@@ -706,6 +706,7 @@ class RangeTracker:
 
     def reset(self) -> None:
         self.T = 0.0
+        self.dt = FT
         self.segs: dict = {}
         self.now: dict = {}         # iid -> (type key, entity dict, inst or None)
         self.hero: tuple | None = None
@@ -717,7 +718,8 @@ class RangeTracker:
 
     def feed(self, s: dict) -> None:
         dt = s.get("dt")
-        self.T += FT if dt is None else float(dt)
+        self.dt = FT if dt is None else float(dt)
+        self.T += self.dt
         h = (s.get("hero") or {}).get("pos")
         self.hero = (float(h[0]), float(h[1])) if h else None
         self.ents = tuple(s.get("ents") or ())
@@ -835,7 +837,8 @@ class RangeTracker:
                           vx=None if vel[0] is None else float(vel[0]),
                           vy=None if len(vel) < 2 or vel[1] is None else float(vel[1]),
                           s=tab.facing(e.get("flipX")), st=st, tin=tin, hero=self.hero, iid=iid,
-                          body=body_polys(e, tab.spec.body), ents=self.ents, mem=self.mem.setdefault(tk, {}))
+                          body=body_polys(e, tab.spec.body), ents=self.ents, mem=self.mem.setdefault(tk, {}),
+                          dt=self.dt)
 
     def path(self, iid: int) -> tuple | None:
         """A type's whole-path hook (its module's `path(view) -> (sure Mask, maybe Mask) | None`): the rest of a move

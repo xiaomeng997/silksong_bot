@@ -98,9 +98,14 @@ def test_ladder_gives_the_whole_dive_and_the_other_side_only_when_the_hero_can_c
     assert maybe.m.any()
     x0, _, x1, _ = ar.union([sure, maybe]).bbox()
     assert x0 < 38.0 and x1 > 45.0
-    # out of Fire Ready: no path
+    # in the dive: the rest of it (to the floor, past the hero); back in Ready: no path
     trk.feed({"dt": ar.FT, "hero": {"pos": [20.0, 4.6]}, "ents": [_mae(40.0, 11.0, "Slash 1"),
                                                                   _tiny("Fire", 41.0, 12.0, -24.0, -36.0)]})
+    trk.ladder((0, 36), sweep=36)
+    sure, _ = trk.paths[9]
+    assert sure.bbox()[1] < ti.BRAKE_Y and sure.bbox()[0] < 20.0
+    trk.feed({"dt": ar.FT, "hero": {"pos": [20.0, 4.6]}, "ents": [_mae(40.0, 11.0, "Forum Fly"),
+                                                                  _tiny("Ready", 41.0, 12.0)]})
     trk.ladder((0, 36), sweep=36)
     assert 9 not in trk.paths
 

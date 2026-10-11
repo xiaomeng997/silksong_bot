@@ -11,7 +11,12 @@ caches and checks the simulator of ssbot.combat.are_types.tiny (simulate / dive_
 
     cd brain
     ../scripts/uv.cmd run python -m ssbot.tools.tiny_early chain --set dev|fresh|r2|person [--out DIR]
-    ../scripts/uv.cmd run python -m ssbot.tools.tiny_early png [--n 8]          # strips: antic -> dive -> return
+    ../scripts/uv.cmd run python -m ssbot.tools.tiny_early rows [--sets fresh,r2,person]   # eval before / after
+    ../scripts/uv.cmd run python -m ssbot.tools.tiny_early_png [--set person] [--n 8]       # strips (PNG)
+
+The before / after eval: attack_range_build --type tiny eval --set <set> --every 6 --idle-every 60 --ks 0,12,36
+--out C:/ssbot/data/m2_forum_are/tiny_early/eval_before (with SSBOT_TINY_EARLY=0: the antic drawn as before) and
+.../eval_after.
 
 Outputs under C:/ssbot/data/m2_forum_are/tiny_early (chain_<set>.json, png/).
 """
@@ -106,6 +111,15 @@ def _m_at(m: dict, T: float) -> tuple | None:
     return float(m["x"][q]), float(m["y"][q]), float(m["vx"][q]), float(m["vy"][q])
 
 
+def frame_dt(t: dict, j0: int, jf: int) -> float:
+    """The game time per game frame (1/60 at 1x, 1/120 in the person's 0.5x sessions, whose cache rows merge two):
+    as tiny._frame_dt offline, the track's shortest time in state."""
+    tin = t["tin"][t["tin"] > 1.0 / 400]
+    d = np.diff(t["T"][j0:jf + 1])
+    d = d[d > 1e-6]
+    return min(float(tin.min()) if len(tin) else 1.0 / 60.0, float(np.median(d)) if len(d) else 1.0 / 60.0)
+
+
 def _contact(t: dict, j: int) -> bool:
     b, h = t["box"][j], t["hbox"][j]
     return bool(np.all(np.isfinite(b)) and np.all(np.isfinite(h)) and b[0] < h[2] and h[0] < b[2] and b[1] < h[3]
@@ -126,7 +140,7 @@ def analyse(ev: dict) -> dict | None:
     jl = jf - 1
     xF, yF = float(t["x"][jf]), float(t["y"][jf])
     side = 1 if t["vx"][jf] > 0 else -1
-    r = dict(t0=t0, tF_t0=tF - t0, side=side, sm=sm, hit=ev["hit"], xF=xF, yF=yF,
+    r = dict(t0=t0, tF_t0=tF - t0, side=side, sm=sm, hit=ev["hit"], xF=xF, yF=yF, dt0=ev["dt0"],
              side_hero_F=int(1 if t["hx"][jf] >= t["x"][jl] else -1), side_hero_0=int(1 if t["hx"][j0] >= t["x"][j0]
                                                                                      else -1),
              mrel=[xF - m["x"][min(int(np.searchsorted(m["T"], tF)), len(m["T"]) - 1)] * 1.0,
@@ -159,7 +173,7 @@ def analyse(ev: dict) -> dict | None:
             continue
         T = float(t["T"][ja])
         hx = float(t["hx"][ja])
-        t_fire = max(t0 + TY.ANTIC_T - T, 0.0)
+        t_fire = max(t0 + TY.ANTIC_WAIT + TY.ANTIC_FRAMES * frame_dt(t, j0, jf) - T, 0.0)
         rows = TY.simulate("ready", float(t["x"][ja]), float(t["y"][ja]), float(t["vx"][ja]), float(t["vy"][ja]), 0.0,
                            ma, sm, hx, t_fire=t_fire)
         k = next((i for i, z in enumerate(rows) if z[3] != "ready"), None)
@@ -170,7 +184,10 @@ def analyse(ev: dict) -> dict | None:
         # the same chain with the real side and the hero's real x at FIRE / while sliding (the hero-free part)
         rows_s = TY.simulate("ready", float(t["x"][ja]), float(t["y"][ja]), float(t["vx"][ja]), float(t["vy"][ja]),
                              0.0, ma, sm, float(t["hx"][min(jf + 15, je - 1)]), t_fire=t_fire, side=side)
-        err, err_s = {}, {}
+        # what the overlay draws: every variant (tiny.variants); the error of the nearest one
+        vs = [z[0] for z in TY.variants(float(t["x"][ja]), float(t["y"][ja]), float(t["vx"][ja]),
+                                        float(t["vy"][ja]), ma, sm, hx, t_fire)]
+        err, err_s, err_u = {}, {}, {}
         for u in US:
             TT = t0 + u
             if TT > real[-1][0]:
@@ -183,11 +200,13 @@ def analyse(ev: dict) -> dict | None:
             x2, y2 = TY.at(rows_s, TT - T)
             err[u] = math.hypot(x1 - real[q][1], y1 - real[q][2])
             err_s[u] = math.hypot(x2 - real[q][1], y2 - real[q][2])
+            err_u[u] = min(math.hypot(z[0] - real[q][1], z[1] - real[q][2]) for z in (TY.at(v, TT - T) for v in vs))
         reach = TY.HERO_REACH * t_fire
         pred[a] = dict(fire_err=math.hypot(px - xF, py - yF), fire_dx=px - xF, fire_dy=py - yF,
                        now_err=math.hypot(float(t["x"][ja]) - xF, float(t["y"][ja]) - yF),
                        side_ok=side_p == side, both=abs(hx - px) <= reach, hero_gap=abs(hx - px),
-                       hero_dx_to_F=float(t["hx"][jf] - hx), path_err=err, path_err_side=err_s)
+                       hero_dx_to_F=float(t["hx"][jf] - hx), path_err=err, path_err_side=err_s,
+                       path_err_union=err_u)
     r["pred"] = pred
     return r
 
@@ -202,7 +221,7 @@ def _q(v, ps=(50, 90, 95, 99, 100)) -> dict | None:
 def summary(rs: list[dict]) -> dict:
     rs = [r for r in rs if r is not None]
     clean = [r for r in rs if not r["hit"]]
-    out = dict(events=len(rs), not_hit=len(clean),
+    out = dict(events=len(rs), not_hit=len(clean), dt0=_q([r["dt0"] for r in rs]),
                tF_t0=_q([r["tF_t0"] for r in rs]),
                side_hero_F=round(float(np.mean([r["side_hero_F"] == r["side"] for r in rs])), 4),
                side_hero_0=round(float(np.mean([r["side_hero_0"] == r["side"] for r in rs])), 4),
@@ -219,9 +238,15 @@ def summary(rs: list[dict]) -> dict:
         k = ">".join(r["states"])
         out["ends"][k] = out["ends"].get(k, 0) + 1
     out["ends"] = dict(sorted(out["ends"].items(), key=lambda z: -z[1])[:8])
+    out["pred"] = _per_a(clean)
+    out["pred_with_hits"] = _per_a(rs)       # a hit on the Maestro / the Tiny: knockback, no cancel
+    return out
+
+
+def _per_a(rs: list) -> dict:
     per = {}
     for a in AS:
-        ps = [r["pred"][a] for r in clean if a in r["pred"]]
+        ps = [r["pred"][a] for r in rs if a in r["pred"]]
         if not ps:
             continue
         per[a] = dict(n=len(ps), fire_err=_q([p["fire_err"] for p in ps]), now_err=_q([p["now_err"] for p in ps]),
@@ -231,28 +256,32 @@ def summary(rs: list[dict]) -> dict:
                       hero_dx_to_F=_q([abs(p["hero_dx_to_F"]) for p in ps]),
                       path={u: _q([p["path_err"][u] for p in ps if u in p["path_err"]], (50, 90, 99)) for u in US},
                       path_side={u: _q([p["path_err_side"][u] for p in ps if u in p["path_err_side"]], (50, 90, 99))
-                                 for u in US})
-    out["pred"] = per
-    return out
+                                 for u in US},
+                      path_union={u: _q([p["path_err_union"][u] for p in ps if u in p["path_err_union"]],
+                                        (50, 90, 99)) for u in US})
+    return per
 
 
 def cmd_chain(a) -> int:
     from ssbot.knowledge.forum_cache import load_cache
     from ssbot.tools.attack_range_build import _cache_files, _idle_priority, person_caches
     _idle_priority()
-    if a.antic_t:
-        TY.ANTIC_T = a.antic_t
+    if a.antic_frames:
+        TY.ANTIC_FRAMES = a.antic_frames
     files = person_caches() if a.set == "person" else _cache_files(a.set)
     files = files[:a.limit] if a.limit else files
     rs = []
+    lone = 0
     for f in files:
         c = load_cache(f)
         for ev in events(c):
             r = analyse(ev)
+            lone += ev.get("maestro", True) is None
             if r is not None:
                 r["fight"] = f.stem
                 rs.append(r)
     s = summary(rs)
+    s["fire_ready_without_maestro_antic"] = lone
     out = Path(a.out) if a.out else OUT
     out.mkdir(parents=True, exist_ok=True)
     (out / f"chain_{a.set}.json").write_text(json.dumps(s, indent=1, default=str), "utf-8")
@@ -265,6 +294,52 @@ def cmd_chain(a) -> int:
     return 0
 
 
+A_BINS = ((0.0, 0.1), (0.1, 0.3), (0.3, 0.5), (0.5, 0.75))
+
+
+def _rowstats(rs: list) -> dict:
+    with_r = [r for r in rs if r["aR"] > 0]
+    aR = sum(r["aR"] for r in with_r)
+    ratios = [r["aE"] / r["aR"] for r in with_r]
+    return {"n": len(rs), "cover": round(sum(r["aI"] for r in with_r) / max(aR, 1e-9), 4),
+            "ratio_area": round(sum(r["aE"] for r in with_r) / max(aR, 1e-9), 3),
+            "ratio_p95": round(float(np.percentile(ratios, 95)), 3) if ratios else None,
+            "miss_rows": round(float(np.mean([bool(r["miss"]) for r in rs])), 4) if rs else None}
+
+
+def cmd_rows(a) -> int:
+    """Before / after per state class (the antic: Fire Ready; the dive: Fire .. Return) and look-ahead, and the antic
+    rows by the time since the antic entry, from attack_range_build eval --out .../eval_before|after rows."""
+    import pickle
+    root = Path(a.out) if a.out else OUT
+    res = {}
+    for st in a.sets.split(","):
+        for which in ("before", "after"):
+            f = root / f"eval_{which}" / f"rows_{st}.pkl"
+            if not f.exists():
+                continue
+            with open(f, "rb") as fh:
+                rows = [r for r in pickle.load(fh) if r["fam"] == "AT_FIRE_READY" and not r["next"] and not r["int"]]
+            d = {}
+            for k in sorted({r["k"] for r in rows}):
+                rk = [r for r in rows if r["k"] == k]
+                d[f"k{k}"] = {"antic": _rowstats([r for r in rk if r["st"] == "Fire Ready"]),
+                              "dive": _rowstats([r for r in rk if r["st"] != "Fire Ready"]),
+                              "antic_by_a": {f"{lo}-{hi}": _rowstats([r for r in rk if r["st"] == "Fire Ready"
+                                                                      and lo <= r["b"] * (1 / 60) < hi])
+                                             for lo, hi in A_BINS}}
+            res.setdefault(st, {})[which] = d
+    (root / "rows_summary.json").write_text(json.dumps(res, indent=1), "utf-8")
+    for st, w in res.items():
+        for which, d in w.items():
+            for kk, x in d.items():
+                print(f"{st:6s} {which:6s} {kk:3s} antic n {x['antic']['n']} cover {x['antic']['cover']} ratio "
+                      f"{x['antic']['ratio_area']} p95 {x['antic']['ratio_p95']} | dive n {x['dive']['n']} cover "
+                      f"{x['dive']['cover']} ratio {x['dive']['ratio_area']} | by a " +
+                      " ".join(f"{b}:{v['cover']}/{v['ratio_area']}" for b, v in x["antic_by_a"].items()))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -272,9 +347,12 @@ def main(argv=None) -> int:
     c.add_argument("--set", required=True, choices=("dev", "fresh", "r2", "person"))
     c.add_argument("--out", default=None)
     c.add_argument("--limit", type=int, default=0, help="the first N caches only")
-    c.add_argument("--antic-t", type=float, default=0.0, help="override tiny.ANTIC_T (calibration)")
+    c.add_argument("--antic-frames", type=float, default=0.0, help="override tiny.ANTIC_FRAMES (calibration)")
+    r = sub.add_parser("rows")
+    r.add_argument("--sets", default="fresh,r2,person")
+    r.add_argument("--out", default=None)
     a = ap.parse_args(argv)
-    return {"chain": cmd_chain}[a.cmd](a)
+    return {"chain": cmd_chain, "rows": cmd_rows}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -154,9 +154,11 @@ def kinematic_shift(view, tau: float) -> tuple:
 # while it slides (the 5 u pass) is left open once Fire Ready has started.
 FIXED_DT = 0.02
 SLASH_POINT = (1.87, 1.88)
-ANTIC_T = 0.713                    # s: Fire Ready entry (its first frame less its time in state) -> FIRE on the 50 Hz
-                                   # step grid: the Fire state starts 0.716-0.717 s after it (R0 dev 489 / 489); 0.713
-                                   # puts the dive's first moves on the recorded frames (path p50 0.24 u vs 0.62 at 0.733)
+# FIRE: the antic's Wait 0.7 s counts whole frames, so the Fire state starts 0.7 s + one frame after the antic
+# entry (R0 dev 60 Hz: 0.716-0.717, 7,769 / 7,769; the person's 0.5x sessions, 120 game frames per game s: 0.700-0.708);
+# 0.8 frame puts the dive's first moves on the recorded frames (R0 dev 6 fights: path p50 0.24 u vs 0.62 at 1 frame)
+ANTIC_WAIT = 0.7
+ANTIC_FRAMES = 0.8
 FR_FLY = (7.0, 20.0, 0.15, 0.9)    # Fire Ready: speedMax, force (mass 1), targetRadius, deceleration
 RET_FLY = (15.0, 40.0, 1.0, 0.9)   # Return
 M_DECEL = 0.9
@@ -307,20 +309,85 @@ def dive_paths(view) -> list:
     if a is None:
         return []
     t0, m, sm = a
-    t_fire = max(t0 + ANTIC_T - view.T, 0.0)
     hx = view.hero[0] if view.hero is not None else view.x
-    vx, vy = view.vx or 0.0, view.vy or 0.0
-    base = simulate("ready", view.x, view.y, vx, vy, 0.0, m, sm, hx, t_fire=t_fire)
+    t_fire = max(t0 + ANTIC_WAIT + ANTIC_FRAMES * _frame_dt(view) - view.T, 0.0)
+    return _cached(view, "ready", lambda: variants(view.x, view.y, view.vx or 0.0, view.vy or 0.0, m, sm, hx,
+                                                   t_fire))
+
+
+def _cached(view, key: str, fn):
+    """fn() once per enemy and frame (every look-ahead of a frame reads the same simulation): kept in the track
+    offline, in the type memory live (cleared past 64 entries)."""
+    store = view.track if view.track is not None else view.mem
+    if store is None:
+        return fn()
+    c = store.setdefault("_sim", {})
+    k = (view.iid, view.j if view.track is not None else round(view.T, 6), key)
+    r = c.get(k)
+    if r is None:
+        if len(c) > 64:
+            c.clear()
+        r = c[k] = fn()
+    return r
+
+
+def _frame_dt(view) -> float:
+    """The game time of one game frame now (1/60 s at 1x, 1/120 at the person's 0.5x): live the tracker's feed step
+    (CustomView.dt); offline the track's shortest time in state (a state's first frame; the person's caches merge two
+    game frames into one row, so their row step is not it)."""
+    from ssbot.combat.attack_range import FT
+    if view.track is not None:
+        tr = view.track
+        dt = tr.get("_gdt")
+        if dt is None:
+            tin = np.asarray(tr["tin"], np.float64)
+            tin = tin[tin > 1.0 / 400]
+            d = np.diff(np.asarray(tr["T"], np.float64))
+            d = d[d > 1e-6]
+            dt = tr["_gdt"] = min(float(tin.min()) if len(tin) else FT, float(np.median(d)) if len(d) else FT)
+    else:
+        dt = view.dt or FT
+    return dt if 1.0 / 400 < dt < 0.05 else FT
+
+
+def variants(x: float, y: float, vx: float, vy: float, m: tuple, sm: int, hx: float, t_fire: float) -> list:
+    """dive_paths from a Tiny in Fire Ready at (x, y) moving (vx, vy), FIRE in t_fire s, the Maestro m = (x, y, vx,
+    vy) now with its antic facing sm, the hero at x = hx now: [(simulate rows, sure)]."""
+    base = simulate("ready", x, y, vx, vy, 0.0, m, sm, hx, t_fire=t_fire)
     out = [(base, True)]
     xf = next((r[1] for r in base if r[3] != "ready"), base[-1][1])
     s = 1 if hx >= xf else -1
-    reach = HERO_REACH * t_fire
-    if abs(hx - xf) <= reach:
-        out.append((simulate("ready", view.x, view.y, vx, vy, 0.0, m, sm, hx, t_fire=t_fire, side=-s), False))
+    if abs(hx - xf) <= HERO_REACH * t_fire:
+        out.append((simulate("ready", x, y, vx, vy, 0.0, m, sm, hx, t_fire=t_fire, side=-s), False))
     # the slide ends 5 u past the hero: the hero moving on along the dive lengthens it (to the timer / the wall)
     far = hx + s * HERO_REACH * (t_fire + FIRE_MAX)
-    out.append((simulate("ready", view.x, view.y, vx, vy, 0.0, m, sm, far, t_fire=t_fire, side=s), False))
+    out.append((simulate("ready", x, y, vx, vy, 0.0, m, sm, far, t_fire=t_fire, side=s), False))
     return out
+
+
+PHASE = {"Fire": "fire", "Brake": "brake", "Pull Up": "pull"}
+
+
+def dive_rest(view) -> list:
+    """[(rows, sure)] of the rest of a dive under way (Fire / Brake / Pull Up), as dive_paths: sure = the hero held
+    (the slide ends 5 u past it), not sure = the longer slide when it moves on along the dive."""
+    ph = PHASE.get(view.st)
+    if ph is None:
+        return []
+    m = _maestro(view) or (view.x, view.y + 5.0, 0.0, 0.0)
+    vx, vy = view.vx or 0.0, view.vy or 0.0
+    s = 1 if vx >= 0 else -1
+    hx = view.hero[0] if view.hero is not None else view.x
+    tin = view.tin or 0.0
+    active = ph == "pull" or tin >= (FIRE_ACTIVE if ph == "fire" else BRAKE_ACTIVE)
+
+    def run():
+        out = [(simulate(ph, view.x, view.y, vx, vy, tin, m, s, hx, side=s, active=active), True)]
+        if ph != "pull":
+            far = hx + s * HERO_REACH * FIRE_MAX
+            out.append((simulate(ph, view.x, view.y, vx, vy, tin, m, s, far, side=s, active=active), False))
+        return out
+    return _cached(view, ph, run)
 
 
 def _shifted(body: list, x0: float, y0: float, x: float, y: float) -> list:
@@ -329,9 +396,9 @@ def _shifted(body: list, x0: float, y0: float, x: float, y: float) -> list:
 
 def path(view):
     """The type's whole-path hook (attack_range.RangeTracker.ladder with a sweep: the overlay's key 9): (sure Mask,
-    maybe Mask) of the body along the chain from now to its return, or None. Only while in Fire Ready (the dive is
-    then drawn from the Maestro's antic entry, 0.7 s before it starts)."""
-    paths = dive_paths(view)
+    maybe Mask) of the body along the chain from now to its return, or None: from Fire Ready on (the dive is then
+    drawn from the Maestro's antic entry, 0.7 s before it starts) to the end of its Pull Up."""
+    paths = dive_paths(view) or dive_rest(view)
     body = _body(view)
     if not paths or not body:
         return None
@@ -344,9 +411,9 @@ def path(view):
 
 
 def early(view):
-    """Fire Ready at look-ahead k: the body where the chain puts it at t (union over the variants dive_paths keeps
-    open), or None (no Maestro seen: the kinematic rule)."""
-    paths = dive_paths(view)
+    """Fire Ready (and Fire / Brake / Pull Up) at look-ahead k: the body where the chain puts it at t (union over the
+    variants dive_paths / dive_rest keep open), or None (no Maestro seen: the kinematic rule)."""
+    paths = dive_paths(view) if view.st == "Fire Ready" else dive_rest(view)
     body = _body(view)
     if not paths or not body:
         return None
@@ -364,17 +431,18 @@ EARLY = os.environ.get("SSBOT_TINY_EARLY", "1") != "0"
 
 
 def custom(view):
-    """(the body moved by the orbit (Defend Buzz) or by its velocity (KINEMATIC states), None); else (None, None)."""
-    if view.st == "Fire Ready" and EARLY:
-        m = early(view)
-        if m is not None:
-            return m, None
+    """(the body where the chain puts it (Fire Ready, Fire, Brake, Pull Up: simulate), moved by the orbit (Defend
+    Buzz) or by its velocity (the other KINEMATIC states), None); else (None, None)."""
     if view.st != "Defend Buzz" and view.st not in KINEMATIC:
         return None, None
     from ssbot.combat.attack_range import poly_mask
     tau = max(view.t - view.T, 0.0)
     if view.st in KINEMATIC:
         dx, dy = kinematic_shift(view, tau)         # (also keeps the live velocity memory current)
+    if EARLY and (view.st == "Fire Ready" or view.st in PHASE):
+        m = early(view)
+        if m is not None:
+            return m, None
     body = _body(view)
     if not body:
         return None, None
