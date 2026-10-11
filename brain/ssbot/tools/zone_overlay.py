@@ -131,7 +131,7 @@ COLORS = {"body": (200, 200, 200), "committed": (245, 150, 245), "window": (250,
           "not_started": (160, 235, 160), "hazard": (110, 190, 255), "death": (220, 160, 185),
           "margins": (255, 245, 185), "yellow": (140, 245, 255), "red": (130, 130, 255),
           "clash": (60, 180, 255)}
-CALLED_STATES = frozenset(("Fire Ready", "Fire", "Brake", "Pull Up", "Wall Bonk"))   # a called Tiny, antic to dive
+CALLED_STATES = frozenset(("Fire Ready",))   # a called Tiny before its dive (the ring goes when it dashes)
 CALLED_RING_U, CALLED_COL = 1.3, (255, 255, 0)                                     # ring radius (u), cyan (BGR)
 A_SUPPORT, A_YELLOW, A_RED, A_SWEEP = 0.33, 0.40, 0.42, 0.22
 A_RANGE = 0.30
@@ -940,7 +940,7 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
         fs = 0.5 * H / 1080.0
         for iid, name, st, pos, col in fr.get("enemies") or ():
             if view.show("range") and "Tiny" in str(name) and st in CALLED_STATES:
-                # the Tiny the Maestro called (Fire Ready from the antic on, then its dive): a thick ring so the person
+                # the Tiny the Maestro called (Fire Ready, from the antic until it dashes): a thick ring so the person
                 # sees which one to dodge (2026-10-10)
                 c = _to_px(Hw, np.array([[pos[0], pos[1]], [pos[0] + CALLED_RING_U, pos[1]]]))
                 cc, rad = (int(round(c[0][0])), int(round(c[0][1]))), int(round(abs(c[1][0] - c[0][0])))
