@@ -4849,3 +4849,37 @@ of 8257114 (§39 overlay); git-ignored forum npz copied from C:\ssbot\live_ov_82
 - Next: the Return drawn early (needs the Maestro's Forum Fly after the slash); a +-1 physics step streak along the
   dive if the margin step wants the phase jitter covered (k 36 cover stops at 65-75 %); the planner could use "the dive
   goes the way the hero is at FIRE" (stand on one side to send it the other way).
+
+## Task Clapper wall top: the jump-cast aim zone covered a wall-top cling (branch worktree-wf_999712d4-d19-1, 2026-10-11; forum.md §42)
+
+Main 58db3f1 + live-combined-1010 (8f8f483). The person (live session `C:\ssbot\data\human\20261011_051105`): during
+the Clapper's big rune antic the range drawn covers a wall-top cling that no Clapper attack reaches.
+
+- Cause (tools `ssbot/tools/clapper_wall.py frames`): only the aim layer (key 8), the CC_JUMP_CAST composite's high-air
+  class, covered the hero (72 / 72 sampled Cast Slam Antic / 2 frames; the range layer at every k and the swept path
+  0 / 72; CC_JUMP's high air 11 / 41 Jump Antic frames). Three table faults: wall bins inherited every open-floor zone
+  cell (walls add escapes: cling, wall jumps); the jump templates' full union put a single early landing's 9 x 7.6 u
+  Slam 2 box at the median flight height (frames 16, 48-55); coarse-only air, the y bins 6.0-7.0 for a Clapper that
+  decides at 7.45, the rune slam margin counted twice.
+- Truth (`clapper_wall truth`, R0 dev / fresh, R1c, the person's 26 attempts): the rune slam never above y 10.53
+  (0.755 u below a y-12.2 cling's wall-slide hurtbox; it does reach a y-11.28 cling), rune bombs never above 5.88, only
+  the airborne body of a jump from that wall reaches a high cling (§10.3); 235,591 high-cling frames with a Clapper
+  alive: 0 damage, 2 i-frame-blocked contacts.
+- Fix (`aim_zones.py`, `aim_ics.py`): the wall column (cells where a clinging hero's HeroBox centre is) uses the cling
+  states `cling_h1.0/2.5/5.0` (aim_ics `CLING`, kept out of `STATES`), scanned per wall bin (`scan_cling`, packed as
+  `cling` [lat, y, x bin, wall, row]) and placed against the actual wall at run time (`apply_cling`, `CLING_WIN`); jump
+  frames from the per-state unions with the landed states moved to the landing height (`landed_shape`); the hazard walk
+  skips rows whose late path meets the rune slam (`hazard_paths` / `_haz_ok`, exact), so CC_JUMP_CAST air uses the full
+  library; CC y bin 7.45; hazard radius without the extra CLEAR.
+- Re-scanned CC_JUMP and CC_JUMP_CAST only (`C:\ssbot\data\m2_forum_aimics\clapper_wall\rescan.ps1` + `rescan2.ps1`,
+  ~1.5 h, 2 Idle processes); the packed tables are in this worktree's knowledge dir (git-ignored npz, untracked json)
+  and copied to `clapper_wall\tables_after` (the old ones in `tables_before`). Validation R0 dev + fresh lat0:
+  CC_JUMP_CAST in-zone 798 -> 139, in-zone hit 231 -> 109 (29 % -> 78 %), undisturbed in-zone not hit 305 -> 18;
+  CC_JUMP 90 -> 83, 46 -> 67 (51 % -> 81 %), 27 -> 11. The person's frames: 72 -> 18 covered (all 18 the y-11.28 cling
+  the rune slam does reach). PNGs `clapper_wall\png\*_before|after.png`, `clapper_wall\zones`.
+- Launcher (not run): `C:\ssbot\sandbox\start_overlay_clapper_fix.ps1` (`--solo "Song Heavy Sentry"`, every layer).
+- Tests: `tests/test_aim_zones.py` (hazard-path skip == plain walk, cling state holds, the wall column at the actual
+  wall, landed shapes).
+- Next: re-scan RE_STAB / MA_SLASH / AT_DIVE for their wall columns (~4 h); a per-frame wall-slide hurtbox for a cling
+  (0.59 u conservative now); the live checkout `C:\ssbot\live_ov_combined` still has the old CC tables (copy
+  `tables_after` there after the person's check).

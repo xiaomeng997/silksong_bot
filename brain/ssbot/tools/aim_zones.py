@@ -88,7 +88,7 @@ CLASS_STATES = {
 # height, holding toward the wall through the latency), so staying, climbing (wall jumps) and letting go are its
 # escapes. The column is placed against the ACTUAL wall at run time (the x bins are 1 u apart: the bin's own wall can
 # be 0.5 u off), its values come from the bin's scan.
-CLING_STATES = tuple(f"cling_h{h}" for h in AIR_H)
+CLING_STATES = tuple(f"cling_h{h}" for h in AIR_H if h >= 1.0)   # (h bin 0.25, under 0.5 u: no column, no cling)
 CLING_DX = 0.265                           # wall face to a clinging hero's transform (= HeroBox centre) x (forum.md 8)
 CLING_WIN = 0.36                           # run time: grid columns with centres in [W - CLING_WIN, W - HB_HW)
 WALL_NEAR = 0.9                            # HeroBox side this close to a wall: the wall library is tried too

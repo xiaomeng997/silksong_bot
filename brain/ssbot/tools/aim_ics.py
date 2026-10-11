@@ -181,7 +181,8 @@ STATES = _state_table()
 # on the wall (the person 2026-10-11: clinging at the wall top is safe from the Clapper): clinging (Ascendant's Grip)
 # to a wall touching the collider on +x, h above standing height, no dash. Not table states of this module (the
 # measured "wallcling" is LOCKED here); the aim zones' wall column (tools.aim_zones CLING_STATES) only.
-CLING = {f"cling_h{h}": ("cling", h, 0.0, False, 0.0, 0) for h in AIR_H}
+# (from h 1.0: 0.25 u above standing the model's hero does not take the cling within the settle)
+CLING = {f"cling_h{h}": ("cling", h, 0.0, False, 0.0, 0) for h in AIR_H if h >= 1.0}
 
 
 def state_spec(name: str) -> tuple:
