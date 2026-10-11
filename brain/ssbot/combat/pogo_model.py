@@ -142,7 +142,11 @@ class PogoModel:
         fl = miss.flags[0]
         lo = max(press_j - 1, 0)
         swung = bool(((fl[press_j:press_j + 2] & kin.F_ATTACKING) != 0).any()) and not bool(fl[lo] & kin.F_GROUND)
-        j, kind = self.contact(miss.pos[0], facing, press_j, targets, alt) if swung else (-1, None)
+        # the swing ends on landing (HeroController.BackOnGround resets the attack): no contact from the first
+        # grounded frame after the press on
+        g = np.flatnonzero((fl[press_j:] & kin.F_GROUND) != 0)
+        last = press_j + int(g[0]) - 1 if len(g) else len(fl) - 1
+        j, kind = self.contact(miss.pos[0, :last + 1], facing, press_j, targets, alt) if swung else (-1, None)
         hit = self.rollout(start, masks, j, **kw) if j >= 0 else None
         return Branches(j, kind, miss, hit)
 

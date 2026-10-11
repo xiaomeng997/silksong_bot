@@ -89,3 +89,23 @@ def test_overlay_pogo_layer_predicts_and_draws(params, arena):
     img2 = np.zeros_like(img)
     zo.draw_pogo(img2, {"now": pg, "frozen": pg, "real": [[30.0, 10.0], [30.0, 9.0], [30.0, 9.5]]}, Hw, 1080)
     assert img2[..., 3].any()
+
+
+def test_overlay_freezes_the_prediction_at_a_press_and_collects_the_real_path(params, arena):
+    from ssbot.tools import zone_overlay as zo
+    start = _falling(params)
+    ov = zo.LiveOverlay.__new__(zo.LiveOverlay)            # no window / thread: the per-frame logic only
+    ov.pogo, ov.pogo_now, ov.pogo_frozen, ov.pogo_real, ov.pogo_t, ov.pogo_clip = True, None, None, [], 0.0, None
+    ov.speed = 0.5
+    ov.stats = {"errors": []}
+    ov.eng = NS(pol=NS(trk=NS(state=lambda: start), params=params, terrain=arena))
+
+    def frame(clip, y):
+        return {"hero": {"facing": 1, "pos": [30.0, y], "anim": {"clip": clip}}, "input": {"mask": 0}, "ents": []}
+    ov._pogo_frame(frame("Airborne", 10.0))
+    assert ov.pogo_now is not None and ov.pogo_frozen is None
+    pred = ov.pogo_now
+    ov._pogo_frame(frame("DownSlash", 9.9))
+    assert ov.pogo_frozen is pred and len(ov.pogo_real) == 2 and ov.stats.get("pogo_presses") == 1
+    ov._pogo_frame(frame("DownSlash", 9.8))
+    assert len(ov.pogo_real) == 3 and not ov.stats["errors"]

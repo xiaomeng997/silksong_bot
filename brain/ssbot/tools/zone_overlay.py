@@ -1288,6 +1288,7 @@ def pogo_predict(eng, s: dict) -> dict | None:
     the first contact with an enemy hurtbox / clashable collider of this frame (held still) and the bounce branch
     from it. The held horizontal input is kept for the whole branch."""
     from ssbot.combat.pogo_model import PogoModel, slash_poly
+    from ssbot.knowledge import kinematics as kin
     from ssbot.knowledge.kinematics import B_ATTACK, B_DOWN, B_LEFT, B_RIGHT
     from ssbot.tools.pogo_check import targets_of
     pol = eng.pol
@@ -1307,7 +1308,8 @@ def pogo_predict(eng, s: dict) -> dict | None:
     tg = targets_of(s)
     br = pm.branches(start, masks, 1, lambda j: tg, facing)
     out = {"miss": br.miss.pos[0].copy(), "hit": None if br.hit is None else br.hit.pos[0].copy(), "j": br.contact_j,
-           "kind": br.kind, "ground": bool(int(br.miss.flags[0, 0]) & 1)}
+           "kind": br.kind, "ground": bool(int(br.miss.flags[0, 0]) & 1),
+           "inv": None if br.hit is None else (br.hit.flags[0] & kin.F_INVULN) != 0}
     if br.contact_j >= 0:
         out["slash"] = slash_poly(facing) + br.miss.pos[0, br.contact_j]
     return out
@@ -1335,10 +1337,21 @@ def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
         if fz.get("slash") is not None:
             q = np.round(_to_px(Hw, fz["slash"])).astype(np.int32)
             cv2.polylines(img, [q], True, (*POGO_COLS["contact"], 255), max(1, th - 1), cv2.LINE_AA)
+    def iframes(br, col):
+        # the bounce's i-frames (pogo_invul 0.16 s: the hammer cannot hurt there): dots on the bounce path
+        if br is None or br.get("hit") is None or br.get("inv") is None:
+            return
+        q = np.round(_to_px(Hw, np.asarray(br["hit"], float)[br["inv"]])).astype(np.int32)
+        for c in q:
+            cv2.circle(img, (int(c[0]), int(c[1])), th + 2, (*col, 255), -1, cv2.LINE_AA)
+
+    if fz is not None:
+        iframes(fz, POGO_COLS["frozen_hit"])
     now = pg.get("now")
     if now is not None and fz is None:
         line(now.get("miss"), POGO_COLS["miss"], th)
         line(now.get("hit"), POGO_COLS["hit"], th)
+        iframes(now, POGO_COLS["hit"])
         if now.get("slash") is not None:
             q = np.round(_to_px(Hw, now["slash"])).astype(np.int32)
             cv2.polylines(img, [q], True, (*POGO_COLS["contact"], 255), max(1, th - 1), cv2.LINE_AA)
@@ -1547,7 +1560,8 @@ class LiveOverlay:
         down = clip in ("DownSlash", "DownSlashAlt")
         if down and self.pogo_clip not in ("DownSlash", "DownSlashAlt") and self.pogo_now is not None:
             self.pogo_frozen = self.pogo_now
-            self.pogo_real = [list((self.pogo_now.get("miss") or [[0, 0]])[0])]
+            m0 = self.pogo_now.get("miss")
+            self.pogo_real = [list(m0[0])] if m0 is not None and len(m0) else []
             self.pogo_t = time.perf_counter()
             self.stats["pogo_presses"] = self.stats.get("pogo_presses", 0) + 1
         self.pogo_clip = clip
@@ -1641,8 +1655,8 @@ class LiveOverlay:
                     lines = legend_lines(fr, self.view, config,
                                          "" if self.eng.running else "(no battle: red only)")
                     if self.pogo and self.view.on:
-                        lines = lines + [("DOWN SLASH now: light blue = miss, green = bounce, yellow = where it "
-                                          "lands; after a press: darker = predicted at the press, white = real", None)]
+                        lines = lines + [("DOWN SLASH now: light blue = miss, green = bounce (dots: i-frames), yellow = "
+                                          "where it lands; after a press: darker = predicted at the press, white = real", None)]
                     # drawn at most at the render size and scaled up nearest (a 4K window: 3 ms instead of 55)
                     W, H = rect[2], rect[3]
                     sc = min(1.0, RENDER[0] / W, RENDER[1] / H)

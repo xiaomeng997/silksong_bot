@@ -34,7 +34,7 @@ def split_of(name: str) -> str:
 
 
 def case_of(r: dict) -> str:
-    if r.get("up_f"):
+    if real_contact(r) is not None:
         if r["hits"]:
             return f"hurtbox:{r['hits'][0]['type']}"
         t = [c for c in r["contacts"] if c["layer"] == 22 and c["parry"] is not None and int(c["parry"]) & 1]
@@ -45,6 +45,19 @@ def case_of(r: dict) -> str:
     if p:
         return "pass:" + p[0]["name"].split(" (")[0].replace(" Ally", "")
     return "miss"
+
+
+def real_contact(r: dict) -> int | None:
+    """The real bounce's contact frame: the first frame after the press with vy -10 (the bounce's first step) followed
+    by the pogo vy >= 15 within 3 frames (a rising jump at the press is not a bounce)."""
+    h = [x for x in r["hero"] if x["f"] > r["f0"]]
+    for i, x in enumerate(h):
+        if r["t_of"].get(str(x["f"]), 1.0) > 0.3:
+            break
+        if abs(float((x["vel"] or [0, 0])[1]) + 10.0) < 0.05:
+            if any(float((y["vel"] or [0, 0])[1]) >= 15.0 for y in h[i + 1:i + 4]):
+                return x["f"]
+    return None
 
 
 def targets_of(s: dict):
@@ -121,7 +134,8 @@ def one(pm, start, S: list[dict], r: dict, name: str) -> dict:
     real = np.array([(x.get("hero") or {}).get("pos", [np.nan, np.nan])[:2] for x in S], float)
     hp = [(x.get("hero") or {}).get("health") for x in S]
     lost = next((j for j in range(1, len(S)) if hp[j] is not None and hp[0] is not None and hp[j] < hp[0]), len(S))
-    act_c = (r["contact_f"][0] - (f0 - 1)) if r.get("up_f") else -1
+    fc = real_contact(r)
+    act_c = (fc - (f0 - 1)) if fc is not None else -1
     geo_j, _ = pm.contact(real, facing, 1, lambda j: tg.get(j, ()))     # the contact rule on the real path
     pick = br.hit if br.hit is not None else br.miss
     timed = pm.rollout(start, masks, act_c) if act_c >= 0 else None
@@ -178,7 +192,9 @@ def summary(res: list[dict]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rows", type=Path, nargs="+", required=True)
-    ap.add_argument("--recs", type=Path, nargs="+", required=True)
+    ap.add_argument("--recs", type=Path, nargs="*", default=[])
+    ap.add_argument("--glob", nargs=2, metavar=("BASE", "PATTERN"), action="append", default=[],
+                    help="also every directory BASE/PATTERN")
     ap.add_argument("--split", default="all", choices=("all", "calib", "test"))
     ap.add_argument("--ev-off", default=None, help="EV_POGO offsets to compare, e.g. -1,0,1 (default pogo_model.EV_OFF)")
     ap.add_argument("--out", type=Path, required=True)
@@ -192,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
                 r = json.loads(line)
                 rows_by[r["session"]].append(r)
     offs = (pogo_model.EV_OFF,) if a.ev_off is None else tuple(int(x) for x in str(a.ev_off).split(","))
-    res = run(recordings(a.recs), rows_by, offs, a.split)
+    extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
+    res = run(recordings(list(a.recs) + extra), rows_by, offs, a.split)
     out = {"split": a.split, "by_ev_off": {str(o): {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1), "utf-8")
