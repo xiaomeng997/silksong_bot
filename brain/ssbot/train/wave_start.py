@@ -146,9 +146,12 @@ class WaveSkipPolicy:
             self.hold[k] = max(2, n)
 
     def _strike(self, kind: str, hx: float, hy: float, side: int) -> None:
-        """Press attack unless the swing's reach (facing `side`) touches a spared enemy."""
-        rx0, ry0, rx1, ry1 = SPARE_REACH[kind]
-        x0, x1 = (hx + rx0, hx + rx1) if side > 0 else (hx - rx1, hx - rx0)
+        """Press attack unless a swing's reach touches a spared enemy: the union of every swing's reach, both facings
+        (the first live 1v1 clear, 2026-10-11: a held up press turned a checked side slash into an up slash that hit
+        the spared Choristor), so `kind` and `side` do not narrow it."""
+        rx = max(max(abs(r[0]), abs(r[2])) for r in SPARE_REACH.values())
+        ry0, ry1 = min(r[1] for r in SPARE_REACH.values()), max(r[3] for r in SPARE_REACH.values())
+        x0, x1 = hx - rx, hx + rx
         m = SPARE_MARGIN
         for bx0, by0, bx1, by1 in self.spared:
             if overlaps(x0 - m, x1 + m, bx0, bx1) and overlaps(hy + ry0 - m, hy + ry1 + m, by0, by1):
