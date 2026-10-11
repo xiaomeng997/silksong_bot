@@ -4783,7 +4783,7 @@ of 8257114 (§39 overlay); git-ignored forum npz copied from C:\ssbot\live_ov_82
 
 - FSM: the Tiny is a prefab spawned by the Maestro (not in the scene bundle): `Song Automaton Tiny` in
   `localpoolprefabs_assets_areahang.bundle` (scene hang_04_boss externals[44] = CAB-3e9ed2e4...). Dump (Control FSM,
-  all states) made with a copy of reactive_scripts/dump_enemies.py: this session's scratchpad `tiny_fsm/`; the chain is
+  all states) made with a copy of reactive_scripts/dump_enemies.py: `C:/ssbot/sandbox/reactive_scripts/out/Song_Automaton_Tiny.txt`; the chain is
   written out in `combat/are_types/tiny.py` (comment block above FIXED_DT) and forum.md §40.1.
 - `combat/are_types/tiny.py`: `simulate(phase, ...)` the whole chain on the 50 Hz physics step (Fire Ready flight to
   the Maestro's Slash Point with the Maestro's 0.9-decay recoil, FIRE at antic + 0.7 s + 0.8 game frame, the dive,
