@@ -404,6 +404,8 @@ class EnvelopeAudit:
     v2_aim_rows: int = 0          # v2: rows a pending aim's zone set S = 1
     v2_react: int = 0             # v2: hit-branch counters placed from the estimate's templates
     v2_esc_rows: int = 0          # v2: rows the escape check (from the row's end) looked at
+    v2_dash_rows: int = 0         # v2 focus margin: rows dashing at the focus unit (read with its "rule" margin)
+    v2_dash_unsafe: int = 0       # ... of them in contact only with that margin
     v2_esc_more: int = 0          # v2: rows the escape check looked at past the first v2_esc_k (forum_v2.ESC_MORE)
     v2_esc_tail: int = 0          # v2: chosen rows whose passing escape became the plan's tail (forum_v2.ESC_TAIL)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
@@ -2047,6 +2049,26 @@ class ForumPlanner(Planner):
 
     # ---- the tick ----
 
+    def _v2_dash(self, o: np.ndarray, f, r1, cx: np.ndarray, cy: np.ndarray, tq: np.ndarray, fr) -> np.ndarray:
+        """The focus margin (forum_v2 MARGIN_MODE "focus", the person 2026-10-11): a row that dashes at the focus
+        unit reads that unit with its "rule" margin (occupied_dash) on stage 1's frames; every other row keeps
+        FOCUS_M. The envelope, the hit branches and the escapes read the plain support."""
+        rs = getattr(f, "rs", None)
+        if rs is None or getattr(rs, "stack_dash", None) is None or rs.focus not in getattr(rs.trk, "now", {}):
+            return o
+        p = rs.trk.now[rs.focus][1].get("pos")
+        if not p:
+            return o
+        dr = forum_v2.dash_at(r1.mode, r1.vel, r1.centre, float(p[0]))
+        if not dr.any():
+            return o
+        od = rs.occupied_dash(cx[dr], cy[dr], tq)
+        self.audit.v2_dash_rows += int(dr.sum())
+        self.audit.v2_dash_unsafe += int((od.any(axis=1) & ~o[dr].any(axis=1)).sum())
+        o = o.copy()
+        o[dr] |= od
+        return o
+
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
              ) -> PlanResult:
         t0 = time.perf_counter()
@@ -2097,6 +2119,7 @@ class ForumPlanner(Planner):
             o, o_cm, o_f = f.occupied_split(cx, cy, tk[fr])
         else:
             o = f.occupied(cx, cy, tk[fr])
+        o = self._v2_dash(o, f, r1, cx, cy, tk[fr], fr)
         if enemy_only:
             o &= (r1.flags[:, fr] & F_INVULN) == 0
         S1 = o.any(axis=1)

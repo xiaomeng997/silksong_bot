@@ -48,7 +48,11 @@ from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 
 V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
 EVERY = int(os.environ.get("SSBOT_FORUM_V2_EVERY", "1") or 1)   # V2Feed: rebuild the support every this many frames
-MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "rule").strip().lower() or "rule"
+MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "focus").strip().lower() or "focus"
+# MARGIN_MODE "focus" (the default; the person, 2026-10-11): the focus unit gets a flat FOCUS_M unless the row dashes
+# at it (then its "rule" margin), every other unit its "rule" margin. The focus unit is the L2 controller's target
+# (GoalPrefs.target) when it is in play, else the only enemy in play, else none (RangeSupport.build's `focus`).
+FOCUS_M = 0.5
 # the escape check runs on a carried CONTINUE row too (1v1 live, forum.md 44: a row chosen with an escape kept running
 # into a Slam Antic's reach unchecked until no row had one; SSBOT_FORUM_V2_ESC_CARRIED=0: the old skip)
 ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
@@ -109,7 +113,7 @@ K_HOLD = 36                           # the margin's k stops growing here (the e
 # The Clapper's measured row margin is larger (3.2 / 4.75 / 7.65 / 9.25 u at k 12 / 18 / 30 / 36: Idle -> Walk at 8
 # u/s and walk reversals): "rule" gives it the fliers' curve (the planner replans every frame, the escape requirement
 # covers the rest); "table" uses every type's measured 99 % row margin (max over fresh / R2 / person) as it is; "flat:x"
-# a constant x u; "zero" none.
+# a constant x u; "zero" none; "focus" (the default) is "rule" here: the focus unit's FOCUS_M is RangeSupport's.
 WALKERS = {"Song Pilgrim 01": ((0, 0.5), (36, 0.5)),
            "Song Pilgrim 03": ((0, 0.5), (12, 0.5), (18, 0.5), (30, 0.91), (36, 1.05))}
 TABLE_M99 = {   # type key -> ((k, m99 u), ...) from the idle-velocity summary (max over the three sets)
@@ -141,6 +145,8 @@ def margin(type_key: str, k: int, mode: str | None = None) -> float:
     """m(type, k) in u (module docstring)."""
     mode = MARGIN_MODE if mode is None else mode
     k = min(max(int(k), 0), K_HOLD)
+    if mode == "focus":
+        mode = "rule"
     if mode == "zero":
         return 0.0
     if mode.startswith("flat:"):
@@ -275,6 +281,8 @@ class LayerSupport:
         self.raw: dict = {i: [] for i in range(len(self.samples))}     # add_raw: (iid, coarse, ix0, iy0, m, esc_m)
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
         self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
+        self.stack_dash: np.ndarray | None = None   # the focus unit with its "rule" margin (rows dashing at it)
+        self.focus: int | None = None
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
         self.fc = _Half(inner_fc, BOUNDS_HALF)
         smax = self.samples[-1] if self.samples else 0
@@ -343,6 +351,13 @@ class LayerSupport:
 
     def occupied(self, x, y, tk, comfort: bool = False) -> np.ndarray:
         return self._occ_stack(self.stack, x, y, tk)
+
+    def occupied_dash(self, x, y, tk) -> np.ndarray | None:
+        """The focus unit with its "rule" margin where that exceeds FOCUS_M (a row dashing at it); None: no such
+        layer (no focus, or its rule margin is FOCUS_M on every sample)."""
+        if self.stack_dash is None:
+            return None
+        return self._occ_stack(self.stack_dash, x, y, tk)
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         ex = set(exclude) if isinstance(exclude, (set, frozenset, list, tuple)) else {exclude}
@@ -431,20 +446,47 @@ def tracker_k_shift(trk_frame: int | None, origin_frame: int | None) -> int:
     return max(int(trk_frame) - int(origin_frame), 0)
 
 
+def dash_at(mode: np.ndarray, vel: np.ndarray, centre: np.ndarray, fx: float) -> np.ndarray:
+    """[N] rows of a rollout (mode [N, T], vel / centre [N, T, 2]) with a dash frame moving towards x = fx (the focus
+    unit's position at the origin): the rows the focus margin reads with the unit's "rule" margin."""
+    from ssbot.knowledge.kinematics import M_DASH
+    d = mode == M_DASH
+    if not d.any():
+        return np.zeros(mode.shape[0], bool)
+    toward = np.sign(vel[..., 0]) * np.sign(fx - centre[..., 0]) > 0
+    return (d & toward).any(axis=1)
+
+
+def focus_iid(trk: RangeTracker, target: int | None) -> int | None:
+    """The focus unit (MARGIN_MODE "focus"): the controller's target (GoalPrefs.target) when the tracker has it, else
+    the only enemy in play, else None (every unit then gets its "rule" margin)."""
+    now = getattr(trk, "now", None) or {}
+    if target is not None and int(target) in now:
+        return int(target)
+    if len(now) == 1:
+        return int(next(iter(now)))
+    return None
+
+
 class RangeSupport(LayerSupport):
     """One tick's v2 support from a fed RangeTracker (module docstring): build() fills the samples; pending() the
     aims; reaction() the hit branch's counters."""
 
     @classmethod
     def build(cls, trk: RangeTracker, samples: tuple = SAMPLE_KS, k_shift: int = 0, inner_fc=None,
-              margin_mode: str | None = None, canvas: Canvas | None = None) -> "RangeSupport":
+              margin_mode: str | None = None, canvas: Canvas | None = None, focus: int | None = None) -> "RangeSupport":
+        """focus: the controller's target iid under MARGIN_MODE "focus" (focus_iid: else the only enemy in play); the
+        focus unit's layers get FOCUS_M and a copy with its "rule" margin goes into stack_dash (occupied_dash: the
+        rows that dash at it)."""
         t0 = time.perf_counter()
         cv = canvas or Canvas()
         rs = cls(cv, samples, k_shift, inner_fc)
         rs.trk = trk
         rs.margin_mode = margin_mode
+        rs.focus = focus_iid(trk, focus) if (margin_mode or MARGIN_MODE) == "focus" else None
         rs.n_vslam = 0
         n_est = 0
+        dash_parts: dict = {}
         for iid in sorted(trk.now):
             tk_name = trk.now[iid][0]
             tab = trk.tables[tk_name]
@@ -455,8 +497,14 @@ class RangeSupport(LayerSupport):
                 if not e.raw.m.size or not e.raw.m.any():
                     continue
                 n_est += 1
-                m = margin(tk_name, k, margin_mode)
+                m = rs.m_of(iid, tk_name, k)
                 c, ix0, iy0 = coarse(e.raw, tab.cell, cv.cell)
+                if iid == rs.focus:
+                    md = round(margin(tk_name, k, "rule"), 4)
+                    if md > m + 1e-6:
+                        dash_parts.setdefault((si, md), []).append((c, ix0, iy0))
+                        if e.haz is not None and e.haz.m.size and e.haz.m.any():
+                            dash_parts[(si, md)].append(coarse(e.haz, tab.cell, cv.cell))
                 esc = k + k_shift >= ESC_FROM_K
                 # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable zone:
                 # the margin's growth is the replanning's business), moves and hazards with their margin
@@ -482,9 +530,14 @@ class RangeSupport(LayerSupport):
                     vm = tab.place("CC_SLAM", "main", k + k_shift, (x, y), sd, (float(trk.hero[0]) - x) * sd)
                     if vm.m.size and vm.m.any():
                         c, ix0, iy0 = coarse(vm, tab.cell, cv.cell)
-                        rs.add_raw(si, iid, c, ix0, iy0, None, margin(tk_name, k, margin_mode))
+                        rs.add_raw(si, iid, c, ix0, iy0, None, rs.m_of(iid, tk_name, k))
                         rs.n_vslam += 1
         rs.finish()
+        if dash_parts:
+            rs.stack_dash = np.zeros(rs.stack.shape, bool)
+            for (si, md), ps in dash_parts.items():
+                d, x0, y0 = dilate_group(ps, md, cv.cell)
+                cv.paste(rs.stack_dash[si], d, x0, y0)
         rs.n_est = n_est
         rs.pend = pending_aims(trk)
         rs.ms = (time.perf_counter() - t0) * 1e3
@@ -526,9 +579,15 @@ class RangeSupport(LayerSupport):
                 for s in (1, -1):
                     du = 0.0 if hero_x is None else (hero_x - ax) * s
                     parts.append(tab.place(fam, None, b, (ax, ay), s, du))
-            m, ix0, iy0 = dilate(union(parts), tab.cell, margin(tk_name, k, self.margin_mode), self.cv.cell)
+            m, ix0, iy0 = dilate(union(parts), tab.cell, self.m_of(iid, tk_name, k), self.cv.cell)
             out.add(si, iid, m, ix0, iy0)
         return out
+
+    def m_of(self, iid: int, type_key: str, k: int) -> float:
+        """The margin of enemy iid at look-ahead k: FOCUS_M for the focus unit (MARGIN_MODE "focus"), else margin()."""
+        if iid is not None and iid == getattr(self, "focus", None):
+            return FOCUS_M
+        return margin(type_key, k, self.margin_mode)
 
 def pending_aims(trk: RangeTracker) -> list[dict]:
     """The enemies in a pending aimed antic with a packed zone table: {iid, name, reader, x, y, s, aim, d_lo, d_hi
@@ -641,9 +700,10 @@ class V2Feed:
                 self.trk.feed(s)
         self.f_fed = f
 
-    def support(self, fcast, origin_frame: int | None) -> V2Forecast:
+    def support(self, fcast, origin_frame: int | None, focus: int | None = None) -> V2Forecast:
+        """focus: the controller's target iid (RangeSupport.build); a changed one rebuilds."""
         if (self.every > 1 and self.last is not None and self.f_fed is not None and origin_frame is not None
-                and 0 <= self.f_fed - self.last_f < self.every):
+                and 0 <= self.f_fed - self.last_f < self.every and getattr(self.last, "focus_arg", None) == focus):
             rs = copy.copy(self.last)             # the stacks shared; its look-ahead k = j - (build frame - origin)
             rs.k_shift = int(self.last_f) - int(origin_frame)
             rs.ms = 0.0
@@ -651,11 +711,12 @@ class V2Feed:
             self.reused += 1
         else:
             rs = RangeSupport.build(self.trk, k_shift=tracker_k_shift(self.f_fed, origin_frame),
-                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode)
+                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode, focus=focus)
+            rs.focus_arg = focus
             self.last, self.last_f = rs, self.f_fed
         self.ms.append(rs.ms)
         return V2Forecast(fcast, rs)
 
 
-__all__ = ["V2_ON", "MARGIN_MODE", "margin", "box_kernel", "dilate", "Canvas", "LayerSupport", "RangeSupport",
+__all__ = ["V2_ON", "MARGIN_MODE", "FOCUS_M", "focus_iid", "dash_at", "margin", "box_kernel", "dilate", "Canvas", "LayerSupport", "RangeSupport",
            "V2Forecast", "V2Feed", "pending_aims", "SAMPLE_KS", "ESC_F", "carry_body", "body_polys", "empty_mask"]

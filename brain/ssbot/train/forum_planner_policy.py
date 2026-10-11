@@ -665,9 +665,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         fcast = self.fc.forecast(HORIZON_S)
         fplan = fcast
         if self.v2feed is not None:
-            # v2: the attack-range tracker fed every game frame up to f, its support for the planner (origin fo)
+            # v2: the attack-range tracker fed every game frame up to f (its support for the planner, origin fo, is
+            # built after the L2 decision: the focus margin needs the controller's target)
             self.v2feed.feed(self.raw, f)
-            fplan = self.v2feed.support(fcast, fo)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
         if self.sc.pq is not None:
@@ -676,6 +676,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         prefs = self.tac.decide(ws, fcast, d, h)
         self._mode_last = prefs.mode
+        if self.v2feed is not None:
+            fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
         dmg, _ = self.sc.kill_inputs(s, obs=raw, ws=ws)
         kill_hp = forum_kill_hp(self.fc)
         ykill = forum_yellow_kill_hp(self.fc, self.freeze)

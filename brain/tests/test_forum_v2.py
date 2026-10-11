@@ -296,3 +296,62 @@ def test_corner_zones_between_a_clapper_and_a_near_wall():
                       4: NS(dead=False, pos=(46.0, 7.45), table=NS(type_key="Song Reed"))})
     z = v.corner_zones(fc)
     assert z == [(v.WALL_L - 1.0, 20.0)]
+
+
+# ---- the focus margin (the person, 2026-10-11) ----
+
+def _fake_tracker(units):
+    """units: {iid: (type_key, (x, y))}: every estimate a 1-cell raw mask at the unit's position, mid-move."""
+    from types import SimpleNamespace as NS
+    now = {iid: (tk, {"pos": p}, None) for iid, (tk, p) in units.items()}
+    tables = {tk: NS(cell=0.05) for tk, _ in units.values()}
+    return NS(now=now, tables=tables, hero=None, T=0.0,
+              estimate=lambda iid, k: NS(raw=_cell_mask(*units[iid][1]), fam="X", haz=None))
+
+
+def test_focus_mode_gives_the_others_the_rule_margin_and_is_the_v2_default():
+    assert v2.MARGIN_MODE == "focus" or "SSBOT_FORUM_V2_MARGIN" in __import__("os").environ
+    for k in (0, 12, 18, 36):
+        for tk in ("Song Reed", "Song Heavy Sentry", "Song Pilgrim 03"):
+            assert v2.margin(tk, k, "focus") == v2.margin(tk, k, "rule")
+
+
+def test_focus_iid_is_the_target_else_the_only_enemy_else_none():
+    one = _fake_tracker({7: ("Song Heavy Sentry", (30.0, 8.0))})
+    two = _fake_tracker({7: ("Song Heavy Sentry", (30.0, 8.0)), 9: ("Song Reed", (40.0, 10.0))})
+    assert v2.focus_iid(one, None) == 7 and v2.focus_iid(one, 3) == 7
+    assert v2.focus_iid(two, 9) == 9 and v2.focus_iid(two, None) is None and v2.focus_iid(two, 3) is None
+
+
+def test_focus_build_flat_for_the_focus_rule_for_the_others_and_the_dash_copy():
+    units = {7: ("Song Heavy Sentry", (30.0, 8.0)), 9: ("Song Reed", (40.0, 10.0))}
+    trk = _fake_tracker(units)
+    rs = v2.RangeSupport.build(trk, margin_mode="focus", focus=7)
+    flat = v2.RangeSupport.build(_fake_tracker({7: units[7]}), margin_mode="flat:0.5")
+    rule = v2.RangeSupport.build(_fake_tracker({9: units[9]}), margin_mode="rule")
+    rule7 = v2.RangeSupport.build(_fake_tracker({7: units[7]}), margin_mode="rule")
+    assert rs.focus == 7
+    assert np.array_equal(rs._stack_of(lambda i: i == 7), flat.stack)
+    assert np.array_equal(rs._stack_of(lambda i: i == 9), rule.stack)
+    si36 = v2.SAMPLE_KS.index(36)
+    si12 = v2.SAMPLE_KS.index(12)
+    assert rs.stack_dash is not None and not rs.stack_dash[si12].any()       # rule = 0.5 up to k 12: no copy
+    assert np.array_equal(rs.stack_dash[si36], rule7.stack[si36]) and rs.stack_dash[si36].sum() > flat.stack[si36].sum()
+    # a 1v1: the focus is the only enemy and the main stack is exactly flat 0.5 (the tj2 arm)
+    solo = v2.RangeSupport.build(_fake_tracker({7: units[7]}), margin_mode="focus")
+    assert solo.focus == 7 and np.array_equal(solo.stack, flat.stack)
+    assert np.array_equal(solo.stack_esc, flat.stack_esc)
+
+
+def test_dash_at_rows_moving_towards_the_focus_in_a_dash():
+    T = 5
+    mode = np.zeros((3, T), np.int64)
+    vel = np.zeros((3, T, 2))
+    cen = np.zeros((3, T, 2))
+    cen[..., 0] = 30.0
+    mode[0, 2] = kin.M_DASH
+    vel[0, 2, 0] = 20.0          # dashing right, focus right: yes
+    mode[1, 2] = kin.M_DASH
+    vel[1, 2, 0] = -20.0         # dashing away: no
+    vel[2, :, 0] = 8.0           # running at it, no dash: no
+    assert v2.dash_at(mode, vel, cen, 35.0).tolist() == [True, False, False]
