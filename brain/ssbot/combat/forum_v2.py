@@ -49,6 +49,9 @@ from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
 EVERY = int(os.environ.get("SSBOT_FORUM_V2_EVERY", "1") or 1)   # V2Feed: rebuild the support every this many frames
 MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "rule").strip().lower() or "rule"
+# the escape check runs on a carried CONTINUE row too (1v1 live, forum.md 44: a row chosen with an escape kept running
+# into a Slam Antic's reach unchecked until no row had one; SSBOT_FORUM_V2_ESC_CARRIED=0: the old skip)
+ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
 
 CELL = 0.1
 CANVAS = (WALL_L - 2.0, FLOOR_Y - 3.0, WALL_R + 2.0, 27.0)      # x0, y0, x1, y1 (u)

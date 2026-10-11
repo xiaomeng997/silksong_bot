@@ -2409,7 +2409,7 @@ class ForumPlanner(Planner):
                              **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
             esc_row = None
             esc_unsafe = False
-            if (fcfg.escape or v2) and not carried:
+            if (fcfg.escape or v2) and (not carried or (v2 and forum_v2.ESC_CARRIED)):
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
                 # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
                 # FORCED_RISK: of the first esc_k rows of the order those tied with the first on every key above the
