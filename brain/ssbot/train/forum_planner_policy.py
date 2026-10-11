@@ -37,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
+from ssbot.combat import forum_v2
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -206,6 +207,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.ab = self._ab_arms()
         self.ab_arm: str | None = None
         self.free = False                       # track A "free" (_set_ta)
+        self.v2feed: forum_v2.V2Feed | None = None   # v2-lite (SSBOT_FORUM_V2=1): the attack-range tracker + support
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -332,6 +334,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
+        if self.planner.fcfg.v2:
+            self.v2feed = self.v2feed or forum_v2.V2Feed()
+            self.v2feed.reset()
+        else:
+            self.v2feed = None
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
         self._audit0 = self.planner.audit.as_dict()
@@ -656,6 +663,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.fc.update(ws)
         wt = self._wave_check(raw, fo)
         fcast = self.fc.forecast(HORIZON_S)
+        fplan = fcast
+        if self.v2feed is not None:
+            # v2: the attack-range tracker fed every game frame up to f, its support for the planner (origin fo)
+            self.v2feed.feed(self.raw, f)
+            fplan = self.v2feed.support(fcast, fo)
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
         if self.sc.pq is not None:
@@ -676,7 +688,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                           np.int64)
         t1 = time.perf_counter()
         S0 = self._start_state(ws, raw)
-        res = self.planner.tick(ws, S0, hold, prefix, fcast, prefs, ctx)
+        res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
         pt = self.planner.audit.pin_ticks
         cl = getattr(res, "clash", None)
@@ -867,7 +879,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         return {"view": self.view, "policy": "forum_planner", "k": 0, "modes": modes, "ab_arm": self.ab_arm,
                 "fcfg": None if fc is None else {"forced_rank": fc.forced_rank, "react": fc.react,
                                                  "commit_rank": fc.commit_rank, "terminal": fc.terminal, "T": fc.T,
-                                                 "ta": "+".join(sorted(fc.tac))},
+                                                 "ta": "+".join(sorted(fc.tac)), "v2": fc.v2,
+                                                 "v2_margin": forum_v2.MARGIN_MODE if fc.v2 else None},
+                "v2_support_ms_p50": q(self.v2feed.ms, 50) if self.v2feed is not None else None,
+                "v2_support_ms_p99": q(self.v2feed.ms, 99) if self.v2feed is not None else None,
                 "branch_model": self.fc.bv is not None,
                 "tick_ms_p50": q(self.tick_ms, 50), "tick_ms_p99": q(self.tick_ms, 99),
                 "plan_ms_p50": q(self.plan_ms, 50), "plan_ms_p99": q(self.plan_ms, 99),

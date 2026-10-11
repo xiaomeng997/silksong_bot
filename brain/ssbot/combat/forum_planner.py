@@ -77,6 +77,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
+from ssbot.combat import forum_v2
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
                                   _hull_points, _is_macro, _rect_meets_polys)
@@ -279,6 +280,13 @@ class ForumConfig:
     eml_mask: float = 1.154       # "eml": masks a contact costs (forum.md 24.3: 1,876 masks in 1,626 hits)
     eml_hits_per_mask: float = 4.0   # the person's exchange: 4 hits landed = 1 mask (9 silk heal 3)
     kb_scale: float = 1.0         # "kb": the measured knockback's factor (medians, forum.md §26)
+    # v2-lite (combat.forum_v2, SSBOT_FORUM_V2=1; forum.md §43): with a V2Forecast the safe test reads the attack-range
+    # estimate + margin, the pending aims' zones, the hit branch's counters from the estimate's templates; every chosen
+    # row needs an escape from its end; safe rows rank by landed hits (then the first hit's frame) before J; the timing
+    # rows are in the set (the extension search: they are enveloped only when the prioritised rows leave none safe);
+    # no clash pass. Off: the planner bit for bit.
+    v2: bool = forum_v2.V2_ON
+    v2_esc_k: int = 16            # v2: safe rows (in the order) the escape check may look at for one with an escape
 
     @property
     def tac(self) -> frozenset:
@@ -393,6 +401,9 @@ class EnvelopeAudit:
     whip_clash_rows: int = 0      # clash-safe rows whose clash meets a Choristor whip, J lowered (track A "whip")
     kb_rows: int = 0              # hit-branch rows whose hit enemy was moved by its knockback (track A "kb")
     bind_threat: int = 0          # Bind macros the support passed and "+k"'s lock check refused (_bind_threatened)
+    v2_aim_rows: int = 0          # v2: rows a pending aim's zone set S = 1
+    v2_react: int = 0             # v2: hit-branch counters placed from the estimate's templates
+    v2_esc_rows: int = 0          # v2: rows the escape check (from the row's end) looked at
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -938,7 +949,7 @@ class ForumPlanner(Planner):
                  fcfg: ForumConfig | None = None, crest: str = "Reaper"):
         self.fcfg = fcfg or ForumConfig()
         super().__init__(params, terrain, cfg or PlannerConfig(T=self.fcfg.T, variants=self.fcfg.variants))
-        self.fsets = {p: cmod.build_forum(self.fcfg.T, p, clash=self.fcfg.clash, waits=self.fcfg.waits)
+        self.fsets = {p: cmod.build_forum(self.fcfg.T, p, clash=self.fcfg.clash, waits=self.fcfg.waits or self.fcfg.v2)
                       for p in cmod.POSTURES}
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
@@ -1213,7 +1224,14 @@ class ForumPlanner(Planner):
                         continue
                     else:
                         budget["react"] += 1
-                        rf = mf.forecast_reaction(t.iid, to, t_react, f.horizon, f.origin_t)
+                        if getattr(f, "v2", False):
+                            # v2: the counters from the estimate's templates (forum_v2.RangeSupport.reaction); a
+                            # TOOK DAMAGE exit that starts no family has no collider of its own (its next move's
+                            # antic comes first)
+                            rf = f.rs.reaction(t.iid, to, int(fr[n]), None)
+                            self.audit.v2_react += int(rf is not None)
+                        else:
+                            rf = mf.forecast_reaction(t.iid, to, t_react, f.horizon, f.origin_t)
                     cache[key] = rf
                 if rf is not None:
                     by_rf.setdefault(key, []).append(n)
@@ -1452,6 +1470,37 @@ class ForumPlanner(Planner):
                     labels[cps[m][0]].append("light cone")
         return fail, labels
 
+    def _escape_fail_v2(self, f, r1, hold_end, rows: np.ndarray) -> tuple[np.ndarray, list]:
+        """v2's escape requirement (forum_v2 module docstring): [len(rows)] 1 when no escape command (_esc_cmds, from
+        the row's end state, its lock played out by the kinematics) keeps the nominal box centre out of the estimate
+        (V2Forecast.occupied: decided moves, bodies carried, hazards, margins) for forum_v2.ESC_F frames past the end
+        (invulnerable frames skipped), else 0."""
+        params = self.params
+        dt = params.frame_time
+        T1 = r1.box.shape[1]
+        L = forum_v2.ESC_F
+        E = self._esc_cmds(L)
+        nE = len(E)
+        h = hold_end
+        hs = [np.repeat(np.asarray(a)[rows], nE, axis=0) for a in (h.latched, h.desired, h.pending, h.age)]
+        lat_e, _ = hold_filter_jit(np.tile(E, (len(rows), 1)), HoldState(*hs))
+        st = np.repeat(r1.final[:, rows], nE, axis=1)
+        re = kin.rollout(st, lat_e, params, self.terrain, threads=self.cfg.threads)
+        cx = 0.5 * (re.box[..., 0] + re.box[..., 2])
+        cy = 0.5 * (re.box[..., 1] + re.box[..., 3])
+        tq = (T1 - 1 + np.arange(L + 1)) * dt
+        occ = f.occupied(cx, cy, tq) & ((re.flags & F_INVULN) == 0)
+        occ[:, 0] = False
+        esc = (~occ.any(axis=1)).reshape(len(rows), nE).any(axis=1)
+        return (~esc).astype(np.int64), [[] if e else ["v2 end"] for e in esc]
+
+    @staticmethod
+    def _v2_locked(r1, rows: np.ndarray) -> np.ndarray:
+        """[len(rows), T1] the hero cannot start an escape on that frame: an attack swinging, a lock or a mode
+        without control, a dash or a sprint (the pending aims' zones assume a free hero at the decision)."""
+        md = r1.mode[rows]
+        return np.isin(md, ESC_LOCK_MODES + (kin.M_DASH, kin.M_SPRINT)) | ((r1.flags[rows] & F_ATTACKING) != 0)
+
     # ---- the Bind's lock ("+k", forum.md 24.5 item 4) ----
 
     def _bind(self, ws, start, hold, prefix, f, ctx):
@@ -1613,13 +1662,15 @@ class ForumPlanner(Planner):
         return out
 
     def _escape_pick(self, f, start, hold, full, hold_end, r1, ranked: np.ndarray, hero: tuple[float, float],
-                     k: int | None = None, t_end: float | None = None) -> tuple[int | None, int, int, int, list]:
+                     k: int | None = None, t_end: float | None = None, v2: bool = False
+                     ) -> tuple[int | None, int, int, int, list]:
         """Of the first k (default esc_k) rows of `ranked`, the first that passes the escape check, else the one with
         the fewest failures (the first of them). No batch starts that would end past t_end (perf_counter s; a batch
         is taken to cost what the last ones did): self.esc_cut. Returns (row or None: no threats / rows / time, its
-        failures, rows checked, threats, its failing threats)."""
+        failures, rows checked, threats, its failing threats). v2: the check is _escape_fail_v2 (one threat: the
+        estimate past the row's end)."""
         self.esc_cut = False
-        threats = self._threats(f, hero)
+        threats = [("v2",)] if v2 else self._threats(f, hero)
         if (not threats and not self.fcfg.light_cone) or not len(ranked):
             return None, 0, 0, len(threats), []
         best, best_fail, checked, best_lab = None, 0, 0, []
@@ -1630,7 +1681,11 @@ class ForumPlanner(Planner):
                 self.esc_cut = True
                 break
             rows = np.asarray(ranked[c0:min(K, c0 + ESC_CHUNK)], np.int64)
-            nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
+            if v2:
+                nf, lab = self._escape_fail_v2(f, r1, hold_end, rows)
+                self.audit.v2_esc_rows += len(rows)
+            else:
+                nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
             self.esc_batch_s = 0.5 * self.esc_batch_s + 0.5 * (time.perf_counter() - tc)
             checked += len(rows)
             for r, n, lb in zip(rows, nf, lab):
@@ -1959,6 +2014,7 @@ class ForumPlanner(Planner):
              ) -> PlanResult:
         t0 = time.perf_counter()
         cfg, fcfg, params = self.cfg, self.fcfg, self.params
+        v2 = bool(fcfg.v2 and getattr(f, "v2", False))
         prefix = np.asarray(prefix, np.int64).reshape(-1)
         P = len(prefix)
         posture = posture_of(start)
@@ -2134,6 +2190,15 @@ class ForumPlanner(Planner):
                     S[pr[pk >= 0]] = True
                     t_hit[pr[pk >= 0]] = pk[pk >= 0]
                     self.audit.pin_rows += int((pk >= 0).sum())
+            if v2 and f.rs.pend:
+                # v2: the pending aims (forum_v2.RangeSupport.aim_fail) on the nominal lane of the rows still safe
+                pr = ch[~S[ch]]
+                if len(pr):
+                    af = f.rs.aim_fail(0.5 * (r1.box[pr, :, 0] + r1.box[pr, :, 2]),
+                                       0.5 * (r1.box[pr, :, 1] + r1.box[pr, :, 3]), self._v2_locked(r1, pr))
+                    S[pr[af]] = True
+                    t_hit[pr[af]] = np.minimum(t_hit[pr[af]], T1 - 1)
+                    self.audit.v2_aim_rows += int(af.sum())
             safe_now = bool((env & ok & ~S & ~hz).any())
             safe_any = safe_any or safe_now
             now = time.perf_counter()
@@ -2164,7 +2229,7 @@ class ForumPlanner(Planner):
         clash_occ: dict = {}                      # row -> (w, its clash branch's contact [T1] or None: clean)
         self._clash_inv = {}
         self._clash_fams = {}
-        if fcfg.clash and fcfg.clash_branch and not (env & ok & ~S & ~hz).any():
+        if fcfg.clash and fcfg.clash_branch and not v2 and not (env & ok & ~S & ~hz).any():
             # no safe row: the clash branch (the plan's "成功率高的招不再逼出 FORCED_RISK"); plain safe rows always
             # come first, so it never runs on a tick that has one
             self.audit.clash_ticks += 1
@@ -2321,8 +2386,12 @@ class ForumPlanner(Planner):
                 mkeep[N - 1] = True
             # FORCED_RISK: the least share in contact, the latest first contact on the nominal lane, then on the
             # envelope (rows clear on the nominal lane), J (a tick with a safe row: those rows all tie on these)
-            order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, ~mkeep, ~keep, clash_p, S,
-                                U, hz_soft, hz))
+            # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
+            # otherwise and on every unsafe row: the order is unchanged)
+            v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
+            order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh, ~mkeep,
+                                ~keep, clash_p, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -2336,7 +2405,7 @@ class ForumPlanner(Planner):
                              **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
             esc_row = None
             esc_unsafe = False
-            if fcfg.escape and not carried:
+            if (fcfg.escape or v2) and not carried:
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
                 # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
                 # FORCED_RISK: of the first esc_k rows of the order those tied with the first on every key above the
@@ -2353,8 +2422,9 @@ class ForumPlanner(Planner):
                         (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1]))
                     dl = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
-                        f, start, hold, full, hold_end, r1, ranked, hero, fcfg.esc_k_forced if forced else fcfg.esc_k,
-                        None if math.isinf(dl) else t0 + dl * 1e-3)
+                        f, start, hold, full, hold_end, r1, ranked, hero,
+                        fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
+                        None if math.isinf(dl) else t0 + dl * 1e-3, v2=v2)
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
@@ -2366,7 +2436,7 @@ class ForumPlanner(Planner):
                         a.esc_forced_pass += int(forced and nf == 0)
                         a.esc_forced_moved += int(forced and esc_row != i)
                         i = esc_row
-                    if fcfg.esc_veto and not forced:
+                    if (fcfg.esc_veto or v2) and not forced:
                         # "+n": the attacks not started are the escape check's only; a row it failed (the fewest
                         # failures of those checked) or did not reach before its deadline with threats in reach is not
                         # safe (forum.md §23.12)
@@ -2376,7 +2446,7 @@ class ForumPlanner(Planner):
                         a.esc_failed += int(failed)
                         a.esc_unchecked += int(unchecked)
                         esc_info["unsafe"] = esc_unsafe
-            elif carried and fcfg.esc_veto and self.prev_esc_unsafe:
+            elif carried and (fcfg.esc_veto or v2) and self.prev_esc_unsafe:
                 esc_unsafe = True                  # the CONTINUE of a row the escape check did not pass
                 a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
