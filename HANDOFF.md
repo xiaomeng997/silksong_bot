@@ -4989,9 +4989,10 @@ to DEMO_SOON.paused for the runs and put back at the end; the instances were lef
 - v2 + `SSBOT_FORUM_V2_MARGIN=flat:0.5`: ~95 % kills in 32-38 s, 50-67 % hitless kills, 0.4-0.9 hits per episode,
   0.55-0.69 landed hits/s.
 - Recommended (arm tj2 = commit f2e30f9 defaults + `SSBOT_FORUM_V2=1 SSBOT_FORUM_V2_MARGIN=flat:0.5
-  SSBOT_FORUM_V2_EVERY=1 SSBOT_FORUM_V2_CORNER=13`): 24 episodes, 23 kills, 15 hitless kills (62.5 %), 0.42 hits
-  before the kill per episode (control t0 + t0b, 46 episodes: 52 %, 0.76), landed 0.60 / s p50, kill 35.5 s p50
-  (p10 28.5, p90 47.4), late ticks 20 %.
+  SSBOT_FORUM_V2_EVERY=1 SSBOT_FORUM_V2_CORNER=13`, three batches): 72 episodes, 69 kills, 49 hitless kills (68.1 %),
+  0.40 hits before the kill per episode (control t0 + t0b, 46 episodes: 52 %, 0.76), landed 0.60 / s p50, kill
+  36.4 s p50 (p10 28.8, p90 46.6), late ticks 21 %. Its 29 hits: slams 17, plain-jump landings 3, runes 5, casts 3,
+  idle body 1. tj2 + EVERY=2: 66.7 % (24), late 12 %; tj2 + face_u 3: 73.9 % (23), landed 0.60 / s: no difference.
 - Slam analysis (all v2 arms, ~300 Slam Antic starts with the hero within 9 u): 14 % hit; with < 8 u from the hero
   to the wall behind it 61 % (22 / 36), 8-13 u 2 %, >= 13 u 9 %. The corners came from the controller's jump
   "under and behind" and the slam's step out to the wall; corner_room_u cut corner slams 13-17 -> 5 per arm.
