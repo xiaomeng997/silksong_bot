@@ -68,7 +68,7 @@ CMD_FILE = Path(r"C:\ssbot\sandbox\human_cmd.txt")
 
 def run_commands(link: OracleLink, log: list, overlay=None) -> None:
     """Execute and remove CMD_FILE's commands; a load waits until the person is in gameplay (title screen: refused).
-    "overlay <k N | mode M | layer L | all [on|off] | swept [on|off] | freeze | step | on | off>" goes to the zone
+    "overlay <k N | mode M | layer L | all [on|off] | swept [on|off] | aim [on|off] | freeze | step | on | off>" goes to the zone
     overlay (--overlay)."""
     if not CMD_FILE.exists():
         return
@@ -235,6 +235,8 @@ def main() -> None:
                     help="range: start with every look-ahead (0 / 6 / 12 / 18 / 36) at once (key 0 toggles)")
     ap.add_argument("--overlay-swept", action="store_true",
                     help="range: start with the swept path (the union of the estimate over 0..k; key 9 toggles)")
+    ap.add_argument("--overlay-aim", action="store_true",
+                    help="range: start with the aim zones of the pending aimed moves (tools.aim_zones; key 8 toggles)")
     ap.add_argument("--solo", default=None, metavar="TYPE",
                     help='single-enemy practice (tools.solo_practice), e.g. --solo "Song Pilgrim 03": loads the wave '
                          "savestate holding that type with the fewest others (unless --savestate), boosts the hero "
@@ -287,9 +289,9 @@ def main() -> None:
         from ssbot.tools.zone_overlay import LiveOverlay
         overlay = LiveOverlay(link, game.pid, speed=args.speed or 1.0, crest=args.overlay_crest,
                               every=args.overlay_every, margins=args.overlay_margins, range_layer=args.overlay_range,
-                              all_k=args.overlay_all_k, swept=args.overlay_swept)
+                              all_k=args.overlay_all_k, swept=args.overlay_swept, aim=args.overlay_aim)
         print("zone overlay: warming up (F8 on/off, F9 mode, F10 freeze, F11 step, 1-5 look-ahead, 0 all look-aheads, "
-              "9 swept path, Ctrl+1-7 layers)")
+              "9 swept path, 8 aim zones, Ctrl+1-7 layers)")
     solo = None
     if args.solo:
         from ssbot.tools.solo_practice import SoloController
