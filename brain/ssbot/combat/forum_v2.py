@@ -35,6 +35,7 @@ centre - transform -0.513, HeroBox centre = transform - 0.38).
 """
 from __future__ import annotations
 
+import copy
 import math
 import os
 import time
@@ -46,6 +47,7 @@ from ssbot.combat.attack_range import (FT, Mask, RangeTracker, _first_state, bod
 from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 
 V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
+EVERY = int(os.environ.get("SSBOT_FORUM_V2_EVERY", "1") or 1)   # V2Feed: rebuild the support every this many frames
 MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "rule").strip().lower() or "rule"
 
 CELL = 0.1
@@ -544,18 +546,28 @@ class V2Forecast:
 
 
 class V2Feed:
-    """The policy's side of v2: a RangeTracker fed every game frame (in order, each once) and the tick's support."""
+    """The policy's side of v2: a RangeTracker fed every game frame (in order, each once) and the tick's support.
+    every > 1 (SSBOT_FORUM_V2_EVERY): the support is rebuilt only every that many fed frames; a tick in between reads
+    the last one shifted to its origin (the estimate as of up to every - 1 frames ago: a move starting or decided in
+    between is seen that much later; its margins stay those of the build's look-ahead)."""
 
-    def __init__(self, margin_mode: str | None = None):
+    def __init__(self, margin_mode: str | None = None, every: int | None = None):
         self.trk = RangeTracker()
         self.f_fed: int | None = None
         self.margin_mode = margin_mode
+        self.every = max(int(EVERY if every is None else every), 1)
         self.ms: list = []
+        self.last: RangeSupport | None = None
+        self.last_f: int | None = None
+        self.reused = 0
 
     def reset(self) -> None:
         self.trk.reset()
         self.f_fed = None
         self.ms = []
+        self.last = None
+        self.last_f = None
+        self.reused = 0
 
     def feed(self, frames: dict, f: int) -> None:
         """Feeds the frames after the last fed one up to f from `frames` ({frame: STATE}); a gap restarts nothing (the
@@ -570,8 +582,17 @@ class V2Feed:
         self.f_fed = f
 
     def support(self, fcast, origin_frame: int | None) -> V2Forecast:
-        rs = RangeSupport.build(self.trk, k_shift=tracker_k_shift(self.f_fed, origin_frame),
-                                inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode)
+        if (self.every > 1 and self.last is not None and self.f_fed is not None and origin_frame is not None
+                and 0 <= self.f_fed - self.last_f < self.every):
+            rs = copy.copy(self.last)             # the stacks shared; its look-ahead k = j - (build frame - origin)
+            rs.k_shift = int(self.last_f) - int(origin_frame)
+            rs.ms = 0.0
+            rs.fc = _Half(getattr(fcast, "fc", None), BOUNDS_HALF)
+            self.reused += 1
+        else:
+            rs = RangeSupport.build(self.trk, k_shift=tracker_k_shift(self.f_fed, origin_frame),
+                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode)
+            self.last, self.last_f = rs, self.f_fed
         self.ms.append(rs.ms)
         return V2Forecast(fcast, rs)
 

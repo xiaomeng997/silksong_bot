@@ -266,3 +266,21 @@ def test_grouped_dilation_equals_the_union_of_each_enemys():
     assert np.array_equal(a.stack, b.stack) and a.stack.any()
     assert np.array_equal(a._stack_of(lambda i: i != 2), b._stack_of(lambda i: i != 2))
     assert b.stack_esc is not None and b.stack_esc.sum() < b.stack.sum()      # the 1.3 u enemy at 0.5 u
+
+
+def test_v2_feed_reuses_the_support_between_rebuilds_shifted_to_the_origin():
+    inner = _reed_forecaster(None, x=40.0).forecast(0.8)
+    fd = v2.V2Feed(every=2)
+    fd.feed({}, 10)
+    a = fd.support(inner, 10)
+    fd.feed({}, 11)
+    b = fd.support(inner, 11)
+    fd.feed({}, 12)
+    c = fd.support(inner, 12)
+    assert b.rs is not a.rs and b.rs.stack is a.rs.stack and b.rs.k_shift == -1 and fd.reused == 1
+    assert c.rs.stack is not a.rs.stack and c.rs.k_shift == 0
+    ls = v2.LayerSupport(v2.Canvas(), (0, 2), k_shift=-1)
+    d, ix0, iy0 = v2.dilate(_cell_mask(25.0, 5.0), 0.05, 0.0)
+    ls.add(1, 1, d, ix0, iy0)
+    # planner frame 1 one frame after the build = the build's look-ahead 2
+    assert ls.occupied(np.array([[25.0, 25.0]]), np.array([[5.0, 5.0]]), np.array([0, 1]) / 60.0).tolist() ==         [[True, True]]
