@@ -178,6 +178,15 @@ def _state_table() -> dict:
 
 
 STATES = _state_table()
+# on the wall (the person 2026-10-11: clinging at the wall top is safe from the Clapper): clinging (Ascendant's Grip)
+# to a wall touching the collider on +x, h above standing height, no dash. Not table states of this module (the
+# measured "wallcling" is LOCKED here); the aim zones' wall column (tools.aim_zones CLING_STATES) only.
+CLING = {f"cling_h{h}": ("cling", h, 0.0, False, 0.0, 0) for h in AIR_H}
+
+
+def state_spec(name: str) -> tuple:
+    """(kind, h, vy, dash, wall, dash dir) of a table state or a cling state."""
+    return STATES[name] if name in STATES else CLING[name]
 SPECIAL = ("bind", "recoil", "hurt", "umbrella", "glide", "pogo", "airdash", "wallcling", "wallslide", "attack_lock")
 
 
@@ -263,8 +272,17 @@ def terrain(p, wall: float | None):
 def start_state(name: str, p, phase: float = 0.0):
     """(model state at the decision, the latched mask at the decision) for a table state."""
     km = _km()
-    kind, h, vy, dash, wall, ddir = STATES[name]
+    kind, h, vy, dash, wall, ddir = state_spec(name)
     tr = terrain(p, wall)
+    if kind == "cling":
+        # in the air against the wall, held toward it until the Grip's cling holds (5 frames, 0.09 u lower in the
+        # model); the hero keeps holding toward the wall through the latency
+        S = km.initial_state(p, 0.0, FLOOR_Y + p.foot + h, vx=0.0, vy=0.0, facing=1, ground=False)
+        S = km.rollout(S, np.full((1, CLING_SETTLE), km.B_RIGHT, np.int64), p, tr).final[:, 0].copy()
+        if S[km.ROW_NAMES.index("cling")] < 0.5:
+            raise RuntimeError(f"{name}: no cling after {CLING_SETTLE} frames (abilities {p.abilities})")
+        S[km.ALPHA] = S[km.ALO] = S[km.AHI] = phase
+        return S, km.B_RIGHT
     if kind == "air":
         S = km.initial_state(p, 0.0, FLOOR_Y + p.foot + h, vx=0.0, vy=vy, facing=1, ground=False)
         latched = 0
@@ -285,6 +303,7 @@ def start_state(name: str, p, phase: float = 0.0):
     return S, latched
 
 
+CLING_SETTLE = 12                          # frames held toward the wall to start a "cling" state
 JHOLD = (2, 4, 8, None)
 GAP2 = (2,)
 DASH2 = 28                                 # a second dash tap this many frames after the first (cooldown 0.425 s)
@@ -372,7 +391,7 @@ def build_library(name: str, p, phase: float = 0.0, T: int = T_LIB, quant: float
     """delay: the first `delay` frames keep the decision's latched keys (the latency sweep: a key L frames late)."""
     km = _km()
     S, latched = start_state(name, p, phase)
-    tr = terrain(p, STATES[name][4])
+    tr = terrain(p, state_spec(name)[4])
     mv, jp, dp = channels(T - delay, (latched & km.B_JUMP) != 0, coarse)
     pad = lambda a: np.concatenate([np.full((len(a), delay), latched, np.int64), a], 1)  # noqa: E731
     mv, jp, dp = pad(mv), pad(jp), pad(dp)
