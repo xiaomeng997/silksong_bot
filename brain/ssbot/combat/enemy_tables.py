@@ -26,6 +26,7 @@ and npz files here, and the static type facts from ssbot.core.forum.
 """
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class Family:
     damage: int                                     # largest logged damage of its colliders (masks)
     sources: dict[str, frozenset[str]]              # state -> damage source type keys
     hazard_sources: frozenset[str] = frozenset()    # thrown hazard types among its sources
+    dur: tuple[float, float] = (0.0, math.inf)      # its logged duration p0.5, p99.5 (s; Subject.t_free)
 
 
 @dataclass(slots=True)
@@ -605,8 +607,10 @@ def _family(name: str, a: dict, spec: ForumType) -> Family:
         damage = max([damage] + [int(v) for v in h.get("dmg") or ()])
     entry = {s: (float(q["min"]), float(q["max"])) for s, q in (a.get("state_entry_s") or {}).items() if q.get("n")}
     hz = frozenset(x for v in srcs.values() for x in v if x in spec.hazards)
+    du = a.get("duration_s") or {}
+    dur = (float(du.get("p0_5", 0.0)), float(du.get("p99_5", math.inf))) if du.get("n") else (0.0, math.inf)
     return Family(name, tuple(a.get("states") or ()), tuple(a.get("start_states") or ()), entry, damage,
-                  {k: frozenset(v) for k, v in srcs.items()}, hz)
+                  {k: frozenset(v) for k, v in srcs.items()}, hz, dur)
 
 
 def type_table(d: dict, spec: ForumType, walk: dict | None = None) -> TypeTable:
@@ -662,9 +666,11 @@ def wanted_key(k: str, spec: ForumType, family_wide: bool = True) -> bool:
 
 
 def load_type_templates(npz: Path, spec: ForumType, margins: dict, base: float = 0.0,
-                        family_wide: bool = True):
+                        family_wide: bool = True, state_margins: dict | None = None):
     """The wanted support templates of one type's npz, one at a time (key, template), each dilated by the hero
-    hurtbox half-extents plus base plus the family's margin (or the hazard's: margins ("ent", hazard)); the npz is
+    hurtbox half-extents plus base plus the family's margin (or the hazard's: margins ("ent", hazard)); with
+    state_margins {(type, family, state): u} a per-state anchor template takes its state's margin where it has one
+    (forum.md §23; tools.forum_state_margins), the family-wide / tail / world-frame ones keep the family's. The npz is
     read lazily, so only one raw and one dilated template are held at a time."""
     with np.load(Path(npz), allow_pickle=False) as z:
         keys = sorted(f[:-5] for f in z.files if f.endswith("/bits") and f[:-5] + "/meta" in z.files)
@@ -673,9 +679,56 @@ def load_type_templates(npz: Path, spec: ForumType, margins: dict, base: float =
                 continue
             t = hb.SpaceTimeTemplate.from_arrays(k, z[k + "/bits"], z[k + "/meta"])
             p = k.split("/")
-            m = base + (margins.get(("ent", p[2]), 0.0) if p[1] == "ent" else
-                        margins.get((spec.type_key, p[1]), 0.0))
+            m = margins.get(("ent", p[2]), 0.0) if p[1] == "ent" else margins.get((spec.type_key, p[1]), 0.0)
+            if state_margins and p[1] != "ent" and len(p) == 4 and p[3] == "anchor" and p[2] != TAIL:
+                m = state_margins.get((spec.type_key, p[1], p[2]), m)
+            m += base
             yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
+
+
+AIM_FILE = "aim_templates.npz"
+
+
+def aim_on() -> bool:
+    """SSBOT_FORUM_AIM (task "zone fix" item 1): the aim-conditioned committed templates; default on since their
+    acceptance (forum.md §29.6: R2 held-out recall 100 % at L2-L4, the re-score's unsafe / false alarms / FORCED_RISK
+    down, misses not up); "0" turns them off. Without knowledge/.../forum/aim_templates.npz (git-ignored, built by
+    tools.forum_aim) nothing is loaded."""
+    return os.environ.get("SSBOT_FORUM_AIM", "0") not in ("", "0")   # off until a true held-out recall (review)
+
+
+def load_aim_templates(spec: ForumType, margins: dict, base: float = 0.0, path: Path | None = None):
+    """(key, template) of one type's aim-conditioned templates (tools.forum_aim: support/<family>/aim@<state>/anchor,
+    t from the aim state's entry, anchored and mirrored where the enemy was then), dilated by the hero hurtbox
+    half-extents + the held-out residual r of the build + the family's margin + base; registers each family's aim
+    state for the trackers (enemy_tracker.AIM_STATES)."""
+    from ssbot.combat import enemy_tracker
+    p = Path(path) if path else FORUM_DIR / AIM_FILE
+    if not p.exists():
+        return
+    tpls, extra = hb.load_templates(p)
+    for k, t in tpls.items():
+        _, fam, aim, _frame = k.split("/")
+        # aim@<state>#<bin>: one template per direction bin of the enemy's flight at the aim (enemy_tracker.aim_bin)
+        state, _, b = aim[len("aim@"):].partition("#")
+        r = extra.get(f"aim/{spec.type_key}|{fam}@{state}#{b}" if b else f"aim/{spec.type_key}|{fam}")
+        if r is None:
+            continue
+        st = enemy_tracker.AIM_STATES.get((spec.type_key, fam))
+        st = set() if st is None else {st} if isinstance(st, str) else set(st)
+        enemy_tracker.AIM_STATES[(spec.type_key, fam)] = st | {state}
+        enemy_tracker.AIM_KEYS.add((spec.type_key, fam, state, int(b) if b else 0))
+        m = margins.get((spec.type_key, fam), 0.0) + base + float(r[0])
+        yield k, t.dilated(rx=hb.HERO_HALF_U[0] + m, ry=hb.HERO_HALF_U[1] + m, key=k)
+
+
+def parse_state_margins(by_state: dict) -> dict:
+    """{"<type>/<family>/<state>": u} -> {(type, family, state): u}."""
+    out = {}
+    for k, v in by_state.items():
+        a, b, c = k.split("/", 2)
+        out[(a, b, c)] = float(v)
+    return out
 
 
 @dataclass(slots=True)
@@ -765,13 +818,16 @@ class EnemyTables:
 
     @classmethod
     def production(cls, root: Path | None = None, margins_path: Path | None = None, base: float = 0.0,
-                   types: tuple[str, ...] | None = None, family_wide: bool = True) -> "EnemyTables":
+                   types: tuple[str, ...] | None = None, family_wide: bool = True,
+                   state_margins_path: Path | None = None) -> "EnemyTables":
         """The committed tables (knowledge/.../enemies/forum/<enemy>.json + the generated _hitboxes.npz) with the
-        production margins and tubes of support_margins.json (R0 certification, forum.md §12.2)."""
+        production margins and tubes of support_margins.json (R0 certification, forum.md §12.2); state_margins_path:
+        the per-state margins (support_margins_state.json, tools.forum_state_margins, forum.md §23) on top."""
         root = Path(root) if root else FORUM_DIR
         mp = Path(margins_path) if margins_path else root / "support_margins.json"
         md = json.loads(mp.read_text("utf-8"))
         margins = parse_margins(md.get("by_family") or {})
+        sm = parse_state_margins(json.loads(Path(state_margins_path).read_text("utf-8")).get("by_state") or {})             if state_margins_path else None
         tubes = Tubes.from_doc(md.get("production_tubes") or {})
         tts = {}
 
@@ -781,16 +837,20 @@ class EnemyTables:
                     continue
                 d = json.loads((root / f"{spec.enemy}.json").read_text("utf-8"))
                 tts[tk] = type_table(d, spec)
-                yield load_type_templates(root / d["templates"]["file"], spec, margins, base, family_wide)
+                yield load_type_templates(root / d["templates"]["file"], spec, margins, base, family_wide, sm)
+                if aim_on():
+                    yield load_aim_templates(spec, margins, base, root / AIM_FILE)
         store = cls._store(per_type())
-        return cls(tts, store, tubes, margins, bool(md.get("certified")), f"production:{root}",
-                   load_chains(root / "chains.json"))
+        return cls(tts, store, tubes, margins, bool(md.get("certified")),
+                   f"production:{root}" + ("" if sm is None else "+state_margins"), load_chains(root / "chains.json"))
 
     @classmethod
     def fold(cls, extra: Path, fold: int, margins: dict, tubes: Tubes, root: Path | None = None, base: float = 0.0,
-             types: tuple[str, ...] | None = None, family_wide: bool = True) -> "EnemyTables":
+             types: tuple[str, ...] | None = None, family_wide: bool = True,
+             state_margins: dict | None = None) -> "EnemyTables":
         """One fold of a behaviour_build --extra directory: <enemy>_support_fold<k>.npz and build.json's walk of that
-        fold, the families from the committed JSON tables (the same build), margins and tubes as given."""
+        fold, the families from the committed JSON tables (the same build), margins (and per-state margins) and tubes
+        as given."""
         root = Path(root) if root else FORUM_DIR
         extra = Path(extra)
         build = json.loads((extra / "build.json").read_text("utf-8"))
@@ -806,7 +866,11 @@ class EnemyTables:
                         "succ": (w.get("succ") or {}).get(str(fold), {})}
                 tts[tk] = type_table(d, spec, walk)
                 npz = extra / f"{spec.enemy}_support_fold{fold}.npz"
-                yield load_type_templates(npz, spec, margins, base, family_wide) if npz.exists() else {}
+                yield load_type_templates(npz, spec, margins, base, family_wide, state_margins) if npz.exists() \
+                    else {}
+                if aim_on():
+                    # built from the dev fights only (tools.forum_aim): held out for the fresh recall
+                    yield load_aim_templates(spec, margins, base, root / AIM_FILE)
         store = cls._store(per_type())
         return cls(tts, store, tubes, margins, True, f"fold{fold}:{extra}", load_chains(root / "chains.json"))
 
