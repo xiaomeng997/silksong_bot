@@ -21,13 +21,33 @@ from pathlib import Path
 import numpy as np
 
 
+RUNS = Path("C:/ssbot/data/runs/m2")
+
+
+def _f_kill(run: str, inst: int, ep: int, cache: dict) -> int | None:
+    key = (run, inst)
+    if key not in cache:
+        p = RUNS / run / f"attempts_i{inst}.jsonl"
+        cache[key] = {int(r["episode"]): r for r in map(json.loads, p.read_text("utf-8").splitlines()) if r}             if p.exists() else {}
+    r = cache[key].get(int(ep)) or {}
+    return r.get("f_kill")
+
+
 def load(out: Path) -> dict[str, list[dict]]:
+    """Episodes per arm; "n_hits" counts the hits before the kill (the Clapper's fight; f <= f_kill, every hit when
+    it was not killed), "tail_hits" those after it (wave 8's members arriving before its start ends the episode)."""
     by = defaultdict(list)
+    cache = {}
     for p in sorted((out / "eps").glob("*.json")):
         d = json.loads(p.read_text("utf-8"))
-        e = {**d["episode"], "hits": d.get("hits") or [], "n_hits": d["episode"].get("hits")}
+        e = {**d["episode"], "hits": d.get("hits") or []}
         if e.get("outcome") == "HARNESS_FAIL":
             continue
+        fk = _f_kill(e["run"], int(e["inst"]), int(e["ep"]), cache)
+        e["f_kill"] = fk
+        e["tail"] = [h for h in e["hits"] if fk is not None and int(h.get("f") or 0) > fk]
+        e["hits"] = [h for h in e["hits"] if fk is None or int(h.get("f") or 0) <= fk]
+        e["n_hits"] = len(e["hits"])
         by[f"{e.get('round')}:{e.get('arm')}"].append(e)
     return by
 
@@ -52,7 +72,8 @@ def arm_summary(eps: list[dict]) -> dict:
         "hitless_kills": sum(1 for e in kills if e["n_hits"] == 0),
         "hitless_kill_pct": round(100.0 * sum(1 for e in kills if e["n_hits"] == 0) / n, 1) if n else None,
         "hitless_eps": sum(1 for e in eps if e["n_hits"] == 0),
-        "hits": sum(e["n_hits"] for e in eps), "masks": sum(e["masks"] for e in eps),
+        "hits": sum(e["n_hits"] for e in eps), "tail_hits": sum(len(e["tail"]) for e in eps),
+        "masks": sum(sum(int(h.get("masks") or 1) for h in e["hits"]) for e in eps),
         "hits_per_ep": round(sum(e["n_hits"] for e in eps) / n, 3) if n else None,
         "hits_per_min": round(60.0 * sum(e["n_hits"] for e in eps) / t_sum, 3) if t_sum else None,
         "landed_per_s_p50": _pct(lps, 50), "landed_per_s_pooled": round(sum(e["landed"] for e in eps) / t_sum, 3)
