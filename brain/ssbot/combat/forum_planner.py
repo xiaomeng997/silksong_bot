@@ -1160,7 +1160,9 @@ class ForumPlanner(Planner):
         occ = np.zeros(rh.bound.shape[:2], bool)
         # track A "kb": the hit enemy pushed by its knockback from the hit frame on (its support moved with it: the
         # hero's hull moved the other way against its own support, the rest of the support as it is)
-        kbs = self._kb_shifts(f, sc, rows, rh.bound.shape[1]) if "kb" in self.fcfg.tac else {}
+        # v2: always (the person 2026-10-10: knockback is a hit branch, not a replacement)
+        kb_on = "kb" in self.fcfg.tac or (self.fcfg.v2 and getattr(f, "v2", False))
+        kbs = self._kb_shifts(f, sc, rows, rh.bound.shape[1]) if kb_on else {}
         moved = np.zeros(len(rows), bool)
         bnd = rh.bound
         if kbs:
@@ -1472,9 +1474,9 @@ class ForumPlanner(Planner):
 
     def _escape_fail_v2(self, f, r1, hold_end, rows: np.ndarray) -> tuple[np.ndarray, list]:
         """v2's escape requirement (forum_v2 module docstring): [len(rows)] 1 when no escape command (_esc_cmds, from
-        the row's end state, its lock played out by the kinematics) keeps the nominal box centre out of the estimate
-        (V2Forecast.occupied: decided moves, bodies carried, hazards, margins) for forum_v2.ESC_F frames past the end
-        (invulnerable frames skipped), else 0."""
+        the row's end state, its lock played out by the kinematics) keeps the nominal box centre out of the escape
+        check's danger (RangeSupport.occupied_esc: moves under way and hazards with their margins, idle bodies carried
+        with forum_v2.ESC_IDLE_M) for forum_v2.ESC_F frames past the end (invulnerable frames skipped), else 0."""
         params = self.params
         dt = params.frame_time
         T1 = r1.box.shape[1]
@@ -1489,7 +1491,9 @@ class ForumPlanner(Planner):
         cx = 0.5 * (re.box[..., 0] + re.box[..., 2])
         cy = 0.5 * (re.box[..., 1] + re.box[..., 3])
         tq = (T1 - 1 + np.arange(L + 1)) * dt
-        occ = f.occupied(cx, cy, tq) & ((re.flags & F_INVULN) == 0)
+        rs = getattr(f, "rs", None)
+        occ = (rs.occupied_esc(cx, cy, tq) if rs is not None and hasattr(rs, "occupied_esc") else
+               f.occupied(cx, cy, tq)) & ((re.flags & F_INVULN) == 0)
         occ[:, 0] = False
         esc = (~occ.any(axis=1)).reshape(len(rows), nE).any(axis=1)
         return (~esc).astype(np.int64), [[] if e else ["v2 end"] for e in esc]

@@ -631,6 +631,9 @@ def analyse(pol, cap: dict, vs, i: int, states: list, fi: dict, fp, groups_cache
            "pick_err": [round(float(err18[pick]), 3), round(float(errH[pick]), 3), bool((re_[pick] == pe).all())],
            "all": [int(ok.sum()), int((ok & (h_all < 0)).sum()), int(unsafe_known.sum()),
                    int((unsafe_known & (h_all < 0)).sum())],
+           # the rows the planner called safe (allowed, known, S = 0) and how many of them clear in hindsight
+           "safe_rows": [int((ok & known & (np.asarray(S_pl) == 0)).sum()),
+                         int((ok & known & (np.asarray(S_pl) == 0) & (h_all < 0)).sum())],
            "kerr": [round(float(kd[:EARLY_K].mean()), 3), round(float(kd.mean()), 3)],
            "same_as_pick": best == pick,
            "person": person_action(fi, i), "hit_in": int(hit_f[0]) + 1 if len(hit_f) else -1,
@@ -971,6 +974,12 @@ def summarize_ticks(T: list[dict], close_u: float) -> dict:
         al = np.array([t["all"] for t in edge], np.float64)
         out["all_rows"] = {"allowed_clear": _share(float(al[:, 1].sum()), float(al[:, 0].sum())),
                            "unsafe_clear": _share(float(al[:, 3].sum()), float(al[:, 2].sum()))}
+        sr = np.array([t["safe_rows"] for t in edge if "safe_rows" in t], np.float64).reshape(-1, 2)
+        if len(sr):
+            # open-loop hindsight of the planner's safe rows: the share of them a recorded damage collider meets
+            out["all_rows"].update(safe_rows=int(sr[:, 0].sum()), safe_hit=_share(float(sr[:, 0].sum() - sr[:, 1].sum()),
+                                                                                  float(sr[:, 0].sum())),
+                                   ticks_any_safe_hit=_share(float(((sr[:, 0] - sr[:, 1]) > 0).sum()), float(len(sr))))
     # ---- moves outside the candidate set ----
     far = [t for t, c in zip(T, close) if not c]
     cls = Counter(action_class(t["person"]) for t in far)

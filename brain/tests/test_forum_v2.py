@@ -237,3 +237,16 @@ def test_v2_full_support_is_forced_risk_without_errors(params, arena):
     r = pl.tick(_world(x), kin.initial_state(params, x, FLOOR + params.foot), kin.HoldState.idle(1),
                 np.zeros(1, np.int64), v2.V2Forecast(inner, ls), _prefs(None, x), _ctx())
     assert r.forced_risk and r.S == 1
+
+
+def test_escape_reads_its_own_danger_when_given():
+    cv = v2.Canvas()
+    ls = v2.LayerSupport(cv, (0, 4))
+    a, ia, ja = v2.dilate(_cell_mask(25.0, 5.0), 0.05, 0.0)
+    ls.add(0, 1, a, ia, ja)
+    x, y, tk = np.array([[25.0]]), np.array([[5.0]]), np.zeros(1)
+    assert ls.occupied_esc(x, y, tk).all()          # none given: the full support
+    b, ib, jb = v2.dilate(_cell_mask(35.0, 5.0), 0.05, 0.0)
+    ls.add_esc(0, b, ib, jb)
+    assert not ls.occupied_esc(x, y, tk).any() and ls.occupied_esc(np.array([[35.0]]), y, tk).all()
+    assert ls.occupied(x, y, tk).all()               # the safe test still reads the full support

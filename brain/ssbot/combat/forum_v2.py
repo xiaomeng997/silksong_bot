@@ -21,7 +21,9 @@ What a row must satisfy under v2 (ForumPlanner.tick with a V2Forecast):
                   inescapable zone (each cell by its own height class, terrain-aware), lat 2.
   escape ready    the chosen row's end leaves an escape: one of the escape commands (stay, run either way, a full jump
                   either way, a dash either way then run) keeps the nominal box out of the estimate for ESC_F frames
-                  past the end (ForumPlanner._escape_fail_v2); a chosen row without one is S = 1.
+                  past the end (ForumPlanner._escape_fail_v2); a chosen row without one is S = 1. Past the end an
+                  idle body counts with ESC_IDLE_M only (idle enemies have no inescapable zone; the growing margin
+                  is the replanning's business), moves under way and hazards with their margin.
   objective       safety first (the lexicographic keys before it unchanged), then the most landed hits on real enemies
                   in the horizon, the earliest first hit, then J.
 
@@ -54,6 +56,8 @@ HB_DY = 0.133                         # HeroBox centre - Bounds centre (y)
 # look-ahead samples (frames): every 2 to 12, every 3 to 36, every 4 to 64 (the escape check reads past the horizon)
 SAMPLE_KS = tuple(list(range(0, 13, 2)) + list(range(15, 37, 3)) + list(range(40, 65, 4)))
 ESC_F = 24                            # frames past the row's end an escape must stay clear
+ESC_FROM_K = 30                       # samples from this planner frame on get the escape check's rasters
+ESC_IDLE_M = 0.5                      # the escape check's margin of an idle body (the estimate's k <= 12 margin)
 K_HOLD = 36                           # the margin's k stops growing here (the error statistics end at k 36)
 
 # the margin m(type, k) in u (MARGIN_MODE "rule", the default; C:/ssbot/data/m2_forum_are/idlevel/summary.md): the
@@ -206,6 +210,7 @@ class LayerSupport:
         self.k_shift = int(k_shift)
         self.layers: dict = {i: [] for i in range(len(self.samples))}
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
+        self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
         self.fc = _Half(inner_fc, BOUNDS_HALF)
         smax = self.samples[-1] if self.samples else 0
@@ -220,6 +225,18 @@ class LayerSupport:
             return
         self.layers[si].append((iid, mask, ix0, iy0))
         self.cv.paste(self.stack[si], mask, ix0, iy0)
+
+    def add_esc(self, si: int, mask: np.ndarray, ix0: int, iy0: int) -> None:
+        """A raster of the escape check's danger (occupied_esc; without any, the escape reads the full support)."""
+        if not mask.size:
+            return
+        if self.stack_esc is None:
+            self.stack_esc = np.zeros_like(self.stack)
+        self.cv.paste(self.stack_esc[si], mask, ix0, iy0)
+
+    def occupied_esc(self, x, y, tk) -> np.ndarray:
+        """The escape check's danger past the row's end (RangeSupport.build: idle bodies with ESC_IDLE_M only)."""
+        return self._occ_stack(self.stack if self.stack_esc is None else self.stack_esc, x, y, tk)
 
     def _sample_of(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         j = np.rint(np.asarray(tk, np.float64) / FT).astype(np.int64) - self.k_shift
@@ -339,8 +356,19 @@ class RangeSupport(LayerSupport):
                 if e is None:
                     continue
                 n_est += 1
-                m, ix0, iy0 = dilate(e.raw, tab.cell, margin(tk_name, k + k_shift, margin_mode), cv.cell)
+                m, ix0, iy0 = dilate(e.raw, tab.cell, margin(tk_name, k, margin_mode), cv.cell)
                 rs.add(si, iid, m, ix0, iy0)
+                if k + k_shift >= ESC_FROM_K:
+                    # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable
+                    # zone: the margin's growth is the replanning's business), moves and hazards as above
+                    if e.fam is None:
+                        m2, jx0, jy0 = dilate(e.raw, tab.cell, ESC_IDLE_M, cv.cell)
+                        rs.add_esc(si, m2, jx0, jy0)
+                        if e.haz is not None and e.haz.m.size and e.haz.m.any():
+                            m3, hx0, hy0 = dilate(e.haz, tab.cell, margin(tk_name, k, margin_mode), cv.cell)
+                            rs.add_esc(si, m3, hx0, hy0)
+                    else:
+                        rs.add_esc(si, m, ix0, iy0)
         rs.n_est = n_est
         rs.pend = pending_aims(trk)
         rs.ms = (time.perf_counter() - t0) * 1e3
@@ -382,8 +410,7 @@ class RangeSupport(LayerSupport):
                 for s in (1, -1):
                     du = 0.0 if hero_x is None else (hero_x - ax) * s
                     parts.append(tab.place(fam, None, b, (ax, ay), s, du))
-            m, ix0, iy0 = dilate(union(parts), tab.cell, margin(tk_name, k + self.k_shift, self.margin_mode),
-                                 self.cv.cell)
+            m, ix0, iy0 = dilate(union(parts), tab.cell, margin(tk_name, k, self.margin_mode), self.cv.cell)
             out.add(si, iid, m, ix0, iy0)
         return out
 
