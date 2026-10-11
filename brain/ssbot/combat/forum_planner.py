@@ -404,6 +404,7 @@ class EnvelopeAudit:
     v2_aim_rows: int = 0          # v2: rows a pending aim's zone set S = 1
     v2_react: int = 0             # v2: hit-branch counters placed from the estimate's templates
     v2_esc_rows: int = 0          # v2: rows the escape check (from the row's end) looked at
+    v2_esc_more: int = 0          # v2: rows the escape check looked at past the first v2_esc_k (forum_v2.ESC_MORE)
     v2_esc_tail: int = 0          # v2: chosen rows whose passing escape became the plan's tail (forum_v2.ESC_TAIL)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
@@ -1703,6 +1704,32 @@ class ForumPlanner(Planner):
                     return int(r), 0, checked, len(threats), []
                 if best is None or n < best_fail:
                     best, best_fail, best_lab = int(r), int(n), lb
+        rs = getattr(f, "rs", None)
+        if v2 and forum_v2.ESC_MORE > 0 and len(ranked) > K and not self.esc_cut and rs is not None:
+            # v2: none of the first K had an escape - look further down the order, the rows whose end stays clear
+            # of the escape danger for a while first (a retreat; 1v1 live: the top rows all approached the Clapper)
+            rest = np.asarray(ranked[K:], np.int64)
+            end = r1.box[rest, -1, :]
+            ex = np.repeat((0.5 * (end[:, 0] + end[:, 2]))[:, None], 4, axis=1)
+            ey = np.repeat((0.5 * (end[:, 1] + end[:, 3]))[:, None], 4, axis=1)
+            tq = np.broadcast_to((r1.box.shape[1] - 1 + np.array([6, 12, 18, 24])) * self.params.frame_time,
+                                 ex.shape)
+            clear = ~rs.occupied_esc(ex, ey, tq).any(axis=1)
+            rest = np.concatenate([rest[clear], rest[~clear]])[:forum_v2.ESC_MORE]
+            for c0 in range(0, len(rest), ESC_CHUNK):
+                tc = time.perf_counter()
+                if t_end is not None and tc + self.esc_batch_s > t_end:
+                    self.esc_cut = True
+                    break
+                rows = rest[c0:c0 + ESC_CHUNK]
+                nf, lab = self._escape_fail_v2(f, r1, hold_end, rows)
+                self.audit.v2_esc_rows += len(rows)
+                self.audit.v2_esc_more += len(rows)
+                self.esc_batch_s = 0.5 * self.esc_batch_s + 0.5 * (time.perf_counter() - tc)
+                checked += len(rows)
+                for r, n in zip(rows, nf):
+                    if n == 0:
+                        return int(r), 0, checked, len(threats), []
         return best, best_fail, checked, len(threats), best_lab
 
     def _contacts_fn(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, occ_fn) -> np.ndarray | None:

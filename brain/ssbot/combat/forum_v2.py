@@ -56,6 +56,8 @@ ESC_CARRIED = os.environ.get("SSBOT_FORUM_V2_ESC_CARRIED", "1").strip() != "0"
 # instead of idling where the row ends (1v1 live: rows that approached a Slam Antic with an escape were all unsafe a
 # few ticks later, none of them carrying that escape; SSBOT_FORUM_V2_ESC_TAIL=0: off)
 ESC_TAIL = os.environ.get("SSBOT_FORUM_V2_ESC_TAIL", "1").strip() != "0"
+# rows the escape check may look at past the first v2_esc_k when none of those had an escape (SSBOT_FORUM_V2_ESC_MORE)
+ESC_MORE = int(os.environ.get("SSBOT_FORUM_V2_ESC_MORE", "48") or 0)
 # the Clapper's corner (1v1 live, forum.md 44: 16 of 26 slam hits): with its body this close to a wall (u) the strip
 # between them is a trap - a slam it starts facing the wall reaches 12 u, so the antic leaves no way out but the wall
 # top (y >= 11.8, never hit; forum.md 42). A safe row ending there ranks after every safe row ending elsewhere
@@ -63,6 +65,13 @@ ESC_TAIL = os.environ.get("SSBOT_FORUM_V2_ESC_TAIL", "1").strip() != "0"
 CORNER_U = float(os.environ.get("SSBOT_FORUM_V2_CORNER", "13") or 0.0)
 CORNER_TOP_Y = 11.15                  # the hero's Bounds centre at a wall-top cling (transform y 11.8)
 CLAPPER = "Song Heavy Sentry"
+# a slam the Clapper may start now (1v1 live, forum.md 44: most slam hits came from a hero that approached an idle /
+# evading Clapper, locked in a dash or a swing when the antic began): for a Clapper outside CC_SLAM / CC_JUMP /
+# CC_JUMP_CAST, a virtual CC_SLAM anchored now and facing the hero (its antic turns to the hero) is the escape
+# check's danger too (samples from ESC_FROM_K on), so a chosen row leaves the hero a way out of a slam started on
+# this tick; re-checked every tick (SSBOT_FORUM_V2_VSLAM=1; off by default)
+VSLAM = os.environ.get("SSBOT_FORUM_V2_VSLAM", "0").strip() == "1"
+VSLAM_FAMS = (None, "CC_EVADE", "CC_CAST")
 
 
 def corner_zones(fc) -> list[tuple[float, float]]:
@@ -433,6 +442,7 @@ class RangeSupport(LayerSupport):
         rs = cls(cv, samples, k_shift, inner_fc)
         rs.trk = trk
         rs.margin_mode = margin_mode
+        rs.n_vslam = 0
         n_est = 0
         for iid in sorted(trk.now):
             tk_name = trk.now[iid][0]
@@ -454,6 +464,25 @@ class RangeSupport(LayerSupport):
                 if esc and idle and e.haz is not None and e.haz.m.size and e.haz.m.any():
                     ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
                     rs.add_raw(si, iid, ch, hx0, hy0, None, m)
+        if VSLAM and trk.hero is not None:
+            for iid in sorted(trk.now):
+                tk_name, e, inst = trk.now[iid]
+                if tk_name != CLAPPER or (inst is not None and inst.fam not in VSLAM_FAMS):
+                    continue
+                p = e.get("pos") or None
+                if not p:
+                    continue
+                x, y = float(p[0]), float(p[1])
+                sd = 1 if float(trk.hero[0]) >= x else -1
+                tab = trk.tables[tk_name]
+                for si, k in enumerate(rs.samples):
+                    if k + k_shift < ESC_FROM_K:
+                        continue
+                    vm = tab.place("CC_SLAM", "main", k + k_shift, (x, y), sd, (float(trk.hero[0]) - x) * sd)
+                    if vm.m.size and vm.m.any():
+                        c, ix0, iy0 = coarse(vm, tab.cell, cv.cell)
+                        rs.add_raw(si, iid, c, ix0, iy0, None, margin(tk_name, k, margin_mode))
+                        rs.n_vslam += 1
         rs.finish()
         rs.n_est = n_est
         rs.pend = pending_aims(trk)
