@@ -40,6 +40,10 @@ DSLASH = os.environ.get("SSBOT_FORUM_DSLASH", "0") == "1"
 CERT = os.environ.get("SSBOT_FORUM_DSLASH_CERT", "1") != "0"
 CHAIN = os.environ.get("SSBOT_FORUM_DSLASH_CHAIN", "1") != "0"
 MAX_ROWS = int(os.environ.get("SSBOT_FORUM_DSLASH_MAX", "24") or 24)
+# SSBOT_FORUM_DSLASH_EVPRE=1 (task 1v1 G4, 5b): the bounce event on the mask before the contact frame (the bounce
+# on the contact frame itself: SlamTheory's and the special mode's convention; T1's live probe1 27 bounces, the
+# real position 6 frames on: p50 0.002 u with it vs 0.307 u with the event on the contact frame's mask)
+EVPRE = os.environ.get("SSBOT_FORUM_DSLASH_EVPRE", "0") == "1"
 SURV_MAX = 12                                 # prefilter survivors expanded at most (the earliest contact first)
 
 GROUND_HOLDS = (3, 8, 14, 20)

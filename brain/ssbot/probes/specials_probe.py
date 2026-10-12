@@ -123,9 +123,23 @@ class Probe(Target):
         r = sp.strike_rows(self.params, self.terrain, start, self.lut, k_now, xa, cy, face, self.tl.disp, 36,
                            max_rows=400, per_entry=1, js_step=1)
         plan_ms = (time.perf_counter() - t1) * 1e3
-        cert, side = t["filter"].split("_")
         safe = approach_safe(self, start, r, k_now, xa, cy, face)
-        ok = [i for i, en in enumerate(r.entry) if en.cert == cert and ((en.dx0 >= 0) == (side == "front")) and safe[i]]
+        if t["filter"].startswith("win:"):
+            # the table v2 (task 1v1 G4, --manifest): a strike window's rows, its centre (the most slack) or its edge
+            # (the least); no fallback
+            _, wid, where = t["filter"].split(":")
+            ok = [i for i, en in enumerate(r.entry) if en.window == wid and safe[i]]
+            ok.sort(key=lambda i: (r.entry[i].slack_u + 0.1 * min(r.entry[i].slack_t, 10)) * (-1 if where == "centre"
+                                                                                                else 1))
+            ok = ok[:3]
+            if not ok:
+                for _ in range(SETTLE_F):
+                    s = self.step(0)
+                return {"f_antic": fa, "k_now": k_now, "rows": len(r.cmd), "skip": "no row in the window"}
+        else:
+            cert, side = t["filter"].split("_")
+            ok = [i for i, en in enumerate(r.entry) if en.cert == cert and ((en.dx0 >= 0) == (side == "front"))
+                  and safe[i]]
         info = {"f_antic": fa, "k_now": k_now, "cx": round(cx, 3), "cy": round(cy, 3), "face": face,
                 "hx": round(float(h["pos"][0]), 3), "rows": len(r.cmd), "tried": r.tried, "match": len(ok),
                 "plan_ms": round(plan_ms, 1), "safe": int(safe.sum())}
@@ -163,7 +177,8 @@ class Probe(Target):
         landed = chp0 is not None and any(x[3] is not None and x[3] < chp0 for x in trace if f_press <= x[0] <= f_press + 6)
         bounce = any(x[2] > 6 for x in trace if f_press < x[0] <= f_press + 10)
         pp = next((x for x in trace if x[0] == f_press), None)
-        return info | {"entry": en.id, "cert": en.cert, "k0": en.k0, "k1": en.k1, "dx": [en.dx0, en.dx1],
+        return info | {"entry": en.id, "window": en.window, "region": en.region, "slack_t": en.slack_t,
+                       "slack_u": en.slack_u, "cert": en.cert, "k0": en.k0, "k1": en.k1, "dx": [en.dx0, en.dx1],
                        "dy": [en.dy0, en.dy1], "vy": en.vy, "key": en.key, "share": en.share, "j_press": jp,
                        "f_first": f_first, "f_press": f_press, "masks": masks,
                        "gaps": sum(1 for a, b in zip(sent, sent[1:]) if b[0] - a[0] != 1),
@@ -180,10 +195,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trials", type=int, default=120)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default=r"C:\ssbot\data\m2_specials\live")
+    ap.add_argument("--table", default="", help="v2: the merged table (task 1v1 G4, specials_v2)")
+    ap.add_argument("--manifest", default=None, help="JSON list of trial specs (filter win:<W>:centre|edge, k_start, "
+                                                    "wait_x); repeated to --trials, shuffled by --seed")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import Recorder
     specs = trial_specs(a.trials, a.seed)
-    tab = sp.SpecialTable.load()
+    if a.manifest:
+        man = json.loads(Path(a.manifest).read_text("utf-8"))
+        rng = random.Random(a.seed)
+        specs = [dict(man[i % len(man)], i=i, pick=rng.random()) for i in range(a.trials)]
+        rng.shuffle(specs)
+    tab = sp.SpecialTable.load(suffix="_v2" if a.table == "v2" else "")
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     rec = None
     try:

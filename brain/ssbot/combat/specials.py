@@ -68,6 +68,13 @@ class Entry:
     share: float
     live_n: int = 0
     live_ok: int = 0
+    # the table v2 (task 1v1 G4, specials_v2): the strikes the entry's follow-up lands (1: the strike alone), its
+    # merged region and its strike window (the table's top level), the late-time and space slack of the cell
+    hits: int = 1
+    region: str = ""
+    window: str = ""
+    slack_t: int = 0
+    slack_u: float = 0.0
 
     def has(self, k: int, dx: float, dy: float, vy: float | None = None) -> bool:
         if not (self.k0 <= k <= self.k1 and self.dx0 <= dx < self.dx1 and self.dy0 <= dy < self.dy1):
@@ -114,14 +121,15 @@ class SpecialTable:
         key = (move, tuple(sorted(certs))) if rank_cert else (move, tuple(sorted(certs)), "share")
         if key not in self._lut:
             es = [e for e in self.by_move.get(move, ()) if e.cert in certs]
-            self._lut[key] = Lut(es, rank_cert) if es else None
+            nc = (self.meta.get(move) or {}).get("native_cell")      # the table v2 (G4): entries span native cells
+            self._lut[key] = (Lut(es, rank_cert, cell=(float(nc[1]), float(nc[2]))) if nc else Lut(es, rank_cert))                 if es else None
         return self._lut[key]
 
     @classmethod
-    def load(cls, moves=("CL_SLAM",), d: Path = DIR) -> "SpecialTable":
+    def load(cls, moves=("CL_SLAM",), d: Path = DIR, suffix: str = "") -> "SpecialTable":
         out, meta = [], {}
         for m in moves:
-            p = Path(d) / f"specials_{m}.json"
+            p = Path(d) / f"specials_{m}{suffix}.json"
             if not p.exists():
                 continue
             j = json.loads(p.read_text("utf-8"))
@@ -129,8 +137,8 @@ class SpecialTable:
             out += [Entry(**e) for e in j["entries"]]
         return cls(out, meta)
 
-    def save(self, move: str, d: Path = DIR, meta: dict | None = None) -> Path:
-        p = Path(d) / f"specials_{move}.json"
+    def save(self, move: str, d: Path = DIR, meta: dict | None = None, suffix: str = "") -> Path:
+        p = Path(d) / f"specials_{move}{suffix}.json"
         ents = [asdict(e) for e in self.by_move.get(move, [])]
         nl = chr(10)
         body = ("," + nl).join(json.dumps(e, separators=(",", ":")) for e in ents)
@@ -148,17 +156,19 @@ class Lut:
     """Entries on their (aligned) cells as a dense array [k, x bin, y bin, vy class, key + 1] -> entry index (-1: none;
     when several keys share a cell, a row may land in any of them: the best one by cert then share is taken)."""
 
-    def __init__(self, entries: list[Entry], rank_cert: bool = True):
+    def __init__(self, entries: list[Entry], rank_cert: bool = True, cell: tuple | None = None):
         self.entries = entries
         e0 = entries[0]
-        self.bx, self.by = e0.dx1 - e0.dx0, e0.dy1 - e0.dy0
+        self.bx, self.by = (e0.dx1 - e0.dx0, e0.dy1 - e0.dy0) if cell is None else cell
         self.x0 = min(e.dx0 for e in entries)
         self.y0 = min(e.dy0 for e in entries)
         self.K = max(e.k1 for e in entries) + 1
         nx = int(round((max(e.dx1 for e in entries) - self.x0) / self.bx))
         ny = int(round((max(e.dy1 for e in entries) - self.y0) / self.by))
         self.idx = np.full((self.K, nx, ny, 3, 3), -1, np.int32)
-        self.rank = np.array([((2 if e.cert == "both" else 1) * 10 if rank_cert else 10) + e.share for e in entries])
+        # the table v2 (G4): more hits first, then the late slack (0 and 1 hit on today's table: unchanged)
+        self.rank = np.array([((2 if e.cert == "both" else 1) * 10 if rank_cert else 10) + e.share
+                              + 10 * (e.hits - 1) + 0.01 * min(e.slack_t, 10) for e in entries])
         self.k_has = np.zeros(self.K, bool)          # the move frames with an entry (long rows)
         for e in entries:
             self.k_has[e.k0:e.k1 + 1] = True
@@ -166,8 +176,10 @@ class Lut:
             xi = int(round((e.dx0 - self.x0) / self.bx))
             yi = int(round((e.dy0 - self.y0) / self.by))
             vs = range(3) if e.vy < 0 else (e.vy,)
+            nxe = 1 if cell is None else max(int(round((e.dx1 - e.dx0) / self.bx)), 1)
+            nye = 1 if cell is None else max(int(round((e.dy1 - e.dy0) / self.by)), 1)
             for v in vs:
-                self.idx[e.k0:e.k1 + 1, xi, yi, v, e.key + 1] = i
+                self.idx[e.k0:e.k1 + 1, xi:xi + nxe, yi:yi + nye, v, e.key + 1] = i
 
     def find(self, k: np.ndarray, dx: np.ndarray, dy: np.ndarray, vyc: np.ndarray) -> np.ndarray:
         """[n] the best entry index for each press (k, dx, dy, vy class), -1: none."""

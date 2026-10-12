@@ -454,6 +454,19 @@ class EnvelopeAudit:
     ds_chosen_chain: int = 0
     ds_credit: int = 0            #   family rows credited a certain strike past the horizon
     ds_ms: float = 0.0
+    mh_targets: int = 0           # SSBOT_FORUM_MOVE_HITS (G4 5b): target bodies put on their move path (calls x targets)
+    hf_ticks: int = 0             # SSBOT_FORUM_HITS_FIRST (G4 4c): ticks with strike options ordered by hits
+    hf_stop: int = 0              #   ticks a strike option passed every check before the rows with fewer hits
+    hf_stop2: int = 0             #   of them on a two-hit (or more) option
+    hf_skipped: int = 0           #   rows not enveloped for it (fewer hits than the passing option)
+    hf_skipped_strike: int = 0    #   of them strike options (one-hit special / family rows)
+    kp_ticks: int = 0             # SSBOT_FORUM_SPECIAL_KEEP (G4 4b): ticks with a kept template
+    kp_kept: int = 0              #   ticks it was chosen again
+    kp_skip: int = 0              #   template searches skipped for it
+    kp_done: int = 0              #   the kept template ran out (its press under way or none left): not a switch
+    kp_sw_gone: int = 0           #   switches: the template's row is gone (contact / certified press lost, move over)
+    kp_sw_unsafe: int = 0         #   switches: a check failed (S, hazards, the committed hold, the macro margin)
+    kp_sw_escape: int = 0         #   switches: the escape check moved the choice off it
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -1183,8 +1196,55 @@ class ForumPlanner(Planner):
             if slot[t.iid] < self.fcfg.K_tgt and not getattr(t, "blocked", False):
                 w4 = kw.get(t.iid)
                 tw[k] = w4 if w4 is not None else float(hw.get(t.iid, 1.0))
-        return (np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64),
-                np.ascontiguousarray(np.stack([t.ok for t in keep])), tw, keep)
+        tb = np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64)
+        if special_mode.MOVE_HITS:
+            tb = self._move_hit_paths(f, keep, tb)
+        return (tb, np.ascontiguousarray(np.stack([t.ok for t in keep])), tw, keep)
+
+    def _move_hit_paths(self, f, keep: list, tbox: np.ndarray) -> np.ndarray:
+        """SSBOT_FORUM_MOVE_HITS (task 1v1 G4, 5b): the scorer's body of an enemy in a tracked move (attack_range
+        Segmenter instance with a template) carried by the move template's displacement still to come
+        (RangeTable.position, vectorized; the mean over the branches the move may take, the instance's own once known),
+        not moved on at its present velocity (most Forum moves carry the body 2-19 u: G3 found most family rows on the
+        slam 'hitting' 6-11 u in front of the Clapper). tbox [K, T1, 4] -> a copy with those targets' paths."""
+        trk = getattr(getattr(f, "rs", None), "trk", None)
+        now = getattr(trk, "now", None) or {}
+        tabs = getattr(trk, "tables", None) or {}
+        if not now or not len(keep):
+            return tbox
+        from ssbot.combat.attack_range import bin_of
+        out = None
+        n = tbox.shape[1]
+        for ti, t in enumerate(keep):
+            if t.hazard or t.iid not in now:
+                continue
+            tk_, _e, inst = now[t.iid]
+            tab = tabs.get(tk_)
+            if inst is None or tab is None:
+                continue
+            b = bin_of(float(trk.T) - inst.t0)
+            brs = (inst.branch,) if inst.branch else tuple(tab.spec.branches.get(inst.fam, ("main",)))
+            ds_ = []
+            for br in brs:
+                tp = tab.templates.get((inst.fam, br))
+                if tp is None:
+                    continue
+                bb = np.clip(b + np.arange(n), 0, tp.nb - 1)
+                du = np.asarray(tp.disp[bb, 0], np.float64)
+                if tp.ratio is not None and inst.fam in tab.spec.aim:
+                    du = np.asarray(tp.ratio[bb], np.float64) * float(tab.landing(inst.hero_du))
+                lo, hi = tab.walls
+                x = np.minimum(np.maximum(inst.x0 + inst.s * du, lo), hi)
+                y = inst.y0 + np.asarray(tp.disp[bb, 1], np.float64)
+                ds_.append(np.stack([x - x[0], y - y[0]], axis=1))
+            if not ds_:
+                continue
+            d = np.mean(ds_, axis=0)
+            if out is None:
+                out = tbox.copy()
+            out[ti] = tbox[ti, 0][None, :] + np.stack([d[:, 0], d[:, 1], d[:, 0], d[:, 1]], axis=1)
+            self.audit.mh_targets += 1
+        return tbox if out is None else out
 
     def _under_bonus(self, f, box: np.ndarray, keep: list) -> np.ndarray:
         """Track A "under" (the person's note ③ of 2026-10-08): J per row = w_under x sum over the flyers in reach of
@@ -2251,7 +2311,9 @@ class ForumPlanner(Planner):
             return None
         if not hasattr(self, "_spec_tab"):
             from ssbot.combat.pogo_slam import SlamTimeline
-            self._spec_tab = specials.SpecialTable.load()
+            # SSBOT_FORUM_SPECIAL_TABLE=v2 (G4): the merged table (the slack cores) in the special mode
+            self._spec_tab = specials.SpecialTable.load(suffix="_v2") if (special_mode.SPECIAL_MODE and
+                                                                           special_mode.TABLE == "v2")                 else specials.SpecialTable.load()
             self._spec_disp = SlamTimeline.load().disp
         hx_ = float(np.asarray(start).reshape(kin.K, -1)[kin.PX, 0])
         best = None
@@ -2291,13 +2353,20 @@ class ForumPlanner(Planner):
             if full_tick:
                 self._sm_full = {"iid": int(iid_), "move": move, "tick": self.ticks, "board": None}
             self.audit.sm_full_ticks += int(full_tick)
-        r = specials.strike_rows(self.params, self.terrain, start, lut, k_now, xa, float(e["pos"][1]), face, disp, T,
-                                 threads=self.cfg.threads, prefix=prefix,
-                                 **({"long_hi": special_mode.LONG_PRESS_MAX if special_mode.LONG else None,
-                                     "early_first": True, "max_rows": special_mode.MAX_ROWS} if mode else {}),
-                                 **({"now_only": True} if not full_tick else {}),
-                                 **({"hold_rem": max(int(self.jump_until - self.ticks), 0)}
-                                    if mode and special_mode.HOLD else {}))
+        pk = getattr(self, "_pv_sm_now", None)
+        if mode and special_mode.KEEP and getattr(self, "_kp", None) == "sm" and pk is not None and                 pk.get("iid") == int(iid_) and pk.get("move", move) == move:
+            # SSBOT_FORUM_SPECIAL_KEEP (G4 4b): a kept special row: no template search this tick (its CONTINUE is
+            # re-certified and checked as a special row; the normal set stays the fallback)
+            r = specials.StrikeRows(np.zeros((0, int(T)), np.int64), [], np.zeros(0, np.int64), 0, [])
+            self.audit.kp_skip += 1
+        else:
+            r = specials.strike_rows(self.params, self.terrain, start, lut, k_now, xa, float(e["pos"][1]), face, disp,
+                                     T, threads=self.cfg.threads, prefix=prefix,
+                                     **({"long_hi": special_mode.LONG_PRESS_MAX if special_mode.LONG else None,
+                                         "early_first": True, "max_rows": special_mode.MAX_ROWS} if mode else {}),
+                                     **({"now_only": True} if not full_tick else {}),
+                                     **({"hold_rem": max(int(self.jump_until - self.ticks), 0)}
+                                        if mode and special_mode.HOLD else {}))
         self.spec_ms = (time.perf_counter() - t0) * 1e3
         self.spec_n = (len(r.cmd), r.tried)
         if mode:
@@ -2507,18 +2576,24 @@ class ForumPlanner(Planner):
         if not len(M):
             return None
         face0 = 1 if st[kin.FACE, 0] >= 0 else -1
-        pre = np.broadcast_to(np.asarray(prefix, np.int64), (len(M), P))
-        lat0, _ = hold_filter_jit(np.concatenate([pre, M], axis=1), hold)
-        r0 = kin.rollout(start, lat0, self.params, self.terrain, threads=self.cfg.threads)
-        _, j0, _, _ = self._ds_hits(r0, lat0, face0, tbox, tok, treal, np.full(len(M), P + 1, np.int64),
-                                    dslash.PREFILTER_GROW_U, np.zeros(0, np.int64))
-        surv = np.flatnonzero(j0 >= 0)
-        if len(surv) > dslash.SURV_MAX:
-            surv = surv[np.argsort(j0[surv], kind="stable")[:dslash.SURV_MAX]]
-        a_.ds_tpl += len(M)
-        a_.ds_pass += len(surv)
-        X, _XP, XN = dslash.expand(M[surv], PJ[surv], [NM[i] for i in surv], T)
         prev = getattr(self, "_ds_prev", None)
+        if special_mode.KEEP and getattr(self, "_kp", None) == "ds" and prev is not None and len(prev) > 1:
+            # SSBOT_FORUM_SPECIAL_KEEP (G4 4b): a kept family row: no template search, only its continuation ("DS
+            # cont" below: its contact and the checks verify it)
+            X, XN, surv = np.zeros((0, T), np.int64), [], np.zeros(0, np.int64)
+            a_.kp_skip += 1
+        else:
+            pre = np.broadcast_to(np.asarray(prefix, np.int64), (len(M), P))
+            lat0, _ = hold_filter_jit(np.concatenate([pre, M], axis=1), hold)
+            r0 = kin.rollout(start, lat0, self.params, self.terrain, threads=self.cfg.threads)
+            _, j0, _, _ = self._ds_hits(r0, lat0, face0, tbox, tok, treal, np.full(len(M), P + 1, np.int64),
+                                        dslash.PREFILTER_GROW_U, np.zeros(0, np.int64))
+            surv = np.flatnonzero(j0 >= 0)
+            if len(surv) > dslash.SURV_MAX:
+                surv = surv[np.argsort(j0[surv], kind="stable")[:dslash.SURV_MAX]]
+            a_.ds_tpl += len(M)
+            a_.ds_pass += len(surv)
+            X, _XP, XN = dslash.expand(M[surv], PJ[surv], [NM[i] for i in surv], T)
         if prev is not None and len(prev) > 1:
             # the previous tick's chosen family row, continued (its timing is off the grid one frame later)
             m = np.zeros(T, np.int64)
@@ -2558,7 +2633,7 @@ class ForumPlanner(Planner):
             c1 = np.where(cert, cj, c1)
         ev = np.zeros((n, P + T), np.int64)
         ci = np.flatnonzero(cert)
-        ev[ci, c1[ci]] = kin.EV_POGO
+        ev[ci, c1[ci] - int(dslash.EVPRE)] = kin.EV_POGO       # EVPRE (G4): the bounce on the contact frame
         rows = [dict(cmd=X[q], ext=X[q], name=XN[q], ev=ev[q], cert=bool(cert[q]), c1=int(c1[q]), c2=-1,
                      tgt=int(keep[int(t1[q])].iid), extra=0, lane=None) for q in range(n)]
         if len(ci):
@@ -2583,7 +2658,7 @@ class ForumPlanner(Planner):
                 latc, _ = hold_filter_jit(np.concatenate([np.broadcast_to(np.asarray(prefix, np.int64), (nc, P)), C],
                                                          axis=1), hold)
                 evc = np.zeros((nc, P + Lc), np.int64)
-                evc[np.arange(nc), c1[cr]] = kin.EV_POGO
+                evc[np.arange(nc), c1[cr] - int(dslash.EVPRE)] = kin.EV_POGO
                 rcb = kin.rollout(start, latc, self.params, self.terrain, events=evc, threads=self.cfg.threads)
                 _, c2, t2, _ = self._ds_hits(rcb, latc, face0, tbox, tok, treal, c1[cr] + 1, 0.0,
                                              np.zeros(0, np.int64))
@@ -2593,13 +2668,17 @@ class ForumPlanner(Planner):
                 ok2 &= c2 < P + Lc
                 # per first strike at most two second presses (the earliest and the latest that connect)
                 pick = []
+                kb = getattr(self, "_ds_keep_b", None) if special_mode.KEEP else None
                 for q in np.unique(cr[ok2]):
                     w_ = np.flatnonzero(ok2 & (cr == q))
-                    pick += sorted({int(w_[0]), int(w_[-1])})
+                    if kb is not None and XN[q] == "DS cont":
+                        # G4 4b: the kept chain's own second press (its offset after the bounce) comes first
+                        pick = [int(w) for w in w_ if cb[w] - (int(c1[q]) - P) == kb] + pick
+                    pick += [w for w in sorted({int(w_[0]), int(w_[-1])}) if w not in pick]
                 pick = np.asarray(pick[:dslash.CHAIN_MAX], np.int64)
                 if len(pick):
                     evc2 = evc[pick].copy()
-                    evc2[np.arange(len(pick)), c2[pick]] |= kin.EV_POGO
+                    evc2[np.arange(len(pick)), c2[pick] - int(dslash.EVPRE)] |= kin.EV_POGO
                     lt = latc[pick]
                     rp = kin.rollout(start, lt[:, :P + T], self.params, self.terrain, events=evc2[:, :P + T],
                                      threads=self.cfg.threads)
@@ -2794,6 +2873,7 @@ class ForumPlanner(Planner):
         self._spec_meta = None
         pv_sm = getattr(self, "_prev_sm", None)          # the special mode: last tick's chosen special row
         self._prev_sm = None
+        self._pv_sm_now = pv_sm
         spec = self._special_rows(f, start, prefix, T) if (v2 and (specials.SPECIALS_ON or special_mode.SPECIAL_MODE))             else None
         n_spec = 0 if spec is None else len(spec.cmd)
         if n_spec:
@@ -2985,17 +3065,88 @@ class ForumPlanner(Planner):
         pass1 = ok & (~S1 | (bell_first & (sc["first_f"] <= t_hit)))
         pre = np.lexsort((-J, U, hz_soft, hz))
         pre = pre[pass1[pre]]
-        core_rows = pre[core[pre]]
-        prio = [int(i) for i in core_rows]
-        n_core = len(prio)
-        if sctx is not None:
-            # the special mode: the special rows that passed stage 1 are always enveloped (after the core rows)
-            prio += [int(i) for i in sctx.rows if pass1[i] and int(i) not in prio]
-            n_core = len(prio)                    # (as the core rows: not cut by the deadline)
-        if n_ds:
-            # G3: the family rows that passed stage 1 are always enveloped (after the core and special rows)
-            prio += [D0 + q for q in range(n_ds) if pass1[D0 + q] and (D0 + q) not in prio]
+        kr = None
+        if special_mode.KEEP and getattr(self, "_kp", None) is not None:
+            # G4 4b: the kept template's row this tick: the special CONTINUE still certified with a contact (in
+            # sctx.rows), or the family's "DS cont" whose contact still holds; none: it is gone
+            if self._kp == "sm" and sctx is not None and cont and (N - 1) in set(sctx.rows.tolist()):
+                kr = N - 1
+            elif self._kp == "ds" and n_ds and "DS cont" in ds.names:
+                # a kept chain whose second press is past the continued row's horizon: its "+c<b>" row
+                nm_ = "DS cont"
+                kb = getattr(self, "_ds_keep_b", None)
+                q0_ = ds.names.index("DS cont")
+                c0_ = np.asarray(ds.cmd[q0_])
+                pr_ = int((((c0_ & B_ATTACK) != 0) & ~np.concatenate([[False], (c0_[:-1] & B_ATTACK) != 0])).sum())
+                if kb is not None and pr_ < 2:
+                    nm_ = f"DS cont+c{kb}" if f"DS cont+c{kb}" in ds.names else None
+                kr = None if nm_ is None else D0 + ds.names.index(nm_)
+            self.audit.kp_ticks += 1
+            if kr is None:
+                # done (the kept plan's press is under way or none is left: the template ran out) or gone (its row
+                # lost its contact / certified press while a press is still ahead, or the enemy left the move)
+                pl_ = np.asarray((pv_sm or {}).get("ext", ()) if self._kp == "sm" else
+                                 (getattr(self, "_ds_prev", None) if getattr(self, "_ds_prev", None) is not None
+                                  else ()), np.int64)
+                a_on = (pl_ & B_ATTACK) != 0
+                rise = a_on & ~np.concatenate([[False], a_on[:-1]]) if len(pl_) else a_on
+                done = (not len(pl_)) or bool(a_on[0]) or not rise[1:].any()
+                self.audit.kp_done += int(done)
+                self.audit.kp_sw_gone += int(not done)
+        hf = bool(special_mode.HITS_FIRST and v2 and (sctx is not None or n_ds))
+        hf_h = None
+        if hf:
+            # G4 4c (the person: most hits first, stop early): the strike options (special rows, family rows) that
+            # passed stage 1 are enveloped first, the kept template's row alone first, then by their hit count (the
+            # scorer's landed hits after the certain-hit credits; MOVE_HITS: on the move's path), J within a count;
+            # once a count's rows include one passing every check (the escape check too), the rows with fewer hits
+            # are not enveloped
+            hk = np.floor(np.asarray(sc["nh"], np.float64) + 1e-9).astype(np.int64)
+            strike = np.zeros(N, bool)
+            if sctx is not None:
+                strike[sctx.rows] = True
+            if n_ds:
+                strike[D0:D0 + n_ds] = True
+            hf_rows = [int(i) for i in pre if strike[i]]
+            hf_rows.sort(key=lambda i: -hk[i])
+            if kr is not None and kr in hf_rows:
+                hf_rows.remove(kr)
+                hf_rows.insert(0, kr)
+            hf_bounds = set()
+            for p_, i in enumerate(hf_rows):
+                nx_ = hf_rows[p_ + 1] if p_ + 1 < len(hf_rows) else None
+                if nx_ is None or (p_ == 0 and i == kr) or hk[nx_] != hk[i]:
+                    hf_bounds.add(p_ + 1)
+            hf_t0 = 0
+            self.audit.hf_ticks += int(bool(hf_rows))
+            rem_ = self.jump_until - self.ticks
+            hf_keep = np.ones(N, bool)
+            if rem_ > 0:
+                wj_ = cmd[:, :min(rem_, T, cfg.release_latency)]
+                hf_keep = ((wj_ & B_JUMP) != 0).all(axis=1) & ((wj_ & B_QUICKCAST) == 0).all(axis=1)
+            hf_mkeep = np.ones(N, bool)
+            if cont and self.macro_until > self.ticks:
+                hf_mkeep = J >= J[N - 1] + MACRO_MARGIN
+                hf_mkeep[N - 1] = True
+            # the rows the dash focus sets S = 1 at the selection (v2_dash_only) never pass
+            dd_ = getattr(self, "v2_dash_only", None)
+            if dd_ is not None and len(dd_) and forum_v2.FOCUS_DASH == "1":
+                hf_keep = hf_keep.copy()
+                hf_keep[dd_] = False
+            prio = hf_rows + [int(i) for i in pre[core[pre] & ~strike[pre]]]
             n_core = len(prio)
+        else:
+            core_rows = pre[core[pre]]
+            prio = [int(i) for i in core_rows]
+            n_core = len(prio)
+            if sctx is not None:
+                # the special mode: the special rows that passed stage 1 are always enveloped (after the core rows)
+                prio += [int(i) for i in sctx.rows if pass1[i] and int(i) not in prio]
+                n_core = len(prio)                    # (as the core rows: not cut by the deadline)
+            if n_ds:
+                # G3: the family rows that passed stage 1 are always enveloped (after the core and special rows)
+                prio += [D0 + q for q in range(n_ds) if pass1[D0 + q] and (D0 + q) not in prio]
+                n_core = len(prio)
         if cont and pass1[N - 1] and not core[N - 1] and (N - 1) not in prio:
             prio.append(N - 1)
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
@@ -3042,7 +3193,12 @@ class ForumPlanner(Planner):
         chunk_ms = 0.0
         while pos < len(queue):
             tc0 = time.perf_counter()
-            ch = np.array(queue[pos:pos + fcfg.chunk], np.int64)
+            end_ = pos + fcfg.chunk
+            if hf and hf_h is None:
+                nb_ = [b_ for b_ in hf_bounds if b_ > pos]
+                if nb_:
+                    end_ = min(end_, min(nb_))        # a chunk never crosses a hit count's end
+            ch = np.array(queue[pos:end_], np.int64)
             pos += len(ch)
             m_sp = np.isin(ch, sctx.rows) if sctx is not None else None
             m_ds = None
@@ -3156,6 +3312,31 @@ class ForumPlanner(Planner):
                     self.audit.v2_aim_rows += int(af.sum())
             safe_now = bool((env & ok & ~S & ~hz).any())
             safe_any = safe_any or safe_now
+            if hf and hf_h is None and pos in hf_bounds:
+                # G4 4c: this hit count's rows done: one passing every check (S, hazards, unpausable, the committed
+                # hold, the macro margin, the v2 escape) -> the rest of the queue keeps only rows with as many hits
+                tier = [i for i in queue[hf_t0:pos] if ok[i] and env[i] and not S[i] and not hz[i] and not hz_soft[i]
+                        and not U[i] and hf_keep[i] and hf_mkeep[i]]
+                hf_t0 = pos
+                if tier:
+                    if not hasattr(self, "_v2_esc_first"):
+                        self._v2_esc_first = {}
+                    nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(tier, np.int64))
+                    if (nf_ == 0).any():
+                        hf_h = int(hk[tier[int(np.argmax(nf_ == 0))]])
+                        rest_q = queue[pos:]
+                        keep_q = [i for i in rest_q if hk[i] >= hf_h]
+                        drop_q = [i for i in rest_q if hk[i] < hf_h]
+                        a_ = self.audit
+                        a_.hf_stop += 1
+                        a_.hf_stop2 += int(hf_h >= 2)
+                        a_.hf_skipped += len(drop_q)
+                        a_.hf_skipped_strike += int(strike[drop_q].sum()) if drop_q else 0
+                        core_set = set(queue[:n_core])
+                        prio_set = set(queue[:n_prio])
+                        queue = queue[:pos] + keep_q
+                        n_core = pos + sum(1 for i in keep_q if i in core_set)
+                        n_prio = pos + sum(1 for i in keep_q if i in prio_set)
             now = time.perf_counter()
             chunk_ms = (now - tc0) * 1e3
             if pos >= n_core and safe_any:
@@ -3391,16 +3572,24 @@ class ForumPlanner(Planner):
                     v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
                     self.audit.v2_corner_rows += int((safe & corner).sum())
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
+            # G4 4b (SSBOT_FORUM_SPECIAL_KEEP): the kept template's row, safe and keeping the committed hold and the
+            # macro margin, before every other safe row (above the landed hits); no key without the switch
+            kk_ = ()
+            if kr is not None:
+                kept_ = np.zeros(N, bool)
+                kept_[kr] = bool(safe[kr] and keep[kr] and mkeep[kr])
+                self.audit.kp_sw_unsafe += int(not kept_[kr])
+                kk_ = (~kept_,)
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff,
-                                    gl.astype(np.int64), v2_nh, ~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+                                    gl.astype(np.int64), v2_nh) + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh,
-                                    ~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh) + kk_ +
+                                   (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -3466,6 +3655,9 @@ class ForumPlanner(Planner):
             elif carried:
                 tail_ok = True
             self.last_sel["chosen"] = i
+            if kr is not None and len(kk_) and not kk_[0][kr]:
+                self.audit.kp_kept += int(i == kr)
+                self.audit.kp_sw_escape += int(i != kr)
             self.prev_tail_ok = bool(tail_ok)
             self.prev_esc_unsafe = bool(esc_unsafe and not S[i])
             a.esc_unsafe += int(esc_unsafe and not S[i])
@@ -3490,7 +3682,7 @@ class ForumPlanner(Planner):
                 a.sm_appr_fail += int(not S[i] and bool(sctx.appr_fail[q_]))
                 a.sm_appr_hammer += int(not S[i] and int(sctx.appr_fail[q_]) == 2)
                 if not S[i] and not esc_unsafe:
-                    self._prev_sm = {"iid": sctx.iid, "ext": sctx.ext[q_].copy()}
+                    self._prev_sm = {"iid": sctx.iid, "ext": sctx.ext[q_].copy(), "move": sctx.move}
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
@@ -3558,6 +3750,19 @@ class ForumPlanner(Planner):
             # (forum_v2.ESC_TAIL) instead of idling where the row ends
             self.prev_cmd = np.concatenate([np.asarray(sel_cmd, np.int64), esc_tail[1]])
             a.v2_esc_tail += 1
+        if special_mode.KEEP:
+            # G4 4b: what is kept next tick: a chosen special row (its CONTINUE), else a chosen family row
+            self._kp = "sm" if getattr(self, "_prev_sm", None) is not None else                 ("ds" if (n_ds and D0 <= res.idx < D0 + n_ds and not S[res.idx]) else None)
+            if self._kp == "ds":
+                # a chain's second press offset after the first bounce (its name's "+c<b>"), while its first strike
+                # is still ahead (two presses in its plan); else none
+                nm_ = ds.names[res.idx - D0]
+                ext_ = np.asarray(ds.ext[res.idx - D0])
+                a_on = (ext_ & B_ATTACK) != 0
+                n_pr = int((a_on & ~np.concatenate([[False], a_on[:-1]])).sum())
+                self._ds_keep_b = int(nm_.rsplit("+c", 1)[1]) if ("+c" in nm_ and n_pr >= 2) else None
+            else:
+                self._ds_keep_b = None
         self.prev_name = res.name
         self.ticks += 1
         t6 = time.perf_counter()

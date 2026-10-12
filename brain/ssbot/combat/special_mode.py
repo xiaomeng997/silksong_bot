@@ -60,6 +60,20 @@ FULL_EVERY = int(os.environ.get("SSBOT_FORUM_SPECIAL_FULL_EVERY", "6") or 6)
 # remaining frames, as the set's attack rows do; without it every special row ranks behind the rows that keep the hold
 # (the selection's `keep` key) until the hold ends (G1's replay, slam 20261012_054126 i0 ep1 f 124204-124213)
 HOLD = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_HOLD", "0").strip() == "1"
+# task 1v1 G4 (the person's decisions of 2026-10-12; every one default off, each its own switch):
+# SSBOT_FORUM_SPECIAL_KEEP=1 (4b, "keep once chosen"): a chosen special row (or a G3 down-slash row) is kept while it
+# is still on its template (the special CONTINUE still certified with a contact; the "DS cont" row's contact holds)
+# and passes every check: no other row replaces it, and its template search is skipped on those ticks
+KEEP = os.environ.get("SSBOT_FORUM_SPECIAL_KEEP", "0").strip() == "1"
+# SSBOT_FORUM_SPECIAL_TABLE=v2 (G4 item 3): the merged table (specials_CL_SLAM_v2.json: the slack cores, late-only time
+# slack, +-0.5 u) instead of today's cells
+TABLE = os.environ.get("SSBOT_FORUM_SPECIAL_TABLE", "").strip()
+# SSBOT_FORUM_HITS_FIRST=1 (4c, "most hits first, stop early"): the strike options (special rows, the down-slash family)
+# are enveloped first, by their hit count; once one passes every check, the rows with fewer hits are not evaluated
+HITS_FIRST = os.environ.get("SSBOT_FORUM_HITS_FIRST", "0").strip() == "1"
+# SSBOT_FORUM_MOVE_HITS=1 (5b): the scorer's target body of an enemy in a tracked move follows the move template's
+# displacement (the hits, the ranking, the family's prefilter) instead of moving on at its present velocity
+MOVE_HITS = os.environ.get("SSBOT_FORUM_MOVE_HITS", "0").strip() == "1"
 from ssbot.combat.special_board import BOARD, L2_ON  # noqa: E402,F401  (the L2 controller's board)
 
 _TL: dict = {}

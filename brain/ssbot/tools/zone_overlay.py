@@ -1404,12 +1404,15 @@ SPECIALS_AHEAD_F = 6        # the special-move entries drawn: press frames conta
 def specials_cells(eng, tl, k: int, cx: float, cy: float, face: int) -> list:
     """The special-move table's strike cells (combat.specials, task 1v1 T3, forum.md 48) for a press SPECIALS_AHEAD_F
     frames from now, in world coordinates on the Clapper's position then (its lunge): (cert, x0, x1, y0, y1), one per
-    cell (any vy class, any key)."""
+    cell (any vy class, any key). SSBOT_OVERLAY_SPECIAL_TABLE=v2 (task 1v1 G4): the merged table v2's slack cores
+    (specials_v2; native cells, runs along dy) instead of today's cells."""
     try:
+        import os as _os
         from ssbot.combat import specials as spm
         tab = getattr(eng, "_spec_tab", None)
         if tab is None:
-            tab = eng._spec_tab = spm.SpecialTable.load()
+            v2 = _os.environ.get("SSBOT_OVERLAY_SPECIAL_TABLE", "").strip() == "v2"
+            tab = eng._spec_tab = spm.SpecialTable.load(suffix="_v2" if v2 else "")
     except Exception:  # noqa: BLE001  (no table)
         return []
     kk = k + SPECIALS_AHEAD_F
@@ -1418,13 +1421,13 @@ def specials_cells(eng, tl, k: int, cx: float, cy: float, face: int) -> list:
     best: dict = {}
     for e in tab.by_move.get("CL_SLAM", ()):
         if e.k0 <= kk <= e.k1:
-            key = (e.dx0, e.dy0)
+            key = (e.dx0, e.dx1, e.dy0, e.dy1)
             if best.get(key) != "both":
                 best[key] = e.cert if best.get(key) is None or e.cert == "both" else best[key]
     out = []
-    for (dx0, dy0), cert in best.items():
-        x0, x1 = sorted((ex + face * dx0, ex + face * (dx0 + 0.5)))
-        out.append((cert, x0, x1, cy + dy0, cy + dy0 + 0.5))
+    for (dx0, dx1, dy0, dy1), cert in best.items():
+        x0, x1 = sorted((ex + face * dx0, ex + face * dx1))
+        out.append((cert, x0, x1, cy + dy0, cy + dy1))
     return out
 
 
