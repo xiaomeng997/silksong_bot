@@ -30,11 +30,10 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.pogo_model import ACTIVE, slash_poly
-from ssbot.ipc.framing import mask
 from ssbot.knowledge import kinematics as kin
 
 TEMPLATE = Path(__file__).resolve().parents[3] / "knowledge" / "1.0.30000" / "enemies" / "forum" / "pogo_clapper_slam.json"
-M_L, M_R, M_D, M_J, M_A = mask("left"), mask("right"), mask("down"), mask("jump"), mask("attack")
+M_L, M_R, M_D, M_J, M_A = kin.B_LEFT, kin.B_RIGHT, kin.B_DOWN, kin.B_JUMP, kin.B_ATTACK   # (the import firewall: no ssbot.ipc)
 BODY_COOLDOWN_F = 0           # no cooldown on a HealthManager's own DamageHero (HeroDownAttack.ContinueBounceTrigger)
 HERO_STAND_DY = 1.553         # hero.pos above the floor when standing (Forum floor y 3.015, hero.pos y 4.568)
 FLOOR_Y = 3.015
