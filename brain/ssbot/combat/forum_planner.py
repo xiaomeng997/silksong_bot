@@ -2407,8 +2407,10 @@ class ForumPlanner(Planner):
         full[:, P:] = cmd
         ok, why = veto(cs, ctx)
         sm_on = bool(v2 and special_mode.SPECIAL_MODE)
-        if sm_on:
-            special_mode.BOARD.clear()            # the L2 controller reads this tick's decision (or none) next tick
+        if special_mode.SPECIAL_MODE:
+            # the L2 controller reads this tick's decision (or none) next tick (review: cleared on every tick, v2 or
+            # not, so no stale strike spot outlives the tick that posted it)
+            special_mode.BOARD.clear()
         sctx = None
         self._sctx = None
         if n_spec and sm_on:

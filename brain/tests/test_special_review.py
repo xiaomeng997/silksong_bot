@@ -128,6 +128,14 @@ def test_a_special_row_hitting_another_enemy_runs_the_hit_branch(params, arena, 
         assert not (sp & set(calls)) and pl.audit.sm_hit_other == 0
 
 
+def test_board_is_cleared_on_a_tick_without_v2(params, arena, mode_on):
+    sm.BOARD[7] = {"tick": 0, "on": True, "x": 31.0}
+    pl = _planner(params, arena)
+    inner = _reed_forecaster(None, x=46.0).forecast(0.8)        # a plain forecast: no v2 support
+    _tick(pl, params, None, f=inner)
+    assert not sm.BOARD
+
+
 def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, monkeypatch):
     # an escape command from the bounce state leaves the certified bounce (other keys): 134753a checked it against
     # the special support (M's danger dropped through the certified window); now the full escape support, and only
