@@ -504,6 +504,110 @@ def make_targets(rows_path: Path, out_dir: Path, rep_center: int = 3, seed: int 
     return meta
 
 
+WINDOWS = (("antic 0-24", 0, 25), ("antic 25-39", 25, 40), ("antic 40-48", 40, 49), ("slam0", 49, 54),
+           ("slam1", 54, 57), ("slam2", 57, 63), ("recover", 63, 78), ("after", 78, 200))
+
+
+def window_of(k: int) -> str:
+    return next(nm for nm, lo, hi in WINDOWS if lo <= k < hi)
+
+
+def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
+    """Batch 2 with the corrected theory (PRE_PROTECT_F): one robust centre per (press window, front / behind, layer
+    'success' = both branches safe or 'hit' = the bounce branch safe) not covered by batch 1, small scans (jump frame
+    +-2 / 4, x0 +-0.3 / 0.6), and a second press after the bounce (12 / 16 / 20 / 24 frames after the first) on the
+    batch-1 centres whose bounce the theory predicts in every timing variant."""
+    import random
+    import numpy as np
+    from ssbot.combat.pogo_slam import FLOOR_Y, M_A, M_D, SlamTheory, SlamTimeline
+    params, terrain = load_kin()
+    th = SlamTheory(params, terrain)
+    tl = SlamTimeline.load()
+    variants = SlamTimeline.variants()
+    paths = th.paths(hs=(3, 7, 11, 16), as_=range(6, 31, 2))
+    miss = th.miss_rollouts(paths)
+    taus = np.arange(4, 71)
+    x0s = np.round(np.arange(2.2, 9.0001, 0.1), 2)
+    cy = tl.pos_y + FLOOR_Y
+    rng = random.Random(seed)
+    covered = {(window_of(t["k_press"]), t["dx_press"] >= 0) for t in first if t["group"] in ("A", "B")}
+    clusters: dict = {}
+    for pi, p in enumerate(paths):
+        o = th.cells(tl, p, miss, pi, 1, x0s, taus, cy)
+        hit = (o["contact"] >= 0) & ~o["hit_bad"] & o["valid"]
+        for layer, ok in (("success", hit & ~o["miss_bad"]), ("hit", hit & o["miss_bad"])):
+            r = ok.copy()
+            for d in (-2, -1, 1, 2):
+                r &= np.roll(ok, d, axis=0)
+            for d in (-3, 3):
+                r &= np.roll(ok, d, axis=1)
+            for ti, xi in zip(*np.nonzero(r)):
+                key = (window_of(int(o["kp"][ti])), bool(o["dxp"][ti, xi] >= 0), layer)
+                clusters.setdefault(key, []).append((pi, int(taus[ti]), float(x0s[xi])))
+
+    def pred_all(p, pi, tau, x0):
+        res = []
+        for v in variants:
+            o = th.cells(v, p, miss, pi, 1, np.array([x0]), np.array([tau]), cy)
+            c = int(o["contact"][0, 0])
+            res.append((c >= 0, c >= 0 and not o["hit_bad"][0, 0], not o["miss_bad"][0, 0]))
+        return {k: round(sum(r[i] for r in res) / len(res), 3) for i, k in enumerate(("bounce", "hit_safe", "miss_safe"))}
+
+    def target(pi, tau, x0, group, note, masks=None, press2=None):
+        p = paths[pi]
+        o = th.cells(tl, p, miss, pi, 1, np.array([x0]), np.array([tau]), cy)
+        if not o["valid"][0, 0] or x0 < 2.2:
+            return None
+        c = int(o["contact"][0, 0])
+        pv = pred_all(p, pi, tau, x0)
+        return {"group": group, "note": note, "path": pi, "tau_j": int(tau), "x0": round(float(x0), 2), "h": p.h,
+                "a": p.a, "pre": p.pre, "post": p.post, "jpost": p.jpost, "k_press": int(tau + p.a), "press2": press2,
+                "dx_press": round(float(o["dxp"][0, 0]), 3), "dy_press": round(float(o["dyp"]), 3),
+                "vy_press": round(float(o["vyp"]), 2),
+                "pred": {"bounce": c >= 0, "hit_safe": bool(c >= 0 and not o["hit_bad"][0, 0]),
+                         "miss_safe": bool(not o["miss_bad"][0, 0])}, "pred_var": pv,
+                "masks": [int(m) for m in (p.masks if masks is None else masks)]}
+
+    tg, centres = [], []
+    for key, lst in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+        if (key[0], key[1]) in covered or len(lst) < 10:
+            continue
+        pi, tau, x0 = rng.choice(lst)
+        note = f"T2 {key[0]} {'front' if key[1] else 'behind'} {key[2]} ({len(lst)} robust cells)"
+        centres.append((pi, tau, x0, note))
+        tg += [target(pi, tau, x0, "B2", note) for _ in range(3)]
+        tg += [target(pi, tau + d, x0, "B2C_tau", f"{note} tau{d:+d}") for d in (-4, -2, 2, 4)]
+        tg += [target(pi, tau, x0 + d, "B2C_x0", f"{note} x0{d:+.1f}") for d in (-0.6, -0.3, 0.3, 0.6)]
+    # the second press after the bounce
+    seen = set()
+    for t in first:
+        if t["group"] not in ("A", "B") or t["note"] in seen or t["pred_var"]["bounce"] < 1.0:
+            continue
+        seen.add(t["note"])
+        for d in (12, 16, 20, 24):
+            m = list(t["masks"])
+            a2 = t["a"] + d
+            if a2 + 3 >= len(m):
+                continue
+            for j in range(a2 - 3, a2 + 3):
+                m[j] |= M_D
+            m[a2] |= M_A
+            tt = target(t["path"], t["tau_j"], t["x0"], "P2", f"{t['note']} press2 +{d}", masks=m, press2=d)
+            if tt is not None:
+                tg += [tt, dict(tt)]
+    tg = [t for t in tg if t is not None]
+    for n, t in enumerate(tg):
+        t["id"] = 10000 + n
+    order = list(range(len(tg)))
+    rng.shuffle(order)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for k in (0, 1):
+        (out_dir / f"t2_i{k}.jsonl").write_text("".join(json.dumps(tg[i]) + "\n" for i in order[k::2]), "utf-8")
+    meta = {"n": len(tg), "centres": centres, "clusters": {"|".join(map(str, k)): len(v) for k, v in clusters.items()}}
+    (out_dir / "targets2_meta.json").write_text(json.dumps(meta, indent=1), "utf-8")
+    return meta
+
+
 def live_report(trial_files: list[Path], rows_path: Path, check_path: Path) -> dict:
     """The targeted trials joined with their down slash (pogo_outcomes rows) and the theory on it (check): per trial
     the outcome (bounce = the real contact, loss = an HP loss within CHECK_S of the press, approach_loss = one before
@@ -615,7 +719,15 @@ def main(argv: list[str] | None = None) -> int:
     a6.add_argument("--rows", type=Path, required=True)
     a6.add_argument("--check", type=Path, required=True)
     a6.add_argument("--out", type=Path, required=True)
+    a7 = sub.add_parser("targets2")
+    a7.add_argument("--first", type=Path, nargs="+", required=True, help="batch-1 target files")
+    a7.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "targets2":
+        first = [json.loads(x) for p in a.first for x in p.read_text("utf-8").splitlines() if x.strip()]
+        meta = make_targets2(a.out, first)
+        print(json.dumps(meta, indent=1)[:5000])
+        return 0
     if a.cmd == "live":
         rep = live_report(a.trials, a.rows, a.check)
         a.out.write_text(json.dumps(rep, indent=1), "utf-8")

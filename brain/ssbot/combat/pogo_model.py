@@ -16,6 +16,8 @@ jump steps from 4, i-frames against enemies pogo_invul 0.16 s); the model puts E
 
     pm = PogoModel(params, terrain)
     br = pm.branches(start, masks, press_j, targets)     # targets(j) -> [(poly [n, 2], kind)] at rollout index j
+                                                         # (the boxes of THAT frame: a lunging enemy's must move;
+                                                         # the Clapper's slam: ssbot.combat.pogo_slam)
     br.contact_j, br.kind, br.miss (Rollout), br.hit (Rollout or None)
 """
 from __future__ import annotations
@@ -34,9 +36,11 @@ DOWN_ALT = np.array([[1.714, -0.368], [1.568, -1.688], [0.91, -2.337], [0.067, -
 ACTIVE = (3, 9)          # frames after the press frame on which the slash can land (pogo_outcomes: hits at +3 .. +9)
 EV_OFF = 0               # EV_POGO's index relative to the contact frame's (pogo_check calibration)
 GROW = 0.0               # u a target polygon grows by before the overlap test (pogo_check calibration)
-# the hurtbox past the exported body box on the side the enemy faces (pogo_check: the Clapper's held hammer is
-# hittable, 0.1-0.3 u in front of its layer-11 box in Idle; flipX False = facing left)
-FRONT_U = {"Song Heavy Sentry": 0.3}
+# the hurtbox past the exported body box on the side the enemy faces, per type. Empty: the Clapper's 0.3 u patch
+# (pogo_check: bounces 0.1-0.3 u in front of its box) was the slam's lunge (30 u/s from the Slam 0 entry, 3.6-4.2 u)
+# carrying the box into the slash after the press; the exported root box is the whole hurtbox when the targets are
+# the boxes of the coming frames (ssbot.combat.pogo_slam: probe recall 0.97, precision 0.96; forum.md 46)
+FRONT_U: dict = {}
 
 
 def front(poly: np.ndarray, face: int, d: float) -> np.ndarray:
