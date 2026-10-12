@@ -2763,6 +2763,11 @@ class ForumPlanner(Planner):
         sk_f = np.full(N, T1, np.int64)
         sk_c = np.zeros(N)
         sel = ok & known
+        if forced and sctx is not None:
+            # review: no safe row: a special row's stage-1 share and first contact were read without M's danger, so in
+            # the FORCED_RISK ranking it would look safer than it is; out (the fallback is the normal rows)
+            sel[sctx.rows] = False
+            self.audit.sm_forced_out += 1
         Pcm = np.zeros(N)                     # commit_rank's keys (0 on every row otherwise: the order is unchanged)
         Pf = np.zeros(N)
         eml_k = np.zeros(N)                   # track A "eml": FORCED_RISK's tie-break after the first contacts

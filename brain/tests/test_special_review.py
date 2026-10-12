@@ -72,6 +72,30 @@ def test_continue_of_a_special_row_is_special_only_while_its_press_is_certified(
     assert (len(pl2.last_sel["J"]) - 1) in pl2._sctx.rows.tolist()
 
 
+def _late_support(trk, k_late):
+    """E's move over the front on every sample; another enemy over the whole arena from look-ahead k_late on (every
+    row is in contact by then: FORCED_RISK)."""
+    rs = v2.RangeSupport(v2.Canvas(), v2.SAMPLE_KS, 0, None)
+    rs.trk, rs.margin_mode, rs.focus, rs.dash_focus = trk, "flat:0.5", 7, None
+    for iid, b, k0 in ((7, M_BOX, 0), (9, (10.0, FLOOR, 53.0, FLOOR + 20.0), k_late)):
+        c, ix0, iy0 = v2.coarse(_raw(*b), 0.05, rs.cv.cell)
+        for si, k in enumerate(v2.SAMPLE_KS):
+            if k >= k0:
+                rs.add_raw(si, iid, c, ix0, iy0, 0.5, 0.5 if k >= v2.ESC_FROM_K else None)
+    rs.finish()
+    return rs
+
+
+@pytest.mark.parametrize("k_late", [22, 31])
+def test_forced_risk_never_ranks_the_special_rows(params, arena, mode_on, k_late):
+    # 134753a chose a SPECIAL row here: its first contact and share were read without M's danger
+    pl = _planner(params, arena)
+    pl.debug = True
+    r = _tick(pl, params, _late_support(_trk({7: _clapper(30.0, 1, 30)}), k_late))
+    assert r.forced_risk and pl.audit.sm_rows > 0
+    assert not r.name.startswith("SPECIAL") and pl.audit.sm_forced_out == 1
+
+
 def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, monkeypatch):
     # an escape command from the bounce state leaves the certified bounce (other keys): 134753a checked it against
     # the special support (M's danger dropped through the certified window); now the full escape support, and only
