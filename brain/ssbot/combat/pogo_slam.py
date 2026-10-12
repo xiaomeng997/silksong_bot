@@ -407,9 +407,11 @@ def predict_press(params: kin.HeroParams, terrain, tl: SlamTimeline, k_now: int,
 
 def build_region(npz_paths: list[Path], out: Path = REGION) -> dict:
     """The success region table from GridAcc grids of several timing variants: per (press frame, dx, dy, vy class)
-    the share of the theory's paths through that cell whose down slash bounces with both branches safe, for the best
-    held direction / jump after the press, the minimum over the variants (robust); and the bounce share."""
-    best_s, best_b, meta = None, None, None
+    the share of the theory's paths through that cell whose down slash bounces with both branches safe ('success',
+    the locked-move rule), that bounces with the bounce branch safe ('hit': the strike works, its miss branch may not
+    be safe) and that bounces ('bounce'), each for the best held direction / jump after the press, the minimum over
+    the variants (robust)."""
+    best_s, best_b, best_h, meta = None, None, None, None
     for p in npz_paths:
         z = np.load(p, allow_pickle=False)
         c = z["c"].astype(np.float64)                 # [5, KP, nx, ny, vc, side, post, jpost]
@@ -417,13 +419,18 @@ def build_region(npz_paths: list[Path], out: Path = REGION) -> dict:
         n = c[0].sum(axis=4)                          # over the side
         succ = np.where(n > 0, c[4].sum(axis=4) / np.maximum(n, 1), 0.0)
         bounce = np.where(n > 0, c[1].sum(axis=4) / np.maximum(n, 1), 0.0)
+        hit = np.where(n > 0, c[2].sum(axis=4) / np.maximum(n, 1), 0.0)
         s_ = succ.max(axis=(4, 5))                    # the best post / jpost
         b_ = bounce.max(axis=(4, 5))
+        h_ = hit.max(axis=(4, 5))
         best_s = s_ if best_s is None else np.minimum(best_s, s_)
         best_b = b_ if best_b is None else np.minimum(best_b, b_)
+        best_h = h_ if best_h is None else np.minimum(best_h, h_)
     np.savez_compressed(out, success=np.round(best_s * 100).astype(np.uint8), bounce=np.round(best_b * 100).astype(np.uint8),
+                        hit=np.round(best_h * 100).astype(np.uint8),
                         meta=json.dumps({k: meta[k] for k in ("KP", "DX0", "DY0", "B")} | {"variants": len(npz_paths)}))
-    return {"cells_success_50": int((best_s >= 0.5).sum()), "cells_bounce_50": int((best_b >= 0.5).sum())}
+    return {"cells_success_50": int((best_s >= 0.5).sum()), "cells_hit_50": int((best_h >= 0.5).sum()),
+            "cells_bounce_50": int((best_b >= 0.5).sum())}
 
 
 class Region:
@@ -434,6 +441,7 @@ class Region:
         z = np.load(path, allow_pickle=False)
         self.success = z["success"]
         self.bounce = z["bounce"]
+        self.hit = z["hit"]
         m = json.loads(str(z["meta"]))
         self.DX0, self.DY0, self.B, self.KP = m["DX0"], m["DY0"], m["B"], m["KP"]
 
@@ -441,7 +449,7 @@ class Region:
         if not (0 <= k < self.KP):
             return []
         vc = 0 if vy > 3 else (2 if vy < -3 else 1)
-        a = (self.success if which == "success" else self.bounce)[k, :, :, vc]
+        a = {"success": self.success, "hit": self.hit, "bounce": self.bounce}[which][k, :, :, vc]
         xi, yi = np.nonzero(a >= thr)
         return [(self.DX0 + x * self.B, self.DY0 + y * self.B, int(a[x, y])) for x, y in zip(xi, yi)]
 

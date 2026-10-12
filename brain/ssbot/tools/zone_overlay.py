@@ -1357,6 +1357,8 @@ def pogo_slam_now(eng, s: dict, start, masks, facing: int) -> dict | None:
     reg = getattr(eng, "_pogo_region", None)
     pr["region"] = [] if reg is None else [(cx + face * (dx + reg.B / 2), cy + dy + reg.B / 2, v)
                                            for dx, dy, v in reg.cells(k, vy)]
+    pr["region_hit"] = [] if reg is None else [(cx + face * (dx + reg.B / 2), cy + dy + reg.B / 2, v)
+                                               for dx, dy, v in reg.cells(k, vy, which="hit")]
     pr["region_b"] = reg.B if reg is not None else 0.25
     pr["slam_k"] = k
     pr["ground"] = False
@@ -1394,14 +1396,16 @@ def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
             cv2.circle(img, (int(c[0]), int(c[1])), th + 2, (*col, 255), -1, cv2.LINE_AA)
 
     def region(br):
-        # the theory's success region for a press now (green squares: where the hero's transform must be)
-        if br is None or not br.get("region"):
+        # the theory's region for a press now, where the hero's transform must be: yellow squares = the slash bounces
+        # and the bounce is safe (its miss branch is not), green = both branches safe (the locked-move rule)
+        if br is None or not (br.get("region") or br.get("region_hit")):
             return
         b = float(br.get("region_b") or 0.25) / 2
         ov = img.copy()
-        for x, y, v in br["region"]:
-            q = np.round(_to_px(Hw, np.array([[x - b, y - b], [x + b, y + b]]))).astype(np.int32)
-            cv2.rectangle(ov, (int(q[0][0]), int(q[0][1])), (int(q[1][0]), int(q[1][1])), (60, 200, 60, 255), -1)
+        for key, col in (("region_hit", (40, 200, 230, 255)), ("region", (60, 200, 60, 255))):
+            for x, y, v in br.get(key) or ():
+                q = np.round(_to_px(Hw, np.array([[x - b, y - b], [x + b, y + b]]))).astype(np.int32)
+                cv2.rectangle(ov, (int(q[0][0]), int(q[0][1])), (int(q[1][0]), int(q[1][1])), col, -1)
         cv2.addWeighted(ov, 0.35, img, 0.65, 0, img)
 
     def hit_mark(br, key, pts_key):
