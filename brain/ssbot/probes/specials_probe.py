@@ -37,6 +37,8 @@ from ssbot.probes.pogo_target import MIN_HP, SETTLE_F, WAIT_S, Target, stop_requ
 from ssbot.tools.pogo_theory import load_kin
 
 D = 8                      # frames between the plan's state and the row's first frame (the planning time)
+HOLD_AFTER = 75            # SlamTheory.T_AFTER
+M_L, M_R = kin.B_LEFT, kin.B_RIGHT
 FILTERS = ("both_front", "both_behind", "bounce_front", "bounce_behind")
 
 
@@ -44,8 +46,8 @@ def trial_specs(n: int, seed: int) -> list[dict]:
     rng = random.Random(seed)
     out = []
     for i in range(n):
-        out.append({"i": i, "wait_x": rng.choice((3.0, 4.5, 6.0, 7.5, 9.0)),
-                    "k_start": rng.choice((2, 8, 14, 20, 26, 32, 38, 44)),
+        out.append({"i": i, "wait_x": rng.choice((3.0, 4.5, 6.0, 7.5, 9.0, 11.0)),
+                    "k_start": rng.choice((2, 8, 14, 20, 26, 32, 38, 44, 50, 56, 63)),
                     "filter": FILTERS[i % len(FILTERS)], "pick": rng.random()})
     return out
 
@@ -142,9 +144,12 @@ class Probe(Target):
         while s["f"] + 2 < f_first:
             s = self.step(0)
         sent, trace = [], []
-        for _ in range(len(masks) + SETTLE_F):
+        # after the row: its key (and nothing else) until the press + HOLD_AFTER, as the theory's paths (T_AFTER)
+        tail = masks[-1] & (M_L | M_R)
+        n_all = max(len(masks), jp + HOLD_AFTER)
+        for _ in range(n_all + SETTLE_F):
             idx = s["f"] + 2 - f_first
-            m = masks[idx] if 0 <= idx < len(masks) else 0
+            m = masks[idx] if 0 <= idx < len(masks) else (tail if len(masks) <= idx < n_all else 0)
             sent.append((s["f"] + 2, m))
             s = self.step(m)
             c = clapper(s)
@@ -164,7 +169,7 @@ class Probe(Target):
                        "press_pos": None if pp is None else [round((pp[4] - cx) * face, 3), round(pp[5] - cy, 3)],
                        "landed": bool(landed), "bounce": bool(bounce), "hurt_rel": hurt[:1],
                        "hurt_before": bool(hurt and hurt[0] < 0), "hurt": bool(hurt),
-                       "success": bool(landed and not hurt), "trace": trace[:jp + 30]}
+                       "success": bool(landed and not hurt), "trace": trace[:jp + 80]}
 
 
 def main(argv: list[str] | None = None) -> int:

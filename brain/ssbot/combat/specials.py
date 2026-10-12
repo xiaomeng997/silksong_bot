@@ -187,10 +187,11 @@ class StrikeRows:
     tried: int                # templates rolled out
 
 
-def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 14, 20)) -> tuple[np.ndarray, np.ndarray]:
+def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 14, 20), hdelays=(0, 8)
+               ) -> tuple[np.ndarray, np.ndarray]:
     """Approach templates of length T for each press mask index j in js: the jump starting at mask s (0 .. j - 2, every
-    `step`; or no jump), held h frames, the horizontal key before the press -1 / 0 / +1 (world: +1 right), down from
-    j - 3, the attack on j. Returns (masks [n, T], j [n])."""
+    `step`; or no jump), held h frames, the horizontal key before the press -1 / 0 / +1 (world: +1 right) from the
+    jump + hdelay (straight up first: over a body), down from j - 3, the attack on j. Returns (masks [n, T], j [n])."""
     rows, jj = [], []
     hk = {1: M_R, -1: M_L, 0: 0}
     for j in js:
@@ -198,14 +199,17 @@ def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 1
         for s in starts:
             for h in (holds if s is not None else (0,)):
                 for pre in (1, 0, -1):
-                    m = np.zeros(T, np.int64)
-                    if s is not None:
-                        m[s:s + h] |= M_J
-                    m[:j] |= hk[pre]
-                    m[max(j - 3, 0):j + 1] |= M_D
-                    m[j] |= M_A
-                    rows.append(m)
-                    jj.append(j)
+                    for d in (hdelays if (s is not None and pre != 0) else (0,)):
+                        if s is not None and s + d >= j:
+                            continue
+                        m = np.zeros(T, np.int64)
+                        if s is not None:
+                            m[s:s + h] |= M_J
+                        m[(0 if d == 0 else s + d):j] |= hk[pre]
+                        m[max(j - 3, 0):j + 1] |= M_D
+                        m[j] |= M_A
+                        rows.append(m)
+                        jj.append(j)
     return (np.asarray(rows, np.int64).reshape(-1, T), np.asarray(jj, np.int64))
 
 
