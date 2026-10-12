@@ -281,6 +281,7 @@ class GauntletTactics:
         self.ta: frozenset = frozenset()                  # track A's tokens (combat.forum_planner.TA_TOKENS): "whip",
         #                                                   "guard", "edge" are read here (the policy sets them)
         self._whips: frozenset = frozenset()              # iids of the Choristors whipping on the last tick
+        self._strike: dict[int, tuple[float, float]] = {}  # Clapper iid -> (game time, x) of the last "slam: strike"
 
     @property
     def xs(self):
@@ -291,6 +292,7 @@ class GauntletTactics:
         self.goal, self.n, self.t_commit, self.jump_how = None, 0, {}, {}
         self.jfam, self.rune = {}, {}
         self._whips = frozenset()
+        self._strike = {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -317,13 +319,23 @@ class GauntletTactics:
         fam = s.family
         xa, xb = self.pb.arena_x
         room = (lambda v: xa + r.wall_room_u <= v <= xb - r.wall_room_u)
+        if fam != CC_SLAM:
+            self._strike.pop(s.iid, None)
         if fam == CC_SLAM:
             if special_board.L2_ON:
                 # the person's general special rule (combat.special_mode): the planner found a strike on this slam
                 # safe from every other enemy on its last tick: stand at its press point (a hit target, not a retreat)
                 b = special_board.BOARD.get(s.iid)
                 if b is not None and b.get("on") and b.get("x") is not None:
+                    self._strike[s.iid] = (self._t, float(b["x"]))
                     return self._clamp(float(b["x"])), frozenset(), "slam: strike"
+                held = self._strike.get(s.iid)
+                if held is not None and 0.0 <= self._t - held[0] <= special_board.L2_HOLD_S:
+                    # review 2026-10-12: the planner's safe strike flickers off for a tick or two while the slam goes on
+                    # (open-loop replay: a median 4 on / off flips a slam, a third of the on runs 1-2 ticks long, the
+                    # stance jumping 5 <-> 13 u): the last strike spot is kept L2_HOLD_S (a preference only: the
+                    # normal rows keep the slam's danger)
+                    return self._clamp(held[1]), frozenset(), "slam: strike (held)"
             if side != front:
                 return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
             out = x + front * r.slam_out_u

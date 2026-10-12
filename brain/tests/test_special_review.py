@@ -136,6 +136,25 @@ def test_board_is_cleared_on_a_tick_without_v2(params, arena, mode_on):
     assert not sm.BOARD
 
 
+def test_l2_strike_spot_holds_through_a_flicker(monkeypatch):
+    from tests.test_forum_l2 import CC, WinFc, clapper, l2, subj, world
+    from ssbot.combat import special_board
+    monkeypatch.setattr(special_board, "L2_ON", True)
+    s = [subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]
+    sm.BOARD.clear()
+    t = l2()
+    ents = [clapper(9, 35.0, False)]
+    sm.BOARD[9] = {"on": True, "x": 31.5}
+    assert t.decide(world(30.0, ents=ents, t=10.0), WinFc(s), None, 3).stance_x == pytest.approx(31.5)
+    sm.BOARD[9] = {"on": False, "x": None}                  # one tick off: the strike spot is kept
+    p = t.decide(world(30.0, ents=ents, t=10.0 + 1 / 60), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(31.5) and p.hit_w.get(9, 0.0) > 0
+    p = t.decide(world(30.0, ents=ents, t=10.0 + 0.2), WinFc(s), None, 3)
+    assert p.stance_x == pytest.approx(22.0)                # off for longer: today's step out
+    sm.BOARD.clear()
+
+
+
 def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, monkeypatch):
     # an escape command from the bounce state leaves the certified bounce (other keys): 134753a checked it against
     # the special support (M's danger dropped through the certified window); now the full escape support, and only
