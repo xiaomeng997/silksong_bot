@@ -2560,6 +2560,18 @@ class ForumPlanner(Planner):
         pins = self._pin_threats(f, tk) if fcfg.pin_aim else []
         self.audit.pin_ticks += int(bool(pins))
         has_hit = sc["first_f"] >= 0
+        sp_e = None
+        if sctx is not None:
+            # review: the special rows whose first predicted hit is on E (or none) skip the hit branch (the bounce is
+            # their hit); one whose first hit is another enemy runs it against the full support (that enemy's
+            # reaction is not certified by E's table)
+            sp_e = np.zeros(N, bool)
+            tg_ = sc["targets"]
+            for r_ in sctx.rows:
+                r_ = int(r_)
+                if sc["first_f"][r_] < 0 or (len(tg_) and getattr(tg_[int(sc["first_t"][r_])], "iid", None) == sctx.iid):
+                    sp_e[r_] = True
+            self.audit.sm_hit_other += int(len(sctx.rows) - sp_e[sctx.rows].sum())
         hit_occ: dict = {}                        # row -> its hit branch's contact [T1] (FORCED_RISK's ranking)
         capped_rows: list = []                    # rows S = 1 by a cap only (checked uncapped before FORCED_RISK)
         safe_any = False
@@ -2601,7 +2613,7 @@ class ForumPlanner(Planner):
             env[ch] = True
             bound[ch] = r2.bound
             t_hit[ch] = np.where(s2, occ.argmax(axis=1), T1)
-            hr = ch[~s2 & has_hit[ch]] if m_sp is None else ch[~s2 & has_hit[ch] & ~m_sp]
+            hr = ch[~s2 & has_hit[ch]] if m_sp is None else ch[~s2 & has_hit[ch] & ~(m_sp & sp_e[ch])]
             if bell_first.any():
                 # in contact, but the swing meets a bell first: the branch with the bell knocked back decides
                 hb_ = ch[s2 & bell_first[ch] & (sc["first_f"][ch] <= t_hit[ch])]

@@ -96,6 +96,38 @@ def test_forced_risk_never_ranks_the_special_rows(params, arena, mode_on, k_late
     assert not r.name.startswith("SPECIAL") and pl.audit.sm_forced_out == 1
 
 
+@pytest.mark.parametrize("other", [True, False])
+def test_a_special_row_hitting_another_enemy_runs_the_hit_branch(params, arena, mode_on, monkeypatch, other):
+    pl = _planner(params, arena)
+    pl.debug = True
+    orig = pl._score_forum
+
+    def score(*a, **k):
+        sc = orig(*a, **k)
+        rows = pl._sctx.rows
+        sc["targets"] = list(sc["targets"]) + [NS(iid=99 if other else 7, hazard=False, blocked=False)]
+        for key in ("first_f", "first_t", "first_k", "first_face"):
+            sc[key] = np.asarray(sc[key]).copy()
+        sc["first_f"][rows] = 12
+        sc["first_t"][rows] = len(sc["targets"]) - 1
+        return sc
+    calls = []
+
+    def hit_branch(f, start, latched, sc, rows, tk, *a, **k):
+        calls.extend(int(i) for i in rows)
+        n, T1 = len(rows), len(tk)
+        return np.ones(n, bool), np.ones((n, T1), bool), np.zeros(n, bool)
+    monkeypatch.setattr(pl, "_score_forum", score)
+    monkeypatch.setattr(pl, "_hit_branch", hit_branch)
+    r = _tick(pl, params, _support({7: [M_BOX]}, _trk({7: _clapper(30.0, 1, 30)})))
+    sp = set(pl._sctx.rows.tolist())
+    if other:
+        assert sp & set(calls) and pl.audit.sm_hit_other == len(sp)
+        assert not r.name.startswith("SPECIAL")          # the stub's branch is in contact
+    else:
+        assert not (sp & set(calls)) and pl.audit.sm_hit_other == 0
+
+
 def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, monkeypatch):
     # an escape command from the bounce state leaves the certified bounce (other keys): 134753a checked it against
     # the special support (M's danger dropped through the certified window); now the full escape support, and only
