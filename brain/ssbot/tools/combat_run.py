@@ -378,7 +378,55 @@ def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet
     return got
 
 
+def _cpu_list(spec: str) -> list[int]:
+    out: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            out += range(int(lo), int(hi) + 1)
+        elif part:
+            out.append(int(part))
+    return out
+
+
+def boost_worker() -> str:
+    """The live worker at High priority, on the P-cores (SSBOT_WORKER_CPUS, default 0-15: the 13900K's hyperthreaded
+    P-cores come first) and with Windows' power throttling (EcoQoS) off. A windowless worker counts as background on
+    Windows 11: on 2026-10-11 evening the same code missed 10x more frames (late states 300-900 per episode, loop stalls
+    100-200 ms, 0-2 of 6 kills) until it was boosted (16-38, 30-41 ms, 6 of 6). SSBOT_WORKER_BOOST=0: as started."""
+    if sys.platform != "win32" or os.environ.get("SSBOT_WORKER_BOOST", "1").strip() == "0":
+        return "boost off"
+    import ctypes
+    import psutil
+
+    msgs = []
+    p = psutil.Process()
+    try:
+        p.nice(psutil.HIGH_PRIORITY_CLASS)
+        msgs.append("High")
+    except Exception as e:  # noqa: BLE001 - best effort
+        msgs.append(f"priority failed: {e}")
+    try:
+        cpus = [c for c in _cpu_list(os.environ.get("SSBOT_WORKER_CPUS", "0-15")) if c < (psutil.cpu_count() or 0)]
+        if cpus:
+            p.cpu_affinity(cpus)
+            msgs.append(f"cpus {cpus[0]}-{cpus[-1]}")
+    except Exception as e:  # noqa: BLE001
+        msgs.append(f"affinity failed: {e}")
+
+    class _PowerThrottling(ctypes.Structure):
+        _fields_ = [("Version", ctypes.c_uint32), ("ControlMask", ctypes.c_uint32), ("StateMask", ctypes.c_uint32)]
+
+    st = _PowerThrottling(1, 1, 0)            # PROCESS_POWER_THROTTLING_EXECUTION_SPEED controlled, state off
+    k32 = ctypes.windll.kernel32
+    ok = k32.SetProcessInformation(ctypes.c_void_p(k32.GetCurrentProcess()), 4, ctypes.byref(st), ctypes.sizeof(st))
+    msgs.append("throttling off" if ok else "throttling unchanged")
+    return ", ".join(msgs)
+
+
 def worker(a: argparse.Namespace) -> int:
+    print(f"[i{a.instance}] worker boost: {boost_worker()}", flush=True)
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
