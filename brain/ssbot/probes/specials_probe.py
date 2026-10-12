@@ -108,7 +108,7 @@ class Probe(Target):
             s = self.step(0)
             v = s["hero"].get("vel") or [0, 0]
             still = still + 1 if abs(float(v[0])) < 0.05 and abs(float(v[1])) < 0.05 else 0     # on the floor, still
-            if s["f"] - fa > 60:
+            if s["f"] - fa > int(t["k_start"]) + 20:
                 return {"skip": "never still", "f_antic": fa}
         e = clapper(s)
         h = s["hero"]
