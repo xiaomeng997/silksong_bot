@@ -141,6 +141,10 @@ AIM_LAT = 2
 # decision; "pred": the carried one only; "0": the position now (before T2)
 AIM_COAST_MODE = os.environ.get("SSBOT_FORUM_V2_AIM_COAST", "union").strip().lower() or "union"
 AIM_COAST = {"RE_STAB": 0.9}
+# SSBOT_FORUM_V2_AIM_DIL (u, default 0: off): a margin on the pending aims' zones (the person: margins separate from the
+# estimate): each anchor is also tried at 8 offsets on a circle of this radius (the zone's union over them: about its
+# dilation by the radius). The Reed stab's anchor moves 1.9 / 3.4 u (p50 / p90) through its antic (T2 live).
+AIM_DIL = float(os.environ.get("SSBOT_FORUM_V2_AIM_DIL", "0") or 0.0)
 LOCK_EXT_F = 24                       # a hero lock at the decision extends the zone test by up to this many frames
 
 
@@ -638,6 +642,10 @@ def pending_aims(trk: RangeTracker) -> list[dict]:
             c = (1.0 - dec ** n) / (1.0 - dec) * FT
             pred = (x + float(v[0]) * c, y + float(v[1] or 0.0) * c if len(v) > 1 else y)
             anchors = (pred,) if AIM_COAST_MODE == "pred" else ((x, y), pred)
+        if AIM_DIL > 0.0:
+            r = AIM_DIL
+            ring = [(r * math.cos(k * math.pi / 4), r * math.sin(k * math.pi / 4)) for k in range(8)]
+            anchors = tuple(anchors) + tuple((ax + dx, ay + dy) for ax, ay in anchors for dx, dy in ring)
         out.append({"iid": iid, "name": name, "reader": rd[name], "x": x, "y": y, "anchors": anchors,
                     "s": trk.tables[tk].facing(e.get("flipX")), "aim": mv.aim, "d_lo": d_lo, "d_hi": d_hi,
                     "D": az.D, "zones": {}})
