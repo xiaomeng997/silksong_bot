@@ -88,3 +88,19 @@ def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, mo
     r = _tick(pl, params, _support({7: [M_BOX]}, _trk({7: _clapper(30.0, 1, 30)})))
     assert r.name.startswith("SPECIAL") and pl.audit.v2_esc_rows > 0
     assert calls and not any(calls)
+
+
+def test_the_tail_follows_the_entrys_jump_past_the_horizon(params, arena):
+    # the special mode's rows carry their whole template past the horizon: a jpost entry's jump runs to press + 19
+    # in the template the tail check and the CONTINUE read (134753a cut it at the horizon for in-horizon presses)
+    tab = specials.SpecialTable.load()
+    lut = tab.lut("CL_SLAM", sm.MODE_CERTS, rank_cert=False)
+    tl = SlamTimeline.load()
+    start = kin.initial_state(params, 34.0, FLOOR + params.foot)
+    r = specials.strike_rows(params, arena, start, lut, 10, 30.0, CY, 1, tl.disp, 36, max_rows=400, per_entry=4,
+                             prefix=np.zeros(1, np.int64), long_hi=sm.LONG_PRESS_MAX)
+    late = [q for q in range(len(r.cmd)) if r.entry[q].jpost and 17 < r.j_press[q] <= 34]
+    assert late
+    for q in late:
+        j = int(r.j_press[q])
+        assert ((r.full[q][j + 3:j + 19] & kin.B_JUMP) != 0).all()

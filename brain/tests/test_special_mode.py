@@ -194,9 +194,12 @@ def test_long_rows_from_the_antic_start(params, arena):
     start = kin.initial_state(params, 34.0, FLOOR + params.foot)
     r = specials.strike_rows(params, arena, start, lut, 1, 30.0, CY, 1, tl.disp, 36, max_rows=200, per_entry=2,
                              prefix=np.zeros(1, np.int64), long_hi=sm.LONG_PRESS_MAX)
-    lg = [q for q in range(len(r.cmd)) if r.full[q] is not None]
-    assert lg and all(r.j_press[q] > 34 and len(r.full[q]) > 36 for q in lg)
-    assert all(np.array_equal(r.full[q][:36], r.cmd[q]) for q in lg)
+    lg = [q for q in range(len(r.cmd)) if r.j_press[q] > 34]
+    assert lg and all(len(r.full[q]) > 36 for q in lg)
+    # every row's whole template runs LONG_POST frames past its press (review: the tail follows the certified bounce)
+    assert all(r.full[q] is None or len(r.full[q]) == max(36, int(r.j_press[q]) + 1 + specials.LONG_POST)
+               for q in range(len(r.cmd)))
+    assert all(r.full[q] is None or np.array_equal(r.full[q][:36], r.cmd[q]) for q in range(len(r.cmd)))
     assert any(42 <= 1 + 1 + r.j_press[q] + 1 <= 51 and r.entry[q].dx0 > 0 for q in lg)     # yellow ones among them
 
 

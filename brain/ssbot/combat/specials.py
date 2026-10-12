@@ -347,7 +347,10 @@ def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: in
             used[wk] += 1
         used[e.id] += 1
         j = int(J[i])
-        L = T if j <= T - 2 else j + 1 + LONG_POST
+        # the special mode (long_hi): every row's whole template runs LONG_POST frames past the press (the entry's
+        # key and jpost on), so the tail check and the CONTINUE follow the certified bounce, not one whose jump is cut
+        # at the horizon (review 2026-10-12)
+        L = T if long_hi is None else max(T, j + 1 + LONG_POST)
         m = np.zeros(L, np.int64)
         m[:min(L, M.shape[1])] = M[i][:L]
         m[j + 1:] &= ~(M_L | M_R)

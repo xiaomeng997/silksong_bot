@@ -2274,7 +2274,7 @@ class ForumPlanner(Planner):
         ev = np.zeros((n, P + L), np.int64)
         ev[np.flatnonzero(keep), contact[keep] - 1] = kin.EV_POGO     # SlamTheory's convention (the certified bounce)
         rows, ext, lat_e, ev, contact, pj = rows[keep], ext[keep], lat_e[keep], ev[keep], contact[keep], pj[keep]
-        is_long = np.array([len(x) > T for x, k_ in zip(exts, keep) if k_], bool)
+        is_long = pj - P - 1 > T - 2                # the press past the horizon (strike_rows' long rows)
         n = len(rows)
 
         def bounce(lat_, ev_):
