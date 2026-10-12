@@ -5173,3 +5173,65 @@ pogo_model, pogo_outcomes and the random-probe recordings (s700000-705000), whic
     branch is never safe.
   The real-time search then reaches them.
 - Jump slam / cast slam use the same Slam 2 / Recover boxes; wire them into SlamTimeline.
+
+## Task 1v1 - stage T2: live Reed 1v1, the Defend stance's tink / counter branch (branch worktree-wf_f1846551-5f9-1, 2026-10-11 night; forum.md §47)
+
+Live runs on game instances 0 and 1 (no oracle deploy, no --restore, no process killed). DEMO_SOON was renamed to
+DEMO_SOON.paused for the runs and put back after each live stretch (it exists now). The instances are still running,
+idle after the last episode.
+
+- `Forum_W_w0r` (encounters.FORUM_W_REED): wave 0 from `fo_cl_w0w`, `forum_solo_intro(0, "Song Reed")` (the
+  Choristor and the Envoy killed in the intro), `end_wave` 0. Manifest `C:\ssbot\sandbox\1v1r_manifest.txt`, collect
+  `C:\ssbot\data\m2_1v1r\col`, summaries `s0..s4.json`. `C:\ssbot\sandbox\1v1r_next.ps1` chains a driver after the
+  running one's .done file. New arms in `1v1_arms.txt`: rfg, rs, rsg, rcg, rsg0, rd15.
+- `ssbot/combat/stance_block.py` (`SSBOT_FORUM_STANCE`, default on): the frames on which a hit on the Reed is a tink
+  (Defend to its end; Defend Start after its shortest dwell; Alert while it may still defend: no Just Did Defend and
+  not yet seen 3 frames with the hero surely inside Defend Range (7.65 u) without defending; other states from the
+  walk's earliest Defend Start). `StanceMemory` is updated per frame from `MultiForecaster.update`.
+  `MultiForecast.targets` then gives the Reed a second Target (`blocked=True`) on those frames:
+  - weight 0 and not real: no landed hit.
+  - `ForumPlanner._hit_branch`: a first hit on it is S = 1. The counter runs 1.25 s past the tink, beyond the horizon.
+    `audit.stance_rows` counts these rows. For FORCED_RISK the row is in contact from the hit + COUNTER_F (29).
+- `forum_v2`:
+  - `SSBOT_FORUM_V2_AIM_COAST` (default union): the RE_STAB pending aim also anchored at the Reed's position carried by
+    its velocity (decay 0.9 / frame) to the decision.
+  - `SSBOT_FORUM_V2_AIM_DIL` (default 0): a ring margin on the pending aims' zones.
+  - `aim_fail` takes p["anchors"]; zone cache key is (side, x, y).
+- Tests: test_stance_block (5), test_forum_v2 (+1: never swings into the Defend; the ranking test patches STANCE off).
+  forum planner / multi_forecast / integration / l2 / r1 pass. test_import_firewall still fails on the old
+  forum_v2 -> aim_zones -> ipc chain (S1, unchanged).
+
+### Measured (forum.md 47.4)
+
+| arm | eps | hitless kills | hits / ep | landed / s p50 | kill p50 | Block / ep |
+|---|---|---|---|---|---|---|
+| v0 | 6 | 33.3 % | 1.00 | 0.20 | 35.8 s | 0 |
+| fcs (v2 focus, a3823ad) | 20 | 60.0 % | 0.65 | 0.47 | 19.5 s | 0.35 |
+| rfg (fcs + TA=guard) | 12 | 75.0 % | 0.25 | 0.59 | 16.6 s | 0.17 |
+| rs (+ stance, 568a75f) | 24 | 66.7 % | 0.38 | 0.36 | 25.3 s | 0 |
+| rsg (+ stance + guard) | 24 | 62.5 % | 0.46 | 0.47 | 20.1 s | 0 |
+| rcg (rsg + coast union) | 24 | 62.5 % | 0.50 | 0.45 | 20.6 s | 0 |
+| rsg0 (= rsg, two more batches) | 48 | 58.3 % | 0.50 | 0.45 | 20.2 s | 0 |
+| rd15 (rsg + zone margin 1.5 u) | 24 | 66.7 % | 0.42 | 0.40 | 22.8 s | 0 |
+
+- Every episode was a kill, and the Reed had full HP at every handover.
+- The stance branch removes the counters: Block triggers went from 0.35 / 0.17 per episode to 0 over 144 episodes,
+  and counter damage from 2 to 0.
+- Hitless kills did not move: 65.6 % before (32 episodes), 62.5 % after (144 episodes). I stopped there.
+- The hits left after the change (66 in 144 episodes): stab lunges 23, stab body 18, pins 22 (mostly FORCED),
+  Evade / Throw body 3.
+- The stab hits come with the hero airborne and safe rows until 5-7 frames before the contact. The Reed moves
+  1.9 / 3.4 u (p50 / p90) through its 0.65 s Stab Antic, but the pending zone is anchored at its position now.
+- Late ticks are about 90 % in every v2 arm on the Reed (v0 0.8 %, the Choristor 1-2 %). The tick takes about 17 ms:
+  planner 9-10, v2 support 4, L2 1.4, forecast 2.
+
+### Not done / open
+
+- The Stab Antic motion, theory first: DistanceFly 5 / speedMax 5 / accel 0.15, DecelerateV2 0.95, vy 2 at the entry,
+  plus the Stab Pos velocity carried in. Then check it on the R0 antics and place the pending zone there. Two simple
+  models (radius-5 point, follow the hero) were no better than standing still. The coast anchor predicts better
+  (1.4 vs 2.3 u p50) but did not change the live hitless rate.
+- Pins (about 0.15 per episode, mostly FORCED): not analysed.
+- The Reed tick time (late about 90 %).
+- The dash stab stays vetoed. The same tink rule applies to it (defenders data).
+- TA=guard: within noise.
