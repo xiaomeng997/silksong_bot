@@ -5060,3 +5060,116 @@ HP at the handover.
   - The Reed is in waves 0, 2, 8 and 12. Wave 0 can reuse solo_clear with keep "Song Reed".
   - The Reed's parry / counter needs the tink-vs-defender rule.
 - The Clapper slam answer (the hammer pogo) from S2 is still open.
+
+## Task 1v1 - stage T1: the Clapper slam's down slash, theory first (branch worktree-wf_f1846551-5f9-1, 2026-10-11 night; forum.md §46)
+
+The person's experiment method (2026-10-11): no blind random trials. Compute the success region from the real
+boxes, check it on the person's recordings, then run targeted live trials at their success points, at every region
+the theory predicts that they never used, and across the predicted boundary. Random trials are only a supplement.
+This stage replaces the previous T1 agent's random pogo_probe work (stopped at 4aa7ccf). It keeps that agent's
+pogo_model, pogo_outcomes and the random-probe recordings (s700000-705000), which serve as the held-out set.
+
+### Code
+
+- `ssbot/combat/pogo_slam.py`:
+  - `SlamTimeline`: the slam's boxes per frame from the antic entry, from the measured template, with 8 timing variants.
+  - `SlamTheory`: the vectorised grid over jump paths x jump frame x start x. It covers the contact (the slash polygon
+    clipped to each frame's root-box band), the approach, the bounce and the miss branches, and the first hit.
+  - `GridAcc`, `predict_press` (run time: a press now, during a slam), `build_region` / `Region` (the success table),
+    `PRE_PROTECT_F`.
+- `ssbot/tools/pogo_theory.py`:
+  - `slams`: the per-frame slam timelines from recordings.
+  - `template`: writes `knowledge/.../pogo_clapper_slam.json`.
+  - `region --variant`: the GridAcc npz.
+  - `check`: the theory on the recorded slashes, from the logged state, inputs and boxes, with damage-rule variants on the real path.
+  - `targets` / `targets2` / `targets3`: the targeted trial lists.
+  - `live`: joins trials, rows and check, and reports success tables, widths and accuracy.
+  - `repredict`: the final theory at each trial's plan, approach included.
+- `ssbot/probes/pogo_target.py` runs the targeted trials. Each trial:
+  - waits in front of the Clapper and follows it frame by frame (the person's note: a backstep took the hero out of
+    Slam Range);
+  - takes the antic entry frame from the Control state's time;
+  - walks to x0 frame-exact (the hero's x extrapolated two frames ahead);
+  - runs the path's masks frame by frame from the jump frame.
+- `ssbot/combat/pogo_model.py`: `FRONT_U` is emptied. The 0.3 u Clapper patch was the slam's lunge.
+- `ssbot/tools/zone_overlay.py --overlay-pogo`: during a slam it shows the press now against the slam's coming boxes
+  (`predict_press`; a red cross marks a branch's first hit) and the success region (green = both branches safe,
+  yellow = only the bounce branch safe).
+- Tests: `tests/test_pogo_slam.py` (4) and `test_pogo_model.py` (6) pass.
+
+### The theory's rules (decompiled code and recordings)
+
+- The boxes are deterministic per state and per frame within the state (1,661 slams).
+- The lunge runs at 30 u/s in 0.6 u physics steps from the Slam 0 entry to the Slam 2 entry: 6 or 7 steps.
+- The Clapper never turns during a slam.
+- The bounce i-frames: 8 physics steps (0.16 s) from the hit response. They only cover ENEMY damage and are not exported.
+- No body DamageHero cooldown: SetCooldown skips a DamageHero on a HealthManager object.
+- A hit up to 2 frames before the contact does not land.
+- An earlier hit cancels the slash.
+- The second vy -10 does not restart the i-frames.
+
+### Numbers
+
+- Check (the theory on logged slashes, logged inputs and logged boxes):
+  - the person's slam slashes: bounce recall 0.85, precision 1.00; outcome class (S / BL / N / NL) 36/45.
+  - the random probes: bounce recall 0.97, precision 0.96; outcome class 96/105.
+- Targeted batch 1 (680 targets: the person's 30 points + 12 old-theory regions + scans):
+  - 317 trials with a down slash. In 236 trials the hero was hit before the press: the approach, which the old target
+    choice did not check.
+  - The check on the logged inputs agrees in 84 % of trials (on-plan 85 %).
+  - The final theory at each plan: 78 % over 5 classes incl. H0 = hit before the press. Approach hits: recall 0.82,
+    precision 0.98.
+  - The person's strike (in front, late antic to Slam 0), by press frame k from the antic entry and dx at the press:
+    - k 45-50, dx 3-6: 57 of 60 succeed.
+    - k 40-44: only dx 4-5 (13/16).
+    - k 51-53: dx 4-6 (19/25), dx < 4 fails (0/9, 7/26).
+    - k >= 54: 0.
+- Batches 2 + 3 (226 + 253): the corrected theory's regions the person never used. Batch 3 keeps only targets whose
+  approach the theory predicts safe, with 4 repeats and scans of +-8 frames / +-1.2 u. Success rates (hp0 > 2):
+  - early antic (k 0-24) in front: 19/23;
+  - mid antic (k 25-39) in front: 15/19;
+  - behind (mid antic and after the slam): 3/3;
+  - other paths into the yellow region: late antic front 0/10 (bounced then hammered), Slam 0 front 7/9.
+- Front "after the slam" targets: 0/12. The probe stands at x0 from the antic entry, inside Slam Collider 2's reach.
+  The approach check misses this standing phase; batch 3 still had 74/253 hit before the press.
+- The second press after the bounce:
+  - at +12 / +16 it never swings;
+  - at +20..40 it swings above the Clapper and bounces 2/44, never hurt. The theory is right in 46/47.
+- Check accuracy over all three batches: 237/277 = 85.6 % by outcome class.
+- Measured widths along the person's points:
+  - jump frame: 5-10 frames contiguous;
+  - x0: 1.2-2.4 u;
+  - the theory's widths are equal or 1-2 frames narrower (conservative).
+
+### State of the machine
+
+- Game instances 0 and 1 are still running (Clapper solo).
+- DEMO_SOON was renamed back at 20:19. No probe or overlay is running.
+- Frozen checkouts: `C:\ssbot\live_1v1_a6240c9` (batch 1 / 2), `C:\ssbot\live_1v1_5c8dffa` (follow logic, batch 2 i0 /
+  batch 3), `C:\ssbot\live_1v1_3dc9044` (the overlay).
+- The overlay launcher `C:\ssbot\sandbox\start_overlay_pogo_check.ps1` is prepared, not started; the previous one
+  is kept as `start_overlay_pogo_check.prev.ps1`. How to read it: forum.md 46.5.
+
+### Data (`C:\ssbot\data\m2_pogo`)
+
+- `theory/`:
+  - `slams_bot.jsonl`, `slams_human.jsonl` (per-frame slam timelines);
+  - `region_*.npz` (9 timing variants);
+  - `check_human4.jsonl`, `check_probe4.jsonl` (the final checks).
+- `target/`:
+  - `t_i*.jsonl`, `t2_i*.jsonl`, `t3_i*.jsonl` (targets);
+  - `live/2026-10-11/TRAIN/pogo_target_*` (recordings + `target_trials.jsonl`);
+  - `b{1,2,3}_rows / _check / _live.json / _repredict.json` (the analyses);
+  - `LEAD_NOTE_follow.txt`.
+
+### Next
+
+- Fold the standing / approach phase into the theory, or let the probe arrive just in time. That frees the front
+  "after the slam" targets.
+- Check the downspike i-frames' prefab value: 2 of the person's bounces survived Slam Collider 2 at +0.21 s.
+- Write the special-move table entries for the Clapper slam:
+  - the green cells;
+  - the person's yellow strike under a robust-bounce condition (bounce in all timing variants), since its miss
+    branch is never safe.
+  The real-time search then reaches them.
+- Jump slam / cast slam use the same Slam 2 / Recover boxes; wire them into SlamTimeline.
