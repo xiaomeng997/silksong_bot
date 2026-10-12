@@ -2125,6 +2125,10 @@ class ForumPlanner(Planner):
             mv = specials.enemy_move({"type_key": e.get("type_key") or tk, "fsms": e.get("fsms")})
             if mv is None or not p or abs(float(p[0]) - hx_) > 12.0:
                 continue
+            if special_mode.SPECIAL_MODE and not special_mode.in_family(mv[0], _inst):
+                # review 2026-10-12: the jump and the jump cast land through the same Control states (Slam 2, Slam
+                # Recover) as the slam: only the tracked instance of the table's own family is that move
+                continue
             if best is None or abs(float(p[0]) - hx_) < best[0]:
                 best = (abs(float(p[0]) - hx_), e, mv, iid, tk)
         if best is None:

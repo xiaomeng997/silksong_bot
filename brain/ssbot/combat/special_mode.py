@@ -55,6 +55,19 @@ from ssbot.combat.special_board import BOARD, L2_ON  # noqa: E402,F401  (the L2 
 _TL: dict = {}
 
 
+# the tracker's family of each table move (attack_range's Segmenter instance): the jump (CC_JUMP) and the jump cast
+# (CC_JUMP_CAST) land through the slam's own Control states "Slam 2" / "Slam Recover" (are_types.clapper FLIGHT), which
+# specials.enemy_move reads as CL_SLAM frames 57+ (review 2026-10-12)
+MOVE_FAMS = {"CL_SLAM": frozenset({"CC_SLAM"})}
+
+
+def in_family(move: str, inst) -> bool:
+    """E's tracked instance is the table move's own family (no instance: the antic was not seen, the move is not known
+    for sure: False)."""
+    fams = MOVE_FAMS.get(move)
+    return fams is not None and inst is not None and getattr(inst, "fam", None) in fams
+
+
 def timeline(move: str):
     """The move's per-frame boxes (root = the body, hammer = the attack) and lunge, in the enemy's facing frame
     relative to its position at the antic entry (CL_SLAM: pogo_slam.SlamTimeline); None: unknown move."""
@@ -383,6 +396,6 @@ def real_approach_fail(tl, k0: int, xa: float, cy: float, face: int, pj: int, bo
     return 0
 
 
-__all__ = ["approach_codes", "contacts", "body_stacks", "SPECIAL_MODE", "MODE_CERTS", "LONG", "L2_ON", "APPR", "BODY_M", "BOARD", "pre_protect", "SpecialCtx", "timeline", "world_boxes",
+__all__ = ["in_family", "MOVE_FAMS", "press_certified", "approach_codes", "contacts", "body_stacks", "SPECIAL_MODE", "MODE_CERTS", "LONG", "L2_ON", "APPR", "BODY_M", "BOARD", "pre_protect", "SpecialCtx", "timeline", "world_boxes",
            "active_last", "row_keys_allowed", "facing_at", "contact_index", "body_extra", "occ_special",
            "real_approach_fail"]

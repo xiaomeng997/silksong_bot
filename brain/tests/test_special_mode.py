@@ -54,8 +54,9 @@ def _clapper(x: float, face: int, k: int):
             "fsms": [{"name": "Control", "state": "Slam Antic", "t": k / 60.0}]}
 
 
-def _trk(units):
-    return NS(now={iid: (CL, e, None) for iid, e in units.items()}, tables={}, hero=None, T=0.0)
+def _trk(units, fam="CC_SLAM"):
+    inst = NS(fam=fam) if fam else None                          # the tracker's instance (special_mode.in_family)
+    return NS(now={iid: (CL, e, inst) for iid, e in units.items()}, tables={}, hero=None, T=0.0)
 
 
 def test_keys_filter_reads_the_keys_a_row_uses():

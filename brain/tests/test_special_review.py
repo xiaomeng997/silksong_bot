@@ -222,3 +222,17 @@ def test_the_tail_follows_the_entrys_jump_past_the_horizon(params, arena):
     for q in late:
         j = int(r.j_press[q])
         assert ((r.full[q][j + 3:j + 19] & kin.B_JUMP) != 0).all()
+
+
+@pytest.mark.parametrize("fam,special", [("CC_SLAM", True), ("CC_JUMP", False), ("CC_JUMP_CAST", False), (None, False)])
+def test_only_the_slam_itself_is_the_tables_move(params, arena, mode_on, fam, special):
+    # the jump and the jump cast land through the slam's Control states (Slam 2 / Slam Recover): 134753a read those as
+    # CL_SLAM frames 57+ and dropped the landing's danger; no instance (the antic unseen): not known for sure either
+    e = _clapper(30.0, 1, 0)
+    e["fsms"] = [{"name": "Control", "state": "Slam 2", "t": 2 / 60.0}]
+    pl = _planner(params, arena)
+    pl.debug = True
+    _tick(pl, params, _support({7: [M_BOX]}, _trk({7: e}, fam=fam)))
+    assert (pl._spec_meta is not None) == special
+    if not special:
+        assert pl._sctx is None and pl.audit.sm_ticks == 0
