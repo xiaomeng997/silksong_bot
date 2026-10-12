@@ -42,9 +42,10 @@ SPECIAL_MODE = os.environ.get("SSBOT_FORUM_SPECIAL_MODE", "0").strip() == "1"
 MODE_CERTS = frozenset(("both", "bounce"))
 LONG = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_LONG", "1").strip() != "0"
 # the real-box approach check (T1: the hammer and the root box, no margin, from the jump to the press) as a FILTER of
-# the special rows (default off: the person's rule checks the approach against E's body and the others only; the
-# audit counts the chosen rows failing it either way)
-APPR = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_APPR", "0").strip() == "1"
+# the special rows (default on, the person 2026-10-12 after G1's replay: the approach also checks M's active real
+# boxes - without it 475 of 712 chosen ticks waited inside the falling hammer; SSBOT_FORUM_SPECIAL_APPR=0 is the
+# literal rule, E's body and the others only; the audit counts the chosen rows failing it either way)
+APPR = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_APPR", "1").strip() != "0"
 _BM = os.environ.get("SSBOT_FORUM_SPECIAL_BODY_M", "").strip()
 BODY_M: float | None = float(_BM) if _BM else None      # None: E's support margin (RangeSupport.m_of)
 CERT_AFTER = 75           # SlamTheory.T_AFTER: the certified window ends at the landing, at most this many frames on
