@@ -409,6 +409,10 @@ class EnvelopeAudit:
     v2_dash_unsafe: int = 0       # ... of them in contact only with that margin
     v2_esc_more: int = 0          # v2: rows the escape check looked at past the first v2_esc_k (forum_v2.ESC_MORE)
     v2_esc_tail: int = 0          # v2: chosen rows whose passing escape became the plan's tail (forum_v2.ESC_TAIL)
+    spec_ticks: int = 0           # specials (SSBOT_FORUM_SPECIALS): ticks with arrive-and-strike rows, the rows, the ones
+    spec_rows: int = 0            #   safe after every check, the ticks that chose one
+    spec_safe: int = 0
+    spec_chosen: int = 0
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -2399,6 +2403,10 @@ class ForumPlanner(Planner):
         self.last_safe, self.last_cs = safe, cs
         V = np.zeros(N, bool)
         counts = np.bincount(first[:N0][safe[:N0]], minlength=len(cs.first_names))
+        if n_spec:
+            self.audit.spec_ticks += 1
+            self.audit.spec_rows += n_spec
+            self.audit.spec_safe += int(safe[N0:N0 + n_spec].sum())
         V[:N0] = counts[first[:N0]] >= 2
         if cont:
             V[-1] = safe[-1]
@@ -2612,6 +2620,7 @@ class ForumPlanner(Planner):
             a.esc_unsafe += int(esc_unsafe and not S[i])
             sel_cmd = cmd[i]
             name = rname(i)
+            a.spec_chosen += int(N0 <= i < N0 + n_spec)
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
