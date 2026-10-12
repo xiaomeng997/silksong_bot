@@ -78,7 +78,7 @@ def targets_of(s: dict):
             v = np.asarray(c["verts_world"], float).reshape(-1, 2)
             if c.get("kind") not in ("box", "polygon") and len(v) > 8:
                 v = v[:: max(len(v) // 8, 1)]
-            out.append((v, k))
+            out.append((v, k, e.get("type_key"), 1 if e.get("flipX") else -1))
     return out
 
 
@@ -102,7 +102,8 @@ def run(recs: list[Path], rows_by: dict, ev_offs: tuple, split: str) -> dict:
         for _, m in rd.terrain():
             terrain = kin.Terrain2D.from_message(m, params.scene("Hang_04"))
             break
-        pms = {o: PogoModel(params, terrain, ev_off=o[0], grow_u=o[1]) for o in ev_offs}
+        pms = {o: PogoModel(params, terrain, ev_off=o[0], grow_u=o[1],
+                            front_u=None if o[2] is None else {"Song Heavy Sentry": o[2]}) for o in ev_offs}
         trk = kin.StateTracker(params, terrain or kin.Terrain2D.empty())
         buf: deque = deque(maxlen=T + EXTRA + 8)
         starts = {}
@@ -206,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--split", default="all", choices=("all", "calib", "test"))
     ap.add_argument("--ev-off", default=None, help="EV_POGO offsets to compare, e.g. -1,0,1 (default pogo_model.EV_OFF)")
     ap.add_argument("--grow", default=None, help="target polygon growths to compare, e.g. 0,0.15,0.3 (u)")
+    ap.add_argument("--front", default=None, help="the Clapper's front extensions to compare (u; pogo_model.FRONT_U)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
     from ssbot.combat import pogo_model
@@ -218,13 +220,14 @@ def main(argv: list[str] | None = None) -> int:
                 rows_by[r["session"]].append(r)
     offs = (pogo_model.EV_OFF,) if a.ev_off is None else tuple(int(x) for x in str(a.ev_off).split(","))
     grows = (pogo_model.GROW,) if a.grow is None else tuple(float(x) for x in str(a.grow).split(","))
-    offs = tuple((o, g) for o in offs for g in grows)
+    fronts = (None,) if a.front is None else tuple(float(x) for x in str(a.front).split(","))
+    offs = tuple((o, g, fr) for o in offs for g in grows for fr in fronts)
     extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
     res = run(recordings(list(a.recs) + extra), rows_by, offs, a.split)
-    out = {"split": a.split, "by_ev_off": {f"{o[0]}|{o[1]}": {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
+    out = {"split": a.split, "by_ev_off": {f"{o[0]}|{o[1]}|{o[2]}": {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1), "utf-8")
-    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(dict(x, ev_off=o[0], grow=o[1])) + "\n" for o, r in res.items() for x in r), "utf-8")
+    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(dict(x, ev_off=o[0], grow=o[1], front=o[2])) + "\n" for o, r in res.items() for x in r), "utf-8")
     print(json.dumps(out, indent=1)[:6000])
     return 0
 

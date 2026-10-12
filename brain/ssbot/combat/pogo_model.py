@@ -34,6 +34,20 @@ DOWN_ALT = np.array([[1.714, -0.368], [1.568, -1.688], [0.91, -2.337], [0.067, -
 ACTIVE = (3, 9)          # frames after the press frame on which the slash can land (pogo_outcomes: hits at +3 .. +9)
 EV_OFF = 0               # EV_POGO's index relative to the contact frame's (pogo_check calibration)
 GROW = 0.0               # u a target polygon grows by before the overlap test (pogo_check calibration)
+# the hurtbox past the exported body box on the side the enemy faces (pogo_check: the Clapper's held hammer is
+# hittable, 0.1-0.3 u in front of its layer-11 box in Idle; flipX False = facing left)
+FRONT_U = {"Song Heavy Sentry": 0.3}
+
+
+def front(poly: np.ndarray, face: int, d: float) -> np.ndarray:
+    """poly with its face side (+1 right, -1 left) moved out by d."""
+    if not d:
+        return poly
+    q = poly.copy()
+    c = poly[:, 0].mean()
+    sel = (q[:, 0] - c) * face > 0
+    q[sel, 0] += face * d
+    return q
 # what a collider does to the slash (pogo_outcomes): its kind from the layer and the damage parry bits
 K_HURT, K_TINK = "hurtbox", "tink"
 
@@ -109,23 +123,27 @@ class Branches:
 
 class PogoModel:
     def __init__(self, params: kin.HeroParams, terrain: kin.Terrain2D | None = None, ev_off: int = EV_OFF,
-                 grow_u: float = GROW):
+                 grow_u: float = GROW, front_u: dict | None = None):
         self.params = params
         self.terrain = terrain
         self.ev_off = ev_off
         self.grow_u = grow_u
+        self.front_u = FRONT_U if front_u is None else front_u
 
     def contact(self, pos: np.ndarray, facing: int, press_j: int, targets, alt: bool | None = None
                 ) -> tuple[int, str | None]:
         """The first rollout index j in press_j + ACTIVE where the slash at pos[j] meets a target (targets(j): [(poly,
-        kind)]); hurtboxes before tinks on the same frame."""
+        kind)] or [(poly, kind, type key, facing)] for FRONT_U); hurtboxes before tinks on the same frame."""
         sp = slash_poly(facing, alt)
         for j in range(press_j + ACTIVE[0], min(press_j + ACTIVE[1], len(pos) - 1) + 1):
             p = sp + pos[j]
             hit = None
-            for poly, kind in targets(j):
+            for t in targets(j):
+                poly, kind = t[0], t[1]
                 if kind is None:
                     continue
+                if len(t) > 3 and t[2] in self.front_u:          # (poly, kind, type, facing)
+                    poly = front(poly, t[3], self.front_u[t[2]])
                 if meets(p, grow(poly, self.grow_u)):
                     if kind == K_HURT:
                         return j, kind
@@ -172,5 +190,5 @@ ENEMY_OUTCOME = {
 }
 
 
-__all__ = ["DOWN", "DOWN_ALT", "ACTIVE", "EV_OFF", "GROW", "grow", "K_HURT", "K_TINK", "collider_kind", "slash_poly", "meets",
+__all__ = ["DOWN", "DOWN_ALT", "ACTIVE", "EV_OFF", "GROW", "grow", "FRONT_U", "front", "K_HURT", "K_TINK", "collider_kind", "slash_poly", "meets",
            "Branches", "PogoModel", "ENEMY_OUTCOME"]

@@ -2052,11 +2052,11 @@ class ForumPlanner(Planner):
     def _v2_dash(self, o: np.ndarray, f, r1, cx: np.ndarray, cy: np.ndarray, tq: np.ndarray, fr) -> np.ndarray:
         """The focus margin (forum_v2 MARGIN_MODE "focus", the person 2026-10-11): a row that dashes at the focus
         unit reads that unit with its "rule" margin (occupied_dash) on stage 1's frames; every other row keeps
-        FOCUS_M. The rows in contact only that way (last_info["dash_only"]) get S = 1 at the selection, after the
+        FOCUS_M. The rows in contact only that way (v2_dash_only, also last_info["dash_only"]) get S = 1 at the selection, after the
         envelope, the hit branches and their caps ran as without the rule (forum.md 46.1: applied at stage 1 they
         shifted the caps and changed 7-20 % of the 1v1 picks though no pick of the flat-0.5 arm was such a row).
         The envelope, the hit branches and the escapes read the plain support."""
-        self.last_info.pop("dash_only", None)
+        self.v2_dash_only = np.zeros(0, np.int64)
         rs = getattr(f, "rs", None)
         if rs is None or getattr(rs, "stack_dash", None) is None or rs.dash_focus not in getattr(rs.trk, "now", {}):
             return o
@@ -2070,7 +2070,7 @@ class ForumPlanner(Planner):
         only = od.any(axis=1) & ~o[dr].any(axis=1)
         self.audit.v2_dash_rows += int(dr.sum())
         self.audit.v2_dash_unsafe += int(only.sum())
-        self.last_info["dash_only"] = np.flatnonzero(dr)[only]
+        self.v2_dash_only = np.flatnonzero(dr)[only]
         return o           # applied at the selection (tick: S of these rows = 1 after the branches and their caps)
 
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
@@ -2322,7 +2322,7 @@ class ForumPlanner(Planner):
                     clash_occ[i] = (w, oc)
                     self.audit.clash_partial += 1
         t4 = time.perf_counter()
-        dash_only = self.last_info.get("dash_only")
+        dash_only = getattr(self, "v2_dash_only", None)
         if dash_only is not None and len(dash_only) and forum_v2.FOCUS_DASH == "1":
             S = S.copy()
             S[dash_only] = True
@@ -2592,7 +2592,7 @@ class ForumPlanner(Planner):
         self.prev_name = res.name
         self.ticks += 1
         t6 = time.perf_counter()
-        self.last_info = {"posture": posture, "N": N, "stage1_pass": int(pass1.sum()), "enveloped": int(env.sum()),
+        self.last_info = {"dash_only": getattr(self, "v2_dash_only", None), "posture": posture, "N": N, "stage1_pass": int(pass1.sum()), "enveloped": int(env.sum()),
                           "core": int(core.sum()), "core_pass": n_core, "prio": n_prio, "overrun": overrun,
                           "cut": cut, "hitfx": budget["hitfx"], "react": budget["react"], "capped": budget["capped"],
                           "uncapped": budget.get("uncapped", 0),
