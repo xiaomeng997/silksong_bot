@@ -8,10 +8,12 @@ import pytest
 
 from ssbot.combat import candidates as cmod
 from ssbot.combat import forum_v2 as v2
+from ssbot.combat import stance_block
 from ssbot.combat.attack_range import Mask
 from ssbot.combat.forum_planner import ForumConfig, ForumPlanner
 from ssbot.combat.planner import PlannerConfig
 from ssbot.knowledge import kinematics as kin
+from tests.test_multi_forecast import BIN, _ent, _go, _run, _tables
 from tests.test_forum_planner import FLOOR, _ctx, _prefs, _reed_forecaster, _world, arena, params  # noqa: F401
 
 
@@ -213,7 +215,8 @@ def test_v2_escape_fails_when_the_end_is_closed_and_passes_when_open(params, are
     assert pl2.last_info["esc"]["fail"] > 0 and pl2.last_info["esc"]["unsafe"]
 
 
-def test_v2_ranks_safe_rows_by_landed_hits_first(params, arena):
+def test_v2_ranks_safe_rows_by_landed_hits_first(params, arena, monkeypatch):
+    monkeypatch.setattr(stance_block, "STANCE_ON", False)   # an Alert Reed that may still defend: no gain (below)
     x = 30.0
     mf = _reed_forecaster(None, x=31.2)             # an idle Reed in reach (its support is not read under v2)
     f = v2.V2Forecast(mf.forecast(0.8), _support_with([]))
@@ -355,3 +358,33 @@ def test_dash_at_rows_moving_towards_the_focus_in_a_dash():
     vel[1, 2, 0] = -20.0         # dashing away: no
     vel[2, :, 0] = 8.0           # running at it, no dash: no
     assert v2.dash_at(mode, vel, cen, 35.0).tolist() == [True, False, False]
+
+
+def _defend_forecaster(x: float, frames: int = 12):
+    """A Reed in Defend at x (entered at frame 0)."""
+    from ssbot.combat.multi_forecast import MultiForecaster
+    from ssbot.core.worldstate import ORACLE
+    mf = MultiForecaster(_tables(), ORACLE, waves=False)
+    script = []
+    for f in range(frames):
+        t = f * BIN
+        evs = [_go(7, "Defend", f, t)] if f == 0 else []
+        script.append((f, t, [_ent(7, x, FLOOR + 1.0, "Defend", flip=True, box=(x - 0.5, FLOOR, x + 0.5, FLOOR + 2.0))],
+                       evs))
+    _run(mf, script)
+    return mf
+
+
+def test_v2_never_swings_into_the_reed_defend(params, arena):
+    """A first hit on a Reed in Defend is a tink: it scores nothing and its branch (the counter) is unsafe."""
+    x = 30.0
+    mf = _defend_forecaster(31.2)
+    f = v2.V2Forecast(mf.forecast(0.8), _support_with([]))
+    tg = f.targets(np.arange(37) / 60.0)
+    assert any(t.blocked for t in tg)
+    pl = _planner(params, arena, True)
+    start = kin.initial_state(params, x, FLOOR + params.foot)
+    pl.tick(_world(x), start, kin.HoldState.idle(1), np.zeros(1, np.int64), f, _prefs(None, 27.0), _ctx())
+    sel = pl.last_sel
+    assert sel["safe"].any() and sel["nh"].max() == 0
+    assert pl.audit.stance_rows > 0

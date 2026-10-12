@@ -68,6 +68,7 @@ import numpy as np
 
 from ssbot.combat.enemy_tables import BIN, EMPTY, FORUM_DIR, JMAX, TAIL, EnemyTables, PlaceBatch, TypeTable, \
     WinBatch
+from ssbot.combat import stance_block
 from ssbot.combat.branch_model import BranchModel, BranchView, memory_for_table
 from ssbot.combat.enemy_tracker import AIM_AFTER, FACES_LEFT, TAIL_KEEP_S, EnemyTracker, body_offsets
 from ssbot.combat.fastquery import circle_hits
@@ -622,6 +623,7 @@ class Target:
     box: np.ndarray               # [T, 4]
     ok: np.ndarray                # [T]
     hazard: bool = False
+    blocked: bool = False         # a guard stance's copy of the body (stance_block): a hit on its ok frames is a tink
 
 
 class _Shim:
@@ -751,6 +753,7 @@ class MultiForecaster:
                 tr.revive()
         if self.bv is not None:
             self.bv.observe(T, ws, self.trackers)
+        stance_block.observe(self, T, ws)
         self.hazards.update(ws)
         self._self_hazards(ws, T)
         if self.use_waves:
@@ -2682,7 +2685,14 @@ class MultiForecast:
             b = np.array(tr.body)
             box = np.stack([b[0] + tr.vel[0] * dt, b[1] + tr.vel[1] * dt, b[2] + tr.vel[0] * dt,
                             b[3] + tr.vel[1] * dt], axis=1)
-            out.append(Target(tr.iid, tr.tk, box, np.ones(len(tk), bool)))
+            blk = stance_block.blocked(self._fc, tr, self.origin_t + tk)
+            if blk is not None and blk.any():
+                # the frames a hit would be blocked (the Reed's Defend): a second target, its hit a tink (no gain, the
+                # counter's branch unsafe: forum_planner._hit_branch)
+                out.append(Target(tr.iid, tr.tk, box, ~blk))
+                out.append(Target(tr.iid, tr.tk, box.copy(), blk, blocked=True))
+            else:
+                out.append(Target(tr.iid, tr.tk, box, np.ones(len(tk), bool)))
         for p in self.paths:
             if p.type_key != BELL:
                 continue

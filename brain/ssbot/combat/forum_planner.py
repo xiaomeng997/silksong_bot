@@ -77,7 +77,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
-from ssbot.combat import forum_v2
+from ssbot.combat import forum_v2, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
                                   _hull_points, _is_macro, _rect_meets_polys)
@@ -398,6 +398,7 @@ class EnvelopeAudit:
     esc_failed: int = 0           # ... it failed the check (every checked row failed: the fewest failures chosen)
     esc_unchecked: int = 0        # ... no row checked before esc_deadline_ms with threats in reach
     esc_carried: int = 0          # ... a carried CONTINUE of such a row
+    stance_rows: int = 0          # hit-branch rows whose first hit is a tink on a guard stance (stance_block): unsafe
     whip_clash_rows: int = 0      # clash-safe rows whose clash meets a Choristor whip, J lowered (track A "whip")
     kb_rows: int = 0              # hit-branch rows whose hit enemy was moved by its knockback (track A "kb")
     bind_threat: int = 0          # Bind macros the support passed and "+k"'s lock check refused (_bind_threatened)
@@ -1031,8 +1032,13 @@ class ForumPlanner(Planner):
         # stance may score where a side slash must not), else the target's one weight
         kw = getattr(prefs, "hit_kw", None) or {}
         tw = np.zeros((len(keep), 4))
+        slot: dict = {}                       # enemy iid -> its scoring slot (a guard stance's copy shares its body's)
         for k, t in enumerate(keep):
-            if k < self.fcfg.K_tgt and not t.hazard:
+            if t.hazard:
+                continue
+            if t.iid not in slot:
+                slot[t.iid] = len(slot)
+            if slot[t.iid] < self.fcfg.K_tgt and not getattr(t, "blocked", False):
                 w4 = kw.get(t.iid)
                 tw[k] = w4 if w4 is not None else float(hw.get(t.iid, 1.0))
         return (np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64),
@@ -1112,7 +1118,7 @@ class ForumPlanner(Planner):
                    unmod=np.zeros(N, np.bool_), sw_f=np.full(N, -1, np.int64), sw_k=np.zeros(N, np.int64),
                    sw_face=np.zeros(N, np.int64), nh=np.zeros(N))
         vr, vl, st, win = self.shapes
-        real = np.array([not t.hazard for t in keep], np.bool_)
+        real = np.array([not t.hazard and not getattr(t, "blocked", False) for t in keep], np.bool_)
         _forum_score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                             np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                             tbox if len(keep) else np.zeros((0, T1, 4)), tok if len(keep) else np.zeros((0, T1), bool),
@@ -1208,6 +1214,16 @@ class ForumPlanner(Planner):
                                                                                                     d_))
                 occ[ns] = o if o is not None else self._contacts(f, rh.bound[ns], tk, skip[ns])
         s = occ.any(axis=1)
+        # a first hit on a guard stance (stance_block: the Reed's Defend) is a tink that starts its counter, 1.25 s
+        # long past the tink: beyond the horizon, so the branch cannot be shown safe (the person: a locked move only
+        # when both outcomes are safe)
+        if len(tg):
+            blk = np.array([bool(getattr(tg[int(sc["first_t"][r])], "blocked", False)) for r in rows], bool)
+            if blk.any():
+                s |= blk
+                for n in np.flatnonzero(blk):       # FORCED_RISK's ranking: in contact from the counter's first damage
+                    occ[n, min(int(fr[n]) + stance_block.COUNTER_F, occ.shape[1] - 1):] = True
+                self.audit.stance_rows += int(blk.sum())
         capped = np.zeros(len(rows), bool)
         # the hit enemy's reaction (hero_caused TOOK DAMAGE exits), one forecast per (enemy, hit frame)
         mf = getattr(f, "_fc", None)
