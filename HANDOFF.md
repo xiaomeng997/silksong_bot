@@ -1,5 +1,98 @@
 # HANDOFF - M2 integration (branch m2-integration-6)
 
+## START HERE (2026-10-12): Forum Clapper 1v1, the next session
+
+Written by the session of 2026-10-11/12 for a fresh session (the old one's context was too long). Reply to the person
+in Chinese; code, commits and this file in English.
+
+### Where things are
+
+- Code: branch `worktree-wf_f1846551-5f9-1`, worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_f1846551-5f9-1`,
+  head `677979c`, NOT merged to main. It holds planner v2-lite and everything after it (stages S1-S3, T1-T3) plus two
+  commits of the old session: `42d258d` (SSBOT_FORUM_KILL_FREE, default on: no killing-blow hold-back for the death
+  slow motion's missing pause, the person's rule) and `677979c` (the combat_run worker boosts itself: High priority,
+  P-cores 0-15, power throttling off).
+- That branch's HANDOFF.md has the detailed sections "Task 1v1" S1-S3 and T1-T3; the facts are in
+  `docs/facts/1.0.30000/forum.md` sec. 43-48 there (Chinese).
+- The person's rules and decisions: `docs/plans/forum_planner_plan.md` on main. Read its notes of 2026-10-09..12 first.
+  The newest ones are the special-move table design, the experiment method, the two-Clapper / finale tactic (T4), the
+  "why" study and its fix order, and the general special rule.
+- Data: `C:\ssbot\data\m2_pogo` (T1, down slash on the slam), `m2_specials` (T3), `m2_two_clapper` (two-Clapper data
+  checks), `m2_why` (the 2026-10-12 replay study; `refute/table_q1.txt`, `table_q2.txt`), `m2_1v1*` (1v1 runs),
+  runs in `C:\ssbot\data\runs\m2\2026101[12]_*`.
+
+### State of play (Clapper 1v1, Forum_W_w7, fo_cl_w7w, crest Wanderer)
+
+- With the worker boost, the arm fcs at 677979c: 7 of 8 kills, 10 hits, 7 of them small rune bombs, kill 44-59 s.
+  The old code f2e30f9 (arm tj2) boosted: 3 of 3. Without the boost, the evening runs had 10x the late states and
+  0-2 kills of 6.
+- The bot glides away from the small runes, never down-slashes the slam and stays far. The 2026-10-12 replay study
+  explains why (plan doc note "why it glides / never down-slashes / not in the face").
+- T1: the down slash on the slam, theory vs live 85.6 %. The person's strike (antic frames 45-50, 3-6 u in front)
+  succeeded 57/60.
+- T3: the special table specials_CL_SLAM.json has 5,757 entries. Arrive-and-strike rows sit behind
+  SSBOT_FORUM_SPECIALS=1 (off by default). Every special row has been rejected so far.
+
+### Next task (the person approved it; budget: about 2-3 % of the weekly quota)
+
+1. Implement the person's GENERAL SPECIAL RULE (plan doc 2026-10-12):
+   - At the antic of a move that has table entries (CL_SLAM first), and when a strike point is reachable and safe from
+     the OTHER enemies (the strike frame and the bounce path after it), the enemy goes into "special mode":
+     - drop that move's attack-range estimate and its aim zones from the safety check;
+     - keep the enemy's body;
+     - keep every other enemy's prediction.
+   - A down slash on an enemy in a move is a certain hit: from the press frame check only the bounce branch, in stage
+     1 and in the envelope. Its escape starts from the bounce state.
+   - The approach before the press is checked against the body and the other enemies only.
+   - The strike can lie beyond the 0.6 s horizon (slam antic 0.8 s, press at frames 42-50). So the strike point is a
+     goal for the L2 controller / the arrive-and-strike rows from the antic's first frame.
+   - L2 must stop sending the hero 13 u away at a slam (gauntlet.py _clapper_spot / CC_RETREAT). Give hit_w > 0 at the
+     strike cell.
+   - Special rows: filter them on the keys they actually use, not ctx.allowed_mask.all().
+   - With no safe, reachable strike, fall back to the normal dodge.
+2. Small runes: before Cast 2 is seen, treat the bombs as not started. Open-loop effect: Cast 1 umbrella 25 % -> 4 %,
+   slashing 18 % -> 91 %.
+   - Then stand on the ground 3-4 u from the Clapper during casts (face_u A/B).
+   - Add the person's row: continuous slashes plus a short hop just before ring 1 lights, with no second jump press in
+     the air (that opens the umbrella).
+   - Per-bomb timing with a small bomb margin.
+   - Prefer non-glide rows.
+3. Live A/B on the Clapper 1v1 against fcs: hitless %, landed hits per second, kill time, hits by source.
+4. Then show the person:
+   - the eye-check overlays (prepared, not started): `C:\ssbot\sandbox\start_overlay_pogo_check.ps1` and
+     `start_overlay_specials_check.ps1`. They wait until no game window is open; launch them via WMI.
+   - a 0.5x demo.
+
+Later, from the plan doc:
+- T4: the finale with the person's two-Clapper tactic.
+- Cross Stitch test (add it to a Forum savestate).
+- Reed 1v1: the stab antic motion; 90 % of ticks over budget.
+- Verify the planner's own input lag (T3 found the probe one frame late).
+- The new vs old code regression is still open under the boost: old 3/3, new 3/3 + 7/8.
+- Occasional 1.4-3.2 s worker stalls trip the brain-lost watchdog (HARNESS_FAIL). Cause unknown.
+
+### Operations
+
+- Live runs: `C:\ssbot\sandbox\1v1_live.ps1 -Rev <sha> -Inst <0|1> -Arms <arm> -Chunk N -Blocks 1 -Seed S
+  [-Manifest ...]`. Arms are in `1v1_arms.txt`. Frozen checkouts come from `1v1_freeze.ps1 -rev <sha>`
+  (C:\ssbot\live_1v1_<sha>).
+- Start everything detached via WMI `Win32_Process Create` (PowerShell `Invoke-CimMethod`).
+- C:\ssbot\sandbox\DEMO_SOON pauses live runs: rename it to DEMO_SOON.paused for a run and back afterwards.
+  STOP_AGENTS stops agents.
+- Game instances: `brain> ..\scripts\uv.cmd run python -m ssbot.tools.launcher -n 2 --detach`. NEVER `--restore`,
+  NEVER kill game processes (ask the person to close the windows); NEVER deploy the oracle.
+- At the time of writing, instances 0 and 1 are open (started 05:08 on 10-12). The next launcher prunes them and
+  restores the golden PlayerPrefs.
+- Workers boost themselves from 677979c on. With an older checkout, run `C:\ssbot\sandbox\boost_workers.ps1` alongside.
+  Offline long jobs stay at Idle priority, at most 3-4 at once.
+- Known test failures, both from before this session:
+  - `tests/test_three_layer.py::test_a_bell_in_reach_is_a_hit_target_of_weight_0`;
+  - `tests/test_import_firewall.py` (from S1).
+- Budget: weekly 91 % on 2026-10-12 06:00 PDT; it resets Thu 2026-10-15 10:00 UTC. About 0.5M subagent tokens ≈ 1 %.
+  The person wants one agent at a time and about 1-2 % kept for chatting until the reset.
+- Workflow scripts must be ASCII only. Never SendMessage to a running workflow agent; use a note file in its data
+  directory.
+
 One section per merged chain; each keeps its chain's own text (headings demoted one level) including its Next steps.
 Paths to worktrees / run dirs in a section are that chain's, not this integration worktree's.
 
