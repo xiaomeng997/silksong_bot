@@ -5538,3 +5538,129 @@ Not confirmed or not fixed (the live A/B must watch these):
 5. A lit bomb missing from one frame's entity export is unpredicted for that frame.
 6. Unverified live: pre-protect frames, the EV_POGO contact convention, the hop timing, FACE 3 vs ring 0, and the
    person's overlay eye check of the bomb forecast. That eye check is still due before BOMB or HOP is relied on.
+
+## Task 1v1 - stage G3: delayed down slashes (branch worktree-wf_f1846551-5f9-1, 2026-10-12; forum.md §52)
+
+The person's decision (plan doc 2026-10-12, "绝招带后手；规划器加延迟下劈" (3)): the Forum planner gets the boss planner's
+pogo macro as a general fix. Before: a down slash only "now" (ATTACK(down)L/R, the first 4 frames of an air row, always
+with a side key); a ground jump + down slash was two decisions (live 10-11/12: 883 of 1,399 down slashes right after a
+JUMP decision), so choosing the jump never counted the strike, and no row had a second down slash. All new behaviour is
+behind switches, default off; with them off every decision is still 677979c's (checked below).
+Data: `C:\ssbot\data\m2_special\g3` (replay probes `why_sel.py`, `meas.py` + `summ.py`, `cmp.py`, `bench.ps1`, launch
+scripts, outputs). All offline; no game was started.
+
+### Code
+
+- `ssbot/combat/dslash.py` (new, numpy only): switches; templates (ground: jump now x hold 3/8/14/20 x press 3..33
+  step 3 x key L/N/R = 132; air: press now or after w in AIR_W (15 values) x key L/N/R, N = in place, a committed jump
+  hold kept); `expand` (the key after the press L/N/R); `chain` (a second press, no jump press after the take-off).
+- `forum_planner.py`:
+  - `_ds_contact_kernel` (numba): the first down slash in the air from a given state on; its first contact with a real
+    target's predicted body (the scorer's polygons, windows and facing); robust under body shifts of -2..+2 frames
+    (optionally also with the body stopped where it is now).
+  - `_ds_rows`: targets over P + 80 frames; runs only with a real target within 10 u in x. Prefilter rollout of the
+    templates to their press + 14 frames, kept where the blade meets a target grown 0.4 u (at most SURV_MAX = 12,
+    earliest contact first). Survivors x key after the press; contact; the certain-hit rule; the certain rows' bounce
+    lanes (EV_POGO at the contact). Chains: a second press 20/24/.../40 frames after the bounce, the earliest and the
+    latest that connect per first strike (at most 16), only when the second strike is certain too; their tail past the
+    horizon (the second strike and bounce) is checked against the support. The previous chosen family row is continued
+    ("DS cont"). At most MAX_ROWS = 24 rows (chains, then certain rows, then the earliest contact).
+  - `_ds_move_paths` / `_ds_cert`: the certain-hit rule reads the target's own move path: the body now carried by the
+    move template's displacement still to come (`RangeTable.position`), one path per branch the move may take. The
+    strike must meet every path, robust to -2..+2 frames on each, at the same frame. A target not in a tracked move, or
+    in a move without a template, is never certain.
+  - tick: family rows after the hop rows (keys filter as the special rows). Certain rows: their bounce lanes spliced
+    into r1 (stage 1, the score, the end state for the escape); enveloped with their bounce events; the hit branch runs
+    on the same lane (the hit enemy's reaction; `_hit_branch(ev_base=)`), outside the hit-branch cap. Non-certain
+    family rows are checked on both branches like every row. Family rows that pass stage 1 are always enveloped. A
+    certain second strike past the horizon is credited (+1 nh, J + hit x hit_w). Audit `ds_*`.
+  - `_special_rows`: SPECIAL_FAST (the whole template set every FULL_EVERY ticks and on the move's first tick, else
+    only the templates that start now: no jump or a jump on mask 0) and SPECIAL_HOLD (`hold_rem`). `_sm_board` keeps a
+    full tick's strike spot for the BOARD on the ticks between. Audit `sm_full_ticks`, `sm_board_cached`.
+- `specials.py`: `strike_rows(now_only=, hold_rem=)`, `_templates(now_only=)`. `special_mode.py`: FAST, FULL_EVERY,
+  HOLD.
+- `tests/test_dslash.py` (14 tests): templates; the chain has no jump press in the air; the jump and its strike are one
+  row that hits; the prefilter; idle targets are not certain; certain rows skip the miss branch; the second strike
+  counts; a body moving away on its move path is not certain; the stopped-body variant; FAST; HOLD.
+
+### Switches
+
+- `SSBOT_FORUM_DSLASH=1`: the family (v2 ticks, ground or air posture, with control, a slash-type down attack: the
+  Wanderer; the Reaper's dive is excluded).
+- `SSBOT_FORUM_DSLASH_CERT=0`: no certain-hit rule (every family row on both branches, no chains); default on with the
+  family. `SSBOT_FORUM_DSLASH_CHAIN=0`: no second strike. `SSBOT_FORUM_DSLASH_MAX` (24): rows per tick.
+- `SSBOT_FORUM_SPECIAL_FAST=1`: the special mode's cost cut (item 3); `SSBOT_FORUM_SPECIAL_FULL_EVERY` (6).
+- `SSBOT_FORUM_SPECIAL_HOLD=1`: the special rows keep a committed jump hold (item 4).
+
+### Numbers (offline; open-loop m2_why replays, every tick, deadlines off; base = fcs)
+
+| Segment (ticks) | Family ran | Safe family row | New (no safe hitting ATTACK(down) row in the set) | No safe hitting row at all | Chosen (share of safe ticks) | Chosen certain / chain | Chosen row nh per s, base -> ds |
+|---|---|---|---|---|---|---|---|
+| Clapper 1v1 054126 i0 ep0-1 (6,605) | 2,014 | 1,452 | 1,155 | 513 | 933 (64 %) | 854 / 758 | 0.49 -> 0.77 |
+| w0r 214048 i0 ep0, Reed + Pilgrim 03 (1,348) | 208 | 113 | 95 | 22 | 33 (29 %) | 15 / 8 | 0.41 -> 0.45 |
+| Gauntlet 221726 i0 ep0, 1-4 enemies (7,297) | 2,567 | 1,316 | 708 | 412 | 872 (66 %) | 672 / 350 | 0.52 -> 0.72 |
+
+- nh per s: the chosen row's predicted landed hits (the scorer's, plus credited strikes past the horizon) per tick,
+  over the 0.6 s horizon. Open-loop (the hero follows the recording): a ranking signal, not a live rate.
+- Safe family-row ticks by target type (new in brackets): Clapper 1,429 (1,151); Pilgrim 03 1,006 (487) in the
+  gauntlet + 33 (18) in w0r; Pilgrim 01 234 (164); Handmaiden 77 (42); Reed 16 (12) + 78 (75) in w0r.
+- Prefilter: 91 / 104 / 60 templates a tick (Clapper / w0r / gauntlet), 8-10 pass, 16-18 rows checked.
+- Slams (1,079 Clapper slam ticks): a safe family row on 195. The press lies in a certified special-table entry (the
+  mode's certs) on 33 ticks: 26 distinct entries, 104 of 2,326 safe rows (4.5 %). Most safe slam rows press at move
+  frames 50-79, 6-11 u in front of the slam timeline's body. Their "hit" is on the scorer's body carried at its present
+  velocity (`MultiForecast.targets`), not on the move's path, so they are not certain and run both branches (see Open).
+- Item 4 (G1's gsa replay, 20261012_054126 i0 ep1, the slam at f 124198):
+  - The deadline cut gsa's slower ticks (25-35 ms; 62 safe rows enveloped vs 169 with deadlines off), so at f 124203
+    gsa picked JUMP(11)L+runL16_attack.
+  - Its 11-frame jump hold was then committed, and every special row failed the selection's `keep` key (they did not
+    hold the jump) for f 124204-124213. From f 124214 the special rows were chosen.
+  - With deadlines off, f 124203 picks MOVE(R)+dashL_attack and special rows are chosen from f 124204 on.
+  - Before f 124203 neither arm chose one: equal nh, then `v2_ff` (earliest first hit) puts a special row (first_f -1:
+    its strike is credited, not located) behind a normal row with a predicted hit at frame 21-24. Not changed.
+  - Fix `SSBOT_FORUM_SPECIAL_HOLD=1`. The whole episode, deadlines on: safe special rows that keep a committed hold
+    27/180 -> 154/154; special rows chosen on 27 -> 56 ticks (deadlines off, no HOLD: 48).
+- Switch-off identity (HEAD with every G3 switch off vs the review's frozen 677979c records `id_old_*`): Clapper 1v1
+  054126 i0 ep0 2947/2947 and w0r 214048 i0 ep0 1348/1348 identical (row, name, S, forced, P, J, n, n_ok, n_safe,
+  mask, command hash).
+- Cost: `forum_v2_bench` on the person's 20261011_051105 attempt 0 (150 s), the arms one after another at Idle
+  (`g3/bench.ps1`, `bsum.py`). The machine was loaded: fcs all-tick act p50 22.4 ms, against 13 ms on a quiet machine in
+  G1. Compare the arms with each other only; the slam-tick act target (p95 under 16.7 ms on a quiet machine) could not
+  be verified.
+
+  | Arm | Planner, all ticks p50 / p95 ms | Planner, slam ticks (360) p50 / p95 ms (over 16.7) | Act, 1 enemy p50 / p95 | Act, 6+ enemies p50 / p95 |
+  |---|---|---|---|---|
+  | fcs | 8.29 / 13.38 | 5.06 / 9.38 (0 %) | 18.1 / 25.4 | 39.7 / 44.0 |
+  | ds | 8.86 / 17.98 | 9.99 / 14.75 (0 %) | 20.1 / 30.9 | 40.3 / 44.8 |
+  | gsa | 8.38 / 14.85 | 15.07 / 26.76 (37 %) | 18.9 / 34.2 | 39.8 / 44.5 |
+  | gsa + FAST | 8.38 / 14.16 | 12.22 / 22.87 (15 %) | 18.9 / 31.0 | 39.7 / 44.2 |
+  | gsads | 8.92 / 20.64 | 20.07 / 31.31 (57 %) | 20.5 / 39.5 | 40.2 / 44.9 |
+  | gsads + FAST | 8.85 / 19.70 | 16.40 / 26.47 (48 %) | 20.2 / 36.2 | 39.8 / 44.5 |
+
+  - The family's own work (`_ds_rows`) in the replays: p50 / p95 3.1 / 6.4 ms (Clapper), 1.7 / 6.6 (w0r), 2.7 / 6.5
+    (gauntlet). Replay planner totals, base -> ds (3 replays at once, deadlines off): Clapper 11.2 / 24.4 -> 12.0 / 28.7;
+    gauntlet with 1 / 2 / 3 / 4 enemies p95 24.9 -> 27.7, 30.1 -> 30.4, 30.2 -> 32.5, 19.0 -> 19.5.
+  - FAST: the special mode's slam-tick planner p95 -15 % (26.8 -> 22.9 ms), its share over 16.7 ms 37 % -> 15 %. Left
+    on a slam tick (cProfile, gsa + FAST, 360 slam ticks, `log_prof_gsaf.txt`): `_special_ctx` 7.0 ms a call (of it
+    `body_stacks` 3.6, `special_mode.contacts` 2.0), `strike_rows` 1.8 ms. Next cuts: E's body stacks across ticks
+    (they are rebuilt every frame), the contact check on the rows that start now only.
+- Tests: test_dslash 14 passed. Full suite without the known failures: 1532 passed, 1 skipped, 1 xfailed. One timing
+  test (`test_hitbox_tables::test_support_query_budget...`) failed while the replays ran in parallel; it passes alone.
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`, appended)
+
+- `ds` = fcs + DSLASH; `gsads` = gsa + DSLASH; `allg3` = gsarn + DSLASH. `allg3fh` = allg3 + SPECIAL_FAST + SPECIAL_HOLD (a new line; the three lines above follow the task's definitions
+  and leave FAST and HOLD off).
+
+### Open items
+
+- Live A/B (ds, gsads vs fcs): hitless %, landed hits per second, the whiff rate of chosen family rows (`ds_chosen`,
+  `ds_chosen_cert`, `ds_chosen_chain`), hits taken right after a family row, late ticks.
+- The scorer's target bodies (`MultiForecast.targets`) move on at their present velocity, which is wrong in a move
+  (most Forum moves carry the body 2-19 u: `attack_range_*.npz` disp). The certain-hit rule reads the move path, but
+  the scorer's predicted hits (nh, the ranking, the prefilter) do not: on the slam most family "hits" are 6-11 u in
+  front of the body. Fix candidate: every row's hit count against `_ds_move_paths`.
+- The certain rule trusts the template's median displacement (no spread beyond the +-2-frame shifts and the
+  branches); T1's lunge variants for CL_SLAM (the special_mode timeline) are not used by the family.
+- The family's EV_POGO sits at the contact frame (the hit branch's convention); the special mode's at contact - 1.
+  Not verified live.
+- Not done here: the special table's follow-ups and chained strikes, the merged wide entries (G4).
