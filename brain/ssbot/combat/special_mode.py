@@ -21,7 +21,8 @@ to the strike point. Concretely (ForumPlanner.tick under v2):
   d. long rows: a press past the planner's horizon (strike_rows long_hi): the row is the template's first T masks;
      the rest (the approach, the press, the bounce's first LONG_POST frames) is rolled out here and checked against
      the special support (the tail check). Every special row's tail check doubles as its escape: clear -> the row
-     has an escape; else the v2 escape check from its end state (the bounce state) against the special support.
+     has an escape; else the v2 escape check from its end state (the bounce state) against the FULL escape support
+     (review 2026-10-12: an escape command leaves the certified bounce, so M's danger applies to it).
   e. the planner posts its decision on BOARD (iid -> tick, on, x); the L2 Clapper controller
      (tactics.gauntlet._clapper_spot) reads it: on -> the stance is the strike point (hit weight > 0), else today's
      step-out.

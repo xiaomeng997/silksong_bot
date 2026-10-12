@@ -1545,13 +1545,10 @@ class ForumPlanner(Planner):
                f.occupied(cx, cy, tq)) & ((re.flags & F_INVULN) == 0)
         sctx = getattr(self, "_sctx", None)
         sp = [] if sctx is None or rs is None else [n for n, r in enumerate(rows) if int(r) in set(sctx.rows.tolist())]
-        if sp:
-            # the special mode: from the row's end (the bounce state) against the special escape support, the full
-            # one from the row's full_from on (M's estimate back after the certified window)
-            lanes = np.concatenate([np.arange(n * nE, (n + 1) * nE) for n in sp])
-            qs = np.repeat(np.searchsorted(sctx.rows, np.asarray(rows)[sp]), nE)
-            occ[lanes] = special_mode.occ_special(sctx, rs, qs, cx[lanes], cy[lanes], tq, esc=True) \
-                & ((re.flags[lanes] & F_INVULN) == 0)
+        # the special mode: an escape command from a special row's end (the bounce state) leaves the certified bounce
+        # (other keys than the entry's), so it is checked against the full escape support like any row's (review
+        # 2026-10-12: it read the special support, M's danger dropped, through the certified window); the row's own
+        # continuation (the certified path, tail_ok) counts as its escape below
         occ[:, 0] = False
         ok_e = (~occ.any(axis=1)).reshape(len(rows), nE)
         esc = ok_e.any(axis=1)

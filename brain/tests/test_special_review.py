@@ -70,3 +70,21 @@ def test_continue_of_a_special_row_is_special_only_while_its_press_is_certified(
     _tick(pl2, params, _support({7: [M_BOX]}, _trk({7: _clapper(30.0, 1, 30)})))
     _tick(pl2, params, _support({7: [M_BOX]}, _trk({7: _clapper(30.0, 1, 31)})))
     assert (len(pl2.last_sel["J"]) - 1) in pl2._sctx.rows.tolist()
+
+
+def test_a_special_rows_escape_keeps_the_moves_danger(params, arena, mode_on, monkeypatch):
+    # an escape command from the bounce state leaves the certified bounce (other keys): 134753a checked it against
+    # the special support (M's danger dropped through the certified window); now the full escape support, and only
+    # the row's own continuation (tail_ok, the certified path) reads the special one
+    calls = []
+    orig = sm.occ_special
+
+    def rec(ctx, rs, q, x, y, tq, esc=False):
+        calls.append(bool(esc))
+        return orig(ctx, rs, q, x, y, tq, esc=esc)
+    monkeypatch.setattr(sm, "occ_special", rec)
+    pl = _planner(params, arena)
+    pl.debug = True
+    r = _tick(pl, params, _support({7: [M_BOX]}, _trk({7: _clapper(30.0, 1, 30)})))
+    assert r.name.startswith("SPECIAL") and pl.audit.v2_esc_rows > 0
+    assert calls and not any(calls)
