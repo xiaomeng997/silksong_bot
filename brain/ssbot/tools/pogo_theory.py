@@ -513,11 +513,15 @@ def window_of(k: int) -> str:
     return next(nm for nm, lo, hi in WINDOWS if lo <= k < hi)
 
 
-def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
+def make_targets2(out_dir: Path, first: list[dict], seed: int = 47, name: str = "t2", approach: bool = False,
+                  skip_covered: bool = True, rep: int = 3, tau_scan=(-4, -2, 2, 4), x0_scan=(-0.6, -0.3, 0.3, 0.6),
+                  press2=(12, 16, 20, 24), id0: int = 10000) -> dict:
     """Batch 2 with the corrected theory (PRE_PROTECT_F): one robust centre per (press window, front / behind, layer
     'success' = both branches safe or 'hit' = the bounce branch safe) not covered by batch 1, small scans (jump frame
     +-2 / 4, x0 +-0.3 / 0.6), and a second press after the bounce (12 / 16 / 20 / 24 frames after the first) on the
-    batch-1 centres whose bounce the theory predicts in every timing variant."""
+    batch-1 centres whose bounce the theory predicts in every timing variant. approach: only cells and targets whose
+    approach (the jump to the press) is not hit in the nominal timing (batch 3: 43-48 % of the batch-1 / 2 trials were
+    hit before the press)."""
     import random
     import numpy as np
     from ssbot.combat.pogo_slam import FLOOR_Y, M_A, M_D, SlamTheory, SlamTimeline
@@ -536,6 +540,8 @@ def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
     for pi, p in enumerate(paths):
         o = th.cells(tl, p, miss, pi, 1, x0s, taus, cy)
         hit = (o["contact"] >= 0) & ~o["hit_bad"] & o["valid"]
+        if approach:
+            hit &= ~o["pre_bad"]
         for layer, ok in (("success", hit & ~o["miss_bad"]), ("hit", hit & o["miss_bad"])):
             r = ok.copy()
             for d in (-2, -1, 1, 2):
@@ -557,7 +563,7 @@ def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
     def target(pi, tau, x0, group, note, masks=None, press2=None):
         p = paths[pi]
         o = th.cells(tl, p, miss, pi, 1, np.array([x0]), np.array([tau]), cy)
-        if not o["valid"][0, 0] or x0 < 2.2:
+        if not o["valid"][0, 0] or x0 < 2.2 or (approach and o["pre_bad"][0, 0]):
             return None
         c = int(o["contact"][0, 0])
         pv = pred_all(p, pi, tau, x0)
@@ -571,21 +577,22 @@ def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
 
     tg, centres = [], []
     for key, lst in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
-        if (key[0], key[1]) in covered or len(lst) < 10:
+        if (skip_covered and (key[0], key[1]) in covered) or len(lst) < 10:
             continue
         pi, tau, x0 = rng.choice(lst)
         note = f"T2 {key[0]} {'front' if key[1] else 'behind'} {key[2]} ({len(lst)} robust cells)"
         centres.append((pi, tau, x0, note))
-        tg += [target(pi, tau, x0, "B2", note) for _ in range(3)]
-        tg += [target(pi, tau + d, x0, "B2C_tau", f"{note} tau{d:+d}") for d in (-4, -2, 2, 4)]
-        tg += [target(pi, tau, x0 + d, "B2C_x0", f"{note} x0{d:+.1f}") for d in (-0.6, -0.3, 0.3, 0.6)]
+        g = "B" + name[1:]
+        tg += [target(pi, tau, x0, g, note) for _ in range(rep)]
+        tg += [target(pi, tau + d, x0, g + "C_tau", f"{note} tau{d:+d}") for d in tau_scan]
+        tg += [target(pi, tau, x0 + d, g + "C_x0", f"{note} x0{d:+.1f}") for d in x0_scan]
     # the second press after the bounce
     seen = set()
     for t in first:
         if t["group"] not in ("A", "B") or t["note"] in seen or t["pred_var"]["bounce"] < 1.0:
             continue
         seen.add(t["note"])
-        for d in (12, 16, 20, 24):
+        for d in press2:
             m = list(t["masks"])
             a2 = t["a"] + d
             if a2 + 3 >= len(m):
@@ -593,19 +600,19 @@ def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
             for j in range(a2 - 3, a2 + 3):
                 m[j] |= M_D
             m[a2] |= M_A
-            tt = target(t["path"], t["tau_j"], t["x0"], "P2", f"{t['note']} press2 +{d}", masks=m, press2=d)
+            tt = target(t["path"], t["tau_j"], t["x0"], "P" + name[1:], f"{t['note']} press2 +{d}", masks=m, press2=d)
             if tt is not None:
                 tg += [tt, dict(tt)]
     tg = [t for t in tg if t is not None]
     for n, t in enumerate(tg):
-        t["id"] = 10000 + n
+        t["id"] = id0 + n
     order = list(range(len(tg)))
     rng.shuffle(order)
     out_dir.mkdir(parents=True, exist_ok=True)
     for k in (0, 1):
-        (out_dir / f"t2_i{k}.jsonl").write_text("".join(json.dumps(tg[i]) + "\n" for i in order[k::2]), "utf-8")
+        (out_dir / f"{name}_i{k}.jsonl").write_text("".join(json.dumps(tg[i]) + "\n" for i in order[k::2]), "utf-8")
     meta = {"n": len(tg), "centres": centres, "clusters": {"|".join(map(str, k)): len(v) for k, v in clusters.items()}}
-    (out_dir / "targets2_meta.json").write_text(json.dumps(meta, indent=1), "utf-8")
+    (out_dir / f"targets{name[1:]}_meta.json").write_text(json.dumps(meta, indent=1), "utf-8")
     return meta
 
 
@@ -849,7 +856,18 @@ def main(argv: list[str] | None = None) -> int:
     a8 = sub.add_parser("repredict")
     a8.add_argument("live_json", type=Path)
     a8.add_argument("--out", type=Path, required=True)
+    a9 = sub.add_parser("targets3")
+    a9.add_argument("--meta2", type=Path, required=True)
+    a9.add_argument("--first", type=Path, nargs="+", required=True)
+    a9.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "targets3":
+        first = [json.loads(x) for p in a.first for x in p.read_text("utf-8").splitlines() if x.strip()]
+        meta = make_targets2(a.out, first, seed=48, name="t3", approach=True, skip_covered=False, rep=4,
+                             tau_scan=(-8, -6, -4, -2, 2, 4, 6, 8), x0_scan=(-1.2, -0.6, -0.3, 0.3, 0.6, 1.2),
+                             press2=(28, 32, 36, 40), id0=20000)
+        print(json.dumps({k: v for k, v in meta.items() if k != "clusters"}, indent=1)[:3000])
+        return 0
     if a.cmd == "repredict":
         rep = repredict(json.loads(a.live_json.read_text("utf-8"))["trials"])
         a.out.write_text(json.dumps(rep, indent=1), "utf-8")
