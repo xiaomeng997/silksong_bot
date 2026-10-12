@@ -1305,6 +1305,9 @@ def pogo_predict(eng, s: dict) -> dict | None:
     if pm is None or pm.params is not pol.params or pm.terrain is not pol.terrain:
         pm = eng._pogo_pm = PogoModel(pol.params, pol.terrain)
     facing = 1 if float(h.get("facing") or 1) >= 0 else -1
+    slam = pogo_slam_now(eng, s, start, masks, facing)
+    if slam is not None:
+        return slam
     tg = targets_of(s)
     br = pm.branches(start, masks, 1, lambda j: tg, facing)
     out = {"miss": br.miss.pos[0].copy(), "hit": None if br.hit is None else br.hit.pos[0].copy(), "j": br.contact_j,
@@ -1313,6 +1316,51 @@ def pogo_predict(eng, s: dict) -> dict | None:
     if br.contact_j >= 0:
         out["slash"] = slash_poly(facing) + br.miss.pos[0, br.contact_j]
     return out
+
+
+def pogo_slam_now(eng, s: dict, start, masks, facing: int) -> dict | None:
+    """During a Clapper slam (the nearest Clapper in Slam Antic .. Slam Recover): the press now against the slam's
+    boxes of the coming frames (ssbot.combat.pogo_slam.predict_press: the contact, the bounce, each branch's first hit
+    by the hammer or the body) and the theory's success region for this slam frame and the hero's vy."""
+    from ssbot.combat import pogo_slam as ps
+    h = s.get("hero") or {}
+    hp = h.get("pos")
+    best = None
+    for e in s.get("ents") or ():
+        if e.get("type_key") != "Song Heavy Sentry" or e.get("is_dead") or not e.get("pos") or not hp:
+            continue
+        st, tin = None, 0.0
+        for m in e.get("fsms") or ():
+            if m.get("name") == "Control":
+                st, tin = m.get("state"), float(m.get("t") or 0.0)
+        k = ps.slam_frame(st, tin)
+        if k is None:
+            continue
+        d = abs(float(e["pos"][0]) - float(hp[0]))
+        if best is None or d < best[0]:
+            best = (d, e, k)
+    if best is None:
+        return None
+    _, e, k = best
+    tl = getattr(eng, "_pogo_tl", None)
+    if tl is None:
+        tl = eng._pogo_tl = ps.SlamTimeline.load()
+        try:
+            eng._pogo_region = ps.Region()
+        except Exception:  # noqa: BLE001  (no region table)
+            eng._pogo_region = None
+    face = 1 if e.get("flipX") else -1
+    cx, cy = float(e["pos"][0]), float(e["pos"][1])
+    pol = eng.pol
+    pr = ps.predict_press(pol.params, pol.terrain, tl, k, cx, cy, face, start, masks, facing)
+    vy = float((h.get("vel") or [0, 0])[1])
+    reg = getattr(eng, "_pogo_region", None)
+    pr["region"] = [] if reg is None else [(cx + face * (dx + reg.B / 2), cy + dy + reg.B / 2, v)
+                                           for dx, dy, v in reg.cells(k, vy)]
+    pr["region_b"] = reg.B if reg is not None else 0.25
+    pr["slam_k"] = k
+    pr["ground"] = False
+    return pr
 
 
 def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
@@ -1345,12 +1393,40 @@ def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
         for c in q:
             cv2.circle(img, (int(c[0]), int(c[1])), th + 2, (*col, 255), -1, cv2.LINE_AA)
 
+    def region(br):
+        # the theory's success region for a press now (green squares: where the hero's transform must be)
+        if br is None or not br.get("region"):
+            return
+        b = float(br.get("region_b") or 0.25) / 2
+        ov = img.copy()
+        for x, y, v in br["region"]:
+            q = np.round(_to_px(Hw, np.array([[x - b, y - b], [x + b, y + b]]))).astype(np.int32)
+            cv2.rectangle(ov, (int(q[0][0]), int(q[0][1])), (int(q[1][0]), int(q[1][1])), (60, 200, 60, 255), -1)
+        cv2.addWeighted(ov, 0.35, img, 0.65, 0, img)
+
+    def hit_mark(br, key, pts_key):
+        # a branch's first hit (hammer or body): a red cross on its path
+        j = br.get(key, -1) if br is not None else -1
+        pts = br.get(pts_key) if br is not None else None
+        if j is None or j < 0 or pts is None or j >= len(pts):
+            return
+        c = np.round(_to_px(Hw, np.asarray(pts[j:j + 1], float))).astype(np.int32)[0]
+        r = th * 4
+        for a, b2 in (((-r, -r), (r, r)), ((-r, r), (r, -r))):
+            cv2.line(img, (int(c[0] + a[0]), int(c[1] + a[1])), (int(c[0] + b2[0]), int(c[1] + b2[1])),
+                     (40, 40, 255, 255), th + 1, cv2.LINE_AA)
+
     if fz is not None:
         iframes(fz, POGO_COLS["frozen_hit"])
+        hit_mark(fz, "miss_hit_j", "miss")
+        hit_mark(fz, "hit_hit_j", "hit")
     now = pg.get("now")
     if now is not None and fz is None:
+        region(now)
         line(now.get("miss"), POGO_COLS["miss"], th)
         line(now.get("hit"), POGO_COLS["hit"], th)
+        hit_mark(now, "miss_hit_j", "miss")
+        hit_mark(now, "hit_hit_j", "hit")
         iframes(now, POGO_COLS["hit"])
         if now.get("slash") is not None:
             q = np.round(_to_px(Hw, now["slash"])).astype(np.int32)

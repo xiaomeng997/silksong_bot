@@ -40,6 +40,9 @@ HERO_STAND_DY = 1.553         # hero.pos above the floor when standing (Forum fl
 FLOOR_Y = 3.015
 CX = 31.0                     # the Clapper's x in the theory (the Forum's middle: no wall within a lunge)
 BIG = 1 << 30
+# a hit the hero's box takes up to this many frames before the slash's contact does not land: the contact's i-frames
+# win (the recorded slashes: probe FP 14 -> 7, the person's 3 -> 2, no new misses; HeroBox applies a buffered hit late)
+PRE_PROTECT_F = 2
 
 
 @dataclass
@@ -243,7 +246,8 @@ class SlamTheory:
         # the miss branch: the hammer and the body, no i-frames, from the press to the landing
         miss_first = self._damage(tl, box, fl, pj, land, taus, X, cy, None)
         miss_bad = miss_first < BIG
-        contact[(contact >= 0) & (miss_first <= contact)] = -1      # hit before the contact: the slash is cancelled
+        # a hit before the contact (and its PRE_PROTECT_F frames) cancels the slash
+        contact[(contact >= 0) & (miss_first < contact - PRE_PROTECT_F)] = -1
         hit_bad = np.zeros((n_t, n_x), bool)
         for jc in np.unique(contact[contact >= 0]):
             ev = np.zeros((1, len(p.masks)), np.int64)
@@ -269,6 +273,8 @@ class SlamTheory:
         first = np.full((n_t, X.shape[1]), BIG, np.int64)
         for j in range(j0, min(j1, len(fl) - 1) + 1):
             if fl[j] & kin.F_INVULN:
+                continue
+            if contact_j is not None and contact_j - PRE_PROTECT_F <= j < contact_j:
                 continue
             k = taus + (j - 1)
             ok = k >= 0
@@ -323,5 +329,123 @@ class GridAcc:
                                                                      "DY0": self.DY0, "B": self.B}))
 
 
+
+
+# ---- run time: a press now during a slam (the overlay's eye check; the special-move table's check) ----
+SLAM_K0 = {"Slam Antic": 0, "Slam 0": 49, "Slam 1": 54, "Slam 2": 57, "Slam Recover": 63}
+REGION = TEMPLATE.with_name("pogo_clapper_slam_region.npz")
+
+
+def slam_frame(state: str | None, t_in: float) -> int | None:
+    """The slam frame (from the antic entry, nominal timing) of a Clapper in Control state `state` for t_in s."""
+    if state not in SLAM_K0:
+        return None
+    return SLAM_K0[state] + int(round(float(t_in) * 60))
+
+
+def predict_press(params: kin.HeroParams, terrain, tl: SlamTimeline, k_now: int, cx_now: float, cy: float,
+                  face: int, start: np.ndarray, masks: np.ndarray, facing: int, alt: bool = False) -> dict:
+    """A down slash pressed on rollout index 1 (masks[0] holds down + attack) by a hero in model state `start`,
+    against a Clapper at slam frame k_now (rollout index j <-> slam frame k_now + j), now at x cx_now (its position
+    y cy) facing `face`: the miss branch, the contact on the predicted path (pogo_model's rule against the root box of
+    each future frame), the bounce branch, and each branch's first hit (hammer or body, outside the i-frames and the
+    PRE_PROTECT_F frames before the contact); world coordinates."""
+    from ssbot.combat.pogo_model import ACTIVE, meets
+    T = len(masks)
+    x_anchor = cx_now - face * tl.disp[min(max(k_now, 0), len(tl.disp) - 1)]
+
+    def wbox(k, which):
+        b = tl.world(np.array([k]), which)[0]
+        if not np.isfinite(b[0]):
+            return None
+        x0, x1 = sorted((x_anchor + face * b[0], x_anchor + face * b[1]))
+        return np.array([x0, x1, cy + b[2], cy + b[3]])
+
+    miss = kin.rollout(start, np.asarray(masks, np.int64)[None], params, terrain)
+    fl = miss.flags[0]
+    swung = bool(((fl[1:3] & kin.F_ATTACKING) != 0).any()) and not bool(fl[0] & kin.F_GROUND)
+    g = np.flatnonzero((fl[1:] & kin.F_GROUND) != 0)
+    last = int(g[0]) if len(g) else T
+    sp = slash_poly(facing, alt)
+    cj = -1
+    if swung:
+        for j in range(1 + ACTIVE[0], min(1 + ACTIVE[1], last) + 1):
+            b = wbox(k_now + j - 1, "root")
+            if b is not None and meets(sp + miss.pos[0, j], np.array([[b[0], b[2]], [b[1], b[2]], [b[1], b[3]], [b[0], b[3]]])):
+                cj = j
+                break
+
+    def first_hit(ro, contact_j):
+        f_ = ro.flags[0]
+        for j in range(1, T + 1):
+            if f_[j] & kin.F_INVULN:
+                continue
+            if contact_j is not None and contact_j - PRE_PROTECT_F <= j < contact_j:
+                continue
+            hx0, hy0, hx1, hy1 = ro.box[0, j]
+            for which in ("hammer", "root"):
+                b = wbox(k_now + j - 1, which)
+                if b is not None and b[0] < hx1 and b[1] > hx0 and b[2] < hy1 and b[3] > hy0:
+                    return j, which
+        return -1, None
+
+    mj, msrc = first_hit(miss, None)
+    if cj >= 0 and 0 <= mj < cj - PRE_PROTECT_F:
+        cj = -1
+    out = {"miss": miss.pos[0].copy(), "miss_hit_j": mj, "miss_hit": msrc, "j": cj, "hit": None, "hit_hit_j": -1,
+           "hit_hit": None, "inv": None, "kind": "hurtbox" if cj >= 0 else None}
+    if cj >= 0:
+        ev = np.zeros((1, T), np.int64)
+        ev[0, cj - 1] = kin.EV_POGO
+        hr = kin.rollout(start, np.asarray(masks, np.int64)[None], params, terrain, events=ev)
+        out["hit"] = hr.pos[0].copy()
+        out["inv"] = (hr.flags[0] & kin.F_INVULN) != 0
+        out["hit_hit_j"], out["hit_hit"] = first_hit(hr, cj)
+        out["slash"] = sp + miss.pos[0, cj]
+    return out
+
+
+def build_region(npz_paths: list[Path], out: Path = REGION) -> dict:
+    """The success region table from GridAcc grids of several timing variants: per (press frame, dx, dy, vy class)
+    the share of the theory's paths through that cell whose down slash bounces with both branches safe, for the best
+    held direction / jump after the press, the minimum over the variants (robust); and the bounce share."""
+    best_s, best_b, meta = None, None, None
+    for p in npz_paths:
+        z = np.load(p, allow_pickle=False)
+        c = z["c"].astype(np.float64)                 # [5, KP, nx, ny, vc, side, post, jpost]
+        meta = json.loads(str(z["meta"]))
+        n = c[0].sum(axis=4)                          # over the side
+        succ = np.where(n > 0, c[4].sum(axis=4) / np.maximum(n, 1), 0.0)
+        bounce = np.where(n > 0, c[1].sum(axis=4) / np.maximum(n, 1), 0.0)
+        s_ = succ.max(axis=(4, 5))                    # the best post / jpost
+        b_ = bounce.max(axis=(4, 5))
+        best_s = s_ if best_s is None else np.minimum(best_s, s_)
+        best_b = b_ if best_b is None else np.minimum(best_b, b_)
+    np.savez_compressed(out, success=np.round(best_s * 100).astype(np.uint8), bounce=np.round(best_b * 100).astype(np.uint8),
+                        meta=json.dumps({k: meta[k] for k in ("KP", "DX0", "DY0", "B")} | {"variants": len(npz_paths)}))
+    return {"cells_success_50": int((best_s >= 0.5).sum()), "cells_bounce_50": int((best_b >= 0.5).sum())}
+
+
+class Region:
+    """The success region table at run time: cells (dx along the Clapper's facing from its position, dy from its
+    position) where a press at slam frame k with the hero's vy class succeeds."""
+
+    def __init__(self, path: Path = REGION):
+        z = np.load(path, allow_pickle=False)
+        self.success = z["success"]
+        self.bounce = z["bounce"]
+        m = json.loads(str(z["meta"]))
+        self.DX0, self.DY0, self.B, self.KP = m["DX0"], m["DY0"], m["B"], m["KP"]
+
+    def cells(self, k: int, vy: float, thr: int = 50, which: str = "success") -> list[tuple[float, float, int]]:
+        if not (0 <= k < self.KP):
+            return []
+        vc = 0 if vy > 3 else (2 if vy < -3 else 1)
+        a = (self.success if which == "success" else self.bounce)[k, :, :, vc]
+        xi, yi = np.nonzero(a >= thr)
+        return [(self.DX0 + x * self.B, self.DY0 + y * self.B, int(a[x, y])) for x, y in zip(xi, yi)]
+
+
 __all__ = ["SlamTimeline", "SlamTheory", "GridAcc", "clip_band", "TEMPLATE", "BODY_COOLDOWN_F", "HERO_STAND_DY",
-           "FLOOR_Y", "CX"]
+           "FLOOR_Y", "CX", "PRE_PROTECT_F", "SLAM_K0", "slam_frame", "predict_press", "build_region", "Region",
+           "REGION"]

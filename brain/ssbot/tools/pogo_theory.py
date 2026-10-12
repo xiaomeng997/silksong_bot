@@ -174,6 +174,8 @@ def load_kin(rec: Path = TERRAIN_REC):
     return params, terrain
 
 
+from ssbot.combat.pogo_slam import PRE_PROTECT_F  # noqa: E402
+
 CHECK_S = 0.75                # game s after the press the check follows (the HP loss window of the lead's quick look)
 PRE_F = 150                   # recorded frames before the press the state estimate reads
 
@@ -235,6 +237,8 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
                 break
             if fl_[j] & kin.F_INVULN:
                 continue
+            if contact_j is not None and contact_j - PRE_PROTECT_F <= j < contact_j:
+                continue
             hx0, hy0, hx1, hy1 = ro.box[0, j]
             rb, ham, _ = boxes[j]
             srcs = [(nm, b) for nm, b in ham]
@@ -246,7 +250,7 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
         return None
 
     pred_miss = first_damage(miss, 1, None)
-    if cj >= 0 and pred_miss is not None and pred_miss["t"] <= tcum[cj] - tp:
+    if cj >= 0 and pred_miss is not None and pred_miss["t"] < tcum[max(cj - PRE_PROTECT_F, 0)] - tp - 1e-6:
         cj = -1                                                      # hit before the contact: the slash is cancelled
     pred_hit = None
     if cj >= 0:
@@ -262,7 +266,7 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
     tw = np.concatenate([[0.0], np.cumsum([float(x.get("dt") or 0.0) for x in W[1:]])])
     contacts_w = [i for i in range(len(W) - 1) if abs(vys[i] + 10.0) < 0.05 and any(v >= 15.0 for v in vys[i + 1:i + 4])]
 
-    def rule(iframes: str, delay: int, need_step: bool):
+    def rule(iframes: str, delay: int, need_step: bool, pre: int = 0, length: float = 0.16):
         """The first damage on the logged path: iframes 'first' (0.16 s from this slash's first contact) or 'each'
         (from every contact, earlier slashes' included); delay: a hammer collider hurts from the frame after the one
         it is logged enabled on (its box then); need_step: only frames with a physics step detect."""
@@ -272,12 +276,13 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
                 break
             iw = i0 - 1 + j
             h = W[iw].get("hero") or {}
-            if h.get("invulnerable") or not h.get("box"):
+            # the previous frame's flag: the frame that takes a hit already logs the hurt i-frames it started
+            if (W[iw - 1].get("hero") or {}).get("invulnerable") or not h.get("box"):
                 continue
             if need_step and not (W[iw].get("fs") or 0):
                 continue
             cs = contacts_w if iframes == "each" else ([first_c] if first_c is not None else [])
-            if any(c is not None and c <= iw and tw[iw] - tw[c] < 0.16 for c in cs):
+            if any(c is not None and -pre / 60 - 1e-6 <= tw[iw] - tw[c] < length for c in cs):
                 continue
             hx0, hy0, hx1, hy1 = h["box"]
             rb, ham, _ = boxes[j]
@@ -289,8 +294,9 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
             if hit_src:
                 return {"t": round(float(tcum[j] - tp), 4), "src": hit_src}
         return None
-    real_rule = rule("first", 0, False)
-    real_rules = {f"{a}|{d}|{int(st)}": rule(a, d, st) for a in ("first", "each") for d in (0, 1) for st in (False, True)}
+    real_rule = rule("first", 0, False, PRE_PROTECT_F, 0.16)
+    real_rules = {f"{a}|{d}|{int(st)}|{pr}|{ln}": rule(a, d, st, pr, ln) for a in ("first", "each") for d in (0, 1)
+                  for st in (False, True) for pr in (0, 1, 2, 3) for ln in (0.16, 0.2)}
     loss = None
     lethal_block = (row.get("hp0") or 9) <= 2        # a probe's LethalBlock: a lethal hit is blocked (no HP loss)
     if row.get("loss_f") is not None and row.get("loss_t") is not None and row["loss_t"] <= CHECK_S:
@@ -498,6 +504,70 @@ def make_targets(rows_path: Path, out_dir: Path, rep_center: int = 3, seed: int 
     return meta
 
 
+def live_report(trial_files: list[Path], rows_path: Path, check_path: Path) -> dict:
+    """The targeted trials joined with their down slash (pogo_outcomes rows) and the theory on it (check): per trial
+    the outcome (bounce = the real contact, loss = an HP loss within CHECK_S of the press, approach_loss = one before
+    the press), the realized jump frame / start x / press state, the pre-registered prediction and the theory on the
+    logged inputs; per centre (group A / B) and scan the success rates."""
+    from collections import defaultdict
+    from ssbot.tools.pogo_check import real_contact
+    rows = {}
+    for line in rows_path.read_text("utf-8").splitlines():
+        r = json.loads(line)
+        rows[(r["session"].split("/")[-1], r["f0"])] = r
+    chk = {}
+    for line in check_path.read_text("utf-8").splitlines():
+        c = json.loads(line)
+        chk[(c["rec"].split("/")[-1], c["f0"])] = c
+    out = []
+    for tf in trial_files:
+        rec = tf.parent.name
+        for line in tf.read_text("utf-8").splitlines():
+            t = json.loads(line)
+            if "f_press" not in t:
+                out.append({"n": t["n"], "target": t["target"], "skip": t.get("skip") or t.get("error")})
+                continue
+            # the down slash of this trial: the press frame +- 2
+            r = next((rows[(rec, f)] for f in range(t["f_press"] - 2, t["f_press"] + 3) if (rec, f) in rows), None)
+            o = {"n": t["n"], "rec": rec, "target": t["target"], "late": t.get("late"), "gaps": t.get("gaps"),
+                 "f_press": t["f_press"]}
+            if r is None:
+                o["skip"] = "no down slash"
+                out.append(o)
+                continue
+            c = chk.get((rec, r["f0"]))
+            cl = r["clappers"][0] if r["clappers"] else None
+            fc = real_contact(r)
+            o |= {"bounce": fc is not None, "loss": r.get("loss_t") is not None and r["loss_t"] <= CHECK_S,
+                  "loss_t": r.get("loss_t"), "loss_src": r.get("loss_src"), "press_shift": r["f0"] - t["f_press"],
+                  "state": cl and cl["state"], "t_state": cl and cl["t"],
+                  "dx": cl and round((r["hero0"]["pos"][0] - cl["pos"][0]) * (1 if cl["flipX"] else -1), 3),
+                  "dy": cl and round(r["hero0"]["pos"][1] - cl["pos"][1], 3),
+                  "vy": round(float((r["hero0"].get("vel") or [0, 0])[1]), 2), "hp0": r.get("hp0"),
+                  "theory": c and {k: c.get(k) for k in ("pred_bounce", "pred_loss", "pred_miss_loss", "real_rule")}}
+            o["success"] = o["bounce"] and not o["loss"]
+            out.append(o)
+    # per centre: the centre trials and each scan's points
+    by = defaultdict(list)
+    for o in out:
+        if o.get("skip"):
+            continue
+        tg = o["target"]
+        base = tg["note"].split(" tau")[0].split(" x0")[0].split(" post")[0].split(" h")[0]
+        by[(base, tg["group"], tg["note"])].append(o)
+    table = []
+    for (base, g, note), lst in sorted(by.items()):
+        n = len(lst)
+        table.append({"centre": base, "group": g, "point": note, "n": n,
+                      "bounce": round(sum(o["bounce"] for o in lst) / n, 3),
+                      "success": round(sum(o["success"] for o in lst) / n, 3),
+                      "loss": round(sum(o["loss"] for o in lst) / n, 3),
+                      "pred_success": lst[0]["target"]["pred_var"]["bounce"] and min(
+                          lst[0]["target"]["pred_var"]["hit_safe"], lst[0]["target"]["pred_var"]["miss_safe"]),
+                      "pred": lst[0]["target"]["pred"], "pred_var": lst[0]["target"]["pred_var"]})
+    return {"trials": out, "table": table}
+
+
 def region(variant: str, out: Path, quick: bool = False) -> None:
     """The theory's grid for one timing variant ('nominal', or 'a48s4p0.2' style) into out (npz)."""
     import numpy as np
@@ -540,7 +610,18 @@ def main(argv: list[str] | None = None) -> int:
     a5 = sub.add_parser("targets")
     a5.add_argument("--rows", type=Path, required=True, help="the person's rows (pogo_outcomes scan)")
     a5.add_argument("--out", type=Path, required=True)
+    a6 = sub.add_parser("live")
+    a6.add_argument("--trials", type=Path, nargs="+", required=True, help="target_trials.jsonl files")
+    a6.add_argument("--rows", type=Path, required=True)
+    a6.add_argument("--check", type=Path, required=True)
+    a6.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "live":
+        rep = live_report(a.trials, a.rows, a.check)
+        a.out.write_text(json.dumps(rep, indent=1), "utf-8")
+        for row in rep["table"]:
+            print(json.dumps(row)[:400])
+        return 0
     if a.cmd == "targets":
         meta = make_targets(a.rows, a.out)
         print(json.dumps({k: v for k, v in meta.items() if k != "person_points"}, indent=1)[:6000])
