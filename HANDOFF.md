@@ -65,6 +65,7 @@ in Chinese; code, commits and this file in English.
 
 Later, from the plan doc:
 - T4: the finale with the person's two-Clapper tactic.
+- Bell Beast with the special table (the person, 2026-10-12: "surely much faster than before"; after the Forum, route bosses are parked). Today: oracle view kill p50 58-59 s, 0.95-0.97 down-slash hits per charge; vision view (degraded_dust) kill p50 95-99 s, 0.15-0.22 per charge (the certain_boss gate); Dig In / Charge End / Leap Land down slashes 0 accepted (m2_vision_view.md sec. 3, 5). Under vision the cells must be robust to the view's position / timing noise.
 - Cross Stitch test (add it to a Forum savestate).
 - Reed 1v1: the stab antic motion; 90 % of ticks over budget.
 - Verify the planner's own input lag (T3 found the probe one frame late).
