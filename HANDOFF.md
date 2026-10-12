@@ -5455,3 +5455,86 @@ START HERE item 2 and the why study's fixes (5)-(9) for the Clapper's small-rune
   unpredicted until they appear (20 frames before lighting).
 - Ring timing could be tightened further (the 9/10-frame steps may alternate deterministically; +1.5 frames of spread
   per ring now).
+
+### Review (2026-10-12, adversarial review of 7f8bb7a..134753a; forum.md §51)
+
+Notes and outputs: `C:\ssbot\data\m2_special\review` (`review.md`; replay harness `ident.py` with `job.ps1` /
+`launch.ps1` / `lane.ps1`; held-out bombs `bombs_heldout.py`; bench lane `benchlane.ps1`). Each fix below has a
+regression test in `brain/tests/test_special_review.py` that fails on 134753a. The fixes run only with their switches
+on; with every new switch off the planner is still 677979c's (checked below). **Live runs must use 48edc28 or later.**
+
+- 0be1730: a special row's press must lie in a certified entry **on the planner's own (hold-filtered) lane**; the
+  CONTINUE of a chosen special row is re-certified every tick. Before: E moved 0.5-1 u -> the CONTINUE kept M's danger
+  dropped with its press out of every cell (offline: chosen). Audit `sm_uncert`.
+- 5d5137b: escape commands from a special row's end are checked against the **full** escape support (they leave the
+  certified bounce); only the row's own continuation (`tail_ok`) reads the special support.
+- a046ebd: in the mode every row's template runs LONG_POST frames past the press, so the tail follows a jpost entry's
+  jump past the horizon (it was cut at T).
+- 45ffaca: special rows are out of the FORCED_RISK ranking (their share / first contact were read without M's danger;
+  offline scenario: a SPECIAL row was the forced pick). Audit `sm_forced_out`.
+- 129be5d: a special row whose first predicted hit is another enemy runs the hit branch (full support). Audit
+  `sm_hit_other`.
+- e13ec79: BOARD is cleared on every planner tick while the mode is on (not only v2 ticks).
+- 6e54f66: L2 holds the strike spot 0.1 s (`special_board.L2_HOLD_S`) through the planner's flicker. On G1's gs replay,
+  BOARD on/off flips per slam were p50 4 / p90 10 / max 20, and 57 of 181 on-runs were 1-2 ticks long. With the hold:
+  p50 2 / p90 2 / max 4.
+- 48edc28: only the tracked slam itself is the table's move. The jump and the jump cast land through the slam's own
+  Control states (Slam 2 / Slam Recover), which `specials.enemy_move` read as CL_SLAM frames 57+. So the mode
+  dropped the landing's danger on every jump landing (about 21 ticks each). E must now be tracked in CC_SLAM
+  (`special_mode.MOVE_FAMS`); with no instance there are no special rows.
+- c668ea6 + d2fac50: a hop row is kept only when its press is a jump from the ground in the model (or continues the
+  prefix's held jump). With a jump in flight, its press was a second press in the air. Audit `hop_inflight`.
+
+Checks:
+- Switch-off identity, every tick of two open-loop replays, deadlines off (HEAD c668ea6 vs a frozen 677979c
+  checkout):
+  - Clapper 1v1 20261012_054126 i0 ep0: 2947/2947 identical.
+  - Multi-enemy w0r 20261011_214048 i0 ep0 (Reed + Pilgrim 03): 1348/1348 identical.
+  - Fields compared: row, name, S, forced, P, J, n, n_allowed, n_safe, mask, and the command hash.
+  - d2fac50 changes only `_rune_hop_rows`, which runs only with RUNE_HOP on.
+- Arm smoke runs (gs, gsa, rn, rn35, gsrn; both segments): no exception.
+- gs slam replay after the fixes up to d2fac50, before the jump-landing fix (54 slams, as G1):
+  - Special ticks 1,755, safe 1,402, chosen 723.
+  - 497 of the chosen fail T1's real-box approach check (G1: 1,750 / 1,435 / 712 / 475).
+  - L2 stance with BOARD on: p50 5.4 u.
+- Held-out bomb forecast (G2's evaluator on 20261012_052248 i0 and 20261012_051007 i1, which G2 did not calibrate on;
+  38 casts):
+  - After Cast 2: recall 0.969 (k 0-20 / 21-40 / 41-62: 0.982 / 0.975 / 0.930), 0.97 false per real bomb-frame.
+  - The planner's table read: 0.958 recall, 1.36 false per real; the forecast's danger area is 28 % smaller.
+  - G2's in-sample 0.971 / 0.87 reproduce.
+- Cost: forum_v2_bench, 20261011_051105 win 0, 150 s, the arms one after another at Idle. The machine was loaded:
+  fcs all-tick act p50 22 ms, against 13 ms in G1. Compare the arms with each other only.
+
+  | Arm | Planner on slam ticks (360), p50 / p95 ms | Planner on cast ticks (187), p50 / p95 ms |
+  |---|---|---|
+  | fcs | 4.95 / 9.26 | 8.67 / 16.29 |
+  | gs | 15.35 / 26.58 (37.5 % over 16.7) | 13.62 / 20.51 |
+  | gsa | 14.94 / 27.39 | 12.93 / 20.94 |
+  | rn | 5.20 / 9.51 | 9.03 / 16.21 |
+  | rn35 | 5.27 / 9.51 | 9.11 / 16.23 |
+  | gsrn | 15.25 / 26.38 | 13.58 / 22.28 |
+
+  All-tick planner p95: fcs 13.2, rn 13.4, gs 14.9, gsrn 15.1 ms.
+  - The table was measured before 48edc28. A paired rerun at 48edc28, fcs and gs side by side, gives slam ticks
+    4.94 / 9.40 for fcs and 14.51 / 26.02 for gs (34 % of gs's slam ticks over 16.7 ms).
+  - The escape fix (5d5137b) costs nothing measurable: gs with the old escape path, paired, was 14.68 / 25.86.
+- Tests at 48edc28:
+  - Full suite without the two known failures and test_harness_recovery: 1508 passed, 1 skipped, 1 xfailed.
+  - The two known failures still fail as before; the firewall chain now lists special_mode -> forum_v2 ->
+    aim_zones -> ipc, as G1 noted.
+  - test_harness_recovery: 3 of 33 fail with "stop requested, ending after 0 episodes". This is environmental: the
+    worker's STOP_FILES include `C:\ssbot\sandbox\DEMO_SOON`, which exists now. The harness is unchanged since
+    677979c.
+  - New: `tests/test_special_review.py`, 15 tests.
+
+Not confirmed or not fixed (the live A/B must watch these):
+1. gs approaches through the active hammer. This follows the person's literal rule: the approach checks the body and
+   the others only. 497 of 723 chosen ticks offline. Run gsa first or alongside, and watch `sm_appr_hammer` and the
+   hammer hits.
+2. gs slam ticks cost about 3x fcs: planner p95 about 27 ms on this loaded machine. Watch late ticks; cuts are needed
+   before gs can be the default.
+3. Past M's end, neither support predicts E's next move; this is the same as the baseline.
+4. Long rows' tails past look-ahead 62 read the last sample.
+5. A lit bomb missing from one frame's entity export is unpredicted for that frame.
+6. Unverified live: pre-protect frames, the EV_POGO contact convention, the hop timing, FACE 3 vs ring 0, and the
+   person's overlay eye check of the bomb forecast. That eye check is still due before BOMB or HOP is relied on.
