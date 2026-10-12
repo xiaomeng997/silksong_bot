@@ -5235,3 +5235,56 @@ idle after the last episode.
 - The Reed tick time (late about 90 %).
 - The dash stab stays vetoed. The same tink rule applies to it (defenders data).
 - TA=guard: within noise.
+
+## Task 1v1 - stage T3: the special-move table (branch worktree-wf_f1846551-5f9-1, 2026-10-11 night; forum.md §48)
+
+The person's design: one-strike entries bound to the enemy's move (time from the antic entry, place relative to the
+enemy mirrored by its facing, vy class, the key held after the press), certified offline, reached at run time by a few
+arrive-and-strike rows added to the planner's candidates (`SSBOT_FORUM_SPECIALS=1`, default off).
+
+### Code
+
+- `ssbot/combat/specials.py`: `Entry`, `SpecialTable` (load / save / applicable / `lut`), `Lut` (dense [k, x, y, vy,
+  key] lookup), `strike_rows` (approach templates: jump start every 3 frames x hold 3/8/14/20 x key before the press
+  x key delayed 0/8 frames after the jump; rolled out; kept where the press frame lands in an entry's cell; prefix-aware),
+  `move_frame` / `enemy_move` (Clapper Control states -> CL_SLAM frame).
+- `ssbot/tools/specials_build.py`: `build` (the CL_SLAM entries from T1's GridAcc variants, robust share >= 0.8 over 9
+  variants and the cell's 12 sub-cells, 3 frames x 0.5 u x 0.5 u, k <= 77; T1's live trials counted in), `eval` (open
+  loop on `slams_bot.jsonl`).
+- `ssbot/probes/specials_probe.py`: scripted verification: stand until k_start, plan strike rows from the standing state,
+  execute one whose approach clears the slam boxes (filter: cert x side, else any clear row), hold the entry's key to
+  the press + 75, log landed / bounce / hurt and the trace.
+- `forum_planner.py`: `_special_rows` + rows inserted after the posture set and before CONTINUE (`rname`), audit
+  `spec_ticks / spec_rows / spec_safe / spec_chosen`.
+- `zone_overlay.py --overlay-pogo`: `specials_cells` (the entries for a press 6 frames ahead; green both / orange
+  bounce outlines).
+- `tests/test_specials.py` (4). test_forum_planner / test_forum_v2 pass with specials on and off.
+
+### Numbers
+
+- Table: 5,757 entries (both front 276, both behind 1,911, bounce front 2,372, bounce behind 1,198). T1 trials inside
+  bounce entries 71/77 succeeded; inside both entries 2/3; outside 101/201.
+- Reachability with a clear approach (kinematics + slam boxes): from the front (1.5-11 u, start k 5-60) no both entry
+  (one exception); from behind (3-5 u) both entries at k 9-45. Post-slam punish: out of Slam Collider 2's reach the
+  Recover is too short to arrive. The Clapper faces the hero at the antic entry, so in 1v1 the both-safe rule leaves
+  no special strike during the slam; only the person's yellow strike (CERT=bounce).
+- Planner replay (S2 run 142306 ep 0, 3,600 frames, specials on): 40 ticks with rows (220), 0 safe after the checks,
+  0 chosen; tick p50 12.39 ms vs 12.26 off; late ticks 299 vs 235.
+- Open loop on 2,603 recorded slams: strike_rows 10-11 ms single thread (840 templates); in 145 of the 146 hit slams
+  of 10-11 a both row existed before the hit (approach not checked).
+LIVE_HANDOFF_PLACEHOLDER
+
+### State of the machine
+
+- Game instances 0 and 1 still running; no oracle deploy, no restore. DEMO_SOON restored at the end.
+- Frozen checkouts: `C:\ssbot\live_1v1_{b2d29af,e0d8e15,a52dade,dcd10d9}` (the probe runs; dcd10d9 = the last probe
+  and the overlay launcher `C:\ssbot\sandbox\start_overlay_specials_check.ps1`, prepared, not started).
+- Probe launcher: `C:\ssbot\sandbox\specials_run.ps1 -Rev <sha> -Inst <i> -Trials <n> -Seed <s>` (via WMI); stop file
+  `C:\ssbot\sandbox\pogo_target.stop`. Offline jobs: `C:\ssbot\sandbox\specials_offline.ps1`.
+- A/B arms for later (NOT run): `sp0`, `sp1`, `sp1b` in `1v1_arms.txt`; command in forum.md 48.7.
+
+### Next
+
+- The arrival error (model vs real press position, 48.5) before anything uses the table: accuracy first.
+- The other nine types' hypotheses (forum.md 48.6) were not computed this stage.
+- Jump slam / cast slam into the timeline.

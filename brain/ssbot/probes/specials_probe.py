@@ -38,6 +38,7 @@ from ssbot.tools.pogo_theory import load_kin
 
 D = 8                      # frames between the plan's state and the row's first frame (the planning time)
 HOLD_AFTER = 75            # SlamTheory.T_AFTER
+LAG = 1                    # the real path lags the model by one frame (forum.md 48.5: best shift +1 in 18 of 30 trials)
 M_L, M_R = kin.B_LEFT, kin.B_RIGHT
 FILTERS = ("both_front", "both_behind", "bounce_front", "bounce_behind")
 
@@ -139,18 +140,18 @@ class Probe(Target):
         en, masks, jp = r.entry[i], [int(m) for m in r.cmd[i]], int(r.j_press[i])
         f_first = fa + k_now + 1                     # the frame mask 0 lands on
         f_press = f_first + jp
-        if s["f"] + 2 > f_first:
+        if s["f"] + 2 + LAG > f_first:
             return info | {"skip": "planned too slowly", "late_f": s["f"] + 2 - f_first}
-        while s["f"] + 2 < f_first:
+        while s["f"] + 2 + LAG < f_first:
             s = self.step(0)
         sent, trace = [], []
         # after the row: its key (and nothing else) until the press + HOLD_AFTER, as the theory's paths (T_AFTER)
         tail = masks[-1] & (M_L | M_R)
         n_all = max(len(masks), jp + HOLD_AFTER)
         for _ in range(n_all + SETTLE_F):
-            idx = s["f"] + 2 - f_first
+            idx = s["f"] + 2 + LAG - f_first
             m = masks[idx] if 0 <= idx < len(masks) else (tail if len(masks) <= idx < n_all else 0)
-            sent.append((s["f"] + 2, m))
+            sent.append((s["f"] + 2 + LAG, m))
             s = self.step(m)
             c = clapper(s)
             trace.append((s["f"], int(s["hero"].get("health") or 0), round(float((s["hero"].get("vel") or [0, 0])[1]), 2),
