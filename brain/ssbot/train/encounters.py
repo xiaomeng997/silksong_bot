@@ -296,6 +296,9 @@ def forum_solo_intro(wave: int, keep: str) -> Callable[[Ctx], int]:
 # in the intro (forum_solo_intro), the episode ends when wave 1 starts (the Choristor's kill)
 FORUM_W_CHORISTOR = replace(FORUM_WAVE_STARTS[0], name="Forum_W_w0c", savestate="fo_cl_w0w",
                             intro=forum_solo_intro(0, "Song Pilgrim 03"), end_wave=0)
+# The Reed 1v1 (task 1v1 T2): the same wave 0 start with the Reed kept (the Choristor and the Envoy killed in the intro)
+FORUM_W_REED = replace(FORUM_WAVE_STARTS[0], name="Forum_W_w0r", savestate="fo_cl_w0w",
+                       intro=forum_solo_intro(0, "Song Reed"), end_wave=0)
 
 
 # ---- route bosses (Task route bosses, 2026-10-06; docs/facts/1.0.30000/route_bosses.md) ----------------------------
@@ -415,4 +418,4 @@ ROUTE_BOSSES_LOW = tuple(replace(e, name=f"{e.name}_low", start_boss_hp=(0.25, 0
 
 ENCOUNTERS = {e.name: e for e in (BELL_BEAST, BELL_BEAST_REAPER, *ROUTE_BOSSES, *ROUTE_BOSSES_LOW, FORUM,
                                   *(forum_variant(a) for a in ("A", "B", "C", "A5", "W")), *FORUM_WAVE_STARTS,
-                                  FORUM_W_W4, *FORUM_W_CLAPPER, FORUM_W_CHORISTOR)}
+                                  FORUM_W_W4, *FORUM_W_CLAPPER, FORUM_W_CHORISTOR, FORUM_W_REED)}
