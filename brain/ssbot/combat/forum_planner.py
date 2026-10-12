@@ -453,6 +453,9 @@ class EnvelopeAudit:
     ds_chosen_cert: int = 0
     ds_chosen_chain: int = 0
     ds_credit: int = 0            #   family rows credited a certain strike past the horizon
+    ds_busy: int = 0              #   review2: ticks with a swing under way / pressed in the prefix (no certain row)
+    ds_cont2: int = 0             #   review2: certain rows holding a second press, offered only as their chain twin
+    ds_anchor: int = 0            #   review2: certain rows whose hit branch is anchored at the certain contact
     ds_ms: float = 0.0
     mh_targets: int = 0           # SSBOT_FORUM_MOVE_HITS (G4 5b): target bodies put on their move path (calls x targets)
     hf_ticks: int = 0             # SSBOT_FORUM_HITS_FIRST (G4 4c): ticks with strike options ordered by hits
@@ -1366,6 +1369,38 @@ class ForumPlanner(Planner):
         out = np.zeros((len(rows), ds.ev.shape[1]), np.int64)
         out[np.flatnonzero(w_)] = np.where(ds.cert[q][:, None], ds.ev[q], 0)
         return out
+
+    def _ds_anchor(self, sc: dict, ds, D0: int, r1, latched: np.ndarray, face0: int):
+        """review2: the certain family rows' hit branch anchored at their certain contact (frame c1, target, a down
+        slash, the facing then), not at the scorer's first hit: the scorer's body moves on at its present velocity (or
+        the move's mean path), so it may see no hit on a certain row (no hit branch: the hit enemy's reaction and
+        knockback were never checked) or one at another frame / on another target. Returns (sc with those rows'
+        first-hit keys replaced (a copy), the certain rows, the certain rows whose target the scorer does not hold:
+        S = 1)."""
+        rows = D0 + np.flatnonzero(ds.cert)
+        if not len(rows):
+            return sc, rows, rows
+        sc_h = dict(sc)
+        for k_ in ("first_f", "first_t", "first_k", "first_face"):
+            sc_h[k_] = np.asarray(sc[k_]).copy()
+        idx = {getattr(t, "iid", None): i for i, t in enumerate(sc["targets"])}
+        lost = []
+        for r in rows:
+            q = int(r) - D0
+            ti = idx.get(int(ds.tgt[q]))
+            if ti is None:
+                lost.append(int(r))
+                continue
+            c = int(ds.c1[q])
+            face = face0
+            for k in range(1, c + 1):                 # the facing as _ds_contact_kernel's
+                m = int(latched[r, k - 1])
+                d = 1 if m & kin.B_RIGHT else (-1 if m & kin.B_LEFT else 0)
+                if d and int(r1.mode[r, k - 1]) == M_NORMAL and not (int(r1.flags[r, k - 1]) & F_ATTACKING):
+                    face = d
+            sc_h["first_f"][r], sc_h["first_t"][r], sc_h["first_k"][r], sc_h["first_face"][r] = c, ti, K_DOWN, face
+        self.audit.ds_anchor += len(rows) - len(lost)
+        return sc_h, rows, np.asarray(lost, np.int64)
 
     def _hit_branch(self, f, start, latched, sc, rows, tk, enemy_only, budget, cap: bool = True, ev_base=None
                     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -2622,7 +2657,13 @@ class ForumPlanner(Planner):
         trk = getattr(getattr(f, "rs", None), "trk", None)
         now = getattr(trk, "now", {}) or {}
         inm = np.array([t.iid in now and now[t.iid][2] is not None for t in keep], bool)
-        paths = self._ds_move_paths(trk, keep, tbox) if (dslash.CERT and inm.any()) else {}
+        # review2: a swing under way at the start or pressed in the prefix (a strike already committed, e.g. the
+        # chain's first press on its way) is outside the rows: its outcome (a bounce or not) is on no family lane, so
+        # no row is certain this tick (every row on both branches: the miss lane and the scorer's hit branch, whose
+        # first hit is that swing's; the certain lane and its hit branch's events would drop that bounce)
+        busy = bool((r1x.flags[0, :P + 1] & F_ATTACKING).any() or (np.asarray(prefix, np.int64) & B_ATTACK).any())
+        self.audit.ds_busy += int(busy)
+        paths = self._ds_move_paths(trk, keep, tbox) if (dslash.CERT and inm.any() and not busy) else {}
         cert = np.zeros(n, bool)
         if paths:
             # the certain-hit rule on the move's own body path (the scorer's body moves on at its present velocity:
@@ -2641,13 +2682,25 @@ class ForumPlanner(Planner):
             for m_, q in enumerate(ci):
                 rows[q]["lane"] = (rb, m_)
         n_chain = 0
+        # review2: a certain row that already holds a second press (the continued chain, "DS cont", once its second
+        # press is inside the horizon) has no bounce event for it: its lane is the second strike's miss and the
+        # certified second bounce is on no lane. It is judged only as its chain twin (the same masks, the second
+        # press re-certified, both bounces on the lane); without a certain twin it is not offered.
+        two = np.zeros(n, np.int64)
+        for q in ci:
+            a_on = (X[q] & B_ATTACK) != 0
+            rz = np.flatnonzero(a_on & ~np.concatenate([[False], a_on[:-1]]))
+            two[q] = int(rz[1]) if len(rz) > 1 else -1
+        two[np.setdiff1d(np.arange(n), ci)] = -1
+        drop_q = set(int(q) for q in ci if two[q] >= 0)
+        self.audit.ds_cont2 += len(drop_q)
         if dslash.CHAIN and len(ci):
             # the second strike: pressed CHAIN_B frames after the first bounce, no jump press in the air
             cr, cb, cq = [], [], []
             for q in ci:
-                for b in dslash.CHAIN_B:
+                for b in ((int(two[q]) - (int(c1[q]) - P),) if two[q] >= 0 else dslash.CHAIN_B):
                     p2 = int(c1[q]) - P + b
-                    if p2 + 1 + int(self.shapes[3][3, 1]) <= L:
+                    if b > 0 and p2 + 1 + int(self.shapes[3][3, 1]) <= L:
                         cr.append(q)
                         cb.append(p2)
             if cr:
@@ -2702,6 +2755,11 @@ class ForumPlanner(Planner):
                                          ev=evq, cert=True, c1=int(c1[q]), c2=int(c2[w_]),
                                          tgt=int(keep[int(t1[q])].iid), extra=int(c2[w_] >= T1), lane=(rp, m_)))
                         n_chain += 1
+        if drop_q:
+            rows = [r_ for i, r_ in enumerate(rows) if i not in drop_q]
+            if not rows:
+                self.ds_ms = (time.perf_counter() - t0) * 1e3
+                return None
         # at most MAX_ROWS: the chains, then the certain rows, then the others; the earliest contact first
         order = sorted(range(len(rows)), key=lambda i: (rows[i]["c2"] < 0, not rows[i]["cert"], rows[i]["c1"]))
         rows = [rows[i] for i in order[:dslash.MAX_ROWS]]
@@ -3071,16 +3129,16 @@ class ForumPlanner(Planner):
             # sctx.rows), or the family's "DS cont" whose contact still holds; none: it is gone
             if self._kp == "sm" and sctx is not None and cont and (N - 1) in set(sctx.rows.tolist()):
                 kr = N - 1
-            elif self._kp == "ds" and n_ds and "DS cont" in ds.names:
-                # a kept chain whose second press is past the continued row's horizon: its "+c<b>" row
-                nm_ = "DS cont"
+            elif self._kp == "ds" and n_ds:
+                # a kept chain while both its presses are ahead: its "+c<b>" twin (both bounces on its lane, the
+                # second press inside the horizon or past it; review2: never the plain "DS cont", whose lane has no
+                # second bounce); one press left (or a kept single strike): "DS cont"
                 kb = getattr(self, "_ds_keep_b", None)
-                q0_ = ds.names.index("DS cont")
-                c0_ = np.asarray(ds.cmd[q0_])
-                pr_ = int((((c0_ & B_ATTACK) != 0) & ~np.concatenate([[False], (c0_[:-1] & B_ATTACK) != 0])).sum())
-                if kb is not None and pr_ < 2:
-                    nm_ = f"DS cont+c{kb}" if f"DS cont+c{kb}" in ds.names else None
-                kr = None if nm_ is None else D0 + ds.names.index(nm_)
+                pv_ = getattr(self, "_ds_prev", None)
+                a_on = (np.asarray(pv_ if pv_ is not None else (), np.int64) & B_ATTACK) != 0
+                n_ahead = int((a_on[1:] & ~a_on[:-1]).sum()) if len(a_on) > 1 else 0
+                nm_ = f"DS cont+c{kb}" if (kb is not None and n_ahead >= 2) else "DS cont"
+                kr = D0 + ds.names.index(nm_) if nm_ in ds.names else None
             self.audit.kp_ticks += 1
             if kr is None:
                 # done (the kept plan's press is under way or none is left: the template ran out) or gone (its row
@@ -3172,6 +3230,13 @@ class ForumPlanner(Planner):
         pins = self._pin_threats(f, tk) if fcfg.pin_aim else []
         self.audit.pin_ticks += int(bool(pins))
         has_hit = sc["first_f"] >= 0
+        sc_ds, ds_lost = sc, None
+        if n_ds and ds.cert.any():
+            # review2: every certain family row gets its hit branch, anchored at its certain contact
+            sc_ds, rc_, ds_lost = self._ds_anchor(sc, ds, D0, r1, latched,
+                                                  1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1)
+            has_hit = has_hit.copy()
+            has_hit[rc_] = True
         sp_e = None
         if sctx is not None:
             # review: the special rows whose first predicted hit is on E (or none) skip the hit branch (the bounce is
@@ -3237,6 +3302,8 @@ class ForumPlanner(Planner):
                     o_sp = np.where(late, occ[m_sp], o_sp)
                 occ[m_sp] = o_sp
             s2 = occ.any(axis=1)
+            if ds_lost is not None and len(ds_lost):
+                s2 = s2 | np.isin(ch, ds_lost)       # review2: a certain row whose hit branch cannot be anchored
             S[ch] = s2
             env[ch] = True
             bound[ch] = r2.bound
@@ -3259,10 +3326,10 @@ class ForumPlanner(Planner):
                 hr_ds, hr = hr[isd], hr[~isd]
             if hr_ds is not None and len(hr_ds):
                 budget["hitfx_ds"] = budget.get("hitfx_ds", 0) + len(hr_ds)      # (the other rows' room unchanged)
-                sh, oh, cp = self._hit_branch(f, start, latched, sc, hr_ds, tk, enemy_only, budget,
+                sh, oh, cp = self._hit_branch(f, start, latched, sc_ds, hr_ds, tk, enemy_only, budget,
                                               ev_base=self._ds_evb(hr_ds, D0, ds))
                 S[hr_ds] |= sh
-                self._note_hit(hr_ds, sh, oh, cp, sc, t_hit, hit_occ, capped_rows, T1)
+                self._note_hit(hr_ds, sh, oh, cp, sc_ds, t_hit, hit_occ, capped_rows, T1)
             if len(hr):
                 room = fcfg.hitfx_k - budget["hitfx"]
                 over = hr[max(room, 0):]
@@ -3354,11 +3421,11 @@ class ForumPlanner(Planner):
             cr = np.array(sorted(set(capped_rows)), np.int64)
             cr = cr[ok[cr] & ~hz[cr]]
             if len(cr):
-                sh, oh, cp = self._hit_branch(f, start, latched, sc, cr, tk, enemy_only, budget, cap=False,
+                sh, oh, cp = self._hit_branch(f, start, latched, sc_ds, cr, tk, enemy_only, budget, cap=False,
                                               ev_base=self._ds_evb(cr, D0, ds))
                 S[cr] = sh
                 t_hit[cr] = T1
-                self._note_hit(cr, sh, oh, cp, sc, t_hit, hit_occ, [], T1)
+                self._note_hit(cr, sh, oh, cp, sc_ds, t_hit, hit_occ, [], T1)
                 budget["uncapped"] = len(cr)
         clash_p = np.zeros(N)
         clash_n = np.zeros(N, np.int64)

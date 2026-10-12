@@ -179,7 +179,13 @@ class Lut:
             nxe = 1 if cell is None else max(int(round((e.dx1 - e.dx0) / self.bx)), 1)
             nye = 1 if cell is None else max(int(round((e.dy1 - e.dy0) / self.by)), 1)
             for v in vs:
-                self.idx[e.k0:e.k1 + 1, xi:xi + nxe, yi:yi + nye, v, e.key + 1] = i
+                if cell is None:
+                    self.idx[e.k0:e.k1 + 1, xi:xi + nxe, yi:yi + nye, v, e.key + 1] = i
+                else:
+                    # the table v2 (review2): entries of one key may share a cell (one per jump after the press, both
+                    # / bounce): the best rank keeps it, not the last one written
+                    sl = self.idx[e.k0:e.k1 + 1, xi:xi + nxe, yi:yi + nye, v, e.key + 1]
+                    sl[(sl < 0) | (self.rank[np.maximum(sl, 0)] < self.rank[i])] = i
 
     def find(self, k: np.ndarray, dx: np.ndarray, dy: np.ndarray, vyc: np.ndarray) -> np.ndarray:
         """[n] the best entry index for each press (k, dx, dy, vy class), -1: none."""

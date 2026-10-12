@@ -4,8 +4,8 @@
   build   T1's theory grids (C:/ssbot/data/m2_pogo/theory/region_*.npz: per press frame x dx x dy (0.25 u) x vy class x
           side x key after the press x jump after the press, the outcomes over 9 timing variants) -> the robust share
           per native cell (the minimum over the variants; specials_build.robust_shares). A cell is good when its share
-          is >= --thr, bad when a path reaches it and its share is lower (unknown: no path). Groups: cert (both / bounce) x vy class x key along the Clapper's facing (the follow-up the
-          theory has: the key held from the press on). Slack: a cell is a CORE cell when the cells of the same group
+          is >= --thr, bad when a path reaches it and its share is lower (unknown: no path). Groups: cert (both / bounce) x vy class x key along the Clapper's facing x jump after the
+          press (the follow-up the theory has: the key held from the press on and jpost; review2: per jpost). Slack: a cell is a CORE cell when the cells of the same group
           from its frame to --late frames LATER (none earlier: the person; live presses 10-11/12 were 78.2 % on time,
           20.4 % +1, 1.3 % +2, 0.2 % +3, 18 of 221,859 early) and within +-(--space) u in dx and dy are all good.
           Regions: the connected core cells of a group (frame x dx x dy); regions under --min-cells are dropped
@@ -17,7 +17,8 @@
 
 The follow-ups of the person's design that the theory grids do not hold (keep side switching to away at frame n, the
 chained down slash, certification to the move's last frame k 77 and the end state) need a theory rerun (open item in
-forum.md 53); here the follow-up is the key held after the press and the hits are 1.
+forum.md 53); here the follow-up is the key held after the press with
+the region's jump after the press (jpost), and the hits are 1.
 
   scripts/uv.cmd run python -m ssbot.tools.specials_v2 build --report C:/ssbot/data/m2_special/g4/v2_report.json
 """
@@ -120,20 +121,25 @@ def build(paths: list[Path], thr: float, late: int, space_u: float, min_cells: i
     s3 = np.ones((3, 3, 3), bool)
     for cert, ch in CERTS:
         for key, combos in KEYS.items():
-            # [K, X, Y, vc, combo, jp] -> best over the combos and the jump after the press
+            # [K, X, Y, vc, combo, jp] -> best over the combos, per jump after the press (review2: the follow-up is
+            # the key AND the jump after the press; an entry's cells and its slack are certified for its own jpost,
+            # not the best jump per cell: G4's max over the jump certified a run's cells with a jump some of them fail)
             st = np.stack([R[ch][:K, :, :, :, si, pi, :] for si, pi in combos], axis=-2)
             st = np.where(np.isfinite(st), st, -1.0)
-            share = st.max(axis=(-2, -1))                         # [K, X, Y, vc]
-            jp = st.max(axis=-2).argmax(axis=-1)                  # [K, X, Y, vc]
-            for vc in range(3):
+            stj = st.max(axis=-2)                                 # [K, X, Y, vc, jp]
+            sb_all = None
+            if cert == "bounce":
+                sb_all = np.stack([R[4][:K, :, :, :, si, pi, :] for si, pi in combos], axis=-2)
+                sb_all = np.where(np.isfinite(sb_all), sb_all, -1.0).max(axis=-2)      # [K, X, Y, vc, jp]
+            for vc, jpi in ((v_, j_) for v_ in range(3) for j_ in range(stj.shape[-1])):
+                share = stj[..., jpi]                             # [K, X, Y, vc] with this jump after the press
                 g = share[..., vc] >= thr
                 # bad: a cell some path reaches whose share is under thr (cells no path reaches are unknown, not bad:
                 # the theory's paths leave holes in dy and vy)
                 bad = (share[..., vc] >= 0) & ~g
                 if cert == "bounce":
                     # a 'bounce' cell is one whose both-branch share is under thr (as specials_build): kept apart
-                    sb = np.stack([R[4][:K, :, :, vc, si, pi, :] for si, pi in combos], axis=-2)
-                    g &= ~(np.where(np.isfinite(sb), sb, -1.0).max(axis=(-2, -1)) >= thr)
+                    g &= ~(sb_all[..., vc, jpi] >= thr)
                 if not g.any():
                     continue
                 core = g & _erode(~bad, late, r)
@@ -148,9 +154,9 @@ def build(paths: list[Path], thr: float, late: int, space_u: float, min_cells: i
                     if ncell < min_cells:
                         continue
                     ks, xs, ys = np.nonzero(m)
-                    rid = f"{'G' if cert == 'both' else 'Y'}v{vc}k{key:+d}#{len(regions)}"
+                    rid = f"{'G' if cert == 'both' else 'Y'}v{vc}k{key:+d}j{jpi}#{len(regions)}"
                     dxs = DX0 + xs * B
-                    reg = {"id": rid, "cert": cert, "vy": vc, "key": key, "cells": ncell,
+                    reg = {"id": rid, "cert": cert, "vy": vc, "key": key, "jpost": int(jpi), "cells": ncell,
                            "k": [int(ks.min()), int(ks.max())], "dx": [round(float(dxs.min()), 2),
                                                                        round(float(dxs.max() + B), 2)],
                            "dy": [round(float(DY0 + ys.min() * B), 2), round(float(DY0 + (ys.max() + 1) * B), 2)],
@@ -161,7 +167,7 @@ def build(paths: list[Path], thr: float, late: int, space_u: float, min_cells: i
                     regions.append(reg)
                     for k_, x_, y_ in zip(ks, xs, ys):
                         cells.append((rid, cert, vc, key, int(k_), int(x_), int(y_), float(share[k_, x_, y_, vc]),
-                                      int(jp[k_, x_, y_, vc]), int(lr[k_, x_, y_]), float(ss[k_, x_, y_]) * B))
+                                      int(jpi), int(lr[k_, x_, y_]), float(ss[k_, x_, y_]) * B))
     # windows: every region's cells on (frame, dx) only, connected
     nx = R[4].shape[1]
     win = np.zeros((K, nx), bool)
@@ -203,7 +209,7 @@ def build(paths: list[Path], thr: float, late: int, space_u: float, min_cells: i
                 id=f"CL_SLAM2|{rid}|k{k_}|x{x_}|y{y0}", type_key="Song Heavy Sentry", move="CL_SLAM", kind="down",
                 k0=k_, k1=k_, dx0=round(DX0 + x_ * B, 3), dx1=round(DX0 + (x_ + 1) * B, 3),
                 dy0=round(DY0 + y0 * B, 3), dy1=round(DY0 + (seg[-1][0] + 1) * B, 3), vy=vc, key=key,
-                jpost=int(np.bincount([s[5] for s in seg]).argmax()), cert=cert,
+                jpost=int(seg[0][5]), cert=cert,                 # one region: one jump after the press
                 share=round(min(s[4] for s in seg), 3), hits=1, region=rid, window=wid_of.get(rid, ""),
                 slack_t=int(min(s[6] for s in seg)), slack_u=round(min(s[7] for s in seg), 3)))
             i = j + 1
