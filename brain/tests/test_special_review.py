@@ -136,6 +136,43 @@ def test_board_is_cleared_on_a_tick_without_v2(params, arena, mode_on):
     assert not sm.BOARD
 
 
+def _hop_planner(params, arena, monkeypatch):
+    from ssbot.combat import rune_bombs as rb
+    from ssbot.combat.forum_planner import ForumConfig, ForumPlanner
+    from ssbot.combat.planner import PlannerConfig
+    monkeypatch.setattr(rb, "HOP", True)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, esc_deadline_ms=math.inf, v2=True, clash=True))
+    hx = 34.0
+    # a bomb over the standing hero lighting 20 frames ahead
+    f = NS(rs=NS(bombs_all=np.array([[7.0, hx, FLOOR + 0.67, rb.R, 20.0, 26.0]]), k_shift=0))
+    start = kin.initial_state(params, hx, FLOOR + params.foot)
+    return pl, f, start
+
+
+def test_hop_rows_press_jump_once_and_never_with_a_jump_in_flight(params, arena, monkeypatch):
+    pl, f, start = _hop_planner(params, arena, monkeypatch)
+    T = pl.fsets["ground"][0].T
+    out = pl._rune_hop_rows(f, start, kin.HoldState.idle(1), np.zeros(1, np.int64), T)
+    assert out is not None
+    cmd, names, _ = out
+    cs = pl.fsets["ground"][0]
+    for n in pl.HOP_SRC:
+        i = [cs.name(j) for j in range(len(cs.cmd))].index(n)
+        assert not (cs.cmd[i] & kin.B_JUMP).any()           # the source rows have no jump of their own
+    for m in cmd:
+        j = np.flatnonzero((m & kin.B_JUMP) != 0)
+        assert len(j) == pl.HOP_HOLD and np.all(np.diff(j) == 1)   # one press, held 11 frames
+    # a jump in flight: in the prefix, held, or queued -> no hop rows (the row's press would be a second one)
+    pre = np.array([kin.B_JUMP], np.int64)
+    assert pl._rune_hop_rows(f, start, kin.HoldState.idle(1), pre, T) is None
+    h = kin.HoldState.idle(1)
+    jb = int(kin.B_JUMP).bit_length() - 1
+    h.latched[0, jb] = True
+    assert pl._rune_hop_rows(f, start, h, np.zeros(1, np.int64), T) is None
+    assert pl.audit.hop_inflight == 2
+
+
 def test_l2_strike_spot_holds_through_a_flicker(monkeypatch):
     from tests.test_forum_l2 import CC, WinFc, clapper, l2, subj, world
     from ssbot.combat import special_board

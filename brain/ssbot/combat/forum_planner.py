@@ -2167,6 +2167,13 @@ class ForumPlanner(Planner):
         bk = getattr(rs, "bombs_all", None)
         if bk is None or not len(bk):
             return None
+        # review: a jump already in flight (in the prefix, or the key held / queued now) would make the row's own press
+        # a second press in the air (the umbrella): no hop rows until it is over
+        jb_i = int(B_JUMP).bit_length() - 1
+        if (np.asarray(prefix, np.int64) & B_JUMP).any() or bool(np.asarray(hold.latched)[0, jb_i]) \
+                or bool(np.asarray(hold.desired)[0, jb_i]) or int(np.asarray(hold.pending)[0, jb_i]) != 0:
+            self.audit.hop_inflight += 1
+            return None
         cs = self.fsets["ground"][0]
         if not hasattr(self, "_hop_src"):
             nm = [cs.name(i) for i in range(len(cs.cmd))]
