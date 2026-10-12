@@ -36,7 +36,7 @@ from ssbot.probes.pogo_probe import clapper, control, hx
 from ssbot.probes.pogo_target import MIN_HP, SETTLE_F, WAIT_S, Target, stop_requested
 from ssbot.tools.pogo_theory import load_kin
 
-D = 4                      # frames between the plan's state and the row's first frame (the planning time)
+D = 8                      # frames between the plan's state and the row's first frame (the planning time)
 FILTERS = ("both_front", "both_behind", "bounce_front", "bounce_behind")
 
 
@@ -52,24 +52,23 @@ def trial_specs(n: int, seed: int) -> list[dict]:
 
 def approach_safe(pr, start, r, k_now: int, xa: float, cy: float, face: int) -> np.ndarray:
     """[n] the row's approach (rollout index 1 .. the press frame) clear of the slam's root and hammer boxes."""
-    if not len(r.cmd):
+    n = len(r.cmd)
+    if not n:
         return np.zeros(0, bool)
     ro = kin.rollout(start, r.cmd, pr.params, pr.terrain)
-    out = np.ones(len(r.cmd), bool)
-    for n, j in enumerate(r.j_press):
-        for jj in range(1, int(j) + 2):
-            hb = ro.box[n, jj]
-            for which in ("root", "hammer"):
-                b = pr.tl.world(np.array([k_now + jj]), which)[0]
-                if not np.isfinite(b[0]):
-                    continue
-                x0, x1 = sorted((xa + face * b[0], xa + face * b[1]))
-                if x0 < hb[2] and x1 > hb[0] and cy + b[2] < hb[3] and cy + b[3] > hb[1]:
-                    out[n] = False
-                    break
-            if not out[n]:
-                break
-    return out
+    L = int(r.j_press.max()) + 2
+    jj = np.arange(1, L)
+    hit = np.zeros((n, L - 1), bool)
+    hb = ro.box[:, 1:L]                                   # [n, L-1, 4] x0, y0, x1, y1
+    for which in ("root", "hammer"):
+        b = pr.tl.world(k_now + jj, which)                # [L-1, 4] x0, x1, y0, y1 (facing frame)
+        fin = np.isfinite(b[:, 0])
+        xs = np.sort(np.stack([xa + face * b[:, 0], xa + face * b[:, 1]], axis=1), axis=1)
+        ox = (xs[None, :, 0] < hb[..., 2]) & (xs[None, :, 1] > hb[..., 0])
+        oy = (cy + b[None, :, 2] < hb[..., 3]) & (cy + b[None, :, 3] > hb[..., 1])
+        hit |= ox & oy & fin[None, :]
+    upto = jj[None, :] <= (r.j_press[:, None] + 1)
+    return ~(hit & upto).any(axis=1)
 
 
 class Probe(Target):
@@ -124,10 +123,12 @@ class Probe(Target):
         cert, side = t["filter"].split("_")
         safe = approach_safe(self, start, r, k_now, xa, cy, face)
         ok = [i for i, en in enumerate(r.entry) if en.cert == cert and ((en.dx0 >= 0) == (side == "front")) and safe[i]]
-        info["safe"] = int(safe.sum())
         info = {"f_antic": fa, "k_now": k_now, "cx": round(cx, 3), "cy": round(cy, 3), "face": face,
                 "hx": round(float(h["pos"][0]), 3), "rows": len(r.cmd), "tried": r.tried, "match": len(ok),
-                "plan_ms": round(plan_ms, 1)}
+                "plan_ms": round(plan_ms, 1), "safe": int(safe.sum())}
+        if not ok:                                   # no row of the filter: any row whose approach is clear
+            ok = [i for i in range(len(r.entry)) if safe[i]]
+            info["fallback"] = True
         if not ok:
             for _ in range(SETTLE_F):
                 s = self.step(0)
