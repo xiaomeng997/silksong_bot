@@ -5295,3 +5295,80 @@ arrive-and-strike rows added to the planner's candidates (`SSBOT_FORUM_SPECIALS=
 - Check whether the planner's own input latency model has the same one-frame lag the probe had (48.5).
 - The other nine types' hypotheses (forum.md 48.6) were not computed this stage.
 - Jump slam / cast slam into the timeline.
+
+## Task 1v1 - stage G1: the general special rule (branch worktree-wf_f1846551-5f9-1, 2026-10-12; forum.md §49)
+
+The person's GENERAL SPECIAL RULE (plan doc 2026-10-12) in the Forum planner, keyed by the special-move table (any
+move with entries gets it; CL_SLAM is the only table so far). Main switch `SSBOT_FORUM_SPECIAL_MODE=1`, default off:
+with it off every decision is the one of 677979c (deterministic replay, deadlines off, SPECIALS=1 CERT=bounce:
+729/729 slam ticks identical, 97 of them with special rows).
+
+### Code
+
+- `ssbot/combat/special_mode.py` (new): switches, the move timeline (E's real root / hammer boxes per frame, the
+  lunge), `contacts` (the slash's contact with the root box, T1's rule, vectorized), `body_stacks` (E's body in M on
+  the support's samples, E's margin, cached per frame), `occ_special` (others | E's body outside the PRE_PROTECT_F
+  frames before the contact; the full support from `full_from` on), `approach_codes` / `real_approach_fail` (T1's
+  real-box approach check), `row_keys_allowed`, `SpecialCtx`.
+- `ssbot/combat/special_board.py` (new, no imports): `BOARD` (planner -> L2, one tick later), `L2_ON`.
+- `forum_planner.py`: `_special_rows` (mode: certs both + bounce, k_shift, long rows, earliest press first);
+  `_special_ctx` (contacts, EV_POGO bounce lanes spliced into r1 incl. the end state, certified window = press ..
+  landing after the bounce (<= 75 frames), the special support, the continuation's tail check, the APPR filter);
+  tick: keys filter (f), stage 1 / envelope / pending aims / v2 escape read the special support for the special rows,
+  no hit branch for them, special rows always enveloped, the certain hit credited (J + hit weight x hit_w[E] where
+  the scorer had nh = 0), CONTINUE of a chosen special row stays special (prev_cmd = its whole template), audit
+  `sm_*`, BOARD.
+- `forum_v2.py`: `special_stacks` (every enemy but E + extra parts), `parts_stacks`, `aim_fail(skip_iid=)`, hazard
+  parts kept apart under the mode (`haz_raw`).
+- `specials.py`: `strike_rows(long_hi=, early_first=)` (long templates past the horizon, built only when the
+  in-horizon pass gives fewer than max_rows rows; at most 3 rows per 6-frame press window), template cache,
+  `lut(rank_cert=False)`.
+- `tactics/gauntlet.py` `_clapper_spot`: BOARD on -> stance = the press x, "slam: strike" (not in CC_RETREAT, so
+  hit_w > 0); else today's step-out.
+- `tools/forum_v2_bench.py`: in-move tick quantiles. `tests/test_special_mode.py` (10 tests).
+
+### Switches
+
+- `SSBOT_FORUM_SPECIAL_MODE=1`: the rule (a)-(g). Generates its own rows; SSBOT_FORUM_SPECIALS / _CERT are not needed
+  and are ignored while it is on (h). Without it, SPECIALS=1 is T3's old behaviour.
+- `SSBOT_FORUM_SPECIAL_APPR=1`: T1's real-box approach check as a filter of the special rows (default off: diagnostic).
+- `SSBOT_FORUM_SPECIAL_L2=0`: no L2 strike spot. `SSBOT_FORUM_SPECIAL_LONG=0`: no long rows.
+  `SSBOT_FORUM_SPECIAL_ROWS` (12), `SSBOT_FORUM_SPECIAL_BODY_M` (E's body margin; default E's support margin).
+
+### Numbers (offline; `C:\ssbot\data\m2_special\g1`)
+
+- Open-loop replay (m2_why harness, fcs runs 054126 i0 / 054132 i1, 8 episodes, 54 slams; `summ.py gs`):
+  special-mode ticks 1,750; ticks with a special row safe after every check 1,435 (all 54 slams; why-study base: 0);
+  chosen 712 ticks (51 slams); press frame p10/50/90 41/64/73, press 0.3/3.8/4.9 u in front.
+- T1's real-box approach check on the chosen rows: 475/712 fail, ALL with the press at k >= 54 (after the hammer
+  comes down: the post-slam entries; the approach waits inside the hammer); presses before k 54: 237/237 pass.
+  With `SSBOT_FORUM_SPECIAL_APPR=1` (gsa, instance 0, 25 slams): 86 chosen ticks in 21 slams, press k p50 44,
+  4.0 u in front, 0 fails.
+- L2 stance distance with BOARD on: p50 5.8 u (gs) / 4.9 u (gsa); off: 13 u.
+- Lag check (i): live keys (keyplan notes, sent target frame vs latched press): fcs boosted runs 3,699 presses: on
+  time 73.2 %, +1 22.0 %, +2 3.7 %, +3-4 1.1 %; all 10-11..12 runs 275,544: 71.8/22.6/4.4/1.2 %. No systematic lag
+  (the probe's +1 was its own send timing); no shift added to the rows.
+- Cost (`forum_v2_bench`, the person's 20261011_051105 attempt 0, 150 s; in-move = E in the slam, 360 ticks): act
+  p50/p95 off 10.0/16.4 ms, on 14.9/22.6 ms (over 16.7 ms: 4.4 % -> 28.1 %); planner 3.2/7.8 -> 8.7/14.5. All
+  ticks: unchanged (13.2/22.8 off, 12.9/21.7 on; the baseline is already over 16.7 ms at p95 on this machine).
+- Tests: test_forum_planner, test_forum_v2, test_specials, test_forum_l2, test_gauntlet, test_forum_tactics,
+  test_special_mode: 108 passed with the mode off, on, and on + APPR. test_import_firewall: still failing (the
+  pre-existing forum_v2 -> aim_zones -> ipc chain; special_mode is listed through forum_v2 too; the L2 module only
+  imports special_board).
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
+
+- `gs` = fcs + `SSBOT_FORUM_SPECIAL_MODE=1`.
+- `gsa` = gs + `SSBOT_FORUM_SPECIAL_APPR=1` (recommended first, given the hammer finding above).
+
+### Open items
+
+- The live A/B (gs, gsa vs fcs): hitless %, landed hits per second, kill time, hits by source (hammer during an
+  approach: audit `sm_appr_hammer`), special rows chosen (`sm_chosen`) and their whiff rate, late ticks.
+- Cost on slam ticks over 16.7 ms at p95 (+5-6 ms): next cuts would be rows every other tick, fewer templates.
+- The rule's approach clause and post-slam entries: ask the person whether the approach should keep M's active
+  boxes (equivalently APPR on), i.e. the rule only for strikes before M's first active frame.
+- Early-antic front entries (k 12-30, 3.5-4.5 u, rising) are chosen too; the table has them from T1's theory, live
+  trials never covered that part.
+- The BOARD is one tick late; L2 still steps out on the antic's first tick or two.
+- Small runes (START HERE item 2) not started.

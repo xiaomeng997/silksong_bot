@@ -82,6 +82,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ssbot.combat import special_board
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
@@ -317,6 +318,12 @@ class GauntletTactics:
         xa, xb = self.pb.arena_x
         room = (lambda v: xa + r.wall_room_u <= v <= xb - r.wall_room_u)
         if fam == CC_SLAM:
+            if special_board.L2_ON:
+                # the person's general special rule (combat.special_mode): the planner found a strike on this slam
+                # safe from every other enemy on its last tick: stand at its press point (a hit target, not a retreat)
+                b = special_board.BOARD.get(s.iid)
+                if b is not None and b.get("on") and b.get("x") is not None:
+                    return self._clamp(float(b["x"])), frozenset(), "slam: strike"
             if side != front:
                 return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
             out = x + front * r.slam_out_u

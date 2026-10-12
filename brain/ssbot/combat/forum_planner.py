@@ -77,7 +77,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
-from ssbot.combat import forum_v2, specials, stance_block
+from ssbot.combat import forum_v2, special_mode, specials, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
                                   _hull_points, _is_macro, _rect_meets_polys)
@@ -413,6 +413,19 @@ class EnvelopeAudit:
     spec_rows: int = 0            #   safe after every check, the ticks that chose one
     spec_safe: int = 0
     spec_chosen: int = 0
+    sm_ticks: int = 0             # the special mode (SSBOT_FORUM_SPECIAL_MODE, combat.special_mode): ticks with special
+    sm_rows: int = 0              #   rows (a contact with E in M found), the rows, those whose keys the allowlist vetoed,
+    sm_keys_veto: int = 0         #   the long ones (press past the horizon), those whose continuation is clear, the rows
+    sm_long: int = 0              #   safe after every check, the ticks with one, the ticks that chose one (CONTINUE of a
+    sm_tail_ok: int = 0           #   special row included), the chosen ones failing T1's real-box approach check
+    sm_safe: int = 0              #   (diagnostic, not a filter), the mode's time
+    sm_safe_ticks: int = 0
+    sm_chosen: int = 0
+    sm_appr_fail: int = 0
+    sm_ms: float = 0.0
+    sm_tail_esc: int = 0          # special rows whose escape is their own clear continuation
+    sm_hit_credit: int = 0        # special rows credited their strike as a landed hit (the scorer had none)
+    sm_appr_hammer: int = 0       # chosen special rows whose approach meets the move's attack box (T1's check)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -1519,9 +1532,24 @@ class ForumPlanner(Planner):
         rs = getattr(f, "rs", None)
         occ = (rs.occupied_esc(cx, cy, tq) if rs is not None and hasattr(rs, "occupied_esc") else
                f.occupied(cx, cy, tq)) & ((re.flags & F_INVULN) == 0)
+        sctx = getattr(self, "_sctx", None)
+        sp = [] if sctx is None or rs is None else [n for n, r in enumerate(rows) if int(r) in set(sctx.rows.tolist())]
+        if sp:
+            # the special mode: from the row's end (the bounce state) against the special escape support, the full
+            # one from the row's full_from on (M's estimate back after the certified window)
+            lanes = np.concatenate([np.arange(n * nE, (n + 1) * nE) for n in sp])
+            qs = np.repeat(np.searchsorted(sctx.rows, np.asarray(rows)[sp]), nE)
+            occ[lanes] = special_mode.occ_special(sctx, rs, qs, cx[lanes], cy[lanes], tq, esc=True) \
+                & ((re.flags[lanes] & F_INVULN) == 0)
         occ[:, 0] = False
         ok_e = (~occ.any(axis=1)).reshape(len(rows), nE)
         esc = ok_e.any(axis=1)
+        if sp:
+            # the row's own continuation (its template past the end: the press, the bounce) clear is an escape
+            for n in sp:
+                if not esc[n] and bool(sctx.tail_ok[int(np.searchsorted(sctx.rows, int(rows[n])))]):
+                    esc[n] = True
+                    self.audit.sm_tail_esc += 1
         # the first escape that passed, per row (forum_v2.ESC_TAIL: the chosen row's plan keeps it as its tail)
         first = np.argmax(ok_e, axis=1)
         self._v2_esc_first.update({int(r): int(first[j]) for j, r in enumerate(rows) if esc[j]})
@@ -2090,22 +2118,137 @@ class ForumPlanner(Planner):
             if mv is None or not p or abs(float(p[0]) - hx_) > 12.0:
                 continue
             if best is None or abs(float(p[0]) - hx_) < best[0]:
-                best = (abs(float(p[0]) - hx_), e, mv)
+                best = (abs(float(p[0]) - hx_), e, mv, iid, tk)
         if best is None:
             return None
-        _, e, (move, k_now) = best
-        lut = self._spec_tab.lut(move)
+        _, e, (move, k_now), iid_, tk_ = best
+        mode = special_mode.SPECIAL_MODE
+        k_trk = k_now
+        if mode:
+            # the special mode: the mode's certs (both + bounce: a down slash on an enemy in a move is a certain hit),
+            # the tracker's look-ahead shift (move frame at the planner's rollout index 0), long rows
+            k_now = k_trk - int(getattr(rs, "k_shift", 0) or 0)
+        lut = self._spec_tab.lut(move, special_mode.MODE_CERTS, rank_cert=False) if mode else self._spec_tab.lut(move)
         if lut is None or k_now + specials.REACT_F >= lut.K:
             return None
         t0 = time.perf_counter()
         face = 1 if e.get("flipX") else -1
         disp = self._spec_disp
-        xa = float(e["pos"][0]) - face * disp[min(max(k_now, 0), len(disp) - 1)]
+        xa = float(e["pos"][0]) - face * disp[min(max(k_trk, 0), len(disp) - 1)]
         r = specials.strike_rows(self.params, self.terrain, start, lut, k_now, xa, float(e["pos"][1]), face, disp, T,
-                                 threads=self.cfg.threads, prefix=prefix)
+                                 threads=self.cfg.threads, prefix=prefix,
+                                 **({"long_hi": special_mode.LONG_PRESS_MAX if special_mode.LONG else None,
+                                     "early_first": True, "max_rows": special_mode.MAX_ROWS} if mode else {}))
         self.spec_ms = (time.perf_counter() - t0) * 1e3
         self.spec_n = (len(r.cmd), r.tried)
+        if mode:
+            self._spec_meta = {"iid": int(iid_), "tk": tk_, "move": move, "k_trk": int(k_trk), "k0": int(k_now),
+                               "xa": xa, "cy": float(e["pos"][1]), "face": face}
         return r
+
+    def _special_ctx(self, f, start, hold, prefix, latched, r1, rows: np.ndarray, exts: list, T: int):
+        """The special mode's tick context (combat.special_mode): the special rows' contact with E's move (the bounce
+        event), their bounce lanes spliced into r1 (stage 1 and the score read the bounce from the press on), the
+        certified window, the special support (special_stacks: E's move dropped, its body and hazards kept, every
+        other enemy kept) and each row's continuation past its end (exts: the row's whole template) checked against
+        it (tail_ok). Rows without a contact in the model are left out (they keep the full checks). None: no row."""
+        from ssbot.combat.forum_v2 import ESC_F
+        t0 = time.perf_counter()
+        meta = getattr(self, "_spec_meta", None)
+        rs = getattr(f, "rs", None)
+        tl = special_mode.timeline(meta["move"]) if meta else None
+        if tl is None or rs is None or not len(rows):
+            return None
+        P = len(prefix)
+        n = len(rows)
+        T1 = P + T + 1
+        L = max(max(len(x) for x in exts), T + ESC_F)
+        ext = np.zeros((n, P + L), np.int64)
+        ext[:, :P] = prefix
+        for q, x in enumerate(exts):
+            ext[q, P:P + len(x)] = x
+            ext[q, P + len(x):] = x[-1] & (kin.B_LEFT | kin.B_RIGHT)
+        lat_e, _ = hold_filter_jit(ext, hold)
+        k0, xa, cy, face = meta["k0"], meta["xa"], meta["cy"], meta["face"]
+        from ssbot.combat.pogo_model import ACTIVE
+        pj = np.zeros(n, np.int64)
+        hf = np.zeros(n, np.int64)
+        for q in range(n):
+            dn = np.flatnonzero(((ext[q, P:] & B_DOWN) != 0) & ((ext[q, P:] & B_ATTACK) != 0))
+            if len(dn):
+                pj[q] = P + int(dn[0]) + 1
+                hf[q] = special_mode.facing_at(start, ext[q], P + int(dn[0]))
+        # the miss lanes for the contact: r1's (the planner's lanes) when the slash's window ends within them, else
+        # the whole template rolled out
+        inside = (pj > 0) & (pj + ACTIVE[1] <= T1 - 1)
+        if inside.all():
+            mpos, mfl = r1.pos[rows], r1.flags[rows]
+        else:
+            re = kin.rollout(start, lat_e, self.params, self.terrain, threads=self.cfg.threads)
+            mpos, mfl = re.pos, re.flags
+        contact = special_mode.contacts(tl, mpos, mfl, pj, k0, xa, cy, face, hf)
+        keep = contact > 0
+        if not keep.any():
+            return None
+        ev = np.zeros((n, P + L), np.int64)
+        ev[np.flatnonzero(keep), contact[keep] - 1] = kin.EV_POGO     # SlamTheory's convention (the certified bounce)
+        rows, ext, lat_e, ev, contact, pj = rows[keep], ext[keep], lat_e[keep], ev[keep], contact[keep], pj[keep]
+        is_long = np.array([len(x) > T for x, k_ in zip(exts, keep) if k_], bool)
+        n = len(rows)
+
+        def bounce(lat_, ev_):
+            """The bounce lanes: the planner's length (r1's splice, the end state for the escape) and the rest of the
+            template continued from there (the tail check, the certified window); arrays over the whole length."""
+            rp_ = kin.rollout(start, lat_[:, :P + T], self.params, self.terrain, events=ev_[:, :P + T],
+                              threads=self.cfg.threads)
+            rt_ = kin.rollout(rp_.final, lat_[:, P + T:], self.params, self.terrain, events=ev_[:, P + T:],
+                              threads=self.cfg.threads)
+            return rp_, {nm: np.concatenate([getattr(rp_, nm), getattr(rt_, nm)[:, 1:]], axis=1)
+                         for nm in ("box", "flags", "pos")}
+        rp, rb = bounce(lat_e, ev)
+        # T1's real-box approach check: 0 clear, 1 the root box (body), 2 the attack box; -1 not computed (without
+        # SSBOT_FORUM_SPECIAL_APPR only the chosen row's, at the selection: a diagnostic)
+        appr = special_mode.approach_codes(tl, k0, xa, cy, face, pj, rb["box"], rb["flags"]) \
+            if special_mode.APPR else np.full(n, -1, np.int64)
+        if special_mode.APPR and appr.any():
+            # SSBOT_FORUM_SPECIAL_APPR: T1's real-box approach check as a filter (the rows failing it keep the
+            # full checks)
+            k2 = appr == 0
+            if not k2.any():
+                return None
+            rows, ext, lat_e, ev, contact, pj, is_long, appr = (a_[k2] for a_ in (rows, ext, lat_e, ev, contact, pj,
+                                                                                  is_long, appr))
+            rp, rb = bounce(lat_e, ev)
+            n = len(rows)
+        Lb = rb["flags"].shape[1]
+        cert_end = np.zeros(n, np.int64)
+        for q in range(n):
+            g = np.flatnonzero((rb["flags"][q, contact[q] + 1:] & F_GROUND) != 0)
+            land = int(contact[q]) + 1 + int(g[0]) if len(g) else Lb - 1
+            cert_end[q] = min(land, int(pj[q]) + special_mode.CERT_AFTER)
+        al = special_mode.active_last(tl)
+        big = 1 << 30
+        full_from = np.where(k0 + cert_end <= al, cert_end, big).astype(np.int64)
+        # the planner lanes: the bounce from the press on (the score, stage 1, the end state for the escape)
+        for nm in ("phys", "pos", "vel", "mode", "flags", "box"):
+            getattr(r1, nm)[rows] = getattr(rp, nm)
+        r1.final[:, rows] = rp.final
+        st_o, es_o = rs.special_stacks(meta["iid"], list(getattr(rs, "haz_raw", {}).get(meta["iid"], ())))
+        st_b, es_b = special_mode.body_stacks(rs, meta["iid"], tl, meta["k_trk"], xa, cy, face, meta["tk"])
+        ctx = special_mode.SpecialCtx(meta["iid"], meta["move"], k0, xa, cy, face, tl, st_o, es_o, st_b, es_b, rows,
+                                      contact, cert_end, full_from, ev[:, :P + T], np.ones(n, bool), pj, is_long)
+        idx = np.arange(T1, Lb)
+        if len(idx):
+            bx = rb["box"][:, idx]
+            tq = idx * self.params.frame_time
+            o = special_mode.occ_special(ctx, rs, np.arange(n), 0.5 * (bx[..., 0] + bx[..., 2]),
+                                         0.5 * (bx[..., 1] + bx[..., 3]), tq)
+            o &= (rb["flags"][:, idx] & F_INVULN) == 0
+            ctx.tail_ok = ~o.any(axis=1)
+        ctx.box, ctx.flags, ctx.pos, ctx.appr_fail = rb["box"], rb["flags"], rb["pos"], appr
+        ctx.ext = ext[:, P:]
+        ctx.ms = (time.perf_counter() - t0) * 1e3
+        return ctx
 
     def _v2_dash(self, o: np.ndarray, f, r1, cx: np.ndarray, cy: np.ndarray, tq: np.ndarray, fr) -> np.ndarray:
         """The focus margin (forum_v2 MARGIN_MODE "focus", the person 2026-10-11): a row that dashes at the focus
@@ -2144,7 +2287,10 @@ class ForumPlanner(Planner):
         N0, T = len(cs.cmd), cs.T
         cont = self.prev_cmd is not None
         rows_ = [cs.cmd]
-        spec = self._special_rows(f, start, prefix, T) if (v2 and specials.SPECIALS_ON) else None
+        self._spec_meta = None
+        pv_sm = getattr(self, "_prev_sm", None)          # the special mode: last tick's chosen special row
+        self._prev_sm = None
+        spec = self._special_rows(f, start, prefix, T) if (v2 and (specials.SPECIALS_ON or special_mode.SPECIAL_MODE))             else None
         n_spec = 0 if spec is None else len(spec.cmd)
         if n_spec:
             rows_.append(spec.cmd)               # the arrive-and-strike rows: after the set, before the CONTINUE
@@ -2170,7 +2316,18 @@ class ForumPlanner(Planner):
         full[:, :P] = prefix
         full[:, P:] = cmd
         ok, why = veto(cs, ctx)
-        if n_spec:
+        sm_on = bool(v2 and special_mode.SPECIAL_MODE)
+        if sm_on:
+            special_mode.BOARD.clear()            # the L2 controller reads this tick's decision (or none) next tick
+        sctx = None
+        self._sctx = None
+        if n_spec and sm_on:
+            # (f) the special rows on the keys they use
+            kok = special_mode.row_keys_allowed(spec.cmd, ctx.allowed_mask)
+            ok = np.append(ok, kok)
+            why = np.append(why, np.where(kok, 0, 1))
+            self.audit.sm_keys_veto += int((~kok).sum())
+        elif n_spec:
             ok = np.append(ok, np.full(n_spec, bool(ctx.allowed_mask.all())))
             why = np.append(why, np.full(n_spec, 0 if ok[-1] else 1))
         if cont:
@@ -2180,6 +2337,22 @@ class ForumPlanner(Planner):
         t1 = time.perf_counter()
         # ---- stage 1: the nominal lane, its box centre against the support ----
         r1 = kin.rollout(start, latched, params, self.terrain, threads=cfg.threads)
+        if sm_on and getattr(self, "_spec_meta", None) is not None and (n_spec or (cont and pv_sm is not None)):
+            # the special mode: the special rows (and the CONTINUE of a chosen one, same enemy) get the bounce lanes,
+            # the special support and their continuation's check
+            s_rows, s_ext = [], []
+            for q in range(n_spec):
+                s_rows.append(N0 + q)
+                fq = spec.full[q] if spec.full is not None else None
+                s_ext.append(fq if fq is not None else spec.cmd[q])
+            pv = pv_sm
+            if cont and pv is not None and pv["iid"] == self._spec_meta["iid"] and len(pv["ext"]) > 1:
+                s_rows.append(N - 1)
+                s_ext.append(pv["ext"][1:])
+            sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray(s_rows, np.int64), s_ext, T)
+            self._sctx = sctx
+            if sctx is not None:
+                self.audit.sm_ms += sctx.ms
         t1r = time.perf_counter()
         T1 = P + T + 1
         tk = np.arange(T1, dtype=np.float64) * params.frame_time
@@ -2196,6 +2369,10 @@ class ForumPlanner(Planner):
         else:
             o = f.occupied(cx, cy, tk[fr])
         o = self._v2_dash(o, f, r1, cx, cy, tk[fr], fr)
+        if sctx is not None:
+            # (a, b) the special rows on stage 1: their bounce lane against the special support
+            sr = sctx.rows
+            o[sr] = special_mode.occ_special(sctx, f.rs, np.arange(len(sr)), cx[sr], cy[sr], tk[fr])
         if enemy_only:
             o &= (r1.flags[:, fr] & F_INVULN) == 0
         S1 = o.any(axis=1)
@@ -2206,6 +2383,19 @@ class ForumPlanner(Planner):
         t2 = time.perf_counter()
         sc = self._score_forum(ws, r1, latched, start, f, prefs, tk, ctx)
         J = sc["J"]
+        if sctx is not None:
+            # (b) a down slash on an enemy in a move is a certain hit: a special row's strike (its contact with E's
+            # move boxes) counts as one landed hit on E where the scorer's target boxes missed it (the hit term at
+            # E's hit weight; none while the controller gives E none)
+            hw_e = float((getattr(prefs, "hit_w", None) or {}).get(sctx.iid, 0.0))
+            miss_ = sctx.rows[np.asarray(sc["nh"])[sctx.rows] < 1.0]
+            if len(miss_) and hw_e > 0:
+                J[miss_] += prefs.weights.get("hit", 10.0) * hw_e
+                for k_ in ("nh", "hits"):
+                    if k_ in sc:
+                        sc[k_] = np.asarray(sc[k_], np.float64).copy()
+                        sc[k_][miss_] = np.maximum(sc[k_][miss_], 1.0)
+                self.audit.sm_hit_credit += len(miss_)
         tac = fcfg.tac
         P1 = o.mean(axis=1) if len(fr) else np.zeros(N)
         if "eml" in tac:
@@ -2246,7 +2436,11 @@ class ForumPlanner(Planner):
         core_rows = pre[core[pre]]
         prio = [int(i) for i in core_rows]
         n_core = len(prio)
-        if cont and pass1[N - 1] and not core[N - 1]:
+        if sctx is not None:
+            # the special mode: the special rows that passed stage 1 are always enveloped (after the core rows)
+            prio += [int(i) for i in sctx.rows if pass1[i] and int(i) not in prio]
+            n_core = len(prio)                    # (as the core rows: not cut by the deadline)
+        if cont and pass1[N - 1] and not core[N - 1] and (N - 1) not in prio:
             prio.append(N - 1)
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
         top = rest[:fcfg.K_b]
@@ -2282,15 +2476,37 @@ class ForumPlanner(Planner):
             tc0 = time.perf_counter()
             ch = np.array(queue[pos:pos + fcfg.chunk], np.int64)
             pos += len(ch)
-            r2 = kin.rollout(start, latched[ch], params, self.terrain, variants=fcfg.variants, threads=cfg.threads)
+            m_sp = np.isin(ch, sctx.rows) if sctx is not None else None
+            if m_sp is not None and m_sp.any():
+                q_sp = np.searchsorted(sctx.rows, ch[m_sp])
+                evc = np.zeros((len(ch), latched.shape[1]), np.int64)
+                evc[m_sp] = sctx.ev[q_sp]
+                r2 = kin.rollout(start, latched[ch], params, self.terrain, events=evc, variants=fcfg.variants,
+                                 threads=cfg.threads)
+            else:
+                m_sp = None
+                r2 = kin.rollout(start, latched[ch], params, self.terrain, variants=fcfg.variants, threads=cfg.threads)
             skip = ((r2.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(r2.flags_all.shape, bool)
             occ = self._contacts(f, r2.bound, tk, skip)
+            if m_sp is not None:
+                # (a, b) the special rows' envelope: the bounce lanes against the special support (the full support
+                # from a row's full_from on)
+                o_sp = self._contacts_fn(f, r2.bound[m_sp], tk, skip[m_sp],
+                                         lambda X, Y: f.rs._occ_stack(sctx.st_o, X, Y, tk))
+                o_b = self._contacts_fn(f, r2.bound[m_sp], tk, skip[m_sp],
+                                        lambda X, Y: f.rs._occ_stack(sctx.st_b, X, Y, tk))
+                o_sp |= o_b & ~special_mode.pre_protect(sctx, q_sp, np.arange(T1))
+                ff = sctx.full_from[q_sp]
+                if (ff < T1).any():
+                    late = np.arange(T1)[None, :] >= ff[:, None]
+                    o_sp = np.where(late, occ[m_sp], o_sp)
+                occ[m_sp] = o_sp
             s2 = occ.any(axis=1)
             S[ch] = s2
             env[ch] = True
             bound[ch] = r2.bound
             t_hit[ch] = np.where(s2, occ.argmax(axis=1), T1)
-            hr = ch[~s2 & has_hit[ch]]
+            hr = ch[~s2 & has_hit[ch]] if m_sp is None else ch[~s2 & has_hit[ch] & ~m_sp]
             if bell_first.any():
                 # in contact, but the swing meets a bell first: the branch with the bell knocked back decides
                 hb_ = ch[s2 & bell_first[ch] & (sc["first_f"][ch] <= t_hit[ch])]
@@ -2330,8 +2546,19 @@ class ForumPlanner(Planner):
                 # v2: the pending aims (forum_v2.RangeSupport.aim_fail) on the nominal lane of the rows still safe
                 pr = ch[~S[ch]]
                 if len(pr):
-                    af = f.rs.aim_fail(0.5 * (r1.box[pr, :, 0] + r1.box[pr, :, 2]),
-                                       0.5 * (r1.box[pr, :, 1] + r1.box[pr, :, 3]), self._v2_locked(r1, pr))
+                    if m_sp is None:
+                        af = f.rs.aim_fail(0.5 * (r1.box[pr, :, 0] + r1.box[pr, :, 2]),
+                                           0.5 * (r1.box[pr, :, 1] + r1.box[pr, :, 3]), self._v2_locked(r1, pr))
+                    else:
+                        # the special rows: E's own aims skipped (the special mode drops its move's aim zones)
+                        af = np.zeros(len(pr), bool)
+                        isp = np.isin(pr, sctx.rows)
+                        for msk, skip_iid in ((~isp, None), (isp, sctx.iid)):
+                            if msk.any():
+                                pp = pr[msk]
+                                af[msk] = f.rs.aim_fail(0.5 * (r1.box[pp, :, 0] + r1.box[pp, :, 2]),
+                                                        0.5 * (r1.box[pp, :, 1] + r1.box[pp, :, 3]),
+                                                        self._v2_locked(r1, pp), skip_iid=skip_iid)
                     S[pr[af]] = True
                     t_hit[pr[af]] = np.minimum(t_hit[pr[af]], T1 - 1)
                     self.audit.v2_aim_rows += int(af.sum())
@@ -2407,6 +2634,15 @@ class ForumPlanner(Planner):
             self.audit.spec_ticks += 1
             self.audit.spec_rows += n_spec
             self.audit.spec_safe += int(safe[N0:N0 + n_spec].sum())
+        if sctx is not None:
+            a_ = self.audit
+            a_.sm_ticks += 1
+            a_.sm_rows += len(sctx.rows)
+            a_.sm_long += int(sctx.is_long.sum())
+            a_.sm_tail_ok += int(sctx.tail_ok.sum())
+            ns_ = int(safe[sctx.rows].sum())
+            a_.sm_safe += ns_
+            a_.sm_safe_ticks += int(ns_ > 0)
         V[:N0] = counts[first[:N0]] >= 2
         if cont:
             V[-1] = safe[-1]
@@ -2621,6 +2857,16 @@ class ForumPlanner(Planner):
             sel_cmd = cmd[i]
             name = rname(i)
             a.spec_chosen += int(N0 <= i < N0 + n_spec)
+            if sctx is not None and i in set(sctx.rows.tolist()):
+                q_ = int(np.searchsorted(sctx.rows, i))
+                if sctx.appr_fail[q_] < 0:
+                    sctx.appr_fail[q_] = special_mode.real_approach_fail(sctx.tl, sctx.k0, sctx.xa, sctx.cy, sctx.face,
+                                                                         int(sctx.pj[q_]), sctx.box[q_], sctx.flags[q_])
+                a.sm_chosen += int(not S[i])
+                a.sm_appr_fail += int(not S[i] and bool(sctx.appr_fail[q_]))
+                a.sm_appr_hammer += int(not S[i] and int(sctx.appr_fail[q_]) == 2)
+                if not S[i] and not esc_unsafe:
+                    self._prev_sm = {"iid": sctx.iid, "ext": sctx.ext[q_].copy()}
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
@@ -2661,7 +2907,24 @@ class ForumPlanner(Planner):
         elif res.name != "CONTINUE":
             self.macro_until = -1
         self.prev_cmd = sel_cmd
-        if esc_tail is not None and esc_tail[0] == res.idx:
+        if sctx is not None:
+            # (e) the decision for the L2 controller (special_mode.BOARD): on = a special row safe after every check;
+            # x = the hero's x at the press of the chosen one, else of the best safe one
+            sq = np.flatnonzero(safe[sctx.rows])
+            on = bool(len(sq))
+            bx_ = None
+            if on:
+                ch_ = [int(np.searchsorted(sctx.rows, res.idx))] if res.idx in set(sctx.rows.tolist()) else \
+                    [int(sq[np.argmax(J[sctx.rows[sq]])])]
+                q_ = ch_[0]
+                bx_ = float(sctx.pos[q_, min(int(sctx.pj[q_]), sctx.pos.shape[1] - 1), 0])
+            special_mode.BOARD[sctx.iid] = {"tick": self.ticks, "move": sctx.move, "k": sctx.k0, "on": on, "x": bx_,
+                                            "rows": len(sctx.rows), "safe": len(sq)}
+        if getattr(self, "_prev_sm", None) is not None and res.idx >= 0 and not S[res.idx]:
+            # the chosen special row's plan is its whole template (the next CONTINUE runs on into the press and
+            # the bounce, judged as a special row again)
+            self.prev_cmd = np.asarray(self._prev_sm["ext"], np.int64)
+        if esc_tail is not None and esc_tail[0] == res.idx and getattr(self, "_prev_sm", None) is None:
             # v2: the escape that kept this row safe is its plan's tail: the next tick's CONTINUE runs into it
             # (forum_v2.ESC_TAIL) instead of idling where the row ends
             self.prev_cmd = np.concatenate([np.asarray(sel_cmd, np.int64), esc_tail[1]])

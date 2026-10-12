@@ -59,16 +59,29 @@ def run(seg: dict, threads: int, limit_s: float) -> dict:
         fd = pol.v2feed
         rows.append({"act": ms, "plan": pol.plan_ms[-1], "v2": fd.ms[-1] if fd is not None and fd.ms else None,
                      "n": len(fd.trk.now) if fd is not None else len(getattr(pol.fc, "trackers", {}) or {}),
-                     "forced": bool(res.forced_risk), "S": int(res.S)})
+                     "forced": bool(res.forced_risk), "S": int(res.S), "move": _in_move(fd)})
     return {"seg": {k: seg[k] for k in ("session", "attempt", "kind")}, "rows": rows,
             "fcfg": {"v2": pl.fcfg.v2, "deadline_ms": pl.fcfg.deadline_ms}}
+
+
+def _in_move(fd) -> bool:
+    """An enemy in a move the special-move table knows (combat.specials: the Clapper's slam) is tracked."""
+    from ssbot.combat import specials
+    if fd is None:
+        return False
+    for tk, e, _ in fd.trk.now.values():
+        if specials.enemy_move({"type_key": e.get("type_key") or tk, "fsms": e.get("fsms")}) is not None:
+            return True
+    return False
 
 
 def summarize(rows: list) -> dict:
     out = {"ticks": len(rows), "act_ms": _q([r["act"] for r in rows]), "plan_ms": _q([r["plan"] for r in rows]),
            "v2_ms": _q([r["v2"] for r in rows if r["v2"] is not None]),
            "forced": round(float(np.mean([r["forced"] for r in rows])), 4) if rows else None,
-           "S1": round(float(np.mean([r["S"] for r in rows])), 4) if rows else None, "by_enemies": {}}
+           "S1": round(float(np.mean([r["S"] for r in rows])), 4) if rows else None, "by_enemies": {},
+           "in_move": {"act_ms": _q([r["act"] for r in rows if r.get("move")]),
+                       "plan_ms": _q([r["plan"] for r in rows if r.get("move")])}}
     for b in ("0", "1", "2-3", "4-5", "6+"):
         rr = [r for r in rows if bucket(r["n"]) == b]
         if rr:

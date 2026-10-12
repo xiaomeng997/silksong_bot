@@ -80,6 +80,9 @@ CLAPPER = "Song Heavy Sentry"
 # check's danger too (samples from ESC_FROM_K on), so a chosen row leaves the hero a way out of a slam started on
 # this tick; re-checked every tick (SSBOT_FORUM_V2_VSLAM=1; off by default)
 VSLAM = os.environ.get("SSBOT_FORUM_V2_VSLAM", "0").strip() == "1"
+# the person's general special rule (combat.special_mode, task 1v1 G1): build() keeps each enemy's hazard parts apart
+# (haz_raw) so the special stacks drop a move's estimate but keep the enemy's hazards
+SPECIAL_MODE = os.environ.get("SSBOT_FORUM_SPECIAL_MODE", "0").strip() == "1"
 VSLAM_FAMS = (None, "CC_EVADE", "CC_CAST")
 
 
@@ -292,6 +295,7 @@ class LayerSupport:
         self.k_shift = int(k_shift)
         self.layers: dict = {i: [] for i in range(len(self.samples))}
         self.raw: dict = {i: [] for i in range(len(self.samples))}     # add_raw: (iid, coarse, ix0, iy0, m, esc_m)
+        self.haz_raw: dict = {}     # SPECIAL_MODE: {iid: [(si, coarse, ix0, iy0, m, esc_m)]} the hazard parts of raw
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
         self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
         self.stack_dash: np.ndarray | None = None   # the focus unit with its "rule" margin (rows dashing at it)
@@ -401,18 +405,64 @@ class LayerSupport:
     def area(self, si: int) -> float:
         return float(self.stack[si].sum()) * self.cv.cell ** 2
 
+    def special_stacks(self, iid: int, extra: list) -> tuple[np.ndarray, np.ndarray]:
+        """The special mode's support (combat.special_mode, the person's general rule): every enemy but `iid` as
+        built (its moves, bodies and hazards with their margins, the escape check's parts likewise), plus extra raw
+        parts [(si, coarse, ix0, iy0, m, esc_m)] (iid's body in its move and its hazards). Returns (stack, the escape
+        check's stack)."""
+        st = np.zeros(self.stack.shape, bool)
+        es = np.zeros(self.stack.shape, bool)
+        for si, ls in self.layers.items():
+            for i_, m_, x0, y0 in ls:
+                if i_ != iid:
+                    self.cv.paste(st[si], m_, x0, y0)
+        for si, parts in self.raw.items():
+            ps = [(c, x0, y0, m, em) for (i_, c, x0, y0, m, em) in parts if i_ != iid]
+            ps += [(c, x0, y0, m, em) for (s_, c, x0, y0, m, em) in extra if s_ == si]
+            for idx, dst in ((3, st), (4, es)):
+                by_m: dict = {}
+                for p in ps:
+                    if p[idx] is not None:
+                        by_m.setdefault(round(float(p[idx]), 4), []).append(p[:3])
+                for m, g in by_m.items():
+                    d, x0, y0 = dilate_group(g, m, self.cv.cell)
+                    self.cv.paste(dst[si], d, x0, y0)
+        if self.stack_esc is None:
+            es = st.copy()
+        return st, es
+
+    def parts_stacks(self, parts: list) -> tuple[np.ndarray, np.ndarray]:
+        """Raw parts [(si, coarse, ix0, iy0, m, esc_m)] alone as (stack, escape stack) (the special mode's E body)."""
+        st = np.zeros(self.stack.shape, bool)
+        es = np.zeros(self.stack.shape, bool)
+        for idx, dst in ((4, st), (5, es)):
+            by_m: dict = {}
+            for p in parts:
+                if p[idx] is not None:
+                    by_m.setdefault((p[0], round(float(p[idx]), 4)), []).append(p[1:4])
+            for (si, m), g in by_m.items():
+                d, x0, y0 = dilate_group(g, m, self.cv.cell)
+                self.cv.paste(dst[si], d, x0, y0)
+        if self.stack_esc is None:
+            es = st.copy()
+        return st, es
+
     def reaction(self, iid: int, to_states, j_hit: int, hero_x: float | None) -> "LayerSupport | None":
         """The counters of a hit (RangeSupport: from the estimate's templates); a plain layer support has none."""
         return None
 
     # ---- pending aims ----
 
-    def aim_fail(self, cx: np.ndarray, cy: np.ndarray, locked: np.ndarray | None = None) -> np.ndarray:
+    def aim_fail(self, cx: np.ndarray, cy: np.ndarray, locked: np.ndarray | None = None, skip_iid: int | None = None
+                 ) -> np.ndarray:
         """[N] rows whose HeroBox centre (the box centre + HB_DY) is inside a pending aim's zone on a frame of its
-        decision window (planner frames; the row's end when it comes later), extended through a lock held then."""
+        decision window (planner frames; the row's end when it comes later), extended through a lock held then.
+        skip_iid: that enemy's aims not checked (the special mode's rows)."""
         N, T1 = cx.shape
         fail = np.zeros(N, bool)
         for p in getattr(self, "pend", ()):
+            if skip_iid is not None and p.get("iid") == skip_iid:
+                continue
             a = p["d_lo"] + self.k_shift
             b = p["d_hi"] + self.k_shift
             if a >= T1 - 1:
@@ -527,6 +577,9 @@ class RangeSupport(LayerSupport):
                 # the margin's growth is the replanning's business), moves and hazards with their margin
                 idle = e.fam is None
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
+                if SPECIAL_MODE and e.haz is not None and e.haz.m.size and e.haz.m.any():
+                    ch_, hx_, hy_ = coarse(e.haz, tab.cell, cv.cell)
+                    rs.haz_raw.setdefault(iid, []).append((si, ch_, hx_, hy_, m, m if esc else None))
                 if esc and idle and e.haz is not None and e.haz.m.size and e.haz.m.any():
                     ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
                     rs.add_raw(si, iid, ch, hx0, hy0, None, m)
