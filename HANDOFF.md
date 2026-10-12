@@ -5579,7 +5579,7 @@ scripts, outputs). All offline; no game was started.
     full tick's strike spot for the BOARD on the ticks between. Audit `sm_full_ticks`, `sm_board_cached`.
 - `specials.py`: `strike_rows(now_only=, hold_rem=)`, `_templates(now_only=)`. `special_mode.py`: FAST, FULL_EVERY,
   HOLD.
-- `tests/test_dslash.py` (14 tests): templates; the chain has no jump press in the air; the jump and its strike are one
+- `tests/test_dslash.py` (13 tests): templates; the chain has no jump press in the air; the jump and its strike are one
   row that hits; the prefilter; idle targets are not certain; certain rows skip the miss branch; the second strike
   counts; a body moving away on its move path is not certain; the stopped-body variant; FAST; HOLD.
 
@@ -5643,7 +5643,7 @@ scripts, outputs). All offline; no game was started.
     on a slam tick (cProfile, gsa + FAST, 360 slam ticks, `log_prof_gsaf.txt`): `_special_ctx` 7.0 ms a call (of it
     `body_stacks` 3.6, `special_mode.contacts` 2.0), `strike_rows` 1.8 ms. Next cuts: E's body stacks across ticks
     (they are rebuilt every frame), the contact check on the rows that start now only.
-- Tests: test_dslash 14 passed. Full suite without the known failures: 1532 passed, 1 skipped, 1 xfailed. One timing
+- Tests: test_dslash 13 passed. Full suite without the known failures: 1532 passed, 1 skipped, 1 xfailed. One timing
   test (`test_hitbox_tables::test_support_query_budget...`) failed while the replays ran in parallel; it passes alone.
 
 ### Arms (`C:\ssbot\sandbox\1v1_arms.txt`, appended)
