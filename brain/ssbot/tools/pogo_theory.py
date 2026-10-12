@@ -257,25 +257,40 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
     fc = real_contact(row)
     # the damage rule alone: the logged hero box and invulnerability against the logged boxes
     jc_real = next((j for j in range(1, n + 1) if W[i0 - 1 + j]["f"] == fc), None) if fc is not None else None
-    real_rule = None
-    for j in range(1, n + 1):
-        if tcum[j] - tp > CHECK_S:
-            break
-        h = W[i0 - 1 + j].get("hero") or {}
-        if h.get("invulnerable") or not h.get("box"):
-            continue
-        if jc_real is not None and 0 <= tcum[j] - tcum[jc_real] < 0.16:      # the downspike i-frames (not exported)
-            continue
-        hx0, hy0, hx1, hy1 = h["box"]
-        rb, ham, _ = boxes[j]
-        srcs = list(ham)
-        if rb is not None:
-            srcs.append(("body", rb))
-        hit_src = [(nm, round(min(b[1], hx1) - max(b[0], hx0), 3), round(min(b[3], hy1) - max(b[2], hy0), 3))
-                   for nm, b in srcs if b[0] < hx1 and b[1] > hx0 and b[2] < hy1 and b[3] > hy0]
-        if hit_src:
-            real_rule = {"t": round(float(tcum[j] - tp), 4), "src": hit_src}
-            break
+    # every real bounce contact in the window (a chain's earlier ones too): vy -10 then the pogo within 3 frames
+    vys = [float(((x.get("hero") or {}).get("vel") or [0, 0])[1]) for x in W]
+    tw = np.concatenate([[0.0], np.cumsum([float(x.get("dt") or 0.0) for x in W[1:]])])
+    contacts_w = [i for i in range(len(W) - 1) if abs(vys[i] + 10.0) < 0.05 and any(v >= 15.0 for v in vys[i + 1:i + 4])]
+
+    def rule(iframes: str, delay: int, need_step: bool):
+        """The first damage on the logged path: iframes 'first' (0.16 s from this slash's first contact) or 'each'
+        (from every contact, earlier slashes' included); delay: a hammer collider hurts from the frame after the one
+        it is logged enabled on (its box then); need_step: only frames with a physics step detect."""
+        first_c = None if jc_real is None else i0 - 1 + jc_real
+        for j in range(1, n + 1):
+            if tcum[j] - tp > CHECK_S:
+                break
+            iw = i0 - 1 + j
+            h = W[iw].get("hero") or {}
+            if h.get("invulnerable") or not h.get("box"):
+                continue
+            if need_step and not (W[iw].get("fs") or 0):
+                continue
+            cs = contacts_w if iframes == "each" else ([first_c] if first_c is not None else [])
+            if any(c is not None and c <= iw and tw[iw] - tw[c] < 0.16 for c in cs):
+                continue
+            hx0, hy0, hx1, hy1 = h["box"]
+            rb, ham, _ = boxes[j]
+            srcs = list(_clapper_boxes(W[iw - delay], iid)[1]) if delay and iw - delay >= 0 else list(ham)
+            if rb is not None:
+                srcs.append(("body", rb))
+            hit_src = [(nm, round(min(b[1], hx1) - max(b[0], hx0), 3), round(min(b[3], hy1) - max(b[2], hy0), 3))
+                       for nm, b in srcs if b[0] < hx1 and b[1] > hx0 and b[2] < hy1 and b[3] > hy0]
+            if hit_src:
+                return {"t": round(float(tcum[j] - tp), 4), "src": hit_src}
+        return None
+    real_rule = rule("first", 0, False)
+    real_rules = {f"{a}|{d}|{int(st)}": rule(a, d, st) for a in ("first", "each") for d in (0, 1) for st in (False, True)}
     loss = None
     lethal_block = (row.get("hp0") or 9) <= 2        # a probe's LethalBlock: a lethal hit is blocked (no HP loss)
     if row.get("loss_f") is not None and row.get("loss_t") is not None and row["loss_t"] <= CHECK_S:
@@ -286,7 +301,7 @@ def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
             "real_bounce": fc is not None, "real_contact_t": (round(float(row["t_of"][str(fc)]) - float(row["t_of"].get(str(row["f0"]), 0.0)), 4)
                                                          if fc is not None and str(fc) in row["t_of"] else None),
             "pred_loss": pred_hit if cj >= 0 else pred_miss, "pred_miss_loss": pred_miss, "real_loss": loss,
-            "state_press": st, "hits": bool(row["hits"]), "real_rule": real_rule,
+            "state_press": st, "hits": bool(row["hits"]), "real_rule": real_rule, "real_rules": real_rules,
             "hp0": row.get("hp0"), "lethal_block": lethal_block}
 
 
@@ -332,6 +347,157 @@ def check(recs: list[Path], rows_path: list[Path], out: Path) -> list[dict]:
     return res
 
 
+K_STATE0 = {"Slam Antic": 0, "Slam 0": 49, "Slam 1": 54, "Slam 2": 57, "Slam Recover": 63}
+
+
+def person_points(rows_path: Path) -> list[dict]:
+    """The person's down slashes during a Clapper slam that bounced without an HP loss within CHECK_S: the press state
+    (slam frame from the antic entry, dx along the Clapper's facing, dy from its position, vy)."""
+    from ssbot.tools.pogo_check import real_contact
+    out = []
+    for line in rows_path.read_text("utf-8").splitlines():
+        r = json.loads(line)
+        if not r["clappers"]:
+            continue
+        c = r["clappers"][0]
+        if c["state"] not in K_STATE0 or real_contact(r) is None:
+            continue
+        if r.get("loss_t") is not None and r["loss_t"] <= CHECK_S:
+            continue
+        face = 1 if c["flipX"] else -1
+        h = r["hero0"]
+        out.append({"rec": r["session"], "f0": r["f0"], "state": c["state"], "t": c["t"],
+                    "k": K_STATE0[c["state"]] + int(round(float(c["t"]) * 60)),
+                    "dx": round((h["pos"][0] - c["pos"][0]) * face, 3), "dy": round(h["pos"][1] - c["pos"][1], 3),
+                    "vy": round(float((h.get("vel") or [0, 0])[1]), 2)})
+    return out
+
+
+def make_targets(rows_path: Path, out_dir: Path, rep_center: int = 3, seed: int = 46) -> dict:
+    """The targeted trials (the person's method): (A) the person's success points reproduced, (B) one robust centre
+    per distinct success region the theory predicts (the contact's slam state x the horizontal after the press x the
+    jump held after it x vy class at the press), (C) scans around every centre: the jump frame +-1..6 (the press
+    time), x0 +-0.3..1.2 u, the other horizontals after the press (incl. against the motion), the jump held +-4
+    frames. Every target carries the theory's prediction under each timing variant (antic 48 / 49, Slam 0 4 / 5, the
+    lunge's physics phase)."""
+    import random
+    import numpy as np
+    from ssbot.combat.pogo_slam import FLOOR_Y, SlamTheory, SlamTimeline
+    params, terrain = load_kin()
+    th = SlamTheory(params, terrain)
+    tl = SlamTimeline.load()
+    variants = SlamTimeline.variants()
+    paths = th.paths(hs=(3, 7, 11, 16), as_=range(6, 31, 2))
+    miss = th.miss_rollouts(paths)
+    taus = np.arange(4, 71)
+    x0s = np.round(np.arange(0.5, 9.0001, 0.1), 2)
+    cy = tl.pos_y + FLOOR_Y
+    cells = []
+    for i, p in enumerate(paths):
+        o = th.cells(tl, p, miss, i, 1, x0s, taus, cy)
+        cells.append(o)
+    states = np.array(tl.state + ["after"] * 400)
+
+    def outcome(o, ti, xi):
+        c = int(o["contact"][ti, xi])
+        return {"bounce": c >= 0, "hit_safe": bool(c >= 0 and not o["hit_bad"][ti, xi]),
+                "miss_safe": bool(not o["miss_bad"][ti, xi]),
+                "contact_state": str(states[int(o["contact_k"][ti, xi])]) if c >= 0 else None}
+
+    def pred_all(pi, tau, x0):
+        """The prediction for path pi at (tau, x0) under every timing variant."""
+        p = paths[pi]
+        res = []
+        for v in variants:
+            o = th.cells(v, p, miss, pi, 1, np.array([x0]), np.array([tau]), cy)
+            res.append(outcome(o, 0, 0))
+        return {k: round(sum(r[k] for r in res) / len(res), 3) for k in ("bounce", "hit_safe", "miss_safe")} | {
+            "contact_state": sorted({r["contact_state"] for r in res if r["contact_state"]})}
+
+    def target(pi, tau, x0, group, note):
+        p = paths[pi]
+        if not (4 <= tau <= 75 and 0.3 <= x0 <= 9.5):
+            return None
+        o = th.cells(tl, p, miss, pi, 1, np.array([x0]), np.array([tau]), cy)
+        if not o["valid"][0, 0]:
+            return None
+        return {"group": group, "note": note, "path": pi, "tau_j": int(tau), "x0": round(float(x0), 2), "h": p.h, "a": p.a,
+                "pre": p.pre, "post": p.post, "jpost": p.jpost, "k_press": int(tau + p.a),
+                "dx_press": round(float(o["dxp"][0, 0]), 3), "dy_press": round(float(o["dyp"]), 3),
+                "vy_press": round(float(o["vyp"]), 2), "pred": outcome(o, 0, 0), "pred_var": pred_all(pi, tau, x0),
+                "masks": [int(m) for m in p.masks]}
+
+    tg: list[dict] = []
+    centres = []
+    # (A) the person's success points
+    pts = person_points(rows_path)
+    for q in pts:
+        best = None
+        for pi, o in enumerate(cells):
+            kp = o["kp"][:, None]
+            d = (np.abs(kp - q["k"]) / 1.0) ** 2 + ((o["dxp"] - q["dx"]) / 0.3) ** 2 + ((o["dyp"] - q["dy"]) / 0.3) ** 2 \
+                + ((o["vyp"] - q["vy"]) / 3.0) ** 2
+            d = np.where(o["valid"], d, np.inf)
+            ti, xi = np.unravel_index(np.argmin(d), d.shape)
+            if best is None or d[ti, xi] < best[0]:
+                best = (float(d[ti, xi]), pi, int(taus[ti]), float(x0s[xi]))
+        if best is not None and best[0] < 6.0:
+            centres.append(("A", best[1], best[2], best[3], f"person {q['rec']} f{q['f0']} {q['state']} t{q['t']}"))
+    # (B) one robust centre per distinct predicted success region
+    clusters: dict = {}
+    for pi, o in enumerate(cells):
+        p = paths[pi]
+        ok = (o["contact"] >= 0) & ~o["hit_bad"] & ~o["miss_bad"] & o["valid"]
+        if not ok.any():
+            continue
+        # robustness: the success holds for the neighbours (tau +-2, x0 +-0.3)
+        r = ok.copy()
+        for dt_ in (-2, -1, 1, 2):
+            r &= np.roll(ok, dt_, axis=0)
+        for dx_ in (-3, -1, 1, 3):
+            r &= np.roll(ok, dx_, axis=1)
+        for ti, xi in zip(*np.nonzero(r)):
+            ck = int(o["contact_k"][ti, xi])
+            vc = "rise" if o["vyp"] > 3 else ("fall" if o["vyp"] < -3 else "apex")
+            key = (str(states[ck]), p.post, p.jpost, vc, bool(o["dxp"][ti, xi] < 0))
+            clusters.setdefault(key, []).append((pi, int(taus[ti]), float(x0s[xi])))
+    rng = random.Random(seed)
+    per_state: dict = {}
+    for key, lst in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+        if len(lst) < 20 or per_state.get(key[0], 0) >= 3:
+            continue
+        per_state[key[0]] = per_state.get(key[0], 0) + 1
+        pi, tau, x0 = rng.choice(lst)
+        centres.append(("B", pi, tau, x0, "region " + "|".join(map(str, key)) + f" ({len(lst)} robust cells)"))
+    # (C) the scans
+    for g, pi, tau, x0, note in centres:
+        for _ in range(rep_center):
+            tg.append(target(pi, tau, x0, g, note))
+        for dt_ in (-6, -4, -2, -1, 1, 2, 4, 6):
+            tg.append(target(pi, tau + dt_, x0, g + "C_tau", f"{note} tau{dt_:+d}"))
+        for dx_ in (-1.2, -0.6, -0.3, 0.3, 0.6, 1.2):
+            tg.append(target(pi, tau, x0 + dx_, g + "C_x0", f"{note} x0{dx_:+.1f}"))
+        p = paths[pi]
+        for q, pp in enumerate(paths):
+            if (pp.h, pp.a, pp.pre, pp.jpost) == (p.h, p.a, p.pre, p.jpost) and pp.post != p.post:
+                tg.append(target(q, tau, x0, g + "C_post", f"{note} post{pp.post:+d}"))
+            if (pp.a, pp.pre, pp.post, pp.jpost) == (p.a, p.pre, p.post, p.jpost) and abs(pp.h - p.h) == 4:
+                tg.append(target(q, tau, x0, g + "C_h", f"{note} h{pp.h}"))
+    tg = [t for t in tg if t is not None]
+    for n, t in enumerate(tg):
+        t["id"] = n
+    order = list(range(len(tg)))
+    rng.shuffle(order)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    halves = [[tg[i] for i in order[0::2]], [tg[i] for i in order[1::2]]]
+    for k, h in enumerate(halves):
+        (out_dir / f"t_i{k}.jsonl").write_text("".join(json.dumps(t) + "\n" for t in h), "utf-8")
+    meta = {"n": len(tg), "centres": [(g, pi, tau, x0, note) for g, pi, tau, x0, note in centres],
+            "person_points": pts, "n_clusters": len(clusters)}
+    (out_dir / "targets_meta.json").write_text(json.dumps(meta, indent=1), "utf-8")
+    return meta
+
+
 def region(variant: str, out: Path, quick: bool = False) -> None:
     """The theory's grid for one timing variant ('nominal', or 'a48s4p0.2' style) into out (npz)."""
     import numpy as np
@@ -371,7 +537,15 @@ def main(argv: list[str] | None = None) -> int:
     a4.add_argument("--glob", nargs=2, metavar=("BASE", "PATTERN"), action="append", default=[])
     a4.add_argument("--rows", type=Path, nargs="+", required=True)
     a4.add_argument("--out", type=Path, required=True)
+    a5 = sub.add_parser("targets")
+    a5.add_argument("--rows", type=Path, required=True, help="the person's rows (pogo_outcomes scan)")
+    a5.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "targets":
+        meta = make_targets(a.rows, a.out)
+        print(json.dumps({k: v for k, v in meta.items() if k != "person_points"}, indent=1)[:6000])
+        print("person points", len(meta["person_points"]))
+        return 0
     if a.cmd == "check":
         extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
         a.out.parent.mkdir(parents=True, exist_ok=True)
