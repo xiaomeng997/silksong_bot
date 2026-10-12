@@ -244,6 +244,8 @@ class SlamTheory:
         vyp = float(miss.vel[i, pj, 1])
         valid = (taus + p.a >= 0)[:, None] & np.ones((1, n_x), bool) & swung
         # the miss branch: the hammer and the body, no i-frames, from the press to the landing
+        # the approach: a hit between the jump's first frame and the press (the press state is then never reached)
+        pre_bad = self._damage(tl, box, fl, 1, pj - 1, taus, X, cy, None) < BIG
         miss_first = self._damage(tl, box, fl, pj, land, taus, X, cy, None)
         miss_bad = miss_first < BIG
         # a hit before the contact (and its PRE_PROTECT_F frames) cancels the slash
@@ -263,7 +265,7 @@ class SlamTheory:
             sel = contact == jc
             hit_bad[sel] = bad[sel]
         return {"kp": taus + p.a, "dxp": dxp, "dyp": dyp, "vyp": vyp, "contact": contact, "hit_bad": hit_bad,
-                "miss_bad": miss_bad, "valid": valid, "contact_k": np.where(contact >= 0, taus[:, None] + contact - 1, -1)}
+                "miss_bad": miss_bad, "valid": valid, "pre_bad": pre_bad, "contact_k": np.where(contact >= 0, taus[:, None] + contact - 1, -1)}
 
     def _damage(self, tl, box, fl, j0, j1, taus, X, cy, contact_j) -> np.ndarray:
         """[n_t, n_x]: the first frame j0..j1 on which the hero's box (relative x, absolute y) meets the hammer or the

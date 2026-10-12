@@ -609,6 +609,52 @@ def make_targets2(out_dir: Path, first: list[dict], seed: int = 47) -> dict:
     return meta
 
 
+def repredict(trials: list[dict]) -> dict:
+    """The final theory at each trial's plan (path, jump frame, start x; nominal timing and the 8 variants), the
+    approach included (a hit between the jump and the press: 'H0', the press state never reached), against what
+    happened (H0 = hurt before any down slash; else S / BL / N / NL with the loss before the landing)."""
+    from collections import Counter
+    import numpy as np
+    from ssbot.combat.pogo_slam import FLOOR_Y, SlamTheory, SlamTimeline
+    params, terrain = load_kin()
+    th = SlamTheory(params, terrain)
+    tls = [SlamTimeline.load()] + SlamTimeline.variants()
+    paths = th.paths(hs=(3, 7, 11, 16), as_=range(6, 31, 2))
+    miss = th.miss_rollouts(paths)
+    cy = tls[0].pos_y + FLOOR_Y
+
+    def cls(b, l):
+        return ("S" if not l else "BL") if b else ("N" if not l else "NL")
+    conf, conf_pv = Counter(), Counter()
+    rows = []
+    for o in trials:
+        tg = o["target"]
+        if tg.get("press2") or o.get("skip") in ("no slam", "antic seen too late") or (o.get("hp0") or 9) <= 2:
+            continue
+        if o.get("skip") not in (None, "no down slash"):
+            continue
+        res = []
+        for tl in tls:
+            c = th.cells(tl, paths[tg["path"]], miss, tg["path"], 1, np.array([tg["x0"]]), np.array([tg["tau_j"]]), cy)
+            b = int(c["contact"][0, 0]) >= 0
+            res.append((bool(c["pre_bad"][0, 0]), b, b and not c["hit_bad"][0, 0], not c["miss_bad"][0, 0]))
+        pre, b, hs, ms = res[0]
+        pred = "H0" if pre else cls(b, not (hs if b else ms))
+        frac = {k: round(sum(r[i] for r in res) / len(res), 2) for i, k in enumerate(("pre_bad", "bounce", "hit_safe", "miss_safe"))}
+        real = "H0" if o.get("skip") == "no down slash" else cls(o["bounce"], o["loss_air"])
+        conf[(real, pred)] += 1
+        pv = "H0" if frac["pre_bad"] >= 0.5 else cls(frac["bounce"] >= 0.5, not ((frac["hit_safe"] if frac["bounce"] >= 0.5 else frac["miss_safe"]) >= 0.5))
+        conf_pv[(real, pv)] += 1
+        rows.append({"n": o["n"], "rec": o.get("rec"), "real": real, "pred": pred, "pred_var_cls": pv, "frac": frac,
+                     "late": o.get("late")})
+
+    def summ(c):
+        n = sum(c.values())
+        return {"n": n, "agree": round(sum(v for (a, b), v in c.items() if a == b) / max(n, 1), 3),
+                "confusion": {f"{a}->{b}": v for (a, b), v in sorted(c.items())}}
+    return {"nominal": summ(conf), "majority_of_variants": summ(conf_pv), "rows": rows}
+
+
 def live_report(trial_files: list[Path], rows_path: Path, check_path: Path) -> dict:
     """The targeted trials joined with their down slash (pogo_outcomes rows) and the theory on it (check): per trial
     the outcome (bounce = the real contact, loss = an HP loss within CHECK_S of the press, approach_loss = one before
@@ -800,7 +846,15 @@ def main(argv: list[str] | None = None) -> int:
     a7 = sub.add_parser("targets2")
     a7.add_argument("--first", type=Path, nargs="+", required=True, help="batch-1 target files")
     a7.add_argument("--out", type=Path, required=True)
+    a8 = sub.add_parser("repredict")
+    a8.add_argument("live_json", type=Path)
+    a8.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "repredict":
+        rep = repredict(json.loads(a.live_json.read_text("utf-8"))["trials"])
+        a.out.write_text(json.dumps(rep, indent=1), "utf-8")
+        print(json.dumps({k: v for k, v in rep.items() if k != "rows"}, indent=1))
+        return 0
     if a.cmd == "targets2":
         first = [json.loads(x) for p in a.first for x in p.read_text("utf-8").splitlines() if x.strip()]
         meta = make_targets2(a.out, first)
