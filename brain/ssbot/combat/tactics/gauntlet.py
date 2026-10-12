@@ -82,7 +82,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from ssbot.combat import special_board
+from ssbot.combat import rune_bombs, special_board
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
@@ -367,6 +367,10 @@ class GauntletTactics:
                 return behind, frozenset(), "rune: behind"
             return self._clamp(out), frozenset(), "rune: out"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
+        if fam == CC_CAST and rune_bombs.FACE_U is not None:
+            # SSBOT_FORUM_RUNE_FACE (task 1v1 G2, the why study's fix (6)): through the small runes on the ground
+            # 3-4 u from it, where only ring 1 reaches (ring 0 ends 2.4 u out): one short hop clears it
+            return self._clamp(x + side * rune_bombs.FACE_U), vocab, "rune: face"
         return self._clamp(x + side * r.face_u), vocab, "face"
 
     # ---- track A (2026-10-08, the person's tactics; forum.md §26) ----

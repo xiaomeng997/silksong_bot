@@ -77,7 +77,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
-from ssbot.combat import forum_v2, special_mode, specials, stance_block
+from ssbot.combat import forum_v2, rune_bombs, special_mode, specials, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
                                   _hull_points, _is_macro, _rect_meets_polys)
@@ -157,6 +157,7 @@ H_W = {1: 1.0, 2: 1.0, 3: 0.6}     # H_exp's weight by h (hits to death; 4 and m
 H_W_FAR, H_W_NONE = 0.3, 0.5
 
 
+M_GLIDE = kin.MODE_NAMES.index("GLIDE")
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 20.11)
 PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
@@ -426,6 +427,11 @@ class EnvelopeAudit:
     sm_tail_esc: int = 0          # special rows whose escape is their own clear continuation
     sm_hit_credit: int = 0        # special rows credited their strike as a landed hit (the scorer had none)
     sm_appr_hammer: int = 0       # chosen special rows whose approach meets the move's attack box (T1's check)
+    hop_ticks: int = 0            # SSBOT_FORUM_RUNE_HOP: ticks with the person's hop rows (task 1v1 G2)
+    hop_rows: int = 0
+    hop_safe: int = 0
+    hop_chosen: int = 0
+    noglide_ticks: int = 0        # SSBOT_FORUM_NOGLIDE: ticks with safe rows both with and without a glide
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -2146,6 +2152,73 @@ class ForumPlanner(Planner):
                                "xa": xa, "cy": float(e["pos"][1]), "face": face}
         return r
 
+    HOP_SRC = ("ATTACK(side)N+clashrepN", "WAIT+clashrepN")
+    HOP_HOLD = 11                 # the hop: jump held 11 frames (the set's JUMP(11)), one press
+
+    def _rune_hop_rows(self, f, start, hold, prefix: np.ndarray, T: int):
+        """SSBOT_FORUM_RUNE_HOP (task 1v1 G2; the person: continuous slashes on the ground and one short hop just
+        before the bomb at the hero lights, no second jump press in the air): the set's ground slash / wait rows
+        with one JUMP(11) press timed from the per-bomb forecast (forum_v2 RangeSupport.bombs_all). The hop's clear
+        frames (no overlap with that bomb's circle, BOMB_M margin) come from a probe rollout pressed at once; the
+        press puts the bomb's lit window inside them (+-2 frames). (cmd [n, T], names, prim bits) or None."""
+        rs = getattr(f, "rs", None)
+        bk = getattr(rs, "bombs_all", None)
+        if bk is None or not len(bk):
+            return None
+        cs = self.fsets["ground"][0]
+        if not hasattr(self, "_hop_src"):
+            nm = [cs.name(i) for i in range(len(cs.cmd))]
+            self._hop_src = [nm.index(n) for n in self.HOP_SRC if n in nm]
+        src = self._hop_src
+        if not src:
+            return None
+        st = np.asarray(start).reshape(kin.K, -1)
+        hx = float(st[kin.PX, 0])
+        P = len(prefix)
+        ks = int(getattr(rs, "k_shift", 0) or 0)
+        near = np.abs(bk[:, 1] - hx) < bk[:, 3] + rune_bombs.HB_HX + 0.5
+        near &= bk[:, 4] + ks - P >= 2                     # lights after the row's first frames
+        if not near.any():
+            return None
+        b = bk[np.flatnonzero(near)[np.argmin(bk[near, 4])]]
+        on_p, off_p = int(b[4]) + ks, int(b[5]) + ks          # planner frames
+        H = self.HOP_HOLD
+        probe = cs.cmd[src[:1]].copy()
+        probe[:, :H] |= B_JUMP
+        full = np.concatenate([np.broadcast_to(np.asarray(prefix, np.int64), (1, P)), probe], axis=1)
+        lat, _ = hold_filter_jit(full, hold)
+        rp = kin.rollout(start, lat, self.params, self.terrain, threads=1)
+        bx_ = rp.box[0]
+        cx = 0.5 * (bx_[:, 0] + bx_[:, 2])
+        cy = 0.5 * (bx_[:, 1] + bx_[:, 3])
+        geo = b[None, :].copy()
+        geo[0, 4], geo[0, 5] = -1e9, 1e9                    # the circle at every frame: where the hop clears it
+        hit = rune_bombs.occupied(geo, cx, cy, np.zeros(len(cx)), rune_bombs.BOMB_M)
+        rel = np.flatnonzero(~hit[P + 1:])                  # clear frames after the press (index 0 = press frame)
+        if not len(rel):
+            return None
+        # the longest run of clear frames that starts after the take-off
+        runs = np.split(rel, np.flatnonzero(np.diff(rel) > 1) + 1)
+        runs = [r_ for r_ in runs if r_[0] > 0] or runs
+        best = max(runs, key=len)
+        a, z = int(best[0]), int(best[-1])
+        lo, hi = off_p - (P + 1) - z, on_p - (P + 1) - a       # press cmd index c with [on, off] inside [c + a, c + z]
+        c0 = (lo + hi) // 2 if lo <= hi else int(round(0.5 * (on_p + off_p) - (P + 1) - 0.5 * (a + z)))
+        cs_ = sorted({c for c in (c0 - 2, c0, c0 + 2) if 0 <= c <= T - H})
+        if not cs_:
+            return None
+        cmd, names, bits = [], [], []
+        jb = 1 << 1                                         # Prim.JUMP
+        for i in src:
+            for c in cs_:
+                m = cs.cmd[i].copy()
+                m[c:c + H] |= B_JUMP
+                cmd.append(m)
+                names.append(f"{cs.name(i)}_hop{c}")
+                bits.append(int(cs.prim_bits[i]) | jb)
+        self.hop_dbg = {"on_p": on_p, "off_p": off_p, "clear": (a, z), "press": cs_, "bx": float(b[1])}
+        return np.asarray(cmd), names, np.asarray(bits, np.int64)
+
     def _special_ctx(self, f, start, hold, prefix, latched, r1, rows: np.ndarray, exts: list, T: int):
         """The special mode's tick context (combat.special_mode): the special rows' contact with E's move (the bounce
         event), their bounce lanes spliced into r1 (stage 1 and the score read the bounce from the press on), the
@@ -2294,12 +2367,20 @@ class ForumPlanner(Planner):
         n_spec = 0 if spec is None else len(spec.cmd)
         if n_spec:
             rows_.append(spec.cmd)               # the arrive-and-strike rows: after the set, before the CONTINUE
+        hop = None
+        if v2 and rune_bombs.HOP and posture == "ground" and mode0 not in NO_CONTROL_MODES:
+            hop = self._rune_hop_rows(f, start, hold, prefix, T)
+        n_hop = 0 if hop is None else len(hop[0])
+        if n_hop:
+            rows_.append(hop[0])                 # the person's hop rows (G2): after the special rows
 
         def rname(i: int) -> str:
             if cont and i == N - 1:
                 return "CONTINUE"
             if N0 <= i < N0 + n_spec:
                 return "SPECIAL " + spec.entry[i - N0].id
+            if N0 + n_spec <= i < N0 + n_spec + n_hop:
+                return hop[1][i - N0 - n_spec]
             return cs.name(i)
         if cont:
             rows_.append(cmod.continue_plan(self.prev_cmd, 1, T)[None])
@@ -2311,7 +2392,8 @@ class ForumPlanner(Planner):
                 cmd = cmd.copy()
                 cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
-        core = np.concatenate([core0, np.zeros(n_spec + int(cont), bool)])
+        core = np.concatenate([core0, np.zeros(n_spec + int(cont), bool)]) if not n_hop else \
+            np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop, bool), np.zeros(int(cont), bool)])
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix
         full[:, P:] = cmd
@@ -2330,6 +2412,11 @@ class ForumPlanner(Planner):
         elif n_spec:
             ok = np.append(ok, np.full(n_spec, bool(ctx.allowed_mask.all())))
             why = np.append(why, np.full(n_spec, 0 if ok[-1] else 1))
+        if n_hop:
+            okb = int(sum(1 << i for i, a_ in enumerate(ctx.allowed_mask) if a_))
+            hok = (hop[2] & ~okb) == 0
+            ok = np.append(ok, hok)
+            why = np.append(why, np.where(hok, 0, 1))
         if cont:
             ok = np.append(ok, bool(ctx.allowed_mask.all()) or self._prev_allowed(ctx))
             why = np.append(why, 0 if ok[-1] else 1)
@@ -2444,7 +2531,7 @@ class ForumPlanner(Planner):
             prio.append(N - 1)
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
         top = rest[:fcfg.K_b]
-        first = np.concatenate([cs.first, np.full(n_spec + int(cont), -1, cs.first.dtype)])
+        first = np.concatenate([cs.first, np.full(n_spec + n_hop + int(cont), -1, cs.first.dtype)])
         sib = []
         top_set = set(top)
         by_first: dict = {}
@@ -2492,7 +2579,7 @@ class ForumPlanner(Planner):
                 # (a, b) the special rows' envelope: the bounce lanes against the special support (the full support
                 # from a row's full_from on)
                 o_sp = self._contacts_fn(f, r2.bound[m_sp], tk, skip[m_sp],
-                                         lambda X, Y: f.rs._occ_stack(sctx.st_o, X, Y, tk))
+                                         lambda X, Y: f.rs.occ_stack_b(sctx.st_o, X, Y, tk))
                 o_b = self._contacts_fn(f, r2.bound[m_sp], tk, skip[m_sp],
                                         lambda X, Y: f.rs._occ_stack(sctx.st_b, X, Y, tk))
                 o_sp |= o_b & ~special_mode.pre_protect(sctx, q_sp, np.arange(T1))
@@ -2630,6 +2717,10 @@ class ForumPlanner(Planner):
         self.last_safe, self.last_cs = safe, cs
         V = np.zeros(N, bool)
         counts = np.bincount(first[:N0][safe[:N0]], minlength=len(cs.first_names))
+        if n_hop:
+            self.audit.hop_ticks += 1
+            self.audit.hop_rows += n_hop
+            self.audit.hop_safe += int(safe[N0 + n_spec:N0 + n_spec + n_hop].sum())
         if n_spec:
             self.audit.spec_ticks += 1
             self.audit.spec_rows += n_spec
@@ -2784,8 +2875,16 @@ class ForumPlanner(Planner):
                     v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
                     self.audit.v2_corner_rows += int((safe & corner).sum())
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
-            order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh, ~mkeep,
-                                ~keep, clash_p, S, U, hz_soft, hz))
+            if v2 and rune_bombs.NOGLIDE:
+                # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
+                # (the umbrella) first
+                gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
+                self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff,
+                                    gl.astype(np.int64), v2_nh, ~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+            else:
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh,
+                                    ~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -2857,6 +2956,7 @@ class ForumPlanner(Planner):
             sel_cmd = cmd[i]
             name = rname(i)
             a.spec_chosen += int(N0 <= i < N0 + n_spec)
+            a.hop_chosen += int(N0 + n_spec <= i < N0 + n_spec + n_hop)
             if sctx is not None and i in set(sctx.rows.tolist()):
                 q_ = int(np.searchsorted(sctx.rows, i))
                 if sctx.appr_fail[q_] < 0:

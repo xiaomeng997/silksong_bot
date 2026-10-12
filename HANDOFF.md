@@ -5372,3 +5372,85 @@ with it off every decision is the one of 677979c (deterministic replay, deadline
   trials never covered that part.
 - The BOARD is one tick late; L2 still steps out on the antic's first tick or two.
 - Small runes (START HERE item 2) not started.
+
+## Task 1v1 - stage G2: small runes (branch worktree-wf_f1846551-5f9-1, 2026-10-12; forum.md §50)
+
+START HERE item 2 and the why study's fixes (5)-(9) for the Clapper's small-rune cast (CC_CAST: Spell Antic -> Cast 1
+-> Cast 2, bombs falling in rings). Five switches, all default off: with them off every decision is the one of
+7f8bb7a (= 677979c; deterministic cast replay i0 ep0: 694/694 ticks identical in chosen row, n_safe, forced).
+
+### Code
+
+- `ssbot/combat/rune_bombs.py` (new, numpy only): the switches; `RuneBombs` (per-bomb forecast: rows from the Cast 2
+  triggers, bombs parsed from the frame's entities by `bomb_ents`, `predict()` -> [n, 6] owner, x, y, r, on, off in
+  game time); `frames()` (look-ahead frames); `occupied()` (HeroBox grown by m vs the circles, per planner frame,
+  only the lit columns); `hop_target()`.
+- `attack_range.py`: `hazards_at` drops the pending CC_CAST row under NOPRE and the spawned row under BOMB;
+  `Segmenter.step` spawns a Cast 2 seen without its CC_CAST instance (NOPRE); `RangeTracker(rune=)` keeps a
+  `RuneBombs` (BOMB or HOP on, or rune=True for the overlay) fed every frame (`_feed_rune`).
+- `forum_v2.py`: `LayerSupport.bombs` / `bomb_m`, `bomb_occ`, `occ_stack_b`; `occupied`, `occupied_esc`,
+  `occupied_without` (by owner), `occupied_only` add the per-frame bombs; `RangeSupport.build` sets `bombs_all`
+  (BOMB or HOP) and `bombs` (BOMB). `special_mode.occ_special` and the special rows' envelope read `occ_stack_b`.
+- `forum_planner.py`: `_rune_hop_rows` (HOP: the person's rows, a probe rollout gives the hop's clear frames, the
+  press puts the target bomb's lit window inside them, presses c0 and c0 +- 2, bases ATTACK(side)N+clashrepN and
+  WAIT+clashrepN, always enveloped, keys checked); NOGLIDE key in the final lexsort right after the landed-hit rank;
+  audit `hop_ticks/rows/safe/chosen`, `noglide_ticks`.
+- `tactics/gauntlet.py` `_clapper_spot`: FACE -> stance at FACE u during CC_CAST ("rune: face"). ("rune: out /
+  behind" are the jump cast's big rune: unchanged.)
+- `tools/zone_overlay.py`: the range mode draws the per-bomb forecast (`draw_rune`, magenta, "+on..off").
+- `tools/forum_v2_bench.py`: `in_cast` quantiles. `tests/test_rune_bombs.py` (9 tests).
+
+### Switches
+
+- `SSBOT_FORUM_RUNE_NOPRE=1`: no bomb forecast before Cast 2 is seen; a Cast 2 without its instance still spawns.
+- `SSBOT_FORUM_RUNE_BOMB=1`: the per-bomb forecast in the safety check, every frame, margin
+  `SSBOT_FORUM_RUNE_BOMB_M` (u, default 0.15) instead of the focus margin; the table's ring windows leave the estimate.
+- `SSBOT_FORUM_RUNE_FACE=<u>`: L2 stance during CC_CAST on the ground <u> from the Clapper (3 / 3.5; empty: face_u 4).
+- `SSBOT_FORUM_RUNE_HOP=1`: the person's hop rows.
+- `SSBOT_FORUM_NOGLIDE=1`: among safe rows with the same landed hits, no glide first.
+
+### Numbers (offline; `C:\ssbot\data\m2_special\g2`)
+
+- Real bombs (fcs 054126 i0 / 054132 i1 recordings, 8 episodes, 55 casts, 530 lit bombs, game time): ring 0 appears
+  at the Cast 2 entry (55/55), ring r 9-10 frames after ring r-1 (95 %), a pair's sides together (95 %; else the pool
+  serves one side 4-60 frames late), lit 20-21 frames after appearing (95 %) for 5-7 frames (all <= 7; the 15-18
+  frame runs in frame counts are hit freezes, dt 0). Same on both halves (the held-out check of the constants).
+- Forecast vs the real lit circles (every frame from Spell Antic to Cast 2 + 130, look-ahead 0-62, centre within
+  0.15 u; after Cast 2): recall table-as-the-planner-reads-it (sampled) 0.959 (k 0-20 / 21-40 / 41-62: 0.967 / 0.965
+  / 0.931), false 1.34 per real, 54,457 u2.frames per cast; per-bomb 0.971 (0.982 / 0.974 / 0.941), false 0.87 per
+  real, 35,278 (-35 %). Rings 0-2 recall 1.000; ring 4 0.942; rings 6+ 0.833 (the pool's late sides at the walls,
+  unseen before they appear, 20 frames before they light). Before Cast 2 the table predicted 44 % of the coming row
+  with 1.87 false per real; NOPRE predicts none (Cast 2 is seen >= 20 frames before the first bomb lights).
+- Open-loop cast replay (m2_why harness, 7 episodes; Spell Antic / Cast 1 / Cast 2): off: glide 2.0 / 21.9 / 24.5 %,
+  slash 70.9 / 21.3 / 41.2 %, Cast 2 forced 15.8 %, Cast 2 chosen rows touching a real bomb (hindsight) 9.0 %.
+  NOPRE: Cast 1 glide 4.3 %, slash 92.3 %. + BOMB: Cast 2 forced 8.8 %, touches 4.4 %. + NOGLIDE: glide 0.1 / 0.0 /
+  14.8 %. All (rn, FACE 3): glide 0.3 / 0.0 / 16.1 %, slash 83.7 / 94.5 / 42.4 %, forced 8.0 %, touches 3.8 %; row-end
+  distance 3.7 u in the antic and Cast 1; L2 stance 3.0 u. Hop rows: 13 ticks (4 safe, 0 chosen): open-loop the
+  recorded hero is mostly airborne at 5.5 u in Cast 2, so the hop and FACE can only be judged live.
+- Cost: replay i1 (planner tick total p50/p95 ms, off vs rn, run side by side): cast ticks 10.4/17.2 -> 11.9/17.4,
+  Idle with bombs falling 12.2/19.9 -> 13.5/19.6, all 10.1/17.7 -> 11.0/17.8. forum_v2_bench (the person's
+  20261011_051105, loaded machine: compare only): all ticks act unchanged; 187 cast/bomb ticks planner 8.8/16.2 ->
+  9.0/15.9.
+- Tests (test_rune_bombs (9 tests), test_forum_planner, test_forum_v2, test_special_mode, test_forum_l2,
+  test_gauntlet, test_specials, test_forum_tactics): 117 passed with the switches off; with all rune switches on 116
+  (test_forum_l2::test_clapper_controller asserts today's 4 u cast stance: FACE 3 changes it, as intended); with
+  SPECIAL_MODE + all rune switches test_special_mode / test_forum_planner / test_forum_v2 62 passed.
+  test_import_firewall fails with the same three pre-existing chains (forum_v2 -> aim_zones -> ipc); rune_bombs
+  imports only numpy.
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
+
+- `rn` = fcs + NOPRE + BOMB + HOP + NOGLIDE + FACE 3; `rn35` = the same with FACE 3.5; `gsrn` = gs + the rune
+  switches (FACE 3).
+
+### Open items
+
+- The person's overlay eye check of the per-bomb forecast before the live A/B relies on it (the rule): range mode,
+  magenta circles; a launcher like `start_overlay_pogo_check.ps1` on a frozen checkout of this commit.
+- Live A/B rn / rn35 vs fcs: hitless %, landed hits per second, kill time, hits by source (rune bomb small), glide
+  share in casts, hop rows chosen (`hop_*`), `noglide_ticks`, late ticks.
+- Not verified: the hop timing live (probe rollout + window), whether FACE 3 drifts into ring 0 (2.4 u) when the
+  Clapper is pushed by hits (0.24-1.44 u); the late-lit pool bombs (2.4 %) and the far rings' late sides stay
+  unpredicted until they appear (20 frames before lighting).
+- Ring timing could be tightened further (the 9/10-frame steps may alternate deterministically; +1.5 frames of spread
+  per ring now).

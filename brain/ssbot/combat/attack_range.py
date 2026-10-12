@@ -51,6 +51,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.are_spec import PARKED, CustomView, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
+from ssbot.combat import rune_bombs as _rb
 
 REPO = Path(__file__).resolve().parents[3]
 FORUM = REPO / "knowledge" / "1.0.30000" / "enemies" / "forum"
@@ -639,6 +640,12 @@ class Segmenter:
                     self.spawned.append((hz, tt, x, y, s))
             if sp.on_step is not None:
                 sp.on_step(cur, st, self.prev, T, x, y, s, hero_x, hero_y, tin, vx)
+        elif _rb.NOPRE and self.prev != st:
+            # SSBOT_FORUM_RUNE_NOPRE (task 1v1 G2): the bombs come only from a seen Cast 2, so a Cast 2 entry seen
+            # without its instance (the Spell Antic missed) still spawns the row
+            for hz in sp.hazards:
+                if hz.name == _rb.NAME and st == hz.state:
+                    self.spawned.append((hz, T - max(float(tin or 0.0), 0.0), x, y, s))
         self.prev = st
         self.prev_tin = float(tin or 0.0)
         return cur
@@ -694,7 +701,8 @@ class RangeTracker:
     """Feeds on game-frame STATEs (as tools.zone_overlay ZoneEngine.feed gets them) and gives the attack-range
     estimate of every tracked enemy at look-ahead k."""
 
-    def __init__(self, tables: dict | None = None):
+    def __init__(self, tables: dict | None = None, rune: bool = False):
+        self._rune_on = rune        # keep the per-bomb small-rune forecast (rune_bombs) without its switches (overlay)
         if tables is None:
             tables = {}
             for tk, sp in SPECS.items():
@@ -715,6 +723,9 @@ class RangeTracker:
         self.ents: tuple = ()       # the frame's entities (EnemySpec.custom: other entities, projectiles)
         self.mem: dict = {}         # type key -> the custom hook's memory across frames
         self.paths: dict = {}       # the last ladder's whole-path hooks: iid -> (sure, maybe) (RangeTracker.path)
+        # the Clapper's small-rune bombs, one by one (rune_bombs; SSBOT_FORUM_RUNE_BOMB / _HOP, or rune=True)
+        self.rune = _rb.RuneBombs() if (_rb.FORECAST or getattr(self, "_rune_on", False)) else None
+        self._rune_n: dict = {}     # iid -> its Segmenter's spawned entries already given to rune
 
     def feed(self, s: dict) -> None:
         dt = s.get("dt")
@@ -745,6 +756,25 @@ class RangeTracker:
         for iid in [i for i in self.segs if i not in now]:
             del self.segs[iid]
         self._feed_objs(s.get("ents") or ())
+        if self.rune is not None:
+            self._feed_rune()
+
+    def _feed_rune(self) -> None:
+        """The per-bomb forecast (rune_bombs): the Cast 2 entries spawned since the last frame, the frame's bombs."""
+        owners = []
+        for iid, seg in self.segs.items():
+            sp = [q for q in seg.spawned[self._rune_n.get(iid, 0):] if q[0].name == _rb.NAME]
+            self._rune_n[iid] = len(seg.spawned)
+            tk = self.now[iid][0] if iid in self.now else None
+            tab = self.tables.get(tk) if tk is not None else None
+            for hz, tt, x, y, _s in sp:
+                P = tab.hazard_params(hz) if tab is not None else {}
+                self.rune.add_trigger(iid, tt, x + float(P.get("dx", 0.0)), y, P.get("x_ok"))
+            if tk == _rb.CLAPPER and iid in self.now:
+                owners.append((iid, float((self.now[iid][1].get("pos") or (0.0, 0.0))[0])))
+        for iid in [i for i in self._rune_n if i not in self.segs]:
+            del self._rune_n[iid]
+        self.rune.feed(self.T, self.ents, owners)
 
     def _feed_objs(self, ents) -> None:
         """Stage B: the projectiles in flight of the types whose module lists them (OBJ_TYPES) and draws them
@@ -912,11 +942,15 @@ def hazards_at(tab: RangeTable, spawned, inst: Inst | None, T: float, pos: tuple
     Segmenter's `spawned`) and, while the current instance is in a family whose trigger is still to come
     (HazardSpec.pre), the predicted ones from its measured trigger window (bins after the antic start) at the enemy's
     position now."""
+    # SSBOT_FORUM_RUNE_BOMB (task 1v1 G2): a spawned bomb row is the per-bomb forecast's (rune_bombs), not the table
+    # windows'; SSBOT_FORUM_RUNE_NOPRE: no bombs before Cast 2 is seen
     ms = [tab.hazard_mask(hz, tt, tt, x, y, s, t) for hz, tt, x, y, s in spawned
-          if tt <= T + 1e-9 and (only is None or hz.name == only)]
+          if tt <= T + 1e-9 and (only is None or hz.name == only) and not (_rb.BOMB and hz.name == _rb.NAME)]
     if inst is not None:
         for hz in tab.spec.hazards:
             if (only is not None and hz.name != only) or not hz.pre or inst.fam not in hz.fams or hz.name in inst.trig:
+                continue
+            if _rb.NOPRE and hz.name == _rb.NAME:
                 continue
             w = (tab.hazard_params(hz).get("trig") or {}).get(inst.fam)
             if not w:

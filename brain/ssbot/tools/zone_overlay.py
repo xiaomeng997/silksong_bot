@@ -361,7 +361,7 @@ class ZoneEngine:
         self.rng = None
         if range_layer:
             from ssbot.combat.attack_range import RangeTracker
-            self.rng = RangeTracker()
+            self.rng = RangeTracker(rune=True)      # + the per-bomb small-rune forecast (task 1v1 G2, draw_rune)
         self.switches = apply_default_env()
         import numba
         numba.set_num_threads(threads)
@@ -680,9 +680,14 @@ class ZoneEngine:
         out: dict = {k: [] for k in ks}
         same: dict = {k: {} for k in ks}
         swept_out: list = []
-        res = {"range": out, "range_same": same, "range_swept": swept_out, "range_sweep": sweep}
+        res = {"range": out, "range_same": same, "range_swept": swept_out, "range_sweep": sweep, "rune": []}
         if self.rng is None:
             return res
+        rune = getattr(self.rng, "rune", None)
+        if rune is not None:
+            # the per-bomb small-rune forecast (combat.rune_bombs, SSBOT_FORUM_RUNE_BOMB's): (x, y, r, on_k, off_k)
+            from ssbot.combat.rune_bombs import frames as _rb_frames
+            res["rune"] = [tuple(float(v) for v in b[1:6]) for b in _rb_frames(rune.predict(self.rng.T), self.rng.T)]
         from ssbot.combat.attack_range import contours, hero_space, same_mask
         per, swept = self.rng.ladder(ks, sweep)
         seen: dict = {}                       # iid -> [(k, raw mask)] of the distinct estimates so far
@@ -934,6 +939,32 @@ AIM_STYLE = {"ground": ("solid", 3.0, 1.0), "low": ("solid", 2.0, 0.9), "high": 
 A_AIM = 0.35
 
 
+RUNE_COL = (255, 80, 255)                  # the per-bomb forecast's outlines (magenta)
+
+
+def draw_rune(img: np.ndarray, fr: dict, Hw: np.ndarray, view: View) -> None:
+    """The per-bomb small-rune forecast (task 1v1 G2, combat.rune_bombs; the person's eye check before the planner
+    relies on it): every bomb predicted lit at the look-ahead shown (view.k; all k: any of KS) as a magenta circle,
+    solid when lit at +0, dashed when later, labelled with its window "+on..off" (frames)."""
+    bombs = fr.get("rune") or ()
+    if not bombs:
+        return
+    H = img.shape[0]
+    s = H / 1080.0
+    ks = sorted(fr.get("range") or ()) if view.all_k else [view.k]
+    placed: list = []
+    a = np.linspace(0.0, 2.0 * math.pi, 49)
+    for x, y, r, on, off in bombs:
+        hit = [k for k in ks if on <= k <= off]
+        if not hit:
+            continue
+        q = _to_px(Hw, np.stack([x + r * np.cos(a), y + r * np.sin(a)], axis=1))
+        style = ("solid", 2.0, 1.0) if on <= 0 else ("dash", 2.0, 0.85)
+        _outline(img, q, RUNE_COL, style, s)
+        j = int(np.argmax(-q[:, 1]))
+        _tag(img, f"+{max(int(on), 0)}..{int(off)}", (q[j, 0] + 3, q[j, 1] - 14 * s), RUNE_COL, s, placed)
+
+
 def draw_aim(img: np.ndarray, fr: dict, Hw: np.ndarray) -> None:
     """The aim zones (tools.aim_zones; the person 2026-10-10): per enemy in a pending aimed antic, its composite zone
     at its position now: ground band filled + thick outline, low air solid, high air dashed, in a light tint of the
@@ -1002,6 +1033,7 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
                     cv2.polylines(img, pl, True, (*dark, 255), th, cv2.LINE_AA)
         if view.show("range"):
             draw_range(img, fr, Hw, view)
+            draw_rune(img, fr, Hw, view)
             if view.aim:
                 draw_aim(img, fr, Hw)
         if view.show("red") or view.show("range"):

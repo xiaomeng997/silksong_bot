@@ -317,7 +317,7 @@ def occ_special(ctx: SpecialCtx, rs, q: np.ndarray, x: np.ndarray, y: np.ndarray
     instead (M's estimate back after the certified window)."""
     from ssbot.combat.attack_range import FT
     fi = np.rint(np.asarray(tq, np.float64) / FT).astype(np.int64)
-    o = rs._occ_stack(ctx.es_o if esc else ctx.st_o, x, y, tq)
+    o = rs.occ_stack_b(ctx.es_o if esc else ctx.st_o, x, y, tq)       # (+ the per-bomb small runes, G2)
     o |= rs._occ_stack(ctx.es_b if esc else ctx.st_b, x, y, tq) & ~pre_protect(ctx, q, fi)
     ff = ctx.full_from[q]
     late = fi[None, :] >= ff[:, None]

@@ -44,6 +44,7 @@ import numpy as np
 
 from ssbot.combat.attack_range import (FT, Mask, RangeTracker, _first_state, body_polys, carry_body, empty_mask,
                                        union)
+from ssbot.combat import rune_bombs as _rb
 from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 
 V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
@@ -302,6 +303,10 @@ class LayerSupport:
         self.focus: int | None = None               # the unit with FOCUS_M (MARGIN_MODE "focus")
         self.dash_focus: int | None = None          # the unit stack_dash holds (FOCUS_DASH)
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
+        # SSBOT_FORUM_RUNE_BOMB (task 1v1 G2): the small-rune bombs one by one (rune_bombs.frames: owner, x, y, r,
+        # on_k, off_k in tracker look-ahead frames), checked on every frame with bomb_m; None: not in this support
+        self.bombs: np.ndarray | None = None
+        self.bomb_m = _rb.BOMB_M
         self.fc = _Half(inner_fc, BOUNDS_HALF)
         smax = self.samples[-1] if self.samples else 0
         js = np.arange(smax + 1)
@@ -350,7 +355,21 @@ class LayerSupport:
 
     def occupied_esc(self, x, y, tk) -> np.ndarray:
         """The escape check's danger past the row's end (RangeSupport.build: idle bodies with ESC_IDLE_M only)."""
-        return self._occ_stack(self.stack if self.stack_esc is None else self.stack_esc, x, y, tk)
+        return self.occ_stack_b(self.stack if self.stack_esc is None else self.stack_esc, x, y, tk)
+
+    def bomb_occ(self, x, y, tk, owners=None) -> np.ndarray | None:
+        """The per-bomb small runes (SSBOT_FORUM_RUNE_BOMB) at planner times tk (every frame, not the samples), or
+        None without them; owners: only those iids' bombs."""
+        if self.bombs is None or not len(self.bombs):
+            return None
+        k = np.rint(np.asarray(tk, np.float64) / FT).astype(np.int64) - self.k_shift
+        return _rb.occupied(self.bombs, x, y, k, self.bomb_m, owners)
+
+    def occ_stack_b(self, stack: np.ndarray, x, y, tk, owners=None) -> np.ndarray:
+        """_occ_stack with the per-bomb small runes (the same array when there are none)."""
+        o = self._occ_stack(stack, x, y, tk)
+        b = self.bomb_occ(x, y, tk, owners)
+        return o if b is None else (o | b)
 
     def _sample_of(self, tk: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         j = np.rint(np.asarray(tk, np.float64) / FT).astype(np.int64) - self.k_shift
@@ -368,7 +387,7 @@ class LayerSupport:
         return ok & (stack[a, row, col] | stack[b, row, col])
 
     def occupied(self, x, y, tk, comfort: bool = False) -> np.ndarray:
-        return self._occ_stack(self.stack, x, y, tk)
+        return self.occ_stack_b(self.stack, x, y, tk)
 
     def occupied_dash(self, x, y, tk) -> np.ndarray | None:
         """The focus unit with its "rule" margin where that exceeds FOCUS_M (a row dashing at it); None: no such
@@ -380,11 +399,12 @@ class LayerSupport:
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         ex = set(exclude) if isinstance(exclude, (set, frozenset, list, tuple)) else {exclude}
         ids = {int(e) for e in ex if isinstance(e, (int, np.integer))}
-        return self._occ_stack(self._stack_of(lambda iid: iid not in ids), x, y, tk)
+        own = None if self.bombs is None else {int(o) for o in self.bombs[:, 0] if int(o) not in ids}
+        return self.occ_stack_b(self._stack_of(lambda iid: iid not in ids), x, y, tk, own)
 
     def occupied_only(self, x, y, tk, iids) -> np.ndarray:
         ids = {int(i) for i in iids}
-        return self._occ_stack(self._stack_of(lambda iid: iid in ids), x, y, tk)
+        return self.occ_stack_b(self._stack_of(lambda iid: iid in ids), x, y, tk, ids)
 
     def _stack_of(self, keep) -> np.ndarray:
         st = np.zeros(self.stack.shape, bool)
@@ -609,6 +629,12 @@ class RangeSupport(LayerSupport):
                 d, x0, y0 = dilate_group(ps, md, cv.cell)
                 cv.paste(rs.stack_dash[si], d, x0, y0)
         rs.n_est = n_est
+        rune = getattr(trk, "rune", None)
+        if rune is not None and (_rb.BOMB or _rb.HOP):
+            bk = _rb.frames(rune.predict(trk.T), trk.T)
+            rs.bombs_all = bk[(bk[:, 5] >= -1) & (bk[:, 4] <= 130)]    # (the hop rows' timing: SSBOT_FORUM_RUNE_HOP)
+            if _rb.BOMB:
+                rs.bombs = rs.bombs_all
         rs.pend = pending_aims(trk)
         rs.ms = (time.perf_counter() - t0) * 1e3
         return rs
