@@ -1,0 +1,403 @@
+"""The Clapper slam's down-slash theory (task 1v1 T1, the person's experiment method 2026-10-11, forum.md 46): the
+real boxes per frame of the slam, measured from recordings, and from them where and when a Wanderer down slash
+bounces off the Clapper and whether the hero then stays clear of the hammer (Slam Collider 1 / 2) and the body.
+
+    cd brain
+    ../scripts/uv.cmd run python -m ssbot.tools.pogo_theory slams <recordings / run dirs> [--glob BASE PATTERN] \
+        --out C:/ssbot/data/m2_pogo/theory/slams.jsonl
+    ../scripts/uv.cmd run python -m ssbot.tools.pogo_theory template C:/ssbot/data/m2_pogo/theory/slams.jsonl \
+        --out <worktree>/knowledge/1.0.30000/enemies/forum/pogo_clapper_slam.json
+
+slams: every CC_SLAM of a Clapper (Control enters Slam Antic) from its first frame to the first frame outside the
+family, per recorded frame: the game time from the antic entry, the Control state and its time, the clip / frame, the
+Clapper's position and velocity, flipX, the root hurtbox (its layer-11 box, which is also its body DamageHero) and the
+enabled Slam Collider 1 / 2 boxes (the hammer: parry 4, the slash passes through it), and the hero (position,
+velocity, health, the damage events naming their source). Boxes are axis aligned [x0, x1, y0, y1] in world units.
+
+template: the slam in the Clapper's frame (x mirrored by its facing at the Slam 0 entry, the origin at its position at
+the antic entry), per game frame from the antic entry: the boxes' spread over the slams, the lunge's displacement and
+what it depends on.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+CLAPPER = "Song Heavy Sentry"
+SLAM = ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?", "Slam 2", "Slam Recover")
+HAMMER = ("Slam Collider 1", "Slam Collider 2")
+
+
+def _box(vs) -> list[float] | None:
+    if not vs:
+        return None
+    xs, ys = vs[0::2], vs[1::2]
+    return [round(min(xs), 3), round(max(xs), 3), round(min(ys), 3), round(max(ys), 3)]
+
+
+def _control(e: dict) -> tuple[str | None, float]:
+    for m in e.get("fsms") or ():
+        if m.get("name") == "Control":
+            return m.get("state"), float(m.get("t") or 0.0)
+    return None, 0.0
+
+
+def frame_of(e: dict, s: dict, t: float) -> dict:
+    st, tin = _control(e)
+    root, ham = None, {}
+    for c in e.get("colliders") or ():
+        nm = c.get("name") or ""
+        if c.get("layer") == 11 and nm.startswith(CLAPPER) and root is None:
+            root = _box(c.get("verts_world"))
+        elif nm.startswith(HAMMER) and "Ally" not in nm and c.get("enabled"):
+            ham[nm.split(" (")[0]] = _box(c.get("verts_world"))
+    h = s.get("hero") or {}
+    a = e.get("anim") or {}
+    dmg = [((ev.get("d") or {}).get("source"), (ev.get("d") or {}).get("invuln"))
+           for ev in s.get("ev") or () if ev.get("k") == "damage"]
+    hpl = [(ev.get("d") or {}).get("source") for ev in s.get("ev") or ()
+           if ev.get("k") == "hp" and (ev.get("d") or {}).get("delta", 0) < 0]
+    return {"f": s["f"], "t": round(t, 4), "dt": s.get("dt"), "st": st, "tin": round(tin, 4), "clip": a.get("clip"),
+            "af": a.get("frame"), "pos": [round(v, 3) for v in (e.get("pos") or [0, 0])[:2]],
+            "vel": [round(v, 2) for v in (e.get("vel") or [0, 0])[:2]], "flip": bool(e.get("flipX")), "root": root,
+            "ham": ham, "hero": [round(v, 3) for v in (h.get("pos") or [0, 0])[:2]],
+            "hvel": [round(v, 2) for v in (h.get("vel") or [0, 0])[:2]], "hbox": h.get("box"),
+            "hp": h.get("health"), "inv": h.get("invulnerable"), "dmg": dmg, "hpl": hpl,
+            "clip_h": (h.get("anim") or {}).get("clip"), "mask": (s.get("input") or {}).get("mask", 0)}
+
+
+def scan(rec: Path) -> list[dict]:
+    from ssbot.tools.pogo_outcomes import _states, rec_name
+    name = rec_name(rec)
+    live: dict[int, dict] = {}
+    out = []
+    for s in _states(rec):
+        dt = float(s.get("dt") or 0.0)
+        seen = set()
+        for e in s.get("ents") or ():
+            if e.get("type_key") != CLAPPER or e.get("is_dead") or not e.get("pos"):
+                continue
+            iid = e.get("iid")
+            seen.add(iid)
+            st, _ = _control(e)
+            cur = live.get(iid)
+            if cur is not None and (st not in SLAM or (st == "Slam Antic" and cur["frames"][-1]["st"] != st)):
+                out.append(live.pop(iid))
+                cur = None
+            if cur is None and st == "Slam Antic":
+                cur = live[iid] = {"rec": name, "iid": iid, "f0": s["f"], "frames": [], "t": 0.0}
+            if cur is not None:
+                cur["frames"].append(frame_of(e, s, cur["t"]))
+                cur["t"] += dt
+        for iid in [k for k in live if k not in seen]:
+            out.append(live.pop(iid))
+    for cur in live.values():
+        cur["open"] = True
+        out.append(cur)
+    for c in out:
+        c.pop("t", None)
+    return out
+
+
+def build_template(paths: list[Path]) -> dict:
+    """The slam in the Clapper's frame from 1x slams (every frame dt 1/60; lunges inside WALL_FREE): per state the
+    median root box per frame in the state (x mirrored by the facing, relative to the current position), the hammer
+    boxes per state, the state durations (frames) and the lunge (x displacement from the Slam 0 entry per frame)."""
+    import numpy as np
+    from collections import Counter, defaultdict
+    root, ham, lunge, durs, ys = defaultdict(list), defaultdict(list), defaultdict(list), Counter(), []
+    n = 0
+    for p in paths:
+        for line in p.read_text("utf-8").splitlines():
+            r = json.loads(line)
+            fr = r["frames"]
+            sts = [x["st"] for x in fr]
+            if r.get("open") or not all(q in sts for q in ("Slam 0", "Slam 2", "Slam Recover")):
+                continue
+            if any(abs(float(x["dt"] or 0) - 1 / 60) > 0.002 for x in fr):
+                continue
+            if not (WALL_FREE[0] < fr[0]["pos"][0] < WALL_FREE[1]):
+                continue
+            n += 1
+            face = 1 if fr[0]["flip"] else -1
+            i0 = sts.index("Slam 0")
+            durs[tuple((s, sts.count(s)) for s in dict.fromkeys(sts))] += 1
+            ki = Counter()
+            for k, x in enumerate(fr):
+                s = x["st"]
+                j = ki[s]
+                ki[s] += 1
+                px, py = x["pos"]
+                if x["root"]:
+                    b = x["root"]
+                    xs = sorted(((b[0] - px) * face, (b[1] - px) * face))
+                    root[(s, j)].append((xs[0], xs[1], b[2] - py, b[3] - py))
+                for nm, b in x["ham"].items():
+                    xs = sorted(((b[0] - px) * face, (b[1] - px) * face))
+                    ham[(s, nm)].append((xs[0], xs[1], b[2] - py, b[3] - py))
+                if k >= i0:
+                    lunge[k - i0].append((px - fr[i0]["pos"][0]) * face)
+                if k == 0:
+                    ys.append(py - (x["root"][2] if x["root"] else py))
+    med = lambda v: [round(float(q), 3) for q in np.median(np.asarray(v), axis=0)]   # noqa: E731
+    st_d = defaultdict(Counter)
+    for seq, c in durs.items():
+        for s, d in seq:
+            st_d[s][d] += c
+    out = {"n_slams": n, "pos_above_floor": round(float(np.median(ys)), 3),
+           "durations": {s: dict(sorted(c.items())) for s, c in st_d.items()},
+           "root": {s: [med(root[(s, j)]) for j in range(max(jj for (ss, jj) in root if ss == s) + 1)
+                        if len(root[(s, j)]) >= 20] for s in SLAM if any(ss == s for ss, _ in root)},
+           "hammer": {f"{s}|{nm}": med(v) for (s, nm), v in ham.items() if len(v) >= 20},
+           "lunge": {str(k): [round(float(q), 3) for q in np.percentile(v, [10, 50, 90])]
+                     for k, v in sorted(lunge.items()) if k <= 20 and len(v) >= 20},
+           "lunge_vx": 30.0, "physics_dt": 0.02}
+    return out
+
+
+WALL_FREE = (19.5, 43.5)      # a lunge from here does not reach a wall (walls 15.29 / 47.65, lunge <= 4.2 u + body)
+TERRAIN_REC = Path(r"C:\ssbot\data\m2_pogo\live\2026-10-11\TRAIN\pogo_probe_s704000")
+
+
+def load_kin(rec: Path = TERRAIN_REC):
+    """The Wanderer's kinematics parameters and the Forum terrain (from a recording's terrain message)."""
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.record.recorder import RecordingReader
+    from ssbot.train.forum_planner_policy import CREST_PARAMS
+    params = kin.HeroParams.load(CREST_PARAMS["Wanderer"])
+    terrain = None
+    for _, m in RecordingReader(rec).terrain():
+        terrain = kin.Terrain2D.from_message(m, params.scene("Hang_04"))
+        break
+    return params, terrain
+
+
+CHECK_S = 0.75                # game s after the press the check follows (the HP loss window of the lead's quick look)
+PRE_F = 150                   # recorded frames before the press the state estimate reads
+
+
+def _clapper_boxes(s: dict, iid: int) -> tuple[list | None, list, str | None]:
+    """The Clapper's root box (its body DamageHero), its enabled hammer boxes [(name, box)] and its Control state."""
+    e = next((x for x in s.get("ents") or () if x.get("iid") == iid), None)
+    if e is None or e.get("is_dead"):
+        return None, [], None
+    f = frame_of(e, s, 0.0)
+    return f["root"], list(f["ham"].items()), f["st"]
+
+
+def check_one(params, terrain, W: list[dict], i0: int, row: dict) -> dict:
+    """The theory on one recorded down slash: the hero's state before the press (the logged pose, velocity and
+    cstate), the logged inputs and frame times after it, the Clapper's logged boxes per frame (row clappers[0]); the
+    predicted contact (the slash polygon on the predicted path against the root box in the active window), the
+    predicted hit / miss branch and its first damage (the hero's box against the hammer and the body, i-frames from
+    the rollout, the body off for 0.5 s after the contact) against what happened."""
+    import numpy as np
+    from ssbot.combat.pogo_model import ACTIVE, meets, slash_poly
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.tools.pogo_check import real_contact
+    iid = row["clappers"][0]["iid"]
+    tr = kin.Trace.from_states(W, params, mask_source="input" if not any((s.get("act") or {}).get("mask") for s in W) else "act")
+    start = kin.estimate_state(tr, [i0 - 1], params, terrain=terrain)
+    n = len(W) - i0
+    masks = tr.mask[i0:i0 + n][None]
+    dt = tr.dt[i0:i0 + n][None]
+    fs = tr.fs[i0:i0 + n][None]
+    tcum = np.concatenate([[0.0], np.cumsum(tr.dt[i0:i0 + n])])     # game time at rollout index j (j = 0: press-1)
+    tp = tcum[1]                                                     # the press frame's
+    miss = kin.rollout(start, masks, params, terrain, dt=dt, fs=fs)
+    facing = 1 if float((W[i0].get("hero") or {}).get("facing") or 1) >= 0 else -1
+    fl = miss.flags[0]
+    boxes = [_clapper_boxes(W[i0 - 1 + j], iid) if j >= 1 else (None, [], None) for j in range(n + 1)]
+    g = np.flatnonzero((fl[1:] & kin.F_GROUND) != 0)
+    last = int(g[0]) if len(g) else n
+    sp = slash_poly(facing)
+    cj = -1
+    for j in range(1, last + 1):
+        el = tcum[j] - tp
+        if el < (ACTIVE[0] - 0.5) / 60 or el > (ACTIVE[1] + 0.5) / 60:
+            continue
+        rb = boxes[j][0]
+        if rb is None:
+            continue
+        poly = np.array([[rb[0], rb[2]], [rb[1], rb[2]], [rb[1], rb[3]], [rb[0], rb[3]]])
+        if meets(sp + miss.pos[0, j], poly):
+            cj = j
+            break
+
+    def first_damage(ro, j_from, contact_j):
+        fl_ = ro.flags[0]
+        gg = np.flatnonzero((fl_[j_from + 1:] & kin.F_GROUND) != 0)
+        jl = j_from + 1 + int(gg[0]) if len(gg) else n
+        for j in range(max(j_from, 1), n + 1):
+            if tcum[j] - tp > CHECK_S:
+                break
+            if fl_[j] & kin.F_INVULN:
+                continue
+            hx0, hy0, hx1, hy1 = ro.box[0, j]
+            rb, ham, _ = boxes[j]
+            srcs = [(nm, b) for nm, b in ham]
+            if rb is not None:
+                srcs.append(("body", rb))
+            for nm, b in srcs:
+                if b[0] < hx1 and b[1] > hx0 and b[2] < hy1 and b[3] > hy0:
+                    return {"t": round(float(tcum[j] - tp), 4), "src": nm, "landed_before": j > jl}
+        return None
+
+    pred_miss = first_damage(miss, 1, None)
+    if cj >= 0 and pred_miss is not None and pred_miss["t"] <= tcum[cj] - tp:
+        cj = -1                                                      # hit before the contact: the slash is cancelled
+    pred_hit = None
+    if cj >= 0:
+        ev = np.zeros((1, n), np.int64)
+        ev[0, cj - 1] = kin.EV_POGO
+        hit = kin.rollout(start, masks, params, terrain, events=ev, dt=dt, fs=fs)
+        pred_hit = first_damage(hit, 1, cj)
+    fc = real_contact(row)
+    # the damage rule alone: the logged hero box and invulnerability against the logged boxes
+    jc_real = next((j for j in range(1, n + 1) if W[i0 - 1 + j]["f"] == fc), None) if fc is not None else None
+    real_rule = None
+    for j in range(1, n + 1):
+        if tcum[j] - tp > CHECK_S:
+            break
+        h = W[i0 - 1 + j].get("hero") or {}
+        if h.get("invulnerable") or not h.get("box"):
+            continue
+        if jc_real is not None and 0 <= tcum[j] - tcum[jc_real] < 0.16:      # the downspike i-frames (not exported)
+            continue
+        hx0, hy0, hx1, hy1 = h["box"]
+        rb, ham, _ = boxes[j]
+        srcs = list(ham)
+        if rb is not None:
+            srcs.append(("body", rb))
+        hit_src = [(nm, round(min(b[1], hx1) - max(b[0], hx0), 3), round(min(b[3], hy1) - max(b[2], hy0), 3))
+                   for nm, b in srcs if b[0] < hx1 and b[1] > hx0 and b[2] < hy1 and b[3] > hy0]
+        if hit_src:
+            real_rule = {"t": round(float(tcum[j] - tp), 4), "src": hit_src}
+            break
+    loss = None
+    lethal_block = (row.get("hp0") or 9) <= 2        # a probe's LethalBlock: a lethal hit is blocked (no HP loss)
+    if row.get("loss_f") is not None and row.get("loss_t") is not None and row["loss_t"] <= CHECK_S:
+        loss = {"t": row["loss_t"], "src": row.get("loss_src")}
+    st = boxes[1][2]
+    return {"rec": row["session"], "f0": row["f0"], "state": row["clappers"][0]["state"], "t_state": row["clappers"][0]["t"],
+            "pred_bounce": cj >= 0, "pred_contact_t": round(float(tcum[cj] - tp), 4) if cj >= 0 else None,
+            "real_bounce": fc is not None, "real_contact_t": (round(float(row["t_of"][str(fc)]) - float(row["t_of"].get(str(row["f0"]), 0.0)), 4)
+                                                         if fc is not None and str(fc) in row["t_of"] else None),
+            "pred_loss": pred_hit if cj >= 0 else pred_miss, "pred_miss_loss": pred_miss, "real_loss": loss,
+            "state_press": st, "hits": bool(row["hits"]), "real_rule": real_rule,
+            "hp0": row.get("hp0"), "lethal_block": lethal_block}
+
+
+def check(recs: list[Path], rows_path: list[Path], out: Path) -> list[dict]:
+    """check_one over every row (a down slash with a Clapper within 9 u) of the given recordings."""
+    from collections import defaultdict, deque
+    from ssbot.tools.pogo_outcomes import _states, rec_name, recordings
+    params, terrain = load_kin()
+    rows_by = defaultdict(dict)
+    for p in rows_path:
+        for line in p.read_text("utf-8").splitlines():
+            r = json.loads(line)
+            if r["clappers"]:
+                rows_by[r["session"]][r["f0"]] = r
+    res = []
+    with out.open("w", encoding="utf-8") as fo:
+        for rec in recordings(recs):
+            name = rec_name(rec)
+            rows = rows_by.get(name)
+            if not rows:
+                continue
+            post = 130
+            buf: deque = deque(maxlen=PRE_F + post + 2)
+            pend = sorted(rows)
+            for s in _states(rec):
+                buf.append(s)
+                while pend and s["f"] >= pend[0] + post:
+                    f0 = pend.pop(0)
+                    W = list(buf)
+                    i0 = next((i for i, x in enumerate(W) if x["f"] == f0), None)
+                    if i0 is None or i0 < 10:
+                        continue
+                    try:
+                        o = check_one(params, terrain, W, i0, rows[f0])
+                    except Exception as ex:  # noqa: BLE001
+                        o = {"rec": name, "f0": f0, "error": repr(ex)}
+                    fo.write(json.dumps(o) + "\n")
+                    fo.flush()
+                    res.append(o)
+                if not pend:
+                    break
+            print(name, len(rows), flush=True)
+    return res
+
+
+def region(variant: str, out: Path, quick: bool = False) -> None:
+    """The theory's grid for one timing variant ('nominal', or 'a48s4p0.2' style) into out (npz)."""
+    import numpy as np
+    from ssbot.combat.pogo_slam import SlamTheory, SlamTimeline
+    params, terrain = load_kin()
+    if variant == "nominal":
+        tl = SlamTimeline.load()
+    else:
+        a, s, p = variant[1:3], variant[4], variant.split("p")[1]
+        tl = SlamTimeline.load(antic=int(a), s0=int(s), phase=float(p))
+    th = SlamTheory(params, terrain)
+    paths = th.paths(hs=(5, 13), as_=range(8, 20, 3), pres=(1,), posts=(1,), jposts=(0,)) if quick else th.paths()
+    x0s = np.round(np.arange(-9.0, 11.0001, 0.1), 3)
+    taus = np.arange(-40, 95)
+    acc = th.grid(tl, x0s, taus, paths)
+    acc.save(out, {"variant": tl.name, "n_paths": len(paths)})
+    print(tl.name, "paths", len(paths), "cells", int(acc.c[0].sum()), "bounce", int(acc.c[1].sum()),
+          "bounce+hit safe", int(acc.c[2].sum()), "both safe", int(acc.c[4].sum()), flush=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a1 = sub.add_parser("slams")
+    a1.add_argument("recs", nargs="*", type=Path)
+    a1.add_argument("--glob", nargs=2, metavar=("BASE", "PATTERN"), action="append", default=[])
+    a1.add_argument("--out", type=Path, required=True)
+    a2 = sub.add_parser("template")
+    a2.add_argument("slams", nargs="+", type=Path)
+    a2.add_argument("--out", type=Path, required=True)
+    a3 = sub.add_parser("region")
+    a3.add_argument("--variant", default="nominal")
+    a3.add_argument("--quick", action="store_true")
+    a3.add_argument("--out", type=Path, required=True)
+    a4 = sub.add_parser("check")
+    a4.add_argument("recs", nargs="*", type=Path)
+    a4.add_argument("--glob", nargs=2, metavar=("BASE", "PATTERN"), action="append", default=[])
+    a4.add_argument("--rows", type=Path, nargs="+", required=True)
+    a4.add_argument("--out", type=Path, required=True)
+    a = ap.parse_args(argv)
+    if a.cmd == "check":
+        extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        check(list(a.recs) + extra, a.rows, a.out)
+        return 0
+    if a.cmd == "region":
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        region(a.variant, a.out, a.quick)
+        return 0
+    if a.cmd == "template":
+        t = build_template(a.slams)
+        a.out.write_text(json.dumps(t, indent=1), "utf-8")
+        print(json.dumps(t)[:3000])
+        return 0
+    if a.cmd == "slams":
+        from ssbot.tools.pogo_outcomes import recordings
+        extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        with a.out.open("w", encoding="utf-8") as fo:
+            for rec in recordings(list(a.recs) + extra):
+                rows = scan(rec)
+                for r in rows:
+                    fo.write(json.dumps(r) + "\n")
+                print(rec, len(rows), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
