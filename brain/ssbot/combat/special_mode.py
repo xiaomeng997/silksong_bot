@@ -182,6 +182,42 @@ def contacts(tl, pos: np.ndarray, flags: np.ndarray, pj: np.ndarray, k0: int, xa
     return out
 
 
+def press_certified(lut, disp: np.ndarray, pos: np.ndarray, vel: np.ndarray, flags: np.ndarray, pj: np.ndarray,
+                    masks: np.ndarray, k0: int, xa: float, cy: float, face: int) -> np.ndarray:
+    """[n] the row's press state ON THE PLANNER'S OWN LANE lies in a certified entry of the table (review 2026-10-12):
+    airborne on the frame before the press, the press frame's move frame k0 + pj, dx along E's facing from E's lunged
+    x, dy, the vy class, and the row's own key after the press (masks[q, pj]: the mask on the press frame's rollout
+    index, prefix included) all inside one entry. specials.strike_rows finds the entries on a rollout of the raw
+    masks; the planner's lane is hold-filtered (a key held now delays a press), and a CONTINUE of a chosen special row
+    is not looked up again at all, so a row whose press left its cell would otherwise drop M's danger uncertified.
+    pos / vel / flags: [n, L] lanes (pos, vel [n, L, 2]); pj: the press frame's rollout index (0: none)."""
+    n = len(pj)
+    out = np.zeros(n, bool)
+    if lut is None or not n:
+        return out
+    L = flags.shape[1]
+    for q in range(n):
+        p = int(pj[q])
+        if p < 1 or p >= L or (int(flags[q, p - 1]) & kin.F_GROUND):
+            continue
+        kp = int(k0) + p
+        if kp < 0 or kp >= lut.K:
+            continue
+        ex = xa + face * float(disp[min(max(kp, 0), len(disp) - 1)])
+        dx = (float(pos[q, p, 0]) - ex) * face
+        dy = float(pos[q, p, 1]) - cy
+        vy = float(vel[q, p, 1])
+        vyc = 0 if vy > 3 else (2 if vy < -3 else 1)
+        xi = int(np.floor((dx - lut.x0) / lut.bx))
+        yi = int(np.floor((dy - lut.y0) / lut.by))
+        if not (0 <= xi < lut.idx.shape[1] and 0 <= yi < lut.idx.shape[2]):
+            continue
+        h = int(masks[q, p]) & (kin.B_LEFT | kin.B_RIGHT) if p < masks.shape[1] else 0
+        s = 1 if h == kin.B_RIGHT else (-1 if h == kin.B_LEFT else 0)
+        out[q] = lut.idx[kp, xi, yi, vyc, s * face + 1] >= 0
+    return out
+
+
 def approach_codes(tl, k0: int, xa: float, cy: float, face: int, pj: np.ndarray, box: np.ndarray,
                    flags: np.ndarray) -> np.ndarray:
     """real_approach_fail for n lanes at once (box [n, L, 4], flags [n, L], pj [n]): [n] 0 clear, 2 the attack box,

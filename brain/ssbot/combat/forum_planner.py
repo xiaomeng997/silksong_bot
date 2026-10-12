@@ -432,6 +432,11 @@ class EnvelopeAudit:
     hop_safe: int = 0
     hop_chosen: int = 0
     noglide_ticks: int = 0        # SSBOT_FORUM_NOGLIDE: ticks with safe rows both with and without a glide
+    sm_uncert: int = 0            # review: special rows (contact found) whose press on the planner's own lane is in no
+                                  #   certified entry (full checks instead)
+    sm_hit_other: int = 0         # review: special rows whose first predicted hit is another enemy (hit branch run)
+    sm_forced_out: int = 0        # review: FORCED_RISK ticks whose special rows were taken out of the ranking
+    hop_inflight: int = 0         # review: ticks without hop rows because a jump is in flight (prefix / held key)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -2149,7 +2154,7 @@ class ForumPlanner(Planner):
         self.spec_n = (len(r.cmd), r.tried)
         if mode:
             self._spec_meta = {"iid": int(iid_), "tk": tk_, "move": move, "k_trk": int(k_trk), "k0": int(k_now),
-                               "xa": xa, "cy": float(e["pos"][1]), "face": face}
+                               "xa": xa, "cy": float(e["pos"][1]), "face": face, "lut": lut}
         return r
 
     HOP_SRC = ("ATTACK(side)N+clashrepN", "WAIT+clashrepN")
@@ -2255,12 +2260,18 @@ class ForumPlanner(Planner):
         # the whole template rolled out
         inside = (pj > 0) & (pj + ACTIVE[1] <= T1 - 1)
         if inside.all():
-            mpos, mfl = r1.pos[rows], r1.flags[rows]
+            mpos, mfl, mvel = r1.pos[rows], r1.flags[rows], r1.vel[rows]
         else:
             re = kin.rollout(start, lat_e, self.params, self.terrain, threads=self.cfg.threads)
-            mpos, mfl = re.pos, re.flags
+            mpos, mfl, mvel = re.pos, re.flags, re.vel
         contact = special_mode.contacts(tl, mpos, mfl, pj, k0, xa, cy, face, hf)
         keep = contact > 0
+        # review: the press must lie in a certified entry on this lane (hold-filtered; the CONTINUE is not looked up
+        # by strike_rows): else the row keeps the full checks
+        cert = special_mode.press_certified(meta.get("lut"), self._spec_disp, mpos, mvel, mfl, pj, ext, k0, xa, cy,
+                                            face)
+        self.audit.sm_uncert += int((keep & ~cert).sum())
+        keep &= cert
         if not keep.any():
             return None
         ev = np.zeros((n, P + L), np.int64)
