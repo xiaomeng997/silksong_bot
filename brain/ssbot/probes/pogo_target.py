@@ -99,8 +99,10 @@ class Target:
             return 0
         return M_R if dx > 0 else M_L
 
-    def walk_to(self, s: dict, tx: float, max_f: int) -> tuple[dict, int]:
+    def walk_to(self, s: dict, tx: float, max_f: int, stop_on_antic: bool = False) -> tuple[dict, int]:
         for k in range(max_f):
+            if stop_on_antic and control(clapper(s)) == "Slam Antic":
+                return s, k
             m = self.walk_mask(s, tx)
             if m == 0 and abs(float((s["hero"].get("vel") or [0, 0])[0])) < 0.1:
                 return self.step(0), k + 1
@@ -120,17 +122,22 @@ class Target:
         t0 = time.time()
         fa = None
         while time.time() - t0 < WAIT_S:
-            s = self.step(0)
             e = clapper(s)
             st = control(e)
             if st == "Slam Antic":
-                fa = s["f"]
+                # the entry frame from the state's time (a re-approach walk may have run over it)
+                tin = next((float(m.get("t") or 0.0) for m in e.get("fsms") or () if m.get("name") == "Control"), 0.0)
+                fa = s["f"] - int(round(tin * 60))
                 break
             if e is not None and st in READY and abs(abs(hx(s) - float(e["pos"][0])) - wait_x0) > 1.0:
                 tx = self.side_x(s, wait_x0)
-                s, _ = self.walk_to(s, tx, 120)
+                s, _ = self.walk_to(s, tx, 120, stop_on_antic=True)
+                continue
+            s = self.step(0)
         if fa is None:
             return {"skip": "no slam"}
+        if s["f"] + 2 - fa > int(t["tau_j"]):
+            return {"skip": "antic seen too late", "f_antic": fa, "k_seen": s["f"] - fa}
         e = clapper(s)
         cx = float(e["pos"][0])
         face = 1 if e.get("flipX") else -1          # flipX True: facing right (+x)
