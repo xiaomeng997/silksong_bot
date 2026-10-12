@@ -504,6 +504,7 @@ def make_targets(rows_path: Path, out_dir: Path, rep_center: int = 3, seed: int 
     return meta
 
 
+FLOOR_Y_HERO = 4.568          # hero.pos y standing on the Forum floor
 WINDOWS = (("antic 0-24", 0, 25), ("antic 25-39", 25, 40), ("antic 40-48", 40, 49), ("slam0", 49, 54),
            ("slam1", 54, 57), ("slam2", 57, 63), ("recover", 63, 78), ("after", 78, 200))
 
@@ -649,6 +650,12 @@ def live_report(trial_files: list[Path], rows_path: Path, check_path: Path) -> d
                   "dy": cl and round(r["hero0"]["pos"][1] - cl["pos"][1], 3),
                   "vy": round(float((r["hero0"].get("vel") or [0, 0])[1]), 2), "hp0": r.get("hp0"),
                   "theory": c and {k: c.get(k) for k in ("pred_bounce", "pred_loss", "pred_miss_loss", "real_rule")}}
+            # the landing after the press (on the floor: hero.pos y at the standing height, no vertical speed)
+            land = next((float(r["t_of"][str(x["f"])]) for x in r["hero"] if x["f"] > r["f0"] + 2
+                         and str(x["f"]) in r["t_of"] and abs(float((x["vel"] or [0, 0])[1])) < 0.01
+                         and float(x["pos"][1]) < FLOOR_Y_HERO + 0.05), None)
+            o["land_t"] = land
+            o["loss_air"] = o["loss"] and (land is None or float(r["loss_t"]) <= land + 1e-6)
             o["success"] = o["bounce"] and not o["loss"]
             out.append(o)
     # per centre: the centre trials and each scan's points
@@ -669,7 +676,78 @@ def live_report(trial_files: list[Path], rows_path: Path, check_path: Path) -> d
                       "pred_success": lst[0]["target"]["pred_var"]["bounce"] and min(
                           lst[0]["target"]["pred_var"]["hit_safe"], lst[0]["target"]["pred_var"]["miss_safe"]),
                       "pred": lst[0]["target"]["pred"], "pred_var": lst[0]["target"]["pred_var"]})
-    return {"trials": out, "table": table}
+    on_plan = [o for o in out if not o.get("skip") and not o.get("late") and not o.get("gaps")]
+    return {"trials": out, "table": table, "widths": widths(out), "accuracy": accuracy(out),
+            "accuracy_on_plan": accuracy(on_plan)}
+
+
+def accuracy(trials: list[dict]) -> dict:
+    """The theory on the trials, by outcome class (S = bounce without an HP loss, BL = bounce then a loss, N = no
+    bounce no loss, NL = no bounce and a loss): the pre-registered prediction (the target's, nominal timing, the
+    planned start) and the theory on the logged inputs and boxes (check); trials whose hero had <= 2 masks (the
+    probe's LethalBlock) left out. The pre-registered branches end on the landing, so their HP loss is the one before
+    it (loss_air); the check follows CHECK_S."""
+    from collections import Counter
+
+    def cls(b, l):
+        return ("S" if not l else "BL") if b else ("N" if not l else "NL")
+    pre, chk = Counter(), Counter()
+    for o in trials:
+        if o.get("skip") or (o.get("hp0") or 9) <= 2:
+            continue
+        real = cls(o["bounce"], o["loss_air"])      # the pre-registered branches end on the landing
+        p = o["target"]["pred"]
+        pre[(real, cls(p["bounce"], not (p["hit_safe"] if p["bounce"] else p["miss_safe"])))] += 1
+        th = o.get("theory")
+        if th:
+            chk[(cls(o["bounce"], o["loss"]), cls(th["pred_bounce"], th["pred_loss"] is not None))] += 1
+
+    def summ(c):
+        n = sum(c.values())
+        return {"n": n, "agree": round(sum(v for (a, b), v in c.items() if a == b) / max(n, 1), 3),
+                "confusion": {f"{a}->{b}": v for (a, b), v in sorted(c.items())}}
+    return {"pre_registered": summ(pre), "check": summ(chk)}
+
+
+def widths(trials: list[dict]) -> list[dict]:
+    """Per centre: the measured success (bounce, no HP loss) at the centre and along its jump-frame and start-x scans,
+    the contiguous run of scan points around the centre with success >= 0.5 (its width: frames / u), and the theory's
+    for the same points (pred_var: bounce and both branches safe, or bounce and the bounce branch safe)."""
+    import re
+    from collections import defaultdict
+    by = defaultdict(lambda: defaultdict(list))
+    for o in trials:
+        if o.get("skip"):
+            continue
+        note = o["target"]["note"]
+        m = re.search(r" (tau|x0)([+-][0-9.]+)$", note)
+        if m:
+            by[note[:m.start()]][(m.group(1), float(m.group(2)))].append(o)
+        elif not re.search(r" (post|h|press2)", note):
+            by[note][("tau", 0.0)].append(o)
+            by[note][("x0", 0.0)].append(o)
+    out = []
+    for centre, pts in by.items():
+        row = {"centre": centre}
+        for dim in ("tau", "x0"):
+            ks = sorted(k for d, k in pts if d == dim)
+            if len(ks) < 3:
+                continue
+            seq = []
+            for k in ks:
+                lst = pts[(dim, k)]
+                pv = lst[0]["target"]["pred_var"]
+                seq.append({"d": k, "n": len(lst), "success": round(sum(x["success"] for x in lst) / len(lst), 2),
+                            "bounce": round(sum(x["bounce"] for x in lst) / len(lst), 2),
+                            "pred_hit": round(min(pv["bounce"], pv["hit_safe"]), 2),
+                            "pred_both": round(min(pv["bounce"], pv["hit_safe"], pv["miss_safe"]), 2)})
+            ok = [s["d"] for s in seq if s["success"] >= 0.5]
+            row[dim] = seq
+            row[dim + "_width"] = (max(ok) - min(ok)) if ok else None
+            pk = [s["d"] for s in seq if s["pred_hit"] >= 0.5]
+            row[dim + "_width_pred"] = (max(pk) - min(pk)) if pk else None
+        out.append(row)
+    return out
 
 
 def region(variant: str, out: Path, quick: bool = False) -> None:
