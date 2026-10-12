@@ -33,6 +33,7 @@ DOWN_ALT = np.array([[1.714, -0.368], [1.568, -1.688], [0.91, -2.337], [0.067, -
                      [-1.449, -1.573], [-1.576, -0.395]])
 ACTIVE = (3, 9)          # frames after the press frame on which the slash can land (pogo_outcomes: hits at +3 .. +9)
 EV_OFF = 0               # EV_POGO's index relative to the contact frame's (pogo_check calibration)
+GROW = 0.0               # u a target polygon grows by before the overlap test (pogo_check calibration)
 # what a collider does to the slash (pogo_outcomes): its kind from the layer and the damage parry bits
 K_HURT, K_TINK = "hurtbox", "tink"
 
@@ -75,6 +76,15 @@ def _hull(pts: np.ndarray) -> np.ndarray:
     return np.array(lower[:-1] + upper[:-1])
 
 
+def grow(poly: np.ndarray, d: float) -> np.ndarray:
+    """poly moved outward by about d on every side (vertices pushed from the centroid; exact for an axis box)."""
+    if d <= 0:
+        return poly
+    c = poly.mean(axis=0)
+    v = poly - c
+    return poly + np.sign(v) * d
+
+
 def meets(a: np.ndarray, b: np.ndarray) -> bool:
     """Two convex polygons overlap (separating axis test; touching edges do not count)."""
     for poly in (a, b):
@@ -98,10 +108,12 @@ class Branches:
 
 
 class PogoModel:
-    def __init__(self, params: kin.HeroParams, terrain: kin.Terrain2D | None = None, ev_off: int = EV_OFF):
+    def __init__(self, params: kin.HeroParams, terrain: kin.Terrain2D | None = None, ev_off: int = EV_OFF,
+                 grow_u: float = GROW):
         self.params = params
         self.terrain = terrain
         self.ev_off = ev_off
+        self.grow_u = grow_u
 
     def contact(self, pos: np.ndarray, facing: int, press_j: int, targets, alt: bool | None = None
                 ) -> tuple[int, str | None]:
@@ -114,7 +126,7 @@ class PogoModel:
             for poly, kind in targets(j):
                 if kind is None:
                     continue
-                if meets(p, poly):
+                if meets(p, grow(poly, self.grow_u)):
                     if kind == K_HURT:
                         return j, kind
                     hit = hit or kind
@@ -160,5 +172,5 @@ ENEMY_OUTCOME = {
 }
 
 
-__all__ = ["DOWN", "DOWN_ALT", "ACTIVE", "EV_OFF", "K_HURT", "K_TINK", "collider_kind", "slash_poly", "meets",
+__all__ = ["DOWN", "DOWN_ALT", "ACTIVE", "EV_OFF", "GROW", "grow", "K_HURT", "K_TINK", "collider_kind", "slash_poly", "meets",
            "Branches", "PogoModel", "ENEMY_OUTCOME"]

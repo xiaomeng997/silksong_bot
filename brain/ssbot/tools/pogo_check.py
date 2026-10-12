@@ -27,6 +27,7 @@ import numpy as np
 
 DELTAS = (6, 12, 18, 24, 36)
 T = 40
+EXTRA = 40           # frames kept past T: freezes (hit stop, kill slow-mo: dt 0) do not advance the game time
 
 
 def split_of(name: str) -> str:
@@ -101,9 +102,9 @@ def run(recs: list[Path], rows_by: dict, ev_offs: tuple, split: str) -> dict:
         for _, m in rd.terrain():
             terrain = kin.Terrain2D.from_message(m, params.scene("Hang_04"))
             break
-        pms = {o: PogoModel(params, terrain, ev_off=o) for o in ev_offs}
+        pms = {o: PogoModel(params, terrain, ev_off=o[0], grow_u=o[1]) for o in ev_offs}
         trk = kin.StateTracker(params, terrain or kin.Terrain2D.empty())
-        buf: deque = deque(maxlen=T + 8)
+        buf: deque = deque(maxlen=T + EXTRA + 8)
         starts = {}
         for s in rd.states(0, 10 ** 9):
             trk.push(s)
@@ -114,10 +115,10 @@ def run(recs: list[Path], rows_by: dict, ev_offs: tuple, split: str) -> dict:
                     starts[f + 1] = trk.state().copy()
                 except Exception:  # noqa: BLE001
                     pass
-            f0 = f - T + 1
+            f0 = f - T - EXTRA + 1
             if f0 in rows and f0 in starts:
-                S = [x for x in buf if f0 - 1 <= x["f"] <= f0 - 1 + T]
-                if len(S) != T + 1 or S[0]["f"] != f0 - 1:
+                S = [x for x in buf if f0 - 1 <= x["f"] <= f0 - 1 + T + EXTRA]
+                if len(S) != T + EXTRA + 1 or S[0]["f"] != f0 - 1:
                     continue
                 st = starts.pop(f0)
                 for o, pm in pms.items():
@@ -127,29 +128,36 @@ def run(recs: list[Path], rows_by: dict, ev_offs: tuple, split: str) -> dict:
 
 def one(pm, start, S: list[dict], r: dict, name: str) -> dict:
     f0 = r["f0"]
-    masks = np.array([int((x.get("input") or {}).get("mask", 0) or 0) for x in S[1:]], np.int64)
+    # rollout index j (game frames from f0 - 1) -> the recorded frame at that game time (frames with dt 0 skipped)
+    ft = float(pm.params.frame_time)
+    tcum = np.cumsum([0.0] + [float(x.get("dt") or 0.0) for x in S[1:]])
+    jr = np.minimum(np.searchsorted(tcum, np.arange(T + 1) * ft - 0.3 * ft), len(S) - 1)
+    Sg = [S[k] for k in jr]
+    masks = np.array([int((x.get("input") or {}).get("mask", 0) or 0) for x in Sg[1:]], np.int64)
     facing = 1 if float((S[0].get("hero") or {}).get("facing") or 1) >= 0 else -1
-    tg = {j: targets_of(S[j]) for j in range(len(S))}
+    tg = {j: targets_of(Sg[j]) for j in range(len(Sg))}
     br = pm.branches(start, masks, 1, lambda j: tg.get(j, ()), facing)
-    real = np.array([(x.get("hero") or {}).get("pos", [np.nan, np.nan])[:2] for x in S], float)
-    hp = [(x.get("hero") or {}).get("health") for x in S]
-    lost = next((j for j in range(1, len(S)) if hp[j] is not None and hp[0] is not None and hp[j] < hp[0]), len(S))
+    real = np.array([(x.get("hero") or {}).get("pos", [np.nan, np.nan])[:2] for x in Sg], float)
+    hp = [(x.get("hero") or {}).get("health") for x in Sg]
+    lost = next((j for j in range(1, len(Sg)) if hp[j] is not None and hp[0] is not None and hp[j] < hp[0]), len(Sg))
     fc = real_contact(r)
-    act_c = (fc - (f0 - 1)) if fc is not None else -1
+    kc = next((k for k, x in enumerate(S) if x["f"] == fc), None) if fc is not None else None
+    act_c = int(np.searchsorted(jr, kc)) if kc is not None else -1
     geo_j, _ = pm.contact(real, facing, 1, lambda j: tg.get(j, ()))     # the contact rule on the real path
     pick = br.hit if br.hit is not None else br.miss
     timed = pm.rollout(start, masks, act_c) if act_c >= 0 else None
     err, err_t = {}, {}
     for d in DELTAS:
         j = d + 1
-        if j >= len(S) or j >= lost:
+        if j >= len(Sg) or j >= lost:
             continue
         err[d] = float(np.hypot(*(pick.pos[0, j] - real[j])))
         if timed is not None:
             err_t[d] = float(np.hypot(*(timed.pos[0, j] - real[j])))
     return {"rec": name, "f0": f0, "case": case_of(r), "pred_j": br.contact_j, "pred_kind": br.kind, "act_j": act_c,
             "geo_j": geo_j,
-            "err": err, "err_timed": err_t, "lost_j": lost if lost < len(S) else None}
+            "err": err, "err_timed": err_t, "lost_j": lost if lost < len(Sg) else None,
+            "frozen": int(len(S) - len(set(int(k) for k in jr)))}
 
 
 def summary(res: list[dict]) -> dict:
@@ -197,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="also every directory BASE/PATTERN")
     ap.add_argument("--split", default="all", choices=("all", "calib", "test"))
     ap.add_argument("--ev-off", default=None, help="EV_POGO offsets to compare, e.g. -1,0,1 (default pogo_model.EV_OFF)")
+    ap.add_argument("--grow", default=None, help="target polygon growths to compare, e.g. 0,0.15,0.3 (u)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
     from ssbot.combat import pogo_model
@@ -208,12 +217,14 @@ def main(argv: list[str] | None = None) -> int:
                 r = json.loads(line)
                 rows_by[r["session"]].append(r)
     offs = (pogo_model.EV_OFF,) if a.ev_off is None else tuple(int(x) for x in str(a.ev_off).split(","))
+    grows = (pogo_model.GROW,) if a.grow is None else tuple(float(x) for x in str(a.grow).split(","))
+    offs = tuple((o, g) for o in offs for g in grows)
     extra = [d for base, pat in a.glob for d in sorted(Path(base).glob(pat)) if d.is_dir()]
     res = run(recordings(list(a.recs) + extra), rows_by, offs, a.split)
-    out = {"split": a.split, "by_ev_off": {str(o): {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
+    out = {"split": a.split, "by_ev_off": {f"{o[0]}|{o[1]}": {"n": len(r), "cases": summary(r)} for o, r in res.items()}}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1), "utf-8")
-    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(dict(x, ev_off=o)) + "\n" for o, r in res.items() for x in r), "utf-8")
+    a.out.with_suffix(".rows.jsonl").write_text("".join(json.dumps(dict(x, ev_off=o[0], grow=o[1])) + "\n" for o, r in res.items() for x in r), "utf-8")
     print(json.dumps(out, indent=1)[:6000])
     return 0
 
