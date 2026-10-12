@@ -436,7 +436,7 @@ class EnvelopeAudit:
                                   #   certified entry (full checks instead)
     sm_hit_other: int = 0         # review: special rows whose first predicted hit is another enemy (hit branch run)
     sm_forced_out: int = 0        # review: FORCED_RISK ticks whose special rows were taken out of the ranking
-    hop_inflight: int = 0         # review: ticks without hop rows because a jump is in flight (prefix / held key)
+    hop_inflight: int = 0         # review: hop rows dropped: their press is not a jump from the ground (model)
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
 
     def as_dict(self) -> dict:
@@ -2167,13 +2167,6 @@ class ForumPlanner(Planner):
         bk = getattr(rs, "bombs_all", None)
         if bk is None or not len(bk):
             return None
-        # review: a jump already in flight (in the prefix, or the key held / queued now) would make the row's own press
-        # a second press in the air (the umbrella): no hop rows until it is over
-        jb_i = int(B_JUMP).bit_length() - 1
-        if (np.asarray(prefix, np.int64) & B_JUMP).any() or bool(np.asarray(hold.latched)[0, jb_i]) \
-                or bool(np.asarray(hold.desired)[0, jb_i]) or int(np.asarray(hold.pending)[0, jb_i]) != 0:
-            self.audit.hop_inflight += 1
-            return None
         cs = self.fsets["ground"][0]
         if not hasattr(self, "_hop_src"):
             nm = [cs.name(i) for i in range(len(cs.cmd))]
@@ -2216,7 +2209,7 @@ class ForumPlanner(Planner):
         cs_ = sorted({c for c in (c0 - 2, c0, c0 + 2) if 0 <= c <= T - H})
         if not cs_:
             return None
-        cmd, names, bits = [], [], []
+        cmd, names, bits, cq = [], [], [], []
         jb = 1 << 1                                         # Prim.JUMP
         for i in src:
             for c in cs_:
@@ -2225,8 +2218,21 @@ class ForumPlanner(Planner):
                 cmd.append(m)
                 names.append(f"{cs.name(i)}_hop{c}")
                 bits.append(int(cs.prim_bits[i]) | jb)
+                cq.append(c)
+        # review 2026-10-12: the row's press must be a jump from the ground in the model (the person: no second jump
+        # press in the air). A jump in flight (the prefix's, or one the held key starts) would make it a second press;
+        # a press that only continues the prefix's held jump is no new press
+        cmd = np.asarray(cmd)
+        lat_h, _ = hold_filter_jit(np.concatenate([np.broadcast_to(np.asarray(prefix, np.int64), (len(cmd), P)), cmd],
+                                                  axis=1), hold)
+        rh = kin.rollout(start, lat_h, self.params, self.terrain, threads=1)
+        cont0 = P > 0 and bool(int(prefix[-1]) & B_JUMP)
+        ok_q = np.array([bool(rh.flags[q, P + c] & F_GROUND) or (c == 0 and cont0) for q, c in enumerate(cq)], bool)
+        self.audit.hop_inflight += int((~ok_q).sum())
+        if not ok_q.any():
+            return None
         self.hop_dbg = {"on_p": on_p, "off_p": off_p, "clear": (a, z), "press": cs_, "bx": float(b[1])}
-        return np.asarray(cmd), names, np.asarray(bits, np.int64)
+        return cmd[ok_q], [n for n, k in zip(names, ok_q) if k], np.asarray(bits, np.int64)[ok_q]
 
     def _special_ctx(self, f, start, hold, prefix, latched, r1, rows: np.ndarray, exts: list, T: int):
         """The special mode's tick context (combat.special_mode): the special rows' contact with E's move (the bounce

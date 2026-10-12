@@ -150,7 +150,7 @@ def _hop_planner(params, arena, monkeypatch):
     return pl, f, start
 
 
-def test_hop_rows_press_jump_once_and_never_with_a_jump_in_flight(params, arena, monkeypatch):
+def test_hop_rows_press_jump_once_and_only_from_the_ground(params, arena, monkeypatch):
     pl, f, start = _hop_planner(params, arena, monkeypatch)
     T = pl.fsets["ground"][0].T
     out = pl._rune_hop_rows(f, start, kin.HoldState.idle(1), np.zeros(1, np.int64), T)
@@ -163,14 +163,12 @@ def test_hop_rows_press_jump_once_and_never_with_a_jump_in_flight(params, arena,
     for m in cmd:
         j = np.flatnonzero((m & kin.B_JUMP) != 0)
         assert len(j) == pl.HOP_HOLD and np.all(np.diff(j) == 1)   # one press, held 11 frames
-    # a jump in flight: in the prefix, held, or queued -> no hop rows (the row's press would be a second one)
+    # a jump started in the prefix: a later press would be a second one in the air -> dropped; only a press that
+    # continues the held key (c 0) is left
     pre = np.array([kin.B_JUMP], np.int64)
-    assert pl._rune_hop_rows(f, start, kin.HoldState.idle(1), pre, T) is None
-    h = kin.HoldState.idle(1)
-    jb = int(kin.B_JUMP).bit_length() - 1
-    h.latched[0, jb] = True
-    assert pl._rune_hop_rows(f, start, h, np.zeros(1, np.int64), T) is None
-    assert pl.audit.hop_inflight == 2
+    out = pl._rune_hop_rows(f, start, kin.HoldState.idle(1), pre, T)
+    assert pl.audit.hop_inflight > 0
+    assert out is None or all(n.endswith("_hop0") for n in out[1])
 
 
 def test_l2_strike_spot_holds_through_a_flicker(monkeypatch):
