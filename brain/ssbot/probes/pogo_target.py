@@ -90,12 +90,21 @@ class Target:
             tx = cx - side * x0
         return tx
 
+    def walk_mask(self, s: dict, tx: float) -> int:
+        """The walk mask for frame s.f + 2 toward tx: the hero's x then extrapolated from this frame's velocity (the
+        two frames in flight already have their masks), none within half a walk step (she stops dead)."""
+        vx = float((s["hero"].get("vel") or [0, 0])[0])
+        dx = tx - (hx(s) + 2 * vx / 60)
+        if abs(dx) <= WALK_U / 2 + 0.01:
+            return 0
+        return M_R if dx > 0 else M_L
+
     def walk_to(self, s: dict, tx: float, max_f: int) -> tuple[dict, int]:
         for k in range(max_f):
-            dx = tx - hx(s)
-            if abs(dx) <= WALK_U / 2 + 0.01:
+            m = self.walk_mask(s, tx)
+            if m == 0 and abs(float((s["hero"].get("vel") or [0, 0])[0])) < 0.1:
                 return self.step(0), k + 1
-            s = self.step(M_R if dx > 0 else M_L)
+            s = self.step(m)
         return s, max_f
 
     def trial(self, t: dict) -> dict:
@@ -138,13 +147,10 @@ class Target:
             k_next = s["f"] + 2 - fa
             if k_next >= tau:
                 break
-            dx = tx - hx(s)
             frames_left = tau - k_next
-            m = 0
-            if abs(dx) > WALK_U / 2 + 0.01:
-                m = M_R if dx > 0 else M_L
-                if abs(dx) > WALK_U * frames_left + 0.05:
-                    late = True
+            m = self.walk_mask(s, tx)
+            if m and abs(tx - hx(s)) > WALK_U * (frames_left + 2) + 0.05:
+                late = True
             s = self.step(m)
         x_jump = None
         k_first = s["f"] + 2 - fa
