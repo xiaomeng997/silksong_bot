@@ -206,3 +206,24 @@ def test_hits_first_reuses_its_tier_escape_check(params, arena, monkeypatch):
     assert pl.audit.hf_stop == 1
     assert not r.S
     assert pl.audit.hf_esc_reused == 1
+    # the tier cache is its own attribute (a first version reused _esc_cache, _esc_cmds' escape commands)
+    assert getattr(pl, "_hf_esc", None) is None
+    assert pl._esc_cmds(24).ndim == 2
+
+
+def test_hits_first_with_rows_past_the_tier_cache(params, arena, monkeypatch):
+    """While the tier cache is handed to the selection's escape check, that check can still build its escape commands
+    (_esc_cmds) for the rows past the cache: the smoke runs of gsav2 / allv2 crashed on a first version whose cache
+    took _esc_cmds' own attribute."""
+    monkeypatch.setattr(special_mode, "HITS_FIRST", True)
+    orig = ForumPlanner._escape_pick
+    n = [0]
+
+    def pick(self, *a, **k):
+        n[0] += 1
+        assert self._esc_cmds(24).ndim == 2             # a row past the cache needs them
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(ForumPlanner, "_escape_pick", pick)
+    pl, r = _tick(params, arena, monkeypatch)
+    assert n[0] >= 1 and pl.audit.hf_esc_reused >= 1

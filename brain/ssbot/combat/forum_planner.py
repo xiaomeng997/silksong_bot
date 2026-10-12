@@ -1981,7 +1981,7 @@ class ForumPlanner(Planner):
         best, best_fail, checked, best_lab = None, 0, 0, []
         K = min(self.fcfg.esc_k if k is None else k, len(ranked))
         c_start = 0
-        cache = getattr(self, "_esc_cache", None) if v2 else None
+        cache = getattr(self, "_hf_esc", None) if v2 else None
         if cache:
             # review2: the leading rows of the order already checked (HITS_FIRST's tiers): their results, in order
             for r in ranked[:K]:
@@ -3714,12 +3714,12 @@ class ForumPlanner(Planner):
                     dl = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
                     # review2 (HITS_FIRST): the rows its tiers checked keep their results (the same _escape_fail_v2 on
                     # the same lanes), so the deadline cannot cut them into "unchecked" (the strike flagged unsafe)
-                    self._esc_cache = hf_ok_ if (hf_ok_ and v2) else None
+                    self._hf_esc = hf_ok_ if (hf_ok_ and v2) else None
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
                         fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
                         None if math.isinf(dl) else t0 + dl * 1e-3, v2=v2)
-                    self._esc_cache = None
+                    self._hf_esc = None
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
