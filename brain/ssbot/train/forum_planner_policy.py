@@ -74,6 +74,10 @@ CLASH_MODES = {"off": {}, "on": {"clash": True}, "yellow": {"clash": True, "clas
                # YELLOW that comes from the chosen plan's S = 1 (h >= 3), never at h 2, in RED or with a pause pending
                "main": {"clash": True, "clash_main": True, "clash_min_p": 0.0, "clash_max_fail": 0.3, "clash_depth": 3}}
 END_SLOW_S = 1.85          # EnemyBattleEndSlow in real time (forum.md §3): the final blow's unpausable window
+# the person 2026-10-12: the death slow motion's missing pause is not a reason to hold the killing blow back (the hero
+# stays in control in it and a dead enemy cannot corner her): no U / I3 veto and no supervisor kill_prims. 0: the old
+# rule (the blow that may end the battle only under I3, YELLOW's per-enemy kill freeze)
+KILL_FREE = os.environ.get("SSBOT_FORUM_KILL_FREE", "1").strip() != "0"
 ANKLET = "Weighted Anklet"
 COG = kin.B_UP | kin.B_QUICKCAST
 COG_FRAMES = 2
@@ -679,8 +683,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
         dmg, _ = self.sc.kill_inputs(s, obs=raw, ws=ws)
-        kill_hp = forum_kill_hp(self.fc)
-        ykill = forum_yellow_kill_hp(self.fc, self.freeze)
+        kill_hp = None if KILL_FREE else forum_kill_hp(self.fc)
+        ykill = None if KILL_FREE else forum_yellow_kill_hp(self.fc, self.freeze)
         ctx = FilterContext.from_world(ws, d, h, want_bind=prefs.want_bind, damage=dmg, kill_hp=kill_hp,
                                        kill_window_s=self.kill_window_s)
         ctx.silk_reserve_full_hp = self.pb.bind_reserve_at_full_hp
