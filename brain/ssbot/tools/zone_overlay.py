@@ -1361,8 +1361,39 @@ def pogo_slam_now(eng, s: dict, start, masks, facing: int) -> dict | None:
                                                for dx, dy, v in reg.cells(k, vy, which="hit")]
     pr["region_b"] = reg.B if reg is not None else 0.25
     pr["slam_k"] = k
+    pr["specials"] = specials_cells(eng, tl, k, cx, cy, face)
     pr["ground"] = False
     return pr
+
+
+SPECIALS_AHEAD_F = 6        # the special-move entries drawn: press frames containing the slam frame now + this
+
+
+def specials_cells(eng, tl, k: int, cx: float, cy: float, face: int) -> list:
+    """The special-move table's strike cells (combat.specials, task 1v1 T3, forum.md 48) for a press SPECIALS_AHEAD_F
+    frames from now, in world coordinates on the Clapper's position then (its lunge): (cert, x0, x1, y0, y1), one per
+    cell (any vy class, any key)."""
+    try:
+        from ssbot.combat import specials as spm
+        tab = getattr(eng, "_spec_tab", None)
+        if tab is None:
+            tab = eng._spec_tab = spm.SpecialTable.load()
+    except Exception:  # noqa: BLE001  (no table)
+        return []
+    kk = k + SPECIALS_AHEAD_F
+    d = tl.disp
+    ex = cx - face * d[min(max(k, 0), len(d) - 1)] + face * d[min(max(kk, 0), len(d) - 1)]
+    best: dict = {}
+    for e in tab.by_move.get("CL_SLAM", ()):
+        if e.k0 <= kk <= e.k1:
+            key = (e.dx0, e.dy0)
+            if best.get(key) != "both":
+                best[key] = e.cert if best.get(key) is None or e.cert == "both" else best[key]
+    out = []
+    for (dx0, dy0), cert in best.items():
+        x0, x1 = sorted((ex + face * dx0, ex + face * (dx0 + 0.5)))
+        out.append((cert, x0, x1, cy + dy0, cy + dy0 + 0.5))
+    return out
 
 
 def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
@@ -1427,6 +1458,12 @@ def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
     now = pg.get("now")
     if now is not None and fz is None:
         region(now)
+        # the special-move table's strike cells a few frames ahead (outlines: green = both outcomes safe, orange =
+        # the bounce safe only)
+        for cert, x0, x1, y0, y1 in now.get("specials") or ():
+            q = np.round(_to_px(Hw, np.array([[x0, y0], [x1, y1]]))).astype(np.int32)
+            col = (60, 220, 60, 255) if cert == "both" else (0, 140, 255, 255)
+            cv2.rectangle(img, (int(q[0][0]), int(q[0][1])), (int(q[1][0]), int(q[1][1])), col, 1, cv2.LINE_AA)
         line(now.get("miss"), POGO_COLS["miss"], th)
         line(now.get("hit"), POGO_COLS["hit"], th)
         hit_mark(now, "miss_hit_j", "miss")

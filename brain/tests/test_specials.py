@@ -48,3 +48,14 @@ def test_strike_rows_land_in_their_entry(P):
         x, y = ro.pos[n, P + j + 1]
         dx = (x - (cx + face * tl.disp[k])) * face
         assert e.has(k, dx, y - cy, ro.vel[n, P + j + 1, 1])
+
+
+def test_overlay_cells():
+    from types import SimpleNamespace
+
+    from ssbot.tools.zone_overlay import specials_cells
+    tl = SlamTimeline.load()
+    cells = specials_cells(SimpleNamespace(), tl, 10, 31.0, 7.449, 1)
+    assert cells and {c[0] for c in cells} <= {"both", "bounce"}
+    assert all(c[1] < c[2] and c[3] < c[4] for c in cells)
+    assert specials_cells(SimpleNamespace(), tl, 200, 31.0, 7.449, 1) == []
