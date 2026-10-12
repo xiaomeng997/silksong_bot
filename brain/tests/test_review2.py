@@ -190,3 +190,19 @@ def test_v2_lut_keeps_the_best_rank_in_a_shared_cell():
         lut = sp.Lut(es, True, cell=(0.25, 0.25))
         i = lut.find(np.array([3]), np.array([0.6]), np.array([1.1]), np.array([1]))[0]
         assert es[int(i)].cert == "both"
+
+
+def test_hits_first_reuses_its_tier_escape_check(params, arena, monkeypatch):
+    """HITS_FIRST (G4 4c) ran the escape check on its tier inside the envelope; the selection ran it again under the
+    escape deadline, which the tier's time could exhaust before the first batch: the strike row was then flagged
+    unsafe as "unchecked". The tier's result now stands for the first row in the order."""
+    import dataclasses
+    monkeypatch.setattr(special_mode, "HITS_FIRST", True)
+
+    def setup(pl):
+        pl.fcfg = dataclasses.replace(pl.fcfg, esc_deadline_ms=0.0)       # the selection's escape check: no time
+
+    pl, r = _tick(params, arena, monkeypatch, setup=setup)
+    assert pl.audit.hf_stop == 1
+    assert not r.S
+    assert pl.audit.hf_esc_reused == 1

@@ -456,6 +456,7 @@ class EnvelopeAudit:
     ds_busy: int = 0              #   review2: ticks with a swing under way / pressed in the prefix (no certain row)
     ds_cont2: int = 0             #   review2: certain rows holding a second press, offered only as their chain twin
     ds_anchor: int = 0            #   review2: certain rows whose hit branch is anchored at the certain contact
+    hf_esc_reused: int = 0        # review2: selections whose escape result is the HITS_FIRST tier's (no second run)
     ds_ms: float = 0.0
     mh_targets: int = 0           # SSBOT_FORUM_MOVE_HITS (G4 5b): target bodies put on their move path (calls x targets)
     hf_ticks: int = 0             # SSBOT_FORUM_HITS_FIRST (G4 4c): ticks with strike options ordered by hits
@@ -1974,7 +1975,24 @@ class ForumPlanner(Planner):
             return None, 0, 0, len(threats), []
         best, best_fail, checked, best_lab = None, 0, 0, []
         K = min(self.fcfg.esc_k if k is None else k, len(ranked))
-        for c0 in range(0, K, ESC_CHUNK):
+        c_start = 0
+        cache = getattr(self, "_esc_cache", None) if v2 else None
+        if cache:
+            # review2: the leading rows of the order already checked (HITS_FIRST's tiers): their results, in order
+            for r in ranked[:K]:
+                if int(r) not in cache:
+                    break
+                n, lb, e1 = cache[int(r)]
+                c_start += 1
+                checked += 1
+                self.audit.hf_esc_reused += 1
+                if n == 0:
+                    if e1 is not None:
+                        self._v2_esc_first[int(r)] = e1       # (forum_v2.ESC_TAIL's escape for the row)
+                    return int(r), 0, checked, len(threats), []
+                if best is None or n < best_fail:
+                    best, best_fail, best_lab = int(r), int(n), lb
+        for c0 in range(c_start, K, ESC_CHUNK):
             tc = time.perf_counter()
             if t_end is not None and tc + self.esc_batch_s > t_end:
                 self.esc_cut = True
@@ -3153,6 +3171,7 @@ class ForumPlanner(Planner):
                 self.audit.kp_sw_gone += int(not done)
         hf = bool(special_mode.HITS_FIRST and v2 and (sctx is not None or n_ds))
         hf_h = None
+        hf_ok_: dict = {}               # review2: the tier rows' escape results {row: (failures, labels, ESC_TAIL's first)}
         if hf:
             # G4 4c (the person: most hits first, stop early): the strike options (special rows, family rows) that
             # passed stage 1 are enveloped first, the kept template's row alone first, then by their hit count (the
@@ -3388,7 +3407,9 @@ class ForumPlanner(Planner):
                 if tier:
                     if not hasattr(self, "_v2_esc_first"):
                         self._v2_esc_first = {}
-                    nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(tier, np.int64))
+                    nf_, lb_ = self._escape_fail_v2(f, r1, hold_end, np.asarray(tier, np.int64))
+                    e1_ = getattr(self, "_v2_esc_first", {})
+                    hf_ok_.update({int(r_): (int(n_), l_, e1_.get(int(r_))) for r_, n_, l_ in zip(tier, nf_, lb_)})
                     if (nf_ == 0).any():
                         hf_h = int(hk[tier[int(np.argmax(nf_ == 0))]])
                         rest_q = queue[pos:]
@@ -3686,10 +3707,14 @@ class ForumPlanner(Planner):
                     hero = (0.0, 0.0) if ws is None or ws.hero is None else \
                         (float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1]))
                     dl = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
+                    # review2 (HITS_FIRST): the rows its tiers checked keep their results (the same _escape_fail_v2 on
+                    # the same lanes), so the deadline cannot cut them into "unchecked" (the strike flagged unsafe)
+                    self._esc_cache = hf_ok_ if (hf_ok_ and v2) else None
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
                         fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
                         None if math.isinf(dl) else t0 + dl * 1e-3, v2=v2)
+                    self._esc_cache = None
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
