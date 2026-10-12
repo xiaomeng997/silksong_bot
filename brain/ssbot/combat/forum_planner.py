@@ -456,7 +456,9 @@ class EnvelopeAudit:
     ds_busy: int = 0              #   review2: ticks with a swing under way / pressed in the prefix (no certain row)
     ds_cont2: int = 0             #   review2: certain rows holding a second press, offered only as their chain twin
     ds_anchor: int = 0            #   review2: certain rows whose hit branch is anchored at the certain contact
-    hf_esc_reused: int = 0        # review2: selections whose escape result is the HITS_FIRST tier's (no second run)
+    ds_anchor_nohit: int = 0      #   of them the scorer saw no hit on (before review2: no hit branch at all)
+    ds_anchor_moved: int = 0      #   of them the scorer's first hit was another frame / target
+    hf_esc_reused: int = 0        # review2: rows whose escape result at the selection is the HITS_FIRST tier's
     ds_ms: float = 0.0
     mh_targets: int = 0           # SSBOT_FORUM_MOVE_HITS (G4 5b): target bodies put on their move path (calls x targets)
     hf_ticks: int = 0             # SSBOT_FORUM_HITS_FIRST (G4 4c): ticks with strike options ordered by hits
@@ -1399,6 +1401,9 @@ class ForumPlanner(Planner):
                 d = 1 if m & kin.B_RIGHT else (-1 if m & kin.B_LEFT else 0)
                 if d and int(r1.mode[r, k - 1]) == M_NORMAL and not (int(r1.flags[r, k - 1]) & F_ATTACKING):
                     face = d
+            f0 = int(sc["first_f"][r])
+            self.audit.ds_anchor_nohit += int(f0 < 0)                  # (no hit branch before review2)
+            self.audit.ds_anchor_moved += int(f0 >= 0 and (f0 != c or int(sc["first_t"][r]) != ti))
             sc_h["first_f"][r], sc_h["first_t"][r], sc_h["first_k"][r], sc_h["first_face"][r] = c, ti, K_DOWN, face
         self.audit.ds_anchor += len(rows) - len(lost)
         return sc_h, rows, np.asarray(lost, np.int64)
