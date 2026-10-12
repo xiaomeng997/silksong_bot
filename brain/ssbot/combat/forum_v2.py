@@ -136,6 +136,11 @@ TABLE_M99 = {   # type key -> ((k, m99 u), ...) from the idle-velocity summary (
 DECISION_S = {"RE_STAB": (0.633, 0.667), "MA_SLASH": (0.683, 0.733), "CC_JUMP": (0.483, 0.517),
               "CC_JUMP_CAST": (0.883, 0.933), "AT_DIVE": (0.699, 0.766)}
 AIM_LAT = 2
+# SSBOT_FORUM_V2_AIM_COAST (task 1v1 T2, the Reed): the pending aim's anchor at its decision. "union" (default): the
+# zone at the enemy's position now and at that position carried by its velocity decaying AIM_COAST a frame to the
+# decision; "pred": the carried one only; "0": the position now (before T2)
+AIM_COAST_MODE = os.environ.get("SSBOT_FORUM_V2_AIM_COAST", "union").strip().lower() or "union"
+AIM_COAST = {"RE_STAB": 0.9}
 LOCK_EXT_F = 24                       # a hero lock at the decision extends the zone test by up to this many frames
 
 
@@ -417,27 +422,28 @@ class LayerSupport:
                 sel[:, b + 1:b + ext.shape[1]] |= ext[:, :-1] if ext.shape[1] > 1 else False
             hx = cx
             hy = cy + HB_DY
-            dxw = hx - p["x"]
-            if p["aim"] == "facing":
-                side = np.full(cx.shape, p["s"], np.int64)
-            else:
-                side = np.where(dxw >= 0, 1, -1)
             inz = np.zeros((N, T1), bool)
-            for sd in (1, -1):
-                z = p["zones"].get(sd)
-                if z is None:
-                    z = p["reader"].zone(p["x"], p["y"], sd, AIM_LAT)
-                    p["zones"][sd] = z
-                if not z.any():
-                    continue
-                gx, gy, D = p["reader"].gx, p["reader"].gy, p["D"]
-                with np.errstate(invalid="ignore"):
-                    ix = np.floor((dxw * sd - gx[0] + D / 2) / D)
-                    iy = np.floor((hy - p["y"] - gy[0] + D / 2) / D)
-                    ok = sel & (side == sd) & np.isfinite(ix) & np.isfinite(iy) & (ix >= 0) & (ix < len(gx)) \
-                        & (iy >= 0) & (iy < len(gy))
-                if ok.any():
-                    inz[ok] = z[iy[ok].astype(np.int64), ix[ok].astype(np.int64)] > 0
+            for ax, ay in p.get("anchors") or ((p["x"], p["y"]),):
+                dxw = hx - ax
+                if p["aim"] == "facing":
+                    side = np.full(cx.shape, p["s"], np.int64)
+                else:
+                    side = np.where(dxw >= 0, 1, -1)
+                for sd in (1, -1):
+                    zk = (sd, round(ax, 2), round(ay, 2))
+                    z = p["zones"].get(zk)
+                    if z is None:
+                        z = p["reader"].zone(ax, ay, sd, AIM_LAT)
+                        p["zones"][zk] = z
+                    if not z.any():
+                        continue
+                    gx, gy, D = p["reader"].gx, p["reader"].gy, p["D"]
+                    with np.errstate(invalid="ignore"):
+                        ix = np.floor((dxw * sd - gx[0] + D / 2) / D)
+                        iy = np.floor((hy - ay - gy[0] + D / 2) / D)
+                        ok = sel & (side == sd) & np.isfinite(ix) & np.isfinite(iy) & (ix >= 0) & (ix < len(gx))                             & (iy >= 0) & (iy < len(gy))
+                    if ok.any():
+                        inz[ok] |= z[iy[ok].astype(np.int64), ix[ok].astype(np.int64)] > 0
             f_ = inz.any(axis=1)
             p["rows_failed"] = int(f_.sum())
             fail |= f_
@@ -620,7 +626,19 @@ def pending_aims(trk: RangeTracker) -> list[dict]:
         d_hi = max(int(math.ceil((hi - age) / FT - 1e-6)), d_lo)
         p = e.get("pos") or (0.0, 0.0)
         mv = az.MOVES[name]
-        out.append({"iid": iid, "name": name, "reader": rd[name], "x": float(p[0]), "y": float(p[1]),
+        x, y = float(p[0]), float(p[1])
+        anchors = ((x, y),)
+        if name in AIM_COAST and AIM_COAST_MODE != "0":
+            # the enemy keeps moving through its antic: its velocity now decays by AIM_COAST[name] a frame (the Reed's
+            # Stab Antic: DecelerateV2 0.95 + DistanceFly; fitted 0.9 on the live T2 antics: the anchor error at the
+            # Stab 1 entry p50 / p90 1.4 / 2.8 u against 2.3 / 3.7 u standing still)
+            v = e.get("vel") or (0.0, 0.0)
+            dec = AIM_COAST[name]
+            n = max(d_lo, 0)
+            c = (1.0 - dec ** n) / (1.0 - dec) * FT
+            pred = (x + float(v[0]) * c, y + float(v[1] or 0.0) * c if len(v) > 1 else y)
+            anchors = (pred,) if AIM_COAST_MODE == "pred" else ((x, y), pred)
+        out.append({"iid": iid, "name": name, "reader": rd[name], "x": x, "y": y, "anchors": anchors,
                     "s": trk.tables[tk].facing(e.get("flipX")), "aim": mv.aim, "d_lo": d_lo, "d_hi": d_hi,
                     "D": az.D, "zones": {}})
     return out
