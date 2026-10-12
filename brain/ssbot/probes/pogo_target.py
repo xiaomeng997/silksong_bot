@@ -129,11 +129,14 @@ class Target:
                 tin = next((float(m.get("t") or 0.0) for m in e.get("fsms") or () if m.get("name") == "Control"), 0.0)
                 fa = s["f"] - int(round(tin * 60))
                 break
-            if e is not None and st in READY and abs(abs(hx(s) - float(e["pos"][0])) - wait_x0) > 1.0:
+            # follow it frame by frame (the person, 2026-10-11 18:50: after a backstep the hero was out of Slam Range,
+            # the Clapper went Far Range and jumped half the time): keep the test distance, chase a backstep at once
+            m = 0
+            if e is not None:
                 tx = self.side_x(s, wait_x0)
-                s, _ = self.walk_to(s, tx, 120, stop_on_antic=True)
-                continue
-            s = self.step(0)
+                if st == "Evade Scuttle" or abs(abs(hx(s) - float(e["pos"][0])) - wait_x0) > 0.4:
+                    m = self.walk_mask(s, tx)
+            s = self.step(m)
         if fa is None:
             return {"skip": "no slam"}
         if s["f"] + 2 - fa > int(t["tau_j"]):
