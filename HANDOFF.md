@@ -5446,7 +5446,8 @@ START HERE item 2 and the why study's fixes (5)-(9) for the Clapper's small-rune
 ### Open items
 
 - The person's overlay eye check of the per-bomb forecast before the live A/B relies on it (the rule): range mode,
-  magenta circles; a launcher like `start_overlay_pogo_check.ps1` on a frozen checkout of this commit.
+  magenta circles. Prepared, not started: `C:\ssbot\sandbox\start_overlay_rune_check.ps1` (frozen checkout
+  `C:\ssbot\live_1v1_e816996`, fo_cl_w7w at 0.5x; waits until no game window is open; launch it via WMI).
 - Live A/B rn / rn35 vs fcs: hitless %, landed hits per second, kill time, hits by source (rune bomb small), glide
   share in casts, hop rows chosen (`hop_*`), `noglide_ticks`, late ticks.
 - Not verified: the hop timing live (probe rollout + window), whether FACE 3 drifts into ring 0 (2.4 u) when the
