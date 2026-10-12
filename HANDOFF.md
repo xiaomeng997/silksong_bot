@@ -5664,3 +5664,103 @@ scripts, outputs). All offline; no game was started.
 - The family's EV_POGO sits at the contact frame (the hit branch's convention); the special mode's at contact - 1.
   Not verified live.
 - Not done here: the special table's follow-ups and chained strikes, the merged wide entries (G4).
+
+## Task 1v1 - stage G4: the special table v2 (branch worktree-wf_f1846551-5f9-1, 2026-10-12; forum.md §53)
+
+The person's decisions of 2026-10-12 ("刀多的先搜", "选中就沿用", "合并成几十个带冗余的条目", "再粗一层：出手窗口") and
+G3's two open items. Every new behaviour has its own switch, default off; with all of them off every decision is still
+677979c's (deterministic replays, deadlines off: Clapper 1v1 054126 i0 ep0 2,947/2,947, w0r 214048 i0 ep0
+1,348/1,348 against the review's frozen records). Data and tooling: `C:\ssbot\data\m2_special\g4` (`rec.py` per-tick
+recorder with the G4 audits, `summ.py`, `seq.ps1` sequential Idle runner, `v2_live.py`, `v2_report.json`). All
+offline; no game was started.
+
+### Code
+
+- `forum_planner.py`:
+  - HITS_FIRST (4c): the strike options (special rows in sctx, family rows) that passed stage 1 are enveloped first:
+    the kept row alone, then by hit count (`floor(sc["nh"])` after the certain-hit credits), J within a count; chunks
+    never cross a count's end. When a count's rows include one passing every check (ok, S, hz, hz_soft, U, the
+    committed hold `keep`, the macro margin, not a FOCUS_DASH dash-only row, and `_escape_fail_v2` == 0), the rest of
+    the queue keeps only rows with at least that many hits (normal rows with as many hits are still checked). Audit
+    `hf_ticks / hf_stop / hf_stop2 / hf_skipped / hf_skipped_strike`.
+  - KEEP (4b): `_kp` ("sm" / "ds") set at the selection. Next tick the kept row is the special CONTINUE if it is still
+    in `sctx.rows` (certified press, contact), or the family's "DS cont" (a chain whose second press is past the
+    continued row's horizon: its "DS cont+c<b>" row, forced into the chain pick; `_ds_keep_b`). The template search is
+    skipped on keep ticks (`_special_rows` returns no rows but sets `_spec_meta`; `_ds_rows` skips the prefilter). A
+    kept row that is safe and keeps the hold / macro margin gets a selection key above the landed hits. Audit
+    `kp_ticks / kp_kept / kp_skip / kp_done / kp_sw_gone / kp_sw_unsafe / kp_sw_escape`.
+  - MOVE_HITS (5b): `_move_hit_paths` (vectorized `RangeTable.position`, branch mean) replaces the scorer's target box
+    of an enemy in a tracked move in `_forum_targets` (hits, ranking, the family's prefilter all read it).
+  - `_ds_rows`: EVPRE puts the family's EV_POGO on mask contact - 1.
+- `special_mode.py`: switches KEEP, TABLE, HITS_FIRST, MOVE_HITS. `dslash.py`: EVPRE.
+- `specials.py`: `Entry` gains `hits / region / window / slack_t / slack_u` (defaults keep today's table identical);
+  `SpecialTable.load/save(suffix=)`; `Lut(cell=)` reads entries spanning native cells (`meta.native_cell`); rank +10 per
+  extra hit + 0.01 x late slack (0 on today's table).
+- `tools/specials_v2.py` (new): the merge (good / bad / unknown cells, late-only slack 3 frames, +-0.5 u, regions >= 40
+  cells, windows on (frame, dx)); writes `knowledge/1.0.30000/enemies/forum/specials_CL_SLAM_v2.json` and a report.
+- `probes/specials_probe.py`: `--table v2 --manifest` (filter `win:<W>:centre|edge`, no fallback); the entry's window /
+  region / slack logged. `tools/zone_overlay.py`: `SSBOT_OVERLAY_SPECIAL_TABLE=v2` draws the v2 entries.
+- `tests/test_g4.py` (6 tests).
+
+### Switches
+
+- `SSBOT_FORUM_HITS_FIRST=1`: most hits first, stop early (v2 ticks with special or family rows).
+- `SSBOT_FORUM_SPECIAL_KEEP=1`: keep a chosen special / family template while it verifies; skip the search meanwhile.
+- `SSBOT_FORUM_MOVE_HITS=1`: target bodies on their move path in the scorer.
+- `SSBOT_FORUM_DSLASH_EVPRE=1`: the family's bounce event one mask earlier (bounce on the contact frame). T1 probe1
+  (27 live bounces, real position 6 frames on): p50 0.002 u with it vs 0.307 u with G3's convention.
+- `SSBOT_FORUM_SPECIAL_TABLE=v2`: the special mode reads `specials_CL_SLAM_v2.json`.
+- `SSBOT_OVERLAY_SPECIAL_TABLE=v2` (overlay only).
+
+### Numbers (open-loop m2_why replays, every tick, deadlines off, run one after another on a quiet machine)
+
+- Table v2: 12,472 core cells, 38 regions (21 in front), 5,938 entries, 3 windows (distances hero centre to Clapper
+  centre along its facing, frames from the antic entry): W1 behind k 0-42 dx -2.5..-2.0 (both-safe); W2 k 0-48 dx
+  -1.5..+5.25 (bounce-safe; holds the person's late-antic regions k 41-48 dx +3.0..+5.25 "hold toward", late slack 4-6
+  frames, joined to the early-antic regions at k 41-44); W3 k 57-74 dx -3.5..+4.25. T1 live trials b1-b3: inside v2
+  cores 19/20 succeeded, inside today's cells 71/77, outside v2 153/258.
+- MOVE_HITS + EVPRE (allg3fh -> +): 508 of 2,947 decisions change; chosen one-hit-or-more ticks 949 -> 909, two-hit
+  479 -> 499; family chosen 351 -> 342, certain 312 -> 324, chains 291 -> 307.
+- HITS_FIRST (+ on top): 628 stop ticks (377 on a two-hit option): rows enveloped 164 -> 17.5, planner mean 13.8 ->
+  9.2 ms, p50 13.6 -> 8.4 ms; ticks with strike options p50/p95 12.3/18.8 -> 8.3/14.2 ms; all ticks p95 16.1 -> 12.5
+  ms; 219,820 rows skipped (3,160 one-hit strike options). 94 decisions change: same hits 72, more 9, fewer 7, unsafe
+  in both 6; none turns unsafe (a first version had 2: a dash-focus row passed the check; fixed).
+- KEEP (+ on top = arm allkh): 358 keep ticks, kept 231, switched: gone 81, unsafe 42, escape 4; 357 searches skipped;
+  two-hit choices 495 -> 392 and chains 289 -> 230 (a kept one-hit row is not replaced by a later two-hit one, by the
+  rule); cost about unchanged. `kp_done` stays 0: the kept row always disappears before its press reaches the first
+  mask (check live).
+- TABLE=v2: special mode alone (gsa+FAST+HOLD -> gsav2): ticks with special rows 68 -> 44, chosen special 46 -> 23,
+  p95 on those ticks 22.4 -> 18.4 ms. allkh -> allv2: chosen special 37 -> 10, family 321 -> 334.
+- w0r allg3fh -> allv2: family chosen 24 -> 49 (certain 6 -> 31), two-hit ticks 86 -> 86, p95 on strike ticks 18.8 ->
+  16.2 ms.
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`, appended)
+
+- `gsav2` = gsa + SPECIAL_FAST + SPECIAL_HOLD + SPECIAL_KEEP + SPECIAL_TABLE=v2 + HITS_FIRST + MOVE_HITS.
+- `allv2` = allg3fh + SPECIAL_KEEP + SPECIAL_TABLE=v2 + MOVE_HITS + HITS_FIRST + DSLASH_EVPRE.
+- `allkh` (extra) = allv2 without TABLE=v2 (today's table), to separate the table from the rest.
+
+### Probe (prepared, not run)
+
+`C:\ssbot\sandbox\specials_v2_run.ps1 -Rev <sha> -Inst <i> [-Trials n -Seed s]` (via WMI; needs the frozen checkout
+`C:\ssbot\live_1v1_<sha>`), manifest `C:\ssbot\sandbox\specials_v2_manifest.json` (60 specs: W1, W3 and W2 with early (k_start 2-14) and late (26-38: the person's sub-window) starts, centre and edge, stand-off 3-6 u), output `C:\ssbot\data\m2_special\g4\live`. The chain and keep-side
+follow-ups are not in v2, so no trials for them.
+
+### Open items
+
+- The follow-up theory was NOT rerun: keep side until n then away, the chained down slash with its timing-robust second
+  contact, certification to k 77 (incl. the ground movement after a landing) and the full end state (kinematics rows
+  PX..ATK_PDIR) need T1's grid rerun per follow-up (9 variants; `SlamTheory._damage` wants a numba kernel first). v2's
+  follow-up is the key held after the press, its hits are all 1, and "a window followed by a later window" is not
+  built.
+- Canonical approach plans per window (x0, jump frame, hold, keys, tolerances) are not built; online still rolls the
+  templates (FAST: the ones starting now) and looks the press up in the v2 cores.
+- KEEP: `kp_done` never fires and 81 keeps end "gone"; check whether the kept row's contact is lost in the last frames
+  before its press. KEEP lowers two-hit choices by about 20 % (by the rule); the person may want a kept one-hit row
+  to yield to a certain two-hit one.
+- The v2 cores are narrow: fewer special rows are found; W2 merges the person's late-antic window with the early
+  antic. Eye check in the overlay (`SSBOT_OVERLAY_SPECIAL_TABLE=v2`) before depending on it.
+- The live step must check, for gsav2 / allv2 vs gsa / allg3fh: hitless %, landed hits per second, whiff rate of the
+  chosen strike options, hits taken while a template is kept, `hf_*` / `kp_*`, late ticks.
+- Tooling caveat: the m2_why harness skips an episode whose output exists, and sequential jobs in one PowerShell lane
+  inherit the previous job's switches; `g4/seq.ps1` clears both.
