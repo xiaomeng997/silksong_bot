@@ -5272,7 +5272,14 @@ arrive-and-strike rows added to the planner's candidates (`SSBOT_FORUM_SPECIALS=
   0 chosen; tick p50 12.39 ms vs 12.26 off; late ticks 299 vs 235.
 - Open loop on 2,603 recorded slams: strike_rows 10-11 ms single thread (840 templates); in 145 of the 146 hit slams
   of 10-11 a both row existed before the hit (approach not checked).
-LIVE_HANDOFF_PLACEHOLDER
+- Live scripted verification (specials_probe, 2 instances, not a planner A/B):
+  - first run: 31 executed, all yellow (late antic / Slam 0, front); success 12/27; the real path lagged the model by
+    one frame (best shift +1 in 18 of 30, +2 in 6);
+  - with LAG = 1 (masks one frame earlier): 158 attempts, 20 executed; yellow late-antic entries 18: landed 14,
+    bounced 16, hurt after the press 1, success 14/18; post-slam entries 2: no hit (the lunge is 3.6 or 4.2 u);
+    press position model vs real p50 0.05 u in x (p90 0.8), 0.13 u in y; 113 attempts had no executable row (84 had
+    rows, none with a clear approach).
+  - Bounce-cert planner replay (run 142545 ep 0): 96 ticks with rows (684), 0 safe, 0 chosen; late 381 vs 386 off.
 
 ### State of the machine
 
@@ -5285,6 +5292,6 @@ LIVE_HANDOFF_PLACEHOLDER
 
 ### Next
 
-- The arrival error (model vs real press position, 48.5) before anything uses the table: accuracy first.
+- Check whether the planner's own input latency model has the same one-frame lag the probe had (48.5).
 - The other nine types' hypotheses (forum.md 48.6) were not computed this stage.
 - Jump slam / cast slam into the timeline.
