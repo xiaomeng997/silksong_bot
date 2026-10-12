@@ -51,6 +51,15 @@ BODY_M: float | None = float(_BM) if _BM else None      # None: E's support marg
 CERT_AFTER = 75           # SlamTheory.T_AFTER: the certified window ends at the landing, at most this many frames on
 LONG_PRESS_MAX = 60       # long rows: presses up to this many masks ahead (1 s)
 MAX_ROWS = int(os.environ.get("SSBOT_FORUM_SPECIAL_ROWS", "12") or 12)    # special rows per tick (earliest press first)
+# SSBOT_FORUM_SPECIAL_FAST=1 (task 1v1 G3 item 3, the mode's cost): per tick only the templates that can start now (jump
+# now, or none: the current state) are rolled out; the whole set (jumps later, the long rows) every FULL_EVERY ticks and
+# on the move's first tick, and its BOARD decision (the L2 strike spot) is kept for the ticks between
+FAST = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_FAST", "0").strip() == "1"
+FULL_EVERY = int(os.environ.get("SSBOT_FORUM_SPECIAL_FULL_EVERY", "6") or 6)
+# SSBOT_FORUM_SPECIAL_HOLD=1 (G3 item 4): the special rows keep holding a committed jump (Planner.jump_until) over its
+# remaining frames, as the set's attack rows do; without it every special row ranks behind the rows that keep the hold
+# (the selection's `keep` key) until the hold ends (G1's replay, slam 20261012_054126 i0 ep1 f 124204-124213)
+HOLD = SPECIAL_MODE and os.environ.get("SSBOT_FORUM_SPECIAL_HOLD", "0").strip() == "1"
 from ssbot.combat.special_board import BOARD, L2_ON  # noqa: E402,F401  (the L2 controller's board)
 
 _TL: dict = {}

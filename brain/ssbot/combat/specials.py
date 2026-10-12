@@ -193,15 +193,15 @@ class StrikeRows:
     full: list | None = None  # long rows (strike_rows long_hi): [n] the whole template past T (None: a row within T)
 
 
-def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 14, 20), hdelays=(0, 8)
-               ) -> tuple[np.ndarray, np.ndarray]:
+def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 14, 20), hdelays=(0, 8),
+               now_only: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Approach templates of length T for each press mask index j in js: the jump starting at mask s (0 .. j - 2, every
     `step`; or no jump), held h frames, the horizontal key before the press -1 / 0 / +1 (world: +1 right) from the
     jump + hdelay (straight up first: over a body), down from j - 3, the attack on j. Returns (masks [n, T], j [n])."""
     rows, jj = [], []
     hk = {1: M_R, -1: M_L, 0: 0}
     for j in js:
-        starts = [None] + list(range(0, max(j - 1, 1), step))
+        starts = [None] + ([0] if now_only else list(range(0, max(j - 1, 1), step)))
         for s in starts:
             for h in (holds if s is not None else (0,)):
                 for pre in (1, 0, -1):
@@ -267,7 +267,8 @@ def _cached(key, make):
 def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: int, x_anchor: float, cy: float,
                 face: int, disp: np.ndarray, T: int, max_rows: int = MAX_ROWS, per_entry: int = PER_ENTRY,
                 horizon: int | None = None, js_step: int = 3, threads: int = 1, prefix: np.ndarray | None = None,
-                long_hi: int | None = None, early_first: bool = False) -> StrikeRows:
+                long_hi: int | None = None, early_first: bool = False, now_only: bool = False,
+                hold_rem: int = 0) -> StrikeRows:
     """The arrive-and-strike rows for a move's entries: approach templates (a press on every js_step-th frame from
     k_now + REACT_F within the horizon) rolled out from `start` (the hero's model state now, at the move's frame
     k_now), kept where the hero's position on the press frame (rollout index j + 1 = move frame k_now + j + 1) lies in
@@ -285,7 +286,9 @@ def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: in
     if lut is None:
         return empty
     js = [j for j in range(max(REACT_F - 1 - P, 0), hz + 1, js_step) if k_now + P + j + 1 < lut.K]
-    jl = [] if long_hi is None else [j for j in range(hz + 1, int(long_hi) + 1, js_step)
+    # now_only (SSBOT_FORUM_SPECIAL_FAST): only the templates that start now (no jump, or a jump on mask 0): a long
+    # row's jump starts at least 6 frames before a press past the horizon, never now
+    jl = [] if (long_hi is None or now_only) else [j for j in range(hz + 1, int(long_hi) + 1, js_step)
                                      if k_now + P + j + 1 < lut.K and lut.k_has[k_now + P + j + 1]]
     if not js and not jl:
         return empty
@@ -296,13 +299,23 @@ def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: in
         a_ = np.arange(len(M_))
         return ro.pos[a_, P + J_ + 1], ro.vel[a_, P + J_ + 1, 1], (ro.flags[a_, P + J_] & kin.F_GROUND) == 0
 
+    def held(M_):
+        """SSBOT_FORUM_SPECIAL_HOLD: the committed jump's remaining hold on every template (a copy)."""
+        if hold_rem <= 0 or not len(M_):
+            return M_
+        M_ = M_.copy()
+        M_[:, :hold_rem] |= M_J
+        return M_
+
     if long_hi is None:
         M, J = _templates(T, js, face)
+        M = held(M)
         pos, vy, air = press_states(M, J)
     else:
         # the special mode: the templates within the horizon first; the long ones only when those give fewer than
         # max_rows rows (the rows go to the earliest presses: a long row ranks after every row within the horizon)
-        M, J = _cached(("s", T, tuple(js)), lambda: _templates(T, js, face)) if js else             (np.zeros((0, T), np.int64), np.zeros(0, np.int64))
+        M, J = _cached(("s", T, tuple(js), now_only), lambda: _templates(T, js, face, now_only=now_only)) if js else             (np.zeros((0, T), np.int64), np.zeros(0, np.int64))
+        M = held(M)
         pos, vy, air = press_states(M, J) if len(M) else (np.zeros((0, 2)), np.zeros(0), np.zeros(0, bool))
         if jl:
             kp_ = k_now + P + J + 1
@@ -312,6 +325,7 @@ def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: in
             got = int(np.minimum(np.bincount(ei_[ei_ >= 0], minlength=1), per_entry).sum()) if (ei_ >= 0).any() else 0
             if got < max_rows:
                 ML, JL = _cached(("l", tuple(jl), js_step), lambda: _templates_long(jl, js_step))
+                ML = held(ML)
                 pl_, vl_, al_ = press_states(ML, JL)
                 TL = ML.shape[1]
                 M = np.concatenate([np.pad(M, ((0, 0), (0, max(TL - M.shape[1], 0)))), ML])
