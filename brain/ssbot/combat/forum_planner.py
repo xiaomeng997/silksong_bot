@@ -77,7 +77,7 @@ import numba
 import numpy as np
 
 from ssbot.combat import candidates as cmod
-from ssbot.combat import forum_v2, stance_block
+from ssbot.combat import forum_v2, specials, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
                                   _hull_points, _is_macro, _rect_meets_polys)
@@ -2065,6 +2065,44 @@ class ForumPlanner(Planner):
 
     # ---- the tick ----
 
+    def _special_rows(self, f, start: np.ndarray, prefix: np.ndarray, T: int):
+        """The special-move table's arrive-and-strike rows (combat.specials, SSBOT_FORUM_SPECIALS=1; forum.md 48):
+        for the nearest enemy in a move the table knows, within reach (12 u), the rows that put the hero in one of
+        the move's entries (the press frame still ahead) and press there. The normal checks then judge them like any
+        row. Costs kept in self.spec_ms / self.spec_n (last_info["spec"])."""
+        rs = getattr(f, "rs", None)
+        trk = getattr(rs, "trk", None)
+        if trk is None:
+            return None
+        if not hasattr(self, "_spec_tab"):
+            from ssbot.combat.pogo_slam import SlamTimeline
+            self._spec_tab = specials.SpecialTable.load()
+            self._spec_disp = SlamTimeline.load().disp
+        hx_ = float(np.asarray(start).reshape(kin.K, -1)[kin.PX, 0])
+        best = None
+        for iid, (tk, e, _inst) in trk.now.items():
+            p = e.get("pos")
+            mv = specials.enemy_move({"type_key": e.get("type_key") or tk, "fsms": e.get("fsms")})
+            if mv is None or not p or abs(float(p[0]) - hx_) > 12.0:
+                continue
+            if best is None or abs(float(p[0]) - hx_) < best[0]:
+                best = (abs(float(p[0]) - hx_), e, mv)
+        if best is None:
+            return None
+        _, e, (move, k_now) = best
+        lut = self._spec_tab.lut(move)
+        if lut is None or k_now + specials.REACT_F >= lut.K:
+            return None
+        t0 = time.perf_counter()
+        face = 1 if e.get("flipX") else -1
+        disp = self._spec_disp
+        xa = float(e["pos"][0]) - face * disp[min(max(k_now, 0), len(disp) - 1)]
+        r = specials.strike_rows(self.params, self.terrain, start, lut, k_now, xa, float(e["pos"][1]), face, disp, T,
+                                 threads=self.cfg.threads, prefix=prefix)
+        self.spec_ms = (time.perf_counter() - t0) * 1e3
+        self.spec_n = (len(r.cmd), r.tried)
+        return r
+
     def _v2_dash(self, o: np.ndarray, f, r1, cx: np.ndarray, cy: np.ndarray, tq: np.ndarray, fr) -> np.ndarray:
         """The focus margin (forum_v2 MARGIN_MODE "focus", the person 2026-10-11): a row that dashes at the focus
         unit reads that unit with its "rule" margin (occupied_dash) on stage 1's frames; every other row keeps
@@ -2102,6 +2140,17 @@ class ForumPlanner(Planner):
         N0, T = len(cs.cmd), cs.T
         cont = self.prev_cmd is not None
         rows_ = [cs.cmd]
+        spec = self._special_rows(f, start, prefix, T) if (v2 and specials.SPECIALS_ON) else None
+        n_spec = 0 if spec is None else len(spec.cmd)
+        if n_spec:
+            rows_.append(spec.cmd)               # the arrive-and-strike rows: after the set, before the CONTINUE
+
+        def rname(i: int) -> str:
+            if cont and i == N - 1:
+                return "CONTINUE"
+            if N0 <= i < N0 + n_spec:
+                return "SPECIAL " + spec.entry[i - N0].id
+            return cs.name(i)
         if cont:
             rows_.append(cmod.continue_plan(self.prev_cmd, 1, T)[None])
         cmd = np.concatenate(rows_)
@@ -2112,11 +2161,14 @@ class ForumPlanner(Planner):
                 cmd = cmd.copy()
                 cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
-        core = np.append(core0, False) if cont else core0.copy()
+        core = np.concatenate([core0, np.zeros(n_spec + int(cont), bool)])
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix
         full[:, P:] = cmd
         ok, why = veto(cs, ctx)
+        if n_spec:
+            ok = np.append(ok, np.full(n_spec, bool(ctx.allowed_mask.all())))
+            why = np.append(why, np.full(n_spec, 0 if ok[-1] else 1))
         if cont:
             ok = np.append(ok, bool(ctx.allowed_mask.all()) or self._prev_allowed(ctx))
             why = np.append(why, 0 if ok[-1] else 1)
@@ -2194,7 +2246,7 @@ class ForumPlanner(Planner):
             prio.append(N - 1)
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
         top = rest[:fcfg.K_b]
-        first = np.append(cs.first, -1) if cont else cs.first
+        first = np.concatenate([cs.first, np.full(n_spec + int(cont), -1, cs.first.dtype)])
         sib = []
         top_set = set(top)
         by_first: dict = {}
@@ -2559,7 +2611,7 @@ class ForumPlanner(Planner):
             self.prev_esc_unsafe = bool(esc_unsafe and not S[i])
             a.esc_unsafe += int(esc_unsafe and not S[i])
             sel_cmd = cmd[i]
-            name = "CONTINUE" if cont and i == N - 1 else cs.name(i)
+            name = rname(i)
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
@@ -2573,7 +2625,7 @@ class ForumPlanner(Planner):
                                     k_lo=int(k_lo[i]), k_hi=int(k_hi[i]),
                                     window=kill_window_frames(params.frame_time, ctx.kill_window_s), P=P)
             for j_ in order[1:6]:
-                nm = "CONTINUE" if cont and j_ == N - 1 else cs.name(int(j_))
+                nm = rname(int(j_))
                 res.alternatives.append((nm, int(S[j_]), round(float(Pc[j_]), 3), round(float(J[j_]), 2)))
             if not S[i]:
                 a.chosen_safe += 1
@@ -2621,7 +2673,7 @@ class ForumPlanner(Planner):
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
-                                     "names": [cs.name(i) for i in range(N0)] + (["CONTINUE"] if cont else []),
+                                     "names": [rname(i) for i in range(N)],
                                      "chosen": int(res.idx), "fr": fr, "o": o, "tk": tk}
         if "E" in sc:
             ci = res.idx if 0 <= res.idx < N else None

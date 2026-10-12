@@ -50,6 +50,28 @@ def trial_specs(n: int, seed: int) -> list[dict]:
     return out
 
 
+def approach_safe(pr, start, r, k_now: int, xa: float, cy: float, face: int) -> np.ndarray:
+    """[n] the row's approach (rollout index 1 .. the press frame) clear of the slam's root and hammer boxes."""
+    if not len(r.cmd):
+        return np.zeros(0, bool)
+    ro = kin.rollout(start, r.cmd, pr.params, pr.terrain)
+    out = np.ones(len(r.cmd), bool)
+    for n, j in enumerate(r.j_press):
+        for jj in range(1, int(j) + 2):
+            hb = ro.box[n, jj]
+            for which in ("root", "hammer"):
+                b = pr.tl.world(np.array([k_now + jj]), which)[0]
+                if not np.isfinite(b[0]):
+                    continue
+                x0, x1 = sorted((xa + face * b[0], xa + face * b[1]))
+                if x0 < hb[2] and x1 > hb[0] and cy + b[2] < hb[3] and cy + b[3] > hb[1]:
+                    out[n] = False
+                    break
+            if not out[n]:
+                break
+    return out
+
+
 class Probe(Target):
     def __init__(self, link, savestate, tab: sp.SpecialTable):
         super().__init__(link, savestate)
@@ -83,7 +105,8 @@ class Probe(Target):
         still = 0
         while s["f"] - fa < int(t["k_start"]) or still < 3:
             s = self.step(0)
-            still = still + 1 if abs(float((s["hero"].get("vel") or [0, 0])[0])) < 0.05 else 0
+            v = s["hero"].get("vel") or [0, 0]
+            still = still + 1 if abs(float(v[0])) < 0.05 and abs(float(v[1])) < 0.05 else 0     # on the floor, still
             if s["f"] - fa > 60:
                 return {"skip": "never still", "f_antic": fa}
         e = clapper(s)
@@ -99,7 +122,9 @@ class Probe(Target):
                            max_rows=400, per_entry=1, js_step=1)
         plan_ms = (time.perf_counter() - t1) * 1e3
         cert, side = t["filter"].split("_")
-        ok = [i for i, en in enumerate(r.entry) if en.cert == cert and ((en.dx0 >= 0) == (side == "front"))]
+        safe = approach_safe(self, start, r, k_now, xa, cy, face)
+        ok = [i for i, en in enumerate(r.entry) if en.cert == cert and ((en.dx0 >= 0) == (side == "front")) and safe[i]]
+        info["safe"] = int(safe.sum())
         info = {"f_antic": fa, "k_now": k_now, "cx": round(cx, 3), "cy": round(cy, 3), "face": face,
                 "hx": round(float(h["pos"][0]), 3), "rows": len(r.cmd), "tried": r.tried, "match": len(ok),
                 "plan_ms": round(plan_ms, 1)}
@@ -123,7 +148,8 @@ class Probe(Target):
             s = self.step(m)
             c = clapper(s)
             trace.append((s["f"], int(s["hero"].get("health") or 0), round(float((s["hero"].get("vel") or [0, 0])[1]), 2),
-                          None if c is None else c.get("hp"), round(hx(s), 3), round(float(s["hero"]["pos"][1]), 3)))
+                          None if c is None else c.get("hp"), round(hx(s), 3), round(float(s["hero"]["pos"][1]), 3),
+                          None if c is None else round(float(c["pos"][0]), 3)))
         hp0 = next((x[1] for x in trace if x[0] >= f_first - 1), trace[0][1])
         hurt = [x[0] - f_press for x in trace if x[1] < hp0]
         chp0 = next((x[3] for x in trace if x[0] >= f_press - 1 and x[3] is not None), None)
@@ -137,7 +163,7 @@ class Probe(Target):
                        "press_pos": None if pp is None else [round((pp[4] - cx) * face, 3), round(pp[5] - cy, 3)],
                        "landed": bool(landed), "bounce": bool(bounce), "hurt_rel": hurt[:1],
                        "hurt_before": bool(hurt and hurt[0] < 0), "hurt": bool(hurt),
-                       "success": bool(landed and not hurt)}
+                       "success": bool(landed and not hurt), "trace": trace[:jp + 30]}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -211,29 +211,32 @@ def _templates(T: int, js: list[int], toward: int, step: int = 3, holds=(3, 8, 1
 
 def strike_rows(params, terrain, start: np.ndarray, lut: "Lut | None", k_now: int, x_anchor: float, cy: float,
                 face: int, disp: np.ndarray, T: int, max_rows: int = MAX_ROWS, per_entry: int = PER_ENTRY,
-                horizon: int | None = None, js_step: int = 3, threads: int = 1) -> StrikeRows:
+                horizon: int | None = None, js_step: int = 3, threads: int = 1, prefix: np.ndarray | None = None
+                ) -> StrikeRows:
     """The arrive-and-strike rows for a move's entries: approach templates (a press on every js_step-th frame from
     k_now + REACT_F within the horizon) rolled out from `start` (the hero's model state now, at the move's frame
     k_now), kept where the hero's position on the press frame (rollout index j + 1 = move frame k_now + j + 1) lies in
     an entry's cell and vy class; the entry's key (and jpost) from the press on. The best rows by cert, share and
     distance to the cell's centre, at most per_entry per entry. Enemy x on move frame k: x_anchor + face * disp[k] (the
-    lunge); its y: cy."""
+    lunge); its y: cy. prefix: the masks already in flight (the rows start after them; rollout index P + j + 1)."""
     T = int(T)
+    P = 0 if prefix is None else len(prefix)
     hz = min(T - 2, horizon or T - 2)
     empty = StrikeRows(np.zeros((0, T), np.int64), [], np.zeros(0, np.int64), 0)
     if lut is None:
         return empty
-    js = [j for j in range(REACT_F - 1, hz + 1, js_step) if k_now + j + 1 < lut.K]
+    js = [j for j in range(max(REACT_F - 1 - P, 0), hz + 1, js_step) if k_now + P + j + 1 < lut.K]
     if not js:
         return empty
     M, J = _templates(T, js, face)
-    ro = kin.rollout(start, M, params, terrain, threads=threads)
+    Mf = np.concatenate([np.broadcast_to(np.asarray(prefix, np.int64), (len(M), P)), M], axis=1) if P else M
+    ro = kin.rollout(start, Mf, params, terrain, threads=threads)
     n = len(M)
     ar = np.arange(n)
-    pos = ro.pos[ar, J + 1]                              # the press frame's position
-    vy = ro.vel[ar, J + 1, 1]
-    air = (ro.flags[ar, J] & kin.F_GROUND) == 0
-    kp = k_now + J + 1
+    pos = ro.pos[ar, P + J + 1]                          # the press frame's position
+    vy = ro.vel[ar, P + J + 1, 1]
+    air = (ro.flags[ar, P + J] & kin.F_GROUND) == 0
+    kp = k_now + P + J + 1
     ex = x_anchor + face * disp[np.clip(kp, 0, len(disp) - 1)]
     dx = (pos[:, 0] - ex) * face
     dy = pos[:, 1] - cy
