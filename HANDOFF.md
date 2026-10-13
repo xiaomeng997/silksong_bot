@@ -5764,3 +5764,62 @@ follow-ups are not in v2, so no trials for them.
   chosen strike options, hits taken while a template is kept, `hf_*` / `kp_*`, late ticks.
 - Tooling caveat: the m2_why harness skips an episode whose output exists, and sequential jobs in one PowerShell lane
   inherit the previous job's switches; `g4/seq.ps1` clears both.
+
+### Review (task 1v1 review 2, 2026-10-12; notes `C:\ssbot\data\m2_special\review2\review.md`; forum.md section 54)
+
+An adversarial safety review of 05271df..4fc31d8. Five defects were confirmed and fixed (eb3aa44, 222dd1f, 28e6638,
+4d0086a). Each has a regression test in `brain/tests/test_review2.py` (8 tests, each failing on 4fc31d8 or 222dd1f).
+
+- **DSLASH certain rows: the hit branch.** It ran only when the scorer saw a hit, and was anchored at the scorer's
+  frame / target. Now every certain row gets it at its certain contact (`_ds_anchor`; audits `ds_anchor`,
+  `ds_anchor_nohit`, `ds_anchor_moved`).
+- **A swing under way or pressed in the latency prefix.** It was on no family lane: the certain rule ran on lanes
+  without its bounce, and `_ds_evb` dropped its hit-branch event. On such a tick no row is certain now (`ds_busy`:
+  about 330 of 2,947 Clapper ticks).
+- **"DS cont" holding a chain's second press inside the horizon.** It was certain with only the first bounce on its
+  events, and KEEP held it. It is now offered only as its chain twin, with both bounces and the second press
+  re-certified (`ds_cont2`). KEEP holds the twin while both presses are ahead.
+- **specials_v2.** Cores, slack and entries were built on the best jump-after-press per cell: 73 of 12,472 core cells
+  had their slack only with the other jump. They are now built per jpost, and the v2 Lut keeps the best rank in a
+  shared cell. Rebuilt table: 72 regions, 11,012 entries, the same 3 windows.
+- **HITS_FIRST: the escape check at the selection.** The selection re-ran the tier's escape check under the escape
+  deadline; a cut flagged the chosen strike "unchecked" (S = 1). The tier's results are now reused (`hf_esc_reused`).
+  The first version (222dd1f) took `_esc_cmds`' cache attribute and crashed every HITS_FIRST arm in the smoke runs;
+  fixed in 4d0086a.
+
+**Identity.** Switch-off identity against 677979c holds on the final code (deadlines off): Clapper 1v1 054126 i0 ep0
+2,947/2,947 and w0r 214048 i0 ep0 1,348/1,348.
+
+**Smoke runs and cost.** Every arm (fcs, ds, gsads, allg3, allg3fh, gsav2, allv2, allkh) completed the Clapper episode,
+and fcs / ds / gsads / allv2 completed w0r. Planner p50 / p95 ms on Clapper, one after another on a loaded machine
+(compare arms only):
+
+| Arm | p50 | p95 |
+|---|---|---|
+| fcs | 11.4 | 25.1 |
+| ds | 12.3 | 29.1 |
+| gsads | 12.8 | 31.5 |
+| allg3 | 12.9 | 31.6 |
+| allg3fh | 12.7 | 30.4 |
+| gsav2 | 11.8 | 25.5 |
+| allv2 | 12.6 | 24.4 |
+| allkh | 12.6 | 24.5 |
+
+**Decisions against G4's allv2.** 290 Clapper ticks change: family rows 352 -> 258, chains 246 -> 130, the chosen row's
+mean landed hits 0.434 -> 0.400, S 236 -> 239. Most of this is the busy rule: G4's chains were mostly chosen on lanes
+without their pending first bounce.
+
+**Tests.** Full suite on eb3aa44: 1,544 passed and 1 failed (the support-query timing budget under load; it passes
+alone). Planner-related suites on 4d0086a: 284 passed.
+
+**Open items.**
+- Carry the pending certified bounce into the family lanes on busy ticks; this would win back the chains.
+- The chain tail past T is checked weakly: centre only, nominal lane, and the support's last sample is at 62 frames
+  while rows reach P + 80.
+- The certain rule uses the nominal hero lane only.
+- Only a row's first hit gets a hit branch.
+- full_from = never when the certified window ends past the nominal `al`, so a late timing variant may end
+  unchecked.
+- v2: no end state, follow-up = key + jpost only, hits = 1.
+- Live, watch: `ds_busy`, `ds_anchor*`, `ds_cont2`, `hf_esc_reused`, esc_unchecked on HITS_FIRST ticks, whiffs and
+  hits taken after family rows, hitless %, landed hits per second, late ticks, slam-tick act p95.
