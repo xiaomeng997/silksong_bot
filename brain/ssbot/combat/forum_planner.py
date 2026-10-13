@@ -187,6 +187,12 @@ def parse_ta(spec: str | None) -> frozenset:
 
 
 TA_ENV = os.environ.get("SSBOT_FORUM_TA", "")
+# SSBOT_FORUM_CL_NODOWN=1 (the person, 2026-10-12, watching the live demos: after the rune hop the planner kept
+# choosing down slashes, so the hero was airborne when the slam antic began and could not reach the strike spot):
+# with a Clapper within CL_NODOWN_U of the hero, no row of the posture set presses a down slash; the special rows'
+# strike is kept (stand in front of it, ready for the special)
+CL_NODOWN = os.environ.get("SSBOT_FORUM_CL_NODOWN", "0").strip() == "1"
+CL_NODOWN_U = 12.0
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -437,6 +443,7 @@ class EnvelopeAudit:
     sm_hit_other: int = 0         # review: special rows whose first predicted hit is another enemy (hit branch run)
     sm_forced_out: int = 0        # review: FORCED_RISK ticks whose special rows were taken out of the ranking
     hop_inflight: int = 0         # review: hop rows dropped: their press is not a jump from the ground (model)
+    cl_nodown: int = 0            # SSBOT_FORUM_CL_NODOWN: down-slash rows of the set dropped near a Clapper
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
     sm_full_ticks: int = 0        # SSBOT_FORUM_SPECIAL_FAST (G3): ticks that rolled the whole template set
     sm_board_cached: int = 0      #   ticks whose BOARD is the last full tick's strike spot
@@ -2358,6 +2365,19 @@ class ForumPlanner(Planner):
 
     # ---- the tick ----
 
+    @staticmethod
+    def _clapper_near(f, start: np.ndarray) -> bool:
+        """SSBOT_FORUM_CL_NODOWN: a tracked Clapper (Song Heavy Sentry) within CL_NODOWN_U of the hero in x."""
+        trk = getattr(getattr(f, "rs", None), "trk", None)
+        if trk is None:
+            return False
+        hx_ = float(np.asarray(start).reshape(kin.K, -1)[kin.PX, 0])
+        for _iid, (tk, e, _inst) in trk.now.items():
+            p = e.get("pos")
+            if (e.get("type_key") or tk) == "Song Heavy Sentry" and p and abs(float(p[0]) - hx_) <= CL_NODOWN_U:
+                return True
+        return False
+
     def _special_rows(self, f, start: np.ndarray, prefix: np.ndarray, T: int):
         """The special-move table's arrive-and-strike rows (combat.specials, SSBOT_FORUM_SPECIALS=1; forum.md 48):
         for the nearest enemy in a move the table knows, within reach (12 u), the rows that put the hero in one of
@@ -3001,6 +3021,11 @@ class ForumPlanner(Planner):
         full[:, :P] = prefix
         full[:, P:] = cmd
         ok, why = veto(cs, ctx)
+        if CL_NODOWN and self._clapper_near(f, start):
+            dn = (cs.prim_bits & (1 << int(cmod.Prim.ATTACK_DOWN))) != 0
+            self.audit.cl_nodown += int((ok & dn).sum())
+            ok = ok & ~dn
+            why = np.where(dn & (why == 0), 1, why)
         sm_on = bool(v2 and special_mode.SPECIAL_MODE)
         if special_mode.SPECIAL_MODE:
             # the L2 controller reads this tick's decision (or none) next tick (review: cleared on every tick, v2 or
