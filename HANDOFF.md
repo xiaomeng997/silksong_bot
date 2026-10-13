@@ -5,6 +5,28 @@
 Written by the session of 2026-10-11/12 for a fresh session (the old one's context was too long). Reply to the person
 in Chinese; code, commits and this file in English.
 
+### Update 2026-10-12 evening (session ae67fe04): live results, read this first
+
+- Dev branch head `effdf6d` (frozen `C:\ssbot\live_1v1_effdf6d`). Since 677979c: G1 the general special rule
+  (SSBOT_FORUM_SPECIAL_MODE, real-box approach check on by default), G2 small runes (5 switches), G3 delayed / chained
+  down slashes (SSBOT_FORUM_DSLASH), G4 HITS_FIRST / SPECIAL_KEEP / MOVE_HITS / table v2, two reviews (15 fixes).
+  All default off; switch-off identity with 677979c proven. Branch HANDOFF sections G1-G4, forum.md 49-54.
+- Live Clapper 1v1 (instances 0/1, 2026-10-12 19:06-19:41, manifest `C:\ssbot\sandboxv1g_manifest.txt`,
+  collect `C:\ssbot\data\m2_live_g\col`, summary `s2.json`):
+  - fcs 24 eps: 22 kills, 7 hitless (29 %), 34 hits (30 not slam: rune bombs), 0.41 landed hits/s, kill p50 54 s.
+  - **rn 16 eps: 16 kills, 15 hitless (94 %), 1 hit, 0.60 hits/s, kill 34 s; rn35 8 eps: 8 kills, 8 hitless, 0.57/s.**
+  - The special mode and the down-slash family are harmful live: allns (runes + family) 5/8 kills, 0 hitless, 7 slam
+    hits; gsav2 (special mode only) 4/8, 12 slam hits; allkh (all, old table) 4/8, 15 slam hits; allv2 1/3.
+    One trace (run 20261012_190851 ep 0, f 20914-20958): a family jump took the hero up as the slam antic began, L2
+    held 'slam: strike', the planner changed plans every tick, she floated in front and Slam Collider 1 hit her.
+    The open-loop replays could not show this.
+- Next (the person decides): make the rune switches default (rn vs rn35); the person's eye check of the per-bomb
+  forecast (`start_overlay_rune_check.ps1`) is still owed; a 0.5x demo with rn. Then, after the weekly reset (Thu
+  10:00 UTC; 97 % used on 10-12): diagnose the special mode / family slam hits from these live logs; G4's undone
+  part (follow-up theory to k 77, end state, approach plans per window); the person's later rules in the plan doc
+  of 2026-10-12 (keep vs extension, keep for all rows, DPS ranking over one common window).
+- Game instances 0 and 1 were left open (launched 19:00); DEMO_SOON is back in place.
+
 ### Where things are
 
 - Code: branch `worktree-wf_f1846551-5f9-1`, worktree `C:\modeling\silksong_bot\.claude\worktrees\wf_f1846551-5f9-1`,
