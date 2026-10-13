@@ -11,7 +11,7 @@ in Chinese; code, commits and this file in English.
   (SSBOT_FORUM_SPECIAL_MODE, real-box approach check on by default), G2 small runes (5 switches), G3 delayed / chained
   down slashes (SSBOT_FORUM_DSLASH), G4 HITS_FIRST / SPECIAL_KEEP / MOVE_HITS / table v2, two reviews (15 fixes).
   All default off; switch-off identity with 677979c proven. Branch HANDOFF sections G1-G4, forum.md 49-54.
-- Live Clapper 1v1 (instances 0/1, 2026-10-12 19:06-19:41, manifest `C:\ssbot\sandboxv1g_manifest.txt`,
+- Live Clapper 1v1 (instances 0/1, 2026-10-12 19:06-19:41, manifest `C:\ssbot\sandbox\1v1g_manifest.txt`,
   collect `C:\ssbot\data\m2_live_g\col`, summary `s2.json`):
   - fcs 24 eps: 22 kills, 7 hitless (29 %), 34 hits (30 not slam: rune bombs), 0.41 landed hits/s, kill p50 54 s.
   - **rn 16 eps: 16 kills, 15 hitless (94 %), 1 hit, 0.60 hits/s, kill 34 s; rn35 8 eps: 8 kills, 8 hitless, 0.57/s.**
