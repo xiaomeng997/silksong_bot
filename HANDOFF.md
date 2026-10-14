@@ -26,6 +26,15 @@ in Chinese; code, commits and this file in English.
   part (follow-up theory to k 77, end state, approach plans per window); the person's later rules in the plan doc
   of 2026-10-12 (keep vs extension, keep for all rows, DPS ranking over one common window).
 - Game instances 0 and 1 were left open (launched 19:00); DEMO_SOON is back in place.
+- The special module is to be REBUILT as a general module (the person, 2026-10-12 late evening; plan doc notes from
+  "why it jumps too early" on): per (enemy, move) a space-time grid (frame x position; no horizontal inertia, extra dims
+  only for dash / sprint; air slices by frames since takeoff x jump hold), the enemy's boxes per frame, the strike
+  regions drawn in, backward reachability with scores (strike cells: depth + follow-ups; paths: discounted strike
+  score + clearance), stored as score contours (MATLAB-style ring matrix, ring tree, CCW outer / CW holes, binary
+  search on the level, compressed so no lattice point changes side on the feasibility ring and +-1 level inside);
+  online: one-step lookahead over the inputs with a per-key-change cost added at search time. Live demos showed why
+  the current special mode fails (8720b7a, arm rnv2nd: the special row drops out of its per-tick re-check every
+  other tick and FORCED_RISK presses a jump ~20 frames early). 8720b7a also adds SSBOT_FORUM_CL_NODOWN.
 
 ### Where things are
 
