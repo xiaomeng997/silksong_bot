@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ssbot.combat import map_lookahead as ml
 from ssbot.combat import special_map as sm
 from ssbot.combat.hero_macros import IFRAMES, key_mask
 from ssbot.combat.pogo_model import ACTIVE, slash_poly
@@ -59,8 +60,11 @@ class Ep:
 
 
 class Sim:
-    def __init__(self, geo: sm.Geometry, pm: sm.PhaseMap, rng: np.random.Generator):
+    def __init__(self, geo: sm.Geometry, pm: sm.PhaseMap, rng: np.random.Generator, src=None):
         self.g, self.pm, self.rng = geo, pm, rng
+        self.ti = ml.TubeIndex.from_geometry(geo)
+        self.src = src if src is not None else ml.DenseSource(pm, self.ti)   # the policy's values (map_lookahead)
+        self.shadows = []                                # other sources: decision agreement on the visited states
         self.p = pm.p
         self.st = geo.steps(self.p)
         self.hm = geo.hm
@@ -84,20 +88,10 @@ class Sim:
         return t.s0 + j if j < t.n else -1
 
     def S(self, k: int, s: int, x: float) -> float:
-        if s < 0 or not 0 <= k < self.g.K:
-            return -np.inf
-        xi = int(np.rint((x - self.g.cfg.x_lo) / self.g.step))
-        if not 0 <= xi < self.g.NX:
-            return -np.inf
-        return float(self.pm.S[k, s, xi])
+        return self.src.S(k, s, x)
 
     def SV(self, k: int, s: int, x: float, d: int) -> float:
-        if s < 0 or not 0 <= k < self.g.K:
-            return -np.inf
-        xi = int(np.rint((x - self.g.cfg.x_lo) / self.g.step))
-        if not 0 <= xi < self.g.NX:
-            return -np.inf
-        return float(self.pm.SV[k, s, xi, d + 1])
+        return self.src.SV(k, s, x, d)
 
     # ---- the hero's vertical per event ----
     def prof(self, ev: dict):
@@ -137,54 +131,27 @@ class Sim:
             # ---- the policy at the end of frame k: inputs for frame k + 1
             jump_now, press_now = None, False
             if slash is None and press_pending is None:
-                s_now = self.slice_of(ev, j) if ev["kind"] != "ground" else 0
-                x1 = x + dir_cur * g.step * self.st[k + 1]
-                cands = []
-                if ev["kind"] == "ground":
-                    for d in (-1, 0, 1):
-                        x2 = x1 + d * g.step * self.st[k + 2]
-                        v = self.S(k + 2, 0, x2)
-                        # a jump pressed next frame (node k + 1) makes its first move with the key read now
-                        for h in self.jump_h:
-                            s0 = self.s0_of[h]
-                            vj = min(self.S(k + 2, s0 + 1, x2), self.S(k + 1, s0, x1))
-                            if vj > g.cfg.wc + 1e-3:
-                                v = max(v, vj)
-                        cands.append((v - lam * (d != dir_cur), ("dir", d)))
-                    for h in self.jump_h:
-                        s0 = self.s0_of[h]
-                        best, bd = -np.inf, dir_cur
-                        for d in (-1, 0, 1):
-                            x2 = x1 + d * g.step * self.st[k + 2]
-                            v = self.S(k + 2, s0 + 2, x2) - lam * (d != dir_cur)
-                            if v > best:
-                                best, bd = v, d
-                        # the start's own score holds the late-jump robustness (the same jump one frame later)
-                        best = min(best, self.S(k, s0, x))
-                        if best > g.cfg.wc + 1e-3:            # a reachable strike (R > 0): never jump without one
-                            cands.append((best - lam, ("jump", h, bd)))
-                else:
-                    _, _, land = self.prof(ev)
-                    s1 = self.slice_of(ev, j + 1) if j + 1 < land else -1
-                    for d in (-1, 0, 1):
-                        x2 = x1 + d * g.step * self.st[k + 2]
-                        s2 = self.slice_of(ev, j + 2) if j + 2 < land else 0
-                        v = self.S(k + 2, s2, x2)
-                        # the input read now is the key a strike pressed from the next node holds (input latency):
-                        # that strike's value belongs to this key
-                        if s1 >= 0 and k + 2 - last_press >= 19:
-                            v = max(v, self.SV(k + 1, s1, x1, d))
-                        cands.append((v - lam * (d != dir_cur), ("dir", d)))
-                    if k + 1 - last_press >= 19 and s_now >= 0:
-                        sv = self.SV(k, s_now, x, dir_cur)
-                        if np.isfinite(sv) and sv >= self.S(k, s_now, x) - 1e-2:
-                            cands.append((np.inf, ("press", dir_cur)))
+                land = self.prof(ev)[2] if ev["kind"] != "ground" else None
+                v, act, cands = ml.decide(self.src, k, ev, x, dir_cur, last_press, lam, land)
+                for sh in self.shadows:                           # the same decision from another value source
+                    v2, act2, c2 = ml.decide(sh["src"], k, ev, x, dir_cur, last_press, lam, land)
+                    sh["n"] += 1
+                    if act2 != act:
+                        sh["diff"] += 1
+                        # what the other choice costs on this source's values (its value below the best)
+                        vd = {c[1]: c[0] for c in cands}
+                        kind = "not_offered_here" if act2 not in vd else (
+                            "not_offered_there" if act not in {c[1] for c in c2} else "value")
+                        gap = float(v - vd[act2]) if act2 in vd else None
+                        sh["gaps"].append((kind, gap))
+                        if len(sh["ex"]) < sh["max_ex"]:
+                            sh["ex"].append({"k": k, "x": round(x, 3), "ev": dict(ev), "dir": dir_cur, "act": act,
+                                             "act2": act2, "v": float(v), "v2": float(v2), "kind": kind, "gap": gap,
+                                             "cands": [(round(float(c[0]), 4), c[1]) for c in cands],
+                                             "cands2": [(round(float(c[0]), 4), c[1]) for c in c2]})
                 if cands:
-                    v, act = max(cands, key=lambda c: c[0])
                     if debug is not None:
-                        debug.append((k, round(x, 3), ev["kind"], j, dir_cur, [(round(float(c[0]), 3), c[1]) for c in cands], act))
-                    if not np.isfinite(v) and v < 0:              # nothing feasible: retreat on the ground
-                        act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", dir_cur)
+                        debug.append((k, round(x, 3), ev["kind"], k - ev["k"], dir_cur, [(round(float(c[0]), 3), c[1]) for c in cands], act))
                     if act[0] == "dir" and act[1] != dir_cur:
                         if "key" in self.late_kinds and rng.random() < self.late_p:
                             dir_pending = act[1]
