@@ -389,6 +389,8 @@ class ZoneEngine:
         self.shadow = os.environ.get("SSBOT_OVERLAY_MAP_PLANNER", "").strip() == "1"
         self._ws_cap = None
         self.act_err = None
+        if os.environ.get("SSBOT_OVERLAY_SPECIAL_MAP", "").strip() == "sg4":
+            _sg4_runtime(self)              # SG4: load the map (and its mmap cache) before the first slam
         self.ws = None
         self.names: dict[int, str] = {}
         self.counts: dict[str, int] = {}
