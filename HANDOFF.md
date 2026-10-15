@@ -5823,3 +5823,103 @@ alone). Planner-related suites on 4d0086a: 284 passed.
 - v2: no end state, follow-up = key + jpost only, hits = 1.
 - Live, watch: `ds_busy`, `ds_anchor*`, `ds_cont2`, `hf_esc_reused`, esc_unchecked on HITS_FIRST ticks, whiffs and
   hits taken after family rows, hitless %, landed hits per second, late ticks, slam-tick act p95.
+
+## Task 1v1 - stage SG1: move data and hero event macros (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §55)
+
+The person's rebuild of the special module as a general space-time map with scores (notes 2026-10-12..14,
+`C:\ssbot\data\m2_map\spec_notes_zh.txt` parts 86-98). SG1 is the foundation: one move-data format and the hero's
+event macros, proven against full rollouts. Offline only; no planner module changed (new modules only), so every
+decision is unchanged.
+
+### Code
+
+- `ssbot/combat/move_data.py` (new): `MoveSpec` (states with seen frame counts, named `Track`s with roles
+  `hurt` / `target` / `tink`, `Motion` segments in 0.02 s physics steps, facing rule, frame clock, frame of
+  reference), `MoveTimeline` (per frame k: boxes, `box(name, k)` with the motion, `damage(k)`, `targets(k)`,
+  `end_k`, weight), `variants("t1" | "observed" | "nominal")`, JSON `save` / `load` (format `ssbot.move_data/1`).
+  - Loaders: `load_cl_slam()` (pogo_clapper_slam.json, the file SlamTimeline reads) and
+    `load_raster_move(enemy_key, family)` (behaviour-model hitbox rasters + state timing; damage only).
+  - Strike target = a track with the `target` role. Clapper root = hurt + target. Slam Collider 1 / 2 = hurt only.
+  - Saved: `knowledge/1.0.30000/moves/Song_Heavy_Sentry__CL_SLAM.json`, `__CC_EVADE.json`.
+- `ssbot/combat/hero_macros.py` (new): `HeroMacros(params, terrain)`.
+  - Tables from rollouts: the step cycle `st[q, j]`, the render lag, jump profiles per hold h = 1..40 and cycle
+    position q, and the bounce profile per contact-frame q.
+  - Macros:
+    - (a) `ground_step`, `run_x`, `solve_keys` (toward m steps then release, optional wait r);
+    - (b) `jump`, `apex_node` (hold + target x -> keys, apex, landing), `apex_classes`;
+    - (c) `cone`, `reach_steps`, the landing in `sweep`;
+    - (d) `contact` / `contact_interval` (T1's slash-polygon rule), `splice_bounce`, `iframes`, `cooldown`;
+    - umbrella `glide` (rollout table);
+    - (e) `landing`.
+  - `sweep(x0, q, keys, kind, h, press=, targets=)` returns the per-frame hero box / rendered pos / flags for SG2's
+    damage test. `sweep_hull` gives the union over q.
+  - Constants: `COOLDOWN_F` 19, `IFRAMES` (0, 8), `MARGINS`, `RENDER_U`.
+- `ssbot/tools/sg1_validate.py` (new): the grids below. It writes `C:\ssbot\data\m2_map\sg1\validate.json`,
+  `rows_jump.json` and `rows_slash.json` (6 s).
+- Tests: `tests/test_move_data.py` (5) and `tests/test_hero_macros.py` (11) pass. test_pogo_slam, test_pogo_model and
+  test_specials still pass. test_import_firewall still fails only on the pre-existing chain; the new modules import
+  no ssbot.ipc.
+
+### Numbers
+
+- **CL_SLAM vs SlamTimeline:** max abs difference 0 over all nine T1 variants (states, root, hammer, lunge).
+- **Timing variants T1 misses:** T1's antic 48/49 x Slam 0 4/5 covers 93.6 % of the 1,661 template slams. Antic 47
+  is 6.4 %. Slam 2 lasting 5 frames is 37.7 %. The "observed" policy gives 72 weighted variants.
+- **Cross-check:** 99.2 % of the template boxes' area lies inside the CC_SLAM damage raster (min 87.6 %; 9 of 87
+  frame boxes are under 99 %). The clocks and frames agree.
+- **Step cycle:** frame j after a node with cycle position q has no physics step iff (j - q) % 6 == 0. The centre
+  alpha of q is (q - 0.5) / 6. alpha = q / 6 itself sits on an edge.
+- **Jump grid (7,488 rows):** stand / holds 1-40 x direction x 0-40 steps x wait 0/6 x node key, 6 q + 6 off-lattice
+  alphas.
+  - Box error 0. Apex frame and height exact. Landing frame and x exact.
+  - Rendered pos <= 0.014 u in x and <= 0.040 u in y.
+- **Slash grid (17,640 rows):** holds 3-30 x press 6-36 x key x jpost x a Clapper root box at -3..+3 u.
+  - In the 8,820 rows with the macro's own inputs (jpost 0), the contact frame is identical on every lattice q.
+    9 off-lattice rows differ: 6 by one frame, 3 at a grazing edge.
+  - After the bounce: box <= 0.002 u (landing park). Apex and landing are exact.
+  - I-frames are contact .. contact + 8 in every row.
+  - Off-lattice outliers come only from alpha 0.003. The cycle slips one frame per ~5,000 frames (0.016666 s frame
+    time); the effect is one step / one frame.
+- **One bounce class in the model:**
+  - The rise is +4.092 u over the contact frame's box, with the apex at c + 22 / 23.
+  - Jump held or pressed from c - 6 to c + 2 changes nothing. A press from c + 3 on opens the umbrella.
+  - T1's jpost changed the fall before the contact in 2,781 of 8,820 rows (air hang near the apex, umbrella while
+    falling) and the contact frame in 432 rows. It never extended a bounce.
+- **Cooldown:** a second press swings only from press + 19 frames (16-18: no swing, no queue), for all q. This matches
+  T1 live (+12/+16 no, +20..40 yes).
+- **Holds:**
+
+  | Hold h | Apex height | Apex frame | Landing frame |
+  |---|---|---|---|
+  | 1 | 0.79-0.92 u | 5-7 | |
+  | 8 | 2.31-2.66 u | 11-12 | |
+  | 16 | 4.43-4.62 u | 18-19 | |
+  | >= 28 | 5.504 u | 28-29 | 54-59 (holding past the apex hangs: separate classes) |
+
+- **Hull over q:** x one step (0.165 u), y up to 0.63 u. Apex +-2 frames and +-0.35 u; landing +-3 frames.
+- **Umbrella:** lands 63-75 frames later. Horizontal reach is <= the run cone (ratio max 1.00).
+- **Contact height:** box bottom 0.07-5.07 u above standing at the contact (p50 2.80).
+
+### Design decisions (for SG2)
+
+- **x lattice = 0.165 u:** exact for every normal movement. x is relative to the enemy's position at k = 0, not the
+  lunging position.
+- **Physics cycle position q:** the only hidden state. Use the hull over q (`sweep_hull`, `MARGINS`), or pair q with
+  the enemy motion's physics phase (one clock).
+- **Strike cells:** must hold with the target shrunk by `RENDER_U` (0.02 x 0.06 u). They may shift one frame.
+- **Bounce apex:** one class. Its height = contact height + 4.092, which is continuous, so the apex layer needs a
+  contact-height bin.
+- **Jump in the air:** the lookahead offers it only as the umbrella input.
+- **Down-slash thrust:** the Wanderer's "15 u/s down" is not in the kinematics model (down + dash is unmodelled), so
+  it is not an input.
+- **Robust share over timing variants:** SG2's choice. The weights of the "observed" variants are available.
+
+### Open items / next
+
+- Check the single bounce class on the person's recordings: jump pressed after the contact or not, bounce apex height.
+- CC_EVADE has damage boxes only. A strike map for it needs a per-frame body track from the recordings.
+- Not built:
+  - umbrella / air dash / slash recoil as true macros (the umbrella is a rollout table);
+  - dash / sprint approaches;
+  - Clapper jump-slam and cast-slam move data.
+- SG2: build the backward-pass map (ground layer + apex layers) for CL_SLAM from these macros and move data.
