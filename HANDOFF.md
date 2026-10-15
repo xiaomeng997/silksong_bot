@@ -6668,3 +6668,73 @@ is a lower bound and the cache never hits.
 5. The hold filter (2-frame minimum press / release) is not in the map: 1-frame key taps and the 1-frame jump hold
    get stretched; the planner's lane is checked on the latched keys, so this costs value, not safety.
 6. Contours for the keyed map, wall buckets for the keyed map (today: leave the map near a wall).
+
+### Review (adversarial safety review of SG4; commits 388d19c, b013072, 1ef50f8; forum.md 60)
+
+Offline only (no game). Data: `C:\ssbot\data\m2_map\sg4\review` (`job.ps1` lanes, `ident_review.py` = ident_map.py
+plus the deadline / lane audits, `replay_rn_b013072.json`, `dl1\` and `id_dl2_*` deadline-on pairs, `r388\` the
+superseded run). Tests: `tests/test_special_map_review.py` (7; each of the first five fails on 065269a).
+
+**Confirmed and fixed (each with a reproduction):**
+
+1. **Physics phase off by the prefix.** `forum_map.row` read the phase from the state after the prefix, but
+   `kin.rollout` advances ALPHA and not ALO / AHI, so k = k0 + P was paired with index 0's cycle: the map's run steps
+   and jump / bounce tubes were len(prefix) frames off the planner lane (live P is 1-4). Synthetic (flat floor, P = 3,
+   174 rows): the lane left the map's path by one run step on most rows (max 0.50 u) and by 0.35 u in y on 107 rows;
+   after the fix x is exact on 229 / 234 rows (one step on the rest: the hold filter), y exact. Now
+   `phases_of(start ALO/AHI, k0)` (p is constant along the lane), the nominal ALPHA's phase first. Replays:
+   "airborne off the macros" 164 -> 18 ticks.
+2. **The CONTINUE of a map row was judged with the Clapper's move dropped after every map exit**, with the old anchor
+   and move frame (`pv_map`), and could chain: in the SG4 replays 936 ticks chose that CONTINUE right after a map row
+   with no map row on the tick (569 after the slam had ended, 104 past the move, 76 no feasible continuation, 94
+   dash / sprint / umbrella, 51 airborne off the macros, 41 an unpressed slash, 1 deviation), chains up to 50 ticks. The deviation and move-end
+   exits did not apply to it. Now the CONTINUE keeps the full checks (the fresh map row is its continuation when the
+   hero follows it: `MapRuntime.extend`); special mode's own CONTINUE skips an old map row.
+3. **The planner lane dropped the map's second bounce** (one EV_POGO per row): after a second press the lane fell
+   where the map bounced (synthetic: up to 9.3 u apart, p90 8.8 u). Now every map contact is an event; the lane's own
+   first contact (special_mode.contacts) must be the map's (`map_lane_contact`).
+4. **Lane guard (new):** the map certifies the Clapper's move only on its own path, so a map row whose planner lane
+   (hold-filtered keys, the map's bounces) leaves that path by more than 0.2 u in x (one run step; the map's x
+   dilation is 0.2475 u) or 0.12 u in y (the map's y dilation) keeps the full checks (`MAP_LANE_TOL_X / _Y`,
+   `map_lane_off`, log `map.lane`). Replays: 739 of 3,001 map rows leave the path, mostly airborne states located by
+   their heights: bounce 127 / 136, jump 451 / 653, ground 161 / 2,212. Before the review these were judged with the
+   move dropped on a lane the map never checked.
+5. **The full support was never read again for map rows** (`full_from = big`): the row's last frames and its tail
+   (up to k ~136) ignored the Clapper's next move. Now from k = end_max + 1 = 79 (every observed variant over).
+6. **IndexError:** the sibling table `first` had no slot for the map row; a tick without a CONTINUE (after a
+   supervisor reset) whose map row passed stage 1 raised (reproduced: fresh planner, hero 4 u behind, k 10).
+7. **Cost:** (a) the map was loaded on the first readiness tick (+80 ms that tick); now preloaded on the first tick
+   with the arena's terrain. (b) With the live deadlines (envelope 8 ms, escape 10 ms) the map's work came out of the
+   planner's budget: 3 rn episodes replayed side by side, the escape check ran out of time on 1,083 ticks with the
+   map vs 665 without (chosen rows unchecked; S = 1 on 1,483 vs 1,011 ticks). The map's own work (row, its special
+   context, readiness) no longer counts against the envelope / escape / clash deadlines
+   (`SSBOT_FORUM_SPECIAL_MAP_DL`, default 1): 608 vs 660 unchecked, S = 1 on 1,022 vs 997; tick p50 / p95 / p99
+   8.2 / 12.7 / 15.9 ms vs 8.0 / 11.2 / 13.6 (ticks with map work 11.5 / 16.2). (c) Readiness only on the safe rows
+   (the penalty ranks only those; same order): 2.3 / 3.5 ms p50 / p95 (SG4 5.8 / 7.6). (d) The mmap cache is written
+   to a private directory and renamed (two brain processes at once).
+8. **Found by the review's own replays (b013072):** the policy constructs the planner on `Terrain2D.empty()`; the
+   first preload built floorless hero macros (first rows planned 0.16 presses instead of ~1, every row failed the lane
+   guard). The runtime now waits for a terrain with floors, and `special_map_rt.runtime` is keyed by terrain and hero.
+
+**Checked, not a defect:** the special support keeps every other enemy, the Clapper's hazards and body (outside the
+2 pre-protect frames); the map's fallback never jumps (retreat on the ground, keep the key in the air) and no map row
+is made without a feasible first decision; the deviation exit fires on knockback / a wall-stopped lunge and the
+anchor follows the antic; the Clapper's facing matches the tracker's (flipX -> +1); BOARD is cleared every tick and the
+slam memory is per instance (iid, t0); the readiness penalty reorders safe rows only (changed the leader on 74 of
+3,079 ticks); flicker after a taken map row (open loop): next tick 27 rows not taken, none started a jump the map row
+did not; the key latency of the map (a key read at frame k moves the body at k + 2) is kin's (lanes exact after fix 1).
+
+**Final numbers (open loop, deadlines off, rn 16 episodes, `replay_rn_b013072.json`; 1ef50f8 decides the same):**
+map rows on 3,001 slam ticks (SG4 2,885), taken 2,382 (79 %; SG4 2,403, 83 %); not taken: 458 lane / contact off the
+map (full checks), 100 safe not first (SG4 345), 33 envelope, 26 stage 1; first rows plan 1.09 presses (SG4 1.04);
+no row: wall 1,452, dash 639, deviation 398, unpressed slash 359, no feasible 257, sprint 213, past the move 200,
+umbrella 122, airborne off the macros 18. **Switch-off identity (1ef50f8 vs frozen 08df1b0):** 2,947 / 2,947 and
+2,073 / 2,073 ticks.
+
+**Live A/B prepared, not run** (the person's overlay eye check comes first: `start_overlay_map_check.ps1` now points at
+the review's frozen checkout). The exact commands, seeds and metrics: `C:\ssbot\sandbox\1v1_map_ab.txt`.
+
+**Open after the review:** airborne map rows mostly fail the lane guard (the height-only `locate` cannot tell the real
+vertical dynamics: a vy / jump-hold aware locate would recover them; value, not safety); with the escape check running
+again the map arm's checked rows fail it more often (119 vs 46 ticks in the 3 deadline replays: watch live); the
+deadline shift makes ticks with map work ~1-3 ms longer (watch the late-tick share); the readiness weight is untuned.
