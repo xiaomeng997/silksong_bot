@@ -325,15 +325,18 @@ def _simplify_py(X, Y, ring_of, prv, nxt, ring_lvl, ring_n, bands, state, tol, c
 _simplify = njit(cache=True)(_simplify_py) if njit is not None else _simplify_py
 
 
-def _inside_lvl(seg, rso, rbb, a, b, px, py):
-    """Winding of (px, py) over the rings a..b-1 of one level (ray toward +X): a ring whose bbox misses the ray
-    (py outside [ymin, ymax) or px > xmax) is skipped."""
+def _inside_lvl(pts, rso, rbb, a, b, px, py):
+    """Winding of (px, py) over the rings a..b-1 of one level (ray toward +X; ring r = pts[rso[r]:rso[r + 1]], closed):
+    a ring whose bbox misses the ray (py outside [ymin, ymax) or px > xmax) is skipped."""
     w = 0
     for r in range(a, b):
         if py < rbb[r, 2] or py >= rbb[r, 3] or px > rbb[r, 1]:
             continue
-        for i in range(rso[r], rso[r + 1]):
-            x0, y0, x1, y1 = seg[i, 0], seg[i, 1], seg[i, 2], seg[i, 3]
+        e = rso[r + 1]
+        for i in range(rso[r], e):
+            j = i + 1 if i + 1 < e else rso[r]
+            x0, y0 = np.int64(pts[i, 0]), np.int64(pts[i, 1])
+            x1, y1 = np.int64(pts[j, 0]), np.int64(pts[j, 1])
             if y0 <= py:
                 if y1 > py and (x1 - x0) * (py - y0) - (px - x0) * (y1 - y0) > 0:
                     w += 1
@@ -342,16 +345,16 @@ def _inside_lvl(seg, rso, rbb, a, b, px, py):
     return w != 0
 
 
-def _band_query_py(seg, rso, rbb, lvl_off, top, px, py):
-    """The band at (px, py) (COORD units): binary search over the nested levels. seg [ns, 4] the segments ring by
-    ring, rso [nr + 1] each ring's segment offset, rbb [nr, 4] (xmin, xmax, ymin, ymax), lvl_off [top + 2] each
-    level's ring offset (rings sorted by level)."""
-    if top < 0 or not _inside_lvl(seg, rso, rbb, lvl_off[0], lvl_off[1], px, py):
+def _band_query_py(pts, rso, rbb, lvl_off, top, px, py):
+    """The band at (px, py) (COORD units): binary search over the nested levels. pts [N, 2] the ring points ring by
+    ring, rso [nr + 1] each ring's offset, rbb [nr, 4] (xmin, xmax, ymin, ymax), lvl_off [top + 2] each level's
+    ring offset (rings sorted by level)."""
+    if top < 0 or not _inside_lvl(pts, rso, rbb, lvl_off[0], lvl_off[1], px, py):
         return -1
     lo, hi = 0, top
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if _inside_lvl(seg, rso, rbb, lvl_off[mid], lvl_off[mid + 1], px, py):
+        if _inside_lvl(pts, rso, rbb, lvl_off[mid], lvl_off[mid + 1], px, py):
             lo = mid
         else:
             hi = mid - 1
@@ -420,11 +423,24 @@ class ContourLayer:
     nx: int
     step: float                    # score per band
     top: int                       # the highest level present (-1: all infeasible)
-    rings: list                    # int64 [n, 2] (X = k, Y = x) in COORD units, sorted by level
+    pts: np.ndarray                # int32 [N, 2] all ring points (X = k, Y = x) in COORD units, ring by ring
+    rso: np.ndarray                # int64 [n_rings + 1]: ring r = pts[rso[r]:rso[r + 1]] (closed); sorted by level
     level: np.ndarray              # int16 [n_rings]
     parent: np.ndarray             # int32 [n_rings] (-1: root)
     stats: dict = field(default_factory=dict)
-    _lv: dict | None = None        # level -> (segments x0, y0, x1, y1, bbox per ring...)
+    _lv: dict | None = None        # level -> (segments x0, y0, x1, y1, ...) for the raster checks
+    _fl: tuple | None = None       # the query arrays
+
+    @property
+    def rings(self) -> list:
+        """The rings as views [n, 2] of pts."""
+        return [self.pts[a:b] for a, b in zip(self.rso[:-1], self.rso[1:])]
+
+    @staticmethod
+    def _flatten(rings: list) -> tuple:
+        n = np.array([len(r) for r in rings], np.int64)
+        pts = np.concatenate(rings).astype(np.int32) if rings else np.zeros((0, 2), np.int32)
+        return pts, np.concatenate([[0], np.cumsum(n)]).astype(np.int64)
 
     # ---- construction ----
     @classmethod
@@ -461,7 +477,8 @@ class ContourLayer:
                         flips += 1
                 rings.append(r)
                 lvls.append(m)
-        lay = cls(nk, nx, step, top, rings, np.array(lvls, np.int16), np.full(len(rings), -1, np.int32))
+        pts, rso = cls._flatten(rings)
+        lay = cls(nk, nx, step, top, pts, rso, np.array(lvls, np.int16), np.full(len(rings), -1, np.int32))
         n0 = sum(len(r) for r in rings)
         removed = 0
         lay._build_tree()
@@ -515,31 +532,33 @@ class ContourLayer:
                 seq.append(w)
                 w = nxt[w]
             out.append(np.stack([X[seq], Y[seq]], 1))
-        self.rings = out
+        self.pts, self.rso = self._flatten(out)
         self._lv = None
         self._fl = None
         return int(removed)
 
     def _build_tree(self):
-        n = len(self.rings)
+        n = len(self.rso) - 1
         self.parent = np.full(n, -1, np.int32)
         if not n:
             return
         bb = self.bbox()
-        ar = np.array([abs(area2(r)) for r in self.rings], np.float64)
-        P = np.concatenate(self.rings).astype(np.int64)
-        off = np.concatenate([[0], np.cumsum([len(r) for r in self.rings])]).astype(np.int64)
-        self.parent = _tree(np.ascontiguousarray(P[:, 0]), np.ascontiguousarray(P[:, 1]), off, bb, ar)
+        ar = np.abs(self.areas2()).astype(np.float64)
+        P = self.pts.astype(np.int64)
+        self.parent = _tree(np.ascontiguousarray(P[:, 0]), np.ascontiguousarray(P[:, 1]), self.rso, bb, ar)
 
     # ---- geometry ----
     def bbox(self) -> np.ndarray:
         """[n, 4] (kmin, kmax, xmin, xmax) in COORD units; the frame range of a ring is kmin..kmax / COORD."""
-        if not self.rings:
+        if len(self.rso) < 2:
             return np.zeros((0, 4), np.int64)
-        return np.array([[r[:, 0].min(), r[:, 0].max(), r[:, 1].min(), r[:, 1].max()] for r in self.rings], np.int64)
+        st = self.rso[:-1]
+        X, Y = self.pts[:, 0], self.pts[:, 1]
+        return np.stack([np.minimum.reduceat(X, st), np.maximum.reduceat(X, st), np.minimum.reduceat(Y, st),
+                         np.maximum.reduceat(Y, st)], 1).astype(np.int64)
 
     def areas2(self) -> np.ndarray:
-        return np.array([area2(r) for r in self.rings], np.int64)
+        return np.array([area2(r.astype(np.int64)) for r in self.rings], np.int64)
 
     def net_area(self) -> dict:
         """Per level the summed signed area (lattice cells; holes subtract)."""
@@ -555,7 +574,7 @@ class ContourLayer:
                     continue
                 segs = []
                 for i in ids:
-                    r = self.rings[i]
+                    r = self.pts[self.rso[i]:self.rso[i + 1]].astype(np.int64)
                     segs.append(np.concatenate([r, np.roll(r, -1, axis=0)], 1))
                 S = np.concatenate(segs).astype(np.int64)            # [ns, 4] x0 y0 x1 y1
                 # sort by min X for the row scans
@@ -581,26 +600,21 @@ class ContourLayer:
         return int(up.sum()) - int(dn.sum()) != 0
 
     def _flat(self):
-        if getattr(self, "_fl", None) is None:
-            order = np.argsort(self.level, kind="stable")             # rings by level (already sorted when built)
-            rings = [self.rings[i] for i in order]
-            n = np.array([len(r) for r in rings], np.int64)
-            seg = (np.concatenate([np.concatenate([r, np.roll(r, -1, axis=0)], 1) for r in rings]).astype(np.int64)
-                   if rings else np.zeros((0, 4), np.int64))
-            rso = np.concatenate([[0], np.cumsum(n)]).astype(np.int64)
-            rbb = (np.array([[r[:, 0].min(), r[:, 0].max(), r[:, 1].min(), r[:, 1].max()] for r in rings], np.int64)
-                   if rings else np.zeros((0, 4), np.int64))
-            lv = self.level[order].astype(np.int64)
+        if self._fl is None:
+            lv = self.level.astype(np.int64)
+            if len(lv) and (np.diff(lv) < 0).any():
+                raise ValueError("rings not sorted by level")
+            rbb = self.bbox().astype(np.int32)
             lvl_off = np.searchsorted(lv, np.arange(self.top + 2)).astype(np.int64)
-            self._fl = (np.ascontiguousarray(seg), rso, np.ascontiguousarray(rbb), lvl_off)
+            self._fl = (np.ascontiguousarray(self.pts), self.rso, np.ascontiguousarray(rbb), lvl_off)
         return self._fl
 
     def query(self, k: int, xi: int) -> int:
         """The band at the lattice point (k, xi) (compiled winding test + binary search on the level); -1 outside."""
         if not (0 <= k < self.nk and 0 <= xi < self.nx) or self.top < 0:
             return -1
-        seg, rso, rbb, lvl_off = self._flat()
-        return int(_band_query(seg, rso, rbb, lvl_off, self.top, k * COORD, xi * COORD))
+        pts, rso, rbb, lvl_off = self._flat()
+        return int(_band_query(pts, rso, rbb, lvl_off, self.top, k * COORD, xi * COORD))
 
     def band(self, k: int, xi: int) -> int:
         """The band at the lattice point (k, xi) by a binary search on the level (the regions are nested; the numpy
@@ -682,10 +696,14 @@ class ContourLayer:
         return np.concatenate(cols, 1) if cols else np.zeros((2, 0), np.int64)
 
     def encode(self) -> dict:
-        n = np.array([len(r) for r in self.rings], np.int32)
-        first = np.array([r[0] for r in self.rings], np.int32).reshape(-1, 2)
-        d = [np.diff(r, axis=0) for r in self.rings]
-        D = np.concatenate(d).astype(np.int64) if d else np.zeros((0, 2), np.int64)
+        n = np.diff(self.rso).astype(np.int32)
+        st = self.rso[:-1]
+        first = self.pts[st].astype(np.int32).reshape(-1, 2)
+        P = self.pts.astype(np.int64)
+        D = np.diff(P, axis=0) if len(P) else np.zeros((0, 2), np.int64)
+        keep = np.ones(len(D), bool)
+        keep[st[1:] - 1] = False                                     # no delta across a ring boundary
+        D = D[keep]
         if D.size and np.abs(D).max() > 32767:
             raise ValueError("delta out of int16 range")
         return {"n": n, "level": self.level.astype(np.int16), "parent": self.parent.astype(np.int32), "first": first,
@@ -693,17 +711,22 @@ class ContourLayer:
 
     @classmethod
     def decode(cls, e: dict, nk: int, nx: int, step: float, top: int) -> "ContourLayer":
-        rings = []
-        o = 0
-        for i, n in enumerate(e["n"]):
-            n = int(n)
-            r = np.empty((n, 2), np.int64)
-            r[0] = e["first"][i]
-            if n > 1:
-                r[1:] = r[0] + np.cumsum(e["delta"][o:o + n - 1].astype(np.int64), axis=0)
-            o += n - 1
-            rings.append(r)
-        return cls(nk, nx, step, top, rings, np.asarray(e["level"], np.int16), np.asarray(e["parent"], np.int32))
+        n = np.asarray(e["n"], np.int64)
+        rso = np.concatenate([[0], np.cumsum(n)]).astype(np.int64)
+        N = int(rso[-1])
+        A = np.zeros((N, 2), np.int64)
+        if N:
+            st = rso[:-1]
+            body = np.ones(N, bool)
+            body[st] = False
+            A[body] = np.asarray(e["delta"], np.int64)
+            A[st] = np.asarray(e["first"], np.int64)
+            C = np.cumsum(A, axis=0)
+            base = np.zeros((len(n), 2), np.int64)
+            base[1:] = C[st[1:] - 1]
+            A = C - np.repeat(base, n, axis=0)
+        return cls(nk, nx, step, top, A.astype(np.int32), rso, np.asarray(e["level"], np.int16),
+                   np.asarray(e["parent"], np.int32))
 
 
 # ---- a set of layers in one file ----
