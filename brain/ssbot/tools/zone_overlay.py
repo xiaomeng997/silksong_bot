@@ -1394,6 +1394,9 @@ def pogo_slam_now(eng, s: dict, start, masks, facing: int) -> dict | None:
     pr["region_b"] = reg.B if reg is not None else 0.25
     pr["slam_k"] = k
     pr["specials"] = specials_cells(eng, tl, k, cx, cy, face)
+    import os as _os
+    if _os.environ.get("SSBOT_OVERLAY_SPECIAL_MAP", "").strip() == "1":          # task 1v1 SG2 (forum.md 56)
+        pr["smap"] = special_map_now(eng, tl, k, cx, face, h)
     pr["ground"] = False
     return pr
 
@@ -1429,6 +1432,112 @@ def specials_cells(eng, tl, k: int, cx: float, cy: float, face: int) -> list:
         x0, x1 = sorted((ex + face * dx0, ex + face * dx1))
         out.append((cert, x0, x1, cy + dy0, cy + dy1))
     return out
+
+
+SMAP_AHEAD_F = 6            # the strike cells drawn: press frames k + 1 .. k + SMAP_AHEAD_F
+
+
+def special_map_now(eng, tl, k: int, cx: float, face: int, h: dict) -> dict | None:
+    """The score map's slice at slam frame k (ssbot.combat.special_map, task 1v1 SG2, forum.md 56), in world
+    coordinates on the Clapper's antic-entry position (its lunge taken off): the ground layer's scores along the
+    floor, each apex class's scores at its apex height (the minimum over the physics phases), the strike cells for the
+    next presses (press frame, node x, the strike's node height), the hero's node and the lookahead's choice."""
+    try:
+        from ssbot.combat.special_map import SpecialMap
+        sm_ = getattr(eng, "_smap", None)
+        if sm_ is None:
+            sm_ = eng._smap = SpecialMap.load()
+    except Exception:  # noqa: BLE001  (no map)
+        return None
+    d = tl.disp
+    x_anchor = cx - face * float(d[min(max(k, 0), len(d) - 1)])
+    floor = float(sm_.meta.get("floor_y", 3.015))
+    wx = x_anchor + face * sm_.xs
+    out = {"k": k, "step": sm_.step, "floor": floor, "wx": wx, "ground": sm_.layer("ground", k), "apex": []}
+    ap = sm_.layer("apex", k)
+    for ci, c in enumerate(sm_.classes):
+        row = ap[ci]
+        if np.isfinite(row).any() or np.isneginf(row).any():
+            out["apex"].append((floor + float(np.mean(c["apex_y"])), row, c["kind"]))
+    st = []
+    for kk in range(k + 1, min(k + 1 + SMAP_AHEAD_F, sm_.strike.shape[0])):
+        xi = np.flatnonzero(sm_.strike[kk] > 0)
+        for i in xi:
+            y = sm_.strike_y[kk, i] if sm_.strike_y is not None else np.nan
+            if np.isfinite(y):
+                st.append((float(wx[i]), floor + float(y), float(sm_.strike[kk, i]), kk - k))
+    out["strike"] = st
+    hb = h.get("box")
+    hp = h.get("pos")
+    if hp:
+        hx = 0.5 * (hb[0] + hb[2]) if hb else float(hp[0])
+        hy = (hb[1] if hb else float(hp[1]) - 1.553) - floor
+        xm = (hx - x_anchor) * face
+        mask = int((h.get("mask") or 0))
+        out["hero"] = {"x": hx, "y": hy + floor, "xm": round(xm, 2), "ground": abs(hy) < 0.05}
+        if abs(hy) < 0.05:
+            g = sm_.layer("ground", k)
+            out["hero"]["score"] = float(g[sm_.xi(xm)])
+            key = 0
+            try:
+                from ssbot.knowledge.kinematics import B_LEFT, B_RIGHT
+                mk = mask & (B_LEFT | B_RIGHT)
+                key = (1 if mk == B_RIGHT else -1 if mk == B_LEFT else 0) * face
+            except Exception:  # noqa: BLE001
+                pass
+            out["choice"] = sm_.ground_choice(k, xm, key)
+    return out
+
+
+def draw_smap(img: np.ndarray, sp: dict, Hw: np.ndarray, H: int) -> None:
+    """The score map's slice: ticks along the floor (the ground layer) and at each apex class's height (apex layers):
+    dark red = infeasible, grey = safe but no strike reachable, yellow -> green = higher scores (reach a strike;
+    two strikes are the brightest green); cyan boxes = the strike cells of the next presses (thicker = sooner); a
+    white ring = the hero's node, with its score and the lookahead's choice."""
+    import cv2
+    th = max(1, int(round(H / 1080)))
+    step = float(sp["step"])
+
+    def col(v):
+        if np.isnan(v):
+            return None
+        if np.isneginf(v):
+            return (30, 30, 170, 255)
+        if v < 0.31:
+            return (150, 150, 150, 255)
+        t = float(np.clip((v - 0.31) / 3.3, 0, 1))
+        return (int(40 + 40 * t), int(200 + 55 * t), int(230 * (1 - t) + 40 * t), 255)
+
+    def strip(y, row, hgt):
+        for wx, v in zip(sp["wx"], row):
+            c = col(float(v))
+            if c is None:
+                continue
+            q = np.round(_to_px(Hw, np.array([[wx - step / 2, y], [wx + step / 2, y + hgt]]))).astype(np.int32)
+            cv2.rectangle(img, (int(q[0][0]), int(q[1][1])), (int(q[1][0]), int(q[0][1])), c, -1)
+
+    strip(sp["floor"], sp["ground"], 0.18)
+    for y, row, kind in sp["apex"]:
+        strip(y, row, 0.07 if kind == "bounce" else 0.1)
+    for wx, y, v, dk in sp.get("strike") or ():
+        q = np.round(_to_px(Hw, np.array([[wx - step / 2, y], [wx + step / 2, y + 0.3]]))).astype(np.int32)
+        cv2.rectangle(img, (int(q[0][0]), int(q[1][1])), (int(q[1][0]), int(q[0][1])), (255, 230, 40, 255),
+                      th + (1 if dk <= 2 else 0), cv2.LINE_AA)
+    hr = sp.get("hero")
+    if hr:
+        p = _to_px(Hw, np.array([[hr["x"], hr["y"] + 1.0]]))[0]
+        c = (int(round(p[0])), int(round(p[1])))
+        cv2.circle(img, c, 10 * th + 4, (255, 255, 255, 255), 2 * th, cv2.LINE_AA)
+        txt = f"k{sp['k']} x{hr['xm']:+.2f}"
+        if hr.get("score") is not None:
+            txt += f" s{hr['score']:.2f}"
+        ch = sp.get("choice")
+        if ch:
+            txt += f" -> {ch['best']} {ch['value']:.2f}"
+        cv2.putText(img, txt, (c[0] + 14 * th, c[1] - 14 * th), cv2.FONT_HERSHEY_SIMPLEX, 0.5 * th, (0, 0, 0, 255),
+                    3 * th, cv2.LINE_AA)
+        cv2.putText(img, txt, (c[0] + 14 * th, c[1] - 14 * th), cv2.FONT_HERSHEY_SIMPLEX, 0.5 * th,
+                    (255, 255, 255, 255), th, cv2.LINE_AA)
 
 
 def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
@@ -1491,6 +1600,8 @@ def draw_pogo(img: np.ndarray, pg: dict, Hw: np.ndarray, H: int) -> None:
         hit_mark(fz, "miss_hit_j", "miss")
         hit_mark(fz, "hit_hit_j", "hit")
     now = pg.get("now")
+    if now is not None and now.get("smap"):
+        draw_smap(img, now["smap"], Hw, H)
     if now is not None and fz is None:
         region(now)
         # the special-move table's strike cells a few frames ahead (outlines: green = both outcomes safe, orange =
