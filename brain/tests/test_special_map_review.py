@@ -226,3 +226,44 @@ def test_no_index_error_without_a_continue(wparams, arena, map_on):
     _tick(pl, _f(30.0, 10), 26.0)
     mi = pl.last_info["map"]
     assert mi["on"] and not mi["s1"]
+
+
+@needs_map
+def test_runtime_waits_for_the_arena_terrain(wparams, arena, map_on):
+    """The policy constructs the planner on Terrain2D.empty() and sets the arena's at the episode start: the map's
+    hero macros must be rolled on the arena (on the empty terrain they fell through the floor: plans without presses)."""
+    from ssbot.combat.hero_macros import HeroMacros
+    pl = fp.ForumPlanner(wparams, kin.Terrain2D.empty(), PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                         fp.ForumConfig(deadline_ms=math.inf, esc_deadline_ms=math.inf, v2=True))
+    assert pl._map is not None and pl._map._rt is None and not pl._map._loaded
+    pl.terrain = arena
+    _tick(pl, _f(30.0, 20), 35.0)
+    rt = pl._map._rt
+    assert rt is not None and rt.hm.terrain is arena
+    assert abs(rt.hm.stand_y0 - HeroMacros(wparams, arena).stand_y0) < 1e-9
+    p = pl._map.slam[7]["plan"]
+    assert p.presses                                              # the strike the map plans from there
+
+
+def test_readiness_on_a_subset_of_rows(setup):
+    """The penalty computed on the safe rows only equals the full computation on those rows."""
+    h, R = _helper(setup)
+    params = setup["params"]
+    cx = 40.0
+    f, _ = _mock(cx, "Walk", 0.3)
+    start = kin.initial_state(params, cx + 4.0, setup["hm"].stand_py, facing=-1, ground=True, alpha=ALPHAS[0])
+    T = 36
+    xs = np.array([cx + 4.5, cx + 5.4, cx + 8.0, cx + 3.6, cx + 6.2])
+    box = np.zeros((len(xs), T + 1, 4))
+    y0 = setup["hm"].stand_y0
+    for i, x in enumerate(xs):
+        box[i, :, 0], box[i, :, 2] = x - 0.25, x + 0.25
+        box[i, :, 1], box[i, :, 3] = y0, y0 + 1.3
+    r1 = NS(box=box, flags=np.full((len(xs), T + 1), kin.F_GROUND, np.int64),
+            mode=np.zeros((len(xs), T + 1), np.int64))
+    cmd = np.zeros((len(xs), T), np.int64)
+    pen, Rr = h.readiness(f, start, r1, cmd, 0, 0)
+    sub = np.array([0, 2, 4])
+    pen2, R2 = h.readiness(f, start, r1, cmd, 0, 1, rows=sub)
+    assert np.allclose(pen2[sub], pen[sub]) and np.allclose(R2[sub], Rr[sub])
+    assert (pen2[[1, 3]] == 0).all() and np.isnan(R2[[1, 3]]).all()

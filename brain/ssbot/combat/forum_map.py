@@ -62,6 +62,11 @@ class MapHelper:
         self.yh: list = []             # (tick, box bottom above the floor at the start) of the last ticks
 
     def runtime(self):
+        terr = getattr(self.pl, "terrain", None)
+        if not self._loaded and (terr is None or not len(getattr(terr, "hseg", ()))):
+            # review: never built on an empty terrain (the policy constructs the planner with Terrain2D.empty() and
+            # sets the arena's at the episode start: floorless hero macros made plans without presses)
+            return None
         if not self._loaded:
             self._loaded = True
             try:
@@ -72,10 +77,14 @@ class MapHelper:
         return self._rt
 
     def preload(self) -> None:
-        """Load the map, the decision states and touch the lookup paths once (the planner's construction), so the first
-        tick near a Clapper does not pay for them."""
+        """Load the map, the decision states and touch the lookup paths once (the planner's construction, else its
+        first tick with the arena's terrain), so the first tick near a Clapper does not pay for them."""
+        if self._loaded:
+            return
         t0 = time.perf_counter()
         rt = self.runtime()
+        if rt is None:
+            return                     # no arena terrain yet (or no map file): the first tick with one loads it
         self._dec = _decision_states()
         if rt is not None:
             try:
@@ -302,9 +311,11 @@ class MapHelper:
             BOARD[info["iid"]] = {"tick": ticks, "on": False, "x": float(x0 + face * bx), "k": k, "why": "ground"}
 
     # ---- readiness before the slam ----
-    def readiness(self, f, start, r1, cmd: np.ndarray, P: int, ticks: int):
+    def readiness(self, f, start, r1, cmd: np.ndarray, P: int, ticks: int, rows: np.ndarray | None = None):
         """[N] penalty (landed-hit units) and [N] readiness of the rows' end states, or None when no Clapper can start
-        its slam (a decision state, the hero within READY_RANGE_U)."""
+        its slam (a decision state, the hero within READY_RANGE_U). rows (review: the safe rows, the only ones the
+        penalty ranks): computed for those only (penalty 0, readiness nan elsewhere); the order among them is the
+        same as computed over all rows."""
         self.ready_info = None
         st0 = np.asarray(start).reshape(kin.K, -1)
         hx = float(st0[kin.PX, 0])
@@ -327,7 +338,11 @@ class MapHelper:
         t0 = time.perf_counter()
         N = r1.box.shape[0]
         Te = r1.box.shape[1] - 1
-        xe = 0.5 * (r1.box[:, -1, 0] + r1.box[:, -1, 2])
+        idx = np.arange(N) if rows is None else np.asarray(rows, np.int64)
+        if not len(idx):
+            return np.zeros(N), np.full(N, np.nan)
+        bx_ = r1.box[idx]
+        xe = 0.5 * (bx_[:, -1, 0] + bx_[:, -1, 2])
         side = np.where(xe >= cx, 1, -1)                          # it turns to face the hero at k = 0
         xm = np.abs(xe - cx)
         S0 = st0[:, 0]
@@ -335,13 +350,13 @@ class MapHelper:
         p_end = sorted({(q - Te) % 6 for q in q0} & set(rt.srcs))   # the phase of a slam starting at the row's end
         if not p_end:
             return None
-        last = cmd[:, -1] if cmd.shape[1] else np.zeros(N, np.int64)
+        last = cmd[idx, -1] if cmd.shape[1] else np.zeros(len(idx), np.int64)
         kd = np.where((last & kin.B_RIGHT) != 0, 1, np.where((last & kin.B_LEFT) != 0, -1, 0)) * side
-        gnd = (r1.flags[:, -1] & kin.F_GROUND) != 0
-        glide = r1.mode[:, -1] == kin.M_GLIDE
-        yb = r1.box[:, -1, 1] - rt.hm.stand_y0
-        yp = r1.box[:, -2, 1] - rt.hm.stand_y0
-        R = np.full(N, np.inf)
+        gnd = (r1.flags[idx, -1] & kin.F_GROUND) != 0
+        glide = r1.mode[idx, -1] == kin.M_GLIDE
+        yb = bx_[:, -1, 1] - rt.hm.stand_y0
+        yp = bx_[:, -2, 1] - rt.hm.stand_y0
+        R = np.full(len(idx), np.inf)
         for p in p_end:
             R = np.minimum(R, rt.readiness_rows(p, xm, kd, gnd, yb, yp))
         R[glide] = 0.0
@@ -360,8 +375,12 @@ class MapHelper:
         self.ready_info = {"iid": iid, "state": stt, "ref": round(ref, 3), "R_min": round(float(R.min()), 3),
                            "R_max": round(float(R.max()), 3), "pen_rows": int((pen > 0).sum()),
                            "out_rows": int(out_.sum()), "ready_x": round(float(cx + sd * xs[bi]), 2),
-                           "ms": round((time.perf_counter() - t0) * 1e3, 2)}
-        return pen, R
+                           "ms": round((time.perf_counter() - t0) * 1e3, 2), "rows": int(len(idx))}
+        if rows is None:
+            return pen, R
+        pen_f, R_f = np.zeros(N), np.full(N, np.nan)
+        pen_f[idx], R_f[idx] = pen, R
+        return pen_f, R_f
 
 
 __all__ = ["MapHelper", "MapRow", "BOARD"]

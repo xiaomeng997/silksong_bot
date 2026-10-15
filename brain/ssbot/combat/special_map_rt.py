@@ -600,7 +600,11 @@ _RT: dict = {}
 
 def runtime(params, terrain) -> MapRuntime | None:
     """The process's map runtime (loaded once); None when the file is missing (the planner then runs without it)."""
-    key = MAP_TAG
+    # review: keyed by the terrain and the hero too (the hero macros are rolled on them)
+    import hashlib
+    sig = hashlib.md5(b"".join(np.ascontiguousarray(getattr(terrain, nm, np.zeros(0)), np.float64).tobytes()
+                               for nm in ("hseg", "vseg"))).hexdigest() if terrain is not None else "none"
+    key = (MAP_TAG, sig, getattr(params, "crest", None), float(getattr(params, "run_speed", 0.0)))
     if key not in _RT:
         p = map_path()
         _RT[key] = MapRuntime(params, terrain, p) if p.exists() else None

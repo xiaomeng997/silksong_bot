@@ -1149,8 +1149,8 @@ class ForumPlanner(Planner):
         self.crest = crest
         self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper
         if SPECIAL_MAP:
-            # review: loaded here, not on the first tick near a Clapper (the load and the first lookups stalled that
-            # tick by ~80 ms in the replays)
+            # review: loaded here (or on the first tick with the arena's terrain: the policy builds the planner on an
+            # empty one), not on the first tick near a Clapper (that tick stalled ~80 ms in the replays)
             from ssbot.combat import forum_map
             self._map = forum_map.MapHelper(self)
             self._map.preload()
@@ -3072,6 +3072,8 @@ class ForumPlanner(Planner):
             forum_map.BOARD.clear()
             if self._map is None:
                 self._map = forum_map.MapHelper(self)
+            if not self._map._loaded:
+                self._map.preload()               # review: the first tick with the arena's terrain
             self._map.info = None
             if v2 and mode0 not in NO_CONTROL_MODES:
                 mrow = self._map.row(f, start, hold, prefix, T, self.ticks)
@@ -3787,7 +3789,8 @@ class ForumPlanner(Planner):
             if SPECIAL_MAP and v2 and self._map is not None:
                 # SG4: the readiness penalty (landed-hit units) before a slam can start; rows with no safe
                 # continuation from their end last (unless every row has none)
-                rp_ = self._map.readiness(f, start, r1, cmd, P, self.ticks)
+                # review: the safe rows only (the penalty ranks only those; ~half the cost)
+                rp_ = self._map.readiness(f, start, r1, cmd, P, self.ticks, rows=np.flatnonzero(safe))
                 if rp_ is not None:
                     pen_ = rp_[0]
                     b0_ = int(np.lexsort((-J, v2_nh))[0]) if safe.any() else -1
