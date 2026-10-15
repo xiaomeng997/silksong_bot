@@ -5,6 +5,18 @@
 Written by the session of 2026-10-11/12 for a fresh session (the old one's context was too long). Reply to the person
 in Chinese; code, commits and this file in English.
 
+### Update 2026-10-15 (session cd68b8e4)
+
+- The person chose the arm rn as the small-rune default: dev branch `5daf3cd` (unset, the five rune switches follow
+  `SSBOT_FORUM_V2`; with v2 on they are rn's: stance 3 u centre to centre). The old baseline is the new arm `fcs0`;
+  switch-off identity checks must use it. Plan doc note of 2026-10-15.
+- The special module rebuild (plan doc notes 2026-10-12 late evening .. 10-14) runs offline as workflow
+  `wf_90e07ad1-32a`, one agent at a time on the dev worktree: SG1 move data + hero event macros (committed: `6f21763`,
+  `f79f3d7`, forum.md 55), SG2 the CL_SLAM score map + checks + overlay prep, SG3 contours + lookahead. Spec notes
+  extracted to `C:\ssbot\data\m2_map\spec_notes_zh.txt`; outputs `C:\ssbot\data\m2_map\sg*`. Next after it: the
+  person's eye check of the map overlay (`start_overlay_map_check.ps1`, prepared by SG2), then integration, review,
+  live A/B against rn. The person wants the quota saved early this week (agents stop at weekly 20 %).
+
 ### Update 2026-10-12 evening (session ae67fe04): live results, read this first
 
 - Dev branch head `effdf6d` (frozen `C:\ssbot\live_1v1_effdf6d`). Since 677979c: G1 the general special rule
