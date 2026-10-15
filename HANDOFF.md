@@ -5408,6 +5408,14 @@ START HERE item 2 and the why study's fixes (5)-(9) for the Clapper's small-rune
 - `SSBOT_FORUM_RUNE_FACE=<u>`: L2 stance during CC_CAST on the ground <u> from the Clapper (3 / 3.5; empty: face_u 4).
 - `SSBOT_FORUM_RUNE_HOP=1`: the person's hop rows.
 - `SSBOT_FORUM_NOGLIDE=1`: among safe rows with the same landed hits, no glide first.
+- **Defaults since 2026-10-15 (the person chose the arm rn over rn35):** unset, the five switches follow
+  `SSBOT_FORUM_V2`: with v2 on, NOPRE / BOMB / HOP / NOGLIDE are on and FACE is 3 u (centre to centre); without v2 all
+  stay off. `0` turns a flag off, `SSBOT_FORUM_RUNE_FACE=0` drops the stance (`rune_bombs.switches`). So at revisions
+  from this commit on, every arm with `SSBOT_FORUM_V2=1` includes rn unless it sets the switches to 0; the old
+  baseline is the new arm `fcs0` (fcs with the five switches at 0), and switch-off identity checks must use it. Live
+  basis (2026-10-12, Clapper 1v1, `C:\ssbot\data\m2_live_g\s2.json`): rn 16/16 kills, 15 hitless, 0.60 landed hits/s,
+  kill p50 33.6 s; rn35 8/8 kills, 8 hitless, 0.57/s, 35.1 s; indistinguishable at these sample sizes, rn has twice
+  the episodes.
 
 ### Numbers (offline; `C:\ssbot\data\m2_special\g2`)
 

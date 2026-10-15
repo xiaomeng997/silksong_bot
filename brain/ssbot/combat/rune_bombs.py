@@ -1,7 +1,9 @@
 """The Choir Clapper's small runes (CC_CAST: Spell Antic -> Cast 1 -> Cast 2, a row of bombs falling in rings), task 1v1
 G2 (forum.md sec. 50; the 2026-10-12 "why" study's fixes (5)-(9), docs/plans/forum_planner_plan.md).
 
-Switches (every one default off; off, nothing here runs and the planner is 7f8bb7a's bit for bit):
+Switches. Unset, every one follows SSBOT_FORUM_V2 (the person, 2026-10-15: the arm rn is the default): with v2 on,
+NOPRE / BOMB / HOP / NOGLIDE are on and FACE is 3 u; without v2 all are off. Set to 0 (FACE=0: no cast stance), the
+planner is 7f8bb7a's bit for bit (the arm fcs0 does that):
   SSBOT_FORUM_RUNE_NOPRE=1   no bomb forecast before Cast 2 is seen (attack_range.hazards_at drops the pending
                              CC_CAST instance's bombs). A Cast 2 entry seen without its CC_CAST instance (the Spell
                              Antic missed) still spawns the row (Segmenter.step). The cast is never cancelled by a hit
@@ -13,8 +15,8 @@ Switches (every one default off; off, nothing here runs and the planner is 7f8bb
                              the margin SSBOT_FORUM_RUNE_BOMB_M (u, default 0.15) instead of the focus margin; the
                              table's ring windows of the spawned row leave the estimate (the pending row before
                              Cast 2 stays unless NOPRE).
-  SSBOT_FORUM_RUNE_FACE=<u>  the L2 stance during CC_CAST: on the ground <u> from the Clapper (3 / 3.5: the live
-                             face_u A/B; empty: face_u as today).
+  SSBOT_FORUM_RUNE_FACE=<u>  the L2 stance during CC_CAST: on the ground <u> from the Clapper, centre to centre (3 /
+                             3.5: the live face_u A/B, 2026-10-12; 0: face_u as before G2).
   SSBOT_FORUM_RUNE_HOP=1     the person's rows: continuous slashes on the ground with one short hop timed from this
                              forecast so the hero is above the bomb that covers her when it lights; no second jump
                              press in the air (that opens the umbrella).
@@ -39,21 +41,36 @@ NAME = "rune bomb small"
 CLAPPER = "Song Heavy Sentry"
 
 
-def _flag(name: str) -> bool:
-    return os.environ.get(name, "0").strip() == "1"
+RN_FACE_U = 3.0                   # the default cast stance under v2 (arm rn; the person chose it over 3.5 on 2026-10-15)
 
 
-def _float(name: str, default: float | None) -> float | None:
-    v = os.environ.get(name, "").strip()
-    return default if not v else float(v)
+def switches(env=None) -> dict:
+    """The switches from the environment. Unset, they follow SSBOT_FORUM_V2: on with v2 (the arm rn's values), off
+    without it; "0" turns a flag off and SSBOT_FORUM_RUNE_FACE=0 drops the cast stance (face_u as before G2)."""
+    env = os.environ if env is None else env
+    v2 = env.get("SSBOT_FORUM_V2", "0").strip() == "1"
+
+    def flag(name: str) -> bool:
+        v = env.get(name, "").strip()
+        return v2 if not v else v == "1"
+
+    def num(name: str, default: float | None) -> float | None:
+        v = env.get(name, "").strip()
+        return default if not v else float(v)
+
+    face = num("SSBOT_FORUM_RUNE_FACE", RN_FACE_U if v2 else None)
+    return {"NOPRE": flag("SSBOT_FORUM_RUNE_NOPRE"), "BOMB": flag("SSBOT_FORUM_RUNE_BOMB"),
+            "BOMB_M": num("SSBOT_FORUM_RUNE_BOMB_M", 0.15), "FACE_U": face if face else None,
+            "HOP": flag("SSBOT_FORUM_RUNE_HOP"), "NOGLIDE": flag("SSBOT_FORUM_NOGLIDE")}
 
 
-NOPRE = _flag("SSBOT_FORUM_RUNE_NOPRE")
-BOMB = _flag("SSBOT_FORUM_RUNE_BOMB")
-BOMB_M = _float("SSBOT_FORUM_RUNE_BOMB_M", 0.15)
-FACE_U = _float("SSBOT_FORUM_RUNE_FACE", None)
-HOP = _flag("SSBOT_FORUM_RUNE_HOP")
-NOGLIDE = _flag("SSBOT_FORUM_NOGLIDE")
+_SW = switches()
+NOPRE = _SW["NOPRE"]
+BOMB = _SW["BOMB"]
+BOMB_M = _SW["BOMB_M"]
+FACE_U = _SW["FACE_U"]
+HOP = _SW["HOP"]
+NOGLIDE = _SW["NOGLIDE"]
 FORECAST = BOMB or HOP            # the tracker keeps a RuneBombs
 
 R = 2.166                         # the bomb's circle collider

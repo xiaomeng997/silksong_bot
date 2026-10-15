@@ -180,3 +180,18 @@ def test_l2_cast_stance(monkeypatch):
     s = [subj(9, CC, 30.0, y=7.45)]                       # idle: face_u as before
     p = l2().decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
     assert p.stance_x == pytest.approx(26.0)
+
+
+def test_switch_defaults_follow_v2():
+    """The person, 2026-10-15: the arm rn is the default under v2 (stance 3 u); without v2 nothing changes; 0 (FACE=0)
+    turns each one off (the arm fcs0)."""
+    off = {"NOPRE": False, "BOMB": False, "BOMB_M": 0.15, "FACE_U": None, "HOP": False, "NOGLIDE": False}
+    rn = {"NOPRE": True, "BOMB": True, "BOMB_M": 0.15, "FACE_U": 3.0, "HOP": True, "NOGLIDE": True}
+    assert rb.switches({}) == off
+    assert rb.switches({"SSBOT_FORUM_V2": "0"}) == off
+    assert rb.switches({"SSBOT_FORUM_V2": "1"}) == rn
+    fcs0 = {"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_RUNE_NOPRE": "0", "SSBOT_FORUM_RUNE_BOMB": "0",
+            "SSBOT_FORUM_RUNE_HOP": "0", "SSBOT_FORUM_NOGLIDE": "0", "SSBOT_FORUM_RUNE_FACE": "0"}
+    assert rb.switches(fcs0) == off
+    assert rb.switches({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_RUNE_FACE": "3.5"})["FACE_U"] == 3.5
+    assert rb.switches({"SSBOT_FORUM_RUNE_BOMB": "1"}) == {**off, "BOMB": True}
