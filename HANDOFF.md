@@ -6476,3 +6476,195 @@ All 6 phases, open floor; the closed loop has 22,320 episodes per source, with t
 4. Readiness is banded now: the ground layer's edges (phase 0) are 0.30 / 0.72 / 1.74 / 2.11, so readiness reads 0,
    0.30, 0.72, 1.74 or 2.11. SG3's R_ref 1.0 falls inside band [0.72, 1.74): use R_ref 0.72 (band 2) with these
    files.
+
+## Task 1v1 - stage SG4: the slam map in the planner (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §59)
+
+The goal (the person, 2026-10-15): a single Clapper killed at 1.5 landed hits per second, hitless first. SG4 measures
+where the hits must come from, rescores the slam map as the person asked (main 108b74d: "raise the danger-distance
+score; once hit you cannot strike anyway"), stores it for run time, and puts it into the Forum planner behind
+`SSBOT_FORUM_SPECIAL_MAP` (default off). Offline only: no game, no live run. The planner must not use the map live
+before the person's eye check (overlay start script prepared, not launched).
+
+### 1. Hit budget (rn, 2026-10-12, 16 episodes; `ssbot.tools.sg4_budget`; `C:\ssbot\data\m2_map\sg4\budget.json|txt`)
+
+- Fight (wave activation to the kill): 541 s, 352 landed hits (22 per kill), **0.65 hits/s**; 87 slams (9.6 / min,
+  1.28 s each). Distances are hero box centre to the Clapper's centre, horizontal. Landed ground slashes p10/50/90/max
+  4.16/4.91/5.30/5.38 u (the Wanderer's slash reaches ~2.7-3 u past the body front edge); down slashes 3.3-3.8 u.
+  Every landed horizontal slash knocks the Clapper back ~0.48 u (over ~8 frames; a down slash does not move it).
+
+  | family | time s (share) | dist p10/50/90 u | air | landed | hits/s | safe-stance share | ceiling hits/s |
+  |---|---|---|---|---|---|---|---|
+  | idle / walk | 126 (23 %) | 4.2 / 9.0 / 13.6 | 40 % | 13 | 0.10 | 0.79 | 2.51 |
+  | evade | 36 (7 %) | 5.2 / 7.1 / 9.4 | 36 % | 36 | 1.00 | 0.91 | 2.87 |
+  | small-rune cast | 125 (23 %) | 4.2 / 5.4 / 6.7 | 32 % | 213 | **1.70** | 0.68 | 2.14 |
+  | slam | 111 (21 %) | 6.9 / 11.1 / 13.0 | 25 % | 30 (0.35 / slam) | 0.27 | 1.00 (behind) | 3.16 |
+  | jump slam | 33 (6 %) | 7.1 / 11.3 / 14.9 | 24 % | 4 | 0.12 | 1.00 | 3.16 |
+  | jump cast | 42 (8 %) | 5.9 / 8.9 / 13.5 | 51 % | 14 | 0.33 | 0.92 | 2.91 |
+  | other (entry) | 68 (13 %) | 3.8 / 5.8 / 6.9 | 10 % | 42 | 0.62 | 0.51 | 1.62 |
+
+  Ceiling = 60/19 x the share of frames in which a ground hero at 4.5 u (front or behind) touches no recorded damage
+  box now and in the next 12 frames (rough; behind the slam is safe, so the slam's ceiling is the full rate).
+- Scenarios at today's time shares: the slam map at 1.13 strikes per slam (the closed loop's mean) gives 0.78 hits/s;
+  at 2.0 per slam (a hop / bounce start) 0.92. **The slam map alone adds +0.13..+0.27.** 1.5 also needs idle / walk
+  (23 % of the fight at 0.10/s, the hero at a median 9 u: stay in slash reach and slash while it walks), the jump
+  slam / jump cast (14 %, 9-11 u away) and the entry; every other family at 70 % of its safe ceiling plus the map
+  gives 1.56-1.70. The cast is already near its ceiling. Staying close also shifts its choices to close-range moves.
+
+### 1b. Rescore (`ssbot.tools.sg4_rescore`; `C:\ssbot\data\m2_map\sg4\rescore\merged_all.json`, `merged_seed157.json`)
+
+New code:
+- `special_map.KeyedMapBuilder` (`MapConfig.keyed`, `key_noise`, `p_late`): the key already read is part of the
+  state (R[k][c], c moves the body in frame k + 1); the choice is the next key, the slash with c held, or a jump. A key
+  change can land late (measured: on time 78.5 %, +1 frame 20 %, +2 1 %, +3 0.5 %): late by m frames, c moves the body
+  m more frames (the intermediate nodes must be feasible). `key_noise`: `none`; `exp` (expected value, a late branch
+  through damage counts 0 = the person's (b)); `hard` (the one-frame-late change as a hard partner, the worse of both =
+  (c)); `hard_exp`. **The strike's bounce is read with the held key at the contact** (1b2: SG3b's map gap). The late
+  jump stands one frame more with the state key.
+- `map_lookahead.decide_keyed` (dispatched by `decide` for keyed sources; `keyed_q` weighs the branches like the
+  pass), `KeyedDenseSource`; exact best-first pruning of the 18 jump holds (3.6x faster ground decisions, identical on
+  4,000 random states).
+- `sg2_sim`: `late_extra` (+2 / +3 frames; `MEASURED_EXTRA`), keyed readiness; default behaviour unchanged (one draw
+  per input; test_map_lookahead's identical-decisions test passes).
+
+Closed loop (SG2's 155 starts x 24 variants x 6 phases = 22,320 episodes per variant, seeds 57 + p, lambda 0.02, the
+measured lateness for keys / presses / jumps, off-lattice starts). "Damaged" = feasible starts that took damage:
+
+| variant | WC / cap | key state | strike, no damage | damaged / ~20,150 | noise-free | hits / slam | key changes |
+|---|---|---|---|---|---|---|---|
+| base (SG2) | 0.3 / 1 u | no | 74.87 % | 97 | 0 | 1.126 | 4.84 |
+| a_w1c1 | 1 / 1 u | no | 74.02 % | 143 | 0 | 1.106 | 4.99 |
+| a_w1c2 | 1 / 2 u | no | 74.77 % | 51 | 0 | 1.119 | 4.97 |
+| a_w3c2 | 3 / 2 u | no | 69.30 % | 688 | 648 | 1.033 | 4.90 |
+| k_none | 0.3 / 1 u | none | 74.77 % | 132 | 0 | 1.128 | 4.67 |
+| b_exp | 0.3 / 1 u | exp | 75.34 % | 31 | 0 | 1.137 | 4.56 |
+| c_hard | 0.3 / 1 u | hard | 74.23 % | 29 | 0 | 1.116 | 4.22 |
+| bc_hexp | 0.3 / 1 u | hard_exp | 75.31 % | 30 | 0 | 1.137 | 4.52 |
+| ac_w1c2 | 1 / 2 u | hard | 73.76 % | 15 | 0 | 1.103 | 4.55 |
+| **ac_w1c3** | **1 / 3 u** | **hard** | **73.59 %** | **15** | **0** | **1.112** | **4.61** |
+| abc_w1c2 | 1 / 2 u | hard_exp | 75.02 % | 21 | 0 | 1.132 | 5.55 |
+| ac_w2c2 | 2 / 2 u | hard | 70.90 % | 341 | 310 | 1.067 | 4.58 |
+| abc_w2c2 | 2 / 2 u | hard_exp | 72.01 % | 294 | 253 | 1.086 | 6.09 |
+
+- Second seed (157) for the top three: ac_w1c3 13, ac_w1c2 16, abc_w1c2 18; pooled 28 / 31 / 39 of ~40,300, hits per
+  slam 1.112 / 1.104 / 1.132.
+- **Default: ac_w1c3** (keyed, the late key change as a hard partner, WC 1.0, clearance cap 3 u): the fewest damaged
+  starts (0.07 %, 3.5x fewer than SG2's map under the same noise), noise-free damage 0, misses 4 (SG2: 69), hits per
+  slam -1 % against SG2. abc_w1c2 is the alternative (+1.8 % hits per slam, +40 % damage, 1 more key change per slam).
+- WC 2-3 breaks the one-step lookahead: noise-free damage appears (the online choice on stored total scores no longer
+  matches the pass's choice on strike value and clearance separately).
+- Readiness vs outcome (ac_w1c3, starts at k 0): <= WC: 879, no strike reachable, 0 damage; (WC, WC + 1): 1,569,
+  99.8 % one strike, 0.19 % damage; [WC + 1, WC + 2): 156, 1.97 hits; >= WC + 2: 2,143, 2.00 hits, 0.09 % damage. The
+  cliff is gone (SG2: the top bin had 1.09 % damage, more than the middle one). **R_ref = WC + 2 = 3.0** (two strikes
+  with full clearance).
+- By start (ac_w1c3 vs base, damaged): ground 10 vs 39, antic entry 4 vs 18, after a hop 1 vs 40, bounce 0 vs 0.
+- T1's trials: unchanged in every variant (certified in all phases 72/73 succeed, recall 0.198; press k 42-47: 55/55,
+  recall 0.474). The held-key bounce removed no certified trial.
+- Decision latency in the sim (dense): 45 us p50, 437 us p99 (SG2's: 25 / 272).
+
+### 1c. Run-time store (`ssbot.combat.special_map_rt`)
+
+- `sg4_rescore store --variant ac_w1c3 --tag sg4 --ready-ref 3.0` -> `knowledge/1.0.30000/enemies/forum/
+  special_map_CL_SLAM_sg4_levels.npz` (git-ignored, 39.5 MB, 6.5 min): per phase S{p} uint8 levels [139, 3, 2216,
+  170] (step 0.025, 0 clipped) and the press flags P{p} bit-packed; meta (tube index, config, R_ref, source commit).
+- `load_levels`: default **mmap** (`SSBOT_FORUM_SPECIAL_MAP_MMAP`): decompressed once into
+  `C:\ssbot\cache\special_map\<file>_<size>_<mtime>\*.npy` (1.0 GB on disk, 1.7 s) and memory-mapped: **RSS +1 MB at
+  load, +120 MB after one slam's frames** (file-backed, shared between brain processes). Without mmap: 1,060 MB per
+  process, 1.0 s.
+- Contours: **not rebuilt** for the keyed map (it has a layer per state key; the dense store is what runs, and mmap
+  makes its size moot). SG3b's ea5l files stay for the old map.
+
+### 2. Integration (switch `SSBOT_FORUM_SPECIAL_MAP=1`, default off)
+
+- `ssbot/combat/forum_map.py` (new) `MapHelper`, called by `ForumPlanner.tick`:
+  - **The map row**: the nearest tracked Clapper whose instance is CC_SLAM (`special_mode.in_family`); k from the
+    instance's start (game time) minus the support's k_shift; the anchor = the instance's x0; the hero's state after
+    the prefix (a one-row rollout): ground, or the jump / bounce slices matching its last three box bottoms
+    (`MapRuntime.locate`, the min-value match); the state key = MOVE x facing; phases from ALO / AHI
+    (`special_map_rt.phases_of`, the minimum per action over the possible phases). `MapRuntime.plan` rolls the
+    lookahead T + 24 frames on the macros (contacts on the nominal timeline with the real slash polygon; presses as
+    `dslash.strike`), cached while the hero follows it (`MapRuntime.extend`, identical to a fresh plan).
+  - The row is judged as a special row (`_special_ctx(..., by_map)`): special_mode's support (the Clapper's move
+    dropped, its body kept outside the pre-protect frames, every other enemy, its hazards, the rune bombs), the bounce
+    lane from its contact, its tail (the template past T) as its escape; no table certification, no T1 approach
+    filter. The full support's verdict on it is logged as a cross-check (`xcheck`), not a veto.
+  - Ranked first among the safe rows (a selection key just above the hit count, below hz / U / S / keep / mkeep); its
+    CONTINUE is judged as a special row too. It only changes when the map's decision changes (no template search).
+  - **Exits** (no row): the hero off the macros (umbrella, dash, sprint, recoil, a slash the map did not press,
+    an airborne state no slice matches), **deviation** (the Clapper outside anchor + the variants' displacement range
+    by more than 0.2 u: a wall-stopped lunge, a horizontal slash's knockback; sticky for that slam), **wall** (a wall
+    within 14 u in front of / 6 u behind the anchor: no wall buckets for the keyed map), past the move, no feasible
+    continuation (never a map jump: the planner's own rows decide).
+  - **Readiness** before a slam (a Clapper in a decision state, the hero within its Slam Range 8.05 + 0.5 u): each
+    row's end state at k = 0 (it faces the hero then; ground, or the matching airborne slices; umbrella = 0) ->
+    penalty `READY_W x max(0, R_ref - R)` added to the safe rows' hit rank (READY_W 0.4 hits per readiness unit,
+    `SSBOT_FORUM_SPECIAL_MAP_READY_W` / `_READY_REF`); rows with no safe continuation last unless all are.
+    `SSBOT_FORUM_CL_NODOWN` is ignored with the map on (counted in `map_nodown_ignored`).
+  - **L2** (`tactics/gauntlet._clapper_spot`, via `forum_map.BOARD`): during the slam the map row's spot (its first
+    press or 10 frames ahead), else the map's best ground spot within 4 u (10 frames ahead), not 13 u out; before the
+    slam (not in a cast) the readiness argmax 3-6 u in front on the hero's side.
+  - Log: `last_info["map"]` -> the decision log's `map` field (row state, value, first action, presses, taken / safe /
+    s1 / env / keep / mkeep / first / xcheck / chosen, the readiness penalty). Audit: map_ticks, map_safe, map_taken,
+    map_xcheck, map_off, ready_ticks, ready_changed, ready_out_rows.
+- Switch-off identity (open-loop m2_why replays, deadlines off, rn arm, HEAD vs a frozen 08df1b0): Clapper 054126 i0
+  ep0 **2,947 / 2,947** ticks identical, rn run 192006 i0 ep1 **2,073 / 2,073**.
+
+### 3. Offline checks (open-loop replays with the map on; `C:\ssbot\data\m2_map\sg4\ident`, `sg4\replay_*.json`)
+
+Harness: `C:\ssbot\data\m2_map\sg4\ident_map.py` (the m2_why refute replay, deadlines off, the rnmap env; one line
+per tick with `last_info["map"]`), `ident_job2.ps1` lanes; summary `ssbot.tools.sg4_replay` -> `sg4\replay_rn.json`,
+`replay_tr190851.json`, `replay_tr203232.json`. Open loop: the recorded hero did not follow the map, so the take rate
+is a lower bound and the cache never hits.
+
+- **rn runs (16 episodes, 36,812 ticks, 87 slams, 6,659 slam ticks):**
+  - a map row on 2,885 slam ticks (43 %); taken 2,403 (83 % of the rows); safe 2,762 (96 %); 68 of 87 slams had a row
+    and all 68 had it taken at least once; the map row's hero state: ground 2,197, jump 578, bounce 110.
+  - no row (ticks): **wall 1,452** (a wall within 14 u in front / 6 u behind the anchor), dash 642, deviation 398,
+    a slash the map did not press 363, no feasible continuation 255, sprint 204, past the move 200, airborne off the
+    macros 164, umbrella 96.
+  - not taken: **345 safe but ranked behind** (all of them: the planner's committed jump hold, `keep`, which the map
+    row releases earlier), 62 envelope / aims, 61 stage-1 contact on the special support, 14 the escape / tail pick.
+  - the full support's cross-check flagged 212 map rows (7 %), 81 of the 2,403 taken (3.4 %).
+  - predicted strikes: the first map row of a slam presses 1.04 times in its 60 frames (value p50 1.74).
+  - readiness: 3,111 ticks with the penalty; it changed the hit-rank leader on 74 (2.4 %).
+  - cost (3 replays at once, Idle, deadlines off): planner tick p50 / p95 12.5 / 28.3 ms on all ticks, 15.0 / 33.8 on
+    slam ticks; the map row 7.2 / 8.5 ms (fresh: the open loop never follows it; ~3 ms on a quiet machine, cached rows
+    one decision); readiness 5.8 / 7.6 ms. Same episode (192006 i0 ep1) map off vs on: all ticks 12.5 / 26.0 vs 12.3 /
+    27.1 ms; slam ticks 11.7 / 23.0 vs 14.8 / 31.2; readiness ticks 21.9 / 28.5 vs 26.3 / 33.5.
+- **190851 i1 ep0 (allkh), the slam hit at f 20933:** the recorded hero was in the umbrella from k 0 to 12 (no map),
+  then a jump state at k 13 (row value 1.73, a press planned 30 frames on; first in the order, moved by the escape
+  pick), k 18 (ranked behind), k 21-24 (the planner's committed jump hold), taken from k 25 on (by then no strike was
+  left: value 0.03-0.1, the row walks out). Whole episode: 11 slams, a row on 124 ticks, taken 74.
+- **203232 i0 ep2 (rnv2nd, x0.5):** the recorded hero slashed the Clapper horizontally from k 0 (the antic): the
+  anchor followed the knockback (0.06 u per frame); rows from k 10 on, taken in all 4 slams (45 of 74 row ticks);
+  first rows' values 1.9-2.6 with 1-2 presses planned.
+- Before the antic re-anchoring the same replays exited 130 / 355 ticks as "deviation" on the antic's knockback.
+
+### 4. Arms, overlay, tests
+
+- `C:\ssbot\sandbox\1v1_arms.txt`: appended `rnmap` = the rn line + `SSBOT_FORUM_SPECIAL_MAP=1`.
+- Overlay (`zone_overlay`): `SSBOT_OVERLAY_SPECIAL_MAP=sg4` draws the SG4 map during a slam (the ground layer for the
+  hero's key, the map row's path and presses, the first action, the off-map reason) and the readiness strip and its
+  argmax before one; `SSBOT_OVERLAY_MAP_PLANNER=1` runs the planner's whole tick open loop on every frame (its keys are
+  not sent) so the layer prints whether the planner took the map row (safe / xcheck / the chosen row) and the
+  readiness penalty. `C:\ssbot\sandbox\start_overlay_map_check.ps1` now points at the frozen checkout of the final SG4 commit
+  (`C:\ssbot\live_1v1_<sha>`, the script names it) with those switches and the rnmap env (not launched).
+- Tests: `tests/test_special_map_sg4.py` (9, 33 s): keyed shapes and hard stricter than none, the held-key strike,
+  the level store round trip (RAM and mmap, press bits), the map row equals SG2's sim noise-free (presses, path,
+  world keys mirrored), extend equals a fresh plan, phases_of, **no jump in the fallback** (retreat on the ground, keep
+  the key in the air, no jump without a reachable strike), **the deviation and wall exits**, **the readiness penalty**
+  (values, -inf last, umbrella 0, the L2 spot, off outside a decision state / Slam Range). Also pass:
+  test_special_map, test_map_lookahead, test_zone_overlay (24).
+
+### Open items / next
+
+1. The person's eye check: `start_overlay_map_check.ps1` (not launched). Then the live A/B rnmap vs rn (16 episodes
+   each, the same seeds); first live check: the map row's take rate, the exits, the hits per slam, any slam damage.
+2. The budget says the slam map cannot reach 1.5 hits/s alone: idle / walk (stay in slash reach, 0.10 -> ~2 hits/s),
+   the jump families and the entry are the next levers; the same map machinery fits other still, not aimed moves.
+3. The umbrella (31 of 46 live slam hits began in it) is still off the map; in the replays it is the largest off-map
+   reason. A glide macro would put those states on the map.
+4. Per-tick cost: a fresh map row is ~3 ms of Python (60 frames); cached rows are cheap. A vectorized or compiled
+   lookahead would make the uncached case cheap too.
+5. The hold filter (2-frame minimum press / release) is not in the map: 1-frame key taps and the 1-frame jump hold
+   get stretched; the planner's lane is checked on the latched keys, so this costs value, not safety.
+6. Contours for the keyed map, wall buckets for the keyed map (today: leave the map near a wall).

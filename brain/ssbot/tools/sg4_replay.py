@@ -31,16 +31,20 @@ def load(paths: list[str]) -> list[dict]:
 
 
 def slams(rows: list[dict]) -> list[list[dict]]:
-    out, cur, key = [], [], None
+    """Consecutive ticks of one Clapper's slam: the same file and Clapper, its move frame not going back (the anchor
+    follows it through the antic, so x0 is no key)."""
+    out, cur, key, kp = [], [], None, None
     for r in rows:
         m = r.get("map") or {}
-        k_ = (r["_file"], m.get("iid"), m.get("x0")) if "k" in m else None
-        if k_ is None or k_ != key:
+        k_ = (r["_file"], m.get("iid")) if "k" in m else None
+        new = k_ is None or k_ != key or (kp is not None and m.get("k", 0) < kp - 3)
+        if new:
             if cur:
                 out.append(cur)
             cur, key = ([r], k_) if k_ is not None else ([], None)
         else:
             cur.append(r)
+        kp = m.get("k") if k_ is not None else None
     if cur:
         out.append(cur)
     return out
