@@ -237,7 +237,8 @@ def phases_of(alo: float, ahi: float, k: int) -> list[int]:
 class MapPlan:
     """The map row from one state: masks [L] (the planner's key bits per frame after the prefix), the map's value of
     the first decision, the press frames and model contacts (row indices), the hero's model x / y per frame, the
-    action per frame, the phases used."""
+    action per frame, the phases used, k0 = the start frame; plan() adds states (the loop state before each frame's
+    decision), values (each decision's value) and final (the loop state at the end, MapRuntime.extend)."""
     masks: np.ndarray
     value: float
     first: tuple
@@ -431,11 +432,13 @@ class MapRuntime:
 
     # ---- the map row ----
     def plan(self, k: int, x: float, ev: dict, c: int, last_press: int, phases: list, L: int,
-             lam: float = LAMBDA, face_hero: int = 1, face: int = 1) -> MapPlan:
+             lam: float = LAMBDA, face_hero: int = 1, face: int = 1, resume: dict | None = None,
+             slash: dict | None = None) -> MapPlan:
         """Roll the lookahead over L frames from the state at the end of frame k (noise free, the macro model; the
         contact on the nominal timeline's target boxes with the real slash polygon). masks[t] = the inputs of frame
         k + 1 + t (planner key bits; the map key d is the world key d x face, face = the Clapper's facing); c,
-        face_hero: the state key and the hero's facing in map coordinates; presses / contacts: row indices."""
+        face_hero: the state key and the hero's facing in map coordinates; presses / contacts: row indices.
+        resume: a previous plan's final loop state (MapPlan.final) to continue from (k, x, ev, c ignored)."""
         from ssbot.combat import dslash
         from ssbot.combat.hero_macros import key_mask
         from ssbot.combat.pogo_model import ACTIVE
@@ -447,22 +450,31 @@ class MapRuntime:
         st = srcs[0].st
         step = self.ti.step
         hm = self.hm
-        ev = dict(ev)
+        if resume is not None:
+            ls = dict(resume)
+            ls["ev"] = dict(ls["ev"])
+        else:
+            ev = dict(ev)
+            ls = {"k": int(k), "x": float(x), "ev": ev, "land": self.land_of(ev) if ev["kind"] != "ground" else None,
+                  "dir": int(c), "facing": int(face_hero), "slash": slash, "lsd": 0, "lp": int(last_press)}
+        k_start = ls["k"]
         masks = np.zeros(L, np.int64)
         xs, ys = np.zeros(L), np.zeros(L)
-        acts, presses, contacts = [], [], []
-        dir_cur = int(c)
-        facing = int(face_hero)
-        slash = None
-        last_step_d = 0
+        acts, presses, contacts, states, values = [], [], [], [], []
         value, first = None, None
-        land = self.land_of(ev) if ev["kind"] != "ground" else None
+        n = 0
         for t in range(L):
+            k = ls["k"]
             if k >= self.ti.K - 5:
                 break
+            ev = ls["ev"]
+            states.append((k, ls["x"], ev["kind"], ev["k"], ev.get("h"), ev.get("yc"), ls["dir"], ls["lp"],
+                           ls["slash"] is not None))
             jump_now, press_now = None, False
-            if slash is None:
-                v, act, _ = decide_multi(srcs, k, ev, x, dir_cur, last_press, lam, land)
+            dir_cur = ls["dir"]
+            if ls["slash"] is None:
+                v, act, _ = decide_multi(srcs, k, ev, ls["x"], dir_cur, ls["lp"], lam, ls["land"])
+                values.append(float(v))
                 if value is None:
                     value, first = float(v), act
                 acts.append(act)
@@ -475,53 +487,82 @@ class MapRuntime:
                     press_now = True
             else:
                 acts.append(("slash",))
+                values.append(np.nan)
                 new_dir = dir_cur
             # frame k + 1: the body moves by the key read in frame k
             if st[k + 1]:
-                x += dir_cur * step
-                last_step_d = dir_cur
+                ls["x"] += dir_cur * step
+                ls["lsd"] = dir_cur
             if jump_now is not None:
                 ev = {"kind": "jump", "h": jump_now, "k": k, "q0": (p0 - k) % 6}
-                land = self.land_of(ev)
-            dir_cur = new_dir
+                ls["land"] = self.land_of(ev)
+            ls["dir"] = dir_cur = new_dir
             if dir_cur:
-                facing = dir_cur
+                ls["facing"] = dir_cur
             k += 1
+            ls["k"] = k
             j = k - ev["k"]
-            if ev["kind"] != "ground" and land is not None and j >= land:
+            if ev["kind"] != "ground" and ls["land"] is not None and j >= ls["land"]:
                 ev = {"kind": "ground", "k": k}
-                land = None
+                ls["land"] = None
             y, py = self.y_of(ev, j) if ev["kind"] != "ground" else self.y_of(ev, 0)
-            xs[t], ys[t] = x, y
+            xs[t], ys[t] = ls["x"], y
             masks[t] |= key_mask(dir_cur * face)
             if ev["kind"] == "jump" and 1 <= j <= ev["h"]:
                 masks[t] |= kin.B_JUMP
             if press_now:
                 presses.append(t)
-                last_press = k
+                ls["lp"] = k
                 if ev["kind"] != "ground":
-                    slash = {"P": k, "face": facing}
+                    ls["slash"] = {"P": k, "face": ls["facing"]}
                 dslash.strike(masks, t)
-            if slash is not None:
-                i = k - slash["P"]
+            sl = ls["slash"]
+            if sl is not None:
+                i = k - sl["P"]
                 if ev["kind"] == "ground" or i > ACTIVE[1]:
-                    slash = None
+                    ls["slash"] = None
                 elif i >= ACTIVE[0]:
                     lag = hm.lag[p0, 12 + (k - 12) % 6]
-                    xr = x - lag * last_step_d * step
+                    xr = ls["x"] - lag * ls["lsd"] * step
                     yr = y + py
-                    poly = self.polys[(slash["face"], False)]
+                    poly = self.polys[(sl["face"], False)]
                     for b in self.tl.targets(k):
                         r = clip_band(poly, b[2] + self.pa - yr, b[3] + self.pa - yr)
                         if r is not None and b[0] - r[1] < xr < b[1] - r[0]:
                             contacts.append(t)
                             ev = {"kind": "bounce", "yc": y, "k": k, "q0": (p0 - k) % 6}
-                            land = self.land_of(ev)
-                            slash = None
+                            ls["land"] = self.land_of(ev)
+                            ls["slash"] = None
                             break
-        n = len(acts)
-        return MapPlan(masks, value if value is not None else -np.inf, first, presses, contacts, xs[:n], ys[:n], acts,
-                       list(phases), k, (time.perf_counter() - t0) * 1e3)
+            ls["ev"] = ev
+            n = t + 1
+        pl = MapPlan(masks, value if value is not None else -np.inf, first, presses, contacts, xs[:n], ys[:n], acts,
+                     list(phases), k_start, (time.perf_counter() - t0) * 1e3)
+        pl.states = states
+        pl.values = values
+        pl.final = ls
+        return pl
+
+    def extend(self, prev: MapPlan, i: int, L: int, lam: float = LAMBDA, face: int = 1) -> MapPlan:
+        """prev from its index i on (the hero followed it for i frames), extended by i frames to length L from its
+        final loop state: what plan() from prev.states[i] returns (deterministic), at the cost of i decisions."""
+        t0 = time.perf_counter()
+        tail = self.plan(0, 0.0, {"kind": "ground"}, 0, -100, prev.phases, i, lam=lam, face=face, resume=prev.final)
+        m = np.concatenate([prev.masks[i:], tail.masks])[:L]
+        # a strike's down key starts one frame before its press: redo the presses near the seam
+        pl = MapPlan(m, np.nan, None, [t - i for t in prev.presses if t >= i] + [t + len(prev.masks) - i
+                                                                              for t in tail.presses],
+                     [t - i for t in prev.contacts if t >= i] + [t + len(prev.masks) - i for t in tail.contacts],
+                     np.concatenate([prev.xs[i:], tail.xs]), np.concatenate([prev.ys[i:], tail.ys]),
+                     prev.acts[i:] + tail.acts, list(prev.phases), prev.k0 + i, 0.0)
+        pl.states = prev.states[i:] + tail.states
+        pl.values = prev.values[i:] + tail.values
+        pl.final = tail.final
+        pl.first = pl.acts[0] if pl.acts else None
+        v0 = pl.values[0] if pl.values else np.nan
+        pl.value = float(v0) if np.isfinite(v0) or (isinstance(v0, float) and np.isneginf(v0)) else prev.value
+        pl.ms = (time.perf_counter() - t0) * 1e3
+        return pl
 
 
 _RT: dict = {}

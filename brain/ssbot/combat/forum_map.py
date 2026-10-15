@@ -115,14 +115,20 @@ class MapHelper:
             info["why"] = "no map file"
             return None
         rs = getattr(f, "rs", None)
+        trk = getattr(rs, "trk", None)
         k_trk = int(mv[1])
+        T_, t0_ = getattr(trk, "T", None), getattr(inst, "t0", None)
+        if T_ is not None and t0_ is not None:
+            k_trk = int(round((float(T_) - float(t0_)) * 60.0))     # frames since the antic entry (game time)
         k0 = k_trk - int(getattr(rs, "k_shift", 0) or 0)
         face = 1 if e.get("flipX") else -1
-        key = (iid, round(float(getattr(inst, "t0", 0.0) or 0.0), 3))
+        key = (iid, round(float(t0_ or 0.0), 3))
         mem = self.slam.get(iid)
         if mem is None or mem["key"] != key:
-            # the anchor: the Clapper's x at the antic entry (the nominal lunge before k_trk taken off)
-            x0 = float(e["pos"][0]) - face * float(rt.disp_lo[min(max(k_trk, 0), len(rt.disp_lo) - 1)])
+            # the anchor: the Clapper's x at the antic entry (the tracked instance's start; else the nominal lunge
+            # before k_trk taken off)
+            x0 = float(getattr(inst, "x0", None) if getattr(inst, "x0", None) is not None else
+                       float(e["pos"][0]) - face * float(rt.disp_lo[min(max(k_trk, 0), len(rt.disp_lo) - 1)]))
             mem = {"key": key, "x0": x0, "face": face, "exit": None, "last_press": -100, "plans": 0, "taken": 0}
             self.slam[iid] = mem
         x0 = mem["x0"]
@@ -180,12 +186,33 @@ class MapHelper:
         if cd > 0:
             last_press = max(last_press, k + int(np.ceil(cd * 60.0)) - smrt.ml.PRESS_COOL)
         face_hero = (1 if S[kin.FACE] >= 0 else -1) * face
-        plan = rt.plan(k, x, ev, cdir, last_press, phases, T + smrt.ROW_EXTRA_F, face_hero=face_hero, face=face)
+        L = T + smrt.ROW_EXTRA_F
+        slash = None
+        if fl[-1] & kin.F_ATTACKING:
+            slash = {"P": int(mem["last_press"]), "face": face_hero}     # the map's own slash in flight
+        # the hero followed last tick's map row: continue it (deterministic) instead of planning again
+        plan, prev = None, mem.get("plan")
+        if prev is not None and prev.phases == phases:
+            i = k - prev.k0
+            if 1 <= i < len(prev.states):
+                s_ = prev.states[i]
+                same_ev = s_[2] == ev["kind"] and (ev["kind"] == "ground" or (s_[3] == ev["k"] and s_[4] == ev.get("h")
+                                                                             and s_[5] == ev.get("yc")))
+                if s_[0] == k and abs(s_[1] - x) < 0.02 and same_ev and s_[6] == cdir and s_[8] == (slash is not None):
+                    plan = rt.extend(prev, i, L, face=face)
+                    info["cached"] = True
+        if plan is None:
+            plan = rt.plan(k, x, ev, cdir, last_press, phases, L, face_hero=face_hero, face=face, slash=slash)
+        mem["plan"] = plan
         mem["plans"] += 1
         info.update(on=True, why="row", x=round(x, 3), ev=ev["kind"], c=cdir, phases=phases, v=round(plan.value, 3),
                     act=list(plan.first) if plan.first else None, presses=plan.presses[:3], ms=round(plan.ms, 2))
-        if not np.isfinite(plan.value):
-            info["why"] = "no feasible continuation"
+        if not np.isfinite(plan.value) or plan.first is None or plan.first[0] == "slash" and not np.isfinite(
+                plan.value):
+            # nothing feasible from here: no map row (the planner's own rows decide; never a map jump)
+            info.update(on=False, why="no feasible continuation")
+            mem["plan"] = None
+            return None
         cmd = np.asarray(plan.masks[:T], np.int64)
         if len(cmd) < T:
             cmd = np.concatenate([cmd, np.full(T - len(cmd), cmd[-1] & (kin.B_LEFT | kin.B_RIGHT) if len(cmd) else 0,

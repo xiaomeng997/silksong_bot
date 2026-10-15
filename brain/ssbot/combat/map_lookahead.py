@@ -326,17 +326,24 @@ def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int,
         for d in (-1, 0, 1):
             v = keyed_q(src, k, 0, x1, c, d, nexts_of(ev, j))
             cands.append((v - lam * (d != c), ("dir", d)))
-        for h in ti.jump_h:
-            s0 = ti.s0_of[h]
-            v0 = src.S(k, s0, x, c)                       # the start slice at k (includes the late jump)
-            if not v0 > ti.wc + 1e-3:
+        # the jump starts: the start slice's value at k (with the late jump) bounds the candidate, so the holds are
+        # tried best first and a hold that cannot beat the best candidate so far is skipped (exact up to ties)
+        v0s = [(src.S(k, ti.s0_of[h], x, c), i, h) for i, h in enumerate(ti.jump_h)]
+        top = max(v for v, _ in cands)
+        jc = []
+        for v0, i, h in sorted(v0s, key=lambda t: (-t[0], t[1])):
+            if not v0 > ti.wc + 1e-3 or v0 - lam <= top:
                 continue
+            s0 = ti.s0_of[h]
             best, bd = -np.inf, c
             for d in (-1, 0, 1):
                 v = keyed_q(src, k, s0 + 1, x1, c, d, lambda m, s0=s0: s0 + 1 + m) - lam * (d != c)
                 if v > best:
                     best, bd = v, d
-            cands.append((min(v0, best + lam * (bd != c)) - lam, ("jump", h, bd)))
+            cv = min(v0, best + lam * (bd != c)) - lam
+            jc.append((i, (cv, ("jump", h, bd))))
+            top = max(top, cv)
+        cands.extend(c_ for _, c_ in sorted(jc, key=lambda t: t[0]))
     else:
         s_now = ti.slice_of(ev, j)
         if k + 1 - last_press >= PRESS_COOL and s_now >= 0:

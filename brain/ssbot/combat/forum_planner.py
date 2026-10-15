@@ -3990,9 +3990,16 @@ class ForumPlanner(Planner):
             ri_ = self._map.ready_info
             if mi_ is not None or ri_ is not None:
                 first_ = (self.last_sel or {}).get("first")
+                ls_ = self.last_sel or {}
+
+                def at_(nm):
+                    a_ = ls_.get(nm)
+                    return None if a_ is None or not hasattr(a_, "__len__") else bool(a_[M0])
                 map_info = {**(mi_ or {}), **({"safe": bool(not S[M0]), "xcheck": map_x, "chosen": res.name,
                                                "s1": bool(S1[M0]), "env": bool(env[M0]), "ok": bool(ok[M0]),
-                                               "first": bool(first_ == M0)} if n_map else {}),
+                                               "first": bool(first_ == M0), "keep": at_("keep"),
+                                               "mkeep": at_("mkeep"), "hz": at_("hz"), "U": at_("U")}
+                                              if n_map else {}),
                             **({"ready": ri_} if ri_ is not None else {})}
             self._map.ready_info = None
         self.prev_name = res.name

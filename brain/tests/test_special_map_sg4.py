@@ -160,7 +160,7 @@ def test_no_jump_fallback_and_keep_key(setup):
 def _mock(x_clapper: float, state: str, t: float, flip: bool = True, t0: float = 1.0):
     e = {"type_key": "Song Heavy Sentry", "pos": [x_clapper, ps.FLOOR_Y + 3.0], "flipX": flip,
          "fsms": [{"name": "Control", "state": state, "t": t}]}
-    inst = SimpleNamespace(fam="CC_SLAM", t0=t0)
+    inst = SimpleNamespace(fam="CC_SLAM", t0=t0, x0=None)
     trk = SimpleNamespace(now={7: ("Song Heavy Sentry", e, inst)})
     return SimpleNamespace(rs=SimpleNamespace(trk=trk, k_shift=0)), e
 
@@ -235,3 +235,26 @@ def test_readiness_penalty(setup):
     assert h.readiness(f2, start, r1, cmd, 0, 1) is None
     far = kin.initial_state(params, cx + 12.0, setup["hm"].stand_py, facing=-1, ground=True)
     assert h.readiness(f, far, r1, cmd, 0, 2) is None
+
+
+def test_extend_equals_a_fresh_plan(setup):
+    """The cached row (MapRuntime.extend: the previous plan from index i, continued i frames) is the plan a fresh
+    lookahead makes from the state the hero reached by following it."""
+    srcs, ti, meta = rt.load_levels(setup["path"], mmap=False)
+    R = rt.MapRuntime(setup["params"], setup["terrain"], srcs=srcs, ti=ti, meta=meta, hm=setup["hm"])
+    p0 = R.plan(0, 4.0, {"kind": "ground", "k": 0}, 0, -100, [0], 60)
+    for i in (1, 5, 17, 30):
+        st = p0.states[i]
+        k, x, kind, ek, h, yc, c, lp, sl = st
+        if sl:
+            continue
+        ev = {"kind": kind, "k": ek}
+        if kind == "jump":
+            ev.update(h=h, q0=(0 - ek) % 6)
+        elif kind == "bounce":
+            ev.update(yc=yc, q0=(0 - ek) % 6)
+        fresh = R.plan(k, x, ev, c, lp, [0], 60)
+        ext = R.extend(p0, i, 60)
+        assert ext.k0 == fresh.k0 == k
+        assert np.array_equal(ext.masks[:55], fresh.masks[:55])
+        assert ext.presses[:2] == fresh.presses[:2]
