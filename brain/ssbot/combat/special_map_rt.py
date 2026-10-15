@@ -99,9 +99,10 @@ class LevelSource:
         self.keyed = bool(meta["keyed"])
         self.kind = "levels_keyed" if self.keyed else "levels"
         self.scale = float(meta["scale"])
-        self._S = S
-        self._P = extra if self.keyed else None          # packed bits of [K, 3, NS, NX] (np.packbits order)
-        self._SV = None if self.keyed else extra         # uint8 [K, NS, NX, 3]
+        self._S = np.asarray(S)                          # a plain view of a memmap: scalar indexing 5x faster
+        self._P = np.asarray(extra) if self.keyed else None   # packed bits of [K, 3, NS, NX] (np.packbits order)
+        self._SV = None if self.keyed else np.asarray(extra)  # uint8 [K, NS, NX, 3]
+        self._x_lo, self._step, self._NX, self._K = float(ti.x_lo), float(ti.step), int(ti.NX), int(ti.K)
         self.NS, self.NX = int(meta["NS"]), int(meta["NX"])
         self.mode = meta.get("key_noise", "none")
         pl = np.asarray(meta.get("p_late", (1, 0, 0, 0)), float)
@@ -110,10 +111,10 @@ class LevelSource:
         self.nq = 0
 
     def _xi(self, k, s, x):
-        if s is None or s < 0 or not 0 <= k < self.ti.K:
+        if s is None or s < 0 or not 0 <= k < self._K:
             return -1
-        xi = self.ti.xi(x)
-        return xi if 0 <= xi < self.ti.NX else -1
+        xi = int(round((x - self._x_lo) / self._step))
+        return xi if 0 <= xi < self._NX else -1
 
     def _v(self, lv) -> float:
         lv = int(lv)
@@ -131,9 +132,13 @@ class LevelSource:
         self.nq += 1
         if xi < 0:
             return -np.inf
-        lv = np.asarray(self._S[k, :, s, xi])
-        fin = lv[lv < NONE_LEVEL]
-        return float(fin.max()) * self.scale if len(fin) else -np.inf
+        S_ = self._S
+        m = -1
+        for c in range(3):
+            lv = int(S_[k, c, s, xi])
+            if lv < NONE_LEVEL and lv > m:
+                m = lv
+        return m * self.scale if m >= 0 else -np.inf
 
     def pbit(self, k: int, c: int, s: int, xi: int) -> bool:
         idx = ((k * 3 + c + 1) * self.NS + s) * self.NX + xi
@@ -387,6 +392,13 @@ class MapRuntime:
         """[N] readiness of end states at k = 0 (phase p): map x xm, state key kd (map frame), on the ground or the
         minimum over the airborne slices matching the last two box bottoms (none matched: 0, off the macros)."""
         src = self.srcs[p]
+        xm, kd, gnd, yb, yp = (np.asarray(a) for a in (xm, kd, gnd, yb, yp))
+        key = np.stack([np.rint(xm / self.ti.step), kd, gnd.astype(float), np.where(gnd, 0, np.rint(yb / 0.01)),
+                        np.where(gnd, 0, np.rint(yp / 0.01))], axis=1)
+        uk, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
+        if len(uk) < len(xm):                                     # many rows end in the same state
+            Ru = self.readiness_rows(p, xm[first], kd[first], gnd[first], yb[first], yp[first], tol)
+            return Ru[np.asarray(inv).reshape(-1)]
         S0 = np.asarray(src._S[0], np.int64)                      # [3, NS, NX] or [NS, NX]
         xi = np.clip(np.rint((np.asarray(xm) - self.ti.x_lo) / self.ti.step).astype(np.int64), 0, self.ti.NX - 1)
         inside = (np.asarray(xm) >= self.ti.x_lo) & (np.asarray(xm) <= self.ti.x_lo + self.ti.step * (self.ti.NX - 1))
