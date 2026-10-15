@@ -53,6 +53,7 @@ class Ep:
     d0: int = 0
     misses: int = 0
     noise_free_damage: int | None = None
+    attribution: dict | None = None
     masks: list = field(default_factory=list)       # per frame from k0 + 1: (dir, jump held, attack)
     trace: list = field(default_factory=list)       # per frame: (k, x, y)
 
@@ -67,6 +68,7 @@ class Sim:
         self.jump_h = [t.param for t in geo.tubes if t.kind == "jump"]
         self.polys = [slash_poly(f, a) for f in (1, -1) for a in (False, True)]
         self.late_p, self.offset = LATE_P, True       # execution noise (off: the attribution replays)
+        self.late_kinds = {"key", "press", "jump"}
 
     # ---- the map lookups ----
     def slice_of(self, ev: dict, j: int) -> int:
@@ -142,11 +144,13 @@ class Sim:
                         x2 = x1 + d * g.step * self.st[k + 2]
                         cands.append((self.S(k + 2, 0, x2) - lam * (d != dir_cur), ("dir", d)))
                     for h in self.jump_h:
-                        s2 = self.g.tubes[self.tube_of[("jump", h)]].s0 + 2
+                        s0 = self.g.tubes[self.tube_of[("jump", h)]].s0
                         best = -np.inf
                         for d in (-1, 0, 1):
                             x2 = x1 + d * g.step * self.st[k + 2]
-                            best = max(best, self.S(k + 2, s2, x2) - lam * (d != dir_cur))
+                            best = max(best, self.S(k + 2, s0 + 2, x2) - lam * (d != dir_cur))
+                        # the start's own score holds the late-jump robustness (the same jump one frame later)
+                        best = min(best, self.S(k, s0, x))
                         if best > g.cfg.wc + 1e-3:            # a reachable strike (R > 0): never jump without one
                             cands.append((best - lam, ("jump", h)))
                 else:
@@ -172,7 +176,7 @@ class Sim:
                     if not np.isfinite(v) and v < 0:              # nothing feasible: retreat on the ground
                         act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", dir_cur)
                     if act[0] == "dir" and act[1] != dir_cur:
-                        if rng.random() < self.late_p:
+                        if "key" in self.late_kinds and rng.random() < self.late_p:
                             dir_pending = act[1]
                         else:
                             dir_cur_next = act[1]
@@ -183,7 +187,7 @@ class Sim:
                         e.key_changes += 1
                     elif act[0] == "press":
                         e.key_changes += 1
-                        press_pending = (k + 1 + (1 if rng.random() < self.late_p else 0), dir_cur)
+                        press_pending = (k + 1 + (1 if "press" in self.late_kinds and rng.random() < self.late_p else 0), dir_cur)
             # ---- frame k + 1
             new_dir = dir_cur
             if isinstance(dir_pending, tuple):
@@ -196,7 +200,7 @@ class Sim:
                 x += dir_cur * g.step
                 last_step_d = dir_cur
             if jump_now is not None:
-                late = rng.random() < self.late_p
+                late = "jump" in self.late_kinds and rng.random() < self.late_p
                 ev = {"kind": "jump", "h": jump_now, "k": k + (1 if late else 0), "q0": (self.p - k - (1 if late else 0)) % 6}
             dir_cur = new_dir
             if dir_cur:
@@ -421,7 +425,15 @@ def main(argv=None) -> int:
                 ev["q0"] = (p - ev["k"]) % 6
             e2 = sim.run(tl, e.start, e.k0, e.x0, ev, a.lam, e.d0)
             e.noise_free_damage = e2.damage_f
-        sim.late_p, sim.offset = LATE_P, True
+            # one noise source at a time at the live rate (10 replays each): which one the damage needs
+            att = {}
+            for nm, kinds, off in (("late_key", {"key"}, False), ("late_press", {"press"}, False),
+                                   ("late_jump", {"jump"}, False), ("off_lattice", set(), True)):
+                sim.late_p, sim.offset, sim.late_kinds = LATE_P, off, kinds
+                att[nm] = sum(sim.run(tl, e.start, e.k0, e.x0, dict(ev), a.lam, e.d0).damage_f >= 0 for _ in range(10))
+            e.attribution = att
+            sim.late_p, sim.offset = 0.0, False
+        sim.late_p, sim.offset, sim.late_kinds = LATE_P, True, {"key", "press", "jump"}
         if p == lo:                                               # the lambda sweep on one phase
             for lam in lams:
                 for tl in vs[::3]:
@@ -439,13 +451,15 @@ def main(argv=None) -> int:
     def ex(e):
         return {"start": e.start, "k0": e.k0, "x0": e.x0, "variant": e.variant, "p": e.p, "lam": e.lam,
                 "damage_f": e.damage_f, "contacts": e.contacts, "presses": e.presses, "misses": e.misses,
-                "readiness": e.readiness, "noise_free_damage": e.noise_free_damage,
+                "readiness": e.readiness, "noise_free_damage": e.noise_free_damage, "attribution": e.attribution,
                 "trace": [t for t in e.trace if e.damage_f < 0 or e.damage_f - 15 <= t[0] <= e.damage_f + 1]}
     dm = [e for e in eps + lam_eps if e.damage_f >= 0]
     res["damage_examples"] = [ex(e) for e in dm[:60]]
     feas = [e for e in eps if e.damage_f >= 0 and np.isfinite(e.readiness)]
     res["feasible_start_damage"] = {"n": len(feas), "of": sum(1 for e in eps if np.isfinite(e.readiness)),
                                     "noise_free_still_damage": sum(1 for e in feas if e.noise_free_damage is not None and e.noise_free_damage >= 0),
+                                    "attribution_sum": {nm: sum((e.attribution or {}).get(nm, 0) for e in feas)
+                                                        for nm in ("late_key", "late_press", "late_jump", "off_lattice")},
                                     "examples": [ex(e) for e in feas[:40]]}
     res["miss_examples"] = [ex(e) for e in eps + lam_eps if e.misses][:30]
     res["rollout_check"] = rollout_check(geo, eps, {v.name: v for v in vs}, 200, rng)

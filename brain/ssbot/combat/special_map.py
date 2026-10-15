@@ -92,6 +92,7 @@ class MapConfig:
     depth_x_u: float = 0.5
     depth_t: int = 3
     late_press: bool = True       # a strike must also work pressed one frame late (20 % of live presses)
+    late_jump: bool = True        # a ground jump start must also work pressed one frame late
     wall_front: float | None = None   # hero x limit in front (u from the anchor), None: open floor
     wall_back: float | None = None
 
@@ -125,6 +126,11 @@ class Geometry:
         t0 = time.time()
         self.spec, self.hm, self.cfg = spec, hm, cfg
         self.variants = spec.variants(cfg.variants)
+        if cfg.wall_front is not None:
+            # a wall in front stops the lunge: the body's front edge (the antic root box's, 2.04 u) stays behind it
+            front0 = max(float(np.nanmax(v.boxes["root"][0, 1])) for v in self.variants)
+            for v in self.variants:
+                v.disp = np.minimum(v.disp, max(cfg.wall_front - front0, 0.0))
         self.end_min = min(v.end_k for v in self.variants)
         self.end_max = max(v.end_k for v in self.variants)
         self.K = self.end_max + 1 + cfg.tail
@@ -599,6 +605,20 @@ class MapBuilder:
             Rk = np.where(bad, -np.inf, Rk).astype(np.float32)
             Ck = np.where(bad, 0.0, Ck).astype(np.float32)
             # the ground node: also every jump start (the slice (h, 0) is the same standing state)
+            if c.late_jump and k + 1 < K:
+                # a jump pressed one frame late: the hero stands (any key) one more frame and starts the same jump at
+                # k + 1; the start counts with the worse of both (the raw starts of k + 1 are kept in JR / JC)
+                Rl = np.full_like(Rk[j0], np.inf)
+                Cl = np.full_like(Ck[j0], np.inf)
+                for d in (-1, 0, 1):
+                    n = d * int(st[k + 1])
+                    Rl = np.minimum(Rl, _shift(JR, n, -np.inf))
+                    Cl = np.minimum(Cl, _shift(JC, n, 0.0))
+                JR, JC = Rk[j0].copy(), Ck[j0].copy()
+                Rk[j0] = np.minimum(Rk[j0], gam * Rl)
+                Ck[j0] = np.minimum(Ck[j0], Cl)
+            else:
+                JR, JC = Rk[j0].copy(), Ck[j0].copy()
             scj = Rk[j0] + c.wc * np.minimum(Ck[j0], c.c_cap) / c.c_cap
             jstart[:, k] = scj
             sc0 = Rk[0] + c.wc * np.minimum(Ck[0], c.c_cap) / c.c_cap

@@ -169,7 +169,7 @@ def heat(geo: sm.Geometry, layer: np.ndarray, kmax: int, title: str, strike: np.
         rect_now(PERSON_WINDOW, (0, 230, 255))
     # axes: x ticks every 2 u, k ticks every 10 frames
     pad = np.full((30, img.shape[1], 3), 255, np.uint8)
-    for x in range(int(np.ceil(geo.cfg.x_lo)), int(geo.cfg.x_hi) + 1, 2):
+    for x in range(int(np.ceil(geo.cfg.x_lo)) + 2, int(geo.cfg.x_hi) + 1, 2):
         cv2.line(img, (xpx(x), 0), (xpx(x), 4), (255, 255, 255), 1)
         cv2.putText(pad, f"{x}", (xpx(x) - 6, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.33, (0, 0, 0), 1)
     cv2.putText(pad, title, (4, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 0), 1)
