@@ -32,6 +32,7 @@ from ssbot.knowledge import kinematics as kin
 from ssbot.tools.special_map_build import OUT, setup
 
 LATE_P = 0.20
+MEASURED_EXTRA = ((2, 0.01), (3, 0.005))     # SG4: +2 / +3 frames late (the measured 1.5 %)
 
 
 @dataclass
@@ -74,6 +75,26 @@ class Sim:
         self.polys = [slash_poly(f, a) for f in (1, -1) for a in (False, True)]
         self.late_p, self.offset = LATE_P, True       # execution noise (off: the attribution replays)
         self.late_kinds = {"key", "press", "jump"}
+        # SG4: the lateness distribution beyond one frame (frames, share); () = SG2's model (20 % one frame late).
+        # The measured one (on time 78 %, +1 20 %, +2..3 1.5 %): MEASURED_EXTRA. One draw per input either way.
+        self.late_extra: tuple = ()
+        self.keyed = bool(getattr(self.src, "keyed", False))
+
+    def lateness(self, kind: str) -> int:
+        """Frames late for one input (0 on time): one draw; SG2's model unless late_extra is set."""
+        if kind not in self.late_kinds:
+            return 0
+        r = self.rng.random()
+        if r < self.late_p:
+            return 1
+        if self.late_p <= 0.0:                    # the noise-free replays
+            return 0
+        acc = self.late_p
+        for m, pm in self.late_extra:
+            acc += pm
+            if r < acc:
+                return m
+        return 0
 
     # ---- the map lookups ----
     def slice_of(self, ev: dict, j: int) -> int:
@@ -124,7 +145,8 @@ class Sim:
         slash = None                       # active slash: press frame, facing, alt
         last_step_d = 0
         kend = min(g.K - 3, tl.end_k + 25)
-        e.readiness = self.S(k0, self.slice_of(ev, k0 - ev["k"]) if ev["kind"] != "ground" else 0, x)
+        s_r = self.slice_of(ev, k0 - ev["k"]) if ev["kind"] != "ground" else 0
+        e.readiness = self.src.S(k0, s_r, x, d0) if self.keyed else self.S(k0, s_r, x)
         k = k0
         while k < kend:
             j = k - ev["k"]
@@ -153,8 +175,9 @@ class Sim:
                     if debug is not None:
                         debug.append((k, round(x, 3), ev["kind"], k - ev["k"], dir_cur, [(round(float(c[0]), 3), c[1]) for c in cands], act))
                     if act[0] == "dir" and act[1] != dir_cur:
-                        if "key" in self.late_kinds and rng.random() < self.late_p:
-                            dir_pending = act[1]
+                        m = self.lateness("key")
+                        if m:
+                            dir_pending = act[1] if m == 1 else ("wait", m, act[1])
                         else:
                             dir_cur_next = act[1]
                             e.key_changes += 1
@@ -164,16 +187,20 @@ class Sim:
                         e.key_changes += 1
                         if act[2] != dir_cur:                      # the jump's best key for its first move
                             e.key_changes += 1
-                            if "key" in self.late_kinds and rng.random() < self.late_p:
-                                dir_pending = act[2]
+                            m = self.lateness("key")
+                            if m:
+                                dir_pending = act[2] if m == 1 else ("wait", m, act[2])
                             else:
                                 dir_pending = ("now", act[2])
                     elif act[0] == "press":
                         e.key_changes += 1
-                        press_pending = (k + 1 + (1 if "press" in self.late_kinds and rng.random() < self.late_p else 0), dir_cur)
+                        press_pending = (k + 1 + self.lateness("press"), dir_cur)
             # ---- frame k + 1
             new_dir = dir_cur
-            if isinstance(dir_pending, tuple):
+            if isinstance(dir_pending, tuple) and dir_pending[0] == "wait":
+                dir_pending = (("wait", dir_pending[1] - 1, dir_pending[2]) if dir_pending[1] > 2
+                               else dir_pending[2])
+            elif isinstance(dir_pending, tuple):
                 new_dir, dir_pending = dir_pending[1], None
             elif dir_pending is not None:                         # the late change lands one frame later
                 dir_pending = ("now", dir_pending)
@@ -183,8 +210,8 @@ class Sim:
                 x += dir_cur * g.step
                 last_step_d = dir_cur
             if jump_now is not None:
-                late = "jump" in self.late_kinds and rng.random() < self.late_p
-                ev = {"kind": "jump", "h": jump_now, "k": k + (1 if late else 0), "q0": (self.p - k - (1 if late else 0)) % 6}
+                late = self.lateness("jump")
+                ev = {"kind": "jump", "h": jump_now, "k": k + late, "q0": (self.p - k - late) % 6}
             dir_cur = new_dir
             if dir_cur:
                 facing = dir_cur

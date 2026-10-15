@@ -228,11 +228,140 @@ class ContourSource:
         return s >= 0 and self._band(f"P{d + 1}/{s}", k, x, s) >= 0
 
 
+class KeyedDenseSource:
+    """SG4: a keyed map's per-frame values of one phase (special_map.KeyedMapBuilder with keep_full): S [K, 3, NS, NX]
+    (the state's key c: the key already read, moving the body in the next frame), SV [K, NS, NX, 3] (the slash pressed
+    next frame with the key d held = the state's key). noise: the map's key_noise and p_late (decide_keyed weighs the
+    late branches the same way)."""
+    kind = "keyed_dense"
+    keyed = True
+
+    def __init__(self, pm, ti: TubeIndex, cfg):
+        self.p, self.ti = pm.p, ti
+        self.st = steps(pm.p, ti.K)
+        self._S, self._SV = pm.S, pm.SV
+        self.mode = cfg.key_noise
+        pl = np.asarray(cfg.p_late, float)
+        self.pl = pl / pl.sum()
+        self.gamma = float(cfg.gamma)
+        self.nq = 0
+
+    def _xi(self, k, s, x):
+        if s < 0 or not 0 <= k < self.ti.K:
+            return -1
+        xi = self.ti.xi(x)
+        return xi if 0 <= xi < self.ti.NX else -1
+
+    def S(self, k: int, s: int, x: float, c: int = 0) -> float:
+        xi = self._xi(k, s, x)
+        self.nq += 1
+        return -np.inf if xi < 0 else float(self._S[k, c + 1, s, xi])
+
+    def Smax(self, k: int, s: int, x: float) -> float:
+        xi = self._xi(k, s, x)
+        self.nq += 1
+        return -np.inf if xi < 0 else float(self._S[k, :, s, xi].max())
+
+    def SV(self, k: int, s: int, x: float, d: int) -> float:
+        xi = self._xi(k, s, x)
+        self.nq += 1
+        return -np.inf if xi < 0 else float(self._SV[k, s, xi, d + 1])
+
+
+def keyed_q(src, k: int, s1: int, x1: float, c: int, d: int, nexts) -> float:
+    """The value of reading key d in frame k + 1 from a state whose key c moves the body in frame k + 1 (the hero at
+    x1 after that move, in slice s1 at k + 1): on time the state (k + 1, s1, x1, d); late by m frames c moves the body
+    m more frames (the intermediate nodes must be feasible) and the state is (k + 1 + m, s_m, x_m, d). nexts(m) -> the
+    slice at k + 1 + m. The map's key_noise weighs the branches (exp: a branch through damage counts 0; hard: the +1
+    branch must be feasible, the worse of both)."""
+    v1 = src.S(k + 1, s1, x1, d)
+    if d == c or src.mode == "none" or not np.isfinite(v1):
+        return v1
+    br = []
+    ok = src.Smax(k + 1, s1, x1) > -np.inf
+    x, s = x1, s1
+    g = src.gamma
+    for m in (1, 2, 3):
+        if not ok:
+            br.append(-np.inf)
+            continue
+        x = x + c * src.ti.step * src.st[k + 1 + m]
+        s = nexts(m)
+        v = src.S(k + 1 + m, s, x, d) if s >= 0 else -np.inf
+        br.append(g ** m * v if np.isfinite(v) else -np.inf)
+        if m < 3:
+            ok = s >= 0 and src.Smax(k + 1 + m, s, x) > -np.inf
+    pl = src.pl
+    if src.mode == "hard":
+        return min(v1, br[0])
+    z = [b if np.isfinite(b) else 0.0 for b in br]
+    if src.mode == "exp":
+        return pl[0] * v1 + pl[1] * z[0] + pl[2] * z[1] + pl[3] * z[2]
+    if not np.isfinite(br[0]):                      # hard_exp
+        return -np.inf
+    return pl[0] * v1 + pl[1] * br[0] + pl[2] * z[1] + pl[3] * z[2]
+
+
+def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None):
+    """decide() on a keyed map (SG4): the state's key is dir_cur. In the air: the slash now when the map's node takes
+    the strike with the held key (SV at least the node's value) and the cooldown is over; else the key d for frame
+    k + 1 by keyed_q - lambda per change. On the ground: the key d, or a ground jump with hold h now (the start slice's
+    value with the late-jump rule, only above the clearance-only score WC: a reachable strike) with its first-move key.
+    Nothing feasible: retreat on the ground (away from the enemy), keep the key in the air."""
+    ti, st = src.ti, src.st
+    c = dir_cur
+    j = k - ev["k"]
+    x1 = x + c * ti.step * st[k + 1]
+    cands = []
+
+    def nexts_of(ev_, j_):
+        def f(m):
+            if ev_["kind"] == "ground":
+                return 0
+            jj = j_ + 1 + m
+            return ti.slice_of(ev_, jj) if (land is None or jj < land) else 0
+        return f
+
+    if ev["kind"] == "ground":
+        for d in (-1, 0, 1):
+            v = keyed_q(src, k, 0, x1, c, d, nexts_of(ev, j))
+            cands.append((v - lam * (d != c), ("dir", d)))
+        for h in ti.jump_h:
+            s0 = ti.s0_of[h]
+            v0 = src.S(k, s0, x, c)                       # the start slice at k (includes the late jump)
+            if not v0 > ti.wc + 1e-3:
+                continue
+            best, bd = -np.inf, c
+            for d in (-1, 0, 1):
+                v = keyed_q(src, k, s0 + 1, x1, c, d, lambda m, s0=s0: s0 + 1 + m) - lam * (d != c)
+                if v > best:
+                    best, bd = v, d
+            cands.append((min(v0, best + lam * (bd != c)) - lam, ("jump", h, bd)))
+    else:
+        s_now = ti.slice_of(ev, j)
+        if k + 1 - last_press >= PRESS_COOL and s_now >= 0:
+            sv = src.SV(k, s_now, x, c)
+            if np.isfinite(sv) and sv >= src.S(k, s_now, x, c) - 1e-3:
+                cands.append((np.inf, ("press", c)))
+        if not cands:
+            s1 = ti.slice_of(ev, j + 1) if (land is None or j + 1 < land) else 0
+            nf = nexts_of(ev, j)
+            for d in (-1, 0, 1):
+                v = keyed_q(src, k, s1, x1, c, d, nf)
+                cands.append((v - lam * (d != c), ("dir", d)))
+    v, act = max(cands, key=lambda cd: cd[0])
+    if not np.isfinite(v) and v < 0:
+        act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", c)
+    return v, act, cands
+
+
 def decide(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None):
     """The lookahead at the end of frame k (inputs for frame k + 1). ev: the hero's vertical event {"kind": ground |
     jump | bounce, "k": its start frame, "h": jump hold, "yc": bounce contact height}; land: the event's landing index
     (frames from its start; from the hero model, needed in the air). Returns (value, action, candidates); action =
-    ("dir", d) | ("jump", h, d) | ("press", d)."""
+    ("dir", d) | ("jump", h, d) | ("press", d). A keyed source (SG4) goes to decide_keyed."""
+    if getattr(src, "keyed", False):
+        return decide_keyed(src, k, ev, x, dir_cur, last_press, lam, land)
     ti, st = src.ti, src.st
     j = k - ev["k"]
     s_now = ti.slice_of(ev, j) if ev["kind"] != "ground" else 0
