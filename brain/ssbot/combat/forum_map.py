@@ -30,6 +30,7 @@ from ssbot.knowledge import kinematics as kin
 
 CLAPPER = "Song Heavy Sentry"
 MOVE = "CL_SLAM"
+ANTIC = "Slam Antic"         # the antic: the Clapper stands (knockback aside); the lunge starts with Slam 0
 BOARD: dict = {}            # iid -> {"tick", "on", "x", "k", "why", "ready_x"} (the planner's last map decision)
 NEAR_U = 16.0               # a Clapper this close (x) is the map's
 FORUM_ARENA = (14.01, 48.99)  # core.forum WALL_L / WALL_R
@@ -131,12 +132,20 @@ class MapHelper:
                        float(e["pos"][0]) - face * float(rt.disp_lo[min(max(k_trk, 0), len(rt.disp_lo) - 1)]))
             mem = {"key": key, "x0": x0, "face": face, "exit": None, "last_press": -100, "plans": 0, "taken": 0}
             self.slam[iid] = mem
+        st_ = next((m.get("state") for m in e.get("fsms") or () if m.get("name") == "Control"), None)
+        if st_ == ANTIC and mem["exit"] is None:
+            # the person (2026-10-15): a still, not aimed move binds to the enemy's position at the antic's last
+            # frame; during the antic the anchor follows it (a horizontal slash's knockback moves it 0.48 u), the
+            # deviation check starts with the lunge
+            mem["x0"] = float(e["pos"][0])
+            mem["plan"] = None if abs(mem.get("x0_prev", mem["x0"]) - mem["x0"]) > 1e-3 else mem.get("plan")
+            mem["x0_prev"] = mem["x0"]
         x0 = mem["x0"]
         info.update(k=k0, x0=round(x0, 3), face=face)
         if mem["exit"] is not None:
             info["why"] = mem["exit"]
             return None
-        dev = rt.deviation(k_trk, float(e["pos"][0]), x0, face)
+        dev = 0.0 if st_ == ANTIC else rt.deviation(k_trk, float(e["pos"][0]), x0, face)
         info["dev"] = round(dev, 3)
         if dev > smrt.DEV_TOL_U:
             mem["exit"] = "deviation"

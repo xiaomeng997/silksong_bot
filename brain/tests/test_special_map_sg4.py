@@ -188,11 +188,15 @@ def test_map_row_and_deviation_exit(setup, monkeypatch):
     assert row is not None and h.info["on"] and row.cmd.shape == (36,)
     assert abs(h.info["x"] - 4.0) < 0.2                      # flipX: it faces +x, the hero 4 u in front
     assert forum_map.BOARD[7]["on"]
-    # the Clapper 0.5 u off its anchor + the displacement range (knockback): the map is left for this slam
-    e["pos"][0] = cx + 0.6
-    assert h.row(f, start, hold, np.zeros(0, np.int64), 36, 1) is None and h.info["why"] == "deviation"
-    e["pos"][0] = cx
+    # knocked back during the antic: the anchor follows it (the move binds to its antic's last frame)
+    e["pos"][0] = cx - 0.48
+    assert h.row(f, start, hold, np.zeros(0, np.int64), 36, 1) is not None and abs(h.info["x0"] - (cx - 0.48)) < 1e-6
+    # in the lunge (Slam 0 on), 0.6 u off its anchor + the displacement range: the map is left for this slam
+    e["fsms"][0].update(state="Slam 0", t=0.02)
+    e["pos"][0] = cx - 0.48 - 0.6
     assert h.row(f, start, hold, np.zeros(0, np.int64), 36, 2) is None and h.info["why"] == "deviation"
+    e["pos"][0] = cx - 0.48
+    assert h.row(f, start, hold, np.zeros(0, np.int64), 36, 3) is None and h.info["why"] == "deviation"
     # a new slam instance: a new anchor
     f2, e2 = _mock(cx, "Slam Antic", 0.1, t0=5.0)
     assert h.row(f2, start, hold, np.zeros(0, np.int64), 36, 3) is not None
