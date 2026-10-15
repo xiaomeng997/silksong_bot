@@ -6053,3 +6053,260 @@ a new layer behind a switch that is off by default).
   - make the map aware of a fresh key change;
   - or re-plan each frame from the exact state.
 - SG1's single bounce class still needs the person's recordings.
+
+## Task 1v1 - stage SG3: score contours and lookahead (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §57)
+
+The person's storage design (S7: contourc rings, ring tree, orientation, lattice-rule simplification, integer delta
+coding) for SG2's maps, the S8 one-step lookahead as a pure function that reads the contours, SG2's closed loop rerun
+on it, and the interface for the planner integration. Offline only. forum_planner, special_mode and gauntlet are
+unchanged. sg2_sim's policy block now calls the shared decide(); its quick output is identical before and after
+(`C:\ssbot\data\m2_map\sg3\before|after\sim_quick.json`).
+
+### Code
+
+- `ssbot/combat/score_contours.py` (new):
+  - `to_bands(score, step)`: b = floor(score / step), -1 = infeasible / no node.
+  - `trace_level`: marching squares on the padded band grid.
+    - Vertices are linearly interpolated at m - 0.5 on the lattice edges.
+    - A saddle joins its high diagonal iff the cell mean >= m - 0.5 (monotone in m, so the levels nest).
+    - Integer coords: COORD = 100 units per frame and per lattice step (0.00165 u). The lattice points sit on
+      multiples of 100, so the winding test is exact. (0.01 u does not divide the 0.165 u step.)
+  - `ContourLayer.from_bands`:
+    - orientation check: the high side lies on the left, outer rings CCW, holes CW in the plane (X = k, Y = x);
+      0 flips needed in every build;
+    - ring tree (compiled);
+    - greedy Visvalingam-Whyatt `_simplify` (compiled) under the lattice rule:
+      - level 0: no lattice point changes side;
+      - inner levels: +-1 band (`tol`), one direction per point;
+      - no vertex of any ring inside a removed triangle and no lattice point on a new edge, so rings never cross or
+        touch;
+    - `stats["tree_kept"]` compares the tree before and after simplification.
+  - Queries and checks:
+    - `query(k, xi)`: compiled winding number with a ring bbox filter and a binary search over the nested levels;
+    - `band()`: the numpy reference;
+    - `row(k)`: one scan line;
+    - `dense()`: a raster by difference arrays, used for the checks;
+    - also `net_area()` (signed areas per level), `bbox()` (frame range per ring) and `contourc()` (the MATLAB
+      two-row layout: header [level; n] then the points, sorted by level).
+  - Storage: `encode` / `decode` (vectorized). Per ring: level, n, parent, the first point (int32) and int16 deltas.
+    `ContourSet` saves named layers in one npz. In memory: flat int32 points plus ring offsets; `prepare()` builds
+    the query arrays.
+  - `fill_rows`: rows with no node (apex rows with no apex state, tube rows where the slice is not a state) copy the
+    previous row before contouring, so they add no rings. The lattice rule applies: nothing is queried there, and
+    the source reads them as infeasible.
+- `ssbot/combat/map_lookahead.py` (new):
+  - `TubeIndex`: the macro states (slice of an event, valid rows per phase);
+  - sources:
+    - `DenseSource`: SG2's keep_full values;
+    - `BandedSource`: the same values cut to bands (lower band edge), exact on the lattice;
+    - `ContourSource`: the tube contour files;
+  - `decide(src, k, ev, x, key, last_press, lam, land)` is SG2's closed-loop policy, now shared (details under
+    "Interface" below);
+  - `decide_world(src, HeroState, EnemyPose, lam)`: world keys;
+  - `readiness(src, x, ev)`: the score at k 0;
+  - `load_contour_source(path, p)`.
+- `ssbot/tools/score_contours_build.py` (new): every layer is checked on every lattice point (feasibility exact,
+  +-tol, rings, orientation, tree). The reports go to `sg3\contours_*.json`.
+  - `nodes`: converts the stored maps (ground, 48 apex and 18 jump-start layers per phase; open floor plus wf6/9/12)
+    to `knowledge/.../special_map_CL_SLAM[_wfU]_contours[_sX].npz`. The rows with no node are listed in
+    meta.none_rows.
+  - `tubes --phases a-b [--step S --suffix _sS]`: SG2's full pass per phase, giving `special_map_CL_SLAM_tubes_p<p>
+    [_sS].npz`. Per slice it stores S/<s>, SV<d+1>/<s> (strike pressed next frame with key d held) and P<d+1>/<s>
+    (press flag: the strike is the best continuation within 0.01; binary, exact). Empty layers are not stored.
+  - All these npz files are git-ignored like the other forum npz.
+- `ssbot/tools/sg3_sim.py` (new): SG2's 155 starts x 24 variants per phase, run three times with the same noise seed:
+  dense (with banded and contour shadows on every visited state), banded, contour. Each differing decision is
+  classified by its cost on the dense values. Damage from feasible starts is replayed noise-free, and the decision
+  latency is timed. Output: `sg3\sim[_sX][_tag]_p<a>-<b>.json`.
+- `ssbot/tools/sg2_sim.py`: the policy calls `map_lookahead.decide`. Optional `src` and `shadows`.
+- Tests:
+  - `tests/test_score_contours.py` (9 tests, 3 s): synthetic peaks, holes, cliffs and walls. Lattice equality,
+    structure, nesting, siblings disjoint, no vertex on the lattice, round trip, contourc layout.
+  - `tests/test_map_lookahead.py` (4 tests, 60 s): reduced map, contours built on demand.
+    - tol-0 contours give exactly the banded values and press flags, and SG2's sim decides identically on them;
+    - tol-1 differences cost less than 3 bands on the banded values;
+    - world-frame signs; readiness.
+  - Also pass: test_special_map, test_hero_macros, test_move_data. test_import_firewall still fails only on its known
+    forum_v2 -> aim_zones -> ipc chain. The new modules import no ssbot.ipc.
+
+### Numbers
+
+- **Node layers** (band 0.05, tol 1; open floor, 6 phases x 67 layers):
+  - 4.02 MB (the dense npz is 375 KB; the bands as zlib'd uint8 are 445 KB);
+  - 76,591 rings; 10.9 M raw points simplified to 2.41 M;
+  - 6.8 % of the lattice points are one band off;
+  - 0 failures, tree kept, 0 orientation flips; 25 s build;
+  - wf6 / wf9 / wf12: 3.6 / 3.9 / 4.0 MB;
+  - without the row fill: 6.85 MB, 256,619 rings, 324 s;
+  - band 0.1: 1.36 MB; band 0.25: 392 KB (0.72x the zlib'd bands, about the dense npz).
+- **Tube layers** (every macro state, band 0.05), per phase:
+  - 8,936-8,948 layers, 44.0-44.6 MB;
+  - 1.17 M rings; 99 M raw points simplified to 24.9 M;
+  - 1.9-2.0 % of points one band off; 0 failures;
+  - 9.4x smaller than SG2's float16 S+SV (419 MB), but **19x larger than the zlib'd uint8 levels (2.3 MB)**;
+  - band 0.1: 18.1 MB (10.6 M points); band 0.25: 5.6 MB (3.6 M points);
+  - contouring takes about 10 min per phase at Idle (3 jobs).
+- **Why the contours are not small**:
+  - the gamma discount makes the scores ramp along k, so a level line runs about every 2-3 frames at 0.05;
+  - the 6-frame physics step pattern makes those lines jagged;
+  - most of each layer is one plateau (clearance only, 0.3), which zlib codes almost for free and contours do not.
+  - Contours compete on size only at about 0.25 per band (the person's 8-16 levels), and that step costs decisions
+    (below).
+- **Queries** (warm, `sg3\timing.json`):
+  - single lattice query: 1.0 us p50, 3.1 us p99 (node and tube layers);
+  - one row raster: about 1.1 ms;
+  - one tube phase: load 1.6 s + prepare 0.2 s, 237 MB of RAM (0.1: 105 MB; nodes 22 MB).
+  - **One lookahead decision** (all successor queries) on the contour source: 7 queries p50 (max 183: a ground
+    decision tries 18 jump holds), 32 us p50, 0.68 ms p99, in Python.
+- **Closed loop, band 0.05** (22,320 episodes per source; 6 phases x 24 variants x 155 starts; seed 57 + p):
+
+  | | strike, no damage | damage episodes | hits / slam | key changes / slam | misses |
+  |---|---|---|---|---|---|
+  | dense | 74.93 % | 712 | 1.125 | 4.84 | 80 |
+  | banded | 74.78 % | 737 | 1.125 | 5.00 | 28 |
+  | contour | 74.85 % | 749 | 1.126 | 5.38 | 45 |
+
+  - Feasible starts damaged: dense 92 / 20,187 (0.46 %), banded 113 (0.56 %), contour 127 / 20,192 (0.63 %). The
+    same episodes without execution noise: **0 / 0 / 0**.
+  - Decisions on the 1,881,410 states the dense run visited:
+    - banded: 98.99 % identical; contour: 97.90 %.
+  - **Every difference is explained**:
+    - (a) value ties: the other choice costs at most 0.0498 on the dense values for banded (bound: one band) and
+      at most 0.1167 for contour (bound: 3 bands, since a contour value lies within -2..+1 bands of the dense value;
+      95.1 % within one band). Banded: 17,947; contour: 37,574.
+    - (b) the never-jump threshold: a jump whose value sits at the clearance-only score (0.3) is offered on one side
+      only. Banded: 1,047; contour: 2,024.
+    - Press decisions never differ, because the press flags are exact binary layers.
+  - The contour policy changes keys about 11 % more often (the +-1 band jitter). With the 20 % late-key noise this
+    is where its extra damage comes from.
+- **Band step and lambda** (phase 0, 3,720 episodes each; dense: 75.1 %, 113 damage episodes):
+
+  | contour run | identical decisions | strike, no damage | damage episodes | hits / slam |
+  |---|---|---|---|---|
+  | band 0.05 | 97.8 % | 74.2 % | 131 | 1.115 |
+  | band 0.1 | 97.0 % | 74.7 % | 117 | 1.117 |
+  | band 0.25 | 96.6 % | 72.0 % | 218 | 1.091 |
+  | band 0.05, lambda 0.05 | 97.5 % | 74.4 % | 138 | 1.12 |
+
+  - With lambda 0.05: 4.71 key changes per slam.
+  - Run-to-run noise is about +-15 damage episodes. Noise-free damage is 0 in every run.
+- **Band 0.1, all 6 phases** (22,320 episodes; the same seeds as the 0.05 table):
+
+  | | strike, no damage | damage episodes | hits / slam | key changes / slam | feasible starts damaged |
+  |---|---|---|---|---|---|
+  | contour | 74.80 % | 756 | 1.124 | 5.10 | 125 / 20,190 |
+  | banded | 74.33 % | 846 | 1.120 | 4.72 | 200 / 20,185 |
+
+  - Identical decisions: 97.07 % (contour), 98.14 % (banded).
+  - Differences: value ties with a gap of at most 0.245 (bound: 3 bands; 96.0 % within one band) and the jump
+    threshold (2,608).
+  - Noise-free: 0 damage.
+  - The banded reference does worse than the contours here. Flooring at 0.1 flattens the clearance term (0.3 x
+    min(C, 1 u)), so ties keep the hero closer to danger and late keys then hurt. The contours' +-1 band breaks
+    those ties.
+  - Tube files: 17.8-18.1 MB per phase; RAM 105 MB per phase (0.05: 237 MB; 0.25: 37 MB); load 1.2 s; queries 1.5 /
+    4.0 us p50 / p99 (under load).
+
+### Design decisions
+
+- **Three layer families.**
+  - Node layers (ground, apex, jump start) are the person's S7 layers.
+  - The tube layers hold every macro state. The airborne lookahead needs the value of the state after the next frame,
+    which is not a node (the person's part 96, last sentence: an air table per slice).
+  - An S2-style online macro evaluation would need SG2's whole Geometry at run time, so it was not built.
+- **Band step 0.05 for the main build; 0.1 recommended for the integration.**
+  - 0.1 makes the same decisions within noise at 40 % of the size.
+  - 0.25 is the person's 8-16 levels: it saves size but costs about 3 points of strikes without damage and doubles
+    the damage episodes.
+- **The +-1 tolerance moves each point one way only.** A point is never one band down at its own level and one up
+  at the next, so the levels stay nested on the lattice without a global check. The geometric checks keep the tree.
+- **Values are lower band edges.** The never-jump threshold (value > WC + 0.001) then stays conservative: band
+  centres would have allowed jumps at R = 0.
+- **The press flags are separate binary layers (exact).** Press decisions are therefore identical to the dense map.
+  The strike values SV are banded like S.
+- **Row fill for no-node rows.** The source reads those rows as infeasible, exactly as the dense pass does.
+- **Coordinates are 1/100 frame x 1/100 lattice step**, not 0.01 u: the 0.165 u step is not a multiple of 0.01 u, so
+  lattice points would sit on half units.
+
+### Interface for the integration stage (not built; after the person's eye check)
+
+- **Switches**:
+  - `SSBOT_FORUM_SPECIAL_MAP=1` (default off: the planner unchanged);
+  - `SSBOT_FORUM_SPECIAL_MAP_SRC=contour|levels` (the source; default contour);
+  - `SSBOT_FORUM_SPECIAL_MAP_STEP=0.1` (which tube files);
+  - `SSBOT_FORUM_SPECIAL_MAP_LAMBDA=0.02`;
+  - `SSBOT_FORUM_SPECIAL_MAP_READY_W` (the readiness penalty weight);
+  - when the map switch is on, `SSBOT_FORUM_CL_NODOWN` is ignored (log it).
+- **Load once**:
+  - 6 tube files: about 1.4 s and 105 MB each at 0.1 (0.05: 1.8 s, 237 MB);
+  - the node file;
+  - the wall buckets: tube files exist for the open floor only; build `tubes --wall-front U --tag wfU` for 6, 9 and
+    12 u (about 10 min per phase).
+- **Per tick, a tracked Clapper in CL_SLAM** (k = frames since the Slam Antic entry, 0..77, on the game-time clock
+  as in sg2_check). Map the state:
+  - **x0 and f**: the Clapper centre at the antic entry (the lunge is inside the map) and its facing.
+  - **x**: (hero box centre - x0) x f.
+  - **ev**: the vertical event:
+    - ground;
+    - jump (h = the hold, j = frames since the press);
+    - bounce (yc = box bottom above the floor at the contact, j = frames since the contact).
+  - **land**: from HeroMacros (jumps[(h, q0)].land; bounce apex + first frame at or below the floor).
+  - **key** = the direction key read this frame x f; **last_press** = the last slash press.
+  - **Phase p**: frame k has a 50 Hz step iff (k - p) % 6 != 0. If the tracker's cycle is ambiguous (ALO..AHI),
+    take the minimum per option over the possible phases.
+  - **Umbrella and other off-map states** (31 of 46 live slam hits started in one): no map value. The planner's
+    normal rows apply.
+- **Call** `decide(src_p, k, ev, x, key, last_press, lam, land)`. It returns (value, action):
+  - `("dir", d)`: key d x f;
+  - `("jump", h, d)`: jump held h frames + key d x f;
+  - `("press", d)`: attack + down + key d x f.
+
+  Cost: 32 us p50, 0.7 ms p99 per phase. Calling it again each frame of the horizon gives the keys of a full row.
+- **Map step to candidate row**:
+  - Roll decide() forward over the planner's horizon T on the hero model (noise-free; the sim's loop without noise),
+    giving one row "SPECIAL_MAP" with its key masks.
+  - The planner judges it like every other row, with its full check over the row's frames: every other enemy's
+    predicted boxes, rune bombs, projectiles, terrain. The Clapper's own slam boxes are certified by the map; keep
+    them as a cross-check, not a veto.
+  - If the row passes, rank it first (as special_mode does today) and keep it while the next decide() agrees (the
+    G4 keep rule). If it fails, the planner's other rows decide.
+- **Readiness before the slam** (replaces CL_NODOWN):
+  - When a Clapper within about 13 u can start CL_SLAM (idle, walk, end of a cast; L2 knows), take each candidate
+    row's end state. Its readiness = `readiness(src, x_end, ev_end)`, min over phases, x relative to the Clapper's
+    current position as if the antic starts then.
+  - Penalty: w x max(0, R_ref - readiness). Use R_ref 1.0: the sim gives 99.4 % strikes without damage from
+    readiness [1, 2), and 0 strikes below 0.31.
+  - Reject rows with readiness -inf unless every row has it. Rows ending in the umbrella count as readiness 0.
+  - The down-slash rows stay. They lose only when they leave the hero unready.
+- **Fallback**:
+  - decide() itself retreats on the ground (away from the Clapper) when nothing is feasible, keeps the key in the air,
+    and never jumps without a reachable strike (a value at or below WC 0.3).
+  - The planner: if the map row fails its check, use the normal rows with the readiness penalty, never a map jump.
+- **L2** (tactics/gauntlet.py `_clapper_spot`, CC_SLAM):
+  - Before the slam, the standing target is the readiness argmax near the hero: front 3-6 u (3.1-3.4) or behind 3 u
+    (3.54). Not slam_out_u 13 u, which has readiness 0.30 and no strike.
+  - During the slam, L2 must not pull the hero out: its target is the map's next x. The existing "slam: strike"
+    branch should take the map's press point.
+- **Log per tick**: the map action, its value, readiness, the phase(s), the source, the decision time (last_info, as
+  the spec_* counters).
+
+### Open items / next
+
+1. **The person's eye check of the SG2 overlay first**: `C:\ssbot\sandbox\start_overlay_map_check.ps1` (prepared,
+   not launched; frozen checkout `C:\ssbot\live_1v1_5f94ddc`). The planner must not use the map before it.
+2. Integration (SG4): the interface above behind `SSBOT_FORUM_SPECIAL_MAP`, with a switch-off identity test.
+3. Review.
+4. Live A/B against the rn arm (16/16 kills, 15 hitless) at the same seeds.
+
+Also open:
+
+- The band step is the person's call:
+  - contours as specified are 4-20x larger than zlib'd dense levels;
+  - 0.1 keeps the decisions at 18 MB per tube phase;
+  - 0.25 (their 8-16 levels) loses strikes.
+  - Alternative: dense uint8 levels at run time, with contours for the boundary geometry and the overlay.
+- Tube files for the wall buckets are not built.
+- The umbrella macro (31 of 46 live hits) is still missing from the map.
+- The contour policy's extra key changes: lambda 0.05, or a tie rule "keep the key within one band".
+- The ground decision's p99 (183 queries for 18 holds) could cache one row per layer and frame.
+- SG1's single bounce class still needs the person's recordings.

@@ -90,7 +90,7 @@ def gap_table(gaps: list, step: float, lam: float) -> dict:
     if len(g):
         out["value_gap"] = {"max": round(float(g.max()), 4), "p50": round(float(np.median(g)), 4),
                             "le_step": round(float((g <= step + 1e-6).mean()), 4),
-                            "le_2step_plus_lam": round(float((g <= 2 * step + lam + 1e-6).mean()), 4)}
+                            "lt_3step": round(float((g < 3 * step + 1e-6).mean()), 4)}
     return out
 
 

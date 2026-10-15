@@ -90,7 +90,8 @@ def test_sources_agree_on_the_lattice(built):
 
 def test_sim_decisions(built):
     """SG2's sim with the dense source and two shadows: the tol-0 contours decide exactly as the banded values; the
-    +-1 contours differ only on options whose dense values are within two bands (+ lambda)."""
+    +-1 contours differ only on options whose values are within three bands (a contour value lies within -2..+1
+    bands of the true value: the floor to the band edge plus the +-1 band of the simplification)."""
     from ssbot.tools.sg2_sim import Sim
     geo, pm, ti = built
     sim = Sim(geo, pm, np.random.default_rng(5))
@@ -105,7 +106,7 @@ def test_sim_decisions(built):
     assert c0["n"] > 100 and c0["diff"] == 0
     for kind, gap in c1["gaps"]:                                   # a jump may cross the never-jump threshold
         assert kind in ("value", "not_offered_here", "not_offered_there")
-        assert gap is None or gap <= 2 * STEP + 0.02 + 1e-6
+        assert gap is None or gap < 3 * STEP + 1e-6
 
 
 def test_decide_world_and_readiness(built):
