@@ -12,8 +12,10 @@ lambda per key change, take the best:
     bounded by the jump start's own score (which holds the late-jump robustness);
   * in the air: per key d the event's value two frames ahead, or the strike pressed from the next node with that key
     held (input latency: the key read now is the key the strike holds); the slash now when the strike with the
-    current key is (within 0.01) the node's best continuation (the press flag) and the cooldown (19 frames from the
-    last press) has run out;
+    current key is (within 0.01) the node's best continuation (the press flag) or (SG3b) at least the best
+    continuation without it given the key already read (committed), and the cooldown (19 frames from the last
+    press) has run out; equal values go to the current key (lambda), then to the key whose value is the earlier
+    strike (SG3b tie rule);
   * nothing feasible: retreat on the ground (away from the enemy), keep the key in the air.
 Map coordinates: x = hero box centre minus the enemy's position at the antic entry (k = 0), along the enemy's facing
 (u, centre to centre); d = +1 moves toward the enemy's front. The map is per physics phase p: frame k has a 50 Hz step
@@ -30,6 +32,9 @@ from ssbot.combat import score_contours as sc
 
 PRESS_COOL = 19                   # frames from one press to the next (hero_macros.COOLDOWN_F)
 PRESS_EPS = 1e-2                  # the strike is the node's best continuation within this
+TIE_EPS = 0.0                     # > 0: equal values in the air -> the key whose value is the earlier strike (SG3b
+                                  # tried 1e-9; see forum.md 58)
+PRESS_COMMITTED = True            # SG3b: also slash when the strike beats every continuation with the committed key
 
 
 def steps(p: int, K: int) -> np.ndarray:
@@ -168,7 +173,9 @@ class BandedSource(DenseSource):
 class ContourSource:
     """One phase's tube layers from the contour store (score_contours_build: layers S/<s>, SV<d+1>/<s>, P<d+1>/<s>;
     a missing layer is all infeasible; the rows at which a slice is no state were filled before contouring and read
-    as infeasible here, as in the dense pass). Values are the lower band edges."""
+    as infeasible here, as in the dense pass). Values are the lower band edges: band x step (SG3's fixed steps) or,
+    for an equal-area file (SG3b, meta.banding), the band's lower edge from the file's edges (per frame or per
+    layer; band 0: 0.0)."""
     kind = "contour"
 
     def __init__(self, cs: sc.ContourSet, ti: TubeIndex, p: int):
@@ -177,6 +184,26 @@ class ContourSource:
         self.st = steps(p, ti.K)
         self.L = cs.layers
         self.nq = 0
+        bd = cs.meta.get("banding", {"mode": "step"})
+        self.mode = bd.get("mode", "step")
+        self.scope = bd.get("scope")
+        self._fv, self._lv = None, None
+        if self.mode == "equal_area":                 # SG3b: a band stands for its lower edge
+            if self.scope == "frame":
+                self._fv = sc.edge_values(cs.arrays[f"edges_{p}"])                        # [K, n]
+            else:
+                E = sc.edge_values(cs.arrays["edges"])                                    # [layer, n]
+                self._lv = {nm: E[i] for i, nm in enumerate(cs.meta["names"])}
+
+    def value(self, name: str, k: int, b: int) -> float:
+        """The score a band stands for (its lower edge); -inf for -1."""
+        if b < 0:
+            return -np.inf
+        if self._fv is not None:
+            return float(self._fv[k, b])
+        if self._lv is not None:
+            return float(self._lv[name][b])
+        return b * self.step
 
     def _band(self, name: str, k: int, x: float, s: int) -> int:
         lay = self.L.get(name)
@@ -188,14 +215,14 @@ class ContourSource:
     def S(self, k, s, x):
         if s < 0:
             return -np.inf
-        b = self._band(f"S/{s}", k, x, s)
-        return -np.inf if b < 0 else b * self.step
+        nm = f"S/{s}"
+        return self.value(nm, k, self._band(nm, k, x, s))
 
     def SV(self, k, s, x, d):
         if s < 0:
             return -np.inf
-        b = self._band(f"SV{d + 1}/{s}", k, x, s)
-        return -np.inf if b < 0 else b * self.step
+        nm = f"SV{d + 1}/{s}"
+        return self.value(nm, k, self._band(nm, k, x, s))
 
     def press(self, k, s, x, d):
         return s >= 0 and self._band(f"P{d + 1}/{s}", k, x, s) >= 0
@@ -235,15 +262,26 @@ def decide(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: 
                 cands.append((best - lam, ("jump", h, bd)))
     else:
         s1 = ti.slice_of(ev, j + 1) if j + 1 < land else -1
+        best_dir = -np.inf
         for d in (-1, 0, 1):
             x2 = x1 + d * ti.step * st[k + 2]
             s2 = ti.slice_of(ev, j + 2) if j + 2 < land else 0
             v = src.S(k + 2, s2, x2)
+            tie = 0.0
             if s1 >= 0 and k + 2 - last_press >= PRESS_COOL:
-                v = max(v, src.SV(k + 1, s1, x1, d))
-            cands.append((v - lam * (d != dir_cur), ("dir", d)))
-        if k + 1 - last_press >= PRESS_COOL and s_now >= 0 and src.press(k, s_now, x, dir_cur):
-            cands.append((np.inf, ("press", dir_cur)))
+                sv = src.SV(k + 1, s1, x1, d)
+                if np.isfinite(sv) and sv >= v:
+                    v, tie = sv, TIE_EPS           # TIE_EPS > 0: a tie goes to the key whose value is the earlier strike
+            best_dir = max(best_dir, v)
+            cands.append((v - lam * (d != dir_cur) + tie, ("dir", d)))
+        if k + 1 - last_press >= PRESS_COOL and s_now >= 0:
+            # the key read now (dir_cur) is committed: the slash now is right when it is the best continuation with
+            # that key (the press flag compares it with S, the best over every key, which may need another key)
+            # (strictly better than waiting: on a tie wait, the strike may come one frame later; an early strike's
+            # value assumes a free key at its contact, which the held key may not have)
+            sv_now = src.SV(k, s_now, x, dir_cur) if PRESS_COMMITTED else -np.inf
+            if src.press(k, s_now, x, dir_cur) or (np.isfinite(sv_now) and sv_now > best_dir):
+                cands.append((np.inf, ("press", dir_cur)))
     v, act = max(cands, key=lambda c: c[0])
     if not np.isfinite(v) and v < 0:                 # nothing feasible: retreat on the ground, keep the key in the air
         act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", dir_cur)

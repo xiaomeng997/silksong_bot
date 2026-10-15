@@ -120,3 +120,99 @@ def test_fill_rows_and_errors():
         sc.ContourLayer.from_bands(B, 0.01)
     E = sc.ContourLayer.from_bands(np.full((4, 4), -1, np.int16), 0.1)
     assert E.top == -1 and not E.rings and E.query(1, 1) == -1
+
+
+# ---- SG3b: equal-area bands (forum.md 58) ----
+def _brute_sse(v, n):
+    """The least sum of squared band areas over every partition of the distinct values into n contiguous bands."""
+    import itertools
+    uv, cnt = np.unique(v, return_counts=True)
+    cm = np.concatenate([[0], np.cumsum(cnt)])
+    best = np.inf
+    for cuts in itertools.combinations(range(1, len(uv)), min(n, len(uv)) - 1):
+        pos = [0, *cm[list(cuts)], cm[-1]]
+        best = min(best, float(sum((b - a) ** 2 for a, b in zip(pos[:-1], pos[1:]))))
+    return best
+
+
+@pytest.mark.parametrize("n", [3, 4, 5])
+def test_equal_area_edges(n):
+    rng = np.random.default_rng(n)
+    # no ties: the plain quantiles, every band within 1 / (64 n) of the total (the cut grid)
+    v = rng.random(20000)
+    e = sc.equal_area_edges(v, n)
+    sh = sc.band_shares(sc.bands_from_edges(v[None], e), n)
+    assert len(e) == n - 1 and np.abs(sh - 1 / n).max() <= 1 / (64 * n) + 1e-9
+    # an atom (the clearance-only plateau): one band of its own, never split
+    w = np.concatenate([rng.random(1000) * 0.3, np.full(7900, 0.3), 0.5 + rng.random(1100)])
+    B = sc.bands_from_edges(w[None], sc.equal_area_edges(w, n))[0]
+    assert ((B == B[1000]) == (w == 0.3)).all()
+    # ties: the most equal partition (least sum of squared areas), checked by brute force; a value never split
+    for seed in range(5):
+        r = np.random.default_rng(100 + seed)
+        t = r.choice(np.round(r.random(9), 2), size=300, p=r.dirichlet(np.ones(9)))
+        e = sc.equal_area_edges(t, n)
+        Bt = sc.bands_from_edges(t[None], e)[0]
+        for u in np.unique(t):
+            assert len(np.unique(Bt[t == u])) == 1
+        c = np.bincount(Bt, minlength=n).astype(float)
+        assert float((c ** 2).sum()) == pytest.approx(_brute_sse(t, n))
+    # fewer distinct values than bands: fewer edges; one value: none
+    assert len(sc.equal_area_edges(np.array([1.0, 1.0, 2.0]), n)) == 1
+    assert len(sc.equal_area_edges(np.full(10, 0.3), n)) == 0
+    assert len(sc.equal_area_edges(np.array([np.nan, -np.inf]), n)) == 0
+
+
+def test_bands_from_edges_per_frame():
+    s = field(6)
+    E = sc.pad_edges([sc.equal_area_edges(row, 4) for row in s], 3)
+    B = sc.bands_from_edges(s, E)
+    for k in range(s.shape[0]):
+        e = E[k][np.isfinite(E[k])]
+        assert (B[k] == sc.bands_from_edges(s[k][None], e)[0]).all()
+    assert ((B >= 0) == np.isfinite(s)).all()
+    V = sc.edge_values(E)
+    assert V.shape == (s.shape[0], 4) and (V[:, 0] == 0).all()
+
+
+@pytest.mark.parametrize("scope", ["layer", "frame"])
+@pytest.mark.parametrize("n", [3, 5])
+def test_equal_area_layers_exact_after_encoding(tmp_path, scope, n):
+    """The feasibility ring exact on every lattice point after simplification and after the integer encoding (file
+    round trip); inner rings exact with tol 0 and within +-1 with tol 1; nesting, orientation, tree."""
+    cs = sc.ContourSet(60, 70, 0.0, {"banding": {"mode": "equal_area", "bands": n, "scope": scope}})
+    want = {}
+    for seed in (0, 1, 2):
+        s = field(seed)
+        if scope == "layer":
+            E = sc.equal_area_edges(s, n)
+        else:
+            E = sc.pad_edges([sc.equal_area_edges(row, n) for row in s], n - 1)
+        B = sc.bands_from_edges(s, E)
+        for tol in (0, 1):
+            L = sc.ContourLayer.from_bands(B, 0.0, tol=tol)
+            assert L.stats["tree_kept"] and L.stats["orientation_flips"] == 0
+            a = L.areas2()
+            for i, p in enumerate(L.parent):
+                if p < 0:
+                    assert a[i] > 0                                   # roots are outer rings
+                else:
+                    assert (sc.winding(L.rings[p], L.rings[i][:, 0], L.rings[i][:, 1]) != 0).all()
+                    if L.level[p] == L.level[i]:
+                        assert np.sign(a[p]) != np.sign(a[i])
+            for p in np.unique(L.parent):                            # siblings disjoint
+                sib = np.flatnonzero(L.parent == p)
+                for i in sib:
+                    for j in sib:
+                        if i != j:
+                            assert (sc.winding(L.rings[i], L.rings[j][:, 0], L.rings[j][:, 1]) == 0).all()
+            cs.add(f"{seed}/{tol}", L)
+            want[f"{seed}/{tol}"] = (B, tol)
+    cs.arrays["edges"] = np.arange(6, dtype=np.float32).reshape(2, 3)
+    cs.save(tmp_path / "ea.npz")
+    cs2 = sc.ContourSet.load(tmp_path / "ea.npz")
+    assert cs2.meta["banding"]["scope"] == scope and (cs2.arrays["edges"] == cs.arrays["edges"]).all()
+    for nm, (B, tol) in want.items():
+        D = cs2.layers[nm].dense()
+        assert ((D >= 0) == (B >= 0)).all()                       # feasibility exact on every lattice point
+        assert np.abs(D.astype(int) - B).max() <= tol

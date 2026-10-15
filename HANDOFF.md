@@ -6310,3 +6310,169 @@ Also open:
 - The contour policy's extra key changes: lambda 0.05, or a tie rule "keep the key within one band".
 - The ground decision's p99 (183 queries for 18 holds) could cache one row per layer and frame.
 - SG1's single bounce class still needs the person's recordings.
+
+## Task 1v1 - stage SG3b: equal-area bands (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §58)
+
+The person's decision (2026-10-15, main ae62219): the outermost (feasibility) ring exact on the integer lattice, inside
+3-5 bands of equal area instead of fixed score steps. Second decision (main b1deace, relayed by the lead's note in
+`C:\ssbot\data\m2_map\sg3b\NOTE_FROM_LEAD.txt`): inner rings may carry some error if that simplifies them, unless the
+closed loop shows clear harm. Offline only; forum_planner, special_mode and gauntlet unchanged.
+
+### Code
+
+- `ssbot/combat/score_contours.py`:
+  - `equal_area_edges(values, n)`: the band edges of the feasible cells' scores. The partition into n contiguous
+    bands with the least sum of squared band areas (the most equal areas); a score value is never split.
+    - Without ties this is the plain quantiles (within 1 / (64 n) of the area: the cut grid when there are more than
+      64 n distinct values).
+    - An atom (one value with more than 1/n of the cells) becomes its own band: the clearance-only plateau 0.3 holds
+      79 % of the feasible tube cells, so in most layers one band is the plateau, one or two lie below it (clearance
+      < 1 u) and the rest above it (a strike is reachable).
+    - A greedy bottom-up quantile rule was tried first and dropped: it merged the cells below the plateau into the
+      plateau band (the near-danger information).
+  - `bands_from_edges` (edges per layer [m] or per frame [nk, m]), `pad_edges`, `edge_values` (a band stands for its
+    lower edge, band 0 for 0.0), `band_shares`.
+  - `ContourSet.arrays`: extra arrays saved as `x_<name>` (the edges).
+- `ssbot/combat/map_lookahead.py`:
+  - `ContourSource` reads equal-area files (meta.banding): value = the band's lower edge from the file's edges (per
+    layer or per frame); SG3's step files unchanged.
+  - **decide(), press rule (fixes a latent gap the bands exposed)**: in the air the key read now is already
+    committed, but the press flag compares the strike with S, the best over every key. A tie could pick a key whose
+    only safe continuation is the strike while the flag said no, so the hero had nothing safe left (101 noise-free
+    damage episodes in ea4f phase 0). Now the slash is also taken when the strike with the committed key is strictly
+    better than every non-press continuation with that key (on a tie: wait; with no safe non-press option: slash).
+    `PRESS_COMMITTED = True`.
+  - Tie rules: the current key keeps ties (lambda, as before). "Prefer the earlier strike" (`TIE_EPS`) was tried:
+    no effect on the equal-area sources and a press-on-tie version caused 106 noise-free damage episodes (ea3l
+    phase 4: an early strike whose value assumes a free key at its contact while the held key is still committed;
+    see Open items). It is off (`TIE_EPS = 0`).
+  - The dense policy changes slightly with the press rule: 712 -> 696 damage episodes, 92 -> 75 feasible starts
+    damaged, strikes without damage 74.93 % -> 75.03 %.
+- `ssbot/tools/score_contours_build.py`:
+  - Equal-area mode is the default: `--bands 5 --scope layer --tol 0` (comma lists build several variants from one
+    pass; the binary press layers are contoured once). `--step S` selects SG3's fixed steps (`--tol` default 1 there).
+  - Files `..._tubes_p<p>[_<tag>]_ea<n><l|f>[_t1].npz`, `..._contours_ea<n><l|f>.npz`. meta.banding: mode, bands,
+    scope, tol, value rule, edge rule; the edges in `x_edges` ([layer, n - 1] in meta.names order, layer scope) or
+    `x_edges_<phase>` ([K, n - 1], frame scope, also listed in meta).
+  - Every layer is checked twice on every lattice point: in memory after the simplification, and again after the
+    file is written and read back (the integer coordinate encoding: 1/100 frame x 1/100 lattice step).
+    - Feasibility exact; inner bands exact (tol 0) or within +-1; rings, orientation, tree.
+    - The band areas per scope unit go to the report.
+  - Reports: `C:\ssbot\data\m2_map\sg3b\contours_*.json`, `build_summary_tubes.json`.
+- `ssbot/tools/sg3b_sim.py` (new): SG3's closed loop (same 155 starts x 24 variants x 6 phases, seeds 57 + p, 20 %
+  late keys / presses / jumps, off-lattice starts, lambda 0.02).
+  - Dense with every variant as a shadow, then each variant's own closed loop, plus the noise-free replays.
+  - Per variant: file size, load / prepare time, the query arrays' RAM, decision latency.
+  - `merge` pools the per-phase raw counts. Outputs `sg3b\sim_<tag>_p<a>-<b>.json`, `sg3b\sim_merged_<tag>.json`.
+- Tests:
+  - `tests/test_score_contours.py` +8: equal areas without ties (within 1 / (64 n)); an atom is one band; the least
+    sum of squares checked by brute force with ties; a value never split; per-frame edges; the feasibility ring exact
+    on every lattice point after the file round trip; inner rings exact (tol 0) or +-1; nesting, orientation,
+    sibling disjointness, tree.
+  - `tests/test_map_lookahead.py` +2: the equal-area contour source returns exactly the lower edge of the dense
+    value's band on sampled lattice states (frame and layer scope); press flags exact; a jump has a reachable strike.
+  - 23 pass in these two files.
+
+### Numbers
+
+All 6 phases, open floor; the closed loop has 22,320 episodes per source, with the final decide() rule.
+
+- **Sizes, tube layers per phase** (8,930-8,948 layers):
+
+  | variant | MB | points | rings |
+  |---|---|---|---|
+  | ea3 layer | 1.37 | 1.39 M | 84 k |
+  | ea4 layer | 1.91 | 1.72 M | 105 k |
+  | ea5 layer | 2.50 | 2.03 M | 125 k |
+  | ea3 frame | 1.48 | 1.67 M | 91 k |
+  | ea4 frame | 2.17 | 2.18 M | 119 k |
+  | ea5 frame | 2.99 | 2.81 M | 150 k |
+  | ea8 layer (reference) | 4.34 | 3.05 M | 181 k |
+
+  - References: SG3 step 0.05: 44 MB; step 0.1: 18 MB; the zlib'd dense uint8 levels: 2.3 MB.
+  - Inner rings +-1 band instead of exact: 17-22 % smaller (ea5 layer 2.03 MB, ea4 layer 1.54 MB); 1.5-3.3 % of the
+    lattice points one band off.
+  - Every layer of every variant verified after the encoding: 0 feasibility mismatches on 15.2 G lattice points
+    (12 variants x 6 phases); 0 orientation flips, trees kept, 0 failures.
+  - Build: about 45-60 s per variant per phase after the 22 s pass.
+- **Band areas** (ea5 layer, per layer over its feasible cells; mean over 5,576 S and SV layers per phase): shares
+  0.14 / 0.39 / 0.18 / 0.15 / 0.14.
+  - 1,161 layers (21 %) have an atom in band 0 (more than 1/5 of the area at one value).
+  - Per layer, the largest deviation from 1 / (bands present): p50 0.07, p90 0.60 (the plateau layers).
+  - Frame scope (ea5 frame): shares 0.09 / 0.14 / 0.11 / 0.14 / 0.52. From k about 70 no strike is left: the plateau
+    is the top band.
+- **Closed loop**:
+
+  | source | strike, no damage | damage eps | feasible starts damaged | noise-free damage | hits / slam | key changes / slam | identical decisions |
+  |---|---|---|---|---|---|---|---|
+  | dense | 75.03 % | 696 | 75 / 20,195 | 0 | 1.127 | 4.84 | - |
+  | step 0.1 (SG3, 18 MB) | 74.96 % | 720 | 99 | 0 | 1.125 | 5.07 | 97.06 % |
+  | ea8 layer (4.3 MB) | 74.59 % | 740 | 105 | 0 | 1.100 | 4.31 | 96.61 % |
+  | **ea5 layer (2.5 MB)** | **73.77 %** | **820** | **201** | **0** | **1.042** | 4.03 | 96.02 % |
+  | ea5 frame | 72.92 % | 1,042 | 419 | 0 | 1.026 | 3.91 | 96.44 % |
+  | ea4 layer | 72.13 % | 1,024 | 375 | 0 | 0.944 | 3.90 | 95.79 % |
+  | ea4 frame | 70.62 % | 1,479 | 836 | 47 | 1.010 | 3.88 | 95.92 % |
+  | ea3 frame | 65.93 % | 2,166 | 1,356 | 44 | 0.868 | 3.61 | 96.13 % |
+  | ea3 layer | 62.63 % | 2,207 | 1,459 | 75 | 0.773 | 3.04 | 95.46 % |
+  | ea5 layer, inner +-1 | 68.95 % | 1,594 | 934 | 353 | 0.843 | 4.13 | 94.96 % |
+  | ea4 layer, inner +-1 | 65.70 % | 2,089 | 1,429 | 740 | 0.833 | 3.94 | 94.71 % |
+
+  - Before the decide() fix (first run, `sim_merged_v12.json`), noise-free damage was 0 only for ea5 layer and the
+    other variants were worse (ea4 frame 2,340 damage episodes, noise-free 279).
+- **Run time**:
+  - one lattice query (warm, ea5 layer): 1.3 us p50, 2.4 us p99;
+  - one decision: p50 35 us, p99 0.6-0.7 ms (Python, 3 jobs running; 8 queries p50, 183 max);
+  - load + prepare: 0.9 s per tube phase;
+  - query arrays in RAM: ea5 layer 20.5 MB per phase (ea4 17 MB, ea8 31 MB; step 0.1 105 MB).
+
+### Why the variants differ
+
+- **Ties.** Inside a band every option has the same value. The lookahead then keeps the current key, so it loses:
+  - the clearance gradient (the plateau and the cells below it fill 2-3 of the 5 bands), which costs damage under
+    the late-key noise;
+  - the ordering of strike timings and depths, which costs hits per slam (1.127 -> 1.042) and two-hit slams
+    (37 % -> 30 %).
+- **3 bands**: the plateau takes one band and leaves one below and one above it, so every strike value ties.
+- **Frame scope is worse than layer scope**, although it orders layers consistently at one frame:
+  - the per-frame edges come from about 2,200 tube slices, so a single layer (the ground, one jump slice) often
+    falls inside 1-2 bands;
+  - the edges change from frame to frame, so the band field is jagged: 20 % more points, 3.0 vs 2.5 MB.
+- **Inner +-1 is clear harm**: with 5 bands one band is a fifth of the area, so the +-1 error reorders strike values.
+  - Noise-free damage appears (353), which must stay 0.
+  - The saving is only 0.47 MB per phase.
+  - So the lead's note's preference (simplified inner rings unless clear harm) does not apply: exact inner rings.
+- **Noise-free damage in ea3 / ea4 frame**:
+  - SG2's strike value assumes a free key at the contact, but the key held through the slash is still committed
+    there;
+  - dense values avoid those strikes (they are a little worse than waiting a frame); band ties do not.
+  - The strict press rule removed most of it (ea4 layer 31 -> 0); the rest is a map-model gap (Open items).
+
+### Decision / default
+
+- **Default: 5 bands, one set of edges per layer, inner rings exact** (`score_contours_build` defaults; files
+  `..._tubes_p<p>_ea5l.npz`). It is the best of the person's 3-5 range and the only one within about 1.3 points of
+  dense with 0 noise-free damage at all 6 phases. The size is 2.5 MB per tube phase, about the zlib'd dense levels.
+- Cost against dense: -1.3 points of strikes without damage, +18 % damage episodes, -7.5 % hits per slam.
+- If that cost is too high:
+  - 8 equal-area bands (ea8 layer, 4.3 MB) are within 0.4 points / +6 % damage of dense;
+  - the zlib'd dense levels (2.3 MB, full 0.02 resolution) decide exactly as dense.
+  - The person's call.
+- Built for the default:
+  - tube files for 6 phases, open floor and the wall buckets: `..._tubes_p<p>[_wf6|_wf9|_wf12]_ea5l.npz`, 2.31-2.34
+    / 2.43-2.46 / 2.43-2.47 MB per phase, every layer verified after the encoding (0 mismatches);
+  - node files `special_map_CL_SLAM[_wf6|_wf9|_wf12]_contours_ea5l.npz`: 192 / 165 / 183 / 184 KB (the dense npz
+    375 KB, its bands zlib'd 222 KB; SG3 step 0.05: 4.0 MB), 402 layers each, verified; node band shares 0.06 / 0.76
+    / 0.07 / 0.05 / 0.05 (the plateau).
+  - Rebuild: `../scripts/uv.cmd run python -m ssbot.tools.score_contours_build nodes` and `... tubes --phases 0-5
+    [--wall-front U --tag wfU]` (about 2.5 min per phase).
+
+### Open items / next
+
+1. The person: accept 5 bands (cost above) or allow 8 / the dense levels at run time.
+2. The map gap: a strike's value should use the held key at its contact frame (SG2 MapBuilder). Then no strike's
+   value is optimistic. This would let the coarse variants (and the planner) choose strikes on ties safely.
+3. SG3's open items stand: the person's overlay eye check first; integration (SG4) behind
+   SSBOT_FORUM_SPECIAL_MAP (then `SSBOT_FORUM_SPECIAL_MAP_SRC=contour` reads the ea5l files); the umbrella macro.
+4. Readiness is banded now: the ground layer's edges (phase 0) are 0.30 / 0.72 / 1.74 / 2.11, so readiness reads 0,
+   0.30, 0.72, 1.74 or 2.11. SG3's R_ref 1.0 falls inside band [0.72, 1.74): use R_ref 0.72 (band 2) with these
+   files.

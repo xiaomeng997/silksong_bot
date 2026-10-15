@@ -6,6 +6,11 @@ Bands. A layer's score s at the lattice point (k, i) (k = frame, i = x lattice i
 b = floor(s / step) (>= 0; capped at n_levels - 1) or -1 for infeasible / no node (-inf, NaN). Level m (0 .. top) is the
 region {b >= m}; level 0 is the feasibility region. The band at a point is the highest level whose region contains it.
 
+Equal-area bands (SG3b, forum.md 58; the person 2026-10-15): instead of a fixed step the band edges are the most
+equal partition of the feasible cells' scores (equal_area_edges: least sum of squared band areas, a score value never
+split), per layer or per frame (bands_from_edges takes [m] or [nk, m] edges); a band then stands for its lower edge
+(edge_values; band 0: 0.0). Level 0 stays the feasibility region, exact on the lattice.
+
 Rings (marching squares). Per level the grid is padded with one infeasible cell on every side, so every ring closes.
 A ring vertex lies on a lattice edge whose two end values straddle the level (linear interpolation at m - 0.5 between
 the end bands); a saddle cell joins its two high corners iff the mean of its four bands is >= m - 0.5 (monotone in m,
@@ -58,6 +63,103 @@ def to_bands(score: np.ndarray, step: float, n_levels: int | None = None) -> np.
         v = np.minimum(v, n_levels - 1)
     b[fin] = v.astype(np.int16)
     return b
+
+
+# ---- equal-area bands (SG3b; the person 2026-10-15: the feasibility ring exact, inside 3-5 bands of equal area) ----
+def _partition_py(pos, n):
+    """Least-squares partition: cut the mass line 0 = pos[0] < ... < pos[-1] = N at n - 1 of the inner positions so
+    that the sum of squared band masses is least (the most equal bands). Returns the chosen inner indices (sorted)."""
+    C = pos.shape[0]
+    f = np.full((n + 1, C), np.inf)
+    arg = np.zeros((n + 1, C), np.int64)
+    for i in range(1, C):
+        f[1, i] = (pos[i] - pos[0]) ** 2
+    for j in range(2, n + 1):
+        for i in range(j, C):
+            best, bl = np.inf, -1
+            for l in range(j - 1, i):
+                c = f[j - 1, l] + (pos[i] - pos[l]) ** 2
+                if c < best:
+                    best, bl = c, l
+            f[j, i] = best
+            arg[j, i] = bl
+    out = np.zeros(n - 1, np.int64)
+    i = C - 1
+    for j in range(n, 1, -1):
+        i = arg[j, i]
+        out[j - 2] = i
+    return out
+
+
+_partition = njit(cache=True)(_partition_py) if njit is not None else _partition_py
+
+
+def equal_area_edges(values: np.ndarray, n_bands: int, grid: int = 64) -> np.ndarray:
+    """The inner band edges t_1 < ... < t_m (m = min(n_bands, distinct values) - 1) of the feasible scores `values`
+    (non-finite ignored): band b = [t_b, t_{b+1}) (t_0 = the lowest score, t_{m+1} = inf). The bands are as equal in
+    area (cell count) as the ties allow: the partition of the sorted scores into contiguous bands with the least sum of
+    squared band areas, a score value never split. Without ties this is the plain quantiles; an atom (one value holding
+    more than 1/n of the cells, e.g. the clearance-only plateau 0.3: 79 % of SG2's feasible tube cells) becomes one
+    band, the cells below and above it share the other bands equally. Cut candidates: every value boundary when there
+    are at most n_bands * grid distinct values, else the boundaries next to the grid quantiles i / (n_bands * grid)
+    plus both edges of every atom (the areas are then equal within 1 / (n_bands * grid) of the total plus ties)."""
+    v = np.asarray(values, np.float64).ravel()
+    v = v[np.isfinite(v)]
+    if not len(v) or n_bands < 2:
+        return np.zeros(0, np.float64)
+    uv, cnt = np.unique(v, return_counts=True)
+    D = len(uv)
+    if D < 2:
+        return np.zeros(0, np.float64)
+    cm = np.concatenate([[0], np.cumsum(cnt)]).astype(np.float64)    # cm[i]: cells below the value uv[i]
+    N = cm[-1]
+    if D - 1 <= n_bands * grid:
+        cand = np.arange(1, D)
+    else:
+        t = np.linspace(0.0, N, n_bands * grid + 1)[1:-1]
+        ci = np.searchsorted(cm, t)
+        at = np.flatnonzero(cnt > N / n_bands)
+        cand = np.unique(np.concatenate([ci - 1, ci, at, at + 1]))
+        cand = cand[(cand >= 1) & (cand <= D - 1)]
+    nb = min(int(n_bands), len(cand) + 1)
+    pos = np.concatenate([[0.0], cm[cand], [N]])
+    sel = _partition(pos, nb)
+    return uv[cand[sel - 1]].astype(np.float64)
+
+
+def pad_edges(edges: list, width: int) -> np.ndarray:
+    """[n, width] float64, each row's edges then +inf (an edge never reached)."""
+    out = np.full((len(edges), max(width, 0)), np.inf)
+    for i, e in enumerate(edges):
+        out[i, :len(e)] = e
+    return out
+
+
+def bands_from_edges(score: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """int16 bands of a [nk, nx] score layer: the number of edges <= the score for finite scores, -1 otherwise.
+    edges: [m] (one set for the layer) or [nk, m] (one set per frame, +inf padded)."""
+    s = np.asarray(score, np.float64)
+    E = np.asarray(edges, np.float64)
+    fin = np.isfinite(s)
+    if E.ndim == 1:
+        b = np.searchsorted(E, np.where(fin, s, -np.inf), side="right")
+    else:
+        b = (np.where(fin, s, -np.inf)[:, :, None] >= E[:, None, :]).sum(-1)
+    return np.where(fin, b, -1).astype(np.int16)
+
+
+def edge_values(edges: np.ndarray) -> np.ndarray:
+    """The value a band stands for: its lower edge (band 0: 0.0; +inf padding stays) -> [m + 1] or [nk, m + 1]."""
+    E = np.asarray(edges, np.float64)
+    z = np.zeros(E.shape[:-1] + (1,))
+    return np.concatenate([z, E], axis=-1)
+
+
+def band_shares(B: np.ndarray, n_bands: int) -> np.ndarray:
+    """[n_bands] share of the feasible cells (B >= 0) in each band."""
+    b = np.asarray(B).ravel()
+    b = b[b >= 0]
+    return np.bincount(b, minlength=n_bands)[:n_bands] / max(len(b), 1)
 
 
 # ---- marching squares ----
@@ -737,6 +839,7 @@ class ContourSet:
         self.nk, self.nx, self.step = nk, nx, step
         self.meta = meta or {}
         self.layers: dict[str, ContourLayer] = {}
+        self.arrays: dict[str, np.ndarray] = {}      # extra arrays saved as x_<name> (e.g. the equal-area band edges)
 
     def add(self, name: str, lay: ContourLayer):
         self.layers[name] = lay
@@ -760,10 +863,11 @@ class ContourSet:
         top = np.array([self.layers[nm].top for nm in names], np.int32)
         meta = dict(self.meta, nk=self.nk, nx=self.nx, step=self.step, coord=COORD, names=names)
         path.parent.mkdir(parents=True, exist_ok=True)
+        extra = {f"x_{k}": v for k, v in self.arrays.items()}
         np.savez_compressed(path, n=cat["n"].astype(np.int32), level=cat["level"].astype(np.int16),
                             parent=cat["parent"].astype(np.int32), first=cat["first"].astype(np.int32).reshape(-1, 2),
                             delta=cat["delta"].astype(np.int16).reshape(-1, 2), nring=nring, npt=npt, top=top,
-                            meta=json.dumps(meta))
+                            meta=json.dumps(meta), **extra)
         return {"bytes": Path(path).stat().st_size, "rings": int(nring.sum()), "points": int(cat["n"].sum())}
 
     @classmethod
@@ -771,6 +875,7 @@ class ContourSet:
         z = np.load(path, allow_pickle=False)
         meta = json.loads(str(z["meta"]))
         cs = cls(meta["nk"], meta["nx"], meta["step"], meta)
+        cs.arrays = {k[2:]: z[k] for k in z.files if k.startswith("x_")}
         ro = np.concatenate([[0], np.cumsum(z["nring"])])
         po = np.concatenate([[0], np.cumsum(z["npt"])])
         n, level, parent, first, delta = z["n"], z["level"], z["parent"], z["first"], z["delta"]
@@ -782,4 +887,5 @@ class ContourSet:
         return cs
 
 
-__all__ = ["COORD", "to_bands", "trace_level", "area2", "winding", "ContourLayer", "ContourSet"]
+__all__ = ["COORD", "to_bands", "equal_area_edges", "pad_edges", "bands_from_edges", "edge_values", "band_shares",
+           "trace_level", "area2", "winding", "ContourLayer", "ContourSet"]
