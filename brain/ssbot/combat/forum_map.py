@@ -71,6 +71,22 @@ class MapHelper:
                 self.load_error = repr(ex)
         return self._rt
 
+    def preload(self) -> None:
+        """Load the map, the decision states and touch the lookup paths once (the planner's construction), so the first
+        tick near a Clapper does not pay for them."""
+        t0 = time.perf_counter()
+        rt = self.runtime()
+        self._dec = _decision_states()
+        if rt is not None:
+            try:
+                p = sorted(rt.srcs)[0]
+                rt.plan(10, 4.0, {"kind": "ground", "k": 10}, 0, -100, [p], 8)
+                rt.readiness_rows(p, np.array([4.0, 5.0]), np.array([0, 1]), np.array([True, False]),
+                                  np.array([0.0, 1.0]), np.array([0.0, 0.8]))
+            except Exception as ex:  # noqa: BLE001 - a warm-up failure must not stop the planner
+                self.load_error = repr(ex)
+        self.preload_ms = round((time.perf_counter() - t0) * 1e3, 1)
+
     # ---- the Clapper and its slam ----
     def _clapper(self, f, hx: float):
         trk = getattr(getattr(f, "rs", None), "trk", None)
@@ -167,7 +183,15 @@ class MapHelper:
         if fl[-1] & kin.F_ATTACKING and mem["last_press"] < k - 12:
             info["why"] = "attacking (not the map's slash)"
             return None
-        phases = [p for p in smrt.phases_of(float(S[kin.ALO]), float(S[kin.AHI]), k) if p in rt.srcs]
+        # review: the phase p = (cycle + move frame) % 6 is constant along the lane, so read it at rollout index 0
+        # (k0) from the start's ALPHA interval: kin.rollout advances ALPHA but not ALO / AHI, so the state after the
+        # prefix still holds index 0's interval (pairing it with k = k0 + P put the steps and tubes P frames off)
+        phases = [p for p in smrt.phases_of(float(st0[kin.ALO, 0]), float(st0[kin.AHI, 0]), k0) if p in rt.srcs]
+        p_nom = smrt.phases_of(float(st0[kin.ALPHA, 0]), float(st0[kin.ALPHA, 0]), k0)[0]
+        if p_nom in phases:
+            # the map rolls its path on the first phase: the nominal one, the planner lane's (the others still bound
+            # every decision, decide_multi)
+            phases = [p_nom] + [p for p in phases if p != p_nom]
         if not phases:
             info["why"] = "phase not in the map"
             return None
@@ -228,7 +252,12 @@ class MapHelper:
                                                np.int64)])
         ext = np.asarray(plan.masks, np.int64)
         meta = {"iid": iid, "tk": tk, "move": MOVE, "k_trk": k_trk, "k0": int(k0), "xa": float(x0),
-                "cy": float(e["pos"][1]), "face": face, "lut": None, "by_map": True}
+                "cy": float(e["pos"][1]), "face": face, "lut": None, "by_map": True,
+                # review: the map's own lane (world x / box bottom per row frame, rollout index P + 1 + t), its
+                # contacts (the bounce events at rollout index P + c), the move frame from which the full support is
+                # read again (every observed variant over: the Clapper may start its next move)
+                "map_x": x0 + face * np.asarray(plan.xs, float), "map_y": y_floor + np.asarray(plan.ys, float),
+                "map_ev": [P + int(c) for c in plan.contacts], "k_full": int(rt.end_max) + 1}
         # L2: the spot a few frames ahead on the map row (its first press if earlier)
         tb = min(len(plan.xs) - 1, plan.presses[0] if plan.presses else 10)
         BOARD[iid] = {"tick": ticks, "on": True, "x": float(x0 + face * plan.xs[max(tb, 0)]) if len(plan.xs) else None,

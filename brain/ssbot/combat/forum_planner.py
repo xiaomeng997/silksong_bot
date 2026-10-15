@@ -197,6 +197,10 @@ CL_NODOWN_U = 12.0
 # the map row during a tracked CL_SLAM (judged as a special row, first among the safe rows), the readiness penalty
 # before a slam can start (replaces SSBOT_FORUM_CL_NODOWN, which is then ignored), the L2 spots. Off: no change.
 SPECIAL_MAP = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
+# review (SG4): the map row's planner lane (hold-filtered keys, the map's bounces) may leave the map's own path by at
+# most one run step in x (0.165 u: a stretched one-frame tap, the map's x dilation is 0.2475 u) and the map's y dilation
+MAP_LANE_TOL_X = 0.2
+MAP_LANE_TOL_Y = 0.12
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -457,6 +461,8 @@ class EnvelopeAudit:
     ready_ticks: int = 0
     ready_changed: int = 0
     ready_out_rows: int = 0
+    map_lane_off: int = 0         # review: map rows whose planner lane left the map's path (kept the full checks)
+    map_lane_contact: int = 0     #   ... whose first contact on the lane is not the map's
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
     sm_full_ticks: int = 0        # SSBOT_FORUM_SPECIAL_FAST (G3): ticks that rolled the whole template set
     sm_board_cached: int = 0      #   ticks whose BOARD is the last full tick's strike spot
@@ -1141,7 +1147,13 @@ class ForumPlanner(Planner):
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.crest = crest
-        self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper (lazy)
+        self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper
+        if SPECIAL_MAP:
+            # review: loaded here, not on the first tick near a Clapper (the load and the first lookups stalled that
+            # tick by ~80 ms in the replays)
+            from ssbot.combat import forum_map
+            self._map = forum_map.MapHelper(self)
+            self._map.preload()
         self.shapes = _shapes(crest)
         cfg_c = AttackTable.load(crest).config
         self.down_slash = cfg_c.get("down") == "Slash"
@@ -2897,6 +2909,19 @@ class ForumPlanner(Planner):
         ev = np.zeros((n, P + L), np.int64)
         hc = keep & (contact > 0)
         ev[np.flatnonzero(hc), contact[hc] - 1] = kin.EV_POGO     # SlamTheory's convention (the certified bounce)
+        if by_map:
+            # review: every bounce of the map's lane (a second strike's too: without it the lane fell where the map
+            # bounced); the first must be the lane's own contact (special_mode.contacts), else the row keeps the
+            # full checks
+            mev = [int(e_) for e_ in meta.get("map_ev") or () if 0 <= int(e_) < P + L]
+            first_ok = (contact == (mev[0] + 1 if mev else -1)) | ((contact <= 0) & (not mev))
+            self.audit.map_lane_contact += int((~first_ok).sum())
+            keep &= first_ok
+            if not keep.any():
+                return None
+            ev[:] = 0
+            for e_ in mev:
+                ev[:, e_] = kin.EV_POGO
         rows, ext, lat_e, ev, contact, pj = rows[keep], ext[keep], lat_e[keep], ev[keep], contact[keep], pj[keep]
         is_long = pj - P - 1 > T - 2                # the press past the horizon (strike_rows' long rows)
         n = len(rows)
@@ -2911,6 +2936,26 @@ class ForumPlanner(Planner):
             return rp_, {nm: np.concatenate([getattr(rp_, nm), getattr(rt_, nm)[:, 1:]], axis=1)
                          for nm in ("box", "flags", "pos")}
         rp, rb = bounce(lat_e, ev)
+        if by_map and meta.get("map_x") is not None:
+            # review: the lane the planner judges must be the map's own (the map alone certifies the Clapper's move on
+            # it): the hold-filtered keys rolled out with the map's bounces stay within one run step (x) and the
+            # map's y dilation of the map's path, else the row keeps the full checks (a model mismatch: the hold
+            # filter, terrain, a phase)
+            mx_, my_ = np.asarray(meta["map_x"], float), np.asarray(meta["map_y"], float)
+            m_ = int(min(len(mx_), rb["box"].shape[1] - P - 1))
+            bxm = rb["box"][:, P + 1:P + 1 + m_]
+            dx_ = np.abs(0.5 * (bxm[..., 0] + bxm[..., 2]) - mx_[None, :m_]).max(axis=1) if m_ else np.zeros(n)
+            dy_ = np.abs(bxm[..., 1] - my_[None, :m_]).max(axis=1) if m_ else np.zeros(n)
+            lane_ok = (dx_ <= MAP_LANE_TOL_X) & (dy_ <= MAP_LANE_TOL_Y)
+            self.audit.map_lane_off += int((~lane_ok).sum())
+            meta["lane_dx"], meta["lane_dy"] = round(float(dx_.max()), 3), round(float(dy_.max()), 3)
+            if not lane_ok.all():
+                if not lane_ok.any():
+                    return None
+                rows, ext, lat_e, ev, contact, pj, is_long = (a_[lane_ok] for a_ in (rows, ext, lat_e, ev, contact, pj,
+                                                                                    is_long))
+                rp, rb = bounce(lat_e, ev)
+                n = len(rows)
         # T1's real-box approach check: 0 clear, 1 the root box (body), 2 the attack box; -1 not computed (without
         # SSBOT_FORUM_SPECIAL_APPR only the chosen row's, at the selection: a diagnostic)
         appr = special_mode.approach_codes(tl, k0, xa, cy, face, pj, rb["box"], rb["flags"]) \
@@ -2936,7 +2981,10 @@ class ForumPlanner(Planner):
         full_from = np.where(k0 + cert_end <= al, cert_end, big).astype(np.int64)
         if by_map:
             cert_end[:] = Lb - 1
-            full_from[:] = big                    # the map certifies E's move to its end
+            # the map certifies E's move to its end; review: from the frame every observed variant has ended on (the
+            # Clapper may start its next move) the full support is read again (big dropped E's next move from the
+            # row's last frames and its tail)
+            full_from[:] = max(0, int(meta.get("k_full", big)) - int(k0)) if meta.get("k_full") is not None else big
         # the planner lanes: the bounce from the press on (the score, stage 1, the end state for the escape)
         for nm in ("phys", "pos", "vel", "mode", "flags", "box"):
             getattr(r1, nm)[rows] = getattr(rp, nm)
@@ -3113,32 +3161,23 @@ class ForumPlanner(Planner):
                 fq = spec.full[q] if spec.full is not None else None
                 s_ext.append(fq if fq is not None else spec.cmd[q])
             pv = pv_sm
-            if cont and pv is not None and pv["iid"] == self._spec_meta["iid"] and len(pv["ext"]) > 1:
+            if cont and pv is not None and pv["iid"] == self._spec_meta["iid"] and len(pv["ext"]) > 1 and \
+                    not pv.get("map"):
                 s_rows.append(N - 1)
                 s_ext.append(pv["ext"][1:])
             sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray(s_rows, np.int64), s_ext, T)
             self._sctx = sctx
             if sctx is not None:
                 self.audit.sm_ms += sctx.ms
-        pv_map = pv_sm is not None and bool(pv_sm.get("map"))
-        if SPECIAL_MAP and sctx is None and (n_map or (cont and pv_map)):
-            # SG4: the map row (and the CONTINUE of last tick's chosen map row) judged as special rows: the map
-            # certifies the Clapper's whole move; the others, its hazards and its body outside the pre-protect frames
-            # stay (special_mode's support)
-            s_rows, s_ext = [], []
-            if n_map:
-                s_rows.append(M0)
-                s_ext.append(mrow.ext)
-                self._spec_meta = mrow.meta
-            if cont and pv_map and len(pv_sm["ext"]) > 1 and (not n_map or pv_sm["iid"] == mrow.meta["iid"]):
-                s_rows.append(N - 1)
-                s_ext.append(pv_sm["ext"][1:])
-                if not n_map:
-                    self._spec_meta = pv_sm["meta"]
-            if s_rows:
-                sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray(s_rows, np.int64), s_ext,
-                                         T)
-                self._sctx = sctx
+        if SPECIAL_MAP and sctx is None and n_map:
+            # SG4: the map row judged as a special row: the map certifies the Clapper's whole move; the others, its
+            # hazards and its body outside the pre-protect frames stay (special_mode's support). Review: the CONTINUE
+            # of last tick's map row is not (it kept the old anchor / move frame and the Clapper's move dropped after
+            # every map exit: deviation, the move's end, an off-macro state); it keeps the full checks, and when the
+            # hero followed the row this tick's map row is its continuation (MapRuntime.extend)
+            self._spec_meta = mrow.meta
+            sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray([M0], np.int64), [mrow.ext], T)
+            self._sctx = sctx
         if n_ds and ds.lane is not None:
             # G3, the certain-hit rule: the certain family rows are judged on their bounce lane from the press on
             # (stage 1, the score, the end state for the escape)
@@ -3324,7 +3363,9 @@ class ForumPlanner(Planner):
             prio.append(N - 1)
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
         top = rest[:fcfg.K_b]
-        first = np.concatenate([cs.first, np.full(n_spec + n_hop + n_ds + int(cont), -1, cs.first.dtype)])
+        # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
+        # IndexError; with a CONTINUE the map row read the CONTINUE's slot)
+        first = np.concatenate([cs.first, np.full(n_spec + n_hop + n_ds + n_map + int(cont), -1, cs.first.dtype)])
         sib = []
         top_set = set(top)
         by_first: dict = {}
@@ -3892,7 +3933,7 @@ class ForumPlanner(Planner):
                 if not S[i] and not esc_unsafe:
                     self._prev_sm = {"iid": sctx.iid, "ext": sctx.ext[q_].copy(), "move": sctx.move}
                     if (getattr(self, "_spec_meta", None) or {}).get("by_map"):
-                        self._prev_sm.update(map=True, meta=self._spec_meta)
+                        self._prev_sm["map"] = True     # SG4: its CONTINUE keeps the full checks (review)
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
@@ -3995,7 +4036,9 @@ class ForumPlanner(Planner):
                 def at_(nm):
                     a_ = ls_.get(nm)
                     return None if a_ is None or not hasattr(a_, "__len__") else bool(a_[M0])
-                map_info = {**(mi_ or {}), **({"safe": bool(not S[M0]), "xcheck": map_x, "chosen": res.name,
+                map_info = {**(mi_ or {}), **({"row": int(M0), "safe": bool(not S[M0]), "xcheck": map_x,
+                                               "chosen": res.name, "lane": [mrow.meta.get("lane_dx"),
+                                                                            mrow.meta.get("lane_dy")],
                                                "s1": bool(S1[M0]), "env": bool(env[M0]), "ok": bool(ok[M0]),
                                                "first": bool(first_ == M0), "keep": at_("keep"),
                                                "mkeep": at_("mkeep"), "hz": at_("hz"), "U": at_("U")}

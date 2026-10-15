@@ -176,10 +176,27 @@ def load_levels(path: Path | None = None, mmap: bool = MMAP) -> tuple[dict, ml.T
         st_ = path.stat()
         d = CACHE / f"{path.stem}_{st_.st_size}_{int(st_.st_mtime)}"
         if not (d / "done").exists():
-            d.mkdir(parents=True, exist_ok=True)
+            # review: written into a private directory and renamed into place, so two brain processes starting
+            # together never map (or overwrite) each other's half-written arrays; the loser of the rename uses the
+            # winner's copy
+            tmp = CACHE / f".{d.name}.{os.getpid()}.{time.time_ns()}"
+            tmp.mkdir(parents=True, exist_ok=True)
             for nm in names:
-                np.save(d / f"{nm}.npy", z[nm])
-            (d / "done").write_text("ok", "utf-8")
+                np.save(tmp / f"{nm}.npy", z[nm])
+            (tmp / "done").write_text("ok", "utf-8")
+            import shutil
+            for attempt in range(2):
+                try:
+                    os.replace(tmp, d)
+                    break
+                except OSError:
+                    if (d / "done").exists() or attempt:
+                        break
+                    shutil.rmtree(d, ignore_errors=True)   # a half-written directory left by a crashed writer
+            if not (d / "done").exists():
+                d = tmp                                   # the rename lost to a directory without "done": use ours
+            elif tmp.exists():
+                shutil.rmtree(tmp, ignore_errors=True)
         arr = {nm: np.load(d / f"{nm}.npy", mmap_mode="r") for nm in names}
     else:
         arr = {nm: z[nm] for nm in names}
@@ -277,6 +294,7 @@ class MapRuntime:
         D = np.stack([np.pad(v.disp, (0, max(0, K - len(v.disp))), mode="edge")[:K] for v in vs])
         self.disp_lo, self.disp_hi = D.min(0), D.max(0)
         self.end_min = int(meta.get("end_min", min(v.end_k for v in vs)))
+        self.end_max = int(meta.get("end_max", max(v.end_k for v in vs)))
         self.polys = {(f, a): slash_poly(f, a) for f in (1, -1) for a in (False, True)}
         self.pa = self.spec.pos_above_floor
         self.wc = float(meta["wc"])
