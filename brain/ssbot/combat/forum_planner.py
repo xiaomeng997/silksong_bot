@@ -201,6 +201,10 @@ SPECIAL_MAP = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
 # most one run step in x (0.165 u: a stretched one-frame tap, the map's x dilation is 0.2475 u) and the map's y dilation
 MAP_LANE_TOL_X = 0.2
 MAP_LANE_TOL_Y = 0.12
+# review (SG4): the map's own work (the map row, its special context, the readiness) does not count against the
+# envelope / escape / clash deadlines (with deadlines on, replays: the escape check ran out of time on +63 % ticks and
+# the chosen rows were left unchecked); SSBOT_FORUM_SPECIAL_MAP_DL=0: they count (SG4)
+MAP_DL_SHIFT = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_DL", "1").strip() != "0"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -3067,7 +3071,9 @@ class ForumPlanner(Planner):
         if n_ds:
             rows_.append(ds.cmd)                 # the delayed / chained down slashes (G3): after the hop rows
         mrow = None
+        map_ms = 0.0                              # review: the map's own work this tick (MAP_DL_SHIFT)
         if SPECIAL_MAP:
+            tm_ = time.perf_counter()
             from ssbot.combat import forum_map
             forum_map.BOARD.clear()
             if self._map is None:
@@ -3077,6 +3083,7 @@ class ForumPlanner(Planner):
             self._map.info = None
             if v2 and mode0 not in NO_CONTROL_MODES:
                 mrow = self._map.row(f, start, hold, prefix, T, self.ticks)
+            map_ms += (time.perf_counter() - tm_) * 1e3
         n_map = 0 if mrow is None else 1
         M0 = D0 + n_ds
         if n_map:
@@ -3177,9 +3184,11 @@ class ForumPlanner(Planner):
             # of last tick's map row is not (it kept the old anchor / move frame and the Clapper's move dropped after
             # every map exit: deviation, the move's end, an off-macro state); it keeps the full checks, and when the
             # hero followed the row this tick's map row is its continuation (MapRuntime.extend)
+            tm_ = time.perf_counter()
             self._spec_meta = mrow.meta
             sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray([M0], np.int64), [mrow.ext], T)
             self._sctx = sctx
+            map_ms += (time.perf_counter() - tm_) * 1e3
         if n_ds and ds.lane is not None:
             # G3, the certain-hit rule: the certain family rows are judged on their bounce lane from the press on
             # (stage 1, the score, the end state for the escape)
@@ -3570,10 +3579,11 @@ class ForumPlanner(Planner):
                 if pos >= n_prio:
                     break
                 # the next chunk would end past the deadline (it costs about what this one did): stop before it
-                if (now - t0) * 1e3 + chunk_ms > fcfg.deadline_ms:
+                if (now - t0) * 1e3 - (map_ms if MAP_DL_SHIFT else 0.0) + chunk_ms > fcfg.deadline_ms:
                     cut = pos < len(queue)
                     break
-            if not safe_any and (time.perf_counter() - t0) * 1e3 > fcfg.deadline_ms and pos < len(queue):
+            el_ms = (time.perf_counter() - t0) * 1e3 - (map_ms if MAP_DL_SHIFT else 0.0)
+            if not safe_any and el_ms > fcfg.deadline_ms and pos < len(queue):
                 overrun = True
         if not safe_any and capped_rows:
             # no safe row: the rows a cap set S = 1 get their hit branch uncapped, so FORCED_RISK never depends on the
@@ -3598,7 +3608,8 @@ class ForumPlanner(Planner):
             # come first, so it never runs on a tick that has one
             self.audit.clash_ticks += 1
             tcl = time.perf_counter()
-            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit, t0)
+            cl = self._clash_pass(f, start, latched, sc, S, ok, hz, tk, enemy_only, ctx, t_hit,
+                                  t0 + (map_ms * 1e-3 if MAP_DL_SHIFT else 0.0))
             self.audit.clash_ms += (time.perf_counter() - tcl) * 1e3
             for i, (w, ph, nc, tn, oc) in cl.items():
                 clash_n[i] = nc
@@ -3790,7 +3801,9 @@ class ForumPlanner(Planner):
                 # SG4: the readiness penalty (landed-hit units) before a slam can start; rows with no safe
                 # continuation from their end last (unless every row has none)
                 # review: the safe rows only (the penalty ranks only those; ~half the cost)
+                tm_ = time.perf_counter()
                 rp_ = self._map.readiness(f, start, r1, cmd, P, self.ticks, rows=np.flatnonzero(safe))
+                map_ms += (time.perf_counter() - tm_) * 1e3
                 if rp_ is not None:
                     pen_ = rp_[0]
                     b0_ = int(np.lexsort((-J, v2_nh))[0]) if safe.any() else -1
@@ -3873,7 +3886,7 @@ class ForumPlanner(Planner):
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
                         fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
-                        None if math.isinf(dl) else t0 + dl * 1e-3, v2=v2)
+                        None if math.isinf(dl) else t0 + (dl + (map_ms if MAP_DL_SHIFT else 0.0)) * 1e-3, v2=v2)
                     self._hf_esc = None
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,

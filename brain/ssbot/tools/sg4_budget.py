@@ -37,9 +37,11 @@ FAM_OF = {"CC_SLAM": "slam", "CC_JUMP": "jump_slam", "CC_CAST": "cast", "CC_JUMP
           "CC_EVADE": "evade", "CC_ENTRY": "other"}
 
 
-def episodes(arm: str) -> list[dict]:
+def episodes(arm: str, live: Path = LIVE, prefix: str = "g") -> list[dict]:
+    """The collected episodes of one arm (forum_remaining_hits collect: <label>_<arm>_*.json; review: --live / --label
+    for the live A/B's collect dir)."""
     out = []
-    for p in sorted(LIVE.glob(f"g_{arm}_*.json")):
+    for p in sorted(Path(live).glob(f"{prefix}_{arm}_*.json")):
         d = json.loads(p.read_text("utf-8"))["episode"]
         out.append(d)
     return out
@@ -204,8 +206,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", default="rn")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--live", type=Path, default=LIVE, help="a collect dir's eps folder")
+    ap.add_argument("--label", default="g", help="the collect manifest's label")
     a = ap.parse_args(argv)
-    eps = [analyse(e) for e in episodes(a.arm)]
+    eps = [analyse(e) for e in episodes(a.arm, a.live, a.label)]
     res = table(eps)
     n_slam = sum(e["slams"] for e in eps)
     res["episodes"] = len(eps)

@@ -7,7 +7,9 @@ Per slam (consecutive ticks of one Clapper's CL_SLAM with the map's state): tick
 reasons for no row (off the macros, mode, deviation, wall, past the move), the rows not taken (stage-1 contact on the
 special support, the envelope / aims, the keys not allowed, the escape check moved the pick), the full support's
 cross-check, the map's first value and its planned presses; the tick cost on slam ticks and on all ticks; the
-readiness penalty's ticks.
+readiness penalty's ticks. Review: the rows whose planner lane left the map's path (the lane guard), the fallback ticks
+(slam ticks without a row) and the slams left by the deviation / wall exits. Also reads the live decision logs
+(decisions_i*.jsonl: the same `map` and `ms` fields).
 """
 from __future__ import annotations
 
@@ -50,6 +52,17 @@ def slams(rows: list[dict]) -> list[list[dict]]:
     return out
 
 
+def _lane_off(m: dict) -> bool:
+    """The review's lane guard (forum_planner MAP_LANE_TOL_X / _Y): the map row's planner lane left the map's path, or
+    its first contact was not the map's (then no lane deviation is logged)."""
+    ln = m.get("lane")
+    if ln is None:
+        return False
+    if ln[0] is None or ln[1] is None:
+        return True
+    return ln[0] > 0.2 + 1e-9 or ln[1] > 0.12 + 1e-9
+
+
 def q(v, p):
     return round(float(np.percentile(v, p)), 2) if len(v) else None
 
@@ -69,7 +82,9 @@ def summarize(rows: list[dict]) -> dict:
             m = r["map"]
             if m.get("taken"):
                 continue
-            if not m.get("ok", True):
+            if _lane_off(m):
+                rej["lane / first contact off the map (full checks)"] += 1
+            elif not m.get("ok", True):
                 rej["keys not allowed"] += 1
             elif m.get("s1"):
                 rej["stage 1 (special support)"] += 1
@@ -91,7 +106,11 @@ def summarize(rows: list[dict]) -> dict:
     row_ms = [r["map"]["total_ms"] for s in sl for r in s if r["map"].get("total_ms") is not None]
     rd = [r["map"]["ready"] for r in rows if (r.get("map") or {}).get("ready")]
     n_on = sum(p["on"] for p in per)
-    return {"ticks": len(rows), "slams": len(sl), "slam_ticks": len(slam_ms),
+    lane_off = sum(1 for s in sl for r in s if r["map"].get("on") and _lane_off(r["map"]))
+    return {"lane_off_rows": lane_off,
+            "fallback_ticks": sum(why.values()),
+            "slams_deviation_exit": sum(1 for p in per if p["exit"] == "deviation"),
+            "slams_wall_exit": sum(1 for p in per if p["exit"] == "wall"),"ticks": len(rows), "slams": len(sl), "slam_ticks": len(slam_ms),
             "row_ticks": n_on, "taken": sum(p["taken"] for p in per), "safe": sum(p["safe"] for p in per),
             "xcheck": sum(p["xcheck"] for p in per),
             "taken_share_of_rows": round(sum(p["taken"] for p in per) / max(n_on, 1), 3),
