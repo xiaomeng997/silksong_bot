@@ -5931,3 +5931,125 @@ decision is unchanged.
   - dash / sprint approaches;
   - Clapper jump-slam and cast-slam move data.
 - SG2: build the backward-pass map (ground layer + apex layers) for CL_SLAM from these macros and move data.
+
+## Task 1v1 - stage SG2: the score map for the Clapper slam (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §56)
+
+The person's space-time map (S1-S6, spec_notes_zh.txt parts 89-96) for CL_SLAM and the down slash, built on SG1's
+move data and macros, checked against T1's trials and the 2026-10-12 live slam hits, run in a closed loop, and
+prepared for the person's eye check. Offline only; forum_planner / special_mode / gauntlet unchanged (zone_overlay gets
+a new layer behind a switch that is off by default).
+
+### Code
+
+- `ssbot/combat/special_map.py` (new):
+  - `MapConfig`: lattice (x -12..+16 u, the 0.165 u run step), gamma 0.99, clearance weight 0.3 (cap 1 u), dilation
+    mx 0.2475 / my 0.12, target shrink 0.1025 (+0.165 with a held key), rendered-y tolerance 0.16, holds (T1's
+    included), contact-height bins 0.2 u, tail 60 frames, variants "observed", late_press / late_jump, wall_front /
+    wall_back.
+  - `Geometry`: the union damage D / clearance CL per (k, box-bottom bin, x); per variant its own damage set (VD, DS)
+    and target box (VB) with robust contact masks CB / CBM per (k, box, rendered-y bin, x); CY (earliest possible
+    contact); the event tubes (ground, 18 jump holds, 30 bounce contact-height bins) per start cycle q.
+  - `MapBuilder.build(p, keep_full)`: one physics phase p. Backward over absolute frames through every macro state
+    (2,216 per frame); per frame the effective key d in {-1, 0, +1}; strikes per variant class (contact in every
+    class, each class's own pre-contact damage up to its contact - PRE_PROTECT_F, bounce value = min over c_min ..
+    c_max + 1); robust late press and late jump; depth + follow-ups; clearance along the chosen path. keep_full keeps
+    S [K, NS, NX] and the strike values SV [K, NS, NX, 3] (float16) for the sim / checks; `stats["why"]` counts the
+    rejection reasons per press frame and x.
+  - `SpecialMap` (the stored file): `ground(k, x, q)`, `layer("ground" | "apex" | "jump_start", k, q)`,
+    `readiness(x)`, `ground_choice(k, x, key, lam)` (the S8 lookahead from a ground node). q None = min over phases.
+  - `save_map` / `quantize`: uint8 levels of 0.02 (255 = infeasible, 254 = no node), meta (lattice, gamma, robust
+    share 1.0, variant policy, source commit, input hashes, classes, config).
+- `ssbot/tools/special_map_build.py` (new): builds the 6 phases, saves
+  `knowledge/1.0.30000/enemies/forum/special_map_CL_SLAM[_wf6|_wf9|_wf12].npz` (git-ignored like the other forum npz;
+  rebuild: `../scripts/uv.cmd run python -m ssbot.tools.special_map_build [--wall-front U --tag wfU]`, 2.5 min),
+  `C:\ssbot\data\m2_map\sg2\build_report*.json`, PNGs in `sg2\png\{open,wf6,wf9,wf12}` (k x x heat maps: ground,
+  strike projection, every apex layer; the person's window yellow, v2 W1-W3 cyan, the strike region white).
+- `ssbot/tools/sg2_check.py` (new): (a) T1 trials b1-b3, (b) live slam hits (m2_live_g s1/s2 hit rows + every slam
+  with an hp loss in run 20261012_203232; the game-time clock, so x0.5 runs work). Outputs
+  `sg2\check_trials_full.json`, `sg2\check_live.json`.
+- `ssbot/tools/sg2_sim.py` (new): the closed loop (one-step lookahead on the map, lambda per key change, input
+  latency handled: the key chosen now also carries the value of a strike or a jump from the next node), the slam's
+  real boxes per variant, execution noise (off-lattice, 20 % late keys / presses / jumps), noise-free and
+  per-noise-source attribution replays, a kin.rollout spot check. Output `sg2\sim.json`.
+- `ssbot/tools/zone_overlay.py`: `special_map_now` / `draw_smap` behind `SSBOT_OVERLAY_SPECIAL_MAP=1` (inside the
+  --overlay-pogo slam layer). Unset: no change.
+- `tests/test_special_map.py` (7 tests, 6 s, a reduced map). Also pass: test_pogo_slam, test_pogo_model,
+  test_move_data, test_hero_macros, test_zone_overlay, test_specials and the other overlay tests (101 tests).
+- Overlay start script prepared, NOT launched: `C:\ssbot\sandbox\start_overlay_map_check.ps1` (frozen checkout, 0.5x,
+  waits until no game window and no human_session; launch via WMI).
+
+### Numbers
+
+- **Build**: 150 s for 6 phases (21-26 s each), K 139 frames, NX 170, 2,216 macro states per frame; file 375 KB.
+- **Feasible share** (k <= 78): ground 0.75, jump apex layers 0.74-0.87, bounce apex layers 0.85-0.95; a strike
+  reachable from 22 % of the ground cells.
+- **Strike windows** (press frame, x relative to the Clapper's current position):
+  - antic: press 1-48, -3.9..+6.2 u (2,331 cells, 2,219 in all phases);
+    - per frame: 42: -3.3..+5.5; 45: -2.1..+5.8; 47: +3.5..+5.5; 48: +4.2..+5.5;
+    - 49-55: none (in some variant the hammer appears before the contact: antic 47 + Slam 0 4 frames -> Slam
+      Collider 1 at k 51);
+  - after the hammer: press 56-67, -4.0..+3.9 u (372 cells).
+- **Against the older windows**: the person's window (k 42-47, 2.5-5 u) 90/96 cells; v2 W1 98 %, W2 83 %, W3 42 %
+  (W3's k 68-74 lies past the earliest variant's end, k 72).
+- **Readiness at k 0** (ground, min over phases): behind 3 u 3.54; front 3 u 3.27, 5 u 3.24, 6 u 3.10, 8-10 u 1.51,
+  12 u 0.71, 13 u 0.30 (no strike).
+- **T1 trials** (527 with a result, 69 % success):
+  - certified in all phases: 72/73 succeed (precision 0.986), recall 0.20; the one failure pressed jump after the
+    press (not the map's path);
+  - the person's points: 26/26 (recall 0.44);
+  - press k 42-47: 55 certified, all succeed; k 48-55: none certified (real success 62 %).
+- **Live slam hits** (46: m2_live_g 42 + the 8720b7a demo 4):
+  - at k 0, 31 airborne, all off the map (umbrella / fresh hop); 15 on the ground, all feasible (readiness 1.5-3.4);
+  - 44/46 passed through an infeasible state before the hit (median 6.5 frames before; first infeasible frame
+    p10/50/90 27/46/54); the last feasible state was airborne in 42 (k p50 34);
+  - 26 had the umbrella open between k 40 and the hit.
+- **Closed loop** (22,320 episodes, 350 s):
+  - feasible starts: 86/20,197 damaged (0.43 %); the same episodes without execution noise: 0;
+  - single noise sources: only late key changes alone cause damage (14 of 860 replays); the rest needs combinations;
+  - readiness [1, 2): 99.4 % strike without damage; >= 3: 99.1 % and 1.97 hits per slam; < 0.31: no strike,
+    0 damage;
+  - hits per slam: after a rune hop 1.95, at the antic entry 1.28;
+  - key changes per slam vs lambda: 12.4 (0), 4.9 (0.02), 4.3 (0.05), 4.0 (0.1; more damage); use 0.02-0.05;
+  - 108 presses without a contact (0.4 %, all from late key changes);
+  - the rollout spot check (200 episodes): box error 0, damage verdict 200/200.
+
+### Design decisions
+
+- **One map per physics phase p** (the 50 Hz cycle at k 0): exact on the lattice, no hull over q. The phase is the
+  game's global clock. Online, with q unknown (the tracker's ALO..AHI), take the min over the possible phases.
+- **The pass goes per frame through every macro state** (tube x index), not node to node. This gives the best
+  horizontal schedule inside each rise / fall, and the press frame, exactly. Only the ground, apex and jump-start
+  layers are stored. The apex layers are the person's nodes; the tube values would be needed for online lookups in
+  the air.
+- **Robust share 1.0 over the 72 observed variants**: a failure is a hit, and the variant is unknown until Slam 0
+  starts. Contact and pre-contact damage are per variant class; elsewhere the union. Measured cost: no strike after
+  press 48. T1 shows 38 % failures there.
+- **Footprint rule as dilation** (half cell + one run step in x, 0.12 u in y), with no erosion of the values.
+- **Late press / late jump are explicit partners**: the late press is the same key one frame more; the late jump is
+  any key one frame on the ground.
+- **The bounce** is one class (SG1), binned by contact height (0.2 u); the contact range c_min..c_max+1 takes the
+  worst.
+- **Scores**: strike = gamma^c (1 + depth) + continuation. The follow-ups come from the continuation, not a separate
+  count. Clearance is carried along the argmax path.
+- **Walls**: buckets by the front wall (6 / 9 / 12 u): the hero clipped, the lunge stopped. Online, take the nearest
+  bucket at or below the real distance.
+
+### Open items / next
+
+- The person's eye check of the overlay: start script ready, not launched. Freeze the commit with
+  `1v1_freeze.ps1 -rev <sha>`; the script names the checkout.
+- S7 contours (contourc rings, tree, orientation, simplification): not built. Dense uint8 levels for now.
+- S8 online in the planner: not done. Readiness as a row penalty, the lookahead, and replacing
+  SSBOT_FORUM_CL_NODOWN all remain.
+  - Airborne lookups need the tube values: store them (about 110 MB per phase as float16) or recompute per slam.
+- Missing macros:
+  - the umbrella (31 of 46 live hits began in it);
+  - the Wanderer down thrust, air dash, sprint approaches, slash recoil.
+- Not yet covered:
+  - back-wall buckets;
+  - wall collisions mid-jump (treated as infeasible).
+- Recall 20 % on the trials, by design: share 1.0, dilations, late presses.
+- Stacked execution noise leaves 0.43 % damage and 0.4 % misses. Remedies:
+  - make the map aware of a fresh key change;
+  - or re-plan each frame from the exact state.
+- SG1's single bounce class still needs the person's recordings.

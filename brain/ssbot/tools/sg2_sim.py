@@ -66,6 +66,7 @@ class Sim:
         self.hm = geo.hm
         self.tube_of = {("jump", t.param): i for i, t in enumerate(geo.tubes) if t.kind == "jump"}
         self.jump_h = [t.param for t in geo.tubes if t.kind == "jump"]
+        self.s0_of = {t.param: t.s0 for t in geo.tubes if t.kind == "jump"}
         self.polys = [slash_poly(f, a) for f in (1, -1) for a in (False, True)]
         self.late_p, self.offset = LATE_P, True       # execution noise (off: the attribution replays)
         self.late_kinds = {"key", "press", "jump"}
@@ -142,17 +143,26 @@ class Sim:
                 if ev["kind"] == "ground":
                     for d in (-1, 0, 1):
                         x2 = x1 + d * g.step * self.st[k + 2]
-                        cands.append((self.S(k + 2, 0, x2) - lam * (d != dir_cur), ("dir", d)))
+                        v = self.S(k + 2, 0, x2)
+                        # a jump pressed next frame (node k + 1) makes its first move with the key read now
+                        for h in self.jump_h:
+                            s0 = self.s0_of[h]
+                            vj = min(self.S(k + 2, s0 + 1, x2), self.S(k + 1, s0, x1))
+                            if vj > g.cfg.wc + 1e-3:
+                                v = max(v, vj)
+                        cands.append((v - lam * (d != dir_cur), ("dir", d)))
                     for h in self.jump_h:
-                        s0 = self.g.tubes[self.tube_of[("jump", h)]].s0
-                        best = -np.inf
+                        s0 = self.s0_of[h]
+                        best, bd = -np.inf, dir_cur
                         for d in (-1, 0, 1):
                             x2 = x1 + d * g.step * self.st[k + 2]
-                            best = max(best, self.S(k + 2, s0 + 2, x2) - lam * (d != dir_cur))
+                            v = self.S(k + 2, s0 + 2, x2) - lam * (d != dir_cur)
+                            if v > best:
+                                best, bd = v, d
                         # the start's own score holds the late-jump robustness (the same jump one frame later)
                         best = min(best, self.S(k, s0, x))
                         if best > g.cfg.wc + 1e-3:            # a reachable strike (R > 0): never jump without one
-                            cands.append((best - lam, ("jump", h)))
+                            cands.append((best - lam, ("jump", h, bd)))
                 else:
                     _, _, land = self.prof(ev)
                     s1 = self.slice_of(ev, j + 1) if j + 1 < land else -1
@@ -185,6 +195,12 @@ class Sim:
                     elif act[0] == "jump":
                         jump_now = act[1]
                         e.key_changes += 1
+                        if act[2] != dir_cur:                      # the jump's best key for its first move
+                            e.key_changes += 1
+                            if "key" in self.late_kinds and rng.random() < self.late_p:
+                                dir_pending = act[2]
+                            else:
+                                dir_pending = ("now", act[2])
                     elif act[0] == "press":
                         e.key_changes += 1
                         press_pending = (k + 1 + (1 if "press" in self.late_kinds and rng.random() < self.late_p else 0), dir_cur)

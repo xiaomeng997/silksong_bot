@@ -33,7 +33,10 @@ TRIALS = [Path(rf"C:\ssbot\data\m2_pogo\target\b{i}_live.json") for i in (1, 2, 
 LIVE = [Path(r"C:\ssbot\data\m2_live_g\s1.json"), Path(r"C:\ssbot\data\m2_live_g\s2.json")]
 RUNS = Path(r"C:\ssbot\data\runs\m2")
 HERO_PY = 1.553                     # hero pos above its box bottom standing (pogo_slam.HERO_STAND_DY)
-HIST = 5                            # frames of height history an airborne live state must match on the map
+# demo runs without hit rows in m2_live_g: every slam with an hp loss is taken from the recording (the person's rnv2nd
+# 0.5x demo on 8720b7a: ep 2 had two Slam Collider 1 hits)
+EXTRA_RUNS = ["20261012_203232_Forum_W_w7_eval_planner_oracle_x0.5_clashM"]
+HIST = 5                           # frames of height history an airborne live state must match on the map
 
 
 def load_trials() -> list[dict]:
@@ -275,7 +278,17 @@ class LiveCheck:
 
     def slam(self, sl: dict, hit: dict) -> dict:
         g = self.g
-        fr = sl["frames"]
+        # the map's frame clock is game time (1/60 s): a slowed run (x0.5) logs each game frame twice
+        byk: dict = {}
+        hp_lost = None
+        for f in sl["frames"]:
+            kk = int(round(float(f.get("t") or 0.0) * 60))
+            byk[kk] = f
+            if hp_lost is None and f.get("hpl"):
+                hp_lost = kk
+        fr = [byk.get(kk, byk[max(k_ for k_ in byk if k_ <= kk)]) for kk in range(max(byk) + 1)]
+        if hp_lost is not None:
+            fr[hp_lost] = dict(fr[hp_lost], hpl=fr[hp_lost].get("hpl") or ["hit"])
         cx0 = fr[0]["pos"][0]
         facing = 1 if fr[0]["flip"] else -1
         hx0 = 0.5 * (fr[0]["hbox"][0] + fr[0]["hbox"][2]) if fr[0].get("hbox") else fr[0]["hero"][0]
@@ -358,6 +371,20 @@ def check_live(geo: sm.Geometry, maps: list[sm.PhaseMap]) -> dict:
                 out.append({"hit": h, "error": "slam not found in the recording"})
                 continue
             out.append(lc.slam(sl, h))
+    for run in EXTRA_RUNS:
+        for d in rec_dirs(run):
+            try:
+                sls = scan(d)
+            except Exception as ex:  # noqa: BLE001
+                out.append({"run": run, "error": repr(ex)})
+                continue
+            for sl in sls:
+                lost = [f for f in sl["frames"] if f.get("hpl")]
+                if lost:
+                    h = {"arm": "demo", "run": run, "ep": None, "f_a": sl["f0"], "src": str(lost[0]["hpl"][0]),
+                         "state": lost[0]["st"], "t": None}
+                    out.append(lc.slam(sl, h))
+                    hits.append(h)
     ok = [r for r in out if "error" not in r]
     summ = {"hits": len(hits), "located": len(ok),
             "takeoff_found": sum(1 for r in ok if r.get("takeoff_k") is not None),
