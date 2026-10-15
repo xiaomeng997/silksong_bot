@@ -76,6 +76,7 @@ Failure (§4.4 item 4): an exception or an injected failure (fail_p) returns LOC
 every decision is LOCAL's bit for bit (tests/test_forum_l2.py).
 """
 import math
+import os
 import random
 import time
 from dataclasses import dataclass, field, replace
@@ -321,6 +322,11 @@ class GauntletTactics:
         room = (lambda v: xa + r.wall_room_u <= v <= xb - r.wall_room_u)
         if fam != CC_SLAM:
             self._strike.pop(s.iid, None)
+        mb = _map_board(s.iid)
+        if fam == CC_SLAM and mb is not None and mb.get("x") is not None:
+            # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row's spot (its press or 10 frames ahead), else the map's best
+            # ground spot near the hero; not slam_out_u (13 u: readiness 0.3, no strike)
+            return self._clamp(float(mb["x"])), frozenset(), "slam: map " + ("row" if mb.get("on") else "ground")
         if fam == CC_SLAM:
             if special_board.L2_ON:
                 # the person's general special rule (combat.special_mode): the planner found a strike on this slam
@@ -379,6 +385,9 @@ class GauntletTactics:
                 return behind, frozenset(), "rune: behind"
             return self._clamp(out), frozenset(), "rune: out"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
+        if fam != CC_CAST and mb is not None and mb.get("ready_x") is not None:
+            # SG4: before a slam can start, the readiness argmax 3-6 u in front (the map at k = 0)
+            return self._clamp(float(mb["ready_x"])), vocab, "face: ready"
         if fam == CC_CAST and rune_bombs.FACE_U is not None:
             # SSBOT_FORUM_RUNE_FACE (task 1v1 G2, the why study's fix (6)): through the small runes on the ground
             # 3-4 u from it, where only ring 1 reaches (ring 0 ends 2.4 u out): one short hop clears it
@@ -820,3 +829,12 @@ class GauntletTactics:
         q = (lambda p: round(float(np.percentile(ms, p)), 3) if ms else None)
         return {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.stats.items() if k != "ms"} | \
             {"ms_p50": q(50), "ms_p99": q(99), "ms_n": len(ms)}
+
+
+def _map_board(iid):
+    """SSBOT_FORUM_SPECIAL_MAP (SG4): the planner's map decision for this Clapper this tick (combat.forum_map.BOARD),
+    None without the switch."""
+    if os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() != "1":
+        return None
+    from ssbot.combat import forum_map
+    return forum_map.BOARD.get(iid)

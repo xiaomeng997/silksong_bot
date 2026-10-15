@@ -366,6 +366,53 @@ class MapRuntime:
     def ready_slices(self, p: int, y_now: float, y_prev: float, tol: float = 0.08) -> list[int]:
         return self.locate(0, [y_now, y_prev], p, tol)
 
+    def _k0_slices(self, p: int):
+        """The airborne slices that are states at k = 0 in phase p and their heights at j and j - 1 (cached)."""
+        c = getattr(self, "_k0c", None)
+        if c is None:
+            c = self._k0c = {}
+        if p not in c:
+            ti = self.ti
+            J, T = ti.SJ, ti.ST
+            q = (p + J) % 6
+            kinds = np.array(ti.kinds)[T]
+            ok = (J >= 1) & (J < ti.LA[T, q]) & (kinds != "ground")
+            s = np.flatnonzero(ok)
+            c[p] = (s, self.TY[T[s], q[s], J[s]], self.TY[T[s], q[s], J[s] - 1])
+        return c[p]
+
+    def readiness_rows(self, p: int, xm: np.ndarray, kd: np.ndarray, gnd: np.ndarray, yb: np.ndarray,
+                       yp: np.ndarray, tol: float = 0.08) -> np.ndarray:
+        """[N] readiness of end states at k = 0 (phase p): map x xm, state key kd (map frame), on the ground or the
+        minimum over the airborne slices matching the last two box bottoms (none matched: 0, off the macros)."""
+        src = self.srcs[p]
+        S0 = np.asarray(src._S[0], np.int64)                      # [3, NS, NX] or [NS, NX]
+        xi = np.clip(np.rint((np.asarray(xm) - self.ti.x_lo) / self.ti.step).astype(np.int64), 0, self.ti.NX - 1)
+        inside = (np.asarray(xm) >= self.ti.x_lo) & (np.asarray(xm) <= self.ti.x_lo + self.ti.step * (self.ti.NX - 1))
+        c = np.asarray(kd, np.int64) + 1
+
+        def val(lv):
+            return np.where(lv >= NONE_LEVEL, -np.inf, lv * src.scale)
+        R = np.zeros(len(xm))
+        g = np.asarray(gnd, bool)
+        if g.any():
+            lv = S0[c[g], 0, xi[g]] if self.keyed else S0[0, xi[g]]
+            R[g] = val(lv)
+        a = ~g
+        if a.any():
+            s, y0, y1 = self._k0_slices(p)
+            ia = np.flatnonzero(a)
+            m = (np.abs(np.asarray(yb)[ia, None] - y0[None, :]) <= tol) & (np.abs(np.asarray(yp)[ia, None] - y1[None, :]) <= tol)
+            for r, i in enumerate(ia):
+                ss = s[m[r]]
+                if not len(ss):
+                    R[i] = 0.0
+                    continue
+                lv = S0[c[i], ss, xi[i]] if self.keyed else S0[ss, xi[i]]
+                R[i] = float(val(lv).min())
+        R[~inside] = -np.inf
+        return R
+
     # ---- the exits ----
     def deviation(self, k: int, cx: float, x0: float, face: int) -> float:
         """How far the Clapper's x lies outside anchor + the variants' displacement range at frame k (u, >= 0)."""

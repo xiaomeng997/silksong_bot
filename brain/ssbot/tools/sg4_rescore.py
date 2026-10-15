@@ -41,6 +41,9 @@ VARIANTS = {
     "bc_hexp": {"keyed": True, "key_noise": "hard_exp"},
     "ac_w1c2": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 2.0},
     "abc_w1c2": {"keyed": True, "key_noise": "hard_exp", "wc": 1.0, "c_cap": 2.0},
+    "ac_w2c2": {"keyed": True, "key_noise": "hard", "wc": 2.0, "c_cap": 2.0},
+    "abc_w2c2": {"keyed": True, "key_noise": "hard_exp", "wc": 2.0, "c_cap": 2.0},
+    "ac_w1c3": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0},
 }
 
 
@@ -137,7 +140,8 @@ def run(a) -> int:
         del pm, sim, src, eps
     res["seconds"] = round(time.time() - t0, 1)
     a.out.mkdir(parents=True, exist_ok=True)
-    (a.out / f"rescore_{a.variant}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
+    sd = f"_s{a.seed}" if a.seed != 57 else ""
+    (a.out / f"rescore_{a.variant}{sd}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
         json.dumps(res, indent=1, default=float), "utf-8")
     return 0
 

@@ -383,6 +383,12 @@ class ZoneEngine:
         self.reach = (int(math.ceil(p.dash_speed * FT / cell)), int(math.ceil(p.jump_speed * FT / cell)),
                       int(math.ceil(p.max_fall * FT / cell)))
         self.running = False
+        # SSBOT_OVERLAY_MAP_PLANNER=1 (task 1v1 SG4): the planner's whole tick runs open loop on every frame (its keys
+        # are not sent: the supervisor's mask dropped as in the m2_why replays), so the SG4 map layer can show whether
+        # the planner took its map row (SSBOT_FORUM_SPECIAL_MAP=1 in the overlay's environment)
+        self.shadow = os.environ.get("SSBOT_OVERLAY_MAP_PLANNER", "").strip() == "1"
+        self._ws_cap = None
+        self.act_err = None
         self.ws = None
         self.names: dict[int, str] = {}
         self.counts: dict[str, int] = {}
@@ -400,15 +406,54 @@ class ZoneEngine:
         from ssbot.train.encounters import ENCOUNTERS
         self.pol.terrain_msg = terrain_msg
         self.pol.reset(random.Random(0), ENCOUNTERS["Forum"])
+        if self.shadow:
+            self._shadow_patch()
         self.running = True
         self.ws = self.raw = self.fcast = None
         self.names, self.counts = {}, {}
         if self.rng is not None:
             self.rng.reset()
 
-    def feed(self, s: dict) -> bool:
-        """One game-frame STATE (frames numbered consecutively): the forecast-only part of ForumPlannerPolicy.act."""
+    def _shadow_patch(self) -> None:
+        """The open-loop planner (SSBOT_OVERLAY_MAP_PLANNER): the backend's world state captured, the supervisor's
+        output dropped (no pause, no mask)."""
+        import dataclasses
         pol = self.pol
+        o_feed = pol.backend.feed
+
+        def fd(s_, _o=o_feed):
+            r = _o(s_)
+            self._ws_cap = r
+            return r
+        pol.backend.feed = fd
+        step0 = pol.sc.step
+
+        def step(*a, _o=step0, **k):
+            r = _o(*a, **k)
+            pol.sc.pq = None
+            return r._replace(mask=None, outcome=None) if hasattr(r, "_replace") else \
+                dataclasses.replace(r, mask=None, outcome=None)
+        pol.sc.step = step
+
+    def feed(self, s: dict) -> bool:
+        """One game-frame STATE (frames numbered consecutively): the forecast-only part of ForumPlannerPolicy.act
+        (SSBOT_OVERLAY_MAP_PLANNER: the whole act, open loop)."""
+        pol = self.pol
+        if self.shadow:
+            if self.rng is not None:
+                self.rng.feed(s)
+            self.raw = s
+            self.f_fed = s["f"]
+            self._names_of(s)
+            self._ws_cap = None
+            try:
+                pol.act(s, None)
+            except Exception as ex:  # noqa: BLE001 - the overlay keeps drawing
+                self.act_err = repr(ex)[:200]
+            if self._ws_cap is None:
+                return False
+            self.ws = self._ws_cap
+            return True
         f = s["f"]
         if self.rng is not None:
             self.rng.feed(s)
@@ -1340,6 +1385,7 @@ def pogo_predict(eng, s: dict) -> dict | None:
     slam = pogo_slam_now(eng, s, start, masks, facing)
     if slam is not None:
         return slam
+    rd = ready_now_sg4(eng, s, h) if os.environ.get("SSBOT_OVERLAY_SPECIAL_MAP", "").strip() == "sg4" else None
     tg = targets_of(s)
     br = pm.branches(start, masks, 1, lambda j: tg, facing)
     out = {"miss": br.miss.pos[0].copy(), "hit": None if br.hit is None else br.hit.pos[0].copy(), "j": br.contact_j,
@@ -1347,6 +1393,8 @@ def pogo_predict(eng, s: dict) -> dict | None:
            "inv": None if br.hit is None else (br.hit.flags[0] & kin.F_INVULN) != 0}
     if br.contact_j >= 0:
         out["slash"] = slash_poly(facing) + br.miss.pos[0, br.contact_j]
+    if rd is not None:
+        out["smap"] = rd
     return out
 
 
@@ -1397,6 +1445,8 @@ def pogo_slam_now(eng, s: dict, start, masks, facing: int) -> dict | None:
     import os as _os
     if _os.environ.get("SSBOT_OVERLAY_SPECIAL_MAP", "").strip() == "1":          # task 1v1 SG2 (forum.md 56)
         pr["smap"] = special_map_now(eng, tl, k, cx, face, h)
+    elif _os.environ.get("SSBOT_OVERLAY_SPECIAL_MAP", "").strip() == "sg4":      # task 1v1 SG4 (forum.md 59)
+        pr["smap"] = special_map_now_sg4(eng, s, k, cx, face, h)
     pr["ground"] = False
     return pr
 
@@ -1489,6 +1539,160 @@ def special_map_now(eng, tl, k: int, cx: float, face: int, h: dict) -> dict | No
     return out
 
 
+def _sg4_runtime(eng):
+    """The SG4 map runtime (special_map_rt; the stored levels of SSBOT_FORUM_SPECIAL_MAP_TAG), once per engine."""
+    rt_ = getattr(eng, "_smap4", None)
+    if rt_ is None and not getattr(eng, "_smap4_err", None):
+        try:
+            from ssbot.combat import special_map_rt as smrt
+            rt_ = eng._smap4 = smrt.runtime(eng.pol.params, eng.pol.terrain)
+            if rt_ is None:
+                eng._smap4_err = "no map file"
+        except Exception as ex:  # noqa: BLE001
+            eng._smap4_err = repr(ex)[:120]
+    return rt_
+
+
+def _sg4_planner_info(eng) -> dict | None:
+    """The planner's own map decision this frame (SSBOT_OVERLAY_MAP_PLANNER=1: the engine runs the planner's tick open
+    loop, its outputs not sent): taken / safe / the full support's cross-check / the chosen row / why not."""
+    pl = getattr(eng.pol, "planner", None)
+    li = getattr(pl, "last_info", None) or {}
+    return li.get("map")
+
+
+def special_map_now_sg4(eng, s: dict, k: int, cx: float, face: int, h: dict) -> dict | None:
+    """SG4's map at slam frame k (special_map_rt, the planner's map): the ground layer for the hero's key (the minimum
+    over the possible physics phases), the map row the planner would get from the hero's state now (its path, its
+    presses, the first action and value), the off-map reason; with the planner running (SSBOT_OVERLAY_MAP_PLANNER=1)
+    whether the planner took the row."""
+    from ssbot.combat import special_map_rt as smrt
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.knowledge.kinematics import B_LEFT, B_RIGHT
+    rt_ = _sg4_runtime(eng)
+    if rt_ is None:
+        return {"k": k, "text": ["SG4 map: " + str(getattr(eng, "_smap4_err", "none"))], "wx": [], "ground": [],
+                "apex": [], "strike": [], "step": 0.165, "floor": 3.015, "sg4": True}
+    x0 = cx - face * float(rt_.disp_lo[min(max(k, 0), len(rt_.disp_lo) - 1)])
+    floor = float(rt_.hm.stand_y0)
+    try:
+        st = eng.pol.trk.state()
+        alo, ahi = float(st[kin.ALO]), float(st[kin.AHI])
+    except Exception:  # noqa: BLE001
+        alo, ahi = 0.0, 0.999
+    phases = smrt.phases_of(alo, ahi, k)
+    mask = int((s.get("input") or {}).get("mask", 0) or 0) & (B_LEFT | B_RIGHT)
+    c = (1 if mask == B_RIGHT else -1 if mask == B_LEFT else 0) * face
+    xs = rt_.ti.x_lo + rt_.ti.step * np.arange(rt_.ti.NX)
+    kk = min(max(k, 0), rt_.ti.K - 1)
+    g = np.array([min(rt_.srcs[p].S(kk, 0, float(x), c) if rt_.keyed else rt_.srcs[p].S(kk, 0, float(x))
+                      for p in phases) for x in xs])
+    out = {"k": k, "step": rt_.ti.step, "floor": floor, "wx": x0 + face * xs, "ground": g, "apex": [], "strike": [],
+           "sg4": True, "wc": rt_.wc, "text": []}
+    hb = h.get("box")
+    if not hb:
+        return out
+    hx = 0.5 * (hb[0] + hb[2])
+    yb = float(hb[1]) - floor
+    hist = getattr(eng, "_smap4_y", [])
+    hist = ([yb] + hist)[:3]
+    eng._smap4_y = hist
+    xm = (hx - x0) * face
+    out["hero"] = {"x": hx, "y": float(hb[1]), "xm": round(xm, 2), "ground": abs(yb) < 0.05}
+    if abs(yb) < 0.05:
+        ev = {"kind": "ground", "k": k}
+    else:
+        best = None
+        for p in phases:
+            for sl in rt_.locate(k, hist, p):
+                v = min(rt_.srcs[q].S(k, sl, xm, c) if rt_.keyed else rt_.srcs[q].S(k, sl, xm) for q in phases)
+                if best is None or v < best[0]:
+                    best = (v, sl, p)
+        if best is None:
+            out["text"].append("k%d x%+.2f off the map (umbrella / dash / recoil / wall / a slash)" % (k, xm))
+            ev = None
+        else:
+            ev = rt_.ev_of_slice(best[1], k, best[2])
+    if ev is not None and k < rt_.end_min:
+        fh = (1 if float(h.get("facing") or 1) >= 0 else -1) * face
+        pl = rt_.plan(k, xm, ev, c, -100, phases, 60, face_hero=fh, face=face)
+        out["row"] = [(float(x0 + face * x), floor + float(y) + 0.6) for x, y in zip(pl.xs, pl.ys)]
+        out["row_press"] = [(float(x0 + face * pl.xs[t]), floor + float(pl.ys[t]) + 0.6) for t in pl.presses
+                            if t < len(pl.xs)]
+        a = pl.first
+        if a is None:
+            an = "-"
+        elif a[0] in ("dir", "press"):
+            an = "%s %+d" % (a[0], a[1] * face)
+        else:
+            an = "jump h%g %+d" % (a[1], a[2] * face)
+        txt = "k%d x%+.2f %s p%s -> %s v%.2f" % (k, xm, ev["kind"], phases, an, pl.value)
+        if pl.presses:
+            txt += " presses +%s" % (pl.presses[:2],)
+        out["text"].append(txt)
+    mi = _sg4_planner_info(eng)
+    if mi is not None:
+        if mi.get("on"):
+            out["text"].append("planner: map row %s safe %s xcheck %s chose %s" % (
+                "TAKEN" if mi.get("taken") else "not taken", mi.get("safe"), mi.get("xcheck"), mi.get("chosen")))
+        else:
+            out["text"].append("planner: no map row (%s)" % (mi.get("why"),))
+    return out
+
+
+def ready_now_sg4(eng, s: dict, h: dict) -> dict | None:
+    """SG4's readiness before a slam (a Clapper in a decision state, the hero within its Slam Range): the map's score
+    at the antic entry (k = 0, it faces the hero) along the floor on both sides, the argmax 3-6 u in front on the
+    hero's side (L2's stance), the hero's own readiness; the planner's penalty when it runs."""
+    from ssbot.combat import special_map_rt as smrt
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.knowledge.gauntlet_tables import FORUM_SPECS
+    hb = h.get("box")
+    if not hb:
+        return None
+    hx = 0.5 * (hb[0] + hb[2])
+    dec = FORUM_SPECS["Song Heavy Sentry"].decision_states
+    best = None
+    for e in s.get("ents") or ():
+        if e.get("type_key") != "Song Heavy Sentry" or e.get("is_dead") or not e.get("pos"):
+            continue
+        st = next((m.get("state") for m in e.get("fsms") or () if m.get("name") == "Control"), None)
+        d = abs(float(e["pos"][0]) - hx)
+        if st in dec and d <= smrt.READY_RANGE_U and (best is None or d < best[0]):
+            best = (d, e, st)
+    if best is None:
+        return None
+    rt_ = _sg4_runtime(eng)
+    if rt_ is None:
+        return None
+    _, e, stt = best
+    cx = float(e["pos"][0])
+    floor = float(rt_.hm.stand_y0)
+    try:
+        st = eng.pol.trk.state()
+        phases = smrt.phases_of(float(st[kin.ALO]), float(st[kin.AHI]), 0)
+    except Exception:  # noqa: BLE001
+        phases = list(range(6))
+    step = rt_.ti.step
+    xs = np.arange(-12.0, 12.01, step)
+    R = np.array([min(rt_.readiness(abs(float(x)), 0, p) for p in phases) for x in xs])
+    sd = 1 if hx >= cx else -1
+    win = (sd * xs >= 3.0) & (sd * xs <= 6.0)
+    bi = int(np.flatnonzero(win)[np.argmax(R[win])])
+    rh = min(rt_.readiness(abs(hx - cx), 0, p) for p in phases)
+    out = {"k": 0, "step": step, "floor": floor, "wx": cx + xs, "ground": R, "apex": [], "strike": [], "sg4": True,
+           "wc": rt_.wc, "ready_x": float(cx + xs[bi]),
+           "text": ["%s: readiness here %.2f (ref %.2f), best %+.2f u in front" % (stt, rh, rt_.ready_ref,
+                                                                               xs[bi] * sd)]}
+    out["hero"] = {"x": hx, "y": float(hb[1]), "xm": round(abs(hx - cx), 2), "ground": True}
+    mi = _sg4_planner_info(eng)
+    if mi is not None and mi.get("ready"):
+        r = mi["ready"]
+        out["text"].append("planner: penalty rows %s out %s changed %s" % (r.get("pen_rows"), r.get("out_rows"),
+                                                                         r.get("changed")))
+    return out
+
+
 def draw_smap(img: np.ndarray, sp: dict, Hw: np.ndarray, H: int) -> None:
     """The score map's slice: ticks along the floor (the ground layer) and at each apex class's height (apex layers):
     dark red = infeasible, grey = safe but no strike reachable, yellow -> green = higher scores (reach a strike;
@@ -1498,14 +1702,16 @@ def draw_smap(img: np.ndarray, sp: dict, Hw: np.ndarray, H: int) -> None:
     th = max(1, int(round(H / 1080)))
     step = float(sp["step"])
 
+    wc0 = float(sp.get("wc", 0.3)) + 0.01
+
     def col(v):
         if np.isnan(v):
             return None
         if np.isneginf(v):
             return (30, 30, 170, 255)
-        if v < 0.31:
+        if v < wc0:
             return (150, 150, 150, 255)
-        t = float(np.clip((v - 0.31) / 3.3, 0, 1))
+        t = float(np.clip((v - wc0) / 3.3, 0, 1))
         return (int(40 + 40 * t), int(200 + 55 * t), int(230 * (1 - t) + 40 * t), 255)
 
     def strip(y, row, hgt):
@@ -1523,7 +1729,31 @@ def draw_smap(img: np.ndarray, sp: dict, Hw: np.ndarray, H: int) -> None:
         q = np.round(_to_px(Hw, np.array([[wx - step / 2, y], [wx + step / 2, y + 0.3]]))).astype(np.int32)
         cv2.rectangle(img, (int(q[0][0]), int(q[1][1])), (int(q[1][0]), int(q[0][1])), (255, 230, 40, 255),
                       th + (1 if dk <= 2 else 0), cv2.LINE_AA)
+    if sp.get("row"):
+        # SG4: the map row's path (box bottom + 0.6 u) and its presses
+        q = np.round(_to_px(Hw, np.asarray(sp["row"], float))).astype(np.int32)
+        cv2.polylines(img, [q], False, (0, 0, 0, 255), 3 * th + 2, cv2.LINE_AA)
+        cv2.polylines(img, [q], False, (60, 230, 255, 255), 2 * th, cv2.LINE_AA)
+        for pt in sp.get("row_press") or ():
+            c_ = np.round(_to_px(Hw, np.array([pt]))[0]).astype(int)
+            cv2.drawMarker(img, (int(c_[0]), int(c_[1])), (255, 255, 40, 255), cv2.MARKER_TILTED_CROSS, 14 * th,
+                           2 * th, cv2.LINE_AA)
+    if sp.get("ready_x") is not None:
+        c_ = np.round(_to_px(Hw, np.array([[sp["ready_x"], sp["floor"] + 0.4]]))[0]).astype(int)
+        cv2.drawMarker(img, (int(c_[0]), int(c_[1])), (255, 255, 255, 255), cv2.MARKER_TRIANGLE_UP, 16 * th,
+                       2 * th, cv2.LINE_AA)
     hr = sp.get("hero")
+    if sp.get("sg4"):
+        if hr:
+            p = _to_px(Hw, np.array([[hr["x"], hr["y"] + 2.6]]))[0]
+            org = (int(round(p[0])) + 14 * th, int(round(p[1])))
+        else:
+            org = (40 * th, 120 * th)
+        for i, txt in enumerate(sp.get("text") or ()):
+            o_ = (org[0], org[1] + i * 18 * th)
+            cv2.putText(img, txt, o_, cv2.FONT_HERSHEY_SIMPLEX, 0.5 * th, (0, 0, 0, 255), 3 * th, cv2.LINE_AA)
+            cv2.putText(img, txt, o_, cv2.FONT_HERSHEY_SIMPLEX, 0.5 * th, (255, 255, 255, 255), th, cv2.LINE_AA)
+        return
     if hr:
         p = _to_px(Hw, np.array([[hr["x"], hr["y"] + 1.0]]))[0]
         c = (int(round(p[0])), int(round(p[1])))

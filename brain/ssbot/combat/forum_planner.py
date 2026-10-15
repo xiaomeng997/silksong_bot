@@ -193,6 +193,10 @@ TA_ENV = os.environ.get("SSBOT_FORUM_TA", "")
 # strike is kept (stand in front of it, ready for the special)
 CL_NODOWN = os.environ.get("SSBOT_FORUM_CL_NODOWN", "0").strip() == "1"
 CL_NODOWN_U = 12.0
+# SSBOT_FORUM_SPECIAL_MAP=1 (task 1v1 SG4, forum.md 59): the Clapper slam's score map in the planner (combat.forum_map):
+# the map row during a tracked CL_SLAM (judged as a special row, first among the safe rows), the readiness penalty
+# before a slam can start (replaces SSBOT_FORUM_CL_NODOWN, which is then ignored), the L2 spots. Off: no change.
+SPECIAL_MAP = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -444,6 +448,15 @@ class EnvelopeAudit:
     sm_forced_out: int = 0        # review: FORCED_RISK ticks whose special rows were taken out of the ranking
     hop_inflight: int = 0         # review: hop rows dropped: their press is not a jump from the ground (model)
     cl_nodown: int = 0            # SSBOT_FORUM_CL_NODOWN: down-slash rows of the set dropped near a Clapper
+    map_ticks: int = 0            # SSBOT_FORUM_SPECIAL_MAP: ticks with a map row; of those safe / taken; the full
+    map_safe: int = 0             #   support's cross-check flagged the map row (not a veto); ticks during a slam
+    map_taken: int = 0            #   without a row; the CL_NODOWN switch ignored; ticks with a readiness penalty,
+    map_xcheck: int = 0           #   of those where it changed the chosen row; rows put last (no safe continuation)
+    map_off: int = 0
+    map_nodown_ignored: int = 0
+    ready_ticks: int = 0
+    ready_changed: int = 0
+    ready_out_rows: int = 0
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
     sm_full_ticks: int = 0        # SSBOT_FORUM_SPECIAL_FAST (G3): ticks that rolled the whole template set
     sm_board_cached: int = 0      #   ticks whose BOARD is the last full tick's strike spot
@@ -1128,6 +1141,7 @@ class ForumPlanner(Planner):
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.crest = crest
+        self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper (lazy)
         self.shapes = _shapes(crest)
         cfg_c = AttackTable.load(crest).config
         self.down_slash = cfg_c.get("down") == "Slash"
@@ -2865,17 +2879,24 @@ class ForumPlanner(Planner):
             re = kin.rollout(start, lat_e, self.params, self.terrain, threads=self.cfg.threads)
             mpos, mfl, mvel = re.pos, re.flags, re.vel
         contact = special_mode.contacts(tl, mpos, mfl, pj, k0, xa, cy, face, hf)
-        keep = contact > 0
-        # review: the press must lie in a certified entry on this lane (hold-filtered; the CONTINUE is not looked up
-        # by strike_rows): else the row keeps the full checks
-        cert = special_mode.press_certified(meta.get("lut"), self._spec_disp, mpos, mvel, mfl, pj, ext, k0, xa, cy,
-                                            face)
-        self.audit.sm_uncert += int((keep & ~cert).sum())
-        keep &= cert
+        by_map = bool(meta.get("by_map"))
+        if by_map:
+            # SG4: the map certifies its rows on the Clapper's whole move (a row without a press or contact on the
+            # lane too: no bounce event, E's move still dropped)
+            keep = np.ones(n, bool)
+        else:
+            keep = contact > 0
+            # review: the press must lie in a certified entry on this lane (hold-filtered; the CONTINUE is not looked
+            # up by strike_rows): else the row keeps the full checks
+            cert = special_mode.press_certified(meta.get("lut"), self._spec_disp, mpos, mvel, mfl, pj, ext, k0, xa,
+                                                cy, face)
+            self.audit.sm_uncert += int((keep & ~cert).sum())
+            keep &= cert
         if not keep.any():
             return None
         ev = np.zeros((n, P + L), np.int64)
-        ev[np.flatnonzero(keep), contact[keep] - 1] = kin.EV_POGO     # SlamTheory's convention (the certified bounce)
+        hc = keep & (contact > 0)
+        ev[np.flatnonzero(hc), contact[hc] - 1] = kin.EV_POGO     # SlamTheory's convention (the certified bounce)
         rows, ext, lat_e, ev, contact, pj = rows[keep], ext[keep], lat_e[keep], ev[keep], contact[keep], pj[keep]
         is_long = pj - P - 1 > T - 2                # the press past the horizon (strike_rows' long rows)
         n = len(rows)
@@ -2894,7 +2915,7 @@ class ForumPlanner(Planner):
         # SSBOT_FORUM_SPECIAL_APPR only the chosen row's, at the selection: a diagnostic)
         appr = special_mode.approach_codes(tl, k0, xa, cy, face, pj, rb["box"], rb["flags"]) \
             if special_mode.APPR else np.full(n, -1, np.int64)
-        if special_mode.APPR and appr.any():
+        if special_mode.APPR and appr.any() and not by_map:
             # SSBOT_FORUM_SPECIAL_APPR: T1's real-box approach check as a filter (the rows failing it keep the
             # full checks)
             k2 = appr == 0
@@ -2913,6 +2934,9 @@ class ForumPlanner(Planner):
         al = special_mode.active_last(tl)
         big = 1 << 30
         full_from = np.where(k0 + cert_end <= al, cert_end, big).astype(np.int64)
+        if by_map:
+            cert_end[:] = Lb - 1
+            full_from[:] = big                    # the map certifies E's move to its end
         # the planner lanes: the bounce from the press on (the score, stage 1, the end state for the escape)
         for nm in ("phys", "pos", "vel", "mode", "flags", "box"):
             getattr(r1, nm)[rows] = getattr(rp, nm)
@@ -2994,6 +3018,19 @@ class ForumPlanner(Planner):
         self._ds_D0 = D0
         if n_ds:
             rows_.append(ds.cmd)                 # the delayed / chained down slashes (G3): after the hop rows
+        mrow = None
+        if SPECIAL_MAP:
+            from ssbot.combat import forum_map
+            forum_map.BOARD.clear()
+            if self._map is None:
+                self._map = forum_map.MapHelper(self)
+            self._map.info = None
+            if v2 and mode0 not in NO_CONTROL_MODES:
+                mrow = self._map.row(f, start, hold, prefix, T, self.ticks)
+        n_map = 0 if mrow is None else 1
+        M0 = D0 + n_ds
+        if n_map:
+            rows_.append(mrow.cmd[None])          # SG4: the map row, after the family rows, before the CONTINUE
 
         def rname(i: int) -> str:
             if cont and i == N - 1:
@@ -3004,6 +3041,8 @@ class ForumPlanner(Planner):
                 return hop[1][i - N0 - n_spec]
             if D0 <= i < D0 + n_ds:
                 return ds.names[i - D0]
+            if n_map and i == M0:
+                return "SPECIAL MAP"
             return cs.name(i)
         if cont:
             rows_.append(cmod.continue_plan(self.prev_cmd, 1, T)[None])
@@ -3015,13 +3054,16 @@ class ForumPlanner(Planner):
                 cmd = cmd.copy()
                 cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
-        core = np.concatenate([core0, np.zeros(n_spec + n_ds + int(cont), bool)]) if not n_hop else \
-            np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop, bool), np.zeros(n_ds + int(cont), bool)])
+        core = np.concatenate([core0, np.zeros(n_spec + n_ds + n_map + int(cont), bool)]) if not n_hop else \
+            np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop, bool),
+                            np.zeros(n_ds + n_map + int(cont), bool)])
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix
         full[:, P:] = cmd
         ok, why = veto(cs, ctx)
-        if CL_NODOWN and self._clapper_near(f, start):
+        if CL_NODOWN and SPECIAL_MAP:
+            self.audit.map_nodown_ignored += 1    # SG4: the readiness penalty replaces it
+        if CL_NODOWN and not SPECIAL_MAP and self._clapper_near(f, start):
             dn = (cs.prim_bits & (1 << int(cmod.Prim.ATTACK_DOWN))) != 0
             self.audit.cl_nodown += int((ok & dn).sum())
             ok = ok & ~dn
@@ -3051,6 +3093,10 @@ class ForumPlanner(Planner):
             kok = special_mode.row_keys_allowed(ds.cmd, ctx.allowed_mask)
             ok = np.append(ok, kok)
             why = np.append(why, np.where(kok, 0, 1))
+        if n_map:
+            kok = special_mode.row_keys_allowed(mrow.cmd[None], ctx.allowed_mask)
+            ok = np.append(ok, kok)
+            why = np.append(why, np.where(kok, 0, 1))
         if cont:
             ok = np.append(ok, bool(ctx.allowed_mask.all()) or self._prev_allowed(ctx))
             why = np.append(why, 0 if ok[-1] else 1)
@@ -3074,6 +3120,25 @@ class ForumPlanner(Planner):
             self._sctx = sctx
             if sctx is not None:
                 self.audit.sm_ms += sctx.ms
+        pv_map = pv_sm is not None and bool(pv_sm.get("map"))
+        if SPECIAL_MAP and sctx is None and (n_map or (cont and pv_map)):
+            # SG4: the map row (and the CONTINUE of last tick's chosen map row) judged as special rows: the map
+            # certifies the Clapper's whole move; the others, its hazards and its body outside the pre-protect frames
+            # stay (special_mode's support)
+            s_rows, s_ext = [], []
+            if n_map:
+                s_rows.append(M0)
+                s_ext.append(mrow.ext)
+                self._spec_meta = mrow.meta
+            if cont and pv_map and len(pv_sm["ext"]) > 1 and (not n_map or pv_sm["iid"] == mrow.meta["iid"]):
+                s_rows.append(N - 1)
+                s_ext.append(pv_sm["ext"][1:])
+                if not n_map:
+                    self._spec_meta = pv_sm["meta"]
+            if s_rows:
+                sctx = self._special_ctx(f, start, hold, prefix, latched, r1, np.asarray(s_rows, np.int64), s_ext,
+                                         T)
+                self._sctx = sctx
         if n_ds and ds.lane is not None:
             # G3, the certain-hit rule: the certain family rows are judged on their bounce lane from the press on
             # (stage 1, the score, the end state for the escape)
@@ -3097,6 +3162,7 @@ class ForumPlanner(Planner):
         else:
             o = f.occupied(cx, cy, tk[fr])
         o = self._v2_dash(o, f, r1, cx, cy, tk[fr], fr)
+        map_x = bool(o[M0].any()) if n_map else None   # SG4's cross-check: the full support on the map row (not a veto)
         if sctx is not None:
             # (a, b) the special rows on stage 1: their bounce lane against the special support
             sr = sctx.rows
@@ -3677,6 +3743,20 @@ class ForumPlanner(Planner):
             # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
             # otherwise and on every unsafe row: the order is unchanged)
             v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            if SPECIAL_MAP and v2 and self._map is not None:
+                # SG4: the readiness penalty (landed-hit units) before a slam can start; rows with no safe
+                # continuation from their end last (unless every row has none)
+                rp_ = self._map.readiness(f, start, r1, cmd, P, self.ticks)
+                if rp_ is not None:
+                    pen_ = rp_[0]
+                    b0_ = int(np.lexsort((-J, v2_nh))[0]) if safe.any() else -1
+                    v2_nh = v2_nh + np.where(safe, pen_, 0.0)
+                    self.audit.ready_ticks += 1
+                    self.audit.ready_out_rows += int((pen_ >= 100.0).sum())
+                    b1_ = int(np.lexsort((-J, v2_nh))[0]) if safe.any() else -1
+                    self.audit.ready_changed += int(b0_ != b1_)
+                    if self._map.ready_info is not None:
+                        self._map.ready_info["changed"] = bool(b0_ != b1_)
             if v2:
                 # the Clapper's corner (forum_v2.corner_zones): safe rows ending in it after the others
                 zones = forum_v2.corner_zones(f)
@@ -3693,6 +3773,12 @@ class ForumPlanner(Planner):
             # G4 4b (SSBOT_FORUM_SPECIAL_KEEP): the kept template's row, safe and keeping the committed hold and the
             # macro margin, before every other safe row (above the landed hits); no key without the switch
             kk_ = ()
+            if n_map:
+                # SG4: the map row first among the safe rows (it keeps that priority while the map keeps choosing it:
+                # the row is the map's decision rolled out, so it only changes when the map's decision does)
+                mk_ = np.zeros(N, bool)
+                mk_[M0] = bool(safe[M0] and keep[M0] and mkeep[M0])
+                kk_ = (~mk_,)
             if kr is not None:
                 kept_ = np.zeros(N, bool)
                 kept_[kr] = bool(safe[kr] and keep[kr] and mkeep[kr])
@@ -3805,6 +3891,8 @@ class ForumPlanner(Planner):
                 a.sm_appr_hammer += int(not S[i] and int(sctx.appr_fail[q_]) == 2)
                 if not S[i] and not esc_unsafe:
                     self._prev_sm = {"iid": sctx.iid, "ext": sctx.ext[q_].copy(), "move": sctx.move}
+                    if (getattr(self, "_spec_meta", None) or {}).get("by_map"):
+                        self._prev_sm.update(map=True, meta=self._spec_meta)
             res = PlanResult(int(sel_cmd[0]), i, name, int(S[i] or esc_unsafe), forced, float(Pc[i]), float(J[i]),
                              bool(V[i]),
                              bool(hz[i]), bool(U[i]), N, int(ok.sum()), int(safe.sum()), sel_cmd, r1.box[i].copy(),
@@ -3885,6 +3973,28 @@ class ForumPlanner(Planner):
                 self._ds_keep_b = int(nm_.rsplit("+c", 1)[1]) if ("+c" in nm_ and n_pr >= 2) else None
             else:
                 self._ds_keep_b = None
+        map_info = None
+        if SPECIAL_MAP and self._map is not None:
+            # SG4: the map row's outcome this tick (the overlay and the decision log read it), L2's spot
+            taken = bool(n_map and res.idx == M0 and not S[M0])
+            if n_map:
+                a.map_ticks += 1
+                a.map_safe += int(not S[M0])
+                a.map_taken += int(taken)
+                a.map_xcheck += int(bool(map_x))
+                self._map.chosen(taken, mrow.plan)
+            elif self._map.info is not None:
+                a.map_off += 1
+                self._map.off_board(f, start, self.ticks)
+            mi_ = self._map.info
+            ri_ = self._map.ready_info
+            if mi_ is not None or ri_ is not None:
+                first_ = (self.last_sel or {}).get("first")
+                map_info = {**(mi_ or {}), **({"safe": bool(not S[M0]), "xcheck": map_x, "chosen": res.name,
+                                               "s1": bool(S1[M0]), "env": bool(env[M0]), "ok": bool(ok[M0]),
+                                               "first": bool(first_ == M0)} if n_map else {}),
+                            **({"ready": ri_} if ri_ is not None else {})}
+            self._map.ready_info = None
         self.prev_name = res.name
         self.ticks += 1
         t6 = time.perf_counter()
@@ -3898,6 +4008,8 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if map_info is not None:
+            self.last_info["map"] = map_info
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
