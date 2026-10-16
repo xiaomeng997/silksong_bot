@@ -13,7 +13,11 @@ is the frame the key takes effect in the game, the STATE's act.mask):
   wait      no key
   down      K_DOWN .. K_PRESS - 1: down held (the person: 5 frames before the attack, p10/90 3.5 / 6.6)
   press     K_PRESS: down + attack; down 2 more frames
-  after     no key at all until the slam ends or the hero lands (no jump in the air: that opens the umbrella)
+  after     never the jump (in the air it opens the umbrella); no key while the bounce rises; then the person's way
+            out (over = 1): from Slam 0 + OVER_S0 the direction over its body to behind it (the other way when the wall
+            behind it leaves less than OVER_ROOM from its centre, none when neither side has it), the dash at Slam 0 +
+            DASH_S0 (2 frames), the key held until she lands; the planner takes over on the ground. No bounce by the
+            press + 14: abort (the planner).
 Slam 0 seen before the press was sent (a short antic or a late tick): the press at once while its frame is within
 Slam 0 + press_late_max, else abort.
 Entry conditions (checked on every tick until the script starts, at the latest at antic frame K_START_MAX): the hero
@@ -24,7 +28,9 @@ jump), the hero hurt, the Clapper gone or out of the slam, a Slam 0 the press ca
 The numbers (forum.md 65.1): the person's 29 landed strikes of the 2026-10-15 demo (0.5x; game frames): x at the antic
 entry 4.3 / 6.3 / 7.5 u (p10 / 50 / 90), walk toward 0 / 10 / 22 frames, jump at 23.7 / 26.5 / 31.1 held 13.3 / 15.5 /
 17.6, down 5 frames before the attack, press at 44.3 / 47.5 / 50.1 (Slam 0 -4.2 / -1.0 / +1.6) at x 4.3 / 5.0 / 5.7,
-contact at Slam 0 +2.5 / +4.0 / +5.5, no jump after the press (0 of 33); the 3 hammer hits pressed at Slam 0 +2..+6.5.
+contact at Slam 0 +2.5 / +4.0 / +5.5, no jump after the press (0 of 33); the 3 hammer hits pressed at Slam 0 +2..+6.5;
+after the bounce a dash in 20 of 29 (antic +69.5 / 72.5 / 75.5, about Slam 0 + 24), the key toward it from about Slam
+0 + 20, landing behind it 20 of 29.
 T1's live trials at 1x (forum.md 46; jump held 16, dx 4.0-6.25 u at the press): pressed at 42-51 104 of 105 safe,
 at 52 0 of 12; held 11 or 16, pressed at 44-51: dx 3.75-6.25 191 of 195, dx >= 6.75 3 of 20.
 
@@ -40,7 +46,7 @@ from ssbot.knowledge import kinematics as kin
 
 CLAPPER = "Song Heavy Sentry"
 SLAM_STATES = ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?", "Slam 2", "Slam Recover")
-M_L, M_R, M_D, M_J, M_A = kin.B_LEFT, kin.B_RIGHT, kin.B_DOWN, kin.B_JUMP, kin.B_ATTACK
+M_L, M_R, M_D, M_J, M_A, M_DASH = kin.B_LEFT, kin.B_RIGHT, kin.B_DOWN, kin.B_JUMP, kin.B_ATTACK, kin.B_DASH
 WALK_U = 8.25 / 60          # the hero's walk per frame (she stops dead)
 SEND_AHEAD = 2              # the policy sends each ACTION for STATE frame + 2
 WALL_L, WALL_R = 14.01, 48.99   # ssbot.core.forum (the import firewall keeps combat light)
@@ -78,6 +84,10 @@ class PlayCfg:
     k_start_max: int = 14            # the latest antic frame (of the next mask) at which the script may start
     k_end: int = 110                 # the script ends here at the latest
     wall_room: float = 0.5           # the stand point at least this far inside the arena walls
+    over: int = 1                    # 1: the way out after the bounce (over its body, the dash); 0: no key (SP1 it1)
+    over_s0: int = 20                # the direction key from Slam 0 + this
+    dash_s0: int = 23                # the dash at Slam 0 + this
+    over_room: float = 6.0           # behind it only with this much room from its centre to the wall (u)
 
     @classmethod
     def from_env(cls) -> "PlayCfg":
@@ -140,6 +150,9 @@ class Run:
     k_press: int | None = None
     s0: int | None = None            # the Slam 0 entry frame (first STATE seen)
     hp0: int | None = None
+    bounced: bool = False
+    over_dir: int | None = None      # the way out: +1 / -1 world x, 0 none
+    k_dash: int | None = None
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -165,6 +178,10 @@ class SlamPlay:
                 out["started"] += 1
             if r.k_press is not None:
                 out["pressed"] += 1
+            if r.bounced:
+                out["bounced"] += 1
+            if r.k_dash is not None:
+                out["dashed"] += 1
             if r.phase == "abort" or (r.phase == "wait" and r.why):
                 out[f"why_{r.why}"] += 1
         return dict(out)
@@ -195,10 +212,15 @@ class SlamPlay:
         e = clapper(s)
         st, tin = control(e)
         r = self.run
-        if r is not None and (e is None or e.get("iid") != r.iid or st not in SLAM_STATES):
-            # the slam ended (or the Clapper is gone): a finished script is done, an unstarted look is dropped
+        new_antic = r is not None and st == "Slam Antic" and abs(int(f - round(tin * 60.0)) - r.fa) > 30
+        if r is not None and (e is None or e.get("iid") != r.iid or new_antic or (
+                st not in SLAM_STATES and not (r.phase == "after" and r.bounced))):
+            # the slam ended (or the Clapper is gone, or a new slam began): a finished script is done, an unstarted
+            # look is dropped; the way out after a bounce runs on to the landing
             self._close("done" if r.phase in ("after", "air", "jump") else r.phase, "slam over")
             r = None
+            if new_antic:
+                self._closed_iid = None
         if st not in SLAM_STATES or (e is not None and e.get("iid") != self._closed_iid):
             self._closed_iid = None
         if r is None:
@@ -247,13 +269,29 @@ class SlamPlay:
             m = self._press_part(r, k, 0)
             if m is None:
                 return None
-        else:                                             # after the press: no key, no jump
-            if ground and r.k_press is not None and k > r.k_press + 8:
+        else:                                             # after the press: never the jump
+            if not r.bounced:
+                if float((h.get("vel") or [0, 0])[1]) > 6.0:
+                    r.bounced = True
+                elif k > r.k_press + 14:
+                    self._close("abort", "no bounce")
+                    return None
+            if ground and k > r.k_press + 8:
                 self._close("done", "landed")
                 return None
             m = 0
-            if r.k_press is not None and k <= r.k_press + c.down_after:
+            if k <= r.k_press + c.down_after:
                 m = M_D
+            if c.over and r.bounced and r.s0 is not None and k - (r.s0 - r.fa) >= c.over_s0:
+                if r.over_dir is None:
+                    r.over_dir = self._over_dir(cx, r.face)
+                if r.over_dir:
+                    m |= M_R if r.over_dir > 0 else M_L
+                    ks0 = k - (r.s0 - r.fa)
+                    if r.k_dash is None and ks0 >= c.dash_s0:
+                        r.k_dash = k
+                    if r.k_dash is not None and k < r.k_dash + 2:
+                        m |= M_DASH
         if k > c.k_end:
             self._close("done", "k_end")
             return None
@@ -261,6 +299,15 @@ class SlamPlay:
         return m
 
     # ---- parts ----
+
+    def _over_dir(self, cx: float, face: int) -> int:
+        """The way out after the bounce: behind it (-face) with OVER_ROOM to the wall there, else in front (+face)
+        with the room, else 0."""
+        room = (lambda d: (cx - WALL_L) if d < 0 else (WALL_R - cx))
+        for d in (-face, face):
+            if room(d) >= self.cfg.over_room:
+                return d
+        return 0
 
     def _press_part(self, r: Run, k: int, m: int) -> int | None:
         c = self.cfg

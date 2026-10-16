@@ -14,11 +14,11 @@ NW = (len(kin.cstate_names()) + 63) // 64
 STAGES = (("Slam Antic", 48), ("Slam 0", 5), ("Slam 1", 3), ("Slam 2", 5), ("Slam Recover", 15))
 
 
-def state(f, st, tin, cx=31.0, flip=False, hx=26.0, hp=9, ground=True, vx=0.0, iid=7):
+def state(f, st, tin, cx=31.0, flip=False, hx=26.0, hp=9, ground=True, vx=0.0, iid=7, vy=0.0):
     cs = [0] * NW
     if ground:
         cs[GROUND_I >> 6] |= 1 << (GROUND_I & 63)
-    return {"f": f, "hero": {"pos": [hx, 4.568], "box": [hx - 0.23, 3.015, hx + 0.23, 5.09], "vel": [vx, 0.0],
+    return {"f": f, "hero": {"pos": [hx, 4.568], "box": [hx - 0.23, 3.015, hx + 0.23, 5.09], "vel": [vx, vy],
                              "health": hp, "cstate": cs, "hero_accepting_input": True},
             "ents": [{"type_key": sp.CLAPPER, "iid": iid, "hp": 200, "pos": [cx, 7.45], "flipX": flip,
                       "fsms": [{"name": "Control", "state": st, "t": tin}]}]}
@@ -37,12 +37,13 @@ def slam_state(k, antic=48):
     return "Idle", t / 60.0
 
 
-def simulate(x0, flip=False, antic=48, f0=1000, hurt_at=None, ground_until=None, cfg=None, start_k=-5):
-    """Run SlamPlay over a toy slam from antic frame start_k; x0 = the hero's distance in front (centre to centre).
-    Returns (play, {landing frame k: mask}, hero x per k (in front, u))."""
+def simulate(x0, flip=False, antic=48, f0=1000, hurt_at=None, ground_until=None, cfg=None, start_k=-5, cx=31.0,
+             bounce=True):
+    """Run SlamPlay over a toy slam from antic frame start_k; x0 = the hero's distance in front (centre to centre); the
+    bounce: vy 17 from the press + 4 for 15 frames. Returns (play, {landing frame k: mask}, hero x per k (in front, u))."""
     play = sp.SlamPlay(cfg or sp.PlayCfg())
     face = 1 if flip else -1
-    cx = 31.0
+    press = None
     hx = cx + face * x0
     pending = {}
     landed = {}
@@ -56,6 +57,8 @@ def simulate(x0, flip=False, antic=48, f0=1000, hurt_at=None, ground_until=None,
             lr = (1 if m & sp.M_R else 0) - (1 if m & sp.M_L else 0)
             if m & sp.M_J and air_from is None:
                 air_from = k
+            if m & sp.M_A and press is None:
+                press = k
             if air_from is None:
                 hx += lr * sp.WALK_U
         ground = air_from is None or k > air_from + 60
@@ -64,7 +67,8 @@ def simulate(x0, flip=False, antic=48, f0=1000, hurt_at=None, ground_until=None,
         xs[k] = (hx - cx) * face
         st, tin = slam_state(k, antic)
         hp = 9 if hurt_at is None or k < hurt_at else 7
-        out = play.step(f, state(f, st, tin, cx=cx, flip=flip, hx=hx, hp=hp, ground=ground), ground)
+        vy = 17.0 if bounce and press is not None and press + 4 <= k < press + 19 else 0.0
+        out = play.step(f, state(f, st, tin, cx=cx, flip=flip, hx=hx, hp=hp, ground=ground, vy=vy), ground)
         if out is not None:
             pending[f + 2] = out
     return play, landed, xs
@@ -94,14 +98,30 @@ def test_off_by_default(monkeypatch):
 def test_the_script_at_5u(flip):
     play, landed, xs = simulate(5.0, flip=flip)
     c = play.cfg
-    # no direction key at all (the hero is inside the stand band), the jump held HOLD frames from K_JUMP
-    assert not keys(landed, sp.M_L | sp.M_R)
+    # no direction key before the way out (the hero is inside the stand band), the jump held HOLD frames from K_JUMP
+    s0 = 48
+    out = keys(landed, sp.M_L | sp.M_R)
+    behind = sp.M_L if flip else sp.M_R                    # the way out goes over its body to its back (-face)
+    assert out and min(out) == s0 + c.over_s0 and all(landed[k] & behind for k in out)
+    assert keys(landed, sp.M_DASH) == [s0 + c.dash_s0, s0 + c.dash_s0 + 1]
     assert keys(landed, sp.M_J) == list(range(c.k_jump, c.k_jump + c.hold))
     assert keys(landed, sp.M_A) == [c.k_press]
     assert keys(landed, sp.M_D) == list(range(c.k_down, c.k_press + c.down_after + 1))
     assert not [k for k in keys(landed, sp.M_J) if k > c.k_press]          # no jump in the air after the press
     assert play.run is None and play.done[-1].phase == "done" and play.done[-1].x_jump == pytest.approx(5.0)
-    assert play.stats()["pressed"] == 1
+    assert play.stats()["pressed"] == 1 and play.stats()["dashed"] == 1
+
+
+def test_the_way_out():
+    # the wall 4 u behind its centre (facing left: behind = +x): out in front instead; no bounce: abort at once
+    play, landed, _ = simulate(5.0, cx=sp.WALL_R - 4.0)
+    out = keys(landed, sp.M_L | sp.M_R)
+    assert out and all(landed[k] & sp.M_L for k in out if k > 48)
+    play, landed, _ = simulate(5.0, bounce=False)
+    assert play.done[-1].why == "no bounce" and not keys(landed, sp.M_DASH)
+    # over = 0 (SP1 it1): no key after the press
+    play, landed, _ = simulate(5.0, cfg=sp.PlayCfg(over=0))
+    assert not keys(landed, sp.M_L | sp.M_R) and not keys(landed, sp.M_DASH)
 
 
 @pytest.mark.parametrize("flip", [False, True])
@@ -109,8 +129,8 @@ def test_walks_in_from_far(flip):
     play, landed, xs = simulate(7.6, flip=flip)
     c = play.cfg
     toward = sp.M_R if not flip else sp.M_L                 # facing left (flip False): the hero is at -x, toward = +x
-    walk = keys(landed, sp.M_L | sp.M_R)
-    assert walk and all(landed[k] & toward for k in walk) and max(walk) < c.k_jump
+    walk = [k for k in keys(landed, sp.M_L | sp.M_R) if k < c.k_jump]
+    assert walk and all(landed[k] & toward for k in walk)
     assert c.stand[0] <= xs[c.k_jump] <= c.stand[1]
     assert keys(landed, sp.M_A) == [c.k_press]
 
@@ -118,7 +138,7 @@ def test_walks_in_from_far(flip):
 def test_walks_out_from_close():
     play, landed, xs = simulate(3.3)
     c = play.cfg
-    walk = keys(landed, sp.M_L | sp.M_R)
+    walk = [k for k in keys(landed, sp.M_L | sp.M_R) if k < c.k_jump]
     assert walk and all(landed[k] & sp.M_L for k in walk)  # facing left, the hero at -x: away = -x
     assert c.stand[0] <= xs[c.k_jump] <= c.stand[1]
     assert keys(landed, sp.M_A) == [c.k_press]
