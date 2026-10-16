@@ -7619,3 +7619,141 @@ are the frames a key takes effect in the game (STATE act.mask).
    fixed-point first.
 3. SP3 (the person, 2026-10-16): after the Clapper jumps (jump slam / jump cast) go behind it, do not flee.
 4. The way out's wall rule (front when < 6 u behind) is tested only on the toy slam; no wall slam came up live.
+
+## Task 1v1 - stage SP2: live 1v1 with the playbook (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §66)
+
+SP1 reached 248 / 248 in its fixed-point band, so the full A/B ran. Distances are centre to centre, + = in front (the
+side the Clapper faces). Hits are counted by HP loss (the bounce's i-frames give `damage` events without HP loss:
+"protected touches"). Landed hits per second while fighting = `ssbot.tools.sg4_budget --live` (f_wake to the kill).
+
+### Design and runs (instances 0 / 1 only, 1x, DEMO_SOON paused per block and restored, both instances frozen after each block)
+
+- Block a: frozen checkout `C:\ssbot\live_1v1_a4cf6d7` (SP1's final code), `1v1_live.ps1 -Arms rn,rnplay,rnplay6
+  -Chunk 2 -Blocks 2`, seeds 840000 / 840002 (i0) and 850000 / 850002 (i1), the arm order reversed in the second
+  block; manifest `C:\ssbot\sandbox\1v1sp2_manifest.txt` (8 episodes per arm).
+- Block a found one playbook failure: a 12-frame hit stop in the antic (below). Fixed (21b40ce), fixed-point tested
+  (it8), then block b with the same design on `C:\ssbot\live_1v1_21b40ce`, seeds 860000 / 860002 (i0) and 870000 /
+  870002 (i1); manifest `C:\ssbot\sandbox\1v1sp2b_manifest.txt` (8 more per arm). rn and the rest of the playbook
+  are the same in both blocks; the fix acts only when the game freezes during a slam.
+- Analysis (offline, Idle): `ssbot.tools.slam_play_ab` (new; per arm: HP-loss hits by source / Clapper state /
+  playbook phase, every slam, the casts, the policy's own playbook counters), `forum_remaining_hits collect` +
+  `forum_1v1_summary --hits`, `sg4_budget --live` per arm. Data `C:\ssbot\data\m2_play\sp2` (`ab.json` block a,
+  `ab_b.json` block b, `ab_all.json` both; `col` / `col_b`, `summary*.json`, `budget_*`, traces, scripts).
+
+### Results (16 episodes per arm; block a / block b in brackets)
+
+| | rn | rnplay | rnplay6 |
+|---|---|---|---|
+| kills | 16 (8 / 8) | 15 (7 / 8): 1 QUIT in block a | 16 (8 / 8) |
+| HP-hitless episodes | 16 | 13 (7 / 6) | 15 (7 / 8) |
+| HP hits before the kill (sources) | 0 | 5: Clapper body 2, hammer (Slam Collider 1) 1, Slam Collider 2 1, rune slam 1 | 1: rune slam |
+| kill time p10 / 50 / 90 (s) | 25.5 / 38.8 / 46.3 | 25.1 / 31.9 / 40.9 | 32.3 / 39.7 / 50.5 |
+| landed hits / s while fighting | 0.608 (0.614 / 0.603) | 0.685 (0.642 / 0.731) | 0.555 (0.518 / 0.598) |
+| slams | 99 | 82 | 90 |
+| playbook pressed / contact / bounce | - | 69 / 68 / 65 | 77 / 77 / 73 |
+| HP lost in a played slam | - | 2 (1 / 1) | 0 |
+| hammer hits (any slam) | 0 | 2 | 0 |
+| strikes (landed hits) per slam | 0.34 | 1.06 | 1.09 |
+| x at Slam 0 > 9 u (fled) | 97 of 99 | 13 of 82 (the declined ones) | 13 of 90 |
+| landing after the way out: behind / in front | - | 62 / 3 (6.5 / 7.3 / 9.7 u p10/50/90) | 72 / 1 |
+| contact at Slam 0 + 2 / 3 / 4 / 5 | - | 1 / 28 / 38 / 1 | 0 / 39 / 36 / 2 |
+
+- Bootstrap (episodes resampled, 90 %): rnplay - rn landed / s +0.075 (-0.003 .. +0.156), kill time p50 -5.7 s
+  (-12.8 .. +0.2); rnplay6 - rn -0.053 (-0.122 .. +0.009), +1.5 s. rn was 16 / 16 hitless here (10-12: 15 / 16).
+- By Clapper family (pooled, h/s): slam rn 0.27 / rnplay 0.78 / rnplay6 0.76 (down slashes 4 / 69 / 80); cast 1.73 /
+  1.71 / 1.64; idle + walk 0.06-0.07 in every arm (23-26 % of the fight time); jump slam 0.08-0.09; jump cast
+  0.32-0.39. rnplay6's 6 u stance brings more jump families (22.4 % of the time vs rn 15.6 %) and less cast time.
+- The playbook's own counters (all slams): rnplay pressed 69 of 82; not pressed: the sprint skid (no input) 6, no
+  landing by k 28 (airborne entry) 3, in the air past k 10 2, late 1, not on the ground at the jump 1. rnplay6 77 of
+  90; not pressed: no landing 6, sprint skid 4, in the air 1, distance 9.6 u 1, not on the ground at the jump 1.
+  Every declined slam was fled by the planner (x at Slam 0 p50 11.9 u).
+- Retreats > 1.5 u (the largest distance in the slam minus the distance at the antic entry, in front): rn 98 of 99;
+  rnplay 13 declined + 6 played (the walk out from 3.8-4.2 u to the stand band); rnplay6 13 + 3.
+
+The five HP-loss hits of rnplay (rn none, rnplay6 one rune slam while airborne at the Clapper's walk):
+1. Block a, 060627 i1 ep1 (the QUIT): **the hit stop** (below): the press went out at Slam 0 - 17 game frames, no
+   bounce, Slam 1's body hit (the planner's jump key in the air after the abort had opened the umbrella); then two
+   planner hits in the same episode (a rune slam at the Jump Antic, airborne; the jump slam's Air body with the
+   umbrella open: Umbrella Inflate, no attack / dash, locked 26-29 frames); QUIT at 1 HP.
+2. Block b, 065013 i1 ep0 (`trace_065013_i1_e0_hammer.txt`): a normal script (airborne entry, landed at k 24, jump at
+   k 26 at 5.44 u, press Slam 0 - 2), contact at Slam 0 + 3; the bounce rose one frame (vy 17.4) and turned down
+   (vy -10) as Slam 1 began, the hero's x from the Clapper's centre jumped from +3.0 to -0.6 u in one frame (over
+   its back), "Recoil Twirl", the hammer (Slam Collider 1) took 2 HP at Slam 1 + 2. In the normal strikes the bounce
+   keeps rising through Slam 1 (vy 17.4, 16.2, ...). Cause not established; 1 of 74 pressed slams on the fixed code.
+3. Block b, 065019 i0 ep0 (`trace_065019_i0_e0_declined.txt`): declined (the planner's dash during the Evade
+   Scuttle left the hero in Sprint Turn, no input, past k 14); the planner fled late; Slam Collider 2 at Slam 2,
+   7.5 u.
+
+The small runes (the casts' code is rn's; per arm, pooled): hits per cast rn 3.53 +- 0.13, rnplay 3.31 +- 0.15,
+rnplay6 2.92 +- 0.13 (SE); the hero's |d| during the cast p10 / 50 / 90 rn 4.38 / 5.40 / 6.89, rnplay 4.13 / 5.41 /
+6.82, rnplay6 4.19 / 5.44 / 7.73 u; air dashes in Cast 2: 1 of 79, 1 of 64, 2 of 72; HP lost in casts 0 / 0 / 0;
+|x| at the Spell Antic p50 7.12 / 6.93 / 8.06 u (> 8 u: 26 of 79, 21 of 64, 41 of 72). **Flag:** rnplay's casts
+behave like rn's (hits per cast -0.22, 1.1 SE; cast hits / s 1.71 vs 1.73); rnplay6's casts start farther (its 6 u
+stance) and land 0.6 fewer hits per cast (3.3 SE).
+
+### The hit stop (found in block a; fixed in 21b40ce)
+
+- The game freezes for ~10-14 STATE frames (STATE `ts` 0 and `dt` 0, then a ramp 1/3, 2/3) on the killing blow, when
+  the hero is hit, and on some of the hero's hits on the Clapper (7 in the 48 episodes, leaving it at 90 / 80 / 50 /
+  40 / 20 / 20 / 10 HP; which hits do it is not known) (`C:\ssbot\data\m2_play\sp2\freezes.py`, `freezes_a.txt` /
+  `freezes_b.txt`: 60 and 56 freezes, 3 and 3 during a slam). SP1 counted the script's frames k in STATE frames: in
+  060627 i1 ep1 the hero's slash at the antic entry froze the game at antic + 1, the STATE count ran 13 frames
+  ahead, the jump went at game frame 13 and the press at game frame 34 = Slam 0 - 17 (`clock_check_060627_e1.txt`):
+  no contact, no bounce, Slam 1's body.
+- Live on the fixed code (block b, 064822 i1 ep0, rnplay6): the hero's slash at the antic entry left the Clapper at
+  90 HP and froze the game 13 frames (the antic 60 STATE frames); the playbook jumped at STATE frame 38, pressed at
+  59 = Slam 0 - 1, contact at Slam 0 + 3, bounce, landing 6.7 u behind it, no HP lost.
+- Fix (`SSBOT_FORUM_SLAM_PLAY_CLOCK`, default 1): `SlamPlay.step(..., t_game=)`; the policy passes
+  `ws.stamp.t_game_s` (the sum of the scaled dt: it stands still through freezes); the antic entry = the game clock
+  minus the Control state time; k, Slam 0 + n (the way out) and the no-bounce check count game frames. 0 = SP1's
+  frame count. The decision log's `play.k` is now the run's own k.
+- Probe: the game clock from the STATEs' dt, `--freeze K:N` (time scale 1e-4 for N STATE frames at antic frame K:
+  the hit stop emulated); `slam_play_run.ps1 -Freeze -Clock`.
+- Tests: `tests/test_slam_play.py` 20 (a 12-frame freeze at game frames 3 / 20 / 44: the keys on the same game frames
+  as without it; the frame count presses > 8 frames early; the switch).
+- Fixed-point it8 (21b40ce; scored with the press's windows widened by the freeze, `rescore.py`; slam_play_report
+  counts STATE frames and calls the freeze-44 trials misses):
+
+| round | instance | what | started | pressed | success | press vs Slam 0 (game frames) |
+|---|---|---|---|---|---|---|
+| it8fz3 | 0 | freeze 12 at antic 3, game clock | 40 | 39 | 39 | -2 / -1 (9 / 30) |
+| it8fz20 | 0 | freeze 12 at antic 20 | 20 | 18 | 18 | -2 / -1 |
+| it8fz44 | 0 | freeze 12 at antic 44 | 20 | 19 | 19 | -4 / -3 (the press lands in the freeze) |
+| it8fz3old | 1 | freeze 12 at antic 3, SP1's frame count (control) | 20 | 12 | **0** | -14 / -13; 11 HP lost |
+| it8hop | 1 | no freeze, game clock, hops (ground + airborne) | 40 | 37 | 37 | -2 / -1 |
+
+  Not pressed on the game clock: no time to walk 2, hurt while waiting 2 (the probe stands still), not on the ground
+  at the jump 1, no landing 1, late 1. The emulated freeze reproduces the live failure on the old clock, and the game
+  clock removes it: 113 / 113 pressed strikes succeeded.
+- Switch-off identity (the HEAD code, `C:\ssbot\data\m2_play\sp2\replay_ident_sp2.ps1`, ticks vs base 182b78f):
+  192006 i0 ep1 2,073 / 2,073 and 193808 i1 ep0 3,183 / 3,183 byte-identical. SLAM_PLAY=1 open loop: 7 / 152 masks
+  replaced, 0 errors. (This re-run overwrote SP1's `head_*` / `play_*` files in `C:\ssbot\data\m2_play\replay`; the
+  new ones are in `sp2\replay`; SP1's `base_*` / `play6_*` stay; noted in its jobs.log.)
+
+### Code / commits
+
+- 21b40ce: `slam_play.py` (the game clock, `GAME_CLOCK`, `Run.ta / ks0 / k`), `forum_planner_policy.py` (passes
+  t_game, logs `play.k = run.k`), `slam_play_probe.py` (game clock, `--freeze`), `tools/slam_play_ab.py`, tests.
+- 6f13b1a: slam_play_ab sums the policy's counters; the decision log keeps only the ticks around events (hits,
+  protected touches), so its per-slam `play` fields cover only the logged slams.
+- Frozen checkout `C:\ssbot\live_1v1_21b40ce` (warm). Sandbox: `slam_play_run.ps1` (+ -Freeze / -Clock),
+  `sp2_it8_i0.ps1` / `sp2_it8_i1.ps1`.
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON restored; no game process touched.
+
+### Next
+
+1. The default arm is the person's call: on these 16 + 16 episodes rnplay vs rn is +0.075 landed hits / s (the
+   interval touches 0) and -5.7 s per kill, with 3 HP-hit episodes vs 0 (one of them the fixed hit stop). rnplay6 is
+   below rnplay everywhere except hitless (15 / 16): drop the 6 u stance.
+2. The lunge case (hit 2): compare contacts at Slam 0 + 3 vs + 4 and the hero's vy / clip at Slam 1; a fixed-point
+   round at the band's far edge (5.4-5.6 u) recording the Clapper's lunge.
+3. Declines (26 of 172 slams in the two play arms): the sprint skid 10 (SP1 item 2: no planner dash + run while a
+   slam can start), no landing in time 9 (the airborne entry), in the air 3. Every decline became a planner flight to
+   ~12 u, and one of them cost HP.
+4. The idle / walk frames (~24 % of the fight) land 0.06 hits / s in every arm: the next budget after the slam.
+5. Umbrella openings (the jump key in the air) are a planner habit in every arm (block a: rn 33, rnplay 20, rnplay6
+   33); two of the QUIT episode's hits came with the umbrella open (no attack / dash for 26-29 frames).
+6. SP3 (the person): after the Clapper jumps, go behind it - not started.
