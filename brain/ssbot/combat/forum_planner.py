@@ -213,6 +213,10 @@ CHASE_DASH_K = (10, 14, 18, 22)           # the dash rows' (a press while the da
 CHASE_FOLLOW = (4, 8)         # frames the side key is held from each press: a landed slash knocks it back ~0.48 u and
 #                               the hero ~0.5 u (recoil 3.75 u/s x 8 steps); run 8.25 u/s = 0.1375 u per frame
 CHASE_PERIOD = 19             # frames between presses (Wanderer attack_cooldown 0.3 s = 18 frames)
+CHASE_AIM_U = 4.3             # the run rows' first press: where a run (CHASE_RUN_UF u per frame) reaches this distance,
+CHASE_RUN_UF = 0.1375         # the press frames within CHASE_K_TOL of it (the deadline replays: 22 rows on every tick
+CHASE_K_TOL = 8               # cut the escape check on +19 % ticks)
+CHASE_DASH_U = 6.5            # the dash rows only from farther than this (a dash covers ~2.8 u)
 CHASE_NEAR_U = 14.0           # a Clapper this close (x) gets chase rows
 CHASE_FAMS = (None, "CC_EVADE", "CC_ENTRY")   # its instance then (idle / walk: none)
 CHASE_RUNE_S = 1.1            # no chase rows this long after a jump cast (its rune circle bursts 0.75-0.87 s after it)
@@ -2622,9 +2626,9 @@ class ForumPlanner(Planner):
     def _chase_rows(self, f, start, T: int):
         """SSBOT_FORUM_CHASE (task 1v1 SG5): toward the nearest Clapper (forum_map.MapHelper._clapper) while it idles,
         walks, evades or enters (CHASE_FAMS; not CHASE_RUNE_S after a jump cast): run (the side key) until the first
-        press at k1 (CHASE_RUN_K), or dash then run (CHASE_DASH_K), then a slash every CHASE_PERIOD frames with the
-        side key held CHASE_FOLLOW frames from each press. Every check the other rows get (the hop block: always
-        enveloped). (cmd [n, T], names, prim bits) or None."""
+        press at k1 (CHASE_RUN_K, within CHASE_K_TOL of where the run reaches CHASE_AIM_U), or from farther than
+        CHASE_DASH_U dash then run (CHASE_DASH_K), then a slash every CHASE_PERIOD frames with the side key held
+        CHASE_FOLLOW frames from each press. Every check the other rows get. (cmd [n, T], names, prim bits) or None."""
         if self._map is None:
             return None
         st = np.asarray(start).reshape(kin.K, -1)
@@ -2644,6 +2648,10 @@ class ForumPlanner(Planner):
         if abs(cx - hx) < 0.5:
             return None
         dirb = kin.B_RIGHT if cx > hx else kin.B_LEFT
+        # the first press where a run reaches the band (CHASE_K_TOL frames either side); the dash rows from afar only
+        k_need = max(0.0, (abs(cx - hx) - CHASE_AIM_U) / CHASE_RUN_UF)
+        run_k = [k for k in CHASE_RUN_K if abs(k - k_need) <= CHASE_K_TOL] or [max(CHASE_RUN_K)]
+        dash_k = CHASE_DASH_K if abs(cx - hx) > CHASE_DASH_U else ()
         P = cmod.Prim
         b_run = cmod._bits(frozenset({P.MOVE, P.ATTACK_SIDE}))
         b_dash = cmod._bits(frozenset({P.MOVE, P.ATTACK_SIDE, P.DASH}))
@@ -2653,7 +2661,7 @@ class ForumPlanner(Planner):
             for k in range(k1, T, CHASE_PERIOD):
                 m[k:k + cmod.PRESS] |= B_ATTACK
                 m[k:k + fol] |= dirb
-        for k1 in CHASE_RUN_K:
+        for k1 in run_k:
             for fol in CHASE_FOLLOW:
                 m = np.zeros(T, np.int64)
                 m[:k1] = dirb
@@ -2661,7 +2669,7 @@ class ForumPlanner(Planner):
                 cmd.append(m)
                 names.append(f"CHASE run{k1}_f{fol}")
                 bits.append(b_run)
-        for k1 in CHASE_DASH_K:
+        for k1 in dash_k:
             for fol in CHASE_FOLLOW:
                 m = np.zeros(T, np.int64)
                 m[:k1] = dirb
@@ -3153,7 +3161,8 @@ class ForumPlanner(Planner):
             hop = self._rune_hop_rows(f, start, hold, prefix, T)
         n_chase = 0
         if CHASE and v2 and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
-            # SG5: the chase rows after the hop rows, in the same block (always enveloped, like the core rows)
+            # SG5: the chase rows after the hop rows, in the same block (not core: enveloped in the order like the
+            # set's rows, so they cannot push the escape check past its deadline)
             ch_ = self._chase_rows(f, start, T)
             if ch_ is not None:
                 n_chase = len(ch_[0])
@@ -3213,7 +3222,7 @@ class ForumPlanner(Planner):
                 cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
         core = np.concatenate([core0, np.zeros(n_spec + n_ds + n_map + int(cont), bool)]) if not n_hop else \
-            np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop, bool),
+            np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop - n_chase, bool), np.zeros(n_chase, bool),
                             np.zeros(n_ds + n_map + int(cont), bool)])
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix

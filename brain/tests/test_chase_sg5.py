@@ -50,7 +50,12 @@ def _chase(mp, hx=20.0, T=36, t=10.0, jc=None):
 
 def test_chase_rows_masks():
     (cmd, names, bits), _ = _chase(_Map(28.0))
-    assert len(cmd) == len(names) == len(bits) == 2 * (len(fp.CHASE_RUN_K) + len(fp.CHASE_DASH_K))
+    # 8 u: a run reaches 4.3 u at frame ~27: presses at 20 / 24 (within 8 frames), and the dash rows (beyond 6.5 u)
+    assert sorted({n.split("_f")[0] for n in names}) == sorted(
+        ["CHASE run20", "CHASE run24"] + [f"CHASE dash{k}" for k in fp.CHASE_DASH_K])
+    assert len(cmd) == len(names) == len(bits) == 2 * (2 + len(fp.CHASE_DASH_K))
+    (_, near, _), _ = _chase(_Map(24.5))                        # 4.5 u: presses at 0 / 4 / 8, no dash
+    assert sorted({n.split("_f")[0] for n in near}) == ["CHASE run0", "CHASE run4", "CHASE run8"]
     toward = kin.B_RIGHT                                          # the Clapper at 28, the hero at 20
     for m, nm in zip(cmd, names):
         k1 = int(nm.split()[1][4 if nm.split()[1].startswith("dash") else 3:].split("_")[0])
