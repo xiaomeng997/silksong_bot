@@ -152,3 +152,43 @@ def test_focus_switch_after_the_others_attack(monkeypatch):
     for i in range(7):
         p = t.decide(world(29.0, t=10.1 + i * 0.1, ents=ents), WinFc(_claps(fx=21.0, ox=37.0), t_min=0.1), None, 3)
     assert p.target == 2 and t.stats["sp7"].get("switch_other just ended a move", 0) >= 1
+
+
+def test_side_two_away(monkeypatch):
+    # the struck one at 31 facing left (the hero in front at 26); the other at 20, idle: the landing between them (27.3)
+    # is 7.3 u from it: TWO_SIDE lands on the far side (behind the struck one, +x); busy or far: between them (-x)
+    monkeypatch.setattr(sp, "TWO_SIDE", True)
+    p = sp.SlamPlay(sp.PlayCfg())
+    s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Idle")
+    r = sp.Run(iid=7, fa=950, face=-1)
+    e = next(o for o in s["ents"] if o["iid"] == 7)
+    assert p._side_pref(r, s, e, 31.0) == (1, "two-away")
+    s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Slam Antic")
+    assert p._side_pref(r, s, e, 31.0) == (-1, "two")
+    s = two_state(1000, 60, hx=30.0, ox=10.0, ost="Idle")
+    assert p._side_pref(r, s, e, 31.0) == (-1, "two")
+    monkeypatch.setattr(sp, "TWO_SIDE", False)
+    s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Idle")
+    assert p._side_pref(r, s, e, 31.0) == (-1, "two")
+
+
+def test_jumper_is_the_target(monkeypatch):
+    monkeypatch.setattr(gt, "TWO_FOCUS", True)
+    monkeypatch.setattr(gt, "TWO_JUMPER", True)
+    t = l2()
+    ents = [clapper(1, 25.0, True), clapper(2, 40.0, False)]
+    p = t.decide(world(30.0, ents=ents), WinFc(_claps(fx=25.0, ox=40.0), t_min=0.1), None, 3)
+    assert p.target == 1
+    for i in range(6):
+        p = t.decide(world(30.0, t=10.1 + i * 0.1, ents=ents),
+                     WinFc([subj(1, CC, 25.0, y=7.45), subj(2, CC, 40.0, y=7.45, state="Jump Antic", family=gt.CC_JUMP,
+                                                         committed=True)], t_min=0.1), None, 3)
+    assert p.target == 2 and t.stats["sp7"]["jumper"] >= 1 and "jump" in t.last["goal_why"]
+    monkeypatch.setattr(gt, "TWO_JUMPER", False)
+    t = l2()
+    t.decide(world(30.0, ents=ents), WinFc(_claps(fx=25.0, ox=40.0), t_min=0.1), None, 3)
+    for i in range(6):
+        p = t.decide(world(30.0, t=10.1 + i * 0.1, ents=ents),
+                     WinFc([subj(1, CC, 25.0, y=7.45), subj(2, CC, 40.0, y=7.45, state="Jump Antic", family=gt.CC_JUMP,
+                                                         committed=True)], t_min=0.1), None, 3)
+    assert p.target == 1

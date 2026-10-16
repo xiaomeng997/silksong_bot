@@ -32,6 +32,7 @@ from ssbot.tools.slam_play_live import manifest, pct
 MOVE_START = {"Slam Antic": "slam", "Spell Antic": "cast", "Jump Antic": "jump", "Cast Slam Antic": "jump_cast",
               "Evade Scuttle": "evade"}
 WALL_L, WALL_R = sp.WALL_L, sp.WALL_R
+SLAM_AFTER_F = 170          # a slam's HP window: the antic entry to here (the strike's landing ~ +105, then 60 frames)
 
 
 def _hero_attacks():
@@ -148,6 +149,30 @@ def episode(arm: str, inst: int, run: Path, row: dict, dec: dict) -> dict:
             "play": None if not pl else f"{pl.get('phase')}@{pl.get('k')}",
             "wall": None if e is None else round(min(float(e["pos"][0]) - WALL_L, WALL_R - float(e["pos"][0])), 2),
         })
+    # every slam of either Clapper: struck (the hero's down slash landed on it from antic + 40 to + 62), the other one's
+    # state and distance to the hero at the antic entry, HP lost from the antic to + SLAM_AFTER_F (its source)
+    slams = []
+    fl = sorted(by_f)
+    last = {}
+    for f in fl:
+        s = by_f[f]
+        for e in claps(s):
+            st, tin = sp.control(e)
+            iid = e["iid"]
+            if st == "Slam Antic" and last.get(iid) != "Slam Antic" and f <= fk:
+                fa = f - int(round(tin * 60.0))
+                o = next((c for c in claps(s) if c["iid"] != iid), None)
+                hx = sp.hero_x(s) if (s.get("hero") or {}).get("box") else None
+                face = 1 if e.get("flipX") else -1
+                struck = [g for g, src, tid in landed if fa + 40 <= g <= fa + 62 and "Down" in src]
+                hp = [(h["f"] - fa, h["src"], h["by"] == iid) for h in hits if fa <= h["f"] <= fa + SLAM_AFTER_F]
+                slams.append({"f": fa, "iid": iid, "x_hero": None if hx is None else round((hx - float(e["pos"][0])) * face, 2),
+                              "other_st": None if o is None else sp.control(o)[0],
+                              "other_d": None if (o is None or hx is None) else round(abs(float(o["pos"][0]) - hx), 2),
+                              "other_front": None if (o is None or hx is None) else
+                              ((hx - float(o["pos"][0])) * (1 if o.get("flipX") else -1) > 0),
+                              "struck": bool(struck), "hp": hp})
+            last[iid] = st
     fight_s = round((fk - f_wake) / 60.0, 2)
     return {"ep": ep_id, "arm": arm, "outcome": row.get("outcome"), "kill_s": row.get("kill_s"),
             "ingame_s": row.get("ingame_s"), "fight_s": fight_s,
@@ -155,7 +180,7 @@ def episode(arm: str, inst: int, run: Path, row: dict, dec: dict) -> dict:
             "landed": sum(1 for f, _, _ in landed if f <= fk),
             "hp_hits_before_kill": sum(1 for h in hits if h["before_kill"]),
             "hp_lost_before_kill": sum(h["amount"] for h in hits if h["before_kill"]),
-            "min_hp": row.get("min_hp"), "hits": hits,
+            "min_hp": row.get("min_hp"), "hits": hits, "slams": slams,
             "both_s": round(n_both / 60.0, 2), "stack_share": round(n_stack / max(n_both, 1), 3),
             "between_share": round(n_between / max(n_both, 1), 3), "near8_share": round(n_near8 / max(n_both, 1), 3),
             "moves": {str(k): dict(v) for k, v in moves.items()},
@@ -170,7 +195,13 @@ def summarize(E: list[dict]) -> dict:
     for e in E:
         for c in e["moves"].values():
             mv.update(c)
+    S = [x for e in E for x in e.get("slams", ())]
+    st = [x for x in S if x["struck"]]
     return {
+        "slams": len(S), "struck": len(st),
+        "struck_hp_lost": sum(1 for x in st if x["hp"]),
+        "struck_hp_by_self": sum(1 for x in st if any(h[2] for h in x["hp"])),
+        "not_struck_hp_lost": sum(1 for x in S if not x["struck"] and x["hp"]),
         "episodes": len(E), "outcomes": dict(Counter(e["outcome"] for e in E)), "kills": len(kills),
         "hp_hitless_kills": sum(1 for e in kills if e["hp_hits_before_kill"] == 0),
         "hp_hits_before_kill": len(H),

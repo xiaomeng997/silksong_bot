@@ -167,6 +167,16 @@ TWO_SLAM_U = 12.5           # the hammer reaches 12 u in front of its centre (+ 
 TWO_CAST_U = 9.0            # the small runes' rings around the caster
 TWO_BODY_U = 4.5            # its body in Slam Recover (front 3.49 u + 0.23 + 0.3; the lunge is over)
 TWO_RUNE = (-1.2, 14.2, 1.45)   # the rune circle's span from the landing along its facing (u) and its last lit second
+# SSBOT_FORUM_TWO_SIDE (SP7, default off): the way out's side with two Clappers. SP5's rule lands between them; in SP7's
+# first trial (t1, e450b7a) 3 of 20 struck slams lost HP to the other one's hammer 115-128 frames after the antic: it
+# was idle 9.7-13.8 u away, started its slam the moment the struck one's Slam 1 ended (Buddy Is Attacking releases
+# it) and hammered ~10 frames after her landing (three more such hits came on the next slam, not struck, she still in
+# the bounce). On: when the other one is free (TWO_FREE_ST) and within TWO_FOLLOW_U of the landing between them (its
+# hammer 12.5 u + the lunge 3.6 u), land on the far side of the struck one (behind it, NEAR's clearance and room rules
+# still apply; else in front as before).
+TWO_SIDE = _on("SSBOT_FORUM_TWO_SIDE")
+TWO_FREE_ST = ("Idle", "Walk", "Evade Scuttle", None)
+TWO_FOLLOW_U = 16.0
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -631,7 +641,15 @@ class SlamPlay:
         if others:
             ox = min(others, key=lambda x: abs(x - cx))
             if ox != cx:
-                return (1 if ox > cx else -1), "two"
+                d = 1 if ox > cx else -1
+                if TWO_SIDE:
+                    # SP7: the other one free (it may start a slam the moment this one's Slam 1 ends: its hammer ~10
+                    # frames after her landing) and its reach covering the landing between them: land on the far side
+                    o = min((o for o in clappers(s) if o.get("iid") != e.get("iid")),
+                            key=lambda o: abs(float(o["pos"][0]) - cx))
+                    if control(o)[0] in TWO_FREE_ST and abs(ox - (cx + d * self.cfg.near_u_front)) < TWO_FOLLOW_U:
+                        return -d, "two-away"
+                return d, "two"
         dl, dr = cx - WALL_L, WALL_R - cx
         if dl == dr:
             return r.face, "wall"

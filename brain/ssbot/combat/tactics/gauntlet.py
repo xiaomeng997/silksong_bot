@@ -130,6 +130,9 @@ TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down
 TWO_IDLE_S = 0.6            # ... before this long into its idle after an attack move (0.65 s without a buddy busy)
 TWO_RUNE_S = 0.2            # no switch onto it until this past its rune hold (a jump cast's circle in front of it)
 TWO_ATTACK_FAMS = (CC_SLAM, CC_CAST, CC_JUMP, CC_JUMP_CAST)
+# SSBOT_FORUM_TWO_JUMPER (SP7, default off; with TWO_FOCUS): a Clapper in a jump move (or its rune circle still to burst)
+# is the target meanwhile (GauntletTactics._two_focus)
+TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -804,6 +807,20 @@ class GauntletTactics:
         room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
+        if TWO_JUMPER:
+            # SSBOT_FORUM_TWO_JUMPER (t1: an other one's jump cast landed 5.27 u in front of her, its rune circle over
+            # the focus's front, the focus slammed: 8 of 41 slams not struck, 6 rune hits): a Clapper in a jump move or
+            # with its rune circle still to burst is the goal's target (the 1v1's way round: under it and behind its
+            # landing, the rune hold) - the plan's 10-11 note "go under it to its other side, it becomes the focus"
+            jm = [c for c in cands if c.s.family in (CC_JUMP, CC_JUMP_CAST)
+                  or (c.s.iid in self.rune and t <= self.rune[c.s.iid][3])]
+            if jm:
+                j = min(jm, key=lambda c: (c.s.family not in (CC_JUMP, CC_JUMP_CAST), c.d))
+                if keep is None or j.s.iid != keep.s.iid:
+                    st["jumper"] = st.get("jumper", 0) + 1
+                    self._sw_why = "two jumper" if keep is not None else self._sw_why
+                st["picks"] = st.get("picks", 0) + 1
+                return self._goal(ws, j, RUSH, t, 1.0, why=f"two: jumper; room {room[j.s.iid]:.1f}")
         if keep is None:
             f = max(cands, key=lambda c: (room[c.s.iid], -c.d))
             why = "two: focus"
