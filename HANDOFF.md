@@ -6802,11 +6802,13 @@ Per tick: slash rows = rows with a predicted landed hit (the planner's own nh > 
   6.5 u (a tier there would rank a retreat past 12 u, R <= WC, over an approach still 7 u out). Every other check
   stays: its body, every move estimate, the small-rune rules, the pending aims, the jump cast's rune, other enemies,
   the escape check, the corner rule.
-- **(c) chase rows** (`ForumPlanner._chase_rows`, in the hop block: always enveloped): toward the nearest Clapper
-  (<= 14 u) while it idles / walks / evades / enters, not within 1.1 s after a jump cast: run until the first press at
-  k1 in 0..24 step 4, or dash (3 frames) then run with the press at 10..22 step 4; then a press every 19 frames
+- **(c) chase rows** (`ForumPlanner._chase_rows`, after the hop rows, not core: enveloped in the order like the set's
+  rows): toward the nearest Clapper (<= 14 u) while it idles / walks / evades / enters, not within 1.1 s after a jump
+  cast: run until the first press at k1 in 0..24 step 4, only the k1 within 8 frames of where the run reaches 4.3 u;
+  from beyond 6.5 u also dash (3 frames) then run with the press at 10..22 step 4; then a press every 19 frames
   (attack_cooldown 18) with the side key held 4 or 8 frames from each press (a landed slash knocks it back ~0.48 u and
-  the hero ~0.5 u; run 0.1375 u per frame). 22 rows per tick.
+  the hero ~0.5 u; run 0.1375 u per frame). 4-16 rows per tick (9.5 on average). A first version (all 22 rows, always
+  enveloped) cut the escape check on +19 % ticks with the deadlines on (below).
 - Audits: chase_ticks / rows / safe / chosen, chase_tier_ticks / rows / changed; `last_sel` keeps v2_nh, ready_pen,
   corner, kk (diagnostics only).
 - Tests `tests/test_chase_sg5.py` (7): the switch off by default and needing the map; the chase rows' masks; their
@@ -6846,19 +6848,23 @@ Moves started by the hero's distance at the start (and how many had a hero damag
 
 | family | chosen slash ticks | chosen reach ticks | plan end dist p50 | presses per plan | plan hits/s | imminent hit (<= 12 f) |
 |---|---|---|---|---|---|---|
-| idle / walk | 2,695 -> 3,194 | 1,498 -> 1,728 | 5.26 -> 5.18 | 0.53 -> 0.74 | 0.81 -> 1.09 | 886 -> 917 |
-| evade | 9 -> 10 | 30 -> 136 | 4.20 -> 4.03 | 0.02 -> 0.11 | 0.007 -> 0.008 | 9 -> 10 |
-| entry | 823 -> 830 | 573 -> 724 | 4.82 -> 4.38 | 0.51 -> 0.65 | 0.86 -> 1.05 | 417 -> 511 |
+| idle / walk | 2,695 -> 3,170 | 1,498 -> 1,744 | 5.26 -> 5.20 | 0.53 -> 0.72 | 0.81 -> 1.06 | 886 -> 902 |
+| evade | 9 -> 13 | 30 -> 139 | 4.20 -> 4.03 | 0.02 -> 0.10 | 0.007 -> 0.011 | 9 -> 13 |
+| entry | 823 -> 835 | 573 -> 695 | 4.82 -> 4.68 | 0.51 -> 0.64 | 0.86 -> 1.04 | 417 -> 523 |
 | cast / slam / jumps | unchanged (+-1 %) | | | | | |
 
-- All ticks: plan hits/s (the chosen row's predicted landed hits / its 0.62 s) 0.831 -> 0.917; FORCED_RISK 4.21 % ->
-  4.23 % (per family unchanged); the chase rows exist on 8,590 ticks, safe on 6,441, safe with a hit on 3,141, chosen
-  on 618 (idle / walk 439, entry 168, evade 11); the tier changed the first row on 30 of 3,653 ticks (158,220 rows
-  below it); escape failures 898 -> 906.
-- Decisions changed on 6,986 of 36,812 ticks (idle / walk 3,493, evade 1,235, entry 1,231, and through the carried
-  plan cast 525, slam 451, jumps 51); slam ticks with a map row taken 2,382 -> 2,445.
-- Tick cost (3 replays at once, Idle priority, deadlines off): all ticks p50 / p95 / p99 11.6 / 23.1 / 29.7 ->
-  11.9 / 25.1 / 32.5 ms; idle / walk ticks p95 24.5 -> 29.4 ms (22 more always-enveloped rows).
+- All ticks (`replay_off2_on3.json`): plan hits/s (the chosen row's predicted landed hits / its 0.62 s) 0.831 ->
+  0.907; FORCED_RISK 4.21 % -> 4.23 % (per family unchanged); the chase rows exist on 8,590 ticks (81,652 rows), a
+  safe one on 5,874, a safe one with a hit on 2,760, chosen on 339 (idle / walk 259, entry 77, evade 3; elsewhere a
+  set row with the same hits wins on later keys); the tier changed the first row on 29 of 3,653 ticks (149,699 rows
+  below it); the readiness penalty's ticks 3,111 -> 3,653 (the evade); escape failures 898 -> 909.
+- Decisions changed on 6,150 of 36,812 ticks (idle / walk 3,173, evade 1,187, entry 1,027, and through the carried
+  plan cast 340, slam 372, jumps 51); slam ticks with a map row taken 2,382 -> 2,441.
+- Tick cost, deadlines off (3 replays at once, Idle priority): all ticks p50 / p95 / p99 11.6 / 23.1 / 29.7 ->
+  11.9 / 24.0 / 30.8 ms; idle / walk p95 24.5 -> 26.8 ms. **Deadlines on** (192006 e1, 192220 e2, 193039 e0; 7,108
+  ticks): p95 / p99 15.6 / 19.2 -> 15.8 / 19.7 ms, ticks over 16.7 ms 231 -> 258, escape check cut by its deadline
+  1,197 -> 1,315 ticks (chosen rows left unchecked 1,165 -> 1,273), FORCED_RISK 298 -> 300 ticks, chase rows chosen
+  55 (the first version: p95 17.2 ms, 402 late, 1,425 cut, 141 chosen).
 - **Switch-off identity** (HEAD vs a frozen a341415, `C:\ssbot\data\m2_map\sg5\base_a341415`, the same harness):
   rnmap's switches 2,073 / 2,073 (192006 e1) and 2,251 / 2,251 (193039 e2) ticks identical; rn's (map off)
   2,073 / 2,073 and 3,183 / 3,183 (193808 e0).
@@ -6884,5 +6890,6 @@ Moves started by the hero's distance at the start (and how many had a hero damag
 2. The jump families (14 %, 9-11 u, hit weight 0 when backing off) are untouched; "under and behind" is the chase there.
 3. The chase stance is on the hero's side; the band behind (readiness 3.25-3.53 at 2.5-4.5 u behind) needs the Clapper
    not to turn (FaceObject: 0.5 s between turns), not used yet.
-4. The 22 chase rows cost ~2-5 ms p95 on idle / walk ticks; fewer rows (one follow value, two dash frames) if late
-   ticks rise.
+4. Cost: with the deadlines on the chase rows are often not enveloped in time (chosen 55 of 7,108 ticks against 141
+   when they were always enveloped); watch the chase rows' chosen share and the late ticks live before making them
+   cheaper (one follow value) or always enveloped again.
