@@ -491,6 +491,7 @@ class EnvelopeAudit:
     hop_chosen: int = 0
     noglide_ticks: int = 0        # SSBOT_FORUM_NOGLIDE: ticks with safe rows both with and without a glide
     nodash_ticks: int = 0         # SSBOT_FORUM_SLAM_PLAY_NODASH: ticks with safe rows both with and without a dash
+    nopogo_ticks: int = 0         # SSBOT_FORUM_SLAM_PLAY_NOPOGO: ticks with safe rows both with and without an air hit
     jb_nojump_ticks: int = 0      # SSBOT_FORUM_JB_NOJUMP: ticks with safe rows both with and without a jump key
     sm_uncert: int = 0            # review: special rows (contact found) whose press on the planner's own lane is in no
                                   #   certified entry (full checks instead)
@@ -4132,6 +4133,19 @@ class ForumPlanner(Planner):
                 dr_ = safe & ((cmd[:, :_sp.NODASH_F] & B_DASH) != 0).any(axis=1)
                 self.audit.nodash_ticks += int(dr_.any() and (safe & ~dr_).any())
                 nd_ = (dr_.astype(np.int64),)
+            npg_ = getattr(prefs, "no_pogo", None) or ()
+            if v2 and npg_ and len(sc.get("targets") or ()):
+                # SSBOT_FORUM_SLAM_PLAY_NOPOGO (task 1v1 SP4; GoalPrefs.no_pogo): a safe row whose first predicted hit is
+                # on the idle Clapper from the air (the hero off the ground at the meet frame) after the rest, above
+                # the landed hits (the hit starts its attack with her in the air: no landing for the playbook)
+                tg_ = sc["targets"]
+                ff_ = sc["first_f"]
+                on_ = np.array([0 <= int(t) < len(tg_) and tg_[int(t)].iid in npg_ for t in sc["first_t"]], bool)
+                fc_ = np.clip(ff_, 0, r1.flags.shape[1] - 1)
+                air_ = (r1.flags[np.arange(N), fc_] & F_GROUND) == 0
+                pr_ = safe & (ff_ >= 0) & on_ & air_
+                self.audit.nopogo_ticks += int(pr_.any() and (safe & ~pr_).any())
+                nd_ = nd_ + (pr_.astype(np.int64),)
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first

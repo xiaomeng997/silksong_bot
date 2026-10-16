@@ -941,6 +941,10 @@ class GauntletTactics:
                 and s.family in (None, "CC_EVADE") and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
             out = replace(out, no_dash=frozenset({g.target}))
+        if (slam_play.ENABLED and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
+                and s.family in (None, "CC_EVADE")):
+            # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air
+            out = replace(out, no_pogo=frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

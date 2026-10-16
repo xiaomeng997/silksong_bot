@@ -107,6 +107,13 @@ AFTER = _on("SSBOT_FORUM_SLAM_AFTER", "0")
 NODASH = _on("SSBOT_FORUM_SLAM_PLAY_NODASH", "0")
 NODASH_U = 10.0             # centre to centre: the playbook's reach (2.7-9 u) + a step
 NODASH_F = 20               # a dash (6 frames) + the sprint's start
+# SSBOT_FORUM_SLAM_PLAY_NOPOGO (task 1v1 SP4, default 0; read by gauntlet / forum_planner): while the Clapper idles /
+# walks / evades, the planner's safe rows whose first predicted hit on it lands from the air (a pogo, a jump slash) rank
+# after the rest, above the landed hits (GoalPrefs.no_pogo). A hit sends the idle Clapper into its attack choice at
+# once with the hero in the air: SP3's A/B, 10 of rnjb's 54 slams began within 12 frames of her air hit; SP4 t2, a
+# pogo off its head after a rune hop bounced her to 9 u above the floor at the antic, no landing by frame 30, the
+# umbrella, the hammer (2 of 2 HP hits).
+NOPOGO = _on("SSBOT_FORUM_SLAM_PLAY_NOPOGO", "0")
 OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
 AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
 

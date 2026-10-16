@@ -15,7 +15,7 @@ CAST = dict(y=7.45, family="CC_JUMP_CAST", committed=True)
 
 
 def test_switches_off_by_default():
-    assert not sp.LATE and not sp.AFTER and not sp.NODASH
+    assert not sp.LATE and not sp.AFTER and not sp.NODASH and not sp.NOPOGO
     assert not (jb.PASS_HIT or jb.LAND_HIT or jb.NO_JUMP or jb.CAST_ANTIC or jb.WALL_PUSH)
 
 
@@ -254,3 +254,17 @@ def test_planner_nodash_key():
     nh = np.array([-2.0, 0.0, -3.0])                                    # v2_nh: minus the landed hits
     order = np.lexsort((-J, nh, dr.astype(np.int64), ~safe))
     assert list(order) == [1, 0, 2]
+
+
+def test_nopogo_prefs(monkeypatch):
+    # SSBOT_FORUM_SLAM_PLAY_NOPOGO: the idle / evading Clapper's iid in GoalPrefs.no_pogo; off or in a move: none
+    monkeypatch.setattr(sp, "ENABLED", True)
+    t = l2()
+    p = t.decide(world(29.0, t=10.0, ents=[clapper(9, 35.0, False)]), WinFc([subj(9, CC, 35.0, y=7.45)]), None, 3)
+    assert p.no_pogo == frozenset()
+    monkeypatch.setattr(sp, "NOPOGO", True)
+    p = t.decide(world(29.0, t=10.1, ents=[clapper(9, 35.0, False)]), WinFc([subj(9, CC, 35.0, y=7.45)]), None, 3)
+    assert p.no_pogo == frozenset({9})
+    p = t.decide(world(29.0, t=10.4, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]), None, 3)
+    assert p.no_pogo == frozenset()
