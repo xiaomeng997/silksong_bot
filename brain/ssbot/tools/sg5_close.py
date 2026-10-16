@@ -9,6 +9,7 @@ during the move (the move start to the next decision state; hero `damage` events
 (body contact while it idles / walks). Bins: < 3.5, 3.5-5, 5-8.05 (Slam Range), 8.05-12, >= 12 u.
 
     ../scripts/uv.cmd run python -m ssbot.tools.sg5_close [--eps C:/ssbot/data/m2_live_g/col/eps] [--out <dir>]
+        [--arm <arm>]   (SG5 review: one arm of a collect dir; the outputs close_moves_<arm>.json|txt)
 """
 from __future__ import annotations
 
@@ -129,17 +130,21 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--eps", type=Path, default=EPS)
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--arm", default=None, help="only this arm's episodes (the outputs get its name)")
     a = ap.parse_args(argv)
     a.out.mkdir(parents=True, exist_ok=True)
     res = []
     for p in sorted(Path(a.eps).glob("*.json")):
         e = json.loads(p.read_text("utf-8"))["episode"]
+        if a.arm is not None and e.get("arm") != a.arm:
+            continue
         try:
             res.append(analyse(e))
         except Exception as ex:  # noqa: BLE001 - a broken recording is skipped and reported
             print("skip", p.name, repr(ex)[:200], flush=True)
     s = summarise(res)
-    (a.out / "close_moves.json").write_text(json.dumps({"summary": s, "episodes": res}, indent=1), "utf-8")
+    sfx = "" if a.arm is None else f"_{a.arm}"
+    (a.out / f"close_moves{sfx}.json").write_text(json.dumps({"summary": s, "episodes": res}, indent=1), "utf-8")
     lines = [f"episodes {s['episodes']}, frames {s['frames']}, decision-state frames with the hero < 5 u "
              f"{s['near_dec_frames']}"]
     moves = sorted({m for b in s["moves_by_bin"].values() for m in b})
@@ -151,7 +156,7 @@ def main(argv=None) -> int:
     lines.append(f"hero damage frames in decision states: {len(s['dec_hits'])}")
     lines.append("hero damage frames by (move or decision state after a move | hero distance | colliders touching):")
     lines += [f"  {n:4} {k}" for k, n in s["hits_by_kind"].items()]
-    (a.out / "close_moves.txt").write_text("\n".join(lines) + "\n", "utf-8")
+    (a.out / f"close_moves{sfx}.txt").write_text("\n".join(lines) + "\n", "utf-8")
     print("\n".join(lines))
     return 0
 

@@ -6893,3 +6893,84 @@ Moves started by the hero's distance at the start (and how many had a hero damag
 4. Cost: with the deadlines on the chase rows are often not enveloped in time (chosen 55 of 7,108 ticks against 141
    when they were always enveloped); watch the chase rows' chosen share and the late ticks live before making them
    cheaper (one follow value) or always enveloped again.
+
+### Review (adversarial safety review of SG5; commits 6f84b98..20dbb4c against a341415; forum.md 61.6)
+
+Offline only (no game, no live run). Data: `C:\ssbot\data\m2_map\sg5\review` (`ident_review.py` = ident_chase.py plus
+the gate / readiness-index fields, `launch_on.ps1`, `ident_cmp.py`, `flicker.py`, `wall_slams.py`,
+`replay_on3_rvon.json`; jsonl `..\id_rvon_*`, `..\id_rvmap_*`, `..\id_rvoff_*`). Tests: `tests/test_chase_sg5_review.py`
+(4; each fails on 20dbb4c). Distances centre to centre (u). The person's rule is "once the slam is handled, chase"; the
+review found three places where SG5 chased (or rated a chase) on a readiness the map does not back, and one guard that
+counted from the wrong tick.
+
+**Confirmed and fixed (each with a reproduction):**
+
+1. **No map file, chase anyway.** `special_map_rt.runtime` returns None without the npz (the planner then runs without
+   the map), but `_chase_rows` only checked that a MapHelper existed and L2 fell back to "chase" at 4 u: 8 chase rows
+   and the 4 u stance with no readiness, no tier, no map row (test: runtime None). Now `MapHelper.chase_gate` returns
+   "no map" and the L2 chase needs `forum_map.MAP_READY` (set when the runtime loads).
+2. **Near a wall the map has no slam row, but the readiness still justified the chase.** The map row leaves a slam
+   whose anchor has a wall within 14 u in front / 6 u behind (`MapRuntime.wall_exit`; in the SG4 replays the largest
+   no-row reason, 1,452 slam ticks). The readiness ignores walls, so SG5's chase rows, chase stance and tier ran there.
+   Reproduction: a Clapper 3.5 u from the left wall facing the hero 4 u away: `row()` on its Slam Antic returns None
+   ("wall") while the readiness posted `chase_x`, set the tier's Clapper, and the chase rows came. Live (75 episodes,
+   every arm, no map; `wall_slams.py`): 68 of 518 slams started with the wall exit (13 %), 11 of them damaged (16 %;
+   open 59 / 450, 13 %); slams started at 3.5-5 u were damaged 16 / 78 against 40 / 341 at 5-8.05 u, so without the
+   map closer is worse; 16 % of the decision-state frames with the hero within 8.55 u were near a wall. Now
+   `chase_gate` "wall" (the Clapper's x, carried to the scuttle's end while it evades, facing the hero): no chase rows,
+   no chase spot, no tier, no swing lock, no readiness while it evades = rnmap's behaviour there (BOARD `chase_off`;
+   L2 "face: ready" / "face"). Replays: chase rows gated on 1,055 ticks, the readiness on 589 (Idle 394, Walk 42,
+   evade 153). A scuttle carried past the wall lands in the gate too (back < 6 u).
+3. **While it evades, the readiness was read at the row's end.** After Scuttle branches at once (SLAM / CAST in Slam
+   Range), so the slam starts when the scuttle ends: 0-21 frames ahead, always inside the 37-frame row; at the row's
+   end it would be 15-37 frames into its antic. Reproduction: a row 1-3 u from the Clapper when the scuttle ends and
+   4.5 u at its end was rated 3.34 (its end) while the map's value at the scuttle's end is -inf (no safe continuation).
+   Now the readiness reads every row at rollout index je = clamp(frames to the scuttle's end, P + 1, P + T) (its x,
+   key, ground, heights, phase and trailing swing frames there; `MapHelper.ready_j`), and the tier's distance at the
+   same index. Replays: read mid-row on 389 evade ticks; the readiness changed the first row on 241 evade ticks (SG5:
+   21).
+4. **The jump cast's CHASE_RUNE_S counted from the wrong tick.** It was noted only inside `_chase_rows`, after its
+   early returns: a jump cast whose last ticks had the hero beyond 16 u, in a dash / recoil or on a wall left an older
+   time (or none), so chase rows could come before the rune circle burst (0.75-0.87 s after the move). Now
+   `ForumPlanner._chase_note_jc` notes every Clapper in CC_JUMP_CAST on every tick (any distance, mode, posture).
+
+**Checked, not a defect:** the map's x range (the readiness reads -12..15.9 u in the facing frame; the rows end within
+8.55 u + a row; S() is -inf outside); the phase ((q - j) % 6, the row's convention after the SG4 review; the swing lock
+reads the same source); a slam starting mid-dash (dash rows only from beyond 6.5 u: the dash's 2.8 u ends >= 3.7 u,
+where the real map's readiness at k <= 6 is >= 3.4; the map row resumes 6 frames later); presses inside the dash /
+dash-combo window (sc["unmod"] vetoes them on every row; the dash rows' first press is at DASH_WAIT 10); the body
+(stage 1 and the envelope on the nominal lane and the hit branch, estimate + 0.5 u; dash rows at it read the "rule"
+margin; a predicted hit on an idle Clapper gets its Dmg Attack reaction forecast); the Walk (DistanceWalk keeps 7 +-
+1.5 u and Close Range comes within 0.25 s in Slam Range: it does not walk into her); the small runes (the per-bomb
+forecast is in every row's support, chase rows included); the jump families (no chase rows there, L2 unchanged; rune
+hold 1.0 s in L2, 1.1 s in the planner); the deadlines (an unenveloped chase row is unsafe: safe = ok & env & ~S & ~hz;
+the gate cuts chase-row ticks 8,590 -> 7,498, so no new deadline replay); flicker (open loop, consecutive idle / walk /
+evade ticks whose plan flips approach <-> retreat by 0.5 u: off 49, SG5 89, review 86 of 8,769; L2 chase <-> other
+flips 17 -> 60: the gate's entries chase -> face 24 / face -> chase 7, and rune: out -> chase 16 as before; no
+chase / retreat oscillation).
+
+**Final numbers (CHASE on, open loop, rn's 16 episodes with rnmap's switches + CHASE, deadlines off; review vs SG5
+20dbb4c):** decisions changed on 1,323 of 36,812 ticks (evade 536, idle / walk 273, cast 259 and slam 253 through the
+carried plan, jump cast 2). Idle / walk: chosen slash ticks 3,170 -> 3,122, chosen reach 1,744 -> 1,724, plan hits/s
+1.058 -> 1.038, the L2 chase stance 5,749 -> 5,164 ticks ("face: ready" 394, "face" 191 where gated). Chase rows
+chosen 339 -> 313 (idle / walk 259 -> 233, entry 77, evade 3); tier changes 29 -> 29. All ticks: plan hits/s 0.907 ->
+0.903, FORCED_RISK 4.23 % -> 4.21 %, tick p50 / p95 / p99 11.9 / 24.0 / 30.8 -> 11.8 / 23.7 / 30.9 ms.
+**Switch-off identity (2a53ad4 vs the frozen a341415, the same harness):** rnmap's switches 2,073 / 2,073 (192006 e1)
+and 2,251 / 2,251 (193039 e2) ticks identical; rn's 2,073 / 2,073 (192006 e1) and 3,183 / 3,183 (193808 e0). Tests:
+121 pass (test_chase_sg5 7, test_chase_sg5_review 4, special_map_sg4, special_map_review, forum_l2, map_lookahead,
+forum_planner, forum_v2, rune_bombs).
+
+**Live A/B prepared, not run** (after the person's overlay eye check and the rnmap vs rn A/B): commands, seeds and
+metrics in `C:\ssbot\sandbox\1v1_chase_ab.txt` (a frozen checkout of the review's final commit; arms rnmap and rnchase,
+16 episodes each on instances 0 and 1; rn's reference comes from the map A/B: rn decides bit-identically here).
+`ssbot.tools.sg5_close --arm` now splits a collect dir by arm (the Clapper's move mix at close range).
+
+**Open after the review:**
+1. SG4 itself (rnmap, unchanged here) still computes the readiness penalty and L2's "face: ready" next to walls where
+   the map has no slam row; wall buckets in the map, or a gate under its own switch, would fix rnmap too.
+2. A row ending mid-swing in the air gets no swing lock (ground swings only); airborne map rows mostly fail the lane
+   guard (SG4 review), so the air readiness is optimistic: watch hits on slams that start while she is airborne.
+3. Small runes: allns (an aggressive arm with the bomb forecast on) took bomb damage during evades / after casts (15
+   frames in 8 episodes; rn 1 in 16); the chase spends more time there: read every "damager" hit in the A/B.
+4. Two Clappers (not the 1v1): the chase and the readiness look at the nearest one only; gate the chase to one Clapper
+   in range before using it in the gauntlet.
