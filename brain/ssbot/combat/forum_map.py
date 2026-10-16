@@ -52,6 +52,38 @@ CHASE_BAND = (3.5, 4.6)
 EVADE_STATE = "Evade Scuttle"
 EVADE_S = 0.35               # Evade Scuttle -> After Scuttle (forum.md 18.1)
 MAP_READY = {"ok": False}    # review: the map runtime loaded (MapHelper.runtime); the L2 chase needs it
+# SSBOT_FORUM_SG8 (task 1v1 SG8, forum.md 64; needs SSBOT_FORUM_SPECIAL_MAP=1; default off: nothing here changes): the
+# fixes from the first live runs (2026-10-15): the airborne locate (the map's own planned state first, then the facts
+# the bot knows: its jump key, whether the arc began with a down slash; an open jump hold is the bot's own choice),
+# the lunge shortfall re-anchored once the lunge is over (the hammer polygons are rigid in the Clapper's frame), no
+# runtime loaded on a tick (every bucket at the construction; a missing one = no map for that slam), the off-board
+# spot near the face (the person: never run away from a slam; stay at its face, 5-7 u)
+SG8 = os.environ.get("SSBOT_FORUM_SG8", "0").strip() == "1"
+LUNGE_DONE = ("Slam 2", "Slam Effects?", "Slam Recover")   # the lunge's last step lands on Slam 2's first frame
+FACE_BAND = (4.5, 7.0)       # SG8: the stance band in front of the Clapper (centre to centre, u; the person's demo)
+FACE_BEHIND = (3.0, 5.0)     # ... and behind it (its body's back edge ~2.2 u)
+FACE_U = 6.0                 # SG8: L2's slam stance in front when the map has no spot for this slam
+LATE_F = 3                   # SG8: the own event's start may be this many frames off the plan's (a late input)
+
+
+STAY_C_U = 1.0              # SG8: the clearance the hammer needs (the polygons are exact; the map's dilation holds the
+                            # off-lattice hero and one late run step): no reward for more (map_lookahead.STAY)
+STAY_MU = 0.2               # ... and the score per u off the face band (a run step 0.165 u: 0.033 > lambda 0.02)
+
+
+def sg8_setup() -> None:
+    """SG8: the map's run-time rules (map_lookahead.STAY / ALLD; the compiled kernels read them when a runtime's tables
+    are built): once per process, before the first runtime loads."""
+    from ssbot.combat import map_lookahead as ml
+    if not SG8 or ml.STAY is not None:
+        return
+    from ssbot.combat.move_data import load_cl_slam
+    vs = load_cl_slam().variants("observed")
+    K = max(len(v.disp) for v in vs) + 40
+    D = np.stack([np.pad(v.disp, (0, max(0, K - len(v.disp))), mode="edge")[:K] for v in vs])
+    ml.STAY = {"caps": None, "c_need": STAY_C_U, "mu": STAY_MU, "dsp": 0.5 * (D.min(0) + D.max(0)),
+               "fb": FACE_BAND, "bb": FACE_BEHIND}
+    ml.ALLD = True
 
 
 def chase_wall(cx: float, hx: float, arena: tuple | None = None, buckets: bool = False) -> bool:
@@ -89,6 +121,10 @@ class MapHelper:
         self.ready_info: dict | None = None
         self._dec = None
         self.yh: list = []             # (tick, box bottom above the floor at the start) of the last ticks
+        self._arc = None               # SG8: the hero's current airborne arc {"ds": a down slash in it} (None: unknown)
+        self.locate_stats = {"plan": 0, "mem": 0, "facts": 0, "open": 0, "min": 0, "fallback": 0}
+        self._last_spot: dict = {}     # SG8: iid -> (tick, x) of this slam's last map spot (L2 between rows)
+        sg8_setup()
 
     def runtime(self):
         terr = getattr(self.pl, "terrain", None)
@@ -118,6 +154,10 @@ class MapHelper:
         if b == "":
             return rt, None
         tag = smrt.MAP_TAG + b
+        if tag not in self._bucket_rt and SG8 and self._loaded:
+            # SG8: never a runtime load on a tick (live: a bucket's first use decompressed 1.5 GB mid-fight, ~3 s);
+            # every bucket is loaded at the construction (preload): one missing here has no file -> no map
+            return rt, "wall"
         if tag not in self._bucket_rt:
             try:
                 self._bucket_rt[tag] = smrt.runtime(self.pl.params, self.pl.terrain, tag)
@@ -144,6 +184,21 @@ class MapHelper:
         if rt is None:
             return                     # no arena terrain yet (or no map file): the first tick with one loads it
         self._dec = _decision_states()
+        if rt is not None and getattr(rt, "stage", None):
+            # SG8 (stalls): every wall bucket of the tag now (the construction), never on a slam tick; decisions as
+            # before (the same runtimes), only when they load
+            t_b = time.perf_counter()
+            for u in smrt.WALL_BUCKETS_F + smrt.WALL_BUCKETS_B + ((smrt.WALL_BUCKET_B15,) if SG8 else ()):
+                sfx = (f"_f{u:g}" if u in smrt.WALL_BUCKETS_F else f"_b{u:g}")
+                tag = smrt.MAP_TAG + sfx
+                if tag in self._bucket_rt:
+                    continue
+                try:
+                    self._bucket_rt[tag] = smrt.runtime(self.pl.params, self.pl.terrain, tag)
+                except Exception as ex:  # noqa: BLE001
+                    self._bucket_rt[tag] = None
+                    self.load_error = repr(ex)
+            self.bucket_ms = round((time.perf_counter() - t_b) * 1e3, 1)
         if rt is not None:
             try:
                 p = sorted(rt.srcs)[0]
@@ -209,11 +264,98 @@ class MapHelper:
         S = r.final[:, 0] if P >= 1 else np.asarray(start).reshape(kin.K, -1)[:, 0]
         return S, r.box[0, :P + 1], r.flags[0, :P + 1], r.mode[0, :P + 1]
 
+    def arc_update(self, st0) -> None:
+        """SG8: the hero's airborne arc from the start state (every tick): reset on the ground, a down slash in it
+        noted (a bounce can follow only then)."""
+        if float(st0[kin.GROUND, 0]) > 0:
+            self._arc = {"ds": False}
+        elif self._arc is not None and int(st0[kin.MODE, 0]) in (kin.M_DS_ANTIC, kin.M_DS_SPIKE):
+            self._arc["ds"] = True
+
+    def _locate_sg8(self, rt, mem, k: int, x: float, cdir: int, phases: list, ys: list, S, md):
+        """SG8: the airborne hero's map event (ev with q0, how) or (None, "none"). The slices matching the last three
+        box bottoms (MapRuntime.locate, every possible phase); then (1) the map's own planned state at this frame (its
+        last plan; else the event it used last tick in this arc) when it is among them; (2) else the ones the facts
+        allow: the jump key (Jump.IsPressed after the prefix: held -> a hold h >= j - 1, released -> h <= j; one frame
+        of slack), a bounce only in an arc with a down slash; (3) the value: per event the minimum over the phases (an
+        unknown); the jump holds still open (key held, h >= j) are the bot's own choice (the row's masks hold the key
+        to h and the lane guard checks the planner's lane on them): the best of them; every other remaining event is
+        unknown: the minimum. Nothing left after (2): every matching slice (the minimum, as before)."""
+        evs = [(p, s, rt.ev_of_slice(s, k, p)) for p in phases for s in rt.locate(k, ys, p, bin_off=True)]
+        if not evs:
+            return None, "none"
+        cbw = float(rt.ti.cb_w)
+
+        def key_of(e):
+            if e["kind"] == "jump":
+                return ("jump", int(e["k"]), float(e["h"]))
+            return ("bounce", int(e["k"]), int(np.floor(float(e["yc"]) / cbw)))
+        exp, how = None, "plan"
+        prev = mem.get("plan")
+        if prev is not None and getattr(prev, "states", None):
+            i = k - prev.k0
+            if 1 <= i < len(prev.states):
+                s_ = prev.states[i]
+                if s_[0] == k and s_[2] in ("jump", "bounce"):
+                    exp = {"kind": s_[2], "k": int(s_[3])}
+                    if s_[2] == "jump":
+                        exp["h"] = s_[4]
+                    else:
+                        exp["yc"] = float(s_[5])
+        if exp is None and mem.get("air_ev") is not None:
+            exp, how = mem["air_ev"], "mem"
+        if exp is not None:
+            # the same jump hold / contact-height bin, its start within LATE_F frames of the planned one (a late
+            # press or contact): the matching slice nearest the plan's start
+            ke = key_of(exp)
+            m_ = sorted((abs(key_of(e)[1] - ke[1]), i_, e) for i_, (_, _, e) in enumerate(evs)
+                        if key_of(e)[0] == ke[0] and key_of(e)[2] == ke[2] and abs(key_of(e)[1] - ke[1]) <= LATE_F)
+            if m_:
+                e_ = m_[0][2]
+                ev = dict(exp)
+                ev["k"], ev["q0"] = int(e_["k"]), int(e_["q0"])
+                self.locate_stats[how] += 1
+                return ev, how
+        jheld = float(S[kin.JHELD]) > 0
+        ds = self._arc is None or bool(self._arc.get("ds")) or bool(
+            np.isin(np.asarray(md), (kin.M_DS_ANTIC, kin.M_DS_SPIKE)).any())
+        keep = []
+        for p, s, e in evs:
+            j = k - int(e["k"])
+            if e["kind"] == "jump":
+                h = float(e["h"])
+                if (jheld and h < j - 1) or (not jheld and h > j):
+                    continue
+            elif not ds:
+                continue
+            keep.append((p, s, e))
+        how = "facts"
+        if not keep:
+            keep, how = list(evs), "fallback"
+        groups: dict = {}
+        for p, s, e in keep:
+            groups.setdefault(key_of(e), []).append((p, s, e))
+        vals = {g: min(min(rt.S_obs(q, k, s, x, cdir) for q in phases) for _, s, _ in lst)
+                for g, lst in groups.items()}
+        open_ = [g for g in groups if g[0] == "jump" and jheld and g[2] >= k - g[1]] if how == "facts" else []
+        cv = []
+        if open_:
+            go = max(open_, key=lambda g: (vals[g], -g[2]))
+            cv.append((vals[go], go))
+        cv += [(vals[g], g) for g in groups if g not in open_]
+        v, g = min(cv, key=lambda t: t[0])
+        if how == "facts":
+            how = "open" if (open_ and g in open_) else ("facts" if len(groups) == 1 else "min")
+        self.locate_stats[how] += 1
+        return dict(groups[g][0][2]), how
+
     def row(self, f, start, hold, prefix, T: int, ticks: int) -> MapRow | None:
         t0 = time.perf_counter()
         st0 = np.asarray(start).reshape(kin.K, -1)
         hx = float(st0[kin.PX, 0])
         self.info = None
+        if SG8:
+            self.arc_update(st0)
         c = self._clapper(f, hx)
         if c is None:
             return None
@@ -255,6 +397,8 @@ class MapHelper:
             mem["x0_prev"] = mem["x0"]
         x0 = mem["x0"]
         info.update(k=k0, x0=round(x0, 3), face=face)
+        if SG8:
+            info["cx"] = round(float(e["pos"][0]), 3)       # (the planner's FORCED_RISK keys in a slam)
         # SG7: the stage entries seen (the tracker's state start: back-dated by the time in state when first seen)
         # and the slam's map (a wall bucket near a wall). SG7 review (forum.md 63.5): the entries in game time x 60,
         # not rounded (half frames at 120 fps / x0.5); the observation is at the tracker's frame (st_ and st_t0 are the
@@ -273,6 +417,7 @@ class MapHelper:
         if mem["exit"] is not None:
             info["why"] = mem["exit"]
             return None
+        ok_v = None
         if getattr(rt, "stage", None):
             # SG7 review: off the 60 Hz grid once (120 fps / x0.5 / a part frame), no stage rows for this slam
             if smrt.off_grid(k_obs) or any(smrt.off_grid(v) for v in seen.values()):
@@ -283,6 +428,32 @@ class MapHelper:
             info["nv"] = len(ok_v)
         dev = 0.0 if st_ == ANTIC else rt.deviation(k_trk, float(e["pos"][0]), x0, face)
         info["dev"] = round(dev, 3)
+        if dev > smrt.DEV_TOL_U and SG8 and getattr(rt, "stage", None):
+            # SG8: a lunge shorter than every variant (live: 1.8-3.1 u; the observed 3.6 / 4.2): the hammer polygons are
+            # rigid in the Clapper's frame, so once the lunge is over (Slam 2 entered: its last step lands on that
+            # frame) the anchor moves to put the Clapper on the consistent variants' smallest displacement there (the
+            # most-behind variant is where it is; the others are ahead: their union covers it); while it still lunges:
+            # no row this tick (not sticky); ahead of the range (knockback forward): the exit as before
+            cx_ = float(e["pos"][0])
+            kk_ = int(np.clip(k_trk, 0, len(rt.disp_lo) - 1))
+            short = (cx_ - x0) * face < float(rt.disp_lo[kk_])
+            if short and st_ in LUNGE_DONE:
+                vv = [rt.vtl[v] for v in (ok_v or range(len(rt.vtl)))]
+                dmin = min(float(v.disp[min(kk_, len(v.disp) - 1)]) for v in vv)
+                mem["x0"] = x0 = cx_ - face * dmin
+                mem["plan"] = None
+                mem["reanchor"] = mem.get("reanchor", 0) + 1
+                info.update(x0=round(x0, 3), reanchor=round(dev, 3))
+                rt_b, why_b = self.runtime_for(x0, face)
+                if why_b is None:
+                    rt = rt_b
+                    info["tag"] = getattr(rt, "tag", None)
+                    ok_v = rt.observe(None if mem.get("obs_off") else seen, k_trk, smrt.OBS_LAT, k_frac=k_obs)
+                dev = rt.deviation(k_trk, cx_, x0, face)
+                info["dev"] = round(dev, 3)
+            elif short:
+                info["why"] = "deviation (lunge short, waiting)"
+                return None
         if dev > smrt.DEV_TOL_U:
             mem["exit"] = "deviation"
             info["why"] = "deviation"
@@ -323,6 +494,16 @@ class MapHelper:
         ground = bool(fl[-1] & kin.F_GROUND)
         if ground:
             ev = {"kind": "ground", "k": k}
+            if SG8:
+                mem["air_ev"] = None
+        elif SG8:
+            ys = [float(b[1]) - y_floor for b in box[::-1][:3]]
+            ev, how_ = self._locate_sg8(rt, mem, k, x, cdir, phases, ys, S, md)
+            info["loc"] = how_
+            if ev is None:
+                info["why"] = "airborne off the macros"
+                return None
+            mem["air_ev"] = {kk: ev[kk] for kk in ("kind", "k", "h", "yc") if kk in ev}
         else:
             ys = [float(b[1]) - y_floor for b in box[::-1][:3]]
             best = None
@@ -385,6 +566,8 @@ class MapHelper:
         tb = min(len(plan.xs) - 1, plan.presses[0] if plan.presses else 10)
         BOARD[iid] = {"tick": ticks, "on": True, "x": float(x0 + face * plan.xs[max(tb, 0)]) if len(plan.xs) else None,
                       "k": k, "why": "row"}
+        if SG8 and BOARD[iid]["x"] is not None:
+            self._last_spot[iid] = (ticks, BOARD[iid]["x"])
         info["total_ms"] = round((time.perf_counter() - t0) * 1e3, 2)
         return MapRow(cmd, ext, meta, plan, info)
 
@@ -409,11 +592,42 @@ class MapHelper:
         if info is None or info.get("on") or "k" not in info:
             return
         rt = (self.slam.get(info.get("iid")) or {}).get("rt") or self.runtime()
+        if SG8 and info.get("why") in ("deviation", "wall"):
+            # SG8: no map for this slam: the last map spot of this slam (L2 keeps the hit weight), else L2's face
+            ls = self._last_spot.get(info.get("iid"))
+            if ls is not None:
+                BOARD[info["iid"]] = {"tick": ticks, "on": False, "x": ls[1], "k": info.get("k"), "why": "last"}
+            else:
+                BOARD.pop(info.get("iid"), None)
+            return
         if rt is None or info.get("why") in ("deviation", "wall"):
             BOARD.pop(info.get("iid"), None)
             return
         hx = float(np.asarray(start).reshape(kin.K, -1)[kin.PX, 0])
         x0, face, k = info["x0"], info["face"], int(info["k"])
+        if SG8:
+            # SG8: the best ground spot 10 frames ahead within 8 u, scored as the map's own fallback (map_lookahead
+            # .STAY): no strike there -> its value capped at the clearance the hammer needs, minus the distance from
+            # the face band; a strike value as it is
+            from ssbot.combat import map_lookahead as ml
+            st_ = ml.STAY
+            xs = (hx - x0) * face + np.arange(-8.0, 8.01, rt.ti.step)
+            kk = min(k + 10, rt.ti.K - 1)
+            V = rt.S_min(list(rt.srcs), kk, 0, xs, 0)
+            fin = np.isfinite(V)
+            if fin.any() and st_ is not None and st_.get("caps") is not None:
+                fd = np.array([ml.face_dist(float(v_), kk, st_) for v_ in xs])
+                sc_ = np.where(V > rt.wc + 1e-3, V, np.minimum(V, st_["caps"])) - st_["mu"] * fd
+                sc_ = np.where(fin, sc_, -np.inf)
+                i_ = int(np.argmax(sc_))
+                x_ = float(x0 + face * xs[i_])
+                BOARD[info["iid"]] = {"tick": ticks, "on": False, "x": x_, "k": k, "why": "ground"}
+                self._last_spot[info["iid"]] = (ticks, x_)
+                return
+            ls = self._last_spot.get(info.get("iid"))
+            if ls is not None:
+                BOARD[info["iid"]] = {"tick": ticks, "on": False, "x": ls[1], "k": k, "why": "last"}
+            return
         xs = (hx - x0) * face + np.arange(-4.0, 4.01, rt.ti.step)
         kk = min(k + 10, rt.ti.K - 1)
         best, bx = -np.inf, None

@@ -44,6 +44,10 @@ WALL_BACK_U = 6.0                  # ... or behind it (no wall buckets for the S
 # 2.04 + 4.2 = 6.24 u); nearer than the last bucket: the wall exit
 WALL_BUCKETS_F = (12.0, 10.0, 8.5, 7.25, 6.5)
 WALL_BUCKETS_B = (4.0, 2.5)
+# SG8 (forum.md 64; SSBOT_FORUM_SG8=1): one more back bucket (2 live slams had the back wall under 2.85 u: no map);
+# only the sg8 tag has its file (others: no runtime -> the wall exit as before)
+SG8 = os.environ.get("SSBOT_FORUM_SG8", "0").strip() == "1"
+WALL_BUCKET_B15 = 1.5
 # SG7 review (forum.md 63.5): a bucket's wall at least this far inside the real wall. The map's hero macros have no
 # wall states, but touching a wall airborne with the key toward it slides / clings / scrambles: HeroBox.cs WallSlide
 # 0.876 u wide with its centre 0.21 u off (0.4 u past the physics box), WallScramble's top 0.51 u above the physics
@@ -259,7 +263,7 @@ def decide_multi(srcs: list, k: int, ev: dict, x: float, c: int, last_press: int
         return ml.decide(srcs[0], k, ev, x, c, last_press, lam, land)
     vals: dict = {}
     for i, s in enumerate(srcs):
-        _, _, cands = ml.decide(s, k, ev, x, c, last_press, lam, land)
+        _, _, cands = ml.decide(s, k, ev, x, c, last_press, lam, land, stay=False)
         seen = {}
         for v, a in cands:
             seen[a] = max(seen.get(a, -np.inf), v)
@@ -274,6 +278,10 @@ def decide_multi(srcs: list, k: int, ev: dict, x: float, c: int, last_press: int
     if not vals:
         act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", c)
         return -np.inf, act, []
+    if ml.STAY is not None:
+        # SG8: the stay rule on the minimum over the sources (map_lookahead.stay_value)
+        s0 = srcs[0]
+        vals = {a: ml.stay_value(v, a, x, c, k, s0.st, s0.ti.step, s0.ti.wc, ml.STAY, lam) for a, v in vals.items()}
     a, v = max(vals.items(), key=lambda t: t[1])
     if not np.isfinite(v) and v < 0:
         a = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", c)
@@ -354,6 +362,10 @@ class MapRuntime:
             self.RMv = np.asarray(self.stage["RM"], np.int64)
             self.vtl = [self.spec.timeline(v["frames"], v["phase"], K=K) for v in self.stage["variants"]]
             self.all_rows = [np.asarray(r, np.int64) for r in np.unique(self.RMv, axis=0)]
+        # SG8: the stay rule's cap score from this map's clearance weight and cap (map_lookahead.STAY)
+        st_ = ml.STAY
+        if st_ is not None and st_.get("caps") is None:
+            st_["caps"] = self.wc * min(float(st_.get("c_need", 1.0)), float(meta["c_cap"])) / float(meta["c_cap"])
         # SG6: the compiled kernels' tables (built here: the map's load, never on a slam tick)
         self.use_jit = JIT
         self._jt = None
@@ -477,16 +489,26 @@ class MapRuntime:
         return 0.0, float(hm.jumps[(1, 0)].py[0])
 
     # ---- the map state of an airborne hero: the tube slices matching its recent heights ----
-    def locate(self, k: int, ys: list, p: int, tol: float = 0.06) -> list[int]:
-        """Slices s at frame k (phase p) whose heights match ys (box bottom above the floor, newest first)."""
+    def locate(self, k: int, ys: list, p: int, tol: float = 0.06, bin_off: bool = False) -> list[int]:
+        """Slices s at frame k (phase p) whose heights match ys (box bottom above the floor, newest first). bin_off
+        (SG8): a bounce slice also matches with one constant offset up to half a contact-height bin (its tube is the
+        bin's centre; the hero's own contact height lies anywhere in the bin), the heights within tol of it."""
         ti = self.ti
         J = ti.SJ
         T = ti.ST
         q = (p - k + J) % 6
         kinds = np.array(ti.kinds)[T]
-        ok = (J >= len(ys) - 1) & (J < ti.LA[T, q]) & (kinds != "ground")
+        base = (J >= len(ys) - 1) & (J < ti.LA[T, q]) & (kinds != "ground")
+        ok = base.copy()
         for i, yy in enumerate(ys):
             ok &= np.abs(self.TY[T, q, np.maximum(J - i, 0)] - yy) <= tol
+        if bin_off:
+            bo = base & (kinds == "bounce")
+            d0 = yy0 = ys[0] - self.TY[T, q, J]
+            bo &= np.abs(d0) <= 0.5 * ti.cb_w + tol
+            for i, yy in enumerate(ys[1:], start=1):
+                bo &= np.abs((yy - self.TY[T, q, np.maximum(J - i, 0)]) - yy0) <= tol
+            ok |= bo
         return np.flatnonzero(ok).tolist()
 
     def ev_of_slice(self, s: int, k: int, p: int) -> dict:
@@ -651,7 +673,7 @@ class MapRuntime:
                 return None
             f = [u for u in WALL_BUCKETS_F if u <= front - WALL_MARGIN_U]
             return f"_f{f[0]:g}" if f else None
-        b = [u for u in WALL_BUCKETS_B if u <= back - WALL_MARGIN_U]
+        b = [u for u in WALL_BUCKETS_B + ((WALL_BUCKET_B15,) if SG8 else ()) if u <= back - WALL_MARGIN_U]
         return f"_b{b[0]:g}" if b else None
 
     def S_obs(self, p: int, k: int, s: int, x: float, c: int = 0) -> float:

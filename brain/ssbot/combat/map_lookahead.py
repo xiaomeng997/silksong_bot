@@ -35,6 +35,15 @@ PRESS_EPS = 1e-2                  # the strike is the node's best continuation w
 TIE_EPS = 0.0                     # > 0: equal values in the air -> the key whose value is the earlier strike (SG3b
                                   # tried 1e-9; see forum.md 58)
 PRESS_COMMITTED = True            # SG3b: also slash when the strike beats every continuation with the committed key
+# SG8 (forum.md 64; the planner sets these with SSBOT_FORUM_SG8=1, the closed loop per run; None / False: unchanged):
+# STAY = {"caps": the score of the clearance the hammer needs (1 u: WC x 1 / C_CAP), "mu": per u off the face band,
+# "dsp": the Clapper's map x per frame (the variants' mean lunge), "fb": (lo, hi) in front, "bb": (lo, hi) behind}:
+# an action whose best continuation reaches no strike (value <= WC) scores min(value, caps) - mu x its distance from
+# the face band (the person: never run away from a slam; the clearance beyond what the hammer needs bought retreats);
+# ALLD: a jump is offered with every first key, so the minimum over several sources (phases x row maps) keeps a jump
+# whose best first key differs between them (else such a ground cell had no common action: a dead end)
+STAY = None
+ALLD = False
 
 
 def steps(p: int, K: int) -> np.ndarray:
@@ -312,7 +321,33 @@ def keyed_q(src, k: int, s1: int, x1: float, c: int, d: int, nexts) -> float:
     return pl[0] * v1 + pl[1] * br[0] + pl[2] * z[1] + pl[3] * z[2]
 
 
-def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None):
+def face_dist(x: float, k: int, stay: dict) -> float:
+    """SG8: the distance (u) of map x from the face band at frame k (in front of the Clapper's map x, or behind)."""
+    dsp = stay["dsp"]
+    rel = x - float(dsp[min(max(int(k), 0), len(dsp) - 1)])
+    if rel >= 0:
+        lo, hi = stay["fb"]
+        return max(0.0, lo - rel, rel - hi)
+    lo, hi = stay["bb"]
+    return max(0.0, lo + rel, -rel - hi)
+
+
+def stay_value(v: float, act: tuple, x: float, c: int, k: int, st, step: float, wc: float, stay: dict,
+               lam: float) -> float:
+    """SG8: an action's value under STAY (no strike through it: capped before its key-change cost, minus the face
+    distance after its move)."""
+    if not np.isfinite(v) or act[0] != "dir":
+        return v
+    d = act[1]
+    pen = lam * (d != c)
+    if v + pen > wc + 1e-3:
+        return v
+    x2 = x + c * step * st[k + 1] + d * step * st[k + 2]
+    return min(v + pen, stay["caps"]) - pen - stay["mu"] * face_dist(x2, k + 2, stay)
+
+
+def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None,
+                 stay: bool = True):
     """decide() on a keyed map (SG4): the state's key is dir_cur. In the air: the slash now when the map's node takes
     the strike with the held key (SV at least the node's value) and the cooldown is over; else the key d for frame
     k + 1 by keyed_q - lambda per change. On the ground: the key d, or a ground jump with hold h now (the start slice's
@@ -342,7 +377,9 @@ def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int,
         top = max(v for v, _ in cands)
         jc = []
         for v0, i, h in sorted(v0s, key=lambda t: (-t[0], t[1])):
-            if not v0 > ti.wc + 1e-3 or v0 - lam <= top:
+            if not v0 > ti.wc + 1e-3 or (not ALLD and v0 - lam <= top):
+                # (SG8 ALLD: no pruning by the best so far: under several sources a jump this source would not pick
+                # can be the only action common to all; one source decides the same either way)
                 continue
             s0 = ti.s0_of[h]
             best, bd = -np.inf, c
@@ -350,6 +387,14 @@ def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int,
                 v = keyed_q(src, k, s0 + 1, x1, c, d, lambda m, s0=s0: s0 + 1 + m) - lam * (d != c)
                 if v > best:
                     best, bd = v, d
+            if ALLD:
+                # SG8: every first key (the minimum over several sources needs a common action)
+                for d in (-1, 0, 1):
+                    vd = keyed_q(src, k, s0 + 1, x1, c, d, lambda m, s0=s0: s0 + 1 + m) - lam * (d != c)
+                    cv = min(v0, vd) - lam
+                    jc.append((i * 3 + d + 1, (cv, ("jump", h, d))))
+                    top = max(top, cv)
+                continue
             cv = min(v0, best + lam * (bd != c)) - lam
             jc.append((i, (cv, ("jump", h, bd))))
             top = max(top, cv)
@@ -366,19 +411,22 @@ def decide_keyed(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int,
             for d in (-1, 0, 1):
                 v = keyed_q(src, k, s1, x1, c, d, nf)
                 cands.append((v - lam * (d != c), ("dir", d)))
+    if STAY is not None and stay:
+        cands = [(stay_value(v_, a_, x, c, k, st, ti.step, ti.wc, STAY, lam), a_) for v_, a_ in cands]
     v, act = max(cands, key=lambda cd: cd[0])
     if not np.isfinite(v) and v < 0:
         act = ("dir", 1 if x >= 0 else -1) if ev["kind"] == "ground" else ("dir", c)
     return v, act, cands
 
 
-def decide(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None):
+def decide(src, k: int, ev: dict, x: float, dir_cur: int, last_press: int, lam: float, land: int | None = None,
+           stay: bool = True):
     """The lookahead at the end of frame k (inputs for frame k + 1). ev: the hero's vertical event {"kind": ground |
     jump | bounce, "k": its start frame, "h": jump hold, "yc": bounce contact height}; land: the event's landing index
     (frames from its start; from the hero model, needed in the air). Returns (value, action, candidates); action =
     ("dir", d) | ("jump", h, d) | ("press", d). A keyed source (SG4) goes to decide_keyed."""
     if getattr(src, "keyed", False):
-        return decide_keyed(src, k, ev, x, dir_cur, last_press, lam, land)
+        return decide_keyed(src, k, ev, x, dir_cur, last_press, lam, land, stay)
     ti, st = src.ti, src.st
     j = k - ev["k"]
     s_now = ti.slice_of(ev, j) if ev["kind"] != "ground" else 0

@@ -68,6 +68,9 @@ MAP_DIR = md.FORUM
 NEG = -np.inf
 LEVEL_SCALE = 0.02            # stored level = round(score / LEVEL_SCALE), 0..250
 INF_LEVEL, NONE_LEVEL = 255, 254
+# SG8: a jump start counts for its ground node only above WC by this (two run-time levels of 0.025: the stored
+# level of a counted jump stays above the online threshold WC + 1e-3)
+JUMP_STRIKE_EPS = 0.05
 
 
 @dataclass
@@ -114,6 +117,11 @@ class MapConfig:
     # SG7 review (forum.md 63.5): carry = a hammer collider also hurts in the first frame of the next state, at that
     # frame's position (the physics step runs before the FSM disables it: move_data.HAMMER_CARRY)
     carry: bool = False
+    # SG8 (forum.md 64): a ground node counts a jump start only when the jump reaches a strike (its score above the
+    # clearance-only score WC by JUMP_STRIKE_EPS), as the online rule does (map_lookahead.decide*: "never jump
+    # without a reachable strike"). Without it a ground cell could be finite through an escape jump the policy never
+    # takes: the sg7r noise-free damage (ground k0 40, x 10 u: value 0.034 at k 40, every key -inf from k 43)
+    jump_strike: bool = False
 
     def key(self) -> dict:
         d = asdict(self)
@@ -1094,6 +1102,8 @@ class KeyedMapBuilder(MapBuilder):
             sc0 = score(Rk[:, 0], Ck[:, 0])
             bj = scj.argmax(1)                                    # [3, NX]
             jb = scj.max(1) > sc0
+            if c.jump_strike:
+                jb &= scj.max(1) > wc + JUMP_STRIKE_EPS
             ar = np.arange(NX)
             for ci in range(3):
                 Rk[ci, 0] = np.where(jb[ci], Rk[ci, j0][bj[ci], ar], Rk[ci, 0])
@@ -1444,6 +1454,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                 sc0 = score(Rk[:, 0], Ck[:, 0])
                 bj = scj.argmax(1)
                 jb = scj.max(1) > sc0
+                if c.jump_strike:
+                    jb &= scj.max(1) > wc + JUMP_STRIKE_EPS
                 ar = np.arange(NX)
                 for ci in range(3):
                     Rk[ci, 0] = np.where(jb[ci], Rk[ci, j0][bj[ci], ar], Rk[ci, 0])

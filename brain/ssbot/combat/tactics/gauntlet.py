@@ -344,6 +344,12 @@ class GauntletTactics:
                     return self._clamp(held[1]), frozenset(), "slam: strike (held)"
             if side != front:
                 return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
+            if _sg8_on():
+                # SSBOT_FORUM_SG8 (forum.md 64; the person: never run away from a slam): no map spot this tick (no
+                # map for this slam, no finite ground value near): at its face, the hit weight kept (the planner's
+                # checks keep the hammer's danger; slam_out_u's 13 u was 24 % of the live slam ticks)
+                from ssbot.combat import forum_map
+                return self._clamp(x + front * forum_map.FACE_U), frozenset(), "slam: face (no map)"
             out = x + front * r.slam_out_u
             if room(out):
                 return out, frozenset(), "slam: step out"
@@ -863,6 +869,12 @@ def _chase_ok(mb, x: float, hx: float) -> bool:
             return False
     from ssbot.combat import forum_map
     return bool(forum_map.MAP_READY.get("ok")) and not forum_map.chase_wall(x, hx)
+
+
+def _sg8_on() -> bool:
+    """SSBOT_FORUM_SG8=1 with SSBOT_FORUM_SPECIAL_MAP=1 (task 1v1 SG8)."""
+    return (os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
+            and os.environ.get("SSBOT_FORUM_SG8", "0").strip() == "1")
 
 
 def _map_board(iid):

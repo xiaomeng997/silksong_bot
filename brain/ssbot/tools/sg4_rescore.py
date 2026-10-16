@@ -56,6 +56,12 @@ VARIANTS = {
     # SG7 review (forum.md 63.5): sg7 + the hammer carried one frame into the next state (the physics order)
     "sg7r": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
              "stage": True, "carry": True},
+    # SG8 (forum.md 64): a ground node counts a jump start only with a reachable strike (MapConfig.jump_strike: the
+    # online rule's own), sg7 / sg7r otherwise
+    "sg7j": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
+             "stage": True, "jump_strike": True},
+    "sg8": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
+            "stage": True, "carry": True, "jump_strike": True},
 }
 HEAD_U = 0.2187                    # the HeroBox's top above the physics box's (HeroBox.cs): the truth's hero box
 
@@ -71,6 +77,19 @@ def config(name: str) -> sm.MapConfig:
         base, u = name.rsplit("_b", 1)
         wb = -float(u)
     return replace(sm.MapConfig(), **VARIANTS[base], wall_front=wf, wall_back=wb)
+
+
+def _dist_at(e, vs) -> float | None:
+    """SG8: the hero's map x minus the Clapper's (the true timeline's lunge) at the Slam 0 entry (u, along its
+    facing; > 0 in front)."""
+    tl = next((v for v in vs if v.name == e.variant), None)
+    if tl is None:
+        return None
+    k0 = int(tl.entry.get("Slam 0", -1))
+    for kk, x, _ in e.trace:
+        if kk == k0:
+            return x - float(tl.disp[min(k0, len(tl.disp) - 1)])
+    return None
 
 
 def readiness_bins(eps: list, wc: float) -> dict:
@@ -117,6 +136,16 @@ def run(a) -> int:
     trials = load_trials()
     tc = TrialCheck(geo)
     lo, hi = (int(v) for v in a.phases.split("-"))
+    if a.stay or a.alld:
+        # SG8 (forum.md 64): the planner's run-time rules (forum_map.sg8_setup) on this map's own variants
+        from ssbot.combat import forum_map
+        D = np.stack([np.pad(v.disp, (0, max(0, geo.K + 40 - len(v.disp))), mode="edge")[:geo.K + 40]
+                      for v in geo.variants])
+        ml.STAY = {"caps": cfg.wc * min(forum_map.STAY_C_U, cfg.c_cap) / cfg.c_cap, "c_need": forum_map.STAY_C_U,
+                   "mu": forum_map.STAY_MU, "dsp": 0.5 * (D.min(0) + D.max(0)), "fb": forum_map.FACE_BAND,
+                   "bb": forum_map.FACE_BEHIND} if a.stay else None
+        ml.ALLD = bool(a.alld)
+    res_rules = {"relocate": a.relocate, "stay": bool(a.stay), "alld": bool(a.alld)}
     res = {"variant": a.variant, "config": cfg.key(), "phases": {}, "lam": a.lam, "seed": a.seed, "truth": a.truth,
            "noise": {"late_p": 0.2, "late_extra": MEASURED_EXTRA}, "geometry_s": round(time.time() - t0, 1)}
     for p in range(lo, hi + 1):
@@ -126,6 +155,7 @@ def run(a) -> int:
         src = ml.KeyedDenseSource(pm, ti, cfg) if cfg.keyed else ml.DenseSource(pm, ti)
         sim = Sim(geo, pm, np.random.default_rng(a.seed + p), src=src)
         sim.late_extra = MEASURED_EXTRA
+        sim.relocate = None if a.relocate == "none" else a.relocate
         if a.truth in ("poly", "polyc"):
             sim.true_poly, sim.head_u = True, HEAD_U
         lat = []
@@ -162,6 +192,16 @@ def run(a) -> int:
         # compared on the starts feasible in both
         rp["episodes"] = [[e.start, e.k0, e.x0, e.d0, e.variant, int(np.isfinite(e.readiness)), int(e.damage_f >= 0),
                            int(e.hits)] for e in eps]
+        if sim.relocate:
+            lc: dict = {}
+            for e in eps:
+                for kk, vv in e.loc.items():
+                    lc[kk] = lc.get(kk, 0) + vv
+            rp["locate"] = lc
+            rp["collapse_eps"] = sum(1 for e in eps if e.loc.get("collapse"))
+        rp["rules"] = res_rules
+        # SG8: the hero's distance from the Clapper at the Slam 0 entry and its largest step away (retreat) per episode
+        rp["dist_s0"] = [round(float(_dist_at(e, vs)), 3) if _dist_at(e, vs) is not None else None for e in eps]
         rp["damage_examples"] = [{"start": e.start, "k0": e.k0, "x0": e.x0, "variant": e.variant, "d0": e.d0,
                                   "damage_f": e.damage_f, "contacts": e.contacts, "presses": e.presses,
                                   "readiness": e.readiness, "noise_free": e.noise_free_damage}
@@ -174,6 +214,7 @@ def run(a) -> int:
     a.out.mkdir(parents=True, exist_ok=True)
     sd = f"_s{a.seed}" if a.seed != 57 else ""
     tr = {"poly": "_tpoly", "polyc": "_tpolyc"}.get(a.truth, "")
+    tr += (f"_r{a.relocate}" if a.relocate != "none" else "") + ("_stay" if a.stay else "") + ("_alld" if a.alld else "")
     (a.out / f"rescore_{a.variant}{sd}{tr}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
         json.dumps(res, indent=1, default=float), "utf-8")
     return 0
@@ -290,6 +331,10 @@ def main(argv=None) -> int:
                    help="poly (SG7): the closed loop's damage on the hammer's polygons and the HeroBox's head; polyc "
                         "(SG7 review): also the hammer carried one frame into the next state (the physics order)")
     r.add_argument("--phases", default="0-5")
+    r.add_argument("--relocate", choices=("none", "min", "sg8"), default="none",
+                   help="SG8: the airborne hero located from its heights (min: SG4-SG7's rule; sg8: forum_map's SG8 rule)")
+    r.add_argument("--stay", action="store_true", help="SG8: map_lookahead.STAY (the fallback stays near the face)")
+    r.add_argument("--alld", action="store_true", help="SG8: map_lookahead.ALLD (jumps with every first key)")
     r.add_argument("--quick", action="store_true")
     r.add_argument("--lam", type=float, default=0.02)
     r.add_argument("--seed", type=int, default=57)

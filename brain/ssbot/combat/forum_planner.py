@@ -203,6 +203,10 @@ SPECIAL_MAP = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
 # map's readiness of a row's end as a tier above the landed hits (the rows below R_ref after the others) where SG4's
 # soft penalty traded readiness for hits; L2's chase stance (tactics.gauntlet). Off: no change.
 CHASE = SPECIAL_MAP and os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1"
+# SSBOT_FORUM_SG8=1 (task 1v1 SG8, forum.md 64; needs SSBOT_FORUM_SPECIAL_MAP=1): the fixes from the first live runs
+# (combat.forum_map: the airborne locate, the lunge re-anchored, the map's fallback near the face; here the slam's
+# FORCED_RISK keys and the off-lattice rows ranked after a safe map row; the small runes' hop tier). Off: no change.
+SG8 = SPECIAL_MAP and os.environ.get("SSBOT_FORUM_SG8", "0").strip() == "1"
 CHASE_TIER = 300.0            # the readiness tier (landed-hit units: above any hit count, below the corner's 1000)
 CHASE_TIER_U = 6.5            # ... for the rows ending this close to the Clapper (centre to centre, u): in slash reach
 #                               the end state must leave R_ref (SG4: readiness >= WC + 2 at the antic entry, 2.00 strikes,
@@ -490,6 +494,9 @@ class EnvelopeAudit:
                                   #   certified entry (full checks instead)
     sm_hit_other: int = 0         # review: special rows whose first predicted hit is another enemy (hit branch run)
     sm_forced_out: int = 0        # review: FORCED_RISK ticks whose special rows were taken out of the ranking
+    sg8_forced_slam: int = 0      # SSBOT_FORUM_SG8: FORCED_RISK ticks in a tracked slam (the slam keys ranked them)
+    sg8_offl_rows: int = 0        # ... rows ranked after a safe map row (a dash / sprint / glide / horizontal slash)
+    sg8_hop_tier: int = 0         # ... Cast 2 ticks with a safe hop row (the hop tier ranked the air dashes after it)
     hop_inflight: int = 0         # review: hop rows dropped: their press is not a jump from the ground (model)
     cl_nodown: int = 0            # SSBOT_FORUM_CL_NODOWN: down-slash rows of the set dropped near a Clapper
     map_ticks: int = 0            # SSBOT_FORUM_SPECIAL_MAP: ticks with a map row; of those safe / taken; the full
@@ -1247,6 +1254,13 @@ class ForumPlanner(Planner):
         z = np.zeros((2, 5))
         pin_contacts_kernel(z, z, np.zeros((2, 5), np.bool_), 0.5, 0.5, np.array([1], np.int64), np.zeros(1),
                             np.zeros(1), PIN_AIM_F, np.ones(1), np.zeros(1), PIN_SPAWN_U, 0.5, np.zeros(5))
+        # SG8 (stalls; forum.md 64): the knockback hull (kin_jit.kb_hull_par / kb_hull / kb_hull_one / near) runs only
+        # on ticks with hazards or soft gates; live its first call (an airborne hit) compiled 1.9 s mid-fight
+        b2 = np.zeros((2, 5, 4))
+        b2[..., 2:] = 1.0
+        b2[1] += 3.0
+        for th in sorted({1, max(int(self.cfg.threads), 1)}):
+            knockback_hull(b2, self.params, self.terrain, threads=th)
 
     # ---- scoring ----
 
@@ -2623,6 +2637,77 @@ class ForumPlanner(Planner):
         self.hop_dbg = {"on_p": on_p, "off_p": off_p, "clear": (a, z), "press": cs_, "bx": float(b[1])}
         return cmd[ok_q], [n for n, k in zip(names, ok_q) if k], np.asarray(bits, np.int64)[ok_q]
 
+    def _sg8_slam_keys(self, start, r1, cmd, P: int, N: int, forced: bool, safe, n_map: int, M0: int):
+        """SG8: (fs_bad, fs_face, offl) [N] for the selection's order (tick: the comment there); zeros outside a slam
+        the map tracks this tick (MapHelper.info with the slam's frame)."""
+        z = np.zeros(N)
+        mi = self._map.info
+        if mi is None or "k" not in mi or mi.get("cx") is None:
+            return z, z, z
+        from ssbot.combat import forum_map
+        F = min(15, cmd.shape[1])
+        md = r1.mode[:, P + 1:]
+        fs_bad, fs_face, offl = z, z, z
+        cx = float(mi["cx"])
+        face = int(mi.get("face", 1))
+        if forced:
+            hx0 = 0.5 * (r1.box[:, P, 0] + r1.box[:, P, 2])
+            xe = 0.5 * (r1.box[:, -1, 0] + r1.box[:, -1, 2])
+            away = np.abs(xe - cx) > np.abs(hx0 - cx) + 1.0
+            glide = (md == kin.M_GLIDE).any(axis=1)
+            ds_ = np.isin(md, (kin.M_DASH, kin.M_SPRINT)).any(axis=1)
+            fs_bad = (glide | (ds_ & away)).astype(np.float64)
+            # the face band around where the Clapper stands at the row's end (its lunge: the variants' mean)
+            from ssbot.combat import map_lookahead as ml
+            st_ = ml.STAY
+            if st_ is not None:
+                ke = int(mi["k"]) + r1.box.shape[1] - 1
+                x0 = float(mi["x0"])
+                xm = (xe - x0) * face
+                fs_face = np.array([ml.face_dist(float(v), ke, st_) for v in xm])
+            self.audit.sg8_forced_slam += 1
+        if n_map and bool(safe[M0]):
+            att = ((cmd[:, :F] & B_ATTACK) != 0) & ((cmd[:, :F] & kin.B_DOWN) == 0)
+            mo = np.isin(md[:, :F], (kin.M_DASH, kin.M_SPRINT, kin.M_GLIDE)).any(axis=1)
+            offl = (mo | att.any(axis=1)).astype(np.float64)
+            offl[M0] = 0.0
+            self.audit.sg8_offl_rows += int(offl.sum())
+        return fs_bad, fs_face, offl
+
+    RUNE_C2_F = (48, 55)          # SG8: Cast 2 enters 48-55 frames after the Spell Antic entry (forum.md 33)
+
+    def _sg8_rune_keys(self, f, start, r1, P: int, N: int, safe, hop_m) -> np.ndarray:
+        """SG8 (the person's small-rune rules: no running away; on the ground at the 3-4 u face, one short hop over
+        ring 1, no second jump press): [N] a tier for the safe rows while the nearest Clapper casts (Spell Antic,
+        Cast 1, Cast 2): Cast 2: the hop rows -1, rows with a dash / sprint (the air dash away: 28 of 40 live casts)
+        +2; before it: rows in the air at a frame Cast 2 can enter +1 (live: mid-hop at ~5 u when Cast 2 began)."""
+        z = np.zeros(N)
+        st0 = np.asarray(start).reshape(kin.K, -1)
+        c = self._map._clapper(f, float(st0[kin.PX, 0]))
+        if c is None:
+            return z
+        _, iid, tk, e, inst = c
+        stt = next((m.get("state") for m in e.get("fsms") or () if m.get("name") == "Control"), None)
+        if stt not in ("Spell Antic", "Cast 1", "Cast 2"):
+            return z
+        md = r1.mode[:, P + 1:]
+        tier = np.where(np.isin(md, (kin.M_DASH, kin.M_SPRINT)).any(axis=1), 2.0, 0.0)
+        if stt == "Cast 2":
+            tier = np.where(hop_m, -1.0, tier)
+        else:
+            trk = getattr(getattr(f, "rs", None), "trk", None)
+            T_, t0_ = getattr(trk, "T", None), getattr(inst, "t0", None)
+            if T_ is not None and t0_ is not None:
+                k = (float(T_) - float(t0_)) * 60.0
+                a = int(max(P + 1, np.floor(self.RUNE_C2_F[0] - k)))
+                b = int(min(r1.flags.shape[1] - 1, np.ceil(self.RUNE_C2_F[1] - k)))
+                if a <= b:
+                    air = ((r1.flags[:, a:b + 1] & F_GROUND) == 0).any(axis=1)
+                    tier = tier + np.where(air, 1.0, 0.0)
+        tier = np.where(safe, tier, 0.0)
+        self.audit.sg8_hop_tier += int(stt == "Cast 2" and bool((safe & hop_m).any()))
+        return tier
+
     def _chase_note_jc(self, f) -> None:
         """SSBOT_FORUM_CHASE (review): every tick, the tracker's time of each Clapper in a jump cast (CHASE_RUNE_S
         counts from its last tick wherever the hero is: beyond the map's NEAR_U, in a dash / recoil, on a wall)."""
@@ -3980,6 +4065,21 @@ class ForumPlanner(Planner):
                     self.audit.v2_corner_rows += int((safe & corner).sum())
                     dg_corner = corner
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
+            # SG8 (SSBOT_FORUM_SG8, forum.md 64; zeros otherwise: the order unchanged): in a Clapper slam the map
+            # tracks, (a) FORCED_RISK: rows with a glide or a dash / sprint ending farther from it after the others
+            # (live: glide in 3 of 8 slam hits, forced dashes into Collider 2's slope in 3), then among equal shares
+            # in contact the row ending nearer the face band; (b) a safe map row this tick: rows starting a dash /
+            # sprint / glide / a horizontal slash (off the map's lattice for many ticks) after the others
+            fs_bad, fs_face, offl = self._sg8_slam_keys(start, r1, cmd, P, N, forced, safe, n_map, M0) \
+                if (SG8 and v2 and self._map is not None) else (np.zeros(N), np.zeros(N), np.zeros(N))
+            # SG8: the small runes' tier (zeros outside the cast): of the safe rows, in Cast 2 the hop rows first and
+            # rows with a dash / air dash last; before it, rows in the air when Cast 2 can start after the others
+            hop_m = np.zeros(N, bool)
+            if n_hop > n_chase:
+                hop_m[N0 + n_spec:N0 + n_spec + n_hop - n_chase] = True
+            rtier = self._sg8_rune_keys(f, start, r1, P, N, safe, hop_m) \
+                if (SG8 and v2 and self._map is not None and not forced) else np.zeros(N)
+            offl = offl + rtier
             # G4 4b (SSBOT_FORUM_SPECIAL_KEEP): the kept template's row, safe and keeping the committed hold and the
             # macro margin, before every other safe row (above the landed hits); no key without the switch
             kk_ = ()
@@ -3999,11 +4099,12 @@ class ForumPlanner(Planner):
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff,
-                                    gl.astype(np.int64), v2_nh) + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
-            else:
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, Pc, sk_c, -sk_f, sk_n, ~V, v2_ff, v2_nh) + kk_ +
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V,
+                                    v2_ff, gl.astype(np.int64), v2_nh, offl) + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+            else:
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V, v2_ff,
+                                    v2_nh, offl) + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
@@ -4027,7 +4128,8 @@ class ForumPlanner(Planner):
                     ranked = order[safe[order]]
                 else:
                     top = order[:fcfg.esc_k_forced]
-                    kk = np.stack([hz, hz_soft, U, S, clash_p, keep, mkeep, V, sk_n, sk_f, sk_c]).astype(np.float64)
+                    kk = np.stack([hz, hz_soft, U, S, clash_p, keep, mkeep, V, sk_n, sk_f, sk_c, fs_bad]
+                                  ).astype(np.float64)
                     ranked = top[(kk[:, top] == kk[:, [int(order[0])]]).all(axis=0)]
                 if not forced or len(ranked) > 1:
                     te = time.perf_counter()

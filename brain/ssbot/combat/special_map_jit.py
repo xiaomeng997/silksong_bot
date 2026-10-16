@@ -29,6 +29,11 @@ MODES = {"none": 0, "exp": 1, "hard": 2, "hard_exp": 3, "hard2": 4}
 # ci: integer constants; cf: float constants
 CI_K, CI_NX, CI_NS, CI_NJ, CI_MODE, CI_NCB, CI_A0, CI_A1 = range(8)
 CF_XLO, CF_STEP, CF_SCALE, CF_WC, CF_CBW, CF_PA, CF_GPY = range(7)
+# SG8 (forum.md 64; map_lookahead.STAY / ALLD, set from SSBOT_FORUM_SG8 at the tables' build): ci STAY, ALLD, KT; cf
+# the cap score, mu, the face band in front / behind, then the Clapper's map x per frame (KT values)
+CI_STAY, CI_ALLD, CI_KT = 8, 9, 10
+CF_CAPS, CF_MU, CF_FB0, CF_FB1, CF_BB0, CF_BB1, CF_DSP0 = 7, 8, 9, 10, 11, 12, 13
+NCI = 11
 # the loop state (plan's ls): si int64, sf float64
 SI_K, SI_EVK, SI_EVKIND, SI_EVSRC, SI_EVJ, SI_EVQ0, SI_EVTUBE, SI_HASLAND, SI_LAND, SI_DIR, SI_FACING, SI_HASSL, \
     SI_SLP, SI_SLFACE, SI_LSD, SI_LP = range(16)
@@ -203,7 +208,7 @@ def _decide1(S, P, R, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, 
                     bi = i
             done[bi] = True
             vv = v0[bi]
-            if not vv > wc + 1e-3 or vv - lam <= top:
+            if not vv > wc + 1e-3 or (ci[CI_ALLD] == 0 and vv - lam <= top):
                 continue
             s0 = JS0[bi]
             best = -np.inf
@@ -214,6 +219,18 @@ def _decide1(S, P, R, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, 
                 if v > best:
                     best = v
                     bd = d
+            if ci[CI_ALLD] != 0:
+                # SG8 (map_lookahead.ALLD): every first key
+                for d in range(-1, 2):
+                    v = _kq(S, P, R, p, k, s0 + 1, x1, c, d, 1, s0, tube, j, land, has_land, ci, cf, pl, gp, TS0,
+                            TN) - lam * (d != c)
+                    cvd = min(vv, v) - lam
+                    a = 3 + 3 * bi + d + 1
+                    val[a] = cvd
+                    off[a] = True
+                    if cvd > top:
+                        top = cvd
+                continue
             cvv = min(vv, best + lam * (bd != c)) - lam
             a = 3 + 3 * bi + bd + 1
             val[a] = cvv
@@ -239,6 +256,17 @@ def _decide1(S, P, R, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, 
                 v = _kq(S, P, R, p, k, s1, x1, c, d, 2, 0, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN)
                 val[d + 1] = v - lam * (d != c)
                 off[d + 1] = True
+
+
+@njit(cache=True, inline="always", error_model="numpy")
+def _face_dist(x, k, ci, cf):
+    """map_lookahead.face_dist."""
+    kt = ci[CI_KT]
+    kk = min(max(k, 0), kt - 1)
+    rel = x - cf[CF_DSP0 + kk]
+    if rel >= 0:
+        return max(0.0, max(cf[CF_FB0] - rel, rel - cf[CF_FB1]))
+    return max(0.0, max(cf[CF_BB0] + rel, -rel - cf[CF_BB1]))
 
 
 @njit(cache=True, error_model="numpy")
@@ -282,6 +310,21 @@ def _decide(Ss, Ps, ph, RM, k, kind, ev_k, tube, land, has_land, x, c, last_pres
                             acc[a] = val[a]
                     else:
                         acc_off[a] = False
+    if ci[CI_STAY] != 0:
+        # SG8 (map_lookahead.stay_value): no strike through it -> min(value, caps) - mu x the face distance
+        p0 = ph[0]
+        step = cf[CF_STEP]
+        wc = cf[CF_WC]
+        x1 = x + c * step * _st(p0, k + 1)
+        for a in range(3):
+            if not acc_off[a]:
+                continue
+            d = a - 1
+            pen = lam * (d != c)
+            v = acc[a] + pen
+            if not np.isfinite(v) or v > wc + 1e-3:
+                continue
+            acc[a] = min(v, cf[CF_CAPS]) - pen - cf[CF_MU] * _face_dist(x1 + d * step * _st(p0, k + 2), k + 2, ci, cf)
     ba = -1
     bv = -np.inf
     for a in range(NA):
@@ -637,9 +680,15 @@ def tables(rt) -> dict | None:
     Ps = tuple(_ro(srcs[p]._P if p in srcs else srcs[any_p]._P) for p in range(6))
     s0 = srcs[any_p]
     NJ = len(ti.jump_h)
+    from ssbot.combat import map_lookahead as ml
+    st_ = ml.STAY
+    dsp = np.asarray(st_["dsp"] if st_ is not None else np.zeros(1), np.float64)
     ci = np.array([ti.K, ti.NX, s0.NS, NJ, MODES[s0.mode], ti.ncb,
-                   ACTIVE[0], ACTIVE[1]], np.int64)
-    cf = np.array([s0._x_lo, s0._step, s0.scale, ti.wc, ti.cb_w, rt.pa, float(hm.jumps[(1, 0)].py[0])], np.float64)
+                   ACTIVE[0], ACTIVE[1], int(st_ is not None), int(bool(ml.ALLD)), len(dsp)], np.int64)
+    cf = np.concatenate([np.array([s0._x_lo, s0._step, s0.scale, ti.wc, ti.cb_w, rt.pa, float(hm.jumps[(1, 0)].py[0])],
+                                  np.float64),
+                         np.array([st_["caps"], st_["mu"], *st_["fb"], *st_["bb"]] if st_ is not None else [0.0] * 6,
+                                  np.float64), dsp])
     gp = np.array([1.0] + [s0.gamma ** m for m in (1, 2, 3)], np.float64)
     pl = np.array(s0.pl, np.float64)
     TS0 = np.asarray(ti.s0, np.int64)
@@ -720,8 +769,8 @@ def warm() -> float:
     S = _ro(np.full((K, 3, NS, NX), 10, np.uint8))
     P = _ro(np.zeros((K * 3 * NS * NX + 7) // 8, np.uint8))
     Ss, Ps = (S,) * 6, (P,) * 6
-    ci = np.array([K, NX, NS, NJ, 2, 1, 3, 9], np.int64)
-    cf = np.array([-1.0, 0.25, 0.025, 1.0, 0.2, 4.4, 0.0], np.float64)
+    ci = np.array([K, NX, NS, NJ, 2, 1, 3, 9, 0, 0, 1], np.int64)
+    cf = np.array([-1.0, 0.25, 0.025, 1.0, 0.2, 4.4, 0.0, 0.3, 0.2, 4.5, 7.0, 3.0, 5.0, 0.0], np.float64)
     pl = np.array([0.785, 0.2, 0.01, 0.005])
     gp = np.array([1.0, 0.99, 0.99 ** 2, 0.99 ** 3])
     TS0 = np.array([0, 1, 3], np.int64)

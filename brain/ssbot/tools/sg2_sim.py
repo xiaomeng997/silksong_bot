@@ -58,6 +58,7 @@ class Ep:
     attribution: dict | None = None
     masks: list = field(default_factory=list)       # per frame from k0 + 1: (dir, jump held, attack)
     trace: list = field(default_factory=list)       # per frame: (k, x, y)
+    loc: dict = field(default_factory=dict)         # SG8 relocate: how each airborne decision located the hero
 
 
 class Sim:
@@ -88,6 +89,98 @@ class Sim:
         self.head_u = 0.0
         self._srcs_cache: dict = {}
         self.n_src = []
+        # SG8 (forum.md 64): relocate = None (the policy reads the true event, as before), "min" (live SG4-SG7: the
+        # airborne hero located from its last three box bottoms, the minimum over the matching slices) or "sg8"
+        # (forum_map.MapHelper._locate_sg8: the policy's own last event, then the facts it knows: its jump key, a down
+        # slash in the arc; an open hold is its own choice)
+        self.relocate = None
+
+    def _locate(self, k: int, ys: list, tol: float = 0.06) -> list:
+        """special_map_rt.MapRuntime.locate on the geometry's tubes (this phase); bin_off with relocate "sg8"."""
+        g = self.g
+        J, T = g.SJ, g.ST
+        q = (self.p - k + J) % 6
+        base = (J >= len(ys) - 1) & (J < g.TL[T, q]) & (g.kind[T] != "ground")
+        ok = base.copy()
+        for i, yy in enumerate(ys):
+            ok &= np.abs(g.TY[T, q, np.maximum(J - i, 0)] - yy) <= tol
+        if self.relocate == "sg8":
+            bo = base & (g.kind[T] == "bounce")
+            d0 = ys[0] - g.TY[T, q, J]
+            bo &= np.abs(d0) <= 0.5 * g.cfg.cb_w + tol
+            for i, yy in enumerate(ys[1:], start=1):
+                bo &= np.abs((yy - g.TY[T, q, np.maximum(J - i, 0)]) - d0) <= tol
+            ok |= bo
+        return np.flatnonzero(ok).tolist()
+
+    def _ev_of(self, s: int, k: int) -> dict:
+        g = self.g
+        t = g.tubes[int(g.ST[s])]
+        k0 = k - int(g.SJ[s])
+        ev = {"kind": t.kind, "k": k0, "q0": (self.p - k0) % 6}
+        if t.kind == "jump":
+            ev["h"] = t.param
+        else:
+            ev["yc"] = float(t.param)
+        return ev
+
+    def relocated(self, tl, k: int, ev: dict, x: float, c: int, trace: list, own: dict | None, ds: bool):
+        """The event the policy reads for an airborne hero (relocate on): (ev or None, how)."""
+        ys = [t[2] for t in trace[::-1][:3]]
+        if len(ys) < 3:
+            return ev, "true"
+        sl = self._locate(k, ys)
+        if not sl:
+            return None, "none"
+        evs = [(s, self._ev_of(s, k)) for s in sl]
+        cbw = self.g.cfg.cb_w
+
+        def key_of(e):
+            if e["kind"] == "jump":
+                return ("jump", int(e["k"]), float(e["h"]))
+            return ("bounce", int(e["k"]), int(np.floor(float(e["yc"]) / cbw)))
+
+        srcs = self.srcs_at(tl, k)
+
+        def val(s):
+            return min(sr.S(k, s, x, c) for sr in srcs) if self.keyed else self.S(k, s, x)
+        if self.relocate == "min":
+            v, s = min((val(s), s) for s, _ in evs)
+            return self._ev_of(s, k), "min"
+        if own is not None:
+            ko = key_of(own)
+            m_ = sorted((abs(key_of(e)[1] - ko[1]), i_, e) for i_, (_, e) in enumerate(evs)
+                        if key_of(e)[0] == ko[0] and key_of(e)[2] == ko[2] and abs(key_of(e)[1] - ko[1]) <= 3)
+            if m_:
+                e_ = m_[0][2]
+                return dict(own, k=int(e_["k"]), q0=int(e_["q0"])), "plan"
+        jheld = ev["kind"] == "jump" and 1 <= k - ev["k"] <= ev["h"]
+        keep = []
+        for s, e in evs:
+            j = k - int(e["k"])
+            if e["kind"] == "jump":
+                if (jheld and e["h"] < j - 1) or (not jheld and e["h"] > j):
+                    continue
+            elif not ds:
+                continue
+            keep.append((s, e))
+        how = "facts"
+        if not keep:
+            keep, how = evs, "fallback"
+        groups: dict = {}
+        for s, e in keep:
+            groups.setdefault(key_of(e), []).append((s, e))
+        vals = {g_: min(val(s) for s, _ in lst) for g_, lst in groups.items()}
+        open_ = [g_ for g_ in groups if g_[0] == "jump" and jheld and g_[2] >= k - g_[1]] if how == "facts" else []
+        cv = []
+        if open_:
+            go = max(open_, key=lambda g_: (vals[g_], -g_[2]))
+            cv.append((vals[go], go))
+        cv += [(vals[g_], g_) for g_ in groups if g_ not in open_]
+        _, g_ = min(cv, key=lambda t: t[0])
+        if how == "facts":
+            how = "open" if (open_ and g_ in open_) else ("facts" if len(groups) == 1 else "min")
+        return dict(groups[g_][0][1]), how
 
     def srcs_at(self, tl, k: int) -> list:
         """The decision sources at frame k: one; SG7 stage maps: the source on each row map of the map's variants
@@ -205,13 +298,27 @@ class Sim:
         e.readiness = (min(sr.S(k0, s_r, x, d0) for sr in self.srcs_at(tl, k0)) if self.keyed
                        else self.S(k0, s_r, x))
         k = k0
+        own_ev = None                      # SG8 relocate: the event the policy itself started (its jump) in this arc
+        arc_ds = False                     # ... a down slash pressed in this arc
         while k < kend:
             j = k - ev["k"]
             # ---- the policy at the end of frame k: inputs for frame k + 1
             jump_now, press_now = None, False
             if slash is None and press_pending is None:
-                land = self.prof(ev)[2] if ev["kind"] != "ground" else None
-                v, act, cands = self.decide(tl, k, ev, x, dir_cur, last_press, lam, land)
+                ev_d = ev
+                if self.relocate and ev["kind"] != "ground":
+                    ev_d, how = self.relocated(tl, k, ev, x, dir_cur, e.trace, own_ev, arc_ds)
+                    e.loc[how] = e.loc.get(how, 0) + 1
+                if ev_d is None:
+                    v, act, cands = -np.inf, ("dir", dir_cur), []
+                else:
+                    land = self.prof(ev_d)[2] if ev_d["kind"] != "ground" else None
+                    v, act, cands = self.decide(tl, k, ev_d, x, dir_cur, last_press, lam, land)
+                    if self.relocate and ev["kind"] != "ground" and not np.isfinite(v):
+                        land_t = self.prof(ev)[2]
+                        vt, _, _ = self.decide(tl, k, ev, x, dir_cur, last_press, lam, land_t)
+                        if np.isfinite(vt):
+                            e.loc["collapse"] = e.loc.get("collapse", 0) + 1
                 for sh in self.shadows:                           # the same decision from another value source
                     v2, act2, c2 = ml.decide(sh["src"], k, ev, x, dir_cur, last_press, lam, land)
                     sh["n"] += 1
@@ -269,6 +376,8 @@ class Sim:
             if jump_now is not None:
                 late = self.lateness("jump")
                 ev = {"kind": "jump", "h": jump_now, "k": k + late, "q0": (self.p - k - late) % 6}
+                own_ev = {"kind": "jump", "h": jump_now, "k": k}      # what the policy decided (a late jump differs)
+                arc_ds = False
             dir_cur = new_dir
             if dir_cur:
                 facing = dir_cur
@@ -293,6 +402,7 @@ class Sim:
                     slash = {"P": k, "face": facing, "alt": bool(rng.random() < 0.5)}
                     last_press = k
                     e.presses.append(k)
+                    arc_ds = True
                 press_pending = None
             # the contact
             if slash is not None:
@@ -314,6 +424,7 @@ class Sim:
                     if hit:
                         e.contacts.append(k)
                         ev = {"kind": "bounce", "yc": y, "k": k, "q0": (self.p - k) % 6}
+                        own_ev = {"kind": "bounce", "yc": y, "k": k}         # the plan's predicted contact
                         slash = None
             # damage (the undilated box; the i-frames / pre-protect are applied at the end)
             if self.hurt(tl, k, x, y):
