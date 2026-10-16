@@ -225,3 +225,70 @@ def test_no_back_and_forth(x0, d):
     walk = [k for k in keys(landed, sp.M_L | sp.M_R) if k < cfg.k_jump]
     assert walk and len({landed[k] & (sp.M_L | sp.M_R) for k in walk}) == 1
     assert d - 0.12 <= xs[cfg.k_jump] <= d + 0.12
+
+
+def simulate_freeze(x0, freeze_g, n_frozen, clock=True, f0=1000, antic=48):
+    """SP2: a hit stop of n_frozen STATE frames when the game reaches antic frame freeze_g: the STATE frames run on,
+    the game (the Clapper's state time, the hero, the keys) stands still; the game takes the keys of the STATE frame
+    in which it moves into a new game frame. clock: the game clock passed to the playbook (the policy's
+    Stamp.t_game_s), else the STATE frame count of SP1. Returns {game frame: the mask it took}."""
+    play = sp.SlamPlay(sp.PlayCfg())
+    face = -1
+    cx = 31.0
+    hx = cx + face * x0
+    pending, landed = {}, {}
+    g, frozen, press, air_from = -5, 0, None, None
+    for i in range(400):
+        f = f0 + i
+        m = pending.pop(f, None)
+        if i > 0:
+            if g == freeze_g and frozen < n_frozen:
+                frozen += 1                                   # the freeze: the game does not move
+            else:
+                g += 1
+                if m is not None:
+                    landed[g] = m
+                    lr = (1 if m & sp.M_R else 0) - (1 if m & sp.M_L else 0)
+                    if m & sp.M_J and air_from is None:
+                        air_from = g
+                    if m & sp.M_A and press is None:
+                        press = g
+                    if air_from is None:
+                        hx += lr * sp.WALK_U
+        if g >= 120:
+            break
+        ground = air_from is None or g > air_from + 60
+        st, tin = slam_state(g, antic)
+        vy = 17.0 if press is not None and press + 4 <= g < press + 19 else 0.0
+        out = play.step(f, state(f, st, tin, cx=cx, hx=hx, ground=ground, vy=vy), ground,
+                        t_game=(g / 60.0 if clock else None))
+        if out is not None:
+            pending[f + 2] = out
+    return play, landed
+
+
+@pytest.mark.parametrize("freeze_g", [3, 20, 44])
+def test_a_hit_stop_in_the_antic(freeze_g):
+    # SP2 live (forum.md 66): a hit across the Clapper's 80 HP froze the game 12 frames at antic +1; the frame count
+    # moved the jump and the press 12 game frames ahead (the press at Slam 0 - 15: no bounce, Slam 1's body hit).
+    # On the game clock the keys land on the same game frames as without the freeze.
+    c = sp.PlayCfg()
+    _, ref = simulate_freeze(5.0, -99, 0)
+    _, got = simulate_freeze(5.0, freeze_g, 12)
+    assert keys(got, sp.M_J) == keys(ref, sp.M_J) == list(range(c.k_jump, c.k_jump + c.hold))
+    assert keys(got, sp.M_A) == keys(ref, sp.M_A) == [c.k_press]
+    assert keys(got, sp.M_DASH) == keys(ref, sp.M_DASH) == [48 + c.dash_s0, 48 + c.dash_s0 + 1]
+    if freeze_g < c.k_jump:
+        _, old = simulate_freeze(5.0, freeze_g, 12, clock=False)
+        assert keys(old, sp.M_A) and keys(old, sp.M_A)[0] < c.k_press - 8      # the SP1 frame count: far too early
+
+
+def test_game_clock_switch(monkeypatch):
+    monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_CLOCK", "0")
+    try:
+        assert importlib.reload(sp).GAME_CLOCK is False
+        monkeypatch.delenv("SSBOT_FORUM_SLAM_PLAY_CLOCK")
+        assert importlib.reload(sp).GAME_CLOCK is True
+    finally:
+        monkeypatch.delenv("SSBOT_FORUM_SLAM_PLAY_CLOCK", raising=False)
+        importlib.reload(sp)

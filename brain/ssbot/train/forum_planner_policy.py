@@ -740,12 +740,13 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.slam_play is not None:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
-                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)))
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None
             rp = self.slam_play.run
-            self._play_tick = None if rp is None else {"phase": rp.phase, "k": f + 2 - rp.fa, "mask": play,
+            self._play_tick = None if rp is None else {"phase": rp.phase, "k": rp.k, "mask": play,
                                                         "why": rp.why}
             if play is not None:
                 mask = play

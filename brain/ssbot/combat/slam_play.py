@@ -4,8 +4,9 @@ SSBOT_FORUM_SLAM_PLAY=1 (default off: nothing here runs and every decision is th
 Heavy Sentry) enters Slam Antic and the entry conditions hold, the bot plays the person's strike as a script, frame by
 frame from the antic entry; otherwise (and whenever the script aborts) the rn planner decides as today.
 
-The script (frame k counted from the antic entry, k = 0 the first STATE whose Control state reads Slam Antic; every k
-is the frame the key takes effect in the game, the STATE's act.mask):
+The script (frame k counted from the antic entry, k = 0 the first STATE whose Control state reads Slam Antic minus
+its state time; every k is the frame the key takes effect in the game, the STATE's act.mask; since SP2 the frames are
+game frames: the game clock stands still through hit-stop freezes, SSBOT_FORUM_SLAM_PLAY_CLOCK):
   walk      k < K_JUMP: on the ground, in front of the Clapper (the side it faces), walk toward / away until the hero's
             centre is inside STAND (centre to centre, u) and stop dead; no key once inside (the person: no key on most
             frames, else toward)
@@ -69,6 +70,10 @@ ENABLED = _on("SSBOT_FORUM_SLAM_PLAY")
 # evades: on the ground <u> in front of it, centre to centre (the person's band at the antic entry, 6.2 u; it picks the
 # slam 74 % of the time at 5.4-8 u). Read by combat.tactics.gauntlet; measured separately from the strike.
 STANCE_U = _num("SSBOT_FORUM_SLAM_PLAY_STANCE", 0.0)
+# SSBOT_FORUM_SLAM_PLAY_CLOCK (default 1; SP2, forum.md 66): the script's frames k on the game clock (Stamp.t_game_s:
+# still through hit-stop freezes); 0: the STATE frame count of SP1 (a 12-frame freeze in the antic moved the press to
+# Slam 0 - 15 live: no bounce, the hammer's body hit at Slam 1).
+GAME_CLOCK = _on("SSBOT_FORUM_SLAM_PLAY_CLOCK", "1")
 
 
 @dataclass
@@ -150,8 +155,9 @@ def on_ground(s: dict) -> bool:
 class Run:
     """One slam the playbook looked at."""
     iid: object
-    fa: int                          # the antic entry frame
+    fa: int                          # the antic entry frame (STATE frames: reports)
     face: int                        # the Clapper's facing (+1: right)
+    ta: float = 0.0                  # the antic entry on the game clock (s): the script's frames k count game frames
     phase: str = "wait"              # wait (conditions not yet met) / walk / jump / air / after / done / abort
     why: str = ""
     k_start: int | None = None
@@ -160,6 +166,8 @@ class Run:
     x_jump: float | None = None
     k_press: int | None = None
     s0: int | None = None            # the Slam 0 entry frame (first STATE seen)
+    ks0: int | None = None           # Slam 0's entry as a game frame from the antic entry
+    k: int = 0                       # the frame k of the latest tick (the decision log)
     hp0: int | None = None
     bounced: bool = False
     over_dir: int | None = None      # the way out: +1 / -1 world x, 0 none
@@ -221,13 +229,22 @@ class SlamPlay:
             self._closed_iid = r.iid
         self.run = None
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool = True) -> int | None:
-        """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides)."""
+    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None
+             ) -> int | None:
+        """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides).
+
+        t_game: the game clock (s; the backend's Stamp.t_game_s, the sum of the scaled dt: it stands still through
+        hit-stop freezes and pauses). The script's frames k count game frames from the antic entry (its Control state
+        time): a freeze in the slam (SP2: a hit that takes the Clapper across 80 / 50 / 20 HP freezes the game for
+        ~12 frames) no longer moves the jump and the press ahead of the Clapper. None: the STATE frame f is the clock
+        (the frame count of SP1)."""
         c = self.cfg
         e = clapper(s)
         st, tin = control(e)
         r = self.run
-        new_antic = r is not None and st == "Slam Antic" and abs(int(f - round(tin * 60.0)) - r.fa) > 30
+        t = f / 60.0 if t_game is None else float(t_game)
+        ta = (f - round(tin * 60.0)) / 60.0 if t_game is None else t - tin     # this antic's entry on the clock
+        new_antic = r is not None and st == "Slam Antic" and abs(ta - r.ta) * 60.0 > 30
         if r is not None and (e is None or e.get("iid") != r.iid or new_antic or (
                 st not in SLAM_STATES and not (r.phase == "after" and r.bounced))):
             # the slam ended (or the Clapper is gone, or a new slam began): a finished script is done, an unstarted
@@ -242,14 +259,16 @@ class SlamPlay:
             if st != "Slam Antic" or (e is not None and e.get("iid") == self._closed_iid):
                 return None
             face = 1 if e.get("flipX") else -1
-            r = self.run = Run(iid=e.get("iid"), fa=int(f - round(tin * 60.0)), face=face)
+            r = self.run = Run(iid=e.get("iid"), fa=int(f - round(tin * 60.0)), face=face, ta=ta)
         if r.phase in ("done", "abort"):
             return None
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)
         if st == "Slam 0" and r.s0 is None:
             r.s0 = f
-        k = f + SEND_AHEAD + c.lag - r.fa                  # the antic frame this tick's mask lands on
+            r.ks0 = int(round(((t if t_game is None else t - tin) - r.ta) * 60.0))
+        k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD + c.lag     # the antic frame this tick's mask lands on
+        r.k = k
         if r.hp0 is not None and hp < r.hp0:
             self._close("abort", "hurt")
             return None
@@ -312,12 +331,12 @@ class SlamPlay:
             m = 0
             if k <= r.k_press + c.down_after:
                 m = M_D
-            if c.over and r.bounced and r.s0 is not None and k - (r.s0 - r.fa) >= c.over_s0:
+            if c.over and r.bounced and r.s0 is not None and k - r.ks0 >= c.over_s0:
                 if r.over_dir is None:
                     r.over_dir = self._over_dir(cx, r.face)
                 if r.over_dir:
                     m |= M_R if r.over_dir > 0 else M_L
-                    ks0 = k - (r.s0 - r.fa)
+                    ks0 = k - r.ks0
                     if r.k_dash is None and ks0 >= c.dash_s0:
                         r.k_dash = k
                     if r.k_dash is not None and k < r.k_dash + 2:
@@ -345,7 +364,7 @@ class SlamPlay:
         if r.k_press is None:
             late = r.s0 is not None and k >= kp - 3
             if k >= kp or late:
-                if r.s0 is not None and k - (r.s0 - r.fa) > c.press_late_max:
+                if r.s0 is not None and k - r.ks0 > c.press_late_max:
                     # Slam 0 seen and the frame is already past its window: the hammer comes before the slash
                     self._close("abort", "press window missed")
                     return None
