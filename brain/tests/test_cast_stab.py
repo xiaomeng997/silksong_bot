@@ -23,11 +23,11 @@ def test_off_by_default(monkeypatch):
 
 
 def test_stab_path():
-    # the dash 2.8 u, the stab's collider from its 7th frame: from 9.2 u the hit on the window's first frame, 3.4 u
-    # from its centre (her box front 1 u outside its body front), the recoil ~3.2 u back and ~2.1 u up
+    # the dash 2.8 u, the stab's collider from its 7th frame: from 9.2 u the hit on the window's first frame, 3.0 u
+    # from its centre (her box front 0.5 u outside its body front), the recoil ~3.2 u back and ~2.1 u up
     p = cs.stab_path(9.2)
-    assert p["hit"] == cs.DASH_F + cs.STAB_ON
-    assert 3.2 < p["xmin"] < 3.7 and 2.0 < p["top"] < 2.3
+    assert p["hit"] == cs.STAB_START + cs.STAB_ON
+    assert 2.8 < p["xmin"] < 3.2 and 2.0 < p["top"] < 2.3
     assert p["path"][-1][1] - p["xmin"] == pytest.approx(3.2, abs=0.2) and p["path"][-1][2] == 0.0
     # nearer: deeper into its body at the window's first frame; far: the hit later, at the tip's reach
     assert cs.stab_path(8.0)["xmin"] < cs.BODY_FRONT + cs.HALF_W + 0.25
@@ -58,9 +58,9 @@ def test_the_script(flip):
             masks[k + 2] = m
     ks = sorted(masks)
     j0 = ks[0]
-    assert masks[j0] & sp.M_DASH and masks[j0 + 1] & sp.M_DASH and not masks[j0 + 2] & sp.M_DASH
-    assert all(masks[j0 + j] & toward for j in range(0, 13))
-    assert [j - j0 for j in ks if masks[j] & sp.M_A] == [3, 4]
+    # the dash held (the sprint) with the key toward it until the hit, the attack on the dash's last frames
+    assert all(masks[j0 + j] & sp.M_DASH and masks[j0 + j] & toward for j in range(0, 13))
+    assert [j - j0 for j in ks if masks[j] & sp.M_A] == [5, 6]
     assert all(masks[j] == 0 for j in ks if j > 16)            # the recoil: no key
     st = c.stats()
     assert st["stabs"] == 1 and st["hit"] == 1
@@ -85,7 +85,7 @@ def test_waits_for_the_ground_and_late():
 def test_miss_hands_back():
     c = cs.CastStab()
     out = [c.step(1000 + k, antic_state(1000 + k, k, 9.2), True) for k in range(0, 30)]
-    assert out[0] is not None and out[-1] is None
+    assert out[0] is not None and out[-1] is None and 0 in out      # the miss releases the dash, then hands back
     assert c.stats().get("why_miss") == 1
 
 

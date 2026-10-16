@@ -5,10 +5,12 @@ SSBOT_FORUM_JB_DASH_SLASH=1 (default off; read by train.forum_planner_policy): w
 enters the jump cast's antic (Control "Cast Slam Antic", 16 frames, then "Cast Slam Antic 2", 40 frames, Jump Aim at
 +55/56; SP4 / SP5 A/B: the hero 9.2 u from its centre at the antic start (p10 / 90 6.2 / 10.3), 0.25 hits per antic)
 and the hero stands on the ground in front of it beyond the side slash's reach, the bot plays the dash slash as a
-script: the ground dash toward it (2 frames of dash, the key toward it held), the attack pressed inside the dash (the
-sprint FSM reads it queued, 0.1 s: the stab starts on the first sprint frame), the key toward it held until the stab
-hits, then no key through the recoil until her control returns; the planner decides again after that (or at once when
-the stab is not seen to hit).
+script: the ground dash toward it with the dash key HELD (the sprint FSM's Dashed state goes to the sprint only while
+the dash is held, and Ground Sprint skids out when it is released; t3, 79eb963: a 2-frame dash ran on as Dash To Run
+and the attack was a plain slash, 8 of 8), the attack pressed on the dash's last frames (Ground Sprint reads it
+queued, 0.1 s: the stab starts on the first sprint frame), the dash key and the key toward it held until the stab hits,
+then no key through the recoil until her control returns; the planner decides again after that (or at once, all keys
+released, when the stab is not seen to hit).
 
 The model (C:\\ssbot\\data\\m2_dash_slash: the decompiled hornet_sprint FSM, the person's 92 Wanderer dash slashes;
 `stab_path`): the dash 28 u/s for 0.1 s (2.8 u); the stab from the first sprint frame, vx 26.9 for 4 frames then 17.5;
@@ -40,6 +42,7 @@ HALF_W = 0.23                # the hero's box half width
 STAB_REACH = 3.10            # the DashStab polygon's reach in front of her transform
 DASH_V, DASH_F = 28.0, 6     # the ground dash: u/s, frames
 STAB_V0, STAB_V0_F, STAB_V = 26.9, 4, 17.5   # the stab's lunge straight from the dash, then the sprint speed
+STAB_START = 7               # the stab's first frame after the dash press (the first sprint frame + 1)
 STAB_ON, STAB_OFF = 7, 14    # its collider active these frames after the stab starts
 HIT_WAIT = 2                 # frames between the hit and the recoil
 REC_VX, REC_VY, REC_DEC, REC_F = 30.0, 20.0, 0.85, 20
@@ -49,7 +52,7 @@ AIM_K = 55                   # the Jump Aim, frames from the antic start
 
 @dataclass
 class StabCfg:
-    press_j: int = 3             # the attack press, frames after the dash press (inside the 6-frame dash)
+    press_j: int = 5             # the attack press, frames after the dash press (the dash's last frames: queued)
     hold_a: int = 2              # the attack held this many frames (one rising edge)
     k_max: int = 12              # the latest antic frame (the mask's) at which the script may start
     d_min: float = 8.0           # her centre's distance in front of its centre at the dash (u): beyond the side
@@ -68,11 +71,11 @@ def stab_path(x0: float, cfg: StabCfg | None = None) -> dict:
     y)] (frames from the dash press; x in front of its centre, y above the floor)."""
     c = cfg or StabCfg()
     x, y, path = x0, 0.0, []
-    for j in range(DASH_F):
-        x -= DASH_V / 60.0
+    for j in range(STAB_START):
+        x -= (DASH_V if j < DASH_F else STAB_V0) / 60.0
         path.append((j, x, y))
     hit, xmin = None, x
-    j = DASH_F
+    j = STAB_START
     for i in range(STAB_OFF + 1):
         x -= (STAB_V0 if i < STAB_V0_F else STAB_V) / 60.0
         xmin = min(xmin, x)
@@ -179,13 +182,11 @@ class CastStab:
                                        and "Dash" in str((ev.get("d") or {}).get("src")) for ev in s.get("ev") or ()):
                 r.hit_f, r.phase = f, "recoil"
             if r.phase == "lunge":
-                if j > c.hit_wait_max + DASH_F:
+                if j > c.hit_wait_max + STAB_START:
                     self._close("done", "miss")
-                    return None
+                    return 0                                 # release the dash (a held one sprints on into it)
                 toward = M_R if -r.face > 0 else M_L
-                m = toward
-                if j < 2:
-                    m |= M_DASH
+                m = toward | M_DASH                          # the dash held: the sprint, the stab from it
                 if c.press_j <= j < c.press_j + c.hold_a:
                     m |= M_A
                 return m
