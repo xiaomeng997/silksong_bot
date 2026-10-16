@@ -511,6 +511,23 @@ class MapRuntime:
             ok |= bo
         return np.flatnonzero(ok).tolist()
 
+    def ev_matches(self, ev: dict, k: int, ys: list, tol: float = 0.06) -> bool:
+        """SG8: the event's own height profile (its exact contact height for a bounce, not its bin's centre) matches
+        the last box bottoms ys (newest first) at frame k, over the frames since the event began, and it has not
+        landed (right after a contact the locate's tubes need three bounce frames: no slice matched there)."""
+        j = int(k) - int(ev["k"])
+        if j < 0 or ev["kind"] not in ("jump", "bounce"):
+            return False
+        land = self.land_of(ev)
+        if land is not None and j >= land:
+            return False
+        for i, yy in enumerate(ys):
+            if j - i < 0:
+                break
+            if abs(self.y_of(ev, j - i)[0] - float(yy)) > tol:
+                return False
+        return True
+
     def ev_of_slice(self, s: int, k: int, p: int) -> dict:
         ti = self.ti
         t = int(ti.ST[s])

@@ -130,6 +130,18 @@ class Sim:
         if len(ys) < 3:
             return ev, "true"
         sl = self._locate(k, ys)
+        if not sl and self.relocate == "sg8" and own is not None:
+            # (forum_map: the own event's profile when no tube slice matches yet, right after a contact)
+            for dk in range(-1 if own["kind"] == "bounce" else 0, 4):
+                e_ = dict(own, k=int(own["k"]) + dk, q0=(self.p - int(own["k"]) - dk) % 6)
+                j = k - e_["k"]
+                if j < 0:
+                    continue
+                y_, _, land = self.prof(e_)
+                if j >= land:
+                    continue
+                if all(abs(float(y_[j - i]) - yy) <= 0.06 for i, yy in enumerate(ys) if j - i >= 0):
+                    return e_, "plan"
         if not sl:
             return None, "none"
         evs = [(s, self._ev_of(s, k)) for s in sl]
@@ -299,7 +311,7 @@ class Sim:
                        else self.S(k0, s_r, x))
         k = k0
         own_ev = None                      # SG8 relocate: the event the policy itself started (its jump) in this arc
-        arc_ds = False                     # ... a down slash pressed in this arc
+        arc_ds = ev0["kind"] != "ground"   # ... a down slash pressed in this arc (an airborne start: unknown)
         while k < kend:
             j = k - ev["k"]
             # ---- the policy at the end of frame k: inputs for frame k + 1

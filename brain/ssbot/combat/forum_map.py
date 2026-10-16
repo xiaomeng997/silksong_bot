@@ -282,8 +282,6 @@ class MapHelper:
         to h and the lane guard checks the planner's lane on them): the best of them; every other remaining event is
         unknown: the minimum. Nothing left after (2): every matching slice (the minimum, as before)."""
         evs = [(p, s, rt.ev_of_slice(s, k, p)) for p in phases for s in rt.locate(k, ys, p, bin_off=True)]
-        if not evs:
-            return None, "none"
         cbw = float(rt.ti.cb_w)
 
         def key_of(e):
@@ -304,6 +302,17 @@ class MapHelper:
                         exp["yc"] = float(s_[5])
         if exp is None and mem.get("air_ev") is not None:
             exp, how = mem["air_ev"], "mem"
+        if exp is not None and not evs:
+            # right after a contact (or at a bounce's last frames) no tube slice matches yet: the plan's own event
+            # when its own profile matches the heights (its start or LATE_F frames later: a late press / contact)
+            for dk in range(-1 if exp["kind"] == "bounce" else 0, LATE_F + 1):
+                e_ = dict(exp, k=int(exp["k"]) + dk)
+                e_["q0"] = (phases[0] - e_["k"]) % 6
+                if rt.ev_matches(e_, k, ys):
+                    self.locate_stats[how] += 1
+                    return e_, how
+        if not evs:
+            return None, "none"
         if exp is not None:
             # the same jump hold / contact-height bin, its start within LATE_F frames of the planned one (a late
             # press or contact): the matching slice nearest the plan's start
