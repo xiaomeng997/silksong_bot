@@ -290,7 +290,23 @@ class PlayProbe(Target):
                    "hurt_way": [h for h in hurts if press <= h["f"] <= (land if land is not None else press + 80) + 15]}
         pp = next((r for r in R if press is not None and r["f"] == press), None)
         jp = next((r for r in R if jump is not None and r["f"] == jump), None)
-        return out | {
+        # SP6 (SSBOT_FORUM_SLAM_PLAY_EARLY): the side slashes before the jump - the presses (STATE frames from the antic
+        # entry, x rel. its centre) and the hits on it before the jump (non-down sources), HP lost before the press
+        early = {"k_early": list(getattr(run, "k_early", []) or [])}
+        pre = [r for r in R if r["f"] >= fa and (jump is None or r["f"] < jump + 8)]
+        prev = 0
+        ep = []
+        for r in pre:
+            if r["act"] & ~prev & M_A:
+                ep.append([r["f"] - fa, xs(r)])
+            prev = r["act"]
+        early["presses"] = ep
+        early["hits"] = [[r["f"] - fa, xs(r), str(e[1])[-12:]] for r in pre for e in r["ev"]
+                         if e[0] == "hit" and "Down" not in str(e[1])]
+        early["hurt_pre"] = [h for h in hurts if press is None or h["f"] < press]
+        cx0 = next((r["cx"] for r in R if r["f"] >= fa and r["cx"] is not None), None)
+        early["drift"] = None if cx0 is None or jp is None or jp["cx"] is None else round((jp["cx"] - cx0) * face, 3)
+        return out | {"early": early,
             "fa": fa, "antic": None if s0 is None else s0 - fa, "s0": s0, "s1": s1, "rec": rec, "end": end,
             "k_jump_real": None if jump is None else jump - fa, "k_press_real": None if press is None else press - fa,
             "press_rel_s0": None if (press is None or s0 is None) else press - s0,
@@ -339,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
                                "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
                                "freeze": a.freeze, "game_clock": sp.GAME_CLOCK, "skid": a.skid, "late": sp.LATE,
                                "umbrella": a.umbrella, "stall": a.stall, "side": sp.SIDE, "near": sp.NEAR,
+                               "early": sp.EARLY,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()

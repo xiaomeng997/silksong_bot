@@ -141,6 +141,17 @@ SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", _V2)
 # the standing y, the landing at Slam 0 + 52-55) and the landing spot fits inside the arena; else the other side; else
 # the old way out. Off: SP1's way out (the dash at Slam 0 + 23, landing 6.6-9.5 u behind it).
 NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
+# SSBOT_FORUM_SLAM_PLAY_EARLY (task 1v1 SP6, default off; forum.md 70): side slashes on the ground in the early antic,
+# then the playbook's walk / jump / strike as before (the person, 2026-10-16: "try to land one more hit in the antic").
+# The person's three mixed fights of the 2026-10-15 demo (`m2_play\sp6\human_early.json`): in reach at the antic entry
+# (2.65-4.33 u), a hit at antic frame 0.5 (a slash pressed before it) and one at 14.5-20 (the attack cooldown 0.3 s =
+# 18 frames), each knocking the Clapper 0.48 u away (it does not move otherwise in the antic), then the walk to 4.7-5.5
+# u and the jump at 30-31: 2-3 hits per slam vs 1 (the 194816a1 fight, no early slash). Here: while k <= early_k_max,
+# on the ground, walk into EARLY_STAND (in the side slash's reach of its body: 2.25 + 3.12 = 5.37 u centre to centre)
+# and press the side slash (the key toward it on the press frame) whenever the attack is ready (our own presses
+# early_cd apart and the STATE's atk_cd) and the slash from her x at the mask's frame meets its body box; after the last
+# early press the walk into STAND as before (a hit leaves her ~1 u farther: its 0.48 u + her recoil ~0.5 u).
+EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY")
 NEAR_V = 0.165              # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -193,6 +204,12 @@ class PlayCfg:
     slash_cd: int = 19               # the side slash no earlier than the down press + this (the attack cooldown)
     slash_y: float = 3.2             # ... with her y above the standing y at the mask frame + 1 at most this
     wall_pad: float = 0.45           # the landing spot's centre at least this far inside the arena walls
+    # SSBOT_FORUM_SLAM_PLAY_EARLY (SP6)
+    early_k_max: int = 22            # the last early press (the mask's antic frame; the person's last early hit at 20)
+    early_stand: tuple = (4.2, 5.0)  # the walk band while an early press is still to come (u in front, centre to centre;
+    #                                  the slash meets its body front 2.25 u from its centre up to 5.37 u; from 5.0 u the
+    #                                  walk into STAND after a missed last press takes 0 frames, from 4.2 u 3 frames)
+    early_cd: int = 19               # frames between two early presses (the Wanderer attack cooldown 0.3 s = 18 + 1)
 
     @classmethod
     def from_env(cls) -> "PlayCfg":
@@ -290,6 +307,7 @@ class Run:
     near_u: float = 0.0              # ... the landing's distance from its centre on that side
     k_turn: int | None = None        # ... the frame of the turn key (she faces it)
     k_slash: int | None = None       # ... the side slash's press frame
+    k_early: list = field(default_factory=list)   # SP6 EARLY: the early side slashes' press frames (antic frame k)
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -330,6 +348,9 @@ class SlamPlay:
                     out[f"side_why_{r.side_why}"] += 1
             if r.k_slash is not None:
                 out["near_slash"] += 1
+            if r.k_early:
+                out["early_runs"] += 1
+                out["early_press"] += len(r.k_early)
         return dict(out)
 
     def active(self) -> bool:
@@ -425,6 +446,8 @@ class SlamPlay:
                          and not band[0] <= x <= band[1])
             if k < c.k_jump or late_walk:
                 m = self._walk(s, cx, r.face, f)          # (LATE: a late start walks into the band up to K_JUMP_LATE2)
+                if EARLY and k < c.k_jump:
+                    m = self._early(r, k, f, s, e, cx, ground, m)   # SP6: side slashes in the early antic
             else:
                 if not ground:
                     self._close("abort", "not on the ground at the jump")
@@ -623,24 +646,58 @@ class SlamPlay:
                 m |= M_D
         return m
 
-    def _walk(self, s: dict, cx: float, face: int, f: int) -> int:
-        """The walk mask for frame f + 2 + lag: where she stands before it (the STATE's x plus the frames already in
-        flight: this script's own masks, else her velocity), none when that is inside STAND, else one step toward
-        its middle (she stops dead; STAND is wider than a step: no back and forth)."""
+    def _x_at_mask(self, s: dict, f: int) -> float:
+        """Her box centre's world x at the mask's frame f + 2 + lag: the STATE's x plus the frames already in flight
+        (this script's own masks, else her velocity)."""
         c = self.cfg
         h = s.get("hero") or {}
         vx = float((h.get("vel") or [0, 0])[0])
         r = self.run
-        lo, hi = (r.stand if r is not None and r.stand else c.stand)
         xw = hero_x(s)
         for fr in range(f + 1, f + SEND_AHEAD + c.lag):
             m = next((m for f2, m in reversed(r.sent) if f2 <= fr), None) if r is not None and r.sent else None
             xw += vx / 60.0 if m is None else ((1 if m & M_R else 0) - (1 if m & M_L else 0)) * WALK_U
+        return xw
+
+    def _walk(self, s: dict, cx: float, face: int, f: int, band: tuple | None = None) -> int:
+        """The walk mask for frame f + 2 + lag: where she stands before it (the STATE's x plus the frames already in
+        flight: this script's own masks, else her velocity), none when that is inside STAND (or band), else one step
+        toward its middle (she stops dead; STAND is wider than a step: no back and forth)."""
+        c = self.cfg
+        r = self.run
+        lo, hi = band if band is not None else (r.stand if r is not None and r.stand else c.stand)
+        xw = self._x_at_mask(s, f)
         x = (xw - cx) * face
         if lo <= x <= hi:
             return 0
         tx = cx + face * 0.5 * (lo + hi)
         return M_R if tx > xw else M_L
+
+    def _early(self, r: Run, k: int, f: int, s: dict, e: dict, cx: float, ground: bool, m_walk: int) -> int:
+        """SP6 EARLY: the mask for antic frame k in the walk phase - the side slash toward it when the attack is ready
+        and its reach meets the body, else the walk into EARLY_STAND while another early press can still come by
+        early_k_max, else m_walk (the walk into STAND)."""
+        c = self.cfg
+        if not ground or k > c.early_k_max:
+            return m_walk
+        nxt = k if not r.k_early else max(k, r.k_early[-1] + c.early_cd)
+        if r.k_start is not None and k <= r.k_start:
+            nxt = max(nxt, k + 1)             # the frame before the press is ours (no attack held: a rising edge)
+        cd = ((s.get("hero") or {}).get("tm") or {}).get("atk_cd")
+        if cd is not None:
+            # the STATE's cooldown after frame f's update; the mask's frame checks it after one more decrement
+            left = float(cd) * 60.0 - (SEND_AHEAD + c.lag - 1)
+            if left > 0.05:
+                nxt = max(nxt, k + int(left + 0.95))
+        if nxt > c.early_k_max:
+            return m_walk
+        toward = M_R if -r.face > 0 else M_L
+        if k >= nxt:
+            xw = self._x_at_mask(s, f)
+            if self._in_reach(e, cx, r.face, xw, -r.face):
+                r.k_early.append(k)
+                return M_A | toward
+        return self._walk(s, cx, r.face, f, band=c.early_stand)
 
     def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
                    ) -> int | None:
