@@ -85,6 +85,10 @@ class GoalPrefs(TacticPrefs):
     #                                              guard rules, track A); an iid here overrides hit_w for that enemy
     vocab: frozenset = frozenset()
     ttl_s: float = 0.6
+    no_hit: frozenset = frozenset()      # iids whose hits do not count this tick (J's hits and the landed-hits rank):
+    #                                      SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3), a jumping Clapper in its antic /
+    #                                      flight - the hits rank above the stance, so a reward there keeps the hero in
+    #                                      the air in front of it instead of under it
 
 
 class Tactics:

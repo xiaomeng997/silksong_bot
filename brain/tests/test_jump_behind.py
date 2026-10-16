@@ -184,3 +184,31 @@ def test_wall_push_rule():
     assert jb.behind_spot(jb.landing(x1, x1 + 2.0, 1.0), 1.0) is None
     # the right wall, facing left
     assert jb.landing_v(jb.WALL_R - 2.0, 1.0, -1.0) == pytest.approx(jb.WALL_R - 4.4)
+
+
+def test_no_hit_while_it_jumps(jb_on):
+    t = l2()
+    p = t.decide(world(26.0, t=10.0, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, state="Jump Antic", **JMP)]), None, 3)
+    assert p.no_hit == frozenset({9})                     # antic
+    p = t.decide(world(29.8, t=10.5, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, y=8.2, state="Air", family="CC_JUMP", committed=True)]), None, 3)
+    assert p.no_hit == frozenset({9})                     # flight
+    p = t.decide(world(38.0, t=11.4, ents=[clapper(9, 34.6, False)]),
+                 WinFc([subj(9, CC, 34.6, state="Slam 2", **JMP)]), None, 3)
+    assert p.no_hit == frozenset() and p.hit_w[9] > 0     # landed: slash its back
+
+
+def test_rune_hold_exit_by_the_landing(jb_on):
+    # landed at 30 facing left (the circle 23.5 +- 7.19 to its left); the hero in front of the landing at 26 and the
+    # Clapper backed off past the landing's back spot (to 35): the nearer way out is behind the landing, not past it
+    t = l2()
+    t.rune[9] = (30.0, -1.0, "under and behind", 99.0)
+    p = t.decide(world(29.0, t=12.0, ents=[clapper(9, 35.5, False)]), WinFc([subj(9, CC, 35.5, y=7.45)]), None, 3)
+    assert t.last["goal_why"].endswith("rune: behind") and p.stance_x == pytest.approx(33.5)
+    # far in front (20): the front way out (30 - 14.5 = 15.5) is nearer
+    p = t.decide(world(20.0, t=12.1, ents=[clapper(9, 35.5, False)]), WinFc([subj(9, CC, 35.5, y=7.45)]), None, 3)
+    assert t.last["goal_why"].endswith("rune: out") and p.no_hit == frozenset({9})
+    # the Clapper standing at the landing between her and the back spot: out
+    p = t.decide(world(29.0, t=12.2, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
+    assert t.last["goal_why"].endswith("rune: out")

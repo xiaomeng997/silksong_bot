@@ -1287,6 +1287,7 @@ class ForumPlanner(Planner):
         # per slash kind (side, up, wall, down): GoalPrefs.hit_kw (the L2 guard rules: an up slash on a Minister's
         # stance may score where a side slash must not), else the target's one weight
         kw = getattr(prefs, "hit_kw", None) or {}
+        nohit = getattr(prefs, "no_hit", None) or ()      # SSBOT_FORUM_JUMP_BEHIND (SP3): weight 0 (and not real)
         tw = np.zeros((len(keep), 4))
         slot: dict = {}                       # enemy iid -> its scoring slot (a guard stance's copy shares its body's)
         for k, t in enumerate(keep):
@@ -1294,7 +1295,7 @@ class ForumPlanner(Planner):
                 continue
             if t.iid not in slot:
                 slot[t.iid] = len(slot)
-            if slot[t.iid] < self.fcfg.K_tgt and not getattr(t, "blocked", False):
+            if slot[t.iid] < self.fcfg.K_tgt and not getattr(t, "blocked", False) and t.iid not in nohit:
                 w4 = kw.get(t.iid)
                 tw[k] = w4 if w4 is not None else float(hw.get(t.iid, 1.0))
         tb = np.ascontiguousarray(np.stack([t.box for t in keep]), np.float64)
@@ -1421,7 +1422,9 @@ class ForumPlanner(Planner):
                    unmod=np.zeros(N, np.bool_), sw_f=np.full(N, -1, np.int64), sw_k=np.zeros(N, np.int64),
                    sw_face=np.zeros(N, np.int64), nh=np.zeros(N))
         vr, vl, st, win = self.shapes
-        real = np.array([not t.hazard and not getattr(t, "blocked", False) for t in keep], np.bool_)
+        nohit = getattr(prefs, "no_hit", None) or ()
+        real = np.array([not t.hazard and not getattr(t, "blocked", False) and t.iid not in nohit for t in keep],
+                        np.bool_)
         _forum_score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                             np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                             tbox if len(keep) else np.zeros((0, T1, 4)), tok if len(keep) else np.zeros((0, T1), bool),
@@ -4065,6 +4068,14 @@ class ForumPlanner(Planner):
                     self.audit.v2_corner_rows += int((safe & corner).sum())
                     dg_corner = corner
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
+            nohit_ = getattr(prefs, "no_hit", None) or ()
+            if v2 and nohit_ and len(sc.get("targets") or ()):
+                # SSBOT_FORUM_JUMP_BEHIND (SP3): a first hit on a no_hit target does not rank (first_f itself stays:
+                # the hit branch's recoil still uses it)
+                tg_ = sc["targets"]
+                ft_ = sc["first_t"]
+                nh_ = np.array([0 <= int(t) < len(tg_) and tg_[int(t)].iid in nohit_ for t in ft_], bool)
+                v2_ff = np.where(safe & nh_, T1, v2_ff)
             # SG8 (SSBOT_FORUM_SG8, forum.md 64; zeros otherwise: the order unchanged): in a Clapper slam the map
             # tracks, (a) FORCED_RISK: rows with a glide or a dash / sprint ending farther from it after the others
             # (live: glide in 3 of 8 slam hits, forced dashes into Collider 2's slope in 3), then among equal shares

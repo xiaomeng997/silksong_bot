@@ -105,6 +105,9 @@ CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUM
 # Jump, so the tracker never ends a tick in them (forum.md 21.7.1)
 CC_AIR_STATES = ("Jump", "Air")                           # its body off the ground (a jump's flight)
 CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off", "rune: out")  # branches that step away
+# SSBOT_FORUM_JUMP_BEHIND: the branches whose target's hits do not count (GoalPrefs.no_hit)
+JB_NO_HIT = ("jump: aim stance", "jump: under and behind (antic)", "jump: under and behind (flight)", "jump: back off",
+             "rune: out")
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -391,13 +394,19 @@ class GauntletTactics:
             land, f0, how, _ = rp
             if jump_behind.ENABLED:
                 # SSBOT_FORUM_JUMP_BEHIND (SP3): BACK_U behind the landing (behind_land_u 2.5 u is inside the reach of
-                # its body turning at its next attack start: 2.25 u + the hero's half width), inside the walls by the
-                # module's pad (the landing is >= 4.5 u from the wall behind it)
+                # its body turning at Idle: 2.25 u + the hero's half width), inside the walls by the module's pad; the
+                # side by where the hero is from the landing (the circle), not from the Clapper now (trial 2: it backed
+                # off past the landing's back spot and "behind" sent her back through the circle as it burst):
+                # behind the landing -> stay behind; in front -> the nearer way out of the circle (its back edge 0.71
+                # u behind the landing, its front 13.7 u in front), not past its body
                 jb_spot = jump_behind.behind_spot(land, f0)
-                through = jb_spot is not None and (jb_spot - x) * (hx - x) < 0
-                if jb_spot is not None and not through and how.startswith("under"):
+                out = self._clamp(land + f0 * r.cast_out_u)
+                rel = (hx - land) * f0
+                if jb_spot is not None and rel < -0.5:
                     return jb_spot, frozenset(), "rune: behind"
-                return self._clamp(land + f0 * r.cast_out_u), frozenset(), "rune: out"
+                if jb_spot is not None and abs(hx - jb_spot) < abs(hx - out) and not min(hx, jb_spot) < x < max(hx, jb_spot):
+                    return jb_spot, frozenset(), "rune: behind"
+                return out, frozenset(), "rune: out"
             behind = land - f0 * r.behind_land_u
             out = land + f0 * r.cast_out_u
             through = (behind - x) * (hx - x) < 0
@@ -885,6 +894,11 @@ class GauntletTactics:
             hw[g.target] = max(hw[g.target], w)
         out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
+        if jump_behind.ENABLED and str(how).startswith(JB_NO_HIT):
+            # SSBOT_FORUM_JUMP_BEHIND (SP3): no hit on it counts while it jumps (antic, flight) or while the stance
+            # leaves its rune circle - the landed-hits rank sits above the stance (trial 2: rows slashing it in the air
+            # kept the hero airborne in front of it: the umbrella, the landing slam, the rune circle)
+            out = replace(out, no_hit=frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:
