@@ -1587,7 +1587,7 @@ def special_map_now_sg4(eng, s: dict, k: int, cx: float, face: int, h: dict) -> 
     c = (1 if mask == B_RIGHT else -1 if mask == B_LEFT else 0) * face
     xs = rt_.ti.x_lo + rt_.ti.step * np.arange(rt_.ti.NX)
     kk = min(max(k, 0), rt_.ti.K - 1)
-    g = np.array([min(rt_.srcs[p].S(kk, 0, float(x), c) if rt_.keyed else rt_.srcs[p].S(kk, 0, float(x))
+    g = np.array([min(rt_.S_obs(p, kk, 0, float(x), c)
                       for p in phases) for x in xs])
     out = {"k": k, "step": rt_.ti.step, "floor": floor, "wx": x0 + face * xs, "ground": g, "apex": [], "strike": [],
            "sg4": True, "wc": rt_.wc, "text": []}
@@ -1607,7 +1607,7 @@ def special_map_now_sg4(eng, s: dict, k: int, cx: float, face: int, h: dict) -> 
         best = None
         for p in phases:
             for sl in rt_.locate(k, hist, p):
-                v = min(rt_.srcs[q].S(k, sl, xm, c) if rt_.keyed else rt_.srcs[q].S(k, sl, xm) for q in phases)
+                v = min(rt_.S_obs(q, k, sl, xm, c) for q in phases)
                 if best is None or v < best[0]:
                     best = (v, sl, p)
         if best is None:

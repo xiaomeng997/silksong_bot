@@ -38,6 +38,13 @@ READY_RANGE_U = 8.05 + 0.5         # the Clapper's Slam Range (pos +- 8.05 u, fo
 DEV_TOL_U = 0.2                    # the deviation exit: the Clapper off its anchor + the variants' displacement range
 WALL_FRONT_U = 14.0                # leave the map when a wall is this close in front of the anchor (the hammer: 12 u)
 WALL_BACK_U = 6.0                  # ... or behind it (no wall buckets for the SG4 maps)
+# SG7 wall buckets (forum.md 63): maps built with the hero limited at a wall this far in front of / behind the anchor
+# (tags <tag>_f<U> / <tag>_b<U>); a slam near a wall uses the bucket at or inside the real wall (the hero is limited
+# more; the lunge is not cut: every front bucket is >= 6.5 u, past the body's front edge after the longest lunge,
+# 2.04 + 4.2 = 6.24 u); nearer than the last bucket: the wall exit
+WALL_BUCKETS_F = (12.0, 10.0, 8.5, 7.25, 6.5)
+WALL_BUCKETS_B = (4.0, 2.5)
+OBS_LAT = int(os.environ.get("SSBOT_FORUM_SPECIAL_MAP_OBS_LAT", "0") or 0)   # frames from a stage entry to seeing it
 ROW_EXTRA_F = 24                   # the map row's template past the planner's horizon (its tail check)
 INF_LEVEL, NONE_LEVEL = sm.INF_LEVEL, sm.NONE_LEVEL
 # SG6 (forum.md 62): the map row's rollout, the readiness and the batched lookups compiled (special_map_jit,
@@ -325,6 +332,7 @@ class MapRuntime:
         self.stage = meta.get("stage")
         self.rows = None
         self.plan_tl = None
+        self.obs_sig = None
         self._tgt_cache: dict = {}
         if self.stage:
             self.RMv = np.asarray(self.stage["RM"], np.int64)
@@ -362,7 +370,7 @@ class MapRuntime:
         (the observation's frame: the planner's frame minus the transition latency lat). The consistent variants: each
         seen entry equal to the variant's, the variant in the same stage at k_now - lat (an unseen next stage has not
         started by then). Returns the consistent variants' indices (every variant: nothing known / a plain map)."""
-        self.rows, self.plan_tl = None, None
+        self.rows, self.plan_tl, self.obs_sig = None, None, None
         if not self.stage or seen is None or k_now is None:
             return list(range(len(self.vtl))) if self.stage else []
         ko = max(int(k_now) - int(lat), 0)
@@ -381,6 +389,7 @@ class MapRuntime:
         if not ok:                                   # an observation no variant explains: every variant
             return list(range(len(self.vtl)))
         self.rows = [np.asarray(r, np.int64) for r in np.unique(self.RMv[ok], axis=0)]
+        self.obs_sig = tuple(ok)
         # the plan's contacts on the consistent variant nearest the nominal timing
         nom = self.spec.timeline(K=len(self.tl.state))
         best = min(ok, key=lambda vi: sum(abs(int(self.vtl[vi].frames[st_]) - int(nom.frames[st_]))
@@ -601,6 +610,27 @@ class MapRuntime:
         front = (hi - x0) if face > 0 else (x0 - lo)
         back = (x0 - lo) if face > 0 else (hi - x0)
         return front < WALL_FRONT_U or back < WALL_BACK_U
+
+    @staticmethod
+    def wall_bucket(x0: float, face: int, arena: tuple) -> str | None:
+        """SG7: "" (open floor: the plain map), "_f<U>" / "_b<U>" (the bucket at or inside the real wall), None (a wall
+        nearer than every bucket: the wall exit)."""
+        lo, hi = arena
+        front = (hi - x0) if face > 0 else (x0 - lo)
+        back = (x0 - lo) if face > 0 else (hi - x0)
+        if front >= WALL_FRONT_U and back >= WALL_BACK_U:
+            return ""
+        if front < WALL_FRONT_U:
+            if back < WALL_BACK_U:
+                return None
+            f = [u for u in WALL_BUCKETS_F if u <= front]
+            return f"_f{f[0]:g}" if f else None
+        b = [u for u in WALL_BUCKETS_B if u <= back]
+        return f"_b{b[0]:g}" if b else None
+
+    def S_obs(self, p: int, k: int, s: int, x: float, c: int = 0) -> float:
+        """SG7: the minimum over the observation's row maps of phase p's S (plain maps: srcs[p].S)."""
+        return min(src.S(k, s, x, c) if self.keyed else src.S(k, s, x) for src in self._srcs([p]))
 
     # ---- the map row ----
     def plan(self, k: int, x: float, ev: dict, c: int, last_press: int, phases: list, L: int,
@@ -892,16 +922,20 @@ class MapRuntime:
 _RT: dict = {}
 
 
-def runtime(params, terrain) -> MapRuntime | None:
-    """The process's map runtime (loaded once); None when the file is missing (the planner then runs without it)."""
+def runtime(params, terrain, tag: str | None = None) -> MapRuntime | None:
+    """The process's map runtime (loaded once per tag; default MAP_TAG); None when the file is missing (the planner
+    then runs without it)."""
     # review: keyed by the terrain and the hero too (the hero macros are rolled on them)
     import hashlib
     sig = hashlib.md5(b"".join(np.ascontiguousarray(getattr(terrain, nm, np.zeros(0)), np.float64).tobytes()
                                for nm in ("hseg", "vseg"))).hexdigest() if terrain is not None else "none"
-    key = (MAP_TAG, sig, getattr(params, "crest", None), float(getattr(params, "run_speed", 0.0)))
+    tag = tag or MAP_TAG
+    key = (tag, sig, getattr(params, "crest", None), float(getattr(params, "run_speed", 0.0)))
     if key not in _RT:
-        p = map_path()
+        p = map_path(tag)
         _RT[key] = MapRuntime(params, terrain, p) if p.exists() else None
+        if _RT[key] is not None:
+            _RT[key].tag = tag
     return _RT[key]
 
 

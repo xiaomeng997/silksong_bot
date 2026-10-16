@@ -79,6 +79,62 @@ class Sim:
         # The measured one (on time 78 %, +1 20 %, +2..3 1.5 %): MEASURED_EXTRA. One draw per input either way.
         self.late_extra: tuple = ()
         self.keyed = bool(getattr(self.src, "keyed", False))
+        # SG7 (forum.md 63): stage = the map's rows follow what the hero has seen of the true timeline's stage entries
+        # (latency obs_lat frames); true_poly / head_u = the damage truth: the hammer's polygons (the timeline's
+        # damage_shapes) against the hero box raised by head_u at the top (default: SG2's boxes)
+        self.stage = bool(getattr(geo, "NR", 0)) and geo.cfg.stage
+        self.obs_lat = 0
+        self.true_poly = False
+        self.head_u = 0.0
+        self._srcs_cache: dict = {}
+        self.n_src = []
+
+    def srcs_at(self, tl, k: int) -> list:
+        """The decision sources at frame k: one; SG7 stage maps: the source on each row map of the map's variants
+        consistent with what the hero has seen of tl by frame k - obs_lat."""
+        if not self.stage:
+            return [self.src]
+        ko = max(k - self.obs_lat, 0)
+        info = sm.Geometry.info_of(tl, ko)
+        key = (ko, info)
+        if key not in self._srcs_cache:
+            g = self.g
+            ok = [vi for vi, v in enumerate(g.variants) if sm.Geometry.info_of(v, ko) == info]
+            if not ok:
+                ok = list(range(len(g.variants)))
+            rms = np.unique(g.RM[ok], axis=0)
+            self._srcs_cache[key] = [self.src.with_rows(rm) for rm in rms]
+        return self._srcs_cache[key]
+
+    def decide(self, tl, k, ev, x, dir_cur, last_press, lam, land):
+        srcs = self.srcs_at(tl, k)
+        self.n_src.append(len(srcs))
+        if len(srcs) == 1:
+            return ml.decide(srcs[0], k, ev, x, dir_cur, last_press, lam, land)
+        from ssbot.combat.special_map_rt import decide_multi
+        return decide_multi(srcs, k, ev, x, dir_cur, last_press, lam, land)
+
+    def hurt(self, tl, k: int, x: float, y: float) -> bool:
+        """The hero box (centre x, bottom y above the floor) meets a damage shape of tl at frame k."""
+        g = self.g
+        pa = g.spec.pos_above_floor
+        top = y + g.H + self.head_u
+        if not self.true_poly:
+            for b in tl.damage(k):
+                if b[0] < x + g.hw and b[1] > x - g.hw and b[2] + pa < top and b[3] + pa > y:
+                    return True
+            return False
+        for b, pg in tl.damage_shapes(k):
+            if pg is None:
+                if b[0] < x + g.hw and b[1] > x - g.hw and b[2] + pa < top and b[3] + pa > y:
+                    return True
+                continue
+            if not (b[0] < x + g.hw and b[1] > x - g.hw and b[2] + pa < top and b[3] + pa > y):
+                continue
+            q = clip_band(np.asarray(pg) + [0.0, pa], y, top)
+            if q is not None and q[0] < x + g.hw and q[1] > x - g.hw:
+                return True
+        return False
 
     def lateness(self, kind: str) -> int:
         """Frames late for one input (0 on time): one draw; SG2's model unless late_extra is set."""
@@ -146,7 +202,8 @@ class Sim:
         last_step_d = 0
         kend = min(g.K - 3, tl.end_k + 25)
         s_r = self.slice_of(ev, k0 - ev["k"]) if ev["kind"] != "ground" else 0
-        e.readiness = self.src.S(k0, s_r, x, d0) if self.keyed else self.S(k0, s_r, x)
+        e.readiness = (min(sr.S(k0, s_r, x, d0) for sr in self.srcs_at(tl, k0)) if self.keyed
+                       else self.S(k0, s_r, x))
         k = k0
         while k < kend:
             j = k - ev["k"]
@@ -154,7 +211,7 @@ class Sim:
             jump_now, press_now = None, False
             if slash is None and press_pending is None:
                 land = self.prof(ev)[2] if ev["kind"] != "ground" else None
-                v, act, cands = ml.decide(self.src, k, ev, x, dir_cur, last_press, lam, land)
+                v, act, cands = self.decide(tl, k, ev, x, dir_cur, last_press, lam, land)
                 for sh in self.shadows:                           # the same decision from another value source
                     v2, act2, c2 = ml.decide(sh["src"], k, ev, x, dir_cur, last_press, lam, land)
                     sh["n"] += 1
@@ -259,10 +316,8 @@ class Sim:
                         ev = {"kind": "bounce", "yc": y, "k": k, "q0": (self.p - k) % 6}
                         slash = None
             # damage (the undilated box; the i-frames / pre-protect are applied at the end)
-            for b in tl.damage(k):
-                if b[0] < x + g.hw and b[1] > x - g.hw and b[2] + pa < y + g.H and b[3] + pa > y:
-                    e.overlaps.append(k)
-                    break
+            if self.hurt(tl, k, x, y):
+                e.overlaps.append(k)
         # the damage events: overlaps not covered by a contact's [c - PRE_PROTECT_F, c + 8]
         for f in e.overlaps:
             if not any(c - PRE_PROTECT_F <= f <= c + IFRAMES[1] for c in e.contacts):
@@ -293,13 +348,15 @@ def starts(quick: bool) -> list[tuple]:
     return out
 
 
-def sim_variants(geo: sm.Geometry, quick: bool):
+def sim_variants(geo: sm.Geometry, quick: bool, spec=None):
+    """The true timelines of the closed loop (spec: another MoveSpec, e.g. with the hammer polygons, SG7)."""
+    spec = spec or geo.spec
     vs = []
     for a in ((47, 48, 49) if not quick else (47, 49)):
         for s0 in (4, 5):
             for s2 in (5, 6):
                 for ph in (0.2, 0.8):
-                    vs.append(geo.spec.timeline({"Slam Antic": a, "Slam 0": s0, "Slam 2": s2}, ph, K=geo.K + 20))
+                    vs.append(spec.timeline({"Slam Antic": a, "Slam 0": s0, "Slam 2": s2}, ph, K=geo.K + 20))
     return vs
 
 

@@ -39,6 +39,7 @@ from ssbot.knowledge import kinematics as kin
 CLAPPER = "Song Heavy Sentry"
 MOVE = "CL_SLAM"
 ANTIC = "Slam Antic"         # the antic: the Clapper stands (knockback aside); the lunge starts with Slam 0
+STAGES = ("Slam 0", "Slam 1", "Slam 2", "Slam Recover")   # SG7: the stage entries the map's rows follow
 BOARD: dict = {}            # iid -> {"tick", "on", "x", "k", "why", "ready_x"} (the planner's last map decision)
 NEAR_U = 16.0               # a Clapper this close (x) is the map's
 FORUM_ARENA = (14.01, 48.99)  # core.forum WALL_L / WALL_R
@@ -53,10 +54,14 @@ EVADE_S = 0.35               # Evade Scuttle -> After Scuttle (forum.md 18.1)
 MAP_READY = {"ok": False}    # review: the map runtime loaded (MapHelper.runtime); the L2 chase needs it
 
 
-def chase_wall(cx: float, hx: float, arena: tuple | None = None) -> bool:
+def chase_wall(cx: float, hx: float, arena: tuple | None = None, buckets: bool = False) -> bool:
     """SSBOT_FORUM_CHASE review: a slam the Clapper at cx starts now (facing the hero at hx, as at every antic) gets no
-    map row (the map row's wall exit: a wall within WALL_FRONT_U in front of / WALL_BACK_U behind the anchor)."""
-    return bool(smrt.MapRuntime.wall_exit(float(cx), 1 if hx >= cx else -1, arena or FORUM_ARENA))
+    map row (the map row's wall exit: a wall within WALL_FRONT_U in front of / WALL_BACK_U behind the anchor; SG7
+    stage maps with buckets: a wall nearer than every bucket)."""
+    face = 1 if hx >= cx else -1
+    if buckets:
+        return smrt.MapRuntime.wall_bucket(float(cx), face, arena or FORUM_ARENA) is None
+    return bool(smrt.MapRuntime.wall_exit(float(cx), face, arena or FORUM_ARENA))
 
 
 def _decision_states() -> frozenset:
@@ -78,6 +83,7 @@ class MapHelper:
         self.pl = planner
         self._rt = None
         self._loaded = False
+        self._bucket_rt: dict = {}           # SG7: wall-bucket maps by tag
         self.slam: dict = {}           # iid -> the slam instance's memory (anchor, facing, exit, presses)
         self.info: dict | None = None
         self.ready_info: dict | None = None
@@ -99,6 +105,27 @@ class MapHelper:
                 self.load_error = repr(ex)
             MAP_READY["ok"] = self._rt is not None
         return self._rt
+
+    def runtime_for(self, x0: float, face: int):
+        """SG7: the slam's map: the plain one on open floor, a wall bucket near a wall (stage maps only: the SG4
+        maps keep their wall exit); (runtime, why) with why "wall" when no bucket fits."""
+        rt = self.runtime()
+        if rt is None or not getattr(rt, "stage", None):
+            return rt, ("wall" if rt is not None and rt.wall_exit(x0, face, FORUM_ARENA) else None)
+        b = rt.wall_bucket(x0, face, FORUM_ARENA)
+        if b is None:
+            return rt, "wall"
+        if b == "":
+            return rt, None
+        tag = smrt.MAP_TAG + b
+        if tag not in self._bucket_rt:
+            try:
+                self._bucket_rt[tag] = smrt.runtime(self.pl.params, self.pl.terrain, tag)
+            except Exception as ex:  # noqa: BLE001
+                self._bucket_rt[tag] = None
+                self.load_error = repr(ex)
+        brt = self._bucket_rt[tag]
+        return (brt, None) if brt is not None else (rt, "wall")
 
     def preload(self) -> None:
         """Load the map, the decision states and touch the lookup paths once (the planner's construction, else its
@@ -150,9 +177,10 @@ class MapHelper:
         """None when the chase may run against the Clapper at cx (the map handles a slam it starts now), else why not:
         "no map" (no map file: the planner runs without it), "wall" (chase_wall: the map would leave that slam to the
         full checks; a scuttle carried past the wall lands here too)."""
-        if self.runtime() is None:
+        rt = self.runtime()
+        if rt is None:
             return "no map"
-        if chase_wall(cx, hx):
+        if chase_wall(cx, hx, buckets=bool(getattr(rt, "stage", None))):
             return "wall"
         return None
 
@@ -227,16 +255,32 @@ class MapHelper:
             mem["x0_prev"] = mem["x0"]
         x0 = mem["x0"]
         info.update(k=k0, x0=round(x0, 3), face=face)
+        # SG7: the stage entries seen (the tracker's state start: back-dated by the time in state when first seen;
+        # the map's clock, k_shift off) and the slam's map (a wall bucket near a wall)
+        ks = int(getattr(rs, "k_shift", 0) or 0)
+        seen = mem.setdefault("seen", {})
+        if st_ in STAGES and st_ not in seen and t0_ is not None and getattr(inst, "st_t0", None) is not None:
+            seen[st_] = int(round((float(inst.st_t0) - float(t0_)) * 60.0)) - ks
+        if getattr(rt, "stage", None):
+            rt_b, why_b = self.runtime_for(x0, face)
+            if why_b is None:
+                rt = rt_b
+                info["tag"] = getattr(rt, "tag", None)
         if mem["exit"] is not None:
             info["why"] = mem["exit"]
             return None
+        if getattr(rt, "stage", None):
+            ok_v = rt.observe(seen, k0, smrt.OBS_LAT)
+            info["seen"] = dict(seen)
+            info["nv"] = len(ok_v)
         dev = 0.0 if st_ == ANTIC else rt.deviation(k_trk, float(e["pos"][0]), x0, face)
         info["dev"] = round(dev, 3)
         if dev > smrt.DEV_TOL_U:
             mem["exit"] = "deviation"
             info["why"] = "deviation"
             return None
-        if rt.wall_exit(x0, face, FORUM_ARENA):
+        if (self.runtime_for(x0, face)[1] if getattr(rt, "stage", None) else
+                rt.wall_exit(x0, face, FORUM_ARENA)):
             mem["exit"] = "wall"
             info["why"] = "wall"
             return None
@@ -276,7 +320,7 @@ class MapHelper:
             best = None
             for p in phases:
                 for s in rt.locate(k, ys, p):
-                    v = min(rt.srcs[q].S(k, s, x, cdir) if rt.keyed else rt.srcs[q].S(k, s, x) for q in phases)
+                    v = min(rt.S_obs(q, k, s, x, cdir) for q in phases)
                     if best is None or v < best[0]:
                         best = (v, s, p)
             if best is None:
@@ -294,7 +338,7 @@ class MapHelper:
             slash = {"P": int(mem["last_press"]), "face": face_hero}     # the map's own slash in flight
         # the hero followed last tick's map row: continue it (deterministic) instead of planning again
         plan, prev = None, mem.get("plan")
-        if prev is not None and prev.phases == phases:
+        if prev is not None and prev.phases == phases and getattr(prev, "obs_sig", None) == rt.obs_sig and                 getattr(prev, "rt_id", id(rt)) == id(rt):
             i = k - prev.k0
             if 1 <= i < len(prev.states):
                 s_ = prev.states[i]
@@ -305,7 +349,9 @@ class MapHelper:
                     info["cached"] = True
         if plan is None:
             plan = rt.plan(k, x, ev, cdir, last_press, phases, L, face_hero=face_hero, face=face, slash=slash)
+        plan.obs_sig, plan.rt_id = rt.obs_sig, id(rt)
         mem["plan"] = plan
+        mem["rt"] = rt
         mem["plans"] += 1
         info.update(on=True, why="row", x=round(x, 3), ev=ev["kind"], c=cdir, phases=phases, v=round(plan.value, 3),
                     act=list(plan.first) if plan.first else None, presses=plan.presses[:3], ms=round(plan.ms, 2))
@@ -354,7 +400,7 @@ class MapHelper:
         info = self.info
         if info is None or info.get("on") or "k" not in info:
             return
-        rt = self.runtime()
+        rt = (self.slam.get(info.get("iid")) or {}).get("rt") or self.runtime()
         if rt is None or info.get("why") in ("deviation", "wall"):
             BOARD.pop(info.get("iid"), None)
             return
@@ -371,7 +417,7 @@ class MapHelper:
                 best, bx = V[i_], xs[i_]
         else:
             for x in xs:
-                v = min(rt.srcs[p].S(kk, 0, x, 0) if rt.keyed else rt.srcs[p].S(kk, 0, x) for p in rt.srcs)
+                v = min(rt.S_obs(p, kk, 0, x, 0) for p in rt.srcs)
                 if v > best:
                     best, bx = v, x
         if bx is not None and np.isfinite(best):
@@ -406,6 +452,12 @@ class MapHelper:
         rt = self.runtime()
         if rt is None:
             return None
+        if getattr(rt, "stage", None):
+            # SG7: near a wall the slam's bucket map (the hero limited at the wall), facing the hero at the antic
+            rt_b, why_b = self.runtime_for(cx, 1 if hx >= cx else -1)
+            if why_b is None and rt_b is not None:
+                rt = rt_b
+            rt.observe(None)
         gate = self.chase_gate(cx, hx) if CHASE else None
         self.chase_off = gate
         if evading and gate is not None:

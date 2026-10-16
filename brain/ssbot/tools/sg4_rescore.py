@@ -44,11 +44,26 @@ VARIANTS = {
     "ac_w2c2": {"keyed": True, "key_noise": "hard", "wc": 2.0, "c_cap": 2.0},
     "abc_w2c2": {"keyed": True, "key_noise": "hard_exp", "wc": 2.0, "c_cap": 2.0},
     "ac_w1c3": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0},
+    # SG7 (forum.md 63): ac_w1c3 + the hammer's polygons + the HeroBox's head + stage-aligned rows; parts alone
+    "sg7": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
+            "stage": True},
+    "sg7_poly": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187},
+    "sg7_stage": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "stage": True},
 }
+HEAD_U = 0.2187                    # the HeroBox's top above the physics box's (HeroBox.cs): the truth's hero box
 
 
 def config(name: str) -> sm.MapConfig:
-    return replace(sm.MapConfig(), **VARIANTS[name])
+    """A variant by name; SG7 wall buckets: <variant>_f<U> (a wall U u in front of the anchor) / _b<U> (behind)."""
+    wf = wb = None
+    base = name
+    if "_f" in name and name.rsplit("_f", 1)[1].replace(".", "").isdigit():
+        base, u = name.rsplit("_f", 1)
+        wf = float(u)
+    elif "_b" in name and name.rsplit("_b", 1)[1].replace(".", "").isdigit():
+        base, u = name.rsplit("_b", 1)
+        wb = -float(u)
+    return replace(sm.MapConfig(), **VARIANTS[base], wall_front=wf, wall_back=wb)
 
 
 def readiness_bins(eps: list, wc: float) -> dict:
@@ -88,12 +103,13 @@ def run(a) -> int:
     geo = setup(cfg)
     ti = ml.TubeIndex.from_geometry(geo)
     b = sm.builder_for(geo)
-    vs = sim_variants(geo, a.quick)
+    from ssbot.combat.move_data import load_cl_slam
+    vs = sim_variants(geo, a.quick, load_cl_slam(poly=True) if a.truth == "poly" else None)
     st = starts(a.quick)
     trials = load_trials()
     tc = TrialCheck(geo)
     lo, hi = (int(v) for v in a.phases.split("-"))
-    res = {"variant": a.variant, "config": cfg.key(), "phases": {}, "lam": a.lam, "seed": a.seed,
+    res = {"variant": a.variant, "config": cfg.key(), "phases": {}, "lam": a.lam, "seed": a.seed, "truth": a.truth,
            "noise": {"late_p": 0.2, "late_extra": MEASURED_EXTRA}, "geometry_s": round(time.time() - t0, 1)}
     for p in range(lo, hi + 1):
         t1 = time.time()
@@ -102,6 +118,8 @@ def run(a) -> int:
         src = ml.KeyedDenseSource(pm, ti, cfg) if cfg.keyed else ml.DenseSource(pm, ti)
         sim = Sim(geo, pm, np.random.default_rng(a.seed + p), src=src)
         sim.late_extra = MEASURED_EXTRA
+        if a.truth == "poly":
+            sim.true_poly, sim.head_u = True, HEAD_U
         lat = []
         orig = ml.decide
 
@@ -119,6 +137,8 @@ def run(a) -> int:
         noise_free(sim, eps, vs, st, a.lam, p)
         rp = counts(eps)
         rp["build_s"] = round(bs, 1)
+        if sim.n_src:
+            rp["sources_per_decision"] = {"mean": round(float(np.mean(sim.n_src)), 3), "max": int(max(sim.n_src))}
         rp["sim_s"] = round(time.time() - t1 - bs, 1)
         lt = np.array(lat) * 1e6
         rp["decision_us"] = {"p50": round(float(np.median(lt)), 1), "p99": round(float(np.quantile(lt, 0.99)), 1)}
@@ -141,7 +161,8 @@ def run(a) -> int:
     res["seconds"] = round(time.time() - t0, 1)
     a.out.mkdir(parents=True, exist_ok=True)
     sd = f"_s{a.seed}" if a.seed != 57 else ""
-    (a.out / f"rescore_{a.variant}{sd}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
+    tr = "_tpoly" if a.truth == "poly" else ""
+    (a.out / f"rescore_{a.variant}{sd}{tr}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
         json.dumps(res, indent=1, default=float), "utf-8")
     return 0
 
@@ -234,9 +255,11 @@ def store(a) -> int:
         del pm
         print("phase", p, round(time.time() - t0, 1), flush=True)
     path = rt.map_path(a.tag)
-    meta = rt.save_levels(path, geo, arrs, list(range(6)), scale,
-                          {"variant": a.variant, "source_commit": git_head(), "ready_ref": a.ready_ref,
-                           "max_score": mx, "clipped_cells": clip})
+    extra = {"variant": a.variant, "source_commit": git_head(), "ready_ref": a.ready_ref, "max_score": mx,
+             "clipped_cells": clip}
+    if cfg.stage:
+        extra["stage"] = geo.row_table()
+    meta = rt.save_levels(path, geo, arrs, list(range(6)), scale, extra)
     print(json.dumps({"path": str(path), "bytes": path.stat().st_size, "scale": scale, "max": mx, "clipped": clip,
                       "seconds": round(time.time() - t0, 1)}))
     return 0
@@ -246,11 +269,13 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     s_ = sub.add_parser("store")
-    s_.add_argument("--variant", required=True, choices=sorted(VARIANTS))
+    s_.add_argument("--variant", required=True)
     s_.add_argument("--tag", default="sg4")
     s_.add_argument("--ready-ref", type=float, default=None)
     r = sub.add_parser("run")
-    r.add_argument("--variant", required=True, choices=sorted(VARIANTS))
+    r.add_argument("--variant", required=True)
+    r.add_argument("--truth", choices=("box", "poly"), default="box",
+                   help="poly (SG7): the closed loop's damage on the hammer's polygons and the HeroBox's head")
     r.add_argument("--phases", default="0-5")
     r.add_argument("--quick", action="store_true")
     r.add_argument("--lam", type=float, default=0.02)

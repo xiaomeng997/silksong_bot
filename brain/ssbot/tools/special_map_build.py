@@ -36,8 +36,9 @@ def setup(cfg: sm.MapConfig | None = None):
     from ssbot.tools.pogo_theory import load_kin
     params, terrain = load_kin()
     hm = HeroMacros(params, terrain)
-    spec = load_cl_slam()
-    geo = sm.Geometry(spec, hm, cfg or sm.MapConfig())
+    cfg = cfg or sm.MapConfig()
+    spec = load_cl_slam(poly=cfg.poly)
+    geo = sm.Geometry(spec, hm, cfg)
     return geo
 
 

@@ -92,12 +92,22 @@ class TrialCheck:
         if best is None or not 0 <= r["k_node"] < g.K:
             return {"ok": False}
         err, j, k0, q0 = best
+        # SG7 stage maps: the rows along the nominal timing's observations (antic 49, Slam 0 5 frames: the trial's kp
+        # is on that clock); plain maps: the frame
+        if getattr(g, "NR", 0):
+            vn = next(i for i, v in enumerate(g.variants)
+                      if v.frames["Slam Antic"] == 49 and v.frames["Slam 0"] == 5 and v.frames["Slam 2"] == 6)
+            rowk = lambda k_: int(g.RM[vn, k_])
+            Dk = lambda k_: g.DR[rowk(k_)]
+        else:
+            rowk = lambda k_: k_
+            Dk = lambda k_: g.D[k_]
         xi = int(np.rint((r["x_node"] - g.cfg.x_lo) / g.step))
         if not 0 <= xi < g.NX:
             return {"ok": False}
         s = t.s0 + j
-        sv = float(pm.SV[r["k_node"], s, xi, r["d_post"] + 1])
-        node = float(pm.S[r["k_node"], s, xi])
+        sv = float(pm.SV[rowk(r["k_node"]), s, xi, r["d_post"] + 1])
+        node = float(pm.S[rowk(r["k_node"]), s, xi])
         # the approach: the jump's frames 0..j along the pre key, back from the press node
         st = g.steps(pm.p)
         x = r["x_node"]
@@ -107,14 +117,14 @@ class TrialCheck:
             if k < 0:
                 break
             xk = int(np.rint((x - g.cfg.x_lo) / g.step))
-            if 0 <= xk < g.NX and g.D[k][g.TYB[ti, q0, jj], xk]:
+            if 0 <= xk < g.NX and Dk(k)[g.TYB[ti, q0, jj], xk]:
                 safe = False
             if jj >= 1:
                 x -= r["d_pre"] * g.step * st[k]
         x0 = x
         x0i = int(np.rint((x0 - g.cfg.x_lo) / g.step))
-        jump_v = float(pm.S[k0, t.s0, x0i]) if 0 <= k0 < g.K and 0 <= x0i < g.NX else np.nan
-        ground_v = float(pm.S[k0, 0, x0i]) if 0 <= k0 < g.K and 0 <= x0i < g.NX else np.nan
+        jump_v = float(pm.S[rowk(k0), t.s0, x0i]) if 0 <= k0 < g.K and 0 <= x0i < g.NX else np.nan
+        ground_v = float(pm.S[rowk(k0), 0, x0i]) if 0 <= k0 < g.K and 0 <= x0i < g.NX else np.nan
         return {"ok": True, "j": j, "y_err": round(err, 3), "sv": sv, "node": node, "approach_safe": safe,
                 "jump_v": jump_v, "ground_v": ground_v, "x0": round(x0, 3), "k0": k0}
 
