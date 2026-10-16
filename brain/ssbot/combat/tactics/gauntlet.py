@@ -83,7 +83,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from ssbot.combat import rune_bombs, special_board
+from ssbot.combat import rune_bombs, slam_play, special_board
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
@@ -402,6 +402,11 @@ class GauntletTactics:
         if fam != CC_CAST and mb is not None and mb.get("ready_x") is not None:
             # SG4: before a slam can start, the readiness argmax 3-6 u in front (the map at k = 0)
             return self._clamp(float(mb["ready_x"])), vocab, "face: ready"
+        if slam_play.STANCE_U > 0 and fam in (None, "CC_EVADE"):
+            # SSBOT_FORUM_SLAM_PLAY_STANCE (task 1v1 SP1, rnplay6): while it idles / walks / backsteps, on the ground
+            # this far in front (the person's band at the antic entry, 6.2 u; it picks the slam 74 % of the time at
+            # 5.4-8 u): a slam it starts finds the playbook's start
+            return self._clamp(x + side * slam_play.STANCE_U), vocab, "face: slam stance"
         if fam == CC_CAST and rune_bombs.FACE_U is not None:
             # SSBOT_FORUM_RUNE_FACE (task 1v1 G2, the why study's fix (6)): through the small runes on the ground
             # 3-4 u from it, where only ring 1 reaches (ring 0 ends 2.4 u out): one short hop clears it

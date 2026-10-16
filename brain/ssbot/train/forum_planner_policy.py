@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import forum_v2
+from ssbot.combat import forum_v2, slam_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -212,6 +212,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.ab_arm: str | None = None
         self.free = False                       # track A "free" (_set_ta)
         self.v2feed: forum_v2.V2Feed | None = None   # v2-lite (SSBOT_FORUM_V2=1): the attack-range tracker + support
+        # SSBOT_FORUM_SLAM_PLAY=1 (task 1v1 SP1, forum.md 65): the person's slam strike as a fixed playbook; None (the
+        # default): nothing changes
+        self.slam_play: slam_play.SlamPlay | None = slam_play.SlamPlay() if slam_play.ENABLED else None
+        self._play_tick: dict | None = None
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -413,6 +417,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.targets = Counter()
         self.binds = 0
         self.cog = {"throws": [], "used": Counter(), "hold": 0, "last_t": -math.inf, "frames": set()}
+        if self.slam_play is not None:
+            self.slam_play.reset()
+        self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
 
@@ -729,7 +736,21 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.first_pending_f = f
             self.first_pending_reasons = list(r.decision.reasons)
         mask = res.mask if r.mask is None else r.mask
-        cog = self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
+        play = None
+        if self.slam_play is not None:
+            # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
+            play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)))
+            if play is not None and (r.mask is not None or self.pause_owned):
+                self.slam_play.abort("supervisor")
+                play = None
+            rp = self.slam_play.run
+            self._play_tick = None if rp is None else {"phase": rp.phase, "k": f + 2 - rp.fa, "mask": play,
+                                                        "why": rp.why}
+            if play is not None:
+                mask = play
+                self.counts["slam_play"] += 1
+        cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
             self.cog["frames"].add(f + 2)
@@ -740,8 +761,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
         self.cog["frames"] = {x for x in self.cog["frames"] if x >= f - 12}
-        self.keylog.tick(f, f + 2, res.cmd if r.mask is None and cog is None and len(res.cmd) else (int(mask),),
-                         sup=r.mask is not None)
+        self.keylog.tick(f, f + 2, res.cmd if r.mask is None and cog is None and play is None and len(res.cmd)
+                         else (int(mask),), sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
         tvi = self.planner.last_info.get("tv")
@@ -867,6 +888,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:
             rec["map"] = li["map"]               # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row / readiness this tick
+        if self._play_tick is not None:
+            rec["play"] = self._play_tick        # SSBOT_FORUM_SLAM_PLAY (SP1): the playbook's phase / frame / keys
+            if self._play_tick["mask"] is not None:
+                rec["mask"] = int(self._play_tick["mask"])
         if getattr(res, "clash", None):
             # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
             # or w below clash_min_p)
@@ -919,4 +944,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "outcome_reason": self.outcome_reason, "alerts": list(self.sc.alerts),
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
                 "real_quit": self.real_quit_stats(), "keys": keys,
-                "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None}
+                "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
+                **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {})}
