@@ -299,3 +299,24 @@ def test_idle_family_cc_idle(monkeypatch):
     p = t.decide(world(29.0, t=10.0, ents=[clapper(9, 35.0, False)]),
                  WinFc([subj(9, CC, 35.0, y=7.45, state="Idle", family="CC_IDLE")]), None, 3)
     assert p.no_dash == frozenset({9}) and p.no_pogo == frozenset({9}) and 9 in p.ground_hit
+
+
+def test_sp4_defaults_follow_v2():
+    """SP4 A/B (forum.md 68.5): unset, the SP4 switches follow SSBOT_FORUM_V2; =0 turns each off; the JB subs only with
+    JUMP_BEHIND."""
+    import os
+    import subprocess
+    import sys
+
+    def flags(env):
+        e = {k: v for k, v in os.environ.items() if not k.startswith("SSBOT_FORUM_")}
+        e.update(env)
+        code = ("from ssbot.combat import slam_play as sp, jump_behind as jb; "
+                "print(''.join(str(int(v)) for v in (sp.LATE, sp.AFTER, sp.NODASH, sp.NOPOGO, jb.PASS_HIT, jb.LAND_HIT, "
+                "jb.NO_JUMP, jb.CAST_ANTIC, jb.WALL_PUSH)))")
+        return subprocess.run([sys.executable, "-c", code], env=e, capture_output=True, text=True).stdout.strip()
+
+    assert flags({}) == "000000000"
+    assert flags({"SSBOT_FORUM_V2": "1"}) == "111111111"
+    assert flags({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_SLAM_AFTER": "0", "SSBOT_FORUM_JB_WALL": "0"}) == "101111110"
+    assert flags({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_JUMP_BEHIND": "0"}) == "111100000"

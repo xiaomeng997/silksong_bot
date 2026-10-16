@@ -60,7 +60,7 @@ def _on(name: str, default: str = "0") -> bool:
 ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND", "1" if _on("SSBOT_FORUM_V2") else "0")
 
 # SP4 (task 1v1 SP4, the person's notes of 2026-10-16 while SP3 ran; forum.md 68): sub-switches of JUMP_BEHIND, each
-# default off (only with ENABLED); off, every decision is the SP3 one.
+# on by default with v2 since the SP4 A/B (only with ENABLED); =0 off, every decision the SP3 one.
 #   SSBOT_FORUM_JB_PASS        the flight's hits count when pressed on the ground ("slash while running past it":
 #                              GoalPrefs.ground_hit instead of no_hit in the flight branch; passing under is a dash, so
 #                              no up slash is rewarded there - the hits from the ground near its take-off / landing)
@@ -80,7 +80,8 @@ ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND", "1" if _on("SSBOT_FORUM_V2") else "0")
 
 
 def _sub(name: str) -> bool:
-    return ENABLED and _on(name, "0")
+    # SP4 A/B (forum.md 68.5): unset, each follows SSBOT_FORUM_V2 (with JUMP_BEHIND on); =0 turns it off
+    return ENABLED and _on(name, "1" if _on("SSBOT_FORUM_V2") else "0")
 
 
 PASS_HIT = _sub("SSBOT_FORUM_JB_PASS")

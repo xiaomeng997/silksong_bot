@@ -84,36 +84,39 @@ GAME_CLOCK = _on("SSBOT_FORUM_SLAM_PLAY_CLOCK", "1")
 # (SP1 it3, the stand pinned: the jump at 3.6-7.25 u all succeeded), the band at the jump from NEAR_BAND_LO
 NEAR_STAND_U = 3.7
 NEAR_BAND_LO = 3.6
-# SSBOT_FORUM_SLAM_PLAY_LATE (task 1v1 SP4, default 0; forum.md 68): the declined slams of SP2 / SP3 (319 slams re-run
+# SSBOT_FORUM_SLAM_PLAY_LATE (task 1v1 SP4, default: follows v2; forum.md 68): the declined slams of SP2 / SP3 (319 slams re-run
 # through the playbook on the recordings: 16 "no input", 16 "no landing", 4 not on the ground at the jump, ...) - (a) no
 # input at the antic (the sprint's Sprint Turn / Skid End after a planner dash + run, 6 of them ended at 4.8-5.5 u at
 # antic frame 13-28; the umbrella, 10, landed 6-9 u out at 13-26): wait, start when input returns (a late start like
 # the airborne entry); (b) an airborne entry landing at antic frame 28 (7 cases at 4.9-5.6 u, all aborted one frame
 # early): the jump up to K_JUMP_LATE2 (the press at K_PRESS_MAX = 19 frames after a jump at 30); (c) a late start
 # outside the jump band walks into it up to K_JUMP_LATE2. 0: SP1-SP3's playbook.
-LATE = _on("SSBOT_FORUM_SLAM_PLAY_LATE", "0")
-# SSBOT_FORUM_SLAM_AFTER (task 1v1 SP4, default 0; read by combat.tactics.gauntlet): a slam the playbook does not take,
+# SP4 A/B (forum.md 68.5; the person's rule "the faster arm is the default"): the SP4 switches below follow
+# SSBOT_FORUM_V2 when unset (on with v2, off without it); =0 turns each off (arm rnsp40 = the SP3 default rnjb).
+_V2 = "1" if _on("SSBOT_FORUM_V2") else "0"
+LATE = _on("SSBOT_FORUM_SLAM_PLAY_LATE", _V2)
+# SSBOT_FORUM_SLAM_AFTER (task 1v1 SP4, default: follows v2; read by combat.tactics.gauntlet): a slam the playbook does not take,
 # the hero in front: never the 13 u flight past the hammer; in Slam 2 (the lunge over: Slam Collider 2 reaches 7.76 u
 # in front of the Clapper at the standing hero's height, 407 live slams) OUTSIDE_U in front of it, in the recovery (the
 # hammer off; its body's front edge 3.49 u to antic frame 67, then 2.25 u) AFTER_U in front with ground hits counting
 # (the after-the-hammer strike, presses about antic frame 63-76)
-AFTER = _on("SSBOT_FORUM_SLAM_AFTER", "0")
-# SSBOT_FORUM_SLAM_PLAY_NODASH (task 1v1 SP4, default 0; the lead's "no dash + run when a slam can start"; read by
+AFTER = _on("SSBOT_FORUM_SLAM_AFTER", _V2)
+# SSBOT_FORUM_SLAM_PLAY_NODASH (task 1v1 SP4, default: follows v2; the lead's "no dash + run when a slam can start"; read by
 # combat.tactics.gauntlet and combat.forum_planner): while the Clapper idles / walks / evades (a slam can start any
 # frame) and the hero is within NODASH_U of it, the planner's safe rows with a dash key in their first NODASH_F frames
 # rank after the safe rows without one, above the landed hits (GoalPrefs.no_dash). A dash + run leaves no input for
 # 10-30 frames (Dash To Run, Sprint Turn / Skid End, Sprint Air): SP2 / SP3's "no input" declines (6 skids of 16) and
 # SP4 t1's sprint skid into its idle body (2 HP).
-NODASH = _on("SSBOT_FORUM_SLAM_PLAY_NODASH", "0")
+NODASH = _on("SSBOT_FORUM_SLAM_PLAY_NODASH", _V2)
 NODASH_U = 10.0             # centre to centre: the playbook's reach (2.7-9 u) + a step
 NODASH_F = 20               # a dash (6 frames) + the sprint's start
-# SSBOT_FORUM_SLAM_PLAY_NOPOGO (task 1v1 SP4, default 0; read by gauntlet / forum_planner): while the Clapper idles /
+# SSBOT_FORUM_SLAM_PLAY_NOPOGO (task 1v1 SP4, default: follows v2; read by gauntlet / forum_planner): while the Clapper idles /
 # walks / evades, the planner's safe rows whose first predicted hit on it lands from the air (a pogo, a jump slash) rank
 # after the rest, above the landed hits (GoalPrefs.no_pogo). A hit sends the idle Clapper into its attack choice at
 # once with the hero in the air: SP3's A/B, 10 of rnjb's 54 slams began within 12 frames of her air hit; SP4 t2, a
 # pogo off its head after a rune hop bounced her to 9 u above the floor at the antic, no landing by frame 30, the
 # umbrella, the hammer (2 of 2 HP hits).
-NOPOGO = _on("SSBOT_FORUM_SLAM_PLAY_NOPOGO", "0")
+NOPOGO = _on("SSBOT_FORUM_SLAM_PLAY_NOPOGO", _V2)
 OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
 AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
 
