@@ -7900,3 +7900,175 @@ so the numbers hold; SSBOT_FORUM_JUMP_BEHIND stays default off at HEAD.
 5. Back-to-wall take-offs tested on 8ed2633 only 7 times (all behind); the person stands against the wall (4.5-5.2 u
    landings), the bot now stands 7 u away at the antic so it jumps 1.8 u forward.
 6. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+## Task 1v1 - stage SP4: declined slams, the interrupted bounce, the person's jump notes (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §68)
+
+Distances are centre to centre (the hero's box centre, the Clapper's transform), + = in front (the side it faces);
+HeroBox 0.46 u wide; its body front edge ~2.1-2.25 u from its centre. Slam frames k count game frames from the antic
+entry. Data `C:\ssbot\data\m2_play\sp4` (t1..t4 trial folders, `ab` the A/B, replay_<sha> the identity checks).
+Commits 88a717e (the switches, by the previous SP4 agent), 20a2d58, 46a1147, ed44eef, c2ccc15 (tested code), 6c15418
+(defaults), docs commit after it.
+
+### Result (the A/B, c2ccc15, rnjb vs rnsp4, 16 episodes each)
+
+| | rnjb (SP3 default) | rnsp4 (+ every SP4 switch) |
+|---|---|---|
+| episodes / kills | 16 / 16 | 16 / 15 + 1 HARNESS_FAIL after its kill (21.1 s, no HP lost; a 12 + 17-frame host stall when its window took focus) |
+| HP-hitless | 13 | 14 (15 counting the harness fail) |
+| HP hits before the kill | 3: hammer 1, Slam Collider 2 1 (both declined slams), body at a Spell Antic 1 | 1: hammer (a declined slam, airborne at 3.3 u at the antic, handed back early) |
+| kill p10 / 50 / 90 (s) | 22.8 / 26.9 / 31.2 | 21.5 / 24.8 / 28.3 |
+| landed hits / s (sg4_budget --live) | 0.844 | 0.879 |
+| slams / taken / hits per slam | 67 / 56 / 1.18 | 47 / 43 / 1.47 |
+| h/s idle+walk / evade / cast / slam / jump slam / jump cast | 0.078 / 0.847 / 1.704 / 0.891 / 0.423 / 0.421 | 0.106 / 1.385 / 1.875 / 1.003 / 0.595 / 0.352 |
+| jumps / safe / behind / hits per jump (antic .. end + 60) | 33 / 33 / 33 / 2.12 | 46 / 46 / 45 / 2.98 |
+
+- Bootstrap (episodes resampled, 90 %): landed / s +0.035 (-0.023 .. +0.093), kill p50 -1.8 s (-4.0 .. +0.9),
+  hitless share +0.06 (-0.13 .. +0.25). Faster on the point estimates and not worse on HP-hitless; the intervals touch
+  0. Per the person's rule (the faster arm is the default) 6c15418 makes the SP4 switches follow SSBOT_FORUM_V2.
+- Run: `C:\ssbot\sandbox\sp4_ab.ps1` via `sp4_block.ps1 -Name ab` (both instances, 4 blocks x 2 episodes per arm,
+  the order alternating per block, reversed on instance 1, seeds 1100000.. / 1110000..); manifest
+  `C:\ssbot\sandbox\1v1sp4ab_manifest.txt`; analysis `sp4\ab` (`ab.json` slam_play_ab, `slams_ab.json` sp4_slams,
+  `jumps_ab.json` / `trials_ab.json` sp3_jumps, `col` + `budget_*` sg4_budget, `stats.py` / `stats.txt`,
+  `jphase.txt`).
+
+### 1. Declined slams
+
+Re-running the playbook on 319 recorded SP2 / SP3 slams: of 67 declines, "no input" 16 (6 Sprint Turn / Skid End
+skids: ~7 u at the antic entry sliding to ~5 u; 10 umbrella glides at 6-9 u), "no landing" 16, not on the ground at
+the jump 4, ...; every decline became the planner's 12 u flight. Switches (each default off until the A/B, now on
+with v2; `=0` off):
+
+- `SSBOT_FORUM_SLAM_PLAY_LATE` (slam_play): no input at the antic -> start when input returns; an airborne entry may
+  jump up to k 30; a late start walks into the jump band by k 30; **every press by k 48** (18 frames after a late
+  jump): t1 (88a717e) every jump at 30 + the press at 49 -> the press at Slam 0 + 0 9 / 9, at Slam 0 + 1 (48-frame
+  antics) 7 / 9 (no contact, the hammer); with the cap (ed44eef) 20 / 20 safe, 19 / 20 landed. In the airborne entry,
+  when a free fall from her y / vy lands after k 30 (a DownSpikeBounce keeps its vy; a jump's rise counts as cut) the
+  script hands the slam back at once ("no landing (fall)", c2ccc15; the hop probe 20 / 20).
+- `SSBOT_FORUM_SLAM_PLAY_NODASH` (gauntlet -> GoalPrefs.no_dash -> forum_planner key): the Clapper idle / walking /
+  evading and the hero within 10 u: safe rows with a dash key in their first 20 frames rank after the rest, above the
+  landed hits.
+- `SSBOT_FORUM_SLAM_PLAY_NOPOGO` (GoalPrefs.no_pogo): the idle / walking / evading Clapper: safe rows whose first
+  predicted hit on it meets with the hero off the ground rank after the rest, above the landed hits; its hits count
+  from the ground only (ground_hit). **SP3 bug found**: the tracker's subject reads `CC_IDLE` for the whole Idle /
+  Walk; SP3's ground_hit (and the first NODASH / NOPOGO) checked (None, CC_EVADE) only, so the idle Clapper's air hits
+  still counted (t3's open-loop replay: ground_hit empty, a pogo row with 2 landed hits). gauntlet `SP4_IDLE_FAMS`
+  (None, CC_EVADE, CC_IDLE) for NODASH / NOPOGO only; SP3's own condition is unchanged (identity).
+- `SSBOT_FORUM_SLAM_AFTER` (gauntlet): a declined slam, the hero in front: Slam 2 -> 8.3 u in front of its current
+  centre (Slam Collider 2 reaches 7.76 u at her height + 0.23 + 0.3), Slam Recover -> 4.3 u with ground hits counting.
+  The polygons (`sp4\slam_shapes.json`, 407 full slams): the lunge 3.6 u p50 (max 4.2) in Slam 0 / 1; Slam Collider 1
+  k 52-56 (in front at her height; its arc covers -1.9 .. +6.2 u higher up); Slam Collider 2 k 52-62; the body front
+  3.49 u to k 67, then 2.25 u. sp4aft (t1, playbook off, every slam to AFTER, 5 episodes): 0.57 hits after the hammer
+  per declined slam (rnjb's declines 0.27, rnplay 0.08), x at the Slam 2 entry p50 8.9 u, 1 HP (Slam Collider 2 from
+  3.5 u at the antic). The antic / Slam 0 / 1 still use slam_out_u (13 u from its current centre, following the lunge):
+  the way back starts late (x at the Slam Recover entry p50 9 u).
+
+Trials (probe `slam_play_probe` via `slam_play_run.ps1`; 1v1 via `1v1_live.ps1`; each block through
+`C:\ssbot\sandbox\sp4_block.ps1`: DEMO_SOON paused / restored, both instances frozen after):
+
+| block | code | what | result |
+|---|---|---|---|
+| t1 | 88a717e | probe: every jump at 30, the press at 49 (sp4j30) | 16 / 18 pressed succeeded -> the cap 48 |
+| t1 | 88a717e | probe --skid 14 at 8.5 / 9.5 u (sp4skid) | the emulation does not hold (she ended 3.5-4.1 u in front, accepting input): 0 / 10 started |
+| t1 | 88a717e | 1v1 sp4aft (5) and sp4jT (2 x 5) | above; sp4jT 41 jumps 40 safe |
+| t2 | 20a2d58 | probe --hop 30 --umbrella (sp4umb) | 18 / 18 pressed succeeded; umbrella (no input) at the antic 4 / 4 |
+| t2 | 20a2d58 | probe --stall 4:4:2 (normal band; pinned 4.2 / 6.0 u) | 12 / 12; 10 / 11 (one hammer at 4.2 u) |
+| t2 | 20a2d58 | 1v1 sp4 (8) | 6 / 8 hitless; both hits: a pogo on the idle Clapper -> bounce to 9 u -> no landing -> umbrella -> hammer |
+| t3 | ed44eef | probe jump 30 / press 48 (sp4j30c) | 20 / 20 safe, 19 / 20 landed |
+| t3 | ed44eef | 1v1 rnsp4 (13) | 7 / 13 hitless, 7 hammer hits, all the CC_IDLE pogo -> c2ccc15 |
+| t4 | c2ccc15 | probe --hop 30 under LATE (sp4hop) | 20 / 20 |
+| t4 | c2ccc15 | 1v1 rnsp4 (13) | 12 / 13 hitless (a rune bomb), 30 / 32 slams taken, 0 hammer |
+
+Note: t2's sp4j30b (20a2d58) pressed at 49 again: the cap then applied to late runs only, a probe's forced ground
+jump took the old formula (17 / 18); 46a1147 applies it to every jump under LATE.
+
+### 2. The bounce-interrupted hammer (065013 i1 ep0)
+
+- Cause: a host stall. STATE 1561218 (two frames after the contact at Slam 0 + 3) has dt 7.01 frames (udt 0.117 s,
+  fs 6 physics steps). The Clapper's FSM changes state once per Update, so Slam 0 -> Slam 1 came at the end of that
+  frame (Slam 0 lasted 11 frames, normally 4-5): Slam Collider 1 ~6 frames late relative to the contact. The bounce's
+  protection (cstate downSpikeBouncing, ~11 game frames from the contact) runs on game time and ended inside it: 2 HP
+  at contact + 10. Normal strikes touch Slam Collider 1 too, always protected (36 of 36 in those two runs: Recoil
+  Twirl with downSpikeBouncing).
+- The stall hit both game instances in the same wall-clock frame (QPC -> 06:50:53.32; instance 0 6 frames). All 21
+  stalls in the 1v1 recordings since SP1 (350,267 frames; `sp4\scripts\hitch_scan.py` / `hitch_wall.py`, `sp4\hitch_scan.json`): 05:59:19 (both, 16 s: Kernel-Power
+  566 session transition, InputAccelerometer), 06:47:53-06:50:54 (8 moments, both; only a DCOM 10016 at 06:47:41),
+  08:42:37-44 (Kernel-Power 566, InputHid); none in SP3's ~190k frames. During SP4: 10:11:48 (4 frames) and
+  10:51:36-37 (both; instance 1's window had focus: 12 + 17 frames, that episode's harness timed out after the kill).
+- Emulation (`slam_play_probe --stall P:S:N`, time scale <= 4 via DebugMod, one RPC per frame): 2 Updates of 4 frames
+  at the contact: 22 / 23 strikes still succeeded (one hammer at the band's inner edge 4.2 u, contact at Slam 0 + 2).
+  A single 7-frame Update cannot be made with the game's tools.
+- Mitigation: nothing the bot can do after the stall (its next key lands on the hit frame). `sp4_block.ps1` holds
+  SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED) while a block runs (released on
+  exit, no settings changed): no Kernel-Power transitions since. Ask the person not to click the game windows during
+  runs.
+
+### 3. The person's jump notes (JUMP_BEHIND sub-switches, `ssbot/combat/jump_behind.py`; tactics in gauntlet)
+
+- `SSBOT_FORUM_JB_CAST_ANTIC`: the jump cast's antic, 4.3 u in front with ground hits counting until 0.62 s, then
+  the 5.5 u aim stance.
+- `SSBOT_FORUM_JB_PASS`: the flight's hits count when pressed on the ground (no up-slash reward: passing is a dash).
+- `SSBOT_FORUM_JB_LAND`: from its apex on (Air, vy < 0) its hits count (ground presses).
+- `SSBOT_FORUM_JB_NOJUMP`: behind it (landed / falling / rune behind), rows without a jump key first among equal
+  landed hits (GoalPrefs.ground_first).
+- `SSBOT_FORUM_JB_WALL`: `are_types.clapper.jump_rule` lands a take-off with its back within 4 u of a wall >= 4.4 u
+  from it (`jump_behind.push_l`).
+
+Hits per jump by phase (`sp4\scripts\jphase.py` on sp3_jumps collect output; antic / flight / landing = Slam 2 + Slam
+Recover / after = end + 60; first hit from behind, frames after the landing, p50; airborne frames behind it from the
+landing to end + 30):
+
+| arm | jumps | antic | flight | landing | after | total | first from behind | air behind |
+|---|---|---|---|---|---|---|---|---|
+| rnjb (A/B) | 33 | 0.03 | 0 | 0.91 | 1.18 | 2.12 | 8 | 23.8 |
+| rnsp4 (A/B) | 46 | 0.11 | 0.11 | 0.74 | 2.02 | 2.98 | 4 | 11.6 |
+| rnsp4 (t3 + t4) | 87 | 0.24 | 0.08 | 0.70 | 1.79 | 2.82 | 4 | 9.5 |
+| rnjbT (SP3 t3-t5, 9.5 u stance) | 178 | 0.03 | 0 | 0.91 | 1.12 | 2.06 | 6 | 29.7 |
+| sp4jT (t1, 9.5 u stance) | 41 | 0.10 | 0.20 | 0.63 | 1.78 | 2.71 | 5 | 4.9 |
+
+Not separated per sub-switch (one arm). The cast antic gives 0.2-0.6 hits per jump cast, far from the person's "at
+least two": the hero is often > 8 u away when it starts (0.5 s walk to 4.3 u). Safety: sp4jT 40 / 41 (the miss: landed
+in front, then a sprint skid into its idle body); rnsp4 133 / 133 jumps (t3, t4, A/B). Back-to-wall take-offs in sp4jT
+7, 6 behind.
+
+### Tools / code
+
+- `ssbot/combat/slam_play.py` (LATE, AFTER, NODASH, NOPOGO, `_fall_frames`), `jump_behind.py` (subs), `tactics/
+  gauntlet.py` (SP4_IDLE_FAMS, AFTER stances, JB branches, prefs), `tactics/modes.py` (GoalPrefs.no_dash / no_pogo /
+  ground_first), `forum_planner.py` (the ground_first / no_dash / no_pogo keys; EnvelopeAudit jb_nojump_ticks /
+  nodash_ticks / nopogo_ticks), `are_types/clapper.py` (JB_WALL).
+- `ssbot/probes/slam_play_probe.py` --skid / --umbrella / --stall (rows carry dtf / fs); `slam_play_run.ps1`
+  -Skid / -Late / -Umbrella / -Stall.
+- `ssbot/tools/sp4_slams.py` (every slam, the declined ones in detail), `ssbot/tools/sp4_why.py` (why a row was
+  picked, open loop).
+- Tests `tests/test_sp4.py` (21).
+
+### Switch-off identity
+
+88a717e, 46a1147, c2ccc15 with the SP4 switches unset: 192006 i0 ep1 2,073 / 2,073 and 084036 i1 ep0 1,778 / 1,778
+ticks byte-identical to 51e8673 (the rnjb default); all on: 0 errors (c2ccc15: 278 / 2,073 and 131 / 1,778 masks
+differ). 6c15418 (defaults): every SP4 switch at 0 identical to 51e8673; unset (v2) identical to c2ccc15 all on
+(`sp4\replay_<sha>`, `replay_ident_rev.ps1` / `replay_ident_def.ps1`).
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
+
+- `rnsp4` = rnjb + every SP4 switch at 1; `rnsp40` = rnjb + every SP4 switch at 0 (the SP3 default). At 6c15418 and
+  later an arm line with SSBOT_FORUM_V2=1 gets the SP4 switches unless it sets them to 0 (rnjb there = rnsp4).
+- rn0 / fcs00 / rnplay0 now carry the SP4 switches at 0 (they keep their meaning at later revisions; harmless at older
+  ones). Trial arms: sp4aft (playbook off + AFTER), sp4jT (9.5 u stance + JB subs), sp4 (all but NODASH / NOPOGO).
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON restored after each; no game process touched.
+Frozen checkouts `C:\ssbot\live_1v1_{88a717e,20a2d58,46a1147,ed44eef,c2ccc15,6c15418}`. Manifests
+`C:\ssbot\sandbox\1v1sp4t1_manifest.txt` .. `t4`, `1v1sp4ab_manifest.txt`. boost_workers.ps1 ran (240 min) for the
+blocks. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. AFTER in the antic / Slam 0 / 1: "just outside" from its antic position (12.5 u, not following the lunge), the
+   dash back at the Slam Recover entry; fixed-point with the playbook off (sp4aft) first.
+2. The remaining declines are high airborne entries (after rune hops; the planner's jump key in the air opening the
+   umbrella). An airborne strike (press timing by height) needs probe trials at several heights.
+3. The cast antic's two slashes need the hero within ~5 u when the jump cast starts.
+4. Host stalls: keep the display request in every live wrapper; tell the person not to click the game windows.
+5. Two Clappers (the plan's last step) not started.
