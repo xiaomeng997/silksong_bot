@@ -8072,3 +8072,136 @@ blocks. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.j
 3. The cast antic's two slashes need the hero within ~5 u when the jump cast starts.
 4. Host stalls: keep the display request in every live wrapper; tell the person not to click the game windows.
 5. Two Clappers (the plan's last step) not started.
+
+## Task 1v1 - stage SP5: the follow-up side and the closer landing after the slam strike (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §69)
+
+The person (2026-10-16): only the first strike position (the playbook: in front, late antic); after the bounce choose
+the side - one Clapper: end between it and the nearer wall (each side slash knocks it ~0.48 u away from the hero,
+toward the open floor), two Clappers: end between them - and land a bit nearer so that one horizontal slash before the
+landing hits it. Distances are centre to centre (the hero's box centre, the Clapper's transform), + = in front (the
+side it faces at the antic); frames from the Slam 0 entry. HeroBox 0.5 u wide in the recordings (0.46 in the tables);
+the Clapper's body box -1.34 .. +2.25 u, floor to 3.9 u (its only collider with damage, also the one the slashes hit).
+Data `C:\ssbot\data\m2_play\sp5` (scripts, `t1.txt` / `t2t3.txt` trials, `ab` the A/B, `replay_<sha>` identity).
+Commits 5f46a89 (switches), f63e605 (the slash's facing), 8a71fef (slam_play_ab), f2fe334 (defaults), docs after it.
+
+### Result (the A/B, f63e605, rnjb vs rnsp5, 16 episodes each; manifest `C:\ssbot\sandbox\1v1sp5ab_manifest.txt`)
+
+| | rnjb (SP4 default) | rnsp5 (+ SIDE + NEAR) |
+|---|---|---|
+| episodes / kills | 16 / 16 | 16 / 16 |
+| HP-hitless | 15 (the hit: a small-rune bomb at Idle) | **16** |
+| kill p10 / 50 / 90 (s) | 23.0 / 26.8 / 28.4 | 21.3 / **23.0** / 27.5 |
+| landed hits / s (sg4_budget --live) | 0.849 | **0.936** |
+| slams / taken / hits per slam (antic .. Recover end) | 50 / 50 / 1.56 | 33 / 33 / 1.79 |
+| way out: behind / in front, landing x p50 | 45 / 2, 7.2 u | 9 / 23, 5.8 u (the hit and its evade push apart; the slash at ~3.8 u) |
+| side slash before the landing (hits) | 0 | 32 of 32 bounced strikes |
+| hits in the 60 frames after the landing, per strike | 0.68 | 0.97 |
+| HP lost from the press to the landing + 60 | 0 | 0 |
+| h/s idle+walk / evade / cast / slam / jump slam / jump cast | 0.116 / 1.19 / 1.90 / 1.00 / 0.42 / 0.44 | 0.166 / 1.75 / 2.00 / 1.32 / 0.35 / 0.39 |
+| the Clapper's distance to the nearer wall p10 / 50 (u); share < 6 u | 5.77 / 12.6; 11.1 % | 6.57 / 13.6; 8.6 % |
+| jumps taking off with its back within 4 u of a wall | 5 of 30 | 2 of 30 |
+
+- Bootstrap (episodes resampled, 90 %): landed / s +0.088 (+0.036 .. +0.140), kill p50 -3.8 s (-5.0 .. -1.0), hitless
+  share +0.06 (0 .. +0.19). Faster with both intervals clear of 0, not worse on HP-hitless: per the person's rule
+  f2fe334 makes SIDE and NEAR follow SSBOT_FORUM_V2.
+- rnsp5's side choices (policy counters): the wall rule 29, "clear" 2 (behind could not clear its back in time, so in
+  front), "room" 1 (no spot behind inside the arena). The jump families' h/s are a little lower in rnsp5 (0.35 / 0.39
+  vs 0.42 / 0.44; 21 / 18 vs 23 / 20 hits, more jump time), not looked into.
+- Run: `C:\ssbot\sandbox\sp5_ab.ps1` via `sp4_block.ps1 -Name sp5ab` (4 blocks x 2 episodes per arm per instance, the
+  order alternating per block and reversed on instance 1, seeds 1200000.. / 1210000..), boost_workers.ps1 on; 12 min.
+  Analysis `sp5\ab`: `ab.json` / `ab.log` (slam_play_ab, now with the way-out fields), `col` + `budget_*`, `stats.py` /
+  `stats.txt`, `wall_dist.txt` (`sp5\scripts\wall_dist.py`).
+
+### Facts and the model (offline, before any trial)
+
+- The bounce in the probe recordings (it2 / it5 / it7, 179 strikes, `sp5\scripts\bounce_tr.py`): her x relative to
+  its centre settles at Slam 0 + 8 (the lunge done): 0.81 / 1.24 / 1.97 u in front (p10 / 50 / 90, max 3.25); apex at
+  Slam 0 + 23, 6.9 u above the standing y; landing Slam 0 + 52-55; the Clapper Slam Recover from + 14, Idle from + 29.
+  Air speed with a direction key 0.165 u / frame (9.9 u/s); with no key she stops dead in the air.
+- The Wanderer side slash (knowledge attacks): 0.19 .. 3.12 u in front of her box centre, -0.56 .. +1.2 u vertically,
+  active frames 1-7 after the press. It meets the body box when her y above the standing y is < 3.43 and her centre is
+  within 2.25 + 3.12 = 5.37 u in front (1.34 + 3.12 = 4.46 u behind; its front 2.25 + 3.12 once it has turned).
+- `sp5\scripts\path_sim.py`: the recorded frames with the hero's x replaced by a candidate way out (the key from Slam 0
+  + K0 at 0.165 u / frame to X_T, one frame back to turn, still), checked against every enabled damage collider of the
+  recorded frames from the contact + 11 (the bounce's protection) to the landing + 5, and the slash's polygon against
+  the body box. Behind (K0 10, X_T 3.7, the clearance rule below): 0 overlaps of 169 (also with the hero box grown by
+  0.4 u), 10 of 179 excluded by the rule; K0 20 (SP1's start) gave 27 of 67 overlaps at Slam 0 + 42-43 (she comes down
+  on its back as it turns at Idle). In front (K0 16, X_T 3.7): no overlap before Slam 0 + 50 (the later ones are the
+  recorded Clapper evading toward the side the recorded hero was not on). Slash hits before the landing: 167 / 169
+  behind, 178 / 179 in front.
+
+### Code (`ssbot/combat/slam_play.py`; both switches follow v2 since f2fe334, `=0` off)
+
+- `SSBOT_FORUM_SLAM_PLAY_SIDE`: `SlamPlay._side_pref` - the world side toward the nearest other living Clapper (two:
+  between them), else toward the nearer wall from its centre after the lunge (one), a tie keeps her side; with SP1's
+  way out (NEAR off) `_side_old` takes the preferred side when the wall there leaves `over_room` (6 u).
+- `SSBOT_FORUM_SLAM_PLAY_NEAR` (`SlamPlay._near`): decided at Slam 0 + 10 (`near_decide_s0`; the STATE two frames
+  before, the lunge over). The landing spot `near_u_front` / `near_u_behind` 3.7 u (down to `near_u_min` 3.3 when the
+  wall leaves less; `wall_pad` 0.45). Behind only when she clears its back (2.25 + 0.25 + 0.3 = 2.8 u behind its centre)
+  by Slam 0 + 40 at 0.165 u / frame from Slam 0 + 10, else in front ("clear"); neither fits: SP1's way out. No dash.
+  The key toward the side from Slam 0 + 10 (behind) / + 16 (front: the hammer and Slam Collider 2 off), the keys in
+  flight counted; one frame of the other key at the spot (+ half a step); the side slash when the press is >= the down
+  press + 19 (`slash_cd`), her y at the mask's frame + 1 <= 3.2 (`slash_y`, gravity from her y / vy) and the slash's
+  reach meets its body (`_in_reach`: its collider's x span, else -1.34 .. +2.25); **the press carries the key toward
+  it**; then no key to the landing (the planner on the ground). `side_force` (+1 keep / -1 switch) for probes.
+- Recoil Twirl (found in t1): a protected touch of the hammer during the bounce (about half the strikes: 'damage' Slam
+  Collider 1 at Slam 0 + 6-8 without HP loss) plays "Recoil Twirl", during which direction keys move her but do not
+  turn her; the attack takes the direction held on its own frame. 5f46a89 sent the turn key alone: 4 of 34 front
+  slashes went the other way (she had walked away from it into the stand band, so she faced away). f63e605: the press
+  frame holds the key toward it.
+- Stats `slam_play`: side_front / side_behind / side_why_* / near_slash. Probe `slam_play_probe` reports `way` (side,
+  why, landing frame and x, the slash's press / hit frames, HP lost to the landing + 15); `slam_play_run.ps1 -V2 -Side
+  -Near`. `ssbot.tools.slam_play_ab`: land_s0, way_slash_hits, land_hits60, hp_land60 per slam and the played_* sums.
+- Tests `tests/test_sp5.py` (9): the switches follow v2; off = SP1's dash way out; NEAR behind (keys, turn, slash after
+  the cooldown, landing at 3.7 u, past its back while high); the wall rule both ways; two Clappers; room / clearance
+  fallbacks; side_force; SIDE with the dash.
+
+### Fixed-point trials (probe, instances 0 / 1, 1x, v2 defaults + SIDE + NEAR; success = the down slash landed and no HP lost from the press to the landing + 15)
+
+| round | code | what | strikes (behind / front) | safe | slash hit before / at the landing |
+|---|---|---|---|---|---|
+| t1 i0 | 5f46a89 | side_force front | 30 front | 30 | 25 (5 misses: 4 facing away in the Twirl, 1 the Clapper evading) |
+| t1 i1 | 5f46a89 | side_force behind | 28 / 4 (clear) | 32 | 28 / 4 |
+| t2 i0 | f63e605 | side_force front | 22 front | 22 | 22 |
+| t2 i1 | f63e605 | the rule, 14 ms tick | 7 / 17 | 24 | 7 / 17 |
+| t3 i0 | f63e605 | side_force behind, 14 ms tick | 20 / 4 (clear) | 24 | 19 (its evade) / 4 |
+| t3 i1 | f63e605 | the rule, hops (airborne entries) | 10 / 12 | 22 | 10 / 12 |
+| all f63e605 | | | 37 / 55 | **92 / 92** | **36 / 37, 55 / 55** |
+
+- 154 / 154 pressed strikes safe over both codes; no HP lost after the landing in the probe's settle either. The
+  slash went out at Slam 0 + 44-48, hit at + 45-49, the landing + 52-55; her x at the slash: in front 3.35 / 3.76 /
+  4.15 u, behind -4.21 / -3.47 / -2.81 (p10 / 50 / 90). Not pressed: no time to walk 2, hurt while waiting 1 (the
+  probe stands still), no landing (fall) 1.
+- The landing x is farther than the spot (front p50 6.0, behind -5.2): the hit's knock-back (it ~0.48 u, her recoil
+  ~0.5 u) and the Clapper's Evade Scuttle (it backs off ~1.8-2.2 u in about half the trials) move them apart after the
+  slash; the slash itself is pressed at ~3.8 u.
+
+### Switch-off identity
+
+f63e605 with SIDE / NEAR unset (then default off): 192006 i0 ep1 2,073 / 2,073 and 084036 i1 ep0 1,778 / 1,778 ticks
+byte-identical to 6c15418 (SP4's `ticks_def_*`, the default under v2); both on: 0 errors (192006 identical, 084036 158
+ticks differ). f2fe334 (defaults): SIDE = NEAR = 0 identical to 6c15418; unset (v2) identical to f63e605 both on
+(`sp5\replay_<sha>`, `replay_ident_sp5.ps1` / `replay_ident_def.ps1`, `scripts\ident.py`).
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
+
+`rnsp5` = rnjb + SIDE + NEAR (at f2fe334 and later rnjb = rnsp5); `rnsp50` = rnjb + SIDE = NEAR = 0 (the SP4 default);
+rn0 / fcs00 / rnplay0 / rnsp40 now carry SIDE = NEAR = 0.
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON restored after each; no game process touched;
+boost_workers stopped after the A/B. Frozen checkouts `C:\ssbot\live_1v1_{5f46a89,f63e605,f2fe334}`. Sandbox:
+`slam_play_run.ps1` (+ -V2 / -Side / -Near; backup .bak_sp5), `sp5_ab.ps1`, `1v1_arms.txt` (backups .bak_sp5 /
+.bak_sp5b). Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. Two Clappers: the side rule's "between them" is in the code and unit-tested only; the playbook tracks the first
+   Clapper of the STATE (`slam_play.clapper`) and was never run with two. Needs the two-Clapper encounter (SP7).
+2. The front side lands the slash at ~3.8 u; the Clapper then evades in about half the strikes. A second slash on
+   the ground (the planner's) follows 0.97 times per strike; whether a nearer spot (3.3 u) or a second air slash adds
+   more is not measured.
+3. Behind is chosen only when the wall behind it is nearer (9 of 32 live); the 2.8 u clearance rule sends 6-17 % of
+   behind choices to the front.
+4. The jump families' h/s were a little lower in rnsp5 (not significant on 30 jumps per arm).
