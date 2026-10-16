@@ -62,10 +62,11 @@ def test_late_start_after_a_skid(monkeypatch):
     play, landed = simulate_noinput(5.1, 20, late=True)
     c = play.cfg
     assert keys(landed, sp.M_J)[0] == c.k_jump and keys(landed, sp.M_A) == [c.k_press]
-    # input back at frame 27 (seen at 27, the key lands at 29): the jump at once, the press at K_PRESS_MAX
+    # input back at frame 27 (seen at 27, the key lands at 29): the jump at once, the press 18 frames later (t1: by
+    # K_PRESS_MAX_LATE = Slam 0 - 1)
     play, landed = simulate_noinput(5.1, 27, late=True)
     j = keys(landed, sp.M_J)
-    assert j and j[0] == 29 and keys(landed, sp.M_A) == [c.k_press_max]
+    assert j and j[0] == 29 and keys(landed, sp.M_A) == [29 + c.press_after_late]
     # back at 6.9 u at frame 18: walks into the band, then jumps (by K_JUMP_LATE2)
     play, landed = simulate_noinput(6.9, 18, late=True)
     j = keys(landed, sp.M_J)
@@ -76,13 +77,14 @@ def test_late_start_after_a_skid(monkeypatch):
 
 
 def test_late_landing_at_28(monkeypatch):
-    # airborne at the antic, down at frame 28 (the 7 live aborts): off, "no landing"; on, the jump at 30, press at 49
+    # airborne at the antic, down at frame 28 (the 7 live aborts): off, "no landing"; on, the jump at 30, press at 48
+    # (K_PRESS_MAX_LATE: SP4 t1, jump 30 + press 49 hit the hammer twice at Slam 0 + 1)
     play, landed, _ = simulate(5.2, ground_until=27)
     assert not keys(landed, sp.M_A) and play.done[0].why == "no landing"
     monkeypatch.setattr(sp, "LATE", True)
     play, landed, _ = simulate(5.2, ground_until=27)
     c = play.cfg
-    assert keys(landed, sp.M_J)[0] == 30 and keys(landed, sp.M_A) == [c.k_press_max]
+    assert keys(landed, sp.M_J)[0] == 30 and keys(landed, sp.M_A) == [c.k_press_max_late] == [48]
 
 
 # ---- after the hammer ----

@@ -125,6 +125,10 @@ class PlayCfg:
     press_after: int = 20
     k_press_max: int = 49
     k_jump_late2: int = 30           # SSBOT_FORUM_SLAM_PLAY_LATE: the latest jump of a late start (no input / airborne)
+    press_after_late: int = 18       # ... its press this many frames after the jump, not after K_PRESS_MAX_LATE: SP4 t1
+    k_press_max_late: int = 48       # (jump 30, press 49) landed the press at Slam 0 + 0 in 9 / 9, at Slam 0 + 1 (a
+    #                                  48-frame antic) in 7 / 9 (2 hammer hits, no contact); the probes before: Slam 0
+    #                                  - 2 386 / 390, - 1 27 / 27, + 0 14 / 14; T1: 29 + 18 -> 16 / 16
     k_end: int = 110                 # the script ends here at the latest
     wall_room: float = 0.5           # the stand point at least this far inside the arena walls
     over: int = 1                    # 1: the way out after the bounce (over its body, the dash); 0: no key (SP1 it1)
@@ -323,7 +327,8 @@ class SlamPlay:
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
             band = r.band or c.band
-            late_walk = LATE and (r.k_air is not None or r.late) and k < c.k_jump_late2 and ground and                 not band[0] <= x <= band[1]
+            late_walk = (LATE and (r.k_air is not None or r.late) and k < c.k_jump_late2 and ground
+                         and not band[0] <= x <= band[1])
             if k < c.k_jump or late_walk:
                 m = self._walk(s, cx, r.face, f)          # (LATE: a late start walks into the band up to K_JUMP_LATE2)
             else:
@@ -337,7 +342,11 @@ class SlamPlay:
                     self._close("abort", "late jump")
                     return None
                 r.phase, r.k_jump, r.x_jump = "jump", k, round(x, 3)
-                r.k_press_plan = min(max(c.k_press, k + c.press_after), c.k_press_max)
+                if LATE and (r.k_air is not None or r.late):
+                    # SSBOT_FORUM_SLAM_PLAY_LATE: a late start's press by Slam 0 - 1 (K_PRESS_MAX_LATE)
+                    r.k_press_plan = min(max(c.k_press, k + c.press_after_late), c.k_press_max_late)
+                else:
+                    r.k_press_plan = min(max(c.k_press, k + c.press_after), c.k_press_max)
                 m = M_J
         elif r.phase == "jump":
             m = M_J if k < r.k_jump + c.hold else 0

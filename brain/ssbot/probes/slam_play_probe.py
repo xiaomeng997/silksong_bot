@@ -14,7 +14,13 @@ stands in for the live hit stop (SP2: a hit across 80 / 50 / 20 HP froze the gam
 time scale goes to 1e-4 for N STATE frames, then back to 1.
 --skid N (SP4, the sprint skid of the live declines): at the antic sighting the probe dashes toward the Clapper (dash +
 the direction 3 frames), holds the direction (a sprint) to frame N - 2, then the other direction 2 frames (a Sprint
-Turn: no input for 10-30 frames, as after a planner dash + run); the playbook steps from frame N.
+Turn: no input for 10-30 frames, as after a planner dash + run); the playbook steps from frame N. (SP4 t1: from 8.5-9.5
+u it ended 3.5-4.1 u in front still accepting input: no Sprint Turn lock - the emulation does not hold.)
+--umbrella (SP4, with --hop H: the live "no input" declines in the air): each hop presses the jump again UMB_AT frames
+after its start (in the air: the umbrella, no input for ~15-25 frames), so some antics begin with her gliding.
+--stall P:S:N (SP4 item 2, the stall of run 065013): P STATE frames after the press was sent, the time scale S (<= 4,
+DebugMod's path) for N STATE frames, then 1: Update runs once per frame with S x dt (the live stall: one frame of 7.0,
+6 physics steps). The rows carry the STATE dt / fs; the trial's "stall" the realized frames and game time.
 
 Per trial (<recording>/play_trials.jsonl): the distance class, the hero's x at the antic sighting, the playbook's run
 (start / jump / press frames it sent, its end and why), and from the STATEs (act.mask = the keys the game held): the
@@ -46,6 +52,7 @@ M_DASH = mask("dash")
 WAIT_S = 12.0
 SETTLE_F = 30
 MAX_F = 260
+UMB_AT = 12                 # --umbrella: the second jump press this many frames into each hop
 
 
 def _ctl(e) -> str | None:
@@ -54,10 +61,13 @@ def _ctl(e) -> str | None:
 
 class PlayProbe(Target):
     def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False, hop: int = 0,
-                 freeze: tuple[int, int] | None = None, skid: int = 0):
+                 freeze: tuple[int, int] | None = None, skid: int = 0, umbrella: bool = False,
+                 stall: tuple[int, float, int] | None = None):
         super().__init__(link, savestate)
         self.hop = hop
         self.skid = skid
+        self.umbrella = umbrella
+        self.stall = stall
         self.freeze = freeze
         self.tg = 0.0                                     # the game clock (s): the sum of the STATEs' scaled dt
         self.tick_ms = tick_ms
@@ -107,6 +117,7 @@ class PlayProbe(Target):
         seen = None
         rows, n_after = [], 0
         fz = None                                         # --freeze: {"f0", "f1", "k"}
+        stl = None                                        # --stall: {"f_press", "f0", "f1"}
         self.tg += float(s.get("dt") or 0.0)
         while True:
             e = sp.clapper(s)
@@ -125,6 +136,9 @@ class PlayProbe(Target):
                 m = self.follow_mask(s, d)
                 if self.hop and (s["f"] // self.hop) % 2 == 0 and s["f"] % self.hop < 8:
                     m |= M_J                              # --hop: a short hop every 2 x HOP frames (airborne starts)
+                if (self.hop and self.umbrella and (s["f"] // self.hop) % 2 == 0
+                        and UMB_AT <= s["f"] % self.hop < UMB_AT + 2):
+                    m |= M_J                              # --umbrella: the jump again in the air (the umbrella opens)
             else:
                 if self.freeze is not None:
                     ka = s["f"] - seen["f"] + seen["k0"]          # STATE frames from the antic entry
@@ -134,6 +148,16 @@ class PlayProbe(Target):
                     elif fz is not None and fz["f1"] is None and s["f"] - fz["f0"] >= self.freeze[1]:
                         link.rpc("time.scale", timeout_s=10, scale=1.0)
                         fz["f1"] = s["f"]
+                if self.stall is not None:
+                    run_ = self.play.run if self.play.run is not None else (self.play.done[-1] if self.play.done else None)
+                    if stl is None and run_ is not None and run_.k_press is not None:
+                        stl = {"f_press": s["f"], "f0": None, "f1": None}
+                    if stl is not None and stl["f0"] is None and s["f"] >= stl["f_press"] + self.stall[0]:
+                        link.rpc("time.scale", timeout_s=10, scale=float(self.stall[1]))
+                        stl["f0"] = s["f"]
+                    elif stl is not None and stl["f0"] is not None and stl["f1"] is None and                             s["f"] - stl["f0"] >= self.stall[2]:
+                        link.rpc("time.scale", timeout_s=10, scale=1.0)
+                        stl["f1"] = s["f"]
                 ks = s["f"] - seen["f"]
                 if self.skid and ks < self.skid:
                     # --skid: dash + sprint toward it, then the other way (a Sprint Turn), the playbook not yet asked
@@ -165,10 +189,14 @@ class PlayProbe(Target):
             self.tg += float(s.get("dt") or 0.0) + (s["f"] - last - 1) * float(s.get("ts") or 1.0) / 60.0
             last = s["f"]
         link.act(last + 2, 0, hold_frames=0)
-        if fz is not None and fz["f1"] is None:
+        if (fz is not None and fz["f1"] is None) or (stl is not None and stl["f0"] is not None and stl["f1"] is None):
             link.rpc("time.scale", timeout_s=10, scale=1.0)
         run = self.play.done[0] if self.play.done else self.play.run      # the trial's slam (not a next one in the settle)
-        return {"d": d, "pin": self.pin, "seen": seen, "freeze": fz} | self._outcome(run, rows)
+        if stl is not None:
+            # the realized stall: STATE frames with dt > 1.5 frames from the scale-up on (game frames, Updates)
+            big = [r for r in rows if "f" in r and stl["f0"] is not None and r["f"] >= stl["f0"] and r.get("dtf", 1) > 1.5]
+            stl["frames"] = [[r["f"], r["dtf"], r.get("fs")] for r in big[:6]]
+        return {"d": d, "pin": self.pin, "seen": seen, "freeze": fz, "stall": stl} | self._outcome(run, rows)
 
     @staticmethod
     def _row(s: dict, e: dict | None, m: int) -> dict:
@@ -183,6 +211,7 @@ class PlayProbe(Target):
             elif k == "damage":
                 evs.append(["damage", str(dd.get("source")), dd.get("amount")])
         return {"f": s["f"], "m": m, "act": int((s.get("act") or {}).get("mask") or 0),
+                "dtf": round(float(s.get("dt") or 0.0) * 60.0, 2), "fs": s.get("fs"),
                 "x": round(sp.hero_x(s), 3), "y": round(float(h["pos"][1]), 3),
                 "vy": round(float((h.get("vel") or [0, 0])[1]), 2), "g": sp.on_ground(s), "hp": int(h.get("health") or 0),
                 "st": _ctl(e), "cx": None if e is None else round(float(e["pos"][0]), 3),
@@ -265,6 +294,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--freeze", default="", help="K:N: at antic frame K the time scale 1e-4 for N frames (a hit stop)")
     ap.add_argument("--skid", type=int, default=0, help="N: dash + sprint toward it from the antic sighting, a Sprint "
                     "Turn at N - 2; the playbook from frame N (SP4)")
+    ap.add_argument("--umbrella", action="store_true", help="with --hop: the jump again in the air (the umbrella; SP4)")
+    ap.add_argument("--stall", default="", help="P:S:N: P STATE frames after the press was sent, the time scale S (<= 4) "
+                    "for N STATE frames (a host stall; SP4 item 2)")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import Recorder
     dists = [float(x) for x in a.dists.split(",")]
@@ -275,11 +307,16 @@ def main(argv: list[str] | None = None) -> int:
         link.rpc("guards.set", save_suppression=True, lethal_block="block")
         link.rpc("fsmtap.set", all=True)
         fz = tuple(int(x) for x in a.freeze.split(":")) if a.freeze else None
-        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz, a.skid)
+        stall = None
+        if a.stall:
+            p_, s_, n_ = a.stall.split(":")
+            stall = (int(p_), float(s_), int(n_))
+        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz, a.skid, a.umbrella, stall)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"slam_play_i{a.instance}_s{a.seed}{a.tag}",
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
                                "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
                                "freeze": a.freeze, "game_clock": sp.GAME_CLOCK, "skid": a.skid, "late": sp.LATE,
+                               "umbrella": a.umbrella, "stall": a.stall,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()
