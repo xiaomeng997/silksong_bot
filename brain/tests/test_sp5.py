@@ -1,7 +1,8 @@
 """Task 1v1 SP5 (forum.md 69): the slam playbook's way out after the bounce - the side by the person's rule
 (SSBOT_FORUM_SLAM_PLAY_SIDE: one Clapper, between it and the nearer wall; two, between them) and the closer landing with
-a side slash before it (SSBOT_FORUM_SLAM_PLAY_NEAR). Both off by default (SP1's way out unchanged); on, the documented
-keys against a toy slam with the bounce's air motion (the probes' numbers: apex Slam 0 + 23, the landing ~+52)."""
+a side slash before it (SSBOT_FORUM_SLAM_PLAY_NEAR). Since the SP5 A/B both follow SSBOT_FORUM_V2 (=0: SP1's way out
+unchanged); on, the documented keys against a toy slam with the bounce's air motion (the probes' numbers: apex Slam 0 +
+23, the landing ~+52)."""
 import importlib
 
 import pytest
@@ -74,13 +75,21 @@ def landing(xs, after):
     return next((k, x) for k, (x, y) in sorted(xs.items()) if k > after and y == 0.0)
 
 
-def test_switches_off_by_default(monkeypatch):
-    for n in ("SSBOT_FORUM_SLAM_PLAY_SIDE", "SSBOT_FORUM_SLAM_PLAY_NEAR"):
+def test_switches_follow_v2(monkeypatch):
+    # the SP5 A/B (forum.md 69.4): unset, SIDE / NEAR follow SSBOT_FORUM_V2; =0 turns each off, =1 on without v2
+    for n in ("SSBOT_FORUM_SLAM_PLAY_SIDE", "SSBOT_FORUM_SLAM_PLAY_NEAR", "SSBOT_FORUM_V2"):
         monkeypatch.delenv(n, raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
     try:
         m = importlib.reload(sp)
         assert m.SIDE is False and m.NEAR is False
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        m = importlib.reload(sp)
+        assert m.SIDE is True and m.NEAR is True
+        monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_SIDE", "0")
+        monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_NEAR", "0")
+        m = importlib.reload(sp)
+        assert m.SIDE is False and m.NEAR is False
+        monkeypatch.delenv("SSBOT_FORUM_V2")
         monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_SIDE", "1")
         monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_NEAR", "1")
         m = importlib.reload(sp)

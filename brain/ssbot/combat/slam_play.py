@@ -121,13 +121,16 @@ NODASH_F = 20               # a dash (6 frames) + the sprint's start
 NOPOGO = _on("SSBOT_FORUM_SLAM_PLAY_NOPOGO", _V2)
 OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
 AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
-# SSBOT_FORUM_SLAM_PLAY_SIDE (task 1v1 SP5, default off; forum.md 69): the side the way out ends on, by the person's
+# SP5 A/B (forum.md 69.4; f63e605, rnjb vs rnsp5, 16 episodes each: HP-hitless 15 -> 16, kill p50 26.8 -> 23.0 s,
+# landed / s 0.849 -> 0.936; the person's rule "the faster arm is the default"): SIDE and NEAR follow SSBOT_FORUM_V2
+# when unset (on with v2, off without it); =0 turns each off (arm rnsp50 = the SP4 default).
+# SSBOT_FORUM_SLAM_PLAY_SIDE (task 1v1 SP5, default: follows v2; forum.md 69): the side the way out ends on, by the person's
 # rule (2026-10-16): one Clapper - between it and the nearer wall (its centre after the lunge), so it stays off the wall
 # (each side slash knocks it ~0.48 u away from the hero, toward the open floor); two Clappers - between them (the side
 # toward the nearest other Clapper). Keep side = stay in front, switch side = over its body, land behind. Off: behind it
 # unless the wall there leaves < OVER_ROOM (SP2: 62 of 65 landings behind it, wherever it stood).
-SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", "0")
-# SSBOT_FORUM_SLAM_PLAY_NEAR (task 1v1 SP5, default off): the closer landing and a side slash before it (the person:
+SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", _V2)
+# SSBOT_FORUM_SLAM_PLAY_NEAR (task 1v1 SP5, default: follows v2): the closer landing and a side slash before it (the person:
 # "if the landing is a bit closer to it, one horizontal slash before landing is best"). No dash: the air key at
 # NEAR_V u / frame toward the chosen side (behind: from Slam 0 + near_s0_behind, over its body; front: from Slam 0 +
 # near_s0_front, away from it) until the hero's centre is near_u from the Clapper's centre on that side, one frame of the
@@ -137,7 +140,7 @@ SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", "0")
 # + near_cross_s0 (her box bottom still 4.2 u above the floor; the probes' bounce: apex Slam 0 + 23 at 6.9 u above
 # the standing y, the landing at Slam 0 + 52-55) and the landing spot fits inside the arena; else the other side; else
 # the old way out. Off: SP1's way out (the dash at Slam 0 + 23, landing 6.6-9.5 u behind it).
-NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", "0")
+NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
 NEAR_V = 0.165              # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
