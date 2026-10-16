@@ -7143,7 +7143,7 @@ front edge 2.1-2.25 u from its centre.
   clearance are their union / minimum; the next frame is the same stage one frame on or (once its minimum length is
   reached) the next stage's entry - both must be safe (`REACH`, minimum). The hero side (run steps, tubes, cycle
   position) stays on the absolute frame. `Geometry._rows`, `StageKeyedMapBuilder` (equals KeyedMapBuilder with one
-  variant: test); 178 rows (antic 49, Slam 0 15, Slam 1 18, Slam 2 36, Recover+ 60).
+  variant: test); 198 rows (antic 49, Slam 0 15, Slam 1 18, Slam 2 36, Recover+ 80).
 - Run time: `forum_map` records each stage's entry per slam (the tracker's state start, back-dated by the time in
   state when first seen) -> `MapRuntime.observe(seen, k, lat)` -> the consistent variants' row maps; every decision is
   the minimum over phases x row maps. `SSBOT_FORUM_SPECIAL_MAP_OBS_LAT` (default 0; vision mode 1-2). Sources carry a
