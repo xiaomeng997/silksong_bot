@@ -7307,3 +7307,197 @@ Open items / next
 2. The escape-row fragility (finite cells without a finite successor) exists in sg7 too: understand it (the run
    steps' lattice rounding vs the tubes, float16 values near 0) before putting the carry into the map.
 3. The carry in the map (sg7r) after 2. The Forum_A scan was stopped at 8,248 slams (budget).
+
+## Task 1v1 - stage SG8: fixes from the first live runs (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §64)
+
+The first live runs (2026-10-15 23:40, frozen d135311, rnmap7r / rnchase7r, 8 episodes; diagnosis in
+`C:\ssbot\data\m2_live_sg7r`) had 0 hammer down slashes in 44 slams and 39 retreats (distance at the Slam 0 entry
+p50 11.8 u). SG8 fixes the causes in that order, offline only (no game, no live run). Switch `SSBOT_FORUM_SG8=1`
+(default off, needs `SSBOT_FORUM_SPECIAL_MAP=1`; sub-switch `SSBOT_FORUM_SG8_STAY`, default 1); map tag **sg8** (stored
+with every bucket); arms `rnmap8` / `rnchase8` appended to `C:\ssbot\sandbox\1v1_arms.txt`. Data:
+`C:\ssbot\data\m2_map\sg8` (scripts in `scripts\`: frag_repro / frag_check / dead_dbg / reloc_dbg / lunge / disp,
+replay_sg8 + job_rp / launch_rp, sg8_eval, cl_summary, ident_cmp; closed loops `rescore\`, `rescore2\`; replays
+`rp_*\`). Distances centre to centre (u).
+
+### 1. The map's fragility: escape jumps the online rule never takes (fixed; the carry goes in: sg8)
+
+- **Cause** (reproduced: sg7r, ground k0 40, x 10 u, S47S5S3S5S15p0.2, phase 0): the cell's value 0.034 came from a
+  **jump start with no reachable strike** (an escape jump over the carried Collider 2 frame: no ground escape exists
+  from there), but the online rule (map_lookahead.decide*) never jumps without a strike (v0 > WC): from k 43 every key
+  was -inf, damage at 55. Every sg7r noise-free damage of the review was this start.
+- **Fix** `MapConfig.jump_strike` (`special_map.JUMP_STRIKE_EPS` 0.05 = 2 run-time levels): a ground node counts a
+  jump start only above WC (a strike). Consistency check (every finite ground cell, the rule's decision on the row's
+  row maps, `frag_check.py`): sg7r phase 0 **26 dead ends of 70,501**; sg8 2 of 70,184; the last two came from
+  `decide_multi`: a jump whose best first key differs between the sources (row maps) is dropped, and a source prunes a
+  jump its own ground keys beat. **`map_lookahead.ALLD`** (SG8): jumps offered with every first key, no pruning by the
+  best so far (one source decides the same either way) -> **0 dead ends** (test on a reduced map too). The compiled
+  kernels carry the same rules (`special_map_jit` ci STAY / ALLD; tests: JIT = Python).
+- So the carry is in: **sg8 = sg7 + the carry (`MapConfig.carry`) + jump_strike**; stored as
+  `special_map_CL_SLAM_sg8[ |_f12|_f10|_f8.5|_f7.25|_f6.5|_b4|_b2.5|_b1.5|_b0.9]_levels.npz` (git-ignored, ~60 MB each,
+  11 min each at Idle; `sg4_rescore store --variant sg8[_<bucket>] --tag ...`).
+- Closed loop (sg4_rescore run, the carry truth `polyc`, 155 starts x 24 timings x 6 phases = 22,320 episodes, the
+  measured lateness; `cl_summary.py` -> `rescore\closed_loop_sg8.json`):
+
+| map / run-time rules | damaged, all starts | feasible starts damaged | noise-free | hits / slam | key changes |
+|---|---|---|---|---|---|
+| sg4 (review) | 643 | 32 / 20,155 (0.159 %) | 15 | 1.112 | 4.61 |
+| sg7 (review) | 31 | 28 / 21,011 (0.133 %) | 0 | 1.248 | 4.93 |
+| sg7r (review) | 235 | 39 / 20,729 (0.188 %) | 32 | 1.196 | 4.64 |
+| **sg8**, the true state | 241 | **7 / 20,583 (0.034 %)** | **0** | 1.195 | 4.66 |
+| sg8 + the live locate (min over the matching slices) | 8,020 | 6,984 / 20,586 (33.9 %) | 5,985 | 0.750 | 4.43 |
+| sg8 + SG8 locate + ALLD | 254 | 15 / 20,578 (0.073 %) | 0 | 1.195 | 4.94 |
+| sg8 + SG8 locate + ALLD + STAY | 253 | 21 / 20,585 (0.102 %) | 0 | 1.197 | 7.94 |
+
+- The final rules (the released hold from the arc's count added, rescore3) decide identically to the row above in the
+  sim (its released jumps are all matched by the policy's own event): 21 / 20,585, noise-free 0. Locate counts there:
+  plan 1,182,071, min 140,089, facts 14,480, open 288 (the true state at the episode's first two frames 25,048).
+
+- "All starts" includes the ~2 % of starts sg8 calls infeasible (no ground escape without a strikeless jump); the
+  sim's fallback there walks away and is hit (sg7 survives most of them because its map ignores the carried frame and
+  its paths happen to miss it). Live, a -inf map row is no row: the planner's own rows decide.
+- The second row block is the closed loop **with the locate step** (`sg2_sim.Sim.relocate`; before, the sim carried
+  the planned state and never relocated): the live rule reproduces the jump collapse (33.9 % of feasible starts
+  damaged); SG8's locate brings it to 0.07-0.10 %, noise-free 0.
+
+### 2. Airborne locate (`forum_map.MapHelper._locate_sg8`; the airborne readiness)
+
+- The slices matching the last three box bottoms (bounce slices also with one constant offset up to half a bin:
+  `locate(bin_off=True)`), then (1) **the map's own planned state** at this frame (its last plan; else the event it
+  used last tick in this arc), matched by hold / contact bin with its start within `LATE_F` 3 frames (a late press /
+  contact); with no slice matched yet (right after a contact) the plan's event by its own exact profile
+  (`MapRuntime.ev_matches`); the plan then extends; (2) else **the facts**: the jump key (Jump.IsPressed after the
+  prefix: held -> holds >= j - 1, released -> holds <= j; a released hold within `HOLD_TOL` 2 of the arc's count of
+  held ticks), a bounce only in an arc with a down slash (`MapHelper.arc_update`, every tick); (3) per event the
+  minimum over the phases; **an open hold (key held) is the bot's own choice: the best of them** (the row's masks
+  hold the key to it; the lane guard checks the planner's lane); every other remaining event the minimum; nothing
+  left: every slice (the old minimum).
+- Readiness (SG8): a row ending airborne reads its own jump key at the readiness index (`ready_k` rmode: held -> the
+  best open hold, released -> its holds, bounce only after a down press); compiled = Python (test).
+- **Unit test from i0e2 f19893** (`tests/test_sg8.py::test_airborne_locate_keeps_the_maps_own_jump`, real sg7r map):
+  the map's jump (h 12 from k 32 at x 5.65) one frame later: the old minimum over the 18 matching holds is -inf, SG8
+  locates the plan's own state (finite, the row survives); without the plan the open hold is the best (finite).
+
+### 3. No retreat during a slam
+
+- **L2** (`tactics/gauntlet._clapper_spot`, SG8): no "slam: step out" (13 u, hit weight 0); without a map spot the
+  stance is the face (`forum_map.FACE_U` 6 u in front, "slam: face (no map)", hit weight kept); behind it as before.
+- **The map's own fallback** (`map_lookahead.STAY`, `SSBOT_FORUM_SG8_STAY`): an action reaching no strike (value <= WC)
+  scores min(value, caps) - mu x its distance from the face band, caps = the clearance the hammer needs (1 u:
+  WC x 1 / C_CAP = 0.333), mu 0.2 per u, band 4.5-7 u in front of the Clapper's mean lunge position (3-5 u behind);
+  the cap is applied before the key-change cost (lambda's order kept). Off-board spot (`MapHelper.off_board`): the same
+  score over 8 u around the hero; the last spot of the slam is held between rows (L2 keeps it). Closed loop above:
+  STAY costs 6 more damaged starts of ~20,580 (still below sg4 / sg7) and 3 key changes per slam; the share of
+  ground starts in front more than 8 u out at the Slam 0 entry 27.2 % -> 25.5 % (p90 14.3 -> 12.4 u; the hammer
+  reaches ~12 u from the anchor: without a strike the band is not safe at the entry, the map keeps the hero out of it).
+- **FORCED_RISK in a tracked slam** (`ForumPlanner._sg8_slam_keys`): rows with a glide, or a dash / sprint ending more
+  than 1 u farther from the Clapper, after the others (a key above the seen contacts; in the escape check's tie set
+  too); then among equal contact shares the row ending nearer the face band.
+
+### 4. Deviation: re-anchor after the lunge
+
+- The live lunges (`lunge.py`, 42 slams): p10 / 50 / 90 2.7 / 3.6 / 4.2 u; 3.0 u = Slam 0 with two still frames (5
+  physics steps); 1.8-2.67 u = the lunge stopped early (negative steps: knockback). The polygons are rigid in the
+  Clapper's frame, so (SG8) a shortfall during Slam 0 / 1 is no row that tick (not sticky: "deviation (lunge short,
+  waiting)"); once Slam 2 is entered (the lunge's last step lands on that frame) the anchor moves so the Clapper sits
+  on the consistent variants' smallest displacement (the others are ahead: their union covers it) and the row resumes.
+  Ahead of the range (knockback forward): the sticky exit as before. No short-lunge variants were added to the map.
+
+### 5. On the lattice; the back wall
+
+- A safe map row this tick: rows starting a dash / sprint / glide / a horizontal slash in their first 15 frames rank
+  after the others (`offl`, above the landed hits; the map row itself first as before).
+- Back buckets `_b1.5` and `_b0.9` (SG8 only; the two live WALLEXIT slams had the Clapper backed against the wall,
+  its centre 1.34 u from it; a bucket's wall stays `WALL_MARGIN_U` 0.35 u inside the real one).
+
+### 6. Stalls
+
+- `ssbot.tools.sg8_warm_maps` decompresses every tag / bucket into the mmap cache; **`C:\ssbot\sandbox\1v1_freeze.ps1`
+  now runs it** on the new checkout's knowledge dir after copying (with the worktree's brain; log
+  `<checkout>\warm_maps.log`; the cache key is size + mtime, which the copy keeps). Backup of the old script:
+  `1v1_freeze.ps1.bak_sg8`.
+- `MapHelper.preload` loads every bucket runtime of a stage map with the main one (all arms: same runtimes, only when);
+  `ForumPlannerPolicy.reset` preloads with the arena's terrain (the episode start, ~0.6 s, not its first tick); SG8
+  never loads a runtime on a tick (a missing one = no map for that slam).
+- `ForumPlanner.warm_kernels` calls `knockback_hull` (kin_jit.kb_hull_par / kb_hull / kb_hull_one / near; 1.9 s live
+  at the first airborne hit).
+- Not done: resending the last ACTION while a tick runs long (the IO loop is single-threaded; a writer thread on the
+  oracle link is not a small, safe change). With the loads and compiles moved out, the replays saw no tick load.
+
+### 7. Small runes (SG8, `ForumPlanner._sg8_rune_keys`, in the same slot as `offl`)
+
+- The nearest Clapper in Cast 2: the safe hop rows first, safe rows with a dash / sprint last (not when FORCED);
+  in Spell Antic / Cast 1: safe rows in the air at a frame Cast 2 can enter (48-55 frames after the antic) after the
+  others. Audit `sg8_hop_tier`.
+
+### 8. Evidence: open-loop replays (deadlines off; `replay_sg8.py`, `sg8_eval.py`; before = the frozen d135311 with the
+run's arm, after = this branch with rnmap8 / rnchase8)
+
+The recorded hero did not follow the plans: these are the planner's choices on the recorded states (the distance at
+the Slam 0 entry stays the recording's, p50 11.8 u both).
+
+| 8 live episodes (44 slams) | before (sg7r) | after (SG8, sg8) |
+|---|---|---|
+| map rows / taken (slam ticks) | 1,595 / 991 | 1,882 / 1,133 |
+| jump collapses (slams) | 11 | **0** |
+| no row: no feasible continuation / deviation / wall | 315 / 209 / 153 | 196 / 0 / 153 |
+| presses planned on taken rows (slams) | 64 (37) | 81 (39) |
+| down slash pressed now (ticks / slams) | 26 / 9 | 46 / 11 |
+| FORCED ticks in slams | 621 | 590 |
+| planned retreats > 1.5 u in 20 frames (ticks; not forced) | 1,176 (1,091) | 765 (698) |
+| L2 stance distance p50 / ticks > 9 u | 9.57 u / 1,848 | 5.32 u / 900 |
+| hop rows chosen / casts with an air dash in Cast 2 | 0 / 8 | 11 / 8 |
+| tick ms p50 / p99 / max; runtime loads on a tick | 12.4 / 31.3 / 198; 8 | 12.0 / 30.4 / 115; 0 |
+| locate (after) | | plan 923, mem 212, open 76, facts 24, min 149, fallback 162 |
+
+| rn's 16 episodes of 2026-10-12 (87 slams, 79 casts) | before (rnchase7r, sg7r) | after (rnchase8, sg8) |
+|---|---|---|
+| map rows / taken (slam ticks) | 3,571 / 2,814 | 3,831 / 2,902 |
+| no row: no feasible continuation / deviation / wall | 363 / 425 / 383 | 480 / 0 / 75 |
+| presses planned on taken rows (slams) | 101 (53) | 118 (64) |
+| down slash pressed now (ticks / slams) | 3 / 2 | 12 / 6 |
+| FORCED ticks in slams | 156 | 149 |
+| planned retreats > 1.5 u in 20 frames (ticks; not forced) | 1,596 (1,567) | 856 (836) |
+| L2 stance distance p50 / ticks > 9 u | 11.45 u / 3,992 | 6.23 u / 2,922 |
+| hop rows chosen / casts with an air dash in Cast 2 (ticks) | 0 / 4 (20) | 11 / 6 (25) |
+| tick ms p50 / p99 / max; runtime loads on a tick | 11.5 / 27.3 / 96.5; 16 | 11.6 / 27.2 / 54.4; 0 |
+
+- rn's recorded hero never jumped on a map plan (0 collapses either way); "no feasible continuation" rises with sg8
+  (the carry and no strikeless escape jumps make more states -inf); the air dashes in Cast 2 rose 20 -> 25 ticks in
+  open loop (open item 3).
+
+- Decisions changed (after vs before, same ticks): slam ticks 1,215 / 3,985, cast 70 / 2,986, other 273 / 11,003.
+- The air dashes in Cast 2 did not change in open loop: 12 of the 22 ticks are FORCED, 5 the CONTINUE of a dash
+  already chosen; the hop tier ranks safe rows only.
+- **Switch-off identity** (this branch vs a frozen 0c6ce72 = the start head with the same map files,
+  `C:\ssbot\live_1v1_0c6ce72`; every tick's decision, chosen row lane and map output; `ident_cmp.py`, `ident.json`):
+  rnmap7r's switches i0 ep1 **3,248 / 3,248**, rnchase7r's i1 ep0 **2,404 / 2,404**, map off (rn) 192006 ep1
+  **2,073 / 2,073**.
+
+### Tests
+
+`tests/test_sg8.py` (6): the f19893 locate, jump_strike + ALLD leave no dead end (reduced map with the carry), STAY /
+ALLD compiled = Python on 120 random plans, the stay value rule, the lunge re-anchor, the airborne readiness compiled =
+Python. Also pass (171 with test_sg8): test_special_map_sg7, test_special_map_sg7_review, test_special_map_jit,
+test_special_map_sg4, test_special_map_review, test_map_lookahead, test_special_map, test_chase_sg5,
+test_chase_sg5_review, test_forum_l2, test_forum_planner, test_forum_v2, test_rune_bombs, test_zone_overlay,
+test_move_data.
+
+### Live retest (prepared, not run): `C:\ssbot\sandbox\1v1_map_ab_sg8.txt`
+
+- Frozen checkout `C:\ssbot\live_1v1_3c8dc2a` (3c8dc2a = SG8's last code commit; every map tag and bucket copied and
+  decompressed into the cache). Commands (one driver per instance, detached via WMI):
+  `1v1_live.ps1 -Rev 3c8dc2a -Inst 0 -Arms rnmap8 -Chunk 4 -Blocks 1 -Seed 760000 -Manifest C:\ssbot\sandbox\1v1m8_manifest.txt`
+  and `-Inst 1 -Arms rnchase8 ... -Seed 770000` (the first runs' shape); what to read and the analysis commands are in
+  the file.
+
+### Open items
+
+1. The live retest: down slashes on the hammer, retreats, the distance at the Slam 0 entry, slam hits (their frame vs
+   the Slam 2 / Recover entry: the carry), FORCED ticks in slams, late ticks.
+2. The sim's relocation still falls back / takes the minimum on ~10 % of airborne decisions (bounce bins, released
+   holds without the plan): 15-21 damaged starts vs 7 with the true state.
+3. Air dashes in Cast 2 were not changed in open loop (FORCED or a CONTINUE); the pre-Cast 2 "on the ground" tier is
+   only a ranking.
+4. STAY's band cannot be reached safely without a strike at the Slam 0 entry (the hammer to ~12 u): the person's 5-7 u
+   stance only works with the strike; the readiness before the antic (SG4) is what brings her there.
+5. The IO-loop resend of the last ACTION during a long tick (not done).
