@@ -7216,3 +7216,94 @@ test_special_map_jit, test_map_lookahead, test_chase_sg5, test_chase_sg5_review,
 3. The demo strikes need the Slam 0 entry before they can be certified at the person's x (~5 u): the antic's
    remaining length is unknown at a press at antic 44-48 (the person's antic at 120 fps: 48-48.5 frames).
 4. The SG6 list's overlay lookups and the umbrella / dash macros remain.
+
+### Review (adversarial safety review of SG7; diff against 2acd7be; commit d135311; forum.md 63.5)
+
+Offline only. Data: `C:\ssbot\data\m2_map\sg7\review` (scans, coverage, observation checks, closed loops, demo / live
+checks). Distances centre to centre (u).
+
+1. **The Collider rule is refuted for one condition: the physics order.** A frame runs its physics step (the lunge
+   moves the Clapper 0.6 u; triggers fire with the colliders enabled now) before Update (the FSM leaves Slam 1 / Slam 2
+   and disables that hammer). So Slam Collider 1 still hurts in the first Slam 2 frame at that frame's (moved)
+   position, Slam Collider 2 in the first Slam Recover frame. Recordings: 30 of 315 Collider 1 hp losses are logged on a
+   Slam 2 frame, 2 Collider 2 losses on a Recover frame. Coverage of hammer damage events by the map's test (dilated
+   physics box + HeroBox head vs the recorded polygon / its box, the event frame or the 2 before):
+   - SG7's own set (3,850 slams, 375 hammer hp losses): polygon and box both miss 9 hp losses (SG7 called them
+     recording alignment; they are this physics order); 1 attempt past the gate missed by the polygon only.
+   - Independent data (the specials probe 2026-10-11, 12 runs, and 54 Forum_A runs 10-02..10-08, partly scanned; 87
+     hammer hp losses): the **polygon misses 3 hp losses that the box catches** (all Collider 1 on the first Slam 2
+     frame; e.g. specials_i1_s32 f2401446: polygon 0.42 u from the hero at the last Slam 1 frame, the lunge's last
+     step carries it onto her), and 44 attempts past the gate and 36 i-frame-blocked attempts likewise.
+   - With the carry (the shape also on the next state's first frame at that frame's position): every hp loss covered
+     except 2 on SG7's set, missed by both models and outside the map's domain (a Wall Slide clip; Sprint Air).
+     Independent: all 87 covered.
+   - Entry vs stay, the cooldown and the i-frame length hold on the independent data (no counter-example); the
+     downspike protection stays the conservative contact +0..+8.
+   - Code: `move_data.load_cl_slam(carry=True)` / `HAMMER_CARRY`, `MapConfig.carry`, variant `sg7r` (= sg7 + carry),
+     closed-loop truth `--truth polyc`. Stored: `special_map_CL_SLAM_sg7r[_f12|_f10|_f8.5|_f7.25|_f6.5|_b4|_b2.5]`.
+2. **Stage-aligned time.** Replayed the live observation (forum_map's back-dated entries + `MapRuntime.observe`) on
+   every recorded slam and compared the consistent variants' hammer (Collider 1 / 2 per frame) with the real one over
+   the next 13 frames (`obscheck_*.txt`):
+   - 60 fps (2,946 bot / probe slams + 915 with part frames, each cut at its first freeze frame): 327,860 + 5,239 real
+     hammer frames, 0 not predicted (also with OBS_LAT 1). The tracker's clock matches the template's (the bot's
+     recordings start a state with tin 0).
+   - **120 fps / x0.5 (274 slams: the person's sessions, the x0.5 runs): 1,306 of 40,976 real hammer frames not
+     predicted** (SG4's union: 0). The game ends states on its own frame grid: entries on half frames, Slam 1 lasting
+     1.5-2.5 frames instead of 3; rounded entries pick the wrong variants. Fix: `MapRuntime.observe` takes the
+     fractional entries / frame (`k_frac`) and uses no stage rows off the 60 Hz grid (`off_grid`: more than
+     `OBS_SNAP` 0.2 from a whole frame; every 60 fps entry is within 0.06); forum_map keeps that for the slam
+     (`info["obs_off"]`). After the fix: 0 not predicted at 120 fps; 60 fps unchanged (the exact rule as before).
+   - forum_map recorded the entries minus k_shift and checked the stage at k0 = k_trk - k_shift although st_ / st_t0
+     are the tracker's now (k_trk): with a tracker ahead of the origin the entries matched the wrong variants. Now the
+     entries are absolute and observed at k_trk. k_shift is 0 in oracle mode (identical decisions there).
+   - Not reproduced: a missed / late transition (back-dating covers ticks that skip a stage), the antic re-entered or
+     a cancelled slam (a new instance resets `seen`), the lunge phase (both phases kept), the merged Recover+ rows (the
+     carry's Collider 2 lies in them).
+3. **Walls.** The bucket maps let the hero touch the bucket's wall (`xs + hw <= wr`), and the bucket's wall could be
+   the real one. The map's hero has no wall states, but airborne at a wall with the key toward it Hornet slides /
+   clings / scrambles (HeroBox.cs: WallSlide 0.876 u wide, centre 0.21 u off, 0.4 u past the physics box;
+   WallScramble's top 0.51 u above it); 26 of 247 bot hammer hp losses in the w7 runs came within 3 frames of a wall
+   clip. Fix: `WALL_MARGIN_U` 0.35 u (touch ray 0.1 + one late run step 0.165 + half a cell): a bucket's wall is at
+   least that far inside the real wall (`wall_bucket`); the open floor (>= 14 u / 6 u) unchanged.
+4. **Checks after the fixes** (closed loop with the carry truth `polyc`, the measured lateness, 22,320 episodes each;
+   `review\rescore\closed_loop_review.json`; demo / live checks on the stored maps):
+
+| | sg4 | sg7 | sg7r |
+|---|---|---|---|
+| damaged episodes, all starts | 643 | **31** | 235 |
+| feasible starts damaged | 32 / 20,155 (0.159 %) | 28 / 21,011 (0.133 %) | 39 / 20,729 (0.188 %) |
+| noise-free damage | 15 | **0** | 32 |
+| hits per slam / key changes | 1.112 / 4.61 | 1.248 / 4.93 | 1.196 / 4.64 |
+| starts feasible on sg4 and sg7 (15,822): damaged | 31 | 9 | |
+| the person's 29 landed strikes certified (any key) | 0 | 6 (10) | 4 (6) |
+| the 5 bad presses certified | 0 | 0 | 0 |
+| 10-12 live slam hits passing an infeasible state first | 44 / 46 | 44 / 46 | 44 / 46 (lead 9.5 f) |
+
+   - Under the corrected truth **sg7 is at least as safe as sg4 in every closed-loop check** (SG7's 16-vs-15 and
+     hop-start counts used the truth without the carry; with it sg4 itself takes 15 noise-free hits). The carry costs
+     sg7's policy one damaged episode (31 vs SG7's 30).
+   - **sg7r is worse, not better**: its geometry covers the carry truth exactly (0 of 1,996,002 truth-hurt cells
+     uncovered), but the carried frames remove strike options and leave marginal escape rows (values 0.0-0.03,
+     clearance only) that the lattice / tube model does not hold: finite ground cells with no finite ground successor
+     in phase 0: sg7 28, sg7r 38 (jump successors not checked). A noise-free example: ground start k0 40, 10 u in
+     front, S47S5: value 0.034 at k 40, every key -inf from k 43, Collider 2 at its entry frame 55. Not recommended;
+     kept selectable (tag `sg7r`).
+   - Tests: `tests/test_special_map_sg7_review.py` (4: the recorded hit needs the carried frame; the carry adds only
+     the next state's first frame; off-grid observation = every variant, on-grid exact as before; the wall margin);
+     3 fail on 99338e3. Also pass: test_special_map_sg7, test_move_data, test_special_map, test_special_map_sg4,
+     test_special_map_review, test_special_map_jit, test_map_lookahead, test_chase_sg5, test_chase_sg5_review
+     (66 passed). The sg4 / map-off paths are untouched by the runtime changes (all behind `rt.stage`); no replay
+     identity run in the review.
+5. **Prepared, not run**: frozen checkout `C:\ssbot\live_1v1_d135311` (it already existed, made at 23:36 by another
+   session from d135311: sg4 / sg7 maps byte-identical, sg7r_f10 / sg7r_f6.5 missing), `C:\ssbot\sandbox\1v1_map_ab_sg7.txt`
+   (rn vs rnmap7, 16 episodes per arm, instances 0 / 1, seeds 740000 / 750000, manifest 1v1m7_manifest.txt),
+   `C:\ssbot\sandbox\start_overlay_map_check_sg7.ps1` (sg7, SSBOT_OVERLAY_MAP_PLANNER=0). Arm lines rnmap7r /
+   rnchase7r (sg7r) were appended to 1v1_arms.txt by another session at 23:36; the review appended nothing.
+
+Open items / next
+1. sg7 meets the closed-loop rule above; the live A/B decides. The live step must check: the map-row take rate,
+   `obs_off` false at 1x, bucket use near walls, any slam damage (its frame relative to the Slam 2 / Recover entry:
+   the carry), late ticks.
+2. The escape-row fragility (finite cells without a finite successor) exists in sg7 too: understand it (the run
+   steps' lattice rounding vs the tubes, float16 values near 0) before putting the carry into the map.
+3. The carry in the map (sg7r) after 2. The Forum_A scan was stopped at 8,248 slams (budget).
