@@ -89,6 +89,10 @@ class GoalPrefs(TacticPrefs):
     #                                      SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3), a jumping Clapper in its antic /
     #                                      flight - the hits rank above the stance, so a reward there keeps the hero in
     #                                      the air in front of it instead of under it
+    ground_hit: frozenset = frozenset()  # iids whose hits count only when pressed on the ground (SP3: a hit on the
+    #                                      idle Clapper sends it into an attack at once, a third of them slams; one
+    #                                      landed from the air - a pogo bounce is airborne 35+ frames - leaves the slam
+    #                                      playbook no landing in time)
 
 
 class Tactics:

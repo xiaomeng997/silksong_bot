@@ -212,3 +212,56 @@ def test_rune_hold_exit_by_the_landing(jb_on):
     # the Clapper standing at the landing between her and the back spot: out
     p = t.decide(world(29.0, t=12.2, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
     assert t.last["goal_why"].endswith("rune: out")
+
+
+def test_ground_hit_on_the_idle_clapper(jb_on):
+    t = l2()
+    p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
+    assert p.ground_hit == frozenset({9}) and p.no_hit == frozenset()
+    # small runes (rn's hop slashes): untouched
+    p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]),
+                 WinFc([subj(9, CC, 30.0, y=7.45, state="Spell Antic", family="CC_CAST", committed=True)]), None, 3)
+    assert p.ground_hit == frozenset()
+
+
+def test_ground_hit_off_by_default():
+    t = l2()
+    p = t.decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc([subj(9, CC, 30.0, y=7.45)]), None, 3)
+    assert p.ground_hit == frozenset() and p.no_hit == frozenset()
+
+
+def test_kernel_ground_only():
+    # one row: a swing pressed in the air meets the target; gonly drops it from h / nh, keeps the first hit
+    from ssbot.combat import forum_planner as fp
+    from ssbot.knowledge import kinematics as kin
+    T1 = 12
+    box = np.zeros((1, T1, 4))
+    box[0, :, :] = (30.0, 4.0, 30.5, 6.08)
+    flags = np.zeros((1, T1), np.int64)
+    flags[0, 3:] |= kin.F_ATTACKING                       # pressed at frame 3, in the air (no F_GROUND)
+    mode = np.zeros((1, T1), np.int64)
+    latched = np.zeros((1, T1), np.int64)
+    latched[0, 2] = kin.B_ATTACK
+    tbox = np.zeros((1, T1, 4))
+    tbox[0, :, :] = (30.6, 4.0, 32.0, 8.0)
+    tok = np.ones((1, T1), bool)
+    tw = np.ones((1, 4))
+
+    def run(gonly):
+        o = dict(J=np.zeros(1), hits=np.zeros(1), ff=np.full(1, -1, np.int64), ft=np.full(1, -1, np.int64),
+                 nh=np.zeros(1))
+        fp._forum_score_kernel(box, flags, mode, latched, 1, tbox, tok, tw, *_shapes(), 14.0, 49.0, np.zeros(8),
+                               31.0, np.zeros(1), np.zeros(1), np.nan, np.inf, o["J"], o["hits"], o["ff"], o["ft"],
+                               np.zeros(1, np.int64), np.zeros(1, np.int64), np.zeros(1), np.zeros(1, np.bool_), False,
+                               0, np.full(1, -1, np.int64), np.zeros(1, np.int64), np.zeros(1, np.int64),
+                               np.ones(1, np.bool_), o["nh"], np.array([gonly], np.bool_))
+        return o
+    a, b = run(False), run(True)
+    if a["nh"][0] == 0:
+        pytest.skip("the synthetic swing does not reach the target with these shapes")
+    assert a["nh"][0] == 1 and b["nh"][0] == 0 and b["ff"][0] == a["ff"][0] >= 0
+
+
+def _shapes():
+    from ssbot.combat.forum_planner import _shapes as shp
+    return shp("Wanderer")

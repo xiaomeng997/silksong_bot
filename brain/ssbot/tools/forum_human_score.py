@@ -465,7 +465,7 @@ def j_terms(pl, cap: dict, box, flags, mode, latched) -> np.ndarray:
                             J, np.zeros(n), np.full(n, -1, np.int64), np.full(n, -1, np.int64), np.zeros(n, np.int64),
                             np.zeros(n, np.int64), np.zeros(n), np.zeros(n, np.bool_), pl.down_slash, pl.combo_f,
                             np.full(n, -1, np.int64), np.zeros(n, np.int64), np.zeros(n, np.int64), real,
-                            np.zeros(n))
+                            np.zeros(n), np.zeros(len(real), np.bool_))
         out[:, t] = J
     return out
 

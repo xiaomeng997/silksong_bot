@@ -899,6 +899,12 @@ class GauntletTactics:
             # leaves its rune circle - the landed-hits rank sits above the stance (trial 2: rows slashing it in the air
             # kept the hero airborne in front of it: the umbrella, the landing slam, the rune circle)
             out = replace(out, no_hit=frozenset({g.target}))
+        elif jump_behind.ENABLED and s is not None and s.type_key == CLAPPER and (
+                s.family in (None, "CC_EVADE") or str(how).startswith(("jump: under and behind (landed)", "rune: behind"))):
+            # SSBOT_FORUM_JUMP_BEHIND (SP3 trial 3): near it after a jump the planner's pogo / jump slashes on the idle
+            # Clapper sent it into its attack choice with the hero bouncing in the air (9 of 56 slams: no landing for
+            # the playbook, 3 hammer hits): its hits count only from the ground (the person slashes it standing)
+            out = replace(out, ground_hit=frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

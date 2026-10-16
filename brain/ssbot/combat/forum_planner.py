@@ -742,7 +742,7 @@ def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 @numba.njit(cache=True, parallel=True)
 def _forum_score_kernel(box, flags, mode, latched, face0, tbox, tok, tw, vr, vl, st, win, wall_l, wall_r, wv, stance_x,
                         rx, rv, boss_x, max_hits, J, hits, first_f, first_t, first_k, first_face, risk, unmod,
-                        down_slash, combo_f, sw_f, sw_k, sw_face, real, nh):
+                        down_slash, combo_f, sw_f, sw_k, sw_face, real, nh, gonly):
     """J per row on the nominal lane over K targets (tbox [K, T1, 4], tok [K, T1], weights tw [K, 4] by the slash kind
     side / up / wall / down: GoalPrefs.hit_kw, else the target's one weight for every kind): the crest's side /
     up / wall / down slash polygons in their active windows against each target's box (an attack counts each target it
@@ -751,7 +751,9 @@ def _forum_score_kernel(box, flags, mode, latched, face0, tbox, tok, tw, vr, vl,
     facing); sw_f / sw_k / sw_face: the first swing (frame, kind, facing); unmod: an attack pressed while dashing or
     sprinting (the dash stab, not modelled) or, combo_f > 0 (Wanderer), up to combo_f frames after a dash / sprint frame
     (HeroController.Attack: inside wandererDashComboWindowTimer the press is the WANDERER DASH COMBO). down_slash: the
-    crest's down attack is a slash (DownSlashTypes.Slash: an ATTACKING swing pressed with down in the air)."""
+    crest's down attack is a slash (DownSlashTypes.Slash: an ATTACKING swing pressed with down in the air). gonly[t]
+    (SSBOT_FORUM_JUMP_BEHIND, GoalPrefs.ground_hit): a hit on target t counts (h, nh) only when the swing was pressed
+    on the ground; the first-hit fields still record it (the hit branch's recoil)."""
     N, T1 = flags.shape
     K = tbox.shape[0]
     for c in numba.prange(N):
@@ -816,6 +818,8 @@ def _forum_score_kernel(box, flags, mode, latched, face0, tbox, tok, tw, vr, vl,
                             first_f[c], first_t[c], first_k[c], first_face[c] = j, t, kind, fc[j]
                         break
                 if got:
+                    if gonly[t] and (flags[c, k - 1] & F_GROUND) == 0:
+                        continue
                     h += tw[t, kind - 1]
                     if real[t]:
                         nh[c] += 1.0
@@ -1425,6 +1429,8 @@ class ForumPlanner(Planner):
         nohit = getattr(prefs, "no_hit", None) or ()
         real = np.array([not t.hazard and not getattr(t, "blocked", False) and t.iid not in nohit for t in keep],
                         np.bool_)
+        gh = getattr(prefs, "ground_hit", None) or ()
+        gonly = np.array([t.iid in gh and not t.hazard for t in keep], np.bool_)
         _forum_score_kernel(np.ascontiguousarray(roll.box), np.ascontiguousarray(roll.flags),
                             np.ascontiguousarray(roll.mode), np.ascontiguousarray(latched), face0,
                             tbox if len(keep) else np.zeros((0, T1, 4)), tok if len(keep) else np.zeros((0, T1), bool),
@@ -1435,7 +1441,7 @@ class ForumPlanner(Planner):
                             float(prefs.max_hits) if prefs.max_hits is not None else np.inf,
                             out["J"], out["hits"], out["first_f"], out["first_t"], out["first_k"], out["first_face"],
                             out["risk"], out["unmod"], self.down_slash, self.combo_f, out["sw_f"], out["sw_k"],
-                            out["sw_face"], real, out["nh"])
+                            out["sw_face"], real, out["nh"], gonly)
         out["targets"] = keep
         if "under" in self.fcfg.tac and len(keep):
             out["J_under"] = self._under_bonus(f, roll.box, keep)
