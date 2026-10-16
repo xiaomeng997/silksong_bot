@@ -5,7 +5,7 @@ over the slam's phases) as one call, and batched level lookups (the L2 strip, th
 
 Every kernel is the Python reference's arithmetic in the same order (no fastmath), so its values and decisions are
 bit-identical (tests/test_special_map_jit.py; open-loop replays, forum.md 62). Only keyed level maps (the SG4 store);
-anything else stays on the Python path. Switch: SSBOT_FORUM_SPECIAL_MAP_JIT (default 0 until the replay identity; 1 = compiled).
+anything else stays on the Python path. Switch: SSBOT_FORUM_SPECIAL_MAP_JIT (default 1 since the replay identity, forum.md 62; 0 = the Python reference).
 
 The tables (special_map_rt.MapRuntime.jit_tables): the levels S{p} [K, 3, NS, NX] and press bits P{p} of all six
 phases as tuples of read-only arrays (a missing phase repeats an existing one, never indexed), the tube index, the
@@ -18,7 +18,7 @@ import os
 import numpy as np
 from numba import njit
 
-JIT = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_JIT", "0").strip() == "1"
+JIT = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_JIT", "1").strip() != "0"
 
 NONE_LEVEL = 254
 PRESS_COOL = 19
