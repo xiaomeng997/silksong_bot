@@ -76,15 +76,17 @@ def sg8_setup() -> None:
     """SG8: the map's run-time rules (map_lookahead.STAY / ALLD; the compiled kernels read them when a runtime's tables
     are built): once per process, before the first runtime loads."""
     from ssbot.combat import map_lookahead as ml
-    if not SG8 or ml.STAY is not None:
+    if not SG8 or ml.STAY is not None or ml.ALLD:
         return
+    ml.ALLD = True
+    if os.environ.get("SSBOT_FORUM_SG8_STAY", "1").strip() == "0":
+        return                     # SG8 without the stay rule (closed loop: 15 vs 21 damaged of ~20,580 starts)
     from ssbot.combat.move_data import load_cl_slam
     vs = load_cl_slam().variants("observed")
     K = max(len(v.disp) for v in vs) + 40
     D = np.stack([np.pad(v.disp, (0, max(0, K - len(v.disp))), mode="edge")[:K] for v in vs])
     ml.STAY = {"caps": None, "c_need": STAY_C_U, "mu": STAY_MU, "dsp": 0.5 * (D.min(0) + D.max(0)),
                "fb": FACE_BAND, "bb": FACE_BEHIND}
-    ml.ALLD = True
 
 
 def chase_wall(cx: float, hx: float, arena: tuple | None = None, buckets: bool = False) -> bool:
@@ -189,8 +191,8 @@ class MapHelper:
             # SG8 (stalls): every wall bucket of the tag now (the construction), never on a slam tick; decisions as
             # before (the same runtimes), only when they load
             t_b = time.perf_counter()
-            for u in smrt.WALL_BUCKETS_F + smrt.WALL_BUCKETS_B + ((smrt.WALL_BUCKET_B15,) if SG8 else ()):
-                sfx = (f"_f{u:g}" if u in smrt.WALL_BUCKETS_F else f"_b{u:g}")
+            for i_, u in enumerate(smrt.WALL_BUCKETS_F + smrt.WALL_BUCKETS_B + (smrt.WALL_BUCKETS_B_SG8 if SG8 else ())):
+                sfx = (f"_f{u:g}" if i_ < len(smrt.WALL_BUCKETS_F) else f"_b{u:g}")
                 tag = smrt.MAP_TAG + sfx
                 if tag in self._bucket_rt:
                     continue

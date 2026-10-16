@@ -44,10 +44,10 @@ WALL_BACK_U = 6.0                  # ... or behind it (no wall buckets for the S
 # 2.04 + 4.2 = 6.24 u); nearer than the last bucket: the wall exit
 WALL_BUCKETS_F = (12.0, 10.0, 8.5, 7.25, 6.5)
 WALL_BUCKETS_B = (4.0, 2.5)
-# SG8 (forum.md 64; SSBOT_FORUM_SG8=1): one more back bucket (2 live slams had the back wall under 2.85 u: no map);
-# only the sg8 tag has its file (others: no runtime -> the wall exit as before)
+# SG8 (forum.md 64; SSBOT_FORUM_SG8=1): two more back buckets (2 live slams had the Clapper backed against the wall:
+# its centre 1.34 u from it, no map); only the sg8 tag has their files (others: no runtime -> the wall exit as before)
 SG8 = os.environ.get("SSBOT_FORUM_SG8", "0").strip() == "1"
-WALL_BUCKET_B15 = 1.5
+WALL_BUCKETS_B_SG8 = (1.5, 0.9)
 # SG7 review (forum.md 63.5): a bucket's wall at least this far inside the real wall. The map's hero macros have no
 # wall states, but touching a wall airborne with the key toward it slides / clings / scrambles: HeroBox.cs WallSlide
 # 0.876 u wide with its centre 0.21 u off (0.4 u past the physics box), WallScramble's top 0.51 u above the physics
@@ -714,7 +714,7 @@ class MapRuntime:
                 return None
             f = [u for u in WALL_BUCKETS_F if u <= front - WALL_MARGIN_U]
             return f"_f{f[0]:g}" if f else None
-        b = [u for u in WALL_BUCKETS_B + ((WALL_BUCKET_B15,) if SG8 else ()) if u <= back - WALL_MARGIN_U]
+        b = [u for u in WALL_BUCKETS_B + (WALL_BUCKETS_B_SG8 if SG8 else ()) if u <= back - WALL_MARGIN_U]
         return f"_b{b[0]:g}" if b else None
 
     def S_obs(self, p: int, k: int, s: int, x: float, c: int = 0) -> float:
