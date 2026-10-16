@@ -44,10 +44,18 @@ def load(paths) -> list[dict]:
     return out
 
 
+def mixed(r: dict) -> bool:
+    """A trace whose playbook run is a second slam inside the trial's settle (probe before 2026-10-16 05:15): its
+    stages and keys mix two slams."""
+    a = r.get("antic")
+    kp = r.get("k_press_real")
+    return (a is not None and not 40 <= a <= 60) or (kp is not None and kp < 0)
+
+
 def summarize(rows: list[dict]) -> dict:
     by = defaultdict(list)
     for r in rows:
-        if "skip" in r or "error" in r or r.get("seen") is None:
+        if "skip" in r or "error" in r or r.get("seen") is None or mixed(r):
             continue
         by[r["d"]].append(r)
     out = {}
@@ -80,7 +88,7 @@ def summarize(rows: list[dict]) -> dict:
 def fails(rows: list[dict]) -> list[dict]:
     out = []
     for r in rows:
-        if "skip" in r or "error" in r or r.get("seen") is None:
+        if "skip" in r or "error" in r or r.get("seen") is None or mixed(r):
             continue
         p = r.get("play") or {}
         if p.get("k_start") is not None and not r.get("success"):
@@ -101,7 +109,7 @@ def main(argv=None) -> int:
     rows = load(a.files)
     s = summarize(rows)
     f = fails(rows)
-    skips = Counter(r.get("skip") or ("error" if "error" in r else "ok") for r in rows)
+    skips = Counter(r.get("skip") or ("error" if "error" in r else "mixed" if mixed(r) else "ok") for r in rows)
     for d, v in s.items():
         print(d, json.dumps(v))
     print("skips", dict(skips))

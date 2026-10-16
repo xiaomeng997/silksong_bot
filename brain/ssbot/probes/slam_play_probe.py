@@ -123,7 +123,7 @@ class PlayProbe(Target):
                 rows.append({"gap": s["f"] - last - 1})
             last = s["f"]
         link.act(last + 2, 0, hold_frames=0)
-        run = self.play.done[-1] if self.play.done else self.play.run
+        run = self.play.done[0] if self.play.done else self.play.run      # the trial's slam (not a next one in the settle)
         return {"d": d, "pin": self.pin, "seen": seen} | self._outcome(run, rows)
 
     @staticmethod
@@ -164,7 +164,7 @@ class PlayProbe(Target):
         end = first(lambda r: r["st"] not in sp.SLAM_STATES, rec) if rec is not None else None
         prev = 0
         jump = press = None
-        for r in R:
+        for r in (r for r in R if r["f"] >= fa - 1):
             rise = r["act"] & ~prev
             prev = r["act"]
             if jump is None and rise & M_J:
