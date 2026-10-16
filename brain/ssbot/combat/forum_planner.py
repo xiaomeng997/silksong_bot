@@ -490,6 +490,7 @@ class EnvelopeAudit:
     hop_safe: int = 0
     hop_chosen: int = 0
     noglide_ticks: int = 0        # SSBOT_FORUM_NOGLIDE: ticks with safe rows both with and without a glide
+    nodash_ticks: int = 0         # SSBOT_FORUM_SLAM_PLAY_NODASH: ticks with safe rows both with and without a dash
     jb_nojump_ticks: int = 0      # SSBOT_FORUM_JB_NOJUMP: ticks with safe rows both with and without a jump key
     sm_uncert: int = 0            # review: special rows (contact found) whose press on the planner's own lane is in no
                                   #   certified entry (full checks instead)
@@ -4122,17 +4123,26 @@ class ForumPlanner(Planner):
                 jr_ = safe & ((cmd & B_JUMP) != 0).any(axis=1)
                 self.audit.jb_nojump_ticks += int(jr_.any() and (safe & ~jr_).any())
                 gf_ = (jr_.astype(np.int64),)
+            nd_ = ()
+            if v2 and (getattr(prefs, "no_dash", None) or ()):
+                # SSBOT_FORUM_SLAM_PLAY_NODASH (task 1v1 SP4; GoalPrefs.no_dash, set only with the switch): near the
+                # idle / walking / evading Clapper the safe rows with a dash key early rank after the ones without,
+                # above the landed hits (a dash + run leaves no input when a slam starts: the playbook cannot take it)
+                from ssbot.combat import slam_play as _sp
+                dr_ = safe & ((cmd[:, :_sp.NODASH_F] & B_DASH) != 0).any(axis=1)
+                self.audit.nodash_ticks += int(dr_.any() and (safe & ~dr_).any())
+                nd_ = (dr_.astype(np.int64),)
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V,
-                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + kk_ +
+                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + nd_ + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V, v2_ff
-                                    ) + gf_ + (v2_nh, offl) + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+                                    ) + gf_ + (v2_nh, offl) + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None

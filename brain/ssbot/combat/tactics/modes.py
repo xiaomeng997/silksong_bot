@@ -93,6 +93,9 @@ class GoalPrefs(TacticPrefs):
     #                                      idle Clapper sends it into an attack at once, a third of them slams; one
     #                                      landed from the air - a pogo bounce is airborne 35+ frames - leaves the slam
     #                                      playbook no landing in time)
+    no_dash: frozenset = frozenset()       # iids near which safe rows with a dash key (first NODASH_F frames) rank after
+    #                                      the rows without, above the landed hits (SSBOT_FORUM_SLAM_PLAY_NODASH, task
+    #                                      1v1 SP4: a dash + run takes the input away when a slam starts)
     ground_first: frozenset = frozenset()  # iids for which rows without a jump key rank first among equal landed hits
     #                                      (SSBOT_FORUM_JB_NOJUMP, task 1v1 SP4: behind the landed Clapper the planner
     #                                      jumped and lost a hit; the ground behind it has no damage box)

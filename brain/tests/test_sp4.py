@@ -15,7 +15,7 @@ CAST = dict(y=7.45, family="CC_JUMP_CAST", committed=True)
 
 
 def test_switches_off_by_default():
-    assert not sp.LATE and not sp.AFTER
+    assert not sp.LATE and not sp.AFTER and not sp.NODASH
     assert not (jb.PASS_HIT or jb.LAND_HIT or jb.NO_JUMP or jb.CAST_ANTIC or jb.WALL_PUSH)
 
 
@@ -85,6 +85,20 @@ def test_late_landing_at_28(monkeypatch):
     play, landed, _ = simulate(5.2, ground_until=27)
     c = play.cfg
     assert keys(landed, sp.M_J)[0] == 30 and keys(landed, sp.M_A) == [c.k_press_max_late] == [48]
+
+
+
+def test_late_press_cap(monkeypatch):
+    # LATE: every press by K_PRESS_MAX_LATE (48: SP4 t1, a jump at 30 + the press at 49 hit the hammer at Slam 0 + 1);
+    # a jump at K_JUMP still presses at K_PRESS
+    monkeypatch.setattr(sp, "LATE", True)
+    play, landed, _ = simulate(5.2)
+    assert keys(landed, sp.M_J)[0] == play.cfg.k_jump and keys(landed, sp.M_A) == [play.cfg.k_press]
+    play, landed, _ = simulate(5.2, cfg=sp.PlayCfg(k_jump=30))
+    assert keys(landed, sp.M_J)[0] == 30 and keys(landed, sp.M_A) == [48]
+    monkeypatch.setattr(sp, "LATE", False)
+    play, landed, _ = simulate(5.2, cfg=sp.PlayCfg(k_jump=30))
+    assert not keys(landed, sp.M_J) and play.done[0].why == "late jump"          # off: SP1's latest jump is 29
 
 
 # ---- after the hammer ----
@@ -207,3 +221,36 @@ def test_planner_ground_first_key():
     nh = np.array([0.0, 0.0, 0.0])
     order = np.lexsort((-J, jr.astype(np.int64), -nh, ~safe))
     assert int(order[0]) == 1
+
+
+def test_nodash_prefs(monkeypatch):
+    # SSBOT_FORUM_SLAM_PLAY_NODASH: near the idle / evading Clapper GoalPrefs.no_dash = its iid; off, far, or in a move: none
+    monkeypatch.setattr(sp, "ENABLED", True)
+    t = l2()
+    p = t.decide(world(29.0, t=10.0, ents=[clapper(9, 35.0, False)]), WinFc([subj(9, CC, 35.0, y=7.45)]), None, 3)
+    assert p.no_dash == frozenset()                                     # off
+    monkeypatch.setattr(sp, "NODASH", True)
+    p = t.decide(world(29.0, t=10.1, ents=[clapper(9, 35.0, False)]), WinFc([subj(9, CC, 35.0, y=7.45)]), None, 3)
+    assert p.no_dash == frozenset({9})
+    p = t.decide(world(29.0, t=10.2, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Evade Scuttle", family="CC_EVADE")]), None, 3)
+    assert p.no_dash == frozenset({9})
+    p = t.decide(world(20.0, t=10.3, ents=[clapper(9, 35.0, False)]), WinFc([subj(9, CC, 35.0, y=7.45)]), None, 3)
+    assert p.no_dash == frozenset()                                     # 15 u away
+    p = t.decide(world(29.0, t=10.4, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]), None, 3)
+    assert p.no_dash == frozenset()                                     # in its slam: the playbook / the planner
+
+
+def test_planner_nodash_key():
+    """The ranking key: with no_dash a safe row without a dash beats a safe dash row with more landed hits; an unsafe
+    row stays last."""
+    import numpy as np
+    cmd = np.zeros((3, 30), np.int64)
+    cmd[0, 2:5] = sp.M_DASH
+    safe = np.array([True, True, False])
+    dr = safe & ((cmd[:, :sp.NODASH_F] & sp.M_DASH) != 0).any(axis=1)
+    J = np.array([5.0, 1.0, 9.0])
+    nh = np.array([-2.0, 0.0, -3.0])                                    # v2_nh: minus the landed hits
+    order = np.lexsort((-J, nh, dr.astype(np.int64), ~safe))
+    assert list(order) == [1, 0, 2]

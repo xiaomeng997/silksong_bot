@@ -937,6 +937,10 @@ class GauntletTactics:
             if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
                 # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
                 out = replace(out, ground_first=frozenset({g.target}))
+        if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
+                and s.family in (None, "CC_EVADE") and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
+            # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
+            out = replace(out, no_dash=frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

@@ -98,6 +98,15 @@ LATE = _on("SSBOT_FORUM_SLAM_PLAY_LATE", "0")
 # hammer off; its body's front edge 3.49 u to antic frame 67, then 2.25 u) AFTER_U in front with ground hits counting
 # (the after-the-hammer strike, presses about antic frame 63-76)
 AFTER = _on("SSBOT_FORUM_SLAM_AFTER", "0")
+# SSBOT_FORUM_SLAM_PLAY_NODASH (task 1v1 SP4, default 0; the lead's "no dash + run when a slam can start"; read by
+# combat.tactics.gauntlet and combat.forum_planner): while the Clapper idles / walks / evades (a slam can start any
+# frame) and the hero is within NODASH_U of it, the planner's safe rows with a dash key in their first NODASH_F frames
+# rank after the safe rows without one, above the landed hits (GoalPrefs.no_dash). A dash + run leaves no input for
+# 10-30 frames (Dash To Run, Sprint Turn / Skid End, Sprint Air): SP2 / SP3's "no input" declines (6 skids of 16) and
+# SP4 t1's sprint skid into its idle body (2 HP).
+NODASH = _on("SSBOT_FORUM_SLAM_PLAY_NODASH", "0")
+NODASH_U = 10.0             # centre to centre: the playbook's reach (2.7-9 u) + a step
+NODASH_F = 20               # a dash (6 frames) + the sprint's start
 OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
 AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
 
@@ -342,8 +351,9 @@ class SlamPlay:
                     self._close("abort", "late jump")
                     return None
                 r.phase, r.k_jump, r.x_jump = "jump", k, round(x, 3)
-                if LATE and (r.k_air is not None or r.late):
-                    # SSBOT_FORUM_SLAM_PLAY_LATE: a late start's press by Slam 0 - 1 (K_PRESS_MAX_LATE)
+                if LATE:
+                    # SSBOT_FORUM_SLAM_PLAY_LATE: every press by Slam 0 - 1 (K_PRESS_MAX_LATE), 18 frames after a late
+                    # jump (a jump at K_JUMP still presses at K_PRESS)
                     r.k_press_plan = min(max(c.k_press, k + c.press_after_late), c.k_press_max_late)
                 else:
                     r.k_press_plan = min(max(c.k_press, k + c.press_after), c.k_press_max)
