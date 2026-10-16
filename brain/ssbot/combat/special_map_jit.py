@@ -64,22 +64,29 @@ def _lvv(lv, scale):
 
 
 @njit(cache=True, inline="always", error_model="numpy")
-def _S(S, k, s, x, c, K, NX, x_lo, step, scale):
-    """LevelSource.S (keyed): the node's value with state key c."""
+def _S(S, R, k, s, x, c, K, NX, x_lo, step, scale):
+    """LevelSource.S (keyed): the node's value with state key c. R: frame -> row (SG7 stage maps; plain: the
+    frame)."""
     xi = _xi(k, s, x, K, NX, x_lo, step)
     if xi < 0:
         return -np.inf
-    return _lvv(np.int64(S[k, c + 1, s, xi]), scale)
+    r = R[k]
+    if r < 0:
+        return -np.inf
+    return _lvv(np.int64(S[r, c + 1, s, xi]), scale)
 
 
 @njit(cache=True, inline="always", error_model="numpy")
-def _Smax(S, k, s, x, K, NX, x_lo, step, scale):
+def _Smax(S, R, k, s, x, K, NX, x_lo, step, scale):
     xi = _xi(k, s, x, K, NX, x_lo, step)
     if xi < 0:
         return -np.inf
+    r = R[k]
+    if r < 0:
+        return -np.inf
     m = -1
     for c in range(3):
-        lv = np.int64(S[k, c, s, xi])
+        lv = np.int64(S[r, c, s, xi])
         if lv < NONE_LEVEL and lv > m:
             m = lv
     if m >= 0:
@@ -88,14 +95,17 @@ def _Smax(S, k, s, x, K, NX, x_lo, step, scale):
 
 
 @njit(cache=True, inline="always", error_model="numpy")
-def _SV(S, P, k, s, x, d, K, NX, NS, x_lo, step, scale):
+def _SV(S, P, R, k, s, x, d, K, NX, NS, x_lo, step, scale):
     """LevelSource.SV (keyed): the strike with key d held, if the node takes it (press bit)."""
     xi = _xi(k, s, x, K, NX, x_lo, step)
     if xi < 0:
         return -np.inf
-    idx = ((k * 3 + d + 1) * NS + s) * NX + xi
+    r = R[k]
+    if r < 0:
+        return -np.inf
+    idx = ((r * 3 + d + 1) * NS + s) * NX + xi
     if (np.int64(P[idx >> 3]) >> (7 - (idx & 7))) & 1:
-        return _lvv(np.int64(S[k, d + 1, s, xi]), scale)
+        return _lvv(np.int64(S[r, d + 1, s, xi]), scale)
     return -np.inf
 
 
@@ -108,19 +118,19 @@ def _slice(tube, j, TS0, TN):
 
 
 @njit(cache=True, error_model="numpy")
-def _kq(S, P, p, k, s1, x1, c, d, nmode, nbase, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN):
+def _kq(S, P, R, p, k, s1, x1, c, d, nmode, nbase, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN):
     """map_lookahead.keyed_q. nmode: 0 ground (slice 0), 1 a jump start (nbase + 1 + m), 2 the event in `tube`
     (slice_of(j + 1 + m), 0 once landed)."""
     K, NX = ci[CI_K], ci[CI_NX]
     mode = ci[CI_MODE]
     x_lo, step, scale = cf[CF_XLO], cf[CF_STEP], cf[CF_SCALE]
-    v1 = _S(S, k + 1, s1, x1, d, K, NX, x_lo, step, scale)
+    v1 = _S(S, R, k + 1, s1, x1, d, K, NX, x_lo, step, scale)
     if d == c or mode == 0 or not np.isfinite(v1):
         return v1
     br0 = -np.inf
     br1 = -np.inf
     br2 = -np.inf
-    ok = _Smax(S, k + 1, s1, x1, K, NX, x_lo, step, scale) > -np.inf
+    ok = _Smax(S, R, k + 1, s1, x1, K, NX, x_lo, step, scale) > -np.inf
     xx = x1
     s = s1
     for m in range(1, 4):
@@ -137,11 +147,11 @@ def _kq(S, P, p, k, s1, x1, c, d, nmode, nbase, tube, j, land, has_land, ci, cf,
                     s = _slice(tube, jj, TS0, TN)
                 else:
                     s = 0
-            v = _S(S, k + 1 + m, s, xx, d, K, NX, x_lo, step, scale) if s >= 0 else -np.inf
+            v = _S(S, R, k + 1 + m, s, xx, d, K, NX, x_lo, step, scale) if s >= 0 else -np.inf
             if np.isfinite(v):
                 b = gp[m] * v
             if m < 3:
-                ok = s >= 0 and _Smax(S, k + 1 + m, s, xx, K, NX, x_lo, step, scale) > -np.inf
+                ok = s >= 0 and _Smax(S, R, k + 1 + m, s, xx, K, NX, x_lo, step, scale) > -np.inf
         if m == 1:
             br0 = b
         elif m == 2:
@@ -161,7 +171,7 @@ def _kq(S, P, p, k, s1, x1, c, d, nmode, nbase, tube, j, land, has_land, ci, cf,
 
 
 @njit(cache=True, error_model="numpy")
-def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN, JS0,
+def _decide1(S, P, R, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN, JS0,
              val, off):
     """map_lookahead.decide_keyed on one phase: the candidates' values into val (offered: off). Action codes: d + 1
     (dir d), 3 + 3 i + bd + 1 (jump hold i, first key bd), 3 + 3 NJ + c + 1 (press)."""
@@ -174,7 +184,7 @@ def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam
     if kind == EV_GROUND:
         top = -np.inf
         for d in range(-1, 2):
-            v = _kq(S, P, p, k, 0, x1, c, d, 0, 0, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN)
+            v = _kq(S, P, R, p, k, 0, x1, c, d, 0, 0, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN)
             cv = v - lam * (d != c)
             val[d + 1] = cv
             off[d + 1] = True
@@ -182,7 +192,7 @@ def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam
                 top = cv
         v0 = np.empty(NJ)
         for i in range(NJ):
-            v0[i] = _S(S, k, JS0[i], x, c, K, NX, x_lo, step, scale)
+            v0[i] = _S(S, R, k, JS0[i], x, c, K, NX, x_lo, step, scale)
         done = np.zeros(NJ, np.bool_)
         for _ in range(NJ):
             bi = -1
@@ -197,7 +207,7 @@ def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam
             best = -np.inf
             bd = c
             for d in range(-1, 2):
-                v = _kq(S, P, p, k, s0 + 1, x1, c, d, 1, s0, tube, j, land, has_land, ci, cf, pl, gp, TS0,
+                v = _kq(S, P, R, p, k, s0 + 1, x1, c, d, 1, s0, tube, j, land, has_land, ci, cf, pl, gp, TS0,
                         TN) - lam * (d != c)
                 if v > best:
                     best = v
@@ -212,8 +222,8 @@ def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam
         s_now = _slice(tube, j, TS0, TN)
         pressed = False
         if k + 1 - last_press >= PRESS_COOL and s_now >= 0:
-            sv = _SV(S, P, k, s_now, x, c, K, NX, NS, x_lo, step, scale)
-            if np.isfinite(sv) and sv >= _S(S, k, s_now, x, c, K, NX, x_lo, step, scale) - 1e-3:
+            sv = _SV(S, P, R, k, s_now, x, c, K, NX, NS, x_lo, step, scale)
+            if np.isfinite(sv) and sv >= _S(S, R, k, s_now, x, c, K, NX, x_lo, step, scale) - 1e-3:
                 a = 3 + 3 * NJ + c + 1
                 val[a] = np.inf
                 off[a] = True
@@ -224,14 +234,14 @@ def _decide1(S, P, p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam
             else:
                 s1 = 0
             for d in range(-1, 2):
-                v = _kq(S, P, p, k, s1, x1, c, d, 2, 0, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN)
+                v = _kq(S, P, R, p, k, s1, x1, c, d, 2, 0, tube, j, land, has_land, ci, cf, pl, gp, TS0, TN)
                 val[d + 1] = v - lam * (d != c)
                 off[d + 1] = True
 
 
 @njit(cache=True, error_model="numpy")
-def _decide(Ss, Ps, ph, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN, JS0,
-            val, off, acc, acc_off):
+def _decide(Ss, Ps, ph, RM, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN,
+            JS0, val, off, acc, acc_off):
     """special_map_rt.decide_multi (one phase: map_lookahead.decide): per action the minimum over the phases (an
     action a phase does not offer is out), the first best in the candidates' order; nothing feasible: retreat on the
     ground, keep the key in the air. (value, kind, a, b): dir (d), jump (hold index, first key), press (key)."""
@@ -239,8 +249,8 @@ def _decide(Ss, Ps, ph, k, kind, ev_k, tube, land, has_land, x, c, last_press, l
     NA = acc.shape[0]
     for q in range(ph.shape[0]):
         p = ph[q]
-        _decide1(Ss[p], Ps[p], p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0,
-                 TN, JS0, val, off)
+        _decide1(Ss[p], Ps[p], RM[q], p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp,
+                 TS0, TN, JS0, val, off)
         if q == 0:
             for a in range(NA):
                 acc[a] = val[a]
@@ -272,14 +282,15 @@ def _decide(Ss, Ps, ph, k, kind, ev_k, tube, land, has_land, x, c, last_press, l
 
 
 @njit(cache=True, error_model="numpy")
-def decide_k(Ss, Ps, ph, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN, JS0):
+def decide_k(Ss, Ps, ph, RM, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN,
+             JS0):
     NA = 3 + 3 * ci[CI_NJ] + 3
     val = np.empty(NA)
     off = np.zeros(NA, np.bool_)
     acc = np.empty(NA)
     acc_off = np.zeros(NA, np.bool_)
-    return _decide(Ss, Ps, ph, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0, TN,
-                   JS0, val, off, acc, acc_off)
+    return _decide(Ss, Ps, ph, RM, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp, TS0,
+                   TN, JS0, val, off, acc, acc_off)
 
 
 @njit(cache=True, error_model="numpy")
@@ -344,8 +355,8 @@ def _land_bounce(yc, q0, BY, BLEN, BAPEX):
 
 
 @njit(cache=True, error_model="numpy")
-def plan_k(Ss, Ps, ph, si, sf, L, lam, face, ci, cf, pl, gp, TS0, TN, JS0, JT, JH, BT, JLAND, JY, JPY, JLEN, BY, BPY,
-           BLEN, BAPEX, LAG, POLY, TGT, NTGT, BITS):
+def plan_k(Ss, Ps, ph, RM, si, sf, L, lam, face, ci, cf, pl, gp, TS0, TN, JS0, JT, JH, BT, JLAND, JY, JPY, JLEN, BY,
+           BPY, BLEN, BAPEX, LAG, POLY, TGT, NTGT, BITS):
     """MapRuntime.plan's loop from the loop state (si, sf): the masks, the hero's x / y per frame, the action and
     value per decision, the state before each frame and the final state. BITS: B_RIGHT, B_LEFT, B_JUMP, B_DOWN,
     B_ATTACK, DOWN_PRE, DOWN_LEN, PRESS."""
@@ -393,7 +404,7 @@ def plan_k(Ss, Ps, ph, si, sf, L, lam, face, ci, cf, pl, gp, TS0, TN, JS0, JT, J
         dir_cur = s[SI_DIR]
         new_dir = dir_cur
         if s[SI_HASSL] == 0:
-            v, ak, aa, ab = _decide(Ss, Ps, ph, k, s[SI_EVKIND], s[SI_EVK], s[SI_EVTUBE], s[SI_LAND],
+            v, ak, aa, ab = _decide(Ss, Ps, ph, RM, k, s[SI_EVKIND], s[SI_EVK], s[SI_EVTUBE], s[SI_LAND],
                                     s[SI_HASLAND] != 0, f[SF_X], dir_cur, s[SI_LP], lam, ci, cf, pl, gp, TS0, TN, JS0,
                                     val, off, acc, acc_off)
             vals[t] = v
@@ -565,14 +576,14 @@ def ready_k(Ss, pe, xm, kd, gnd, yb, yp, tol, K0S, K0Y0, K0Y1, K0N, x_lo, step, 
 
 
 @njit(cache=True, error_model="numpy")
-def smin_k(Ss, ph, ks, ss, xs, cs, K, NX, x_lo, step, scale):
-    """[n] the minimum over the phases ph of LevelSource.S(k, s, x, c) (keyed)."""
+def smin_k(Ss, ph, RM, ks, ss, xs, cs, K, NX, x_lo, step, scale):
+    """[n] the minimum over the sources (phase ph[q], row map RM[q]) of LevelSource.S(k, s, x, c) (keyed)."""
     n = xs.shape[0]
     out = np.empty(n)
     for i in range(n):
         v = np.inf
         for q in range(ph.shape[0]):
-            vv = _S(Ss[ph[q]], ks[i], ss[i], xs[i], cs[i], K, NX, x_lo, step, scale)
+            vv = _S(Ss[ph[q]], RM[q], ks[i], ss[i], xs[i], cs[i], K, NX, x_lo, step, scale)
             if q == 0 or vv < v:
                 v = vv
         out[i] = v
@@ -674,10 +685,11 @@ def tables(rt) -> dict | None:
             "jidx": {int(h): i for i, h in enumerate(ti.jump_h)}}
 
 
-def plan_args(T: dict) -> tuple:
+def plan_args(T: dict, tgt: tuple | None = None) -> tuple:
+    TGT, NTGT = tgt if tgt is not None else (T["TGT"], T["NTGT"])
     return (T["ci"], T["cf"], T["pl"], T["gp"], T["TS0"], T["TN"], T["JS0"], T["JT"], T["JH"], T["BT"], T["JLAND"],
-            T["JY"], T["JPY"], T["JLEN"], T["BY"], T["BPY"], T["BLEN"], T["BAPEX"], T["LAG"], T["POLY"], T["TGT"],
-            T["NTGT"], T["BITS"])
+            T["JY"], T["JPY"], T["JLEN"], T["BY"], T["BPY"], T["BLEN"], T["BAPEX"], T["LAG"], T["POLY"], TGT,
+            NTGT, T["BITS"])
 
 
 def warm() -> float:
@@ -711,16 +723,18 @@ def warm() -> float:
     NTGT = np.zeros(K + 2, np.int64)
     BITS = np.array([1, 2, 4, 8, 16, 1, 6, 3], np.int64)
     ph = np.array([0, 1], np.int64)
+    RM = np.ascontiguousarray(np.tile(np.arange(K, dtype=np.int64), (2, 1)))
     si = np.zeros(NSI, np.int64)
     si[SI_LP] = -100
     sf = np.zeros(NSF)
-    plan_k(Ss, Ps, ph, si, sf, 4, 0.02, 1, ci, cf, pl, gp, TS0, TN, JS0, JT, JH, BT, JLAND, JY, JY, JLEN, BY, BY, BLEN,
-           BAPEX, LAG, POLY, TGT, NTGT, BITS)
-    decide_k(Ss, Ps, ph, 2, 0, 2, 0, 0, False, 0.0, 0, -100, 0.02, ci, cf, pl, gp, TS0, TN, JS0)
+    plan_k(Ss, Ps, ph, RM, si, sf, 4, 0.02, 1, ci, cf, pl, gp, TS0, TN, JS0, JT, JH, BT, JLAND, JY, JY, JLEN, BY, BY,
+           BLEN, BAPEX, LAG, POLY, TGT, NTGT, BITS)
+    decide_k(Ss, Ps, ph, RM, 2, 0, 2, 0, 0, False, 0.0, 0, -100, 0.02, ci, cf, pl, gp, TS0, TN, JS0)
     z = np.zeros(2)
     ready_k(Ss, ph, z, np.zeros(2, np.int64), np.array([True, False]), z, z, 0.08, np.zeros((6, 1), np.int64),
             np.zeros((6, 1)), np.zeros((6, 1)), np.zeros(6, np.int64), -1.0, 0.25, NX, 0.025)
-    smin_k(Ss, ph, np.zeros(2, np.int64), np.zeros(2, np.int64), z, np.zeros(2, np.int64), K, NX, -1.0, 0.25, 0.025)
+    smin_k(Ss, ph, RM, np.zeros(2, np.int64), np.zeros(2, np.int64), z, np.zeros(2, np.int64), K, NX, -1.0, 0.25,
+           0.025)
     return (time.perf_counter() - t0) * 1e3
 
 

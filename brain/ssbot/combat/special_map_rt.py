@@ -113,9 +113,20 @@ class LevelSource:
         self.pl = pl / pl.sum()
         self.gamma = float(meta["gamma"])
         self.nq = 0
+        # SG7 stage maps (meta "stage"): frame k -> the row of the arrays along one variant's path (-1: none); the
+        # default is the first variant's; plain maps: the frame itself
+        rows = meta.get("stage")
+        self.rm = (np.asarray(rows["RM"][0], np.int64) if rows else np.arange(self._K)).copy()
+        self.rm = np.concatenate([self.rm, np.full(16, -1, np.int64)])
+
+    def with_rows(self, rm) -> "LevelSource":
+        import copy
+        o = copy.copy(self)
+        o.rm = np.concatenate([np.asarray(rm, np.int64)[:self._K], np.full(16, -1, np.int64)])
+        return o
 
     def _xi(self, k, s, x):
-        if s is None or s < 0 or not 0 <= k < self._K:
+        if s is None or s < 0 or not 0 <= k < self._K or self.rm[k] < 0:
             return -1
         xi = int(round((x - self._x_lo) / self._step))
         return xi if 0 <= xi < self._NX else -1
@@ -129,7 +140,8 @@ class LevelSource:
         self.nq += 1
         if xi < 0:
             return -np.inf
-        return self._v(self._S[k, c + 1, s, xi] if self.keyed else self._S[k, s, xi])
+        r = self.rm[k]
+        return self._v(self._S[r, c + 1, s, xi] if self.keyed else self._S[r, s, xi])
 
     def Smax(self, k: int, s: int, x: float) -> float:
         xi = self._xi(k, s, x)
@@ -137,9 +149,10 @@ class LevelSource:
         if xi < 0:
             return -np.inf
         S_ = self._S
+        r = self.rm[k]
         m = -1
         for c in range(3):
-            lv = int(S_[k, c, s, xi])
+            lv = int(S_[r, c, s, xi])
             if lv < NONE_LEVEL and lv > m:
                 m = lv
         return m * self.scale if m >= 0 else -np.inf
@@ -153,9 +166,10 @@ class LevelSource:
         self.nq += 1
         if xi < 0:
             return -np.inf
+        r = self.rm[k]
         if self.keyed:
-            return self._v(self._S[k, d + 1, s, xi]) if self.pbit(k, d, s, xi) else -np.inf
-        return self._v(self._SV[k, s, xi, d + 1])
+            return self._v(self._S[r, d + 1, s, xi]) if self.pbit(r, d, s, xi) else -np.inf
+        return self._v(self._SV[r, s, xi, d + 1])
 
     def press(self, k: int, s: int, x: float, d: int) -> bool:
         sv = self.SV(k, s, x, d)
@@ -305,12 +319,74 @@ class MapRuntime:
         self.keyed = bool(meta["keyed"])
         self._ready_ref = READY_REF if READY_REF is not None else float(meta.get("ready_ref", self.wc + 1.0))
         self._tube_y()
+        # SG7 stage maps (meta "stage", forum.md 63): the rows' table and each variant's row map; rows = the row maps
+        # of the variants consistent with what the hero has seen (set by forum_map per tick; None: every variant's);
+        # plan_tl = the timeline whose targets the map row's contacts use (None: the nominal)
+        self.stage = meta.get("stage")
+        self.rows = None
+        self.plan_tl = None
+        self._tgt_cache: dict = {}
+        if self.stage:
+            self.RMv = np.asarray(self.stage["RM"], np.int64)
+            self.vtl = [self.spec.timeline(v["frames"], v["phase"], K=K) for v in self.stage["variants"]]
+            self.all_rows = [np.asarray(r, np.int64) for r in np.unique(self.RMv, axis=0)]
         # SG6: the compiled kernels' tables (built here: the map's load, never on a slam tick)
         self.use_jit = JIT
         self._jt = None
         if self.use_jit:
             self.jit_tables()
         self.init_s = round(time.time() - t0, 2)
+
+    # ---- SG7: the sources = phases x the observation's row maps ----
+    def _rowmaps(self) -> list:
+        if self.rows:
+            return list(self.rows)
+        if self.stage:
+            return list(self.all_rows)
+        return [None]
+
+    def _srcs(self, phases) -> list:
+        return [self.srcs[p] if rm is None else self.srcs[p].with_rows(rm) for p in phases for rm in self._rowmaps()]
+
+    def _ph_rm(self, phases) -> tuple:
+        K = self.ti.K
+        pairs = [(p, rm) for p in phases for rm in self._rowmaps()]
+        ph = np.array([p for p, _ in pairs], np.int64)
+        RM = np.stack([np.asarray(self.srcs[p].rm[:K] if rm is None else np.asarray(rm)[:K], np.int64)
+                       for p, rm in pairs])
+        return ph, np.ascontiguousarray(RM)
+
+    def observe(self, seen: dict | None, k_now: int | None = None, lat: int = 0) -> list:
+        """SG7: set rows / plan_tl from what the hero has seen of the slam's stage entries: seen = {stage: entry
+        frame} ("Slam 0", "Slam 1", "Slam 2", "Slam Recover"; the antic's is 0) and the stage it is in at frame k_now
+        (the observation's frame: the planner's frame minus the transition latency lat). The consistent variants: each
+        seen entry equal to the variant's, the variant in the same stage at k_now - lat (an unseen next stage has not
+        started by then). Returns the consistent variants' indices (every variant: nothing known / a plain map)."""
+        self.rows, self.plan_tl = None, None
+        if not self.stage or seen is None or k_now is None:
+            return list(range(len(self.vtl))) if self.stage else []
+        ko = max(int(k_now) - int(lat), 0)
+        cur = max(seen, key=lambda st_: seen[st_]) if seen else "Slam Antic"
+        ok = []
+        for vi, tl in enumerate(self.vtl):
+            if any(int(tl.entry.get(st_, -1)) != int(e) for st_, e in seen.items() if st_ != "Slam Antic"):
+                continue
+            st_k = tl.state[ko] if ko < len(tl.state) else "after"
+            if cur == "Slam Recover":
+                if st_k not in ("Slam Recover", "after"):
+                    continue
+            elif st_k != cur:
+                continue
+            ok.append(vi)
+        if not ok:                                   # an observation no variant explains: every variant
+            return list(range(len(self.vtl)))
+        self.rows = [np.asarray(r, np.int64) for r in np.unique(self.RMv[ok], axis=0)]
+        # the plan's contacts on the consistent variant nearest the nominal timing
+        nom = self.spec.timeline(K=len(self.tl.state))
+        best = min(ok, key=lambda vi: sum(abs(int(self.vtl[vi].frames[st_]) - int(nom.frames[st_]))
+                                          for st_ in nom.frames) + abs(self.vtl[vi].phase - nom.phase))
+        self.plan_tl = self.vtl[best]
+        return ok
 
     def jit_tables(self) -> dict | None:
         """special_map_jit.tables (None: not a keyed level map; the Python path)."""
@@ -483,13 +559,32 @@ class MapRuntime:
         ks, ss, cs = (np.array(np.broadcast_to(np.asarray(a, np.int64), (n,))) for a in (ks, ss, cs))
         T = self.jit_tables() if self.use_jit else None
         if T is None:
-            return np.array([min(self.srcs[p].S(int(k), int(s), float(x), int(c)) if self.keyed else
-                                 self.srcs[p].S(int(k), int(s), float(x)) for p in phases)
+            srcs = self._srcs(phases)
+            return np.array([min(sr.S(int(k), int(s), float(x), int(c)) if self.keyed else
+                                 sr.S(int(k), int(s), float(x)) for sr in srcs)
                              for k, s, x, c in zip(ks, ss, xs, cs)], np.float64).reshape(n)
         ti = self.ti
-        return smj.smin_k(T["Ss"], np.asarray(list(phases), np.int64), ks, ss, xs, cs, int(ti.K),
+        ph, RM = self._ph_rm(phases)
+        return smj.smin_k(T["Ss"], ph, RM, ks, ss, xs, cs, int(ti.K),
                           int(ti.NX), float(T["cf"][smj.CF_XLO]), float(T["cf"][smj.CF_STEP]),
                           float(T["cf"][smj.CF_SCALE]))
+
+    def _plan_tgt(self, T: dict):
+        """(TGT, NTGT) of the plan's timeline (the nominal's from the tables; SG7: the observation's)."""
+        if self.plan_tl is None:
+            return T["TGT"], T["NTGT"]
+        key = self.plan_tl.name
+        if key not in self._tgt_cache:
+            KT = T["KT"]
+            tg = [np.asarray(self.plan_tl.targets(k), np.float64).reshape(-1, 4) for k in range(KT)]
+            nb = max(T["TGT"].shape[1], max(len(t) for t in tg))
+            TGT = np.zeros((KT, nb, 4))
+            NTGT = np.zeros(KT, np.int64)
+            for k_, t in enumerate(tg):
+                TGT[k_, :len(t)] = t
+                NTGT[k_] = len(t)
+            self._tgt_cache[key] = (TGT, NTGT)
+        return self._tgt_cache[key]
 
     # ---- the exits ----
     def deviation(self, k: int, cx: float, x0: float, face: int) -> float:
@@ -533,7 +628,8 @@ class MapRuntime:
             kind, tube = smj.EV_JUMP, ti._jt[float(ev["h"])]
         elif ev["kind"] == "bounce":
             kind, tube = smj.EV_BOUNCE, ti.bounce_t[int(np.clip(np.floor(ev["yc"] / ti.cb_w), 0, ti.ncb - 1))]
-        v, a0, a1, a2 = smj.decide_k(T["Ss"], T["Ps"], np.asarray(list(phases), np.int64), int(k), kind,
+        ph, RM = self._ph_rm(phases)
+        v, a0, a1, a2 = smj.decide_k(T["Ss"], T["Ps"], ph, RM, int(k), kind,
                                      int(ev["k"]), tube, 0 if land is None else int(land), land is not None, float(x),
                                      int(c), int(last_press), float(lam), T["ci"], T["cf"], T["pl"], T["gp"], T["TS0"],
                                      T["TN"], T["JS0"])
@@ -593,8 +689,8 @@ class MapRuntime:
         si[smj.SI_LP] = ls["lp"]
         k_start = ls["k"]
         (masks, xs, ys, act, vals, sti, stf, press, cont, n, s, f, has_first, v_first,
-         first) = smj.plan_k(T["Ss"], T["Ps"], np.asarray(list(phases), np.int64), si, sf, int(L), float(lam),
-                             int(face), *smj.plan_args(T))
+         first) = smj.plan_k(T["Ss"], T["Ps"], *self._ph_rm(phases), si, sf, int(L), float(lam),
+                             int(face), *smj.plan_args(T, self._plan_tgt(T)))
         JH = ti.jump_h
 
         def act_of(a):
@@ -644,6 +740,7 @@ class MapRuntime:
         pl = MapPlan(masks, float(v_first) if has_first else -np.inf, act_of(first.tolist()) if has_first else None,
                      np.flatnonzero(press[:n]).tolist(), np.flatnonzero(cont[:n]).tolist(), xs[:n], ys[:n], acts,
                      list(phases), k_start, (time.perf_counter() - t0) * 1e3)
+        pl.rows, pl.plan_tl = self.rows, self.plan_tl
         pl.states = states
         pl.values = values
         pl.final = final
@@ -663,9 +760,10 @@ class MapRuntime:
         from ssbot.combat.pogo_slam import clip_band
         from ssbot.knowledge import kinematics as kin
         t0 = time.perf_counter()
-        srcs = [self.srcs[p] for p in phases]
+        srcs = self._srcs(phases)
         p0 = phases[0]
         st = srcs[0].st
+        tl_c = self.plan_tl if self.plan_tl is not None else self.tl
         step = self.ti.step
         hm = self.hm
         if resume is not None:
@@ -744,7 +842,7 @@ class MapRuntime:
                     xr = ls["x"] - lag * ls["lsd"] * step
                     yr = y + py
                     poly = self.polys[(sl["face"], False)]
-                    for b in self.tl.targets(k):
+                    for b in tl_c.targets(k):
                         r = clip_band(poly, b[2] + self.pa - yr, b[3] + self.pa - yr)
                         if r is not None and b[0] - r[1] < xr < b[1] - r[0]:
                             contacts.append(t)
@@ -756,6 +854,7 @@ class MapRuntime:
             n = t + 1
         pl = MapPlan(masks, value if value is not None else -np.inf, first, presses, contacts, xs[:n], ys[:n], acts,
                      list(phases), k_start, (time.perf_counter() - t0) * 1e3)
+        pl.rows, pl.plan_tl = self.rows, self.plan_tl
         pl.states = states
         pl.values = values
         pl.final = ls
@@ -765,7 +864,13 @@ class MapRuntime:
         """prev from its index i on (the hero followed it for i frames), extended by i frames to length L from its
         final loop state: what plan() from prev.states[i] returns (deterministic), at the cost of i decisions."""
         t0 = time.perf_counter()
-        tail = self.plan(0, 0.0, {"kind": "ground"}, 0, -100, prev.phases, i, lam=lam, face=face, resume=prev.final)
+        keep = (self.rows, self.plan_tl)
+        self.rows, self.plan_tl = getattr(prev, "rows", None), getattr(prev, "plan_tl", None)
+        try:
+            tail = self.plan(0, 0.0, {"kind": "ground"}, 0, -100, prev.phases, i, lam=lam, face=face,
+                             resume=prev.final)
+        finally:
+            self.rows, self.plan_tl = keep
         m = np.concatenate([prev.masks[i:], tail.masks])[:L]
         # a strike's down key starts one frame before its press: redo the presses near the seam
         pl = MapPlan(m, np.nan, None, [t - i for t in prev.presses if t >= i] + [t + len(prev.masks) - i
@@ -773,6 +878,7 @@ class MapRuntime:
                      [t - i for t in prev.contacts if t >= i] + [t + len(prev.masks) - i for t in tail.contacts],
                      np.concatenate([prev.xs[i:], tail.xs]), np.concatenate([prev.ys[i:], tail.ys]),
                      prev.acts[i:] + tail.acts, list(prev.phases), prev.k0 + i, 0.0)
+        pl.rows, pl.plan_tl = getattr(prev, "rows", None), getattr(prev, "plan_tl", None)
         pl.states = prev.states[i:] + tail.states
         pl.values = prev.values[i:] + tail.values
         pl.final = tail.final

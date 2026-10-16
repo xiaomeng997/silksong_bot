@@ -236,7 +236,7 @@ class KeyedDenseSource:
     kind = "keyed_dense"
     keyed = True
 
-    def __init__(self, pm, ti: TubeIndex, cfg):
+    def __init__(self, pm, ti: TubeIndex, cfg, rm: np.ndarray | None = None):
         self.p, self.ti = pm.p, ti
         self.st = steps(pm.p, ti.K)
         self._S, self._SV = pm.S, pm.SV
@@ -245,9 +245,17 @@ class KeyedDenseSource:
         self.pl = pl / pl.sum()
         self.gamma = float(cfg.gamma)
         self.nq = 0
+        # SG7 stage maps: frame k -> the row of the arrays (one variant's path; -1 = none); plain maps: the frame
+        self.rm = np.arange(ti.K + 16) if rm is None else np.asarray(rm, np.int64)
+
+    def with_rows(self, rm: np.ndarray) -> "KeyedDenseSource":
+        import copy
+        o = copy.copy(self)
+        o.rm = np.asarray(rm, np.int64)
+        return o
 
     def _xi(self, k, s, x):
-        if s < 0 or not 0 <= k < self.ti.K:
+        if s < 0 or not 0 <= k < self.ti.K or self.rm[k] < 0:
             return -1
         xi = self.ti.xi(x)
         return xi if 0 <= xi < self.ti.NX else -1
@@ -255,17 +263,17 @@ class KeyedDenseSource:
     def S(self, k: int, s: int, x: float, c: int = 0) -> float:
         xi = self._xi(k, s, x)
         self.nq += 1
-        return -np.inf if xi < 0 else float(self._S[k, c + 1, s, xi])
+        return -np.inf if xi < 0 else float(self._S[self.rm[k], c + 1, s, xi])
 
     def Smax(self, k: int, s: int, x: float) -> float:
         xi = self._xi(k, s, x)
         self.nq += 1
-        return -np.inf if xi < 0 else float(self._S[k, :, s, xi].max())
+        return -np.inf if xi < 0 else float(self._S[self.rm[k], :, s, xi].max())
 
     def SV(self, k: int, s: int, x: float, d: int) -> float:
         xi = self._xi(k, s, x)
         self.nq += 1
-        return -np.inf if xi < 0 else float(self._SV[k, s, xi, d + 1])
+        return -np.inf if xi < 0 else float(self._SV[self.rm[k], s, xi, d + 1])
 
 
 def keyed_q(src, k: int, s1: int, x1: float, c: int, d: int, nexts) -> float:
