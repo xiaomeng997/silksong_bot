@@ -85,8 +85,14 @@ class PlayCfg:
     band: tuple = (4.0, 6.2)         # at the jump the hero must be in here, else abort (T1: 3.75-6.25 safe)
     reach: tuple = (2.7, 9.0)        # the distance at which a start is considered at all
     k_start_max: int = 14            # the latest antic frame (of the next mask) at which the script may start
-    air: int = 1                     # in the air at the antic: steer toward STAND and start on landing (by K_JUMP - 4)
+    air: int = 1                     # in the air at the antic: steer toward STAND and start on landing
     k_air_max: int = 10              # ... only when seen in the air by this antic frame
+    k_jump_late: int = 29            # a landing after K_JUMP - 1: the jump at once, at the latest at this frame, the
+    #                                  press PRESS_AFTER frames after it but not after K_PRESS_MAX (T1, jump held 16:
+    #                                  jump 28 + 20 -> 20 / 20, 29 + 18 -> 16 / 16, 30 + 20 = 51 -> 9 / 9, 31 + 20 = 52
+    #                                  -> 0 / 10)
+    press_after: int = 20
+    k_press_max: int = 49
     k_end: int = 110                 # the script ends here at the latest
     wall_room: float = 0.5           # the stand point at least this far inside the arena walls
     over: int = 1                    # 1: the way out after the bounce (over its body, the dash); 0: no key (SP1 it1)
@@ -159,6 +165,7 @@ class Run:
     over_dir: int | None = None      # the way out: +1 / -1 world x, 0 none
     k_dash: int | None = None
     k_air: int | None = None         # the frame the airborne entry took over (phase land)
+    k_press_plan: int | None = None  # the press frame for this run's jump (K_PRESS, later after a late jump)
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -249,7 +256,7 @@ class SlamPlay:
         if r.phase == "land" and ground:
             r.phase = "wait"                              # landed: the start check (walk time from here)
         if r.phase == "land":
-            if k > c.k_jump - 4 or not accepting:
+            if k > c.k_jump_late - 1 or not accepting:
                 self._close("abort", "no landing" if accepting else "no input in the air")
                 return None
             m = self._walk(s, float(e["pos"][0]), r.face, f)
@@ -259,8 +266,10 @@ class SlamPlay:
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is None:
                 return None
-            r.sent.append((f + SEND_AHEAD, m))
-            return m
+            if k < c.k_jump:
+                r.sent.append((f + SEND_AHEAD, m))
+                return m
+            # a late landing inside the jump band: the jump this tick (below)
         cx = float(e["pos"][0])
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
@@ -273,7 +282,11 @@ class SlamPlay:
                 if not c.band[0] <= x <= c.band[1]:
                     self._close("abort", f"x {x:.2f} outside the band at the jump")
                     return None
+                if k > c.k_jump_late:
+                    self._close("abort", "late jump")
+                    return None
                 r.phase, r.k_jump, r.x_jump = "jump", k, round(x, 3)
+                r.k_press_plan = min(max(c.k_press, k + c.press_after), c.k_press_max)
                 m = M_J
         elif r.phase == "jump":
             m = M_J if k < r.k_jump + c.hold else 0
@@ -328,9 +341,10 @@ class SlamPlay:
 
     def _press_part(self, r: Run, k: int, m: int) -> int | None:
         c = self.cfg
+        kp = r.k_press_plan if r.k_press_plan is not None else c.k_press
         if r.k_press is None:
-            late = r.s0 is not None and k >= c.k_press - 3
-            if k >= c.k_press or late:
+            late = r.s0 is not None and k >= kp - 3
+            if k >= kp or late:
                 if r.s0 is not None and k - (r.s0 - r.fa) > c.press_late_max:
                     # Slam 0 seen and the frame is already past its window: the hammer comes before the slash
                     self._close("abort", "press window missed")
@@ -338,7 +352,7 @@ class SlamPlay:
                 r.k_press = k
                 r.phase = "after"
                 return m | M_D | M_A
-            if k >= c.k_down:
+            if k >= kp - (c.k_press - c.k_down):
                 m |= M_D
         return m
 
@@ -364,7 +378,7 @@ class SlamPlay:
     def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
                    ) -> int | None:
         c = self.cfg
-        if k > (c.k_jump - 4 if r.k_air is not None else c.k_start_max):
+        if k > (c.k_jump_late - 1 if r.k_air is not None else c.k_start_max):
             if not r.why:
                 r.why = "late"
             r.phase = "abort"
@@ -397,7 +411,8 @@ class SlamPlay:
             r.why = "in the air"
             return None
         need = abs(tgt - x) / WALK_U + abs(vx) / 8.25 * 2 + 1
-        if k + need > c.k_jump - 1:
+        late_ok = r.k_air is not None and c.band[0] <= x <= c.band[1]   # landed late inside the jump band: jump now
+        if k + need > c.k_jump - 1 and not late_ok:
             r.why = "no time to walk"
             return None
         r.phase, r.k_start, r.x_start, r.hp0, r.why = "walk", k, round(x, 3), hp, ""

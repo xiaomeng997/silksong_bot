@@ -156,6 +156,11 @@ def test_declines():
     assert not landed and play.done[0].why == "in the air"
     play, landed, _ = simulate(5.0, ground_until=30)
     assert landed and not any(landed.values()) and play.done[0].why == "no landing"
+    # down at frame 25 inside the jump band (seen at 25, the key lands at 27): the jump at once, the press 20 later
+    play, landed, _ = simulate(5.0, ground_until=24)
+    c = play.cfg
+    j = keys(landed, sp.M_J)
+    assert j and c.k_jump < j[0] <= c.k_jump_late and keys(landed, sp.M_A) == [min(j[0] + c.press_after, c.k_press_max)]
     # airborne at the sighting but down by frame 8: it starts late and still walks / jumps in time
     play, landed, _ = simulate(6.5, ground_until=6)
     assert keys(landed, sp.M_A) == [play.cfg.k_press]
@@ -180,11 +185,11 @@ def test_abort_on_a_hit():
 
 def test_slam0_rule():
     # Slam 0 seen before the press: the press goes out at once (its frame Slam 0 + 2 here, not the planned 52)
-    cfg = sp.PlayCfg(k_press=52, k_down=48)
+    cfg = sp.PlayCfg(k_press=52, k_down=48, k_press_max=60)
     play, landed, _ = simulate(5.0, antic=47, cfg=cfg)
     assert keys(landed, sp.M_A) == [47 + 2]
     # a script whose press would come past Slam 0 + press_late_max: abort, no press into the hammer
-    cfg = sp.PlayCfg(k_press=60, k_down=55)
+    cfg = sp.PlayCfg(k_press=60, k_down=55, k_press_max=60)
     play, landed, _ = simulate(5.0, antic=47, cfg=cfg)
     assert not keys(landed, sp.M_A)
     assert play.done[-1].why == "press window missed"
