@@ -74,6 +74,8 @@ class Track:
     by_state: dict = field(default_factory=dict)
     by_frame: np.ndarray | None = None
     after: np.ndarray | None = None
+    poly: np.ndarray | None = None     # SG7: the collider's real shape when it is a polygon ([m, 2] x, y in the same
+                                       # frame as the boxes, without the motion); the box is its bounding box
 
 
 @dataclass
@@ -101,6 +103,9 @@ class MoveTimeline:
     pos_y: float
     end_k: int                   # the move's last frame (the last state's last frame)
     weight: float = 1.0          # the variant's share of the instances (independent states assumed)
+    polys: dict = field(default_factory=dict)   # track name -> [m, 2] polygon (SG7; tracks without one: absent)
+    frames: dict = field(default_factory=dict)  # state -> its frame count in this variant
+    phase: float = 0.5           # the motion's physics phase
 
     @property
     def K(self) -> int:
@@ -122,6 +127,23 @@ class MoveTimeline:
     def damage(self, k: int) -> np.ndarray:
         """[n, 4] every box that hurts the hero at frame k (motion applied)."""
         return self._with(HURT, k)
+
+    def damage_shapes(self, k: int) -> list:
+        """SG7: [(box [4], polygon [m, 2] or None)] of every shape that hurts the hero at frame k, motion applied (the
+        same order as damage(k))."""
+        out = []
+        for n, r in self.roles.items():
+            if HURT not in r:
+                continue
+            b = self.box(n, k)
+            if not np.isfinite(b[0]):
+                continue
+            pg = self.polys.get(n)
+            if pg is not None:
+                pg = np.asarray(pg, float).copy()
+                pg[:, 0] += self.disp[int(np.clip(k, 0, self.K - 1))]
+            out.append((b, pg))
+        return out
 
     def targets(self, k: int) -> np.ndarray:
         """[n, 4] every strike target at frame k (motion applied)."""
@@ -196,7 +218,9 @@ class MoveSpec:
                 w *= st.share(n)
         tag = name or "".join(f"{s[:1]}{n}" for s, n in seq) + f"p{phase}"
         return MoveTimeline(self.enemy, self.move, tag, state, entry, boxes,
-                            {t.name: t.roles for t in self.tracks}, disp, self.pos_above_floor, end_k, w)
+                            {t.name: t.roles for t in self.tracks}, disp, self.pos_above_floor, end_k, w,
+                            {t.name: np.asarray(t.poly, float) for t in self.tracks if t.poly is not None},
+                            dict(seq), float(phase))
 
     def variants(self, policy: str = "t1", min_share: float = 0.0) -> list[MoveTimeline]:
         """The timing variants. "t1": T1's nine for CL_SLAM (nominal + antic 48/49 x Slam 0 4/5 x phase 0.2/0.8);
@@ -238,7 +262,8 @@ class MoveSpec:
                 "tracks": [{"name": t.name, "roles": sorted(t.roles),
                             "by_state": {s: arr(b) for s, b in t.by_state.items()},
                             "by_frame": arr(t.by_frame),
-                            "after": t.after if isinstance(t.after, str) else arr(t.after)} for t in self.tracks]}
+                            "after": t.after if isinstance(t.after, str) else arr(t.after),
+                            **({"poly": arr(t.poly)} if t.poly is not None else {})} for t in self.tracks]}
 
     @classmethod
     def from_dict(cls, d: dict) -> "MoveSpec":
@@ -247,7 +272,8 @@ class MoveSpec:
         return cls(d["enemy"], d["move"], d["source"],
                    [StateSpec(s["name"], {int(k): v for k, v in s["frames"].items()}, s["nominal"]) for s in d["states"]],
                    [Track(t["name"], frozenset(t["roles"]), {s: arr(b) for s, b in t["by_state"].items()},
-                          arr(t["by_frame"]), t["after"] if isinstance(t["after"], str) else arr(t["after"]))
+                          arr(t["by_frame"]), t["after"] if isinstance(t["after"], str) else arr(t["after"]),
+                          arr(t.get("poly")))
                     for t in d["tracks"]],
                    [Motion(m["vx"], m["from"], m["to"]) for m in d["motion"]], d["pos_above_floor"],
                    d["facing_rule"], d["clock"], d["frame_ref"], tuple(d["phases"]), d["nominal_phase"], d["K"],
@@ -265,7 +291,19 @@ class MoveSpec:
 
 
 # ---- loaders ----
-def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160) -> MoveSpec:
+# SG7 (forum.md 63): Slam Collider 1 / 2 are PolygonCollider2Ds (the oracle exports kind "poly" and their world
+# vertices); rigid in the Clapper's frame (x along its facing, y relative to its position): the median of 15,560 / 25,390
+# recorded frames, max vertex deviation 0.0009 u (ssbot.tools.sg7_c2rule); their bounding boxes are the template's
+# hammer boxes to 0.001 u. The template keeps the boxes; load_cl_slam(poly=True) attaches these shapes.
+HAMMER_POLY = {
+    "Slam Collider 1": ((-1.91, 2.854), (1.739, 3.129), (4.067, 2.645), (6.089, 1.524), (6.236, 0.505),
+                        (5.297, 0.014), (1.966, -3.185)),
+    "Slam Collider 2": ((2.399, 0.754), (4.067, 2.645), (6.089, 1.523), (7.755, -4.194), (7.166, -4.987),
+                        (0.674, -3.62)),
+}
+
+
+def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160, poly: bool = False) -> MoveSpec:
     """CL_SLAM (the Clapper's slam) from the template SlamTimeline reads: the root box per frame in each state (its
     last row repeats; past the move the last recover box stays), the hammer (Slam Collider 1 in Slam 1, Slam Collider
     2 in Slam 2) and the lunge (30 u/s from the Slam 0 entry to the Slam 2 entry). Nominal and T1's variants keep
@@ -279,7 +317,13 @@ def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160) -> MoveSpec:
     tracks = [Track("root", frozenset({HURT, TARGET}), root, after="last")]
     for key, b in t["hammer"].items():
         s, nm = key.split("|")
-        tracks.append(Track(nm, frozenset({HURT}), {s: np.asarray([b], float)}))
+        pg = None
+        if poly and nm in HAMMER_POLY:
+            pg = np.asarray(HAMMER_POLY[nm], float)
+            bb = [pg[:, 0].min(), pg[:, 0].max(), pg[:, 1].min(), pg[:, 1].max()]
+            if np.abs(np.asarray(bb) - np.asarray(b, float)).max() > 0.01:
+                raise ValueError(f"{nm}: the polygon's bounding box {bb} is not the template box {b}")
+        tracks.append(Track(nm, frozenset({HURT}), {s: np.asarray([b], float)}, poly=pg))
     motion = [Motion(float(t.get("lunge_vx", 30.0)), "Slam 0", "Slam 2")]
     return MoveSpec("Song Heavy Sentry", "CL_SLAM", f"{Path(path).name} ({t['n_slams']} slams)", states, tracks,
                     motion, float(t["pos_above_floor"]),
@@ -347,4 +391,4 @@ def load_raster_move(enemy_key: str, family: str, enemy: str | None = None, tol_
 
 
 __all__ = ["HURT", "TARGET", "TINK", "StateSpec", "Track", "Motion", "MoveTimeline", "MoveSpec", "load_cl_slam",
-           "load_raster_move", "raster_boxes", "SLAM_TEMPLATE", "MOVES_DIR", "CLOCK", "FRAME_REF"]
+           "load_raster_move", "raster_boxes", "SLAM_TEMPLATE", "MOVES_DIR", "CLOCK", "FRAME_REF", "HAMMER_POLY"]

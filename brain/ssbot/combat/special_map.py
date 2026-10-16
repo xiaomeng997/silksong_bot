@@ -103,6 +103,13 @@ class MapConfig:
     keyed: bool = False
     key_noise: str = "none"
     p_late: tuple = (0.785, 0.20, 0.01, 0.005)
+    # SG7 (forum.md 63): poly = the hammer's real shapes (Slam Collider 1 / 2 are PolygonCollider2Ds; their boxes are
+    # only bounding boxes) in the damage and clearance tests; head_u = the hero's hurt box raised at the top by the
+    # HeroBox's top above the physics box (0.745 - 0.5262 = 0.2187 u, HeroBox.cs: normal ground and air boxes);
+    # stage = the stage-aligned rows (the clock restarts at every observed stage entry: StageKeyedMapBuilder)
+    poly: bool = False
+    head_u: float = 0.0
+    stage: bool = False
 
     def key(self) -> dict:
         d = asdict(self)
@@ -162,15 +169,87 @@ class Geometry:
     def _boxes(self):
         pa = self.spec.pos_above_floor
         self.dmg, self.tgt = [], []
+        self.dmgp = []                     # per frame, aligned with dmg[k]: (base polygon id, x shift) or None
+        self.pbase = []                    # base polygons [m, 2] (y above the floor, x without the motion)
+        pid: dict = {}
         for k in range(self.K):
-            ds, ts = set(), set()
+            ds, ts = {}, set()
             for v in self.variants:
-                for b in v.damage(k):
-                    ds.add(tuple(np.round([b[0], b[1], b[2] + pa, b[3] + pa], 4)))
+                shapes = v.damage_shapes(k) if self.cfg.poly else [(b, None) for b in v.damage(k)]
+                for b, pg in shapes:
+                    key = tuple(np.round([b[0], b[1], b[2] + pa, b[3] + pa], 4))
+                    if pg is None:
+                        ds.setdefault(key, None)
+                        continue
+                    dx = float(v.disp[int(np.clip(k, 0, v.K - 1))])
+                    base = np.asarray(pg, float) - np.array([dx, -pa])
+                    bk = tuple(np.round(base.ravel(), 4))
+                    if bk not in pid:
+                        pid[bk] = len(self.pbase)
+                        self.pbase.append(base)
+                    ds[key] = (pid[bk], dx)
                 for b in v.targets(k):
                     ts.add(tuple(np.round([b[0], b[1], b[2] + pa, b[3] + pa], 4)))
-            self.dmg.append(np.array(sorted(ds), float).reshape(-1, 4))
+            keys = sorted(ds)
+            self.dmg.append(np.array(keys, float).reshape(-1, 4))
+            self.dmgp.append([ds[kk] for kk in keys])
             self.tgt.append(np.array(sorted(ts), float).reshape(-1, 4))
+
+    def _ptables(self, hy0, hy1):
+        """Per base polygon: the x range of the polygon inside each hero band [hy0, hy1] (clip_band: exact for a convex
+        polygon, the hull of the cut otherwise) and the distance table (bands x hero-centre offsets on a 1/8-step grid)
+        from the dilated hero box to the polygon."""
+        import shapely
+        c = self.cfg
+        self.PIA, self.PIB, self.PT = [], [], []
+        hwm = self.hw + c.mx
+        self.pdu = self.step / 8.0
+        for pg in self.pbase:
+            ia = np.full(len(hy0), np.inf)
+            ib = np.full(len(hy0), -np.inf)
+            for i in range(len(hy0)):
+                q = clip_band(pg, hy0[i], hy1[i])
+                if q is not None:
+                    ia[i], ib[i] = q
+            self.PIA.append(ia)
+            self.PIB.append(ib)
+            W = c.c_cap + hwm + 0.5
+            u = np.arange(pg[:, 0].min() - W, pg[:, 0].max() + W + self.pdu, self.pdu)
+            poly = shapely.Polygon(pg)
+            shapely.prepare(poly)
+            rects = shapely.box((u - hwm)[None, :], hy0[:, None], (u + hwm)[None, :], hy1[:, None])
+            self.PT.append((float(u[0]), shapely.distance(poly, rects).astype(np.float64)))
+
+    def _shape_mats(self, k, hx0, hx1, hy0, hy1, need_gap: bool):
+        """Per damage shape of frame k: OV [n, NYB, NX] (the dilated hero box meets it) and, if need_gap, the gap
+        [n, NYB, NX] (u, float64; a lower bound for a polygon: its table's 1/8-step grid minus half a cell)."""
+        B, P = self.dmg[k], self.dmgp[k]
+        n = len(B)
+        OV = np.zeros((n, self.NYB, self.NX), bool)
+        G = np.empty((n, self.NYB, self.NX)) if need_gap else None
+        for i in range(n):
+            b, pp = B[i], P[i]
+            if pp is None:
+                yov = (b[2] < hy1) & (b[3] > hy0)
+                xin = (hx1 > b[0]) & (hx0 < b[1])
+                OV[i] = yov[:, None] & xin[None, :]
+                if need_gap:
+                    gx = np.maximum(0.0, np.maximum(b[0] - hx1, hx0 - b[1]))
+                    gy = np.maximum(0.0, np.maximum(b[2] - hy1, hy0 - b[3]))
+                    G[i] = np.sqrt(gx[None, :] ** 2 + gy[:, None] ** 2)
+                continue
+            q, dx = pp
+            OV[i] = (hx1[None, :] > (self.PIA[q] + dx)[:, None]) & (hx0[None, :] < (self.PIB[q] + dx)[:, None])
+            if need_gap:
+                u0, T = self.PT[q]
+                f = (self.xs - dx - u0) / self.pdu
+                i0 = np.floor(f).astype(np.int64)
+                inside = (i0 >= 0) & (i0 + 1 < T.shape[1])
+                i0c = np.clip(i0, 0, T.shape[1] - 2)
+                g = np.minimum(T[:, i0c], T[:, i0c + 1]) - 0.5 * self.pdu
+                g = np.where(inside[None, :], np.maximum(g, 0.0), self.cfg.c_cap + 1.0)
+                G[i] = np.where(OV[i], 0.0, g)
+        return OV, G
 
     def ybin(self, y) -> np.ndarray:
         return np.clip(np.floor((np.asarray(y) - self.y_lo) / self.cfg.yb).astype(np.int64), 0, self.NYB - 1)
@@ -186,25 +265,18 @@ class Geometry:
         self.D = np.zeros((K, NYB, NX), bool)
         self.CL = np.full((K, NYB, NX), np.float32(c.c_cap), np.float32)
         lo = self.y_lo + c.yb * np.arange(NYB)
-        hy0, hy1 = lo - c.my, lo + c.yb + self.H + c.my
+        hy0, hy1 = lo - c.my, lo + c.yb + self.H + c.head_u + c.my
         hx0, hx1 = self.xs - self.hw - c.mx, self.xs + self.hw + c.mx
         wl, wr = c.wall_back, c.wall_front
-        for k in range(K):
-            B = self.dmg[k]
-            if not len(B):
-                continue
-            yov = (B[None, :, 2] < hy1[:, None]) & (B[None, :, 3] > hy0[:, None])          # [NYB, n]
-            xin = (hx1[None, :] > B[:, None, 0]) & (hx0[None, :] < B[:, None, 1])           # [n, NX]
-            self.D[k] = (yov[:, :, None] & xin[None]).any(1)
-            gx = np.maximum(0.0, np.maximum(B[:, None, 0] - hx1[None, :], hx0[None, :] - B[:, None, 1]))   # [n, NX]
-            gy = np.maximum(0.0, np.maximum(B[None, :, 2] - hy1[:, None], hy0[:, None] - B[None, :, 3]))   # [NYB, n]
-            dist = np.sqrt(gx[None] ** 2 + gy[:, :, None] ** 2).min(1)
-            self.CL[k] = np.minimum(dist, c.c_cap)
+        if self.pbase:
+            self._ptables(hy0, hy1)
         # per variant: its own damage set per frame (VD[v, k] -> DS[k][id]): the pre-contact test of a strike is per
-        # variant (an early-lunging variant's body is no danger once that variant's own contact protects the hero)
+        # variant (an early-lunging variant's body is no danger once that variant's own contact protects the hero);
+        # SG7 stage rows: each set's clearance too (CLS[k][id])
         pa = self.spec.pos_above_floor
         self.VD = np.zeros((len(self.variants), K + 16), np.int64)
         self.DS = []
+        self.CLS = [] if c.stage else None
         for k in range(K):
             B = self.dmg[k]
             sets: dict = {}
@@ -215,13 +287,19 @@ class Geometry:
                     idx.append(int(np.flatnonzero((np.abs(B - key) < 1e-6).all(1))[0]))
                 self.VD[vi, k] = sets.setdefault(tuple(sorted(idx)), len(sets))
             ds = np.zeros((max(len(sets), 1), NYB, NX), bool)
+            cls_ = np.full((max(len(sets), 1), NYB, NX), np.float32(c.c_cap), np.float32) if c.stage else None
             if len(B):
-                yov = (B[None, :, 2] < hy1[:, None]) & (B[None, :, 3] > hy0[:, None])
-                xin = (hx1[None, :] > B[:, None, 0]) & (hx0[None, :] < B[:, None, 1])
+                OV, G = self._shape_mats(k, hx0, hx1, hy0, hy1, True)
+                self.D[k] = OV.any(0)
+                self.CL[k] = np.minimum(G.min(0), c.c_cap)
                 for key, sid in sets.items():
                     if key:
-                        ds[sid] = (yov[:, list(key), None] & xin[None, list(key)]).any(1)
+                        ds[sid] = OV[list(key)].any(0)
+                        if cls_ is not None:
+                            cls_[sid] = np.minimum(G[list(key)].min(0), c.c_cap)
             self.DS.append(ds)
+            if cls_ is not None:
+                self.CLS.append(cls_)
         self.VD[:, K:] = self.VD[:, K - 1:K]
         if wl is not None or wr is not None:          # the wall buckets: the hero cannot stand past a wall
             out = np.zeros(NX, bool)
@@ -232,6 +310,79 @@ class Geometry:
             self.D[:, :, out] = True
             for ds in self.DS:
                 ds[:, :, out] = True
+            if self.CLS is not None:
+                for cl in self.CLS:
+                    cl[:, :, out] = 0.0
+        if c.stage:
+            self._rows()
+
+    # ---- SG7: the stage-aligned rows ----
+    STAGE_ORDER = {"A": 0, "S0": 1, "S1": 2, "S2": 3, "M": 4}
+
+    @staticmethod
+    def info_of(v, k: int) -> tuple:
+        """What the hero has seen of variant v's stage entries by frame k: ("A",) the antic; ("S0", e) Slam 0 entered
+        at frame e; ("S1", e, s0) / ("S2", e, s0) Slam 1 / 2 entered at e after a Slam 0 of s0 frames; ("M",) Slam
+        Recover or later (merged: the hammer is gone; the body is robust over the rest)."""
+        st = v.state[k] if k < v.K else "after"
+        if st == "Slam Antic":
+            return ("A",)
+        if st == "Slam 0":
+            return ("S0", int(v.entry["Slam 0"]))
+        if st == "Slam 1":
+            return ("S1", int(v.entry["Slam 1"]), int(v.frames["Slam 0"]))
+        if st == "Slam 2":
+            return ("S2", int(v.entry["Slam 2"]), int(v.frames["Slam 0"]))
+        return ("M",)
+
+    def _rows(self):
+        """SG7 stage-aligned time (the person, 2026-10-15; forum.md 63): row = (k, info). The map's clock restarts at
+        every observed stage entry: a row holds only the variants consistent with what the hero has seen (before an
+        entry every remaining length of the current stage is possible; after it only the remaining stages' lengths
+        and the lunge phase). Per row r: the consistent variants RV[r]; the damage DR [NR, NYB, NX] and clearance CLR
+        (the union / minimum over RV[r] of their own sets at frame k); the move's end (the earliest consistent
+        variant's); REACH[r][m] the rows reachable m frames on (the variants' own paths: each next frame is either the
+        same stage one frame on or, once its minimum length is reached, the next stage's entry; both must be safe).
+        Per variant its row map RM [nv, K + 16] (-1 past the map)."""
+        K, nv = self.K, len(self.variants)
+        o = self.STAGE_ORDER
+        allr = {(k, self.info_of(v, k)) for v in self.variants for k in range(K)}
+        rows = sorted(allr, key=lambda t: (t[0], o[t[1][0]], t[1][1:]))
+        rid = {r: i for i, r in enumerate(rows)}
+        self.RM = np.full((nv, K + 16), -1, np.int64)
+        for vi, v in enumerate(self.variants):
+            for k in range(K):
+                self.RM[vi, k] = rid[(k, self.info_of(v, k))]
+        self.rows = rows
+        self.NR = NR = len(rows)
+        self.row_k = np.array([r[0] for r in rows], np.int64)
+        self.rows_at = [[] for _ in range(K)]
+        for i, (k, _) in enumerate(rows):
+            self.rows_at[k].append(i)
+        self.RV = [np.flatnonzero(self.RM[:, k] == i) for i, (k, _) in enumerate(rows)]
+        self.REACH = []
+        for i, (k, _) in enumerate(rows):
+            rr = []
+            for m in range(13):
+                kk = k + m
+                rr.append(sorted(set(int(x) for x in self.RM[self.RV[i], kk]) - {-1}) if kk < K else [])
+            self.REACH.append(rr)
+        self.row_end = np.array([min(self.variants[v].end_k for v in self.RV[i]) for i in range(NR)], np.int64)
+        self.DR = np.zeros((NR, self.NYB, self.NX), bool)
+        self.CLR = np.full((NR, self.NYB, self.NX), np.float32(self.cfg.c_cap), np.float32)
+        for i, (k, _) in enumerate(rows):
+            for sid in sorted(set(int(x) for x in self.VD[self.RV[i], k])):
+                self.DR[i] |= self.DS[k][sid]
+                self.CLR[i] = np.minimum(self.CLR[i], self.CLS[k][sid])
+
+    def row_table(self) -> dict:
+        """The rows for the stored map's meta: per row (k, stage, entry, s0), per variant its descriptor and row map."""
+        return {"rows": [[int(k), inf[0], int(inf[1]) if len(inf) > 1 else -1, int(inf[2]) if len(inf) > 2 else -1]
+                         for k, inf in self.rows],
+                "variants": [{"frames": {s: int(n) for s, n in v.frames.items()}, "phase": float(v.phase),
+                              "entry": {s: int(e) for s, e in v.entry.items()}, "end_k": int(v.end_k)}
+                             for v in self.variants],
+                "RM": self.RM[:, :self.K].tolist()}
 
     def _contact(self):
         """Per frame k and per distinct target box b of that frame (tgt[k][b]; VB[v, k] = variant v's box index):
@@ -962,7 +1113,332 @@ class KeyedMapBuilder(MapBuilder):
         return PhaseMap(p, S, SV, ground, apex, strike, strike_y, strike_kind, jstart, stats)
 
 
+class StageKeyedMapBuilder(KeyedMapBuilder):
+    """SG7: KeyedMapBuilder's pass on the stage-aligned rows (Geometry._rows; forum.md 63). Every frame-indexed table
+    of the keyed pass becomes row-indexed; a value m frames on is the minimum over the rows reachable m frames on
+    (REACH: the move's stage branches), a feasibility the AND; the damage / clearance / strike classes / the move's end
+    of a row come from its consistent variants only. The hero's side (the run steps, the tubes, the cycle position) is
+    the absolute frame's, as before. PhaseMap fields (keep_full): S [NR, 3, NS, NX], SV [NR, NS, NX, 3], ground
+    [NR, 3, NX], apex [n_tubes, NR, 3, NX], jstart [n_holds, NR, 3, NX]; strike / strike_y / strike_kind by press frame
+    (the best over the rows)."""
+
+    def build(self, p: int, keep_full: bool = False) -> PhaseMap:
+        g, c = self.g, self.g.cfg
+        t0 = time.time()
+        K, NS, NX, NR = g.K, g.NS, g.NX, g.NR
+        st = g.steps(p)
+        ncum = np.cumsum(st)
+        gam = np.float32(c.gamma)
+        wc, cap = np.float32(c.wc), np.float32(c.c_cap)
+        pl = np.asarray(c.p_late, np.float32)
+        pl = pl / pl.sum()
+        mode = c.key_noise
+        R, C, F, CLRr, OK0, B0, JRr, JCr = {}, {}, {}, {}, {}, {}, {}, {}
+        NXT = {}
+        S = np.empty((NR, 3, NS, NX), np.float16) if keep_full else None
+        SV = np.full((NR, NS, NX, 3), -np.inf, np.float16) if keep_full else None
+        ground = np.full((NR, 3, NX), -np.inf, np.float32)
+        apex = np.full((len(g.tubes), NR, 3, NX), np.nan, np.float32)
+        strike = np.zeros((K + 1, NX), np.float32)
+        strike_y = np.full((K + 1, NX), np.nan, np.float32)
+        strike_kind = np.zeros((K + 1, NX), np.int8)
+        sidx = np.arange(NS)
+        j0 = np.array([t.s0 for t in g.tubes if t.kind == "jump"])
+        jstart = np.full((len(j0), NR, 3, NX), -np.inf, np.float32)
+        n_strike_cells = 0
+        why = {w: np.zeros((K + 1, NX), np.int32) for w in ("contact", "air_or_end", "pre_damage", "bounce", "late")}
+
+        def score(r_, cc):
+            return r_ + wc * np.minimum(cc, cap) / cap
+
+        def mn(tab, rows, sel):
+            """Elementwise minimum over rows of tab[row][sel] (sel: an index tuple or array)."""
+            out = None
+            for rr in rows:
+                a = tab[rr][sel]
+                out = a if out is None else np.minimum(out, a)
+            return out
+
+        def an(tab, rows, sel):
+            out = None
+            for rr in rows:
+                a = tab[rr][sel]
+                out = a if out is None else (out & a)
+            return out
+
+        for k in range(K - 1, -1, -1):
+            q = (p - k + g.SJ) % 6
+            T, J = g.ST, g.SJ
+            Lq = g.TL[T, q]
+            valid = J < Lq
+            yb = g.TYB[T, q, J]
+            inv = g.TINV[T, q, J]
+            nxt = np.where(g.kind[T] == "ground", 0, np.where(J + 1 < Lq, sidx + 1, 0))
+            NXT[k] = nxt
+            s1 = nxt
+            s2 = NXT[k + 1][s1] if (k + 1) in NXT else None
+            s3 = NXT[k + 2][s2] if (s2 is not None and (k + 2) in NXT) else None
+            s4 = NXT[k + 3][s3] if (s3 is not None and (k + 3) in NXT) else None
+            for r in g.rows_at[k]:
+                reach = g.REACH[r]
+                end_r = int(g.row_end[r])
+                Dn = g.DR[r][yb] & ~inv[:, None]
+                CLn = np.where(inv[:, None], cap, g.CLR[r][yb]).astype(np.float32)
+                CLRr[r] = CLn
+                # ---- continuation per state key c
+                bR = np.full((3, NS, NX), -np.inf, np.float32)
+                bC = np.zeros((3, NS, NX), np.float32)
+                if k == K - 1 or not reach[1]:
+                    bR[:] = 0.0
+                    bC[:] = CLn
+                else:
+                    for ci, cv in enumerate((-1, 0, 1)):
+                        n1 = cv * int(st[k + 1])
+                        bS = np.full((NS, NX), -np.inf, np.float32)
+                        late = []
+                        if mode != "none":
+                            ok_path = _shift(an(F, reach[1], s1), n1, False)
+                            cl_path = _shift(mn(CLRr, reach[1], s1), n1, 0.0)
+                            nm = n1
+                            for m, (sm_, kk) in enumerate(((s2, k + 2), (s3, k + 3), (s4, k + 4)), start=1):
+                                if sm_ is None or not reach[m + 1] or any(rr not in R for rr in reach[m + 1]):
+                                    late.append(None)
+                                    continue
+                                nm = nm + cv * int(st[kk])
+                                late.append((sm_, m + 1, nm, ok_path.copy(), cl_path.copy()))
+                                if m < 3 and all(rr in F for rr in reach[m + 1]):
+                                    ok_path &= _shift(an(F, reach[m + 1], sm_), nm, False)
+                                    cl_path = np.minimum(cl_path, _shift(mn(CLRr, reach[m + 1], sm_), nm, 0.0))
+                        for di, dv in enumerate((-1, 0, 1)):
+                            V1 = _shift(mn(R, reach[1], (di, s1)), n1, -np.inf)
+                            C1 = _shift(mn(C, reach[1], (di, s1)), n1, 0.0)
+                            if di == ci or mode == "none":
+                                rr_, cc = gam * V1, np.minimum(CLn, C1)
+                            else:
+                                br, bc = [], []
+                                for m, lb in enumerate(late, start=1):
+                                    if lb is None:
+                                        br.append(np.full((NS, NX), -np.inf, np.float32))
+                                        bc.append(np.zeros((NS, NX), np.float32))
+                                        continue
+                                    sm_, mm, nm, okp, clp = lb
+                                    v = gam ** m * np.where(okp, _shift(mn(R, reach[mm], (di, sm_)), nm, -np.inf),
+                                                            -np.inf)
+                                    cv_ = np.where(okp, np.minimum(clp, _shift(mn(C, reach[mm], (di, sm_)), nm, 0.0)),
+                                                   0.0)
+                                    br.append(v.astype(np.float32))
+                                    bc.append(cv_.astype(np.float32))
+                                if mode == "hard":
+                                    rr_ = gam * np.minimum(V1, br[0])
+                                    cc = np.minimum(CLn, np.minimum(C1, bc[0]))
+                                else:
+                                    def z(v):
+                                        return np.where(np.isfinite(v), v, 0.0)
+                                    if mode == "exp":
+                                        fin = np.isfinite(V1)
+                                        rexp = pl[0] * V1 + pl[1] * z(br[0]) + pl[2] * z(br[1]) + pl[3] * z(br[2])
+                                        cexp = pl[0] * C1 + pl[1] * z(bc[0]) + pl[2] * z(bc[1]) + pl[3] * z(bc[2])
+                                    else:
+                                        fin = np.isfinite(V1) & np.isfinite(br[0])
+                                        rexp = pl[0] * V1 + pl[1] * br[0] + pl[2] * z(br[1]) + pl[3] * z(br[2])
+                                        cexp = pl[0] * C1 + pl[1] * bc[0] + pl[2] * z(bc[1]) + pl[3] * z(bc[2])
+                                    rr_ = np.where(fin, gam * rexp, -np.inf)
+                                    cc = np.minimum(CLn, np.where(fin, cexp, 0.0))
+                            sc = score(rr_, cc)
+                            better = sc > bS
+                            bS = np.where(better, sc, bS)
+                            bR[ci] = np.where(better, rr_, bR[ci])
+                            bC[ci] = np.where(better, cc, bC[ci])
+                # ---- the strike pressed in frame k + 1 with the key d held
+                ok_now = np.zeros((3, NS, NX), bool)
+                b_now = np.full((3, NS, NX), -np.inf, np.float32)
+                svb = np.full((3, NS, NX), -np.inf, np.float32)
+                svC = np.zeros((3, NS, NX), np.float32)
+                can = valid & g.can_kind[T] & g.TAIR[T, q, J] & (J >= g.cool) & (k + 4 + 1 <= end_r)
+                ss = np.flatnonzero(can)
+                if len(ss) and k + 11 < K and all(reach[i] for i in range(1, 12)):
+                    Ts, Js, qs = T[ss], J[ss], q[ss]
+                    Ls = Lq[ss]
+                    rel = {}
+                    for i in range(1, 12):
+                        idx = Js + i
+                        rel[i] = (idx < Ls, g.TYB[Ts, qs, idx], g.TRB[Ts, qs, idx], g.TY[Ts, qs, idx])
+                    nrel = {i: int(ncum[k + i] - ncum[k]) for i in range(1, 12)}
+                    ia = list(range(ACTIVE[0] + 1, ACTIVE[1] + 2))
+                    V = g.RV[r]
+                    classes = np.unique(np.concatenate([g.VB[V, k + 1:k + 11], g.VD[V, k + 1:k + 11]], axis=1), axis=0)
+                    for di, d in enumerate((-1, 0, 1)):
+                        CBx = g.CBM if d else g.CB
+                        cmin = np.full((len(ss), NX), -1, np.int64)
+                        for i in ia:
+                            air_i, _, rb_i, _ = rel[i]
+                            if k + i > end_r:
+                                break
+                            y = _shift(g.CY[k + i][rb_i], d * nrel[i], False) & air_i[:, None]
+                            cmin = np.where((cmin < 0) & y, i, cmin)
+                        cmax = np.full((len(ss), NX), -1, np.int64)
+                        every = np.ones((len(ss), NX), bool)
+                        nocon = np.zeros((len(ss), NX), bool)
+                        predmg = np.zeros((len(ss), NX), bool)
+                        for cls in classes:
+                            sb, sd = cls[:10], cls[10:]
+                            cc_ = np.full((len(ss), NX), -1, np.int64)
+                            for i in ia:
+                                if k + i > end_r:
+                                    break
+                                air_i, _, rb_i, _ = rel[i]
+                                a = _shift(CBx[k + i][sb[i - 1], rb_i], d * nrel[i], False) & air_i[:, None]
+                                cc_ = np.where((cc_ < 0) & a, i, cc_)
+                            con = cc_ >= 0
+                            bad = np.zeros_like(con)
+                            for i in range(1, ACTIVE[1]):
+                                sel = con & (i <= cc_ - PRE_PROTECT_F)
+                                if not sel.any():
+                                    break
+                                _, yb_i, _, _ = rel[i]
+                                bad |= sel & _shift(g.DS[k + i][sd[i - 1]][yb_i], d * nrel[i], True)
+                            nocon |= ~con
+                            predmg |= con & bad
+                            every &= con & ~bad
+                            cmax = np.maximum(cmax, cc_)
+                        why["contact"][k + 1] += (~nocon).sum(0).astype(np.int32)
+                        why["pre_damage"][k + 1] += (~nocon & predmg).sum(0).astype(np.int32)
+                        cmax = np.where(every, cmax, -1)
+                        ok = cmax >= 0
+                        ok_c = ok.copy()
+                        if not ok.any():
+                            continue
+                        cmin = np.where(cmin < 0, cmax, np.minimum(cmin, cmax))
+                        air_next = np.stack([rel[i][0] for i in range(1, 12)])
+                        cm1 = np.clip(cmax + 1, 1, 11)
+                        ok &= np.take_along_axis(air_next.T, cm1 - 1, axis=1) & (k + cmax + 1 <= end_r)
+                        why["air_or_end"][k + 1] += (ok_c & ~ok).sum(0).astype(np.int32)
+                        ok_c = ok.copy()
+                        Bm = np.full((len(ss), NX), np.inf, np.float32)
+                        Cm = np.full((len(ss), NX), np.inf, np.float32)
+                        for cc in range(ACTIVE[0] + 1, ACTIVE[1] + 3):
+                            sel = ok & (cc >= cmin) & (cc <= cmax + 1)
+                            if not sel.any():
+                                continue
+                            _, _, _, ycon = rel[cc]
+                            cb = np.floor(ycon / c.cb_w).astype(np.int64)
+                            has = (cb >= 0) & (cb < g.ncb)
+                            sb = g.bounce0[np.clip(cb, 0, g.ncb - 1)]
+                            Rb = _shift(mn(R, reach[cc], (di, sb)), d * nrel[cc], -np.inf)
+                            Cb = _shift(mn(C, reach[cc], (di, sb)), d * nrel[cc], 0.0)
+                            Rb = np.where(has[:, None], Rb, -np.inf)
+                            Bm = np.where(sel, np.minimum(Bm, Rb), Bm)
+                            Cm = np.where(sel, np.minimum(Cm, Cb), Cm)
+                        ok &= np.isfinite(Bm)
+                        why["bounce"][k + 1] += (ok_c & ~ok).sum(0).astype(np.int32)
+                        disc = gam ** np.maximum(cmax, 0).astype(np.float32)
+                        ok_now[di, ss] = ok
+                        b_now[di, ss] = np.where(ok, disc * Bm, -np.inf)
+                        n1 = d * int(st[k + 1])
+                        part = np.where(Js + 1 < g.SN[ss], ss + 1, ss)
+                        okL = ok & (Js + 1 < g.SN[ss])[:, None]
+                        if all(rr in OK0 for rr in reach[1]):
+                            late_ok = _shift(an(OK0, reach[1], (di, part)), n1, False)
+                            late_b = _shift(mn(B0, reach[1], (di, part)), n1, -np.inf)
+                        else:
+                            late_ok = np.zeros_like(ok)
+                            late_b = np.full_like(Bm, -np.inf)
+                        if c.late_press:
+                            why["late"][k + 1] += (okL & ~late_ok).sum(0).astype(np.int32)
+                            okL &= late_ok
+                        else:
+                            okL, late_b = ok.copy(), np.full_like(Bm, np.inf)
+                        if not okL.any():
+                            continue
+                        BL = np.minimum(np.where(ok, disc * Bm, -np.inf), late_b)
+                        cnt = np.zeros_like(BL)
+                        run = np.ones_like(okL)
+                        for m in range(1, c.depth_t + 1):
+                            km = k + m
+                            pm_ = np.where(Js + m < g.SN[ss], ss + m, ss)
+                            if reach[m] and all(rr in OK0 for rr in reach[m]):
+                                nm = d * int(ncum[km] - ncum[k])
+                                run = run & _shift(an(OK0, reach[m], (di, pm_)), nm, False) &                                     (Js + m < g.SN[ss])[:, None]
+                            else:
+                                run = np.zeros_like(run)
+                            cnt += run
+                        dt = cnt / c.depth_t
+                        marg = np.full(BL.shape, np.inf, np.float32)
+                        nmax = int(np.ceil(c.depth_x_u / g.step)) + 1
+                        for m in range(nmax, 0, -1):
+                            fail = ~_shift(okL, m, False) | ~_shift(okL, -m, False)
+                            marg = np.where(fail, (m - 0.5) * g.step, marg)
+                        dx = np.minimum(marg / c.depth_x_u, 1.0)
+                        depth = np.minimum(dx, dt)
+                        sv = np.where(okL, disc * (1.0 + depth) + BL, -np.inf).astype(np.float32)
+                        cs = np.minimum(CLn[ss], np.where(np.isfinite(Cm), Cm, 0.0))
+                        svb[di, ss] = sv
+                        svC[di, ss] = cs
+                        if SV is not None:
+                            SV[r, ss, :, di] = score(sv, cs).astype(np.float16)
+                        sco = np.where(okL & ~Dn[ss], 1.0 + depth, 0.0)
+                        if sco.any():
+                            n_strike_cells += int((sco > 0).sum())
+                            best_row = sco.max(0)
+                            arg = sco.argmax(0)
+                            upd = best_row > strike[k + 1]
+                            strike[k + 1] = np.where(upd, best_row, strike[k + 1])
+                            strike_y[k + 1] = np.where(upd, g.TY[Ts[arg], qs[arg], Js[arg]], strike_y[k + 1])
+                            kk = np.where(g.kind[Ts[arg]] == "bounce", 2, 1).astype(np.int8)
+                            strike_kind[k + 1] = np.where(upd, kk, strike_kind[k + 1])
+                # ---- the node per state key
+                use_s = score(svb, svC) > score(bR, bC)
+                Rk = np.where(use_s, svb, bR)
+                Ck = np.where(use_s, svC, bC)
+                bad = (Dn | ~valid[:, None])[None]
+                if SV is not None:
+                    SV[r][np.broadcast_to(bad[0][:, :, None], SV[r].shape)] = -np.inf
+                Rk = np.where(bad, -np.inf, Rk).astype(np.float32)
+                Ck = np.where(bad, 0.0, Ck).astype(np.float32)
+                raw_R, raw_C = Rk[:, j0].copy(), Ck[:, j0].copy()
+                if c.late_jump and k + 1 < K and reach[1] and all(rr in JRr for rr in reach[1]):
+                    JRn, JCn = mn(JRr, reach[1], slice(None)), mn(JCr, reach[1], slice(None))
+                    Rl = np.stack([_shift(JRn[ci], cv * int(st[k + 1]), -np.inf) for ci, cv in enumerate((-1, 0, 1))])
+                    Cl = np.stack([_shift(JCn[ci], cv * int(st[k + 1]), 0.0) for ci, cv in enumerate((-1, 0, 1))])
+                    Rk[:, j0] = np.minimum(Rk[:, j0], gam * Rl)
+                    Ck[:, j0] = np.minimum(Ck[:, j0], Cl)
+                scj = score(Rk[:, j0], Ck[:, j0])
+                jstart[:, r] = scj.transpose(1, 0, 2)
+                sc0 = score(Rk[:, 0], Ck[:, 0])
+                bj = scj.argmax(1)
+                jb = scj.max(1) > sc0
+                ar = np.arange(NX)
+                for ci in range(3):
+                    Rk[ci, 0] = np.where(jb[ci], Rk[ci, j0][bj[ci], ar], Rk[ci, 0])
+                    Ck[ci, 0] = np.where(jb[ci], Ck[ci, j0][bj[ci], ar], Ck[ci, 0])
+                R[r], C[r] = Rk, Ck
+                F[r] = np.isfinite(Rk).any(0)
+                OK0[r], B0[r] = ok_now, b_now
+                JRr[r], JCr[r] = raw_R, raw_C
+                Sk = score(Rk, Ck)
+                if S is not None:
+                    S[r] = Sk.astype(np.float16)
+                ground[r] = Sk[:, 0]
+                at_apex = valid & (J == g.TAPEX[T, q]) & (g.kind[T] != "ground")
+                for s_ in np.flatnonzero(at_apex):
+                    ti = T[s_]
+                    apex[ti, r] = np.fmax(apex[ti, r], Sk[:, s_])
+            # ring cleanup (rows of frames no longer read)
+            for tab, keep in ((R, 12), (C, 12), (F, 6), (CLRr, 6), (OK0, 4), (B0, 4), (JRr, 1), (JCr, 1)):
+                for old in [rr for rr in tab if g.row_k[rr] > k + keep]:
+                    del tab[old]
+            for old in [kk for kk in NXT if kk > k + 6]:
+                del NXT[old]
+        stats = {"p": p, "seconds": round(time.time() - t0, 1), "strike_cells": n_strike_cells, "why": why,
+                 "keyed": True, "key_noise": mode, "stage": True, "NR": int(NR)}
+        return PhaseMap(p, S, SV, ground, apex, strike, strike_y, strike_kind, jstart, stats)
+
+
 def builder_for(geo: Geometry) -> MapBuilder:
+    if geo.cfg.stage:
+        if not geo.cfg.keyed:
+            raise ValueError("stage rows need the keyed pass")
+        return StageKeyedMapBuilder(geo)
     return KeyedMapBuilder(geo) if geo.cfg.keyed else MapBuilder(geo)
 
 
