@@ -249,8 +249,25 @@ def _decide(Ss, Ps, ph, RM, k, kind, ev_k, tube, land, has_land, x, c, last_pres
     ground, keep the key in the air. (value, kind, a, b): dir (d), jump (hold index, first key), press (key)."""
     NJ = ci[CI_NJ]
     NA = acc.shape[0]
+    K = ci[CI_K]
     for q in range(ph.shape[0]):
         p = ph[q]
+        # SG7: a source with the same phase and the same rows over the frames this decision reads (k .. k + 4) as
+        # an earlier one gives the same values: skip it (the minimum is unchanged)
+        dup = False
+        for q2 in range(q):
+            if ph[q2] != p:
+                continue
+            same = True
+            for kk in range(k, min(k + 5, K)):
+                if RM[q2, kk] != RM[q, kk]:
+                    same = False
+                    break
+            if same:
+                dup = True
+                break
+        if dup:
+            continue
         _decide1(Ss[p], Ps[p], RM[q], p, k, kind, ev_k, tube, land, has_land, x, c, last_press, lam, ci, cf, pl, gp,
                  TS0, TN, JS0, val, off)
         if q == 0:
