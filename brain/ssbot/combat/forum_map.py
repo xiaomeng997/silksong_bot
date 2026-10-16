@@ -715,7 +715,18 @@ class MapHelper:
         glide = r1.mode[idx, je] == kin.M_GLIDE
         yb = bx_[:, je, 1] - rt.hm.stand_y0
         yp = bx_[:, je - 1, 1] - rt.hm.stand_y0
-        R = rt.readiness_min(p_end, xm, kd, gnd, yb, yp)   # SG6: one compiled call with the JIT
+        rmode = None
+        if SG8:
+            # SG8: an airborne end's own jump key (the row's mask read at index je): held -> the open holds are the
+            # bot's choice (the best), released -> the holds it had; a bounce only after a down press (the row's, or
+            # one earlier in the arc)
+            col = cmd[idx, ce] if (cmd.shape[1] and 0 <= ce < cmd.shape[1]) else np.zeros(len(idx), np.int64)
+            dn_ = ((cmd[idx, :max(ce + 1, 0)] & (kin.B_DOWN | kin.B_ATTACK)) == (kin.B_DOWN | kin.B_ATTACK)).any(axis=1) \
+                if ce >= 0 else np.zeros(len(idx), bool)
+            arc_ds = self._arc is None or bool(self._arc.get("ds"))
+            rmode = np.where(gnd, 0, np.where((col & kin.B_JUMP) != 0, 1, 2) + np.where(dn_ | arc_ds, 4, 0))
+            rmode = rmode.astype(np.int64)
+        R = rt.readiness_min(p_end, xm, kd, gnd, yb, yp, rmode=rmode)   # SG6: one compiled call with the JIT
         R[glide] = 0.0
         if chase:
             # SG5: a row ending in a ground swing: the hero is locked until the swing ends (attack_duration), so a

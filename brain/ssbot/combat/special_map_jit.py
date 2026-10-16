@@ -582,24 +582,28 @@ def plan_k(Ss, Ps, ph, RM, si, sf, L, lam, face, ci, cf, pl, gp, TS0, TN, JS0, J
 
 
 @njit(cache=True, error_model="numpy")
-def ready_k(Ss, pe, xm, kd, gnd, yb, yp, tol, K0S, K0Y0, K0Y1, K0N, x_lo, step, NX, scale):
+def ready_k(Ss, pe, xm, kd, gnd, yb, yp, tol, K0S, K0Y0, K0Y1, K0N, x_lo, step, NX, scale, rmode, K0H, K0J):
     """The minimum over the phases pe of MapRuntime.readiness_rows (k = 0): rows with the same key as an earlier row
-    (np.unique's first occurrence: x / step, key, ground, the heights / 0.01) take that row's value."""
+    (np.unique's first occurrence: x / step, key, ground, the heights / 0.01) take that row's value. SG8 rmode per
+    row (0: as before): an airborne end's own jump key: 1 held (an open hold: the best jump slice with h >= j - 1),
+    2 released (the jump slices with h <= j), +4 a bounce possible (a down press in the arc); K0H / K0J the k = 0
+    slices' hold (-1: a bounce) and index."""
     N = xm.shape[0]
-    key = np.empty((N, 5))
+    key = np.empty((N, 6))
     for i in range(N):
         key[i, 0] = np.rint(xm[i] / step)
         key[i, 1] = kd[i]
         key[i, 2] = 1.0 if gnd[i] else 0.0
         key[i, 3] = 0.0 if gnd[i] else np.rint(yb[i] / 0.01)
         key[i, 4] = 0.0 if gnd[i] else np.rint(yp[i] / 0.01)
+        key[i, 5] = rmode[i]
     R = np.empty(N)
     hi = x_lo + step * (NX - 1)
     for i in range(N):
         rep = -1
         for jj in range(i):
             if key[jj, 0] == key[i, 0] and key[jj, 1] == key[i, 1] and key[jj, 2] == key[i, 2] and \
-                    key[jj, 3] == key[i, 3] and key[jj, 4] == key[i, 4]:
+                    key[jj, 3] == key[i, 3] and key[jj, 4] == key[i, 4] and key[jj, 5] == key[i, 5]:
                 rep = jj
                 break
         if rep >= 0:
@@ -621,12 +625,31 @@ def ready_k(Ss, pe, xm, kd, gnd, yb, yp, tol, K0S, K0Y0, K0Y1, K0N, x_lo, step, 
             else:
                 v = np.inf
                 hit = False
+                md = rmode[i] & 3
+                bok = md == 0 or (rmode[i] & 4) != 0
+                vo = -np.inf
+                ho = False
                 for m in range(K0N[p]):
                     if abs(yb[i] - K0Y0[p, m]) <= tol and abs(yp[i] - K0Y1[p, m]) <= tol:
+                        h = K0H[p, m]
+                        if md != 0:
+                            if h < 0:
+                                if not bok:
+                                    continue
+                            elif md == 1 and h < K0J[p, m] - 1:
+                                continue
+                            elif md == 2 and h > K0J[p, m]:
+                                continue
                         vv = _lvv(np.int64(S[0, c, K0S[p, m], xi]), scale)
-                        if not hit or vv < v:
+                        if md == 1 and h >= 0:
+                            if not ho or vv > vo:
+                                vo = vv
+                            ho = True
+                        elif not hit or vv < v:
                             v = vv
                         hit = True
+                if ho and vo < v:
+                    v = vo
                 if not hit:
                     v = 0.0
             if not inside:
@@ -741,15 +764,21 @@ def tables(rt) -> dict | None:
     K0Y0 = np.zeros((6, M))
     K0Y1 = np.zeros((6, M))
     K0N = np.zeros(6, np.int64)
+    K0H = np.full((6, M), -1.0)
+    K0J = np.zeros((6, M), np.int64)
     for p, (s, y0, y1) in k0.items():
         K0S[p, :len(s)] = s
         K0Y0[p, :len(s)] = y0
         K0Y1[p, :len(s)] = y1
         K0N[p] = len(s)
+        for m, s_ in enumerate(np.asarray(s).tolist()):
+            t_ = int(ti.ST[s_])
+            K0H[p, m] = float(ti.params[t_]) if ti.kinds[t_] == "jump" else -1.0
+            K0J[p, m] = int(ti.SJ[s_])
     return {"Ss": Ss, "Ps": Ps, "ci": ci, "cf": cf, "pl": pl, "gp": gp, "TS0": TS0, "TN": TN, "JS0": JS0, "JT": JT,
             "JH": JH, "BT": BT, "JLAND": JLAND, "JY": JY, "JPY": JPY, "JLEN": JLEN, "BY": BY, "BPY": BPY, "BLEN": BLEN,
             "BAPEX": BAPEX, "LAG": LAG, "POLY": POLY, "TGT": TGT, "NTGT": NTGT, "BITS": BITS, "K0S": K0S,
-            "K0Y0": K0Y0, "K0Y1": K0Y1, "K0N": K0N, "KT": KT,
+            "K0Y0": K0Y0, "K0Y1": K0Y1, "K0N": K0N, "KT": KT, "K0H": K0H, "K0J": K0J,
             "jidx": {int(h): i for i, h in enumerate(ti.jump_h)}}
 
 
@@ -800,7 +829,8 @@ def warm() -> float:
     decide_k(Ss, Ps, ph, RM, 2, 0, 2, 0, 0, False, 0.0, 0, -100, 0.02, ci, cf, pl, gp, TS0, TN, JS0)
     z = np.zeros(2)
     ready_k(Ss, ph, z, np.zeros(2, np.int64), np.array([True, False]), z, z, 0.08, np.zeros((6, 1), np.int64),
-            np.zeros((6, 1)), np.zeros((6, 1)), np.zeros(6, np.int64), -1.0, 0.25, NX, 0.025)
+            np.zeros((6, 1)), np.zeros((6, 1)), np.zeros(6, np.int64), -1.0, 0.25, NX, 0.025, np.zeros(2, np.int64),
+            np.zeros((6, 1)), np.zeros((6, 1), np.int64))
     smin_k(Ss, ph, RM, np.zeros(2, np.int64), np.zeros(2, np.int64), z, np.zeros(2, np.int64), K, NX, -1.0, 0.25,
            0.025)
     return (time.perf_counter() - t0) * 1e3

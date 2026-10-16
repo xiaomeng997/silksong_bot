@@ -553,16 +553,18 @@ class MapRuntime:
         return c[p]
 
     def readiness_rows(self, p: int, xm: np.ndarray, kd: np.ndarray, gnd: np.ndarray, yb: np.ndarray,
-                       yp: np.ndarray, tol: float = 0.08) -> np.ndarray:
+                       yp: np.ndarray, tol: float = 0.08, rmode: np.ndarray | None = None) -> np.ndarray:
         """[N] readiness of end states at k = 0 (phase p): map x xm, state key kd (map frame), on the ground or the
         minimum over the airborne slices matching the last two box bottoms (none matched: 0, off the macros)."""
         src = self.srcs[p]
         xm, kd, gnd, yb, yp = (np.asarray(a) for a in (xm, kd, gnd, yb, yp))
+        rmode = np.zeros(len(xm), np.int64) if rmode is None else np.asarray(rmode, np.int64)
         key = np.stack([np.rint(xm / self.ti.step), kd, gnd.astype(float), np.where(gnd, 0, np.rint(yb / 0.01)),
-                        np.where(gnd, 0, np.rint(yp / 0.01))], axis=1)
+                        np.where(gnd, 0, np.rint(yp / 0.01))] + ([rmode] if rmode.any() else []), axis=1)
         uk, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
         if len(uk) < len(xm):                                     # many rows end in the same state
-            Ru = self.readiness_rows(p, xm[first], kd[first], gnd[first], yb[first], yp[first], tol)
+            Ru = self.readiness_rows(p, xm[first], kd[first], gnd[first], yb[first], yp[first], tol,
+                                     rmode[first] if rmode.any() else None)
             return Ru[np.asarray(inv).reshape(-1)]
         S0 = np.asarray(src._S[0], np.int64)                      # [3, NS, NX] or [NS, NX]
         xi = np.clip(np.rint((np.asarray(xm) - self.ti.x_lo) / self.ti.step).astype(np.int64), 0, self.ti.NX - 1)
@@ -581,10 +583,29 @@ class MapRuntime:
             s, y0, y1 = self._k0_slices(p)
             ia = np.flatnonzero(a)
             m = (np.abs(np.asarray(yb)[ia, None] - y0[None, :]) <= tol) & (np.abs(np.asarray(yp)[ia, None] - y1[None, :]) <= tol)
+            ti = self.ti
             for r, i in enumerate(ia):
                 ss = s[m[r]]
                 if not len(ss):
                     R[i] = 0.0
+                    continue
+                md = int(rmode[i]) & 3
+                if md:
+                    # SG8 (special_map_jit.ready_k): the row's own jump key
+                    bok = (int(rmode[i]) & 4) != 0
+                    hs = np.array([float(ti.params[ti.ST[s_]]) if ti.kinds[ti.ST[s_]] == "jump" else -1.0 for s_ in ss])
+                    js = ti.SJ[ss]
+                    keep = np.where(hs < 0, bok, (hs >= js - 1) if md == 1 else (hs <= js))
+                    ss, hs = ss[keep], hs[keep]
+                    if not len(ss):
+                        R[i] = 0.0
+                        continue
+                    vv = val(S0[c[i], ss, xi[i]] if self.keyed else S0[ss, xi[i]])
+                    op = (hs >= 0) if md == 1 else np.zeros(len(ss), bool)
+                    v_ = float(vv[~op].min()) if (~op).any() else np.inf
+                    if op.any():
+                        v_ = min(v_, float(vv[op].max()))
+                    R[i] = v_
                     continue
                 lv = S0[c[i], ss, xi[i]] if self.keyed else S0[ss, xi[i]]
                 R[i] = float(val(lv).min())
@@ -592,20 +613,23 @@ class MapRuntime:
         return R
 
     def readiness_min(self, phases, xm: np.ndarray, kd: np.ndarray, gnd: np.ndarray, yb: np.ndarray,
-                      yp: np.ndarray, tol: float = 0.08) -> np.ndarray:
-        """[N] the minimum over phases of readiness_rows (SG6: one compiled call with the JIT)."""
+                      yp: np.ndarray, tol: float = 0.08, rmode: np.ndarray | None = None) -> np.ndarray:
+        """[N] the minimum over phases of readiness_rows (SG6: one compiled call with the JIT). rmode (SG8): per row
+        its own jump key at the end (special_map_jit.ready_k); None: 0 (as before)."""
         T = self.jit_tables() if self.use_jit else None
         if T is None:
             R = np.full(len(xm), np.inf)
             for p in phases:
-                R = np.minimum(R, self.readiness_rows(p, xm, kd, gnd, yb, yp, tol))
+                R = np.minimum(R, self.readiness_rows(p, xm, kd, gnd, yb, yp, tol, rmode))
             return R
         ti = self.ti
         return smj.ready_k(T["Ss"], np.asarray(list(phases), np.int64), smj.wr(xm, np.float64),
                            smj.wr(kd, np.int64), smj.wr(gnd, np.bool_), smj.wr(yb, np.float64),
                            smj.wr(yp, np.float64), float(tol),
                            T["K0S"], T["K0Y0"], T["K0Y1"], T["K0N"], float(ti.x_lo), float(ti.step), int(ti.NX),
-                           float(T["cf"][smj.CF_SCALE]))
+                           float(T["cf"][smj.CF_SCALE]),
+                           smj.wr(np.zeros(len(xm), np.int64) if rmode is None else rmode, np.int64),
+                           T["K0H"], T["K0J"])
 
     def S_min(self, phases, ks, ss, xs, cs) -> np.ndarray:
         """[n] min over phases of the sources' S(k, s, x, c) (keyed; unkeyed: S(k, s, x)), elementwise (scalars

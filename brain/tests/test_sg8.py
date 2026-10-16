@@ -173,3 +173,38 @@ def test_lunge_short_reanchors_after_the_lunge(kinf, monkeypatch):
     dmin = min(float(r.vtl[v].disp[k]) for v in ok_v)
     x0n = cx - face * dmin
     assert r.deviation(k, cx, x0n, face) <= rt.DEV_TOL_U + 1e-9
+
+
+def test_readiness_rmode_python_equals_jit(kinf, small, tmp_path):
+    """SG8's airborne readiness (a row's own jump key at its end): the compiled kernel equals the Python reference,
+    and rmode 0 is the old rule."""
+    params, terrain, hm = kinf
+    geo, pm = small[True]
+    scale = rt.level_scale(geo.cfg.wc)
+    path = tmp_path / "lv.npz"
+    rt.save_levels(path, geo, rt.phase_levels(pm, True, scale), [0], scale, {"ready_ref": 3.0,
+                                                                              "stage": geo.row_table()})
+    r = rt.MapRuntime(params, terrain, path, hm=hm)
+    r.observe(None)
+    s, y0, y1 = r._k0_slices(0)
+    rng = np.random.default_rng(3)
+    n = 400
+    pick = rng.integers(0, len(s), n)
+    gnd = rng.random(n) < 0.3
+    yb = np.where(gnd, 0.0, y0[pick] + rng.uniform(-0.03, 0.03, n))
+    yp = np.where(gnd, 0.0, y1[pick] + rng.uniform(-0.03, 0.03, n))
+    xm = rng.uniform(-6.0, 11.0, n)
+    kd = rng.integers(-1, 2, n)
+    rmode = np.where(gnd, 0, rng.choice([0, 1, 2, 5, 6], n)).astype(np.int64)
+    a = r.readiness_min([0], xm, kd, gnd, yb, yp, rmode=rmode)
+    a0 = r.readiness_min([0], xm, kd, gnd, yb, yp)
+    r.use_jit = False
+    b = r.readiness_min([0], xm, kd, gnd, yb, yp, rmode=rmode)
+    b0 = r.readiness_min([0], xm, kd, gnd, yb, yp)
+    assert np.array_equal(np.nan_to_num(a, neginf=-9e9), np.nan_to_num(b, neginf=-9e9))
+    assert np.array_equal(np.nan_to_num(a0, neginf=-9e9), np.nan_to_num(b0, neginf=-9e9))
+    z = rmode == 0
+    assert np.array_equal(np.nan_to_num(a[z], neginf=-9e9), np.nan_to_num(a0[z], neginf=-9e9))
+    op = rmode == 1
+    # an open hold: the best of its consistent jump slices (no slice left: 0, off the macros, as before)
+    assert ((np.nan_to_num(a[op], neginf=-9e9) >= np.nan_to_num(a0[op], neginf=-9e9)) | (a[op] == 0.0)).all()
