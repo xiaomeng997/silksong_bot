@@ -12,6 +12,9 @@ The game clock (SP2): the probe sums the STATEs' scaled dt (a skipped frame at t
 to the playbook like the policy's Stamp.t_game_s (SSBOT_FORUM_SLAM_PLAY_CLOCK=0: the frame count of SP1). --freeze K:N
 stands in for the live hit stop (SP2: a hit across 80 / 50 / 20 HP froze the game ~12 frames): at antic frame K the
 time scale goes to 1e-4 for N STATE frames, then back to 1.
+--skid N (SP4, the sprint skid of the live declines): at the antic sighting the probe dashes toward the Clapper (dash +
+the direction 3 frames), holds the direction (a sprint) to frame N - 2, then the other direction 2 frames (a Sprint
+Turn: no input for 10-30 frames, as after a planner dash + run); the playbook steps from frame N.
 
 Per trial (<recording>/play_trials.jsonl): the distance class, the hero's x at the antic sighting, the playbook's run
 (start / jump / press frames it sent, its end and why), and from the STATEs (act.mask = the keys the game held): the
@@ -39,6 +42,7 @@ from ssbot.ipc.oracle_link import OracleLink
 from ssbot.probes.pogo_target import MIN_HP, Target, stop_requested
 
 M_L, M_R, M_J, M_A = mask("left"), mask("right"), mask("jump"), mask("attack")
+M_DASH = mask("dash")
 WAIT_S = 12.0
 SETTLE_F = 30
 MAX_F = 260
@@ -50,9 +54,10 @@ def _ctl(e) -> str | None:
 
 class PlayProbe(Target):
     def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False, hop: int = 0,
-                 freeze: tuple[int, int] | None = None):
+                 freeze: tuple[int, int] | None = None, skid: int = 0):
         super().__init__(link, savestate)
         self.hop = hop
+        self.skid = skid
         self.freeze = freeze
         self.tg = 0.0                                     # the game clock (s): the sum of the STATEs' scaled dt
         self.tick_ms = tick_ms
@@ -129,11 +134,21 @@ class PlayProbe(Target):
                     elif fz is not None and fz["f1"] is None and s["f"] - fz["f0"] >= self.freeze[1]:
                         link.rpc("time.scale", timeout_s=10, scale=1.0)
                         fz["f1"] = s["f"]
-                pm = self.play.step(s["f"], s, sp.on_ground(s), bool(s["hero"].get("hero_accepting_input", True)),
-                                    t_game=self.tg if sp.GAME_CLOCK else None)
-                if self.tick_ms > 0:
-                    time.sleep(self.tick_ms / 1000.0)
-                m = 0 if pm is None else pm
+                ks = s["f"] - seen["f"]
+                if self.skid and ks < self.skid:
+                    # --skid: dash + sprint toward it, then the other way (a Sprint Turn), the playbook not yet asked
+                    tw = M_R if float(e["pos"][0]) > sp.hero_x(s) else M_L
+                    m = (tw | M_DASH) if ks < 3 else (tw if ks < self.skid - 2 else (M_L | M_R) & ~tw)
+                    seen.setdefault("skid_tw", tw)
+                    if ks == self.skid - 1:
+                        seen["skid_x"] = round((sp.hero_x(s) - float(e["pos"][0])) * (1 if e.get("flipX") else -1), 3)
+                        seen["skid_acc"] = bool(s["hero"].get("hero_accepting_input", True))
+                else:
+                    pm = self.play.step(s["f"], s, sp.on_ground(s), bool(s["hero"].get("hero_accepting_input", True)),
+                                        t_game=self.tg if sp.GAME_CLOCK else None)
+                    if self.tick_ms > 0:
+                        time.sleep(self.tick_ms / 1000.0)
+                    m = 0 if pm is None else pm
             link.act(s["f"] + 2, m, hold_frames=0)
             if seen is not None:
                 h = s.get("hero") or {}
@@ -248,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pin", action="store_true", help="the stand band pinned at each distance class (x at the jump)")
     ap.add_argument("--hop", type=int, default=0, help="while waiting, a hop (jump held 8 frames) every 2 x HOP frames")
     ap.add_argument("--freeze", default="", help="K:N: at antic frame K the time scale 1e-4 for N frames (a hit stop)")
+    ap.add_argument("--skid", type=int, default=0, help="N: dash + sprint toward it from the antic sighting, a Sprint "
+                    "Turn at N - 2; the playbook from frame N (SP4)")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import Recorder
     dists = [float(x) for x in a.dists.split(",")]
@@ -258,11 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         link.rpc("guards.set", save_suppression=True, lethal_block="block")
         link.rpc("fsmtap.set", all=True)
         fz = tuple(int(x) for x in a.freeze.split(":")) if a.freeze else None
-        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz)
+        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz, a.skid)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"slam_play_i{a.instance}_s{a.seed}{a.tag}",
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
                                "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
-                               "freeze": a.freeze, "game_clock": sp.GAME_CLOCK,
+                               "freeze": a.freeze, "game_clock": sp.GAME_CLOCK, "skid": a.skid, "late": sp.LATE,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()

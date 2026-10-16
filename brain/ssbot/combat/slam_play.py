@@ -84,6 +84,22 @@ GAME_CLOCK = _on("SSBOT_FORUM_SLAM_PLAY_CLOCK", "1")
 # (SP1 it3, the stand pinned: the jump at 3.6-7.25 u all succeeded), the band at the jump from NEAR_BAND_LO
 NEAR_STAND_U = 3.7
 NEAR_BAND_LO = 3.6
+# SSBOT_FORUM_SLAM_PLAY_LATE (task 1v1 SP4, default 0; forum.md 68): the declined slams of SP2 / SP3 (319 slams re-run
+# through the playbook on the recordings: 16 "no input", 16 "no landing", 4 not on the ground at the jump, ...) - (a) no
+# input at the antic (the sprint's Sprint Turn / Skid End after a planner dash + run, 6 of them ended at 4.8-5.5 u at
+# antic frame 13-28; the umbrella, 10, landed 6-9 u out at 13-26): wait, start when input returns (a late start like
+# the airborne entry); (b) an airborne entry landing at antic frame 28 (7 cases at 4.9-5.6 u, all aborted one frame
+# early): the jump up to K_JUMP_LATE2 (the press at K_PRESS_MAX = 19 frames after a jump at 30); (c) a late start
+# outside the jump band walks into it up to K_JUMP_LATE2. 0: SP1-SP3's playbook.
+LATE = _on("SSBOT_FORUM_SLAM_PLAY_LATE", "0")
+# SSBOT_FORUM_SLAM_AFTER (task 1v1 SP4, default 0; read by combat.tactics.gauntlet): a slam the playbook does not take,
+# the hero in front: never the 13 u flight past the hammer; in Slam 2 (the lunge over: Slam Collider 2 reaches 7.76 u
+# in front of the Clapper at the standing hero's height, 407 live slams) OUTSIDE_U in front of it, in the recovery (the
+# hammer off; its body's front edge 3.49 u to antic frame 67, then 2.25 u) AFTER_U in front with ground hits counting
+# (the after-the-hammer strike, presses about antic frame 63-76)
+AFTER = _on("SSBOT_FORUM_SLAM_AFTER", "0")
+OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
+AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
 
 
 @dataclass
@@ -108,6 +124,7 @@ class PlayCfg:
     #                                  -> 0 / 10)
     press_after: int = 20
     k_press_max: int = 49
+    k_jump_late2: int = 30           # SSBOT_FORUM_SLAM_PLAY_LATE: the latest jump of a late start (no input / airborne)
     k_end: int = 110                 # the script ends here at the latest
     wall_room: float = 0.5           # the stand point at least this far inside the arena walls
     over: int = 1                    # 1: the way out after the bounce (over its body, the dash); 0: no key (SP1 it1)
@@ -186,6 +203,7 @@ class Run:
     k_press_plan: int | None = None  # the press frame for this run's jump (K_PRESS, later after a late jump)
     stand: tuple | None = None       # this run's stand / band when not the cfg's (SSBOT_FORUM_JUMP_BEHIND near a wall)
     band: tuple | None = None
+    late: bool = False               # SSBOT_FORUM_SLAM_PLAY_LATE: no input seen at the antic (a late start allowed)
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -287,7 +305,7 @@ class SlamPlay:
         if r.phase == "land" and ground:
             r.phase = "wait"                              # landed: the start check (walk time from here)
         if r.phase == "land":
-            if k > c.k_jump_late - 1 or not accepting:
+            if k > (c.k_jump_late2 if LATE else c.k_jump_late - 1) or (not accepting and not LATE):
                 self._close("abort", "no landing" if accepting else "no input in the air")
                 return None
             m = self._walk(s, float(e["pos"][0]), r.face, f)
@@ -304,17 +322,18 @@ class SlamPlay:
         cx = float(e["pos"][0])
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
-            if k < c.k_jump:
-                m = self._walk(s, cx, r.face, f)
+            band = r.band or c.band
+            late_walk = LATE and (r.k_air is not None or r.late) and k < c.k_jump_late2 and ground and                 not band[0] <= x <= band[1]
+            if k < c.k_jump or late_walk:
+                m = self._walk(s, cx, r.face, f)          # (LATE: a late start walks into the band up to K_JUMP_LATE2)
             else:
                 if not ground:
                     self._close("abort", "not on the ground at the jump")
                     return None
-                band = r.band or c.band
                 if not band[0] <= x <= band[1]:
                     self._close("abort", f"x {x:.2f} outside the band at the jump")
                     return None
-                if k > c.k_jump_late:
+                if k > (c.k_jump_late2 if LATE else c.k_jump_late):
                     self._close("abort", "late jump")
                     return None
                 r.phase, r.k_jump, r.x_jump = "jump", k, round(x, 3)
@@ -410,7 +429,10 @@ class SlamPlay:
     def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
                    ) -> int | None:
         c = self.cfg
-        if k > (c.k_jump_late - 1 if r.k_air is not None else c.k_start_max):
+        lim = c.k_start_max
+        if r.k_air is not None or r.late:
+            lim = c.k_jump_late2 if LATE else c.k_jump_late - 1
+        if k > lim:
             if not r.why:
                 r.why = "late"
             r.phase = "abort"
@@ -422,6 +444,7 @@ class SlamPlay:
         vx = float((h.get("vel") or [0, 0])[0])
         if not accepting:
             r.why = "no input (sprint, recoil)"
+            r.late = r.late or LATE                       # SSBOT_FORUM_SLAM_PLAY_LATE: start when input returns
             return None
         if x <= 0:
             r.why = "behind"
@@ -442,7 +465,7 @@ class SlamPlay:
             lo, hi = r.stand
             tgt = min(max(x, lo), hi)
         if not ground:
-            if c.air and k <= c.k_air_max and r.k_air is None:
+            if c.air and r.k_air is None and (k <= c.k_air_max or (LATE and r.late)):
                 # in the air at the antic (a hop): steer toward STAND (never the jump), start once she lands
                 r.phase, r.k_air, r.hp0, r.why = "land", k, hp, ""
                 return self._walk(s, cx, r.face, f)
@@ -450,7 +473,11 @@ class SlamPlay:
             return None
         need = abs(tgt - x) / WALK_U + abs(vx) / 8.25 * 2 + 1
         band = r.band or c.band
-        late_ok = r.k_air is not None and band[0] <= x <= band[1]   # landed late inside the jump band: jump now
+        late_ok = (r.k_air is not None or r.late) and band[0] <= x <= band[1]   # landed late inside the jump band
+        if LATE and (r.k_air is not None or r.late) and not late_ok:
+            # LATE: a late start walks into the jump band (the walk phase) when that fits by K_JUMP_LATE2
+            gap = max(x - (band[1] - 0.1), (band[0] + 0.1) - x, 0.0)
+            late_ok = k + gap / WALK_U + abs(vx) / 8.25 * 2 + 1 <= c.k_jump_late2
         if k + need > c.k_jump - 1 and not late_ok:
             r.why = "no time to walk"
             return None

@@ -104,10 +104,17 @@ CC_IDLE, CC_SLAM, CC_JUMP, CC_JUMP_CAST, CC_CAST = "CC_IDLE", "CC_SLAM", "CC_JUM
 # Jump Aim (and Cast Jump) are instant: one frame goes Jump Antic / Cast Slam Antic 2 -> (Cast Jump ->) Jump Aim ->
 # Jump, so the tracker never ends a tick in them (forum.md 21.7.1)
 CC_AIR_STATES = ("Jump", "Air")                           # its body off the ground (a jump's flight)
-CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off", "rune: out")  # branches that step away
+CC_RETREAT = ("slam: step out", "slam: out to the wall", "jump: back off", "rune: out",  # branches that step away
+              "slam: outside")
 # SSBOT_FORUM_JUMP_BEHIND: the branches whose target's hits do not count (GoalPrefs.no_hit)
 JB_NO_HIT = ("jump: aim stance", "jump: under and behind (antic)", "jump: under and behind (flight)", "jump: back off",
              "rune: out")
+# ... and the branches whose target's hits count from the ground only (GoalPrefs.ground_hit; SP4's labels exist only
+# with their switches: the flight with JB_PASS, the fall with JB_LAND, the cast antic with JB_CAST_ANTIC, the slam's
+# recovery with SLAM_AFTER); JB_NOJUMP's ground-first branches (GoalPrefs.ground_first)
+JB_GROUND_HIT = ("jump: under and behind (landed)", "rune: behind", "jump: under and behind (flight)",
+                 "jump: under and behind (falling)", "jump: cast antic slash", "slam: after")
+JB_GROUND_FIRST = ("jump: under and behind (landed)", "jump: under and behind (falling)", "rune: behind")
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -350,6 +357,15 @@ class GauntletTactics:
                     return self._clamp(held[1]), frozenset(), "slam: strike (held)"
             if side != front:
                 return self._clamp(x - front * r.slam_behind_u), frozenset(), "slam: stay behind"
+            if slam_play.AFTER:
+                # SSBOT_FORUM_SLAM_AFTER (task 1v1 SP4, the person: never run away from a slam): a slam the playbook
+                # did not take, the hero in front: in Slam 2 (the lunge over; Slam Collider 2 reaches 7.76 u in front
+                # of it at her height) just outside its reach, then in the recovery (the hammer off) back into slash
+                # reach of its front edge (3.49 u to frame 67, then 2.25 u), ground hits counting
+                if s.state == "Slam Recover":
+                    return self._clamp(x + front * slam_play.AFTER_U), frozenset(), "slam: after"
+                if s.state in ("Slam 2", "Slam Effects?"):
+                    return self._clamp(x + front * slam_play.OUTSIDE_U), frozenset(), "slam: outside"
             if _sg8_on():
                 # SSBOT_FORUM_SG8 (forum.md 64; the person: never run away from a slam): no map spot this tick (no
                 # map for this slam, no finite ground value near): at its face, the hit weight kept (the planner's
@@ -450,6 +466,12 @@ class GauntletTactics:
         rec = self.jb_land.get(s.iid)
         if st in jb.ANTIC_STATES or (rec is None and st not in jb.AIR_STATES + jb.LANDED_STATES):
             self.jb_land.pop(s.iid, None)
+            if (jb.CAST_ANTIC and fam == CC_JUMP_CAST and side == front and st in ("Cast Slam Antic", "Cast Slam Antic 2")
+                    and self._t - self.t_commit.get(s.iid, self._t) < jb.CFG["cast_slash_s"]):
+                # SSBOT_FORUM_JB_CAST_ANTIC (SP4, the person: "during the big rune's antic you can stand in front of it
+                # and slash at least twice"): in slash reach in front, ground hits counting, then the aim stance
+                self.jump_how[s.iid] = "under and behind"
+                return self._clamp(x + front * jb.CFG["cast_u"]), frozenset(), "jump: cast antic slash"
             if side != front:
                 # behind it already at the antic (it faces the hero at the antic start: she crossed during it)
                 spot = jb.behind_spot(x, front)
@@ -472,6 +494,8 @@ class GauntletTactics:
             #                                               of its take-off and of the estimate
         self.jb_land[s.iid] = (x0, f0, land, by_v)
         phase = "flight"
+        if jb.LAND_HIT and st == "Air" and vel is not None and getattr(vel, "conf", 0) > 0 and float(vel.v[1]) < 0:
+            phase = "falling"                             # SSBOT_FORUM_JB_LAND (SP4): past its apex, hits count
         if st in jb.LANDED_STATES:
             land, phase = x, "landed"                     # it stands at its landing (a hit pushes it 0.24-1.44 u)
         spot = jb.behind_spot(land, f0)
@@ -894,17 +918,25 @@ class GauntletTactics:
             hw[g.target] = max(hw[g.target], w)
         out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
-        if jump_behind.ENABLED and str(how).startswith(JB_NO_HIT):
+        how_s = str(how)
+        if jump_behind.ENABLED and how_s.startswith(JB_NO_HIT) and not (
+                jump_behind.PASS_HIT and how_s == "jump: under and behind (flight)"):
             # SSBOT_FORUM_JUMP_BEHIND (SP3): no hit on it counts while it jumps (antic, flight) or while the stance
             # leaves its rune circle - the landed-hits rank sits above the stance (trial 2: rows slashing it in the air
             # kept the hero airborne in front of it: the umbrella, the landing slam, the rune circle)
             out = replace(out, no_hit=frozenset({g.target}))
-        elif jump_behind.ENABLED and s is not None and s.type_key == CLAPPER and (
-                s.family in (None, "CC_EVADE") or str(how).startswith(("jump: under and behind (landed)", "rune: behind"))):
+        elif (jump_behind.ENABLED or (slam_play.AFTER and how_s == "slam: after")) and s is not None and (
+                s.type_key == CLAPPER) and (
+                s.family in (None, "CC_EVADE") or how_s.startswith(JB_GROUND_HIT)):
             # SSBOT_FORUM_JUMP_BEHIND (SP3 trial 3): near it after a jump the planner's pogo / jump slashes on the idle
             # Clapper sent it into its attack choice with the hero bouncing in the air (9 of 56 slams: no landing for
-            # the playbook, 3 hammer hits): its hits count only from the ground (the person slashes it standing)
+            # the playbook, 3 hammer hits): its hits count only from the ground (the person slashes it standing). SP4:
+            # also in the flight (JB_PASS), its fall (JB_LAND), the jump cast's antic (JB_CAST_ANTIC) and after the
+            # hammer (SLAM_AFTER)
             out = replace(out, ground_hit=frozenset({g.target}))
+            if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
+                # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
+                out = replace(out, ground_first=frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

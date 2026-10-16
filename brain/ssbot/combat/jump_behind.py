@@ -59,6 +59,36 @@ def _on(name: str, default: str = "0") -> bool:
 # (arm rnplay0 = rnplay without it).
 ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND", "1" if _on("SSBOT_FORUM_V2") else "0")
 
+# SP4 (task 1v1 SP4, the person's notes of 2026-10-16 while SP3 ran; forum.md 68): sub-switches of JUMP_BEHIND, each
+# default off (only with ENABLED); off, every decision is the SP3 one.
+#   SSBOT_FORUM_JB_PASS        the flight's hits count when pressed on the ground ("slash while running past it":
+#                              GoalPrefs.ground_hit instead of no_hit in the flight branch; passing under is a dash, so
+#                              no up slash is rewarded there - the hits from the ground near its take-off / landing)
+#   SSBOT_FORUM_JB_LAND        from behind, its falling body counts (ground presses) from the apex on ("once it comes
+#                              down near the ground you can already slash; the bot waits for its recovery")
+#   SSBOT_FORUM_JB_NOJUMP      behind it from the descent to the rune hold: rows without a jump key first among equal
+#                              landed hits (GoalPrefs.ground_first; "Hornet jumps once behind it and loses a hit; the
+#                              ground there has no damage box"); SP4 replay: at the landing tick every ground hit row
+#                              was flagged S for one tick and a JUMP(48) row (no hit) won on a lower key, then the
+#                              committed jump made the next ticks' safe ground slashes not "keep"
+#   SSBOT_FORUM_JB_CAST_ANTIC  the jump cast's antic (the big rune, aim at antic +55 frames): on the ground cast_u in
+#                              front (in slash reach of its front edge, 2.25 u) with ground hits counting until
+#                              cast_slash_s, then the aim stance ("stand in front and slash at least twice")
+#   SSBOT_FORUM_JB_WALL        the planner's estimate (are_types.clapper.jump_rule) lands a jump taking off with its
+#                              back within push_from_u of a wall at least wall_push_u out (the wall rule's push), so a
+#                              back-off keeps clear of the pushed landing, not the vertical one (the person's hit)
+
+
+def _sub(name: str) -> bool:
+    return ENABLED and _on(name, "0")
+
+
+PASS_HIT = _sub("SSBOT_FORUM_JB_PASS")
+LAND_HIT = _sub("SSBOT_FORUM_JB_LAND")
+NO_JUMP = _sub("SSBOT_FORUM_JB_NOJUMP")
+CAST_ANTIC = _sub("SSBOT_FORUM_JB_CAST_ANTIC")
+WALL_PUSH = _sub("SSBOT_FORUM_JB_WALL")
+
 NUM = {
     "aim_u": 5.5,          # antic: the stance in front (centre to centre, u; 0.5 u past the jump's 5 u: it jumps
     #                        slightly toward her, away from a wall behind it)
@@ -72,6 +102,10 @@ NUM = {
     "wall_pad_u": 0.5,     # the stance at least this far from a wall (the hero's half width 0.25 + 0.25)
     "turn_u": 2.3,         # the planner's estimate: from the landing on, its standing body of either facing reaches
     #                        this far on both sides (attack_range._jb_turn_mask; the turned Idle body's back p1 2.25 u)
+    "cast_u": 4.3,         # SSBOT_FORUM_JB_CAST_ANTIC: the stance in front in its jump cast's antic (its front edge
+    #                        2.25 u: a 1.8 u gap, inside the side slash's reach; it jumps 0.6 u back from there)
+    "cast_slash_s": 0.62,  # ... until this long after the antic start (aim at +55 frames = 0.92 s; 1.2 u back to
+    #                        aim_u takes 9 frames)
 }
 BODY_TOP_U = 3.92          # the standing body's top above the floor (Idle box y 3.01-6.92)
 
@@ -100,6 +134,16 @@ def wall_rule(x0: float, land: float, front: float, cfg: dict | None = None) -> 
     if front > 0:
         return max(land, WALL_L + lo)
     return min(land, WALL_R - lo)
+
+
+def push_l(x: float, s: int, L: float, cfg: dict | None = None) -> float:
+    """SSBOT_FORUM_JB_WALL: the decided landing offset L (along the facing s) of a jump taking off with its back within
+    push_from_u of a wall raised to land at least wall_push_u from that wall (the wall rule's push)."""
+    c = CFG if cfg is None else cfg
+    room0 = (x - WALL_L) if s > 0 else (WALL_R - x)
+    if room0 < c["push_from_u"]:
+        return max(float(L), c["wall_push_u"] - room0)
+    return float(L)
 
 
 def landing(x: float, hx: float, front: float, cfg: dict | None = None) -> float:

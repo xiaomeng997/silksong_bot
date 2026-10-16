@@ -24,6 +24,7 @@ Hazards (pooled "damager" objects; the damage events name them "rune bomb small(
 """
 import math
 
+from ssbot.combat import jump_behind as _jb
 from ssbot.combat.are_spec import Decision, EnemySpec, HazardSpec
 
 JUMP_GAIN = 0.916          # x_land - x = 0.916 vx (the flight's horizontal time)
@@ -37,9 +38,15 @@ def jump_rule(x: float, y: float, vx, hero_x, hero_y) -> tuple[int, float]:
     offset in that frame from the observed vx, or from the hero's x when vx is not known."""
     s = 1 if (hero_x is None or hero_x >= x) else -1
     if vx is not None and math.isfinite(vx) and abs(vx) > 1e-3:
-        return s, JUMP_GAIN * float(vx) * s
-    du = 0.0 if hero_x is None else (hero_x - x) * s
-    return s, JUMP_GAIN * min(max(du - JUMP_SHORT, -JUMP_VX_MAX), JUMP_VX_MAX)
+        L = JUMP_GAIN * float(vx) * s
+    else:
+        du = 0.0 if hero_x is None else (hero_x - x) * s
+        L = JUMP_GAIN * min(max(du - JUMP_SHORT, -JUMP_VX_MAX), JUMP_VX_MAX)
+    if _jb.WALL_PUSH:
+        # SSBOT_FORUM_JB_WALL (task 1v1 SP4): a take-off with its back within 4 u of a wall lands >= 4.4 u from it
+        # (SP3: 334 jumps, 3.47 u once, p5 4.58): the arc meets the wall-top ledge and is pushed out
+        L = _jb.push_l(x, s, L)
+    return s, L
 
 
 # a predicted landing beyond these x (u) runs into a wall: R0 dev, 41 of the 42 jumps that landed 2-13 frames early

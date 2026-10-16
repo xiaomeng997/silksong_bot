@@ -93,6 +93,9 @@ class GoalPrefs(TacticPrefs):
     #                                      idle Clapper sends it into an attack at once, a third of them slams; one
     #                                      landed from the air - a pogo bounce is airborne 35+ frames - leaves the slam
     #                                      playbook no landing in time)
+    ground_first: frozenset = frozenset()  # iids for which rows without a jump key rank first among equal landed hits
+    #                                      (SSBOT_FORUM_JB_NOJUMP, task 1v1 SP4: behind the landed Clapper the planner
+    #                                      jumped and lost a hit; the ground behind it has no damage box)
 
 
 class Tactics:
