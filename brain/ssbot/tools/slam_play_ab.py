@@ -3,8 +3,9 @@
 Per arm:
 - episodes: kills, HP-hitless kills (hits counted by HP loss: the bounce's i-frames produce `damage` events without HP
   loss), kill time, the HP-loss hits by source, by the Clapper's Control state and by the playbook's phase;
-- every slam: the playbook started or not and why (the decision log's `play` field: the run's phase, its frame k from
-  the antic entry and its `why`), its own keys (slam_play_live: the jump at antic +K_JUMP, the attack + down at
+- every slam: the playbook started or not and why (the policy's counters for all slams; per slam the decision
+  log's `play` field, only for the slams the log kept - it keeps the ticks around events: the run's phase, its frame
+  k from the antic entry and its `why`), its own keys (slam_play_live: the jump at antic +K_JUMP, the attack + down at
   +K_PRESS, either one frame late), contact (the hero's attack hits the Clapper from the playbook's press to +14),
   the bounce (the hero's vy > 6 in the press's 14 frames), landed (its HP drops), HP lost in the slam (until the
   Slam Recover ends) and its source (the hammer = Slam Collider 1), HP lost in the 60 frames after, the retreat (the
@@ -214,7 +215,13 @@ def summarize(E: list[dict]) -> dict:
     dc = [x for x in S if x["play_seen"] and not x["play_started"]]
     allw = [v for c in C for v in c["d"]]
     allw2 = [v for c in C for v in c["d_after"]]
+    pc = Counter()
+    for e in E:
+        pc.update(e.get("slam_play") or {})
     out = {
+        # the policy's own playbook counters (every slam; the decision log keeps only the ticks around events, so the
+        # per-slam play_* fields below exist only for the slams it logged)
+        "policy_slam_play": dict(sorted(pc.items())),
         "episodes": len(E), "outcomes": dict(Counter(e["outcome"] for e in E)), "kills": len(kills),
         "hp_hitless_kills": sum(1 for e in kills if e["hp_hits_before_kill"] == 0),
         "hp_hits_before_kill": sum(e["hp_hits_before_kill"] for e in E),
@@ -226,9 +233,9 @@ def summarize(E: list[dict]) -> dict:
         "hits_by_src": dict(Counter(h["src"] for h in H)), "hits_by_state": dict(Counter(str(h["st"]) for h in H)),
         "hits_by_play": dict(Counter(str(h["play"]) for h in H)),
         "hits_air": sum(1 for h in H if h["air"]), "hits_forced": sum(1 for h in H if h["forced"]),
-        "slams": len(S), "play_seen": sum(1 for x in S if x["play_seen"]), "play_started": len(st),
+        "slams": len(S), "play_logged": sum(1 for x in S if x["play_seen"]), "play_started_logged": len(st),
         "play_air_entry": sum(1 for x in S if x["play_air_entry"]),
-        "play_declined_why": dict(Counter(x["play_why"] or "(none)" for x in dc)),
+        "play_declined_why_logged": dict(Counter(x["play_why"] or "(none)" for x in dc)),
         "play_started_end": dict(Counter(f"{x['play_last_phase']}:{x['play_why'] or ''}" for x in st)),
         "played_keys": len(pl), "played_contact": sum(1 for x in pl if x["contact"]),
         "played_bounce": sum(1 for x in pl if x["bounce"]), "played_landed": sum(1 for x in pl if x["landed"]),
