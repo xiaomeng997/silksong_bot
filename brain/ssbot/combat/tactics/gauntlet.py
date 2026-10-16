@@ -458,8 +458,9 @@ class GauntletTactics:
         x0, f0, land, by_v = rec
         if not by_v and st == "Air" and vx is not None and abs(vx) > 0.05:
             land, by_v = jb.landing_v(x0, vx, f0), True   # the decided vx (attack_range's jump_rule does the same)
-        if st in jb.AIR_STATES and (x - land) * f0 > 0:
-            land = x                                      # pushed out past the estimate (the wall-top ledge)
+        if st in jb.AIR_STATES and (x - x0) * f0 > 0.05 and (x - land) * f0 > 0:
+            land = x                                      # pushed out past the estimate (the wall-top ledge): forward
+            #                                               of its take-off and of the estimate
         self.jb_land[s.iid] = (x0, f0, land, by_v)
         phase = "flight"
         if st in jb.LANDED_STATES:

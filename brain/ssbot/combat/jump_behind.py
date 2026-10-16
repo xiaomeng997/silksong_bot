@@ -19,10 +19,12 @@ _clapper_spot) is:
   after   a jump cast's rune circle (6.48 u in front of the landing, r 7.19: from 0.71 u behind it) bursts 65-73 frames
           after the landing, 45-53 frames after the move ends: the stance stays BACK_U behind the landing until then
           (gauntlet's rune hold, BACK_U instead of behind_land_u 2.5 u, which a turning body reaches).
-The wall rule (SP3 data, sp3_jumps, 1,819 jumps of the live 1v1 runs): the landing's centre was never closer than
-wall_back_u (3.01 u) to the wall on its back side (p1 4.42, p5 5.43 u); with its back at the wall at take-off (0.0-1.4 u
-of gap) it lands 3.5-6.0 u from it (the arc meets the wall-top ledge: it lands 2-13 frames early and is pushed out; the
-person: "it moves forward a bit, leaving a spot"). Behind needs min_back_u + wall_pad_u from the landing to the wall.
+The wall rule (SP3 data, sp3_jumps, 1,839 jumps of the live 1v1 runs): the landing's centre was never closer than
+wall_back_u (3.01 u) to the wall on its back side (p1 4.42, p5 5.43 u). Taking off with its centre within push_from_u (4 u)
+of the wall behind it (its back 0-2.7 u from the wall), it landed 3.47 u from it once and otherwise >= 3.83 u (p5
+4.58; 334 jumps): when the formula puts it nearer, the arc meets the wall-top ledge, it lands 2-13 frames early and is
+pushed out (the person: "it moves forward a bit, leaving a spot"); the 3.0-3.4 u landings took off 4.6-5.4 u out and
+jumped back (the hero within 5 u at its Jump Aim). Behind needs min_back_u + wall_pad_u from the landing to the wall.
 The turn: a landed jump ends in Idle, which turns the Clapper to a hero behind it, so its front (2.25 u) reaches her side
 (S2 live, 304 jumps with the hero behind the landing: 17 body hits at Idle 2.0-2.5 u behind it). The planner's estimate
 (attack_range.RangeTracker.estimate) adds its standing body of either facing (turn_u) from the landing (Slam 2 / Slam
@@ -59,6 +61,8 @@ NUM = {
     "min_back_u": 3.1,     # behind needs the stance at least this far behind the landing centre (the planner keeps
     #                        turn_u 2.3 + its margin 0.5 + the hero's half width 0.25 from it), else the old back-off
     "wall_back_u": 3.0,    # the wall rule (module docstring): no landing closer to the wall behind it
+    "wall_push_u": 4.4,    # ... nor closer than this when it took off with its back within push_from_u of that wall
+    "push_from_u": 4.0,    #     (334 such jumps: 3.47 u once, otherwise >= 3.83, p5 4.58)
     "wall_pad_u": 0.5,     # the stance at least this far from a wall (the hero's half width 0.25 + 0.25)
     "turn_u": 2.3,         # the planner's estimate: from the landing on, its standing body of either facing reaches
     #                        this far on both sides (attack_range._jb_turn_mask; the turned Idle body's back p1 2.25 u)
@@ -81,28 +85,27 @@ def _load() -> dict:
 CFG = _load()
 
 
+def wall_rule(x0: float, land: float, front: float, cfg: dict | None = None) -> float:
+    """The wall rule (module docstring) on a formula landing: never closer than wall_back_u to the wall behind it, nor
+    closer than wall_push_u when it took off with its back within push_from_u of that wall."""
+    c = CFG if cfg is None else cfg
+    room0 = (x0 - WALL_L) if front > 0 else (WALL_R - x0)
+    lo = c["wall_push_u"] if room0 < c["push_from_u"] else c["wall_back_u"]
+    if front > 0:
+        return max(land, WALL_L + lo)
+    return min(land, WALL_R - lo)
+
+
 def landing(x: float, hx: float, front: float, cfg: dict | None = None) -> float:
     """The jump's landing x from its take-off x, the hero's x at its Jump Aim and its facing (+1 right), with the wall
-    rule (module docstring)."""
-    c = CFG if cfg is None else cfg
-    land = x + 0.916 * max(-12.0, min(12.0, hx - 5.0 * front - x))
-    if front > 0:
-        land = max(land, WALL_L + c["wall_back_u"])
-    else:
-        land = min(land, WALL_R - c["wall_back_u"])
-    return land
+    rule."""
+    return wall_rule(x, x + 0.916 * max(-12.0, min(12.0, hx - 5.0 * front - x)), front, cfg)
 
 
 def landing_v(x0: float, vx: float, front: float, cfg: dict | None = None) -> float:
     """The landing from the take-off x and the decided vx (the first Air frame's; attack_range's jump_rule), with the
     wall rule."""
-    c = CFG if cfg is None else cfg
-    land = x0 + 0.916 * float(vx)
-    if front > 0:
-        land = max(land, WALL_L + c["wall_back_u"])
-    else:
-        land = min(land, WALL_R - c["wall_back_u"])
-    return land
+    return wall_rule(x0, x0 + 0.916 * float(vx), front, cfg)
 
 
 def behind_spot(land: float, front: float, cfg: dict | None = None) -> float | None:

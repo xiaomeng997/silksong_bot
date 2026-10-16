@@ -25,8 +25,10 @@ def test_landing_formula_and_wall_rule():
     # hero 9 u in front (facing left): target = hero + 5, vx = -4 -> 3.66 u toward her
     assert jb.landing(35.0, 26.0, -1.0) == pytest.approx(35.0 - 0.916 * 4.0)
     # hero within 5 u: it jumps back, but never closer than wall_back_u to the wall behind it
-    assert jb.landing(16.0, 18.0, 1.0) == pytest.approx(jb.WALL_L + jb.CFG["wall_back_u"])
-    assert jb.landing(47.0, 45.0, -1.0) == pytest.approx(jb.WALL_R - jb.CFG["wall_back_u"])
+    assert jb.landing(19.5, 21.5, 1.0) == pytest.approx(jb.WALL_L + jb.CFG["wall_back_u"])
+    assert jb.landing(43.5, 41.5, -1.0) == pytest.approx(jb.WALL_R - jb.CFG["wall_back_u"])
+    # taken off with its back near the wall: pushed out at least wall_push_u
+    assert jb.landing(16.0, 18.0, 1.0) == pytest.approx(jb.WALL_L + jb.CFG["wall_push_u"])
     assert jb.landing_v(30.0, -5.0, -1.0) == pytest.approx(30.0 - 4.58)
     # behind: back_u behind the landing; against the wall: up to the pad, None below min_back_u
     assert jb.behind_spot(30.0, -1.0) == pytest.approx(33.5)
@@ -81,18 +83,21 @@ def test_landing_from_the_air_vx(jb_on):
 
 
 def test_pushed_out_past_the_estimate(jb_on):
-    # its back at the left wall, the hero 4.6 u in front: the estimate is the wall rule's 3.0 u (no room behind:
-    # back off); the arc meets the ledge and pushes it out: once it is past the estimate, behind it again
+    # taken off 4.6 u from the left wall, the hero 2 u in front: it jumps back, the estimate is the wall rule's 3.0 u (no
+    # room behind: back off); pushed out forward of its take-off (5.2 u), behind it again
     t = l2()
-    x0 = jb.WALL_L + 1.35
-    t.decide(world(x0 + 4.6, t=10.0, ents=[clapper(9, x0, True)]),
+    x0 = jb.WALL_L + 4.6
+    t.decide(world(x0 + 2.0, t=10.0, ents=[clapper(9, x0, True)]),
              WinFc([subj(9, CC, x0, state="Jump Antic", **JMP)]), None, 3)
-    t.decide(world(x0 + 4.6, t=10.5, ents=[clapper(9, x0, True)]),
+    t.decide(world(x0 + 2.0, t=10.5, ents=[clapper(9, x0, True)]),
              WinFc([subj(9, CC, x0, y=8.0, state="Jump", family="CC_JUMP", committed=True)]), None, 3)
     assert t.last["goal_why"].endswith("jump: back off")
-    p = t.decide(world(x0 + 4.6, t=11.0, ents=[clapper(9, jb.WALL_L + 4.4, True)]),
+    p = t.decide(world(x0 + 2.0, t=10.8, ents=[clapper(9, jb.WALL_L + 4.4, True)]),
                  WinFc([subj(9, CC, jb.WALL_L + 4.4, y=12.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
-    assert "under and behind" in t.last["goal_why"] and p.stance_x == pytest.approx(jb.WALL_L + 4.4 - 3.5)
+    assert t.last["goal_why"].endswith("jump: back off")          # moving back: not past its take-off
+    p = t.decide(world(x0 + 2.0, t=11.0, ents=[clapper(9, jb.WALL_L + 5.2, True)]),
+                 WinFc([subj(9, CC, jb.WALL_L + 5.2, y=12.0, state="Air", family="CC_JUMP", committed=True)]), None, 3)
+    assert "under and behind" in t.last["goal_why"] and p.stance_x == pytest.approx(jb.WALL_L + 5.2 - 3.5)
 
 
 def test_rune_hold_uses_the_jumps_facing(jb_on):
@@ -165,3 +170,17 @@ def test_dash_focus_free_in_the_flight(monkeypatch):
     assert not forum_v2.jb_dash_free(rs)
     inst.states, inst.fam = ["Slam Antic"], "CC_SLAM"
     assert not forum_v2.jb_dash_free(rs)
+
+
+def test_wall_push_rule():
+    # its back at the left wall at take-off (centre 1.35 u out), the hero 4.6 u in front: the formula lands it 1.3 u out
+    # (it jumps back); the data: >= 3.83 u but once (3.47) - the stored landing is 4.4 u out, behind it fits (3.9 u)
+    x0 = jb.WALL_L + 1.35
+    assert jb.landing(x0, x0 + 4.6, 1.0) == pytest.approx(jb.WALL_L + 4.4)
+    assert jb.behind_spot(jb.landing(x0, x0 + 4.6, 1.0), 1.0) == pytest.approx(jb.WALL_L + 0.9)
+    # taking off 5 u out and jumping back: only the 3.0 u floor (no room behind)
+    x1 = jb.WALL_L + 5.0
+    assert jb.landing(x1, x1 + 2.0, 1.0) == pytest.approx(jb.WALL_L + 3.0)
+    assert jb.behind_spot(jb.landing(x1, x1 + 2.0, 1.0), 1.0) is None
+    # the right wall, facing left
+    assert jb.landing_v(jb.WALL_R - 2.0, 1.0, -1.0) == pytest.approx(jb.WALL_R - 4.4)
