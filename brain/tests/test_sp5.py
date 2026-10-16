@@ -115,7 +115,7 @@ def test_near_behind(monkeypatch, flip):
     toward = sp.M_R if flip else sp.M_L
     mv = keys(landed, over)
     assert mv and min(mv) == A0 + c.near_s0_behind
-    assert keys(landed, toward) == [r.k_turn] and r.k_turn > max(mv)
+    assert keys(landed, toward) == [r.k_turn, r.k_slash] and r.k_turn > max(mv)
     sl = [k for k in keys(landed, sp.M_A) if k > c.k_press]
     assert sl == [r.k_slash] and r.k_slash > r.k_turn and r.k_slash >= c.k_press + c.slash_cd
     assert xs[r.k_slash + 1][1] <= c.slash_y + 0.3                # low enough: the slash meets its body
@@ -142,7 +142,7 @@ def test_side_rule_one_clapper(monkeypatch):
     assert r.near == 1 and r.side_why == "wall"
     away = keys(landed, sp.M_R)
     assert away and min(away) == A0 + c.near_s0_front
-    assert keys(landed, sp.M_L) == [r.k_turn]
+    assert keys(landed, sp.M_L) == [r.k_turn, r.k_slash]
     kl, xl = landing(xs, c.k_press + 8)
     assert xl == pytest.approx(c.near_u_front, abs=0.2) and r.k_slash is not None and r.k_slash < kl
     assert play.stats()["side_front"] == 1

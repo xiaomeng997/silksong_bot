@@ -580,8 +580,11 @@ class SlamPlay:
                 return M_R if -d > 0 else M_L                      # the turn: she faces it
             return M_R if d > 0 else M_L
         if k > r.k_turn and k >= r.k_press + c.slash_cd and low and self._in_reach(e, cx, r.face, xw, -d):
+            # the key toward it with the press: a protected touch of the hammer during the bounce (Recoil Twirl, about
+            # half the strikes) locks her facing until the attack, which takes the direction held on its frame (SP5
+            # t1: 4 of 34 front slashes went the other way after the turn key alone)
             r.k_slash = k
-            return M_A
+            return M_A | (M_R if -d > 0 else M_L)
         return 0
 
     @staticmethod
