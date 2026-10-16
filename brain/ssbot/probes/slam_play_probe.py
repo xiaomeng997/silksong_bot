@@ -265,9 +265,31 @@ class PlayProbe(Target):
                     hurts.append({"f": b["f"], "rel_s0": None if s0 is None else b["f"] - s0, "src": "?", "st": b["st"],
                                   "in_slam": end is None or b["f"] < end})
         hurt_slam = [h for h in hurts if h["in_slam"]]
+        xs = lambda r: None if r is None or r["cx"] is None else round((r["x"] - r["cx"]) * face, 3)   # noqa: E731
+        # SP5 (SSBOT_FORUM_SLAM_PLAY_SIDE / _NEAR): the way out - the landing (frame from Slam 0, x rel. its centre, +
+        # in front), the side slash after the press (its press from Slam 0, a hit on it within 10 frames, before / at
+        # the landing), HP lost from the press to the landing + 15 (the playbook's part)
+        way = {}
+        if press is not None and s0 is not None:
+            land = first(lambda r: r["g"], press + 9)
+            lr = next((r for r in R if land is not None and r["f"] == land), None)
+            sl = None
+            prev = 0
+            for r in (r for r in R if r["f"] >= press + 1):
+                if sl is None and r["act"] & ~prev & M_A and r["f"] >= press + 10:
+                    sl = r["f"]
+                prev = r["act"]
+            sl_hit = None if sl is None else next((r["f"] for r in R if sl <= r["f"] <= sl + 10 and any(
+                e[0] == "hit" and "Down" not in str(e[1]) for e in r["ev"])), None)
+            d = getattr(run, "near", None) or getattr(run, "over_dir", None)
+            way = {"side": None if not d else ("front" if d == face else "behind"),
+                   "side_why": getattr(run, "side_why", ""), "near_u": getattr(run, "near_u", None),
+                   "land_s0": None if land is None else land - s0, "x_land": xs(lr) if lr is not None else None,
+                   "slash_s0": None if sl is None else sl - s0, "slash_hit_s0": None if sl_hit is None else sl_hit - s0,
+                   "slash_before_land": sl_hit is not None and land is not None and sl_hit <= land,
+                   "hurt_way": [h for h in hurts if press <= h["f"] <= (land if land is not None else press + 80) + 15]}
         pp = next((r for r in R if press is not None and r["f"] == press), None)
         jp = next((r for r in R if jump is not None and r["f"] == jump), None)
-        xs = lambda r: None if r is None or r["cx"] is None else round((r["x"] - r["cx"]) * face, 3)   # noqa: E731
         return out | {
             "fa": fa, "antic": None if s0 is None else s0 - fa, "s0": s0, "s1": s1, "rec": rec, "end": end,
             "k_jump_real": None if jump is None else jump - fa, "k_press_real": None if press is None else press - fa,
@@ -275,7 +297,7 @@ class PlayProbe(Target):
             "x_jump": xs(jp), "x_press": xs(pp), "y_press": None if pp is None else pp["y"],
             "contact_rel_s0": None if (contact is None or s0 is None) else contact - s0,
             "landed": landed, "bounce": bounce, "hurt_slam": hurt_slam, "hurt_after": [h for h in hurts if not h["in_slam"]],
-            "hp0": hp0, "success": bool(landed and not hurt_slam), "trace": R}
+            "hp0": hp0, "success": bool(landed and not hurt_slam), "way": way, "trace": R}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -316,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
                                "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
                                "freeze": a.freeze, "game_clock": sp.GAME_CLOCK, "skid": a.skid, "late": sp.LATE,
-                               "umbrella": a.umbrella, "stall": a.stall,
+                               "umbrella": a.umbrella, "stall": a.stall, "side": sp.SIDE, "near": sp.NEAR,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()

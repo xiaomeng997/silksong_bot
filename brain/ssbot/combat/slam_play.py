@@ -19,7 +19,9 @@ game frames: the game clock stands still through hit-stop freezes, SSBOT_FORUM_S
             out (over = 1): from Slam 0 + OVER_S0 the direction over its body to behind it (the other way when the wall
             behind it leaves less than OVER_ROOM from its centre, none when neither side has it), the dash at Slam 0 +
             DASH_S0 (2 frames), the key held until she lands; the planner takes over on the ground. No bounce by the
-            press + 14: abort (the planner).
+            press + 14: abort (the planner). SP5 (SSBOT_FORUM_SLAM_PLAY_SIDE / _NEAR): the side by the person's rule
+            (between it and the nearer wall; two Clappers: between them) and the closer landing (no dash, near_u from
+            its centre) with a side slash before it.
 Slam 0 seen before the press was sent (a short antic or a late tick): the press at once while its frame is within
 Slam 0 + press_late_max, else abort.
 Entry conditions (checked on every tick until the script starts, at the latest at antic frame K_START_MAX): the hero
@@ -119,6 +121,26 @@ NODASH_F = 20               # a dash (6 frames) + the sprint's start
 NOPOGO = _on("SSBOT_FORUM_SLAM_PLAY_NOPOGO", _V2)
 OUTSIDE_U = 8.3             # 7.76 + the hero's half width 0.23 + 0.3
 AFTER_U = 4.3               # 3.49 + 0.23 + 0.58: in the side slash's reach of its front edge
+# SSBOT_FORUM_SLAM_PLAY_SIDE (task 1v1 SP5, default off; forum.md 69): the side the way out ends on, by the person's
+# rule (2026-10-16): one Clapper - between it and the nearer wall (its centre after the lunge), so it stays off the wall
+# (each side slash knocks it ~0.48 u away from the hero, toward the open floor); two Clappers - between them (the side
+# toward the nearest other Clapper). Keep side = stay in front, switch side = over its body, land behind. Off: behind it
+# unless the wall there leaves < OVER_ROOM (SP2: 62 of 65 landings behind it, wherever it stood).
+SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", "0")
+# SSBOT_FORUM_SLAM_PLAY_NEAR (task 1v1 SP5, default off): the closer landing and a side slash before it (the person:
+# "if the landing is a bit closer to it, one horizontal slash before landing is best"). No dash: the air key at
+# NEAR_V u / frame toward the chosen side (behind: from Slam 0 + near_s0_behind, over its body; front: from Slam 0 +
+# near_s0_front, away from it) until the hero's centre is near_u from the Clapper's centre on that side, one frame of the
+# other key (she turns to face it), then the side slash when it can meet its body (the press >= the down press +
+# slash_cd, her centre low enough: the body top 3.9 u above the floor, the slash 0.56 u below her box centre) and no
+# key to the landing. Behind only when she clears its back (the turned front -2.25 u + her half width + 0.3) by Slam 0
+# + near_cross_s0 (her box bottom still 4.2 u above the floor; the probes' bounce: apex Slam 0 + 23 at 6.9 u above
+# the standing y, the landing at Slam 0 + 52-55) and the landing spot fits inside the arena; else the other side; else
+# the old way out. Off: SP1's way out (the dash at Slam 0 + 23, landing 6.6-9.5 u behind it).
+NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", "0")
+NEAR_V = 0.165              # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
+SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
+BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
 
 
 @dataclass
@@ -154,6 +176,20 @@ class PlayCfg:
     over_s0: int = 20                # the direction key from Slam 0 + this
     dash_s0: int = 23                # the dash at Slam 0 + this
     over_room: float = 6.0           # behind it only with this much room from its centre to the wall (u)
+    # SSBOT_FORUM_SLAM_PLAY_SIDE / _NEAR (SP5)
+    side_force: int = 0              # probes: +1 keep side (in front), -1 switch side (behind), 0 the person's rule
+    near_u_front: float = 3.7        # the landing, centre to centre (u): in front (its front edge 2.25 + 0.25 + 1.2)
+    near_u_behind: float = 3.7       # ... behind (its turn at Idle reaches -2.25, p1 -2.87; the slash reaches 4.46)
+    near_u_min: float = 3.3          # nearer when the wall leaves less room
+    near_decide_s0: int = 10         # the side decided at Slam 0 + this (the mask's frame; the STATE 2 frames before:
+    #                                  the lunge over, her x rel. its centre settles from STATE Slam 0 + 8)
+    near_s0_behind: int = 10         # behind: the key over its body from Slam 0 + this
+    near_s0_front: int = 16          # front: the key away from Slam 0 + this (the hammer / Slam Collider 2 off at +15)
+    near_cross_s0: int = 40          # behind: past near_cross_u behind its centre by Slam 0 + this
+    near_cross_u: float = 2.8        # 2.25 + 0.25 + 0.3
+    slash_cd: int = 19               # the side slash no earlier than the down press + this (the attack cooldown)
+    slash_y: float = 3.2             # ... with her y above the standing y at the mask frame + 1 at most this
+    wall_pad: float = 0.45           # the landing spot's centre at least this far inside the arena walls
 
     @classmethod
     def from_env(cls) -> "PlayCfg":
@@ -246,6 +282,11 @@ class Run:
     stand: tuple | None = None       # this run's stand / band when not the cfg's (SSBOT_FORUM_JUMP_BEHIND near a wall)
     band: tuple | None = None
     late: bool = False               # SSBOT_FORUM_SLAM_PLAY_LATE: no input seen at the antic (a late start allowed)
+    side_why: str = ""               # SP5: why this side (wall / two / force / room / clear / old)
+    near: int | None = None          # SP5 NEAR: the way's world direction (+-1), 0 = the old way out, None = not decided
+    near_u: float = 0.0              # ... the landing's distance from its centre on that side
+    k_turn: int | None = None        # ... the frame of the turn key (she faces it)
+    k_slash: int | None = None       # ... the side slash's press frame
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -279,6 +320,13 @@ class SlamPlay:
                 out["air_entry"] += 1
             if r.phase == "abort" or (r.phase == "wait" and r.why):
                 out[f"why_{r.why}"] += 1
+            if r.over_dir is not None or r.near:
+                d = r.near if r.near else r.over_dir
+                out["side_" + ("front" if d == r.face else "behind" if d == -r.face else "none")] += 1
+                if r.side_why:
+                    out[f"side_why_{r.side_why}"] += 1
+            if r.k_slash is not None:
+                out["near_slash"] += 1
         return dict(out)
 
     def active(self) -> bool:
@@ -416,9 +464,11 @@ class SlamPlay:
             m = 0
             if k <= r.k_press + c.down_after:
                 m = M_D
-            if c.over and r.bounced and r.s0 is not None and k - r.ks0 >= c.over_s0:
+            if NEAR and c.over and r.bounced and r.s0 is not None and r.near != 0:
+                m |= self._near(r, k, f, s, e, cx)          # SP5: the closer landing, the side slash before it
+            elif c.over and r.bounced and r.s0 is not None and k - r.ks0 >= c.over_s0:
                 if r.over_dir is None:
-                    r.over_dir = self._over_dir(cx, r.face)
+                    r.over_dir = self._side_old(r, s, e, cx) if SIDE else self._over_dir(cx, r.face)
                 if r.over_dir:
                     m |= M_R if r.over_dir > 0 else M_L
                     ks0 = k - r.ks0
@@ -442,6 +492,113 @@ class SlamPlay:
             if room(d) >= self.cfg.over_room:
                 return d
         return 0
+
+    def _side_pref(self, r: Run, s: dict, e: dict, cx: float) -> tuple[int, str]:
+        """SP5 SIDE: the world direction from its centre the hero should end on (+1 right), and why: the side toward the
+        nearest other Clapper (two: end between them), else toward the nearer wall (one: between it and the wall);
+        a tie keeps her side (in front). cfg.side_force (probes): +1 keep, -1 switch."""
+        if self.cfg.side_force:
+            return r.face * (1 if self.cfg.side_force > 0 else -1), "force"
+        others = [float(o["pos"][0]) for o in s.get("ents") or ()
+                  if o.get("type_key") == CLAPPER and not o.get("is_dead") and (o.get("hp") or 0) > 0 and o.get("pos")
+                  and o.get("iid") != e.get("iid")]
+        if others:
+            ox = min(others, key=lambda x: abs(x - cx))
+            if ox != cx:
+                return (1 if ox > cx else -1), "two"
+        dl, dr = cx - WALL_L, WALL_R - cx
+        if dl == dr:
+            return r.face, "wall"
+        return (-1 if dl < dr else 1), "wall"
+
+    def _side_old(self, r: Run, s: dict, e: dict, cx: float) -> int:
+        """SIDE with SP1's way out (the dash; NEAR off): the preferred side when the wall there leaves OVER_ROOM from its
+        centre, else the other, else none."""
+        pref, why = self._side_pref(r, s, e, cx)
+        room = (lambda d: (cx - WALL_L) if d < 0 else (WALL_R - cx))
+        for d, w in ((pref, why), (-pref, "room")):
+            if room(d) >= self.cfg.over_room:
+                r.side_why = w
+                return d
+        r.side_why = "room"
+        return 0
+
+    def _near_fit(self, d: int, cx: float, u: float) -> float | None:
+        """The landing distance on world side d (u, from u down to near_u_min) whose spot fits inside the walls."""
+        c = self.cfg
+        room = ((cx - WALL_L) if d < 0 else (WALL_R - cx)) - c.wall_pad
+        if room >= u:
+            return u
+        return room if room >= c.near_u_min else None
+
+    def _near(self, r: Run, k: int, f: int, s: dict, e: dict, cx: float) -> int:
+        """SP5 NEAR: the way out's keys for frame f + 2 (antic frame k) after the bounce, 0 = none."""
+        c = self.cfg
+        ks0 = k - r.ks0
+        h = s.get("hero") or {}
+        if r.near is None:
+            if ks0 < c.near_decide_s0:
+                return 0
+            # off: behind first (SP1's way out), in front when that does not fit
+            pref, why = self._side_pref(r, s, e, cx) if SIDE else (-r.face, "behind")
+            x_rel = (hero_x(s) - cx) * r.face
+            fits = {}
+            for d in (pref, -pref):
+                u = self._near_fit(d, cx, c.near_u_front if d == r.face else c.near_u_behind)
+                # behind: past its back by near_cross_s0 at NEAR_V from the key's start (else she comes down on it)
+                clear = d == r.face or (x_rel - NEAR_V * (c.near_cross_s0 - max(ks0, c.near_s0_behind))
+                                        <= -c.near_cross_u)
+                fits[d] = (u, u is not None and clear)
+            r.near = next((d for d in (pref, -pref) if fits[d][1]), 0)
+            if r.near == 0:
+                r.side_why = "old"
+                return 0
+            r.near_u = fits[r.near][0]
+            r.side_why = why if r.near == pref else ("room" if fits[pref][0] is None else "clear")
+        d = r.near
+        if ks0 < (c.near_s0_behind if d == -r.face else c.near_s0_front) or r.k_slash is not None:
+            return 0
+        # her x at the mask's frame (the keys in flight: this script's own masks, else her velocity)
+        xw = hero_x(s)
+        vx = float((h.get("vel") or [0, 0])[0])
+        for fr in range(f + 1, f + SEND_AHEAD + c.lag):
+            m0 = next((m for f2, m in reversed(r.sent) if f2 <= fr), None) if r.sent else None
+            xw += vx / 60.0 if m0 is None else ((1 if m0 & M_R else 0) - (1 if m0 & M_L else 0)) * NEAR_V
+        rel = (xw - cx) * r.face                                   # + in front
+        y = float((h.get("pos") or [0.0, FLOOR_Y])[1]) - FLOOR_Y
+        vy = float((h.get("vel") or [0.0, 0.0])[1])
+        for _ in range(SEND_AHEAD + c.lag + 1):                    # y at the mask's frame + 1 (the slash's first frame)
+            y += vy / 60.0
+            vy -= GRAV / 60.0
+        low = y <= c.slash_y
+        if r.k_turn is None:
+            tx = cx + d * r.near_u
+            reached = (xw - tx) * d >= 0.5 * NEAR_V                # the turn key moves her NEAR_V back to tx
+            past = d == r.face or rel <= -c.near_cross_u
+            if reached or (low and past and self._in_reach(e, cx, r.face, xw, -d)):
+                r.k_turn = k
+                return M_R if -d > 0 else M_L                      # the turn: she faces it
+            return M_R if d > 0 else M_L
+        if k > r.k_turn and k >= r.k_press + c.slash_cd and low and self._in_reach(e, cx, r.face, xw, -d):
+            r.k_slash = k
+            return M_A
+        return 0
+
+    @staticmethod
+    def _in_reach(e: dict, cx: float, face: int, xw: float, look: int) -> bool:
+        """The side slash from x xw facing look (+1 right) meets the Clapper's body box (its collider's x span when the
+        STATE has it, else BODY_FRONT / BODY_BACK from its centre), with 0.1 u to spare."""
+        span = None
+        for col in e.get("colliders") or ():
+            if col.get("name") == CLAPPER and col.get("enabled") and col.get("verts_world"):
+                xs = col["verts_world"][0::2]
+                span = (float(min(xs)), float(max(xs)))
+                break
+        if span is None:
+            a, b = cx + face * BODY_FRONT, cx - face * BODY_BACK
+            span = (min(a, b), max(a, b))
+        lo, hi = (xw + SLASH_X[0], xw + SLASH_X[1]) if look > 0 else (xw - SLASH_X[1], xw - SLASH_X[0])
+        return lo < span[1] - 0.1 and hi > span[0] + 0.1
 
     def _press_part(self, r: Run, k: int, m: int) -> int | None:
         c = self.cfg
