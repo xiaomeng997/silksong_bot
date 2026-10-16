@@ -193,3 +193,13 @@ def test_stance_sub_switch(monkeypatch):
     s = [subj(9, "Song Heavy Sentry", 30.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]
     p = l2().decide(world(24.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
     assert p.stance_x != pytest.approx(24.0)
+
+
+@pytest.mark.parametrize("x0,d", [(5.0, 4.5), (7.7, 6.0), (5.0, 6.5)])
+def test_no_back_and_forth(x0, d):
+    # a stand band only 0.24 wide (the probe's --pin): one walk direction, the hero inside it at the jump
+    cfg = sp.PlayCfg(stand=(d - 0.12, d + 0.12), band=(3.5, 7.5))
+    play, landed, xs = simulate(x0, cfg=cfg)
+    walk = [k for k in keys(landed, sp.M_L | sp.M_R) if k < cfg.k_jump]
+    assert walk and len({landed[k] & (sp.M_L | sp.M_R) for k in walk}) == 1
+    assert d - 0.12 <= xs[cfg.k_jump] <= d + 0.12

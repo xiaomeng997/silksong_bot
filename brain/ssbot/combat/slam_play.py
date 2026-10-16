@@ -236,7 +236,7 @@ class SlamPlay:
             r.s0 = f
         k = f + SEND_AHEAD + c.lag - r.fa                  # the antic frame this tick's mask lands on
         if r.phase == "wait":
-            m = self._try_start(r, k, s, e, ground, accepting, hp)
+            m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is None:
                 return None
             r.sent.append((f + SEND_AHEAD, m))
@@ -248,7 +248,7 @@ class SlamPlay:
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
             if k < c.k_jump:
-                m = self._walk(s, cx, r.face)
+                m = self._walk(s, cx, r.face, f)
             else:
                 if not ground:
                     self._close("abort", "not on the ground at the jump")
@@ -325,22 +325,27 @@ class SlamPlay:
                 m |= M_D
         return m
 
-    def _walk(self, s: dict, cx: float, face: int) -> int:
+    def _walk(self, s: dict, cx: float, face: int, f: int) -> int:
+        """The walk mask for frame f + 2 + lag: where she stands before it (the STATE's x plus the frames already in
+        flight: this script's own masks, else her velocity), none when that is inside STAND, else one step toward
+        its middle (she stops dead; STAND is wider than a step: no back and forth)."""
         c = self.cfg
         h = s.get("hero") or {}
         vx = float((h.get("vel") or [0, 0])[0])
         lo, hi = c.stand
-        xw = hero_x(s) + (SEND_AHEAD + c.lag) * vx / 60.0  # where she is when this mask lands (moving: still moving)
+        r = self.run
+        xw = hero_x(s)
+        for fr in range(f + 1, f + SEND_AHEAD + c.lag):
+            m = next((m for f2, m in reversed(r.sent) if f2 <= fr), None) if r is not None and r.sent else None
+            xw += vx / 60.0 if m is None else ((1 if m & M_R else 0) - (1 if m & M_L else 0)) * WALK_U
         x = (xw - cx) * face
         if lo <= x <= hi:
             return 0
-        tx = cx + face * (0.5 * (lo + hi) if not lo <= x <= hi else x)
-        dx = tx - xw
-        if abs(dx) <= WALK_U / 2 + 0.01:
-            return 0
-        return M_R if dx > 0 else M_L
+        tx = cx + face * 0.5 * (lo + hi)
+        return M_R if tx > xw else M_L
 
-    def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int) -> int | None:
+    def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
+                   ) -> int | None:
         c = self.cfg
         if k > c.k_start_max:
             if not r.why:
@@ -372,4 +377,4 @@ class SlamPlay:
             r.why = "no time to walk"
             return None
         r.phase, r.k_start, r.x_start, r.hp0, r.why = "walk", k, round(x, 3), hp, ""
-        return self._walk(s, cx, r.face)
+        return self._walk(s, cx, r.face, f)

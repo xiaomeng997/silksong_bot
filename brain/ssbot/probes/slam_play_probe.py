@@ -86,7 +86,7 @@ class PlayProbe(Target):
             # --pin: the strike from D itself (the stand band pinned at D, the jump band around it): x at the jump
             # classes, the band's edges
             b = self.base
-            self.play.cfg = replace(b, stand=(d - 0.08, d + 0.08), band=(min(b.band[0], d - 0.3), max(b.band[1], d + 0.3)),
+            self.play.cfg = replace(b, stand=(d - 0.12, d + 0.12), band=(min(b.band[0], d - 0.3), max(b.band[1], d + 0.3)),
                                     reach=(2.7, max(b.reach[1], d + 1.5)))
         self.play.reset()
         t0 = time.time()
@@ -158,9 +158,9 @@ class PlayProbe(Target):
         def first(pred, after=None):
             return next((r["f"] for r in R if (after is None or r["f"] >= after) and pred(r)), None)
 
-        s0 = first(lambda r: r["st"] == "Slam 0")
-        s1 = first(lambda r: r["st"] == "Slam 1")
-        rec = first(lambda r: r["st"] == "Slam Recover")
+        s0 = first(lambda r: r["st"] == "Slam 0", fa)
+        s1 = first(lambda r: r["st"] == "Slam 1", fa)
+        rec = first(lambda r: r["st"] == "Slam Recover", fa)
         end = first(lambda r: r["st"] not in sp.SLAM_STATES, rec) if rec is not None else None
         prev = 0
         jump = press = None
