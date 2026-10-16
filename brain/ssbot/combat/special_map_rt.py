@@ -25,6 +25,7 @@ import numpy as np
 
 from ssbot.combat import map_lookahead as ml
 from ssbot.combat import special_map as sm
+from ssbot.combat import special_map_jit as smj
 
 MAP_ON = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
 MAP_TAG = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_TAG", "sg4").strip() or "sg4"
@@ -39,6 +40,9 @@ WALL_FRONT_U = 14.0                # leave the map when a wall is this close in 
 WALL_BACK_U = 6.0                  # ... or behind it (no wall buckets for the SG4 maps)
 ROW_EXTRA_F = 24                   # the map row's template past the planner's horizon (its tail check)
 INF_LEVEL, NONE_LEVEL = sm.INF_LEVEL, sm.NONE_LEVEL
+# SG6 (forum.md 62): the map row's rollout, the readiness and the batched lookups compiled (special_map_jit,
+# bit-identical to the Python code here); SSBOT_FORUM_SPECIAL_MAP_JIT=0: the Python reference
+JIT = smj.JIT
 
 
 def map_path(tag: str = MAP_TAG) -> Path:
@@ -301,7 +305,18 @@ class MapRuntime:
         self.keyed = bool(meta["keyed"])
         self._ready_ref = READY_REF if READY_REF is not None else float(meta.get("ready_ref", self.wc + 1.0))
         self._tube_y()
+        # SG6: the compiled kernels' tables (built here: the map's load, never on a slam tick)
+        self.use_jit = JIT
+        self._jt = None
+        if self.use_jit:
+            self.jit_tables()
         self.init_s = round(time.time() - t0, 2)
+
+    def jit_tables(self) -> dict | None:
+        """special_map_jit.tables (None: not a keyed level map; the Python path)."""
+        if self._jt is None:
+            self._jt = smj.tables(self) or False
+        return self._jt or None
 
     @property
     def ready_ref(self) -> float:
@@ -444,6 +459,38 @@ class MapRuntime:
         R[~inside] = -np.inf
         return R
 
+    def readiness_min(self, phases, xm: np.ndarray, kd: np.ndarray, gnd: np.ndarray, yb: np.ndarray,
+                      yp: np.ndarray, tol: float = 0.08) -> np.ndarray:
+        """[N] the minimum over phases of readiness_rows (SG6: one compiled call with the JIT)."""
+        T = self.jit_tables() if self.use_jit else None
+        if T is None:
+            R = np.full(len(xm), np.inf)
+            for p in phases:
+                R = np.minimum(R, self.readiness_rows(p, xm, kd, gnd, yb, yp, tol))
+            return R
+        ti = self.ti
+        return smj.ready_k(T["Ss"], np.asarray(list(phases), np.int64), smj.wr(xm, np.float64),
+                           smj.wr(kd, np.int64), smj.wr(gnd, np.bool_), smj.wr(yb, np.float64),
+                           smj.wr(yp, np.float64), float(tol),
+                           T["K0S"], T["K0Y0"], T["K0Y1"], T["K0N"], float(ti.x_lo), float(ti.step), int(ti.NX),
+                           float(T["cf"][smj.CF_SCALE]))
+
+    def S_min(self, phases, ks, ss, xs, cs) -> np.ndarray:
+        """[n] min over phases of the sources' S(k, s, x, c) (keyed; unkeyed: S(k, s, x)), elementwise (scalars
+        broadcast). SG6: one compiled call with the JIT (the L2 strip, the off-board spot, the swing lock)."""
+        xs = smj.wr(np.asarray(xs, np.float64).reshape(-1), np.float64)
+        n = len(xs)
+        ks, ss, cs = (np.array(np.broadcast_to(np.asarray(a, np.int64), (n,))) for a in (ks, ss, cs))
+        T = self.jit_tables() if self.use_jit else None
+        if T is None:
+            return np.array([min(self.srcs[p].S(int(k), int(s), float(x), int(c)) if self.keyed else
+                                 self.srcs[p].S(int(k), int(s), float(x)) for p in phases)
+                             for k, s, x, c in zip(ks, ss, xs, cs)], np.float64).reshape(n)
+        ti = self.ti
+        return smj.smin_k(T["Ss"], np.asarray(list(phases), np.int64), ks, ss, xs, cs, int(ti.K),
+                          int(ti.NX), float(T["cf"][smj.CF_XLO]), float(T["cf"][smj.CF_STEP]),
+                          float(T["cf"][smj.CF_SCALE]))
+
     # ---- the exits ----
     def deviation(self, k: int, cx: float, x0: float, face: int) -> float:
         """How far the Clapper's x lies outside anchor + the variants' displacement range at frame k (u, >= 0)."""
@@ -464,6 +511,147 @@ class MapRuntime:
     def plan(self, k: int, x: float, ev: dict, c: int, last_press: int, phases: list, L: int,
              lam: float = LAMBDA, face_hero: int = 1, face: int = 1, resume: dict | None = None,
              slash: dict | None = None) -> MapPlan:
+        """plan_py (below); SG6: the compiled loop (plan_jit, the same MapPlan) when the JIT is on."""
+        if self.use_jit:
+            T = self.jit_tables()
+            if T is not None:
+                pl = self.plan_jit(T, k, x, ev, c, last_press, phases, L, lam, face_hero, face, resume, slash)
+                if pl is not None:
+                    return pl
+        return self.plan_py(k, x, ev, c, last_press, phases, L, lam, face_hero, face, resume, slash)
+
+    def decide_jit(self, phases, k: int, ev: dict, x: float, c: int, last_press: int, lam: float,
+                   land: int | None) -> tuple | None:
+        """decide_multi([srcs[p] for p in phases], ...)'s (value, action) from the compiled kernel (None: no
+        tables)."""
+        T = self.jit_tables()
+        if T is None:
+            return None
+        ti = self.ti
+        kind, tube = smj.EV_GROUND, 0
+        if ev["kind"] == "jump":
+            kind, tube = smj.EV_JUMP, ti._jt[float(ev["h"])]
+        elif ev["kind"] == "bounce":
+            kind, tube = smj.EV_BOUNCE, ti.bounce_t[int(np.clip(np.floor(ev["yc"] / ti.cb_w), 0, ti.ncb - 1))]
+        v, a0, a1, a2 = smj.decide_k(T["Ss"], T["Ps"], np.asarray(list(phases), np.int64), int(k), kind,
+                                     int(ev["k"]), tube, 0 if land is None else int(land), land is not None, float(x),
+                                     int(c), int(last_press), float(lam), T["ci"], T["cf"], T["pl"], T["gp"], T["TS0"],
+                                     T["TN"], T["JS0"])
+        act = ("dir", a1) if a0 == smj.A_DIR else (("jump", ti.jump_h[a1], a2) if a0 == smj.A_JUMP else
+                                                     ("press", a1))
+        return float(v), act
+
+    def plan_jit(self, T: dict, k, x, ev, c, last_press, phases, L, lam=LAMBDA, face_hero=1, face=1, resume=None,
+                 slash=None) -> MapPlan | None:
+        """plan_py as one compiled loop (special_map_jit.plan_k); None: a state the tables do not cover (the
+        Python path)."""
+        t0 = time.perf_counter()
+        ti = self.ti
+        if resume is not None:
+            ls = dict(resume)
+            ls["ev"] = dict(ls["ev"])
+        else:
+            ev = dict(ev)
+            ls = {"k": int(k), "x": float(x), "ev": ev, "land": self.land_of(ev) if ev["kind"] != "ground" else None,
+                  "dir": int(c), "facing": int(face_hero), "slash": slash, "lsd": 0, "lp": int(last_press)}
+        ev0 = ls["ev"]
+        si = np.zeros(smj.NSI, np.int64)
+        sf = np.zeros(smj.NSF)
+        si[smj.SI_K] = ls["k"]
+        sf[smj.SF_X] = ls["x"]
+        kd = ev0["kind"]
+        si[smj.SI_EVSRC] = smj.SRC_INPUT
+        si[smj.SI_EVK] = ev0["k"]
+        if kd == "jump":
+            ji = T["jidx"].get(int(ev0["h"]))
+            tb = ti._jt.get(float(ev0["h"]))
+            if ji is None or tb is None:
+                return None
+            si[smj.SI_EVKIND] = smj.EV_JUMP
+            si[smj.SI_EVJ] = ji
+            si[smj.SI_EVQ0] = int(ev0["q0"])
+            si[smj.SI_EVTUBE] = tb
+            sf[smj.SF_H] = float(ev0["h"])
+        elif kd == "bounce":
+            si[smj.SI_EVKIND] = smj.EV_BOUNCE
+            si[smj.SI_EVQ0] = int(ev0["q0"])
+            sf[smj.SF_YC] = float(ev0["yc"])
+            si[smj.SI_EVTUBE] = ti.bounce_t[int(np.clip(np.floor(ev0["yc"] / ti.cb_w), 0, ti.ncb - 1))]
+        elif kd != "ground":
+            return None
+        if ls["land"] is not None:
+            si[smj.SI_HASLAND] = 1
+            si[smj.SI_LAND] = int(ls["land"])
+        si[smj.SI_DIR] = ls["dir"]
+        si[smj.SI_FACING] = ls["facing"]
+        sl = ls["slash"]
+        if sl is not None:
+            si[smj.SI_HASSL] = 1
+            si[smj.SI_SLP] = int(sl["P"])
+            si[smj.SI_SLFACE] = int(sl["face"])
+        si[smj.SI_LSD] = ls["lsd"]
+        si[smj.SI_LP] = ls["lp"]
+        k_start = ls["k"]
+        (masks, xs, ys, act, vals, sti, stf, press, cont, n, s, f, has_first, v_first,
+         first) = smj.plan_k(T["Ss"], T["Ps"], np.asarray(list(phases), np.int64), si, sf, int(L), float(lam),
+                             int(face), *smj.plan_args(T))
+        JH = ti.jump_h
+
+        def act_of(a):
+            if a[0] == smj.A_DIR:
+                return ("dir", a[1])
+            if a[0] == smj.A_JUMP:
+                return ("jump", JH[a[1]], a[2])
+            if a[0] == smj.A_PRESS:
+                return ("press", a[1])
+            return ("slash",)
+        KN = ("ground", "jump", "bounce")
+        n = int(n)
+        acts = [act_of(a) for a in act[:n].tolist()]
+        values = [np.nan if a[0] == "slash" else v for a, v in zip(acts, vals[:n].tolist())]
+        states = []
+        for si_, sf_ in zip(sti[:n].tolist(), stf[:n].tolist()):
+            src_ = si_[smj.SI_EVSRC]
+            if src_ == smj.SRC_INPUT:
+                h, yc = ev0.get("h"), ev0.get("yc")
+            elif src_ == smj.SRC_JUMP:
+                h, yc = JH[si_[smj.SI_EVJ]], None
+            elif src_ == smj.SRC_BOUNCE:
+                h, yc = None, sf_[smj.SF_YC]
+            else:
+                h, yc = None, None
+            states.append((si_[smj.SI_K], sf_[smj.SF_X], KN[si_[smj.SI_EVKIND]], si_[smj.SI_EVK], h, yc,
+                           si_[smj.SI_DIR], si_[smj.SI_LP], si_[smj.SI_HASSL] != 0))
+        s = s.tolist()
+        f = f.tolist()
+        src_ = s[smj.SI_EVSRC]
+        if src_ == smj.SRC_INPUT:
+            evf = dict(ev0)
+        elif src_ == smj.SRC_JUMP:
+            evf = {"kind": "jump", "h": JH[s[smj.SI_EVJ]], "k": s[smj.SI_EVK], "q0": s[smj.SI_EVQ0]}
+        elif src_ == smj.SRC_BOUNCE:
+            evf = {"kind": "bounce", "yc": f[smj.SF_YC], "k": s[smj.SI_EVK], "q0": s[smj.SI_EVQ0]}
+        else:
+            evf = {"kind": "ground", "k": s[smj.SI_EVK]}
+        slf = None
+        if s[smj.SI_HASSL]:
+            slf = {"P": s[smj.SI_SLP], "face": s[smj.SI_SLFACE]}
+            if sl is not None and slf == sl:
+                slf = sl
+        final = {"k": s[smj.SI_K], "x": f[smj.SF_X], "ev": evf, "land": s[smj.SI_LAND] if s[smj.SI_HASLAND] else None,
+                 "dir": s[smj.SI_DIR], "facing": s[smj.SI_FACING], "slash": slf, "lsd": s[smj.SI_LSD],
+                 "lp": s[smj.SI_LP]}
+        pl = MapPlan(masks, float(v_first) if has_first else -np.inf, act_of(first.tolist()) if has_first else None,
+                     np.flatnonzero(press[:n]).tolist(), np.flatnonzero(cont[:n]).tolist(), xs[:n], ys[:n], acts,
+                     list(phases), k_start, (time.perf_counter() - t0) * 1e3)
+        pl.states = states
+        pl.values = values
+        pl.final = final
+        return pl
+
+    def plan_py(self, k: int, x: float, ev: dict, c: int, last_press: int, phases: list, L: int,
+                lam: float = LAMBDA, face_hero: int = 1, face: int = 1, resume: dict | None = None,
+                slash: dict | None = None) -> MapPlan:
         """Roll the lookahead over L frames from the state at the end of frame k (noise free, the macro model; the
         contact on the nominal timeline's target boxes with the real slash polygon). masks[t] = the inputs of frame
         k + 1 + t (planner key bits; the map key d is the world key d x face, face = the Clapper's facing); c,

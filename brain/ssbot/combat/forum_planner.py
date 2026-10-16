@@ -4218,6 +4218,7 @@ class ForumPlanner(Planner):
             self._map.ready_info = None
         self.prev_name = res.name
         self.ticks += 1
+        self.last_map_ms = map_ms                 # SG6: the map's own work this tick (diagnostics)
         t6 = time.perf_counter()
         self.last_info = {"dash_only": getattr(self, "v2_dash_only", None), "posture": posture, "N": N, "stage1_pass": int(pass1.sum()), "enveloped": int(env.sum()),
                           "core": int(core.sum()), "core_pass": n_core, "prio": n_prio, "overrun": overrun,

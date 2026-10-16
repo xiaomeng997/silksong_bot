@@ -102,10 +102,17 @@ class MapHelper:
 
     def preload(self) -> None:
         """Load the map, the decision states and touch the lookup paths once (the planner's construction, else its
-        first tick with the arena's terrain), so the first tick near a Clapper does not pay for them."""
+        first tick with the arena's terrain), so the first tick near a Clapper does not pay for them. SG6: the
+        compiled kernels are compiled (or loaded from numba's cache) at the planner's construction already."""
         if self._loaded:
             return
         t0 = time.perf_counter()
+        if smrt.JIT and getattr(self, "jit_warm_ms", None) is None:
+            try:
+                self.jit_warm_ms = round(smrt.smj.warm(), 1)
+            except Exception as ex:  # noqa: BLE001 - a compile failure must not stop the planner
+                self.jit_warm_ms = -1.0
+                self.load_error = repr(ex)
         rt = self.runtime()
         if rt is None:
             return                     # no arena terrain yet (or no map file): the first tick with one loads it
@@ -116,6 +123,9 @@ class MapHelper:
                 rt.plan(10, 4.0, {"kind": "ground", "k": 10}, 0, -100, [p], 8)
                 rt.readiness_rows(p, np.array([4.0, 5.0]), np.array([0, 1]), np.array([True, False]),
                                   np.array([0.0, 1.0]), np.array([0.0, 0.8]))
+                rt.readiness_min([p], np.array([4.0, 5.0]), np.array([0, 1]), np.array([True, False]),
+                                 np.array([0.0, 1.0]), np.array([0.0, 0.8]))
+                rt.S_min([p], 0, 0, np.array([4.0, 5.0]), 0)
             except Exception as ex:  # noqa: BLE001 - a warm-up failure must not stop the planner
                 self.load_error = repr(ex)
         self.preload_ms = round((time.perf_counter() - t0) * 1e3, 1)
@@ -353,10 +363,17 @@ class MapHelper:
         xs = (hx - x0) * face + np.arange(-4.0, 4.01, rt.ti.step)
         kk = min(k + 10, rt.ti.K - 1)
         best, bx = -np.inf, None
-        for x in xs:
-            v = min(rt.srcs[p].S(kk, 0, x, 0) if rt.keyed else rt.srcs[p].S(kk, 0, x) for p in rt.srcs)
-            if v > best:
-                best, bx = v, x
+        if rt.use_jit and rt.jit_tables() is not None:
+            # SG6: one compiled call (the first x with the best value, as the loop below)
+            V = rt.S_min(list(rt.srcs), kk, 0, xs, 0)
+            i_ = int(np.argmax(V)) if len(V) else 0
+            if len(V) and V[i_] > best:
+                best, bx = V[i_], xs[i_]
+        else:
+            for x in xs:
+                v = min(rt.srcs[p].S(kk, 0, x, 0) if rt.keyed else rt.srcs[p].S(kk, 0, x) for p in rt.srcs)
+                if v > best:
+                    best, bx = v, x
         if bx is not None and np.isfinite(best):
             BOARD[info["iid"]] = {"tick": ticks, "on": False, "x": float(x0 + face * bx), "k": k, "why": "ground"}
 
@@ -424,9 +441,7 @@ class MapHelper:
         glide = r1.mode[idx, je] == kin.M_GLIDE
         yb = bx_[:, je, 1] - rt.hm.stand_y0
         yp = bx_[:, je - 1, 1] - rt.hm.stand_y0
-        R = np.full(len(idx), np.inf)
-        for p in p_end:
-            R = np.minimum(R, rt.readiness_rows(p, xm, kd, gnd, yb, yp))
+        R = rt.readiness_min(p_end, xm, kd, gnd, yb, yp)   # SG6: one compiled call with the JIT
         R[glide] = 0.0
         if chase:
             # SG5: a row ending in a ground swing: the hero is locked until the swing ends (attack_duration), so a
@@ -443,12 +458,22 @@ class MapHelper:
                         break
                     n_att += run_
                 att_f = int(round(float(getattr(self.pl.params, "attack_duration", 0.25)) * 60.0))
-                for i in np.flatnonzero(att & gnd & np.isfinite(R)):
-                    kl = max(0, att_f - int(n_att[i]))
-                    if kl > 0:
-                        v = min(rt.srcs[p].S(kl, 0, float(xm[i]), int(kd[i])) if rt.keyed else
-                                rt.srcs[p].S(kl, 0, float(xm[i])) for p in p_end)
-                        R[i] = min(R[i], v)
+                if rt.use_jit and rt.jit_tables() is not None:
+                    # SG6: the swing lock's lookups in one compiled call
+                    ia_ = np.flatnonzero(att & gnd & np.isfinite(R))
+                    kl_ = np.maximum(0, att_f - n_att[ia_])
+                    ia_, kl_ = ia_[kl_ > 0], kl_[kl_ > 0]
+                    if len(ia_):
+                        V_ = rt.S_min(p_end, kl_, 0, xm[ia_], kd[ia_])
+                        for i, v in zip(ia_.tolist(), V_.tolist()):
+                            R[i] = min(R[i], v)
+                else:
+                    for i in np.flatnonzero(att & gnd & np.isfinite(R)):
+                        kl = max(0, att_f - int(n_att[i]))
+                        if kl > 0:
+                            v = min(rt.srcs[p].S(kl, 0, float(xm[i]), int(kd[i])) if rt.keyed else
+                                    rt.srcs[p].S(kl, 0, float(xm[i])) for p in p_end)
+                            R[i] = min(R[i], v)
                 self.swing_rows = int(att.sum())
         ref = rt.ready_ref
         pen = smrt.READY_W * np.maximum(0.0, ref - np.where(np.isfinite(R), R, 0.0))
@@ -457,7 +482,10 @@ class MapHelper:
             pen = np.where(out_, 100.0, pen)
         # L2 before the slam: the readiness argmax 3-6 u in front of it on the hero's side (standing, no key)
         xs = np.arange(3.0, 6.01, rt.ti.step)
-        rv = [min(rt.readiness(float(x), 0, p) for p in p_end) for x in xs]
+        if rt.use_jit and rt.jit_tables() is not None:
+            rv = rt.S_min(p_end, 0, 0, xs, 0)                     # SG6: rt.readiness(x, 0, p) in one call
+        else:
+            rv = [min(rt.readiness(float(x), 0, p) for p in p_end) for x in xs]
         bi = int(np.argmax(rv))
         sd = 1 if hx >= cx else -1
         BOARD[iid] = {"tick": ticks, "on": False, "x": None, "ready_x": float(cx + sd * xs[bi]), "k": None,
