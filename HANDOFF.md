@@ -7882,6 +7882,10 @@ touched. Frozen checkouts `C:\ssbot\live_1v1_{5442ece,974114b,33af2ab,88ea445,8e
 `C:\ssbot\sandbox\1v1sp3t_manifest.txt`, `1v1sp3t2..t5`, `1v1sp3ab_manifest.txt` (block a), `1v1sp3abb_manifest.txt`
 (block b); wrapper `sp3_block5.ps1`.
 
+The lead's 9db5fe8 (SSBOT_FORUM_SLAM_PLAY on by default under v2; old rn = arm rn0) landed on this branch after
+8ed2633. Every SP3 run used the frozen checkouts above (before it) and the arms rnjb / rnjbT set SLAM_PLAY=1 explicitly,
+so the numbers hold; SSBOT_FORUM_JUMP_BEHIND stays default off at HEAD.
+
 ### Next
 
 1. The default arm is the person's call: rnjb vs rnplay -8.5 s per kill and +0.17 landed hits / s (intervals clear of
