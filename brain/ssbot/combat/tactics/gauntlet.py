@@ -120,6 +120,16 @@ JB_GROUND_FIRST = ("jump: under and behind (landed)", "jump: under and behind (f
 # ground_hit checked (None, CC_EVADE) only (SP4 t3: no ground_hit while it idled after a small rune cast; the pogo
 # counted 2 landed hits)
 SP4_IDLE_FAMS = (None, "CC_EVADE", CC_IDLE)
+# SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7, default off; forum.md 71): with two Clappers in play (and nobody else), L2's
+# goal is RUSH on the focus (GauntletTactics._two_focus), never KITE (SP7's baseline: 8 of 8 w13 episodes QUIT at 1 HP,
+# most hits under KITE(EVADE) with the hero in the air)
+TWO_FOCUS = os.environ.get("SSBOT_FORUM_TWO_FOCUS", "0").strip() == "1"
+TWO_HYST_U = 1.0            # a switch needs the other one this much more room to its outer wall (u)
+TWO_CLOSE_U = 7.0           # ... and her within this of its centre in time (inside its Slam Range, 8.05 u)
+TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down near an idle Clapper, NODASH)
+TWO_IDLE_S = 0.6            # ... before this long into its idle after an attack move (0.65 s without a buddy busy)
+TWO_RUNE_S = 0.2            # no switch onto it until this past its rune hold (a jump cast's circle in front of it)
+TWO_ATTACK_FAMS = (CC_SLAM, CC_CAST, CC_JUMP, CC_JUMP_CAST)
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -300,6 +310,8 @@ class GauntletTactics:
         self._strike: dict[int, tuple[float, float]] = {}  # Clapper iid -> (game time, x) of the last "slam: strike"
         self.jb_land: dict[int, tuple[float, float]] = {}  # SSBOT_FORUM_JUMP_BEHIND: Clapper iid -> (landing x, facing)
         #                                                    of its jump, from the first tick past the antic
+        self._two_fam: dict[int, str | None] = {}         # SP7: Clapper iid -> its family on the last tick
+        self._two_idle: dict[int, float] = {}             # SP7: Clapper iid -> game time it went idle after an attack
 
     @property
     def xs(self):
@@ -312,6 +324,7 @@ class GauntletTactics:
         self._whips = frozenset()
         self._strike = {}
         self.jb_land = {}
+        self._two_fam, self._two_idle = {}, {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -699,6 +712,8 @@ class GauntletTactics:
                                  for c in cands]
         if not cands:
             return None
+        if TWO_FOCUS and len(cands) == 2 and all(c.s.type_key == CLAPPER for c in cands):
+            return self._two_focus(ws, cands, t, old)
         claps = [c for c in cands if c.s.type_key == CLAPPER]
         turn = set()
         if len(claps) >= 2 and any(c.s.committed for c in claps):
@@ -751,6 +766,60 @@ class GauntletTactics:
         g = self._kite(cands, c, hx, t)
         g.score = val(c)
         return g
+
+    # ---- SP7: two Clappers (SSBOT_FORUM_TWO_FOCUS) ----
+
+    def _outer_room(self, c: Cand, o: Cand) -> float:
+        """The room from a Clapper's centre to the wall on its side away from the other one (u): its evade backs off
+        that way when the hero stands between them, and inside 6 u of that wall the evade becomes an escape jump."""
+        x0, x1 = self.pb.arena_x
+        return (c.x - x0) if c.x < o.x else (x1 - c.x)
+
+    def _two_run_ok(self, f: Cand, o: Cand, t: float) -> tuple[bool, str]:
+        """The person's second switch condition: the other one will not jump while she runs to it - it cannot start a
+        move while the focus is committed (Buddy Is Attacking) and she gets within TWO_CLOSE_U of it before the focus's
+        move can end, or it has just ended a move (TWO_IDLE_S into its idle family: the idle lasts 0.65-1.15 s before
+        it decides, and within 8 u it decides a close move) and she gets there in time. Never into a jump move or onto
+        a rune circle still to burst in front of it (the plan's 10-11 note: ~1.2 s after a jump cast's landing)."""
+        if o.s.family in (CC_JUMP, CC_JUMP_CAST):
+            return False, "other jumping"
+        rp = self.rune.get(o.s.iid)
+        if rp is not None and t <= rp[3] + TWO_RUNE_S:
+            return False, "other's rune circle"
+        need = max(0.0, o.d - TWO_CLOSE_U) / TWO_RUN_U_S
+        if f.s.committed and need <= float(getattr(f.s, "t_free", 0.0) or 0.0):
+            return True, "focus committed"
+        t0 = self._two_idle.get(o.s.iid)
+        if o.s.family in (None, CC_IDLE) and t0 is not None and (t - t0) + need <= TWO_IDLE_S:
+            return True, "other just ended a move"
+        return False, "other free"
+
+    def _two_focus(self, ws, cands: list[Cand], t: float, old: Goal | None) -> Goal:
+        """SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7, the person's strategy of 2026-10-16): the goal is RUSH on the focus -
+        the Clapper farther from the wall on its side away from the other one (then its face stance, 4 u on the hero's
+        side, is between them; close, it decides close moves: slam / small runes / evade, not the jumps of 8 u and
+        beyond); the focus switches to the other one only when it has more room (by TWO_HYST_U) AND it will not jump
+        while she runs to it (_two_run_ok). Never KITE."""
+        a, b = cands
+        room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
+        keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
+        st = self.stats.setdefault("sp7", {})
+        if keep is None:
+            f = max(cands, key=lambda c: (room[c.s.iid], -c.d))
+            why = "two: focus"
+            self._sw_why = None if old is None else "ineligible"
+        else:
+            o = b if keep is a else a
+            ok2, how = self._two_run_ok(keep, o, t)
+            if room[o.s.iid] > room[keep.s.iid] + TWO_HYST_U and ok2:
+                f, why = o, f"two: switch ({how})"
+                self._sw_why = "two"
+                st["switch"] = st.get("switch", 0) + 1
+                st[f"switch_{how}"] = st.get(f"switch_{how}", 0) + 1
+            else:
+                f, why = keep, "two: keep" + ("" if room[o.s.iid] <= room[keep.s.iid] + TWO_HYST_U else f" ({how})")
+        st["picks"] = st.get("picks", 0) + 1
+        return self._goal(ws, f, RUSH, t, 1.0, why=f"{why}; room {room[f.s.iid]:.1f}")
 
     def _kite_spot(self, subjects, target, hx: float) -> tuple[float, str]:
         """KITE's stance (module docstring) from the enemies in play now: kite_u from the target on its side away from
@@ -823,6 +892,13 @@ class GauntletTactics:
         for s in getattr(fc, "subjects", ()) or ():
             if s.type_key != CLAPPER or s.pos is None:
                 continue
+            if TWO_FOCUS:
+                # SP7: when it went idle after an attack move (the switch rule's "it has just ended a move")
+                if s.family in (None, CC_IDLE) and self._two_fam.get(s.iid) in TWO_ATTACK_FAMS:
+                    self._two_idle[s.iid] = t
+                elif s.family not in (None, CC_IDLE):
+                    self._two_idle.pop(s.iid, None)
+                self._two_fam[s.iid] = s.family
             if s.family not in (CC_JUMP, CC_JUMP_CAST):
                 if self.jfam.pop(s.iid, None) == CC_JUMP_CAST:
                     # a jump cast just ended: it stands at its landing, and its rune circle bursts later in front

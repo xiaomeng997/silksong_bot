@@ -152,7 +152,22 @@ NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
 # early_cd apart and the STATE's atk_cd) and the slash from her x at the mask's frame meets its body box; after the last
 # early press the walk into STAND as before (a hit leaves her ~1 u farther: its 0.48 u + her recoil ~0.5 u).
 EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY")
-NEAR_V = 0.165              # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
+# SSBOT_FORUM_TWO_PLAY (task 1v1 SP7, default off; forum.md 71): two Clappers (the final wave, Forum_W_w13). Off, the
+# playbook follows the first Clapper of the STATE only (clapper()): SP7's baseline (8 w13 episodes of the v2 default)
+# saw 7 of its 30 slams, and 12 of the 13 hammer hits came from the other one. On: the script follows the Clapper that
+# enters Slam Antic (the nearest to the hero when both do; a handled slam is not looked at again until that Clapper
+# leaves it) and does not start while the other one can reach the stand point during the strike (TWO_DANGER: in a jump
+# move - its landing aims 5.27 u in front of her -, in its hammer within TWO_SLAM_U of the stand point, casting the small
+# runes within TWO_CAST_U, in its recovery within TWO_BODY_U, or its jump cast's rune circle - centre 6.48 u in front of
+# the landing, r 7.19: -0.7 .. +13.7 u, lit 63-86 frames after the landing - still to burst over the stand point). The
+# other one cannot start a move while this one is in its antic .. Slam 1 (Buddy Is Attacking), only finish one.
+TWO_PLAY = _on("SSBOT_FORUM_TWO_PLAY")
+TWO_JUMP_ST = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2", "Jump Aim", "Cast Jump", "Jump", "Air")
+TWO_SLAM_U = 12.5           # the hammer reaches 12 u in front of its centre (+ her half width 0.23 + 0.3)
+TWO_CAST_U = 9.0            # the small runes' rings around the caster
+TWO_BODY_U = 4.5            # its body in Slam Recover (front 3.49 u + 0.23 + 0.3; the lunge is over)
+TWO_RUNE = (-1.2, 14.2, 1.45)   # the rune circle's span from the landing along its facing (u) and its last lit second
+NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
 
@@ -244,6 +259,12 @@ def clapper(s: dict) -> dict | None:
                  and (e.get("hp") or 0) > 0 and e.get("pos")), None)
 
 
+def clappers(s: dict) -> list[dict]:
+    """Every living Clapper of a STATE (its entity order)."""
+    return [e for e in s.get("ents") or () if e.get("type_key") == CLAPPER and not e.get("is_dead")
+            and (e.get("hp") or 0) > 0 and e.get("pos")]
+
+
 def control(e: dict | None) -> tuple[str | None, float]:
     for m in (e or {}).get("fsms") or ():
         if m.get("name") == "Control":
@@ -329,11 +350,63 @@ class SlamPlay:
         self.run: Run | None = None
         self.done: list[Run] = []            # finished runs of this episode (the stats)
         self._closed_iid = None              # the Clapper whose slam was handled: no second look until it leaves it
+        self._closed: set = set()            # TWO_PLAY: every Clapper whose slam was handled (until it leaves it)
+        self._jfam: dict = {}                # TWO_PLAY: Clapper iid -> "j" / "jc" (its jump move) / "jc_landed"
+        self._rune: dict = {}                # TWO_PLAY: Clapper iid -> (landing x, facing, game time) of a jump cast
 
     def reset(self) -> None:
         self.run = None
         self.done = []
         self._closed_iid = None
+        self._closed, self._jfam, self._rune = set(), {}, {}
+
+    def _two_pick(self, s: dict, t: float) -> dict | None:
+        """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
+        (the nearest to the hero), else the first not handled; the per-Clapper bookkeeping (handled slams, jump casts'
+        landings for the rune circle)."""
+        cs = clappers(s)
+        for o in cs:
+            st = control(o)[0]
+            iid = o.get("iid")
+            if st not in SLAM_STATES and (self.run is None or self.run.iid != iid):
+                self._closed.discard(iid)
+            if st in ("Cast Slam Antic", "Cast Slam Antic 2"):
+                self._jfam[iid] = "jc"
+                self._rune.pop(iid, None)
+            elif st == "Jump Antic":
+                self._jfam[iid] = "j"
+            elif st in ("Slam 2", "Slam Recover", "Idle") and self._jfam.get(iid) == "jc":
+                self._jfam[iid] = "jc_landed"
+                self._rune[iid] = (float(o["pos"][0]), 1 if o.get("flipX") else -1, t)
+            elif st in ("Slam Antic", "Spell Antic", "Evade Scuttle"):
+                self._jfam.pop(iid, None)
+        if self.run is not None:
+            return next((o for o in cs if o.get("iid") == self.run.iid), None)
+        hx = hero_x(s) if (s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos") else 0.0
+        antic = [o for o in cs if control(o)[0] == "Slam Antic" and o.get("iid") not in self._closed]
+        if antic:
+            return min(antic, key=lambda o: abs(float(o["pos"][0]) - hx))
+        return next((o for o in cs if o.get("iid") not in self._closed), None)
+
+    def _two_danger(self, s: dict, e: dict, tx: float, t: float) -> str | None:
+        """TWO_PLAY: why the other Clapper can reach the stand point tx during the strike (module constants), or None."""
+        for o in clappers(s):
+            if o.get("iid") == e.get("iid"):
+                continue
+            st = control(o)[0]
+            d = abs(float(o["pos"][0]) - tx)
+            if st in TWO_JUMP_ST:
+                return f"other {st}"
+            if st in ("Slam 0", "Slam 1", "Slam Effects?", "Slam 2") and d < TWO_SLAM_U:
+                return f"other {st}"
+            if st in ("Spell Antic", "Cast 1", "Cast 2") and d < TWO_CAST_U:
+                return f"other {st}"
+            if st == "Slam Recover" and d < TWO_BODY_U:
+                return "other Slam Recover"
+            rc = self._rune.get(o.get("iid"))
+            if rc is not None and t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]:
+                return "other rune circle"
+        return None
 
     def stats(self) -> dict:
         from collections import Counter
@@ -383,6 +456,8 @@ class SlamPlay:
             r.why = r.why or why
             self.done.append(r)
             self._closed_iid = r.iid
+            if TWO_PLAY:
+                self._closed.add(r.iid)
         self.run = None
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None
@@ -395,10 +470,10 @@ class SlamPlay:
         ~12 frames) no longer moves the jump and the press ahead of the Clapper. None: the STATE frame f is the clock
         (the frame count of SP1)."""
         c = self.cfg
-        e = clapper(s)
+        t = f / 60.0 if t_game is None else float(t_game)
+        e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
         st, tin = control(e)
         r = self.run
-        t = f / 60.0 if t_game is None else float(t_game)
         ta = (f - round(tin * 60.0)) / 60.0 if t_game is None else t - tin     # this antic's entry on the clock
         new_antic = r is not None and st == "Slam Antic" and abs(ta - r.ta) * 60.0 > 30
         if r is not None and (e is None or e.get("iid") != r.iid or new_antic or (
@@ -443,6 +518,15 @@ class SlamPlay:
             r.sent.append((f + SEND_AHEAD, m))
             return m
         if r.phase == "wait":
+            if TWO_PLAY:
+                # SP7: not while the other Clapper can reach the stand point during the strike (the planner decides)
+                cx0 = float(e["pos"][0])
+                x0 = (hero_x(s) - cx0) * r.face
+                tx = cx0 + r.face * min(max(x0, c.stand[0]), c.stand[1])
+                why = self._two_danger(s, e, tx, t)
+                if why is not None:
+                    r.why = why
+                    return None
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is None:
                 return None
