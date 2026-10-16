@@ -180,6 +180,25 @@ def control(e: dict | None) -> tuple[str | None, float]:
     return None, 0.0
 
 
+FLOOR_Y = 4.568            # the hero's transform y standing on the Forum floor
+GRAV = 72.0                 # u/s^2: the hero's vy falls 1.2 per frame in the air (a jump's / bounce's decay)
+
+
+def _fall_frames(s: dict) -> float:
+    """Frames until the hero lands on the floor in a free fall from her y / vy, 0 on the ground or below the floor. A
+    rising jump counts as cut (no jump key in the land phase: the release stops the rise; the probes' hops, rising at
+    17.4 at antic frame 2, landed by 18-25); a down slash's bounce (DownSpikeBounce clips) keeps its vy (it holds 17.4
+    for ~8 frames, then falls 1.2 per frame: this is the earliest landing)."""
+    h = s.get("hero") or {}
+    y = float((h.get("pos") or [0.0, FLOOR_Y])[1]) - FLOOR_Y
+    if y <= 0.0:
+        return 0.0
+    vy = float((h.get("vel") or [0.0, 0.0])[1])
+    if not str((h.get("anim") or {}).get("clip") or "").startswith("DownSpikeBounce"):
+        vy = min(vy, 0.0)
+    return 60.0 * (vy + (vy * vy + 2.0 * GRAV * y) ** 0.5) / GRAV
+
+
 def hero_x(s: dict) -> float:
     h = s.get("hero") or {}
     b = h.get("box")
@@ -327,6 +346,11 @@ class SlamPlay:
         if r.phase == "land":
             if k > (c.k_jump_late2 if LATE else c.k_jump_late - 1) or (not accepting and not LATE):
                 self._close("abort", "no landing" if accepting else "no input in the air")
+                return None
+            if LATE and k + _fall_frames(s) > c.k_jump_late2:
+                # SSBOT_FORUM_SLAM_PLAY_LATE: even a free fall from here lands after K_JUMP_LATE2 (a pogo bounce off its
+                # head, SP4 t3: 9 u above the floor at the antic): hand the slam back at once, not at frame 30
+                self._close("abort", "no landing (fall)")
                 return None
             m = self._walk(s, float(e["pos"][0]), r.face, f)
             r.sent.append((f + SEND_AHEAD, m))

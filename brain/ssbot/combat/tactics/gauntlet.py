@@ -115,6 +115,11 @@ JB_NO_HIT = ("jump: aim stance", "jump: under and behind (antic)", "jump: under 
 JB_GROUND_HIT = ("jump: under and behind (landed)", "rune: behind", "jump: under and behind (flight)",
                  "jump: under and behind (falling)", "jump: cast antic slash", "slam: after")
 JB_GROUND_FIRST = ("jump: under and behind (landed)", "jump: under and behind (falling)", "rune: behind")
+# SP4 (SLAM_PLAY_NODASH / _NOPOGO): the families in which the Clapper can start an attack any frame. The tracker's
+# subject reads CC_IDLE for the whole Idle / Walk (EnemyTracker.enter: a decision state starts the idle family): SP3's
+# ground_hit checked (None, CC_EVADE) only (SP4 t3: no ground_hit while it idled after a small rune cast; the pogo
+# counted 2 landed hits)
+SP4_IDLE_FAMS = (None, "CC_EVADE", CC_IDLE)
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -938,13 +943,15 @@ class GauntletTactics:
                 # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
                 out = replace(out, ground_first=frozenset({g.target}))
         if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
-                and s.family in (None, "CC_EVADE") and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
+                and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
             out = replace(out, no_dash=frozenset({g.target}))
         if (slam_play.ENABLED and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
-                and s.family in (None, "CC_EVADE")):
-            # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air
-            out = replace(out, no_pogo=frozenset({g.target}))
+                and s.family in SP4_IDLE_FAMS):
+            # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air, and (its idle family
+            # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only
+            out = replace(out, no_pogo=frozenset({g.target}),
+                          ground_hit=frozenset(out.ground_hit) | frozenset({g.target}))
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

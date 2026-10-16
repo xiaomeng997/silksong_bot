@@ -268,3 +268,34 @@ def test_nopogo_prefs(monkeypatch):
     p = t.decide(world(29.0, t=10.4, ents=[clapper(9, 35.0, False)]),
                  WinFc([subj(9, CC, 35.0, y=7.45, state="Slam Antic", family="CC_SLAM", committed=True)]), None, 3)
     assert p.no_pogo == frozenset()
+
+
+def test_late_fall_abort(monkeypatch):
+    # LATE: an airborne entry whose free fall lands after K_JUMP_LATE2 hands the slam back at once (a pogo bounce 4 u
+    # above the floor rising at 17.4: ~39 frames); a hop (rising, the key released) is not judged by its vy
+    s = state(1000, "Slam Antic", 0.05, cx=31.0, flip=False, hx=31.0 - 3.6, ground=False, vy=17.4)
+    s["hero"]["pos"] = [27.4, sp.FLOOR_Y + 4.0]
+    s["hero"]["anim"] = {"clip": "DownSpikeBounce 2"}
+    assert sp._fall_frames(s) > 35
+    s["hero"]["anim"] = {"clip": "Airborne"}
+    assert sp._fall_frames(s) < 25
+    monkeypatch.setattr(sp, "LATE", True)
+    play = sp.SlamPlay(sp.PlayCfg())
+    s["hero"]["anim"] = {"clip": "DownSpikeBounce 2"}
+    play.step(1000, s, False, True)                     # the airborne entry (phase land) ...
+    s2 = state(1001, "Slam Antic", 0.067, cx=31.0, flip=False, hx=31.0 - 3.6, ground=False, vy=17.4)
+    s2["hero"]["pos"] = [27.4, sp.FLOOR_Y + 4.2]
+    s2["hero"]["anim"] = {"clip": "DownSpikeBounce 2"}
+    assert play.step(1001, s2, False, True) is None     # ... handed back on the next tick
+    assert play.done and play.done[-1].why == "no landing (fall)"
+
+
+def test_idle_family_cc_idle(monkeypatch):
+    # the tracker's subject reads CC_IDLE while it idles: NODASH / NOPOGO apply there (NOPOGO also adds ground_hit)
+    monkeypatch.setattr(sp, "ENABLED", True)
+    monkeypatch.setattr(sp, "NODASH", True)
+    monkeypatch.setattr(sp, "NOPOGO", True)
+    t = l2()
+    p = t.decide(world(29.0, t=10.0, ents=[clapper(9, 35.0, False)]),
+                 WinFc([subj(9, CC, 35.0, y=7.45, state="Idle", family="CC_IDLE")]), None, 3)
+    assert p.no_dash == frozenset({9}) and p.no_pogo == frozenset({9}) and 9 in p.ground_hit
