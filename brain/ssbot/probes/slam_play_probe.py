@@ -25,6 +25,7 @@ import json
 import random
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from ssbot.combat import slam_play as sp
@@ -43,10 +44,12 @@ def _ctl(e) -> str | None:
 
 
 class PlayProbe(Target):
-    def __init__(self, link: OracleLink, savestate: str, tick_ms: float):
+    def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False):
         super().__init__(link, savestate)
         self.tick_ms = tick_ms
         self.play = sp.SlamPlay()
+        self.base = self.play.cfg
+        self.pin = pin
 
     def scale1(self) -> None:
         r = self.link.rpc("time.scale", timeout_s=10, scale=1.0)
@@ -79,6 +82,12 @@ class PlayProbe(Target):
         if e is None or hp < MIN_HP or (e.get("hp") or 0) < 70:
             s = self.load()
         last = s["f"]
+        if self.pin:
+            # --pin: the strike from D itself (the stand band pinned at D, the jump band around it): x at the jump
+            # classes, the band's edges
+            b = self.base
+            self.play.cfg = replace(b, stand=(d - 0.08, d + 0.08), band=(min(b.band[0], d - 0.3), max(b.band[1], d + 0.3)),
+                                    reach=(2.7, max(b.reach[1], d + 1.5)))
         self.play.reset()
         t0 = time.time()
         seen = None
@@ -115,7 +124,7 @@ class PlayProbe(Target):
             last = s["f"]
         link.act(last + 2, 0, hold_frames=0)
         run = self.play.done[-1] if self.play.done else self.play.run
-        return {"d": d, "seen": seen} | self._outcome(run, rows)
+        return {"d": d, "pin": self.pin, "seen": seen} | self._outcome(run, rows)
 
     @staticmethod
     def _row(s: dict, e: dict | None, m: int) -> dict:
@@ -206,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-trials", type=int, default=400)
     ap.add_argument("--out", default=r"C:\ssbot\data\m2_play\live")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--pin", action="store_true", help="the stand band pinned at each distance class (x at the jump)")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import Recorder
     dists = [float(x) for x in a.dists.split(",")]
@@ -215,10 +225,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         link.rpc("guards.set", save_suppression=True, lethal_block="block")
         link.rpc("fsmtap.set", all=True)
-        pr = PlayProbe(link, a.savestate, a.tick_ms)
+        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"slam_play_i{a.instance}_s{a.seed}{a.tag}",
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
-                               "tick_ms": a.tick_ms, "savestate": a.savestate,
+                               "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()
