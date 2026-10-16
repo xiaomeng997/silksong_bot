@@ -21,7 +21,10 @@ is the frame the key takes effect in the game, the STATE's act.mask):
 Slam 0 seen before the press was sent (a short antic or a late tick): the press at once while its frame is within
 Slam 0 + press_late_max, else abort.
 Entry conditions (checked on every tick until the script starts, at the latest at antic frame K_START_MAX): the hero
-on the ground, accepting input, in front of the Clapper, the walk into STAND done by K_JUMP - 1 inside the arena.
+on the ground, accepting input, in front of the Clapper, the walk into STAND done by K_JUMP - 1 inside the arena. In
+the air at the antic (air = 1, seen by K_AIR_MAX): the script steers toward STAND (no jump, no attack) and starts on
+landing if the walk still fits; no landing by K_JUMP - 4: abort. Not accepting input (the sprint's skid, a recoil):
+no start.
 Abort (the planner decides again): conditions lost before the jump (not on the ground at the jump, outside BAND at the
 jump), the hero hurt, the Clapper gone or out of the slam, a Slam 0 the press cannot meet.
 
@@ -82,6 +85,8 @@ class PlayCfg:
     band: tuple = (4.0, 6.2)         # at the jump the hero must be in here, else abort (T1: 3.75-6.25 safe)
     reach: tuple = (2.7, 9.0)        # the distance at which a start is considered at all
     k_start_max: int = 14            # the latest antic frame (of the next mask) at which the script may start
+    air: int = 1                     # in the air at the antic: steer toward STAND and start on landing (by K_JUMP - 4)
+    k_air_max: int = 10              # ... only when seen in the air by this antic frame
     k_end: int = 110                 # the script ends here at the latest
     wall_room: float = 0.5           # the stand point at least this far inside the arena walls
     over: int = 1                    # 1: the way out after the bounce (over its body, the dash); 0: no key (SP1 it1)
@@ -153,6 +158,7 @@ class Run:
     bounced: bool = False
     over_dir: int | None = None      # the way out: +1 / -1 world x, 0 none
     k_dash: int | None = None
+    k_air: int | None = None         # the frame the airborne entry took over (phase land)
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -182,12 +188,14 @@ class SlamPlay:
                 out["bounced"] += 1
             if r.k_dash is not None:
                 out["dashed"] += 1
+            if r.k_air is not None:
+                out["air_entry"] += 1
             if r.phase == "abort" or (r.phase == "wait" and r.why):
                 out[f"why_{r.why}"] += 1
         return dict(out)
 
     def active(self) -> bool:
-        return self.run is not None and self.run.phase in ("walk", "jump", "air", "after")
+        return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after")
 
     def abort(self, why: str) -> None:
         """Hand the slam back to the planner (the supervisor took the keys)."""
@@ -235,15 +243,24 @@ class SlamPlay:
         if st == "Slam 0" and r.s0 is None:
             r.s0 = f
         k = f + SEND_AHEAD + c.lag - r.fa                  # the antic frame this tick's mask lands on
+        if r.hp0 is not None and hp < r.hp0:
+            self._close("abort", "hurt")
+            return None
+        if r.phase == "land" and ground:
+            r.phase = "wait"                              # landed: the start check (walk time from here)
+        if r.phase == "land":
+            if k > c.k_jump - 4 or not accepting:
+                self._close("abort", "no landing" if accepting else "no input in the air")
+                return None
+            m = self._walk(s, float(e["pos"][0]), r.face, f)
+            r.sent.append((f + SEND_AHEAD, m))
+            return m
         if r.phase == "wait":
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is None:
                 return None
             r.sent.append((f + SEND_AHEAD, m))
             return m
-        if r.hp0 is not None and hp < r.hp0:
-            self._close("abort", "hurt")
-            return None
         cx = float(e["pos"][0])
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
@@ -347,7 +364,7 @@ class SlamPlay:
     def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
                    ) -> int | None:
         c = self.cfg
-        if k > c.k_start_max:
+        if k > (c.k_jump - 4 if r.k_air is not None else c.k_start_max):
             if not r.why:
                 r.why = "late"
             r.phase = "abort"
@@ -357,8 +374,8 @@ class SlamPlay:
         x = (hero_x(s) - cx) * r.face
         h = s.get("hero") or {}
         vx = float((h.get("vel") or [0, 0])[0])
-        if not ground or not accepting:
-            r.why = "not on the ground"
+        if not accepting:
+            r.why = "no input (sprint, recoil)"
             return None
         if x <= 0:
             r.why = "behind"
@@ -371,6 +388,13 @@ class SlamPlay:
         tx = cx + r.face * tgt
         if not WALL_L + c.wall_room <= tx <= WALL_R - c.wall_room:
             r.why = "wall"
+            return None
+        if not ground:
+            if c.air and k <= c.k_air_max and r.k_air is None:
+                # in the air at the antic (a hop): steer toward STAND (never the jump), start once she lands
+                r.phase, r.k_air, r.hp0, r.why = "land", k, hp, ""
+                return self._walk(s, cx, r.face, f)
+            r.why = "in the air"
             return None
         need = abs(tgt - x) / WALK_U + abs(vx) / 8.25 * 2 + 1
         if k + need > c.k_jump - 1:

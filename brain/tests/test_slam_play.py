@@ -145,14 +145,31 @@ def test_walks_out_from_close():
 
 
 def test_declines():
-    # behind it, too far, in the air past the start window: the planner decides (no key ever), one look per slam
-    for kw in ({"x0": -5.0}, {"x0": 10.5}, {"x0": 5.0, "ground_until": 30}):
+    # behind it, too far: the planner decides (no key ever), one look per slam
+    for kw in ({"x0": -5.0}, {"x0": 10.5}):
         play, landed, _ = simulate(**kw)
         assert not landed, kw
         assert len(play.done) == 1 and play.done[0].k_start is None
+    # in the air past the start: air = 0 never takes it; air = 1 holds no key in the air (in STAND) and gives it
+    # back at K_JUMP - 4 without a landing
+    play, landed, _ = simulate(5.0, ground_until=30, cfg=sp.PlayCfg(air=0))
+    assert not landed and play.done[0].why == "in the air"
+    play, landed, _ = simulate(5.0, ground_until=30)
+    assert landed and not any(landed.values()) and play.done[0].why == "no landing"
     # airborne at the sighting but down by frame 8: it starts late and still walks / jumps in time
     play, landed, _ = simulate(6.5, ground_until=6)
     assert keys(landed, sp.M_A) == [play.cfg.k_press]
+
+
+def test_air_entry():
+    # in the air 8 u in front until antic frame 12: steered toward STAND in the air, the strike on time
+    play, landed, xs = simulate(8.0, ground_until=12)
+    c = play.cfg
+    early = [k for k in keys(landed, sp.M_L | sp.M_R) if k <= 12]
+    assert early and all(landed[k] & sp.M_R for k in early)       # facing left: toward = +x
+    assert c.stand[0] <= xs[c.k_jump] <= c.stand[1]
+    assert keys(landed, sp.M_A) == [c.k_press] and play.stats()["air_entry"] == 1
+    assert not keys(landed, sp.M_J)[0] < c.k_jump                  # never a jump before the script's own
 
 
 def test_abort_on_a_hit():

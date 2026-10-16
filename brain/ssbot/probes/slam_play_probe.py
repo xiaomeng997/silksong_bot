@@ -44,8 +44,9 @@ def _ctl(e) -> str | None:
 
 
 class PlayProbe(Target):
-    def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False):
+    def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False, hop: int = 0):
         super().__init__(link, savestate)
+        self.hop = hop
         self.tick_ms = tick_ms
         self.play = sp.SlamPlay()
         self.base = self.play.cfg
@@ -98,11 +99,16 @@ class PlayProbe(Target):
             if seen is None:
                 if st == "Slam Antic":
                     seen = {"f": s["f"], "x": round((sp.hero_x(s) - float(e["pos"][0])) * (1 if e.get("flipX") else -1), 3),
-                            "ground": sp.on_ground(s), "vx": round(float((s["hero"].get("vel") or [0, 0])[0]), 2)}
+                            "ground": sp.on_ground(s), "vx": round(float((s["hero"].get("vel") or [0, 0])[0]), 2),
+                            "vy": round(float((s["hero"].get("vel") or [0, 0])[1]), 2),
+                            "y": round(float(s["hero"]["pos"][1]), 3),
+                            "accepting": bool(s["hero"].get("hero_accepting_input", True))}
                 elif time.time() - t0 > WAIT_S:
                     return {"skip": "no slam"}
             if seen is None:
                 m = self.follow_mask(s, d)
+                if self.hop and (s["f"] // self.hop) % 2 == 0 and s["f"] % self.hop < 8:
+                    m |= M_J                              # --hop: a short hop every 2 x HOP frames (airborne starts)
             else:
                 pm = self.play.step(s["f"], s, sp.on_ground(s), bool(s["hero"].get("hero_accepting_input", True)))
                 if self.tick_ms > 0:
@@ -150,6 +156,7 @@ class PlayProbe(Target):
         out = {"gaps": sum(r.get("gap", 0) for r in rows)}
         if run is not None:
             out["play"] = {"fa": run.fa, "face": run.face, "phase": run.phase, "why": run.why, "k_start": run.k_start,
+                           "k_air": getattr(run, "k_air", None),
                            "x_start": run.x_start, "k_jump": run.k_jump, "x_jump": run.x_jump, "k_press": run.k_press}
         if not R or run is None:
             return out | {"trace": R}
@@ -216,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=r"C:\ssbot\data\m2_play\live")
     ap.add_argument("--tag", default="")
     ap.add_argument("--pin", action="store_true", help="the stand band pinned at each distance class (x at the jump)")
+    ap.add_argument("--hop", type=int, default=0, help="while waiting, a hop (jump held 8 frames) every 2 x HOP frames")
     a = ap.parse_args(argv)
     from ssbot.record.recorder import Recorder
     dists = [float(x) for x in a.dists.split(",")]
@@ -225,10 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         link.rpc("guards.set", save_suppression=True, lethal_block="block")
         link.rpc("fsmtap.set", all=True)
-        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin)
+        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"slam_play_i{a.instance}_s{a.seed}{a.tag}",
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
-                               "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin,
+                               "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()
