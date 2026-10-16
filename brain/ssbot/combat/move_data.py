@@ -303,7 +303,16 @@ HAMMER_POLY = {
 }
 
 
-def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160, poly: bool = False) -> MoveSpec:
+# SG7 review (forum.md 63.5): the physics order. A frame runs its physics step (the lunge moves the Clapper, triggers
+# fire with the colliders enabled now) before Update (the FSM leaves Slam 1 / Slam 2 and disables that hammer), so a
+# hammer collider still hurts in the first frame of the next state, at that frame's position (the lunge's last step
+# lands on the Slam 2 entry frame). Recordings: 30 of 315 Slam Collider 1 hp losses are logged on a Slam 2 frame, 2
+# Slam Collider 2 losses on a Slam Recover frame; carried one frame, the polygon covers every hammer hp loss but 2
+# (box: 9 missed). load_cl_slam(carry=True) adds that frame; the defaults keep the old maps.
+HAMMER_CARRY = {"Slam 1": "Slam 2", "Slam 2": "Slam Recover"}
+
+
+def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160, poly: bool = False, carry: bool = False) -> MoveSpec:
     """CL_SLAM (the Clapper's slam) from the template SlamTimeline reads: the root box per frame in each state (its
     last row repeats; past the move the last recover box stays), the hammer (Slam Collider 1 in Slam 1, Slam Collider
     2 in Slam 2) and the lunge (30 u/s from the Slam 0 entry to the Slam 2 entry). Nominal and T1's variants keep
@@ -323,7 +332,10 @@ def load_cl_slam(path: Path = SLAM_TEMPLATE, K: int = 160, poly: bool = False) -
             bb = [pg[:, 0].min(), pg[:, 0].max(), pg[:, 1].min(), pg[:, 1].max()]
             if np.abs(np.asarray(bb) - np.asarray(b, float)).max() > 0.01:
                 raise ValueError(f"{nm}: the polygon's bounding box {bb} is not the template box {b}")
-        tracks.append(Track(nm, frozenset({HURT}), {s: np.asarray([b], float)}, poly=pg))
+        by_state = {s: np.asarray([b], float)}
+        if carry and s in HAMMER_CARRY:          # on in the next state's first frame only (a nan row = off after it)
+            by_state[HAMMER_CARRY[s]] = np.asarray([b, [np.nan] * 4], float)
+        tracks.append(Track(nm, frozenset({HURT}), by_state, poly=pg))
     motion = [Motion(float(t.get("lunge_vx", 30.0)), "Slam 0", "Slam 2")]
     return MoveSpec("Song Heavy Sentry", "CL_SLAM", f"{Path(path).name} ({t['n_slams']} slams)", states, tracks,
                     motion, float(t["pos_above_floor"]),
@@ -391,4 +403,5 @@ def load_raster_move(enemy_key: str, family: str, enemy: str | None = None, tol_
 
 
 __all__ = ["HURT", "TARGET", "TINK", "StateSpec", "Track", "Motion", "MoveTimeline", "MoveSpec", "load_cl_slam",
-           "load_raster_move", "raster_boxes", "SLAM_TEMPLATE", "MOVES_DIR", "CLOCK", "FRAME_REF", "HAMMER_POLY"]
+           "load_raster_move", "raster_boxes", "SLAM_TEMPLATE", "MOVES_DIR", "CLOCK", "FRAME_REF", "HAMMER_POLY",
+           "HAMMER_CARRY"]

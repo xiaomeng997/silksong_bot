@@ -111,6 +111,9 @@ class MapConfig:
     poly: bool = False
     head_u: float = 0.0
     stage: bool = False
+    # SG7 review (forum.md 63.5): carry = a hammer collider also hurts in the first frame of the next state, at that
+    # frame's position (the physics step runs before the FSM disables it: move_data.HAMMER_CARRY)
+    carry: bool = False
 
     def key(self) -> dict:
         d = asdict(self)

@@ -44,6 +44,22 @@ WALL_BACK_U = 6.0                  # ... or behind it (no wall buckets for the S
 # 2.04 + 4.2 = 6.24 u); nearer than the last bucket: the wall exit
 WALL_BUCKETS_F = (12.0, 10.0, 8.5, 7.25, 6.5)
 WALL_BUCKETS_B = (4.0, 2.5)
+# SG7 review (forum.md 63.5): a bucket's wall at least this far inside the real wall. The map's hero macros have no
+# wall states, but touching a wall airborne with the key toward it slides / clings / scrambles: HeroBox.cs WallSlide
+# 0.876 u wide with its centre 0.21 u off (0.4 u past the physics box), WallScramble's top 0.51 u above the physics
+# box's; 26 of 247 bot hammer hp losses in the w7 runs came within 3 frames of a wall clip. 0.35 u = the wall-touch
+# ray 0.1 + one late run step 0.165 + half a lattice cell 0.0825: neither a row nor its one-frame-late key branch
+# reaches the real wall
+WALL_MARGIN_U = 0.35
+# SG7 review: a stage entry / observation frame (game time x 60) within this of a whole frame is that frame (60 fps
+# runs: all within 0.06 of 12,637 entries; 120 fps: 0.44-0.5 off for 64 %)
+OBS_SNAP = 0.2
+
+
+def off_grid(v) -> bool:
+    """SG7 review: a stage entry / observation frame (game time x 60) off the 60 Hz frame grid."""
+    v = float(v)
+    return abs(v - round(v)) > OBS_SNAP
 OBS_LAT = int(os.environ.get("SSBOT_FORUM_SPECIAL_MAP_OBS_LAT", "0") or 0)   # frames from a stage entry to seeing it
 ROW_EXTRA_F = 24                   # the map row's template past the planner's horizon (its tail check)
 INF_LEVEL, NONE_LEVEL = sm.INF_LEVEL, sm.NONE_LEVEL
@@ -364,20 +380,29 @@ class MapRuntime:
                        for p, rm in pairs])
         return ph, np.ascontiguousarray(RM)
 
-    def observe(self, seen: dict | None, k_now: int | None = None, lat: int = 0) -> list:
+    def observe(self, seen: dict | None, k_now: int | None = None, lat: int = 0,
+                k_frac: float | None = None) -> list:
         """SG7: set rows / plan_tl from what the hero has seen of the slam's stage entries: seen = {stage: entry
         frame} ("Slam 0", "Slam 1", "Slam 2", "Slam Recover"; the antic's is 0) and the stage it is in at frame k_now
         (the observation's frame: the planner's frame minus the transition latency lat). The consistent variants: each
         seen entry equal to the variant's, the variant in the same stage at k_now - lat (an unseen next stage has not
-        started by then). Returns the consistent variants' indices (every variant: nothing known / a plain map)."""
+        started by then). Returns the consistent variants' indices (every variant: nothing known / a plain map).
+        SG7 review (forum.md 63.5): the entries and k_frac (the observation's frame) are game time x 60. On the 60 fps
+        clock they lie within 0.06 of a whole frame (the template's variants are whole 60 Hz frames: exact rule); off
+        that grid (OBS_SNAP: a 120 fps game, the x0.5 runs, a part frame) the stage lengths are not the template's
+        (120 fps: Slam 1 lasts 1.5-2.5 frames) and the rows' timing is wrong, so nothing is observed (every variant's
+        rows, as the SG4 map's union): forum_map keeps that for the rest of the slam."""
         self.rows, self.plan_tl, self.obs_sig = None, None, None
         if not self.stage or seen is None or k_now is None:
             return list(range(len(self.vtl))) if self.stage else []
+        if (k_frac is not None and off_grid(k_frac)) or any(off_grid(e) for e in seen.values()):
+            return list(range(len(self.vtl)))
         ko = max(int(k_now) - int(lat), 0)
         cur = max(seen, key=lambda st_: seen[st_]) if seen else "Slam Antic"
         ok = []
         for vi, tl in enumerate(self.vtl):
-            if any(int(tl.entry.get(st_, -1)) != int(e) for st_, e in seen.items() if st_ != "Slam Antic"):
+            if any(int(tl.entry.get(st_, -1)) != int(round(float(e))) for st_, e in seen.items()
+                   if st_ != "Slam Antic"):
                 continue
             st_k = tl.state[ko] if ko < len(tl.state) else "after"
             if cur == "Slam Recover":
@@ -620,12 +645,13 @@ class MapRuntime:
         back = (x0 - lo) if face > 0 else (hi - x0)
         if front >= WALL_FRONT_U and back >= WALL_BACK_U:
             return ""
+        # SG7 review (forum.md 63.5): the bucket's wall WALL_MARGIN_U inside the real one
         if front < WALL_FRONT_U:
             if back < WALL_BACK_U:
                 return None
-            f = [u for u in WALL_BUCKETS_F if u <= front]
+            f = [u for u in WALL_BUCKETS_F if u <= front - WALL_MARGIN_U]
             return f"_f{f[0]:g}" if f else None
-        b = [u for u in WALL_BUCKETS_B if u <= back]
+        b = [u for u in WALL_BUCKETS_B if u <= back - WALL_MARGIN_U]
         return f"_b{b[0]:g}" if b else None
 
     def S_obs(self, p: int, k: int, s: int, x: float, c: int = 0) -> float:

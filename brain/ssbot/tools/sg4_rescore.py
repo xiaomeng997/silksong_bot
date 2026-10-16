@@ -53,6 +53,9 @@ VARIANTS = {
     "sg7h2": {"keyed": True, "key_noise": "hard2", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
               "stage": True},
     "sg7h2_poly": {"keyed": True, "key_noise": "hard2", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187},
+    # SG7 review (forum.md 63.5): sg7 + the hammer carried one frame into the next state (the physics order)
+    "sg7r": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
+             "stage": True, "carry": True},
 }
 HEAD_U = 0.2187                    # the HeroBox's top above the physics box's (HeroBox.cs): the truth's hero box
 
@@ -108,7 +111,8 @@ def run(a) -> int:
     ti = ml.TubeIndex.from_geometry(geo)
     b = sm.builder_for(geo)
     from ssbot.combat.move_data import load_cl_slam
-    vs = sim_variants(geo, a.quick, load_cl_slam(poly=True) if a.truth == "poly" else None)
+    vs = sim_variants(geo, a.quick, load_cl_slam(poly=True) if a.truth == "poly" else
+                      load_cl_slam(poly=True, carry=True) if a.truth == "polyc" else None)
     st = starts(a.quick)
     trials = load_trials()
     tc = TrialCheck(geo)
@@ -122,7 +126,7 @@ def run(a) -> int:
         src = ml.KeyedDenseSource(pm, ti, cfg) if cfg.keyed else ml.DenseSource(pm, ti)
         sim = Sim(geo, pm, np.random.default_rng(a.seed + p), src=src)
         sim.late_extra = MEASURED_EXTRA
-        if a.truth == "poly":
+        if a.truth in ("poly", "polyc"):
             sim.true_poly, sim.head_u = True, HEAD_U
         lat = []
         orig = ml.decide
@@ -169,7 +173,7 @@ def run(a) -> int:
     res["seconds"] = round(time.time() - t0, 1)
     a.out.mkdir(parents=True, exist_ok=True)
     sd = f"_s{a.seed}" if a.seed != 57 else ""
-    tr = "_tpoly" if a.truth == "poly" else ""
+    tr = {"poly": "_tpoly", "polyc": "_tpolyc"}.get(a.truth, "")
     (a.out / f"rescore_{a.variant}{sd}{tr}_p{lo}-{hi}{'_quick' if a.quick else ''}.json").write_text(
         json.dumps(res, indent=1, default=float), "utf-8")
     return 0
@@ -282,8 +286,9 @@ def main(argv=None) -> int:
     s_.add_argument("--ready-ref", type=float, default=None)
     r = sub.add_parser("run")
     r.add_argument("--variant", required=True)
-    r.add_argument("--truth", choices=("box", "poly"), default="box",
-                   help="poly (SG7): the closed loop's damage on the hammer's polygons and the HeroBox's head")
+    r.add_argument("--truth", choices=("box", "poly", "polyc"), default="box",
+                   help="poly (SG7): the closed loop's damage on the hammer's polygons and the HeroBox's head; polyc "
+                        "(SG7 review): also the hammer carried one frame into the next state (the physics order)")
     r.add_argument("--phases", default="0-5")
     r.add_argument("--quick", action="store_true")
     r.add_argument("--lam", type=float, default=0.02)

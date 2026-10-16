@@ -255,12 +255,16 @@ class MapHelper:
             mem["x0_prev"] = mem["x0"]
         x0 = mem["x0"]
         info.update(k=k0, x0=round(x0, 3), face=face)
-        # SG7: the stage entries seen (the tracker's state start: back-dated by the time in state when first seen;
-        # the map's clock, k_shift off) and the slam's map (a wall bucket near a wall)
-        ks = int(getattr(rs, "k_shift", 0) or 0)
+        # SG7: the stage entries seen (the tracker's state start: back-dated by the time in state when first seen)
+        # and the slam's map (a wall bucket near a wall). SG7 review (forum.md 63.5): the entries in game time x 60,
+        # not rounded (half frames at 120 fps / x0.5); the observation is at the tracker's frame (st_ and st_t0 are the
+        # tracker's now: k_trk), so neither carries k_shift (the planner origin's offset from the tracker)
         seen = mem.setdefault("seen", {})
         if st_ in STAGES and st_ not in seen and t0_ is not None and getattr(inst, "st_t0", None) is not None:
-            seen[st_] = int(round((float(inst.st_t0) - float(t0_)) * 60.0)) - ks
+            seen[st_] = round((float(inst.st_t0) - float(t0_)) * 60.0, 3)
+        k_obs = float(k_trk)
+        if T_ is not None and t0_ is not None:
+            k_obs = (float(T_) - float(t0_)) * 60.0
         if getattr(rt, "stage", None):
             rt_b, why_b = self.runtime_for(x0, face)
             if why_b is None:
@@ -270,7 +274,11 @@ class MapHelper:
             info["why"] = mem["exit"]
             return None
         if getattr(rt, "stage", None):
-            ok_v = rt.observe(seen, k0, smrt.OBS_LAT)
+            # SG7 review: off the 60 Hz grid once (120 fps / x0.5 / a part frame), no stage rows for this slam
+            if smrt.off_grid(k_obs) or any(smrt.off_grid(v) for v in seen.values()):
+                mem["obs_off"] = True
+            ok_v = rt.observe(None if mem.get("obs_off") else seen, k_trk, smrt.OBS_LAT, k_frac=k_obs)
+            info["obs_off"] = bool(mem.get("obs_off"))
             info["seen"] = dict(seen)
             info["nv"] = len(ok_v)
         dev = 0.0 if st_ == ANTIC else rt.deviation(k_trk, float(e["pos"][0]), x0, face)

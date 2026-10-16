@@ -37,7 +37,7 @@ def setup(cfg: sm.MapConfig | None = None):
     params, terrain = load_kin()
     hm = HeroMacros(params, terrain)
     cfg = cfg or sm.MapConfig()
-    spec = load_cl_slam(poly=cfg.poly)
+    spec = load_cl_slam(poly=cfg.poly, carry=cfg.carry)
     geo = sm.Geometry(spec, hm, cfg)
     return geo
 
