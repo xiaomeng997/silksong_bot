@@ -156,17 +156,25 @@ def test_focus_switch_after_the_others_attack(monkeypatch):
 
 def test_side_two_away(monkeypatch):
     # the struck one at 31 facing left (the hero in front at 26); the other at 20, idle: the landing between them (27.3)
-    # is 7.3 u from it: TWO_SIDE lands on the far side (behind the struck one, +x); busy or far: between them (-x)
+    # is 7.3 u from it: TWO_SIDE lands on the far side (behind the struck one, +x: 14.7 u from it); busy or far:
+    # between them (-x); closer: the far side's dash way out
     monkeypatch.setattr(sp, "TWO_SIDE", True)
+    monkeypatch.setattr(sp, "SIDE", True)
+    monkeypatch.setattr(sp, "NEAR", True)
     p = sp.SlamPlay(sp.PlayCfg())
     s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Idle")
     r = sp.Run(iid=7, fa=950, face=-1)
     e = next(o for o in s["ents"] if o["iid"] == 7)
     assert p._side_pref(r, s, e, 31.0) == (1, "two-away")
-    s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Slam Antic")
+    s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Cast 2")
     assert p._side_pref(r, s, e, 31.0) == (-1, "two")
     s = two_state(1000, 60, hx=30.0, ox=10.0, ost="Idle")
-    assert p._side_pref(r, s, e, 31.0) == (-1, "two")
+    assert p._side_pref(r, s, e, 31.0) == (-1, "two")              # 21 u apart: between them is out of its reach
+    s = two_state(1000, 60, hx=30.0, ox=25.0, ost="Slam Antic")
+    assert p._side_pref(r, s, e, 31.0) == (1, "two-far")           # 6 u apart: 3.7 u behind is in its reach too
+    # NEAR's decision: two-far -> SP1's dash way out on that side (room 18 u behind it)
+    r.ks0, r.near = 0, None
+    assert p._near(r, 12, 1000, s, e, 31.0) == 0 and r.near == 0 and r.over_dir == 1 and r.side_why == "two-far"
     monkeypatch.setattr(sp, "TWO_SIDE", False)
     s = two_state(1000, 60, hx=30.0, ox=20.0, ost="Idle")
     assert p._side_pref(r, s, e, 31.0) == (-1, "two")

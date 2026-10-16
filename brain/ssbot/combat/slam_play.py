@@ -175,8 +175,12 @@ TWO_RUNE = (-1.2, 14.2, 1.45)   # the rune circle's span from the landing along 
 # hammer 12.5 u + the lunge 3.6 u), land on the far side of the struck one (behind it, NEAR's clearance and room rules
 # still apply; else in front as before).
 TWO_SIDE = _on("SSBOT_FORUM_TWO_SIDE")
-TWO_FREE_ST = ("Idle", "Walk", "Evade Scuttle", None)
-TWO_FOLLOW_U = 16.0
+TWO_FREE_ST = ("Idle", "Walk", "Evade Scuttle", "Slam Antic", None)   # free, or its slam already begun
+TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre now (12 u with the lunge; slam_out_u 13: 0
+#                             hits in 1v1). t2 (ab30fbf, NEAR's 3.7 u on the far side): 24 of 25 struck slams safe, but
+#                             13 of 17 slams not struck lost HP, most of them started while she was still in the bounce
+#                             7.4-8.3 u from the slammer: with the other one closer than 3.7 + 13 u the far side's 3.7 u
+#                             is in its reach too -> "two-far": SP1's dash way out on that side (lands 6.6-9.5 u out)
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -644,11 +648,13 @@ class SlamPlay:
                 d = 1 if ox > cx else -1
                 if TWO_SIDE:
                     # SP7: the other one free (it may start a slam the moment this one's Slam 1 ends: its hammer ~10
-                    # frames after her landing) and its reach covering the landing between them: land on the far side
+                    # frames after her landing) and its reach covering the landing between them: land on the far side,
+                    # NEAR's 3.7 u when that is out of its reach, else SP1's dash way out (6.6-9.5 u from this one)
                     o = min((o for o in clappers(s) if o.get("iid") != e.get("iid")),
                             key=lambda o: abs(float(o["pos"][0]) - cx))
-                    if control(o)[0] in TWO_FREE_ST and abs(ox - (cx + d * self.cfg.near_u_front)) < TWO_FOLLOW_U:
-                        return -d, "two-away"
+                    sep = abs(ox - cx)
+                    if control(o)[0] in TWO_FREE_ST and sep - self.cfg.near_u_front < TWO_REACH_U:
+                        return -d, ("two-away" if sep + self.cfg.near_u_behind >= TWO_REACH_U else "two-far")
                 return d, "two"
         dl, dr = cx - WALL_L, WALL_R - cx
         if dl == dr:
@@ -685,6 +691,12 @@ class SlamPlay:
                 return 0
             # off: behind first (SP1's way out), in front when that does not fit
             pref, why = self._side_pref(r, s, e, cx) if SIDE else (-r.face, "behind")
+            if why == "two-far":
+                # SP7 TWO_SIDE: SP1's dash way out on that side (kept: the other one may be in its antic by Slam 0 + 20)
+                room = (lambda d: (cx - WALL_L) if d < 0 else (WALL_R - cx))
+                r.near, r.side_why = 0, why
+                r.over_dir = next((d for d in (pref, -pref) if room(d) >= c.over_room), 0)
+                return 0
             x_rel = (hero_x(s) - cx) * r.face
             fits = {}
             for d in (pref, -pref):
