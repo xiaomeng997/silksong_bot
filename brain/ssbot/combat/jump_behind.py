@@ -84,6 +84,13 @@ def _sub(name: str) -> bool:
     return ENABLED and _on(name, "1" if _on("SSBOT_FORUM_V2") else "0")
 
 
+# SSBOT_FORUM_JB_WALK (task 1v1 SP6, default off, only with ENABLED; forum.md 70): in the flight, when a walk gets her
+# past its back by the time its body comes down to her head (aim + walk_end_f), the planner's safe rows with a dash key
+# rank after the rest (GoalPrefs.no_dash): she walks behind and can slash on the way. Both jumps fly the same arc (vy
+# 36.3, apex 9.07 u above the floor at aim +26-27, 55 frames; SP6 jump_fams.json): it lands 5.27 u (p10 4.73) in
+# front of her, so the walk (0.1375 u / frame; her air speed measured the same) fits only when the landing comes
+# nearer than ~5.0 u - a short jump, a wall push.
+WALK = ENABLED and _on("SSBOT_FORUM_JB_WALK")
 PASS_HIT = _sub("SSBOT_FORUM_JB_PASS")
 LAND_HIT = _sub("SSBOT_FORUM_JB_LAND")
 NO_JUMP = _sub("SSBOT_FORUM_JB_NOJUMP")
@@ -107,6 +114,9 @@ NUM = {
     #                        2.25 u: a 1.8 u gap, inside the side slash's reach; it jumps 0.6 u back from there)
     "cast_slash_s": 0.62,  # ... until this long after the antic start (aim at +55 frames = 0.92 s; 1.2 u back to
     #                        aim_u takes 9 frames)
+    "walk_v": 0.1375,      # SSBOT_FORUM_JB_WALK: her walk (u / frame; the air the same: SP6, 104 way-outs)
+    "walk_end_f": 50,      # ... past its back by aim + this (its body's bottom 2.4 u above the floor at +50)
+    "walk_clear_u": 1.87,  # ... behind the landing centre: its back 1.34 + her half width 0.23 + 0.3
 }
 BODY_TOP_U = 3.92          # the standing body's top above the floor (Idle box y 3.01-6.92)
 
@@ -177,3 +187,11 @@ def aim_spot(x: float, front: float, cfg: dict | None = None) -> float:
     u = c["aim_wall_u"] if room0 < c["push_from_u"] else c["aim_u"]
     v = x + front * u
     return min(max(v, WALL_L + c["wall_pad_u"]), WALL_R - c["wall_pad_u"])
+
+
+def walk_fits(hx: float, land: float, face: int, since_aim_f: float) -> bool:
+    """SSBOT_FORUM_JB_WALK: the hero at hx, the landing at land (its jump facing face), since_aim_f frames after its Jump
+    Aim: a walk from here gets her walk_clear_u behind the landing by aim + walk_end_f."""
+    c = CFG
+    need = (hx - land) * face + c["walk_clear_u"]
+    return need <= c["walk_v"] * (c["walk_end_f"] - since_aim_f)

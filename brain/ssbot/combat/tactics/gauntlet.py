@@ -942,6 +942,15 @@ class GauntletTactics:
             if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
                 # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
                 out = replace(out, ground_first=frozenset({g.target}))
+        if (jump_behind.WALK and s is not None and s.type_key == CLAPPER and how_s == "jump: under and behind (flight)"
+                and s.iid in self.jb_land):
+            # SSBOT_FORUM_JB_WALK (SP6): a walk gets her past its back in time: no dash (she can slash on the way)
+            x0, f0, land, _ = self.jb_land[s.iid]
+            aim_f = 30.0 if s.family == CC_JUMP else 55.0
+            since = (self._t - self.t_commit.get(s.iid, self._t)) * 60.0 - aim_f
+            if (hx - land) * f0 > 0 and jump_behind.walk_fits(hx, land, int(f0), since):
+                out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
+                self.stats["jb_walk"] = self.stats.get("jb_walk", 0) + 1
         if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
                 and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it

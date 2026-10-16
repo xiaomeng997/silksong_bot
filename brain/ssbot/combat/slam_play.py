@@ -212,6 +212,7 @@ class PlayCfg:
     #                                  after a hit she is ~1 u farther: 4.8 + 1 inside BAND at the jump)
     early_cd: int = 19               # frames between two early presses (the Wanderer attack cooldown 0.3 s = 18 + 1)
     early_quiet: int = 3             # no key away from it this many frames before / after an early press
+    early_post_stand: tuple = (4.2, 4.9)   # the walk band after an early press (the jump BAND unchanged)
     early_near_v: float = 0.138      # NEAR's behind clearance under EARLY: her measured air speed (u / frame) ...
     early_cross_u: float = 2.3       # ... and the distance past its centre by Slam 0 + near_cross_s0 (x at Slam 0 + 10
     #                                  <= 1.84 u in front: t1's failures 1.99 / 2.09, SP5's behind successes 0.2-2.13)
@@ -695,6 +696,12 @@ class SlamPlay:
         last = r.k_early[-1] if r.k_early else None
         if last is not None and k == last + 1:
             return M_A | toward                    # the press's second frame
+        if last is not None and not r.stand:
+            # after an early press the walk into early_post_stand: a hit's recoil (~0.5 u over 8 frames, on into the
+            # jump when it came after antic frame ~18) and its knock-back (0.48 u) put her ~0.9 u farther at the
+            # press (t2, ba5502e: x at the press 5.66-5.86 u after hits at 15-22 vs 4.86 without; the one hammer
+            # hit pressed from 5.78 u at Slam 0 - 1)
+            m_walk = self._walk(s, cx, r.face, f, band=c.early_post_stand)
         quiet = last is not None and k - last <= c.early_quiet
         if not ground or k > c.early_k_max:
             return 0 if quiet and m_walk & away else m_walk

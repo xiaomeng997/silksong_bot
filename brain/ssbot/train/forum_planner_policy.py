@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import forum_v2, slam_play
+from ssbot.combat import cast_stab, forum_v2, slam_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -215,6 +215,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SSBOT_FORUM_SLAM_PLAY=1 (task 1v1 SP1, forum.md 65): the person's slam strike as a fixed playbook; None (the
         # default): nothing changes
         self.slam_play: slam_play.SlamPlay | None = slam_play.SlamPlay() if slam_play.ENABLED else None
+        # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab)
+        self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
         self._play_tick: dict | None = None
 
     @staticmethod
@@ -419,6 +421,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.cog = {"throws": [], "used": Counter(), "hold": 0, "last_t": -math.inf, "frames": set()}
         if self.slam_play is not None:
             self.slam_play.reset()
+        if self.cast_stab is not None:
+            self.cast_stab.reset()
         self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
@@ -751,6 +755,16 @@ class ForumPlannerPolicy(PlannerPolicy):
             if play is not None:
                 mask = play
                 self.counts["slam_play"] += 1
+        if self.cast_stab is not None and play is None:
+            # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
+            stab = self.cast_stab.step(f, s, ws.hero.contact.v == "GROUND",
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)))
+            if stab is not None and (r.mask is not None or self.pause_owned):
+                self.cast_stab.abort("supervisor")
+                stab = None
+            if stab is not None:
+                mask = play = stab
+                self.counts["cast_stab"] += 1
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
@@ -946,4 +960,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
                 "real_quit": self.real_quit_stats(), "keys": keys,
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
-                **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {})}
+                **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
+                **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {})}

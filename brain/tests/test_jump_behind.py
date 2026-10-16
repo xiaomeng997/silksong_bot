@@ -288,3 +288,13 @@ def test_enabled_default_follows_v2():
     assert enabled({}) == "0"
     assert enabled({"SSBOT_FORUM_V2": "1"}) == "1"
     assert enabled({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_JUMP_BEHIND": "0"}) == "0"
+
+
+def test_walk_fits_sp6():
+    # SP6 SSBOT_FORUM_JB_WALK: walk_v 0.1375 u / frame to walk_clear_u 1.87 behind the landing by aim + 50
+    from ssbot.combat import jump_behind as jb
+    assert jb.walk_fits(30.0 + 5.0, 30.0, 1, 0.0)              # 6.87 u in 50 frames: 6.875
+    assert not jb.walk_fits(30.0 + 5.27, 30.0, 1, 0.0)         # the usual landing 5.27 u in front: no
+    assert not jb.walk_fits(30.0 + 3.0, 30.0, 1, 20.0)         # 4.87 u in 30 frames: no
+    assert jb.walk_fits(30.0 - 2.0, 30.0, -1, 10.0)            # facing left: 3.87 u in 40 frames: yes
+    assert jb.WALK is False                                    # default off
