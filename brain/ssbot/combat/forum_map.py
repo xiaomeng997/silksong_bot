@@ -384,6 +384,27 @@ class MapHelper:
         for p in p_end:
             R = np.minimum(R, rt.readiness_rows(p, xm, kd, gnd, yb, yp))
         R[glide] = 0.0
+        if CHASE:
+            # SG5: a row ending in a ground swing: the hero is locked until the swing ends (attack_duration), so a
+            # slam starting at the row's end meets her free only k_lock frames into its antic: the map's value there
+            fl = r1.flags[idx]
+            att = (fl[:, -1] & kin.F_ATTACKING) != 0
+            if att.any():
+                n_att = np.zeros(len(idx), np.int64)                  # trailing swing frames at the end
+                run_ = att.copy()
+                for j in range(fl.shape[1] - 1, -1, -1):
+                    run_ &= (fl[:, j] & kin.F_ATTACKING) != 0
+                    if not run_.any():
+                        break
+                    n_att += run_
+                att_f = int(round(float(getattr(self.pl.params, "attack_duration", 0.25)) * 60.0))
+                for i in np.flatnonzero(att & gnd & np.isfinite(R)):
+                    kl = max(0, att_f - int(n_att[i]))
+                    if kl > 0:
+                        v = min(rt.srcs[p].S(kl, 0, float(xm[i]), int(kd[i])) if rt.keyed else
+                                rt.srcs[p].S(kl, 0, float(xm[i])) for p in p_end)
+                        R[i] = min(R[i], v)
+                self.swing_rows = int(att.sum())
         ref = rt.ready_ref
         pen = smrt.READY_W * np.maximum(0.0, ref - np.where(np.isfinite(R), R, 0.0))
         out_ = np.isneginf(R)

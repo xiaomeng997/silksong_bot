@@ -173,3 +173,39 @@ def test_readiness_while_it_evades_and_the_chase_spot(setup, monkeypatch):  # no
     assert h.readiness(f2, start, r1, cmd, 0, 2) is not None and h.ready_cx == pytest.approx(cx)
     assert lo - 1e-6 <= forum_map.BOARD[7]["chase_x"] - cx <= hi + 1e-6
     assert rt.READY_RANGE_U > hi
+
+
+def test_readiness_of_a_row_ending_in_a_swing(setup, monkeypatch):  # noqa: F811
+    """CHASE: a ground row ending mid-swing meets a slam starting then only when the swing ends: the map's value k_lock
+    = attack_duration - the swing's frames so far into the antic (never above the free hero's)."""
+    from ssbot.combat import forum_map
+    from ssbot.combat.hero_macros import ALPHAS
+    h, R = _helper(setup)
+    params = setup["params"]
+    cx, T = 40.0, 36
+    xs = np.array([cx + 4.5, cx + 4.5, cx + 6.0])
+    box = np.zeros((3, T + 1, 4))
+    y0 = setup["hm"].stand_y0
+    for i, x in enumerate(xs):
+        box[i, :, 0], box[i, :, 2] = x - 0.25, x + 0.25
+        box[i, :, 1], box[i, :, 3] = y0, y0 + 1.3
+    flags = np.full((3, T + 1), kin.F_GROUND, np.int64)
+    flags[1, -4:] |= kin.F_ATTACKING                              # 4 frames into a swing at the end
+    flags[2, -1:] |= kin.F_ATTACKING
+    r1 = NS(box=box, flags=flags, mode=np.zeros((3, T + 1), np.int64))
+    cmd = np.zeros((3, T), np.int64)
+    start = kin.initial_state(params, cx + 4.0, setup["hm"].stand_py, facing=-1, ground=True, alpha=ALPHAS[0])
+    f, _ = _mock(cx, "Idle", 0.3)
+    monkeypatch.setattr(forum_map, "CHASE", False)
+    _, R0 = h.readiness(f, start, r1, cmd, 0, 0)
+    assert R0[0] == R0[1]                                         # SG4: the swing is not looked at
+    monkeypatch.setattr(forum_map, "CHASE", True)
+    _, R1 = h.readiness(f, start, r1, cmd, 0, 1)
+    att_f = int(round(params.attack_duration * 60))
+    from ssbot.combat import special_map_rt as rt
+    S0 = np.asarray(start).reshape(kin.K, -1)[:, 0]
+    p_end = sorted({(q - T) % 6 for q in rt.phases_of(float(S0[kin.ALO]), float(S0[kin.AHI]), 0)} & set(R.srcs))
+    for i, n in ((1, 4), (2, 1)):
+        v = min(R.srcs[p].S(att_f - n, 0, float(xs[i] - cx), 0) for p in p_end)
+        assert R1[i] <= R0[i] + 1e-9 and R1[i] == pytest.approx(min(R0[i], v))
+    assert R1[0] == R0[0] and h.swing_rows == 2
