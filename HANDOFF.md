@@ -7757,3 +7757,142 @@ Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON restored
 5. Umbrella openings (the jump key in the air) are a planner habit in every arm (block a: rn 33, rnplay 20, rnplay6
    33); two of the QUIT episode's hits came with the umbrella open (no attack / dash for 26-29 frames).
 6. SP3 (the person): after the Clapper jumps, go behind it - not started.
+
+## Task 1v1 - stage SP3: after the Clapper jumps, go behind it (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §67)
+
+The person's request (main cff3da1): after the Clapper jumps (jump slam CC_JUMP, jump cast CC_JUMP_CAST) go behind it,
+do not flee; even with its back to the wall it moves forward when it jumps and leaves a spot behind it. Distances are
+centre to centre (the hero's box centre, the Clapper's transform), + = the side the jump faces (it faces the hero at
+the antic), "behind" the other side; frames from its Jump Aim (the first Jump / Air STATE) or from the landing (the
+first Slam 2).
+
+### Facts (`ssbot.tools.sp3_jumps collect / report / trials`; `C:\ssbot\data\m2_play\sp3`: jumps_sp2 / _g / _s2 = every
+live 1v1 recording before SP3, 554 episodes, 1,819 jumps; human_jumps.json / human_sum.json = the person's 19 jumps of
+the 10-15 demo; facts.txt)
+
+- The landing is 5.27 u (p10 / 90 4.73 / 5.66) in front of the hero's x at its Jump Aim: landing = take-off + 0.916 vx
+  (vx of the first Air frame), error p50 0.12 / p90 0.45 u off the walls. From 5 u it jumps in place.
+- Timing: aim at antic +30 (jump slam) / +55 (jump cast) STATE frames; flight 55 frames (43-47 when it meets the wall-top
+  ledge); Slam 2 ~5 + Slam Recover ~15 frames, Idle at landing +20.
+- Arc (its body box bottom above the floor, frames from the aim): 2.9 u at +3, 5.7 at +9, 8.2 at +18, apex 9.05 at +27,
+  8.0 at +36, 6.3 at +42, 4.8 at +45, 3.7 at +48, 2.4 at +50, landing +55. A standing HeroBox top is 2.30 u above the
+  floor: with 0.5 u margin the body is over her head from +4 to +48.
+- Hurt shapes relative to the landing (+ front): Slam Collider 2 (polygon) 0.67..7.76 u in front only (Slam 2); body in
+  Slam 2 -1.27..+3.49; Slam Recover back edge p50 -1.19, min -1.83; at Idle it turns to a hero behind it: its front then
+  reaches -2.25 u (p1; min -2.87). Rune circle: centre +6.48 (some +6.75), r 7.187, back edge -0.71 (-0.44), lit 63-86
+  frames after the landing (p50 65-72).
+- Walls: no landing nearer than 3.01 u to the wall behind it (p1 4.42, p5 5.43). Taking off with its centre within 4 u of
+  that wall (its back 0-2.7 u from it; 335 jumps): >= 3.35 u, p5 4.58, p50 6.7 - the arc meets the wall-top ledge, lands
+  2-13 frames early and is pushed out (the person's observation). Exception: the hero within 5-6 u at its aim (it jumps
+  in place or back): 3 of 23 landed 3.35-3.7 u from the wall; from >= 6 u never nearer than 4.16 u (302).
+- Speeds: run 8.25 u/s; ground dash 28 u/s for 0.1 s then the sprint toward 17.5 u/s; air dash ~5 u in 0.25 s. From 5 u
+  in front to clear its back edge with margin (-2.1 u) is 7.1 u relative: 52 frames running (the window ends at +48):
+  a dash is needed.
+- The person (19 jumps, 0 HP lost): 8.4-10 u at the antic, walks in to 4.2-7.7 u (p50 5.2) by the aim, it jumps nearly
+  in place; a ground dash (or an air dash from a jump) at aim +15..27 then the sprint, passing its centre at aim +23..37
+  (its apex; clearance 3.2-7 u); behind it at the landing 17 of 19 (3.0-5.1 u, p50 3.7; the 2 others were 15 u away at
+  the aim); at the wall (4.5 / 5.2 u of room) against the wall. Next move: evade 9, slam 9, cast 1.
+- The bot's old way round (S2's L2 "under and behind", 304 jumps ending behind the landing): HP lost in 17.4 % (front
+  4.2 %): the next slam's hammer 25, **its turn at Idle onto a hero 2.0-2.5 u behind it 17**, the Air body 4, evade 2,
+  too close in the antic 2. SP2's arms (rn / rnplay / rnplay6) were 9-16 u in front at the landing (p50 12.4), 0.1-0.4
+  hits / s in the jump families.
+
+### Code (`SSBOT_FORUM_JUMP_BEHIND=1`, default off; `SSBOT_FORUM_JUMP_BEHIND_SET="aim_u=5.5,back_u=3.5,..."`)
+
+- `ssbot/combat/jump_behind.py`: the switch, CFG (aim_u 5.5, aim_wall_u 7, back_u 3.5, min_back_u 3.1, wall_back_u 3,
+  wall_push_u 4.4 / push_from_u 4, wall_pad_u 0.5, turn_u 2.3), `landing` / `landing_v` / `wall_rule`, `behind_spot`,
+  `aim_spot`.
+- L2 (`GauntletTactics._jump_behind`, gauntlet.py): antic -> 5.5 u in front (7 u with its back within 4 u of a wall);
+  past the antic -> 3.5 u behind the landing (stored on the first tick past the antic from the take-off x and the first
+  Air vx, else the hero's x; the wall rule; never short of where it is when pushed forward past its take-off); landed ->
+  behind its own x; no room behind (< 3.6 u to the wall) -> the old back-off. Rune hold after a jump cast: behind the
+  landing -> stay there; in front -> the nearer way out of the circle, not past its body; the circle on the jump's own
+  facing (Idle has turned it). Stats `l2.jb` (ticks per branch).
+- Ranking: `forum_v2.corner_zones` skips a Clapper in a jump move; `GoalPrefs.no_hit` (antic, flight, back-off,
+  rune-out: its hits count for neither J nor the landed-hits rank nor the first-hit rank; the hit branch keeps them);
+  `GoalPrefs.ground_hit` (idle / walk / evade / landed / rune-behind: only swings pressed on the ground count; kernel
+  arg `gonly`); `forum_v2.jb_dash_free`: a row dashing at the Clapper in its flight / landing reads the focus margin, not
+  the flier "rule" margin.
+- Planner estimate (`attack_range.RangeTracker.estimate`): from the landing on (Slam 2 / Slam Recover), its standing body
+  of either facing (+-2.3 u, floor to 3.92 u): the turn at Idle.
+- Slam playbook (`slam_play._try_start`): between it and a wall with the 4.6 u stand point outside the arena, a stand band
+  from 3.7 u (band at the jump from 3.6; SP1 it3: 3.6-7.25 u all succeeded).
+- Arms (`C:\ssbot\sandbox\1v1_arms.txt`): `rnjb` = rnplay + JUMP_BEHIND; `rnjbT` = rnjb + SSBOT_FORUM_SLAM_PLAY_STANCE=9.5
+  (the trial arm: it stands 9.5 u away while the Clapper idles, so it picks far moves).
+- Tests `tests/test_jump_behind.py` (17).
+
+### Targeted live trials (instances 0 / 1, 1x; rnjbT; every jump a trial: safe = no HP lost from the antic to the move's
+end + 60 frames (a jump cast: to the rune circle's last lit frame + 10); behind = behind the landing at the landing frame)
+
+| round | code | eps | jumps (slam / cast) | safe | behind (p50 x at landing) | hits landing .. end + 60 (from behind) | the failures, and the change after |
+|---|---|---|---|---|---|---|---|
+| t1 | 5442ece | 6 | 20 (10 / 10) | 20 | 18 (-4.0 u) | 43 (8) | two in front, safe: back-to-wall take-offs whose formula landing was nearer the wall -> the wall push (974114b) |
+| t2 | 974114b | 12 | 45 (24 / 21) | 42 | 41 (-4.2) | 91 (12) | 3 hits, all airborne in front of it: rows slashing it in the air won the hits rank (umbrella, landing slam); the rune hold judged "behind" from the Clapper's current x and sent her back through the circle -> no_hit, the rune exit by the landing (33af2ab) |
+| t3 | 33af2ab | 16 | 81 (50 / 31) | 80 | 78 (-3.4) | 160 (71) | 1: in front at 4.6 u at the landing (landing slam); 9 of 56 slams began with her bouncing off a pogo (3 hammer hits) -> ground_hit (88ea445) |
+| t4 | 88ea445 | 12 | 56 (29 / 27) | 55 | 54 (-3.5) | 115 (45) | 1: a back-to-wall jump cast, in front, short of the circle's front edge; slams with no landing 1 of 29 |
+| t5 | 8ed2633 | 10 | 41 (23 / 18) | 41 | 41 (-3.5) | 86 (35) | none; the 6 back-to-wall take-offs all behind (6.5-8.8 u at the aim, landing 5.1-7.1 u from the wall) |
+| all | | 56 | 243 (136 / 107) | 238 (97.9 %) | 232 (95.5 %) | 495 (171) | |
+
+- How she gets there (t3 + t4, 137 jumps): 5.66 u in front at the aim (p10 / 90 5.33 / 8.52); 132 pass its centre at aim
+  +18 / 21 / 29 (p10 / 50 / 90), 76 in a ground dash (Dash To Run), 48 in an air dash (Sprint Air); clearance p10 3.3 u;
+  behind at the landing 3.26-3.59 u (p50 3.44). 275 hits from the landing to the move's end + 60 (2.0 per jump), 116 from
+  behind (SP2's rnplay: 0.35 per jump, none from behind). Its next move: evade 62, cast 34, slam 27, with her 3.4-4.4 u
+  in front.
+- Per episode the trial arm lost HP before the kill 1 / 6 / 5 / 3 / 3 times per round, mostly slams the playbook did not
+  take (she was in the air at the antic) and small runes; its 9.5 u idle stance adds to that. The A/B uses rnjb.
+
+### Full 1v1 A/B (rnplay vs rnjb; 8 episodes per arm per block, two instances; block a on 88ea445, block b on 8ed2633)
+
+Manifests `C:\ssbot\sandbox\1v1sp3ab_manifest.txt` (block a, seeds 920000 / 930000) and `1v1sp3abb_manifest.txt`
+(block b, 940000 / 950000), the arm order alternating per instance and block; analysis in `C:\ssbot\data\m2_play\sp3\ab`
+(`slam_play_ab` ab*.json, `sp3_jumps` jumps_ab*.json / trials_ab*.json, `forum_remaining_hits collect` col / col_b,
+`sg4_budget --live` budget_*, stats_all.py / .txt).
+
+| | rnplay | rnjb |
+|---|---|---|
+| episodes / kills | 16 / 16 | 16 / 16 |
+| HP-hitless episodes | 14 (7 / 7) | 13 (6 / 7) |
+| HP hits before the kill | 2: hammer 2 (slams not taken: airborne no landing, a late press) | 3: landing slam 1 (block a's back-to-wall jump cast; fixed in 8ed2633), hammer 2 (slams not taken: airborne no landing, sprint skid) |
+| kill time p10 / 50 / 90 (s) | 26.9 / 33.4 / 39.4 | 21.2 / 24.9 / 30.4 |
+| landed hits / s while fighting | 0.691 (a 0.628 / b 0.767) | 0.861 (0.880 / 0.842) |
+| jumps / behind / HP lost / hits per jump (landing .. end + 60) | 39 / 1 / 0 / 0.26 | 36 / 35 / 1 / 1.9 |
+| jump slam h/s (distance p50) | 0.143 (11-12 u) | 0.547 (3.9 u) |
+| jump cast h/s | 0.460 (8.6-8.8 u) | 0.424 (4.7-5.0 u) |
+| idle / walk h/s | 0.071 (23.8 % of the time) | 0.090 (16.4 %) |
+| slam h/s (down slashes) | 0.786 (82) | 0.908 (46) |
+| small runes h/s | 1.630 | 1.678 |
+| evade h/s | 0.769 | 0.905 |
+
+- Bootstrap (episodes resampled, 90 %): rnjb - rnplay landed / s +0.171 (+0.097 .. +0.241), kill time p50 -8.45 s
+  (-11.1 .. -5.7): neither touches 0.
+- The jump cast's hits did not rise: no hit counts in its 55-frame antic under JB (no_hit; rnplay sometimes slashes it
+  there from the front), and the hits from behind are offset by the rune hold. Slams: 54 vs 93 (shorter fights), 1.26 vs
+  1.03 hits per slam.
+
+### Switch-off identity
+
+Each tested commit (5442ece, 974114b, 33af2ab, 88ea445, 8ed2633), from its frozen checkout: 192006 i0 ep1 2,073 / 2,073
+and 193808 i1 ep0 3,183 / 3,183 ticks byte-identical to SP2's head (rn) and play (rn + SLAM_PLAY) files
+(`C:\ssbot\data\m2_play\sp3\replay_<sha>`, `replay_ident_<sha>.ps1`); JB on open loop: no errors.
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON renamed back after every block; no game process
+touched. Frozen checkouts `C:\ssbot\live_1v1_{5442ece,974114b,33af2ab,88ea445,8ed2633}` (all warm). Manifests
+`C:\ssbot\sandbox\1v1sp3t_manifest.txt`, `1v1sp3t2..t5`, `1v1sp3ab_manifest.txt` (block a), `1v1sp3abb_manifest.txt`
+(block b); wrapper `sp3_block5.ps1`.
+
+### Next
+
+1. The default arm is the person's call: rnjb vs rnplay -8.5 s per kill and +0.17 landed hits / s (intervals clear of
+   0), one more HP-hit episode in 16 (3 vs 2); its one jump-caused hit (the back-to-wall jump cast) is fixed in 8ed2633.
+2. Most HP loss left (both arms): slams the playbook does not take - she is in the air at the antic (a pogo bounce, a
+   jump slash) and does not land in time, or a sprint skid takes input away. Next: SP1 item 2 (no planner dash + run
+   when a slam can start) and an airborne start for the strike, fixed-point first.
+3. No hit counts in the jump antic under JB: try allowing ground side slashes only (5.5 u is at the edge of the reach)
+   and see whether the jump cast's hits rise.
+4. The turned body is in the estimate only from a jump's landing; an idle Clapper also turns to a hero behind it at its
+   next attack start (2.25 u), not modelled in general.
+5. Back-to-wall take-offs tested on 8ed2633 only 7 times (all behind); the person stands against the wall (4.5-5.2 u
+   landings), the bot now stands 7 u away at the antic so it jumps 1.8 u forward.
+6. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
