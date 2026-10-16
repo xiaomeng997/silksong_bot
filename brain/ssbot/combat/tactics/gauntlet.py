@@ -83,7 +83,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from ssbot.combat import rune_bombs, slam_play, special_board
+from ssbot.combat import jump_behind, rune_bombs, slam_play, special_board
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
@@ -283,6 +283,8 @@ class GauntletTactics:
         #                                                   "guard", "edge" are read here (the policy sets them)
         self._whips: frozenset = frozenset()              # iids of the Choristors whipping on the last tick
         self._strike: dict[int, tuple[float, float]] = {}  # Clapper iid -> (game time, x) of the last "slam: strike"
+        self.jb_land: dict[int, tuple[float, float]] = {}  # SSBOT_FORUM_JUMP_BEHIND: Clapper iid -> (landing x, facing)
+        #                                                    of its jump, from the first tick past the antic
 
     @property
     def xs(self):
@@ -294,6 +296,7 @@ class GauntletTactics:
         self.jfam, self.rune = {}, {}
         self._whips = frozenset()
         self._strike = {}
+        self.jb_land = {}
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -356,6 +359,8 @@ class GauntletTactics:
             # behind it means through its body on the ground (round 2, live w13: 7 body hits that way): as far out
             # as the wall lets (the hammer reaches 12 u in front: the farther the likelier it misses)
             return self._clamp(out), frozenset(), "slam: out to the wall"
+        if fam in (CC_JUMP, CC_JUMP_CAST) and jump_behind.ENABLED:
+            return self._jump_behind(ws, s, x, hx, front, side, fam)
         if fam in (CC_JUMP, CC_JUMP_CAST):
             land = jump_landing(x, hx, front)              # from where both are now (module docstring)
             behind = land - front * r.behind_land_u
@@ -384,6 +389,15 @@ class GauntletTactics:
             # front) is inside it. Stay behind the landing (where the way round went, not through its body) or out
             # past it (round 3: v4 w7 took 20 of its hits there, the controller back at the face)
             land, f0, how, _ = rp
+            if jump_behind.ENABLED:
+                # SSBOT_FORUM_JUMP_BEHIND (SP3): BACK_U behind the landing (behind_land_u 2.5 u is inside the reach of
+                # its body turning at its next attack start: 2.25 u + the hero's half width), inside the walls by the
+                # module's pad (the landing is >= 4.5 u from the wall behind it)
+                jb_spot = jump_behind.behind_spot(land, f0)
+                through = jb_spot is not None and (jb_spot - x) * (hx - x) < 0
+                if jb_spot is not None and not through and how.startswith("under"):
+                    return jb_spot, frozenset(), "rune: behind"
+                return self._clamp(land + f0 * r.cast_out_u), frozenset(), "rune: out"
             behind = land - f0 * r.behind_land_u
             out = land + f0 * r.cast_out_u
             through = (behind - x) * (hx - x) < 0
@@ -412,6 +426,51 @@ class GauntletTactics:
             # 3-4 u from it, where only ring 1 reaches (ring 0 ends 2.4 u out): one short hop clears it
             return self._clamp(x + side * rune_bombs.FACE_U), vocab, "rune: face"
         return self._clamp(x + side * r.face_u), vocab, "face"
+
+    def _jump_behind(self, ws, s, x: float, hx: float, front: float, side: float, fam: str
+                     ) -> tuple[float, frozenset, str]:
+        """SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3, combat.jump_behind): the stance during a jump move. Antic: AIM_U in
+        front (it jumps in place); past the antic: BACK_U behind the landing - stored on the first tick past the antic
+        from its take-off x and its vx (the first Air frame's; before that the hero's x ~ hers at its Jump Aim), the
+        wall rule, then never short of where it is now along the jump (a jump into the wall-top ledge is pushed out);
+        on Slam 2 / Slam Recover behind its own x. No room behind (the landing < min_back_u + wall_pad_u from the wall
+        behind it): the old back-off in front past its landing slam / rune circle."""
+        r = self.rules
+        jb = jump_behind
+        st = s.state
+        rec = self.jb_land.get(s.iid)
+        if st in jb.ANTIC_STATES or (rec is None and st not in jb.AIR_STATES + jb.LANDED_STATES):
+            self.jb_land.pop(s.iid, None)
+            if side != front:
+                # behind it already at the antic (it faces the hero at the antic start: she crossed during it)
+                spot = jb.behind_spot(x, front)
+                if spot is not None:
+                    self.jump_how[s.iid] = "under and behind"
+                    return spot, frozenset(), "jump: under and behind (antic)"
+            self.jump_how[s.iid] = "under and behind"
+            return jb.aim_spot(x, front), frozenset(), "jump: aim stance"
+        e = self._ent(ws, s.iid)
+        vel = getattr(e, "vel", None) if e is not None else None
+        vx = float(vel.v[0]) if (vel is not None and getattr(vel, "conf", 0) > 0) else None
+        if rec is None:
+            # (take-off x, facing, landing, from vx): the hero's x now stands for hers at its Jump Aim (1-2 frames ago)
+            rec = (x, front, jb.landing(x, hx, front), False)
+        x0, f0, land, by_v = rec
+        if not by_v and st == "Air" and vx is not None and abs(vx) > 0.05:
+            land, by_v = jb.landing_v(x0, vx, f0), True   # the decided vx (attack_range's jump_rule does the same)
+        if st in jb.AIR_STATES and (x - land) * f0 > 0:
+            land = x                                      # pushed out past the estimate (the wall-top ledge)
+        self.jb_land[s.iid] = (x0, f0, land, by_v)
+        phase = "flight"
+        if st in jb.LANDED_STATES:
+            land, phase = x, "landed"                     # it stands at its landing (a hit pushes it 0.24-1.44 u)
+        spot = jb.behind_spot(land, f0)
+        if spot is None:
+            out = land + f0 * (r.jump_out_u if fam == CC_JUMP else r.cast_out_u)
+            self.jump_how[s.iid] = "back off"
+            return self._clamp(out), frozenset(), "jump: back off"
+        self.jump_how[s.iid] = "under and behind"
+        return spot, frozenset(), f"jump: under and behind ({phase})"
 
     # ---- track A (2026-10-08, the person's tactics; forum.md §26) ----
 
@@ -732,11 +791,17 @@ class GauntletTactics:
                     fa = clapper_facing(e) if e is not None else None
                     x = float(s.pos[0])
                     f0 = float(fa) if fa is not None else (1.0 if hx >= x else -1.0)
+                    if jump_behind.ENABLED and s.iid in self.jb_land:
+                        # SP3: the circle lies in front of the jump's facing; at Idle it turns to a hero behind it (the
+                        # person's demo, the recordings' Idle body), so the jump's own facing
+                        f0 = self.jb_land[s.iid][1]
                     self.rune[s.iid] = (x, f0, self.jump_how.get(s.iid) or "back off", t + r.rune_hold_s)
                 elif s.iid in self.rune and t > self.rune[s.iid][3]:
                     del self.rune[s.iid]
                 for m in (self.t_commit, self.jump_how):
                     m.pop(s.iid, None)
+                if jump_behind.ENABLED:
+                    self.jb_land.pop(s.iid, None)
                 continue
             self.jfam[s.iid] = s.family
             self.rune.pop(s.iid, None)
@@ -791,6 +856,9 @@ class GauntletTactics:
                 g.stance_x, how = self._kite_spot(fc.subjects, s, hx)
             else:
                 g.stance_x, g.vocab, how = self._spot(ws, s, hx)
+                if jump_behind.ENABLED and str(how).startswith(("jump:", "rune:")):
+                    jbs = self.stats.setdefault("jb", {})       # SP3: the ticks per branch
+                    jbs[how] = jbs.get(how, 0) + 1
             g.why = f"{g.why.split('; ')[0]}; {how}" if "; " in g.why else how     # the controller's branch now
             g.face_x = float(s.pos[0])
         wts = dict(prefs.weights)                         # LOCAL's (Q6's silk gathering in it), EVADE's factors undone

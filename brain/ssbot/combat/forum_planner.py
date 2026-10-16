@@ -3225,7 +3225,7 @@ class ForumPlanner(Planner):
         if rs is None or getattr(rs, "stack_dash", None) is None or rs.dash_focus not in getattr(rs.trk, "now", {}):
             return o
         p = rs.trk.now[rs.dash_focus][1].get("pos")
-        if not p:
+        if not p or forum_v2.jb_dash_free(rs):
             return o
         dr = forum_v2.dash_at(r1.mode, r1.vel, r1.centre, float(p[0]))
         if not dr.any():

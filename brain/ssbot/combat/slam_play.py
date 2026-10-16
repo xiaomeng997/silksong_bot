@@ -46,6 +46,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from ssbot.combat import jump_behind as _jb
 from ssbot.knowledge import kinematics as kin
 
 CLAPPER = "Song Heavy Sentry"
@@ -74,6 +75,11 @@ STANCE_U = _num("SSBOT_FORUM_SLAM_PLAY_STANCE", 0.0)
 # still through hit-stop freezes); 0: the STATE frame count of SP1 (a 12-frame freeze in the antic moved the press to
 # Slam 0 - 15 live: no bounce, the hammer's body hit at Slam 1).
 GAME_CLOCK = _on("SSBOT_FORUM_SLAM_PLAY_CLOCK", "1")
+# SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3, combat.jump_behind): after a jump the hero may stand between the Clapper and a
+# wall; when the stand point does not fit inside the arena, the nearest that does if it is NEAR_STAND_U or more in front
+# (SP1 it3, the stand pinned: the jump at 3.6-7.25 u all succeeded), the band at the jump from NEAR_BAND_LO
+NEAR_STAND_U = 3.7
+NEAR_BAND_LO = 3.6
 
 
 @dataclass
@@ -174,6 +180,8 @@ class Run:
     k_dash: int | None = None
     k_air: int | None = None         # the frame the airborne entry took over (phase land)
     k_press_plan: int | None = None  # the press frame for this run's jump (K_PRESS, later after a late jump)
+    stand: tuple | None = None       # this run's stand / band when not the cfg's (SSBOT_FORUM_JUMP_BEHIND near a wall)
+    band: tuple | None = None
     sent: list = field(default_factory=list)   # (frame, mask)
 
 
@@ -298,7 +306,8 @@ class SlamPlay:
                 if not ground:
                     self._close("abort", "not on the ground at the jump")
                     return None
-                if not c.band[0] <= x <= c.band[1]:
+                band = r.band or c.band
+                if not band[0] <= x <= band[1]:
                     self._close("abort", f"x {x:.2f} outside the band at the jump")
                     return None
                 if k > c.k_jump_late:
@@ -382,8 +391,8 @@ class SlamPlay:
         c = self.cfg
         h = s.get("hero") or {}
         vx = float((h.get("vel") or [0, 0])[0])
-        lo, hi = c.stand
         r = self.run
+        lo, hi = (r.stand if r is not None and r.stand else c.stand)
         xw = hero_x(s)
         for fr in range(f + 1, f + SEND_AHEAD + c.lag):
             m = next((m for f2, m in reversed(r.sent) if f2 <= fr), None) if r is not None and r.sent else None
@@ -420,8 +429,14 @@ class SlamPlay:
         tgt = min(max(x, lo), hi)
         tx = cx + r.face * tgt
         if not WALL_L + c.wall_room <= tx <= WALL_R - c.wall_room:
-            r.why = "wall"
-            return None
+            dmax = ((WALL_R - c.wall_room) - cx) if r.face > 0 else (cx - (WALL_L + c.wall_room))
+            if not (_jb.ENABLED and dmax >= NEAR_STAND_U):
+                r.why = "wall"
+                return None
+            # SSBOT_FORUM_JUMP_BEHIND: between it and a wall after a jump: a nearer stand point (module constants)
+            r.stand, r.band = (NEAR_STAND_U, min(dmax, hi)), (NEAR_BAND_LO, c.band[1])
+            lo, hi = r.stand
+            tgt = min(max(x, lo), hi)
         if not ground:
             if c.air and k <= c.k_air_max and r.k_air is None:
                 # in the air at the antic (a hop): steer toward STAND (never the jump), start once she lands
@@ -430,7 +445,8 @@ class SlamPlay:
             r.why = "in the air"
             return None
         need = abs(tgt - x) / WALK_U + abs(vx) / 8.25 * 2 + 1
-        late_ok = r.k_air is not None and c.band[0] <= x <= c.band[1]   # landed late inside the jump band: jump now
+        band = r.band or c.band
+        late_ok = r.k_air is not None and band[0] <= x <= band[1]   # landed late inside the jump band: jump now
         if k + need > c.k_jump - 1 and not late_ok:
             r.why = "no time to walk"
             return None

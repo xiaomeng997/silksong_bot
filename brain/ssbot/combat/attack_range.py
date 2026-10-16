@@ -51,6 +51,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.are_spec import PARKED, CustomView, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
+from ssbot.combat import jump_behind as _jb
 from ssbot.combat import rune_bombs as _rb
 
 REPO = Path(__file__).resolve().parents[3]
@@ -455,6 +456,15 @@ def carry_body(polys, vel, tau: float, cell: float = CELL, on: bool | None = Non
     return poly_mask([np.asarray(p, np.float64).reshape(-1, 2) + (dx, dy) for p in polys], cell)
 
 
+def _jb_turn_mask(x: float, cell: float = CELL) -> Mask:
+    """SSBOT_FORUM_JUMP_BEHIND: the Clapper's standing body of either facing at x (the Idle box's front, the larger
+    half, on both sides: turn_u; floor to its top 3.92 u above)."""
+    from ssbot.core.forum import FLOOR_Y
+    h = float(_jb.CFG["turn_u"])
+    y0, y1 = FLOOR_Y, FLOOR_Y + _jb.BODY_TOP_U
+    return poly_mask([np.array([(x - h, y0), (x + h, y0), (x + h, y1), (x - h, y1)], np.float64)], cell)
+
+
 def _inside(x: float, intervals) -> bool:
     if not intervals:
         return True
@@ -840,6 +850,12 @@ class RangeTracker:
                           ctx={"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
                                "body": body_polys(e, tab.spec.body)})
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
+            if _jb.ENABLED and tk == _jb.CLAPPER and inst.fam in _jb.JUMP_FAMS and inst.states \
+                    and inst.states[-1] in _jb.LANDED_STATES:
+                # SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3): a landed jump ends in Idle, which turns it to a hero behind
+                # it: its front (2.25 u, p99 of the recorded turned bodies) then reaches her side (S2 live: 17 body
+                # hits at Idle 2.0-2.5 u behind the landing); the body of either facing from the landing on
+                est.raw = union([est.raw, _jb_turn_mask(float(p[0]), tab.cell)])
         if tab.spec.hazards:
             seg = self.segs.get(iid)
             hm = hazards_at(tab, seg.spawned if seg else (), inst, self.T, (float(p[0]), float(p[1])),

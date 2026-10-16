@@ -44,6 +44,7 @@ import numpy as np
 
 from ssbot.combat.attack_range import (FT, Mask, RangeTracker, _first_state, body_polys, carry_body, empty_mask,
                                        union)
+from ssbot.combat import jump_behind as _jb
 from ssbot.combat import rune_bombs as _rb
 from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 
@@ -94,6 +95,10 @@ def corner_zones(fc) -> list[tuple[float, float]]:
     out = []
     for tr in (getattr(fc, "trackers", None) or {}).values():
         if tr.dead or tr.pos is None or getattr(getattr(tr, "table", None), "type_key", None) != CLAPPER:
+            continue
+        if _jb.ENABLED and getattr(getattr(tr, "cur", None), "family", None) in _jb.JUMP_FAMS:
+            # SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3): a Clapper in a jump move has no corner - its back side is the
+            # stance (it lands >= 4.5 u from the wall behind it)
             continue
         x = float(tr.pos[0])
         if x - WALL_L < CORNER_U:
@@ -540,6 +545,19 @@ def dash_at(mode: np.ndarray, vel: np.ndarray, centre: np.ndarray, fx: float) ->
         return np.zeros(mode.shape[0], bool)
     toward = np.sign(vel[..., 0]) * np.sign(fx - centre[..., 0]) > 0
     return (d & toward).any(axis=1)
+
+
+def jb_dash_free(rs) -> bool:
+    """SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3): the focus unit is a Clapper in a jump's flight or landing (past its Jump
+    Aim: the arc and the landing are known, error p50 0.03 u off the walls): a row dashing at it reads it with the focus
+    margin like every other row, not the "rule" margin (the flier curve, 4.3 u at k 36, which keeps every dash out from
+    under it; the person dashes under it 15-27 frames past its Jump Aim, the run alone does not clear it in time)."""
+    if not _jb.ENABLED or rs is None or getattr(rs, "dash_focus", None) is None:
+        return False
+    x = (getattr(getattr(rs, "trk", None), "now", None) or {}).get(rs.dash_focus)
+    inst = x[2] if x else None
+    return (inst is not None and x[0] == _jb.CLAPPER and getattr(inst, "fam", None) in _jb.JUMP_FAMS
+            and bool(getattr(inst, "states", None)) and inst.states[-1] in _jb.AIR_STATES + _jb.LANDED_STATES)
 
 
 def focus_iid(trk: RangeTracker, target: int | None) -> int | None:
