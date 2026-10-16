@@ -8205,3 +8205,169 @@ boost_workers stopped after the A/B. Frozen checkouts `C:\ssbot\live_1v1_{5f46a8
 3. Behind is chosen only when the wall behind it is nearer (9 of 32 live); the 2.8 u clearance rule sends 6-17 % of
    behind choices to the front.
 4. The jump families' h/s were a little lower in rnsp5 (not significant on 30 jumps per arm).
+
+## Task 1v1 - stage SP6: early side slashes in the slam antic, the dash slash in the jump cast's antic, the jump flights measured, walking behind, the rune circle's edge (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §70)
+
+The person: "try to land one more hit in the antic" (their three mixed fights slashed early in the slam antic, then
+struck the hammer: 2-3 hits per slam), plus their jump-cast notes (measure the jump slam and the jump cast apart; walk
+behind when the time allows; a hop slash on the pass; a small hop over the rune circle's edge; the dash slash in the
+jump cast's antic when too far). Distances are centre to centre (the hero's box centre, the Clapper's transform), + =
+in front (the side it faces); HeroBox 0.46 u wide; its body box -1.34 .. +2.25 u, floor to 3.9 u. Slam frames k are
+game frames from the antic entry. Data `C:\ssbot\data\m2_play\sp6` (scripts, trial reports, `ab` / `abb` / `abc` the
+A/B blocks, `replay_<sha>` identity). Commits 1cec5f0, ba5502e, 79eb963, 0db621e, ba68d87, 74174bd, d950e0a (tested
+code), docs after it.
+
+### Result (the final A/B, d950e0a, rnjb vs rnsp6, 32 episodes each; manifest `C:\ssbot\sandbox\1v1sp6abd_manifest.txt`, analysis `sp6\abd`, `abd_stats.txt`)
+
+| | rnjb (the default) | rnsp6 (+ EARLY) |
+|---|---|---|
+| episodes / kills | 32 / 32 | 32 / 32 |
+| HP-hitless | 31 | 30 |
+| HP hits before the kill (sources) | 1: its body at Idle after a played slam | 2: small rune bombs (Evade Scuttle / no state), none in a slam |
+| kill p10 / 50 / 90 (s) | 21.1 / 23.1 / 25.3 | 18.7 / **22.0** / 25.9 |
+| landed hits / s (sg4_budget --live) | 0.958 | **1.008** |
+| slams / strikes per slam / slam h/s | 69 / 1.87 / 1.23 | 71 / **2.55** / **1.56** |
+| early presses / aborts at the jump | - | 52 of 71 slams / 0 |
+| HP lost in slams / in the 60 frames after the landing | 0 / 1 | 0 / 0 |
+
+- Bootstrap (episodes resampled, 90 %): landed / s +0.050 (+0.014 .. +0.087), kill p50 -1.1 s (-2.3 .. -0.06), hitless
+  share -0.031 (-0.125 .. +0.062). Faster with both intervals clear of 0, but one HP-hit episode more (30 vs 31; its
+  two hits are small rune bombs outside the slams). By the rule "promote if not worse on HP-hitless and faster" EARLY is
+  **not** made the default; it stays off (`=1` on). The person's call.
+- The first A/B (74174bd, 48 episodes each in three blocks `sp6\ab` / `abb` / `abc`, pooled `sp6\ab_pool.txt`):
+  hitless 46 vs 42, landed / s 0.945 vs 0.998, kill p50 24.1 vs 22.1 s. Block abc found a walk-in bug (three hammer
+  hits, all EARLY's): a planner slash at the antic entry pushed the first early press past frame 18 while she stood at
+  4.25 u; the frame-before key toward it repeated every frame while the late window (4.2-4.4 u) stayed out of reach and
+  walked her to 3.31-3.42 u; the jump was refused (band 4.0) and the planner's flight met the hammer. Fixed in d950e0a
+  (below), fixed-point t7, then the final A/B.
+
+### 1. The person's mixed fights (`sp6\scripts\human_early.py`, `human_early.json`)
+
+193525 a0 / a1 and 194816 a0: in reach at the antic entry (2.65-4.33 u), a hit at antic frame 0.5 (pressed before it)
+and one at 14.5-20 (the Wanderer attack cooldown 0.3 s = 18 frames), each knocking the Clapper 0.48 u away (it does
+not move otherwise in the antic), then the walk to 4.7-5.5 u and the jump at 30-31. 194816 a1 (down slash only): 1 hit
+per slam.
+
+### 2. Code: `SSBOT_FORUM_SLAM_PLAY_EARLY` (`ssbot/combat/slam_play.py`, default off; arm `rnsp6`)
+
+- In the playbook's walk phase, on the ground, up to antic frame `early_k_max` 23: walk into `early_stand` 3.8-4.8 u
+  (the side slash meets its body front from <= 5.37 u) and press the side slash whenever the attack is ready (own
+  presses `early_cd` 19 frames apart and the STATE's `hero.tm.atk_cd`) and the slash from her x at the mask's frame
+  meets its body box (`_in_reach`). The key toward it the frame before the press and on both press frames (the attack
+  held 2 frames: one rising edge); no key away from it within `early_quiet` 3 frames of a press; the first press at the
+  script's 3rd frame (t1: presses at the 2nd frame landed with the walk-away key sent before: 0 of 14 hit).
+- A press from frame `early_late_k` 18 on only from 4.0-4.45 u (`early_late_lo` / `early_late_u`): a late hit's
+  recoil and knock-back build up over ~8 frames and run on into the jump (t2 / t3: the two hammer hits pressed the
+  strike from 5.66-5.78 u at Slam 0 - 1 after a hit at frame 22 from 4.6-4.7 u). The press window also bounds the walk
+  toward it (never a step below its low edge; `early_min_u` 3.6 otherwise) and the frame-before key is sent only when
+  she does not face it yet (STATE `hero.facing`) - the A/B's walk-in bug. After an early press the walk into
+  `early_post_stand` 4.2-4.9 u; under EARLY the jump band from `early_band_lo` 3.6 u (SP1 it3: 3.6-7.25 u all safe;
+  t4: two presses at 23 from ~4.0 u left her at 3.81 / 3.96 u at the jump, below 4.0: no strike).
+- Under EARLY, NEAR's behind clearance uses the measured air speed: 0.138 u / frame in all 104 behind way-outs of SP5
+  t1-t3 and SP6 t1 (8.25 u/s, the run speed; not NEAR_V 0.165), past `early_cross_u` 2.3 u by Slam 0 + 40 (x at Slam 0
+  + 10 <= 1.84 u in front). t1's two failures: behind from 1.99 / 2.09 u, its Idle turn into her at Slam 0 + 43-44.
+- Stats `slam_play`: `early_runs`, `early_press`. Probe: `early` (press frames, hits before the jump, HP lost before
+  the press, its drift); the strike press is the first attack after the jump (`sp6\scripts\rescore.py` re-scores old
+  trial files); `--slash N` (while waiting, a side slash toward it every N frames within 5.2 u: the planner's idle
+  slashes, a cooldown and a knock-back at the antic entry); `slam_play_run.ps1 -Early 1 -Slash N` (backup .bak_sp6).
+- Tests `tests/test_sp6.py` (20).
+
+### 3. Fixed-point trials (probe, instances 0 / 1, 1x, v2 defaults + EARLY; success = the down slash landed and no HP lost from the press to the landing + 15)
+
+| round | code | strikes pressed | success | early hits per strike | hits per strike (early + down + way slash) | failures -> change |
+|---|---|---|---|---|---|---|
+| t1 | 1cec5f0 | 62 | 60 | 0.77 | 2.74 | 2 behind way-outs into its Idle turn -> measured air speed; presses at the 2nd frame slashed the wrong way -> the key toward it around the press |
+| t2 | ba5502e | 60 | 59 | 0.97 (58 / 58 presses hit) | 2.93 | 1 hammer (early hit at 22, strike from 5.78 u at Slam 0 - 1) |
+| t3 | 79eb963 | 56 | 55 | 1.00 | 2.96 | 1 hammer (the same, 5.66 u) -> late presses from <= 4.4 u |
+| t4 | 0db621e | 65 (67 started) | 65 / 67 | 0.74 | 2.74 | 2 aborted at the jump (3.81 / 3.96 u), the probe then stood in the lunge -> late presses from >= 4.2 u, band from 3.6 u |
+| t5 | 74174bd | 65 (66 started) | 65 / 65, 0 HP lost in the 66 started | 0.69 (45 / 45) | 2.68 | none (the A/B then found the walk-in bug) |
+| t7 | d950e0a | 48 (`--slash 20 / 24`) | **48 / 48 without HP loss, 47 landed** | 1.12 (16 slams with two) | 3.04 | none; 11 of 64 trials lost HP to small rune bombs while the probe stood waiting (it does not dodge) |
+
+SP5's playbook in the same probe: ~2 hits per strike (the down slash + the way-out slash).
+
+### 4. The jump slam and the jump cast apart (`sp6\scripts\jump_fams.py`, `jump_fams.json`: every live jump before SP3, 1,028 / 791)
+
+- Antic to Jump Aim: jump slam 30 frames (p10 / 90 29 / 30); jump cast 55 (54 / 56) = Cast Slam Antic 16 + Cast Slam
+  Antic 2 40 (71 casts of the SP4 / SP5 A/Bs).
+- The flight is the same for both: vy 36.3 at take-off, its body box bottom 9.07 u above the floor at its apex (aim
+  +26-27), 55 frames in the air. The jump cast is not higher or slower.
+- The landing is 5.27 u in front of her x at the aim for both (it aims there); take-off to landing p50 3.4 / 2.9 u
+  (p90 8.4 / 5.7).
+- At the jump cast's antic start she is 9.2 u away (p10 / 90 6.2 / 10.3; 63 of 71 beyond 8 u); 0.21-0.33 hits per
+  jump cast antic under the v2 defaults.
+
+### 5. Walking behind (`SSBOT_FORUM_JB_WALK`, `jump_behind.walk_fits`, default off; trial arm `sp6jwT`)
+
+- Model: from 5.27 u in front of the landing to 1.87 u behind it (its back 1.34 + 0.23 + 0.3) is 7.14 u; its body
+  comes down to a standing hero's head (2.4 u above the floor) at aim +50: 50 x 0.138 u = 6.9 u. Walking fits only when
+  the landing is < ~5.0 u in front of her (a short jump, a wall push); a hop is no faster (air 0.138 u / frame).
+- The switch: in the flight, when the walk fits, safe rows with a dash rank after the rest (GoalPrefs.no_dash).
+- t6 (74174bd, 8 episodes): it fired on 18-53 ticks per episode, but 22 of 22 jumps still dashed in the flight (the
+  dash comes at aim +15..27, when the walk does not fit yet); 22 / 22 safe and behind, 3.1 hits per jump. Walking
+  behind is essentially never available the way it aims; left off.
+
+### 6. A hop slash on the pass: not done
+
+JB_PASS counts the flight's hits from the ground only; a low hop slash needs a ground_hit exception. Its body bottom is
+3.9 u above the floor at the aim, 5.9 u 3 frames later, and 3.3 u 3 frames before the landing: only a few frames on each
+side are low enough.
+
+### 7. The rune circle's edge and height (`sp6\scripts\rune_edge.py`)
+
+- The rune slam's damager is a disc: r 7.187 u, centre 6.48 u (some 6.75) in front of the landing and 0.33 u above the
+  floor (world y 3.34): it reaches 7.5 u up. Its back edge by height above the floor 0 / 1 / 2 / 3 / 4 / 5 / 6 u:
+  -0.70 / -0.68 / -0.51 / -0.19 / +0.30 / +1.02 / +2.06 u from the landing. Feet 4 u up move the edge 1 u forward.
+- Live (rnjb / rnsp5 / rnjbT, 116 jump casts): while it is lit she stands 3.6-4.3 u behind the landing (p50) and never
+  came within 0.5 u of the edge (min gap p50 2.8-3.5 u, p10 1.6-2.3). Its ground edge (-0.70 u) lies inside the
+  Clapper's own body (back -1.34, the turned front -2.25): behind it the edge never blocks a slash; a hop would matter
+  only after it has been knocked / evaded >= 1.5 u forward. No live test.
+
+### 8. The dash slash in the jump cast's antic (`ssbot/combat/cast_stab.py`, `SSBOT_FORUM_JB_DASH_SLASH`, default off; trial arm `sp6dsT`)
+
+- Model (`stab_path`, the decompiled hornet_sprint FSM and the person's 92 uses in `C:\ssbot\data\m2_dash_slash`): the
+  ground dash 2.8 u in 0.1 s with the dash key HELD (the FSM's Dashed state sprints only while it is held; t3, 79eb963:
+  a 2-frame dash ran on as Dash To Run, the attack was a plain slash, 8 of 8), the attack on the dash's last frames
+  (queued 0.1 s), the stab from the first sprint frame, its collider 0-3.10 u in front of her, active 7-14 frames into
+  the stab; on a hit 2 frames still, then 30 u/s back and 20 u/s up, x0.85 per frame for 20 frames (~3.2 u back, ~2.1 u
+  up), then the fall. An enemy in its antic cannot block (the person): only the hit branch. Start when the hit is
+  predicted, her box front stays >= 0.25 u outside its body front, and she lands by aim + 8: from ~9.0-12.4 u at the
+  antic start (exactly the "too far to slash" cases).
+- Script: in Cast Slam Antic by antic frame 12, on the ground, in front, dash and attack cooldowns ready: dash + the key
+  toward it, both held, the attack on frames 5-6; on the DashStab hit all keys released until she lands; a miss
+  releases the dash and hands back. Policy hook after the slam playbook (the supervisor's keys win). Stats
+  `cast_stab` (antics, stabs, hit, end_*, no_*).
+- t6 (74174bd, sp6dsT, 8 episodes, 9.5 u idle stance): 10 jump casts, 9 stabs, **9 DashStab hits** (antic frame
+  17-20), 1 antic seen too late; **10 / 10 safe and behind at the landing**; 0.90 hits per jump cast antic (rnjbT at the
+  same stance 0.06, v2 defaults 0.21-0.33). The jump slams of the same runs: 1 hit in 14 (its landing slam, her 5.5 u
+  in front; not the stab).
+- Tests `tests/test_cast_stab.py` (10). Not done: the air follow-up after the stab's recoil (RecoilStab); no A/B.
+
+### Switch-off identity
+
+d950e0a and 74174bd with EARLY / JB_DASH_SLASH / JB_WALK unset: 192006 i0 ep1 2,073 / 2,073 and 084036 i1 ep0 1,778 / 1,778 ticks
+byte-identical to f2fe334's default (`sp5\replay_f2fe334\ticks_unset_*`); all three on: 0 errors (31 / 106 ticks
+differ). 1cec5f0 EARLY unset: identical; EARLY on: 62 ticks differ. (The ba68d87 "all on" run did not set the switches:
+the script's `$sw` shadowed the `[string]$Sw` parameter; fixed in `sp6\replay_ident_sp6.ps1`, rerun on 74174bd.)
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp6)
+
+`rnsp6` = rnjb + SSBOT_FORUM_SLAM_PLAY_EARLY=1; trial arms `sp6dsT` = rnjbT + JB_DASH_SLASH, `sp6jwT` = rnjbT + JB_WALK.
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4) after every block; DEMO_SOON restored after each; no game process touched;
+boost_workers ran for the blocks. Frozen checkouts `C:\ssbot\live_1v1_{1cec5f0,ba5502e,79eb963,0db621e,ba68d87,74174bd,d950e0a}`.
+Sandbox: `sp6_t1.ps1`, `sp6_t3.ps1` .. `sp6_t7.ps1`, `sp6_ab.ps1` / `sp6_abb.ps1` / `sp6_abc.ps1` / `sp6_abd.ps1`;
+manifests `1v1sp6t3_manifest.txt`, `1v1sp6t6_manifest.txt`, `1v1sp6ab_manifest.txt`, `1v1sp6abb_manifest.txt`,
+`1v1sp6abc_manifest.txt`, `1v1sp6abd_manifest.txt`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The default for EARLY is the person's call (70.11 / the result table): faster (+0.05 landed hits / s, -1.1 s per
+   kill, intervals clear of 0; slams 1.87 -> 2.55 hits each), HP-hitless 30 vs 31 (two small rune bombs, not slam
+   hits). If promoted: make SSBOT_FORUM_SLAM_PLAY_EARLY follow SSBOT_FORUM_V2 like SIDE / NEAR, arm rnsp60 = EARLY=0.
+2. The dash slash (JB_DASH_SLASH): 9 / 9 DashStab hits and 10 / 10 safe jump casts fixed-point; next its A/B (the
+   default + JB_DASH_SLASH vs the default), and the air follow-up after the recoil (RecoilStab).
+3. The early-antic down slash chained into the late strike (the map's region) is not done.
+4. A low hop slash on the pass (a ground_hit exception for low air presses near the take-off / landing) is not done.
+5. Two Clappers (SP7) not started; slam_play.clapper() still follows the first Clapper of the STATE.
