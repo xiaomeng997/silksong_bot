@@ -8487,6 +8487,10 @@ baseline 144051 i1 ep0 1,541 / 1,541 ticks byte-identical to d950e0a (`sp7\repla
 All four on (1b8a1cb, `replay_sw1.ps1`): the w7 episodes identical (one Clapper: no SP7 rule applies), the w13 one
 differs from tick 123, no errors.
 
+Note: the lead's ecc3e36 (SSBOT_FORUM_SLAM_PLAY_EARLY follows SSBOT_FORUM_V2) landed on this branch during SP7, after
+1b8a1cb: every SP7 run used frozen checkouts before it, so rnjb / two / two2 / two3 above ran with EARLY off; at HEAD
+they get the early side slashes too (test_sp7 passes there).
+
 ### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
 
 `two` = rnjb + TWO_PLAY + TWO_FOCUS; `twoP` / `twoF` one of them; `two2` = two + TWO_SIDE + TWO_JUMPER; `two3` = two +
