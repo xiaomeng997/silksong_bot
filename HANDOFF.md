@@ -7501,3 +7501,121 @@ test_move_data.
 4. STAY's band cannot be reached safely without a strike at the Slam 0 entry (the hammer to ~12 u): the person's 5-7 u
    stance only works with the strike; the readiness before the antic (SG4) is what brings her there.
 5. The IO-loop resend of the last ACTION during a long tick (not done).
+
+## Task 1v1 - stage SP1: the person's slam strike as a playbook (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §65)
+
+The person's decision (main 9f75b8e): the slam strike as a fixed playbook from their own demo, proven by fixed-point
+live trials (>= 90 %) before the full fight; small runes exactly as rn; the map line (SG1-SG8) parked and OFF here.
+Distances are centre to centre, + = in front (the side the Clapper faces). Frames k count from the antic entry and
+are the frames a key takes effect in the game (STATE act.mask).
+
+### The person's key timeline (`ssbot.tools.sp1_human_keys`, `C:\ssbot\data\m2_play\human_keys.json`)
+
+- 35 slams in the four 2026-10-15 demo fights (0.5x, game frames), 33 down presses in the late antic / Slam 0, 29
+  landed. p10 / 50 / 90 of the landed ones:
+  - x at the antic entry 4.3 / 6.3 / 7.5 u; toward-key frames before the jump 0 / 11 / 22 (away 0);
+  - jump at k 23.7 / 26.5 / 31.1, held 13.3 / 15.5 / 17.6 frames; no direction key in the air;
+  - down 3.5 / 5.0 / 6.6 frames before the attack; attack at k 44.3 / 47.5 / 50.1 = Slam 0 -4.2 / -1.0 / +1.6 at
+    x 4.3 / 5.0 / 5.7 u; contact Slam 0 +2.5 / +4.0 / +5.5;
+  - no jump after the press (0 of 33); a dash after the bounce in 21 of 29 (about Slam 0 + 24, the key toward it
+    from about Slam 0 + 20), landing behind it 20 of 29.
+- The jump frame does not depend on the distance (correlation -0.22): they walk to ~5 u, then the same timing.
+- The 4 misses were all late presses (hammer): Slam 0 +2.0 at 5.6 u, +6.0, +6.5, +6.5.
+
+### Code (`SSBOT_FORUM_SLAM_PLAY=1`, default off)
+
+- `ssbot/combat/slam_play.py`: `SlamPlay.step(f, s, ground, accepting)` -> the mask for frame f + 2 or None (the
+  planner decides). `PlayCfg` (overrides: `SSBOT_FORUM_SLAM_PLAY_SET="k_jump=27,stand=4.8:5.4"`).
+  - Antic entry: the first STATE reading Slam Antic minus the Control state's time.
+  - Start: on the ground, accepting input, in front, 2.7-9 u, the walk into the stand band 4.6-5.6 u done by k 25,
+    the stand point inside the arena, by k 14.
+  - Walk: stop dead inside the band; the frames already in flight are counted (no back and forth).
+  - Jump at k 26 held 16, no direction; down from k 42; attack at k 47; down 2 more frames. Abort at the jump when not
+    on the ground or outside 4.0-6.2 u.
+  - After the press: never the jump; no key while rising; from Slam 0 + 20 the key over its body to behind it (the
+    front when the wall behind leaves < 6 u from its centre, none when neither side has it); the dash at Slam 0 + 23
+    (2 frames); held to the landing; the planner on the ground. No bounce by press + 14: abort. Hurt: abort.
+  - Airborne entry (in the air at the antic, seen by k 10): steer toward the band in the air, start on landing; a
+    landing after k 25 inside the jump band jumps at once (by k 29), the press 20 frames after the jump and by k 49
+    (T1, held 16: 28 + 20 -> 20 / 20, 30 + 20 = 51 -> 9 / 9, 31 + 20 = 52 -> 0 / 10); no landing by k 28: abort.
+  - Slam 0 seen before the press: press at once while within Slam 0 + 3, else abort (never happened).
+  - Not accepting input (the sprint's Sprint Turn / Skid End, about 10-30 frames after a planner dash + run): no start.
+- `ForumPlannerPolicy.act`: the planner and supervisor tick as before; the playbook's mask replaces the planner's while
+  its script runs; the supervisor's keys (r.mask / pause) win and abort the script; no Cogfly then. Decision log field
+  `play` (phase, k, mask, why); stats `slam_play` (slams, started, pressed, bounced, dashed, air_entry, end_*, why_*).
+- `SSBOT_FORUM_SLAM_PLAY_STANCE=<u>` (rnplay6: 6): `GauntletTactics._clapper_spot` puts the stance <u> in front while
+  the Clapper idles / walks / backsteps ("face: slam stance"), instead of the 4 u face.
+- Probe `ssbot/probes/slam_play_probe.py` (`--dists --per --pin --hop --tick-ms`; the playbook's own step, the mask for
+  STATE f sent for f + 2 like `episode._act`), launcher `C:\ssbot\sandbox\slam_play_run.ps1` (WMI; stop file
+  `pogo_target.stop`), report `ssbot.tools.slam_play_report`.
+- `ssbot.tools.slam_play_live`: per arm from run manifests, every slam (the playbook's own keys found in act.mask,
+  landed / killing blow, damage in the slam and in the 60 frames after, x at the antic / Slam 0) and per episode the
+  real HP-loss hits vs the bounce's protected touches.
+- Arms in `C:\ssbot\sandbox\1v1_arms.txt`: `rnplay` = rn + SSBOT_FORUM_SLAM_PLAY=1; `rnplay6` = rnplay +
+  SSBOT_FORUM_SLAM_PLAY_STANCE=6.
+
+### Fixed-point live trials (instances 0 / 1, 1x, savestate fo_cl_w7w; success = contact and no HP lost until the Slam Recover ends)
+
+| round | code | what | started | success | notes |
+|---|---|---|---|---|---|
+| it1 | 3dad338 | no key after the press | 38 | 38 | 29 of 40 then landed on its head and took a body hit after the slam |
+| it2 | ee92cf2 | + the way out over its body | 67 | 67 | 0 hits after; 13 not started (the hero knocked airborne while waiting) |
+| it3 | 05aea45 | --pin: the stand band at D (x at the jump) | 84 | 71 | jump at 3.6-7.25 u: 71 / 71; 7.25-7.5 u: 0 / 4 (3 out of reach, 1 hammer); 9 band aborts from a 0.16 u band walking back and forth (fixed in 573ebd3) |
+| it4 | 573ebd3 | the script 2 / 1 frames later (press at Slam 0 + 0 / -1) | 14 / 16 | 14 / 16 | short-antic emulation |
+| it5 | 573ebd3 | 14 ms sleep before each send | 37 | 37 | the planner's tick time |
+| it6 | 2e20729 | --hop 30 (airborne entries) | 51 ground + 18 air | 69 | 10 of 29 airborne did not land by k 22 |
+| it7 | a4cf6d7 | --hop 30, late landing jumps at once | 44 ground + 31 air | 75 | 31 of 36 airborne started |
+
+- Final playbook (it2, it5, it6, it7): 280 slams seen, 248 started, **248 / 248 succeeded**. Ground starts 199 / 199
+  over every antic-entry distance class seen (4.9-8.3 u; < 5 / 5-5.5 / ... / >= 7.5). Press always Slam 0 - 2, contact
+  Slam 0 + 2 / 3 / 4 / 5 (26 / 111 / 105 / 6), x at the jump 4.6-5.6 u.
+- The 4.5 u class cannot be placed: the Clapper backsteps at < 5.4 u, so the 4.5 u waits saw the antic at 5.0-5.4 u.
+  it3 pinned the strike distance instead: 3.6-7.25 u all succeed, so the stand band 4.6-5.6 u and the jump band
+  4.0-6.2 u have > 1 u margin on both sides; no narrowing needed.
+- Antic length: from the tin-based entry it was 49 frames in every probe slam. In the full fights, counted from the
+  first STATE reading Slam Antic, 48-frame antics showed the playbook's jump at 25 / press at 46 = still Slam 0 - 2: the
+  recordings' 47 / 48 / 49 are mostly the first reading lagging by 1-2 frames. it4 covers a real shorter antic anyway.
+
+### Full-fight check (not an A/B: 4 episodes per arm and code; `slam_play_live` + `forum_remaining_hits collect` + `forum_1v1_summary`)
+
+| | rnplay 11a4662 | rnplay a4cf6d7 | rnplay6 11a4662 | rnplay6 a4cf6d7 | rn (10-12, 16 eps) |
+|---|---|---|---|---|---|
+| kills / HP-hitless kills | 4 / 4 | 4 / 3 | 4 / 3 | 4 / 3 | 16 / 15 |
+| kill time p50 (s) | 29.3 | 30.6 | 38.6 | 37.1 | 33.6 |
+| landed hits / s p50 | 0.71 | 0.65 | 0.55 | 0.60 | 0.60 |
+| slams / played / landed | 16 / 11 / 11 | 17 / 15 / 15 | 19 / 9 / 9 | 22 / 18 / 18 | 87 / - / - |
+| HP lost in or 60 frames after a played slam | 0 | 0 | 0 | 0 | - |
+| x at Slam 0 > 9 u (fled) | 5 | 2 | 9 | 3 | 87 |
+| the hit before the kill | - | a small rune (air, FORCED) | body in a declined slam (sprint skid) | jump slam's Air | |
+
+- 53 played slams, 53 landed (2 killing blows); landing after the way out: 49 of 50 behind it (4.4-9.9 u), 1 in front.
+- Declines: mostly the sprint skid (no input), the rest airborne (before the airborne entry). rn fled every slam
+  (12-13 u at Slam 0); rnplay struck 26 times in 33 slams (0.79 per slam; rn 0.35).
+- The bounce's i-frames produce `damage` events without HP loss (123 in the 16 episodes): the attempts row `hits` and
+  the policy's `hits_taken` count them; `forum_1v1_summary` (via collect) does not. Count hits by HP loss.
+
+### Switch-off identity and tests
+
+- Base 182b78f (`C:\ssbot\data\m2_play\base_182b78f`, knowledge dir junctioned to the worktree's) vs HEAD, rn switches,
+  `forum_policy_replay --deadline-ms inf`: 192006 i0 ep1 **2,073 / 2,073**, 193808 i1 ep0 **3,183 / 3,183** ticks
+  identical (`C:\ssbot\data\m2_play\replay`, `replay_ident.ps1`). With SLAM_PLAY=1 the open-loop replay ran without
+  errors (136 ticks' masks replaced in 193808, none in 192006); +STANCE 6: 70 / 317.
+- `tests/test_slam_play.py` (16); test_forum_l2, test_chase_sg5, test_rune_bombs pass.
+
+### State of the machine
+
+- Instances 0 and 1 frozen (time.scale 1e-4; instance 0 read time_scale 0.0 after the last check: its game is paused,
+  the next combat_run resumes it). DEMO_SOON restored after every live block.
+- Frozen checkouts: `C:\ssbot\live_1v1_{3dad338,ee92cf2,05aea45,573ebd3,2e20729,11a4662,a4cf6d7}` and the final docs
+  commit.
+- Data `C:\ssbot\data\m2_play`: `live\2026-10-16\TRAIN\slam_play_i*_s*<tag>` (it1 ... it7hop), `it*.json` tables,
+  `live_smoke1.json` / `live_smoke2.json`, `col` / `col2` + `smoke*_summary.json`, `human_keys.json`, `replay`.
+- Manifests `C:\ssbot\sandbox\1v1play_manifest.txt` (11a4662) and `1v1play2_manifest.txt` (a4cf6d7).
+
+### Next
+
+1. SP2: the full A/B rn vs rnplay (and rnplay6), hits by HP loss.
+2. The sprint skid declines: under SLAM_PLAY, no dash + run in the early antic (or when a slam can start), tested
+   fixed-point first.
+3. SP3 (the person, 2026-10-16): after the Clapper jumps (jump slam / jump cast) go behind it, do not flee.
+4. The way out's wall rule (front when < 6 u behind) is tested only on the toy slam; no wall slam came up live.
