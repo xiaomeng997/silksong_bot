@@ -15,9 +15,15 @@ Per tick (ForumPlanner.tick calls MapHelper):
     in the umbrella counts as 0. Replaces SSBOT_FORUM_CL_NODOWN.
   * BOARD (the L2 controller, tactics.gauntlet._clapper_spot): during the slam the map row's spot (on) or the map's
     best ground spot near the hero; before it the readiness argmax 3-6 u in front.
+  * SSBOT_FORUM_CHASE=1 (task 1v1 SG5, forum.md 61; needs SSBOT_FORUM_SPECIAL_MAP=1; default off: nothing here changes):
+    the readiness also runs while the Clapper evades (Evade Scuttle: After Scuttle branches at once, in its Slam Range
+    to SLAM / CAST; the Clapper carried by its velocity to the scuttle's end), and BOARD gets "chase_x": the readiness
+    argmax inside CHASE_BAND (the slash stance the L2 controller chases to), "R_ref" the threshold the planner's
+    readiness tier uses.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -34,6 +40,14 @@ ANTIC = "Slam Antic"         # the antic: the Clapper stands (knockback aside); 
 BOARD: dict = {}            # iid -> {"tick", "on", "x", "k", "why", "ready_x"} (the planner's last map decision)
 NEAR_U = 16.0               # a Clapper this close (x) is the map's
 FORUM_ARENA = (14.01, 48.99)  # core.forum WALL_L / WALL_R
+# SSBOT_FORUM_CHASE (SG5): chasing and slashing outside the slam, on the map's readiness (default off)
+CHASE = os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1"
+# the chase stance's band in front (centre to centre, u): the map's ground readiness stays >= 3.28 (R_ref 3.0 = two
+# strikes with full clearance) from 3.0 to 4.5 u for an antic that starts up to 12 frames before the hero is free (a
+# slash's lock: attack_duration 15 frames), 5.0 u drops to 1.93 at k 12; landed ground slashes 4.2-5.4 u
+CHASE_BAND = (3.5, 4.6)
+EVADE_STATE = "Evade Scuttle"
+EVADE_S = 0.35               # Evade Scuttle -> After Scuttle (forum.md 18.1)
 
 
 def _decision_states() -> frozenset:
@@ -317,6 +331,7 @@ class MapHelper:
         penalty ranks): computed for those only (penalty 0, readiness nan elsewhere); the order among them is the
         same as computed over all rows."""
         self.ready_info = None
+        self.ready_cx = None
         st0 = np.asarray(start).reshape(kin.K, -1)
         hx = float(st0[kin.PX, 0])
         c = self._clapper(f, hx)
@@ -330,7 +345,16 @@ class MapHelper:
             if m.get("name") == "Control":
                 stt = m.get("state")
         cx = float(e["pos"][0])
-        if stt not in self._dec or abs(cx - hx) > smrt.READY_RANGE_U:
+        evading = CHASE and stt == EVADE_STATE
+        if evading:
+            # SG5: After Scuttle branches at once (Slam Range -> SLAM / CAST): the Clapper where the scuttle ends
+            t_in = 0.0
+            for m in e.get("fsms") or ():
+                if m.get("name") == "Control":
+                    t_in = float(m.get("t") or 0.0)
+            v = e.get("vel") or (0.0, 0.0)
+            cx = cx + float(v[0]) * max(0.0, EVADE_S - t_in)
+        if (stt not in self._dec and not evading) or abs(cx - hx) > smrt.READY_RANGE_U:
             return None
         rt = self.runtime()
         if rt is None:
@@ -372,6 +396,13 @@ class MapHelper:
         sd = 1 if hx >= cx else -1
         BOARD[iid] = {"tick": ticks, "on": False, "x": None, "ready_x": float(cx + sd * xs[bi]), "k": None,
                       "why": "ready"}
+        if CHASE:
+            # SG5: the chase stance (the L2 controller): the readiness argmax inside the slash band
+            band = (xs >= CHASE_BAND[0] - 1e-9) & (xs <= CHASE_BAND[1] + 1e-9)
+            ib = np.flatnonzero(band)
+            ci = int(ib[int(np.argmax(np.asarray(rv)[ib]))]) if len(ib) else bi
+            BOARD[iid].update(chase_x=float(cx + sd * xs[ci]), R_ref=float(ref), evading=bool(evading))
+            self.ready_cx = cx                                    # (the planner's readiness tier: near rows)
         self.ready_info = {"iid": iid, "state": stt, "ref": round(ref, 3), "R_min": round(float(R.min()), 3),
                            "R_max": round(float(R.max()), 3), "pen_rows": int((pen > 0).sum()),
                            "out_rows": int(out_.sum()), "ready_x": round(float(cx + sd * xs[bi]), 2),

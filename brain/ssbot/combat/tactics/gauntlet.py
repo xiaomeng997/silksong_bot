@@ -385,6 +385,13 @@ class GauntletTactics:
                 return behind, frozenset(), "rune: behind"
             return self._clamp(out), frozenset(), "rune: out"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
+        if fam != CC_CAST and _chase_on():
+            # SSBOT_FORUM_CHASE (SG5): idle / walk, the evade (chase at once: it ends in its next move), the entry: a
+            # slash stance in reach on the hero's side, the map's readiness argmax inside forum_map.CHASE_BAND (a slam
+            # starting then leaves two strikes with full clearance), else CHASE_U
+            if mb is not None and mb.get("chase_x") is not None:
+                return self._clamp(float(mb["chase_x"])), vocab, "chase: ready"
+            return self._clamp(x + side * CHASE_U), vocab, "chase"
         if fam != CC_CAST and mb is not None and mb.get("ready_x") is not None:
             # SG4: before a slam can start, the readiness argmax 3-6 u in front (the map at k = 0)
             return self._clamp(float(mb["ready_x"])), vocab, "face: ready"
@@ -780,6 +787,9 @@ class GauntletTactics:
             wts["risk"] /= EVADE_RISK_X
         for k, v in (r.weights.get(g.name) or {}).items():
             wts[k] = wts.get(k, 0.0) * float(v)
+        if str(how).startswith("chase"):
+            # SSBOT_FORUM_CHASE (SG5): close the gap before its next move (the planner's safety keys stay above J)
+            wts["stance"] = wts.get("stance", 0.0) * CHASE_STANCE_X
         hw = {k: (min(v, self.local.rules.other_hit_w) if v > 0 and k != g.target else v)
               for k, v in prefs.hit_w.items()}           # LOCAL's own target back to the others' weight
         if how in CC_RETREAT:
@@ -829,6 +839,16 @@ class GauntletTactics:
         q = (lambda p: round(float(np.percentile(ms, p)), 3) if ms else None)
         return {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.stats.items() if k != "ms"} | \
             {"ms_p50": q(50), "ms_p99": q(99), "ms_n": len(ms)}
+
+
+CHASE_U = 4.0               # SSBOT_FORUM_CHASE: the chase stance without the map's readiness (centre to centre, u)
+CHASE_STANCE_X = 2.0        # ... and its stance weight's factor
+
+
+def _chase_on() -> bool:
+    """SSBOT_FORUM_CHASE=1 with SSBOT_FORUM_SPECIAL_MAP=1 (task 1v1 SG5)."""
+    return (os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
+            and os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1")
 
 
 def _map_board(iid):

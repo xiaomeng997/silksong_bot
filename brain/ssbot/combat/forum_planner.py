@@ -197,6 +197,38 @@ CL_NODOWN_U = 12.0
 # the map row during a tracked CL_SLAM (judged as a special row, first among the safe rows), the readiness penalty
 # before a slam can start (replaces SSBOT_FORUM_CL_NODOWN, which is then ignored), the L2 spots. Off: no change.
 SPECIAL_MAP = os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
+# SSBOT_FORUM_CHASE=1 (task 1v1 SG5, forum.md 61; needs SSBOT_FORUM_SPECIAL_MAP=1): chase and slash outside the slam:
+# per tick the chase rows (run / dash toward a Clapper that idles, walks, evades or enters, then a slash every 19
+# frames with the side key held a few frames after each press to follow the knockback; every check stays), and the
+# map's readiness of a row's end as a tier above the landed hits (the rows below R_ref after the others) where SG4's
+# soft penalty traded readiness for hits; L2's chase stance (tactics.gauntlet). Off: no change.
+CHASE = SPECIAL_MAP and os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1"
+CHASE_TIER = 300.0            # the readiness tier (landed-hit units: above any hit count, below the corner's 1000)
+CHASE_TIER_U = 6.5            # ... for the rows ending this close to the Clapper (centre to centre, u): in slash reach
+#                               the end state must leave R_ref (SG4: readiness >= WC + 2 at the antic entry, 2.00 strikes,
+#                               0.09 % damaged starts; (WC, WC + 1) 0.19 %); farther out SG4's soft penalty as before
+#                               (a tier there would rank a retreat past 12 u (R <= WC) over an approach still 7 u out)
+CHASE_RUN_K = (0, 4, 8, 12, 16, 20, 24)   # the run rows' first press frame (the side key held until it)
+CHASE_DASH_K = (10, 14, 18, 22)           # the dash rows' (a press while the dash runs is the dash stab: candidates.DASH_WAIT)
+CHASE_FOLLOW = (4, 8)         # frames the side key is held from each press: a landed slash knocks it back ~0.48 u and
+#                               the hero ~0.5 u (recoil 3.75 u/s x 8 steps); run 8.25 u/s = 0.1375 u per frame
+CHASE_PERIOD = 19             # frames between presses (Wanderer attack_cooldown 0.3 s = 18 frames)
+CHASE_NEAR_U = 14.0           # a Clapper this close (x) gets chase rows
+CHASE_FAMS = (None, "CC_EVADE", "CC_ENTRY")   # its instance then (idle / walk: none)
+CHASE_RUNE_S = 1.1            # no chase rows this long after a jump cast (its rune circle bursts 0.75-0.87 s after it)
+
+
+def chase_tier_low(R: np.ndarray, safe: np.ndarray, xe: np.ndarray, cx: float | None, ref: float,
+                   near_u: float = CHASE_TIER_U) -> np.ndarray:
+    """SSBOT_FORUM_CHASE (SG5): [N] the rows the readiness tier puts after the others: safe, ending within near_u of
+    the Clapper (centre to centre, the readiness's Clapper x) with the map's readiness of the end state below ref (nan:
+    not computed, never low; -inf: no safe continuation, low)."""
+    if cx is None:
+        return np.zeros(len(R), bool)
+    Rf = np.where(np.isnan(R), np.inf, R)
+    return np.asarray(safe, bool) & (np.abs(np.asarray(xe) - float(cx)) <= near_u) & (Rf < ref)
+
+
 # review (SG4): the map row's planner lane (hold-filtered keys, the map's bounces) may leave the map's own path by at
 # most one run step in x (0.165 u: a stretched one-frame tap, the map's x dilation is 0.2475 u) and the map's y dilation
 MAP_LANE_TOL_X = 0.2
@@ -462,6 +494,13 @@ class EnvelopeAudit:
     map_xcheck: int = 0           #   of those where it changed the chosen row; rows put last (no safe continuation)
     map_off: int = 0
     map_nodown_ignored: int = 0
+    chase_ticks: int = 0          # SSBOT_FORUM_CHASE (SG5): ticks with chase rows; the rows, safe ones, chosen ticks
+    chase_rows: int = 0
+    chase_safe: int = 0
+    chase_chosen: int = 0
+    chase_tier_ticks: int = 0     # ... ticks with the readiness tier; safe rows put below it; ticks it changed the first
+    chase_tier_rows: int = 0
+    chase_tier_changed: int = 0
     ready_ticks: int = 0
     ready_changed: int = 0
     ready_out_rows: int = 0
@@ -1152,6 +1191,7 @@ class ForumPlanner(Planner):
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
         self.crest = crest
         self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper
+        self._chase_jc: dict = {}         # SSBOT_FORUM_CHASE: iid -> the tracker's last time in a jump cast
         if SPECIAL_MAP:
             # review: loaded here (or on the first tick with the arena's terrain: the policy builds the planner on an
             # empty one), not on the first tick near a Clapper (that tick stalled ~80 ms in the replays)
@@ -2579,6 +2619,59 @@ class ForumPlanner(Planner):
         self.hop_dbg = {"on_p": on_p, "off_p": off_p, "clear": (a, z), "press": cs_, "bx": float(b[1])}
         return cmd[ok_q], [n for n, k in zip(names, ok_q) if k], np.asarray(bits, np.int64)[ok_q]
 
+    def _chase_rows(self, f, start, T: int):
+        """SSBOT_FORUM_CHASE (task 1v1 SG5): toward the nearest Clapper (forum_map.MapHelper._clapper) while it idles,
+        walks, evades or enters (CHASE_FAMS; not CHASE_RUNE_S after a jump cast): run (the side key) until the first
+        press at k1 (CHASE_RUN_K), or dash then run (CHASE_DASH_K), then a slash every CHASE_PERIOD frames with the
+        side key held CHASE_FOLLOW frames from each press. Every check the other rows get (the hop block: always
+        enveloped). (cmd [n, T], names, prim bits) or None."""
+        if self._map is None:
+            return None
+        st = np.asarray(start).reshape(kin.K, -1)
+        hx = float(st[kin.PX, 0])
+        c = self._map._clapper(f, hx)
+        if c is None:
+            return None
+        d, iid, _, e, inst = c
+        trk = getattr(getattr(f, "rs", None), "trk", None)
+        t_ = float(getattr(trk, "T", 0.0) or 0.0)
+        fam = getattr(inst, "fam", None) if inst is not None else None
+        if fam == "CC_JUMP_CAST":
+            self._chase_jc[iid] = t_
+        if fam not in CHASE_FAMS or d > CHASE_NEAR_U or t_ - self._chase_jc.get(iid, -1e9) <= CHASE_RUNE_S:
+            return None
+        cx = float(e["pos"][0])
+        if abs(cx - hx) < 0.5:
+            return None
+        dirb = kin.B_RIGHT if cx > hx else kin.B_LEFT
+        P = cmod.Prim
+        b_run = cmod._bits(frozenset({P.MOVE, P.ATTACK_SIDE}))
+        b_dash = cmod._bits(frozenset({P.MOVE, P.ATTACK_SIDE, P.DASH}))
+        cmd, names, bits = [], [], []
+
+        def presses(m, k1, fol):
+            for k in range(k1, T, CHASE_PERIOD):
+                m[k:k + cmod.PRESS] |= B_ATTACK
+                m[k:k + fol] |= dirb
+        for k1 in CHASE_RUN_K:
+            for fol in CHASE_FOLLOW:
+                m = np.zeros(T, np.int64)
+                m[:k1] = dirb
+                presses(m, k1, fol)
+                cmd.append(m)
+                names.append(f"CHASE run{k1}_f{fol}")
+                bits.append(b_run)
+        for k1 in CHASE_DASH_K:
+            for fol in CHASE_FOLLOW:
+                m = np.zeros(T, np.int64)
+                m[:k1] = dirb
+                m[:cmod.PRESS] |= B_DASH
+                presses(m, k1, fol)
+                cmd.append(m)
+                names.append(f"CHASE dash{k1}_f{fol}")
+                bits.append(b_dash)
+        return np.asarray(cmd), names, np.asarray(bits, np.int64)
+
     DS_REACH_U = 10.0             # the family runs only with a real target this close in x (box edge to hero centre)
 
     def _ds_hits(self, r, lat, face0: int, tbox, tok, treal, k_from, grow: float, shifts, stop: bool = False):
@@ -3058,6 +3151,14 @@ class ForumPlanner(Planner):
         hop = None
         if v2 and rune_bombs.HOP and posture == "ground" and mode0 not in NO_CONTROL_MODES:
             hop = self._rune_hop_rows(f, start, hold, prefix, T)
+        n_chase = 0
+        if CHASE and v2 and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
+            # SG5: the chase rows after the hop rows, in the same block (always enveloped, like the core rows)
+            ch_ = self._chase_rows(f, start, T)
+            if ch_ is not None:
+                n_chase = len(ch_[0])
+                hop = ch_ if hop is None else (np.concatenate([hop[0], ch_[0]]), list(hop[1]) + list(ch_[1]),
+                                               np.concatenate([np.asarray(hop[2], np.int64), ch_[2]]))
         n_hop = 0 if hop is None else len(hop[0])
         if n_hop:
             rows_.append(hop[0])                 # the person's hop rows (G2): after the special rows
@@ -3642,10 +3743,14 @@ class ForumPlanner(Planner):
         self.last_safe, self.last_cs = safe, cs
         V = np.zeros(N, bool)
         counts = np.bincount(first[:N0][safe[:N0]], minlength=len(cs.first_names))
-        if n_hop:
+        if n_hop > n_chase:
             self.audit.hop_ticks += 1
-            self.audit.hop_rows += n_hop
-            self.audit.hop_safe += int(safe[N0 + n_spec:N0 + n_spec + n_hop].sum())
+            self.audit.hop_rows += n_hop - n_chase
+            self.audit.hop_safe += int(safe[N0 + n_spec:N0 + n_spec + n_hop - n_chase].sum())
+        if n_chase:
+            self.audit.chase_ticks += 1
+            self.audit.chase_rows += n_chase
+            self.audit.chase_safe += int(safe[N0 + n_spec + n_hop - n_chase:N0 + n_spec + n_hop].sum())
         if n_spec:
             self.audit.spec_ticks += 1
             self.audit.spec_rows += n_spec
@@ -3797,6 +3902,7 @@ class ForumPlanner(Planner):
             # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
             # otherwise and on every unsafe row: the order is unchanged)
             v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            dg_pen, dg_corner = None, None          # (diagnostics: last_sel)
             if SPECIAL_MAP and v2 and self._map is not None:
                 # SG4: the readiness penalty (landed-hit units) before a slam can start; rows with no safe
                 # continuation from their end last (unless every row has none)
@@ -3806,6 +3912,22 @@ class ForumPlanner(Planner):
                 map_ms += (time.perf_counter() - tm_) * 1e3
                 if rp_ is not None:
                     pen_ = rp_[0]
+                    dg_pen = pen_
+                    if CHASE:
+                        # SG5: the readiness as a tier above the landed hits: the safe rows whose end leaves less
+                        # than R_ref (a slam starting then: two strikes with full clearance) after the others; no
+                        # safe continuation (-inf) last
+                        R_ = rp_[1]
+                        ref_ = float(self._map.runtime().ready_ref) if self._map.runtime() is not None else 3.0
+                        low_ = chase_tier_low(R_, safe, 0.5 * (r1.box[:, -1, 0] + r1.box[:, -1, 2]),
+                                              getattr(self._map, "ready_cx", None), ref_)
+                        b0t_ = int(np.lexsort((-J, v2_nh + np.where(safe, pen_, 0.0)))[0]) if safe.any() else -1
+                        pen_ = pen_ + np.where(low_, CHASE_TIER, 0.0)
+                        b1t_ = int(np.lexsort((-J, v2_nh + np.where(safe, pen_, 0.0)))[0]) if safe.any() else -1
+                        self.audit.chase_tier_ticks += 1
+                        self.audit.chase_tier_rows += int(low_.sum())
+                        self.audit.chase_tier_changed += int(b0t_ != b1t_)
+                        dg_pen = pen_
                     b0_ = int(np.lexsort((-J, v2_nh))[0]) if safe.any() else -1
                     v2_nh = v2_nh + np.where(safe, pen_, 0.0)
                     self.audit.ready_ticks += 1
@@ -3826,6 +3948,7 @@ class ForumPlanner(Planner):
                         corner |= (cxe >= x0) & (cxe <= x1) & (cye < forum_v2.CORNER_TOP_Y)
                     v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
                     self.audit.v2_corner_rows += int((safe & corner).sum())
+                    dg_corner = corner
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
             # G4 4b (SSBOT_FORUM_SPECIAL_KEEP): the kept template's row, safe and keeping the committed hold and the
             # macro margin, before every other safe row (above the landed hits); no key without the switch
@@ -3861,7 +3984,8 @@ class ForumPlanner(Planner):
                              "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
                              "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
                              "flags": r1.flags, "cmd": cmd, "P": P, "T1": T1, "p_k": fcfg.p_k,
-                             **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")}}
+                             **{k: sc.get(k) for k in ("E", "trapped", "overlap", "hexp")},
+                             "v2_nh": v2_nh, "ready_pen": dg_pen, "corner": dg_corner, "kk": kk_}
             esc_row = None
             esc_unsafe = False
             if (fcfg.escape or v2) and (not carried or (v2 and forum_v2.ESC_CARRIED)):
@@ -3929,7 +4053,8 @@ class ForumPlanner(Planner):
             sel_cmd = cmd[i]
             name = rname(i)
             a.spec_chosen += int(N0 <= i < N0 + n_spec)
-            a.hop_chosen += int(N0 + n_spec <= i < N0 + n_spec + n_hop)
+            a.hop_chosen += int(N0 + n_spec <= i < N0 + n_spec + n_hop - n_chase)
+            a.chase_chosen += int(n_chase > 0 and N0 + n_spec + n_hop - n_chase <= i < N0 + n_spec + n_hop)
             if dslash.DSLASH:
                 self._ds_prev = None
                 if D0 <= i < D0 + n_ds and not S[i]:
