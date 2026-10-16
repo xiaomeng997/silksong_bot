@@ -19,7 +19,9 @@ Per tick (ForumPlanner.tick calls MapHelper):
     the readiness also runs while the Clapper evades (Evade Scuttle: After Scuttle branches at once, in its Slam Range
     to SLAM / CAST; the Clapper carried by its velocity to the scuttle's end), and BOARD gets "chase_x": the readiness
     argmax inside CHASE_BAND (the slash stance the L2 controller chases to), "R_ref" the threshold the planner's
-    readiness tier uses.
+    readiness tier uses. Review (forum.md 61.6): only where the map handles a slam starting now (MapHelper.chase_gate:
+    the map loaded, no wall exit for the Clapper facing the hero; else BOARD "chase_off" and rnmap's readiness), and
+    while it evades the readiness is read at the scuttle's end (the slam starts there), not at the row's end.
 """
 from __future__ import annotations
 
@@ -48,6 +50,13 @@ CHASE = os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1"
 CHASE_BAND = (3.5, 4.6)
 EVADE_STATE = "Evade Scuttle"
 EVADE_S = 0.35               # Evade Scuttle -> After Scuttle (forum.md 18.1)
+MAP_READY = {"ok": False}    # review: the map runtime loaded (MapHelper.runtime); the L2 chase needs it
+
+
+def chase_wall(cx: float, hx: float, arena: tuple | None = None) -> bool:
+    """SSBOT_FORUM_CHASE review: a slam the Clapper at cx starts now (facing the hero at hx, as at every antic) gets no
+    map row (the map row's wall exit: a wall within WALL_FRONT_U in front of / WALL_BACK_U behind the anchor)."""
+    return bool(smrt.MapRuntime.wall_exit(float(cx), 1 if hx >= cx else -1, arena or FORUM_ARENA))
 
 
 def _decision_states() -> frozenset:
@@ -88,6 +97,7 @@ class MapHelper:
             except Exception as ex:  # noqa: BLE001 - a broken map file must not stop the planner
                 self._rt = None
                 self.load_error = repr(ex)
+            MAP_READY["ok"] = self._rt is not None
         return self._rt
 
     def preload(self) -> None:
@@ -109,6 +119,32 @@ class MapHelper:
             except Exception as ex:  # noqa: BLE001 - a warm-up failure must not stop the planner
                 self.load_error = repr(ex)
         self.preload_ms = round((time.perf_counter() - t0) * 1e3, 1)
+
+    # ---- SSBOT_FORUM_CHASE (SG5 review) ----
+    @staticmethod
+    def clapper_x(e: dict, stt) -> tuple[float, int | None]:
+        """(x, frames until a slam can start or None): while it evades (CHASE), where the scuttle ends (carried by its
+        velocity) and the frames until then (After Scuttle branches at once); else where it is now."""
+        cx = float(e["pos"][0])
+        if not (CHASE and stt == EVADE_STATE):
+            return cx, None
+        t_in = 0.0
+        for m in e.get("fsms") or ():
+            if m.get("name") == "Control":
+                t_in = float(m.get("t") or 0.0)
+        v = e.get("vel") or (0.0, 0.0)
+        dt = max(0.0, EVADE_S - t_in)
+        return cx + float(v[0]) * dt, int(round(dt * 60.0))
+
+    def chase_gate(self, cx: float, hx: float) -> str | None:
+        """None when the chase may run against the Clapper at cx (the map handles a slam it starts now), else why not:
+        "no map" (no map file: the planner runs without it), "wall" (chase_wall: the map would leave that slam to the
+        full checks; a scuttle carried past the wall lands here too)."""
+        if self.runtime() is None:
+            return "no map"
+        if chase_wall(cx, hx):
+            return "wall"
+        return None
 
     # ---- the Clapper and its slam ----
     def _clapper(self, f, hx: float):
@@ -332,6 +368,8 @@ class MapHelper:
         same as computed over all rows."""
         self.ready_info = None
         self.ready_cx = None
+        self.ready_j = None
+        self.chase_off = None
         st0 = np.asarray(start).reshape(kin.K, -1)
         hx = float(st0[kin.PX, 0])
         c = self._clapper(f, hx)
@@ -344,50 +382,57 @@ class MapHelper:
         for m in e.get("fsms") or ():
             if m.get("name") == "Control":
                 stt = m.get("state")
-        cx = float(e["pos"][0])
         evading = CHASE and stt == EVADE_STATE
-        if evading:
-            # SG5: After Scuttle branches at once (Slam Range -> SLAM / CAST): the Clapper where the scuttle ends
-            t_in = 0.0
-            for m in e.get("fsms") or ():
-                if m.get("name") == "Control":
-                    t_in = float(m.get("t") or 0.0)
-            v = e.get("vel") or (0.0, 0.0)
-            cx = cx + float(v[0]) * max(0.0, EVADE_S - t_in)
+        cx, k_ev = self.clapper_x(e, stt)                         # SG5: while it evades, where the scuttle ends
         if (stt not in self._dec and not evading) or abs(cx - hx) > smrt.READY_RANGE_U:
             return None
         rt = self.runtime()
         if rt is None:
             return None
+        gate = self.chase_gate(cx, hx) if CHASE else None
+        self.chase_off = gate
+        if evading and gate is not None:
+            # review: the map would not handle this slam: rnmap's behaviour (no readiness while it evades), and the
+            # L2 controller told so (BOARD "chase_off": its own branches, not the chase)
+            BOARD[iid] = {"tick": ticks, "on": False, "x": None, "ready_x": None, "k": None, "why": "chase_off",
+                          "chase_off": gate}
+            return None
+        chase = CHASE and gate is None
         t0 = time.perf_counter()
         N = r1.box.shape[0]
         Te = r1.box.shape[1] - 1
+        # review: the rollout index whose state meets the slam's k = 0: the row's end; while it evades, the scuttle's
+        # end (After Scuttle branches at once; not before the first frame after the prefix)
+        je = Te if k_ev is None else int(min(Te, max(P + 1, k_ev)))
+        self.ready_j = je
         idx = np.arange(N) if rows is None else np.asarray(rows, np.int64)
         if not len(idx):
             return np.zeros(N), np.full(N, np.nan)
         bx_ = r1.box[idx]
-        xe = 0.5 * (bx_[:, -1, 0] + bx_[:, -1, 2])
+        xe = 0.5 * (bx_[:, je, 0] + bx_[:, je, 2])
         side = np.where(xe >= cx, 1, -1)                          # it turns to face the hero at k = 0
         xm = np.abs(xe - cx)
         S0 = st0[:, 0]
         q0 = smrt.phases_of(float(S0[kin.ALO]), float(S0[kin.AHI]), 0)   # the cycle at rollout index 0 (k = 0 there)
-        p_end = sorted({(q - Te) % 6 for q in q0} & set(rt.srcs))   # the phase of a slam starting at the row's end
+        p_end = sorted({(q - je) % 6 for q in q0} & set(rt.srcs))   # the phase of a slam starting at index je
         if not p_end:
             return None
-        last = cmd[idx, -1] if cmd.shape[1] else np.zeros(len(idx), np.int64)
+        ce = je - P - 1                                           # cmd's column read at index je
+        last = cmd[idx, ce] if (cmd.shape[1] and 0 <= ce < cmd.shape[1]) else np.zeros(len(idx), np.int64)
         kd = np.where((last & kin.B_RIGHT) != 0, 1, np.where((last & kin.B_LEFT) != 0, -1, 0)) * side
-        gnd = (r1.flags[idx, -1] & kin.F_GROUND) != 0
-        glide = r1.mode[idx, -1] == kin.M_GLIDE
-        yb = bx_[:, -1, 1] - rt.hm.stand_y0
-        yp = bx_[:, -2, 1] - rt.hm.stand_y0
+        gnd = (r1.flags[idx, je] & kin.F_GROUND) != 0
+        glide = r1.mode[idx, je] == kin.M_GLIDE
+        yb = bx_[:, je, 1] - rt.hm.stand_y0
+        yp = bx_[:, je - 1, 1] - rt.hm.stand_y0
         R = np.full(len(idx), np.inf)
         for p in p_end:
             R = np.minimum(R, rt.readiness_rows(p, xm, kd, gnd, yb, yp))
         R[glide] = 0.0
-        if CHASE:
+        if chase:
             # SG5: a row ending in a ground swing: the hero is locked until the swing ends (attack_duration), so a
             # slam starting at the row's end meets her free only k_lock frames into its antic: the map's value there
-            fl = r1.flags[idx]
+            # (review: at index je)
+            fl = r1.flags[idx, :je + 1]
             att = (fl[:, -1] & kin.F_ATTACKING) != 0
             if att.any():
                 n_att = np.zeros(len(idx), np.int64)                  # trailing swing frames at the end
@@ -417,7 +462,9 @@ class MapHelper:
         sd = 1 if hx >= cx else -1
         BOARD[iid] = {"tick": ticks, "on": False, "x": None, "ready_x": float(cx + sd * xs[bi]), "k": None,
                       "why": "ready"}
-        if CHASE:
+        if CHASE and not chase:
+            BOARD[iid]["chase_off"] = gate                        # review: rnmap's readiness, no chase spot / tier
+        if chase:
             # SG5: the chase stance (the L2 controller): the readiness argmax inside the slash band
             band = (xs >= CHASE_BAND[0] - 1e-9) & (xs <= CHASE_BAND[1] + 1e-9)
             ib = np.flatnonzero(band)
@@ -435,4 +482,4 @@ class MapHelper:
         return pen_f, R_f
 
 
-__all__ = ["MapHelper", "MapRow", "BOARD"]
+__all__ = ["MapHelper", "MapRow", "BOARD", "MAP_READY", "chase_wall"]

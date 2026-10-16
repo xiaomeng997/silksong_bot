@@ -2623,12 +2623,26 @@ class ForumPlanner(Planner):
         self.hop_dbg = {"on_p": on_p, "off_p": off_p, "clear": (a, z), "press": cs_, "bx": float(b[1])}
         return cmd[ok_q], [n for n, k in zip(names, ok_q) if k], np.asarray(bits, np.int64)[ok_q]
 
+    def _chase_note_jc(self, f) -> None:
+        """SSBOT_FORUM_CHASE (review): every tick, the tracker's time of each Clapper in a jump cast (CHASE_RUNE_S
+        counts from its last tick wherever the hero is: beyond the map's NEAR_U, in a dash / recoil, on a wall)."""
+        trk = getattr(getattr(f, "rs", None), "trk", None)
+        if trk is None:
+            return
+        t_ = float(getattr(trk, "T", 0.0) or 0.0)
+        for iid, (tk, e, inst) in (getattr(trk, "now", None) or {}).items():
+            if getattr(inst, "fam", None) == "CC_JUMP_CAST" and (e.get("type_key") or tk) == "Song Heavy Sentry":
+                self._chase_jc[int(iid)] = t_
+
     def _chase_rows(self, f, start, T: int):
         """SSBOT_FORUM_CHASE (task 1v1 SG5): toward the nearest Clapper (forum_map.MapHelper._clapper) while it idles,
         walks, evades or enters (CHASE_FAMS; not CHASE_RUNE_S after a jump cast): run (the side key) until the first
         press at k1 (CHASE_RUN_K, within CHASE_K_TOL of where the run reaches CHASE_AIM_U), or from farther than
         CHASE_DASH_U dash then run (CHASE_DASH_K), then a slash every CHASE_PERIOD frames with the side key held
-        CHASE_FOLLOW frames from each press. Every check the other rows get. (cmd [n, T], names, prim bits) or None."""
+        CHASE_FOLLOW frames from each press. Every check the other rows get. Review: none unless the map handles a
+        slam it starts now (MapHelper.chase_gate: the map loaded, no wall exit; while it evades, where the scuttle
+        ends). (cmd [n, T], names, prim bits) or None."""
+        self.chase_off = None
         if self._map is None:
             return None
         st = np.asarray(start).reshape(kin.K, -1)
@@ -2640,12 +2654,15 @@ class ForumPlanner(Planner):
         trk = getattr(getattr(f, "rs", None), "trk", None)
         t_ = float(getattr(trk, "T", 0.0) or 0.0)
         fam = getattr(inst, "fam", None) if inst is not None else None
-        if fam == "CC_JUMP_CAST":
-            self._chase_jc[iid] = t_
         if fam not in CHASE_FAMS or d > CHASE_NEAR_U or t_ - self._chase_jc.get(iid, -1e9) <= CHASE_RUNE_S:
             return None
         cx = float(e["pos"][0])
         if abs(cx - hx) < 0.5:
+            return None
+        stt = next((m.get("state") for m in e.get("fsms") or () if m.get("name") == "Control"), None)
+        gate = self._map.chase_gate(self._map.clapper_x(e, stt)[0], hx)
+        if gate is not None:
+            self.chase_off = gate
             return None
         dirb = kin.B_RIGHT if cx > hx else kin.B_LEFT
         # the first press where a run reaches the band (CHASE_K_TOL frames either side); the dash rows from afar only
@@ -3160,6 +3177,8 @@ class ForumPlanner(Planner):
         if v2 and rune_bombs.HOP and posture == "ground" and mode0 not in NO_CONTROL_MODES:
             hop = self._rune_hop_rows(f, start, hold, prefix, T)
         n_chase = 0
+        if CHASE:
+            self._chase_note_jc(f)               # review: every tick (CHASE_RUNE_S from the jump cast's last tick)
         if CHASE and v2 and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
             # SG5: the chase rows after the hop rows, in the same block (not core: enveloped in the order like the
             # set's rows, so they cannot push the escape check past its deadline)
@@ -3928,7 +3947,9 @@ class ForumPlanner(Planner):
                         # safe continuation (-inf) last
                         R_ = rp_[1]
                         ref_ = float(self._map.runtime().ready_ref) if self._map.runtime() is not None else 3.0
-                        low_ = chase_tier_low(R_, safe, 0.5 * (r1.box[:, -1, 0] + r1.box[:, -1, 2]),
+                        je_ = getattr(self._map, "ready_j", None)        # review: the readiness's index (the evade's
+                        je_ = -1 if je_ is None else int(je_)             # end while it evades)
+                        low_ = chase_tier_low(R_, safe, 0.5 * (r1.box[:, je_, 0] + r1.box[:, je_, 2]),
                                               getattr(self._map, "ready_cx", None), ref_)
                         b0t_ = int(np.lexsort((-J, v2_nh + np.where(safe, pen_, 0.0)))[0]) if safe.any() else -1
                         pen_ = pen_ + np.where(low_, CHASE_TIER, 0.0)

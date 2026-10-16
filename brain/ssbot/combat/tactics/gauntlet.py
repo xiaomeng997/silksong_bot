@@ -385,10 +385,11 @@ class GauntletTactics:
                 return behind, frozenset(), "rune: behind"
             return self._clamp(out), frozenset(), "rune: out"
         vocab = frozenset({GLIDE_SPIKE}) if fam == CC_CAST else frozenset()
-        if fam != CC_CAST and _chase_on():
+        if fam != CC_CAST and _chase_on() and _chase_ok(mb, x, hx):
             # SSBOT_FORUM_CHASE (SG5): idle / walk, the evade (chase at once: it ends in its next move), the entry: a
             # slash stance in reach on the hero's side, the map's readiness argmax inside forum_map.CHASE_BAND (a slam
-            # starting then leaves two strikes with full clearance), else CHASE_U
+            # starting then leaves two strikes with full clearance), else CHASE_U. Review: only where the map handles
+            # a slam it starts now (_chase_ok); elsewhere the branches below as in rnmap
             if mb is not None and mb.get("chase_x") is not None:
                 return self._clamp(float(mb["chase_x"])), vocab, "chase: ready"
             return self._clamp(x + side * CHASE_U), vocab, "chase"
@@ -849,6 +850,19 @@ def _chase_on() -> bool:
     """SSBOT_FORUM_CHASE=1 with SSBOT_FORUM_SPECIAL_MAP=1 (task 1v1 SG5)."""
     return (os.environ.get("SSBOT_FORUM_SPECIAL_MAP", "0").strip() == "1"
             and os.environ.get("SSBOT_FORUM_CHASE", "0").strip() == "1")
+
+
+def _chase_ok(mb, x: float, hx: float) -> bool:
+    """SSBOT_FORUM_CHASE review: the chase stance only where the slam map handles a slam this Clapper starts now: the
+    planner's gate on its last tick (BOARD "chase_x": yes, "chase_off": no), else (no readiness that tick: far, the
+    entry, no safe row) the map loaded (forum_map.MAP_READY) and no wall exit for it facing the hero (chase_wall)."""
+    if mb is not None:
+        if mb.get("chase_x") is not None:
+            return True
+        if mb.get("chase_off"):
+            return False
+    from ssbot.combat import forum_map
+    return bool(forum_map.MAP_READY.get("ok")) and not forum_map.chase_wall(x, hx)
 
 
 def _map_board(iid):

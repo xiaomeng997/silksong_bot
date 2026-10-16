@@ -39,6 +39,12 @@ class _Map:
         d = abs(self.e["pos"][0] - hx) if self.d is None else self.d
         return (d, 7, CC, self.e, self.inst)
 
+    def clapper_x(self, e, stt):                                  # (review: the map's gate; the open arena here)
+        return float(e["pos"][0]), None
+
+    def chase_gate(self, cx, hx):
+        return None
+
 
 def _chase(mp, hx=20.0, T=36, t=10.0, jc=None):
     pl = NS(_map=mp, _chase_jc={} if jc is None else jc)
@@ -85,7 +91,10 @@ def test_chase_rows_only_outside_its_moves():
     assert _chase(_Map(20.2))[0] is None                          # on top of it
     # a jump cast: its rune circle bursts after the move: no chase rows for CHASE_RUNE_S
     r, pl = _chase(_Map(28.0, "CC_JUMP_CAST"), t=10.0)
-    assert r is None and pl._chase_jc[7] == 10.0
+    assert r is None
+    mp = _Map(28.0, "CC_JUMP_CAST")                               # review: noted every tick by _chase_note_jc
+    fp.ForumPlanner._chase_note_jc(pl, NS(rs=NS(trk=NS(T=10.0, now={7: (CC, mp.e, mp.inst)}))))
+    assert pl._chase_jc[7] == 10.0
     assert _chase(_Map(28.0), t=10.0 + fp.CHASE_RUNE_S - 0.05, jc=pl._chase_jc)[0] is None
     assert _chase(_Map(28.0), t=10.0 + fp.CHASE_RUNE_S + 0.05, jc=pl._chase_jc)[0] is not None
     assert fp.ForumPlanner._chase_rows(NS(_map=None, _chase_jc={}), None, np.zeros((kin.K, 1)), 36) is None
@@ -113,6 +122,7 @@ def test_l2_chase_stance(monkeypatch):
     p0 = t.decide(world(20.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
     assert p0.stance_x == pytest.approx(26.0) and t.last["goal_why"].endswith("face")
     monkeypatch.setenv("SSBOT_FORUM_CHASE", "1")
+    monkeypatch.setitem(forum_map.MAP_READY, "ok", True)          # (review: the L2 chase needs the map loaded)
     t = l2()
     p = t.decide(world(20.0, ents=[clapper(9, 30.0, False)]), WinFc(s), None, 3)
     assert t.last["goal_why"].endswith("chase") and p.stance_x == pytest.approx(30.0 - gauntlet.CHASE_U)
@@ -162,14 +172,15 @@ def test_readiness_while_it_evades_and_the_chase_spot(setup, monkeypatch):  # no
     r1 = NS(box=box, flags=np.full((2, T + 1), kin.F_GROUND, np.int64), mode=np.zeros((2, T + 1), np.int64))
     cmd = np.zeros((2, T), np.int64)
     start = kin.initial_state(params, cx + 4.0, setup["hm"].stand_py, facing=-1, ground=True, alpha=ALPHAS[0])
-    f, e = _mock(cx, "Evade Scuttle", 0.1)
+    monkeypatch.setattr(forum_map, "FORUM_ARENA", (0.0, 80.0))   # (review: no wall exit near x 40 here)
+    f, e = _mock(cx, "Evade Scuttle", 0.25)                       # (review: read 6 frames on: the setup's 2 phases)
     e["vel"] = [-6.0, 0.0]                                        # scuttling away from the hero (+x)
     monkeypatch.setattr(forum_map, "CHASE", False)
     assert h.readiness(f, start, r1, cmd, 0, 0) is None           # SG4: decision states only
     monkeypatch.setattr(forum_map, "CHASE", True)
     out = h.readiness(f, start, r1, cmd, 0, 1)
     assert out is not None
-    assert h.ready_cx == pytest.approx(cx - 6.0 * (forum_map.EVADE_S - 0.1))     # where the scuttle ends
+    assert h.ready_cx == pytest.approx(cx - 6.0 * (forum_map.EVADE_S - 0.25))    # where the scuttle ends
     b = forum_map.BOARD[7]
     lo, hi = forum_map.CHASE_BAND
     assert lo - 1e-6 <= b["chase_x"] - h.ready_cx <= hi + 1e-6 and b["R_ref"] == pytest.approx(R.ready_ref)
@@ -185,6 +196,7 @@ def test_readiness_of_a_row_ending_in_a_swing(setup, monkeypatch):  # noqa: F811
     = attack_duration - the swing's frames so far into the antic (never above the free hero's)."""
     from ssbot.combat import forum_map
     from ssbot.combat.hero_macros import ALPHAS
+    monkeypatch.setattr(forum_map, "FORUM_ARENA", (0.0, 80.0))   # (review: no wall exit near x 40 here)
     h, R = _helper(setup)
     params = setup["params"]
     cx, T = 40.0, 36
