@@ -215,6 +215,9 @@ class PlayCfg:
     early_post_stand: tuple = (4.2, 4.9)   # the walk band after an early press (the jump BAND unchanged)
     early_late_k: int = 18           # a press from this antic frame on (its recoil reaches the jump) ...
     early_late_u: float = 4.4        # ... only from this near (u, centre to centre; the walk band's top then)
+    early_late_lo: float = 4.2       # ... and from this far at least (the press's two frames toward it: -0.27 u)
+    early_band_lo: float = 3.6       # after an early press the jump band from here (SP1 it3: the jump at 3.6-7.25 u,
+    #                                  71 / 71 safe)
     early_near_v: float = 0.138      # NEAR's behind clearance under EARLY: her measured air speed (u / frame) ...
     early_cross_u: float = 2.3       # ... and the distance past its centre by Slam 0 + near_cross_s0 (x at Slam 0 + 10
     #                                  <= 1.84 u in front: t1's failures 1.99 / 2.09, SP5's behind successes 0.2-2.13)
@@ -452,6 +455,8 @@ class SlamPlay:
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
             band = r.band or c.band
+            if EARLY and r.k_early:
+                band = (min(band[0], c.early_band_lo), band[1])     # SP6: an early hit's knock-back builds up late
             late_walk = (LATE and (r.k_air is not None or r.late) and k < c.k_jump_late2 and ground
                          and not band[0] <= x <= band[1])
             if k < c.k_jump or late_walk:
@@ -726,9 +731,12 @@ class SlamPlay:
         if nxt >= c.early_late_k:
             # a late press (its hit's recoil runs on into the jump): from early_late_u at most (t2 / t3: the two hammer
             # hits pressed the strike from 5.66-5.78 u at Slam 0 - 1 after an early hit at antic frame 22 from
-            # 4.6-4.7 u; hits from <= 4.5 u put her at <= 5.56 u)
-            band = (band[0], c.early_late_u)
-            reach = reach and (xw - cx) * r.face <= c.early_late_u + 0.05
+            # 4.6-4.7 u; hits from <= 4.5 u put her at <= 5.56 u) and early_late_lo at least (t4, 0db621e: two presses
+            # at 23 from 3.98-4.12 u left her at 3.81-3.96 u at the jump - the knock-back and the recoil build up over
+            # ~8 frames - outside BAND: no strike, the lunge)
+            band = (c.early_late_lo + 0.05, c.early_late_u + 0.05)     # wider than a step (0.1375 u)
+            xr = (xw - cx) * r.face
+            reach = reach and c.early_late_lo <= xr <= c.early_late_u + 0.05
         prev = r.sent[-1][1] if r.sent else 0
         if k >= nxt and reach and prev & toward and not prev & away:
             r.k_early.append(k)
