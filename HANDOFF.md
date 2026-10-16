@@ -7097,3 +7097,122 @@ test_forum_v2, test_rune_bombs, test_zone_overlay (149 pass, 4.3 min).
 2. The map row's special context is now the map's largest per-tick cost (~2.5 ms p95 on row ticks); a lighter support
    check for the map row (its own lane is certified) would be the next lever.
 3. The overlay's own per-frame lookups (zone_overlay's ground strip) are still Python (its map row uses the kernel).
+
+## Task 1v1 - stage SG7: map fixes from the person's demo (branch worktree-wf_f1846551-5f9-1, 2026-10-15 night; forum.md §63)
+
+The person's slam demo (2026-10-15, `C:\ssbot\data\m2_map\human_1015`) showed the SG4 map certifying 0 of 29 landed
+down strikes. SG7 fixes what the game and the recordings prove, behind a new map tag. Offline only (no game, no live
+run). Data: `C:\ssbot\data\m2_map\sg7`. Distances are centre to centre (u); HeroBox 0.46 u wide; the Clapper's body
+front edge 2.1-2.25 u from its centre.
+
+### 1. The Slam Collider 2 rule: the hammer is a polygon
+
+- **Game facts.** Slam Collider 1 / 2 are PolygonCollider2Ds (the oracle exports `kind: poly` and world vertices;
+  dealt 2, `can_cause_damage` always true). The template and the map used their bounding boxes. The polygons are rigid
+  in the Clapper's frame (x mirrored by facing, relative to its position): 7 / 6 vertices, max vertex deviation
+  0.0009 u over 40,950 frames; their bounding boxes equal the template boxes to 0.001 u. Collider 2 is high near the
+  Clapper (2.6 u above its position) and slopes down to the floor in front (7.75 u, 0.24 u above the floor): a hero
+  bouncing above its head front is inside the box but outside the polygon.
+- **The demo's 20 "Collider 2 after the bounce i-frames" overlaps vanish** with the polygon (box: 23 hurtable frames;
+  polygon: 0). The other candidates are refuted by data and code: stays keep calling damage (379 of 415 Collider 2
+  overlap runs of 6+ frames have attempts from their 4th frame on; `HeroBox.OnTriggerStay2D` -> `CheckForDamage` every
+  physics step); the downspike protection is 8 physics steps (`downspikeInvulnerabilitySteps`, decremented in
+  `HeroController.FixedUpdate`; the recorded counter reaches 0 after 0.16 s = 9.5-10 frames at 60 Hz; the map's
+  contact +0..+8 frames is shorter, conservative, unchanged); `ContinueBounceTrigger`'s `SetCooldown(0.5)` never applies
+  to the hammer (layer 22, not a down-slash trigger target).
+- **All recordings** (`ssbot.tools.sg7_c2scan` + `sg7_c2rule`; 3,859 slams: 133 w7 1v1 runs, T1 probes, 20 human
+  sessions + the demo; 9 two-Clapper slams dropped; 10,706 TakeDamage attempts: 8,834 blocked, 1,216 past the gate,
+  656 hp losses; `C:\ssbot\data\m2_map\sg7\c2\rule_all.json`):
+  - 378 hammer hp losses (Collider 1 271, Collider 2 107): with the map's dilation (x 0.2475, y 0.12) the polygon and
+    the box both cover 369 within the hit frame and the 2 before; the other 9 are missed equally by both (recording
+    alignment at stun / dash frames). Undilated: box misses 22, polygon 28 (the 6 extra inside the dilation).
+  - The HeroBox top is 0.2187 u above the physics box top (HeroBox.cs: the normal ground / air boxes end at transform
+    + 0.745, the physics box at + 0.526). Polygon vs the physics box misses 11 more blocked attempts than vs the box
+    raised by 0.2187 u (3 in the demo) -> the map's hero box top is raised by 0.2187 u (a tightening). The bottom stays
+    the physics box's (the air HeroBox bottom is 0.53 u higher: not relaxed).
+  - Hurtable overlaps without an attempt within 2 frames (Collider 2): box 389 frames, polygon 91, polygon vs the real
+    HeroBox 35 (the rest: the HeroBox is smaller than the physics box in dash / umbrella states).
+- Code: `move_data.HAMMER_POLY`, `load_cl_slam(poly=True)`, `Track.poly`, `MoveTimeline.damage_shapes`; special_map
+  `MapConfig.poly / head_u` (band intervals + a distance table per polygon; the defaults keep the old maps
+  bit-identical: D, CL, VD, DS checked).
+
+### 2. Stage-aligned time (the person's rule, main 69d7cd2 / 09f15ed)
+
+- Rows = (frame k, what the hero has seen of the stage entries): antic; Slam 0 entered at e; Slam 1 / Slam 2 entered at
+  e after a Slam 0 of s0 frames; Recover-or-later merged (robust). Per row only the consistent variants: damage /
+  clearance are their union / minimum; the next frame is the same stage one frame on or (once its minimum length is
+  reached) the next stage's entry - both must be safe (`REACH`, minimum). The hero side (run steps, tubes, cycle
+  position) stays on the absolute frame. `Geometry._rows`, `StageKeyedMapBuilder` (equals KeyedMapBuilder with one
+  variant: test); 178 rows (antic 49, Slam 0 15, Slam 1 18, Slam 2 36, Recover+ 60).
+- Run time: `forum_map` records each stage's entry per slam (the tracker's state start, back-dated by the time in
+  state when first seen) -> `MapRuntime.observe(seen, k, lat)` -> the consistent variants' row maps; every decision is
+  the minimum over phases x row maps. `SSBOT_FORUM_SPECIAL_MAP_OBS_LAT` (default 0; vision mode 1-2). Sources carry a
+  row map (`LevelSource.rm / with_rows`, `KeyedDenseSource`); the kernels read rows through `RM` and skip a source whose
+  rows over the decision's frames repeat an earlier one's. Map row cost p50: sg7 0.13-0.55 ms, sg4 0.09-0.24 ms
+  (`sg7\tickcost.json`).
+- `hard2` key noise (the +1 and +2 late key paths both feasible) added and tested (`sg7h2`): not better, not used.
+
+### 3. Wall buckets
+
+- The arena is 35 u wide: front and back walls are never both near. Front buckets 12 / 10 / 8.5 / 7.25 / 6.5 u, back
+  4 / 2.5 u (the hero cannot pass the wall); the bucket at or inside the real wall (stricter); every front bucket is
+  at least 6.5 u, beyond the body front after the longest lunge (2.04 + 4.2 = 6.24 u), so the lunge is never cut.
+  Nearer than the last bucket: the wall exit as before. `MapRuntime.wall_bucket`, `forum_map.runtime_for` (row,
+  off-board, readiness, the chase gate). Files `special_map_CL_SLAM_sg7[_f12|_f10|_f8.5|_f7.25|_f6.5|_b4|_b2.5]
+  _levels.npz` (~67 MB each, git-ignored; rebuild: `sg4_rescore store --variant <tag> --tag <tag> --ready-ref 3.0`,
+  7 min each).
+- rn's 16 episodes open loop (36,812 ticks): sg7 map rows on 3,665 ticks (sg4 3,001), taken 2,690 (2,382); wall exits
+  230 ticks (sg4 1,452).
+
+### 4. Checks (truth: hammer polygons + the HeroBox head; the closed loop with the measured lateness;
+`sg7\closed_loop_summary.json`, `sg7\rescore\common`, `sg7\demo_sg7_explain.json`, `sg7\live_sg4.json` / `live_sg7.json`)
+
+| | sg4 | sg7 |
+|---|---|---|
+| closed loop, damaged episodes over all starts (22,320) | 626 | **30** |
+| starts feasible on both maps (20,142): damaged | 15 | 16 |
+|   ground / antic entry / after a hop / after a bounce | 10 / 4 / 1 / 0 | 4 / 3 / **9** / 0 |
+| starts feasible only on sg7 (869): damaged | 611 | 11 |
+| feasible starts damaged (each map's own set) | 15 / 20,155 (0.074 %) | 27 / 21,011 (0.129 %) |
+| noise-free damage | 0 | 0 |
+| strike without damage | 73.6 % | 87.2 % |
+| hits per slam / key changes per slam | 1.112 / 4.61 | 1.248 / 4.93 |
+| T1 trials certified (precision, recall) | 72 / 73 (0.986, 0.198) | 105 / 109 (0.963, 0.288) |
+| T1 press 42-47 / 48-55 | 55 / 55; none | 70 / 71; 15 / 17 |
+| 10-12 live slam hits passing an infeasible state first | 44 / 46 (lead 11.5 f) | 44 / 46 (lead 7 f) |
+| the person's 29 landed strikes certified | 0 | **5** (any key 9) |
+| the person's 5 misses / hammer-hit presses certified | 0 | 0 |
+
+- sg7's 3 extra certified T1 failures: 2 execution (a press one frame late), 1 path (jump pressed after the press);
+  all three lost a mask to the body 0.63-0.72 s after the press (after the slam), not to the hammer rule.
+- The hop-start regression (1 -> 9): after the first strike's bounce the map waits for a second press after the
+  hammer (presses at k 55-58) and the hero is caught at Slam 0 / 1 (k 51-54) under the measured lateness; noise-free 0.
+- The demo's 24 uncertified strikes (traced: `sg7_demo --explain sg7`): 19 "the hammer / the lunging body reaches the
+  hero before the contact in some timing still consistent with what was seen" (presses at antic 44-48: the antic may
+  still end at 47; the first touch at press +5..+7), 3 no contact in some timing, 1 no safe bounce continuation, 1 a
+  press one frame late fails. The certified ones are at 4.6-5.1 u; the person's at 4.7-6.0 u rely on the actual timing.
+- Readiness at k 0 (ground / antic-entry starts): sg7 has no "no strike reachable" bin; at WC + 2 or more: 4 / 2,112
+  damaged (sg4 2 / 2,143).
+- **Not made the default** (the rule: at least as safe as sg4 in every check): one more damaged common start
+  (16 vs 15), the hop starts (9 vs 1), 3 more T1 failures. Selectable: `SSBOT_FORUM_SPECIAL_MAP_TAG=sg7`; arms appended
+  to `C:\ssbot\sandbox\1v1_arms.txt`: `rnmap7`, `rnchase7` (= rnmap / rnchase + the tag). rnmap / rnchase keep sg4.
+- Identity with the default (sg4) and with the map off: open-loop replay 192006 e1, rn / rnmap / rnchase switches vs
+  SG6's HEAD outputs: 2,073 / 2,073 ticks each, every map output too (`sg7\ident\ident.json`).
+
+### Tests
+
+`tests/test_special_map_sg7.py` (7: the polygons are the template boxes; polygon damage inside box damage and the
+polygon clearance a lower bound of the true gap; the stage builder equals the keyed one with one variant; the rows and
+their reach; stage-map feasibility dominates the union map's; the stored stage map, sources, observation, kernel vs
+Python; the wall buckets). Also pass: test_move_data, test_special_map, test_special_map_sg4, test_special_map_review,
+test_special_map_jit, test_map_lookahead, test_chase_sg5, test_chase_sg5_review, test_zone_overlay.
+
+### Open items / next
+
+1. The person decides sg7 vs sg4 as the default (the table above); a live A/B rnmap vs rnmap7 needs a frozen checkout
+   (`1v1_freeze.ps1 -rev <sha>` copies the sg7 npz files) - not made.
+2. The hop-start second-strike exposure: a rule against waiting through Slam 0 / 1 for a second press (or a second
+   press only from a state with clearance) would remove sg7's only closed-loop regression.
+3. The demo strikes need the Slam 0 entry before they can be certified at the person's x (~5 u): the antic's
+   remaining length is unknown at a press at antic 44-48 (the person's antic at 120 fps: 48-48.5 frames).
+4. The SG6 list's overlay lookups and the umbrella / dash macros remain.
