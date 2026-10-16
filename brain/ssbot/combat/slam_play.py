@@ -141,7 +141,10 @@ SIDE = _on("SSBOT_FORUM_SLAM_PLAY_SIDE", _V2)
 # the standing y, the landing at Slam 0 + 52-55) and the landing spot fits inside the arena; else the other side; else
 # the old way out. Off: SP1's way out (the dash at Slam 0 + 23, landing 6.6-9.5 u behind it).
 NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
-# SSBOT_FORUM_SLAM_PLAY_EARLY (task 1v1 SP6, default off; forum.md 70): side slashes on the ground in the early antic,
+# SP6 A/B (forum.md 70; d950e0a, rnjb vs rnsp6, 32 episodes each: landed / s 0.958 -> 1.008, kill p50 23.1 -> 22.0 s,
+# strikes per slam 1.87 -> 2.55, HP-hitless 31 -> 30 - the two extra hits small rune bombs, none in a slam; the person,
+# 2026-10-16: "the early slam antic must slash"): EARLY follows SSBOT_FORUM_V2 when unset; =0 turns it off (arm rnsp60).
+# SSBOT_FORUM_SLAM_PLAY_EARLY (task 1v1 SP6, default: follows v2; forum.md 70): side slashes on the ground in the early antic,
 # then the playbook's walk / jump / strike as before (the person, 2026-10-16: "try to land one more hit in the antic").
 # The person's three mixed fights of the 2026-10-15 demo (`m2_play\sp6\human_early.json`): in reach at the antic entry
 # (2.65-4.33 u), a hit at antic frame 0.5 (a slash pressed before it) and one at 14.5-20 (the attack cooldown 0.3 s =
@@ -151,7 +154,7 @@ NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
 # and press the side slash (the key toward it on the press frame) whenever the attack is ready (our own presses
 # early_cd apart and the STATE's atk_cd) and the slash from her x at the mask's frame meets its body box; after the last
 # early press the walk into STAND as before (a hit leaves her ~1 u farther: its 0.48 u + her recoil ~0.5 u).
-EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY")
+EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY", _V2)
 # SSBOT_FORUM_TWO_PLAY (task 1v1 SP7, default off; forum.md 71): two Clappers (the final wave, Forum_W_w13). Off, the
 # playbook follows the first Clapper of the STATE only (clapper()): SP7's baseline (8 w13 episodes of the v2 default)
 # saw 7 of its 30 slams, and 12 of the 13 hammer hits came from the other one. On: the script follows the Clapper that

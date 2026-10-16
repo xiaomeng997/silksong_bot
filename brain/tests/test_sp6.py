@@ -1,5 +1,5 @@
 """Task 1v1 SP6 (forum.md 70): side slashes on the ground in the early slam antic before the playbook's strike
-(SSBOT_FORUM_SLAM_PLAY_EARLY, default off). A toy antic: the Clapper still except the knock-back of a landed slash (0.48 u
+(SSBOT_FORUM_SLAM_PLAY_EARLY, default: follows v2). A toy antic: the Clapper still except the knock-back of a landed slash (0.48 u
 away from her), her recoil 0.5 u over 8 frames, the walk WALK_U per frame; the attack cooldown 18 frames (the STATE's
 tm.atk_cd)."""
 import importlib
@@ -56,12 +56,17 @@ def presses(landed):
     return sorted(k for k, m in landed.items() if m & sp.M_A and not landed.get(k - 1, 0) & sp.M_A)
 
 
-def test_off_by_default(monkeypatch):
+def test_default_follows_v2(monkeypatch):
+    # the person, 2026-10-16, after the SP6 A/B: the early slashes are part of the v2 defaults; =0 turns them off
     monkeypatch.delenv("SSBOT_FORUM_SLAM_PLAY_EARLY", raising=False)
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
         assert importlib.reload(sp).EARLY is False
         monkeypatch.setenv("SSBOT_FORUM_V2", "1")
-        assert importlib.reload(sp).EARLY is False      # not part of the v2 defaults until its A/B
+        assert importlib.reload(sp).EARLY is True
+        monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_EARLY", "0")
+        assert importlib.reload(sp).EARLY is False
+        monkeypatch.delenv("SSBOT_FORUM_V2")
         monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_EARLY", "1")
         assert importlib.reload(sp).EARLY is True
     finally:
