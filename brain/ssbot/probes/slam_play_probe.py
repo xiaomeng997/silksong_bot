@@ -49,6 +49,7 @@ from ssbot.probes.pogo_target import MIN_HP, Target, stop_requested
 
 M_L, M_R, M_J, M_A = mask("left"), mask("right"), mask("jump"), mask("attack")
 M_DASH = mask("dash")
+M_D = mask("down")
 WAIT_S = 12.0
 SETTLE_F = 30
 MAX_F = 260
@@ -243,8 +244,8 @@ class PlayProbe(Target):
             prev = r["act"]
             if jump is None and rise & M_J:
                 jump = r["f"]
-            if press is None and rise & M_A:
-                press = r["f"]
+            if press is None and rise & M_A and (jump is not None or r["act"] & M_D):
+                press = r["f"]                            # the strike (SP6: not an early side slash before the jump)
         landed = False
         bounce = False
         if press is not None:

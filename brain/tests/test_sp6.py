@@ -52,7 +52,8 @@ def run(x0, early=True, cx=31.0, flip=False, cfg=None, monkeypatch=None, cd0=0.0
 
 
 def presses(landed):
-    return sorted(k for k, m in landed.items() if m & sp.M_A)
+    """The attack's rising edges (the early press is held two frames: one attack)."""
+    return sorted(k for k, m in landed.items() if m & sp.M_A and not landed.get(k - 1, 0) & sp.M_A)
 
 
 def test_off_by_default(monkeypatch):
@@ -85,7 +86,11 @@ def test_two_early_slashes_from_reach(flip, monkeypatch):
     pr = [k for k in presses(landed) if k < 26]
     assert len(pr) == 2 and pr[1] - pr[0] == play.cfg.early_cd and pr[1] <= play.cfg.early_k_max
     toward = sp.M_R if flip is False else sp.M_L      # face -1 (flip False): she is left of it, it is to her right
-    assert all(landed[k] & toward for k in pr)
+    away = sp.M_L if toward == sp.M_R else sp.M_R
+    # the key toward it the frame before and on both press frames; nothing away from it within 3 frames of a press
+    assert all(landed[k] & toward and landed[k - 1] & toward and landed[k + 1] & toward and landed[k + 1] & sp.M_A
+               for k in pr)
+    assert not any(landed.get(j, 0) & away for k in pr for j in range(k - 3, k + 4))
     assert hits == pr
     assert landed.get(26, 0) & sp.M_J
     assert play.cfg.band[0] <= xs[26] <= play.cfg.band[1]
@@ -126,3 +131,19 @@ def test_stats(monkeypatch):
     play, _, _, _ = run(4.4, monkeypatch=monkeypatch)
     st = play.stats()
     assert st["early_runs"] == 1 and st["early_press"] == 2
+
+
+@pytest.mark.parametrize("early,x_rel,want", [(False, 2.0, "behind"), (True, 2.0, "front"), (True, 1.7, "behind"),
+                                              (False, 2.3, "front")])
+def test_near_clearance_under_early(early, x_rel, want, monkeypatch):
+    # NEAR's behind clearance at Slam 0 + 10: SP5's NEAR_V (0.165 u / frame, past 2.8 u) when EARLY is off; under EARLY
+    # the measured 0.138 u / frame and 2.3 u (x at Slam 0 + 10 <= 1.84 u in front)
+    monkeypatch.setattr(sp, "EARLY", early)
+    monkeypatch.setattr(sp, "SIDE", True)
+    play = sp.SlamPlay(sp.PlayCfg(side_force=-1))
+    cx, face = 31.0, -1
+    r = sp.Run(iid=7, fa=900, face=face, ks0=40, k_press=38, bounced=True)
+    play.run = r
+    s = state(1000, "Slam 1", 0.1, cx=cx, flip=False, hx=cx + face * x_rel, ground=False)
+    play._near(r, 50, 1000, s, s["ents"][0], cx)
+    assert ("behind" if r.near == -face else "front") == want

@@ -205,11 +205,16 @@ class PlayCfg:
     slash_y: float = 3.2             # ... with her y above the standing y at the mask frame + 1 at most this
     wall_pad: float = 0.45           # the landing spot's centre at least this far inside the arena walls
     # SSBOT_FORUM_SLAM_PLAY_EARLY (SP6)
-    early_k_max: int = 22            # the last early press (the mask's antic frame; the person's last early hit at 20)
-    early_stand: tuple = (4.2, 5.0)  # the walk band while an early press is still to come (u in front, centre to centre;
+    early_k_max: int = 23            # the last early press (the mask's antic frame; the person's last early press at 23)
+    early_stand: tuple = (3.8, 4.8)  # the walk band while an early press is still to come (u in front, centre to centre;
     #                                  the slash meets its body front 2.25 u from its centre up to 5.37 u; from 5.0 u the
-    #                                  walk into STAND after a missed last press takes 0 frames, from 4.2 u 3 frames)
+    #                                  walk into STAND after a missed last press takes 0 frames, from 3.8 u 6 frames;
+    #                                  after a hit she is ~1 u farther: 4.8 + 1 inside BAND at the jump)
     early_cd: int = 19               # frames between two early presses (the Wanderer attack cooldown 0.3 s = 18 + 1)
+    early_quiet: int = 3             # no key away from it this many frames before / after an early press
+    early_near_v: float = 0.138      # NEAR's behind clearance under EARLY: her measured air speed (u / frame) ...
+    early_cross_u: float = 2.3       # ... and the distance past its centre by Slam 0 + near_cross_s0 (x at Slam 0 + 10
+    #                                  <= 1.84 u in front: t1's failures 1.99 / 2.09, SP5's behind successes 0.2-2.13)
 
     @classmethod
     def from_env(cls) -> "PlayCfg":
@@ -434,6 +439,8 @@ class SlamPlay:
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is None:
                 return None
+            if EARLY and k < c.k_jump and r.phase == "walk":
+                m = self._early(r, k, f, s, e, float(e["pos"][0]), ground, m)   # SP6: no key away before a press
             if k < c.k_jump:
                 r.sent.append((f + SEND_AHEAD, m))
                 return m
@@ -571,9 +578,12 @@ class SlamPlay:
             fits = {}
             for d in (pref, -pref):
                 u = self._near_fit(d, cx, c.near_u_front if d == r.face else c.near_u_behind)
-                # behind: past its back by near_cross_s0 at NEAR_V from the key's start (else she comes down on it)
-                clear = d == r.face or (x_rel - NEAR_V * (c.near_cross_s0 - max(ks0, c.near_s0_behind))
-                                        <= -c.near_cross_u)
+                # behind: past its back by near_cross_s0 at NEAR_V from the key's start (else she comes down on it).
+                # SP6 EARLY: the measured speed (0.138 u / frame in all 104 behind way-outs of SP5 t1-t3 and SP6 t1, not
+                # NEAR_V) and early_cross_u: the early hits push it 0.36-0.48 u, the strike lands farther out, and
+                # the two t1 failures (its Idle turn into her at Slam 0 + 43-44) started the way at 1.99 / 2.09 u
+                v, cu = (c.early_near_v, c.early_cross_u) if EARLY else (NEAR_V, c.near_cross_u)
+                clear = d == r.face or (x_rel - v * (c.near_cross_s0 - max(ks0, c.near_s0_behind)) <= -cu)
                 fits[d] = (u, u is not None and clear)
             r.near = next((d for d in (pref, -pref) if fits[d][1]), 0)
             if r.near == 0:
@@ -675,14 +685,24 @@ class SlamPlay:
 
     def _early(self, r: Run, k: int, f: int, s: dict, e: dict, cx: float, ground: bool, m_walk: int) -> int:
         """SP6 EARLY: the mask for antic frame k in the walk phase - the side slash toward it when the attack is ready
-        and its reach meets the body, else the walk into EARLY_STAND while another early press can still come by
-        early_k_max, else m_walk (the walk into STAND)."""
+        and its reach meets the body (the key toward it the frame before, the press held two frames with it: one
+        rising edge, the direction toward it whichever of them the game takes), else the walk into EARLY_STAND while
+        another early press can still come by early_k_max (no key away from it within early_quiet frames of a
+        press), else m_walk (the walk into STAND)."""
         c = self.cfg
+        toward = M_R if -r.face > 0 else M_L
+        away = M_L if toward == M_R else M_R
+        last = r.k_early[-1] if r.k_early else None
+        if last is not None and k == last + 1:
+            return M_A | toward                    # the press's second frame
+        quiet = last is not None and k - last <= c.early_quiet
         if not ground or k > c.early_k_max:
-            return m_walk
-        nxt = k if not r.k_early else max(k, r.k_early[-1] + c.early_cd)
-        if r.k_start is not None and k <= r.k_start:
-            nxt = max(nxt, k + 1)             # the frame before the press is ours (no attack held: a rising edge)
+            return 0 if quiet and m_walk & away else m_walk
+        nxt = k if last is None else max(k, last + c.early_cd)
+        if r.k_start is not None:
+            # the frame before the press is ours and carries the key toward it (t1, 1cec5f0: a walk away sent before
+            # the press landed with it - the slash went the other way, 0 of 14 presses at the script's 2nd frame hit)
+            nxt = max(nxt, r.k_start + 2)
         cd = ((s.get("hero") or {}).get("tm") or {}).get("atk_cd")
         if cd is not None:
             # the STATE's cooldown after frame f's update; the mask's frame checks it after one more decrement
@@ -690,14 +710,19 @@ class SlamPlay:
             if left > 0.05:
                 nxt = max(nxt, k + int(left + 0.95))
         if nxt > c.early_k_max:
-            return m_walk
-        toward = M_R if -r.face > 0 else M_L
-        if k >= nxt:
-            xw = self._x_at_mask(s, f)
-            if self._in_reach(e, cx, r.face, xw, -r.face):
-                r.k_early.append(k)
-                return M_A | toward
-        return self._walk(s, cx, r.face, f, band=c.early_stand)
+            return 0 if quiet and m_walk & away else m_walk
+        xw = self._x_at_mask(s, f)
+        reach = self._in_reach(e, cx, r.face, xw, -r.face)
+        prev = r.sent[-1][1] if r.sent else 0
+        if k >= nxt and reach and prev & toward and not prev & away:
+            r.k_early.append(k)
+            return M_A | toward
+        if nxt - k <= 1 and (reach or self._in_reach(e, cx, r.face, xw - r.face * WALK_U, -r.face)):
+            return toward                           # the frame before the press: toward it
+        m = self._walk(s, cx, r.face, f, band=c.early_stand)
+        if m & away and (quiet or nxt - k <= c.early_quiet):
+            return 0                                # no key away from it around a press
+        return m
 
     def _try_start(self, r: Run, k: int, s: dict, e: dict, ground: bool, accepting: bool, hp: int, f: int
                    ) -> int | None:
