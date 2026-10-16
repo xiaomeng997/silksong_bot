@@ -99,11 +99,15 @@ def test_two_early_slashes_from_reach(flip, monkeypatch):
 
 
 def test_walks_into_reach_from_far(monkeypatch):
-    # 7.5 u at the entry: walk into EARLY_STAND, one press (the second would come after early_k_max), the jump at 26
-    play, landed, xs, hits = run(7.5, monkeypatch=monkeypatch)
+    # 6.5 u at the entry: walk into EARLY_STAND, one press before early_late_k (the second would come after
+    # early_k_max), the jump at 26 inside the band; 7.5 u: in reach only after early_late_k, from farther than
+    # early_late_u (its recoil would run on into the jump): no early press
+    play, landed, xs, hits = run(6.5, monkeypatch=monkeypatch)
     pr = [k for k in presses(landed) if k < 26]
-    assert len(pr) == 1 and xs[pr[0] - 1] <= 5.37
+    assert len(pr) == 1 and pr[0] < play.cfg.early_late_k and xs[pr[0] - 1] <= 5.37
     assert landed.get(26, 0) & sp.M_J and play.cfg.band[0] <= xs[26] <= play.cfg.band[1]
+    play, landed, xs, hits = run(7.5, monkeypatch=monkeypatch)
+    assert [k for k in presses(landed) if k < 26] == [] and landed.get(26, 0) & sp.M_J
 
 
 def test_cooldown_from_the_state(monkeypatch):

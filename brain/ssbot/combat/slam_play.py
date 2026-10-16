@@ -213,6 +213,8 @@ class PlayCfg:
     early_cd: int = 19               # frames between two early presses (the Wanderer attack cooldown 0.3 s = 18 + 1)
     early_quiet: int = 3             # no key away from it this many frames before / after an early press
     early_post_stand: tuple = (4.2, 4.9)   # the walk band after an early press (the jump BAND unchanged)
+    early_late_k: int = 18           # a press from this antic frame on (its recoil reaches the jump) ...
+    early_late_u: float = 4.4        # ... only from this near (u, centre to centre; the walk band's top then)
     early_near_v: float = 0.138      # NEAR's behind clearance under EARLY: her measured air speed (u / frame) ...
     early_cross_u: float = 2.3       # ... and the distance past its centre by Slam 0 + near_cross_s0 (x at Slam 0 + 10
     #                                  <= 1.84 u in front: t1's failures 1.99 / 2.09, SP5's behind successes 0.2-2.13)
@@ -720,13 +722,20 @@ class SlamPlay:
             return 0 if quiet and m_walk & away else m_walk
         xw = self._x_at_mask(s, f)
         reach = self._in_reach(e, cx, r.face, xw, -r.face)
+        band = c.early_stand
+        if nxt >= c.early_late_k:
+            # a late press (its hit's recoil runs on into the jump): from early_late_u at most (t2 / t3: the two hammer
+            # hits pressed the strike from 5.66-5.78 u at Slam 0 - 1 after an early hit at antic frame 22 from
+            # 4.6-4.7 u; hits from <= 4.5 u put her at <= 5.56 u)
+            band = (band[0], c.early_late_u)
+            reach = reach and (xw - cx) * r.face <= c.early_late_u + 0.05
         prev = r.sent[-1][1] if r.sent else 0
         if k >= nxt and reach and prev & toward and not prev & away:
             r.k_early.append(k)
             return M_A | toward
         if nxt - k <= 1 and (reach or self._in_reach(e, cx, r.face, xw - r.face * WALK_U, -r.face)):
             return toward                           # the frame before the press: toward it
-        m = self._walk(s, cx, r.face, f, band=c.early_stand)
+        m = self._walk(s, cx, r.face, f, band=band)
         if m & away and (quiet or nxt - k <= c.early_quiet):
             return 0                                # no key away from it around a press
         return m
