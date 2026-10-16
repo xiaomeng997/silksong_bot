@@ -338,6 +338,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
+        mh = getattr(self.planner, "_map", None)
+        if mh is not None and not mh._loaded:
+            # SG8 (stalls, forum.md 64): the slam map and every wall bucket with the arena's terrain here (the episode's
+            # start), not on its first tick (~0.6 s); the same runtimes either way
+            mh.preload()
         if self.planner.fcfg.v2:
             self.v2feed = self.v2feed or forum_v2.V2Feed()
             self.v2feed.reset()

@@ -64,6 +64,7 @@ FACE_BAND = (4.5, 7.0)       # SG8: the stance band in front of the Clapper (cen
 FACE_BEHIND = (3.0, 5.0)     # ... and behind it (its body's back edge ~2.2 u)
 FACE_U = 6.0                 # SG8: L2's slam stance in front when the map has no spot for this slam
 LATE_F = 3                   # SG8: the own event's start may be this many frames off the plan's (a late input)
+HOLD_TOL = 2                 # SG8: a released jump's hold may be this many frames off the arc's count of held ticks
 
 
 STAY_C_U = 1.0              # SG8: the clearance the hammer needs (the polygons are exact; the map's dilation holds the
@@ -268,9 +269,17 @@ class MapHelper:
         """SG8: the hero's airborne arc from the start state (every tick): reset on the ground, a down slash in it
         noted (a bounce can follow only then)."""
         if float(st0[kin.GROUND, 0]) > 0:
-            self._arc = {"ds": False}
-        elif self._arc is not None and int(st0[kin.MODE, 0]) in (kin.M_DS_ANTIC, kin.M_DS_SPIKE):
+            self._arc = {"ds": False, "held": 0, "rel": False}
+            return
+        if self._arc is None:
+            return
+        if int(st0[kin.MODE, 0]) in (kin.M_DS_ANTIC, kin.M_DS_SPIKE):
             self._arc["ds"] = True
+        # the jump key's run in this arc (ticks: one per frame; a late tick skips frames: HOLD_TOL)
+        if float(st0[kin.JHELD, 0]) > 0 and not self._arc["rel"]:
+            self._arc["held"] += 1
+        elif self._arc["held"] > 0:
+            self._arc["rel"] = True
 
     def _locate_sg8(self, rt, mem, k: int, x: float, cdir: int, phases: list, ys: list, S, md):
         """SG8: the airborne hero's map event (ev with q0, how) or (None, "none"). The slices matching the last three
@@ -328,12 +337,19 @@ class MapHelper:
         jheld = float(S[kin.JHELD]) > 0
         ds = self._arc is None or bool(self._arc.get("ds")) or bool(
             np.isin(np.asarray(md), (kin.M_DS_ANTIC, kin.M_DS_SPIKE)).any())
+        # released in this arc before the prefix: the hold its key had (the arc's count; frames the prefix still held
+        # it count too)
+        hold_n = None
+        if not jheld and self._arc is not None and self._arc.get("rel") and not ds:
+            hold_n = int(self._arc["held"])
         keep = []
         for p, s, e in evs:
             j = k - int(e["k"])
             if e["kind"] == "jump":
                 h = float(e["h"])
                 if (jheld and h < j - 1) or (not jheld and h > j):
+                    continue
+                if hold_n is not None and abs(h - hold_n) > HOLD_TOL:
                     continue
             elif not ds:
                 continue

@@ -167,11 +167,14 @@ class Sim:
                 e_ = m_[0][2]
                 return dict(own, k=int(e_["k"]), q0=int(e_["q0"])), "plan"
         jheld = ev["kind"] == "jump" and 1 <= k - ev["k"] <= ev["h"]
+        hold_n = ev["h"] if (ev["kind"] == "jump" and not jheld and not ds) else None   # (forum_map: the arc's count)
         keep = []
         for s, e in evs:
             j = k - int(e["k"])
             if e["kind"] == "jump":
                 if (jheld and e["h"] < j - 1) or (not jheld and e["h"] > j):
+                    continue
+                if hold_n is not None and abs(e["h"] - hold_n) > 2:
                     continue
             elif not ds:
                 continue
