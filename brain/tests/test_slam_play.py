@@ -292,3 +292,21 @@ def test_game_clock_switch(monkeypatch):
     finally:
         monkeypatch.delenv("SSBOT_FORUM_SLAM_PLAY_CLOCK", raising=False)
         importlib.reload(sp)
+
+
+def test_enabled_default_follows_v2():
+    """The person, 2026-10-16: the playbook is the default under v2; without v2 it stays off; 0 turns it off."""
+    import subprocess
+    import sys
+
+    def enabled(env):
+        code = "from ssbot.combat import slam_play as sp; print(int(sp.ENABLED))"
+        import os
+        e = {k: v for k, v in os.environ.items() if not k.startswith("SSBOT_FORUM_")}
+        e.update(env)
+        return subprocess.run([sys.executable, "-c", code], env=e, capture_output=True, text=True).stdout.strip()
+
+    assert enabled({}) == "0"
+    assert enabled({"SSBOT_FORUM_V2": "1"}) == "1"
+    assert enabled({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_SLAM_PLAY": "0"}) == "0"
+    assert enabled({"SSBOT_FORUM_SLAM_PLAY": "1"}) == "1"

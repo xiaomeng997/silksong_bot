@@ -1,6 +1,7 @@
 """The person's slam strike as a fixed playbook (task 1v1 SP1, the person's decision 2026-10-16; forum.md 65).
 
-SSBOT_FORUM_SLAM_PLAY=1 (default off: nothing here runs and every decision is the one before): when the Clapper (Song
+SSBOT_FORUM_SLAM_PLAY=1 (default since 2026-10-16: on whenever SSBOT_FORUM_V2=1, off without v2; =0 turns it off and
+every decision is the one before): when the Clapper (Song
 Heavy Sentry) enters Slam Antic and the entry conditions hold, the bot plays the person's strike as a script, frame by
 frame from the antic entry; otherwise (and whenever the script aborts) the rn planner decides as today.
 
@@ -66,7 +67,10 @@ def _num(name: str, default: float) -> float:
     return float(v) if v else default
 
 
-ENABLED = _on("SSBOT_FORUM_SLAM_PLAY")
+# The person, 2026-10-16: the fast arm is the default ("the one that runs away and kills slowly would surely die
+# against two Clappers"). Unset, SSBOT_FORUM_SLAM_PLAY follows SSBOT_FORUM_V2 (on with v2, off without it, like the
+# small-rune switches); 0 turns it off (arm rn0 = the old rn).
+ENABLED = _on("SSBOT_FORUM_SLAM_PLAY", "1" if _on("SSBOT_FORUM_V2") else "0")
 # SSBOT_FORUM_SLAM_PLAY_STANCE=<u> (default 0 = off; arm rnplay6: 6): the L2 stance while the Clapper idles / walks /
 # evades: on the ground <u> in front of it, centre to centre (the person's band at the antic entry, 6.2 u; it picks the
 # slam 74 % of the time at 5.4-8 u). Read by combat.tactics.gauntlet; measured separately from the strike.
