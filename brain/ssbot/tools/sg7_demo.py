@@ -97,10 +97,67 @@ def slice_of(rt, ma: dict, kn: int) -> int | None:
     return None
 
 
+def explain(variant: str, rows: list) -> None:
+    """The strike rule's verdicts at each uncertified landed strike's cell (open-floor and bucket maps alike: the
+    variant + the bucket's wall)."""
+    from ssbot.combat import special_map as sm
+    from ssbot.tools.sg4_rescore import config
+    from ssbot.tools.special_map_build import setup
+    want: dict = {}
+    for r in rows:
+        if not r["landed"] or r.get("cert") or "_cell" not in r:
+            continue
+        p, rws, s, xi, c, bucket = r["_cell"]
+        want.setdefault((bucket or "", p), []).append((r, rws, s, xi, c))
+    for (bucket, p), items in sorted(want.items()):
+        geo = setup(config(variant + bucket))
+        trace = {}
+        for r, rws, s, xi, c in items:
+            for rw in rws:
+                trace[(rw, s, xi, c)] = r.setdefault("explain", {}).setdefault(str(rw), [])
+        sm.builder_for(geo).build(p, keep_full=False, trace=trace)
+        for r, rws, s, xi, c in items:
+            r["reason"] = reason(r.get("explain", {}))
+
+
+def reason(ex: dict) -> str:
+    """One line from a traced cell: the first failing stage of the strike rule (any of its rows)."""
+    out = []
+    for rw, lst in ex.items():
+        d = {}
+        cls = [x for x in lst if x[0] == "class"]
+        for x in lst:
+            if x[0] != "class":
+                d[x[0]] = x[1:]
+        if d.get("node_damage", (False,))[0]:
+            out.append("the node itself in the (dilated) damage")
+            continue
+        if not d.get("can_press", (False,))[0]:
+            out.append("no press allowed here (cooldown / ground / too late in the move)")
+            continue
+        nocon = [x for x in cls if x[2] < 0]
+        pre = [x for x in cls if x[2] >= 0 and x[3] >= 0]
+        if nocon:
+            out.append(f"no contact in {len(nocon)} of {len(cls)} variant classes")
+        elif pre:
+            out.append(f"damage before the contact in {len(pre)} of {len(cls)} classes (first at press +{min(x[3] for x in pre)})")
+        elif "cmax" in d and not d["cmax"][2]:
+            out.append("not airborne one frame after the latest contact / contact past the move")
+        elif "bounce_value" in d and not np.isfinite(d["bounce_value"][0]):
+            out.append(f"no safe bounce continuation (contact {d['bounce_value'][2]}..)")
+        elif "late_press_ok" in d and not d["late_press_ok"][0]:
+            out.append("a press one frame late fails")
+        else:
+            out.append("strike ok but the node value prefers another action" if "strike_value" in d else "?")
+    return "; ".join(sorted(set(out)))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tag", default="sg7")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--explain", default="", help="a sg4_rescore variant: rebuild its phases with the strike rule "
+                                                  "traced at every uncertified landed strike's cell (the reasons)")
     a = ap.parse_args(argv)
     ctx = Ctx(a.tag)
     D = json.loads(DEMO.read_text("utf-8"))
@@ -163,7 +220,13 @@ def main(argv=None) -> int:
                     dks.append(dk)
             r["cert_dk_same_x"] = dks
             r["h_err"] = ma.get("h_err")
+            r["_cell"] = (p, [int(x) for x in sorted({int(rm[kn]) for rm in (rt.rows or [srcs[0].rm])})], int(s),
+                          int(round((nd_x - rt.ti.x_lo) / rt.ti.step)), c, bucket)
             rt.observe(None)
+    if a.explain:
+        explain(a.explain, rows)
+    for r in rows:
+        r.pop("_cell", None)
     land = [r for r in rows if r["landed"]]
     bad = [r for r in rows if not r["landed"] or r["hit_after"]]
     summ = {"tag": a.tag, "presses": len(rows), "landed": len(land),

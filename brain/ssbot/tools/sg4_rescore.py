@@ -49,6 +49,10 @@ VARIANTS = {
             "stage": True},
     "sg7_poly": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187},
     "sg7_stage": {"keyed": True, "key_noise": "hard", "wc": 1.0, "c_cap": 3.0, "stage": True},
+    # SG7 hard2: the key change's +1 and +2 late paths both feasible (the measured +2 lateness is 1 %)
+    "sg7h2": {"keyed": True, "key_noise": "hard2", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187,
+              "stage": True},
+    "sg7h2_poly": {"keyed": True, "key_noise": "hard2", "wc": 1.0, "c_cap": 3.0, "poly": True, "head_u": 0.2187},
 }
 HEAD_U = 0.2187                    # the HeroBox's top above the physics box's (HeroBox.cs): the truth's hero box
 
@@ -150,6 +154,10 @@ def run(a) -> int:
             es = [e for e in eps if e.start.startswith(grp)]
             rp["by_start"][grp] = counts(es)
         rp["trials"] = trial_verdicts(geo, pm, trials, tc)
+        # SG7: every episode compactly (start, k0, x0, d0, variant, ev k, start feasible, damaged, hits) so maps can be
+        # compared on the starts feasible in both
+        rp["episodes"] = [[e.start, e.k0, e.x0, e.d0, e.variant, int(np.isfinite(e.readiness)), int(e.damage_f >= 0),
+                           int(e.hits)] for e in eps]
         rp["damage_examples"] = [{"start": e.start, "k0": e.k0, "x0": e.x0, "variant": e.variant, "d0": e.d0,
                                   "damage_f": e.damage_f, "contacts": e.contacts, "presses": e.presses,
                                   "readiness": e.readiness, "noise_free": e.noise_free_damage}

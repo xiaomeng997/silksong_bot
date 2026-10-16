@@ -25,7 +25,7 @@ PRESS_COOL = 19
 A_DIR, A_JUMP, A_PRESS, A_SLASH = 0, 1, 2, 3
 EV_GROUND, EV_JUMP, EV_BOUNCE = 0, 1, 2
 SRC_INPUT, SRC_JUMP, SRC_BOUNCE, SRC_GROUND = 0, 1, 2, 3
-MODES = {"none": 0, "exp": 1, "hard": 2, "hard_exp": 3}
+MODES = {"none": 0, "exp": 1, "hard": 2, "hard_exp": 3, "hard2": 4}
 # ci: integer constants; cf: float constants
 CI_K, CI_NX, CI_NS, CI_NJ, CI_MODE, CI_NCB, CI_A0, CI_A1 = range(8)
 CF_XLO, CF_STEP, CF_SCALE, CF_WC, CF_CBW, CF_PA, CF_GPY = range(7)
@@ -160,6 +160,8 @@ def _kq(S, P, R, p, k, s1, x1, c, d, nmode, nbase, tube, j, land, has_land, ci, 
             br2 = b
     if mode == 2:
         return min(v1, br0)
+    if mode == 4:
+        return min(v1, min(br0, br1))
     z0 = br0 if np.isfinite(br0) else 0.0
     z1 = br1 if np.isfinite(br1) else 0.0
     z2 = br2 if np.isfinite(br2) else 0.0
@@ -618,7 +620,7 @@ def tables(rt) -> dict | None:
     Ps = tuple(_ro(srcs[p]._P if p in srcs else srcs[any_p]._P) for p in range(6))
     s0 = srcs[any_p]
     NJ = len(ti.jump_h)
-    ci = np.array([ti.K, ti.NX, s0.NS, NJ, {"none": 0, "exp": 1, "hard": 2, "hard_exp": 3}[s0.mode], ti.ncb,
+    ci = np.array([ti.K, ti.NX, s0.NS, NJ, MODES[s0.mode], ti.ncb,
                    ACTIVE[0], ACTIVE[1]], np.int64)
     cf = np.array([s0._x_lo, s0._step, s0.scale, ti.wc, ti.cb_w, rt.pa, float(hm.jumps[(1, 0)].py[0])], np.float64)
     gp = np.array([1.0] + [s0.gamma ** m for m in (1, 2, 3)], np.float64)

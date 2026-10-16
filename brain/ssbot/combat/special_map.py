@@ -98,7 +98,8 @@ class MapConfig:
     # SG4 (KeyedMapBuilder): the key already read is part of the state (it moves the body in the next frame), so a
     # key change can be late. key_noise: "none" (no late keys; only the held key at a strike's contact), "exp" (the
     # expected value over the measured late-input distribution p_late (on time, +1, +2, +3 frames); a late branch that
-    # meets damage counts 0: a hit means no strike), "hard" (a key change also needs its one-frame-late path feasible:
+    # meets damage counts 0: a hit means no strike), "hard2" (SG7: the one- and two-frame-late paths both feasible,
+    # the worst of the three), "hard" (a key change also needs its one-frame-late path feasible:
     # the late press / late jump rule), "hard_exp" (hard for +1, the +2 / +3 branches in expectation)
     keyed: bool = False
     key_noise: str = "none"
@@ -913,6 +914,9 @@ class KeyedMapBuilder(MapBuilder):
                             if mode == "hard":
                                 rr = gam * np.minimum(V1, br[0])
                                 cc = np.minimum(CLn, np.minimum(C1, bc[0]))
+                            elif mode == "hard2":
+                                rr = gam * np.minimum(V1, np.minimum(br[0], br[1]))
+                                cc = np.minimum(CLn, np.minimum(C1, np.minimum(bc[0], bc[1])))
                             else:
                                 def z(v):
                                     return np.where(np.isfinite(v), v, 0.0)
@@ -1122,8 +1126,14 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
     [NR, 3, NX], apex [n_tubes, NR, 3, NX], jstart [n_holds, NR, 3, NX]; strike / strike_y / strike_kind by press frame
     (the best over the rows)."""
 
-    def build(self, p: int, keep_full: bool = False) -> PhaseMap:
+    def build(self, p: int, keep_full: bool = False, trace: dict | None = None) -> PhaseMap:
+        """trace (diagnostics, SG7 demo check): {(row, slice, xi, key d): []} -> the strike rule's verdicts of those
+        cells appended as (stage, value) pairs: node damage / invalid, per variant class its contact frame and
+        pre-contact damage, c_max, airborne after / inside the move, the bounce value, the late press, the strike."""
         g, c = self.g, self.g.cfg
+        trc = {}
+        for (r_, s_, xi_, d_), lst in (trace or {}).items():
+            trc.setdefault(r_, []).append((s_, xi_, d_, lst))
         t0 = time.time()
         K, NS, NX, NR = g.K, g.NS, g.NX, g.NR
         st = g.steps(p)
@@ -1185,6 +1195,10 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                 Dn = g.DR[r][yb] & ~inv[:, None]
                 CLn = np.where(inv[:, None], cap, g.CLR[r][yb]).astype(np.float32)
                 CLRr[r] = CLn
+                tr = trc.get(r, [])
+                for s_, xi_, d_, lst in tr:
+                    lst.append(("node_damage", bool(Dn[s_, xi_])))
+                    lst.append(("valid", bool(valid[s_])))
                 # ---- continuation per state key c
                 bR = np.full((3, NS, NX), -np.inf, np.float32)
                 bC = np.zeros((3, NS, NX), np.float32)
@@ -1231,6 +1245,9 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                                 if mode == "hard":
                                     rr_ = gam * np.minimum(V1, br[0])
                                     cc = np.minimum(CLn, np.minimum(C1, bc[0]))
+                                elif mode == "hard2":
+                                    rr_ = gam * np.minimum(V1, np.minimum(br[0], br[1]))
+                                    cc = np.minimum(CLn, np.minimum(C1, np.minimum(bc[0], bc[1])))
                                 else:
                                     def z(v):
                                         return np.where(np.isfinite(v), v, 0.0)
@@ -1256,6 +1273,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                 svC = np.zeros((3, NS, NX), np.float32)
                 can = valid & g.can_kind[T] & g.TAIR[T, q, J] & (J >= g.cool) & (k + 4 + 1 <= end_r)
                 ss = np.flatnonzero(can)
+                for s_, xi_, d_, lst in tr:
+                    lst.append(("can_press", bool(can[s_])))
                 if len(ss) and k + 11 < K and all(reach[i] for i in range(1, 12)):
                     Ts, Js, qs = T[ss], J[ss], q[ss]
                     Ls = Lq[ss]
@@ -1280,7 +1299,9 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                         every = np.ones((len(ss), NX), bool)
                         nocon = np.zeros((len(ss), NX), bool)
                         predmg = np.zeros((len(ss), NX), bool)
-                        for cls in classes:
+                        tsel = [(int(np.searchsorted(ss, s_)), xi_, lst) for s_, xi_, d_, lst in tr
+                                if d_ == d and s_ in set(ss.tolist())]
+                        for ci_, cls in enumerate(classes):
                             sb, sd = cls[:10], cls[10:]
                             cc_ = np.full((len(ss), NX), -1, np.int64)
                             for i in ia:
@@ -1291,12 +1312,17 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                                 cc_ = np.where((cc_ < 0) & a, i, cc_)
                             con = cc_ >= 0
                             bad = np.zeros_like(con)
+                            bad_at = np.full((len(ss), NX), -1, np.int64)
                             for i in range(1, ACTIVE[1]):
                                 sel = con & (i <= cc_ - PRE_PROTECT_F)
                                 if not sel.any():
                                     break
                                 _, yb_i, _, _ = rel[i]
-                                bad |= sel & _shift(g.DS[k + i][sd[i - 1]][yb_i], d * nrel[i], True)
+                                hit_i = sel & _shift(g.DS[k + i][sd[i - 1]][yb_i], d * nrel[i], True)
+                                bad_at = np.where((bad_at < 0) & hit_i, i, bad_at)
+                                bad |= hit_i
+                            for i_s, xi_, lst in tsel:
+                                lst.append(("class", ci_, int(cc_[i_s, xi_]), int(bad_at[i_s, xi_])))
                             nocon |= ~con
                             predmg |= con & bad
                             every &= con & ~bad
@@ -1312,6 +1338,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                         air_next = np.stack([rel[i][0] for i in range(1, 12)])
                         cm1 = np.clip(cmax + 1, 1, 11)
                         ok &= np.take_along_axis(air_next.T, cm1 - 1, axis=1) & (k + cmax + 1 <= end_r)
+                        for i_s, xi_, lst in tsel:
+                            lst.append(("cmax", int(cmax[i_s, xi_]), "air_and_inside", bool(ok[i_s, xi_])))
                         why["air_or_end"][k + 1] += (ok_c & ~ok).sum(0).astype(np.int32)
                         ok_c = ok.copy()
                         Bm = np.full((len(ss), NX), np.inf, np.float32)
@@ -1330,6 +1358,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                             Bm = np.where(sel, np.minimum(Bm, Rb), Bm)
                             Cm = np.where(sel, np.minimum(Cm, Cb), Cm)
                         ok &= np.isfinite(Bm)
+                        for i_s, xi_, lst in tsel:
+                            lst.append(("bounce_value", float(Bm[i_s, xi_]), "cmin", int(cmin[i_s, xi_])))
                         why["bounce"][k + 1] += (ok_c & ~ok).sum(0).astype(np.int32)
                         disc = gam ** np.maximum(cmax, 0).astype(np.float32)
                         ok_now[di, ss] = ok
@@ -1345,6 +1375,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                             late_b = np.full_like(Bm, -np.inf)
                         if c.late_press:
                             why["late"][k + 1] += (okL & ~late_ok).sum(0).astype(np.int32)
+                            for i_s, xi_, lst in tsel:
+                                lst.append(("late_press_ok", bool(late_ok[i_s, xi_])))
                             okL &= late_ok
                         else:
                             okL, late_b = ok.copy(), np.full_like(Bm, np.inf)
@@ -1374,6 +1406,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                         cs = np.minimum(CLn[ss], np.where(np.isfinite(Cm), Cm, 0.0))
                         svb[di, ss] = sv
                         svC[di, ss] = cs
+                        for i_s, xi_, lst in tsel:
+                            lst.append(("strike_value", float(sv[i_s, xi_])))
                         if SV is not None:
                             SV[r, ss, :, di] = score(sv, cs).astype(np.float16)
                         sco = np.where(okL & ~Dn[ss], 1.0 + depth, 0.0)
@@ -1411,6 +1445,8 @@ class StageKeyedMapBuilder(KeyedMapBuilder):
                 for ci in range(3):
                     Rk[ci, 0] = np.where(jb[ci], Rk[ci, j0][bj[ci], ar], Rk[ci, 0])
                     Ck[ci, 0] = np.where(jb[ci], Ck[ci, j0][bj[ci], ar], Ck[ci, 0])
+                for s_, xi_, d_, lst in tr:
+                    lst.append(("continue_value", float(bR[d_ + 1, s_, xi_]), "node_value", float(Rk[d_ + 1, s_, xi_])))
                 R[r], C[r] = Rk, Ck
                 F[r] = np.isfinite(Rk).any(0)
                 OK0[r], B0[r] = ok_now, b_now

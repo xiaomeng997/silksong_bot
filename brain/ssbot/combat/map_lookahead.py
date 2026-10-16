@@ -302,6 +302,8 @@ def keyed_q(src, k: int, s1: int, x1: float, c: int, d: int, nexts) -> float:
     pl = src.pl
     if src.mode == "hard":
         return min(v1, br[0])
+    if src.mode == "hard2":                         # SG7: the +1 and +2 late branches both feasible
+        return min(v1, br[0], br[1])
     z = [b if np.isfinite(b) else 0.0 for b in br]
     if src.mode == "exp":
         return pl[0] * v1 + pl[1] * z[0] + pl[2] * z[1] + pl[3] * z[2]
