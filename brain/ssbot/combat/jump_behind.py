@@ -2,7 +2,7 @@
 jumps, go behind it, do not run far away; even with its back against the wall it moves forward a bit when it jumps,
 leaving a spot behind it for Hornet to stand"; forum.md 67).
 
-SSBOT_FORUM_JUMP_BEHIND=1 (default off: nothing here is read and every decision is the one before). During the Choir
+SSBOT_FORUM_JUMP_BEHIND=1 (default since 2026-10-16: on with SSBOT_FORUM_V2=1, off without v2; =0 off, every decision the one before). During the Choir
 Clapper's jump moves (CC_JUMP: Jump Antic > Jump > Air > Slam 2 > Slam Recover; CC_JUMP_CAST: Cast Slam Antic > Cast
 Slam Antic 2 > Jump > Air > Slam 2 > Slam Recover, then the rune circle) the L2 stance (combat.tactics.gauntlet
 _clapper_spot) is:
@@ -54,7 +54,10 @@ def _on(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip() == "1"
 
 
-ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND")
+# The person, 2026-10-16: the faster arm is the default (SP3: rnjb kill p50 24.9 s vs rnplay 33.4 s, +0.17 landed
+# hits/s). Unset, SSBOT_FORUM_JUMP_BEHIND follows SSBOT_FORUM_V2 (on with v2, off without it); 0 turns it off
+# (arm rnplay0 = rnplay without it).
+ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND", "1" if _on("SSBOT_FORUM_V2") else "0")
 
 NUM = {
     "aim_u": 5.5,          # antic: the stance in front (centre to centre, u; 0.5 u past the jump's 5 u: it jumps
