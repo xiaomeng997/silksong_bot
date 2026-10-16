@@ -6738,3 +6738,151 @@ the review's frozen checkout). The exact commands, seeds and metrics: `C:\ssbot\
 vertical dynamics: a vy / jump-hold aware locate would recover them; value, not safety); with the escape check running
 again the map arm's checked rows fail it more often (119 vs 46 ticks in the 3 deadline replays: watch live); the
 deadline shift makes ticks with map work ~1-3 ms longer (watch the late-tick share); the readiness weight is untuned.
+
+## Task 1v1 - stage SG5: chase and slash (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §61)
+
+The person's rule (main 4d09c89): once the slam is handled, every other situation should allow chasing and horizontal
+slashing. Offline only (no game, no live run); the overlay eye check of the slam map and the rnmap A/B are still
+pending. Switch `SSBOT_FORUM_CHASE` (default off, needs `SSBOT_FORUM_SPECIAL_MAP=1`). Distances are centre to centre
+(hero box centre to the Clapper's transform, horizontal, u). Data: `C:\ssbot\data\m2_map\sg5` (harness
+`ident_chase.py` = the m2_why refute replay with one line per planner tick, `job.ps1` / `launch.ps1` lanes; jsonl
+`id_<tag>_<run><ep>.jsonl`; summaries `replay_off.json`, `replay_off2_on2.json`; `close_moves.json|txt`).
+
+### 1. Why she keeps away (open loop, rn's 16 episodes with rnmap's switches, deadlines off; 36,812 ticks)
+
+Per tick: slash rows = rows with a predicted landed hit (the planner's own nh > 0); reach rows = a press with the hero
+3.5-5.0 u in front or 2.4-3.6 u behind; the furthest stage each reached and, for a safe one not chosen, the ranking key
+(hz / U / S / keep / mkeep / map / hits / readiness / corner / later keys) or the escape check.
+
+| family | ticks | dist p10/50/90 | in reach | slash-row ticks | safe | chosen slash | L2 branch (ticks) |
+|---|---|---|---|---|---|---|---|
+| idle / walk | 8,658 | 4.2 / 9.0 / 13.6 | 18 % | 4,149 | 2,720 | 2,695 | face 2,921, face: ready 2,828, rune: out 1,046 (hit weight 0), below 1,002 |
+| evade | 2,440 | 5.2 / 7.1 / 9.4 | 14 % | 340 | 9 | 9 | face 1,864 |
+| jump slam | 1,980 | 7.1 / 11.3 / 14.9 | 5 % | 456 | 158 | 157 | back off 1,106, under and behind 874 |
+| jump cast | 2,806 | 5.9 / 8.9 / 13.5 | 6 % | 962 | 413 | 412 | back off 1,095, under and behind 1,245 |
+| entry | 4,068 | 3.8 / 5.8 / 6.9 | 29 % | 889 | 823 | 823 | face 2,085 |
+
+- **When a safe slash row exists the planner takes it (99 %).** Safe slash rows ranked behind: readiness 18, escape 7
+  (idle / walk). No safe one: vetoed rows (down slashes in the air: R_DOWN while a damage box is active; presses inside
+  a dash / sprint / the dash-combo window: unmodelled) and stage-1 contact / the envelope.
+- **No generic escape reserve against the unstarted slam exists in rn**: `SSBOT_FORUM_V2_VSLAM` is off, the escape
+  check reads an idle Clapper as its body + 0.5 u (ESC_IDLE_M), the focus Clapper's margin is a flat 0.5 u (the "rule"
+  margin only for rows dashing at it). The unstarted slam is only in the map's readiness penalty (rnmap: changed the
+  first row on 74-111 of 3,111-3,653 ticks) and the corner rule 13 (0 rows ranked by it in these replays).
+- **Why idle / walk is far: where the previous move leaves her.** Idle / walk segments by the move before (209):
+  after a slam 87 segments = 50 % of the idle / walk time, median 34 frames, the hero 12.9 u away at its start (L2's
+  slam step-out, 13 u) and 5.1 u at its end (she closes at ~13.6 u/s); next move evade 44, slam 29, cast 11. After a
+  cast 69 (1,781 frames): 5.0 -> 3.3 u. After a jump cast 18 (1,321 frames, "rune: out" 14.5 u, hit weight 0): 11.0 ->
+  8.6 u. After a jump slam 19 (1,064 frames): 10.9 -> 5.9 u.
+- **The evade is never followed by idle / walk**: After Scuttle branches at once (FSM, forum.md 18.1): of 92 evades
+  the next move was cast 43, slam 25, jump cast 14, jump slam 10; the 24 jump families = the hero beyond Slam Range
+  (8.05 u) at the evade's end (p50 5.35 u at its start, 7.95 u at its end). During the evade itself the side slashes
+  miss (it scuttles away) and the down slashes are vetoed: its 1.0 hits/s land at its end.
+- Far ticks (|d| > 5.4 u) in idle / walk: the chosen row ends 3.3 u closer (p50); the row ending nearest the L2 stance
+  loses on later keys (J ties within 0.6) or to a row with a hit; the CONTINUE's macro margin rarely binds.
+- Examples (`id_off2_*`): 192006e3 f 68186 (Walk, 4.82 u, L2 face: ready 3.98 u): the slash row MOVE(R)+runL16_attack
+  ranked behind by the readiness penalty, the CONTINUE (3.88 u, no press) taken; 192006e0 f 60936 (Idle, 10.7 u,
+  airborne): the 6 slash rows are down slashes, all vetoed; 192006e3 f 67756 (12.96 u after a slam): no slash row in
+  the horizon, the chosen jump-run ends at 7.34 u; 192006e0 f 61466 (Idle after a jump cast, 14.1 u): L2 "rune: out"
+  14.5 u, hit weight 0.
+
+### 2. SSBOT_FORUM_CHASE (default off; needs SSBOT_FORUM_SPECIAL_MAP=1)
+
+- **(a) L2** (`tactics/gauntlet._clapper_spot`): idle / walk, the evade and the entry (not the slam, the jumps, the
+  rune hold after a jump cast, the cast): "chase: ready" = the map's readiness argmax inside `forum_map.CHASE_BAND`
+  3.5-4.6 u on the hero's side (BOARD `chase_x`), else "chase" at `CHASE_U` 4.0 u; the target's hit weight (3.0); the
+  stance weight x `CHASE_STANCE_X` 2. The band: the map's ground readiness (min over phases) stays >= 3.28 at
+  3.0-4.5 u for an antic that starts up to 12 frames before the hero is free (a swing locks 15 frames); 5.0 u falls to
+  1.93 at k 12; 7-9 u 1.62 at k 0; 12 u 1.0.
+- **(b) planner** (`forum_planner`): the readiness also runs while the Clapper evades (Evade Scuttle; the Clapper
+  carried by its velocity to the scuttle's end, `EVADE_S` 0.35 s); a row ending in a ground swing is read at k = the
+  swing's remaining frames (`attack_duration` 15 - its frames so far); **the readiness tier**: safe rows ending within
+  `CHASE_TIER_U` 6.5 u of the Clapper with readiness < R_ref (3.0) rank after the others (`CHASE_TIER` 300 landed-hit
+  units: above the hits, below the corner rule; -inf rows last), SG4's soft penalty kept inside the tiers and beyond
+  6.5 u (a tier there would rank a retreat past 12 u, R <= WC, over an approach still 7 u out). Every other check
+  stays: its body, every move estimate, the small-rune rules, the pending aims, the jump cast's rune, other enemies,
+  the escape check, the corner rule.
+- **(c) chase rows** (`ForumPlanner._chase_rows`, in the hop block: always enveloped): toward the nearest Clapper
+  (<= 14 u) while it idles / walks / evades / enters, not within 1.1 s after a jump cast: run until the first press at
+  k1 in 0..24 step 4, or dash (3 frames) then run with the press at 10..22 step 4; then a press every 19 frames
+  (attack_cooldown 18) with the side key held 4 or 8 frames from each press (a landed slash knocks it back ~0.48 u and
+  the hero ~0.5 u; run 0.1375 u per frame). 22 rows per tick.
+- Audits: chase_ticks / rows / safe / chosen, chase_tier_ticks / rows / changed; `last_sel` keeps v2_nh, ready_pen,
+  corner, kk (diagnostics only).
+- Tests `tests/test_chase_sg5.py` (7): the switch off by default and needing the map; the chase rows' masks; their
+  gating (not in the slam / cast / jumps, 1.1 s after a jump cast, too far, on top); the tier's rows; the L2 chase
+  stance (band / fallback / evade / weight; slam, cast, jump unchanged); the readiness while it evades (carried) and the
+  chase spot in the band; a row ending in a swing. Also pass: test_special_map_sg4, test_special_map_review,
+  test_forum_l2, test_map_lookahead, test_forum_planner, test_forum_v2, test_rune_bombs (116 with the first 6 SG5 tests).
+
+### 3. Safety beyond the slam (`ssbot.tools.sg5_close`, 75 live Clapper 1v1 episodes of every arm, 2026-10-12)
+
+Moves started by the hero's distance at the start (and how many had a hero damage frame during the move):
+
+| start distance | slam | evade | cast | jump slam | jump cast |
+|---|---|---|---|---|---|
+| < 3.5 u | 40 (10) | 43 (2) | 27 (0) | 1 | 2 |
+| 3.5-5 u | 78 (16) | 133 (2) | 47 (3) | 3 | 3 |
+| 5-8.05 u | 341 (40) | 189 (2) | 196 (0) | 5 | 1 |
+| 8.05-12 u | 59 (4) | 170 (1) | 128 (2) | 110 (1) | 85 (1) |
+
+- Within 5 u (377 moves): evade 47 %, slam 31 %, cast 20 %, jump families 2.4 % (from Idle 352, Walk 25): the FSM's Close Range
+  picks SLAM / EVADE / CAST; Far Range (JUMP / CAST / JUMP CAST) needs the hero beyond Slam Range 8.05 u.
+- Damage frames by collider: the slam (hammer and body) ~136 (handled by the map), the small runes ("damager") after /
+  in the cast and during the evade ~56 (the small-rune rules), jumps 2. **Body contact outside a move: 4 events in 75
+  episodes (none in rn), all in Idle with the hero at 1.8-2.6 u (overlapping its front edge ~2.2 u: landings after
+  bounces), none in Walk.**
+- Covered by: the slam -> the map (rows, the readiness tier, the band); evade -> its body + margin (dash rows at it read
+  the "rule" margin), its leftover runes -> the small-rune rules; cast -> RUNE_NOPRE / BOMB / HOP / FACE; jump / jump
+  cast -> the pending aims and L2's jump branches (no chase rows then and 1.1 s after a jump cast); the body -> the
+  estimate + 0.5 u and the escape check.
+- **New hit risks to watch live:** (1) a slam that starts while the hero is mid-swing (the map exits "attacking" until
+  the swing ends; the band and the swing readiness keep R >= 3.28 for k <= 12 at 3.0-4.5 u); (2) more time inside Slam
+  Range = more slams and evades, fewer jumps (more slams to handle per minute); (3) the Walk at up to 8 u/s for 0.25 s
+  before Close Range (0 Walk contacts in 75 episodes; the estimate carries its velocity); (4) the evade's end into a
+  cast with the hero close: the cast's runes (the small-rune rules); (5) tick cost (below).
+
+### 4. Offline evidence: CHASE on vs off (open loop, rn 16 episodes, rnmap's switches, deadlines off)
+
+| family | chosen slash ticks | chosen reach ticks | plan end dist p50 | presses per plan | plan hits/s | imminent hit (<= 12 f) |
+|---|---|---|---|---|---|---|
+| idle / walk | 2,695 -> 3,194 | 1,498 -> 1,728 | 5.26 -> 5.18 | 0.53 -> 0.74 | 0.81 -> 1.09 | 886 -> 917 |
+| evade | 9 -> 10 | 30 -> 136 | 4.20 -> 4.03 | 0.02 -> 0.11 | 0.007 -> 0.008 | 9 -> 10 |
+| entry | 823 -> 830 | 573 -> 724 | 4.82 -> 4.38 | 0.51 -> 0.65 | 0.86 -> 1.05 | 417 -> 511 |
+| cast / slam / jumps | unchanged (+-1 %) | | | | | |
+
+- All ticks: plan hits/s (the chosen row's predicted landed hits / its 0.62 s) 0.831 -> 0.917; FORCED_RISK 4.21 % ->
+  4.23 % (per family unchanged); the chase rows exist on 8,590 ticks, safe on 6,441, safe with a hit on 3,141, chosen
+  on 618 (idle / walk 439, entry 168, evade 11); the tier changed the first row on 30 of 3,653 ticks (158,220 rows
+  below it); escape failures 898 -> 906.
+- Decisions changed on 6,986 of 36,812 ticks (idle / walk 3,493, evade 1,235, entry 1,231, and through the carried
+  plan cast 525, slam 451, jumps 51); slam ticks with a map row taken 2,382 -> 2,445.
+- Tick cost (3 replays at once, Idle priority, deadlines off): all ticks p50 / p95 / p99 11.6 / 23.1 / 29.7 ->
+  11.9 / 25.1 / 32.5 ms; idle / walk ticks p95 24.5 -> 29.4 ms (22 more always-enveloped rows).
+- **Switch-off identity** (HEAD vs a frozen a341415, `C:\ssbot\data\m2_map\sg5\base_a341415`, the same harness):
+  rnmap's switches 2,073 / 2,073 (192006 e1) and 2,251 / 2,251 (193039 e2) ticks identical; rn's (map off)
+  2,073 / 2,073 and 3,183 / 3,183 (193808 e0).
+- **What open loop cannot show:** the recorded hero did not follow the chase, so the distance she keeps and the
+  Clapper's answer to a closer hero (Idle's evade coin flip and Close Range's SLAM / EVADE / CAST within 8.05 u instead
+  of Far Range's jumps) are unmeasured; the plan rates above are per-tick plans, not landed hits (idle / walk plans
+  0.81 hits/s against 0.10 landed live).
+
+### 5. Arm, live A/B (not run)
+
+- `C:\ssbot\sandbox\1v1_arms.txt`: appended `rnchase` = the rnmap line + `SSBOT_FORUM_CHASE=1`.
+- The live A/B must measure (after the overlay eye check and the rnmap A/B): hitless share and every hit taken with
+  its state (body contact in idle / walk / evade, slams that started while she was mid-swing or chasing, the cast's
+  runes after an evade); landed hits/s by family (idle / walk 0.10, evade 1.0, entry 0.62 in rn); the distance per
+  family (idle / walk p50 9 u -> the band); the Clapper's move mix and slams per minute (more slams / evades, fewer
+  jumps); hits per slam; chase rows chosen and the tier's changes (decision logs' audits); the late-tick share.
+  Commands as in `C:\ssbot\sandbox\1v1_map_ab.txt` with the arms rnmap and rnchase on a new frozen checkout.
+
+### Open items / next
+
+1. The idle / walk after a slam starts 12.9 u away because L2 steps out 13 u during the slam; with the map (rnmap) the
+   hero should end the slam near it: the A/B decides whether idle / walk then starts close.
+2. The jump families (14 %, 9-11 u, hit weight 0 when backing off) are untouched; "under and behind" is the chase there.
+3. The chase stance is on the hero's side; the band behind (readiness 3.25-3.53 at 2.5-4.5 u behind) needs the Clapper
+   not to turn (FaceObject: 0.5 s between turns), not used yet.
+4. The 22 chase rows cost ~2-5 ms p95 on idle / walk ticks; fewer rows (one follow value, two dash frames) if late
+   ticks rise.
