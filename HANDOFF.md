@@ -8371,3 +8371,143 @@ manifests `1v1sp6t3_manifest.txt`, `1v1sp6t6_manifest.txt`, `1v1sp6ab_manifest.t
 3. The early-antic down slash chained into the late strike (the map's region) is not done.
 4. A low hop slash on the pass (a ground_hit exception for low air presses near the take-off / landing) is not done.
 5. Two Clappers (SP7) not started; slam_play.clapper() still follows the first Clapper of the STATE.
+
+## Task 1v1 - stage SP7: two Clappers (the finale; branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §71)
+
+The person (2026-10-16): fight two at once - stand between the two Clappers, the focus is the one farther from its
+wall, stand in front of the focus close so it does not jump, use the down slash's bounce i-frames to absorb the one
+behind, switch the target only when (1) the one behind is farther from its wall AND (2) it will not jump while she
+runs to it. Distances are centre to centre (the hero's box centre, the Clapper's transform), + = in front (the side it
+faces); HeroBox 0.46 u wide; its body box -1.34 .. +2.25 u, floor to 3.9 u. Data `C:\ssbot\data\m2_play\sp7`
+(`base`, `t1`..`t3` trials, `ab` the A/B, `replay_<sha>` identity, scripts). Commits e450b7a, ab30fbf, 1b8a1cb (code),
+docs after them. **Stage gate not reached: no arm kills both Clappers in the A/B (all 16-episode arms 0 kills, 0
+HP-hitless); no default changed.**
+
+### The encounter
+
+`Forum_W_w13` (savestate `C:\ssbot\sandbox\savestates\fo_cl_w13w.json`: wave 13 = the final wave, two Clappers, the
+Wanderer crest; `ssbot/train/encounters.py` FORUM_W_CLAPPER; the episode ends when the battle completes) runs through
+the existing harness unchanged: `1v1_live.ps1 -Encounter Forum_W_w13 -Timebox 180` (wrappers `C:\ssbot\sandbox\
+sp7_base.ps1`, `sp7_t.ps1`, `sp7_ab.ps1`). The hero starts at 7 HP and every Clapper hit costs 2: the supervisor quits
+(QUIT_EMULATED, hits_to_death 1) after the third hit. Each Clapper has 230 HP (about 23 Wanderer hits each).
+
+### Baseline: the v2 default on two Clappers (`base`, d950e0a arm rnjb, 8 episodes, seeds 1500000.. / 1510000..)
+
+- 8 / 8 QUIT at 1 HP after 15-33 s, 0 kills, 0.58 landed hits / s; 24 HP-loss hits, 7.5 per minute: the hammer
+  (Slam Collider 1) 13, the big rune (rune slam) 6, Slam Collider 2 3, small rune bombs 2. Every hit was taken in the air
+  and with the planner in FORCED_RISK (no safe row; 5 of 24 had a safe row 30 frames before); the umbrella was open in
+  the 30 frames before 11 of them. L2's goal at most hits: KITE(EVADE) (two Clappers within 8 u of each other: KITE 8 u
+  away from the target, LOCAL's EVADE standing).
+- The slam playbook follows `slam_play.clapper()` = the first Clapper of the STATE: it saw 7 of the 30 slams, and 12 of
+  the 13 hammer hits came from the other one ("Song Heavy Sentry (3)").
+
+### Code (`ssbot/combat/slam_play.py`, `ssbot/combat/tactics/gauntlet.py`; every switch default off)
+
+- `SSBOT_FORUM_TWO_PLAY`: the playbook follows the Clapper entering Slam Antic (the nearest to the hero when both do;
+  `SlamPlay._two_pick`; a handled slam is not looked at again until that Clapper leaves it: `_closed`), and does not
+  start while the other one can reach the stand point during the strike (`_two_danger`: in a jump move - its landing
+  aims 5.27 u in front of her -, in Slam 0-2 within 12.5 u, casting within 9 u, in Slam Recover within 4.5 u, or its jump
+  cast's rune circle - -0.7 .. +13.7 u from its landing, lit 63-86 frames after it - over the stand point; the other one
+  cannot start a move during this one's antic .. Slam 1, Buddy Is Attacking). Stats why_other *.
+- `SSBOT_FORUM_TWO_FOCUS`: with exactly two Clappers in play L2's goal is RUSH on the focus, never KITE
+  (`GauntletTactics._two_focus`): the focus = the larger room from its centre to the wall on its side away from the other
+  one (`_outer_room`; its evade backs off that way when she stands between them, < 6 u turns the evade into an escape
+  jump); the controller's face stance (4 u on her side) is then between them. Switch to the other only when its room is
+  > the focus's + 1 u AND (`_two_run_ok`) it is not in a jump move / rune hold and either the focus is committed (the
+  other cannot start a move) and she gets within 7 u of it at 8.25 u/s before the focus's move can end (t_free), or it
+  went idle after an attack move and she gets there within 0.6 s of that. Stats `l2.sp7` (picks, switch, switch_*).
+- `SSBOT_FORUM_TWO_JUMPER` (with TWO_FOCUS): a Clapper in a jump move or with its rune circle pending is the target
+  meanwhile (the 1v1's way round: under it, behind its landing, the rune hold) - the plan's 10-11 note.
+- `SSBOT_FORUM_TWO_SIDE`: the strike's way out with the other one free (Idle / Walk / Evade / already in its Slam Antic)
+  and its follow-up hammer (13 u from its centre) reaching the landing between them (SP5's rule) lands on the far side
+  of the struck one: NEAR's 3.7 u ("two-away") when that is out of its reach, else SP1's dash way out on that side
+  ("two-far", 6.6-9.5 u out; the side is fixed at Slam 0 + 10).
+- `ssbot.tools.sp7_two` (per episode: outcome, fight time, landed hits, every HP-loss hit with its source, the Clapper
+  that dealt it, both states, her x from it, between / stacked, the L2 goal and the playbook phase; the time stacked
+  (< 4 u apart), between them, within 8 u; every slam: struck or not, the other one's state / distance, HP lost from
+  its antic to + 170; bootstrap vs a base arm). Scripts in `sp7`: `trace_hit.py` (the frames before a hit),
+  `ab_stats.py`, `umb.py`, `shield_geo.py`.
+- Tests `tests/test_sp7.py` (14); slam_play / sp4 / sp5 / sp6 / forum_l2 / jump_behind / cast_stab pass (125).
+
+### Trials (8 episodes each on Forum_W_w13, instances 0 / 1, 1x, the same seeds as the baseline)
+
+| round | code / arm | outcome | HP hits / min | slams struck | struck slams with HP lost (antic .. + 170) | not struck with HP lost |
+|---|---|---|---|---|---|---|
+| base | d950e0a rnjb | 8 QUIT | 7.5 | 7 / 30 | 2 | 18 / 23 |
+| t1 | e450b7a two (PLAY + FOCUS) | 8 QUIT | 6.1 | 20 / 41 | 3 (all the other one's follow-up hammer, 115-128 frames after the antic) | 15 / 21 |
+| t2 | ab30fbf two2 (+ SIDE away, JUMPER) | 7 QUIT, 1 CLEAR (49.5 s, 3 hits) | 5.2 | 25 / 42 | 1 | 13 / 17 |
+| t3 | 1b8a1cb two2 (SIDE two-far) | 8 QUIT | 5.9 | 17 / 26 | 1 | 7 / 9 |
+
+- The follow-up chain (t1 trace 145306_2 i1 ep0): she strikes one, the other (idle, 10-14 u away) starts its slam the
+  moment the struck one's Slam 1 ends; she is in the bounce until Slam 0 + 52 = the new antic's frame ~40 (too late for
+  any strike: the playbook jumps by 30), lands between them in its reach, and its hammer comes 10-16 frames later. Six
+  of t1's hits were this chain -> TWO_SIDE.
+- The rune trap (t1 trace 145306_2 i1 ep1): the other one's jump cast landed 5.27 u in front of her, its circle over the
+  focus's front; the focus slammed; the playbook waited (other rune circle) and L2 sent her 13 u out ("slam: step
+  out") into the circle -> TWO_JUMPER.
+
+### A/B (1b8a1cb, 16 episodes per arm, 4 blocks x 2 per arm per instance, seeds 1600000.. / 1610000..; manifest `C:\ssbot\sandbox\1v1sp7ab_manifest.txt`; `sp7\ab\two.txt`, `ab_stats.txt`)
+
+| | rnjb (default) | two (PLAY + FOCUS) | two2 (+ SIDE + JUMPER) | two3 (PLAY + FOCUS + SIDE; run after, same seeds) |
+|---|---|---|---|---|
+| episodes / kills / HP-hitless | 15 + 1 harness fail / 0 / 0 | 16 / 0 / 0 | 16 / 0 / 0 | 15 + 1 harness fail / 0 / 0 |
+| fight time (to the QUIT) mean, p10 / 50 / 90 (s) | 23.7, 12.2 / 25.2 / 33.8 | 24.5, 17.1 / 25.0 / 32.1 | **32.6**, 17.9 / 29.3 / 55.2 | 26.6, 15.2 / 28.0 / 36.1 |
+| HP-loss hits / min | 7.59 | 7.65 | **5.63** | 7.52 |
+| landed hits / s | 0.559 | **0.632** | 0.464 | 0.454 |
+| hits / min: hammer / landing (Slam Collider 2) / big rune / small rune bombs / body | 2.36 / 1.85 / 2.02 / 0.67 / 0.67 | 1.68 / 1.84 / 1.53 / 1.38 / 1.22 | 0.34 / 1.49 / 1.15 / 1.03 / 1.61 | 1.35 / 1.65 / 1.80 / 2.41 / 0.30 |
+| slams struck / struck with HP lost / not struck with HP lost | 6 / 45, 1, 27 | 45 / 77, 8, 24 | 37 / 71, 4, 20 | 30 / 54, 0, 18 |
+| time between them / stacked (< 4 u) / within 8 u of one | 17.7 / 22.9 / 68.7 % | **57.4 / 6.9** / 83.2 % | 13.4 / 27.8 / 79.5 % | 20.4 / 19.7 / 71.0 % |
+| moves / min: slam / jump / jump cast / cast / evade | 7.6 / 8.1 / 4.7 / 9.9 / 22.8 | 11.8 / 5.8 / 5.0 / 8.1 / 20.5 | 8.2 / 6.7 / 5.6 / 9.2 / 25.3 | 8.1 / 7.1 / 3.9 / 10.2 / 24.1 |
+
+- Bootstrap vs rnjb (episodes resampled, 90 %): two landed / s +0.072 (-0.006 .. +0.147), hits / min +0.07 (-1.29 ..
+  +1.28), fight time +0.8 s; two2 fight time +8.7 s (+1.8 .. +16.4), hits / min -1.93 (-3.46 .. -0.42), landed / s
+  -0.094 (-0.151 .. -0.037); two3 landed / s -0.106 (-0.183 .. -0.031), hits / min -0.08 (-1.61 .. +1.47).
+- The strikes under TWO_PLAY (the playbook's "fixed point" in the full fight: a struck slam without HP loss from its
+  antic to + 170): two 37 / 45 = 82 %; with TWO_SIDE (two2 + two3) 63 / 67 = **94 %**; rnjb 5 / 6.
+- The person's "close, so it does not jump" holds in "two": the most slams (11.8 / min) and the fewest jumps (5.8 / min);
+  "between them" 57 % of the time, stacked 7 %.
+- Not promoted: no arm kills, HP-hitless 0 everywhere; "two" is faster (interval touches 0), "two2" survives longer
+  with fewer hits per minute but lands fewer hits. The person's call.
+
+### The old notes (plan 10-11) against the data (32 trial episodes, 141 slams; `sp7\*\two.json`)
+
+- "Stacked, you cannot stand and fight; sometimes flee": slams starting with the other Clapper within 4 u of her lost HP
+  in 10 of 11; 4-9 u 20 / 45, 9-13 u 18 / 42, 13-17 u **4 / 19**, >= 17 u 8 / 20. Agrees: near both she cannot stand.
+  The person's 10-16 strategy needs the other one >= 13 u behind (its hammer and its follow-up out of reach).
+- The shield (a down slash on the one in front to absorb the other's damage) was geometrically available almost never:
+  of the 54 Clapper-dealt hits, the other Clapper was within 5.5 u of her 25 frames before in 11, with her on the ground
+  in 1 (`shield_geo.py`); 42 hits came from rune objects. Not implemented: it needs the stance first (in "two" she is
+  within 8 u of one 83 % of the time but not at its face when the other attacks) and fixed-point pogo trials on an
+  idle Clapper (its Dmg Attack then decides a move at once).
+
+### Switch-off identity
+
+e450b7a and 1b8a1cb with the SP7 switches unset: 192006 i0 ep1 2,073 / 2,073, 084036 i1 ep0 1,778 / 1,778 and the w13
+baseline 144051 i1 ep0 1,541 / 1,541 ticks byte-identical to d950e0a (`sp7\replay_<sha>`, `replay_ident_sp7.ps1`).
+All four on (1b8a1cb, `replay_sw1.ps1`): the w7 episodes identical (one Clapper: no SP7 rule applies), the w13 one
+differs from tick 123, no errors.
+
+### Arms (`C:\ssbot\sandbox\1v1_arms.txt`)
+
+`two` = rnjb + TWO_PLAY + TWO_FOCUS; `twoP` / `twoF` one of them; `two2` = two + TWO_SIDE + TWO_JUMPER; `two3` = two +
+TWO_SIDE.
+
+### Machine state
+
+Instances 0 and 1 frozen (time scale 1e-4; instance 0 read 0.0 after the A/B: paused, the next combat_run resumes it)
+after every block; DEMO_SOON restored after each; no game process touched; boost_workers ran for the blocks
+(`boost_workers.stop` renamed to `.prev_sp7`). Frozen checkouts `C:\ssbot\live_1v1_{e450b7a,ab30fbf,1b8a1cb}`.
+Manifests `C:\ssbot\sandbox\1v1sp7base_manifest.txt`, `1v1sp7t1..t3_manifest.txt`, `1v1sp7ab_manifest.txt`. Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. Every hit is taken in FORCED_RISK, mostly airborne (the umbrella open before 40-67 % of them): two Clappers' supports
+   leave no safe row. The stance has to keep the other one >= 13 u behind (the data above) - a focus stance that
+   pushes the focus away from the other one, not only "farther from its wall".
+2. The follow-up chain (a slam starting while she is in a strike's bounce) cannot be struck with the playbook's timing;
+   TWO_SIDE moves her out of its reach (struck slams 94 % safe) but out of "between them" (13-20 %).
+3. The shield: fixed-point pogo trials on an idle Clapper timed to the other one's hammer / landing (the bounce's ~8
+   physics steps), once the stance puts her at its face.
+4. The big rune and the small rune bombs are now the largest sources (2.5-4 hits / min in the SP7 arms).
+5. The playbook can run one slam at a time; a second Clapper's slam during the first's way out is left to the planner.
