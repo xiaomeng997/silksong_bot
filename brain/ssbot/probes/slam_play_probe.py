@@ -63,8 +63,9 @@ def _ctl(e) -> str | None:
 class PlayProbe(Target):
     def __init__(self, link: OracleLink, savestate: str, tick_ms: float, pin: bool = False, hop: int = 0,
                  freeze: tuple[int, int] | None = None, skid: int = 0, umbrella: bool = False,
-                 stall: tuple[int, float, int] | None = None):
+                 stall: tuple[int, float, int] | None = None, slash: int = 0):
         super().__init__(link, savestate)
+        self.slash = slash
         self.hop = hop
         self.skid = skid
         self.umbrella = umbrella
@@ -140,6 +141,9 @@ class PlayProbe(Target):
                 if (self.hop and self.umbrella and (s["f"] // self.hop) % 2 == 0
                         and UMB_AT <= s["f"] % self.hop < UMB_AT + 2):
                     m |= M_J                              # --umbrella: the jump again in the air (the umbrella opens)
+                if self.slash and e is not None and s["f"] % self.slash < 2 and abs(sp.hero_x(s) - float(e["pos"][0])) <= 5.2:
+                    # --slash N (SP6): the planner's slashes while it idles (a cooldown and a knock-back at the antic)
+                    m = (m & ~(M_L | M_R)) | M_A | (M_R if float(e["pos"][0]) > sp.hero_x(s) else M_L)
             else:
                 if self.freeze is not None:
                     ka = s["f"] - seen["f"] + seen["k0"]          # STATE frames from the antic entry
@@ -334,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--skid", type=int, default=0, help="N: dash + sprint toward it from the antic sighting, a Sprint "
                     "Turn at N - 2; the playbook from frame N (SP4)")
     ap.add_argument("--umbrella", action="store_true", help="with --hop: the jump again in the air (the umbrella; SP4)")
+    ap.add_argument("--slash", type=int, default=0, help="N: while waiting, a side slash toward it every N frames "
+                    "when within 5.2 u (the planner's idle slashes; SP6)")
     ap.add_argument("--stall", default="", help="P:S:N: P STATE frames after the press was sent, the time scale S (<= 4) "
                     "for N STATE frames (a host stall; SP4 item 2)")
     a = ap.parse_args(argv)
@@ -350,13 +356,13 @@ def main(argv: list[str] | None = None) -> int:
         if a.stall:
             p_, s_, n_ = a.stall.split(":")
             stall = (int(p_), float(s_), int(n_))
-        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz, a.skid, a.umbrella, stall)
+        pr = PlayProbe(link, a.savestate, a.tick_ms, a.pin, a.hop, fz, a.skid, a.umbrella, stall, a.slash)
         rec = Recorder(link, out_dir=a.out, profile="TRAIN", episode=f"slam_play_i{a.instance}_s{a.seed}{a.tag}",
                        config={"probe": "slam_play_probe", "seed": a.seed, "dists": dists, "per": a.per,
                                "tick_ms": a.tick_ms, "savestate": a.savestate, "pin": a.pin, "hop": a.hop,
                                "freeze": a.freeze, "game_clock": sp.GAME_CLOCK, "skid": a.skid, "late": sp.LATE,
                                "umbrella": a.umbrella, "stall": a.stall, "side": sp.SIDE, "near": sp.NEAR,
-                               "early": sp.EARLY,
+                               "early": sp.EARLY, "slash": a.slash,
                                "cfg": pr.play.cfg.__dict__}).start()
         log = (rec.path / "play_trials.jsonl").open("w", encoding="utf-8")
         pr.load()

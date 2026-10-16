@@ -215,8 +215,9 @@ class PlayCfg:
     early_post_stand: tuple = (4.2, 4.9)   # the walk band after an early press (the jump BAND unchanged)
     early_late_k: int = 18           # a press from this antic frame on (its recoil reaches the jump) ...
     early_late_u: float = 4.4        # ... only from this near (u, centre to centre; the walk band's top then)
-    early_late_lo: float = 4.2       # ... and from this far at least (the press's two frames toward it: -0.27 u)
-    early_band_lo: float = 3.6       # after an early press the jump band from here (SP1 it3: the jump at 3.6-7.25 u,
+    early_late_lo: float = 4.0       # ... and from this far at least (the jump BAND from early_band_lo under EARLY)
+    early_min_u: float = 3.6         # no early press nearer than this, and the walk toward it stops here
+    early_band_lo: float = 3.6       # under EARLY the jump band from here (SP1 it3: the jump at 3.6-7.25 u,
     #                                  71 / 71 safe)
     early_near_v: float = 0.138      # NEAR's behind clearance under EARLY: her measured air speed (u / frame) ...
     early_cross_u: float = 2.3       # ... and the distance past its centre by Slam 0 + near_cross_s0 (x at Slam 0 + 10
@@ -455,7 +456,7 @@ class SlamPlay:
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
         if r.phase == "walk":
             band = r.band or c.band
-            if EARLY and r.k_early:
+            if EARLY:
                 band = (min(band[0], c.early_band_lo), band[1])     # SP6: an early hit's knock-back builds up late
             late_walk = (LATE and (r.k_air is not None or r.late) and k < c.k_jump_late2 and ground
                          and not band[0] <= x <= band[1])
@@ -726,25 +727,32 @@ class SlamPlay:
         if nxt > c.early_k_max:
             return 0 if quiet and m_walk & away else m_walk
         xw = self._x_at_mask(s, f)
-        reach = self._in_reach(e, cx, r.face, xw, -r.face)
+        xr = (xw - cx) * r.face
         band = c.early_stand
+        lo_x, hi_x = c.early_min_u, 99.0                 # the press's x window (u in front, centre to centre)
         if nxt >= c.early_late_k:
             # a late press (its hit's recoil runs on into the jump): from early_late_u at most (t2 / t3: the two hammer
             # hits pressed the strike from 5.66-5.78 u at Slam 0 - 1 after an early hit at antic frame 22 from
             # 4.6-4.7 u; hits from <= 4.5 u put her at <= 5.56 u) and early_late_lo at least (t4, 0db621e: two presses
-            # at 23 from 3.98-4.12 u left her at 3.81-3.96 u at the jump - the knock-back and the recoil build up over
-            # ~8 frames - outside BAND: no strike, the lunge)
-            band = (c.early_late_lo + 0.05, c.early_late_u + 0.05)     # wider than a step (0.1375 u)
-            xr = (xw - cx) * r.face
-            reach = reach and c.early_late_lo <= xr <= c.early_late_u + 0.05
+            # at 23 from 3.98-4.12 u left her at 3.81-3.96 u at the jump, below BAND's 4.0)
+            lo_x, hi_x = c.early_late_lo, c.early_late_u + 0.05
+            band = (c.early_late_lo + 0.1, c.early_late_u + 0.05)
+        ok = lambda x_rel, x_w: lo_x <= x_rel <= hi_x and self._in_reach(e, cx, r.face, x_w, -r.face)   # noqa: E731
         prev = r.sent[-1][1] if r.sent else 0
-        if k >= nxt and reach and prev & toward and not prev & away:
+        fc = (s.get("hero") or {}).get("facing")
+        facing = prev & toward or (not prev & away and fc is not None and float(fc) * -r.face > 0)
+        if k >= nxt and ok(xr, xw) and facing and not prev & away:
             r.k_early.append(k)
             return M_A | toward
-        if nxt - k <= 1 and (reach or self._in_reach(e, cx, r.face, xw - r.face * WALK_U, -r.face)):
-            return toward                           # the frame before the press: toward it
+        if nxt - k <= 1 and not facing and ok(xr - WALK_U, xw - r.face * WALK_U):
+            return toward                           # the frame before the press: toward it (she turns to it)
+        # the walk into the band: toward it only down to the window (abc block of the A/B, 74174bd: the frame-before
+        # toward key repeated while a late press stayed out of its window walked her from 4.25 to 3.31-3.42 u: no
+        # strike, three hammer hits); away from it only when no press is due within early_quiet frames
         m = self._walk(s, cx, r.face, f, band=band)
-        if m & away and (quiet or nxt - k <= c.early_quiet):
+        if m & toward and xr - WALK_U < lo_x:
+            m = 0
+        if m & away and (quiet or (nxt - k <= c.early_quiet and lo_x <= xr <= hi_x)):
             return 0                                # no key away from it around a press
         return m
 

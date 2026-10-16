@@ -151,3 +151,15 @@ def test_near_clearance_under_early(early, x_rel, want, monkeypatch):
     s = state(1000, "Slam 1", 0.1, cx=cx, flip=False, hx=cx + face * x_rel, ground=False)
     play._near(r, 50, 1000, s, s["ents"][0], cx)
     assert ("behind" if r.near == -face else "front") == want
+
+
+@pytest.mark.parametrize("x0", [4.25, 4.0, 3.7])
+def test_late_window_never_walks_in(x0, monkeypatch):
+    # the A/B's abc block (74174bd): a planner slash just before the antic pushed the first press past early_late_k; the
+    # key toward it before a press that stayed out of the late window walked her from 4.25 to 3.3-3.4 u (no strike,
+    # the hammer). Now: never nearer than the window's low edge from a walk toward it, the jump at 26 inside BAND
+    play, landed, xs, hits = run(x0, cd0=0.3, start_k=0, monkeypatch=monkeypatch)
+    lo = min(x0, play.cfg.early_late_lo) - 0.01
+    assert min(xs[k] for k in range(2, 26)) >= lo - sp.WALK_U
+    assert landed.get(26, 0) & sp.M_J
+    assert all(xs[k] >= play.cfg.early_late_lo - 0.3 for k in [k for k in presses(landed) if k < 26])
