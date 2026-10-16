@@ -155,7 +155,7 @@ def _episode(arm: str, inst: int, run: Path, row: dict, dec: dict, cfg) -> dict:
         x["x_end"] = None if se is None else (None if _signed(se, clap.get(end), f0) is None
                                               else round(_signed(se, clap.get(end), f0), 2))
         # the way out's landing: the first frame on the ground after the bounce, signed (+ in front)
-        xl = None
+        xl = gl = None
         if x["bounce"] and press is not None:
             for g in range(press + 15, min(end + 60, f_end)):
                 s_ = by_f.get(g)
@@ -163,8 +163,16 @@ def _episode(arm: str, inst: int, run: Path, row: dict, dec: dict, cfg) -> dict:
                     e_ = clap.get(g) or clap.get(fa)
                     v = _signed(s_, e_, f0)
                     xl = None if v is None else round(v, 2)
+                    gl = g
                     break
         x["x_land"] = xl
+        # SP5: the way out's side slash (a hit that is not a down slash from the press + 15 to the landing + 3) and the
+        # hero's landed hits in the 60 frames after the landing (the follow-up), frames from Slam 0
+        x["land_s0"] = None if (gl is None or x.get("s0") is None) else gl - x["s0"]
+        x["way_slash_hits"] = 0 if gl is None else sum(1 for f, s_ in landed_f if press + 15 <= f <= gl + 3
+                                                       and "Down" not in s_)
+        x["land_hits60"] = None if gl is None else sum(1 for f, _ in landed_f if gl < f <= gl + 60)
+        x["hp_land60"] = None if gl is None else [(h["f"] - gl, h["src"], h["st"]) for h in hits if gl < h["f"] <= gl + 60]
     # casts
     casts = []
     fl = sorted(by_f)
@@ -245,6 +253,15 @@ def summarize(E: list[dict]) -> dict:
         "played_land_behind": sum(1 for x in pl if x["x_land"] is not None and x["x_land"] < 0),
         "played_land_front": sum(1 for x in pl if x["x_land"] is not None and x["x_land"] >= 0),
         "played_x_land": pct([abs(x["x_land"]) for x in pl if x["x_land"] is not None]),
+        # SP5: the way out (the landing frame from Slam 0, the side slash before / at the landing, the follow-up)
+        "played_land_s0": pct([x.get("land_s0") for x in pl if x.get("land_s0") is not None]),
+        "played_way_slash": sum(1 for x in pl if x.get("way_slash_hits")),
+        "played_way_slash_hits": sum(x.get("way_slash_hits") or 0 for x in pl),
+        "played_land_hits60": sum(x.get("land_hits60") or 0 for x in pl),
+        "played_land_hits60_per": round(sum(x.get("land_hits60") or 0 for x in pl)
+                                        / max(sum(1 for x in pl if x.get("land_hits60") is not None), 1), 3),
+        "played_hp_land60": sum(1 for x in pl if x.get("hp_land60")),
+        "played_hp_land60_src": dict(Counter(h[1] for x in pl for h in (x.get("hp_land60") or ()))),
         "hammer_hits": sum(1 for x in S if x["hammer_hit"]),
         "hp_in_slams": sum(len(x["hp_slam"]) for x in S), "hp_after_slams": sum(len(x["hp_after"]) for x in S),
         "hp_in_slams_src": dict(Counter(h[1] for x in S for h in x["hp_slam"])),
