@@ -6974,3 +6974,126 @@ metrics in `C:\ssbot\sandbox\1v1_chase_ab.txt` (a frozen checkout of the review'
    frames in 8 episodes; rn 1 in 16); the chase spends more time there: read every "damager" hit in the A/B.
 4. Two Clappers (not the 1v1): the chase and the readiness look at the nearest one only; gate the chase to one Clapper
    in range before using it in the gauntlet.
+
+## Task 1v1 - stage SG6: the map work compiled (branch worktree-wf_f1846551-5f9-1, 2026-10-15; forum.md §62)
+
+The person's decision (main 4b3a347): "compile it if it is easy." Offline only (no game, no live run). New module
+`ssbot/combat/special_map_jit.py` (numba, `cache=True`, no fastmath); switch `SSBOT_FORUM_SPECIAL_MAP_JIT` (default 1
+since the replay identity below; 0 = the Python reference, kept unchanged as `MapRuntime.plan_py`, `readiness_rows`
+and the old loops in `forum_map`). Data: `C:\ssbot\data\m2_map\sg6` (harness `ident_sg6.py` = the m2_why refute replay
+with one line per tick: the decision, the tick's ms, the planner's `map_ms`, the row / readiness / off-board / chase-row
+times and fingerprints of every map output; `job.ps1`, `launch.ps1`; `ident_cmp.py`, `tick_stats.py`, `prof_*.py`).
+
+### 1. Where the map work went (cProfile, one open-loop replay each: 192006 e1 with rnmap's and rnchase's switches)
+
+- **The map row** (`MapHelper.row` -> `MapRuntime.plan`): 94 % in `decide_multi` -> `decide_keyed` -> `keyed_q` ->
+  `LevelSource.S / Smax` (about 44 decisions per row, 125k scalar lookups for 107 rows); `_state_at_prefix` 5 %,
+  `locate` 1.5 %.
+- **The readiness** (`MapHelper.readiness` -> `readiness_rows`): 58 % in one line, `np.asarray(src._S[0], np.int64)`,
+  which converted the whole k = 0 slab (3 x 2,216 x 170 levels, 9 MB) to int64 on every call (1.2 ms); `np.unique` 10 %;
+  the airborne rows' loop; the L2 strip (121 positions x phases scalar lookups) ~4 %.
+- **The off-board spot** (`MapHelper.off_board`, every slam tick without a row): 321 positions x 6 phases scalar
+  lookups (0.36 ms p95; not in `map_ms`).
+- The chase rows (SG5) do no map lookups (0.06 ms p95; only `chase_gate`).
+- Quiet machine without the profiler (section 4): a fresh map row 2.9 ms p50, a cached one 0.24, the readiness 2.0.
+
+### 2. The kernels
+
+- `_decide1` = `decide_keyed` on one phase's levels (the late-key branches of `keyed_q` for none / exp / hard /
+  hard_exp, the jump holds best first with the same pruning, the press with the held key); `_decide` = `decide_multi`
+  (per action the minimum over the phases, an action some phase does not offer is out, the first best in the
+  candidates' order, the retreat / keep-key fallback).
+- `plan_k` = `MapRuntime.plan`'s whole loop from a loop state (decisions, run steps, jump starts and landings from the
+  hero macros' profiles, the key / jump / strike masks, the slash in flight, the contact with the move's nominal targets
+  through `clip_band` and the render lag, the bounce events); `plan_jit` builds the same `MapPlan` (masks, path,
+  actions, values, states, presses, contacts, final; `extend` / resume through it).
+- `ready_k`: the readiness of all end states as one call, the minimum over the slam's phases, reading the levels in
+  place (no 9 MB conversion); `np.unique`'s first-occurrence rows reproduced (a row with an earlier row's key takes its
+  value). `smin_k`: batched lookups (min over phases) for the L2 strip, the off-board spot and the swing lock.
+- The reference's arithmetic in the same order (gamma^m precomputed in Python); keyed level maps only (anything else:
+  the Python path). `special_map_jit.tables` is built in `MapRuntime.__init__` (0.13 s, at the map's load): the levels
+  and press bits of the six phases as tuples of read-only arrays (a RAM load becomes read-only views: one
+  specialisation), the tube index, the macros' jump / bounce profiles, the lag, the slash polygons, the targets per frame.
+- **Compile time**: `special_map_jit.warm()` (a tiny synthetic map with the run-time types) runs in `MapHelper.preload`
+  at the planner's construction: 0.2-0.3 s from numba's cache, 5-9 s the first time in a fresh checkout (or after an
+  edit of the module). A real call adds no specialisation (test), so neither the first tick with the arena nor the first
+  slam tick compiles. The first slam of a process still pays the page faults of the memory-mapped levels (both paths).
+- Call sites: `MapRuntime.plan` (-> `plan_jit`), `readiness_min` (forum_map.readiness), `S_min` (strip, swing lock,
+  off-board), `decide_jit` (tests); `ForumPlanner.last_map_ms` (diagnostic, the tick's `map_ms`).
+
+### 3. Identity
+
+- **(a) Unit tests** `tests/test_special_map_jit.py` (8 tests, 10 cases, ~60 s): on the real map (all six phases, the
+  49 tubes, every key) 4,000 random states plus the states along 400 map rows from them (about 21,000 decisions):
+  value and action identical; 300 map rows (and `extend` at random indices) from random states (one or two phases,
+  both facings, a slash in flight, airborne starts, cooldowns): every `MapPlan` field identical; `readiness_min` and
+  `S_min` on random end states with duplicate keys and off-map x; the four key-noise modes on the reduced test map
+  (RAM and mmap loads); `MapHelper.readiness` (rnmap and the chase: swing lock, strip, band) and `off_board`: the same
+  penalty, readiness and BOARD; compiled once at the warm-up; the switch.
+- **(b) Open-loop replays, JIT 0 vs 1** (rn's 16 episodes, deadlines off; `ident_jit.json`): rnmap's switches
+  **36,812 / 36,812** ticks identical (the decision and every map output: the row's plan fingerprint, value, first
+  action, exit reason; the readiness's penalty / R / index; BOARD), 3,001 map rows, 3,111 readiness ticks, 3,658
+  off-board ticks; rnchase's switches **36,812 / 36,812**, 3,023 rows, 3,500 readiness ticks, 3,636 off-board ticks.
+- **(c) Switch-off identity** (HEAD 91ed018, JIT on by default, vs a frozen 818df08 = `sg6\base_818df08`;
+  `ident_switchoff.json`): rn's switches 2,073 / 2,073 (192006 e1), 2,251 / 2,251 (193039 e2), 3,183 / 3,183 (193808
+  e0); rnmap's 2,073 / 2,073, 2,251 / 2,251, 3,183 / 3,183 (map outputs included); rnchase's the same.
+
+### 4. Timing (`timing.json`, `timing.txt`)
+
+Quiet machine: no game, the rest of the machine at 0-8 % CPU (32 threads) before and after; one replay at a time at
+Normal priority; 192006 e1, 192220 e2, 193039 e0 (7,108 ticks per arm). "Map work" = the planner's `map_ms` (the map
+row, its special context, the readiness) on the ticks with map work (a map row or a readiness: rnmap 964, rnchase
+1,030 ticks); "lookups" = the row + readiness + off-board calls only. p50 / p95 / p99 ms, JIT off -> on:
+
+| deadlines off | rnmap | rnchase |
+|---|---|---|
+| map work | 2.22 / 4.85 / 5.78 -> **0.27 / 2.78 / 3.29** | 2.21 / 4.88 / 5.81 -> **0.34 / 2.79 / 3.58** |
+| lookups | 2.12 / 3.25 / 3.77 -> 0.19 / 0.55 / 0.90 | 2.16 / 3.21 / 3.81 -> 0.30 / 0.63 / 1.07 |
+| fresh map row | 2.88 / 3.59 / 3.97 -> 0.38 / 0.84 / 1.11 | 2.88 / 3.67 / 4.17 -> 0.39 / 0.87 / 1.21 |
+| readiness | 2.03 / 2.95 / 3.32 -> 0.16 / 0.23 / 0.31 | 2.05 / 2.57 / 3.31 -> 0.24 / 0.33 / 0.54 |
+| tick with map work | 11.96 / 19.23 / 22.16 -> 9.95 / 18.01 / 21.69 | 12.11 / 19.98 / 22.87 -> 10.45 / 18.08 / 22.68 |
+| all ticks | 7.60 / 15.00 / 19.66 -> 7.61 / 14.40 / 18.57 | 7.78 / 15.57 / 20.14 -> 7.85 / 14.90 / 19.04 |
+| ticks > 16.7 ms | 162 -> 133 | 231 -> 169 |
+
+| deadlines on (live values) | rnmap | rnchase |
+|---|---|---|
+| all ticks | 7.39 / 11.77 / 14.79 -> 7.24 / 10.26 / 11.87 | 7.62 / 12.24 / 15.03 -> 7.40 / 10.64 / 12.52 |
+| tick with map work | 10.57 / 14.96 / 18.44 -> 8.87 / 11.62 / 13.65 | 10.94 / 15.32 / 18.78 -> 9.01 / 12.11 / 14.29 |
+| ticks > 16.7 ms | **31 -> 2** | **29 -> 4** |
+| escape check cut by its deadline | **273 -> 194** ticks | **370 -> 330** |
+| chosen rows left unchecked | 254 -> 176 | 349 -> 310 |
+| envelope cut (deadline_cut) | 2,245 -> 2,162 | 2,443 -> 2,278 |
+| FORCED_RISK ticks | 300 -> 298 | 301 -> 301 |
+
+- With the deadlines on the decisions follow the clock, so on / off differ by design there (b and c are deadlines off).
+- `map_ms` was already excluded from the deadlines (SG4 review, `SSBOT_FORUM_SPECIAL_MAP_DL`), so the fewer escape
+  cuts are the rest of the tick running faster without the Python map work (likely its allocations and the 9 MB
+  conversion per readiness; not measured separately).
+- The remaining map work (p95 2.8 ms on row ticks) is the map row's special context (`ForumPlanner._special_ctx`:
+  special_mode's support on the row's lane), not map lookups; the lookups are 0.2-0.3 ms p50, <= 1.2 ms p99.
+- SG5's deadline numbers (p95 15.6 ms, 231-258 late ticks) were 3 replays at once at Idle priority; not comparable.
+
+### 5. Frozen checkout, A/B files, overlay (prepared, not run)
+
+- The frozen checkout of this section's commit: `C:\ssbot\live_1v1_<sha>` (1v1_freeze.ps1; the map npz copied with
+  its size / mtime, so the mmap cache is reused; numba compiles its kernels on the first planner construction there).
+- `C:\ssbot\sandbox\1v1_map_ab_jit.txt` (rn vs rnmap) and `1v1_chase_ab_jit.txt` (rnmap vs rnchase) point at it: the
+  old files' seeds, new manifests (`1v1mj_manifest.txt`, `1v1chj_manifest.txt`) and output dirs (`m2_live_map_jit`,
+  `m2_live_chase_jit`); run these or the old ones, not both (same seeds). The arms (1v1_arms.txt) are unchanged: the
+  JIT is on by default in the new checkout.
+- `C:\ssbot\sandbox\start_overlay_map_check_jit.ps1`: the overlay start script pointing at the new checkout (log
+  `overlay_map_check_jit.log`); not launched. The old files are unchanged.
+
+### Tests
+
+`tests/test_special_map_jit.py` (new, 10 cases); also pass: test_special_map_sg4, test_special_map_review,
+test_chase_sg5, test_chase_sg5_review, test_map_lookahead, test_special_map, test_forum_l2, test_forum_planner,
+test_forum_v2, test_rune_bombs, test_zone_overlay (149 pass, 4.3 min).
+
+### Open items / next
+
+1. Unchanged order: the person's overlay eye check (now `start_overlay_map_check_jit.ps1`), then the live rnmap vs rn
+   A/B, then rnchase vs rnmap (`*_jit.txt`).
+2. The map row's special context is now the map's largest per-tick cost (~2.5 ms p95 on row ticks); a lighter support
+   check for the map row (its own lane is certified) would be the next lever.
+3. The overlay's own per-frame lookups (zone_overlay's ground strip) are still Python (its map row uses the kernel).
