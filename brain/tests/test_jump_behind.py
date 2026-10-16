@@ -265,3 +265,9 @@ def test_kernel_ground_only():
 def _shapes():
     from ssbot.combat.forum_planner import _shapes as shp
     return shp("Wanderer")
+
+
+def test_aim_stance_far_with_its_back_at_a_wall():
+    assert jb.aim_spot(30.0, -1.0) == pytest.approx(24.5)                  # open: 5.5 u
+    assert jb.aim_spot(jb.WALL_R - 1.6, -1.0) == pytest.approx(jb.WALL_R - 8.6)   # back within 4 u: 7 u
+    assert jb.aim_spot(jb.WALL_L + 1.6, 1.0) == pytest.approx(jb.WALL_L + 8.6)

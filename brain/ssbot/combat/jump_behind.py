@@ -8,7 +8,9 @@ Slam Antic 2 > Jump > Air > Slam 2 > Slam Recover, then the rune circle) the L2 
 _clapper_spot) is:
   antic   AIM_U in front of it (the person stands 4.2-7.7 u, p50 5.2, in front at its Jump Aim: the jump's target is the
           hero's x 5 u on its own side, so from 5 u it jumps in place and the whole flight is above her way under it);
-          a hero behind it at the antic stays behind (BACK_U);
+          aim_wall_u (7 u) when its back is within push_from_u of a wall (it then jumps 1.8 u toward her, away from
+          the wall: from 5-6 u it landed as near as 3.35 u to the wall, the A/B's one jump hit); a hero behind it at
+          the antic stays behind (BACK_U);
   flight  BACK_U behind the landing (the person: 3.0-5.1 u, p50 3.7, at the landing; the slash reaches its back edge,
           1.27-1.34 u behind its centre, from up to about 4.4 u; its body turning at Idle reaches 2.25 u behind the old
           back side: below), the landing = take-off + 0.916 vx (vx: the first Air frame's; before it the hero's x on
@@ -57,6 +59,7 @@ ENABLED = _on("SSBOT_FORUM_JUMP_BEHIND")
 NUM = {
     "aim_u": 5.5,          # antic: the stance in front (centre to centre, u; 0.5 u past the jump's 5 u: it jumps
     #                        slightly toward her, away from a wall behind it)
+    "aim_wall_u": 7.0,     # ... with its back within push_from_u of a wall (aim_spot)
     "back_u": 3.5,         # flight / landed / rune hold: the stance behind the landing (centre to centre, u)
     "min_back_u": 3.1,     # behind needs the stance at least this far behind the landing centre (the planner keeps
     #                        turn_u 2.3 + its margin 0.5 + the hero's half width 0.25 from it), else the old back-off
@@ -119,6 +122,10 @@ def behind_spot(land: float, front: float, cfg: dict | None = None) -> float | N
 
 
 def aim_spot(x: float, front: float, cfg: dict | None = None) -> float:
+    """The antic stance: aim_u in front; aim_wall_u when its back is within push_from_u of a wall (from 5-6 u it jumps
+    in place against the wall: landing room 3.35-3.7 u in 3 of 23; from >= 6 u it jumps toward her: >= 4.16 u, n 302)."""
     c = CFG if cfg is None else cfg
-    v = x + front * c["aim_u"]
+    room0 = (x - WALL_L) if front > 0 else (WALL_R - x)
+    u = c["aim_wall_u"] if room0 < c["push_from_u"] else c["aim_u"]
+    v = x + front * u
     return min(max(v, WALL_L + c["wall_pad_u"]), WALL_R - c["wall_pad_u"])
