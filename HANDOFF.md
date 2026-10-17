@@ -8845,3 +8845,136 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
 3. A new jump antic's stance ignores the previous jump cast's rune circle (t4's failure).
 4. Small rune bombs while airborne were the arms' main HP difference (R2 CAST_FACE line).
 5. SP8c (EVADE_CHASE, one Clapper, approved) and SP9 (two Clappers: switch target at the corner) are next.
+
+## Task 1v1 - stage SP8c: chase the Clapper's evade (branch worktree-wf_f1846551-5f9-1, 2026-10-16 / 17; forum.md §74)
+
+The person (2026-10-16, via the lead's `C:\ssbot\data\m2_play\sp8\APPROVED_EVADE_CHASE.txt`; one Clapper only): "when it
+runs away (the evade), rush up and hit it". With two Clappers their rule is different (switch target when the focus
+evades or reaches the corner: SP9), so the chase starts only with exactly one live Clapper. Distances are centre to
+centre (her box centre, its transform), + = in front; HeroBox 0.46 u wide; its Idle body box -1.34 .. +2.25 u. Evade =
+Control `Evade Scuttle`: 0.35 s (21-22 game frames), 15 u/s straight back from her, ~5.3 u. Data
+`C:\ssbot\data\m2_play\sp8c` (`base` = the SP8b A/B default arm's evades, `t1`..`t3` trials, `ab` / `ab2` / `abp` the
+A/B rounds and pooled, `replay_<sha>` identity, `scripts`). Commits 7c342fa (code), 14cb7e7 (t1 fixes), af09d4f (t2
+fixes; tested and A/B code), docs after it. **Not promoted: faster by a lot, HP-hitless 26 vs 28 of 32; the switch
+stays default off - the person's call.**
+
+### Result
+
+- **Why** (forum.md 10 / 18; `human_two\answer.txt`): After Scuttle reads Slam Range at once - Close at <= 8.28 u
+  (SLAM / CAST; Evaded excludes EVADE), Far at >= 8.36 u (JUMP 0.5 / CAST 0.25 / JUMP CAST 0.25; 0 of 198 off). Under
+  the default she follows ~0.2 u during the slide (airborne at its start in 174 of 260 SP6 evades - her hop slash or a
+  down slash's bounce; ground control back at frame 8 p50; then the planner turns and even backs off), ends 9.1 u away
+  (p10 / 90 8.0 / 10.1) and only 16 of 176 evades of the SP8b A/B default arm picked a close move.
+- **Fixed-point gate passed** (af09d4f, t3, 32 episodes at the default stance): 103 evades, **101 (98 %) within 8.0 u at
+  the slide's end and without HP lost from the slide's start to the end of the next move's cycle**; next moves slam 53,
+  cast 48, jump cast 1; 32 / 32 episodes HP-hitless.
+- **A/B** (af09d4f, rnjb vs sp8c, 2 rounds x 16 per arm = 32, block design, the same seeds; two rounds fixed
+  beforehand, pooled decision): kill p50 21.6 -> **18.3 s** (-3.24, 90 % -3.99 .. -2.36), landed / s 1.041 -> **1.205**
+  (+0.164, +0.127 .. +0.200), Close at the slide's end 8 % -> 97 %, jump moves 7.3 -> 0.7 per minute; **HP-hitless 28
+  -> 26 of 32** (-0.062, -0.219 .. +0.094). sp8c's HP losses: small rune bombs 4 (two in the cast right after a chased
+  evade, two in the second of two casts in a row), one normal slam's hammer (not after an evade), one rune slam; rnjb:
+  landing hammer 2, its body 1, rune slam 2. The 56 slams right after a chased evade lost no HP ("dashing into a slam
+  start" did not happen). By the rule read literally (not worse on HP-hitless) **not promoted**; the switch stays off.
+
+| A/B pooled (32 per arm) | rnjb | sp8c |
+|---|---|---|
+| kills / HP-hitless | 32 / **28** | 32 / 26 |
+| kill p10 / 50 / 90 (s) | 19.3 / 21.6 / 24.0 | 17.3 / **18.3** / 19.8 |
+| landed hits / s (sg4_budget) | 1.041 | **1.205** |
+| evades / per episode / Close at the end | 123 / 3.84 / 10 (8 %) | 117 / 3.66 / **114 (97 %)** |
+| next move slam / cast / jump / jump cast | 5 / 36 / 46 / 31 | 56 / 59 / 1 / 0 |
+| next move's cycle h/s: cast / slam | 1.15 / 0.64 (n 5) | **1.86 / 1.34** |
+| moves per minute slam / cast / evade / jump / jump cast | 5.5 / 7.7 / 10.7 / 4.3 / 3.0 | 10.4 / 9.6 / 11.8 / 0.5 / 0.2 |
+
+Rounds: 1 rnjb 14 / 16 hitless, 22.1 s, 1.018 - sp8c 13 / 16, 18.7 s, 1.189 (+0.172, +0.117 .. +0.221); 2 rnjb 14 / 16,
+21.4 s, 1.064 - sp8c 13 / 16, 18.2 s, 1.221 (+0.157, +0.108 .. +0.205). `ab*\ab_stats.txt`, `ab*\evade_report.txt`
+(bootstrap: episodes resampled, 4,000 draws). Note: a pooled manifest made with `cat` keeps the second file's BOM on its
+first line (that arm then reads "\ufeffsp8c" and drops 2 episodes): `1v1sp8cabp_manifest.txt` was rebuilt without it.
+
+### 1. `SSBOT_FORUM_EVADE_CHASE` (`ssbot/combat/evade_chase.py`, default off; one live Clapper)
+
+- Starts on the first tick of an `Evade Scuttle` with her in front; a script until the state leaves Evade Scuttle, then
+  the planner (and the slam playbook / the jump antic scripts on the next move). Policy hook after the slam playbook and
+  cast_stab (the supervisor's keys win; another script taking the keys ends the run: `yield_to`); `observe` every tick.
+- Run: the key toward it every frame (ground or air, 8.25 u/s); none nearer than `stop_u` 3.6 u. The end distance with
+  the run alone: d + its remaining slide (cut where its back meets the wall) - 0.1375 u per frame.
+- Ground dash tap (dash 2 frames; 3.27 u in frames 1-7 + the run) when the run alone ends beyond `dash_if_u` 5.6 u, the
+  dash cooldown is over, the key filter latches toward + dash, the path keeps >= `min_u` 3.2 u every frame and >=
+  `end_lo` 4.0 u at the end, by evade frame `dash_k_max` 18, and **not while the STATE's attack cooldown is above
+  `atk_cd_max` 0.19 s** (a dash key 4-6 frames after a slash press is ignored; t1 + t2: 0 / 8 at 4, 12 / 15 at 5-6,
+  117 / 117 from 7); a dash not seen to start by its mask + 3 is sent again. Air dash (2 frames at 28 u/s + the Air
+  Sprint 0.235 s from 26.9 u/s, -1.1 per physics step: ~5.8 u in 16 frames; movement_kinematics 1.3) only when the run
+  alone ends beyond `air_if_u` 8.0 (Far), with `air_margin` 0.6 u more room.
+- Slash (2 frames, one rising edge, the key toward it) only from evade frame `slash_k_min` 18, attack ready, facing it,
+  no Dash / Sprint / Skid clip, the slash two frames on meeting its sliding body box.
+- No start / hand back (`rune`) while a jump cast's rune circle lit or still to come (cast_stab's rule) lies over her way
+  to it.
+- Stats `evade_chase` in the attempts rows' `policy` (evades, runs, dash, air_dash, dash_retry, presses, end_*, no_*,
+  `chase_runs`: per run f0, k0, x0, ground0, dash_k / dash_x / dash_pred / air / dash_tries, presses, hits, x_end, next,
+  end, why). `SSBOT_FORUM_EVADE_CHASE_SET="dash_if_u=6,end_lo=4.2"` overrides the ChaseCfg numbers.
+
+### 2. Fixed-point trials (`sp8c_go.ps1` -> `sp4_block.ps1` -> `sp8_t.ps1`, Forum_W_w7, instances 0 / 1, 1x, the default stance; success = <= 8.0 u at the slide's end and no HP lost from its start to the end of the next move's cycle)
+
+| round | code | episodes | evades | Close (<= 8.28) | success | next slam / cast / jump / jump cast | HP-hitless | failures -> change |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 7c342fa | 16 | 60 | 47 (78 %) | 45 (75 %) | 23 / 27 / 5 / 4 | 12 / 16 | chased into the previous jump cast's circle (lit 42 frames after the start, 2 HP) -> no chase over a circle; a slash early in the slide (its recoil + the knock-back) left her 9.0 u away, a far cast, a bomb -> slashes from frame 18; late landings from a bounce ended 6.5-7.8 u -> dash to frame 18; + the air dash |
+| t2 | 14cb7e7 | 32 | 95 | 85 (89.5 %) | 85 (89.5 %) | 46 / 40 / 4 / 4 | 31 / 32 | 7 Far endings, all a slash hit at the slide's start and the dash key 3-5 frames later ignored -> the attack-cooldown gate + retry; 13 runs left open across the slam playbook -> `yield_to` |
+| **t3** | **af09d4f** | 32 | 103 | **101 (98 %)** | **101 (98 %)** | 53 / 48 / 0 / 1 | **32 / 32** | none |
+
+Model vs live (t2, `sp8c\scripts\calib.py`): its slide 0.264 u per frame (p10 / 90 0.243 / 0.279) over 21-22 frames; the
+ground dash moves from 1 frame after its mask (p90 2), 4.03 u in the 10 frames from its start (the dash + 2 frames of
+Dash To Run); the real end minus the predicted p50 +0.17 u; the air dash 4.22 u in 10 frames, ending 0.49 u nearer than
+predicted (inside the 0.6 u margin).
+
+### 3. Offline facts (`sp8c\scripts\evade_facts.py` on the antic_audit frames; `cast_risk.py`; `move_mix.py`)
+
+- SP6 A/B (260 evades): her start 3.42 / 3.94 / 5.27 u (p10 / 50 / 90); 150 started on the frame her slash hit it;
+  after the slide 7-8.3 u: 30 of 30 close moves; beyond 8.3: 0 slams in 227.
+- Next move's cycle (its start to the next move's start), the SP8b default arm: cast 1.11 h/s, jump cast 1.04, slam
+  0.56 (n 10), jump slam 0.52.
+- One bomb hit traced (`trace_bomb.py`, A/B round 2 i1 ep1): the hop at Cast 2 + 2, the umbrella open, floating at feet
+  2.25 u for 25 frames; the +4.2 u pair lit under her at Cast 2 + 31 (the bomb's top 2.82 u above the floor). The small
+  rune is the rn rules' (the person: "small runes entirely the rn way"); SP8c does not touch it.
+
+### 4. Tools / code
+
+- `ssbot.tools.sp8c_evade` (collect / report: per evade d0, d at the slide's end and the frame after, next move, hits
+  in the slide and in the next move's cycle, HP lost to the end of that cycle, the run record; per arm Close share,
+  the gate, next-move mix, cycle h/s, HP-hitless). Scripts `sp8c\scripts`: `evade_facts.py`, `cast_risk.py`,
+  `calib.py`, `dash_block.py`, `move_mix.py`, `trace_ev.py` (an evade frame by frame), `trace_bomb.py` (a cast's bombs),
+  `hp_ctx.py` (every HP loss with the moves before it); `ab_analyze.sh`, `replay_ident_sp8c.ps1`.
+- Sandbox `C:\ssbot\sandbox\sp8c_go.ps1` (boost, sp4_block with sp8_t / sp8_ab, boost off).
+- Tests `tests/test_sp8c.py` (19: off by default, start gates, run / dash / air dash / no dash near, the attack-cooldown
+  gate, the retry, the slash timing, the rune circle, the wall cut, yield_to, a second evade); slam_play / sp8 / sp8b /
+  cast_stab pass. The full suite at af09d4f: 1,857 passed,
+  5 failed (pre-existing: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell
+  test).
+
+### 5. Switch-off identity
+
+`sp8c\replay_ident_sp8c.ps1`: 7c342fa and af09d4f with the switch unset are byte-identical to 7e268ef's default on the
+three identity episodes (2,073 / 1,778 / 1,541 ticks); on (open loop): 0 errors, 192006 differs on 111 lines, 084036 on
+90, the w13 two-Clapper episode identical (no start).
+
+### 6. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp8c)
+
+`sp8c` = rnjb + `SSBOT_FORUM_EVADE_CHASE=1`. If the person promotes it: make the switch follow `SSBOT_FORUM_V2` (`=0`
+off, like the SP8a switches) and add `rnsp8c0` = the default with it `=0`.
+
+### 7. Machine state
+
+Instances 0 and 1 were running (reopened by SP8b after the person's practice); every block paused DEMO_SOON and froze
+both instances after (time scale 1e-4, `sp4_block.ps1`); no game process touched; boost_workers ran for the blocks
+(`boost_workers.stop` present again). Frozen checkouts `C:\ssbot\live_1v1_{7c342fa,14cb7e7,af09d4f}`. Manifests
+`1v1sp8ct1..t3_manifest.txt`, `1v1sp8cab_manifest.txt`, `1v1sp8cab2_manifest.txt`, `1v1sp8cabp_manifest.txt` (both
+rounds). Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The person decides on EVADE_CHASE (kill p50 -3.2 s, landed / s +0.16, HP-hitless 26 vs 28 of 32: the extra losses
+   are small-rune bombs in close casts, which the chase makes the usual follow-up).
+2. The close-cast bomb dodge (R2 line): the rn rows hop at Cast 2's start and float on the umbrella at 2.25 u, under
+   the +-4.2 u pair's top (2.82 u) when it lights ~31 frames later; a hop timed to that pair (or standing beyond 6.6 u
+   at its light and back inside 6.0 u for the +-8.4 u pair 10 frames later) would close it.
+3. With the chase the jump moves nearly vanish in the 1v1 (7 in 32 episodes); SP9 (two Clappers: switch target when
+   the focus evades / reaches the corner) is next.
