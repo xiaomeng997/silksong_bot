@@ -64,10 +64,32 @@ from the antic to Slam 2: jump 1.21-1.43 s, jump cast 1.63-1.85 s), F's tail is 
                                deciding after its tail, sees B attacking and cancels.
   SSBOT_FORUM_TWO_ESC_SET      "back_u=6,coin_f=18": trial overrides of the EscCfg numbers.
 
+SP9c (task 1v1 SP9c, forum.md 78; the spec switch/answer.txt 2b-2h, 3 and 5 S7; the person's plan notes of 2026-10-16
+"switch target when the focus starts an antic near its wall", "refined switch timing"; an A/B arm only - the model says
+every antic-switch variant lands fewer hits). F's close slam / cast antic near its wall: the first STATE that shows F (the
+Clapper she is on: the nearer one, inside its Slam Range, so Close Range picked the move) entering Slam Antic / Spell
+Antic with B idle or walking on F's open side, B >= sep_min from F (a slam: >= sep_slam, its hammer covers her path to B
+when nearer), and the wall test (trig 0: its back <= back_u 8.1 u; trig 1, the person's refined trigger: its back after
+this move (disp_*) - the next walk-back walk_back - knock x hits_after < pred_line, one slide) starts an AswRun.
+  SSBOT_FORUM_TWO_ANTICSWITCH  (default off): L2's target is B from the antic (lock-in: no switch back before the first
+                               hit on B after F's flag-off, B's own move, or end_f); the slam playbook / the low hop leave
+                               F's move alone; a walk script (one ground dash when the run alone is late): a slam - out
+                               of the hammer (x0 + hammer_u along F's facing) by hammer_k, then toward B; the hold point
+                               hold_b u short of B (outside its Slam Range) until the step-in that reaches the press point
+                               (B's near edge - 2.7 u) step_spare frames before F's flag-off; no planner hit on B while
+                               F's flag is on (a hit on B then is cancelled: B re-enters Idle and rolls its evade coin), but
+                               the script's press on B's Idle (re-)entry within lock_win frames (the hit lands before the
+                               coin at 0.25 s: "re-hit B inside 0.25 s of each Idle re-entry during F's lock"); on the
+                               first STATE of F's flag-off (Slam 2 / Cast 2) the deciding side slash on B when it meets
+                               B's body (a slam: not from inside the hammer before Slam Recover), else the walk in while
+                               it reaches by the tail's end - B decides a close move, F after its tail sees B attacking.
+  SSBOT_FORUM_TWO_ASW_SET      "trig=1,back_u=7.5": trial overrides of the AswCfg numbers.
+
     two = TwoPlay()                                   # per episode: two.reset()
-    m = two.step(f, s, ground, accepting, focus, t)   # IdleHit / Opening / SP9b: the mask for frame f + 2, or None
+    m = two.step(f, s, ground, accepting, focus, t)   # IdleHit / Opening / SP9b / SP9c: the mask for frame f + 2, or None
     prefs = two.space(prefs, s, t)                    # TWO_SPACE's stance
-    v = two.esc_view()                                # SP9b: the escape run for L2 (gauntlet) and cast_stab, or None
+    v = two.esc_view()                                # SP9b / SP9c: the run for L2 (gauntlet) and cast_stab, or None
+    skip = two.asw_skip()                             # SP9c: F while the antic switch runs (the slam playbook, the low hop)
 """
 from __future__ import annotations
 
@@ -100,7 +122,9 @@ OPEN = _on("SSBOT_FORUM_TWO_OPEN", _V2)
 ESC_CORNER = _on("SSBOT_FORUM_TWO_CORNER")
 ESC_SWITCH = _on("SSBOT_FORUM_TWO_WALLSWITCH", _V2)
 ESC = ESC_CORNER or ESC_SWITCH
-ANY = IDLEHIT or SPACE or OPEN or ESC   # the policy's TwoPlay object (CHASE / CAST live in their own scripts)
+# SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
+ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
+ANY = IDLEHIT or SPACE or OPEN or ESC or ASW   # the policy's TwoPlay object (CHASE / CAST live in their own scripts)
 
 CLAPPER = _sp.CLAPPER
 M_L, M_R, M_A = _sp.M_L, _sp.M_R, _sp.M_A
@@ -167,15 +191,118 @@ class EscCfg:
 
 def _esc_cfg() -> EscCfg:
     """SSBOT_FORUM_TWO_ESC_SET="back_u=6,coin_f=18": trial overrides of the EscCfg numbers."""
-    c = EscCfg()
-    for kv in os.environ.get("SSBOT_FORUM_TWO_ESC_SET", "").replace(";", ",").split(","):
+    return _set_cfg(EscCfg(), "SSBOT_FORUM_TWO_ESC_SET")
+
+
+def _set_cfg(c, env: str):
+    for kv in os.environ.get(env, "").replace(";", ",").split(","):
         if "=" not in kv:
             continue
         k, v = (x.strip() for x in kv.split("=", 1))
         if not hasattr(c, k):
-            raise KeyError(f"SSBOT_FORUM_TWO_ESC_SET: unknown key {k!r}")
+            raise KeyError(f"{env}: unknown key {k!r}")
         setattr(c, k, type(getattr(c, k))(float(v)))
     return c
+
+
+# ---- SP9c: the antic switch ----
+ASW_ANTIC = {"Slam Antic": "slam", "Spell Antic": "cast"}
+ASW_ON_ST = {"slam": ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?"), "cast": ("Spell Antic", "Cast 1")}
+ASW_HAMMER_ST = ("Slam 0", "Slam 1", "Slam Effects?", "Slam 2")     # its hammer (Slam Collider 1 / 2) may be out
+
+
+@dataclass
+class AswCfg:
+    trig: int = 0             # 0: T8.1 - F's back <= back_u; 1: the person's refined trigger - pred_back < pred_line
+    back_u: float = 8.1       # (switch answer section 3: slide 5.40 + one idle movement 2.08 = 7.5, her 1.5x = 8.1)
+    d_u: float = 8.3          # Close Range picked the move: she within its Slam Range (|dx| <= d_u, |dy| <= dy_u)
+    dy_u: float = 3.9
+    sep_slam: float = 16.0    # a slam only with F-B >= this (the hammer covers her path to B when nearer: 2f)
+    sep_min: float = 4.0      # B at least this far from F (x; Avoid Type within 4 u)
+    # trig 1 (the person 2026-10-16 "refined switch timing"; the lead: its wall distance after this move + the next
+    # walk-back 2.1 u + her knock-back 0.48 u per hit below one slide 5.4 u): its back after this move = back0 +
+    # disp_<kind> (its x along its facing from the antic to its Idle, her hits in it included: SP9b A/B close focus
+    # antics p50 slam +3.12 .. +3.24 (the lunge), cast -1.44 .. -1.62) - walk_back - knock x hits_after
+    pred_line: float = 5.4
+    walk_back: float = 2.1
+    knock: float = 0.48
+    disp_slam: float = 3.1
+    disp_cast: float = -1.5
+    hits_after: float = 1.0
+    # F's move (frames from its antic's first frame; SP9b A/B close focus antics p10 / 50 / 90)
+    k_off_slam: int = 56      # Slam 2 entry (its flag off) 55 / 56 / 66
+    k_off_cast: int = 49      # Cast 2 entry 48 / 49 / 50
+    tail_slam: int = 20       # Slam 2 + Slam Recover to its Idle (k_idle - k_off p50 21)
+    tail_cast: int = 25       # Cast 2 to its Idle (p50 25-26)
+    hammer_u: float = 12.3    # a slam: her centre beyond x0 + this along F's facing from hammer_k until its Slam
+    #                           Recover (Slam Collider 2's farthest point from x0 p90 11.96, + her half width 0.25 + 0.1)
+    hammer_k: int = 50        # (Slam Collider 1 from 0.85 s p10 = antic frame 51)
+    hold_b: float = 8.8       # the hold point this far from B's centre (outside its Slam Range 8.3 + 0.25 + 0.25)
+    reach_in: float = 2.7     # the press point: her centre this far from B's near body edge (the slash reach 3.12)
+    gap_b: float = 2.75       # never nearer to B's centre than this
+    step_spare: int = 4       # the step-in reaches the press point this many frames before F's flag-off
+    dash_min: float = 3.5     # a ground dash only with at least this far to go (u; it moves 3.27 u in 7 frames)
+    release_lag: float = 2.0  # the dash held into the ground sprint: released when her travel in this many frames at her
+    #                           speed reaches the target (cast_stab T2's closed loop) ...
+    grace_f: int = 10         # ... at the latest this many frames into the sprint (Sprint Grace: no skid)
+    combo_f: int = 10         # no press this many frames after the sprint (DASHCOMBO_WINDOW 0.15 s: the dash combo)
+    end_f: int = 90           # lock-in: the run ends this long after F's flag-off at the latest
+    lock_win: int = 10        # F's lock: the press on B's Idle (re-)entry only up to this many frames after it (the
+    #                           hit lands 3-4 frames after the press's STATE: before the coin at 15)
+
+
+def _asw_cfg() -> AswCfg:
+    """SSBOT_FORUM_TWO_ASW_SET="trig=1,back_u=7.5": trial overrides of the AswCfg numbers."""
+    return _set_cfg(AswCfg(), "SSBOT_FORUM_TWO_ASW_SET")
+
+
+def pred_back(c: AswCfg, back0: float, kind: str) -> float:
+    """The refined trigger's prediction: F's back after this move, the next walk-back and her knock-back (AswCfg)."""
+    disp = c.disp_slam if kind == "slam" else c.disp_cast
+    return back0 + disp - c.walk_back - c.knock * c.hits_after
+
+
+@dataclass
+class AswRun:
+    iid: object                # F
+    other: object              # B
+    kind: str                  # "slam" / "cast"
+    f_a: int                   # the STATE frame that first showed the antic
+    k_a: int                   # its antic frame then (the STATE's lag)
+    ta: float                  # the antic's entry on the game clock
+    x0: float                  # F's x, facing (+1 right; B is on that side), back room, the prediction
+    face: int
+    back0: float
+    pred: float
+    sep0: float                # F-B |dx|
+    rel0: float                # her x in front of F (u, centre to centre)
+    o_st: str                  # B's state and |dx| from her
+    o_d: float
+    mode: str | None           # "aswitch" / None (not taken: why)
+    hp0: int = 0
+    why: str = ""
+    phase: str = "go"          # go (F's flag on) / tail (F's flag off .. its Idle) / after (until the lock-in ends)
+    f_off: int | None = None   # F's flag-off (the STATE frame that first showed Slam 2 / Cast 2)
+    k_off: int | None = None   # ... its antic frame
+    f_rec: int | None = None   # a slam: its Slam Recover (the hammer is gone)
+    f_idle: int | None = None
+    hits_f: list = field(default_factory=list)    # (frame - f_a, phase) of landed hits on F / on B
+    hits_b: list = field(default_factory=list)
+    b_idle: list = field(default_factory=list)    # frames (- f_a) of B's Idle (re-)entries
+    b_evade: int | None = None                     # frame (- f_a) of B's Evade Scuttle in the run
+    hp: list = field(default_factory=list)
+    presses: list = field(default_factory=list)   # (frame - f_a, kind, |dx| to B)
+    dash: list = field(default_factory=list)      # antic frames k of the dash-sprints
+    dash_end: int | None = None                    # the STATE frame she had control again after the last one
+    k_line: int | None = None  # a slam: the antic frame she was first beyond the hammer line
+    k_hold: int | None = None  # the antic frame she first reached the hold / press point
+    hit_b: int | None = None   # the first landed hit on B from F's flag-off on (frames - f_off; < 0: in F's lock)
+    b_next: str | None = None  # B's next move (state) and its frame - f_off
+    k_next: int | None = None
+    tx: float | None = None    # the target x this tick
+    walk: int = 0
+    f_end: int | None = None
+    end: str = ""
 
 
 # The hop over the landed Clapper from the corner (C:/ssbot/data/m2_play/sp9b/hop_over_table.json, kinematics
@@ -338,6 +465,13 @@ class TwoPlay:
         self._esc_hop_f: int | None = None   # the hop's latched press frame (mask frame j = 0)
         self._esc_hop_plan: tuple | None = None
         self._sw_stance_x: float | None = None  # arm B's stance this tick (F's flag on)
+        # SP9c: the antic switch
+        self.acfg = _asw_cfg() if ASW else AswCfg()
+        self.asw: AswRun | None = None
+        self.asw_done: list[AswRun] = []
+        self.asw_n: Counter = Counter()
+        self._asw_dash: dict | None = None    # the dash held into the sprint: {"f0", "dir", "rel", "ctl"}
+        self._asw_prev = 0                    # its last mask
 
     # ---- helpers ----
 
@@ -358,6 +492,7 @@ class TwoPlay:
         hx = _sp.hero_x(s) if (s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos") else None
         self.entry = {}
         antics = []
+        asw_antics = []
         for e in _sp.clappers(s):
             iid = e.get("iid")
             st, tin = _sp.control(e)
@@ -368,6 +503,8 @@ class TwoPlay:
                 self.entry[iid] = pst is not None and pst[0] == "Idle"
             if ESC and st in ESC_ANTIC and (pst is None or pst[0] not in ESC_PRE):
                 antics.append(e)
+            if ASW and st in ASW_ANTIC and (pst is None or pst[0] != st):
+                asw_antics.append(e)
             self.prev[iid] = (st, tin)
             if SPACE and hx is not None:
                 j = self.jumps.get(iid)
@@ -383,6 +520,8 @@ class TwoPlay:
                         j["t_land"] = t
         if ESC:
             self._esc_observe(f, s, t, hx, antics)
+        if ASW:
+            self._asw_observe(f, s, t, hx, asw_antics)
         # the IdleHit run's bookkeeping on every tick (another script may hold the keys when its hit shows): the landed
         # hit on its Clapper (the STATE that shows it: its state turns over in the same frame), the run's end
         r = self.idle
@@ -404,8 +543,15 @@ class TwoPlay:
     # ---- S2 IdleHit / S6 Opening ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool, focus, t: float, wake_f: int | None = None,
-             two_enc: bool = False) -> int | None:
-        """The mask for frame f + 2 (IdleHit, the Opening), or None (the planner)."""
+             two_enc: bool = False, latch=None) -> int | None:
+        """The mask for frame f + 2 (IdleHit, the Opening, SP9b / SP9c), or None (the planner). latch: m -> the key mask
+        the oracle's hold filter latches at f + 2 when m is sent for it (SP9c's dash; None: m)."""
+        if ASW and self.asw is not None:
+            am = self._asw_step(f, s, ground, accepting, t, latch)
+            if am is not None:
+                self._asw_prev = am
+                return am
+            self._asw_prev = 0
         if ESC and self.esc is not None:
             em = self._esc_step(f, s, ground, accepting)
             if em is not None:
@@ -472,10 +618,10 @@ class TwoPlay:
                                     d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
         if r is None or r.k_press is not None:
             return None
-        if ESC:
+        if ESC or ASW:
             v = self.esc_view()
             if v is not None and iid in v["no_hit"]:
-                r.why = r.why or "esc"             # SP9b: no hit on it now (the corner's wait / F's lock)
+                r.why = r.why or "esc"             # SP9b / SP9c: no hit on it now (the corner's wait / F's lock)
                 return None
         k = f - r.f0
         hx = self._xw(s)
@@ -572,7 +718,10 @@ class TwoPlay:
     def esc_view(self) -> dict | None:
         """The running escape jump for L2 (gauntlet) and cast_stab: {"iid" (F), "other" (B), "mode", "phase", "kind",
         "hold" (L2's target to keep), "no_hit" (iids whose hits do not count / no IdleHit), "corner_aim" (F's antic:
-        the stance in reach), "after_land"}; None without a run the arm took."""
+        the stance in reach), "after_land"}; None without a run the arm took. SP9c: the antic switch's run (mode
+        "aswitch") the same way."""
+        if ASW and self.asw is not None and self.asw.mode is not None:
+            return self._asw_view()
         r = self.esc
         if r is None or r.mode is None:
             return None
@@ -599,7 +748,7 @@ class TwoPlay:
         hp = int((s.get("hero") or {}).get("health") or 0)
         if self.esc is not None:
             self._esc_update(f, s, hx, hp, cs)
-        if self.esc is None and antics and len(cs) == 2 and hx is not None:
+        if self.esc is None and antics and len(cs) == 2 and hx is not None and self.asw is None:
             for e in antics:
                 self._esc_start(f, s, e, cs, hx, hp)
                 if self.esc is not None:
@@ -964,6 +1113,320 @@ class TwoPlay:
                             "rune": r.rune, "walk": r.walk, "f_end": r.f_end, "end": r.end} for r in runs]
         return out
 
+    # ---- SP9c: the antic switch (TWO_ANTICSWITCH) ----
+
+    def asw_skip(self) -> frozenset:
+        """F while the antic switch runs: the slam playbook and the low hop leave its move alone."""
+        r = self.asw
+        return frozenset({r.iid}) if (ASW and r is not None and r.mode is not None) else frozenset()
+
+    def _asw_view(self) -> dict:
+        r = self.asw
+        on = r.f_off is None
+        return {"iid": r.iid, "other": r.other, "mode": r.mode, "phase": r.phase, "kind": r.kind, "back0": r.back0,
+                "back_u": self.acfg.back_u, "after_land": not on, "corner_aim": False, "corner_side": False,
+                "hold": r.other, "no_hit": frozenset({r.other}) if on else frozenset(), "stance": r.tx}
+
+    def _asw_observe(self, f: int, s: dict, t: float, hx: float | None, antics: list) -> None:
+        cs = _sp.clappers(s)
+        hp = int((s.get("hero") or {}).get("health") or 0)
+        if self.asw is not None:
+            self._asw_update(f, s, t, hp)
+        if (self.asw is None and (self.esc is None or self.esc.mode is None) and antics and len(cs) == 2
+                and hx is not None):
+            for e in antics:
+                self._asw_start(f, s, t, e, cs, hx, hp)
+                if self.asw is not None:
+                    break
+        r = self.asw
+        if r is not None and hx is not None:
+            r.tx = self._asw_target(s, t, hx)
+
+    def _asw_press_x(self, o: dict, sgn: int) -> float:
+        """Her centre's x for the side slash on B (its body's near edge - reach_in, coming from F's side)."""
+        span = body_span(o)
+        near = span[0] if sgn > 0 else span[1]
+        return near - sgn * self.acfg.reach_in
+
+    def _asw_start(self, f: int, s: dict, t: float, e: dict, cs: list, hx: float, hp: int) -> None:
+        c = self.acfg
+        st, tin = _sp.control(e)
+        kind = ASW_ANTIC[st]
+        o = next(x for x in cs if x.get("iid") != e.get("iid"))
+        cx, ox = float(e["pos"][0]), float(o["pos"][0])
+        face = face_of(e)
+        back = back_room(e)
+        d, do = abs(hx - cx), abs(hx - ox)
+        hy = float(((s.get("hero") or {}).get("pos") or [0.0, 0.0])[1])
+        dy = hy - float(e["pos"][1])
+        pr = pred_back(c, back, kind)
+        self.asw_n[f"{kind}_antics"] += 1
+        if d > do:
+            self.asw_n["no_other_nearer"] += 1
+            return
+        if d > c.d_u or abs(dy) > c.dy_u:
+            self.asw_n["no_far_pick"] += 1             # Close Range did not pick it
+            return
+        if not ((back <= c.back_u) if c.trig == 0 else (pr < c.pred_line)):
+            self.asw_n["no_wall"] += 1
+            return
+        self.asw_n[f"{kind}_trig"] += 1
+        k_now = int(round(tin * 60.0))
+        ost = _sp.control(o)[0]
+        sep = abs(ox - cx)
+        why = ""
+        if (ox - cx) * face <= 0:
+            why = "b behind"
+        elif ost not in ("Idle", "Walk"):
+            why = "b busy"
+        elif sep < (c.sep_slam if kind == "slam" else c.sep_min):
+            why = "sep"
+        elif any(a < max(hx, ox) and b > min(hx, ox) for a, b in self._rune_threats(f, s)):
+            why = "rune"
+        else:
+            # she reaches the press point by F's tail end (and a slam: out of its hammer by hammer_k): the run with one
+            # dash held into the ground sprint (cast_stab.sprint_travel: ~7.3 u by the release at Sprint Grace)
+            jmax = _cs.DASH_F + c.grace_f + 1
+
+            def frames(dist: float) -> float:
+                if dist < c.dash_min:
+                    return max(0.0, dist) / WALK_U
+                for j in range(1, jmax + 1):
+                    if _cs.sprint_travel(j) >= dist:
+                        return float(j)
+                return jmax + (dist - _cs.sprint_travel(jmax)) / WALK_U
+            k_off = c.k_off_slam if kind == "slam" else c.k_off_cast
+            tail = c.tail_slam if kind == "slam" else c.tail_cast
+            press = self._asw_press_x(o, face)
+            if k_now + SEND_AHEAD + frames((press - hx) * face) > k_off + tail - 6:
+                why = "far"
+            elif kind == "slam" and k_now + SEND_AHEAD + frames((cx + face * c.hammer_u - hx) * face) > c.hammer_k:
+                why = "hammer"
+        run = AswRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f, k_a=k_now, ta=t - tin, x0=round(cx, 3),
+                     face=face, back0=round(back, 2), pred=round(pr, 2), sep0=round(sep, 2),
+                     rel0=round((hx - cx) * face, 2), o_st=ost, o_d=round(do, 2), mode=None if why else "aswitch",
+                     hp0=hp, why=why)
+        if why:
+            self.asw_n[f"no_{why}"] += 1
+            run.end, run.f_end = "not taken", 0
+            self.asw_done.append(run)
+            return
+        self.asw = run
+        self._asw_dash = None
+        self.asw_n["runs"] += 1
+        self.asw_n[f"runs_{kind}"] += 1
+
+    def _asw_update(self, f: int, s: dict, t: float, hp: int) -> None:
+        r = self.asw
+        c = self.acfg
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("dealt") is None
+                                                                            or float(d.get("dealt")) > 0):
+                tgt = d.get("ent") or d.get("iid")
+                if tgt == r.iid:
+                    r.hits_f.append((f - r.f_a, r.phase))
+                elif tgt == r.other:
+                    r.hits_b.append((f - r.f_a, r.phase))
+                    if r.f_off is not None and r.hit_b is None:
+                        r.hit_b = f - r.f_off
+        if hp < r.hp0:
+            r.hp.append(f - r.f_a)
+        r.hp0 = hp
+        e = clapper_by(s, r.iid)
+        o = clapper_by(s, r.other)
+        if o is None:
+            self._asw_close(f, "B dead")
+            return
+        ost = _sp.control(o)[0]
+        if r.other in self.entry:
+            r.b_idle.append(f - r.f_a)
+        if ost == "Evade Scuttle" and r.b_evade is None:
+            r.b_evade = f - r.f_a
+        k = int(round((t - r.ta) * 60.0))
+        st = _sp.control(e)[0] if e is not None else None
+        if r.f_off is None and (e is None or st not in ASW_ON_ST[r.kind]):
+            r.f_off, r.k_off, r.phase = f, k, "tail"           # its flag is off (or it died)
+        if r.kind == "slam" and r.f_rec is None and (e is None or st not in ASW_HAMMER_ST + ("Slam Antic",)):
+            r.f_rec = f                                          # its hammer is gone
+        if r.f_off is not None and r.f_idle is None and (e is None or st not in ("Slam 2", "Slam Effects?",
+                                                                                 "Slam Recover", "Cast 2")):
+            r.f_idle, r.phase = f, "after"
+        if r.f_off is not None and ost in MOVE_ST and f > r.f_off:
+            r.b_next, r.k_next = ost, f - r.f_off
+            self._asw_close(f, "B move")
+        elif r.hit_b is not None:
+            self._asw_close(f, "hit")
+        elif r.f_off is not None and f - r.f_off > c.end_f:
+            self._asw_close(f, "end")
+        elif r.f_off is None and k > (c.k_off_slam if r.kind == "slam" else c.k_off_cast) + 40:
+            self._asw_close(f, "late")
+
+    def _asw_close(self, f: int, why: str) -> None:
+        r = self.asw
+        if r is not None:
+            r.f_end, r.end = f - r.f_a, why
+            self.asw_done.append(r)
+            self.asw_n[f"end_{why}"] += 1
+        self.asw = None
+        self._asw_dash = None
+
+    def _asw_target(self, s: dict, t: float, hx: float) -> float | None:
+        """The run's target x (module docstring): the hold point short of B, the press point from the step-in (F's
+        lock) or at once (its tail); a slam: never inside the hammer line until its Slam Recover; never nearer to B than
+        gap_b."""
+        r = self.asw
+        c = self.acfg
+        o = clapper_by(s, r.other)
+        if o is None:
+            return None
+        sgn = r.face
+        ox = float(o["pos"][0])
+        press = self._asw_press_x(o, sgn)
+        k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD
+        if r.f_off is None:
+            k_off = c.k_off_slam if r.kind == "slam" else c.k_off_cast
+            pd = (ox - press) * sgn                              # the press point's distance from B's centre
+            # the step-in's frames: the dash held into the sprint when the dash is ready (less time inside B's Slam
+            # Range before F's flag-off: its evade coin fires 0.25 s after the Idle entry that her entry causes),
+            # else the walk
+            step = max(0.0, c.hold_b - pd)
+            tm = (s.get("hero") or {}).get("tm") or {}
+            if step >= c.dash_min and float(tm.get("dash_cd") or 0.0) <= 0.02 and self._asw_dash is None:
+                walk_f = next((j for j in range(1, 30) if _cs.sprint_travel(j) >= step), 30) + 4
+            else:
+                walk_f = step / WALK_U
+            db = (ox - hx) * sgn
+            if k >= k_off - c.step_spare - walk_f:
+                tx = press
+            elif db > c.hold_b:
+                tx = ox - sgn * c.hold_b
+            else:
+                tx = hx if db >= pd else press                   # inside the hold point: stay (not back to F)
+        else:
+            tx = press
+        if r.kind == "slam" and r.f_rec is None:
+            line = r.x0 + sgn * c.hammer_u
+            if (tx - line) * sgn < 0:
+                tx = line
+        if (ox - tx) * sgn < c.gap_b:
+            tx = ox - sgn * c.gap_b
+        return min(max(tx, WALL_L + 0.5), WALL_R - 0.5)
+
+    def _bomb_near(self, s: dict, hx: float) -> bool:
+        from ssbot.combat import rune_bombs as _rb
+        return any(abs(bx - hx) < _rb.R + HALF_W + 0.5 for _iid, bx, _by, _lit in _rb.bomb_ents(s.get("ents")))
+
+    def _asw_step(self, f: int, s: dict, ground: bool, accepting: bool, t: float, latch) -> int | None:
+        """The antic switch's keys (module docstring): the walk / dash to the target, the re-hit on B's Idle (re-)entry
+        in F's lock, the deciding side slash on B from F's flag-off."""
+        r = self.asw
+        c = self.acfg
+        if r.mode is None:
+            return None
+        sec = self._second(f)
+        if sec is not None:
+            return sec
+        h = s.get("hero") or {}
+        tm = h.get("tm") or {}
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD          # the mask's antic frame
+        hx = _sp.hero_x(s)
+        dm = self._asw_dash
+        if dm is not None:
+            # the dash held into the ground sprint, released inside Sprint Grace (closed loop on her x and speed: cast_stab
+            # T2), then no key until she has control again
+            j = f + SEND_AHEAD - dm["f0"]
+            sg = 1 if dm["dir"] == M_R else -1
+            if dm.get("rel") is None:
+                v = abs(float((h.get("vel") or [0.0, 0.0])[0]))
+                remain = ((r.tx if r.tx is not None else hx) - hx) * sg
+                if j > _cs.DASH_F and (remain - c.release_lag * v / 60.0 <= 0.3 or j > _cs.DASH_F + c.grace_f):
+                    dm["rel"] = j
+                    return 0
+                return dm["dir"] | M_DASH
+            if ground and accepting and clip != "Dash" and not clip.startswith(_cs.STOP_WAIT_CLIPS):
+                dm["ctl"] = j
+                r.dash_end = f
+                self._asw_dash = None
+            elif j > dm["rel"] + 40:
+                self._asw_dash = None
+            else:
+                return 0
+        if not accepting or r.tx is None:
+            return None
+        o = clapper_by(s, r.other)
+        if o is None:
+            return None
+        hxw = self._xw(s)
+        if self._bomb_near(s, hx):
+            return None                                          # a small-rune bomb at her x: the planner's hop
+        ox = float(o["pos"][0])
+        ost = _sp.control(o)[0]
+        look = 1 if ox > hxw else -1
+        toward_b = M_R if look > 0 else M_L
+        span = body_span(o)
+        u0 = (hxw - r.x0) * r.face
+        in_hammer = r.kind == "slam" and r.f_rec is None and -1.91 - HALF_W < u0 < c.hammer_u
+        # the presses (not in the dash combo's window after a sprint: an attack then is the Wanderer dash combo)
+        want = False
+        if r.f_off is None:
+            # F's lock: the re-hit on B's Idle (re-)entry before its coin
+            if ost == "Idle" and r.b_idle and (f - r.f_a) - r.b_idle[-1] <= c.lock_win and not (
+                    r.presses and r.presses[-1][0] >= r.b_idle[-1]):
+                want = "lock"
+        elif r.hit_b is None and ost in ("Idle", "Walk") and not (in_hammer and k >= c.hammer_k - 6):
+            want = "decide"
+        combo = r.dash_end is not None and f - r.dash_end < c.combo_f
+        if want and ground and not combo and slash_meets(hxw, look, span) and self._atk_ready(s):
+            if not self._facing(s, look):
+                return toward_b
+            r.presses.append((f - r.f_a, want, round(abs(hxw - ox), 2)))
+            self.asw_n[f"press_{want}"] += 1
+            return self._press(f, toward_b)
+        # the walk (the dash-sprint when the run alone is late)
+        tx = r.tx
+        dist = abs(tx - hx)
+        if r.kind == "slam" and r.k_line is None and (hx - (r.x0 + r.face * c.hammer_u)) * r.face >= 0:
+            r.k_line = k
+        if dist <= 0.3:
+            if r.k_hold is None:
+                r.k_hold = k
+            return 0
+        toward = M_R if tx > hx else M_L
+        if r.f_off is None:
+            k_off = c.k_off_slam if r.kind == "slam" else c.k_off_cast
+            deadline = c.hammer_k if (r.kind == "slam" and r.k_line is None) else k_off - c.step_spare
+        else:
+            deadline = k + 1 if r.hit_b is None else k + 999     # the tail: as soon as possible
+        late = k + dist / WALK_U > deadline
+        if (late and ground and dist >= c.dash_min and float(tm.get("dash_cd") or 0.0) <= 0.02
+                and float(tm.get("atk_cd") or 0.0) <= 0.19 and not any(x in clip for x in NO_ATK_CLIPS)
+                and self._asw_prev & toward and _cs._clean(latch, toward | M_DASH)):
+            self._asw_dash = {"f0": f + SEND_AHEAD, "dir": toward, "rel": None}
+            r.dash.append(k)
+            self.asw_n["dash"] += 1
+            return toward | M_DASH
+        r.walk += 1
+        return toward
+
+    def asw_stats(self) -> dict:
+        runs = self.asw_done + ([self.asw] if self.asw is not None else [])
+        out = dict(self.asw_n)
+        out["asw_runs"] = [{"f_a": r.f_a, "kind": r.kind, "mode": r.mode, "why": r.why, "k_a": r.k_a,
+                            "back0": r.back0, "pred": r.pred, "sep0": r.sep0, "rel0": r.rel0, "o_st": r.o_st,
+                            "o_d": r.o_d, "off": None if r.f_off is None else r.f_off - r.f_a, "k_off": r.k_off,
+                            "rec": None if r.f_rec is None else r.f_rec - r.f_a,
+                            "idle": None if r.f_idle is None else r.f_idle - r.f_a, "hits_f": r.hits_f,
+                            "hits_b": r.hits_b, "b_idle": r.b_idle, "b_evade": r.b_evade, "hp": r.hp,
+                            "presses": r.presses, "dash": r.dash, "k_line": r.k_line, "k_hold": r.k_hold,
+                            "hit_b": r.hit_b, "hit_in_tail": r.hit_b is not None and 0 <= r.hit_b <= (
+                                self.acfg.tail_slam if r.kind == "slam" else self.acfg.tail_cast) + 2,
+                            "lock_hits": [x for x in r.hits_b if x[1] == "go"],
+                            "b_next": r.b_next, "k_next": r.k_next, "walk": r.walk, "f_end": r.f_end,
+                            "end": r.end, "lag": r.k_a} for r in runs]
+        return out
+
     # ---- S5 the stance ----
 
     def space(self, prefs, s: dict, t: float, focus):
@@ -1042,6 +1505,8 @@ class TwoPlay:
             res["open"] = {k: v for k, v in self.open.items()}
         if ESC:
             res["esc"] = self.esc_stats()
+        if ASW:
+            res["asw"] = self.asw_stats()
         return res
 
 

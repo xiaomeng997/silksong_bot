@@ -374,11 +374,16 @@ class RuneLowHop:
     # ---- the script ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             latch=None) -> int | None:
+             latch=None, skip: frozenset | None = None) -> int | None:
         """The mask for frame f + 2 while the script runs, else None. t_game: the game clock (s; Stamp.t_game_s);
         latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m)."""
         t = f / 60.0 if t_game is None else float(t_game)
         e = self._pick(s) if self.two else _sp.clapper(s)
+        if skip and e is not None and e.get("iid") in skip and not self.critical():
+            # SP9c (combat.two_play's antic switch): its cast is left alone (she switched to the other one)
+            if self.run is not None and self.run.iid in skip:
+                self._close("abort", "asw")
+            return None
         st, tin = _sp.control(e)
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)

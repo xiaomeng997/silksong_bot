@@ -506,7 +506,7 @@ class GauntletTactics:
                     self.jump_how[s.iid] = "under and behind"
                     return spot, frozenset(), "jump: under and behind (antic)"
             self.jump_how[s.iid] = "under and behind"
-            esc = self.two_esc if two_play.ESC else None
+            esc = self.two_esc if (two_play.ESC or two_play.ASW) else None
             if esc is not None and esc.get("corner_aim") and esc.get("iid") == s.iid:
                 # SP9b arm A (SSBOT_FORUM_TWO_CORNER): the focus's escape jump - in reach through the antic (cast_stab
                 # slashes it, then its way under from the take-off)
@@ -827,7 +827,7 @@ class GauntletTactics:
         room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
-        esc = self.two_esc if two_play.ESC else None
+        esc = self.two_esc if (two_play.ESC or two_play.ASW) else None
         if esc is not None and (not esc.get("after_land") or esc.get("corner_side")):
             # SP9b: the focus's escape jump (antic, flight): arm A holds the focus, arm B the other one (B is locked);
             # arm A also while she is in the corner behind it after its landing (t2)
@@ -1008,7 +1008,7 @@ class GauntletTactics:
                     status = "event"
         if two_play.SPACE:
             self._sp9_fam = {x.iid: x.family for x in (getattr(fc, "subjects", ()) or ()) if x.type_key == CLAPPER}
-        esc = self.two_esc if two_play.ESC else None
+        esc = self.two_esc if (two_play.ESC or two_play.ASW) else None
         if (esc is not None and status == "ok" and self.goal is not None and esc.get("hold") is not None
                 and esc["hold"] != self.goal.target):
             status = "event"                              # SP9b: the escape run holds another target: pick now
@@ -1129,7 +1129,7 @@ class GauntletTactics:
                                                                    jump_behind.CFG["corner_walk_end_f"]):
                     out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
                     self.stats["jb_corner_walk"] = self.stats.get("jb_corner_walk", 0) + 1
-        esc = self.two_esc if two_play.ESC else None
+        esc = self.two_esc if (two_play.ESC or two_play.ASW) else None
         if (esc is not None and esc.get("mode") == "corner" and s is not None and s.iid == esc.get("iid")
                 and how_s == "jump: under and behind (flight)" and s.iid in self.jb_land):
             # SP9b arm A: JB_CORNER's walk under the focus's escape jump (dash rows after) when the walk fits

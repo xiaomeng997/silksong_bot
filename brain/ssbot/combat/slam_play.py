@@ -478,8 +478,8 @@ class SlamPlay:
                 self._closed.add(r.iid)
         self.run = None
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None
-             ) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
+             skip: frozenset | None = None) -> int | None:
         """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides).
 
         t_game: the game clock (s; the backend's Stamp.t_game_s, the sum of the scaled dt: it stands still through
@@ -490,6 +490,11 @@ class SlamPlay:
         c = self.cfg
         t = f / 60.0 if t_game is None else float(t_game)
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
+        if skip and e is not None and e.get("iid") in skip:
+            # SP9c (combat.two_play's antic switch): its slam is left alone (she switched to the other one)
+            if self.run is not None and self.run.iid in skip:
+                self._close("abort", "asw")
+            return None
         st, tin = control(e)
         r = self.run
         ta = (f - round(tin * 60.0)) / 60.0 if t_game is None else t - tin     # this antic's entry on the clock

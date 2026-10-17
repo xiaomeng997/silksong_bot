@@ -715,9 +715,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
-        esc_on = self.two is not None and two_play.ESC
+        esc_on = self.two is not None and (two_play.ESC or two_play.ASW)
         if esc_on:
-            # SP9b: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall)
+            # SP9b / SP9c: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall) or
+            # antic switch
             self.two.observe(f, s, ws.stamp.t_game_s)
             if isinstance(self.tac, GauntletTactics):
                 self.tac.two_esc = self.two.esc_view()
@@ -783,11 +784,13 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.rune_lowhop is not None:
             self.rune_lowhop.observe(f, s)
             low_crit = self.rune_lowhop.critical()
+        # SP9c (SSBOT_FORUM_TWO_ANTICSWITCH): the antic switch's F - the slam playbook and the low hop leave its move
+        asw_skip = self.two.asw_skip() if (self.two is not None and two_play.ASW) else None
         if self.slam_play is not None and not low_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None)
+                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None
@@ -822,7 +825,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s, latch=latch_h)
+                                       t_game=ws.stamp.t_game_s, latch=latch_h, skip=asw_skip)
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None
@@ -849,10 +852,15 @@ class ForumPlannerPolicy(PlannerPolicy):
             # SP9a S2 IdleHit / S6 the opening (the supervisor's keys win)
             if self._wake_f is None and tap is not None and getattr(tap, "wake_frame", None) is not None:
                 self._wake_f = int(tap.wake_frame)
+            latch_t = None
+            if two_play.ASW:
+                def latch_t(m: int, _h=hold, _p=prefix) -> int:
+                    lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
+                    return int(lat[-1])
             tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
-                                two_enc="_w13" in str(getattr(self.enc, "name", "")))
+                                two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t)
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
                 self.counts["two_play"] += 1
