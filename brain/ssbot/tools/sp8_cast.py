@@ -100,6 +100,8 @@ def summarize(J: list[dict], E: list[dict]) -> dict:
                 d["T1"] = {"stabs": len(st), "dashstab_hits": len(ds_hit), "rs_planned_at_hit": len(rs_pl),
                            "rs_started": len(rs_st), "rs_hit": len(rs_hit),
                            "rs_hit_unseen": sum(1 for j in rs_st if j["script"].get("why") == "rs hit unseen"),
+                           "rs_near": sum(1 for j in ds_hit if j["script"].get("why") == "rs near"),
+                           "rs_x": pct([j["script"].get("rs_x") for j in ds_hit]),
                            "x0": pct([j["script"]["x0"] for j in st]), "k0": pct([j["script"]["k0"] for j in st]),
                            "k_hit": pct([j["script"]["k_hit"] for j in ds_hit]),
                            "rs_start_g": pct([j["script"]["rs_start_g"] for j in rs_st]),

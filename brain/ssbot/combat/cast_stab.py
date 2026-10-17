@@ -103,7 +103,9 @@ class StabCfg:
     # SP8 T1 (JB_DASH_COMBO): the RecoilStab
     combo_d_min: float = 10.0    # the RS only from this far at the dash (u, centre to centre)
     rs_g0: int = 16              # the attack's first frame (game frames after the DashStab hit, the mask's frame)
-    rs_g_late: int = 24          # ... the press may still come up to here when ticks were skipped
+    rs_g_late: int = 24          # ... the press may still come up to here (ticks skipped, or her recoil still
+    #                                  carrying her out to rs_x_min)
+    rs_x_min: float = 6.75       # the RS only from this far (her x at the press, centre to centre: _rs_far)
     rs_hit_g: int = 25           # the predicted RS hit after the DashStab hit (start g15-16, collider r8-10)
     rs_k_max: int = 52           # the RS hit by this antic frame (the Jump Aim at 55)
     rs_wait_g: int = 30          # no RS clip by here: no RS (hand back)
@@ -244,6 +246,7 @@ class Stab:
     rs_sent: int = 0
     rs_start_g: float | None = None
     rs_hit_g: float | None = None
+    rs_x: float | None = None   # T1: her farthest x at the RS press check (u, centre to centre)
     t_aim: float | None = None
     rel_j: int | None = None    # T2: the release frame (j)
     x_stop: float | None = None
@@ -310,7 +313,7 @@ class CastStab:
     @staticmethod
     def _rec(r: Stab) -> dict:
         return {"mode": r.mode, "f0": r.j0 - SEND_AHEAD, "k0": r.k0, "x0": r.x0, "rs": r.rs, "k_hit": r.k_hit,
-                "rs_start_g": r.rs_start_g,
+                "rs_start_g": r.rs_start_g, "rs_x": r.rs_x,
                 "rs_hit_g": r.rs_hit_g, "rel_j": r.rel_j, "x_stop": r.x_stop, "presses": r.presses, "hits": r.hits,
                 "skid": r.skid, "stab_in_stop": r.stab_in_stop, "end": r.phase, "why": r.why, "at_aim": r.at_aim,
                 "pred": r.pred, "prep": r.prep, "under": r.under}
@@ -470,7 +473,11 @@ class CastStab:
                     self._close("done", "no rs")
                     return None
                 gm = g + SEND_AHEAD                      # the mask's frame
-                if r.rs_sent < c.hold_a and c.rs_g0 <= gm and (r.rs_sent > 0 or gm <= c.rs_g_late):
+                if r.rs_sent == 0 and gm > c.rs_g_late:
+                    # never far enough: no RS - the stab's own recoil rule (no key until g31, then the planner)
+                    r.rs, r.why = False, "rs near"
+                    return 0
+                if r.rs_sent < c.hold_a and c.rs_g0 <= gm and (r.rs_sent > 0 or self._rs_far(r, s, e)):
                     r.rs_sent += 1
                     return M_A                           # a new press: the RecoilStab (no direction, no dash)
                 return 0
@@ -510,6 +517,18 @@ class CastStab:
         if r.phase == "under":
             return self._step_under(r, t, s, e, st, ground)
         return None
+
+    def _rs_far(self, r: Stab, s: dict, e: dict) -> bool:
+        """The RS from here clears its body: her x (centre to centre, on the mask's frame) at least rs_x_min. The RS
+        lunges 3.4 u (p50; 2.9-4.3 by its collider frame r9-11) before it hits (SP8 t1-t4 and A/B, 42 RS): from 5.8
+        and 6.06 u it reached its body at r10 (x 1.47 / 1.73 at the hit, 2 HP each); from >= 6.75 u 21 of 21 hit at
+        >= 3.47 u."""
+        h = s.get("hero") or {}
+        xr = (_sp.hero_x(s) - float(e["pos"][0])) * r.face
+        xr += float((h.get("vel") or [0.0, 0.0])[0]) * r.face * SEND_AHEAD / 60.0
+        if r.rs_x is None or xr > r.rs_x:
+            r.rs_x = round(xr, 2)
+        return xr >= self.cfg.rs_x_min
 
     def _why_not_under(self, r: Stab, s: dict, st: str | None) -> str | None:
         """T1's way under after the RS bounce: None when it goes, else why not (the planner then)."""

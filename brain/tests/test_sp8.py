@@ -301,3 +301,19 @@ def test_no_rs_blocks_the_attack_to_g31():
         out[k] = c.step(f, hero(antic_state(f, k, 10.4, ground=k <= 16, ev=ev), clip), k <= 16, True, t_game=f / 60)
     assert all(out[k] == 0 for k in range(16, 15 + c.cfg.rs_block_g)) and out[15 + c.cfg.rs_block_g] is None
     assert c.done[-1].why == "control"
+
+
+def test_rs_only_from_far_enough():
+    # the recoil leaves her 6.0 u out (< rs_x_min 6.75): no RS press, no key to g31, then the planner
+    c = cs.CastStab(dash_slash=True, combo=True, stop=False)
+    out = {}
+    for k in range(0, 60):
+        f = 1000 + k
+        ev = [{"k": "hit", "d": {"type_key": sp.CLAPPER, "src": "DashStab"}}] if k == 15 else []
+        x = 10.6 if k <= 15 else 6.0
+        clip = "Idle" if k <= 16 else "Wanderer DashRecoil" if k < 37 else "Airborne"
+        out[k] = c.step(f, hero(antic_state(f, k, x, ground=k <= 16, ev=ev), clip), k <= 16, True, t_game=f / 60)
+    assert not any(m and m & sp.M_A for k, m in out.items() if k > 15)
+    r = c.done[-1]
+    assert not r.rs and r.why == "rs near" and r.rs_x == pytest.approx(6.0)
+    assert all(out[k] == 0 for k in range(16, 15 + c.cfg.rs_block_g)) and out[15 + c.cfg.rs_block_g] is None
