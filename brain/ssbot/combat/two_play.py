@@ -254,6 +254,8 @@ class AswCfg:
     #                           (0.5 u to B's Slam Range: she enters it about at the flag-off)
     dash_min: float = 3.5     # a ground dash only with at least this far to go (u; it moves 3.27 u in 7 frames)
     far_slack: int = 8        # the start: the hold point reached by the step-in + this many frames (else "far")
+    casts: int = 1            # 0: slams only (t2 + t3: the slam switches 27 / 27 without HP lost, the cast switches 21 / 29 -
+    #                           F's rings at B and B's reaction move together; arm sp9cS)
     first: int = 1            # no switch on F's first attack move of the wave (the opening's A1: punish it; c3 is
     #                           17-19 u away - switch answer section 4)
     release_lag: float = 2.0  # the dash held into the ground sprint: released when her travel in this many frames at her
@@ -1230,6 +1232,9 @@ class TwoPlay:
             self.asw_n["no_wall"] += 1
             return
         self.asw_n[f"{kind}_trig"] += 1
+        if kind == "cast" and not c.casts:
+            self.asw_n["no_cast_off"] += 1
+            return
         k_now = int(round(tin * 60.0))
         ost = _sp.control(o)[0]
         sep = abs(ox - cx)

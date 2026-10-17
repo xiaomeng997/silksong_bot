@@ -283,3 +283,12 @@ def test_esc_fallback_corner_when_b_near(monkeypatch):
     for s in (esc_state(1000, "Idle", 0.5, b_x=near, b_st="Air"), esc_state(1001, "Jump Antic", b_x=near, b_st="Air")):
         two.observe(s["f"], s, s["f"] / 60.0)
     assert two.esc.mode is None and two.esc.why == "other jumping"
+
+
+def test_slams_only(asw, monkeypatch):
+    monkeypatch.setenv("SSBOT_FORUM_TWO_ASW_SET", "first=0,casts=0")
+    two = tp.TwoPlay()
+    step_all(two, [fstate(1000, "Idle", 0.5), fstate(1001, "Spell Antic", 1 / 60)])
+    assert two.asw is None and two.asw_n["no_cast_off"] == 1
+    step_all(two, [fstate(1100, "Idle", 0.5), fstate(1101, "Slam Antic", 1 / 60)])
+    assert two.asw is not None and two.asw.kind == "slam"
