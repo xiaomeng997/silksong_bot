@@ -134,6 +134,7 @@ def rune_spans(s: dict) -> list[tuple[float, float, object, bool]]:
     return out
 
 
+FLOOR_BOX = 3.015            # the floor's y under the boxes (her box bottom standing; its body box's)
 RUNE_LIVE_F = 100            # a circle not seen lit yet is still to come for this many frames after it is first seen
 STOP_WAIT_CLIPS = ("Sprint", "Skid", "Wanderer", "Land to Sprint")   # T2 waits these out (and "Dash" itself)
 
@@ -203,6 +204,14 @@ class StabCfg:
     corner_walk_max: float = 6.6  # she walks in from this far at most (u, centre to centre; beyond: the dash scripts)
     corner_k_max_j: int = 14     # the latest antic frame (the mask's) to start: the jump slam
     corner_k_max_c: int = 30     # ... the jump cast
+    # SP8b JB_CORNER's way under (from its take-off: the landing pushed out 1.1-4.1 u toward where she stood at the
+    # aim, 43-53 frames later; the behind spot by the wall rule's estimate, then never short of its x along the jump)
+    corner_under_max: float = 7.0   # she in front within this at the take-off (u, centre to centre)
+    corner_under_start_f: int = 8   # the start up to this many frames after the aim
+    corner_under_end_f: int = 50    # hand back at aim + this at the latest
+    corner_under_tol: float = 0.2   # at the behind spot within this: no key
+    corner_head_gap: float = 0.35   # its body's bottom this far above her head to pass under it (dash or walk)
+    corner_dash_wait: int = 10      # no walk that fits and no dash allowed by aim + this: the planner
 
 
 def _num_env(c: StabCfg) -> StabCfg:
@@ -353,6 +362,7 @@ class CastStab:
         self._seen: set = set()            # (iid, antic entry frame) looked at
         self.n_antic = 0
         self.n_jantic = 0                  # SP8b: jump slam antics looked at
+        self._jump_kind: dict = {}         # SP8b JB_CORNER: Clapper iid -> the antic kind seen, until its take-off
         self.why_not: dict = {}
         self._pred: dict = {}
         self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
@@ -363,6 +373,7 @@ class CastStab:
         self._seen = set()
         self.n_antic = 0
         self.n_jantic = 0
+        self._jump_kind = {}
         self.why_not = {}
         self._runes = {}
 
@@ -390,6 +401,12 @@ class CastStab:
         if self.slam_dash or self.corner:
             out["j_antics"] = self.n_jantic
         for r in self.done + ([self.run] if self.run is not None else []):
+            if r.mode == "under":                                              # SP8b JB_CORNER's way under
+                out["corner_under"] += 1
+                out["corner_under_there"] += bool(r.under and r.under.get("there") is not None)
+                out["corner_under_dash"] += bool(r.under and r.under.get("dash") is not None)
+                out[f"corner_under_end_{r.phase}_{r.why}"] += 1
+                continue
             pre = "corner_" if r.corner else "j_" if r.kind == "jump" else ""     # SP8b's runs apart
             out[pre + ("stabs" if r.mode == "stab" else "stops")] += 1
             if r.mode == "stab":
@@ -486,6 +503,8 @@ class CastStab:
                                 "feet": round(float(b[1]) - 3.015, 2), "clip": str((h.get("anim") or {}).get("clip"))}
             if r.phase == "prep":
                 m = self._step_prep(r, f, t, s, e, st, tin, ground, accepting, latch)
+            elif r.mode == "under":
+                m = self._step_cunder(r, f, t, s, e, st, ground)
             else:
                 m = self._step_stop(r, f, t, s, e, st, ground, accepting) if r.mode == "stop" else \
                     self._step_stab(r, f, t, s, e, st, ground)
@@ -495,6 +514,13 @@ class CastStab:
         # a new start?
         if e is None:
             return None
+        if self.corner:
+            # SP8b JB_CORNER: the way under a jump at a wall starts at its take-off (one look per jump whose antic was
+            # seen)
+            if st in ("Cast Slam Antic", "Cast Slam Antic 2", JUMP_ANTIC[0]):
+                self._jump_kind[e.get("iid")] = "jump" if st == JUMP_ANTIC[0] else "cast"
+            elif st in ("Jump", "Air") and e.get("iid") in self._jump_kind:
+                return self._start_under(f, t, s, e, st, tin, ground, hp)
         if st == "Cast Slam Antic":
             kind = "cast"
         elif st == JUMP_ANTIC[0] and (self.slam_dash or self.corner):
@@ -704,6 +730,122 @@ class CastStab:
         if c.under_dash_f <= ua < c.under_dash_f + c.under_dash_hold:
             u.setdefault("dash", ua)
             return toward | M_DASH
+        return toward
+
+    # ---- SP8b JB_CORNER: the way under a jump at a wall ----
+
+    @staticmethod
+    def _body(e: dict) -> tuple[float, float, float] | None:
+        """Its body collider ("Song Heavy Sentry", damage on): (x lo, x hi, bottom above the floor), or None."""
+        for col in e.get("colliders") or ():
+            if col.get("name") == CLAPPER and col.get("enabled", True) and col.get("verts_world"):
+                vs = col["verts_world"]
+                xs, ys = vs[0::2], vs[1::2]
+                return float(min(xs)), float(max(xs)), float(min(ys)) - FLOOR_BOX
+        return None
+
+    def _start_under(self, f: int, t: float, s: dict, e: dict, st: str, tin: float, ground: bool,
+                     hp: int) -> int | None:
+        """At its take-off (the first Jump / Air tick after an antic seen): the way under when its centre is within
+        corner_from_u of the wall behind it, one live Clapper, she on the ground in front within corner_under_max and
+        the wall rule's landing leaves a behind spot."""
+        c = self.cfg
+        iid = e.get("iid")
+        kind = self._jump_kind.pop(iid, "jump")
+        face = 1 if e.get("flipX") else -1
+        cx = float(e["pos"][0])
+        h = s.get("hero") or {}
+        hx = _sp.hero_x(s)
+        since = (tin + (1.0 / 60.0 if st == "Air" else 0.0)) * 60.0       # frames since the aim (Jump: 1 frame)
+        x_rel = (hx - cx) * face
+        b = h.get("box")
+        feet = float(b[1]) - FLOOR_BOX if b else 0.0
+        land = _jb.landing(cx, float((h.get("pos") or [hx])[0]), face)
+        why = None
+        if _jb.corner_room(cx, face) >= c.corner_from_u:
+            why = "not corner"
+        elif len(_sp.clappers(s)) != 1:
+            why = "two"
+        elif since > c.corner_under_start_f:
+            why = "late"
+        elif x_rel <= 0:
+            why = "behind"
+        elif x_rel > c.corner_under_max:
+            why = "far"
+        elif feet > 0.6:
+            why = "air"
+        elif _jb.behind_spot(land, face) is None:
+            why = "no room"
+        if why is not None:
+            self.why_not["under_" + why] = self.why_not.get("under_" + why, 0) + 1
+            return None
+        r = Stab(iid=iid, face=face, j0=f + SEND_AHEAD, k0=0, x0=round(x_rel, 3), hp0=hp, mode="under", ta=t,
+                 phase="under", kind=kind, corner=True,
+                 pred={"mode": "under", "land": round(land, 2), "room0": round(_jb.corner_room(cx, face), 2)})
+        r.t_aim = t - since / 60.0
+        r.x_aim_cx, r.hx_aim = cx, hx
+        r.at_aim = {"x": round(x_rel, 2), "feet": round(feet, 2), "clip": str((h.get("anim") or {}).get("clip"))}
+        r.under = {"x0c": cx, "land": land, "f0": round(since, 1)}
+        self.run = r
+        m = self._step_cunder(r, f, t, s, e, st, ground)
+        if m is not None:
+            r.last_m = m
+        return m
+
+    def _step_cunder(self, r: Stab, f: int, t: float, s: dict, e: dict, st: str | None, ground: bool) -> int | None:
+        """Toward the wall to the behind spot of the (pushed-out) landing: a walk when it gets her past its back
+        (walk_clear_u) by aim + corner_walk_end_f, else one ground dash under its body while it is high (rising, or
+        its bottom well above her head); never into its body's x span while its bottom is below her head + the gap;
+        no key once there; the planner when it lands or at aim + corner_under_end_f."""
+        c = self.cfg
+        h = s.get("hero") or {}
+        u = r.under
+        toward = M_R if -r.face > 0 else M_L
+        cx = float(e["pos"][0])
+        hx = _sp.hero_x(s)
+        since = (t - r.t_aim) * 60.0 + SEND_AHEAD          # the mask's frame from the aim
+        if st not in ("Jump", "Air"):
+            self._close("done", "landed" if (hx - cx) * r.face < 0 else "landed front")
+            return None
+        if since > c.corner_under_end_f:
+            self._close("done", "end")
+            return None
+        if (cx - u["x0c"]) * r.face > 0.05 and (cx - u["land"]) * r.face > 0:
+            u["land"] = cx                                 # pushed out past the estimate (the wall-top ledge)
+        land = u["land"]
+        spot = _jb.behind_spot(land, r.face)
+        if spot is None:
+            self._close("abort", "no room")
+            return None
+        d = (hx - spot) * r.face                           # still to go toward the wall (u)
+        if d <= c.corner_under_tol:
+            u.setdefault("there", round(since, 1))
+            return 0
+        if u.get("dash") is not None and since - u["dash"] < c.tap_f:
+            return toward | M_DASH                         # the dash tap's second frame
+        b = h.get("box")
+        top = (float(b[3]) - FLOOR_BOX) if b else 2.07
+        body = self._body(e)
+        vy = float((e.get("vel") or [0.0, 0.0])[1]) if e.get("vel") else 0.0
+        high = body is None or body[2] >= top + c.corner_head_gap
+        lo_n, hi_n = (float(b[0]), float(b[2])) if b else (hx - HALF_W, hx + HALF_W)
+        step = -r.face * _sp.WALK_U
+        under_now = body is not None and lo_n < body[1] and hi_n > body[0]
+        under_next = body is not None and lo_n + step < body[1] and hi_n + step > body[0]
+        if under_next and not under_now and not high:
+            u["held"] = u.get("held", 0) + 1
+            return 0                                       # never under its falling (or still low) body
+        need = (hx - land) * r.face + _jb.CFG["walk_clear_u"]
+        walk_fits = need <= _jb.CFG["walk_v"] * (_jb.CFG["corner_walk_end_f"] - since)
+        tm = h.get("tm") or {}
+        dash_ok = (u.get("dash") is None and ground and float(tm.get("dash_cd") or 0.0) <= 0.02 and high
+                   and (vy >= 0.0 or body is None or body[2] >= top + 1.5))
+        if not walk_fits and dash_ok:
+            u["dash"] = round(since, 1)
+            return toward | M_DASH
+        if not walk_fits and u.get("dash") is None and since > c.corner_dash_wait:
+            self._close("abort", "no way")                 # no walk in time and no dash: the planner (back off)
+            return None
         return toward
 
     # ---- dash, stop, side slashes (SP8 T2) ----

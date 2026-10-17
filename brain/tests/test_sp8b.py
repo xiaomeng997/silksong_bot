@@ -224,3 +224,100 @@ def test_walk_fits_corner_end():
     assert jb.corner_room(jb.WALL_L + 2.0, 1) == pytest.approx(2.0) and jb.corner_room(jb.WALL_R - 3.0, -1) == \
         pytest.approx(3.0)
     assert c["corner_walk_end_f"] < c["walk_end_f"]
+
+
+# ---- JB_CORNER's way under ----
+
+def flight_state(f, k, hx, cx, flip, bb, ground=True, vy=1.0):
+    """k frames after its Jump Aim (Jump on k 0, then Air): its body box 4.5 u wide around cx, bottom bb above the
+    floor; the hero at hx on the floor."""
+    st, tin = ("Jump", 0.0) if k <= 0 else ("Air", (k - 1) / 60.0)
+    s = state(f, st, tin, cx=cx, flip=flip, hx=hx, ground=ground)
+    s["hero"]["tm"] = {"dash_cd": 0.0, "atk_cd": 0.0}
+    s["ev"] = []
+    e = s["ents"][0]
+    y0 = cs.FLOOR_BOX + bb
+    e["colliders"] = [{"name": sp.CLAPPER, "enabled": True, "damage": True,
+                       "verts_world": [cx - 2.25, y0, cx + 2.25, y0, cx + 2.25, y0 + 3.9, cx - 2.25, y0 + 3.9]}]
+    e["vel"] = [0.0, vy]
+    return s
+
+
+def run_under(flip, x_rel=4.4, room0=2.5, dland=2.3, n_land=45):
+    """A toy corner jump: its centre room0 from the wall behind it, the hero x_rel in front; the jump lands dland u
+    toward her n_land frames after the aim (its body bottom a parabola, apex 9.07 u at +26); a walk key moves her
+    WALK_U, a dash 28 u/s for 7 frames."""
+    face = 1 if flip else -1
+    cx0 = (sp.WALL_L + room0) if flip else (sp.WALL_R - room0)
+    c = cs.CastStab(slam_dash=True, corner=True)
+    c._jump_kind[7] = "jump"
+    hx = cx0 + face * x_rel
+    keys, dash_at, path = {}, None, []
+    for k in range(0, n_land + 3):
+        f = 2000 + k
+        m_now = keys.get(k, 0)
+        toward = sp.M_R if -face > 0 else sp.M_L
+        if m_now & sp.M_DASH and dash_at is None:
+            dash_at = k
+        if dash_at is not None and 1 <= k - dash_at <= cs.DASH_F:
+            hx -= face * cs.DASH_V / 60.0
+        elif m_now & toward:
+            hx -= face * sp.WALK_U
+        cx = cx0 + face * dland * min(1.0, k / n_land)
+        bb = max(0.0, 9.07 * (1.0 - ((k - 26) / 27.0) ** 2)) if k < n_land else 0.0
+        vy = 1.0 if k < 26 else -1.0
+        if k >= n_land:
+            s = state(f, "Slam 2", 0.0, cx=cx, flip=flip, hx=hx)
+            s["hero"]["tm"] = {"dash_cd": 0.0, "atk_cd": 0.0}
+            s["ev"] = []
+        else:
+            s = flight_state(f, k, hx, cx, flip, bb, vy=vy)
+        path.append((k, (hx - cx) * face, bb))
+        m = c.step(f, s, True, True, t_game=f / 60.0)
+        if m is not None:
+            keys[k + 2] = m
+    return c, keys, path, dash_at
+
+
+@pytest.mark.parametrize("flip", [False, True])
+@pytest.mark.parametrize("x_rel,dash", [(4.4, False), (6.5, True)])
+def test_corner_under(flip, x_rel, dash):
+    # from 4.4 u the walk past its back fits by aim + 38 (the wall rule's landing 1.9 u toward her); from 6.5 u a dash
+    c, keys, path, dash_at = run_under(flip, x_rel=x_rel)
+    r = (c.done + [c.run])[0]
+    assert r.mode == "under" and r.corner and r.under.get("there") is not None
+    assert (r.under.get("dash") is not None) == dash
+    if dash:
+        # the dash only when its body is above her head (2.075 u box) by the gap
+        bb_at_dash = next(bb for k, x, bb in path if k == dash_at)
+        assert bb_at_dash >= 2.075 + c.cfg.corner_head_gap - 0.6     # the mask's frame is the STATE frame + 2
+    # behind the landing's centre by the back spot, before it lands; never in its x span while it is low
+    assert path[-1][1] < -3.0
+    for k, x, bb in path:
+        if abs(x) < 2.25 + 0.23:
+            assert bb >= 2.075, (k, x, bb)
+    assert r.phase == "done" and r.why == "landed"
+
+
+def test_corner_under_walks_when_it_fits():
+    # she stands 2 u in front at the take-off and it lands 3 u toward her: the walk past its back fits - no dash
+    c, keys, path, dash_at = run_under(False, x_rel=2.6, dland=3.4)
+    r = (c.done + [c.run])[0]
+    assert r.mode == "under" and r.under.get("dash") is None and dash_at is None and path[-1][1] < -3.0
+
+
+def test_corner_under_no_start():
+    face = -1
+    c = cs.CastStab(slam_dash=True, corner=True)
+    c._jump_kind[7] = "jump"
+    cx = sp.WALL_R - 6.0                                       # not at a wall
+    assert c.step(3000, flight_state(3000, 0, cx + face * 4.4, cx, False, 0.85), True, t_game=50.0) is None
+    assert c.stats()["no_under_not corner"] == 1 and 7 not in c._jump_kind
+    c._jump_kind[7] = "jump"
+    cx = sp.WALL_R - 2.5
+    assert c.step(3100, flight_state(3100, 0, cx - face * 2.0, cx, False, 0.85), True, t_game=51.0) is None
+    assert c.stats()["no_under_behind"] == 1
+    c2 = cs.CastStab(slam_dash=True, corner=False)            # the corner off: no way-under script
+    c2._jump_kind[7] = "jump"
+    assert c2.step(3200, flight_state(3200, 0, cx + face * 4.4, cx, False, 0.85), True, t_game=52.0) is None
+    assert c2.run is None
