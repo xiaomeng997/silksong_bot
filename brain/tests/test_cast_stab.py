@@ -11,8 +11,12 @@ from tests.test_slam_play import state
 
 def test_off_by_default(monkeypatch):
     # off without v2; since the SP8a A/B it follows SSBOT_FORUM_V2 (=0 off, with STOP=0 too: nothing runs)
+    # (since the lead's note of 2026-10-17 JB_SLAM_DASH / JB_CORNER follow v2 too: =0 here)
     for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SSBOT_FORUM_JB_SLAM_DASH", "0")
+    monkeypatch.setenv("SSBOT_FORUM_JB_CORNER", "0")
+    importlib.reload(cs._jb)
     try:
         assert importlib.reload(cs).ENABLED is False
         monkeypatch.setenv("SSBOT_FORUM_V2", "1")
@@ -23,8 +27,10 @@ def test_off_by_default(monkeypatch):
         monkeypatch.setenv("SSBOT_FORUM_JB_DASH_SLASH", "1")
         assert importlib.reload(cs).ENABLED is True
     finally:
-        for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2"):
+        for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2", "SSBOT_FORUM_JB_SLAM_DASH",
+                  "SSBOT_FORUM_JB_CORNER"):
             monkeypatch.delenv(k, raising=False)
+        importlib.reload(cs._jb)
         importlib.reload(cs)
 
 

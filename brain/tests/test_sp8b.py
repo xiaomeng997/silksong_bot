@@ -26,10 +26,20 @@ def jump_antic_state(f, k, x0, cx=31.0, flip=False, ground=True, ev=(), facing=N
 
 
 def test_off_by_default(monkeypatch):
+    # since the lead's note of 2026-10-17 (SP9c): unset, both follow SSBOT_FORUM_V2; =0 off (arm rnsp8bc0)
     for k in ("SSBOT_FORUM_JB_SLAM_DASH", "SSBOT_FORUM_JB_CORNER"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
+        importlib.reload(jb)
+        m = importlib.reload(cs)
+        assert not m.SLAM_DASH and not m.CORNER and not jb.CORNER
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        importlib.reload(jb)
+        m = importlib.reload(cs)
+        assert m.SLAM_DASH and m.CORNER and jb.CORNER
+        monkeypatch.setenv("SSBOT_FORUM_JB_SLAM_DASH", "0")
+        monkeypatch.setenv("SSBOT_FORUM_JB_CORNER", "0")
         importlib.reload(jb)
         m = importlib.reload(cs)
         assert not m.SLAM_DASH and not m.CORNER and not jb.CORNER

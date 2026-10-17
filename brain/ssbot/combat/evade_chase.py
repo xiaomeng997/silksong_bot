@@ -57,7 +57,11 @@ def _on(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip() == "1"
 
 
-ENABLED = _on("SSBOT_FORUM_EVADE_CHASE")
+# The lead's note of 2026-10-17 (the person: "a single Clapper is not dangerous - fight it however is fastest"; SP8d's
+# four-arm A/B: sp8all = the low hop + EVADE_CHASE + JB_SLAM_DASH + JB_CORNER the fastest, kill p50 17.3 s, 1.305 landed / s,
+# 16 / 16 HP-hitless): unset, SSBOT_FORUM_EVADE_CHASE follows SSBOT_FORUM_V2 (on with v2), =0 off (arm rnsp8bc0); one
+# live Clapper only (two Clappers: SSBOT_FORUM_TWO_CHASE)
+ENABLED = _on("SSBOT_FORUM_EVADE_CHASE", "1" if _on("SSBOT_FORUM_V2") else "0")
 CLAPPER = _sp.CLAPPER
 EVADE = "Evade Scuttle"
 M_L, M_R, M_A, M_DASH = _sp.M_L, _sp.M_R, _sp.M_A, _sp.M_DASH

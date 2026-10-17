@@ -262,3 +262,24 @@ def test_gauntlet_holds_b(monkeypatch):
     p = t.decide(world(29.0, t=10.1, ents=ents), WinFc(fc, t_min=0.1), None, 3)
     assert p.target == 2 and 2 in p.no_hit and p.stance_x == pytest.approx(30.3)
     assert t.stats["sp7"]["esc_aswitch"] == 1
+
+
+def test_esc_fallback_corner_when_b_near(monkeypatch):
+    # the lead's note (item 2b): the switch first; only when B is too close to hold short of it, the corner
+    from tests.test_sp9b import fstate as esc_state
+    for k in ("ESC", "ESC_SWITCH", "ANY"):
+        monkeypatch.setattr(tp, k, True)
+    monkeypatch.setattr(tp, "ESC_CORNER", False)
+    monkeypatch.setattr(tp, "ASW", False)
+    near = tp.WALL_L + 3.99 + 11.0                                 # B 7 u from her: no room to hold 7.5 u short of it
+    for fb, mode, why in ((False, None, "b near"), (True, "corner", "")):
+        monkeypatch.setattr(tp, "ESC_FALLBACK", fb)
+        two = tp.TwoPlay()
+        for s in (esc_state(1000, "Idle", 0.5, b_x=near), esc_state(1001, "Jump Antic", b_x=near)):
+            two.observe(s["f"], s, s["f"] / 60.0)
+        assert two.esc.mode == mode and two.esc.why == why
+    # B jumping: no fallback (the switch's other gates)
+    two = tp.TwoPlay()
+    for s in (esc_state(1000, "Idle", 0.5, b_x=near, b_st="Air"), esc_state(1001, "Jump Antic", b_x=near, b_st="Air")):
+        two.observe(s["f"], s, s["f"] / 60.0)
+    assert two.esc.mode is None and two.esc.why == "other jumping"

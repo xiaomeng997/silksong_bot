@@ -87,14 +87,19 @@ _V2 = "1" if _on("SSBOT_FORUM_V2") else "0"
 DASH_SLASH = _on("SSBOT_FORUM_JB_DASH_SLASH", _V2)
 COMBO = DASH_SLASH and _on("SSBOT_FORUM_JB_DASH_COMBO", _V2)
 STOP = _on("SSBOT_FORUM_JB_DASH_STOP", _V2)
-# SP8b (forum.md 73): default off until their A/B; with them off every decision is the SP8a one
-SLAM_DASH = _on("SSBOT_FORUM_JB_SLAM_DASH")
+# SP8b (forum.md 73). The lead's note of 2026-10-17 (the person: "a single Clapper is not dangerous - fight it however is
+# fastest"; SP8d's four-arm A/B, sp8all the fastest): unset, JB_SLAM_DASH (and jump_behind's JB_CORNER) follow
+# SSBOT_FORUM_V2, =0 off (arm rnsp8bc0); one live Clapper only
+SLAM_DASH = _on("SSBOT_FORUM_JB_SLAM_DASH", _V2)
 CORNER = _jb.CORNER
 # SP9b arm A (SSBOT_FORUM_TWO_CORNER, combat.two_play; default off): JB_CORNER's antic script and way under also for the
 # focus's escape jump with two Clappers (its centre within the escape line of the wall behind it: two_play's EscCfg
 # back_u), the jumper given by the policy (two_play.TwoPlay.esc_view)
 TWO_CORNER = _on("SSBOT_FORUM_TWO_CORNER")
-ENABLED = DASH_SLASH or STOP or SLAM_DASH or CORNER or TWO_CORNER
+# SP9c (the lead's note of 2026-10-17, item 2b; combat.two_play TWO_ESC_FALLBACK, default off): the corner scripts for
+# the focus's escape jump only when the switch (TWO_WALLSWITCH) fails because the other one is too close
+TWO_FALLBACK = _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
+ENABLED = DASH_SLASH or STOP or SLAM_DASH or CORNER or TWO_CORNER or TWO_FALLBACK
 CLAPPER = _sp.CLAPPER
 ANTIC = ("Cast Slam Antic", "Cast Slam Antic 2")
 JUMP_ANTIC = ("Jump Antic",)  # SP8b: the jump slam's antic (30 frames; Jump Aim at +30, p10 / 90 29 / 30)
@@ -366,7 +371,7 @@ class CastStab:
         self.stop = STOP if stop is None else stop
         self.slam_dash = SLAM_DASH if slam_dash is None else slam_dash      # SP8b: the jump slam's antic
         self.corner = CORNER if corner is None else corner                  # SP8b: either jump antic at a wall
-        self.two_corner = TWO_CORNER                                        # SP9b arm A: the escape jump, two Clappers
+        self.two_corner = TWO_CORNER or TWO_FALLBACK                        # SP9b arm A: the escape jump, two Clappers
         self._esc: dict | None = None                                       # ... this tick's escape run (corner mode)
         if dash_slash is None and stop is None and not (self.dash_slash or self.stop):
             self.dash_slash = True               # constructed directly (tests, probes): the SP6 dash slash

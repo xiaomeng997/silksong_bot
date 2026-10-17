@@ -127,6 +127,10 @@ OPEN = _on("SSBOT_FORUM_TWO_OPEN", _V2)
 # the corner takes F's escape jump before the switch)
 ESC_CORNER = _on("SSBOT_FORUM_TWO_CORNER")
 ESC_SWITCH = _on("SSBOT_FORUM_TWO_WALLSWITCH", _V2)
+# SP9c (the lead's note of 2026-10-17, item 2b - the person: "if it is already too close and the only choice is taking a
+# hit or the corner, of course choose the corner"): with the switch on, the corner (arm A) takes F's escape jump when the
+# switch's only failed gate is "b near" (B too close to hold short of it); default off (=1 on; arm sp9bAB)
+ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
 ESC = ESC_CORNER or ESC_SWITCH
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
 ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
@@ -812,6 +816,9 @@ class TwoPlay:
                 hold = c.sw_hold_j if kind == "jump" else c.sw_hold_c
                 if (ox - hx) * face < hold + 0.5:
                     why = "b near"                       # no room to hold short of B (t1: F's landing hammer)
+                    if ESC_FALLBACK:
+                        mode, why = "corner", ""         # SP9c fallback: the corner takes it
+                        self.esc_n["fallback_corner"] += 1
                 else:
                     mode = "switch"
         self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f,

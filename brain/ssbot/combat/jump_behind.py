@@ -99,7 +99,8 @@ WALK = ENABLED and _on("SSBOT_FORUM_JB_WALK")
 # by the wall-top ledge, 3.35-6.0 u from the wall, 43-53 frames after the aim; the combo answer, section 0), so the
 # walk under it to the behind spot often fits: the planner's dash rows rank after the rest when a walk gets her
 # walk_clear_u behind the landing by aim + corner_walk_end_f (gauntlet; JB_WALL's landing estimate).
-CORNER = ENABLED and _on("SSBOT_FORUM_JB_CORNER")
+# (the lead's note of 2026-10-17: unset, follows SSBOT_FORUM_V2 - on with v2 -, =0 off; arm rnsp8bc0)
+CORNER = ENABLED and _on("SSBOT_FORUM_JB_CORNER", "1" if _on("SSBOT_FORUM_V2") else "0")
 PASS_HIT = _sub("SSBOT_FORUM_JB_PASS")
 LAND_HIT = _sub("SSBOT_FORUM_JB_LAND")
 NO_JUMP = _sub("SSBOT_FORUM_JB_NOJUMP")

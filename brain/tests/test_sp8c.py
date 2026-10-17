@@ -65,9 +65,14 @@ def simulate(x0, land_k=0, cx=31.0, flip=False, n_ev=21, cfg=None, atk_cd0=0.3):
 
 
 def test_off_by_default(monkeypatch):
+    # since the lead's note of 2026-10-17 (SP9c): unset, it follows SSBOT_FORUM_V2; =0 off (arm rnsp8bc0)
     monkeypatch.delenv("SSBOT_FORUM_EVADE_CHASE", raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
+        assert not importlib.reload(ec).ENABLED
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        assert importlib.reload(ec).ENABLED
+        monkeypatch.setenv("SSBOT_FORUM_EVADE_CHASE", "0")
         assert not importlib.reload(ec).ENABLED
         monkeypatch.setenv("SSBOT_FORUM_EVADE_CHASE", "1")
         assert importlib.reload(ec).ENABLED
