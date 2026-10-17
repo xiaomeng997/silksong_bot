@@ -125,3 +125,82 @@ def test_gauntlet_targets_the_other(on, monkeypatch):
     monkeypatch.setattr(gt.GauntletTactics, "_outer_room", lambda self, c, o: 5.0)
     tac._two_focus(None, [C(7, J_X), C(99, I_X)], 1.0, None)
     assert seen["target"] == 99 and seen["why"].startswith("two: jumphit hit")
+
+
+# ---- SSBOT_FORUM_CLAW_CHASE (the late Clawline on a far jump) ----
+
+def cstate(f, st, tin, hx=J_X + 10.0, b_st="Idle", y_air=0.0, clip="Idle", accepting=True, two=True, ev=(),
+           ents=()):
+    s = two_state(f, st, tin, cx=J_X, flip=True, hx=hx, b_st=b_st, b_x=44.0, ground=y_air <= 0.0, ev=ev)
+    h = s["hero"]
+    h["silk"], h["can"] = 3, {"harpoon": True, "dash": True}
+    h["anim"] = {"clip": clip}
+    h["hero_accepting_input"] = accepting
+    if y_air > 0:
+        h["box"] = [h["box"][0], h["box"][1] + y_air, h["box"][2], h["box"][3] + y_air]
+    if not two:
+        s["ents"] = s["ents"][:1]
+    s["ents"] += list(ents)
+    return s
+
+
+def claw_on(monkeypatch, scope="any", var="A", cfg=""):
+    from ssbot.combat import claw_chase as cc
+    monkeypatch.setattr(cc, "ENABLED", True)
+    monkeypatch.setattr(cc, "SCOPE", scope)
+    monkeypatch.setattr(cc, "VARIANT", var)
+    if cfg:
+        monkeypatch.setenv("SSBOT_FORUM_CLAW_SET", cfg)
+    return cc
+
+
+def test_claw_default_off(monkeypatch):
+    from ssbot.combat import claw_chase as cc
+    monkeypatch.delenv("SSBOT_FORUM_CLAW_CHASE", raising=False)
+    assert not importlib.reload(cc).ENABLED
+    c = cc.ClawChase()
+    assert c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0), True, True) is None and c.run is None
+
+
+def test_claw_sequence_any(monkeypatch):
+    cc = claw_on(monkeypatch, "any", "A")
+    c = cc.ClawChase(cc._cfg())
+    out = {}
+    f = 1000
+    c.step(f, cstate(f, "Idle", 0.5), True, True)
+    for f in range(1001, 1060):
+        k = f - 1000
+        st = "Jump Antic" if k < 30 else "Jump"
+        k_mask = k + 2
+        y = 1.0 if 4 <= k_mask < 30 else 0.0                       # in the air after the hop
+        lock = 22 <= k_mask < 47
+        clip = "Harpoon Dash" if lock else ("Recoil Twirl" if k_mask >= 47 else "Idle")
+        m = c.step(f, cstate(f, st, (k if k < 30 else k - 30) / 60.0, y_air=max(y, 3.0 if k_mask >= 20 else y),
+                             clip=clip, accepting=not lock), k_mask < 4, not lock)
+        out[k_mask] = m
+    r = c.run or (c.done[-1] if c.done else None)
+    assert r is not None, dict(c.n)
+    assert r.kind == "jump" and r.press_rel == -10 and r.k_press == 20 and r.k_hop == 3
+    assert all(out[k] == cc.M_J for k in range(3, 13))           # the hop: 10 frames
+    assert out[19] == cc.M_L                                     # the turn toward J (left of her)
+    assert out[20] == out[21] == cc.M_CLAW | cc.M_L               # the press
+    assert all(out[k] == 0 for k in range(22, 46))               # the lock
+    assert r.k_ctrl is not None and any(out[k] == cc.M_DASH | cc.M_L for k in out if k >= 46)   # the air dash back
+
+
+def test_claw_scope_bomb_gate(monkeypatch):
+    cc = claw_on(monkeypatch, "bomb")
+    c = cc.ClawChase(cc._cfg())
+    c.step(1000, cstate(1000, "Idle", 0.5, two=False), True, True)
+    c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0, two=False), True, True)
+    assert c.run is None and c.n["no_one"] == 1
+    c = cc.ClawChase(cc._cfg())
+    c.step(1000, cstate(1000, "Idle", 0.5), True, True)
+    c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0), True, True)
+    assert c.run is None and c.n["no_no bomb"] == 1
+    bomb = {"iid": 555, "type_key": "damager", "name": "rune bomb small", "colliders": [
+        {"verts_world": [28.0, 3.0, 30.0, 3.0, 30.0, 5.0, 28.0, 5.0], "r": 2.166, "enabled": True, "damage": {"eff": 1}}]}
+    c = cc.ClawChase(cc._cfg())
+    c.step(1000, cstate(1000, "Idle", 0.5), True, True)
+    c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0, ents=(bomb,)), True, True)
+    assert c.run is not None and c.run.why == "bomb"

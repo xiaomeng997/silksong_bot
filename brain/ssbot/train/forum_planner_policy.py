@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import air_chain, cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
+from ssbot.combat import air_chain, cast_stab, claw_chase, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -230,6 +230,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                                            if rune_lowhop.ENABLED else None)
         # SP9a (SSBOT_FORUM_TWO_IDLEHIT / _SPACE / _OPEN, default off; combat.two_play): two Clappers
         self.two: two_play.TwoPlay | None = two_play.TwoPlay() if two_play.ANY else None
+        # SP10c (SSBOT_FORUM_CLAW_CHASE, default off): the late Clawline on a far jump (combat.claw_chase)
+        self.claw: claw_chase.ClawChase | None = claw_chase.ClawChase() if claw_chase.ENABLED else None
         self._wake_f: int | None = None
         self._play_tick: dict | None = None
         self.own_trace: list = []                 # SP10a: see reset()
@@ -441,6 +443,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.slam_play.reset()
         if self.cast_stab is not None:
             self.cast_stab.reset()
+        if self.claw is not None:
+            self.claw.reset()
         if self.evade_chase is not None:
             self.evade_chase.reset()
         if self.rune_lowhop is not None:
@@ -821,6 +825,17 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play
                 own = "slam"
                 self.counts["slam_play"] += 1
+        if self.claw is not None and play is None and not low_crit and not asw_crit:
+            # SP10c: the late Clawline on a far jump while its script runs (the supervisor's keys win)
+            cm = self.claw.step(f, s, ws.hero.contact.v == "GROUND",
+                                bool((s.get("hero") or {}).get("hero_accepting_input", True)), ws.stamp.t_game_s)
+            if cm is not None and (r.mask is not None or self.pause_owned):
+                self.claw.abort("supervisor")
+                cm = None
+            if cm is not None:
+                mask = play = cm
+                own = "claw"
+                self.counts["claw_chase"] += 1
         if self.cast_stab is not None and play is None and not low_crit and not asw_crit:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
             def latch(m: int, _h=hold, _p=prefix) -> int:
@@ -1098,6 +1113,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
+                **({"claw_chase": self.claw.stats()} if self.claw is not None else {}),
                 **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {}),
                 **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
                 **({"two_play": self.two.stats()} if self.two is not None else {}),

@@ -47,8 +47,8 @@ Unknown parts are bounded from above, never guessed low: an unknown crest takes 
 takes every level; an equipped tool not known to leave the nail's damage alone (KNOWN_NEUTRAL) adds the imbuement
 (IMBUE_MULT, an assumption: no imbuement in the facts) and Barbed Wire; a target type without an audited scaling at the
 needle level is unbounded (inf: every press may kill it); the Silkspear scales with the needle (a flat 15 would only
-make it smaller); thrown tools and the Clawline are unbounded (none in the M2 loadouts; their damage is not in the
-facts). observe() raises a kind's bound to any larger hit the recording / STATE shows, and reports it.
+make it smaller); thrown tools are unbounded (none in the M2 loadouts; their damage is not in the facts); the Clawline
+is CLAW_HITS hits of CLAW_DEALT (SP10c; unbounded only with an unknown scaling). observe() raises a kind's bound to any larger hit the recording / STATE shows, and reports it.
 """
 import math
 from collections.abc import Mapping
@@ -75,6 +75,12 @@ UNKNOWN_ADDS = (HUNTER_COMBO["Hunter_v3"] - 1, WARRIOR_MULT - 1)
 CRIT_CRESTS = frozenset({"Wanderer"})
 UNKNOWN_SLOT_MULT = 2.5                     # the largest swing multiplier in the attack tables (Reaper charge)
 FIXED_DEALT = 5.0                           # hero damagers with useNailDamage false (crests.json damageDealt 5)
+# the Clawline (Harpoon Dash; task 1v1 SP10c, C:/ssbot/data/m2_play/clawline/answer.txt section 1 Q3): two hits on the
+# hooked enemy (the needle's catch and the dash's damager), each dealt 4 -> 5 HP on a Clapper (runs/m2/20261004_153511
+# i3_000 f205756 / 205767): bounded per hit by the larger of dealt 4 x the target's scaling and the fixed damagers' 5,
+# a Wanderer critical hit included (whether the harpoon can crit is not in the facts: the bound takes it)
+CLAW_DEALT = 4.0
+CLAW_HITS = 2
 ROUND_EPS = 1e-3
 UNKNOWN_SCALING = math.inf                  # a target type without an audited damage scaling
 # tools that do not change a nail hit's damage (crests.json gameplay: weighted anklet = knockback / i-frames, dice =
@@ -127,6 +133,7 @@ class HeroDamage:
     scaling: float = 1.0        # the target's damage-scaling bound the nail / spear bounds use (max over levels)
     floor_nail: float = 0.0     # observe(): the largest logged hit of each kind (a bound is never below it)
     floor_spear: float = 0.0
+    clawline: float = math.inf  # one Clawline (CLAW_HITS hits on the hooked enemy), upper bound; inf: unknown scaling
 
     @classmethod
     def from_loadout(cls, crest: str | None, needle_level: int | None = 0, tools=(),
@@ -159,7 +166,7 @@ class HeroDamage:
 
     def at(self, scaling: "float | Mapping[int, float] | None") -> "HeroDamage":
         """These bounds against a target whose damage scaling is `scaling` (scaling_at; inf / None: unknown)."""
-        nail = spear = 0.0
+        nail = spear = claw = 0.0
         smax = 0.0
         for k, n_dealt, s_dealt in self.levels:
             s = scaling_at(scaling, k)
@@ -167,7 +174,9 @@ class HeroDamage:
             # the fixed damagers' level is -1 (ApplyDamageScaling x 1): only the nail's dealt scales
             nail = max(nail, _scale(n_dealt, s, self.crit), _scale(FIXED_DEALT, 1.0, self.crit))
             spear = max(spear, _scale(s_dealt, s, False))
-        return replace(self, nail=max(nail, self.floor_nail), spear=max(spear, self.floor_spear), scaling=smax)
+            claw = max(claw, CLAW_HITS * max(_scale(CLAW_DEALT, s, self.crit), _scale(FIXED_DEALT, 1.0, self.crit)))
+        return replace(self, nail=max(nail, self.floor_nail), spear=max(spear, self.floor_spear), scaling=smax,
+                       clawline=claw)
 
     def of_prim(self, p: Prim) -> float:
         """One landed hit of primitive p; 0 for the non-damaging ones."""
@@ -175,7 +184,9 @@ class HeroDamage:
             return self.nail
         if p == Prim.SILKSKILL:
             return self.spear
-        if p in (Prim.TOOL, Prim.CLAWLINE):
+        if p == Prim.CLAWLINE:
+            return self.clawline
+        if p == Prim.TOOL:
             return self.tool
         return 0.0
 

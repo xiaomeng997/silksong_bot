@@ -119,7 +119,12 @@ def test_hunter_bounds_match_the_logged_hits_and_the_playbook():
     assert bb.nail == 5.0 and bb.spear >= 15.0 and 1.0 <= bb.scaling < 1.034
     assert HUNTER.of_prim(Prim.ATTACK_SIDE) == HUNTER.of_prim(Prim.ATTACK_DOWN) == 5.0
     assert HUNTER.of_prim(Prim.SILKSKILL) == 15.0 and HUNTER.of_prim(Prim.DASH) == 0.0
-    assert math.isinf(HUNTER.of_prim(Prim.TOOL)) and math.isinf(HUNTER.of_prim(Prim.CLAWLINE))
+    assert math.isinf(HUNTER.of_prim(Prim.TOOL))
+    # SP10c: the Clawline is two hits of dealt 4 (5 HP on a Clapper), each at least the fixed damagers' 5; a Wanderer
+    # crit taken (x 3); unknown scaling: unbounded
+    assert HUNTER.of_prim(Prim.CLAWLINE) == 10.0
+    assert HeroDamage.from_loadout("Wanderer", 0, ()).of_prim(Prim.CLAWLINE) == 30.0
+    assert math.isinf(HeroDamage.from_loadout("Hunter", 0, (), scaling=None).of_prim(Prim.CLAWLINE))
     # the STUCK state: boss 15 HP. The nail cannot kill it, only the Silkspear (not allowed below full HP)
     assert Prim.ATTACK_SIDE not in bb.kill_prims(15.0) and Prim.SILKSKILL in bb.kill_prims(15.0)
     assert ATTACKS <= bb.kill_prims(5.0) and bb.kill_prims(None) == frozenset()
