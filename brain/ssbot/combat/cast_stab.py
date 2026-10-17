@@ -54,6 +54,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from ssbot.combat import jump_behind as _jb
 from ssbot.combat import slam_play as _sp
 
 
@@ -107,6 +108,13 @@ class StabCfg:
     rs_wait_g: int = 30          # no RS clip by here: no RS (hand back)
     rs_end_g: int = 45           # the RS clip running past here: hand back
     post_aim_f: int = 10         # after the RS hit no key until the Jump Aim + this
+    under: int = 1               # then the way under it (0: hand back to the planner at aim + post_aim_f)
+    under_dash_f: int = 16       # ... the key toward it from aim + post_aim_f, the air dash at aim + this (its
+    under_dash_hold: int = 4     #     body's bottom 8.2 u above the floor, her top <= 7.4) held this many frames
+    under_clear: float = 2.4     # ... no key once she is this far behind its centre (its back 1.34 + 0.23 + 0.8)
+    under_feet_max: float = 5.3  # ... only when her feet are at most this high at aim + post_aim_f
+    under_end_f: int = 48        # ... hand back at aim + this at the latest
+    prep_max: int = 3            # the start's first dash frame waits up to this many frames for the key filter
     # SP8 T2 (JB_DASH_STOP): dash, stop, side slashes
     stop_d_min: float = 6.7      # the start's distance band (u, centre to centre; below it a tap overshoots)
     stop_d_max: float = 11.3     # ... above it the release falls past grace_f
@@ -188,6 +196,14 @@ def sprint_travel(j: int) -> float:
     return d
 
 
+def _clean(latch, m: int) -> bool:
+    """The direction and dash keys of m latch as sent (no latch callable: yes)."""
+    if latch is None:
+        return True
+    keys = M_L | M_R | M_DASH
+    return (int(latch(m)) & keys) == (m & keys)
+
+
 def stop_plan(x0: float, cfg: StabCfg) -> dict | None:
     """T2: how she stops in reach from x0 (centre to centre): a tap (the dash's own travel) or the dash held to the
     frame jr (the first frame without it) - None when neither stops her inside [stop_lo, stop_u + tap_room] in time."""
@@ -233,6 +249,10 @@ class Stab:
     skid: bool = False
     stab_in_stop: bool = False
     at_aim: dict | None = None
+    prep: int = 0               # frames waited for the key filter before the dash
+    x_aim_cx: float | None = None   # its centre and her transform x at the aim (the landing's prediction)
+    hx_aim: float | None = None
+    under: dict | None = None   # T1's way under: start / dash / clear frames (from the aim), her height
 
 
 class CastStab:
@@ -289,7 +309,7 @@ class CastStab:
                 "rs_start_g": r.rs_start_g,
                 "rs_hit_g": r.rs_hit_g, "rel_j": r.rel_j, "x_stop": r.x_stop, "presses": r.presses, "hits": r.hits,
                 "skid": r.skid, "stab_in_stop": r.stab_in_stop, "end": r.phase, "why": r.why, "at_aim": r.at_aim,
-                "pred": r.pred}
+                "pred": r.pred, "prep": r.prep, "under": r.under}
 
     def active(self) -> bool:
         return self.run is not None and self.run.phase not in ("done", "abort")
@@ -305,10 +325,13 @@ class CastStab:
             self.done.append(r)
         self.run = None
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None
-             ) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
+             latch=None) -> int | None:
         """The mask for frame f + 2 while a script runs, else None. t_game: the game clock (s; Stamp.t_game_s, still
-        through hit-stop freezes); None: f / 60 (tests)."""
+        through hit-stop freezes); None: f / 60 (tests). latch: m -> the key mask the game latches at f + 2 when m is
+        sent for it (the oracle's hold filter: a key stays down 2 frames, up 2 frames, never left and right at once;
+        SP8 t1: a planner key away from it on the frame before the start turned the first dash frame away, 1 of 7
+        stabs); None: m itself."""
         c = self.cfg
         t = f / 60.0 if t_game is None else float(t_game)
         e = _sp.clapper(s)
@@ -331,12 +354,17 @@ class CastStab:
                         r.hits.append((round((t - r.ta) * 60.0, 1), str(d.get("src"))))
             if r.t_aim is None and st not in ANTIC:
                 r.t_aim = t - (tin if st in ("Cast Jump", "Jump Aim") else 0.0)
+                r.x_aim_cx = float(e["pos"][0])
+                r.hx_aim = float((h.get("pos") or [_sp.hero_x(s)])[0])
                 b = h.get("box")
                 if b:
                     r.at_aim = {"x": round((_sp.hero_x(s) - float(e["pos"][0])) * r.face, 2),
                                 "feet": round(float(b[1]) - 3.015, 2), "clip": str((h.get("anim") or {}).get("clip"))}
-            m = self._step_stop(r, f, t, s, e, st, ground, accepting) if r.mode == "stop" else \
-                self._step_stab(r, f, t, s, e, st, ground)
+            if r.phase == "prep":
+                m = self._step_prep(r, f, t, s, e, st, tin, ground, accepting, latch)
+            else:
+                m = self._step_stop(r, f, t, s, e, st, ground, accepting) if r.mode == "stop" else \
+                    self._step_stab(r, f, t, s, e, st, ground)
             if m is not None:
                 r.last_m = m
             return m
@@ -363,7 +391,36 @@ class CastStab:
         self.run = Stab(iid=e.get("iid"), face=face, j0=f + SEND_AHEAD, k0=ka, x0=round(x0, 3), pred=p, hp0=hp,
                         mode=mode, ta=t - tin, rs=bool(p.get("rs")), phase="lunge" if mode == "stab" else "dash")
         toward = M_R if -face > 0 else M_L
+        if not _clean(latch, toward | M_DASH):
+            self.run.phase = "prep"              # the key toward it first: the dash on the first clean frame
+            self.run.prep = 1
+            self.run.last_m = toward
+            return toward
         self.run.last_m = toward | M_DASH
+        return toward | M_DASH
+
+    def _step_prep(self, r: Stab, f: int, t: float, s: dict, e: dict, st: str | None, tin: float, ground: bool,
+                   accepting: bool, latch) -> int | None:
+        """The start's key-filter wait: the key toward it until toward + dash latch together, then the script from
+        that frame (its start conditions checked again at the new antic frame and distance)."""
+        toward = M_R if -r.face > 0 else M_L
+        if not _clean(latch, toward | M_DASH):
+            if r.prep >= self.cfg.prep_max:
+                self._close("abort", "prep")
+                return None
+            r.prep += 1
+            return toward
+        if st != "Cast Slam Antic":
+            self._close("abort", "prep late")
+            return None
+        ka = int(round(tin * 60.0)) + SEND_AHEAD
+        why = self._why_not(s, e, ground, accepting, ka)
+        if why is not None or self._pred.get("mode", "stab") != r.mode:
+            self._close("abort", f"prep {why or 'mode'}")
+            return None
+        x0 = (_sp.hero_x(s) - float(e["pos"][0])) * r.face
+        r.j0, r.k0, r.x0, r.pred, r.rs = f + SEND_AHEAD, ka, round(x0, 3), self._pred, bool(self._pred.get("rs"))
+        r.phase = "lunge" if r.mode == "stab" else "dash"
         return toward | M_DASH
 
     # ---- the dash slash (SP6) and the RecoilStab (SP8 T1) ----
@@ -431,13 +488,58 @@ class CastStab:
                 self._close("done", "landed")
                 return None
             if r.t_aim is not None and round((t - r.t_aim) * 60.0) + SEND_AHEAD >= c.post_aim_f:
+                why = self._why_not_under(r, s, st)
+                if why is not None:
+                    self._close("done", f"post ({why})")
+                    return None
+                b = h.get("box")
+                r.phase, r.under = "under", {"f0": round((t - r.t_aim) * 60.0) + SEND_AHEAD,
+                                             "feet": round(float(b[1]) - 3.015, 2) if b else None,
+                                             "x": round((_sp.hero_x(s) - float(e["pos"][0])) * r.face, 2)}
+            elif st is not None and st not in ANTIC and st not in ("Cast Jump", "Jump Aim", "Jump", "Air"):
                 self._close("done", "post")
                 return None
-            if st is not None and st not in ANTIC and st not in ("Cast Jump", "Jump Aim", "Jump", "Air"):
-                self._close("done", "post")
-                return None
-            return 0
+            else:
+                return 0
+        if r.phase == "under":
+            return self._step_under(r, t, s, e, st, ground)
         return None
+
+    def _why_not_under(self, r: Stab, s: dict, st: str | None) -> str | None:
+        """T1's way under after the RS bounce: None when it goes, else why not (the planner then)."""
+        c = self.cfg
+        if not c.under:
+            return "off"
+        if st not in ("Cast Jump", "Jump Aim", "Jump", "Air"):
+            return "state"
+        b = (s.get("hero") or {}).get("box")
+        if not b or float(b[1]) - 3.015 > c.under_feet_max:
+            return "high"
+        if r.x_aim_cx is None or r.hx_aim is None:
+            return "no aim"
+        land = _jb.landing(r.x_aim_cx, r.hx_aim, r.face)
+        if _jb.behind_spot(land, r.face) is None:
+            return "no room behind"
+        return None
+
+    def _step_under(self, r: Stab, t: float, s: dict, e: dict, st: str | None, ground: bool) -> int | None:
+        """The key toward it, the air dash under its rising body at aim + under_dash_f, toward until she is
+        under_clear behind its centre, then no key; the planner on the ground (or at aim + under_end_f)."""
+        c = self.cfg
+        ua = round((t - r.t_aim) * 60.0) + SEND_AHEAD          # the mask's frame from the aim
+        xr = (_sp.hero_x(s) - float(e["pos"][0])) * r.face
+        u = r.under
+        if (ground and ua > u["f0"] + 2) or ua > c.under_end_f or st not in ("Cast Jump", "Jump Aim", "Jump", "Air"):
+            self._close("done", "under landed" if ground else "under end")
+            return None
+        if xr <= -c.under_clear or u.get("clear") is not None:
+            u.setdefault("clear", ua)
+            return 0
+        toward = M_R if -r.face > 0 else M_L
+        if c.under_dash_f <= ua < c.under_dash_f + c.under_dash_hold:
+            u.setdefault("dash", ua)
+            return toward | M_DASH
+        return toward
 
     # ---- dash, stop, side slashes (SP8 T2) ----
 

@@ -758,9 +758,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.counts["slam_play"] += 1
         if self.cast_stab is not None and play is None:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
+            def latch(m: int, _h=hold, _p=prefix) -> int:
+                # the key mask the oracle's hold filter latches at f + 2 when m is sent for it
+                lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
+                return int(lat[-1])
             stab = self.cast_stab.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s)
+                                       t_game=ws.stamp.t_game_s, latch=latch)
             if stab is not None and (r.mask is not None or self.pause_owned):
                 self.cast_stab.abort("supervisor")
                 stab = None

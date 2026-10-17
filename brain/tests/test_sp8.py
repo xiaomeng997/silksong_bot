@@ -3,10 +3,12 @@ and dash, stop, side slashes (SSBOT_FORUM_JB_DASH_STOP), both default off (ssbot
 fixes (its body front in the cast antic, the dash's frames, gravity)."""
 import importlib
 
+import numpy as np
 import pytest
 
 from ssbot.combat import cast_stab as cs
 from ssbot.combat import slam_play as sp
+from ssbot.knowledge import kinematics as kin
 from tests.test_cast_stab import antic_state
 
 
@@ -79,13 +81,12 @@ def jump_state(f, k, x0, flip=False):
     return s
 
 
-@pytest.mark.parametrize("flip", [False, True])
-def test_the_combo(flip):
-    c = cs.CastStab(dash_slash=True, combo=True, stop=False)
-    face = 1 if flip else -1
-    toward = sp.M_R if -face > 0 else sp.M_L
+def run_combo(flip, feet_at_aim=4.5, cfg=None, n=110, latch=None):
+    """A toy jump cast: the DashStab hits at antic frame 15, the RS clip from the frame after the press, its hit 9
+    frames later (then the bounce), the Jump Aim at 56; the hero does not move."""
+    c = cs.CastStab(cfg, dash_slash=True, combo=True, stop=False)
     masks, k_hit, k_rs, k_rs_hit = {}, 15, None, None
-    for k in range(0, 80):
+    for k in range(0, n):
         f = 1000 + k
         ev, clip, ground = [], "Idle", True
         if k == k_hit:
@@ -102,23 +103,69 @@ def test_the_combo(flip):
             if k >= k_rs + 9:
                 clip = "DownSpikeBounce 1"
         s = antic_state(f, k, 10.6, flip=flip, ground=ground, ev=ev) if k < 56 else jump_state(f, k, 10.6, flip)
-        m = c.step(f, hero(s, clip), ground and k < 70, True, t_game=f / 60.0)
+        m = c.step(f, hero(s, clip, feet=0.0 if ground else feet_at_aim), ground, True, t_game=f / 60.0,
+                   latch=latch)
         if m is not None:
             masks[k + 2] = m
+    return c, masks, k_hit, k_rs_hit
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_the_combo(flip):
+    c, masks, k_hit, k_rs_hit = run_combo(flip)
+    face = 1 if flip else -1
+    toward = sp.M_R if -face > 0 else sp.M_L
     r = c.done[-1]
     assert r.rs and r.k_hit == pytest.approx(k_hit)
     # the dash held with the key toward it until the hit
     assert all(masks[k] & sp.M_DASH and masks[k] & toward for k in range(2, k_hit + 2))
-    # no key from the hit to the press; the attack on g16-17 (the mask's game frames); then nothing
-    after = sorted(k for k in masks if k > k_hit + 1)
+    # no key from the hit to the press; the attack on g16-17 (the mask's game frames); then nothing until the aim + 10
+    aim = 56
+    after = sorted(k for k in masks if k_hit + 1 < k < aim + c.cfg.post_aim_f)
     a = [k - k_hit for k in after if masks[k] & sp.M_A]
     assert a == [16, 17]
     assert all(masks[k] in (0, sp.M_A) for k in after)
     assert r.rs_start_g is not None and r.rs_hit_g == pytest.approx(k_rs_hit - k_hit)
-    # no key after the RS hit until the Jump Aim (56) + post_aim_f, then the planner
-    assert max(after) == 56 + c.cfg.post_aim_f - 1 and r.why == "post"
+    # the way under: the key toward it from aim + 10, the air dash at aim + 16 .. 19, then toward (the toy hero does not
+    # move: no clear, the end at aim + under_end_f)
+    under = sorted(k for k in masks if k >= aim + c.cfg.post_aim_f)
+    assert under[0] == aim + c.cfg.post_aim_f
+    dash = [k - aim for k in under if masks[k] & sp.M_DASH]
+    assert dash == list(range(c.cfg.under_dash_f, c.cfg.under_dash_f + c.cfg.under_dash_hold))
+    assert all(masks[k] & toward and not masks[k] & sp.M_A for k in under)
+    assert max(under) == aim + c.cfg.under_end_f and r.why == "under end"
     st = c.stats()
     assert st["rs_planned"] == 1 and st["rs_started"] == 1 and st["rs_hit"] == 1 and len(st["runs"]) == 1
+
+
+def test_combo_no_under():
+    # too high at aim + 10 (her top above its body's bottom at the dash), or under off: the planner at aim + 10
+    for feet, cfg, why in ((6.0, None, "post (high)"), (4.5, cs.StabCfg(under=0), "post (off)")):
+        c, masks, _, _ = run_combo(False, feet_at_aim=feet, cfg=cfg)
+        assert c.done[-1].why == why and max(masks) == 56 + c.cfg.post_aim_f - 1
+
+
+def test_prep_waits_for_the_key_filter():
+    # a planner key away from it latched on the frame before: the key toward it first, the dash a frame later
+    face = -1                                                # flip False: it faces left, she is on its left
+    toward = sp.M_R if -face > 0 else sp.M_L
+    away = sp.M_L if toward == sp.M_R else sp.M_R
+    sent = {1001: away}
+    def latch_for(f):
+        def latch(m):
+            seq = [sent.get(fr, 0) for fr in range(f - 1, f + 2)] + [m]
+            lat, _ = kin.hold_filter(np.array(seq), kin.HoldState.idle(1))
+            return int(lat[-1])
+        return latch
+    c = cs.CastStab(dash_slash=True, combo=True, stop=False)
+    out = {}
+    for k in range(0, 6):
+        f = 1000 + k
+        m = c.step(f, hero(antic_state(f, k, 10.6)), True, True, t_game=f / 60.0, latch=latch_for(f))
+        if m is not None:
+            sent[f + 2] = out[f + 2] = m
+    assert out[1002] == toward and out[1003] == toward | sp.M_DASH
+    assert c.run.phase == "lunge" and c.run.j0 == 1003 and c.run.prep == 1
 
 
 def test_combo_gates():

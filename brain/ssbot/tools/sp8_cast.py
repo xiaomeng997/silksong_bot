@@ -39,7 +39,7 @@ def collect(manifests: list[str], arms: set | None, out: Path) -> None:
                 continue
             lab = {"arm": arm, "run": run.name, "inst": inst, "ep": int(row.get("episode", -1))}
             J = [j for j in jumps_of(states, lab, HERO_ATTACKS) if j["f"] <= f1]
-            cst = row.get("cast_stab") or {}
+            cst = row.get("cast_stab") or (row.get("policy") or {}).get("cast_stab") or {}
             runs = list(cst.get("runs") or [])
             for j in J:
                 j.pop("path", None)
@@ -106,7 +106,7 @@ def summarize(J: list[dict], E: list[dict]) -> dict:
                            "rs_hit_g": pct([j["script"]["rs_hit_g"] for j in rs_st if j["script"].get("rs_hit_g")]),
                            "at_aim_x": pct([(j["script"].get("at_aim") or {}).get("x") for j in rs_st]),
                            "at_aim_feet": pct([(j["script"].get("at_aim") or {}).get("feet") for j in rs_st]),
-                           "ends": dict(Counter((j["script"]["end"], j["script"]["why"]) for j in st).most_common()),
+                           "ends": dict(Counter(f'{j["script"]["end"]}/{j["script"]["why"]}' for j in st).most_common()),
                            "antic_hits_per_stab": round(sum(len(_antic_hits(j)) for j in st) / len(st), 3),
                            "antic_hits_per_rs": round(sum(len(_antic_hits(j)) for j in rs_pl) / len(rs_pl), 3)
                            if rs_pl else None,
@@ -125,7 +125,7 @@ def summarize(J: list[dict], E: list[dict]) -> dict:
                            "presses": dict(Counter(len(j["script"].get("presses") or []) for j in sp)),
                            "antic_hits_dist": dict(Counter(nh)), "ge2": sum(1 for x in nh if x >= 2),
                            "antic_hits_per_stop": round(sum(nh) / len(sp), 3),
-                           "ends": dict(Counter((j["script"]["end"], j["script"]["why"]) for j in sp).most_common()),
+                           "ends": dict(Counter(f'{j["script"]["end"]}/{j["script"]["why"]}' for j in sp).most_common()),
                            "safe_land30": sum(1 for j in sp if not _hurt(j, LAND_SAFE_F)),
                            "behind": sum(1 for j in sp if (j.get("hero_land") or 0) < 0)}
             no = [j for j in L if not j.get("script")]
