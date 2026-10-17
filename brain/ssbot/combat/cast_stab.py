@@ -215,6 +215,10 @@ class StabCfg:
     corner_dash_wait: int = 10      # no walk that fits and no dash allowed by aim + this: the planner
     corner_under_feet: float = 3.0  # her feet at most this high at the start (in the air: the air dash)
     corner_dash_gap: int = 12       # a second dash this many frames after the first at the earliest
+    corner_wall_min: float = 0.9    # the spot never nearer the wall than this (u, her centre; t3: a dash under took
+    #                                 her 0.5 u from the wall, the planner's dash into it after the landing turned into
+    #                                 a wall jump into its body, 2 HP)
+    corner_dash_min_d: float = 2.8  # no dash with less than this still to go (it would overshoot to the wall): walk
 
 
 def _num_env(c: StabCfg) -> StabCfg:
@@ -825,6 +829,7 @@ class CastStab:
             wl = _jb.WALL_L + _jb.CFG["wall_pad_u"] if r.face > 0 else _jb.WALL_R - _jb.CFG["wall_pad_u"]
             spot = wl
             u["pad"] = True
+        spot = max(spot, _jb.WALL_L + c.corner_wall_min) if r.face > 0 else min(spot, _jb.WALL_R - c.corner_wall_min)
         d = (hx - spot) * r.face                           # still to go toward the wall (u)
         if d <= c.corner_under_tol:
             u.setdefault("there", round(since, 1))
@@ -849,7 +854,7 @@ class CastStab:
         walk_fits = need <= _jb.CFG["walk_v"] * (_jb.CFG["corner_walk_end_f"] - since)
         tm = h.get("tm") or {}
         dash_ok = (len(u.get("dashes", ())) < 2 and float(tm.get("dash_cd") or 0.0) <= 0.02 and high
-                   and (vy >= 0.0 or body is None or body[2] >= top + 1.5))
+                   and (vy >= 0.0 or body is None or body[2] >= top + 1.5) and d >= c.corner_dash_min_d)
         if not walk_fits and dash_ok:
             u["dash"] = round(since, 1)                    # (a ground dash, or the air dash when she is up)
             u.setdefault("dashes", []).append(u["dash"])
