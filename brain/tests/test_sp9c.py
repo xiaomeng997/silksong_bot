@@ -228,7 +228,7 @@ def test_bomb_hop_over_f_runes(asw):
         two.observe(f, s, f / 60.0)
         crit.append(two.asw_critical())
         outs.append(two.step(f, s, r.hop_P is None, True, 99, f / 60.0))
-    assert all(crit[:15])
+    assert all(crit[1:15])                                       # from crit_lead frames before the press
     j = outs.index(sp.M_J)
     assert set(outs[:j]) == {0} and r.hops and r.hops[0][1] == r.hop_H
     assert outs[j:j + r.hop_H] == [sp.M_J] * r.hop_H and outs[j + r.hop_H] == 0

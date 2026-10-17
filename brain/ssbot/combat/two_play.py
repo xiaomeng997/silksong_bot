@@ -266,6 +266,7 @@ class AswCfg:
     bomb_lead: int = 30       # a covering bomb's window this close (frames): plan the hop, stand still until its press
     x_pad: float = 0.3        # a bomb covers her when |her x - its x| < its radius + her half width + this
     margin: float = 0.12      # her box bottom at least this above the bomb circle's top (rune_lowhop's HopCfg)
+    crit_lead: int = 4        # the other scripts are held off from this many frames before the planned press
     lock_win: int = 10        # F's lock: the press on B's Idle (re-)entry only up to this many frames after it (the
     #                           hit lands 3-4 frames after the press's STATE: before the coin at 15)
 
@@ -322,6 +323,8 @@ class AswRun:
     hop_H: int = 0
     hops: list = field(default_factory=list)       # (P, H, w0, w1)
     pending: bool = False                          # a covering bomb's window within bomb_lead (the hop to plan)
+    plan_P: int | None = None                      # ... the planned press (antic frame k) this tick
+    hop_w1: int = 0                                # the committed hop's covering windows' end
     k_line: int | None = None  # a slam: the antic frame she was first beyond the hammer line
     k_hold: int | None = None  # the antic frame she first reached the hold / press point
     hit_b: int | None = None   # the first landed hit on B from F's flag-off on (frames - f_off; < 0: in F's lock)
@@ -1157,14 +1160,16 @@ class TwoPlay:
                                       ) else frozenset()
 
     def asw_critical(self) -> bool:
-        """The bomb hop is committed (its hold, the covering bomb's window after it): the antic switch's script keeps
-        the keys ahead of the other scripts (like the low hop's critical window)."""
+        """The bomb hop's press is due within crit_lead frames, or it is committed (its hold, the covering bombs' lit
+        window): the antic switch's script keeps the keys ahead of the other scripts (like the low hop's critical
+        window). (t2, c3e0f5f: a 40-frame window after the press kept the slam playbook off B's slam: its hammer, 4 HP
+        losses in sp9cP)"""
         r = self.asw
         if not ASW or r is None or r.mode is None:
             return False
         if r.hop_P is None:
-            return r.pending                             # a covering bomb's window near: the stand / the press
-        return r.k_now <= r.hop_P + max(r.hop_H, 40)
+            return r.plan_P is not None and r.plan_P - r.k_now <= self.acfg.crit_lead
+        return r.k_now <= max(r.hop_P + r.hop_H + 1, r.hop_w1 + 1)
 
     def _asw_view(self) -> dict:
         r = self.asw
@@ -1190,6 +1195,11 @@ class TwoPlay:
                 r.tx = self._asw_target(s, t, hx)
             thr = self._asw_threats(r, hx)
             r.pending = bool(thr) and min(w0 for w0, _, _ in thr) - r.k_now < self.acfg.bomb_lead
+            r.plan_P = None
+            if r.pending and r.hop_P is None and _sp.on_ground(s):
+                from ssbot.combat import rune_lowhop as _rl
+                plan = _rl.hop_plan(thr, r.k_now, range(9, 17), 3)
+                r.plan_P = None if plan is None else int(plan["P"])
 
     def _asw_press_x(self, o: dict, sgn: int) -> float:
         """Her centre's x for the side slash on B (its body's near edge - reach_in, coming from F's side)."""
@@ -1467,7 +1477,7 @@ class TwoPlay:
                 self.asw_n["hop_none"] += 1
                 return None
             if plan["P"] <= k and (latch is None or bool(int(latch(M_J)) & M_J)):
-                r.hop_P, r.hop_H = k, plan["H"]
+                r.hop_P, r.hop_H, r.hop_w1 = k, plan["H"], max(w1 for _, w1, _ in thr)
                 r.hops.append((k, plan["H"], min(w0 for w0, _, _ in thr), max(w1 for _, w1, _ in thr)))
                 self.asw_n["hops"] += 1
                 return M_J
