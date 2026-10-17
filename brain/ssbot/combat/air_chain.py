@@ -52,6 +52,10 @@ MAX_PRESS_C = 75                # the strike press at most this many frames ahea
 MIN_PRESS_C = 6                 # ... at least this many
 RESEARCH_F = 3                  # a failed search is tried again after this many frames
 FLOOR_Y = 3.015
+GROUND_EPS = 0.08               # her box bottom this close to the floor counts as landed
+LATE_SLACK = 3                  # the strike's contact at most press + ACTIVE[1] - LATE_SLACK in the plan (a margin for
+#                                 the model's error: FP2's lost plans had the contact at press + 8 / 9)
+KEEP_F = 12                     # a plan failing its check is kept when no new plan exists and its strike is this close
 
 
 @dataclass
@@ -426,13 +430,18 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int) -> list[Plan]:
         good[sel[j < off]] = False
         hit = sel[j >= off]
         c_strike[hit] = j[j >= off]
+        late = c_strike[sel] > p_strike[sel] + ACTIVE[1] - LATE_SLACK
+        good[sel[(j >= off) & late]] = False
         ev[hit, c_strike[hit] - off] |= kin.EV_POGO
         sel = np.flatnonzero(good)
         if not len(sel):
             return []
         # pass 3: safety with both bounces; no landing before the strike's contact
         ro = sim.roll(cm[sel], ev[sel])
-        gnd = (ro.flags & kin.F_GROUND) != 0
+        # grounded: the flag, or her box bottom at the floor (FP2, 3eb3914: a plan whose umbrella press came 1 frame
+        # above the floor became a buffered ground jump - the model never set the flag on the landing frame - and
+        # the run closed on the landing)
+        gnd = ((ro.flags & kin.F_GROUND) != 0) | (ro.box[..., 1] <= FLOOR_Y + GROUND_EPS)
         ii = np.arange(ro.flags.shape[1])[None, :]
         landed = (gnd & (ii >= off) & (ii <= c_strike[sel][:, None])).any(axis=1)
         i_from = np.array([0 if plans[i].inv_until is None else off + plans[i].inv_until - F0 + 1 for i in sel])
@@ -472,7 +481,7 @@ def search(sim: ChainSim, ctx: Ctx) -> Plan | None:
     if not ok:
         return None
     pref = {k: i for i, k in enumerate(PRESS_K)}
-    ok.sort(key=lambda p: (p.f_down is None, pref[p.k_press], p.d_end - F0,
+    ok.sort(key=lambda p: (p.f_down is None, pref[p.k_press], p.c_strike - p.f_press, p.d_end - F0,
                            p.f_umb is not None, -(p.f_umb or 0)))
     best = ok[0]
     best.n_ok = len(ok)

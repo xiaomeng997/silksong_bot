@@ -834,14 +834,21 @@ class SlamPlay:
             r.chain_log.append([f, "plan", plan.row(), round(1e3 * (time.perf_counter() - t0), 1)])
         elif not _ac.check(sim, ctx, r.chain):
             plan = _ac.search(sim, ctx)
-            if plan is None:
+            if plan is None and r.chain.f_press - F <= _ac.KEEP_F:
+                # no new plan this close to the strike: the committed one goes on (dropping it leaves her floating in
+                # front of B's hammer with the planner)
+                if not r.chain_log or r.chain_log[-1][1] != "keep":
+                    r.chain_log.append([f, "keep", r.chain.row(), round(1e3 * (time.perf_counter() - t0), 1)])
+                plan = r.chain
+            elif plan is None:
                 r.chain_log.append([f, "lost", r.chain.row(), round(1e3 * (time.perf_counter() - t0), 1)])
                 r.chain, r.chain_off = None, "lost"
                 return None
-            if r.chain.pressed_down is not None:
-                plan.f_down, plan.pressed_down = r.chain.f_down, r.chain.pressed_down
-            r.chain = plan
-            r.chain_log.append([f, "replan", plan.row(), round(1e3 * (time.perf_counter() - t0), 1)])
+            if plan is not r.chain:
+                if r.chain.pressed_down is not None:
+                    plan.f_down, plan.pressed_down = r.chain.f_down, r.chain.pressed_down
+                r.chain = plan
+                r.chain_log.append([f, "replan", plan.row(), round(1e3 * (time.perf_counter() - t0), 1)])
         p = r.chain
         m = _ac.mask_at(p, F)
         if p.f_down is not None and p.pressed_down is None and m & M_A:
