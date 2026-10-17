@@ -171,7 +171,7 @@ def test_prep_waits_for_the_key_filter():
 def test_combo_gates():
     # below combo_d_min: the SP6 stab only (its landing rule)
     c = cs.CastStab(dash_slash=True, combo=True, stop=False)
-    assert c.step(1000, hero(antic_state(1000, 2, 9.6)), True, t_game=1000 / 60) is not None
+    assert c.step(1000, hero(antic_state(1000, 2, 9.85)), True, t_game=1000 / 60) is not None
     assert not c.run.rs
     # the RS hit predicted by rs_k_max: at antic frame 12 from 10.6 u (hit j15, RS 12 + 15 + 25 = 52) yes; from 11.9 u
     # (hit j18) no, and the stab alone lands late
@@ -265,3 +265,39 @@ def test_both_on_split_by_distance():
     c = cs.CastStab(dash_slash=True, combo=True, stop=True)
     c.step(1000, hero(antic_state(1000, 2, 7.6)), True, t_game=1000 / 60)
     assert c.run.mode == "stop"
+
+
+def test_both_on_prefers_the_stop_to_a_lone_stab():
+    # 9.85 u: the stab would go without the RS (below combo_d_min) - the stop's two slashes instead
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True)
+    c.step(1000, hero(antic_state(1000, 2, 9.85)), True, t_game=1000 / 60)
+    assert c.run.mode == "stop"
+    # 12 u: past the stop's grace - the stab with the RS
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True)
+    c.step(1000, hero(antic_state(1000, 2, 12.0)), True, t_game=1000 / 60)
+    assert c.run.mode == "stab" and c.run.rs
+
+
+def test_the_dash_frame_distance():
+    # running toward it at 8.25 u/s: the start reads her x on the dash's frame (2 frames on: 0.275 u nearer)
+    c = cs.CastStab(dash_slash=True, combo=True, stop=False)
+    s = hero(antic_state(1000, 2, 10.1), vx=8.25)          # flip False: it faces left, she is on its left: +x toward
+    c.step(1000, s, True, t_game=1000 / 60)
+    assert c.run.pred["x_dash"] == pytest.approx(10.1 - 0.275, abs=0.01) and not c.run.rs
+    # SP8 t2 ep 0: 9.52 u at the STATE, running in - 9.19 at the dash: the stab's lunge on after the hit reaches its body
+    c = cs.CastStab(dash_slash=True, combo=False, stop=False)
+    assert c.step(1000, hero(antic_state(1000, 2, 9.52), vx=8.25), True, t_game=1000 / 60) is None
+    assert c.stats().get("no_too close") == 1
+
+
+def test_no_rs_blocks_the_attack_to_g31():
+    # a stab without the RS planned: no key until g31 even after her control is back (an attack would make an RS)
+    c = cs.CastStab(dash_slash=True, combo=False, stop=False)
+    out = {}
+    for k in range(0, 60):
+        f = 1000 + k
+        ev = [{"k": "hit", "d": {"type_key": sp.CLAPPER, "src": "DashStab"}}] if k == 15 else []
+        clip = "Idle" if k <= 16 else "Wanderer DashRecoil" if k < 37 else "Airborne"
+        out[k] = c.step(f, hero(antic_state(f, k, 10.4, ground=k <= 16, ev=ev), clip), k <= 16, True, t_game=f / 60)
+    assert all(out[k] == 0 for k in range(16, 15 + c.cfg.rs_block_g)) and out[15 + c.cfg.rs_block_g] is None
+    assert c.done[-1].why == "control"

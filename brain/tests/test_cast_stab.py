@@ -25,14 +25,19 @@ def test_off_by_default(monkeypatch):
 def test_stab_path():
     # the dash 2.8 u, the stab's collider from its 7th frame: from 9.2 u the hit on the window's first frame, 3.0 u
     # from its centre (her box front 0.5 u outside its body front), the recoil ~3.2 u back and ~2.1 u up
+    # (SP8: she lunges on 2 frames after the hit, and the hit may register a frame late: xmin 3 sprint frames short)
     p = cs.stab_path(9.2)
     assert p["hit"] == cs.STAB_START + cs.STAB_ON
-    assert 2.8 < p["xmin"] < 3.2 and 2.0 < p["top"] < 2.3
-    assert p["path"][-1][1] - p["xmin"] == pytest.approx(3.2, abs=0.2) and p["path"][-1][2] == 0.0
+    x_hit = next(x for j, x, y in p["path"] if j == p["hit"])
+    assert 2.8 < x_hit < 3.2 and 2.0 < p["top"] < 2.3
+    assert p["xmin"] == pytest.approx(x_hit - (cs.HIT_WAIT + cs.HIT_LAG) * cs.STAB_V / 60.0)
+    assert p["path"][-1][1] - (x_hit - cs.HIT_WAIT * cs.STAB_V / 60.0) == pytest.approx(3.2, abs=0.2)
+    assert p["path"][-1][2] == 0.0
     # nearer: deeper into its body at the window's first frame; far: the hit later, at the tip's reach
     assert cs.stab_path(8.0)["xmin"] < cs.BODY_FRONT + cs.HALF_W + 0.25
     far = cs.stab_path(12.0)
-    assert far["hit"] > p["hit"] and far["xmin"] == pytest.approx(cs.BODY_FRONT + cs.STAB_REACH, abs=0.3)
+    x_far = next(x for j, x, y in far["path"] if j == far["hit"])
+    assert far["hit"] > p["hit"] and x_far == pytest.approx(cs.BODY_FRONT + cs.STAB_REACH, abs=0.3)
     assert cs.stab_path(20.0)["hit"] is None
 
 
@@ -53,7 +58,7 @@ def test_the_script(flip):
     masks = {}
     for k in range(0, 40):
         ev = [{"k": "hit", "d": {"type_key": sp.CLAPPER, "src": "DashStab"}}] if k == 14 else []
-        m = c.step(1000 + k, antic_state(1000 + k, k, 9.2, flip=flip, ground=k < 2 or k > 36, ev=ev), k < 2 or k > 36)
+        m = c.step(1000 + k, antic_state(1000 + k, k, 10.4, flip=flip, ground=k < 2 or k > 36, ev=ev), k < 2 or k > 36)
         if m is not None:
             masks[k + 2] = m
     ks = sorted(masks)
@@ -84,13 +89,13 @@ def test_waits_for_the_ground_and_late():
 
 def test_miss_hands_back():
     c = cs.CastStab()
-    out = [c.step(1000 + k, antic_state(1000 + k, k, 9.2), True) for k in range(0, 30)]
+    out = [c.step(1000 + k, antic_state(1000 + k, k, 10.4), True) for k in range(0, 30)]
     assert out[0] is not None and out[-1] is None and 0 in out      # the miss releases the dash, then hands back
     assert c.stats().get("why_miss") == 1
 
 
 def test_hurt_aborts():
     c = cs.CastStab()
-    assert c.step(1000, antic_state(1000, 0, 9.2), True) is not None
-    assert c.step(1001, antic_state(1001, 1, 9.2, hp=7), True) is None
+    assert c.step(1000, antic_state(1000, 0, 10.4), True) is not None
+    assert c.step(1001, antic_state(1001, 1, 10.4, hp=7), True) is None
     assert c.stats().get("why_hurt") == 1

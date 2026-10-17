@@ -77,7 +77,8 @@ DASH_V, DASH_F = 28.0, 7     # the ground dash: u/s, the frames it moves (1 .. 7
 STAB_V0, STAB_V0_F, STAB_V = 26.9, 5, 17.5   # the stab's lunge straight from the dash, then the sprint speed
 STAB_START = 8               # the stab clip's first frame after the dash's mask (the first sprint frame)
 STAB_ON, STAB_OFF = 7, 14    # its collider active these frames after the stab starts
-HIT_WAIT = 2                 # frames between the hit and the recoil
+HIT_WAIT = 2                 # frames between the hit and the recoil: she lunges on at STAB_V (SP8 t2: 0.6 u)
+HIT_LAG = 1                  # the hit may register this many frames after the model's (live j16 vs j15)
 REC_VX, REC_VY, REC_DEC, REC_F = 30.0, 20.0, 0.85, 20
 GRAV = 60.0                  # u/s^2 (kinematics: 60 x gravityScale 1; 1.2 u/s per 50 Hz physics step)
 AIM_K = 55                   # the Jump Aim, frames from the antic start
@@ -107,6 +108,7 @@ class StabCfg:
     rs_k_max: int = 52           # the RS hit by this antic frame (the Jump Aim at 55)
     rs_wait_g: int = 30          # no RS clip by here: no RS (hand back)
     rs_end_g: int = 45           # the RS clip running past here: hand back
+    rs_block_g: int = 31         # no RS planned: no key until here (an attack press up to g30 makes one)
     post_aim_f: int = 10         # after the RS hit no key until the Jump Aim + this
     under: int = 1               # then the way under it (0: hand back to the planner at aim + post_aim_f)
     under_dash_f: int = 16       # ... the key toward it from aim + post_aim_f, the air dash at aim + this (its
@@ -166,8 +168,10 @@ def stab_path(x0: float, cfg: StabCfg | None = None) -> dict:
     if hit is None:
         return {"hit": None, "xmin": xmin, "path": path, "land": None, "top": 0.0}
     for _ in range(HIT_WAIT):
-        j += 1                                    # the person's profiles: 17.5 on the hit frame, then -30 at once
+        j += 1                                    # she lunges on at the sprint speed (SP8 t2 ep 0: from 2.59 u at the
+        x -= STAB_V / 60.0                        # hit to 1.98 two frames later, into its body: 2 HP), then -30
         path.append((j, x, y))
+    xmin = min(xmin, x - HIT_LAG * STAB_V / 60.0)
     vx, vy = REC_VX, REC_VY
     for _ in range(REC_F):
         j += 1
@@ -452,8 +456,10 @@ class CastStab:
         landed = ground and f - r.hit_f >= 6
         if r.phase == "recoil":
             if not r.rs:
-                # SP6: no key until her control returns (the recoil clip over), then the planner
-                if (f - r.hit_f >= 8 and "Recoil" not in clip) or landed or j > c.end_j:
+                # SP6: no key until her control returns (the recoil clip over), then the planner - SP8: not before
+                # the RecoilStab's window closes (a planner attack at g26-30 after control came back made an
+                # unplanned RS at antic 54, t2 ep 1: she bounced at its face at the aim, fled into the rune circle)
+                if (g >= c.rs_block_g and "Recoil" not in clip) or landed or j > c.end_j:
                     self._close("done", "landed" if landed else "control")
                     return None
                 return 0
@@ -631,8 +637,19 @@ class CastStab:
         x0 = (_sp.hero_x(s) - cx) * face
         if x0 <= 0:
             return "behind"
+        # where she is on the dash's frame (SEND_AHEAD on: a run toward it before the start, SP8 t2 ep 0: 9.52 u at the
+        # STATE, 9.19 at the dash)
+        x0 += float((h.get("vel") or [0.0, 0.0])[0]) * face * SEND_AHEAD / 60.0
         why_stab = self._why_stab(s, face, x0, ka) if self.dash_slash else "off"
+        if why_stab is None and not (self.stop and self.combo and not self._pred.get("rs")):
+            return None
         if why_stab is None:
+            # both on: the stop's two slashes before a lone DashStab (0.9 hits per antic, SP6 t6); the stab only
+            # when the stop does not go
+            pred = self._pred
+            if self._why_stop(x0, ka) is None:
+                return None
+            self._pred = pred
             return None
         if self.stop:
             why_stop = self._why_stop(x0, ka)
@@ -659,8 +676,8 @@ class CastStab:
         room = (_sp.WALL_R - hx) if face > 0 else (hx - _sp.WALL_L)   # behind her (she is on its +face side)
         if room < c.wall_room:
             return "wall"
-        self._pred = {"mode": "stab", "hit": p["hit"], "xmin": round(p["xmin"], 2), "land": p["land"],
-                      "top": round(p["top"], 2), "rs": rs}
+        self._pred = {"mode": "stab", "x_dash": round(x0, 2), "hit": p["hit"], "xmin": round(p["xmin"], 2),
+                      "land": p["land"], "top": round(p["top"], 2), "rs": rs}
         return None
 
     def _why_stop(self, x0: float, ka: int) -> str | None:
@@ -672,5 +689,5 @@ class CastStab:
         p = stop_plan(x0, c)
         if p is None:
             return "no stop"
-        self._pred = {"mode": "stop", **p}
+        self._pred = {"mode": "stop", "x_dash": round(x0, 2), **p}
         return None
