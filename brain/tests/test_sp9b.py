@@ -153,6 +153,7 @@ def test_switch_lock_then_deciding_hit(switch):
     step_all(two, [fstate(1000, "Idle", 0.5, b_x=30.0), fstate(1001, "Jump Antic", b_x=30.0)])
     v = two.esc_view()
     assert v["mode"] == "switch" and v["hold"] == 99 and v["no_hit"] == frozenset({99})   # B's hits off: F's lock
+    assert two.step(1002, fstate(1002, "Jump Antic", 1 / 60, b_x=30.0), True, True, 99, 1002 / 60.0) == sp.M_R  # walks
     assert v["stance"] == pytest.approx(30.0 - 7.0)               # before F's aim: 7 u short of B
     # F's Jump Aim with her at 23 u: it lands 0.916 x (23 - 5 - 18) = 0 u from its take-off, the wall rule (its back
     # 3.99 < 4: >= 4.4 u from the wall) -> 18.41; the stance 8.3 u past it, at most 2.7 u short of B: 26.71
@@ -163,7 +164,7 @@ def test_switch_lock_then_deciding_hit(switch):
     out = step_all(two, [fstate(1031, "Jump", hx=26.5, b_x=30.0, facing=1),
                          fstate(1080, "Slam 2", hx=26.5, b_x=30.0, facing=1),
                          fstate(1081, "Slam 2", 1 / 60, hx=26.5, b_x=30.0, facing=1)])
-    assert out[0] is None and out[1] == sp.M_A | sp.M_R and out[2] == sp.M_A | sp.M_R
+    assert out[0] == 0 and out[1] == sp.M_A | sp.M_R and out[2] == sp.M_A | sp.M_R    # at the stance: no key
     assert not two.esc_view()["no_hit"] and two.esc.press["f"] == 0
     hit = [{"k": "hit", "d": {"type_key": sp.CLAPPER, "ent": 99, "dealt": 10}}]
     step_all(two, [fstate(1083, "Slam 2", 3 / 60, hx=26.5, b_x=30.0, facing=1, ev=hit),

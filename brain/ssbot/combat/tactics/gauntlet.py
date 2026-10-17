@@ -828,8 +828,9 @@ class GauntletTactics:
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
         esc = self.two_esc if two_play.ESC else None
-        if esc is not None and not esc.get("after_land"):
-            # SP9b: the focus's escape jump (antic, flight): arm A holds the focus, arm B the other one (B is locked)
+        if esc is not None and (not esc.get("after_land") or esc.get("corner_side")):
+            # SP9b: the focus's escape jump (antic, flight): arm A holds the focus, arm B the other one (B is locked);
+            # arm A also while she is in the corner behind it after its landing (t2)
             g = self._esc_hold(ws, cands, esc, keep, room, t, st)
             if g is not None:
                 return g
@@ -845,7 +846,7 @@ class GauntletTactics:
                     self._sw_why = "two slammer" if keep is not None else self._sw_why
                 st["picks"] = st.get("picks", 0) + 1
                 return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
-        if esc is not None and esc.get("after_land"):
+        if esc is not None and esc.get("after_land") and not esc.get("corner_side"):
             # SP9b after the focus's landing: the hold below the slammer rule (B is free from F's landing on)
             g = self._esc_hold(ws, cands, esc, keep, room, t, st)
             if g is not None:
@@ -1152,6 +1153,10 @@ class GauntletTactics:
         if esc is not None and esc.get("stance") is not None and g.target == esc.get("hold"):
             # SP9b arm B (t1): short of B before the focus's Jump Aim, outside its landing hammer / circle after it
             out = replace(out, stance_x=float(esc["stance"]))
+        if esc is not None and esc.get("corner_side"):
+            # SP9b arm A (t2): in the corner after the landing no dash toward / through the focus first (a dash into
+            # its back in Slam Recover, its turned Idle body)
+            out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({esc["iid"]}))
         if esc is not None and esc.get("no_hit"):
             # SP9b: no hit counts on these now (arm A: the focus idle with her in the corner; arm B: the other one
             # while the focus's flag is on)

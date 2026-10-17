@@ -220,6 +220,7 @@ class EscRun:
     x_land: float | None = None  # F's x at the landing
     aim_hx: float | None = None  # her x at F's Jump Aim (its first flight STATE) and F's predicted landing x from it
     land_pred: float | None = None
+    u_now: float | None = None   # her x along its facing from its centre now
     hits_f: list = field(default_factory=list)    # (frame - f_a, phase) of landed hits on F / on B
     hits_b: list = field(default_factory=list)
     hp: list = field(default_factory=list)        # frames (- f_a) of HP losses while the run lasts
@@ -575,6 +576,9 @@ class TwoPlay:
         if r.mode == "corner":
             v["hold"] = r.iid
             v["corner_aim"] = r.phase == "antic"
+            # (t2) she in the corner (behind F) after its landing: L2 keeps F above the slammer rule (B's slam sent her
+            # through F's body twice) and F's dash rows rank after the rest
+            v["corner_side"] = r.f_land is not None and r.u_now is not None and r.u_now < 0.0
             if r.phase == "idle" and r.exit in (None, "hop"):
                 v["no_hit"] = frozenset({r.iid})          # its Idle: a hit makes it attack her at once, pinned
         else:
@@ -698,6 +702,8 @@ class TwoPlay:
         st, tin = _sp.control(e)
         cx = float(e["pos"][0])
         k_st = int(round(tin * 60.0))
+        if hx is not None:
+            r.u_now = round((hx - cx) * r.face, 2)
         if r.phase == "antic" and st in FLIGHT_ST:
             r.phase, r.f_take = "flight", f - k_st
             if hx is not None:
@@ -861,7 +867,7 @@ class TwoPlay:
         r = self.esc
         c = self.ecfg
         if r.f_land is None:
-            return None
+            return self._sw_move(f, s, ground, accepting)
         pr = r.press
         if pr is not None and pr.get("pf") is not None:
             sec = self._second(f)
@@ -915,6 +921,23 @@ class TwoPlay:
             u = None if e is None else round((_sp.hero_x(s) - float(e["pos"][0])) * r.face, 2)
             r.hop.update(j_end=f + SEND_AHEAD - self._esc_hop_f, u_end=u, end="yield")
             self._esc_close(f, "hop")
+
+    def _sw_move(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
+        """Arm B before F's landing (t2: the planner floated on the umbrella in F's landing hammer): walk to the stance
+        (_sw_stance: short of B, then past F's predicted landing), no key within 0.3 u of it; the planner while B can
+        reach her."""
+        r = self.esc
+        x = self._sw_stance_x
+        if x is None or not accepting:
+            return None
+        hx = _sp.hero_x(s)
+        if other_danger(s, r.iid, hx, self._rune_threats(f, s)) is not None:
+            return None
+        self.esc_n["sw_move"] += 1
+        if abs(x - hx) <= 0.3:
+            return 0
+        r.walk += 1
+        return M_R if x > hx else M_L
 
     def esc_stats(self) -> dict:
         runs = self.esc_done + ([self.esc] if self.esc is not None else [])
