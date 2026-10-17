@@ -185,6 +185,30 @@ TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre n
 #                             13 of 17 slams not struck lost HP, most of them started while she was still in the bounce
 #                             7.4-8.3 u from the slammer: with the other one closer than 3.7 + 13 u the far side's 3.7 u
 #                             is in its reach too -> "two-far": SP1's dash way out on that side (lands 6.6-9.5 u out)
+# SSBOT_FORUM_TWO_HANDOFF (task 1v1 SP10b, default off; twoslam answer.txt R2): the second hammer. With TWO_PLAY the run
+# stays on the struck Clapper A until her landing; the other one's (B's) slam began in the meantime, and its run
+# opened at antic frame 15-40 was cut at once by K_START_MAX 14 ("late": 125 of the 186 failed second strikes; B struck
+# 0 / 145 with the run still on A at B's antic + 10, 95 / 136 once it was free; the failures lost HP 148 / 186). On:
+# when a run that pressed closes (the landing, A gone, k_end), the run on B opened within HO_GAP_F frames (at once on
+# the landing tick) is a LATE start (Run.late: the jump up to K_JUMP_LATE2 30, the late walk into BAND, the press 18
+# frames after the jump, at K_PRESS_MAX_LATE 48 at the latest) when its antic frame is <= K_JUMP_LATE2.
+TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF")
+HO_GAP_F = 4
+# SSBOT_FORUM_TWO_TIGHT (task 1v1 SP10b, default off; twoslam answer.txt R3): B enters Slam Antic before A's Slam 0 +
+# TIGHT_S0 (the bounce's apex): B's Slam 0 comes <= 18 frames after her landing and no strike reaches it (0 / 55 struck,
+# 53 / 55 lost HP; at the landing she is 3.8-6.1 u in front of B, inside its hammer). On: no pre-landing side slash,
+# SP1's way out over A to its far side (the dash at Slam 0 + 23; lands 6.6-9.5 u behind A's centre) when the room
+# behind A is >= OVER_ROOM and that landing is >= TWO_REACH_U from B; after the landing no key (the planner's jump
+# toward B held off) until B's Slam 2, B leaves its slam, she is hurt, or TIGHT_HOLD_S.
+TWO_TIGHT = _on("SSBOT_FORUM_TWO_TIGHT")
+TIGHT_S0 = 23               # game frames after A's Slam 0
+TIGHT_LAND_U = 6.6          # SP1's way out: the landing behind its centre (6.6-9.5 u)
+TIGHT_HOLD_S = 1.2
+# SSBOT_FORUM_SLAM_REACH_NAME (task 1v1 SP10b, default off): _in_reach takes the body collider of a wave-13 Clapper
+# too (its GameObject "Song Heavy Sentry (2)" / "(3)"; off: only "Song Heavy Sentry", so with two Clappers the side
+# slash's reach was checked against BODY_FRONT / BODY_BACK, not the state's real span: Slam 2 / Recover front 3.37-3.49,
+# Slam Antic 1.87)
+REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME")
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -360,6 +384,9 @@ class Run:
     k_slash: int | None = None       # ... the side slash's press frame
     k_early: list = field(default_factory=list)   # SP6 EARLY: the early side slashes' press frames (antic frame k)
     sent: list = field(default_factory=list)   # (frame, mask)
+    handoff: bool = False            # SP10b TWO_HANDOFF: opened right after a strike run on the other Clapper closed
+    ho_cand: bool = False            # ... (pending: decided on the run's first tick from its antic frame)
+    tight: tuple | None = None       # SP10b TWO_TIGHT: (the other's iid, the way's world direction, 0 = no room / reach)
 
 
 class SlamPlay:
@@ -371,12 +398,18 @@ class SlamPlay:
         self._closed: set = set()            # TWO_PLAY: every Clapper whose slam was handled (until it leaves it)
         self._jfam: dict = {}                # TWO_PLAY: Clapper iid -> "j" / "jc" (its jump move) / "jc_landed"
         self._rune: dict = {}                # TWO_PLAY: Clapper iid -> (landing x, facing, game time) of a jump cast
+        self._t = 0.0                        # SP10b: this tick's clock (s)
+        self._ho = None                      # SP10b TWO_HANDOFF: (iid, clock) of the last strike run closed
+        self._hold = None                    # SP10b TWO_TIGHT: (B's iid, clock, HP) - no key until B's Slam 2
+        self.holds: list = []                # ... [B iid, start f, end f, why] per hold (stats)
 
     def reset(self) -> None:
         self.run = None
         self.done = []
         self._closed_iid = None
         self._closed, self._jfam, self._rune = set(), {}, {}
+        self._ho = self._hold = None
+        self.holds = []
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -454,13 +487,28 @@ class SlamPlay:
             if r.k_early:
                 out["early_runs"] += 1
                 out["early_press"] += len(r.k_early)
+            if r.handoff:
+                out["handoff"] += 1
+                out["handoff_pressed"] += r.k_press is not None
+            if r.tight is not None:
+                out["tight_" + ("away" if r.tight[1] else "noroom")] += 1
+        if self.holds:
+            out["tight_holds"] = len(self.holds)
         return dict(out)
 
     def runs_rec(self) -> list:
         """SP10a (logging only): every run - [iid, antic entry frame, phase, why, k_start, k_jump, k_press, bounced,
         Slam 0's k, k_air, the last tick's k, side_why]."""
-        return [[r.iid, r.fa, r.phase, r.why, r.k_start, r.k_jump, r.k_press, r.bounced, r.ks0, r.k_air, r.k,
-                 r.side_why] for r in self.done + ([self.run] if self.run is not None else [])]
+        # SP10b: + [handoff, tight (other iid, way) or None, k_slash] (only when one of them is set: the old rows keep
+        # their length)
+        out = []
+        for r in self.done + ([self.run] if self.run is not None else []):
+            row = [r.iid, r.fa, r.phase, r.why, r.k_start, r.k_jump, r.k_press, r.bounced, r.ks0, r.k_air, r.k,
+                   r.side_why]
+            if r.handoff or r.tight is not None:
+                row += [r.handoff, None if r.tight is None else list(r.tight), r.k_slash]
+            out.append(row)
+        return out
 
     def active(self) -> bool:
         return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after")
@@ -475,6 +523,8 @@ class SlamPlay:
     def _close(self, phase: str, why: str = "") -> None:
         r = self.run
         if r is not None:
+            if TWO_HANDOFF and TWO_PLAY and phase == "done" and r.k_press is not None:
+                self._ho = (r.iid, self._t)          # SP10b: the other one's slam may be handed over (step)
             if r.phase in ("walk", "jump", "air", "after") or phase == "abort":
                 r.phase = phase
             r.why = r.why or why
@@ -495,7 +545,12 @@ class SlamPlay:
         (the frame count of SP1)."""
         c = self.cfg
         t = f / 60.0 if t_game is None else float(t_game)
+        self._t = t
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
+        if self._hold is not None:
+            hm = self._hold_mask(f, s)
+            if hm is not None:
+                return hm
         if skip and e is not None and e.get("iid") in skip:
             # SP9c (combat.two_play's antic switch): its slam is left alone (she switched to the other one)
             if self.run is not None and self.run.iid in skip:
@@ -520,6 +575,9 @@ class SlamPlay:
                 return None
             face = 1 if e.get("flipX") else -1
             r = self.run = Run(iid=e.get("iid"), fa=int(f - round(tin * 60.0)), face=face, ta=ta)
+            if (TWO_HANDOFF and TWO_PLAY and self._ho is not None and self._ho[0] != r.iid
+                    and (t - self._ho[1]) * 60.0 <= HO_GAP_F):
+                r.ho_cand = True                          # SP10b: a strike run on the other one just closed
         if r.phase in ("done", "abort"):
             return None
         h = s.get("hero") or {}
@@ -529,6 +587,11 @@ class SlamPlay:
             r.ks0 = int(round(((t if t_game is None else t - tin) - r.ta) * 60.0))
         k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD + c.lag     # the antic frame this tick's mask lands on
         r.k = k
+        if r.ho_cand:
+            # SP10b TWO_HANDOFF: B's run as a late start (the jump up to K_JUMP_LATE2) when its antic frame allows it
+            r.ho_cand = False
+            if LATE and k <= c.k_jump_late2 and r.phase == "wait":
+                r.late = r.handoff = True
         if r.hp0 is not None and hp < r.hp0:
             self._close("abort", "hurt")
             return None
@@ -561,7 +624,10 @@ class SlamPlay:
                 return None
             if EARLY and k < c.k_jump and r.phase == "walk":
                 m = self._early(r, k, f, s, e, float(e["pos"][0]), ground, m)   # SP6: no key away before a press
-            if k < c.k_jump:
+            if k < c.k_jump or r.phase == "land":
+                # (SP10b: a late start in the air from K_JUMP on steers toward STAND like any land phase; it fell
+                # through to the after-the-press branch before and raised on k_press None - only reachable with a
+                # LATE start in the air at k >= K_JUMP, which the old paths almost never met)
                 r.sent.append((f + SEND_AHEAD, m))
                 return m
             # a late landing inside the jump band: the jump this tick (below)
@@ -614,8 +680,20 @@ class SlamPlay:
                     self._close("abort", "no bounce")
                     return None
             if ground and k > r.k_press + 8:
+                tight = r.tight
                 self._close("done", "landed")
+                if tight is not None and tight[1]:
+                    # SP10b TWO_TIGHT: landed on A's far side - no key until B's Slam 2 (the planner's jump toward B)
+                    self._hold = (tight[0], t, hp, f)
+                    hm = self._hold_mask(f, s)
+                    if hm is not None:
+                        return hm
+                if TWO_HANDOFF and TWO_PLAY:
+                    # SP10b: B's run opens on this tick (a late start)
+                    return self.step(f, s, ground, accepting, t_game, skip)
                 return None
+            if TWO_TIGHT and TWO_PLAY and r.tight is None and r.bounced and r.s0 is not None:
+                self._tight_check(r, k, s, e, cx, t)
             m = 0
             if k <= r.k_press + c.down_after:
                 m = M_D
@@ -636,6 +714,48 @@ class SlamPlay:
             return None
         r.sent.append((f + SEND_AHEAD, m))
         return m
+
+    # ---- SP10b ----
+
+    def _hold_mask(self, f: int, s: dict) -> int | None:
+        """TWO_TIGHT's hold after the far-side landing: 0 (no key) while B is in its slam before Slam 2, she is not hurt
+        and TIGHT_HOLD_S has not passed; else the hold ends (None)."""
+        iid, t0, hp0, f0 = self._hold
+        b = next((o for o in clappers(s) if o.get("iid") == iid), None)
+        st = control(b)[0]
+        hp = int((s.get("hero") or {}).get("health") or 0)
+        why = ("gone" if b is None else "hurt" if hp < hp0 else "time" if self._t - t0 > TIGHT_HOLD_S
+               else None if st in ("Slam Antic", "Slam 0", "Slam 1") else f"B {st}")
+        if why is None:
+            return 0
+        self.holds.append([iid, f0, f, why])
+        self._hold = None
+        return None
+
+    def _tight_check(self, r: Run, k: int, s: dict, e: dict, cx: float, t: float) -> None:
+        """TWO_TIGHT: another Clapper's slam began before A's Slam 0 + TIGHT_S0 (game frames): the way out over A to its
+        far side when that fits (no side slash), else r.tight = (iid, 0) and the way as before."""
+        ts0 = r.ta + r.ks0 / 60.0                             # A's Slam 0 on the clock
+        if (t - ts0) * 60.0 > TIGHT_S0 + 8:
+            return                                            # past the apex (a late tick): not decided here
+        for o in clappers(s):
+            if o.get("iid") == r.iid:
+                continue
+            st, tin = control(o)
+            if st not in ("Slam Antic", "Slam 0", "Slam 1"):
+                continue
+            if (t - tin - ts0) * 60.0 >= TIGHT_S0:
+                continue
+            bx = float(o["pos"][0])
+            away = 1 if cx > bx else -1                       # from B through A: A's far side
+            room = (cx - WALL_L) if away < 0 else (WALL_R - cx)
+            land = cx + away * min(TIGHT_LAND_U, room - self.cfg.wall_pad)
+            if room >= self.cfg.over_room and abs(land - bx) >= TWO_REACH_U:
+                r.tight = (o.get("iid"), away)
+                r.near, r.over_dir, r.side_why = 0, away, "tight"
+            else:
+                r.tight = (o.get("iid"), 0)
+            return
 
     # ---- parts ----
 
@@ -767,7 +887,9 @@ class SlamPlay:
         STATE has it, else BODY_FRONT / BODY_BACK from its centre), with 0.1 u to spare."""
         span = None
         for col in e.get("colliders") or ():
-            if col.get("name") == CLAPPER and col.get("enabled") and col.get("verts_world"):
+            nm = str(col.get("name") or "")
+            if ((nm == CLAPPER or (REACH_NAME and nm.startswith(CLAPPER + " ("))) and col.get("enabled")
+                    and col.get("verts_world")):
                 xs = col["verts_world"][0::2]
                 span = (float(min(xs)), float(max(xs)))
                 break

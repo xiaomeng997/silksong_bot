@@ -1090,4 +1090,6 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
                 **({"two_play": self.two.stats()} if self.two is not None else {}),
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
+                **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
+                   else {}),
                 "own_trace": self.own_trace}
