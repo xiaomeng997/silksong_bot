@@ -60,7 +60,7 @@ A_BIT, J_BIT, D_BIT = 1 << BIT["attack"], 1 << BIT["jump"], 1 << BIT["dash"]
 L_BIT, R_BIT, DN_BIT, UP_BIT = 1 << BIT["left"], 1 << BIT["right"], 1 << BIT["down"], 1 << BIT["up"]
 LAND_CLIPS = ("Land", "Slash Land", "Hard Land", "HardLand")
 HURT_CLIPS = ("Recoil", "Stun")
-SCRIPT_OWN = ("slam", "stab", "low", "chase", "two")
+SCRIPT_OWN = ("slam", "stab", "low", "chase", "two", "claw")      # (SP10c: claw = CLAW_CHASE, two:jh = TWO_JUMPHIT)
 MOVE_START = ("Slam Antic", "Spell Antic", "Jump Antic", "Cast Slam Antic", "Evade Scuttle")
 FLOOR_Y = 3.01                     # the floor (her box bottom on the ground: her transform 4.57 - 1.56)
 
@@ -435,10 +435,16 @@ def _script_subject(own: str, ep: dict, g: int, att, own_g: tuple):
     if own == "slam":
         r = [x for x in ep["slam_runs"] if x[1] <= g <= x[1] + 150]
         return r[-1][0] if r else None
-    if own in ("two:idle", "two:esc", "two:asw", "chase", "low"):
-        # IdleHit / the chase / the low hop act on the focus (L2's target) or the caster in front
+    if own in ("two:idle", "two:esc", "two:asw", "two:jh", "chase", "low"):
+        # IdleHit / the chase / the low hop act on the focus (L2's target) or the caster in front; SP10c's jumphit on
+        # the other one (L2's target)
         tgt = own_g[2]
         return tgt
+    if own == "claw":
+        # SP10c: the late Clawline acts on the jumper whose run is open near g
+        r = [x for x in ((ep["pol"].get("claw_chase") or {}).get("claw_runs") or [])
+             if int(x["f_a"]) <= g <= int(x["f_a"]) + int(x.get("f_end") or 150)]
+        return r[-1]["J"] if r else None
     return None
 
 

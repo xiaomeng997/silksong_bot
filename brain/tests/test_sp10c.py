@@ -222,3 +222,19 @@ def test_hit_script_walks_to_i_and_slashes(on):
     two.jcfg.hit_script = 0
     run(two, [jstate(1000, "Idle", 0.5, hx=hx), jstate(1001, "Jump Antic", 1 / 60.0, hx=hx)])
     assert two.last_part != "jh"                       # t1 / t2: IdleHit and the planner
+
+
+def test_claw_other_in_the_way(monkeypatch):
+    cc = claw_on(monkeypatch, "any")
+    c = cc.ClawChase(cc._cfg())
+    # the other Clapper between her (J_X + 10) and J (J_X): no start
+    s0, s1 = cstate(1000, "Idle", 0.5), cstate(1001, "Jump Antic", 1 / 60.0)
+    for s in (s0, s1):
+        s["ents"][1]["pos"] = [J_X + 5.0, 7.45]
+    c.step(1000, s0, True, True)
+    c.step(1001, s1, True, True)
+    assert c.run is None and c.n["no_other in the way"] == 1
+    c = cc.ClawChase(cc._cfg())                          # the other one behind her: the run starts
+    c.step(1000, cstate(1000, "Idle", 0.5), True, True)
+    c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0), True, True)
+    assert c.run is not None

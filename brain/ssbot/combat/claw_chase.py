@@ -74,6 +74,7 @@ class ClawCfg:
     ds_reach: float = 1.4     # variant B: |its x - her x| for the down slash (u) ...
     ds_top: float = 2.6       # ... with its body top this far below her box bottom at most
     ds_max: int = 2
+    ray_gate: int = 1         # (A/B fix) no start with the other Clapper in the way (between her and J or just past it)
 
 
 def _cfg() -> ClawCfg:
@@ -166,6 +167,17 @@ class ClawChase:
                     return True
         return False
 
+    @staticmethod
+    def _in_way(hx: float, cx: float, o: dict) -> bool:
+        """The spec's gate (answer.txt section 3): the other Clapper's body between her and J, or within 3 u past J (the
+        dash's damager stops her on the first enemy it meets; the needle hooks the nearer body in its band). (A/B
+        5e48c0c, w13 scope any: 3 of 5 runs with the other one in the way, the dash stopped 4.9-8.6 u short of J, 1 hit,
+        then J's body.)"""
+        a, b = min(hx, cx), max(hx, cx)
+        lo, hi = _tp.body_span(o)
+        pad = 3.0
+        return lo - _tp.HALF_W < b + (pad if cx > hx else 0.0) and hi + _tp.HALF_W > a - (pad if cx < hx else 0.0)
+
     def _start(self, f: int, s: dict, e: dict, ground: bool, accepting: bool) -> None:
         c = self.cfg
         st, tin = _sp.control(e)
@@ -187,6 +199,8 @@ class ClawChase:
             why = "silk"
         elif len(cs) == 2 and any(_sp.control(o)[0] in _tp.JUMP_ST for o in cs if o is not e):
             why = "other jumping"
+        elif len(cs) == 2 and c.ray_gate and any(self._in_way(hx, cx, o) for o in cs if o is not e):
+            why = "other in the way"
         elif SCOPE != "any":
             if len(cs) != 2:
                 why = "one"
