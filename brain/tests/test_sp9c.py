@@ -39,6 +39,7 @@ def asw(monkeypatch):
         monkeypatch.setattr(tp, k, True)
     for k in ("ESC", "ESC_CORNER", "ESC_SWITCH", "IDLEHIT", "OPEN", "SPACE"):
         monkeypatch.setattr(tp, k, False)
+    monkeypatch.setenv("SSBOT_FORUM_TWO_ASW_SET", "first=0")     # (the opening's rule has its own test)
     yield
 
 
@@ -91,8 +92,17 @@ def test_not_taken(asw):
     assert two.asw is not None and two.asw.kind == "cast"
 
 
+def test_no_switch_on_the_first_attack(asw, monkeypatch):
+    monkeypatch.delenv("SSBOT_FORUM_TWO_ASW_SET")
+    two = tp.TwoPlay()
+    step_all(two, [fstate(1000, "Idle", 0.5), fstate(1001, "Slam Antic", 1 / 60)])
+    assert two.asw is None and two.asw_done[-1].why == "first"            # the opening's A1: punish it
+    step_all(two, [fstate(1100, "Idle", 0.5), fstate(1101, "Spell Antic", 1 / 60)])
+    assert two.asw is not None and two.asw.kind == "cast"                 # its second attack: the switch
+
+
 def test_trigger_pred(asw, monkeypatch):
-    monkeypatch.setenv("SSBOT_FORUM_TWO_ASW_SET", "trig=1")
+    monkeypatch.setenv("SSBOT_FORUM_TWO_ASW_SET", "trig=1,first=0")
     try:
         c = tp._asw_cfg()
         assert c.trig == 1
@@ -108,7 +118,7 @@ def test_trigger_pred(asw, monkeypatch):
         step_all(two, [fstate(1000, "Idle", 0.5, cx=cx), fstate(1001, "Spell Antic", cx=cx)])
         assert two.asw is not None and two.asw.pred == pytest.approx(4.42, abs=0.01)
     finally:
-        monkeypatch.delenv("SSBOT_FORUM_TWO_ASW_SET")
+        monkeypatch.setenv("SSBOT_FORUM_TWO_ASW_SET", "first=0")
 
 
 def test_slam_run_dash_hold_then_decide(asw):
@@ -135,14 +145,12 @@ def test_slam_run_dash_hold_then_decide(asw):
     assert out == [0] and r.dash_end == 1014 and r.k_hold == 16
     press = B_X - 2.25 - 2.7
     out = step_all(two, [fstate(1024, "Slam Antic", 24 / 60, hx=hold)])
-    assert r.tx == pytest.approx(hold) and out == [0]             # the dash is ready: the step-in waits (k 39)
-    out = step_all(two, [fstate(1037, "Slam Antic", 37 / 60, hx=hold), fstate(1038, "Slam Antic", 38 / 60, hx=hold)])
-    assert r.tx == pytest.approx(press) and out == [sp.M_R, sp.M_R | sp.M_DASH] and r.dash == [4, 40]
-    s = fstate(1048, "Slam Antic", 48 / 60, hx=press - 0.2)
-    s["hero"]["vel"] = [20.0, 0.0]
-    assert step_all(two, [s]) == [0]                              # released at the press point
-    assert step_all(two, [fstate(1050, "Slam Antic", 50 / 60, hx=press)]) == [0] and r.dash_end == 1050
-    # F's flag-off (Slam 2, past the dash combo window): she at the press point facing F - the turn, then the press
+    assert r.tx == pytest.approx(hold) and out == [0]             # outside B's Slam Range until the step-in
+    # the step-in 4 frames before F's predicted flag-off (k 52): a walk (the dash kept for B's evade)
+    out = step_all(two, [fstate(1049, "Slam Antic", 49 / 60, hx=hold), fstate(1050, "Slam Antic", 50 / 60, hx=hold),
+                         fstate(1051, "Slam 0", 0.0, hx=hold + 0.14)])
+    assert out == [0, sp.M_R, sp.M_R] and r.tx == pytest.approx(press) and r.dash == [4]
+    # F's flag-off (Slam 2): she reaches the press point facing F - the turn, then the deciding press
     out = step_all(two, [fstate(1061, "Slam 2", 0.0, hx=press)])
     assert r.f_off == 1061 and r.phase == "tail" and out == [sp.M_R]
     out = step_all(two, [fstate(1062, "Slam 2", 1 / 60, hx=press, facing=1)])
@@ -155,7 +163,7 @@ def test_slam_run_dash_hold_then_decide(asw):
     d = two.asw_done[-1]
     assert d.end == "B move" and d.b_next == "Slam Antic" and d.k_next == 5 and d.hit_b == 5
     st = two.stats()["asw"]
-    assert st["runs"] == 1 and st["asw_runs"][0]["hit_in_tail"] and st["asw_runs"][0]["dash"] == [4, 40]
+    assert st["runs"] == 1 and st["asw_runs"][0]["hit_in_tail"] and st["asw_runs"][0]["dash"] == [4]
 
 
 def test_slam_press_waits_for_the_hammer(asw):
@@ -192,18 +200,42 @@ def test_lock_rehit_only_inside_the_coin_window(asw):
     assert out[0] != sp.M_A | sp.M_R and len(r.presses) == 1
 
 
-def test_bomb_at_her_x_hands_back(asw):
-    two = tp.TwoPlay()
-    step_all(two, [fstate(1000, "Idle", 0.5), fstate(1001, "Spell Antic", 1 / 60)])
-    s = fstate(1060, "Cast 2", 10 / 60, hx=WALL_X + 9.0)
+def _bomb(iid, bx, lit=False, by=3.67):
     import math
-    bx, by, R = WALL_X + 8.4, 3.65, 2.166
+    R = 2.166
     vs = [v for a in range(8) for v in (bx + R * math.cos(a * math.pi / 4), by + R * math.sin(a * math.pi / 4))]
-    s["ents"].append({"type_key": "damager", "iid": 555, "pos": [bx, by],
-                      "colliders": [{"enabled": False, "verts_world": vs}]})
-    from ssbot.combat import rune_bombs as rb
-    assert list(rb.bomb_ents(s["ents"]))
-    assert step_all(two, [s]) == [None]
+    return {"type_key": "damager", "iid": iid, "pos": [bx, by], "colliders": [{"enabled": lit, "verts_world": vs}]}
+
+
+def test_bomb_hop_over_f_runes(asw):
+    two = tp.TwoPlay()
+    hx = B_X - 8.8                                                # at the hold point
+    stale = _bomb(554, hx + 0.2)                                  # an earlier cast's unlit leftover under her
+    s0 = fstate(1000, "Idle", 0.5)
+    s1 = fstate(1001, "Spell Antic", 1 / 60)
+    s1["ents"].append(stale)
+    step_all(two, [s0, s1])
+    r = two.asw
+    s = fstate(1050, "Cast 2", 0.0, hx=hx, b_st="Walk")
+    s["ents"].append(stale)
+    step_all(two, [s])
+    assert r.f_off == 1050 and not two.asw_critical()             # the stale bomb is no threat
+    # a new bomb of F's row at her x (k 52): the hop over its lit window; she stands still until the press
+    outs, crit = [], []
+    for f in range(1052, 1090):
+        s = fstate(f, "Cast 2" if f < 1075 else "Idle", (f - 1050) / 60, hx=hx, b_st="Walk", ground=True)
+        s["ents"] += [stale, _bomb(555, hx, lit=1071 <= f <= 1077)]
+        two.observe(f, s, f / 60.0)
+        crit.append(two.asw_critical())
+        outs.append(two.step(f, s, r.hop_P is None, True, 99, f / 60.0))
+    assert all(crit[:15])
+    j = outs.index(sp.M_J)
+    assert set(outs[:j]) == {0} and r.hops and r.hops[0][1] == r.hop_H
+    assert outs[j:j + r.hop_H] == [sp.M_J] * r.hop_H and outs[j + r.hop_H] == 0
+    w0 = 52 + 20 - 1
+    P, H = r.hops[0][0], r.hops[0][1]
+    from ssbot.combat import rune_lowhop as rl_
+    assert all(rl_.HOP_LO[H][kk - P] >= 2.94 for kk in range(w0, 52 + 27 + 2))
 
 
 def test_skip_slam_play_and_low_hop(monkeypatch):

@@ -786,7 +786,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             low_crit = self.rune_lowhop.critical()
         # SP9c (SSBOT_FORUM_TWO_ANTICSWITCH): the antic switch's F - the slam playbook and the low hop leave its move
         asw_skip = self.two.asw_skip() if (self.two is not None and two_play.ASW) else None
-        if self.slam_play is not None and not low_crit:
+        # SP9c: its bomb hop over F's small runes at her x is committed - its script keeps the keys (the others are not
+        # stepped, like the low hop's critical window)
+        asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
+        if self.slam_play is not None and not low_crit and not asw_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
@@ -800,7 +803,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             if play is not None:
                 mask = play
                 self.counts["slam_play"] += 1
-        if self.cast_stab is not None and play is None and not low_crit:
+        if self.cast_stab is not None and play is None and not low_crit and not asw_crit:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
             def latch(m: int, _h=hold, _p=prefix) -> int:
                 # the key mask the oracle's hold filter latches at f + 2 when m is sent for it
@@ -818,7 +821,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.counts["cast_stab"] += 1
         if self.rune_lowhop is not None and play is not None:
             self.rune_lowhop.yield_to(s)          # SP8d: another script has the keys (outside the hop's window)
-        elif self.rune_lowhop is not None:
+        elif self.rune_lowhop is not None and not asw_crit:
             # SP8d: the small-rune cast script (the supervisor's keys win)
             def latch_h(m: int, _h=hold, _p=prefix) -> int:
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
@@ -834,7 +837,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.counts["rune_lowhop"] += 1
         if self.evade_chase is not None and play is not None:
             self.evade_chase.yield_to(s)          # SP8c: another script has the keys: the chase run ends
-        elif self.evade_chase is not None:
+        elif self.evade_chase is not None and not asw_crit:
             # SP8c: the chase of the Clapper's evade while its script runs (the supervisor's keys win)
             def latch_c(m: int, _h=hold, _p=prefix) -> int:
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)

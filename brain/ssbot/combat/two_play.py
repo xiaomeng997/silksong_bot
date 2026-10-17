@@ -71,18 +71,24 @@ Clapper she is on: the nearer one, inside its Slam Range, so Close Range picked 
 Antic with B idle or walking on F's open side, B >= sep_min from F (a slam: >= sep_slam, its hammer covers her path to B
 when nearer), and the wall test (trig 0: its back <= back_u 8.1 u; trig 1, the person's refined trigger: its back after
 this move (disp_*) - the next walk-back walk_back - knock x hits_after < pred_line, one slide) starts an AswRun.
-  SSBOT_FORUM_TWO_ANTICSWITCH  (default off): L2's target is B from the antic (lock-in: no switch back before the first
-                               hit on B after F's flag-off, B's own move, or end_f); the slam playbook / the low hop leave
-                               F's move alone; a walk script (one ground dash when the run alone is late): a slam - out
-                               of the hammer (x0 + hammer_u along F's facing) by hammer_k, then toward B; the hold point
-                               hold_b u short of B (outside its Slam Range) until the step-in that reaches the press point
-                               (B's near edge - 2.7 u) step_spare frames before F's flag-off; no planner hit on B while
-                               F's flag is on (a hit on B then is cancelled: B re-enters Idle and rolls its evade coin), but
-                               the script's press on B's Idle (re-)entry within lock_win frames (the hit lands before the
-                               coin at 0.25 s: "re-hit B inside 0.25 s of each Idle re-entry during F's lock"); on the
-                               first STATE of F's flag-off (Slam 2 / Cast 2) the deciding side slash on B when it meets
-                               B's body (a slam: not from inside the hammer before Slam Recover), else the walk in while
-                               it reaches by the tail's end - B decides a close move, F after its tail sees B attacking.
+  SSBOT_FORUM_TWO_ANTICSWITCH  (default off): not on F's first attack of the wave (the opening's A1: punish it);
+                               L2's target is B from the antic (lock-in: no switch back before the first hit on B after
+                               F's flag-off, B's own move, or end_f); the slam playbook / the low hop leave F's move alone;
+                               a walk script (the dash held into the sprint, released inside Sprint Grace, only when the
+                               run alone is late for the hold point / a slam's hammer line x0 + hammer_u by hammer_k): the
+                               hold point hold_b u short of B (outside its Slam Range: t1, entering it during F's lock let
+                               an idle B's evade coin fire at once) until step_spare frames before F's predicted flag-off,
+                               then the walk to the press point (B's near edge - reach_in); no planner hit on B while F's
+                               flag is on (a hit on B then is cancelled: B re-enters Idle and rolls its evade coin), but the
+                               script's press on B's Idle (re-)entry within lock_win frames (the hit lands before the coin
+                               at 0.25 s: "re-hit B inside 0.25 s of each Idle re-entry during F's lock"); from F's flag-off
+                               (Slam 2 / Cast 2) the deciding side slash on B when it meets B's body (a slam: not from
+                               inside the hammer before Slam Recover) - B decides a close move, F after its tail sees B
+                               attacking. A cast: F's small-rune rings reach her at B (the bomb at her x lights ~1.3-1.7 s
+                               after F's antic) - the run keeps a bomb phase after the lock-in to F's flag-off + bomb_f:
+                               the hop over each covering bomb of F's row (rune_lowhop's hop_plan on the bombs seen at her
+                               x, the unlit leftovers of an earlier row ignored), standing still until its press; while it
+                               is due / held the script keeps the keys ahead of the other scripts (asw_critical).
   SSBOT_FORUM_TWO_ASW_SET      "trig=1,back_u=7.5": trial overrides of the AswCfg numbers.
 
     two = TwoPlay()                                   # per episode: two.reset()
@@ -240,13 +246,22 @@ class AswCfg:
     hold_b: float = 8.8       # the hold point this far from B's centre (outside its Slam Range 8.3 + 0.25 + 0.25)
     reach_in: float = 2.7     # the press point: her centre this far from B's near body edge (the slash reach 3.12)
     gap_b: float = 2.75       # never nearer to B's centre than this
-    step_spare: int = 4       # the step-in reaches the press point this many frames before F's flag-off
+    step_spare: int = 4       # the step-in from the hold point starts this many frames before F's predicted flag-off
+    #                           (0.5 u to B's Slam Range: she enters it about at the flag-off)
     dash_min: float = 3.5     # a ground dash only with at least this far to go (u; it moves 3.27 u in 7 frames)
+    far_slack: int = 8        # the start: the hold point reached by the step-in + this many frames (else "far")
+    first: int = 1            # no switch on F's first attack move of the wave (the opening's A1: punish it; c3 is
+    #                           17-19 u away - switch answer section 4)
     release_lag: float = 2.0  # the dash held into the ground sprint: released when her travel in this many frames at her
     #                           speed reaches the target (cast_stab T2's closed loop) ...
     grace_f: int = 10         # ... at the latest this many frames into the sprint (Sprint Grace: no skid)
     combo_f: int = 10         # no press this many frames after the sprint (DASHCOMBO_WINDOW 0.15 s: the dash combo)
     end_f: int = 90           # lock-in: the run ends this long after F's flag-off at the latest
+    bomb_f: int = 95          # a cast: the run's bomb phase (the hop over F's small-rune bombs at her x) lasts to F's
+    #                           flag-off + this (ring 6, 25 u from it, lit by Cast 2 + 58 + 21 + 7)
+    bomb_lead: int = 30       # a covering bomb's window this close (frames): plan the hop, stand still until its press
+    x_pad: float = 0.3        # a bomb covers her when |her x - its x| < its radius + her half width + this
+    margin: float = 0.12      # her box bottom at least this above the bomb circle's top (rune_lowhop's HopCfg)
     lock_win: int = 10        # F's lock: the press on B's Idle (re-)entry only up to this many frames after it (the
     #                           hit lands 3-4 frames after the press's STATE: before the coin at 15)
 
@@ -294,6 +309,15 @@ class AswRun:
     presses: list = field(default_factory=list)   # (frame - f_a, kind, |dx| to B)
     dash: list = field(default_factory=list)      # antic frames k of the dash-sprints
     dash_end: int | None = None                    # the STATE frame she had control again after the last one
+    o_prev: str | None = None                      # B's state on the last tick
+    lock_end: str | None = None                    # the lock-in's end (a cast's run then keeps its bomb phase)
+    f_lock: int | None = None
+    bombs: dict = field(default_factory=dict)      # small-rune bombs: iid -> {"x", "y", "a", "on", "end", "stale"}
+    k_now: int = 0
+    hop_P: int | None = None                       # the bomb hop: its press (antic frame k) and hold
+    hop_H: int = 0
+    hops: list = field(default_factory=list)       # (P, H, w0, w1)
+    pending: bool = False                          # a covering bomb's window within bomb_lead (the hop to plan)
     k_line: int | None = None  # a slam: the antic frame she was first beyond the hammer line
     k_hold: int | None = None  # the antic frame she first reached the hold / press point
     hit_b: int | None = None   # the first landed hit on B from F's flag-off on (frames - f_off; < 0: in F's lock)
@@ -471,6 +495,7 @@ class TwoPlay:
         self.asw_done: list[AswRun] = []
         self.asw_n: Counter = Counter()
         self._asw_dash: dict | None = None    # the dash held into the sprint: {"f0", "dir", "rel", "ctl"}
+        self._n_att: Counter = Counter()      # iid -> its attack antics seen (slam / cast / jump / jump cast)
         self._asw_prev = 0                    # its last mask
 
     # ---- helpers ----
@@ -505,6 +530,8 @@ class TwoPlay:
                 antics.append(e)
             if ASW and st in ASW_ANTIC and (pst is None or pst[0] != st):
                 asw_antics.append(e)
+            if ASW and (st in ASW_ANTIC or st in ESC_ANTIC) and (pst is None or pst[0] != st):
+                self._n_att[iid] += 1
             self.prev[iid] = (st, tin)
             if SPACE and hx is not None:
                 j = self.jumps.get(iid)
@@ -720,7 +747,7 @@ class TwoPlay:
         "hold" (L2's target to keep), "no_hit" (iids whose hits do not count / no IdleHit), "corner_aim" (F's antic:
         the stance in reach), "after_land"}; None without a run the arm took. SP9c: the antic switch's run (mode
         "aswitch") the same way."""
-        if ASW and self.asw is not None and self.asw.mode is not None:
+        if ASW and self.asw is not None and self.asw.mode is not None and self.asw.lock_end is None:
             return self._asw_view()
         r = self.esc
         if r is None or r.mode is None:
@@ -748,7 +775,8 @@ class TwoPlay:
         hp = int((s.get("hero") or {}).get("health") or 0)
         if self.esc is not None:
             self._esc_update(f, s, hx, hp, cs)
-        if self.esc is None and antics and len(cs) == 2 and hx is not None and self.asw is None:
+        if self.esc is None and antics and len(cs) == 2 and hx is not None and (self.asw is None
+                                                                                 or self.asw.lock_end is not None):
             for e in antics:
                 self._esc_start(f, s, e, cs, hx, hp)
                 if self.esc is not None:
@@ -1118,7 +1146,18 @@ class TwoPlay:
     def asw_skip(self) -> frozenset:
         """F while the antic switch runs: the slam playbook and the low hop leave its move alone."""
         r = self.asw
-        return frozenset({r.iid}) if (ASW and r is not None and r.mode is not None) else frozenset()
+        return frozenset({r.iid}) if (ASW and r is not None and r.mode is not None and r.lock_end is None
+                                      ) else frozenset()
+
+    def asw_critical(self) -> bool:
+        """The bomb hop is committed (its hold, the covering bomb's window after it): the antic switch's script keeps
+        the keys ahead of the other scripts (like the low hop's critical window)."""
+        r = self.asw
+        if not ASW or r is None or r.mode is None:
+            return False
+        if r.hop_P is None:
+            return r.pending                             # a covering bomb's window near: the stand / the press
+        return r.k_now <= r.hop_P + max(r.hop_H, 40)
 
     def _asw_view(self) -> dict:
         r = self.asw
@@ -1140,7 +1179,10 @@ class TwoPlay:
                     break
         r = self.asw
         if r is not None and hx is not None:
-            r.tx = self._asw_target(s, t, hx)
+            if r.lock_end is None:
+                r.tx = self._asw_target(s, t, hx)
+            thr = self._asw_threats(r, hx)
+            r.pending = bool(thr) and min(w0 for w0, _, _ in thr) - r.k_now < self.acfg.bomb_lead
 
     def _asw_press_x(self, o: dict, sgn: int) -> float:
         """Her centre's x for the side slash on B (its body's near edge - reach_in, coming from F's side)."""
@@ -1175,7 +1217,9 @@ class TwoPlay:
         ost = _sp.control(o)[0]
         sep = abs(ox - cx)
         why = ""
-        if (ox - cx) * face <= 0:
+        if c.first and self._n_att[e.get("iid")] <= 1:
+            why = "first"
+        elif (ox - cx) * face <= 0:
             why = "b behind"
         elif ost not in ("Idle", "Walk"):
             why = "b busy"
@@ -1196,16 +1240,15 @@ class TwoPlay:
                         return float(j)
                 return jmax + (dist - _cs.sprint_travel(jmax)) / WALK_U
             k_off = c.k_off_slam if kind == "slam" else c.k_off_cast
-            tail = c.tail_slam if kind == "slam" else c.tail_cast
-            press = self._asw_press_x(o, face)
-            if k_now + SEND_AHEAD + frames((press - hx) * face) > k_off + tail - 6:
+            # (the spec: she can be within 8.3 u of B by F's flag-off) the hold point by the step-in + slack
+            if k_now + SEND_AHEAD + frames((ox - face * c.hold_b - hx) * face) > k_off - c.step_spare + c.far_slack:
                 why = "far"
             elif kind == "slam" and k_now + SEND_AHEAD + frames((cx + face * c.hammer_u - hx) * face) > c.hammer_k:
                 why = "hammer"
         run = AswRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f, k_a=k_now, ta=t - tin, x0=round(cx, 3),
                      face=face, back0=round(back, 2), pred=round(pr, 2), sep0=round(sep, 2),
                      rel0=round((hx - cx) * face, 2), o_st=ost, o_d=round(do, 2), mode=None if why else "aswitch",
-                     hp0=hp, why=why)
+                     hp0=hp, why=why, o_prev=ost)
         if why:
             self.asw_n[f"no_{why}"] += 1
             run.end, run.f_end = "not taken", 0
@@ -1233,6 +1276,14 @@ class TwoPlay:
         if hp < r.hp0:
             r.hp.append(f - r.f_a)
         r.hp0 = hp
+        k = int(round((t - r.ta) * 60.0))
+        r.k_now = k + SEND_AHEAD
+        self._asw_bombs(r, s, k)
+        if r.lock_end is not None:
+            # the bomb phase: until F's rings have passed her (and a hop has landed)
+            if k - (r.k_off or k) > c.bomb_f and r.hop_P is None:
+                self._asw_close(f, r.lock_end, final=True)
+            return
         e = clapper_by(s, r.iid)
         o = clapper_by(s, r.other)
         if o is None:
@@ -1243,7 +1294,6 @@ class TwoPlay:
             r.b_idle.append(f - r.f_a)
         if ost == "Evade Scuttle" and r.b_evade is None:
             r.b_evade = f - r.f_a
-        k = int(round((t - r.ta) * 60.0))
         st = _sp.control(e)[0] if e is not None else None
         if r.f_off is None and (e is None or st not in ASW_ON_ST[r.kind]):
             r.f_off, r.k_off, r.phase = f, k, "tail"           # its flag is off (or it died)
@@ -1252,7 +1302,9 @@ class TwoPlay:
         if r.f_off is not None and r.f_idle is None and (e is None or st not in ("Slam 2", "Slam Effects?",
                                                                                  "Slam Recover", "Cast 2")):
             r.f_idle, r.phase = f, "after"
-        if r.f_off is not None and ost in MOVE_ST and f > r.f_off:
+        o_new = ost != r.o_prev or r.other in self.entry
+        r.o_prev = ost
+        if r.f_off is not None and ost in MOVE_ST and o_new and f > r.f_off:
             r.b_next, r.k_next = ost, f - r.f_off
             self._asw_close(f, "B move")
         elif r.hit_b is not None:
@@ -1262,14 +1314,61 @@ class TwoPlay:
         elif r.f_off is None and k > (c.k_off_slam if r.kind == "slam" else c.k_off_cast) + 40:
             self._asw_close(f, "late")
 
-    def _asw_close(self, f: int, why: str) -> None:
+    def _asw_close(self, f: int, why: str, final: bool = False) -> None:
         r = self.asw
+        if r is not None and not final and r.kind == "cast" and r.f_off is not None and r.lock_end is None:
+            # the lock-in ends; F's small-rune rings still to pass her: the bomb phase (the hop) keeps the run
+            r.lock_end, r.f_lock, r.phase = why, f - r.f_a, "bomb"
+            self.asw_n[f"lock_{why}"] += 1
+            self._asw_dash = None
+            return
         if r is not None:
-            r.f_end, r.end = f - r.f_a, why
+            if r.lock_end is None:
+                r.lock_end, r.f_lock = why, f - r.f_a
+            r.f_end, r.end = f - r.f_a, r.lock_end
             self.asw_done.append(r)
-            self.asw_n[f"end_{why}"] += 1
+            self.asw_n[f"end_{r.end}"] += 1
         self.asw = None
         self._asw_dash = None
+
+    def _asw_bombs(self, r: AswRun, s: dict, k: int) -> None:
+        """The small-rune bombs' appearance / light per object (rune_lowhop's bookkeeping): the unlit ones there before
+        F's flag-off are stale (t1: the pool keeps an earlier cast's unlit row in place) until one lights or is placed
+        anew."""
+        from ssbot.combat import rune_bombs as _rb
+        cur = {}
+        for iid, bx, by, lit in _rb.bomb_ents(s.get("ents")):
+            cur[iid] = lit
+            b = r.bombs.get(iid)
+            if b is not None and abs(b["x"] - bx) > 0.3:
+                b = None                                   # a pooled object placed anew
+            if b is None:
+                b = r.bombs[iid] = {"x": round(bx, 3), "y": round(by, 3), "a": k, "on": None, "end": False,
+                                    "stale": r.f_off is None and not lit}
+            if lit:
+                b["stale"] = False
+                if b["on"] is None:
+                    b["on"] = k
+            elif b["on"] is not None:
+                b["end"] = True
+        for iid, b in r.bombs.items():
+            if iid not in cur and (b["on"] is not None or k > b["a"] + 21 + 7 + 2):
+                b["end"] = True
+
+    def _asw_threats(self, r: AswRun, hx: float) -> list[tuple[int, int, float]]:
+        """[(w0, w1, thr)]: the live bombs covering her x - antic frames her box bottom must stay above thr."""
+        from ssbot.combat import rune_lowhop as _rl
+        c = self.acfg
+        out = []
+        for b in r.bombs.values():
+            if b["end"] or b["stale"]:
+                continue
+            dx = abs(hx - b["x"])
+            if dx >= _rl.R + HALF_W + c.x_pad:
+                continue
+            w0, w1 = (b["on"], b["on"] + 6) if b["on"] is not None else (b["a"] + 20, b["a"] + 21 + 6)
+            out.append((w0 - 1, w1 + 1, _rl.bomb_top(b["y"], max(0.0, dx - c.x_pad)) + c.margin))
+        return out
 
     def _asw_target(self, s: dict, t: float, hx: float) -> float | None:
         """The run's target x (module docstring): the hold point short of B, the press point from the step-in (F's
@@ -1285,19 +1384,14 @@ class TwoPlay:
         press = self._asw_press_x(o, sgn)
         k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD
         if r.f_off is None:
+            # (t1, 931052a: entering B's Slam Range during F's lock let an idle B's evade coin fire at once, 2 of 3
+            # runs - B slid away and jumped) the hold point outside its Slam Range until step_spare frames before F's
+            # predicted flag-off: she enters its range about when F's flag goes off (B then decides: a walking B on
+            # its range check, an idle one on her hit or its coin's evade, chased)
             k_off = c.k_off_slam if r.kind == "slam" else c.k_off_cast
             pd = (ox - press) * sgn                              # the press point's distance from B's centre
-            # the step-in's frames: the dash held into the sprint when the dash is ready (less time inside B's Slam
-            # Range before F's flag-off: its evade coin fires 0.25 s after the Idle entry that her entry causes),
-            # else the walk
-            step = max(0.0, c.hold_b - pd)
-            tm = (s.get("hero") or {}).get("tm") or {}
-            if step >= c.dash_min and float(tm.get("dash_cd") or 0.0) <= 0.02 and self._asw_dash is None:
-                walk_f = next((j for j in range(1, 30) if _cs.sprint_travel(j) >= step), 30) + 4
-            else:
-                walk_f = step / WALK_U
             db = (ox - hx) * sgn
-            if k >= k_off - c.step_spare - walk_f:
+            if k >= k_off - c.step_spare:
                 tx = press
             elif db > c.hold_b:
                 tx = ox - sgn * c.hold_b
@@ -1312,10 +1406,6 @@ class TwoPlay:
         if (ox - tx) * sgn < c.gap_b:
             tx = ox - sgn * c.gap_b
         return min(max(tx, WALL_L + 0.5), WALL_R - 0.5)
-
-    def _bomb_near(self, s: dict, hx: float) -> bool:
-        from ssbot.combat import rune_bombs as _rb
-        return any(abs(bx - hx) < _rb.R + HALF_W + 0.5 for _iid, bx, _by, _lit in _rb.bomb_ents(s.get("ents")))
 
     def _asw_step(self, f: int, s: dict, ground: bool, accepting: bool, t: float, latch) -> int | None:
         """The antic switch's keys (module docstring): the walk / dash to the target, the re-hit on B's Idle (re-)entry
@@ -1353,14 +1443,36 @@ class TwoPlay:
                 self._asw_dash = None
             else:
                 return 0
+        # the bomb hop (a cast's small runes at her x: "cast only with the bomb hop", switch answer 2f / section 3)
+        if r.hop_P is not None:
+            j = k - r.hop_P
+            if (ground and j > 4) or j > 50:
+                r.hop_P = None                                   # landed
+            else:
+                return M_J if j < r.hop_H else 0
+        thr = self._asw_threats(r, hx)
+        if thr and min(w0 for w0, _, _ in thr) - k < c.bomb_lead:
+            if not ground or not accepting:
+                return None                                      # (the planner's bomb forecast)
+            from ssbot.combat import rune_lowhop as _rl
+            plan = _rl.hop_plan(thr, k, range(9, 17), 3)
+            if plan is None:
+                self.asw_n["hop_none"] += 1
+                return None
+            if plan["P"] <= k and (latch is None or bool(int(latch(M_J)) & M_J)):
+                r.hop_P, r.hop_H = k, plan["H"]
+                r.hops.append((k, plan["H"], min(w0 for w0, _, _ in thr), max(w1 for _, w1, _ in thr)))
+                self.asw_n["hops"] += 1
+                return M_J
+            return 0                                             # stand still over the planned x until the press
+        if r.lock_end is not None:
+            return None                                          # the bomb phase: nothing else
         if not accepting or r.tx is None:
             return None
         o = clapper_by(s, r.other)
         if o is None:
             return None
         hxw = self._xw(s)
-        if self._bomb_near(s, hx):
-            return None                                          # a small-rune bomb at her x: the planner's hop
         ox = float(o["pos"][0])
         ost = _sp.control(o)[0]
         look = 1 if ox > hxw else -1
@@ -1394,11 +1506,13 @@ class TwoPlay:
                 r.k_hold = k
             return 0
         toward = M_R if tx > hx else M_L
-        if r.f_off is None:
+        if r.f_off is None and (ox - tx) * r.face >= c.hold_b - 0.05 or (r.kind == "slam" and r.k_line is None):
+            # the dash (held into the sprint) only to reach the hold point by the step-in / the hammer line by
+            # hammer_k (the step-in walks: she keeps the dash for the chase of B's evade, no dash combo window)
             k_off = c.k_off_slam if r.kind == "slam" else c.k_off_cast
             deadline = c.hammer_k if (r.kind == "slam" and r.k_line is None) else k_off - c.step_spare
         else:
-            deadline = k + 1 if r.hit_b is None else k + 999     # the tail: as soon as possible
+            deadline = k + 999
         late = k + dist / WALK_U > deadline
         if (late and ground and dist >= c.dash_min and float(tm.get("dash_cd") or 0.0) <= 0.02
                 and float(tm.get("atk_cd") or 0.0) <= 0.19 and not any(x in clip for x in NO_ATK_CLIPS)
@@ -1424,7 +1538,8 @@ class TwoPlay:
                                 self.acfg.tail_slam if r.kind == "slam" else self.acfg.tail_cast) + 2,
                             "lock_hits": [x for x in r.hits_b if x[1] == "go"],
                             "b_next": r.b_next, "k_next": r.k_next, "walk": r.walk, "f_end": r.f_end,
-                            "end": r.end, "lag": r.k_a} for r in runs]
+                            "end": r.end, "lag": r.k_a, "f_lock": r.f_lock, "hops": r.hops,
+                            "bombs_live": sum(1 for b in r.bombs.values() if not b["stale"])} for r in runs]
         return out
 
     # ---- S5 the stance ----
