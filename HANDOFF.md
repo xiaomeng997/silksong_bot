@@ -9150,3 +9150,151 @@ not have).
    hand over to the evade chase.
 4. A slam that starts during the hop's window gets the playbook only after the window (~C + 38, from the air); no HP
    lost from it in these runs, not measured on its own.
+
+## Task 1v1 - stage SP9a: two Clappers - chase the focus's evade, hit it on its Idle entry, the low hop on its close cast, the spacing rules, the opening (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §76)
+
+The spec: C:\ssbot\data\m2_play\switch\answer.txt section 5 (S1-S3, S5, S6), human_two\answer.txt R2-R7 / R9,
+buddy\answer.txt R1-R3; the person's plan notes of 2026-10-16 (the chase is the main gain; the antic switch and the
+corner are SP9 arms for later). Forum_W_w13 (fo_cl_w13w: the final wave, 7 HP, 2 HP per hit, the episode quits after
+the third hit; 230 HP per Clapper), `1v1_live.ps1 -Encounter Forum_W_w13 -Timebox 180`, instances 0 / 1, 1x. F = the
+focus (L2's target when it is a Clapper, else the nearer one), B = the other one; distances centre to centre (her box
+centre, its transform), + = in front of it; HeroBox 0.46 u wide. Data `C:\ssbot\data\m2_play\sp9` (`base_two.*` the
+SP7 A/B's "two" re-read, `t1` the trial, `ab` / `ab2` the A/B rounds, `abp` both pooled, `replay_<sha>` identity,
+`scripts`). Commits da0d059 (code), 594bb71 (IdleHit's bookkeeping; decisions byte-identical to da0d059), 0f4db52
+(the default), docs after it. No NOTE_FROM_LEAD appeared during the stage.
+
+### Result
+
+- **The first two-Clapper kills.** A/B (594bb71, two rounds x 16 per arm, block design, the same seeds): `two` (the
+  SP7 arm: rnjb + TWO_PLAY + TWO_FOCUS) vs `sp9a` (+ TWO_CHASE + TWO_IDLEHIT + TWO_CAST + TWO_SPACE + TWO_OPEN):
+  **both Clappers killed 5 -> 18 of 32 episodes, Clappers killed 10 -> 36, landed / s 0.699 -> 1.268 (90 % +0.494 ..
+  +0.649), both alive 0.715 -> 1.361 (+0.565 .. +0.723), HP-loss hits / min 5.67 -> 4.46 (-2.43 .. -0.02)**, kills per
+  episode +0.81 (+0.44 .. +1.19), survival p50 30.0 -> 31.3 s (n.s.), kill p50 of the clears 50.2 -> 33.8 s, HP-hitless
+  clears 1 -> 3. More landed per s and kills, not more HP hits per minute -> **promoted** (0f4db52): TWO_PLAY,
+  TWO_FOCUS and the five SP9a switches follow SSBOT_FORUM_V2 (`=0` off; arm `rnsp9a0` = the old default).
+- Round 2 added `sp9aNC` (sp9a without TWO_CHASE): 2 / 16 clears, landed / s 0.975, HP hits / min 6.68 (more than two's
+  5.64) - the chase carries the gain; without it the Idle hits and the cast face alone are not better on HP.
+- **Fixed-point (per rule, t1 + both rounds' sp9a, 48 episodes):** TWO_IDLEHIT presses landed 65 / 66 (rounds 1-2;
+  the ground entries in reach with the attack ready: hit within 15 frames 37 / 41 in t1 + round 1); TWO_CAST close
+  casts without HP lost (antic .. + 110 frames) 141 / 147 (96 %); TWO_OPEN openings at x 24-26.3 at Enter Land with the
+  first hit on c2 by 2.6 s and >= 2 hits before its Idle 46 / 48 (96 %); **TWO_CHASE: Close (<= 8.28 u) at the slide's
+  end 200 / 256 chase runs (78 %), started by evade frame 4 within 8 u 129 / 158 (82 %) - below the 90 % gate**: the
+  misses are airborne starts with no dash left (the planner's air dash 0.3-0.4 s before the evade, the umbrella, a
+  stun) and B's hits during F's slide (aborts "hurt"); HP lost within 120 frames of a chased evade 25 / 256. The rule's
+  own checks pass (After Scuttle Close 74 %, follow p50 3.63 u). TWO_SPACE is a stance rule (no per-run gate); its checks
+  pass (below).
+
+| A/B (594bb71) | two r1 | sp9a r1 | two r2 | sp9a r2 | sp9aNC r2 | two pooled (32) | sp9a pooled (32) |
+|---|---|---|---|---|---|---|---|
+| both killed (CLEAR) / Clappers killed | 3 / 6 | **11 / 22** | 2 / 4 | **7 / 14** | 2 / 5 | 5 / 10 | **18 / 36** |
+| landed / s (fight) / both alive | 0.712 / 0.724 | **1.303 / 1.390** | 0.686 / 0.707 | **1.234 / 1.335** | 0.975 / 1.023 | 0.699 / 0.715 | **1.268 / 1.361** |
+| HP-loss hits / min | 5.71 | **4.06** | 5.64 | **4.84** | 6.68 | 5.67 | **4.46** |
+| survival p50 (s) / kill p50 of the clears | 26.2 / 60.4 | 31.4 / 33.3 | 34.2 / 44.0 | 31.1 / 34.3 | 24.1 / 35.4 | 30.0 / 50.2 | 31.3 / 33.8 |
+| HP-hitless clears | 0 | 2 | 1 | 1 | 0 | 1 | 3 |
+
+HP-loss hits / min by source (pooled): two - rune damagers (big rune + small runes) 2.14, Slam Collider 2 (landing)
+1.89, hammer 0.92, body 0.73; sp9a - rune damagers 1.38, hammer 1.18, Slam Collider 2 0.85, body 1.04.
+
+### The person's checks (switch answer section 5; pooled, 32 episodes per arm; `ssbot.tools.sp9_two`)
+
+| check | person | two | sp9a |
+|---|---|---|---|
+| S1 After Scuttle Close (>= 50 %) / her follow in the slide p50 (>= 2.9 u) | 22 % / 0.88 | 14.3 % / 0.99 | **74.4 % / 3.63** |
+| S2 F's Idle runs ended by her hit (>= 64 %) / first hit p50 (<= 0.19 s) / within 15 frames | 50 % / - | 35.6 % / 0.317 / 9.8 % | 51.2 % / 0.283 / 17.5 % |
+| S3 landed per close cast (>= 2.2) / per focus slam (>= 2.0) | 3.14 / 2.08 | 1.88 / 1.54 | **3.37** / 1.88 |
+| S5 other one < 4 u (<= 3 %) / Slam Collider 2 hits per min (<= 1.1) | 2.8 % / 1.06 | 0.14 % / 1.89 | 0.64 % / **0.85** |
+| S6 x at Enter Land (24.0-26.3) / first hit on c2 / hits on c2 before its Idle (>= 2) / by t 4 (>= 4) / by t 6 (>= 7) / c2 HP at c3's 8.3 u contact (<= 140) | 24.0-26.3 / 2.40 s / 2 / 5 / 8 / 140 | 47.9 / c3 first (2.70 s) / 0 / 0.16 / 0.41 / 230 | **24.9-25.1 / 2.43 s / 1.97 / 4.69 / 7.66 / 150** |
+| S8 gate p50: landed / s x time to the 3rd HP hit (>= 46) | - | 17.3 | 42.0 |
+| between them / stacked (< 4 u) / within 8 u of the nearer | 48 % / 14 % / 92 % | 44 % / 13.6 % / 82 % | 78 % / 5.9 % / 95 % |
+
+S2's gap: 141 of 219 of F's Idle entries (round 1) find her in the air - after a strike she is still in the bounce
+(F goes Idle at ~Slam 0 + 30, she lands at Slam 0 + 52-55; the NEAR slash comes at ~Idle + 15, the coin's frame), after
+a cast in the low hop over ring 1 (its descent slash at ~Idle + 14-16, half of them after the coin). Re-entries (a hit
+cancelled while B attacks) cannot be hit within 0.25 s with side slashes (the cooldown is 0.32 s): 0 of 40.
+
+### 1. Code (`ssbot/combat/two_play.py`, `evade_chase.py`, `rune_lowhop.py`, `tactics/gauntlet.py`, `train/forum_planner_policy.py`, `train/wave_start.py` / `encounters.py`)
+
+- `SSBOT_FORUM_TWO_CHASE` (S1): `EvadeChase(one=EVADE_CHASE, two=TWO_CHASE)` - with two live Clappers the focus's Evade
+  Scuttle is chased exactly like SP8c (run, one dash tap gated on the attack cooldown, the air dash when the run alone
+  ends Far, a slash at the slide's end), never a slash whose reach meets B's body; one live Clapper still needs
+  SSBOT_FORUM_EVADE_CHASE (the person decides on SP8c).
+- `SSBOT_FORUM_TWO_IDLEHIT` (S2): `TwoPlay.observe` sees F's Idle (re-)entry on the first STATE that shows it (a
+  re-entry: its state time starting again - a hit -> Dmg Attack -> Close Range -> CANCEL -> Idle in one frame); the
+  IdleHit script then presses the side slash on that tick when the slash from her x at the mask's frame meets its body
+  (its collider) on the ground with the attack ready (the turn key one frame before when she faces away; standing
+  still while the cooldown ends inside the window), else walks in when that reaches it by 30 frames; no start while B
+  can reach her (`other_danger`: B in a jump move, its hammer / lunge within 12.5 u in front, casting within 9 u,
+  recovering within 4.5 u, a rune circle over her), in the air, without input. The policy steps it after the other
+  scripts (the slam playbook, the jump antic scripts, the low hop and the chase keep the keys). Reaction: the press on
+  the entry tick lands 2 frames later, the hit 3-4 frames after the entry (p10 4, p50 7 with the cooldown waits).
+- `SSBOT_FORUM_TWO_CAST` (S3): `RuneLowHop(two=True)` - the caster in Spell Antic nearest to her in front; no start /
+  hand back outside the critical window while `other_danger`. The slam playbook on F's slams is TWO_PLAY (SP7).
+- `SSBOT_FORUM_TWO_SPACE` (S5): (a) gauntlet `_two_focus`: one Clapper entering Slam Antic with the two < 16 u apart is
+  L2's target for that slam (its slam is an L2 event); (b) `TwoPlay.space` moves L2's stance out of: 4 u (+ her half
+  width) of the one not slamming while the other is in Slam Antic and the two are < 16 u apart; 2.5 u of a Clapper in
+  Idle / Walk / Evade / Cast / Recover; 4-8.3 u in front of a jump's landing from its Jump Aim (`jump_landing` from its
+  take-off x and her x at the aim); the big rune circle to come (landing + 6.48 u along its facing, r 7.19) and every
+  rune circle lit or to come. A stance (score) rule: the planner's checks are unchanged.
+- `SSBOT_FORUM_TWO_OPEN` (S6): the harness could not move her before the wave's activation (the wave intro sent no keys
+  from the load to `wait_wave_active`, ~2.5 s); now `wait_wave_start` / `wait_wave_active` take a key callback and the
+  w13 intro walks her left (`two_play.intro_keys`) to x <= 26.5 (x 29.3 p50 at the wake, from 48.73); the Opening script
+  then walks to x 25.0 (c2's landing x 21.03 + 3.97 u, inner side) and slashes c2 while its collider is in reach (Drop
+  In's last frame, Enter Land) until c2's first Idle (IdleHit takes that). The A2 switch to c3 (section 4) and the
+  corner (S4) / the antic switch (S7) are not in SP9a.
+- `ssbot.tools.sp9_two` (per arm: kills, landed / s both alive, HP hits per minute by source, survival, the S1-S6 / S8
+  checks, IdleHit / chase records, bootstrap vs a base arm). Scripts `sp9\scripts`: `idle_why.py` (F's Idle entries:
+  why no hit within 15 frames), `fp_sum.py` (the per-rule fixed-point counts), `trace_idle.py`, `trace_chase.py`,
+  `trace_open.py`, `peek_open.py`; `replay_ident_sp9.ps1`.
+- Tests `tests/test_sp9.py` (14: the switches follow v2, the Idle entry / re-entry press, the turn, walk-in / far, no
+  start with B's slam or in the air, only the focus, the opening, the spacing spans, the two-Clapper chase, the
+  low hop's caster, the intro keys, the hit seen while another script has the keys); slam_play / sp7-sp8d / forum_l2 /
+  jump_behind / cast_stab pass (201).
+
+### 2. Trial t1 (da0d059, sp9a, 16 episodes, seeds 2500000 / 2510000; `sp9\t1`)
+
+5 / 16 both killed (11 Clappers), landed / s 1.248 (both alive 1.344), HP hits / min 5.47; S1 Close 66 %, follow 3.37 u;
+chase runs Close 51 / 72; IdleHit's recorded hits were undercounted (15 of 30 presses: the hit shows on the tick its next
+move begins, when another script holds the keys) -> 594bb71 reads them every tick (decisions byte-identical: the w13
+replay with every switch on, 1,541 / 1,541 ticks); from the recordings 21 / 23 ground entries in reach with the attack
+ready were hit within 15 frames; close casts safe 41 / 43; openings 15 / 16.
+
+### 3. Switch-off identity
+
+`sp9\replay_ident_sp9.ps1`: da0d059 with the SP9a switches unset byte-identical to b4783b9's default on the three
+identity episodes (192006 i0 ep1 2,073, 084036 i1 ep0 1,778, the w13 144051 i1 ep0 1,541 ticks); with TWO_PLAY +
+TWO_FOCUS (the A/B's base) identical to b4783b9's on the w13 episode; every switch on: 0 errors. 0f4db52 (the default)
+with all seven `=0`: byte-identical to b4783b9's default on all three; unset: the w7 episodes identical (one Clapper:
+the two-Clapper rules are inert), the w13 episode identical to 594bb71 with every switch on, 0 errors. A live check of
+the new default (rnjb at 0f4db52, 8 w13 episodes; `sp9\chk`): 4 / 8 both killed (8 Clappers), landed / s 1.27 (both alive 1.32), HP-loss hits / min 5.02, After Scuttle Close 72.5 %, the intro walk and the opening in 8 / 8 (x 24.9-25.2 at Enter Land, c2 first).
+
+### 4. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backups .bak_sp9a / .bak_sp9a2)
+
+`sp9a` = two + the five SP9a switches (the A/B arm); `sp9aNC` = sp9a without TWO_CHASE; `rnsp9a0` = the v2 default with
+all seven two-Clapper switches `=0` (the SP8d default). two / twoP / twoF / two2 / two3 / sp9aNC carry the SP9a switches
+`=0` (twoP TWO_FOCUS=0, twoF TWO_PLAY=0) so they keep their meaning; rnjb is sp9a on w13 from 0f4db52 on (on w7 the
+two-Clapper switches are inert).
+
+### 5. Machine state
+
+Instances 0 and 1 ran every block (started 2026-10-16 20:36), frozen at time scale 1e-4 after each by sp4_block;
+DEMO_SOON paused and restored per block; boost_workers ran for the blocks (`boost_workers.stop` present again). No game
+process touched. Frozen checkouts `C:\ssbot\live_1v1_{da0d059,594bb71,0f4db52}`. Sandbox `sp9_go.ps1` (wake, boost,
+sp4_block), `sp9_t.ps1`, `sp9_ab.ps1`; manifests `1v1sp9t1_manifest.txt`, `1v1sp9ab_manifest.txt`,
+`1v1sp9ab2_manifest.txt`, `1v1sp9chk_manifest.txt` (`sp9\abp\man.txt`: rounds 1-2, two and sp9a). Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched. Full suite at 0f4db52: 1,888 passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test; and the untracked test_sg8_review.py x3).
+
+### Next
+
+1. TWO_CHASE's fixed-point is 78-82 % (the 90 % gate is not met) though the A/B depends on it: the misses start in
+   the air with no dash left (the planner's air dash just before the evade) or end with B hitting her during F's slide.
+   A rule against air dashes near an idle focus when B is free, or a chase that starts from the umbrella / stun end,
+   would be the next fixes; the person decides whether the promotion stands meanwhile.
+2. S2's gap (51 % of F's Idle runs ended by her hit vs the person's 64 %+): after a strike F goes Idle ~22 frames before
+   her landing and the side slash cannot reach its body from that height until ~Idle + 15 (the coin); after a cast the
+   low hop's descent slash comes at Idle + 14-16. A second down slash (pogo) on F's Idle entry after the strike, or a
+   hop plan with a press at F's Idle entry on the way up, are the candidates (both make F decide with her airborne).
+3. S6's A2 switch to c3 (section 4: on a close A2, deciding hit on idle c3 in c2's tail), S4 (the corner on an escape
+   jump) and S7 (the close-only antic switch arm) are the SP9 arms still to build; the person wants the corner and the
+   switch compared (plan note 2026-10-16).
+4. The hammer is now sp9a's second source (1.18 / min): focus slams without HP lost from the antic to + 170 frames 104 / 128 (81 %)
+   under TWO_PLAY; the second slam during the first's way out is still the planner's.
