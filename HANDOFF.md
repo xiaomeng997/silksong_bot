@@ -8700,3 +8700,148 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
 4. `slam_play.GRAV` 72 (the default playbook's fall estimate) should be 60 (1.2 u/s per 50 Hz step); it changes
    default decisions, so it needs its own A/B.
 5. With two Clappers the dash scripts do not start (one live Clapper only); SP9 decides.
+
+## Task 1v1 - stage SP8b: the jump slam's antic far away (dash, stop, one side slash) and the jump moves at a wall (walk in, slash, go under to the wall side) (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §73)
+
+The person (2026-10-16): "the two jump moves mostly start their antic far away; try either dash slash x2 or dash then stop
+and side slash x2" (SP8a did the jump cast) and "after pushing it into the corner, when it does a jump move you can walk
+up leisurely, slash twice, then go under to its back". The lead's note (NOTE_FROM_LEAD.txt): JB_CORNER is a ONE-Clapper
+behaviour (two Clappers: SP9 switches target at the corner). The jump slam (CC_JUMP): Jump Antic 30 frames, Jump Aim at
++30, 55-frame flight, landing Slam 2 hammer (Slam Collider 2 0.67-7.76 u in front). Distances centre to centre (her box
+centre, its transform), + = in front; HeroBox 0.46 u wide, 2.07 u high; its crouched body front 1.65 u in the Jump Antic
+(standing slash reach <= 4.67 u). "Corner" = its centre < 4 u from the wall behind it at the antic start. Data
+`C:\ssbot\data\m2_play\sp8b` (`t1`..`t5` trials, `ab` / `ab2` / `ab3` rounds, `abq` the three pooled, `replay_<sha>`,
+`scripts`). Commits e84d78f (code), 9c64a1e (the herd trial knob), c92ae2e (t1 fix: the scripted way under), d27777a (t2
+fixes), 7e268ef (t3 fix; tested and A/B code), docs after it.
+
+### Result
+
+- **JB_SLAM_DASH passes the fixed-point gate**: 173 scripted jump slam antics in t1-t4, 172 with >= 1 landed hit, 172
+  without HP loss from the antic start to landing + 30 (the miss: after a dash tap control did not come back before the
+  antic's end); 11 / 11 behind at the landing in the arm without the herd knob. Stops 3.6-4.4 u (p10 / 90), the press at
+  antic frame 14-22, no skid, no DashStab out of a stop.
+- **JB_CORNER passes the fixed-point gate** (the herd arm, below): final code (7e268ef, t4) 15 corner jumps, **15 behind
+  at the landing, 14 without HP loss** (the one: the previous jump cast's rune circle hit her during the antic and
+  knocked her under its body; no corner script ran); d27777a (t3) 13 / 13 behind, 12 / 13 safe.
+- **DashStab comparison** (`j_mode` 1, t5, t1's seeds at the 9.5 u stance): 22 / 22 DashStab hits, safe at the aim, but
+  behind at the landing 5 / 28 (the planner backs off in front), one landing-hammer hit, 3.25 hits per jump slam (the stop
+  arm 4.0): not used.
+- **A/B** (Forum_W_w7, the default stance, 7e268ef, rnjb vs sp8b = + both switches, 3 rounds x 16 per arm = 48, block
+  design, the same seeds; rounds 2-3 added because round 1 was undecided, round 3 fixed beforehand as the last):
+  sp8b kill p50 21.6 -> **20.6 s** (-0.99, 90 % -1.72 .. -0.31), landed / s 1.053 -> 1.073 (+0.020, -0.008 .. +0.048),
+  jump slam antic 0.0 -> 0.86 hits, jump slam family 3.78 -> 4.39 hits; **HP-hitless 45 -> 43 of 48**. None of sp8b's 6
+  HP losses was inside an SP8b script or the corner stance (54 / 54 scripted jump slams and 9 / 9 corner jumps safe): small
+  rune bombs 4, a normal slam's hammer 1, its body in a jump cast's recovery after an SP8a T2 stop 1. By the rule read
+  literally (not worse on HP-hitless) **not promoted**: both switches stay default off; the person decides (to promote:
+  set both `=1`, or make them follow v2 like the SP8a switches).
+
+| A/B pooled (48 per arm) | rnjb | sp8b |
+|---|---|---|
+| kills / HP-hitless | 48 / **45** | 48 / 43 |
+| HP-loss sources (before the kill) | body 2, Slam Collider 2 1 | rune bomb small 4, Slam Collider 2 1 (a slam), body 1 |
+| kill p10 / 50 / 90 (s) | 19.1 / 21.6 / 23.6 | 19.1 / **20.6** / 23.3 |
+| landed hits / s (sg4_budget) | 1.053 | **1.073** |
+| jump slams / antic hits each / family hits each / safe / behind | 67 / 0.0 / 3.78 / 67 / 67 | 64 / 0.86 / 4.39 / 64 / 62 |
+| scripted jump slams / >= 1 hit / safe | - | 54 / 54 / 54 |
+| corner jump slams + casts / safe / behind | 4 + 5 / 9 / 5 (casts 1 / 5) | 5 + 4 / 9 / 9 |
+
+Rounds: 1 rnjb 16 / 16 hitless, 20.4 s, 1.073 - sp8b 15 / 16, 20.6, 1.092; 2 rnjb 15 / 16, 21.8, 1.041 - sp8b 14 / 16, 20.0,
+1.083 (+0.042, -0.004 .. +0.089); 3 both 14 / 16, 21.5 / 20.8 s, 1.046 / 1.046. `ab*\ab_stats.txt` (bootstrap, episodes
+resampled, 4,000 draws).
+
+### 1. JB_SLAM_DASH (`ssbot/combat/cast_stab.py`, `SSBOT_FORUM_JB_SLAM_DASH`, default off; one live Clapper)
+
+- SP8a's T2 for the Jump Antic: from `j_stop_d_min` 6.6 .. `j_stop_d_max` 11.3 u (her x on the dash's frame) by antic
+  frame `j_k_max` 14, the predicted press by `j_press_k_max` 26 (its collider frames still reach the take-off frame's
+  body): the dash + the key toward it held, released closed loop at `j_stop_u` 4.15 (inside Sprint Grace), one side slash
+  from <= `j_reach` 4.5 u. Nearer (4.5-6.6 u: a tap would overshoot) she walks in and slashes; in reach at the start (>=
+  `j_min_u` 3.4) she slashes at once, twice when the first press comes by antic frame 7. The first press of a walk start
+  has the key toward it on the frame before. The script hands back right after its last press (`last press`): the
+  planner's aim stance and the way under as before (rel_aim 5.4-6.1 u; hits after the aim 3.5 per jump vs 3.8).
+- `j_mode` 1 (`SSBOT_FORUM_JB_DASH_SET=j_mode=1`): the DashStab (`stab_path(..., front=J_BODY_FRONT)`), only when the model
+  puts her >= `j_aim_x_min` 5 u in front at the aim. The model: from 9.5-11 u the hit at j15, at the aim 5.3-6.8 u in front
+  and 1.85 u up, landing at aim + 23-25 with its landing 0.3-1.6 u toward her: inside the landing hammer, 8-9 u from the
+  spot behind. t5 confirmed it.
+- Stats `cast_stab`: `j_antics`, `j_stops`, `j_stop_presses`, `j_why_*`, `no_j_*`; records carry `kind` / `walk` /
+  `corner`.
+
+### 2. JB_CORNER (`SSBOT_FORUM_JB_CORNER`, default off, with JUMP_BEHIND; one live Clapper; cast_stab + jump_behind + gauntlet)
+
+- Antic (both jump moves): its centre < `corner_from_u` 4 u from the wall behind it, she 3.4-`corner_walk_max` 6.6 u in
+  front on the ground: walk in and slash every 19 frames to the antic's last press (jump slam 26, jump cast 50) - T2's
+  slash phase without the dash. Farther: the dash scripts as before (JB_SLAM_DASH; SP8a T1 / T2). The L2 antic stance at a
+  wall (gauntlet `_jump_behind`): `corner_aim_u` 4.4 u in front ("jump: aim stance (corner)", still no-hit) instead of
+  `aim_wall_u` 7 u (t2: after the cast antic's stop the planner dashed back to 7 u at the aim, the way under had no dash
+  left, she stayed in front and the rune circle hit her at landing + 66).
+- The way under (a script from the take-off, the first Jump / Air tick after an antic it saw; `_start_under`,
+  `_step_cunder`): at a wall, she <= `corner_under_max` 8 u in front, feet <= 3 u, and the wall rule's landing (>=
+  wall_push_u 4.4 u from the wall) leaves a behind spot. Target: `back_u` 3.5 u behind the landing estimate (moved with
+  its x when the ledge pushes it out farther), never nearer the wall than `corner_wall_min` 0.9 u (t3: a dash carried
+  her 0.5 u from the wall; after the landing the planner's dash into the wall became a wall jump into its body, 2 HP).
+  A walk when it gets her past its back (1.87 u behind the landing centre) by aim + `corner_walk_end_f` 38 (a pushed jump
+  lands at aim + 43-53), else a dash (ground or air) while its body bottom is >= her head + 0.35 u (rising, or >= 1.5 u
+  above her head when falling) and >= 2.8 u still to go; a second dash 12 frames later when the walk still does not fit;
+  never into its body's x span while its bottom is below her head + 0.35; no key once there; the planner on its landing
+  or at aim + 50; no stance at back_u (it lands nearer the wall than estimated): the wall-pad spot, no abort.
+- Gauntlet: in the flight the planner's dash rows rank after the rest when the walk fits (`jb_corner_walk` ticks).
+- Stats: `corner_stops` / `corner_*` (the antic), `corner_under`, `_there`, `_dash`, `_dash2`, `_pad`, `_end_*`,
+  `no_under_*`.
+
+### 3. The corner start state (trial only)
+
+Corner jumps are rare in the 1v1 (SP8a A/B: 16 of 238 jump slams, 12 of 145 jump casts; near escape jumps 11 in 144
+episodes) and the savestate restarts the wave (no mid-fight start). `SSBOT_FORUM_JUMP_BEHIND_SET=herd=1` (trial only,
+default 0): after a jump that took off away from a wall she backs off instead of going behind, stays on one side, and
+its evades push it to the wall behind it (at the wall an Evade Scuttle becomes an Escape Jump). It gave 6, 17, 13, 15
+corner jumps per 16-32 episodes. In the herd arm "behind at the landing" counts only for the corner jumps.
+
+### 4. Fixed-point trials (`sp8_t.ps1` via `sp4_block.ps1`, Forum_W_w7, instances 0 / 1, 1x)
+
+| round | code | arm (episodes) | jump slam scripts / >= 1 hit / safe | corner jumps / safe / behind | failures -> change |
+|---|---|---|---|---|---|
+| t1 | 9c64a1e | sp8sdT (16, 9.5 u stance) | 11 / 11 / 11 (behind 11 / 11) | 2 / 2 / 1 | - |
+| t1 | 9c64a1e | sp8hT (16, herd) | 26 / 26 / 26 | 6 / 6 / 3 | corner jump casts after the T2 stop: the planner fled late, rune circle x2 -> the way under as a script |
+| t2 | c92ae2e | sp8hT (32) | 41 / 41 / 41 | 17 / 17 / 15 | the planner dashed back to 7 u at the aim (no dash left); one take-off airborne -> corner stance 4.4 u, air start, second dash, <= 8 u |
+| t3 | d27777a | sp8hT (32) | 46 / 45 / 45 | 13 / 12 / 13 | dash to 0.5 u from the wall, the planner's wall jump into its body -> >= 0.9 u from the wall, no dash below 2.8 u |
+| **t4** | **7e268ef** | sp8hT (32) | **49 / 49 / 49** | **15 / 14 / 15** | the previous rune circle in the antic, knocked under its body (no corner script ran) |
+| t5 | 7e268ef | sp8jsT (16, DashStab, t1's seeds) | 22 stabs / 22 / 27 of 28 | - | behind 5 / 28, one landing hammer -> not used |
+
+Corner jumps' antic hits: jump slam 1.0 per jump (default 0.12), jump cast 1.9-2.1; after the aim 2.0-4.5.
+
+### 5. Tools / code
+
+- `ssbot.tools.sp8_cast` reports the jump slam scripts (`J`) and the corner jumps (`corner`, with rows) per arm and
+  family. Scripts `sp8b\scripts`: `corner_now.py` (corner jumps by wall distance), `peek.py` (newest runs' SP8b records),
+  `trial_sum.py` (the gates from report.json), `ticks_peek.py`, `ab_stats.py`; `ab_analyze.sh`, `replay_ident_sp8b.ps1`,
+  `wait_practice.ps1`.
+- Tests `tests/test_sp8b.py` (32: switches, the jump stop / walk-in / stab variant, the corner antic, the way under walk /
+  dash / two dashes and never under a low body, gates); cast_stab / sp8 / jump_behind / gauntlet / sp4-sp7 pass.
+
+### 6. Switch-off identity
+
+`sp8b\replay_ident_sp8b.ps1` (the three identity episodes): e84d78f and 7e268ef with both switches unset are
+byte-identical to 49e301a's default (2,073 / 1,778 / 1,541 ticks); both on (open loop): 0 errors, 192006 differs from
+tick 1332, 084036 from 892, the w13 two-Clapper episode identical (no start).
+
+### 7. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp8b2)
+
+`sp8b` = rnjb + JB_SLAM_DASH + JB_CORNER (the A/B arm); trial arms `sp8sdT` (rnjbT + JB_SLAM_DASH), `sp8jsT` (+ `j_mode=1`),
+`sp8hT` (sp8b + `herd=1`). The default arm rnjb has both off (unset).
+
+### 8. Machine state
+
+The person's practice (instance 8, 20:20-20:36) closed instances 0 / 1; reopened with `launch_sp8.ps1` (launcher -n 2
+--detach, via WMI; never --restore). Frozen (time scale 1e-4) after every block by `sp4_block.ps1`, DEMO_SOON restored;
+no game process touched; boost_workers ran for the blocks (`boost_workers.stop` present again). Frozen checkouts
+`C:\ssbot\live_1v1_{e84d78f,9c64a1e,c92ae2e,d27777a,7e268ef}`. Manifests `1v1sp8bt1..t5_manifest.txt`,
+`1v1sp8bab_manifest.txt`, `..bab2..`, `..bab3..`, `..babp..` (rounds 1-2), `..babq..` (1-3). Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The person decides on JB_SLAM_DASH / JB_CORNER (faster, 2 fewer HP-hitless episodes from unrelated small-rune bombs);
+   JB_SLAM_DASH alone was not A/B'd separately.
+2. The planner's model has no wall cling / wall jump: near a wall a dash into it + jump launches her into the Clapper (t3).
+3. A new jump antic's stance ignores the previous jump cast's rune circle (t4's failure).
+4. Small rune bombs while airborne were the arms' main HP difference (R2 CAST_FACE line).
+5. SP8c (EVADE_CHASE, one Clapper, approved) and SP9 (two Clappers: switch target at the corner) are next.
