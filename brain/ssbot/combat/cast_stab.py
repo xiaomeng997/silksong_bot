@@ -285,7 +285,8 @@ class CastStab:
 
     @staticmethod
     def _rec(r: Stab) -> dict:
-        return {"mode": r.mode, "k0": r.k0, "x0": r.x0, "rs": r.rs, "k_hit": r.k_hit, "rs_start_g": r.rs_start_g,
+        return {"mode": r.mode, "f0": r.j0 - SEND_AHEAD, "k0": r.k0, "x0": r.x0, "rs": r.rs, "k_hit": r.k_hit,
+                "rs_start_g": r.rs_start_g,
                 "rs_hit_g": r.rs_hit_g, "rel_j": r.rel_j, "x_stop": r.x_stop, "presses": r.presses, "hits": r.hits,
                 "skid": r.skid, "stab_in_stop": r.stab_in_stop, "end": r.phase, "why": r.why, "at_aim": r.at_aim,
                 "pred": r.pred}
