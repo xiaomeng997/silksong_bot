@@ -133,6 +133,53 @@ def summarize(J: list[dict], E: list[dict]) -> dict:
             no = [j for j in L if not j.get("script")]
             d["no_script"] = {"n": len(no), "antic_hits_per": round(sum(len(_antic_hits(j)) for j in no) / len(no), 3)
                               if no else None, "rel0": pct([j["rel0"] for j in no])}
+        if fam == "CC_JUMP":
+            # SP8b JB_SLAM_DASH: the jump slam's antic scripts
+            S = [j for j in L if j.get("script")]
+            d["scripts"] = len(S)
+            d["script_kinds"] = dict(Counter(
+                f'{j["script"]["mode"]}{"/walk" if j["script"].get("walk") else ""}'
+                f'{"/corner" if j["script"].get("corner") else ""}' for j in S))
+            if S:
+                nh = [len(_antic_hits(j)) for j in S]
+                d["J"] = {"x0": pct([j["script"]["x0"] for j in S]), "k0": pct([j["script"]["k0"] for j in S]),
+                          "rel_j": pct([j["script"].get("rel_j") for j in S]),
+                          "x_stop": pct([j["script"].get("x_stop") for j in S]),
+                          "skid": sum(1 for j in S if j["script"].get("skid")),
+                          "stab_in_stop": sum(1 for j in S if j["script"].get("stab_in_stop")),
+                          "presses": dict(Counter(len(j["script"].get("presses") or []) for j in S)),
+                          "press_k": pct([p for j in S for p in (j["script"].get("presses") or [])]),
+                          "antic_hits_dist": dict(Counter(nh)), "ge1": sum(1 for x in nh if x >= 1),
+                          "antic_hits_per_script": round(sum(nh) / len(S), 3),
+                          "ends": dict(Counter(f'{j["script"]["end"]}/{j["script"]["why"]}' for j in S).most_common()),
+                          "rel_aim": pct([j["rel_aim"] for j in S]),
+                          "safe_land30": sum(1 for j in S if not _hurt(j, LAND_SAFE_F)),
+                          "behind": sum(1 for j in S if (j.get("hero_land") or 0) < 0),
+                          "safe_and_behind": sum(1 for j in S if not _hurt(j, LAND_SAFE_F)
+                                                 and (j.get("hero_land") or 0) < 0),
+                          "hits_after_aim_per": round(sum(len(j["hits"]) - len(_antic_hits(j)) for j in S) / len(S), 3)}
+        # SP8b JB_CORNER: the jumps taking off with its centre within 4 u of the wall behind it
+        C = [j for j in L if j.get("x0_room_back") is not None and j["x0_room_back"] < 4.0]
+        if C:
+            nh = [len(_antic_hits(j)) for j in C]
+            d["corner"] = {"n": len(C), "corner_scripts": sum(1 for j in C if (j.get("script") or {}).get("corner")),
+                           "rel0": pct([j["rel0"] for j in C]), "rel_aim": pct([j["rel_aim"] for j in C]),
+                           "room0": pct([j["x0_room_back"] for j in C]),
+                           "room_land": pct([j["room_back"] for j in C]), "flight": pct([j["k_land"] - j["k_aim"]
+                                                                                        for j in C]),
+                           "antic_hits_per": round(sum(nh) / len(C), 3), "antic_hits_dist": dict(Counter(nh)),
+                           "hits_after_aim_per": round(sum(len(j["hits"]) - len(_antic_hits(j)) for j in C) / len(C), 3),
+                           "safe_land30": sum(1 for j in C if not _hurt(j, LAND_SAFE_F)),
+                           "behind": sum(1 for j in C if (j.get("hero_land") or 0) < 0),
+                           "safe_and_behind": sum(1 for j in C if not _hurt(j, LAND_SAFE_F)
+                                                  and (j.get("hero_land") or 0) < 0),
+                           "hero_land": pct([j.get("hero_land") for j in C]),
+                           "rows": [{"run": j["run"], "ep": j["ep"], "fam": j["fam"], "room0": j["x0_room_back"],
+                                     "rel0": j["rel0"], "rel_aim": j["rel_aim"], "room_land": j["room_back"],
+                                     "hero_land": j.get("hero_land"), "antic_hits": len(_antic_hits(j)),
+                                     "after": len(j["hits"]) - len(_antic_hits(j)), "hurt": _hurt(j, LAND_SAFE_F),
+                                     "script": (j.get("script") or {}).get("mode"),
+                                     "corner": (j.get("script") or {}).get("corner")} for j in C][:40]}
         out[f"{arm} {fam}"] = d
     ea = defaultdict(list)
     for e in E:
@@ -141,7 +188,7 @@ def summarize(J: list[dict], E: list[dict]) -> dict:
         why = Counter()
         for e in L:
             for k, v in (e.get("cast_stab") or {}).items():
-                if k.startswith("no_") or k.startswith("why_") or k.startswith("end_"):
+                if k.startswith(("no_", "why_", "end_", "j_", "corner_")) and isinstance(v, (int, float)):
                     why[k] += v
         out[f"{arm} episodes"] = {"n": len(L), "kills": sum(e["kill"] for e in L),
                                   "fight_s": pct([e["fight_s"] for e in L]),

@@ -48,6 +48,20 @@ fitted 0.183-0.283 s: the release by grace_f frames into the sprint); then side 
 first with no direction key (she faces it), later ones with the key toward it on the frame before, walking in to
 stop_stand between them (each hit knocks it ~0.48 u away), until the antic frame press_k_max.
 
+SSBOT_FORUM_JB_SLAM_DASH=1 (SP8b, default off until its A/B; forum.md 73): the same stop for the jump slam's antic (Jump
+Antic, 30 frames to the Jump Aim; its crouched body front 1.65 u: the standing side slash reaches <= 4.67 u centre to
+centre; at its start she stands 9.25 u away, p10 / 90 8.53 / 9.76, and lands 2 hits in 52 antics, antic_audit): from
+j_stop_d_min .. j_stop_d_max the dash held and released to stop at j_stop_u, then one side slash (about antic frame 20);
+nearer (in reach, or a walk-in that reaches by j_press_k_max) she walks in and slashes, twice when the first press comes
+early enough; then the planner (JUMP_BEHIND's aim stance and the way under). j_mode 1 (SSBOT_FORUM_JB_DASH_SET=j_mode=1):
+the DashStab instead of the stop (the comparison: one hit at k0 + 15-17 from 8-12 u, she is in the recoil at the aim).
+SSBOT_FORUM_JB_CORNER=1 (SP8b, with JUMP_BEHIND, default off; one live Clapper only - the lead's note: with two Clappers
+SP9 switches target at the corner): the Clapper's centre within corner_from_u of the wall behind it at either jump
+antic's start (the person: "after pushing it into the corner, when it does a jump move you can walk up leisurely, slash
+twice, then go under to its back") and she within corner_walk_max in front: walk in and slash every slash_cd frames
+through the antic (the stop script's slash phase without the dash); the way under is the planner's (JUMP_BEHIND's
+behind spot with the wall rule; gauntlet: walk when it fits).
+
     cs = CastStab()                                   # per episode: cs.reset()
     m = cs.step(f, s, ground, accepting, t_game)      # the mask for frame f + 2, or None (the planner decides)
 """
@@ -73,9 +87,15 @@ _V2 = "1" if _on("SSBOT_FORUM_V2") else "0"
 DASH_SLASH = _on("SSBOT_FORUM_JB_DASH_SLASH", _V2)
 COMBO = DASH_SLASH and _on("SSBOT_FORUM_JB_DASH_COMBO", _V2)
 STOP = _on("SSBOT_FORUM_JB_DASH_STOP", _V2)
-ENABLED = DASH_SLASH or STOP
+# SP8b (forum.md 73): default off until their A/B; with them off every decision is the SP8a one
+SLAM_DASH = _on("SSBOT_FORUM_JB_SLAM_DASH")
+CORNER = _jb.CORNER
+ENABLED = DASH_SLASH or STOP or SLAM_DASH or CORNER
 CLAPPER = _sp.CLAPPER
 ANTIC = ("Cast Slam Antic", "Cast Slam Antic 2")
+JUMP_ANTIC = ("Jump Antic",)  # SP8b: the jump slam's antic (30 frames; Jump Aim at +30, p10 / 90 29 / 30)
+J_AIM_K = 30
+J_BODY_FRONT = 1.65          # its crouched body front in the Jump Antic (2.05 on its first frame; antic_audit)
 M_L, M_R, M_A, M_DASH = _sp.M_L, _sp.M_R, _sp.M_A, _sp.M_DASH
 SEND_AHEAD = _sp.SEND_AHEAD
 BODY_FRONT = 1.873           # its body box front edge from its centre in the cast antic (u; Idle 2.25)
@@ -165,6 +185,24 @@ class StabCfg:
     stop_stand: float = 4.3      # between presses walk in to here ...
     stop_min_u: float = 3.4      # ... never nearer
     press_k_max: int = 50        # the last press's antic frame (the mask's)
+    # SP8b JB_SLAM_DASH: the jump slam's Jump Antic (Jump Aim at +30; its crouched body front 1.65 u: the standing side
+    # slash reaches <= 4.67 u centre to centre)
+    j_stop_d_min: float = 6.6    # the dash-stop band (u, centre to centre, her x on the dash's frame); nearer: walk in
+    j_stop_d_max: float = 11.3   # ... (past it the release falls past grace_f)
+    j_stop_u: float = 4.15       # the target stop
+    j_stop_lo: float = 3.4       # no start when the predicted stop is nearer
+    j_reach: float = 4.5         # a press only from here or nearer
+    j_stand: float = 4.1         # between presses walk in to here (her box front 2.2 u off its crouched body) ...
+    j_min_u: float = 3.4         # ... never nearer
+    j_press_k_max: int = 26      # the last press's antic frame (the mask's; its collider frames reach the take-off)
+    j_k_max: int = 14            # the latest antic frame (the mask's) at which a jump slam script may start
+    j_mode: int = 0              # 1: the DashStab (stab_path with the crouched front) instead of the stop
+    j_aim_x_min: float = 5.0     # ... only when the model puts her this far in front at the aim (in the recoil)
+    # SP8b JB_CORNER (both jump antics, one live Clapper)
+    corner_from_u: float = 4.0   # its centre within this of the wall behind it at the antic start (push_from_u)
+    corner_walk_max: float = 6.6  # she walks in from this far at most (u, centre to centre; beyond: the dash scripts)
+    corner_k_max_j: int = 14     # the latest antic frame (the mask's) to start: the jump slam
+    corner_k_max_c: int = 30     # ... the jump cast
 
 
 def _num_env(c: StabCfg) -> StabCfg:
@@ -180,7 +218,7 @@ def _num_env(c: StabCfg) -> StabCfg:
     return c
 
 
-def stab_path(x0: float, cfg: StabCfg | None = None) -> dict:
+def stab_path(x0: float, cfg: StabCfg | None = None, front: float = BODY_FRONT) -> dict:
     """The dash slash from x0 u in front of its centre (centre to centre), the dash's mask on frame 0: the predicted
     frame of the hit (None: no hit), her nearest x (centre), the recoil's top height, the landing frame, and the path
     [(j, x, y)] (frames from the dash's mask; x in front of its centre, y above the floor)."""
@@ -194,7 +232,7 @@ def stab_path(x0: float, cfg: StabCfg | None = None) -> dict:
         x -= (STAB_V0 if i < STAB_V0_F else STAB_V) / 60.0
         xmin = min(xmin, x)
         path.append((j, x, y))
-        if i >= STAB_ON and x - STAB_REACH <= BODY_FRONT:
+        if i >= STAB_ON and x - STAB_REACH <= front:
             hit = j
             break
         j += 1
@@ -241,19 +279,22 @@ def _clean(latch, m: int) -> bool:
     return (int(latch(m)) & keys) == (m & keys)
 
 
-def stop_plan(x0: float, cfg: StabCfg) -> dict | None:
+def stop_plan(x0: float, cfg: StabCfg, stop_u: float | None = None, stop_lo: float | None = None) -> dict | None:
     """T2: how she stops in reach from x0 (centre to centre): a tap (the dash's own travel) or the dash held to the
-    frame jr (the first frame without it) - None when neither stops her inside [stop_lo, stop_u + tap_room] in time."""
+    frame jr (the first frame without it) - None when neither stops her inside [stop_lo, stop_u + tap_room] in time.
+    stop_u / stop_lo: the cfg's (the cast antic) unless given (SP8b: the jump slam's j_stop_u / j_stop_lo)."""
     c = cfg
+    su = c.stop_u if stop_u is None else stop_u
+    lo = c.stop_lo if stop_lo is None else stop_lo
     x_tap = x0 - sprint_travel(DASH_F)
-    if c.stop_lo <= x_tap <= c.stop_u + c.tap_room:
+    if lo <= x_tap <= su + c.tap_room:
         return {"tap": True, "jr": c.tap_f, "x_stop": round(x_tap, 2)}
-    if x_tap < c.stop_lo:
+    if x_tap < lo:
         return None
     for jr in range(DASH_F + 1, DASH_F + c.grace_f + 1):
         x_stop = x0 - sprint_travel(jr + 1)        # she moves on through the release's own frame
-        if x_stop <= c.stop_u:
-            return {"tap": False, "jr": jr, "x_stop": round(x_stop, 2)} if x_stop >= c.stop_lo else None
+        if x_stop <= su:
+            return {"tap": False, "jr": jr, "x_stop": round(x_stop, 2)} if x_stop >= lo else None
     return None
 
 
@@ -291,21 +332,27 @@ class Stab:
     x_aim_cx: float | None = None   # its centre and her transform x at the aim (the landing's prediction)
     hx_aim: float | None = None
     under: dict | None = None   # T1's way under: start / dash / clear frames (from the aim), her height
+    kind: str = "cast"          # SP8b: "jump" (the jump slam's Jump Antic) or "cast" (the jump cast's antic)
+    walk: bool = False          # SP8b: no dash - she starts in reach or walks in (the first press with the key toward it)
+    corner: bool = False        # SP8b JB_CORNER's run
 
 
 class CastStab:
     def __init__(self, cfg: StabCfg | None = None, dash_slash: bool | None = None, combo: bool | None = None,
-                 stop: bool | None = None):
+                 stop: bool | None = None, slam_dash: bool | None = None, corner: bool | None = None):
         self.cfg = cfg or _num_env(StabCfg())
         self.dash_slash = DASH_SLASH if dash_slash is None else dash_slash
         self.combo = (COMBO if combo is None else combo) and self.dash_slash
         self.stop = STOP if stop is None else stop
+        self.slam_dash = SLAM_DASH if slam_dash is None else slam_dash      # SP8b: the jump slam's antic
+        self.corner = CORNER if corner is None else corner                  # SP8b: either jump antic at a wall
         if dash_slash is None and stop is None and not (self.dash_slash or self.stop):
             self.dash_slash = True               # constructed directly (tests, probes): the SP6 dash slash
         self.run: Stab | None = None
         self.done: list[Stab] = []
         self._seen: set = set()            # (iid, antic entry frame) looked at
         self.n_antic = 0
+        self.n_jantic = 0                  # SP8b: jump slam antics looked at
         self.why_not: dict = {}
         self._pred: dict = {}
         self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
@@ -315,6 +362,7 @@ class CastStab:
         self.done = []
         self._seen = set()
         self.n_antic = 0
+        self.n_jantic = 0
         self.why_not = {}
         self._runes = {}
 
@@ -339,35 +387,53 @@ class CastStab:
     def stats(self) -> dict:
         from collections import Counter
         out = Counter({"antics": self.n_antic})
+        if self.slam_dash or self.corner:
+            out["j_antics"] = self.n_jantic
         for r in self.done + ([self.run] if self.run is not None else []):
-            out["stabs" if r.mode == "stab" else "stops"] += 1
+            pre = "corner_" if r.corner else "j_" if r.kind == "jump" else ""     # SP8b's runs apart
+            out[pre + ("stabs" if r.mode == "stab" else "stops")] += 1
             if r.mode == "stab":
-                out["hit"] += r.hit_f is not None
-                out["rs_planned"] += r.rs
-                out["rs_started"] += r.rs_start_g is not None
-                out["rs_hit"] += r.rs_hit_g is not None
+                out[pre + "hit"] += r.hit_f is not None
+                out[pre + "rs_planned"] += r.rs
+                out[pre + "rs_started"] += r.rs_start_g is not None
+                out[pre + "rs_hit"] += r.rs_hit_g is not None
             else:
-                out["stop_presses"] += len(r.presses)
-                out["stop_skid"] += r.skid
-                out["stop_stab"] += r.stab_in_stop
-            out["hits_in_script"] += len(r.hits)
-            out[f"end_{r.phase}"] += 1
+                out[pre + "stop_presses"] += len(r.presses)
+                out[pre + "stop_skid"] += r.skid
+                out[pre + "stop_stab"] += r.stab_in_stop
+            out[pre + "hits_in_script"] += len(r.hits)
+            out[f"{pre}end_{r.phase}"] += 1
             if r.why:
-                out[f"why_{r.why}"] += 1
+                out[f"{pre}why_{r.why}"] += 1
         for k, v in self.why_not.items():
             out[f"no_{k}"] += v
         res = dict(out)
-        if self.combo or self.stop:
+        if self.combo or self.stop or self.slam_dash or self.corner:
             res["runs"] = [self._rec(r) for r in self.done + ([self.run] if self.run is not None else [])]
         return res
 
     @staticmethod
     def _rec(r: Stab) -> dict:
-        return {"mode": r.mode, "f0": r.j0 - SEND_AHEAD, "k0": r.k0, "x0": r.x0, "rs": r.rs, "k_hit": r.k_hit,
-                "rs_start_g": r.rs_start_g, "rs_x": r.rs_x,
-                "rs_hit_g": r.rs_hit_g, "rel_j": r.rel_j, "x_stop": r.x_stop, "presses": r.presses, "hits": r.hits,
-                "skid": r.skid, "stab_in_stop": r.stab_in_stop, "end": r.phase, "why": r.why, "at_aim": r.at_aim,
-                "pred": r.pred, "prep": r.prep, "under": r.under}
+        d = {"mode": r.mode, "f0": r.j0 - SEND_AHEAD, "k0": r.k0, "x0": r.x0, "rs": r.rs, "k_hit": r.k_hit,
+             "rs_start_g": r.rs_start_g, "rs_x": r.rs_x,
+             "rs_hit_g": r.rs_hit_g, "rel_j": r.rel_j, "x_stop": r.x_stop, "presses": r.presses, "hits": r.hits,
+             "skid": r.skid, "stab_in_stop": r.stab_in_stop, "end": r.phase, "why": r.why, "at_aim": r.at_aim,
+             "pred": r.pred, "prep": r.prep, "under": r.under}
+        if r.kind != "cast" or r.walk or r.corner:
+            d.update({"kind": r.kind, "walk": r.walk, "corner": r.corner})      # SP8b
+        return d
+
+    @staticmethod
+    def _states(r: Stab) -> tuple:
+        """The run's antic states (SP8b: the jump slam's Jump Antic, else the jump cast's two)."""
+        return JUMP_ANTIC if r.kind == "jump" else ANTIC
+
+    def _lim(self, r: Stab) -> tuple[float, float, float, int]:
+        """The slash phase's (reach, stand, nearest, last press antic frame) for the run's antic."""
+        c = self.cfg
+        if r.kind == "jump":
+            return c.j_reach, c.j_stand, c.j_min_u, c.j_press_k_max
+        return c.stop_reach, c.stop_stand, c.stop_min_u, c.press_k_max
 
     def active(self) -> bool:
         return self.run is not None and self.run.phase not in ("done", "abort")
@@ -410,7 +476,7 @@ class CastStab:
                     dealt = d.get("dealt", d.get("amount"))
                     if dealt is None or float(dealt) > 0:
                         r.hits.append((round((t - r.ta) * 60.0, 1), str(d.get("src"))))
-            if r.t_aim is None and st not in ANTIC:
+            if r.t_aim is None and st not in self._states(r):
                 r.t_aim = t - (tin if st in ("Cast Jump", "Jump Aim") else 0.0)
                 r.x_aim_cx = float(e["pos"][0])
                 r.hx_aim = float((h.get("pos") or [_sp.hero_x(s)])[0])
@@ -427,27 +493,48 @@ class CastStab:
                 r.last_m = m
             return m
         # a new start?
-        if e is None or st != "Cast Slam Antic":
+        if e is None:
+            return None
+        if st == "Cast Slam Antic":
+            kind = "cast"
+        elif st == JUMP_ANTIC[0] and (self.slam_dash or self.corner):
+            kind = "jump"                                   # SP8b: the jump slam's antic
+        else:
             return None
         ka = int(round(tin * 60.0)) + SEND_AHEAD          # the antic frame the next mask lands on
         key = (e.get("iid"), f - int(round(tin * 60.0)))
         if key in self._seen:
             return None
-        why = self._why_not(s, e, ground, accepting, ka)
+        why = self._why_start(s, e, ground, accepting, ka, kind)
         if why is not None:
             if why != "wait":
                 self._seen.add(key)
-                self.n_antic += 1
-                self.why_not[why] = self.why_not.get(why, 0) + 1
+                if kind == "cast":
+                    self.n_antic += 1
+                    self.why_not[why] = self.why_not.get(why, 0) + 1
+                else:
+                    self.n_jantic += 1
+                    self.why_not["j_" + why] = self.why_not.get("j_" + why, 0) + 1
             return None
         self._seen.add(key)
-        self.n_antic += 1
+        if kind == "cast":
+            self.n_antic += 1
+        else:
+            self.n_jantic += 1
         face = 1 if e.get("flipX") else -1
         x0 = (_sp.hero_x(s) - float(e["pos"][0])) * face
         p = self._pred
         mode = p.get("mode", "stab")
         self.run = Stab(iid=e.get("iid"), face=face, j0=f + SEND_AHEAD, k0=ka, x0=round(x0, 3), pred=p, hp0=hp,
-                        mode=mode, ta=t - tin, rs=bool(p.get("rs")), phase="lunge" if mode == "stab" else "dash")
+                        mode=mode, ta=t - tin, rs=bool(p.get("rs")), phase="lunge" if mode == "stab" else "dash",
+                        kind=kind, walk=bool(p.get("walk")), corner=bool(p.get("corner")))
+        if self.run.walk:
+            # SP8b: in reach or walking in - the slash phase at once (no dash)
+            self.run.phase = "slash"
+            m = self._step_stop(self.run, f, t, s, e, st, ground, accepting)
+            if m is not None:
+                self.run.last_m = m
+            return m
         toward = M_R if -face > 0 else M_L
         if not _clean(latch, toward | M_DASH):
             self.run.phase = "prep"              # the key toward it first: the dash on the first clean frame
@@ -468,11 +555,13 @@ class CastStab:
                 return None
             r.prep += 1
             return toward
-        if st != "Cast Slam Antic":
+        if st != self._states(r)[0]:
             self._close("abort", "prep late")
             return None
         ka = int(round(tin * 60.0)) + SEND_AHEAD
-        why = self._why_not(s, e, ground, accepting, ka)
+        why = self._why_start(s, e, ground, accepting, ka, r.kind)
+        if why is None and bool(self._pred.get("walk")):
+            why = "walk"                                  # SP8b: in reach / walk-in band by now: not this dash
         if why is not None or self._pred.get("mode", "stab") != r.mode:
             self._close("abort", f"prep {why or 'mode'}")
             return None
@@ -640,8 +729,9 @@ class CastStab:
                 r.phase, r.rel_j = "stop", j
                 return 0
             v = abs(float((h.get("vel") or [0.0, 0.0])[0]))
+            stop_u = c.j_stop_u if r.kind == "jump" else c.stop_u
             # closed loop: release when her travel through the mask's frame and the release frame ends at stop_u
-            if j > DASH_F and (xr - c.release_lag * v / 60.0 <= c.stop_u or j > DASH_F + c.grace_f):
+            if j > DASH_F and (xr - c.release_lag * v / 60.0 <= stop_u or j > DASH_F + c.grace_f):
                 r.phase, r.rel_j = "stop", j
                 if j > DASH_F + c.grace_f:
                     r.why = "late release"
@@ -662,31 +752,158 @@ class CastStab:
             else:
                 return 0
         if r.phase == "slash":
-            if st not in ANTIC or km > c.press_k_max + 2:
-                self._close("done", "aim" if st not in ANTIC else "end")
+            states = self._states(r)
+            reach, stand, min_u, k_max = self._lim(r)
+            if st not in states or km > k_max + 2:
+                self._close("done", "aim" if st not in states else "end")
                 return None
             last = r.presses[-1] if r.presses else None
             if last is not None and km - last < 1.5:
-                return M_A | (toward if len(r.presses) > 1 else 0)     # the press's second frame
+                return M_A | (toward if len(r.presses) > 1 or r.walk else 0)     # the press's second frame
+            if (r.kind == "jump" or r.walk) and last is not None and last + c.slash_cd > k_max:
+                # SP8b: no press fits before the aim any more - the planner (its aim stance, the way under)
+                self._close("done", "last press")
+                return None
             cd = float(((h.get("tm") or {}).get("atk_cd")) or 0.0) * 60.0 - (SEND_AHEAD - 1)
             ready = (last is None or km - last >= c.slash_cd) and cd <= 0.05 and accepting and ground
             v = float((h.get("vel") or [0.0, 0.0])[0]) * r.face
             x_m = xr + v * SEND_AHEAD / 60.0              # her x at the mask's frame (her own velocity)
-            in_reach = x_m <= c.stop_reach and km <= c.press_k_max
+            in_reach = x_m <= reach and km <= k_max
             if ready and in_reach:
-                if not r.presses:
+                if not r.presses and not r.walk:
                     r.presses.append(round(km, 1))
                     return M_A                            # the first press: no key (she faces it from the dash)
-                if r.last_m & toward:
+                fc = h.get("facing")
+                facing = fc is not None and float(fc) * -r.face > 0
+                if r.last_m & toward or (r.walk and not r.presses and facing):
                     r.presses.append(round(km, 1))
                     return M_A | toward
                 return toward                             # the frame before the press: toward it
-            if x_m - _sp.WALK_U >= c.stop_stand and x_m - _sp.WALK_U >= c.stop_min_u:
+            if x_m - _sp.WALK_U >= stand and x_m - _sp.WALK_U >= min_u:
                 return toward                             # walk in between presses
             return 0
         return None
 
     # ---- the start ----
+
+    def _why_start(self, s: dict, e: dict, ground: bool, accepting: bool, ka: int, kind: str) -> str | None:
+        """None when a script starts now (self._pred says which); "wait" to look again next tick; else why not. The
+        jump cast's antic: SP8b's corner first (it walks in from below the T1 / T2 bands), then SP6 / SP8a as before."""
+        if kind == "jump":
+            return self._why_not_jump(s, e, ground, accepting, ka)
+        if self.corner:
+            wc = self._why_corner(s, e, ground, accepting, ka, kind)
+            if wc is None or wc == "wait":
+                return wc
+        return self._why_not(s, e, ground, accepting, ka)
+
+    def _x_dash(self, s: dict, e: dict) -> tuple[int, float, float]:
+        """(its facing, her x in front of its centre now, the same on the mask's frame: her own velocity on)."""
+        face = 1 if e.get("flipX") else -1
+        x_now = (_sp.hero_x(s) - float(e["pos"][0])) * face
+        v = float(((s.get("hero") or {}).get("vel") or [0.0, 0.0])[0])
+        return face, x_now, x_now + v * face * SEND_AHEAD / 60.0
+
+    def _rune_in_way(self, s: dict, e: dict, face: int, front_u: float) -> bool:
+        cx = float(e["pos"][0])
+        hx = _sp.hero_x(s)
+        front = cx + face * front_u
+        lo, hi = min(hx, front), max(hx, front)
+        return any(a < hi and b > lo for a, b in self._rune_threats(int(s.get("f") or 0), s))
+
+    def _why_corner(self, s: dict, e: dict, ground: bool, accepting: bool, ka: int, kind: str) -> str | None:
+        """SP8b JB_CORNER: its centre within corner_from_u of the wall behind it, one live Clapper, she on the ground in
+        front within corner_walk_max: the slash phase at once (walk in, a press every slash_cd frames)."""
+        c = self.cfg
+        face, x_now, x0 = self._x_dash(s, e)
+        cx = float(e["pos"][0])
+        room0 = (cx - _sp.WALL_L) if face > 0 else (_sp.WALL_R - cx)
+        if room0 >= c.corner_from_u:
+            return "not corner"
+        if len(_sp.clappers(s)) != 1:
+            return "corner two"
+        if x_now <= 0:
+            return "corner behind"
+        if x0 > c.corner_walk_max:
+            return "corner far"
+        reach, _, min_u, k_max = self._lim(Stab(iid=None, face=face, j0=0, k0=0, x0=0.0, kind=kind))
+        if x0 < min_u:
+            return "corner near"                         # nearer than the stance's nearest: the planner
+        k_late = c.corner_k_max_j if kind == "jump" else c.corner_k_max_c
+        if ka > k_late or ka + max(0.0, (x0 - reach) / _sp.WALK_U) > k_max:
+            return "corner late"
+        if not (accepting and ground):
+            return "wait"
+        if self._rune_in_way(s, e, face, J_BODY_FRONT if kind == "jump" else BODY_FRONT):
+            return "wait"
+        self._pred = {"mode": "stop", "walk": True, "corner": True, "x_dash": round(x0, 2), "room0": round(room0, 2)}
+        return None
+
+    def _why_not_jump(self, s: dict, e: dict, ground: bool, accepting: bool, ka: int) -> str | None:
+        """SP8b: the jump slam's antic. JB_CORNER first (at a wall, near), then JB_SLAM_DASH: in reach or a walk-in that
+        presses by j_press_k_max (the slash phase at once), the dash-stop from j_stop_d_min (or the DashStab, j_mode 1)."""
+        c = self.cfg
+        if self.corner:
+            wc = self._why_corner(s, e, ground, accepting, ka, "jump")
+            if wc is None or wc == "wait":
+                return wc
+        if not self.slam_dash:
+            return "off"
+        if ka > c.j_k_max:
+            return "late"
+        if not (accepting and ground):
+            return "wait"
+        face, x_now, x0 = self._x_dash(s, e)
+        if x_now <= 0:
+            return "behind"
+        if len(_sp.clappers(s)) != 1:
+            return "two"                                 # one Clapper only (the person's two-Clapper rules differ)
+        if self._rune_in_way(s, e, face, J_BODY_FRONT):
+            return "wait"
+        if x0 < c.j_stop_d_min:
+            if x0 < c.j_min_u:
+                return "near"                            # at its body already: the planner (its aim stance)
+            if ka + max(0.0, (x0 - c.j_reach) / _sp.WALK_U) > c.j_press_k_max:
+                return "walk late"
+            self._pred = {"mode": "stop", "walk": True, "x_dash": round(x0, 2)}
+            return None
+        tm = (s.get("hero") or {}).get("tm") or {}
+        if float(tm.get("dash_cd") or 0.0) > 0.02 or float(tm.get("atk_cd") or 0.0) > 0.02:
+            return "wait"
+        if c.j_mode == 1:
+            return self._why_jstab(s, face, x0, ka)
+        if x0 > c.j_stop_d_max:
+            return "distance"
+        p = stop_plan(x0, c, stop_u=c.j_stop_u, stop_lo=c.j_stop_lo)
+        if p is None:
+            return "no stop"
+        if ka + p["jr"] + 3 > c.j_press_k_max:
+            return "late"                                # the press after the stop would come past j_press_k_max
+        self._pred = {"mode": "stop", "x_dash": round(x0, 2), **p}
+        return None
+
+    def _why_jstab(self, s: dict, face: int, x0: float, ka: int) -> str | None:
+        """SP8b j_mode 1: the DashStab in the jump slam's antic - the hit before the aim, her box front outside its
+        crouched body, and her x in the recoil at the aim at least j_aim_x_min (its jump aims 5 u in front of her)."""
+        c = self.cfg
+        if not c.d_min <= x0 <= c.d_max:
+            return "distance"
+        p = stab_path(x0, c, front=J_BODY_FRONT)
+        if p["hit"] is None or ka + p["hit"] + HIT_LAG >= J_AIM_K:
+            return "no hit"
+        if p["xmin"] - HALF_W < J_BODY_FRONT + c.margin:
+            return "too close"
+        ja = J_AIM_K - ka
+        x_aim = next((x for j, x, y in p["path"] if j == ja), p["path"][-1][1])
+        if x_aim < c.j_aim_x_min:
+            return "aim near"
+        hx = _sp.hero_x(s)
+        room = (_sp.WALL_R - hx) if face > 0 else (hx - _sp.WALL_L)
+        if room < c.wall_room:
+            return "wall"
+        self._pred = {"mode": "stab", "x_dash": round(x0, 2), "hit": p["hit"], "xmin": round(p["xmin"], 2),
+                      "land": p["land"], "top": round(p["top"], 2), "rs": False, "x_aim": round(x_aim, 2)}
+        return None
 
     def _why_not(self, s: dict, e: dict, ground: bool, accepting: bool, ka: int) -> str | None:
         """None when a script starts now (self._pred says which); "wait" to look again next tick; else the reason it

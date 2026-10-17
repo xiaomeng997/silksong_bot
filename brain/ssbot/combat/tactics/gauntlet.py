@@ -1044,6 +1044,20 @@ class GauntletTactics:
             if (hx - land) * f0 > 0 and jump_behind.walk_fits(hx, land, int(f0), since):
                 out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
                 self.stats["jb_walk"] = self.stats.get("jb_walk", 0) + 1
+        if (jump_behind.CORNER and s is not None and s.type_key == CLAPPER
+                and how_s == "jump: under and behind (flight)" and s.iid in self.jb_land
+                and sum(1 for x in (getattr(fc, "subjects", ()) or ())
+                        if x.type_key == CLAPPER and x.alive and x.in_play) == 1):
+            # SSBOT_FORUM_JB_CORNER (SP8b): a jump taking off with its centre within push_from_u of the wall behind it
+            # lands pushed out, near her: walk under it to the behind spot when the walk fits (dash rows after)
+            x0, f0, land, _ = self.jb_land[s.iid]
+            if jump_behind.corner_room(x0, f0) < jump_behind.CFG["push_from_u"]:
+                aim_f = 30.0 if s.family == CC_JUMP else 55.0
+                since = (self._t - self.t_commit.get(s.iid, self._t)) * 60.0 - aim_f
+                if (hx - land) * f0 > 0 and jump_behind.walk_fits(hx, land, int(f0), since,
+                                                                   jump_behind.CFG["corner_walk_end_f"]):
+                    out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
+                    self.stats["jb_corner_walk"] = self.stats.get("jb_corner_walk", 0) + 1
         if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
                 and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it

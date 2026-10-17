@@ -91,6 +91,15 @@ def _sub(name: str) -> bool:
 # front of her, so the walk (0.1375 u / frame; her air speed measured the same) fits only when the landing comes
 # nearer than ~5.0 u - a short jump, a wall push.
 WALK = ENABLED and _on("SSBOT_FORUM_JB_WALK")
+# SSBOT_FORUM_JB_CORNER (task 1v1 SP8b, default off, only with ENABLED; forum.md 73; one live Clapper only - the lead's
+# note of 2026-10-16: with two Clappers SP9 switches target at the corner): the person, "after pushing it into the
+# corner, when it does a jump move you can walk up leisurely, slash twice, then go under to its back". Its centre
+# within push_from_u of the wall behind it at the antic start: combat.cast_stab walks her in and slashes through the
+# antic (both jump moves); in the flight the landing comes 1.1-4.1 u in front of where she stood at the aim (pushed out
+# by the wall-top ledge, 3.35-6.0 u from the wall, 43-53 frames after the aim; the combo answer, section 0), so the
+# walk under it to the behind spot often fits: the planner's dash rows rank after the rest when a walk gets her
+# walk_clear_u behind the landing by aim + corner_walk_end_f (gauntlet; JB_WALL's landing estimate).
+CORNER = ENABLED and _on("SSBOT_FORUM_JB_CORNER")
 PASS_HIT = _sub("SSBOT_FORUM_JB_PASS")
 LAND_HIT = _sub("SSBOT_FORUM_JB_LAND")
 NO_JUMP = _sub("SSBOT_FORUM_JB_NOJUMP")
@@ -117,6 +126,8 @@ NUM = {
     "walk_v": 0.1375,      # SSBOT_FORUM_JB_WALK: her walk (u / frame; the air the same: SP6, 104 way-outs)
     "walk_end_f": 50,      # ... past its back by aim + this (its body's bottom 2.4 u above the floor at +50)
     "walk_clear_u": 1.87,  # ... behind the landing centre: its back 1.34 + her half width 0.23 + 0.3
+    "corner_walk_end_f": 38,  # SSBOT_FORUM_JB_CORNER: the walk past its back by aim + this (a pushed-out jump lands
+    #                        43-53 frames after the aim, its body down to her head ~5 frames before)
 }
 BODY_TOP_U = 3.92          # the standing body's top above the floor (Idle box y 3.01-6.92)
 
@@ -189,9 +200,15 @@ def aim_spot(x: float, front: float, cfg: dict | None = None) -> float:
     return min(max(v, WALL_L + c["wall_pad_u"]), WALL_R - c["wall_pad_u"])
 
 
-def walk_fits(hx: float, land: float, face: int, since_aim_f: float) -> bool:
+def walk_fits(hx: float, land: float, face: int, since_aim_f: float, end_f: float | None = None) -> bool:
     """SSBOT_FORUM_JB_WALK: the hero at hx, the landing at land (its jump facing face), since_aim_f frames after its Jump
-    Aim: a walk from here gets her walk_clear_u behind the landing by aim + walk_end_f."""
+    Aim: a walk from here gets her walk_clear_u behind the landing by aim + walk_end_f (end_f: another limit, SP8b's
+    corner_walk_end_f)."""
     c = CFG
     need = (hx - land) * face + c["walk_clear_u"]
-    return need <= c["walk_v"] * (c["walk_end_f"] - since_aim_f)
+    return need <= c["walk_v"] * ((c["walk_end_f"] if end_f is None else end_f) - since_aim_f)
+
+
+def corner_room(x: float, front: float) -> float:
+    """SSBOT_FORUM_JB_CORNER: the Clapper's centre to the wall behind it (front: its facing, +1 right)."""
+    return (x - WALL_L) if front > 0 else (WALL_R - x)
