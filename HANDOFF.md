@@ -8515,3 +8515,187 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
    physics steps), once the stance puts her at its face.
 4. The big rune and the small rune bombs are now the largest sources (2.5-4 hits / min in the SP7 arms).
 5. The playbook can run one slam at a time; a second Clapper's slam during the first's way out is left to the planner.
+
+## Task 1v1 - stage SP8a: the jump cast's antic far away - dash slash x2 (DashStab + RecoilStab) vs dash, stop, side slash x2 (branch worktree-wf_f1846551-5f9-1, 2026-10-16; forum.md §72)
+
+The person (2026-10-16): "the two jump moves mostly start their antic far away; try either dash slash x2 or dash then
+stop and side slash x2". SP8a is the big rune (the jump cast: Cast Slam Antic 16 + Cast Slam Antic 2 40 frames, Jump
+Aim at antic +55); the spec was C:\ssbot\data\m2_dash_slash\combo\answer.txt (section 4) and
+C:\ssbot\data\m2_play\antic_audit\audit.txt. Distances are centre to centre (the hero's box centre, the Clapper's
+transform), + = in front (the side it faces); HeroBox 0.46 u wide; its body front 1.873 u in the cast antic. g = game
+frames from the DashStab's hit (Stamp.t_game_s). Data `C:\ssbot\data\m2_play\sp8` (`t1`..`t5` trials, `ab` / `ab2` /
+`abp` the A/B rounds and pooled, `replay_<sha>` identity, `scripts`). Commits 4f48cb1, 6e6b760, e0e84b4, 4c028c0,
+33ff9d5, 20a7400, 34b2b47 (tested code), ad77f85 (the default), 49e301a (the rune check refined, checked live), docs
+after it. The human_two answer.txt did not exist
+during SP8a (only its intermediate files); the lead's NOTE_FROM_LEAD (JB_CORNER one Clapper only) concerns SP8b.
+
+### Result
+
+- **Both scripts pass the fixed-point gates** (final code, the 9.5 u idle stance): T1 DashStab + RecoilStab 22 / 22
+  DashStab hits, RS started 22 / 22 and hit 22 / 22, 29 / 29 jump casts without HP loss to landing + 30, 22 / 22 safe
+  and behind at the landing, 1.62 hits per jump cast antic (2.0 per scripted one; SP6's DashStab alone 0.90). T2 dash,
+  stop, side slashes 18 / 18 stops with two hits, no skid, no DashStab out of a stop, 18 / 18 safe and behind, 1.64 hits
+  per jump cast antic.
+- **A/B** (Forum_W_w7, the default stance, 32 episodes per arm in two rounds of 16, block design, the same seeds; table
+  below): sp8dx (T1 + T2: the stop below 10 u, the stab + RS from there) is the fastest and not worse on HP-hitless:
+  landed / s 1.022 -> **1.075** (+0.053, 90 % +0.016 .. +0.089), kill p50 21.9 -> **20.6 s** (-1.25, -2.06 .. +0.05),
+  HP-hitless 30 -> 30 of 32, hits per jump cast antic 0.48 -> 1.85. **Promoted** (ad77f85): JB_DASH_SLASH /
+  JB_DASH_COMBO / JB_DASH_STOP follow SSBOT_FORUM_V2, `=0` off; arm `rnsp8a0` = all three off (the SP7 default).
+  Then 49e301a: the rune check counts only circles lit now or still to come (the circle object stays, unlit, after its
+  burst: 34b2b47's check also blocked starts after a spent one). Live check of the default at 49e301a (rnjb, 16
+  episodes, seeds 1760000 / 1770000, `sp8\chk`): 16 / 16 kills, **16 / 16 HP-hitless**, fight p50 21.3 s; 10 jump casts,
+  1.80 hits per antic, 9 stops all with two hits, 10 / 10 safe and behind at the landing.
+- At the default stance the jump cast starts 8.8-10.2 u away (p10 / 90): T2 runs on 20 of 26 jump casts in sp8dx (1 tap),
+  T1 on 2 (both in round 1); T1 alone (`sp8dc`, round 1 only) ran 2 stabs in 20 jump casts (the stab needs ~9.6 u, the
+  RS 10 u) and was slower (kill p50 23.3 s). sp8dp (T2 alone) was 31 / 32 HP-hitless, landed / s 1.061, kill p50 21.1:
+  with T1 rarely running at this stance sp8dx and sp8dp are nearly the same arm (the person may prefer sp8dp's
+  hitless count; by the rule sp8dx).
+- The walk-in fix alone (`sp8cw`, cast_slash_s 0.78): hits per jump cast antic 0.48 -> 0.94, landed / s +0.017 (-0.024
+  .. +0.059), kill p50 -0.6 s, HP-hitless 30 = 30: slower than the dash arms, not promoted (the dash scripts take over
+  those antics; it stays an override).
+
+| A/B (32 per arm; round 1 33ff9d5, round 2 34b2b47) | rnjb (default) | sp8cw (walk-in fix) | sp8dp (T2) | sp8dx (T1 + T2) | sp8dc (T1, round 1, 16) |
+|---|---|---|---|---|---|
+| kills / HP-hitless | 32 / 30 | 32 / 30 | 32 / **31** | 32 / 30 | 16 / 15 |
+| HP-loss hits (before the kill) | rune bomb small, rune slam | body, Slam Collider 2 | rune bomb small | body (a RecoilStab from 5.8 u, its hit at r10: round 1, before 20a7400), hammer | body (a RecoilStab from 6.06 u), rune bomb small |
+| kill p10 / 50 / 90 (s) | 19.6 / 21.9 / 24.0 | 19.6 / 21.4 / 24.1 | 19.2 / 21.1 / 24.0 | 18.9 / **20.6** / 23.0 | 19.5 / 23.3 / 26.4 |
+| landed hits / s (sg4_budget --live) | 1.022 | 1.039 | 1.061 | **1.075** | 0.984 |
+| - vs rnjb, 90 % | | +0.017 (-0.024 .. +0.059) | +0.039 (0.000 .. +0.078) | +0.053 (+0.016 .. +0.089) | -0.051 (-0.114 .. +0.012) |
+| jump casts / hits per antic / safe to landing + 30 / behind at the landing | 31 / 0.48 / 31 / 31 | 32 / 0.94 / 32 / 32 | 26 / 1.89 / 26 / 25 | 26 / 1.85 / 25 / 26 | 20 / 0.40 / 19 / 20 |
+| jump cast family h/s (antic to recovery) | 0.49 | 0.60 | 0.84 | 0.92 | 0.55 |
+| T1 stabs / RS hit / T2 stops / two hits | - | - | - / - / 22 / 22 | 2 / 2 / 20 / 20 | 2 / 2 / - |
+
+Round 1 alone (16 each): rnjb 16 / 16 hitless, kill p50 21.4, 1.036; sp8cw 16 / 16, 20.6, 1.074; sp8dp 15 / 16, 21.1,
+1.046; sp8dx 15 / 16, 20.2, 1.082. Round 2: rnjb 14 / 16, 22.2, 1.008; sp8cw 14 / 16, 22.2, 1.007; sp8dp **16 / 16**,
+20.9, 1.076 (+0.068, +0.017 .. +0.122); sp8dx 15 / 16, 21.8, 1.068 (+0.060, +0.015 .. +0.110). `ab\ab_stats.txt`,
+`ab2\ab_stats.txt`, `abp\ab_stats.txt` (bootstrap: episodes resampled, 4,000 draws).
+
+### 1. Fixes to the SP6 dash slash model first (`ssbot/combat/cast_stab.py`; only with JB_DASH_SLASH)
+
+- Its body front in the cast antic is 1.873 u from its centre (SP6 used the Idle box's 2.25; antic_audit's recorded
+  collider). The dash moves on frames 1-7 after the dash's mask (3.27 u; live 3.36), the stab's clip from frame 8, its
+  collider from 7 frames after that: the model now hits at j15-16 like SP6 t6's 9 live stabs (it said 14 for the near
+  ones). Gravity 60 u/s^2 (1.2 u/s per 50 Hz physics step, kinematics.py; SP6 72): the live recoil lands g39-42.
+  `slam_play.GRAV` (72, the default playbook's fall estimate) is unchanged: changing it changes default decisions.
+- SP6's recoil phase handed back to the planner on the hit's own tick (she is still on the ground there): t6's 9 stabs
+  all ended "landed" at once. The ground check now counts from 6 frames after the hit.
+- t1 (one DashStab miss): the oracle's key filter (a key stays down 2 frames, up 2 frames, never left and right
+  together) kept a planner key away from it latched on the first dash frame - she dashed away. The policy now passes
+  `latch(m)` (the mask the hold filter latches at f + 2 for m: `kin.hold_filter` over the sent prefix); a start whose
+  toward + dash would not latch sends the key toward it first and dashes on the first clean frame (`prep`, <= 3).
+- t2 (2 HP, a lone stab from 9.52 u at the STATE, running in: 9.19 at the dash): after the hit she lunges on 2 more
+  frames at the sprint speed (2.59 -> 1.98 u) into its body. The model now moves her through those 2 frames and takes
+  one more frame of hit lag for its nearest x; the start reads her x on the dash's own frame (x + vx * 2 / 60). The
+  stab now needs ~9.6 u at the dash.
+- t2 (2 HP, a rune circle at landing + 66): a planner attack 26 frames after a stab without the RS made an unplanned
+  RecoilStab at antic 54 (W Recoil Cancelable reads any new press to ~g30); she bounced at its face at the aim and fled
+  forward into the circle. Without the RS planned the script now sends no key until g31 (`rs_block_g`).
+- t5 (2 HP): a jump cast 56 frames after the previous one's landing - the stab dashed into the previous rune circle (lit
+  63-86 frames after its landing). No start while a rune circle object lies over the way in (`rune_spans`).
+
+### 2. T1 `SSBOT_FORUM_JB_DASH_COMBO` (with JB_DASH_SLASH; default off until ad77f85, now follows v2): the DashStab, then the Wanderer RecoilStab
+
+- After the DashStab's hit event (src "DashStab"), on the game clock (Stamp.t_game_s, passed by the policy; g in game
+  frames rounded): no key g0-15, the attack on the mask's frames g16-17 (one rising edge, no direction, no dash), then
+  no key until the RS hits (src "RecoilStab"; its clip ends early on a hit: DownSpikeBounce / Recoil Twirl) or its clip
+  ends (a miss). Gates: the dash >= `combo_d_min` 10.0 u (her x on the dash's frame) and the RS hit predicted by antic
+  `rs_k_max` 52 (antic frame of the dash + the model's hit frame + `rs_hit_g` 25); this replaces the stab's landing
+  rule. A late DashStab hit (k + 25 > 52) drops the RS. After the A/B: the RS press only when her x is >= `rs_x_min`
+  6.75 u (it may wait to g24 while the recoil carries her out; else no RS).
+- After the RS hit: no key until the Jump Aim + `post_aim_f` 10 (its body rises in place in front of her), then the way
+  under (`under`, t1 fix: the planner fled forward from 2 of 6 RS bounces, both into the rune circle at landing + 66):
+  the key toward it, the air dash (refreshed by the RS hit) at aim + 16 for 4 frames (its body's bottom 8.2 u above
+  the floor there, her top <= 7.4), toward until she is 2.4 u behind its centre, then no key; the planner on the ground
+  or at aim + 48. Only with her feet <= 5.3 u at aim + 10 and room behind the landing (`jump_behind.behind_spot`),
+  else the planner at aim + 10.
+- Live timing (t3-t5, 31 RS): the RS clip from g16 (the press frame), its hit at g25-27 = antic 42-48; the bounce leaves
+  her 3.6-5.7 u in front, feet 3.4-4.3 u up at the aim; under: clear behind at aim + 33-41.
+- The RS geometry (`sp8\scripts\rs_geom.py`, every RS of t1-t4 and the A/B, 42): her x at the RS clip's start 5.7-7.8
+  u; it lunges 2.9-4.3 u (p50 3.4) before its collider hits (r9-11); from 5.8 / 6.06 u it hit at r10 at 1.47 / 1.73 u -
+  inside its body front: 2 HP each (both in the first A/B, both from 10.2 / 10.26 u at the dash, running in); from >=
+  6.75 u, 21 of 21 hit at >= 3.47 u.
+
+### 3. T2 `SSBOT_FORUM_JB_DASH_STOP` (default off until ad77f85, now follows v2): dash, stop, side slashes
+
+- From `stop_d_min` 6.7 .. `stop_d_max` 11.3 u (her x on the dash's frame), by antic frame 14: a tap (the dash's own
+  3.3 u) when that stops her at 3.4-4.75 u, else the dash and the key toward it held into the ground sprint and released
+  closed loop (her x minus `release_lag` 2 frames of her speed <= `stop_u` 4.4 u), at most `grace_f` 10 frames into the
+  sprint (Sprint Grace: the FSM's 0.3 s, fitted 0.183-0.283 s: a release inside it regains control at once, no skid).
+  Then (control back: on the ground, accepting input, out of the Dash / Sprint / Skid / Wanderer clips) the first side
+  slash with no direction key, then every 19 frames with the key toward it on the frame before, walking in to 4.3 u
+  between them (each hit knocks it ~0.48 u away), until antic frame 50.
+- Live (t1-t5 and the A/B): no skid and no DashStab out of a stop in any of them; release at sprint frame 5-10
+  (j 12-17); the stop at 3.9-4.7 u (p10 / 90; release_lag 3 in t1 stopped 4.3-5.1 u, then 2); first press antic 18-22,
+  second 37-43; hits at ~19-25 and ~38-45.
+
+### 4. The walk-in fix (cast_slash_s 0.62 -> 0.78, no code: `SSBOT_FORUM_JUMP_BEHIND_SET=cast_slash_s=0.78`)
+
+JB_CAST_ANTIC's slash window in the cast antic until 0.78 s (47 frames) instead of 0.62 (37): the walk-in reaches its
+body at frame ~39 (antic_audit). In the trial arms it ran on the antics without a script; in the A/B as its own arm
+`sp8cw`.
+
+### 5. Fixed-point trials (`1v1_live.ps1`, Forum_W_w7, instances 0 / 1, 1x; the 9.5 u idle stance: it jumps often; criteria from the combo answer, section 4; `ssbot.tools.sp8_cast`, data `sp8\t1` .. `t5`)
+
+| round | code | arm (episodes) | jump casts | scripts | DashStab hits / RS started / RS hit (T1); stops / two hits (T2) | hits per jump cast antic | safe to landing + 30 / behind | failures -> change |
+|---|---|---|---|---|---|---|---|---|
+| t1 | 6e6b760 | sp8dcT (8) | 10 | 7 stabs | 6 / 6 / 6 | 1.40 (2.0 per RS antic) | 10 / 8 | 1 stab dashed away (the key filter: a planner key away from it latched) -> `prep`; 2 RS bounces the planner fled forward, rune circle at landing + 66 (2 x 2 HP) -> `under` |
+| t1 | 6e6b760 | sp8dpT (8) | 9 | 6 stops | 6 / 6 | 1.44 | 9 / 9 | stops 4.33-5.06 u (release_lag 3 too early) -> 2 |
+| t2 | 4c028c0 | sp8dcT (16) | 18 | 12 stabs | 11 / 9 / 9 | 1.50 | 16 / 16 | a lone stab from 9.19 u at the dash reached its body (2 HP) -> drift model, x on the dash frame; an unplanned RS from a planner attack at g26 (rune, 2 HP) -> `rs_block_g`; a no-script jump cast: the planner's skid under its centre (body, 2 HP) |
+| t2 | 4c028c0 | sp8dpT (16) | 20 | 6 stops (8 out of the band: > 11.3 u at the 9.5 stance; 6 airborne / late) | 6 / 6 | 1.20 | 19 / 19 | a no-script jump cast: the planner stayed in front at the landing (Slam Collider 2, 2 HP) |
+| **t3 + t4** | **33ff9d5** | sp8dcT (24) | 29 | 22 stabs | **22 / 22 / 22** | **1.62** (2.0) | **29 / 29** | none in the jump casts (HP elsewhere: rune bombs, hammer x2, a jump slam's Slam Collider 2) |
+| **t3 + t4** | **33ff9d5** | sp8dpT (24) | 33 | 18 stops | **18 / 18**, no skid, no DashStab | **1.64** (2.0) | 32 / 32 (18 / 18 of the stops) | a no-script jump cast: the planner's flight into its falling body (2 HP) |
+| t5 | 20a7400 | sp8dcT (16, both instances) | 16 | 14 stabs | 13 / 9 / 9 (2 gated by rs_x_min, 2 below 10 u) | 1.50 | 15 / 15 | a stab into the previous jump cast's rune circle (56 frames after its landing; 2 HP) -> no start while a rune circle lies over the way in |
+
+### 6. Tools / code
+
+- `ssbot/combat/cast_stab.py` (CastStab: the stab, T1, T2; `stab_path`, `sprint_travel`, `stop_plan`, `rune_spans`;
+  `SSBOT_FORUM_JB_DASH_SET="stop_u=4.2,rs_x_min=7"` overrides the StabCfg numbers); the policy passes the game clock and
+  `latch` (`train/forum_planner_policy.py`). Stats `cast_stab` in the attempts rows' `policy` (antics, stabs, hit,
+  rs_planned / started / hit, stops, stop_presses / skid / stab, no_* reasons, and `runs`: per script its start frame,
+  distance, the DashStab / RS frames, the release, the stop, the presses, hits, its aim position, the way under).
+- `ssbot.tools.sp8_cast` (collect / report: per jump the antic's hits by source, the script record, HP lost to the
+  landing + 30 and the rune + 10, behind at the landing); `forum_demo.HERO_ATTACKS` now counts `RecoilStab`.
+- Scripts `sp8\scripts`: `trace_jc.py` (a jump cast frame by frame), `rs_geom.py` (every RS: start x, hit frame and x,
+  HP), `sprint_rel.py`, `sprint_stop_sim*.py` (the kinematics model's sprint is not the FSM's: it decelerates through
+  a release; the live stops follow the FSM), `stab_trace2.py`, `ab_stats.py`; `ab_analyze.sh` (slam_play_ab,
+  forum_remaining_hits + sg4_budget, sp8_cast, ab_stats).
+- Tests `tests/test_sp8.py` (29), `tests/test_cast_stab.py` (updated); slam_play / sp4-sp7 / forum_l2 / jump_behind
+  pass (164).
+
+### 7. Switch-off identity
+
+`replay_ident_sp8.ps1` (`sp8\replay_<sha>`, the three w7 / w13 identity episodes): 4f48cb1 and 33ff9d5 with the
+switches unset vs da3d92d: 2,073 / 2,073, 1,778 / 1,778, 1,541 / 1,541 ticks byte-identical; all on (open loop): 0
+errors (24 ticks differ in 192006). ad77f85 and 49e301a (the default) with all three `=0` vs da3d92d: byte-identical on
+all three; unset (the new default): 0 errors, 192006 differs from tick 1127 (24 ticks: its second jump cast), 084036 and
+the w13 episode (two Clappers: no start) identical.
+
+### 8. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backups .bak_sp8 / .bak_sp8b)
+
+Trial arms (the 9.5 u idle stance, + cast_slash_s 0.78): `sp8dcT` (sp6dsT + COMBO), `sp8dpT` (rnjbT + STOP). A/B arms:
+`sp8cw` (rnjb + cast_slash_s 0.78), `sp8dc` (+ DASH_SLASH + COMBO), `sp8dp` (+ STOP), `sp8dx` (all three = the new
+default). `rnsp8a0` = the default with all three `=0`. rn0 / fcs00 / rnplay0 / rnsp40 / rnsp50 / rnsp60 / sp8cw carry
+all three `=0`, sp6dsT / sp8dcT / sp8dc / sp8dpT / sp8dp the other ones `=0`, so they keep their meaning.
+
+### 9. Machine state
+
+Instances 0 and 1 were closed (the person's practice); the harness does not start them: reopened with
+`ssbot.tools.launcher -n 2 --detach` (`C:\ssbot\sandbox\launch_sp8.ps1`, detached via WMI; never --restore), frozen
+(time scale 1e-4) after every block by `sp4_block.ps1`, DEMO_SOON restored after each; no game process touched;
+boost_workers ran for the blocks (`boost_workers.stop` present again). Frozen checkouts
+`C:\ssbot\live_1v1_{4f48cb1,da3d92d,6e6b760,4c028c0,33ff9d5,20a7400,34b2b47,ad77f85,49e301a}`. Sandbox: `sp8_t.ps1`,
+`sp8_ab.ps1` (`-Arms` as string[]: a comma list in `-Command` becomes an array), manifests `1v1sp8t1..t5_manifest.txt`,
+`1v1sp8ab_manifest.txt`, `1v1sp8ab2_manifest.txt`, `1v1sp8abp_manifest.txt` (both rounds), `1v1sp8chk_manifest.txt`. Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The jump slam (Jump Antic, aim at +30) is SP8b: the combo answer gives the DashStab only (1 hit at k0 + 15-17 from
+   9-13 u; the RS lands under the take-off), the corner rule (JB_CORNER, one Clapper).
+2. T1b (the RS press at g12-14 held through g17, 1-2 frames earlier) was not tried; with rs_x_min 6.75 the RS needs a
+   far DashStab, so it runs mostly from >= 10.5 u.
+3. The no-script jump casts still lose HP to the planner's flight now and then (3 of the 42 in t2-t4: a skid under
+   its centre, staying in front at the landing): the `under` script could also run after T2's slashes / the walk-in.
+4. `slam_play.GRAV` 72 (the default playbook's fall estimate) should be 60 (1.2 u/s per 50 Hz step); it changes
+   default decisions, so it needs its own A/B.
+5. With two Clappers the dash scripts do not start (one live Clapper only); SP9 decides.
