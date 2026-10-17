@@ -158,3 +158,60 @@ def test_reach_name_reads_the_wave13_body(monkeypatch, on):
     assert got == on
     e["colliders"][0]["name"] = sp.CLAPPER
     assert sp.SlamPlay._in_reach(e, 31.0, 1, 37.2, -1)
+
+
+# ---- SSBOT_FORUM_TWO_AIRCHAIN (combat.air_chain) ----
+
+def test_chain_plan_cmds_matches_the_tick_by_tick_masks():
+    import random
+
+    import numpy as np
+
+    from ssbot.combat import air_chain as ac
+    rnd = random.Random(1)
+    for _ in range(1500):
+        F0 = 100
+        fd = rnd.choice([None, F0 + rnd.randint(-3, 20)])
+        fu = rnd.choice([None, F0 + rnd.randint(-3, 40)])
+        fp = F0 + rnd.randint((fd - F0 + 19) if fd is not None else 0, 70)
+        p = ac.Plan(F0, rnd.choice([0, ac.M_L, ac.M_R]), F0 + rnd.randint(-5, 40), fd, fu, fp, 47, 8)
+        if fd is not None and fd < F0 and rnd.random() < 0.3:
+            p.pressed_down = fd
+        assert (ac.plan_cmds(p, F0, 90) == ac._plan_cmds_loop(p, F0, 90)).all()
+
+
+def _chain_world(x=37.0, y=4.8, vy=-19.0):
+    import numpy as np
+
+    from ssbot.combat import air_chain as ac
+    from ssbot.knowledge import kinematics as kin
+    from ssbot.train.forum_planner_policy import CREST_PARAMS
+    p = kin.HeroParams.load(CREST_PARAMS["Wanderer"])
+    terr = kin.Terrain2D.from_boxes([(-200.0, 3.015 - 10.0, 260.0, 3.015), (0.0, 0.0, 14.01, 40.0),
+                                     (48.99, 0.0, 70.0, 40.0)])
+    S = kin.initial_state(p, x, 4.568 + y, vy=vy, facing=1, ground=False)
+    return ac.ChainSim(S, np.zeros(1, np.int64), kin.HoldState.idle(1), p, terr, 1000, 1000)
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_chain_replaces_the_way_out(two_on, monkeypatch, on):
+    """She falls toward A's Idle body 2.4 u in front of it after the strike (A0 + 40), B in Slam Antic since 5 frames
+    8.6 u away facing her: on, the chain's down slash on A now (its bounce) and B's strike planned at K_PRESS 47."""
+    from ssbot.combat import air_chain as ac
+    monkeypatch.setattr(ac, "AIRCHAIN", on)
+    monkeypatch.setattr(sp, "NEAR", True)
+    p = sp.SlamPlay(sp.PlayCfg())
+    r = after_run(face=1, ta=10.0)
+    r.near, r.k_turn, r.k_slash = None, None, None
+    p.run = r
+    ta0 = 10.0 + 48 / 60.0
+    s = two(1000, "Idle", 0.2, "Slam Antic", 5 / 60.0, ax=34.6, bx=44.0, hx=37.0, ground=False, vy=-19.0)
+    s["hero"]["pos"] = [37.0, 4.568 + 4.8]
+    s["hero"]["facing"] = 1
+    m = p.step(1000, s, False, t_game=ta0 + 40 / 60.0, sim=_chain_world())
+    if not on:
+        assert r.chain is None and not r.chain_log
+        return
+    assert r.chain is not None and r.chain.b_iid == 8 and r.chain.k_press == 47
+    assert r.chain.f_down is not None and m & sp.M_D
+    assert r.chain_log[0][1] == "plan" and p.stats()["chain_plan"] == 1

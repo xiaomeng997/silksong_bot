@@ -49,6 +49,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from ssbot.combat import air_chain as _ac
 from ssbot.combat import jump_behind as _jb
 from ssbot.knowledge import kinematics as kin
 
@@ -387,6 +388,11 @@ class Run:
     handoff: bool = False            # SP10b TWO_HANDOFF: opened right after a strike run on the other Clapper closed
     ho_cand: bool = False            # ... (pending: decided on the run's first tick from its antic frame)
     tight: tuple | None = None       # SP10b TWO_TIGHT: (the other's iid, the way's world direction, 0 = no room / reach)
+    chain: object = None             # SP10b TWO_AIRCHAIN: the air chain's plan (air_chain.Plan) while it runs
+    chain_off: str = ""              # ... why the chain is no longer tried on this run ("" = may still start)
+    chain_next: int = 0              # ... the next frame a failed search is tried again
+    chain_from: object = None        # ... a run on B opened by the chain's strike: A's iid
+    chain_log: list = field(default_factory=list)   # [frame, event, plan row]
 
 
 class SlamPlay:
@@ -492,6 +498,13 @@ class SlamPlay:
                 out["handoff_pressed"] += r.k_press is not None
             if r.tight is not None:
                 out["tight_" + ("away" if r.tight[1] else "noroom")] += 1
+            if r.chain_log:
+                out["chain_runs"] += 1
+                for ev in r.chain_log:
+                    out["chain_" + ev[1]] += 1
+            if r.chain_from is not None:
+                out["chain_b_runs"] += 1
+                out["chain_b_bounced"] += r.bounced
         if self.holds:
             out["tight_holds"] = len(self.holds)
         return dict(out)
@@ -505,8 +518,9 @@ class SlamPlay:
         for r in self.done + ([self.run] if self.run is not None else []):
             row = [r.iid, r.fa, r.phase, r.why, r.k_start, r.k_jump, r.k_press, r.bounced, r.ks0, r.k_air, r.k,
                    r.side_why]
-            if r.handoff or r.tight is not None:
-                row += [r.handoff, None if r.tight is None else list(r.tight), r.k_slash]
+            if r.handoff or r.tight is not None or r.chain_log or r.chain_from is not None:
+                row += [r.handoff, None if r.tight is None else list(r.tight), r.k_slash, r.chain_log,
+                        r.chain_from]
             out.append(row)
         return out
 
@@ -535,7 +549,7 @@ class SlamPlay:
         self.run = None
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             skip: frozenset | None = None) -> int | None:
+             skip: frozenset | None = None, sim=None) -> int | None:
         """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides).
 
         t_game: the game clock (s; the backend's Stamp.t_game_s, the sum of the scaled dt: it stands still through
@@ -690,9 +704,14 @@ class SlamPlay:
                         return hm
                 if TWO_HANDOFF and TWO_PLAY:
                     # SP10b: B's run opens on this tick (a late start)
-                    return self.step(f, s, ground, accepting, t_game, skip)
+                    return self.step(f, s, ground, accepting, t_game, skip, sim)
                 return None
-            if TWO_TIGHT and TWO_PLAY and r.tight is None and r.bounced and r.s0 is not None:
+            if (_ac.AIRCHAIN and TWO_PLAY and sim is not None and r.bounced and r.s0 is not None and not r.chain_off
+                    and not (r.tight is not None and r.tight[1])):
+                cm = self._chain(r, k, f, s, e, t, sim, hp)
+                if cm is not None:
+                    return cm
+            if TWO_TIGHT and TWO_PLAY and r.tight is None and r.bounced and r.s0 is not None and r.chain is None:
                 self._tight_check(r, k, s, e, cx, t)
             m = 0
             if k <= r.k_press + c.down_after:
@@ -756,6 +775,93 @@ class SlamPlay:
             else:
                 r.tight = (o.get("iid"), 0)
             return
+
+    def _chain(self, r: Run, k: int, f: int, s: dict, e: dict, t: float, sim, hp: int) -> int | None:
+        """TWO_AIRCHAIN (combat.air_chain) in A's way out: the plan's keys for frame f + 2, or None (the way out as
+        before). The plan is searched when another Clapper is in Slam Antic, re-checked every tick, searched again
+        when the check fails; the strike press hands the run over to B (a run on B in its 'after' phase)."""
+        F = f + 2
+        b = None
+        if r.chain is not None:
+            b = next((o for o in clappers(s) if o.get("iid") == r.chain.b_iid), None)
+            if b is None or control(b)[0] not in ("Slam Antic", "Slam 0"):
+                r.chain_log.append([f, "drop_b", r.chain.row()])
+                r.chain, r.chain_off = None, "b gone"
+                return None
+        else:
+            if F < r.chain_next or (s.get("hero") or {}).get("hero_accepting_input") is False:
+                return None
+            if on_ground(s):
+                return None
+            cands = [o for o in clappers(s) if o.get("iid") != r.iid and control(o)[0] == "Slam Antic"
+                     and o.get("iid") not in self._closed]
+            if not cands:
+                return None
+            hx = hero_x(s)
+            b = min(cands, key=lambda o: abs(float(o["pos"][0]) - hx))
+        ctx = self._chain_ctx(r, s, b, sim, f)
+        if r.chain is None:
+            plan = _ac.search(sim, ctx)
+            if plan is None:
+                r.chain_next = F + _ac.RESEARCH_F
+                if not r.chain_log or r.chain_log[-1][1] != "none":
+                    r.chain_log.append([f, "none", None])
+                return None
+            r.chain = plan
+            r.chain_log.append([f, "plan", plan.row()])
+        elif not _ac.check(sim, ctx, r.chain):
+            plan = _ac.search(sim, ctx)
+            if plan is None:
+                r.chain_log.append([f, "lost", r.chain.row()])
+                r.chain, r.chain_off = None, "lost"
+                return None
+            if r.chain.pressed_down is not None:
+                plan.f_down, plan.pressed_down = r.chain.f_down, r.chain.pressed_down
+            r.chain = plan
+            r.chain_log.append([f, "replan", plan.row()])
+        p = r.chain
+        m = _ac.mask_at(p, F)
+        if p.f_down is not None and p.pressed_down is None and m & M_A:
+            p.pressed_down = F
+        if p.pressed is None and F >= p.f_press and m & M_A:
+            p.pressed = F
+            r.chain_log.append([f, "strike", p.row()])
+            # the strike: the run passes to B (its 'after' phase: the bounce, the way out, the landing)
+            st_b, tin_b = control(b)
+            ta_b = t - tin_b
+            nb = Run(iid=b.get("iid"), fa=int(f - round(tin_b * 60.0)), face=1 if b.get("flipX") else -1, ta=ta_b,
+                     phase="after", k_press=int(round((t - ta_b) * 60.0)) + SEND_AHEAD + self.cfg.lag, hp0=hp,
+                     chain_from=r.iid)
+            nb.k = nb.k_press
+            nb.sent.append((F, m))
+            self._close("done", "chain")
+            self.run = nb
+            return m
+        r.sent.append((F, m))
+        return m
+
+    def _chain_ctx(self, r: Run, s: dict, b: dict, sim, f: int) -> "_ac.Ctx":
+        """The air chain's view of this STATE: B (its centre, facing, antic frame at the start state's frame fo), A's
+        body box (its collider, else BODY_FRONT / BACK), her x and facing."""
+        a = next((o for o in clappers(s) if o.get("iid") == r.iid), None)
+        a_box = None
+        for col in (a or {}).get("colliders") or ():
+            nm = str(col.get("name") or "")
+            if (nm == CLAPPER or nm.startswith(CLAPPER + " (")) and col.get("enabled") and col.get("verts_world"):
+                xs, ys = col["verts_world"][0::2], col["verts_world"][1::2]
+                a_box = (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))
+                break
+        if a is not None and a_box is None:
+            ax, ay = float(a["pos"][0]), float(a["pos"][1])
+            fa = 1 if a.get("flipX") else -1
+            x0, x1 = sorted((ax + fa * BODY_FRONT, ax - fa * BODY_BACK))
+            a_box = (x0, ay - 4.43, x1, ay - 0.53)
+        h = s.get("hero") or {}
+        fc = h.get("facing")
+        tin = control(b)[1]
+        return _ac.Ctx(b_iid=b.get("iid"), b_x=float(b["pos"][0]), b_y=float(b["pos"][1]),
+                       b_face=1 if b.get("flipX") else -1, kb0=int(round(tin * 60.0)) - (f - sim.fo), a_box=a_box,
+                       hero_x=hero_x(s), face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
 
     # ---- parts ----
 

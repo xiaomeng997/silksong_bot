@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
+from ssbot.combat import air_chain, cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -798,9 +798,13 @@ class ForumPlannerPolicy(PlannerPolicy):
         asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
         if self.slam_play is not None and not low_crit and not asw_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
+            # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
+            sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
+                   if air_chain.AIRCHAIN and self.two is not None else None)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip)
+                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip,
+                                       sim=sim)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None
