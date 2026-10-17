@@ -9298,3 +9298,163 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
    switch compared (plan note 2026-10-16).
 4. The hammer is now sp9a's second source (1.18 / min): focus slams without HP lost from the antic to + 170 frames 104 / 128 (81 %)
    under TWO_PLAY; the second slam during the first's way out is still the planner's.
+
+## Task 1v1 - stage SP9b: the focus's escape jump at a wall - the corner (A) and the switch (B), both built and compared live (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §77)
+
+The person (2026-10-16): "for the corner escape jump, SP9 does both the corner and the switch, compares them live, and
+the faster becomes the default". Spec: C:\ssbot\data\m2_play\switch\answer.txt 2f / 4 / 5 S4, buddy\answer.txt section 4
+and R4, human_two R8. Forum_W_w13 (fo_cl_w13w), `1v1_live.ps1 -Encounter Forum_W_w13 -Timebox 180`, instances 0 / 1,
+1x. F = the Clapper she is on (the nearer one, within 8.3 u), B = the other one; distances centre to centre (her box
+centre, its transform), + = F's facing (the open side, away from the wall); HeroBox 0.46 u wide. An escape jump: F's
+evade with its back within ~6 u of the wall (5.83 escapes, 6.06 does not) becomes an Escape Jump on the evade's entry
+(jump / jump cast alternating, no buddy check); the STATE shows Idle (or Walk) -> Jump Antic / Cast Slam Antic directly
+(47 of 49 in the SP9a A/B). B is locked from F's antic to its landing (Slam 2): jump 1.21-1.43 s, jump cast 1.63-1.85 s;
+F's tail is Slam 2 + Slam Recover (~20 frames to its Idle). Data `C:\ssbot\data\m2_play\sp9b` (`base_esc.*` the SP9a
+A/B re-read, `t1`..`t4` trials, `ab` / `ab2` the A/B rounds, `abp` both pooled, `chk` the default's live check,
+`replay_<sha>` identity, `hop_over_sim.json` / `hop_over_table.json`, `human_corner.txt`, `scripts`). Commits 65eb0a3
+(code), d14db10 / 575af6b / 555bf98 (trial fixes; 555bf98 is the tested and A/B code), 5b572d4 (the default), docs after
+it. No NOTE_FROM_LEAD appeared during the stage; no human practice ran.
+
+### Result
+
+- **Both arms pass the fixed-point gate** (555bf98, t4, 32 episodes per arm; no HP lost from the antic to the landing +
+  1 s): **corner 18 / 19 (95 %), switch 20 / 22 (91 %)**, after three fix rounds (table below).
+- **A/B** (555bf98, rnjb = the SP9a default vs sp9bA = + TWO_CORNER vs sp9bB = + TWO_WALLSWITCH, 2 rounds x 16 per arm
+  fixed beforehand, block design, the same seeds, pooled decision):
+
+| A/B pooled (32 / 31 / 31) | rnjb (default) | sp9bA (corner) | sp9bB (switch) |
+|---|---|---|---|
+| both killed / Clappers killed | 17 / 36 | 16 / 35 | **19 / 38** |
+| landed / s (fight / both alive) | 1.267 / 1.360 | 1.284 / 1.352 | **1.303 / 1.393** |
+| HP-loss hits / min | 4.69 | 4.38 | **3.99** |
+| HP-hitless clears | 1 | 5 | 5 |
+| kill p10 / 50 / 90 of the clears (s) | 28.2 / 31.5 / 36.4 | 27.8 / 32.3 / 36.4 | 28.9 / 32.0 / 36.3 |
+| hits / min: runes / Slam Collider 2 / body / Slam Collider 1 | 2.04 / 1.22 / 0.75 / 0.68 | 1.85 / 0.82 / 1.17 / 0.55 | 1.51 / 0.96 / 0.96 / 0.55 |
+| F's escape jumps / no HP lost to the landing + 1 s | 62 / 42 (68 %) | 46 / 32 (70 %) | 49 / 39 (80 %) |
+| taken by the arm / no HP lost | - | 20 / 16 | 14 / 13 |
+| hits per escape jump on F (to the landing + 1 s / the next 2 s), on B | 1.16 / 0.42, 1.42 / 1.77 | 2.26 / 1.11, 0.52 / 1.11 | 1.49 / 0.80, 0.80 / 1.78 |
+
+  Bootstrap (episodes resampled, 90 %): B - default landed / s +0.038 (-0.046 .. +0.120), both alive +0.035 (-0.060 ..
+  +0.128), HP hits / min -0.69 (-1.92 .. +0.53), kills / episode +0.10 (-0.29 .. +0.51); A - default +0.017 (-0.068 ..
+  +0.104), -0.30 (-1.50 .. +0.90), +0.005; **B - A +0.020 (-0.062 .. +0.102), HP hits / min -0.41 (-1.65 .. +0.86),
+  kills / episode +0.10**. Round 1: rnjb 10 clears / 21 killed / 1.312 / 3.86, A 10 / 21 / 1.349 / 3.67, B 11 / 22 /
+  1.322 / 3.40; round 2: 7 / 15 / 1.219 / 5.57, 6 / 14 / 1.211 / 5.17, 8 / 16 / 1.281 / 4.63 (A and B one HARNESS_FAIL
+  each).
+- **By the rule (faster: more landed per s and kills, not more HP hits per min) the switch is the faster arm and better
+  than the default on all three point estimates: promoted** (5b572d4: `SSBOT_FORUM_TWO_WALLSWITCH` follows
+  SSBOT_FORUM_V2, `=0` off; arm `rnsp9b0`). The corner stays default off (`=1` on; it then takes F's escape jump before
+  the switch). Every interval crosses 0: escape jumps come ~1.5-2 per episode and the arms take 30-45 % of them (none
+  while B jumps, casts or slams), so the episode-level difference is small; the local safety (the landing + 1 s) is the
+  clearest gain (68 % -> 80 %).
+
+### 1. Facts (`ssbot.tools.sp9b_esc`, `scripts/human_corner.py`, `hop_over_sim.py` / `hop_over_table.py`, `rune_geom.py`)
+
+- SP9a default (its A/B, 32 episodes): F's escape jumps 1.53 per episode, no HP lost to the landing + 1 s 31 / 49 (63 %),
+  hits on F to the landing + 1 s 1.41 (the person 2.56 in the jump + 4.94 in the 3 s after). L2 often switched to B at
+  the antic already (`two: switch (focus committed)`: the focus at its wall has less room) and kept F when B was jumping.
+- The person's 16 corners: F's next move came 0.37-0.79 s after the landing (slam 7, cast 5, evade 4; mostly her hit at
+  its Idle entry), and she was still behind it then (2.5-4.6 u from its centre, 0.26-2.9 u from the wall); its slam was
+  struck from the corner (a07: the down slash's bounce).
+- The hop over the landed F (kinematics rollouts, the hull of every timing lane): from >= 2.5 u behind its centre, the
+  jump held 28 frames, the key toward the open side from d0 (16 frames at 3.0 u .. 2 at 5.0 u), the air dash near the
+  apex (j 26): worst-case clearance over its turned Idle body (-2.25 .. +1.34, top 3.92 u) 0.63 u at 2.5 u, 1.0-1.06 u
+  from 2.75 u; she lands 5.6-6.6 u on its open side at j 51-57 (`two_play.HOP_TABLE`).
+- The big rune circle collider: an octagon of radius 7.19 centred 0.33 u above the floor, lit 6-8 frames 65-72 frames
+  after it appears.
+- F's jump aims at her x at its Jump Aim minus 5 u (0.916 x the offset, at most 12; the wall rule): with her at B, F
+  lands 5 u short of her - Slam Collider 2 (0.67-7.76 u in front) and the jump cast's circle (landing + 6.48 u, r 7.19)
+  cover her (switch answer 2f: leaving F at an escape jump 46-59 % safe, at an escape jump cast 5-12 %).
+- The oracle's key filter (a key down 2 frames, left and right never together) let a planner key away from the wall,
+  pressed a frame before, latch with a scripted air dash: the dash went the wrong way (t1, twice).
+
+### 2. Code (`ssbot/combat/two_play.py` EscCfg / EscRun / TwoPlay.esc*, `cast_stab.py`, `tactics/gauntlet.py`, `train/forum_planner_policy.py`)
+
+- Detection (both switches): the first STATE showing a Clapper entering Jump Antic / Cast Slam Antic with its back <=
+  `back_u` 6.2 u, she within `d_u` 8.3 u and nearer to it than to the other one -> TwoPlay.esc (EscRun). Neither arm
+  takes it while B is in a jump move, casting (Spell Antic .. Cast 2) or slamming (Slam Antic .. Slam Recover), or a rune
+  circle (lit or to come) lies over the corner / her / the way to B (`_esc_block`). The policy runs TwoPlay.observe
+  before L2's decision when the switches are on (L2 sees the run on its first tick; `tac.two_esc = two.esc_view()`).
+- **A `SSBOT_FORUM_TWO_CORNER`** (default off): L2 holds F (`_esc_hold`, above the slammer rule while she is behind it
+  after the landing); the antic stance 4.4 u in front (`jump: aim stance (esc corner)`); cast_stab's JB_CORNER antic
+  script (walk in, a slash every 19 frames) and its way under from the take-off run for F with two Clappers (CastStab.step
+  gets the run: `esc=`); the way under's dash waits a frame when the key filter would not latch toward + dash; TWO_SPACE
+  skips F's own landing band / big rune to come; JB_CORNER's walk preference in the flight; after the landing the planner
+  slashes its back (JUMP_BEHIND's landed stance), F's dash rows rank after the rest while she is behind it; in its Idle:
+  no hit on it (`no_hit`, no IdleHit) and no key (`_corner_hold`) while she stands >= 2.5 u behind it and B cannot reach
+  her; the jump slam: at its Idle + `coin_f` 17 frames (its evade coin passed) with F still idle and her 2.5-5.25 u
+  behind it, the hop over it (`hop_plan`, `_hop_keys`; ends on her landing, at j 75, on HP lost, or when another script
+  takes the keys: `esc_yield`); the jump cast: behind it until its circle burst (lit, then unlit, or the landing + 100),
+  no hit, then the normal play. Exits: hop / rune / moved (F left Idle) / front (she was not behind) / near / far / late /
+  danger.
+- **B `SSBOT_FORUM_TWO_WALLSWITCH`** (on with v2 since 5b572d4): only with B on the open side at least `sw_hold` + 0.5 u
+  from her (7.5 jump / 12.5 jump cast); L2 holds B until B's next move or F's landing + 60; no hit on B while F's flag is
+  on (a hit is cancelled and B's evade coin fires 0.25 s after its Idle re-entry, faster than the slash cooldown); a walk
+  script (`_sw_move`) to `_sw_stance`: before F's Jump Aim `sw_hold_j` 7.0 / `sw_hold_c` 12.0 u short of B, after it
+  `sw_safe_j` 9.0 / `sw_safe_c` 14.5 u past F's predicted landing (jump_behind.landing from its take-off and her x at the
+  aim), at most `sw_b_gap` 2.7 u short of B; on the first STATE of F's landing (its flag off) the side slash on B when it
+  meets B's body and B is idle (IdleHit's press when it pressed first), else the walk in when it reaches by the tail's end
+  (`sw_tail_f` 22); the run hands back to the default ("b came") when B walks in so far that the hold point would be
+  within `sw_f_front` 4.5 u of F. `SSBOT_FORUM_TWO_ESC_SET="sw_safe_j=9.5"` overrides EscCfg.
+- Stats `two_play.esc` in the attempts rows' `policy` (counts, `esc_runs`: kind, mode / why not, back0, rel0, B's state /
+  distance, take-off / landing / Idle frames, u at the landing, hits on F / B, HP frames, exit, hop, press, rune, end).
+- `ssbot.tools.sp9b_esc` (collect / report per arm: every jump at a wall of either Clapper, escape or not, hits on F / B
+  in the antic / flight / landing + 1 s / the next 2 s, HP lost to the landing + 1 s / + 3 s with the sources, her place
+  at the landing, B's state, the policy run attached, the gate). Scripts `sp9b\scripts`: `trace_esc.py` (a run frame by
+  frame: F's state, u, feet, B, the latched keys, L2's goal / stance, HP / hits), `probe_states.py`, `rune_geom.py`,
+  `human_corner.py`, `hop_over_sim.py`, `hop_over_table.py`; `replay_ident_sp9b.ps1`.
+- Tests `tests/test_sp9b.py` (14: the defaults, detection, the corner's phases / view / hold / hop, the hop's room, the
+  jump cast's wait for the burst, the switch's hold / stance / deciding press / hand-back, the blocks, cast_stab with two
+  Clappers and its latch wait, L2's hold / no_hit / corner stance); test_sp9's switch test counts TWO_WALLSWITCH. Full
+  suite at 5b572d4: 1,913 passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists,
+  test_import_firewall, test_three_layer's bell test; and the untracked test_sg8_review.py x3).
+
+### 3. Fixed-point trials (`sp9_go.ps1` -> `sp4_block.ps1` -> `sp9_ab.ps1 -Arms sp9bA,sp9bB`; manifests `1v1sp9bt1..t4_manifest.txt`)
+
+| round | code | episodes per arm | corner taken / safe | switch taken / safe | failures -> change |
+|---|---|---|---|---|---|
+| t1 | 65eb0a3 | 16 | 18 / 11 (61 %) | 11 / 8 (73 %) | corner: TWO_SPACE pushed the antic stance 14 u out (B's jump / a circle), she ran off (landing hammer); the way under's air dash went away from the wall twice (the latched planner key); a planner dash into F's turned body in the corner; B's outer small runes in the corner. Switch: F's landing hammer 3 times (she at B, F jumped at her) -> blocks for B jumping / casting, TWO_SPACE yields to the corner, the latch wait, standing still in the corner, the switch's hold / past-the-landing stance |
+| t2 | d14db10 | 16 | 10 / 8 (80 %) | 6 / 4 (67 %) | corner: B's slam made L2 pick the slammer, she dashed through F's body (2) -> the hold above the slammer rule while behind F, no-dash on F; switch: the planner floated on the umbrella in F's landing hammer -> the walk script |
+| t3 | 575af6b | 32 | 19 / 17 (89.5 %) | 20 / 17 (85 %) | B already slamming at F's antic hit her (2) -> no run while B slams; 8.3 u past the landing left her 7.63 u in front once -> 9.0; B walked in, the hold point moved back into F -> hand back |
+| **t4** | **555bf98** | 32 | **19 / 18 (95 %)** | **22 / 20 (91 %)** | corner: once in front at the landing (the way under failed), body; switch: both after the hand-back (one a bomb at antic frame 4) |
+
+t4: corner - behind at the landing 16 / 19; hits on F antic 2.42, flight 0.37, landing + 1 s 0.84, the next 2 s 0.79;
+hops 5, over F 3 (1 landed, 2 taken over by another script after passing it at 4.1 / 6.1 u), 2 taken over before passing;
+not taken: B jumping 16, casting 2, slamming 2. Switch - the landing press 8 / 22, in F's tail 5; B's next move close 15
+(evade 7, cast 5, slam 3; 7 runs handed back); not taken: B jumping 12, slamming 5, B near 4, casting 2.
+
+### 4. Switch-off identity
+
+`sp9b\replay_ident_sp9b.ps1` (192006 i0 ep1, 084036 i1 ep0, the w13 144051 i1 ep0): 65eb0a3, d14db10, 575af6b and
+555bf98 with both switches unset, and 575af6b / 555bf98 with both `=0`, byte-identical to 0f4db52's default (2,073 /
+1,778 / 1,541 ticks); each switch on (open loop): 0 errors, w7 identical (one Clapper), w13 differs from tick 292-293.
+5b572d4 (the default) with TWO_WALLSWITCH `=0` (both `=0`): byte-identical to 0f4db52 on all three; unset: the w7
+episodes identical, the w13 episode byte-identical to 555bf98 with the switch on, 0 errors. A live check of the new
+default (rnjb at 5b572d4, 8 w13 episodes, seeds 3140000 / 3150000; `sp9b\chk`): 1 / 8 both killed (2 Clappers),
+landed / s 1.16 (both alive 1.26), HP-loss hits / min 6.25 (the slam hammer 2.84 of them); F's escape jumps 12, 10
+without HP lost to the landing + 1 s, the switch took 5 (4 safe). A small sample (the A/B's default round 2: 7 / 16, 5.57
+/ min); the code path is the A/B's sp9bB.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backups .bak_sp9b / .bak_sp9b2)
+
+`sp9bA` = rnjb + TWO_CORNER=1; `sp9bB` = rnjb + TWO_WALLSWITCH=1 (= rnjb from 5b572d4 on); `rnsp9b0` = the default with
+TWO_WALLSWITCH=0 (the SP9a default). two / twoP / twoF / two2 / two3 / sp9a / sp9aNC / rnsp9a0 carry TWO_WALLSWITCH=0 so
+they keep their meaning.
+
+### 6. Machine state
+
+Instances 0 and 1 ran every block (started 2026-10-16 20:36), frozen at time scale 1e-4 after each by sp4_block;
+DEMO_SOON paused and restored per block; boost_workers ran for the blocks (`boost_workers.stop` present again). No game
+process touched. Frozen checkouts `C:\ssbot\live_1v1_{65eb0a3,d14db10,575af6b,555bf98,5b572d4}`. Manifests
+`1v1sp9bt1..t4_manifest.txt`, `1v1sp9bab_manifest.txt`, `1v1sp9bab2_manifest.txt` (`sp9b\abp\man.txt` both),
+`1v1sp9bchk_manifest.txt`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. Both arms leave 55-70 % of F's escape jumps to the default: B jumping (most), casting or slamming at F's antic - the
+   two attack at once (the escape bypasses the buddy check); no rule for those yet.
+2. The corner's hop crossed F 3 times in 5 (twice another script took the keys first); the jump cast's corner waits
+   behind F until its circle bursts without hitting it.
+3. The switch's deciding press came in 8 of 22 (B walking - a hit on Walk does not make it decide - or out of reach);
+   waiting for B's Idle entry might raise it.
+4. The person may prefer the corner's damage on F (3.37 hits to the landing + 3 s vs 2.29) or switch it on with
+   `SSBOT_FORUM_TWO_CORNER=1`; by the rule the switch is the default.
