@@ -428,6 +428,7 @@ class JhCfg:
     hold_f: int = 8           # at the exit until J's landing + this (the hammer: Slam 2 5-6 frames)
     hold_c_f: int = 90        # the jump cast: until its landing + this (the circle lights 63-86 frames after)
     chase_f: int = 30         # a chase start needs this many frames before the leave
+    hit_script: int = 1       # (t2) the hit phase's own script (0: IdleHit and the planner, t1 / t2)
 
 
 @dataclass
@@ -587,6 +588,7 @@ class TwoPlay:
         self.jh_n: Counter = Counter()
         self._jh_prev: dict = {}              # iid -> its Control state on the last tick
         self._jh_dash: dict | None = None     # the leave's dash held into the sprint
+        self._jh_pressed: int | None = None   # the hit script's last press frame
 
     # ---- helpers ----
 
@@ -1429,6 +1431,8 @@ class TwoPlay:
         c = self.jcfg
         if r.phase == "leave" and r.f_land is not None:
             r.phase = "hold"
+        if r.phase == "hit" and c.hit_script:
+            return self._jh_hit(f, s, ground, accepting)
         if r.phase not in ("leave", "hold") or r.exit_x is None:
             return None
         h = s.get("hero") or {}
@@ -1467,6 +1471,44 @@ class TwoPlay:
             r.dash_f = f - r.f_a
             self.jh_n["dash" if ground else "air_dash"] += 1
             return toward | M_DASH
+        r.walk += 1
+        return toward
+
+    def _jh_hit(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
+        """The hit phase (t2: the planner floated on the umbrella / stood off in 30 of 39 runs - J's predicted landing
+        follows her - and landed 0.87 hits on I per run): to I and slash it - the side slash when it meets I's body
+        (the turn key first), else the walk toward it (in the air: the key toward it without the jump key, she drops);
+        near the leave's deadline she stands; the planner while I itself can reach her (its own move's tail, a rune
+        circle) or without input."""
+        r = self.jh
+        c = self.jcfg
+        sec = self._second(f)
+        if sec is not None and self._jh_pressed == self._press_f:
+            return sec
+        I = clapper_by(s, r.I)
+        if I is None or not accepting:
+            return None
+        hx = self._xw(s)
+        if other_danger(s, r.J, hx, self._rune_threats(f, s)) is not None:
+            self.jh_n["hit_danger"] += 1
+            return None
+        if r.f_leave is not None and f + SEND_AHEAD + c.slash_f > r.f_leave:
+            return 0 if ground else None                 # the leave is due: stand (the leave script next)
+        cx = float(I["pos"][0])
+        look = 1 if cx > hx else -1
+        toward = M_R if look > 0 else M_L
+        span = body_span(I)
+        if not ground:
+            r.walk += 1
+            return toward if not slash_meets(hx, look, span, spare=-0.4) else 0
+        if slash_meets(hx, look, span):
+            if not self._atk_ready(s):
+                return 0
+            if not self._facing(s, look):
+                return toward
+            self._jh_pressed = f
+            self.jh_n["hit_press"] += 1
+            return self._press(f, toward)
         r.walk += 1
         return toward
 

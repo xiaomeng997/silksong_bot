@@ -204,3 +204,21 @@ def test_claw_scope_bomb_gate(monkeypatch):
     c.step(1000, cstate(1000, "Idle", 0.5), True, True)
     c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0, ents=(bomb,)), True, True)
     assert c.run is not None and c.run.why == "bomb"
+
+
+def test_hit_script_walks_to_i_and_slashes(on):
+    two = tp.TwoPlay()
+    hx = I_X - 6.0                                     # out of the side slash's reach of I's body
+    out = run(two, [jstate(1000, "Idle", 0.5, hx=hx), jstate(1001, "Jump Antic", 1 / 60.0, hx=hx)])
+    assert two.jh.phase == "hit" and out[-1] == tp.M_R and two.last_part == "jh"     # the walk toward I
+    s = jstate(1002, "Jump Antic", 2 / 60.0, hx=I_X - 2.9)
+    s["hero"]["facing"] = 1
+    m = run(two, [s])[0]
+    assert m & tp.M_A and m & tp.M_R                   # the slash on I (in reach, facing it)
+    s = jstate(1003, "Jump Antic", 3 / 60.0, hx=I_X - 2.9)
+    s["hero"]["facing"] = 1
+    assert run(two, [s])[0] == tp.M_A | tp.M_R           # the press's second frame
+    two = tp.TwoPlay()
+    two.jcfg.hit_script = 0
+    run(two, [jstate(1000, "Idle", 0.5, hx=hx), jstate(1001, "Jump Antic", 1 / 60.0, hx=hx)])
+    assert two.last_part != "jh"                       # t1 / t2: IdleHit and the planner
