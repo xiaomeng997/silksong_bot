@@ -324,6 +324,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             S = kin.initial_state(self.params, x, FLOOR_Y + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), fcast, prefs, ctx)
         planner.warm_kernels()
+        if air_chain.AIRCHAIN:
+            air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         self.fc.reset()
         return time.perf_counter() - t0
 

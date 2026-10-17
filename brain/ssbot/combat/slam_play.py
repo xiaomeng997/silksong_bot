@@ -47,6 +47,7 @@ at 52 0 of 12; held 11 or 16, pressed at 44-51: dx 3.75-6.25 191 of 195, dx >= 6
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 
 from ssbot.combat import air_chain as _ac
@@ -821,25 +822,26 @@ class SlamPlay:
             hx = hero_x(s)
             b = min(cands, key=lambda o: abs(float(o["pos"][0]) - hx))
         ctx = self._chain_ctx(r, s, b, sim, f)
+        t0 = time.perf_counter()
         if r.chain is None:
             plan = _ac.search(sim, ctx)
             if plan is None:
                 r.chain_next = F + _ac.RESEARCH_F
                 if not r.chain_log or r.chain_log[-1][1] != "none":
-                    r.chain_log.append([f, "none", None])
+                    r.chain_log.append([f, "none", None, round(1e3 * (time.perf_counter() - t0), 1)])
                 return None
             r.chain = plan
-            r.chain_log.append([f, "plan", plan.row()])
+            r.chain_log.append([f, "plan", plan.row(), round(1e3 * (time.perf_counter() - t0), 1)])
         elif not _ac.check(sim, ctx, r.chain):
             plan = _ac.search(sim, ctx)
             if plan is None:
-                r.chain_log.append([f, "lost", r.chain.row()])
+                r.chain_log.append([f, "lost", r.chain.row(), round(1e3 * (time.perf_counter() - t0), 1)])
                 r.chain, r.chain_off = None, "lost"
                 return None
             if r.chain.pressed_down is not None:
                 plan.f_down, plan.pressed_down = r.chain.f_down, r.chain.pressed_down
             r.chain = plan
-            r.chain_log.append([f, "replan", plan.row()])
+            r.chain_log.append([f, "replan", plan.row(), round(1e3 * (time.perf_counter() - t0), 1)])
         p = r.chain
         m = _ac.mask_at(p, F)
         if p.f_down is not None and p.pressed_down is None and m & M_A:

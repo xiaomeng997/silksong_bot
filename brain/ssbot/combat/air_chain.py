@@ -492,3 +492,25 @@ def check(sim: ChainSim, ctx: Ctx, p: Plan) -> bool:
 
 
 __all__ = ["AIRCHAIN", "ChainSim", "Ctx", "Plan", "timelines", "mask_at", "plan_cmds", "search", "check", "evaluate"]
+
+
+def warm(params) -> float:
+    """Compile / load every numba path of the chain before the fight (a synthetic double slam: her falling 2.4 u in
+    front of A's Idle body, B 9.4 u away in Slam Antic): search (both press passes) and check. The first chain of a
+    worker process otherwise paid the compile inside a tick (fixed-point FP2, 3eb3914: one 758 ms tick, the brain-lost
+    watchdog paused the game: HARNESS_FAIL). Returns the seconds spent."""
+    import time
+    from ssbot.knowledge.kinematics import HoldState, Terrain2D
+    t0 = time.perf_counter()
+    terr = Terrain2D.from_boxes([(-200.0, FLOOR_Y - 10.0, 260.0, FLOOR_Y), (0.0, 0.0, 14.01, 40.0),
+                                 (48.99, 0.0, 70.0, 40.0)])
+    for kb, prefix in ((5, np.zeros(1, np.int64)), (30, np.zeros(2, np.int64))):
+        S = kin.initial_state(params, 37.0, 4.568 + 4.8, vy=-19.0, facing=1, ground=False)
+        sim = ChainSim(S, prefix, HoldState.idle(1), params, terr, 1000, 1000 + len(prefix) - 1)
+        ctx = Ctx(b_iid=8, b_x=44.0, b_y=7.449, b_face=-1, kb0=kb, a_box=(33.26, 3.02, 36.85, 6.92), hero_x=37.0,
+                  face=1, tls=timelines())
+        p = search(sim, ctx)
+        if p is not None:
+            check(sim, ctx, p)
+        evaluate(sim, ctx, [Plan(sim.f + 2, M_R, sim.f + 6, None, sim.f + 4, sim.f + 30, 47, 8)], sim.f + 2)
+    return time.perf_counter() - t0
