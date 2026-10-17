@@ -8659,8 +8659,9 @@ body at frame ~39 (antic_audit). In the trial arms it ran on the antics without 
   HP), `sprint_rel.py`, `sprint_stop_sim*.py` (the kinematics model's sprint is not the FSM's: it decelerates through
   a release; the live stops follow the FSM), `stab_trace2.py`, `ab_stats.py`; `ab_analyze.sh` (slam_play_ab,
   forum_remaining_hits + sg4_budget, sp8_cast, ab_stats).
-- Tests `tests/test_sp8.py` (29), `tests/test_cast_stab.py` (updated); slam_play / sp4-sp7 / forum_l2 / jump_behind
-  pass (164).
+- Tests `tests/test_sp8.py`, `tests/test_cast_stab.py` (updated); slam_play / sp4-sp7 / forum_l2 / jump_behind / cast_stab /
+  sp8 pass (164). The full suite at ad77f85: 1,775 passed; test_import_firewall and test_three_layer's bell test fail
+  at da3d92d too; test_harness_recovery fails while C:\ssbot\sandbox\DEMO_SOON exists (the worker stops at once).
 
 ### 7. Switch-off identity
 
