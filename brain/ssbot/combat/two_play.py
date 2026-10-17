@@ -409,12 +409,16 @@ class JhCfg:
     #                           55 frames (SP10b A/B, 149 jumps); after its Jump Aim: the first flight frame + 55
     k_land_c: int = 110       # the jump cast: Cast Slam Antic (+ 2) -> flight from +54-56, 55 frames
     flight_f: int = 55
-    back_u: float = 1.8       # the landing's danger behind it: its Slam 2 body back edge 1.27 + her half width + margin
+    back_u: float = 3.0       # the landing's danger behind it (t1: 1.8 u - its Slam 2 body back edge 1.27 + her half
+    #                           width + margin - left her under its falling body: 16 of 19 back exits hit by its Air body
+    #                           5-15 frames before the landing at -1.1 .. -1.55 u from its centre; it still moves ~0.5 u
+    #                           toward the landing in its last 5 frames above her head)
     front_u: float = 8.5      # in front: Slam Collider 2 to 7.76 u + her half width + margin (SP9b t3: 8.3 left her
     #                           7.63 u from the real landing once)
     circle_u: float = 14.3    # the jump cast's rune circle: landing + 6.48 u, r 7.19 (13.67) + half width + margin
     circle_back_u: float = 1.4  # ... its back edge 0.71 u behind the landing + half width + margin
-    margin_f: int = 10        # the leave starts this many frames before the walk / run out would just make it
+    margin_f: int = 14        # the leave starts this many frames before the walk / run out would just make it (t1: 10,
+    #                           the leave's dash came 6-15 frames late after a slash / turn)
     slash_f: int = 14         # a press now ties her up this long (the slash; the hit's recoil a little less)
     dash_u: float = 2.8       # the dash (6 frames, 28 u/s) ...
     dash_f: int = 6
@@ -1455,11 +1459,13 @@ class TwoPlay:
         toward = M_R if r.exit_x > hx else M_L
         if dist <= c.stop_u or (hx - r.exit_x) * r.ldir >= 0:
             return 0                                     # at (or past) the exit: stand
-        if (ground and dist >= c.walk_dash_u and r.dash_f is None and float(tm.get("dash_cd") or 0.0) <= 0.02
+        can_dash = bool(((h.get("can") or {}).get("dash", True)))
+        if (dist >= c.walk_dash_u and r.dash_f is None and float(tm.get("dash_cd") or 0.0) <= 0.02 and can_dash
                 and not any(x in clip for x in NO_ATK_CLIPS) and self._facing(s, 1 if toward == M_R else -1)):
-            self._jh_dash = {"f0": f + SEND_AHEAD, "dir": toward, "rel": None}
+            # (t1: ground only - in the air she walked out; the air dash: 0.15 s at 28 u/s, then the direction key)
+            self._jh_dash = {"f0": f + SEND_AHEAD, "dir": toward, "rel": None} if ground else None
             r.dash_f = f - r.f_a
-            self.jh_n["dash"] += 1
+            self.jh_n["dash" if ground else "air_dash"] += 1
             return toward | M_DASH
         r.walk += 1
         return toward
