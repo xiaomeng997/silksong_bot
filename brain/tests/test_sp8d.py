@@ -23,7 +23,8 @@ def cast_state_at(k):
     return "Evade Scuttle", k / 60.0
 
 
-def c_state(f, k, x_rel, cx=31.0, flip=False, bottom=0.0, atk_cd=0.0, bombs=(), hp=9, two=False, facing=None):
+def c_state(f, k, x_rel, cx=31.0, flip=False, bottom=0.0, atk_cd=0.0, bombs=(), hp=9, two=False, facing=None,
+            dead=False):
     face = 1 if flip else -1
     st, tin = cast_state_at(k)
     s = state(f, st, tin, cx=cx, flip=flip, hx=cx + face * x_rel, ground=bottom <= 0.031, hp=hp)
@@ -38,6 +39,8 @@ def c_state(f, k, x_rel, cx=31.0, flip=False, bottom=0.0, atk_cd=0.0, bombs=(), 
         s["ents"].append({"type_key": "rune bomb small", "iid": 500 + i, "pos": [bx, 3.65],
                           "colliders": [{"verts_world": _circle(bx, 3.65), "r": lh.R, "enabled": lit,
                                          "damage": {"eff": 2} if lit else None}]})
+    if dead:
+        s["ents"] = s["ents"][1:]
     if two:
         o = copy.deepcopy(s["ents"][0])
         o["iid"] = 99
@@ -55,7 +58,8 @@ def _circle(x, y):
     return out
 
 
-def simulate(x_rel0=4.3, cx=31.0, flip=False, cfg=None, n=140, a1=None, lit_lead=20, hurt_at=None, two=False):
+def simulate(x_rel0=4.3, cx=31.0, flip=False, cfg=None, n=140, a1=None, lit_lead=20, hurt_at=None, two=False,
+             kill_at=None):
     """A toy cast: Spell Antic at k = 0, Cast 2 at SA + C1; ring r's bombs (both sides) appear at Cast 2 + 9.6 r (ring
     1 at a1 when given) and light lit_lead frames later for 6 frames. She walks WALK_U per frame with a key on the
     ground, jumps by the hop table (the hold so far), the attack cooldown 18 frames. Returns (script, rows) with rows
@@ -102,7 +106,8 @@ def simulate(x_rel0=4.3, cx=31.0, flip=False, cfg=None, n=140, a1=None, lit_lead
                         lit_over.append((r, round(bottom, 2)))
         cd = max(0.0, (18 - (k - last_atk)) / 60.0)
         hp = 9 if hurt_at is None or k < hurt_at else 7
-        s = c_state(f, k, x, cx=cx, flip=flip, bottom=bottom, atk_cd=cd, bombs=bombs, hp=hp, two=two)
+        s = c_state(f, k, x, cx=cx, flip=flip, bottom=bottom, atk_cd=cd, bombs=bombs, hp=hp, two=two,
+                    dead=kill_at is not None and k >= kill_at)
         m = h.step(f, s, bottom <= 0.031, True, t_game=f / 60.0)
         rows.append((k, round(x, 3), round(bottom, 2), m, lit_over))
         if m is not None:
@@ -216,3 +221,14 @@ def test_no_air_slash_on_idle_inside_the_window():
         if air and st == "Idle":
             # an air press on the Idle body comes only after the hold and the covering bomb's window
             assert k >= run.P + run.H and k > kc + 10 + 20 + 7
+
+
+def test_hop_runs_on_when_it_dies_mid_hop():
+    # t1 (5c7cbd8): an air slash killed it at P + 7; the bombs stay: the hold and the window run on
+    h, rows = simulate(kill_at=SA + C1 + 24)
+    run = (h.done + [h.run])[0]
+    assert run.P is not None
+    held = [k for k, x, b, m, lo in rows if m is not None and m & sp.M_J]
+    assert len(held) >= run.H
+    assert not any(r[4] for r in rows)
+    assert run.phase == "abort" and run.why.startswith("gone")

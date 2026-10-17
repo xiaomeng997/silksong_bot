@@ -163,7 +163,10 @@ def cast_of(fr: list[dict], i0: int, label: dict, runs: list[dict]) -> dict | No
                 n += 1
             jp.append((round(g[i] - g0, 1), n))
     rec["jumps"] = jp
-    run = next((r for r in runs if abs(int(r.get("f0") or -99) - x["f"]) <= 4), None)
+    # the script's run: by its antic entry frame (fa, from 5c9e2f9 on), else its start up to 45 frames into the antic
+    # (it starts late when the slam playbook's way out still has the keys)
+    run = next((r for r in runs if r.get("fa") is not None and abs(int(r["fa"]) - x["f"]) <= 3), None) or next(
+        (r for r in runs if r.get("fa") is None and -3 <= int(r.get("f0") or -99) - x["f"] <= 45), None)
     rec["script"] = run
     return rec
 

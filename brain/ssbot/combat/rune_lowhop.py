@@ -158,7 +158,9 @@ class HopCfg:
     #                              reaches the band by antic frame ~44)
     gap_lo: float = 0.6          # in the air: no key toward it when her box centre is nearer its body's edge than
     #                              this (u) ...
-    gap_hi: float = 2.6          # ... the key toward it when the gap is beyond this (the slash's reach 3.12 - spare)
+    gap_hi: float = 2.0          # ... the key toward it when the gap is beyond this (t1, 5c7cbd8, gap_hi 2.6: the
+    #                              descent's slash at j 24 met its Idle body from d <= 4.63 u in 9 of 9, from 4.64 on
+    #                              in 2 of 14 - its evade starts then)
     k_max: int = 200             # the run ends this many frames after the antic entry at the latest
     land_wait: int = 50          # after the press: no landing by P + this -> hand back
     cast2_k: float = 49.5        # Cast 2 entry from the antic entry (p50; before it is seen)
@@ -249,6 +251,7 @@ class Hop:
     face: int                    # its facing (+1 right); she is in front of it
     f0: int                      # the STATE frame of the start
     ta: float                    # the antic entry on the clock (s)
+    fa: int                      # the antic entry's STATE frame (f0 - its state time)
     d0: float                    # her x in front of its centre at the start (u)
     ground0: bool
     hp0: int
@@ -355,7 +358,7 @@ class RuneLowHop:
 
     @staticmethod
     def _rec(r: Hop) -> dict:
-        return {"f0": r.f0, "d0": r.d0, "ground0": r.ground0, "x0": r.x0,
+        return {"f0": r.f0, "fa": r.fa, "d0": r.d0, "ground0": r.ground0, "x0": r.x0,
                 "k_c2": None if r.tc is None else round((r.tc - r.ta) * 60.0, 1),
                 "bombs": {str(i): b for i, b in r.bombs.items() if b.get("cover")},
                 "plan": r.plan, "P": r.P, "H": r.H, "k_land": r.k_land, "presses": r.presses, "hits": r.hits,
@@ -374,16 +377,29 @@ class RuneLowHop:
         hp = int(h.get("health") or 0)
         r = self.run
         if r is not None:
-            if e is None or e.get("iid") != r.iid:
-                self._close("abort", "gone")
-                return None
             if hp < r.hp0:
                 self._close("abort", "hurt")
                 return None
-            if len(_sp.clappers(s)) != 1:
+            gone = e is None or e.get("iid") != r.iid
+            two = not gone and len(_sp.clappers(s)) != 1
+            new = not gone and st == "Spell Antic" and abs((t - tin) - r.ta) * 60.0 > 30
+            if (gone or two or new) and self.critical():
+                # t1 (5c7cbd8): an air slash killed it at P + 7, the run ended, the hold was cut at 8 frames and its
+                # ring-1 bomb (the bombs stay) hit her 7 frames later: the hold and the bomb window run on
+                r.k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD
+                self._observe_cast(r, s, None, None, 0.0, t, r.k - SEND_AHEAD)
+                m = M_J if r.k - r.P < r.H else 0
+                r.sent.append((f, m))
+                r.ticks += 1
+                r.why = r.why or ("gone (hop on)" if gone else "two (hop on)" if two else "new cast (hop on)")
+                return m
+            if gone:
+                self._close("abort", "gone")
+                return None
+            if two:
                 self._close("abort", "two")
                 return None
-            if st == "Spell Antic" and abs((t - tin) - r.ta) * 60.0 > 30:
+            if new:
                 self._close("done", "new cast")          # a new cast: its own run below
                 r = None
         if r is None:
@@ -411,8 +427,8 @@ class RuneLowHop:
             if why is not None:
                 self.why_not[why] = self.why_not.get(why, 0) + 1
                 return None
-            r = self.run = Hop(iid=e.get("iid"), face=face, f0=f, ta=ta, d0=round(d0, 3), ground0=bool(ground),
-                               hp0=hp)
+            r = self.run = Hop(iid=e.get("iid"), face=face, f0=f, ta=ta, fa=int(f - round(tin * 60.0)),
+                               d0=round(d0, 3), ground0=bool(ground), hp0=hp)
         k_now = int(round((t - r.ta) * 60.0))
         r.k = k_now + SEND_AHEAD
         self._observe_cast(r, s, e, st, tin, t, k_now)
@@ -437,7 +453,7 @@ class RuneLowHop:
         return any(x < hi and y > lo for x, y in self._rune_threats(f, s))
 
     def _observe_cast(self, r: Hop, s: dict, e: dict, st: str | None, tin: float, t: float, k_now: int) -> None:
-        if st == "Cast 2" and r.tc is None:
+        if st == "Cast 2" and r.tc is None and e is not None:
             r.tc = t - tin
             if r.x0 is None:
                 r.x0 = float(e["pos"][0])
