@@ -190,6 +190,14 @@ def rules_pass(row: dict, f_wake: int, f_end: int, fk: int, policy: dict | None)
                                        "hits": len(hit_here),
                                        "states": ("Spell Antic", "Cast 1", "Cast 2") if kind == "cast" else SLAM_ST}
             prev[iid] = st
+    # HP-loss hits after each event: an evade to its start + 120 frames (the next move's cycle), an Idle run to + 60, a
+    # close cast to + 110 (ring 1's light + 25 frames ~ antic + 100), a focus slam to + 170
+    for lst, win in ((evades, 120), (idles, 60)):
+        for r in lst:
+            r["hp"] = sum(1 for g in hp_hits if r["f"] <= g <= r["f"] + win)
+    for r in closes:
+        win = 110 if r["kind"] == "cast" else 170
+        r["hp"] = sum(1 for g in hp_hits if r["f"] <= g <= r["f"] + win)
     fight_s = (fk - f_wake) / 60.0
     both_s = n_both / 60.0
     t3 = (hp_hits[2] - f_wake) / 60.0 if len(hp_hits) >= 3 else fight_s
@@ -215,6 +223,28 @@ def episode(arm: str, inst: int, run: Path, row: dict, dec: dict) -> dict:
     return e
 
 
+def _idlehit(ok: list[dict]) -> dict:
+    """TWO_IDLEHIT's runs (policy two_play.idle_runs_rec: [f0, re, d0, k_press, k_hit, walk, why])."""
+    R = [r for e in ok for r in ((e.get("two_play") or {}).get("idle_runs_rec") or ())]
+    if not R:
+        return {}
+    pr = [r for r in R if r[3] is not None]
+    hit = [r for r in R if r[4] is not None]
+    return {"runs": len(R), "re": sum(1 for r in R if r[1]), "press": len(pr), "hit": len(hit),
+            "hit_within_15": sum(1 for r in hit if r[4] <= 15), "k_press_p50": pct([r[3] for r in pr], (50,)),
+            "k_hit_p10_50_90": pct([r[4] for r in hit]), "walk_runs": sum(1 for r in R if r[5]),
+            "why": dict(Counter(r[6] for r in R))}
+
+
+def _chase(ok: list[dict]) -> dict:
+    out = Counter()
+    for e in ok:
+        for k, v in (e.get("evade_chase") or {}).items():
+            if isinstance(v, (int, float)):
+                out[k] += v
+    return dict(out)
+
+
 def summarize(E: list[dict]) -> dict:
     out = sp7_two.summarize(E)
     ok = [e for e in E if e.get("outcome") != "HARNESS_FAIL"]
@@ -237,6 +267,13 @@ def summarize(E: list[dict]) -> dict:
         "S1_evades": len(ev), "S1_close_share": round(sum(x["close"] for x in ev) / len(ev), 3) if ev else None,
         "S1_follow_p50": pct([x["follow"] for x in ev], (50,)), "S1_d_end_p10_50_90": pct([x["d_end"] for x in ev]),
         "S1_next": dict(Counter(x["next"] for x in ev)),
+        "S1_close_safe_share": round(sum(1 for x in ev if x["close"] and not x.get("hp")) / len(ev), 3) if ev else None,
+        "S2_hp_after_share": round(sum(1 for x in idl if x.get("hp")) / len(idl), 3) if idl else None,
+        "S3_close_casts_safe": sum(1 for x in casts if not x.get("hp")),
+        "S3_focus_slams_safe": sum(1 for x in slams if not x.get("hp")),
+        "idlehit": _idlehit(ok),
+        "open_script": dict(Counter(str((e.get("two_play") or {}).get("open", {}).get("done")) for e in ok)),
+        "chase_runs": _chase(ok),
         "S2_idle_runs": len(idl), "S2_hit_ended_share": round(sum(x["by_hit"] for x in idl) / len(idl), 3) if idl
         else None,
         "S2_first_hit_s_p50": (round(float(np.median(hit_first)) / 60.0, 3) if hit_first else None),

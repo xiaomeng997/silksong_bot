@@ -201,3 +201,12 @@ def test_intro_keys():
     assert tp.intro_keys(s) == sp.M_L
     s = two_state(1000, "Idle", 0.0, hx=26.0)
     assert tp.intro_keys(s) == 0
+
+
+def test_idle_hit_seen_while_another_script_has_the_keys(on):
+    two = tp.TwoPlay()
+    run(two, [two_state(1000, "Slam Recover", 0.3), two_state(1001, "Idle", 0.0), two_state(1002, "Idle", 1 / 60)])
+    # the hit shows with its next move begun (another script takes the keys: no step this tick)
+    s = two_state(1004, "Spell Antic", 0.0, ev=[{"k": "hit", "d": {"ent": 7, "type_key": sp.CLAPPER, "dealt": 9}}])
+    two.observe(1004, s, 1004 / 60.0)
+    assert two.idle is None and two.idle_done[-1].k_hit == 3 and two.idle_done[-1].why == "hit"

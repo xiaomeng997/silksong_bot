@@ -211,6 +211,23 @@ class TwoPlay:
                         j["done"] = True
                         j["land_x"] = float(e["pos"][0])
                         j["t_land"] = t
+        # the IdleHit run's bookkeeping on every tick (another script may hold the keys when its hit shows): the landed
+        # hit on its Clapper (the STATE that shows it: its state turns over in the same frame), the run's end
+        r = self.idle
+        if r is not None:
+            for ev in s.get("ev") or ():
+                d = ev.get("d") or {}
+                if ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.iid:
+                    if r.k_hit is None and (d.get("dealt") is None or float(d.get("dealt")) > 0):
+                        r.k_hit = f - r.f0
+            e = clapper_by(s, r.iid)
+            hp = int((s.get("hero") or {}).get("health") or 0)
+            if e is None or len(_sp.clappers(s)) != 2:
+                self._idle_close("gone" if e is None else "one")
+            elif _sp.control(e)[0] != "Idle" or r.iid in self.entry or f - r.f0 > WIN_F or hp < r.hp0:
+                self._idle_close("hit" if r.k_hit is not None else (
+                    "hurt" if hp < r.hp0 else "re-entry" if r.iid in self.entry else
+                    "left idle" if _sp.control(e)[0] != "Idle" else "window"))
 
     # ---- S2 IdleHit / S6 Opening ----
 
@@ -262,8 +279,6 @@ class TwoPlay:
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)
         if len(cs) != 2:
-            if r is not None:
-                self._idle_close("one")
             return None
         F = clapper_by(s, focus) if focus is not None else None
         if F is None:
@@ -272,17 +287,8 @@ class TwoPlay:
         iid = F.get("iid")
         st, tin = _sp.control(F)
         entry = iid in self.entry
-        # the landed hit on the run's Clapper (the STATE that shows it: its state turns over in the same frame)
-        if r is not None:
-            for ev in s.get("ev") or ():
-                d = ev.get("d") or {}
-                if ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.iid:
-                    if r.k_hit is None and (d.get("dealt") is None or float(d.get("dealt")) > 0):
-                        r.k_hit = f - r.f0
-        if r is not None and (r.iid != iid or st != "Idle" or entry or f - r.f0 > WIN_F or hp < r.hp0):
-            self._idle_close("hit" if r.k_hit is not None else ("hurt" if hp < r.hp0 else
-                                                                  "re-entry" if entry and r.iid == iid else
-                                                                  "left idle" if st != "Idle" else "window"))
+        if r is not None and (r.iid != iid or entry):
+            self._idle_close("focus" if r.iid != iid else "re-entry")      # (observe closes the other ends)
             r = None
         if r is None and entry:
             hx = _sp.hero_x(s)
