@@ -10,15 +10,21 @@ from tests.test_slam_play import state
 
 
 def test_off_by_default(monkeypatch):
-    monkeypatch.delenv("SSBOT_FORUM_JB_DASH_SLASH", raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    # off without v2; since the SP8a A/B it follows SSBOT_FORUM_V2 (=0 off, with STOP=0 too: nothing runs)
+    for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2"):
+        monkeypatch.delenv(k, raising=False)
     try:
+        assert importlib.reload(cs).ENABLED is False
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        assert importlib.reload(cs).ENABLED is True
+        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_SLASH", "0")
+        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_STOP", "0")
         assert importlib.reload(cs).ENABLED is False
         monkeypatch.setenv("SSBOT_FORUM_JB_DASH_SLASH", "1")
         assert importlib.reload(cs).ENABLED is True
     finally:
-        monkeypatch.delenv("SSBOT_FORUM_JB_DASH_SLASH", raising=False)
-        monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
+        for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2"):
+            monkeypatch.delenv(k, raising=False)
         importlib.reload(cs)
 
 

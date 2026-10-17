@@ -12,25 +12,28 @@ from ssbot.knowledge import kinematics as kin
 from tests.test_cast_stab import antic_state
 
 
-def test_switches_off_by_default(monkeypatch):
-    for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_COMBO", "SSBOT_FORUM_JB_DASH_STOP"):
+def test_switches_follow_v2(monkeypatch):
+    keys = ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_COMBO", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2")
+    for k in keys:
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
     try:
         m = importlib.reload(cs)
-        assert not (m.ENABLED or m.COMBO or m.STOP)
-        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_COMBO", "1")
-        assert importlib.reload(cs).COMBO is False          # only with JB_DASH_SLASH
-        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_SLASH", "1")
-        assert importlib.reload(cs).COMBO is True
-        monkeypatch.delenv("SSBOT_FORUM_JB_DASH_SLASH")
-        monkeypatch.delenv("SSBOT_FORUM_JB_DASH_COMBO")
+        assert not (m.ENABLED or m.COMBO or m.STOP)              # without v2: off
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        m = importlib.reload(cs)
+        assert m.ENABLED and m.DASH_SLASH and m.COMBO and m.STOP  # the SP8a default with v2
+        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_SLASH", "0")
+        m = importlib.reload(cs)
+        assert m.ENABLED and m.STOP and not m.DASH_SLASH and not m.COMBO   # COMBO only with JB_DASH_SLASH
+        monkeypatch.setenv("SSBOT_FORUM_JB_DASH_STOP", "0")
+        m = importlib.reload(cs)
+        assert not (m.ENABLED or m.COMBO or m.STOP)              # arm rnsp8a0
+        monkeypatch.setenv("SSBOT_FORUM_V2", "0")
         monkeypatch.setenv("SSBOT_FORUM_JB_DASH_STOP", "1")
         m = importlib.reload(cs)
         assert m.ENABLED and m.STOP and not m.DASH_SLASH
     finally:
-        for k in ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_COMBO", "SSBOT_FORUM_JB_DASH_STOP",
-                  "SSBOT_FORUM_V2"):
+        for k in keys:
             monkeypatch.delenv(k, raising=False)
         importlib.reload(cs)
 
@@ -330,3 +333,13 @@ def test_no_start_through_a_rune_circle():
     assert c.step(1000, s, True, t_game=1000 / 60) is None and c.run is None
     s2 = hero(antic_state(1001, 3, 10.6))                     # gone: the start goes
     assert c.step(1001, s2, True, t_game=1001 / 60) is not None
+
+
+def test_one_clapper_only():
+    # two live Clappers: no start (the person's two-Clapper rules differ; SP9)
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True)
+    s = hero(antic_state(1000, 2, 10.6))
+    other = dict(s["ents"][0], iid=8, pos=[45.0, 7.45])
+    other["fsms"] = [{"name": "Control", "state": "Idle", "t": 0.3}]
+    s["ents"].append(other)
+    assert c.step(1000, s, True, t_game=1000 / 60) is None and c.stats().get("no_two") == 1

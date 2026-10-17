@@ -2,43 +2,45 @@
 to slash during the big rune's antic, try the dash slash"; forum.md 70), and SP8's two answers to "the two jump moves
 mostly start their antic far away; try either dash slash x2 or dash then stop and side slash x2" (forum.md 72).
 
-SSBOT_FORUM_JB_DASH_SLASH=1 (default off; read by train.forum_planner_policy): when the Clapper (Song Heavy Sentry)
-enters the jump cast's antic (Control "Cast Slam Antic", 16 frames, then "Cast Slam Antic 2", 40 frames, Jump Aim at
-+55/56; SP4 / SP5 A/B: the hero 9.2 u from its centre at the antic start (p10 / 90 6.2 / 10.3), 0.25 hits per antic)
-and the hero stands on the ground in front of it beyond the side slash's reach, the bot plays the dash slash as a
-script: the ground dash toward it with the dash key HELD (the sprint FSM's Dashed state goes to the sprint only while
-the dash is held, and Ground Sprint skids out when it is released; t3, 79eb963: a 2-frame dash ran on as Dash To Run
-and the attack was a plain slash, 8 of 8), the attack pressed on the dash's last frames (Ground Sprint reads it
-queued, 0.1 s: the stab starts on the first sprint frame), the dash key and the key toward it held until the stab hits,
-then no key through the recoil until her control returns; the planner decides again after that (or at once, all keys
-released, when the stab is not seen to hit).
+SSBOT_FORUM_JB_DASH_SLASH=1 (read by train.forum_planner_policy; since the SP8a A/B on with SSBOT_FORUM_V2, =0 off):
+when the Clapper (Song Heavy Sentry) enters the jump cast's antic (Control "Cast Slam Antic", 16 frames, then "Cast
+Slam Antic 2", 40 frames, Jump Aim at +55/56; SP4 / SP5 A/B: the hero 9.2 u from its centre at the antic start (p10 /
+90 6.2 / 10.3), 0.25 hits per antic) and the hero stands on the ground in front of it beyond the side slash's reach,
+the bot plays the dash slash as a script: the ground dash toward it with the dash key HELD (the sprint FSM's Dashed
+state goes to the sprint only while the dash is held, and Ground Sprint skids out when it is released; t3, 79eb963: a
+2-frame dash ran on as Dash To Run and the attack was a plain slash, 8 of 8), the attack pressed on the dash's last
+frames (Ground Sprint reads it queued, 0.1 s: the stab starts on the first sprint frame), the dash key and the key
+toward it held until the stab hits, then no key through the recoil until her control returns; the planner decides again
+after that (or at once, all keys released, when the stab is not seen to hit).
 
 The model (C:\\ssbot\\data\\m2_dash_slash: the decompiled hornet_sprint FSM, the person's 92 Wanderer dash slashes;
 `stab_path`; SP8 calibrated on SP6 t6's 9 live stabs, C:\\ssbot\\data\\m2_dash_slash\\combo\\model_calib_bot.txt): the
 dash 28 u/s on frames 1-7 after the dash's mask (3.27 u; live 3.36); the stab's clip from frame 8, vx 26.9 for 5 frames
-then 17.5; its collider (0 .. 3.10 u in front of her transform, the side slash's reach) active from 7 to 14 frames after
-the stab starts (live: hits at frame 15-16 after the dash's mask; SP6's model put them one frame early); its body front
-in the cast antic 1.873 u from its centre (SP6 used the Idle box's 2.25: the audit's recorded collider, antic_audit);
-on a hit 2 frames still, then the recoil: vx 30 u/s away, vy +20, x0.85 per frame for 20 frames (0.333 s: ~3.2 u back,
-~2.1 u up), control back 0.344-0.48 s after the press, then the fall at 60 u/s^2 (1.2 u/s per 50 Hz physics step;
-kinematics.py; SP6 used 72). An enemy in an antic cannot block (the person; the Clapper has no guard), so only the hit
-branch is modelled: the start needs the predicted hit, her box front never nearer than its body front + STAB_MARGIN
-during the lunge, and her landing by the Jump Aim (+55) minus LAND_MARGIN frames. A miss (the stab not seen to hit by
-the window's end) lunges ~4.4 u on and hands back to the planner.
+then 17.5; its collider (0 .. 3.10 u in front of her transform, the side slash's reach) active from 7 to 14 frames
+after the stab starts (live: hits at frame 15-16 after the dash's mask; SP6's model put them one frame early); its body
+front in the cast antic 1.873 u from its centre (SP6 used the Idle box's 2.25: the audit's recorded collider,
+antic_audit); on a hit she lunges on 2 frames at 17.5 u/s (SP8 t2: 0.6 u; the hit may also register a frame late), then
+the recoil: vx 30 u/s away, vy +20, x0.85 per frame for 20 frames (0.333 s: ~3.2 u back, ~2.1 u up), control back
+0.344-0.48 s after the press, then the fall at 60 u/s^2 (1.2 u/s per 50 Hz physics step; kinematics.py; SP6 used 72).
+An enemy in an antic cannot block (the person; the Clapper has no guard), so only the hit branch is modelled: the start
+needs the predicted hit, her box front never nearer than its body front + STAB_MARGIN during the lunge, and her landing
+by the Jump Aim (+55) minus LAND_MARGIN frames. A miss (the stab not seen to hit by the window's end) lunges ~4.4 u on
+and hands back to the planner.
 
-SSBOT_FORUM_JB_DASH_COMBO=1 (SP8 T1, default off, only with JB_DASH_SLASH; C:\\ssbot\\data\\m2_dash_slash\\combo\\
-answer.txt section 4): after the DashStab's hit the Wanderer RecoilStab (RS: a hover, then a lunge 45 u/s forward and 15
-down) - a NEW attack press after the hit (holding it from the stab never triggers it), read from W Recoil Cancelable
-(the earliest RS start g15 game frames after the hit): no key from the hit to the press, the attack on g16-17 (the
-mask's game frame; held 2 frames: one rising edge), then no key - no dash (an air dash would cancel it), no jump, no
-direction - until the RS hits (src RecoilStab, ~g24-26) or its clip ends. Only when the dash starts >= combo_d_min
-(10.0 u: the RS hit 0.67 u outside its body at the latest collider frame) and the RS hit is predicted by antic frame
-rs_k_max (52; the Jump Aim at 55): this replaces the stab's landing rule (with the RS she lands ~aim + 33). The RS
-bounces her (vy -10, then +17.4; no i-frames; the air dash refreshed): no key until the Jump Aim + post_aim_f (its body
-rises in place: 0.85 u above the floor at the aim, 2.93 at +3, 5.72 at +9), then the planner (JUMP_BEHIND). The game
-clock (Stamp.t_game_s) counts g: a crit's hit-stop freezes 0.2 s.
+SSBOT_FORUM_JB_DASH_COMBO=1 (SP8 T1, follows v2 like JB_DASH_SLASH, only with it;
+C:\\ssbot\\data\\m2_dash_slash\\combo\\answer.txt section 4): after the DashStab's hit the Wanderer RecoilStab (RS: a
+hover, then a lunge 45 u/s forward and 15 down) - a NEW attack press after the hit (holding it from the stab never
+triggers it), read from W Recoil Cancelable (the earliest RS start g15 game frames after the hit): no key from the hit
+to the press, the attack on g16-17 (the mask's game frame; held 2 frames: one rising edge), then no key - no dash (an
+air dash would cancel it), no jump, no direction - until the RS hits (src RecoilStab, ~g24-26) or its clip ends. Only
+when the dash starts >= combo_d_min (10.0 u: the RS hit 0.67 u outside its body at the latest collider frame) and the
+RS hit is predicted by antic frame rs_k_max (52; the Jump Aim at 55): this replaces the stab's landing rule (with the
+RS she lands ~aim + 33). The RS bounces her (vy -10, then +17.4; no i-frames; the air dash refreshed): no key until the
+Jump Aim + post_aim_f (its body rises in place: 0.85 u above the floor at the aim, 2.93 at +3, 5.72 at +9), then the
+planner (JUMP_BEHIND). The game clock (Stamp.t_game_s) counts g: a crit's hit-stop freezes 0.2 s.
 
-SSBOT_FORUM_JB_DASH_STOP=1 (SP8 T2, default off; the person's second option): from stop_d_min .. stop_d_max in front,
+SSBOT_FORUM_JB_DASH_STOP=1 (SP8 T2, follows v2; the person's second option; with JB_DASH_SLASH on, the stop goes
+below combo_d_min and the stab + RS from there; one live Clapper only): from stop_d_min .. stop_d_max in front,
 the dash + the key toward it held, both released so she stops in slash reach (centre to centre <= stop_u): a tap (the
 dash's own 3.3 u) when that reaches, else the dash held into the ground sprint and released, closed loop on her x and
 speed, inside Sprint Grace (the FSM: a release within 0.3 s of the sprint's start regains control at once, no skid;
@@ -58,13 +60,19 @@ from ssbot.combat import jump_behind as _jb
 from ssbot.combat import slam_play as _sp
 
 
-def _on(name: str) -> bool:
-    return os.environ.get(name, "0").strip() == "1"
+def _on(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip() == "1"
 
 
-DASH_SLASH = _on("SSBOT_FORUM_JB_DASH_SLASH")
-COMBO = DASH_SLASH and _on("SSBOT_FORUM_JB_DASH_COMBO")
-STOP = _on("SSBOT_FORUM_JB_DASH_STOP")
+# SP8a A/B (forum.md 72; 34b2b47 / 33ff9d5, 32 episodes per arm; the person's rule "the faster arm is the default, not
+# worse on HP-hitless"): sp8dx (all three) landed / s 1.022 -> 1.075 (+0.053, 90 % +0.016 .. +0.089), kill p50 21.9 ->
+# 20.6 s, HP-hitless 30 -> 30 of 32, the jump cast's antic 0.48 -> 1.85 hits. Unset, the three follow SSBOT_FORUM_V2
+# (on with v2, off without it, like the SP4-SP6 switches); =0 turns each off (arm rnsp8a0: all three off = the SP7
+# default).
+_V2 = "1" if _on("SSBOT_FORUM_V2") else "0"
+DASH_SLASH = _on("SSBOT_FORUM_JB_DASH_SLASH", _V2)
+COMBO = DASH_SLASH and _on("SSBOT_FORUM_JB_DASH_COMBO", _V2)
+STOP = _on("SSBOT_FORUM_JB_DASH_STOP", _V2)
 ENABLED = DASH_SLASH or STOP
 CLAPPER = _sp.CLAPPER
 ANTIC = ("Cast Slam Antic", "Cast Slam Antic 2")
@@ -675,6 +683,8 @@ class CastStab:
         x0 = (_sp.hero_x(s) - cx) * face
         if x0 <= 0:
             return "behind"
+        if len(_sp.clappers(s)) != 1:
+            return "two"                                 # one Clapper only (the person's two-Clapper rules differ)
         hx = _sp.hero_x(s)
         front = cx + face * BODY_FRONT
         lo, hi = min(hx, front), max(hx, front)
