@@ -232,6 +232,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.two: two_play.TwoPlay | None = two_play.TwoPlay() if two_play.ANY else None
         self._wake_f: int | None = None
         self._play_tick: dict | None = None
+        self.own_trace: list = []                 # SP10a: see reset()
+        self._own_last: tuple | None = None
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -447,6 +449,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
+        # SP10a (logging only): who sent each tick's keys, run-length coded - [f, own, crit, L2 target, goal, why] on
+        # every tick where one of them changes (own: plan / sup / slam / stab / low / chase / two:<part> / cog)
+        self.own_trace: list = []
+        self._own_last: tuple | None = None
 
     # ---- perception hooks ----
 
@@ -773,6 +779,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.first_pending_f = f
             self.first_pending_reasons = list(r.decision.reasons)
         mask = res.mask if r.mask is None else r.mask
+        own = "plan" if r.mask is None else "sup"
         play = None
         if self.cast_stab is not None:
             self.cast_stab.observe(f, s)          # SP8: the rune circles' first frame and lit state, every tick
@@ -802,6 +809,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                                         "why": rp.why}
             if play is not None:
                 mask = play
+                own = "slam"
                 self.counts["slam_play"] += 1
         if self.cast_stab is not None and play is None and not low_crit and not asw_crit:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
@@ -818,6 +826,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 stab = None
             if stab is not None:
                 mask = play = stab
+                own = "stab"
                 self.counts["cast_stab"] += 1
         if self.rune_lowhop is not None and play is not None:
             self.rune_lowhop.yield_to(s)          # SP8d: another script has the keys (outside the hop's window)
@@ -834,6 +843,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 lh = None
             if lh is not None:
                 mask = play = lh
+                own = "low"
                 self.counts["rune_lowhop"] += 1
         if self.evade_chase is not None and play is not None:
             self.evade_chase.yield_to(s)          # SP8c: another script has the keys: the chase run ends
@@ -850,6 +860,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 ch = None
             if ch is not None:
                 mask = play = ch
+                own = "chase"
                 self.counts["evade_chase"] += 1
         if self.two is not None and play is None:
             # SP9a S2 IdleHit / S6 the opening (the supervisor's keys win)
@@ -866,13 +877,22 @@ class ForumPlannerPolicy(PlannerPolicy):
                                 two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t)
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
+                own = "two:" + str(getattr(self.two, "last_part", None))
                 self.counts["two_play"] += 1
         elif esc_on:
             self.two.esc_yield(f, s)              # SP9b: another script has the keys: a running hop ends
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
+            own = "cog"
             self.cog["frames"].add(f + 2)
+        if self.pause_owned:
+            own = "sup"
+        key = (own, "low" if low_crit else "asw" if asw_crit else None, getattr(prefs, "target", None),
+               self.tac.last.get("goal"), self.tac.last.get("goal_why"))
+        if key != self._own_last:
+            self._own_last = key
+            self.own_trace.append([f, *key])
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
@@ -1068,4 +1088,6 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
                 **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {}),
                 **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
-                **({"two_play": self.two.stats()} if self.two is not None else {})}
+                **({"two_play": self.two.stats()} if self.two is not None else {}),
+                **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
+                "own_trace": self.own_trace}

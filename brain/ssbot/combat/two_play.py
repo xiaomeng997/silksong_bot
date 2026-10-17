@@ -582,20 +582,24 @@ class TwoPlay:
              two_enc: bool = False, latch=None) -> int | None:
         """The mask for frame f + 2 (IdleHit, the Opening, SP9b / SP9c), or None (the planner). latch: m -> the key mask
         the oracle's hold filter latches at f + 2 when m is sent for it (SP9c's dash; None: m)."""
+        self.last_part = None                 # SP10a (logging only): which part sent the mask
         if ASW and self.asw is not None:
             am = self._asw_step(f, s, ground, accepting, t, latch)
             if am is not None:
                 self._asw_prev = am
+                self.last_part = "asw"
                 return am
             self._asw_prev = 0
         if ESC and self.esc is not None:
             em = self._esc_step(f, s, ground, accepting)
             if em is not None:
+                self.last_part = "esc"
                 return em
         m = None
         if OPEN and two_enc:
             m = self._open_step(f, s, ground, accepting, t, wake_f)
         idle_m = self._idle_step(f, s, ground, accepting, focus) if IDLEHIT else None
+        self.last_part = "open" if m is not None else "idle" if idle_m is not None else None
         return m if m is not None else idle_m
 
     def _press(self, f: int, toward: int) -> int:

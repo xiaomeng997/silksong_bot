@@ -456,6 +456,12 @@ class SlamPlay:
                 out["early_press"] += len(r.k_early)
         return dict(out)
 
+    def runs_rec(self) -> list:
+        """SP10a (logging only): every run - [iid, antic entry frame, phase, why, k_start, k_jump, k_press, bounced,
+        Slam 0's k, k_air, the last tick's k, side_why]."""
+        return [[r.iid, r.fa, r.phase, r.why, r.k_start, r.k_jump, r.k_press, r.bounced, r.ks0, r.k_air, r.k,
+                 r.side_why] for r in self.done + ([self.run] if self.run is not None else [])]
+
     def active(self) -> bool:
         return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after")
 
