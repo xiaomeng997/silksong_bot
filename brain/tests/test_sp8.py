@@ -16,6 +16,10 @@ def test_switches_follow_v2(monkeypatch):
     keys = ("SSBOT_FORUM_JB_DASH_SLASH", "SSBOT_FORUM_JB_DASH_COMBO", "SSBOT_FORUM_JB_DASH_STOP", "SSBOT_FORUM_V2")
     for k in keys:
         monkeypatch.delenv(k, raising=False)
+    # (since the lead's note of 2026-10-17 JB_SLAM_DASH / JB_CORNER follow v2 too: =0 here, the SP8a switches alone)
+    monkeypatch.setenv("SSBOT_FORUM_JB_SLAM_DASH", "0")
+    monkeypatch.setenv("SSBOT_FORUM_JB_CORNER", "0")
+    importlib.reload(cs._jb)
     try:
         m = importlib.reload(cs)
         assert not (m.ENABLED or m.COMBO or m.STOP)              # without v2: off
@@ -33,8 +37,9 @@ def test_switches_follow_v2(monkeypatch):
         m = importlib.reload(cs)
         assert m.ENABLED and m.STOP and not m.DASH_SLASH
     finally:
-        for k in keys:
+        for k in keys + ("SSBOT_FORUM_JB_SLAM_DASH", "SSBOT_FORUM_JB_CORNER"):
             monkeypatch.delenv(k, raising=False)
+        importlib.reload(cs._jb)
         importlib.reload(cs)
 
 
