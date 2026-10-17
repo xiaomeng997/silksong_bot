@@ -328,6 +328,7 @@ class GauntletTactics:
         self._strike = {}
         self.jb_land = {}
         self._two_fam, self._two_idle = {}, {}
+        self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
     # ---- geometry ----
@@ -500,6 +501,10 @@ class GauntletTactics:
                     self.jump_how[s.iid] = "under and behind"
                     return spot, frozenset(), "jump: under and behind (antic)"
             self.jump_how[s.iid] = "under and behind"
+            if jb.CORNER and getattr(self, "_n_clappers", 0) == 1 and jb.corner_room(x, front) < jb.CFG["push_from_u"]:
+                # SSBOT_FORUM_JB_CORNER (SP8b): at a wall stay in reach through the antic (cast_stab slashes, then its
+                # way under from the take-off) instead of backing off to aim_wall_u
+                return self._clamp(x + front * jb.CFG["corner_aim_u"]), frozenset(), "jump: aim stance (corner)"
             return jb.aim_spot(x, front), frozenset(), "jump: aim stance"
         e = self._ent(ws, s.iid)
         vel = getattr(e, "vel", None) if e is not None else None
@@ -911,6 +916,8 @@ class GauntletTactics:
         hx = float(ws.hero.pos.v[0])
         t = float(ws.stamp.t_game_s) if getattr(ws, "stamp", None) is not None else 0.0
         self._t = t
+        self._n_clappers = sum(1 for x in (getattr(fc, "subjects", ()) or ())
+                               if x.type_key == CLAPPER and x.alive and x.in_play and x.pos is not None)
         for s in getattr(fc, "subjects", ()) or ():
             if s.type_key != CLAPPER or s.pos is None:
                 continue

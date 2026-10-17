@@ -252,13 +252,14 @@ def run_under(flip, x_rel=4.4, room0=2.5, dland=2.3, n_land=45):
     c = cs.CastStab(slam_dash=True, corner=True)
     c._jump_kind[7] = "jump"
     hx = cx0 + face * x_rel
-    keys, dash_at, path = {}, None, []
+    keys, dash_at, path, dashes = {}, None, [], []
     for k in range(0, n_land + 3):
         f = 2000 + k
         m_now = keys.get(k, 0)
         toward = sp.M_R if -face > 0 else sp.M_L
-        if m_now & sp.M_DASH and dash_at is None:
-            dash_at = k
+        if m_now & sp.M_DASH and not keys.get(k - 1, 0) & sp.M_DASH:
+            dash_at = k                                         # a new dash (the latest one moves her)
+            dashes.append(k)
         if dash_at is not None and 1 <= k - dash_at <= cs.DASH_F:
             hx -= face * cs.DASH_V / 60.0
         elif m_now & toward:
@@ -276,7 +277,7 @@ def run_under(flip, x_rel=4.4, room0=2.5, dland=2.3, n_land=45):
         m = c.step(f, s, True, True, t_game=f / 60.0)
         if m is not None:
             keys[k + 2] = m
-    return c, keys, path, dash_at
+    return c, keys, path, (dashes[0] if dashes else None)
 
 
 @pytest.mark.parametrize("flip", [False, True])
@@ -321,3 +322,20 @@ def test_corner_under_no_start():
     c2._jump_kind[7] = "jump"
     assert c2.step(3200, flight_state(3200, 0, cx + face * 4.4, cx, False, 0.85), True, t_game=52.0) is None
     assert c2.run is None
+
+
+def test_corner_under_two_dashes_from_far():
+    # 8 u in front at the take-off (the wall rule's landing 2.6 u toward her): one dash does not get her past its back
+    # in time - a second one while it is high
+    c, keys, path, dash_at = run_under(False, x_rel=8.0, dland=2.6)
+    r = (c.done + [c.run])[0]
+    assert r.mode == "under" and len(r.under["dashes"]) == 2 and r.under.get("there") is not None
+    for k, x, bb in path:
+        if abs(x) < 2.25 + 0.23:
+            assert bb >= 2.075, (k, x, bb)
+
+
+def test_corner_aim_stance_label():
+    # the corner's antic stance keeps the aim stance's no-hit rule (the label starts with it)
+    from ssbot.combat.tactics import gauntlet as g
+    assert "jump: aim stance (corner)".startswith(g.JB_NO_HIT)

@@ -128,6 +128,8 @@ NUM = {
     "walk_clear_u": 1.87,  # ... behind the landing centre: its back 1.34 + her half width 0.23 + 0.3
     "corner_walk_end_f": 38,  # SSBOT_FORUM_JB_CORNER: the walk past its back by aim + this (a pushed-out jump lands
     #                        43-53 frames after the aim, its body down to her head ~5 frames before)
+    "corner_aim_u": 4.4,   # SSBOT_FORUM_JB_CORNER: the antic stance at a wall (in reach; instead of aim_wall_u: t2, the
+    #                        planner dashed back to 7 u at the aim and the way under had no dash left)
     "herd": 0.0,           # SP8b trial only (the corner start state): 1 = back off instead of behind after a jump that
     #                        took off away from a wall (gauntlet), so its evades pin it at the wall behind it
 }

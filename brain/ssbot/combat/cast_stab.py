@@ -202,16 +202,19 @@ class StabCfg:
     # SP8b JB_CORNER (both jump antics, one live Clapper)
     corner_from_u: float = 4.0   # its centre within this of the wall behind it at the antic start (push_from_u)
     corner_walk_max: float = 6.6  # she walks in from this far at most (u, centre to centre; beyond: the dash scripts)
-    corner_k_max_j: int = 14     # the latest antic frame (the mask's) to start: the jump slam
+    corner_k_max_j: int = 20     # the latest antic frame (the mask's) to start: the jump slam (the press by
+    #                              j_press_k_max decides; t2: a corner escape jump seen with her busy until k15)
     corner_k_max_c: int = 30     # ... the jump cast
     # SP8b JB_CORNER's way under (from its take-off: the landing pushed out 1.1-4.1 u toward where she stood at the
     # aim, 43-53 frames later; the behind spot by the wall rule's estimate, then never short of its x along the jump)
-    corner_under_max: float = 7.0   # she in front within this at the take-off (u, centre to centre)
+    corner_under_max: float = 8.0   # she in front within this at the take-off (u, centre to centre)
     corner_under_start_f: int = 8   # the start up to this many frames after the aim
     corner_under_end_f: int = 50    # hand back at aim + this at the latest
     corner_under_tol: float = 0.2   # at the behind spot within this: no key
     corner_head_gap: float = 0.35   # its body's bottom this far above her head to pass under it (dash or walk)
     corner_dash_wait: int = 10      # no walk that fits and no dash allowed by aim + this: the planner
+    corner_under_feet: float = 3.0  # her feet at most this high at the start (in the air: the air dash)
+    corner_dash_gap: int = 12       # a second dash this many frames after the first at the earliest
 
 
 def _num_env(c: StabCfg) -> StabCfg:
@@ -405,6 +408,8 @@ class CastStab:
                 out["corner_under"] += 1
                 out["corner_under_there"] += bool(r.under and r.under.get("there") is not None)
                 out["corner_under_dash"] += bool(r.under and r.under.get("dash") is not None)
+                out["corner_under_dash2"] += bool(r.under and len(r.under.get("dashes", ())) >= 2)
+                out["corner_under_pad"] += bool(r.under and r.under.get("pad"))
                 out[f"corner_under_end_{r.phase}_{r.why}"] += 1
                 continue
             pre = "corner_" if r.corner else "j_" if r.kind == "jump" else ""     # SP8b's runs apart
@@ -772,7 +777,7 @@ class CastStab:
             why = "behind"
         elif x_rel > c.corner_under_max:
             why = "far"
-        elif feet > 0.6:
+        elif feet > c.corner_under_feet:
             why = "air"
         elif _jb.behind_spot(land, face) is None:
             why = "no room"
@@ -815,14 +820,19 @@ class CastStab:
         land = u["land"]
         spot = _jb.behind_spot(land, r.face)
         if spot is None:
-            self._close("abort", "no room")
-            return None
+            # pushed nearer the wall than the estimate: no stance at back_u - the wall pad (its turned front reaches
+            # 2.25 u behind its centre; she stands >= 2.8 u behind it there)
+            wl = _jb.WALL_L + _jb.CFG["wall_pad_u"] if r.face > 0 else _jb.WALL_R - _jb.CFG["wall_pad_u"]
+            spot = wl
+            u["pad"] = True
         d = (hx - spot) * r.face                           # still to go toward the wall (u)
         if d <= c.corner_under_tol:
             u.setdefault("there", round(since, 1))
             return 0
         if u.get("dash") is not None and since - u["dash"] < c.tap_f:
             return toward | M_DASH                         # the dash tap's second frame
+        if u.get("dash") is not None and since - u["dash"] < c.corner_dash_gap:
+            return toward
         b = h.get("box")
         top = (float(b[3]) - FLOOR_BOX) if b else 2.07
         body = self._body(e)
@@ -838,10 +848,11 @@ class CastStab:
         need = (hx - land) * r.face + _jb.CFG["walk_clear_u"]
         walk_fits = need <= _jb.CFG["walk_v"] * (_jb.CFG["corner_walk_end_f"] - since)
         tm = h.get("tm") or {}
-        dash_ok = (u.get("dash") is None and ground and float(tm.get("dash_cd") or 0.0) <= 0.02 and high
+        dash_ok = (len(u.get("dashes", ())) < 2 and float(tm.get("dash_cd") or 0.0) <= 0.02 and high
                    and (vy >= 0.0 or body is None or body[2] >= top + 1.5))
         if not walk_fits and dash_ok:
-            u["dash"] = round(since, 1)
+            u["dash"] = round(since, 1)                    # (a ground dash, or the air dash when she is up)
+            u.setdefault("dashes", []).append(u["dash"])
             return toward | M_DASH
         if not walk_fits and u.get("dash") is None and since > c.corner_dash_wait:
             self._close("abort", "no way")                 # no walk in time and no dash: the planner (back off)
