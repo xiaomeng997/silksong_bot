@@ -90,7 +90,11 @@ STOP = _on("SSBOT_FORUM_JB_DASH_STOP", _V2)
 # SP8b (forum.md 73): default off until their A/B; with them off every decision is the SP8a one
 SLAM_DASH = _on("SSBOT_FORUM_JB_SLAM_DASH")
 CORNER = _jb.CORNER
-ENABLED = DASH_SLASH or STOP or SLAM_DASH or CORNER
+# SP9b arm A (SSBOT_FORUM_TWO_CORNER, combat.two_play; default off): JB_CORNER's antic script and way under also for the
+# focus's escape jump with two Clappers (its centre within the escape line of the wall behind it: two_play's EscCfg
+# back_u), the jumper given by the policy (two_play.TwoPlay.esc_view)
+TWO_CORNER = _on("SSBOT_FORUM_TWO_CORNER")
+ENABLED = DASH_SLASH or STOP or SLAM_DASH or CORNER or TWO_CORNER
 CLAPPER = _sp.CLAPPER
 ANTIC = ("Cast Slam Antic", "Cast Slam Antic 2")
 JUMP_ANTIC = ("Jump Antic",)  # SP8b: the jump slam's antic (30 frames; Jump Aim at +30, p10 / 90 29 / 30)
@@ -362,6 +366,8 @@ class CastStab:
         self.stop = STOP if stop is None else stop
         self.slam_dash = SLAM_DASH if slam_dash is None else slam_dash      # SP8b: the jump slam's antic
         self.corner = CORNER if corner is None else corner                  # SP8b: either jump antic at a wall
+        self.two_corner = TWO_CORNER                                        # SP9b arm A: the escape jump, two Clappers
+        self._esc: dict | None = None                                       # ... this tick's escape run (corner mode)
         if dash_slash is None and stop is None and not (self.dash_slash or self.stop):
             self.dash_slash = True               # constructed directly (tests, probes): the SP6 dash slash
         self.run: Stab | None = None
@@ -475,8 +481,12 @@ class CastStab:
             self.done.append(r)
         self.run = None
 
+    def _esc_match(self, e: dict | None) -> bool:
+        """SP9b arm A: e is the focus of a running escape jump (corner mode) with two Clappers."""
+        return self._esc is not None and e is not None and e.get("iid") == self._esc.get("iid")
+
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             latch=None) -> int | None:
+             latch=None, esc: dict | None = None) -> int | None:
         """The mask for frame f + 2 while a script runs, else None. t_game: the game clock (s; Stamp.t_game_s, still
         through hit-stop freezes); None: f / 60 (tests). latch: m -> the key mask the game latches at f + 2 when m is
         sent for it (the oracle's hold filter: a key stays down 2 frames, up 2 frames, never left and right at once;
@@ -485,10 +495,17 @@ class CastStab:
         c = self.cfg
         t = f / 60.0 if t_game is None else float(t_game)
         e = _sp.clapper(s)
+        r = self.run
+        if self.two_corner:
+            # SP9b arm A: with two Clappers the run's Clapper / the escape jump's focus, not the STATE's first one
+            self._esc = esc if (esc is not None and esc.get("mode") == "corner") else None
+            cs2 = _sp.clappers(s)
+            want = r.iid if r is not None else (self._esc or {}).get("iid")
+            if len(cs2) == 2 and want is not None:
+                e = next((x for x in cs2 if x.get("iid") == want), e)
         st, tin = _sp.control(e)
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)
-        r = self.run
         if r is not None:
             if hp < r.hp0:
                 self._close("abort", "hurt")
@@ -523,16 +540,17 @@ class CastStab:
         # a new start?
         if e is None:
             return None
-        if self.corner:
+        esc_m = self.two_corner and self._esc_match(e)
+        if self.corner or esc_m:
             # SP8b JB_CORNER: the way under a jump at a wall starts at its take-off (one look per jump whose antic was
-            # seen)
+            # seen); SP9b arm A: the escape jump's focus with two Clappers
             if st in ("Cast Slam Antic", "Cast Slam Antic 2", JUMP_ANTIC[0]):
                 self._jump_kind[e.get("iid")] = "jump" if st == JUMP_ANTIC[0] else "cast"
             elif st in ("Jump", "Air") and e.get("iid") in self._jump_kind:
                 return self._start_under(f, t, s, e, st, tin, ground, hp)
         if st == "Cast Slam Antic":
             kind = "cast"
-        elif st == JUMP_ANTIC[0] and (self.slam_dash or self.corner):
+        elif st == JUMP_ANTIC[0] and (self.slam_dash or self.corner or esc_m):
             kind = "jump"                                   # SP8b: the jump slam's antic
         else:
             return None
@@ -771,9 +789,10 @@ class CastStab:
         feet = float(b[1]) - FLOOR_BOX if b else 0.0
         land = _jb.landing(cx, float((h.get("pos") or [hx])[0]), face)
         why = None
-        if _jb.corner_room(cx, face) >= c.corner_from_u:
+        esc_m = self.two_corner and self._esc_match(e)
+        if _jb.corner_room(cx, face) >= (float(self._esc.get("back_u", c.corner_from_u)) if esc_m else c.corner_from_u):
             why = "not corner"
-        elif len(_sp.clappers(s)) != 1:
+        elif len(_sp.clappers(s)) != 1 and not esc_m:
             why = "two"
         elif since > c.corner_under_start_f:
             why = "late"
@@ -949,7 +968,7 @@ class CastStab:
         jump cast's antic: SP8b's corner first (it walks in from below the T1 / T2 bands), then SP6 / SP8a as before."""
         if kind == "jump":
             return self._why_not_jump(s, e, ground, accepting, ka)
-        if self.corner:
+        if self.corner or (self.two_corner and self._esc_match(e)):
             wc = self._why_corner(s, e, ground, accepting, ka, kind)
             if wc is None or wc == "wait":
                 return wc
@@ -976,9 +995,10 @@ class CastStab:
         face, x_now, x0 = self._x_dash(s, e)
         cx = float(e["pos"][0])
         room0 = (cx - _sp.WALL_L) if face > 0 else (_sp.WALL_R - cx)
-        if room0 >= c.corner_from_u:
+        esc_m = self.two_corner and self._esc_match(e)      # SP9b arm A: the escape jump's focus, two Clappers
+        if room0 >= (float(self._esc.get("back_u", c.corner_from_u)) if esc_m else c.corner_from_u):
             return "not corner"
-        if len(_sp.clappers(s)) != 1:
+        if len(_sp.clappers(s)) != 1 and not esc_m:
             return "corner two"
         if x_now <= 0:
             return "corner behind"
@@ -1001,7 +1021,7 @@ class CastStab:
         """SP8b: the jump slam's antic. JB_CORNER first (at a wall, near), then JB_SLAM_DASH: in reach or a walk-in that
         presses by j_press_k_max (the slash phase at once), the dash-stop from j_stop_d_min (or the DashStab, j_mode 1)."""
         c = self.cfg
-        if self.corner:
+        if self.corner or (self.two_corner and self._esc_match(e)):
             wc = self._why_corner(s, e, ground, accepting, ka, "jump")
             if wc is None or wc == "wait":
                 return wc

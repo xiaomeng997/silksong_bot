@@ -715,10 +715,17 @@ class ForumPlannerPolicy(PlannerPolicy):
             return self._pause_tick(s, f, fo, ws, raw, t0)
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
+        esc_on = self.two is not None and two_play.ESC
+        if esc_on:
+            # SP9b: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall)
+            self.two.observe(f, s, ws.stamp.t_game_s)
+            if isinstance(self.tac, GauntletTactics):
+                self.tac.two_esc = self.two.esc_view()
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
             # SP9a: the per-tick bookkeeping (Idle entries, jump take-offs, rune circles) and TWO_SPACE's stance
-            self.two.observe(f, s, ws.stamp.t_game_s)
+            if not esc_on:
+                self.two.observe(f, s, ws.stamp.t_game_s)
             prefs = self.two.space(prefs, s, ws.stamp.t_game_s, getattr(prefs, "target", None))
         self._mode_last = prefs.mode
         if self.v2feed is not None:
@@ -798,7 +805,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             stab = self.cast_stab.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s, latch=latch)
+                                       t_game=ws.stamp.t_game_s, latch=latch,
+                                       esc=self.two.esc_view() if esc_on else None)
             if stab is not None and (r.mask is not None or self.pause_owned):
                 self.cast_stab.abort("supervisor")
                 stab = None
@@ -848,6 +856,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
                 self.counts["two_play"] += 1
+        elif esc_on:
+            self.two.esc_yield(f)                 # SP9b: another script has the keys: a running hop ends
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog

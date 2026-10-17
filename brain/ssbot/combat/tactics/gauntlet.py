@@ -318,6 +318,7 @@ class GauntletTactics:
         self._two_fam: dict[int, str | None] = {}         # SP7: Clapper iid -> its family on the last tick
         self._two_idle: dict[int, float] = {}             # SP7: Clapper iid -> game time it went idle after an attack
         self._sp9_fam: dict = {}                          # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
+        self.two_esc: dict | None = None                  # SP9b: the policy's escape run view (two_play.esc_view)
 
     @property
     def xs(self):
@@ -505,6 +506,11 @@ class GauntletTactics:
                     self.jump_how[s.iid] = "under and behind"
                     return spot, frozenset(), "jump: under and behind (antic)"
             self.jump_how[s.iid] = "under and behind"
+            esc = self.two_esc if two_play.ESC else None
+            if esc is not None and esc.get("corner_aim") and esc.get("iid") == s.iid:
+                # SP9b arm A (SSBOT_FORUM_TWO_CORNER): the focus's escape jump - in reach through the antic (cast_stab
+                # slashes it, then its way under from the take-off)
+                return self._clamp(x + front * jb.CFG["corner_aim_u"]), frozenset(), "jump: aim stance (esc corner)"
             if jb.CORNER and getattr(self, "_n_clappers", 0) == 1 and jb.corner_room(x, front) < jb.CFG["push_from_u"]:
                 # SSBOT_FORUM_JB_CORNER (SP8b): at a wall stay in reach through the antic (cast_stab slashes, then its
                 # way under from the take-off) instead of backing off to aim_wall_u
@@ -821,6 +827,12 @@ class GauntletTactics:
         room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
+        esc = self.two_esc if two_play.ESC else None
+        if esc is not None and not esc.get("after_land"):
+            # SP9b: the focus's escape jump (antic, flight): arm A holds the focus, arm B the other one (B is locked)
+            g = self._esc_hold(ws, cands, esc, keep, room, t, st)
+            if g is not None:
+                return g
         if two_play.SPACE:
             # SSBOT_FORUM_TWO_SPACE (SP9a S5, switch answer 2f / human_two R6): one of them in its Slam Antic with the
             # two < 16 u apart - its hammer covers the ground by the other one (HP lost 8 / 8 within 4 u of the other
@@ -833,6 +845,11 @@ class GauntletTactics:
                     self._sw_why = "two slammer" if keep is not None else self._sw_why
                 st["picks"] = st.get("picks", 0) + 1
                 return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
+        if esc is not None and esc.get("after_land"):
+            # SP9b after the focus's landing: the hold below the slammer rule (B is free from F's landing on)
+            g = self._esc_hold(ws, cands, esc, keep, room, t, st)
+            if g is not None:
+                return g
         if TWO_JUMPER:
             # SSBOT_FORUM_TWO_JUMPER (t1: an other one's jump cast landed 5.27 u in front of her, its rune circle over
             # the focus's front, the focus slammed: 8 of 41 slams not struck, 6 rune hits): a Clapper in a jump move or
@@ -863,6 +880,19 @@ class GauntletTactics:
                 f, why = keep, "two: keep" + ("" if room[o.s.iid] <= room[keep.s.iid] + TWO_HYST_U else f" ({how})")
         st["picks"] = st.get("picks", 0) + 1
         return self._goal(ws, f, RUSH, t, 1.0, why=f"{why}; room {room[f.s.iid]:.1f}")
+
+    def _esc_hold(self, ws, cands: list[Cand], esc: dict, keep, room: dict, t: float, st: dict) -> Goal | None:
+        """SP9b (combat.two_play): the escape run's target - the focus (arm A, TWO_CORNER) or the other one (arm B,
+        TWO_WALLSWITCH) - while the run lasts."""
+        c = next((c for c in cands if c.s.iid == esc.get("hold")), None)
+        if c is None:
+            return None
+        k = f"esc_{esc.get('mode')}"
+        if keep is None or keep.s.iid != c.s.iid:
+            st[k] = st.get(k, 0) + 1
+            self._sw_why = f"two {esc.get('mode')}" if keep is not None else self._sw_why
+        st["picks"] = st.get("picks", 0) + 1
+        return self._goal(ws, c, RUSH, t, 1.0, why=f"two: esc {esc.get('mode')}; room {room[c.s.iid]:.1f}")
 
     def _kite_spot(self, subjects, target, hx: float) -> tuple[float, str]:
         """KITE's stance (module docstring) from the enemies in play now: kite_u from the target on its side away from
@@ -977,6 +1007,10 @@ class GauntletTactics:
                     status = "event"
         if two_play.SPACE:
             self._sp9_fam = {x.iid: x.family for x in (getattr(fc, "subjects", ()) or ()) if x.type_key == CLAPPER}
+        esc = self.two_esc if two_play.ESC else None
+        if (esc is not None and status == "ok" and self.goal is not None and esc.get("hold") is not None
+                and esc["hold"] != self.goal.target):
+            status = "event"                              # SP9b: the escape run holds another target: pick now
         if "whip" in self.ta:
             whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
                               if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)
@@ -1094,6 +1128,17 @@ class GauntletTactics:
                                                                    jump_behind.CFG["corner_walk_end_f"]):
                     out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
                     self.stats["jb_corner_walk"] = self.stats.get("jb_corner_walk", 0) + 1
+        esc = self.two_esc if two_play.ESC else None
+        if (esc is not None and esc.get("mode") == "corner" and s is not None and s.iid == esc.get("iid")
+                and how_s == "jump: under and behind (flight)" and s.iid in self.jb_land):
+            # SP9b arm A: JB_CORNER's walk under the focus's escape jump (dash rows after) when the walk fits
+            x0, f0, land, _ = self.jb_land[s.iid]
+            aim_f = 30.0 if s.family == CC_JUMP else 55.0
+            since = (self._t - self.t_commit.get(s.iid, self._t)) * 60.0 - aim_f
+            if (hx - land) * f0 > 0 and jump_behind.walk_fits(hx, land, int(f0), since,
+                                                               jump_behind.CFG["corner_walk_end_f"]):
+                out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
+                self.stats["esc_corner_walk"] = self.stats.get("esc_corner_walk", 0) + 1
         if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
                 and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
@@ -1104,6 +1149,11 @@ class GauntletTactics:
             # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only
             out = replace(out, no_pogo=frozenset({g.target}),
                           ground_hit=frozenset(out.ground_hit) | frozenset({g.target}))
+        if esc is not None and esc.get("no_hit"):
+            # SP9b: no hit counts on these now (arm A: the focus idle with her in the corner; arm B: the other one
+            # while the focus's flag is on)
+            out = replace(out, no_hit=frozenset(out.no_hit) | frozenset(esc["no_hit"]))
+            self.stats["esc_no_hit"] = self.stats.get("esc_no_hit", 0) + 1
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:
