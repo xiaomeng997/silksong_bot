@@ -333,6 +333,16 @@ def test_no_start_through_a_rune_circle():
     assert c.step(1000, s, True, t_game=1000 / 60) is None and c.run is None
     s2 = hero(antic_state(1001, 3, 10.6))                     # gone: the start goes
     assert c.step(1001, s2, True, t_game=1001 / 60) is not None
+    # a circle seen lit before (burst) and still there unlit is no threat (192006 ep 1: it stays after the burst)
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True)
+    lit = dict(rune, iid=5, colliders=[dict(rune["colliders"][0], enabled=True)])
+    s0 = hero(antic_state(900, 30, 10.6))
+    s0["ents"][0]["fsms"][0].update({"state": "Idle", "t": 0.5})
+    s0["ents"].append(lit)
+    c.observe(900, s0)
+    s3 = hero(antic_state(1000, 2, 10.6))
+    s3["ents"].append(dict(rune, iid=5))
+    assert c.step(1000, s3, True, t_game=1000 / 60) is not None
 
 
 def test_one_clapper_only():

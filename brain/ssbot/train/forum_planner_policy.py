@@ -742,6 +742,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.first_pending_reasons = list(r.decision.reasons)
         mask = res.mask if r.mask is None else r.mask
         play = None
+        if self.cast_stab is not None:
+            self.cast_stab.observe(f, s)          # SP8: the rune circles' first frame and lit state, every tick
         if self.slam_play is not None:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",

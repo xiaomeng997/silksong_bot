@@ -97,9 +97,10 @@ RUNE_R = 7.187               # the jump cast's rune circle (forum.md 70.7: a dis
 #                              cast 56 frames after the last one's landing, the stab into its circle, 2 HP)
 
 
-def rune_spans(s: dict) -> list[tuple[float, float]]:
-    """The x spans of the rune circles present in a STATE (damager objects with a collider of the circle's size, lit
-    or not yet)."""
+def rune_spans(s: dict) -> list[tuple[float, float, object, bool]]:
+    """The rune circles present in a STATE (damager objects with a collider of the circle's size): (x lo, x hi, iid,
+    lit now). The object is there from its landing on and stays after its burst, unlit (192006 ep 1: present from the
+    landing, lit + 65 .. + 71, still there 175 frames later)."""
     out = []
     for o in s.get("ents") or ():
         if o.get("type_key") != "damager" or not o.get("pos"):
@@ -108,9 +109,12 @@ def rune_spans(s: dict) -> list[tuple[float, float]]:
             vs = col.get("verts_world") or ()
             xs = vs[0::2]
             if xs and abs((max(xs) - min(xs)) - 2 * RUNE_R) <= 0.6:
-                out.append((float(min(xs)), float(max(xs))))
+                out.append((float(min(xs)), float(max(xs)), o.get("iid"), bool(col.get("enabled"))))
                 break
     return out
+
+
+RUNE_LIVE_F = 100            # a circle not seen lit yet is still to come for this many frames after it is first seen
 STOP_WAIT_CLIPS = ("Sprint", "Skid", "Wanderer", "Land to Sprint")   # T2 waits these out (and "Dash" itself)
 
 
@@ -304,6 +308,7 @@ class CastStab:
         self.n_antic = 0
         self.why_not: dict = {}
         self._pred: dict = {}
+        self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
 
     def reset(self) -> None:
         self.run = None
@@ -311,6 +316,25 @@ class CastStab:
         self._seen = set()
         self.n_antic = 0
         self.why_not = {}
+        self._runes = {}
+
+    def observe(self, f: int, s: dict) -> None:
+        """Every tick (the policy calls it while the slam playbook runs too): the rune circles' first frame and lit
+        state."""
+        self._rune_threats(f, s)
+
+    def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
+        """The x spans of the rune circles that are lit now or still to come (present, not yet seen lit, and first
+        seen less than RUNE_LIVE_F frames ago); a burst one stays as an unlit object and is no threat."""
+        out = []
+        for lo, hi, iid, lit in rune_spans(s):
+            r = self._runes.setdefault(iid, {"first": f, "lit": False})
+            if lit:
+                r["lit"] = True
+                out.append((lo, hi))
+            elif not r["lit"] and f - r["first"] < RUNE_LIVE_F:
+                out.append((lo, hi))
+        return out
 
     def stats(self) -> dict:
         from collections import Counter
@@ -688,7 +712,7 @@ class CastStab:
         hx = _sp.hero_x(s)
         front = cx + face * BODY_FRONT
         lo, hi = min(hx, front), max(hx, front)
-        if any(a < hi and b > lo for a, b in rune_spans(s)):
+        if any(a < hi and b > lo for a, b in self._rune_threats(int(s.get("f") or 0), s)):
             return "wait"                                # a rune circle over the way in: look again next tick
         # where she is on the dash's frame (SEND_AHEAD on: a run toward it before the start, SP8 t2 ep 0: 9.52 u at the
         # STATE, 9.19 at the dash)
