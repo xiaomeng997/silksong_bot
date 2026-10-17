@@ -22,7 +22,10 @@ The script (every mask for frame f + 2; k = the evade's frame of that mask from 
            run alone is beyond dash_if_u, the dash cooldown is over, she is on the ground accepting input, the oracle's
            key filter latches toward + dash on this frame, and the dash's path keeps her at least min_u from its
            centre every frame and at least end_lo at the end (its slide stops early when its back meets the wall);
-           by evade frame dash_k_max. In the air (air_dash): the air dash (2 frames at 28 u/s, then the Air Sprint's
+           by evade frame dash_k_max; not within atk_lock frames of her last attack press (t2, 14cb7e7: the dash key
+           4-6 frames after a slash press is ignored - 0 of 8 at 4, 12 of 15 at 5-6, all 117 from 7 on; seven slides
+           ended Far after a slash hit at the slide's start: her recoil and no dash); a dash not seen to start by the
+           mask + 3 is tried again. In the air (air_dash): the air dash (2 frames at 28 u/s, then the Air Sprint's
            0.235 s from 26.9 u/s down by 1.1 per physics step: ~5.8 u in 16 frames; movement_kinematics 1.3) only
            when the run alone ends Far (beyond air_if_u) and its path keeps air_margin more room.
   slash    the side slash (attack 2 frames, the key toward it) from evade frame slash_k_min on (t1, 7c342fa: a hit
@@ -85,6 +88,9 @@ class ChaseCfg:
     dash: int = 1                # 0: no dash (run and slash only)
     slash: int = 1               # 0: no slash
     slash_k_min: int = 18        # no slash before this evade frame (the mask's; the hit at the slide's end)
+    atk_cd_max: float = 0.19     # no dash while the STATE's attack cooldown is above this (s; 0.283 on the press's
+    #                              STATE: the mask >= 7 frames after the press)
+    dash_check_f: int = 3        # a dash not started (dash_cd up, a Dash clip) by its mask + this: try again
 
 
 def _num_env(c: ChaseCfg) -> ChaseCfg:
@@ -153,6 +159,7 @@ class Chase:
     dash_x: float | None = None
     dash_pred: dict | None = None
     air: bool = False           # the dash was the air dash
+    dash_tries: int = 0         # dash masks sent (a retry when one did not start)
     presses: list = field(default_factory=list)   # (evade frame of the mask, her x)
     hits: list = field(default_factory=list)      # (evade frame, src)
     x_end: float | None = None  # her x in front of its centre on the last Evade Scuttle tick
@@ -211,6 +218,19 @@ class EvadeChase:
         if self.active():
             self._close("abort", why)
 
+    def yield_to(self, s: dict) -> None:
+        """Another script (the slam playbook, the jump antic scripts) sends the keys this tick: the slide over -> the
+        run ends ("end", its next state); still sliding -> abort ("other")."""
+        r = self.run
+        if r is None or r.phase != "run":
+            return
+        st = _sp.control(_sp.clapper(s))[0]
+        if st != EVADE:
+            r.next_st = st
+            self._close("done", "end")
+        else:
+            self._close("abort", "other")
+
     def _close(self, phase: str, why: str = "") -> None:
         r = self.run
         if r is not None:
@@ -226,6 +246,7 @@ class EvadeChase:
             out["runs"] += 1
             out["dash"] += r.dash_k is not None
             out["air_dash"] += r.air
+            out["dash_retry"] += max(0, r.dash_tries - 1)
             out["presses"] += len(r.presses)
             out["hits_in_run"] += len(r.hits)
             out[f"end_{r.phase}_{r.why}"] += 1
@@ -240,7 +261,7 @@ class EvadeChase:
     @staticmethod
     def _rec(r: Chase) -> dict:
         return {"f0": r.f0, "k0": r.k0, "x0": r.x0, "ground0": r.ground0, "dash_k": r.dash_k, "dash_x": r.dash_x,
-                "dash_pred": r.dash_pred, "air": r.air, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
+                "dash_pred": r.dash_pred, "air": r.air, "dash_tries": r.dash_tries, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
                 "next": r.next_st, "end": r.phase, "why": r.why, "ticks": r.ticks}
 
     # ---- the script ----
@@ -336,6 +357,10 @@ class EvadeChase:
         # the dash tap's second frame
         if r.dash_k is not None and k - r.dash_k < c.tap_f:
             return toward | M_DASH
+        if (r.dash_k is not None and k - r.dash_k > c.dash_check_f and float(tm.get("dash_cd") or 0.0) <= 0.02
+                and "Dash" not in clip and "Sprint" not in clip):
+            r.dash_k = None                           # the dash did not start: may try again
+            r.air = False
         # the slash's second frame (one rising edge)
         if r.presses and k - r.presses[-1][0] == 1:
             return M_A | toward
@@ -344,7 +369,8 @@ class EvadeChase:
             r.presses.append((k, round(d, 2)))
             return M_A | toward
         # a dash when the run alone ends too far and the dash keeps clear of it
-        if c.dash and r.dash_k is None and ground and accepting and k <= c.dash_k_max:
+        atk_lock = float(tm.get("atk_cd") or 0.0) > c.atk_cd_max
+        if c.dash and r.dash_k is None and ground and accepting and k <= c.dash_k_max and not atk_lock:
             d_run = d + slide - WALK_U * n
             if d_run > c.dash_if_u and float(tm.get("dash_cd") or 0.0) <= 0.02 and not any(
                     x in clip for x in NO_ATK_CLIPS):
@@ -354,10 +380,12 @@ class EvadeChase:
                 if min(path) >= c.min_u and d_end >= c.end_lo and (latch is None or (
                         int(latch(toward | M_DASH)) & (M_L | M_R | M_DASH)) == toward | M_DASH):
                     r.dash_k, r.dash_x = k, round(d, 2)
+                    r.dash_tries += 1
                     r.dash_pred = {"d_run": round(d_run, 2), "d_end": round(d_end, 2), "min": round(min(path), 2),
                                    "n": n}
                     return toward | M_DASH
-        if c.dash and c.air_dash and r.dash_k is None and not ground and accepting and k <= c.dash_k_max:
+        if c.dash and c.air_dash and r.dash_k is None and not ground and accepting and k <= c.dash_k_max and \
+                not atk_lock:
             d_run = d + slide - WALK_U * n
             if d_run > c.air_if_u and float(tm.get("dash_cd") or 0.0) <= 0.02 and not any(
                     x in clip for x in NO_ATK_CLIPS):
@@ -366,6 +394,7 @@ class EvadeChase:
                 if min(path) >= c.min_u + c.air_margin and d_end >= c.end_lo + c.air_margin and (latch is None or (
                         int(latch(toward | M_DASH)) & (M_L | M_R | M_DASH)) == toward | M_DASH):
                     r.dash_k, r.dash_x, r.air = k, round(d, 2), True
+                    r.dash_tries += 1
                     r.dash_pred = {"d_run": round(d_run, 2), "d_end": round(d_end, 2), "min": round(min(path), 2),
                                    "n": n, "air": True}
                     return toward | M_DASH

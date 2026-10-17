@@ -53,8 +53,10 @@ def simulate(x0, land_k=0, cx=31.0, flip=False, n_ev=21, cfg=None, atk_cd0=0.3):
         st = ec.EVADE if k < n_ev else "Slam Antic"
         kk = k if k < n_ev else k - n_ev
         cd = max(0.0, atk_cd0 - k / 60.0)
+        dcd = 0.0 if dash_from is None else max(0.0, 0.425 - (k - dash_from) / 60.0)
+        clip = "Dash" if dash_from is not None and k - dash_from <= ec.DASH_F else "Idle"
         s = ev_state(f, kk, x, cx=c, flip=flip, ground=k >= land_k, feet=0.0 if k >= land_k else 2.0,
-                     atk_cd=cd, st=st)
+                     atk_cd=cd, st=st, dash_cd=dcd, clip=clip)
         m = ch.step(f, s, k >= land_k, True)
         out.append((k, round(x, 3), m))
         if m is not None:
@@ -108,7 +110,7 @@ def test_run_toward_and_close_at_the_end():
 
 
 def test_dash_when_far():
-    ch, out = simulate(6.0, land_k=0)
+    ch, out = simulate(6.0, land_k=0, atk_cd0=0.0)
     r = ch.done[0]
     assert r.dash_k is not None and r.dash_k <= 4
     assert min(x for _, x, _ in out) >= ec.ChaseCfg().min_u - 0.05
@@ -152,7 +154,7 @@ def test_no_slash_early_in_the_slide():
 
 
 def test_air_dash_when_far():
-    ch, out = simulate(7.6, land_k=30)
+    ch, out = simulate(7.6, land_k=30, atk_cd0=0.0)
     r = ch.done[0]
     assert r.air and r.dash_k is not None
     assert r.dash_pred["d_run"] > ec.ChaseCfg().air_if_u
@@ -161,7 +163,7 @@ def test_air_dash_when_far():
     ch, out = simulate(4.0, land_k=30)
     assert ch.done[0].dash_k is None
     # off
-    ch, out = simulate(7.6, land_k=30, cfg=ec.ChaseCfg(air_dash=0))
+    ch, out = simulate(7.6, land_k=30, atk_cd0=0.0, cfg=ec.ChaseCfg(air_dash=0))
     assert ch.done[0].dash_k is None
 
 
@@ -240,3 +242,42 @@ def test_second_evade_new_run():
     assert m is not None and len(ch.done) == 1 and ch.run is not None
     st = ch.stats()
     assert st["runs"] == 2 and st["evades"] == 2 and len(st["chase_runs"]) == 2
+
+
+def test_no_dash_right_after_a_slash():
+    # t2: a dash key 4-6 frames after a slash press is ignored; atk_cd 0.283 on the press's STATE
+    ch = ec.EvadeChase()
+    m = ch.step(1000, ev_state(1000, 2, 6.0, atk_cd=0.25, clip="Slash"), True)
+    assert m is not None and not m & sp.M_DASH
+    m = ch.step(1001, ev_state(1001, 3, 6.2, atk_cd=0.15, clip="Slash"), True)
+    assert m & sp.M_DASH
+
+
+def test_dash_retry_when_it_did_not_start():
+    ch = ec.EvadeChase()
+    assert ch.step(1000, ev_state(1000, 2, 6.0), True) & sp.M_DASH
+    assert ch.step(1001, ev_state(1001, 3, 6.2), True) & sp.M_DASH       # the tap's second frame
+    ms = [ch.step(1000 + k - 2, ev_state(1000 + k - 2, k, 6.2 + 0.1 * k), True) for k in range(4, 8)]
+    # no dash seen (dash_cd 0, no Dash clip) by the mask + 3: sent again
+    assert [bool(m & sp.M_DASH) for m in ms] == [False, False, True, True] and ch.run.dash_tries == 2
+    # a dash that started (dash_cd up, Dash clip): no retry
+    ch = ec.EvadeChase()
+    ch.step(1000, ev_state(1000, 2, 6.0), True)
+    ch.step(1001, ev_state(1001, 3, 6.2), True)
+    for k in range(4, 9):
+        m = ch.step(1000 + k - 2, ev_state(1000 + k - 2, k, 5.5, dash_cd=0.4, clip="Dash"), True)
+        assert not m & sp.M_DASH
+    assert ch.run.dash_tries == 1
+
+
+def test_yield_to_another_script():
+    ch = ec.EvadeChase()
+    ch.step(1000, ev_state(1000, 2, 4.0), True)
+    ch.yield_to(ev_state(1001, 0, 5.0, st="Slam Antic"))
+    assert ch.done[0].phase == "done" and ch.done[0].next_st == "Slam Antic" and ch.run is None
+    ch = ec.EvadeChase()
+    ch.step(1000, ev_state(1000, 2, 4.0), True)
+    ch.yield_to(ev_state(1001, 3, 4.2))
+    assert ch.done[0].phase == "abort" and ch.done[0].why == "other"
+    ch.yield_to(ev_state(1002, 4, 4.2))                                    # nothing running: nothing happens
+    assert len(ch.done) == 1

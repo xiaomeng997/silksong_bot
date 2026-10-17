@@ -779,7 +779,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             if stab is not None:
                 mask = play = stab
                 self.counts["cast_stab"] += 1
-        if self.evade_chase is not None and play is None:
+        if self.evade_chase is not None and play is not None:
+            self.evade_chase.yield_to(s)          # SP8c: another script has the keys: the chase run ends
+        elif self.evade_chase is not None:
             # SP8c: the chase of the Clapper's evade while its script runs (the supervisor's keys win)
             def latch_c(m: int, _h=hold, _p=prefix) -> int:
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
