@@ -128,6 +128,8 @@ NUM = {
     "walk_clear_u": 1.87,  # ... behind the landing centre: its back 1.34 + her half width 0.23 + 0.3
     "corner_walk_end_f": 38,  # SSBOT_FORUM_JB_CORNER: the walk past its back by aim + this (a pushed-out jump lands
     #                        43-53 frames after the aim, its body down to her head ~5 frames before)
+    "herd": 0.0,           # SP8b trial only (the corner start state): 1 = back off instead of behind after a jump that
+    #                        took off away from a wall (gauntlet), so its evades pin it at the wall behind it
 }
 BODY_TOP_U = 3.92          # the standing body's top above the floor (Idle box y 3.01-6.92)
 

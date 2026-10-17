@@ -520,6 +520,11 @@ class GauntletTactics:
         if st in jb.LANDED_STATES:
             land, phase = x, "landed"                     # it stands at its landing (a hit pushes it 0.24-1.44 u)
         spot = jb.behind_spot(land, f0)
+        if jb.CFG["herd"] and jb.corner_room(x0, f0) >= jb.CFG["push_from_u"]:
+            # SP8b trial only (SSBOT_FORUM_JUMP_BEHIND_SET=herd=1, the corner start state): away from a wall back off
+            # instead of going behind - she stays on one side, its evades pin it at the wall behind it, and its jumps
+            # there (an Escape Jump when an evade meets the wall) are the corner case
+            spot = None
         if spot is None:
             out = land + f0 * (r.jump_out_u if fam == CC_JUMP else r.cast_out_u)
             self.jump_how[s.iid] = "back off"
