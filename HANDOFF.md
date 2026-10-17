@@ -9458,3 +9458,144 @@ process touched. Frozen checkouts `C:\ssbot\live_1v1_{65eb0a3,d14db10,575af6b,55
    waiting for B's Idle entry might raise it.
 4. The person may prefer the corner's damage on F (3.37 hits to the landing + 3 s vs 2.29) or switch it on with
    `SSBOT_FORUM_TWO_CORNER=1`; by the rule the switch is the default.
+
+## Task 1v1 - stage SP9c: the close-only antic switch with two Clappers (an A/B arm), and the lead's note of 2026-10-17 (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §78)
+
+The spec: C:\ssbot\data\m2_play\switch\answer.txt 2b-2h, 3 and 5 S7 (an A/B arm only: the model says every antic-switch
+variant lands fewer hits), the person's plan notes of 2026-10-16 ("refined switch timing"), and the lead's note
+C:\ssbot\data\m2_play\sp9\NOTE_FROM_LEAD.txt (08:07, found before t2): (1) promote EVADE_CHASE / JB_SLAM_DASH / JB_CORNER
+for one Clapper, (2a) the early switch when the focus is pushed to its wall, (2b) the escape-jump fallback (switch first,
+the corner only when B is too close). Forum_W_w13 (fo_cl_w13w), `1v1_live.ps1 -Encounter Forum_W_w13 -Timebox 180`,
+instances 0 / 1, 1x. F = the Clapper she is on (nearer, inside its Slam Range: Close Range picked the move), B = the other
+one; distances centre to centre (her box centre, its transform), + = F's facing; HeroBox 0.46 u wide; F's lock = its Is
+Attacking (Slam Antic .. Slam 2, Spell Antic .. Cast 2). Data `C:\ssbot\data\m2_play\sp9c` (`base_asw.*` the SP9b A/B
+re-read, `t1`..`t3` trials, `ab` / `ab2` / `abp` the A/B, `w7` the 1v1 check, `replay_<sha>` identity, `scripts`). Commits
+931052a (code), c3e0f5f / b99b650 (trial fixes), 37ea102 (the note's promotion + the fallback switch), 8427ab0
+(`casts=0`; the A/B code), docs after it. No human practice ran.
+
+### Result
+
+- **The antic switch stays default off.** A/B (8427ab0, block design, the same seeds; rnjb 31 + 1 HARNESS_FAIL, sp9cS =
+  rnjb + TWO_ANTICSWITCH on slams only 16, sp9bAB 32): landed / s 1.339 / 1.328 / 1.307 (both alive 1.370 / 1.362 / 1.370),
+  HP-loss hits / min 4.46 / 4.63 / 5.09, **HP hits per landed 0.0555 / 0.0581 / 0.0649**, both killed 16 / 9 / 14,
+  Clappers killed 32 / 18 / 28, kill p50 of the clears 29.5 / 32.5 / 32.6 s, HP-hitless clears 8 / 0 / 4. Bootstrap 90 %:
+  sp9cS - rnjb landed / s -0.011 (-0.104 .. +0.083), HP / min +0.19 (-1.27 .. +1.58), kills / episode +0.09 (-0.41 ..
+  +0.60), HP per landed +0.003 (-0.018 .. +0.022). The task's keep rule (landed / s within 0.1 of the default AND HP per
+  landed not worse): the first holds, the second fails on the point estimate -> left off. sp9bAB - rnjb -0.031 (-0.123 ..
+  +0.061), +0.67 (-0.89 .. +2.17), -0.16, +0.010 -> not promoted (TWO_ESC_FALLBACK stays off). The two rounds' default
+  differed a lot (round 1: 5 / 15 clears, 6.11 HP / min; round 2: 11 / 16, 3.28): every difference is noise-level.
+- **Fixed point:** the slam switches pass (t2 + t3 + the A/B: 38 / 39 without HP lost from F's antic to its Idle + 60
+  frames); **the cast switches fail** (t2 + t3: 21 / 29, 72 %): F's small-rune rings reach her at B (the bomb at her x
+  lights ~1.3-1.7 s after F's antic) while B, hit in F's tail, already starts its reaction move (slam or cast) - the bomb
+  hop and the slam playbook compete for the same frames. The person's refined trigger (`trig=1`) failed too (t1 19 / 31,
+  t2 15 / 23, t3 7 / 17). So the A/B arm was slams only (`casts=0`, sp9cS); sp9cT (T8.1, both kinds) passed only in t2
+  (29 / 32) and fell to 19 / 24 in t3.
+- **The lead's note (1): EVADE_CHASE, JB_SLAM_DASH, JB_CORNER follow SSBOT_FORUM_V2** (37ea102; =0 off, arm rnsp8bc0; still
+  one live Clapper only). w7 live check of the new default (8427ab0 rnjb, 16 episodes, seeds 3340000 / 3350000): **16 / 16
+  killed, 15 / 16 HP-hitless (one small-rune bomb), kill p10 / 50 / 90 16.1 / 17.3 / 18.7 s, landed / s 1.288**, 47 slams
+  started, 46 struck, 0 HP lost in slams (SP8d's sp8all: 17.3 s, 1.305, 16 / 16).
+- **(2a)** On the SP9b A/B's 63 default episodes the T8.1 trigger held at the close antic right before F's escape jump in
+  25 / 37 (rnjb) and 21 / 30 (sp9bB) - misses: B attacking 9 / 5, B behind F 2 / 3, a slam with F-B < 16 u 1 / 1; most of
+  those antics already have F's back at 1.35 u (against the wall) or 6.06 u (the opening's c2, its first move - not
+  switched, below). The switch arm did not reduce the escape jumps: per minute rnjb 3.07, sp9cS 3.63, sp9bAB 3.96.
+  Switching earlier (F's back 8-12 u, one move before) would need a new trigger.
+- **(2b)** TWO_ESC_FALLBACK (with TWO_WALLSWITCH: the corner takes F's escape jump only when the switch's single failed
+  gate is "b near"): 6 / 6 fallback corners without HP lost to the landing + 3 s (t3 2, A/B 4; all jump casts: she stays
+  in the corner until the circle bursts), but the arm's episode numbers were worse (above) -> not promoted.
+
+### 1. Facts (`ssbot.tools.sp9c_asw` on the SP9b A/B, `base_asw.*`)
+
+- F's close slams 7.5-8.6 / min, close casts 5.9-6.2 / min; T8.1 candidates (back <= 8.1, B idle / walking on F's open
+  side, a slam F-B >= 16 u, a cast >= 4 u) 4.7-5.0 / min, half slams half casts, back0 p50 4.4-4.8, B 17 u from her, F-B
+  22 u; under the default 89-94 % of them lose no HP to F's Idle + 1 s; hits on F lock / tail / Idle + 1 s 2.3-2.4 /
+  0.45-0.5 / 1.3-1.4.
+- A slam carries F forward: its x along its facing from the antic to its Idle p10 / 50 / 90 +2.5 / +3.1 / +3.7 u (the
+  Slam 1 lunge net of her knock-back); a cast -1.4 .. -1.6 (her knock-back). With the person's refined formula (back after
+  the move + walk-back 2.1 + 0.48 u per hit < 5.4) a slam triggers only below ~4.9 u, a cast up to ~9.6 u.
+- The STATE shows F's antic 0 / 1 / 2 frames (p10 / 50 / 90) after its entry; the script's first key lands two frames
+  later.
+
+### 2. Code (`ssbot/combat/two_play.py` AswCfg / AswRun / TwoPlay._asw_*, `slam_play.py` / `rune_lowhop.py` `skip=`, `train/forum_planner_policy.py`, `tactics/gauntlet.py`)
+
+- `SSBOT_FORUM_TWO_ANTICSWITCH` (default off; `SSBOT_FORUM_TWO_ASW_SET` overrides AswCfg: `trig=1` the refined trigger,
+  `casts=0` slams only, `first=0` also F's first attack of the wave). Trigger on the first STATE of F's Slam Antic /
+  Spell Antic: she within d_u 8.3 / dy_u 3.9 of F and nearer to it than to B; trig 0 back <= 8.1 / trig 1 pred_back <
+  5.4; B Idle / Walk on F's open side; slam F-B >= 16, cast >= 4; no rune circle on the way; the hold point reachable
+  by F's predicted flag-off - 4 (+ 8 slack); not F's first attack of the wave (the opening's A1: t1 had 16 such switches,
+  c3 still 17 u away). Not with an SP9b escape run taken; the escape detection waits while the switch's lock-in runs.
+- The run: L2 holds B through `esc_view()` (mode "aswitch": the hold, `no_hit` B while F's flag is on, the stance) until
+  the first landed hit on B after F's flag-off, B's next move start, or flag-off + 90; the slam playbook and the low hop
+  skip F (`skip=`). The walk script: a slam - beyond the hammer line (x0 + 12.3 u: Slam Collider 2's farthest point p90
+  11.96 + half width + 0.1) by antic frame 50 and never inside it before Slam Recover; the hold point 8.8 u short of B
+  (outside its Slam Range) until 4 frames before F's predicted flag-off (k 56 slam / 49 cast), then the walk to the press
+  point (B's near body edge - 2.7 u); the dash (held into the sprint, released inside Sprint Grace on her x and speed)
+  only when the run alone misses the hold point / the hammer line. Presses: the re-hit on B's Idle (re-)entry within
+  10 frames during F's lock (before its coin at 15), the deciding side slash from F's flag-off when it meets B's body (B
+  Idle or Walk), none in the dash combo window (10 frames after a sprint).
+- A cast's bomb phase (after the lock-in, to F's flag-off + 95): the small-rune bombs tracked per object (the unlit ones
+  there before F's flag-off are stale - the pool keeps an earlier row in place); a new bomb covering her x within 30
+  frames -> rune_lowhop.hop_plan (holds 9-16), she stands still until the press, then the hold; `asw_critical()` from 4
+  frames before the planned press to the end of the hold / the covering bombs' lit window - the policy then steps no
+  other script (like the low hop's critical window).
+- `SSBOT_FORUM_TWO_ESC_FALLBACK` (default off, needs TWO_WALLSWITCH): `_esc_start`'s "b near" becomes mode "corner";
+  cast_stab's corner scripts accept it (`two_corner = TWO_CORNER or TWO_FALLBACK`).
+- The note's promotion: `evade_chase.ENABLED`, `cast_stab.SLAM_DASH`, `jump_behind.CORNER` default to SSBOT_FORUM_V2.
+- Stats `two_play.asw` (counts and `asw_runs`: kind, mode / why not, k_a (lag), back0, pred, sep0, rel0, B's state /
+  distance, flag-off / Slam Recover / Idle frames, hits on F / B with the phase, B's Idle entries / evade, HP frames,
+  presses, dashes, the line / hold frames, hit_b, B's next move, the lock-in end, hops). `ssbot.tools.sp9c_asw` (every close
+  antic of F per arm: trigger flags, B, hits, HP to F's Idle + 60, next move / escape, the gate). `sp9_two` prints HP hits
+  per landed in its bootstrap. Scripts `sp9c\scripts`: `trace_asw.py`, `peek_dec.py`, `offline_two.py`, `esc_cover.py`;
+  `replay_ident_sp9c.ps1`, `replay_batch*.ps1`.
+- Tests `tests/test_sp9c.py` (13: default off, T8.1 / pred / first / slams-only triggers, the not-taken reasons, the slam
+  run (dash, hold, step-in, the deciding press, B's next move), the hammer wait, the lock re-hit window, the bomb hop over
+  F's runes with a stale leftover, the skips, L2's hold, the fallback); test_sp8b / test_sp8c / test_cast_stab follow the
+  new defaults (test_sp8's SP8a switch test sets the two =0, 904119a). Full suite at 8427ab0 + the tests: 1,914
+  passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall,
+  test_three_layer's bell test; and the untracked test_sg8_review.py x3; `sp9c\full_tests_8427ab0.log` before the
+  test_sp8 fix: 1,913 / 9).
+
+### 3. Fixed-point trials (`sp9_go.ps1` -> `sp4_block.ps1` -> `sp9_ab.ps1`; gate: the switches the arm took, no HP lost from F's antic to its Idle + 60 frames >= 90 %)
+
+| round | code | per arm | sp9cT (T8.1) | sp9cP (refined) | failures -> change |
+|---|---|---|---|---|---|
+| t1 | 931052a | 16 | 23 / 30 | 19 / 31 | 16 opening switches; B's evade coin when she entered its range in F's lock (B slid away, then jumped); stale pool bombs held the script off and the planner dashed into F's hammer; F's rings at B without a hop -> no first-attack switch, hold until flag-off - 4, the dash only to reach the hold / the line, the bomb phase |
+| t2 | c3e0f5f | 16 | **29 / 32** (slams 17 / 17, casts 12 / 15) | 15 / 23 | a 40-frame critical window after the hop kept the slam playbook off B's slam (4 hammer hits in sp9cP) -> critical from press - 4 to the hold / lit end |
+| t3 | b99b650 | 16 | 19 / 24 (slams 10 / 10, casts 9 / 14) | 7 / 17 | the cast switches 21 / 29 over t2 + t3 -> `casts=0` (arm sp9cS) |
+| A/B r1 | 8427ab0 | 16 | sp9cS 11 / 12 (the one: an earlier cast's bomb at antic frame 23) | - | |
+
+t2 sp9cT: a hit on B after F's flag-off 14 / 32 (9 inside F's tail), B's next move close (slam / cast / evade) 27 / 32.
+t3 sp9bAB (16 episodes): 2 fallback corners, both safe.
+
+### 4. Identity
+
+`sp9c\replay_ident_sp9c.ps1` (192006 i0 ep1, 084036 i1 ep0, w13 144051 i1 ep0): 931052a and c3e0f5f with TWO_ANTICSWITCH
+unset and =0 byte-identical to 5b572d4's default (2,073 / 1,778 / 1,541 ticks); on (trig 0 / 1, open loop): 0 errors.
+37ea102 and 8427ab0 with EVADE_CHASE / JB_SLAM_DASH / JB_CORNER =0: byte-identical to 5b572d4 on all three; unset (the new
+default): the w7 episodes differ from tick 354 / 378, **the w13 episode is identical**; 8427ab0 unset = 37ea102 unset;
+TWO_ESC_FALLBACK=1 on the w13 episode identical (no fallback case there); 29 replays, 0 errors.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backups .bak_sp9c / .bak_sp9c2)
+
+`sp9cT` = rnjb + TWO_ANTICSWITCH=1; `sp9cP` = + `TWO_ASW_SET=trig=1`; `sp9cS` = + `TWO_ASW_SET=casts=0`; `sp9bAB` = rnjb +
+TWO_ESC_FALLBACK=1; `rnsp8bc0` = rnjb with EVADE_CHASE / JB_SLAM_DASH / JB_CORNER =0 (the old default). Every older arm
+carries the three =0 so it keeps its meaning (rnjb / rnjbT / sp9cT / sp9cP / sp9cS follow the new default).
+
+### 6. Machine state
+
+Instances 0 and 1 ran every block (started 2026-10-16 20:36), frozen at time scale 1e-4 after each by sp4_block;
+DEMO_SOON paused and restored per block; boost_workers ran for the blocks (`boost_workers.stop` present again). No game
+process touched. Frozen checkouts `C:\ssbot\live_1v1_{931052a,c3e0f5f,37ea102,b99b650,8427ab0}`. Sandbox `sp9c_go.ps1`
+(A/B rounds + the w7 check), `sp9c_w7.ps1`; manifests `1v1sp9ct1..t3_manifest.txt`, `1v1sp9cab_manifest.txt`,
+`1v1sp9cab2_manifest.txt`, `1v1sp9cw7_manifest.txt`. Untracked brain/tests/test_sg8_review.py and
+knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The cast switch: when B, hit in F's tail, picks a slam, F's bomb phase should yield to the slam playbook until the
+   strike's bounce (and the low hop for B's cast already covers F's bombs); one more fixed-point round.
+2. (2a) An earlier trigger - F's back 8-12 u one move before the wall, B still far - was not built; the escape jumps per
+   minute did not drop with the T8.1 trigger (most pre-escape antics already have F against the wall).
+3. The opening's first move is not switched (switch answer section 4); `first=0` tries the person's "plenty of time
+   before B walks in" for it.
+4. The new 1v1 default (EVADE_CHASE / JB_SLAM_DASH / JB_CORNER) was checked on w7 only (16 episodes); its effect after the
+   first kill on w13 is inside the A/B arms (identical across arms).
