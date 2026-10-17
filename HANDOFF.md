@@ -9745,3 +9745,173 @@ untouched. Full suite at 8345296 (+ the docs): 1,921 passed, 8 failed (the 5 kno
 6. IdleHit: 72 of F's Idle entries were missed because another script held the keys (the low hop 37), 64 because she was
    in the air (SP9a's S2 gap).
 7. The planner's attack presses: 221 dropped (156 pressed inside its own slash cooldown).
+
+## Task 1v1 - stage SP10b: the second hammer - the hand-off (R2, now the default), the tight way out (R3, off) and the person's air chain (R4, off) (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §80)
+
+The spec: C:\ssbot\data\m2_play\twoslam\answer.txt (the check found that the side slash's cooldown swallowed 0 of 186
+failed second strikes; the real blocker was the playbook run staying on A until her landing and B's start capped at antic
+frame 14: 125 / 186) and the person's notes of 2026-10-17 ("in alternating slams try replacing the follow-up side slash
+with a down slash ... if there is still time open the umbrella and take the next special straight from the air"; and,
+during this stage, "before the second hammer falls the first one is in its recovery, the second in its antic, both
+stand still - the air is safe"). A = the Clapper she struck, B = the other one, A0 / B0 = their Slam 0 entries (game
+frames); **k_land (nominal) = 53 - (B's antic entry - A0)**: B's antic frame at the default landing A0 + 53 (her own
+landing moves with the air chain, so the bands use the nominal one). Distances centre to centre (her box centre, its
+transform), HeroBox 0.46 u wide. Forum_W_w13 (fo_cl_w13w), instances 0 / 1, 1x. Data `C:\ssbot\data\m2_play\sp10b`
+(`geo_chain.json` the 281 cases' geometry, `ho_replay_*` the open-loop replay, `fp1*` / `fp2*` the fixed points,
+`base_cases.*` SP10a's baseline through the same tool, `ab/` the A/B and its audit, `replay_<sha>` identity,
+`scripts`). The lead's notes (sp10\NOTE_FROM_LEAD.txt): note 1 is SP10c's; note 2 (rescue the cast switch with one
+airborne sequence, "after TWO_AIRCHAIN works") was not started - the air chain failed its fixed point. No human practice ran.
+
+### Result
+
+- **TWO_HANDOFF (+ SLAM_REACH_NAME) is the new default** (fbae4c6: both follow SSBOT_FORUM_V2, =0 off; arm rnsp10b0 =
+  the SP10a default). A/B (e4d6365, 2 rounds x 16 per arm, block design, the same seeds 3800000.. / 3800100..):
+
+| | rnjb (old default) | two_ho (R2) | two_ht (R2 + R3) |
+|---|---|---|---|
+| landed / s (both alive) | 1.241 (1.287) | **1.387 (1.438)** | 1.380 (1.438) |
+| both Clappers killed / Clappers killed | 13 / 32, 28 | **18 / 32, 37** | 18 / 32, 36 |
+| HP-loss hits / min | 5.42 | **3.74** | 4.77 |
+| HP-hitless clears | 3 | **10** | 4 |
+| kill p10 / 50 / 90 of the clears (s) | 28.3 / 32.1 / 35.6 | 26.5 / 28.7 / 34.6 | 27.4 / 28.8 / 32.9 |
+| close slams struck | 124 / 177 (70 %) | 161 / 194 (83 %) | 144 / 184 |
+| **B struck, k_land 8-29** (HP per case) | 0 / 9 (1.33) | **12 / 13 (0.15)** | 7 / 9 (0.44) |
+| tight cases (k_land >= 30) losing HP | 1 / 1 | 4 / 4 | 3 / 4 |
+
+  Bootstrap 90 %, two_ho - rnjb: landed / s +0.146 (+0.054 .. +0.235), HP hits / min -1.70 (-3.16 .. -0.16), kills /
+  episode +0.28 (-0.13 .. +0.66), HP hits per landed -0.028 (-0.050 .. -0.006); two_ht - rnjb: +0.139 (+0.054 .. +0.221),
+  -0.65 (-2.16 .. +0.84), +0.25. The person's rule (more landed per s and kills, not more HP hits per min): both arms
+  pass it, two_ho and two_ht tie on landed / s (1.387 / 1.380) and kills, two_ho has fewer HP hits -> two_ho promoted.
+  Round 1 alone had two_ht ahead (1.461 / 3.44 HP hits per min vs two_ho 1.381 / 4.75): the two arms differ only in the
+  tight cases (~0.1 per episode), so their gap is noise.
+- **Fixed point of R2** (gate: B struck >= 60 % of the k_land 8-29 cases, HP <= 0.3 per case): t1 f3d6d62 5 / 9 struck
+  (0.44); t2 0fb205e 14 / 19 (0.42); t3 e4d6365 (two_ht) 5 / 5 (0.00); the A/B's two_ho 12 / 13 (0.15) -> passes from t3.
+  SP10a's baseline through the same tool: 1 / 19 (1.68 HP per case).
+- **R3 (TWO_TIGHT) stays off**: tight cases (B's antic before A0 + 23) losing HP: two_ht 6 / 13 over t1-t3 + the A/B
+  (the gate <= 50 % passes) vs 10 / 10 without it - but the far-side dash needs 10.5 u behind A, most tight cases have no
+  room (A/B 3 of 4 "no room"), and the A/B shows no gain (two_ht 4.77 HP hits / min vs two_ho 3.74, noise-level).
+- **R4 (TWO_AIRCHAIN) failed its fixed point twice and stays off**: c1 3eb3914 (64 episodes) B struck 7 / 19 in k_land
+  8-29 (1.05 HP per case); c2 ca5b69e (32) 1 / 5 (1.6). When the chain struck, it worked: 15 strikes, 13 bounced off
+  B's body, no HP lost while floating; the failures were plans "lost" (the model's contact slipping to the end of the
+  slash's active window - re-checked every tick, no new plan -> the planner in the float in front of B's hammer) and one
+  buffered ground jump. **The person's "the air is safe" holds in the live data**: every HP loss in the chained slams of
+  all SP10b runs came at B0 .. B0 + 12 (B's hammer / landing collider / body), none in the gap before it.
+- **Per k_land band, R2 vs R4** (fixed points; struck / cases, HP per case): <= 0: R2 21 / 24 (0.08), R4 18 / 25 (0.24);
+  1-7: R2 10 / 10 (0), R4 9 / 12 (0.17); **8-29: R2 19 / 24 (0.33), R4 8 / 24 (1.17)**; >= 30 (tight): R2 1 / 8
+  struck, R4 1 / 3. R2 strikes B more and loses less in every band.
+
+### 1. Code (`ssbot/combat/slam_play.py`, `ssbot/combat/air_chain.py`, `train/forum_planner_policy.py`, `tools/forum_policy_replay.py`)
+
+- `SSBOT_FORUM_TWO_HANDOFF` (default on with v2 since fbae4c6): a strike run that closes 'done' (her landing, A gone,
+  k_end) records itself; the run opened on another Clapper's Slam Antic within HO_GAP_F 4 frames (on the landing tick
+  itself: the step re-runs) is a late start (Run.late, Run.handoff: the jump up to K_JUMP_LATE2 30, the late walk into
+  BAND, the press 18 frames after the jump, at 48 at the latest) when its antic frame is <= 30. While B is in Slam Antic
+  before the side slash, NEAR's landing between them aims at B's stand (HO_STAND_U 5.1 u in front of B) when that is
+  farther from A than 3.7 u (also after her turn key; no early turn for the side slash on A then) - the t1 / t2 failures
+  landed 7.8-8.3 u in front of B (A to B 11.5-12.1 u) and could not walk into the band by k30.
+- `SSBOT_FORUM_SLAM_REACH_NAME` (default on with v2 since fbae4c6): `_in_reach` takes the wave-13 body collider ("Song
+  Heavy Sentry (2)" / "(3)"); before, the side slash's reach used BODY_FRONT 2.25 / BACK 1.34 there (the real Slam Antic
+  front is 1.87, Slam Recover 3.37); no tick changed on the four replay episodes.
+- `SSBOT_FORUM_TWO_TIGHT` (off): B's Slam Antic entered before A0 + 23 -> SP1's way out over A to its far side (the dash
+  at Slam 0 + 23; no side slash) when the room behind A is >= 10.5 u and the landing (6.6 u behind A) is >= 13 u from B;
+  after the landing no key until B's Slam 2 / B gone / hurt / 1.2 s (the planner's jump toward B held off). Else
+  r.tight = (B, 0) and the way as before.
+- `SSBOT_FORUM_TWO_AIRCHAIN` (off; `air_chain.py`): in A's way out with B in Slam Antic, a plan over the hero model (the
+  policy's start state and keys in flight via `ChainSim`; pogo_model's down-slash shapes, pogo_slam's slam timeline in two
+  timing variants): drift toward B's strike point for D frames, an optional down slash on the body below (A's or B's), an
+  optional umbrella press, B's strike at antic frame 47 (46 / 48); accepted when in both variants the strike meets B's
+  Slam 0 body within press + 3 .. + 6 before she lands (flag or box at the floor), the optional slash meets a body, and her
+  box meets no hammer / body box outside the i-frames to the contact + 18; re-checked every tick, searched again when the
+  check fails, kept when no new plan exists and the strike is <= 12 frames away; the strike hands the run over to B (a
+  run in its 'after' phase). Search ~9-16 ms, check ~1.5-2 ms (warm); `air_chain.warm` at the policy's warm-up.
+  Example of the person's chain live (FP2, 20261017_122014_i0_e1 f3159404-3159458): A idle after its slam, B enters
+  Slam Antic, the down slash hits A's body instead of the side slash (bounce to 8.1 u), she falls onto B's Slam 0 body,
+  the down slash hits B (bounce), no HP lost.
+- A latent bug fixed: a LATE start in the air from K_JUMP on fell through to the after-the-press branch and raised on
+  k_press None (unreachable on the old paths in practice; the hand-off reaches it).
+- Logging: slam_runs rows carry [handoff, tight, k_slash, chain log, chain_from] when set; attempts rows `slam_holds`;
+  forum_policy_replay writes slam_play / slam_runs / slam_holds.
+- Tests `tests/test_sp10b.py` (16: the hand-off on / off, the late jump to 30, the wait on the other's danger, the aim at
+  B's stand and again after the turn, tight with / without room and the hold, the reach name, the chain's masks vs
+  frame by frame, the chain replacing the way out, the v2 defaults). Full suite at e4d6365: 1,939 passed, 5 failed (the
+  known: test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3).
+- Scripts `sp10b\scripts`: `geo_chain.py` / `geo_sum.py` (the 281 cases' geometry), `ho_replay.py` / `ho_sum.py` (the
+  open-loop replay), `fp_cases.py` (the gates per band on sec_extract pickles), `runs_sum.py` (hand-off / tight / chain
+  logs per arm), `chain_try.py` / `chain_diag.py` (the chain's model vs the recordings), `peek_rec.py`, `tick_diff.py`,
+  `replay_ident_sp10b.ps1`, `ac_replay.ps1`, `idle_py.ps1`.
+
+### 2. Fixed-point trials (`sp10b_go.ps1` -> `sp4_block.ps1` -> `sp10b_ab.ps1`; manifests `1v1sp10b{fp1,fp2,fp1b,fp2b,fp1c}_manifest.txt`)
+
+| round | code | arm (episodes) | k_land 8-29: B struck (HP per case) | tight lost HP | failures -> change |
+|---|---|---|---|---|---|
+| t1 | f3d6d62 | two_ho 32 / two_ht 32 | 2 / 6 (0.67) / 3 / 3 (0) | 4 / 4 / 1 / 3 | four hand-offs landed 7.8-8.3 u from B (A to B 11.5-11.9): "no time to walk"; two tight dashes with 7.3 / 7.6 u of room flew into the wall -> aim at B's stand, dash room 10.5 |
+| t2 | 0fb205e | two_ho 31 / two_ht 32 | 6 / 8 (0.50) / 8 / 11 (0.36) | 2 / 2 / 0 / 2 | two landed 8.2 u from B (B's antic after her turn key) -> aim again after the turn |
+| t3 | e4d6365 | two_ht 32 | 5 / 5 (0) | 2 / 4 | passes |
+| c1 | 3eb3914 | two_ac 64 (1 HARNESS_FAIL) | 7 / 19 (1.05) | 2 / 3 | plans lost at the end of the float, a buffered ground jump -> contact <= press + 6, landing by box, keep near the strike |
+| c2 | ca5b69e | two_ac 32 | 1 / 5 (1.6) | - | 6 plans, 1 strike, 5 lost: fails -> not in the A/B |
+
+The reaction lag: the hand-off's B run opened on the tick of her landing in 17 of 22 k_land 8-29 cases (1-2 frames in
+2: tick gaps; earlier in 3: an air entry); the tight check and the chain's search run on every tick from the first STATE
+that shows B's Slam Antic.
+
+### 3. Identity (`sp10b\scripts\replay_ident_sp10b.ps1`; `tick_diff.py`)
+
+Every SP10b commit with its switches off (and fbae4c6 with TWO_HANDOFF=0 SLAM_REACH_NAME=0) byte-identical to
+fadc77a's default on the w13 144051 i1 e0 (1,541 ticks), SP10a's w13 102908 i0 e0 (1,659) and the w7 192006 i0 e1 /
+084036 i1 e0 (2,073 / 1,778). On: TWO_HANDOFF differs only on 102908 from its hand-off (tick 1,580 / 1,592);
+SLAM_REACH_NAME changed no tick; TWO_AIRCHAIN differs only on 102908 from the chain (tick 1,583); the w7 episodes are
+identical with every switch on (one Clapper). fbae4c6 unset (the new default): the w7 episodes byte-identical to the old default (one Clapper: no hand-off), the w13 episodes identical to e4d6365 with TWO_HANDOFF=1 (1,541 / 1,659 ticks); 0 errors.
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` on the A/B; `sp10b\ab\audit.json / .txt`, traces `ab\hp`)
+
+New default (two_ho, 32 episodes, 13.9 min): **52 HP losses (3.74 / min)** vs the old default's arm 73 (5.42 / min).
+By what hit: big rune 14, landing collider 13, body 12, hammer 7, small runes 6 (old: 19 / 8 / 18 / 14 / 14). By move:
+Slam Antic 13 (21), escape jump cast 12 (15), Cast Slam Antic 10 (10), Spell Antic 8 (18), escape jump 5 (3), Jump 4 (5).
+She was in the air the frame before in 46 / 52 (old 60 / 73).
+
+| cause | new (old) | top sub-causes, new default (n) | example frames (run_ep@frame) |
+|---|---|---|---|
+| L2 / planner decision | 29 (42) | the planner in the air with the dash ready 10 (L2 on it 4, on the other 4, forced 2); the slam stayed in reach in the air 4; the planner moved into it 5; the playbook's gates (other Jump Antic 2, other rune circle 2) | 20261017_134314_i1_e1@3457084, 20261017_134746_i0_e0@3471047, 20261017_134314_i1_e0@3455651 |
+| script conflict | 13 (19) | the chase on one while the other hit 5; the slam playbook on one while the other hit 3; the low hop on one 2; **the hand-off 2 (old 5)**: B's antic too early (k 34 at the landing) and a hand-off held by A's jump (other Air) | 20261017_134246_i0_e0@3454683, 20261017_135210_i1_e1@3488193, 20261017_134246_i0_e0@3453540, 20261017_141151_i0_e0@3558827 |
+| airborne / landing | 10 (12) | umbrella 3, no landing in time for a slam 2, in the air after its dash 2 | 20261017_135618_i1_e1@3503500, 20261017_134314_i1_e1@3457157 |
+| attack cooldown | 0 (0) | - | - |
+| harness / host stall | 0 in the A/B | two HARNESS_FAILs in the fixed points (758 / 307 ms ticks), both while a checkout freeze warmed its slam maps (IO); no freeze ran during a live block after that | 20261017_122159_i1_e1, 20261017_125204_i0_e0 |
+
+Missed planned actions (new vs old): close slams struck 161 / 194 (83 %) vs 124 / 177 (70 %); not struck 29 vs 49 (the
+gate "other rune circle" 10 vs 10, no landing in time 5 vs 6, hand-off late 4 vs 6, hurt 3 vs 7, outside the band 2);
+Idle entries hit within 30 frames 271 / 364 (74 %) vs 241 / 341 (71 %) - missed: in the air 38, the low hop had the
+keys 15, the slam playbook 9, the gate (other in the air) 7; chases 162, ended far 15 (176 / 12); attack presses 1,374,
+dropped 74 (all the planner's, 58 inside its own cooldown) vs 1,274 / 103, delayed 26 vs 18.
+Switches across situations: the hand-off needs the other Clapper's slam and never fires with one Clapper (w7 identity);
+the one-Clapper phase of the w13 episodes: 102.5 s, 1 HP loss (old 94.4 s, 3); attacker within 6 u of a wall 14 (19);
+SLAM_REACH_NAME acts in both phases (no tick changed on the replays). TWO_TIGHT's far side has room in few cases (the
+dash needs 10.5 u behind A): A/B 1 away, 3 no room.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backups .bak_sp10b / .bak_sp10b2)
+
+`two_ho` = rnjb + TWO_HANDOFF + SLAM_REACH_NAME (= rnjb on w13 from fbae4c6 on); `two_ht` = two_ho + TWO_TIGHT;
+`two_ac` = rnjb + TWO_AIRCHAIN + SLAM_REACH_NAME + TWO_HANDOFF=0 (its fixed-point meaning); `rnsp10b0` = the default with
+TWO_HANDOFF=0 SLAM_REACH_NAME=0 (the SP10a default). Every older arm carries both =0 (rnjb / rnjbT / sp9cT / sp9cP /
+sp9cS / sp9bAB / two_ho / two_ht follow the new default).
+
+### 6. Machine state
+
+Instances 0 and 1 ran FP1 / FP2 / FP1b / FP2b / FP1c and the A/B (both started 2026-10-16 20:36), frozen at time scale
+1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each block
+(`boost_workers.stop` present again). No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{f3d6d62, 3eb3914,
+25266b4, 0fb205e, ca5b69e, e4d6365, fbae4c6}`. Sandbox `sp10b_go.ps1`, `sp10b_ab.ps1`; manifests
+`1v1sp10b{fp1,fp2,fp1b,fp2b,fp1c,ab1,ab2}_manifest.txt`. Untracked brain/tests/test_sg8_review.py and
+knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **Tight double slams** (B's antic before A0 + 23, ~0.1 per episode): still 4 / 4 HP losses under the new default; the
+   far-side dash needs room behind A that is rarely there. Candidates: a no-dash far side (NEAR behind, 3.7 u, when the
+   crossing fits), or the air chain over B's hammer once its model holds.
+2. **The air chain** (R4): calibrate the hero model at the end of the umbrella float and the attack cancel against the
+   15 live chain strikes (`chain_diag.py` compares the model's rollouts with the recordings), then a third fixed point;
+   the lead's note 2 (the cast switch rescued with one airborne sequence) waits on it.
+3. The planner in the air (the dash ready, the umbrella): 15 of 52 HP losses under the new default.
+4. The scripts acting on one Clapper while the other hits (chase 5, slam 3, low hop 2): SP10a's open item 4.
+5. The playbook's gate "other rune circle" still declines 10 close slams per 32 episodes (SP10a's open item 3).
+6. Escape jumps (escape jump cast 12 + escape jump 5 of 52): SP10a's open item 2.
