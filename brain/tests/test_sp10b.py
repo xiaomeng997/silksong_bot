@@ -251,3 +251,28 @@ def test_handoff_aims_again_after_the_turn(two_on, monkeypatch):
     s = two(1000, "Idle", 0.1, "Slam Antic", 2 / 60.0, ax=30.0, bx=42.0, hx=33.7, ground=False, vy=-2.0)
     m = p.step(1000, s, False, t_game=ta0 + 30 / 60.0)
     assert r.near_u == pytest.approx(6.9) and r.k_turn is None and m & sp.M_R
+
+
+@pytest.mark.parametrize("v2,ho,want", [("1", None, True), ("1", "0", False), ("0", None, False), (None, None, False)])
+def test_handoff_and_reach_follow_v2(monkeypatch, v2, ho, want):
+    """Since the SP10b A/B: TWO_HANDOFF and SLAM_REACH_NAME follow SSBOT_FORUM_V2 when unset (=0 off); TWO_TIGHT and
+    TWO_AIRCHAIN stay off."""
+    import importlib
+
+    from ssbot.combat import air_chain
+    for k, v in (("SSBOT_FORUM_V2", v2), ("SSBOT_FORUM_TWO_HANDOFF", ho), ("SSBOT_FORUM_SLAM_REACH_NAME", ho)):
+        if v is None:
+            monkeypatch.delenv(k, raising=False)
+        else:
+            monkeypatch.setenv(k, v)
+    monkeypatch.delenv("SSBOT_FORUM_TWO_TIGHT", raising=False)
+    monkeypatch.delenv("SSBOT_FORUM_TWO_AIRCHAIN", raising=False)
+    try:
+        m = importlib.reload(sp)
+        a = importlib.reload(air_chain)
+        assert m.TWO_HANDOFF == want and m.REACH_NAME == want
+        assert not m.TWO_TIGHT and not a.AIRCHAIN
+    finally:
+        monkeypatch.undo()
+        importlib.reload(air_chain)
+        importlib.reload(sp)

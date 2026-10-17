@@ -187,14 +187,18 @@ TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre n
 #                             13 of 17 slams not struck lost HP, most of them started while she was still in the bounce
 #                             7.4-8.3 u from the slammer: with the other one closer than 3.7 + 13 u the far side's 3.7 u
 #                             is in its reach too -> "two-far": SP1's dash way out on that side (lands 6.6-9.5 u out)
-# SSBOT_FORUM_TWO_HANDOFF (task 1v1 SP10b, default off; twoslam answer.txt R2): the second hammer. With TWO_PLAY the run
+# SSBOT_FORUM_TWO_HANDOFF (task 1v1 SP10b; follows v2 since the SP10b A/B, below; twoslam answer.txt R2): the second hammer. With TWO_PLAY the run
 # stays on the struck Clapper A until her landing; the other one's (B's) slam began in the meantime, and its run
 # opened at antic frame 15-40 was cut at once by K_START_MAX 14 ("late": 125 of the 186 failed second strikes; B struck
 # 0 / 145 with the run still on A at B's antic + 10, 95 / 136 once it was free; the failures lost HP 148 / 186). On:
 # when a run that pressed closes (the landing, A gone, k_end), the run on B opened within HO_GAP_F frames (at once on
 # the landing tick) is a LATE start (Run.late: the jump up to K_JUMP_LATE2 30, the late walk into BAND, the press 18
 # frames after the jump, at K_PRESS_MAX_LATE 48 at the latest) when its antic frame is <= K_JUMP_LATE2.
-TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF")
+# SP10b A/B (e4d6365, 32 episodes per arm, the same seeds: landed / s 1.241 -> 1.387, both Clappers killed 13 -> 18 / 32,
+# HP-loss hits / min 5.42 -> 3.74, B struck in k_land 8-29 0 / 9 -> 12 / 13; the person's rule "more landed per s and
+# kills, not more HP hits per min"): TWO_HANDOFF and SLAM_REACH_NAME follow SSBOT_FORUM_V2 when unset (on with v2, off
+# without it); =0 turns each off (arm rnsp10b0 = the SP10a default).
+TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF", _V2)
 HO_GAP_F = 4
 # ... and its landing (fixed-point t1, f3d6d62: B struck 7 / 11 hand-offs of k_land 8-29; the four failures landed 7.8-8.3 u
 # in front of B - A to B 11.5-11.9 u - and could not walk into BAND by K_JUMP_LATE2): while B is in Slam Antic before
@@ -213,11 +217,11 @@ TIGHT_LAND_U = 6.6          # SP1's way out: the landing behind its centre (6.6-
 TIGHT_HOLD_S = 1.2
 TIGHT_DASH_ROOM = 10.5      # the dash way out needs this room behind A's centre (t1, f3d6d62: two dashes with 7.3 / 7.6 u
 #                             of room flew into the wall - a wall slide, no landing, the planner's wall jump back)
-# SSBOT_FORUM_SLAM_REACH_NAME (task 1v1 SP10b, default off): _in_reach takes the body collider of a wave-13 Clapper
+# SSBOT_FORUM_SLAM_REACH_NAME (task 1v1 SP10b; follows v2 since the SP10b A/B, with TWO_HANDOFF): _in_reach takes the body collider of a wave-13 Clapper
 # too (its GameObject "Song Heavy Sentry (2)" / "(3)"; off: only "Song Heavy Sentry", so with two Clappers the side
 # slash's reach was checked against BODY_FRONT / BODY_BACK, not the state's real span: Slam 2 / Recover front 3.37-3.49,
 # Slam Antic 1.87)
-REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME")
+REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME", _V2)
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
