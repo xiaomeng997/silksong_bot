@@ -9599,3 +9599,149 @@ knowledge/.../aim_zones_*.json left untouched.
    before B walks in" for it.
 4. The new 1v1 default (EVADE_CHASE / JB_SLAM_DASH / JB_CORNER) was checked on w7 only (16 episodes); its effect after the
    first kill on w13 is inside the A/B arms (identical across arms).
+
+## Task 1v1 - stage SP10a: the cause audit of the two-Clapper default (every HP loss and every missed planned action), the baseline for SP10b / SP10c (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §79)
+
+The person (2026-10-17): the cause audit is part of every stage - every HP loss AND every missed planned action traced
+through the inputs and states of the preceding ~60 frames and classified (attack cooldown, airborne / landing, script
+conflict, L2 / planner decision, harness / host stall); check how switches built for one situation behave in another.
+The person's message during the stage: "before the second hammer falls the first one is in its recovery, the second
+in its antic, both stand still - the air is safe" (checked below, section 5). Forum_W_w13 (fo_cl_w13w), instances 0 / 1,
+1x. F / B / distances as in SP9a-SP9c (centre to centre, her box centre to its transform; + = in front of the Clapper
+named; HeroBox 0.46 u wide). Data `C:\ssbot\data\m2_play\sp10` (`base` the 64-episode baseline: `audit.json/.txt`,
+`hp_rnjb.txt` = every HP loss with its 60-frame trace, `two.json/.txt` = sp9_two, `early_cover.txt`; `old` / `old9b` the
+same audit of the SP9c / SP9b A/B default arms; `replay_fadc77a` identity; `scripts`). Commits fadc77a (logging only),
+8345296 (the tool and its tests), the docs after it. The lead's NOTE_FROM_LEAD.txt (sp10, 10:25 / 10:35) is for SP10b / SP10c only - no
+action here. No human practice ran.
+
+### Result
+
+- **Baseline (fadc77a = the default, rnjb, 64 fresh w13 episodes, seeds 3600000.. / 3610000.., 2 x 32 per instance):
+  both Clappers killed 32 / 64, Clappers killed 66, landed / s 1.335 (both alive 1.382), HP-loss hits / min 5.06, HP-
+  hitless clears 6, kill p10 / 50 / 90 of the clears 26.9 / 29.8 / 36.2 s** (the SP9c default arm: 16 / 31, 1.339, 4.46;
+  within its own round-to-round noise 3.28-6.11 / min).
+- **HP losses: 136.** By what hit: hammer (Slam Collider 1) 37, landing (Slam Collider 2) 36, big rune 27, body 23,
+  small runes 13; she was in the air the frame before 115 / 136 (85 %). By the attacker's move: **slams 49 (36 %),
+  escape jump casts 29 + escape jumps 9 = 38 (28 %), other jumps / jump casts 28 (21 %), casts 18 (13 %)**, evade 3.
+- **By cause** (`ssbot.tools.sp10_audit`, rules below; sub-labels with counts):
+
+| cause | n | top sub-causes (n) | example frames (run_ep@frame) |
+|---|---|---|---|
+| L2 / planner decision | 76 | the planner in the air with the dash ready, L2 on the other Clapper (25: F's escape jump cast's big rune / landing 16 of them); slam not struck - the playbook's gates / her place at the antic (13: the other's rune circle 7, outside the band at the jump 4); the planner moved into it (14); a script's own move (low hop 6, slam 7) | 20261017_102832_i1_e0@2755160, 20261017_102908_i0_e1@2759457, 20261017_102908_i0_e1@2759384 |
+| script conflict | 36 | **the second hammer - the playbook still on the other's slam (hand-off) 18**; a script acting on one Clapper while the other hit her 18 (the chase 9, the slam playbook's bounce 5, the low hop 4) | 20261017_102908_i0_e0@2758554, 20261017_102832_i1_e1@2757649, 20261017_102715_i0_e0@2751228 |
+| airborne / landing | 23 | the umbrella float in front of a landing jumper (8); slam not struck: no landing in time 6 (the bounce off the first strike), no input at the antic 3; landing 4 | 20261017_102715_2_i1_e1@2752591, 20261017_102955_i1_e0@2760447 |
+| attack cooldown | 1 | the chase's press dropped | 20261017_104430_i0_e1@2814439 |
+| harness / host stall | 0 | no window with keys >= 3 frames late or STATE gaps | - |
+
+- **Missed planned actions** (64 episodes): close slams (her in front within 8.3 u at its antic) 374 - struck 277
+  (74 %), killed in the antic 6, **not struck 91**: the playbook's gate "other rune circle" 27, the hand-off 18, no landing
+  in time 11, hurt 8, outside the band at the jump 6, the other casting 4 / in the air 3 / ..., no input 4, too far to
+  walk 3. F's Idle entries within 8.3 u (both live) 684 - hit within 30 frames 497 (73 %); not: she was in the air 64,
+  another script had the keys 72 (the low hop 37, the escape switch's walk 14, the playbook 12, the chase 8, the opening
+  1), IdleHit's gate (the other can reach her) 21, no run with the planner's keys 12, hurt / no input 14. Chase runs 306 -
+  ended Far 28 (9 %: ended far 14, started in the air without a dash 10, hurt 4). Attack presses 2,683 - **dropped 221
+  (8 %; 213 of them the planner's: 156 pressed while cooling down - mostly inside its own Slash / SlashAlt - the rest in
+  Airborne / Umbrella / Turn clips)**, delayed 66 (pressed in the cooldown, the attack came at its end). Run aborts: low hop
+  "other" 42 / "gone" 27 / "air" 26 / hurt 7, slam "late" 19 / "other rune circle" 18 / "no landing" 11 / hurt 11, chase
+  "other" 11 / hurt 6 / rune 5.
+- **Escape jumps (step 2's condition): among the top causes (38 / 136 HP losses, 28 %, the second situation after the
+  slams) - but the early switch as specified was not built** (reason: section 3): the person's trigger (F's back 8-12 u,
+  pushed toward its wall, B far, at F's next close slam antic) held 8 times in the 64 episodes and before 1 of the 110
+  escape jumps (the armed reading: 17-23 switches, before 6-15 of 110); an A/B of 32 per arm would see 4-12 of them. 32 of
+  the 38 escape-jump HP losses came with L2 already on B (F's jump cast lands 5 u short of her and its circle covers her
+  there), the switch the early trigger would bring forward.
+
+### 1. Code
+
+- fadc77a (logging only; decisions unchanged): the policy's `own_trace` (run-length coded per tick: who sent the keys -
+  plan / sup / slam / stab / low / chase / two:<open|idle|esc|asw> / cog -, the critical window, L2's target / goal / why)
+  and `slam_runs` (every slam playbook run: iid, antic frame, phase, why, k_start / k_jump / k_press, bounced, Slam 0's k,
+  k_air, the last k, side_why) in the attempts rows; `TwoPlay.last_part`.
+- `ssbot.tools.sp10_audit` (`--manifest --arms [--json] [--traces]`): per HP loss the attacker (the Slam Collider's
+  own state first; a rune's caster = the Clapper whose cast came last within 5 s) and its move, the 60-frame trace (her x
+  from it, height, ground / air, clip, attack cooldown, dash ready, the latched keys, who sent them, L2's target, both
+  Clappers' states, late frames), and one cause by the first rule that holds over the decisive window (the 24 frames
+  before the hit): keys >= 3 frames late / STATE gaps -> host; a script's (or the planner's down) press dropped by the
+  cooldown in -45..-3 -> cooldown; hurt recoil / stun -> airborne; a slam begun while the playbook ran the other one's slam
+  and got no strike run -> script conflict (hand-off); a slam she was in front of within 8.3 u at its antic and the
+  playbook declined / aborted before a press -> the playbook's why (gate / place -> L2, in the air / no landing / no input
+  -> airborne, the hand-off -> script conflict); a script holding >= 6 of the 24 frames: on the other Clapper -> script
+  conflict, else its own move (-> L2) or in the air without a dash (-> airborne); the planner: moved into it (her own
+  travel >= 0.75 u toward it with keys toward it) -> L2, landing or >= 20 air frames without a dash ready -> airborne, else
+  L2 (in the air with the dash ready / stayed in reach). Missed actions: every close slam, F's Idle entries, chase runs,
+  run aborts, attack presses (dropped / delayed). Situational: HP by live Clappers and owner, near walls, the one-Clapper
+  phase, the double slams with the damage colliders enabled in their gap.
+- Tests `tests/test_sp10.py` (7: last_part, slam_runs format, the owner lookup, the dropped / delayed press, the planner
+  moved-in and hand-off classes, the stall first). Full suite: below (section 6).
+
+### 2. Identity
+
+`sp10\scripts\replay_ident_sp10.ps1`: fadc77a's ticks byte-identical to 8427ab0's default on the w13 144051 i1 ep0 (1,541
+ticks) and the w7 192006 i0 ep1 / 084036 i1 ep0 (2,073 / 1,778); 0 errors. The baseline ran from the frozen checkout
+`C:\ssbot\live_1v1_fadc77a` (warmed by that replay).
+
+### 3. Escape jumps and the early switch (step 2; `sp10\scripts\early_cover.py`, `early_trig.py`, `early_armed.py`)
+
+- F's escape jumps (a close Jump Antic / Cast Slam Antic with its back <= 6.2 u): 110 in 64 episodes (1.7 per episode),
+  HP lost within 3 s after 55. TWO_WALLSWITCH took 27 of the 82 it saw - 26 without HP lost - and left 55 (B jumping 24,
+  B near 13, B slamming 11, B casting 7): 27 of those 55 lost HP. At the escape B was jumping / slamming / casting in
+  64 / 110 (HP lost within 3 s 39), evading in 2, idle / walking in 44 (16).
+- The move right before F's escape: a cast 43, an evade 31, a slam 22, a jump 14; its last close slam within 10 s had its
+  back < 8 u in 54, 8-12 u in 4, > 12 u in 14, none in 38.
+- The trigger as specified (back 8-12, B Idle / Walk on F's open side, F-B >= 16 u, at F's close slam antic): 8 in 64
+  episodes, followed by an escape within 8 s once; with "pushed" (its back fell >= 1 u over 3 s) the same 8. Wider windows:
+  back 6-12 37 (15 escapes follow), 0-12 75 (38), 0-8.1 (SP9c's sp9cS trigger) 67 (37). Armed reading (armed at back 8-12 /
+  pushed / B far, switch at F's next close slam antic at any back): 17 switches (push >= 1 u) / 23 (push >= 0), before 6 /
+  15 of the 110 escapes (p50 5.1 s before).
+- So the early switch cannot reach most escape jumps, and their HP is lost with her at B (32 / 38 with L2 on B: F's jump
+  cast aims 5 u short of her, its landing hammer 0.67-7.76 u in front and the circle landing + 6.48 u, r 7.19 cover B's
+  side). Not built; the person / the lead decide (open item 2).
+
+### 4. Switches across situations
+
+- One-Clapper scripts with two Clappers: JB_SLAM_DASH / JB_CORNER (cast_stab) held the keys 0 frames with two alive (145
+  in the one-Clapper phase); EVADE_CHASE's one-Clapper mode only with one alive (792 frames). The one-Clapper phase of the
+  w13 episodes: 228 s, 2 HP losses (0.5 / min).
+- Scripts acting on one of the two while the other one attacked: 18 HP losses (13 %) - the chase of one Clapper's evade
+  ran her under the other's jump landing / into its body (9), the slam playbook's bounce off one drifted her into the
+  other's jump landing (5), the low hop's stance on one's cast stood in the other's big rune circle (4).
+- Two-Clapper rules near walls: 33 HP losses with the attacker within 6 u of a wall (2 with her within 3 u): 14 with L2 on
+  the other Clapper (the escape jump case above).
+
+### 5. The double slams (the person's message: "the air is safe" before the second hammer)
+
+48 double slams (B's Slam Antic while A's slam runs), B struck 24 (50 %; all close slams 74 %). The gap (A in Slam 2 /
+Slam Recover / Idle, B in its antic before Slam 0): p50 34 frames, she was in the air 83 % of it; **the damage colliders
+enabled there were the bodies only** (top <= 3.91 u above the floor, -1.34 .. +3.49 u along A's facing) **except A's Slam 2
+landing collider in 25 of ~1,400 gap frames** (up to 6.93 u above the floor, 0.67-7.76 u in front of A); **1 HP loss
+inside the 48 gaps** (A's Slam 2 landing collider), the rest after them (B's hammer 10, A's / B's bodies 6, A's landing 4, A's
+big rune 4, A's hammer 4; of the 28 from B's antic to + 170 frames, 27 after the gap). The air above the bodies is safe in
+the gap once A is past Slam 2; the HP is lost to B's hammer itself - SP10b's air chain (strike it from the air) is where
+the gap is used.
+
+### 6. Machine state
+
+Instances 0 and 1 ran the baseline block (started 2026-10-16 20:36), frozen at time scale 1e-4 after it by sp4_block;
+DEMO_SOON paused and restored; boost_workers ran for the block (`boost_workers.stop` present again). No game process
+touched. Frozen checkout `C:\ssbot\live_1v1_fadc77a`. Sandbox `sp10_go.ps1` (wake, boost, sp4_block) and `sp10_ab.ps1`;
+manifest `1v1sp10base_manifest.txt`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
+untouched. Full suite at 8345296 (+ the docs): 1,921 passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test; and the untracked test_sg8_review.py x3; `sp10ull_tests.log`).
+
+### Open items (not in SP10a's scope)
+
+1. **The second hammer (SP10b): 18 HP losses + 17-18 unstruck slams** - the playbook stays on the first slam's bounce /
+   landing and the second Clapper's antic is past the start limit when it frees; in the gap only bodies are live.
+2. **Escape jumps (28 % of the HP losses)**: the early switch as specified reaches 1-15 of 110; the losses come with her
+   at B while B attacks or F's jump cast lands near her. Candidates with data behind them: the corner for F's escape jump
+   CAST (SP9c's fallback corners 6 / 6 safe, all jump casts; SP9b's corner 18 / 19), and a rule for F's escape while B
+   attacks (the switch's 42 "B busy" cases lost HP 21 times). The person decides.
+3. The playbook's gate "other rune circle" declined 27 close slams (7 HP losses): it blocks until the other's landing +
+   1.45 s, while the circle is lit only 6-8 frames ~65-72 frames after it appears - a gate on the circle's lit window at
+   the strike's frames would keep most of them.
+4. Scripts for one Clapper ignoring the other's jump landing / big rune circle (chase 9, playbook bounce 5, low hop 4 HP
+   losses): the chase / the low hop could take SP7's `_two_danger` (the other's jump move, its rune circle) as an abort.
+5. The planner in the air: 40 HP losses with the planner holding the keys in the air (25 with the dash ready, 8 on the
+   umbrella in front of a landing jumper); 115 / 136 hits found her airborne.
+6. IdleHit: 72 of F's Idle entries were missed because another script held the keys (the low hop 37), 64 because she was
+   in the air (SP9a's S2 gap).
+7. The planner's attack presses: 221 dropped (156 pressed inside its own slash cooldown).
