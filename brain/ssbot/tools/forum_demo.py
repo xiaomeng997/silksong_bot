@@ -68,8 +68,8 @@ COGFLY = frozenset(("Damager",))
 BELL = frozenset(("Enemy Damager",))
 # the hero's own attack sources ("hit" src); anything else that is not a helper is reported as "other"
 HERO_ATTACKS = frozenset(("Slash", "AltSlash", "UpSlash", "DownSlash", "DownSlash New", "DownSlashAlt", "WallSlash",
-                          "DashStab", "DashStabAlt", "DashUpper Slash", "Harpoon Damager", "Harpoon Dash Damager",
-                          "Needle Damage", "Extra Damager"))
+                          "DashStab", "DashStabAlt", "RecoilStab", "DashUpper Slash", "Harpoon Damager",
+                          "Harpoon Dash Damager", "Needle Damage", "Extra Damager"))
 # animation clips whose start counts as one use (clip prefix -> technique)
 CLIP_USES = (("Dash Upper Antic", "dash_attack"), ("Wanderer Dash Attack", "dash_attack"),
              ("Harpoon Antic", "clawline"), ("Umbrella Inflate", "glide"), ("BindCharge", "bind_start"),

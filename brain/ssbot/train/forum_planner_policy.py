@@ -215,7 +215,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SSBOT_FORUM_SLAM_PLAY=1 (task 1v1 SP1, forum.md 65): the person's slam strike as a fixed playbook; None (the
         # default): nothing changes
         self.slam_play: slam_play.SlamPlay | None = slam_play.SlamPlay() if slam_play.ENABLED else None
-        # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab)
+        # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab); SP8: + the
+        # RecoilStab (SSBOT_FORUM_JB_DASH_COMBO), or dash, stop, side slashes (SSBOT_FORUM_JB_DASH_STOP)
         self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
         self._play_tick: dict | None = None
 
@@ -758,7 +759,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.cast_stab is not None and play is None:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
             stab = self.cast_stab.step(f, s, ws.hero.contact.v == "GROUND",
-                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)))
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                                       t_game=ws.stamp.t_game_s)
             if stab is not None and (r.mask is not None or self.pause_owned):
                 self.cast_stab.abort("supervisor")
                 stab = None
