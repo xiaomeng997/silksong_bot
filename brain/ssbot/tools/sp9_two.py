@@ -349,13 +349,15 @@ def main(argv=None) -> int:
         hpm = lambda v: sum(x["hp_hits_before_kill"] for x in v) / max(sum(x["fight_s"] for x in v) / 60.0, 1e-9)  # noqa
         kills = lambda v: sum(x.get("kills_n", 0) for x in v) / max(len(v), 1)                  # noqa: E731
         surv = lambda v: float(np.median([x["fight_s"] for x in v]))                             # noqa: E731
+        hpl = lambda v: sum(x["hp_hits_before_kill"] for x in v) / max(sum(x["landed"] for x in v), 1)  # noqa: E731
         for arm in E:
             if arm == a.base:
                 continue
             b, c = ok(E[a.base]), ok(E[arm])
             print(f"{arm} - {a.base}: landed/s both alive", sp7_two.boot(b, c, both),
                   "| landed/s", sp7_two.boot(b, c, pooled), "| HP hits/min", sp7_two.boot(b, c, hpm),
-                  "| kills/episode", sp7_two.boot(b, c, kills), "| survival p50", sp7_two.boot(b, c, surv))
+                  "| kills/episode", sp7_two.boot(b, c, kills), "| survival p50", sp7_two.boot(b, c, surv),
+                  "| HP hits per landed (SP9c)", sp7_two.boot(b, c, hpl))
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps({"arms": out, "episodes": E}, indent=1, default=str), "utf-8")
