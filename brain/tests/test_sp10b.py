@@ -215,3 +215,24 @@ def test_chain_replaces_the_way_out(two_on, monkeypatch, on):
     assert r.chain is not None and r.chain.b_iid == 8 and r.chain.k_press == 47
     assert r.chain.f_down is not None and m & sp.M_D
     assert r.chain_log[0][1] == "plan" and p.stats()["chain_plan"] == 1
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_handoff_aims_the_landing_at_bs_stand(two_on, monkeypatch, on):
+    """B (12 u in front of A) in Slam Antic during A's way out: on, NEAR's landing between them moves from 3.7 u in
+    front of A to B's stand (12 - 5.1 = 6.9 u in front of A)."""
+    monkeypatch.setattr(sp, "TWO_HANDOFF", on)
+    monkeypatch.setattr(sp, "NEAR", True)
+    monkeypatch.setattr(sp, "SIDE", True)
+    p = sp.SlamPlay(sp.PlayCfg())
+    r = after_run(face=1, ta=10.0)
+    r.near, r.k_turn, r.k_slash = None, None, None
+    p.run = r
+    ta0 = 10.0 + 48 / 60.0
+    for i, kb in enumerate(range(0, 30, 2)):
+        s = two(1000 + i, "Slam Recover", 0.1, "Slam Antic", kb / 60.0, ax=30.0, bx=42.0, hx=31.5 + 0.2 * i,
+                ground=False, vy=2.0)
+        p.step(1000 + i, s, False, t_game=ta0 + (12 + 2 * i) / 60.0)
+    assert r.near == 1
+    assert r.near_u == pytest.approx(6.9 if on else 3.7)
+    assert (r.side_why == "ho_aim") == on

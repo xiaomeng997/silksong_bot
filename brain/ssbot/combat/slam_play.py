@@ -195,6 +195,11 @@ TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre n
 # frames after the jump, at K_PRESS_MAX_LATE 48 at the latest) when its antic frame is <= K_JUMP_LATE2.
 TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF")
 HO_GAP_F = 4
+# ... and its landing (fixed-point t1, f3d6d62: B struck 7 / 11 hand-offs of k_land 8-29; the four failures landed 7.8-8.3 u
+# in front of B - A to B 11.5-11.9 u - and could not walk into BAND by K_JUMP_LATE2): while B is in Slam Antic before
+# her turn key, SP5 NEAR's landing between them aims at B's stand (HO_STAND_U in front of B's centre) when that is
+# farther from A than near_u_front (no side slash on A from there)
+HO_STAND_U = 5.1
 # SSBOT_FORUM_TWO_TIGHT (task 1v1 SP10b, default off; twoslam answer.txt R3): B enters Slam Antic before A's Slam 0 +
 # TIGHT_S0 (the bounce's apex): B's Slam 0 comes <= 18 frames after her landing and no strike reaches it (0 / 55 struck,
 # 53 / 55 lost HP; at the landing she is 3.8-6.1 u in front of B, inside its hammer). On: no pre-landing side slash,
@@ -205,6 +210,8 @@ TWO_TIGHT = _on("SSBOT_FORUM_TWO_TIGHT")
 TIGHT_S0 = 23               # game frames after A's Slam 0
 TIGHT_LAND_U = 6.6          # SP1's way out: the landing behind its centre (6.6-9.5 u)
 TIGHT_HOLD_S = 1.2
+TIGHT_DASH_ROOM = 10.5      # the dash way out needs this room behind A's centre (t1, f3d6d62: two dashes with 7.3 / 7.6 u
+#                             of room flew into the wall - a wall slide, no landing, the planner's wall jump back)
 # SSBOT_FORUM_SLAM_REACH_NAME (task 1v1 SP10b, default off): _in_reach takes the body collider of a wave-13 Clapper
 # too (its GameObject "Song Heavy Sentry (2)" / "(3)"; off: only "Song Heavy Sentry", so with two Clappers the side
 # slash's reach was checked against BODY_FRONT / BODY_BACK, not the state's real span: Slam 2 / Recover front 3.37-3.49,
@@ -736,6 +743,20 @@ class SlamPlay:
 
     # ---- SP10b ----
 
+    def _ho_aim(self, r: Run, s: dict, cx: float, d: int) -> None:
+        """TWO_HANDOFF: another Clapper in Slam Antic on the landing's side (between them): the landing at its stand
+        (HO_STAND_U in front of its centre) when that is farther from A than the run's near_u (the room permitting)."""
+        for o in clappers(s):
+            if o.get("iid") == r.iid or control(o)[0] != "Slam Antic" or o.get("iid") in self._closed:
+                continue
+            u = (float(o["pos"][0]) - cx) * d - HO_STAND_U
+            if u > r.near_u + 0.05:
+                fit = self._near_fit(d, cx, u)
+                if fit is not None and fit > r.near_u:
+                    r.near_u = fit
+                    r.side_why = "ho_aim"
+            return
+
     def _hold_mask(self, f: int, s: dict) -> int | None:
         """TWO_TIGHT's hold after the far-side landing: 0 (no key) while B is in its slam before Slam 2, she is not hurt
         and TIGHT_HOLD_S has not passed; else the hold ends (None)."""
@@ -769,7 +790,7 @@ class SlamPlay:
             away = 1 if cx > bx else -1                       # from B through A: A's far side
             room = (cx - WALL_L) if away < 0 else (WALL_R - cx)
             land = cx + away * min(TIGHT_LAND_U, room - self.cfg.wall_pad)
-            if room >= self.cfg.over_room and abs(land - bx) >= TWO_REACH_U:
+            if room >= TIGHT_DASH_ROOM and abs(land - bx) >= TWO_REACH_U:
                 r.tight = (o.get("iid"), away)
                 r.near, r.over_dir, r.side_why = 0, away, "tight"
             else:
@@ -972,6 +993,8 @@ class SlamPlay:
             vy -= GRAV / 60.0
         low = y <= c.slash_y
         if r.k_turn is None:
+            if TWO_HANDOFF and TWO_PLAY and d == r.face:
+                self._ho_aim(r, s, cx, d)
             tx = cx + d * r.near_u
             reached = (xw - tx) * d >= 0.5 * NEAR_V                # the turn key moves her NEAR_V back to tx
             past = d == r.face or rel <= -c.near_cross_u
