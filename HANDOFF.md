@@ -8978,3 +8978,175 @@ rounds). Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.
    at its light and back inside 6.0 u for the +-8.4 u pair 10 frames later) would close it.
 3. With the chase the jump moves nearly vanish in the 1v1 (7 in 32 episodes); SP9 (two Clappers: switch target when
    the focus evades / reaches the corner) is next.
+
+## Task 1v1 - stage SP8d: the small runes on the ground with one low hop timed to the bomb at her x (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §75)
+
+The person (2026-10-16, plan note "small runes - a low hop timed to the bomb at her x"): "for the small runes, if the jump
+is timed precisely, you do not even need to jump higher than the Clapper and can slash the whole time". One live
+Clapper (Forum_W_w7). Distances are centre to centre (her box centre, its transform), + = in front; heights are her box
+bottom above the floor (y 3.0); HeroBox 0.5 x 2.08 u. Frames are game frames from the Spell Antic entry (k); C = the
+Cast 2 entry. Data `C:\ssbot\data\m2_play\sp8d` (`cast_*.pkl` + `cast_facts.txt` the 1,113 casts of the SP8a-c runs,
+`baseline_casts.json`, `hop_model.json`, `air_slash.txt`, `t1` / `t2` / `t2b` trials, `ab` the A/B, `replay_<sha>`
+identity, `scripts`). Commits 5c7cbd8 (code), 3498a79 + 5c9e2f9 (a harness change and its revert, see Machine state),
+b2c14cd (t1 fixes; tested and A/B code), b4783b9 (the default), docs after it.
+
+### Result
+
+- **The script**: from the Spell Antic on the ground 3.6-4.6 u in front with side slashes every 19 frames; ring 1's
+  bomb appears at C + 9-10 and the hop is planned from that frame: hold 12 (11 in a few), pressed at C + 15-18, apex
+  3.55-3.67 u above the floor (below its head, 3.92), her box bottom >= the bomb's top + 0.12 u over its whole lit window
+  (+ 1 frame each side); slashes in the air on the rhythm; the planner from her landing.
+- **Fixed-point gate passed**: t1 (5c7cbd8) + t2 / t2b (b2c14cd), 48 episodes: **96 close casts, 96 without HP lost
+  from the antic to ring 1's light + 25 frames**; her box bottom at ring 1's light 3.42 / 3.52 / 3.79 u (p10 / 50 / 90;
+  default 3.21 / 4.83 / 5.30). Hits per close cast to ring 1's light + 25 frames 4.88 (default 4.11), to Cast 2's end
+  3.96 (3.66). No HP lost before a kill in the 48 episodes.
+- **A/B** (b2c14cd, 4 arms x 16, block design, the same seeds): **sp8lh** kill p50 21.6 -> **19.5 s** (-2.04, 90 %
+  -3.13 .. -0.85), landed / s 1.027 -> **1.126** (+0.100, +0.034 .. +0.165), **HP-hitless 16 = 16**: faster and not
+  worse -> **promoted** (b4783b9: RUNE_LOWHOP follows SSBOT_FORUM_V2, `=0` off; arm `rnsp8d0` = the default with it off).
+- **sp8all** (LOWHOP + EVADE_CHASE + JB_SLAM_DASH + JB_CORNER): kill p50 **17.3 s** (-4.29, -4.99 .. -3.45), landed / s
+  **1.305** (+0.279, +0.232 .. +0.319), **HP-hitless 16 = 16**: faster and not worse than the default. sp8c alone 17.6 s,
+  1.274, 16 / 16. No arm lost HP before the kill (the SP8b / SP8c A/Bs' extra losses were small-rune bombs; none here).
+  The SP8b / SP8c switches stay off: the person decides.
+- The gate's "landed per close cast >= 2.2" read as antic hits without the hit that triggered the cast: default 1.90,
+  sp8lh 1.81-1.83 - 92 % of close casts are triggered by her hit on the Idle Clapper and the 43-frame antic then holds at
+  most 2 more slashes at 19 frames apart, so that count cannot reach 2.2; through Cast 2's end without the trigger:
+  default 2.73, sp8lh 3.00; through ring 1's light + 25 frames: 3.18 vs 3.92.
+
+### 1. Facts (`scripts/cast_extract.py`, `cast_facts.py`, `body_profile.py`, `hop_model.py`, `slash_geom.py`, `baseline.py`)
+
+- Timeline: Spell Antic 43-44 frames, Cast 1 6, C = k 48-50, Cast 2 24-26 frames, then Idle 16-17 (p50, to 40); next
+  move Evade Scuttle 61 %, Slam Antic 18 %, Walk 8 %, Spell Antic 5 %.
+- Bombs: ring r's pair at x0 +- 4.2 r (x0 = its x at C), centre y = its y - 3.8 (top 2.83 u above the floor), circle
+  r 2.166; ring r appears at C + 0 / 9-10 / 19-20 / 28-30 / ..., lights 20-21 frames after it appears (p5-p95), lit 6
+  frames (p95 7). Between x0 + 2.67 and x0 + 5.73 only ring 1 reaches her (one hop, timed from its appearance at
+  C + 9-10; it lights at C + 29-31).
+- Its body box: Spell Antic 0-3 top 3.19 u / front 2.05 u; 4-7 4.36 / 2.06; from 8 on, Cast 1 and Cast 2 0-13 4.78 /
+  1.84; Cast 2 from 14 on 3.19 / 2.05; Idle 3.92 / 2.25. At ring 1's light it is in Idle.
+- The ground hop per hold (the kinematics model's lanes; the logged apex table in hero_wanderer_forum.json agrees):
+  hold 11 apex 3.33-3.55 u, 12 3.55-3.67 u (below its head, 3.92), 13 3.67-3.96 u; she passes 2.8 u 9-10 frames
+  after the press (`rune_lowhop.HOP_LO` / `HOP_HI`, j = 0 the latched press frame).
+- The side slash's lower edge (attacks/wanderer.json "normal") is measured from her box centre, not her transform:
+  1,143 live presses in x reach, margin (body top minus the edge) >= -0.1 hit 13 / 13, below -0.5 1 / 174.
+- The default under v2 (rn small-rune rows): at ring 1's light her bottom is 3.21 / 4.83 / 5.30 u (p10 / 50 / 90),
+  mostly a full jump (held 24-28 frames, apex 5.5 u); 126 presses in reach of the Idle body from 3.9-5.3 u up, 0 hits;
+  15 of 1,005 casts lost HP to a bomb (all airborne, bottom 0.4-2.3 u). Per close cast (d0 <= 8.28 u): antic 2.83 hits
+  (1.90 without the hit that triggered the cast; 1.57 over all casts = the "~1.6"), to Cast 2's end 3.66, to ring 1's
+  light + 25 frames 4.11 (1.78 s, 2.31 hits / s).
+
+### 2. `SSBOT_FORUM_RUNE_LOWHOP` (`ssbot/combat/rune_lowhop.py`; default off until b4783b9, now follows v2; one live Clapper)
+
+- Start: its Spell Antic, she in front <= `start_max` 10.5 u, no jump cast rune circle over her stance (a start can
+  be late when the slam playbook's way out still has the keys). Policy hook after the slam playbook and cast_stab,
+  before the evade chase; the supervisor's keys win; another script taking the keys ends the run (`yield_to`).
+- Stance: on the ground `stand_lo` 3.6 .. `stand_hi` 4.6 u from its centre and, from Cast 2 on, `x0_lo` 2.95 ..
+  `x0_hi` 5.45 u from x0; no key inside; no direction key in a Dash / Sprint clip.
+- Slashes: every `slash_cd` 19 frames when the STATE's attack cooldown is over, the slash's x reach (3.12 u) meets its
+  body box and the lower edge is below its top - `y_spare` 0.1 (body by state, above); the key toward it on the press.
+- The hop: planned once a covering bomb is seen (|her x - its x| < R + 0.25 + `x_pad` 0.3): the lowest hold in 9 .. 16
+  whose press frames P keep her box bottom (the lowest lane) >= the bomb's top at her x + `margin` 0.12 u over its lit
+  window (appearance + 20 .. + 21 + 6, `pre` / `post` 1 frame more) for >= `min_slack` 3 choices of P; of those the P
+  with the most slashes that can land before the landing (the highest lane; no slash on the Idle Clapper inside the
+  window), then the middle. The plan is kept while the covering bombs do not change. No second jump press.
+- In the air: slashes on the rhythm where they meet its body; none on the Idle Clapper while the hold or the bomb
+  window is on (a hit makes it pick its next move at once); the key toward it beyond `gap_hi` 2.0 u to its body, never
+  past x0_lo .. x0_hi while a bomb covers her.
+- Critical window (the hold or the covering bomb's window): the policy does not step the slam playbook, cast_stab or
+  the evade chase (they start a few frames later from the air); the hop runs on if the Clapper dies (b2c14cd).
+- Ends: landed from the hop; the cast over with nothing covering her; its next move; HP lost; a covering bomb due within
+  12 frames with her in the air ("air": the planner's bomb forecast takes over).
+- Stats `rune_lowhop` in the attempts rows' `policy` (casts, runs, hops, presses, air_presses, hold_*, end_*, no_*,
+  `hop_runs`: f0, fa, d0, x0, k_c2, covering bombs, plan {H, P, lo, hi, thr}, P, H, k_land, presses, hits, end, why).
+  `SSBOT_FORUM_RUNE_LOWHOP_SET="margin=0.15,gap_hi=2.2"` overrides the HopCfg numbers.
+
+### 3. Fixed-point trials (`sp8d_go.ps1` -> `sp4_block.ps1` -> `sp8_t.ps1`, Forum_W_w7, instances 0 / 1, 1x, the default stance; success = no HP lost from the antic to ring 1's light + 25 frames; landed per close cast)
+
+| round | code | arm (episodes) | casts / close | close safe | hold (count); P - C p10/50/90 | bottom at ring 1's light p10/50/90 | hits per close cast: antic / to Cast 2's end / span | air presses hit | failures -> change |
+|---|---|---|---|---|---|---|---|---|---|
+| t1 | 5c7cbd8 | sp8lh (16) | 43 / 27 | **27 / 27** | 12 (29), 11 (4); 16 / 17 / 17 | 3.42 / 3.52 / 3.79 | 2.74 / 3.96 / 4.89 | 19 / 34 | a far cast: the air slash killed it at P + 7, the run ended, the hold was cut at 8 frames and ring 1's bomb hit her 7 frames after the kill (not an A/B loss) -> the hop runs on after its death; the descent's slash met its Idle body from <= 4.63 u in 9 / 9, farther 2 / 14 -> air key toward it beyond a 2.0 u gap |
+| t2 | b2c14cd | sp8lh (16) | 41 / 25 | **25 / 25** | 12 (28), 11 (3); 16 / 17 / 17 | 3.42 / 3.52 / 3.79 | 2.84 / 3.96 / 4.88 | 15 / 33 | none (6 "air": the previous cast's outer bombs due with her airborne, the planner took them, no HP lost) |
+| t2b | b2c14cd | sp8all (16) | 47 / 44 | **44 / 44** | 12 (32), 11 (6); 16 / 17 / 17 | 3.27 / 3.52 / 3.87 | 2.43 / 3.55 / 4.32 | 24 / 49 | none |
+
+The air slash mostly comes on the descent (P + 24, ~C + 40) as its Idle ends and it starts to evade: about half miss
+(a miss only delays the next press). `sp8d\t1`, `t2`, `t2b` (`cast.json`, `report.txt`), `trials_summary.txt`.
+
+### 4. A/B (b2c14cd, 4 arms x 16 episodes, chunks of 2, 4 blocks per instance, the order reversed on odd blocks and on instance 1, seeds 2300000.. / 2310000..; manifest `C:\ssbot\sandbox\1v1sp8dab_manifest.txt`; `sp8d\ab\ab_stats.txt`)
+
+| A/B (16 per arm) | rnjb (default) | sp8lh (+ LOWHOP) | sp8c (+ EVADE_CHASE) | sp8all (LOWHOP + EVADE_CHASE + JB_SLAM_DASH + JB_CORNER) |
+|---|---|---|---|---|
+| kills / HP-hitless | 16 / **16** | 16 / **16** | 16 / **16** | 16 / **16** |
+| kill p10 / 50 / 90 (s) | 19.9 / 21.6 / 23.4 | 18.1 / **19.5** / 23.6 | 16.6 / 17.6 / 18.1 | 16.6 / **17.3** / 18.5 |
+| - vs rnjb, 90 % | | -2.04 (-3.13 .. -0.85) | -3.96 (-4.66 .. -3.09) | -4.29 (-4.99 .. -3.45) |
+| landed hits / s (sg4_budget) | 1.027 | **1.126** | 1.274 | **1.305** |
+| - vs rnjb, 90 % | | +0.100 (+0.034 .. +0.165) | +0.249 (+0.201 .. +0.287) | +0.279 (+0.232 .. +0.319) |
+| close casts / safe | 25 / 25 | 26 / 26 | 41 / 41 | 41 / 41 |
+| hits per close cast: antic / Cast 2's end / span | 2.88 / 3.64 / 4.04 | 2.81 / 3.92 / **4.85** | 2.63 / 3.56 / 4.10 | 2.41 / 3.63 / **4.54** |
+| bottom at ring 1's light p10 / 50 / 90 (u) | 4.07 / 4.83 / 5.18 | 3.42 / 3.52 / 3.84 | 4.52 / 4.83 / 5.25 | 3.48 / 3.60 / 4.75 |
+| Close at the slide's end | 8 % | 0 % | 98 % | 98 % |
+
+sp8all - sp8c: landed / s +0.030 (+0.002 .. +0.060), kill p50 -0.34 s (-0.77 .. +0.11). sp8all - sp8lh: +0.178
+(+0.121 .. +0.233), -2.2 s. `sp8d\ab` (`ab_stats.txt`, `ab_stats_extra.txt`, `cast_sp8d_report.txt`, `trial_sum.txt`,
+`evade_report.txt`, `cast_report.txt`; bootstrap: episodes resampled, 4,000 draws); `ab_analyze.sh`.
+
+### 5. Tools / code
+
+- `ssbot.tools.sp8d_cast` (collect / report: per cast d0, close, hits in the antic / cast / span, ground share, her
+  bottom at every lit bomb near her, HP lost, the script record; per arm the gate). Scripts `sp8d\scripts`:
+  `cast_extract.py`, `cast_facts.py`, `body_profile.py`, `hop_table.py` / `hop_model.py`, `air_slash.py` /
+  `slash_geom.py`, `baseline.py`, `gate.py`, `trial_sum.py`, `peek.py`, `trace_cast.py`, `ab_stats.py`,
+  `inst_state.py` / `fps.py` / `load_try.py` (instance checks); `ab_analyze.sh`, `replay_ident_sp8d.ps1`.
+- Tests `tests/test_sp8d.py` (18: off by default, the hop tables, the plan (hold 12, press a + 6 .. 8), the slash edge,
+  the bomb top, toy casts at 3.0 / 4.3 / 6.5 u both facings (never under a lit bomb, below its head, >= 4 presses 19
+  apart, landed), the hop from ring 1's appearance, a late light, no start with two / behind / far, HP loss, the critical
+  window, no air slash on Idle inside the window, the hop on after its death); slam_play / sp8 / sp8b / sp8c / cast_stab
+  pass (129).
+
+### 6. Switch-off identity
+
+`sp8d\replay_ident_sp8d.ps1`: 5c7cbd8 and b2c14cd with the switch unset are byte-identical to af09d4f's default on the
+three identity episodes (2,073 / 1,778 / 1,541 ticks); on (open loop): 0 errors, 192006 differs from tick 257, 084036
+from 285, the w13 two-Clapper episode identical (no start).
+
+### 7. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp8d)
+
+`sp8lh` = rnjb + `SSBOT_FORUM_RUNE_LOWHOP=1`; `sp8all` = sp8lh + `SSBOT_FORUM_EVADE_CHASE=1` + `SSBOT_FORUM_JB_SLAM_DASH=1`
++ `SSBOT_FORUM_JB_CORNER=1`.
+
+Promotion (b4783b9): RUNE_LOWHOP unset follows SSBOT_FORUM_V2 (`=0` off); `rnsp8d0` = the default with it `=0` (the
+SP8c default); rn0 / fcs00 / rnplay0 / rnsp40 / rnsp50 / rnsp60 / sp8cw / rnsp8a0 carry `SSBOT_FORUM_RUNE_LOWHOP=0` so
+they keep their meaning; rnjb (and every v2 arm without `=0`) is the low-hop default from b4783b9 on. Identity: b4783b9
+with `=0` is byte-identical to af09d4f on the three identity episodes; unset (the new default, open loop) 0 errors,
+192006 differs from tick 257, 084036 from 285, the w13 episode identical. Full suite at b4783b9: 1,887 passed, 8 failed
+(the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test; and
+the untracked brain/tests/test_sg8_review.py x3: it calls ForumPlanner._escape_pick(rest=...), which this branch does
+not have).
+
+### 8. Machine state
+
+- At 00:11 the display went off (Kernel-Power 566, idle timeout, after SP8c's last block); from then on both training
+  instances ran at 3.7 frames per second: same-scene savestate loads took 3.6 s instead of 0.5 s and the wave never
+  started within the harness's timeouts (t1's first launch: 10 episodes, all HARNESS_FAIL "did not start wave 7"). I
+  first took it for a DebugMod load problem and added a harness preload (3498a79, SSBOT_RESET_PRELOAD), then found the
+  frame rate and reverted it (5c9e2f9). While checking, instance 0 went once to the title and back into the sandbox slot
+  (pause menu, Quit, Yes) and loaded fo_R2 / fo_cl_w13w / fo_cl_w7w a few times; no game process was touched. A
+  1-pixel mouse move (and back; no click, no key) woke the display and both instances ran at 60 fps again.
+- `C:\ssbot\sandbox\sp8d_go.ps1` (a copy of sp8c_go.ps1) now wakes the display first; sp4_block's ES_DISPLAY_REQUIRED
+  keeps it on during a block but does not turn an off display back on. Anyone running live blocks at night should wake
+  it the same way (check the fps: `sp8d\scripts\fps.py <inst>`).
+- Instances 0 and 1 are running (started 2026-10-16 20:36), frozen at time scale 1e-4 after every block by sp4_block;
+  DEMO_SOON restored after each block; boost_workers ran for the blocks (`boost_workers.stop` present again).
+- Frozen checkouts `C:\ssbot\live_1v1_{5c7cbd8,3498a79,b2c14cd,b4783b9}` (3498a79: the reverted harness change; unused
+  for results). Manifests `1v1sp8dt1_manifest.txt` (+ `.failed_5c7cbd8` / `.failed_3498a79`: the frame-rate failures),
+  `1v1sp8dt2_manifest.txt`, `1v1sp8dt2b_manifest.txt`, `1v1sp8dab_manifest.txt`. Untracked brain/tests/test_sg8_review.py
+  and knowledge/.../aim_zones_*.json left untouched.
+
+### Next
+
+1. The person decides on EVADE_CHASE (SP8c) and JB_SLAM_DASH + JB_CORNER (SP8b): with the low hop the combined arm
+   is the fastest and lost no HP before a kill in 16 episodes (the reason they were not promoted - small-rune bombs in
+   close casts - did not appear). To promote: make them follow SSBOT_FORUM_V2 like the SP8a switches.
+2. Two Clappers: the low hop does not start (one live Clapper only). The person's R2 (human_two) is the same rule for the
+   final wave; SP9 could enable it there once the other Clapper's slam / position is handled.
+3. The descent's air slash (P + 24) misses about half the time (its evade starts then); it could wait for the landing or
+   hand over to the evade chase.
+4. A slam that starts during the hop's window gets the playbook only after the window (~C + 38, from the air); no HP
+   lost from it in these runs, not measured on its own.
