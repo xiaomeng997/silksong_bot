@@ -724,16 +724,20 @@ class ForumPlannerPolicy(PlannerPolicy):
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         esc_on = self.two is not None and (two_play.ESC or two_play.ASW)
-        if esc_on:
+        pre_obs = esc_on or (self.two is not None and two_play.JUMPHIT)
+        if pre_obs:
             # SP9b / SP9c: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall) or
-            # antic switch
+            # antic switch; SP10c: TWO_JUMPHIT's run
             self.two.observe(f, s, ws.stamp.t_game_s)
             if isinstance(self.tac, GauntletTactics):
-                self.tac.two_esc = self.two.esc_view()
+                if esc_on:
+                    self.tac.two_esc = self.two.esc_view()
+                if two_play.JUMPHIT:
+                    self.tac.two_jh = self.two.jh_view()
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
             # SP9a: the per-tick bookkeeping (Idle entries, jump take-offs, rune circles) and TWO_SPACE's stance
-            if not esc_on:
+            if not pre_obs:
                 self.two.observe(f, s, ws.stamp.t_game_s)
             prefs = self.two.space(prefs, s, ws.stamp.t_game_s, getattr(prefs, "target", None))
         self._mode_last = prefs.mode
@@ -860,7 +864,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             ch = self.evade_chase.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c,
-                                       focus=getattr(prefs, "target", None))
+                                       focus=getattr(prefs, "target", None),
+                                       block=(self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT)
+                                              else None))
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None
@@ -873,7 +879,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             if self._wake_f is None and tap is not None and getattr(tap, "wake_frame", None) is not None:
                 self._wake_f = int(tap.wake_frame)
             latch_t = None
-            if two_play.ASW:
+            if two_play.ASW or two_play.JUMPHIT:
                 def latch_t(m: int, _h=hold, _p=prefix) -> int:
                     lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
                     return int(lat[-1])

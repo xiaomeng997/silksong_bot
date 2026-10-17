@@ -298,9 +298,15 @@ class EvadeChase:
             return min(ev, key=lambda e: abs(float(e["pos"][0]) - hx)) if ev else None
         return _sp.clapper(s)
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, latch=None, focus=None) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, latch=None, focus=None,
+             block: str | None = None) -> int | None:
         """The mask for frame f + 2 while the chase runs, else None. latch: m -> the key mask the oracle's hold filter
-        latches at f + 2 when m is sent for it (None: m itself); focus: L2's target (two Clappers)."""
+        latches at f + 2 when m is sent for it (None: m itself); focus: L2's target (two Clappers); block: why no chase
+        may run now (SP10c TWO_JUMPHIT: the other one's landing), None: no block."""
+        if block is not None:
+            if self.run is not None:
+                self._close("abort", block)
+            return None
         e = self._pick(s, focus) if self.two else _sp.clapper(s)
         st, tin = _sp.control(e)
         h = s.get("hero") or {}

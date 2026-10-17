@@ -319,6 +319,8 @@ class GauntletTactics:
         self._two_idle: dict[int, float] = {}             # SP7: Clapper iid -> game time it went idle after an attack
         self._sp9_fam: dict = {}                          # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self.two_esc: dict | None = None                  # SP9b: the policy's escape run view (two_play.esc_view)
+        self.two_jh: dict | None = None                   # SP10c: the policy's TWO_JUMPHIT run view (two_play.jh_view)
+        self._jh_last: dict | None = None                 # SP10c: the view on the last tick
 
     @property
     def xs(self):
@@ -333,6 +335,7 @@ class GauntletTactics:
         self.jb_land = {}
         self._two_fam, self._two_idle = {}, {}
         self._sp9_fam = {}                                # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
+        self.two_jh, self._jh_last = None, None
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
@@ -851,6 +854,19 @@ class GauntletTactics:
             g = self._esc_hold(ws, cands, esc, keep, room, t, st)
             if g is not None:
                 return g
+        jh = self.two_jh if two_play.JUMPHIT else None
+        if jh is not None:
+            # SSBOT_FORUM_TWO_JUMPHIT (SP10c, the lead's NOTE 4 / 5, the person: "the moment one starts its jump antic
+            # she can already go and hit the other one"): from the first STATE of J's jump move the other one (I, locked
+            # by the buddy rule: a hit only cancels it back to Idle) is the target, above the room / hysteresis rule,
+            # until J's landing + its tail (two_play: out of the landing before it lands)
+            c = next((c for c in cands if c.s.iid == jh.get("hold")), None)
+            if c is not None:
+                if keep is None or keep.s.iid != c.s.iid:
+                    st["jumphit"] = st.get("jumphit", 0) + 1
+                    self._sw_why = "two jumphit" if keep is not None else self._sw_why
+                st["picks"] = st.get("picks", 0) + 1
+                return self._goal(ws, c, RUSH, t, 1.0, why=f"two: jumphit {jh.get('phase')}; room {room[c.s.iid]:.1f}")
         if TWO_JUMPER:
             # SSBOT_FORUM_TWO_JUMPER (t1: an other one's jump cast landed 5.27 u in front of her, its rune circle over
             # the focus's front, the focus slammed: 8 of 41 slams not struck, 6 rune hits): a Clapper in a jump move or
@@ -1012,6 +1028,13 @@ class GauntletTactics:
         if (esc is not None and status == "ok" and self.goal is not None and esc.get("hold") is not None
                 and esc["hold"] != self.goal.target):
             status = "event"                              # SP9b: the escape run holds another target: pick now
+        jh = self.two_jh if two_play.JUMPHIT else None
+        if jh is not None and status == "ok" and self.goal is not None and jh.get("hold") != self.goal.target:
+            status = "event"                              # SP10c: TWO_JUMPHIT holds the other one: pick now
+        if two_play.JUMPHIT and status == "ok" and self.goal is not None and self._jh_last is not None and jh is None:
+            status = "event"                              # SP10c: the run ended: the normal rule picks now
+        if two_play.JUMPHIT:
+            self._jh_last = jh
         if "whip" in self.ta:
             whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
                               if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)
@@ -1157,6 +1180,11 @@ class GauntletTactics:
             # SP9b arm A (t2): in the corner after the landing no dash toward / through the focus first (a dash into
             # its back in Slam Recover, its turned Idle body)
             out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({esc["iid"]}))
+        if jh is not None and jh.get("no_hit"):
+            # SP10c: TWO_JUMPHIT's leave - no hit counts on I (nor J) while she walks / stands out of J's landing
+            out = replace(out, no_hit=frozenset(out.no_hit) | frozenset(jh["no_hit"]))
+        if jh is not None and jh.get("exit") is not None and jh.get("phase") in ("leave", "hold"):
+            out = replace(out, stance_x=float(jh["exit"]))
         if esc is not None and esc.get("no_hit"):
             # SP9b: no hit counts on these now (arm A: the focus idle with her in the corner; arm B: the other one
             # while the focus's flag is on)

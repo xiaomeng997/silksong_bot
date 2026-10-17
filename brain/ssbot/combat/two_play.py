@@ -134,7 +134,10 @@ ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
 ESC = ESC_CORNER or ESC_SWITCH
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
 ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
-ANY = IDLEHIT or SPACE or OPEN or ESC or ASW   # the policy's TwoPlay object (CHASE / CAST live in their own scripts)
+# SP10c (the lead's NOTE 4 / 5 of 2026-10-17, the person: "the moment one starts its jump antic she can already go and
+# hit the other one" - part of the target-switch controller; forum.md 81): default off (=1 on)
+JUMPHIT = _on("SSBOT_FORUM_TWO_JUMPHIT")
+ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT   # the policy's TwoPlay object (CHASE / CAST: own scripts)
 
 CLAPPER = _sp.CLAPPER
 M_L, M_R, M_A = _sp.M_L, _sp.M_R, _sp.M_A
@@ -399,6 +402,70 @@ class EscRun:
     end: str = ""
 
 
+# ---- SP10c: TWO_JUMPHIT - one Clapper jumps (J), she hits the other one (I) ----
+@dataclass
+class JhCfg:
+    k_land_j: int = 85        # STATE frames from J's Jump Antic entry to its landing (Slam 2): flight from +29 / 30,
+    #                           55 frames (SP10b A/B, 149 jumps); after its Jump Aim: the first flight frame + 55
+    k_land_c: int = 110       # the jump cast: Cast Slam Antic (+ 2) -> flight from +54-56, 55 frames
+    flight_f: int = 55
+    back_u: float = 1.8       # the landing's danger behind it: its Slam 2 body back edge 1.27 + her half width + margin
+    front_u: float = 8.5      # in front: Slam Collider 2 to 7.76 u + her half width + margin (SP9b t3: 8.3 left her
+    #                           7.63 u from the real landing once)
+    circle_u: float = 14.3    # the jump cast's rune circle: landing + 6.48 u, r 7.19 (13.67) + half width + margin
+    circle_back_u: float = 1.4  # ... its back edge 0.71 u behind the landing + half width + margin
+    margin_f: int = 10        # the leave starts this many frames before the walk / run out would just make it
+    slash_f: int = 14         # a press now ties her up this long (the slash; the hit's recoil a little less)
+    dash_u: float = 2.8       # the dash (6 frames, 28 u/s) ...
+    dash_f: int = 6
+    run_u_s: float = 15.0     # ... then the sprint (u/s; 17.5 at full speed)
+    walk_dash_u: float = 2.5  # walk out when the exit is nearer than this
+    stop_u: float = 0.35      # the leave walk stops this near the exit (the sprint: + its skid)
+    hold_f: int = 8           # at the exit until J's landing + this (the hammer: Slam 2 5-6 frames)
+    hold_c_f: int = 90        # the jump cast: until its landing + this (the circle lights 63-86 frames after)
+    chase_f: int = 30         # a chase start needs this many frames before the leave
+
+
+@dataclass
+class JhRun:
+    J: object                  # the jumper
+    I: object                  # the other one (the target)
+    kind: str                  # "jump" / "cast"
+    f_a: int                   # J's antic entry (the STATE frame - its state time)
+    x0: float
+    face: int
+    d_hj0: float               # her distances at the start (u, centre to centre)
+    d_hi0: float
+    between: bool
+    hp0: int
+    phase: str = "hit"         # hit -> leave -> hold -> tail (after J's landing) -> closed
+    aim_hx: float | None = None
+    f_aim: int | None = None
+    land: float | None = None  # J's landing x (from her x at the aim; before it: predicted from her x now)
+    f_land_pred: int = 0
+    f_land: int | None = None
+    side: str | None = None    # the exit: "front" (away from J) / "back" (behind J's landing, under it) / "none"
+    exit_x: float | None = None
+    f_leave: int | None = None  # the deadline (planned) and the frame the leave began
+    k_leave: int | None = None
+    k_out: int | None = None   # frames (- f_a) when she was first outside the zone after the leave began
+    inside: bool = False       # she is inside the landing zone now
+    ldir: int = 0              # the leave's direction (+1 right)
+    u_land: float | None = None  # her x from the landing along J's facing at J's landing (+ = in front)
+    dash_f: int | None = None
+    hits_i: list = field(default_factory=list)   # frames (- f_a) of landed hits on I / on J
+    hits_j: list = field(default_factory=list)
+    hp: list = field(default_factory=list)       # (frame - f_a, source)
+    walk: int = 0
+    f_end: int | None = None
+    end: str = ""
+
+
+def _jh_cfg() -> JhCfg:
+    """SSBOT_FORUM_TWO_JH_SET="front_u=8.7,margin_f=12": trial overrides of the JhCfg numbers."""
+    return _set_cfg(JhCfg(), "SSBOT_FORUM_TWO_JH_SET")
+
+
 def clapper_by(s: dict, iid) -> dict | None:
     return next((e for e in _sp.clappers(s) if e.get("iid") == iid), None)
 
@@ -434,10 +501,11 @@ def slash_meets(xw: float, look: int, span: tuple[float, float], spare: float = 
     return lo < span[1] - spare and hi > span[0] + spare
 
 
-def other_danger(s: dict, f_iid, x: float, runes: list | None = None) -> str | None:
+def other_danger(s: dict, f_iid, x: float, runes: list | None = None, jump_ok=None) -> str | None:
     """Why the Clapper(s) other than f_iid can reach her x now (SP7's _two_danger with her x as the point): a jump move,
     its hammer / lunge within 12.5 u (Slam Antic .. Slam 2: the hammer reaches 12 u in front, from its centre), the small
-    runes within 9 u, its recovering body within 4.5 u; a rune circle (lit or to come) over x."""
+    runes within 9 u, its recovering body within 4.5 u; a rune circle (lit or to come) over x. jump_ok: the iid whose
+    jump move does not count (SP10c TWO_JUMPHIT: its landing guard decides)."""
     for o in _sp.clappers(s):
         if o.get("iid") == f_iid:
             continue
@@ -446,6 +514,8 @@ def other_danger(s: dict, f_iid, x: float, runes: list | None = None) -> str | N
         d = abs(cx - x)
         front = (x - cx) * face_of(o) > -1.5
         if st in JUMP_ST:
+            if jump_ok is not None and o.get("iid") == jump_ok:
+                continue
             return f"other {st}"
         if st in SLAM_ST and d < _sp.TWO_SLAM_U and front:
             return f"other {st}"
@@ -506,6 +576,13 @@ class TwoPlay:
         self._asw_dash: dict | None = None    # the dash held into the sprint: {"f0", "dir", "rel", "ctl"}
         self._n_att: Counter = Counter()      # iid -> its attack antics seen (slam / cast / jump / jump cast)
         self._asw_prev = 0                    # its last mask
+        # SP10c: TWO_JUMPHIT's run (one Clapper's jump move) and the finished ones
+        self.jcfg = _jh_cfg() if JUMPHIT else JhCfg()
+        self.jh: JhRun | None = None
+        self.jh_done: list[JhRun] = []
+        self.jh_n: Counter = Counter()
+        self._jh_prev: dict = {}              # iid -> its Control state on the last tick
+        self._jh_dash: dict | None = None     # the leave's dash held into the sprint
 
     # ---- helpers ----
 
@@ -558,6 +635,8 @@ class TwoPlay:
             self._esc_observe(f, s, t, hx, antics)
         if ASW:
             self._asw_observe(f, s, t, hx, asw_antics)
+        if JUMPHIT:
+            self._jh_observe(f, s, hx)
         # the IdleHit run's bookkeeping on every tick (another script may hold the keys when its hit shows): the landed
         # hit on its Clapper (the STATE that shows it: its state turns over in the same frame), the run's end
         r = self.idle
@@ -595,6 +674,11 @@ class TwoPlay:
             if em is not None:
                 self.last_part = "esc"
                 return em
+        if JUMPHIT and self.jh is not None:
+            jm = self._jh_step(f, s, ground, accepting)
+            if jm is not None:
+                self.last_part = "jh"
+                return jm
         m = None
         if OPEN and two_enc:
             m = self._open_step(f, s, ground, accepting, t, wake_f)
@@ -669,12 +753,17 @@ class TwoPlay:
         look = 1 if cx > hx else -1
         toward = M_R if look > 0 else M_L
         why = None
+        jh = self.jh if (JUMPHIT and self.jh is not None and self.jh.I == iid) else None
         if not accepting:
             why = "no input"
         elif not ground:
             why = "air"
+        elif jh is not None and jh.phase != "hit":
+            why = "jh leave"                         # SP10c: she leaves J's landing now
+        elif jh is not None and jh.f_leave is not None and f + SEND_AHEAD + self.jcfg.slash_f > jh.f_leave:
+            why = "jh deadline"                      # SP10c: a press now would still tie her up at the leave
         else:
-            why = other_danger(s, iid, hx, self._rune_threats(f, s))
+            why = other_danger(s, iid, hx, self._rune_threats(f, s), jump_ok=jh.J if jh is not None else None)
         if why is not None:
             r.why = r.why or why
             return None
@@ -1157,6 +1246,261 @@ class TwoPlay:
                             "rune": r.rune, "walk": r.walk, "f_end": r.f_end, "end": r.end} for r in runs]
         return out
 
+    # ---- SP10c: TWO_JUMPHIT (one Clapper jumps: hit the other one, out of the landing before it lands) ----
+
+    def _jh_observe(self, f: int, s: dict, hx: float | None) -> None:
+        """Every tick: the run's bookkeeping, or a new run on the first STATE of a Clapper's Jump Antic / Cast Slam
+        Antic with both live (not the focus's escape jump at its wall: SP9b's)."""
+        cs = _sp.clappers(s)
+        if self.jh is not None:
+            self._jh_update(f, s, hx, cs)
+        prev = self._jh_prev
+        now = {e.get("iid"): _sp.control(e)[0] for e in cs}
+        self._jh_prev = now
+        if (self.jh is not None and self.jh.phase != "tail") or len(cs) != 2 or hx is None:
+            return
+        for e in cs:
+            st, tin = _sp.control(e)
+            if st not in ESC_ANTIC or prev.get(e.get("iid")) in ESC_PRE:
+                continue
+            if self.jh is not None:
+                if e.get("iid") == self.jh.J:
+                    continue
+                self._jh_close(f, "next")                # J's tail: the other one's jump starts a new run
+            o = next(x for x in cs if x.get("iid") != e.get("iid"))
+            self.jh_n["antics"] += 1
+            cx, ox = float(e["pos"][0]), float(o["pos"][0])
+            d, do = abs(hx - cx), abs(hx - ox)
+            c = self.ecfg
+            if back_room(e) <= c.back_u and d <= c.d_u and d <= do:
+                self.jh_n["no_escape"] += 1              # SP9b's (the switch / the corner)
+                continue
+            if _sp.control(o)[0] in JUMP_ST:
+                self.jh_n["no_other_jumping"] += 1
+                continue
+            if (ESC and self.esc is not None) or (ASW and self.asw is not None and self.asw.lock_end is None):
+                self.jh_n["no_run"] += 1
+                continue
+            hp = int((s.get("hero") or {}).get("health") or 0)
+            self.jh = JhRun(J=e.get("iid"), I=o.get("iid"), kind="jump" if st == "Jump Antic" else "cast",
+                            f_a=f - int(round(tin * 60.0)), x0=round(cx, 3), face=face_of(e), d_hj0=round(d, 2),
+                            d_hi0=round(do, 2), between=min(cx, ox) < hx < max(cx, ox), hp0=hp)
+            self.jh_n["runs"] += 1
+            self.jh_n[f"runs_{self.jh.kind}"] += 1
+            self._jh_update(f, s, hx, cs)
+            break
+
+    @staticmethod
+    def _landing(x0: float, aim_x: float, face: int) -> float:
+        """gauntlet.jump_landing (forum.md 10.1): its x + 0.92 clamp(her x - 5 u on its side - its x, +-12)."""
+        return x0 + 0.92 * max(-12.0, min(12.0, aim_x - face * 5.0 - x0))
+
+    def _jh_zone(self, r: JhRun, land: float) -> tuple[float, float]:
+        c = self.jcfg
+        front = c.front_u if r.kind == "jump" else c.circle_u
+        a, b = land - r.face * c.back_u, land + r.face * front
+        return min(a, b), max(a, b)
+
+    def _jh_frames(self, dist: float, dash: bool) -> float:
+        """Frames to cover dist (u): the walk, or one dash held into the ground sprint (cast_stab.sprint_travel)."""
+        c = self.jcfg
+        if not dash or dist < c.walk_dash_u:
+            return max(0.0, dist) / WALK_U
+        jmax = _cs.DASH_F + self.acfg.grace_f + 1
+        for j in range(1, jmax + 1):
+            if _cs.sprint_travel(j) >= dist:
+                return float(j) + 4.0                    # + the stop (control back after the sprint's release)
+        return jmax + 4.0 + (dist - _cs.sprint_travel(jmax)) / WALK_U
+
+    def _jh_exit(self, r: JhRun, s: dict, hx: float, land: float, J: dict, I: dict, dash: bool):
+        """The way out of the landing zone: (side, x, frames) - the front (away from J; not through I's body or a wall)
+        or the back (behind its landing, under J in the air; not through J's body while it is still on the ground)."""
+        c = self.jcfg
+        lo, hi = self._jh_zone(r, land)
+        out = []
+        for side, x in (("front", (hi + 0.15) if r.face > 0 else (lo - 0.15)),
+                        ("back", (lo - 0.15) if r.face > 0 else (hi + 0.15))):
+            if not WALL_L + 0.6 <= x <= WALL_R - 0.6:
+                continue
+            a, b = min(hx, x), max(hx, x)
+            ia, ib = body_span(I)
+            if ia - HALF_W - 0.15 < b and ib + HALF_W + 0.15 > a:
+                continue                                 # through I's body
+            if side == "back" and _sp.control(J)[0] in ESC_PRE:
+                ja, jb = body_span(J)
+                if ja - HALF_W - 0.15 < b and jb + HALF_W + 0.15 > a:
+                    continue                             # through J's body on the ground (its antic)
+            out.append((side, x, self._jh_frames(abs(x - hx), dash)))
+        if not out:
+            return None
+        return min(out, key=lambda o: o[2])
+
+    def _jh_update(self, f: int, s: dict, hx: float | None, cs: list) -> None:
+        c = self.jcfg
+        r = self.jh
+        J, I = clapper_by(s, r.J), clapper_by(s, r.I)
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("dealt") is None
+                                                                       or float(d.get("dealt")) > 0):
+                who = d.get("ent") or d.get("iid")
+                if who == r.I:
+                    r.hits_i.append(f - r.f_a)
+                elif who == r.J:
+                    r.hits_j.append(f - r.f_a)
+            elif ev.get("k") == "hp" and (d.get("delta") or 0) < 0:
+                r.hp.append((f - r.f_a, str(d.get("source"))[:40]))
+        if J is None or I is None or hx is None:
+            self._jh_close(f, "gone")
+            return
+        st = _sp.control(J)[0]
+        if r.aim_hx is None and st in FLIGHT_ST:
+            # Jump Aim is instant (never a tick's state): her x on its first flight STATE (one frame after the aim)
+            vx = float(((s.get("hero") or {}).get("vel") or [0.0, 0.0])[0])
+            r.aim_hx = round(hx - vx / 60.0, 3)
+            r.f_aim = f
+            r.land = round(self._landing(r.x0, r.aim_hx, r.face), 3)
+        if st in LAND_ST and r.f_land is None:
+            r.f_land = f
+            r.u_land = round((hx - float(J["pos"][0])) * r.face, 2)
+            if r.phase == "hit":
+                r.phase = "tail"
+        if st not in ESC_PRE + FLIGHT_ST + LAND_ST:
+            self._jh_close(f, "done")
+            return
+        if r.phase == "tail" or (r.f_land is not None and r.phase == "hold" and f - r.f_land > (
+                c.hold_f if r.kind == "jump" else c.hold_c_f)):
+            r.phase = "tail"
+            r.inside = False
+            return
+        land = r.land if r.land is not None else self._landing(r.x0, hx, r.face)
+        lo, hi = self._jh_zone(r, land)
+        r.inside = lo < hx < hi
+        if r.inside and r.k_leave is not None:
+            r.k_out = None
+        elif not r.inside and r.k_leave is not None and r.k_out is None:
+            r.k_out = f - r.f_a
+        if r.phase != "hit":
+            if r.phase == "leave" and r.f_aim is not None and r.side is not None and r.exit_x is not None:
+                # the exit from the aim's landing (the leave may have begun from the predicted one)
+                if r.side == "front":
+                    r.exit_x = round((hi + 0.15) if r.face > 0 else (lo - 0.15), 3)
+                else:
+                    r.exit_x = round((lo - 0.15) if r.face > 0 else (hi + 0.15), 3)
+            return
+        f_land = (r.f_aim + c.flight_f) if r.f_aim is not None else (r.f_a + (c.k_land_j if r.kind == "jump"
+                                                                               else c.k_land_c))
+        r.f_land_pred = f_land
+        if not r.inside:
+            r.f_leave = None
+            return
+        can = (s.get("hero") or {}).get("can") or {}
+        ex = self._jh_exit(r, s, hx, land, J, I, bool(can.get("dash", True)))
+        if ex is None:
+            r.f_leave = None
+            r.side = "none"
+            return
+        side, x, n = ex
+        r.f_leave = int(f_land - n - c.margin_f)
+        if r.f_aim is not None and f + SEND_AHEAD >= r.f_leave:
+            # (before the aim the landing follows her x: no leave then)
+            r.phase, r.side, r.exit_x, r.k_leave = "leave", side, round(x, 3), f - r.f_a
+            r.ldir = 1 if x > hx else -1
+            self.jh_n[f"leave_{side}"] += 1
+
+    def _jh_close(self, f: int, why: str) -> None:
+        r = self.jh
+        if r is not None:
+            r.f_end, r.end = f, why
+            self.jh_done.append(r)
+            self.jh_n[f"end_{why}"] += 1
+        self.jh = None
+        self._jh_dash = None
+
+    def _jh_step(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
+        """The leave: one dash held into the ground sprint toward the exit when it is farther than walk_dash_u (released
+        by her x and speed, then no key until control returns), the walk the rest, then no key at the exit until J's
+        landing + hold_f (the jump cast: its circle); None in the other phases (IdleHit / the planner at I)."""
+        r = self.jh
+        c = self.jcfg
+        if r.phase == "leave" and r.f_land is not None:
+            r.phase = "hold"
+        if r.phase not in ("leave", "hold") or r.exit_x is None:
+            return None
+        h = s.get("hero") or {}
+        tm = h.get("tm") or {}
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        hx = _sp.hero_x(s)
+        dm = getattr(self, "_jh_dash", None)
+        if dm is not None:
+            j = f + SEND_AHEAD - dm["f0"]
+            sg = 1 if dm["dir"] == M_R else -1
+            if dm.get("rel") is None:
+                v = abs(float((h.get("vel") or [0.0, 0.0])[0]))
+                remain = (r.exit_x - hx) * sg
+                if j > _cs.DASH_F and (remain - self.acfg.release_lag * v / 60.0 <= 0.3
+                                       or j > _cs.DASH_F + self.acfg.grace_f):
+                    dm["rel"] = j
+                    return 0
+                return dm["dir"] | M_DASH
+            if ground and accepting and clip != "Dash" and not clip.startswith(_cs.STOP_WAIT_CLIPS):
+                self._jh_dash = None
+            elif j > dm["rel"] + 40:
+                self._jh_dash = None
+            else:
+                return 0
+        if not accepting:
+            return None
+        dist = abs(r.exit_x - hx)
+        toward = M_R if r.exit_x > hx else M_L
+        if dist <= c.stop_u or (hx - r.exit_x) * r.ldir >= 0:
+            return 0                                     # at (or past) the exit: stand
+        if (ground and dist >= c.walk_dash_u and r.dash_f is None and float(tm.get("dash_cd") or 0.0) <= 0.02
+                and not any(x in clip for x in NO_ATK_CLIPS) and self._facing(s, 1 if toward == M_R else -1)):
+            self._jh_dash = {"f0": f + SEND_AHEAD, "dir": toward, "rel": None}
+            r.dash_f = f - r.f_a
+            self.jh_n["dash"] += 1
+            return toward | M_DASH
+        r.walk += 1
+        return toward
+
+    def jh_view(self) -> dict | None:
+        """TWO_JUMPHIT's run for L2 (gauntlet): {"J", "I", "phase", "kind", "exit", "side", "hold" (L2's target),
+        "no_hit"}; None without a run (or after a back exit's landing: she is at J, the normal rule)."""
+        r = self.jh
+        if r is None:
+            return None
+        if r.phase == "tail" and r.side == "back":
+            return None
+        v = {"J": r.J, "I": r.I, "phase": r.phase, "kind": r.kind, "exit": r.exit_x, "side": r.side, "hold": r.I,
+             "no_hit": frozenset()}
+        if r.phase in ("leave", "hold"):
+            v["no_hit"] = frozenset({r.I, r.J})
+        return v
+
+    def jh_block(self, f: int) -> str | None:
+        """Why a chase (evade_chase) on I may not run now (SP10c): the leave, or too near its deadline."""
+        r = self.jh
+        if r is None or r.phase == "tail":
+            return None
+        if r.phase != "hit":
+            return "jh leave"
+        if r.f_leave is not None and f + self.jcfg.chase_f > r.f_leave:
+            return "jh deadline"
+        return None
+
+    def jh_stats(self) -> dict:
+        runs = self.jh_done + ([self.jh] if self.jh is not None else [])
+        out = dict(self.jh_n)
+        out["jh_runs"] = [{"f_a": r.f_a, "J": r.J, "I": r.I, "kind": r.kind, "d_hj0": r.d_hj0, "d_hi0": r.d_hi0,
+                           "between": r.between, "aim": None if r.f_aim is None else r.f_aim - r.f_a,
+                           "aim_hx": r.aim_hx, "land": r.land, "f_land": None if r.f_land is None else r.f_land - r.f_a,
+                           "f_land_pred": r.f_land_pred - r.f_a if r.f_land_pred else None, "side": r.side,
+                           "exit": r.exit_x, "k_leave": r.k_leave, "k_out": r.k_out, "u_land": r.u_land,
+                           "dash": r.dash_f, "walk": r.walk, "hits_i": r.hits_i, "hits_j": r.hits_j, "hp": r.hp,
+                           "f_end": None if r.f_end is None else r.f_end - r.f_a, "end": r.end} for r in runs]
+        return out
+
     # ---- SP9c: the antic switch (TWO_ANTICSWITCH) ----
 
     def asw_skip(self) -> frozenset:
@@ -1579,6 +1923,11 @@ class TwoPlay:
             return prefs
         hx = _sp.hero_x(s)
         x = float(prefs.stance_x)
+        jh = self.jh if JUMPHIT else None
+        if jh is not None and jh.phase in ("leave", "hold") and jh.exit_x is not None:
+            # SP10c: out of J's landing zone (the leave script walks there; the planner's stance the same)
+            self.space_n["jh exit"] += 1
+            return replace(prefs, stance_x=float(jh.exit_x))
         spans = []                               # (lo, hi, why)
         slammer = next((e for e in cs if _sp.control(e)[0] == "Slam Antic"), None)
         sep = abs(float(cs[0]["pos"][0]) - float(cs[1]["pos"][0]))
@@ -1593,6 +1942,8 @@ class TwoPlay:
                 spans.append((cx - 2.5 - HALF_W, cx + 2.5 + HALF_W, "body 2.5u"))
             j = self.jumps.get(e.get("iid"))
             corner_own = ESC and self.esc is not None and self.esc.mode == "corner" and self.esc.iid == e.get("iid")
+            if jh is not None and jh.J == e.get("iid") and jh.phase == "hit" and jh.inside:
+                corner_own = True                # SP10c: at I until the leave (its deadline keeps her clear)
             if j is not None and not j.get("done") and j["aim_hx"] is not None and not corner_own:
                 # (SP9b arm A: the corner owns the focus's own escape jump - behind its landing)
                 # from its Jump Aim on (the landing follows her x until then)
@@ -1648,6 +1999,8 @@ class TwoPlay:
             res["esc"] = self.esc_stats()
         if ASW:
             res["asw"] = self.asw_stats()
+        if JUMPHIT:
+            res["jumphit"] = self.jh_stats()
         return res
 
 
