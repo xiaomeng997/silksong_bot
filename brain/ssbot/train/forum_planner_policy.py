@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import cast_stab, forum_v2, slam_play
+from ssbot.combat import cast_stab, evade_chase, forum_v2, slam_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -218,6 +218,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab); SP8: + the
         # RecoilStab (SSBOT_FORUM_JB_DASH_COMBO), or dash, stop, side slashes (SSBOT_FORUM_JB_DASH_STOP)
         self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
+        # SP8c (SSBOT_FORUM_EVADE_CHASE, default off): chase the Clapper's evade (combat.evade_chase)
+        self.evade_chase: evade_chase.EvadeChase | None = evade_chase.EvadeChase() if evade_chase.ENABLED else None
         self._play_tick: dict | None = None
 
     @staticmethod
@@ -424,6 +426,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.slam_play.reset()
         if self.cast_stab is not None:
             self.cast_stab.reset()
+        if self.evade_chase is not None:
+            self.evade_chase.reset()
         self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
@@ -773,6 +777,19 @@ class ForumPlannerPolicy(PlannerPolicy):
             if stab is not None:
                 mask = play = stab
                 self.counts["cast_stab"] += 1
+        if self.evade_chase is not None and play is None:
+            # SP8c: the chase of the Clapper's evade while its script runs (the supervisor's keys win)
+            def latch_c(m: int, _h=hold, _p=prefix) -> int:
+                lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
+                return int(lat[-1])
+            ch = self.evade_chase.step(f, s, ws.hero.contact.v == "GROUND",
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c)
+            if ch is not None and (r.mask is not None or self.pause_owned):
+                self.evade_chase.abort("supervisor")
+                ch = None
+            if ch is not None:
+                mask = play = ch
+                self.counts["evade_chase"] += 1
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
@@ -969,4 +986,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "real_quit": self.real_quit_stats(), "keys": keys,
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
-                **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {})}
+                **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
+                **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {})}
