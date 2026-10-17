@@ -47,20 +47,27 @@ def switch(monkeypatch):
     yield
 
 
-def test_switches_default_off(monkeypatch):
+def test_switches_default(monkeypatch):
     for k in ("SSBOT_FORUM_TWO_CORNER", "SSBOT_FORUM_TWO_WALLSWITCH"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
         m = importlib.reload(tp)
-        assert not (m.ESC or m.ESC_CORNER or m.ESC_SWITCH)                # not even with v2 (until their A/B)
+        assert not (m.ESC or m.ESC_CORNER or m.ESC_SWITCH)                # no v2: both off
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        m = importlib.reload(tp)
+        assert m.ESC and m.ESC_SWITCH and not m.ESC_CORNER                 # since the SP9b A/B: the switch with v2
         assert not importlib.reload(cs).TWO_CORNER
+        monkeypatch.setenv("SSBOT_FORUM_TWO_WALLSWITCH", "0")
+        m = importlib.reload(tp)
+        assert not (m.ESC or m.ESC_SWITCH)                                 # =0: off (arm rnsp9b0)
         two = m.TwoPlay()
         s = fstate(1000, "Jump Antic")
         two.observe(1000, s, 1000 / 60.0)
         assert two.esc is None and two.esc_view() is None and "esc" not in two.stats()
     finally:
         monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
+        monkeypatch.delenv("SSBOT_FORUM_TWO_WALLSWITCH", raising=False)
         importlib.reload(tp)
         importlib.reload(cs)
 

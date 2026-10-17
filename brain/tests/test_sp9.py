@@ -14,7 +14,7 @@ from ssbot.combat.tactics.modes import GoalPrefs
 from tests.test_slam_play import state
 
 SW = ("SSBOT_FORUM_TWO_CHASE", "SSBOT_FORUM_TWO_IDLEHIT", "SSBOT_FORUM_TWO_CAST", "SSBOT_FORUM_TWO_SPACE",
-      "SSBOT_FORUM_TWO_OPEN")
+      "SSBOT_FORUM_TWO_OPEN", "SSBOT_FORUM_TWO_WALLSWITCH")    # (SP9b's switch also follows v2 since its A/B)
 
 
 def two_state(f, st, tin, x_rel=4.0, cx=31.0, flip=False, ground=True, atk_cd=0.0, facing=None, b_st="Idle",

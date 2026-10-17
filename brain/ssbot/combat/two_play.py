@@ -55,7 +55,7 @@ from the antic to Slam 2: jump 1.21-1.43 s, jump cast 1.63-1.85 s), F's tail is 
                                d0, the air dash at jd: hop_over_table, worst-case clearance >= 0.6 u over its body); the
                                jump cast: behind it, no hit, until its rune circle burst (the circle reaches 0.6 u behind
                                its landing), then the normal play.
-  SSBOT_FORUM_TWO_WALLSWITCH   arm B (default off): at F's escape-jump antic L2's target is B (when B is not in a jump
+  SSBOT_FORUM_TWO_WALLSWITCH   arm B (since its A/B on with SSBOT_FORUM_V2, =0 off): at F's escape-jump antic L2's target is B (when B is not in a jump
                                move and no rune circle lies over it), held until B's next move or F's tail end + a margin;
                                no hit on B while F's flag is on (a hit then is cancelled: B re-enters Idle and its evade
                                coin fires 0.25 s later, faster than the slash cooldown), then the deciding hit on B in F's
@@ -92,9 +92,13 @@ IDLEHIT = _on("SSBOT_FORUM_TWO_IDLEHIT", _V2)
 CAST = _on("SSBOT_FORUM_TWO_CAST", _V2)
 SPACE = _on("SSBOT_FORUM_TWO_SPACE", _V2)
 OPEN = _on("SSBOT_FORUM_TWO_OPEN", _V2)
-# SP9b (forum.md 77): the escape jump at a wall, two arms; default off until the live A/B
+# SP9b (forum.md 77): the escape jump at a wall, two arms. A/B (555bf98, 2 rounds x 16 per arm, block design, the same
+# seeds; the person's rule "the faster becomes the default"): the switch (arm B) was the faster - landed / s 1.267 ->
+# 1.303, Clappers killed 36 -> 38, HP-loss hits / min 4.69 -> 3.99 vs the SP9a default (corner 1.284 / 35 / 4.38): since
+# then TWO_WALLSWITCH follows SSBOT_FORUM_V2 when unset (=0 off; arm rnsp9b0); TWO_CORNER stays default off (=1 on:
+# the corner takes F's escape jump before the switch)
 ESC_CORNER = _on("SSBOT_FORUM_TWO_CORNER")
-ESC_SWITCH = _on("SSBOT_FORUM_TWO_WALLSWITCH")
+ESC_SWITCH = _on("SSBOT_FORUM_TWO_WALLSWITCH", _V2)
 ESC = ESC_CORNER or ESC_SWITCH
 ANY = IDLEHIT or SPACE or OPEN or ESC   # the policy's TwoPlay object (CHASE / CAST live in their own scripts)
 
