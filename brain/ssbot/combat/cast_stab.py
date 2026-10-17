@@ -84,6 +84,25 @@ GRAV = 60.0                  # u/s^2 (kinematics: 60 x gravityScale 1; 1.2 u/s p
 AIM_K = 55                   # the Jump Aim, frames from the antic start
 SPRINT_V, SPRINT_DEC = 20.0, 1.1 * 50.0 / 60.0   # Ground Sprint: Sprint Speed Regular 20, AccelerateToX 1.1 / step
 RS_CLIP = "Wanderer RecoilStab"
+RUNE_R = 7.187               # the jump cast's rune circle (forum.md 70.7: a disc of this radius, lit 63-86 frames after
+#                              its landing); a start never dashes through one that is still there (SP8 t5 ep 2: a jump
+#                              cast 56 frames after the last one's landing, the stab into its circle, 2 HP)
+
+
+def rune_spans(s: dict) -> list[tuple[float, float]]:
+    """The x spans of the rune circles present in a STATE (damager objects with a collider of the circle's size, lit
+    or not yet)."""
+    out = []
+    for o in s.get("ents") or ():
+        if o.get("type_key") != "damager" or not o.get("pos"):
+            continue
+        for col in o.get("colliders") or ():
+            vs = col.get("verts_world") or ()
+            xs = vs[0::2]
+            if xs and abs((max(xs) - min(xs)) - 2 * RUNE_R) <= 0.6:
+                out.append((float(min(xs)), float(max(xs))))
+                break
+    return out
 STOP_WAIT_CLIPS = ("Sprint", "Skid", "Wanderer", "Land to Sprint")   # T2 waits these out (and "Dash" itself)
 
 
@@ -656,6 +675,11 @@ class CastStab:
         x0 = (_sp.hero_x(s) - cx) * face
         if x0 <= 0:
             return "behind"
+        hx = _sp.hero_x(s)
+        front = cx + face * BODY_FRONT
+        lo, hi = min(hx, front), max(hx, front)
+        if any(a < hi and b > lo for a, b in rune_spans(s)):
+            return "wait"                                # a rune circle over the way in: look again next tick
         # where she is on the dash's frame (SEND_AHEAD on: a run toward it before the start, SP8 t2 ep 0: 9.52 u at the
         # STATE, 9.19 at the dash)
         x0 += float((h.get("vel") or [0.0, 0.0])[0]) * face * SEND_AHEAD / 60.0

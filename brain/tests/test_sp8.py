@@ -317,3 +317,16 @@ def test_rs_only_from_far_enough():
     r = c.done[-1]
     assert not r.rs and r.why == "rs near" and r.rs_x == pytest.approx(6.0)
     assert all(out[k] == 0 for k in range(16, 15 + c.cfg.rs_block_g)) and out[15 + c.cfg.rs_block_g] is None
+
+
+def test_no_start_through_a_rune_circle():
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True)
+    s = hero(antic_state(1000, 2, 10.6))
+    hx = sp.hero_x(s)
+    rune = {"type_key": "damager", "pos": [hx + 3.0, 3.34], "colliders": [
+        {"name": "c", "enabled": False, "verts_world": [hx + 3.0 - cs.RUNE_R, 3.0, hx + 3.0 + cs.RUNE_R, 3.0,
+                                                         hx + 3.0, 10.5]}]}
+    s["ents"].append(rune)
+    assert c.step(1000, s, True, t_game=1000 / 60) is None and c.run is None
+    s2 = hero(antic_state(1001, 3, 10.6))                     # gone: the start goes
+    assert c.step(1001, s2, True, t_game=1001 / 60) is not None
