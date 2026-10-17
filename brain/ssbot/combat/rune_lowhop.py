@@ -278,8 +278,11 @@ class Hop:
 
 
 class RuneLowHop:
-    def __init__(self, cfg: HopCfg | None = None):
+    def __init__(self, cfg: HopCfg | None = None, two: bool = False):
         self.cfg = cfg or _num_env(HopCfg())
+        # SP9a S3 (SSBOT_FORUM_TWO_CAST, combat.two_play): with two live Clappers the caster in Spell Antic nearest to
+        # her in front; no start / hand back (outside the critical window) while the other one can reach her
+        self.two = two
         self.run: Hop | None = None
         self.done: list[Hop] = []
         self._seen: set = set()
@@ -375,7 +378,7 @@ class RuneLowHop:
         """The mask for frame f + 2 while the script runs, else None. t_game: the game clock (s; Stamp.t_game_s);
         latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m)."""
         t = f / 60.0 if t_game is None else float(t_game)
-        e = _sp.clapper(s)
+        e = self._pick(s) if self.two else _sp.clapper(s)
         st, tin = _sp.control(e)
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)
@@ -385,7 +388,7 @@ class RuneLowHop:
                 self._close("abort", "hurt")
                 return None
             gone = e is None or e.get("iid") != r.iid
-            two = not gone and len(_sp.clappers(s)) != 1
+            two = not gone and not self._n_ok(s)
             new = not gone and st == "Spell Antic" and abs((t - tin) - r.ta) * 60.0 > 30
             if (gone or two or new) and self.critical():
                 # t1 (5c7cbd8): an air slash killed it at P + 7, the run ended, the hold was cut at 8 frames and its
@@ -406,6 +409,12 @@ class RuneLowHop:
             if new:
                 self._close("done", "new cast")          # a new cast: its own run below
                 r = None
+            elif self.two and len(_sp.clappers(s)) == 2 and not self.critical():
+                from ssbot.combat import two_play as _tp
+                why = _tp.other_danger(s, r.iid, self._hx(s))
+                if why is not None:
+                    self._close("abort", "other")
+                    return None
         if r is None:
             if e is None or st != "Spell Antic":
                 return None
@@ -418,7 +427,7 @@ class RuneLowHop:
             face = 1 if e.get("flipX") else -1
             d0 = (_sp.hero_x(s) - float(e["pos"][0])) * face
             why = None
-            if len(_sp.clappers(s)) != 1:
+            if not self._n_ok(s):
                 why = "two"
             elif d0 <= 0:
                 why = "behind"
@@ -428,6 +437,10 @@ class RuneLowHop:
                 why = "dead"
             elif self._rune_over(f, s, float(e["pos"][0]), face):
                 why = "rune"
+            elif self.two and len(_sp.clappers(s)) == 2:
+                from ssbot.combat import two_play as _tp
+                if _tp.other_danger(s, e.get("iid"), self._hx(s)) is not None:
+                    why = "other"
             if why is not None:
                 self.why_not[why] = self.why_not.get(why, 0) + 1
                 return None
@@ -448,6 +461,24 @@ class RuneLowHop:
         r.sent.append((f, m))
         r.ticks += 1
         return m
+
+    def _n_ok(self, s: dict) -> bool:
+        n = len(_sp.clappers(s))
+        return n == 1 or (n == 2 and self.two)
+
+    def _pick(self, s: dict) -> dict | None:
+        """two=True: the run's Clapper; else (two live) the one in Spell Antic nearest to her with her in front; else
+        the first."""
+        cs = _sp.clappers(s)
+        if self.run is not None:
+            return next((e for e in cs if e.get("iid") == self.run.iid), None)
+        if len(cs) == 2:
+            hx = _sp.hero_x(s)
+            sp_ = [e for e in cs if _sp.control(e)[0] == "Spell Antic"
+                   and (hx - float(e["pos"][0])) * (1 if e.get("flipX") else -1) > 0]
+            if sp_:
+                return min(sp_, key=lambda e: abs(float(e["pos"][0]) - hx))
+        return _sp.clapper(s)
 
     def _rune_over(self, f: int, s: dict, cx: float, face: int) -> bool:
         a = cx + face * self.cfg.stand_lo

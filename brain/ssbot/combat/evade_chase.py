@@ -36,6 +36,10 @@ Not while a jump cast's rune circle is lit or still to come over her way to it (
 cast's circle, lit 42 frames after the evade's start, 2 HP): no start, or the run hands back ("rune").
 Abort (the planner decides again): HP lost, the Clapper gone or a second one alive, a rune circle over the way, the
 state no longer Evade Scuttle (the normal end: "end").
+Two Clappers (task 1v1 SP9a S1, SSBOT_FORUM_TWO_CHASE, combat.two_play; EvadeChase(two=True)): the focus's evade (the
+L2 target the policy passes, else the nearer one) is chased the same way, the slash never pressed when it would meet
+the other one's body (the switch answer 2a: B is free during F's slide and decides at once when hit, 19 / 19); one
+live Clapper chases only with one=True (SSBOT_FORUM_EVADE_CHASE).
 
     ec = EvadeChase()                                   # per episode: ec.reset()
     m = ec.step(f, s, ground, accepting, latch)         # the mask for frame f + 2, or None (the planner decides)
@@ -170,8 +174,9 @@ class Chase:
 
 
 class EvadeChase:
-    def __init__(self, cfg: ChaseCfg | None = None):
+    def __init__(self, cfg: ChaseCfg | None = None, one: bool = True, two: bool = False):
         self.cfg = cfg or _num_env(ChaseCfg())
+        self.one, self.two = one, two        # chase with one live Clapper / with two (SP9a TWO_CHASE)
         self.run: Chase | None = None
         self.done: list[Chase] = []
         self._seen: set = set()
@@ -224,7 +229,7 @@ class EvadeChase:
         r = self.run
         if r is None or r.phase != "run":
             return
-        st = _sp.control(_sp.clapper(s))[0]
+        st = _sp.control(self._by_iid(s, r.iid) if self.two else _sp.clapper(s))[0]
         if st != EVADE:
             r.next_st = st
             self._close("done", "end")
@@ -266,10 +271,33 @@ class EvadeChase:
 
     # ---- the script ----
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, latch=None) -> int | None:
+    @staticmethod
+    def _by_iid(s: dict, iid) -> dict | None:
+        return next((e for e in _sp.clappers(s) if e.get("iid") == iid), None)
+
+    def _n_ok(self, s: dict) -> bool:
+        n = len(_sp.clappers(s))
+        return (n == 1 and self.one) or (n == 2 and self.two)
+
+    def _pick(self, s: dict, focus) -> dict | None:
+        """The Clapper of this tick: the run's; else with one live Clapper that one, with two (two=True) the focus
+        when it is in Evade Scuttle (no focus: the nearer one in it)."""
+        cs = _sp.clappers(s)
+        if self.run is not None:
+            return self._by_iid(s, self.run.iid) if self.two else _sp.clapper(s)
+        if len(cs) == 2 and self.two:
+            if focus is not None:
+                e = self._by_iid(s, focus)
+                return e if _sp.control(e)[0] == EVADE else None
+            hx = _sp.hero_x(s)
+            ev = [e for e in cs if _sp.control(e)[0] == EVADE]
+            return min(ev, key=lambda e: abs(float(e["pos"][0]) - hx)) if ev else None
+        return _sp.clapper(s)
+
+    def step(self, f: int, s: dict, ground: bool, accepting: bool = True, latch=None, focus=None) -> int | None:
         """The mask for frame f + 2 while the chase runs, else None. latch: m -> the key mask the oracle's hold filter
-        latches at f + 2 when m is sent for it (None: m itself)."""
-        e = _sp.clapper(s)
+        latches at f + 2 when m is sent for it (None: m itself); focus: L2's target (two Clappers)."""
+        e = self._pick(s, focus) if self.two else _sp.clapper(s)
         st, tin = _sp.control(e)
         h = s.get("hero") or {}
         hp = int(h.get("health") or 0)
@@ -287,7 +315,7 @@ class EvadeChase:
             if hp < r.hp0:
                 self._close("abort", "hurt")
                 return None
-            if len(_sp.clappers(s)) != 1:
+            if not self._n_ok(s):
                 self._close("abort", "two")
                 return None
             if self._rune_in_way(f, s, e, r.face):
@@ -313,7 +341,7 @@ class EvadeChase:
         face = 1 if e.get("flipX") else -1
         x0 = (_sp.hero_x(s) - float(e["pos"][0])) * face
         why = None
-        if len(_sp.clappers(s)) != 1:
+        if not self._n_ok(s):
             why = "two"
         elif x0 <= 0:
             why = "behind"
@@ -416,6 +444,13 @@ class EvadeChase:
             return False
         if prev & away:
             return False                              # the slash would go the other way
+        if self.two:
+            # SP9a S1: never a slash that meets the other Clapper's body during F's slide (it would decide at once)
+            from ssbot.combat import two_play as _tp
+            xb = cx + d * r.face
+            for o in _sp.clappers(s):
+                if o.get("iid") != r.iid and _tp.slash_meets(xb, -r.face, _tp.body_span(o), spare=-0.3):
+                    return False
         fc = (s.get("hero") or {}).get("facing")
         facing = bool(prev & (M_R if -r.face > 0 else M_L)) or (fc is not None and float(fc) * -r.face > 0)
         if not facing:

@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play
+from ssbot.combat import cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -218,11 +218,19 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab); SP8: + the
         # RecoilStab (SSBOT_FORUM_JB_DASH_COMBO), or dash, stop, side slashes (SSBOT_FORUM_JB_DASH_STOP)
         self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
-        # SP8c (SSBOT_FORUM_EVADE_CHASE, default off): chase the Clapper's evade (combat.evade_chase)
-        self.evade_chase: evade_chase.EvadeChase | None = evade_chase.EvadeChase() if evade_chase.ENABLED else None
-        # SP8d (SSBOT_FORUM_RUNE_LOWHOP, default off): the small runes on the ground, slashes through, one low hop per
-        # bomb at her x (combat.rune_lowhop)
-        self.rune_lowhop: rune_lowhop.RuneLowHop | None = rune_lowhop.RuneLowHop() if rune_lowhop.ENABLED else None
+        # SP8c (SSBOT_FORUM_EVADE_CHASE, default off): chase the Clapper's evade (combat.evade_chase); SP9a
+        # (SSBOT_FORUM_TWO_CHASE, default off): the focus's evade with two Clappers
+        self.evade_chase: evade_chase.EvadeChase | None = (
+            evade_chase.EvadeChase(one=evade_chase.ENABLED, two=two_play.CHASE)
+            if (evade_chase.ENABLED or two_play.CHASE) else None)
+        # SP8d (SSBOT_FORUM_RUNE_LOWHOP, follows v2): the small runes on the ground, slashes through, one low hop per
+        # bomb at her x (combat.rune_lowhop); SP9a (SSBOT_FORUM_TWO_CAST, default off): also on the focus's close cast
+        # with two Clappers
+        self.rune_lowhop: rune_lowhop.RuneLowHop | None = (rune_lowhop.RuneLowHop(two=two_play.CAST)
+                                                           if rune_lowhop.ENABLED else None)
+        # SP9a (SSBOT_FORUM_TWO_IDLEHIT / _SPACE / _OPEN, default off; combat.two_play): two Clappers
+        self.two: two_play.TwoPlay | None = two_play.TwoPlay() if two_play.ANY else None
+        self._wake_f: int | None = None
         self._play_tick: dict | None = None
 
     @staticmethod
@@ -433,6 +441,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.evade_chase.reset()
         if self.rune_lowhop is not None:
             self.rune_lowhop.reset()
+        if self.two is not None:
+            self.two.reset()
+        self._wake_f = None
         self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
@@ -705,6 +716,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         prefs = self.tac.decide(ws, fcast, d, h)
+        if self.two is not None:
+            # SP9a: the per-tick bookkeeping (Idle entries, jump take-offs, rune circles) and TWO_SPACE's stance
+            self.two.observe(f, s, ws.stamp.t_game_s)
+            prefs = self.two.space(prefs, s, ws.stamp.t_game_s, getattr(prefs, "target", None))
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
@@ -814,13 +829,25 @@ class ForumPlannerPolicy(PlannerPolicy):
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
                 return int(lat[-1])
             ch = self.evade_chase.step(f, s, ws.hero.contact.v == "GROUND",
-                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c)
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c,
+                                       focus=getattr(prefs, "target", None))
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None
             if ch is not None:
                 mask = play = ch
                 self.counts["evade_chase"] += 1
+        if self.two is not None and play is None:
+            # SP9a S2 IdleHit / S6 the opening (the supervisor's keys win)
+            if self._wake_f is None and tap is not None and getattr(tap, "wake_frame", None) is not None:
+                self._wake_f = int(tap.wake_frame)
+            tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
+                                bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                                getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
+                                two_enc="_w13" in str(getattr(self.enc, "name", "")))
+            if tm_ is not None and not (r.mask is not None or self.pause_owned):
+                mask = play = tm_
+                self.counts["two_play"] += 1
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog
@@ -1019,4 +1046,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
                 **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {}),
-                **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {})}
+                **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
+                **({"two_play": self.two.stats()} if self.two is not None else {})}

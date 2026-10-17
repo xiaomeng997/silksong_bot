@@ -83,7 +83,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from ssbot.combat import jump_behind, rune_bombs, slam_play, special_board
+from ssbot.combat import jump_behind, rune_bombs, slam_play, special_board, two_play
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
 from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
@@ -315,6 +315,7 @@ class GauntletTactics:
         #                                                    of its jump, from the first tick past the antic
         self._two_fam: dict[int, str | None] = {}         # SP7: Clapper iid -> its family on the last tick
         self._two_idle: dict[int, float] = {}             # SP7: Clapper iid -> game time it went idle after an attack
+        self._sp9_fam: dict = {}                          # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
 
     @property
     def xs(self):
@@ -328,6 +329,7 @@ class GauntletTactics:
         self._strike = {}
         self.jb_land = {}
         self._two_fam, self._two_idle = {}, {}
+        self._sp9_fam = {}                                # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
@@ -817,6 +819,18 @@ class GauntletTactics:
         room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
+        if two_play.SPACE:
+            # SSBOT_FORUM_TWO_SPACE (SP9a S5, switch answer 2f / human_two R6): one of them in its Slam Antic with the
+            # two < 16 u apart - its hammer covers the ground by the other one (HP lost 8 / 8 within 4 u of the other
+            # one): the slammer is the target for this slam (strike it; the playbook takes it when it can start)
+            sl = [c for c in cands if c.s.family == CC_SLAM and getattr(c.s, "state", None) == "Slam Antic"]
+            if len(sl) == 1 and abs(a.x - b.x) < 16.0:
+                c = sl[0]
+                if keep is None or keep.s.iid != c.s.iid:
+                    st["slammer"] = st.get("slammer", 0) + 1
+                    self._sw_why = "two slammer" if keep is not None else self._sw_why
+                st["picks"] = st.get("picks", 0) + 1
+                return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
         if TWO_JUMPER:
             # SSBOT_FORUM_TWO_JUMPER (t1: an other one's jump cast landed 5.27 u in front of her, its rune circle over
             # the focus's front, the focus slammed: 8 of 41 slams not struck, 6 rune hits): a Clapper in a jump move or
@@ -953,6 +967,14 @@ class GauntletTactics:
         self._count_hits(ws, t)
         self.n += 1
         status = self._status(fc, t)
+        if two_play.SPACE and TWO_FOCUS and status == "ok" and self.goal is not None:
+            # SP9a S5: the other one entering its slam is an event (the slammer rule picks at once)
+            for x in getattr(fc, "subjects", ()) or ():
+                if (x.type_key == CLAPPER and x.iid != self.goal.target and x.family == CC_SLAM
+                        and self._sp9_fam.get(x.iid) != CC_SLAM):
+                    status = "event"
+        if two_play.SPACE:
+            self._sp9_fam = {x.iid: x.family for x in (getattr(fc, "subjects", ()) or ()) if x.type_key == CLAPPER}
         if "whip" in self.ta:
             whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
                               if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)

@@ -241,11 +241,18 @@ def forum_wave_intro(wave: int) -> Callable[[Ctx], int]:
     then waits for the wave's members to be activated and moves the tap's battle start there (the episode's
     wake_frame and waves[0] then mark the wave's real start, as in a full gauntlet)."""
     def intro(ctx: Ctx) -> int:
+        import os
+
         from ssbot.train.wave_start import prune_ghosts, wait_wave_active, wait_wave_start
-        s = wait_wave_start(ctx.link, FORUM, wave)
+        keys = None
+        if wave == 13 and os.environ.get("SSBOT_FORUM_TWO_OPEN", "0").strip() == "1":
+            # task 1v1 SP9a S6 (combat.two_play): the final wave's opening walk from the load (the person moves 2.6-2.7
+            # s before the Drop Antic; the policy gets the keys at the wave's activation, ~2.5 s after the load)
+            from ssbot.combat.two_play import intro_keys as keys
+        s = wait_wave_start(ctx.link, FORUM, wave, keys=keys)
         started_f = ctx.tap.wake_frame
         pr = prune_ghosts(ctx.link) if wave > 0 else {"pruned": []}
-        a = wait_wave_active(ctx.link, FORUM, wave, after=s["f"])
+        a = wait_wave_active(ctx.link, FORUM, wave, after=s["f"], keys=keys)
         if started_f is None:
             raise RuntimeError("intro: room.battles started but the tap saw no start")
         ctx.tap.rebase_start(a["f"], "wave active")

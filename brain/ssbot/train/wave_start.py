@@ -277,9 +277,10 @@ def verify_wave_start(s: dict, enc, wave: int) -> dict:
 STATE_PREFIX = "fo_r1_w"      # wave-start savestates: fo_r1_w<i>, taken at wave i's activation (make_wave_states)
 
 
-def wait_wave_start(link: OracleLink, enc, wave: int, timeout_s: float = 30.0) -> dict:
+def wait_wave_start(link: OracleLink, enc, wave: int, timeout_s: float = 30.0, keys=None) -> dict:
     """After a wave-start savestate load: keep the keys up until room.battles reports the battle started at `wave`
-    (DebugMod's RoomSpecific restores currentWave and calls StartBattle; the Start Range trigger is already woken)."""
+    (DebugMod's RoomSpecific restores currentWave and calls StartBattle; the Start Range trigger is already woken).
+    keys: STATE -> the key mask to send meanwhile (None: none; SSBOT_FORUM_TWO_OPEN's walk, task 1v1 SP9a)."""
     last = link.frame
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -288,11 +289,12 @@ def wait_wave_start(link: OracleLink, enc, wave: int, timeout_s: float = 30.0) -
         b = battle_of(s, enc.battle_name) or {}
         if b.get("started") and b.get("wave", -1) >= wave:
             return s
-        link.act(last + 2, 0, hold_frames=0)
+        link.act(last + 2, 0 if keys is None else int(keys(s)), hold_frames=0)
     raise RuntimeError(f"the wave-start savestate did not start wave {wave} within {timeout_s:.0f} s")
 
 
-def wait_wave_active(link: OracleLink, enc, wave: int, after: int | None = None, timeout_s: float = 10.0) -> dict:
+def wait_wave_active(link: OracleLink, enc, wave: int, after: int | None = None, timeout_s: float = 10.0,
+                     keys=None) -> dict:
     """The first STATE (newer than `after`) in which the battle at `wave` has activated its members: room.battles
     currentEnemies > 0 (BattleWave.WaveStarted counts them in, startDelay after StartWave). After a wave-start load
     room.battles reports the wave from the battle start on (module docstring), so this is the wave's real start.
@@ -305,7 +307,7 @@ def wait_wave_active(link: OracleLink, enc, wave: int, after: int | None = None,
         b = battle_of(s, enc.battle_name) or {}
         if b.get("started") and b.get("wave", -1) >= wave and (b.get("enemies") or 0) > 0:
             return s
-        link.act(last + 2, 0, hold_frames=0)
+        link.act(last + 2, 0 if keys is None else int(keys(s)), hold_frames=0)
     raise RuntimeError(f"wave {wave} did not activate its members within {timeout_s:.0f} s")
 
 
