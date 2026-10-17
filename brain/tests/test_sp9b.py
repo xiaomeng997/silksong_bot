@@ -156,19 +156,19 @@ def test_switch_lock_then_deciding_hit(switch):
     assert two.step(1002, fstate(1002, "Jump Antic", 1 / 60, b_x=30.0), True, True, 99, 1002 / 60.0) == sp.M_R  # walks
     assert v["stance"] == pytest.approx(30.0 - 7.0)               # before F's aim: 7 u short of B
     # F's Jump Aim with her at 23 u: it lands 0.916 x (23 - 5 - 18) = 0 u from its take-off, the wall rule (its back
-    # 3.99 < 4: >= 4.4 u from the wall) -> 18.41; the stance 8.3 u past it, at most 2.7 u short of B: 26.71
+    # 3.99 < 4: >= 4.4 u from the wall) -> 18.41; the stance 9.0 u past it, at most 2.7 u short of B: 27.3
     step_all(two, [fstate(1031, "Jump", hx=23.0, b_x=30.0)])
     assert two.esc.land_pred == pytest.approx(tp.WALL_L + 4.4, abs=0.01)
-    assert two.esc_view()["stance"] == pytest.approx(tp.WALL_L + 4.4 + 8.3, abs=0.01)
+    assert two.esc_view()["stance"] == pytest.approx(30.0 - 2.7, abs=0.01)          # 18.41 + 9.0 past B - 2.7
     # F lands; she stands 3.5 u in front of B (B faces left: its front edge at 27.75), facing it
-    out = step_all(two, [fstate(1031, "Jump", hx=26.5, b_x=30.0, facing=1),
-                         fstate(1080, "Slam 2", hx=26.5, b_x=30.0, facing=1),
-                         fstate(1081, "Slam 2", 1 / 60, hx=26.5, b_x=30.0, facing=1)])
+    out = step_all(two, [fstate(1031, "Jump", hx=27.2, b_x=30.0, facing=1),
+                         fstate(1080, "Slam 2", hx=27.2, b_x=30.0, facing=1),
+                         fstate(1081, "Slam 2", 1 / 60, hx=27.2, b_x=30.0, facing=1)])
     assert out[0] == 0 and out[1] == sp.M_A | sp.M_R and out[2] == sp.M_A | sp.M_R    # at the stance: no key
     assert not two.esc_view()["no_hit"] and two.esc.press["f"] == 0
     hit = [{"k": "hit", "d": {"type_key": sp.CLAPPER, "ent": 99, "dealt": 10}}]
-    step_all(two, [fstate(1083, "Slam 2", 3 / 60, hx=26.5, b_x=30.0, facing=1, ev=hit),
-                   fstate(1084, "Slam 2", 4 / 60, hx=26.5, b_x=30.0, b_st="Slam Antic", facing=1)])
+    step_all(two, [fstate(1083, "Slam 2", 3 / 60, hx=27.2, b_x=30.0, facing=1, ev=hit),
+                   fstate(1084, "Slam 2", 4 / 60, hx=27.2, b_x=30.0, b_st="Slam Antic", facing=1)])
     r = two.esc_done[-1]
     assert two.esc is None and r.end == "B move" and r.press["hit"] == 3 and r.press["b_next"] == "Slam Antic"
 
@@ -244,7 +244,7 @@ def test_gauntlet_hold_and_no_hit(monkeypatch):
 
 
 def test_block_b_jumping_casting_or_near(corner, monkeypatch):
-    for b_st, why in (("Air", "other jumping"), ("Cast 2", "other casting")):
+    for b_st, why in (("Air", "other jumping"), ("Cast 2", "other casting"), ("Slam 0", "other slamming")):
         two = tp.TwoPlay()
         step_all(two, [fstate(1000, "Idle", 0.5, b_st=b_st), fstate(1001, "Jump Antic", b_st=b_st)])
         assert two.esc.mode is None and two.esc.why == why and two.esc_view() is None
@@ -266,3 +266,12 @@ def test_corner_under_dash_waits_for_the_latch(monkeypatch):
     m = c.step(1057, _cs_state(1057, "Jump", 1 / 60, WALL_X + 4.5), True, True, 1057 / 60.0, latch=lambda x: x,
                esc=esc)
     assert m == sp.M_L | sp.M_DASH
+
+
+def test_switch_hands_back_when_b_comes(switch):
+    two = tp.TwoPlay()
+    step_all(two, [fstate(1000, "Idle", 0.5, b_x=30.0), fstate(1001, "Jump Antic", b_x=30.0)])
+    assert two.esc is not None and two.esc.mode == "switch"
+    # B walks in to 26: the hold point (19) would be 1 u from F's centre (< 4.5): the run ends, the default play
+    step_all(two, [fstate(1010, "Jump Antic", 9 / 60, b_x=26.0, b_st="Walk")])
+    assert two.esc is None and two.esc_done[-1].end == "b came"

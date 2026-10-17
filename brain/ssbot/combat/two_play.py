@@ -154,8 +154,10 @@ class EscCfg:
     # B is on the open side at least sw_hold + 0.5 u from her
     sw_hold_j: float = 7.0
     sw_hold_c: float = 12.0
-    sw_safe_j: float = 8.3
-    sw_safe_c: float = 14.2
+    sw_safe_j: float = 9.0       # (t3: 8.3 left her 7.63 u in front of the real landing once: the hammer)
+    sw_safe_c: float = 14.5
+    sw_f_front: float = 4.5      # the hold never nearer to F's centre than this (t3: B walked in, the hold point moved
+    #                              back and she walked into F's body): nearer -> the run hands back ("b came")
     sw_b_gap: float = 2.7
 
 
@@ -601,6 +603,8 @@ class TwoPlay:
         r = self.esc
         sw_on = r is not None and r.mode == "switch" and r.f_land is None
         self._sw_stance_x = self._sw_stance(f, s) if sw_on else None
+        if sw_on and self._sw_stance_x is None and clapper_by(s, r.other) is not None:
+            self._esc_close(f, "b came")                 # no room short of B any more: the default play
 
     def _esc_start(self, f: int, s: dict, e: dict, cs: list, hx: float, hp: int) -> None:
         c = self.ecfg
@@ -647,6 +651,8 @@ class TwoPlay:
             return "other jumping"
         if st in CAST_ST:
             return "other casting"
+        if st in SLAM_ST or st == "Slam Recover":
+            return "other slamming"                      # (t3: its hammer hit her in F's antic twice; the playbook's)
         ox, cx = float(o["pos"][0]), float(e["pos"][0])
         wall = WALL_L if face_of(e) > 0 else WALL_R
         lo, hi = min(hx, ox, cx, wall), max(hx, ox, cx, wall)
@@ -667,6 +673,8 @@ class TwoPlay:
         near_b = ox - sgn * c.sw_b_gap
         if r.land_pred is None:
             x = ox - sgn * (c.sw_hold_j if r.kind == "jump" else c.sw_hold_c)
+            if (x - r.x0) * sgn < c.sw_f_front:
+                return None
         else:
             x = r.land_pred + sgn * (c.sw_safe_j if r.kind == "jump" else c.sw_safe_c)
             if (x - near_b) * sgn > 0:
