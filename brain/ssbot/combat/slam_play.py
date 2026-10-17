@@ -1001,13 +1001,18 @@ class SlamPlay:
             y += vy / 60.0
             vy -= GRAV / 60.0
         low = y <= c.slash_y
+        if TWO_HANDOFF and TWO_PLAY and d == r.face:
+            u0 = r.near_u
+            self._ho_aim(r, s, cx, d)
+            if r.near_u > u0 + 0.05 and r.k_turn is not None:
+                # B's antic began after her turn (fixed point t2, 25266b4: two hand-offs landed 8.2 u in front of B,
+                # A to B 11.9 / 12.1 u, B's antic at A0 + 33 / 37): on to its stand, the turn again there
+                r.k_turn = None
         if r.k_turn is None:
-            if TWO_HANDOFF and TWO_PLAY and d == r.face:
-                self._ho_aim(r, s, cx, d)
             tx = cx + d * r.near_u
             reached = (xw - tx) * d >= 0.5 * NEAR_V                # the turn key moves her NEAR_V back to tx
             past = d == r.face or rel <= -c.near_cross_u
-            if reached or (low and past and self._in_reach(e, cx, r.face, xw, -d)):
+            if reached or (low and past and r.side_why != "ho_aim" and self._in_reach(e, cx, r.face, xw, -d)):
                 r.k_turn = k
                 return M_R if -d > 0 else M_L                      # the turn: she faces it
             return M_R if d > 0 else M_L

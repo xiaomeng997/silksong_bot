@@ -236,3 +236,18 @@ def test_handoff_aims_the_landing_at_bs_stand(two_on, monkeypatch, on):
     assert r.near == 1
     assert r.near_u == pytest.approx(6.9 if on else 3.7)
     assert (r.side_why == "ho_aim") == on
+
+
+def test_handoff_aims_again_after_the_turn(two_on, monkeypatch):
+    """B's antic begins after her turn key at NEAR's 3.7 u: the turn is undone, the landing moves to B's stand."""
+    monkeypatch.setattr(sp, "TWO_HANDOFF", True)
+    monkeypatch.setattr(sp, "NEAR", True)
+    monkeypatch.setattr(sp, "SIDE", True)
+    p = sp.SlamPlay(sp.PlayCfg())
+    r = after_run(face=1, ta=10.0)
+    r.near, r.near_u, r.k_turn, r.k_slash, r.side_why = 1, 3.7, 70, None, "two"
+    p.run = r
+    ta0 = 10.0 + 48 / 60.0
+    s = two(1000, "Idle", 0.1, "Slam Antic", 2 / 60.0, ax=30.0, bx=42.0, hx=33.7, ground=False, vy=-2.0)
+    m = p.step(1000, s, False, t_game=ta0 + 30 / 60.0)
+    assert r.near_u == pytest.approx(6.9) and r.k_turn is None and m & sp.M_R
