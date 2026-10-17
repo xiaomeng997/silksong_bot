@@ -748,6 +748,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         play = None
         if self.cast_stab is not None:
             self.cast_stab.observe(f, s)          # SP8: the rune circles' first frame and lit state, every tick
+        if self.evade_chase is not None:
+            self.evade_chase.observe(f, s)        # SP8c: the same for the chase
         if self.slam_play is not None:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",

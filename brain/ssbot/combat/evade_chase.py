@@ -21,12 +21,18 @@ The script (every mask for frame f + 2; k = the evade's frame of that mask from 
   dash     one ground dash tap (the dash key 2 frames: 3.27 u in frames 1-7 at 28 u/s, then the run) when d_end with the
            run alone is beyond dash_if_u, the dash cooldown is over, she is on the ground accepting input, the oracle's
            key filter latches toward + dash on this frame, and the dash's path keeps her at least min_u from its
-           centre every frame and at least end_lo at the end (its slide stops early when its back meets the wall).
-  slash    the side slash (attack 2 frames, the key toward it) when the attack is ready, she faces it, no dash /
-           sprint clip (an attack from a sprint is a DashStab), and the slash from her x two frames after the mask
-           meets its body box moving away.
-Abort (the planner decides again): HP lost, the Clapper gone or a second one alive, the state no longer Evade Scuttle
-(the normal end: "end").
+           centre every frame and at least end_lo at the end (its slide stops early when its back meets the wall);
+           by evade frame dash_k_max. In the air (air_dash): the air dash (2 frames at 28 u/s, then the Air Sprint's
+           0.235 s from 26.9 u/s down by 1.1 per physics step: ~5.8 u in 16 frames; movement_kinematics 1.3) only
+           when the run alone ends Far (beyond air_if_u) and its path keeps air_margin more room.
+  slash    the side slash (attack 2 frames, the key toward it) from evade frame slash_k_min on (t1, 7c342fa: a hit
+           early in the slide pushed her back with its recoil and it 0.48 u on - one evade ended 9.0 u away, a far
+           cast), when the attack is ready, she faces it, no dash / sprint clip (an attack from a sprint is a
+           DashStab), and the slash from her x two frames after the mask meets its body box moving away.
+Not while a jump cast's rune circle is lit or still to come over her way to it (t1: the chase into the previous jump
+cast's circle, lit 42 frames after the evade's start, 2 HP): no start, or the run hands back ("rune").
+Abort (the planner decides again): HP lost, the Clapper gone or a second one alive, a rune circle over the way, the
+state no longer Evade Scuttle (the normal end: "end").
 
     ec = EvadeChase()                                   # per episode: ec.reset()
     m = ec.step(f, s, ground, accepting, latch)         # the mask for frame f + 2, or None (the planner decides)
@@ -36,6 +42,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from ssbot.combat import cast_stab as _cs
 from ssbot.combat import slam_play as _sp
 
 
@@ -55,6 +62,8 @@ BODY_FRONT, BODY_BACK = _sp.BODY_FRONT, _sp.BODY_BACK
 SLASH_X = _sp.SLASH_X
 DASH_V, DASH_F = 28.0, 7     # the ground dash: u/s, the frames it moves (cast_stab: 3.27 u; live 3.36)
 NO_ATK_CLIPS = ("Dash", "Sprint", "Skid")
+AIR_DASH_F = 2               # the air dash: 2 physics steps at 28 u/s (0.04 s), then the Air Sprint
+AIR_SPRINT_F, AIR_SPRINT_V0, AIR_SPRINT_DEC = 14, 26.9, 1.1 * 50.0 / 60.0   # 0.235 s from 26.9 u/s, -1.1 per step
 
 
 @dataclass
@@ -64,15 +73,18 @@ class ChaseCfg:
     min_u: float = 3.2           # ... and never nearer than this on any frame (her box front 0.72 u off its front 2.25)
     stop_u: float = 3.6          # no key toward it nearer than this
     tap_f: int = 2               # the dash key held this many frames (a tap: the dash runs its 0.1 s on)
-    dash_k_max: int = 15         # the latest evade frame (the mask's) of the dash: it moves by the slide's end, and the
-    #                              dash cooldown (0.425 s) is over by the next move's antic + ~11 (SP8a / SP8b's dash
-    #                              scripts in a jump antic start up to antic frame 14)
+    dash_k_max: int = 18         # the latest evade frame (the mask's) of the dash (t1: 15 left the late landings from
+    #                              a down slash's bounce at 6.5-7.8 u, no dash)
+    air_dash: int = 1            # the air dash when the run alone ends Far
+    air_if_u: float = 8.0        # ... beyond this (u; Close at <= 8.28)
+    air_margin: float = 0.6      # ... its path keeps min_u + this, its end end_lo + this (the model is the facts')
     slash_cd: int = 19           # own presses this many frames apart (the Wanderer cooldown 0.3 s = 18)
     hit_lag: int = 2             # the slash meets it this many frames after the mask's frame
     reach_spare: float = 0.1     # the slash must overlap its body box by this much
     wall_back: float = 1.34      # its back from its centre (the slide stops when it meets the wall)
     dash: int = 1                # 0: no dash (run and slash only)
     slash: int = 1               # 0: no slash
+    slash_k_min: int = 18        # no slash before this evade frame (the mask's; the hit at the slide's end)
 
 
 def _num_env(c: ChaseCfg) -> ChaseCfg:
@@ -93,6 +105,25 @@ def slide_left(cx: float, face: int, n: int, back: float = 1.34) -> float:
     meets the arena wall."""
     room = (cx - _sp.WALL_L) if face > 0 else (_sp.WALL_R - cx)
     return max(0.0, min(EV_V * max(0, n), room - back))
+
+
+def air_travel(j: int) -> float:
+    """Her travel (u) by frame j after an air dash's mask (a tap): AIR_DASH_F frames at DASH_V, the Air Sprint's
+    AIR_SPRINT_F frames slowing from AIR_SPRINT_V0, then the air control with the key toward it (WALK_U)."""
+    d = 0.0
+    for jj in range(1, j + 1):
+        if jj <= AIR_DASH_F:
+            d += DASH_V / 60.0
+        elif jj <= AIR_DASH_F + AIR_SPRINT_F:
+            d += (AIR_SPRINT_V0 - AIR_SPRINT_DEC * (jj - AIR_DASH_F - 1)) / 60.0
+        else:
+            d += WALK_U
+    return d
+
+
+def air_path(d: float, n: int, slide: float) -> list[float]:
+    """As dash_path for the air dash (frames 1 .. AIR_DASH_F + AIR_SPRINT_F + 3)."""
+    return [d + min(slide, EV_V * min(j, n)) - air_travel(j) for j in range(1, AIR_DASH_F + AIR_SPRINT_F + 4)]
 
 
 def dash_path(d: float, n: int, slide: float) -> list[float]:
@@ -121,6 +152,7 @@ class Chase:
     dash_k: int | None = None   # the evade frame of the dash's mask
     dash_x: float | None = None
     dash_pred: dict | None = None
+    air: bool = False           # the dash was the air dash
     presses: list = field(default_factory=list)   # (evade frame of the mask, her x)
     hits: list = field(default_factory=list)      # (evade frame, src)
     x_end: float | None = None  # her x in front of its centre on the last Evade Scuttle tick
@@ -138,6 +170,7 @@ class EvadeChase:
         self._seen: set = set()
         self.n_evade = 0
         self.why_not: dict = {}
+        self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
 
     def reset(self) -> None:
         self.run = None
@@ -145,6 +178,31 @@ class EvadeChase:
         self._seen = set()
         self.n_evade = 0
         self.why_not = {}
+        self._runes = {}
+
+    def observe(self, f: int, s: dict) -> None:
+        """Every tick (the policy calls it whichever script runs): the rune circles' first frame and lit state."""
+        self._rune_threats(f, s)
+
+    def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
+        """The x spans of the jump cast rune circles lit now or still to come (cast_stab's rule: present, not yet
+        seen lit, first seen less than RUNE_LIVE_F frames ago)."""
+        out = []
+        for lo, hi, iid, lit in _cs.rune_spans(s):
+            r = self._runes.setdefault(iid, {"first": f, "lit": False})
+            if lit:
+                r["lit"] = True
+                out.append((lo, hi))
+            elif not r["lit"] and f - r["first"] < _cs.RUNE_LIVE_F:
+                out.append((lo, hi))
+        return out
+
+    def _rune_in_way(self, f: int, s: dict, e: dict, face: int) -> bool:
+        """A threat span over her way to it: from her x to min_u in front of its centre."""
+        hx = _sp.hero_x(s)
+        near = float(e["pos"][0]) + face * self.cfg.min_u
+        lo, hi = min(hx, near), max(hx, near)
+        return any(a < hi and b > lo for a, b in self._rune_threats(f, s))
 
     def active(self) -> bool:
         return self.run is not None and self.run.phase == "run"
@@ -167,6 +225,7 @@ class EvadeChase:
         for r in runs:
             out["runs"] += 1
             out["dash"] += r.dash_k is not None
+            out["air_dash"] += r.air
             out["presses"] += len(r.presses)
             out["hits_in_run"] += len(r.hits)
             out[f"end_{r.phase}_{r.why}"] += 1
@@ -181,7 +240,7 @@ class EvadeChase:
     @staticmethod
     def _rec(r: Chase) -> dict:
         return {"f0": r.f0, "k0": r.k0, "x0": r.x0, "ground0": r.ground0, "dash_k": r.dash_k, "dash_x": r.dash_x,
-                "dash_pred": r.dash_pred, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
+                "dash_pred": r.dash_pred, "air": r.air, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
                 "next": r.next_st, "end": r.phase, "why": r.why, "ticks": r.ticks}
 
     # ---- the script ----
@@ -210,6 +269,9 @@ class EvadeChase:
             if len(_sp.clappers(s)) != 1:
                 self._close("abort", "two")
                 return None
+            if self._rune_in_way(f, s, e, r.face):
+                self._close("abort", "rune")
+                return None
             for ev in s.get("ev") or ():
                 d = ev.get("d") or {}
                 if ev.get("k") == "hit" and d.get("type_key") == CLAPPER:
@@ -236,6 +298,8 @@ class EvadeChase:
             why = "behind"
         elif hp <= 0:
             why = "dead"
+        elif self._rune_in_way(f, s, e, face):
+            why = "rune"
         if why is not None:
             self.why_not[why] = self.why_not.get(why, 0) + 1
             return None
@@ -293,6 +357,18 @@ class EvadeChase:
                     r.dash_pred = {"d_run": round(d_run, 2), "d_end": round(d_end, 2), "min": round(min(path), 2),
                                    "n": n}
                     return toward | M_DASH
+        if c.dash and c.air_dash and r.dash_k is None and not ground and accepting and k <= c.dash_k_max:
+            d_run = d + slide - WALK_U * n
+            if d_run > c.air_if_u and float(tm.get("dash_cd") or 0.0) <= 0.02 and not any(
+                    x in clip for x in NO_ATK_CLIPS):
+                path = air_path(d, n, slide)
+                d_end = path[-1] if n >= len(path) else path[max(0, n - 1)]
+                if min(path) >= c.min_u + c.air_margin and d_end >= c.end_lo + c.air_margin and (latch is None or (
+                        int(latch(toward | M_DASH)) & (M_L | M_R | M_DASH)) == toward | M_DASH):
+                    r.dash_k, r.dash_x, r.air = k, round(d, 2), True
+                    r.dash_pred = {"d_run": round(d_run, 2), "d_end": round(d_end, 2), "min": round(min(path), 2),
+                                   "n": n, "air": True}
+                    return toward | M_DASH
         if d - WALK_U < c.stop_u:
             return 0
         return toward
@@ -300,9 +376,9 @@ class EvadeChase:
     def _slash_ok(self, r: Chase, k: int, s: dict, e: dict, d: float, cx: float, tm: dict, clip: str, prev: int,
                   away: int) -> bool:
         c = self.cfg
-        if r.presses and k - r.presses[-1][0] < c.slash_cd:
+        if k < c.slash_k_min or (r.presses and k - r.presses[-1][0] < c.slash_cd):
             return False
-        if r.dash_k is not None and k - r.dash_k < DASH_F + 2:
+        if r.dash_k is not None and k - r.dash_k < (AIR_DASH_F + AIR_SPRINT_F if r.air else DASH_F) + 2:
             return False                              # an attack from the dash / sprint is a DashStab
         if any(x in clip for x in NO_ATK_CLIPS):
             return False

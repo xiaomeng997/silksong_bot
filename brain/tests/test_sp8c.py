@@ -137,12 +137,77 @@ def test_no_dash_option():
 
 
 def test_slash_when_in_reach():
-    ch, out = simulate(3.5, land_k=0, atk_cd0=0.0)
+    ch, out = simulate(3.5, land_k=0, atk_cd0=0.0, cfg=ec.ChaseCfg(slash_k_min=0))
     r = ch.done[0]
     assert r.presses and r.presses[0][0] <= 3
     # two frames of the attack: one rising edge
     am = [k for k, _, m in out if m is not None and m & sp.M_A]
     assert am[:2] == [am[0], am[0] + 1]
+
+
+def test_no_slash_early_in_the_slide():
+    # t1: an early hit's recoil (and its knock-back) left her far at the slide's end
+    ch, out = simulate(3.5, land_k=0, atk_cd0=0.0)
+    assert all(k >= ec.ChaseCfg().slash_k_min for k, _ in ch.done[0].presses)
+
+
+def test_air_dash_when_far():
+    ch, out = simulate(7.6, land_k=30)
+    r = ch.done[0]
+    assert r.air and r.dash_k is not None
+    assert r.dash_pred["d_run"] > ec.ChaseCfg().air_if_u
+    assert r.dash_pred["min"] >= ec.ChaseCfg().min_u + ec.ChaseCfg().air_margin
+    # no air dash from near (the run alone ends Close)
+    ch, out = simulate(4.0, land_k=30)
+    assert ch.done[0].dash_k is None
+    # off
+    ch, out = simulate(7.6, land_k=30, cfg=ec.ChaseCfg(air_dash=0))
+    assert ch.done[0].dash_k is None
+
+
+def test_air_travel():
+    assert abs(ec.air_travel(2) - 2 * 28.0 / 60.0) < 1e-9
+    assert 5.5 <= ec.air_travel(16) <= 6.1             # ~5 u of Air Sprint (movement_kinematics 1.3) + the dash
+
+
+def rune_ent(lo, lit=True):
+    return {"type_key": "damager", "iid": 555, "pos": [lo + 7.187, 3.34],
+            "colliders": [{"verts_world": [lo, 3.0, lo + 2 * 7.187, 3.0, lo + 2 * 7.187, 10.0, lo, 10.0],
+                           "enabled": lit}]}
+
+
+def test_no_chase_into_a_rune_circle():
+    # facing left (flip False), she stands to its left: a circle over her way (lit) -> no start
+    ch = ec.EvadeChase()
+    s = ev_state(1000, 0, 4.0)
+    s["ents"].append(rune_ent(20.0, lit=True))
+    ch.observe(1000, s)
+    assert ch.step(1000, s, True) is None
+    assert ch.why_not == {"rune": 1}
+    # a circle not lit yet, first seen 30 frames ago: still to come -> no start
+    ch = ec.EvadeChase()
+    s0 = ev_state(970, 0, 4.0, st="Idle")
+    s0["ents"].append(rune_ent(20.0, lit=False))
+    ch.observe(970, s0)
+    s = ev_state(1000, 0, 4.0)
+    s["ents"].append(rune_ent(20.0, lit=False))
+    ch.observe(1000, s)
+    assert ch.step(1000, s, True) is None and ch.why_not == {"rune": 1}
+    # a spent one (seen lit before, unlit now): no threat
+    ch = ec.EvadeChase()
+    s0 = ev_state(900, 0, 4.0, st="Idle")
+    s0["ents"].append(rune_ent(20.0, lit=True))
+    ch.observe(900, s0)
+    s = ev_state(1000, 0, 4.0)
+    s["ents"].append(rune_ent(20.0, lit=False))
+    ch.observe(1000, s)
+    assert ch.step(1000, s, True) is not None
+    # a circle far away (behind her): no threat
+    ch = ec.EvadeChase()
+    s = ev_state(1000, 0, 4.0)
+    s["ents"].append(rune_ent(0.0, lit=True))
+    ch.observe(1000, s)
+    assert ch.step(1000, s, True) is not None
 
 
 def test_no_slash_out_of_reach():

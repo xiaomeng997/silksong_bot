@@ -1,7 +1,7 @@
 """The Clapper's evades in the 1v1 runs (task 1v1 SP8c, forum.md 74): per Evade Scuttle where she is at its start
 and on the first frame after it (After Scuttle reads Slam Range there: Close at <= 8.28 u centre to centre, Far at >=
 8.36), the move it picks next, the hits on it during the slide and in the next move's cycle (its start to the start
-of the move after), HP lost from the slide's start to the next move's start + HURT_F frames (with the sources), and
+of the move after), HP lost from the slide's start to the end of that cycle (with the sources), and
 the SSBOT_FORUM_EVADE_CHASE script's record (dash frame, presses, end). Distances are centre to centre (the hero's
 box centre, the Clapper's transform), + = in front.
 
@@ -25,7 +25,7 @@ MOVES = {"Slam Antic": "slam", "Spell Antic": "cast", "Jump Antic": "jump", "Cas
          "Evade Scuttle": "evade", "Escape Jump": "escape"}
 CLOSE_U = 8.28                     # After Scuttle: Close Range at <= 8.28 u (human_two: 0 of 198 off)
 GATE_U = 8.0                       # the trial's success: within this at the slide's end ...
-HURT_F = 60                        # ... and no HP lost from its start to the next move's start + this
+#                                    ... and no HP lost from its start to the end of the next move's cycle
 
 
 def _rel(s: dict, e: dict) -> float:
@@ -84,11 +84,14 @@ def evades_of(states: list[dict], label: dict, hero_attacks, runs: list[dict]) -
                         ch += int(dealt is None or float(dealt) > 0)
             cyc = {"hits": ch, "frames": k2 - k1, "full": si + 2 < len(starts),
                    "x0": round(_rel(states[k1], st_of[k1][2]), 2) if st_of[k1][2] is not None else None}
-        f_lim = int(states[nxt[0]]["f"]) + HURT_F if nxt is not None else int(states[-1]["f"])
+        # HP lost from the slide's start to the end of the next move's cycle (a cast's bombs come after its antic)
+        f_lim = (int(states[min(n - 1, starts[si + 2][0] if si + 2 < len(starts) else n - 1)]["f"])
+                 if nxt is not None else int(states[-1]["f"]))
         hurt = [{"df": f - f0, "hp": a, "src": s_[-40:]} for f, a, s_ in hp_ev if f0 <= f <= f_lim]
         xs = [round(_rel(states[k], st_of[k][2]), 2) for k in range(i, j + 2) if k < n and st_of[k][2] is not None]
         room = (float(e["pos"][0]) - sp.WALL_L) if e.get("flipX") else (sp.WALL_R - float(e["pos"][0]))
-        run = next((r for r in runs if abs(int(r.get("f0") or -99) - f0) <= 3), None)
+        # the run may start later in the slide (the slam playbook's way out still had the keys)
+        run = next((r for r in runs if f0 - 3 <= int(r.get("f0") or -99) <= f0 + (j - i)), None)
         out.append({**label, "f": f0, "nf": j - i + 1, "d0": round(_rel(states[i], e), 2),
                     "feet0": round(float(b0[1]) - 3.015, 2) if b0 else None,
                     "ground0": bool(sp.on_ground(states[i])), "room": round(room, 2),
