@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import cast_stab, evade_chase, forum_v2, slam_play
+from ssbot.combat import cast_stab, evade_chase, forum_v2, rune_lowhop, slam_play
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -220,6 +220,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
         # SP8c (SSBOT_FORUM_EVADE_CHASE, default off): chase the Clapper's evade (combat.evade_chase)
         self.evade_chase: evade_chase.EvadeChase | None = evade_chase.EvadeChase() if evade_chase.ENABLED else None
+        # SP8d (SSBOT_FORUM_RUNE_LOWHOP, default off): the small runes on the ground, slashes through, one low hop per
+        # bomb at her x (combat.rune_lowhop)
+        self.rune_lowhop: rune_lowhop.RuneLowHop | None = rune_lowhop.RuneLowHop() if rune_lowhop.ENABLED else None
         self._play_tick: dict | None = None
 
     @staticmethod
@@ -428,6 +431,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.cast_stab.reset()
         if self.evade_chase is not None:
             self.evade_chase.reset()
+        if self.rune_lowhop is not None:
+            self.rune_lowhop.reset()
         self._play_tick = None
         self._wave_v = -1
         self._wave_t = None
@@ -750,7 +755,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.cast_stab.observe(f, s)          # SP8: the rune circles' first frame and lit state, every tick
         if self.evade_chase is not None:
             self.evade_chase.observe(f, s)        # SP8c: the same for the chase
-        if self.slam_play is not None:
+        # SP8d: while the low hop's hold or a bomb window over her is on, its script keeps the keys (the other scripts
+        # are not stepped: they start from the air a few frames later)
+        low_crit = False
+        if self.rune_lowhop is not None:
+            self.rune_lowhop.observe(f, s)
+            low_crit = self.rune_lowhop.critical()
+        if self.slam_play is not None and not low_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
@@ -764,7 +775,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             if play is not None:
                 mask = play
                 self.counts["slam_play"] += 1
-        if self.cast_stab is not None and play is None:
+        if self.cast_stab is not None and play is None and not low_crit:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
             def latch(m: int, _h=hold, _p=prefix) -> int:
                 # the key mask the oracle's hold filter latches at f + 2 when m is sent for it
@@ -779,6 +790,22 @@ class ForumPlannerPolicy(PlannerPolicy):
             if stab is not None:
                 mask = play = stab
                 self.counts["cast_stab"] += 1
+        if self.rune_lowhop is not None and play is not None:
+            self.rune_lowhop.yield_to(s)          # SP8d: another script has the keys (outside the hop's window)
+        elif self.rune_lowhop is not None:
+            # SP8d: the small-rune cast script (the supervisor's keys win)
+            def latch_h(m: int, _h=hold, _p=prefix) -> int:
+                lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
+                return int(lat[-1])
+            lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
+                                       bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                                       t_game=ws.stamp.t_game_s, latch=latch_h)
+            if lh is not None and (r.mask is not None or self.pause_owned):
+                self.rune_lowhop.abort("supervisor")
+                lh = None
+            if lh is not None:
+                mask = play = lh
+                self.counts["rune_lowhop"] += 1
         if self.evade_chase is not None and play is not None:
             self.evade_chase.yield_to(s)          # SP8c: another script has the keys: the chase run ends
         elif self.evade_chase is not None:
@@ -991,4 +1018,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
-                **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {})}
+                **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {}),
+                **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {})}
