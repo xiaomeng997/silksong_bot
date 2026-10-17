@@ -124,7 +124,7 @@ class StabCfg:
     tap_f: int = 2               # a tap: the dash held this many frames (the dash runs its 0.1 s on)
     tap_room: float = 0.35       # a tap when the dash's own travel stops her within stop_u + this
     grace_f: int = 10            # the release at most this many frames into the ground sprint (0.167 s < 0.183)
-    release_lag: float = 3.0     # her travel frames from the STATE to the stop (SEND_AHEAD + the release frame)
+    release_lag: float = 2.0     # her travel frames from the STATE to the stop (t1: 3.0 stopped 0.3-0.9 u short)
     slash_cd: int = 19           # own presses this many frames apart (the Wanderer cooldown 0.3 s = 18)
     stop_reach: float = 4.75     # a press only from here or nearer (centre to centre)
     stop_stand: float = 4.3      # between presses walk in to here ...
