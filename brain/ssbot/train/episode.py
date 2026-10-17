@@ -340,6 +340,16 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         rec.start_resume = steps
         if not ok:
             raise RuntimeError(f"still paused before the reset ({where(link.state)}; taps {steps[-4:]})")
+    # SSBOT_RESET_PRELOAD=<savestate> (harness only; unset by default): load this savestate (another scene) before the
+    # encounter's. SP8d, 2026-10-17: after a 54-minute freeze both training instances reloaded Hang_04 into Hang_04
+    # the slow way (3.6 s instead of 0.5 s) without DebugMod's RoomSpecific battle restore (wave 0, never started:
+    # "the wave-start savestate did not start wave 7"); a load from another scene still restores and starts it
+    preload = os.environ.get("SSBOT_RESET_PRELOAD", "").strip()
+    if preload:
+        try:
+            link.rpc("savestate.load", timeout_s=40, name=preload, timeout=30)
+        except (OracleError, TimeoutError) as e:
+            errors.append(f"preload {preload}: {e}")
     for attempt in range(3):
         t0 = time.perf_counter()
         try:
