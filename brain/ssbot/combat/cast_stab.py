@@ -530,7 +530,7 @@ class CastStab:
             if r.phase == "prep":
                 m = self._step_prep(r, f, t, s, e, st, tin, ground, accepting, latch)
             elif r.mode == "under":
-                m = self._step_cunder(r, f, t, s, e, st, ground)
+                m = self._step_cunder(r, f, t, s, e, st, ground, latch)
             else:
                 m = self._step_stop(r, f, t, s, e, st, ground, accepting) if r.mode == "stop" else \
                     self._step_stab(r, f, t, s, e, st, ground)
@@ -547,7 +547,7 @@ class CastStab:
             if st in ("Cast Slam Antic", "Cast Slam Antic 2", JUMP_ANTIC[0]):
                 self._jump_kind[e.get("iid")] = "jump" if st == JUMP_ANTIC[0] else "cast"
             elif st in ("Jump", "Air") and e.get("iid") in self._jump_kind:
-                return self._start_under(f, t, s, e, st, tin, ground, hp)
+                return self._start_under(f, t, s, e, st, tin, ground, hp, latch)
         if st == "Cast Slam Antic":
             kind = "cast"
         elif st == JUMP_ANTIC[0] and (self.slam_dash or self.corner or esc_m):
@@ -772,7 +772,7 @@ class CastStab:
         return None
 
     def _start_under(self, f: int, t: float, s: dict, e: dict, st: str, tin: float, ground: bool,
-                     hp: int) -> int | None:
+                     hp: int, latch=None) -> int | None:
         """At its take-off (the first Jump / Air tick after an antic seen): the way under when its centre is within
         corner_from_u of the wall behind it, one live Clapper, she on the ground in front within corner_under_max and
         the wall rule's landing leaves a behind spot."""
@@ -815,12 +815,13 @@ class CastStab:
         r.at_aim = {"x": round(x_rel, 2), "feet": round(feet, 2), "clip": str((h.get("anim") or {}).get("clip"))}
         r.under = {"x0c": cx, "land": land, "f0": round(since, 1)}
         self.run = r
-        m = self._step_cunder(r, f, t, s, e, st, ground)
+        m = self._step_cunder(r, f, t, s, e, st, ground, latch)
         if m is not None:
             r.last_m = m
         return m
 
-    def _step_cunder(self, r: Stab, f: int, t: float, s: dict, e: dict, st: str | None, ground: bool) -> int | None:
+    def _step_cunder(self, r: Stab, f: int, t: float, s: dict, e: dict, st: str | None, ground: bool,
+                     latch=None) -> int | None:
         """Toward the wall to the behind spot of the (pushed-out) landing: a walk when it gets her past its back
         (walk_clear_u) by aim + corner_walk_end_f, else one ground dash under its body while it is high (rising, or
         its bottom well above her head); never into its body's x span while its bottom is below her head + the gap;
@@ -875,6 +876,11 @@ class CastStab:
         dash_ok = (len(u.get("dashes", ())) < 2 and float(tm.get("dash_cd") or 0.0) <= 0.02 and high
                    and (vy >= 0.0 or body is None or body[2] >= top + 1.5) and d >= c.corner_dash_min_d)
         if not walk_fits and dash_ok:
+            if latch is not None and not _clean(latch, toward | M_DASH):
+                # SP9b t1: a planner key away from it still held by the key filter latched with the dash (left and
+                # right never together): the air dash went away from the wall - toward first, the dash next frame
+                u["latch_wait"] = u.get("latch_wait", 0) + 1
+                return toward
             u["dash"] = round(since, 1)                    # (a ground dash, or the air dash when she is up)
             u.setdefault("dashes", []).append(u["dash"])
             return toward | M_DASH

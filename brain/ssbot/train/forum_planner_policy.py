@@ -857,7 +857,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play = tm_
                 self.counts["two_play"] += 1
         elif esc_on:
-            self.two.esc_yield(f)                 # SP9b: another script has the keys: a running hop ends
+            self.two.esc_yield(f, s)              # SP9b: another script has the keys: a running hop ends
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog

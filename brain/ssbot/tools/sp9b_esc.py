@@ -261,6 +261,55 @@ def summarize(J: list[dict], n_ep: int) -> dict:
     return out
 
 
+def attach_runs(J: list[dict], row: dict) -> None:
+    """The policy's SP9b records (two_play esc_runs, f_a = the STATE frame that first showed the antic) onto the
+    scanned jumps (the recording's first antic frame; the same jump within 6 frames)."""
+    tp = ((row.get("policy") or {}).get("two_play") or {}).get("esc") or {}
+    runs = tp.get("esc_runs") or ()
+    for j in J:
+        r = next((r for r in runs if 0 <= r["f_a"] - j["f_a"] <= 6), None)
+        j["run"] = r
+
+
+def gate(J: list[dict]) -> dict:
+    """The SP9b fixed-point gate per arm: F's escape jumps the arm's script took (run mode corner / switch), no HP lost
+    from the antic to the landing + 60 frames; with the arm's own checks."""
+    E = [j for j in J if j["esc"] and j.get("run") and j["run"].get("mode")]
+    if not E:
+        return {"n": 0}
+    safe = [j for j in E if not j["hp1"]]
+    out = {"n": len(E), "safe": len(safe), "share": round(len(safe) / len(E), 3),
+           "by_kind": {k: [sum(1 for j in E if j["kind"] == k), sum(1 for j in safe if j["kind"] == k)]
+                       for k in ("jump", "cast")},
+           "hp1_src": dict(Counter(src for j in E for _, _, src in j["hp1"])),
+           "safe_land3": sum(1 for j in E if not j["hp3"]),
+           "hits_F_antic_flight_land1_land3": [round(float(np.mean([j["hits"][k] for j in E])), 2)
+                                               for k in ("antic", "flight", "land1", "land3")],
+           "hits_B_jump_land1_land3": [round(float(np.mean([j["hits_o"][k] for j in E])), 2)
+                                       for k in ("jump", "land1", "land3")],
+           "ends": dict(Counter(j["run"].get("end") for j in E))}
+    corner = [j for j in E if j["run"]["mode"] == "corner"]
+    if corner:
+        hops = [j["run"]["hop"] for j in corner if j["run"].get("hop")]
+        out["corner"] = {"n": len(corner), "behind_at_land": sum(1 for j in corner if (j["run"].get("u_land") or 0) < 0),
+                         "exit": dict(Counter(j["run"].get("exit") for j in corner)),
+                         "hops": len(hops), "hop_end": dict(Counter(h.get("end") for h in hops)),
+                         "hop_b": pct([h.get("b") for h in hops]), "hop_u_end": pct([h.get("u_end") for h in hops]),
+                         "rune_lit_hit": sum(1 for j in corner if j["rune"] and j["rune"]["lit_hit"])}
+    sw = [j for j in E if j["run"]["mode"] == "switch"]
+    if sw:
+        pr = [j["run"].get("press") or {} for j in sw]
+        out["switch"] = {"n": len(sw), "pressed": sum(1 for p in pr if p.get("f") is not None),
+                         "press_f": pct([p.get("f") for p in pr]), "hit_in_tail": sum(1 for p in pr if
+                                                                                  p.get("hit") is not None
+                                                                                  and p["hit"] <= 22),
+                         "b_next": dict(Counter(p.get("b_next") for p in pr)),
+                         "b_next_close": sum(1 for p in pr if p.get("b_next") in ("Slam Antic", "Spell Antic",
+                                                                                    "Evade Scuttle")),
+                         "why": dict(Counter(p.get("why") for p in pr if p.get("why")))}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--manifest", action="append", required=True)
@@ -284,10 +333,12 @@ def main(argv=None) -> int:
                 continue
             n_ep[arm] += 1
             ep = f"{run.name[:15]}{run.name[-2:] if run.name.endswith('_2') else ''}_i{inst}_e{row['episode']}"
-            for j in scan(row, dec.get(int(row["episode"]), {})):
+            jj = scan(row, dec.get(int(row["episode"]), {}))
+            attach_runs(jj, row)
+            for j in jj:
                 j["ep"] = ep
                 J[arm].append(j)
-    res = {arm: summarize(v, n_ep[arm]) for arm, v in J.items()}
+    res = {arm: summarize(v, n_ep[arm]) | {"gate": gate(v)} for arm, v in J.items()}
     for arm, v in res.items():
         print(arm, json.dumps(v, indent=1, default=str))
         if a.all:
@@ -297,6 +348,11 @@ def main(argv=None) -> int:
                           f"prev {j['prev']}:{j['plen']} hits {j['hits']} o {j['hits_o']} hp1 {j['hp1']} her {j['her']} "
                           f"rune {j['rune']} next {j['next']}@{j['k_next']} o {j['o_st0']} {j['o_d0']} "
                           f"o_after {j['o_after']} goal {j['goal0']}")
+                    r = j.get("run")
+                    if r:
+                        print(f"      run {r.get('mode')} why {r.get('why')!r} land {r.get('land')} u_land "
+                              f"{r.get('u_land')} exit {r.get('exit')} hop {r.get('hop')} press {r.get('press')} "
+                              f"rune {r.get('rune')} end {r.get('end')}@{r.get('f_end')} hp {r.get('hp')}")
     if a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps({"arms": res, "jumps": J}, indent=1, default=str), "utf-8")

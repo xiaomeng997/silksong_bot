@@ -95,10 +95,10 @@ def test_corner_view_phases_and_hop(corner):
     v = two.esc_view()
     assert v["after_land"] and not v["corner_aim"] and not v["no_hit"]       # its back slashed in Slam 2 / Recover
     out = step_all(two, [fstate(1086, "Slam Recover", 6 / 60, hx=behind), fstate(1100, "Idle", 0.0, hx=behind)])
-    assert out == [None, None] and two.esc.phase == "idle" and two.esc_view()["no_hit"] == frozenset({7})
+    assert out == [None, 0] and two.esc.phase == "idle" and two.esc_view()["no_hit"] == frozenset({7})   # stands still
     # its coin moment passes with it still idle: the hop (b 3.5: H 28, the key from 14, the dash at 26)
     out = step_all(two, [fstate(1114, "Idle", 14 / 60, hx=behind)])
-    assert out == [None]                                          # mask frame Idle + 16 < coin_f 17
+    assert out == [0]                                             # mask frame Idle + 16 < coin_f 17: still
     keys = step_all(two, [fstate(1115 + j, "Idle", (15 + j) / 60, hx=behind, ground=j < 2) for j in range(40)])
     H, d0, jd = tp.hop_plan(3.5)
     assert (H, d0, jd) == (28, 14, 26)
@@ -140,7 +140,7 @@ def test_corner_jump_cast_waits_for_the_burst(corner):
     step_all(two, [fstate(1000, "Idle", 0.5), fstate(1001, "Cast Slam Antic"), fstate(1056, "Jump", hx=hx, ground=False),
                    fstate(1110, "Slam 2", hx=hx), fstate(1130, "Idle", 0.0, hx=hx, ents=[_rune(c, False)])])
     out = step_all(two, [fstate(1150, "Idle", 20 / 60, hx=hx, ents=[_rune(c, False)])])
-    assert out == [None] and two.esc.exit is None and two.esc_view()["no_hit"] == frozenset({7})   # no hop, no hit
+    assert out == [0] and two.esc.exit is None and two.esc_view()["no_hit"] == frozenset({7})   # still, no hop, no hit
     step_all(two, [fstate(1175, "Idle", 45 / 60, hx=hx, ents=[_rune(c, True)]),
                    fstate(1182, "Idle", 52 / 60, hx=hx, ents=[_rune(c, False)])])
     assert two.esc.rune == {"seen": 20, "lit": 65, "burst": 72} and two.esc.exit == "rune"
@@ -153,6 +153,12 @@ def test_switch_lock_then_deciding_hit(switch):
     step_all(two, [fstate(1000, "Idle", 0.5, b_x=30.0), fstate(1001, "Jump Antic", b_x=30.0)])
     v = two.esc_view()
     assert v["mode"] == "switch" and v["hold"] == 99 and v["no_hit"] == frozenset({99})   # B's hits off: F's lock
+    assert v["stance"] == pytest.approx(30.0 - 7.0)               # before F's aim: 7 u short of B
+    # F's Jump Aim with her at 23 u: it lands 0.916 x (23 - 5 - 18) = 0 u from its take-off, the wall rule (its back
+    # 3.99 < 4: >= 4.4 u from the wall) -> 18.41; the stance 8.3 u past it, at most 2.7 u short of B: 26.71
+    step_all(two, [fstate(1031, "Jump", hx=23.0, b_x=30.0)])
+    assert two.esc.land_pred == pytest.approx(tp.WALL_L + 4.4, abs=0.01)
+    assert two.esc_view()["stance"] == pytest.approx(tp.WALL_L + 4.4 + 8.3, abs=0.01)
     # F lands; she stands 3.5 u in front of B (B faces left: its front edge at 27.75), facing it
     out = step_all(two, [fstate(1031, "Jump", hx=26.5, b_x=30.0, facing=1),
                          fstate(1080, "Slam 2", hx=26.5, b_x=30.0, facing=1),
@@ -234,3 +240,28 @@ def test_gauntlet_hold_and_no_hit(monkeypatch):
     fc[0] = subj(1, CC, 20.0, y=7.45, state="Jump Antic", family=gt.CC_JUMP, committed=True, t_free=1.4)
     p = t.decide(world(24.0, t=10.1, ents=ents), WinFc(fc, t_min=0.1), None, 3)
     assert p.target == 1 and p.stance_x == pytest.approx(24.4) and "esc corner" in t.last["goal_why"]
+
+
+def test_block_b_jumping_casting_or_near(corner, monkeypatch):
+    for b_st, why in (("Air", "other jumping"), ("Cast 2", "other casting")):
+        two = tp.TwoPlay()
+        step_all(two, [fstate(1000, "Idle", 0.5, b_st=b_st), fstate(1001, "Jump Antic", b_st=b_st)])
+        assert two.esc.mode is None and two.esc.why == why and two.esc_view() is None
+    monkeypatch.setattr(tp, "ESC_CORNER", False)
+    monkeypatch.setattr(tp, "ESC_SWITCH", True)
+    two = tp.TwoPlay()                                            # B 7 u from her: no room to hold 7.5 u short
+    step_all(two, [fstate(1000, "Idle", 0.5, b_x=WALL_X + 11.0), fstate(1001, "Jump Antic", b_x=WALL_X + 11.0)])
+    assert two.esc.mode is None and two.esc.why == "b near"
+
+
+def test_corner_under_dash_waits_for_the_latch(monkeypatch):
+    monkeypatch.setattr(cs, "TWO_CORNER", True)
+    esc = {"iid": 7, "mode": "corner", "back_u": 6.2}
+    c = cs.CastStab(dash_slash=True, combo=True, stop=True, slam_dash=False, corner=False)
+    c.step(1001, _cs_state(1001, "Cast Slam Antic", 0.0, WALL_X + 7.0), True, True, 1001 / 60.0, esc=esc)
+    away = lambda m: (m & ~(sp.M_L | sp.M_R)) | sp.M_R                    # the filter latches a key away from it
+    m = c.step(1056, _cs_state(1056, "Jump", 0.0, WALL_X + 4.5), True, True, 1056 / 60.0, latch=away, esc=esc)
+    assert c.run is not None and c.run.mode == "under" and m == sp.M_L and c.run.under.get("latch_wait") == 1
+    m = c.step(1057, _cs_state(1057, "Jump", 1 / 60, WALL_X + 4.5), True, True, 1057 / 60.0, latch=lambda x: x,
+               esc=esc)
+    assert m == sp.M_L | sp.M_DASH

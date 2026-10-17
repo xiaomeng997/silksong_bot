@@ -1149,6 +1149,9 @@ class GauntletTactics:
             # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only
             out = replace(out, no_pogo=frozenset({g.target}),
                           ground_hit=frozenset(out.ground_hit) | frozenset({g.target}))
+        if esc is not None and esc.get("stance") is not None and g.target == esc.get("hold"):
+            # SP9b arm B (t1): short of B before the focus's Jump Aim, outside its landing hammer / circle after it
+            out = replace(out, stance_x=float(esc["stance"]))
         if esc is not None and esc.get("no_hit"):
             # SP9b: no hit counts on these now (arm A: the focus idle with her in the corner; arm B: the other one
             # while the focus's flag is on)

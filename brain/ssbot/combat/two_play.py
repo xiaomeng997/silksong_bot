@@ -146,6 +146,17 @@ class EscCfg:
     # arm B (TWO_WALLSWITCH)
     sw_tail_f: int = 22       # F's tail: Slam 2 + Slam Recover, 19-20 frames from the landing to its Idle
     sw_end_f: int = 60        # the switch run ends this long after F's landing at the latest
+    # (t1 fix) F's jump aims at her x at its Jump Aim (lands 5 u short of her, on its side): the landing hammer (Slam
+    # Collider 2, 0.67 - 7.76 u in front of the landing) and the jump cast's circle (landing + 6.48 u, r 7.19) cover the
+    # ground in front of her there. So before the aim she holds sw_hold_j (jump slam) / sw_hold_c (jump cast) u short
+    # of B's centre, after the aim she goes to the landing + sw_safe_j / sw_safe_c (outside the hammer / the circle +
+    # her half width + margin) and no nearer to B than sw_b_gap (its Idle front 2.25 + 0.23 + 0.2); a switch only when
+    # B is on the open side at least sw_hold + 0.5 u from her
+    sw_hold_j: float = 7.0
+    sw_hold_c: float = 12.0
+    sw_safe_j: float = 8.3
+    sw_safe_c: float = 14.2
+    sw_b_gap: float = 2.7
 
 
 def _esc_cfg() -> EscCfg:
@@ -207,6 +218,8 @@ class EscRun:
     f_idle: int | None = None  # F's first Idle after the landing
     u_land: float | None = None  # her x along its facing from its centre at the landing (- = the corner side)
     x_land: float | None = None  # F's x at the landing
+    aim_hx: float | None = None  # her x at F's Jump Aim (its first flight STATE) and F's predicted landing x from it
+    land_pred: float | None = None
     hits_f: list = field(default_factory=list)    # (frame - f_a, phase) of landed hits on F / on B
     hits_b: list = field(default_factory=list)
     hp: list = field(default_factory=list)        # frames (- f_a) of HP losses while the run lasts
@@ -317,6 +330,7 @@ class TwoPlay:
         self.esc_n: Counter = Counter()
         self._esc_hop_f: int | None = None   # the hop's latched press frame (mask frame j = 0)
         self._esc_hop_plan: tuple | None = None
+        self._sw_stance_x: float | None = None  # arm B's stance this tick (F's flag on)
 
     # ---- helpers ----
 
@@ -567,6 +581,7 @@ class TwoPlay:
             v["hold"] = r.other
             if r.f_land is None:
                 v["no_hit"] = frozenset({r.other})        # F's flag on: a hit on B is cancelled (its coin then)
+                v["stance"] = self._sw_stance_x           # short of B / outside F's landing (t1)
         return v
 
     def _esc_observe(self, f: int, s: dict, t: float, hx: float | None, antics: list) -> None:
@@ -579,6 +594,9 @@ class TwoPlay:
                 self._esc_start(f, s, e, cs, hx, hp)
                 if self.esc is not None:
                     break
+        r = self.esc
+        sw_on = r is not None and r.mode == "switch" and r.f_land is None
+        self._sw_stance_x = self._sw_stance(f, s) if sw_on else None
 
     def _esc_start(self, f: int, s: dict, e: dict, cs: list, hx: float, hp: int) -> None:
         c = self.ecfg
@@ -594,14 +612,20 @@ class TwoPlay:
         if d > c.d_u or d > do:
             self.esc_n["no_near"] += 1
             return
-        mode, why = None, ""
-        if ESC_CORNER:
-            mode = "corner"
-        elif ESC_SWITCH:
-            why = self._sw_block(f, s, o, hx)
-            mode = None if why else "switch"
         face = face_of(e)
-        self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind="jump" if st == "Jump Antic" else "cast", f_a=f,
+        kind = "jump" if st == "Jump Antic" else "cast"
+        why = self._esc_block(f, s, e, o, hx)
+        mode = None
+        if not why:
+            if ESC_CORNER:
+                mode = "corner"
+            elif ESC_SWITCH:
+                hold = c.sw_hold_j if kind == "jump" else c.sw_hold_c
+                if (ox - hx) * face < hold + 0.5:
+                    why = "b near"                       # no room to hold short of B (t1: F's landing hammer)
+                else:
+                    mode = "switch"
+        self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f,
                           k_a=int(round(tin * 60.0)), x0=round(cx, 3), face=face, back0=round(back, 2),
                           rel0=round((hx - cx) * face, 2), o_st=_sp.control(o)[0], o_d=round(do, 2), mode=mode,
                           hp0=hp, why=why)
@@ -610,17 +634,40 @@ class TwoPlay:
         if why:
             self.esc_n[f"no_switch_{why}"] += 1
 
-    def _sw_block(self, f: int, s: dict, o: dict, hx: float) -> str:
-        """Why B cannot be the target now ("" when it can): in a jump move (its landing aims at her), or a rune circle
-        (lit or to come) over the way to it."""
+    def _esc_block(self, f: int, s: dict, e: dict, o: dict, hx: float) -> str:
+        """Why neither arm takes F's escape jump ("" when it can; t1): B in a jump move (its landing aims at her, the
+        corner and the way to B both in reach) or casting (its outer small-rune rings reach the corner: 2 of t1's corner
+        HP losses), or a rune circle (lit or to come) over the corner / her / the way to B."""
         st = _sp.control(o)[0]
         if st in JUMP_ST:
             return "other jumping"
-        ox = float(o["pos"][0])
-        lo, hi = min(hx, ox), max(hx, ox)
+        if st in CAST_ST:
+            return "other casting"
+        ox, cx = float(o["pos"][0]), float(e["pos"][0])
+        wall = WALL_L if face_of(e) > 0 else WALL_R
+        lo, hi = min(hx, ox, cx, wall), max(hx, ox, cx, wall)
         if any(a < hi and b > lo for a, b in self._rune_threats(f, s)):
             return "rune"
         return ""
+
+    def _sw_stance(self, f: int, s: dict) -> float | None:
+        """Arm B's stance for L2 while F's flag is on (EscCfg sw_*): short of B before F's Jump Aim, outside F's landing
+        hammer / its circle after it, never nearer to B than sw_b_gap."""
+        r = self.esc
+        c = self.ecfg
+        o = clapper_by(s, r.other)
+        if o is None:
+            return None
+        ox = float(o["pos"][0])
+        sgn = r.face                                       # from F toward the open side (B's side)
+        near_b = ox - sgn * c.sw_b_gap
+        if r.land_pred is None:
+            x = ox - sgn * (c.sw_hold_j if r.kind == "jump" else c.sw_hold_c)
+        else:
+            x = r.land_pred + sgn * (c.sw_safe_j if r.kind == "jump" else c.sw_safe_c)
+            if (x - near_b) * sgn > 0:
+                x = near_b
+        return min(max(x, WALL_L + 0.5), WALL_R - 0.5)
 
     def _esc_update(self, f: int, s: dict, hx: float | None, hp: int, cs: list) -> None:
         r = self.esc
@@ -653,6 +700,12 @@ class TwoPlay:
         k_st = int(round(tin * 60.0))
         if r.phase == "antic" and st in FLIGHT_ST:
             r.phase, r.f_take = "flight", f - k_st
+            if hx is not None:
+                # its landing is decided at the Jump Aim from her x (jump_behind.landing: 0.916 x the offset to 5 u
+                # short of her, at most 12; the wall rule)
+                from ssbot.combat import jump_behind as _jbm
+                r.aim_hx = round(hx, 3)
+                r.land_pred = round(float(_jbm.landing(r.x0, hx, r.face)), 3)
         if r.phase in ("antic", "flight") and st not in ESC_PRE + FLIGHT_ST:
             r.phase = "landed"
             r.f_land = f - k_st if st == "Slam 2" else f
@@ -727,19 +780,21 @@ class TwoPlay:
         if u > -0.5:
             r.exit = "front"                               # not in the corner: nothing to leave
             return None
-        if r.kind == "cast":
-            # behind it, no hit (esc_view), until its rune circle burst
-            if "burst" in r.rune or f - r.f_land > c.rune_wait_f:
-                r.exit = "rune"
-            return None
         if r.phase == "landed":
             return None                                    # its back slashed (the planner)
         if st != "Idle":
             r.exit = "moved"
             return None
+        if r.kind == "cast":
+            # behind it, no hit (esc_view), until its rune circle burst: standing still (t1: a planner dash at the wall
+            # went into its turned Idle body)
+            if "burst" in r.rune or f - r.f_land > c.rune_wait_f:
+                r.exit = "rune"
+                return None
+            return self._corner_hold(f, s, ground, accepting, -u)
         k_idle = f - r.f_idle + SEND_AHEAD                 # the mask's frame from its Idle entry
         if k_idle < c.coin_f:
-            return None                                    # the planner, no hit on it
+            return self._corner_hold(f, s, ground, accepting, -u)   # no hit on it, standing still
         if k_idle > c.coin_f + 15:
             r.exit = "late"                                # (another script had the keys): its Idle may end mid-hop
             return None
@@ -764,6 +819,18 @@ class TwoPlay:
         self._esc_hop_f = f + SEND_AHEAD
         self.esc_n["hops"] += 1
         return self._hop_keys(f, s, ground)
+
+    def _corner_hold(self, f: int, s: dict, ground: bool, accepting: bool, b: float) -> int | None:
+        """Arm A's wait in the corner (F idle, she behind it): no key when she stands >= hop_b_min behind it on the
+        ground and B cannot reach her; else the planner."""
+        if not (ground and accepting) or b < self.ecfg.hop_b_min:
+            return None
+        if any(x in str(((s.get("hero") or {}).get("anim") or {}).get("clip") or "") for x in NO_ATK_CLIPS):
+            return None
+        if other_danger(s, self.esc.iid, _sp.hero_x(s), self._rune_threats(f, s)) is not None:
+            return None
+        self.esc_n["corner_hold"] += 1
+        return 0
 
     def _hop_keys(self, f: int, s: dict, ground: bool) -> int | None:
         r = self.esc
@@ -840,11 +907,13 @@ class TwoPlay:
             return toward
         return None
 
-    def esc_yield(self, f: int) -> None:
+    def esc_yield(self, f: int, s: dict | None = None) -> None:
         """Another script took the keys: a running hop ends."""
         r = self.esc
         if r is not None and self._esc_hop_f is not None:
-            r.hop.update(j_end=f + SEND_AHEAD - self._esc_hop_f, end="yield")
+            e = clapper_by(s, r.iid) if s is not None else None
+            u = None if e is None else round((_sp.hero_x(s) - float(e["pos"][0])) * r.face, 2)
+            r.hop.update(j_end=f + SEND_AHEAD - self._esc_hop_f, u_end=u, end="yield")
             self._esc_close(f, "hop")
 
     def esc_stats(self) -> dict:
@@ -884,7 +953,9 @@ class TwoPlay:
             if st in BODY_ST:
                 spans.append((cx - 2.5 - HALF_W, cx + 2.5 + HALF_W, "body 2.5u"))
             j = self.jumps.get(e.get("iid"))
-            if j is not None and not j.get("done") and j["aim_hx"] is not None:
+            corner_own = ESC and self.esc is not None and self.esc.mode == "corner" and self.esc.iid == e.get("iid")
+            if j is not None and not j.get("done") and j["aim_hx"] is not None and not corner_own:
+                # (SP9b arm A: the corner owns the focus's own escape jump - behind its landing)
                 # from its Jump Aim on (the landing follows her x until then)
                 from ssbot.combat.tactics.gauntlet import jump_landing
                 land = jump_landing(j["x0"], j["aim_hx"], j["face"])
