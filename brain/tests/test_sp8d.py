@@ -115,11 +115,17 @@ def simulate(x_rel0=4.3, cx=31.0, flip=False, cfg=None, n=140, a1=None, lit_lead
     return h, rows
 
 
-def test_off_by_default(monkeypatch):
+def test_follows_v2(monkeypatch):
+    # since the SP8d A/B: unset it follows SSBOT_FORUM_V2, =0 turns it off
     monkeypatch.delenv("SSBOT_FORUM_RUNE_LOWHOP", raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
         assert not importlib.reload(lh).ENABLED
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+        assert importlib.reload(lh).ENABLED
+        monkeypatch.setenv("SSBOT_FORUM_RUNE_LOWHOP", "0")
+        assert not importlib.reload(lh).ENABLED
+        monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
         monkeypatch.setenv("SSBOT_FORUM_RUNE_LOWHOP", "1")
         assert importlib.reload(lh).ENABLED
     finally:

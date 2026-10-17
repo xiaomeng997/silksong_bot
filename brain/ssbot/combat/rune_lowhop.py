@@ -2,7 +2,8 @@
 the jump is timed precisely, you do not even need to jump higher than the Clapper and can slash the whole time";
 forum.md 75).
 
-SSBOT_FORUM_RUNE_LOWHOP=1 (read by train.forum_planner_policy; default off until its A/B; one live Clapper only): when
+SSBOT_FORUM_RUNE_LOWHOP (read by train.forum_planner_policy; since the SP8d A/B on with SSBOT_FORUM_V2, =0 off; one live
+Clapper only): when
 the Clapper (Song Heavy Sentry) enters Spell Antic the bot plays the cast as a script: on the ground in front of it,
 side slashes on the 19-frame rhythm, and one jump per bomb that covers her, its press frame and hold length chosen so
 her box bottom stays above that bomb's circle while it is lit and as low as that allows; slashes in the air on the
@@ -66,7 +67,10 @@ def _on(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip() == "1"
 
 
-ENABLED = _on("SSBOT_FORUM_RUNE_LOWHOP")
+# SP8d A/B (forum.md 75.4; b2c14cd, rnjb vs sp8lh, 16 episodes each, the same seeds: kill p50 21.6 -> 19.5 s, landed / s
+# 1.027 -> 1.126 (90 % +0.034 .. +0.165), HP-hitless 16 = 16; the person's rule "the faster arm is the default"): unset,
+# SSBOT_FORUM_RUNE_LOWHOP follows SSBOT_FORUM_V2 (on with v2, off without it); =0 turns it off (arm rnsp8d0).
+ENABLED = _on("SSBOT_FORUM_RUNE_LOWHOP", "1" if _on("SSBOT_FORUM_V2") else "0")
 CLAPPER = _sp.CLAPPER
 CAST_ST = ("Spell Antic", "Cast 1", "Cast 2")
 M_L, M_R, M_A, M_J = _sp.M_L, _sp.M_R, _sp.M_A, _sp.M_J
