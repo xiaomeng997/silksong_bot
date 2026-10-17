@@ -44,22 +44,32 @@ def on(monkeypatch):
     yield
 
 
-def test_off_by_default(monkeypatch):
+def test_switches_follow_v2(monkeypatch):
     for k in SW:
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("SSBOT_FORUM_V2", "1")
+    monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
     try:
         m = importlib.reload(tp)
-        assert not (m.CHASE or m.IDLEHIT or m.CAST or m.SPACE or m.OPEN or m.ANY)
-        for k in SW:
-            monkeypatch.setenv(k, "1")
+        assert not (m.CHASE or m.IDLEHIT or m.CAST or m.SPACE or m.OPEN or m.ANY)       # no v2: off
+        monkeypatch.setenv("SSBOT_FORUM_V2", "1")
         m = importlib.reload(tp)
-        assert m.CHASE and m.IDLEHIT and m.CAST and m.SPACE and m.OPEN and m.ANY
+        assert m.CHASE and m.IDLEHIT and m.CAST and m.SPACE and m.OPEN and m.ANY        # since the SP9a A/B
+        assert importlib.reload(sp).TWO_PLAY
+        from ssbot.combat.tactics import gauntlet as gt
+        assert importlib.reload(gt).TWO_FOCUS
+        for k in SW + ("SSBOT_FORUM_TWO_PLAY", "SSBOT_FORUM_TWO_FOCUS"):
+            monkeypatch.setenv(k, "0")
+        m = importlib.reload(tp)
+        assert not (m.CHASE or m.IDLEHIT or m.CAST or m.SPACE or m.OPEN or m.ANY)       # =0: off (arm rnsp9a0)
+        assert not importlib.reload(sp).TWO_PLAY and not importlib.reload(gt).TWO_FOCUS
     finally:
-        for k in SW:
+        for k in SW + ("SSBOT_FORUM_TWO_PLAY", "SSBOT_FORUM_TWO_FOCUS"):
             monkeypatch.delenv(k, raising=False)
         monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
         importlib.reload(tp)
+        importlib.reload(sp)
+        from ssbot.combat.tactics import gauntlet as gt
+        importlib.reload(gt)
 
 
 def run(two, ss, focus=7, two_enc=False, wake_f=None):

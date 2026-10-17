@@ -155,7 +155,7 @@ NEAR = _on("SSBOT_FORUM_SLAM_PLAY_NEAR", _V2)
 # early_cd apart and the STATE's atk_cd) and the slash from her x at the mask's frame meets its body box; after the last
 # early press the walk into STAND as before (a hit leaves her ~1 u farther: its 0.48 u + her recoil ~0.5 u).
 EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY", _V2)
-# SSBOT_FORUM_TWO_PLAY (task 1v1 SP7, default off; forum.md 71): two Clappers (the final wave, Forum_W_w13). Off, the
+# SSBOT_FORUM_TWO_PLAY (task 1v1 SP7; since SP9a follows SSBOT_FORUM_V2, =0 off; forum.md 71 / 76): two Clappers (the final wave, Forum_W_w13). Off, the
 # playbook follows the first Clapper of the STATE only (clapper()): SP7's baseline (8 w13 episodes of the v2 default)
 # saw 7 of its 30 slams, and 12 of the 13 hammer hits came from the other one. On: the script follows the Clapper that
 # enters Slam Antic (the nearest to the hero when both do; a handled slam is not looked at again until that Clapper
@@ -164,7 +164,8 @@ EARLY = _on("SSBOT_FORUM_SLAM_PLAY_EARLY", _V2)
 # runes within TWO_CAST_U, in its recovery within TWO_BODY_U, or its jump cast's rune circle - centre 6.48 u in front of
 # the landing, r 7.19: -0.7 .. +13.7 u, lit 63-86 frames after the landing - still to burst over the stand point). The
 # other one cannot start a move while this one is in its antic .. Slam 1 (Buddy Is Attacking), only finish one.
-TWO_PLAY = _on("SSBOT_FORUM_TWO_PLAY")
+# SP9a A/B (forum.md 76): follows SSBOT_FORUM_V2 when unset (=0 off), with the SP9a switches
+TWO_PLAY = _on("SSBOT_FORUM_TWO_PLAY", _V2)
 TWO_JUMP_ST = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2", "Jump Aim", "Cast Jump", "Jump", "Air")
 TWO_SLAM_U = 12.5           # the hammer reaches 12 u in front of its centre (+ her half width 0.23 + 0.3)
 TWO_CAST_U = 9.0            # the small runes' rings around the caster

@@ -120,10 +120,12 @@ JB_GROUND_FIRST = ("jump: under and behind (landed)", "jump: under and behind (f
 # ground_hit checked (None, CC_EVADE) only (SP4 t3: no ground_hit while it idled after a small rune cast; the pogo
 # counted 2 landed hits)
 SP4_IDLE_FAMS = (None, "CC_EVADE", CC_IDLE)
-# SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7, default off; forum.md 71): with two Clappers in play (and nobody else), L2's
+# SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7; since SP9a follows SSBOT_FORUM_V2, =0 off; forum.md 71 / 76): with two Clappers in play (and nobody else), L2's
 # goal is RUSH on the focus (GauntletTactics._two_focus), never KITE (SP7's baseline: 8 of 8 w13 episodes QUIT at 1 HP,
 # most hits under KITE(EVADE) with the hero in the air)
-TWO_FOCUS = os.environ.get("SSBOT_FORUM_TWO_FOCUS", "0").strip() == "1"
+# SP9a A/B (forum.md 76): follows SSBOT_FORUM_V2 when unset (=0 off), with the SP9a switches
+TWO_FOCUS = os.environ.get("SSBOT_FORUM_TWO_FOCUS", "1" if os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1" else "0"
+                           ).strip() == "1"
 TWO_HYST_U = 1.0            # a switch needs the other one this much more room to its outer wall (u)
 TWO_CLOSE_U = 7.0           # ... and her within this of its centre in time (inside its Slam Range, 8.05 u)
 TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down near an idle Clapper, NODASH)

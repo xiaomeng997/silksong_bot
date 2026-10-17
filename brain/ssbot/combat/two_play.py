@@ -1,7 +1,9 @@
 """Two Clappers, SP9a (task 1v1 SP9a, Forum_W_w13; the spec C:/ssbot/data/m2_play/switch/answer.txt section 5 S1-S6,
 human_two/answer.txt R2-R7 and R9, buddy/answer.txt R1-R3; forum.md 76).
 
-Every rule has its own switch, default off; with all off nothing here runs and every decision is the one before.
+Every rule has its own switch; since the SP9a A/B (594bb71, 32 episodes per arm: kills 10 -> 36 Clappers, landed / s
+0.70 -> 1.27, HP hits / min 5.67 -> 4.46) each follows SSBOT_FORUM_V2 when unset, =0 off; with all =0 nothing here runs
+and every decision is the one before (arm rnsp9a0).
 F = the focus (L2's target when it is a Clapper, else the Clapper nearer to her), B = the other one. Distances are
 centre to centre (her box centre, its transform), + = in front of it (the side it faces); HeroBox 0.46 u wide.
 
@@ -53,11 +55,15 @@ def _on(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip() == "1"
 
 
-CHASE = _on("SSBOT_FORUM_TWO_CHASE")
-IDLEHIT = _on("SSBOT_FORUM_TWO_IDLEHIT")
-CAST = _on("SSBOT_FORUM_TWO_CAST")
-SPACE = _on("SSBOT_FORUM_TWO_SPACE")
-OPEN = _on("SSBOT_FORUM_TWO_OPEN")
+# SP9a A/B (594bb71, forum.md 76; the person's rule "the faster arm is the default", two Clappers: more landed per s and
+# kills, not more HP hits per min): the promoted switches below follow SSBOT_FORUM_V2 when unset (on with v2), =0 off
+# (arm rnsp9a0 = the default with every two-Clapper switch off)
+_V2 = "1" if _on("SSBOT_FORUM_V2") else "0"
+CHASE = _on("SSBOT_FORUM_TWO_CHASE", _V2)
+IDLEHIT = _on("SSBOT_FORUM_TWO_IDLEHIT", _V2)
+CAST = _on("SSBOT_FORUM_TWO_CAST", _V2)
+SPACE = _on("SSBOT_FORUM_TWO_SPACE", _V2)
+OPEN = _on("SSBOT_FORUM_TWO_OPEN", _V2)
 ANY = IDLEHIT or SPACE or OPEN          # the policy's TwoPlay object (CHASE / CAST live in their own scripts)
 
 CLAPPER = _sp.CLAPPER
