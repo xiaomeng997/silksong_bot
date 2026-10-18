@@ -831,7 +831,7 @@ class GauntletTactics:
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
         st = self.stats.setdefault("sp7", {})
         esc = self.two_esc if (two_play.ESC or two_play.ASW) else None
-        if esc is not None and (not esc.get("after_land") or esc.get("corner_side")):
+        if esc is not None and (not esc.get("after_land") or esc.get("corner_side") or esc.get("hold_after")):
             # SP9b: the focus's escape jump (antic, flight): arm A holds the focus, arm B the other one (B is locked);
             # arm A also while she is in the corner behind it after its landing (t2)
             g = self._esc_hold(ws, cands, esc, keep, room, t, st)

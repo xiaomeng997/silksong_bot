@@ -104,6 +104,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 
 from ssbot.combat import cast_stab as _cs
+from ssbot.combat import rune_pogo as _rp
 from ssbot.combat import slam_play as _sp
 
 
@@ -131,7 +132,14 @@ ESC_SWITCH = _on("SSBOT_FORUM_TWO_WALLSWITCH", _V2)
 # hit or the corner, of course choose the corner"): with the switch on, the corner (arm A) takes F's escape jump when the
 # switch's only failed gate is "b near" (B too close to hold short of it); default off (=1 on; arm sp9bAB)
 ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
-ESC = ESC_CORNER or ESC_SWITCH
+# SP11a (task 1v1 SP11a; the person's big-rune sequence, the lead's NOTE 4 / 5 of 2026-10-17; combat.rune_pogo):
+# default off (=1 on). F's escape jump CAST with B free: L2 holds B, she goes to B's face and slashes it through F's
+# lock, then the altitude controller (a pogo on B's head, the umbrella; the hero model's plans against F's landing
+# hammer, its circle's dome, B's body / hammer) to the circle's burst; "far" (her spot at B clear of both at F's aim)
+# hands back at once. Plain escape jumps keep TWO_WALLSWITCH; with TWO_ESC_FALLBACK the corner takes the casts the tier
+# does not (B busy, she behind F, B too near F).
+RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER")
+ESC = ESC_CORNER or ESC_SWITCH or RUNETIER
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
 ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
 # SP10c (the lead's NOTE 4 / 5 of 2026-10-17, the person: "the moment one starts its jump antic she can already go and
@@ -642,6 +650,7 @@ class TwoPlay:
         self._runes: dict = {}
         # SP9b: the escape run (F's jump at the wall) and the finished ones
         self.ecfg = _esc_cfg() if ESC else EscCfg()
+        self.rt = _rp.RunePogo() if RUNETIER else None    # SP11a: the pogo tier's controller
         self.esc: EscRun | None = None
         self.esc_done: list[EscRun] = []
         self.esc_n: Counter = Counter()
@@ -743,7 +752,7 @@ class TwoPlay:
     # ---- S2 IdleHit / S6 Opening ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool, focus, t: float, wake_f: int | None = None,
-             two_enc: bool = False, latch=None) -> int | None:
+             two_enc: bool = False, latch=None, sim=None) -> int | None:
         """The mask for frame f + 2 (IdleHit, the Opening, SP9b / SP9c), or None (the planner). latch: m -> the key mask
         the oracle's hold filter latches at f + 2 when m is sent for it (SP9c's dash; None: m)."""
         self.last_part = None                 # SP10a (logging only): which part sent the mask
@@ -755,9 +764,9 @@ class TwoPlay:
                 return am
             self._asw_prev = 0
         if ESC and self.esc is not None:
-            em = self._esc_step(f, s, ground, accepting)
+            em = self._esc_step(f, s, ground, accepting, sim)
             if em is not None:
-                self.last_part = "esc"
+                self.last_part = "rt" if self.esc is not None and self.esc.mode == "pogo" else "esc"
                 return em
         if JUMPHIT and self.jh is not None:
             jm = self._jh_step(f, s, ground, accepting)
@@ -942,6 +951,14 @@ class TwoPlay:
         v = {"iid": r.iid, "other": r.other, "mode": r.mode, "phase": r.phase, "kind": r.kind, "back0": r.back0,
              "back_u": self.ecfg.back_u, "after_land": r.f_land is not None, "corner_aim": False,
              "no_hit": frozenset()}
+        if r.mode == "pogo":
+            # SP11a: L2 holds B through the run (also after F's landing); no hit on B while F's flag is on only with
+            # slash=0 (the person: slash it)
+            v["hold"] = r.other
+            v["hold_after"] = True
+            if not self.rt.cfg.slash and r.f_land is None:
+                v["no_hit"] = frozenset({r.other})
+            return v
         if r.mode == "corner":
             v["hold"] = r.iid
             v["corner_aim"] = r.phase == "antic"
@@ -992,7 +1009,20 @@ class TwoPlay:
         kind = "jump" if st == "Jump Antic" else "cast"
         why = self._esc_block(f, s, e, o, hx)
         mode = None
-        if not why:
+        if RUNETIER and kind == "cast":
+            # SP11a: the pogo tier on F's escape jump cast (B free, she in front of F, B not on F's body)
+            if not why and (hx - cx) * face < 0.5:
+                why = "behind"
+            if not why and (ox - cx) * face < self.rt.cfg.min_db:
+                why = "b near"
+            if not why:
+                mode = "pogo"
+            elif ESC_FALLBACK:
+                mode, why = "corner", ""                 # TWO_ESC_FALLBACK: the corner takes the rest
+                self.esc_n["fallback_corner"] += 1
+            if mode == "pogo":
+                self.rt.start(f, s, e, o, hx, hp, tin)
+        elif not why:
             if ESC_CORNER:
                 mode = "corner"
             elif ESC_SWITCH:
@@ -1109,6 +1139,12 @@ class TwoPlay:
                         r.rune.setdefault("lit", f - r.f_land)
                     elif "lit" in r.rune:
                         r.rune.setdefault("burst", f - r.f_land)
+        if r.mode == "pogo":
+            if self.rt.run is not None:
+                self.rt.update(f, s, hx, hp)
+            if self.rt.run is None:
+                self._esc_close(f, f"rt {self.rt.done[-1].end}" if self.rt.done else "rt")
+            return
         if r.mode == "switch":
             if r.f_land is not None and o is not None:
                 ost = _sp.control(o)[0]
@@ -1130,6 +1166,8 @@ class TwoPlay:
 
     def _esc_close(self, f: int, why: str) -> None:
         r = self.esc
+        if self.rt is not None and self.rt.run is not None:
+            self.rt.close(f, why)                           # SP11a: the tier's run ends with the escape run
         if r is not None:
             r.f_end, r.end = f - r.f_a, why
             self.esc_done.append(r)
@@ -1137,10 +1175,15 @@ class TwoPlay:
         self.esc = None
         self._esc_hop_f = None
 
-    def _esc_step(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
+    def _esc_step(self, f: int, s: dict, ground: bool, accepting: bool, sim=None) -> int | None:
         r = self.esc
         if r is None or r.mode is None:
             return None
+        if r.mode == "pogo":
+            m = self.rt.step(f, s, ground, accepting, sim)
+            if self.rt.run is None:
+                self._esc_close(f, f"rt {self.rt.done[-1].end}" if self.rt.done else "rt")
+            return m
         if r.mode == "corner":
             return self._corner_step(f, s, ground, accepting)
         return self._switch_step(f, s, ground, accepting)
@@ -1318,9 +1361,15 @@ class TwoPlay:
         r.walk += 1
         return M_R if x > hx else M_L
 
+    def rt_critical(self) -> bool:
+        """SP11a: the pogo tier's run holds the keys (the policy steps no other script)."""
+        return RUNETIER and self.rt is not None and self.esc is not None and self.esc.mode == "pogo"             and self.rt.critical()
+
     def esc_stats(self) -> dict:
         runs = self.esc_done + ([self.esc] if self.esc is not None else [])
         out = dict(self.esc_n)
+        if RUNETIER and self.rt is not None:
+            out["rune_tier"] = self.rt.stats()
         out["esc_runs"] = [{"f_a": r.f_a, "kind": r.kind, "mode": r.mode, "why": r.why, "back0": r.back0,
                             "rel0": r.rel0, "k_a": r.k_a, "o_st": r.o_st, "o_d": r.o_d,
                             "take": None if r.f_take is None else r.f_take - r.f_a,

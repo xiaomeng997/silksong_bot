@@ -328,6 +328,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         planner.warm_kernels()
         if air_chain.AIRCHAIN:
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
+        if two_play.RUNETIER:
+            from ssbot.combat import rune_pogo
+            rune_pogo.warm(self.params)       # SP11a: the pogo tier's planner (else compiled inside a tick)
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -809,6 +812,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SP9c: its bomb hop over F's small runes at her x is committed - its script keeps the keys (the others are not
         # stepped, like the low hop's critical window)
         asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
+        # SP11a (SSBOT_FORUM_TWO_RUNETIER): the pogo tier's run holds the keys - no other script is stepped (its keys
+        # come from TwoPlay.step below; the supervisor's still win)
+        rt_crit = two_play.RUNETIER and self.two is not None and self.two.rt_critical()
+        asw_crit = asw_crit or rt_crit
         if self.slam_play is not None and not low_crit and not asw_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
@@ -902,10 +909,14 @@ class ForumPlannerPolicy(PlannerPolicy):
                 def latch_t(m: int, _h=hold, _p=prefix) -> int:
                     lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
                     return int(lat[-1])
+            # SP11a: the hero model of this tick for the pogo tier's plans (only while its run is on)
+            rt_sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
+                      if (two_play.RUNETIER and self.two.rt_critical()) else None)
             tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
-                                two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t)
+                                two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t,
+                                **({"sim": rt_sim} if two_play.RUNETIER else {}))
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
                 own = "two:" + str(getattr(self.two, "last_part", None))
@@ -919,7 +930,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.cog["frames"].add(f + 2)
         if self.pause_owned:
             own = "sup"
-        key = (own, "low" if low_crit else "asw" if asw_crit else None, getattr(prefs, "target", None),
+        key = (own, "low" if low_crit else "rt" if (two_play.RUNETIER and rt_crit) else "asw" if asw_crit else None,
+               getattr(prefs, "target", None),
                self.tac.last.get("goal"), self.tac.last.get("goal_why"))
         if key != self._own_last:
             self._own_last = key
