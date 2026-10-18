@@ -104,10 +104,39 @@ class RtCfg:
     pass_x: float = 3.25        # (the lead's NOTE 8) another Clapper's jump cast at her: under it to this far behind its
     #                             landing (SP10c: 3.0 u clear of its falling body); the pogo on the target the fallback
     pass_on: int = 1            # 0: no pass (NOTE 7's pogo on the target for those too)
+    # ---- SP12b v2 (SSBOT_FORUM_TWO_RT2=1 sets v2; every key below acts only with v2) ----
+    v2: int = 0
+    pass_esc: int = 1           # the escape casts try the pass too (under F to pass_x behind its landing) before the
+    #                             pogo on B (the baseline: 42 of 44 escape casts with her inside the circle at its lit
+    #                             lost HP; behind the landing 25 / 29 kept it)
+    pass_room: float = 3.6      # the pass needs this from the landing to the wall behind it (jump_behind min_back_u +
+    #                             wall_pad_u)
+    lure_m: float = 0.6         # the escape cast's antic stance: at least this past the p whose landing leaves pass_room
+    b_wall: float = 7.0         # no side slash on B in the antic while B's back (to the wall behind it) < this (SP11a:
+    #                             B evaded 43 / 65 and leapt itself 23 / 65 - the slashes pushed it into its escape line)
+    end_behind: int = 1         # the run ends once the caster landed and its hammer is over with her >= min_behind
+    #                             behind the landing on the ground: L2 holds the caster (its rune hold) to the burst +
+    #                             hold_f (combat.tactics.gauntlet "rune: behind")
+    min_behind: float = 2.9
+    hold_f: int = 30
+    leave_u: float = 6.0        # the pogo target left (not a target state, or this far from her) ...
+    leave_f: int = 40           # ... with the circle's lit this many frames away or more: the run ends (the default)
+    b_slam_end: int = 1         # B's Slam Antic ends a pogo run (the playbook takes the slam) unless the circle lights
+    b_slam_keep: int = 25       # within this many frames
+    bombs: int = 1              # the small-rune bombs (rune_bombs' forecast) are a danger of every plan (SP11a: the
+    bomb_m: float = 0.15        # small runes rose to 1.33 / min while the run held the keys and the low hop was idle)
+    iframe: int = 1             # a safe down slash whose contact's i-frames (~9 frames) cover the predicted first lit
+    iframe_lo: int = 3          # frames ranks first: contact in lit0 - iframe_lo .. lit0
+    claw: int = 0               # far casts in the Clawline band (claw_chase variant A, the lead's 05:06 note): 0 the
+    #                             pass, 1 the Clawline, 2 alternate per cast (the fixed point's comparison)
+    stay: int = 1               # best_pass has a "stay" plan (no key; she is already behind)
+
+
+RT2 = os.environ.get("SSBOT_FORUM_TWO_RT2", "0").strip() == "1"
 
 
 def _cfg() -> RtCfg:
-    c = RtCfg()
+    c = RtCfg(v2=1 if RT2 else 0)
     for kv in os.environ.get("SSBOT_FORUM_TWO_RUNETIER_SET", "").replace(";", ",").split(","):
         if "=" not in kv:
             continue
@@ -138,6 +167,11 @@ def body_box(e: dict) -> tuple[float, float, float, float]:
 def landing(x0: float, hx: float, face: int) -> float:
     from ssbot.combat import jump_behind as _jb
     return float(_jb.landing(x0, hx, face))
+
+
+def room_behind(L: float, face: int) -> float:
+    """The room from a landing x to the wall behind it (its back side along its jump facing)."""
+    return (L - WALL_L) if face > 0 else (WALL_R - L)
 
 
 def rune_centre(L: float, face: int) -> float:
@@ -180,6 +214,10 @@ class Ctx:
     f_box: tuple | None = None    # F's body box after its landing (its Slam 2 / Recover / Idle)
     b_hammer: tuple | None = None  # B's slam hammer: (mask frame from, to, x0, x1, top) while B slams
     f_fall: tuple | None = None   # F's flight: (its aim's mask frame, its landing's, x0, L, its facing) - the moving body
+    bombs: np.ndarray | None = None  # (v2) small-rune bombs: rune_bombs.frames rows (owner, x, y, r, on_k, off_k), k
+    #                                  frames from the STATE (mask frame F0 - SEND_AHEAD)
+    bomb_m: float = 0.15
+    lit_pred: int | None = None   # (v2) the predicted first lit mask frame (the i-frame ranking)
 
 
 # F's body in the jump cast's flight (5 recorded flights, 53-55 frames): its box bottom above the floor every 6 frames
@@ -311,6 +349,23 @@ def hammer_hits(ro: kin.Rollout, L: float, face: int, pad: float) -> np.ndarray:
     return _poly_hits(px, py, z, z, b).reshape(N, T1)
 
 
+def bomb_hits(ro: kin.Rollout, bk: np.ndarray, i0: int, m: float) -> np.ndarray:
+    """[N, T1] her box meets a lit small-rune bomb (rune_bombs.frames rows: owner, x, y, r, on_k, off_k; rollout index
+    = i0 + k) grown by m: the box's nearest point to the circle's centre within r + m."""
+    b = ro.box
+    N, T1 = b.shape[:2]
+    out = np.zeros((N, T1), bool)
+    for _o, bx, by, r, on, off in np.asarray(bk, float):
+        lo, hi = max(int(i0 + on), 0), min(int(i0 + off), T1 - 1)
+        if hi < lo:
+            continue
+        sb = b[:, lo:hi + 1]
+        qx = np.clip(bx, sb[..., 0], sb[..., 2])
+        qy = np.clip(by, sb[..., 1], sb[..., 3])
+        out[:, lo:hi + 1] |= (qx - bx) ** 2 + (qy - by) ** 2 < (r + m) ** 2
+    return out
+
+
 def dome_hits(ro: kin.Rollout, rc: float, m: float) -> np.ndarray:
     """[N, T1] her box bottom below the dome (+ m) at her box's x nearest the centre."""
     b = ro.box
@@ -424,6 +479,8 @@ class Planner:
             if hi > self.off:
                 w = (idx >= lo) & (idx <= hi)
                 bad |= box_hits(ro, (x0, FLOOR - 1.0, x1, FLOOR + top), cfg.hammer_m) & w & ~inv
+        if c.bombs is not None and len(c.bombs):
+            bad |= bomb_hits(ro, c.bombs, self.off - SEND_AHEAD, c.bomb_m) & ~inv
         bad[:, :self.off + 1] = False
         return np.where(bad.any(axis=1), np.argmax(bad, axis=1), -1)
 
@@ -540,6 +597,13 @@ class Planner:
         plans = self.evaluate(plans)
         safe = [p for p in plans if p.bad is None]
         dk = self._dk(x0)
+        if self.cfg.v2 and self.cfg.iframe and c.lit_pred is not None:
+            # (SP12b) the down-spike i-frames (~9 frames from the contact) over the predicted first lit frames: a safe
+            # down slash meeting B in lit0 - iframe_lo .. lit0 ranks first (the bounce then lifts her over the dome)
+            lo = c.lit_pred - self.cfg.iframe_lo
+            tim = [p for p in safe if p.kind == "drop" and p.contact is not None and lo <= p.contact <= c.lit_pred]
+            if tim:
+                return min(tim, key=lambda p: (abs(p.contact - (c.lit_pred - 1)), p.d1 - p.d0))
         # 1) keep, no drift or toward the target x; 2) a down slash onto B (the latest press); 3) keep drifting away
         keep = [p for p in safe if p.kind == "keep" and p.dirk in (0, dk)]
         if keep:
@@ -576,12 +640,14 @@ class Planner:
                     out.append((abs(u - c.pass_x), p.d1, p))
             return out
 
-        if prev is not None and prev.kind == "pass" and prev.d1 > F0:
+        if prev is not None and prev.kind == "pass" and (prev.d1 > F0 or (self.cfg.v2 and prev.dirk == 0)):
             q = Plan("pass", prev.dirk, prev.d0, prev.d1, dash=prev.dash, why=prev.why)
             self.evaluate([q])
             if ok([q]):
                 return q
         plans = []
+        if self.cfg.v2 and self.cfg.stay:
+            plans.append(Plan("pass", 0, F0, F0, why="pass stay"))      # (SP12b) already behind: no key
         # (the lead's NOTE 9: "let the far one jump over to me, then go") no move before its aim: rushing at it in its
         # antic makes it jump in place near its own wall, no room behind its landing
         w0 = max((c.a_frame - F0) if (c.a_frame is not None and not c.a_seen) else 0, 0)
@@ -707,6 +773,14 @@ class RtRun:
     ms_plan: list = field(default_factory=list)   # the plans' compute time (ms)
     f_end: int | None = None
     end: str = ""
+    # (SP12b v2)
+    room_b: float | None = None    # the landing's room to the wall behind it (u; predicted at the aim, then seen)
+    kinds: list = field(default_factory=list)     # (f - f_a, plan kind) at each change of the plan's kind
+    behind_f: int | None = None    # the first frame (- f_a) she stood >= min_behind behind the landing after it
+    u_land: float | None = None    # her x ahead of the landing along F's facing at its landing / at the lit / at the end
+    u_lit: float | None = None
+    u_end: float | None = None
+    claw: bool = False             # handed to the late Clawline (claw_chase) at the start
 
 
 class RunePogo:
@@ -725,6 +799,9 @@ class RunePogo:
         self._b_slam_f0: int | None = None    # B's Slam Antic entry (STATE frame) while it slams
         self._umb_f: int | None = None        # the last umbrella press sent (mask frame)
         self._next_plan = 0
+        self.hold_after: tuple | None = None  # (SP12b) (the caster's iid, STATE frame): L2 holds it (its rune hold) to then
+        self._bombs = None                    # (SP12b) this tick's small-rune bomb forecast (rune_bombs.frames)
+        self.claw_runs: list = []             # (SP12b) the far casts handed to the late Clawline (TwoPlay)
 
     # ---- bookkeeping (every tick, TwoPlay._esc_observe) ----
 
@@ -746,6 +823,12 @@ class RunePogo:
         self._press_f = self._drop_f = self._bounce_f = self._b_slam_f0 = self._umb_f = None
         self._next_plan = 0
         self._prev_b = _sp.control(B)[0]
+        self.hold_after = None
+        if self.cfg.v2 and self._prev_b in B_SLAM:
+            # (SP12b) B already in its slam at the start: its hammer from its antic entry (the transition is not seen)
+            bst, btin = _sp.control(B)
+            if bst == "Slam Antic":
+                self._b_slam_f0 = f - int(round(btin * 60.0))
         return r
 
     def update(self, f: int, s: dict, hx: float | None, hp: int) -> None:
@@ -829,11 +912,39 @@ class RunePogo:
             return
         if r.phase == "done":
             return
+        if c.v2 and r.f_land is not None and hx is not None:
+            u = round((hx - r.x_land) * r.face, 2)
+            if r.u_land is None:
+                r.u_land = u
+            if "lit" in r.rune and r.u_lit is None:
+                r.u_lit = u
+            r.u_end = u
         if _sp.control(B)[0] in ("Jump Antic", "Cast Slam Antic"):
             self.close(f, "b jump")              # (fp1: 4 of 10 'other' runs) the target leaps itself: the default play
             return
         if "unlit" in r.rune or (r.f_land is not None and f - r.f_land > c.end_f):
             self.close(f, "burst" if "unlit" in r.rune else "end")
+            return
+        if not c.v2 or r.f_land is None or hx is None:
+            return
+        # ---- SP12b v2 ends ----
+        u = (hx - r.x_land) * r.face
+        lit_in = (r.f_land + (r.rune["lit"] if "lit" in r.rune else c.lit0)) - f
+        kind = self.plan.kind if self.plan is not None else None
+        if c.end_behind and f - r.f_land >= 13 and u <= -c.min_behind and _sp.on_ground(s) and r.tier != "far":
+            # behind the landing, its hammer over: the default play holds the caster (gauntlet's rune hold)
+            r.behind_f = f - r.f_a
+            self.close(f, "behind")
+            return
+        if kind not in ("up", "keep", "drop"):
+            return                               # only a pogo run on B ends on B (a pass / a flee runs on)
+        bst = _sp.control(B)[0]
+        bx = float(B["pos"][0])
+        if c.b_slam_end and bst == "Slam Antic" and lit_in > c.b_slam_keep:
+            self.close(f, "b slam")              # the slam playbook takes B's slam (its strike / way out)
+            return
+        if (bst not in B_FREE or abs(bx - hx) > c.leave_u) and lit_in >= c.leave_f:
+            self.close(f, "b left")              # no pogo target and the circle not due: the default play
 
     def close(self, f: int, why: str) -> None:
         r = self.run
@@ -841,6 +952,12 @@ class RunePogo:
             r.f_end, r.end = f - r.f_a, why
             r.phase = "done"
             self.done.append(r)
+            if self.cfg.v2 and r.f_land is not None and r.u_end is not None and r.u_end <= -self.cfg.min_behind \
+                    and why not in ("F dead",):
+                # (SP12b) she is behind the caster's landing: L2 holds the caster through its circle (the rune hold)
+                lit = r.rune.get("lit")
+                until = r.f_land + (lit + 9 if lit is not None else self.cfg.lit1) + self.cfg.hold_f
+                self.hold_after = (r.iid, until)
         self.run = None
         self.plan = None
 
@@ -849,8 +966,9 @@ class RunePogo:
 
     # ---- the keys (TwoPlay.step) ----
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool, sim) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool, sim, bombs=None) -> int | None:
         r = self.run
+        self._bombs = bombs
         if r is None or r.phase == "done":
             return None
         cs = _sp.clappers(s)
@@ -874,6 +992,8 @@ class RunePogo:
                 return None
         if r.phase == "go" and r.src == "other" and self.cfg.pass_on:
             r.phase = "air"                               # (NOTE 8) the pass / the planner from the antic on
+        if r.phase == "go" and self.cfg.v2 and _sp.control(B)[0] not in B_FREE:
+            r.phase = "air"                               # (SP12b) B busy (its cast): no walk to its face, the planner
         if r.phase == "go":
             if Fm < a_frame - self.cfg.jump_lead:
                 return self._go(f, s, F, B, ground)
@@ -889,6 +1009,8 @@ class RunePogo:
         c = self.cfg
         bx = float(B["pos"][0])
         spot = bx + r.spot_sgn * r.face * c.spot
+        if c.v2 and r.aim_hx is not None:
+            spot = r.aim_hx                            # (SP12b) where she is (the lure stance is not B's face)
         u = (spot - r.L_pred) * r.face                 # her spot ahead of the landing
         rc = (rune_centre(r.L_pred, r.face) - r.L_pred) * r.face
         return u - HALF_W >= max(7.76, rc + RUNE_R) + c.far_m
@@ -903,6 +1025,9 @@ class RunePogo:
         hxw = hx + vx * SEND_AHEAD / 60.0
         bx = float(B["pos"][0])
         spot = bx + r.spot_sgn * r.face * c.spot
+        slash = c.slash
+        if c.v2:
+            spot, slash = self._go_v2(r, B, spot)
         look = 1 if bx > hxw else -1
         toward = M_R if look > 0 else M_L
         if self._press_f is not None and f + SEND_AHEAD - self._press_f == 1:
@@ -911,7 +1036,7 @@ class RunePogo:
         lo, hi = (hxw + _sp.SLASH_X[0], hxw + _sp.SLASH_X[1]) if look > 0 else (hxw - _sp.SLASH_X[1],
                                                                                  hxw - _sp.SLASH_X[0])
         meets = lo < bb[2] - 0.1 and hi > bb[0] + 0.1
-        if c.slash and meets and ground and _atk_ready(s):
+        if slash and meets and ground and _atk_ready(s):
             fc = h.get("facing")
             if fc is None or float(fc) * look <= 0:
                 return toward
@@ -927,6 +1052,34 @@ class RunePogo:
                 ((h.get("can") or {}).get("dash", True)):
             return k | M_DASH
         return k
+
+    def p_need(self, r: RtRun) -> float:
+        """(SP12b) the smallest p (her x ahead of the caster's take-off at its aim - 1) whose landing leaves pass_room to
+        the wall behind it (the wall rule included)."""
+        c = self.cfg
+        for i in range(0, 69):
+            p = 0.25 * i
+            L = landing(r.x0, r.x0 + r.face * p, r.face)
+            if room_behind(L, r.face) >= c.pass_room:
+                return p
+        return 17.0
+
+    def _go_v2(self, r: RtRun, B: dict, spot: float) -> tuple[float, int]:
+        """(SP12b) the escape cast's antic stance: B's face when that leaves the pass its room (p >= p_need + lure_m) or
+        when nothing else does; else the lure point p_need + lure_m in front of F when B's front stays clear of it. The
+        side slash on B only while B's back (its centre to the wall behind it, away from her) >= b_wall."""
+        c = self.cfg
+        bx = float(B["pos"][0])
+        need = self.p_need(r) + c.lure_m
+        p_spot = (spot - r.x0) * r.face
+        if p_spot < need:
+            lure = r.x0 + r.face * need
+            b_front = (bx - r.x0) * r.face - (_sp.BODY_FRONT + HALF_W + 0.5)
+            if need <= b_front:
+                spot = min(max(lure, WALL_L + 0.6), WALL_R - 0.6)
+        b_back = (WALL_R - bx) if r.face > 0 else (bx - WALL_L)
+        slash = c.slash if b_back >= c.b_wall else 0
+        return spot, slash
 
     def _ctx(self, f: int, s: dict, F: dict, B: dict, ground: bool, a_frame: int) -> Ctx:
         r, c = self.run, self.cfg
@@ -977,14 +1130,26 @@ class RunePogo:
         jx0 = r.x0 if r.f_aim is None else None
         j_box = body_box(F) if fst in ("Cast Slam Antic", "Cast Slam Antic 2") else None
         pass_x = c.pass_x if (r.src == "other" and c.pass_on) else None
+        if c.v2 and pass_x is None and c.pass_esc and c.pass_on:
+            # (SP12b) the escape cast's pass under F too, when its landing leaves the room behind it
+            Lp = L if r.f_aim is not None else landing(r.x0, _sp.hero_x(s), r.face)
+            if room_behind(Lp, r.face) >= c.pass_room:
+                pass_x = c.pass_x
         if pass_x is not None:
             Lp = L if r.f_aim is not None else landing(r.x0, _sp.hero_x(s), r.face)
             tx = min(max(Lp - r.face * pass_x, WALL_L + 0.6), WALL_R - 0.6)
+            if c.v2:
+                r.room_b = round(room_behind(Lp, r.face), 2)
+        bombs = None
+        if c.v2 and c.bombs and self._bombs is not None and len(self._bombs):
+            bombs = np.asarray(self._bombs, float)
         return Ctx(F0=f + SEND_AHEAD, b_box=bb, b_x=bx, b_ok=bst in B_FREE, tx=tx, rising=rising, b_vx=bv,
                    jx0=jx0, j_box=j_box, pass_x=pass_x,
                    face=1 if fc is None or float(fc) >= 0 else -1, L=L, f_L=f_L, fface=r.face, rc=rc,
                    lit=(lit0, lit1), a_frame=a_frame, a_seen=r.f_aim is not None, ground=ground, atk_ready_f=rdy,
-                   gliding=gliding, j_held=j_held, f_box=f_box, b_hammer=b_ham, f_fall=f_fall)
+                   gliding=gliding, j_held=j_held, f_box=f_box, b_hammer=b_ham, f_fall=f_fall,
+                   bombs=bombs, bomb_m=c.bomb_m,
+                   lit_pred=(f_L + c.lit0 + 1 if "lit" not in r.rune else r.f_land + r.rune["lit"]) if c.v2 else None)
 
     def _air(self, f: int, s: dict, F: dict, B: dict, ground: bool, sim, a_frame: int) -> int:
         r, c = self.run, self.cfg
@@ -1015,6 +1180,8 @@ class RunePogo:
             r.ms_plan.append(round(1e3 * (time.perf_counter() - t0), 1))
             if p is None or q.key() != p.key():
                 r.plans.append((f - r.f_a, q.row()))
+            if c.v2 and (not r.kinds or r.kinds[-1][1] != q.kind):
+                r.kinds.append((f - r.f_a, q.kind))
             self.plan = p = q
             self._next_plan = Fm + c.research
             self._drop_f = None
@@ -1052,7 +1219,8 @@ class RunePogo:
                                             "f_csa2", "f_aim", "a_pred", "aim_hx", "p_aim", "db_aim", "L_pred",
                                             "f_land", "x_land", "rune", "presses", "jump_f", "contacts", "umbs",
                                             "drops", "hits_b", "hp", "hp_src", "min_h_lit", "b_moves", "f_end",
-                                            "end")}
+                                            "end", "room_b", "kinds", "behind_f", "u_land", "u_lit", "u_end",
+                                            "claw")}
             for k in ("f_csa2", "f_aim", "a_pred", "f_land"):
                 if d[k] is not None:
                     d[k] = d[k] - r.f_a

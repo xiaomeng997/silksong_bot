@@ -856,7 +856,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.claw is not None and play is None and not low_crit and not asw_crit:
             # SP10c: the late Clawline on a far jump while its script runs (the supervisor's keys win)
             cm = self.claw.step(f, s, ws.hero.contact.v == "GROUND",
-                                bool((s.get("hero") or {}).get("hero_accepting_input", True)), ws.stamp.t_game_s)
+                                bool((s.get("hero") or {}).get("hero_accepting_input", True)), ws.stamp.t_game_s,
+                                **({"req": self.two.claw_req} if (two_play.RT2 and self.two is not None) else {}))
             if cm is not None and (r.mask is not None or self.pause_owned):
                 self.claw.abort("supervisor")
                 cm = None
@@ -930,11 +931,17 @@ class ForumPlannerPolicy(PlannerPolicy):
             # SP11a: the hero model of this tick for the pogo tier's plans (only while its run is on)
             rt_sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
                       if (two_play.RUNETIER and self.two.rt_critical()) else None)
+            rt_kw = {"sim": rt_sim} if two_play.RUNETIER else {}
+            if two_play.RT2 and rt_sim is not None and self.v2feed is not None:
+                # SP12b: the small-rune bombs (frames from this STATE) for the run's plans
+                trk_ = self.v2feed.trk
+                if getattr(trk_, "rune", None) is not None:
+                    from ssbot.combat import rune_bombs as _rbm
+                    rt_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
-                                two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t,
-                                **({"sim": rt_sim} if two_play.RUNETIER else {}))
+                                two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t, **rt_kw)
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
                 own = "two:" + str(getattr(self.two, "last_part", None))

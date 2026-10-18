@@ -263,7 +263,9 @@ class ClawChase:
                 r.x_land_j = round(float(e["pos"][0]), 3)
                 r.u_land = round((_sp.hero_x(s) - r.x_land_j) * r.face, 2)
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool, t: float | None = None) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool, t: float | None = None, **kw) -> int | None:
+        """kw req (SP12b, SSBOT_FORUM_TWO_RT2): when passed, a run starts only on the jump cast TwoPlay handed over
+        ((the caster's iid, its antic entry frame) or None: no start)."""
         if not ENABLED:
             return None
         cs = _sp.clappers(s)
@@ -273,8 +275,12 @@ class ClawChase:
         if not (h.get("box") or h.get("pos")):
             return None
         if self.run is None:
+            ext = "req" in kw
+            req = kw.get("req")
             for e in cs:
                 st = now.get(e.get("iid"))
+                if ext and (req is None or e.get("iid") != req[0]):
+                    continue
                 if st in ("Jump Antic", "Cast Slam Antic") and prev.get(e.get("iid")) not in JUMP_ANTIC:
                     self._start(f, s, e, ground, accepting)
                     if self.run is not None:

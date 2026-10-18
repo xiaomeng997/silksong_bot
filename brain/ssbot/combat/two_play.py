@@ -138,7 +138,13 @@ ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
 # hammer, its circle's dome, B's body / hammer) to the circle's burst; "far" (her spot at B clear of both at F's aim)
 # hands back at once. Plain escape jumps keep TWO_WALLSWITCH; with TWO_ESC_FALLBACK the corner takes the casts the tier
 # does not (B busy, she behind F, B too near F).
-RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER")
+# SP12b (task 1v1 SP12b; SP11a's failures, the lead's NOTES 8 / 9 and 05:06 note; combat.rune_pogo RtCfg v2): default off
+# (=1 on; it turns RUNETIER on with v2). Every jump cast of either Clapper: the pass under the caster to behind its landing
+# first (the escape casts too: from B's face or the lure point p_need + lure_m), the pogo on B the fallback; the small-rune
+# bombs in every plan; a pogo run ends when B leaves / slams with the circle not due; behind the landing the run ends and
+# L2 holds the caster (its rune hold) to the burst + 0.5 s; far casts in the Clawline band optionally to claw_chase.
+RT2 = _on("SSBOT_FORUM_TWO_RT2")
+RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER") or RT2
 ESC = ESC_CORNER or ESC_SWITCH or RUNETIER
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
 ANTICSWITCH = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
@@ -873,6 +879,9 @@ class TwoPlay:
         # SP9b: the escape run (F's jump at the wall) and the finished ones
         self.ecfg = _esc_cfg() if ESC else EscCfg()
         self.rt = _rp.RunePogo() if RUNETIER else None    # SP11a: the pogo tier's controller
+        self.claw_req: tuple | None = None   # SP12b: (the caster's iid, its antic entry frame) handed to the Clawline
+        self._claw_n = 0
+        self._f_now = 0
         self.esc: EscRun | None = None
         self.esc_done: list[EscRun] = []
         self.esc_n: Counter = Counter()
@@ -1001,7 +1010,7 @@ class TwoPlay:
     # ---- S2 IdleHit / S6 Opening ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool, focus, t: float, wake_f: int | None = None,
-             two_enc: bool = False, latch=None, sim=None) -> int | None:
+             two_enc: bool = False, latch=None, sim=None, bombs=None) -> int | None:
         """The mask for frame f + 2 (IdleHit, the Opening, SP9b / SP9c), or None (the planner). latch: m -> the key mask
         the oracle's hold filter latches at f + 2 when m is sent for it (SP9c's dash; None: m)."""
         self.last_part = None                 # SP10a (logging only): which part sent the mask
@@ -1013,7 +1022,7 @@ class TwoPlay:
                 return am
             self._asw_prev = 0
         if ESC and self.esc is not None:
-            em = self._esc_step(f, s, ground, accepting, sim)
+            em = self._esc_step(f, s, ground, accepting, sim, bombs)
             if em is not None:
                 self.last_part = "rt" if self.esc is not None and self.esc.mode == "pogo" else "esc"
                 return em
@@ -1216,6 +1225,15 @@ class TwoPlay:
         if ASW and self.asw is not None and self.asw.mode is not None and self.asw.lock_end is None:
             return self._asw_view()
         r = self.esc
+        if (r is None or r.mode is None) and RT2 and self.rt is not None and self.rt.hold_after is not None:
+            # SP12b: behind the caster's landing - L2 holds the caster (gauntlet's rune hold: BACK_U behind it) to the
+            # circle's burst + hold_f
+            iid, until = self.rt.hold_after
+            if self._f_now <= until:
+                return {"iid": iid, "other": None, "mode": "rt_hold", "phase": "hold", "kind": "cast", "back0": 0.0,
+                        "back_u": self.ecfg.back_u, "after_land": True, "corner_aim": False, "hold": iid,
+                        "hold_after": True, "no_hit": frozenset()}
+            self.rt.hold_after = None
         if r is None or r.mode is None:
             return None
         v = {"iid": r.iid, "other": r.other, "mode": r.mode, "phase": r.phase, "kind": r.kind, "back0": r.back0,
@@ -1245,6 +1263,9 @@ class TwoPlay:
         return v
 
     def _esc_observe(self, f: int, s: dict, t: float, hx: float | None, antics: list) -> None:
+        self._f_now = f
+        if RT2 and self.claw_req is not None and f - self.claw_req[1] > 3:
+            self.claw_req = None                         # SP12b: the Clawline's start is on the antic's first ticks
         cs = _sp.clappers(s)
         hp = int((s.get("hero") or {}).get("health") or 0)
         if self.esc is not None:
@@ -1283,12 +1304,19 @@ class TwoPlay:
         kind = "jump" if st == "Jump Antic" else "cast"
         why = self._esc_block(f, s, e, o, hx)
         mode = None
-        if RUNETIER and kind == "cast":
+        rt_cast = RUNETIER and kind == "cast"
+        if rt_cast:
             # SP11a: the pogo tier on F's escape jump cast (B free, she in front of F, B not on F's body)
             if not why and (hx - cx) * face < 0.5:
                 why = "behind"
             if not why and (ox - cx) * face < self.rt.cfg.min_db:
                 why = "b near"
+            if RT2 and why in ("b near", "other casting"):
+                why = ""                                 # SP12b: the pass needs no free B; the bombs are in the plans
+            elif RT2 and why == "behind":
+                rt_cast, why = False, ""                 # SP12b: she is behind F already: the default's switch below
+                self.esc_n["rt2_behind"] += 1
+        if rt_cast:
             if not why:
                 mode = "pogo"
             elif ESC_FALLBACK:
@@ -1335,16 +1363,46 @@ class TwoPlay:
             why = "b near"
         elif any(a < max(hx, ox) + 3.0 and b > min(hx, ox) - 3.0 for a, b in self._rune_threats(f, s)):
             why = "rune"
+        if RT2 and why in ("b near", "other casting"):
+            why = ""                                     # SP12b: the pass needs no free target; bombs in the plans
         self.esc_n["rt_other"] += 1
         if why:
             self.esc_n[f"rt_other_no_{why}"] += 1
             return
+        if RT2 and self.rt.cfg.claw and self._claw_band(s, e, o, hx):
+            # SP12b (the lead's 05:06 note): the far one's cast in the Clawline band to claw_chase (variant A); claw=2
+            # alternates with the pass per cast (the fixed point's comparison)
+            n = self._claw_n
+            self._claw_n += 1
+            if self.rt.cfg.claw == 1 or n % 2 == 0:
+                self.claw_req = (e.get("iid"), f - int(round(tin * 60.0)))
+                self.esc_n["rt2_claw"] += 1
+                # L2 holds the caster through its circle after the Clawline (she lands behind its landing)
+                self.rt.hold_after = (e.get("iid"), f - int(round(tin * 60.0)) + 108 + self.rt.cfg.lit1
+                                      + self.rt.cfg.hold_f)
+                self.rt.claw_runs.append({"f_a": f, "iid": e.get("iid"), "d0": round(abs(hx - cx), 2)})
+                return
+            self.esc_n["rt2_claw_alt_pass"] += 1
         self.rt.start(f, s, e, o, hx, hp, tin, src="other")
         self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind="cast", f_a=f, k_a=int(round(tin * 60.0)),
                           x0=round(cx, 3), face=face, back0=round(back_room(e), 2), rel0=round((hx - cx) * face, 2),
                           o_st=ost, o_d=round(abs(hx - ox), 2), mode="pogo", hp0=hp, why="")
         self.esc_n["runs"] += 1
         self.esc_n["mode_pogo_other"] += 1
+
+    @staticmethod
+    def _claw_band(s: dict, e: dict, o: dict, hx: float) -> bool:
+        """SP12b: a far cast the late Clawline can take (claw_chase's gates: 8.4-12.2 u, she in front of it on the
+        ground, silk, the other one not in the way)."""
+        from ssbot.combat import claw_chase as _cc
+        c = _cc.ClawCfg()
+        cx = float(e["pos"][0])
+        h = s.get("hero") or {}
+        if (hx - cx) * face_of(e) <= 0 or not c.d_min <= abs(hx - cx) <= c.d_max:
+            return False
+        if not _sp.on_ground(s) or int(h.get("silk") or 0) < 1:
+            return False
+        return not _cc.ClawChase._in_way(hx, cx, o)
 
     def _esc_block(self, f: int, s: dict, e: dict, o: dict, hx: float) -> str:
         """Why neither arm takes F's escape jump ("" when it can; t1): B in a jump move (its landing aims at her, the
@@ -1478,12 +1536,12 @@ class TwoPlay:
         self.esc = None
         self._esc_hop_f = None
 
-    def _esc_step(self, f: int, s: dict, ground: bool, accepting: bool, sim=None) -> int | None:
+    def _esc_step(self, f: int, s: dict, ground: bool, accepting: bool, sim=None, bombs=None) -> int | None:
         r = self.esc
         if r is None or r.mode is None:
             return None
         if r.mode == "pogo":
-            m = self.rt.step(f, s, ground, accepting, sim)
+            m = self.rt.step(f, s, ground, accepting, sim, bombs)
             if self.rt.run is None:
                 self._esc_close(f, f"rt {self.rt.done[-1].end}" if self.rt.done else "rt")
             return m
@@ -1673,6 +1731,8 @@ class TwoPlay:
         out = dict(self.esc_n)
         if RUNETIER and self.rt is not None:
             out["rune_tier"] = self.rt.stats()
+            if RT2:
+                out["rt2_claw"] = list(self.rt.claw_runs)
         out["esc_runs"] = [{"f_a": r.f_a, "kind": r.kind, "mode": r.mode, "why": r.why, "back0": r.back0,
                             "rel0": r.rel0, "k_a": r.k_a, "o_st": r.o_st, "o_d": r.o_d,
                             "take": None if r.f_take is None else r.f_take - r.f_a,
