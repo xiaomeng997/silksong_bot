@@ -1229,13 +1229,14 @@ class TwoPlay:
         if (r is None or r.mode is None) and RT2 and self.rt is not None and self.rt.hold_after is not None:
             # SP12b: behind the caster's landing - L2 holds the caster (gauntlet's rune hold: BACK_U behind it) to the
             # circle's burst + hold_f
-            iid, until = self.rt.hold_after
+            iid, until = self.rt.hold_after[:2]
+            land, fface = (self.rt.hold_after[2:4] if len(self.rt.hold_after) >= 4 else (None, None))
             if self._f_now <= until:
                 # no hit on the caster meanwhile (fp1: IdleHit at its Idle and the chase of its evade took her into
                 # its circle's back edge, 2 of 15 holds)
                 return {"iid": iid, "other": None, "mode": "rt_hold", "phase": "hold", "kind": "cast", "back0": 0.0,
                         "back_u": self.ecfg.back_u, "after_land": True, "corner_aim": False, "hold": iid,
-                        "hold_after": True, "no_hit": frozenset({iid})}
+                        "hold_after": True, "no_hit": frozenset({iid}), "land": land, "face": fface}
             self.rt.hold_after = None
         if r is None or r.mode is None:
             return None
@@ -1316,8 +1317,14 @@ class TwoPlay:
                 why = "behind"
             if not why and (ox - cx) * face < self.rt.cfg.min_db:
                 why = "b near"
-            if RT2 and (why in ("b near", "other casting") or (why == "other slamming" and self.rt.cfg.other_slam)):
-                why = ""                                 # SP12b: the pass needs no free B; bombs / B's hammer in the plans
+            if RT2 and why == "b near":
+                why = ""                                 # SP12b: the pass needs no free B
+            elif RT2 and (why in ("other casting", "other slamming") or (not why and self._bombs_near(s, hx))):
+                # SP12b fp2: B's small runes / its slam (B's hammer hit 1 of 1 such runs) / bombs near her - the run
+                # starts once that is over and the bombs are clear of her, while F is still in its antic
+                self._rt_pend = (e.get("iid"), o.get("iid"), f - int(round(tin * 60.0)), "esc")
+                self.esc_n["rt2_pend_" + ("cast" if why == "other casting" else "slam" if why else "bomb")] += 1
+                why = why or "bombs near"
             elif RT2 and why == "behind":
                 rt_cast, why = False, ""                 # SP12b: she is behind F already: the default's switch below
                 self.esc_n["rt2_behind"] += 1
@@ -1368,13 +1375,18 @@ class TwoPlay:
             why = "b near"
         elif any(a < max(hx, ox) + 3.0 and b > min(hx, ox) - 3.0 for a, b in self._rune_threats(f, s)):
             why = "rune"
-        if RT2 and (why in ("b near", "other casting") or (why == "other slamming" and ost == "Slam Recover")):
-            why = ""                                     # SP12b: the pass needs no free target; bombs in the plans
-        elif RT2 and why == "other slamming" and self.rt.cfg.other_slam and pend is None:
-            # SP12b: the other one (her focus) slams - the playbook takes its slam; the run starts once it is over
-            # while the caster is still in its antic (the retry in _esc_observe)
-            self._rt_pend = (e.get("iid"), o.get("iid"), f - int(round(tin * 60.0)))
-            self.esc_n["rt2_pend"] += 1
+        if RT2 and (why == "b near" or (why == "other slamming" and ost == "Slam Recover")):
+            why = ""                                     # SP12b: the pass needs no free target
+        if RT2 and not why and pend is None and self._bombs_near(s, hx):
+            why = "bombs near"                           # SP12b fp2: 2 far-cast runs hit at their start by lit bombs
+        if RT2 and why in ("other slamming", "other casting", "bombs near") and self.rt.cfg.other_slam \
+                and pend is None:
+            # SP12b: the other one (her focus) slams - the playbook takes its slam - or casts small runes (fp2: the
+            # default and the low hop take them); the run starts once that is over while the caster is still in its
+            # antic (the retry in _esc_observe)
+            self._rt_pend = (e.get("iid"), o.get("iid"), f - int(round(tin * 60.0)), "other")
+            self.esc_n["rt2_pend_" + ("slam" if why == "other slamming" else "cast" if why == "other casting"
+                                      else "bomb")] += 1
         if pend is not None:
             self.esc_n["rt2_pend_start" if not why else "rt2_pend_no"] += 1
             if why:
@@ -1407,18 +1419,42 @@ class TwoPlay:
     def _rt_pend_retry(self, f: int, s: dict, cs: list, hx: float | None, hp: int) -> None:
         """SP12b: a far cast declined while her focus slammed - start its run once that slam is over (Slam Recover /
         no longer slamming) while the caster is still in its antic, no other run on; else drop it."""
-        jid, oid, f_a = self._rt_pend
+        jid, oid, f_a, src = self._rt_pend
         e, o = clapper_by(s, jid), clapper_by(s, oid)
         st = _sp.control(e)[0] if e is not None else None
         if e is None or o is None or st not in ("Cast Slam Antic", "Cast Slam Antic 2") or hx is None \
-                or f - f_a > 40:
+                or f - f_a > self.rt.cfg.pend_f:
             self._rt_pend = None
             return
         ost = _sp.control(o)[0]
-        if self.esc is not None or ost in SLAM_ST:
+        held = self.esc is not None and not (self.esc.mode is None and self.esc.iid == jid)
+        if held or ost in SLAM_ST or ost in CAST_ST:
             return
+        if self._bombs_near(s, hx):
+            return                                   # bombs still near her (they light outward ~1.7 s)
         self._rt_pend = None
+        if self.esc is not None:
+            self._esc_close(f, "rt2 pend")           # the caster's declined escape record: the run replaces it
+        if src == "esc":
+            tin = (f - f_a) / 60.0
+            self.esc_n["rt2_pend_start"] += 1
+            self.rt.start(f, s, e, o, hx, hp, tin)
+            cx, ox = float(e["pos"][0]), float(o["pos"][0])
+            self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind="cast", f_a=f, k_a=int(round(tin * 60.0)),
+                              x0=round(cx, 3), face=face_of(e), back0=round(back_room(e), 2),
+                              rel0=round((hx - cx) * face_of(e), 2), o_st=ost, o_d=round(abs(hx - ox), 2),
+                              mode="pogo", hp0=hp, why="")
+            self.esc_n["runs"] += 1
+            self.esc_n["mode_pogo"] += 1
+            return
         self._rt_other(f, s, e, o, hx, hp, (f - f_a) / 60.0, pend=(jid, f_a))
+
+    def _bombs_near(self, s: dict, hx: float | None) -> bool:
+        """SP12b: a small-rune bomb (appeared or lit) within pend_bomb_u of her."""
+        if hx is None:
+            return False
+        from ssbot.combat import rune_bombs as _rbm
+        return any(abs(bx - hx) < self.rt.cfg.pend_bomb_u for _, bx, _, _ in _rbm.bomb_ents(s.get("ents")))
 
     def rt_hold_block(self, f: int) -> str | None:
         """SP12b: why no chase (evade_chase) may run now - L2 holds a jump caster through its circle (rt_hold)."""

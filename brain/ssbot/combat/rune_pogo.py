@@ -135,6 +135,15 @@ class RtCfg:
     air_pass: int = 1           # best_pass in the air too (fp1: 9 of 16 far casts began with her in the air - the
     #                             pogo planner kept her there, the pass never came)
     other_slam: int = 1         # a run also starts with the other Clapper slamming (its hammer in the plans)
+    pend_f: int = 45            # (fp2) the other one casting small runes at the antic: the run starts once its cast is
+    pend_bomb_u: float = 6.0    # over and no bomb is within pend_bomb_u of her, while the caster's antic is <= pend_f
+    #                             frames old (fp2: 7 of 7 far-cast runs started in the other's cast lost HP, 5 to its
+    #                             bombs in the first 40 frames); else no run (the default play and the low hop)
+    go_end: int = 12            # (fp2) the escape cast's go phase ends this many frames before the predicted aim (no
+    #                             dash toward B's face at the aim: 4 of 11 failed escape runs dashed 3-4 u away at A - 2,
+    #                             the pass then waited 12-18 frames, came too late under F's fall and turned to the front)
+    commit_f: int = 15          # (fp2) a pass under way whose plans all turn unsafe is kept while its first danger is
+    #                             >= commit_f frames away (plans wavered pass / pogo / flee in 9 of 37 far-cast runs)
 
 
 RT2 = os.environ.get("SSBOT_FORUM_TWO_RT2", "0").strip() == "1"
@@ -672,7 +681,9 @@ class Planner:
         # antic makes it jump in place near its own wall, no room behind its landing
         w0 = max((c.a_frame - F0) if (c.a_frame is not None and not c.a_seen) else 0, 0)
         keys = [(k, "pass")]
-        if v2 and self.cfg.front:
+        behind_on = prev is not None and prev.kind == "pass" and prev.why.startswith("pass") and prev.dirk != 0
+        if v2 and self.cfg.front and not behind_on:
+            # (fp2) no turn to the front exit while a pass behind is under way (she turned under the falling caster)
             keys.append((M_L if k == M_R else M_R, "front"))
         for kk, nm in keys:
             for w in (w0, w0 + 4, w0 + 10, w0 + 18, w0 + 28):
@@ -686,7 +697,20 @@ class Planner:
         out = ok(plans)
         if not out:
             return None
+        if v2:
+            # (fp2) the earliest start first (the model's slack: a pass that waits 12-18 frames came too late), then
+            # nearest the target, then the shortest
+            return min(out, key=lambda t: (t[0], t[3].d0 if t[3].dirk else F0, round(t[1], 1), t[2]))[3]
         return min(out, key=lambda t: (t[0], round(t[1], 1), t[2]))[3]
+
+    def keep_pass(self, prev: Plan) -> Plan | None:
+        """(SP12b fp2) the previous pass plan again when no pass plan is safe now: kept while its first danger is at
+        least commit_f frames away (the model's noise flips the pass to a pogo / flee and back); None otherwise."""
+        q = Plan("pass", prev.dirk, prev.d0, prev.d1, dash=prev.dash, why=prev.why + " commit")
+        self.evaluate([q])
+        if q.bad is None or q.bad >= self.c.F0 + self.cfg.commit_f:
+            return q
+        return None
 
     def best_flee(self, x0: float) -> Plan:
         """On the ground without a safe contact plan: walk either way (or stand), optionally jump and open the
@@ -963,12 +987,12 @@ class RunePogo:
             r.behind_f = f - r.f_a
             self.close(f, "behind")
             return
-        if c.end_behind and c.front and f - r.f_land >= 13 and _sp.on_ground(s) and self._front_u(r, hx) >= 0.0:
-            r.behind_f = f - r.f_a
-            self.close(f, "front")                # past the circle's far edge: the default play (its rune hold: out)
-            return
-        if kind not in ("up", "keep", "drop"):
-            return                               # only a pogo run on B ends on B (a pass / a flee runs on)
+        # (fp2) past the circle's far edge the run stays to the burst (its stay plan): the default's "rune: out" stance
+        # (cast_out_u from the landing) is inside the far edge
+        if kind not in ("up", "keep", "drop") or f - r.f_land < 13:
+            return                               # only a pogo run on B ends on B (a pass / a flee runs on); (fp2) not
+            #                                      before the caster's landing hammer is over (2 of 5 such ends: hit at
+            #                                      L + 1 .. 4 by the default play)
         bst = _sp.control(B)[0]
         bx = float(B["pos"][0])
         if c.b_slam_end and bst == "Slam Antic" and lit_in > c.b_slam_keep:
@@ -988,12 +1012,12 @@ class RunePogo:
             r.f_end, r.end = f - r.f_a, why
             r.phase = "done"
             self.done.append(r)
-            if self.cfg.v2 and r.f_land is not None and r.u_end is not None and (
-                    r.u_end <= -self.cfg.min_behind or why == "front") and why not in ("F dead",):
+            if self.cfg.v2 and r.f_land is not None and r.u_end is not None and r.u_end <= -self.cfg.min_behind \
+                    and why not in ("F dead",):
                 # (SP12b) she is behind the caster's landing: L2 holds the caster through its circle (the rune hold)
                 lit = r.rune.get("lit")
                 until = r.f_land + (lit + 9 if lit is not None else self.cfg.lit1) + self.cfg.hold_f
-                self.hold_after = (r.iid, until)
+                self.hold_after = (r.iid, until, r.x_land, r.face)
         self.run = None
         self.plan = None
 
@@ -1031,7 +1055,7 @@ class RunePogo:
         if r.phase == "go" and self.cfg.v2 and _sp.control(B)[0] in B_BUSY_START:
             r.phase = "air"                               # (SP12b) B in a move: no walk to its face, the planner
         if r.phase == "go":
-            if Fm < a_frame - self.cfg.jump_lead:
+            if Fm < a_frame - (self.cfg.go_end if self.cfg.v2 else self.cfg.jump_lead):
                 return self._go(f, s, F, B, ground)
             r.phase = "air"
         m = self._air(f, s, F, B, ground, sim, a_frame)
@@ -1203,6 +1227,9 @@ class RunePogo:
             if (ground or (c.v2 and c.air_pass)) and ctx.pass_x is not None and (
                     q := pl.best_pass(hx, prev=p)) is not None:
                 pass
+            elif c.v2 and p is not None and p.kind == "pass" and ctx.pass_x is not None and (
+                    q := pl.keep_pass(p)) is not None:
+                pass                                      # (fp2) the pass under way: committed while its danger is far
             elif ground:
                 q = pl.best_up(hx, a_frame, prev=p)
                 if q is None or q.bad is not None:

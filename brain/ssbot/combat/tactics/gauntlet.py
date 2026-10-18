@@ -418,6 +418,15 @@ class GauntletTactics:
             # behind it means through its body on the ground (round 2, live w13: 7 body hits that way): as far out
             # as the wall lets (the hammer reaches 12 u in front: the farther the likelier it misses)
             return self._clamp(out), frozenset(), "slam: out to the wall"
+        ev_ = self.two_esc if two_play.RT2 else None
+        if (ev_ is not None and ev_.get("mode") == "rt_hold" and ev_.get("hold") == s.iid
+                and ev_.get("land") is not None):
+            # SP12b (SSBOT_FORUM_TWO_RT2): L2 holds a jump caster through its circle (rt_hold): behind its landing
+            # whatever it starts meanwhile but a slam (fp2: its next jump's aim stance 5.5 u in front, IdleHit and
+            # the chase sent her into the circle still to burst; gauntlet's own rune record ends at its next move)
+            spot = jump_behind.behind_spot(float(ev_["land"]), float(ev_["face"]))
+            if spot is not None:
+                return spot, frozenset(), "rune: behind (rt hold)"
         if fam in (CC_JUMP, CC_JUMP_CAST) and jump_behind.ENABLED:
             return self._jump_behind(ws, s, x, hx, front, side, fam)
         if fam in (CC_JUMP, CC_JUMP_CAST):

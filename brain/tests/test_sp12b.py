@@ -233,13 +233,16 @@ def test_update_ends_when_b_leaves(rt2):
     s3 = fstate(1115, "Idle", 0.3, hx=WALL_X + 17.0, b_x=WALL_X + 26.0, b_st="Evade Scuttle")
     s3["ents"][0]["pos"][0] = WALL_X + 10.0
     pg2.update(1115, s3, WALL_X + 17.0, 7)
+    assert pg2.run is not None                   # (fp2) not before the caster's landing hammer is over (L + 13)
+    s3["f"] = 1123
+    pg2.update(1123, s3, WALL_X + 17.0, 7)
     assert pg2.run is None and pg2.done[-1].end == "b left"
     # a pass plan is not ended by B leaving
     pg3 = rp.RunePogo()
     pg3.start(1001, s, F, B, WALL_X + 17.0, 7, 0.0)
     pg3.run.f_aim, pg3.run.f_land, pg3.run.x_land, pg3.run.phase = 1056, 1109, WALL_X + 10.0, "air"
     pg3.plan = rp.Plan("pass", tp.M_L, 0, 30)
-    pg3.update(1115, s3, WALL_X + 17.0, 7)
+    pg3.update(1123, s3, WALL_X + 17.0, 7)
     assert pg3.run is not None
 
 
@@ -389,7 +392,7 @@ def test_far_cast_waits_for_the_focus_slam(rt2):
         return s
     two = tp.TwoPlay()
     _run(two, [st(1000, "Slam Antic", "Idle", 0.3), st(1001, "Slam Antic", "Cast Slam Antic", 0.32)])
-    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend"] == 1
+    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend_slam"] == 1
     _run(two, [st(1015, "Slam 1", "Cast Slam Antic")])
     assert two.rt.run is None and two._rt_pend is not None
     _run(two, [st(1025, "Slam Recover", "Cast Slam Antic")])
@@ -397,11 +400,44 @@ def test_far_cast_waits_for_the_focus_slam(rt2):
     assert two.esc_n["rt2_pend_start"] == 1
 
 
-def test_escape_cast_with_b_slamming_starts_and_models_its_hammer(rt2):
+def test_escape_cast_with_b_slamming_waits_for_its_slam(rt2):
+    """(fp2: B's hammer hit the one escape run that started in B's slam) B slams at F's escape antic: the run starts
+    once B's slam is over, while F is still in its antic."""
     two = tp.TwoPlay()
     ss = _antic_states(b_x=WALL_X + 22.0, b_st="Slam Antic")
-    for s in ss:
-        s["ents"][1]["fsms"][0]["t"] = 0.3
+    for s_ in ss:
+        s_["ents"][1]["fsms"][0]["t"] = 0.3
     _run(two, ss)
-    assert two.esc is not None and two.esc.mode == "pogo" and two.rt.run is not None
-    assert two.rt._b_slam_f0 is not None and two.rt.run.phase == "air"
+    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend_slam"] == 1
+    s2 = fstate(1030, "Cast Slam Antic 2", 0.0, x_rel=4.0, b_st="Slam Recover", b_x=WALL_X + 22.0)
+    _run(two, [s2])
+    assert two.rt.run is not None and two.esc.mode == "pogo" and two.esc_n["rt2_pend_start"] == 1
+
+
+def test_hold_view_carries_the_landing_and_the_pend_on_casts(rt2):
+    pg = rp.RunePogo()
+    r = rp.RtRun(iid=7, other=99, f_a=1000, k_a=0, x0=WALL_X, face=1, back0=4.0, rel0=8.0, db0=20.0, b_st0="Idle")
+    r.f_land, r.x_land, r.u_end = 1108, WALL_X + 3.0, -3.5
+    pg.run = r
+    pg.close(1125, "behind")
+    assert pg.hold_after[0] == 7 and pg.hold_after[2] == pytest.approx(WALL_X + 3.0) and pg.hold_after[3] == 1
+    two = tp.TwoPlay()
+    two.rt.hold_after = pg.hold_after
+    two._f_now = 1130
+    v = two.esc_view()
+    assert v["land"] == pytest.approx(WALL_X + 3.0) and v["face"] == 1
+    # an escape cast with B casting small runes: no run until B's cast is over and its bombs are clear of her
+    two = tp.TwoPlay()
+    ss = _antic_states(b_x=WALL_X + 22.0, b_st="Cast 2")
+    _run(two, ss)
+    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend_cast"] == 1
+    bomb = {"type_key": "damager", "iid": -9, "pos": [WALL_X + 5.0, 3.6],
+            "colliders": [{"enabled": False, "verts_world": [WALL_X + 5.0 - 2.166, 3.6, WALL_X + 5.0 + 2.166, 3.6,
+                                                             WALL_X + 5.0, 3.6 + 2.166, WALL_X + 5.0, 3.6 - 2.166]}]}
+    s2 = fstate(1020, "Cast Slam Antic", 0.32, x_rel=4.0, b_st="Idle", b_x=WALL_X + 22.0, ents=[bomb])
+    _run(two, [s2])
+    assert two.rt.run is None and two._rt_pend is not None              # a bomb 1 u from her
+    s3 = fstate(1030, "Cast Slam Antic 2", 0.0, x_rel=4.0, b_st="Idle", b_x=WALL_X + 22.0)
+    _run(two, [s3])
+    assert two.rt.run is not None and two.rt.run.src == "esc" and two.rt.run.f_a - two.rt.run.k_a == 1001
+    assert two.esc_n["rt2_pend_start"] == 1 and two.esc is not None and two.esc.mode == "pogo"
