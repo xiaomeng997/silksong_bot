@@ -910,8 +910,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             ch = self.evade_chase.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c,
                                        focus=getattr(prefs, "target", None),
-                                       block=(self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT)
-                                              else None), guard=gsp)
+                                       block=((self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT)
+                                               else None)
+                                              or (self.two.rt_hold_block(f) if (self.two is not None and two_play.RT2)
+                                                  else None)), guard=gsp)
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None

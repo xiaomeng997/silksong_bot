@@ -128,7 +128,7 @@ def test_claw_handoff_in_band(rt2, monkeypatch):
     assert two.rt.hold_after is not None and two.rt.hold_after[0] == 99
     v = two.esc_view()
     assert v["mode"] == "rt_hold" and v["hold"] == 99 and v["hold_after"]
-    assert two.stats()["esc"]["rt2_claw"][0]["iid"] == 99
+    assert two.stats()["esc"]["rt2_claw"][0]["iid"] == 99 and two.esc_n["rt2_claw_n"] == 1
     # out of the band (B 20 u away): the pass run
     two = tp.TwoPlay()
     _run(two, _far_states(x_rel=3.0, b_x=WALL_X + 23.0))
@@ -341,3 +341,67 @@ def test_closed_loop_escape_pass_from_b_face(bx):
     assert "pass" in kinds
     assert dangers == []
     assert (x_now - L) <= -2.9
+
+
+def test_front_exit_when_behind_is_blocked():
+    """A far cast clamped (she 20 u from it): behind its landing is 12 u away under its flight past a body, the far
+    edge ~6 u ahead - the front plan is safe and chosen."""
+    jx, hx = 20.0, 40.0
+    cfg = rp.RtCfg(v2=1)
+    cfg.horizon = 140
+    a_frame, F0 = 1003, 1000
+    f_L = a_frame + 53
+    # a Clapper body between her and the landing's back side (the pass is blocked)
+    ix = 34.0
+    ctx = rp.Ctx(F0=F0, b_box=(ix - 1.34, 3.02, ix + 2.25, 6.92), b_x=ix, b_ok=False, tx=ix, face=1, L=None, f_L=f_L,
+                 fface=1, rc=None, lit=(f_L + cfg.lit0, f_L + cfg.lit1), a_frame=a_frame, ground=True,
+                 atk_ready_f=F0, f_fall=(a_frame, f_L, jx, rp.landing(jx, hx, 1), 1), jx0=jx,
+                 j_box=(jx - 1.34, 3.02, jx + 2.25, 6.92), pass_x=3.25)
+    pl = rp.Planner(_sim(hx), ctx, cfg)
+    q = pl.best_pass(hx)
+    assert q is not None and q.why.startswith("front") and q.bad is None
+    pl.evaluate([q])
+    L = float(pl.last_Ls[0])
+    xe = float(pl.last_ro.centre[0, -1, 0])
+    assert (xe - rp.rune_centre(L, 1)) >= rp.RUNE_R + 0.25 + 0.5
+    cfg.front = 0
+    assert rp.Planner(_sim(hx), ctx, cfg).best_pass(hx) is None
+
+
+def test_hold_view_blocks_hits_and_the_chase(rt2):
+    two = tp.TwoPlay()
+    two.rt.hold_after = (7, 1200)
+    two._f_now = 1100
+    v = two.esc_view()
+    assert v["mode"] == "rt_hold" and v["no_hit"] == frozenset({7})
+    assert two.rt_hold_block(1100) == "rt hold" and two.rt_hold_block(1201) is None
+    two._f_now = 1201
+    assert two.esc_view() is None and two.rt.hold_after is None
+
+
+def test_far_cast_waits_for_the_focus_slam(rt2):
+    """The far one jump-casts while her focus (F) slams: no run then; once F's slam is in its recovery and the caster
+    still in its antic, the run starts (src other, its aim from the antic entry)."""
+    def st(f, f_state, b_state, tin=0.0):
+        s = fstate(f, f_state, tin, x_rel=3.0, b_st=b_state, b_x=WALL_X + 20.0)
+        s["ents"][1]["flipX"] = False
+        s["ents"][1]["fsms"][0]["t"] = (f - 1001) / 60.0 if b_state.startswith("Cast") else 0.1
+        return s
+    two = tp.TwoPlay()
+    _run(two, [st(1000, "Slam Antic", "Idle", 0.3), st(1001, "Slam Antic", "Cast Slam Antic", 0.32)])
+    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend"] == 1
+    _run(two, [st(1015, "Slam 1", "Cast Slam Antic")])
+    assert two.rt.run is None and two._rt_pend is not None
+    _run(two, [st(1025, "Slam Recover", "Cast Slam Antic")])
+    assert two.rt.run is not None and two.rt.run.src == "other" and two.rt.run.a_pred == 1001 + 55
+    assert two.esc_n["rt2_pend_start"] == 1
+
+
+def test_escape_cast_with_b_slamming_starts_and_models_its_hammer(rt2):
+    two = tp.TwoPlay()
+    ss = _antic_states(b_x=WALL_X + 22.0, b_st="Slam Antic")
+    for s in ss:
+        s["ents"][1]["fsms"][0]["t"] = 0.3
+    _run(two, ss)
+    assert two.esc is not None and two.esc.mode == "pogo" and two.rt.run is not None
+    assert two.rt._b_slam_f0 is not None and two.rt.run.phase == "air"

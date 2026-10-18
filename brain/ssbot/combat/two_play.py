@@ -880,6 +880,7 @@ class TwoPlay:
         self.ecfg = _esc_cfg() if ESC else EscCfg()
         self.rt = _rp.RunePogo() if RUNETIER else None    # SP11a: the pogo tier's controller
         self.claw_req: tuple | None = None   # SP12b: (the caster's iid, its antic entry frame) handed to the Clawline
+        self._rt_pend: tuple | None = None   # SP12b: (caster, other, antic entry) - a far cast waiting on the other's slam
         self._claw_n = 0
         self._f_now = 0
         self.esc: EscRun | None = None
@@ -1230,9 +1231,11 @@ class TwoPlay:
             # circle's burst + hold_f
             iid, until = self.rt.hold_after
             if self._f_now <= until:
+                # no hit on the caster meanwhile (fp1: IdleHit at its Idle and the chase of its evade took her into
+                # its circle's back edge, 2 of 15 holds)
                 return {"iid": iid, "other": None, "mode": "rt_hold", "phase": "hold", "kind": "cast", "back0": 0.0,
                         "back_u": self.ecfg.back_u, "after_land": True, "corner_aim": False, "hold": iid,
-                        "hold_after": True, "no_hit": frozenset()}
+                        "hold_after": True, "no_hit": frozenset({iid})}
             self.rt.hold_after = None
         if r is None or r.mode is None:
             return None
@@ -1268,6 +1271,8 @@ class TwoPlay:
             self.claw_req = None                         # SP12b: the Clawline's start is on the antic's first ticks
         cs = _sp.clappers(s)
         hp = int((s.get("hero") or {}).get("health") or 0)
+        if RT2 and self._rt_pend is not None:
+            self._rt_pend_retry(f, s, cs, hx, hp)
         if self.esc is not None:
             self._esc_update(f, s, hx, hp, cs)
         if self.esc is None and antics and len(cs) == 2 and hx is not None and (self.asw is None
@@ -1311,8 +1316,8 @@ class TwoPlay:
                 why = "behind"
             if not why and (ox - cx) * face < self.rt.cfg.min_db:
                 why = "b near"
-            if RT2 and why in ("b near", "other casting"):
-                why = ""                                 # SP12b: the pass needs no free B; the bombs are in the plans
+            if RT2 and (why in ("b near", "other casting") or (why == "other slamming" and self.rt.cfg.other_slam)):
+                why = ""                                 # SP12b: the pass needs no free B; bombs / B's hammer in the plans
             elif RT2 and why == "behind":
                 rt_cast, why = False, ""                 # SP12b: she is behind F already: the default's switch below
                 self.esc_n["rt2_behind"] += 1
@@ -1345,7 +1350,7 @@ class TwoPlay:
         if why:
             self.esc_n[f"no_switch_{why}"] += 1
 
-    def _rt_other(self, f: int, s: dict, e: dict, o: dict, hx: float, hp: int, tin: float) -> None:
+    def _rt_other(self, f: int, s: dict, e: dict, o: dict, hx: float, hp: int, tin: float, pend=None) -> None:
         """SP11a scope 1 (the lead's NOTE 7): a jump cast that is not the focus's escape jump - the pogo tier on the
         other Clapper (its face, its head) when that one is free, in front of the caster by min_db and no rune circle
         lies over her / it; declined: counted only (no escape run: the default play)."""
@@ -1363,20 +1368,29 @@ class TwoPlay:
             why = "b near"
         elif any(a < max(hx, ox) + 3.0 and b > min(hx, ox) - 3.0 for a, b in self._rune_threats(f, s)):
             why = "rune"
-        if RT2 and why in ("b near", "other casting"):
+        if RT2 and (why in ("b near", "other casting") or (why == "other slamming" and ost == "Slam Recover")):
             why = ""                                     # SP12b: the pass needs no free target; bombs in the plans
+        elif RT2 and why == "other slamming" and self.rt.cfg.other_slam and pend is None:
+            # SP12b: the other one (her focus) slams - the playbook takes its slam; the run starts once it is over
+            # while the caster is still in its antic (the retry in _esc_observe)
+            self._rt_pend = (e.get("iid"), o.get("iid"), f - int(round(tin * 60.0)))
+            self.esc_n["rt2_pend"] += 1
+        if pend is not None:
+            self.esc_n["rt2_pend_start" if not why else "rt2_pend_no"] += 1
+            if why:
+                return
         self.esc_n["rt_other"] += 1
         if why:
             self.esc_n[f"rt_other_no_{why}"] += 1
             return
-        if RT2 and self.rt.cfg.claw and self._claw_band(s, e, o, hx):
+        if RT2 and self.rt.cfg.claw and pend is None and self._claw_band(s, e, o, hx):
             # SP12b (the lead's 05:06 note): the far one's cast in the Clawline band to claw_chase (variant A); claw=2
             # alternates with the pass per cast (the fixed point's comparison)
             n = self._claw_n
             self._claw_n += 1
             if self.rt.cfg.claw == 1 or n % 2 == 0:
                 self.claw_req = (e.get("iid"), f - int(round(tin * 60.0)))
-                self.esc_n["rt2_claw"] += 1
+                self.esc_n["rt2_claw_n"] += 1
                 # L2 holds the caster through its circle after the Clawline (she lands behind its landing)
                 self.rt.hold_after = (e.get("iid"), f - int(round(tin * 60.0)) + 108 + self.rt.cfg.lit1
                                       + self.rt.cfg.hold_f)
@@ -1389,6 +1403,29 @@ class TwoPlay:
                           o_st=ost, o_d=round(abs(hx - ox), 2), mode="pogo", hp0=hp, why="")
         self.esc_n["runs"] += 1
         self.esc_n["mode_pogo_other"] += 1
+
+    def _rt_pend_retry(self, f: int, s: dict, cs: list, hx: float | None, hp: int) -> None:
+        """SP12b: a far cast declined while her focus slammed - start its run once that slam is over (Slam Recover /
+        no longer slamming) while the caster is still in its antic, no other run on; else drop it."""
+        jid, oid, f_a = self._rt_pend
+        e, o = clapper_by(s, jid), clapper_by(s, oid)
+        st = _sp.control(e)[0] if e is not None else None
+        if e is None or o is None or st not in ("Cast Slam Antic", "Cast Slam Antic 2") or hx is None \
+                or f - f_a > 40:
+            self._rt_pend = None
+            return
+        ost = _sp.control(o)[0]
+        if self.esc is not None or ost in SLAM_ST:
+            return
+        self._rt_pend = None
+        self._rt_other(f, s, e, o, hx, hp, (f - f_a) / 60.0, pend=(jid, f_a))
+
+    def rt_hold_block(self, f: int) -> str | None:
+        """SP12b: why no chase (evade_chase) may run now - L2 holds a jump caster through its circle (rt_hold)."""
+        if RT2 and self.rt is not None and self.rt.hold_after is not None and self.esc is None \
+                and f <= self.rt.hold_after[1]:
+            return "rt hold"
+        return None
 
     @staticmethod
     def _claw_band(s: dict, e: dict, o: dict, hx: float) -> bool:
