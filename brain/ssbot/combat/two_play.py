@@ -421,6 +421,7 @@ class PmRun:
     need: float
     lock_rem: float
     hp0: int = 0
+    side0: str = "open"        # her side of F at the antic: "open" (between F and B) / "wall" (already behind it)
     phase: str = "strike"
     f_herd: int | None = None
     back_herd: float | None = None
@@ -2430,8 +2431,8 @@ class TwoPlay:
         o = next(x for x in cs if x.get("iid") != iid)
         cx, ox = float(F["pos"][0]), float(o["pos"][0])
         back = wall_away(cx, hx)
-        if back > c.back_u:
-            return
+        if back > c.back_u or abs(hx - cx) > c.d_u + 2.0:
+            return                                       # (beyond d_u + 2 she is not at it: its walk comes anyway)
         self.wo_n["cand"] += 1
         d = 1 if hx >= cx else -1
         why = None
@@ -2580,8 +2581,6 @@ class TwoPlay:
             why = "busy"
         elif (hx - cx) * face <= 0:
             why = "behind"                                       # she is not in front of it
-        elif (ox - cx) * face <= 0:
-            why = "b behind"
         elif _sp.control(o)[0] not in ("Idle", "Walk"):
             why = "b busy"
         elif need <= lock_rem:
@@ -2593,8 +2592,9 @@ class TwoPlay:
             return
         self.pm = PmRun(iid=e.get("iid"), other=o.get("iid"), f_a=f, k_a=k_now, face=face, wdir=wdir,
                         room_f=round(room_f, 2), room_b=round(room_b, 2), need=round(need, 3),
-                        lock_rem=round(lock_rem, 3), hp0=hp)
+                        lock_rem=round(lock_rem, 3), hp0=hp, side0="wall" if (hx - cx) * wdir > 0 else "open")
         self.pm_n["runs"] += 1
+        self.pm_n[f"runs_{self.pm.side0}"] += 1         # "wall": she is on F's wall side already (the way out keeps it)
 
     def _pm_update(self, f: int, s: dict, t: float, hx: float, hp: int, cs: list) -> None:
         r = self.pm
@@ -2692,7 +2692,7 @@ class TwoPlay:
         if PUSHMID:
             runs = self.pm_done + ([self.pm] if self.pm is not None else [])
             out["pushmid"] = {**dict(self.pm_n), "runs_rec": [
-                {"f_a": r.f_a, "iid": r.iid, "k_a": r.k_a, "room_f": r.room_f, "room_b": r.room_b, "need": r.need,
+                {"f_a": r.f_a, "iid": r.iid, "k_a": r.k_a, "side0": r.side0, "room_f": r.room_f, "room_b": r.room_b, "need": r.need,
                  "lock_rem": r.lock_rem, "f_herd": None if r.f_herd is None else r.f_herd - r.f_a,
                  "back_herd": r.back_herd, "backs": r.backs, "hits_f": r.hits_f, "hp": r.hp, "next_st": r.next_st,
                  "f_end": r.f_end, "end": r.end} for r in runs]}
