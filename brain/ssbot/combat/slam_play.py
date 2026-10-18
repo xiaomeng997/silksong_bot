@@ -173,6 +173,24 @@ TWO_SLAM_U = 12.5           # the hammer reaches 12 u in front of its centre (+ 
 TWO_CAST_U = 9.0            # the small runes' rings around the caster
 TWO_BODY_U = 4.5            # its body in Slam Recover (front 3.49 u + 0.23 + 0.3; the lunge is over)
 TWO_RUNE = (-1.2, 14.2, 1.45)   # the rune circle's span from the landing along its facing (u) and its last lit second
+# SSBOT_FORUM_TWO_RUNEGATE (task 1v1 SP11-0, default off; SP10a / SP10c audits: the gate above declined 22 of 189 close
+# slams in SP10c's T2 by blocking from the other one's landing to + 1.45 s while its circle hurts only 6-8 frames from
+# landing + 65 .. 77): the gate on the circle's lit window at the strike's frames. The circle is a dome (an octagon of r
+# 7.19 centred 0.34 u above the floor, landing + 6.48 u along its facing leftward / + 6.75 rightward, bigrune
+# answer.txt); the strike puts her at the stand point, her box bottom RG_H10[k // 2] u above the floor at antic frame k
+# (p10 of 737 struck slams of SP10b / SP10c: on the ground to k 26, 4.1-4.4 u at the press k 44-52, the bounce's apex
+# 6.9 u at k 72). On: the start is declined only when for some strike frame k inside the lit window (landing + 65 - RG_M
+# .. landing + 85 + RG_M) her box at (the stand point, RG_H10) meets the dome, and never once that circle was seen lit
+# and then unlit (burst). Offline on the 60 gated slams of SP10b / SP10c: 10 released (4 lost no HP under the planner, 4
+# the hammer, 1 the body, 1 the rune), 50 still declined - the dome covers the bounce over the stand point.
+TWO_RUNEGATE = _on("SSBOT_FORUM_TWO_RUNEGATE")
+RG_H10 = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.37, 0.72, 1.41, 2.11, 2.46, 3.15, 3.78,
+          4.05, 4.41, 4.39, 4.31, 4.11, 3.86, 4.2, 4.66, 5.18, 5.7, 6.01, 6.32, 6.6, 6.79, 6.86, 6.9, 6.86, 6.71, 6.6,
+          6.32, 5.93, 5.7, 5.18, 4.55, 4.2, 3.44, 2.57, 2.1, 1.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+RG_LIT = (65, 85)           # the circle's lit frames after the landing (first lit p5 65 / p95 77, 6-8 frames)
+RG_M = 3                    # frames of margin on both ends
+RG_R = 7.19                 # the dome's radius, its centre 0.34 u above the floor
+RG_C = (6.48, 6.75)         # its centre in front of the landing: facing left / right
 # SSBOT_FORUM_TWO_SIDE (SP7, default off): the way out's side with two Clappers. SP5's rule lands between them; in SP7's
 # first trial (t1, e450b7a) 3 of 20 struck slams lost HP to the other one's hammer 115-128 frames after the antic: it
 # was idle 9.7-13.8 u away, started its slam the moment the struck one's Slam 1 ended (Buddy Is Attacking releases
@@ -405,6 +423,7 @@ class Run:
     chain_next: int = 0              # ... the next frame a failed search is tried again
     chain_from: object = None        # ... a run on B opened by the chain's strike: A's iid
     chain_log: list = field(default_factory=list)   # [frame, event, plan row]
+    rg_k: int | None = None          # SP11-0 TWO_RUNEGATE: the first antic frame its gate passed where the old one blocked
 
 
 class SlamPlay:
@@ -420,6 +439,8 @@ class SlamPlay:
         self._ho = None                      # SP10b TWO_HANDOFF: (iid, clock) of the last strike run closed
         self._hold = None                    # SP10b TWO_TIGHT: (B's iid, clock, HP) - no key until B's Slam 2
         self.holds: list = []                # ... [B iid, start f, end f, why] per hold (stats)
+        self._guard = None                   # SP11-0 TWO_GUARD: this tick's danger spans (combat.two_play)
+        self._rg_circ: dict = {}             # SP11-0 TWO_RUNEGATE: circle iid -> {t0, lit, burst, cx}
 
     def reset(self) -> None:
         self.run = None
@@ -428,6 +449,7 @@ class SlamPlay:
         self._closed, self._jfam, self._rune = set(), {}, {}
         self._ho = self._hold = None
         self.holds = []
+        self._rg_circ = {}
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -457,8 +479,38 @@ class SlamPlay:
             return min(antic, key=lambda o: abs(float(o["pos"][0]) - hx))
         return next((o for o in cs if o.get("iid") not in self._closed), None)
 
-    def _two_danger(self, s: dict, e: dict, tx: float, t: float) -> str | None:
-        """TWO_PLAY: why the other Clapper can reach the stand point tx during the strike (module constants), or None."""
+    def _rg_exposed(self, rc: tuple, tx: float, t: float, k: int) -> bool:
+        """SSBOT_FORUM_TWO_RUNEGATE: the strike started now (antic frame k) meets the circle of the jump cast that landed
+        at rc (x, facing, clock) while it is lit (module constants); False once that circle burst."""
+        cen = rc[0] + rc[1] * (RG_C[1] if rc[1] > 0 else RG_C[0])
+        for c in self._rg_circ.values():
+            if c["burst"] and abs(c["cx"] - cen) < 1.5 and c["t0"] >= rc[2] - 0.1:
+                return False
+        w0, w1 = rc[2] + (RG_LIT[0] - RG_M) / 60.0, rc[2] + (RG_LIT[1] + RG_M) / 60.0
+        if t > w1:
+            return False
+        dx = max(0.0, abs(tx - cen) - 0.23)
+        for kk in range(max(k, k + int((w0 - t) * 60.0)), min(110, k + int(round((w1 - t) * 60.0))) + 1):
+            hb = RG_H10[min(kk // 2, len(RG_H10) - 1)]
+            if dx * dx + max(0.0, hb - 0.34) ** 2 < RG_R * RG_R:
+                return True
+        return False
+
+    def _rg_observe(self, s: dict, t: float) -> None:
+        """SSBOT_FORUM_TWO_RUNEGATE: the circle objects' first time, lit and burst (lit, then unlit) every tick."""
+        from ssbot.combat import cast_stab as _cs
+        for lo, hi, ciid, lit in _cs.rune_spans(s):
+            c = self._rg_circ.setdefault(ciid, {"t0": t, "lit": False, "burst": False, "cx": 0.5 * (lo + hi)})
+            if abs(c["cx"] - 0.5 * (lo + hi)) > 0.5 or (c["burst"] and lit):
+                c.update(t0=t, lit=False, burst=False, cx=0.5 * (lo + hi))     # the pool reused the object
+            if lit:
+                c["lit"] = True
+            elif c["lit"]:
+                c["burst"] = True
+
+    def _two_danger(self, s: dict, e: dict, tx: float, t: float, k: int | None = None) -> str | None:
+        """TWO_PLAY: why the other Clapper can reach the stand point tx during the strike (module constants), or None.
+        k: the antic frame of this tick's mask (SSBOT_FORUM_TWO_RUNEGATE's rune check; None: the old one)."""
         for o in clappers(s):
             if o.get("iid") == e.get("iid"):
                 continue
@@ -473,7 +525,12 @@ class SlamPlay:
             if st == "Slam Recover" and d < TWO_BODY_U:
                 return "other Slam Recover"
             rc = self._rune.get(o.get("iid"))
-            if rc is not None and t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]:
+            if rc is not None and TWO_RUNEGATE and k is not None:
+                if self._rg_exposed(rc, tx, t, k):
+                    return "other rune circle"
+                if t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]                         and self.run is not None and self.run.rg_k is None:
+                    self.run.rg_k = k                 # the old gate would have declined it here (stats)
+            elif rc is not None and t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]:
                 return "other rune circle"
         return None
 
@@ -519,7 +576,12 @@ class SlamPlay:
                 out["chain_b_bounced"] += r.bounced
         if self.holds:
             out["tight_holds"] = len(self.holds)
-        return dict(out)
+        rg = [[r.iid, r.fa, r.rg_k, r.phase, r.why, r.k_press, r.bounced]
+              for r in self.done + ([self.run] if self.run is not None else []) if r.rg_k is not None]
+        res = dict(out)
+        if rg:
+            res["rg_rel"] = rg                       # SP11-0 TWO_RUNEGATE: the runs its gate let start
+        return res
 
     def runs_rec(self) -> list:
         """SP10a (logging only): every run - [iid, antic entry frame, phase, why, k_start, k_jump, k_press, bounced,
@@ -561,7 +623,7 @@ class SlamPlay:
         self.run = None
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             skip: frozenset | None = None, sim=None) -> int | None:
+             skip: frozenset | None = None, sim=None, guard: list | None = None) -> int | None:
         """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides).
 
         t_game: the game clock (s; the backend's Stamp.t_game_s, the sum of the scaled dt: it stands still through
@@ -572,7 +634,10 @@ class SlamPlay:
         c = self.cfg
         t = f / 60.0 if t_game is None else float(t_game)
         self._t = t
+        self._guard = guard                  # SP11-0 SSBOT_FORUM_TWO_GUARD: the other one's danger spans (or None)
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
+        if TWO_RUNEGATE and TWO_PLAY:
+            self._rg_observe(s, t)
         if self._hold is not None:
             hm = self._hold_mask(f, s)
             if hm is not None:
@@ -641,7 +706,7 @@ class SlamPlay:
                 cx0 = float(e["pos"][0])
                 x0 = (hero_x(s) - cx0) * r.face
                 tx = cx0 + r.face * min(max(x0, c.stand[0]), c.stand[1])
-                why = self._two_danger(s, e, tx, t)
+                why = self._two_danger(s, e, tx, t, k)
                 if why is not None:
                     r.why = why
                     return None
@@ -716,7 +781,7 @@ class SlamPlay:
                         return hm
                 if TWO_HANDOFF and TWO_PLAY:
                     # SP10b: B's run opens on this tick (a late start)
-                    return self.step(f, s, ground, accepting, t_game, skip, sim)
+                    return self.step(f, s, ground, accepting, t_game, skip, sim, guard)
                 return None
             if (_ac.AIRCHAIN and TWO_PLAY and sim is not None and r.bounced and r.s0 is not None and not r.chain_off
                     and not (r.tight is not None and r.tight[1])):
@@ -761,6 +826,12 @@ class SlamPlay:
                     r.near_u = fit
                     r.side_why = "ho_aim"
             return
+
+    def _guarded_spot(self, r: Run, x: float) -> bool:
+        """SP11-0 SSBOT_FORUM_TWO_GUARD: her landing at x (box centre) meets another Clapper's danger span (its jump
+        landing band, its big rune circle; not its slam: the hand-off / TWO_TIGHT handle a second hammer)."""
+        from ssbot.combat import two_play as _tp
+        return _tp.guard_hit(self._guard, x - 0.25, x + 0.25, kinds=("land", "rune"), own=r.iid) is not None
 
     def _hold_mask(self, f: int, s: dict) -> int | None:
         """TWO_TIGHT's hold after the far-side landing: 0 (no key) while B is in its slam before Slam 2, she is not hurt
@@ -970,7 +1041,11 @@ class SlamPlay:
                 # SP7 TWO_SIDE: SP1's dash way out on that side (kept: the other one may be in its antic by Slam 0 + 20)
                 room = (lambda d: (cx - WALL_L) if d < 0 else (WALL_R - cx))
                 r.near, r.side_why = 0, why
-                r.over_dir = next((d for d in (pref, -pref) if room(d) >= c.over_room), 0)
+                ds = [d for d in (pref, -pref) if room(d) >= c.over_room]
+                if self._guard is not None and len(ds) > 1 and self._guarded_spot(r, cx + ds[0] * TIGHT_LAND_U):
+                    if not self._guarded_spot(r, cx + ds[1] * TIGHT_LAND_U):
+                        ds, r.side_why = ds[::-1], "guard"     # SP11-0: away from the other one's danger
+                r.over_dir = ds[0] if ds else 0
                 return 0
             x_rel = (hero_x(s) - cx) * r.face
             fits = {}
@@ -984,11 +1059,19 @@ class SlamPlay:
                 clear = d == r.face or (x_rel - v * (c.near_cross_s0 - max(ks0, c.near_s0_behind)) <= -cu)
                 fits[d] = (u, u is not None and clear)
             r.near = next((d for d in (pref, -pref) if fits[d][1]), 0)
+            g_switch = False
+            if self._guard is not None and r.near != 0 and self._guarded_spot(r, cx + r.near * fits[r.near][0]):
+                # SP11-0 TWO_GUARD: the landing spot in the other one's danger span (its jump landing band, its big rune
+                # circle): the other side when that fits and is clear of them
+                o = -r.near
+                if fits[o][1] and not self._guarded_spot(r, cx + o * fits[o][0]):
+                    r.near, g_switch = o, True
             if r.near == 0:
                 r.side_why = "old"
                 return 0
             r.near_u = fits[r.near][0]
-            r.side_why = why if r.near == pref else ("room" if fits[pref][0] is None else "clear")
+            r.side_why = "guard" if g_switch else (
+                why if r.near == pref else ("room" if fits[pref][0] is None else "clear"))
         d = r.near
         if ks0 < (c.near_s0_behind if d == -r.face else c.near_s0_front) or r.k_slash is not None:
             return 0

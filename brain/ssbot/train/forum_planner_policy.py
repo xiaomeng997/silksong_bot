@@ -791,6 +791,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         mask = res.mask if r.mask is None else r.mask
         own = "plan" if r.mask is None else "sup"
         play = None
+        # SP11-0 (SSBOT_FORUM_TWO_GUARD): the other Clapper's danger spans for the one-Clapper scripts (None: off)
+        gsp = (self.two.guard_spans(f, s, ws.stamp.t_game_s)
+               if (two_play.GUARD and self.two is not None) else None)
         if self.cast_stab is not None:
             self.cast_stab.observe(f, s)          # SP8: the rune circles' first frame and lit state, every tick
         if self.evade_chase is not None:
@@ -814,7 +817,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                        t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip,
-                                       sim=sim)
+                                       sim=sim, guard=gsp)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None
@@ -862,7 +865,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s, latch=latch_h, skip=asw_skip)
+                                       t_game=ws.stamp.t_game_s, latch=latch_h, skip=asw_skip, guard=gsp)
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None
@@ -881,7 +884,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c,
                                        focus=getattr(prefs, "target", None),
                                        block=(self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT)
-                                              else None))
+                                              else None), guard=gsp)
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None

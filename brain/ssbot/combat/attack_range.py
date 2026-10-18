@@ -54,6 +54,10 @@ from ssbot.combat.are_spec import PARKED, CustomView, Decision, EnemySpec, Hazar
 from ssbot.combat import jump_behind as _jb
 from ssbot.combat import rune_bombs as _rb
 
+# SSBOT_FORUM_TWO_COMMIT (task 1v1 SP11-0, default off; read by combat.forum_v2): estimates keep their part without
+# the hazards (Estimate.core) so a non-focus Clapper's hazards (the jump cast's rune circle) get their own margin
+COMMIT_CORE = __import__("os").environ.get("SSBOT_FORUM_TWO_COMMIT", "0").strip() == "1"
+
 REPO = Path(__file__).resolve().parents[3]
 FORUM = REPO / "knowledge" / "1.0.30000" / "enemies" / "forum"
 FT = 1.0 / 60.0
@@ -705,6 +709,7 @@ class Estimate:
     b: int | None              # the bin of the frame shown (b + k is placed)
     pos: tuple
     haz: Mask | None = None    # the part of raw from the enemy's hazards (types with hazards)
+    core: Mask | None = None   # SSBOT_FORUM_TWO_COMMIT (SP11-0): raw before the hazards were added (set only then)
 
 
 class RangeTracker:
@@ -856,6 +861,8 @@ class RangeTracker:
                 # it: its front (2.25 u, p99 of the recorded turned bodies) then reaches her side (S2 live: 17 body
                 # hits at Idle 2.0-2.5 u behind the landing); the body of either facing from the landing on
                 est.raw = union([est.raw, _jb_turn_mask(float(p[0]), tab.cell)])
+        if COMMIT_CORE:
+            est.core = est.raw          # SSBOT_FORUM_TWO_COMMIT: the move / body without the hazards (forum_v2.build)
         if tab.spec.hazards:
             seg = self.segs.get(iid)
             hm = hazards_at(tab, seg.spawned if seg else (), inst, self.T, (float(p[0]), float(p[1])),

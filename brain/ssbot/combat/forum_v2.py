@@ -86,6 +86,18 @@ VSLAM = os.environ.get("SSBOT_FORUM_V2_VSLAM", "0").strip() == "1"
 # (haz_raw) so the special stacks drop a move's estimate but keep the enemy's hazards
 SPECIAL_MODE = os.environ.get("SSBOT_FORUM_SPECIAL_MODE", "0").strip() == "1"
 VSLAM_FAMS = (None, "CC_EVADE", "CC_CAST")
+# SSBOT_FORUM_TWO_COMMIT (task 1v1 SP11-0, default off; two Clappers): under MARGIN_MODE "focus" a Clapper that is not
+# the focus gets the "rule" margin (0.5 u to k 12, then 0.3 + 11 t^2: 2.1 u at k 24, 4.3 u at k 36) on everything it
+# does - also on a committed move whose place is known: a jump past its Jump Aim (the landing from its take-off and her
+# x at the aim, error p50 0.03-0.05 u), its landing (Slam 2 / Slam Recover), and its hazards (the jump cast's rune
+# circle: centre landing + 6.48 u, r 7.19, lit 65-77 frames after the landing). (Not a slam: its antic turns to the
+# hero, are_types.clapper.) SP10c's T2 (rnjb, 32 episodes): 47 of the 49 planner-owned HP losses came after a FORCED_RISK
+# streak (no safe row) of 7-90 frames, 24 of them with the attacker not L2's target (its landing / circle grown by up to
+# 4.3 u leaves no row out; at the target switch of 20261017_161806_2_i0_e0 f 4011325 the safe rows went 23 -> 0 in one
+# tick). On: those parts get COMMIT_M (default FOCUS_M) like the focus unit; idle bodies, walks, evades, casts and slams
+# keep the rule margin.
+COMMIT = os.environ.get("SSBOT_FORUM_TWO_COMMIT", "0").strip() == "1"
+COMMIT_M = float(os.environ.get("SSBOT_FORUM_TWO_COMMIT_M", "") or FOCUS_M)
 
 
 def corner_zones(fc) -> list[tuple[float, float]]:
@@ -560,6 +572,14 @@ def jb_dash_free(rs) -> bool:
             and bool(getattr(inst, "states", None)) and inst.states[-1] in _jb.AIR_STATES + _jb.LANDED_STATES)
 
 
+def committed(inst) -> bool:
+    """SSBOT_FORUM_TWO_COMMIT: a Clapper's move instance whose place is known - a jump / jump cast past its Jump Aim or
+    landed (jump_behind's AIR / LANDED states)."""
+    if inst is None or not getattr(inst, "states", None):
+        return False
+    return inst.fam in _jb.JUMP_FAMS and inst.states[-1] in _jb.AIR_STATES + _jb.LANDED_STATES
+
+
 def focus_iid(trk: RangeTracker, target: int | None) -> int | None:
     """The focus unit (MARGIN_MODE "focus"): the controller's target (GoalPrefs.target) when the tracker has it, else
     the only enemy in play, else None (every unit then gets its "rule" margin)."""
@@ -614,6 +634,19 @@ class RangeSupport(LayerSupport):
                 # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable zone:
                 # the margin's growth is the replanning's business), moves and hazards with their margin
                 idle = e.fam is None
+                if COMMIT and tk_name == CLAPPER and iid != rs.focus and m > COMMIT_M:
+                    # SSBOT_FORUM_TWO_COMMIT: a committed move (whole estimate) / its hazards with COMMIT_M
+                    if committed(trk.now[iid][2]):
+                        rs.add_raw(si, iid, c, ix0, iy0, COMMIT_M, COMMIT_M if esc else None)
+                        rs.n_commit = getattr(rs, "n_commit", 0) + 1
+                        continue
+                    if e.haz is not None and e.haz.m.size and e.haz.m.any() and e.core is not None:
+                        cc, cx0, cy0 = coarse(e.core, tab.cell, cv.cell)
+                        rs.add_raw(si, iid, cc, cx0, cy0, m, (ESC_IDLE_M if idle else m) if esc else None)
+                        ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
+                        rs.add_raw(si, iid, ch, hx0, hy0, COMMIT_M, COMMIT_M if esc else None)
+                        rs.n_commit = getattr(rs, "n_commit", 0) + 1
+                        continue
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
                 if SPECIAL_MODE and e.haz is not None and e.haz.m.size and e.haz.m.any():
                     ch_, hx_, hy_ = coarse(e.haz, tab.cell, cv.cell)

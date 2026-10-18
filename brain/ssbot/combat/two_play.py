@@ -137,7 +137,14 @@ ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
 # SP10c (the lead's NOTE 4 / 5 of 2026-10-17, the person: "the moment one starts its jump antic she can already go and
 # hit the other one" - part of the target-switch controller; forum.md 81): default off (=1 on)
 JUMPHIT = _on("SSBOT_FORUM_TWO_JUMPHIT")
-ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT   # the policy's TwoPlay object (CHASE / CAST: own scripts)
+# SP11-0 (task 1v1 SP11-0, the SP10 cause audits: one-Clapper scripts acting while the other Clapper hit her - the chase 10
+# of 68 HP losses in SP10c's T2, the low hop's stance in the other's big rune, the slam playbook's way out drifting into
+# the other's landing): default off (=1 on). TwoPlay.guard_spans gives the other Clapper's danger spans (its jump landing
+# band once its Jump Aim fixed it, its big rune circle lit or to come, its hammer in a slam, its body) and the chase (no
+# start / abort with her inside one, never a key / dash that takes her into one on the way to the focus), the low hop (no
+# start / abort with its stance or her x in one) and the slam playbook (the way out's side away from them) use them
+GUARD = _on("SSBOT_FORUM_TWO_GUARD")
+ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD   # the policy's TwoPlay object (CHASE / CAST: own scripts)
 
 CLAPPER = _sp.CLAPPER
 M_L, M_R, M_A = _sp.M_L, _sp.M_R, _sp.M_A
@@ -216,6 +223,52 @@ def _set_cfg(c, env: str):
             raise KeyError(f"{env}: unknown key {k!r}")
         setattr(c, k, type(getattr(c, k))(float(v)))
     return c
+
+
+@dataclass
+class GuardCfg:
+    """SSBOT_FORUM_TWO_GUARD (SP11-0): the other Clapper's danger spans (u, centre to centre, her box centre's x)."""
+    land_back: float = 3.0      # a jump's landing band behind the landing (its falling Air body: SP10c fp1, 1.8-1.95 u
+    #                             behind was hit 16 / 19, 3.0 u safe)
+    land_front: float = 8.3     # ... in front (Slam Collider 2 0.67-7.76 u + her half width 0.25 + 0.3)
+    land_tail_f: int = 12       # ... until this many frames after its landing (Slam 2's collider), then its body
+    rune_c: float = 6.48        # the big rune circle's centre in front of the landing ...
+    rune_r: float = 7.74        # ... and its reach (r 7.19 + her half width 0.25 + 0.3)
+    hammer_u: float = 12.5      # a slam's hammer in front of its centre (slam_play.TWO_SLAM_U)
+    hammer_back: float = 1.9    # ... behind it (its back 1.34 + 0.25 + 0.3)
+    body_pad: float = 0.55      # around a body (her half width + 0.3)
+
+
+def _guard_cfg() -> GuardCfg:
+    """SSBOT_FORUM_TWO_GUARD_SET="land_back=3.3": trial overrides of the GuardCfg numbers."""
+    return _set_cfg(GuardCfg(), "SSBOT_FORUM_TWO_GUARD_SET")
+
+
+GUARD_ALL = ("land", "rune", "hammer", "body")
+
+
+def guard_hit(spans, lo: float, hi: float, kinds=GUARD_ALL, own=None) -> str | None:
+    """SSBOT_FORUM_TWO_GUARD: the kind of the first span (of another Clapper than own, or a circle) that meets
+    [lo, hi], or None."""
+    for a, b, kind, iid in spans or ():
+        if kind in kinds and (iid is None or iid != own) and a < hi and b > lo:
+            return kind
+    return None
+
+
+def guard_room(spans, x: float, d: int, kinds=GUARD_ALL, own=None) -> float:
+    """SSBOT_FORUM_TWO_GUARD: how far (u) she can move from x in world direction d before a span's near edge (99 with
+    none that way; 0 when x is inside one)."""
+    room = 99.0
+    for a, b, kind, iid in spans or ():
+        if kind not in kinds or (iid is not None and iid == own):
+            continue
+        if a < x < b:
+            return 0.0
+        edge = a - x if d > 0 else x - b
+        if edge >= 0.0:
+            room = min(room, edge)
+    return room
 
 
 # ---- SP9c: the antic switch ----
@@ -581,6 +634,8 @@ class TwoPlay:
         self._asw_dash: dict | None = None    # the dash held into the sprint: {"f0", "dir", "rel", "ctl"}
         self._n_att: Counter = Counter()      # iid -> its attack antics seen (slam / cast / jump / jump cast)
         self._asw_prev = 0                    # its last mask
+        # SP11-0: TWO_GUARD's numbers
+        self.gcfg = _guard_cfg() if GUARD else GuardCfg()
         # SP10c: TWO_JUMPHIT's run (one Clapper's jump move) and the finished ones
         self.jcfg = _jh_cfg() if JUMPHIT else JhCfg()
         self.jh: JhRun | None = None
@@ -625,7 +680,7 @@ class TwoPlay:
             if ASW and (st in ASW_ANTIC or st in ESC_ANTIC) and (pst is None or pst[0] != st):
                 self._n_att[iid] += 1
             self.prev[iid] = (st, tin)
-            if SPACE and hx is not None:
+            if (SPACE or GUARD) and hx is not None:
                 j = self.jumps.get(iid)
                 if st in ("Jump Antic", "Cast Slam Antic") and (j is None or j.get("done")):
                     self.jumps[iid] = {"x0": float(e["pos"][0]), "face": face_of(e), "aim_hx": None,
@@ -633,6 +688,8 @@ class TwoPlay:
                 elif j is not None and not j.get("done"):
                     if st in ("Jump", "Air") and j["aim_hx"] is None:
                         j["aim_hx"] = hx
+                        if GUARD:
+                            j["aim_face"] = face_of(e)     # SP11-0: the jump faces her at its aim
                     if st not in JUMP_ST:
                         j["done"] = True
                         j["land_x"] = float(e["pos"][0])
@@ -1958,6 +2015,53 @@ class TwoPlay:
                             "b_next": r.b_next, "k_next": r.k_next, "walk": r.walk, "f_end": r.f_end,
                             "end": r.end, "lag": r.k_a, "f_lock": r.f_lock, "hops": r.hops,
                             "bombs_live": sum(1 for b in r.bombs.values() if not b["stale"])} for r in runs]
+        return out
+
+    # ---- SP11-0 TWO_GUARD ----
+
+    def guard_spans(self, f: int, s: dict, t: float) -> list:
+        """SSBOT_FORUM_TWO_GUARD: [(lo, hi, kind, iid)] - every live Clapper's danger spans now (the consumers skip
+        their own Clapper's): "land" its jump's landing band from its Jump Aim (jump_landing from its take-off x and her
+        x at the aim, its facing then) to its landing + land_tail_f, "rune" its jump cast's circle from the aim (the
+        circle predicted from the landing) and every circle object lit or still to come (cast_stab.rune_spans; owner
+        None), "hammer" a slam (Slam Antic: both sides - the antic turns to her; Slam 0 .. Slam 2: in front), "body" its
+        body. Two live Clappers only (else [])."""
+        cs = _sp.clappers(s)
+        if len(cs) != 2:
+            return []
+        c = self.gcfg
+        out = []
+        for e in cs:
+            iid = e.get("iid")
+            st = _sp.control(e)[0]
+            cx, fc = float(e["pos"][0]), face_of(e)
+            a, b = body_span(e)
+            out.append((a - c.body_pad, b + c.body_pad, "body", iid))
+            j = self.jumps.get(iid)
+            jland = None
+            landed = j is not None and j.get("done") and j.get("t_land") is not None
+            if j is not None and j.get("aim_hx") is not None:
+                if not j.get("done"):
+                    from ssbot.combat.tactics.gauntlet import jump_landing
+                    jf = j.get("aim_face", j["face"])
+                    jland = (jump_landing(j["x0"], j["aim_hx"], jf), jf)
+                elif landed and (t - j["t_land"]) * 60.0 <= c.land_tail_f:
+                    jland = (float(j["land_x"]), j.get("aim_face", j["face"]))
+            if jland is not None:
+                L, jf = jland
+                p, q = L - jf * c.land_back, L + jf * c.land_front
+                out.append((min(p, q), max(p, q), "land", iid))
+                if j.get("fam") == "jc" and not j.get("done"):
+                    cc = L + jf * c.rune_c
+                    out.append((cc - c.rune_r, cc + c.rune_r, "rune", iid))
+            elif st in SLAM_ST and not (landed and (t - j["t_land"]) * 60.0 <= c.land_tail_f + 6):
+                if st == "Slam Antic":
+                    out.append((cx - c.hammer_u, cx + c.hammer_u, "hammer", iid))
+                else:
+                    p, q = cx - fc * c.hammer_back, cx + fc * c.hammer_u
+                    out.append((min(p, q), max(p, q), "hammer", iid))
+        for lo, hi in self._rune_threats(f, s):
+            out.append((lo - HALF_W - 0.3, hi + HALF_W + 0.3, "rune", None))
         return out
 
     # ---- S5 the stance ----

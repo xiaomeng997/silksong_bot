@@ -36,6 +36,11 @@ Not while a jump cast's rune circle is lit or still to come over her way to it (
 cast's circle, lit 42 frames after the evade's start, 2 HP): no start, or the run hands back ("rune").
 Abort (the planner decides again): HP lost, the Clapper gone or a second one alive, a rune circle over the way, the
 state no longer Evade Scuttle (the normal end: "end").
+SP11-0 (SSBOT_FORUM_TWO_GUARD, combat.two_play.guard_spans; step(guard=...)): with two Clappers the other one's danger
+spans (its jump landing band once aimed, its big rune circle, its hammer, its body): no start and abort ("guard") with
+her x inside one; the run key only while the step stays out of the nearest span on the way to the focus, the dash /
+air dash only when their whole travel does (SP10c T2: 10 of 68 HP losses were the chase running her under the other
+one's landing or into its body).
 Two Clappers (task 1v1 SP9a S1, SSBOT_FORUM_TWO_CHASE, combat.two_play; EvadeChase(two=True)): the focus's evade (the
 L2 target the policy passes, else the nearer one) is chased the same way, the slash never pressed when it would meet
 the other one's body (the switch answer 2a: B is free during F's slide and decides at once when hit, 19 / 19); one
@@ -135,6 +140,11 @@ def air_travel(j: int) -> float:
     return d
 
 
+# SSBOT_FORUM_TWO_GUARD (SP11-0): the room (u) a dash / an air dash needs toward the focus before the other one's span
+GUARD_DASH_U = DASH_V / 60.0 * DASH_F + WALK_U * 3 + 0.1
+GUARD_AIR_U = air_travel(AIR_DASH_F + AIR_SPRINT_F + 3) + 0.1
+
+
 def air_path(d: float, n: int, slide: float) -> list[float]:
     """As dash_path for the air dash (frames 1 .. AIR_DASH_F + AIR_SPRINT_F + 3)."""
     return [d + min(slide, EV_V * min(j, n)) - air_travel(j) for j in range(1, AIR_DASH_F + AIR_SPRINT_F + 4)]
@@ -175,6 +185,8 @@ class Chase:
     next_st: str | None = None  # its first state after the slide
     sent: list = field(default_factory=list)      # (f, mask) of this run's masks
     ticks: int = 0
+    guard_min: float | None = None   # SSBOT_FORUM_TWO_GUARD: the least room toward it seen (u)
+    guard_stops: int = 0             # ... masks held back by it
 
 
 class EvadeChase:
@@ -187,6 +199,7 @@ class EvadeChase:
         self.n_evade = 0
         self.why_not: dict = {}
         self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
+        self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the chases not started for it
 
     def reset(self) -> None:
         self.run = None
@@ -195,6 +208,7 @@ class EvadeChase:
         self.n_evade = 0
         self.why_not = {}
         self._runes = {}
+        self.guard_f = []
 
     def observe(self, f: int, s: dict) -> None:
         """Every tick (the policy calls it whichever script runs): the rune circles' first frame and lit state."""
@@ -265,13 +279,18 @@ class EvadeChase:
             out[f"no_{k}"] += v
         res = dict(out)
         res["chase_runs"] = [self._rec(r) for r in runs]
+        if self.guard_f:
+            res["guard_nostart_f"] = list(self.guard_f)
         return res
 
     @staticmethod
     def _rec(r: Chase) -> dict:
-        return {"f0": r.f0, "k0": r.k0, "x0": r.x0, "ground0": r.ground0, "dash_k": r.dash_k, "dash_x": r.dash_x,
-                "dash_pred": r.dash_pred, "air": r.air, "dash_tries": r.dash_tries, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
-                "next": r.next_st, "end": r.phase, "why": r.why, "ticks": r.ticks}
+        out = {"f0": r.f0, "k0": r.k0, "x0": r.x0, "ground0": r.ground0, "dash_k": r.dash_k, "dash_x": r.dash_x,
+               "dash_pred": r.dash_pred, "air": r.air, "dash_tries": r.dash_tries, "presses": r.presses, "hits": r.hits, "x_end": r.x_end, "k_end": r.k_end,
+               "next": r.next_st, "end": r.phase, "why": r.why, "ticks": r.ticks}
+        if r.guard_min is not None:
+            out["guard_min"], out["guard_stops"] = r.guard_min, r.guard_stops   # SSBOT_FORUM_TWO_GUARD
+        return out
 
     # ---- the script ----
 
@@ -299,7 +318,7 @@ class EvadeChase:
         return _sp.clapper(s)
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, latch=None, focus=None,
-             block: str | None = None) -> int | None:
+             block: str | None = None, guard: list | None = None) -> int | None:
         """The mask for frame f + 2 while the chase runs, else None. latch: m -> the key mask the oracle's hold filter
         latches at f + 2 when m is sent for it (None: m itself); focus: L2's target (two Clappers); block: why no chase
         may run now (SP10c TWO_JUMPHIT: the other one's landing), None: no block."""
@@ -331,13 +350,17 @@ class EvadeChase:
             if self._rune_in_way(f, s, e, r.face):
                 self._close("abort", "rune")
                 return None
+            room = self._guard_room(r, f, s, e, guard)
+            if room is not None and room <= 0.0:
+                self._close("abort", "guard")
+                return None
             for ev in s.get("ev") or ():
                 d = ev.get("d") or {}
                 if ev.get("k") == "hit" and d.get("type_key") == CLAPPER:
                     dealt = d.get("dealt", d.get("amount"))
                     if dealt is None or float(dealt) > 0:
                         r.hits.append((k - SEND_AHEAD, str(d.get("src"))))
-            m = self._step_run(r, f, k, s, e, ground, accepting, latch)
+            m = self._step_run(r, f, k, s, e, ground, accepting, latch, room)
             r.sent.append((f, m))
             r.ticks += 1
             return m
@@ -359,15 +382,36 @@ class EvadeChase:
             why = "dead"
         elif self._rune_in_way(f, s, e, face):
             why = "rune"
+        room = None
+        if why is None and guard is not None:
+            room = self._guard_room(Chase(iid=e.get("iid"), face=face, f0=f, k0=0, x0=x0, ground0=bool(ground), hp0=hp),
+                                    f, s, e, guard)
+            if room is not None and room <= 0.0:
+                why = "guard"
+                self.guard_f.append(f)              # SSBOT_FORUM_TWO_GUARD: the no-start frames (stats)
         if why is not None:
             self.why_not[why] = self.why_not.get(why, 0) + 1
             return None
         k = int(round(tin * 60.0)) + SEND_AHEAD
         self.run = Chase(iid=e.get("iid"), face=face, f0=f, k0=k, x0=round(x0, 3), ground0=bool(ground), hp0=hp)
-        m = self._step_run(self.run, f, k, s, e, ground, accepting, latch)
+        m = self._step_run(self.run, f, k, s, e, ground, accepting, latch, room)
         self.run.sent.append((f, m))
         self.run.ticks += 1
         return m
+
+    def _guard_room(self, r: Chase, f: int, s: dict, e: dict, guard: list | None) -> float | None:
+        """SSBOT_FORUM_TWO_GUARD: her room (u) toward the focus from her x on the mask's frame before the other one's
+        nearest danger span (0: she is inside one), None without guard spans."""
+        if guard is None:
+            return None
+        from ssbot.combat import two_play as _tp
+        xw, _ = self._x_mask(r, f, s, e)
+        room = _tp.guard_room(guard, xw, -r.face, own=r.iid)
+        if room > 0.0 and _tp.guard_hit(guard, xw - 0.01, xw + 0.01, own=r.iid):
+            room = 0.0
+        if r.guard_min is None or room < r.guard_min:
+            r.guard_min = round(room, 2)
+        return room
 
     def _x_mask(self, r: Chase, f: int, s: dict, e: dict) -> tuple[float, float]:
         """(her box centre's world x, its centre's world x) on the mask's frame f + 2: her velocity (or this run's own
@@ -379,8 +423,10 @@ class EvadeChase:
         cx = float(e["pos"][0]) + ev * SEND_AHEAD / 60.0
         return xw, cx
 
-    def _step_run(self, r: Chase, f: int, k: int, s: dict, e: dict, ground: bool, accepting: bool, latch) -> int:
+    def _step_run(self, r: Chase, f: int, k: int, s: dict, e: dict, ground: bool, accepting: bool, latch,
+                  room: float | None = None) -> int:
         c = self.cfg
+        room = 99.0 if room is None else room      # SSBOT_FORUM_TWO_GUARD: her room toward it (u)
         h = s.get("hero") or {}
         clip = str((h.get("anim") or {}).get("clip") or "")
         tm = h.get("tm") or {}
@@ -411,7 +457,7 @@ class EvadeChase:
         if c.dash and r.dash_k is None and ground and accepting and k <= c.dash_k_max and not atk_lock:
             d_run = d + slide - WALK_U * n
             if d_run > c.dash_if_u and float(tm.get("dash_cd") or 0.0) <= 0.02 and not any(
-                    x in clip for x in NO_ATK_CLIPS):
+                    x in clip for x in NO_ATK_CLIPS) and room >= GUARD_DASH_U:
                 path = dash_path(d, n, slide)
                 d_end = path[-1] if n >= len(path) else path[max(0, n - 1)]
                 # the end: the evade's last frame (or the path's end when the evade ends later)
@@ -426,7 +472,7 @@ class EvadeChase:
                 not atk_lock:
             d_run = d + slide - WALK_U * n
             if d_run > c.air_if_u and float(tm.get("dash_cd") or 0.0) <= 0.02 and not any(
-                    x in clip for x in NO_ATK_CLIPS):
+                    x in clip for x in NO_ATK_CLIPS) and room >= GUARD_AIR_U:
                 path = air_path(d, n, slide)
                 d_end = path[-1] if n >= len(path) else path[max(0, n - 1)]
                 if min(path) >= c.min_u + c.air_margin and d_end >= c.end_lo + c.air_margin and (latch is None or (
@@ -438,6 +484,9 @@ class EvadeChase:
                     return toward | M_DASH
         if d - WALK_U < c.stop_u:
             return 0
+        if room < WALK_U * (SEND_AHEAD + 1):
+            r.guard_stops += 1
+            return 0                                  # SSBOT_FORUM_TWO_GUARD: the next step meets the other's span
         return toward
 
     def _slash_ok(self, r: Chase, k: int, s: dict, e: dict, d: float, cx: float, tm: dict, clip: str, prev: int,

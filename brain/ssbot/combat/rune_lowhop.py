@@ -46,7 +46,10 @@ The script (every mask for frame f + 2; k counts game frames from the antic entr
           the jump antic scripts and the evade chase (the policy does not call them then: they start a few frames
           later, from the air).
 Abort (the planner decides again): HP lost, the Clapper gone or a second one alive, a jump cast's rune circle over her
-stance, a start in the air that does not land before the hop. Done: landed from the hop; the cast over without a
+stance, a start in the air that does not land before the hop. SP11-0 (SSBOT_FORUM_TWO_GUARD; step(guard=...)): with two
+Clappers no start / abort ("guard", outside the critical window) when the other one's danger span (combat.two_play
+guard_spans: its jump landing band, its big rune circle, its hammer, its body) meets her way to the stance or the stance
+(SP10a / SP10c audits: the stance on one's cast in the other's big rune circle). Done: landed from the hop; the cast over without a
 covering bomb; another script took the keys outside the critical window.
 
     lh = RuneLowHop()                                         # per episode: lh.reset()
@@ -289,6 +292,7 @@ class RuneLowHop:
         self.n_cast = 0
         self.why_not: dict = {}
         self._runes: dict = {}
+        self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the casts not started for it
 
     def reset(self) -> None:
         self.run = None
@@ -297,6 +301,7 @@ class RuneLowHop:
         self.n_cast = 0
         self.why_not = {}
         self._runes = {}
+        self.guard_f = []
 
     # ---- bookkeeping ----
 
@@ -361,6 +366,8 @@ class RuneLowHop:
             out[f"no_{k}"] += v
         res = dict(out)
         res["hop_runs"] = [self._rec(r) for r in runs]
+        if self.guard_f:
+            res["guard_nostart_f"] = list(self.guard_f)
         return res
 
     @staticmethod
@@ -374,7 +381,7 @@ class RuneLowHop:
     # ---- the script ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             latch=None, skip: frozenset | None = None) -> int | None:
+             latch=None, skip: frozenset | None = None, guard: list | None = None) -> int | None:
         """The mask for frame f + 2 while the script runs, else None. t_game: the game clock (s; Stamp.t_game_s);
         latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m)."""
         t = f / 60.0 if t_game is None else float(t_game)
@@ -420,6 +427,9 @@ class RuneLowHop:
                 if why is not None:
                     self._close("abort", "other")
                     return None
+                if guard is not None and e is not None and self._guarded(s, e, r.face, guard):
+                    self._close("abort", "guard")
+                    return None
         if r is None:
             if e is None or st != "Spell Antic":
                 return None
@@ -446,6 +456,9 @@ class RuneLowHop:
                 from ssbot.combat import two_play as _tp
                 if _tp.other_danger(s, e.get("iid"), self._hx(s)) is not None:
                     why = "other"
+                elif guard is not None and self._guarded(s, e, face, guard):
+                    why = "guard"
+                    self.guard_f.append(f)          # SSBOT_FORUM_TWO_GUARD: the no-start frames (stats)
             if why is not None:
                 self.why_not[why] = self.why_not.get(why, 0) + 1
                 return None
@@ -484,6 +497,14 @@ class RuneLowHop:
             if sp_:
                 return min(sp_, key=lambda e: abs(float(e["pos"][0]) - hx))
         return _sp.clapper(s)
+
+    def _guarded(self, s: dict, e: dict, face: int, guard: list) -> str | None:
+        """SSBOT_FORUM_TWO_GUARD: the other Clapper's danger span kind over her way to the stance or the stance."""
+        from ssbot.combat import two_play as _tp
+        cx = float(e["pos"][0])
+        a, b = cx + face * self.cfg.stand_lo, cx + face * self.cfg.stand_hi
+        hx = _sp.hero_x(s)
+        return _tp.guard_hit(guard, min(a, b, hx), max(a, b, hx), own=e.get("iid"))
 
     def _rune_over(self, f: int, s: dict, cx: float, face: int) -> bool:
         a = cx + face * self.cfg.stand_lo
