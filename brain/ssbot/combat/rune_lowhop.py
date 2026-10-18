@@ -416,6 +416,7 @@ class Hop:
     op_ms: float = 0.0           # their time (ms)
     op_k: int | None = None      # the antic frame of the jump press (committed)
     op_j0: int | None = None     # its mask frame
+    op_bounce: int | None = None  # the mask frame the bounce off F's head was seen
     op_fail: int = 0             # ticks the committed plan failed its check
     op_alt: int = 0              # in-air replacements (best_air)
 
@@ -1048,7 +1049,19 @@ class RuneLowHop:
                 self.pm_giveup = r.pm_why
             self._close("done", "pm landed" if ok else "pm early land")
             return None
-        if self._sim is not None and e is not None:
+        h = s.get("hero") or {}
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        vy = float((h.get("vel") or [0.0, 0.0])[1])
+        if p.press is not None and F0 > p.press and r.op_bounce is None and (
+                clip.startswith("DownSpikeBounce") or (vy > 12.0 and F0 > p.press + 2)):
+            r.op_bounce = F0
+        if p.contact is not None and r.op_bounce is None and F0 > p.contact + 4 and not ground:
+            # (fp1) the down slash missed F's head (no bounce): the plan is void - the planner decides
+            r.pm_why = "miss"
+            self.pm_giveup = "miss"
+            self._close("abort", "pm miss")
+            return None
+        if self._sim is not None and e is not None and (p.press is None or F0 <= p.press):
             pl, _tgt = self._over_planner(r, f, s, e, ground)
             if not pl.again(p):
                 r.op_fail += 1

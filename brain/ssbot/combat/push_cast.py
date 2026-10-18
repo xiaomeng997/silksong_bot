@@ -46,7 +46,10 @@ PMCAST = _on("SSBOT_FORUM_TWO_PMCAST")
 M_L, M_R, M_D, M_J, M_A = _rp.M_L, _rp.M_R, _rp.M_D, _rp.M_J, _rp.M_A
 FLOOR = _rp.FLOOR
 TALL_TOP, LOW_TOP = 4.78, 3.19         # F's body top above the floor: Spell Antic 8 on / Cast 1 / Cast 2 0-13; Cast 2 14 on
-NO_UMB = 10 ** 6                        # a plan's umbrella press beyond any horizon (none)
+NO_UMB = 1 << 40                        # a plan's umbrella press beyond any horizon (none); (fp1: 10 ** 6 was below
+#                                         the live frame numbers ~8.9e6: every plan held the jump key to its landing)
+IDLE_HALF = 2.25                        # F's Idle body front (it may turn to face her once its cast is over)
+IDLE_TOP = 3.92
 
 
 @dataclass
@@ -55,14 +58,17 @@ class PcCfg:
     trig: str = "nat"          # nat: TWO_PUSHMID's gates (F nearer its wall than B, B idle / walking and out of the lock-
     #                            bounded run's reach); force: every close cast of F with room behind it (the fixed point)
     ret: int = 1               # the herd's return rule: 1 after one F move, 2 once the lock-bounded run to B passes
-    room_c: float = 3.2        # F's centre to the wall behind it (away from her) at the antic >= this
+    room_c: float = 3.8        # F's centre to the wall behind it (away from her) at the antic >= this (land_lo + the wall pad + 0.3)
     d_max: float = 7.5         # she within this of F's centre at the antic (in front of it)
-    land_lo: float = 2.2       # her landing behind x0 (its back 1.34 + her half width 0.25 + 0.6) ...
+    land_lo: float = 3.0       # her landing behind x0 (fp1: F turns to face her in its Idle - its front 2.25 + her
+    #                            half width 0.25 + 0.5) ...
     land_hi: float = 5.6       # ... to this (ring 2's inner edge 5.98 - her half width - 0.15)
     wall_pad: float = 0.5      # and this clear of the wall
     k_plan0: int = 12          # over plans from this antic frame on ...
     k_last: int = 62           # ... the jump pressed by this antic frame at the latest (else the low hop)
-    tgt_c: int = 17            # the contact's target: Cast 2 + this (ring 0 lights ~C + 20; the i-frames ~9 frames)
+    tgt_c: int = 8             # the contact's target: Cast 2 + this (fp1: contacts near Cast 2 + 14, where its body
+    #                            top drops 4.78 -> 3.19 u, missed; the i-frames ~9 frames, ring 0 lights ~C + 20)
+    idle_k: int = 22           # F's body may turn toward her from Cast 2 + this (its Idle: the box both ways)
     every: int = 3             # ... every this many ticks (the plan kept and checked between)
     horizon: int = 110
     body_m: float = 0.1
@@ -95,23 +101,62 @@ class OverPlanner(_rp.Planner):
     low_F (Cast 2 + 14: the contact box then is the low one) and the over plans' landing band."""
 
     def __init__(self, sim, ctx: _rp.Ctx, cfg: PcCfg, low_F: int, x0: float, wdir: int,
-                 walls: tuple = (_rp.WALL_L, _rp.WALL_R)):
+                 walls: tuple = (_rp.WALL_L, _rp.WALL_R), idle_F: int | None = None):
         super().__init__(sim, ctx, rt_cfg(cfg))
         self.pc = cfg
         self.low_F, self.x0, self.wdir, self.walls = low_F, x0, wdir, walls
+        self.idle_F = (low_F - 14 + cfg.idle_k) if idle_F is None else idle_F
 
     def _boxes(self) -> tuple:
         x0, y0, x1, _y1 = self._b_contact_box()
         return (x0, y0, x1, FLOOR + TALL_TOP), (x0, y0, x1, FLOOR + LOW_TOP)
 
     def _hit(self, ro: kin.Rollout, faces: np.ndarray) -> np.ndarray:
+        """The slash meets F's box on this frame and the next (fp1: one-frame contacts missed live): the tall box to
+        low_F - 3, the low one from there (the drop's frame is not known to the frame)."""
         tall, low = self._boxes()
         T1 = ro.flags.shape[1]
         h_t = _rp.slash_hits(ro, faces, tall, self.off)
         h_l = _rp.slash_hits(ro, faces, low, self.off)
-        il = self._i(self.low_F)
+        il = self._i(self.low_F) - 3
         idx = np.arange(T1)[None, :]
-        return np.where(idx < il, h_t, h_l)
+        h = np.where(idx < il, h_t, h_l)
+        h2 = np.zeros_like(h)
+        h2[:, :-1] = h[:, :-1] & h[:, 1:]
+        return h2
+
+    def danger(self, ro: kin.Rollout, contacts: np.ndarray) -> np.ndarray:
+        """rune_pogo's dangers but F's body by time: the tall box to low_F, the low one (top 3.19 u) to idle_F, then
+        its Idle body both ways from x0 (fp1: it turns to face her) - outside the i-frames and the 2 frames before the
+        contact."""
+        b_box = self.c.b_box
+        self.c.b_box = None
+        try:
+            bad_i = super().danger(ro, contacts)
+        finally:
+            self.c.b_box = b_box
+        N, T1 = ro.flags.shape
+        idx = np.arange(T1)[None, :]
+        inv = (ro.flags & kin.F_INVULN) != 0
+        pre = (contacts[:, None] >= 0) & (idx >= contacts[:, None] - 2) & (idx < contacts[:, None])
+        x0b, _y0, x1b, _y1 = b_box
+        il, ii = self._i(self.low_F), self._i(self.idle_F)
+        m = self.pc.body_m
+        hit = np.zeros((N, T1), bool)
+        for lo, hi, box in ((0, il, (x0b, FLOOR - 1.0, x1b, FLOOR + TALL_TOP)),
+                            (il, ii, (x0b - 0.2, FLOOR - 1.0, x1b + 0.2, FLOOR + LOW_TOP)),
+                            (ii, T1, (self.x0 - IDLE_HALF, FLOOR - 1.0, self.x0 + IDLE_HALF, FLOOR + IDLE_TOP))):
+            lo, hi = max(lo, self.off + 1), min(hi, T1)
+            if hi > lo:
+                h = _rp.box_hits(ro, box, m)
+                hit[:, lo:hi] |= h[:, lo:hi]
+        hit &= ~inv & ~pre
+        first = np.where(hit.any(axis=1), np.argmax(hit, axis=1), -1)
+        out = bad_i.copy()
+        for n in range(N):
+            if first[n] >= 0 and (out[n] < 0 or first[n] < out[n]):
+                out[n] = first[n]
+        return out
 
     def _contact(self, ro: kin.Rollout, plans: list) -> np.ndarray:
         N, T1 = ro.flags.shape
@@ -167,7 +212,7 @@ class OverPlanner(_rp.Planner):
         return out
 
     def best_over(self, target_F: int | None = None, ws: tuple = (0, 3, 7, 12), holds: tuple = (18, 26),
-                  dds: tuple = (6, 12, 18), es: tuple = (0, 12, 30)) -> _rp.Plan | None:
+                  dds: tuple = (6, 10, 14, 18), es: tuple = (0, 12, 30)) -> _rp.Plan | None:
         """From the ground: the safe over plans (module docstring); the contact nearest target_F (the person: just
         before the runes - ring 0 lights ~C + 20), then the latest jump, no umbrella, the band's middle."""
         c, F0 = self.c, self.c.F0
