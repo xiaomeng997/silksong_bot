@@ -99,3 +99,77 @@ def test_b2_fc_windows_and_plan():
     assert 99 in r.owners
     p = lh.hop_plan2(w, r.k, range(9, 27), 3)
     assert p is not None and p["n"] == 2 and p["H"] > 16          # one full jump clears both
+
+
+# ---- TWO_PMCAST (combat.push_cast, two_play._pmc_start, rune_lowhop's over route) ----
+
+from ssbot.combat import push_cast as pc  # noqa: E402
+from ssbot.combat import rune_pogo as rp  # noqa: E402
+from ssbot.combat.air_chain import ChainSim  # noqa: E402
+from ssbot.knowledge import kinematics as kin  # noqa: E402
+from tests.test_sp9 import two_state  # noqa: E402
+import pytest  # noqa: E402
+
+PARAMS = kin.HeroParams.load(kin.REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json")
+TERR = kin.Terrain2D.from_boxes([(-200.0, pc.FLOOR - 10.0, 260.0, pc.FLOOR), (0.0, 0.0, rp.WALL_L, 40.0),
+                                 (rp.WALL_R, 0.0, 70.0, 40.0)])
+
+
+def test_pmcast_defaults_off():
+    assert not pc.PMCAST and not tp.PMCAST
+    c = pc.PcCfg()
+    assert (c.trig, c.ret, c.room_c, c.land_lo, c.land_hi, c.k_last, c.tgt_c) == ("nat", 1, 3.2, 2.2, 5.6, 62, 17)
+    assert not lh.RuneLowHop(two=True).pmc
+
+
+@pytest.fixture
+def pmc(monkeypatch):
+    for k in ("PMCAST", "PMANY", "SP11B", "ANY", "IDLEHIT", "SPACE"):
+        monkeypatch.setattr(tp, k, True)
+    monkeypatch.setattr(tp, "GUARD", False)
+    yield
+
+
+def test_pmcast_start_nat_and_force(pmc):
+    # F (iid 7) at 20 facing right (her 4 u in front, its back 5.99 u from the left wall), B idle at 40 (16 u from her:
+    # the lock-bounded run (16 - 7) / 8.25 s > the cast lock): the natural gates hold
+    two = tp.TwoPlay()
+    s = two_state(100, "Spell Antic", 0.0, x_rel=4.0, cx=20.0, flip=True, b_st="Idle", b_x=40.0, b_flip=False)
+    two.observe(100, s, 100 / 60.0)
+    assert two.pm is not None and two.pm.kind == "cast" and two.pm.wdir == -1 and two.pm.nat
+    assert two.pm_cast() == {7: -1} and two.pm_view()["hold"] == 7 and two.pm_hint() == {}
+    # B near (the switch's run fits): no natural run; trig force runs it anyway
+    two = tp.TwoPlay()
+    s = two_state(100, "Spell Antic", 0.0, x_rel=4.0, cx=20.0, flip=True, b_st="Idle", b_x=30.0)
+    two.observe(100, s, 100 / 60.0)
+    assert two.pm is None and two.pm_n["cno_run ok"] == 1
+    two = tp.TwoPlay()
+    two.pccfg = pc.PcCfg(trig="force")
+    two.observe(100, s, 100 / 60.0)
+    assert two.pm is not None and not two.pm.nat
+    # no room behind F (2.99 u to the wall): none even forced
+    two = tp.TwoPlay()
+    two.pccfg = pc.PcCfg(trig="force")
+    s = two_state(100, "Spell Antic", 0.0, x_rel=4.0, cx=17.0, flip=True, b_st="Idle", b_x=40.0)
+    two.observe(100, s, 100 / 60.0)
+    assert two.pm is None and two.pm_n["cno_room"] == 1
+
+
+def test_over_plan_crosses_to_the_wall_side():
+    # her 4 u in front of F (x 20, facing right), 30 frames into its antic: the jump, the down slash on its head,
+    # the landing 2.2 - 5.6 u behind x0 after the contact, clear of F's row of bombs
+    fx, hx, kant = 20.0, 23.6, 30
+    S = kin.initial_state(PARAMS, hx, 4.568, facing=-1, ground=True)
+    sim = ChainSim(S, np.zeros(2, np.int64), kin.HoldState.idle(1), PARAMS, TERR, 1000, 1001)
+    F0 = 1003
+    C_F = F0 + int(round(49.5 - (kant + 2)))
+    bk = rb.pending_rows([(1, fx, 7.45, "Spell Antic", kant / 60.0)])
+    ctx = rp.Ctx(F0=F0, b_box=(fx - 1.34, pc.FLOOR, fx + 1.84, pc.FLOOR + pc.TALL_TOP), b_x=fx, b_ok=True,
+                 tx=fx - 3.9, face=-1, ground=True, atk_ready_f=F0, bombs=bk)
+    pl = pc.OverPlanner(sim, ctx, pc.PcCfg(), C_F + 14, fx, -1)
+    p = pl.best_over(target_F=C_F + 17)
+    assert p is not None and p.press is not None and p.contact is not None
+    assert p.jump[0] >= F0 and p.contact > p.press
+    assert pl.again(p)
+    x_land = float(p.why.rsplit("x ", 1)[1])
+    assert 2.2 <= fx - x_land <= 5.6

@@ -192,7 +192,16 @@ WALKOUT = _on("SSBOT_FORUM_TWO_WALKOUT")
 OPENPUSH = _on("SSBOT_FORUM_TWO_OPENPUSH")
 RUNLOCK = _on("SSBOT_FORUM_TWO_RUNLOCK")
 PUSHMID = _on("SSBOT_FORUM_TWO_PUSHMID")
-SP11B = WALKOUT or OPENPUSH or RUNLOCK or PUSHMID
+# SP13b (the person, 2026-10-18: "stand on the ground, slash twice, and when the small runes are about to come out flip
+# over"): SSBOT_FORUM_TWO_PMCAST, default off (=1 on; SSBOT_FORUM_TWO_PMCAST_SET: combat.push_cast.PcCfg) - TWO_PUSHMID's
+# CAST route: at F's close Spell Antic (trig nat: she nearer F than B and within d_max in front of it, F's outer room +
+# hyst < B's, B idle / walking, the lock-bounded run to B failing; trig force: any close cast of F, either encounter -
+# the fixed point) with room_c behind F, the low hop's run on F (its ground slashes) plays the over plan
+# (combat.push_cast: the jump, the down slash on F's head, the bounce to F's wall side, landing behind ring 1) instead of
+# its hop; landed on F's wall side the herd (L2 holds F, the stance 3.5 u on its wall side), ret 1 / ret 2 as PUSHMID's
+PMCAST = _on("SSBOT_FORUM_TWO_PMCAST")
+PMANY = PUSHMID or PMCAST
+SP11B = WALKOUT or OPENPUSH or RUNLOCK or PMANY
 # SP12a (task 1v1 SP12a; the SP11 cause audits' top cause - the planner in the air with the dash ready and no safe row,
 # FORCED_RISK streaks of 15-53 frames before 44 of 45 such HP losses of SP11b's default): default off (=1 on).
 #   TWO_RUNEEXIT (ReCfg) the open-loop replays of those streaks (sp12\fr1): even with no margin no row was free - she was
@@ -513,6 +522,11 @@ class PmRun:
     lock_rem: float
     hp0: int = 0
     side0: str = "open"        # her side of F at the antic: "open" (between F and B) / "wall" (already behind it)
+    kind: str = "slam"         # SP13b: "cast" (TWO_PMCAST's route)
+    x0: float | None = None    # (cast) F's x at the antic
+    d0: float | None = None    # (cast) her x in front of F at the antic
+    f_land: int | None = None  # (cast) frames from the antic to her landing on its wall side
+    nat: bool = True           # (cast) the natural gates held (trig force runs them all)
     phase: str = "strike"
     f_herd: int | None = None
     back_herd: float | None = None
@@ -928,6 +942,10 @@ class TwoPlay:
         self.op = {"on": False, "end": None, "c2": None, "blk_open": 0, "blk_idle": 0, "nohit": 0, "back": None,
                    "back_end": None, "f_end": None}
         self.pcfg = _set_cfg(PmCfg(), "SSBOT_FORUM_TWO_PUSHMID_SET") if PUSHMID else PmCfg()
+        from ssbot.combat import push_cast as _pc
+        self.pccfg = _pc.cfg_from_env() if PMCAST else _pc.PcCfg()     # SP13b TWO_PMCAST
+        if PMCAST:
+            self.pcfg = replace(self.pcfg, ret=self.pccfg.ret)
         self.pm: PmRun | None = None
         self.pm_done: list[PmRun] = []
         self.pm_n: Counter = Counter()
@@ -973,7 +991,7 @@ class TwoPlay:
                 self._n_att[iid] += 1
             if SP11B and st in MOVE_ST and (pst is None or pst[0] != st):
                 self._wo_cool.pop(iid, None)
-                if PUSHMID and st in MOVE_KIND:
+                if PMANY and st in MOVE_KIND:
                     pm_antics.append(e)
             self.prev[iid] = (st, tin)
             if (SPACE or GUARD) and hx is not None:
@@ -2579,12 +2597,15 @@ class TwoPlay:
             self._wo_update(f, s, t, hx, hp, cs)
         if OPENPUSH:
             self._op_update(f, s, hx, cs)
-        if PUSHMID:
+        if PMANY:
             if self.pm is not None:
                 self._pm_update(f, s, t, hx, hp, cs)
-            if self.pm is None and pm_antics and len(cs) == 2:
+            if self.pm is None and pm_antics and (len(cs) == 2 or (PMCAST and self.pccfg.trig == "force")):
                 for e in pm_antics:
-                    self._pm_start(f, s, e, cs, hx, hp)
+                    if PMCAST and _sp.control(e)[0] == "Spell Antic":
+                        self._pmc_start(f, s, e, cs, hx, hp)
+                    elif len(cs) == 2:
+                        self._pm_start(f, s, e, cs, hx, hp)
                     if self.pm is not None:
                         break
 
@@ -2592,7 +2613,7 @@ class TwoPlay:
         """Another two-Clapper run holds the play (the antic switch, the escape run, TWO_JUMPHIT, PUSHMID)."""
         return ((ASW and self.asw is not None and self.asw.mode is not None)
                 or (ESC and self.esc is not None and self.esc.mode is not None)
-                or (JUMPHIT and self.jh is not None) or (PUSHMID and self.pm is not None))
+                or (JUMPHIT and self.jh is not None) or (PMANY and self.pm is not None))
 
     def sp11b_nohit(self, s: dict) -> frozenset:
         """The Clappers whose hits do not count now: OPENPUSH's c2 near its wall in the opening, WALKOUT's F."""
@@ -2618,7 +2639,7 @@ class TwoPlay:
             prefs = replace(prefs, no_hit=frozenset(prefs.no_hit) | nh)
         if WALKOUT and self.wo is not None and self.wo.sx is not None:
             prefs = replace(prefs, stance_x=float(self.wo.sx))
-        if (PUSHMID and self.pm is not None and self.pm.phase == "herd"
+        if (PMANY and self.pm is not None and self.pm.phase == "herd"
                 and getattr(prefs, "target", None) == self.pm.iid):
             x = self._pm_stance(s)
             if x is not None:
@@ -2856,7 +2877,7 @@ class TwoPlay:
         if hp < r.hp0:
             r.hp.append((f - r.f_a, r.phase))
         r.hp0 = hp
-        if F is None or o is None:
+        if F is None or (o is None and not (r.kind == "cast" and r.other is None)):
             self._pm_close(f, "gone")
             return
         st, tin = _sp.control(F)
@@ -2868,6 +2889,17 @@ class TwoPlay:
             if (ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.iid
                     and r.phase == "herd" and (d.get("dealt") is None or float(d.get("dealt")) > 0)):
                 r.hits_f += 1
+        if r.phase == "strike" and r.kind == "cast":
+            # (SP13b TWO_PMCAST) the crossing: the low hop's over plan; landed on F's wall side -> the herd
+            if f - r.f_a > 170:
+                self._pm_close(f, "no herd")
+            elif _sp.on_ground(s) and side and f - r.f_a > 20:
+                r.phase, r.f_herd, r.back_herd = "herd", f, round(wall_d, 2)
+                r.f_land = f - r.f_a
+                self.pm_n["herd"] += 1
+            elif _sp.on_ground(s) and not side and st not in CAST_ST:
+                self._pm_close(f, "no cross")
+            return
         if r.phase == "strike":
             if f - r.f_a > 140:
                 self._pm_close(f, "no herd")
@@ -2889,13 +2921,72 @@ class TwoPlay:
             if c.ret == 1:
                 self._pm_close(f, "f move")
                 return
-        if c.ret == 2 and kind is not None and st in LOCK_ST[kind]:
+        if c.ret == 2 and kind is not None and st in LOCK_ST[kind] and o is not None:
             need = max(0.0, abs(hx - float(o["pos"][0])) - c.close_u) / c.run_u_s
             if need <= self._pm_lock_rem(kind, int(round(tin * 60.0))):
                 self._pm_close(f, "run ok")
                 return
         if f - (r.f_herd or r.f_a) > c.end_f:
             self._pm_close(f, "time")
+
+    def _pmc_start(self, f: int, s: dict, e: dict, cs: list, hx: float, hp: int) -> None:
+        """SP13b TWO_PMCAST: F's close Spell Antic -> a cast-route run (PmRun kind "cast") when its gates hold (trig nat:
+        PUSHMID's - she nearer F, F's outer room + hyst < B's, B idle / walking and out of the lock-bounded run's reach;
+        trig force: only she in front within d_max, room_c behind F, no other run)."""
+        c, pc = self.pcfg, self.pccfg
+        st, tin = _sp.control(e)
+        k_now = int(round(tin * 60.0))
+        self.pm_n["cast_antics"] += 1
+        cx = float(e["pos"][0])
+        face = face_of(e)
+        d = (hx - cx) * face
+        wdir = -face                                             # F's back: away from her (she is in front)
+        room = (cx - WALL_L) if wdir < 0 else (WALL_R - cx)
+        hy = float(((s.get("hero") or {}).get("pos") or [0.0, 0.0])[1])
+        o = next((x for x in cs if x.get("iid") != e.get("iid")), None)
+        why = None
+        if self._busy():
+            why = "busy"
+        elif d <= 0:
+            why = "behind"
+        elif d > pc.d_max or abs(hy - float(e["pos"][1])) > c.dy_u:
+            why = "far"
+        elif room < pc.room_c:
+            why = "room"
+        nat_why, room_b, need, lock_rem = None, 0.0, 0.0, self._pm_lock_rem("cast", k_now)
+        if o is None:
+            nat_why = "one"
+        else:
+            ox = float(o["pos"][0])
+            do = abs(hx - ox)
+            room_b = (ox - WALL_L) if cx > ox else (WALL_R - ox)
+            need = max(0.0, do - c.close_u) / c.run_u_s
+            if abs(hx - cx) > do:
+                nat_why = "b nearer"
+            elif (ox - cx) * wdir > 0:
+                nat_why = "b behind f"                           # B on F's back side: its wall side is not outer
+            elif room + c.hyst >= room_b:
+                nat_why = "f room"
+            elif _sp.control(o)[0] not in ("Idle", "Walk"):
+                nat_why = "b busy"
+            elif need <= lock_rem:
+                nat_why = "run ok"
+        if why is None and nat_why is not None and pc.trig != "force":
+            why = nat_why
+        if why is not None:
+            self.pm_n[f"cno_{why}"] += 1
+            return
+        self.pm = PmRun(iid=e.get("iid"), other=None if o is None else o.get("iid"), f_a=f, k_a=k_now, face=face,
+                        wdir=wdir, room_f=round(room, 2), room_b=round(room_b, 2), need=round(need, 3),
+                        lock_rem=round(lock_rem, 3), hp0=hp, side0="open", kind="cast", x0=round(cx, 3),
+                        d0=round(d, 3), nat=nat_why is None)
+        self.pm_n["cast_runs"] += 1
+        self.pm_n["cast_runs_nat" if nat_why is None else "cast_runs_forced"] += 1
+
+    def pm_note(self, f: int, why: str) -> None:
+        """SP13b: the low hop gave the cast route up (no over plan by k_last, lost in the air): the run ends."""
+        if self.pm is not None and self.pm.kind == "cast" and self.pm.phase == "strike":
+            self._pm_close(f, why)
 
     def _pm_close(self, f: int, why: str) -> None:
         r = self.pm
@@ -2920,14 +3011,22 @@ class TwoPlay:
     def pm_view(self) -> dict | None:
         """PUSHMID for L2 (gauntlet): {"hold": F, "phase", "iid", "other"} while the run is on, else None."""
         r = self.pm
-        if not PUSHMID or r is None:
+        if not PMANY or r is None:
             return None
         return {"hold": r.iid, "phase": r.phase, "iid": r.iid, "other": r.other}
+
+    def pm_cast(self) -> dict:
+        """SP13b TWO_PMCAST for the low hop: {F's iid: the world side to cross to (its wall side)} while the cast
+        route's crossing is due."""
+        r = self.pm
+        if not PMCAST or r is None or r.kind != "cast" or r.phase != "strike":
+            return {}
+        return {r.iid: r.wdir}
 
     def pm_hint(self) -> dict:
         """PUSHMID for the slam playbook: {F's iid: the world side to land on (its wall side)} in the strike."""
         r = self.pm
-        if not PUSHMID or r is None or r.phase != "strike":
+        if not PUSHMID or r is None or r.phase != "strike" or r.kind != "slam":
             return {}
         return {r.iid: r.wdir}
 
@@ -2942,10 +3041,11 @@ class TwoPlay:
                  "dash": r.dash, "keys": r.keys, "f_end": r.f_end, "end": r.end} for r in runs]}
         if OPENPUSH:
             out["openpush"] = dict(self.op)
-        if PUSHMID:
+        if PMANY:
             runs = self.pm_done + ([self.pm] if self.pm is not None else [])
             out["pushmid"] = {**dict(self.pm_n), "runs_rec": [
-                {"f_a": r.f_a, "iid": r.iid, "k_a": r.k_a, "side0": r.side0, "room_f": r.room_f, "room_b": r.room_b, "need": r.need,
+                {"f_a": r.f_a, "iid": r.iid, "k_a": r.k_a, "side0": r.side0,
+                 **({"kind": r.kind, "x0": r.x0, "d0": r.d0, "f_land": r.f_land, "nat": r.nat} if PMCAST else {}), "room_f": r.room_f, "room_b": r.room_b, "need": r.need,
                  "lock_rem": r.lock_rem, "f_herd": None if r.f_herd is None else r.f_herd - r.f_a,
                  "back_herd": r.back_herd, "backs": r.backs, "hits_f": r.hits_f, "hp": r.hp, "next_st": r.next_st,
                  "f_end": r.f_end, "end": r.end} for r in runs]}

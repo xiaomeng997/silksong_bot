@@ -331,10 +331,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         if claw_strike.CLAWSTRIKE:
             claw_strike.warm(self.params)     # SP13: the Clawline strike's plan paths (air_chain's evaluate)
-        if two_play.RUNETIER or rune_lowhop.BOMBS2:
+        if two_play.RUNETIER or rune_lowhop.BOMBS2 or two_play.PMCAST:
             from ssbot.combat import rune_pogo
             rune_pogo.warm(self.params)       # SP11a: the pogo tier's planner (else compiled inside a tick); SP13b
             #                                   the low hop's air plans (BOMBS2) use the same rollouts / SAT kernel
+        if two_play.PMCAST:
+            from ssbot.combat import push_cast
+            push_cast.warm(self.params)       # SP13b: the cast route's over planner
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -735,7 +738,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         esc_on = self.two is not None and (two_play.ESC or two_play.ASW)
-        pre_obs = esc_on or (self.two is not None and (two_play.JUMPHIT or two_play.PUSHMID))
+        pre_obs = esc_on or (self.two is not None and (two_play.JUMPHIT or two_play.PMANY))
         if pre_obs:
             # SP9b / SP9c: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall) or
             # antic switch; SP10c: TWO_JUMPHIT's run
@@ -745,7 +748,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                     self.tac.two_esc = self.two.esc_view()
                 if two_play.JUMPHIT:
                     self.tac.two_jh = self.two.jh_view()
-                if two_play.PUSHMID:
+                if two_play.PMANY:
                     self.tac.two_pm = self.two.pm_view()      # SP11b: L2 holds F in the herd
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
@@ -895,14 +898,18 @@ class ForumPlannerPolicy(PlannerPolicy):
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
                 return int(lat[-1])
             lh_kw = {}
-            if self.rune_lowhop.b2:
+            if self.rune_lowhop.pmc and self.two is not None:
+                # SP13b (SSBOT_FORUM_TWO_PMCAST): the cast route's F (its over plan instead of the hop)
+                lh_kw["pm"] = self.two.pm_cast()
+            if self.rune_lowhop.b2 or self.rune_lowhop.pmc:
                 # SP13b (SSBOT_FORUM_TWO_BOMBS2): every caster's bombs (the tracker's forecast, frames from this
                 # STATE) and, in the air, the hero model of this tick for the umbrella / drift plans
                 trk_ = self.v2feed.trk if self.v2feed is not None else None
                 if trk_ is not None and getattr(trk_, "rune", None) is not None:
                     from ssbot.combat import rune_bombs as _rbm
                     lh_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
-                if ws.hero.contact.v != "GROUND" and self.rune_lowhop.active():
+                if (self.rune_lowhop.pmc and (lh_kw.get("pm") or self.rune_lowhop.active())) or (
+                        ws.hero.contact.v != "GROUND" and self.rune_lowhop.active()):
                     lh_kw["sim"] = air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
             lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
@@ -911,6 +918,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                                               and self.two.rt_hold_block(f))
                                              else frozenset(e.get("iid") for e in slam_play.clappers(s))),
                                        guard=gsp if (gsp is not None and self.two.gcfg.low) else None, **lh_kw)
+            if self.rune_lowhop.pm_giveup and self.two is not None:
+                self.two.pm_note(f, "low " + self.rune_lowhop.pm_giveup)     # SP13b: the cast route given up
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None

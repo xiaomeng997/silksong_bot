@@ -872,7 +872,7 @@ class GauntletTactics:
                     self._sw_why = "two slammer" if keep is not None else self._sw_why
                 st["picks"] = st.get("picks", 0) + 1
                 return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
-        pm = self.two_pm if two_play.PUSHMID else None
+        pm = self.two_pm if two_play.PMANY else None
         if pm is not None and pm.get("hold") is not None:
             # SP11b TWO_PUSHMID: F held (its slam's way out to its wall side, then the herd) below the slammer rule
             c = next((c for c in cands if c.s.iid == pm["hold"]), None)
@@ -1070,7 +1070,7 @@ class GauntletTactics:
             status = "event"                              # SP10c: the run ended: the normal rule picks now
         if two_play.JUMPHIT:
             self._jh_last = jh
-        pm = self.two_pm if two_play.PUSHMID else None
+        pm = self.two_pm if two_play.PMANY else None
         if pm is not None and status == "ok" and self.goal is not None and pm.get("hold") != self.goal.target:
             status = "event"                              # SP11b: TWO_PUSHMID holds F: pick now
         if "whip" in self.ta:

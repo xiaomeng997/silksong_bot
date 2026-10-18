@@ -37,7 +37,7 @@ def test_defaults_off(monkeypatch):
 
 @pytest.fixture
 def sp11b(monkeypatch):
-    for k in ("WALKOUT", "OPENPUSH", "RUNLOCK", "PUSHMID", "SP11B", "ANY", "IDLEHIT", "SPACE"):
+    for k in ("WALKOUT", "OPENPUSH", "RUNLOCK", "PUSHMID", "PMANY", "SP11B", "ANY", "IDLEHIT", "SPACE"):
         monkeypatch.setattr(tp, k, True)
     monkeypatch.setattr(tp, "GUARD", False)
     yield

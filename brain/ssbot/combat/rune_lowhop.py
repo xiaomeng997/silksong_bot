@@ -408,6 +408,16 @@ class Hop:
     split: int = 0               # plans with a second hop after the landing
     air: list = field(default_factory=list)     # in-air plans used: (k, kind)
     owners: set = field(default_factory=set)    # the casters whose bombs covered her
+    # SP13b TWO_PMCAST (the cast route of TWO_PUSHMID: the over plan instead of the hop)
+    pm: int | None = None        # the world side to cross to (F's wall side) while the route is due
+    pm_why: str = ""             # how the route ended (over / no plan / ...)
+    op: object = None            # the over plan (rune_pogo.Plan, absolute mask frames)
+    op_plans: int = 0            # over searches
+    op_ms: float = 0.0           # their time (ms)
+    op_k: int | None = None      # the antic frame of the jump press (committed)
+    op_j0: int | None = None     # its mask frame
+    op_fail: int = 0             # ticks the committed plan failed its check
+    op_alt: int = 0              # in-air replacements (best_air)
 
 
 class RuneLowHop:
@@ -424,6 +434,11 @@ class RuneLowHop:
         self._runes: dict = {}
         self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the casts not started for it
         self.b2 = BOMBS2 and two           # SP13b: both casters' bombs (forecast) in the plan
+        from ssbot.combat import push_cast as _pc
+        self.pmc = _pc.PMCAST              # SP13b TWO_PMCAST: the over plan on the cast route's F
+        self.pccfg = _pc.cfg_from_env() if self.pmc else _pc.PcCfg()
+        self._pm: dict = {}                # this tick's cast-route requests (TwoPlay.pm_cast: F's iid -> wdir)
+        self.pm_giveup: str | None = None  # the route given up this tick (the policy tells TwoPlay)
         self._bk = None                    # BOMBS2: this tick's forecast rows (rune_bombs.frames, from the STATE)
         self._sim = None                   # BOMBS2: this tick's hero model (air_chain.ChainSim) for the air plans
 
@@ -454,11 +469,13 @@ class RuneLowHop:
         return out
 
     def active(self) -> bool:
-        return self.run is not None and self.run.phase in ("stance", "hop")
+        return self.run is not None and self.run.phase in ("stance", "hop", "over")
 
     def critical(self) -> bool:
         """The hop's hold or a covering bomb's window is on: the script keeps the keys ahead of the other scripts."""
         r = self.run
+        if r is not None and r.phase == "over":
+            return True                                   # (SP13b TWO_PMCAST) the over plan holds the keys
         if r is None or r.phase != "hop" or r.P is None:
             return False
         if r.k < r.P + r.H + 1:
@@ -497,6 +514,10 @@ class RuneLowHop:
             out[f"end_{r.phase}_{r.why}"] += 1
             if r.H is not None:
                 out[f"hold_{r.H}"] += 1
+            if self.pmc and (r.pm is not None or r.pm_why):
+                out["pm_runs"] += 1
+                out[f"pm_end_{r.pm_why or 'open'}"] += 1
+                out["pm_over"] += r.op_k is not None
             if self.b2:
                 out["b2_free_ticks"] += r.free
                 out["b2_rehop"] += r.rehop
@@ -520,19 +541,26 @@ class RuneLowHop:
                 "plan": r.plan, "P": r.P, "H": r.H, "k_land": r.k_land, "presses": r.presses, "hits": r.hits,
                 "late": r.late, "plans": r.plans, "end": r.phase, "why": r.why, "ticks": r.ticks, "k": r.k,
                 **({"b2": {"free": r.free, "rehop": r.rehop, "big": r.big, "split": r.split, "air": r.air,
-                           "owners": sorted(str(o) for o in r.owners), "iid": str(r.iid)}} if BOMBS2 else {})}
+                           "owners": sorted(str(o) for o in r.owners), "iid": str(r.iid)}} if BOMBS2 else {}),
+                **({"pm": {"dir": r.pm, "why": r.pm_why, "k_jump": r.op_k, "plans": r.op_plans,
+                           "ms": round(r.op_ms, 1), "fail": r.op_fail, "alt": r.op_alt,
+                           "plan": None if r.op is None else [r.op.jump, r.op.d0, r.op.d1, r.op.press, r.op.contact,
+                                                              r.op.umb, r.op.why]}}
+                   if (r.pm is not None or r.pm_why) else {})}
 
     # ---- the script ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
              latch=None, skip: frozenset | None = None, guard: list | None = None, bombs=None,
-             sim=None) -> int | None:
+             sim=None, pm: dict | None = None) -> int | None:
         """The mask for frame f + 2 while the script runs, else None. t_game: the game clock (s; Stamp.t_game_s);
         latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m).
         (SP13b BOMBS2) bombs: the tracker's per-bomb forecast (rune_bombs.frames rows from this STATE; the rows still
         to come are added here), sim: the tick's hero model (air_chain.ChainSim) for the air plans."""
         t = f / 60.0 if t_game is None else float(t_game)
-        if self.b2:
+        self._pm = pm or {}
+        self.pm_giveup = None
+        if self.b2 or self._pm or (self.run is not None and self.run.phase == "over"):
             pend = _rb.pending_rows([(x.get("iid"), float(x["pos"][0]), float(x["pos"][1]), *_sp.control(x))
                                      for x in _sp.clappers(s)])
             fc = np.asarray(bombs, float).reshape(-1, 6) if bombs is not None and len(bombs) else np.zeros((0, 6))
@@ -560,6 +588,8 @@ class RuneLowHop:
                 # ring-1 bomb (the bombs stay) hit her 7 frames later: the hold and the bomb window run on
                 r.k = int(round((t - r.ta) * 60.0)) + SEND_AHEAD
                 self._observe_cast(r, s, None, None, 0.0, t, r.k - SEND_AHEAD)
+                if r.phase == "over":
+                    return self._over_step(r, f, s, None, ground)     # (SP13b) the over plan runs on
                 m = M_J if r.k - r.P < r.H else 0
                 r.sent.append((f, m))
                 r.ticks += 1
@@ -620,6 +650,8 @@ class RuneLowHop:
                                d0=round(d0, 3), ground0=bool(ground), hp0=hp)
         k_now = int(round((t - r.ta) * 60.0))
         r.k = k_now + SEND_AHEAD
+        if self.pmc and r.pm is None and not r.pm_why and r.iid in self._pm and r.phase == "stance":
+            r.pm = int(self._pm[r.iid])                   # (SP13b TWO_PMCAST) the cast route on this cast
         self._observe_cast(r, s, e, st, tin, t, k_now)
         for ev in s.get("ev") or ():
             d = ev.get("d") or {}
@@ -811,6 +843,8 @@ class RuneLowHop:
         if k > c.k_max:
             self._close("done", "timeout")
             return None
+        if r.phase == "over":
+            return self._over_step(r, f, s, e, ground)
         # the hop committed: hold, air slashes, steer, land
         if r.phase == "hop":
             j = k - r.P
@@ -868,7 +902,12 @@ class RuneLowHop:
         # the hop: plan on every tick once a covering bomb is seen
         prev = r.sent[-1][1] if r.sent else 0
         cont = M_A | toward if (r.presses and k - r.presses[-1][0] == 1 and prev & M_A) else 0
-        if thr:
+        if r.pm is not None:
+            # (SP13b TWO_PMCAST) the over plan instead of the hop: its jump press when due, else the stance below
+            m = self._pm_step(r, f, s, e, ground)
+            if m is not None:
+                return m
+        if thr and r.pm is None:
             if not ground:
                 if min(w0 for w0, _, _ in thr) - k < 12:
                     # a covering bomb lights soon and she is in the air (a start in the air, a knock-back): the hop
@@ -938,6 +977,88 @@ class RuneLowHop:
         if d < lo - 0.5 * WALK_U or (x0d is not None and x0d < c.x0_lo):
             return away
         return 0
+
+    # ---- SP13b SSBOT_FORUM_TWO_PMCAST ----
+
+    def _over_planner(self, r: Hop, f: int, s: dict, e: dict, ground: bool):
+        """push_cast.OverPlanner for this tick (the policy's hero model) and the contact's target mask frame."""
+        from ssbot.combat import push_cast as _pc
+        from ssbot.combat import rune_pogo as _rpg
+        pc = self.pccfg
+        h = s.get("hero") or {}
+        F0 = f + SEND_AHEAD
+        bb = _rpg.body_box(e)
+        fx = float(e["pos"][0])
+        b_box = (bb[0], _pc.FLOOR, bb[2], _pc.FLOOR + _pc.TALL_TOP)
+        oth = [x for x in _sp.clappers(s) if x.get("iid") != r.iid]
+        f_box = _rpg.body_box(oth[0]) if oth else None
+        cd = (h.get("tm") or {}).get("atk_cd")
+        rdy = F0 + (0 if cd is None else max(0, int(math.ceil(float(cd) * 60.0 - (SEND_AHEAD - 1)))))
+        j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
+        fc = h.get("facing")
+        kc = (r.tc - r.ta) * 60.0 if r.tc is not None else self.cfg.cast2_k
+        low_F = F0 + int(round(kc + 14 - r.k))
+        tgt = F0 + int(round(kc + pc.tgt_c - r.k))
+        x0 = r.x0 if r.x0 is not None else fx
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        ctx = _rpg.Ctx(F0=F0, b_box=b_box, b_x=fx, b_ok=True, tx=x0 + r.pm * 0.5 * (pc.land_lo + pc.land_hi),
+                       face=1 if fc is None or float(fc) >= 0 else -1, ground=ground, atk_ready_f=rdy,
+                       j_held=j_held, f_box=f_box, bombs=self._bk, bomb_m=pc.bomb_m,
+                       gliding=clip.startswith("Umbrella") and "Deflate" not in clip)
+        return _pc.OverPlanner(self._sim, ctx, pc, low_F, x0, r.pm), tgt
+
+    def _pm_end(self, r: Hop, why: str) -> None:
+        r.pm, r.pm_why = None, why
+        self.pm_giveup = why
+
+    def _pm_step(self, r: Hop, f: int, s: dict, e: dict, ground: bool) -> int | None:
+        """The cast route in the stance: the over plan searched every `every` ticks from k_plan0 (kept and checked
+        between), its jump pressed when due (-> phase over); none by k_last (or no hero model): the low hop as before."""
+        import time
+        from ssbot.combat import rune_pogo as _rpg
+        pc = self.pccfg
+        k = r.k
+        if self._sim is None or k > pc.k_last:
+            self._pm_end(r, "no plan" if self._sim is not None else "no sim")
+            return None
+        if not ground or k < pc.k_plan0:
+            return None
+        F0 = f + SEND_AHEAD
+        pl, tgt = self._over_planner(r, f, s, e, ground)
+        if not (r.op is not None and r.op.jump[0] >= F0 and (r.ticks % pc.every) and pl.again(r.op)):
+            t0 = time.perf_counter()
+            r.op = pl.best_over(target_F=tgt)
+            r.op_plans += 1
+            r.op_ms += (time.perf_counter() - t0) * 1e3
+        if r.op is not None and r.op.jump[0] <= F0:
+            r.phase, r.op_k, r.op_j0 = "over", k, r.op.jump[0]
+            return _rpg.mask_at(r.op, F0)
+        return None
+
+    def _over_step(self, r: Hop, f: int, s: dict, e: dict, ground: bool) -> int | None:
+        """The committed over plan: its keys; checked every tick (failing with a danger within 8 frames: rune_pogo's
+        best_air toward the landing band); landed after the contact -> done (TwoPlay's herd); landed before -> done."""
+        from ssbot.combat import rune_pogo as _rpg
+        p = r.op
+        F0 = f + SEND_AHEAD
+        if ground and F0 > r.op_j0 + 6:
+            ok = p.contact is not None and F0 > p.contact
+            r.pm_why = "over" if ok else "early land"
+            if not ok:
+                self.pm_giveup = r.pm_why
+            self._close("done", "pm landed" if ok else "pm early land")
+            return None
+        if self._sim is not None and e is not None:
+            pl, _tgt = self._over_planner(r, f, s, e, ground)
+            if not pl.again(p):
+                r.op_fail += 1
+                if p.bad is not None and p.bad - F0 < 8 and not ground:
+                    alt = pl.best_air(_sp.hero_x(s))
+                    if alt is not None and alt.bad is None:
+                        alt.contact = alt.contact if alt.contact is not None else p.contact
+                        r.op = p = alt
+                        r.op_alt += 1
+        return _rpg.mask_at(p, F0)
 
     # ---- SP13b SSBOT_FORUM_TWO_BOMBS2 ----
 
