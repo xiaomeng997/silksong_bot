@@ -10647,8 +10647,9 @@ ran; the trading bot was not touched.
   `forced_streak` per HP loss. SP11b's ranking re-labelled (`base_audit`): the same numbers, "(forced; ...)".
 - Tests `tests/test_sp12a.py` (6: the defaults, the exit-late geometry - time, walls, bodies, a later-blocking body -, the
   circles from a jump cast and the log, the strike guard's bomb decline / timing / own bombs, off unchanged, the body
-  decline and the walk abort on the other one's jump). Related suites (test_sp9 / sp10 / sp10b / sp11_0 / sp11a / sp11b):
-  73 passed.
+  decline and the walk abort on the other one's jump; a196093: + the bomb part off). Full suite at a196093: 2,003 passed,
+  the 8 known failures (test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell
+  test, the untracked test_sg8_review.py x3; `sp12ullsuite_a196093.log`).
 
 ### 2. Identity (`sp12\scripts\replay_ident_sp12a.ps1`, `ident_cmp.sh`; from the frozen checkout, which it warmed)
 
