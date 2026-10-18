@@ -80,7 +80,7 @@ class RtCfg:
     a_antic: int = 55           # ... else the antic's first frame + this
     land_f: int = 53            # L = A + this (the flight p50 53-55)
     lit0: int = 64              # the circle lit from L + this (first lit 65 in 1,000 of ~1,400, 74-77 in ~140) ...
-    lit1: int = 80              # ... to L + this (lit 7-8 frames; the late ones end ~L + 84)
+    lit1: int = 84              # ... to L + this (lit 7-8 frames; the late ones, first lit 74 - 77, end ~L + 84)
     umb_f: int = 10             # the umbrella (the jump pressed in the air) this many frames after a contact
     dome_m: float = 0.45        # her box bottom above the dome by this (the model floats 0.2 - 0.3 u high)
     hammer_m: float = 0.3       # her box off F's landing hammer polygon by this
