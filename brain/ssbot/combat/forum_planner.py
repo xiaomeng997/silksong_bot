@@ -491,6 +491,8 @@ class EnvelopeAudit:
     hop_chosen: int = 0
     noglide_ticks: int = 0        # SSBOT_FORUM_NOGLIDE: ticks with safe rows both with and without a glide
     nodash_ticks: int = 0         # SSBOT_FORUM_SLAM_PLAY_NODASH: ticks with safe rows both with and without a dash
+    rx_ticks: int = 0             # SSBOT_FORUM_TWO_RUNEEXIT (SP12a): ticks with a circle still to light passed
+    rx_split: int = 0             # ... of them with safe rows both late and not late for its exit
     nopogo_ticks: int = 0         # SSBOT_FORUM_SLAM_PLAY_NOPOGO: ticks with safe rows both with and without an air hit
     jb_nojump_ticks: int = 0      # SSBOT_FORUM_JB_NOJUMP: ticks with safe rows both with and without a jump key
     sm_uncert: int = 0            # review: special rows (contact found) whose press on the planner's own lane is in no
@@ -3906,6 +3908,7 @@ class ForumPlanner(Planner):
         self.last_sel = None
         esc_tail = None
         self._v2_esc_first = {}
+        rxl_ = None                           # SSBOT_FORUM_TWO_RUNEEXIT: the safe rows late for a circle's exit
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
@@ -4146,6 +4149,18 @@ class ForumPlanner(Planner):
                 pr_ = safe & (ff_ >= 0) & on_ & air_
                 self.audit.nopogo_ticks += int(pr_.any() and (safe & ~pr_).any())
                 nd_ = nd_ + (pr_.astype(np.int64),)
+            rxl_ = None
+            rx_ = getattr(prefs, "rune_exit", None) or ()
+            if v2 and rx_:
+                # SSBOT_FORUM_TWO_RUNEEXIT (task 1v1 SP12a; combat.two_play.rune_exit_late): the safe rows whose end is
+                # inside a jump cast's circle still to light with no way out left in time rank after the safe rows
+                # that keep one, above the landed hits and NODASH (no key without the switch)
+                from ssbot.combat import two_play as _tp
+                endb = r1.box[:, -1, :]
+                rxl_ = safe & _tp.rune_exit_late(0.5 * (endb[:, 0] + endb[:, 2]), rx_, float(T1 - 1))
+                self.audit.rx_ticks += 1
+                self.audit.rx_split += int(rxl_.any() and (safe & ~rxl_).any())
+                nd_ = nd_ + (rxl_.astype(np.int64),)
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
@@ -4384,6 +4399,10 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if rxl_ is not None:
+            # SP12a: [safe rows late for a circle's exit, safe rows, the chosen row late]
+            self.last_info["rx"] = [int(rxl_.sum()), int(safe.sum()),
+                                    bool(0 <= res.idx < len(rxl_) and rxl_[res.idx])]
         if map_info is not None:
             self.last_info["map"] = map_info
         if self.debug:

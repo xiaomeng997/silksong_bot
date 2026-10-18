@@ -187,7 +187,21 @@ OPENPUSH = _on("SSBOT_FORUM_TWO_OPENPUSH")
 RUNLOCK = _on("SSBOT_FORUM_TWO_RUNLOCK")
 PUSHMID = _on("SSBOT_FORUM_TWO_PUSHMID")
 SP11B = WALKOUT or OPENPUSH or RUNLOCK or PUSHMID
-ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD or SP11B   # the policy's TwoPlay object
+# SP12a (task 1v1 SP12a; the SP11 cause audits' top cause - the planner in the air with the dash ready and no safe row,
+# FORCED_RISK streaks of 15-53 frames before 44 of 45 such HP losses of SP11b's default): default off (=1 on).
+#   TWO_RUNEEXIT (ReCfg) the open-loop replays of those streaks (sp12\fr1): even with no margin no row was free - she was
+#                already trapped; 19 of the 45 were a jump cast's big rune circle (centre 6.48 / 6.75 u in front of the
+#                landing, r 7.19, lit landing + 62 .. 88) with her inside it and the way out too long (8+ u), past the
+#                wall or through a Clapper's body. The circle is known from the caster's Jump Aim (~117 frames before
+#                it lights), the planner sees 36 + 24 frames: it kept hitting inside the circle until no exit was left.
+#                On: every tick TwoPlay.rune_exit gives the planner each jump cast's circle still to light (past its aim
+#                or landed, not burst) and the Clappers' bodies (grounded now; a jumper's at its landing from its
+#                landing - 10 frames); the planner ranks the safe rows whose end is inside a circle with no exit left
+#                in time (an edge inside the walls, no body on the way, reached at the run's speed + a buffer before
+#                the circle lights) after the safe rows that keep one, above the landed hits and NODASH
+#                (GoalPrefs.rune_exit; forum_planner "rune exit").
+RUNEEXIT = _on("SSBOT_FORUM_TWO_RUNEEXIT")
+ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD or SP11B or RUNEEXIT   # the policy's TwoPlay object
 
 CLAPPER = _sp.CLAPPER
 M_L, M_R, M_A = _sp.M_L, _sp.M_R, _sp.M_A
@@ -282,6 +296,69 @@ class GuardCfg:
     body_pad: float = 0.55      # around a body (her half width + 0.3)
     low: int = 0                # 1: the low hop takes the spans too (fixed points: 3251a4a 5 of 9 guard no-starts / aborts
     #                             without HP lost, 4cb5880 - its big rune circle only - 0 of 1: off, its own trial switch)
+
+
+@dataclass
+class ReCfg:
+    """SSBOT_FORUM_TWO_RUNEEXIT (SP12a): a jump cast's big rune circle for the planner's exit tier (u, centre to centre;
+    frames of 1/60 s)."""
+    c_left: float = 6.48        # the circle's centre in front of the landing, facing left / right (bigrune answer.txt)
+    c_right: float = 6.75
+    reach: float = 7.72         # r 7.19 (the dome at her box bottom) + her half width 0.23 + 0.3
+    land_f: float = 110.0       # a jump cast's landing after its antic entry (flight from +54 .. 56)
+    lit_f: float = 62.0         # the circle lights from landing + 65 (p5) - 3 ...
+    end_f: float = 88.0         # ... to landing + 85 + 3 (RG_LIT, slam_play)
+    horizon_f: float = 180.0    # circles lighting later than this are not passed
+    body_pad: float = 0.55      # around a body (her half width + 0.3)
+    jump_body: float = 2.5      # a jumper's body around its landing
+    jump_block_f: float = 10.0  # ... from its landing - this
+    v: float = 8.25 / 60.0      # her run (u / frame)
+    buf_f: float = 8.0          # frames of slack before the circle lights
+    wall_pad: float = 0.3       # an edge this close to a wall does not fit
+
+
+def _re_cfg() -> ReCfg:
+    """SSBOT_FORUM_TWO_RUNEEXIT_SET="buf_f=12": trial overrides of the ReCfg numbers."""
+    return _set_cfg(ReCfg(), "SSBOT_FORUM_TWO_RUNEEXIT_SET")
+
+
+def rune_exit_late(cxe, rx, k_end: float, walls=(None, None)):
+    """SSBOT_FORUM_TWO_RUNEEXIT: [len(cxe)] True where a row ending at x cxe (frame k_end from the planner's origin) is
+    inside a circle of rx = (circles, bodies, cfg numbers) that lights after k_end with no way out left in time: each
+    side's edge (centre +- reach) inside the walls, no body span [lo, hi] blocking from k_from on between cxe and the
+    edge when she gets there, reached at v u / frame + buf_f frames before the circle's first lit frame."""
+    import numpy as np
+    cxe = np.asarray(cxe, np.float64)
+    late = np.zeros(cxe.shape, bool)
+    if not rx:
+        return late
+    circles, bodies, num = rx
+    v, buf, pad = num["v"], num["buf_f"], num["wall_pad"]
+    wl = (WALL_L if walls[0] is None else walls[0]) + pad
+    wr = (WALL_R if walls[1] is None else walls[1]) - pad
+    for cx, reach, k_on, _k_off in circles:
+        if k_on <= k_end:
+            continue                                   # lit within the row: the planner's own check has it
+        inside = np.abs(cxe - cx) < reach
+        if not inside.any():
+            continue
+        lead = k_on - k_end - buf
+        ok = np.zeros(cxe.shape, bool)
+        for d in (-1.0, 1.0):
+            edge = cx + d * reach
+            if not wl <= edge <= wr:
+                continue
+            dist = np.abs(edge - cxe)
+            side_ok = dist / v <= lead
+            for lo, hi, k_from in bodies:
+                # a body between her end and the edge, reached when it already blocks
+                near = np.where(d > 0, lo, hi)
+                between = ((d > 0) & (hi > cxe) & (lo < edge)) | ((d < 0) & (lo < cxe) & (hi > edge))
+                t_at = k_end + np.maximum((near - cxe) * d, 0.0) / v
+                side_ok &= ~(between & (t_at >= k_from))
+            ok |= side_ok
+        late |= inside & ~ok
+    return late
 
 
 def _guard_cfg() -> GuardCfg:
@@ -836,6 +913,10 @@ class TwoPlay:
         self.pm: PmRun | None = None
         self.pm_done: list[PmRun] = []
         self.pm_n: Counter = Counter()
+        # SP12a: TWO_RUNEEXIT's numbers and its per-circle log
+        self.rcfg = _re_cfg() if RUNEEXIT else ReCfg()
+        self.rx_log: dict = {}                # (caster iid, antic clock) -> the circle's record (rune_exit / rx_note)
+        self._rx_keys: list = []              # this tick's circles (rx_note)
 
     # ---- helpers ----
 
@@ -2756,6 +2837,87 @@ class TwoPlay:
             out.append((lo - HALF_W - 0.3, hi + HALF_W + 0.3, "rune", None))
         return out
 
+    # ---- SP12a TWO_RUNEEXIT ----
+
+    def rune_exit(self, f: int, s: dict, t: float) -> tuple:
+        """SSBOT_FORUM_TWO_RUNEEXIT: (circles, bodies, numbers) for the planner's exit tier, frames from this tick's
+        clock t: circles [(centre x, reach, first lit frame, last lit frame)] of every jump cast past its Jump Aim or
+        landed whose circle is still to light (not seen burst) within horizon_f; bodies [(lo, hi, from frame)] - a
+        grounded Clapper's body span now, a jumper's around its landing from its landing - jump_block_f. () without
+        a circle. Logs each circle (rx_log)."""
+        cs = _sp.clappers(s)
+        c = self.rcfg
+        self._rx_keys = []
+        circles, bodies = [], []
+        from ssbot.combat.tactics.gauntlet import jump_landing
+        spans = _cs.rune_spans(s)
+        hx = _sp.hero_x(s) if (s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos") else None
+        for e in cs:
+            iid = e.get("iid")
+            st = _sp.control(e)[0]
+            j = self.jumps.get(iid)
+            k_land = None
+            if j is not None and j.get("aim_hx") is not None:
+                jf = j.get("aim_face", j["face"])
+                if not j.get("done"):
+                    L = jump_landing(j["x0"], j["aim_hx"], jf)
+                    k_land = (j["t0"] + c.land_f / 60.0 - t) * 60.0
+                elif j.get("t_land") is not None:
+                    L = float(j["land_x"])
+                    k_land = (j["t_land"] - t) * 60.0
+                if k_land is not None and j.get("fam") == "jc":
+                    k_on, k_off = k_land + c.lit_f, k_land + c.end_f
+                    cx = L + jf * (c.c_right if jf > 0 else c.c_left)
+                    key = (iid, round(float(j["t0"]), 3))
+                    rec = self.rx_log.get(key)
+                    burst = rec is not None and rec.get("burst")
+                    if not burst and rec is not None:
+                        # the circle object near the centre seen lit, then unlit: burst
+                        for lo, hi, _ciid, lit in spans:
+                            if abs(0.5 * (lo + hi) - cx) < 1.5:
+                                if lit:
+                                    rec["lit"] = True
+                                elif rec.get("lit"):
+                                    rec["burst"] = burst = True
+                    if not burst and k_off > 0 and k_on <= c.horizon_f:
+                        circles.append((cx, c.reach, k_on, k_off))
+                        if rec is None:
+                            rec = self.rx_log[key] = {"iid": iid, "t0": round(float(j["t0"]), 3), "f0": f,
+                                                      "cx": round(cx, 2), "L": round(float(L), 2), "face": jf,
+                                                      "k_on0": round(k_on, 1), "hx0": None if hx is None else round(hx, 2),
+                                                      "ticks": 0, "inside": 0, "split": 0, "chosen_late": 0,
+                                                      "f_split0": None, "f_last": f, "lit": False, "burst": False}
+                        rec["f_last"] = f
+                        rec["ticks"] += 1
+                        if hx is not None and abs(hx - cx) < c.reach:
+                            rec["inside"] += 1
+                        self._rx_keys.append(key)
+            if (st in JUMP_ST and st not in ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
+                    and k_land is not None and j is not None and not j.get("done")):
+                bodies.append((L - c.jump_body, L + c.jump_body, k_land - c.jump_block_f))
+            else:
+                a, b = body_span(e)
+                bodies.append((a - c.body_pad, b + c.body_pad, -1e9))
+        if not circles:
+            return ()
+        return (tuple(circles), tuple(bodies), {"v": c.v, "buf_f": c.buf_f, "wall_pad": c.wall_pad})
+
+    def rx_note(self, f: int, info) -> None:
+        """SSBOT_FORUM_TWO_RUNEEXIT: the planner's exit tier this tick (planner.last_info["rx"]: [safe rows late, safe
+        rows, chosen late]) on this tick's circles."""
+        if not info or not self._rx_keys:
+            return
+        n_late, n_safe, ch_late = info
+        for key in self._rx_keys:
+            rec = self.rx_log.get(key)
+            if rec is None:
+                continue
+            if 0 < n_late < n_safe:
+                rec["split"] += 1
+                if rec["f_split0"] is None:
+                    rec["f_split0"] = f
+            rec["chosen_late"] += int(bool(ch_late))
+
     # ---- S5 the stance ----
 
     def space(self, prefs, s: dict, t: float, focus):
@@ -2849,6 +3011,8 @@ class TwoPlay:
             res["jumphit"] = self.jh_stats()
         if SP11B:
             res.update(self.sp11b_stats())
+        if RUNEEXIT:
+            res["rune_exit"] = list(self.rx_log.values())    # SP12a
         return res
 
 

@@ -749,6 +749,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             if not pre_obs:
                 self.two.observe(f, s, ws.stamp.t_game_s)
             prefs = self.two.space(prefs, s, ws.stamp.t_game_s, getattr(prefs, "target", None))
+            if two_play.RUNEEXIT:
+                # SP12a: the jump casts' circles still to light for the planner's exit tier
+                rx = self.two.rune_exit(f, s, ws.stamp.t_game_s)
+                if rx:
+                    prefs = replace(prefs, rune_exit=rx)
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
@@ -766,6 +771,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         S0 = self._start_state(ws, raw)
         res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
+        if two_play.RUNEEXIT and self.two is not None and getattr(prefs, "rune_exit", None):
+            self.two.rx_note(f, self.planner.last_info.get("rx"))      # SP12a
         pt = self.planner.audit.pin_ticks
         cl = getattr(res, "clash", None)
         self._plan_ring.append((fo, int(res.S), bool(res.forced_risk), bool(cl and not cl[2]),
@@ -825,10 +832,17 @@ class ForumPlannerPolicy(PlannerPolicy):
                    if air_chain.AIRCHAIN and self.two is not None else None)
             if two_play.PUSHMID and self.two is not None:
                 self.slam_play.side_hint = self.two.pm_hint()  # SP11b: F's slam's way out to its wall side
+            bks = None
+            if slam_play.STRIKEGUARD and self.v2feed is not None:
+                # SP12a: the small-rune bombs (frames from this STATE) for the strike's path
+                trk_ = self.v2feed.trk
+                if getattr(trk_, "rune", None) is not None:
+                    from ssbot.combat import rune_bombs as _rbm
+                    bks = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                        t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip,
-                                       sim=sim, guard=gsp)
+                                       sim=sim, guard=gsp, bombs=bks)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None

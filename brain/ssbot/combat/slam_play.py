@@ -194,6 +194,21 @@ RG_LIT = (65, 85)           # the circle's lit frames after the landing (first l
 RG_M = 3                    # frames of margin on both ends
 RG_R = 7.19                 # the dome's radius, its centre 0.34 u above the floor
 RG_C = (6.48, 6.75)         # its centre in front of the landing: facing left / right
+# SSBOT_FORUM_TWO_STRIKEGUARD (task 1v1 SP12a, default off; the SP11 cause audits' second cause - the slam playbook
+# striking one Clapper while the other one hit her: 22 HP losses in SP11b's 128 default episodes, 11 of them the other
+# one's small runes, 5 its jump's falling body in her bounce, 4 its body, 2 its jump landing): TWO_GUARD extended to
+# the strike itself. The start check (and every tick of the walk until the jump: abort, the planner decides) declines
+# when on the strike's path - her walk from her x to the stand point at WALK_U a frame, the stand point from the jump
+# with her box bottom RG_H10 (p10 of 737 struck slams) up to SG_END_K - a small-rune bomb of the other one (rune_bombs'
+# per-bomb forecast, SG_BOMB_M u) is lit ("other bomb"), the other one's body (+ SG_BODY_PAD) is ("other body"), or,
+# during the walk, the other one enters a jump move or a cast within TWO_CAST_U ("other <state>": the start check has
+# these already). The way out's landing side also avoids a bomb lit at its landing (_guarded_spot, SG_LAND_K). Stats
+# slam_play.sg (iid, antic entry, k, why, phase).
+STRIKEGUARD = _on("SSBOT_FORUM_TWO_STRIKEGUARD")
+SG_END_K = 96               # the strike's path is checked to this antic frame (the bounce lands ~Slam 0 + 52)
+SG_BOMB_M = 0.25            # bomb margin (u): rune_bombs.BOMB_M 0.15 + 0.1 for the walk's timing
+SG_BODY_PAD = 0.55          # her half width + 0.3 around the other one's body
+SG_LAND_K = (92, 112)       # the way out's landing window (antic frames)
 # SSBOT_FORUM_TWO_SIDE (SP7, default off): the way out's side with two Clappers. SP5's rule lands between them; in SP7's
 # first trial (t1, e450b7a) 3 of 20 struck slams lost HP to the other one's hammer 115-128 frames after the antic: it
 # was idle 9.7-13.8 u away, started its slam the moment the struck one's Slam 1 ended (Buddy Is Attacking releases
@@ -446,6 +461,8 @@ class SlamPlay:
         self._rg_circ: dict = {}             # SP11-0 TWO_RUNEGATE: circle iid -> {t0, lit, burst, cx}
         self._rg_tick = None                 # ... this tick's antic frame when the old gate would have declined
         self.side_hint: dict = {}            # SP11b TWO_PUSHMID: Clapper iid -> the world side of its way out
+        self._bombs = None                   # SP12a TWO_STRIKEGUARD: this tick's bomb forecast (rune_bombs.frames)
+        self.sg: list = []                   # ... [iid, antic entry, k, why, decline / abort, ticks] per guard event
 
     def reset(self) -> None:
         self.run = None
@@ -456,6 +473,8 @@ class SlamPlay:
         self.holds = []
         self._rg_circ = {}
         self.side_hint = {}
+        self._bombs = None
+        self.sg = []
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -587,6 +606,8 @@ class SlamPlay:
         res = dict(out)
         if rg:
             res["rg_rel"] = rg                       # SP11-0 TWO_RUNEGATE: the runs its gate let start
+        if STRIKEGUARD:
+            res["sg"] = [list(x) for x in self.sg]   # SP12a TWO_STRIKEGUARD: its declines / aborts
         return res
 
     def runs_rec(self) -> list:
@@ -629,7 +650,7 @@ class SlamPlay:
         self.run = None
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             skip: frozenset | None = None, sim=None, guard: list | None = None) -> int | None:
+             skip: frozenset | None = None, sim=None, guard: list | None = None, bombs=None) -> int | None:
         """The mask for frame f + 2 from the STATE of frame f, or None (the planner decides).
 
         t_game: the game clock (s; the backend's Stamp.t_game_s, the sum of the scaled dt: it stands still through
@@ -641,6 +662,8 @@ class SlamPlay:
         t = f / 60.0 if t_game is None else float(t_game)
         self._t = t
         self._guard = guard                  # SP11-0 SSBOT_FORUM_TWO_GUARD: the other one's danger spans (or None)
+        self._bombs = bombs                  # SP12a SSBOT_FORUM_TWO_STRIKEGUARD: rune_bombs.frames from this STATE (or None)
+        self._f = f
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
         if TWO_RUNEGATE and TWO_PLAY:
             self._rg_observe(s, t)
@@ -714,6 +737,10 @@ class SlamPlay:
                 x0 = (hero_x(s) - cx0) * r.face
                 tx = cx0 + r.face * min(max(x0, c.stand[0]), c.stand[1])
                 why = self._two_danger(s, e, tx, t, k)
+                if why is None and STRIKEGUARD:
+                    why = self._sg_danger(s, e, r, tx, k, walk=False)
+                    if why is not None:
+                        self._sg_log(r, k, why, "decline")
                 if why is not None:
                     r.why = why
                     return None
@@ -733,6 +760,14 @@ class SlamPlay:
             # a late landing inside the jump band: the jump this tick (below)
         cx = float(e["pos"][0])
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
+        if r.phase == "walk" and STRIKEGUARD and k < c.k_jump and TWO_PLAY:
+            # SP12a: the other one's danger reaches the strike's path during the walk: the planner decides
+            tx_ = cx + r.face * min(max(x, (r.stand or c.stand)[0]), (r.stand or c.stand)[1])
+            why = self._sg_danger(s, e, r, tx_, k, walk=True)
+            if why is not None:
+                self._sg_log(r, k, why, "abort")
+                self._close("abort", "sg " + why)
+                return None
         if r.phase == "walk":
             band = r.band or c.band
             if EARLY:
@@ -840,7 +875,72 @@ class SlamPlay:
         """SP11-0 SSBOT_FORUM_TWO_GUARD: her landing at x (box centre) meets another Clapper's danger span (its jump
         landing band, its big rune circle; not its slam: the hand-off / TWO_TIGHT handle a second hammer)."""
         from ssbot.combat import two_play as _tp
+        if STRIKEGUARD and self._sg_bomb_at(r, x, SG_LAND_K):
+            return True                              # SP12a: a bomb of the other one lit at her landing
         return _tp.guard_hit(self._guard, x - 0.25, x + 0.25, kinds=("land", "rune"), own=r.iid) is not None
+
+    # ---- SP12a SSBOT_FORUM_TWO_STRIKEGUARD ----
+
+    def _sg_k0(self, r: Run) -> int:
+        """The antic frame of this tick's STATE (the bomb frames count from it)."""
+        return int(round((self._t - r.ta) * 60.0))
+
+    def _sg_bomb_at(self, r: Run, x: float, ks: tuple, h: float = 0.0) -> bool:
+        """A bomb of a Clapper other than the run's lit over her box (centre x, box bottom h above the floor) at some
+        antic frame of [ks[0], ks[1]]."""
+        bk = getattr(self, "_bombs", None)
+        if bk is None or not len(bk):
+            return False
+        import numpy as np
+        from ssbot.combat import rune_bombs as _rb
+        own = {int(o) for o in bk[:, 0] if int(o) != r.iid}
+        if not own:
+            return False
+        k0 = self._sg_k0(r)
+        kk = np.arange(ks[0], ks[1] + 1) - k0
+        y = 3.0 + h + 1.0394                      # Bounds centre (the kinematics box: half height 1.0394)
+        return bool(_rb.occupied(bk, np.full(kk.shape, x), np.full(kk.shape, y), kk, SG_BOMB_M, own).any())
+
+    def _sg_danger(self, s: dict, e: dict, r: Run, tx: float, k: int, walk: bool) -> str | None:
+        """SSBOT_FORUM_TWO_STRIKEGUARD: why the other Clapper's danger reaches the strike's path from antic frame k
+        (module constants), or None."""
+        import numpy as np
+        hx = hero_x(s)
+        lo, hi = min(hx, tx) - 0.25, max(hx, tx) + 0.25
+        for o in clappers(s):
+            if o.get("iid") == e.get("iid"):
+                continue
+            from ssbot.combat import two_play as _tp
+            a, b = _tp.body_span(o)
+            if a - SG_BODY_PAD < hi and b + SG_BODY_PAD > lo:
+                return "other body"
+            if walk:
+                st = control(o)[0]
+                if st in TWO_JUMP_ST:
+                    return f"other {st}"
+                if st in ("Spell Antic", "Cast 1", "Cast 2") and abs(float(o["pos"][0]) - tx) < TWO_CAST_U:
+                    return f"other {st}"
+        bk = getattr(self, "_bombs", None)
+        if bk is not None and len(bk):
+            from ssbot.combat import rune_bombs as _rb
+            own = {int(o_) for o_ in bk[:, 0] if int(o_) != r.iid}
+            if own:
+                k0 = self._sg_k0(r)
+                ks = np.arange(max(k, k0), SG_END_K + 1)
+                kj = max(k, self.cfg.k_jump)
+                d = 1.0 if tx >= hx else -1.0
+                xs = np.where(ks < kj, hx + d * np.minimum(abs(tx - hx), WALK_U * (ks - k0)), tx)
+                hs = np.array([0.0 if kk < kj else RG_H10[min(int(kk) // 2, len(RG_H10) - 1)] for kk in ks])
+                ys = 3.0 + hs + 1.0394
+                if _rb.occupied(bk, xs, ys, ks - k0, SG_BOMB_M, own).any():
+                    return "other bomb"
+        return None
+
+    def _sg_log(self, r: Run, k: int, why: str, what: str) -> None:
+        if what == "decline" and self.sg and self.sg[-1][0] == r.iid and self.sg[-1][1] == r.fa and                 self.sg[-1][4] == "decline":
+            self.sg[-1][5] += 1                    # the same slam declined again this tick
+            return
+        self.sg.append([r.iid, r.fa, k, why, what, 1])
 
     def _hold_mask(self, f: int, s: dict) -> int | None:
         """TWO_TIGHT's hold after the far-side landing: 0 (no key) while B is in its slam before Slam 2, she is not hurt

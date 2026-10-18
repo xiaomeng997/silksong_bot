@@ -101,6 +101,9 @@ class GoalPrefs(TacticPrefs):
     ground_first: frozenset = frozenset()  # iids for which rows without a jump key rank first among equal landed hits
     #                                      (SSBOT_FORUM_JB_NOJUMP, task 1v1 SP4: behind the landed Clapper the planner
     #                                      jumped and lost a hit; the ground behind it has no damage box)
+    rune_exit: tuple = ()                  # SSBOT_FORUM_TWO_RUNEEXIT (task 1v1 SP12a; combat.two_play.rune_exit): the
+    #                                      jump casts' circles still to light and the bodies; safe rows ending inside
+    #                                      one with no way out left rank after the rest, above the landed hits
 
 
 class Tactics:
