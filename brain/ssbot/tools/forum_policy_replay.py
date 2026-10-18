@@ -107,7 +107,9 @@ def main(argv=None) -> int:
            "first_ticks_ms": [round(x, 1) for x in pol.tick_ms[:12]],
            "true_waves": (row.get("gauntlet") or {}).get("waves"),
            # SP10b: the slam playbook's counts and runs (the hand-off / tight / air chain logs)
-           **{k: st[k] for k in ("slam_play", "slam_runs", "slam_holds") if k in st}}
+           **{k: st[k] for k in ("slam_play", "slam_runs", "slam_holds") if k in st},
+           # SP11a: TwoPlay's stats (the escape runs, RUNETIER's rune_tier) when it ran
+           **({"two_play": st["two_play"]} if "two_play" in st else {})}
     if a.ticks_out is not None:
         a.ticks_out.write_text("".join(json.dumps(r) + "\n" for r in tick_rows), encoding="utf-8")
     js = json.dumps(out, indent=1, default=str)

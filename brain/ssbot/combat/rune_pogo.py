@@ -595,6 +595,7 @@ class RunePogo:
         self._drop_f: int | None = None       # the air phase's down slash press (mask frame)
         self._bounce_f: int | None = None     # the last bounce seen (STATE frame)
         self._b_slam_f0: int | None = None    # B's Slam Antic entry (STATE frame) while it slams
+        self._umb_f: int | None = None        # the last umbrella press sent (mask frame)
         self._next_plan = 0
 
     # ---- bookkeeping (every tick, TwoPlay._esc_observe) ----
@@ -609,7 +610,7 @@ class RunePogo:
         r.a_pred = f - r.k_a + self.cfg.a_antic
         self.run = r
         self.plan = None
-        self._press_f = self._drop_f = self._bounce_f = self._b_slam_f0 = None
+        self._press_f = self._drop_f = self._bounce_f = self._b_slam_f0 = self._umb_f = None
         self._next_plan = 0
         self._prev_b = _sp.control(B)[0]
         return r
@@ -812,8 +813,11 @@ class RunePogo:
         cd = tm.get("atk_cd")
         rdy = f + SEND_AHEAD + (0 if cd is None else max(0, int(math.ceil(float(cd) * 60.0 - (SEND_AHEAD - 1)))))
         clip = str((h.get("anim") or {}).get("clip") or "")
-        gliding = clip.startswith("Umbrella") and "Deflate" not in clip
         j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
+        # the umbrella open, or pressed by the run in the last 10 frames with the key still held (the STATE shows the
+        # Umbrella clips 1 - 3 frames later): keep holding the key (a release would end the float)
+        gliding = (clip.startswith("Umbrella") and "Deflate" not in clip) or (
+            self._umb_f is not None and 0 <= f + SEND_AHEAD - self._umb_f <= 10 and not ground)
         fst = _sp.control(F)[0]
         f_box = None if fst in ("Cast Slam Antic", "Cast Slam Antic 2", "Jump Aim", "Cast Jump", "Jump", "Air")             else body_box(F)
         f_fall = None
@@ -868,6 +872,7 @@ class RunePogo:
             r.jump_f = Fm - r.f_a
         if p.umb is not None and Fm == p.umb:
             r.umbs.append(Fm - r.f_a)
+            self._umb_f = Fm
         return m
 
     def committed(self, p: Plan | None, Fm: int) -> bool:
