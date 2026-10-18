@@ -93,6 +93,14 @@ class RtCfg:
     scope: int = 1              # 1: any jump cast of either Clapper (the lead's NOTE 7: the far one's onto her face too);
     #                             0: the focus's escape jump casts only
     near_u: float = 6.0         # a jump cast of the other one: she within this of the target Clapper keeps her side of it
+    contact_in: float = 0.4     # (fp1) the down slash must meet B's box this far inside its x edges (a walking B / the
+    #                             model's x error left 6 of 25 sent presses without a bounce)
+    b_walk_f: int = 30          # B's x extrapolated with its velocity this many frames at most (fp1: B walked 2.2 u
+    #                             in 16 frames away from her contact)
+    jump_commit: int = 4        # an "up" plan is kept from its jump press for this many frames, then re-planned in the
+    #                             air (the drift / the press follow B)
+    after_contact: int = 45     # a plan with a bounce is judged to its contact + this (the float then is ~7.6 u up: the
+    #                             next plans take it from there - a second bounce, a drift out)
 
 
 def _cfg() -> RtCfg:
@@ -159,6 +167,8 @@ class Ctx:
     ground: bool = False
     atk_ready_f: int = 0          # the first mask frame the attack can be pressed
     gliding: bool = False         # the umbrella is open now
+    rising: bool = False          # her own jump is rising with the key held (keep it: a release halves the rise)
+    b_vx: float = 0.0             # B's x velocity (u per frame) for its box over the plan
     j_held: bool = False          # the jump key is latched now
     f_box: tuple | None = None    # F's body box after its landing (its Slam 2 / Recover / Idle)
     b_hammer: tuple | None = None  # B's slam hammer: (mask frame from, to, x0, x1, top) while B slams
@@ -212,12 +222,13 @@ def plan_cmds(p: Plan, F0: int, T: int) -> np.ndarray:
         a = max(j0 - F0, 0)
         out[a:max(min(j0 + H - F0, T), 0)] |= M_J
     if p.press is not None:
+        # the attack on two frames (fp1, cac3388: a press on one frame was lost twice when the policy's tick for that
+        # frame was skipped; the hold filter makes the two one press)
         c = p.press - F0
         if 0 <= c - 1 < T:
             out[c - 1] |= M_D
-        if 0 <= c < T:
-            out[c] = (out[c] & ~M_J) | M_D | M_A
-        out[max(c + 1, 0):max(min(c + 5, T), 0)] |= M_D
+        out[max(c, 0):max(min(c + 2, T), 0)] |= M_D | M_A
+        out[max(c + 2, 0):max(min(c + 5, T), 0)] |= M_D
         out[max(c, 0):max(min(c + 5, T), 0)] &= ~M_J
     if p.umb is not None:
         a = max(p.umb - F0, 0)
@@ -240,13 +251,19 @@ def _poly_hits(px: np.ndarray, py: np.ndarray, hx: np.ndarray, hy: np.ndarray, r
     return out
 
 
-def slash_hits(ro: kin.Rollout, faces: np.ndarray, box: tuple, i0: int) -> np.ndarray:
+def slash_hits(ro: kin.Rollout, faces: np.ndarray, box: tuple, i0: int, shift: np.ndarray | None = None) -> np.ndarray:
     """[N, T1] the down slash (BOTH shapes: the alternation unknown) placed at her transform on frame i would meet the
-    box (frames before i0 False)."""
+    box (frames before i0 False; shift [T1]: the box's x offset per frame)."""
     N, T1 = ro.flags.shape
     pos = ro.pos
     hx, hy = pos[..., 0].ravel(), pos[..., 1].ravel()
-    rect = np.broadcast_to(np.asarray(box, float), (hx.shape[0], 4))
+    if shift is None:
+        rect = np.broadcast_to(np.asarray(box, float), (hx.shape[0], 4))
+    else:
+        r1 = np.repeat(np.asarray(box, float)[None, :], T1, axis=0)
+        r1[:, 0] += shift
+        r1[:, 2] += shift
+        rect = np.tile(r1, (N, 1))
     fr = np.repeat(np.asarray(faces), T1)
     hit = np.ones(hx.shape[0], bool)
     for poly in (DOWN, DOWN_ALT):
@@ -261,11 +278,12 @@ def slash_hits(ro: kin.Rollout, faces: np.ndarray, box: tuple, i0: int) -> np.nd
     return hit
 
 
-def box_hits(ro: kin.Rollout, box: tuple, pad: float = 0.0) -> np.ndarray:
-    """[N, T1] her box meets the AABB (grown by pad)."""
+def box_hits(ro: kin.Rollout, box: tuple, pad: float = 0.0, shift: np.ndarray | None = None) -> np.ndarray:
+    """[N, T1] her box meets the AABB (grown by pad; shift [T1]: its x offset per frame)."""
     b = ro.box
     x0, y0, x1, y1 = box
-    return (b[..., 0] < x1 + pad) & (b[..., 2] > x0 - pad) & (b[..., 1] < y1 + pad) & (b[..., 3] > y0 - pad)
+    dx = 0.0 if shift is None else np.asarray(shift)[None, :]
+    return (b[..., 0] < x1 + dx + pad) & (b[..., 2] > x0 + dx - pad) & (b[..., 1] < y1 + pad) & (b[..., 3] > y0 - pad)
 
 
 def hammer_hits(ro: kin.Rollout, L: float, face: int, pad: float) -> np.ndarray:
@@ -305,6 +323,16 @@ class Planner:
     def _F(self, i: int) -> int:
         return self.c.F0 + (i - self.off)
 
+    def _b_shift(self, T1: int) -> np.ndarray:
+        """[T1] B's x offset per rollout index (its velocity, at most b_walk_f frames ahead)."""
+        k = np.clip(np.arange(T1) - self.off, 0, self.cfg.b_walk_f)
+        return self.c.b_vx * k
+
+    def _b_contact_box(self) -> tuple:
+        x0, y0, x1, y1 = self.c.b_box
+        d = self.cfg.contact_in if (x1 - x0) > 2.0 * self.cfg.contact_in + 0.4 else 0.0
+        return (x0 + d, y0, x1 - d, y1)
+
     def _faces(self, plans: list[Plan]) -> np.ndarray:
         return np.array([((1 if p.dirk == M_R else -1) if (p.dirk and p.press is not None and p.d0 < p.press)
                           else self.c.face) for p in plans])
@@ -322,7 +350,7 @@ class Planner:
         pre = (contacts[:, None] >= 0) & (idx >= contacts[:, None] - 2) & (idx < contacts[:, None])
         bad = np.zeros((N, T1), bool)
         if c.b_box is not None:
-            bad |= box_hits(ro, c.b_box, cfg.body_m) & ~inv & ~pre
+            bad |= box_hits(ro, c.b_box, cfg.body_m, self._b_shift(T1)) & ~inv & ~pre
         if c.f_box is not None:
             bad |= box_hits(ro, c.f_box, cfg.body_m) & ~inv
         if c.L is not None and c.f_L is not None:
@@ -363,7 +391,7 @@ class Planner:
         if self.c.b_box is None or not self.c.b_ok:
             return out
         faces = self._faces(plans)
-        hit = slash_hits(ro, faces, self.c.b_box, self.off)
+        hit = slash_hits(ro, faces, self._b_contact_box(), self.off, self._b_shift(T1))
         gnd = (ro.flags & kin.F_GROUND) != 0
         for n, p in enumerate(plans):
             if p.press is None:
@@ -401,10 +429,13 @@ class Planner:
         cont = np.array([self._i(p.contact) if p.contact is not None else -1 for p in plans])
         bad = self.danger(ro, cont)
         for n, p in enumerate(plans):
+            b = None if bad[n] < 0 else self._F(int(bad[n]))
             if p.press is not None and p.contact is None:
-                p.bad, p.why = p.press, p.why + " no contact"
+                p.bad, p.why = (p.press if b is None else min(p.press, b)), p.why + " no contact"
             else:
-                p.bad = None if bad[n] < 0 else self._F(int(bad[n]))
+                if b is not None and p.contact is not None and b > p.contact + self.cfg.after_contact:
+                    b = None
+                p.bad = b
         self.last_ro = ro
         return plans
 
@@ -421,7 +452,7 @@ class Planner:
         drifts = [(0, 0)] + ([(dk, d) for d in (6, 14, 30)] if dk else []) + [(ok, d) for d in (10, 30)]
         out = []
         for k, d in drifts:
-            if c.gliding:
+            if c.gliding or c.rising:
                 out.append(Plan("keep", k, F0, F0 + d, hold_j=True, why="keep"))
             else:
                 u0 = 2 if c.j_held else 0          # a held jump key is released 2 frames first (an edge)
@@ -460,7 +491,8 @@ class Planner:
                 for k, d in ((0, 0), (dk, 8), (dk, 20)):
                     if d and not k:
                         continue
-                    plans.append(Plan("drop", k, F0, min(F0 + d, P + 6), press=P, hold_j=c.gliding, why="drop"))
+                    plans.append(Plan("drop", k, F0, min(F0 + d, P + 6), press=P, hold_j=c.gliding or c.rising,
+                                      why="drop"))
         plans = self.evaluate(plans)
         safe = [p for p in plans if p.bad is None]
         dk = self._dk(x0)
@@ -503,7 +535,7 @@ class Planner:
             if again.bad is None:
                 return again
         dk = M_R if c.b_x > x0 else M_L
-        j_lo = max(F0, a_frame - cfg.jump_lead)
+        j_lo = max(F0 + (2 if c.j_held else 0), a_frame - cfg.jump_lead)   # (fp1) a held key: no edge, no jump
         d0 = max(a_frame + 1, F0)
         plans = []
         # after F's aim (her x no longer matters to it) a walk toward B may come first: the jump w frames later
@@ -518,7 +550,9 @@ class Planner:
         ro = self._roll(plans)
         faces = np.array([((1 if p.dirk == M_R else -1) if p.dirk else c.face) for p in plans])
         # a pogo from above: the slash meets B's box with her box bottom at or above its top - 0.3, falling
-        hit = slash_hits(ro, faces, c.b_box, self.off) & (ro.box[..., 1] >= c.b_box[3] - 0.3) & (ro.vel[..., 1] < 0)
+        T1 = ro.flags.shape[1]
+        hit = slash_hits(ro, faces, self._b_contact_box(), self.off, self._b_shift(T1)) & (
+            ro.box[..., 1] >= c.b_box[3] - 0.3) & (ro.vel[..., 1] < 0)
         out = []
         for n, p in enumerate(plans):
             ks = np.flatnonzero(hit[n])
@@ -706,6 +740,9 @@ class RunePogo:
             return
         if r.phase == "done":
             return
+        if _sp.control(B)[0] in ("Jump Antic", "Cast Slam Antic"):
+            self.close(f, "b jump")              # (fp1: 4 of 10 'other' runs) the target leaps itself: the default play
+            return
         if "unlit" in r.rune or (r.f_land is not None and f - r.f_land > c.end_f):
             self.close(f, "burst" if "unlit" in r.rune else "end")
 
@@ -744,8 +781,8 @@ class RunePogo:
                 self.close(f, "far")
                 return None
         if r.phase == "go":
-            if ground and Fm < a_frame - self.cfg.jump_lead:
-                return self._go(f, s, F, B)
+            if Fm < a_frame - self.cfg.jump_lead:
+                return self._go(f, s, F, B, ground)
             r.phase = "air"
         m = self._air(f, s, F, B, ground, sim, a_frame)
         r.ms.append((Fm - r.f_a, m))
@@ -762,8 +799,9 @@ class RunePogo:
         rc = (rune_centre(r.L_pred, r.face) - r.L_pred) * r.face
         return u - HALF_W >= max(7.76, rc + RUNE_R) + c.far_m
 
-    def _go(self, f: int, s: dict, F: dict, B: dict) -> int:
-        """B's face: the walk / dash to the spot, the side slash on B when it meets its body (slash=1)."""
+    def _go(self, f: int, s: dict, F: dict, B: dict, ground: bool = True) -> int:
+        """B's face: the walk / dash to the spot, the side slash on B when it meets its body (slash=1; on the ground);
+        in the air the key toward the spot only."""
         r, c = self.run, self.cfg
         h = s.get("hero") or {}
         vx = float((h.get("vel") or [0.0, 0.0])[0])
@@ -779,7 +817,7 @@ class RunePogo:
         lo, hi = (hxw + _sp.SLASH_X[0], hxw + _sp.SLASH_X[1]) if look > 0 else (hxw - _sp.SLASH_X[1],
                                                                                  hxw - _sp.SLASH_X[0])
         meets = lo < bb[2] - 0.1 and hi > bb[0] + 0.1
-        if c.slash and meets and _atk_ready(s):
+        if c.slash and meets and ground and _atk_ready(s):
             fc = h.get("facing")
             if fc is None or float(fc) * look <= 0:
                 return toward
@@ -791,7 +829,7 @@ class RunePogo:
             return 0
         k = M_R if d > 0 else M_L
         clip = str((h.get("anim") or {}).get("clip") or "")
-        if abs(d) > c.dash_u and _sp.on_ground(s) and not any(x in clip for x in ("Dash", "Sprint", "Skid")) and \
+        if abs(d) > c.dash_u and ground and _sp.on_ground(s) and not any(x in clip for x in ("Dash", "Sprint", "Skid")) and \
                 ((h.get("can") or {}).get("dash", True)):
             return k | M_DASH
         return k
@@ -839,7 +877,10 @@ class RunePogo:
             xa, xb = bx + fb * HAMMER_X[0], bx + fb * HAMMER_X[1]
             b_ham = (self._b_slam_f0 + HAMMER_K[0], self._b_slam_f0 + HAMMER_K[1], min(xa, xb), max(xa, xb),
                      HAMMER_TOP)
-        return Ctx(F0=f + SEND_AHEAD, b_box=bb, b_x=bx, b_ok=bst in B_FREE, tx=tx,
+        vy = float((h.get("vel") or [0.0, 0.0])[1])
+        rising = (not ground) and j_held and vy > 0.5 and not gliding and not clip.startswith("DownSpike")
+        bv = float((B.get("vel") or [0.0, 0.0])[0]) / 60.0 if bst in ("Walk",) else 0.0
+        return Ctx(F0=f + SEND_AHEAD, b_box=bb, b_x=bx, b_ok=bst in B_FREE, tx=tx, rising=rising, b_vx=bv,
                    face=1 if fc is None or float(fc) >= 0 else -1, L=L, f_L=f_L, fface=r.face, rc=rc,
                    lit=(lit0, lit1), a_frame=a_frame, a_seen=r.f_aim is not None, ground=ground, atk_ready_f=rdy,
                    gliding=gliding, j_held=j_held, f_box=f_box, b_hammer=b_ham, f_fall=f_fall)
@@ -875,7 +916,7 @@ class RunePogo:
             self._next_plan = Fm + c.research
             self._drop_f = None
         m = mask_at(p, Fm)
-        if p.press is not None and Fm == p.press:
+        if p.press is not None and p.press <= Fm <= p.press + 1 and self._drop_f is None and m & M_A:
             self._drop_f = Fm
             r.drops.append((Fm - r.f_a, None if p.contact is None else p.contact - r.f_a, p.kind))
         if p.jump is not None and Fm == p.jump[0]:
@@ -893,7 +934,9 @@ class RunePogo:
         if self._drop_f is not None and Fm <= self._drop_f + 12:
             return True
         if p.jump is not None and p.jump[0] < Fm:
-            end = (p.press + 12) if p.press is not None else (p.umb if p.umb is not None else p.jump[0] + p.jump[1])
+            if p.kind == "up":
+                return Fm <= p.jump[0] + self.cfg.jump_commit      # then re-planned in the air (B moves)
+            end = p.umb if p.umb is not None else p.jump[0] + p.jump[1]
             return Fm <= end
         return False
 

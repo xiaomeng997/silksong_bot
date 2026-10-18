@@ -60,8 +60,8 @@ def test_plan_masks_frame_by_frame():
     assert [rp.mask_at(p, 100 + i) for i in range(40)] == [int(x) for x in full]
     assert full[0] & rp.M_J and full[0] & rp.M_R and not full[8] & rp.M_R
     assert full[9] & rp.M_D and not full[9] & rp.M_A                     # down a frame before the press
-    assert full[10] & rp.M_A and full[10] & rp.M_D and not full[10] & rp.M_J
-    assert not any(full[11:15] & rp.M_J) and all(full[11:15] & rp.M_D)
+    assert full[10] & rp.M_A and full[10] & rp.M_D and not full[10] & rp.M_J and full[11] & rp.M_A
+    assert not any(full[11:15] & rp.M_J) and all(full[11:15] & rp.M_D) and not full[12] & rp.M_A
     assert not full[24] & rp.M_J and all(full[25:] & rp.M_J)             # the umbrella from 125, held
     q = rp.Plan("up", 0, 0, 0, jump=(102, 12), press=120)
     m = rp.plan_cmds(q, 100, 30)
@@ -125,13 +125,15 @@ def test_closed_loop_clears_the_landing_and_the_dome():
     state = kin.initial_state(P, hx, 4.568, facing=1, ground=True)
     hold = HoldState.idle(1)
     ctl = rp.RunePogo()
-    ground, gliding, x_now, last_bounce, atk_until = True, False, hx, None, 0
+    ground, gliding, x_now, last_bounce, atk_until, vy_now = True, False, hx, None, 0, 0.0
     bounces, dangers = [], []
     for frame in range(1000, 1000 + 160):
         sim = ChainSim(state, np.zeros(0, np.int64), hold, P, TERR, frame - 1, frame - 2)
         ctx = rp.Ctx(F0=frame, b_box=bbox, b_x=bx, b_ok=True, tx=bx, face=1, L=L, f_L=f_L, fface=1, rc=rc,
                      lit=(f_L + cfg.lit0, f_L + cfg.lit1), a_frame=a_frame, ground=ground,
                      atk_ready_f=max(frame, atk_until), gliding=gliding, j_held=bool(int(hold.mask()[0]) & rp.M_J),
+                     rising=(not ground) and bool(int(hold.mask()[0]) & rp.M_J) and vy_now > 0.5 and not gliding
+                     and (last_bounce is None or frame - last_bounce > 12),
                      f_fall=(a_frame, f_L, x0, L, 1) if frame <= f_L + 1 else None)
         p = ctl.plan
         if not ctl.committed(p, frame):
@@ -163,6 +165,7 @@ def test_closed_loop_clears_the_landing_and_the_dome():
         gliding = int(ro.mode[0, 1]) == kin.M_GLIDE
         inv = bool(ro.flags[0, 1] & kin.F_INVULN)
         x_now = 0.5 * (b[0] + b[2])
+        vy_now = float(ro.vel[0, 1, 1])
         g = frame + 1
         if not inv and b[0] < bbox[2] and b[2] > bbox[0] and b[1] < bbox[3] and b[3] > bbox[1]:
             dangers.append((g - f_L, "B body"))
