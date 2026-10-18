@@ -10547,3 +10547,143 @@ dc81390}`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_
    the hit-in-tail part had no measurable per-switch gain.
 5. The audit's top causes are unchanged from SP11-0: the planner airborne with the dash ready and the slam playbook on one
    Clapper while the other hits.
+
+## Task 1v1 - stage SP12a: the SP11 audits' top causes - TWO_RUNEEXIT (the planner's exit tier for a jump cast's big rune circle) and TWO_STRIKEGUARD (TWO_GUARD on the slam strike's path); both failed their fixed point, stay off; no A/B (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §85)
+
+The task (SP12a): (1) the planner in the air with the dash ready and no safe row (FORCED_RISK streaks; 14 of SP11b's 61
+clears' cost) - trace a sample frame by frame and fix the root causes behind switches; (2) the slam playbook striking one
+Clapper while the other hits her (5.5 clears' cost) - TWO_GUARD extended to the strike itself. Fixed points per fix, then
+ONE w13 A/B (64 per arm), the cause audit. The person's goal: a full-HP clear of the two-Clapper wave (the main measure:
+HP-hitless clears). Forum_W_w13 (fo_cl_w13w), instances 0 / 1, 1x; u centre to centre (her box centre, its transform),
+HeroBox 0.46 u wide. Data `C:\ssbot\data\m2_play\sp12` (`air_dec_rnjb.json` the decision rows before every such HP loss,
+`fr1\*.json` the open-loop row decomposition of 12 of them, `base_rx` the open-loop baseline of 20 default episodes with
+the switches on, `fp1` the fixed point: `fp.json / .txt`, `two.*`, `ab_stats.txt`, `audit.*`, `rank.txt`, traces `hp`;
+`base_audit` the default re-audited with the fixed forced flag; `replay_fc8a24e` identity; `scripts`). Commits fc8a24e
+(code + tests), c56d860 (the audit tool), the docs after them. No NOTE_FROM_LEAD in `sp12`; no human practice ran; the
+trading bot was not touched.
+
+### Result
+
+- **Neither switch reached its fixed-point gate (>= 90 %); both stay off; no A/B** (the person's rule: the fixed point
+  first). One round, fp1 (fc8a24e, arm s12xg = rnjb + both, 32 w13 episodes, seeds 8100000.. / 8110000.., 2 x 16):
+
+| switch | its events | no HP lost in the window | the default's open-loop baseline (`base_rx`, 20 episodes) |
+|---|---|---|---|
+| TWO_RUNEEXIT (window: the circle's lit frames - 6 .. + 32, big rune hits) | 57 jump-cast circles where the tier split the safe rows (59 circles, her inside every one) | **45 / 57 (79 %)** | the tier would have acted on 32 circles; the default lost no HP to 25 (78 %) |
+| TWO_STRIKEGUARD (window: the event .. antic + 120, any hit) | 21: declines "other bomb" 14, "other body" 5; aborts "other bomb" 1, "other Cast Slam Antic" 1 | **12 / 21 (57 %)**: bombs 7 / 15, body 4 / 5, jump 1 / 1 | it would have fired 6 times; the default lost HP after 2 (67 %) |
+
+  fp1 as a whole (other seeds than the default's, not a comparison): hitless clears 2 / 32, both killed 21, landed / s
+  1.289, HP hits / min 4.20 (the default, SP11b's 128 pooled: 27 / 128, 88, 1.360, 3.47); close slams struck 147 / 203
+  (72 %) vs 631 / 776 (81 %) - the strike guard's 13 "other bomb" declines.
+- **Why every row is unsafe (task item 1)** - the 45 SP11b default HP losses labelled "the planner in the air, dash
+  ready" (`air_dec_rnjb.json`): **44 came at the end of a FORCED_RISK streak** (no safe row; p10 / 50 / 90 13 / 34 / 42
+  frames); by what hit: **a jump cast's big rune 18, small runes 15, a jump landing 11** (Jump 6, jump cast 5), a slam
+  body 1; L2 on the attacker 21, on the other 24. In the 60 frames before, the escape check had failed the chosen row
+  ("v2 end": safe for 36 frames, no escape in the 24 after) in 41 of 45 (median 14 frames). The open-loop decomposition of
+  12 of them (`fr1`, 127 forced ticks; per row and per Clapper, stage 1 under the tick's support, under a flat 0.5 u margin
+  on every Clapper, under no margin): with no margin at all some row was free at the streak's first tick in 9 of 12 but
+  only in 28 of 127 ticks; with 0.5 u in 4 / 12 first ticks and 11 / 127 ticks; with the default margins 0. **She is
+  already trapped when the streak starts** - the margins (the non-focus Clapper's rule margin 2.1 / 4.3 u at k 24 / 36)
+  matter only at its first 1-3 ticks (one slam case, 20261018_032939 i0 e1, 152 rows free under 0.5 u for 3 ticks), NODASH
+  ranks only safe rows (none exist in a streak), the umbrella's end model was not involved in the traced cases. The traps:
+  (a) a jump cast's circle (centre 6.48 / 6.75 u in front of the landing, r 7.19, lit landing + 62 .. 88): the jump aims 5.27
+  u in front of her, so the circle's centre lands ~1.2 u past her; its far edge ~8.9 u away is behind a wall or the other
+  Clapper's body, its near edge behind the caster's landing body (20261018_005249 i1 e0: the edge at 50.4 u past the wall
+  48.99; 20261018_040129 i1 e1 / 023606 i1 e0: the other Clapper standing at the edge); (b) the jumper's landing hammer
+  with the other Clapper's body or the wall on her other side; (c) the small-rune rings (every x is a bomb at some frame).
+- **TWO_RUNEEXIT acted as designed and did not change the outcome**: the circle is passed from the jump's first flight
+  STATE (the aim + 1; k_on ~117 frames ahead), the tier split the safe rows in 57 of 59 circles from the first tick in
+  most - but the rows that keep an exit are mostly the ones under the jumper's flight / past the landing before it lands,
+  which the planner's own check (the committed flight and landing hammer) marks unsafe a few ticks later, or the exit
+  closes by the other Clapper walking to the circle's edge (`scripts/rx_trace.py`, 20261018_050005 i0 e1 f 6752140-260:
+  16 of 189 safe rows kept the left exit under 670's flight, forced 4 ticks later, then every safe row late; the right
+  exit behind 664's body). A ranking tier cannot create the exit; the person's answers (the pass under the far jumper,
+  the pogo / float over a head: SP11a NOTES 4-9) are the moves that do.
+- **TWO_STRIKEGUARD's bomb check hands slams to the planner that the strike would have survived**: it declined 15 strikes
+  per 32 episodes for a bomb on the path (the forecast's windows and RG_H10's p10 heights are conservative); the planner
+  then lost HP to the slam's hammer / landing at antic + 43 .. 55 (5) or to the bombs themselves at + 2 .. 27 (4). The SP11b
+  default lost 11 HP in 128 episodes to the other one's bombs during a strike - fewer than the declines cost here.
+
+### 1. Code (`combat/two_play.py` ReCfg / rune_exit_late / TwoPlay.rune_exit / rx_note, `combat/forum_planner.py`, `combat/slam_play.py` SP12a section, `combat/tactics/modes.py` GoalPrefs.rune_exit, `train/forum_planner_policy.py`, `tools/sp10_audit.py`)
+
+- `SSBOT_FORUM_TWO_RUNEEXIT` (default off; `SSBOT_FORUM_TWO_RUNEEXIT_SET` overrides ReCfg): every tick `TwoPlay.rune_exit`
+  passes the planner (GoalPrefs.rune_exit) each jump cast's circle past its Jump Aim or landed, not seen burst, lighting
+  within 180 frames (centre from `jump_landing` and the aim facing, reach 7.72 u, lit landing + 62 .. 88, the landing at
+  antic + 110 before it is seen) and the Clappers' body spans (grounded: now, + 0.55 u; a jumper in flight: 2.5 u around its
+  landing from the landing - 10). In `ForumPlanner.tick` the safe rows whose end is inside a circle lighting after the row
+  with no way out left (`rune_exit_late`: an edge inside the walls - 0.3 u, no body span between, reached at 8.25 u / s +
+  8 frames before the first lit frame) rank after the safe rows that keep one, above the landed hits and NODASH; forced
+  ticks unchanged. Stats: planner audit `rx_ticks / rx_split`, last_info["rx"], two_play `rune_exit` (per circle: f0,
+  centre, k_on0, ticks, inside, split, chosen late, lit / burst).
+- `SSBOT_FORUM_TWO_STRIKEGUARD` (default off): `SlamPlay.step(bombs=)` gets rune_bombs' per-bomb forecast (frames from
+  this STATE); the start check (after `_two_danger`) declines and every walk tick before the jump aborts when on the
+  strike's path - her walk from her x to the stand point at WALK_U a frame, then the stand point with her box bottom
+  RG_H10[k // 2] to antic frame 96 - another Clapper's bomb is lit (margin 0.25 u: "other bomb"), the other one's body +
+  0.55 u meets the path ("other body"), or (the walk only) the other one enters a jump move or a cast within 9 u; the way
+  out's landing side (`_guarded_spot`) also avoids a bomb lit at antic 92 .. 112. Stats `slam_play.sg` ([iid, antic entry,
+  k, why, decline / abort, ticks]); an abort's why is "sg <why>".
+- `ssbot.tools.sp10_audit`: the planner's forced flag from its last decision BEFORE the hit (the hit frame's own row is the
+  recoil's: SP11b's labels read "not forced" for 44 of 45 losses whose streak ran to the frame before) and
+  `forced_streak` per HP loss. SP11b's ranking re-labelled (`base_audit`): the same numbers, "(forced; ...)".
+- Tests `tests/test_sp12a.py` (6: the defaults, the exit-late geometry - time, walls, bodies, a later-blocking body -, the
+  circles from a jump cast and the log, the strike guard's bomb decline / timing / own bombs, off unchanged, the body
+  decline and the walk abort on the other one's jump). Related suites (test_sp9 / sp10 / sp10b / sp11_0 / sp11a / sp11b):
+  73 passed.
+
+### 2. Identity (`sp12\scripts\replay_ident_sp12a.ps1`, `ident_cmp.sh`; from the frozen checkout, which it warmed)
+
+fc8a24e with both switches unset: byte-identical to dc81390's default (`sp11\s2\replay_dc81390\ticks_new_*`) on the w13
+144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1 / 084036 i1 e0 (2,073 / 1,778). On: both - w13
+from tick 381 / 330, **the w7 192006 from tick 1,015 (TWO_RUNEEXIT acts with one Clapper too: its jump casts have the same
+circle)**, 084036 identical; RUNEEXIT alone 381 / 330; STRIKEGUARD alone 144051 from 1,372 (one decline), 102908 identical;
+0 errors; tick p50 / p99 15-20 / 29-36 ms in the switch-on replays (Idle priority; the unset ones overlapped
+the live block: 29-35 / 55-73 ms, not comparable).
+
+### 3. Fixed point (`sp12_go.ps1` -> `sp4_block.ps1` -> `sp12_ab.ps1`; manifest `1v1sp12a_fp1_manifest.txt`; `scripts/fp12.py`)
+
+As in the Result. The reaction lag: the strike guard runs from the first STATE of the antic (declines at k 2 = the send-
+ahead); the circle reaches the planner on the jump's first flight STATE (the tier split at that tick in most circles).
+
+### 4. The cause audit (`ssbot.tools.sp10_audit`; the default `base_audit` - SP11b's 128 rnjb episodes with the fixed forced flag -, the bundle `fp1\audit.*`, `rank.txt`, traces `hp`)
+
+The default is unchanged. **Default (128 episodes, 213 HP losses, 3.47 / min; 155 planner-owned, 152 of them after a
+FORCED_RISK streak > 6 frames, median 36)**, ranked by the hitless clears they cost (61 clears with HP lost; 1 / k each):
+the planner in the air with the dash ready, forced, L2 on the other 7.33 (alone 5) / on the attacker 7.17 (5); the slam
+playbook on one while the other hit 5.50; the low hop in the air in its reach 4.50; the planner moved into it, forced, L2
+on the other 4.33; the low hop on one while the other hit 3.33; the umbrella 3.17; the planner moved into it, forced, L2 on
+it 3.00; the low hop moved her into it 3.00. Clears lost to one class alone: L2 / planner 35, script conflict 8, airborne
+3. By source: small runes 51, big rune 49, body 45, landing 42, hammer 26. **The bundle (fp1, 32 episodes, 66 HP losses,
+4.20 / min)**: the planner moved into it, forced (L2 on it 2.83, on the other 2.17), the umbrella 2.00, the slam moved her
+into it 1.50, the planner in the air with the dash ready (forced) 1.33 + 1.00 + 1.00, "slam not struck: the gate (other
+bomb)" 0.83; by source body 14, landing 14, small runes 14, big rune 13, hammer 11. Missed planned actions (bundle /
+default): close slams struck 147 / 203 (72 %) / 631 / 776 (81 %; not struck: the gate "other bomb" 13 / -, "other rune
+circle" 12 / 32); F's Idle entries hit within 30 frames 247 / 356 (69 %) / 1,038 / 1,457 (71 %; missed: in the air 35 /
+156, the low hop had the keys 22 / 76); presses dropped 110 / 1,473 / 444 / 6,230. Switches across situations: TWO_RUNEEXIT
+acts in the one-Clapper phase too (w7 identity); the strike guard needs two Clappers. One Clapper left: bundle 134.7 s, 3
+HP losses; default 549 s, 7.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp12a)
+
+`s12x` = rnjb + TWO_RUNEEXIT, `s12g` = rnjb + TWO_STRIKEGUARD, `s12xg` = both (the fixed-point arm).
+
+### 6. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (04:56-05:11), frozen at time scale 1e-4 after it by sp4_block;
+DEMO_SOON paused and restored; boost_workers ran for the block (`boost_workers.stop` present again). No game process
+touched. Frozen checkout `C:\ssbot\live_1v1_fc8a24e`. Sandbox `sp12_go.ps1`, `sp12_ab.ps1`. Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **The air losses are traps set seconds earlier, not row choices**: a jump cast aims its circle onto her (centre ~1.2 u
+   past her), and the exits are behind the caster's landing body, past a wall or past the other Clapper. What could
+   change it: the person's pass under the far jumper before its landing (SP11a NOTE 8 / 9, df8ce79's pass plans untested
+   live), the pogo / float over a head (SP11a's RUNETIER: 73 % at fp3), or standing at the jump cast's antic so that the
+   far edge (her x + ~8.9 u away from the jumper) is open - a stance rule at the antic, not a ranking tier after the aim.
+2. **The small runes during a strike**: a decline costs more than the bomb; a strike timed against the bomb's lit frames
+   (the jump 4-6 frames earlier when the stand point's bomb lights at k 26 .. 37 - her box above 2.83 u from ~k 36) or the
+   low hop's timing inside the walk would keep the strike. Not built.
+3. The strike guard's body / jump parts (4 / 5 and 1 / 1 safe) are rare (~6 events per 32 episodes); they could be tried
+   alone (the bomb check off) with a larger fixed point.
+4. The forced ranking under a relaxed margin (the non-focus idle Clapper at 0.5 u) frees rows only at a streak's first 1-3
+   ticks (11 of 127 forced ticks): small.
