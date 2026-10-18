@@ -10905,3 +10905,180 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
 4. NOTE 2 (2) the far one's jump slams (the pass under them), NOTE 3 addendum 2 (hits on the non-jumper during a jump move)
    and the w7 rune hold's passivity: not built - SP13.
 5. The Clawline is not cleaner than the pass in its band (10 / 14 vs 47 / 62): claw stays 0.
+
+
+## Task 1v1 - stage SP13: SSBOT_FORUM_CLAWSTRIKE (the small hop + Clawline + down slash on the slammer's hammer; the person's first priority of 2026-10-18 ~07:50) and SSBOT_FORUM_AIRSTRIKE (the air approach to the same strike): CLAWSTRIKE passed its fixed points (w7 forced 29 / 29, w13 forced 44 / 44 without HP lost); AIRSTRIKE failed (1 / 5) and stays off; the A/B (64 per arm) promoted CLAWSTRIKE with trigger=force: HP-hitless clears 14 vs 10 / 64 (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §87)
+
+The task (SP13 + SP13a): FIRST PRIORITY - SSBOT_FORUM_CLAWSTRIKE: on a slam antic the ground playbook cannot reach in time,
+a small hop (her box bottom in the slammer's body band <= ~3.4 u), the Clawline toward it, the vertical bounce, the down
+slash on its hammer at Slam 0 - 2; fixed point >= 90 % struck or safe without HP loss, then the A/B (64 per arm). SP13a:
+(1) TWO_AIRCHAIN's model calibration (the umbrella float's end, the attack cancel), (2) SSBOT_FORUM_AIRSTRIKE - the strike
+reached from the air whenever the ground take-off is blocked, the Clawline at the slammer its universal fallback; the
+crossed slams' bridging down slash onto B. Also TWO_HOLDHIT beyond RT2's hold (sp12 NOTE 3 addendum 2). S = the Clapper in
+Slam Antic, k = its antic frame of the mask (the playbook's k: STATE frame + 2), P = the Clawline's mask frame; u centre to
+centre (her box centre, its transform). Forum_W_w13 (fo_cl_w13w) / Forum_W_w7 (fo_cl_w7w), instances 0 / 1, 1x. Data
+`C:\ssbot\data\m2_play\sp13` (`claw_runs.pkl` / `claw_rows.pkl` the 106 live Clawline runs of SP10c / SP12b, `fp1`..`fp5`
+the fixed points - `fp.txt / .json` per run, `traj.txt` against the recordings -, `ab` the A/B and its audit,
+`replay_<sha>` identity, `smoke` the first open-loop replay, `scripts`). No NOTE_FROM_LEAD in sp13; no human practice ran;
+the trading bot was not touched.
+
+### Result
+
+- **The Clawline's live timeline** (`scripts\claw_extract.py`, `claw_an.py`, `claw_cal.py`, `claw_tm.py`; 106 SP10c / SP12b
+  runs, frames from P): Harpoon Antic P + 2 .. + 10 (she drifts 1.18-1.32 u toward, her box bottom y_P - 0.261 + 0.0788
+  vy_P, sd 0.10), the needle's hit P + 10 / 11 (frozen to the dash), the dash from P + 19 .. 22 (p50 21, 1.4 u a physics
+  step), the catch after 3-7 frames, control 5 / 6 frames after the catch (P + 26 .. 34, p50 32) with vy -10 for one frame
+  and then the pogo bounce (vy 17.4 for ~6 frames, then -1.2 a frame: kinematics' EV_POGO reproduces it frame by frame).
+  **At control: no i-frames (tm.ds 0, inv 0) and the attack cooled down 0.15 s more (27 / 27 checked runs)**;
+  HeroController.DownspikeBounce(harpoonRecoil) also starts the down slash's recovery at 0.1 s (FinishDownspike
+  standardRecovery=false) and CanDownAttack is false while downSpikeBouncing: **the down slash comes at control + 9 at the
+  earliest**. With Slam 0 at k 48 / 49 and the strike pressed by Slam 0 + 1 (the playbook: k 52 0 / 12 safe), control must
+  come by k ~40 and **the Clawline by k ~5-11, not 15-20** (the person's numbers assumed control 25-30 frames after the
+  press and no cooldown). Live (fp1 / fp4): control 24-27 frames after the first STATE with the Clawline bit, the stop
+  2.96 / 4.06-4.25 / 4.68-4.76 u in front of S's centre (p10 / 50 / 90; its front 1.87: ~2.0 u short, the spec's 2.26),
+  the strike's contact at Slam 0 + 1 / 2 / 3.
+- **The offline study** (`scripts\cs_study.py`, `cs_space.py`, `cs_diag.py`; claw_strike's model): from the ground the hop is
+  3-5 frames (box bottom 0.7-1.6 u at the press), the press at k 5-10 decided by k 2-6, 5.5-10.5 u from S; airborne starts
+  with box bottom 1.5-4.5 u and |vy| <= 8 at k 2-8; nothing from 6 u up or past 11 u (the ray band / the dash's 7 u).
+- **Fixed points** (gate: >= 90 % of the Clawline runs without HP lost from the antic to the antic + 120):
+
+| round | code / arm, episodes | Clawline runs: no HP lost | struck (hit on S after the strike press) | declines | failures -> change |
+|---|---|---|---|---|---|
+| fp1 | 2c0842e / cs13f (w7, trigger=force), 32 | **29 / 29** | 27 (2: S died in the lock) | silk 38, no plan 31 (airborne at the antic: the ground strike then struck), late 7 | passes |
+| fp2 | b812a76 / cs13a (w13, the reach trigger + AIRSTRIKE), 36 (stopped) | 0 runs | - | no plan 3, late 3, silk 2, other in the way 1 | the natural trigger hardly fires (below); AIRSTRIKE 1 / 5 |
+| fp3 | b812a76 / cs13f (w13, force), 30 (stopped) | 33 / 40 (82.5 %) | 25 | no plan 49, silk 45, late 24 | all 6 HP losses the other one's (small runes in the hop / lock 3, a big rune 1, its body / hammer 2) -> 162ca26: the other one Idle / Walk at the start, no bomb of it on the path |
+| fp4 | 162ca26 / cs13f (w13, force), 64 | 51 / 58 (87.9 %) | 43 | no plan 103, silk 94, late 45, other Evade 19 / in the way 18 / Slam Recover 10 | no strike plan at control 5 (2 + 3 the hammers), a big rune circle 1, a plan lost 4 frames before the press 1 -> e6a53fc (the open-loop press, the circle gate, the keep) and cc69bf0 (her vy at the press in the fit's -6 .. +9: the hop's fast rise held her 2.1-2.6 u up) |
+| fp5 | cc69bf0 / cs13f (w13, force), 64 | **44 / 44** | 40 (3: S died in the lock) | silk 121, no plan 116, late 71, other Evade 24 / in the way 24 / Slam Recover 11 | passes |
+
+- **The natural trigger ("reach": the playbook's "no time to walk", beyond its 9 u, in the air past k 10, no landing in
+  time) hardly fires in w13**: fp2's 209 slams gave 9 tries and no plan - the slams the ground strike cannot reach start
+  with her high in the air (no landing (fall) / in the air: box bottom 5-7 u at k 4-8; the SP12b / SP12a / SP11b audits:
+  34 of 135 HP-losing unstruck slams "no landing", 31 "late: the playbook on the other one's slam" - the crossed slams), out
+  of the ray band until k ~20. So the fixed points and the A/B use **trigger=force**: the Clawline strike on every slam
+  from 5.6 u (CsCfg.force_min_u) whenever its gates and a plan hold (else the playbook as before).
+- **SSBOT_FORUM_AIRSTRIKE failed its fixed point and stays off**: fp2, 5 air runs, 1 without HP lost. 3 of 4 losses are
+  the air chain's known model error at the umbrella's end: in fp2 20261018_113437 i0 e0 (fa 8166719) the float carried her
+  from 4.4 to 2.5 u in front of S with no key held (momentum), the attack at k 47 opened Umbrella Deflate (two frames, no
+  slash), S's Slam 0 body hit her at k 50 - the model had her slash at k 47 and the contact at k 50 (SP13a part 1's
+  calibration item, not done).
+- **Promoted: SSBOT_FORUM_CLAWSTRIKE follows SSBOT_FORUM_V2 when unset, trigger=force (a861184; =0 off, arm
+  rnsp13_0 = the SP12b default).** The A/B (cc69bf0, 64 per arm, block design, 2 x 32 per instance, the same seeds
+  9900000.. / 9910000..; `ab\ab_stats.txt`, `ab\fp.txt`):
+
+| | rnjb (old default) | cs13f (CLAWSTRIKE, trigger=force) |
+|---|---|---|
+| **HP-hitless clears** | **10 / 64 (15.6 %)** | **14 / 64 (21.9 %)** |
+| both Clappers killed | 46 | 44 |
+| landed / s | 1.331 | 1.358 |
+| HP-loss hits / min | 3.422 | 3.423 |
+| close slams struck | 321 / 394 (81 %) | 310 / 396 (78 %) |
+| HP by source: small rune / big rune / landing / body / hammer | 36 / 28 / 21 / 13 / 11 | 25 / 26 / 19 / 22 / 15 |
+| Clawline runs: no HP lost antic .. + 120 / struck | - | 48 / 52, 41 |
+
+  Bootstrap 90 % (cs13f - rnjb): hitless-clear rate +0.063 (-0.047 .. +0.172), both killed -2 (-11 .. +6), landed / s
+  +0.027 (-0.031 .. +0.086), HP hits / min +0.001 (-0.76 .. +0.76). The person's rule (the best on hitless clears, not
+  worse on the others): cs13f is the best on hitless clears, the others' intervals all span 0 (kills -2 and HP / min +0.001
+  are noise) -> promoted. The Clawline fired 52 times in 64 episodes (0.8 per episode; declines in fp5: silk 121, no plan
+  116, late 71, the other one evading / in the way 24 / 24).
+
+### 1. Code (`combat/claw_strike.py`, `combat/slam_play.py` SP13 section, `train/forum_planner_policy.py`)
+
+- `SSBOT_FORUM_CLAWSTRIKE` (since a861184 follows SSBOT_FORUM_V2 when unset, trigger=force; =0 off;
+  `SSBOT_FORUM_CLAWSTRIKE_SET` for CsCfg). The plan (`ClawStrike.plan`): candidates
+  (hop 3-6 frames when on the ground / none in the air, the press P up to k 14) rolled with the policy's hero model
+  (ChainSim); at P in the air, her box bottom at the throw (y_P - 0.261 + 0.0788 vy) in 0.6-3.3 u, her vy in -6 .. +9,
+  S's front within 10.2 u; the Clawline phase from the live timeline (`claw_phase`: the antic's 1.25 u, the stop gap 1.7 /
+  2.5 u, control at the dash start + catch-to-control 25 / 27 + the dash frames) - in each of the 4 variants the post-control
+  hero model (`_ctrl_sim`: the catch state, EV_POGO without its i-frames, the attack cooldown 0.15 s, the recovery from 0.1
+  s) must have a strike plan (air_chain.evaluate with S as B, both slam timelines: a contact on its Slam 0 body in the slash's
+  active frames before landing, her box clear of its hammer / body outside the strike's i-frames to the contact + 18; a
+  coarse grid - presses k 45-50, drifts 0 / 4 - for speed); the smallest hop and the earliest press first, 12-17 ms (cap 30).
+- SlamPlay: the run phases cs_pre (the hop, the turn key, the Clawline + the key toward S for two frames; re-checked every
+  tick for the committed press, else another press, kept within 4 frames of it - CS_KEEP_F), cs_lock (no key to control:
+  accepting, no Harpoon clip), cs_strike (the full strike grid from control - presses k 44-51 from control + 10, drifts 0 /
+  3 / 6 / 10 toward / away -, re-checked every tick, kept within KEEP_F; no plan at control -> the playbook's press open
+  loop at max(47, control + 11)), then the playbook's after phase (the bounce is a hit on S, not her vy). Triggers: "reach"
+  (the wait phase's "no time to walk" / "in the air" / beyond 9 u, the land phase's no landing in time) or "force" (from
+  force_min_u 5.6 u in the wait / land phases). Gates: input, silk >= 1, in front of S, k <= 14, no other Clapper body
+  between them, **the other one Idle / Walk** (S's antic holds it: Buddy Is Attacking - only a move under way reaches her
+  in the ~30-frame lock), **no lit / forecast small-rune bomb of it on the path** (`_cs_bomb`, rune_bombs.frames: in place to
+  P + 10, the dash, the hold to control, the bounce), **no big rune circle still to burst over the path** (`_cs_circle`),
+  optionally the room rule (CsCfg.room). Stats `slam_play` cs_* / cs_no_*, slam_runs rows + [plan, log, k press, k control,
+  strike, as_air].
+- `SSBOT_FORUM_AIRSTRIKE` (default off): in the air with no ground strike in time (and no Clawline plan): air_chain.search
+  with S as its B (`_as_try`), re-searched when its check fails, kept within KEEP_F.
+- Policy: the ChainSim and the bomb forecast with CLAWSTRIKE on; `claw_strike.warm` / `air_chain.warm` at warm-up.
+- Tests `tests/test_sp13.py` (15: defaults and the v2 default, the timeline, the bounce without i-frames and the cooldown, the ground plan and
+  its keys, no plan too far / too late / too high, the run's phases to the lock, off unchanged, AIRSTRIKE on / off, no
+  Clawline while the other one moves). Full suite at cc69bf0 (its frozen checkout): 2,039 passed, 2 failed (the known: test_import_firewall, test_three_layer's bell
+  test; the untracked test_sg8_review.py is not in the checkout), 1 skipped, 1 xfailed - `sp13\fullsuite_cc69bf0.log`.
+
+### 2. Identity (`sp13\scripts\replay_ident_sp13.ps1`, `ident_cmp.sh`; from the frozen checkouts)
+
+2c0842e, b812a76, 162ca26, e6a53fc and cc69bf0 with the SP13 switches unset: byte-identical to 8568825's default
+(`sp12b\replay_8568825\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1
+/ 084036 i1 e0 (2,073 / 1,778). CLAWSTRIKE + AIRSTRIKE on (the reach trigger): identical on all four (no trigger fired);
+cc69bf0 trigger=force: w13 identical (no Clawline: silk / no plan), w7 from tick 591 / 764 (the Clawline); 0 tracebacks.
+a861184 (the promotion): SSBOT_FORUM_CLAWSTRIKE=0 byte-identical to 8568825's default on all four; unset (the new default with
+v2): w13 identical (no Clawline in those episodes), w7 from tick 591 / 764; 0 tracebacks.
+
+### 3. Live rounds (`sp13_go.ps1` -> `sp4_block.ps1` -> `sp13_ab.ps1`; manifests `1v1sp13_{fp1,fp2,fp3,fp4,fp5,fp5x,ab1}_manifest.txt`; `scripts\fp13.py`, `cs_traj.py`, `ab13.ps1`)
+
+fp2 / fp3 were stopped with 1v1_live.stop after 36 / 30 episodes (the trigger, the other one); fp5x (e6a53fc) was stopped
+after its first chunks for cc69bf0. The reaction lag: the plan is made on the first STATE of S's Slam Antic that passes the
+gates (k 2 in 34 of 44 fp5 runs, k 3 in 4; 41 from the ground with a 3-frame hop, the press at k 5 / 6 in 35), its
+first key (the hop) on that tick's mask.
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` on the A/B; `ab\audit.*`, `ab\rank.txt`, traces `ab\hp`)
+
+rnjb 109 HP losses (3.42 / min; L2 / planner 69, script conflict 21, airborne 19), cs13f 107 (3.42; 66 / 19 / 22).
+Ranked by the hitless clears they cost (a clear with k causes shares 1 / k) - **cs13f** (30 clears with HP lost): the
+planner in the air with the dash ready, forced, L2 on it 7.00 (alone 5, 10 HP losses: small runes in the caster's Spell
+Antic + 80 .. 101 and big runes at Cast Slam Antic + 108 .. 176 - no Clawline run within 200 frames of any), the same with
+L2 on the other 3.50 (13), the planner moved into it (forced, L2 on the other) 2.50 (11), "slam not struck: the gate other
+rune circle" 2.00, the playbook still on the other's slam (hand-off) 2.00, no landing in time 2.00; **rnjb** (36): the
+planner in the air with the dash ready, forced, L2 on the other 5.50 (13), the low hop moved her into it 5.00 (11), the
+planner moved into it (forced, L2 on the other) 5.00 (12), the umbrella 2.50, the low hop stayed in its reach 2.00. Clears
+lost to one class alone: cs13f L2 / planner 17, script conflict 2; rnjb 23 / 3, airborne 2. The Clawline runs' own HP
+losses (4 of 52): a small rune already at her at the plan (k 2: the bomb forecast missed it), S's Slam 0 body after a
+strike without a bounce (k 49), the other one's hammer / body in the way out (k 111 / 120). Missed planned actions (rnjb /
+cs13f): close slams struck 321 / 394 / 310 / 396 (the top miss the gate "other rune circle" 18 / 20); F's Idle entries hit
+572 / 743 (77 %) / 531 / 758 (70 %, not traced); presses dropped 234 / 3,198 / 247 / 3,103; double slams struck 18 / 35 /
+19 / 42. One Clapper left: 335.1 s / 6 HP losses vs 253.0 s / 3. Switches across situations: the Clawline acts with one
+Clapper too (w7 forced 29 / 29 safe; the one-Clapper phase above); with two its start is gated by the other one's state,
+bombs and circles (fp3's six losses were all the other one's); AIRSTRIKE (off) fails at the umbrella's end; the reach
+trigger hardly fires with two Clappers.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp13)
+
+`cs13f` = rnjb + SSBOT_FORUM_CLAWSTRIKE=1 SSBOT_FORUM_CLAWSTRIKE_SET=trigger=force (= rnjb from a861184 on); `cs13` =
+rnjb + CLAWSTRIKE + trigger=reach; `cs13a` = cs13 + SSBOT_FORUM_AIRSTRIKE=1; `as13` = rnjb + AIRSTRIKE + CLAWSTRIKE=0;
+`rnsp13_0` = rnjb + SSBOT_FORUM_CLAWSTRIKE=0 (the SP12b default). rnjb follows the new default.
+
+### 6. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (11:16-11:30), fp2 (11:30-11:45), fp3 (11:45-11:59), fp4
+(11:59-12:29), fp5x (12:29-12:31), fp5 (12:31-13:02) and the A/B (13:02-13:57), frozen at time scale 1e-4 after each
+block by sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each block (`boost_workers.stop` present
+again). No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{2c0842e, b812a76, 162ca26, e6a53fc, cc69bf0, a861184}`.
+Sandbox `sp13_go.ps1`, `sp13_ab.ps1`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
+untouched.
+
+### Open items
+
+1. **SP13a part 1 - the umbrella / attack-cancel model** (TWO_AIRCHAIN, AIRSTRIKE): live, the float carries her on toward the
+   target with no key (4.4 -> 2.5 u in ~20 frames) and an attack in the float first plays Umbrella Deflate (~2 frames, no
+   slash) - the model has neither; calibrate on AIRSTRIKE's 5 runs (`fp2\traj.txt`) and SP10b's 15 chain strikes
+   (`sp10b\scripts\chain_diag.py`), then AIRSTRIKE's / AIRCHAIN's fixed points again; the crossed slams' bridging down
+   slash onto B (the person, 2026-10-18) and the air approach for slams that start with her high in the air (the natural
+   CLAWSTRIKE trigger's cases: box bottom 5-7 u at k 4-8) wait on it.
+2. **Coverage of the Clawline strike**: silk 0 at the antic (fp5: 121 declines) and "no plan" (116: in the air at the
+   antic) dominate; "late" 71 (the run's first look after k 14). The press must come by k ~11 (control + the 0.15 s
+   cooldown): an early-antic decision only.
+3. The Clawline's own A/B losses (4 / 52): a bomb already under her at the plan, a strike without a bounce, the other one in
+   the way out after the strike.
+4. TWO_HOLDHIT beyond RT2's hold (sp12 NOTE 3 addendum 2: hits on the non-jumper during a jump move; the w7 rune hold's
+   passivity): not built.
+5. The audit's top cause is unchanged since SP10: the planner in the air with the dash ready (forced) against the casters'
+   small runes / big runes (L2 on the caster or the other).
+6. F's Idle entries hit fell in the Clawline arm (70 % vs 77 %): not traced.
