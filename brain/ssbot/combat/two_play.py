@@ -338,7 +338,7 @@ LOCK_ST = {"slam": ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?"), "cast": 
            "jump": ("Jump Antic", "Jump Aim", "Jump", "Air"),
            "jc": ("Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump", "Jump Aim", "Jump", "Air")}
 LOCK_ANY = frozenset(x for v in LOCK_ST.values() for x in v)
-WO_TAIL_ST = ("Slam 2", "Slam Effects?", "Slam Recover", "Cast 2", "After Scuttle")
+WO_TAIL_ST = ("Slam 2", "Slam Effects?", "Slam Recover", "After Scuttle")   # (not Cast 2: its small runes, fp1)
 B_FREE_ST = ("Idle", "Walk", "Evade Scuttle", "After Scuttle")
 
 
@@ -389,7 +389,8 @@ class WoRun:
 
 @dataclass
 class OpCfg:
-    back_u: float = 7.0       # c2's back (to the wall on its side away from her) below which no hit on it counts
+    back_u: float = 7.1       # c2's back (to the wall on its side away from her) below which no hit on it counts (the
+    #                           spec's 7.0: c2 lands at 6.78 - 7.02, fp1 let one slash through at 7.02)
     end_s: float = 8.0        # the rule ends this long after the wake at the latest (else at c2's first move)
 
 
@@ -2440,6 +2441,8 @@ class TwoPlay:
         sx = min(max(cx + d * c.d_u, WALL_L + 0.5), WALL_R - 0.5)
         if ost not in B_FREE_ST:
             why = "b busy"
+        elif self._wo_bombs(s, hx) or self._wo_bombs(s, sx):
+            why = "bomb"
         elif abs(sx - ox) < c.b_gap or (sx - cx) * d < c.d_u - 0.5:
             why = "no stand"
         elif GUARD and guard_hit(self.guard_spans(f, s, t), sx - HALF_W, sx + HALF_W, own=iid) is not None:
@@ -2489,6 +2492,8 @@ class TwoPlay:
         if st in MOVE_ST:
             r.next_st, r.k_next = st, f - (r.f_idle if r.f_idle is not None else r.f0)
             self._wo_close(f, "f move")
+        elif self._wo_bombs(s, hx):
+            self._wo_close(f, "bomb")                  # (fp1: 2 of 19 runs hurt by F's small runes from a Cast 2 start)
         elif ost not in B_FREE_ST:
             self._wo_close(f, "b move")
         elif c.draw_u <= 0 and r.walks > 0:
@@ -2501,6 +2506,12 @@ class TwoPlay:
             self._wo_close(f, "time")
         elif st == "Idle" and r.f_idle is not None and f - r.f_idle > c.idle_f:
             self._wo_close(f, "idle")
+
+    @staticmethod
+    def _wo_bombs(s: dict, hx: float) -> bool:
+        """A small-rune bomb (lit or to light) within its radius + 1.5 u of her x: the low hop's / the planner's."""
+        from ssbot.combat import rune_bombs as _rb
+        return any(abs(bx - hx) < _rb.R + 1.5 for _, bx, _, _ in _rb.bomb_ents(s.get("ents")))
 
     def _wo_close(self, f: int, why: str) -> None:
         r = self.wo
