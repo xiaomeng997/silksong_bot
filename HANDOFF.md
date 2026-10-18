@@ -10383,3 +10383,164 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
 4. The small runes rose under the tier (the low hop is not stepped while the run holds the keys): let the low hop act
    inside the run when B casts.
 5. The model's float is 0.2 - 1 u high after some bounces (Recoil Twirl); the dome margin 0.45 u.
+
+
+## Task 1v1 - stage SP11b: the focus at its wall - TWO_EARLYSWITCH, TWO_WALKOUT, TWO_OPENPUSH, TWO_RUNLOCK (A/B: none promoted) and TWO_PUSHMID (inert, no A/B) (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §84)
+
+The task (SP11b; the person: "switch target early enough to reduce the corner big runes"; C:\ssbot\data\m2_play\bigrune\
+answer.txt section 1 - how F ends at its wall: its own Idle-coin evade 43 %, the opening 22 %, an evade after her hit 13 %,
+her knock-back 8 %): three arms, each behind its switch - (1) TWO_EARLYSWITCH, the early slam switch with the spec's
+gates; (2) TWO_WALKOUT, stand beyond 8.3 u at F's Idle so it walks out; (3) TWO_OPENPUSH, no front slash on c2 near its wall
+in the opening - plus the lead's NOTE 6 (C:\ssbot\data\m2_play\sp11\NOTE_FROM_LEAD.txt, read before every block; NOTES 1-5
+and 7-9 are SP11a's): (4) TWO_RUNLOCK, the switch run bounded by the focus's lock end, and (5) TWO_PUSHMID with two return
+rules. Fixed points, then the w13 A/B (64 per arm, block design, the same seeds), the cause audit. F = the focus (L2's
+target, the Clapper at its wall), B = the other one; u centre to centre (her box centre, its transform); "back" = F's centre
+to the wall on its side away from her. Forum_W_w13 (fo_cl_w13w), instances 0 / 1, 1x. Data `C:\ssbot\data\m2_play\sp11\s2`
+(`fp1` / `fp2` the fixed points, `ab` the A/B rounds 1-2 (5 arms x 64: `two.*`, `ab_stats.txt`, `fp.*`, `audit.*`, traces
+`hp`, `rank.txt`, `c2_first.txt`), `ab3` the confirmation round (rnjb vs s11E, 64 each), `ab_pool` rnjb vs s11E pooled 128
+each (`two.*`, `ab_stats.txt`, `fp.*`, `audit.*`, `rank.txt`), `base_*` the SP11-0 default's event baseline, `replay_<sha>`
+identity, `scripts` (`fp11b.py` the per-switch events, `c2_first.py`, `ab_all.ps1`, `replay_ident_sp11b.ps1`)). Commits
+1063321 (code), e192543 / dc81390 (fixed-point fixes; dc81390 = the A/B code), then the audit tool and the docs. No human
+practice ran; the trading bot was not touched.
+
+### Result
+
+- **Nothing promoted; the default is unchanged** (the person's rule: the arm best on HP-hitless clears and not worse on the
+  others). A/B at dc81390, rounds 1-2 (2 x 32 per arm, seeds 7300000.. / 7400000.., block design):
+
+| | rnjb (default) | s11E EARLYSWITCH | s11W WALKOUT | s11O7 OPENPUSH (7.0 u) | s11L RUNLOCK |
+|---|---|---|---|---|---|
+| **HP-hitless clears** | 12 / 64 (18.8 %) | 12 / 64 | 12 / 64 | 8 / 63 | 8 / 64 |
+| both Clappers killed | 40 | 48 | 46 | 40 | 42 |
+| landed / s | 1.340 | 1.307 | **1.173** | **1.204** | **1.270** |
+| HP-loss hits / min | 3.91 | **2.97** | 3.22 | 3.81 | 3.91 |
+| escapes / min both alive (casts) | 4.51 (2.38) | 3.93 (2.11) | 4.60 (2.28) | 4.81 (2.75) | 6.16 (3.08) |
+| squeezed share (both within 6 u, or both on one side with her wall within 6 u) | 0.148 | 0.086 | 0.156 | 0.136 | 0.164 |
+
+  Bootstrap 90 % (episodes resampled) vs rnjb: s11E hitless +0.0 (-0.109 .. +0.109), both killed +8 (-0.05 .. +17),
+  landed / s -0.033 (-0.093 .. +0.029), HP hits / min -0.94 (-1.75 .. -0.15); s11W 0.0 (-0.109 .. +0.109), +6 (-3 .. +14),
+  -0.168 (-0.225 .. -0.111), -0.69 (-1.47 .. +0.15); s11O7 -0.061 (-0.170 .. +0.049), 0, -0.137 (-0.197 .. -0.079), -0.10;
+  s11L -0.063 (-0.172 .. +0.047), +2, -0.071 (-0.132 .. -0.007), 0.00. W / O / L are worse on landed / s and not better on
+  hitless clears: not promoted. **s11E tied the default on hitless clears with fewer HP hits and more kills, so it got a
+  confirmation round** (ab3, 2 x 32, seeds 7500000..): s11E 9 / 64 vs rnjb 15 / 64, landed / s 1.300 vs 1.379, HP hits / min
+  3.46 vs 3.04. **Pooled 128 per arm: hitless clears 21 vs 27 (16.4 % vs 21.1 %; -0.047, 90 % -0.133 .. +0.031), both
+  killed 93 vs 88 (+5, -7 .. +17), landed / s 1.304 vs 1.360 (-0.056, -0.095 .. -0.017), HP hits / min 3.21 vs 3.47 (-0.26,
+  -0.83 .. +0.29)** - not promoted (its hitless point estimate is lower and landed / s is worse).
+- **TWO_PUSHMID never got its situation**: its trigger (F's close Slam Antic, F's outer room smaller than B's by 1 u, the
+  lock-bounded run to B failing, B idle / walking, room for her behind F) fired 0 / 1 times in 16 episodes (fp1 ret 1 /
+  ret 2), 1 in 16 with room_min 4.5 (fp2): of ~30 such slam antics per 16 episodes the run to B fits (the switch takes it)
+  in ~45 %, B is busy in ~20 %, F has < 6 u behind it in ~30 %; the same situation on F's casts (~28 per 16 episodes) has
+  no crossing in this build (below). Not in the A/B.
+
+### 1. Code (`combat/two_play.py` SP11b section, `combat/tactics/gauntlet.py`, `combat/slam_play.py` side_hint, `train/forum_planner_policy.py`, `tools/sp10_audit.py`)
+
+- `SSBOT_FORUM_TWO_EARLYSWITCH` (default off; `SSBOT_FORUM_TWO_EARLY_SET`): SP9c's AswRun (the antic switch) with
+  `_early_cfg()` = casts 0, trig 0 (F's back <= 8.1 u), first 0, sep_slam 17.1 u, plus AswCfg.early: her predicted centre at
+  antic frame k_i15 = 91 (F's Idle + 15) >= pred_d 8.55 u from F's centre after its 3.6 u lunge (the press point when the
+  dash-sprint / walk reaches it by then), else "pred". TWO_ANTICSWITCH's own numbers win when both are on. Stats
+  `asw_runs[].pd`.
+- `SSBOT_FORUM_TWO_WALKOUT` (default off; `SSBOT_FORUM_TWO_WALKOUT_SET`, WoCfg): F (L2's target) in its tail (Slam 2 / Slam
+  Recover / After Scuttle; not Cast 2 since dc81390) or at its Idle entry, back <= 8.0 u, her within d_u + 2 of it, B in
+  Idle / Walk / Evade / After Scuttle, the stand (F + 8.9 u on its open side) clear of B (3.5 u), of B's guard spans and of
+  small-rune bombs -> the run: keys to the stand (a dash from > 3 u while within 5.9 u of F), the turn to F, no key; no hit on
+  F (GoalPrefs.no_hit), L2's stance the stand; the stand follows F while it walks; ends at F's next move (MOVE_ST), B's move,
+  F's back >= draw_u 11.4 u, a bomb, a hit, F's Idle + 90, 240 frames, another script's keys (`wo_yield`). open=1: the
+  opening walks to c2 + 8.9 u (no slash) and the run takes c2's first Idle. One run per F move cycle. Stats `walkout`.
+- `SSBOT_FORUM_TWO_OPENPUSH` (default off; `SSBOT_FORUM_TWO_OPENPUSH_SET`, OpCfg): from the wake until c2's first move (or
+  8 s), while c2's back < back_u (7.1 u since dc81390; the A/B arm s11O7 used the spec's 7.0) and she is on its open side: no
+  press by the opening script, no IdleHit press, no hit on c2 for the planner (no_hit). Stats `openpush`.
+- `SSBOT_FORUM_TWO_RUNLOCK` (default off): `GauntletTactics._two_run_ok`'s "focus committed" bound is t_free - (the family's
+  p0.5 duration - TWO_LOCK_S: slam 0.92, cast 0.81, jump 1.21, jump cast 1.63 s); after such a switch no hit on the new
+  target while the old focus is in its lock states (`two_play.LOCK_ANY`; stats `rl_no_hit`).
+- `SSBOT_FORUM_TWO_PUSHMID` (default off; `SSBOT_FORUM_TWO_PUSHMID_SET`, PmCfg ret 1 / 2): at F's close Slam Antic (above)
+  `SlamPlay.side_hint` = F's wall side for the way out (`_side_pref` -> "pushmid"), then the herd: L2 holds F
+  (`_two_focus`, below the slammer rule; `two_pm` view), the stance 3.5 u from F on its wall side; ret 1 ends at F's next
+  antic / evade, ret 2 when the lock-bounded run check to B passes; also when she is already on F's wall side (side0
+  "wall"). Casts / jumps: counted only.
+- Tests `tests/test_sp11b.py` (6: the defaults, the walk-out's start / stand / drawn end and no-starts, the opening's no-hit,
+  the lock bound, PUSHMID's start / hint / herd / ret-1 end). `sp10_audit` knows `two:wo`.
+
+### 2. Fixed points (`sp11_go.ps1` -> `sp4_block.ps1` -> `sp11_ab.ps1`; manifests `1v1sp11b_{fp1,fp2,ab1,ab2,ab3}_manifest.txt`; `scripts/fp11b.py`)
+
+| round | code | arms (16 episodes each) | result | change |
+|---|---|---|---|---|
+| fp1 | e192543 | s11E, s11W, s11O, s11L, s11P1, s11P2 | EARLY: her >= 8.55 u from F at its Idle + 15 28 / 31, no HP lost antic .. Idle + 60 31 / 31, F escape within 6 s 1 / 31; WALKOUT 17 / 19 without HP lost (2 losses: F's small runes after a Cast 2 start), >= 8.3 u at F's Idle + 15 18 / 18; OPENPUSH: no press below 7.0 u, but c2 landed at 7.02 u and took one slash (6.54 u); RUNLOCK: 43 switches, HP lost within 120 f of one 3; PUSHMID 0 / 1 runs | WALKOUT not from Cast 2, bombs end / block it; OPENPUSH 7.1 u |
+| fp2 | dc81390 | s11W, s11O, s11P1r (room_min 4.5) | WALKOUT 16 / 16, >= 8.3 u 15 / 16; OPENPUSH 0 side hits on c2 (its first move an evade 12 / 16 from 7.02 u); PUSHMID 1 run | - |
+| A/B | dc81390 | 5 x 64 | EARLY 112 / 119 >= 8.55 u, 117 / 119 without HP lost, F escape 11 / 119, B escape 20 / 119; WALKOUT 66 / 66 without HP lost, >= 8.3 u 57 / 64 | - |
+
+### 3. Identity (`sp11\s2\scripts\replay_ident_sp11b.ps1`)
+
+1063321 and dc81390 with every SP11b switch unset: byte-identical to df8ce79's default (`sp11\s1\replay_df8ce79\ticks_new_*`)
+on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1 / 084036 i1 e0 (2,073 / 1,778). All
+five on: w7 identical (one Clapper), w13 differs from tick 123 / 1,106, 0 errors (+ two w13 episodes with early escape casts
+and PUSHMID ret 2 + RUNLOCK at 1063321: 0 errors).
+
+### 4. What the arms did (A/B; `ab\fp.txt`, `ab\c2_first.txt`)
+
+- **EARLYSWITCH works as designed and still costs**: fewer escapes (3.93 vs 4.51 / min with both alive, escape casts 2.11 vs
+  2.38; pooled 128: 4.02 vs 4.95) and less squeezed time (0.086 vs 0.148; pooled 0.085 vs 0.128), but the switch leaves F's close slam unstruck (the playbook's close
+  slams struck 284 / 480 vs 318 / 390: "no run" 120) and the hits on F with it (landed / s -0.056 pooled); B escaped within
+  6 s of 20 / 119 switches (17 %; the spec's SP9c 11 %); its own HP losses 2 (a small rune, a big rune), hammer hits 23 vs
+  16 ("no landing in time" 8 vs 4: B's slam right after the sprint).
+- **WALKOUT fires almost only at c2's first Idle** (158 candidates, 80 declined on B busy; 66 runs, 64 of them the
+  opening). F (c2) walked out once in 41 / 66 (2.24 u, back 7.02 -> 9.26 u), never picked a far move or a jump from the
+  wall, then decided a close move although she stood ~8.9 u off: evade 36 / 66 (55 %), cast 15, slam 12; its first two
+  moves were "evade -> jump / jump cast" in 22 / 64 episodes - the default's c2 opens slam 23 / evade 24 / cast 17 of 64 (no
+  walk first). So the coin's 8.3 u is not what stops the evade after the walk; the walk-out moves F 2.2 u and costs ~1.4 s of
+  hitting (landed / s -0.17).
+- **OPENPUSH** (7.0 u): c2 took the one slash at 7.02 u, then no hit until its first move; that move was an evade 30 / 63
+  (default 24 / 64), escapes 4.81 / min, landed / s -0.14. Without the hit at its Idle entry its evade coin fires (a hit
+  inside 0.25 s blocks it), and the evade, not her push, carries it into its line.
+- **RUNLOCK**: switches 8.49 vs 10.73 / min, HP lost within 2 s of a switch 32 / 215 (15 %) vs 33 / 257 (13 %) - no safer per
+  switch - and escapes 6.16 vs 4.51 / min (she stays on F at its wall when the lock-bounded run fails).
+
+### 5. The cause audit (`ssbot.tools.sp10_audit`; the default pooled over three rounds `ab_pool\audit.json / .txt`, traces `ab_pool\hp`, `ab_pool\rank.txt`; all five arms rounds 1-2 `ab\audit.*`, `ab\rank.txt`)
+
+The default is unchanged, so the audit is of the default itself, pooled over all three rounds (rnjb, 128 episodes; the
+64-episode rounds-1-2 audit of all five arms is `abudit.*`): 213 HP losses (3.47 / min): small runes 51, big rune 49, body
+45, landing 42, hammer 26; by class L2 / planner 127, script conflict 47, airborne / landing 38, cooldown 1, host 0; 53 of
+213 in an escape jump's window. Ranked by the hitless clears they cost (61 clears with HP lost; a clear with k losses gives
+1 / k to each cause): **the planner in the air with the dash ready, L2 on the other Clapper 7.33 (alone 6), the same with L2
+on the attacker 6.67 (alone 5)**, the slam playbook on one while the other hit 5.50, the low hop in the air in its reach
+4.50, the planner moved into it (L2 on the other) 3.83, the low hop on one while the other hit 3.33, the umbrella 3.17, the
+planner moved into it (L2 on it) 3.00, the low hop moved her into it 3.00, the hand-off 2.50. Clears lost to one class
+alone: L2 / planner 35, script conflict 8, airborne 3. Missed planned actions: close slams struck 631 / 776 (81 %; not
+struck: the gate "other rune circle" 32, hurt in the slam 23, no landing in time 23, the gate "other Cast 2" 8); F's Idle
+entries hit within 30 frames 1,038 / 1,457 (71 %; she was in the air 156, the low hop had the keys 76, the escape switch 37);
+chases ended far 56 / 655; attack presses dropped 444 / 6,230. One Clapper left: 549 s, 7 HP losses. EARLYSWITCH (128): 209
+HP losses (3.21 / min; body 30 and landing 28 - fewer escape landings -, hammer 44, small runes 60); top: the planner in the
+air with the dash ready (L2 on it) 6.50, **the playbook's gate "other rune circle" 5.83**, the slam playbook on one while
+the other hit 5.50, the low hop moved her into it 4.83, the umbrella 4.33, its own run (two:asw) 2.83 (5 losses); close
+slams struck 550 / 933 ("no run" 230: the switch leaves F's slam). Switches across situations: all five are inert with one
+Clapper (w7 identity); WALKOUT (made for F at its wall mid-fight) is in practice an opening rule; EARLYSWITCH's B escapes
+44 / 229 (19 %).
+
+### 6. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp11b)
+
+`s11E` = rnjb + TWO_EARLYSWITCH, `s11W` = rnjb + TWO_WALKOUT, `s11O` = rnjb + TWO_OPENPUSH (7.1 u), `s11O7` = the same at
+7.0 u (the A/B arm), `s11L` = rnjb + TWO_RUNLOCK, `s11P1` / `s11P2` = rnjb + TWO_PUSHMID ret 1 / ret 2 + TWO_RUNLOCK,
+`s11P1r` = s11P1 with room_min 4.5.
+
+### 7. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1, fp2, the A/B rounds ab1 / ab2 and the confirmation ab3, frozen at
+time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each block
+(`boost_workers.stop` present again). No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{1063321, e192543,
+dc81390}`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **The escape count is not the hitless-clear lever it looked like**: EARLYSWITCH cut escapes 13 % and the squeezed time
+   42 % yet lost hitless clears (21 vs 27 / 128) and landed / s; what the switch gives up (F's close slam strike and its hits)
+   and B's escapes after it weigh as much. A next try: switch only when the strike on F's slam is declined anyway (the
+   playbook's gate / no landing), or strike F's slam first and switch in its tail.
+2. **F's evade after a walk-out**: at ~8.9 u c2 still evaded 55 % (the default's c2 opens with an evade 24 / 64 with her close) - its Close Range /
+   coin geometry after a walk is not the 8.3 u of the Idle entry; measure the FSM's range check on the recordings before any
+   stand-off rule.
+3. **PUSHMID needs the cast crossing**: the slam case is ~1 per 16 episodes; F's close casts with the same geometry are ~28
+   per 16. A hop or pogo over the casting F (Spell Antic body 3.19-4.78 u high, 2.05 u front) must also plan F's small-rune
+   rings behind it (pairs at x0 +- 4.2 r, lit C + 30 / 40 / ...: she lands in rings 1-2) - not built.
+4. RUNLOCK raised escapes (6.16 vs 4.51 / min): the lock-bounded run drops the switches that took her off F at its wall;
+   the hit-in-tail part had no measurable per-switch gain.
+5. The audit's top causes are unchanged from SP11-0: the planner airborne with the dash ready and the slam playbook on one
+   Clapper while the other hits.

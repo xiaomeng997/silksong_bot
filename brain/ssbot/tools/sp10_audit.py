@@ -435,7 +435,7 @@ def _script_subject(own: str, ep: dict, g: int, att, own_g: tuple):
     if own == "slam":
         r = [x for x in ep["slam_runs"] if x[1] <= g <= x[1] + 150]
         return r[-1][0] if r else None
-    if own in ("two:idle", "two:esc", "two:asw", "two:jh", "two:rt", "chase", "low"):
+    if own in ("two:idle", "two:esc", "two:asw", "two:jh", "two:rt", "two:wo", "chase", "low"):
         # IdleHit / the chase / the low hop act on the focus (L2's target) or the caster in front; SP10c's jumphit on
         # the other one (L2's target)
         tgt = own_g[2]
