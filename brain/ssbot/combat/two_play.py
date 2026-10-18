@@ -142,8 +142,14 @@ JUMPHIT = _on("SSBOT_FORUM_TWO_JUMPHIT")
 # the other's landing): default off (=1 on). TwoPlay.guard_spans gives the other Clapper's danger spans (its jump landing
 # band once its Jump Aim fixed it, its big rune circle lit or to come, its hammer in a slam, its body) and the chase (no
 # start / abort with her inside one, never a key / dash that takes her into one on the way to the focus), the low hop (no
-# start / abort with its stance or her x in one) and the slam playbook (the way out's side away from them) use them
-GUARD = _on("SSBOT_FORUM_TWO_GUARD")
+# start / abort with its stance or her x in one) and the slam playbook (the way out's side away from them) use them.
+# SP11-0 A/B (9789b37, 2 x 32 per arm, block design, the same seeds 5200000.. / 5300000..; the person's rule: the arm
+# best on HP-hitless clears and not worse on the others): s11g (TWO_GUARD + TWO_COMMIT + TWO_RUNEGATE) vs rnjb -
+# hitless clears 12 vs 8 / 64 (+0.063, 90 % -0.047 .. +0.172), both killed 48 vs 35 (+4 .. +22), landed / s 1.335 vs
+# 1.305 (-0.025 .. +0.083), HP hits / min 3.11 vs 4.64 (-2.38 .. -0.67); s11gr (without TWO_COMMIT) 7 / 35 / 1.306 /
+# 4.47. Since then TWO_GUARD follows SSBOT_FORUM_V2 when unset (=0 off; arm rnsp11_0 = the SP10c default); the low
+# hop's part stays off (GuardCfg.low)
+GUARD = _on("SSBOT_FORUM_TWO_GUARD", _V2)
 ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD   # the policy's TwoPlay object (CHASE / CAST: own scripts)
 
 CLAPPER = _sp.CLAPPER

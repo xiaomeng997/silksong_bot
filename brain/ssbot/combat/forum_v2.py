@@ -95,8 +95,10 @@ VSLAM_FAMS = (None, "CC_EVADE", "CC_CAST")
 # streak (no safe row) of 7-90 frames, 24 of them with the attacker not L2's target (its landing / circle grown by up to
 # 4.3 u leaves no row out; at the target switch of 20261017_161806_2_i0_e0 f 4011325 the safe rows went 23 -> 0 in one
 # tick). On: those parts get COMMIT_M (default FOCUS_M) like the focus unit; idle bodies, walks, evades, casts and slams
-# keep the rule margin.
-COMMIT = os.environ.get("SSBOT_FORUM_TWO_COMMIT", "0").strip() == "1"
+# keep the rule margin. SP11-0 A/B (9789b37, 64 per arm): with it (s11g) hitless clears 12 vs 8 / 64, both killed 48 vs
+# 35, HP hits / min 3.11 vs 4.64; without it (s11gr, the script guards alone) 7 / 35 / 4.47 - since then it follows
+# SSBOT_FORUM_V2 when unset (=0 off; arm rnsp11_0).
+COMMIT = os.environ.get("SSBOT_FORUM_TWO_COMMIT", "1" if V2_ON else "0").strip() == "1"
 COMMIT_M = float(os.environ.get("SSBOT_FORUM_TWO_COMMIT_M", "") or FOCUS_M)
 
 

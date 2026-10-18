@@ -182,7 +182,10 @@ TWO_RUNE = (-1.2, 14.2, 1.45)   # the rune circle's span from the landing along 
 # 6.9 u at k 72). On: the start is declined only when for some strike frame k inside the lit window (landing + 65 - RG_M
 # .. landing + 85 + RG_M) her box at (the stand point, RG_H10) meets the dome, and never once that circle was seen lit
 # and then unlit (burst). Offline on the 60 gated slams of SP10b / SP10c: 10 released (4 lost no HP under the planner, 4
-# the hammer, 1 the body, 1 the rune), 50 still declined - the dome covers the bounce over the stand point.
+# the hammer, 1 the body, 1 the rune), 50 still declined - the dome covers the bounce over the stand point. Live (SP11-0
+# fixed points + the A/B arms, 3251a4a .. 9789b37): 12 starts it let through, 7 struck, 10 / 12 without HP lost to the
+# antic + 120 (none by the rune; a hammer after a strike without bounce, the other one's landing after a "no landing")
+# - below the 90 % gate: stays off (=1 on).
 TWO_RUNEGATE = _on("SSBOT_FORUM_TWO_RUNEGATE")
 RG_H10 = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.37, 0.72, 1.41, 2.11, 2.46, 3.15, 3.78,
           4.05, 4.41, 4.39, 4.31, 4.11, 3.86, 4.2, 4.66, 5.18, 5.7, 6.01, 6.32, 6.6, 6.79, 6.86, 6.9, 6.86, 6.71, 6.6,

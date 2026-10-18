@@ -56,7 +56,9 @@ from ssbot.combat import rune_bombs as _rb
 
 # SSBOT_FORUM_TWO_COMMIT (task 1v1 SP11-0, default off; read by combat.forum_v2): estimates keep their part without
 # the hazards (Estimate.core) so a non-focus Clapper's hazards (the jump cast's rune circle) get their own margin
-COMMIT_CORE = __import__("os").environ.get("SSBOT_FORUM_TWO_COMMIT", "0").strip() == "1"
+COMMIT_CORE = __import__("os").environ.get(
+    "SSBOT_FORUM_TWO_COMMIT", "1" if __import__("os").environ.get("SSBOT_FORUM_V2", "0").strip() == "1" else "0"
+).strip() == "1"   # (follows SSBOT_FORUM_V2 since the SP11-0 A/B, like forum_v2.COMMIT)
 
 REPO = Path(__file__).resolve().parents[3]
 FORUM = REPO / "knowledge" / "1.0.30000" / "enemies" / "forum"

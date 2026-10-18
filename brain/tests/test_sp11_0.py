@@ -17,31 +17,38 @@ from tests.test_sp10b import after_run, two
 from tests.test_sp9 import two_state
 
 
-@pytest.mark.parametrize("name,mod,attr", [("SSBOT_FORUM_TWO_GUARD", tp, "GUARD"),
-                                           ("SSBOT_FORUM_TWO_RUNEGATE", sp, "TWO_RUNEGATE")])
-def test_default_off(monkeypatch, name, mod, attr):
-    monkeypatch.delenv(name, raising=False)
+def test_runegate_default_off(monkeypatch):
+    monkeypatch.delenv("SSBOT_FORUM_TWO_RUNEGATE", raising=False)
     monkeypatch.setenv("SSBOT_FORUM_V2", "1")
     try:
-        assert not getattr(importlib.reload(mod), attr)
-        monkeypatch.setenv(name, "1")
-        assert getattr(importlib.reload(mod), attr)
+        assert not importlib.reload(sp).TWO_RUNEGATE
+        monkeypatch.setenv("SSBOT_FORUM_TWO_RUNEGATE", "1")
+        assert importlib.reload(sp).TWO_RUNEGATE
     finally:
         monkeypatch.delenv("SSBOT_FORUM_V2", raising=False)
-        monkeypatch.delenv(name, raising=False)
-        importlib.reload(mod)
+        monkeypatch.delenv("SSBOT_FORUM_TWO_RUNEGATE", raising=False)
+        importlib.reload(sp)
 
 
-def test_commit_default_off(monkeypatch):
+@pytest.mark.parametrize("v2,val,want", [("1", None, True), ("1", "0", False), ("0", None, False), (None, None, False),
+                                         (None, "1", True)])
+def test_guard_and_commit_follow_v2(monkeypatch, v2, val, want):
+    """Since the SP11-0 A/B: TWO_GUARD and TWO_COMMIT follow SSBOT_FORUM_V2 when unset (=0 off)."""
     from ssbot.combat import attack_range as ar
     from ssbot.combat import forum_v2 as fv
-    monkeypatch.delenv("SSBOT_FORUM_TWO_COMMIT", raising=False)
+    for k, v in (("SSBOT_FORUM_V2", v2), ("SSBOT_FORUM_TWO_GUARD", val), ("SSBOT_FORUM_TWO_COMMIT", val)):
+        if v is None:
+            monkeypatch.delenv(k, raising=False)
+        else:
+            monkeypatch.setenv(k, v)
     try:
-        assert not importlib.reload(fv).COMMIT and not importlib.reload(ar).COMMIT_CORE
-        monkeypatch.setenv("SSBOT_FORUM_TWO_COMMIT", "1")
-        assert importlib.reload(fv).COMMIT and importlib.reload(ar).COMMIT_CORE and fv.COMMIT_M == fv.FOCUS_M
+        assert importlib.reload(tp).GUARD == want
+        assert importlib.reload(fv).COMMIT == want and importlib.reload(ar).COMMIT_CORE == want
+        assert fv.COMMIT_M == fv.FOCUS_M
     finally:
-        monkeypatch.delenv("SSBOT_FORUM_TWO_COMMIT", raising=False)
+        for k in ("SSBOT_FORUM_V2", "SSBOT_FORUM_TWO_GUARD", "SSBOT_FORUM_TWO_COMMIT"):
+            monkeypatch.delenv(k, raising=False)
+        importlib.reload(tp)
         importlib.reload(ar)
         importlib.reload(fv)
 
