@@ -173,3 +173,13 @@ def test_over_plan_crosses_to_the_wall_side():
     assert pl.again(p)
     x_land = float(p.why.rsplit("x ", 1)[1])
     assert 3.0 <= fx - x_land <= 5.6
+
+
+def test_b2_plan_kept_while_it_clears_the_moving_windows():
+    # (fp1) the forecast's windows shift a frame per tick: the planned hop is kept while it still clears them
+    plan = lh.hop_plan2([(79, 88, 2.95), (78, 89, 2.95)], 65, range(9, 27), 3)
+    assert plan is not None and plan["w_end"] == 89
+    assert lh.RuneLowHop._plan_holds(plan, [(79, 88, 2.95), (79, 89, 2.95)], 66)
+    assert not lh.RuneLowHop._plan_holds(plan, [(70, 95, 2.95)], 66)
+    # a later window the plan was not made for (the second hop's) does not void it
+    assert lh.RuneLowHop._plan_holds(plan, [(79, 88, 2.95), (140, 147, 2.95)], 66)

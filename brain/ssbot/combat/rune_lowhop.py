@@ -358,6 +358,7 @@ def hop_plan2(threats: list[tuple[int, int, float]], k_first: int, holds: range,
         plan = hop_plan(first, k_first, holds, min_slack, score=score)
         if plan is None:
             continue
+        plan["w_end"] = max(w1 for _, w1, _ in first)
         if not rest:
             return {**plan, "n": n, "of": len(ts), "H2": None}
         if tail is None:
@@ -928,6 +929,12 @@ class RuneLowHop:
                 k_ready = max(k, last + c.slash_cd, k + int(math.ceil(max(0.0, cd * 60.0 - (SEND_AHEAD - 1)))))
                 key = [(int(a), int(b), round(x, 2)) for a, b, x in thr]
                 plan = r.plan
+                if (self.b2 and plan is not None and plan["P"] >= k and plan["thr"] != key
+                        and self._plan_holds(plan, thr, k)):
+                    # (SP13b fp1) the forecast's windows move a frame or two every tick: a plan that still clears them
+                    # all is kept (re-planning each tick slid the press to the middle of a shrinking range until none
+                    # was left - 3 of fp1's 10 small-rune hits, the hop never pressed)
+                    plan = r.plan = {**plan, "thr": key}
                 if plan is None or plan["thr"] != key or plan["P"] < k:
                     # (re)plan when the covering bombs change (a new one, a light seen) or the press was missed; a
                     # plan is kept otherwise (its slack shrinks as the frames pass)
@@ -1094,6 +1101,21 @@ class RuneLowHop:
                 r.owners.add(int(o))
         r.fcw = out
         return out
+
+    @staticmethod
+    def _plan_holds(plan: dict, thr: list, k: int) -> bool:
+        """The planned hop (press P, hold H: the lowest lane) still clears every window still to end (those it was
+        not planned for and cannot clear: a split plan's later windows are the second hop's)."""
+        lo_t = HOP_LO[plan["H"]]
+        P = plan["P"]
+        land = min(P + len(lo_t), plan.get("w_end", 1 << 30) + 1)
+        for w0, w1, th in thr:
+            if w1 < k or w0 >= land:
+                continue
+            for j in range(max(w0, k) - P, w1 - P + 1):
+                if j < 0 or j >= len(lo_t) or lo_t[j] < th:
+                    return False
+        return True
 
     def _b2_left(self, r: Hop, hx: float, cx: float) -> bool:
         """Covering windows still to come at her x (the seen bombs and the forecast)."""
