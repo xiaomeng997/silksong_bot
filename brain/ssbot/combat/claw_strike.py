@@ -48,7 +48,12 @@ def _on(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip() == "1"
 
 
-CLAWSTRIKE = _on("SSBOT_FORUM_CLAWSTRIKE")
+# SP13 A/B (cc69bf0, w13, 64 episodes per arm, the same seeds 9900000.. / 9910000..; rnjb vs cs13f = trigger force):
+# HP-hitless clears 10 -> 14 / 64 (+0.063, 90 % -0.047 .. +0.172), landed / s 1.331 -> 1.358 (-0.031 .. +0.086), HP-loss
+# hits / min 3.422 -> 3.423 (-0.76 .. +0.76), both killed 46 -> 44 (-11 .. +6); the person's rule (the best on hitless
+# clears, not worse on the others): CLAWSTRIKE follows SSBOT_FORUM_V2 when unset (on with v2, trigger force), =0 off
+# (arm rnsp13_0 = the SP12b default)
+CLAWSTRIKE = _on("SSBOT_FORUM_CLAWSTRIKE", "1" if _on("SSBOT_FORUM_V2") else "0")
 # SSBOT_FORUM_AIRSTRIKE (SP13a, default off): the air approach to the same strike when she is in the air at S's antic
 # and the playbook's landing comes too late (or no Clawline plan exists): combat.air_chain's search with S as its B (a
 # drift toward S's strike point, an optional down slash on a body below - S's antic body or the other one's -, the
@@ -95,8 +100,9 @@ class CsCfg:
     pre_drifts: tuple = (0, 4)      # full grid is searched again from control on)
     room: int = 0                   # 1: only when she cannot leave the hammer's reach (12.5 u) behind her
     other_free: int = 1             # the other Clapper Idle / Walk at the start (else no Clawline: she is locked ~30 f)
-    trigger: str = "reach"          # "reach": the playbook's reach / time declines; "force": every slam in its ray band
-    #                                 (the fixed-point trials)
+    trigger: str = "force"          # "force" (the default since the SP13 A/B): every slam from force_min_u it can plan;
+    #                                 "reach": only the playbook's reach / time declines (hardly fires with two Clappers:
+    #                                 those slams start with her high in the air)
     force_min_u: float = 5.6        # "force": her centre this far from its centre at least
 
     @classmethod

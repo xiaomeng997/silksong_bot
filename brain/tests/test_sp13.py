@@ -31,7 +31,7 @@ def ctx_for(hx, kb0):
 def test_defaults_off():
     assert not cs.CLAWSTRIKE
     c = cs.CsCfg()
-    assert c.trigger == "reach" and c.room == 0 and c.k_last == 14
+    assert c.trigger == "force" and c.room == 0 and c.k_last == 14 and c.force_min_u == 5.6
 
 
 def test_claw_phase_timeline():
@@ -87,6 +87,7 @@ def _slam(f, k, hx, silk=3):
 
 def test_slamplay_takes_the_clawline_when_the_walk_does_not_fit(monkeypatch):
     monkeypatch.setattr(cs, "CLAWSTRIKE", True)
+    monkeypatch.setenv("SSBOT_FORUM_CLAWSTRIKE_SET", "trigger=reach")
     hx = 31.0 - 9.5
     p = sp.SlamPlay(sp.PlayCfg())
     m = p.step(1000, _slam(1000, 2, hx), True, t_game=10.0, sim=sim_for(hx))
@@ -164,3 +165,20 @@ def test_no_clawline_while_the_other_one_moves(monkeypatch):
         assert (p.run.phase == "cs_pre") == taken
         if not taken:
             assert p.run.cs_log[0][1:] == ["no", "other Spell Antic"]
+
+
+@pytest.mark.parametrize("v2,flag,on", [("1", None, True), ("1", "0", False), ("0", None, False), ("0", "1", True)])
+def test_clawstrike_follows_v2(monkeypatch, v2, flag, on):
+    # the SP13 A/B: CLAWSTRIKE follows SSBOT_FORUM_V2 when unset (=0 off: arm rnsp13_0); AIRSTRIKE stays off
+    import importlib
+    monkeypatch.setenv("SSBOT_FORUM_V2", v2)
+    if flag is None:
+        monkeypatch.delenv("SSBOT_FORUM_CLAWSTRIKE", raising=False)
+    else:
+        monkeypatch.setenv("SSBOT_FORUM_CLAWSTRIKE", flag)
+    try:
+        m = importlib.reload(cs)
+        assert m.CLAWSTRIKE is on and not m.AIRSTRIKE
+    finally:
+        monkeypatch.undo()
+        importlib.reload(cs)
