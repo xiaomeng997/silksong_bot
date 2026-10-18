@@ -9915,3 +9915,173 @@ knowledge/.../aim_zones_*.json left untouched.
 4. The scripts acting on one Clapper while the other hits (chase 5, slam 3, low hop 2): SP10a's open item 4.
 5. The playbook's gate "other rune circle" still declines 10 close slams per 32 episodes (SP10a's open item 3).
 6. Escape jumps (escape jump cast 12 + escape jump 5 of 52): SP10a's open item 2.
+
+
+## Task 1v1 - stage SP10c: TWO_JUMPHIT (the lead's NOTE 4 / 5, off: failed its fixed point three times) and the late Clawline CLAW_CHASE (off: variant A passes T0 / T1 on one Clapper, rarely fires in the default play) (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §81)
+
+The spec: C:\ssbot\data\m2_play\clawline\answer.txt (the late Clawline) and the lead's NOTE_FROM_LEAD.txt in
+C:\ssbot\data\m2_play\sp10 (NOTE 5: do NOTE 4 - TWO_JUMPHIT, "the moment one starts its jump antic she can already go and
+hit the other one", part of the target-switch controller - first; NOTE 3: report the hitless-clear rate of every arm;
+NOTE 1, the hop + Clawline cast switch, waits: see Open items). J = the Clapper in a jump move (Jump Antic / Cast Slam
+Antic), I = the other one; frames from J's antic entry (a jump: Jump Aim = the first flight frame at +29 / 30, landing
++85, tail 19-20 frames; a jump cast: flight from +54-56, landing +110); distances centre to centre (her box centre, its
+transform), HeroBox 0.46 u wide. Forum_W_w13 (fo_cl_w13w) / Forum_W_w7 (fo_cl_w7w), instances 0 / 1, 1x. Data
+`C:\ssbot\data\m2_play\sp10c` (`jw_*.json` the other one's jump moves per run - `scripts/jw_scan.py`, `jh_sum.py`;
+`claw_*.json` the far jumps and the claw runs - `scripts/claw_scan.py`; `fp3_audit.*`, `t2_audit.*` the cause audits;
+`replay_<sha>` identity). No human practice ran; the trading bot was not touched.
+
+### Result
+
+- **TWO_JUMPHIT failed the lead's fixed-point gate (>= 90 % of the other one's jumps with >= 2 hits on I and no HP lost
+  from J's antic to its landing + 1 s) three times and stays off; no A/B.** Baseline (SP10b's A/B, 96 episodes): 157
+  non-escape jumps of the other one, 46 pass (29 %), 1.3 hits on I per jump, ~63 % without HP lost.
+
+| round | code | jumps | gate | hits on I | no HP | episodes: clears / hitless, HP hits / min | failure -> change |
+|---|---|---|---|---|---|---|---|
+| fp1 | 3691702 | 46 | 5 (11 %) | 1.09 | 25 | 4 / 0, 7.03 | 17 of 19 back exits hit by J's falling Air body (she stood 1.95 u behind the landing; it still moves 0.5 u toward the landing in its last 5 frames above her head) -> back exit 3.0 u, margin 14 |
+| fp2 | e69fac7 | 39 | 8 (21 %) | 0.87 | 29 | 8 / 3, 4.24 | the planner floated on the umbrella / stood off while J's predicted landing followed her -> the hit phase's own script |
+| fp3 | 5e48c0c | 45 | 12 (27 %) | 1.09 | 34 | 11 / 4, 3.08 | fails |
+
+  Why it cannot reach the gate as built: J's jump antic is 30 frames (the Wanderer slash cooldown 18: one or two
+  slashes); J aims at her x at its Jump Aim (lands 4.6-5.8 u in front of her on its side, 0.92 x (d - 5), capped at 12 u),
+  so after the aim its landing hammer (0.67-7.76 u in front) and its body always cover her; with her between the two
+  (113 / 157 in the baseline) the way out away from J crosses I's body, so the only clean exit is under J to 3 u behind
+  its landing, which takes the whole flight (fp3: the back exits of jump slams began at frames 29-39); and I is often in
+  its own evade / tail at J's antic (fp3: evade 8, Slam Recover / Slam 2 / Cast 2 15 of 45). fp3's episode numbers (11 /
+  16 clears, 4 hitless, 3.08 HP hits / min, 1.309 landed / s) sit in the default's range (SP10b two_ho: 18 / 32, 10, 3.74,
+  1.387) on other seeds - not a comparison.
+- **CLAW_CHASE variant A passes T0 / T1 on one Clapper** (w7, the 9.5 u idle stance so it jumps far): the hop held 10
+  frames, the Clawline at Jump Aim - 10, the air dash toward its take-off side at control: **39 / 39 hooked, 39 / 39
+  without HP lost from the press to its landing + 1 s, 38 / 39 behind its landing** (6.9 u behind, p10-p90 4.5-8.6), 2 x 5
+  HP from the Clawline plus 1.4-1.9 back slashes (the default's dash-stop-slash at the same stance: 16 / 17 safe, 1.35).
+  **Without the air dash 13 of 17 were hit by its body** (the model's bounce contact); **the person's variant B** (no
+  dash, down-slash its head, drift to its back): 24 / 24 hooked, 18 / 24 safe, 0.38 back slashes - worse than A.
+- But the default play never meets it on one Clapper: the w7 A/B (5e48c0c, 16 per arm) saw no far jump in 32 episodes (the
+  claw arm not one jump antic; the evade chase keeps her close): rnjb and ccAany identical (16 / 16 clears, kill p50 17.0 / 17.1 s).
+- Two Clappers: the spec's trigger (a small rune on her ground path behind the landing) fired ~0.1 per episode, "any far
+  jump" ~0.25 (most jump moves start with her outside 8.4-12.2 u, in the air or without silk). T2: below.
+
+- **T2 (d09484b, Forum_W_w13, 2 x 16 per arm, block design, the same seeds 4800000.. / 4810000..): nothing promoted.**
+
+| | rnjb (default) | ccA (the spec's rule: a small rune on her path) | ccAany (any far jump) |
+|---|---|---|---|
+| claw runs | - | 3 (2 hooked; 1 hit by that very bomb in the hop's rise, antic + 9) | 8 (8 hooked, 8 safe) |
+| landed / s (both alive) | 1.319 (1.379) | 1.358 (1.413) | 1.301 (1.338) |
+| both killed / Clappers killed | 16 / 32, 33 | 18 / 32, 38 | 16 / 32, 33 |
+| HP-loss hits / min | 4.78 | 4.35 | 5.07 |
+| **HP-hitless clears** (NOTE 3) | **2 / 32** | **6 / 32** | **3 / 32** |
+| clear time p10 / 50 / 90 (s) | 28.2 / 29.8 / 34.9 | 26.7 / 30.6 / 35.1 | 29.0 / 31.5 / 34.4 |
+
+  Bootstrap 90 %, ccA - rnjb: landed / s +0.037 (-0.04 .. +0.118), HP hits / min -0.43 (-1.72 .. +0.82), kills /
+  episode +0.16 (-0.25 .. +0.56); ccAany - rnjb: -0.019 (-0.097 .. +0.058), +0.31 (-0.98 .. +1.49), 0.0 (-0.41 .. +0.41).
+  ccA's point estimates all point the person's way, but its switch fired 3 times in 32 episodes (the other 29 played
+  as the default), so the gap is arm-to-arm noise and every interval spans 0: **not promoted - the person decides**
+  (it rarely fires; 2 of 3 safe). ccAany is not better. The w7 A/B (5e48c0c, 16 per arm, rnjb vs ccAany): no far
+  jump in 32 episodes, identical (16 / 16 clears, kill p50 17.0 / 17.1 s).
+
+### 1. Code
+
+- `SSBOT_FORUM_TWO_JUMPHIT` (default off; `combat/two_play.py` JhCfg / JhRun / `_jh_*`, `tactics/gauntlet.py` `_two_focus`
+  and `_decide`, `evade_chase.step(block=)`, the policy): the run opens on the first STATE of J's Jump Antic / Cast Slam
+  Antic with both live, not the focus's escape jump at its wall (SP9b's: her within 8.3 u of J, its back <= 6.2 u, nearer
+  J than I) and no SP9b / SP9c run; L2's target is I from that tick (above the room / hysteresis rule) to J's tail end (a
+  back exit hands back at the landing); the hit phase (fp3: its own script - the side slash on I when it meets I's body,
+  else the walk toward it, in the air the key toward it without the jump key; the planner while I itself can reach her);
+  from J's Jump Aim the landing is fixed and, inside its zone (3.0 u behind, 8.5 u in front; a jump cast 14.3 u, the rune
+  circle), the leave begins at the landing - the frames to walk / dash-sprint out - 14 by the exit that does not cross
+  I's body (front) or J's grounded body (back), then she stands there to the landing + 8 (a cast + 90); no hit counts on
+  I / J during the leave; the chase on I is blocked in the leave and within 30 frames of its deadline. Stats
+  `two_play.jumphit` / `jh_runs`, own `two:jh`.
+- `SSBOT_FORUM_CLAW_CHASE` (default off; `combat/claw_chase.py`; the policy steps it after the slam playbook, before
+  cast_stab, own `claw`): the gates (J facing her at 8.4-12.2 u, she on the ground with input, silk >= 1, the other one
+  not jumping and not in the way - d09484b, the spec's ray gate), `SSBOT_FORUM_CLAW_SCOPE` bomb (the spec's two-Clapper
+  rule: a small-rune bomb on her path to the slash spot behind the landing, or the other one casting) / any, the key
+  sequence above, `SSBOT_FORUM_CLAW_VAR` A / B, `SSBOT_FORUM_CLAW_SET` overrides with per-run value lists. The Clawline key
+  is the ACTION mask's bit 4 (ssbot.ipc.framing BUTTONS "clawline", key S). Stats `claw_chase` / `claw_runs`.
+- `combat/hero_damage.py`: the Clawline bound is 2 hits x max(dealt 4 x the target's scaling, the fixed 5), a Wanderer
+  crit included (unbounded only with an unknown scaling); before, unbounded.
+- `ssbot.tools.sp10_audit`: the owners `claw` (the jumper of the open run) and `two:jh` (L2's target).
+- Tests `tests/test_sp10c.py` (10) and `test_kill_rule.py` (the Clawline bound). Full suite at d09484b: 1,953 passed, 5 failed (the known: test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3; `sp10c\fullsuite.log`).
+
+### 2. Live trials (`sp10c_go.ps1` -> `sp4_block.ps1` -> `sp10c_ab.ps1 [-Encounter]`; manifests `1v1sp10c{fp1,fp2,fp3,t0,t1,ab13,ab7,fpc,t2}_manifest.txt`)
+
+- Facts from the Clawline runs (T0 + T1, 80 runs): her box bottom 2.8-3.3 u at the press, 2.1-3.0 u (jump) / 2.6-3.1 u
+  (jump cast) at the ray check (press + 9); **control returns 30-33 frames after the press** (the model said 25-30); at
+  control her centre is 0.5 u (-0.8 .. +1.75) in front of J's centre - inside its body, whose contact is still off; the
+  press at Jump Aim -13 and -8 worked as well as -10 with the dash (16 / 16 jumps).
+- The stopped w13 A/B (5e48c0c, 12 episodes per claw arm): scope any ran 5 times, 3 with the other Clapper in the way (the
+  dash stopped 4.9-8.6 u short of J after one hit, then J's body) -> the ray gate (d09484b); scope bomb ran once (hurt in
+  the hop). The w13 fixed point after the fix (d09484b, ccAany, 16 episodes): 50 jump antics, 4 runs (rejected: distance
+  31, in the air 9, silk 4, late 2), 3 hooked, 3 / 4 safe (1: the other one's small rune under the hop at k 43).
+
+### 3. Identity
+
+`sp10c\scripts\replay_ident_sp10c.ps1`: every SP10c commit with its switches off byte-identical to fbae4c6's default
+(`sp10b\replay_fbae4c6\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1
+/ 084036 i1 e0 (2,073 / 1,778) - 3691702, e69fac7, d09484b checked; TWO_JUMPHIT on differs on 144051 first at tick 449, the
+jumphit goal (`two: jumphit hit`); CLAW_CHASE on (scope bomb) identical on all four (no trigger).
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` on T2, 32 episodes per arm; `sp10c\t2_audit.json / .txt`, traces `t2_hp`)
+
+The default (rnjb) - nothing was promoted, so the default's T2 runs are the audited set, ccA / ccAany for contrast:
+**68 HP losses (4.78 / min)**; by what hit: body 20, landing collider 16, small runes 11, hammer 11, big rune 10; airborne
+the frame before 50 / 68; by move: Slam Antic 18, Spell Antic 17, escape jump cast 13 + escape jump 5, Jump Antic 9, Cast
+Slam Antic 4.
+
+| cause | rnjb (ccA / ccAany) | top sub-causes, rnjb (n) | example frames (run_ep@frame) |
+|---|---|---|---|
+| L2 / planner decision | 41 (33 / 44) | the planner in the air with the dash ready 14 (L2 on the other 10); the planner moved into it 10; the playbook's gate "other rune circle" 4; the slam stayed in reach in the air 2 | 20261017_161806_2_i0_e0@4011365, 20261017_162122_i1_e0@4023578 |
+| script conflict | 20 (13 / 15) | **the chase on one while the other hit 10**; the slam playbook on one 4; the low hop on one 3 | 20261017_161806_2_i0_e1@4013297, 20261017_162734_i0_e1@4046393 |
+| airborne / landing | 6 (17 / 13) | umbrella, no landing in time | - |
+| attack cooldown | 0 | - | - |
+| harness / host stall | 1 (0 / 0) | keys 3 frames late | 20261017_162305_i1_e1@4031073 |
+
+- **Ranked by the hitless clears they cost (NOTE 3; the three arms pooled, 96 episodes: 50 clears, 11 hitless, 39 clears
+  with HP lost - 15 of them only once)**, a clear with k causes shares 1 / k: the planner in the air with the dash ready
+  and L2 on the other 5.0 (alone 3), the planner moved into it with L2 on it 4.0 (2), the low hop on one while the other
+  hit 3.0 (1), the planner moved into it with L2 on the other 3.0, the chase on one while the other hit 2.8 (2), the
+  planner in the air with the dash ready and L2 on it 2.5 (1), the slam playbook moved her into it 2.5 (2), the umbrella
+  2.0. Clears lost to one cause class alone: L2 / planner 20, script conflict 5.
+- Missed planned actions (rnjb): close slams struck 144 / 189 (76 %; not struck: the gate "other rune circle" 22, hurt
+  in the slam 7, no landing in time 4, the hand-off late 3); Idle entries hit within 30 frames 269 / 367 (73 %; missed: in
+  the air 29, the low hop had the keys 17, no IdleHit run 16, the gate "the other can reach her" 10, the escape switch had
+  the keys 9); chases 161, ended far 13; presses 1,383, dropped 96 (65 inside the planner's own cooldown), delayed 31.
+- Switches across situations: the Clawline (tried on one Clapper) needs the ray gate with two (before it, 3 of 5 runs
+  with the other in the way); with it ccAany's 8 runs were all safe; ccA's one HP loss was the bomb its rule exists for,
+  hit in the hop's rise (the spec's "0 bomb hits on triggered jumps" not met, 1 / 3). The one-Clapper phase: rnjb 105.9 s,
+  1 HP loss (ccA 111.6 s / 3, ccAany 103.2 s / 3). Attacker within 6 u of a wall: 12 (22 / 20). TWO_JUMPHIT (fp3's audit,
+  `fp3_audit.txt`): 24 HP losses (3.08 / min), 6 of them "the jumphit script on I while J hit her" (J's landing / body /
+  big rune), 4 umbrella.
+- The other one's jumps in today's default (rnjb, T2, `jw_t2.json`): 58 non-escape, 16 pass the JUMPHIT gate (28 %),
+  1.12 hits on I, 43 without HP lost - fp3 (27 %, 1.09, 76 %) did not move these.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp10c)
+
+`jh` = rnjb + TWO_JUMPHIT; `cc0T` = rnjb + the 9.5 u idle stance + EVADE_CHASE=0 (it jumps far; the 1v1 trial arm);
+`ccT0` / `ccAT` / `ccBT` = cc0T + CLAW_CHASE scope any (T0 cycled onsets and the dash on / off; A; B); `ccA` / `ccB` =
+rnjb + CLAW_CHASE (scope bomb; A / B); `ccAany` = rnjb + CLAW_CHASE scope any.
+
+### 6. Machine state
+
+Instances 0 and 1 ran fp1 / fp2 / t0 / fp3 / t1 / ab13 (stopped after 18 chunks: the ray gate) / ab7 / fpc / t2 (both
+started 2026-10-16 20:36), frozen at time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per
+block; boost_workers ran for each block (`boost_workers.stop` present again). No game process touched. Frozen checkouts
+`C:\ssbot\live_1v1_{3691702, e69fac7, 5e48c0c, d09484b}`. Sandbox `sp10c_go.ps1` (the Ab steps take an encounter and a
+timebox), `sp10c_ab.ps1`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **TWO_JUMPHIT needs another way to pass its gate**: with her between the two, the only clean exit after J's aim is
+   under J to 3 u behind its landing (the whole flight). Candidates: the hop over the locked I to its far side (SP9b's
+   hop-over table), or standing >= 17.4 u from J before its aim (the 12 u jump cap x 0.92). The person / the lead decide;
+   fp3's code is in (off).
+2. **NOTE 1 (the hop + Clawline cast switch) not started**: the Clawline is now known to be reliable live (w7 80 / 80
+   hooked, w13 17 of 18 presses; control back 30-33 frames after the press, inside the hooked body - the air dash is
+   needed at once); next: model it on SP9c's 29 recorded cast-switch failures, then the fixed point.
+3. **When the Clawline can matter**: the default play rarely lets a Clapper jump from far (w7 0 in 32 episodes; w13 ~0.25
+   per episode with her 8.4-12.2 u away). Either keep it as a rare tool (ccA / ccAany off now) or pair it with a stance
+   that invites far jumps (cc0T's 9.5 u + the Clawline: per far jump 2 x 5 HP + 1.4-1.9 back slashes, no HP lost 39 / 39).
+4. Not done from the spec's T0: the hover heights over a lit small rune, a hook on an Idle Clapper from 6 u, whether the
+   needle takes the big rune circle; the bomb rule's hop rise (ccA's 1 HP loss).
+5. The audit's top causes are unchanged from SP10a / SP10b: the planner in the air (dash ready / umbrella) and moving into
+   it, and one-Clapper scripts (chase, low hop, slam playbook) ignoring the other one (SP10a items 3-5).
