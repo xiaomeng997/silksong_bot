@@ -63,6 +63,7 @@ HALF_W = 0.23                   # her box half width
 ANTIC_DX = 1.25                 # u toward in Harpoon Antic (p50 1.18, p90 1.32)
 DY0, DYV = -0.261, 0.0788       # her box bottom at the throw: y_P + DY0 + DYV * vy_P (resid sd 0.10)
 DASH_U = 1.4 * 50.0 / 60.0      # u per 60 Hz frame (70 u/s, 0.02 s physics steps)
+VY_RANGE = (-6.0, 9.0)          # her vy at the press inside the live runs' range (the fit above)
 DASH_MAX_U = 7.0                # the dash runs 0.1 s at most
 ATK_CD_S = 0.15                 # the attack cooldown at control (s)
 GOOD_OK = 4                     # plan(): a (hop, P) with this many passing strike plans in its worst variant is taken
@@ -264,6 +265,10 @@ class ClawStrike:
             vy = float(ro.vel[n, i, 1])
             xp = 0.5 * float(ro.box[n, i, 0] + ro.box[n, i, 2])
             if not c.ray_lo <= bb + DY0 + DYV * vy <= c.ray_bb:
+                continue
+            if not VY_RANGE[0] <= vy <= VY_RANGE[1]:
+                # the hold height's fit (DY0, DYV) covers vy -5.4 .. +8.7 at the press; fp4 (162ca26): two presses in a
+                # hop's fast rise held her 2.1-2.6 u up at control - no strike plan, the other one's hammer
                 continue
             if (fx - xp) * toward - HALF_W > c.reach or (fx - xp) * toward < 0.5:
                 continue
