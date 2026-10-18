@@ -2953,6 +2953,13 @@ class TwoPlay:
             why = "far"
         elif room < pc.room_c:
             why = "room"
+        elif o is not None and _sp.control(o)[0] in JUMP_ST:
+            why = "b jump"                                       # (fp2) B in a jump move: its landing / circle
+        else:
+            # (fp2) a big rune circle (lit or to come) over her way: from her x to F's far side's landing band
+            lo_x, hi_x = sorted((hx, cx + wdir * (pc.land_hi + HALF_W)))
+            if any(x0 < hi_x and x1 > lo_x for x0, x1 in self._rune_threats(f, s)):
+                why = "circle"
         nat_why, room_b, need, lock_rem = None, 0.0, 0.0, self._pm_lock_rem("cast", k_now)
         if o is None:
             nat_why = "one"
