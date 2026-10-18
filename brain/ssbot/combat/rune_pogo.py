@@ -90,6 +90,9 @@ class RtCfg:
     min_db: float = 6.5         # B at least this far from F (its face spot off F's body)
     far_m: float = 0.5          # "far": her spot this clear of the hammer / the circle edge
     research: int = 1           # plan every this many frames in the air
+    scope: int = 1              # 1: any jump cast of either Clapper (the lead's NOTE 7: the far one's onto her face too);
+    #                             0: the focus's escape jump casts only
+    near_u: float = 6.0         # a jump cast of the other one: she within this of the target Clapper keeps her side of it
 
 
 def _cfg() -> RtCfg:
@@ -551,6 +554,8 @@ class RtRun:
     db0: float                     # B ahead of x0 along F's facing
     b_st0: str | None
     hp0: int = 0
+    src: str = "esc"               # esc: the focus's escape jump cast; other: any other jump cast (scope 1)
+    spot_sgn: int = -1             # her spot at B: -1 on the caster's side (B - face * spot), +1 on B's far side
     tier: str = "pogo"             # pogo / far
     phase: str = "go"              # go / air / done
     far_checked: bool = False      # the "far" test made at F's aim
@@ -600,13 +605,18 @@ class RunePogo:
 
     # ---- bookkeeping (every tick, TwoPlay._esc_observe) ----
 
-    def start(self, f: int, s: dict, F: dict, B: dict, hx: float, hp: int, tin: float) -> RtRun:
+    def start(self, f: int, s: dict, F: dict, B: dict, hx: float, hp: int, tin: float, src: str = "esc") -> RtRun:
+        """F = the jump caster, B = the Clapper whose head she pogos (src esc: F the focus at its wall)."""
         face = face_of(F)
         x0 = float(F["pos"][0])
+        bx = float(B["pos"][0])
+        sgn = -1
+        if src == "other" and abs(hx - bx) <= self.cfg.near_u and (hx - bx) * face > 0:
+            sgn = 1                                       # she is on B's far side, near it: keep that side
         r = RtRun(iid=F.get("iid"), other=B.get("iid"), f_a=f, k_a=int(round(tin * 60.0)), x0=round(x0, 3),
                   face=face, back0=round((x0 - WALL_L) if face > 0 else (WALL_R - x0), 2),
-                  rel0=round((hx - x0) * face, 2), db0=round((float(B["pos"][0]) - x0) * face, 2),
-                  b_st0=_sp.control(B)[0], hp0=hp)
+                  rel0=round((hx - x0) * face, 2), db0=round((bx - x0) * face, 2),
+                  b_st0=_sp.control(B)[0], hp0=hp, src=src, spot_sgn=sgn)
         r.a_pred = f - r.k_a + self.cfg.a_antic
         self.run = r
         self.plan = None
@@ -747,7 +757,7 @@ class RunePogo:
             return False
         c = self.cfg
         bx = float(B["pos"][0])
-        spot = bx - r.face * c.spot
+        spot = bx + r.spot_sgn * r.face * c.spot
         u = (spot - r.L_pred) * r.face                 # her spot ahead of the landing
         rc = (rune_centre(r.L_pred, r.face) - r.L_pred) * r.face
         return u - HALF_W >= max(7.76, rc + RUNE_R) + c.far_m
@@ -760,7 +770,7 @@ class RunePogo:
         hx = _sp.hero_x(s)
         hxw = hx + vx * SEND_AHEAD / 60.0
         bx = float(B["pos"][0])
-        spot = bx - r.face * c.spot
+        spot = bx + r.spot_sgn * r.face * c.spot
         look = 1 if bx > hxw else -1
         toward = M_R if look > 0 else M_L
         if self._press_f is not None and f + SEND_AHEAD - self._press_f == 1:
@@ -891,7 +901,8 @@ class RunePogo:
         runs = self.done + ([self.run] if self.run is not None else [])
         out = []
         for r in runs:
-            d = {k: getattr(r, k) for k in ("f_a", "k_a", "x0", "face", "back0", "rel0", "db0", "b_st0", "tier",
+            d = {k: getattr(r, k) for k in ("f_a", "k_a", "x0", "face", "back0", "rel0", "db0", "b_st0", "src",
+                                            "spot_sgn", "tier",
                                             "f_csa2", "f_aim", "a_pred", "aim_hx", "p_aim", "db_aim", "L_pred",
                                             "f_land", "x_land", "rune", "presses", "jump_f", "contacts", "umbs",
                                             "drops", "hits_b", "hp", "hp_src", "min_h_lit", "b_moves", "f_end",

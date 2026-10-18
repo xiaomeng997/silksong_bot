@@ -1001,9 +1001,13 @@ class TwoPlay:
         self.esc_n["jump_antics"] += 1
         if back > c.back_u:
             self.esc_n["no_wall"] += 1
+            if RUNETIER and st == "Cast Slam Antic" and self.rt.cfg.scope:
+                self._rt_other(f, s, e, o, hx, hp, tin)
             return
         if d > c.d_u or d > do:
             self.esc_n["no_near"] += 1
+            if RUNETIER and st == "Cast Slam Antic" and self.rt.cfg.scope:
+                self._rt_other(f, s, e, o, hx, hp, tin)
             return
         face = face_of(e)
         kind = "jump" if st == "Jump Antic" else "cast"
@@ -1042,6 +1046,35 @@ class TwoPlay:
         self.esc_n[f"mode_{mode}"] += 1
         if why:
             self.esc_n[f"no_switch_{why}"] += 1
+
+    def _rt_other(self, f: int, s: dict, e: dict, o: dict, hx: float, hp: int, tin: float) -> None:
+        """SP11a scope 1 (the lead's NOTE 7): a jump cast that is not the focus's escape jump - the pogo tier on the
+        other Clapper (its face, its head) when that one is free, in front of the caster by min_db and no rune circle
+        lies over her / it; declined: counted only (no escape run: the default play)."""
+        ost = _sp.control(o)[0]
+        ox, cx = float(o["pos"][0]), float(e["pos"][0])
+        face = face_of(e)
+        why = ""
+        if ost in JUMP_ST:
+            why = "other jumping"
+        elif ost in CAST_ST:
+            why = "other casting"
+        elif ost in SLAM_ST or ost == "Slam Recover":
+            why = "other slamming"
+        elif (ox - cx) * face < self.rt.cfg.min_db:
+            why = "b near"
+        elif any(a < max(hx, ox) + 3.0 and b > min(hx, ox) - 3.0 for a, b in self._rune_threats(f, s)):
+            why = "rune"
+        self.esc_n["rt_other"] += 1
+        if why:
+            self.esc_n[f"rt_other_no_{why}"] += 1
+            return
+        self.rt.start(f, s, e, o, hx, hp, tin, src="other")
+        self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind="cast", f_a=f, k_a=int(round(tin * 60.0)),
+                          x0=round(cx, 3), face=face, back0=round(back_room(e), 2), rel0=round((hx - cx) * face, 2),
+                          o_st=ost, o_d=round(abs(hx - ox), 2), mode="pogo", hp0=hp, why="")
+        self.esc_n["runs"] += 1
+        self.esc_n["mode_pogo_other"] += 1
 
     def _esc_block(self, f: int, s: dict, e: dict, o: dict, hx: float) -> str:
         """Why neither arm takes F's escape jump ("" when it can; t1): B in a jump move (its landing aims at her, the

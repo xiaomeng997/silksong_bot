@@ -249,3 +249,28 @@ def test_far_tier_hands_back(tier):
 
 def test_warm_runs():
     assert rp.warm(P) < 30.0
+
+
+def test_scope_any_jump_cast_of_the_other_one(tier, monkeypatch):
+    """The lead's NOTE 7: B (far, not at a wall) jump-casts while she is at F's face - the run pogos F's head."""
+    def ss(x_rel):
+        out = []
+        for f, st in ((1000, "Idle"), (1001, "Cast Slam Antic")):
+            s = fstate(f, "Idle", 0.5, x_rel=x_rel, b_st=st, b_x=40.0)
+            s["ents"][1]["flipX"] = False                  # B faces left, toward her and F
+            out.append(s)
+        return out
+    two = tp.TwoPlay()
+    _run(two, ss(3.0))
+    r = two.esc
+    assert r is not None and r.mode == "pogo" and r.iid == 99 and r.other == 7
+    run = two.rt.run
+    assert run.src == "other" and run.spot_sgn == -1       # she is between them: F's face on B's side
+    assert two.esc_view()["hold"] == 7 and two.esc_n["mode_pogo_other"] == 1
+    two = tp.TwoPlay()
+    _run(two, ss(-3.0))
+    assert two.rt.run is not None and two.rt.run.spot_sgn == 1   # she is behind F (near it): that side kept
+    monkeypatch.setenv("SSBOT_FORUM_TWO_RUNETIER_SET", "scope=0")
+    two = tp.TwoPlay()
+    _run(two, ss(3.0))
+    assert two.esc is None and two.esc_n["rt_other"] == 0
