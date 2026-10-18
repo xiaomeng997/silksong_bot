@@ -143,6 +143,7 @@ def air_travel(j: int) -> float:
 # SSBOT_FORUM_TWO_GUARD (SP11-0): the room (u) a dash / an air dash needs toward the focus before the other one's span
 GUARD_DASH_U = DASH_V / 60.0 * DASH_F + WALK_U * 3 + 0.1
 GUARD_AIR_U = air_travel(AIR_DASH_F + AIR_SPRINT_F + 3) + 0.1
+GUARD_EXIT_U = 4.0           # ... inside a span: the chase on when its way out toward the focus is this short (the dash)
 
 
 def air_path(d: float, n: int, slide: float) -> list[float]:
@@ -187,6 +188,7 @@ class Chase:
     ticks: int = 0
     guard_min: float | None = None   # SSBOT_FORUM_TWO_GUARD: the least room toward it seen (u)
     guard_stops: int = 0             # ... masks held back by it
+    guard_kind: str | None = None    # ... the kind of span she was seen inside
 
 
 class EvadeChase:
@@ -290,6 +292,7 @@ class EvadeChase:
                "next": r.next_st, "end": r.phase, "why": r.why, "ticks": r.ticks}
         if r.guard_min is not None:
             out["guard_min"], out["guard_stops"] = r.guard_min, r.guard_stops   # SSBOT_FORUM_TWO_GUARD
+            out["guard_kind"] = r.guard_kind
         return out
 
     # ---- the script ----
@@ -384,16 +387,19 @@ class EvadeChase:
             why = "rune"
         room = None
         if why is None and guard is not None:
-            room = self._guard_room(Chase(iid=e.get("iid"), face=face, f0=f, k0=0, x0=x0, ground0=bool(ground), hp0=hp),
-                                    f, s, e, guard)
+            c0 = Chase(iid=e.get("iid"), face=face, f0=f, k0=0, x0=x0, ground0=bool(ground), hp0=hp)
+            room = self._guard_room(c0, f, s, e, guard)
+            self._gk = c0.guard_kind
             if room is not None and room <= 0.0:
                 why = "guard"
-                self.guard_f.append(f)              # SSBOT_FORUM_TWO_GUARD: the no-start frames (stats)
+                self.guard_f.append([f, self._gk])  # SSBOT_FORUM_TWO_GUARD: the no-start frames and kinds (stats)
         if why is not None:
             self.why_not[why] = self.why_not.get(why, 0) + 1
             return None
         k = int(round(tin * 60.0)) + SEND_AHEAD
         self.run = Chase(iid=e.get("iid"), face=face, f0=f, k0=k, x0=round(x0, 3), ground0=bool(ground), hp0=hp)
+        if room is not None:
+            self.run.guard_min, self.run.guard_kind = c0.guard_min, c0.guard_kind
         m = self._step_run(self.run, f, k, s, e, ground, accepting, latch, room)
         self.run.sent.append((f, m))
         self.run.ticks += 1
@@ -405,10 +411,14 @@ class EvadeChase:
         if guard is None:
             return None
         from ssbot.combat import two_play as _tp
-        xw, _ = self._x_mask(r, f, s, e)
-        room = _tp.guard_room(guard, xw, -r.face, own=r.iid)
-        if room > 0.0 and _tp.guard_hit(guard, xw - 0.01, xw + 0.01, own=r.iid):
-            room = 0.0
+        xw, cx = self._x_mask(r, f, s, e)
+        ex, room, kind = _tp.guard_exit(guard, xw, -r.face, own=r.iid)
+        r.guard_kind = kind or r.guard_kind
+        if kind is not None:
+            # (fp1 fix, 3251a4a: 5 of 25 no-starts lost HP to the span she stood in) inside a span: the chase goes on
+            # when its way toward the focus leaves it within GUARD_EXIT_U and short of its stop (an escape), else 0
+            d = (xw - cx) * r.face
+            room = ex + room if ex <= min(GUARD_EXIT_U, d - self.cfg.stop_u) else 0.0
         if r.guard_min is None or room < r.guard_min:
             r.guard_min = round(room, 2)
         return room

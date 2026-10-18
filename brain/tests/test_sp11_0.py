@@ -113,9 +113,18 @@ def test_chase_held_by_the_other_ones_landing(guard_on):
     gsp = two.guard_spans(1003, s, 1003 / 60.0)
     ch = ec.EvadeChase(one=False, two=True)
     assert ch.step(1003, s, True, True, focus=7, guard=gsp) is None and ch.why_not.get("guard") == 1
+    assert ch.guard_f == [[1003, "land"]]
     # without the guard the chase starts
     ch = ec.EvadeChase(one=False, two=True)
     assert ch.step(1003, s, True, True, focus=7) is not None
+    # (fp1 fix) inside a band whose exit toward F (28.0, 1.5 u on) is short of the chase's stop (F 8 u away at 34.5):
+    # the chase is her way out - it starts; with the exit 7 u on (F 8 u away) it does not
+    s8 = two_state(1003, ec.EVADE, 3 / 60.0, x_rel=8.0, cx=34.5, b_st="Idle", b_x=45.0)
+    ch = ec.EvadeChase(one=False, two=True)
+    assert ch.step(1003, s8, True, True, focus=7, guard=[(20.0, 28.0, "land", 99)]) is not None
+    assert ch.run.guard_kind == "land"
+    ch = ec.EvadeChase(one=False, two=True)
+    assert ch.step(1003, s8, True, True, focus=7, guard=[(20.0, 33.5, "land", 99)]) is None
     # F facing right at 25 (she 4.5 u in front at 29.5, the way to F is -x); a span ending 0.2 u short of her: the run
     # key held back (the next step would enter it)
     s = two_state(1003, ec.EVADE, 3 / 60.0, x_rel=4.5, cx=25.0, flip=True, b_st="Idle", b_x=45.0)
@@ -145,6 +154,10 @@ def test_lowhop_no_start_with_the_stance_in_the_others_circle():
     gsp = [(hx - 3.0, hx + 0.5, "rune", None)]
     hop.step(1000, s, True, True, t_game=1000 / 60.0, guard=gsp)
     assert hop.run is None and hop.why_not.get("guard") == 1
+    # (fp1 fix) only the big rune circle counts for the low hop: a landing band there does not
+    hop = rl.RuneLowHop(two=True)
+    hop.step(1000, s, True, True, t_game=1000 / 60.0, guard=[(hx - 3.0, hx + 0.5, "land", 99)])
+    assert hop.run is not None
     hop = rl.RuneLowHop(two=True)
     hop.step(1000, s, True, True, t_game=1000 / 60.0, guard=[(hx + 30.0, hx + 31.0, "rune", None)])
     assert hop.run is not None

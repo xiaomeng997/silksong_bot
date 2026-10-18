@@ -271,6 +271,20 @@ def guard_room(spans, x: float, d: int, kinds=GUARD_ALL, own=None) -> float:
     return room
 
 
+def guard_exit(spans, x: float, d: int, kinds=GUARD_ALL, own=None) -> tuple[float, float, str | None]:
+    """SSBOT_FORUM_TWO_GUARD (fp1 fix): with x inside spans, (the distance (u) out of them in world direction d, the room
+    past that exit to the next span, the kind she is in); (0, guard_room, None) when x is in none."""
+    use = [(a, b, kind) for a, b, kind, iid in spans or () if kind in kinds and not (iid is not None and iid == own)]
+    e, kind0 = x, None
+    for _ in range(len(use) + 1):
+        inside = [(a, b, kind) for a, b, kind in use if a < e < b]
+        if not inside:
+            break
+        kind0 = kind0 or inside[0][2]
+        e = max(b for _, b, _ in inside) + 0.01 if d > 0 else min(a for a, _, _ in inside) - 0.01
+    return abs(e - x), guard_room(spans, e, d, kinds, own), kind0
+
+
 # ---- SP9c: the antic switch ----
 ASW_ANTIC = {"Slam Antic": "slam", "Spell Antic": "cast"}
 ASW_ON_ST = {"slam": ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?"), "cast": ("Spell Antic", "Cast 1")}

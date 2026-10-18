@@ -504,7 +504,9 @@ class RuneLowHop:
         cx = float(e["pos"][0])
         a, b = cx + face * self.cfg.stand_lo, cx + face * self.cfg.stand_hi
         hx = _sp.hero_x(s)
-        return _tp.guard_hit(guard, min(a, b, hx), max(a, b, hx), own=e.get("iid"))
+        # (fp1 fix, 3251a4a: 4 of 9 guard no-starts / aborts lost HP, 2 of them to the very bombs the hop is for) only
+        # the other one's big rune circle (SP10a / SP10c: the stance in it); its hammer / cast stay other_danger's
+        return _tp.guard_hit(guard, min(a, b, hx), max(a, b, hx), kinds=("rune",), own=e.get("iid"))
 
     def _rune_over(self, f: int, s: dict, cx: float, face: int) -> bool:
         a = cx + face * self.cfg.stand_lo

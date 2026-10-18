@@ -423,7 +423,7 @@ class Run:
     chain_next: int = 0              # ... the next frame a failed search is tried again
     chain_from: object = None        # ... a run on B opened by the chain's strike: A's iid
     chain_log: list = field(default_factory=list)   # [frame, event, plan row]
-    rg_k: int | None = None          # SP11-0 TWO_RUNEGATE: the first antic frame its gate passed where the old one blocked
+    rg_k: int | None = None          # SP11-0 TWO_RUNEGATE: the antic frame it started where the old gate declined
 
 
 class SlamPlay:
@@ -441,6 +441,7 @@ class SlamPlay:
         self.holds: list = []                # ... [B iid, start f, end f, why] per hold (stats)
         self._guard = None                   # SP11-0 TWO_GUARD: this tick's danger spans (combat.two_play)
         self._rg_circ: dict = {}             # SP11-0 TWO_RUNEGATE: circle iid -> {t0, lit, burst, cx}
+        self._rg_tick = None                 # ... this tick's antic frame when the old gate would have declined
 
     def reset(self) -> None:
         self.run = None
@@ -528,8 +529,8 @@ class SlamPlay:
             if rc is not None and TWO_RUNEGATE and k is not None:
                 if self._rg_exposed(rc, tx, t, k):
                     return "other rune circle"
-                if t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]                         and self.run is not None and self.run.rg_k is None:
-                    self.run.rg_k = k                 # the old gate would have declined it here (stats)
+                if t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]:
+                    self._rg_tick = k                 # the old gate would have declined this tick (stats)
             elif rc is not None and t <= rc[2] + TWO_RUNE[2] and TWO_RUNE[0] <= (tx - rc[0]) * rc[1] <= TWO_RUNE[1]:
                 return "other rune circle"
         return None
@@ -701,6 +702,7 @@ class SlamPlay:
             r.sent.append((f + SEND_AHEAD, m))
             return m
         if r.phase == "wait":
+            self._rg_tick = None
             if TWO_PLAY:
                 # SP7: not while the other Clapper can reach the stand point during the strike (the planner decides)
                 cx0 = float(e["pos"][0])
@@ -711,6 +713,8 @@ class SlamPlay:
                     r.why = why
                     return None
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
+            if m is not None and TWO_RUNEGATE and self._rg_tick == k and r.rg_k is None:
+                r.rg_k = k                            # SP11-0: started where the old gate would have declined it
             if m is None:
                 return None
             if EARLY and k < c.k_jump and r.phase == "walk":
