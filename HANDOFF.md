@@ -10262,3 +10262,124 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
    a guard no-start); a hop plan that also clears the other one's circle / landing would be the fix.
 4. The chase guard holds back more chases (ended Far 26 -> 37 of ~360): F evades into the other one's landing band often;
    a re-target to the other Clapper there (the switch) was not built.
+
+
+## Task 1v1 - stage SP11a: the big rune - TWO_RUNETIER (the person's pogo sequence, the lead's NOTES 1-9; failed its fixed point three times, stays off; no A/B) (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §83)
+
+The task: SSBOT_FORUM_TWO_RUNETIER per C:\ssbot\data\m2_play\bigrune\answer.txt sections 2-4 (the tiers on F's escape jump
+cast), fixed points per tier (>= 90 % without HP lost from F's antic to L + 110), then the w13 A/B (64 per arm: the default
+vs + RUNETIER vs + TWO_ESC_FALLBACK) and the cause audit. The lead's notes in C:\ssbot\data\m2_play\sp11\NOTE_FROM_LEAD.txt
+(read before every block) changed the content: NOTE 1 (probe the down-spike i-frames against the big rune first), NOTE 4 /
+5 (the person: "no luring at all, just stay in the idle one's face and slash it", then onto its head, pogo, the float timed
+to the burst; the lure / Clawline parts superseded), NOTE 7 (the scope: any jump cast of either Clapper), NOTE 8 / 9 (a
+far Clapper's jump cast at her: let it jump, then pass UNDER it to >= 3-3.5 u behind its landing; the head-pogo the
+fallback). NOTE 2 (calibrate SP10b's air chain first) was not done (below); NOTE 6 is SP11b's. F = the jump caster (the
+focus at its wall for an escape cast), B = the Clapper she pogos (the other one); A = F's Jump Aim, L = its landing; u
+centre to centre (her box centre, its transform), her box bottom above the floor for heights. Forum_W_w13 (fo_cl_w13w),
+instances 0 / 1, 1x. Data `C:\ssbot\data\m2_play\sp11\s1` (`iframe_probe.*`, `iframe_cases.txt`, `float_check.json`,
+`esc_s11g.*` the default's baseline, `fp1` / `fp2` / `fp3` the fixed points: `fp_sum.json / .txt`, `press_check.txt`,
+fp3 `audit.json / .txt` + traces `hp`; `replay_<sha>` identity; `scripts`). No human practice ran; the trading bot was
+not touched.
+
+### Result
+
+- **Not promoted; no A/B** (the person's rule: the fixed point first). Pooled per round (s11TF = rnjb + RUNETIER +
+  TWO_ESC_FALLBACK, 32 w13 episodes each, gate: no HP lost from the caster's antic to L + 110):
+
+| round | code | the focus's escape casts (pogo) | other jump casts (pogo / pass) | fallback corners | sent down slashes bounced | failures -> change |
+|---|---|---|---|---|---|---|
+| fp1 | 8699dc5 | 5 / 10 | 3 / 10 | 7 / 9 | 19 / 25 | one-frame attack presses lost on skipped ticks; a held jump key (no edge) never jumped; B walked out of thin contacts; 4 'other' targets leapt themselves -> two-frame press, release first, B's velocity + 0.4 u deep contact, re-plan after the jump, end on "b jump" |
+| fp2 | 08142d7 | 8 / 13 | 4 / 10 | 5 / 7 | 17 / 17 | 5 floats ended after ~16 frames: the run sent 0 while the umbrella relinquished control (hero_accepting_input false) - the circle then hit her 5 times at L + 67 .. 74, 0.8 - 2.9 u up -> keys inside the umbrella |
+| fp3 | 7395500 | **11 / 15 (73 %)** | 4 / 7 | 5 / 11 | - | B's body after F's landing (4), B's evades / own escape jumps |
+
+  The default handles the same casts at ~67 % (SP11-0's s11g + chk2, 96 episodes: the focus's escape casts with B free 29
+  / 43, other jump casts with the target free 28 / 42), so fp3's 73 % is not a proven gain. Episodes (other seeds, not a
+  comparison): hitless clears 3 / 4 / 6 of 32, both killed 20 / 18 / 19; fp3's audit 4.18 HP-loss hits / min (s11g in the
+  SP11-0 A/B 3.11).
+- **NOTE 1 (the probe): the down-spike i-frames block the big rune.** `cState.downspikeInvulnerabilitySteps > 0` blocks
+  ENEMY damage unless the DamageHero has `noBounceCooldown` (HeroController.cs:5264 / 5391); the rune slam's damager is
+  hazard_type 1 (ENEMY). On the recordings (1,630 w13 episodes, 17,015 frames with her box touching a lit big circle):
+  20261016_144051 i1 e0 f 3252230 - her box 1.2 - 2.2 u inside the lit circle for 6 frames with steps 5 .. 1, no damage;
+  the hit came on the first frame with steps 0 (`iframe_cases.txt`). One deep case only (the others with steps > 0 were
+  outside), so it is a strong but single-case answer.
+- **The float clears the dome**: a pogo on a Clapper's head (her box bottom 4.5 - 5.2 u at the contact) and the umbrella
+  ~10 frames later float her at 7.6 - 8.9 u for ~40 frames (recorded 3456616: >= 7.6 from + 13 to + 54), above the dome's
+  top (7.19 + 0.34 = 7.53 u) and above F's landing hammer (Slam Collider 2's polygon (0.67, 0.6) (2.4, 5.0) (4.07, 6.9)
+  (6.09, 5.8) (7.76, 0.1) (7.17, -0.7) u along its facing / above the floor). The hero model floats 0.2 - 0.3 u high in
+  the clean cases, ~1 u high after a "Recoil Twirl" bounce (`float_check.json`, 40 recorded bounce + umbrella sequences).
+- **Where the escape casts cost the default** (s11g + chk2, 96 episodes): 87 escape jump casts (0.91 / episode), HP lost
+  antic .. L + 110 in 34 (39 %); 48 of 153 HP-loss hits fell in these windows; 10 clears lost their hitless status only
+  there (3 more with escape jumps). B was free at F's antic in 43 (14 lost HP), busy in 44 (20).
+
+### 1. Code (`combat/rune_pogo.py`, `combat/two_play.py`, `combat/tactics/gauntlet.py`, `train/forum_planner_policy.py`, `tools/sp10_audit.py`, `tools/forum_policy_replay.py`)
+
+- `SSBOT_FORUM_TWO_RUNETIER` (default off; `SSBOT_FORUM_TWO_RUNETIER_SET` overrides RtCfg). The run (TwoPlay.esc mode
+  "pogo", L2 holds B through it - also after F's landing, `hold_after`; `rt_critical()`: the policy steps no other script;
+  own `two:rt`): on F's escape jump cast (B free, she in front of F, B >= 6.5 u past it) and, scope 1 (NOTE 7, the
+  default of the switch), on any other jump cast (`_rt_other`: the target free, in front of the caster, no circle over
+  her / it). Phases: go (to B's face 3.0 u from its centre on F's side, a dash beyond 4.5 u, the side slash on B when it
+  meets its body: slash=1) until the predicted aim - 2 (Cast Slam Antic 2 + 40, else the antic + 55); far (at the aim:
+  her spot clear of the hammer and the circle by 0.5 u -> the run ends); air (re-planned every tick on the hero model,
+  air_chain.ChainSim): plans "up" (the jump, no drift before the aim + 1, one down slash meeting B's body box from above
+  0.4 u inside its x edges, B's walk extrapolated), "keep" (the umbrella on an edge / held, a drift toward above B or
+  behind it while it slams), "drop" (one down slash onto B from the float), "pass" (NOTE 8 / 9: for an other jump cast -
+  from its aim on, the key toward 3.25 u behind its landing, a dash held into the sprint or not), "flee" (walk / hop +
+  umbrella). A plan is safe when her box meets none of: B's body (outside the pogo i-frames), the caster's antic body and
+  its flight body (its recorded path: box bottom up to 9.0 u at the apex), its landing hammer (the polygon, L - 3 .. L +
+  13), the dome (lit L + 64 .. 84 or as seen, margin 0.45 u), B's slam hammer (antic + 46 .. 72, 7.57 u high, the lunge);
+  each plan's landing follows its own x at the aim while the aim is to come; a bounce plan is judged to its contact + 45
+  frames; the previous plan is kept while it stays safe; the attack on two frames; a held jump key released 2 frames
+  before a ground jump; the keys go on inside the umbrella (it relinquishes control). End: the circle seen lit then unlit,
+  L + 95, the target leaping itself ("b jump"), F / B gone. `rune_pogo.warm` at the policy's warm-up (~0.25 s).
+- Stats `two_play.esc.rune_tier` (src, tier, the aim, p_aim, L, contacts, umbrellas, drops, plans, the circle, the
+  lowest height while lit, B's moves, HP, plan ms p50 / p99 4-9 / 12-15 ms, the keys); forum_policy_replay writes
+  TwoPlay's stats; sp10_audit knows `two:rt`.
+- Tests `tests/test_sp11a.py` (14: default off, the cfg, the masks, the dome / hammer geometry, the up plan, the closed loop
+  on the hero model (no danger met), the run's start / hold / no-start on a busy B / the fallback, plain escape jumps
+  keep the switch, the go slash, far, the scope, the pass). Full suite at df8ce79: section 5.
+
+### 2. Identity (`sp11\s1\scripts\replay_ident_sp11a.ps1`, `ident_cmp.sh`)
+
+41c7794, cac3388, 8699dc5, 08142d7, 6ccddd8 and df8ce79 with RUNETIER unset: byte-identical to 58cf30b's default
+(`sp11\s0\replay_58cf30b\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006
+i0 e1 / 084036 i1 e0 (2,073 / 1,778). On (open loop): w7 identical (one Clapper), w13 differs from tick 275-293, two
+episodes with an escape cast early (182407 i1 e0, 182823 i0 e1) run, 0 errors.
+
+### 3. The cause audit (`ssbot.tools.sp10_audit` on fp3, s11TF, 32 episodes; `fp3\audit.json / .txt`, traces `fp3\hp`)
+
+Nothing promoted, so the default's audit is SP11-0's (s11g); fp3 for the tier's own runs: 63 HP losses (4.18 / min; s11g
+3.11): small runes 20 (1.33 / min vs 0.73 - the run holds the keys, the low hop is not stepped while it runs), hammer 14,
+body 12, landing 9 (0.60 / min, as s11g), big rune 8 (0.53 / min vs 0.67). Ranked by the hitless clears they cost (19
+clears, 6 hitless, 13 with HP lost): stab in reach in the air 1.5, the planner in the air with the dash ready (L2 on it)
+1.5, the planner moved into it 1.5, the hand-off 1.0, **two:rt moved her into it 1.0**, the slam playbook on one while the
+other hit 1.0, the umbrella 0.83. The tier's own runs over fp1-fp3: 65, HP lost in 30 (the first loss): a Clapper's body
+14 (before F's landing 5, at it 1, in the lit window 3, after 5), the circle in its lit window 7 (fp1-fp2: no bounce / the
+float cut; fp3: 1), F's landing hammer 4, B's slam (hammer 3, its landing 2); the target evaded in 43 of the 65 (its Idle
+coin with her near) and leapt itself (its own escape jump at its wall) in 23 - the target the pogo needs leaves. Switches across situations: inert with one Clapper (w7 identity);
+the fallback corner (TWO_ESC_FALLBACK) 17 / 27 safe over the three rounds.
+
+### 4. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp11a)
+
+`s11T` = rnjb + TWO_RUNETIER; `s11F` = rnjb + TWO_ESC_FALLBACK (= sp9bAB); `s11TF` = both (the fixed-point arm).
+
+### 5. Machine state
+
+Instances 0 and 1 ran fp1 / fp2 / fp3 (started 2026-10-16 20:36), frozen at time scale 1e-4 after each block by
+sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each block (`boost_workers.stop` present again).
+No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{41c7794, dcdadb3, cac3388, 8699dc5, 08142d7, 6ccddd8,
+7395500, df8ce79}`. Manifests `1v1sp11a_fp{1,2,3}_manifest.txt` (sp11_go.ps1 -> sp4_block.ps1 -> sp11_ab.ps1). Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched. Full suite at df8ce79: 1,990 passed, 8 failed (the known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3; `sp11\s1ullsuite_df8ce79.log`).
+
+### Open items
+
+1. **The target leaves**: the pogo needs B under her, but B (free after F's landing, coin-evading before) slams, walks,
+   evades and escape-jumps; the run then holds the keys without a target (14 body losses). Candidates: hand B's slam to
+   the playbook / the air chain, end the run when B leaves and the circle is not due, slash=0 near B's wall (B evaded in
+   43 of 65 runs, leapt itself in 23).
+2. **The pass under the far caster (NOTE 8 / 9)** ran only in fp3 at 7395500 (rush allowed); df8ce79 (waits for the
+   caster's aim) is untested live.
+3. **NOTE 2 (the air chain) not done**: the tier's circle timing needs no strike timing (the float covers ~40 frames above
+   the dome), so it was not the blocker here; the tight double slams still wait on it.
+4. The small runes rose under the tier (the low hop is not stepped while the run holds the keys): let the low hop act
+   inside the run when B casts.
+5. The model's float is 0.2 - 1 u high after some bounces (Recoil Twirl); the dome margin 0.45 u.
