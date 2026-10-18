@@ -10500,7 +10500,7 @@ and PUSHMID ret 2 + RUNLOCK at 1063321: 0 errors).
 ### 5. The cause audit (`ssbot.tools.sp10_audit`; the default pooled over three rounds `ab_pool\audit.json / .txt`, traces `ab_pool\hp`, `ab_pool\rank.txt`; all five arms rounds 1-2 `ab\audit.*`, `ab\rank.txt`)
 
 The default is unchanged, so the audit is of the default itself, pooled over all three rounds (rnjb, 128 episodes; the
-64-episode rounds-1-2 audit of all five arms is `abudit.*`): 213 HP losses (3.47 / min): small runes 51, big rune 49, body
+64-episode rounds-1-2 audit of all five arms is `ab\audit.*`): 213 HP losses (3.47 / min): small runes 51, big rune 49, body
 45, landing 42, hammer 26; by class L2 / planner 127, script conflict 47, airborne / landing 38, cooldown 1, host 0; 53 of
 213 in an escape jump's window. Ranked by the hitless clears they cost (61 clears with HP lost; a clear with k losses gives
 1 / k to each cause): **the planner in the air with the dash ready, L2 on the other Clapper 7.33 (alone 6), the same with L2
