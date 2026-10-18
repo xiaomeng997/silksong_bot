@@ -37,7 +37,8 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import air_chain, cast_stab, claw_chase, evade_chase, forum_v2, rune_lowhop, slam_play, two_play
+from ssbot.combat import (air_chain, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, slam_play,
+                          two_play)
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -328,6 +329,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         planner.warm_kernels()
         if air_chain.AIRCHAIN:
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
+        if claw_strike.CLAWSTRIKE:
+            claw_strike.warm(self.params)     # SP13: the Clawline strike's plan paths (air_chain's evaluate)
         if two_play.RUNETIER:
             from ssbot.combat import rune_pogo
             rune_pogo.warm(self.params)       # SP11a: the pogo tier's planner (else compiled inside a tick)
@@ -829,7 +832,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
-                   if air_chain.AIRCHAIN and self.two is not None else None)
+                   if ((air_chain.AIRCHAIN and self.two is not None) or claw_strike.CLAWSTRIKE) else None)
             if two_play.PUSHMID and self.two is not None:
                 self.slam_play.side_hint = self.two.pm_hint()  # SP11b: F's slam's way out to its wall side
             bks = None

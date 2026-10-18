@@ -51,6 +51,7 @@ import time
 from dataclasses import dataclass, field
 
 from ssbot.combat import air_chain as _ac
+from ssbot.combat import claw_strike as _cs
 from ssbot.combat import jump_behind as _jb
 from ssbot.knowledge import kinematics as kin
 
@@ -446,6 +447,14 @@ class Run:
     chain_from: object = None        # ... a run on B opened by the chain's strike: A's iid
     chain_log: list = field(default_factory=list)   # [frame, event, plan row]
     rg_k: int | None = None          # SP11-0 TWO_RUNEGATE: the antic frame it started where the old gate declined
+    cs: object = None                # SP13 SSBOT_FORUM_CLAWSTRIKE: the Clawline plan (claw_strike.CsPlan) once taken
+    cs_toward: int = 0               # ... the world direction toward S
+    cs_k_press: int | None = None    # ... the Clawline's antic frame (sent)
+    cs_k_ctrl: int | None = None     # ... control's antic frame
+    cs_strike: object = None         # ... the strike's plan (air_chain.Plan) from control
+    cs_log: list = field(default_factory=list)   # [frame, event, data]
+    cs_hit: bool = False             # ... a hit on S after the strike's press (the strike's bounce)
+    cs_next: int = 0                 # ... a failed Clawline search is tried again from this mask frame
 
 
 class SlamPlay:
@@ -467,6 +476,8 @@ class SlamPlay:
         self.side_hint: dict = {}            # SP11b TWO_PUSHMID: Clapper iid -> the world side of its way out
         self._bombs = None                   # SP12a TWO_STRIKEGUARD: this tick's bomb forecast (rune_bombs.frames)
         self.sg: list = []                   # ... [iid, antic entry, k, why, decline / abort, ticks] per guard event
+        self._csx = None                     # SP13 SSBOT_FORUM_CLAWSTRIKE: claw_strike.ClawStrike (made on first use)
+        self.cs_declines: dict = {}          # ... why a slam the playbook could not reach got no Clawline
 
     def reset(self) -> None:
         self.run = None
@@ -479,6 +490,7 @@ class SlamPlay:
         self.side_hint = {}
         self._bombs = None
         self.sg = []
+        self.cs_declines = {}
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -605,6 +617,18 @@ class SlamPlay:
                 out["chain_b_bounced"] += r.bounced
         if self.holds:
             out["tight_holds"] = len(self.holds)
+        if _cs.CLAWSTRIKE:
+            for r in self.done + ([self.run] if self.run is not None else []):
+                if r.cs is None:
+                    continue
+                out["cs_runs"] += 1
+                out["cs_pressed"] += r.cs_k_press is not None
+                out["cs_ctrl"] += r.cs_k_ctrl is not None
+                out["cs_struck"] += r.cs_strike is not None and r.k_press is not None
+                out["cs_hit"] += r.cs_hit
+                out[f"cs_end_{r.phase}_{r.why[:24]}"] += 1
+            for why, n in self.cs_declines.items():
+                out[f"cs_no_{why}"] += n
         rg = [[r.iid, r.fa, r.rg_k, r.phase, r.why, r.k_press, r.bounced]
               for r in self.done + ([self.run] if self.run is not None else []) if r.rg_k is not None]
         res = dict(out)
@@ -623,14 +647,19 @@ class SlamPlay:
         for r in self.done + ([self.run] if self.run is not None else []):
             row = [r.iid, r.fa, r.phase, r.why, r.k_start, r.k_jump, r.k_press, r.bounced, r.ks0, r.k_air, r.k,
                    r.side_why]
-            if r.handoff or r.tight is not None or r.chain_log or r.chain_from is not None:
+            if r.handoff or r.tight is not None or r.chain_log or r.chain_from is not None or r.cs_log:
                 row += [r.handoff, None if r.tight is None else list(r.tight), r.k_slash, r.chain_log,
                         r.chain_from]
+            if r.cs_log:
+                # SP13 SSBOT_FORUM_CLAWSTRIKE: [the plan, the log, the Clawline's / control's antic frames, the strike]
+                row += [None if r.cs is None else r.cs.row(), r.cs_log, r.cs_k_press, r.cs_k_ctrl,
+                        None if r.cs_strike is None else r.cs_strike.row()]
             out.append(row)
         return out
 
     def active(self) -> bool:
-        return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after")
+        return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after", "cs_pre", "cs_lock",
+                                                            "cs_strike")
 
     def abort(self, why: str) -> None:
         """Hand the slam back to the planner (the supervisor took the keys)."""
@@ -719,9 +748,19 @@ class SlamPlay:
         if r.hp0 is not None and hp < r.hp0:
             self._close("abort", "hurt")
             return None
+        if r.phase in ("cs_pre", "cs_lock", "cs_strike"):
+            # SP13 SSBOT_FORUM_CLAWSTRIKE: the Clawline approach holds the keys
+            return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
         if r.phase == "land" and ground:
             r.phase = "wait"                              # landed: the start check (walk time from here)
         if r.phase == "land":
+            if (_cs.CLAWSTRIKE and sim is not None and accepting
+                    and (k > (c.k_jump_late2 if LATE else c.k_jump_late - 1)
+                         or (LATE and k + _fall_frames(s) > c.k_jump_late2) or self._cs_cfg().trigger == "force")):
+                # SP13: no landing in time for the ground strike (or the trials' force): the Clawline approach
+                cm = self._cs_try(r, k, f, s, e, ground, accepting, sim, hp, t, "no landing")
+                if cm is not None:
+                    return cm
             if k > (c.k_jump_late2 if LATE else c.k_jump_late - 1) or (not accepting and not LATE):
                 self._close("abort", "no landing" if accepting else "no input in the air")
                 return None
@@ -748,10 +787,24 @@ class SlamPlay:
                 if why is not None:
                     r.why = why
                     return None
+            if _cs.CLAWSTRIKE and sim is not None and self._cs_cfg().trigger == "force":
+                # SP13 fixed-point trials: the Clawline approach on every slam it can reach from force_min_u
+                if (hero_x(s) - float(e["pos"][0])) * r.face >= self._cs_cfg().force_min_u:
+                    cm = self._cs_try(r, k, f, s, e, ground, accepting, sim, hp, t, "force")
+                    if cm is not None:
+                        return cm
             m = self._try_start(r, k, s, e, ground, accepting, hp, f)
             if m is not None and TWO_RUNEGATE and self._rg_tick == k and r.rg_k is None:
                 r.rg_k = k                            # SP11-0: started where the old gate would have declined it
             if m is None:
+                if (_cs.CLAWSTRIKE and sim is not None and self.run is r and r.phase == "wait"
+                        and (r.why == "no time to walk" or r.why == "in the air"
+                             or (r.why.startswith("distance") and (hero_x(s) - float(e["pos"][0])) * r.face
+                                 > c.reach[1]))):
+                    # SP13: the ground strike cannot reach it in time: the Clawline approach
+                    cm = self._cs_try(r, k, f, s, e, ground, accepting, sim, hp, t, r.why.split(" ")[0])
+                    if cm is not None:
+                        return cm
                 return None
             if EARLY and k < c.k_jump and r.phase == "walk":
                 m = self._early(r, k, f, s, e, float(e["pos"][0]), ground, m)   # SP6: no key away before a press
@@ -813,7 +866,14 @@ class SlamPlay:
                 return None
         else:                                             # after the press: never the jump
             if not r.bounced:
-                if float((h.get("vel") or [0, 0])[1]) > 6.0:
+                if r.cs is not None:
+                    # SP13: the Clawline's own bounce rises at the press: the strike's bounce is its hit on S
+                    if self._cs_s_hit(s, r):
+                        r.bounced = r.cs_hit = True
+                    elif k > r.k_press + 14:
+                        self._close("abort", "no bounce")
+                        return None
+                elif float((h.get("vel") or [0, 0])[1]) > 6.0:
                     r.bounced = True
                 elif k > r.k_press + 14:
                     self._close("abort", "no bounce")
@@ -1080,6 +1140,194 @@ class SlamPlay:
         return _ac.Ctx(b_iid=b.get("iid"), b_x=float(b["pos"][0]), b_y=float(b["pos"][1]),
                        b_face=1 if b.get("flipX") else -1, kb0=int(round(tin * 60.0)) - (f - sim.fo), a_box=a_box,
                        hero_x=hero_x(s), face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
+
+    # ---- SP13 SSBOT_FORUM_CLAWSTRIKE ----
+
+    def _cs_cfg(self) -> "_cs.CsCfg":
+        if self._csx is None:
+            self._csx = _cs.ClawStrike(_cs.CsCfg.from_env())
+        return self._csx.cfg
+
+    def _cs_decline(self, r: Run, f: int, why: str) -> None:
+        if not any(x[1] == "no" and x[2] == why for x in r.cs_log):
+            r.cs_log.append([f, "no", why])
+            self.cs_declines[why] = self.cs_declines.get(why, 0) + 1
+
+    def _cs_other(self, s: dict, r: Run) -> dict | None:
+        return next((o for o in clappers(s) if o.get("iid") != r.iid), None)
+
+    @staticmethod
+    def _cs_box(o: dict | None) -> tuple | None:
+        """A Clapper's body AABB (its collider, else the standing box from BODY_FRONT / BACK)."""
+        if o is None:
+            return None
+        for col in o.get("colliders") or ():
+            nm = str(col.get("name") or "")
+            if (nm == CLAPPER or nm.startswith(CLAPPER + " (")) and col.get("enabled") and col.get("verts_world"):
+                xs, ys = col["verts_world"][0::2], col["verts_world"][1::2]
+                return float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
+        ax, ay = float(o["pos"][0]), float(o["pos"][1])
+        fa = 1 if o.get("flipX") else -1
+        x0, x1 = sorted((ax + fa * BODY_FRONT, ax - fa * BODY_BACK))
+        return x0, ay - 4.43, x1, ay - 0.53
+
+    def _cs_ctx(self, r: Run, s: dict, e: dict, sim, t: float, f: int) -> "_cs.CsCtx":
+        h = s.get("hero") or {}
+        fc = h.get("facing")
+        kb0 = int(round((t - r.ta) * 60.0)) - (f - sim.fo)        # S's antic frame at the sim's rollout index 0
+        return _cs.CsCtx(s_iid=r.iid, s_x=float(e["pos"][0]), s_y=float(e["pos"][1]), s_face=r.face, kb0=kb0,
+                         hero_x=hero_x(s), face=1 if fc is None or float(fc) >= 0 else -1,
+                         other_box=self._cs_box(self._cs_other(s, r)), tls=_ac.timelines())
+
+    def _cs_try(self, r: Run, k: int, f: int, s: dict, e: dict, ground: bool, accepting: bool, sim, hp: int,
+                t: float, why: str) -> int | None:
+        """SP13: start the Clawline approach on S when its gates hold and a plan exists (the keys for frame f + 2),
+        else None (the playbook / the planner as before; the decline is logged once per reason)."""
+        c = self._cs_cfg()
+        if r.cs is not None or f + 2 < r.cs_next:
+            return None
+        h = s.get("hero") or {}
+        cx = float(e["pos"][0])
+        hx = hero_x(s)
+        x = (hx - cx) * r.face
+        reason = None
+        if not accepting:
+            reason = "input"
+        elif int(h.get("silk") or 0) < 1 or not ((h.get("can") or {}).get("harpoon", True)):
+            reason = "silk"
+        elif x <= 0:
+            reason = "behind"
+        elif k > c.k_last:
+            reason = "late"
+        else:
+            o = self._cs_other(s, r)
+            if o is not None:
+                ob = self._cs_box(o)
+                lo, hi = sorted((hx, cx))
+                if ob[0] - _cs.HALF_W < hi and ob[2] + _cs.HALF_W > lo:
+                    reason = "other in the way"
+            if reason is None and c.room:
+                # only when she cannot leave the hammer's reach (13 u from its centre) on her side
+                out_x = cx + r.face * 13.0
+                if WALL_L + 0.5 <= out_x <= WALL_R - 0.5 and (
+                        o is None or not min(hx, out_x) - 0.5 < float(o["pos"][0]) < max(hx, out_x) + 0.5):
+                    reason = "room"
+        if reason is None:
+            if self._csx.params is None:
+                self._csx.params, self._csx.terrain = sim.params, sim.terrain
+            t0 = time.perf_counter()
+            plan = self._csx.plan(sim, self._cs_ctx(r, s, e, sim, t, f), ground, accepting)
+            ms = round(1e3 * (time.perf_counter() - t0), 1)
+            if plan is None:
+                r.cs_next = f + 2 + 2                          # a failed search is tried again 2 frames later
+                if not any(x_[1] == "none" for x_ in r.cs_log):
+                    r.cs_log.append([f, "none", k, ms])
+                reason = "no plan"
+        if reason is not None:
+            self._cs_decline(r, f, reason)
+            return None
+        r.cs, r.cs_toward = plan, (1 if cx > hx else -1)
+        r.phase, r.k_start, r.x_start, r.hp0, r.why = "cs_pre", k, round(x, 3), hp, ""
+        hb = h.get("box") or [0, FLOOR_Y - 1.56, 0, 0]
+        r.cs_log.append([f, "plan", why, k, round(x, 2), round(float(hb[1]) - (FLOOR_Y - 1.56), 2), plan.row(), ms])
+        return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
+
+    @staticmethod
+    def _cs_s_hit(s: dict, r: Run) -> bool:
+        """A hit on S this tick that is not the Clawline's own (the strike's down slash)."""
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if (ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.iid
+                    and "Harpoon" not in str(d.get("src") or "")):
+                return True
+        return False
+
+    def _cs_step(self, r: Run, k: int, f: int, s: dict, e: dict, ground: bool, accepting: bool, sim,
+                 t: float) -> int | None:
+        """SP13: the Clawline approach's keys for frame f + 2 (the press, the lock to control, the strike), or None
+        (the run aborted: the planner decides)."""
+        F = f + 2
+        p = r.cs
+        h = s.get("hero") or {}
+        if r.phase == "cs_pre":
+            if F < p.f_press - 1 and sim is not None:
+                # re-checked from this tick's state: the committed press, else another press (no new hop)
+                ctx = self._cs_ctx(r, s, e, sim, t, f)
+                hu = p.f0 + p.hop if p.hop else None
+                q = self._csx.plan(sim, ctx, False, accepting, hop_until=hu, p_only=p.f_press)
+                if q is None:
+                    q = self._csx.plan(sim, ctx, False, accepting, hop_until=hu)
+                    if q is None:
+                        r.cs_log.append([f, "lost", k])
+                        self._close("abort", "cs lost")
+                        return None
+                    r.cs_log.append([f, "replan", k, q.row()])
+                q.f0, q.hop = p.f0, p.hop                      # the hop's own frames
+                r.cs = p = q
+            m = _cs.plan_mask(p, F, r.cs_toward)
+            if F >= p.f_press + 1:
+                r.phase = "cs_lock"
+                r.cs_k_press = k - (F - p.f_press)
+                r.cs_log.append([f, "press", r.cs_k_press])
+            r.sent.append((F, m))
+            return m
+        if r.phase == "cs_lock":
+            harp = str((h.get("anim") or {}).get("clip") or "").startswith("Harpoon")
+            if accepting and not harp and F > p.f_press + 12:
+                r.phase = "cs_strike"
+                r.cs_k_ctrl = k - SEND_AHEAD
+                hb = h.get("box") or [0, FLOOR_Y - 1.56, 0, 0]
+                r.cs_log.append([f, "ctrl", r.cs_k_ctrl, round((hero_x(s) - float(e["pos"][0])) * r.face, 2),
+                                 round(float(hb[1]) - (FLOOR_Y - 1.56), 2), round(float((h.get("vel") or [0, 0])[1]), 1)])
+            elif F > p.f_press + 45:
+                r.cs_log.append([f, "noctrl", k])
+                self._close("abort", "cs no control")
+                return None
+            else:
+                r.sent.append((F, 0))
+                return 0
+        # cs_strike: the down slash on S's Slam 0 body (air_chain's plans from this tick's hero model)
+        if sim is None:
+            self._close("abort", "cs no sim")
+            return None
+        cx = float(e["pos"][0])
+        a_entry = int(round(f - (t - r.ta) * 60.0))                # S's antic entry as a STATE frame
+        fc = h.get("facing")
+        actx = _ac.Ctx(b_iid=r.iid, b_x=cx, b_y=float(e["pos"][1]), b_face=r.face, kb0=sim.fo - a_entry,
+                       a_box=self._cs_box(self._cs_other(s, r)), hero_x=hero_x(s),
+                       face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
+        cfg = self._cs_cfg()
+        sp_ = r.cs_strike
+        if sp_ is None or not _ac.check(sim, actx, sp_):
+            f_min = max(F, a_entry + r.cs_k_ctrl + cfg.cd_f - 1, a_entry + cfg.press_k[0])
+            plans = []
+            for fp in range(f_min, a_entry + cfg.press_k[1] + 1):
+                for d in cfg.drifts:
+                    for dk in ((0,) if d == 0 else (r.cs_toward, -r.cs_toward)):
+                        m_ = 0 if dk == 0 else (M_R if dk > 0 else M_L)
+                        plans.append(_ac.Plan(F, m_, F + d, None, None, fp, fp - a_entry, r.iid))
+            ok = _ac.evaluate(sim, actx, plans, F) if plans else []
+            if ok:
+                ok.sort(key=lambda q_: (abs(q_.k_press - 47), q_.d_end - q_.f0, q_.c_strike - q_.f_press))
+                q = ok[0]
+                q.n_ok = len(ok)
+                r.cs_log.append([f, "strike" if sp_ is None else "restrike", q.row(), len(ok)])
+                r.cs_strike = sp_ = q
+            elif sp_ is not None and sp_.f_press - F <= _ac.KEEP_F:
+                if not r.cs_log or r.cs_log[-1][1] != "keep":
+                    r.cs_log.append([f, "keep", sp_.row()])
+            else:
+                r.cs_log.append([f, "nostrike", k])
+                self._close("abort", "cs no strike")
+                return None
+        m = _ac.mask_at(sp_, F)
+        if sp_.pressed is None and F >= sp_.f_press and m & M_A:
+            sp_.pressed = F
+            r.k_press = k
+            r.phase = "after"
+            r.cs_log.append([f, "pressed", k])
+        r.sent.append((F, m))
+        return m
 
     # ---- parts ----
 
