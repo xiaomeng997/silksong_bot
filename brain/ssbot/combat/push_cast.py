@@ -58,10 +58,11 @@ class PcCfg:
     trig: str = "nat"          # nat: TWO_PUSHMID's gates (F nearer its wall than B, B idle / walking and out of the lock-
     #                            bounded run's reach); force: every close cast of F with room behind it (the fixed point)
     ret: int = 1               # the herd's return rule: 1 after one F move, 2 once the lock-bounded run to B passes
-    room_c: float = 3.8        # F's centre to the wall behind it (away from her) at the antic >= this (land_lo + the wall pad + 0.3)
+    room_c: float = 4.3        # F's centre to the wall behind it (away from her) at the antic >= this (land_lo + the wall pad + 0.3)
     d_max: float = 7.5         # she within this of F's centre at the antic (in front of it)
-    land_lo: float = 3.0       # her landing behind x0 (fp1: F turns to face her in its Idle - its front 2.25 + her
-    #                            half width 0.25 + 0.5) ...
+    land_lo: float = 3.5       # her landing behind x0 (fp1: F turns to face her in its Idle - its front 2.25 + her
+    #                            half width 0.25 + 1.0: fp2 - her ground slashes push F 0.48 u toward her landing side and
+    #                            the real drift after the bounce fell 0.5 - 0.8 u short of the model's) ...
     land_hi: float = 5.6       # ... to this (ring 2's inner edge 5.98 - her half width - 0.15)
     wall_pad: float = 0.5      # and this clear of the wall
     k_plan0: int = 12          # over plans from this antic frame on ...
@@ -69,6 +70,7 @@ class PcCfg:
     tgt_c: int = 8             # the contact's target: Cast 2 + this (fp1: contacts near Cast 2 + 14, where its body
     #                            top drops 4.78 -> 3.19 u, missed; the i-frames ~9 frames, ring 0 lights ~C + 20)
     idle_k: int = 22           # F's body may turn toward her from Cast 2 + this (its Idle: the box both ways)
+    guard_u: float = 0.7       # after the bounce: falling within this of F's body box (x) -> the key away from it
     every: int = 3             # ... every this many ticks (the plan kept and checked between)
     horizon: int = 110
     body_m: float = 0.1

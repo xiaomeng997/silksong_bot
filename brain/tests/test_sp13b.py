@@ -118,7 +118,7 @@ TERR = kin.Terrain2D.from_boxes([(-200.0, pc.FLOOR - 10.0, 260.0, pc.FLOOR), (0.
 def test_pmcast_defaults_off():
     assert not pc.PMCAST and not tp.PMCAST
     c = pc.PcCfg()
-    assert (c.trig, c.ret, c.room_c, c.land_lo, c.land_hi, c.k_last, c.tgt_c) == ("nat", 1, 3.8, 3.0, 5.6, 62, 8)
+    assert (c.trig, c.ret, c.room_c, c.land_lo, c.land_hi, c.k_last, c.tgt_c) == ("nat", 1, 4.3, 3.5, 5.6, 62, 8)
     assert not lh.RuneLowHop(two=True).pmc
 
 
@@ -147,7 +147,7 @@ def test_pmcast_start_nat_and_force(pmc):
     two.pccfg = pc.PcCfg(trig="force")
     two.observe(100, s, 100 / 60.0)
     assert two.pm is not None and not two.pm.nat
-    # no room behind F (2.99 u to the wall): none even forced (room_c 3.8)
+    # no room behind F (2.99 u to the wall): none even forced (room_c 4.3)
     two = tp.TwoPlay()
     two.pccfg = pc.PcCfg(trig="force")
     s = two_state(100, "Spell Antic", 0.0, x_rel=4.0, cx=17.0, flip=True, b_st="Idle", b_x=40.0)
@@ -172,7 +172,7 @@ def test_over_plan_crosses_to_the_wall_side():
     assert p.jump[0] >= F0 and p.contact > p.press
     assert pl.again(p)
     x_land = float(p.why.rsplit("x ", 1)[1])
-    assert 3.0 <= fx - x_land <= 5.6
+    assert 3.5 <= fx - x_land <= 5.6
 
 
 def test_b2_plan_kept_while_it_clears_the_moving_windows():

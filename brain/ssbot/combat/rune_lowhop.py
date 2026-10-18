@@ -418,6 +418,7 @@ class Hop:
     op_k: int | None = None      # the antic frame of the jump press (committed)
     op_j0: int | None = None     # its mask frame
     op_bounce: int | None = None  # the mask frame the bounce off F's head was seen
+    op_guard: int = 0            # ticks the landing guard steered her off F's body
     op_fail: int = 0             # ticks the committed plan failed its check
     op_alt: int = 0              # in-air replacements (best_air)
 
@@ -545,7 +546,8 @@ class RuneLowHop:
                 **({"b2": {"free": r.free, "rehop": r.rehop, "big": r.big, "split": r.split, "air": r.air,
                            "owners": sorted(str(o) for o in r.owners), "iid": str(r.iid)}} if BOMBS2 else {}),
                 **({"pm": {"dir": r.pm, "why": r.pm_why, "k_jump": r.op_k, "plans": r.op_plans,
-                           "ms": round(r.op_ms, 1), "fail": r.op_fail, "alt": r.op_alt,
+                           "ms": round(r.op_ms, 1), "fail": r.op_fail, "alt": r.op_alt, "guard": r.op_guard,
+                           "bounce": r.op_bounce,
                            "plan": None if r.op is None else [r.op.jump, r.op.d0, r.op.d1, r.op.press, r.op.contact,
                                                               r.op.umb, r.op.why]}}
                    if (r.pm is not None or r.pm_why) else {})}
@@ -1068,6 +1070,19 @@ class RuneLowHop:
             self.pm_giveup = "miss"
             self._close("abort", "pm miss")
             return None
+        if r.op_bounce is not None and not ground and e is not None and vy < 0:
+            # (SP13b fp2) the landing guard: falling onto F's body (it turned to face her, her slashes pushed it toward
+            # her landing, the real drift fell short) -> the key away from its centre, to its wall side
+            from ssbot.combat import rune_pogo as _rpg
+            bx0, _by0, bx1, _by1 = _rpg.body_box(e)
+            g = self.pccfg.guard_u
+            hx = _sp.hero_x(s)
+            if bx0 - g - HALF_W < hx < bx1 + g + HALF_W:
+                fx = float(e["pos"][0])
+                side = 1 if hx >= fx else -1
+                r.op_guard += 1
+                m = _rpg.mask_at(p, F0) & ~(M_L | M_R)
+                return m | (M_R if side > 0 else M_L)
         if self._sim is not None and e is not None and (p.press is None or F0 <= p.press):
             pl, _tgt = self._over_planner(r, f, s, e, ground)
             if not pl.again(p):
