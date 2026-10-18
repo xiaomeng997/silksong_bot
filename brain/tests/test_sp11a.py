@@ -277,3 +277,25 @@ def test_scope_any_jump_cast_of_the_other_one(tier, monkeypatch):
     two = tp.TwoPlay()
     _run(two, ss(3.0))
     assert two.esc is None and two.esc_n["rt_other"] == 0
+
+
+def test_pass_under_the_far_caster():
+    """The lead's NOTE 8: another Clapper's jump cast at her from 13 u - under its flight to 3.25 u behind its landing
+    (each plan's landing from its own x at the aim), no danger to the horizon."""
+    jx, hx, ix = 38.0, 25.0, 22.0
+    cfg = rp.RtCfg()
+    cfg.horizon = 140
+    a_frame = 1053
+    f_L = a_frame + 53
+    ctx = rp.Ctx(F0=1000, b_box=(ix - 1.34, 3.02, ix + 2.25, 6.92), b_x=ix, b_ok=True, tx=ix, face=1, L=None, f_L=f_L,
+                 fface=-1, rc=None, lit=(f_L + cfg.lit0, f_L + cfg.lit1), a_frame=a_frame, ground=True,
+                 atk_ready_f=1000, f_fall=(a_frame, f_L, jx, rp.landing(jx, hx, -1), -1), jx0=jx,
+                 j_box=(jx - 2.25, 3.02, jx + 1.34, 6.92), pass_x=3.25)
+    pl = rp.Planner(_sim(hx), ctx, cfg)
+    q = pl.best_pass(hx)
+    assert q is not None and q.kind == "pass" and q.bad is None
+    pl.evaluate([q])
+    L = float(pl.last_Ls[0])
+    xe = float(pl.last_ro.centre[0, -1, 0])
+    assert 3.0 <= (xe - L) <= 5.8                                         # behind the landing (it faces left)
+    assert pl.best_pass(hx, prev=q) is not None                          # kept while safe

@@ -101,6 +101,9 @@ class RtCfg:
     #                             air (the drift / the press follow B)
     after_contact: int = 45     # a plan with a bounce is judged to its contact + this (the float then is ~7.6 u up: the
     #                             next plans take it from there - a second bounce, a drift out)
+    pass_x: float = 3.25        # (the lead's NOTE 8) another Clapper's jump cast at her: under it to this far behind its
+    #                             landing (SP10c: 3.0 u clear of its falling body); the pogo on the target the fallback
+    pass_on: int = 1            # 0: no pass (NOTE 7's pogo on the target for those too)
 
 
 def _cfg() -> RtCfg:
@@ -168,6 +171,10 @@ class Ctx:
     atk_ready_f: int = 0          # the first mask frame the attack can be pressed
     gliding: bool = False         # the umbrella is open now
     rising: bool = False          # her own jump is rising with the key held (keep it: a release halves the rise)
+    jx0: float | None = None      # the caster's take-off x while its aim is still to come: each plan's own landing
+    #                               from her x at the aim - 1 in that plan (else the landing L above for all)
+    j_box: tuple | None = None    # the caster's grounded body in its antic (a body she cannot run through)
+    pass_x: float | None = None   # (NOTE 8) the pass-under target: this far behind the caster's landing (u), None: no pass
     b_vx: float = 0.0             # B's x velocity (u per frame) for its box over the plan
     j_held: bool = False          # the jump key is latched now
     f_box: tuple | None = None    # F's body box after its landing (its Slam 2 / Recover / Idle)
@@ -196,6 +203,7 @@ class Plan:
     contact: int | None = None    # its predicted contact (mask frame)
     umb: int | None = None        # the umbrella's press frame (held to the horizon)
     hold_j: bool = False          # keep: the jump (umbrella) held from the first frame
+    dash: tuple | None = None     # pass: the dash press (mask frame) and how long it is held (> 4: into the sprint)
     bad: int | None = None        # the first danger (mask frame), None = none to the horizon
     why: str = ""
 
@@ -204,7 +212,7 @@ class Plan:
                 self.why]
 
     def key(self) -> tuple:
-        return (self.kind, self.dirk, self.d0, self.d1, self.jump, self.press, self.umb, self.hold_j)
+        return (self.kind, self.dirk, self.d0, self.d1, self.jump, self.press, self.umb, self.hold_j, self.dash)
 
 
 def plan_cmds(p: Plan, F0: int, T: int) -> np.ndarray:
@@ -233,6 +241,9 @@ def plan_cmds(p: Plan, F0: int, T: int) -> np.ndarray:
     if p.umb is not None:
         a = max(p.umb - F0, 0)
         out[a:T] |= M_J
+    if p.dash is not None:
+        a, H = p.dash
+        out[max(a - F0, 0):max(min(a + H - F0, T), 0)] |= M_DASH
     return out
 
 
@@ -341,6 +352,19 @@ class Planner:
         cm = np.stack([plan_cmds(p, self.c.F0, self.T) for p in plans])
         return self.sim.roll(cm, ev)
 
+    def landings(self, ro: kin.Rollout) -> np.ndarray:
+        """[N] the caster's landing x per plan: from her x at its aim - 1 in that plan while the aim is to come (jx0),
+        else c.L."""
+        c = self.c
+        N, T1 = ro.flags.shape
+        Ls = np.full(N, np.nan if c.L is None else float(c.L))
+        if c.jx0 is not None and c.a_frame is not None and not c.a_seen:
+            i = self._i(c.a_frame - 1)
+            if self.off <= i < T1:
+                xs = ro.centre[:, i, 0]
+                Ls = np.array([landing(c.jx0, float(x), c.fface) for x in xs])
+        return Ls
+
     def danger(self, ro: kin.Rollout, contacts: np.ndarray) -> np.ndarray:
         """[N] the first danger's rollout index (after off), -1 none; contacts [N] the bounce's index or -1."""
         c, cfg = self.c, self.cfg
@@ -349,31 +373,51 @@ class Planner:
         inv = (ro.flags & kin.F_INVULN) != 0
         pre = (contacts[:, None] >= 0) & (idx >= contacts[:, None] - 2) & (idx < contacts[:, None])
         bad = np.zeros((N, T1), bool)
+        Ls = self.landings(ro)
+        self.last_Ls = Ls
         if c.b_box is not None:
             bad |= box_hits(ro, c.b_box, cfg.body_m, self._b_shift(T1)) & ~inv & ~pre
         if c.f_box is not None:
             bad |= box_hits(ro, c.f_box, cfg.body_m) & ~inv
-        if c.L is not None and c.f_L is not None:
+        if c.j_box is not None and c.a_frame is not None:
+            hi = self._i(c.a_frame + 3)
+            if hi > self.off:
+                bad |= box_hits(ro, c.j_box, cfg.body_m) & ~inv & (idx <= hi)
+        if c.f_L is not None and np.isfinite(Ls).any():
             lo, hi = self._i(c.f_L - 3), self._i(c.f_L + 13)
             if hi > self.off:
                 w = (idx >= lo) & (idx <= hi)
-                bad |= hammer_hits(ro, c.L, c.fface, cfg.hammer_m) & w
-        if c.rc is not None and c.lit is not None:
+                for Lv in np.unique(np.round(Ls[np.isfinite(Ls)], 2)):
+                    sel = np.round(Ls, 2) == Lv
+                    sub = type("R", (), {})()
+                    sub.box, sub.flags = ro.box[sel], ro.flags[sel]
+                    bad[sel] |= hammer_hits(sub, float(Lv), c.fface, cfg.hammer_m) & w
+        if c.lit is not None and (c.rc is not None or np.isfinite(Ls).any()):
             lo, hi = self._i(c.lit[0] - 2), self._i(c.lit[1] + 2)
             if hi > self.off:
                 w = (idx >= lo) & (idx <= hi)
-                bad |= dome_hits(ro, c.rc, cfg.dome_m) & w & ~inv
+                if c.rc is not None and (c.jx0 is None or c.a_seen):
+                    bad |= dome_hits(ro, c.rc, cfg.dome_m) & w & ~inv
+                else:
+                    rcs = np.array([rune_centre(float(L), c.fface) for L in Ls])
+                    b = ro.box
+                    dx = np.maximum(np.maximum(b[..., 0] - rcs[:, None], rcs[:, None] - b[..., 2]), 0.0)
+                    top = dome_top(dx)
+                    bad |= (top > 0) & (b[..., 1] - FLOOR < top + cfg.dome_m) & w & ~inv
         if c.f_fall is not None:
             fa, fl, x0, L, fc = c.f_fall
+            Lp = np.where(np.isfinite(Ls), Ls, L)
             span = max(fl - fa, 1)
+            b = ro.box
             for j in range(max(self.off + 1, self._i(fa)), min(self._i(fl + 2), T1)):
                 k = self._F(j) - fa
                 fr = min(max(k / span, 0.0), 1.0)
-                xc = x0 + (L - x0) * fr
+                xc = x0 + (Lp - x0) * fr                                    # [N]
                 y0 = float(np.interp(k * 54.0 / span, np.arange(0, 66, 6), FLIGHT_Y0))
                 xa, xb = xc - fc * (1.34 + 0.3), xc + fc * (2.25 + 0.3)
-                box = (min(xa, xb), FLOOR + y0 - 0.3, max(xa, xb), FLOOR + y0 + 3.8 + 0.3)
-                bad[:, j] |= box_hits(ro, box, 0.0)[:, j]
+                lo_x, hi_x = np.minimum(xa, xb), np.maximum(xa, xb)
+                bad[:, j] |= ((b[:, j, 0] < hi_x) & (b[:, j, 2] > lo_x) & (b[:, j, 1] < FLOOR + y0 + 3.8 + 0.3)
+                              & (b[:, j, 3] > FLOOR + y0 - 0.3))
         if c.b_hammer is not None:
             f0, f1, x0, x1, top = c.b_hammer
             lo, hi = self._i(f0), self._i(f1)
@@ -508,6 +552,48 @@ class Planner:
             tgt = umb_t if umb_t is not None else F0
             return min(safe, key=lambda p: (abs((p.umb or F0) - tgt), p.d1 - p.d0))
         return max(plans, key=lambda p: (p.bad if p.bad is not None else 1 << 30, p.kind == "keep", p.press or 0))
+
+    def best_pass(self, x0: float, prev: Plan | None = None) -> Plan | None:
+        """(The lead's NOTE 8) under the caster to pass_x behind its landing: wait w frames, then the key toward the
+        target (a dash, held into the sprint or not) for D frames; each plan's landing from its own x at the aim. The
+        previous pass plan while it stays safe and ends behind the landing; else the safe plan ending nearest the
+        target (then the earliest); None without one."""
+        c, F0 = self.c, self.c.F0
+        if c.pass_x is None or c.jx0 is None and c.L is None:
+            return None
+        L0 = c.L if c.L is not None else landing(c.jx0, x0, c.fface)
+        tgt = L0 - c.fface * c.pass_x
+        k = M_R if tgt > x0 else M_L
+
+        def ok(plans):
+            ro, Ls, out = self.last_ro, self.last_Ls, []
+            end_i = ro.flags.shape[1] - 1
+            for n, p in enumerate(plans):
+                L = Ls[n] if np.isfinite(Ls[n]) else L0
+                xe = float(ro.centre[n, end_i, 0])
+                u = (L - xe) * c.fface                       # behind the landing by u (not under it, not back)
+                if p.bad is None and c.pass_x - 0.3 <= u <= c.pass_x + 2.5:
+                    out.append((abs(u - c.pass_x), p.d1, p))
+            return out
+
+        if prev is not None and prev.kind == "pass" and prev.d1 > F0:
+            q = Plan("pass", prev.dirk, prev.d0, prev.d1, dash=prev.dash, why=prev.why)
+            self.evaluate([q])
+            if ok([q]):
+                return q
+        plans = []
+        for w in (0, 10, 20, 30, 42):
+            for dash in (0, 2, 30):
+                for D in (14, 26, 40, 56, 72):
+                    p = Plan("pass", k, F0 + w, F0 + w + D, why=f"pass w{w} d{dash}")
+                    if dash:
+                        p.dash = (F0 + w, dash)
+                    plans.append(p)
+        plans = self.evaluate(plans)
+        out = ok(plans)
+        if not out:
+            return None
+        return min(out, key=lambda t: (round(t[0], 1), t[1]))[2]
 
     def best_flee(self, x0: float) -> Plan:
         """On the ground without a safe contact plan: walk either way (or stand), optionally jump and open the
@@ -780,6 +866,8 @@ class RunePogo:
                 r.tier = "far"
                 self.close(f, "far")
                 return None
+        if r.phase == "go" and r.src == "other" and self.cfg.pass_on:
+            r.phase = "air"                               # (NOTE 8) the pass / the planner from the antic on
         if r.phase == "go":
             if Fm < a_frame - self.cfg.jump_lead:
                 return self._go(f, s, F, B, ground)
@@ -880,7 +968,14 @@ class RunePogo:
         vy = float((h.get("vel") or [0.0, 0.0])[1])
         rising = (not ground) and j_held and vy > 0.5 and not gliding and not clip.startswith("DownSpike")
         bv = float((B.get("vel") or [0.0, 0.0])[0]) / 60.0 if bst in ("Walk",) else 0.0
+        jx0 = r.x0 if r.f_aim is None else None
+        j_box = body_box(F) if fst in ("Cast Slam Antic", "Cast Slam Antic 2") else None
+        pass_x = c.pass_x if (r.src == "other" and c.pass_on) else None
+        if pass_x is not None:
+            Lp = L if r.f_aim is not None else landing(r.x0, _sp.hero_x(s), r.face)
+            tx = min(max(Lp - r.face * pass_x, WALL_L + 0.6), WALL_R - 0.6)
         return Ctx(F0=f + SEND_AHEAD, b_box=bb, b_x=bx, b_ok=bst in B_FREE, tx=tx, rising=rising, b_vx=bv,
+                   jx0=jx0, j_box=j_box, pass_x=pass_x,
                    face=1 if fc is None or float(fc) >= 0 else -1, L=L, f_L=f_L, fface=r.face, rc=rc,
                    lit=(lit0, lit1), a_frame=a_frame, a_seen=r.f_aim is not None, ground=ground, atk_ready_f=rdy,
                    gliding=gliding, j_held=j_held, f_box=f_box, b_hammer=b_ham, f_fall=f_fall)
@@ -898,7 +993,9 @@ class RunePogo:
             t0 = time.perf_counter()
             pl = Planner(sim, ctx, c)
             hx = _sp.hero_x(s)
-            if ground:
+            if ground and ctx.pass_x is not None and (q := pl.best_pass(hx, prev=p)) is not None:
+                pass
+            elif ground:
                 q = pl.best_up(hx, a_frame, prev=p)
                 if q is None or q.bad is not None:
                     fl = pl.best_flee(hx)
@@ -996,6 +1093,9 @@ def warm(params) -> float:
         if ground:
             pl.best_up(hx, F0 + 2)
             pl.best_flee(hx)
+            ctx.jx0, ctx.pass_x, ctx.L, ctx.a_seen = x0, cfg.pass_x, None, False
+            ctx.j_box = (x0 - 1.34, 3.02, x0 + 2.25, 6.92)
+            Planner(sim, ctx, cfg).best_pass(hx)
         else:
             pl.best_air(hx, F0 + 8)
     return time.perf_counter() - t0
