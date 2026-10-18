@@ -10548,7 +10548,7 @@ dc81390}`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_
 5. The audit's top causes are unchanged from SP11-0: the planner airborne with the dash ready and the slam playbook on one
    Clapper while the other hits.
 
-## Task 1v1 - stage SP12a: the SP11 audits' top causes - TWO_RUNEEXIT (the planner's exit tier for a jump cast's big rune circle) and TWO_STRIKEGUARD (TWO_GUARD on the slam strike's path); both failed their fixed point, stay off; no A/B (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §85)
+## Task 1v1 - stage SP12a: the SP11 audits' top causes - TWO_RUNEEXIT (the planner's exit tier for a jump cast's big rune circle) and TWO_STRIKEGUARD (TWO_GUARD on the slam strike's path): RUNEEXIT failed its fixed point; STRIKEGUARD without its bomb part passed its fixed point and lost the A/B (HP-hitless clears 3 vs 10 / 64); nothing promoted (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §85)
 
 The task (SP12a): (1) the planner in the air with the dash ready and no safe row (FORCED_RISK streaks; 14 of SP11b's 61
 clears' cost) - trace a sample frame by frame and fix the root causes behind switches; (2) the slam playbook striking one
@@ -10557,24 +10557,44 @@ ONE w13 A/B (64 per arm), the cause audit. The person's goal: a full-HP clear of
 HP-hitless clears). Forum_W_w13 (fo_cl_w13w), instances 0 / 1, 1x; u centre to centre (her box centre, its transform),
 HeroBox 0.46 u wide. Data `C:\ssbot\data\m2_play\sp12` (`air_dec_rnjb.json` the decision rows before every such HP loss,
 `fr1\*.json` the open-loop row decomposition of 12 of them, `base_rx` the open-loop baseline of 20 default episodes with
-the switches on, `fp1` the fixed point: `fp.json / .txt`, `two.*`, `ab_stats.txt`, `audit.*`, `rank.txt`, traces `hp`;
+the switches on, `fp2` the second fixed point (`fp.json / .txt`), `ab` the A/B (`two.*`, `ab_stats.txt`, `fp.*`,
+`audit.*`, `rank.txt`, traces `hp`), `fp1` the first fixed point: `fp.json / .txt`, `two.*`, `ab_stats.txt`, `audit.*`, `rank.txt`, traces `hp`;
 `base_audit` the default re-audited with the fixed forced flag; `replay_fc8a24e` identity; `scripts`). Commits fc8a24e
-(code + tests), c56d860 (the audit tool), the docs after them. No NOTE_FROM_LEAD in `sp12`; no human practice ran; the
-trading bot was not touched.
+(code + tests), c56d860 (the audit tool), a196093 (the fp1 fix: SSBOT_FORUM_TWO_STRIKEGUARD_BOMB=0; the A/B code), the
+docs after them. The lead's NOTE_FROM_LEAD.txt in `sp12` (05:06, read before the fp2 and A/B blocks; it appeared after
+fp1 began) is for SP12b (the late Clawline as a third option on the far caster) - no action here. No human practice
+ran; the trading bot was not touched.
 
 ### Result
 
-- **Neither switch reached its fixed-point gate (>= 90 %); both stay off; no A/B** (the person's rule: the fixed point
-  first). One round, fp1 (fc8a24e, arm s12xg = rnjb + both, 32 w13 episodes, seeds 8100000.. / 8110000.., 2 x 16):
+- **Nothing promoted; the default is unchanged.** TWO_RUNEEXIT failed its fixed point; TWO_STRIKEGUARD's bomb part failed
+  its fixed point, its body / jump part (SSBOT_FORUM_TWO_STRIKEGUARD_BOMB=0) passed the second one and lost the A/B.
 
-| switch | its events | no HP lost in the window | the default's open-loop baseline (`base_rx`, 20 episodes) |
-|---|---|---|---|
-| TWO_RUNEEXIT (window: the circle's lit frames - 6 .. + 32, big rune hits) | 57 jump-cast circles where the tier split the safe rows (59 circles, her inside every one) | **45 / 57 (79 %)** | the tier would have acted on 32 circles; the default lost no HP to 25 (78 %) |
-| TWO_STRIKEGUARD (window: the event .. antic + 120, any hit) | 21: declines "other bomb" 14, "other body" 5; aborts "other bomb" 1, "other Cast Slam Antic" 1 | **12 / 21 (57 %)**: bombs 7 / 15, body 4 / 5, jump 1 / 1 | it would have fired 6 times; the default lost HP after 2 (67 %) |
+| round | code / arm | switch: its events | no HP lost in the window (gate >= 90 %) | the default's open-loop baseline (`base_rx`, 20 episodes) |
+|---|---|---|---|---|
+| fp1 | fc8a24e / s12xg (both), 32 ep. | RUNEEXIT: 57 jump-cast circles where the tier split the safe rows (window: the lit frames - 6 .. + 32, big rune hits) | **45 / 57 (79 %)** - fails | the tier would have acted on 32 circles; the default lost no HP to 25 (78 %) |
+| fp1 | (same) | STRIKEGUARD: 21 (declines "other bomb" 14 / "other body" 5, aborts "other bomb" 1 / "other Cast Slam Antic" 1; window: the event .. antic + 120) | **12 / 21 (57 %)** - fails: bombs 7 / 15, body 4 / 5, jump 1 / 1 | 6 events, the default lost HP after 2 (67 %) |
+| fp2 | a196093 / s12g0 (STRIKEGUARD, BOMB=0), 64 ep. | 24 (declines "other body" 18, aborts "other Jump Antic" 4 / "other Cast Slam Antic" 2) | **22 / 24 (92 %)** - passes | - |
+| A/B | a196093 / s12g0 | 22 (body 15, cast 5, jump 2) | 16 / 22 (73 %) | - |
 
-  fp1 as a whole (other seeds than the default's, not a comparison): hitless clears 2 / 32, both killed 21, landed / s
-  1.289, HP hits / min 4.20 (the default, SP11b's 128 pooled: 27 / 128, 88, 1.360, 3.47); close slams struck 147 / 203
-  (72 %) vs 631 / 776 (81 %) - the strike guard's 13 "other bomb" declines.
+  fp1 as a whole (other seeds, not a comparison): hitless clears 2 / 32, both killed 21, landed / s 1.289, HP hits / min
+  4.20; close slams struck 147 / 203 (72 %) - the bomb part's 13 declines. **The A/B** (a196093, 64 per arm, block design,
+  2 x 32 per instance, the same seeds 8300000.. / 8310000..; `ab\ab_stats.txt`):
+
+| | rnjb (default) | s12g0 (STRIKEGUARD, no bomb part) |
+|---|---|---|
+| **HP-hitless clears** | **10 / 64 (15.6 %)** | 3 / 64 (4.7 %) |
+| both Clappers killed | 46 | 43 |
+| landed / s | 1.345 | 1.294 |
+| HP-loss hits / min | 3.31 | 3.99 |
+| close slams struck | 304 / 393 (77 %) | 276 / 382 (72 %; not struck "other body" 11) |
+
+  Bootstrap 90 % (episodes resampled), s12g0 - rnjb: hitless-clear rate -0.109 (-0.203 .. -0.031), both killed -3 (-12 ..
+  +6), landed / s -0.052 (-0.107 .. +0.006), HP hits / min +0.68 (-0.06 .. +1.43): worse on the main measure with the
+  interval below 0 -> not promoted. The switch fired 22 times in 64 episodes (17 episodes); its declines hand a slam to the
+  planner (close slams struck 72 % vs 77 %), and the planner-owned HP losses rose 81 -> 96 (94 of them after a FORCED_RISK
+  streak > 6 frames). The 7-clear gap is larger than its 22 events explain alone; part of it is the A/B's noise (SP11b's
+  rounds of the same default: 12 / 64 and 15 / 64).
 - **Why every row is unsafe (task item 1)** - the 45 SP11b default HP losses labelled "the planner in the air, dash
   ready" (`air_dec_rnjb.json`): **44 came at the end of a FORCED_RISK streak** (no safe row; p10 / 50 / 90 13 / 34 / 42
   frames); by what hit: **a jump cast's big rune 18, small runes 15, a jump landing 11** (Jump 6, jump cast 5), a slam
@@ -10639,12 +10659,15 @@ circle)**, 084036 identical; RUNEEXIT alone 381 / 330; STRIKEGUARD alone 144051 
 0 errors; tick p50 / p99 15-20 / 29-36 ms in the switch-on replays (Idle priority; the unset ones overlapped
 the live block: 29-35 / 55-73 ms, not comparable).
 
-### 3. Fixed point (`sp12_go.ps1` -> `sp4_block.ps1` -> `sp12_ab.ps1`; manifest `1v1sp12a_fp1_manifest.txt`; `scripts/fp12.py`)
+### 3. Fixed points and the A/B (`sp12_go.ps1` -> `sp4_block.ps1` -> `sp12_ab.ps1`; manifests `1v1sp12a_{fp1,fp2,ab1}_manifest.txt`; `scripts/fp12.py`, `ab12.ps1`)
 
-As in the Result. The reaction lag: the strike guard runs from the first STATE of the antic (declines at k 2 = the send-
+As in the Result. fp1 -> fp2: the bomb part dropped (a196093, SSBOT_FORUM_TWO_STRIKEGUARD_BOMB=0; its declines lost HP
+after 8 of 15: the hammer at antic + 43 .. 55, the bombs at + 2 .. 27); TWO_RUNEEXIT not retried (no fix found: the
+rows that keep an exit are the ones the planner's own check drops a few ticks later). a196093 with every SP12a switch
+unset: byte-identical to dc81390's default on the four identity episodes (`replay_a196093`). The reaction lag: the strike guard runs from the first STATE of the antic (declines at k 2 = the send-
 ahead); the circle reaches the planner on the jump's first flight STATE (the tier split at that tick in most circles).
 
-### 4. The cause audit (`ssbot.tools.sp10_audit`; the default `base_audit` - SP11b's 128 rnjb episodes with the fixed forced flag -, the bundle `fp1\audit.*`, `rank.txt`, traces `hp`)
+### 4. The cause audit (`ssbot.tools.sp10_audit`; the A/B `ab\audit.*`, `ab\rank.txt`, traces `ab\hp`; the default re-audited with the fixed forced flag `base_audit`; the bundle `fp1\audit.*`)
 
 The default is unchanged. **Default (128 episodes, 213 HP losses, 3.47 / min; 155 planner-owned, 152 of them after a
 FORCED_RISK streak > 6 frames, median 36)**, ranked by the hitless clears they cost (61 clears with HP lost; 1 / k each):
@@ -10662,15 +10685,31 @@ circle" 12 / 32); F's Idle entries hit within 30 frames 247 / 356 (69 %) / 1,038
 acts in the one-Clapper phase too (w7 identity); the strike guard needs two Clappers. One Clapper left: bundle 134.7 s, 3
 HP losses; default 549 s, 7.
 
+**The A/B (64 per arm)**: rnjb 106 HP losses (3.31 / min; big rune 27, hammer 23, small runes 22, landing 17, body 17; L2 /
+planner 62, airborne 24, script conflict 20); s12g0 125 (3.99; small runes 32, big rune 29, landing 26, hammer 22, body
+16; L2 / planner 74, script conflict 26, airborne 25). Ranked by the hitless clears they cost - rnjb (36 clears with HP
+lost): the planner in the air with the dash ready, forced, L2 on the other 8.00 (alone 5), the slam playbook on one while
+the other hit 4.00 (small runes 7 of its 10 losses, the other's jump body 3), the umbrella 3.50, the chase on one while the
+other hit 2.00, "slam not struck: no input at the antic" 2.00, the gate "other rune circle" 2.00; s12g0 (40): the planner
+in the air with the dash ready, forced, L2 on it 4.17, the planner moved into it, forced (L2 on it 3.83, on the other
+3.83), the slam playbook on one while the other hit 3.83 (small runes 5 of 7), the slam stayed in its reach in the air
+2.50, the low hop on one while the other hit 2.00. Clears lost to one class alone: rnjb L2 / planner 16, script conflict 5,
+airborne 5; s12g0 23 / 4 / 3. Missed planned actions (rnjb / s12g0): close slams struck 304 / 393 / 276 / 382 (not
+struck: the gate "other rune circle" 17 / 22, no landing in time 17 / 16, "other body" - / 11); F's Idle entries hit
+within 30 frames 618 / 825 (75 %) / 583 / 777 (75 %); chases ended far 34 / 30; presses dropped 271 / 3,332 / 254 / 3,088.
+One Clapper left: 231 s / 2 HP losses, 228 s / 1.
+
 ### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp12a)
 
-`s12x` = rnjb + TWO_RUNEEXIT, `s12g` = rnjb + TWO_STRIKEGUARD, `s12xg` = both (the fixed-point arm).
+`s12x` = rnjb + TWO_RUNEEXIT, `s12g` = rnjb + TWO_STRIKEGUARD, `s12xg` = both (fp1), `s12g0` = rnjb + TWO_STRIKEGUARD +
+SSBOT_FORUM_TWO_STRIKEGUARD_BOMB=0 (fp2, the A/B).
 
 ### 6. Machine state
 
-Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (04:56-05:11), frozen at time scale 1e-4 after it by sp4_block;
-DEMO_SOON paused and restored; boost_workers ran for the block (`boost_workers.stop` present again). No game process
-touched. Frozen checkout `C:\ssbot\live_1v1_fc8a24e`. Sandbox `sp12_go.ps1`, `sp12_ab.ps1`. Untracked
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (04:56-05:11), fp2 (05:28-05:55) and the A/B (05:58-06:51), frozen
+at time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each
+block (`boost_workers.stop` present again). No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{fc8a24e,
+a196093}`. Sandbox `sp12_go.ps1`, `sp12_ab.ps1`. Untracked
 brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
 
 ### Open items
@@ -10683,7 +10722,8 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
 2. **The small runes during a strike**: a decline costs more than the bomb; a strike timed against the bomb's lit frames
    (the jump 4-6 frames earlier when the stand point's bomb lights at k 26 .. 37 - her box above 2.83 u from ~k 36) or the
    low hop's timing inside the walk would keep the strike. Not built.
-3. The strike guard's body / jump parts (4 / 5 and 1 / 1 safe) are rare (~6 events per 32 episodes); they could be tried
-   alone (the bomb check off) with a larger fixed point.
+3. The strike guard's body / jump parts were tried alone (fp2 22 / 24, then the A/B: hitless 3 vs 10 / 64): a declined or
+   aborted strike costs more than the other one's body / jump does to a strike - the guard's events are safe, the slams
+   it gives up are not. Off.
 4. The forced ranking under a relaxed margin (the non-focus idle Clapper at 0.5 u) frees rows only at a streak's first 1-3
    ticks (11 of 127 forced ticks): small.
