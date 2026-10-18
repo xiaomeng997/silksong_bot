@@ -363,10 +363,18 @@ def _hp_losses(ep: dict) -> list[dict]:
                     handoff = "slam" in o_fa and struck_other
             run_any = [x for x in slam_runs if x[1] <= g <= x[1] + 140]
             dec_row = None
-            fl = [f for f in ep["dec_f"] if g - 6 <= f <= g]
+            # SP12a: the planner's last decision BEFORE the hit (the hit frame's own row is the recoil's: it read
+            # "not forced" for 44 of 45 SP11b air losses whose forced streak ran up to g - 1) and the forced streak
+            # ending there
+            fl = [f for f in ep["dec_f"] if g - 6 <= f < g]
             if fl:
                 dec_row = dec[fl[-1]]
             forced = None if dec_row is None else bool(dec_row.get("forced"))
+            f_streak = 0
+            for f_ in reversed([f for f in ep["dec_f"] if g - 90 <= f < g]):
+                if not dec[f_].get("forced"):
+                    break
+                f_streak += 1
             plan = None if dec_row is None else dec_row.get("plan")
             after_prev = prev_hit is not None and g - prev_hit <= 150
             # classification (module docstring; the first rule that holds)
@@ -420,7 +428,8 @@ def _hp_losses(ep: dict) -> list[dict]:
                         "esc_jump": esc_jump is not None and esc_jump <= 6.2 and jump_d0 is not None and jump_d0 <= CLOSE_U, "clip": r["clip"], "air_dec": air_dec, "moved_in": moved_in,
                         "toward_keys": toward_keys,
                         "own": dict(own_set), "own_g": own_g[0], "tgt_is_att": tgt_g == att if tgt_g is not None else None,
-                        "why": own_g[4], "forced": forced, "plan": plan, "late": late, "gaps": gaps,
+                        "why": own_g[4], "forced": forced, "forced_streak": f_streak, "plan": plan, "late": late,
+                        "gaps": gaps,
                         "hitch_ms": round(hitch * 1e3, 1), "dash_left": dash_left, "dropped": [p["f"] - g for p in pr],
                         "slam_run": run_att, "slam_runs_near": [[x[0] == att, x[1] - g, x[2], x[3]] for x in run_any],
                         "after_prev": after_prev, "wall_her": round(_wall_d(r["hx"]), 2),
