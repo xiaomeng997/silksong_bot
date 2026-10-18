@@ -10728,3 +10728,180 @@ brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched
    it gives up are not. Off.
 4. The forced ranking under a relaxed margin (the non-focus idle Clapper at 0.5 u) frees rows only at a streak's first 1-3
    ticks (11 of 127 forced ticks): small.
+
+
+## Task 1v1 - stage SP12b: TWO_RUNETIER v2 (SSBOT_FORUM_TWO_RT2: the pass under every jump caster to behind its landing, the pogo the fallback) and TWO_HOLDHIT (hits on the caster through the rune hold): RT2's gate missed (escape casts 35 / 41 = 85 % from the antic, far casts 67-83 %), HOLDHIT passed (37 / 40); the A/B (escape casts only + HOLDHIT) hitless 11 vs 10 / 64 - not promoted (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §86)
+
+The task (SP12b): SSBOT_FORUM_TWO_RUNETIER v2 - fix SP11a's failures (the pogo target leaves: B evades 43 / 65, escape-jumps
+23 / 65; hand B's slam to the playbook; the low hop inside the run when B casts; test live the pass under the far caster
+that waits for its aim (df8ce79, NOTE 8 / 9); time the pogo's i-frames to the lit frames), fixed points >= 90 % without HP
+lost from the caster's antic to the burst + 0.5 s (escape casts and the far one's casts separately), then the w13 A/B (64
+per arm) and the cause audit. The lead's notes in `C:\ssbot\data\m2_play\sp12\NOTE_FROM_LEAD.txt`: the 05:06 note (the late
+Clawline as a third far-caster option, per band) and NOTES 2 / 3 (08:05-08:35, read before the fp3 block: does the pass
+fire on the far one's casts - counts and why not; the far one's jump SLAMS - extend or report for SP13; NOTE 3 + addenda:
+TWO_HOLDHIT - hits during the rune hold / the jump move on the caster itself and on the non-jumper, fixed point and A/B).
+F / J = the caster, B = the other Clapper; A = its Jump Aim, L = its landing; u centre to centre (her box centre, its
+transform). Forum_W_w13 (fo_cl_w13w), instances 0 / 1, 1x. Data `C:\ssbot\data\m2_play\sp12b` (`jc_rnjb.json` the
+default's 307 jump casts over 192 SP11b / SP12a episodes, `fp1`..`fp4` / `ab` the live rounds (`fp.json / .txt` per cast;
+`ab` also `two.*`, `ab_stats.txt`, `audit.*`, `rank.txt`, traces `hp`), `replay_<sha>` identity, `scripts`
+(`jc_base.py`, `jc_sum.py`, `jc_rows.py`, `fp12b.py`, `note2_counts.py`, `trace_cast.py`, `replay_ident_sp12b.ps1`,
+`ident_cmp.sh`, `ab12b.ps1`), `fullsuite_8568825.log`). No human practice ran; the trading bot was not touched.
+
+### Result
+
+- **Not promoted; the default is unchanged.** RT2's fixed point missed 90 % in both classes; TWO_HOLDHIT passed its own
+  (it acts only inside RT2's hold). The A/B ran RT2 on escape casts only (scope=0) + HOLDHIT because fp3's count read 10 / 10
+  - a join bug in `fp12b.py` (runs whose start pended matched by their start frame, not their antic) hid the pending
+  starts; corrected, the escape-cast runs were 11 / 13 (fp3), 12 / 14 (fp4), 12 / 14 (A/B) = **35 / 41 (85 %)**. 3 of the 6
+  were hit before (or in the first 2 frames of) a run that pended on B's slam / bombs (B's hammer at the antic + 0 / + 16,
+  a body at + 2): from the run's start 35 / 38 (92 %).
+- The baseline (`jc_rnjb.json`, the default over 192 episodes): every jump cast with HP lost from its antic to the burst +
+  30: escape casts 69 / 151 (46 %), the far one's 54 / 150 (36 %); her place at the first lit frame decides it - inside
+  the circle 81 / 85 lost HP, behind the landing 10 / 81, outside past the far edge 27 / 128; in the escape casts she stood
+  between F's landing and B (B 12-18 u past the landing, often in its Slam Antic at L + 60); the room behind the landing
+  (to F's wall) was >= 3.7 u in 95 % of the escape casts (p5 3.7, p50 6.4 u).
+
+| round | code / arm, episodes | escape-cast runs: no HP lost antic .. burst + 30 | far-cast runs (pass / pogo) | Clawline (8.4-12.2 u) | casts without a run | all jump casts |
+|---|---|---|---|---|---|---|
+| fp1 | b0737f0 / s12bc, 32 | 9 / 10 (every one: pass -> behind) | 9 / 16 | 1 / 2 | 13 / 25 | 32 / 53 |
+| fp2 | 5019056 / s12bc, 64 | 18 / 29 | 33 / 54 | 4 / 6 | 8 / 20 | 63 / 109 |
+| fp3 | d213a70 / s12bc, 64 | **11 / 13 (85 %)** | 29 / 35 (83 %) | 3 / 3 | 26 / 56 | 69 / 107 |
+| fp4 | 8568825 / s12bh (+ HOLDHIT), 64 | **12 / 14 (86 %)** | 31 / 46 (67 %) | 2 / 3 | 32 / 52 | 77 / 115 |
+| A/B | 8568825 / s12be (escape casts only + HOLDHIT), 64 | 12 / 14 | - | - | 39 / 72 | 51 / 86 (rnjb 67 / 110) |
+
+  The default's rate on the same windows: SP12a's A/B rnjb 66 / 103 (escape 25 / 46, far 41 / 55), this A/B's rnjb 67 / 110.
+- **TWO_HOLDHIT** (fp4 vs fp3, RT2's holds behind the landing): hits on the caster per hold 1.45 (31 of 40 holds) vs 0.03
+  (1 of 38) without it; no HP lost from L + 13 to the burst + 30 in 37 / 40 (92.5 %) vs 35 / 38. A/B s12be 2.08 per hold
+  (11 / 13), 12 / 13 without HP lost; the default (rnjb, behind the landing at the lit) 1.48 (22 / 25).
+- **The A/B** (8568825, 64 per arm, block design, 2 x 32 per instance, the same seeds 8900000.. / 8910000..; `ab\ab_stats.txt`):
+
+| | rnjb (default) | s12be (RT2 on escape casts + HOLDHIT) |
+|---|---|---|
+| **HP-hitless clears** | **10 / 64 (15.6 %)** | **11 / 64 (17.2 %)** |
+| both Clappers killed | 35 | 43 |
+| landed / s | 1.311 | 1.368 |
+| HP-loss hits / min | 4.08 | 3.80 |
+| close slams struck | 292 / 369 (79 %) | 292 / 370 (79 %) |
+| HP by source: big rune / body / landing / small runes / hammer | 30 / 30 / 26 / 20 / 14 | 20 / 21 / 26 / 23 / 22 |
+
+  Bootstrap 90 % (s12be - rnjb): hitless-clear rate +0.016 (-0.094 .. +0.125), both killed +8 (-1 .. +17), landed / s
+  +0.058 (+0.001 .. +0.115), HP hits / min -0.29 (-1.19 .. +0.64). Best on hitless clears by one and not worse on the
+  others - but the fixed point under it missed 90 % (above): **not promoted** (the person's rule: the fixed point first).
+  The escape casts' share of HP losses fell (the move at the loss: escape jump casts 23 -> 18, other jump casts 19 -> 14),
+  the slams' rose (Slam Antic 26 -> 35, the hammer 14 -> 22). 14 RT2 runs in 64 episodes (escape casts), 10 of them after
+  a pending start; two:rt held the keys 1,320 frames with 1 HP loss ("two:rt moved her into it").
+- **The lead's 05:06 note (the Clawline per band)**, fp1-fp4 pooled (four code versions): the Clawline (8.4-12.2 u) 10 / 14
+  (71 %); the pass 8.4-12.2 u 47 / 62 (76 %), 12.2-17 u 30 / 44 (68 %), < 8.4 u 17 / 21 (81 %), > 17 u 2 / 4. The pass is
+  not worse in the Clawline's band and needs no silk / no hook: claw stays 0.
+- **NOTE 2 (1) - does the pass fire on the far one's casts**: fp3 56 far casts: the pass fired in 30 (the first plan in 24),
+  the Clawline 3, a run without a pass 3 (airborne starts: up / keep / drop on her focus), no run 20; fp4 61: pass 38 (31
+  first), Clawline 3, no pass 4, no run 16. Why no run (fp4 counters): pending and never started (she airborne 23, bombs
+  within 4 u 29, the focus's cast 8 / slam 7; 36 pending starts), the other one jumping 9-24, a rune circle 1. In the default
+  there is no pass at all: L2 keeps the focus and jump_behind's stance applies only to L2's target - the person's "Hornet
+  does NOT dash under it" is the default's behaviour.
+- **NOTE 2 (2) - the far one's jump SLAMS**: not built (RT2's model has the jump cast's flight / hammer / circle; a jump slam
+  needs its own timings and no circle) - SP13.
+- **NOTE 3 addendum 2 (the non-jumper during a jump move) and the one-Clapper rune hold (w7)**: not built - IdleHit is
+  blocked by other_danger("other Jump ...") while the other jumps (SP10c's TWO_JUMPHIT, off), and in w7 the default's
+  "rune: behind" already has ground_hit; why it waits there was not traced - SP13.
+
+### 1. Code (`combat/rune_pogo.py` RtCfg v2 / Planner.best_pass / keep_pass / bomb_hits / RunePogo v2 ends, `combat/two_play.py` RT2 / HOLDHIT / pending / rt_hold, `combat/tactics/gauntlet.py` rt hold stance, `combat/claw_chase.py` req, `train/forum_planner_policy.py`)
+
+- `SSBOT_FORUM_TWO_RT2` (default off; turns TWO_RUNETIER on with RtCfg v2; `SSBOT_FORUM_TWO_RUNETIER_SET` keys below):
+  every jump cast of either Clapper while both live - the escape cast (TwoPlay's rule) and any other (scope=1; scope=0 the
+  escape casts only). The run's planner (SP11a's hero-model plans) tries the **pass** first (under the caster to pass_x
+  3.25 u behind its landing, each plan's landing from its own x at the aim; waits for the aim - NOTE 9), then the **front
+  exit** past the circle's far edge + 0.5 u (front=1; not while a pass behind is under way), then the pogo on B (v1), then
+  flee; the pass also from the air (air_pass) and kept while its first danger is >= 15 frames away (commit_f); the earliest
+  start first; a stay plan. The escape cast's go phase walks to B's face when its p (her x ahead of F at A - 1) leaves the
+  landing pass_room 3.6 u to F's wall (p_need + 0.6), else to that lure point; no side slash on B with B's back < 7 u; the
+  go phase ends at A - 12 (go_end). Small-rune bombs (rune_bombs' forecast, the policy's) are a danger of every plan
+  (bomb_hits); B's slam already under way at the start is modelled; i-frame ranking: a safe down slash meeting B in lit0 -
+  3 .. lit0 first (iframe). Ends: "behind" (>= 2.9 u behind the landing on the ground from L + 13: L2 then holds the caster -
+  `esc_view` mode "rt_hold", gauntlet's stance BACK_U behind the run's landing whatever the caster starts but a slam - to
+  the lit + 9 + 30 frames; the chase and the low hop are idle meanwhile, no hit on the caster unless HOLDHIT); a pogo run on
+  B ends on B's Slam Antic from the landing on (the playbook) and when B left (not a target / > 6 u) from L + 13 with the
+  lit >= 40 frames away; past the far edge the run stays to the burst. **Pending starts**: the other one slamming / casting,
+  bombs within 4 u of her, or (far casts) she airborne -> the run starts once that is over while the caster's antic is <=
+  70 frames old (`rt2_pend_*`). Far casts in the Clawline band (claw_chase's gates) to `claw_chase` variant A with claw=1
+  (claw=2 alternates; `SSBOT_FORUM_CLAW_CHASE=1 SSBOT_FORUM_CLAW_SCOPE=any`; ClawChase starts only on TwoPlay's request when
+  RT2 is on). Stats `two_play.esc.rune_tier` (+ room_b, kinds, behind_f, u_land / u_lit / u_end), `rt2_claw`, counters
+  `rt2_*`.
+- `SSBOT_FORUM_TWO_HOLDHIT` (default off; acts with RT2): through the rt hold the hits on the caster count (from the ground:
+  gauntlet's "rune: behind" ground_hit) and IdleHit may slash it while her x stays >= 1.5 u behind the landing.
+- Tests `tests/test_sp12b.py` (23: defaults, bomb geometry, p_need, the starts / pending / claw hand-over, the hold view, the
+  ends, B's slam at the start, the i-frame preference, the closed-loop escape pass on the hero model from B's face (no flight
+  body / hammer / dome / B contact, she ends >= 2.9 u behind), the front exit, HOLDHIT). Full suite at 8568825: 2,016
+  passed, 5 failed - the known (test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3;
+  test_harness_recovery passed with DEMO_SOON paused by the A/B block) - `sp12b\fullsuite_8568825.log`.
+
+### 2. Identity (`sp12b\scripts\replay_ident_sp12b.ps1`, `ident_cmp.sh`; from the frozen checkouts)
+
+b0737f0, 5019056, d213a70, d76d17a and 8568825 with every SP12b switch unset: byte-identical to a196093's default
+(`sp12\replay_a196093\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1 /
+084036 i1 e0 (2,073 / 1,778). RT2 on: **w7 identical (one Clapper: no run starts)**, w13 from tick 293 / 275 (286 at
+8568825: the pending start), 0 tracebacks; with the Clawline hand-over (b0737f0) the same.
+
+### 3. Live rounds (`sp12b_go.ps1` -> `sp4_block.ps1` -> `sp12b_ab.ps1`; manifests `1v1sp12b_{fp1,fp2,fp3,fp4,ab1}_manifest.txt`; `scripts\fp12b.py`, `ab12b.ps1`)
+
+- fp1 -> fp2 (b0737f0 -> 5019056): 9 of 16 far runs began in the air and the pogo planner kept her there -> the pass from
+  the air; clamped far casts -> the front exit; runs with the other slamming; IdleHit / the chase took her into the circle's
+  back edge after "behind" twice -> no hit / no chase during the hold.
+- fp2 -> fp3 (-> d213a70): 7 of 7 far runs started in the focus's cast lost HP (5 to its bombs in 40 frames) and B's hammer
+  hit the one escape run started in B's slam -> pending starts; a dash toward B's face at A - 2 left the pass too late and
+  it turned to the front under the falling caster (4 of 11 escape failures, `trace_cast.py` 082445 i1 e0 f 7485119) ->
+  go_end 12, earliest start first, no front during a pass; a jump's aim stance, IdleHit and the low hop took her back into
+  the circle in the hold -> the hold's stance from the run's landing, the low hop idle; B left / B slam not before L + 13.
+- fp3 -> fp4 (-> 8568825): 4 of 5 failed far runs began airborne -> far casts pend while she is airborne; pending to the
+  antic + 70 with bombs within 4 u (45 / 6 u started 11 of 50); B's slam ends a pogo run from the landing on. fp4 added
+  HOLDHIT (d76d17a).
+- The reaction lag: a run starts on the first STATE of the caster's Cast Slam Antic (or the first STATE after its pending
+  reason clears); the pass's plans act from the tick after the aim's STATE (the plan waits w0 = the aim - F0).
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` on the A/B; `ab\audit.*`, `ab\rank.txt`, traces `ab\hp`)
+
+rnjb 120 HP losses (4.08 / min; L2 / planner 76, airborne 29, script conflict 15), s12be 112 (3.80; 68 / 26 / 18). Ranked by
+the hitless clears they cost - **rnjb** (25 clears with HP lost): the planner in the air with the dash ready, forced, L2 on
+the other 6.00 (alone 4, 19 HP losses), the planner in the air (umbrella) 5.00 (4, 17), the planner in the air, forced, L2
+on it 2.50, the slam moved her into it 2.00, the low hop stayed in its reach in the air 1.50, the low hop on one while the
+other hit 1.50; **s12be** (32): the planner in the air with the dash ready, forced, L2 on the other 6.00 (alone 2, 19), the
+planner in the air (umbrella) 4.00 (2, 11), "slam not struck: no landing in time" 2.50, the slam moved her into it 2.50, the
+slam playbook on one while the other hit 2.00, the planner in the air, forced, L2 on it 1.50, the chase on one while the
+other hit 1.50, the playbook still on the other's slam (hand-off) 1.50. Clears lost to one class alone: rnjb L2 / planner
+14, airborne 6, script conflict 1; s12be 12 / 5 / 4. Missed planned actions (rnjb / s12be): close slams struck 292 / 369 /
+292 / 370 (79 %; not struck: the gate "other rune circle" 22 in rnjb, "no landing in time" 15 in s12be); F's Idle entries
+hit 531 / 712 (75 %) / 521 / 705 (74 %; missed in the air 61 / 66); presses dropped 217 / 2,883 / 234 / 3,005; double
+slams struck 15 / 32 / 23 / 47. One Clapper left: 217.8 s / 7 HP losses, 272.5 s / 4. Switches across situations: RT2
+needs two Clappers (w7 identical); HOLDHIT acts only in RT2's hold; the Clawline hand-over only with CLAW_CHASE + claw >= 1.
+The RT2 runs' own failures (fp3 / fp4 / A/B, 6 escape + 21 far): hits before a pending run began 3 (B's hammer / a body at
+the antic), bombs in the run 3, the caster's landing hammer after a pogo / air start 4, the focus's slam during the run or
+the hold 4, B's evade / escape jump ending a pogo run 5, the circle after a late pass 4, bodies under the flight 4.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp12b)
+
+`s12b` = rnjb + TWO_RT2; `s12bc` = s12b + claw=2 + SSBOT_FORUM_CLAW_CHASE=1 SSBOT_FORUM_CLAW_SCOPE=any SSBOT_FORUM_CLAW_VAR=A
+(fp1-fp3); `s12bh` = s12bc + TWO_HOLDHIT (fp4); `s12be` = rnjb + TWO_RT2 + SSBOT_FORUM_TWO_RUNETIER_SET=scope=0 + TWO_HOLDHIT
+(the A/B).
+
+### 6. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (07:40-07:55), fp2 (08:01-08:32), fp3 (08:35-09:06), fp4 (09:09-09:40)
+and the A/B (09:41-10:36), frozen at time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block;
+boost_workers ran for each block (`boost_workers.stop` present again). No game process touched. Frozen checkouts
+`C:\ssbot\live_1v1_{b0737f0, 5019056, d213a70, d76d17a, 8568825}`. Sandbox `sp12b_go.ps1`, `sp12b_ab.ps1`. Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **RT2's gate from the antic**: 3 of the 6 escape failures came before a pending run began; counted from the run's start
+   35 / 38 (92 %). Either start those runs at once with B's slam / bombs in the plans (fp2: both such runs lost HP) or judge
+   the switch from its start - the person's call; then a confirmation A/B round of s12be (this one: hitless +1, kills +8,
+   landed / s +0.058 with its interval above 0).
+2. **Far casts 67-83 %**: airborne starts pend now (fp4 23), B's own moves end pogo runs (b jump / left / slam 10 in fp4),
+   the focus's slam during the run / the hold (4); a far run should keep the pass across B's moves with B's jump / slam in
+   its danger model.
+3. **Coverage**: about half of all jump casts get no run (pending that never started, the other one jumping 9-24 per 64
+   episodes); those keep the default's 46-62 %.
+4. NOTE 2 (2) the far one's jump slams (the pass under them), NOTE 3 addendum 2 (hits on the non-jumper during a jump move)
+   and the w7 rune hold's passivity: not built - SP13.
+5. The Clawline is not cleaner than the pass in its band (10 / 14 vs 47 / 62): claw stays 0.
