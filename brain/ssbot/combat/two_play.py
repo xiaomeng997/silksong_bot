@@ -207,6 +207,13 @@ SP11B = WALKOUT or OPENPUSH or RUNLOCK or PUSHMID
 #                the circle lights) after the safe rows that keep one, above the landed hits and NODASH
 #                (GoalPrefs.rune_exit; forum_planner "rune exit").
 RUNEEXIT = _on("SSBOT_FORUM_TWO_RUNEEXIT")
+# SP12b (the lead's NOTE 3 of 2026-10-18, the person: "behind the big rune it is the SAME Clapper - two more hits are
+# always good"): default off (=1 on; acts only with TWO_RT2). Through RT2's rune hold behind the caster's landing the
+# hits on the caster count (from the ground: gauntlet's "rune: behind" ground_hit) and IdleHit may slash it while her
+# x stays >= hold_hit_u behind the landing (the circle starts 0.71 u behind it + her half width + a margin); the chase
+# of its evade stays off (its evade slides into its own circle).
+HOLDHIT = _on("SSBOT_FORUM_TWO_HOLDHIT")
+HOLD_HIT_U = 1.5
 ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD or SP11B or RUNEEXIT   # the policy's TwoPlay object
 
 CLAPPER = _sp.CLAPPER
@@ -1119,6 +1126,16 @@ class TwoPlay:
         look = 1 if cx > hx else -1
         toward = M_R if look > 0 else M_L
         why = None
+        hold_lim = None
+        if HOLDHIT and RT2 and self.rt is not None and self.rt.hold_after is not None and self.esc is None \
+                and len(self.rt.hold_after) >= 4 and self.rt.hold_after[0] == iid and f <= self.rt.hold_after[1] \
+                and self.rt.hold_after[2] is not None:
+            # SP12b TWO_HOLDHIT: the held caster - in reach from behind its circle's back edge only
+            land, fface = float(self.rt.hold_after[2]), int(self.rt.hold_after[3])
+            hold_lim = land - fface * HOLD_HIT_U          # her x may not pass this toward the landing
+            if (hx - hold_lim) * fface > 0:
+                r.why = r.why or "hold edge"
+                return None
         jh = self.jh if (JUMPHIT and self.jh is not None and self.jh.I == iid) else None
         if not accepting:
             why = "no input"
@@ -1155,6 +1172,12 @@ class TwoPlay:
         if k + need > WIN_F:
             r.why = r.why or "far"
             return None
+        if hold_lim is not None:
+            # (TWO_HOLDHIT) the walk into reach would cross the circle's back edge: the planner
+            x_hit = (span[0] - (_sp.SLASH_X[1] - 0.15)) if look > 0 else (span[1] + (_sp.SLASH_X[1] - 0.15))
+            if (x_hit - hold_lim) * int(self.rt.hold_after[3]) > 0:
+                r.why = r.why or "hold edge"
+                return None
         r.walk += 1
         r.sent.append((f, toward))
         return toward
@@ -1236,7 +1259,8 @@ class TwoPlay:
                 # its circle's back edge, 2 of 15 holds)
                 return {"iid": iid, "other": None, "mode": "rt_hold", "phase": "hold", "kind": "cast", "back0": 0.0,
                         "back_u": self.ecfg.back_u, "after_land": True, "corner_aim": False, "hold": iid,
-                        "hold_after": True, "no_hit": frozenset({iid}), "land": land, "face": fface}
+                        "hold_after": True, "no_hit": frozenset() if (HOLDHIT and land is not None) else frozenset({iid}),
+                        "land": land, "face": fface}
             self.rt.hold_after = None
         if r is None or r.mode is None:
             return None

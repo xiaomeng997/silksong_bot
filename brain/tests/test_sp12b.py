@@ -441,3 +441,32 @@ def test_hold_view_carries_the_landing_and_the_pend_on_casts(rt2):
     _run(two, [s3])
     assert two.rt.run is not None and two.rt.run.src == "esc" and two.rt.run.f_a - two.rt.run.k_a == 1001
     assert two.esc_n["rt2_pend_start"] == 1 and two.esc is not None and two.esc.mode == "pogo"
+
+
+def test_holdhit_counts_hits_on_the_held_caster(rt2, monkeypatch):
+    two = tp.TwoPlay()
+    two.rt.hold_after = (7, 1300, WALL_X + 3.0, 1)
+    two._f_now = 1200
+    assert two.esc_view()["no_hit"] == frozenset({7})                 # TWO_HOLDHIT off: no hit on the caster
+    monkeypatch.setattr(tp, "HOLDHIT", True)
+    assert two.esc_view()["no_hit"] == frozenset()
+    # IdleHit on the held caster (F, iid 7, at WALL_X + 3 facing right after its landing; it turned at Idle): she 3.5 u
+    # behind the landing -> allowed (in reach: its turned front 2.25 u toward her); 1.0 u behind -> "hold edge"
+    def idle_state(f, hx):
+        s = fstate(f, "Idle", 0.0 if f % 2 else 0.02, hx=hx, b_x=WALL_X + 30.0)
+        s["ents"][0]["pos"][0] = WALL_X + 3.0
+        s["ents"][0]["flipX"] = False                                   # it faces her (left)
+        s["hero"]["facing"] = 1
+        return s
+    s0 = idle_state(1201, WALL_X + 3.0 - 3.5)
+    two.prev[7] = ("Slam Recover", 0.3)
+    two.observe(1201, s0, 1201 / 60.0)
+    m = two._idle_step(1201, s0, True, True, 7)
+    assert two.idle is not None and two.idle.why != "hold edge" and m is not None
+    two2 = tp.TwoPlay()
+    two2.rt.hold_after = (7, 1300, WALL_X + 3.0, 1)
+    two2._f_now = 1200
+    s1 = idle_state(1201, WALL_X + 3.0 - 1.0)
+    two2.prev[7] = ("Slam Recover", 0.3)
+    two2.observe(1201, s1, 1201 / 60.0)
+    assert two2._idle_step(1201, s1, True, True, 7) is None and two2.idle.why == "hold edge"
