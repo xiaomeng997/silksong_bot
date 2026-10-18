@@ -237,6 +237,8 @@ class GuardCfg:
     hammer_u: float = 12.5      # a slam's hammer in front of its centre (slam_play.TWO_SLAM_U)
     hammer_back: float = 1.9    # ... behind it (its back 1.34 + 0.25 + 0.3)
     body_pad: float = 0.55      # around a body (her half width + 0.3)
+    low: int = 0                # 1: the low hop takes the spans too (fixed points: 3251a4a 5 of 9 guard no-starts / aborts
+    #                             without HP lost, 4cb5880 - its big rune circle only - 0 of 1: off, its own trial switch)
 
 
 def _guard_cfg() -> GuardCfg:

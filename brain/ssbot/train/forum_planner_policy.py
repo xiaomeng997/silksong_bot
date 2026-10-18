@@ -865,7 +865,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s, latch=latch_h, skip=asw_skip, guard=gsp)
+                                       t_game=ws.stamp.t_game_s, latch=latch_h, skip=asw_skip,
+                                       guard=gsp if (gsp is not None and self.two.gcfg.low) else None)
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None
