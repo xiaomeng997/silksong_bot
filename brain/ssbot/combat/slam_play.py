@@ -205,6 +205,10 @@ RG_C = (6.48, 6.75)         # its centre in front of the landing: facing left / 
 # these already). The way out's landing side also avoids a bomb lit at its landing (_guarded_spot, SG_LAND_K). Stats
 # slam_play.sg (iid, antic entry, k, why, phase).
 STRIKEGUARD = _on("SSBOT_FORUM_TWO_STRIKEGUARD")
+# SP12a fp1 (fc8a24e, 32 w13 episodes): the bomb part declined 15 strikes, 7 of them without HP lost to antic + 120 (the
+# planner then met the hammer at + 43 .. 55 or the bombs themselves); its body / jump parts 5 of 6. =0 drops the bomb
+# part (the start / walk check and the landing side); the body / jump parts stay (fp2)
+SG_BOMBS = os.environ.get("SSBOT_FORUM_TWO_STRIKEGUARD_BOMB", "1").strip() != "0"
 SG_END_K = 96               # the strike's path is checked to this antic frame (the bounce lands ~Slam 0 + 52)
 SG_BOMB_M = 0.25            # bomb margin (u): rune_bombs.BOMB_M 0.15 + 0.1 for the walk's timing
 SG_BODY_PAD = 0.55          # her half width + 0.3 around the other one's body
@@ -875,7 +879,7 @@ class SlamPlay:
         """SP11-0 SSBOT_FORUM_TWO_GUARD: her landing at x (box centre) meets another Clapper's danger span (its jump
         landing band, its big rune circle; not its slam: the hand-off / TWO_TIGHT handle a second hammer)."""
         from ssbot.combat import two_play as _tp
-        if STRIKEGUARD and self._sg_bomb_at(r, x, SG_LAND_K):
+        if STRIKEGUARD and SG_BOMBS and self._sg_bomb_at(r, x, SG_LAND_K):
             return True                              # SP12a: a bomb of the other one lit at her landing
         return _tp.guard_hit(self._guard, x - 0.25, x + 0.25, kinds=("land", "rune"), own=r.iid) is not None
 
@@ -920,7 +924,7 @@ class SlamPlay:
                     return f"other {st}"
                 if st in ("Spell Antic", "Cast 1", "Cast 2") and abs(float(o["pos"][0]) - tx) < TWO_CAST_U:
                     return f"other {st}"
-        bk = getattr(self, "_bombs", None)
+        bk = getattr(self, "_bombs", None) if SG_BOMBS else None
         if bk is not None and len(bk):
             from ssbot.combat import rune_bombs as _rb
             own = {int(o_) for o_ in bk[:, 0] if int(o_) != r.iid}

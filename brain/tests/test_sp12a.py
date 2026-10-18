@@ -149,3 +149,19 @@ def test_strikeguard_body_and_walk_abort(monkeypatch):
     m2 = play.step(1010, s2, True, True, t_game=1010 / 60.0)
     assert m2 is None and play.done[-1].phase == "abort" and play.done[-1].why.startswith("sg other Jump Antic")
     assert play.sg[-1][4] == "abort"
+
+
+def test_strikeguard_bomb_part_off(monkeypatch):
+    monkeypatch.setattr(sp, "STRIKEGUARD", True)
+    monkeypatch.setattr(sp, "SG_BOMBS", False)
+    monkeypatch.setattr(sp, "TWO_PLAY", True)
+    play = sp.SlamPlay()
+    play.reset()
+    s = two_state(1000, "Slam Antic", 0.0, x_rel=6.0, cx=31.0, b_st="Idle", b_x=46.0)
+    play.step(1000, s, True, True, t_game=1000 / 60.0, bombs=_bombs(99, [25.9], 5, 12))
+    assert not play.sg                                         # the bomb part off: no decline
+    play = sp.SlamPlay()
+    play.reset()
+    s = two_state(1000, "Slam Antic", 0.0, x_rel=8.0, cx=31.0, b_st="Idle", b_x=24.0)
+    play.step(1000, s, True, True, t_game=1000 / 60.0)
+    assert play.run.why == "other body"                        # the body part stays
