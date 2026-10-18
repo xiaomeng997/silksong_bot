@@ -327,7 +327,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             S = kin.initial_state(self.params, x, FLOOR_Y + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), fcast, prefs, ctx)
         planner.warm_kernels()
-        if air_chain.AIRCHAIN:
+        if air_chain.AIRCHAIN or claw_strike.AIRSTRIKE:
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         if claw_strike.CLAWSTRIKE:
             claw_strike.warm(self.params)     # SP13: the Clawline strike's plan paths (air_chain's evaluate)
@@ -832,7 +832,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
-                   if ((air_chain.AIRCHAIN and self.two is not None) or claw_strike.CLAWSTRIKE) else None)
+                   if ((air_chain.AIRCHAIN and self.two is not None) or claw_strike.CLAWSTRIKE
+                       or claw_strike.AIRSTRIKE) else None)
             if two_play.PUSHMID and self.two is not None:
                 self.slam_play.side_hint = self.two.pm_hint()  # SP11b: F's slam's way out to its wall side
             bks = None

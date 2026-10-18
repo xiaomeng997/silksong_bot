@@ -49,6 +49,11 @@ def _on(name: str, default: str = "0") -> bool:
 
 
 CLAWSTRIKE = _on("SSBOT_FORUM_CLAWSTRIKE")
+# SSBOT_FORUM_AIRSTRIKE (SP13a, default off): the air approach to the same strike when she is in the air at S's antic
+# and the playbook's landing comes too late (or no Clawline plan exists): combat.air_chain's search with S as its B (a
+# drift toward S's strike point, an optional down slash on a body below - S's antic body or the other one's -, the
+# umbrella, the strike at S's antic frame 46-48), re-checked every tick, kept near the strike (slam_play)
+AIRSTRIKE = _on("SSBOT_FORUM_AIRSTRIKE")
 M_L, M_R, M_D, M_J, M_A = kin.B_LEFT, kin.B_RIGHT, kin.B_DOWN, kin.B_JUMP, kin.B_ATTACK
 M_CLAW = 1 << 4                 # the clawline button (ssbot.ipc.framing.BUTTONS order; key S)
 FLOOR = 3.015                   # the Forum floor (box bottom standing)
@@ -60,11 +65,9 @@ DY0, DYV = -0.261, 0.0788       # her box bottom at the throw: y_P + DY0 + DYV *
 DASH_U = 1.4 * 50.0 / 60.0      # u per 60 Hz frame (70 u/s, 0.02 s physics steps)
 DASH_MAX_U = 7.0                # the dash runs 0.1 s at most
 ATK_CD_S = 0.15                 # the attack cooldown at control (s)
-GOOD_OK = 10                    # plan(): a (hop, P) with this many passing strike plans in its worst variant is taken
-BUDGET_S = 0.025                # plan(): stop searching after this long once one passes
-HARD_S = 0.040                  # ... and after this long in any case
-P_PREF = 6                      # plan(): presses tried nearest this antic frame first (the offline study's most robust:
-#                                 cs_space.py, a hop of 3 frames and the press at antic frame 6 from 7.5-9.5 u)
+GOOD_OK = 4                     # plan(): a (hop, P) with this many passing strike plans in its worst variant is taken
+BUDGET_S = 0.020                # plan(): stop searching after this long once one passes
+HARD_S = 0.030                  # ... and after this long in any case
 DS_REC0 = 0.1                   # HeroController.DownspikeBounce(harpoonRecoil): FinishDownspike(standardRecovery=False)
 #                                 starts the down slash's recovery timer at 0.1 s (to Config.DownspikeRecoveryTime);
 #                                 CanDownAttack is false while downSpikeBouncing (DOWNSPIKE_REBOUND_STEPS) or recovering
@@ -83,10 +86,12 @@ class CsCfg:
     ray_lo: float = 0.6             # ... and at least (in the air, above the floor's hover)
     reach: float = 10.2             # her box centre to the body front at the press at most (the ray's 10.5 u)
     k_last: int = 14                # the latest antic frame of the press considered
-    hops: tuple = (3, 4, 5, 6, 8, 10)   # the hop's jump-held frames (on the ground)
+    hops: tuple = (3, 4, 5, 6)      # the hop's jump-held frames (on the ground; the offline study: 3-5 pass, 8+ none)
     press_k: tuple = (44, 51)       # the strike press's antic frames (inclusive)
     cd_f: int = 10                  # the strike press at control + this at the earliest (0.15 s + 1)
     drifts: tuple = (0, 3, 6, 10)   # the drift key's frames after control (toward / away)
+    pre_press: tuple = (45, 50)     # plan(): the strike grid of the Clawline's feasibility check (a coarser one: the
+    pre_drifts: tuple = (0, 4)      # full grid is searched again from control on)
     room: int = 0                   # 1: only when she cannot leave the hammer's reach (12.5 u) behind her
     trigger: str = "reach"          # "reach": the playbook's reach / time declines; "force": every slam in its ray band
     #                                 (the fixed-point trials)
@@ -185,23 +190,24 @@ class ClawStrike:
         return _ac.ChainSim(S1, np.zeros(0, np.int64), kin.HoldState.idle(1), sim.params, sim.terrain, f_ctrl,
                             f_ctrl - 1)
 
-    def strike_plans(self, csim: _ac.ChainSim, ctx: CsCtx, a_entry: int, toward: int) -> list:
+    def strike_plans(self, csim: _ac.ChainSim, ctx: CsCtx, a_entry: int, toward: int, coarse: bool = False) -> list:
         """The strike plans from control (a_entry: S's antic entry as a STATE frame)."""
         c = self.cfg
         F0 = csim.f + 2
         out = []
-        lo = max(F0 + c.cd_f - 1, a_entry + c.press_k[0])
-        for fp in range(lo, a_entry + c.press_k[1] + 1):
-            for d in c.drifts:
+        pk, drifts = (c.pre_press, c.pre_drifts) if coarse else (c.press_k, c.drifts)
+        lo = max(F0 + c.cd_f - 1, a_entry + pk[0])
+        for fp in range(lo, a_entry + pk[1] + 1):
+            for d in drifts:
                 for dk in ((0,) if d == 0 else (toward, -toward)):
                     m = 0 if dk == 0 else (M_R if dk > 0 else M_L)
                     out.append(_ac.Plan(F0, m, F0 + d, None, None, fp, fp - a_entry, ctx.s_iid))
         return out
 
-    def eval_strike(self, csim: _ac.ChainSim, ctx: CsCtx, a_entry: int, toward: int) -> list:
+    def eval_strike(self, csim: _ac.ChainSim, ctx: CsCtx, a_entry: int, toward: int, coarse: bool = False) -> list:
         """The strike plans from control that pass in both slam timelines (air_chain.evaluate: S as B, the other one's
         body as A's box)."""
-        plans = self.strike_plans(csim, ctx, a_entry, toward)
+        plans = self.strike_plans(csim, ctx, a_entry, toward, coarse)
         if not plans:
             return []
         ac_ctx = _ac.Ctx(b_iid=ctx.s_iid, b_x=ctx.s_x, b_y=ctx.s_y, b_face=ctx.s_face, kb0=csim.fo - a_entry,
@@ -262,7 +268,7 @@ class ClawStrike:
                 continue
             cand.append((h, P, bb, vy, xp))
         best = None
-        cand.sort(key=lambda r_: (abs(r_[1] - a_entry - P_PREF), r_[0]))
+        cand.sort(key=lambda r_: (r_[0], r_[1]))           # the smallest hop and the earliest press first
         for h, P, bb, vy, xp in cand:
             el = time.perf_counter() - t0
             if (el > BUDGET_S and best is not None) or el > HARD_S:
@@ -276,7 +282,8 @@ class ClawStrike:
                         x_s, bbh, fc = ph
                         f_ctrl = P + fc
                         ctrl_k.append(f_ctrl - a_entry)
-                        ok = self.eval_strike(self._ctrl_sim(sim, x_s, bbh, toward, f_ctrl), ctx, a_entry, toward)
+                        ok = self.eval_strike(self._ctrl_sim(sim, x_s, bbh, toward, f_ctrl), ctx, a_entry, toward,
+                                              coarse=True)
                     var_ok.append(len(ok))
                     sample.append(ok[0].row() if ok else None)
                     if not ok:

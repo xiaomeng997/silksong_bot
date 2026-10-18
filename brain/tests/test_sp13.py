@@ -15,6 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 PARAMS = kin.HeroParams.load(REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json")
 TERR = kin.Terrain2D.from_boxes([(-200.0, cs.FLOOR - 10.0, 260.0, cs.FLOOR), (0.0, 0.0, 14.01, 40.0),
                                  (48.99, 0.0, 70.0, 40.0)])
+cs.warm(PARAMS)                 # the numba paths (the plan's search stops at HARD_S: a compile inside it finds nothing)
 
 
 def sim_for(hx, f=1000, ground=True, bb=0.0, vy=0.0):
@@ -115,8 +116,35 @@ def test_slamplay_off_unchanged(monkeypatch):
         m = p.step(1000, _slam(1000, 2, hx, silk=0), True, t_game=10.0, sim=sim_for(hx))
         # no silk: no Clawline either way - the playbook's decline, no key, the row as before
         assert m is None and p.run.phase == "wait" and p.run.why == "distance 9.5"
-        assert len(p.runs_rec()[0]) == (12 if not on else 17 + 5)
+        assert len(p.runs_rec()[0]) == (12 if not on else 17 + 6)
     monkeypatch.setattr(cs, "CLAWSTRIKE", False)
     p = sp.SlamPlay(sp.PlayCfg())
     assert p.step(1000, _slam(1000, 2, hx), True, t_game=10.0, sim=sim_for(hx)) is None
     assert "cs_runs" not in p.stats() and len(p.runs_rec()[0]) == 12
+
+
+def test_airstrike_from_high_in_the_air(monkeypatch):
+    # SP13a: 6 u up and rising slowly at antic frame 8, 6.5 u in front: no landing by K_JUMP_LATE2, no Clawline (off):
+    # the air plan (air_chain.search with S as B) takes the keys on the tick after the air entry; without AIRSTRIKE the
+    # run aborts 'no landing (fall)' there
+    hx = 31.0 - 6.5
+
+    def st(f, k):
+        s = _slam(f, k, hx)
+        s["hero"]["box"] = [hx - 0.23, cs.FLOOR + 6.0, hx + 0.23, cs.FLOOR + 8.07]
+        s["hero"]["pos"] = [hx, cs.FLOOR + 6.0 + cs.POS_DY]
+        s["hero"]["vel"] = [0.0, 2.0]
+        return s
+    for on in (False, True):
+        monkeypatch.setattr(cs, "AIRSTRIKE", on)
+        monkeypatch.setattr(sp, "LATE", True)
+        p = sp.SlamPlay(sp.PlayCfg())
+        p.step(1000, st(1000, 8), False, t_game=10.0, sim=sim_for(hx, ground=False, bb=6.0, vy=2.0))
+        assert p.run.phase == "land"
+        m = p.step(1001, st(1001, 9), False, t_game=10.0 + 1 / 60.0, sim=sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0))
+        if not on:
+            assert m is None and p.done and p.done[0].why.startswith("no landing")
+            continue
+        r = p.run
+        assert r is not None and r.as_air and r.phase == "cs_strike" and r.cs_strike is not None
+        assert 46 <= r.cs_strike.k_press <= 48 and r.cs_log[-1][1] == "as_plan"

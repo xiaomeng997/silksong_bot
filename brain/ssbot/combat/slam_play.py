@@ -455,6 +455,7 @@ class Run:
     cs_log: list = field(default_factory=list)   # [frame, event, data]
     cs_hit: bool = False             # ... a hit on S after the strike's press (the strike's bounce)
     cs_next: int = 0                 # ... a failed Clawline search is tried again from this mask frame
+    as_air: bool = False             # SP13a SSBOT_FORUM_AIRSTRIKE: the strike planned from the air (air_chain.search)
 
 
 class SlamPlay:
@@ -617,8 +618,13 @@ class SlamPlay:
                 out["chain_b_bounced"] += r.bounced
         if self.holds:
             out["tight_holds"] = len(self.holds)
-        if _cs.CLAWSTRIKE:
+        if _cs.CLAWSTRIKE or _cs.AIRSTRIKE:
             for r in self.done + ([self.run] if self.run is not None else []):
+                if r.as_air:
+                    out["as_runs"] += 1
+                    out["as_pressed"] += r.k_press is not None
+                    out["as_hit"] += r.cs_hit
+                    out[f"as_end_{r.phase}_{r.why[:24]}"] += 1
                 if r.cs is None:
                     continue
                 out["cs_runs"] += 1
@@ -653,7 +659,7 @@ class SlamPlay:
             if r.cs_log:
                 # SP13 SSBOT_FORUM_CLAWSTRIKE: [the plan, the log, the Clawline's / control's antic frames, the strike]
                 row += [None if r.cs is None else r.cs.row(), r.cs_log, r.cs_k_press, r.cs_k_ctrl,
-                        None if r.cs_strike is None else r.cs_strike.row()]
+                        None if r.cs_strike is None else r.cs_strike.row(), r.as_air]
             out.append(row)
         return out
 
@@ -754,7 +760,7 @@ class SlamPlay:
         if r.phase == "land" and ground:
             r.phase = "wait"                              # landed: the start check (walk time from here)
         if r.phase == "land":
-            if (_cs.CLAWSTRIKE and sim is not None and accepting
+            if ((_cs.CLAWSTRIKE or _cs.AIRSTRIKE) and sim is not None and accepting
                     and (k > (c.k_jump_late2 if LATE else c.k_jump_late - 1)
                          or (LATE and k + _fall_frames(s) > c.k_jump_late2) or self._cs_cfg().trigger == "force")):
                 # SP13: no landing in time for the ground strike (or the trials' force): the Clawline approach
@@ -797,7 +803,7 @@ class SlamPlay:
             if m is not None and TWO_RUNEGATE and self._rg_tick == k and r.rg_k is None:
                 r.rg_k = k                            # SP11-0: started where the old gate would have declined it
             if m is None:
-                if (_cs.CLAWSTRIKE and sim is not None and self.run is r and r.phase == "wait"
+                if ((_cs.CLAWSTRIKE or _cs.AIRSTRIKE) and sim is not None and self.run is r and r.phase == "wait"
                         and (r.why == "no time to walk" or r.why == "in the air"
                              or (r.why.startswith("distance") and (hero_x(s) - float(e["pos"][0])) * r.face
                                  > c.reach[1]))):
@@ -866,7 +872,7 @@ class SlamPlay:
                 return None
         else:                                             # after the press: never the jump
             if not r.bounced:
-                if r.cs is not None:
+                if r.cs is not None or r.as_air:
                     # SP13: the Clawline's own bounce rises at the press: the strike's bounce is its hit on S
                     if self._cs_s_hit(s, r):
                         r.bounced = r.cs_hit = True
@@ -1184,8 +1190,10 @@ class SlamPlay:
         """SP13: start the Clawline approach on S when its gates hold and a plan exists (the keys for frame f + 2),
         else None (the playbook / the planner as before; the decline is logged once per reason)."""
         c = self._cs_cfg()
-        if r.cs is not None or f + 2 < r.cs_next:
+        if r.cs is not None or r.as_air or f + 2 < r.cs_next:
             return None
+        if not _cs.CLAWSTRIKE:
+            return self._as_try(r, k, f, s, e, ground, accepting, sim, hp, t, why)
         h = s.get("hero") or {}
         cx = float(e["pos"][0])
         hx = hero_x(s)
@@ -1225,11 +1233,41 @@ class SlamPlay:
                 reason = "no plan"
         if reason is not None:
             self._cs_decline(r, f, reason)
+            if _cs.AIRSTRIKE and reason in ("no plan", "silk", "other in the way", "room"):
+                return self._as_try(r, k, f, s, e, ground, accepting, sim, hp, t, why)
             return None
         r.cs, r.cs_toward = plan, (1 if cx > hx else -1)
         r.phase, r.k_start, r.x_start, r.hp0, r.why = "cs_pre", k, round(x, 3), hp, ""
         hb = h.get("box") or [0, FLOOR_Y - 1.56, 0, 0]
         r.cs_log.append([f, "plan", why, k, round(x, 2), round(float(hb[1]) - (FLOOR_Y - 1.56), 2), plan.row(), ms])
+        return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
+
+    def _as_try(self, r: Run, k: int, f: int, s: dict, e: dict, ground: bool, accepting: bool, sim, hp: int,
+                t: float, why: str) -> int | None:
+        """SP13a SSBOT_FORUM_AIRSTRIKE: in the air at S's antic with no ground strike in time (and no Clawline plan):
+        air_chain's search with S as its B; the keys for frame f + 2 or None."""
+        if ground or not accepting or r.as_air or k > 40:
+            return None
+        h = s.get("hero") or {}
+        fc = h.get("facing")
+        a_entry = int(round(f - (t - r.ta) * 60.0))
+        actx = _ac.Ctx(b_iid=r.iid, b_x=float(e["pos"][0]), b_y=float(e["pos"][1]), b_face=r.face,
+                       kb0=sim.fo - a_entry, a_box=self._cs_box(self._cs_other(s, r)), hero_x=hero_x(s),
+                       face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
+        t0 = time.perf_counter()
+        plan = _ac.search(sim, actx)
+        ms = round(1e3 * (time.perf_counter() - t0), 1)
+        if plan is None:
+            r.cs_next = f + 2 + _ac.RESEARCH_F
+            if not any(x_[1] == "as_none" for x_ in r.cs_log):
+                r.cs_log.append([f, "as_none", k, ms])
+            self._cs_decline(r, f, "as no plan")
+            return None
+        hb = h.get("box") or [0, FLOOR_Y - 1.56, 0, 0]
+        r.as_air, r.cs_strike = True, plan
+        r.phase, r.k_start, r.hp0, r.why = "cs_strike", k, hp, ""
+        r.cs_log.append([f, "as_plan", why, k, round((hero_x(s) - float(e["pos"][0])) * r.face, 2),
+                         round(float(hb[1]) - (FLOOR_Y - 1.56), 2), plan.row(), ms])
         return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
 
     @staticmethod
@@ -1298,7 +1336,22 @@ class SlamPlay:
                        face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
         cfg = self._cs_cfg()
         sp_ = r.cs_strike
-        if sp_ is None or not _ac.check(sim, actx, sp_):
+        if r.as_air and sp_ is not None and not _ac.check(sim, actx, sp_):
+            # SP13a: the air approach searched again (air_chain's grid: drift, down slash, umbrella, the strike)
+            q = _ac.search(sim, actx)
+            if q is not None:
+                if sp_.pressed_down is not None:
+                    q.f_down, q.pressed_down = sp_.f_down, sp_.pressed_down
+                r.cs_log.append([f, "restrike", q.row(), q.n_ok])
+                r.cs_strike = sp_ = q
+            elif sp_.f_press - F <= _ac.KEEP_F:
+                if not r.cs_log or r.cs_log[-1][1] != "keep":
+                    r.cs_log.append([f, "keep", sp_.row()])
+            else:
+                r.cs_log.append([f, "nostrike", k])
+                self._close("abort", "as no strike")
+                return None
+        elif sp_ is None or not _ac.check(sim, actx, sp_):
             f_min = max(F, a_entry + r.cs_k_ctrl + cfg.cd_f - 1, a_entry + cfg.press_k[0])
             plans = []
             for fp in range(f_min, a_entry + cfg.press_k[1] + 1):
@@ -1321,7 +1374,9 @@ class SlamPlay:
                 self._close("abort", "cs no strike")
                 return None
         m = _ac.mask_at(sp_, F)
-        if sp_.pressed is None and F >= sp_.f_press and m & M_A:
+        if sp_.f_down is not None and sp_.pressed_down is None and m & M_A:
+            sp_.pressed_down = F
+        elif sp_.pressed is None and F >= sp_.f_press and m & M_A:
             sp_.pressed = F
             r.k_press = k
             r.phase = "after"
