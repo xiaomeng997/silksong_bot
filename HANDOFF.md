@@ -3030,7 +3030,7 @@ commit_rank and without L2 (their branches did not have them); reproducing them 
 - Full suite at 32db232 (all merges, before the integration tests): 1257 passed, 2 skipped (the vision window
   forecast test, the hitbox-table timing test on a busy machine: the same two as the tracks'), 1 xfailed
   (`scratchpad/fullsuite_32db232.txt` of this session).
-  Full suite at 6c160ac (the final code): 1264 passed, 2 skipped (the same two), 1 xfailed (ullsuite_6c160ac.txt).
+  Full suite at 6c160ac (the final code): 1264 passed, 2 skipped (the same two), 1 xfailed (\fullsuite_6c160ac.txt).
 - New `tests/test_forum_integration.py` (7): the chosen FORCED_RISK row is the least of the choice set on the stacked
   keys for share / seen / seen_cf x commit_rank off / on, a switched-off key is 0 everywhere; a tick with every switch
   on (Wanderer, seen_cf, commit_rank, clash, escape, terminal value); the policy's combined switches and the AB arms.
@@ -9725,7 +9725,7 @@ Instances 0 and 1 ran the baseline block (started 2026-10-16 20:36), frozen at t
 DEMO_SOON paused and restored; boost_workers ran for the block (`boost_workers.stop` present again). No game process
 touched. Frozen checkout `C:\ssbot\live_1v1_fadc77a`. Sandbox `sp10_go.ps1` (wake, boost, sp4_block) and `sp10_ab.ps1`;
 manifest `1v1sp10base_manifest.txt`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
-untouched. Full suite at 8345296 (+ the docs): 1,921 passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test; and the untracked test_sg8_review.py x3; `sp10ull_tests.log`).
+untouched. Full suite at 8345296 (+ the docs): 1,921 passed, 8 failed (the 5 known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test; and the untracked test_sg8_review.py x3; `sp10\full_tests.log`).
 
 ### Open items (not in SP10a's scope)
 
@@ -10368,7 +10368,7 @@ Instances 0 and 1 ran fp1 / fp2 / fp3 (started 2026-10-16 20:36), frozen at time
 sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for each block (`boost_workers.stop` present again).
 No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{41c7794, dcdadb3, cac3388, 8699dc5, 08142d7, 6ccddd8,
 7395500, df8ce79}`. Manifests `1v1sp11a_fp{1,2,3}_manifest.txt` (sp11_go.ps1 -> sp4_block.ps1 -> sp11_ab.ps1). Untracked
-brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched. Full suite at df8ce79: 1,990 passed, 8 failed (the known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3; `sp11\s1ullsuite_df8ce79.log`).
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched. Full suite at df8ce79: 1,990 passed, 8 failed (the known: test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3; `sp11\s1\fullsuite_df8ce79.log`).
 
 ### Open items
 
@@ -10649,7 +10649,7 @@ ran; the trading bot was not touched.
   circles from a jump cast and the log, the strike guard's bomb decline / timing / own bombs, off unchanged, the body
   decline and the walk abort on the other one's jump; a196093: + the bomb part off). Full suite at a196093: 2,003 passed,
   the 8 known failures (test_harness_recovery x3 while DEMO_SOON exists, test_import_firewall, test_three_layer's bell
-  test, the untracked test_sg8_review.py x3; `sp12ullsuite_a196093.log`).
+  test, the untracked test_sg8_review.py x3; `sp12\fullsuite_a196093.log`).
 
 ### 2. Identity (`sp12\scripts\replay_ident_sp12a.ps1`, `ident_cmp.sh`; from the frozen checkout, which it warmed)
 
