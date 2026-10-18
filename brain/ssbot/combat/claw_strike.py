@@ -93,6 +93,7 @@ class CsCfg:
     pre_press: tuple = (45, 50)     # plan(): the strike grid of the Clawline's feasibility check (a coarser one: the
     pre_drifts: tuple = (0, 4)      # full grid is searched again from control on)
     room: int = 0                   # 1: only when she cannot leave the hammer's reach (12.5 u) behind her
+    other_free: int = 1             # the other Clapper Idle / Walk at the start (else no Clawline: she is locked ~30 f)
     trigger: str = "reach"          # "reach": the playbook's reach / time declines; "force": every slam in its ray band
     #                                 (the fixed-point trials)
     force_min_u: float = 5.6        # "force": her centre this far from its centre at least

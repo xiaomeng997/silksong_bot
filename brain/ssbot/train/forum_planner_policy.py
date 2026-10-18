@@ -837,7 +837,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             if two_play.PUSHMID and self.two is not None:
                 self.slam_play.side_hint = self.two.pm_hint()  # SP11b: F's slam's way out to its wall side
             bks = None
-            if slam_play.STRIKEGUARD and slam_play.SG_BOMBS and self.v2feed is not None:
+            if ((slam_play.STRIKEGUARD and slam_play.SG_BOMBS) or claw_strike.CLAWSTRIKE) and self.v2feed is not None:
                 # SP12a: the small-rune bombs (frames from this STATE) for the strike's path
                 trk_ = self.v2feed.trk
                 if getattr(trk_, "rune", None) is not None:

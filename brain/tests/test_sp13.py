@@ -148,3 +148,19 @@ def test_airstrike_from_high_in_the_air(monkeypatch):
         r = p.run
         assert r is not None and r.as_air and r.phase == "cs_strike" and r.cs_strike is not None
         assert 46 <= r.cs_strike.k_press <= 48 and r.cs_log[-1][1] == "as_plan"
+
+
+def test_no_clawline_while_the_other_one_moves(monkeypatch):
+    # fp3: every HP loss of the w13 trials came from the other Clapper; a move of it under way at the start: no Clawline
+    monkeypatch.setattr(cs, "CLAWSTRIKE", True)
+    monkeypatch.setattr(sp, "TWO_PLAY", True)
+    hx = 31.0 - 9.5
+    for ost, taken in (("Idle", True), ("Spell Antic", False)):
+        p = sp.SlamPlay(sp.PlayCfg())
+        s = _slam(1000, 2, hx)
+        s["ents"].append({"type_key": sp.CLAPPER, "iid": 8, "hp": 200, "pos": [45.0, 7.45], "flipX": False,
+                          "fsms": [{"name": "Control", "state": ost, "t": 0.3}]})
+        p.step(1000, s, True, t_game=10.0, sim=sim_for(hx))
+        assert (p.run.phase == "cs_pre") == taken
+        if not taken:
+            assert p.run.cs_log[0][1:] == ["no", "other Spell Antic"]

@@ -1214,6 +1214,11 @@ class SlamPlay:
                 lo, hi = sorted((hx, cx))
                 if ob[0] - _cs.HALF_W < hi and ob[2] + _cs.HALF_W > lo:
                     reason = "other in the way"
+            if reason is None and o is not None and c.other_free and control(o)[0] not in ("Idle", "Walk"):
+                # fp3 (b812a76, w13 force): 6 of 35 runs lost HP, all to the other one - its small runes in the hop / the
+                # lock (3), a big rune (1), its body / hammer (2). S's antic holds it (Buddy Is Attacking: no new move),
+                # so only a move under way at the start reaches her in the lock: none at all
+                reason = f"other {control(o)[0]}"
             if reason is None and c.room:
                 # only when she cannot leave the hammer's reach (13 u from its centre) on her side
                 out_x = cx + r.face * 13.0
@@ -1231,6 +1236,8 @@ class SlamPlay:
                 if not any(x_[1] == "none" for x_ in r.cs_log):
                     r.cs_log.append([f, "none", k, ms])
                 reason = "no plan"
+        if reason is None and self._cs_bomb(r, plan, cx, hx):
+            reason = "other bomb"                             # a small rune of the other one on the Clawline's path
         if reason is not None:
             self._cs_decline(r, f, reason)
             if _cs.AIRSTRIKE and reason in ("no plan", "silk", "other in the way", "room"):
@@ -1269,6 +1276,30 @@ class SlamPlay:
         r.cs_log.append([f, "as_plan", why, k, round((hero_x(s) - float(e["pos"][0])) * r.face, 2),
                          round(float(hb[1]) - (FLOOR_Y - 1.56), 2), plan.row(), ms])
         return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
+
+    def _cs_bomb(self, r: Run, plan, cx: float, hx: float) -> bool:
+        """SP13: a lit / forecast small-rune bomb of another Clapper (rune_bombs.frames from this STATE) meets her box on
+        the Clawline's path: in place to the press + 10 (the hop's box bottom), the dash to the stop (S's front - 2.1 u),
+        held there to control, the bounce over the stop to the press + 50."""
+        bk = self._bombs
+        if bk is None or not len(bk):
+            return False
+        import numpy as np
+        from ssbot.combat import rune_bombs as _rb
+        own = {int(o) for o in bk[:, 0] if int(o) != r.iid}
+        if not own:
+            return False
+        k0 = self._sg_k0(r)
+        kp = int(plan.k_press)
+        ks = np.arange(k0, kp + 51)
+        d = 1.0 if cx > hx else -1.0
+        x_stop = cx - d * (_cs.BODY_FRONT + 2.1 + _cs.HALF_W)
+        x1 = hx + d * _cs.ANTIC_DX
+        xs = np.where(ks <= kp + 10, hx, np.where(ks >= kp + 27, x_stop, x1 + (x_stop - x1) * (ks - kp - 10) / 17.0))
+        bb = float(plan.bb_press or 1.0)
+        hs = np.where(ks <= kp + 32, bb, bb + np.minimum(4.0, 0.29 * (ks - kp - 32)))
+        ys = 3.0 + hs + 1.0394
+        return bool(_rb.occupied(bk, xs, ys, ks - k0, SG_BOMB_M, own).any())
 
     @staticmethod
     def _cs_s_hit(s: dict, r: Run) -> bool:
