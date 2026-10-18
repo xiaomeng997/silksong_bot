@@ -582,7 +582,10 @@ class Planner:
             if ok([q]):
                 return q
         plans = []
-        for w in (0, 10, 20, 30, 42):
+        # (the lead's NOTE 9: "let the far one jump over to me, then go") no move before its aim: rushing at it in its
+        # antic makes it jump in place near its own wall, no room behind its landing
+        w0 = max((c.a_frame - F0) if (c.a_frame is not None and not c.a_seen) else 0, 0)
+        for w in (w0, w0 + 4, w0 + 10, w0 + 18, w0 + 28):
             for dash in (0, 2, 30):
                 for D in (14, 26, 40, 56, 72):
                     p = Plan("pass", k, F0 + w, F0 + w + D, why=f"pass w{w} d{dash}")
