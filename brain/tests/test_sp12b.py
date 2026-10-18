@@ -470,3 +470,19 @@ def test_holdhit_counts_hits_on_the_held_caster(rt2, monkeypatch):
     two2.prev[7] = ("Slam Recover", 0.3)
     two2.observe(1201, s1, 1201 / 60.0)
     assert two2._idle_step(1201, s1, True, True, 7) is None and two2.idle.why == "hold edge"
+
+
+def test_far_cast_pends_while_she_is_airborne(rt2):
+    ss = []
+    for f, st in ((1000, "Idle"), (1001, "Cast Slam Antic")):
+        s_ = fstate(f, "Idle", 0.5, x_rel=3.0, b_st=st, b_x=WALL_X + 20.0, ground=False)
+        s_["ents"][1]["flipX"] = False
+        ss.append(s_)
+    two = tp.TwoPlay()
+    _run(two, ss)
+    assert two.rt.run is None and two._rt_pend is not None and two.esc_n["rt2_pend_air"] == 1
+    s2 = _far_states(x_rel=3.0, b_x=WALL_X + 20.0)[1]
+    s2["f"] = 1020
+    s2["ents"][1]["fsms"][0]["t"] = 19 / 60.0
+    _run(two, [s2])
+    assert two.rt.run is not None and two.rt.run.src == "other" and two.esc_n["rt2_pend_start"] == 1

@@ -135,8 +135,10 @@ class RtCfg:
     air_pass: int = 1           # best_pass in the air too (fp1: 9 of 16 far casts began with her in the air - the
     #                             pogo planner kept her there, the pass never came)
     other_slam: int = 1         # a run also starts with the other Clapper slamming (its hammer in the plans)
-    pend_f: int = 45            # (fp2) the other one casting small runes at the antic: the run starts once its cast is
-    pend_bomb_u: float = 6.0    # over and no bomb is within pend_bomb_u of her, while the caster's antic is <= pend_f
+    pend_f: int = 70            # (fp2) the other one casting small runes at the antic: the run starts once its cast is
+    pend_bomb_u: float = 4.0    # over and no bomb is within pend_bomb_u of her, while the caster's antic is <= pend_f
+    #                             (fp3: 45 / 6 u started 11 of 50 pending casts - the bombs light outward ~1.7 s; a start
+    #                             up to the aim + 15 leaves the sprint under the flight 38+ frames)
     #                             frames old (fp2: 7 of 7 far-cast runs started in the other's cast lost HP, 5 to its
     #                             bombs in the first 40 frames); else no run (the default play and the low hop)
     go_end: int = 12            # (fp2) the escape cast's go phase ends this many frames before the predicted aim (no
@@ -989,16 +991,17 @@ class RunePogo:
             return
         # (fp2) past the circle's far edge the run stays to the burst (its stay plan): the default's "rune: out" stance
         # (cast_out_u from the landing) is inside the far edge
-        if kind not in ("up", "keep", "drop") or f - r.f_land < 13:
-            return                               # only a pogo run on B ends on B (a pass / a flee runs on); (fp2) not
-            #                                      before the caster's landing hammer is over (2 of 5 such ends: hit at
-            #                                      L + 1 .. 4 by the default play)
+        if kind not in ("up", "keep", "drop"):
+            return                               # only a pogo run on B ends on B (a pass / a flee runs on)
         bst = _sp.control(B)[0]
         bx = float(B["pos"][0])
         if c.b_slam_end and bst == "Slam Antic" and lit_in > c.b_slam_keep:
+            # (fp3) from the caster's landing on: the playbook needs B's antic (B's hammer hit a run that kept its
+            # float through B's slam from L + 2)
             self.close(f, "b slam")              # the slam playbook takes B's slam (its strike / way out)
             return
-        if (bst not in B_FREE or abs(bx - hx) > c.leave_u) and lit_in >= c.leave_f:
+        if (bst not in B_FREE or abs(bx - hx) > c.leave_u) and lit_in >= c.leave_f and f - r.f_land >= 13:
+            # (fp2) not before the caster's landing hammer is over (2 of 5 such ends: hit at L + 1 .. 4)
             self.close(f, "b left")              # no pogo target and the circle not due: the default play
 
     def _front_u(self, r: RtRun, hx: float) -> float:

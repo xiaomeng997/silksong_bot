@@ -1403,14 +1403,17 @@ class TwoPlay:
             why = ""                                     # SP12b: the pass needs no free target
         if RT2 and not why and pend is None and self._bombs_near(s, hx):
             why = "bombs near"                           # SP12b fp2: 2 far-cast runs hit at their start by lit bombs
-        if RT2 and why in ("other slamming", "other casting", "bombs near") and self.rt.cfg.other_slam \
+        if RT2 and not why and pend is None and not _sp.on_ground(s):
+            why = "air"                                  # SP12b fp3: 4 of 5 failed far runs began airborne (the pogo
+            #                                              planner on her focus, no pass from the air)
+        if RT2 and why in ("other slamming", "other casting", "bombs near", "air") and self.rt.cfg.other_slam \
                 and pend is None:
             # SP12b: the other one (her focus) slams - the playbook takes its slam - or casts small runes (fp2: the
             # default and the low hop take them); the run starts once that is over while the caster is still in its
             # antic (the retry in _esc_observe)
             self._rt_pend = (e.get("iid"), o.get("iid"), f - int(round(tin * 60.0)), "other")
             self.esc_n["rt2_pend_" + ("slam" if why == "other slamming" else "cast" if why == "other casting"
-                                      else "bomb")] += 1
+                                      else "air" if why == "air" else "bomb")] += 1
         if pend is not None:
             self.esc_n["rt2_pend_start" if not why else "rt2_pend_no"] += 1
             if why:
@@ -1452,7 +1455,7 @@ class TwoPlay:
             return
         ost = _sp.control(o)[0]
         held = self.esc is not None and not (self.esc.mode is None and self.esc.iid == jid)
-        if held or ost in SLAM_ST or ost in CAST_ST:
+        if held or ost in SLAM_ST or ost in CAST_ST or (src == "other" and not _sp.on_ground(s)):
             return
         if self._bombs_near(s, hx):
             return                                   # bombs still near her (they light outward ~1.7 s)
