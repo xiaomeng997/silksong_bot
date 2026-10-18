@@ -824,11 +824,12 @@ def slash_meets(xw: float, look: int, span: tuple[float, float], spare: float = 
     return lo < span[1] - spare and hi > span[0] + spare
 
 
-def other_danger(s: dict, f_iid, x: float, runes: list | None = None, jump_ok=None) -> str | None:
+def other_danger(s: dict, f_iid, x: float, runes: list | None = None, jump_ok=None, cast_ok: bool = False) -> str | None:
     """Why the Clapper(s) other than f_iid can reach her x now (SP7's _two_danger with her x as the point): a jump move,
     its hammer / lunge within 12.5 u (Slam Antic .. Slam 2: the hammer reaches 12 u in front, from its centre), the small
     runes within 9 u, its recovering body within 4.5 u; a rune circle (lit or to come) over x. jump_ok: the iid whose
-    jump move does not count (SP10c TWO_JUMPHIT: its landing guard decides)."""
+    jump move does not count (SP10c TWO_JUMPHIT: its landing guard decides). cast_ok (SP13b TWO_BOMBS2): its small runes
+    do not count (the caller plans against its bombs)."""
     for o in _sp.clappers(s):
         if o.get("iid") == f_iid:
             continue
@@ -842,7 +843,7 @@ def other_danger(s: dict, f_iid, x: float, runes: list | None = None, jump_ok=No
             return f"other {st}"
         if st in SLAM_ST and d < _sp.TWO_SLAM_U and front:
             return f"other {st}"
-        if st in CAST_ST and d < _sp.TWO_CAST_U:
+        if st in CAST_ST and d < _sp.TWO_CAST_U and not cast_ok:
             return f"other {st}"
         if st == "Slam Recover" and d < _sp.TWO_BODY_U:
             return "other Slam Recover"

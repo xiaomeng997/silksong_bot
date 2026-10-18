@@ -331,9 +331,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         if claw_strike.CLAWSTRIKE:
             claw_strike.warm(self.params)     # SP13: the Clawline strike's plan paths (air_chain's evaluate)
-        if two_play.RUNETIER:
+        if two_play.RUNETIER or rune_lowhop.BOMBS2:
             from ssbot.combat import rune_pogo
-            rune_pogo.warm(self.params)       # SP11a: the pogo tier's planner (else compiled inside a tick)
+            rune_pogo.warm(self.params)       # SP11a: the pogo tier's planner (else compiled inside a tick); SP13b
+            #                                   the low hop's air plans (BOMBS2) use the same rollouts / SAT kernel
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -893,13 +894,23 @@ class ForumPlannerPolicy(PlannerPolicy):
             def latch_h(m: int, _h=hold, _p=prefix) -> int:
                 lat, _ = kin.hold_filter(np.append(_p, np.int64(m)), _h)
                 return int(lat[-1])
+            lh_kw = {}
+            if self.rune_lowhop.b2:
+                # SP13b (SSBOT_FORUM_TWO_BOMBS2): every caster's bombs (the tracker's forecast, frames from this
+                # STATE) and, in the air, the hero model of this tick for the umbrella / drift plans
+                trk_ = self.v2feed.trk if self.v2feed is not None else None
+                if trk_ is not None and getattr(trk_, "rune", None) is not None:
+                    from ssbot.combat import rune_bombs as _rbm
+                    lh_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
+                if ws.hero.contact.v != "GROUND" and self.rune_lowhop.active():
+                    lh_kw["sim"] = air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
             lh = self.rune_lowhop.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                        t_game=ws.stamp.t_game_s, latch=latch_h,
                                        skip=(asw_skip if not (two_play.RT2 and self.two is not None
                                                               and self.two.rt_hold_block(f))
                                              else frozenset(e.get("iid") for e in slam_play.clappers(s))),
-                                       guard=gsp if (gsp is not None and self.two.gcfg.low) else None)
+                                       guard=gsp if (gsp is not None and self.two.gcfg.low) else None, **lh_kw)
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None

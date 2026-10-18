@@ -302,6 +302,28 @@ class RuneBombs:
         return a[a[:, 5] >= T - 1e-9]
 
 
+def pending_rows(clappers, cast2_k: tuple = (47.5, 51.0), cast1_k: tuple = (5.0, 7.5), skip=()) -> np.ndarray:
+    """(SP13b, SSBOT_FORUM_TWO_BOMBS2) the rows still to come: every Clapper in Spell Antic / Cast 1 (no Cast 2 yet:
+    the tracker's forecast starts at Cast 2 under NOPRE) as frames() rows from now (owner, x, y, r, on_k, off_k): its
+    Cast 2 entry cast2_k frames after the antic entry (Cast 1: cast1_k after its entry), ring r's pair at x +- 4.2 r,
+    the windows of predict() over the entry's spread. clappers: [(iid, x, y, Control state, state time s)]."""
+    rows = []
+    for iid, x, y, st, tin in clappers:
+        if iid in skip or st not in ("Spell Antic", "Cast 1"):
+            continue
+        kk = cast2_k if st == "Spell Antic" else cast1_k
+        lo, hi = max(kk[0] - tin * 60.0, 0.0), max(kk[1] - tin * 60.0, 0.0)
+        rb = RuneBombs()
+        rb.add_trigger(iid, lo * FT, x, y)
+        rb.add_trigger(iid, hi * FT, x, y)
+        p = rb.predict(0.0)
+        if len(p):
+            rows.append(frames(p, 0.0))
+    if not rows:
+        return np.zeros((0, 6))
+    return np.concatenate(rows)
+
+
 def frames(bombs: np.ndarray, T: float) -> np.ndarray:
     """predict()'s windows as look-ahead frames from T: [n, 6] (owner, x, y, r, on_k, off_k), on_k / off_k integer
     frames (a frame k is game time T + k FT; inclusive, rounded outward)."""

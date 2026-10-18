@@ -61,6 +61,8 @@ import math
 import os
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from ssbot.combat import cast_stab as _cs
 from ssbot.combat import rune_bombs as _rb
 from ssbot.combat import slam_play as _sp
@@ -74,6 +76,20 @@ def _on(name: str, default: str = "0") -> bool:
 # 1.027 -> 1.126 (90 % +0.034 .. +0.165), HP-hitless 16 = 16; the person's rule "the faster arm is the default"): unset,
 # SSBOT_FORUM_RUNE_LOWHOP follows SSBOT_FORUM_V2 (on with v2, off without it); =0 turns it off (arm rnsp8d0).
 ENABLED = _on("SSBOT_FORUM_RUNE_LOWHOP", "1" if _on("SSBOT_FORUM_V2") else "0")
+# SP13b (the person, 2026-10-18 ~08:45: "the runes come from both sides, a big jump would clear both, but Hornet does the
+# small hop and gets hit by one side"; SP13's A/B recordings: 123 of 599 two-alive casts had the other Clapper's Cast 2
+# 45-90 frames before / after (its cast starts as soon as the first one's lock ends at Cast 2), 43 of them lost HP to a
+# small rune vs 34 of the other 476): SSBOT_FORUM_TWO_BOMBS2, default off (=1 on; acts with two Clappers, TWO_CAST).
+# The low hop plans against every bomb that covers her from BOTH casters - the bombs seen, the tracker's per-bomb
+# forecast (rune_bombs; the rows whose Cast 2 is seen) and the rows still to come (a Clapper in Spell Antic / Cast 1:
+# rune_bombs.pending_rows) - with the full jump's holds (17-26: >= 2.95 u for up to 33 frames) when no low hop clears
+# them all, and a second hop after landing when one jump cannot (the first covers the earliest windows, the rest must
+# stay feasible from its landing); the other one's cast no longer ends / blocks the run (its bombs are in the plan); a
+# start also in Cast 1 / Cast 2; once its caster's cast is over the run stays while covering bombs remain (no stance
+# walk, the keys only when one is within look2 frames); in the air with a covering bomb soon the umbrella (the jump
+# pressed in the air: it holds the height, never lifts) / a drift from the hero model's rollouts against every bomb
+# instead of handing back.
+BOMBS2 = _on("SSBOT_FORUM_TWO_BOMBS2")
 CLAPPER = _sp.CLAPPER
 CAST_ST = ("Spell Antic", "Cast 1", "Cast 2")
 M_L, M_R, M_A, M_J = _sp.M_L, _sp.M_R, _sp.M_A, _sp.M_J
@@ -140,6 +156,73 @@ HOP_HI = {
          4.64, 4.64, 4.61, 4.56, 4.49, 4.41, 4.39, 4.27, 4.12, 3.95, 3.76, 3.65, 3.54, 3.30, 3.03, 2.75, 2.44, 2.29,
          2.09, 1.73, 1.40, 1.01, 0.59, 0.02),
 }
+# SP13b (SSBOT_FORUM_TWO_BOMBS2): the full jump's holds 17-26 from the same model (C:/ssbot/data/m2_play/sp13b/
+# hop_ext.json, scripts/hop_ext.py; holds 12 / 16 reproduce the lo lanes above exactly): the apex 4.64 (H 17) - 5.48 u
+# (H 26), the box bottom >= 2.95 u from j 11 to j 32 (H 17) - 43 (H 26) against 11 - 31 for the low hops
+HOP_LO.update({
+    17: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.64, 4.64, 4.64, 4.61, 4.55, 4.49, 4.39, 4.32, 4.22, 4.06, 3.88, 3.76, 3.54, 3.39, 3.19, 2.91, 2.61, 2.43,
+        2.09, 1.86, 1.56, 1.16, 0.74, 0.47, 0.05, 0.01),
+    18: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.78, 4.77, 4.73, 4.67, 4.59, 4.57, 4.49, 4.35, 4.20, 4.02, 3.82, 3.70, 3.56, 3.34, 3.06, 2.76,
+        2.45, 2.24, 2.02, 1.70, 1.30, 0.88, 0.47, 0.18, 0.01),
+    19: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.83, 4.84, 4.83, 4.79, 4.72, 4.72, 4.63, 4.52, 4.38, 4.22, 4.04, 3.97, 3.83, 3.60, 3.34, 3.06,
+        2.76, 2.58, 2.36, 2.08, 1.70, 1.30, 0.88, 0.59, 0.29, 0.01),
+    20: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.00, 5.01, 4.99, 4.94, 4.88, 4.88, 4.78, 4.67, 4.53, 4.37, 4.18, 4.09, 3.96, 3.73, 3.47,
+        3.19, 2.88, 2.69, 2.46, 2.19, 1.81, 1.41, 0.98, 0.68, 0.37, 0.06, 0.02),
+    21: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.14, 5.14, 5.12, 5.07, 5.00, 5.00, 4.91, 4.79, 4.65, 4.48, 4.29, 4.19, 4.05, 3.84,
+        3.58, 3.29, 2.98, 2.77, 2.54, 2.29, 1.90, 1.50, 1.07, 0.75, 0.43, 0.13, 0.02),
+    22: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.22, 5.26, 5.26, 5.23, 5.18, 5.10, 5.10, 5.01, 4.88, 4.74, 4.56, 4.37, 4.26, 4.11,
+        3.91, 3.64, 3.35, 3.04, 2.83, 2.59, 2.33, 1.95, 1.54, 1.10, 0.80, 0.47, 0.16, 0.02),
+    23: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.22, 5.33, 5.36, 5.35, 5.31, 5.26, 5.18, 5.15, 5.03, 4.94, 4.79, 4.61, 4.41, 4.30,
+        4.11, 3.94, 3.67, 3.37, 3.05, 2.85, 2.59, 2.33, 1.94, 1.52, 1.08, 0.79, 0.47, 0.13, 0.02),
+    24: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.41, 5.37, 5.31, 5.22, 5.16, 5.09, 4.98, 4.82, 4.64, 4.43,
+        4.30, 4.15, 3.94, 3.67, 3.36, 3.04, 2.85, 2.62, 2.31, 1.91, 1.49, 1.04, 0.79, 0.48, 0.07, 0.02),
+    25: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.43, 5.41, 5.37, 5.31, 5.22, 5.19, 5.11, 4.98, 4.82, 4.64,
+        4.43, 4.30, 4.17, 3.93, 3.64, 3.33, 3.04, 2.82, 2.62, 2.26, 1.86, 1.43, 1.04, 0.73, 0.47, 0.02),
+    26: (0.03, 0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55,
+        4.75, 4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.47, 5.48, 5.46, 5.41, 5.34, 5.25, 5.19, 5.11, 4.96, 4.79,
+        4.64, 4.42, 4.28, 4.12, 3.85, 3.56, 3.33, 3.00, 2.76, 2.53, 2.14, 1.73, 1.43, 0.97, 0.65, 0.34, 0.02),
+})
+HOP_HI.update({
+    17: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.78, 4.77, 4.73, 4.67, 4.59, 4.59, 4.49, 4.35, 4.22, 4.06, 3.88, 3.82, 3.59, 3.39, 3.19, 2.91, 2.61,
+        2.45, 2.10, 1.86, 1.56, 1.16, 0.74, 0.47, 0.05),
+    18: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.83, 4.84, 4.84, 4.83, 4.79, 4.72, 4.63, 4.57, 4.50, 4.38, 4.22, 4.04, 3.83, 3.70, 3.56, 3.34, 3.06,
+        2.76, 2.45, 2.24, 2.02, 1.70, 1.30, 0.88, 0.47, 0.18),
+    19: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.00, 5.01, 5.01, 4.99, 4.94, 4.88, 4.78, 4.72, 4.66, 4.53, 4.37, 4.18, 3.97, 3.84, 3.71, 3.47,
+        3.19, 2.88, 2.58, 2.36, 2.16, 1.81, 1.41, 0.98, 0.59, 0.29),
+    20: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.14, 5.14, 5.14, 5.12, 5.07, 5.00, 4.91, 4.85, 4.79, 4.65, 4.48, 4.29, 4.09, 3.96, 3.83,
+        3.58, 3.29, 2.98, 2.69, 2.46, 2.28, 1.90, 1.50, 1.07, 0.68, 0.37, 0.12),
+    21: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.26, 5.26, 5.26, 5.23, 5.18, 5.10, 5.01, 4.95, 4.88, 4.74, 4.56, 4.37, 4.19, 4.05,
+        3.91, 3.64, 3.35, 3.04, 2.77, 2.54, 2.33, 1.95, 1.54, 1.10, 0.75, 0.43, 0.16),
+    22: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.33, 5.36, 5.36, 5.34, 5.30, 5.24, 5.15, 5.10, 5.03, 4.90, 4.74, 4.56, 4.37, 4.26,
+        4.11, 3.91, 3.64, 3.35, 3.04, 2.83, 2.59, 2.33, 1.95, 1.54, 1.10, 0.80, 0.47, 0.16),
+    23: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.41, 5.38, 5.33, 5.26, 5.18, 5.16, 5.03, 4.94, 4.79, 4.61, 4.41,
+        4.30, 4.11, 3.94, 3.67, 3.37, 3.05, 2.85, 2.59, 2.33, 1.94, 1.52, 1.08, 0.79, 0.47, 0.13),
+    24: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.43, 5.43, 5.41, 5.37, 5.31, 5.22, 5.16, 5.09, 4.98, 4.82, 4.64,
+        4.43, 4.30, 4.15, 3.94, 3.67, 3.36, 3.04, 2.85, 2.62, 2.31, 1.91, 1.49, 1.04, 0.79, 0.48, 0.07),
+    25: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.47, 5.48, 5.48, 5.46, 5.41, 5.34, 5.25, 5.19, 5.12, 4.99, 4.83,
+        4.64, 4.43, 4.30, 4.17, 3.93, 3.64, 3.33, 3.04, 2.82, 2.62, 2.26, 1.86, 1.43, 1.04, 0.73, 0.47),
+    26: (0.03, 0.38, 0.73, 1.08, 1.43, 1.77, 1.77, 2.12, 2.47, 2.82, 3.17, 3.49, 3.49, 3.79, 4.07, 4.32, 4.55, 4.75,
+        4.75, 4.93, 5.09, 5.22, 5.33, 5.41, 5.41, 5.47, 5.51, 5.51, 5.50, 5.47, 5.42, 5.34, 5.25, 5.19, 5.11, 4.96,
+        4.79, 4.64, 4.42, 4.28, 4.12, 3.85, 3.56, 3.33, 3.00, 2.76, 2.53, 2.14, 1.73, 1.43, 0.97, 0.65, 0.34),
+})
 
 
 @dataclass
@@ -172,6 +255,15 @@ class HopCfg:
     land_wait: int = 50          # after the press: no landing by P + this -> hand back
     cast2_k: float = 49.5        # Cast 2 entry from the antic entry (p50; before it is seen)
     cast2_len: int = 24          # Cast 2's frames (its Idle from C + 24, p5)
+    # ---- SP13b SSBOT_FORUM_TWO_BOMBS2 (act only with it on) ----
+    h_max2: int = 26             # the full jump's holds up to this (the apex 5.48 u at 26; a longer hold adds nothing)
+    look2: int = 45              # free mode (its caster's cast over): the keys only while a covering bomb's window
+    #                              starts within this many frames (else the other scripts / the planner)
+    rise2: int = 13              # a second hop needs its press this many frames before its first window (j 12: 2.95 u)
+    air2: int = 1                # in the air with a covering bomb soon: the hero model's umbrella / drift plans
+    air_m: float = 0.35          # ... her box this clear of every lit bomb circle (the model floats 0.2 - 0.3 u high:
+    #                              SP11a float_check)
+    air_h: int = 70              # ... the rollout horizon (frames)
 
 
 def _num_env(c: HopCfg) -> HopCfg:
@@ -252,6 +344,36 @@ def hop_plan(threats: list[tuple[int, int, float]], k_first: int, holds: range, 
     return fallback
 
 
+def hop_plan2(threats: list[tuple[int, int, float]], k_first: int, holds: range, min_slack: int, score=None,
+              rise: int = 13) -> dict | None:
+    """(SP13b BOMBS2) the first hop against every covering window [(w0, w1, thr)]: the lowest hold that clears them all
+    (hop_plan over the full holds), else the longest run of the earliest windows one hop clears whose remaining windows
+    a second hop pressed after its landing still clears (its press >= the landing + 1 and its first window >= its press
+    + rise); else (tail=True) the longest run of the earliest windows one hop clears, H2 -1: the rest is left to the
+    umbrella in the air (RuneLowHop._air_plan). {"H", "P", "lo", "hi", "n", "of", "H2"} or None."""
+    ts = sorted(threats)
+    tail = None
+    for n in range(len(ts), 0, -1):
+        first, rest = ts[:n], ts[n:]
+        plan = hop_plan(first, k_first, holds, min_slack, score=score)
+        if plan is None:
+            continue
+        if not rest:
+            return {**plan, "n": n, "of": len(ts), "H2": None}
+        if tail is None:
+            tail = {**plan, "n": n, "of": len(ts), "H2": -1}
+        land = plan["P"] + len(HOP_LO[plan["H"]])
+        w_rest = min(w0 for w0, _, _ in rest)
+        if w_rest < land + 1 + rise:
+            continue
+        if w_rest >= land + 1 + 50:
+            return {**plan, "n": n, "of": len(ts), "H2": 0}     # the rest is far: planned after the landing
+        p2 = hop_plan2(rest, land + 1, holds, 1, rise=rise)
+        if p2 is not None and p2["n"] == p2["of"]:
+            return {**plan, "n": n, "of": len(ts), "H2": p2["H"]}
+    return tail
+
+
 @dataclass
 class Hop:
     iid: object
@@ -278,6 +400,14 @@ class Hop:
     k: int = 0
     late: int = 0                # ticks a covering bomb was due with no feasible hop
     plans: int = 0
+    # SP13b BOMBS2
+    fcw: list = field(default_factory=list)     # the forecast's covering windows of the last tick [(w0, w1, thr)]
+    free: int = 0                # ticks in free mode (its caster's cast over, covering bombs left)
+    rehop: int = 0               # back to the stance after a landing with covering bombs left
+    big: int = 0                 # hops with a hold > 16 (the full jump)
+    split: int = 0               # plans with a second hop after the landing
+    air: list = field(default_factory=list)     # in-air plans used: (k, kind)
+    owners: set = field(default_factory=set)    # the casters whose bombs covered her
 
 
 class RuneLowHop:
@@ -293,6 +423,9 @@ class RuneLowHop:
         self.why_not: dict = {}
         self._runes: dict = {}
         self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the casts not started for it
+        self.b2 = BOMBS2 and two           # SP13b: both casters' bombs (forecast) in the plan
+        self._bk = None                    # BOMBS2: this tick's forecast rows (rune_bombs.frames, from the STATE)
+        self._sim = None                   # BOMBS2: this tick's hero model (air_chain.ChainSim) for the air plans
 
     def reset(self) -> None:
         self.run = None
@@ -330,6 +463,8 @@ class RuneLowHop:
             return False
         if r.k < r.P + r.H + 1:
             return True
+        if self.b2 and any(w0 <= r.k + 2 and w1 >= r.k for w0, w1, _ in r.fcw):
+            return True
         return any(w1 >= r.k for _, w1, _ in self._threat_windows(r, None))
 
     def abort(self, why: str) -> None:
@@ -362,6 +497,13 @@ class RuneLowHop:
             out[f"end_{r.phase}_{r.why}"] += 1
             if r.H is not None:
                 out[f"hold_{r.H}"] += 1
+            if self.b2:
+                out["b2_free_ticks"] += r.free
+                out["b2_rehop"] += r.rehop
+                out["b2_big"] += r.big
+                out["b2_split"] += r.split
+                out["b2_air"] += len(r.air)
+                out["b2_two_owner_runs"] += len(r.owners) >= 2
         for k, v in self.why_not.items():
             out[f"no_{k}"] += v
         res = dict(out)
@@ -376,15 +518,26 @@ class RuneLowHop:
                 "k_c2": None if r.tc is None else round((r.tc - r.ta) * 60.0, 1),
                 "bombs": {str(i): b for i, b in r.bombs.items() if b.get("cover")},
                 "plan": r.plan, "P": r.P, "H": r.H, "k_land": r.k_land, "presses": r.presses, "hits": r.hits,
-                "late": r.late, "plans": r.plans, "end": r.phase, "why": r.why, "ticks": r.ticks, "k": r.k}
+                "late": r.late, "plans": r.plans, "end": r.phase, "why": r.why, "ticks": r.ticks, "k": r.k,
+                **({"b2": {"free": r.free, "rehop": r.rehop, "big": r.big, "split": r.split, "air": r.air,
+                           "owners": sorted(str(o) for o in r.owners), "iid": str(r.iid)}} if BOMBS2 else {})}
 
     # ---- the script ----
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-             latch=None, skip: frozenset | None = None, guard: list | None = None) -> int | None:
+             latch=None, skip: frozenset | None = None, guard: list | None = None, bombs=None,
+             sim=None) -> int | None:
         """The mask for frame f + 2 while the script runs, else None. t_game: the game clock (s; Stamp.t_game_s);
-        latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m)."""
+        latch: m -> the key mask the oracle's hold filter latches at f + 2 when m is sent for it (None: m).
+        (SP13b BOMBS2) bombs: the tracker's per-bomb forecast (rune_bombs.frames rows from this STATE; the rows still
+        to come are added here), sim: the tick's hero model (air_chain.ChainSim) for the air plans."""
         t = f / 60.0 if t_game is None else float(t_game)
+        if self.b2:
+            pend = _rb.pending_rows([(x.get("iid"), float(x["pos"][0]), float(x["pos"][1]), *_sp.control(x))
+                                     for x in _sp.clappers(s)])
+            fc = np.asarray(bombs, float).reshape(-1, 6) if bombs is not None and len(bombs) else np.zeros((0, 6))
+            self._bk = np.concatenate([fc, pend]) if len(pend) else fc
+            self._sim = sim
         e = self._pick(s) if self.two else _sp.clapper(s)
         if skip and e is not None and e.get("iid") in skip and not self.critical():
             # SP9c (combat.two_play's antic switch): its cast is left alone (she switched to the other one)
@@ -423,7 +576,7 @@ class RuneLowHop:
                 r = None
             elif self.two and len(_sp.clappers(s)) == 2 and not self.critical():
                 from ssbot.combat import two_play as _tp
-                why = _tp.other_danger(s, r.iid, self._hx(s))
+                why = _tp.other_danger(s, r.iid, self._hx(s), cast_ok=self.b2)
                 if why is not None:
                     self._close("abort", "other")
                     return None
@@ -431,9 +584,10 @@ class RuneLowHop:
                     self._close("abort", "guard")
                     return None
         if r is None:
-            if e is None or st != "Spell Antic":
+            if e is None or st not in (CAST_ST if self.b2 else ("Spell Antic",)):
                 return None
-            ta = t - tin
+            # (SP13b BOMBS2) a start in Cast 1 / Cast 2 too: its antic entry from the p50 timeline
+            ta = t - tin - (0.0 if st == "Spell Antic" else (43.5 if st == "Cast 1" else self.cfg.cast2_k) / 60.0)
             key = (e.get("iid"), round(ta * 60.0))
             if any(k_[0] == key[0] and abs(k_[1] - key[1]) <= 3 for k_ in self._seen):
                 return None
@@ -454,7 +608,7 @@ class RuneLowHop:
                 why = "rune"
             elif self.two and len(_sp.clappers(s)) == 2:
                 from ssbot.combat import two_play as _tp
-                if _tp.other_danger(s, e.get("iid"), self._hx(s)) is not None:
+                if _tp.other_danger(s, e.get("iid"), self._hx(s), cast_ok=self.b2) is not None:
                     why = "other"
                 elif guard is not None and self._guarded(s, e, face, guard):
                     why = "guard"
@@ -496,6 +650,12 @@ class RuneLowHop:
                    and (hx - float(e["pos"][0])) * (1 if e.get("flipX") else -1) > 0]
             if sp_:
                 return min(sp_, key=lambda e: abs(float(e["pos"][0]) - hx))
+            if self.b2:
+                # (SP13b BOMBS2) a caster in Cast 1 / Cast 2 in front (a start there)
+                c12 = [e for e in cs if _sp.control(e)[0] in ("Cast 1", "Cast 2")
+                       and (hx - float(e["pos"][0])) * (1 if e.get("flipX") else -1) > 0]
+                if c12:
+                    return min(c12, key=lambda e: abs(float(e["pos"][0]) - hx))
         return _sp.clapper(s)
 
     def _guarded(self, s: dict, e: dict, face: int, guard: list) -> str | None:
@@ -656,22 +816,53 @@ class RuneLowHop:
             j = k - r.P
             if ground and j > 4:
                 r.k_land = k
-                self._close("done", "landed")
-                return None
-            if j > c.land_wait:
-                self._close("done", "no landing")
-                return None
-            m = M_J if j < r.H else 0
-            m |= self._air_keys(r, s, e, st, tin, k, d, cx, hx, toward, away, tm, j)
-            return m
+                if not (self.b2 and self._b2_left(r, hx, cx)):
+                    self._close("done", "landed")
+                    return None
+                # (SP13b BOMBS2) covering bombs left (the other row / the second hop): back to the stance
+                r.phase, r.P, r.H, r.plan = "stance", None, None, None
+                r.rehop += 1
+            else:
+                if j > c.land_wait:
+                    self._close("done", "no landing")
+                    return None
+                if self.b2 and self.cfg.air2 and j >= r.H:
+                    # (SP13b BOMBS2) a covering window the hop's lowest lane does not clear and no second hop can (it
+                    # starts before the landing + rise2): from the hold's end the umbrella / drift plan of the hero
+                    # model holds her over it (the latest safe umbrella press)
+                    lo_t = HOP_LO[r.H]
+                    land_k = r.P + len(lo_t)
+                    bad = [w for w in self._threat_windows(r, hx) + self._fc_windows(r, hx)
+                           if w[1] >= k and w[0] < land_k + self.cfg.rise2 and any(
+                               (lo_t[jj - r.P] if 0 <= jj - r.P < len(lo_t) else 0.0) < w[2]
+                               for jj in range(max(w[0], k), w[1] + 1))]
+                    if bad:
+                        m = self._air_plan(r, f, s)
+                        if m is not None:
+                            return m
+                m = M_J if j < r.H else 0
+                m |= self._air_keys(r, s, e, st, tin, k, d, cx, hx, toward, away, tm, j)
+                return m
         # stance: the cast over and nothing covers her -> the planner
         cast = st in CAST_ST
         xs = self._stand_xs(r, cx)
         thr = self._threat_windows(r, hx, xs)
+        free = False
+        if self.b2:
+            # (SP13b BOMBS2) every caster's bombs at her x / the stance: the forecast's windows join the seen ones
+            fcw = self._fc_windows(r, hx, () if (not cast and st not in ("Idle", None)) else xs)
+            thr = thr + fcw
+            if not cast and st not in ("Idle", None) and thr:
+                # its next move began with covering bombs left: free mode (no stance, no slash on it), the keys only
+                # while a window starts within look2 frames
+                free = True
+                r.free += 1
+                if min(w0 for w0, _, _ in thr) - k > c.look2:
+                    return None
         if not cast and not thr:
             self._close("done", "over")
             return None
-        if not cast and st not in ("Idle", None):
+        if not cast and st not in ("Idle", None) and not free:
             self._close("done", "next")                   # its next move began (no hop was due)
             return None
         # the hop: plan on every tick once a covering bomb is seen
@@ -681,9 +872,16 @@ class RuneLowHop:
             if not ground:
                 if min(w0 for w0, _, _ in thr) - k < 12:
                     # a covering bomb lights soon and she is in the air (a start in the air, a knock-back): the hop
-                    # cannot be pressed - the planner (its bomb forecast) decides
+                    # cannot be pressed - the planner (its bomb forecast) decides; (SP13b BOMBS2) unless the hero
+                    # model has a fall / umbrella / drift plan clear of every bomb
+                    if self.b2 and c.air2:
+                        m = self._air_plan(r, f, s)
+                        if m is not None:
+                            return m
                     self._close("abort", "air")
                     return None
+                if free:
+                    return 0
             else:
                 last = r.presses[-1][0] if r.presses else -99
                 cd = float(tm.get("atk_cd") or 0.0)
@@ -696,8 +894,13 @@ class RuneLowHop:
                     body_front = self._body(r, k)[1]
                     gap = max(0.0, d - body_front)
                     w_end = max(w1 for _, w1, _ in thr)
-                    plan = hop_plan(thr, k, range(c.h_min, c.h_max + 1), c.min_slack,
-                                    score=self._score(r, k_ready, min(gap, SLASH_X[1] - 0.5), w_end))
+                    sc = self._score(r, k_ready, min(gap, SLASH_X[1] - 0.5), w_end)
+                    if self.b2:
+                        # (windows already on cannot be cleared by a press now: the rest is planned)
+                        plan = hop_plan2([w for w in thr if w[0] > k], k, range(c.h_min, c.h_max2 + 1), c.min_slack,
+                                         score=sc, rise=c.rise2)
+                    else:
+                        plan = hop_plan(thr, k, range(c.h_min, c.h_max + 1), c.min_slack, score=sc)
                     if plan is not None:
                         r.plans += 1
                         plan = r.plan = {**plan, "k": k, "thr": key}
@@ -709,6 +912,9 @@ class RuneLowHop:
                         if ok:
                             r.P, r.H = k, plan["H"]
                             r.phase = "hop"
+                            if self.b2:
+                                r.big += plan["H"] > 16
+                                r.split += plan.get("n", 0) < plan.get("of", 0)
                             m = M_J | cont
                             if not cont and self._slash_ok(r, s, e, st, tin, k, d, tm, air=False, j=0):
                                 r.presses.append((k, False, round(d, 2), 0.0))
@@ -717,6 +923,8 @@ class RuneLowHop:
         # the ground stance: a slash when it meets its body, else walk into the band
         if cont:
             return cont                                   # the slash's second frame
+        if free:
+            return 0                                      # (BOMBS2) its caster moves on: stand for the bombs
         if self._slash_ok(r, s, e, st, tin, k, d, tm, air=not ground, j=None):
             r.presses.append((k, not ground, round(d, 2), round(bottom, 2)))
             return M_A | toward
@@ -730,6 +938,75 @@ class RuneLowHop:
         if d < lo - 0.5 * WALK_U or (x0d is not None and x0d < c.x0_lo):
             return away
         return 0
+
+    # ---- SP13b SSBOT_FORUM_TWO_BOMBS2 ----
+
+    def _fc_windows(self, r: Hop, hx: float, xs: tuple = ()) -> list[tuple[int, int, float]]:
+        """The forecast's bombs (every caster: self._bk, frames from the STATE) that cover her x hx or the xs she may be
+        at: [(w0, w1, thr)] in the run's frames, still to end; kept on the run for critical()."""
+        c = self.cfg
+        bk = self._bk
+        out = []
+        if bk is not None and len(bk):
+            k0 = r.k - SEND_AHEAD
+            for o, bx, by, _r, on, off in bk:
+                if k0 + off < r.k:
+                    continue
+                dx = min(abs(x - bx) for x in (hx,) + tuple(xs))
+                if dx >= R + HALF_W + c.x_pad:
+                    continue
+                thr = bomb_top(by, max(0.0, dx - c.x_pad)) + c.margin
+                out.append((int(k0 + on) - c.pre, int(k0 + off) + c.post, round(thr, 2)))
+                r.owners.add(int(o))
+        r.fcw = out
+        return out
+
+    def _b2_left(self, r: Hop, hx: float, cx: float) -> bool:
+        """Covering windows still to come at her x (the seen bombs and the forecast)."""
+        thr = self._threat_windows(r, hx) + self._fc_windows(r, hx)
+        return any(w1 >= r.k + 1 for _, w1, _ in thr)
+
+    def _air_plan(self, r: Hop, f: int, s: dict) -> int | None:
+        """In the air with a covering bomb soon: the hero model's plans (fall / the umbrella pressed at u and held /
+        a drift key) against every lit bomb of the forecast (grown by air_m) and the Clappers' bodies (outside the
+        i-frames); the first safe one in the order fall without a key, fall with the shortest drift, the umbrella
+        (latest press first); its keys for this mask frame, None when none is safe."""
+        sim, bk = self._sim, self._bk
+        if sim is None or bk is None:
+            return None
+        import numpy as np
+        from ssbot.combat import rune_pogo as _rpg
+        from ssbot.knowledge import kinematics as kin
+        c = self.cfg
+        h = s.get("hero") or {}
+        F0 = f + SEND_AHEAD
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        gliding = clip.startswith("Umbrella") and "Deflate" not in clip
+        j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
+        plans = []
+        for dk, ds in ((0, (0,)), (M_L, (6, 14, 30)), (M_R, (6, 14, 30))):
+            for d in ds:
+                plans.append(_rpg.Plan("fall", dk, F0, F0 + d, why=f"fall{d}"))
+                if gliding:
+                    plans.append(_rpg.Plan("umb", dk, F0, F0 + d, hold_j=True, why=f"hold{d}"))
+                else:
+                    u0 = 2 if j_held else 0
+                    for u in (u0 + 10, u0 + 6, u0 + 3, u0):
+                        plans.append(_rpg.Plan("umb", dk, F0, F0 + d, umb=F0 + u, why=f"umb{u}d{d}"))
+        cm = np.stack([_rpg.plan_cmds(p, F0, c.air_h) for p in plans])
+        ro = sim.roll(cm)
+        off = sim.off
+        bad = _rpg.bomb_hits(ro, np.asarray(bk, float), off - SEND_AHEAD, c.air_m)
+        inv = (ro.flags & kin.F_INVULN) != 0
+        for e in _sp.clappers(s):
+            bad |= _rpg.box_hits(ro, _rpg.body_box(e), 0.1) & ~inv
+        bad[:, :off + 1] = False
+        ok = [p for n, p in enumerate(plans) if not bad[n].any()]
+        if not ok:
+            return None
+        p = ok[0]
+        r.air.append((r.k, p.why))
+        return _rpg.mask_at(p, F0)
 
     def _stand_xs(self, r: Hop, cx: float) -> tuple:
         """The x she may stand at before the bombs light (the band's ends), for the cover check."""
