@@ -10085,3 +10085,180 @@ timebox), `sp10c_ab.ps1`. Untracked brain/tests/test_sg8_review.py and knowledge
    needle takes the big rune circle; the bomb rule's hop rise (ccA's 1 HP loss).
 5. The audit's top causes are unchanged from SP10a / SP10b: the planner in the air (dash ready / umbrella) and moving into
    it, and one-Clapper scripts (chase, low hop, slam playbook) ignoring the other one (SP10a items 3-5).
+
+
+## Task 1v1 - stage SP11-0: quick wins from the SP10 cause audits - the script guards (TWO_GUARD, now the default), the committed-move margin (TWO_COMMIT, now the default) and the rune gate on the dome (TWO_RUNEGATE, off) (branch worktree-wf_f1846551-5f9-1, 2026-10-17; forum.md §82)
+
+The task (SP11-0): (1) one-Clapper scripts acting while the other Clapper hits her (the chase 10 of 68 HP losses in
+SP10c's T2, the low hop's stance in the other's big rune, the slam bounce drifting into the other's landing) - abort or
+re-target on the other one's danger; (2) the playbook's gate "other rune circle" (blocking to the other's landing + 1.45 s)
+tightened to the lit window; (3) the planner airborne with the dash ready and walking into attacks - trace, find why, fix
+what is cheap. The person's goal: a full-HP clear of the two-Clapper wave (the main measure: HP-hitless clears). Forum_W_w13
+(fo_cl_w13w), instances 0 / 1, 1x; distances centre to centre (her box centre, its transform), HeroBox 0.46 u wide. Data
+`C:\ssbot\data\m2_play\sp11\s0` (`forced_why*` the planner's FORCED_RISK streaks before HP losses, `rep` the open-loop
+replays of the margin change, `runegate*` the gated slams and the strike profile, `fp1` / `fp2` / `fp_audit*` the fixed
+points, `ab` the A/B: `two.json / .txt`, `audit.json / .txt`, traces `ab\hp`, `fp_sum_ab*.txt`; `replay_<sha>` identity;
+`scripts`). Commits 3251a4a (code), 4cb5880 / 9789b37 (fixed-point fixes; 9789b37 = the A/B code), 58cf30b (the
+promotion), docs after it. The lead's NOTE_FROM_LEAD.txt in `sp11` (NOTES 1-5) are all for SP11a (the air chain, the
+big-rune pogo tier) - read before every live block, no action here. No human practice ran; the trading bot was not
+touched.
+
+### Result
+
+- **Promoted: TWO_GUARD + TWO_COMMIT** (58cf30b; both follow SSBOT_FORUM_V2, =0 off; arm `rnsp11_0` = the SP10c
+  default). A/B (9789b37, 2 rounds x 32 per arm, block design, the same seeds 5200000.. / 5300000..):
+
+| | rnjb (old default) | s11gr (GUARD + RUNEGATE) | **s11g (GUARD + RUNEGATE + COMMIT)** |
+|---|---|---|---|
+| **HP-hitless clears** | 8 / 64 (12.5 %) | 7 / 64 (10.9 %) | **12 / 64 (18.8 %)** |
+| both Clappers killed / Clappers killed | 35 / 64, 70 | 35 / 64, 75 | **48 / 64, 96** |
+| landed / s (fight / both alive) | 1.305 / 1.361 | 1.306 / 1.351 | **1.335 / 1.385** |
+| HP-loss hits / min | 4.64 | 4.47 | **3.11** |
+| round 1 / round 2 hitless clears | 6 / 2 | 3 / 4 | 8 / 4 |
+| kill p10 / 50 / 90 of the clears (s) | 28.0 / 32.2 / 35.8 | 27.8 / 31.8 / 36.9 | 27.2 / 31.8 / 38.0 |
+
+  Bootstrap 90 % (episodes resampled), s11g - rnjb: hitless-clear rate +0.063 (-0.047 .. +0.172), both killed +13 (+4 ..
+  +22), landed / s +0.030 (-0.025 .. +0.083), HP hits / min -1.52 (-2.38 .. -0.67); s11gr - rnjb: -0.016 (-0.109 ..
+  +0.078), 0 (-9 .. +9), 0.000 (-0.053 .. +0.054), -0.17 (-1.06 .. +0.74); s11g - s11gr: +0.078 (-0.031 .. +0.188), +13
+  (+4 .. +21), +0.030, -1.36 (-2.18 .. -0.54). By the person's rule (best on hitless clears, not worse on the others) s11g
+  is promoted; the hitless-clear interval still crosses 0 (12 vs 8). The gain is TWO_COMMIT's: the script guards alone
+  (s11gr) are not better than the default.
+- **Confirmation at the promoted commit** (58cf30b, a third round, 2 x 16 per arm, seeds 5500000.. / 5510000..; `chk2`):
+  the new default (rnjb) vs the old (rnsp11_0) - hitless clears 6 vs 2 / 32 (+0.125, 90 % 0.0 .. +0.25), both killed 21
+  vs 14 (+1 .. +13), landed / s 1.313 vs 1.332 (-0.090 .. +0.053), HP hits / min 3.42 vs 5.44 (-3.23 .. -0.89). **Pooled
+  with the A/B (s11g = the new default in effect), 96 per arm: hitless clears 18 vs 10 (18.8 % vs 10.4 %; +0.083, 90 %
+  0.0 .. +0.167), both killed 69 vs 49 (+9 .. +31), landed / s 1.328 vs 1.314 (-0.028 .. +0.057), HP hits / min 3.22 vs
+  4.90 (-2.36 .. -1.00).** A first smoke check (`chk`, 16 episodes, the new default only) had 9 / 16 both killed, 2
+  hitless, ~4.5 HP hits / min - the low end of the same spread.
+- **TWO_RUNEGATE stays off**: it lets a strike start only where the strike's own frames meet the lit circle's dome - the
+  dome (r 7.19 centred 0.34 u above the floor) covers the bounce over the stand point, so offline it would have released 10
+  of 60 gated slams; live (fixed points + the A/B arms) 12 starts let through, 7 struck, 10 / 12 without HP lost to the
+  antic + 120 (none by the rune: a hammer after a strike without a bounce, the other one's landing after "no landing") -
+  below the 90 % gate. In the A/B it acted twice in s11g's 64 episodes (both safe), so the promoted default is s11g
+  without it in effect.
+- **The low hop's guard stays off** (GuardCfg.low = 0, its own trial switch `SSBOT_FORUM_TWO_GUARD_SET="low=1"`): fp1 5 /
+  9 events without HP lost (2 lost to the very bombs the hop is for), fp2 (the other's big rune only) 0 / 1.
+
+### 1. Why (the analysis before the code)
+
+- **The planner's FORCED_RISK streaks** (`forced_why.py` on SP10c's T2 rnjb): 47 of the 49 planner-owned HP losses came
+  after a streak of 7-90 frames with no safe row (32 > 24 frames); in 24 the attacker was not L2's target. Under the v2
+  margin mode "focus" a non-focus Clapper gets the "rule" margin (0.5 u to k 12, then 0.3 + 11 t^2: 2.1 u at k 24, 4.3 u
+  at k 36) on everything - also on a jump past its Jump Aim (the landing error p50 0.03-0.05 u) and on its rune circle:
+  the circle (r 7.19) became ~11.5 u, the landing hammer ~4 u wider, and no row was safe. Example 20261017_161806_2_i0_e0
+  f 4011325: L2 switched to the other Clapper during A's escape jump and the safe rows went 23 -> 0 in one tick; she
+  floated 40 frames in A's landing hammer. The open-loop replay of six T2 episodes with TWO_COMMIT (`rep`): at the start of
+  the live streaks before 8 non-target HP losses safe rows existed in 5 (0 without); none for target attackers.
+- **The rune gate** (`runegate.py` / `runegate_eval*.py` on SP10b / SP10c, 60 gated close slams): most antics began 0-5
+  frames after the other one's jump-cast landing (the buddy lock releases at its Slam 2) or 15-35 frames after; with the
+  strike's p10 height per antic frame (737 struck slams: on the ground to k 26, 4.1-4.4 u at the press, the apex 6.9 u at
+  k 72) she is under the dome during the lit window in 50 of 60 - the old gate's decline was mostly right; under the
+  planner the declined slams lost HP 41 / 60 anyway (the hammer 17, the rune 22).
+- **The script conflicts** (the SP10 traces): the chase ran her under the other one's jump landing (Air -> Slam 2) or
+  through its body; the low hop's stance stood in the other's circle; the slam playbook's NEAR way out picked the side
+  "between them" into the other one's landing band.
+
+### 2. Code (`combat/two_play.py` GuardCfg / guard_spans / guard_hit / guard_room / guard_exit, `evade_chase.py`, `rune_lowhop.py`, `slam_play.py`, `forum_v2.py`, `attack_range.py`, `train/forum_planner_policy.py`)
+
+- `SSBOT_FORUM_TWO_GUARD` (default on with v2 since 58cf30b): `TwoPlay.guard_spans` every tick with two live Clappers -
+  per Clapper its body (+ 0.55 u), its jump's landing band from its Jump Aim (jump_landing from its take-off x and her x at
+  the first Jump / Air frame, its facing then; 3.0 u behind - its falling body, SP10c - to 8.3 u in front) to the landing
+  + 12 frames, its jump cast's circle from the aim (landing + 6.48 u, +- 7.74), its slam's hammer (Slam Antic: 12.5 u
+  both sides - the antic turns to her; Slam 0 .. Slam 2: 12.5 u in front, 1.9 u behind), and every circle object lit or to
+  come. The chase (`EvadeChase.step(guard=)`): no start / abort ("guard") with her inside a span unless the way toward the
+  focus leaves it within 4 u and short of the chase's stop (4cb5880: an escape), the run key held back when the next step
+  enters the nearest span on the way, the dash / air dash only when their travel (3.78 / 6.33 u) fits; the slam playbook
+  (`step(guard=)`): NEAR's / two-far's side away from the other one's landing band / circle (not its hammer: the hand-off
+  handles a second slam); the low hop only with `GuardCfg.low`. `SSBOT_FORUM_TWO_GUARD_SET` overrides GuardCfg. Stats:
+  chase runs `guard_min / guard_stops / guard_kind`, `evade_chase.guard_nostart_f` [frame, kind], `rune_lowhop
+  .guard_nostart_f`, slam runs' side_why "guard". The spans act on the tick's STATE (no lag beyond the policy's send-ahead
+  of 2 frames); the landing is known from the first Jump / Air STATE (Jump Aim + 1).
+- `SSBOT_FORUM_TWO_COMMIT` (default on with v2 since 58cf30b): in `RangeSupport.build` a non-focus Clapper whose move is a
+  jump / jump cast past its Jump Aim or landed (`forum_v2.committed`) gets COMMIT_M (= FOCUS_M 0.5 u; `SSBOT_FORUM_TWO_
+  COMMIT_M`) on its whole estimate, and an idle / moving one's hazards (the rune circle) get it on that part
+  (`Estimate.core` = the estimate without the hazards, set in `attack_range.RangeTracker.estimate`); idle bodies, walks,
+  evades, casts and slams keep the rule margin (the slam antic turns to her). With one Clapper it is the focus: inert.
+- `SSBOT_FORUM_TWO_RUNEGATE` (off): `SlamPlay._rg_exposed` - the start declined only when for a strike frame inside the
+  circle's lit window (landing + 62 .. 88) her box at (the stand point, `RG_H10[k]`) meets the dome, never after that
+  circle was seen lit then unlit (`_rg_observe`); stats `slam_play.rg_rel`.
+- Tests `tests/test_sp11_0.py` (11: the defaults / v2, `committed`, the spans, the chase's hold / no start / escape / no
+  dash, the low hop's rune-only guard, the slam way out's side, the dome and the burst, the old gate kept when off);
+  `test_sp9`'s switch test counts TWO_GUARD. Full suite at 4cb5880: 1,964 passed, the 5 known failures
+  (test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3); `test_sp10c::
+  test_gauntlet_targets_the_other` fails when run after test_sp9 / test_sp9b / test_sp9c in one subset - also at d09484b
+  (an old order dependency, not this stage's).
+
+### 3. Fixed points (`sp11_go.ps1` -> `sp4_block.ps1` -> `sp11_ab.ps1`; `scripts/fp_sum.py`; gate: no HP lost in the window after the switch's event, >= 90 %)
+
+| round | code | episodes | chase guard: no-starts / held or aborted runs | slam side | low hop | RUNEGATE starts | failures -> change |
+|---|---|---|---|---|---|---|---|
+| fp1 | 3251a4a (s11g) | 32 | 20 / 25, 16 / 17 | 2 / 2 | 5 / 9 | 1 / 1 (logging bug: 11 not started) | no-starts inside the span she stood in (the landing hit her anyway) -> the escape rule; the low hop's guard cancelled hops over the very bombs -> its big rune only; the RUNEGATE log -> only real starts |
+| fp2 | 4cb5880 (s11g) | 32 | 39 / 41, 9 / 10 | - | 0 / 1 | 5 / 5 (4 struck) | the low hop's guard -> off (GuardCfg.low) |
+| A/B | 9789b37 (s11g + s11gr) | 128 | 222 / 234, 66 / 74 | 1 / 1 | - | 4 / 6 | - |
+
+Pooled from fp2 on: the chase guard 336 / 359 (94 %: no-starts 261 / 275, runs 75 / 84), the slam side 3 / 3;
+RUNEGATE 10 / 12 (off). fp1 / fp2 as wholes: 21 / 17 of 32 both killed, 5 / 3 hitless (other seeds).
+
+### 4. Identity (`sp11\s0\scripts\replay_ident_sp11_0.ps1`, `ident_cmp.sh`)
+
+3251a4a, 4cb5880 and 9789b37 with the SP11-0 switches unset byte-identical to fbae4c6's default (`sp10b\replay_fbae4c6\
+ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1 / 084036 i1 e0 (2,073 /
+1,778); all three on: the w7 episodes identical (one Clapper), w13 differs from tick 353 / 330, 0 errors; each alone on
+w13: GUARD from 482 / 330, COMMIT from 353 / 332, RUNEGATE identical. 58cf30b (the default): with TWO_GUARD=0
+TWO_COMMIT=0 byte-identical to the old default on all four; unset: the w7 episodes identical to the old default, the w13
+episodes byte-identical to 9789b37 with GUARD + COMMIT on; 0 errors.
+
+### 5. The cause audit (`ssbot.tools.sp10_audit` on the A/B, 64 episodes per arm; `ab\audit.json / .txt`, traces `ab\hp`; `scripts/rank_hitless.py`)
+
+HP losses: rnjb 134 (4.64 / min), s11gr 134 (4.47), **s11g 98 (3.11)**. By class (rnjb / s11g): L2 / planner 76 / 62,
+script conflict 30 / 17, airborne / landing 27 / 19, cooldown 1 / 0, host 0 / 0. By what hit (rnjb / s11g): landing
+collider 31 / 19, big rune 30 / 21, body 31 / 19, small runes 21 / 23, hammer 21 / 16. **The non-target Clapper's jump
+landing + big rune: 47 -> 30 (1.63 -> 0.95 / min; s11gr 50)** - TWO_COMMIT's situation.
+
+Ranked by the hitless clears they cost (a clear with k HP losses gives 1 / k to each loss's cause):
+
+| new default s11g (36 clears with HP lost) | cost | old default rnjb (27) | cost |
+|---|---|---|---|
+| planner in the air, dash ready, L2 on the other | 5.0 (alone 4) | planner in the air (umbrella) | 2.5 |
+| planner in the air (umbrella) | 4.5 (3) | low hop on one while the other hit | 2.33 |
+| planner in the air, dash ready, L2 on it | 4.5 (4) | slam not struck: gate "other rune circle" | 2.33 |
+| slam playbook on one while the other hit | 2.5 (2) | slam playbook on one while the other hit | 2.33 |
+| planner moved into it, L2 on the other | 2.5 (1) | slam not struck: no landing in time | 2.33 |
+| chase on one while the other hit | 2.0 (1) | planner in the air, dash ready, L2 on it | 2.0 |
+| slam not struck: no landing in time | 2.0 (1) | chase on one while the other hit | 1.83 |
+
+Clears lost to one cause class alone: s11g L2 / planner 19, airborne 5, script conflict 4; rnjb 10 / 3 / 4. The script
+conflicts fell 30 -> 17 (the chase on one while the other hit 10 -> 4 - s11gr 1 -, the low hop 6 -> 4 - its guard off -,
+the slam playbook 8 -> 5, the hand-off 5 -> 2); the planner in the air is
+now the top cause by far (forced streaks before most of them: in the fixed points 102 of 106 planner-owned HP losses
+came after a FORCED_RISK streak > 6 frames, 58 with the attacker L2's target - slams and casts the playbook / the low hop
+did not take). Missed planned actions (rnjb / s11g): close slams struck 285 / 381 (75 %) / 311 / 397 (78 %) - not struck:
+the gate "other rune circle" 20 / 22, no landing in time 15 / 11, the hand-off late 10 / -, the gate "other Cast 2" 6 /
+9; F's Idle entries hit within 30 frames 484 / 724 (67 %) / 584 / 789 (74 %); chases ended Far 26 / 372 / 37 / 350 (the
+guard holds them back); attack presses dropped 225 / 2,835 / 249 / 3,198. Switches across situations: both new switches
+are inert with one Clapper (w7 identity; the one-Clapper phase of the w13 episodes: rnjb 181 s / 0 HP, s11g 256 s / 3,
+s11gr 212 s / 6 - none from a guard: the spans are empty with one Clapper); attacker within 6 u of a wall 33 / 32.
+
+### 6. Machine state
+
+Instances 0 and 1 ran fp1, fp2, the A/B (ab1, ab2) and the default's checks (`chk`, `chk2`) (both started 2026-10-16 20:36),
+frozen at time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block; boost_workers ran for
+each block (`boost_workers.stop` present again). No game process touched. Frozen checkouts `C:\ssbot\live_1v1_{3251a4a,
+4cb5880, 9789b37, 58cf30b}`. Sandbox `sp11_go.ps1`, `sp11_ab.ps1`; manifests `1v1sp11{fp1,fp2,ab1,ab2,chk,chk2}_manifest.txt`.
+Arms (`1v1_arms.txt`, backups .bak_sp11_0 / .bak_sp11_0b): `s11g` = rnjb + TWO_GUARD + TWO_RUNEGATE + TWO_COMMIT, `s11gr`
+= rnjb + TWO_GUARD + TWO_RUNEGATE + TWO_COMMIT=0, `rnsp11_0` = the default with TWO_GUARD=0 TWO_COMMIT=0; every older arm
+carries both =0 (rnjb / rnjbT / sp9c* / sp9bAB / two_ho / two_ht / jh / cc* / s11g follow the new default). Untracked
+brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **The planner in the air with no safe row** is now the top cause (14.0 of the 36 clears' cost): FORCED_RISK streaks of
+   25-90 frames before the hit, half of them with the attacker L2's target (its slam the playbook did not take, its cast
+   the low hop did not take). Next: why no row escapes a slam antic / a cast from the air (the escape check's
+   "v2 end", the dash rows near an idle Clapper ranked after the rest by NODASH, the umbrella float's model at its end).
+2. **The rune gate**: the dome covers the strike's bounce, so the right fix is a strike whose way out leaves the dome
+   before the lit frames (the far side, or SP11a's pogo / air chain timing), not a looser gate.
+3. **The low hop with the other one's danger**: aborting it hands the bombs to the planner (fp1: 2 bomb hits right after
+   a guard no-start); a hop plan that also clears the other one's circle / landing would be the fix.
+4. The chase guard holds back more chases (ended Far 26 -> 37 of ~360): F evades into the other one's landing band often;
+   a re-target to the other Clapper there (the switch) was not built.
