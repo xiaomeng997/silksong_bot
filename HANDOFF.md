@@ -10461,7 +10461,7 @@ practice ran; the trading bot was not touched.
   the lock bound, PUSHMID's start / hint / herd / ret-1 end). `sp10_audit` knows `two:wo`.
   Full suite at 343eea6 (the code of dc81390): 1,996 passed, the 8 known failures (test_harness_recovery x3 while
   DEMO_SOON exists, test_import_firewall, test_three_layer's bell test, the untracked test_sg8_review.py x3;
-  `sp11\s2ullsuite_dc81390.log`).
+  `sp11\s2\fullsuite_dc81390.log`).
 
 ### 2. Fixed points (`sp11_go.ps1` -> `sp4_block.ps1` -> `sp11_ab.ps1`; manifests `1v1sp11b_{fp1,fp2,ab1,ab2,ab3}_manifest.txt`; `scripts/fp11b.py`)
 
