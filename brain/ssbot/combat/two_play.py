@@ -141,7 +141,15 @@ ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
 RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER")
 ESC = ESC_CORNER or ESC_SWITCH or RUNETIER
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
-ASW = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
+ANTICSWITCH = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
+# SP11b (task 1v1 SP11b; bigrune/answer.txt section 1 and 4, the person: "switch target early enough to reduce the
+# corner big runes"): default off (=1 on). The antic switch's run (AswRun) with the spec's numbers - slams only (casts=0),
+# trigger T8.1 (F's back <= 8.1 u), also on F's first attack (first=0), F-B >= 17.1 u (sep_slam: F lunges 3.6 u, so her
+# press point at B stays >= 8.55 u from F) and her predicted centre >= 8.55 u from F's lunged centre at F's Idle + 15
+# (AswCfg.early: antic + k_i15) - else no switch. SSBOT_FORUM_TWO_EARLY_SET overrides those AswCfg numbers. With
+# TWO_ANTICSWITCH also on, the antic switch's own numbers (SSBOT_FORUM_TWO_ASW_SET) win.
+EARLY = _on("SSBOT_FORUM_TWO_EARLYSWITCH")
+ASW = ANTICSWITCH or EARLY
 # SP10c (the lead's NOTE 4 / 5 of 2026-10-17, the person: "the moment one starts its jump antic she can already go and
 # hit the other one" - part of the target-switch controller; forum.md 81): default off (=1 on)
 JUMPHIT = _on("SSBOT_FORUM_TWO_JUMPHIT")
@@ -158,7 +166,28 @@ JUMPHIT = _on("SSBOT_FORUM_TWO_JUMPHIT")
 # 4.47. Since then TWO_GUARD follows SSBOT_FORUM_V2 when unset (=0 off; arm rnsp11_0 = the SP10c default); the low
 # hop's part stays off (GuardCfg.low)
 GUARD = _on("SSBOT_FORUM_TWO_GUARD", _V2)
-ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD   # the policy's TwoPlay object (CHASE / CAST: own scripts)
+# SP11b (task 1v1 SP11b; bigrune/answer.txt section 1 - how the focus ends at its wall: its own Idle-coin evade 43 %, the
+# opening 22 %, an evade after her hit 13 %, her knock-back 8 % - and the lead's NOTE 6): each default off (=1 on)
+#   TWO_WALKOUT  (WoCfg) the coin needs her within 8.3 u of F at its Idle (beyond it F walked out 85 %): F (L2's target)
+#                with its back within back_u of its wall and B not attacking -> she stands d_u from F on its open side
+#                through F's Idle entries (no hit on F) while F walks out toward her, until F's back >= draw_u, F starts
+#                a move, B moves or the time is up; with open=1 also the opening (she waits at c2 + d_u, no slash)
+#   TWO_OPENPUSH (OpCfg) the opening (the wake .. c2's first move): no hit on c2 while its back < back_u (each front
+#                slash pushes it 0.48 u; it lands 0.8 u outside its escape line) - the opening script's and IdleHit's
+#                presses and the planner's hits on c2 (GoalPrefs.no_hit)
+#   TWO_RUNLOCK  (combat.tactics.gauntlet) the switch rule's "focus committed" run bounded by the focus's LOCK end
+#                (slam 0.92 s, cast 0.81, jump 1.21, jump cast 1.63 s from its antic), not its move's end; after such a
+#                switch no hit on the new target while the old one's flag is on (the deciding hit in its tail)
+#   TWO_PUSHMID  (PmCfg) at F's close Slam Antic with F's outer room smaller than B's and the run to B failing the
+#                lock-bounded check: the slam playbook's way out to F's wall side (over its body), then L2 holds F
+#                with the stance on its wall side (her slashes herd it toward the middle) - ret 1: for one F move
+#                (until its next antic), ret 2: until the lock-bounded run check to B passes
+WALKOUT = _on("SSBOT_FORUM_TWO_WALKOUT")
+OPENPUSH = _on("SSBOT_FORUM_TWO_OPENPUSH")
+RUNLOCK = _on("SSBOT_FORUM_TWO_RUNLOCK")
+PUSHMID = _on("SSBOT_FORUM_TWO_PUSHMID")
+SP11B = WALKOUT or OPENPUSH or RUNLOCK or PUSHMID
+ANY = IDLEHIT or SPACE or OPEN or ESC or ASW or JUMPHIT or GUARD or SP11B   # the policy's TwoPlay object
 
 CLAPPER = _sp.CLAPPER
 M_L, M_R, M_A = _sp.M_L, _sp.M_R, _sp.M_A
@@ -301,6 +330,108 @@ def guard_exit(spans, x: float, d: int, kinds=GUARD_ALL, own=None) -> tuple[floa
     return abs(e - x), guard_room(spans, e, d, kinds, own), kind0
 
 
+# ---- SP11b: the focus at its wall ----
+MOVE_KIND = {"Slam Antic": "slam", "Spell Antic": "cast", "Jump Antic": "jump", "Cast Slam Antic": "jc"}
+# the buddy lock (its flag on): the antic start to Slam 2 / Cast 2 (buddy/answer.txt; lower bounds in frames)
+LOCK_F = {"slam": 55, "cast": 48, "jump": 72, "jc": 97}
+LOCK_ST = {"slam": ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?"), "cast": ("Spell Antic", "Cast 1"),
+           "jump": ("Jump Antic", "Jump Aim", "Jump", "Air"),
+           "jc": ("Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump", "Jump Aim", "Jump", "Air")}
+LOCK_ANY = frozenset(x for v in LOCK_ST.values() for x in v)
+WO_TAIL_ST = ("Slam 2", "Slam Effects?", "Slam Recover", "Cast 2", "After Scuttle")
+B_FREE_ST = ("Idle", "Walk", "Evade Scuttle", "After Scuttle")
+
+
+def wall_away(cx: float, hx: float) -> float:
+    """A Clapper's centre to the wall on its side away from her (u)."""
+    return (cx - WALL_L) if hx >= cx else (WALL_R - cx)
+
+
+@dataclass
+class WoCfg:
+    back_u: float = 8.0       # F's back (its centre to the wall on its side away from her) at the start (<=)
+    d_u: float = 8.9          # her stand: this far from F's centre on its open side (its Slam Range 8.3 + 0.25 + 0.35)
+    draw_u: float = 11.4      # keep standing off while F walks out until its back >= this (the line 6.0 + one slide 5.4:
+    #                           a coin evade from there stays outside the line); 0: re-engage at F's first Walk
+    end_f: int = 240          # the run ends this long after its start at the latest
+    idle_f: int = 90          # ... or this long after F's last Idle entry with F still in Idle
+    dash_min: float = 3.0     # a ground dash toward the stand with at least this far to go (3.27 u in 7 frames)
+    b_gap: float = 3.5        # no stand within this of B's centre
+    open: int = 1             # the opening: wait at c2's landing + d_u (no slash on c2) for its first Idle
+
+
+@dataclass
+class WoRun:
+    iid: object
+    other: object
+    f0: int
+    st0: str
+    back0: float
+    d0: float
+    dir: int                   # her side of F (+1 right): the open side
+    hp0: int = 0
+    opening: bool = False
+    phase: str = "out"
+    f_idle: int | None = None  # F's last Idle entry
+    idles: int = 0
+    d_i15: float | None = None # her |dx| from F at its first Idle entry + 15
+    walks: int = 0
+    back_max: float = 0.0
+    sx: float | None = None
+    next_st: str | None = None
+    k_next: int | None = None
+    hp: list = field(default_factory=list)
+    dash: int = 0
+    keys: int = 0
+    f_end: int | None = None
+    end: str = ""
+
+
+@dataclass
+class OpCfg:
+    back_u: float = 7.0       # c2's back (to the wall on its side away from her) below which no hit on it counts
+    end_s: float = 8.0        # the rule ends this long after the wake at the latest (else at c2's first move)
+
+
+@dataclass
+class PmCfg:
+    ret: int = 1              # 1: herd through one F move (until its next antic / evade); 2: until the lock-bounded run
+    #                           check to B passes (TWO_RUNLOCK's)
+    d_u: float = 8.3          # F's close slam (she within its Slam Range)
+    dy_u: float = 3.9
+    hyst: float = 1.0         # F's outer room + this < B's
+    room_min: float = 6.0     # F's centre to its wall >= this (slam_play's over_room: she lands behind it)
+    stance_u: float = 3.5     # the herd stance: this far from F's centre on its wall side
+    wall_pad: float = 1.0
+    end_f: int = 360          # the herd lasts at most this long (frames)
+    close_u: float = 7.0      # the run check: her within this of B's centre ...
+    run_u_s: float = 8.25     # ... at the run speed (u / s), by F's lock end
+
+
+@dataclass
+class PmRun:
+    iid: object
+    other: object
+    f_a: int
+    k_a: int
+    face: int
+    wdir: int                  # toward F's wall (her herd side)
+    room_f: float
+    room_b: float
+    need: float
+    lock_rem: float
+    hp0: int = 0
+    phase: str = "strike"
+    f_herd: int | None = None
+    back_herd: float | None = None
+    backs: list = field(default_factory=list)   # (frame - f_a, F's wall distance) at F's Idle entries in the herd
+    hits_f: int = 0
+    hp: list = field(default_factory=list)
+    next_st: str | None = None
+    f_end: int | None = None
+    end: str = ""
+
+
 # ---- SP9c: the antic switch ----
 ASW_ANTIC = {"Slam Antic": "slam", "Spell Antic": "cast"}
 ASW_ON_ST = {"slam": ("Slam Antic", "Slam 0", "Slam 1", "Slam Effects?"), "cast": ("Spell Antic", "Cast 1")}
@@ -357,11 +488,22 @@ class AswCfg:
     crit_lead: int = 4        # the other scripts are held off from this many frames before the planned press
     lock_win: int = 10        # F's lock: the press on B's Idle (re-)entry only up to this many frames after it (the
     #                           hit lands 3-4 frames after the press's STATE: before the coin at 15)
+    # SP11b TWO_EARLYSWITCH (bigrune answer section 1): the coin needs her within 8.3 u of F at its Idle (+ 0.25 s)
+    early: int = 0            # 1: no switch unless her predicted centre at antic frame k_i15 is >= pred_d from F's
+    pred_d: float = 8.55      # centre after its lunge (lunge_u along its facing); her: the press point when the run
+    lunge_u: float = 3.6      # reaches it by then (the dash held into the sprint, then the walk), else as far as it gets
+    k_i15: int = 91           # F's Idle + 15 (Slam 2 at 56 + the tail 20 + the coin 15)
 
 
 def _asw_cfg() -> AswCfg:
     """SSBOT_FORUM_TWO_ASW_SET="trig=1,back_u=7.5": trial overrides of the AswCfg numbers."""
     return _set_cfg(AswCfg(), "SSBOT_FORUM_TWO_ASW_SET")
+
+
+def _early_cfg() -> AswCfg:
+    """SSBOT_FORUM_TWO_EARLYSWITCH's AswCfg (the spec: casts=0, trig 0, back_u 8.1, first=0, F-B >= 17.1 u, the
+    predicted-distance gate); SSBOT_FORUM_TWO_EARLY_SET="back_u=7.5,sep_slam=16" overrides."""
+    return _set_cfg(AswCfg(casts=0, trig=0, back_u=8.1, first=0, sep_slam=17.1, early=1), "SSBOT_FORUM_TWO_EARLY_SET")
 
 
 def pred_back(c: AswCfg, back0: float, kind: str) -> float:
@@ -418,6 +560,7 @@ class AswRun:
     hit_b: int | None = None   # the first landed hit on B from F's flag-off on (frames - f_off; < 0: in F's lock)
     b_next: str | None = None  # B's next move (state) and its frame - f_off
     k_next: int | None = None
+    pd: float | None = None    # SP11b early: her predicted distance from F's lunged centre at antic frame k_i15 (u)
     tx: float | None = None    # the target x this tick
     walk: int = 0
     f_end: int | None = None
@@ -658,7 +801,7 @@ class TwoPlay:
         self._esc_hop_plan: tuple | None = None
         self._sw_stance_x: float | None = None  # arm B's stance this tick (F's flag on)
         # SP9c: the antic switch
-        self.acfg = _asw_cfg() if ASW else AswCfg()
+        self.acfg = _early_cfg() if (EARLY and not ANTICSWITCH) else _asw_cfg() if ASW else AswCfg()
         self.asw: AswRun | None = None
         self.asw_done: list[AswRun] = []
         self.asw_n: Counter = Counter()
@@ -675,6 +818,22 @@ class TwoPlay:
         self._jh_prev: dict = {}              # iid -> its Control state on the last tick
         self._jh_dash: dict | None = None     # the leave's dash held into the sprint
         self._jh_pressed: int | None = None   # the hit script's last press frame
+        # SP11b: TWO_WALKOUT / TWO_OPENPUSH / TWO_PUSHMID (TWO_RUNLOCK lives in gauntlet)
+        self.wcfg = _set_cfg(WoCfg(), "SSBOT_FORUM_TWO_WALKOUT_SET") if WALKOUT else WoCfg()
+        self.wo: WoRun | None = None
+        self.wo_done: list[WoRun] = []
+        self.wo_n: Counter = Counter()
+        self._wo_cool: dict = {}              # iid -> no new run until its next move (one run per F cycle)
+        self._wo_sent = False                 # the run's script sent this tick's keys
+        self._wo_pst = None                   # F's state on the run's last tick
+        self._focus = None                    # L2's target on the last step
+        self.ocfg = _set_cfg(OpCfg(), "SSBOT_FORUM_TWO_OPENPUSH_SET") if OPENPUSH else OpCfg()
+        self.op = {"on": False, "end": None, "c2": None, "blk_open": 0, "blk_idle": 0, "nohit": 0, "back": None,
+                   "back_end": None, "f_end": None}
+        self.pcfg = _set_cfg(PmCfg(), "SSBOT_FORUM_TWO_PUSHMID_SET") if PUSHMID else PmCfg()
+        self.pm: PmRun | None = None
+        self.pm_done: list[PmRun] = []
+        self.pm_n: Counter = Counter()
 
     # ---- helpers ----
 
@@ -696,6 +855,7 @@ class TwoPlay:
         self.entry = {}
         antics = []
         asw_antics = []
+        pm_antics = []
         for e in _sp.clappers(s):
             iid = e.get("iid")
             st, tin = _sp.control(e)
@@ -710,6 +870,10 @@ class TwoPlay:
                 asw_antics.append(e)
             if ASW and (st in ASW_ANTIC or st in ESC_ANTIC) and (pst is None or pst[0] != st):
                 self._n_att[iid] += 1
+            if SP11B and st in MOVE_ST and (pst is None or pst[0] != st):
+                self._wo_cool.pop(iid, None)
+                if PUSHMID and st in MOVE_KIND:
+                    pm_antics.append(e)
             self.prev[iid] = (st, tin)
             if (SPACE or GUARD) and hx is not None:
                 j = self.jumps.get(iid)
@@ -731,6 +895,8 @@ class TwoPlay:
             self._asw_observe(f, s, t, hx, asw_antics)
         if JUMPHIT:
             self._jh_observe(f, s, hx)
+        if SP11B and hx is not None:
+            self._sp11b_observe(f, s, t, hx, pm_antics)
         # the IdleHit run's bookkeeping on every tick (another script may hold the keys when its hit shows): the landed
         # hit on its Clapper (the STATE that shows it: its state turns over in the same frame), the run's end
         r = self.idle
@@ -773,6 +939,14 @@ class TwoPlay:
             if jm is not None:
                 self.last_part = "jh"
                 return jm
+        if SP11B:
+            self._focus = focus
+        if WALKOUT:
+            wm = self._wo_step(f, s, ground, accepting, focus, two_enc, t)
+            self._wo_sent = wm is not None
+            if wm is not None:
+                self.last_part = "wo"
+                return wm
         m = None
         if OPEN and two_enc:
             m = self._open_step(f, s, ground, accepting, t, wake_f)
@@ -841,6 +1015,11 @@ class TwoPlay:
             if v is not None and iid in v["no_hit"]:
                 r.why = r.why or "esc"             # SP9b / SP9c: no hit on it now (the corner's wait / F's lock)
                 return None
+        if SP11B and iid in self.sp11b_nohit(s):
+            r.why = r.why or "sp11b"               # SP11b: the opening's push rule / the walk-out's stand-off
+            if OPENPUSH and iid == self.op.get("c2"):
+                self.op["blk_idle"] += 1
+            return None
         k = f - r.f0
         hx = self._xw(s)
         cx = float(F["pos"][0])
@@ -919,7 +1098,15 @@ class TwoPlay:
         if not accepting:
             return None
         hx = self._xw(s)
-        if c2 is not None and ground and st2 in ("Drop In", "Enter Land"):
+        open_x = OPEN_X
+        if WALKOUT and self.wcfg.open and c2 is not None:
+            # SP11b TWO_WALKOUT: wait beyond its Slam Range for its first Idle (no slash: it walks out toward her)
+            open_x = float(c2["pos"][0]) + self.wcfg.d_u
+            o["wo"] = round(open_x, 2)
+        elif c2 is not None and ground and st2 in ("Drop In", "Enter Land") and OPENPUSH and (
+                wall_away(float(c2["pos"][0]), hx) < self.ocfg.back_u):
+            self.op["blk_open"] += 1                # SP11b TWO_OPENPUSH: no front slash on c2 near its wall
+        elif c2 is not None and ground and st2 in ("Drop In", "Enter Land"):
             span = body_span(c2)
             y0, _ = body_y(c2)
             hy = float((h.get("pos") or [0.0, 0.0])[1])
@@ -931,10 +1118,10 @@ class TwoPlay:
                 o["presses"].append((f, round(hx - float(c2["pos"][0]), 2), st2))
                 return self._press(f, toward)
         # the walk to OPEN_X (stop dead inside +-0.3 u)
-        if abs(hx - OPEN_X) <= 0.3:
+        if abs(hx - open_x) <= 0.3:
             return 0
         o["walk"] += 1
-        return M_L if hx > OPEN_X else M_R
+        return M_L if hx > open_x else M_R
 
     # ---- SP9b: the escape jump (TWO_CORNER / TWO_WALLSWITCH) ----
 
@@ -1796,6 +1983,7 @@ class TwoPlay:
         ost = _sp.control(o)[0]
         sep = abs(ox - cx)
         why = ""
+        early_pd = None
         if c.first and self._n_att[e.get("iid")] <= 1:
             why = "first"
         elif (ox - cx) * face <= 0:
@@ -1824,10 +2012,26 @@ class TwoPlay:
                 why = "far"
             elif kind == "slam" and k_now + SEND_AHEAD + frames((cx + face * c.hammer_u - hx) * face) > c.hammer_k:
                 why = "hammer"
+            if not why and c.early:
+                # SP11b: her centre at F's Idle + 15 (antic frame k_i15) >= pred_d from F's centre after its lunge
+                press = self._asw_press_x(o, face)
+                dist = (press - hx) * face
+                n = c.k_i15 - k_now - SEND_AHEAD
+                if dist <= 0 or frames(dist) <= n:
+                    hp_x = press
+                elif dist < c.dash_min:
+                    hp_x = hx + face * max(0, n) * WALK_U
+                else:
+                    jj = max(0, min(n, jmax))
+                    hp_x = hx + face * (_cs.sprint_travel(jj) + max(0, n - jj) * WALK_U)
+                pd = (hp_x - (cx + face * c.lunge_u)) * face
+                early_pd = round(pd, 2)
+                if pd < c.pred_d:
+                    why = "pred"
         run = AswRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f, k_a=k_now, ta=t - tin, x0=round(cx, 3),
                      face=face, back0=round(back, 2), pred=round(pr, 2), sep0=round(sep, 2),
                      rel0=round((hx - cx) * face, 2), o_st=ost, o_d=round(do, 2), mode=None if why else "aswitch",
-                     hp0=hp, why=why, o_prev=ost)
+                     hp0=hp, why=why, o_prev=ost, pd=early_pd)
         if why:
             self.asw_n[f"no_{why}"] += 1
             run.end, run.f_end = "not taken", 0
@@ -2118,7 +2322,380 @@ class TwoPlay:
                             "lock_hits": [x for x in r.hits_b if x[1] == "go"],
                             "b_next": r.b_next, "k_next": r.k_next, "walk": r.walk, "f_end": r.f_end,
                             "end": r.end, "lag": r.k_a, "f_lock": r.f_lock, "hops": r.hops,
-                            "bombs_live": sum(1 for b in r.bombs.values() if not b["stale"])} for r in runs]
+                            "bombs_live": sum(1 for b in r.bombs.values() if not b["stale"]),
+                            **({"pd": r.pd, "o_iid": r.other, "iid": r.iid} if EARLY else {})} for r in runs]
+        return out
+
+    # ---- SP11b: TWO_WALKOUT / TWO_OPENPUSH / TWO_PUSHMID ----
+
+    def _sp11b_observe(self, f: int, s: dict, t: float, hx: float, pm_antics: list) -> None:
+        cs = _sp.clappers(s)
+        hp = int((s.get("hero") or {}).get("health") or 0)
+        if WALKOUT and self.wo is not None:
+            self._wo_update(f, s, t, hx, hp, cs)
+        if OPENPUSH:
+            self._op_update(f, s, hx, cs)
+        if PUSHMID:
+            if self.pm is not None:
+                self._pm_update(f, s, t, hx, hp, cs)
+            if self.pm is None and pm_antics and len(cs) == 2:
+                for e in pm_antics:
+                    self._pm_start(f, s, e, cs, hx, hp)
+                    if self.pm is not None:
+                        break
+
+    def _busy(self) -> bool:
+        """Another two-Clapper run holds the play (the antic switch, the escape run, TWO_JUMPHIT, PUSHMID)."""
+        return ((ASW and self.asw is not None and self.asw.mode is not None)
+                or (ESC and self.esc is not None and self.esc.mode is not None)
+                or (JUMPHIT and self.jh is not None) or (PUSHMID and self.pm is not None))
+
+    def sp11b_nohit(self, s: dict) -> frozenset:
+        """The Clappers whose hits do not count now: OPENPUSH's c2 near its wall in the opening, WALKOUT's F."""
+        out = set()
+        if OPENPUSH and self.op["on"] and self.op["end"] is None and self.op.get("c2") is not None:
+            c2 = clapper_by(s, self.op["c2"])
+            hx = _sp.hero_x(s)
+            if c2 is not None and hx >= float(c2["pos"][0]) and wall_away(float(c2["pos"][0]), hx) < self.ocfg.back_u:
+                out.add(self.op["c2"])
+        if WALKOUT and self.wo is not None:
+            out.add(self.wo.iid)
+        return frozenset(out)
+
+    def sp11b_prefs(self, prefs, s: dict):
+        """SP11b's changes to L2's prefs (before TWO_SPACE's stance): the no-hit Clappers, WALKOUT's stand, PUSHMID's
+        herd stance."""
+        if not ((s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos")):
+            return prefs
+        nh = self.sp11b_nohit(s)
+        if nh:
+            if OPENPUSH and self.op.get("c2") in nh:
+                self.op["nohit"] += 1
+            prefs = replace(prefs, no_hit=frozenset(prefs.no_hit) | nh)
+        if WALKOUT and self.wo is not None and self.wo.sx is not None:
+            prefs = replace(prefs, stance_x=float(self.wo.sx))
+        if (PUSHMID and self.pm is not None and self.pm.phase == "herd"
+                and getattr(prefs, "target", None) == self.pm.iid):
+            x = self._pm_stance(s)
+            if x is not None:
+                prefs = replace(prefs, stance_x=float(x))
+        return prefs
+
+    # -- TWO_OPENPUSH --
+
+    def _op_update(self, f: int, s: dict, hx: float, cs: list) -> None:
+        o = self.op
+        if o["end"] is not None:
+            return
+        if not o["on"]:
+            if self.open.get("f_wake") is None or len(cs) != 2:
+                return
+            o["on"] = True
+            o["f0"] = f
+            c2 = min(cs, key=lambda e: float(e["pos"][0]))
+            o["c2"] = c2.get("iid")
+            o["back"] = round(wall_away(float(c2["pos"][0]), hx), 2)
+        c2 = clapper_by(s, o["c2"])
+        if c2 is None:
+            o["end"], o["f_end"] = "gone", f - o["f0"]
+            return
+        st = _sp.control(c2)[0]
+        o["back_end"] = round(wall_away(float(c2["pos"][0]), hx), 2)
+        if st in MOVE_ST:
+            o["end"], o["f_end"], o["move"] = "move", f - o["f0"], st
+        elif (f - o["f0"]) / 60.0 > self.ocfg.end_s:
+            o["end"], o["f_end"] = "time", f - o["f0"]
+
+    # -- TWO_WALKOUT --
+
+    def _wo_start(self, f: int, s: dict, focus, two_enc: bool, t: float) -> None:
+        c = self.wcfg
+        cs = _sp.clappers(s)
+        if len(cs) != 2 or self._busy():
+            return
+        hx = _sp.hero_x(s)
+        F = clapper_by(s, focus) if focus is not None else None
+        opening = (two_enc and c.open and self.open.get("done") == "c2 idle" and self.open.get("wo") is not None
+                   and not self.wo_n.get("runs_open", 0))
+        if opening:
+            F = min(cs, key=lambda e: float(e["pos"][0]))     # c2 (its first Idle)
+        if F is None:
+            F = min(cs, key=lambda e: abs(float(e["pos"][0]) - hx))
+        iid = F.get("iid")
+        if self._wo_cool.get(iid):
+            return
+        st = _sp.control(F)[0]
+        if not (st in WO_TAIL_ST or (st == "Idle" and (iid in self.entry or opening))):
+            return
+        o = next(x for x in cs if x.get("iid") != iid)
+        cx, ox = float(F["pos"][0]), float(o["pos"][0])
+        back = wall_away(cx, hx)
+        if back > c.back_u:
+            return
+        self.wo_n["cand"] += 1
+        d = 1 if hx >= cx else -1
+        why = None
+        ost = _sp.control(o)[0]
+        sx = min(max(cx + d * c.d_u, WALL_L + 0.5), WALL_R - 0.5)
+        if ost not in B_FREE_ST:
+            why = "b busy"
+        elif abs(sx - ox) < c.b_gap or (sx - cx) * d < c.d_u - 0.5:
+            why = "no stand"
+        elif GUARD and guard_hit(self.guard_spans(f, s, t), sx - HALF_W, sx + HALF_W, own=iid) is not None:
+            why = "guard"
+        if why is not None:
+            self.wo_n[f"no_{why}"] += 1
+            self._wo_cool[iid] = True
+            return
+        hp = int((s.get("hero") or {}).get("health") or 0)
+        self.wo = WoRun(iid=iid, other=o.get("iid"), f0=f, st0=str(st), back0=round(back, 2),
+                        d0=round(abs(hx - cx), 2), dir=d, hp0=hp, opening=bool(opening), sx=sx,
+                        back_max=round(back, 2))
+        if st == "Idle":
+            self.wo.f_idle, self.wo.idles = f, 1
+        self._wo_cool[iid] = True
+        self._wo_pst = st
+        self.wo_n["runs"] += 1
+        if opening:
+            self.wo_n["runs_open"] += 1
+
+    def _wo_update(self, f: int, s: dict, t: float, hx: float, hp: int, cs: list) -> None:
+        r = self.wo
+        c = self.wcfg
+        F, o = clapper_by(s, r.iid), clapper_by(s, r.other)
+        if hp < r.hp0:
+            r.hp.append(f - r.f0)
+            self._wo_close(f, "hurt")
+            return
+        if F is None or o is None:
+            self._wo_close(f, "gone")
+            return
+        st = _sp.control(F)[0]
+        cx = float(F["pos"][0])
+        back = (cx - WALL_L) if r.dir > 0 else (WALL_R - cx)
+        r.back_max = round(max(r.back_max, back), 2)
+        if r.iid in self.entry:
+            r.idles += 1
+            r.f_idle = f
+        if r.f_idle is not None and r.d_i15 is None and f - r.f_idle >= 15:
+            r.d_i15 = round(abs(hx - cx), 2)
+        if st == "Walk" and self._wo_pst != "Walk":
+            r.walks += 1
+        self._wo_pst = st
+        ost = _sp.control(o)[0]
+        sx = min(max(cx + r.dir * c.d_u, WALL_L + 0.5), WALL_R - 0.5)
+        r.sx = sx
+        if st in MOVE_ST:
+            r.next_st, r.k_next = st, f - (r.f_idle if r.f_idle is not None else r.f0)
+            self._wo_close(f, "f move")
+        elif ost not in B_FREE_ST:
+            self._wo_close(f, "b move")
+        elif c.draw_u <= 0 and r.walks > 0:
+            self._wo_close(f, "walked")
+        elif c.draw_u > 0 and back >= c.draw_u:
+            self._wo_close(f, "drawn")
+        elif abs(sx - float(o["pos"][0])) < c.b_gap or (sx - cx) * r.dir < c.d_u - 1.0:
+            self._wo_close(f, "no stand")
+        elif f - r.f0 > c.end_f:
+            self._wo_close(f, "time")
+        elif st == "Idle" and r.f_idle is not None and f - r.f_idle > c.idle_f:
+            self._wo_close(f, "idle")
+
+    def _wo_close(self, f: int, why: str) -> None:
+        r = self.wo
+        if r is not None:
+            r.f_end, r.end = f - r.f0, why
+            self.wo_done.append(r)
+            self.wo_n[f"end_{why}"] += 1
+        self.wo = None
+        self._wo_pst = None
+
+    def wo_yield(self, f: int) -> None:
+        """Another script took the keys: the walk-out ends."""
+        if self.wo is not None:
+            self._wo_close(f, "yield")
+
+    def _wo_step(self, f: int, s: dict, ground: bool, accepting: bool, focus, two_enc: bool, t: float) -> int | None:
+        if self.wo is None:
+            self._wo_start(f, s, focus, two_enc, t)
+        r = self.wo
+        if r is None or not accepting or not ground:
+            return None
+        h = s.get("hero") or {}
+        tm = h.get("tm") or {}
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        F = clapper_by(s, r.iid)
+        if F is None or r.sx is None:
+            return None
+        hx = _sp.hero_x(s)
+        dist = r.sx - self._xw(s)
+        cx = float(F["pos"][0])
+        look = 1 if cx > hx else -1
+        r.keys += 1
+        if abs(dist) <= 0.3:
+            if r.phase == "out":
+                r.phase = "hold"
+            if not self._facing(s, look) and "Dash" not in clip:
+                return M_R if look > 0 else M_L        # face it (one frame: 0.14 u)
+            return 0
+        toward = M_R if dist > 0 else M_L
+        if (abs(dist) >= self.wcfg.dash_min and float(tm.get("dash_cd") or 0.0) <= 0.02
+                and not any(x in clip for x in NO_ATK_CLIPS) and (hx - cx) * r.dir < self.wcfg.d_u - 3.0):
+            r.dash += 1
+            self.wo_n["dash"] += 1
+            return toward | M_DASH
+        return toward
+
+    # -- TWO_PUSHMID --
+
+    @staticmethod
+    def _pm_lock_rem(kind: str, k_now: int) -> float:
+        return max(0.0, (LOCK_F[kind] - k_now - SEND_AHEAD) / 60.0)
+
+    def _pm_start(self, f: int, s: dict, e: dict, cs: list, hx: float, hp: int) -> None:
+        c = self.pcfg
+        st, tin = _sp.control(e)
+        kind = MOVE_KIND[st]
+        self.pm_n[f"{kind}_antics"] += 1
+        o = next(x for x in cs if x.get("iid") != e.get("iid"))
+        cx, ox = float(e["pos"][0]), float(o["pos"][0])
+        d, do = abs(hx - cx), abs(hx - ox)
+        hy = float(((s.get("hero") or {}).get("pos") or [0.0, 0.0])[1])
+        if d > do or d > c.d_u or abs(hy - float(e["pos"][1])) > c.dy_u:
+            return
+        face = face_of(e)
+        room_f = (cx - WALL_L) if ox > cx else (WALL_R - cx)     # its outer room (away from B)
+        room_b = (ox - WALL_L) if cx > ox else (WALL_R - ox)
+        if room_f + c.hyst >= room_b:
+            return
+        self.pm_n[f"{kind}_trig"] += 1
+        k_now = int(round(tin * 60.0))
+        need = max(0.0, do - c.close_u) / c.run_u_s
+        lock_rem = self._pm_lock_rem(kind, k_now)
+        wdir = 1 if cx > ox else -1                              # toward F's outer wall
+        why = None
+        if kind != "slam":
+            why = kind
+        elif self._busy():
+            why = "busy"
+        elif (hx - cx) * face <= 0:
+            why = "behind"                                       # she is not in front of it
+        elif (ox - cx) * face <= 0:
+            why = "b behind"
+        elif _sp.control(o)[0] not in ("Idle", "Walk"):
+            why = "b busy"
+        elif need <= lock_rem:
+            why = "run ok"                                       # the switch's run fits: not PUSHMID's case
+        elif room_f < c.room_min:
+            why = "room"
+        if why is not None:
+            self.pm_n[f"no_{why}"] += 1
+            return
+        self.pm = PmRun(iid=e.get("iid"), other=o.get("iid"), f_a=f, k_a=k_now, face=face, wdir=wdir,
+                        room_f=round(room_f, 2), room_b=round(room_b, 2), need=round(need, 3),
+                        lock_rem=round(lock_rem, 3), hp0=hp)
+        self.pm_n["runs"] += 1
+
+    def _pm_update(self, f: int, s: dict, t: float, hx: float, hp: int, cs: list) -> None:
+        r = self.pm
+        c = self.pcfg
+        F, o = clapper_by(s, r.iid), clapper_by(s, r.other)
+        if hp < r.hp0:
+            r.hp.append((f - r.f_a, r.phase))
+        r.hp0 = hp
+        if F is None or o is None:
+            self._pm_close(f, "gone")
+            return
+        st, tin = _sp.control(F)
+        cx = float(F["pos"][0])
+        wall_d = (cx - WALL_L) if r.wdir < 0 else (WALL_R - cx)
+        side = (hx - cx) * r.wdir > 0.3                          # she is on F's wall side
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if (ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.iid
+                    and r.phase == "herd" and (d.get("dealt") is None or float(d.get("dealt")) > 0)):
+                r.hits_f += 1
+        if r.phase == "strike":
+            if f - r.f_a > 140:
+                self._pm_close(f, "no herd")
+            elif st not in SLAM_ST + ("Slam Recover",) and _sp.on_ground(s):
+                if side:
+                    r.phase, r.f_herd, r.back_herd = "herd", f, round(wall_d, 2)
+                    self.pm_n["herd"] += 1
+                else:
+                    self._pm_close(f, "no cross")
+            return
+        if r.iid in self.entry:
+            r.backs.append((f - r.f_a, round(wall_d, 2)))
+        if not side and _sp.on_ground(s):
+            self._pm_close(f, "crossed")
+            return
+        kind = MOVE_KIND.get(st)
+        if st in MOVE_ST and tin * 60.0 <= 3.5 and r.next_st is None:
+            r.next_st = st                                       # its next antic / evade (its first STATE)
+            if c.ret == 1:
+                self._pm_close(f, "f move")
+                return
+        if c.ret == 2 and kind is not None and st in LOCK_ST[kind]:
+            need = max(0.0, abs(hx - float(o["pos"][0])) - c.close_u) / c.run_u_s
+            if need <= self._pm_lock_rem(kind, int(round(tin * 60.0))):
+                self._pm_close(f, "run ok")
+                return
+        if f - (r.f_herd or r.f_a) > c.end_f:
+            self._pm_close(f, "time")
+
+    def _pm_close(self, f: int, why: str) -> None:
+        r = self.pm
+        if r is not None:
+            r.f_end, r.end = f - r.f_a, why
+            self.pm_done.append(r)
+            self.pm_n[f"end_{why}"] += 1
+        self.pm = None
+
+    def _pm_stance(self, s: dict) -> float | None:
+        r = self.pm
+        F = clapper_by(s, r.iid)
+        if F is None:
+            return None
+        cx = float(F["pos"][0])
+        room = (WALL_R - cx) if r.wdir > 0 else (cx - WALL_L)
+        u = min(self.pcfg.stance_u, max(0.0, room - self.pcfg.wall_pad))
+        if u < 1.0:
+            u = room / 2.0
+        return cx + r.wdir * u
+
+    def pm_view(self) -> dict | None:
+        """PUSHMID for L2 (gauntlet): {"hold": F, "phase", "iid", "other"} while the run is on, else None."""
+        r = self.pm
+        if not PUSHMID or r is None:
+            return None
+        return {"hold": r.iid, "phase": r.phase, "iid": r.iid, "other": r.other}
+
+    def pm_hint(self) -> dict:
+        """PUSHMID for the slam playbook: {F's iid: the world side to land on (its wall side)} in the strike."""
+        r = self.pm
+        if not PUSHMID or r is None or r.phase != "strike":
+            return {}
+        return {r.iid: r.wdir}
+
+    def sp11b_stats(self) -> dict:
+        out = {}
+        if WALKOUT:
+            runs = self.wo_done + ([self.wo] if self.wo is not None else [])
+            out["walkout"] = {**dict(self.wo_n), "runs_rec": [
+                {"f0": r.f0, "iid": r.iid, "st0": r.st0, "back0": r.back0, "d0": r.d0, "opening": r.opening,
+                 "f_idle": None if r.f_idle is None else r.f_idle - r.f0, "idles": r.idles, "d_i15": r.d_i15,
+                 "walks": r.walks, "back_max": r.back_max, "next_st": r.next_st, "k_next": r.k_next, "hp": r.hp,
+                 "dash": r.dash, "keys": r.keys, "f_end": r.f_end, "end": r.end} for r in runs]}
+        if OPENPUSH:
+            out["openpush"] = dict(self.op)
+        if PUSHMID:
+            runs = self.pm_done + ([self.pm] if self.pm is not None else [])
+            out["pushmid"] = {**dict(self.pm_n), "runs_rec": [
+                {"f_a": r.f_a, "iid": r.iid, "k_a": r.k_a, "room_f": r.room_f, "room_b": r.room_b, "need": r.need,
+                 "lock_rem": r.lock_rem, "f_herd": None if r.f_herd is None else r.f_herd - r.f_a,
+                 "back_herd": r.back_herd, "backs": r.backs, "hits_f": r.hits_f, "hp": r.hp, "next_st": r.next_st,
+                 "f_end": r.f_end, "end": r.end} for r in runs]}
         return out
 
     # ---- SP11-0 TWO_GUARD ----
@@ -2172,6 +2749,8 @@ class TwoPlay:
 
     def space(self, prefs, s: dict, t: float, focus):
         """TWO_SPACE (module docstring b-d): the stance moved out of the forbidden spans."""
+        if SP11B:
+            prefs = self.sp11b_prefs(prefs, s)
         if not SPACE:
             return prefs
         cs = _sp.clappers(s)
@@ -2257,6 +2836,8 @@ class TwoPlay:
             res["asw"] = self.asw_stats()
         if JUMPHIT:
             res["jumphit"] = self.jh_stats()
+        if SP11B:
+            res.update(self.sp11b_stats())
         return res
 
 

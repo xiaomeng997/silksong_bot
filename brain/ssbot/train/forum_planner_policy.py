@@ -731,7 +731,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         esc_on = self.two is not None and (two_play.ESC or two_play.ASW)
-        pre_obs = esc_on or (self.two is not None and two_play.JUMPHIT)
+        pre_obs = esc_on or (self.two is not None and (two_play.JUMPHIT or two_play.PUSHMID))
         if pre_obs:
             # SP9b / SP9c: the bookkeeping first, so L2 sees this tick's escape run (the focus's jump at the wall) or
             # antic switch; SP10c: TWO_JUMPHIT's run
@@ -741,6 +741,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                     self.tac.two_esc = self.two.esc_view()
                 if two_play.JUMPHIT:
                     self.tac.two_jh = self.two.jh_view()
+                if two_play.PUSHMID:
+                    self.tac.two_pm = self.two.pm_view()      # SP11b: L2 holds F in the herd
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
             # SP9a: the per-tick bookkeeping (Idle entries, jump take-offs, rune circles) and TWO_SPACE's stance
@@ -821,6 +823,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
                    if air_chain.AIRCHAIN and self.two is not None else None)
+            if two_play.PUSHMID and self.two is not None:
+                self.slam_play.side_hint = self.two.pm_hint()  # SP11b: F's slam's way out to its wall side
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                        t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip,
@@ -921,8 +925,11 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play = tm_
                 own = "two:" + str(getattr(self.two, "last_part", None))
                 self.counts["two_play"] += 1
-        elif esc_on:
-            self.two.esc_yield(f, s)              # SP9b: another script has the keys: a running hop ends
+        elif esc_on or (self.two is not None and two_play.WALKOUT):
+            if esc_on:
+                self.two.esc_yield(f, s)          # SP9b: another script has the keys: a running hop ends
+            if two_play.WALKOUT:
+                self.two.wo_yield(f)              # SP11b: the walk-out ends
         cog = None if play is not None else self._cogfly(f, ws, raw, res, r, fcast, S0, wt)
         if cog is not None:
             mask = cog

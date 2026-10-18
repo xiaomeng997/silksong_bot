@@ -445,6 +445,7 @@ class SlamPlay:
         self._guard = None                   # SP11-0 TWO_GUARD: this tick's danger spans (combat.two_play)
         self._rg_circ: dict = {}             # SP11-0 TWO_RUNEGATE: circle iid -> {t0, lit, burst, cx}
         self._rg_tick = None                 # ... this tick's antic frame when the old gate would have declined
+        self.side_hint: dict = {}            # SP11b TWO_PUSHMID: Clapper iid -> the world side of its way out
 
     def reset(self) -> None:
         self.run = None
@@ -454,6 +455,7 @@ class SlamPlay:
         self._ho = self._hold = None
         self.holds = []
         self._rg_circ = {}
+        self.side_hint = {}
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -992,6 +994,8 @@ class SlamPlay:
         a tie keeps her side (in front). cfg.side_force (probes): +1 keep, -1 switch."""
         if self.cfg.side_force:
             return r.face * (1 if self.cfg.side_force > 0 else -1), "force"
+        if self.side_hint and e.get("iid") in self.side_hint:
+            return int(self.side_hint[e.get("iid")]), "pushmid"      # SP11b TWO_PUSHMID: F's wall side
         others = [float(o["pos"][0]) for o in s.get("ents") or ()
                   if o.get("type_key") == CLAPPER and not o.get("is_dead") and (o.get("hp") or 0) > 0 and o.get("pos")
                   and o.get("iid") != e.get("iid")]

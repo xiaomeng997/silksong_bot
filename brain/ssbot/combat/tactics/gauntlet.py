@@ -132,6 +132,13 @@ TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down
 TWO_IDLE_S = 0.6            # ... before this long into its idle after an attack move (0.65 s without a buddy busy)
 TWO_RUNE_S = 0.2            # no switch onto it until this past its rune hold (a jump cast's circle in front of it)
 TWO_ATTACK_FAMS = (CC_SLAM, CC_CAST, CC_JUMP, CC_JUMP_CAST)
+# SSBOT_FORUM_TWO_RUNLOCK (task 1v1 SP11b, the lead's NOTE 6a; combat.two_play.RUNLOCK, default off): the "focus
+# committed" run is bounded by the focus's LOCK end - the other one is unlocked from the focus's Slam 2 / Cast 2 entry
+# (buddy/answer.txt), not at its move's end (t_free: the start + the family's p0.5 duration, the tail included) - so
+# need <= t_free - (dur p0.5 - TWO_LOCK_S); after such a switch no hit on the new target counts while the old one's
+# flag is on (GoalPrefs.no_hit: a hit then is cancelled and re-arms its evade coin; the deciding hit in its tail)
+TWO_LOCK_S = {CC_SLAM: 0.92, CC_CAST: 0.81, CC_JUMP: 1.21, CC_JUMP_CAST: 1.63}   # from the antic start (lower bounds)
+TWO_DUR0_S = {CC_SLAM: 1.2583, CC_CAST: 1.225, CC_JUMP: 1.544, CC_JUMP_CAST: 1.9646}   # ChoirClapper.json p0.5
 # SSBOT_FORUM_TWO_JUMPER (SP7, default off; with TWO_FOCUS): a Clapper in a jump move (or its rune circle still to burst)
 # is the target meanwhile (GauntletTactics._two_focus)
 TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
@@ -319,6 +326,8 @@ class GauntletTactics:
         self._two_idle: dict[int, float] = {}             # SP7: Clapper iid -> game time it went idle after an attack
         self._sp9_fam: dict = {}                          # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self.two_esc: dict | None = None                  # SP9b: the policy's escape run view (two_play.esc_view)
+        self.two_pm: dict | None = None                   # SP11b: TWO_PUSHMID's view (two_play.pm_view)
+        self._rl_sw: tuple | None = None                  # SP11b TWO_RUNLOCK: (new target, old focus) of the switch
         self.two_jh: dict | None = None                   # SP10c: the policy's TWO_JUMPHIT run view (two_play.jh_view)
         self._jh_last: dict | None = None                 # SP10c: the view on the last tick
 
@@ -336,6 +345,7 @@ class GauntletTactics:
         self._two_fam, self._two_idle = {}, {}
         self._sp9_fam = {}                                # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self.two_jh, self._jh_last = None, None
+        self.two_pm, self._rl_sw = None, None
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
@@ -813,7 +823,11 @@ class GauntletTactics:
         if rp is not None and t <= rp[3] + TWO_RUNE_S:
             return False, "other's rune circle"
         need = max(0.0, o.d - TWO_CLOSE_U) / TWO_RUN_U_S
-        if f.s.committed and need <= float(getattr(f.s, "t_free", 0.0) or 0.0):
+        t_free = float(getattr(f.s, "t_free", 0.0) or 0.0)
+        if two_play.RUNLOCK and f.s.family in TWO_LOCK_S:
+            # SP11b TWO_RUNLOCK: the focus's lock end, not its move's end
+            t_free = max(0.0, t_free - (TWO_DUR0_S[f.s.family] - TWO_LOCK_S[f.s.family]))
+        if f.s.committed and need <= t_free:
             return True, "focus committed"
         t0 = self._two_idle.get(o.s.iid)
         if o.s.family in (None, CC_IDLE) and t0 is not None and (t - t0) + need <= TWO_IDLE_S:
@@ -849,6 +863,16 @@ class GauntletTactics:
                     self._sw_why = "two slammer" if keep is not None else self._sw_why
                 st["picks"] = st.get("picks", 0) + 1
                 return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
+        pm = self.two_pm if two_play.PUSHMID else None
+        if pm is not None and pm.get("hold") is not None:
+            # SP11b TWO_PUSHMID: F held (its slam's way out to its wall side, then the herd) below the slammer rule
+            c = next((c for c in cands if c.s.iid == pm["hold"]), None)
+            if c is not None:
+                if keep is None or keep.s.iid != c.s.iid:
+                    st["pushmid"] = st.get("pushmid", 0) + 1
+                    self._sw_why = "two pushmid" if keep is not None else self._sw_why
+                st["picks"] = st.get("picks", 0) + 1
+                return self._goal(ws, c, RUSH, t, 1.0, why=f"two: pushmid {pm.get('phase')}; room {room[c.s.iid]:.1f}")
         if esc is not None and esc.get("after_land") and not esc.get("corner_side"):
             # SP9b after the focus's landing: the hold below the slammer rule (B is free from F's landing on)
             g = self._esc_hold(ws, cands, esc, keep, room, t, st)
@@ -891,6 +915,8 @@ class GauntletTactics:
             if room[o.s.iid] > room[keep.s.iid] + TWO_HYST_U and ok2:
                 f, why = o, f"two: switch ({how})"
                 self._sw_why = "two"
+                if two_play.RUNLOCK and how == "focus committed":
+                    self._rl_sw = (o.s.iid, keep.s.iid)       # SP11b: no hit on o while keep's flag is on
                 st["switch"] = st.get("switch", 0) + 1
                 st[f"switch_{how}"] = st.get(f"switch_{how}", 0) + 1
             else:
@@ -1035,6 +1061,9 @@ class GauntletTactics:
             status = "event"                              # SP10c: the run ended: the normal rule picks now
         if two_play.JUMPHIT:
             self._jh_last = jh
+        pm = self.two_pm if two_play.PUSHMID else None
+        if pm is not None and status == "ok" and self.goal is not None and pm.get("hold") != self.goal.target:
+            status = "event"                              # SP11b: TWO_PUSHMID holds F: pick now
         if "whip" in self.ta:
             whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
                               if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)
@@ -1190,6 +1219,15 @@ class GauntletTactics:
             # while the focus's flag is on)
             out = replace(out, no_hit=frozenset(out.no_hit) | frozenset(esc["no_hit"]))
             self.stats["esc_no_hit"] = self.stats.get("esc_no_hit", 0) + 1
+        if two_play.RUNLOCK and self._rl_sw is not None:
+            # SP11b TWO_RUNLOCK: after a lock-bounded switch no hit on the new target while the old focus's flag is on
+            tgt, old_f = self._rl_sw
+            so = next((x for x in getattr(fc, "subjects", ()) or () if x.iid == old_f), None)
+            if g.target == tgt and so is not None and so.alive and getattr(so, "state", None) in two_play.LOCK_ANY:
+                out = replace(out, no_hit=frozenset(out.no_hit) | frozenset({tgt}))
+                self.stats["rl_no_hit"] = self.stats.get("rl_no_hit", 0) + 1
+            else:
+                self._rl_sw = None
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:
