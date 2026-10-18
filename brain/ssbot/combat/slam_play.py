@@ -241,6 +241,7 @@ TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre n
 # without it); =0 turns each off (arm rnsp10b0 = the SP10a default).
 TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF", _V2)
 HO_GAP_F = 4
+CS_KEEP_F = 4               # SP13 SSBOT_FORUM_CLAWSTRIKE: a lost plan this close to its Clawline press is kept
 # ... and its landing (fixed-point t1, f3d6d62: B struck 7 / 11 hand-offs of k_land 8-29; the four failures landed 7.8-8.3 u
 # in front of B - A to B 11.5-11.9 u - and could not walk into BAND by K_JUMP_LATE2): while B is in Slam Antic before
 # her turn key, SP5 NEAR's landing between them aims at B's stand (HO_STAND_U in front of B's centre) when that is
@@ -704,8 +705,8 @@ class SlamPlay:
         self._bombs = bombs                  # SP12a SSBOT_FORUM_TWO_STRIKEGUARD: rune_bombs.frames from this STATE (or None)
         self._f = f
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
-        if TWO_RUNEGATE and TWO_PLAY:
-            self._rg_observe(s, t)
+        if (TWO_RUNEGATE and TWO_PLAY) or _cs.CLAWSTRIKE:
+            self._rg_observe(s, t)                    # (SP13: the circles' burst for the Clawline's gate)
         if self._hold is not None:
             hm = self._hold_mask(f, s)
             if hm is not None:
@@ -1238,6 +1239,8 @@ class SlamPlay:
                 reason = "no plan"
         if reason is None and self._cs_bomb(r, plan, cx, hx):
             reason = "other bomb"                             # a small rune of the other one on the Clawline's path
+        if reason is None and self._cs_circle(s, cx, hx, self._t):
+            reason = "other rune circle"
         if reason is not None:
             self._cs_decline(r, f, reason)
             if _cs.AIRSTRIKE and reason in ("no plan", "silk", "other in the way", "room"):
@@ -1301,6 +1304,21 @@ class SlamPlay:
         ys = 3.0 + hs + 1.0394
         return bool(_rb.occupied(bk, xs, ys, ks - k0, SG_BOMB_M, own).any())
 
+    def _cs_circle(self, s: dict, cx: float, hx: float, t: float) -> bool:
+        """fp4 (162ca26): a big rune circle (lit, or its object still to burst: not seen lit then unlit, younger than
+        1.6 s) over the Clawline's x span (her x to the stop 2.1 u short of S's front) - the other one Idle at the
+        start, its circle burst in her lock (k 21)."""
+        from ssbot.combat import cast_stab as _cst
+        d = 1.0 if cx > hx else -1.0
+        x_stop = cx - d * (_cs.BODY_FRONT + 2.1 + _cs.HALF_W)
+        lo, hi = min(hx, x_stop) - 0.5, max(hx, x_stop) + 0.5
+        for a, b, ciid, lit in _cst.rune_spans(s):
+            c = self._rg_circ.get(ciid)
+            pending = lit or (c is not None and not c["burst"] and t - c["t0"] < 1.6)
+            if pending and a < hi and b > lo:
+                return True
+        return False
+
     @staticmethod
     def _cs_s_hit(s: dict, r: Run) -> bool:
         """A hit on S this tick that is not the Clawline's own (the strike's down slash)."""
@@ -1326,13 +1344,21 @@ class SlamPlay:
                 q = self._csx.plan(sim, ctx, False, accepting, hop_until=hu, p_only=p.f_press)
                 if q is None:
                     q = self._csx.plan(sim, ctx, False, accepting, hop_until=hu)
-                    if q is None:
+                    if q is None and p.f_press - F <= CS_KEEP_F:
+                        # fp4: one plan lost 4 frames before its press - the abort left her in the hop in front of
+                        # the hammer (Slam Collider 1 at k 54): the committed press goes on
+                        if not any(x_[1] == "keep" for x_ in r.cs_log):
+                            r.cs_log.append([f, "keep", k])
+                        q = p
+                    elif q is None:
                         r.cs_log.append([f, "lost", k])
                         self._close("abort", "cs lost")
                         return None
-                    r.cs_log.append([f, "replan", k, q.row()])
-                q.f0, q.hop = p.f0, p.hop                      # the hop's own frames
-                r.cs = p = q
+                    else:
+                        r.cs_log.append([f, "replan", k, q.row()])
+                if q is not p:
+                    q.f0, q.hop = p.f0, p.hop                  # the hop's own frames
+                    r.cs = p = q
             m = _cs.plan_mask(p, F, r.cs_toward)
             if F >= p.f_press + 1:
                 r.phase = "cs_lock"
@@ -1401,9 +1427,20 @@ class SlamPlay:
                 if not r.cs_log or r.cs_log[-1][1] != "keep":
                     r.cs_log.append([f, "keep", sp_.row()])
             else:
-                r.cs_log.append([f, "nostrike", k])
-                self._close("abort", "cs no strike")
-                return None
+                kp = max(self.cfg.k_press, r.cs_k_ctrl + cfg.cd_f + 1)
+                if kp > self.cfg.k_press_max_late + 2:
+                    r.cs_log.append([f, "nostrike", k])
+                    self._close("abort", "cs no strike")
+                    return None
+                # fp4 (162ca26): 3 of 41 runs had no strike plan at control (her stop 1.9-4.2 u in front of S) and the
+                # abort left her in front of its hammer (Slam Collider 1, k 53-55): the playbook's press, open loop
+                r.cs_log.append([f, "open", k, kp])
+                r.phase, r.k_press_plan = "air", kp
+                m = self._press_part(r, k, 0)
+                if m is None:
+                    return None
+                r.sent.append((F, m))
+                return m
         m = _ac.mask_at(sp_, F)
         if sp_.f_down is not None and sp_.pressed_down is None and m & M_A:
             sp_.pressed_down = F
