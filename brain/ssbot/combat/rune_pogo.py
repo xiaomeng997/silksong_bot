@@ -856,7 +856,10 @@ class RunePogo:
         if F is None or B is None:
             return None
         h = s.get("hero") or {}
-        if not accepting:
+        clip = str((h.get("anim") or {}).get("clip") or "")
+        if not accepting and not (clip.startswith("Umbrella") and "Deflate" not in clip):
+            # (fp2) the umbrella relinquishes control (hero_accepting_input false) but its float lasts only while the
+            # jump key is held: inside it the plan's keys go on (fp2: 0 keys there ended 5 floats after ~16 frames)
             return 0
         Fm = f + SEND_AHEAD
         a_frame = r.f_aim if r.f_aim is not None else r.a_pred
