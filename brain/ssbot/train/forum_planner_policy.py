@@ -37,8 +37,8 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import (air_chain, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, slam_play,
-                          two_play)
+from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop,
+                          slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -234,6 +234,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SP10c (SSBOT_FORUM_CLAW_CHASE, default off): the late Clawline on a far jump (combat.claw_chase)
         self.claw: claw_chase.ClawChase | None = (claw_chase.ClawChase()
                                                   if (claw_chase.ENABLED or claw_chase.CLAWAIR) else None)   # SP14 CLAWAIR
+        # SP-AIR1 (SSBOT_FORUM_AIRSHOW, default off; a show arm): one Clapper killed without landing (combat.air_show)
+        self.air_show = None
+        if air_show.AIRSHOW:
+            self.air_show = air_show.AirShow()
         self._wake_f: int | None = None
         self._play_tick: dict | None = None
         self.own_trace: list = []                 # SP10a: see reset()
@@ -339,6 +343,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if two_play.PMCAST:
             from ssbot.combat import push_cast
             push_cast.warm(self.params)       # SP13b: the cast route's over planner
+        if air_show.AIRSHOW:
+            air_show.warm(self.params)        # SP-AIR1: the air show's planner
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -462,6 +468,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.rune_lowhop.reset()
         if self.two is not None:
             self.two.reset()
+        if self.air_show is not None:
+            self.air_show.reset()
         self._wake_f = None
         self._play_tick = None
         self._wave_v = -1
@@ -833,6 +841,21 @@ class ForumPlannerPolicy(PlannerPolicy):
         # come from TwoPlay.step below; the supervisor's still win)
         rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
         asw_crit = asw_crit or rt_crit
+        if self.air_show is not None and not self.pause_owned and r.mask is None:
+            # SP-AIR1 (SSBOT_FORUM_AIRSHOW): the air show owns the keys to the kill (no other script is stepped)
+            trk_ = self.v2feed.trk if self.v2feed is not None else None
+            abk = None
+            if trk_ is not None and getattr(trk_, "rune", None) is not None:
+                from ssbot.combat import rune_bombs as _rbm
+                abk = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
+            am = self.air_show.step(f, s, ws.hero.contact.v == "GROUND",
+                                    bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                                    air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), bombs=abk)
+            if am is not None:
+                mask = play = int(am)
+                own = "air"
+                asw_crit = True
+                self.counts["air_show"] += 1
         if self.slam_play is not None and not low_crit and not asw_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
@@ -1191,6 +1214,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"evade_chase": self.evade_chase.stats()} if self.evade_chase is not None else {}),
                 **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
                 **({"two_play": self.two.stats()} if self.two is not None else {}),
+                **({"air_show": self.air_show.stats()} if self.air_show is not None else {}),
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),
