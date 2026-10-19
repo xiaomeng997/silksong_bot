@@ -159,12 +159,16 @@ TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
 TWO_JUMPTRAP = os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP", "0").strip() == "1"
 JT_ANTIC = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
 JT = {"gap_u": 2.0, "jc_back_u": 8.0, "force": 0.0, "reach_j": 7.76, "reach_c": 13.67, "pad": 0.25, "o_att": 1.0,
-      "o_back_u": 1.0, "ground": 1.0}
+      "o_back_u": 1.0, "ground": 1.0, "o_way": 1.0, "aim_spot": 1.0}
 # fp1 (b4c2196, w13, 32 episodes: 37 runs, 28 without HP lost to the landing + 1 s; 3 hit in the antic's first 5 frames)
 # -> o_att: no switch while the other one slams / casts (2 runs: the switch left its hammer to her, hit at +5 / +7);
 # o_back_u: the spot behind the landing at least the other one's half width + this from its centre (1 run: the other one
 # stood there); ground: in the antic / the flight her rows without a jump key first among the safe ones
-# (GoalPrefs.ground_first; 3 runs: she jumped on the way under and met its landing / its falling body in the air)
+# (GoalPrefs.ground_first; 3 runs: she jumped on the way under and met its landing / its falling body in the air).
+# fp2 (35be527, w13 jt / jtc, 64 episodes: 69 runs, 60 without HP lost to the landing + 1 s) -> o_way: no switch with the
+# other one's body on her way under the jumper (between her and it, or within its half width + 1 u in front of it:
+# 4 runs - she jumped over it and met the landing hammer in the air); aim_spot: the aim stance's landing must leave a
+# spot behind it too (1 run: pushed out by the wall rule, "back off" in front of it)
 for _kv in os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP_SET", "").replace(";", ",").split(","):
     if "=" in _kv:
         _k, _v = (_x.strip() for _x in _kv.split("=", 1))
@@ -1034,6 +1038,15 @@ class GauntletTactics:
                 if min(abs(v - ocx) for v in (spot, sa) if v is not None) < half + JT["o_back_u"]:
                     st["jt_no_o_back"] = st.get("jt_no_o_back", 0) + 1
                     continue                              # the other one stands at the spot behind the landing
+            if JT["aim_spot"] and jump_behind.behind_spot(
+                    jump_behind.landing(x, jump_behind.aim_spot(x, front), front), front) is None:
+                st["jt_no_aim_spot"] = st.get("jt_no_aim_spot", 0) + 1
+                continue
+            if JT["o_way"]:
+                ocx, half = self._body(fc, o)
+                if (ocx - x) * front > -(half + 1.0) and (hx - ocx) * front > -(half + JT["pad"]):
+                    st["jt_no_o_way"] = st.get("jt_no_o_way", 0) + 1
+                    continue                              # its body on her way under the jumper
             reach = land + front * ((JT["reach_c"] if jc else JT["reach_j"]) + JT["pad"])
             obs = (xb if front > 0 else xa) - front * JT["pad"]
             if (ox - hx) * front > 0:

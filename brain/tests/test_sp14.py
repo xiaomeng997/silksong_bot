@@ -114,3 +114,15 @@ def test_fp1_exclusions(tac):
     fc = Fc([S(7, 23.6, gt.CC_JUMP, "Jump Antic"), S(99, 26.4)])
     assert tac._jt_update(None, fc, 14.6, 1.0) is None
     assert tac.stats["sp7"]["jt_no_o_back"] == 1
+
+
+def test_fp2_exclusions(tac):
+    # the other one between her and the jumper (fp2 192650: J 35.7, her 46.84, the other 41.92)
+    fc = Fc([S(7, 35.7, gt.CC_JUMP_CAST, "Cast Slam Antic"), S(99, 41.92)])
+    assert tac._jt_update(None, fc, 46.84, 1.0) is None and tac.stats["sp7"]["jt_no_o_way"] == 1
+    # ... or standing at the jumper's front (fp2 193512: J 29.8, the other 29.68, her 19.08)
+    fc = Fc([S(7, 29.8, gt.CC_JUMP_CAST, "Cast Slam Antic"), S(99, 29.68)])
+    assert tac._jt_update(None, fc, 19.08, 1.0) is None
+    # the far-side focus (the trap) still fires
+    fc = Fc([S(7, 36.3, gt.CC_JUMP, "Jump Antic"), S(99, 15.4)])
+    assert tac._jt_update(None, fc, 19.6, 1.0) == 7
