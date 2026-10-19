@@ -2,6 +2,7 @@
 combat.rune_bombs.pending_rows) and SSBOT_FORUM_TWO_PMCAST - TWO_PUSHMID's cast route (combat.push_cast). Off:
 unchanged."""
 import copy
+import importlib
 
 import numpy as np
 
@@ -13,8 +14,8 @@ from tests.test_sp8d import c_state
 
 
 def test_defaults_off():
-    assert not lh.BOMBS2
-    assert not lh.RuneLowHop(two=True).b2
+    # BOMBS2 follows SSBOT_FORUM_V2 since the SP13b A/B (test_bombs2_follows_v2); it needs the two-Clapper mode
+    assert lh.RuneLowHop(two=True).b2 == lh.BOMBS2 and not lh.RuneLowHop(two=False).b2
     c = lh.HopCfg()
     assert c.h_max == 16 and c.h_max2 == 26 and c.look2 == 45 and c.rise2 == 13
     # the extended holds continue the low hops' lowest lane (the same model): >= 2.95 u from j 11 to j 43 at H 26
@@ -183,3 +184,21 @@ def test_b2_plan_kept_while_it_clears_the_moving_windows():
     assert not lh.RuneLowHop._plan_holds(plan, [(70, 95, 2.95)], 66)
     # a later window the plan was not made for (the second hop's) does not void it
     assert lh.RuneLowHop._plan_holds(plan, [(79, 88, 2.95), (140, 147, 2.95)], 66)
+
+
+@pytest.mark.parametrize("v2,flag,on", [("1", None, True), ("1", "0", False), ("0", None, False), ("0", "1", True)])
+def test_bombs2_follows_v2(monkeypatch, v2, flag, on):
+    # the SP13b A/B: BOMBS2 follows SSBOT_FORUM_V2 when unset (=0 off: arm rnsp13b_0); PMCAST stays off
+    monkeypatch.setenv("SSBOT_FORUM_V2", v2)
+    if flag is None:
+        monkeypatch.delenv("SSBOT_FORUM_TWO_BOMBS2", raising=False)
+    else:
+        monkeypatch.setenv("SSBOT_FORUM_TWO_BOMBS2", flag)
+    monkeypatch.delenv("SSBOT_FORUM_TWO_PMCAST", raising=False)
+    try:
+        m = importlib.reload(lh)
+        assert m.BOMBS2 is on and m.RuneLowHop(two=True).b2 is on and not m.RuneLowHop(two=True).pmc
+        assert not m.RuneLowHop(two=False).b2
+    finally:
+        monkeypatch.undo()
+        importlib.reload(lh)

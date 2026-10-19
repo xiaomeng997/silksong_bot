@@ -89,7 +89,12 @@ ENABLED = _on("SSBOT_FORUM_RUNE_LOWHOP", "1" if _on("SSBOT_FORUM_V2") else "0")
 # walk, the keys only when one is within look2 frames); in the air with a covering bomb soon the umbrella (the jump
 # pressed in the air: it holds the height, never lifts) / a drift from the hero model's rollouts against every bomb
 # instead of handing back.
-BOMBS2 = _on("SSBOT_FORUM_TWO_BOMBS2")
+# SP13b A/B (f134795, w13, 64 episodes per arm, 2 rounds x 32, block design, the same seeds 9700000.. / 9800000..; rnjb vs
+# b2): HP-hitless clears 6 -> 18 / 64 (+0.188, 90 % +0.078 .. +0.297), both killed 42 -> 46 (-5 .. +13), landed / s
+# 1.332 -> 1.329 (-0.063 .. +0.057), HP-loss hits / min 3.72 -> 3.02 (-1.43 .. +0.00); small-rune HP losses 22 -> 4,
+# overlap pairs clean 21 / 31 -> 30 / 30. The person's rule (the best on hitless clears, not worse on the others):
+# BOMBS2 follows SSBOT_FORUM_V2 when unset (on with v2), =0 off (arm rnsp13b_0 = the SP13 default)
+BOMBS2 = _on("SSBOT_FORUM_TWO_BOMBS2", "1" if _on("SSBOT_FORUM_V2") else "0")
 CLAPPER = _sp.CLAPPER
 CAST_ST = ("Spell Antic", "Cast 1", "Cast 2")
 M_L, M_R, M_A, M_J = _sp.M_L, _sp.M_R, _sp.M_A, _sp.M_J
