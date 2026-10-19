@@ -11288,7 +11288,7 @@ Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
    landing guard corrects it in most overs (75 / 88); the bounce off a Clapper's head lifts her ~3.7 u (DownSpikeBounce
    ~20 frames of rise) - calibrate kinematics' EV_POGO drift / rise on the 141 fp3 overs.
 
-## Task 1v1 - stage SP14: the top audit cause (the planner in the air with the dash ready, forced, L2 on the other one) traced - no planner bug, the other one's jump sets the trap at its Jump Aim; SSBOT_FORUM_TWO_JUMPTRAP (the trapping jumper becomes the target: the 1v1's way under it to behind its landing) passed its fixed point (fp3 29 / 30) and the A/B (HP-hitless clears 10 vs 5 / 64) -> the default with v2; SSBOT_FORUM_TWO_CLAWAIR (variant A's Clawline from the air, the person's airborne answer) built and fixed-pointed, off (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §89)
+## Task 1v1 - stage SP14: the top audit cause (the planner in the air with the dash ready, forced, L2 on the other one) traced - no planner bug, the other one's jump sets the trap at its Jump Aim; SSBOT_FORUM_TWO_JUMPTRAP (the trapping jumper becomes the target: the 1v1's way under it to behind its landing) passed its fixed point (fp3 29 / 30) and the A/B (HP-hitless clears 10 vs 5 / 64) -> the default with v2; SSBOT_FORUM_TWO_CLAWAIR (variant A's Clawline from the air, the person's airborne answer) built and fixed-pointed, off; SSBOT_FORUM_TWO_FLIPB (variant (c): over B on the escape jump cast) built, forced 5 / 6, natural none, off (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §89)
 
 The task (SP14): the open items of SP13b aimed at its top audit cause. STEP 1: trace the 18 "planner in the air with the
 dash ready, forced, L2 on the other" losses (the other one's jump landing 10, its big rune 7) and why the planner rated
@@ -11302,8 +11302,9 @@ flight). J = the jumper (not L2's target), F = L2's target, u centre to centre. 
 1x. Data `C:\ssbot\data\m2_play\sp14` (`fp1.json`, `fp2_jt.json`, `fp2_jtc.json`, `fp3_jt.json` the JUMPTRAP runs per
 round; `ab\` the A/B (two, ab_stats, fp_log, audit, rank, hp); `w7chk_two.*`; `fpca1.json`, `fpca2_*.json` the CLAWAIR runs;
 `replay_*` identity; `scripts`: `fp14.py`, `fpca.py`, `ab14.ps1`, `replay_ident_sp14.ps1`, `ident_cmp.sh`,
-`ident_cmp_promo.sh`). Commits b4c2196 (JUMPTRAP), 35be527 / eb3b153 (its fixed-point fixes), f86fb69 (CLAWAIR),
-cbd3332 (the promotion), f2eb0b5 (CLAWAIR's fp1 fix), then the docs. No human practice ran; the trading bot was not
+`ident_cmp_promo.sh`, `fpfb.py`). Commits b4c2196 (JUMPTRAP), 35be527 / eb3b153 (its fixed-point fixes), f86fb69
+(CLAWAIR), cbd3332 (the promotion), f2eb0b5 (CLAWAIR's fp1 fix), 3118daf (docs), a94e6b2 (FLIPB), a9982ee (its fpfb1
+fix), then the docs. No human practice ran; the trading bot was not
 touched.
 
 ### Result
@@ -11358,6 +11359,15 @@ touched.
   (f2eb0b5, jta 32 + jtaf = scope any 32 episodes) 6 runs (3 + 3), all hooked, 3 clean (natural 0 / 3: a jump cast's
   circle at +34 / +39 twice, control after a jump cast's landing once; scope any 3 / 3) - pooled 15 / 22 (68 %), and the
   bomb gate leaves ~0.1 natural runs per episode. JUMPTRAP inside these arms: 23 / 24, 22 / 23, 29 / 32.
+- **SSBOT_FORUM_TWO_FLIPB** (item B, variant (c): on F's escape jump cast with her between, the hop + the Clawline at B
+  + down slashes on B's head, past B, then L2's stance just outside the circle's far edge) - built after the A/B,
+  fixed-pointed, off: fpfb1 (a94e6b2, fb natural + fbf force, 64 w13 episodes) no run - the escape jump casts reaching
+  the gate (~50) had her in the air at F's antic (29) or B finishing a move (21) -> a9982ee (the gate re-checked every
+  antic tick to k 35, the airborne press without a hop when her throw's band meets B's standing body, B in Slam Recover /
+  After Scuttle free); fpfb2 (a9982ee, 64 episodes): natural 0 runs (in the air 11, B busy 8, and the natural
+  "no room short of B" test), forced 6 runs, 6 hooked, 2 down slashes, 5 / 6 without HP lost from F's antic to the
+  burst + 30 frames (one at +169 after the flip, outside the circle), 5 / 6 outside the circle's far edge at the end.
+  Not at the gate (n 6, and the natural trigger never fired); the escape-cast big runes stay the top cause.
 - **The comparison the person asked for (over / under / the pass, 19:10)**: the pass under (JUMPTRAP) fp3 29 / 30 and
   42 / 45 in the A/B; the take-off hook under (CLAW_CHASE A inside jtc) 3 / 3 (too few); the hook from the air (CLAWAIR)
   above; **the bounce over the top of a descending jumper was not built** - with control 26 - 34 frames after the
@@ -11391,9 +11401,23 @@ touched.
   meets J's flight box (rune_pogo.FLIGHT_Y0, x linear to the landing) in her band (CLAWSTRIKE's throw fit from her fall,
   overlap >= 0.4 u, its near edge 0.5 - 10.5 u ahead) with control (P + 32) by its flight frame 40; then variant A's run
   (lock, the air dash to its take-off side, no key to her landing). Stats `claw_chase` ca_* and claw_runs (why "air").
-- Tests `tests/test_sp14.py` (10: the defaults and the v2 default, the trap firing / holding / releasing, room on the
+- `SSBOT_FORUM_TWO_FLIPB` (default off; `SSBOT_FORUM_TWO_FLIPB_SET` -> `two_play.FB`: trig nat / force, hop_hold 10,
+  press_k 12, ds_max 2, ds_reach 1.4, ds_top 2.6, out_m 0.6, gap_max 9, end_f 30, k_late 35, air_yb 3): TwoPlay's escape
+  run (TWO_WALLSWITCH's: F's back <= 6.2 u, she within 8.3 u and nearer F) on a jump cast, `_fb_gate` (she between, B on
+  her far side not jumping / casting / slamming / evading - Slam Recover / After Scuttle free -, B's front 0.5 - 9 u
+  ahead, on the ground or her throw's band low enough (<= 3 u, vy -6 .. +9), silk and harpoon, no bomb on her way, (nat)
+  the circle's far edge from her x now not short of B's front - 0.5, room past B for the spot) at the first STATE and
+  again every antic tick to k 35 (`_fb_retry`) -> mode "flipb": `_flipb_step` (the hop, the turn, the Clawline at B for
+  2 frames, no key to control, then the key past B with down slashes on B's head, to her landing; the run holds the keys:
+  rt_critical, the policy steps no other script), esc_view holds B with `_fb_spot` (13.67 u + her half width + out_m
+  past F's landing, past B's back when B stands there), hits on B from F's landing on, until the burst + 30 frames.
+  Stats `two_play.esc` fb_* and esc_runs[].fb.
+- Tests `tests/test_sp14.py` (12: the defaults and the v2 default, the trap firing / holding / releasing, room on the
   far side, force, the escape cast / the other one jumping / the target / one Clapper, the jump cast's circle hold, the
-  goal, fp1's and fp2's exclusions, CLAWAIR's default and the air-only start). The suite's known order dependency
+  goal, fp1's and fp2's exclusions, CLAWAIR's default and the air-only start, FLIPB's gate and its keys). Full suite at
+a94e6b2: 2,068 passed, 3 failed (the known test_import_firewall and test_three_layer bell test, and test_sp14's FLIPB
+gate test hit by test_sp9's module reload after a9982ee's edit landed mid-run; it passes on a9982ee alone), 1 skipped,
+1 xfailed - `sp14\fullsuite_a94e6b2.log`. The suite's known order dependency
   (test_sp10c::test_gauntlet_targets_the_other after test_sp9's reloads, open item Q) shows up when those files run
   together; each passes alone.
 
@@ -11403,13 +11427,15 @@ b4c2196 (worktree), eb3b153 (its frozen checkout) and f86fb69 (worktree) with ev
 to e5dc189's default (`sp13b\replay_e5dc189\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659)
 and the w7 192006 i0 e1 / 084036 i1 e0 (2,073 / 1,778). JUMPTRAP on: w7 identical (one Clapper), w13 102908 from tick 275
 (144051 from 450 under b4c2196, identical under eb3b153's exclusions). CLAWAIR on (+ JUMPTRAP): w7 192006 from tick 938
-(it acts with one Clapper too: far jumps only, >= 7 u). cbd3332 (the promotion): `SSBOT_FORUM_TWO_JUMPTRAP=0`
+(it acts with one Clapper too: far jumps only, >= 7 u). a94e6b2: unset byte-identical to
+cbd3332's default on all four; FLIPB on (nat and force) identical too (no escape cast of the kind in them).
+cbd3332 (the promotion): `SSBOT_FORUM_TWO_JUMPTRAP=0`
 byte-identical to e5dc189's default on all four; unset byte-identical to eb3b153's jt on all four; 0 tracebacks.
 
 ### 3. Live rounds (`sp14_go.ps1` -> `sp4_block.ps1` -> `sp14_ab.ps1`; manifests `1v1sp14_{fp1,fp2,fp3,ab1,ab2,w7chk,fpca1,fpca2}_manifest.txt`)
 
 fp1 18:54-19:10, fp2 19:14-19:44, fp3 19:46-20:03, the A/B round 1 20:04-20:31, round 2 20:31-21:00, the w7 check
-21:00-21:12, CLAWAIR fpca1 21:12-21:28, fpca2 21:29-21:59. Reaction: JUMPTRAP on the first STATE of the antic (L2's
+21:00-21:12, CLAWAIR fpca1 21:12-21:28, fpca2 21:29-21:59, FLIPB fpfb1 22:06-22:36, fpfb2 22:37-23:06. Reaction: JUMPTRAP on the first STATE of the antic (L2's
 "event" pick the same tick); CLAWAIR from the first airborne tick of the antic / flight that has a plan.
 
 ### 4. The cause audit (`ssbot.tools.sp10_audit` + rank_hitless on the A/B; `ab\audit.*`, `ab\rank.txt`, traces `ab\hp`)
@@ -11437,14 +11463,14 @@ episodes is the upper bound; the hero-model count was not done.
 ### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp14)
 
 `jt` = rnjb + SSBOT_FORUM_TWO_JUMPTRAP=1; `jtf` = jt + force=1; `jtc` = jt + CLAW_CHASE A scope any; `jta` = jt +
-SSBOT_FORUM_TWO_CLAWAIR=1; `jtaf` = jta + scope=any; `rnsp14_0` = rnjb + SSBOT_FORUM_TWO_JUMPTRAP=0 (the SP13b
+SSBOT_FORUM_TWO_CLAWAIR=1; `jtaf` = jta + scope=any; `fb` / `fbf` = rnjb + SSBOT_FORUM_TWO_FLIPB=1 (natural / trig=force); `rnsp14_0` = rnjb + SSBOT_FORUM_TWO_JUMPTRAP=0 (the SP13b
 default). rnjb follows the new default (JUMPTRAP on).
 
 ### 6. Machine state
 
 Instances 0 and 1 (started 2026-10-16 20:36) ran every SP14 block, frozen at time scale 1e-4 after each by sp4_block;
 DEMO_SOON paused and restored per block; boost_workers on per block (`boost_workers.stop` present again). No game
-process touched. Frozen checkouts `C:\ssbot\live_1v1_{b4c2196, 35be527, eb3b153, cbd3332, f2eb0b5}`. Sandbox
+process touched. Frozen checkouts `C:\ssbot\live_1v1_{b4c2196, 35be527, eb3b153, cbd3332, f2eb0b5, a94e6b2, a9982ee}`. Sandbox
 `sp14_go.ps1`, `sp14_ab.ps1`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
 untouched.
 
@@ -11453,10 +11479,12 @@ untouched.
 1. **A** (the planner in the air, forced, vs the other one's jump landing / big rune): traced (no planner bug, the trap
    at the Jump Aim) - DONE for the far jumps (JUMPTRAP promoted: the jump-landing share of the cause 9 -> 1); the big
    runes left are the escape casts (B).
-2. **B** TWO_FLIPB (c): NOT STARTED. It is now the top cause's main part (jt: 11 big-rune losses in "the planner in the
-   air ... L2 on the other", most of them escape casts with her between); 4 of SP13b's 18. Design notes: the hook on B's
-   standing body with CLAWSTRIKE's timeline (control 26 - 34 frames after the press) needs B locked until the caster's
-   landing (jump cast lock 97 frames), the down slash on B's head, then past B to just outside the circle's far edge.
+2. **B** TWO_FLIPB (c): PARTLY - built (a94e6b2, a9982ee), forced 5 / 6 clean (6 / 6 hooked, 5 / 6 outside the circle),
+   the natural trigger never fired in 64 episodes: she is in the air above the throw band at F's antic (11 - 29 per 64
+   episodes) or B is busy (8 - 21). Next: the airborne approach (the drift / umbrella down to the band, or a down slash
+   on B from above instead of the Clawline), a wider natural trigger (B within the circle's far reach rather than "no
+   room short of B"), then its fixed point and the A/B. It is the top cause's main part now (jt: 11 big-rune losses in
+   "the planner in the air ... L2 on the other", mostly escape casts with her between).
 3. **C** the other one's jump slams: the pass under far jumps - DONE (JUMPTRAP); the take-off hook under (CLAW_CHASE A)
    3 / 3 in jtc, not A/B'd; the airborne hook (CLAWAIR) - PARTLY (built, fixed point 15 / 22 = 68 %, off: its jump-cast runs ended inside the circle; the bomb gate makes it rare); the bounce over the top of a descending jumper -
    NOT BUILT (physically late: see Result); FACEJUMP / TWO_CLAWUNDER (in place at her face / in the corner) - NOT
