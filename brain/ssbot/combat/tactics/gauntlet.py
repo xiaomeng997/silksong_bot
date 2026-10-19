@@ -158,7 +158,13 @@ TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
 # force=1": force = every such jump move at her (the fixed points), the gap test off.
 TWO_JUMPTRAP = os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP", "0").strip() == "1"
 JT_ANTIC = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
-JT = {"gap_u": 2.0, "jc_back_u": 8.0, "force": 0.0, "reach_j": 7.76, "reach_c": 13.67, "pad": 0.25}
+JT = {"gap_u": 2.0, "jc_back_u": 8.0, "force": 0.0, "reach_j": 7.76, "reach_c": 13.67, "pad": 0.25, "o_att": 1.0,
+      "o_back_u": 1.0, "ground": 1.0}
+# fp1 (b4c2196, w13, 32 episodes: 37 runs, 28 without HP lost to the landing + 1 s; 3 hit in the antic's first 5 frames)
+# -> o_att: no switch while the other one slams / casts (2 runs: the switch left its hammer to her, hit at +5 / +7);
+# o_back_u: the spot behind the landing at least the other one's half width + this from its centre (1 run: the other one
+# stood there); ground: in the antic / the flight her rows without a jump key first among the safe ones
+# (GoalPrefs.ground_first; 3 runs: she jumped on the way under and met its landing / its falling body in the air)
 for _kv in os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP_SET", "").replace(";", ",").split(","):
     if "=" in _kv:
         _k, _v = (_x.strip() for _x in _kv.split("=", 1))
@@ -1001,6 +1007,9 @@ class GauntletTactics:
             o = next(x for x in subs if x.iid != s.iid)
             if o.family in (CC_JUMP, CC_JUMP_CAST):
                 continue
+            if JT["o_att"] and getattr(o, "state", None) in two_play.SLAM_ST + two_play.CAST_ST:
+                st["jt_no_o_att"] = st.get("jt_no_o_att", 0) + 1
+                continue                                  # its slam / cast first (the playbook, the low hop)
             x = float(s.pos[0])
             e = self._ent(ws, s.iid)
             fa = clapper_facing(e) if e is not None else None
@@ -1013,11 +1022,20 @@ class GauntletTactics:
             if jc and back < JT["jc_back_u"]:
                 continue                                  # the escape cast (TWO_WALLSWITCH / the FLIPB item)
             land = jump_behind.landing(x, hx, front)
-            if jump_behind.behind_spot(land, front) is None:
+            spot = jump_behind.behind_spot(land, front)
+            if spot is None:
                 continue
+            ox = float(o.pos[0])
+            if JT["o_back_u"] > 0 and (ox - x) * front < 0:
+                # the spot behind the landing from her x now and from the aim stance (JUMP_BEHIND walks her there in
+                # the antic: it then jumps nearly in place)
+                ocx, half = self._body(fc, o)
+                sa = jump_behind.behind_spot(jump_behind.landing(x, jump_behind.aim_spot(x, front), front), front)
+                if min(abs(v - ocx) for v in (spot, sa) if v is not None) < half + JT["o_back_u"]:
+                    st["jt_no_o_back"] = st.get("jt_no_o_back", 0) + 1
+                    continue                              # the other one stands at the spot behind the landing
             reach = land + front * ((JT["reach_c"] if jc else JT["reach_j"]) + JT["pad"])
             obs = (xb if front > 0 else xa) - front * JT["pad"]
-            ox = float(o.pos[0])
             if (ox - hx) * front > 0:
                 ocx, half = self._body(fc, o)
                 ob = ocx - front * (half + JT["pad"])
@@ -1272,6 +1290,12 @@ class GauntletTactics:
             if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
                 # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
                 out = replace(out, ground_first=frozenset({g.target}))
+        jt = self._jt if TWO_JUMPTRAP else None
+        if (jt is not None and JT["ground"] and g.target == jt["iid"]
+                and how_s.startswith(("jump: under and behind (flight)", "jump: aim stance"))):
+            # SSBOT_FORUM_TWO_JUMPTRAP (SP14 fp1): under it on the ground - no-jump rows first among the safe ones
+            out = replace(out, ground_first=frozenset(out.ground_first) | frozenset({g.target}))
+            self.stats["jt_ground"] = self.stats.get("jt_ground", 0) + 1
         if (jump_behind.WALK and s is not None and s.type_key == CLAPPER and how_s == "jump: under and behind (flight)"
                 and s.iid in self.jb_land):
             # SSBOT_FORUM_JB_WALK (SP6): a walk gets her past its back in time: no dash (she can slash on the way)

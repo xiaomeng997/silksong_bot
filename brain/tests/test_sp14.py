@@ -102,3 +102,15 @@ def test_two_focus_targets_the_jumper(tac, monkeypatch):
     tac._jt_update(None, Fc([a, b]), 19.6, 1.0)
     tac._two_focus(None, [C(a), C(b)], 1.0, None)
     assert seen["target"] == 7 and seen["why"].startswith("two: jumptrap jump")
+
+
+def test_fp1_exclusions(tac):
+    # the other one slamming / casting at the trigger: its move first (fp1: hit at +5 / +7 by its hammer)
+    for st in ("Slam Antic", "Slam 0", "Spell Antic", "Cast 2"):
+        fc = Fc([S(7, 36.3, gt.CC_JUMP, "Jump Antic"), S(99, 15.4, "CC_SLAM", st)])
+        assert tac._jt_update(None, fc, 19.6, 1.0) is None
+    # the other one standing at the spot behind the landing (fp1 185647: landing 22.29, spot 25.79, the other at 27.16)
+    tac.goal = gt.Goal(gt.RUSH, 99, 16.0, 0.0)
+    fc = Fc([S(7, 23.6, gt.CC_JUMP, "Jump Antic"), S(99, 26.4)])
+    assert tac._jt_update(None, fc, 14.6, 1.0) is None
+    assert tac.stats["sp7"]["jt_no_o_back"] == 1
