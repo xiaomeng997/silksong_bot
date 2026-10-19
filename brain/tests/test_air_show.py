@@ -46,7 +46,7 @@ def planner(world, e, st, hx, y, vy=0.0, ground=False, t=0.1, face=-1):
 def test_default_off():
     assert asw.AIRSHOW is False                        # the suite runs without SSBOT_FORUM_AIRSHOW
     c = asw.cfg_from_env()
-    assert c.after_c == 46 and c.floor_c == 30 and c.horizon == 96
+    assert c.after_c == 46 and c.floor_c == 30 and c.horizon == 76
 
 
 def test_slam_timeline_has_the_hammer_and_the_lunge():

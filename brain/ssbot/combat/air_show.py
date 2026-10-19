@@ -67,7 +67,7 @@ IDLE_TOP = 3.92
 @dataclass
 class AsCfg:
     """SSBOT_FORUM_AIRSHOW_SET="after_c=50,floor_c=30": trial overrides."""
-    horizon: int = 96           # the plans' rollout length (frames from the mask frame f + 2)
+    horizon: int = 76           # the plans' rollout length (frames from the mask frame f + 2; b9: 96 -> 76 for the tick)
     after_c: int = 46           # a drop plan is judged to its contact + this (the bounce's apex ~20, back at the head ~40)
     floor_c: int = 30           # ... the floor / the walls to its contact + this (the next plan takes it from there)
     floor_eps: float = 0.08     # her box bottom this close to the floor counts as landed (air_chain GROUND_EPS)
@@ -100,12 +100,14 @@ class AsCfg:
     #                             away from a slam she had just struck)
     dash_min_u: float = 0.0     # (b5) air dash plans only toward a target at least this far (b8: 4 in the losing arm)
     keep_umb_last: int = 0      # 1: a safe keep without the umbrella ranks first (b4-b6: the Deflate in 12 of 36 HP losses)
+    dash_lock: int = 1          # (b8) no press during the air dash / Air Sprint, the dash plan kept 12 frames from its
+    #                             press, and no air dash as the none-safe fallback
     behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
     dash_a: tuple = (0,)        # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
     dash_gap: int = 16
     two_f: int = 1              # 1: the contact needs the slash on the box two frames running (push_cast fp1)
-    p_max: int = 44             # presses searched to F0 + this
+    p_max: int = 38             # presses searched to F0 + this (b9: 44 -> 38)
     p_step: int = 1             # ... every this many frames (3x past p_fine)
     p_fine: int = 12
     stance_u: float = 5.6       # the ground stance in front of it (outside the walk's 7 +- 1.5: it comes to her)
@@ -123,7 +125,7 @@ class AsCfg:
     hold_h: tuple = (8, 12, 16, 22, 30)
     drift_d: tuple = (0, 6, 10, 14, 20, 28)
     air_drift: tuple = ((0, 0), (1, 6), (1, 14), (1, 30), (-1, 10))
-    umb_u: tuple = (0, 4, 8, 14, 22)
+    umb_u: tuple = (0, 6, 14)
 
 
 def cfg_from_env() -> AsCfg:
@@ -550,7 +552,7 @@ class ShowPlanner(_rp.Planner):
 
 
 def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: float | None = None,
-         umb_last: bool = False) -> _rp.Plan | None:
+         umb_last: bool = False, fb_nodash: bool = False) -> _rp.Plan | None:
     """The safe drop with the earliest contact (then the shortest drift), else the safe keep (a fall first, then the
     latest umbrella, the shortest drift), else the plan whose first danger comes latest."""
     if not plans:
@@ -572,8 +574,13 @@ def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: flo
                                           round(abs(getattr(p, "x_end", tx) - tx) / 0.75), p.umb is not None,
                                           -(p.umb or 0), p.d1 - p.d0))
         return min(kp, key=lambda p: (p.umb is not None, -(p.umb or 0), p.d1 - p.d0))
-    return max(plans, key=lambda p: (p.bad if p.bad is not None else 1 << 30, p.contact is not None,
-                                     -(p.d1 - p.d0)))
+    pool = plans
+    if fb_nodash:
+        # (b8) none safe: not an air dash (7 of 14 HP losses came right after one - into its body)
+        nd = [p for p in plans if p.dash is None]
+        pool = nd or plans
+    return max(pool, key=lambda p: (p.bad if p.bad is not None else 1 << 30, p.contact is not None,
+                                    -(p.d1 - p.d0)))
 
 
 _WBITS: list = []
@@ -801,7 +808,7 @@ class AirShow:
             sk = None
             if tl.kind == "slam" and tl.k0 is not None:
                 sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
-            q = pick(plans, strike=sk, tx=tx, umb_last=bool(self.cfg.keep_umb_last))
+            q = pick(plans, strike=sk, tx=tx, umb_last=bool(self.cfg.keep_umb_last), fb_nodash=bool(self.cfg.dash_lock))
             if (self.cfg.claw and st not in INTRO and (q is None or q.bad is not None or q.contact is None)
                     and (prev is None or prev.kind != "claw")):
                 # (the lead's NOTE 2) no safe down slash: the Clawline chase (its body hooked, the bounce, the drop
@@ -974,6 +981,8 @@ class AirShow:
             if Fm <= min(end, self._drop_f + self.cfg.commit_f):
                 return True
             self._drop_f = None
+        if self.cfg.dash_lock and p.dash is not None and p.dash[0] < Fm <= p.dash[0] + 12:
+            return True                       # (b8) the air dash under way: its plan (a press after the sprint)
         if p.kind == "up" and p.jump is not None and p.jump[0] < Fm <= p.jump[0] + self.cfg.jump_commit:
             return True                       # the jump pressed: its keys to lift-off (the STATE shows it ~2 frames on)
         return False
@@ -1083,6 +1092,8 @@ class AirShow:
         clip = str((h.get("anim") or {}).get("clip") or "")
         if "Deflate" in clip:
             rdy = max(rdy, f + SEND_AHEAD + 8)      # (b2 / b6) the float closing (~8 frames) swallows an attack
+        if self.cfg.dash_lock and ("Dash" in clip or "Sprint" in clip):
+            rdy = max(rdy, f + SEND_AHEAD + 12)     # (b8) a press in the air dash / Air Sprint is lost: she flew on into it
         j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
         gliding = (clip.startswith("Umbrella") and "Deflate" not in clip) or (
             self._umb_f is not None and 0 <= f + SEND_AHEAD - self._umb_f <= 10 and not ground)
