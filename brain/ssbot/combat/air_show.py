@@ -67,7 +67,7 @@ IDLE_TOP = 3.92
 @dataclass
 class AsCfg:
     """SSBOT_FORUM_AIRSHOW_SET="after_c=50,floor_c=30": trial overrides."""
-    horizon: int = 76           # the plans' rollout length (frames from the mask frame f + 2; b9: 96 -> 76 for the tick)
+    horizon: int = 96           # the plans' rollout length (frames from the mask frame f + 2; b10: 76 lost, 4 vs 8 / 24)
     after_c: int = 46           # a drop plan is judged to its contact + this (the bounce's apex ~20, back at the head ~40)
     floor_c: int = 30           # ... the floor / the walls to its contact + this (the next plan takes it from there)
     floor_eps: float = 0.08     # her box bottom this close to the floor counts as landed (air_chain GROUND_EPS)
@@ -100,14 +100,17 @@ class AsCfg:
     #                             away from a slam she had just struck)
     dash_min_u: float = 0.0     # (b5) air dash plans only toward a target at least this far (b8: 4 in the losing arm)
     keep_umb_last: int = 0      # 1: a safe keep without the umbrella ranks first (b4-b6: the Deflate in 12 of 36 HP losses)
-    dash_lock: int = 1          # (b8) no press during the air dash / Air Sprint, the dash plan kept 12 frames from its
-    #                             press, and no air dash as the none-safe fallback
+    dash_lock: int = 0          # (b8) 1: no press during the air dash / Air Sprint and the dash plan kept 12 frames from
+    #                             its press (b10: 4 vs 8 / 24 - she fell onto its body without a press)
+    fb_nodash: int = 0          # 1: no air dash as the none-safe fallback
+    dash_rank: int = 0          # 1: a safe keep ranks before a safe air-dash drop (b10: an air dash in the last 6 frames
+    #                             before 13 of 24 HP losses)
     behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
     dash_a: tuple = (0,)        # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
     dash_gap: int = 16
     two_f: int = 1              # 1: the contact needs the slash on the box two frames running (push_cast fp1)
-    p_max: int = 38             # presses searched to F0 + this (b9: 44 -> 38)
+    p_max: int = 44             # presses searched to F0 + this
     p_step: int = 1             # ... every this many frames (3x past p_fine)
     p_fine: int = 12
     stance_u: float = 5.6       # the ground stance in front of it (outside the walk's 7 +- 1.5: it comes to her)
@@ -552,13 +555,15 @@ class ShowPlanner(_rp.Planner):
 
 
 def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: float | None = None,
-         umb_last: bool = False, fb_nodash: bool = False) -> _rp.Plan | None:
+         umb_last: bool = False, fb_nodash: bool = False, dash_rank: bool = False) -> _rp.Plan | None:
     """The safe drop with the earliest contact (then the shortest drift), else the safe keep (a fall first, then the
     latest umbrella, the shortest drift), else the plan whose first danger comes latest."""
     if not plans:
         return None
     safe = [p for p in plans if p.bad is None]
     dr = [p for p in safe if p.press is not None and p.contact is not None]
+    if dash_rank and any(p.press is None for p in safe):
+        dr = [p for p in dr if p.dash is None]
     if dr:
         def risky(p):
             return strike is not None and strike[0] <= p.contact <= strike[1]
@@ -808,7 +813,8 @@ class AirShow:
             sk = None
             if tl.kind == "slam" and tl.k0 is not None:
                 sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
-            q = pick(plans, strike=sk, tx=tx, umb_last=bool(self.cfg.keep_umb_last), fb_nodash=bool(self.cfg.dash_lock))
+            q = pick(plans, strike=sk, tx=tx, umb_last=bool(self.cfg.keep_umb_last),
+                     fb_nodash=bool(self.cfg.dash_lock or self.cfg.fb_nodash), dash_rank=bool(self.cfg.dash_rank))
             if (self.cfg.claw and st not in INTRO and (q is None or q.bad is not None or q.contact is None)
                     and (prev is None or prev.kind != "claw")):
                 # (the lead's NOTE 2) no safe down slash: the Clawline chase (its body hooked, the bounce, the drop
