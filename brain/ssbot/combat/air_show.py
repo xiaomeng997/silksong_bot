@@ -87,9 +87,16 @@ class AsCfg:
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
     depth_m: float = 0.15       # ... and the slash this far into its box (its top lowered for the contact test)
+    above_m: float = 0.3        # (b6) her box bottom this far over its top at the contact
+    flight_mx: float = 0.8      # (b6) its jump flight's box grown by this in x ...
+    flight_my: float = 0.5      # ... and in y
     range_y: float = 7.5        # at its evade's end (After Scuttle's Slam Range read) her box bottom below this ...
     range_x: float = 7.6        # ... and her centre within this of its centre (Slam Range: +-8.05, top 7.8 u)
     keep_f: int = 40            # a safe keep plan is ranked by her distance to the target this many frames on
+    keep_floor: int = 50        # (b5) a plan without a contact: the floor / walls checked this many frames ahead (to the
+    #                             horizon every keep landed: all bad, and the latest-danger fallback air-dashed her 7 u
+    #                             away from a slam she had just struck)
+    dash_min_u: float = 4.0     # (b5) air dash plans only toward a target at least this far
     behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
     dash_a: tuple = (0,)        # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
@@ -300,6 +307,10 @@ class ShowPlanner(_rp.Planner):
         if not np.isfinite(tg[:, 0]).any():
             return out
         hit = slash_hits_t(ro, self._faces(plans), tg, self.off)
+        with np.errstate(invalid="ignore"):
+            # (b6) from above: her box bottom this far over its top at the contact (low contacts missed live - the
+            # press a frame or two late - and she fell onto its body)
+            hit &= ro.box[..., 1] >= (tg[None, :, 3] + self.ac.depth_m) + self.ac.above_m
         if self.ac.two_f:
             h2 = np.zeros_like(hit)
             h2[:, :-1] = hit[:, :-1] & hit[:, 1:]
@@ -325,11 +336,14 @@ class ShowPlanner(_rp.Planner):
     def danger(self, ro: kin.Rollout, contacts: np.ndarray) -> np.ndarray:
         c, ac = self.c, self.ac
         b_box = c.b_box
-        c.b_box = None                      # the parent: bombs, the jump moves' flight / landing / dome
+        c.b_box = None                      # the parent: bombs, the jump moves' landing / dome (the flight: below)
+        f_fall = c.f_fall
+        c.f_fall = None
         try:
             bad_p = super().danger(ro, contacts)
         finally:
             c.b_box = b_box
+            c.f_fall = f_fall
         N, T1 = ro.flags.shape
         idx = np.arange(T1)[None, :]
         inv = (ro.flags & kin.F_INVULN) != 0
@@ -350,11 +364,28 @@ class ShowPlanner(_rp.Planner):
                 r[:, 3] += ac.ham_m
                 z = np.zeros(N)
                 bad[:, i] |= _rp._poly_hits(px, py, z, z, r)
+        if f_fall is not None:
+            # its flight (rune_pogo's FLIGHT_Y0, x linear to the landing) with wider margins (b6: 3 hits by the rising
+            # body at 2.3 - 2.6 u from its centre)
+            fa, fl, x0, L, fc = f_fall
+            Ls = getattr(self, "last_Ls", None)
+            Lp = np.where(np.isfinite(Ls), Ls, L) if Ls is not None and len(Ls) == N else np.full(N, L)
+            span = max(fl - fa, 1)
+            mx, my = ac.flight_mx, ac.flight_my
+            for j in range(max(self.off + 1, self._i(fa)), min(self._i(fl + 2), T1)):
+                k = self._F(j) - fa
+                fr = min(max(k / span, 0.0), 1.0)
+                xc = x0 + (Lp - x0) * fr
+                y0 = float(np.interp(k * 54.0 / span, np.arange(0, 66, 6), _rp.FLIGHT_Y0))
+                xa, xb = xc - fc * (1.34 + mx), xc + fc * (2.25 + mx)
+                lo_x, hi_x = np.minimum(xa, xb), np.maximum(xa, xb)
+                bad[:, j] |= ((b[:, j, 0] < hi_x) & (b[:, j, 2] > lo_x) & (b[:, j, 1] < FLOOR + y0 + 3.8 + my)
+                              & (b[:, j, 3] > FLOOR + y0 - my))
         bad &= ~inv & ~pre
         # the floor and the walls (no i-frames for those): to the contact + floor_c (a drop) / the horizon (no contact)
         gnd = ((ro.flags & kin.F_GROUND) != 0) | (b[..., 1] <= FLOOR + ac.floor_eps)
         wall = (b[..., 0] <= WALL_L + ac.wall_m) | (b[..., 2] >= WALL_R - ac.wall_m)
-        lim = np.where(contacts >= 0, contacts + ac.floor_c, T1)[:, None]
+        lim = np.where(contacts >= 0, contacts + ac.floor_c, self.off + ac.keep_floor)[:, None]
         ff = getattr(self, "_floor_from", None)
         f0 = (np.asarray(ff)[:, None] if ff is not None and len(ff) == N else self.off + 1)
         bad |= (gnd | wall) & (idx <= lim) & (idx >= f0)
@@ -489,7 +520,7 @@ class ShowPlanner(_rp.Planner):
                 for hj in holds:
                     out.append(_rp.Plan("drop", k, F0, F0 + d, press=P, hold_j=hj, why="drop" + ("h" if hj else "")))
             P += ac.p_step if P - p0 < ac.p_fine else 3 * ac.p_step
-        if getattr(c, "dash_ok", False) and dk:
+        if getattr(c, "dash_ok", False) and dk and abs(tx - x0) >= ac.dash_min_u:
             for a in ac.dash_a:
                 for P in range(max(p0, F0 + a + ac.dash_gap), F0 + ac.p_max + 1, 3):
                     for d in (a + 4, a + 14, a + 30):

@@ -88,7 +88,7 @@ def test_air_drop_on_its_head_and_the_floor_is_a_danger(world):
     q = asw.pick(plans)
     assert q is not None and q.kind == "drop" and q.contact is not None and q.bad is None
     # far from it (nothing to pogo) every plan lands: no safe plan (the floor)
-    pl2, _ = planner(world, clapper(16.0, "Idle", 0.1), "Idle", 40.0, FLOOR + 3.0 + 1.553, vy=-2.0)
+    pl2, _ = planner(world, clapper(16.0, "Idle", 0.1), "Idle", 40.0, FLOOR + 1.2 + 1.553, vy=-2.0)
     plans2 = pl2.evaluate(pl2.keeps(40.0, 16.0))
     assert all(p.bad is not None for p in plans2)
 
@@ -105,3 +105,14 @@ def test_step_owns_the_keys_and_yields_with_two(world):
     assert a.step(1001, s2, True, True, sim) is None
     st = a.stats()
     assert st["success"] is False and st["n_chains"] == 0 and "chains" in st
+
+
+def test_jump_flight_is_a_danger(world):
+    # its jump in place under her: the rising flight body (FLIGHT_Y0, grown 0.8 / 0.5 u) makes staying over it bad
+    e = clapper(30.0, "Air", 0.05, face=1)
+    pl, _ = planner(world, e, "Air", 30.5, FLOOR + 5.0 + 1.553, vy=0.0)
+    pl.c.f_fall = (1004, 1004 + 53, 30.0, 30.0, 1)
+    pl.c.L, pl.c.f_L, pl.c.fface = 30.0, 1004 + 53, 1
+    plans = pl.evaluate(pl.keeps(30.5, 33.0))
+    stay = [p for p in plans if p.dirk == 0]
+    assert stay and all(p.bad is not None for p in stay)
