@@ -156,7 +156,19 @@ TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
 # it becomes the focus"). A jump cast with its back within jc_back_u of its wall is the escape cast (TWO_WALLSWITCH,
 # the person's FLIPB): not taken. The other one in a jump move too: not taken. SSBOT_FORUM_TWO_JUMPTRAP_SET="gap_u=2,
 # force=1": force = every such jump move at her (the fixed points), the gap test off.
-TWO_JUMPTRAP = os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP", "0").strip() == "1"
+# SP14 A/B (eb3b153, w13, 64 episodes per arm, 2 rounds x 32, block design, the same seeds 9700000.. / 9800000..; rnjb vs
+# jt): HP-hitless clears 5 -> 10 / 64 (+0.078, 90 % -0.016 .. +0.172), both killed 35 -> 42 (-2 .. +16), landed / s
+# 1.292 -> 1.358 (+0.000 .. +0.130), HP-loss hits / min 4.46 -> 3.62 (-1.70 .. -0.01). The person's rule (the best on
+# hitless clears, not worse on the others): unset, SSBOT_FORUM_TWO_JUMPTRAP follows SSBOT_FORUM_V2 (=0 off: arm
+# rnsp14_0 = the SP13b default)
+
+
+def jumptrap_on(env=None) -> bool:
+    e = os.environ if env is None else env
+    return e.get("SSBOT_FORUM_TWO_JUMPTRAP", "1" if e.get("SSBOT_FORUM_V2", "0").strip() == "1" else "0").strip() == "1"
+
+
+TWO_JUMPTRAP = jumptrap_on()
 JT_ANTIC = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
 JT = {"gap_u": 2.0, "jc_back_u": 8.0, "force": 0.0, "reach_j": 7.76, "reach_c": 13.67, "pad": 0.25, "o_att": 1.0,
       "o_back_u": 1.0, "ground": 1.0, "o_way": 1.0, "aim_spot": 1.0}

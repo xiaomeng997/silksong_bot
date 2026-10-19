@@ -32,7 +32,11 @@ def tac(monkeypatch):
 
 
 def test_default_off():
-    assert gt.TWO_JUMPTRAP is False                    # the suite runs without SSBOT_FORUM_TWO_JUMPTRAP
+    assert gt.TWO_JUMPTRAP is False                    # the suite runs without SSBOT_FORUM_TWO_JUMPTRAP / V2
+    # SP14 A/B: unset it follows SSBOT_FORUM_V2; =0 turns it off
+    assert gt.jumptrap_on({}) is False and gt.jumptrap_on({"SSBOT_FORUM_V2": "1"}) is True
+    assert gt.jumptrap_on({"SSBOT_FORUM_V2": "1", "SSBOT_FORUM_TWO_JUMPTRAP": "0"}) is False
+    assert gt.jumptrap_on({"SSBOT_FORUM_TWO_JUMPTRAP": "1"}) is True
     assert gt.JT["gap_u"] == 2.0 and gt.JT["force"] == 0.0 and gt.JT["jc_back_u"] == 8.0
 
 
