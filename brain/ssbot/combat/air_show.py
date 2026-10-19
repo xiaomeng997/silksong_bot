@@ -83,11 +83,13 @@ class AsCfg:
     claw_p: int = 24            # its press searched to F0 + this
     claw_ms: float = 8.0        # ... for at most this long
     claw_every: int = 3         # ... tried every this many planning ticks
-    rel_gap: int = 7            # (b2) in the umbrella's float: the press this many frames after the jump key's release
+    rel_gap: int = 10           # (b2) in the umbrella's float: the press this many frames after the jump key's release
+    #                             (b6: the Deflate began 2 frames after the release and lasted 8: a press at + 7 was lost)
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
     depth_m: float = 0.15       # ... and the slash this far into its box (its top lowered for the contact test)
-    above_m: float = 0.3        # (b6) her box bottom this far over its top at the contact
+    above_m: float = 0.0        # (b6 / b7) her box bottom this far over its top at the contact (b7: 0.3 halved the safe
+    #                             drops - side contacts - and the runs fell apart: 0 / 16)
     flight_mx: float = 0.8      # (b6) its jump flight's box grown by this in x ...
     flight_my: float = 0.5      # ... and in y
     range_y: float = 7.5        # at its evade's end (After Scuttle's Slam Range read) her box bottom below this ...
@@ -1070,7 +1072,7 @@ class AirShow:
         rdy = f + SEND_AHEAD + (0 if cd is None else max(0, int(math.ceil(float(cd) * 60.0 - (SEND_AHEAD - 1)))))
         clip = str((h.get("anim") or {}).get("clip") or "")
         if "Deflate" in clip:
-            rdy = max(rdy, f + SEND_AHEAD + 5)      # (b2) the float closing swallows an attack
+            rdy = max(rdy, f + SEND_AHEAD + 8)      # (b2 / b6) the float closing (~8 frames) swallows an attack
         j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
         gliding = (clip.startswith("Umbrella") and "Deflate" not in clip) or (
             self._umb_f is not None and 0 <= f + SEND_AHEAD - self._umb_f <= 10 and not ground)
