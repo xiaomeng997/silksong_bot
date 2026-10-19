@@ -116,7 +116,7 @@ class AsCfg:
     stance_u: float = 5.6       # the ground stance in front of it (outside the walk's 7 +- 1.5: it comes to her)
     away_u: float = 9.0         # a slam in its antic with no safe up plan: walk to this from its centre
     lead_f: int = 16            # the drift target: its body this many frames ahead
-    slam_back_u: float = 0.6    # ... in its slam antic: this far behind its antic centre
+    slam_back_u: float = 1.0    # ... in its slam antic: this far behind its antic centre (b11: 0.6 -> 1.0, 2 vs 6 / 8)
     side_u: float = 0.6         # the drift target this far toward the nearer wall from its centre (it evades away
     #                             from her: from its wall side it backs into the middle)
     research: int = 1           # plan every this many ticks

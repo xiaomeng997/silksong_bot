@@ -11496,3 +11496,58 @@ untouched.
 6. **New**: small-rune HP losses 10 -> 19 under JUMPTRAP - check the low hop / BOMBS2 after a JUMPTRAP switch.
 7. **E** (umbrella close + down slash on a slam): the upper bound is 13 - 18 slams per 64 episodes ("no landing in
    time"); the hero-model count is open.
+
+## Task 1v1 - stage SP-AIR1: the show - one Clapper (w7) killed with no HP lost and without landing (SSBOT_FORUM_AIRSHOW, a show arm, default off; branch worktree-wf_f1846551-5f9-1, 2026-10-19; forum.md §90)
+
+The task: the person's show (2026-10-18 18:25, renewed 2026-10-19 ~11:00): from her first take-off (before her first hit)
+to the Clapper's death no grounded frame (cState.onGround), no wall cling, no HP lost; a switch, decisions bit-identical
+when off; first success fast, then the rate; SHOW.txt / SHOW_READY for the lead (the lead's NOTE: show-worthy = a full
+success and >= 4 of the last 8 live episodes of one commit; the mp4 optional). Data `C:\ssbot\data\m2_play\air1`
+(`an_<block>.txt / .json` per episode via `scripts\air_an.py`, `hp_<block>.txt` HP-loss classes via `scripts\hp_an.py`,
+`scripts\arms.py` per arm, `trace.py` per frame, `dec.py` the move choices, `air_facts.py` the bounce facts, STATUS.txt,
+SHOW.txt, SHOW_READY). Sandbox `air1_go.ps1` -> `sp4_block.ps1` -> `air1_ab.ps1` (manifests `1v1air1_<block>_manifest.txt`).
+
+### Result
+
+- **Show-ready**: SHOW_READY = commit **3c59a82, arm asb** (airshow + SSBOT_FORUM_AIRSHOW_SET=slam_back_u=1.0, the
+  default since the next commit): 6 / 8 airborne hitless kills in block b11 (cut by the lead's SHOW_PAUSE at 13:33),
+  kill time from the take-off p50 16.6 s; before it bb8e3b0 / as6b 8 / 24 with the last 8 at 5 / 8. Commands:
+  `C:\ssbot\sandbox\demo_arm.ps1 -Rev 3c59a82 -Arm asb -Inst 0 -Episodes 3 -Scale 1.0` (and `-Scale 0.5`); checkouts
+  frozen and warmed. 220 live episodes in all, 44 airborne hitless kills (p50 16.1 s, 13.5 - 20.1; ~22 hits each).
+- **Facts** (forum.md 90.1): the bounce off its head +3.0 - 3.7 u, apex ~20 frames after the contact, back at its head
+  ~40, the floor ~50; a pogo restores the air dash (240 / 274); +1 silk per hit; a hit on its Idle picks the move the
+  same frame (Dmg Attack), After Scuttle reads Slam Range (+-8.05 u, top 7.8 u above the floor) at once - at a bounce's
+  apex she is out of it and the evade becomes a jump move (5 / 6); an attack in the umbrella's float only closes it
+  (Deflate ~8 frames from 2 after the release); the air dash + Air Sprint carries her 6.4 - 7 u; its Drop In can land on
+  her and its Roar locks her.
+
+### 1. Code
+
+- `combat/air_show.py` (new): AirShow (ground: the up plans, the stance / the slam's way round; air: rune_pogo.Planner's
+  plans re-judged by ShowPlanner against its boxes by time - pogo_slam's slam timelines with move_data.HAMMER_POLY, the
+  cast's body top, the evade's slide with the After-Scuttle Slam-Range rule, rune_pogo's flight / landing hammer / dome
+  -, the bombs, the floor and the walls; the Clawline chase via claw_strike's timeline when no safe drop exists; the
+  float's release gap; the bounce wait; stats). AsCfg via SSBOT_FORUM_AIRSHOW_SET.
+- `train/forum_planner_policy.py`: with the switch on the show steps ahead of the other scripts and owns the keys (the
+  supervisor's keys win), its planner and the default planner alternate ticks (the last plan result stands for the
+  supervisor on the show's ticks); stats `policy.air_show`. `tools/forum_policy_replay.py` reports it.
+- Tests `tests/test_air_show.py` (7). Identity: switch unset byte-identical to sp14\replay_a94e6b2 on w7 192006 i0 e1 /
+  084036 i1 e0 and w13 144051 i1 e0 / 102908 i0 e0 (worktree at 1c30be8 and at aac717e + edits: `air1\replay_wt1`,
+  `replay_wt2`).
+- Arms (1v1_arms.txt, backup .bak_air1): airshow (= rnjb + SSBOT_FORUM_AIRSHOW=1), as6 / asn / asu / as6b / asd / asb
+  (parameter arms of the A/Bs, see forum.md 90.3).
+
+### 2. Live (instances 0 / 1, w7, 1.0x; forum.md 90.3 has the table)
+
+smoke1 .. b11 from 11:24 to 13:34; every block froze both instances after it (sp4_block), DEMO_SOON paused and restored,
+boost_workers on and off. No game process touched; the trading bot not touched. The lead's SHOW_PAUSE (13:33) cut b11;
+no live block after it.
+
+### Open items
+
+1. Confirm asb (slam_back_u 1.0) on >= 24 episodes after the show (only 8 so far).
+2. The air dash is in the last 6 frames before 13 of 24 HP losses (as6b): use it only for the evade chase with a clear
+   6 u path, or re-judge after the dash with the Air Sprint's real path; the dash lock and "keeps before dashes" lost.
+3. The jump's rising body (4 / 24): measured flight x instead of the linear one; move out in front 3 u on a jump in
+   place. 4. The Clawline chase as the first choice after an evade (the lead's NOTE 2) - used in 29 of 592 evades.
+5. The mp4 recording was not made (optional per the lead's NOTE).
