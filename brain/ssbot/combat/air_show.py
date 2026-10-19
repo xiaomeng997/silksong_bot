@@ -77,6 +77,13 @@ class AsCfg:
     bomb_m: float = 0.15
     contact_in: float = 0.3     # the slash meets its body box this far inside its x edges
     pre_f: int = 1              # its body this many frames before a contact does not count (air_chain PRE_PROTECT_F 2)
+    late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
+    #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
+    depth_m: float = 0.15       # ... and the slash this far into its box (its top lowered for the contact test)
+    range_y: float = 7.5        # at its evade's end (After Scuttle's Slam Range read) her box bottom below this ...
+    range_x: float = 7.6        # ... and her centre within this of its centre (Slam Range: +-8.05, top 7.8 u)
+    keep_f: int = 40            # a safe keep plan is ranked by her distance to the target this many frames on
+    behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
     dash_a: tuple = (0, 3)      # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
     dash_gap: int = 16
@@ -146,6 +153,7 @@ class Tl:
     ham: list
     kind: str
     k0: int | None = None
+    dec: tuple | None = None        # (rollout indices, its centre x there): it reads Slam Range there (After Scuttle)
 
 
 def its_timeline(e: dict, st: str | None, t_in: float, base_i: int, T1: int, cfg: AsCfg, hero_x: float) -> Tl:
@@ -205,7 +213,9 @@ def its_timeline(e: dict, st: str | None, t_in: float, base_i: int, T1: int, cfg
         n = np.clip(idx - base_i, 0, max(EVADE_F - k_now, 0))
         sh = vx * n
         bx = np.stack([bb[0] + sh, np.full(T1, bb[1]), bb[2] + sh, np.full(T1, bb[3])], axis=1)
-        return Tl(bx.copy(), bx[None], [[]], "evade", k_now)
+        i_end = base_i + max(EVADE_F - k_now, 0)
+        dec = ([i for i in range(i_end - 1, i_end + 3) if 0 <= i < T1], cx + vx * max(EVADE_F - k_now, 0))
+        return Tl(bx.copy(), bx[None], [[]], "evade", k_now, dec)
     if st in JUMP_PRE or st in JUMP_AIR:
         # the jump moves: its body on the ground to the aim (a target to the aim - 2), the flight / the landing from
         # rune_pogo's Ctx (AirShow._ctx); no target in the flight
@@ -267,6 +277,7 @@ class ShowPlanner(_rp.Planner):
         d = np.where(w > 2.0 * cfg.contact_in + 0.4, cfg.contact_in, 0.0)
         tg[:, 0] += d
         tg[:, 2] -= d
+        tg[:, 3] -= cfg.depth_m
         self.tgt = tg
 
     def _fit(self, a: np.ndarray, T1: int) -> np.ndarray:
@@ -296,7 +307,7 @@ class ShowPlanner(_rp.Planner):
             sw = (ro.flags[n, min(pi, T1 - 1)] | ro.flags[n, min(pi + 1, T1 - 1)]) & kin.F_ATTACKING
             if not sw or gnd[n, max(pi - 1, 0)]:
                 continue
-            for j in range(pi + 3, min(pi + 10, T1)):
+            for j in range(pi + 3, min(pi + 4 + self.ac.late_j, T1)):
                 if gnd[n, pi:j + 1].any():
                     break
                 if hit[n, j]:
@@ -340,6 +351,14 @@ class ShowPlanner(_rp.Planner):
         ff = getattr(self, "_floor_from", None)
         f0 = (np.asarray(ff)[:, None] if ff is not None and len(ff) == N else self.off + 1)
         bad |= (gnd | wall) & (idx <= lim) & (idx >= f0)
+        if self.tl.dec is not None and ac.range_y > 0:
+            # (smoke1) After Scuttle reads Slam Range at once: her box bottom >= 7.8 u above the floor there (a bounce's
+            # apex) turned 5 of 6 evades into jump moves - keep her inside (box bottom < range_y, |dx| < range_x)
+            ii, xe = self.tl.dec
+            for i in ii:
+                if self.off < i < T1:
+                    cxh = 0.5 * (b[:, i, 0] + b[:, i, 2])
+                    bad[:, i] |= ((b[:, i, 1] - FLOOR) >= ac.range_y) | (np.abs(cxh - xe) > ac.range_x)
         bad[:, :self.off + 1] = False
         first = np.where(bad.any(axis=1), np.argmax(bad, axis=1), -1)
         out = bad_p.copy()
@@ -376,6 +395,10 @@ class ShowPlanner(_rp.Planner):
                 if 0 <= k < self.T:
                     ev[m, k] |= kin.EV_POGO
         ro = self._roll(sub, ev)
+        T1r = ro.flags.shape[1]
+        ik = min(self.off + self.ac.keep_f, T1r - 1)
+        for m, p in enumerate(sub):
+            p.x_end = float(ro.centre[m, ik, 0])
         self._floor_from = [ff[n] for n in keep]
         cont = np.array([self._i(p.contact) if p.contact is not None else -1 for p in sub])
         bad = self.danger(ro, cont)
@@ -476,7 +499,7 @@ class ShowPlanner(_rp.Planner):
         return out
 
 
-def pick(plans: list, prefer: str = "drop", strike: tuple | None = None) -> _rp.Plan | None:
+def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: float | None = None) -> _rp.Plan | None:
     """The safe drop with the earliest contact (then the shortest drift), else the safe keep (a fall first, then the
     latest umbrella, the shortest drift), else the plan whose first danger comes latest."""
     if not plans:
@@ -489,6 +512,10 @@ def pick(plans: list, prefer: str = "drop", strike: tuple | None = None) -> _rp.
         return min(dr, key=lambda p: (risky(p), p.dash is not None, p.contact, p.d1 - p.d0, p.press))
     kp = [p for p in safe if p.press is None]
     if kp:
+        if tx is not None:
+            # (smoke1) the keep nearest the target keyframes on (a jump in place: she floated 8 u away and landed)
+            return min(kp, key=lambda p: (round(abs(getattr(p, "x_end", tx) - tx) / 0.75), p.umb is not None,
+                                          -(p.umb or 0), p.d1 - p.d0))
         return min(kp, key=lambda p: (p.umb is not None, -(p.umb or 0), p.d1 - p.d0))
     return max(plans, key=lambda p: (p.bad if p.bad is not None else 1 << 30, p.contact is not None,
                                      -(p.d1 - p.d0)))
@@ -667,6 +694,7 @@ class AirShow:
         ctx = self._ctx(f, s, e, ground, st)
         T1 = sim.off + self.cfg.horizon
         hx = _sp.hero_x(s)
+        self._hx = hx
         tl = its_timeline(e, st, t_in, sim.f - sim.fo, T1, self.cfg, hx)
         pl = ShowPlanner(sim, ctx, self.cfg, tl)
         tx = self._tx(e, st, tl, sim.f - sim.fo)
@@ -687,7 +715,7 @@ class AirShow:
             sk = None
             if tl.kind == "slam" and tl.k0 is not None:
                 sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
-            q = pick(plans, strike=sk)
+            q = pick(plans, strike=sk, tx=tx)
         self.ms.append((time.perf_counter() - t0) * 1e3)
         self.n_plans += 1
         if q is not None:
@@ -771,12 +799,20 @@ class AirShow:
             if not _TLS:
                 _TLS.extend(_slam_tls(4))
             x0 = cx - fc * _TLS[0].disp[min(max(k, 0), len(_TLS[0].disp) - 1)]
-            if k < 54:
-                tx = x0 - fc * self.cfg.slam_back_u
-            elif k < 63:
-                tx = cx - fc * 1.0
+            if k < 63:
+                tx = x0 - fc * self.cfg.slam_back_u     # (b2) 1 u behind the lunging centre was inside Slam Collider 1
             else:
                 tx = cx
+            return min(max(tx, WALL_L + 0.8), WALL_R - 0.8)
+        j = self.jump
+        if tl is not None and tl.kind == "jump" and j:
+            # a jump move: behind its landing (Slam Collider 2 reaches 0.67 - 7.76 u in front of it)
+            jf = j["face"]
+            if "x_land" in j:
+                L = j["x_land"]
+            else:
+                L = _rp.landing(j["x0"], j.get("hx_aim", self._hx), jf)
+            tx = L - jf * self.cfg.behind_u
             return min(max(tx, WALL_L + 0.8), WALL_R - 0.8)
         if tl is not None:
             i = min(base_i + self.cfg.lead_f, tl.tgt.shape[0] - 1)
