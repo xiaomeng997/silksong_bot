@@ -11082,3 +11082,208 @@ untouched.
 5. The audit's top cause is unchanged since SP10: the planner in the air with the dash ready (forced) against the casters'
    small runes / big runes (L2 on the caster or the other).
 6. F's Idle entries hit fell in the Clawline arm (70 % vs 77 %): not traced.
+
+## Task 1v1 - stage SP13b: TWO_BOMBS2 (the low hop against both casters' bombs; the person's FIRST item of 2026-10-18 ~08:45) and TWO_PMCAST (TWO_PUSHMID's cast route: slash twice, pogo over the caster just before its runes, land on its wall side, herd it): both passed their fixed points; the A/B (64 per arm) promoted BOMBS2 - HP-hitless clears 18 vs 6 / 64, small-rune HP losses 4 vs 22 -; PMCAST (its natural trigger fires ~0.1 per episode) stays off (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §88)
+
+The task (SP13b): FIRST - SSBOT_FORUM_TWO_BOMBS2 (the person ~08:45: "the runes come from both sides, a big jump would clear
+both, but Hornet does the small hop and gets hit by one side"): the low hop plans against every lit / to-light bomb at her
+x from both Clappers; one low hop not enough -> the full jump, the umbrella (it only holds the height), a pogo; fixed point
+on two-caster overlaps >= 90 % without a bomb hit, then the A/B. TASK - SSBOT_FORUM_TWO_PMCAST, TWO_PUSHMID's CAST route
+(the person ~07:00, main:docs/plans/forum_planner_plan.md: "stand on the ground, slash twice, and when the small runes are
+about to come out flip over"): at F's close cast antic with F nearer its wall than B and B out of reach, two ground
+slashes, a pogo over F's head just before its runes, airborne while ring 1 is lit, the landing on F's wall side, then the
+herd toward the middle; two return rules as arms; fixed point >= 90 % without HP lost from F's antic to Cast 2 + 60, then
+the w13 A/B (64 per arm). The ALSO items (FACEJUMP, LANDPOGO, TWO_FLIPB, TWO_CLAWUNDER) and the lead's NOTE of 14:35-14:45
+(C:\ssbot\data\m2_play\sp13\NOTE_FROM_LEAD.txt: FLIPB variant (c) first; BOMBS2's Clawline + pogo option) were not built
+(Open items). F = the caster / focus, B = the other Clapper, k = F's antic frame (STATE frame + 2), C = its Cast 2 entry
+(k 48-50), u centre to centre (her box centre, its transform). Forum_W_w13 (fo_cl_w13w) / Forum_W_w7 (fo_cl_w7w),
+instances 0 / 1, 1x. Data `C:\ssbot\data\m2_play\sp13b` (`scan_ab13.json` the SP13 A/B's casts (the baseline), `fp1` ..
+`fp3` the fixed points (`fp_*.txt / .json` per cast-route run, `scan_b.json` / `audit_b.*` BOMBS2's round), `ab` the A/B
+and its audit, `replay_<sha>` identity, `hop_ext.json` the full jump's holds, `scripts`: `sit_scan.py` (casts, overlap
+pairs, PUSHMID gates from the recordings), `fp13b.py`, `pm_traj.py`, `hop_ext.py`, `ab13b.ps1`,
+`replay_ident_sp13b.ps1`, `ident_cmp.sh`). Commits 4842a2f (BOMBS2), 73ada99 (PMCAST), dae38b7 / 67f693f / f134795
+(PMCAST's fixed-point fixes), 2abcc6b (BOMBS2's fp1 fix), e5dc189 (the promotion), then the docs. No human practice ran;
+the trading bot was not touched.
+
+### Result
+
+- **The two-caster overlap** (`scripts\sit_scan.py` on SP13's A/B recordings, 128 episodes): the other Clapper starts its
+  cast as soon as the first one's lock ends at Cast 2, so 123 of 599 two-alive casts had the other one's Cast 2 45 - 90
+  frames before / after; 43 of those lost HP to a small rune vs 34 of the other 476. Counted as pairs (the second Cast 2
+  30 - 90 frames after the first; a small-rune HP loss from the first antic to the second Cast 2 + 80): **31 / 64 clean
+  (48 %; rnjb 12 / 32, cs13f 19 / 32)**. The default's low hop ended at the other one's cast (other_danger: "other Spell
+  Antic" within 9 u: 38 - 47 aborts + 12 - 22 no-starts per 64 episodes) and after its one hop ("landed": the planner then
+  met the second row in the air).
+- **BOMBS2 fixed point** (fp1, 73ada99, arm b2, 32 w13 episodes): **overlap pairs 13 / 14 clean (92.9 %)**; casts with a
+  small-rune HP loss 11 / 141 (7.8 %; SP13's A/B 77 / 599 = 12.9 %); 15 runs planned against both owners' bombs, 23
+  re-hops after a landing, 17 split plans, 2 full jumps, the in-air umbrella / drift plans 102 ticks, aborts in the air 3
+  (the default's 33 - 42 per 64). 3 of the round's 10 small-rune hits were the low hop's own (on the ground, a plan made
+  and never pressed: the forecast's windows move a frame or two each tick and each change re-planned the hop until its
+  press slid out of the range) -> 2abcc6b keeps a plan that still clears the windows it was made for.
+- **PMCAST fixed points** (trig=force: every close cast of F in front within 7.5 u with room behind F; gate: no HP lost
+  from F's antic to Cast 2 + 60 (~k 110); also counted: every committed over to its landing):
+
+| round | code / arm, episodes | runs | over commits | HP lost in the window | HP lost in the over (to the landing) | misses | change |
+|---|---|---|---|---|---|---|---|
+| fp1 | 73ada99 / pmcf w7, 20 | 56 | 38 | 3 | 9 | - | the plans held the jump key to the landing (NO_UMB 10^6 < the frame numbers): bounces 3.7 u high; F turned to face her and she landed on its front; one-frame contacts at the body's drop (C + 14) missed -> dae38b7 |
+| fp1 | 73ada99 / pmcf w13 (stopped after 12) | - | - | - | - | - | stale code |
+| fp2 | dae38b7 / pmcf w7, 20 | 58 | 57 | 1 | 4 | 1 | landings 2.0 - 2.5 u behind F: her ground slashes pushed F 0.48 u toward the landing side, the real drift 0.5 - 0.8 u short -> 67f693f (land 3.5 - 5.6 u, the landing guard) |
+| fp2 | dae38b7 / pmcf w13, 32 | 88 | 68 | 2 | 6 | - | the other one's big rune circle 1 -> f134795 (no start with B jumping or a circle over her way) |
+| fp3 | 67f693f / pmcf w7, 20 | 57 | 53 | **0** | **1** | 3 | passes |
+| fp3 | 67f693f / pmcf w13, 32 | 116 | 88 | **1** (B's hammer) | **2** | 2 | passes |
+
+  fp3: runs without HP lost in the window 57 / 57 (w7) and 115 / 116 (w13); over commits without HP lost to the landing
+  138 / 141 (97.9 %); 3 + 2 missed pogos handed back with no HP lost. The over: the jump at antic frame 31 - 36 (p10 / 90;
+  two ground slashes before it), the contact ~C + 8 .. 26, the landing on F's far side at k 121 - 128 (~C + 73), the
+  landing guard acted in 75 of 88 / 48 of 53 overs; the search 23 ms p50 (18 - 32), 6 - 14 searches per cast.
+- **The natural trigger hardly fires**: 1 of 116 forced w13 runs met PUSHMID's gates (F nearer its wall than B by 1 u, B
+  idle / walking and out of the lock-bounded run's reach, she nearer F); sit_scan on SP13's A/B: of 599 two-alive casts
+  185 had F within 8.3 u and nearer its wall, then "run ok" 87, B busy 43, F's room < 5 u 43 -> 12 (~1.5 per 16
+  episodes).
+- **Promoted: SSBOT_FORUM_TWO_BOMBS2 follows SSBOT_FORUM_V2 when unset (e5dc189; =0 off, arm rnsp13b_0 = the SP13
+  default).** The A/B (f134795, w13, 64 per arm = 2 rounds x 32, block design, the same seeds 9700000.. / 9800000..,
+  instances 0 / 1; `ab_pool\ab_stats.txt`, `ab_pool\fp.txt`, `ab_pool\fp11b.txt`, `ab_pool\scan.txt`; round 1 alone
+  `ab\`):
+
+| | rnjb (old default) | b2 (BOMBS2) | pmc1 (PMCAST ret 1) | pmc2 (PMCAST ret 2) |
+|---|---|---|---|---|
+| **HP-hitless clears** | **6 / 64 (9.4 %)** | **18 / 64 (28.1 %)** | 3 / 64 (4.7 %) | 8 / 64 (12.5 %) |
+| both Clappers killed | 42 | 46 | 35 | 49 |
+| landed / s | 1.332 | 1.329 | 1.295 | 1.372 |
+| HP-loss hits / min | 3.72 | 3.02 | 4.74 | 3.55 |
+| HP by source: small rune / big rune / landing / body / hammer | 22 / 22 / 26 / 28 / 22 | **4** / 26 / 22 / 27 / 20 | 24 / 31 / 20 / 33 / 31 | 27 / 25 / 21 / 20 / 19 |
+| two-caster overlap pairs without a small-rune HP loss | 21 / 31 | **30 / 30** | 20 / 39 | 12 / 26 |
+| cast-route runs (natural) / over / herd / HP lost antic .. + 110 | - | - | 10 / 7 / 8 / 1 (a bomb before the over) | 6 / 5 / 4 / 0 |
+| escapes / min with both alive (casts) | 5.27 (2.73) | 5.66 (2.75) | 5.12 (2.56) | 4.46 (2.48) |
+| squeezed share | 0.133 | 0.157 | 0.152 | 0.144 |
+| F's back at its Idle entries p50 (share < 6.2 u) | 10.80 (0.266) | 10.66 (0.256) | 10.33 (0.296) | 11.31 (0.258) |
+
+  Bootstrap 90 % vs rnjb (episodes resampled): b2 hitless +0.188 (+0.078 .. +0.297), both killed +4 (-5 .. +13), landed / s
+  -0.004 (-0.063 .. +0.057), HP hits / min -0.70 (-1.43 .. +0.00); pmc1 -0.047 (-0.125 .. +0.031), -7 (-16 .. +2), -0.037
+  (-0.101 .. +0.029), +1.02 (+0.23 .. +1.87); pmc2 +0.031 (-0.063 .. +0.125), +7 (-1 .. +15), +0.040 (-0.015 .. +0.099),
+  -0.17 (-0.89 .. +0.56). The person's rule: b2 is the best on hitless clears and not worse on the others (both round 1
+  10 vs 4 / 32 and round 2 8 vs 2 / 32) -> promoted. PMCAST: its 16 natural runs were clean bar one bomb before the over
+  (the herd: F's back 3.5 - 11.1 u at its next Idle entries), so the arms' differences are the episodes' divergence, not
+  the route (pmc1's HP / min interval excludes 0, pmc2's hitless clears are below b2's) -> not promoted; the natural
+  gates (PUSHMID's) leave ~0.15 runs per episode.
+- **Two-caster overlaps under the new default** (b2 in the A/B): 30 / 30 pairs clean; the run kept both rows (two-owner
+  runs 40, re-hops after a landing 52, split plans 45, holds > 16 136 of the hops, in-air plans 193 ticks, aborts in the
+  air 10 vs 14 / 64 in rnjb).
+
+### 1. Code (`combat/rune_lowhop.py`, `combat/rune_bombs.py`, `combat/push_cast.py` (new), `combat/two_play.py`, `train/forum_planner_policy.py`, `combat/tactics/gauntlet.py`)
+
+- `SSBOT_FORUM_TWO_BOMBS2` (default off; acts with the low hop's two-Clapper mode, TWO_CAST, so also in w7): the threat
+  windows at her x / the stance are the seen bombs (any owner) + the tracker's per-bomb forecast (`trk.rune.predict`:
+  every row whose Cast 2 is seen) + `rune_bombs.pending_rows` (a Clapper in Spell Antic / Cast 1: its row from the p50
+  timeline, Cast 2 47.5 - 51 frames after the antic entry); `hop_plan2`: the lowest hold of 9 - 26 that clears them all
+  (holds 17 - 26 from the same kinematics model, `HOP_LO / HOP_HI` extended: the box bottom >= 2.95 u from j 11 to j 32
+  - 43 vs 31 for H 16), else the longest run of the earliest windows one hop clears whose rest a second hop after its
+  landing still clears (the run returns to the stance after the landing: `rehop`), else that first hop with the rest left
+  to the umbrella (H2 -1); a plan that still clears its windows is kept (2abcc6b); other_danger(cast_ok): the other one's
+  cast no longer ends / blocks the run; starts also in Cast 1 / Cast 2; free mode once its caster's cast is over (no
+  stance, no slash; the keys only while a covering window starts within 45 frames); in the air with a covering window
+  within 12 frames (or, in the hop, one its lowest lane misses before the landing + 13) `_air_plan`: the hero model's
+  fall / umbrella (pressed at +0 / 3 / 6 / 10, held) / drift plans against every bomb (grown 0.35 u: the model floats
+  0.2 - 0.3 u high) and the Clappers' bodies, the first safe one (fall, the shortest drift, the latest umbrella) instead
+  of the hand-back. Stats `rune_lowhop` b2_*, hop_runs[].b2.
+- `SSBOT_FORUM_TWO_PMCAST` (default off; `SSBOT_FORUM_TWO_PMCAST_SET` -> `push_cast.PcCfg`: trig nat / force, ret 1 / 2,
+  room_c 4.3, land 3.5 - 5.6, tgt_c 8, k_plan0 12, k_last 62, every 3, guard_u 0.7): TwoPlay `_pmc_start` at F's Spell
+  Antic (trig nat: PUSHMID's gates; force: in front within d_max 7.5 u, room_c behind F; both: no other run, B not
+  jumping, no big rune circle over her way) -> PmRun kind "cast" (`pm_cast()` for the low hop; L2 holds F
+  (`two_pm`)); the low hop's run on F keeps its stance and ground slashes and, from k 12 every 3 ticks, searches
+  `push_cast.OverPlanner.best_over` (rune_pogo's Planner with F as the pogo target: the jump w = 0 / 3 / 7 / 12 frames
+  ahead held 18 / 26, the drift key toward F's far side from + 6 / 10 / 14 / 18, the down slash pressed so it meets F's
+  box on two consecutive frames from above while falling - the tall box (4.78 u) to C + 11, the low one (3.19) after -,
+  EV_POGO, the drift ending 0 / 12 / 30 frames after the press + 6; safe: F's body by time (tall / low / its Idle body
+  both ways from C + 22), B's body, every bomb row (forecast + pending), and the landing 3.5 - 5.6 u behind x0 inside the
+  walls; the contact nearest C + 8, then the latest jump, no umbrella (umbrella variants only when nothing else is safe));
+  the jump pressed when due -> phase "over" (critical: its keys ahead of the other scripts; the plan re-checked before the
+  press, best_air when it fails within 8 frames; no bounce by the contact + 4 -> "pm miss", the planner; after the bounce
+  the landing guard: falling within 0.7 u of F's body box -> the key away from its centre); landed -> done, TwoPlay's herd
+  (the stance 3.5 u on F's wall side; ret 1 to F's next move, ret 2 until the lock-bounded run to B passes). No plan by
+  k 62 -> the low hop as before ("no plan"). Stats `two_play.pushmid` (cast_*, cno_*), hop_runs[].pm.
+- Policy: the tracker's bomb frames and (PMCAST / BOMBS2 in the air) a ChainSim for the low hop; `pm_note` when the route
+  is given up; `rune_pogo.warm` / `push_cast.warm` at warm-up. `two_play.PMANY` (PUSHMID or PMCAST) for the pm machinery
+  (gauntlet's hold, the herd stance).
+- Tests `tests/test_sp13b.py` (14: defaults and the v2 default (4 cases), the extended holds, hop_plan2 single / split / tail, pending_rows,
+  other_danger cast_ok, the run surviving the other one's cast, the forecast windows and the full jump, the kept plan,
+  PMCAST's start gates nat / force / room, the over plan crossing to the band); `tests/test_sp11b.py` fixture sets
+  PMANY. Full suite at f134795 (its frozen checkout): 2,053 passed, 2 failed (the known: test_import_firewall, test_three_layer's bell test), 1 skipped, 1 xfailed - `sp13b\fullsuite_f134795.log`.
+
+### 2. Identity (`sp13b\scripts\replay_ident_sp13b.ps1`, `ident_cmp.sh`; from the frozen checkouts)
+
+4842a2f, 73ada99, dae38b7, 2abcc6b, 67f693f and f134795 with every SP13b switch unset: byte-identical to a861184's default
+(`sp13\replay_a861184\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659) and the w7 192006 i0 e1
+/ 084036 i1 e0 (2,073 / 1,778). BOMBS2 on: w13 from tick 1,145 / 602, w7 from 323 / 351 (it acts with one Clapper too);
+PMCAST force: w13 from 1,081 / 775, w7 from 285 - 290 / 320 - 1,048; PMCAST natural (`pmn`, f134795): 3 of 4 identical, the
+w13 102908 from tick 775 (a cast route there); PMCAST ret 2 + BOMBS2: runs; 0 tracebacks. e5dc189 (the promotion):
+SSBOT_FORUM_TWO_BOMBS2=0 byte-identical to a861184's default on all four; unset (the new default with v2) byte-identical
+to 67f693f's BOMBS2=1 on all four; 0 tracebacks.
+
+### 3. Live rounds (`sp13b_go.ps1` -> `sp4_block.ps1` -> `sp13b_ab.ps1`; manifests `1v1sp13b_{fp1b,fp1p7,fp1p13,fp2p7,fp2p13,fp2b,fp3p7,fp3p13,ab1,ab2,w7chk}_manifest.txt`)
+
+fp1p13 (stale code) and fp2b (the BOMBS2 step on dae38b7, before the kept-plan fix) were cut with `1v1_live.stop`. The
+reaction lag: the cast route starts on the first STATE of F's Spell Antic (TwoPlay.observe before the low hop's step, the
+same tick); the over search from k 12; the low hop's plans every tick from the first covering window (the forecast's
+pending row from the antic's first STATE).
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` + rank_hitless on the pooled A/B; `ab_pool\audit.*`, `ab_pool\rank.txt`, traces `ab_pool\hp`)
+
+rnjb (old default) 120 HP losses (3.72 / min; L2 / planner 69, airborne / landing 31, script conflict 19, host 1); b2 (new
+default) 99 (3.02 / min; 68 / 16 / 15). Ranked by the hitless clears they cost (a clear with k causes shares 1 / k) -
+**b2** (28 clears with HP lost): the planner in the air with the dash ready, forced, L2 on the other 4.00 (alone 2, 18
+losses: the other one's jump landing 8 + 2 and its big rune 7 - the jump moves now lead), "slam not struck: no input at
+the antic (sprint / recoil)" 2.00, the low hop on the other while this one hit 2.00 (6: the other's big rune 4, a body 2
+- BOMBS2's runs hold the keys longer), the umbrella 1.50, the playbook moved her into it 1.50, the gate "other rune
+circle" 1.50, no landing in time 1.50, a strike pressed without a bounce 1.50, the low hop stayed in its reach 1.50;
+**rnjb** (36): the umbrella 6.00 (16: jump landings 10, big runes 3), the planner moved into it (forced, L2 on the other)
+5.00 (15), the same with L2 on it 3.33, the gate "other rune circle" 3.00, the planner in the air with the dash ready
+(L2 on the other) 2.83 (14: big runes 8, jump landings 5), the same with L2 on it 2.50, the low hop moved her into it
+2.00. Clears lost to one class alone: b2 L2 / planner 15, airborne 4, script 2; rnjb 20 / 6 / 1. The small runes left
+the top of the list (22 -> 4 HP losses; overlap pairs 30 / 30). Missed planned actions (rnjb / b2): close slams struck
+303 / 394 / 299 / 392 (the gate "other rune circle" 20 / 19); F's Idle entries hit within 30 frames 576 / 771 (75 %) /
+560 / 776 (72 %; "script conflict" 68 -> 101: the low hop's longer runs keep the keys at the other one's Idle entries);
+chases ended far 41 / 354 / 36 / 351; presses dropped 235 / 3,119 / 200 / 3,116; double slams struck 16 / 44 / 18 / 47;
+one Clapper left 245 s / 5 HP losses vs 290 s / 8. Switches across situations: BOMBS2 acts with one Clapper too (the
+two-Clapper mode of the low hop is on in w7: identity from tick 323 / 351; live w7 check at e5dc189, rnjb (BOMBS2 on) vs rnsp13b_0, 14 episodes each analysed (`sp13b\w7chk_two.*`): clears 14 / 14 both, HP-hitless 14 vs 13, landed / s 1.349 vs 1.322 (-0.012 .. +0.064), kill p50 17.7 vs 17.2 s - no harm); PMCAST's cast route needs only F
+(w7 forced 57 / 57 clean in its window) but its natural gates need B; the cast-route machinery (PMANY) left the
+decisions identical in the episodes without a run (replay `pmn`: 3 of 4 identical, the fourth from the run's tick 775).
+
+### 6. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp13b)
+
+`b2` = rnjb + SSBOT_FORUM_TWO_BOMBS2=1; `pmcf` = rnjb + TWO_PMCAST trig=force (the fixed points); `pmc1` / `pmc2` = rnjb +
+TWO_PMCAST ret 1 / ret 2; `b2pm1` / `b2pm2` = both (not run). `rnsp13b_0` = rnjb + SSBOT_FORUM_TWO_BOMBS2=0 (the SP13 default); rnjb follows the new default (BOMBS2 on).
+
+### 7. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran fp1 (14:45-15:17), fp2 (15:17-15:43), fp3 (15:43-16:06) and the A/B
+(round 1 16:07-17:03, round 2 17:03-17:59) and the w7 check (18:19-18:31; 1v1sp13b_w7chk_manifest.txt), frozen at time scale 1e-4 after each block by sp4_block; DEMO_SOON paused and restored per block;
+boost_workers ran for each block (`boost_workers.stop` present again). No game process touched. Frozen checkouts
+`C:\ssbot\live_1v1_{4842a2f, 73ada99, dae38b7, 2abcc6b, 67f693f, f134795}`. Sandbox `sp13b_go.ps1`, `sp13b_ab.ps1`.
+Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left untouched.
+
+### Open items
+
+1. **The jump moves lead the audit now**: the planner in the air with the dash ready vs the other one's jump landing /
+   big rune (10 + 7 of b2's 18 top-cause losses), the umbrella vs jump landings. The person's ALSO items aim there and
+   were not built: SSBOT_FORUM_FACEJUMP (a jump slam in place at her face: the down slash on its head 0-3 frames before
+   its landing, or the Clawline into its descending body above Slam Collider 2), SSBOT_FORUM_TWO_FLIPB (the wall-side
+   caster's jump cast with her between: the lead's NOTE of 14:35 makes variant (c) - small hop + Clawline at B + the
+   down slash on B, reusing CLAWSTRIKE; B locked until the caster lands - the first choice, then past the circle's far
+   edge and stand just outside it, slashing B if it comes; the pass-under / corner the fallbacks), SSBOT_FORUM_TWO_CLAWUNDER
+   (the corner jumper: the unhooked Clawline under its rise, or from above the hammer edge in its descent) and
+   SSBOT_FORUM_LANDPOGO (a body predicted at her landing spot: a pogo instead of the landing; to locked blockers only since
+   AIRSTRIKE failed).
+2. **BOMBS2's remaining options** (the lead's NOTE ~14:45): the Clawline at either Clapper + a down slash on it to extend
+   the airtime over lit bombs, and a pogo on the caster's head through its cast (two casters) - not built; the in-air
+   aborts are 10 per 64 episodes, the small-rune HP losses 4.
+3. **BOMBS2 holds the keys longer**: F's Idle entries hit 72 % vs 75 % ("script conflict" 101 vs 68) and "the low hop on
+   the other while this one hit" 6 losses (the other's big rune 4) - the run's critical windows over the other one's jump
+   cast.
+4. **PMCAST's natural trigger** (PUSHMID's gates) fires ~0.15 times per episode: F within 8.3 u and nearer its wall in
+   185 of 599 casts, then "run ok" 87, B busy 43, F's room < 5 u 43. The route itself is safe (fp3: 138 / 141 overs
+   without HP lost; the A/B 16 natural runs clean bar one bomb before the over); a wider trigger (e.g. B busy but not in
+   reach, or F nearer its wall without the 1 u margin) needs the person's call.
+5. The over plan's drift model: the real drift after the pogo bounce falls 0.5 - 0.8 u short of the hero model's and the
+   landing guard corrects it in most overs (75 / 88); the bounce off a Clapper's head lifts her ~3.7 u (DownSpikeBounce
+   ~20 frames of rise) - calibrate kinematics' EV_POGO drift / rise on the 141 fp3 overs.
