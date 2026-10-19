@@ -76,7 +76,9 @@ class AsCfg:
     ham_m: float = 0.15         # ... off its hammer polygons
     bomb_m: float = 0.15
     contact_in: float = 0.3     # the slash meets its body box this far inside its x edges
-    pre_f: int = 1              # its body this many frames before a contact does not count (air_chain PRE_PROTECT_F 2)
+    pre_f: int = 0              # its body this many frames before a contact does not count (b4: 0 - her box on its back
+    #                             edge as the slash landed: the body hit first)
+    bounce_wait: int = 8        # a hit on it seen: no new plan for this many frames until her bounce (vy > 5) shows
     rel_gap: int = 7            # (b2) in the umbrella's float: the press this many frames after the jump key's release
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
@@ -590,6 +592,7 @@ class AirShow:
         self.done = False
         self.why_none = {}
         self._pend = None
+        self._hit_f = None
 
     # ---- bookkeeping ----
 
@@ -617,6 +620,7 @@ class AirShow:
         chp = (e or {}).get("hp")
         if self._chp is not None and chp is not None and chp < self._chp:
             yb = float((h.get("box") or [0, FLOOR, 0, FLOOR])[1]) - FLOOR
+            self._hit_f = f
             if self.f_first_take is None:
                 self.hits_pre += 1
             else:
@@ -700,6 +704,13 @@ class AirShow:
             return self._mask_plan(Fm)
         st, t_in = _sp.control(e)
         if self._committed(Fm):
+            return self._mask_plan(Fm)
+        vy_now = float((h.get("vel") or [0.0, 0.0])[1])
+        if (not ground and self._hit_f is not None and f - self._hit_f <= self.cfg.bounce_wait and vy_now < 5.0
+                and self.plan is not None and self.plan.press is not None):
+            # (b4) a hit on it seen, its bounce not yet: no new plan (a plan from the falling state dashed her 7 u
+            # away and cancelled the bounce)
+            self.why_none["bounce_wait"] = self.why_none.get("bounce_wait", 0) + 1
             return self._mask_plan(Fm)
         if self.plan is not None and (Fm < self._next or not plan):
             return self._mask_plan(Fm)
