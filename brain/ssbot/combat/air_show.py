@@ -88,17 +88,18 @@ class AsCfg:
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
     depth_m: float = 0.15       # ... and the slash this far into its box (its top lowered for the contact test)
-    above_m: float = 0.0        # (b6 / b7) her box bottom this far over its top at the contact (b7: 0.3 halved the safe
-    #                             drops - side contacts - and the runs fell apart: 0 / 16)
-    flight_mx: float = 0.8      # (b6) its jump flight's box grown by this in x ...
-    flight_my: float = 0.5      # ... and in y
+    above_m: float = -9.0       # (b6 - b8) her box bottom this far over its top at the contact (b7: 0.3 halved the safe
+    #                             drops - side contacts - and the runs fell apart: 0 / 16; b8: 0 lost to off, 0 vs 6 / 16)
+    flight_mx: float = 0.3      # (b6) its jump flight's box grown by this in x ... (b8: 0.8 / 0.5 in the losing arm)
+    flight_my: float = 0.3      # ... and in y
     range_y: float = 7.5        # at its evade's end (After Scuttle's Slam Range read) her box bottom below this ...
     range_x: float = 7.6        # ... and her centre within this of its centre (Slam Range: +-8.05, top 7.8 u)
     keep_f: int = 40            # a safe keep plan is ranked by her distance to the target this many frames on
-    keep_floor: int = 50        # (b5) a plan without a contact: the floor / walls checked this many frames ahead (to the
+    keep_floor: int = 200       # (b5) a plan without a contact: the floor / walls checked this many frames ahead (to the
     #                             horizon every keep landed: all bad, and the latest-danger fallback air-dashed her 7 u
     #                             away from a slam she had just struck)
-    dash_min_u: float = 4.0     # (b5) air dash plans only toward a target at least this far
+    dash_min_u: float = 0.0     # (b5) air dash plans only toward a target at least this far (b8: 4 in the losing arm)
+    keep_umb_last: int = 0      # 1: a safe keep without the umbrella ranks first (b4-b6: the Deflate in 12 of 36 HP losses)
     behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
     dash_a: tuple = (0,)        # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
@@ -548,7 +549,8 @@ class ShowPlanner(_rp.Planner):
         return out
 
 
-def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: float | None = None) -> _rp.Plan | None:
+def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: float | None = None,
+         umb_last: bool = False) -> _rp.Plan | None:
     """The safe drop with the earliest contact (then the shortest drift), else the safe keep (a fall first, then the
     latest umbrella, the shortest drift), else the plan whose first danger comes latest."""
     if not plans:
@@ -563,7 +565,11 @@ def pick(plans: list, prefer: str = "drop", strike: tuple | None = None, tx: flo
     if kp:
         if tx is not None:
             # (smoke1) the keep nearest the target keyframes on (a jump in place: she floated 8 u away and landed)
-            return min(kp, key=lambda p: (round(abs(getattr(p, "x_end", tx) - tx) / 0.75), p.umb is not None,
+            # (b4-b6) a fall before the umbrella: its Deflate (~8 frames, no attack) left her low by its body or
+            # hammer in 12 of 36 HP losses
+            ul = umb_last
+            return min(kp, key=lambda p: (ul and p.umb is not None and not p.hold_j,
+                                          round(abs(getattr(p, "x_end", tx) - tx) / 0.75), p.umb is not None,
                                           -(p.umb or 0), p.d1 - p.d0))
         return min(kp, key=lambda p: (p.umb is not None, -(p.umb or 0), p.d1 - p.d0))
     return max(plans, key=lambda p: (p.bad if p.bad is not None else 1 << 30, p.contact is not None,
@@ -795,7 +801,7 @@ class AirShow:
             sk = None
             if tl.kind == "slam" and tl.k0 is not None:
                 sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
-            q = pick(plans, strike=sk, tx=tx)
+            q = pick(plans, strike=sk, tx=tx, umb_last=bool(self.cfg.keep_umb_last))
             if (self.cfg.claw and st not in INTRO and (q is None or q.bad is not None or q.contact is None)
                     and (prev is None or prev.kind != "claw")):
                 # (the lead's NOTE 2) no safe down slash: the Clawline chase (its body hooked, the bounce, the drop
@@ -1061,6 +1067,10 @@ class AirShow:
         sgn = 1.0 if hx >= cx else -1.0
         want = self.cfg.away_u if st in SLAM_ST else self.cfg.stance_u
         spot = cx + sgn * want
+        if st in SLAM_ST:
+            # (b5 / b6) its slam on the ground: behind it (3.5 u) when there is room, else beyond the lunge's hammer
+            behind = cx - fc * 3.5
+            spot = behind if WALL_L + 0.8 <= behind <= WALL_R - 0.8 else cx + fc * 12.5
         spot = min(max(spot, WALL_L + 0.8), WALL_R - 0.8)
         k = 0 if abs(spot - hx) < 0.3 else (M_R if spot > hx else M_L)
         return _rp.Plan("walk", k, Fm, Fm + 3, why=f"walk {st} {round(spot - hx, 2)} fc{fc}")
