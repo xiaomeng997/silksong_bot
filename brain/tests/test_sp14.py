@@ -126,3 +126,34 @@ def test_fp2_exclusions(tac):
     # the far-side focus (the trap) still fires
     fc = Fc([S(7, 36.3, gt.CC_JUMP, "Jump Antic"), S(99, 15.4)])
     assert tac._jt_update(None, fc, 19.6, 1.0) == 7
+
+
+# ---- SSBOT_FORUM_TWO_CLAWAIR (combat.claw_chase: variant A's Clawline started in the air) ----
+
+def test_clawair_default_off():
+    from ssbot.combat import claw_chase as cc
+    assert cc.CLAWAIR is False and cc.CA["scope"] == "reach"
+
+
+def test_clawair_starts_in_the_air_only(monkeypatch):
+    from ssbot.combat import claw_chase as cc
+    from tests.test_sp10c import cstate, J_X
+    monkeypatch.setattr(cc, "CLAWAIR", True)
+    c = cc.ClawChase(cc.ClawCfg())
+    c.step(1000, cstate(1000, "Idle", 0.5, hx=J_X + 10.0, y_air=1.0), False, True)
+    s = cstate(1001, "Jump Antic", 1 / 60.0, hx=J_X + 10.0, y_air=1.0)
+    s["hero"]["vel"] = [0.0, 0.0]
+    m = c.step(1001, s, False, True)
+    r = c.run
+    assert r is not None and r.why == "air" and r.hop_hold == 0 and r.phase == "air", dict(c.n)
+    assert r.k_press == 1001 + cc.SEND_AHEAD + 1 - 1000 and m == cc.M_L    # the turn now, the press next
+    # on the ground: the airborne start does not run (variant A's ground start is off)
+    c = cc.ClawChase(cc.ClawCfg())
+    c.step(1000, cstate(1000, "Idle", 0.5), True, True)
+    assert c.step(1001, cstate(1001, "Jump Antic", 1 / 60.0), True, True) is None and c.run is None
+    # behind it: no run
+    c = cc.ClawChase(cc.ClawCfg())
+    c.step(1000, cstate(1000, "Idle", 0.5, hx=J_X - 6.0, y_air=1.0), False, True)
+    s = cstate(1001, "Jump Antic", 1 / 60.0, hx=J_X - 6.0, y_air=1.0)
+    s["hero"]["vel"] = [0.0, 0.0]
+    assert c.step(1001, s, False, True) is None and c.run is None

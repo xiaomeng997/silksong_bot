@@ -232,7 +232,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SP9a (SSBOT_FORUM_TWO_IDLEHIT / _SPACE / _OPEN, default off; combat.two_play): two Clappers
         self.two: two_play.TwoPlay | None = two_play.TwoPlay() if two_play.ANY else None
         # SP10c (SSBOT_FORUM_CLAW_CHASE, default off): the late Clawline on a far jump (combat.claw_chase)
-        self.claw: claw_chase.ClawChase | None = claw_chase.ClawChase() if claw_chase.ENABLED else None
+        self.claw: claw_chase.ClawChase | None = (claw_chase.ClawChase()
+                                                  if (claw_chase.ENABLED or claw_chase.CLAWAIR) else None)   # SP14 CLAWAIR
         self._wake_f: int | None = None
         self._play_tick: dict | None = None
         self.own_trace: list = []                 # SP10a: see reset()

@@ -44,6 +44,33 @@ def _on(name: str, default: str = "0") -> bool:
 
 
 ENABLED = _on("SSBOT_FORUM_CLAW_CHASE")
+# SSBOT_FORUM_TWO_CLAWAIR (task 1v1 SP14, default off; the person 2026-10-18 19:10 / 20:30, the lead's ADDENDUM 3: "hit by
+# the big rune many times, mostly while Hornet is in the AIR and the Clapper jumps over to her"): the airborne start of
+# variant A. She is in the air (no hop) at a Clapper's jump antic or early flight, in front of it, inside its landing's
+# reach (the hammer 7.76 u / the circle 13.67 u in front, its body 1.6 u behind; the landing from jump_behind.landing),
+# silk >= 1, the other one neither jumping nor in the way: the press frame P is the earliest one whose ray check (P + 10)
+# meets its body - the flight's box from rune_pogo.FLIGHT_Y0 (bottom above the floor every 6 frames from its aim, x
+# linear from the take-off to the landing, 3.8 u high, 1.34 behind / 2.25 in front) - inside her band (her box bottom
+# at the throw yP - 0.261 + 0.0788 vyP: CLAWSTRIKE's fit, vy -6 .. +9 u/s; her fall from now with g 0.0169 u/f^2;
+# the band + 0.50 .. + 1.98 u, overlap >= ca_ovl), its near edge 0.5 .. 10.5 u ahead after the antic's 1.25 u drift,
+# and control (P + 32) at its flight frame <= ca_ctrl_k (its body still high above her: the air dash at control goes
+# under it to its take-off side, the landing behind its landing - the hammer / the circle in front). The rest is
+# variant A's run (lock, the air dash, no key to her landing). Far jumps only (her centre >= ca_dmin 7 u from its
+# centre: JUMP_BEHIND's aim stance at 5.5 u makes it jump in place). SSBOT_FORUM_TWO_CLAWAIR_SET "scope=any" (the fixed
+# points: every airborne case in front within 12 u), "ca_ovl=0.4,ca_ctrl_k=40".
+CLAWAIR = _on("SSBOT_FORUM_TWO_CLAWAIR")
+CA = {"scope": "reach", "ca_ovl": 0.4, "ca_ctrl_k": 40.0, "ca_kmax": 30.0, "ca_dmin": 7.0}
+for _kv in os.environ.get("SSBOT_FORUM_TWO_CLAWAIR_SET", "").replace(";", ",").split(","):
+    if "=" in _kv:
+        _k, _v = (_x.strip() for _x in _kv.split("=", 1))
+        if _k not in CA:
+            raise KeyError(f"SSBOT_FORUM_TWO_CLAWAIR_SET: unknown key {_k!r}")
+        CA[_k] = _v if _k == "scope" else float(_v)
+CA_G = 0.0169               # her gravity in the air (u / frame^2; the bounce's 4.08 u peak at 22 frames)
+CA_DY0, CA_DYV = -0.261, 0.0788   # claw_strike's throw fit (her box bottom at the throw from yP, vyP in u/s)
+CA_CTRL = 32                # control after the press (p50; 26-34)
+FLIGHT_Y0 = (0.8, 4.1, 6.6, 8.2, 9.0, 8.9, 8.0, 6.3, 3.7, 0.3, 0.0)   # rune_pogo.FLIGHT_Y0 (every 6 frames from the aim)
+FLIGHT_F = 54               # the flight's frames (aim -> landing)
 VARIANT = os.environ.get("SSBOT_FORUM_CLAW_VAR", "A").strip().upper() or "A"
 SCOPE = os.environ.get("SSBOT_FORUM_CLAW_SCOPE", "bomb").strip() or "bomb"
 M_L, M_R, M_J, M_A, M_D, M_DASH = _sp.M_L, _sp.M_R, _sp.M_J, _sp.M_A, _sp.M_D, _sp.M_DASH
@@ -138,6 +165,8 @@ class ClawChase:
 
     def reset(self) -> None:
         self.run: ClawRun | None = None
+        self._ca_tried: dict = {}                       # SP14 CLAWAIR: J iid -> (antic entry, aim frame, run started)
+        self._ca_x0: dict = {}                          # SP14 CLAWAIR: J iid -> (take-off x, landing x)
         self.done: list[ClawRun] = []
         self.n: Counter = Counter()
         self._prev: dict = {}
@@ -231,6 +260,112 @@ class ClawChase:
         self.n["runs"] += 1
         self.n[f"runs_{kind}"] += 1
 
+    def _start_air(self, f: int, s: dict, e: dict) -> None:
+        """SSBOT_FORUM_TWO_CLAWAIR (module note at CLAWAIR): variant A from the air - the press frame from her fall and
+        its flight's body; re-tried every tick of the move until a run starts or its flight frame passes ca_kmax."""
+        c = self.cfg
+        st, tin = _sp.control(e)
+        iid = e.get("iid")
+        cs = _sp.clappers(s)
+        h = s.get("hero") or {}
+        hx = _sp.hero_x(s)
+        cx = float(e["pos"][0])
+        face = _tp.face_of(e)
+        rec = self._ca_tried.get(iid)
+        if rec is None or rec[2]:
+            return                                       # its antic not seen, or a run on this move already
+        f_a, aim = rec[0], rec[1]
+        jc = rec[3]
+        k_now = f + SEND_AHEAD - aim                     # its flight frame of the mask frame
+        if k_now > CA["ca_kmax"] or (hx - cx) * face <= 0:
+            return
+        if abs(hx - cx) < CA["ca_dmin"]:
+            return                                       # a near jump (the person's: far jumps; 1v1's aim stance)
+        if int(h.get("silk") or 0) < 1 or not ((h.get("can") or {}).get("harpoon", True)):
+            self.n["ca_no_silk"] += 1
+            return
+        if len(cs) == 2 and any(_sp.control(o)[0] in _tp.JUMP_ST for o in cs if o is not e):
+            return
+        if len(cs) == 2 and c.ray_gate and any(self._in_way(hx, cx, o) for o in cs if o is not e):
+            self.n["ca_no_way"] += 1
+            return
+        from ssbot.combat import jump_behind as _jb
+        if self._ca_x0.get(iid) is not None:
+            x0, land = self._ca_x0[iid]
+        else:
+            x0, land = cx, _jb.landing(cx, hx, face)
+        rel = (hx - land) * face
+        if CA["scope"] != "any" and not (-1.6 <= rel <= (13.67 if jc else 7.76) + 0.25):
+            return
+        if CA["scope"] == "any" and abs(hx - cx) > 12.0:
+            return
+        hb = h.get("box") or [0, _sp.FLOOR_Y - 1.56, 0, 0]
+        y = float(hb[1]) - (_sp.FLOOR_Y - 1.56)          # her box bottom above the floor
+        vy = float((h.get("vel") or [0.0, 0.0])[1]) / 60.0   # u / frame
+        P = None
+        for d in range(SEND_AHEAD + 1, 40):              # (one frame for the turn key before the press)
+            kP = f + d - aim
+            if kP + CA_CTRL > CA["ca_ctrl_k"]:
+                break
+            yP = y + vy * d - 0.5 * CA_G * d * d
+            vyP = (vy - CA_G * d) * 60.0
+            if yP < 0.3 or not -6.0 <= vyP <= 9.0:
+                continue
+            yb = yP + CA_DY0 + CA_DYV * vyP
+            kr = kP + 10
+            if kr < 0:
+                jb, jx = 0.0, x0
+            else:
+                i = min(kr / 6.0, len(FLIGHT_Y0) - 1.0)
+                i0 = int(i)
+                i1 = min(i0 + 1, len(FLIGHT_Y0) - 1)
+                jb = FLIGHT_Y0[i0] + (FLIGHT_Y0[i1] - FLIGHT_Y0[i0]) * (i - i0)
+                jx = x0 + (land - x0) * min(kr / FLIGHT_F, 1.0)
+            ovl = min(yb + 1.98, jb + 3.8) - max(yb + 0.5, jb)
+            gap = (hx - face * 1.25 - (jx + face * 2.25)) * face    # her x after the antic's drift to its near edge
+            if ovl >= CA["ca_ovl"] and 0.5 <= gap <= 10.5:
+                P = f + d
+                break
+        if P is None:
+            self.n["ca_no_band"] += 1
+            return
+        o = next((x for x in cs if x is not e), None)
+        self._runs += 1
+        r = ClawRun(J=iid, I=None if o is None else o.get("iid"), kind="cast" if jc else "jump", f_a=f_a,
+                    x0=round(x0, 3), face=face, d0=round(abs(hx - cx), 2), y0=round(y, 2),
+                    hp0=int(h.get("health") or 0), silk0=int(h.get("silk") or 0), why="air", hop_hold=0,
+                    press_rel=int(P - aim), after="dash")
+        r.k_hop = f + SEND_AHEAD - f_a
+        r.k_press = P - f_a
+        r.phase = "air"
+        self.run = r
+        self._ca_tried[iid] = (f_a, aim, True, jc)
+        self.n["runs"] += 1
+        self.n["ca_runs"] += 1
+        self.n[f"ca_runs_{r.kind}"] += 1
+
+    def ca_observe(self, f: int, s: dict) -> None:
+        """SP14 CLAWAIR: every tick - each Clapper's antic entry and aim frame (from its state times) and its take-off x
+        and landing (the first flight tick's: the hero's x then stands for hers at its Jump Aim; jump_behind.landing)."""
+        from ssbot.combat import jump_behind as _jb
+        c = self.cfg
+        for e in _sp.clappers(s):
+            iid = e.get("iid")
+            st, tin = _sp.control(e)
+            old = self._ca_tried.get(iid)
+            if st in ("Jump Antic", "Cast Slam Antic"):
+                f_a = f - int(round(tin * 60.0))
+                if old is None or old[0] != f_a:
+                    jc = st == "Cast Slam Antic"
+                    self._ca_tried[iid] = (f_a, f_a + (c.ja_c if jc else c.ja_j), False, jc)
+                    self._ca_x0.pop(iid, None)
+            elif st in ("Jump Aim", "Cast Jump", "Jump") and self._ca_x0.get(iid) is None and old is not None:
+                cx = float(e["pos"][0])
+                self._ca_x0[iid] = (cx, _jb.landing(cx, _sp.hero_x(s), _tp.face_of(e)))
+                self._ca_tried[iid] = (old[0], f - int(round(tin * 60.0)), old[2], old[3])
+            elif st not in ("Air", "Cast Slam Antic 2", "Jump Aim", "Cast Jump", "Jump"):
+                self._ca_x0.pop(iid, None)
+
     # ---- the run ----
 
     def _close(self, f: int, why: str) -> None:
@@ -266,11 +401,13 @@ class ClawChase:
     def step(self, f: int, s: dict, ground: bool, accepting: bool, t: float | None = None, **kw) -> int | None:
         """kw req (SP12b, SSBOT_FORUM_TWO_RT2): when passed, a run starts only on the jump cast TwoPlay handed over
         ((the caster's iid, its antic entry frame) or None: no start)."""
-        if not ENABLED:
+        if not (ENABLED or CLAWAIR):
             return None
         cs = _sp.clappers(s)
         now = {e.get("iid"): _sp.control(e)[0] for e in cs}
         prev, self._prev = self._prev, now
+        if CLAWAIR:
+            self.ca_observe(f, s)
         h = s.get("hero") or {}
         if not (h.get("box") or h.get("pos")):
             return None
@@ -281,10 +418,16 @@ class ClawChase:
                 st = now.get(e.get("iid"))
                 if ext and (req is None or e.get("iid") != req[0]):
                     continue
-                if st in ("Jump Antic", "Cast Slam Antic") and prev.get(e.get("iid")) not in JUMP_ANTIC:
+                if ENABLED and st in ("Jump Antic", "Cast Slam Antic") and prev.get(e.get("iid")) not in JUMP_ANTIC:
                     self._start(f, s, e, ground, accepting)
                     if self.run is not None:
                         break
+            if self.run is None and CLAWAIR and not ext and not ground and accepting:
+                for e in cs:
+                    if now.get(e.get("iid")) in JUMP_ANTIC + ("Jump Aim", "Cast Jump", "Jump", "Air"):
+                        self._start_air(f, s, e)
+                        if self.run is not None:
+                            break
             if self.run is None:
                 return None
         r = self.run
