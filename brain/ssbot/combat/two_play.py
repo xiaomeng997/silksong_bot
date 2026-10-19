@@ -145,7 +145,31 @@ ESC_FALLBACK = ESC_SWITCH and _on("SSBOT_FORUM_TWO_ESC_FALLBACK")
 # L2 holds the caster (its rune hold) to the burst + 0.5 s; far casts in the Clawline band optionally to claw_chase.
 RT2 = _on("SSBOT_FORUM_TWO_RT2")
 RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER") or RT2
-ESC = ESC_CORNER or ESC_SWITCH or RUNETIER
+# SSBOT_FORUM_TWO_FLIPB (task 1v1 SP14, default off; the person 2026-10-18 ~09:40 / 14:35 / 14:40, TWO_CLAPPER_OPEN_ITEMS
+# B: "she is between the two, the wall-side one jump-casts ... flipping over the OTHER Clapper would be better"; variant
+# (c): a small hop + the Clawline at B + a down slash on B, B locked until the caster lands): F's escape jump cast
+# (TWO_WALLSWITCH's run: F's back <= 6.2 u from its wall, she within 8.3 u and nearer F than B) with B on her far side
+# (B not jumping / casting / slamming: F's antic locks it, a hit is cancelled), B's front edge 0.5 - 9 u ahead of her
+# (the ray's 10.5 u less the antic's drift), she on the ground with silk and the harpoon, no small-rune bomb on her way,
+# and (trig nat) the circle's far edge from her x now (landing + 13.67 u) not short of B's front - 0.5 u (no standing
+# room outside it short of B) and room past B for the spot outside the circle's far edge as predicted from her x at the
+# press (her x then ~ B's front - 2 u: F's aim falls in the hook): mode "flipb" instead of "switch". The run: the jump
+# held hop_hold frames, the turn key, the Clawline toward B at press_k (2 frames), no key until control (the hook's
+# contact off to control + 0.2 s), then the key away from F (drift past B) with a down slash on B's head when its body is
+# below her in reach (<= ds_max, the pogo's i-frames), until she lands; then L2 holds B with the stance just outside
+# the circle's far edge (out_m past it, past B's back when B stands there), hits on B allowed from F's landing on (its
+# slam: the playbook), until the circle's burst + 30 frames. SSBOT_FORUM_TWO_FLIPB_SET "trig=force,press_k=12".
+FLIPB = _on("SSBOT_FORUM_TWO_FLIPB")
+FB = {"trig": "nat", "hop_hold": 10.0, "press_k": 12.0, "ds_max": 2.0, "ds_reach": 1.4, "ds_top": 2.6, "out_m": 0.6,
+      "gap_max": 9.0, "end_f": 30.0}
+for _kv in os.environ.get("SSBOT_FORUM_TWO_FLIPB_SET", "").replace(";", ",").split(","):
+    if "=" in _kv:
+        _k, _v = (_x.strip() for _x in _kv.split("=", 1))
+        if _k not in FB:
+            raise KeyError(f"SSBOT_FORUM_TWO_FLIPB_SET: unknown key {_k!r}")
+        FB[_k] = _v if _k == "trig" else float(_v)
+M_CLAW = 1 << 4             # the clawline button (ssbot.ipc.framing.BUTTONS order; key S)
+ESC = ESC_CORNER or ESC_SWITCH or RUNETIER or FLIPB
 # SP9c (forum.md 78): the close-only antic switch, an A/B arm (default off, =1 on)
 ANTICSWITCH = _on("SSBOT_FORUM_TWO_ANTICSWITCH")
 # SP11b (task 1v1 SP11b; bigrune/answer.txt section 1 and 4, the person: "switch target early enough to reduce the
@@ -732,6 +756,8 @@ class EscRun:
     walk: int = 0
     f_end: int | None = None
     end: str = ""
+    fb: dict | None = None     # SP14 TWO_FLIPB: {"f0", "phase", "k_press", "hook", "ds", "k_ctrl", "k_land", "x_land",
+    #                            "out", "end"} (frames - f0)
 
 
 # ---- SP10c: TWO_JUMPHIT - one Clapper jumps (J), she hits the other one (I) ----
@@ -911,6 +937,7 @@ class TwoPlay:
         self._esc_hop_f: int | None = None   # the hop's latched press frame (mask frame j = 0)
         self._esc_hop_plan: tuple | None = None
         self._sw_stance_x: float | None = None  # arm B's stance this tick (F's flag on)
+        self._fb_spot_x: float | None = None    # SP14 TWO_FLIPB: the stance outside the circle
         # SP9c: the antic switch
         self.acfg = _early_cfg() if (EARLY and not ANTICSWITCH) else _asw_cfg() if ASW else AswCfg()
         self.asw: AswRun | None = None
@@ -1302,6 +1329,14 @@ class TwoPlay:
             v["corner_side"] = r.f_land is not None and r.u_now is not None and r.u_now < 0.0
             if r.phase == "idle" and r.exit in (None, "hop"):
                 v["no_hit"] = frozenset({r.iid})          # its Idle: a hit makes it attack her at once, pinned
+        elif r.mode == "flipb":
+            # SP14 TWO_FLIPB: L2 holds B through the run; the stance outside the circle's far edge once known; hits on
+            # B count from F's landing on (B free: its slam is the playbook's)
+            v["hold"] = r.other
+            v["hold_after"] = True
+            if r.f_land is None:
+                v["no_hit"] = frozenset({r.other})
+            v["stance"] = self._fb_spot_x
         else:
             v["hold"] = r.other
             if r.f_land is None:
@@ -1326,6 +1361,7 @@ class TwoPlay:
                 if self.esc is not None:
                     break
         r = self.esc
+        self._fb_spot_x = self._fb_spot(s) if (FLIPB and r is not None and r.mode == "flipb") else None
         sw_on = r is not None and r.mode == "switch" and r.f_land is None
         self._sw_stance_x = self._sw_stance(f, s) if sw_on else None
         if sw_on and self._sw_stance_x is None and clapper_by(s, r.other) is not None:
@@ -1391,10 +1427,18 @@ class TwoPlay:
                         self.esc_n["fallback_corner"] += 1
                 else:
                     mode = "switch"
+        fb = None
+        if FLIPB and kind == "cast" and mode in ("switch", None):
+            fbw = self._fb_gate(s, e, o, hx)
+            self.esc_n[f"fb_{fbw or 'go'}"] += 1
+            if not fbw:
+                mode, why = "flipb", ""
+                fb = {"f0": f, "phase": "hop", "k_press": int(FB["press_k"]), "hook": [], "ds": [], "k_ctrl": None,
+                      "k_land": None, "x_land": None, "out": None, "end": ""}
         self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f,
                           k_a=int(round(tin * 60.0)), x0=round(cx, 3), face=face, back0=round(back, 2),
                           rel0=round((hx - cx) * face, 2), o_st=_sp.control(o)[0], o_d=round(do, 2), mode=mode,
-                          hp0=hp, why=why)
+                          hp0=hp, why=why, fb=fb)
         self.esc_n["runs"] += 1
         self.esc_n[f"mode_{mode}"] += 1
         if why:
@@ -1541,6 +1585,124 @@ class TwoPlay:
             return "rune"
         return ""
 
+    def _fb_gate(self, s: dict, e: dict, o: dict, hx: float) -> str:
+        """SP14 TWO_FLIPB: why F's escape jump cast is not flipped over B ("" when it is)."""
+        from ssbot.combat import jump_behind as _jbm
+        from ssbot.combat import rune_bombs as _rbm
+        h = s.get("hero") or {}
+        cx, ox = float(e["pos"][0]), float(o["pos"][0])
+        face = face_of(e)
+        ost = _sp.control(o)[0]
+        if (hx - cx) * face <= 0.5 or (ox - hx) * face <= 0:
+            return "not between"
+        if ost in JUMP_ST or ost in CAST_ST or ost in SLAM_ST or ost == "Slam Recover":
+            return "b busy"
+        if not _sp.on_ground(s):
+            return "air"
+        if int(h.get("silk") or 0) < 1 or not ((h.get("can") or {}).get("harpoon", True)):
+            return "silk"
+        front = ox - face * (2.25 + HALF_W)                  # B's front edge (it faces her) + her half width
+        gap = (front - hx) * face
+        if not 0.5 <= gap <= FB["gap_max"]:
+            return "b far" if gap > 0 else "b near"
+        lo, hi = min(hx, ox) - 3.0, max(hx, ox) + 3.0
+        if any(lo < bx < hi for _, bx, _, _ in _rbm.bomb_ents(s.get("ents"))):
+            return "bombs"
+        far_now = _jbm.landing(cx, hx, face) + face * 13.67
+        if FB["trig"] != "force" and (front - 0.5 - far_now) * face > 0:
+            return "room short of b"                         # she can stand outside the circle short of B
+        x_aim = front - face * 2.0                           # her x at F's aim: the hook's stop short of B's body
+        far = _jbm.landing(cx, x_aim, face) + face * 13.67
+        spot = far + face * (HALF_W + FB["out_m"])
+        back_b = ox + face * (1.34 + HALF_W + 1.2)
+        spot = max(spot, back_b) if face > 0 else min(spot, back_b)
+        wall = WALL_R if face > 0 else WALL_L
+        if (wall - face * 0.5 - spot) * face < 0:
+            return "no room past b"
+        return ""
+
+    def _fb_spot(self, s: dict) -> float | None:
+        """SP14 TWO_FLIPB: the stance just outside the circle's far edge (its landing as predicted at F's aim / seen),
+        past B's back when B stands there."""
+        r = self.esc
+        o = clapper_by(s, r.other)
+        land = r.x_land if r.x_land is not None else r.land_pred
+        if land is None:
+            return None
+        spot = land + r.face * (13.67 + HALF_W + FB["out_m"])
+        if o is not None:
+            ox = float(o["pos"][0])
+            lo, hi = body_span(o)
+            if lo - HALF_W - 0.3 < spot < hi + HALF_W + 0.3:
+                spot = (hi + HALF_W + 0.5) if r.face > 0 else (lo - HALF_W - 0.5)
+            del ox
+        return min(max(spot, WALL_L + 0.5), WALL_R - 0.5)
+
+    def _flipb_step(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
+        """SP14 TWO_FLIPB's keys (module note at FLIPB): hop, turn, Clawline at B, lock, drift past B with down slashes
+        on its head, until she lands; None after (the planner, L2's stance outside the circle)."""
+        r = self.esc
+        fb = r.fb
+        if fb["phase"] in ("out", "done"):
+            return None
+        o = clapper_by(s, r.other)
+        if o is None:
+            fb.update(phase="done", end="B gone")
+            return None
+        k = f + SEND_AHEAD - fb["f0"]
+        h = s.get("hero") or {}
+        hx = _sp.hero_x(s)
+        ox = float(o["pos"][0])
+        toward = M_R if ox > hx else M_L
+        away = M_R if r.face > 0 else M_L                    # from F toward B's far side
+        for ev in s.get("ev") or ():
+            d = ev.get("d") or {}
+            if ev.get("k") == "hit" and d.get("type_key") == CLAPPER and (d.get("ent") or d.get("iid")) == r.other \
+                    and "Harpoon" in str(d.get("src") or ""):
+                fb["hook"].append(k)
+        if r.hp and r.hp[-1] >= 0 and fb["phase"] in ("hop", "press", "lock") and r.hp[-1] >= k - 3 - SEND_AHEAD:
+            fb.update(phase="out", end="hurt")
+            return None
+        ph = fb["phase"]
+        if ph == "hop":
+            if k < int(FB["hop_hold"]):
+                return M_J
+            fb["phase"] = ph = "press"
+        if ph == "press":
+            kp = fb["k_press"]
+            if k < kp - 1:
+                return 0
+            if k == kp - 1:
+                return toward
+            if k < kp + 2:
+                return M_CLAW | toward
+            fb["phase"] = ph = "lock"
+        if ph == "lock":
+            clip = str((h.get("anim") or {}).get("clip") or "")
+            if (accepting and not clip.startswith("Harpoon") and k > fb["k_press"] + 12) or k > fb["k_press"] + 45:
+                fb.update(phase="after", k_ctrl=k)
+                ph = "after"
+            else:
+                return 0
+        if ph == "after":
+            if ground and k > fb["k_ctrl"] + 3:
+                fb.update(phase="out", k_land=k, x_land=round(hx, 2), end="landed")
+                return None
+            if k > fb["k_ctrl"] + 90:
+                fb.update(phase="out", end="timeout")
+                return None
+            tm = h.get("tm") or {}
+            ready = float(tm.get("atk_cd") or 0.0) * 60.0 - (SEND_AHEAD - 1) <= 0.05
+            y = float((h.get("box") or [0, 0])[1]) - (_sp.FLOOR_Y - 1.56)
+            y0, y1 = body_y(o)
+            top = y1 - (_sp.FLOOR_Y - 1.56)
+            if (len(fb["ds"]) < int(FB["ds_max"]) and ready and abs(ox - hx) <= FB["ds_reach"]
+                    and 0.0 <= y - top <= FB["ds_top"] and (not fb["ds"] or k - fb["ds"][-1] > 6)):
+                fb["ds"].append(k)
+                return _sp.M_D | M_A | away
+            return away
+        return None
+
     def _sw_stance(self, f: int, s: dict) -> float | None:
         """Arm B's stance for L2 while F's flag is on (EscCfg sw_*): short of B before F's Jump Aim, outside F's landing
         hammer / its circle after it, never nearer to B than sw_b_gap."""
@@ -1625,6 +1787,17 @@ class TwoPlay:
             if self.rt.run is None:
                 self._esc_close(f, f"rt {self.rt.done[-1].end}" if self.rt.done else "rt")
             return
+        if r.mode == "flipb":
+            if o is None:
+                self._esc_close(f, "B dead")
+            elif r.f_land is not None and ("burst" in r.rune and f - r.f_land - r.rune["burst"] > FB["end_f"]
+                                           or f - r.f_land > 150):
+                if r.fb is not None and hx is not None:
+                    o_ = clapper_by(s, r.other)
+                    r.fb["out"] = round((hx - (r.x_land + r.face * 13.67)) * r.face, 2) if r.x_land is not None else None
+                    del o_
+                self._esc_close(f, "flipb end")
+            return
         if r.mode == "switch":
             if r.f_land is not None and o is not None:
                 ost = _sp.control(o)[0]
@@ -1666,6 +1839,8 @@ class TwoPlay:
             return m
         if r.mode == "corner":
             return self._corner_step(f, s, ground, accepting)
+        if r.mode == "flipb":
+            return self._flipb_step(f, s, ground, accepting)
         return self._switch_step(f, s, ground, accepting)
 
     def _corner_step(self, f: int, s: dict, ground: bool, accepting: bool) -> int | None:
@@ -1842,7 +2017,10 @@ class TwoPlay:
         return M_R if x > hx else M_L
 
     def rt_critical(self) -> bool:
-        """SP11a: the pogo tier's run holds the keys (the policy steps no other script)."""
+        """SP11a: the pogo tier's run holds the keys (the policy steps no other script). SP14: TWO_FLIPB's keys too."""
+        if (FLIPB and self.esc is not None and self.esc.mode == "flipb" and self.esc.fb is not None
+                and self.esc.fb["phase"] in ("hop", "press", "lock", "after")):
+            return True
         return RUNETIER and self.rt is not None and self.esc is not None and self.esc.mode == "pogo"             and self.rt.critical()
 
     def esc_stats(self) -> dict:
@@ -1859,7 +2037,7 @@ class TwoPlay:
                             "idle": None if r.f_idle is None else r.f_idle - r.f_a, "u_land": r.u_land,
                             "hits_f": r.hits_f, "hits_b": r.hits_b, "hp": r.hp, "exit": r.exit, "hop": r.hop,
                             "press": {k: v for k, v in (r.press or {}).items() if k != "pf"} if r.press else None,
-                            "rune": r.rune, "walk": r.walk, "f_end": r.f_end, "end": r.end} for r in runs]
+                            "rune": r.rune, "walk": r.walk, "f_end": r.f_end, "end": r.end, "fb": r.fb} for r in runs]
         return out
 
     # ---- SP10c: TWO_JUMPHIT (one Clapper jumps: hit the other one, out of the landing before it lands) ----

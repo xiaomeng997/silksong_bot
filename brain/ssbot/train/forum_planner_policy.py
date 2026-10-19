@@ -831,7 +831,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
         # SP11a (SSBOT_FORUM_TWO_RUNETIER): the pogo tier's run holds the keys - no other script is stepped (its keys
         # come from TwoPlay.step below; the supervisor's still win)
-        rt_crit = two_play.RUNETIER and self.two is not None and self.two.rt_critical()
+        rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
         asw_crit = asw_crit or rt_crit
         if self.slam_play is not None and not low_crit and not asw_crit:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)

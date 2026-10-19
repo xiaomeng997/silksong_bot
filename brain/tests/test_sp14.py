@@ -161,3 +161,55 @@ def test_clawair_starts_in_the_air_only(monkeypatch):
     s = cstate(1001, "Jump Antic", 1 / 60.0, hx=J_X - 6.0, y_air=1.0)
     s["hero"]["vel"] = [0.0, 0.0]
     assert c.step(1001, s, False, True) is None and c.run is None
+
+
+# ---- SSBOT_FORUM_TWO_FLIPB (combat.two_play: over B on F's escape jump cast) ----
+
+def fb_state(f, st="Cast Slam Antic", tin=0.05, hx=22.0, b_x=30.0, b_st="Idle", y_air=0.0, clip="Idle"):
+    from tests.test_sp9 import two_state
+    s = two_state(f, st, tin, cx=16.0, flip=True, hx=hx, b_st=b_st, b_x=b_x, ground=y_air <= 0.0)
+    h = s["hero"]
+    h["silk"], h["can"], h["anim"] = 3, {"harpoon": True, "dash": True}, {"clip": clip}
+    if y_air > 0:
+        h["box"] = [h["box"][0], h["box"][1] + y_air, h["box"][2], h["box"][3] + y_air]
+    return s
+
+
+def test_flipb_default_off_and_gate():
+    from ssbot.combat import two_play as tp
+    assert tp.FLIPB is False and tp.FB["trig"] == "nat"
+    two = tp.TwoPlay()
+    cs = lambda s: (tp.clapper_by(s, 7), tp.clapper_by(s, 99))
+    s = fb_state(1000)
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) == ""                     # B at 30 stands inside the circle's reach: flip
+    s = fb_state(1000, b_x=44.0)
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) in ("room short of b", "b far")
+    s = fb_state(1000, b_st="Slam Antic")
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) == "b busy"
+    s = fb_state(1000, y_air=2.0)
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) == "air"
+
+
+def test_flipb_keys():
+    from ssbot.combat import two_play as tp
+    two = tp.TwoPlay()
+    two.esc = tp.EscRun(iid=7, other=99, kind="cast", f_a=1000, k_a=3, x0=16.0, face=1, back0=2.0, rel0=6.0,
+                        o_st="Idle", o_d=8.0, mode="flipb", hp0=9,
+                        fb={"f0": 1000, "phase": "hop", "k_press": 12, "hook": [], "ds": [], "k_ctrl": None,
+                            "k_land": None, "x_land": None, "out": None, "end": ""})
+    out = {}
+    for f in range(1000, 1060):
+        k = f + tp.SEND_AHEAD - 1000
+        lock = 14 <= k < 44
+        y = 0.0 if k < 2 else 3.0
+        s = fb_state(f, hx=22.0 if k < 30 else 27.5, y_air=y, clip="Harpoon Dash" if lock else "Airborne")
+        out[k] = two._flipb_step(f, s, y <= 0.0, not lock)
+    assert all(out[k] == tp.M_J for k in range(2, 10))
+    assert out[11] == tp.M_R and out[12] == out[13] == tp.M_CLAW | tp.M_R
+    assert all(out[k] == 0 for k in range(14, 44))
+    assert two.esc.fb["phase"] == "after" and out[50] in (tp.M_R, tp._sp.M_D | tp.M_A | tp.M_R)
+    assert two.rt_critical() is False or tp.FLIPB                # (critical only with the switch on)
