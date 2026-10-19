@@ -161,7 +161,12 @@ RUNETIER = _on("SSBOT_FORUM_TWO_RUNETIER") or RT2
 # slam: the playbook), until the circle's burst + 30 frames. SSBOT_FORUM_TWO_FLIPB_SET "trig=force,press_k=12".
 FLIPB = _on("SSBOT_FORUM_TWO_FLIPB")
 FB = {"trig": "nat", "hop_hold": 10.0, "press_k": 12.0, "ds_max": 2.0, "ds_reach": 1.4, "ds_top": 2.6, "out_m": 0.6,
-      "gap_max": 9.0, "end_f": 30.0}
+      "gap_max": 9.0, "end_f": 30.0, "k_late": 35.0, "air_yb": 3.0}
+# fpfb1 (a94e6b2, w13 fb / fbf, 24 episodes): no run - 8 escape jump casts reached the gate, 4 with her in the air at
+# F's antic, 4 with B finishing a move -> the gate is re-checked every tick of F's antic to k_late (35: control by ~k 80,
+# B locked to 97); in the air (no hop) the press when her throw's band meets B's standing body (her box bottom at the
+# throw <= air_yb above the floor, vy -6 .. +9 u/s: CLAWSTRIKE's fit); B in Slam Recover / After Scuttle counts as free
+FB_OK_B = ("Slam Recover", "After Scuttle")
 for _kv in os.environ.get("SSBOT_FORUM_TWO_FLIPB_SET", "").replace(";", ",").split(","):
     if "=" in _kv:
         _k, _v = (_x.strip() for _x in _kv.split("=", 1))
@@ -1361,6 +1366,8 @@ class TwoPlay:
                 if self.esc is not None:
                     break
         r = self.esc
+        if FLIPB and r is not None:
+            self._fb_retry(f, s, hx)
         self._fb_spot_x = self._fb_spot(s) if (FLIPB and r is not None and r.mode == "flipb") else None
         sw_on = r is not None and r.mode == "switch" and r.f_land is None
         self._sw_stance_x = self._sw_stance(f, s) if sw_on else None
@@ -1433,8 +1440,10 @@ class TwoPlay:
             self.esc_n[f"fb_{fbw or 'go'}"] += 1
             if not fbw:
                 mode, why = "flipb", ""
-                fb = {"f0": f, "phase": "hop", "k_press": int(FB["press_k"]), "hook": [], "ds": [], "k_ctrl": None,
-                      "k_land": None, "x_land": None, "out": None, "end": ""}
+                air = not _sp.on_ground(s)
+                fb = {"f0": f, "phase": "press" if air else "hop",
+                      "k_press": (SEND_AHEAD + 1) if air else int(FB["press_k"]), "hook": [], "ds": [],
+                      "k_ctrl": None, "k_land": None, "x_land": None, "out": None, "end": "", "late": 0, "air": air}
         self.esc = EscRun(iid=e.get("iid"), other=o.get("iid"), kind=kind, f_a=f,
                           k_a=int(round(tin * 60.0)), x0=round(cx, 3), face=face, back0=round(back, 2),
                           rel0=round((hx - cx) * face, 2), o_st=_sp.control(o)[0], o_d=round(do, 2), mode=mode,
@@ -1595,10 +1604,12 @@ class TwoPlay:
         ost = _sp.control(o)[0]
         if (hx - cx) * face <= 0.5 or (ox - hx) * face <= 0:
             return "not between"
-        if ost in JUMP_ST or ost in CAST_ST or ost in SLAM_ST or ost == "Slam Recover":
+        if (ost in JUMP_ST or ost in CAST_ST or ost in SLAM_ST or ost in ("Evade Scuttle",)) and ost not in FB_OK_B:
             return "b busy"
         if not _sp.on_ground(s):
-            return "air"
+            yb = self._fb_throw_y(s)
+            if yb is None or yb > FB["air_yb"]:
+                return "air"
         if int(h.get("silk") or 0) < 1 or not ((h.get("can") or {}).get("harpoon", True)):
             return "silk"
         front = ox - face * (2.25 + HALF_W)                  # B's front edge (it faces her) + her half width
@@ -1620,6 +1631,41 @@ class TwoPlay:
         if (wall - face * 0.5 - spot) * face < 0:
             return "no room past b"
         return ""
+
+    @staticmethod
+    def _fb_throw_y(s: dict) -> float | None:
+        """SP14 TWO_FLIPB: her box bottom above the floor at a Clawline thrown now (CLAWSTRIKE's fit; None: vy out of
+        the fit's range)."""
+        h = s.get("hero") or {}
+        b = h.get("box")
+        if not b:
+            return None
+        y = float(b[1]) - (_sp.FLOOR_Y - 1.56)
+        vy = float((h.get("vel") or [0.0, 0.0])[1])
+        if not -6.0 <= vy <= 9.0:
+            return None
+        return y - 0.261 + 0.0788 * vy
+
+    def _fb_retry(self, f: int, s: dict, hx: float | None) -> None:
+        """SP14 TWO_FLIPB (fpfb1): F's escape jump cast not flipped at its first STATE - the gate again every tick of its
+        antic to k_late; a pass turns the run into "flipb" (in the air: no hop)."""
+        r = self.esc
+        if hx is None or r.fb is not None or r.kind != "cast" or r.mode not in ("switch", None) or r.phase != "antic":
+            return
+        if f - r.f_a + r.k_a > FB["k_late"]:
+            return
+        e, o = clapper_by(s, r.iid), clapper_by(s, r.other)
+        if e is None or o is None:
+            return
+        why = self._fb_gate(s, e, o, hx)
+        if why:
+            return
+        air = not _sp.on_ground(s)
+        r.mode, r.why = "flipb", ""
+        r.fb = {"f0": f, "phase": "press" if air else "hop", "k_press": (SEND_AHEAD + 1) if air else int(FB["press_k"]),
+                "hook": [], "ds": [], "k_ctrl": None, "k_land": None, "x_land": None, "out": None, "end": "",
+                "late": f - r.f_a + r.k_a, "air": air}
+        self.esc_n["fb_retry_go"] += 1
 
     def _fb_spot(self, s: dict) -> float | None:
         """SP14 TWO_FLIPB: the stance just outside the circle's far edge (its landing as predicted at F's aim / seen),

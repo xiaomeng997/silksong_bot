@@ -189,9 +189,16 @@ def test_flipb_default_off_and_gate():
     s = fb_state(1000, b_st="Slam Antic")
     e, o = cs(s)
     assert two._fb_gate(s, e, o, 22.0) == "b busy"
-    s = fb_state(1000, y_air=2.0)
+    s = fb_state(1000, y_air=5.0)
     e, o = cs(s)
-    assert two._fb_gate(s, e, o, 22.0) == "air"
+    assert two._fb_gate(s, e, o, 22.0) == "air"                  # too high for the ray at B's standing body
+    s = fb_state(1000, y_air=2.0)
+    s["hero"]["vel"] = [0.0, 0.0]
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) == ""                     # (fpfb1) low enough in the air: no hop
+    s = fb_state(1000, b_st="Slam Recover")
+    e, o = cs(s)
+    assert two._fb_gate(s, e, o, 22.0) == ""                     # B finishing its slam counts as free
 
 
 def test_flipb_keys():
