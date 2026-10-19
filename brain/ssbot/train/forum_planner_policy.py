@@ -470,6 +470,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.two.reset()
         if self.air_show is not None:
             self.air_show.reset()
+            self._air_k = 0
         self._wake_f = None
         self._play_tick = None
         self._wave_v = -1
@@ -785,7 +786,16 @@ class ForumPlannerPolicy(PlannerPolicy):
                           np.int64)
         t1 = time.perf_counter()
         S0 = self._start_state(ws, raw)
-        res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
+        # SP-AIR1 (SSBOT_FORUM_AIRSHOW): while the show owns the keys its planner and this one alternate (the tick's
+        # cost): on the show's ticks the last plan result stands for the supervisor
+        air_tick = False
+        if self.air_show is not None and not self.air_show.done and self.planner_last is not None:
+            self._air_k += 1
+            air_tick = self._air_k % 2 == 1
+        if air_tick:
+            res = self.planner_last
+        else:
+            res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
         if two_play.RUNEEXIT and self.two is not None and getattr(prefs, "rune_exit", None):
             self.two.rx_note(f, self.planner.last_info.get("rx"))      # SP12a
@@ -850,7 +860,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 abk = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             am = self.air_show.step(f, s, ws.hero.contact.v == "GROUND",
                                     bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                    air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), bombs=abk)
+                                    air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), bombs=abk,
+                                    plan=air_tick or self.air_show.plan is None)
             if am is not None:
                 mask = play = int(am)
                 own = "air"

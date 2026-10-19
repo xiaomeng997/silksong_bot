@@ -55,6 +55,7 @@ CAST_ST = ("Spell Antic", "Cast 1", "Cast 2")
 JUMP_PRE = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
 JUMP_AIR = ("Jump Aim", "Cast Jump", "Jump", "Air", "Charged?", "Slam")
 EVADE_F = 21                            # Evade Scuttle 0.35 s at 15 u/s straight back
+INTRO = (None, "Init", "Rest", "Drop Antic", "Notify", "Drop In", "Enter Land", "Roar")   # no take-off in these
 JUMP_AIM_K = {"Jump Antic": 30, "Cast Slam Antic": 55, "Cast Slam Antic 2": 40}   # the aim's frame in the state
 # the cast's body top above the floor (push_cast / rune_lowhop facts): Spell Antic 0-3 3.19, 4-7 4.36, 8 on 4.78,
 # Cast 1 4.78, Cast 2 0-13 4.78, 14 on 3.19; the Idle body 3.92
@@ -75,12 +76,18 @@ class AsCfg:
     ham_m: float = 0.15         # ... off its hammer polygons
     bomb_m: float = 0.15
     contact_in: float = 0.3     # the slash meets its body box this far inside its x edges
+    pre_f: int = 1              # its body this many frames before a contact does not count (air_chain PRE_PROTECT_F 2)
+    strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
+    dash_a: tuple = (0, 3)      # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
+    dash_gap: int = 16
     two_f: int = 1              # 1: the contact needs the slash on the box two frames running (push_cast fp1)
     p_max: int = 44             # presses searched to F0 + this
     p_step: int = 1             # ... every this many frames (3x past p_fine)
     p_fine: int = 12
     stance_u: float = 5.6       # the ground stance in front of it (outside the walk's 7 +- 1.5: it comes to her)
     away_u: float = 9.0         # a slam in its antic with no safe up plan: walk to this from its centre
+    lead_f: int = 16            # the drift target: its body this many frames ahead
+    slam_back_u: float = 0.6    # ... in its slam antic: this far behind its antic centre
     side_u: float = 0.6         # the drift target this far toward the nearer wall from its centre (it evades away
     #                             from her: from its wall side it backs into the middle)
     research: int = 1           # plan every this many ticks
@@ -308,7 +315,7 @@ class ShowPlanner(_rp.Planner):
         N, T1 = ro.flags.shape
         idx = np.arange(T1)[None, :]
         inv = (ro.flags & kin.F_INVULN) != 0
-        pre = (contacts[:, None] >= 0) & (idx >= contacts[:, None] - 2) & (idx < contacts[:, None])
+        pre = (contacts[:, None] >= 0) & (idx >= contacts[:, None] - ac.pre_f) & (idx < contacts[:, None])
         bad = np.zeros((N, T1), bool)
         body = self._fit(self.tl.body, T1)
         for v in range(body.shape[0]):
@@ -443,6 +450,11 @@ class ShowPlanner(_rp.Planner):
                 for hj in holds:
                     out.append(_rp.Plan("drop", k, F0, F0 + d, press=P, hold_j=hj, why="drop" + ("h" if hj else "")))
             P += ac.p_step if P - p0 < ac.p_fine else 3 * ac.p_step
+        if getattr(c, "dash_ok", False) and dk:
+            for a in ac.dash_a:
+                for P in range(max(p0, F0 + a + ac.dash_gap), F0 + ac.p_max + 1, 2):
+                    for d in (a + 4, a + 14, a + 30):
+                        out.append(_rp.Plan("drop", dk, F0, F0 + d, press=P, dash=(F0 + a, 2), why=f"dash{a}"))
         return out
 
     def keeps(self, x0: float, tx: float) -> list:
@@ -464,7 +476,7 @@ class ShowPlanner(_rp.Planner):
         return out
 
 
-def pick(plans: list, prefer: str = "drop") -> _rp.Plan | None:
+def pick(plans: list, prefer: str = "drop", strike: tuple | None = None) -> _rp.Plan | None:
     """The safe drop with the earliest contact (then the shortest drift), else the safe keep (a fall first, then the
     latest umbrella, the shortest drift), else the plan whose first danger comes latest."""
     if not plans:
@@ -472,7 +484,9 @@ def pick(plans: list, prefer: str = "drop") -> _rp.Plan | None:
     safe = [p for p in plans if p.bad is None]
     dr = [p for p in safe if p.press is not None and p.contact is not None]
     if dr:
-        return min(dr, key=lambda p: (p.contact, p.d1 - p.d0, p.press))
+        def risky(p):
+            return strike is not None and strike[0] <= p.contact <= strike[1]
+        return min(dr, key=lambda p: (risky(p), p.dash is not None, p.contact, p.d1 - p.d0, p.press))
     kp = [p for p in safe if p.press is None]
     if kp:
         return min(kp, key=lambda p: (p.umb is not None, -(p.umb or 0), p.d1 - p.d0))
@@ -597,7 +611,9 @@ class AirShow:
 
     # ---- the step ----
 
-    def step(self, f: int, s: dict, ground: bool, accepting: bool, sim, bombs=None) -> int | None:
+    def step(self, f: int, s: dict, ground: bool, accepting: bool, sim, bombs=None, plan: bool = True) -> int | None:
+        """The mask for frame f + 2 (None: not the show's - two Clappers / none). plan=False: no new plan this tick
+        (the policy alternates this planner with its own: the tick's cost), the current plan's keys."""
         cl = _sp.clappers(s)
         e = cl[0] if len(cl) == 1 else None
         if len(cl) > 1:
@@ -619,7 +635,8 @@ class AirShow:
         if e is None:
             if self.chain is not None and self.chain.f_end is None:
                 self.chain.f_end, self.chain.end = f, "kill" if self.kill_f is not None else "gone"
-            self.done = True
+            if self.kill_f is not None:
+                self.done = True               # the kill (before its spawn: not yet)
             return None
         Fm = f + SEND_AHEAD
         c = self.chain
@@ -644,7 +661,7 @@ class AirShow:
         st, t_in = _sp.control(e)
         if self._committed(Fm):
             return self._mask_plan(Fm)
-        if self.plan is not None and Fm < self._next:
+        if self.plan is not None and (Fm < self._next or not plan):
             return self._mask_plan(Fm)
         t0 = time.perf_counter()
         ctx = self._ctx(f, s, e, ground, st)
@@ -652,8 +669,10 @@ class AirShow:
         hx = _sp.hero_x(s)
         tl = its_timeline(e, st, t_in, sim.f - sim.fo, T1, self.cfg, hx)
         pl = ShowPlanner(sim, ctx, self.cfg, tl)
-        tx = self._tx(e, st)
-        if ground and self._pend is None:
+        tx = self._tx(e, st, tl, sim.f - sim.fo)
+        if ground and self._pend is None and st in INTRO:
+            q = self._ground_move(Fm, hx, e, st)          # the intro (its Roar locks her): no take-off yet
+        elif ground and self._pend is None:
             ups = pl.evaluate(pl.ups(hx, tx, 0))
             safe = [p for p in ups if p.bad is None and p.contact is not None]
             q = min(safe, key=lambda p: (p.contact, p.jump[0], p.d1 - p.d0)) if safe else None
@@ -665,7 +684,10 @@ class AirShow:
             if prev is not None:
                 plans.insert(0, prev)
             plans = pl.evaluate(plans)
-            q = pick(plans)
+            sk = None
+            if tl.kind == "slam" and tl.k0 is not None:
+                sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
+            q = pick(plans, strike=sk)
         self.ms.append((time.perf_counter() - t0) * 1e3)
         self.n_plans += 1
         if q is not None:
@@ -737,8 +759,30 @@ class AirShow:
         self.chain = Chain(f)
         self.chains.append(self.chain)
 
-    def _tx(self, e: dict, st: str | None) -> float:
+    def _tx(self, e: dict, st: str | None, tl: Tl | None = None, base_i: int = 0) -> float:
+        """The drift target: its body's centre lead_f frames ahead (the evade's slide, a walk, the lunge), side_u
+        toward its nearer wall."""
         cx = float(e["pos"][0])
+        fc = _rp.face_of(e)
+        if tl is not None and tl.kind == "slam" and tl.k0 is not None:
+            # the slam: over its back half before the hammer (the lunge carries Slam Collider 1's back edge forward
+            # past its antic centre), behind its lunging centre in Slam 1 / 2, over it in the recover
+            k = tl.k0
+            if not _TLS:
+                _TLS.extend(_slam_tls(4))
+            x0 = cx - fc * _TLS[0].disp[min(max(k, 0), len(_TLS[0].disp) - 1)]
+            if k < 54:
+                tx = x0 - fc * self.cfg.slam_back_u
+            elif k < 63:
+                tx = cx - fc * 1.0
+            else:
+                tx = cx
+            return min(max(tx, WALL_L + 0.8), WALL_R - 0.8)
+        if tl is not None:
+            i = min(base_i + self.cfg.lead_f, tl.tgt.shape[0] - 1)
+            b = tl.body[0, i]
+            if np.isfinite(b[0]):
+                cx = 0.5 * float(b[0] + b[2])
         side = -1.0 if (cx - WALL_L) < (WALL_R - cx) else 1.0
         tx = cx + side * self.cfg.side_u
         return min(max(tx, WALL_L + 0.8), WALL_R - 0.8)
@@ -769,6 +813,7 @@ class AirShow:
         ctx = _rp.Ctx(F0=f + SEND_AHEAD, b_box=_rp.body_box(e), b_x=bx, b_ok=True, tx=bx,
                       face=1 if fc is None or float(fc) >= 0 else -1, ground=ground, atk_ready_f=rdy,
                       gliding=gliding, j_held=j_held, bomb_m=self.cfg.bomb_m, rising=rising)
+        ctx.dash_ok = (not ground) and bool((h.get("can") or {}).get("dash")) and not clip.startswith("Dash")
         if self._bombs is not None and len(self._bombs):
             ctx.bombs = np.asarray(self._bombs, float)
         j = self.jump
