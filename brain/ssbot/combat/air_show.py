@@ -115,6 +115,13 @@ class AsCfg:
     p_fine: int = 12
     stance_u: float = 5.6       # the ground stance in front of it (outside the walk's 7 +- 1.5: it comes to her)
     away_u: float = 9.0         # a slam in its antic with no safe up plan: walk to this from its centre
+    face: str = "free"          # (the lead's NOTE 3, the person) "wall": every contact on a free (Idle / Walk / After
+    #                             Scuttle) Clapper with her centre >= face_m on its nearer wall's side of its centre while
+    #                             it is within face_wall_u of that wall: it turns to face the wall, its evade goes to the
+    #                             middle (never an escape jump), its slam swings toward the wall
+    face_m: float = 0.4
+    face_wall_u: float = 12.0
+    face_tx_u: float = 1.0      # ... and the drift target that far on the wall side
     lead_f: int = 16            # the drift target: its body this many frames ahead
     slam_back_u: float = 1.0    # ... in its slam antic: this far behind its antic centre (b11: 0.6 -> 1.0, 2 vs 6 / 8)
     side_u: float = 0.6         # the drift target this far toward the nearer wall from its centre (it evades away
@@ -142,7 +149,7 @@ def cfg_from_env() -> AsCfg:
         cur = getattr(c, k)
         if isinstance(cur, tuple):
             raise KeyError(f"SSBOT_FORUM_AIRSHOW_SET: {k!r} is a tuple")
-        setattr(c, k, type(cur)(float(v)))
+        setattr(c, k, v if isinstance(cur, str) else type(cur)(float(v)))
     return c
 
 
@@ -323,6 +330,12 @@ class ShowPlanner(_rp.Planner):
             h2 = np.zeros_like(hit)
             h2[:, :-1] = hit[:, :-1] & hit[:, 1:]
             hit = h2
+        side = getattr(self, "face_side", 0)
+        if side and self.tl.kind == "idle":
+            # (NOTE 3) a hit on it now starts its move at once facing her: her centre on its wall side at the contact
+            with np.errstate(invalid="ignore"):
+                cxb = 0.5 * (tg[:, 0] + tg[:, 2]) + getattr(self, "face_off", 0.0)   # its position (the box is lopsided)
+                hit &= (ro.centre[..., 0] - cxb[None, :]) * side >= self.ac.face_m
         gnd = ((ro.flags & kin.F_GROUND) != 0) | (ro.box[..., 1] <= FLOOR + self.ac.floor_eps)
         for n, p in enumerate(plans):
             if p.press is None:
@@ -652,6 +665,8 @@ class AirShow:
         self.n_claw = 0
         self.evades: list = []
         self._ev = None
+        self.moves: list = []
+        self.escape_jumps = 0
         self._claw_k = 0
 
     # ---- bookkeeping ----
@@ -666,9 +681,23 @@ class AirShow:
                 if self._ev is not None and self._ev.get("next") is None and st not in (
                         "Evade Scuttle", "After Scuttle", None):
                     self._ev["next"] = st
+                if st in ("Slam Antic", "Spell Antic", "Evade Scuttle", "Jump Antic", "Cast Slam Antic", "Walk"):
+                    cx_ = float(e["pos"][0])
+                    dl, dr = cx_ - WALL_L, WALL_R - cx_
+                    wside = -1 if dl < dr else 1
+                    hxs = _sp.hero_x(s)
+                    if len(self.moves) < 120:
+                        self.moves.append({"f": f, "st": st, "prev": self._st_last, "wall_u": round(min(dl, dr), 2),
+                                           "her_wall_side": bool((hxs - cx_) * wside > 0), "face": _rp.face_of(e),
+                                           "faces_wall": _rp.face_of(e) == wside, "dx": round(hxs - cx_, 2)})
+                if st in ("Jump Antic", "Cast Slam Antic") and self._st_last == "Evade Scuttle":
+                    self.escape_jumps += 1
                 if st == "Evade Scuttle":
                     hb = h.get("box") or [0, FLOOR, 0, FLOOR]
-                    self._ev = {"f": f, "dx": round(_sp.hero_x(s) - float(e["pos"][0]), 2),
+                    cxe = float(e["pos"][0])
+                    self._ev = {"f": f, "dx": round(_sp.hero_x(s) - cxe, 2),
+                                "to_mid": bool(-_rp.face_of(e) * (1 if cxe < 0.5 * (WALL_L + WALL_R) else -1) > 0),
+                                "wall_u": round(min(cxe - WALL_L, WALL_R - cxe), 2),
                                 "yb": round(float(hb[1]) - FLOOR, 2), "air": not ground, "next": None,
                                 "claw": None, "dash": None, "hit": None, "end": None, "silk": h.get("silk")}
                     self.evades.append(self._ev)
@@ -716,7 +745,9 @@ class AirShow:
         st, t = _sp.control(e) if e is not None else (None, 0.0)
         h = s.get("hero") or {}
         p = self.plan
-        return {"f": f, "why": why, "st": st, "k": int(round(t * 60)), "yb": round(float((h.get("box") or [0, FLOOR])[1])
+        return {"f": f, "why": why, "st": st, "k": int(round(t * 60)), "face": None if e is None else _rp.face_of(e),
+                "cx": None if e is None else round(float(e["pos"][0]), 2),
+                "yb": round(float((h.get("box") or [0, FLOOR])[1])
                                                                                - FLOOR, 2),
                 "dx": None if e is None else round(_sp.hero_x(s) - float(e["pos"][0]), 2),
                 "plan": None if p is None else [p.kind, p.why, p.press, p.contact, p.bad, p.umb],
@@ -795,6 +826,9 @@ class AirShow:
         self._hx = hx
         tl = its_timeline(e, st, t_in, sim.f - sim.fo, T1, self.cfg, hx)
         pl = ShowPlanner(sim, ctx, self.cfg, tl)
+        pl.face_side = self._face_side(e)
+        bb_ = _rp.body_box(e)
+        pl.face_off = float(e["pos"][0]) - 0.5 * (bb_[0] + bb_[2])
         tx = self._tx(e, st, tl, sim.f - sim.fo)
         if ground and self._pend is None and st in INTRO:
             q = self._ground_move(Fm, hx, e, st)          # the intro (its Roar locks her): no take-off yet
@@ -1040,6 +1074,17 @@ class AirShow:
         self.chain = Chain(f)
         self.chains.append(self.chain)
 
+    def _face_side(self, e: dict) -> int:
+        """(NOTE 3) face=wall: the side (+1 right / -1 left) she must hit it from - its nearer wall's - while it is
+        within face_wall_u of that wall; 0: free."""
+        if self.cfg.face != "wall":
+            return 0
+        cx = float(e["pos"][0])
+        dl, dr = cx - WALL_L, WALL_R - cx
+        if min(dl, dr) >= self.cfg.face_wall_u:
+            return 0
+        return -1 if dl < dr else 1
+
     def _tx(self, e: dict, st: str | None, tl: Tl | None = None, base_i: int = 0) -> float:
         """The drift target: its body's centre lead_f frames ahead (the evade's slide, a walk, the lunge), side_u
         toward its nearer wall."""
@@ -1073,7 +1118,10 @@ class AirShow:
             if np.isfinite(b[0]):
                 cx = 0.5 * float(b[0] + b[2])
         side = -1.0 if (cx - WALL_L) < (WALL_R - cx) else 1.0
-        tx = cx + side * self.cfg.side_u
+        su = self.cfg.side_u
+        if self.cfg.face == "wall" and min(cx - WALL_L, WALL_R - cx) < self.cfg.face_wall_u:
+            su = max(su, self.cfg.face_tx_u)
+        tx = cx + side * su
         return min(max(tx, WALL_L + 0.8), WALL_R - 0.8)
 
     def _ground_move(self, Fm: int, hx: float, e: dict, st: str | None) -> _rp.Plan:
@@ -1161,7 +1209,7 @@ class AirShow:
                 "air_frames": self.air_frames, "hits_pre": self.hits_pre, "n_chains": len(self.chains),
                 "success": bool(ok), "hits_by_kind": kinds, "chains": ch,
                 "ms": [round(float(np.percentile(self.ms, q)), 1) for q in (50, 90, 99)] if self.ms else None,
-                "n_claw": self.n_claw, "evades": self.evades[:40],
+                "n_claw": self.n_claw, "evades": self.evades[:40], "moves": self.moves, "escape_jumps": self.escape_jumps,
                 "claw_ms": [round(float(np.percentile(self.claw_ms, q)), 1) for q in (50, 99)] if self.claw_ms else None,
                 "n_plans": self.n_plans, "kinds": self.kinds, "why_none": self.why_none,
                 "plans": self.plans_log[-300:]}

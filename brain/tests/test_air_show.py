@@ -116,3 +116,24 @@ def test_jump_flight_is_a_danger(world):
     plans = pl.evaluate(pl.keeps(30.5, 33.0))
     stay = [p for p in plans if p.dirk == 0]
     assert stay and all(p.bad is not None for p in stay)
+
+
+def test_face_wall_keeps_her_on_its_wall_side(world, monkeypatch):
+    # NOTE 3: near the left wall (4 u) a contact on an Idle Clapper only with her centre >= 0.4 u left of its centre
+    monkeypatch.setenv("SSBOT_FORUM_AIRSHOW_SET", "face=wall")
+    a = asw.AirShow()
+    assert a.cfg.face == "wall" and a._face_side(clapper(18.0)) == -1 and a._face_side(clapper(31.0)) == 0
+    e = clapper(18.0, "Idle", 0.1, face=1)
+    pl, _ = planner(world, e, "Idle", 18.6, FLOOR + 5.2 + 1.553, vy=-2.0)
+    free = [p for p in pl.evaluate(pl.drops(18.6, 18.0)) if p.contact is not None]
+    pl2, _ = planner(world, e, "Idle", 18.6, FLOOR + 5.2 + 1.553, vy=-2.0)
+    pl2.ac = a.cfg
+    pl2.face_side = -1
+    bb = rp.body_box(e)
+    pl2.face_off = 18.0 - 0.5 * (bb[0] + bb[2])
+    side = [p for p in pl2.evaluate(pl2.drops(18.6, 17.0)) if p.contact is not None]
+    assert len(free) > len(side)
+    for p in side:
+        i = pl2._i(p.contact)
+        n = [q.key() for q in pl2.last_sub].index(p.key())
+        assert float(pl2.last_ro.centre[n, i, 0]) - 18.0 <= -0.4 + 1e-6
