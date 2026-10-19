@@ -11513,7 +11513,17 @@ SHOW.txt, SHOW_READY). Sandbox `air1_go.ps1` -> `sp4_block.ps1` -> `air1_ab.ps1`
   default since the next commit): 6 / 8 airborne hitless kills in block b11 (cut by the lead's SHOW_PAUSE at 13:33),
   kill time from the take-off p50 16.6 s; before it bb8e3b0 / as6b 8 / 24 with the last 8 at 5 / 8. Commands:
   `C:\ssbot\sandbox\demo_arm.ps1 -Rev 3c59a82 -Arm asb -Inst 0 -Episodes 3 -Scale 1.0` (and `-Scale 0.5`); checkouts
-  frozen and warmed. 220 live episodes in all, 44 airborne hitless kills (p50 16.1 s, 13.5 - 20.1; ~22 hits each).
+  frozen and warmed. 460 live episodes to b16, 112 airborne hitless kills (p50 16.4 s, 13.5 - 20.6; ~22 hits each); the
+  asb parameters (the default of 2cba0a4 / 6d0bbec) pooled over b11 - b15: 36 / 96 = 38 %. After the show (13:33, the
+  person: 2 / 6 full successes) the lead's NOTE 3 asked for face=wall (keep it facing its nearer wall so its evades go to
+  the middle): built (SSBOT_FORUM_AIRSHOW_SET=face=wall), it faced the wall at 73 / 159 move starts near a wall (control
+  42 / 152) but lost the A/B 5 vs 9 / 24 (its slams then swing at her: Slam 1 hits 6); also tried and lost: the umbrella
+  last (7 vs 9 / 24), 1.4 u behind in the slam antic (7 vs 6 / 24), no low side contacts (2 vs 6 / 16), no air dash as
+  the fallback (2 vs 6 / 16).
+  b16 (the last block, 15:15 - 15:34): airshow 6 / 16, asx (the air dash only toward a target >= 3 u) 7 / 16 (within
+  the noise), asz (body margin 0.25 u) 2 / 16; pooled asb parameters b11 - b16: 42 / 112 = 38 %. Full suite at 6d0bbec
+  (worktree): 2,065 passed, 2 failed (the known test_import_firewall and test_three_layer bell test), 1 skipped, 1
+  xfailed (`air1ullsuite_6d0bbec.log`).
 - **Facts** (forum.md 90.1): the bounce off its head +3.0 - 3.7 u, apex ~20 frames after the contact, back at its head
   ~40, the floor ~50; a pogo restores the air dash (240 / 274); +1 silk per hit; a hit on its Idle picks the move the
   same frame (Dmg Attack), After Scuttle reads Slam Range (+-8.05 u, top 7.8 u above the floor) at once - at a bounce's
@@ -11545,7 +11555,9 @@ no live block after it.
 
 ### Open items
 
-1. Confirm asb (slam_back_u 1.0) on >= 24 episodes after the show (only 8 so far).
+1. The rate is ~38 % (target >= 50 %): she drops below its head beside it (the umbrella's Deflate, then an air dash into
+   its body or a fall onto it) and the hammers (Slam 1 / 2) lead; keep her above its head (open the umbrella only 1 u
+   above its top, drift out when below it) rather than forbidding the low contacts / the dash fallback (both lost).
 2. The air dash is in the last 6 frames before 13 of 24 HP losses (as6b): use it only for the evade chase with a clear
    6 u path, or re-judge after the dash with the Air Sprint's real path; the dash lock and "keeps before dashes" lost.
 3. The jump's rising body (4 / 24): measured flight x instead of the linear one; move out in front 3 u on a jump in
