@@ -71,6 +71,7 @@ CA_DY0, CA_DYV = -0.261, 0.0788   # claw_strike's throw fit (her box bottom at t
 CA_CTRL = 32                # control after the press (p50; 26-34)
 FLIGHT_Y0 = (0.8, 4.1, 6.6, 8.2, 9.0, 8.9, 8.0, 6.3, 3.7, 0.3, 0.0)   # rune_pogo.FLIGHT_Y0 (every 6 frames from the aim)
 FLIGHT_F = 54               # the flight's frames (aim -> landing)
+CA_BOMB_U = 3.0             # fp1: no start with a small-rune bomb this near her way (u)
 VARIANT = os.environ.get("SSBOT_FORUM_CLAW_VAR", "A").strip().upper() or "A"
 SCOPE = os.environ.get("SSBOT_FORUM_CLAW_SCOPE", "bomb").strip() or "bomb"
 M_L, M_R, M_J, M_A, M_D, M_DASH = _sp.M_L, _sp.M_R, _sp.M_J, _sp.M_A, _sp.M_D, _sp.M_DASH
@@ -288,6 +289,17 @@ class ClawChase:
             return
         if len(cs) == 2 and c.ray_gate and any(self._in_way(hx, cx, o) for o in cs if o is not e):
             self.n["ca_no_way"] += 1
+            return
+        # fp1 (cbd3332, w13 jta, 32 episodes: 16 runs, 12 without HP lost; all 4 losses small-rune bombs - the run hangs
+        # her in the air without i-frames over the other one's rows): none while the other one casts or a bomb (lit or
+        # to light) lies within CA_BOMB_U of her x or between her and its take-off x (the dash back's way)
+        if any(_sp.control(o)[0] in _tp.CAST_ST for o in cs if o is not e):
+            self.n["ca_no_cast"] += 1
+            return
+        from ssbot.combat import rune_bombs as _rb
+        lo_b, hi_b = min(hx, cx) - CA_BOMB_U, max(hx, cx) + CA_BOMB_U
+        if any(lo_b < bx < hi_b for _, bx, _, _ in _rb.bomb_ents(s.get("ents"))):
+            self.n["ca_no_bomb"] += 1
             return
         from ssbot.combat import jump_behind as _jb
         if self._ca_x0.get(iid) is not None:
