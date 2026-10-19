@@ -142,6 +142,29 @@ TWO_DUR0_S = {CC_SLAM: 1.2583, CC_CAST: 1.225, CC_JUMP: 1.544, CC_JUMP_CAST: 1.9
 # SSBOT_FORUM_TWO_JUMPER (SP7, default off; with TWO_FOCUS): a Clapper in a jump move (or its rune circle still to burst)
 # is the target meanwhile (GauntletTactics._two_focus)
 TWO_JUMPER = os.environ.get("SSBOT_FORUM_TWO_JUMPER", "0").strip() == "1"
+# SSBOT_FORUM_TWO_JUMPTRAP (task 1v1 SP14, default off; with TWO_FOCUS): SP13b's top audit cause - the planner in the air
+# with the dash ready, no safe row, L2 on the other one - was the OTHER Clapper's jump landing hammer / jump cast circle
+# 10 + 7 of 18 times: at its Jump Aim it lands 5 u short of her (the landing: jump_behind.landing), its Slam Collider 2
+# reaches 7.76 u in front of the landing (its circle 13.67 u), and the floor on her far side ended at the focus's body
+# or the wall (the trap closes 38-45 frames before the landing, past the planner's horizon; SP12a found her trapped at
+# the first forced frame). Here, from the first STATE of a non-target Clapper's jump antic (Jump Antic / Cast Slam
+# Antic / Cast Slam Antic 2) with her in front of it, when its landing from her x now leaves less than gap_u between
+# its reach (+ her half width) and the first obstacle on her far side (the other one's body box, the wall) and a spot
+# behind its landing exists (jump_behind.behind_spot), the jumper is the goal's target until its move ends (a jump
+# cast: until its circle's hold, self.rune) - the 1v1's way round (JUMP_BEHIND: the aim stance in its antic, which
+# shortens its jump, then under it to behind its landing; the person's 10-11 plan note "go under it to its other side,
+# it becomes the focus"). A jump cast with its back within jc_back_u of its wall is the escape cast (TWO_WALLSWITCH,
+# the person's FLIPB): not taken. The other one in a jump move too: not taken. SSBOT_FORUM_TWO_JUMPTRAP_SET="gap_u=2,
+# force=1": force = every such jump move at her (the fixed points), the gap test off.
+TWO_JUMPTRAP = os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP", "0").strip() == "1"
+JT_ANTIC = ("Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2")
+JT = {"gap_u": 2.0, "jc_back_u": 8.0, "force": 0.0, "reach_j": 7.76, "reach_c": 13.67, "pad": 0.25}
+for _kv in os.environ.get("SSBOT_FORUM_TWO_JUMPTRAP_SET", "").replace(";", ",").split(","):
+    if "=" in _kv:
+        _k, _v = (_x.strip() for _x in _kv.split("=", 1))
+        if _k not in JT:
+            raise KeyError(f"SSBOT_FORUM_TWO_JUMPTRAP_SET: unknown key {_k!r}")
+        JT[_k] = float(_v)
 GLIDE_SPIKE = "GLIDE_SPIKE"
 NAIL_SRC = ("Slash", "UpSlash", "DownSlash New", "AltSlash", "WallSlash", "DashSlash")
 
@@ -330,6 +353,9 @@ class GauntletTactics:
         self._rl_sw: tuple | None = None                  # SP11b TWO_RUNLOCK: (new target, old focus) of the switch
         self.two_jh: dict | None = None                   # SP10c: the policy's TWO_JUMPHIT run view (two_play.jh_view)
         self._jh_last: dict | None = None                 # SP10c: the view on the last tick
+        self._jt: dict | None = None                      # SP14 TWO_JUMPTRAP: the held jumper's record
+        self._jt_done: dict[int, float] = {}              # SP14: Clapper iid -> t_commit of the jump move it fired on
+        self.jt_runs: list[dict] = []                     # SP14: the episode's records (stats)
 
     @property
     def xs(self):
@@ -342,6 +368,7 @@ class GauntletTactics:
         self._whips = frozenset()
         self._strike = {}
         self.jb_land = {}
+        self._jt, self._jt_done, self.jt_runs = None, {}, []
         self._two_fam, self._two_idle = {}, {}
         self._sp9_fam = {}                                # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self.two_jh, self._jh_last = None, None
@@ -900,6 +927,18 @@ class GauntletTactics:
                     self._sw_why = "two jumphit" if keep is not None else self._sw_why
                 st["picks"] = st.get("picks", 0) + 1
                 return self._goal(ws, c, RUSH, t, 1.0, why=f"two: jumphit {jh.get('phase')}; room {room[c.s.iid]:.1f}")
+        jt = self._jt if TWO_JUMPTRAP else None
+        if jt is not None:
+            # SSBOT_FORUM_TWO_JUMPTRAP (SP14): the other one's jump move traps her short of its far-side obstacle -
+            # the jumper is the target (JUMP_BEHIND's way round) until its move / its circle's hold ends
+            c = next((c for c in cands if c.s.iid == jt["iid"]), None)
+            if c is not None:
+                if keep is None or keep.s.iid != c.s.iid:
+                    st["jumptrap"] = st.get("jumptrap", 0) + 1
+                    self._sw_why = "two jumptrap" if keep is not None else self._sw_why
+                st["picks"] = st.get("picks", 0) + 1
+                return self._goal(ws, c, RUSH, t, 1.0,
+                                  why=f"two: jumptrap {jt['kind']} gap {jt['gap']:.1f}; room {room[c.s.iid]:.1f}")
         if TWO_JUMPER:
             # SSBOT_FORUM_TWO_JUMPER (t1: an other one's jump cast landed 5.27 u in front of her, its rune circle over
             # the focus's front, the focus slammed: 8 of 41 slams not struck, 6 rune hits): a Clapper in a jump move or
@@ -932,6 +971,68 @@ class GauntletTactics:
                 f, why = keep, "two: keep" + ("" if room[o.s.iid] <= room[keep.s.iid] + TWO_HYST_U else f" ({how})")
         st["picks"] = st.get("picks", 0) + 1
         return self._goal(ws, f, RUSH, t, 1.0, why=f"{why}; room {room[f.s.iid]:.1f}")
+
+    def _jt_update(self, ws, fc, hx: float, t: float) -> int | None:
+        """SSBOT_FORUM_TWO_JUMPTRAP (SP14; module note at TWO_JUMPTRAP): the held jumper's iid, or None. Releases the
+        hold when its move is over (a jump cast: past its circle's hold); else, with exactly two Clappers in play and a
+        goal, fires on the first tick of a non-target Clapper's jump antic (re-checked every tick of the antic with her
+        x then) whose landing traps her (or every one, force=1)."""
+        subs = [x for x in (getattr(fc, "subjects", ()) or ())
+                if x.type_key == CLAPPER and x.alive and x.in_play and x.pos is not None]
+        jt = self._jt
+        if jt is not None:
+            s = next((x for x in subs if x.iid == jt["iid"]), None)
+            if s is not None and (s.family in (CC_JUMP, CC_JUMP_CAST)
+                                  or (s.iid in self.rune and t <= self.rune[s.iid][3])):
+                return jt["iid"]
+            jt["t_end"] = round(t, 3)
+            self._jt = None
+        if len(subs) != 2 or self.goal is None:
+            return None
+        st = self.stats.setdefault("sp7", {})
+        xa, xb = self.pb.arena_x
+        for s in subs:
+            if (s.iid == self.goal.target or s.family not in (CC_JUMP, CC_JUMP_CAST)
+                    or getattr(s, "state", None) not in JT_ANTIC):
+                continue
+            tc = self.t_commit.get(s.iid)
+            if self._jt_done.get(s.iid) == tc:
+                continue                                  # this move fired already (and its hold ended)
+            o = next(x for x in subs if x.iid != s.iid)
+            if o.family in (CC_JUMP, CC_JUMP_CAST):
+                continue
+            x = float(s.pos[0])
+            e = self._ent(ws, s.iid)
+            fa = clapper_facing(e) if e is not None else None
+            side = 1.0 if hx >= x else -1.0
+            front = float(fa) if fa is not None else side
+            if side != front:
+                continue                                  # behind it already: JUMP_BEHIND's own antic rule
+            jc = s.family == CC_JUMP_CAST
+            back = (x - xa) if front > 0 else (xb - x)
+            if jc and back < JT["jc_back_u"]:
+                continue                                  # the escape cast (TWO_WALLSWITCH / the FLIPB item)
+            land = jump_behind.landing(x, hx, front)
+            if jump_behind.behind_spot(land, front) is None:
+                continue
+            reach = land + front * ((JT["reach_c"] if jc else JT["reach_j"]) + JT["pad"])
+            obs = (xb if front > 0 else xa) - front * JT["pad"]
+            ox = float(o.pos[0])
+            if (ox - hx) * front > 0:
+                ocx, half = self._body(fc, o)
+                ob = ocx - front * (half + JT["pad"])
+                obs = min(obs, ob) if front > 0 else max(obs, ob)
+            gap = (obs - reach) * front
+            if not (JT["force"] or gap < JT["gap_u"]):
+                continue
+            self._jt_done[s.iid] = tc
+            self._jt = {"iid": s.iid, "kind": "jc" if jc else "jump", "t0": round(t, 3), "x": round(x, 2),
+                        "hx": round(hx, 2), "ox": round(ox, 2), "land": round(land, 2), "gap": round(gap, 2),
+                        "other": o.iid, "state": s.state, "t_end": None}
+            self.jt_runs.append(self._jt)
+            st["jt_fire_" + self._jt["kind"]] = st.get("jt_fire_" + self._jt["kind"], 0) + 1
+            return s.iid
+        return None
 
     def _esc_hold(self, ws, cands: list[Cand], esc: dict, keep, room: dict, t: float, st: dict) -> Goal | None:
         """SP9b (combat.two_play): the escape run's target - the focus (arm A, TWO_CORNER) or the other one (arm B,
@@ -1073,6 +1174,10 @@ class GauntletTactics:
         pm = self.two_pm if two_play.PMANY else None
         if pm is not None and status == "ok" and self.goal is not None and pm.get("hold") != self.goal.target:
             status = "event"                              # SP11b: TWO_PUSHMID holds F: pick now
+        if TWO_JUMPTRAP and TWO_FOCUS:
+            jt = self._jt_update(ws, fc, hx, t)
+            if jt is not None and status == "ok" and self.goal is not None and jt != self.goal.target:
+                status = "event"                          # SP14: the trapping jumper is the target from now
         if "whip" in self.ta:
             whips = frozenset(x.iid for x in (getattr(fc, "subjects", ()) or ())
                               if x.type_key == CHORISTOR and x.family == CH_WHIP and x.alive and x.in_play)
