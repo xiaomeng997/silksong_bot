@@ -11287,3 +11287,184 @@ Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
 5. The over plan's drift model: the real drift after the pogo bounce falls 0.5 - 0.8 u short of the hero model's and the
    landing guard corrects it in most overs (75 / 88); the bounce off a Clapper's head lifts her ~3.7 u (DownSpikeBounce
    ~20 frames of rise) - calibrate kinematics' EV_POGO drift / rise on the 141 fp3 overs.
+
+## Task 1v1 - stage SP14: the top audit cause (the planner in the air with the dash ready, forced, L2 on the other one) traced - no planner bug, the other one's jump sets the trap at its Jump Aim; SSBOT_FORUM_TWO_JUMPTRAP (the trapping jumper becomes the target: the 1v1's way under it to behind its landing) passed its fixed point (fp3 29 / 30) and the A/B (HP-hitless clears 10 vs 5 / 64) -> the default with v2; SSBOT_FORUM_TWO_CLAWAIR (variant A's Clawline from the air, the person's airborne answer) built and fixed-pointed, off (branch worktree-wf_f1846551-5f9-1, 2026-10-18; forum.md §89)
+
+The task (SP14): the open items of SP13b aimed at its top audit cause. STEP 1: trace the 18 "planner in the air with the
+dash ready, forced, L2 on the other" losses (the other one's jump landing 10, its big rune 7) and why the planner rated
+itself forced; STEP 2: build in the person's order (TWO_FLIPB (c), the jump-landing answer the traces support - the
+planner fix, FACEJUMP, TWO_CLAWUNDER, the pass-under for far jumps -, LANDPOGO on locked blockers), each behind its own
+switch; STEP 3: fixed points >= 90 %, one w13 A/B (64 per arm), the cause audit, the w7 check. The lead's NOTE
+(sp14\NOTE_FROM_LEAD.txt 19:00 / 19:10 / 19:20 / 20:30): report every TWO_CLAPPER_OPEN_ITEMS.txt item touched; the
+person's mid-air intercept over the top for far jumps (compare over / under / the pass); count the umbrella-close slam
+cases (item E); add the AIRBORNE branch (the Clawline at the jumper when she is in the air at its Jump Aim / in its
+flight). J = the jumper (not L2's target), F = L2's target, u centre to centre. Forum_W_w13 / Forum_W_w7, instances 0 / 1,
+1x. Data `C:\ssbot\data\m2_play\sp14` (`fp1.json`, `fp2_jt.json`, `fp2_jtc.json`, `fp3_jt.json` the JUMPTRAP runs per
+round; `ab\` the A/B (two, ab_stats, fp_log, audit, rank, hp); `w7chk_two.*`; `fpca1.json`, `fpca2_*.json` the CLAWAIR runs;
+`replay_*` identity; `scripts`: `fp14.py`, `fpca.py`, `ab14.ps1`, `replay_ident_sp14.ps1`, `ident_cmp.sh`,
+`ident_cmp_promo.sh`). Commits b4c2196 (JUMPTRAP), 35be527 / eb3b153 (its fixed-point fixes), f86fb69 (CLAWAIR),
+cbd3332 (the promotion), f2eb0b5 (CLAWAIR's fp1 fix), then the docs. No human practice ran; the trading bot was not
+touched.
+
+### Result
+
+- **Why forced with the dash ready (STEP 1; the 18 traced through the decision log: n_safe / alts per tick, both
+  Clappers' states and x)**: every one ends a forced segment that began 23 - 45 frames before the hit (p50 ~40) with
+  no safe row among 516 - 558 (all air dashes included): the dash rows end in the focus's body / the wall on her far side
+  or in the landing hammer / the jumper's falling body on the near side. No planner bug (SP12a's per-row breakdown of 12
+  such segments said the same; the jump's landing formula errs 0.03 u p50). The trap is set at J's Jump Aim: it lands
+  5 u short of her (take-off + 0.916 x clamp(her x - 5 face - x, 12)), Slam Collider 2 reaches 7.76 u in front of the
+  landing (the jump cast's circle 13.67 u), and the floor beyond her ends at the focus's body or the wall (< 2 u left);
+  the planner's ~36-frame horizon sees it only when the landing is fixed. Classes of the 18: far jump / jump cast at her
+  with the focus or the wall at her back 9 (landing 7, big rune 2) -> the pass under it; the wall-side caster's escape
+  jump cast with her between 4 (FLIPB (c)); a jump in place at her face 2 (FACEJUMP / CLAWUNDER); both jumping 2;
+  misattributed 1. Offline the same gate on the SP13b recordings: the default kept HP from the antic to the landing + 1 s
+  in 20 / 44 (b2) and 22 / 40 (rnjb) of them.
+- **SSBOT_FORUM_TWO_JUMPTRAP fixed points** (w13, natural trigger; gate: no HP lost from J's antic to its landing + 1 s):
+
+| round | code / arm, episodes | runs | clean | failures | change |
+|---|---|---|---|---|---|
+| fp1 | b4c2196 / jt, 32 | 37 | 29 (78.4 %; 3 hit in the antic's first 5 frames) | switched while the other one slammed (its hammer at +5 / +7) 2; jumped on the way under 3; the other one at the spot behind 1; the other one jumped too 1 | -> 35be527: o_att, o_back_u (also from the aim stance's landing), ground_first in the antic / flight |
+| fp2 | 35be527 / jt, 32 | 31 | 27 (87.1 %) | the other one between her and J on a jump cast (she jumped over it into the hammer) 3; a wall-pushed landing without a spot 1 | -> eb3b153: o_way, aim_spot |
+| fp2 | 35be527 / jtc (+ CLAW_CHASE A, scope any), 32 | 38 | 33 (86.8 %; the take-off Clawline 3 / 3) | as above | as above |
+| **fp3** | **eb3b153 / jt, 32** | **30** | **29 (96.7 %)** | a wall jumper's landing (gap 1.8) | **passes** |
+
+  The trigger acts on the first STATE of J's antic in 94 of 136 runs (the rest: she walked into the trap later in the
+  antic); ~0.94 runs per episode; in the A/B's jt arm 45 natural runs, 42 clean (93.3 %).
+- **Promoted: SSBOT_FORUM_TWO_JUMPTRAP follows SSBOT_FORUM_V2 when unset (cbd3332; =0 off, arm rnsp14_0 = the SP13b
+  default).** The A/B (eb3b153, w13, 64 per arm = 2 rounds x 32, block design, the same seeds 9700000.. / 9800000..;
+  `ab\ab_stats.txt`, `ab\two.txt`):
+
+| | rnjb (old default = SP13b's b2) | jt (TWO_JUMPTRAP) |
+|---|---|---|
+| **HP-hitless clears** | **5 / 64 (7.8 %)** | **10 / 64 (15.6 %)** |
+| both Clappers killed | 35 | 42 |
+| landed / s | 1.292 | 1.358 |
+| HP-loss hits / min | 4.46 | 3.62 |
+| HP by source: landing / big rune / body / hammer / small rune | 32 / 34 / 27 / 29 / 10 | **20** / 29 / **19** / 26 / 19 |
+| HP by move: jump / escape jump cast / jump cast / slam / small runes | 15 / 32 / 17 / 49 / 11 | **7** / **21** / 18 / 37 / 22 |
+
+  Bootstrap 90 % (jt - rnjb, episodes resampled): hitless +0.078 (-0.016 .. +0.172), both killed +7 (-2 .. +16), landed / s
+  +0.066 (+0.000 .. +0.130), HP hits / min -0.84 (-1.70 .. -0.01); round 1 4 vs 1, round 2 6 vs 4. The person's rule
+  (the best on hitless clears, not worse on the others) -> promoted. **Both arms ran well below SP13b's level** (b2 then
+  18 / 64 hitless, 46 both killed, with the same seeds and byte-identical decisions; the loop / plan timings the same):
+  the block design keeps the comparison fair, but the absolute numbers of this evening are low (open item 5).
+- **w7 check** (eb3b153, rnjb vs jt, 16 per arm, `w7chk_two.*`): 16 / 16 clears both, HP-hitless 13 vs 13, kill p50 17.5
+  vs 17.1 s, landed / s 1.355 vs 1.333 (-0.057 .. +0.012): no effect with one Clapper (the w7 replays are identical).
+- **SSBOT_FORUM_TWO_CLAWAIR** (the lead's ADDENDUM 3, the person's first choice when she is in the air) failed its
+  fixed point and stays off: fpca1 (cbd3332, arm jta = jt + CLAWAIR, natural, 32 w13 episodes) 16 runs, 12 hooked, 12
+  without HP lost from the run's start to J's landing + 1 s (75 %; the 4 losses all small-rune bombs while the run held
+  her in the air without i-frames) -> f2eb0b5 (no start while the other one casts or a bomb lies on her way); fpca2
+  (f2eb0b5, jta 32 + jtaf = scope any 32 episodes) 6 runs (3 + 3), all hooked, 3 clean (natural 0 / 3: a jump cast's
+  circle at +34 / +39 twice, control after a jump cast's landing once; scope any 3 / 3) - pooled 15 / 22 (68 %), and the
+  bomb gate leaves ~0.1 natural runs per episode. JUMPTRAP inside these arms: 23 / 24, 22 / 23, 29 / 32.
+- **The comparison the person asked for (over / under / the pass, 19:10)**: the pass under (JUMPTRAP) fp3 29 / 30 and
+  42 / 45 in the A/B; the take-off hook under (CLAW_CHASE A inside jtc) 3 / 3 (too few); the hook from the air (CLAWAIR)
+  above; **the bounce over the top of a descending jumper was not built** - with control 26 - 34 frames after the
+  press and no i-frames in the Clawline, a hook on its descending body gives control after its landing with her in
+  front inside the landing hammer's frames, unless she throws with her box bottom >= ~4.3 u above the floor at its
+  flight frame <= 42 (offline on SP13b's recordings: such a throw existed in 25 / 62 airborne-at-aim jumps and 15 / 45
+  jump casts of the other one, but nearly all of them hook its body on the RISE - which is what CLAWAIR does).
+
+### 1. Code (`combat/tactics/gauntlet.py` TWO_JUMPTRAP / JT / jumptrap_on / _jt_update / _two_focus / the ground_first branch, `combat/claw_chase.py` CLAWAIR / CA / _start_air / ca_observe, `train/forum_planner_policy.py`)
+
+- `SSBOT_FORUM_TWO_JUMPTRAP` (default with v2 since cbd3332; `SSBOT_FORUM_TWO_JUMPTRAP_SET` -> `gauntlet.JT`: gap_u 2,
+  jc_back_u 8, force, reach_j 7.76, reach_c 13.67, pad 0.25, o_att, o_back_u 1, ground, o_way, aim_spot): GauntletTactics
+  `_jt_update` every tick (with two Clappers and a goal): fires on a non-target Clapper's Jump Antic / Cast Slam Antic (2)
+  (re-checked every antic tick with her x then) when she is in front of it, the other one is not in a jump move, not
+  slamming / casting (o_att), not on her way under it (o_way: between her and it or within its half width + 1 u of its
+  front), the spot behind its landing (jump_behind.behind_spot; from her x now and from the aim stance's landing) exists
+  (aim_spot) and keeps the other one's half width + 1 u off (o_back_u), a jump cast's back is >= 8 u from its wall (the
+  escape cast is TWO_WALLSWITCH's / FLIPB's), and the landing from her x now leaves < gap_u between its reach (+ her
+  half width) and the first obstacle on her far side (the other one's body box, the wall) - or always with force=1; an
+  "event" makes L2 pick at once; `_two_focus` returns the jumper (RUSH, "two: jumptrap <kind> gap <u>") until its move
+  ends (a jump cast: until gauntlet's rune hold, self.rune); JUMP_BEHIND then plays its aim stance and the way under it
+  to BACK_U behind its landing; in the antic / the flight her no-jump rows rank first among the safe ones
+  (GoalPrefs.ground_first). Stats `l2.sp7` jt_fire_jump / jt_fire_jc / jt_no_*, `l2.jt_ground`; the decision log's
+  goal_why.
+- `SSBOT_FORUM_TWO_CLAWAIR` (default off; `SSBOT_FORUM_TWO_CLAWAIR_SET` -> `claw_chase.CA`: scope reach / any, ca_ovl
+  0.4, ca_ctrl_k 40, ca_kmax 30, ca_dmin 7): the policy builds ClawChase for it (CLAW_CHASE's own ground start stays off
+  unless SSBOT_FORUM_CLAW_CHASE=1); `ca_observe` keeps each Clapper's antic entry / aim frame / take-off x / landing;
+  `_start_air` (she in the air and accepting input, J in its antic or flight frame <= 30, >= 7 u, she in front inside
+  its landing's reach (scope reach), silk, the other one not jumping / casting / in the way, no small-rune bomb within
+  3 u of her way (f2eb0b5)): the earliest press P (from mask frame + 3, the turn key first) whose ray check (P + 10)
+  meets J's flight box (rune_pogo.FLIGHT_Y0, x linear to the landing) in her band (CLAWSTRIKE's throw fit from her fall,
+  overlap >= 0.4 u, its near edge 0.5 - 10.5 u ahead) with control (P + 32) by its flight frame 40; then variant A's run
+  (lock, the air dash to its take-off side, no key to her landing). Stats `claw_chase` ca_* and claw_runs (why "air").
+- Tests `tests/test_sp14.py` (10: the defaults and the v2 default, the trap firing / holding / releasing, room on the
+  far side, force, the escape cast / the other one jumping / the target / one Clapper, the jump cast's circle hold, the
+  goal, fp1's and fp2's exclusions, CLAWAIR's default and the air-only start). The suite's known order dependency
+  (test_sp10c::test_gauntlet_targets_the_other after test_sp9's reloads, open item Q) shows up when those files run
+  together; each passes alone.
+
+### 2. Identity (`sp14\scripts\replay_ident_sp14.ps1`, `ident_cmp.sh`, `ident_cmp_promo.sh`)
+
+b4c2196 (worktree), eb3b153 (its frozen checkout) and f86fb69 (worktree) with every SP14 switch unset: byte-identical
+to e5dc189's default (`sp13b\replay_e5dc189\ticks_new_*`) on the w13 144051 i1 e0 (1,541 ticks) / 102908 i0 e0 (1,659)
+and the w7 192006 i0 e1 / 084036 i1 e0 (2,073 / 1,778). JUMPTRAP on: w7 identical (one Clapper), w13 102908 from tick 275
+(144051 from 450 under b4c2196, identical under eb3b153's exclusions). CLAWAIR on (+ JUMPTRAP): w7 192006 from tick 938
+(it acts with one Clapper too: far jumps only, >= 7 u). cbd3332 (the promotion): `SSBOT_FORUM_TWO_JUMPTRAP=0`
+byte-identical to e5dc189's default on all four; unset byte-identical to eb3b153's jt on all four; 0 tracebacks.
+
+### 3. Live rounds (`sp14_go.ps1` -> `sp4_block.ps1` -> `sp14_ab.ps1`; manifests `1v1sp14_{fp1,fp2,fp3,ab1,ab2,w7chk,fpca1,fpca2}_manifest.txt`)
+
+fp1 18:54-19:10, fp2 19:14-19:44, fp3 19:46-20:03, the A/B round 1 20:04-20:31, round 2 20:31-21:00, the w7 check
+21:00-21:12, CLAWAIR fpca1 21:12-21:28, fpca2 21:29-21:59. Reaction: JUMPTRAP on the first STATE of the antic (L2's
+"event" pick the same tick); CLAWAIR from the first airborne tick of the antic / flight that has a plan.
+
+### 4. The cause audit (`ssbot.tools.sp10_audit` + rank_hitless on the A/B; `ab\audit.*`, `ab\rank.txt`, traces `ab\hp`)
+
+rnjb (old default) 132 HP losses (4.46 / min; L2 / planner 71, airborne / landing 35, script conflict 26); jt (new
+default) 113 (3.62 / min; 66 / 24 / 21, host stall 2). Ranked by the hitless clears they cost (a clear with k causes
+shares 1 / k) - **jt** (32 clears with HP lost): the umbrella 4.50 (alone 3, 9 losses), **the planner in the air with
+the dash ready, forced, L2 on the other 4.50 (alone 3, 13 losses: big runes 11, a jump landing 1 - rnjb had 20 there:
+big runes 12, jump landings 6, jump-cast landings 3)**, the playbook still on the other one's slam (the hand-off) 3.50
+(alone 3, 6), "slam not struck: no landing in time" 3.00 (9), the planner moved into it (forced, L2 on the other) 2.50,
+the low hop on the other while this one hit 1.50, the low hop moved her into it 1.33; **rnjb** (30): the planner in the
+air with the dash ready (L2 on the other) 5.00 (alone 4, 20), the umbrella 3.50 (14), hurt recoil 2.50, a strike without
+a bounce 2.00, the planner moved into it (L2 on it) 2.00, the hand-off 1.50. Clears lost to one class alone: jt L2 /
+planner 12, airborne 6, script 6; rnjb 11 / 6 / 2. **The big runes left at the top are mostly escape casts** (the
+caster's back < 6 u from its wall, her between - FLIPB (c), item B; JUMPTRAP leaves them by design). Missed planned
+actions (rnjb / jt): close slams struck 257 / 357 (72 %) / 269 / 366 (73 %; not struck: rnjb the gate "other rune
+circle" 26, hurt 16, no landing in time 13; jt no landing in time 18, the rune-circle gate 17, hurt 12, "other Cast 2"
+10); F's Idle entries hit within 30 frames 505 / 719 (70 %) / 522 / 719 (73 %); chases ended far 32 / 296 / 36 / 317;
+presses dropped 186 / 2,729 / 163 / 2,926. Small-rune HP losses 10 -> 19 (the low hop taking the other one's rows
+after a JUMPTRAP switch: to check). One Clapper left: 6 vs 8 HP losses. Switches across situations: JUMPTRAP needs two
+Clappers (w7 identical, the live w7 check equal); CLAWAIR acts with one Clapper too (far jumps only; not A/B'd).
+The umbrella-close slam count (ADDENDUM 2, item E): "slam not struck: no landing in time" 13 (rnjb) / 18 (jt) per 64
+episodes is the upper bound; the hero-model count was not done.
+
+### 5. Arms (`C:\ssbot\sandbox\1v1_arms.txt`, backup .bak_sp14)
+
+`jt` = rnjb + SSBOT_FORUM_TWO_JUMPTRAP=1; `jtf` = jt + force=1; `jtc` = jt + CLAW_CHASE A scope any; `jta` = jt +
+SSBOT_FORUM_TWO_CLAWAIR=1; `jtaf` = jta + scope=any; `rnsp14_0` = rnjb + SSBOT_FORUM_TWO_JUMPTRAP=0 (the SP13b
+default). rnjb follows the new default (JUMPTRAP on).
+
+### 6. Machine state
+
+Instances 0 and 1 (started 2026-10-16 20:36) ran every SP14 block, frozen at time scale 1e-4 after each by sp4_block;
+DEMO_SOON paused and restored per block; boost_workers on per block (`boost_workers.stop` present again). No game
+process touched. Frozen checkouts `C:\ssbot\live_1v1_{b4c2196, 35be527, eb3b153, cbd3332, f2eb0b5}`. Sandbox
+`sp14_go.ps1`, `sp14_ab.ps1`. Untracked brain/tests/test_sg8_review.py and knowledge/.../aim_zones_*.json left
+untouched.
+
+### Open items (TWO_CLAPPER_OPEN_ITEMS.txt)
+
+1. **A** (the planner in the air, forced, vs the other one's jump landing / big rune): traced (no planner bug, the trap
+   at the Jump Aim) - DONE for the far jumps (JUMPTRAP promoted: the jump-landing share of the cause 9 -> 1); the big
+   runes left are the escape casts (B).
+2. **B** TWO_FLIPB (c): NOT STARTED. It is now the top cause's main part (jt: 11 big-rune losses in "the planner in the
+   air ... L2 on the other", most of them escape casts with her between); 4 of SP13b's 18. Design notes: the hook on B's
+   standing body with CLAWSTRIKE's timeline (control 26 - 34 frames after the press) needs B locked until the caster's
+   landing (jump cast lock 97 frames), the down slash on B's head, then past B to just outside the circle's far edge.
+3. **C** the other one's jump slams: the pass under far jumps - DONE (JUMPTRAP); the take-off hook under (CLAW_CHASE A)
+   3 / 3 in jtc, not A/B'd; the airborne hook (CLAWAIR) - PARTLY (built, fixed point 15 / 22 = 68 %, off: its jump-cast runs ended inside the circle; the bomb gate makes it rare); the bounce over the top of a descending jumper -
+   NOT BUILT (physically late: see Result); FACEJUMP / TWO_CLAWUNDER (in place at her face / in the corner) - NOT
+   STARTED (2 of SP13b's 18).
+4. **D** LANDPOGO on locked blockers: NOT STARTED.
+5. **New**: this evening's level is low in both arms (hitless 5 / 64 for the old default vs 18 / 64 in SP13b's A/B with
+   the same seeds and identical decisions): find the cause (the game instances' state since the 18:30 one-Clapper demo,
+   the person watching the windows, the time of day) before the next A/B, or pool across evenings.
+6. **New**: small-rune HP losses 10 -> 19 under JUMPTRAP - check the low hop / BOMBS2 after a JUMPTRAP switch.
+7. **E** (umbrella close + down slash on a slam): the upper bound is 13 - 18 slams per 64 episodes ("no landing in
+   time"); the hero-model count is open.
