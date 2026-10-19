@@ -77,6 +77,7 @@ class AsCfg:
     bomb_m: float = 0.15
     contact_in: float = 0.3     # the slash meets its body box this far inside its x edges
     pre_f: int = 1              # its body this many frames before a contact does not count (air_chain PRE_PROTECT_F 2)
+    rel_gap: int = 7            # (b2) in the umbrella's float: the press this many frames after the jump key's release
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
     depth_m: float = 0.15       # ... and the slash this far into its box (its top lowered for the contact test)
@@ -464,11 +465,20 @@ class ShowPlanner(_rp.Planner):
         p0 = max(F0, c.atk_ready_f)
         out = []
         P = p0
-        holds = (True, False) if (c.rising and not c.gliding) else (c.gliding,)
+        holds = (True, False) if (c.rising and not c.gliding) else (False,)
         while P <= F0 + ac.p_max:
             for sgn, d in ac.air_drift:
                 k = 0 if sgn == 0 else (dk if sgn > 0 else (ok if dk else 0))
                 if d and not k:
+                    continue
+                if c.gliding:
+                    # (b2) an attack in the float only closes it (Umbrella Deflate ~6 frames, no slash): the jump key
+                    # held to P - rel_gap, released, the press rel_gap frames later
+                    r = P - ac.rel_gap
+                    if r < F0:
+                        continue
+                    out.append(_rp.Plan("drop", k, F0, F0 + d, jump=(F0, r - F0) if r > F0 else None, press=P,
+                                        why=f"dropu{r - F0}"))
                     continue
                 for hj in holds:
                     out.append(_rp.Plan("drop", k, F0, F0 + d, press=P, hold_j=hj, why="drop" + ("h" if hj else "")))
@@ -663,8 +673,11 @@ class AirShow:
             if self.chain is not None and self.chain.f_end is None:
                 self.chain.f_end, self.chain.end = f, "kill" if self.kill_f is not None else "gone"
             if self.kill_f is not None:
-                self.done = True               # the kill (before its spawn: not yet)
-            return None
+                self.done = True               # the kill
+                return None
+            # (b3) before its spawn: no keys (the default play walked her under its drop point: Drop In hit her)
+            self.why_none["spawn"] = self.why_none.get("spawn", 0) + 1
+            return 0
         Fm = f + SEND_AHEAD
         c = self.chain
         if c is not None and c.f_end is None and (ground or wall):
@@ -707,7 +720,7 @@ class AirShow:
             if q is None:
                 q = self._ground_move(Fm, hx, e, st)
         else:
-            plans = pl.drops(hx, tx) + pl.keeps(hx, tx)
+            plans = (pl.drops(hx, tx) if st not in INTRO else []) + pl.keeps(hx, tx)
             prev = self._again(self.plan, Fm, ctx)
             if prev is not None:
                 plans.insert(0, prev)
@@ -831,7 +844,7 @@ class AirShow:
         spot = cx + sgn * want
         spot = min(max(spot, WALL_L + 0.8), WALL_R - 0.8)
         k = 0 if abs(spot - hx) < 0.3 else (M_R if spot > hx else M_L)
-        return _rp.Plan("walk", k, Fm, Fm + 1, why=f"walk {st} {round(spot - hx, 2)} fc{fc}")
+        return _rp.Plan("walk", k, Fm, Fm + 3, why=f"walk {st} {round(spot - hx, 2)} fc{fc}")
 
     def _ctx(self, f: int, s: dict, e: dict, ground: bool, st: str | None) -> _rp.Ctx:
         h = s.get("hero") or {}
@@ -839,6 +852,8 @@ class AirShow:
         cd = tm.get("atk_cd")
         rdy = f + SEND_AHEAD + (0 if cd is None else max(0, int(math.ceil(float(cd) * 60.0 - (SEND_AHEAD - 1)))))
         clip = str((h.get("anim") or {}).get("clip") or "")
+        if "Deflate" in clip:
+            rdy = max(rdy, f + SEND_AHEAD + 5)      # (b2) the float closing swallows an attack
         j_held = bool(int((s.get("act") or {}).get("mask") or 0) & M_J)
         gliding = (clip.startswith("Umbrella") and "Deflate" not in clip) or (
             self._umb_f is not None and 0 <= f + SEND_AHEAD - self._umb_f <= 10 and not ground)
