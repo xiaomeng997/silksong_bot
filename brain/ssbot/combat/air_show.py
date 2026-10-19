@@ -79,6 +79,10 @@ class AsCfg:
     pre_f: int = 0              # its body this many frames before a contact does not count (b4: 0 - her box on its back
     #                             edge as the slash landed: the body hit first)
     bounce_wait: int = 8        # a hit on it seen: no new plan for this many frames until her bounce (vy > 5) shows
+    claw: int = 1               # (the lead's NOTE 2) the Clawline chase when no safe down slash exists
+    claw_p: int = 24            # its press searched to F0 + this
+    claw_ms: float = 8.0        # ... for at most this long
+    claw_every: int = 3         # ... tried every this many planning ticks
     rel_gap: int = 7            # (b2) in the umbrella's float: the press this many frames after the jump key's release
     late_j: int = 3             # (b2) the contact by the press + 3 + this (the slash lands on press + 3 .. 9; a contact
     #                             predicted on + 8 / 9 missed live and she fell into the hammer: air_chain LATE_SLACK 3)
@@ -88,7 +92,7 @@ class AsCfg:
     keep_f: int = 40            # a safe keep plan is ranked by her distance to the target this many frames on
     behind_u: float = 2.4       # a jump move: the target this far behind its landing (its landing hammer is in front)
     strike_k: tuple = (45, 52)  # a contact in these slam antic frames (the Slam 0 rise) ranks after the other safe drops
-    dash_a: tuple = (0, 3)      # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
+    dash_a: tuple = (0,)        # air dash plans: the dash pressed F0 + a (2 frames), the press from its end + dash_gap
     dash_gap: int = 16
     two_f: int = 1              # 1: the contact needs the slash on the box two frames running (push_cast fp1)
     p_max: int = 44             # presses searched to F0 + this
@@ -108,7 +112,7 @@ class AsCfg:
     walk_w: tuple = (0, 3, 6, 10)
     hold_h: tuple = (8, 12, 16, 22, 30)
     drift_d: tuple = (0, 6, 10, 14, 20, 28)
-    air_drift: tuple = ((0, 0), (1, 5), (1, 10), (1, 18), (1, 30), (-1, 8), (-1, 18))
+    air_drift: tuple = ((0, 0), (1, 6), (1, 14), (1, 30), (-1, 10))
     umb_u: tuple = (0, 4, 8, 14, 22)
 
 
@@ -487,7 +491,7 @@ class ShowPlanner(_rp.Planner):
             P += ac.p_step if P - p0 < ac.p_fine else 3 * ac.p_step
         if getattr(c, "dash_ok", False) and dk:
             for a in ac.dash_a:
-                for P in range(max(p0, F0 + a + ac.dash_gap), F0 + ac.p_max + 1, 2):
+                for P in range(max(p0, F0 + a + ac.dash_gap), F0 + ac.p_max + 1, 3):
                     for d in (a + 4, a + 14, a + 30):
                         out.append(_rp.Plan("drop", dk, F0, F0 + d, press=P, dash=(F0 + a, 2), why=f"dash{a}"))
         return out
@@ -593,6 +597,11 @@ class AirShow:
         self.why_none = {}
         self._pend = None
         self._hit_f = None
+        self.claw_ms: list = []
+        self.n_claw = 0
+        self.evades: list = []
+        self._ev = None
+        self._claw_k = 0
 
     # ---- bookkeeping ----
 
@@ -603,6 +612,15 @@ class AirShow:
         if e is not None:
             self._iid = e.get("iid")
             if st != self._st_last:
+                if self._ev is not None and self._ev.get("next") is None and st not in (
+                        "Evade Scuttle", "After Scuttle", None):
+                    self._ev["next"] = st
+                if st == "Evade Scuttle":
+                    hb = h.get("box") or [0, FLOOR, 0, FLOOR]
+                    self._ev = {"f": f, "dx": round(_sp.hero_x(s) - float(e["pos"][0]), 2),
+                                "yb": round(float(hb[1]) - FLOOR, 2), "air": not ground, "next": None,
+                                "claw": None, "dash": None, "hit": None, "end": None, "silk": h.get("silk")}
+                    self.evades.append(self._ev)
                 if st in ("Jump Antic", "Cast Slam Antic"):
                     self.jump = {"f_antic": f, "x0": float(e["pos"][0]), "face": _rp.face_of(e), "kind": st}
                 if st == "Cast Slam Antic 2" and self.jump:
@@ -621,6 +639,8 @@ class AirShow:
         if self._chp is not None and chp is not None and chp < self._chp:
             yb = float((h.get("box") or [0, FLOOR, 0, FLOOR])[1]) - FLOOR
             self._hit_f = f
+            if self._ev is not None and self._ev.get("hit") is None:
+                self._ev["hit"] = f - self._ev["f"]
             if self.f_first_take is None:
                 self.hits_pre += 1
             else:
@@ -631,7 +651,8 @@ class AirShow:
         if e is None and self._chp is not None and self.kill_f is None:
             self.kill_f = f
         self._chp = chp if e is not None else self._chp
-        if self._hp is not None and hp is not None and hp < self._hp:
+        if self._hp is not None and hp is not None and hp < self._hp and self.kill_f is None:
+            # (b5) the show ends at its death: HP lost after the kill is not counted
             if self.f_first_take is not None:
                 self.hp_after += self._hp - hp
             if self.chain is not None:
@@ -688,6 +709,8 @@ class AirShow:
             c.ground_f += int(ground)
             c.wall_f += int(wall)
             c.f_end, c.end = f, "land" if ground else "wall"
+            if self._ev is not None and self._ev.get("end") is None and f - self._ev["f"] < 150:
+                self._ev["end"] = (c.end, f - self._ev["f"])
             if c.br is None:
                 c.br = self._brk(f, s, e, c.end)
         if ground and self.phase == "air" and self._pend is None:
@@ -740,6 +763,14 @@ class AirShow:
             if tl.kind == "slam" and tl.k0 is not None:
                 sk = (f + self.cfg.strike_k[0] - tl.k0, f + self.cfg.strike_k[1] - tl.k0)
             q = pick(plans, strike=sk, tx=tx)
+            if (self.cfg.claw and st not in INTRO and (q is None or q.bad is not None or q.contact is None)
+                    and (prev is None or prev.kind != "claw")):
+                # (the lead's NOTE 2) no safe down slash: the Clawline chase (its body hooked, the bounce, the drop
+                # plans from control)
+                self._claw_k += 1
+                cq = self._claw(sim, ctx, e, st, t_in, f, hx, tx, h) if self._claw_k % self.cfg.claw_every == 1 else None
+                if cq is not None:
+                    q = cq
         self.ms.append((time.perf_counter() - t0) * 1e3)
         self.n_plans += 1
         if q is not None:
@@ -751,6 +782,125 @@ class AirShow:
         self.plan = q
         self._next = Fm + self.cfg.research
         return self._mask_plan(Fm)
+
+    def _claw(self, sim, ctx, e: dict, st, t_in: float, f: int, hx: float, tx: float, h: dict):
+        """The Clawline at its body from the air (claw_strike's live timeline: the throw band at the press, the ray
+        at P + 10 meeting its body, the stop 1.7 / 2.5 u short of its near edge, control 25 / 27 frames + the dash);
+        from control (no i-frames, the attack cooling 0.15 s) a safe drop with a contact in both variants. The earliest
+        such press; None without one (silk 0, no harpoon, none in the band)."""
+        from ssbot.combat import claw_strike as _cs
+        c = self.cfg
+        silk = int(h.get("silk") or 0)
+        if silk < 1 or not bool((h.get("can") or {}).get("harpoon", True)):
+            self.why_none["claw_silk"] = self.why_none.get("claw_silk", 0) + 1
+            return None
+        t0 = time.perf_counter()
+        F0 = f + SEND_AHEAD
+        cx = float(e["pos"][0])
+        toward = 1 if cx > hx else -1
+        tk = M_R if toward > 0 else M_L
+        T = c.claw_p + 4
+        rows = []
+        for P in range(F0 + 1, F0 + c.claw_p + 1, 2):
+            for d in (0, 6):
+                cm = np.zeros(T, np.int64)
+                if d:
+                    cm[:max(min(d, P - 1 - F0), 0)] |= tk
+                if 0 <= P - 1 - F0 < T:
+                    cm[P - 1 - F0] |= tk
+                rows.append((P, d, cm))
+        ro = sim.roll(np.stack([r[2] for r in rows]))
+        off = sim.off
+        T1 = sim.off + c.horizon
+        tl = its_timeline(e, st, t_in, sim.f - sim.fo, T1, c, hx)
+        body = tl.body[0]
+        cand = []
+        for n, (P, d, _cm) in enumerate(rows):
+            i = off + (P - F0)
+            if i >= ro.box.shape[1] or ((ro.flags[n, off + 1:i + 1] & kin.F_GROUND) != 0).any():
+                continue
+            bb = float(ro.box[n, i, 1]) - FLOOR
+            vy = float(ro.vel[n, i, 1])
+            xp = 0.5 * float(ro.box[n, i, 0] + ro.box[n, i, 2])
+            bt = bb + _cs.DY0 + _cs.DYV * vy
+            if not (0.6 <= bt <= 3.3 and _cs.VY_RANGE[0] <= vy <= _cs.VY_RANGE[1]):
+                continue
+            br = body[min(i + 10, T1 - 1)]
+            if not np.isfinite(br[0]) or bt + FLOOR > br[3] - 0.3:
+                continue
+            fx = br[0] if toward > 0 else br[2]
+            if not 0.5 <= (fx - xp) * toward - _cs.HALF_W <= 10.2:
+                continue
+            cand.append((P, d, bb, vy, xp))
+        best = None
+        for P, d, bb, vy, xp in cand:
+            if time.perf_counter() - t0 > c.claw_ms / 1e3:
+                self.why_none["claw_budget"] = self.why_none.get("claw_budget", 0) + 1
+                break
+            posts = []
+            for gap, cc in ((1.7, 25), (2.5, 27)):
+                i_c = off + (P - F0) + 22
+                bc = body[min(i_c, T1 - 1)]
+                if not np.isfinite(bc[0]):
+                    posts = []
+                    break
+                fxc = bc[0] if toward > 0 else bc[2]
+                ph = _cs.claw_phase(xp, bb, vy, toward, fxc, gap, cc)
+                if ph is None:
+                    posts = []
+                    break
+                x_s, bbh, fc = ph
+                f_ctrl = P + fc
+                if not self._claw_lock_ok(tl, sim, P, f_ctrl, xp + toward * _cs.ANTIC_DX, x_s, bbh, F0):
+                    posts = []
+                    break
+                csim = _cs.ClawStrike._ctrl_sim(None, sim, x_s, bbh, toward, f_ctrl)
+                ctx2 = _rp.Ctx(F0=f_ctrl + 1, b_box=ctx.b_box, b_x=ctx.b_x, b_ok=True, tx=tx, face=toward, ground=False,
+                               atk_ready_f=f_ctrl + 1 + 9, bomb_m=c.bomb_m)
+                ctx2.bombs = ctx.bombs
+                for k_ in ("L", "f_L", "fface", "a_frame", "a_seen", "f_fall", "rc", "lit", "jx0"):
+                    setattr(ctx2, k_, getattr(ctx, k_))
+                tl2 = its_timeline(e, st, t_in, f - f_ctrl, csim.off + c.horizon, c, hx)
+                pl2 = ShowPlanner(csim, ctx2, c, tl2)
+                ps = pl2.evaluate(pl2.drops(x_s, tx))
+                q2 = pick(ps, tx=tx)
+                if q2 is None or q2.bad is not None or q2.contact is None:
+                    posts = []
+                    break
+                posts.append((fc, q2))
+            if posts:
+                q2 = posts[0][1]
+                best = _rp.Plan("claw", tk, F0, F0 + d, press=P, contact=q2.contact,
+                                why=f"claw P{P - F0} c{max(x[0] for x in posts)}")
+                best.claw = (P, max(x[0] for x in posts), toward, q2)
+                break
+        self.claw_ms.append((time.perf_counter() - t0) * 1e3)
+        return best
+
+    def _claw_lock_ok(self, tl: Tl, sim, P: int, f_ctrl: int, x_a: float, x_s: float, bb: float, F0: int) -> bool:
+        """Her box held through the Clawline (at x_a to the dash, then at the stop x_s; box bottom bb) clear of its
+        hammer polygons and of the lit bombs (its body's contact is off while hooked)."""
+        off = sim.off
+        i0, i_d, i1 = off + (P - F0), off + (P - F0) + 20, off + (f_ctrl - F0)
+        hw = 0.25
+        for hl in tl.ham:
+            for i, px, py in hl:
+                if i0 <= i <= i1:
+                    xc = x_a if i < i_d else x_s
+                    r = np.array([[xc - hw - 0.15, FLOOR + bb - 0.15, xc + hw + 0.15, FLOOR + bb + 2.08 + 0.15]])
+                    z = np.zeros(1)
+                    if _rp._poly_hits(px, py, z, z, r)[0]:
+                        return False
+        bk = self._bombs
+        if bk is not None and len(bk):
+            for _o, bx, by, br, on, off_k in np.asarray(bk, float):
+                for k in range(max(int(on), P - F0 + SEND_AHEAD), min(int(off_k), f_ctrl - F0 + SEND_AHEAD) + 1):
+                    xc = x_a if k < P - F0 + SEND_AHEAD + 20 else x_s
+                    qx = min(max(bx, xc - hw), xc + hw)
+                    qy = min(max(by, FLOOR + bb), FLOOR + bb + 2.08)
+                    if (qx - bx) ** 2 + (qy - by) ** 2 < (br + 0.2) ** 2:
+                        return False
+        return True
 
     def _again(self, p, Fm: int, ctx) -> _rp.Plan | None:
         if p is None or p.kind == "walk":
@@ -774,6 +924,12 @@ class AirShow:
         p = self.plan
         if p is None:
             return False
+        if p.kind == "claw" and getattr(p, "claw", None) is not None:
+            P, fc, _tw, q2 = p.claw
+            if Fm < P + fc + 2:
+                return Fm >= P - 1            # the turn key, the press, the lock: no new plan
+            self.plan = p = q2                # control: the post plan (kept while it stays safe)
+            return False
         if self._drop_f is not None:
             end = (p.contact + 2) if p.contact is not None else self._drop_f + self.cfg.commit_f
             if Fm <= min(end, self._drop_f + self.cfg.commit_f):
@@ -791,7 +947,26 @@ class AirShow:
             self._take(Fm)
         if p.kind == "walk":
             return int(p.dirk) if p.d0 <= Fm < p.d1 else 0
+        if p.kind == "claw" and getattr(p, "claw", None) is not None:
+            from ssbot.combat.claw_strike import M_CLAW
+            P, fc, tw, q2 = p.claw
+            tk = M_R if tw > 0 else M_L
+            if Fm < P - 1:
+                return int(p.dirk) if p.d0 <= Fm < p.d1 else 0
+            if Fm == P - 1:
+                return tk
+            if Fm < P + 2:
+                if Fm == P:
+                    self.n_claw += 1
+                    if self._ev is not None and self._ev.get("claw") is None and Fm - self._ev["f"] < 90:
+                        self._ev["claw"] = Fm - SEND_AHEAD - self._ev["f"]
+                return M_CLAW | tk
+            if Fm < P + fc:
+                return 0                      # the lock: no key to control
+            return _rp.mask_at(q2, Fm)
         m = _rp.mask_at(p, Fm)
+        if (m & M_DASH) and self._ev is not None and self._ev.get("dash") is None and Fm - self._ev["f"] < 90:
+            self._ev["dash"] = Fm - SEND_AHEAD - self._ev["f"]
         if p.press is not None and p.press <= Fm <= p.press + 1 and (m & M_A) and self._drop_f is None:
             self._drop_f = Fm
         if p.umb is not None and Fm == p.umb:
@@ -926,6 +1101,8 @@ class AirShow:
                 "air_frames": self.air_frames, "hits_pre": self.hits_pre, "n_chains": len(self.chains),
                 "success": bool(ok), "hits_by_kind": kinds, "chains": ch,
                 "ms": [round(float(np.percentile(self.ms, q)), 1) for q in (50, 90, 99)] if self.ms else None,
+                "n_claw": self.n_claw, "evades": self.evades[:40],
+                "claw_ms": [round(float(np.percentile(self.claw_ms, q)), 1) for q in (50, 99)] if self.claw_ms else None,
                 "n_plans": self.n_plans, "kinds": self.kinds, "why_none": self.why_none,
                 "plans": self.plans_log[-300:]}
 
