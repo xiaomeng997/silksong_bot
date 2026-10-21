@@ -125,6 +125,15 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   'where can she be at frame T' and every danger / terrain check need only the PROJECTION onto (x, y): one region per
   frame, the union; (2) vy is an ATTRIBUTE of a point (the vy range available there), used only when continuing from
   it or timing a strike - not separate tables; (3) the coarse far layer bins vy coarsely (over-approximating).
+  DANGER CUTS X ONLY (the person, 2026-10-20: 'a touch still needs a branch; with vy flattened how do you branch, and
+  without flattening it is even more fragmented?'): danger never changes her vy - it only removes x (and kills a
+  piece whose x is all gone). So a touch is NOT a vertical branch: it splits / shrinks the x interval sets of the
+  pieces it touches. Vertical pieces are created only by EVENTS (the dash, the umbrella open / close, the Clawline,
+  a pogo), few per airtime because of the locks. Keep each piece as a FAMILY over its event time (e.g. 'dashed at
+  any frame in [d1, d2]' is one piece; at frame T its heights / phases form a curve segment); a danger cut may split
+  the event-time interval into sub-intervals - the only branching, bounded. Waypoints / continuations only at the
+  canonical states the families flow into (A1 at rest = an apex or a dash end, A3, A4, the ground), with the reused
+  tables. The (x, y) projection is for the queries and the display only; the computation keeps the curves and phases.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
