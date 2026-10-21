@@ -86,7 +86,8 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
 - THE TABLE SET (the person, 2026-10-20, revised): the ground dash is unlimited, so the ground has two steady states,
   WALK and RUN (the sprint, 17.5 u/s, after a dash; accel 1.1 / step, the skid if released after Sprint Grace).
   START states: ground walk, ground run, air at rest (an apex), air float (its terminal -6 u/s); air normal at its
-  terminal fall is kept only formally (the fall needs more height than the arena to reach it). END conditions: the
+  terminal fall (max fall 30 u/s, reached after 0.5 s / 7.5 u from rest - possible in a full-height fall of the
+  ~12 u arena; the lead's earlier 'never reached' used the anklet's 38 u/s). END conditions: the
   strike windows (can slash / can down slash / can Clawline) and the steady states WITHOUT the apex (ground walk,
   ground run, the float); 'air dash used' is a flag for the air only (the ground dash is unlimited). The
   APEX is never an end condition: after a strike, a separate STRIKE MODULE (the side slash's recoil, the pogo
@@ -98,7 +99,10 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
   float toward -6; no close before 17 f; a re-open >= 13 f after a close), the air dash (vy 0 for 0.1 s; one per
   airtime - is it restored by a pogo? M0), the Clawline (the hold, then the bounce +17.4 or a flat unhooked pull), the
-  pogo (+17.4, 5 f constant then gravity), the jump's release frame on the take-off. So the vertical state is a
+  pogo (+17.4, 5 f constant then gravity), the jump's release frame on the take-off, and the AIR HANG
+  (kinematics.py: holding jump through the apex sets the gravity scale to 0.1 at the first falling step, +0.1 per
+  step while held, back to 1 on release - a slower start of the fall; a hold-time parameter). Otherwise the fall is
+  free fall: g 60 u/s^2 (1.2 u/s per 50 Hz physics step), capped at 30 u/s. So the vertical state is a
   small DISCRETE family: canonical curves y(k), vy(k) (the fall from rest, the float after the Inflate, the bounce,
   the fall after a Deflate, the jump per release frame) glued at event frames. Store those curves as 1-D arrays (no
   2-D air tables); at use time build the event tree (event frames on a 2-4 f grid, refined near tight windows; the
