@@ -117,6 +117,14 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   that is a point ON A1's fall curve, so she joins A1's table at the phase where A1 has the same vy (about frame 7-13
   of A1), shifted in time and position. Tables are therefore indexed by phase, not only entered at frame 0. M0: the
   horizontal control during the Deflate (the float's inertia or the instant run).
+  FRAGMENTS AND HOW TO USE THEM (the person, 2026-10-20): the air dash does not widen the x interval - she cannot
+  come back within the same time, so the x set splits into lobes with a hole (interval SETS handle it), and after the
+  dash she is A1 at rest (good). A1 / A2 carry vy (one curve: A2 the rise, A1 the fall after the apex - its phase IS
+  vy); A3 / A4 have a fixed vy. From A1, after 30 f she may be on A1 at phase 1, 2, ... 30 (different dash / close
+  timings), each with its own height and x range - fragmented but cheap (tens to a few hundred fragments). Use: (1)
+  'where can she be at frame T' and every danger / terrain check need only the PROJECTION onto (x, y): one region per
+  frame, the union; (2) vy is an ATTRIBUTE of a point (the vy range available there), used only when continuing from
+  it or timing a strike - not separate tables; (3) the coarse far layer bins vy coarsely (over-approximating).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
