@@ -86,10 +86,14 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
 - THE TABLE SET (the person's count, 2026-10-20): 4 start states (ground; air at rest = an apex; air normal at its
   terminal fall; air float at -6 u/s) x 10 end conditions (the 4 states x dash used / not - no dash at the start
   counts as not used - + 'can slash' + 'can Clawline') = 40 tables x 120 frames, one region (contour) per frame.
-  Storage suggestion: per start state ONE table whose cells carry a flag byte (which end states / dash used / can
-  slash / can Clawline are possible there) = 4 tables; left-right mirror symmetry halves them; vertical extent
-  clipped to the arena (~+-15 u). At 0.05 u cells about 600 x 300 cells x 120 frames x 1 byte ~ 22 MB per start
-  state; bit-packed masks for the danger intersection, contours derived for display / compact checks.
+  STORAGE = CONTOUR VERTICES (the person): one polygon (or a union of a few) per (start state, end condition,
+  frame). Because horizontal and vertical are decoupled (instant run; the jump hold, the fall and the umbrella act on
+  y only), each region is close to a product 'x interval x y interval' - nearly a rectangle - with a few cut corners
+  where they couple (an air dash holds the height; the float's horizontal inertia gives the float pieces their own
+  x range; the Clawline). So a frame needs only a handful of vertices: 40 x 120 frames is a few MB at most.
+  Intersections with the danger polygons are polygon tests (convex pieces, SAT); forward ∩ backward is a polygon
+  intersection; grids are only rasterised on the fly (the coarse far layer, debugging), not stored. Left-right
+  mirror symmetry halves the set; the vertical extent is clipped to the arena.
 - Danger inside one segment (between two steady states): roll that segment's small family on the fly (take-off frame
   x jump hold x drift pattern x umbrella timing x Clawline / dash press) against the predicted danger - no stored
   transitional tables. Meet in the middle likewise joins only at steady states (e.g. 'standing at frame 8'), and the
