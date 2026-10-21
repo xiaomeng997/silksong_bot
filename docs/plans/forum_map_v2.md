@@ -153,6 +153,12 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   hand over to A4 / the ground, merge after quantising t0 / y0 (0.05 u; 0.25 u in the coarse far layer), drop when
   dominated (same curve and phase, the same height bin, a subset x set), and the backward pass from the goal windows
   keeps only clusters that can still reach one. M1 measures the real counts and times.
+  IT SATURATES (the person: '120 f in the air -> 14400?'): no - the count does not grow with time without bound. At a
+  given frame a cluster is (the curve, its phase, the height bin, the flags); heights are bounded by the arena (~12 u
+  -> ~240 bins at 0.05 u), the phases by the curves (A1 ~31 until the terminal, the float ~50 until -6, A2 ~23, A4 1),
+  so at most ~(31 + 50 + 23 + 1) x 240 x 2 flags ~ 5e4 keys per frame at 0.05 u whatever the horizon, far fewer
+  reachable (a fast fall high up is impossible); the coarse far layer (0.25 u, vy bins) caps it near ~1e3. Staying up
+  120 f at all needs the float or bounces (an unbraked fall from 12 u lands in ~38 f).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
