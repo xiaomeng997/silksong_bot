@@ -172,6 +172,22 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   so at most ~(31 + 50 + 23 + 1) x 240 x 2 flags ~ 5e4 keys per frame at 0.05 u whatever the horizon, far fewer
   reachable (a fast fall high up is impossible); the coarse far layer (0.25 u, vy bins) caps it near ~1e3. Staying up
   120 f at all needs the float or bounces (an unbraked fall from 12 u lands in ~38 f).
+  THE COLLAPSE AND THE RECURSION (the person, 2026-10-21: 'when time passes my cluster's x becomes a point and its
+  future a cone - the derived clusters cannot be collapsed; tables for A1 collapsed at every phase, each with all
+  derived transformations for 120 f? that is recursive - compute it explicitly or find a recursive element?'):
+  - It is recursive but CLOSED over a finite set: the start states (curve, phase, flags) - A1 ~31 phases, A2 ~23,
+    A3 ~60 x 3 vx classes, A4, ground walk / run - a couple of hundred. Everything is relative to her position
+    (translation invariance), so x never enters a table key.
+  - THE RECURSIVE ELEMENT = the one-step transition table: for each start state, 'continue' -> (curve, phase + 1),
+    and every allowed event -> its resulting start state + its displacement (the dash +-2.8 u, the Clawline's pull)
+    + its duration. From it, R(s, t) for every s is computed EXPLICITLY offline by dynamic programming over t
+    (R(s, t) = s's own motion u the events' children R(s', t - tau) translated) - no symbolic machinery needed.
+  - Store per start state and frame only the UNION region (a relative polygon / interval set; optionally the
+    earliest-touch data), not the per-cluster detail: ~200 states x 120 f x a small polygon = a few MB.
+  - THE COLLAPSE IS FREE: every tick her exact state (curve, phase, flags) picks a table, translated to her exact x /
+    y - old clusters are never 'collapsed', they are rebuilt. Online, with danger, the cluster forward pass starts
+    from the exact current state with the transition table and the cuts (ms), rebuilt at every branch point.
+  - Longer horizons compose: R(s, t1 + t2) from R(s, t1)'s canonical end states and R(s', t2) (the coarse far layer).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
