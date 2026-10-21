@@ -83,6 +83,13 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   choice in the segment. So the tables are a handful (ground, apex, float; x the dash flag), not one per transitional
   frame. This matches the person's 10-14 / 10-15 notes (the air by events: from a decision point straight to the
   apex; vertical only float / normal). The flags kept: the dash available, the attack cooldown.
+- THE TABLE SET (the person's count, 2026-10-20): 4 start states (ground; air at rest = an apex; air normal at its
+  terminal fall; air float at -6 u/s) x 10 end conditions (the 4 states x dash used / not - no dash at the start
+  counts as not used - + 'can slash' + 'can Clawline') = 40 tables x 120 frames, one region (contour) per frame.
+  Storage suggestion: per start state ONE table whose cells carry a flag byte (which end states / dash used / can
+  slash / can Clawline are possible there) = 4 tables; left-right mirror symmetry halves them; vertical extent
+  clipped to the arena (~+-15 u). At 0.05 u cells about 600 x 300 cells x 120 frames x 1 byte ~ 22 MB per start
+  state; bit-packed masks for the danger intersection, contours derived for display / compact checks.
 - Danger inside one segment (between two steady states): roll that segment's small family on the fly (take-off frame
   x jump hold x drift pattern x umbrella timing x Clawline / dash press) against the predicted danger - no stored
   transitional tables. Meet in the middle likewise joins only at steady states (e.g. 'standing at frame 8'), and the
