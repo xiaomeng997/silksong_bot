@@ -88,6 +88,16 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
 - Where dangers interleave inside one segment (weaving between two boxes), the frame-by-frame propagation with the
   danger subtracted complements the waypoint restarts.
 
+MEET IN THE MIDDLE (the person, 2026-10-20 evening): branches can be computed backward. A goal at a later time
+(e.g. a window's press region at frame 20) has a BACKWARD envelope: the states from which it is reachable in n
+frames. Forward 10 frames from her (danger subtracted) intersected with backward 10 frames from the goal (danger
+subtracted) at frame 10: any overlap with COMPATIBLE STATES (vy range, umbrella / dash flags - not only the position)
+is a path around the obstacle; the junction is picked inside the overlap (the most margin), the keys come from both
+halves' witness paths. Horizontal is time-symmetric (instant run) but vertical is not (gravity), so the backward
+tables are precomputed separately, keyed by the arrival state. Per frame, forward ∩ backward is the tube of all
+feasible paths: the robust choice and the commitment monitor. The search then asks per window 'forward ∩ backward
+non-empty?' instead of branching at every touch.
+
 THE CLAWLINE IN THE TWO LAYERS (the person, 2026-10-20 evening):
 - Windows are bound to the enemy (time relative to its event, position relative to it and its facing). At decision
   time the search transforms each window to map coordinates and time with the predicted enemy state, including the
