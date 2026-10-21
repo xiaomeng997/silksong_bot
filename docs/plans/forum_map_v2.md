@@ -110,6 +110,20 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   module), each branch = one vertical curve with the horizontal interval of its mode = one horizontal segment per
   frame, checked against the danger polygons and the terrain. Tens to a few hundred branches per airtime. The 2-D
   'air envelope' is only their union (for display); the ground keeps its interval tables (y fixed until the take-off).
+- NO ENUMERATION OF EVENT ORDERS: PROPAGATE STATES AND MERGE (the person asked 2026-10-20: dash-then-umbrella vs
+  umbrella-then-dash vs two umbrella cycles vs a Clawline left then right, and how 20 free frames split between them,
+  explode combinatorially; the dash and the Clawline move x, the float slows x with inertia). Answer: a frame-by-frame
+  forward pass over STATES, not sequences. A state key = (the vertical curve and its phase, the height quantised to
+  ~0.05 u, the locks / flags: umbrella open / opening k / closing k / reopen lock, the air dash used, the Clawline
+  block phase); its value = the reachable x as a set of intervals (+ vx bounds inside the float). Each frame every
+  state either continues (x intervals widen by the mode's reach, the float by its bounded accel) or starts any allowed
+  event (the dash: x +-2.8 u, height held; the unhooked Clawline: the flat pull; the umbrella open / close) -> a new
+  key. Equal keys MERGE (their interval sets unite) - different orders that end in the same state cost nothing extra;
+  dominated states (same key, a subset of x) are dropped; danger and terrain cut the intervals at that frame. The
+  vertical's discreteness keeps the keys few: heights <= arena / 0.05 ~ 250, x a handful of modes x a few flags -
+  at most a few thousand keys per frame, usually far fewer; 60 frames is well within a compiled pass. A backward pass
+  from the goal windows (meet in the middle) prunes further; the free-space results from the canonical starts are the
+  precomputed tables. Event-time grids are not needed: every frame is a possible event start, the merging absorbs it.
 - TERRAIN CONTACTS ARE BRANCH EVENTS, NOT END STATES (the person, 2026-10-20): the tables are terrain-free; the system
   must handle scenes with terrain, and a landing height need not equal the take-off height. Where the envelope's
   lower boundary first touches a floor / platform top, that contact generates a branch: those positions at that frame
