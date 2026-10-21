@@ -74,14 +74,23 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   keyed by her movement state. Only CONTROLLABLE states get tables (a dash's 2nd frame has no choice: it is a
   deterministic carve-out to the next controllable state). In the air the tables assume infinite height (no floor);
   terrain (floor, walls, ceiling) and danger are applied at use time.
-- The state key must hold everything that changes the future reach: the mode (ground / air normal / float /
-  opening / closing), vy (binned: a rise at +10 and a fall at -5 reach different places), the jump-hold phase, the
-  float's vx (inertia), the dash available or not. Per cell store the reachable state range (vy range, flags), so a
-  continuation can start from a chosen (position, state).
+- JUNCTIONS ONLY AT STEADY / CANONICAL STATES (the person, 2026-10-20 evening; it supersedes the lead's 'vy bins,
+  hundreds of tables'): a continuation may start only from a state that is fully given by the position (plus a flag
+  or two): standing on the ground (vx is instant), the apex of a jump / pogo bounce / Clawline bounce (vy 0, the
+  umbrella closed), the float at its terminal -6 u/s, (later: the wall cling). Transitional states (jump frame 2, 3,
+  ... 20, a bounce's rise, the umbrella's opening) never start a table: they live INSIDE a segment that starts at a
+  steady state, and that state's forward table already holds every frame of every jump / hold / drift / umbrella
+  choice in the segment. So the tables are a handful (ground, apex, float; x the dash flag), not one per transitional
+  frame. This matches the person's 10-14 / 10-15 notes (the air by events: from a decision point straight to the
+  apex; vertical only float / normal). The flags kept: the dash available, the attack cooldown.
+- Danger inside one segment (between two steady states): roll that segment's small family on the fly (take-off frame
+  x jump hold x drift pattern x umbrella timing x Clawline / dash press) against the predicted danger - no stored
+  transitional tables. Meet in the middle likewise joins only at steady states (e.g. 'standing at frame 8'), and the
+  backward tables are keyed by steady goal states or by window events.
 - Use: the search runs inside the envelope until the first frame it touches any predicted damage box or terrain -
   that frame IS the branch time (generated automatically); until then every point inside is free. To go on, pick a
-  waypoint inside the envelope at the branch time (a position + one of its reachable states; several candidates, a
-  small tree) and restart from the reused table of that state. Paths to a chosen point are cheap (instant run: hold
+  waypoint inside the envelope at the branch time (a position in a STEADY state - see the junction rule; several
+  candidates, a small tree) and restart from the reused table of that state. Paths to a chosen point are cheap (instant run: hold
   toward it m frames, then release).
 - A fixed future time T: as she moves, the envelope for T shrinks (the future collapses into the past). Use it as the
   commitment monitor: a planned target at T stays valid while it is inside the shrinking envelope (the hysteresis).
@@ -91,8 +100,8 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
 MEET IN THE MIDDLE (the person, 2026-10-20 evening): branches can be computed backward. A goal at a later time
 (e.g. a window's press region at frame 20) has a BACKWARD envelope: the states from which it is reachable in n
 frames. Forward 10 frames from her (danger subtracted) intersected with backward 10 frames from the goal (danger
-subtracted) at frame 10: any overlap with COMPATIBLE STATES (vy range, umbrella / dash flags - not only the position)
-is a path around the obstacle; the junction is picked inside the overlap (the most margin), the keys come from both
+subtracted) at frame 10: any overlap at a STEADY junction state (standing, an apex, the float; the dash flag) is a path
+around the obstacle; the junction is picked inside the overlap (the most margin), the keys come from both
 halves' witness paths. Horizontal is time-symmetric (instant run) but vertical is not (gravity), so the backward
 tables are precomputed separately, keyed by the arrival state. Per frame, forward ∩ backward is the tube of all
 feasible paths: the robust choice and the commitment monitor. The search then asks per window 'forward ∩ backward
