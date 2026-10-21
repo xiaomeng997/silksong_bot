@@ -104,6 +104,13 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   +3 cuts the rise to +0.5), so a bounce needs no separate apex start.
   (A3) THE FLOAT's first steady frame (the Inflate's end, vy +0.5, then the float toward -6): vx from the antic's
   strong accel (8.5) is close to the held direction's float speed - 3 values (left / none / right).
+  A3 IS A CURVE, NOT A CONSTANT (the person asked 2026-10-21 'does A3 still need to be dynamic?'): yes, like A1 -
+  the float's vy goes from +0.5 toward -6 at 0.13 u/s per physics step, ~60 f to reach it, and most floats end before
+  that (the air show: the float's vy p50 -1.3, its runs p50 10 f / p90 38 f). Its vertical is deterministic (no
+  control but the close), so A3 clusters are keyed by their origin exactly as A1's, the steady -6 u/s is only the
+  curve's tail. The one extra is the horizontal inertia: the x reach per frame comes from a small precomputed 1-D
+  table per entry vx class (left / none / right), the Umbrella Turn included (a reversal takes its own clip, p50 19 f).
+  Only A4 (the terminal fall) has a truly constant vy.
   Common flags: the air dash used, the attack cooldown left. With the ground walk / run and A4 (below) 6 start states.
   TABLES CHAIN AT CANONICAL STATES (the person, 2026-10-20: 'if nothing happens in A2 before the apex, switch to
   A1?' - yes): A2's do-nothing branch IS an A1 state at the apex (vy 0, umbrella closed, no hang, the i-frames over,
@@ -120,7 +127,7 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   FRAGMENTS AND HOW TO USE THEM (the person, 2026-10-20): the air dash does not widen the x interval - she cannot
   come back within the same time, so the x set splits into lobes with a hole (interval SETS handle it), and after the
   dash she is A1 at rest (good). A1 / A2 carry vy (one curve: A2 the rise, A1 the fall after the apex - its phase IS
-  vy); A3 / A4 have a fixed vy. From A1, after 30 f she may be on A1 at phase 1, 2, ... 30 (different dash / close
+  vy); A3 is a curve too (see A3 above); only A4 has a fixed vy. From A1, after 30 f she may be on A1 at phase 1, 2, ... 30 (different dash / close
   timings), each with its own height and x range - fragmented but cheap (tens to a few hundred fragments). Use: (1)
   'where can she be at frame T' and every danger / terrain check need only the PROJECTION onto (x, y): one region per
   frame, the union; (2) vy is an ATTRIBUTE of a point (the vy range available there), used only when continuing from
