@@ -83,9 +83,16 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   choice in the segment. So the tables are a handful (ground, apex, float; x the dash flag), not one per transitional
   frame. This matches the person's 10-14 / 10-15 notes (the air by events: from a decision point straight to the
   apex; vertical only float / normal). The flags kept: the dash available, the attack cooldown.
-- THE TABLE SET (the person's count, 2026-10-20): 4 start states (ground; air at rest = an apex; air normal at its
-  terminal fall; air float at -6 u/s) x 10 end conditions (the 4 states x dash used / not - no dash at the start
-  counts as not used - + 'can slash' + 'can Clawline') = 40 tables x 120 frames, one region (contour) per frame.
+- THE TABLE SET (the person, 2026-10-20, revised): the ground dash is unlimited, so the ground has two steady states,
+  WALK and RUN (the sprint, 17.5 u/s, after a dash; accel 1.1 / step, the skid if released after Sprint Grace).
+  START states: ground walk, ground run, air at rest (an apex), air float (its terminal -6 u/s); air normal at its
+  terminal fall is kept only formally (the fall needs more height than the arena to reach it). END conditions: the
+  strike windows (can slash / can down slash / can Clawline) and the steady states WITHOUT the apex (ground walk,
+  ground run, the float, a landing); 'air dash used' is a flag for the air only (the ground dash is unlimited). The
+  APEX is never an end condition: after a strike, a separate STRIKE MODULE (the side slash's recoil, the pogo
+  bounce, the Clawline's control and bounce) produces the next steady state (an apex or the ground) with its time and
+  position, and that state starts the next search. Note: the float reaches -6 u/s only ~1 s after the Inflate
+  (0.13 u/s per physics step from +0.5), so most float segments end before it.
   STORAGE = CONTOUR VERTICES (the person): one polygon (or a union of a few) per (start state, end condition,
   frame). Because horizontal and vertical are decoupled (instant run; the jump hold, the fall and the umbrella act on
   y only), each region is close to a product 'x interval x y interval' - nearly a rectangle - with a few cut corners
@@ -163,7 +170,7 @@ plan logged in the decisions in the same step format (for combo mining later).
 - M0 calibrations (live probes on w7, forced setups): the Deflate delay (attack / Clawline from the float), the float
   drift, the Clawline straight from the float, the side down slash's bounce, the down slash cadence after a pogo and
   after a whiff, the air dash after a pogo, the Idle hook reaction timing (12-18 f: why), the hold height vs her vy at
-  the Clawline press, a second Clawline at control, the UNHOOKED Clawline's distance / time / height; the hero model updated (switch), facts in forum.md.
+  the Clawline press, a second Clawline at control, the UNHOOKED Clawline's distance / time / height, the ground dash's cooldown (unlimited?) and the sprint's steady state; the hero model updated (switch), facts in forum.md.
 - M1 L2 envelopes (offline): the engine, validated against kinematics rollouts (every rollout inside the envelope,
   tightness reported), timings.
 - M2 L1 Clapper model (offline): frame-accurate polygon timelines + the reaction rules + predict(); validation on the
