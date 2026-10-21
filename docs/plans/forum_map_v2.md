@@ -104,7 +104,13 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   +3 cuts the rise to +0.5), so a bounce needs no separate apex start.
   (A3) THE FLOAT's first steady frame (the Inflate's end, vy +0.5, then the float toward -6): vx from the antic's
   strong accel (8.5) is close to the held direction's float speed - 3 values (left / none / right).
-  Common flags: the air dash used, the attack cooldown left. With the ground walk / run that is 5 start states.
+  Common flags: the air dash used, the attack cooldown left. With the ground walk / run and A4 (below) 6 start states.
+  TABLES CHAIN AT CANONICAL STATES (the person, 2026-10-20: 'if nothing happens in A2 before the apex, switch to
+  A1?' - yes): A2's do-nothing branch IS an A1 state at the apex (vy 0, umbrella closed, no hang, the i-frames over,
+  the attack ready) - so A2's table only covers the rise (~22 / 23 f: two variants for the 50 Hz / 60 fps jitter) and
+  hands over to A1; an umbrella opened in the rise hands over to A3 at its steady frame, a dash to A1 at its end.
+  Likewise A1's plain fall reaches the terminal -30 u/s after 30 f (7.5 u) - a canonical A4 (terminal fall). Every
+  table is short; long reach = tables chained at canonical states (time-shifted, translated).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
