@@ -68,6 +68,26 @@ L2 HERO ENVELOPES (the person's design; one for Hornet, every enemy):
   side at her feet's height, narrowing to ~0.35 u past it 1 u below her feet; the lowest point ~1.17 u below her
   feet); the hurtbox is 0.4554 x 2.2498 u, centre 0.38 u below the transform.
 
+THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
+- The envelope is fight-independent and precomputed before the fight (per hero kit: crest, tools, abilities): tables
+  'reachable after 1, 2, 3, ... frames', with HER CURRENT POSITION AS THE ORIGIN, independent of her map x / y,
+  keyed by her movement state. Only CONTROLLABLE states get tables (a dash's 2nd frame has no choice: it is a
+  deterministic carve-out to the next controllable state). In the air the tables assume infinite height (no floor);
+  terrain (floor, walls, ceiling) and danger are applied at use time.
+- The state key must hold everything that changes the future reach: the mode (ground / air normal / float /
+  opening / closing), vy (binned: a rise at +10 and a fall at -5 reach different places), the jump-hold phase, the
+  float's vx (inertia), the dash available or not. Per cell store the reachable state range (vy range, flags), so a
+  continuation can start from a chosen (position, state).
+- Use: the search runs inside the envelope until the first frame it touches any predicted damage box or terrain -
+  that frame IS the branch time (generated automatically); until then every point inside is free. To go on, pick a
+  waypoint inside the envelope at the branch time (a position + one of its reachable states; several candidates, a
+  small tree) and restart from the reused table of that state. Paths to a chosen point are cheap (instant run: hold
+  toward it m frames, then release).
+- A fixed future time T: as she moves, the envelope for T shrinks (the future collapses into the past). Use it as the
+  commitment monitor: a planned target at T stays valid while it is inside the shrinking envelope (the hysteresis).
+- Where dangers interleave inside one segment (weaving between two boxes), the frame-by-frame propagation with the
+  danger subtracted complements the waypoint restarts.
+
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
   primitives at branch points. Branch points = the end of her discrete commitments (a slash's lock, the Clawline's
