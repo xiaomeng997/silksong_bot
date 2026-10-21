@@ -88,6 +88,18 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
 - Where dangers interleave inside one segment (weaving between two boxes), the frame-by-frame propagation with the
   danger subtracted complements the waypoint restarts.
 
+THE CLAWLINE IN THE TWO LAYERS (the person, 2026-10-20 evening):
+- Windows are bound to the enemy (time relative to its event, position relative to it and its facing). At decision
+  time the search transforms each window to map coordinates and time with the predicted enemy state, including the
+  Clawline's PRESS region of a Clawline window (in front of its body within the 10.5 u ray, her box bottom in the
+  band against its body, the press frames, e.g. slam antic 5-11), and asks whether her envelope contains it (with a
+  usable state). After the press the Clawline is a deterministic block; the window's later steps follow it.
+- The Clawline is also plain MOBILITY: unhooked it still pulls her flat ~5.7-7.8 u at the same height (10 recorded
+  cases: measure it in M0) - fight-independent, so it belongs in the precomputed envelope tables like the dash;
+  hooked it carries her to ~2 u before the target's body and bounces her ~4 u up - target-dependent, so it is added
+  at use time (a hook on an Idle Clapper is a hit and triggers its reaction: the enemy model sees it). Slower than
+  the dash for short hops (control 26-34 f), faster for long ones (70 u/s).
+
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
   primitives at branch points. Branch points = the end of her discrete commitments (a slash's lock, the Clawline's
@@ -121,7 +133,7 @@ plan logged in the decisions in the same step format (for combo mining later).
 - M0 calibrations (live probes on w7, forced setups): the Deflate delay (attack / Clawline from the float), the float
   drift, the Clawline straight from the float, the side down slash's bounce, the down slash cadence after a pogo and
   after a whiff, the air dash after a pogo, the Idle hook reaction timing (12-18 f: why), the hold height vs her vy at
-  the Clawline press, a second Clawline at control; the hero model updated (switch), facts in forum.md.
+  the Clawline press, a second Clawline at control, the UNHOOKED Clawline's distance / time / height; the hero model updated (switch), facts in forum.md.
 - M1 L2 envelopes (offline): the engine, validated against kinematics rollouts (every rollout inside the envelope,
   tightness reported), timings.
 - M2 L1 Clapper model (offline): frame-accurate polygon timelines + the reaction rules + predict(); validation on the
