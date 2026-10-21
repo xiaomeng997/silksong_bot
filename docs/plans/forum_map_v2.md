@@ -145,6 +145,14 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   the flags and locks stop the cascade (a dashed cluster cannot dash again): about a hundred alive at most. A cluster
   EXITS when its x set is empty (cut by danger) or when it hands over (a landing -> a ground cluster, the terminal
   fall -> A4). Grouping adjacent clusters by event time is only an optional storage compression.
+  HOW MANY (the person, 2026-10-21: '60 f in the air, a new height every frame, x the dash flag -> 3600 clusters?'):
+  that order is right for the worst case (a dash at any of 60 frames, opens / closes at any allowed frame: a few
+  thousand keys alive), and it is affordable: per cluster per frame one interval-set update plus one cut against the
+  danger's x slice at the cluster's own height (precompute per frame the danger's x intervals per height bin) -
+  ~3600 x 60 ~ 2e5 cheap operations, milliseconds compiled. Usually far fewer: clusters die when cut or landing,
+  hand over to A4 / the ground, merge after quantising t0 / y0 (0.05 u; 0.25 u in the coarse far layer), drop when
+  dominated (same curve and phase, the same height bin, a subset x set), and the backward pass from the goal windows
+  keeps only clusters that can still reach one. M1 measures the real counts and times.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
