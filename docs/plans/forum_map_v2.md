@@ -241,6 +241,34 @@ per combo (anchor event, preconditions as ranges, steps with timing windows rela
 branch points, status candidate / verified / promoted / demoted, evidence, an optional Chinese name); every executed
 plan logged in the decisions in the same step format (for combo mining later).
 
+## 1b. Open questions and risks (the lead, 2026-10-20, after the design talk)
+
+1. ACCEPTANCE WITHOUT LEAKS: 'found by the search' means primitives + the generic strike module only - the combo
+   library must NOT contain P1-P5's own macros during the acceptance run (else it is trivially 'found'). Run the suite
+   twice: primitives only (the real test) and with the library (the speed / quality comparison).
+2. MARGINS FROM MEASURED ERRORS: every model (the hero curves, the enemy polygons and timings) carries its measured
+   error; the checks grow the danger polygons / shift the timings by it (per move, per frame offset), and plans that
+   lean on an untested mechanic are flagged. History: the air strike (1 / 5) and the special mode failed on model
+   errors, not on search.
+3. LATENCY IN THE COMMITMENTS: STATE arrives 1-2 f late, keys are sent 2 f ahead, the 50 Hz / 60 fps jitter, host
+   stalls (late ticks ~0.4 %): the reveal frame + the reaction lag must be in every 'safe until she can react' check.
+4. THE ENEMY'S CHOICE MEMORY: the Close / Far Range choices use V4 with eventMax / missedMax (no long repeats; after
+   Evaded only SLAM / CAST; the escape jump alternates 1:1) - so the outcome probabilities depend on its recent
+   choices; model the history, the search can exploit it.
+5. TWO ENEMIES ARE A JOINT STATE: the buddy lock couples them; predict() must take both and branch jointly (outcomes
+   multiply); keep it bounded (the locked one has no new move until the other's lock ends).
+6. THE OBJECTIVE BEYOND THE HORIZON: hits per second and safety inside the horizon are not enough - a terminal value
+   for the end state (room to the walls, its facing / wall distance, the other Clapper's position, still having a
+   strike window next) or the search will take greedy paths into corners. forum_reach.npz's TerminalValue is the
+   precursor; redesign it with the envelopes. Hitless first: a plan must be safe for every outcome; hits rank the safe.
+7. WHAT CAN BE HIT AND HOW: per move and frame which polygons are pogo-able / tink / pass-through (the slam's hammer is
+   passed through, the Slam 0 body is the strike), the enemy's own invulnerable states (the intro), her slash recoil
+   and its push on the enemy (0.48 u per side slash) - all inside the strike module.
+8. COVERAGE: unknown or rare enemy states (stuck at a wall, the wall push of a jump, the death) fall back to the old
+   conservative supports; walls (cling / slide / wall jump) are not modelled yet.
+9. MEASURING LIVE: one 64-episode A/B cannot see small gains (the same default gave 18 / 64 and 5 / 64); keep the
+   default as a control in every session and pool.
+
 ## 2. Stages (sequential; each with fixed points / checks and a cause audit; switches default off, bit-identical off)
 
 - M0 calibrations (live probes on w7, forced setups): the Deflate delay (attack / Clawline from the float), the float
