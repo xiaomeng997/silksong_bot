@@ -208,6 +208,12 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
     not change where she can be): the attack cooldown (a time mask on the 'can slash' flag) and the pogo i-frames (no
     cuts while they run) - handled online. Short locks (no re-open for 13 f after a close) may be over-approximated in
     the free-space table and enforced exactly in the online pass and the final re-verification.
+  - THE CLAWLINE IS AN EDGE, NOT A KEY (the person, 2026-10-21): the air tables include the UNHOOKED Clawline as a
+    movement event from every air state where it is allowed, left or right (she turns instantly): the antic hover
+    (~8-9 f, the height held, ~1.2 u drift toward the facing), the flat pull (~5.7-7.8 u, 70 u/s), and its end maps to
+    an EXISTING state (A1 at rest if it ends with vy 0, A2 if it ends in a bounce - M0 says which). No 'Clawline used'
+    or cooldown key (silk is not a constraint); if M0 finds a cooldown it is a short lock like the umbrella's re-open
+    (over-approximated in the table, exact online). The hooked Clawline stays online (it depends on the target).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
