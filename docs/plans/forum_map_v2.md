@@ -134,6 +134,17 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   the event-time interval into sub-intervals - the only branching, bounded. Waypoints / continuations only at the
   canonical states the families flow into (A1 at rest = an apex or a dash end, A3, A4, the ground), with the reused
   tables. The (x, y) projection is for the queries and the display only; the computation keeps the curves and phases.
+  THE CLUSTER, EXACTLY (the person, 2026-10-21): a cluster is one vertical trajectory = (the curve, its ORIGIN TIME
+  t0 = game frame - phase, its ORIGIN HEIGHT y0, the flags: dash used, umbrella locks, attack cooldown). Game frame 10
+  at A1 phase 5 and game frame 11 at A1 phase 6 are the same cluster 'A1 phase 0 at frame 5'. Its vertical evolution
+  is fixed, so it stores only the x interval set per frame. A cluster joined mid-curve (e.g. after an umbrella close,
+  at A1 phase 5 on frame 10) is empty before the join (a virtual origin) and starts with the joining piece's x range.
+  Clusters with the same key MERGE their x sets (quantised t0 / y0 make merges happen). Each frame an event can spawn
+  a new cluster (a dash from a cluster that has not dashed -> an A1 cluster at the dash's end; a close -> A1 at a
+  phase; an open -> A3; a pogo / a hooked Clawline -> A2), so roughly one new cluster per frame per event kind, but
+  the flags and locks stop the cascade (a dashed cluster cannot dash again): about a hundred alive at most. A cluster
+  EXITS when its x set is empty (cut by danger) or when it hands over (a landing -> a ground cluster, the terminal
+  fall -> A4). Grouping adjacent clusters by event time is only an optional storage compression.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
