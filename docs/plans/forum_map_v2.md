@@ -88,11 +88,16 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   START states: ground walk, ground run, air at rest (an apex), air float (its terminal -6 u/s); air normal at its
   terminal fall is kept only formally (the fall needs more height than the arena to reach it). END conditions: the
   strike windows (can slash / can down slash / can Clawline) and the steady states WITHOUT the apex (ground walk,
-  ground run, the float, a landing); 'air dash used' is a flag for the air only (the ground dash is unlimited). The
+  ground run, the float); 'air dash used' is a flag for the air only (the ground dash is unlimited). The
   APEX is never an end condition: after a strike, a separate STRIKE MODULE (the side slash's recoil, the pogo
   bounce, the Clawline's control and bounce) produces the next steady state (an apex or the ground) with its time and
   position, and that state starts the next search. Note: the float reaches -6 u/s only ~1 s after the Inflate
   (0.13 u/s per physics step from +0.5), so most float segments end before it.
+- TERRAIN CONTACTS ARE BRANCH EVENTS, NOT END STATES (the person, 2026-10-20): the tables are terrain-free; the system
+  must handle scenes with terrain, and a landing height need not equal the take-off height. Where the envelope's
+  lower boundary first touches a floor / platform top, that contact generates a branch: those positions at that frame
+  become a GROUND WALK start at the floor's height, and the ground table continues from there (per contact x its
+  earliest frame). Walls (cling / slide) and ceilings (a bonk resets vy) are contact events of the same kind.
   STORAGE = CONTOUR VERTICES (the person): one polygon (or a union of a few) per (start state, end condition,
   frame). Because horizontal and vertical are decoupled (instant run; the jump hold, the fall and the umbrella act on
   y only), each region is close to a product 'x interval x y interval' - nearly a rectangle - with a few cut corners
