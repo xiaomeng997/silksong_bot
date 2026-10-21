@@ -188,6 +188,13 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
     y - old clusters are never 'collapsed', they are rebuilt. Online, with danger, the cluster forward pass starts
     from the exact current state with the transition table and the cuts (ms), rebuilt at every branch point.
   - Longer horizons compose: R(s, t1 + t2) from R(s, t1)'s canonical end states and R(s', t2) (the coarse far layer).
+  - CAUSAL, NO CIRCULAR REFERENCE (the person asked): R(s, t) uses only R(., t') with t' < t because every event
+    takes >= 1 step (the dash 0.1 s, the umbrella >= 17 f open + ~7 f close, a re-open >= 13 f after a close, the
+    Clawline 26-34 f). The STATE GRAPH has cycles (A1 -dash-> A1, A1 -open-> A3 -close-> A1, A2 -> A1), but each
+    cycle consumes time, so unrolled in time it is a DAG: compute by increasing t. Two rules keep it clean: (1)
+    zero-time relabels are ALIASES, not edges (A2 at its apex IS A1 phase 0; A1 at the terminal IS A4) - one
+    canonical name each, no self-loops; (2) count time in 50 Hz physics steps inside the tables (exactly causal;
+    some 60 fps frames have no step) and convert at the interface. The flags break some cycles anyway (one air dash).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
