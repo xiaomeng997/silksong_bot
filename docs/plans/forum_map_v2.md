@@ -214,6 +214,10 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
     an EXISTING state (A1 at rest if it ends with vy 0, A2 if it ends in a bounce - M0 says which). No 'Clawline used'
     or cooldown key (silk is not a constraint); if M0 finds a cooldown it is a short lock like the umbrella's re-open
     (over-approximated in the table, exact online). The hooked Clawline stays online (it depends on the target).
+    THE CLAWLINE'S COOLDOWN AS A KEY? (the person asked): decide on M0's number - if the next Clawline is free at
+    its control (only the 26-34 f block), no key; if a cooldown outlasts the block, add a 'Clawline ready' flag like the
+    air dash's (x2 air tables, ~940, still a few MB) - a cooldown that changes where she can be belongs in the key;
+    only a very short one may stay an online lock.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
