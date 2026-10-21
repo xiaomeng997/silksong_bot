@@ -93,6 +93,19 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   bounce, the Clawline's control and bounce) produces the next steady state (an apex or the ground) with its time and
   position, and that state starts the next search. Note: the float reaches -6 u/s only ~1 s after the Inflate
   (0.13 u/s per physics step from +0.5), so most float segments end before it.
+- THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
+  forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
+  fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
+  float toward -6; no close before 17 f; a re-open >= 13 f after a close), the air dash (vy 0 for 0.1 s; one per
+  airtime - is it restored by a pogo? M0), the Clawline (the hold, then the bounce +17.4 or a flat unhooked pull), the
+  pogo (+17.4, 5 f constant then gravity), the jump's release frame on the take-off. So the vertical state is a
+  small DISCRETE family: canonical curves y(k), vy(k) (the fall from rest, the float after the Inflate, the bounce,
+  the fall after a Deflate, the jump per release frame) glued at event frames. Store those curves as 1-D arrays (no
+  2-D air tables); at use time build the event tree (event frames on a 2-4 f grid, refined near tight windows; the
+  locks and the one air dash prune it; target-dependent events - a pogo, a hooked Clawline - come from the strike
+  module), each branch = one vertical curve with the horizontal interval of its mode = one horizontal segment per
+  frame, checked against the danger polygons and the terrain. Tens to a few hundred branches per airtime. The 2-D
+  'air envelope' is only their union (for display); the ground keeps its interval tables (y fixed until the take-off).
 - TERRAIN CONTACTS ARE BRANCH EVENTS, NOT END STATES (the person, 2026-10-20): the tables are terrain-free; the system
   must handle scenes with terrain, and a landing height need not equal the take-off height. Where the envelope's
   lower boundary first touches a floor / platform top, that contact generates a branch: those positions at that frame
