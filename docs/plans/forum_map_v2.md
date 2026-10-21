@@ -94,6 +94,17 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   bounce, the Clawline's control and bounce) produces the next steady state (an apex or the ground) with its time and
   position, and that state starts the next search. Note: the float reaches -6 u/s only ~1 s after the Inflate
   (0.13 u/s per physics step from +0.5), so most float segments end before it.
+- AIR START STATES (the person, 2026-10-20: 'vy = 0, the first controllable frame after a down slash, the first
+  steady frame of the umbrella?'): yes, three canonical air starts, each fully given by the position + a few flags:
+  (A1) AT REST, vy 0, umbrella closed: an apex, the end of an air dash (vy 0), the end of a hit recoil (v 0 after
+  0.2 s); flag: the air hang available (only after a jump held through the apex, not after a bounce).
+  (A2) THE BOUNCE, its first controllable frame (vy +17.4 in the 5-frame constant phase): after a pogo contact (the
+  i-frames running, the attack ready ~19 f after the press) or the Clawline's control (no i-frames, the attack 9 f
+  later) - the same curve, other flags; the whole rise and the apex are inside A2's table (the umbrella from contact
+  +3 cuts the rise to +0.5), so a bounce needs no separate apex start.
+  (A3) THE FLOAT's first steady frame (the Inflate's end, vy +0.5, then the float toward -6): vx from the antic's
+  strong accel (8.5) is close to the held direction's float speed - 3 values (left / none / right).
+  Common flags: the air dash used, the attack cooldown left. With the ground walk / run that is 5 start states.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
