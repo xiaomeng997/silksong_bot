@@ -195,6 +195,13 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
     zero-time relabels are ALIASES, not edges (A2 at its apex IS A1 phase 0; A1 at the terminal IS A4) - one
     canonical name each, no self-loops; (2) count time in 50 Hz physics steps inside the tables (exactly causal;
     some 60 fps frames have no step) and convert at the interface. The flags break some cycles anyway (one air dash).
+  - THE GROUND TABLE (the person, 2026-10-21): in the air the state at any moment is fixed, so its reach map is one
+    table; on the ground the take-off time tau and place are free - the ground table is the UNION over tau of the
+    jump tables DILATED by the walk interval reached by tau (a Minkowski sum / max-plus convolution), plus the
+    stay-on-the-ground part - again one deterministic table per ground start (walk, run). Because left / right is
+    decoupled and the air speed equals the walk speed, it is close to 'x in [-X(t), X(t)] x y in [0, the running
+    max of the jump height]', with corners where the sprint / dash couple. Like every table it holds only the union;
+    the per-take-off arcs for the danger cuts are regenerated online from the transition table.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
