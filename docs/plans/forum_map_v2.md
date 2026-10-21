@@ -111,6 +111,12 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   hands over to A1; an umbrella opened in the rise hands over to A3 at its steady frame, a dash to A1 at its end.
   Likewise A1's plain fall reaches the terminal -30 u/s after 30 f (7.5 u) - a canonical A4 (terminal fall). Every
   table is short; long reach = tables chained at canonical states (time-shifted, translated).
+  JOINING A CURVE AT A PHASE (the person, 2026-10-20: 'A3 closed -> A1? not from 0'): right - the close is a Deflate
+  carve-out (~6-7 f; measured: normal gravity, vy falls 1.2 u/s per physics step from the float's vy, no re-open for
+  >= 13 f, an attack waits), after which she is in a plain fall at vy = (the float's vy at the close, +0.5 .. -6) -
+  that is a point ON A1's fall curve, so she joins A1's table at the phase where A1 has the same vy (about frame 7-13
+  of A1), shifted in time and position. Tables are therefore indexed by phase, not only entered at frame 0. M0: the
+  horizontal control during the Deflate (the float's inertia or the instant run).
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
