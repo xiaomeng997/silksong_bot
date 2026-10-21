@@ -202,6 +202,12 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
     decoupled and the air speed equals the walk speed, it is close to 'x in [-X(t), X(t)] x y in [0, the running
     max of the jump height]', with corners where the sprint / dash couple. Like every table it holds only the union;
     the per-take-off arcs for the danger cuts are regenerated online from the transition table.
+  - WHICH TABLE (the person: 'in the air the state picks one of ~200 maps'): yes - the key is (the curve, its
+    phase, the air-dash-used flag, the float's vx class): A1 ~31 + A2 ~23 + A3 ~60 x 3 + A4 1 ~ 235 x 2 for the dash
+    flag ~ 470 air tables, plus ground walk / run - each a small polygon per step, a few MB in all. NOT keys (they do
+    not change where she can be): the attack cooldown (a time mask on the 'can slash' flag) and the pogo i-frames (no
+    cuts while they run) - handled online. Short locks (no re-open for 13 f after a close) may be over-approximated in
+    the free-space table and enforced exactly in the online pass and the final re-verification.
 - THE AIR: HORIZONTAL INTERVALS x DISCRETE VERTICAL CURVES (the person, 2026-10-20): left / right can go back and
   forth, so an x interval per frame is right; but the fall is one-way and only a few events change vy, each to a
   fixed value and with its own lock: the umbrella (Antic 6 f at gravity, then Inflate vy +0.5 for 12 f, then the
