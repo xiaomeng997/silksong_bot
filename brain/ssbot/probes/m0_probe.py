@@ -327,7 +327,9 @@ def trial_fl(rng: random.Random, kind: str) -> tuple[list[int], dict]:
         m += _seg(M_J | press, 3) + _seg(M_J, 10) + _seg(0, 60)
     elif v == "infl":
         m += _seg(M_J, rng.randint(1, 11))
-        m += _seg(M_J | press, 3) + _seg(M_J, 14) + _seg(0, 45)
+        hp = rng.choice((3, 3, 8, 16))        # the press held this long (does it carry into the Float Idle?)
+        p["hp"] = hp
+        m += _seg(M_J | press, hp) + _seg(M_J, max(17 - hp, 2)) + _seg(0, 45)
     else:
         t = rng.randint(12, 50)               # jump-held frames after the antic (the Inflate's ~12 included)
         p["t"] = t
@@ -407,7 +409,7 @@ def gen_claw(rng: random.Random, air: bool, d: int):
     p: dict = {"d": d, "air": air}
     s = yield
     if air:
-        H = rng.randint(4, 18)
+        H = rng.randint(14, 18) if rng.random() < 0.6 else rng.randint(4, 13)
         k = rng.randint(2, 45)                # press frame after the jump's first frame
         p.update(H=H, k=k)
         for i in range(k):
