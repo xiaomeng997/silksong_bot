@@ -36,6 +36,9 @@ L1 ENEMY MODEL (per enemy, per move; knowledge, measured once):
   from Slam / Spell / Jump / Cast Slam Antic to Slam 2 / Cast 2); every start state first faces her (FaceObjectV2,
   turns >= 0.5 s apart); Jump Aim reads her x (target = her x - 5 x its facing, travel 0.916 x clamp(+-12), wall push);
   Slam Range = its pos +-8.05 u in x and pos -4.46 .. +3.37 u in y (her collider in the trigger).
+- The WALL PUSH of a jump (the person, 2026-10-22, from the recordings): near a wall the push acts late in the
+  flight, near the landing (the flights that touch a wall last 43-47 f instead of 55); the RISE is unaffected - so a
+  ride up is unaffected, but the landing x (and the jump cast's dome) must be predicted with the push.
 - API: predict(enemy state, her planned path) -> per frame: damage / body / pogo polygons for each outcome branch with
   probabilities, and the reveal frame of each branch (when she can see which one it is).
 - Validation (the rule validate-predictions-first): frame accuracy per move on the recordings (timing and geometry),
