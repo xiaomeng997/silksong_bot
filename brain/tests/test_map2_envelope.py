@@ -152,7 +152,8 @@ def test_no_live_module_imports_map2():
     offenders = []
     for p in root.rglob("*.py"):
         rel = p.relative_to(root).as_posix()
-        if rel.startswith("map2/") or rel in ("tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py"):
+        if rel.startswith("map2/") or rel in ("tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py",
+                                               "tools/m3_search.py", "tools/m3_accept.py"):
             continue
         if pat.search(p.read_text(encoding="utf-8", errors="ignore")):
             offenders.append(rel)

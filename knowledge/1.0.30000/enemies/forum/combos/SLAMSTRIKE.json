@@ -1,0 +1,19 @@
+{
+ "name": "SLAMSTRIKE",
+ "zh": "冲锤固定打法（地面起跳下劈冲锤）",
+ "status": "promoted",
+ "source": "brain/ssbot/combat/slam_play.py (SSBOT_FORUM_SLAM_PLAY, SP1; the person's 29 landed strikes of 2026-10-15)",
+ "evidence": "forum.md 65: the person's strikes x at the antic 4.3 / 6.3 / 7.5 u, jump 23.7 / 26.5 / 31.1 held 13.3 / 15.5 / 17.6, press 44.3 / 47.5 / 50.1; the playbook k_jump 26 hold 16 press 47",
+ "anchor": {"kind": "clapper_state", "states": ["Slam Antic"], "j": [0, 14]},
+ "pre": {"front_u": [2.7, 9.0], "ground": true},
+ "steps": [
+  {"ref": "anchor", "f": [0, 25], "do": "walk", "keys": "toward / away", "grid": {"stand": [4.6, 5.1, 5.6]}, "note": "to the stand band, then no key"},
+  {"ref": "anchor", "f": [24, 28], "do": "jump", "keys": "J", "grid": {"k_jump": [24, 26, 28], "hold": [14, 16]}},
+  {"ref": "anchor", "f": [41, 49], "do": "down", "keys": "D"},
+  {"ref": "anchor", "f": [45, 49], "do": "dslash", "keys": "DA", "grid": {"k_press": [45, 47, 49]}}
+ ],
+ "grid": {"stand": [4.6, 5.1, 5.6], "k_jump": [24, 26, 28], "hold": [14, 16], "k_press": [45, 47, 49]},
+ "branch_points": ["contact"],
+ "uncertain": [],
+ "impl": "slamstrike"
+}

@@ -168,7 +168,8 @@ def test_bot_does_not_import_map2():
     it only inside its --overlay-map2 layer."""
     root = Path(cm.__file__).resolve().parents[1]
     pat = re.compile(r"^\s*(from|import)\s+ssbot\.map2|ssbot\.map2\s+import", re.M)
-    allowed = {"tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py"}
+    allowed = {"tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py", "tools/m3_search.py",
+               "tools/m3_accept.py"}
     offenders = []
     for p in root.rglob("*.py"):
         rel = p.relative_to(root).as_posix()

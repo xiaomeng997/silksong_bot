@@ -1,0 +1,17 @@
+{
+ "name": "JUMPTRAP",
+ "zh": "跳招陷阱：从跳起的怪下方穿到它落点后面",
+ "status": "promoted",
+ "source": "brain/ssbot/combat/two_play.py SSBOT_FORUM_TWO_JUMPTRAP (SP14) / jump_behind.py",
+ "evidence": "SP14 fixed point fp3 29 / 30; A/B HP-hitless clears 10 vs 5 / 64; forum.md 89",
+ "anchor": {"kind": "clapper_state", "states": ["Jump Antic", "Jump Aim", "Jump", "Air", "Cast Slam Antic", "Cast Slam Antic 2"], "j": [0, 60]},
+ "pre": {"max_u": 16.0, "ground": true},
+ "steps": [
+  {"ref": "anchor", "f": [0, 60], "do": "run", "keys": "toward its landing's far side", "grid": {"behind_u": [2.0, 3.5, 5.0], "dash_f": [-1, 0, 6]}},
+  {"ref": "anchor", "f": [0, 60], "do": "stop", "keys": "-"}
+ ],
+ "grid": {"behind_u": [2.0, 3.5, 5.0], "dash_f": [-1, 0, 6]},
+ "branch_points": ["landing"],
+ "uncertain": [],
+ "impl": "jumptrap"
+}

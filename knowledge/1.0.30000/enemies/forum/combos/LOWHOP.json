@@ -1,0 +1,16 @@
+{
+ "name": "LOWHOP",
+ "zh": "小跳躲小符文",
+ "status": "promoted",
+ "source": "brain/ssbot/combat/rune_lowhop.py (SSBOT_FORUM_TWO_BOMBS2, SP13b)",
+ "evidence": "SP13b A/B HP-hitless clears 18 vs 6 / 64, small-rune HP losses 4 vs 22; forum.md 88",
+ "anchor": {"kind": "bomb_ring", "states": ["Cast 2"], "j": [0, 80]},
+ "pre": {"ground": true},
+ "steps": [
+  {"ref": "anchor", "f": [-14, -8], "do": "jump", "keys": "J", "grid": {"lead": [8, 11, 14], "hold": [3, 5, 7]}, "note": "the hop's air time over the ring's lit frames (bomb top 2.82 u above the floor)"}
+ ],
+ "grid": {"lead": [8, 11, 14], "hold": [3, 5, 7]},
+ "branch_points": ["landing"],
+ "uncertain": [],
+ "impl": "lowhop"
+}

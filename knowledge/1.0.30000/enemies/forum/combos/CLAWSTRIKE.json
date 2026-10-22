@@ -1,0 +1,18 @@
+{
+ "name": "CLAWSTRIKE",
+ "zh": "小跳飞针下劈冲锤",
+ "status": "promoted",
+ "source": "brain/ssbot/combat/claw_strike.py (SSBOT_FORUM_CLAWSTRIKE, SP13)",
+ "evidence": "SP13 fixed points w7 forced 29 / 29, w13 forced 44 / 44 without HP lost; A/B (64 per arm) HP-hitless clears 14 vs 10; forum.md 87",
+ "anchor": {"kind": "clapper_state", "states": ["Slam Antic"], "j": [0, 11]},
+ "pre": {"front_u": [1.0, 10.5], "bb_max": 3.3, "note": "her centre in front of its centre along its facing; her box bottom above the floor at most bb_max; the other Clapper Idle / Walk (SP13 gate)"},
+ "steps": [
+  {"ref": "anchor", "f": [0, 0], "do": "hop", "keys": "J", "grid": {"hold": [3, 4, 5, 6]}, "note": "on the ground only"},
+  {"ref": "anchor", "f": [5, 11], "do": "claw", "keys": "toward", "grid": {"k_press": [5, 7, 9, 11]}},
+  {"ref": "ctrl", "f": [0, 25], "do": "search", "note": "the strike from control: the search's down slash on Slam 0 (antic 44 - 51)"}
+ ],
+ "grid": {"hop": [3, 4, 5, 6], "k_press": [5, 7, 9, 11]},
+ "branch_points": ["ctrl"],
+ "uncertain": [],
+ "impl": "clawstrike"
+}
