@@ -11710,3 +11710,100 @@ Frozen checkouts `C:\ssbot\live_1v1_{90ffbdf, 9f2191e, 83789a9, 293a957, 2aec2ed
    HERO2 has not run live: by the rule the person's eye check of the predictions comes first (M2 / M4).
 5. For M1 / M2: the Clapper picks its move at the needle's hit from her throw position (6); the unhooked Clawline is
    an A1 edge with a residual vx (9); no Clawline-ready key (8); the pogo bounce is 3.74 u, the Clawline's 4.09 (5).
+
+## Task map2 - stage M1: the hero envelope engine (offline; the cluster forward pass on kin_jit lanes, exact vertical keys without snapping, the event limit for segment families, the Clawline block, danger cuts, witnesses, the canonical tables and their reflection for meet in the middle) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §92)
+
+The task: docs/plans/forum_map_v2.md section 1 L2 with the person's refinements of 10-20 / 21 (the clusters, the
+transition table as the recursive element, R(s, t) by a DP over time, union regions as contours, the Clawline as an
+edge, no snapping) and section 2 M1: the engine for Hornet (Wanderer, the Forum kit, the M0 / HERO2 model), validated
+against the hero model's rollouts. Offline only: no live run, no switch needed - nothing in the bot imports
+`ssbot.map2` (a test checks it), so the decisions are bit-identical. u: her box centre, centre to centre.
+
+### The engine (`brain/ssbot/map2/env_jit.py`, `envelope.py`)
+
+- A CLUSTER is one vertical trajectory held as a full kin_jit state (height, vy, gravity scale, mode / phase, the
+  timers and flags: air dash used, the umbrella / dash / attack locks, the Clawline lock) plus an x interval set per
+  frame. Clusters merge only on a bit-equal canonical vertical key (no snapping; timers that ran out, spent queues,
+  held keys whose hold no longer acts are canonicalised).
+- The recursive element is kin_jit's frame: each frame a cluster rolls its physics steps once, then branches on every
+  choice that changes its vertical state or mode (jump pressed / held / released, dash pressed left / right or held,
+  the attack's cancels of the umbrella and the sprint, the unhooked Clawline left / right, P + 9 or P + 8 throw); every
+  child comes from its parent one frame earlier (a DAG in time); R(s, t) = the union of the clusters' x sets at t.
+- Two LANES per cluster (one always holding left, one right): their per-frame x displacements bound every member's,
+  [a, b] -> [a + dlo, b + dhi] (exact for the instant run and the committed blocks, an over-approximation inside the
+  umbrella's inertia after a cut). The vertical never depends on left / right without walls: the lanes never diverged.
+- Danger: boxes in her centre's space cut each child's intervals at its own height every frame.
+- The unhooked Clawline: the M0 track (hero2.claw_unhooked) per frame as a block, control at P + 32 (+ the throw
+  variant) as an A1 start, then HarpoonDashEnd's residual drift bounded per step.
+- The event limit (the spec's "segment family"): events = presses, releases of a key whose hold still acts, the
+  Clawline; going on, releasing a useless hold and a queued action firing are free. Inside a segment every frame is
+  exact; longer reach chains segments / tables at canonical states.
+- Witness: backtrack the cluster chain (the vertical choices + a tube of x from which the target stays reachable),
+  then the left / right keys by a greedy tracker and, if it misses, a beam search (24 states spread across the tube),
+  re-simulated by the reference model (kin_jit + the Clawline block + the residual).
+- Tables (`canonical`, `table_keys`, `build_table`, `save_tables`, `Tables`): canonical starts (A1 phase 0..30, A2 the
+  Clawline's default bounce 4.09 u and the down slash's restarted bounce 3.74 u, phase 0..22, both with the air dash
+  restored; A3 Float Idle phase 0..58 x the vx class held from the open; A4; ground standing; ground sprint left /
+  right; air ones x dash used) x 6 physics-phase classes (frames, not 50 Hz steps: the FSM durations are frame-timed),
+  per frame and end condition (all / can slash / can down slash / can Clawline / on the ground / floating) a
+  conservative 0.05 u row raster relative to her start. Backward (meet in the middle) = the point reflection
+  (`Tables.backward / meet`).
+- Not used: the far-layer BANDS (same discrete state, y / vy hull, locks least restrictive: a superset, validated) -
+  with the dash and the Clawline they stayed at 50k - 290k clusters for 30 - 60 frames.
+
+### Validation (`brain/ssbot/tools/m1_envelope.py`; 400 recorded start states from the M0 runs: ground 222, air 111, umbrella 55, sprint / dash 12; random key sequences rolled by the reference model)
+
+| setting | starts x rollouts | escapes | clusters at T p50 / max | pass p50 / p99 |
+|---|---|---|---|---|
+| exact (no event limit), 12 f, free space | 120 x 300 = 36,000 | **0** | 74,464 / 104,757 | 395 / 586 ms |
+| <= 2 events, 30 f, the floor | 400 x 300 = 120,000 | **0** (one ground-dash start had 300 escapes of 0.0965 u: the start's drawn-x offset, fixed - rerun 0 / 300) | 4,716 / 14,503 | 97 / 282 ms (run beside other jobs) |
+| <= 2 events, 30 f, the floor + 4 random moving danger boxes | 300 x 300 = 90,000 (42,355 touched danger) | **0**, 0 rows inside a box | 4,350 / 14,140 | 74 / 254 ms |
+| <= 3 events, 20 f, the floor | 60 x 300 = 18,000 | **0** | 30,770 / 54,520 | 204 / 416 ms |
+
+- Witnesses (<= 2 events, 30 f, 80 starts x 20 targets: interval ends and interiors): 1,600 / 1,600 found, vertical
+  miss 0, horizontal p50 0.000 / p90 0.062 / p99 0.13 / max 0.62 u, 98.5 % within 0.1 u, interval ends max 0.165 u (one
+  run step): the extremes are real (tight). The large interior misses follow a Clawline (its antic drift takes only
+  three values). 1.4 ms p50, 8 ms p99.
+- Tightness of the random sample: the rollouts' bounding box equals the envelope's (x ratio 1.00, y 0.94 - 1.00 at
+  frames 5 - 20); cell coverage by 300 random rollouts is ~1 % (sparse sampling; the witnesses cover the interior).
+- Tables: subset 390 (29.7 s, 9.4 MB), full 1,758 (164.8 s, 43.2 MB); 75,201 sampled exact cluster points: 0 outside
+  their table. Outline polygons (`envelope.contours`, the 0.05 u staircase, collinear points dropped): p50 90 vertices
+  / 13 polygons per table at frame 10, 697 / 51 at frame 30 - not a handful: the exact heights differ and the dash /
+  Clawline lobes split the region; a conservative simplification is left to M3.
+- Pass time (100 starts, the floor, one thread): <= 1 event 30 f 4.5 / 17 ms (p50 / p99), 60 f 14 / 44 ms; <= 2 events
+  10 f 3.7 / 8.1 ms, 20 f 23 / 70 ms, 30 f 67 / 208 ms; <= 3 events 20 f 240 / 489 ms; no limit 6 f 8 / 12 ms, 8 f 36 /
+  58 ms, 10 f 111 / 206 ms, 12 f 355 / 820 ms.
+- Tests: `brain/tests/test_map2_envelope.py` (8: exact containment, the event-limited pass on the floor, danger
+  cuts, witness ends, the raster, the contours, the key canonicalisation, no live import). The full suite at f471324:
+  2,079 passed, 8 failed - M0's 5 (test_harness_recovery x 3 stopped by the existing DEMO_SOON, test_import_firewall,
+  test_three_layer) and 3 in the untracked brain/tests/test_sg8_review.py (not in this branch, not mine: it calls a
+  ForumPlanner._escape_pick(rest=...) this branch does not have).
+
+### Findings the person should know
+
+1. The cluster count is one to two orders above the spec's estimate (A1, free space, no limit: 23,831 at 16 f, 146 ms).
+   Switching mechanics off at 16 f: no Clawline 5,703; no P + 8 throw 14,767; **no air dash 286**; no dash with jump
+   held 14,118; no umbrella cancels 20,063; no umbrella 10,830; no Clawline and no dash 62. The air dash in kin_jit is
+   NOT "vy 0 for 0.1 s then A1 at rest": 2 dash steps at 28 u/s, then 14 frames of air sprint (no control, 26.9 u/s
+   falling 1.1 per step, gravity with an easing fall clamp, cancellable by attack / jump at any frame, extended at 12 u/s
+   while the dash is held) ending in a fall - every start frame x direction x jump held x cancel frame is its own
+   trajectory. The event limit keeps the passes at milliseconds.
+2. A jump held into a dash keeps gravity low through the dash and the air sprint (kin_jit's hang ramp): ~0.3 u higher
+   at the end. Not measured live: an "uncertain mechanic" for M3 (forced trial first).
+3. The attack in normal control is not only restrictive: its 0.1 s lock lets jump be held without opening the umbrella
+   (then the hang, a dash with jump held) and delays a queued dash. Covered by CB_JH (jump held without a press: an
+   over-approximation in an airtime's first frames) and the dash check after the Update's attack timer; OPT_ATK
+   (attacks as choices) is an option (x 2.4 clusters).
+4. Releasing jump while rising halves vy also after the 9 rise steps: holding jump stays a live state while vy > 0.
+5. Tables per physics-phase class in frames, not in 50 Hz steps (the curves are still per step).
+6. The Clawline's control assumes the air dash restored (an over-approximation if it was used; M0 did not split
+   that); the ground Clawline is not in (M0: 0.20 u off in its Catch); walls are not modelled (flat floor only).
+
+### Open items
+
+- M3 has to chain segments at canonical states (the junctions: standing, a Clawline / bounce start, Float Idle) and
+  use the tables as the backward filter; the stored outlines are unsimplified staircases.
+- The far layer (bands) needs a coarser discrete key to be bounded with the dash and the Clawline.
+- Parallelising the pass (the children of a frame are independent until the merge) would cut the times ~3 - 6x.
+- Data: `C:\ssbot\data\m2_play\map2\m1` (`starts.npz`, `f_*.json / .log` every number, `tables_ev2_t30.npz`,
+  `tables_full_ev2_t30.npz`, `f_mech_t16.json`, the debug scripts).
