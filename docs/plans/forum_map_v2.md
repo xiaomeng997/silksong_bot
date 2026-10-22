@@ -299,6 +299,17 @@ THE CLAWLINE IN THE TWO LAYERS (the person, 2026-10-20 evening):
   at use time (a hook on an Idle Clapper is a hit and triggers its reaction: the enemy model sees it). Slower than
   the dash for short hops (control 26-34 f), faster for long ones (70 u/s).
 
+BOUNDS (the lead's proposal, 2026-10-22, asked by the person; M3 checks them on the data):
+- TIME: the precomputed tables and the standard horizon 2 s = 120 frames = 100 physics steps (it covers a jump
+  cast from its Jump Aim to the end of the burst, 55 + 65 + ~8 = ~128 f, and the trap lead times, 23-45 f before a
+  hit); the exact online part only to the candidate's next branch point (typically 10-40 f); the coarse exit check
+  stretched to 3 s (180 f) only while a jump cast is in its antic (antic 55 f + the rest); beyond the horizon the
+  terminal value. The enemy predictions use the same horizon, with at most two future enemy choices branched.
+- SPACE: the arena itself - the Forum walls x 14.01 .. 48.99 (35 u), the floor y 3.015 to the ceiling step ~15.15
+  (~12 u). The relative tables span x +-35 u (2 s of sprint + dashes / Clawlines can cross the whole arena) and y
+  -12.2 .. +9 u (the floor below, the jumps and bounces above, the ceiling caps it); walls / floor / ceiling are
+  applied at use time as terrain events. Other rooms: their own bounds from the terrain map.
+
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
   primitives at branch points. Branch points = the end of her discrete commitments (a slash's lock, the Clawline's
