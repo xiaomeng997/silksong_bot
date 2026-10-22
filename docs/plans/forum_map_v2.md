@@ -302,12 +302,18 @@ THE CLAWLINE IN THE TWO LAYERS (the person, 2026-10-20 evening):
 HOW TO GET THERE (the person, 2026-10-22: 'the map says which points are reachable but not how - is the exact
 computation picking a point and choosing keys, or are the keys stored for every point?'): neither store-everything nor
 blind choice:
-- Offline the DP keeps ONE back-pointer per table cell (the event or 'continue' and the predecessor at the previous
-  step) - one witness, not all combinations. Online the cluster pass keeps for each cluster its parent and its event
-  frame. A target (x, y, t) is turned into keys by walking these back: the vertical part is the cluster chain (which
-  events at which frames: the dash at d, the umbrella at u / its close at c, the jump release r); the horizontal part
-  is trivial because the run is instant - hold toward the target for m steps, then release (bang-bang), threaded
-  through the cluster's allowed x intervals where danger cut them.
+- BACK-POINTERS LIVE ON FULL STATES, NEVER ON THE FLATTENED MAP (the person, 2026-10-22: a projected cell can be
+  reached in several full states - very different vy / vx / keys pressed; with one pointer per projected cell C may
+  point to B while B points to A', and from A' the state at B cannot reach C). The flattened region is only for the
+  queries (reachable at all? the first touch?). Paths come from the CLUSTERS: a cluster is one vertical history, so
+  its parent cluster and its event frame are unique; B-via-A and B-via-A' are different clusters even where they
+  share (x, y). Offline, keep the cluster tree of every start state (clusters with parent, event frame, the x
+  interval sets per step - finite, tens of MB in all); online the cluster pass builds the same tree with the cuts.
+- Reconstruction: the clusters whose height at t is the target's y and whose x set holds its x; walk their chain
+  back for the vertical events (the dash at d, the umbrella at u / the close at c, the jump release r); inside each
+  cluster rebuild x backward - with the instant run always possible (x(t-1) = the clamp of x(t) into the previous
+  interval within one step, it exists by construction of the dilation); inside the float (vx inertia) solve the
+  bounded-acceleration switch times (a bang-bang path to any interior point exists).
 - 'Exact computation' then means: simulate THAT concrete key string with the exact hero model (HERO2) and check it
   frame by frame against the predicted danger polygons (with their margins) before committing - the tables say what
   is possible, the simulation confirms the chosen path.
