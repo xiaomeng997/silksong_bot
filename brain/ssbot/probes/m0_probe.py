@@ -31,7 +31,8 @@ Clapper experiments (after its Roar; many per load; the load is renewed when its
   side      a low hop beside its body (her box 0.1 - 1.4 u clear of its body box) and the down slash into its side:
             a full bounce or not, the i-frames.
   hook      the Clawline at it while it is Idle (or walking) from the ground, 3 - 9.5 u away: the needle's hit, the
-            dash, the damage and its Control FSM's next move (the 12-18 f reaction).
+            dash, the damage and its Control FSM's next move (the 12-18 f reaction); a second action at control.
+  idle_hit  a side (or up) slash on it while it is Idle, from beside it: the hit to its Dmg Attack and next move.
 Every trial is one line of <recording>/m0_trials.jsonl (the experiment, its parameters, the frames). The hero is
 made invincible after every load (PlayerData isInvincible through the debug line server, port 47631 + instance) and
 her silk is kept at 9 (silk is not a constraint), so no hit or knock-back spoils a setup.
@@ -59,8 +60,9 @@ INTRO = (None, "Init", "Rest", "Drop Antic", "Notify", "Drop In", "Enter Land", 
 FLOOR = 3.015                    # the Forum floor (the standing box bottom)
 WALL_L, WALL_R = 14.01, 48.99
 X0 = 33.77                       # her x after fo_cl_w7w's load
+OPT = {"pre_dash": 0.35, "sprint": 1.0 / 3.0, "force_v": ""}   # --pre-dash / --sprint / --force-v
 HERO_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_whiff")
-CLAP_EXPS = ("pogo", "side", "hook")
+CLAP_EXPS = ("pogo", "side", "hook", "idle_hit")
 STOP_FILES = (r"C:\ssbot\sandbox\STOP_AGENTS", r"C:\ssbot\sandbox\HUMAN_PRACTICE", r"C:\ssbot\sandbox\DEMO_SOON",
               r"C:\ssbot\sandbox\m0_probe.stop")
 PRE_SPAWN_F = 225                # frames after the load's first input frame that a hero-only trial may use
@@ -319,6 +321,8 @@ def trial_fl(rng: random.Random, kind: str) -> tuple[list[int], dict]:
             p["side"] = True
     else:
         v = rng.choices(("held", "rel0", "relk", "infl", "antic"), (25, 15, 18, 15, 12))[0]
+        if OPT["force_v"]:
+            v = OPT["force_v"]
         press = M_CLAW | ROOM
     p["v"] = v
     # m so far ends 6 frames into the umbrella (the antic); the Inflate runs ~11-12 frames more
@@ -362,7 +366,7 @@ def trial_drift(rng: random.Random) -> tuple[list[int], dict]:
 
 def trial_dash(rng: random.Random, d: int) -> tuple[list[int], dict]:
     md = M_R if d > 0 else M_L
-    v = rng.choice(("twice", "twice", "sprint"))
+    v = "sprint" if rng.random() < OPT["sprint"] else "twice"
     p: dict = {"d": d, "v": v}
     if v == "twice":
         j = rng.randint(4, 40)
@@ -455,7 +459,7 @@ def gen_pogo(rng: random.Random, kind: str):
     bb = body_box(e)
     cx = 0.5 * (bb[0] + bb[2])
     side = 1 if hx(s) >= cx else -1
-    pre_dash = kind == "pogo" and rng.random() < 0.35
+    pre_dash = kind == "pogo" and rng.random() < OPT["pre_dash"]
     p["pre_dash"] = pre_dash
     if kind == "pogo":
         off = rng.uniform(-1.3, 1.3)
@@ -601,6 +605,50 @@ def gen_hook(rng: random.Random, max_wait: int = 900):
     return p
 
 
+def gen_idle_hit(rng: random.Random, max_wait: int = 900):
+    """A side slash (or an up slash) on the Clapper while it is Idle, from the ground beside it (her box edge 0.1 - 1.0 u
+    from its body edge): the frames from the hit to its Dmg Attack and its next move (the hook's reaction compared)."""
+    p: dict = {}
+    s = yield
+    gap = rng.uniform(0.1, 1.0)
+    wait_f = rng.choice((0, 0, rng.randint(1, 20)))
+    p.update(gap=gap, wait_f=wait_f, kind=rng.choices(("side", "up"), (4, 1))[0])
+    n = 0
+    idle_n = 0
+    while n < max_wait:
+        e = clapper(s)
+        bb = body_box(e)
+        st = control(e)
+        if e is None or bb is None:
+            return dict(p, skip="no clapper")
+        side = 1 if hx(s) >= 0.5 * (bb[0] + bb[2]) else -1
+        tx = (bb[2] + 0.25 + gap) if side > 0 else (bb[0] - 0.25 - gap)
+        if not (WALL_L + 0.6 < tx < WALL_R - 0.6):
+            side = -side
+            tx = (bb[2] + 0.25 + gap) if side > 0 else (bb[0] - 0.25 - gap)
+        idle_n = idle_n + 1 if st == "Idle" else 0
+        if st == "Idle" and idle_n > wait_f and abs(hx(s) - tx) < 0.35 and accepting(s) and on_ground(s):
+            break
+        k = 0
+        if abs(hx(s) - tx) >= 0.15 and accepting(s):
+            k = key_toward(hx(s), tx)
+        s = yield k
+        n += 1
+    else:
+        return dict(p, skip="no idle")
+    e = clapper(s)
+    p["start"] = {"f": s["f"], "x": hx(s), "cx": float(e["pos"][0]), "st": control(e), "box": body_box(e),
+                  "t": next((m.get("t") for m in e.get("fsms") or () if m.get("name") == "Control"), None)}
+    toward = key_toward(hx(s), float(e["pos"][0]))
+    p["f_press"] = s["f"] + 2
+    m = M_A | toward | (M_U if p["kind"] == "up" else 0)
+    for i in range(2):
+        s = yield m
+    for i in range(70):
+        s = yield 0
+    return p
+
+
 # ---- main -----------------------------------------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
@@ -613,6 +661,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=8100000)
     ap.add_argument("--minutes", type=float, default=60.0, help="stop after this many minutes")
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\map2_m0")
+    ap.add_argument("--pre-dash", type=float, default=0.35, help="pogo: the share of tries with an air dash first")
+    ap.add_argument("--sprint", type=float, default=1.0 / 3.0, help="dash_g: the share of held dashes (the sprint)")
+    ap.add_argument("--force-v", default="", help="fl_claw: always this variant")
     a = ap.parse_args(argv)
 
     from ssbot.probes.common import load_slot
@@ -620,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import re
     exps = [x.strip() for x in re.split(r"[,:]", a.exps) if x.strip()]
+    OPT.update(pre_dash=a.pre_dash, sprint=a.sprint, force_v=a.force_v)
     for x in exps:
         if x not in HERO_EXPS + CLAP_EXPS:
             raise SystemExit(f"unknown experiment {x}")
@@ -693,6 +745,8 @@ def main(argv: list[str] | None = None) -> int:
                 R.refill()
                 if exp == "hook":
                     res = R.run(gen_hook(rng), max_frames=1100)
+                elif exp == "idle_hit":
+                    res = R.run(gen_idle_hit(rng), max_frames=1000)
                 else:
                     res = R.run(gen_pogo(rng, exp), max_frames=400)
                 rec_line["res"] = res
