@@ -51,6 +51,8 @@ M_R, M_L, M_J, M_D, M_A = kin.B_RIGHT, kin.B_LEFT, kin.B_JUMP, kin.B_DOWN, kin.B
 # for alpha in [(q - 1) / 6, q / 6) (mod 1); alpha = q / 6 itself sits on an edge (the 0.016666 s frame decides)
 ALPHAS = tuple(((q - 0.5) / 6) % 1.0 for q in range(6))
 COOLDOWN_F = 19                              # measured by HeroMacros.cooldown(); asserted in the tests
+PRESS_TO_CONTACT = 3                         # HERO2 bounce profile: the down slash's contact this many frames after its
+#                                              press (live m0_probe: P + 3 in 66, + 4 in 40 of 115 contacts)
 IFRAMES = (0, 8)                             # F_INVULN frames c + 0 .. c + 8 after a contact on frame c
 
 
@@ -168,7 +170,11 @@ class HeroMacros:
                                               int(np.argmax(y)), land)
 
     def _bounce_profile(self, qc: int) -> VProfile:
-        """Free space (no terrain): the contact on sweep index 1 of a falling start, relative to that frame's box."""
+        """Free space (no terrain): the contact on sweep index 1 of a falling start, relative to that frame's box.
+        SSBOT_FORUM_HERO2 (params.hero2 with H2_POGO_RS): the Wanderer down slash is pressed PRESS_TO_CONTACT frames
+        before the contact (the live mode, forum.md 91), so the slash's bounce restart runs in the profile."""
+        if int(self.params.hero2) & kin.H2_POGO_RS:
+            return self._bounce_profile_h2(qc)
         T = self.T
         q0 = (qc + 1) % 6                                  # node one frame before the contact
         S = self._start(q0, y=self.stand_py + 30.0, vy=-6.0, ground=False)
@@ -177,6 +183,21 @@ class HeroMacros:
         ro = self._roll(S, np.zeros((1, T), np.int64), ev, terrain=None)
         y = ro.box[0, 1:, 1] - ro.box[0, 1, 1]
         return VProfile("bounce", 0, qc, y, ro.pos[0, 1:, 1] - ro.box[0, 1:, 1], ro.flags[0, 1:].copy(),
+                        int(np.argmax(y)), -1)
+
+    def _bounce_profile_h2(self, qc: int) -> VProfile:
+        """HERO2: the down slash pressed PRESS_TO_CONTACT frames before the contact (sweep index 0 = the contact)."""
+        T = self.T
+        k = PRESS_TO_CONTACT
+        q0 = (qc + k + 1) % 6                              # node one frame before the press
+        S = self._start(q0, y=self.stand_py + 30.0, vy=-6.0, ground=False)
+        m = np.zeros((1, T + k), np.int64)
+        m[0, 0:2] = M_D | M_A                              # the press (two frames, as the bot latches it)
+        ev = np.zeros((1, T + k), np.int64)
+        ev[0, k] = kin.EV_POGO
+        ro = self._roll(S, m, ev, terrain=None)
+        y = ro.box[0, k + 1:, 1] - ro.box[0, k + 1, 1]
+        return VProfile("bounce", 0, qc, y, ro.pos[0, k + 1:, 1] - ro.box[0, k + 1:, 1], ro.flags[0, k + 1:].copy(),
                         int(np.argmax(y)), -1)
 
     # ---- (a) ground steps / horizontal schedules ----

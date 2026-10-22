@@ -71,6 +71,29 @@ DASH_U = 1.4 * 50.0 / 60.0      # u per 60 Hz frame (70 u/s, 0.02 s physics step
 VY_RANGE = (-6.0, 9.0)          # her vy at the press inside the live runs' range (the fit above)
 DASH_MAX_U = 7.0                # the dash runs 0.1 s at most
 ATK_CD_S = 0.15                 # the attack cooldown at control (s)
+# SSBOT_FORUM_HERO2 (map v2 stage M0, default off; forum.md 91): the hold height from the Harpoon Antic's own rules
+# (ClampVelocity2D y -10 .. 5, then DecelerateXY 0.875 per step, gravity off, to the throw 9 frames after the press):
+# her box bottom at the throw = bb + H2_HOLD_K * clamp(vy, -10, 5) with bb / vy her free-flight state at the press's
+# latched frame (the model's rollout at P); live m0_probe 123 airborne presses vy -19.6 .. +17.4: exact to 0.000 u
+# (p10 / p90) with the 7 / 8 physics steps known, K 0.0744 / 0.0804 without (DY0 / DYV above were fitted on the state
+# two frames before the latch: the SP13 runs' P was the decision frame)
+HERO2 = kin.hero2_on()
+H2_HOLD_K = 0.0774
+H2_HOLD_SPREAD = 0.0030         # +- per u/s of the clamped vy (7 vs 8 physics steps in the antic)
+
+
+def hold_bb(bb: float, vy: float) -> float:
+    """Her box bottom (above the floor) held through the Clawline from her state at the press."""
+    if HERO2:
+        return bb + H2_HOLD_K * min(max(vy, -10.0), 5.0)
+    return bb + DY0 + DYV * vy
+
+
+def vy_ok(vy: float) -> bool:
+    """Her vy at the press inside the hold model's range (HERO2: any; the clamp holds over the measured -19.6 .. 17.4)."""
+    if HERO2:
+        return -30.0 <= vy <= 25.0
+    return VY_RANGE[0] <= vy <= VY_RANGE[1]
 GOOD_OK = 4                     # plan(): a (hop, P) with this many passing strike plans in its worst variant is taken
 BUDGET_S = 0.020                # plan(): stop searching after this long once one passes
 HARD_S = 0.030                  # ... and after this long in any case
@@ -165,7 +188,7 @@ def claw_phase(x_p: float, bb_p: float, vy_p: float, toward: int, fx: float, gap
     """The live timeline from the press state (her box centre x, box bottom above the floor, vy): (her stop x, box
     bottom held to control, control's frame after P), None when the dash cannot reach the stop (> DASH_MAX_U)."""
     x_t = x_p + toward * ANTIC_DX
-    bb = max(bb_p + DY0 + DYV * vy_p, 0.25)
+    bb = max(hold_bb(bb_p, vy_p), 0.25)
     x_s = fx - toward * (gap + HALF_W)
     dist = (x_s - x_t) * toward
     if dist > DASH_MAX_U:
@@ -270,9 +293,9 @@ class ClawStrike:
             bb = float(ro.box[n, i, 1]) - FLOOR
             vy = float(ro.vel[n, i, 1])
             xp = 0.5 * float(ro.box[n, i, 0] + ro.box[n, i, 2])
-            if not c.ray_lo <= bb + DY0 + DYV * vy <= c.ray_bb:
+            if not c.ray_lo <= hold_bb(bb, vy) <= c.ray_bb:
                 continue
-            if not VY_RANGE[0] <= vy <= VY_RANGE[1]:
+            if not vy_ok(vy):
                 # the hold height's fit (DY0, DYV) covers vy -5.4 .. +8.7 at the press; fp4 (162ca26): two presses in a
                 # hop's fast rise held her 2.1-2.6 u up at control - no strike plan, the other one's hammer
                 continue

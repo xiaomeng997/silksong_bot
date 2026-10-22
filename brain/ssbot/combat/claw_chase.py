@@ -35,6 +35,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass, field
 
+from ssbot.combat import claw_strike as _cs
 from ssbot.combat import slam_play as _sp
 from ssbot.combat import two_play as _tp
 
@@ -321,9 +322,9 @@ class ClawChase:
                 break
             yP = y + vy * d - 0.5 * CA_G * d * d
             vyP = (vy - CA_G * d) * 60.0
-            if yP < 0.3 or not -6.0 <= vyP <= 9.0:
+            if yP < 0.3 or not (_cs.vy_ok(vyP) if _cs.HERO2 else -6.0 <= vyP <= 9.0):
                 continue
-            yb = yP + CA_DY0 + CA_DYV * vyP
+            yb = _cs.hold_bb(yP, vyP) if _cs.HERO2 else yP + CA_DY0 + CA_DYV * vyP
             kr = kP + 10
             if kr < 0:
                 jb, jx = 0.0, x0

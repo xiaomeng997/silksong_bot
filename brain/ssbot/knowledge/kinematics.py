@@ -511,6 +511,12 @@ class HeroParams:
     scr_roof_t: float = 0.0917         # Hit Roof Soft: the End clip from a FixedUpdate entry (fit: control back 5
     #                                    frames after the roof step)
     scr_detach: float = 0.2            # Detach: Translate x by scale.x * 0.2 (away from the wall)
+    # map v2 stage M0 (SSBOT_FORUM_HERO2, default off; hero2()): H2_* behaviour bits measured on the m0_probe
+    # recordings (forum.md 91), 0 = the model as before (bit-identical); the restart's time / jump steps are fitted
+    hero2: int = 0
+    h2_pogo_rs_t: float = 0.1083       # the Wanderer slash's "Bounce" animation event after the press (s): the bounce
+    #                                    restarts there (NailSlash.DownBounce -> DownspikeBounce, FinishDownspike vy -10)
+    h2_pogo_j2: int = 8                # ... with its own jump steps (the slash config: one step at the bounce speed)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -542,7 +548,8 @@ class HeroParams:
               "scr_force_held", "scr_end_vy", "scr_end_decel", "scr_end_t", "scr_roof_ray", "scr_roof_t",
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
               "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
-              "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact")
+              "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact",
+              "hero2", "h2_pogo_rs_t", "h2_pogo_j2")
 
     def vector(self) -> np.ndarray:
         """The scalar parameters (P_* order); with AB_THUNK a tail from P_THK: per THUNK_SLOTS slot the vertex count
@@ -637,9 +644,41 @@ class HeroParams:
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
  P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_THK_ON, P_THK_OFF, P_THK_OFF_UP,
  P_SLOPE_CONTACT,
- NP) = range(152)
+ P_H2, P_H2_RST, P_H2_PJ2,
+ NP) = range(155)
 assert NP == len(HeroParams.VECTOR)
 P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
+# HeroParams.hero2 bits (map v2 stage M0, forum.md 91; kin_jit only, with abilities != 0):
+#   H2_GLIDE_GRAV  the umbrella's Attack / Dash Cancel gives gravity back (RegainControl -> AffectedByGravity(true)):
+#                  the model kept the Inflate's gravity off and, with the jump key held, ramped it as an air hang
+#   H2_REL_LOSS    an attack / dash press on the frame the jump key is released in the float is lost (Float Idle's
+#                  ListenForJump END -> Deflate runs first in that Update; the press's edge is gone in the Deflate)
+#   H2_POGO_RS     the Wanderer slash bounce restarts at the slash's "Bounce" animation event (h2_pogo_rs_t after the
+#                  press) when the contact came before it: vy -10 for that frame, then h2_pogo_j2 jump steps; a contact
+#                  after the event bounces once with h2_pogo_j2 (NailSlash.QueueBounce -> DownBounce)
+#   H2_GLIDE_ATK   the umbrella's Attack Cancel swings on the press frame (SetStartWithAttack -> DoAttack inside the
+#                  FSM's Update), not a frame later from the attack queue
+H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK = 1, 2, 4, 8
+H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK
+HERO2_ENV = "SSBOT_FORUM_HERO2"
+# the M0 calibration (ssbot.tools.m0_calib; forum.md 91): the bits and the fitted restart
+HERO2_OVERRIDES = {"hero2": H2_ALL, "h2_pogo_rs_t": 0.1083, "h2_pogo_j2": 8}
+
+
+def hero2_on() -> bool:
+    import os
+    return os.environ.get(HERO2_ENV, "0").strip() == "1"
+
+
+def hero2(params: HeroParams, on: bool | None = None) -> HeroParams:
+    """SSBOT_FORUM_HERO2 (map v2 stage M0, default off): the hero model with the M0 calibration (HERO2_OVERRIDES).
+    Off (or a params without the Forum abilities) returns `params` itself, so the rollouts stay bit-identical."""
+    on = hero2_on() if on is None else on
+    if not on or not params.abilities:
+        return params
+    d = params.to_json()
+    d.update(HERO2_OVERRIDES)
+    return HeroParams.from_json(d)
 THK_STRIDE = 1 + 2 * THUNK_MAXV
 
 

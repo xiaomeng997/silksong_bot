@@ -48,6 +48,8 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0,
     P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
+from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
+    H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, P_H2, P_H2_RST, P_H2_PJ2)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1285,6 +1287,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
         x[MODE_T] = f32(x[MODE_T] + dt)
     if mode == M_GLIDE:
         ph = x[PHASE]
+        h2 = np.int64(P[P_H2])
+        ended = False
         if x[GROUND] > 0:                 # LAND -> Land -> Relinquish Control
             regain_jump(x, mask, P)
             x[GL_CD] = P[P_GL_CD]
@@ -1303,6 +1307,7 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[PHASE] = 3.0                # END -> Deflate: gravity back
             x[MODE_T] = 0.0
             grav_on(x)
+            ended = True
         elif ph == 5:
             x[PHASE] = 2.0                # Bump L / R -> Float Idle (AccelerateToY, UmbrellaMotionX from the next step)
             x[MODE_T] = 0.0
@@ -1311,9 +1316,15 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[GL_CD] = P[P_GL_CD]
         if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3
                                    or x[PHASE] == 5):
-            if (pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0):
+            if ((pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0)) and \
+                    not (ended and (h2 & H2_REL_LOSS) != 0):
                 regain(x, mask)           # Attack Cancel / Dash Cancel: control back, the press acts this frame
+                if (h2 & H2_GLIDE_GRAV) != 0:
+                    grav_on(x)            # RegainControl -> AffectedByGravity(true) (live: -1.2 per step at once)
                 x[GL_CD] = P[P_GL_CD]
+                if (h2 & H2_GLIDE_ATK) != 0 and (pressed & B_ATTACK) != 0:
+                    do_attack(x, mask, P)  # SetStartWithAttack -> RegainControl -> DoAttack in the FSM's own Update
+                    x[AQ] = -1.0          # (live: the slash on the press frame; the queue would swing a frame late)
         if x[MODE] == M_GLIDE and (x[PHASE] == 1 or x[PHASE] == 2):
             rx, ry = rend_x(x), rend_y(x)
             bl = hray(rx, ry, -1.0, P[P_GL_BRAY], TT)
@@ -1811,6 +1822,12 @@ def apply_events(x, ev, P):
         x[MODE] = M_NORMAL
         x[JUMPING] = 1.0
         x[JSTEPS] = P[P_POGO_J]
+        if P[P_ABIL] != 0 and (np.int64(P[P_H2]) & H2_POGO_RS) != 0 and x[ATTACKING] > 0 and x[ATK_PDIR] == 2 \
+                and ge32(x[ATK_T], P[P_H2_RST]):
+            # a contact after the slash's "Bounce" event: NailSlash.QueueBounce -> DownBounce at once (CancelAttack,
+            # the slash's own bounce config); before it the default bounce here and the restart at the event (update)
+            x[JSTEPS] = P[P_H2_PJ2]
+            x[ATTACKING] = 0.0
         x[JDSTEPS] = P[P_POGO_JD]
         x[BOUNCE] = 0.0
         x[DS_REC] = 0.0
@@ -1961,8 +1978,20 @@ def update(x, mask, ev, dt, udt, P, TT):
         else:
             x[MODE_T] = f32(x[MODE_T] + dt)
     if normal and x[ATTACKING] > 0:
+        t_prev = x[ATK_T]
         x[ATK_T] = f32(x[ATK_T] + dt)
-        if ge32(x[ATK_T], P[P_ATK_DUR]):
+        if ab != 0 and (np.int64(P[P_H2]) & H2_POGO_RS) != 0 and x[ATK_PDIR] == 2 and x[BOUNCE] >= 0 \
+                and t_prev < P[P_H2_RST] and ge32(x[ATK_T], P[P_H2_RST]):
+            # the slash's "Bounce" animation event after a pogo contact: NailSlash.DownBounce -> CancelAttack and
+            # DownspikeBounce again (FinishDownspike: vy -10 this frame, the bounce config's jump steps)
+            x[ATTACKING] = 0.0
+            x[JUMPING] = 1.0
+            x[JSTEPS] = P[P_H2_PJ2]
+            x[JDSTEPS] = P[P_POGO_JD]
+            x[BOUNCE] = 0.0
+            x[GS] = 1.0
+            x[VY] = P[P_DS_ENDVY]
+        if x[ATTACKING] > 0 and ge32(x[ATK_T], P[P_ATK_DUR]):
             x[ATTACKING] = 0.0
             if ab != 0:
                 x[WSLASH] = 0.0           # ResetAttacks

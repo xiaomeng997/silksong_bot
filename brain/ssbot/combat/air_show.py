@@ -908,8 +908,8 @@ class AirShow:
             bb = float(ro.box[n, i, 1]) - FLOOR
             vy = float(ro.vel[n, i, 1])
             xp = 0.5 * float(ro.box[n, i, 0] + ro.box[n, i, 2])
-            bt = bb + _cs.DY0 + _cs.DYV * vy
-            if not (0.6 <= bt <= 3.3 and _cs.VY_RANGE[0] <= vy <= _cs.VY_RANGE[1]):
+            bt = _cs.hold_bb(bb, vy)                       # HERO2: the Harpoon Antic's clamp (claw_strike)
+            if not (0.6 <= bt <= 3.3 and _cs.vy_ok(vy)):
                 continue
             br = body[min(i + 10, T1 - 1)]
             if not np.isfinite(br[0]) or bt + FLOOR > br[3] - 0.3:

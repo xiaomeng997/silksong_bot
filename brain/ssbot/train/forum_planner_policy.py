@@ -171,7 +171,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.clash not in CLASH_MODES:
             raise ValueError(f"clash mode {clash!r}: one of {sorted(CLASH_MODES)}")
         self.crest_seen: str | None = None
-        self.params0 = HeroParams.load(CREST_PARAMS[crest])
+        # SSBOT_FORUM_HERO2 (map v2 M0, default off): the hero model with the M0 calibration (kin.hero2: the same
+        # object when off)
+        self.params0 = kin.hero2(HeroParams.load(CREST_PARAMS[crest]))
         self.params = self.params0
         self.pb, self.rules = load_forum_playbook(playbook)
         self.floor_hero_y = FLOOR_Y + hb.HERO_HALF_U[1]
