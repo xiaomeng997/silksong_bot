@@ -117,6 +117,12 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   thin BAND (its height +- half a bin) in every danger check - conservative, still safe; (2) the chosen plan is
   re-verified with the exact unsnapped trajectory before it is committed (the tight strike windows need that). The
   same snapping may serve A1 / A2 in the far layer; x stays exact (interval sets).
+  WHERE SNAPPING APPLIES (the person, 2026-10-21: 'the final table is one flattened region picked from her current
+  state and everything is done offline with unlimited compute, so no snapping'): right for the PRECOMPUTED tables -
+  they are computed exactly (full precision), no snapping. Snapping is only an option for the ONLINE cluster pass,
+  the one place with a time budget (when danger is near, the clusters are rebuilt from her exact state and cut; a cut
+  in a parent changes its children's x sets, so this cannot be fully precomputed). Use it there only if M1 / M3 show
+  the online counts or times need it; the committed plan is re-verified exactly either way.
   Common flags: the air dash used, the attack cooldown left. With the ground walk / run and A4 (below) 6 start states.
   TABLES CHAIN AT CANONICAL STATES (the person, 2026-10-20: 'if nothing happens in A2 before the apex, switch to
   A1?' - yes): A2's do-nothing branch IS an A1 state at the apex (vy 0, umbrella closed, no hang, the i-frames over,
