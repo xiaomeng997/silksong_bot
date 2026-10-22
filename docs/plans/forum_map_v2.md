@@ -314,6 +314,17 @@ blind choice:
   cluster rebuild x backward - with the instant run always possible (x(t-1) = the clamp of x(t) into the previous
   interval within one step, it exists by construction of the dilation); inside the float (vx inertia) solve the
   bounded-acceleration switch times (a bang-bang path to any interior point exists).
+- A CLUSTER = (ITS TYPE, ITS SPACE-TIME ORIGIN); A PATH = THE EVENT LIST (the person, 2026-10-22): a cluster's free
+  evolution is its type's table translated to its origin (the fixed vertical curve, the shared x growth), so free
+  clusters store nothing per frame - only the danger-cut ones carry their cut x sets. A path is the list of non-left /
+  right key events (jump press / release, dash, umbrella open / close, Clawline, attacks) with their time and place;
+  left / right between them is rebuilt. 'An event gives the same state whatever came before' holds for the TYPE of
+  most events (dash -> A1 at rest; a pogo -> the 3.74 u bounce; a hooked Clawline's control -> the 4.09 u bounce; the
+  open -> A3 after the Inflate with vx by the held key; a landing -> ground walk), but NOT always for the ORIGIN: the
+  umbrella antic falls 6 f from the prior vy; the Clawline's hold height depends on vy at the press (+0.074..0.080 x
+  the clamped vy); the close continues the float's vy (A1 at the phase with that vy) and freezes vx for 6 f; the
+  unhooked Clawline ends at A1 with a residual vx 12.46 decaying x0.923 per step. So an event is a deterministic map
+  'prior state at the event frame -> (type, origin)', computed exactly; the new cluster then runs on its type's table.
 - 'Exact computation' then means: simulate THAT concrete key string with the exact hero model (HERO2) and check it
   frame by frame against the predicted danger polygons (with their margins) before committing - the tables say what
   is possible, the simulation confirms the chosen path.
