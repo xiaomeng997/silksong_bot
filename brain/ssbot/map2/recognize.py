@@ -14,8 +14,9 @@ at nominal timing), her trajectory (mode, ground, position) and the Clappers' pr
                other one is attacking (P1-locked: the buddy lock, a free hit)
   P2           the umbrella open (Float) in the plan, closed by the plan (not by landing), then a down slash contact
                within 45 frames of the close
-  P3-face      a contact on a Clapper in Idle / Walk (or in the frame its next move starts) within 12 u of its nearer
-               wall with her centre on its wall side by >= 0.3 u (its next move faces the wall)
+  P3-face      a contact on a Clapper in Idle / Walk (the frame before the hit) within 12 u of its nearer wall whose
+               next move (it starts at the hit, facing her side) faces that wall (no move in the plan's horizon: her
+               centre on its wall side by >= 0.3 u at the contact)
   P3-cross     a Clapper in Slam Antic facing her: she ends behind it (the side opposite its facing) before its Slam 0
   P4           >= 2 down slash contacts on a Clapper in Jump / Air (its flight), or one on its rising body (vy > 0)
   P5           a down slash contact on a grounded Clapper (not in its flight) while she falls (her vy < 0 at the
@@ -127,7 +128,7 @@ def classify(ev, sit) -> list:
                 hx = tr.pos[kc, 0]
                 nxt = next(((r[0], r[7]) for r in sorted(br.recs.get(iid, ()), key=lambda r: r[0])
                             if r[0] >= kc and r[3] in MOVE_STARTS and r[4] <= 1), None)
-                if (hx - cx) * to_wall >= 0.3 and (nxt is None or nxt[1] == to_wall):
+                if (nxt is not None and nxt[1] == to_wall) or (nxt is None and (hx - cx) * to_wall >= 0.3):
                     labels.add("P3-face")
     # P4: contacts on its flight
     for iid in iids:

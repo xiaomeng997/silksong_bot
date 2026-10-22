@@ -186,7 +186,8 @@ def human_situations(W) -> list:
 
 
 PLAIN_CLIPS = {"Airborne", "Idle", "Run", "Run To Idle", "Turn", "Idle To Run", "Land", "Land To Run",
-               "Dash To Idle", "Dash To Run", "DownSpikeBounce 1", "DownSpikeBounce 2", "Slash To Run"}
+               "Dash To Idle", "Dash To Run", "DownSpikeBounce 1", "DownSpikeBounce 2", "Slash To Run", "Slash",
+               "SlashAlt", "Slash Land", "Slash Land Run", "Slash Land Run Alt", "Skid End 1", "Skid End 2"}
 
 
 def rec_state(W, E, g):

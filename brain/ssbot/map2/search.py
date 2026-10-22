@@ -1042,8 +1042,10 @@ class Searcher:
                             # the middle of the overlap and, when wide, both sides of its centre (the contact's side
                             # steers its next move's facing: P3)
                             xs_ = [0.5 * (a_ + bb_)]
-                            if bb_ - a_ > 1.2:
-                                xs_ += [max(a_ + 0.3, min(cx - 0.6, bb_ - 0.3)), min(bb_ - 0.3, max(cx + 0.6, a_ + 0.3))]
+                            for sd in (-0.9, 0.9):           # each side of its centre (the contact's side: P3)
+                                xv = min(max(cx + sd, a_ + 0.1), bb_ - 0.1)
+                                if bb_ - a_ > 0.2 and (xv - cx) * sd > 0.3 and abs(xv - xs_[0]) > 0.3:
+                                    xs_.append(xv)
                             for xm in xs_:
                                 found["dslash"].append((int(R["t"][i]), int(R["g"][i]), float(xm), float(R["y"][i]),
                                                         dc, abs(xm - cx)))
@@ -1098,7 +1100,7 @@ class Searcher:
                                 if r2 not in sel:
                                     sel.append(r2)
                         elif per > 1 and len(first) > 1:
-                            sel.append(first[1 + (n_ % (len(first) - 1))])   # the sides of its centre in turn
+                            sel += first[1:3]                                # the sides of its centre
                         for r in sel:
                             cands.append((kind, r[0], r[1], r[2], r[3], iid, r[4], b))
         # dedupe
