@@ -605,8 +605,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--savestate", default="fo_cl_w7w")
-    ap.add_argument("--exps", default=",".join(HERO_EXPS))
-    ap.add_argument("--weights", default="", help="comma-separated weights for --exps (default equal)")
+    ap.add_argument("--exps", default=",".join(HERO_EXPS), help="experiments, separated by ',' or ':'")
+    ap.add_argument("--weights", default="", help="weights for --exps, separated by ',' or ':' (default equal)")
     ap.add_argument("--trials", type=int, default=100)
     ap.add_argument("--seed", type=int, default=8100000)
     ap.add_argument("--minutes", type=float, default=60.0, help="stop after this many minutes")
@@ -616,11 +616,12 @@ def main(argv: list[str] | None = None) -> int:
     from ssbot.probes.common import load_slot
     from ssbot.record.recorder import Recorder
 
-    exps = [x.strip() for x in a.exps.split(",") if x.strip()]
+    import re
+    exps = [x.strip() for x in re.split(r"[,:]", a.exps) if x.strip()]
     for x in exps:
         if x not in HERO_EXPS + CLAP_EXPS:
             raise SystemExit(f"unknown experiment {x}")
-    w = [float(v) for v in a.weights.split(",")] if a.weights else [1.0] * len(exps)
+    w = [float(v) for v in re.split(r"[,:]", a.weights) if v.strip()] if a.weights else [1.0] * len(exps)
     rng = random.Random(a.seed)
     link = OracleLink(instance=a.instance, connect_timeout_s=120)
     pd = PdLine(a.instance)
