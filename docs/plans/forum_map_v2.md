@@ -114,8 +114,8 @@ THE PERSON'S REFINEMENT OF L2 (2026-10-20 evening):
   NO SNAPPING (the person, 2026-10-21, final): the precomputed tables are computed exactly offline, and online the
   pass starts from her ONE exact observed state, so every derived cluster is exact too (snapping was only a way to
   merge clusters, not to model uncertainty). The online count is the raw number of event spawns from that one start -
-  a few hundred to a few thousand, milliseconds compiled - so nothing is snapped. (The lead's earlier snapping
-  proposal is withdrawn.)
+  a few hundred to a few thousand, milliseconds compiled - so nothing is snapped. (The person's own earlier
+  snapping idea of the same day, which the lead had adopted, is dropped by the person.)
   Common flags: the air dash used, the attack cooldown left. With the ground walk / run and A4 (below) 6 start states.
   TABLES CHAIN AT CANONICAL STATES (the person, 2026-10-20: 'if nothing happens in A2 before the apex, switch to
   A1?' - yes): A2's do-nothing branch IS an A1 state at the apex (vy 0, umbrella closed, no hang, the i-frames over,
