@@ -24,6 +24,8 @@ randomize_start's dx), so nothing hooks, hits or locks her:
             and released (the skid).
   ds_whiff  the down slash in the air with nothing below, a second press j = 12..24 frames after the first (the
             cadence after a whiff), and side slashes the same.
+  reopen    the umbrella opened, closed (the jump released), the jump pressed again k = 1..24 frames later: the
+            re-open lock.
 Clapper experiments (after its Roar; many per load; the load is renewed when its HP drops below 60):
   pogo      a full jump over its head and the down slash on it; then at j frames after the press the second down
             slash (the cadence after a pogo hit), the air dash (does a pogo give it back?) or nothing (the bounce and
@@ -61,7 +63,7 @@ FLOOR = 3.015                    # the Forum floor (the standing box bottom)
 WALL_L, WALL_R = 14.01, 48.99
 X0 = 33.77                       # her x after fo_cl_w7w's load
 OPT = {"pre_dash": 0.35, "sprint": 1.0 / 3.0, "force_v": ""}   # --pre-dash / --sprint / --force-v
-HERO_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_whiff")
+HERO_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_whiff", "reopen")
 CLAP_EXPS = ("pogo", "side", "hook", "idle_hit")
 STOP_FILES = (r"C:\ssbot\sandbox\STOP_AGENTS", r"C:\ssbot\sandbox\HUMAN_PRACTICE", r"C:\ssbot\sandbox\DEMO_SOON",
               r"C:\ssbot\sandbox\m0_probe.stop")
@@ -314,6 +316,8 @@ def trial_fl(rng: random.Random, kind: str) -> tuple[list[int], dict]:
     m = _umbrella_open(rng, d, md, mo, p)
     if kind == "fl_atk":
         v = rng.choices(("held", "rel0", "relk", "infl", "side_held", "side_relk"), (25, 20, 40, 12, 10, 8))[0]
+        if OPT["force_v"]:
+            v = OPT["force_v"]
         press = M_D | M_A
         if v.startswith("side"):
             press = M_A
@@ -348,6 +352,20 @@ def trial_fl(rng: random.Random, kind: str) -> tuple[list[int], dict]:
             mg = 0 if g == 0 else (md if g == d else mo)
             p.update(k=k, g=g)
             m += _seg(mg, k) + _seg(press | mg, 3) + _seg(mg, 10) + _seg(0, 45)
+    return m, p
+
+
+def trial_reopen(rng: random.Random) -> tuple[list[int], dict]:
+    """The umbrella opened, floated, closed (the jump released), then the jump pressed again k frames after the
+    release and held: the re-open lock after a close."""
+    d = rng.choice((-1, 1))
+    md, mo = (M_R, M_L) if d > 0 else (M_L, M_R)
+    p: dict = {"d": d}
+    m = _umbrella_open(rng, d, md, mo, p)
+    t = rng.randint(12, 24)
+    k = rng.randint(1, 24)
+    p.update(t=t, k=k)
+    m += _seg(M_J, t) + _seg(0, k) + _seg(M_J, 25) + _seg(0, 20)
     return m, p
 
 
@@ -663,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\map2_m0")
     ap.add_argument("--pre-dash", type=float, default=0.35, help="pogo: the share of tries with an air dash first")
     ap.add_argument("--sprint", type=float, default=1.0 / 3.0, help="dash_g: the share of held dashes (the sprint)")
-    ap.add_argument("--force-v", default="", help="fl_claw: always this variant")
+    ap.add_argument("--force-v", default="", help="fl_atk / fl_claw: always this variant")
     a = ap.parse_args(argv)
 
     from ssbot.probes.common import load_slot
@@ -724,6 +742,8 @@ def main(argv: list[str] | None = None) -> int:
                         masks, p = trial_fl(rng, exp)
                     elif exp == "drift":
                         masks, p = trial_drift(rng)
+                    elif exp == "reopen":
+                        masks, p = trial_reopen(rng)
                     else:
                         masks, p = trial_whiff(rng)
                     res = R.run(seq(masks, p), max_frames=len(masks) + 5)
