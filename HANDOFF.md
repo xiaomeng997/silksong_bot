@@ -11807,3 +11807,135 @@ against the hero model's rollouts. Offline only: no live run, no switch needed -
 - Parallelising the pass (the children of a frame are independent until the merge) would cut the times ~3 - 6x.
 - Data: `C:\ssbot\data\m2_play\map2\m1` (`starts.npz`, `f_*.json / .log` every number, `tables_ev2_t30.npz`,
   `tables_full_ev2_t30.npz`, `f_mech_t16.json`, the debug scripts).
+
+## Task map2 - stage M2: the Clapper model (offline; the Control FSM as a frame machine driven by her planned path, the fit's timings and per-frame body boxes, the hammer / bomb / rune shapes, predict()'s outcome branches with probabilities, reveal frames, the timing variants' union and the measured margins; validated on three recorded sets; the overlay's eye-check layer prepared, not started) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §93)
+
+The task: docs/plans/forum_map_v2.md section 1 L1 / 1b and section 2 M2 - every move's frame-accurate shapes in its
+own frame with their kinds and timing variants, the reaction rules (the L1 list), predict(enemy states, her planned
+path) -> per-frame shapes per outcome branch with probabilities and reveal frames and the measured errors as margins;
+validation on the recorded runs (timing per state transition by move, true damage contacts covered at k 0 / 6 / 12 / 36
+/ 60, area ratio, the rule predictions); the overlay for the person's eye check (a launcher, NOT started). No live run.
+u: world units, centre to centre unless a box edge is named; frames: game frames (a hit-stop freeze is not a frame).
+Commits 475f66a (the model, tools, tests, the overlay layer) and ebc12db (the margins in the knowledge file, predict
+30 % faster with identical outputs, the overlay grouped per Clapper; note: its message also lists the ghost hazards,
+the start-state turn and the exit lag, which are already in 475f66a), then the docs.
+
+### The model (`brain/ssbot/map2/clapper.py`; knowledge `knowledge/1.0.30000/enemies/forum/clapper_m2.json`)
+
+- `Sim`: one Clapper stepped per game frame - physics (its velocity per 50 Hz step: the lunge 30 u/s from the Slam 0
+  entry to the Slam 2 entry, the evade 15 u/s back, the walk 8 u/s, the jump vx = Jump X / vy 38 / gravity 84 u/s^2,
+  the grounded transform following the box bottom, the walls, the ROOF near the walls, the recoil 0.06 u per step x 8 per
+  side slash, in the air too) then the FSM update (the state's exit at its duration, the instant chain Close / Far
+  Range / Dmg Attack / After Scuttle / Avoid Type / Escape Jump / Jump Aim / Charged?). Rules from the decompiled
+  Control FSM, each checked on the recordings (93.2): TOOK DAMAGE only in Idle, Dmg Attack in the hit frame; Slam
+  Range = her physics box against the trigger (+-8.046, -4.454 .. +3.369) with a 0.02 u contact offset, decided in the
+  frame of the overlap (447 / 505; else +1 / +2), and for Dmg Attack also when she was inside the frame before (the
+  exit reported one frame late: 91 cases); Idle Time read at the Idle entry (1.15 s with a living buddy); Will Evade
+  50 / 50; Avoid Type at |dx| < 4; DistanceWalk by |dx| with hysteresis 5.5 / 8.5 (entry by 7); Close Range: the
+  buddy attacking -> CANCEL, the clip Walk B -> SLAM, Evaded -> V4 SLAM / CAST, else V4 SLAM / EVADE / CAST; Far Range:
+  V4 JUMP .5 / CAST .25 / JUMP CAST .25; the V4 counters per action instance (run / missed, eventMax / missedMax) in
+  `Memory`; the escape ray 6 u behind (the facing before the turn), JUMP / JUMP CAST alternating; a move's start state
+  always turns to her (its own FaceObjectV2), Idle / Walk turn with the 0.5 s pause; Jump Aim: target = her x - 5 x
+  facing, Jump X = clamp(+-12); hp to 0 -> dead, the body off.
+- Timings (`Know.durations`, the fit's distributions; conditioned on the frames already spent) and the body box per
+  state and frame (`Know.box`, the union over the frame and its neighbours: an animation change point moves by one
+  frame). Hammer polygons (move_data.HAMMER_POLY) on Slam 1 (+ the first Slam 2 frame) and Slam 2 (+ the first Slam
+  Recover frame; a jump's landing too). Bomb rows (`bomb_hazards`: ring m at 0 / 10 / 19 / 29 / 39 / 49 frames after
+  the Cast 2 entry +- 1, lit 20 - 21 frames later for 5 - 7; the pool's late rings 6 - 9 over their observed window;
+  only the bombs that reach the arena). The big rune (`rune_hazards`: 6.75 / 6.48 u ahead by facing, y 3.342, r 7.187,
+  lit landing + 65 .. 72). The hazards of a Clapper killed after its cast stay (predict(hazards=...)).
+- Branches: the random choices are drawn where they first matter (Will Evade at the frame she is in range at Can
+  Evade, the walk's far timer in 15-frame bins up to her expected Close, the V4 picks, a planned hit in a move's last
+  frames that may already be Idle: `hit_idle`); `predict()` forks the joint particles (two Clappers: the buddy lock
+  couples them), each record carries the timing range [a, b] (a state's duration spread widens it, a decision waiting
+  for her narrows it) and is drawn at k + a .. k + b. Output `Prediction.branches` (grouped by each Clapper's first 2
+  move picks and its Will Evade draws; group=False: every particle): `p`, `choices` ([kind, outcome, frame, reveal lo,
+  reveal hi]), `reveal`, `shapes(k)` / `damage(k, margins)` / `targets(k, POGO)`; `Prediction.danger_boxes(k)` gives
+  M1's danger input (her box centre's configuration space, the margins on). Shape kinds DAMAGE / BODY / POGO / TINK
+  (the root box DAMAGE | BODY | POGO; the hammer, bombs, rune DAMAGE only; no TINK on the Clapper).
+- `Tracker` (online: the STATEs' entities and Control transitions -> Obs with the history's evidence, the replayed
+  Memory, the absent Clappers' hazards; a test checks it against the validation's Episode on a recording);
+  `move_timeline(K, move)` (a move's shapes per frame in its own frame); `Know.margin(move, k)`.
+
+### Validation (`brain/ssbot/tools/m2_validate.py`; traces by `m2_clapper extract`; fit = SP13 / SP13b / SP-AIR1 b4-b10, 600 episodes; held = SP14 / SP-AIR1 b11-b16, 424; old = SP8 .. SP12, 483)
+
+| | fit | held | old |
+|---|---|---|---|
+| V4 picks / not allowed by the replayed counters | 9,239 / 9 | 5,816 / 3 | 7,434 / 4 |
+| far list's log-loss (truly random 0.5 / 0.25 / 0.25) | 0.68 | 0.75 | 0.66 |
+| Close vs Far at Dmg Attack / After Scuttle | 10,261 / 10,263 | 6,006 / 6,006 | 8,418 / 8,418 |
+| the buddy lock (attacking <=> CANCEL) | 11,841 / 11,910 | 3,790 / 3,808 | 11,392 / 11,472 |
+| the escape ray | 5,830 / 5,834 | 2,985 / 2,987 | 5,054 / 5,058 |
+| a move's start state faces her | 13,994 / 14,147 | 7,949 / 8,069 | 11,775 / 11,886 |
+| jump landing from the aim, > 6 u off a wall: abs err p50 / p90 / p99 | 0 / 0 / 0.30 | 0 / 0 / 0.51 | 0 / 0 / 0.42 |
+| ... within 6 u of a wall: model p90 / without the roof's push p90 | 0.25 / 2.82 | 0.11 / 2.91 | 0.19 / 2.75 |
+| flight frames exact | 1,707 / 1,757 | 759 / 782 | 1,681 / 1,726 |
+| predict() from recorded states with her actual path: realized branch found | 92.2 % | 93.4 % | 92.4 % |
+
+- Timing (held; the actual entry inside the realized branch's [a, b] / abs err p90): Slam 0 98.9 % / Slam 1 99.3 % /
+  Slam 2 98.3 % / Recover 99.0 % (2 frames); Slam Antic 97.3 %; Spell Antic 97.0 %, Cast 1 98.7 %, Cast 2 99.2 %; Jump
+  Antic 95.7 %, Air 98.0 %; Cast Slam Antic 95.6 % / 2 96.8 %; Evade 95.2 %; Idle 97.3 %; Walk 99.0 %. The big misses
+  (p99 13 - 25 frames) are decision moments (her Slam Range entry, the buddy's lock, an evade and her slash in one
+  frame). Facing at the actual move start 99.0 - 100 %; landing x at k 0-12 / 13-36 / 37+: p90 0 / 0.02 / 0.29 u.
+- True damage contacts covered by the realized branch (held, k = frames before the overlap): bombs 231-248 / 231-248
+  (100 %) at k 0 - 60; Slam Collider 1 99.4 - 99.6 % at k 0 - 36, 97.9 % at 60, 98.4 % at 120; Slam Collider 2 96.4 -
+  99.7 % at k 0 - 36, 97.8 % at 60, 94.8 % at 120; the big rune 100 % at k 0 - 90. Old set: Slam Collider 1 >= 99.9 %,
+  Slam Collider 2 97.7 - 100 %, bombs / rune 99.9 - 100 % at k 0 - 36.
+- Area of the actual damage colliders covered (held): k 0 99.3 - 100 %; k 6 - 12 98.3 - 100 % (the slam's area ratio
+  1.14 - 1.21: the timing union); k 36 96.9 - 100 %; k 60 93.9 - 100 %; k 120 90.0 - 99.6 %. With the fit's margins
+  (`m2_clapper margins`: per move and k the growth for 99 % of the fit set's area, else the knee; k <= 12 mostly
+  0 - 0.3 u, 36 f 0.2 - 1.0, 60 f 0.5 - 1.0, 90 / 120 f 1.0) the held coverage at k <= 60 is 98.7 - 100 %; what no growth
+  covers (<= 3.7 %, all at k >= 60) are choice / timing misses.
+- Speed (held, horizon up to 123 frames, run beside the full suite at Idle): one Clapper p50 / p90 / p99 1.2 / 2.7 /
+  5.0 ms; two 16 / 58 / 125 ms (particles p99 247). The overlay (40 frames): p50 ~1 ms, p99 ~20 ms.
+
+### Facts found on the way (forum.md 93.4)
+
+1. The jump's WALL PUSH is the roof: near a wall the roof polygons (Roof Collider_Basic (1) / (2): x 13.9 -> 14.2 u high,
+   15.4 -> 15.0, 16.7 -> 16.1; right 46.9 -> 15.1, 49.7 -> 14.3) meet the body's top at the rise's end (take-off + 15 -
+   19 frames, box top 14.2 - 15.3); the velocity slides along the slope (vx +-5 - 6 u/s away from the wall, vy +1 .. +6):
+   the landing 1.3 - 3.6 u off the wall, the flight 43 - 46 frames. The person's reading holds below ~14 u (the rise is
+   the same) and the shift builds up over the descent; the contact itself is in the rise's last ~10 frames.
+2. A hit in the air: the flight goes on (vx unchanged), the recoil adds 0.06 u per step (the rest after the landing).
+3. Slam Range: the trigger's contact offset (decisions at a recorded gap of 0.004 / 0.006 u), decided in the overlap's
+   frame, the exit one frame late for Dmg Attack.
+4. DistanceWalk uses |dx| with the 5.5 / 8.5 hysteresis (7,289 / 7,326 in the band keep the direction).
+5. Idle Time is read at the Idle entry; a move's start state always faces her (13 / 13 needed turns, 5 within 0.5 s of
+   the last); the body is off from the death frame (261 / 261); Avoid Type by |dx| < 4 (1,110 / 1,110).
+
+### The overlay (the person's eye check; NOT started)
+
+- `C:\ssbot\sandbox\start_overlay_map2_clapper.ps1` (default fo_cl_w7w, `-Save fo_cl_w13w` for two Clappers), frozen
+  checkout `C:\ssbot\live_1v1_ebc12db`: waits until no game window and no human_session remain (the bot's two
+  instances must be closed first), then human_session --instance 8 --speed 0.5 --overlay --overlay-range --overlay-map2,
+  HUMAN_PRACTICE set while it runs. Drawn: the real colliders now (red) and, at the look-ahead (keys 1-5), each
+  Clapper's predicted damage shapes per outcome of its own (top 4 coloured, the rest grey) with probability / choices /
+  reveal labels. Her path is held still (no hit by her): a hit's Dmg Attack is not in the drawn branches.
+- `ssbot/map2/overlay.py` (Map2Live: the Tracker fed with every game frame, predict every 2 frames); zone_overlay /
+  human_session only import it with `--overlay-map2`. Offline renders of a recording: `map2\m2\overlay_png`.
+
+### Identity, tests
+
+- No switch: the bot does not import `ssbot.map2` (`tests/test_map2_clapper.py::test_bot_does_not_import_map2`, and the
+  M1 test's exemptions extended to the two tools). Replay of 475f66a's frozen checkout (`map2\m2\scripts\replay_ident_m2.ps1`,
+  `ident_cmp.sh`): w7 192006 i0 e1 (2,073 ticks) / 084036 i1 e0 (1,778), w13 144051 i1 e0 (1,541) / 102908 i0 e0
+  (1,659) byte-identical to M0's b11eac5. ebc12db changes only map2 and the m2 tools.
+- `tests/test_map2_clapper.py` (13: the tables, V4, the memory's sources, the slam's hammer timing and side, Will
+  Evade's branch and reveal, the hit reaction, the jump's landing, the wall push, the buddy lock, the shapes' growth,
+  the tracker, the import check, the tracker vs the validation on a recording) + test_map2_envelope (8) pass.
+  Full suite at 475f66a (its frozen checkout): 2,093 passed, 5 failed - the known test_import_firewall and
+  test_three_layer bell test and the three test_harness_recovery tests stopped by the existing DEMO_SOON file (as in
+  M0) - 1 skipped, 1 xfailed (`map2\fullsuite_475f66a.log`).
+
+### Open items
+
+1. The person's eye check in the overlay before any live use (the rule validate-predictions-first).
+2. Beyond ~36 frames the errors are decision moments (her Slam Range entries, the other one's lock, an evade in the
+   frame of her slash): coverage 90 - 95 % at 90 - 120 frames without margins - M3 should use the exact shapes to the
+   next branch point and the coarse layer beyond.
+3. Two Clappers over 120 frames: p99 125 ms - M3 needs shorter exact horizons or the merging of equivalent particles.
+4. Unexplained: 1.5 % of the move starts not facing her; ~7 % of Idle's turns against the 0.5 s pause rule.
+5. Coarse: the intro (Drop In falls at 48 u/s); the Clawline's hits (4 damage) react but push nothing; the roof
+   polygons are Hang_04's (other rooms: from their terrain).
+6. Data: `C:\ssbot\data\m2_play\map2\m2` (`cache\{fit,held,old}` traces, `val_{fit,held,old}.json / .txt` every
+   number, `margins.log`, `overlay_png`, `scripts` incl. the exploration scripts, `replay_475f66a`).

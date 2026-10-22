@@ -8509,6 +8509,7 @@ w7（`fo_cl_w7w`，一只 Clapper，Wanderer），实例 0 / 1，1.0 倍速，�
 ### 93.6 开关、一致性、速度
 
 - 不需要开关：bot 不导入 `ssbot.map2`（`tests/test_map2_clapper.py` 检查，叠加层只在 `--overlay-map2` 时才导入）。回放 475f66a 的冻结副本：w7 192006 i0 e1（2,073 tick）/ 084036 i1 e0（1,778）、w13 144051 i1 e0（1,541）/ 102908 i0 e0（1,659）和 M0 的 b11eac5 逐字节相同；ebc12db 只改了 map2 和工具。
+- 全套测试（475f66a 的冻结副本）：2,093 过、5 个失败——两个老的（test_import_firewall、test_three_layer 的铃铛测试），加上现有 DEMO_SOON 文件让 3 个 test_harness_recovery 停下（M0 时一样）；1 跳过、1 预期失败。
 - 速度（留出集，视野到 123 帧）：一只 p50 / p90 / p99 1.2 / 2.7 / 5.0 ms；两只 16 / 58 / 125 ms（粒子 p99 247）。叠加层视野 40 帧：p50 约 1 ms、p99 约 20 ms。
 
 ### 93.7 测得的误差（余量表，在知识文件里）
