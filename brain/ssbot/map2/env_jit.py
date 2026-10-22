@@ -112,7 +112,9 @@ K_C0 = NK0 + 9
 NKEY = K_C0 + NC
 # fields a no-op press may change (the filter compares children of one parent without them): the press edges and
 # the queues a fresh press reproduces (a buffered jump / queued dash fires in the frame a new press would)
-_NOOP_SKIP = np.array([QQ, AQ, JQ, DQ], dtype=np.int64)
+_NOOP_SKIP = np.array([QQ, AQ], dtype=np.int64)
+# (the jump / dash queues and the jump buffer are NOT skipped: a queued jump or dash fires by itself while its key is
+# held - a forced behaviour, not an option a fresh press reproduces)
 
 
 @njit(cache=True, error_model="numpy")
@@ -215,9 +217,8 @@ for _q in range(NK0):
 
 @njit(cache=True, error_model="numpy")
 def keq_noop(a, b, ub):
-    """Child b adds nothing to child a of the same parent: equal keys except that b holds at least the keys a holds,
-    none of b's extra held keys acts in b's state (ub: hold_useful) - so a can press whatever b can - and the queues
-    / the jump buffer (a fresh press in the frame a queue would fire does the same)."""
+    """Child b adds nothing to child a of the same parent: equal keys except that b holds at least the keys a holds
+    and none of b's extra held keys acts in b's state (ub: hold_useful) - so a can press whatever b can."""
     pa = np.int64(a[K_PREV])
     pb = np.int64(b[K_PREV])
     if (pa & ~pb) != 0:
@@ -225,7 +226,7 @@ def keq_noop(a, b, ub):
     if ((pb & ~pa) & ub) != 0:
         return False
     for i in range(a.shape[0]):
-        if i == K_PREV or i == K_JBUF:
+        if i == K_PREV:
             continue
         if i < NK0 and _NOOP_POS[i]:
             continue

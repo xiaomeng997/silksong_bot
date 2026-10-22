@@ -180,10 +180,31 @@ def raster_cells(rows: np.ndarray, cell: float = CELL) -> set:
     return cells
 
 
+def random_danger(rng, S: np.ndarray, T: int, hh: float, n_boxes: int = 4) -> list:
+    """Per frame boxes (her centre's space) around her start: n_boxes rectangles 0.5 .. 3 u wide, 0.5 .. 4 u high,
+    centres within 6 u in x and -4 .. +3 u in y, each drifting at up to 6 u/s, live from frame 3 on."""
+    x0, y0 = float(S[km.PX]), float(S[km.PY] + hh)
+    out = [np.zeros((0, 4)) for _ in range(T + 1)]
+    for _ in range(n_boxes):
+        cx, cy = x0 + rng.uniform(-6, 6), y0 + rng.uniform(-4, 3)
+        w, h = rng.uniform(0.5, 3.0), rng.uniform(0.5, 4.0)
+        vx, vy = rng.uniform(-6, 6) / 60, rng.uniform(-3, 3) / 60
+        for t in range(3, T + 1):
+            bx, by = cx + vx * t, cy + vy * t
+            out[t] = np.vstack([out[t], [[bx - w / 2, by - h / 2, bx + w / 2, by + h / 2]]])
+    return out
+
+
+def in_danger(boxes: np.ndarray, x: float, y: float) -> bool:
+    return bool(len(boxes) and np.any((boxes[:, 0] <= x) & (x <= boxes[:, 2]) & (boxes[:, 1] <= y) & (y <= boxes[:, 3])))
+
+
 def check_start(E: env.Engine, S: np.ndarray, T: int, n_roll: int, rng, terrain=None, band_n: int = 0,
-                band_t: int = -1, claw: bool = True, cover_frames=(5, 10, 15, 20, 30, 40), opts: int = 0) -> dict:
+                band_t: int = -1, claw: bool = True, cover_frames=(5, 10, 15, 20, 30, 40), opts: int = 0,
+                danger: bool = False) -> dict:
     st = E.start_state(S)
-    fw = E.forward(st, T, terrain=terrain, band_n=band_n, band_t=band_t, claw=claw, tf8=claw, opts=opts)
+    dz = random_danger(rng, S, T, E.hh) if danger else None
+    fw = E.forward(st, T, terrain=terrain, band_n=band_n, band_t=band_t, claw=claw, tf8=claw, opts=opts, danger=dz)
     max_ev = (opts >> 8) & 15
     if max_ev:
         masks = random_masks_ev(rng, n_roll, T, max_ev, claw=claw, start_prev=int(S[km.PREV]))
@@ -193,8 +214,12 @@ def check_start(E: env.Engine, S: np.ndarray, T: int, n_roll: int, rng, terrain=
                         terrain=terrain)
     fidx = frame_index(fw)
     esc = []
+    hit = 0
     for i in range(n_roll):
         for t in range(1, T + 1):
+            if dz is not None and in_danger(dz[t], xy[i, t, 0], xy[i, t, 1]):
+                hit += 1
+                break                   # touched the danger: the later frames are not hers to keep
             d = point_dist(fw, fidx, t, xy[i, t, 0], xy[i, t, 1])
             if d > 0:
                 esc.append({"roll": i, "t": t, "dist": d, "xy": xy[i, t].tolist(),
@@ -214,7 +239,16 @@ def check_start(E: env.Engine, S: np.ndarray, T: int, n_roll: int, rng, terrain=
                     "env_y": [float(rows[:, 0].min()), float(rows[:, 1].max())] if len(rows) else None,
                     "roll_x": [float(xy[:, t, 0].min()), float(xy[:, t, 0].max())],
                     "roll_y": [float(xy[:, t, 1].min()), float(xy[:, t, 1].max())]}
-    return {"escapes": esc, "n_esc": len(esc), "counts": [fw.count(t) for t in range(T + 1)],
+    # the cut envelope must hold no point inside a box (a sample of the rows at the frames' heights)
+    leak = 0
+    if dz is not None:
+        for t in range(1, T + 1):
+            g, x0, x1, y0, y1 = fw.frame_rows(t)
+            for bx0, by0, bx1, by1 in dz[t]:
+                # a row strictly overlapping a box at a height inside it (exact clusters: y0 = y1)
+                leak += int(np.sum((y0 == y1) & (by0 <= y0) & (y0 <= by1) & (x0 < bx1 - 1e-9) & (x1 > bx0 + 1e-9)))
+    return {"escapes": esc, "n_esc": len(esc), "danger_hit": hit, "danger_leak": leak,
+            "dead": int(fw.stats[:, 2].sum()), "counts": [fw.count(t) for t in range(T + 1)],
             "seconds": fw.seconds, "exact_until": fw.exact_until(), "diverged": int(fw.stats[:, 3].sum()),
             "splits": int(fw.stats[:, 7].sum()), "cover": cover}
 
@@ -250,6 +284,89 @@ def witness_start(E: env.Engine, S: np.ndarray, T: int, n_targets: int, rng, ter
     return out
 
 
+def build_tables_cmd(args) -> int:
+    """tables OUT.npz: the canonical starts' tables (env.table_keys) per phase class, args.T frames, the event limit
+    args.max_ev (0: none - only for short T), written with save_tables; prints per table the counts and time."""
+    E = env.Engine()
+    alphas = [int(a) for a in args.alphas.split(",")]
+    keys = env.table_keys(full=args.full)
+    tabs, stat = {}, {}
+    t0 = time.perf_counter()
+    for ac in alphas:
+        for k in keys:
+            S, terr = env.canonical(E.params, k[0], k[1], ac, k[2], k[3])
+            tb = env.build_table(E, S, terr, args.T, band_n=0, max_events=args.max_ev)
+            name = env.key_name(k, ac)
+            tabs[name] = tb
+            verts = [env.contour_vertices(tb["all"][t]) for t in range(0, args.T + 1, 5)]
+            stat[name] = {"ms": round(tb["_seconds"] * 1e3, 1), "clusters_T": tb["_counts"][-1],
+                          "rows_T": len(tb["all"][-1]), "vertices": verts}
+            print(f"{name:22s} {tb['_seconds'] * 1e3:8.1f} ms clusters T {tb['_counts'][-1]:6d} rows T "
+                  f"{len(tb['all'][-1]):5d} contour vertices / 5 f {verts}", flush=True)
+    meta = {"T": args.T, "max_ev": args.max_ev, "alphas": alphas, "q": env.QROW, "keys": list(tabs),
+            "params": str(env.PARAMS_PATH), "hero2": True, "built_s": round(time.perf_counter() - t0, 1)}
+    env.save_tables(args.a, tabs, meta)
+    Path(args.b[0]).write_text(json.dumps({"meta": meta, "stat": stat}))
+    print("tables", len(tabs), "in %.1f s" % (time.perf_counter() - t0), "file %.1f MB" % (Path(args.a).stat().st_size / 1e6))
+    return 0
+
+
+def tabcheck_cmd(args) -> int:
+    """tabcheck TABLES.npz OUT.json: the stored tables against fresh exact passes from their canonical starts:
+    every exact cluster point (sampled) must be inside the table (the raster is conservative); the raster's extra
+    area (cells of the table not touched by a cluster point) is the looseness of the 0.05 u rows."""
+    E = env.Engine()
+    tb = env.Tables(args.a)
+    rng = np.random.default_rng(args.seed)
+    miss = tot = 0
+    for name in tb.meta["keys"]:
+        kind_var, rest = name.split("@")
+        ph = int(rest.split("/")[0].rstrip("d"))
+        dashed = rest.split("/")[0].endswith("d")
+        ac = int(rest.split("/a")[1])
+        kind, var = kind_var[:2], kind_var[2:]
+        if kind[0] == "G":
+            kind, var = "G", kind_var[1:]
+        S, terr = env.canonical(E.params, kind, ph, ac, var, dashed)
+        fw = E.forward(E.start_state(S), tb.meta["T"], terrain=terr, max_events=tb.meta["max_ev"])
+        xs, ys = float(S[km.PX]), float(S[km.PY] + E.hh)
+        for t in rng.choice(np.arange(1, tb.meta["T"] + 1), size=5, replace=False):
+            g, x0, x1, y0, y1 = fw.frame_rows(int(t))
+            for k in rng.choice(len(g), size=min(40, len(g)), replace=False):
+                x = float(rng.uniform(x0[k], x1[k]))
+                tot += 1
+                if not tb.contains(name, "all", int(t), x - xs, float(y0[k]) - ys):
+                    miss += 1
+    out = {"points": tot, "outside_table": miss}
+    print(json.dumps(out))
+    Path(args.b[0]).write_text(json.dumps(out))
+    return 0
+
+
+def timing_cmd(args) -> int:
+    """timing STARTS.npz OUT.json: the forward pass's time and cluster count per (event limit, horizon) over the
+    start states (the Forum floor), single thread, the pass only."""
+    d = np.load(args.a)
+    S = d["S"][args.start:args.start + (args.n or len(d["S"]))]
+    E = env.Engine()
+    terr = env.floor_terrain()
+    E.forward(E.start_state(S[0]), 2, terrain=terr)
+    out = {}
+    for mev, T in ((1, 30), (1, 60), (2, 10), (2, 20), (2, 30), (3, 20), (0, 6), (0, 8), (0, 10), (0, 12)):
+        secs, cnt, tot = [], [], []
+        for s in S:
+            fw = E.forward(E.start_state(s), T, terrain=terr, max_events=mev)
+            secs.append(fw.seconds)
+            cnt.append(fw.count(T))
+            tot.append(int(fw.cl_off[-1]))
+        key = f"ev{mev or 'all'} T{T}"
+        out[key] = {"ms_p50_p90_p99_max": [round(v * 1e3, 1) for v in _q(secs)], "clusters_T": _q(cnt),
+                    "clusters_total": _q(tot)}
+        print(key, json.dumps(out[key]), flush=True)
+    Path(args.b[0]).write_text(json.dumps(out))
+    return 0
+
+
 def _q(v, ps=(50, 90, 99, 100)):
     v = np.asarray(v, dtype=float)
     return [round(float(np.percentile(v, p)), 4) for p in ps] if len(v) else None
@@ -257,7 +374,7 @@ def _q(v, ps=(50, 90, 99, 100)):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["starts", "check", "witness"])
+    ap.add_argument("cmd", choices=["starts", "check", "witness", "tables", "tabcheck", "timing"])
     ap.add_argument("a")
     ap.add_argument("b", nargs="*")
     ap.add_argument("--T", type=int, default=20)
@@ -272,13 +389,22 @@ def main(argv=None) -> int:
     ap.add_argument("--look", type=int, default=3)
     ap.add_argument("--opts", type=int, default=0, help="env_jit OPT_* bits (64: attacks in normal control)")
     ap.add_argument("--max-ev", type=int, default=0, help="the event limit (the rollouts then change keys <= it)")
+    ap.add_argument("--danger", action="store_true", help="random moving boxes cut the envelope; a rollout ends at its first touch")
     ap.add_argument("--start", type=int, default=0, help="first start index")
+    ap.add_argument("--full", action="store_true", help="tables: every canonical phase (else every 5th)")
+    ap.add_argument("--alphas", default="0", help="tables: the phase classes, e.g. 0,1,2,3,4,5")
     args = ap.parse_args(argv)
     if args.cmd == "starts":
         d = sample_starts(args.b)
         np.savez_compressed(args.a, **d)
         print(len(d["S"]), "start states")
         return 0
+    if args.cmd == "tables":
+        return build_tables_cmd(args)
+    if args.cmd == "tabcheck":
+        return tabcheck_cmd(args)
+    if args.cmd == "timing":
+        return timing_cmd(args)
     d = np.load(args.a)
     S, lab = d["S"], d["labels"]
     if args.n or args.start:
@@ -294,18 +420,21 @@ def main(argv=None) -> int:
     if args.cmd == "check":
         for i, s in enumerate(S):
             r = check_start(E, s, args.T, args.rolls, rng, terrain=terr, band_n=args.band_n, band_t=args.band_t,
-                            claw=claw, opts=args.opts)
+                            claw=claw, opts=args.opts, danger=args.danger)
             r["label"] = str(lab[i])
             out["per"].append(r)
             print(f"{i:3d} {lab[i]:34s} esc {r['n_esc']:3d} clusters T {r['counts'][-1]:6d} max "
                   f"{max(r['counts']):6d} {r['seconds'] * 1e3:8.1f} ms exact<= {r['exact_until']}", flush=True)
         n_esc = sum(r["n_esc"] for r in out["per"])
+        out["danger"] = {"hit": sum(r["danger_hit"] for r in out["per"]), "leak": sum(r["danger_leak"] for r in out["per"]),
+                         "dead": sum(r["dead"] for r in out["per"])}
         secs = [r["seconds"] for r in out["per"]]
         out["summary"] = {"starts": len(S), "rollouts": len(S) * args.rolls, "escapes": n_esc,
                           "escape_dist": _q([e["dist"] for r in out["per"] for e in r["escapes"]]),
                           "seconds_p50_p90_p99_max": _q(secs),
                           "clusters_at_T": _q([r["counts"][-1] for r in out["per"]]),
                           "clusters_max": _q([max(r["counts"]) for r in out["per"]])}
+        out["summary"]["danger"] = out["danger"]
         print(json.dumps(out["summary"]))
     else:
         allw = []

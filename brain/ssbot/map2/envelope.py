@@ -238,7 +238,10 @@ class Fwd:
         masks = np.zeros(t, dtype=np.int64)
         oxy = np.zeros((t + 1, 2))
         S0 = self.start.L[1].copy()
-        S0[km.PX] = S0[km.QX] = S0[km.SX] = xp[0]
+        dx0 = xp[0] - S0[km.PX]
+        S0[km.PX] += dx0
+        S0[km.QX] += dx0
+        S0[km.SX] += dx0
         ej.track(S0, self.start.cu.copy(), vm, tlo, thi, self.eng.udt, self.eng.P, self.terrain, look, masks, oxy)
         if beam > 0 and abs(oxy[t, 0] - x) > 1e-3:
             m2 = np.zeros(t, dtype=np.int64)
@@ -274,8 +277,11 @@ class Engine:
         x = S[km.PX]
         a = x if x0 is None else x0
         b = x if x1 is None else x1
-        L[0, km.PX] = L[0, km.QX] = L[0, km.SX] = a
-        L[1, km.PX] = L[1, km.QX] = L[1, km.SX] = b
+        for ln, v in ((0, a), (1, b)):     # shifted as a whole: the previous step's / drawn x keep their offsets
+            dx = v - x                      # (a ground sprint's start translates from the drawn position)
+            L[ln, km.PX] += dx
+            L[ln, km.QX] += dx
+            L[ln, km.SX] += dx
         cu = np.array([-1.0, 0, 0, 0, 0, 0, 0]) if cu is None else np.asarray(cu, dtype=np.float64)
         return Start(L, cu, np.array([[a, b]]), label)
 
@@ -458,12 +464,12 @@ def contour_vertices(r: np.ndarray) -> int:
     return v + 2 * len(prev)
 
 
-def build_table(eng: "Engine", S: np.ndarray, terr, T: int, band_n: int = 3000) -> dict:
-    """One table: the forward pass from S over T frames (the far layer from band_n clusters), per frame and end
-    condition the raster relative to her start position (x, centre y). Returns {cond: [T + 1 arrays (bin, xa, xb)]},
-    with the counts and the time."""
+def build_table(eng: "Engine", S: np.ndarray, terr, T: int, band_n: int = 0, max_events: int = 0) -> dict:
+    """One table: the forward pass from S over T frames (the event limit max_events: the segment family; the far
+    layer's bands from band_n clusters), per frame and end condition the raster relative to her start position (x,
+    centre y). Returns {cond: [T + 1 arrays (bin, xa, xb)]}, with the counts and the time."""
     st = eng.start_state(S)
-    fw = eng.forward(st, T, terrain=terr, band_n=band_n)
+    fw = eng.forward(st, T, terrain=terr, band_n=band_n, max_events=max_events)
     xs, ys = float(S[km.PX]), float(S[km.PY] + eng.hh)
     out = {c: [] for c in TABLE_CONDS}
     for t in range(T + 1):
