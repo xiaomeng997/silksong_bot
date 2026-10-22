@@ -658,8 +658,10 @@ P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 #                  after the event bounces once with h2_pogo_j2 (NailSlash.QueueBounce -> DownBounce)
 #   H2_GLIDE_ATK   the umbrella's Attack Cancel swings on the press frame (SetStartWithAttack -> DoAttack inside the
 #                  FSM's Update), not a frame later from the attack queue
-H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK = 1, 2, 4, 8
-H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK
+#   H2_INFL_END    the jump released before the Inflate ends: Start -> Float Idle -> END -> Deflate in the Inflate's
+#                  last frame (the model entered the Deflate a frame later), that Deflate one frame longer
+H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END = 1, 2, 4, 8, 16
+H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 # the M0 calibration (ssbot.tools.m0_calib; forum.md 91): the bits and the fitted restart
 HERO2_OVERRIDES = {"hero2": H2_ALL, "h2_pogo_rs_t": 0.1083, "h2_pogo_j2": 8}

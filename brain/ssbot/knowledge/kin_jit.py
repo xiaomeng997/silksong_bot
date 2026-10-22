@@ -49,7 +49,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
-    H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, P_H2, P_H2_RST, P_H2_PJ2)
+    H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, P_H2, P_H2_RST, P_H2_PJ2)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1303,6 +1303,13 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
             x[MODE_T] = 0.0
             x[VY] = accel_to(P[P_GL_START_VY], P[P_GL_VYACC], P[P_GL_VY])
             x[VX] = umbrella_x(x[VX], mask, P[P_GL_ACC], P[P_GL_DEC], P[P_GL_VMAX])
+            if (h2 & H2_INFL_END) != 0 and (mask & B_JUMP) == 0:
+                # Float Idle's ListenForJump in the same Update: END -> Deflate at once (live: the Deflate from the
+                # Inflate's last frame, 7 frames long, 26 / 27); an attack pressed this frame was caught by the
+                # Inflate's own listener first (live: the slash, 1 / 1), so the cancel below still takes it
+                x[PHASE] = 3.0
+                x[MODE_T] = -dt
+                grav_on(x)
         elif (ph == 2 or ph == 5) and (mask & B_JUMP) == 0:
             x[PHASE] = 3.0                # END -> Deflate: gravity back
             x[MODE_T] = 0.0
@@ -1314,6 +1321,9 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
         elif ph == 3 and ge32(x[MODE_T], P[P_GL_DEFLATE]):
             regain_jump(x, mask, P)
             x[GL_CD] = P[P_GL_CD]
+            if (h2 & H2_GLIDE_ATK) != 0 and (pressed & B_ATTACK) != 0:
+                do_attack(x, mask, P)     # the Deflate's own ListenForAttack on its last frame (live: the slash then)
+                x[AQ] = -1.0
         if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3
                                    or x[PHASE] == 5):
             if ((pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0)) and \

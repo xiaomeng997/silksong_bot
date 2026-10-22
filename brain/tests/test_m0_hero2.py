@@ -79,6 +79,21 @@ def test_release_frame_press_lost(base):
     assert not (new.flags[0] & kin.F_ATTACKING).any()
 
 
+def test_release_in_the_inflate(base):
+    """The jump released inside the Inflate: live the Deflate starts on the Inflate's last frame (gravity at once), the
+    old model floated a frame first."""
+    m = _seg(M_J, 16) + _seg(0, 4) + _seg(M_J, 13) + _seg(0, 40)     # the umbrella's antic + 7 frames of the Inflate
+    masks = np.array([m], np.int64)
+    old = _roll(base, masks)
+    new = _roll(kin.hero2(base, on=True), masks)
+    g_old = np.flatnonzero((old.mode[0] == kin.M_GLIDE))
+    g_new = np.flatnonzero((new.mode[0] == kin.M_GLIDE))
+    assert g_new[-1] <= g_old[-1]                                    # the Deflate no later than before
+    i = int(np.flatnonzero(np.diff(new.vel[0, :, 1]) < -1.0)[0])      # the first gravity step after the Inflate
+    j = int(np.flatnonzero(np.diff(old.vel[0, 20:, 1]) < -1.0)[0]) + 20
+    assert i < j
+
+
 def test_pogo_restart_rise(base):
     """A down slash pressed 3 frames before the contact: the bounce restarts at the slash's Bounce event (live rise
     3.74 u over the contact frame's box in 79 % of 115 contacts, 4.09 in 16 %); the old model rose ~0.5 u higher."""

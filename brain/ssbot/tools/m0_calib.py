@@ -360,6 +360,41 @@ def an_inflate_entry(trials) -> dict:
     return {"inflate_entry": [list(r) for r in rr]}
 
 
+def an_reopen(trials) -> dict:
+    """The umbrella's re-open after a close: the jump pressed again k frames after the release."""
+    tab = defaultdict(list)
+    rows_out = []
+    for t in trials:
+        if t["exp"] != "reopen":
+            continue
+        rows = t["rows"]
+        ue = fsm_list(rows, "Umbrella Float")
+        i_antic = next((i for i, fr, to in ue if to == "Antic"), None)
+        if i_antic is None:
+            continue
+        iR = first(rows, lambda r: not r["m"] & M_J, i_antic + 1)
+        iD = next((i for i, fr, to in ue if to == "Deflate" and i >= (iR or 0)), None)
+        if iR is None or iD is None:
+            continue
+        iJ = press_idx(rows, M_J, iR)
+        if iJ is None:
+            continue
+        iA2 = next((i for i, fr, to in ue if to == "Antic" and i >= iJ), None)
+        iCd = next((i for i, fr, to in ue if fr == "Cooldown" and to == "Idle" and i >= iD), None)
+        iCtl = first(rows, lambda r: r["acc"], iD)
+        g = rows[iJ]["onGround"]
+        o = {"k": iJ - iR, "deflate": iD - iR, "ctrl": None if iCtl is None else iCtl - iR,
+             "fsm_idle": None if iCd is None else iCd - iR, "reopen": None if iA2 is None or iA2 - iJ > 26 else iA2 - iJ,
+             "yb": rows[iJ]["yb"], "g": g, "clip": rows[iJ]["clip"]}
+        rows_out.append(o)
+        tab[o["k"]].append("G" if g else ("x" if o["reopen"] is None else str(o["reopen"])))
+    print("\n== the umbrella's re-open: the jump pressed again k frames after the release (k: delays / x none / G landed) ==")
+    print("  " + " ".join(f"{k}:{''.join(v)}" for k, v in sorted(tab.items())))
+    print(f"  the close: Deflate at release + {cnt(o['deflate'] for o in rows_out)}, control at + {cnt(o['ctrl'] for o in rows_out)}, "
+          f"its FSM Idle at + {cnt(o['fsm_idle'] for o in rows_out)}")
+    return {"rows": rows_out}
+
+
 # ---- (9) / (7) / (8) the unhooked Clawline, its hold height and a second action at control --------------------------
 
 def an_claw(t: dict) -> dict | None:
@@ -772,7 +807,7 @@ def report_idle_hit(trials) -> dict:
 
 # ---- the kinematics model against the hero-only trials ----------------------------------------------------------------
 
-KIN_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_whiff")
+KIN_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_whiff", "reopen")
 KIN_KEYS = ("hero", "input", "act", "game", "fs", "dt", "udt", "ts", "ev", "pause", "f")
 
 
@@ -888,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
     out["pogo"] = report_pogo(trials)
     out["hook"] = report_hook(trials)
     out["idle_hit"] = report_idle_hit(trials)
+    out["reopen"] = an_reopen(trials)
     if a.kin:
         out["kin"] = report_kin(kin_check(a.recs), "the current model")
     if a.json:
