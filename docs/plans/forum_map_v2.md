@@ -299,6 +299,19 @@ THE CLAWLINE IN THE TWO LAYERS (the person, 2026-10-20 evening):
   at use time (a hook on an Idle Clapper is a hit and triggers its reaction: the enemy model sees it). Slower than
   the dash for short hops (control 26-34 f), faster for long ones (70 u/s).
 
+HOW TO GET THERE (the person, 2026-10-22: 'the map says which points are reachable but not how - is the exact
+computation picking a point and choosing keys, or are the keys stored for every point?'): neither store-everything nor
+blind choice:
+- Offline the DP keeps ONE back-pointer per table cell (the event or 'continue' and the predecessor at the previous
+  step) - one witness, not all combinations. Online the cluster pass keeps for each cluster its parent and its event
+  frame. A target (x, y, t) is turned into keys by walking these back: the vertical part is the cluster chain (which
+  events at which frames: the dash at d, the umbrella at u / its close at c, the jump release r); the horizontal part
+  is trivial because the run is instant - hold toward the target for m steps, then release (bang-bang), threaded
+  through the cluster's allowed x intervals where danger cut them.
+- 'Exact computation' then means: simulate THAT concrete key string with the exact hero model (HERO2) and check it
+  frame by frame against the predicted danger polygons (with their margins) before committing - the tables say what
+  is possible, the simulation confirms the chosen path.
+
 BOUNDS (the lead's proposal, 2026-10-22, asked by the person; M3 checks them on the data):
 - TIME: the precomputed tables and the standard horizon 2 s = 120 frames = 100 physics steps (it covers a jump
   cast from its Jump Aim to the end of the burst, 55 + 65 + ~8 = ~128 f, and the trap lead times, 23-45 f before a
