@@ -241,6 +241,9 @@ def main() -> None:
                     help="the down-slash eye check (zone_overlay.draw_pogo, combat.pogo_model): the predicted path of "
                          "a down slash pressed now (miss / bounce) and, after a press, the prediction next to the real "
                          "path")
+    ap.add_argument("--overlay-map2", action="store_true",
+                    help="the map v2 Clapper model's eye check (ssbot.map2.overlay, forum.md 93): the predicted damage "
+                         "shapes per outcome branch at the look-ahead (keys 1-5), her path held still")
     ap.add_argument("--solo", default=None, metavar="TYPE",
                     help='single-enemy practice (tools.solo_practice), e.g. --solo "Song Pilgrim 03": loads the wave '
                          "savestate holding that type with the fewest others (unless --savestate), boosts the hero "
@@ -294,7 +297,7 @@ def main() -> None:
         overlay = LiveOverlay(link, game.pid, speed=args.speed or 1.0, crest=args.overlay_crest,
                               every=args.overlay_every, margins=args.overlay_margins, range_layer=args.overlay_range,
                               all_k=args.overlay_all_k, swept=args.overlay_swept, aim=args.overlay_aim,
-                              pogo=args.overlay_pogo)
+                              pogo=args.overlay_pogo, map2=args.overlay_map2)
         print("zone overlay: warming up (F8 on/off, F9 mode, F10 freeze, F11 step, 1-5 look-ahead, 0 all look-aheads, "
               "9 swept path, 8 aim zones, Ctrl+1-7 layers)")
     solo = None

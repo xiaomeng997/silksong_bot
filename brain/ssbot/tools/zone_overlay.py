@@ -1119,6 +1119,9 @@ def render(fr: dict, grid: Grid, out_size: tuple[int, int], view: View, legend: 
             cv2.circle(img, c, r, (255, 255, 255, 255), -1, cv2.LINE_AA)
         if fr.get("pogo"):
             draw_pogo(img, fr["pogo"], Hw, H)
+        if fr.get("map2"):
+            from ssbot.map2.overlay import draw_map2
+            draw_map2(img, fr["map2"], Hw, H)
     if legend is not None:
         draw_legend(img, legend, view)
     return img
@@ -1859,8 +1862,12 @@ class LiveOverlay:
     def __init__(self, link, game_pid: int, speed: float = 1.0, crest: str = "Wanderer", threads: int = 4,
                  every: int = 3, margins: bool = False, log_path: Path | None = None, range_layer: bool = False,
                  mode: str | None = None, k: int = 0, all_k: bool = False, swept: bool = False, aim: bool = False,
-                 pogo: bool = False):
+                 pogo: bool = False, map2: bool = False):
         self.link, self.pid = link, game_pid
+        self.map2 = None                    # the map v2 Clapper model's eye check (ssbot.map2.overlay, --overlay-map2)
+        if map2:
+            from ssbot.map2.overlay import Map2Live
+            self.map2 = Map2Live()
         self.pogo = pogo                    # the down-slash eye check (draw_pogo)
         self.pogo_now = None
         self.pogo_frozen = None
@@ -2025,6 +2032,8 @@ class LiveOverlay:
             self.eng.start(self.terrain)
             self.stats["starts"] += 1
             self.group, self.f_next = [], 0
+            if self.map2 is not None:
+                self.map2.reset()
         ts = float(s.get("ts") or 0.0)
         if self.view.frozen and not self.stepping:
             return False
@@ -2041,6 +2050,11 @@ class LiveOverlay:
         self.stats["fed"] += 1
         if self.pogo and fed:
             self._pogo_frame(m)
+        if self.map2 is not None and fed:
+            try:
+                self.map2.feed(m)
+            except Exception as e:  # noqa: BLE001 - the overlay goes on without the map2 layer's frame
+                self.stats["errors"].append(f"map2: {e!r}"[:300])
         if self.stepping:
             self.stepping = 0
             self._rpc_scale(FREEZE_SCALE)
@@ -2147,11 +2161,18 @@ class LiveOverlay:
                     if self.pogo and shown is not None:
                         shown = dict(shown, pogo={"now": self.pogo_now, "frozen": self.pogo_frozen,
                                                   "real": self.pogo_real})
+                    m2 = None
+                    if self.map2 is not None and shown is not None:
+                        m2 = self.map2.frame(self.view.k)
+                        shown = dict(shown, map2=m2)
                     lines = legend_lines(fr, self.view, config,
                                          "" if self.eng.running else "(no battle: red only)")
                     if self.pogo and self.view.on:
                         lines = lines + [("DOWN SLASH now: light blue = miss, green = bounce (dots: i-frames), yellow = "
                                           "where it lands; after a press: darker = predicted at the press, white = real", None)]
+                    if self.map2 is not None and self.view.on:
+                        from ssbot.map2.overlay import legend as _m2_legend
+                        lines = lines + _m2_legend(m2)
                     # drawn at most at the render size and scaled up nearest (a 4K window: 3 ms instead of 55)
                     W, H = rect[2], rect[3]
                     sc = min(1.0, RENDER[0] / W, RENDER[1] / H)
