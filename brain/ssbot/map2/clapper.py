@@ -999,6 +999,15 @@ class Sim:
             if nxt is not None:
                 self._enter(nxt, hero, k, buddy_att)
 
+    def may_choose(self, k: int, hero: HeroPath) -> bool:
+        """Can step(k) need a random choice (the caller then keeps a copy to step again)? Idle / Walk, a hit this
+        frame, or a timed state whose nominal end comes now (its exit's instant chain may hold a choice)."""
+        if self.dead:
+            return False
+        if self.st in ("Idle", "Walk") or hero.hits.get(self.iid, {}).get(k) is not None:
+            return True
+        return self.dur is not None and self.j + 1 >= self.dur[1]
+
     def rec(self) -> tuple:
         """The record of this frame: (k, a, b, state, j, x, y, face, hammer)."""
         ham = 0
@@ -1177,12 +1186,14 @@ def predict(obs: list[Obs], mems: dict, hero: HeroPath, K: Know, T: int = 120, m
                 o = ss[1 - i] if len(ss) == 2 else None
                 b_att = bool(o.attacking) if o is not None and not o.dead else False
                 b_x = o.x if o is not None and not o.dead else None
-                snap = s.clone()
+                snap = s.clone() if s.may_choose(k, hero) else None
                 try:
                     s.step(k, hero, b_att, b_x)
                     rr[i].append(s.rec())
                     stack.append((pp, ss, rr, i + 1))
                 except NeedChoice as nc:
+                    if snap is None:
+                        raise RuntimeError(f"a choice {nc.key} where may_choose said none ({s.st})") from nc
                     for q, outc in nc.options:
                         if q <= 0:
                             continue

@@ -6,12 +6,12 @@ Every fed game frame goes to the online Tracker (the V4 memory, the history's ev
 clapper.predict() runs from the Clappers now with HER PATH HELD STILL (she stays where she is and lands no hit: her
 real future is unknown to the overlay, so a hit's Dmg Attack is not in the branches) over HORIZON frames. Drawn at the
 overlay's look-ahead k (keys 1-5: now / +6 / +12 / +18 / +36 frames):
-  - the top branches (by probability) each in its own colour: their DAMAGE shapes at +k (the body box, the hammer
-    polygons Slam Collider 1 / 2, the lit bombs and the big rune circle), outlines, the union over the branch's
-    timing variants;
-  - a label per branch at its Clapper: its probability, its choices (the move picked, Will Evade, ...) and its reveal
-    frame (the earliest frame its first choice shows, + frames from now);
-  - the remaining branches as one grey outline (their union).
+  - per Clapper its own outcomes (the joint branches grouped by its choices, their probabilities summed), the top
+    TOP each in its own colour: their DAMAGE shapes at +k (the body box, the hammer polygons Slam Collider 1 / 2,
+    the lit bombs and the big rune circle), outlines, the union over the timing variants;
+  - a label per outcome at the Clapper: its probability, its choices (the move picked, Will Evade, ...) and its
+    reveal frame (the earliest frame its first choice shows, + frames from now);
+  - its less likely outcomes as one grey outline (their union).
 The real colliders stay drawn by the overlay's own red layer (mode range+red / red), so prediction and truth sit side
 by side. Nothing here feeds the bot.
 """
@@ -73,46 +73,61 @@ class Map2Live:
         self.stats["ms"].append((time.perf_counter() - t0) * 1e3)
 
     def frame(self, k: int) -> dict | None:
-        """What to draw at look-ahead k (frames from the prediction's start; the frames fed since are subtracted)."""
+        """What to draw at look-ahead k (frames from the prediction's start; the frames fed since are subtracted):
+        per Clapper its own outcomes (the joint branches grouped by that Clapper's choices, their probabilities
+        summed), the top TOP each in a colour with a label at the Clapper, the rest one grey outline."""
         P = self.pred
         if P is None:
             return None
-        kk = int(k) + (self.trk.k - self.k_pred)
-        if kk > P.T:
-            kk = P.T
-        out = {"k": int(k), "branches": [], "rest": []}
-        for n, b in enumerate(P.branches):
-            sh = b.damage(kk)
-            if n < TOP:
-                out["branches"].append({"p": b.p, "label": _label(b, self.trk.k - self.k_pred), "col": COLS[n],
-                                        "shapes": sh, "at": _anchor(b, kk)})
-            else:
-                out["rest"].extend(sh)
-        out["n"] = len(P.branches)
-        out["ms"] = P.ms
+        since = self.trk.k - self.k_pred
+        kk = min(int(k) + since, P.T)
+        groups: dict = {}
+        for b in P.branches:
+            for iid, ch in b.choices.items():
+                key = (iid, tuple((c[0], c[1]) for c in ch))
+                g = groups.get(key)
+                if g is None:
+                    groups[key] = g = {"iid": iid, "p": 0.0, "ch": ch, "reveal": None, "shapes": {}}
+                g["p"] += b.p
+                rv = [c[3] for c in ch if c[3] is not None]
+                if rv:
+                    g["reveal"] = min(rv) if g["reveal"] is None else min(g["reveal"], min(rv))
+                for s_ in b.damage(kk):
+                    if s_.iid != iid:
+                        continue
+                    geo = s_.box if s_.box is not None else s_.circle if s_.circle is not None else \
+                        tuple(np.round(s_.poly, 2).ravel())
+                    g["shapes"][(s_.name, tuple(np.round(geo, 2)) if s_.box is not None else geo)] = s_
+        out = {"k": int(k), "clappers": [], "rest": [], "ms": P.ms, "n": len(P.branches)}
+        by_iid: dict = {}
+        for g in groups.values():
+            by_iid.setdefault(g["iid"], []).append(g)
+        for iid, gs in sorted(by_iid.items()):
+            gs.sort(key=lambda g: -g["p"])
+            t = self.trk.cl.get(iid) or {}
+            at = (t.get("x"), (t.get("y") or 0.0) + 1.2) if t.get("x") is not None else None
+            rows = []
+            for n, g in enumerate(gs):
+                if n < TOP:
+                    rows.append({"p": g["p"], "label": _label(g["ch"], g["p"], g["reveal"], since), "col": COLS[n],
+                                 "shapes": list(g["shapes"].values())})
+                else:
+                    out["rest"].extend(g["shapes"].values())
+            out["clappers"].append({"iid": iid, "at": at, "rows": rows})
         return out
 
 
-def _label(b: cm.Branch, since: int) -> str:
+def _label(ch: list, p: float, reveal, since: int) -> str:
     parts = []
-    for iid, ch in b.choices.items():
-        for c in ch:
-            if c[0] in ("close", "close_ev", "far", "escape"):
-                parts.append(str(c[1]))
-            elif c[0] == "will_evade":
-                parts.append("evade" if c[1] else "no evade")
-            elif c[0] == "hit_idle":
-                parts.append("hit in Idle")
-    rv = "" if b.reveal is None else f" rev {b.reveal - since:+d}f"
-    return f"{b.p:.2f} " + (" / ".join(parts) if parts else "as now") + rv
-
-
-def _anchor(b: cm.Branch, k: int):
-    for s in b.shapes(k):
-        if s.name == "body":
-            x0, y0, x1, y1 = s.box
-            return (0.5 * (x0 + x1), y1 + 0.6)
-    return None
+    for c in ch:
+        if c[0] in ("close", "close_ev", "far", "escape"):
+            parts.append(str(c[1]))
+        elif c[0] == "will_evade":
+            parts.append("evade" if c[1] else "no evade")
+        elif c[0] == "hit_idle":
+            parts.append("hit in Idle")
+    rv = "" if reveal is None else f" rev {reveal - since:+d}f"
+    return f"{p:.2f} " + (" / ".join(parts) if parts else "as now") + rv
 
 
 def draw_map2(img: np.ndarray, data: dict, Hw: np.ndarray, H: int) -> None:
@@ -129,30 +144,30 @@ def draw_map2(img: np.ndarray, data: dict, Hw: np.ndarray, H: int) -> None:
 
     for s in data.get("rest") or ():
         outline(s, REST_COL, max(1, th - 1))
-    labels_at: dict = {}
-    for br in data.get("branches") or ():
-        for s in br["shapes"]:
-            outline(s, br["col"], th)
-        at = br.get("at")
-        if at is not None:
-            key = (round(at[0], 0), round(at[1], 0))
-            n = labels_at.get(key, 0)
-            labels_at[key] = n + 1
-            p = _to_px(Hw, np.array([at]))[0]
-            org = (int(p[0]) - int(60 * fs * 2), int(p[1]) - int(n * 22 * fs * 2))
-            cv2.putText(img, br["label"], org, cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0, 255), th + 2, cv2.LINE_AA)
-            cv2.putText(img, br["label"], org, cv2.FONT_HERSHEY_SIMPLEX, fs, (*br["col"], 255), max(1, th - 1),
+    for cl in data.get("clappers") or ():
+        for row in cl["rows"]:
+            for s in row["shapes"]:
+                outline(s, row["col"], th)
+        at = cl.get("at")
+        if at is None:
+            continue
+        p = _to_px(Hw, np.array([at]))[0]
+        for n, row in enumerate(cl["rows"]):
+            org = (int(p[0]) - int(60 * fs * 2), int(p[1]) - int((len(cl["rows"]) - n) * 22 * fs * 2))
+            cv2.putText(img, row["label"], org, cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0, 255), th + 2, cv2.LINE_AA)
+            cv2.putText(img, row["label"], org, cv2.FONT_HERSHEY_SIMPLEX, fs, (*row["col"], 255), max(1, th - 1),
                         cv2.LINE_AA)
 
 
 def legend(data: dict | None) -> list:
     if data is None:
         return [("MAP2 Clapper model (M2): no Clapper / no prediction yet", None)]
-    out = [(f"MAP2 Clapper model (M2) at +{data['k']} f: predicted DAMAGE shapes per branch (her path held still, no "
-            f"hit by her), label = probability / choices / reveal; grey = the other {max(data['n'] - TOP, 0)} "
-            f"branches; {data['ms']:.1f} ms", None)]
-    for br in data.get("branches") or ():
-        out.append((br["label"], br["col"]))
+    out = [(f"MAP2 Clapper model (M2) at +{data['k']} f: each Clapper's predicted DAMAGE shapes per outcome (its "
+            f"colour; her path held still, no hit by her), label at it = probability / choices / reveal (frames from "
+            f"now); grey = its less likely outcomes; {data['n']} joint branches, {data['ms']:.1f} ms", None)]
+    for cl in data.get("clappers") or ():
+        for row in cl["rows"]:
+            out.append((f"Clapper {cl['iid'] % 1000}: {row['label']}", row["col"]))
     return out
 
 
