@@ -11563,3 +11563,150 @@ no live block after it.
 3. The jump's rising body (4 / 24): measured flight x instead of the linear one; move out in front 3 u on a jump in
    place. 4. The Clawline chase as the first choice after an evade (the lead's NOTE 2) - used in 29 of 592 evades.
 5. The mp4 recording was not made (optional per the lead's NOTE).
+
+## Task map2 - stage M0: the hero model's calibration (live forced probes on w7, every M0 item measured on >= 20 trials; SSBOT_FORUM_HERO2, default off: the umbrella's attack cancel, the release-frame loss and the Wanderer pogo restart in kin_jit, the Clawline's hold height in the planners' macros, the Clawline carve-out for M1) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §91)
+
+The task: docs/plans/forum_map_v2.md section 2 M0 (and every "M0" in section 1): live probes with forced setups, each
+measured on >= 20 trials, then the hero model (kinematics and the planners' macros) updated behind SSBOT_FORUM_HERO2
+(default off, bit-identical off). P = the frame whose latched ACTION mask (STATE act.mask) first holds the key - **two
+frames later than SP13's P** (SP13's runs: the latch at P + 2 in 98 / 108, P + 3 in 10). u: x her box centre, bb her box
+bottom above the floor (3.015), "gap" box edge to box edge. Forum_W_w7 (fo_cl_w7w), Wanderer, instances 0 / 1, 1.0x.
+Data `C:\ssbot\data\m2_play\map2` (`m0_calib.txt / .json` every number, `all_rows.pkl` the extracted trials,
+`kin_b1_both.json` the model check, `replay_*` identity, `scripts`), recordings `C:\ssbot\data\runs\m2\map2_m0_{smoke,b1,b2}`.
+No NOTE_FROM_LEAD in map2; no human practice ran; the trading bot was not touched.
+
+### Result (779 trials: fl_atk 136, fl_claw 94, claw_air 74, claw_gnd 34, drift 41, reopen 44, dash_g 55, ds_whiff 41, pogo 122, side 60, hook 49, idle_hit 29)
+
+1. **Attack / Clawline from the umbrella float.** Attack in Float Idle with the jump held: the slash on the press
+   frame (22 / 22, no Deflate). **On the jump's release frame: lost** (0 / 20; Float Idle's ListenForJump END fires
+   first, the Deflate runs, control 6 frames later, no slash). In the Deflate (release + 1 .. 6): at once (19 / 19, its
+   Attack Cancel); after it: at once (34 / 34). In the Inflate: lost at its frames 1 - 4 (6 / 6, ListenForAttack's 0.075 s
+   delay), at once from its 6th (9 / 9); in the umbrella's antic (5 - 6 frames): lost (0 / 26). What decides SP13a's 2 f
+   vs the air show's ~8 f: a press on (or latched before)
+   the release frame is lost - the Deflate's 6 frames plus the bot's 2. **The Clawline** (HeroController's queue, not the
+   FSM): at once from Float Idle held or released that frame (43 / 43), from the Deflate / after (16 / 16); **lost in the
+   umbrella's antic** (0 / 24); in the Inflate only when the key is still held as Float Idle starts (6 / 11).
+2. **The float's horizontal**: UmbrellaMotionX with the previous frame's key per physics step - antic (accel 8.5)
+   1022 / 1022 steps, Inflate (vx reset to 0 at its entry, accel 1.0 / decel 0.25) 2084 / 2219 (the misses: its entry
+   frame's extra step), Float Idle 3822 / 3856. **The Deflate freezes vx** (639 / 639 steps unchanged, any key), then the
+   instant run; the Deflate is 6 frames after the float (132 / 132), 7 when the jump was released inside the Inflate
+   (it starts on the Inflate's last frame; 26 / 27). A key released in the float drifts on ~3 u (8.5 -> 0 at 0.25 per
+   step). **The re-open after a close** (44): a jump press before the umbrella FSM is Idle again (release + 11 .. 14 =
+   the Deflate's 6 + its Cooldown 0.1 s) does nothing (0 / 18; holding does not help), from release + 12 it opens at
+   once (13 / 13) while she is >= 1.1 u up.
+3. **The Clawline straight from the float**: yes (1).
+4. **A side down slash** (her box bottom below its body top, her box 0.03 - 1.7 u clear of its body in x, p50 0.92, n 42):
+   **a full pogo bounce** (41 / 42; the other she had landed), the same rise (3.74 u over the contact frame's box, p10
+   3.43 / p90 4.09) and i-frames (contact .. + 8 / 9: DOWNSPIKE_INVULNERABILITY_STEPS 8). Top contacts 33: 30 bounced (3
+   landed / frozen).
+5. **The down slash cadence**: the next swing 18 frames after the press at the earliest, after a whiff (41 second
+   presses: none at + 12 .. 16, + 17 swings at + 18 from the queue in 4 / 5, + 18 .. 24 at once) and after a pogo hit (57:
+   none at + 10 .. 17, at + 18 one at once and one a frame late, + 19 .. 26 at once) alike. **A pogo restores the air
+   dash**: 28 / 28 pre-dashed contacts had can.dash false before and true at contact + 9 .. 14 (that dash's 0.425 s
+   cooldown); without an earlier dash it is free at contact + 3 / 4. **The bounce**: vy -10 on the contact frame, the
+   default bounce, then the slash's "Bounce" animation event at P + 7 restarts it (one more -10 frame, then one step of
+   17.4): rise **3.74 u** (79 % of 115) / 4.09 (16 %), apex contact + 21 / 22; a contact after P + 7 bounces once
+   (~2.7 - 3.05 u). The old model (one EV_POGO) was ~0.5 u high in 65 / 78. **The hooked Clawline's forced bounce is the
+   plain one**: 4.09 u over the control frame's box (19 / 19), apex control + 22 / 23 - A2 differs after a pogo (3.74)
+   and after a Clawline (4.09).
+6. **The Idle hook**: the Clapper reacts **in the needle's hit frame** (P + 8 / 9; Dmg Attack and its next move's first
+   STATE frame the same frame, 38 / 39 Idle hooks); a side / up slash on the Idle Clapper the same (0 frames, 27 / 27).
+   So there is no 12 - 18 f reaction delay: the move starts 10 - 14 frames BEFORE she arrives (the dash's damage at P + 18
+   .. 24) - most likely the origin of the "12 - 18 f" (from the decision tick it is + 10 / 11). The only spreads: P + 8
+   vs + 9 (the antic clip's phase), and a Walking Clapper (no Dmg Attack: Walk's own 0.25 s / Slam Range at P + 6 .. 20).
+   **It picks the move from her position at the needle's hit** - still where she threw (3 - 9.5 u), not her arrival:
+   beyond 8.05 u the hook draws a far move.
+7. **The hold height vs vy at the press** (123 airborne presses, vy -19.6 .. +17.4): the Harpoon Antic clamps vy to
+   [-10, 5] and multiplies by 0.875 on entry and per step (gravity off) to the throw: hold bb = bb_P + 0.02 v sum 0.875^k
+   (k 1 .. n, n the 7 / 8 steps to the throw) - residual p10 / p90 0.000 u (sd 0.09). With the model's free-flight vy at
+   the latched frame: **bb + (0.0744 .. 0.0804) clamp(vy, -10, 5)**. SP13's fit (-0.261 + 0.0788 vy) is +0.24 u off in
+   this convention (it used the state 2 frames earlier) and overshoots fast rises (the clamp). From the ground: 0.25 u.
+8. **A second Clawline at control**: unhooked, lost before control + 13 (0 / 9 at + 2 .. 12), at once from + 13 (23 / 23)
+   - the Harpoon FSM's Wait 0.2 s (can.harpoon is true from + 10, but the press is dropped until the FSM is Idle);
+   hooked, from + 12 / 13 (0 / 18 at + 2 .. 11, 1 / 2 at + 12, 9 / 9 at + 13 .. 18) and **it cuts the forced bounce** (vy
+   clamped to 5, x 0.875). After an unhooked Clawline the attack and the dash are free at control (24 / 24, 17 / 17);
+   hooked the attack waits to control + 10 / 11. 13 frames < the ~30-frame block: no "Clawline ready" key, an online lock.
+9. **The unhooked Clawline** (173: 125 air, 48 ground): the antic from P, the throw at P + 9 (air 51 / 60; 8 in 9; ground
+   7 / 8), then rigidly: the throw 10 frames still, the dash 70 u/s for Wait 0.1 s (6 steps 8.4 u, 172 / 173), the Catch 6
+   frames (x 0.75 per step), **control at P + 32** (30 .. 33). **Pull P -> control 10.6 u** (p10 9.4 / p90 10.8; ground
+   9.2 - 10.6), **the height held**; **the end: vy 0, no bounce (an A1 start)**, vx 12.46 toward, then HarpoonDashEnd's
+   decaying air-move velocity (x 0.923 per step, skipped while a key is held, cancelled by a turn): +1.62 u with no key
+   (0.81 / 2.17). `knowledge.hero2.claw_unhooked` integrates it per step: air 111 / 125 within 0.1 u from P to control
+   (p90 0.12), ground 48 / 48 off by a constant 0.20 u in the Catch.
+10. **The rest**: the Deflate's horizontal is frozen (2); the unhooked end is A1 (9); **the ground dash: any number, the
+   next one 25 frames after the press** (0.425 s: + 24 swings a frame late, earlier presses are dropped, no queue), 7 - 9
+   frames, 3.5 - 4.05 u; **the sprint**: 28 -> 17.5 u/s at 1.1 per step, **steady 17.5 u/s** (22 held dashes, 843 frames),
+   released after Sprint Grace the skid (x 0.85 per step, ~16 frames), with the key held the run after it.
+
+### 1. Code
+
+- `brain/ssbot/probes/m0_probe.py` (2aa76a2, 90ffbdf, 9f2191e, 83789a9): the probe (hero-only trials in the ~4 s before
+  the Clapper drops in, one per load, placed with randomize_start's dx; the Clapper's after its Roar; isInvincible and
+  silk 9 through the debug line server; fsmtap all). Sandbox `m0_go.ps1` -> `sp4_block.ps1` -> `m0_probe.ps1`, boost
+  `m0_boost.ps1`.
+- `brain/ssbot/tools/m0_calib.py`: the extraction and every measurement above; `--kin` the model check (the kinematics
+  rolled from each hero-only trial's standing frame with the logged latched masks and dt / steps).
+- **SSBOT_FORUM_HERO2** (293a957, b11eac5; default off): `kinematics.HeroParams.hero2` (bits appended to the vector with
+  `h2_pogo_rs_t` 0.1083 / `h2_pogo_j2` 8; 0 = the rules as before) and `kinematics.hero2(params)` (the same object when
+  off), applied to the policy's params0. kin_jit: H2_GLIDE_GRAV (the umbrella's Attack / Dash Cancel restores gravity -
+  the old model kept it off and ramped it as an air hang with the jump held: up to 1.7 u), H2_REL_LOSS (no cancel on the
+  release frame), H2_GLIDE_ATK (the cancel's slash on the press frame, not a frame later from the queue; also a press
+  on the Deflate's last frame), H2_INFL_END (the jump released inside the Inflate: the Deflate from its last frame, one
+  frame longer), H2_POGO_RS (the slash bounce restart; a later contact bounces once with the slash's config). `hero_macros` (the HERO2 bounce profile:
+  the down slash pressed 3 frames before the contact), `claw_strike.hold_bb / vy_ok` (also in air_show and claw_chase:
+  the clamp formula, any vy; off = the old fit, the same float expression), `knowledge/hero2.py` (the Clawline
+  carve-out and the measured timings for M1).
+- Tests `tests/test_m0_hero2.py` (10).
+
+### 2. The model check (the hero-only trials, the comparison cut at a Clawline press)
+
+| trials | n | within 0.1 u throughout: current / HERO2 | attack onsets equal: current / HERO2 |
+|---|---|---|---|
+| float, attack with the jump held | 22 | 0 / **22** | 0 / **22** |
+| attack in the Inflate | 14 | 6 / **14** | 6 / **14** |
+| attack on the release frame | 21 | 5 / **21** | 0 / **21** |
+| attack after the release | 53 | 50 / **52** | 34 / **53** |
+| float + Clawline (to the press) | 85 | 84 / **85** | 85 / 85 |
+| drift, whiff, dash / sprint, Clawline jumps (to the press) | 185 | 182 / 182 | 185 / 185 |
+| **b1 i0** | **380** | **327 / 376** | **310 / 380** |
+| b3: attack in the umbrella's antic | 26 | 5 / **21** | 26 / 26 |
+| b3: the re-open after a close | 44 | 31 / **35** | 44 / 44 |
+| b2: dash / sprint, whiff, Clawline in the antic | 34 | 34 / 34 | 34 / 34 |
+| **all three blocks** | **484** | **397 / 466 (96.3 %)** | **414 / 484** |
+
+The 18 left: the umbrella's antic 5 vs 6 frames (14, max 0.32 u: the frame-time jitter, inside the timing lanes'
++-1 frame), a dash re-pressed on the dash's end frame (3: the game stops, the model sprints), one Deflate entry a frame
+off. The
+pogo bounce: b1's 78 contacts 13 -> 78 / 78 within 0.1 u (the fit), **b2's 22 (held out) 4 -> 21 / 22**.
+
+### 3. Identity
+
+`C:\ssbot\data\m2_play\map2\scripts\replay_ident_m0.ps1` (forum_policy_replay, the default arm's env, 4000 frames) and
+`ident_cmp.sh`: the reference from the pre-HERO2 checkout 83789a9 (`replay_ref`); 293a957 and b11eac5 with
+SSBOT_FORUM_HERO2 unset **byte-identical to it** on w7 192006 i0 e1 (2,073 ticks) / 084036 i1 e0 (1,778) and w13 144051
+i1 e0 (1,541) / 102908 i0 e0 (1,659); with SSBOT_FORUM_HERO2=1 all four run with 0 tracebacks and differ from their
+first tick (the bounce tables, the hold height). Tests: `tests/test_m0_hero2.py` 10 + the kinematics / macros / air
+show / SP13 files 81 pass; the full suite at 293a957 (its frozen checkout, Idle): 2,071 passed, 5 failed - the two known
+(test_import_firewall, test_three_layer's bell test) and three test_harness_recovery tests that stop at the present
+C:\ssbot\sandbox\DEMO_SOON (the same three fail on the pre-HERO2 checkout 83789a9), 1 skipped, 1 xfailed
+(`map2\fullsuite_293a957.log`); at b11eac5 2,072 passed and the same 5 failed (`map2\fullsuite_b11eac5.log`).
+
+### 4. Live blocks (instances 0 / 1)
+
+smoke (03:28, 14 + 9 trials), b1 (03:31 - 03:48, 415 + 180), b2 (03:53 - 03:57, 80 + 34), b3 (04:18 - 04:20, 44 + 26:
+the re-open, the attack in the umbrella's antic). The instances were not
+running at the start: launched with `launch_sp8.ps1` (ssbot.tools.launcher -n 2 --detach, WMI) at 03:28. Every block:
+the display woken, DEMO_SOON paused and restored, the probes boosted (High, P-cores, EcoQoS off), both instances frozen
+(time scale 1e-4) after it by sp4_block. No game process killed; the oracle not deployed; only instances 0 and 1.
+Frozen checkouts `C:\ssbot\live_1v1_{90ffbdf, 9f2191e, 83789a9, 293a957, 2aec2ed, b11eac5}`.
+
+### Open items
+
+1. Not measured: the hooked body's contact off to control + 0.2 s (the hero was invincible in the probes), a jump
+   pressed from contact + 3 (the umbrella in the bounce).
+2. `knowledge.hero2.claw_unhooked` from the ground: a constant 0.20 u in the Catch (the air is exact).
+3. Edges left in kin_jit (2.): a dash re-pressed on its end frame; the antic's 5 / 6 frames is the timing lanes' job.
+4. claw_strike's timeline constants are still SP13's (its P two frames early); HERO2 replaces only the hold height.
+   HERO2 has not run live: by the rule the person's eye check of the predictions comes first (M2 / M4).
+5. For M1 / M2: the Clapper picks its move at the needle's hit from her throw position (6); the unhooked Clawline is
+   an A1 edge with a residual vx (9); no Clawline-ready key (8); the pogo bounce is 3.74 u, the Clawline's 4.09 (5).

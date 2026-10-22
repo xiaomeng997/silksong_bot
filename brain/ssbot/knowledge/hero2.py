@@ -42,16 +42,17 @@ CLAW_ANTIC_DECEL = (0.975, 0.875)
 CLAW_CATCH_DECEL = 0.75
 CLAW_END_DECAY = 0.923     # the air-move velocity after control, per step (exp(-4 * 0.02))
 CLAW_VY_CLAMP = (-10.0, 5.0)
-# after an unhooked Clawline's control: the attack and the dash at once (54 / 54, 26 / 26 presses at control + 2 ..
-# 24); the umbrella at once when high enough (CanFloat); the next Clawline only from control + 13 (0 / 12 presses at
-# + 2 .. 12, 31 / 31 at + 13 .. 24): the FSM's Wait 0.2 s (can.harpoon turns true at + 10, the 0.16 s cooldown, but a
+# after an unhooked Clawline's control: the attack and the dash at once (24 / 24, 17 / 17 presses at control + 2 ..
+# 24); the umbrella at once when high enough (CanFloat); the next Clawline only from control + 13 (0 / 9 presses at
+# + 2 .. 12, 23 / 23 at + 13 .. 24): the FSM's Wait 0.2 s (can.harpoon turns true at + 10, the 0.16 s cooldown, but a
 # press before the FSM is Idle again is lost). No longer cooldown: no 'Clawline ready' key for the tables.
 CLAW_NEXT_F = 13
 # hooked (an enemy in the ray; 49 presses from the ground at the Clapper 3.1 - 8.6 u away): the needle hits at P + 8 / 9
 # (the enemy's TOOK DAMAGE that frame: an Idle Clapper's Dmg Attack and its next move start there, 38 / 40), the dash
 # from P + 17 .. 19, its body's damage at P + 18 .. 24, control at P + 23 .. 32 (p50 26) with vy -10 for one frame and
 # the forced bounce (vy 17.4); no i-frames; the attack at control + 10 / 11 (0.15 s); a second Clawline from control
-# + 12 (0 / 21 at + 2 .. 11), which cuts the bounce (vy clamped to 5, then x 0.875).
+# + 12 / 13 (0 / 18 at + 2 .. 11, 1 / 2 at + 12, 9 / 9 at + 13 .. 18), which cuts the bounce (vy clamped to 5, then
+# x 0.875).
 HOOK_NEEDLE_F = (8, 9)
 HOOK_NEXT_F = 12
 
@@ -119,12 +120,17 @@ def claw_unhooked(x0: float, bb0: float, vx0: float, vy0: float, d: int, fs, thr
 # the float (132 / 132), 7 when the release falls on the Inflate's last frame (26 / 27), gravity on, vx frozen (639 / 639
 # steps dvx 0, whatever key), control after it (the instant run). A release with no key in the float drifts on ~3 u
 # (8.5 u/s at 0.25 per step).
+# The re-open after a close (44): a jump press before the FSM is Idle again (release + 11 .. 14 = the Deflate's 6 + its
+# Cooldown 0.1 s) does nothing (0 / 18, holding does not help: a new press), from release + 12 the umbrella opens at once
+# (13 / 13) when she is still >= 1.1 u up (CanFloat).
 DEFLATE_F = 6
+REOPEN_F = 12
 # attack (down / side) pressed in the umbrella, frames to the slash (fl_atk, 110):
 #   Float Idle, jump held: at once (22 / 22, no Deflate); on the jump's release frame: LOST (0 / 20; Float Idle's
 #   ListenForJump END fires first, the Deflate runs, control 6 frames later, no slash); in the Deflate (release + 1 ..
 #   6): at once (19 / 19, the Deflate's Attack Cancel); after it: at once (34 / 34); in the Inflate: lost at its frames
-#   1 - 4 (6 / 6: ListenForAttack's 0.075 s delay), at once from its 6th (9 / 9; the 5th not sampled). SP13a's "2 f" and
+#   1 - 4 (6 / 6: ListenForAttack's 0.075 s delay), at once from its 6th (9 / 9; the 5th not sampled); in the umbrella's
+#   antic (5 - 6 frames): lost (0 / 26). SP13a's "2 f" and
 #   the air show's "~8 f": a press on (or latched before) the release frame - lost, the Deflate's 6 frames + the bot's 2.
 ATK_INFLATE_DELAY_F = 5
 # Clawline pressed in the umbrella (fl_claw, 85 + 9): Float Idle held or released the same frame: at once (43 / 43;
@@ -139,11 +145,14 @@ ATK_INFLATE_DELAY_F = 5
 # a contact after the event (P + 8 ..): one bounce of one step, rise ~2.7 - 3.05; i-frames contact + 0 .. 8 / 9 (the 8
 # DOWNSPIKE_INVULNERABILITY_STEPS). A SIDE contact (her box bottom below its body top, her box clear of it in x by
 # 0.03 - 1.7 u, n 42): a full bounce in 41 (the miss: she had landed), the same i-frames.
+# The hooked Clawline's forced bounce is the plain default bounce: 4.09 u over the control frame's box (19 / 19), apex
+# control + 22 / 23 - the A2 start differs after a pogo (3.74) and after a Clawline (4.09).
 POGO_RISE = (3.43, 3.74, 4.09)
+CLAW_BOUNCE_RISE = 4.09
 POGO_APEX_F = (21, 22)
 POGO_IFRAMES_F = (0, 9)
 # the slash cadence: the next swing 18 frames after the press at the earliest (the 0.3 s cooldown; a press at + 17 held
-# two frames swings at + 18 from the queue, 4 / 5), after a whiff and after a pogo hit alike (n 41 / 61)
+# two frames swings at + 18 from the queue, 4 / 5), after a whiff and after a pogo hit alike (n 41 / 57)
 SLASH_NEXT_F = 18
 # the air dash after a pogo: restored (ResetAirMoves; 28 / 28 pre-dashed contacts had can.dash false before and true
 # at contact + 9 .. 14 = the 0.425 s dash cooldown since that dash); without an earlier dash it is free at contact + 3 / 4
