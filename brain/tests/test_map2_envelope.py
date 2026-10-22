@@ -110,6 +110,26 @@ def test_raster_is_conservative():
                 assert np.any((s[:, 1] <= x) & (x <= s[:, 2]))
 
 
+def test_contours_cover_the_raster():
+    rows = np.array([[0.0, 0.2, 0.0, 1.0], [0.2, 0.4, 0.5, 2.0], [1.0, 1.1, -3.0, -2.0]])
+    r = env.raster(rows, 0.0, 0.0)
+    polys = env.contours(r)
+    assert len(polys) == 2
+
+    def inside(p, x, y):
+        n, c = len(p), False
+        for i in range(n):
+            (x1, y1), (x2, y2) = p[i], p[(i + 1) % n]
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                c = not c
+        return c
+
+    for b, a, c in r:
+        y = (b + 0.5) * env.QROW
+        for x in np.linspace(a + 1e-6, c - 1e-6, 4):
+            assert any(inside(p, x, y) for p in polys)
+
+
 def test_vkey_canonical(eng):
     S = km.initial_state(eng.params, 0.0, 20.0, ground=False)
     cu = np.array([-1.0, 0, 0, 0, 0, 0, 0])

@@ -22,6 +22,13 @@ frame), the lanes frozen meanwhile (their cooldowns tick), control at P + 32 (+ 
 
 Time: frames (60 fps Update, where keys act and the FSM timers run) with the physics steps of each frame from the
 lane's own phase, exactly as kin_jit.run_lane under nominal timing; the vertical curves are per 50 Hz step.
+
+The count (forum.md 92): exact clusters do not stay at a few thousand - the air dash (its 14-frame air sprint, cancelled
+at any frame, with or without jump held) and the Clawline (4 variants every frame) multiply them (A1, 16 frames:
+23,831). The event limit (opts bits 8 .. 11: presses, releases of a hold that acts, the Clawline; going on is free)
+gives the spec's segment family in milliseconds. A held key whose hold acts (hold_useful) is the default 'going on';
+the dominance filter drops a child that only holds more useless keys than a sibling. The far layer's bands (band_n /
+band_t: one discrete state, a y / vy hull) are a validated superset but stayed large with the dash and the Clawline.
 """
 from __future__ import annotations
 

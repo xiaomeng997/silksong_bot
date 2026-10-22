@@ -464,6 +464,49 @@ def contour_vertices(r: np.ndarray) -> int:
     return v + 2 * len(prev)
 
 
+def contours(r: np.ndarray, q: float = QROW) -> list[np.ndarray]:
+    """The raster rows (bin, xa, xb) as outline polygons (vertices counter-clockwise, collinear points dropped): one per
+    run of consecutive bins whose intervals overlap; a bin holding several intervals of one run contributes its hull
+    (conservative). The contour-vertex form of a table region (for display and polygon tests)."""
+    if not len(r):
+        return []
+    bins = np.unique(r[:, 0]).astype(np.int64)
+    rows = {int(b): r[r[:, 0] == b][:, 1:] for b in bins}
+    # runs: overlapping intervals of consecutive bins
+    comp, polys = {}, []
+    runs = []
+    for b in bins:
+        for k, (a, c) in enumerate(rows[int(b)]):
+            joined = None
+            for ri, run in enumerate(runs):
+                lb, (la, lc) = run[-1][0], run[-1][1]
+                if lb == b - 1 and a <= lc + 1e-9 and c >= la - 1e-9:
+                    if joined is None:
+                        run.append((int(b), (a, c)))
+                        joined = ri
+            if joined is None:
+                runs.append([(int(b), (a, c))])
+    for run in runs:
+        hull = {}
+        for b, (a, c) in run:
+            lo, hi = hull.get(b, (a, c))
+            hull[b] = (min(lo, a), max(hi, c))
+        bs = sorted(hull)
+        right = []
+        for b in bs:
+            right += [(hull[b][1], b * q), (hull[b][1], (b + 1) * q)]
+        left = []
+        for b in reversed(bs):
+            left += [(hull[b][0], (b + 1) * q), (hull[b][0], b * q)]
+        pts = np.array(right + left)
+        keep = [i for i in range(len(pts))
+                if not (np.allclose(pts[i - 1], pts[i]) or
+                        abs((pts[i][0] - pts[i - 1][0]) * (pts[(i + 1) % len(pts)][1] - pts[i - 1][1]) -
+                            (pts[i][1] - pts[i - 1][1]) * (pts[(i + 1) % len(pts)][0] - pts[i - 1][0])) < 1e-12)]
+        polys.append(pts[keep])
+    return polys
+
+
 def build_table(eng: "Engine", S: np.ndarray, terr, T: int, band_n: int = 0, max_events: int = 0) -> dict:
     """One table: the forward pass from S over T frames (the event limit max_events: the segment family; the far
     layer's bands from band_n clusters), per frame and end condition the raster relative to her start position (x,
