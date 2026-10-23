@@ -103,7 +103,8 @@ class LiveCfg:
     mem_gb: float = 6.0            # a worker above this RSS exits after its search (the controller restarts it)
     hang_s: float = 3.0            # a search running this long: the worker reports its stack (and dumps the snapshot)
     dump_dir: str = ""             # where a hung search's snapshot is pickled ('': not)
-    ready_s: float = 240.0         # the workers' start-up wait
+    ready_s: float = 900.0         # the workers' start-up wait (a fresh checkout compiles the search: minutes)
+    warm_rec: int = 6              # recorded situations searched in a worker's warm-up (the compiled paths)
     replay: bool = False           # an offline replay: her position is the recording's, not her keys' result - the
     #                                hero tolerances are logged, not enforced
     log: bool = True
@@ -745,12 +746,47 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
                     steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time())
 
 
-def _warm_search(S, W) -> None:
-    S0 = km.initial_state(W.params, 26.0, sk.FLOOR + sk.FOOT, ground=True, facing=1)
-    o = cm.Obs(1, "Idle", 8 / 60.0, 33.0, cm.STAND_Y, 0.0, 0.0, -1, 230, None, j=8)
-    sit = ms.Situation(S0, [o], {1: cm.Memory()})
-    S.decide(sit, cap_s=0.3)
-    S.decide(sit, cap_s=0.2, prefix=ms.Seg(np.full(3, km.B_RIGHT, np.int64), [], None, "pre"))
+WARM_SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")   # the acceptance set (M3): the warm-up's situations
+
+
+def _warm_search(S, W, n_rec: int = 6) -> float:
+    """Every compiled path of the search before the first live snapshot: searches on a VIRTUAL clock (work units, so
+    a cold numba cache's compile time does not use up the cap and leave paths untouched - the first live searches of
+    a fresh checkout otherwise compiled the parallel pass and the witnesses for 40 s each, hung for the bot): an Idle
+    Clapper from the ground, the same after a prefix through the hold filter's realizer, two Clappers from the air
+    (one in its slam antic), and a few recorded situations of the acceptance set when it is on this machine."""
+    t0 = time.perf_counter()
+    vc, rl = S.vclock, S.realizer
+    S.vclock = 0.01
+    try:
+        hold_filter1(np.array([1, 0, 0, 2, 2, 0], np.int64), hold_tuple(km.HoldState.idle(1)))
+        S0 = km.initial_state(W.params, 26.0, sk.FLOOR + sk.FOOT, ground=True, facing=1)
+        o = cm.Obs(1, "Idle", 8 / 60.0, 33.0, cm.STAND_Y, 0.0, 0.0, -1, 230, None, j=8)
+        sit = ms.Situation(S0, [o], {1: cm.Memory()})
+        S.decide(sit, cap_s=0.4)
+        S.realizer = HoldRealizer(5, hold_tuple(km.HoldState.idle(1)))
+        S.decide(sit, cap_s=0.4, prefix=ms.Seg(np.array([km.B_RIGHT] * 3 + [0] * 2, np.int64), [], None, "pre"))
+        S.realizer = rl
+        Sa = km.initial_state(W.params, 30.0, sk.FLOOR + 2.0 + sk.FOOT, ground=False, vy=-2.0, facing=1)
+        o2 = cm.Obs(2, "Slam Antic", 5 / 60.0, 40.0, cm.STAND_Y, 0.0, 0.0, -1, 230, None, j=5)
+        S.decide(ms.Situation(Sa, [o, o2], {1: cm.Memory(), 2: cm.Memory()}), cap_s=0.4)
+        if n_rec and WARM_SITS.exists():
+            import pickle
+            with open(WARM_SITS, "rb") as fh:
+                sits = pickle.load(fh)
+            pick, seen = [], set()
+            for s_ in sits:
+                g = (s_.meta.get("src"), len(s_.obs), (s_.meta.get("moves") or [""])[0][:2])
+                if g not in seen:
+                    seen.add(g)
+                    pick.append(s_)
+            for s_ in pick[:n_rec]:
+                s_.S = km.pad_state(s_.S)
+                S.realizer = HoldRealizer(1, hold_tuple(km.HoldState.idle(1)))
+                S.decide(s_, cap_s=0.3, prefix=ms.Seg(np.zeros(1, np.int64), [], None, "pre"))
+    finally:
+        S.vclock, S.realizer = vc, rl
+    return time.perf_counter() - t0
 
 
 def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0) -> None:
@@ -763,7 +799,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0)
         S.part = (part, nparts)
     t0 = time.perf_counter()
     try:
-        _warm_search(S, W)
+        _warm_search(S, W, cfg.warm_rec)
     except Exception as e:  # noqa: BLE001 - reported, the worker goes on
         out_q.put({"kind": "error", "part": part, "where": "warm", "error": repr(e)[:400]})
     state = {"latest": None, "plans": {}, "abort": False, "cur": None, "stop": False}
