@@ -2388,7 +2388,9 @@ class Searcher:
             if getattr(e, "tag", ()):
                 return e
             if not e.finished and e.open_ok and (best is None or not best.safe or e.value_open > best.value + 1e-9):
-                self.ev.finish(e)
+                # (M4b's hard cap: a two-Clapper plan's exit checks - hundreds of outcomes - stop at the time; the
+                # plan then counts as unchecked)
+                self.ev.finish(e, until=(lambda: now() - t0c > cap) if cfg.hard_cap else None)
             return e
         if not cfg.defer_noop and (best is None or (noop.safe and not best.safe)):
             best = noop
