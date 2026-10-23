@@ -97,6 +97,7 @@ class Cfg:
     margin_scale: float = 1.0              # the measured margins x this (1: as measured; the sensitivity runs only)
     prims: tuple = ("dslash", "claw")
     cap_s: float = 8.0                     # the time cap of one decision
+    depth_frac: tuple = (0.45, 0.8)        # the cumulative share of the cap that depth 1, 2, ... may use (the last: all)
     w_hit: float = 1.0
     w_face: float = 0.5                    # the facing-to-the-wall value (P3)
     w_wall: float = 0.08                   # per u of wall room under 3 u
@@ -1715,10 +1716,15 @@ class Searcher:
                 lib_nodes += self._mk_nodes(plan, e, 1)  # a macro that landed a strike: the search goes on after it
         for depth in range(1, cfg.depth + 1):
             nxt = list(lib_nodes) if depth == 1 else []
-            for node in beam:
+            # ANYTIME: each depth gets its share of the cap (cfg.depth_frac, cumulative) and each node of the beam an
+            # equal part of what is left of it, so a slow depth (two Clappers) still leaves time for the next one
+            frac = cfg.depth_frac[min(depth, len(cfg.depth_frac)) - 1] if depth < cfg.depth else 1.0
+            depth_end = t0 + cap * frac
+            for ni, node in enumerate(beam):
                 if time.perf_counter() - t0 > cap:
                     timed_out = True
                     break
+                node_end = time.perf_counter() + max(0.0, depth_end - time.perf_counter()) / (len(beam) - ni)
                 fws = self.passes(node)
                 cands = []
                 for fw in fws:
@@ -1726,9 +1732,15 @@ class Searcher:
                     for c in ws:
                         self.stats[f"win_{c[0]}_d{depth}"] = self.stats.get(f"win_{c[0]}_d{depth}", 0) + 1
                     cands += [(fw, c) for c in ws]
+                # round robin over (primitive, Clapper): a time slice spent on one of them alone finds nothing else
+                groups: dict = {}
+                for fc in cands:
+                    groups.setdefault((fc[1][0], fc[1][5]), []).append(fc)
+                cands = [g[i] for i in range(max((len(g) for g in groups.values()), default=0))
+                         for g in groups.values() if i < len(g)]
                 if depth == 1:
                     for fw in fws[:1]:
-                        cands += [(fw, c) for c in self.safe_cands(node, fw)]
+                        cands = [(fw, c) for c in self.safe_cands(node, fw)] + cands
                 refine = []
                 queue = list(cands)
                 qi = 0
@@ -1737,6 +1749,9 @@ class Searcher:
                     qi += 1
                     if time.perf_counter() - t0 > cap:
                         timed_out = True
+                        break
+                    if time.perf_counter() > node_end:
+                        self.stats[f"sliced_d{depth}"] = self.stats.get(f"sliced_d{depth}", 0) + 1
                         break
                     seg = self.realize(node, fw, c) if c[0] != "safe" else self.realize_safe(fw, c)
                     if seg is None:

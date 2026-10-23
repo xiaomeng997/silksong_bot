@@ -273,14 +273,9 @@ def classify(ev, sit) -> list:
     if o is None:
         return []
     labels = set(classify_outcome(o, ev.plan, sit))
-    seen = set()
     for oo in ev.outcomes:
         if not getattr(oo.tr, "claws", None):
             continue
-        key = (id(oo.branch.choices), oo.tr.variant)
-        if key in seen:
-            continue
-        seen.add(key)
         for (lb, _) in reaction_details(oo):
             labels.add(lb)
     return sorted(labels)

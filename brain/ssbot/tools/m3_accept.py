@@ -503,6 +503,11 @@ def cmd_run(a) -> int:
         sits = sits[:a.limit]
     if a.only:
         sits = [s for s in sits if any(m in a.only.split(",") for m in s.meta["moves"])]
+    if a.timeouts_of:
+        # the situations whose search hit the cap in an earlier run (re-run with a longer cap: what time buys)
+        prev = json.loads(Path(a.timeouts_of).read_text("utf-8"))
+        names = {r["name"] for r in prev if r.get("timed_out")}
+        sits = [s for s in sits if s.name in names]
     jobs = [(i, s, a.lib, a.cap, a.depth) for i, s in enumerate(sits)]
     t0 = time.time()
     res = []
@@ -746,6 +751,7 @@ def main(argv=None) -> int:
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--only", default="")
     p.add_argument("--tag", default="")
+    p.add_argument("--timeouts-of", default="", help="only the situations that timed out in this run json")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")
