@@ -1734,6 +1734,7 @@ class Map2Controller:
             key = (ob.st, int(self.trk.cl.get(ob.iid, {}).get("ent") or 0))
             if self._st_seen.get(ob.iid) not in (None, key):
                 self.trig.append("reveal")
+                self.row.setdefault("rev", []).append([ob.iid % 1000, ob.st])   # (M4d: the reveal latency audit)
             self._st_seen[ob.iid] = key
             hp0 = self._hp_seen.get(ob.iid)
             if hp0 is not None and ob.hp < hp0:
