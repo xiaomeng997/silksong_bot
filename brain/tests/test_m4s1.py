@@ -269,8 +269,25 @@ def test_late_check_from_the_keys_actually_sent(W, live_plan):
     ok, why, _ = lv.late_check(W, lp, 104, f, bad, [o0], 0.5)
     assert not ok and why == "unplanned slash"
     late = np.concatenate([[int(o.cmds[0]) if len(o.cmds) else 0], keys[:-1]])
-    ok, why, info = lv.late_check(W, lp, 104, f, late, [o0], 0.0)
+    slip = [100 + q + 1 for q in range(len(keys)) if late[q] != keys[q]]
+    ok, why, info = lv.late_check(W, lp, 104, f, late, [o0], 0.0, slip=slip)
     assert (not ok and why in ("path", "danger", "claw latch", "press moved")) or (ok and info["dev"] == 0.0)
+    # the slip's own effect only: the same late keys with no slip named - the effect is 0 (a model drift or a replay's
+    # recorded position never counts)
+    ok, why, info = lv.late_check(W, lp, 104, f, late, [o0], 0.0, slip=[])
+    assert why != "path"
+
+
+def test_a_bad_press_up_to_the_deviation_is_unsafe(W):
+    """A Clawline the state does not allow (the umbrella's antic) is the plan's own press: the outcome is unsafe
+    ('press@P') - M3 accepts a collision AT the deviation frame, but the plan's key there is still played."""
+    sit = ms.Situation(_air(W, y=10.0), [cm.Obs(1, "Idle", 8 / 60.0, 40.0, cm.STAND_Y, 0.0, 0.0, -1, 230, None, j=8)],
+                       {1: cm.Memory()})
+    press.ON[0] = True
+    plan = ms.Plan([ms.Seg(np.array([J] * 4 + [R], np.int64), [], (1, 1))])
+    ev = ms.Searcher(W, ms.Cfg()).ev.evaluate(sit, plan, exits=False)
+    assert ev.outcomes and not ev.safe
+    assert all(o.why == "press@5" for o in ev.outcomes)
 
 
 class _Trk:
@@ -304,8 +321,8 @@ def test_the_controller_rechecks_a_slipped_key(W, live_plan, monkeypatch):
         ctl.sent_hist[k] = int(o.cmds[k - 100])
     calls = []
 
-    def fake(W_, lp_, fo, f, keys, idx, tol, pos_ref=None):
-        calls.append((fo, f, [int(x) for x in keys]))
+    def fake(W_, lp_, fo, f, keys, idx, tol, pos_ref=None, slip=None):
+        calls.append((fo, f, [int(x) for x in keys], slip))
         return False, "danger", {"s": fo - lp_.t_a}
     monkeypatch.setattr(lv, "late_check", fake)
     row: dict = {}

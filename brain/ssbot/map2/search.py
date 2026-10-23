@@ -1271,8 +1271,8 @@ class Evaluator:
         e = self.evaluate(sit, plan, exits=False)
         bad = None
         for o in e.outcomes:
-            if o.why.startswith("hit@"):
-                k = int(o.why[4:])
+            if o.why.startswith(("hit@", "press@")):
+                k = int(o.why.split("@")[1])
                 bad = k if bad is None else min(bad, k)
         return bad is None, bad, (time.perf_counter() - t0) * 1e3
 
@@ -1593,7 +1593,13 @@ class Evaluator:
                 dev += 1
         safe, why, exit_n, k_end = True, "", -1, tr.end
         ifr_until = max([kc + sk.DS_IFR[1] for (kc, _, kind) in tr.contacts if kind == "down"], default=-1)
-        if k_col is not None:
+        kx = bad_frame(tr, 1, tr.end)
+        if kx is not None and (dev is None or kx <= dev):
+            # M4 S1: a press the game would not play as planned (a Clawline the state does not allow, a side contact
+            # out of the air sprint) up to the deviation frame - its key there is still played (M3 accepts a
+            # collision AT the deviation frame; this one is the plan's own press): unsafe
+            safe, why = False, f"press@{kx}"
+        elif k_col is not None:
             if dev is None or k_col < dev:
                 safe, why = False, f"hit@{k_col}"
             else:

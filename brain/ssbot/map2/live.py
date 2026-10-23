@@ -1033,15 +1033,18 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
 
 
 def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, tol: float,
-               pos_ref: dict | None = None) -> tuple:
+               pos_ref: dict | None = None, slip: list | None = None) -> tuple:
     """M4 S1 (LiveCfg.late_check): the plan in control after a skipped tick slipped one of its keys (the oracle held
     the previous ACTION for that frame) - re-simulated from her ANCHOR state (the snapshot's) with the keys actually
     applied for frames t_a + 1 .. f + 1 (keys: a skipped frame's held keys) and the plan's own commands from f + 2,
     through the snapshot's hold filter state, in every outcome idx still possible; a down slash press the keys latch up
     to 2 frames late is moved there (simulate then credits it only where it lands: press.ON), a Clawline that no longer
     latches at its P with her facing toward the target, or a press the plan does not have, fails it. Each must touch
-    none of its danger from the anchor to its committed end and stay within tol of its planned path from now (fo; the
-    path re-simulated at its commit / last re-anchoring: pos_ref). (ok, why, info) as commit_check's."""
+    none of its danger from the anchor to its committed end, and the SLIP'S OWN EFFECT on her path from now (fo) on -
+    the same re-simulation with the slipped frames' keys as the plan has them (slip: their frames; the model and the
+    anchor the same, so a model drift or a replay's recorded position does not count) - must stay within tol. The
+    path of the plan in control (pos_ref: its re-simulated path at the commit / the last re-anchoring) moves by that
+    effect (info pos_over). (ok, why, info) as commit_check's."""
     t0 = time.perf_counter()
     s = int(fo - lp.t_a)
     r0 = int(f + 2 - lp.t_a)
@@ -1051,10 +1054,19 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
     alpha_c = int(round(float(S_a[km.ALPHA]) * 6.0)) % 6
     keys = np.asarray(keys, np.int64)
     pos_over, dev_max, n_sim = {}, 0.0, 0
+
+    def sim(o, kk_):
+        cmds = np.concatenate([kk_, o.cmds[r0:o.end + 1]])
+        lat = hold_filter1(cmds, lp.hold_a)
+        plan, why_ = reanchor_outcome(o, 0, lat, lp.lat_a, move=2)
+        if plan is None:
+            return None, lat, why_
+        tr_ = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
+                          claw_lock=int(getattr(lp, "claw_lock", -99)))
+        return tr_, lat, ""
     for i in idx:
         o = lp.outs[i]
-        cmds = np.concatenate([keys, o.cmds[r0:o.end + 1]])
-        lat = hold_filter1(cmds, lp.hold_a)
+        tr, lat, why = sim(o, keys)
         planned = {k for (k, _) in o.presses}
         claws = {int(k0) + len(m): c for (k0, m, _, c) in o.segs if c is not None}
         fac = sk.facing_track(face0, lat) if claws else None
@@ -1069,11 +1081,8 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
             if k in claws and not (_rising(m, pm, M_CLAW) and int(fac[q + 1]) == (1 if claws[k][0] > 0 else -1)):
                 return False, "claw latch", info
             pm = m
-        plan, why = reanchor_outcome(o, 0, lat, lp.lat_a, move=2)
-        if plan is None:
+        if tr is None:
             return False, why, info
-        tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
-                         claw_lock=int(getattr(lp, "claw_lock", -99)))
         n_sim += 1
         kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
         if kk < r0:
@@ -1082,16 +1091,28 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
         if kc_ is not None:
             info.update(col=int(kc_), out=i)
             return False, "danger", info
-        ref = (pos_ref or {}).get(i, o.pos)
-        kk = min(kk, len(ref) - 1)
-        dev = np.abs(tr.pos[s:kk + 1] - ref[s:kk + 1]).max(axis=1)
+        # the slip's own effect: the same keys with the slipped frames' as the plan has them
+        ks = keys.copy()
+        for k in (slip or ()):
+            q = int(k) - int(lp.t_a) - 1
+            if 0 <= q < len(ks) and int(k) - int(lp.t_a) < len(o.cmds):
+                ks[q] = int(o.cmds[int(k) - int(lp.t_a)])
+        trb, _, _ = sim(o, ks)
+        n_sim += 1
+        if trb is None:
+            trb = tr
+        kk = min(kk, len(trb.pos) - 1)
+        eff = tr.pos[:kk + 1] - trb.pos[:kk + 1]
+        dev = np.abs(eff[s:kk + 1]).max(axis=1) if kk >= s else np.zeros(0)
         dmax = float(dev.max()) if len(dev) else 0.0
         dev_max = max(dev_max, dmax)
         if dmax > tol:
             info.update(dev=round(dmax, 3), dev_k=int(np.argmax(dev)) + s, out=i)
             return False, "path", info
+        ref = (pos_ref or {}).get(i, o.pos)
         po = np.array(ref, copy=True)
-        po[:kk + 1] = tr.pos[:kk + 1]
+        n_ = min(len(po), kk + 1)
+        po[:n_] = po[:n_] + eff[:n_]
         pos_over[i] = po
     info.update(alive=list(idx), pos_over=pos_over, dev=round(dev_max, 3), n_sim=n_sim,
                 ms=round((time.perf_counter() - t0) * 1e3, 2))
@@ -2258,7 +2279,8 @@ class Map2Controller:
         tc = time.perf_counter()
         keys = np.array([self._sent_at(k) or 0 for k in range(int(lp.t_a) + 1, int(f) + 2)], np.int64)
         try:
-            ok, why_l, info = late_check(self.W, lp, fo, f, keys, idx, self.cfg.tol_late, pos_ref=self.ctrl_pos)
+            ok, why_l, info = late_check(self.W, lp, fo, f, keys, idx, self.cfg.tol_late, pos_ref=self.ctrl_pos,
+                                         slip=slip)
         except Exception as e:  # noqa: BLE001
             ok, why_l, info = False, "error", {"error": repr(e)[:200]}
         msc = (time.perf_counter() - tc) * 1e3
