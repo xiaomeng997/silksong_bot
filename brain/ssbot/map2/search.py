@@ -135,6 +135,9 @@ class Cfg:
     # after this many of the first pass's candidates were evaluated (or its queue ran out); their candidates then join
     # the M3 round robin for the rest of the node's queue. 0: every pass up front (M3).
     pass2_after: int = 0
+    hard_cap: bool = False                 # M4b: the contingent plans' and the deferred noop's exit checks stop at
+    #                                        the time (M3 ran them all: a two-Clapper decision with a 2 s cap took up to
+    #                                        59 s); the outcomes left count as unchecked
     defer_noop: bool = False               # M4b: the noop (the fallback plan) gets its exit checks at the end, not
     #                                        before the first candidate (5 - 90 ms on the w7 recordings)
     reuse_root: bool = False               # M4b: the noop plan is the root's evaluation with its exits run (one
@@ -157,7 +160,7 @@ class Cfg:
         2-event pass on the background thread, joined when done or after the first pass's queue), the passes on 2
         threads, the noop's evaluation reused and its exits deferred, a 1 s cap; with two worker processes per game
         instance each searcher takes a part (Searcher.part = (0, 2) / (1, 2)) and the better result wins."""
-        d = dict(cap_s=1.0, pass2_after=6, pass2_bg=True, fwd_threads=2, reuse_root=True, defer_noop=True)
+        d = dict(cap_s=1.0, pass2_after=6, pass2_bg=True, fwd_threads=2, reuse_root=True, defer_noop=True, hard_cap=True)
         d.update(kw)
         return cls(**d)
 
@@ -1540,12 +1543,15 @@ class Evaluator:
         if o.exit_n <= 0:
             o.safe, o.why, o.value = False, f"exit@{o.k_end}", -1.0
 
-    def finish(self, ev: Eval, stop: bool = True) -> Eval:
+    def finish(self, ev: Eval, stop: bool = True, until=None) -> Eval:
         """Run the pending exit checks (most probable outcome first; stop at the first failure unless stop is False)
-        and settle the plan's safety and value."""
+        and settle the plan's safety and value. until: a callable - true once the time is up (M4b's hard cap: the
+        outcomes not checked by then count as unchecked, unsafe)."""
         t0 = time.perf_counter()
         for o in sorted(ev.outcomes, key=lambda o: -o.p):
             if getattr(o, "pending", False):
+                if until is not None and until():
+                    break
                 self._exit(o)
                 if not o.safe and stop:
                     break
@@ -2313,7 +2319,7 @@ class Searcher:
                 e = self.ev.evaluate(sit, plan, exits=False, tag=ptag, start=sp.get("start") if ptag else None)
                 e.tag = ptag
                 if e.open_ok:
-                    self.ev.finish(e, stop=False)
+                    self.ev.finish(e, stop=False, until=(lambda: self._now() > t_end) if self.cfg.hard_cap else None)
                 e.contingent = {rk_label(rk): len(v) for rk, v in conts.items()}
                 made.append(e)
                 if e.outcomes:
@@ -2552,9 +2558,11 @@ class Searcher:
                     best = e
                     note(best)
         if cfg.defer_noop:
-            if not noop.finished:
-                self.ev.finish(noop, stop=False)
-            if best is None or better(noop, best):
+            # (the noop's value is at most its open value: a safe plan already worth as much needs no noop exits)
+            if not noop.finished and not (best is not None and best.safe and best.value >= noop.value_open):
+                self.ev.finish(noop, stop=False,
+                               until=(lambda: now() - t0c > 1.5 * cap) if cfg.hard_cap else None)
+            if noop.finished and (best is None or better(noop, best)):
                 best = noop
                 note(best)
         chosen = best

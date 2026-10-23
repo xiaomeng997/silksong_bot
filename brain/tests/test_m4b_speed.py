@@ -258,3 +258,15 @@ def test_background_pass_and_threads_decide(W):
     S = ms.Searcher(W, ms.Cfg(cap_s=1.0, depth=2, pass2_after=6, pass2_bg=True, fwd_threads=4, reuse_root=True))
     r = S.decide(sit)
     assert r.ev is not None and r.ev.safe and any(str(m[1]).startswith("passes2") for m in S.marks)
+
+
+def test_live_config_with_a_contingent_plan(W):
+    """Cfg.live() (the anytime order, the hard cap) on the far hook (a contingent plan: _combine runs) - a safe plan,
+    the decision near its cap."""
+    import time as _t
+    sit = ms.Situation(_ground(W, C - 9.0), [_obs("Idle", C, j=8)], {1: cm.Memory()}, name="far hook")
+    S = ms.Searcher(W, ms.Cfg.live(cap_s=2.0))
+    t = _t.perf_counter()
+    r = S.decide(sit)
+    assert r.ev is not None and r.ev.safe
+    assert _t.perf_counter() - t < 2.0 * 1.25 + 1.5
