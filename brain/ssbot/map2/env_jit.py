@@ -114,8 +114,8 @@ _QQ = int(np.flatnonzero(_KEEP == QQ)[0])
 # canonicalised: JDSTEPS (min with jump_steps_min: only '>=' is read), ATK_T (only while attacking), the cooldowns
 # that stop at <= 0 (ATK_CD, CLING_CD, GL_CD, DASH_CD, JBUF: max 0), PREV (jump / attack / dash bits), the direction of
 # a committed block (dash FACE, sprint SP_X, Clawline), the custom fields
-K_JDS, K_ATKT, K_ATKCD, K_CLCD, K_GLCD, K_DCD, K_JBUF, K_PREV, K_DIR, K_ABUF = range(NK0, NK0 + 10)
-K_C0 = NK0 + 10
+K_JDS, K_ATKT, K_ATKCD, K_CLCD, K_GLCD, K_DCD, K_JBUF, K_PREV, K_DIR, K_ABUF, K_XVD = range(NK0, NK0 + 11)
+K_C0 = NK0 + 11
 NKEY = K_C0 + NC
 # fields a no-op press may change (the filter compares children of one parent without them): the press edges and
 # the queues a fresh press reproduces (a buffered jump / queued dash fires in the frame a new press would)
@@ -174,6 +174,11 @@ def vkey(x, cu, P, floor, out):
     out[K_JBUF] = max(x[JBUF], 0.0) if ((floor and m != M_NORMAL and m != M_HARD_LAND) or
                                         (sq and (h2 & H2_SPR_JUMP) != 0)) else 0.0
     out[K_ABUF] = max(x[ABUF], 0.0) if (sq and (h2 & H2_SPR_ATK) != 0) else 0.0
+    # the extra air velocity's side while it is faster than the run (beyond that the lanes bound it): clusters with
+    # opposite extras (a dash left / right cancelled the same frame) must not share lanes (the lane on each side
+    # takes the larger extra of a merge)
+    xv = x[XVX]
+    out[K_XVD] = (1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0
     out[_JQ] = x[JQ] if (floor and (prv & B_JUMP) != 0 and 0 <= x[JQ] <= P[P_JQ]) else -1.0
     out[_DQ] = x[DQ] if ((prv & B_DASH) != 0 and 0 <= x[DQ] <= P[P_DQ]) else -1.0
     out[_AQ] = -1.0
