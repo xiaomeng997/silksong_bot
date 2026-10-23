@@ -126,6 +126,8 @@ class Cfg:
     # after this many of the first pass's candidates were evaluated (or its queue ran out); their candidates then join
     # the M3 round robin for the rest of the node's queue. 0: every pass up front (M3).
     pass2_after: int = 0
+    defer_noop: bool = False               # M4b: the noop (the fallback plan) gets its exit checks at the end, not
+    #                                        before the first candidate (5 - 90 ms on the w7 recordings)
     reuse_root: bool = False               # M4b: the noop plan is the root's evaluation with its exits run (one
     #                                        prediction less; the same plan and value - M3 evaluated it twice)
     fwd_threads: int = 0                   # M4b: the approach passes' per-parent work on this many threads (> 1;
@@ -2346,7 +2348,9 @@ class Searcher:
         mark("root")
         beam = [rt]
         best = kept
-        if cfg.reuse_root:
+        if cfg.defer_noop:
+            noop = rt.noop_ev                                  # M4b: its exits run at the end (the fallback only)
+        elif cfg.reuse_root:
             noop = self.ev.finish(rt.noop_ev, stop=False)      # M4b: the root's noop evaluation, its exits run
         else:
             noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop"))
@@ -2361,9 +2365,10 @@ class Searcher:
             if not e.finished and e.open_ok and (best is None or not best.safe or e.value_open > best.value + 1e-9):
                 self.ev.finish(e)
             return e
-        if best is None or (noop.safe and not best.safe):
+        if not cfg.defer_noop and (best is None or (noop.safe and not best.safe)):
             best = noop
-        note(best)
+        if best is not None:
+            note(best)
         timed_out = False
         n_cand = 0
 
@@ -2527,6 +2532,12 @@ class Searcher:
                 if e.finished and not e.tag and better(e, best):
                     best = e
                     note(best)
+        if cfg.defer_noop:
+            if not noop.finished:
+                self.ev.finish(noop, stop=False)
+            if best is None or better(noop, best):
+                best = noop
+                note(best)
         chosen = best
         if kept is not None and best is not None and best is not kept and best.safe and \
                 best.value < kept.value + cfg.w_switch:

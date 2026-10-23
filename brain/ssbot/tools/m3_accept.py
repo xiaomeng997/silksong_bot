@@ -589,6 +589,14 @@ def cmd_run(a) -> int:
     extra = {"prio": a.prio, "cfg": {"pass2_after": a.pass2_after}} if (a.prio != "idle" or a.pass2_after) else {}
     if a.safe_ts:
         extra.setdefault("cfg", {})["safe_ts"] = tuple(int(x) for x in a.safe_ts.split(","))
+    if a.cfg:
+        # Cfg overrides k=v;k=v (M4b: the live configuration's flags)
+        from ssbot.map2 import search as ms_
+        for kv in a.cfg.split(";"):
+            if kv.strip():
+                k, v = kv.split("=")
+                extra.setdefault("cfg", {})[k.strip()] = type(getattr(ms_.Cfg(), k.strip()))(eval(v))  # noqa: S307
+        extra.setdefault("prio", a.prio)
     if a.split > 1:
         # a split search (M4b): each part of a situation its own job, merged per situation (merge_split)
         jobs = [(i, s, a.lib, a.cap, a.depth, dict(extra, part=(q, a.split))) for i, s in enumerate(sits)
@@ -898,6 +906,7 @@ def main(argv=None) -> int:
     p.add_argument("--load", action="store_true", help="the simulated load of 2 games + 2 bots (M4b)")
     p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation (M4b)")
     p.add_argument("--safe-ts", default="", help="Cfg.safe_ts, comma-separated frames (M4b)")
+    p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v (M4b)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")
