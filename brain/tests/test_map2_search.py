@@ -140,7 +140,7 @@ def test_m3_tools_only_import_map2():
     root = Path(ms.__file__).resolve().parents[1]
     pat = re.compile(r"^\s*(from|import)\s+ssbot\.map2|ssbot\.map2\s+import", re.M)
     allowed = {"tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py", "tools/m3_search.py",
-               "tools/m3_accept.py"}
+               "tools/m3_accept.py", "tools/m4b_speed.py"}
     offenders = []
     for p in root.rglob("*.py"):
         rel = p.relative_to(root).as_posix()

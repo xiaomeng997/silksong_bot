@@ -774,6 +774,7 @@ class Evaluator:
         self.n_exit = 0
         self.ms_pred = 0.0
         self.ms_exit = 0.0
+        self.units = 0                 # work units (closed-loop evaluations + exit checks): the virtual clock's ticks
 
     def predict(self, sit: Situation, path: cm.HeroPath, T: int):
         t0 = time.perf_counter()
@@ -889,6 +890,7 @@ class Evaluator:
         branches of those reactions - its value is the plan's given those reactions, not the plan's (only _combine's
         joined plan is evaluated whole)."""
         t0 = time.perf_counter()
+        self.units += 1
         W, cfg = self.W, self.cfg
         n0p, n0e = self.n_pred, self.n_exit
         face0 = int(sit.S[km.FACE]) if sit.S[km.FACE] != 0 else 1
@@ -1062,6 +1064,7 @@ class Evaluator:
 
     def _exit(self, o: Outcome) -> None:
         """The coarse exit check of one outcome (from its end or its deviation frame)."""
+        self.units += 1
         o.pending = False
         st = state_at(self.W, o.tr, o.k_end)
         if st is None:
@@ -1181,6 +1184,15 @@ class Searcher:
         self.splits: dict = {}
         self.debug = False
         self.trace: list = []
+        # the clock of the time cap: None = wall time; a float = a VIRTUAL clock, seconds per work unit (Evaluator.units:
+        # one closed-loop evaluation or exit check) - deterministic runs (the identity checks of the speed work)
+        self.vclock: float | None = None
+        # the ANYTIME trace of the last decide(): (clock s, wall ms, value, safe, origin, plan frames) each time the
+        # best plan changed (the noop included)
+        self.anytime: list = []
+
+    def _now(self) -> float:
+        return time.perf_counter() if self.vclock is None else self.ev.units * self.vclock
 
     # ---- the pass and the windows ----
     def passes(self, node: Node) -> list:
@@ -1608,7 +1620,7 @@ class Searcher:
                 n_top += 1
                 if n_top > self.cfg.combine_splits:
                     break
-            if time.perf_counter() > t_end:
+            if self._now() > t_end:
                 break
             base, ptag, P = sp["plan"], sp["tag"], sp["P"]
             nb = len(base.segs)
@@ -1623,7 +1635,7 @@ class Searcher:
                         scored.append((g[1], e))
                 ok = []
                 for _, e in sorted(scored, key=lambda t: -t[0])[:self.cfg.combine_top]:
-                    if time.perf_counter() > t_end:
+                    if self._now() > t_end:
                         break
                     g = self._gval(e, pre, finish=True)
                     if g is not None and g[0]:
@@ -1659,7 +1671,7 @@ class Searcher:
                 if e.outcomes:
                     index(e)
                 self.stats["combined"] = self.stats.get("combined", 0) + 1
-                if e.safe or time.perf_counter() > t_end:
+                if e.safe or self._now() > t_end:
                     break
                 # the reactions that failed in the joined plan: their next continuation (or none)
                 bad = {reaction_key(o.branch, P, lag) for o in e.outcomes if not o.safe}
@@ -1676,8 +1688,19 @@ class Searcher:
         cfg = self.cfg
         self.ev.n_pred = self.ev.n_exit = 0
         self.ev.ms_pred = self.ev.ms_exit = 0.0
+        self.ev.units = 0
+        now = self._now
+        t0c = now()
         self.stats = {}
         self.splits = {}
+        self.anytime = []
+        last_noted = [None]
+
+        def note(e):
+            if e is not None and e is not last_noted[0]:
+                last_noted[0] = e
+                self.anytime.append((now() - t0c, (time.perf_counter() - t0) * 1e3, float(e.value), bool(e.safe),
+                                     e.plan.origin, e.plan.n_frames()))
         tried = []
         kept = None
         if prev is not None and prev.segs:
@@ -1685,6 +1708,7 @@ class Searcher:
             if e.safe:
                 kept = e
                 tried.append(e)
+                note(kept)
         rt = self.root(sit)
         beam = [rt]
         best = kept
@@ -1701,6 +1725,7 @@ class Searcher:
             return e
         if best is None or (noop.safe and not best.safe):
             best = noop
+        note(best)
         timed_out = False
         n_cand = 0
 
@@ -1717,7 +1742,7 @@ class Searcher:
         lib_nodes = []
         for combo in cfg.library:
             for plan in combo.instantiate(self.W, sit, rt.pred):
-                if time.perf_counter() - t0 > cap:
+                if now() - t0c > cap:
                     timed_out = True
                     break
                 e = consider(self.ev.evaluate(sit, plan, exits=False))
@@ -1726,18 +1751,19 @@ class Searcher:
                 tried.append(e)
                 if e.finished and better(e, best):
                     best = e
+                    note(best)
                 lib_nodes += self._mk_nodes(plan, e, 1)  # a macro that landed a strike: the search goes on after it
         for depth in range(1, cfg.depth + 1):
             nxt = list(lib_nodes) if depth == 1 else []
             # ANYTIME: each depth gets its share of the cap (cfg.depth_frac, cumulative) and each node of the beam an
             # equal part of what is left of it, so a slow depth (two Clappers) still leaves time for the next one
             frac = cfg.depth_frac[min(depth, len(cfg.depth_frac)) - 1] if depth < cfg.depth else 1.0
-            depth_end = t0 + cap * frac
+            depth_end = t0c + cap * frac
             for ni, node in enumerate(beam):
-                if time.perf_counter() - t0 > cap:
+                if now() - t0c > cap:
                     timed_out = True
                     break
-                node_end = time.perf_counter() + max(0.0, depth_end - time.perf_counter()) / (len(beam) - ni)
+                node_end = now() + max(0.0, depth_end - now()) / (len(beam) - ni)
                 fws = self.passes(node)
                 cands = []
                 for fw in fws:
@@ -1760,10 +1786,10 @@ class Searcher:
                 while qi < len(queue):
                     fw, c = queue[qi]
                     qi += 1
-                    if time.perf_counter() - t0 > cap:
+                    if now() - t0c > cap:
                         timed_out = True
                         break
-                    if time.perf_counter() > node_end:
+                    if now() > node_end:
                         self.stats[f"sliced_d{depth}"] = self.stats.get(f"sliced_d{depth}", 0) + 1
                         break
                     seg = self.realize(node, fw, c) if c[0] != "safe" else self.realize_safe(fw, c)
@@ -1781,6 +1807,7 @@ class Searcher:
                                            None if nm is None else (nm.why, nm.tr.contacts, nm.tr.missed), e))
                     if e.finished and not e.tag and better(e, best):
                         best = e
+                        note(best)
                     # the +-1-2 f / +-0.4 u refinement near a tight window (the spec's coarse grid then refinement): a
                     # down slash whose plan failed by a collision just before its contact or missed its target
                     if c[0] == "dslash" and len(c) == 8 and not e.open_ok and len(refine) < cfg.n_refine:
@@ -1815,16 +1842,18 @@ class Searcher:
                 beam.append(n_)
         # the contingent plans (one continuation per reaction to a hook), within a quarter of the cap more
         if self.splits:
-            t_end = max(time.perf_counter(), t0 + cap) + 0.25 * cap
+            t_end = max(now(), t0c + cap) + 0.25 * cap
             for e in self._combine(sit, tried, t_end):
                 tried.append(e)
                 n_cand += 1
                 if e.finished and not e.tag and better(e, best):
                     best = e
+                    note(best)
         chosen = best
         if kept is not None and best is not None and best is not kept and best.safe and \
                 best.value < kept.value + cfg.w_switch:
             chosen = kept                                            # hysteresis
+            note(kept)
         ms = (time.perf_counter() - t0) * 1e3
         res = Result(chosen, tried, ms, timed_out, n_cand, self.ev.n_pred, self.ev.n_exit, self.ev.ms_pred,
                      self.ev.ms_exit, kept is not None and chosen is kept)
