@@ -353,6 +353,13 @@ decision in the middle of a transition (a jump, a dash, an umbrella opening); sa
 reveal); the loss is some adaptivity in fast exchanges - keep a small set of EMERGENCY deviations (dash / umbrella /
 Clawline from mid-transition) for model errors. To do as M1b after M3 (M3 already chains <= 2-event segments at
 canonical junctions, the same direction).
+TABLE KEYS UNDER THIS SCHEME (the person, 2026-10-22): the fall keeps one table per frame of the fall from rest (each
+vy until the terminal speed: ~30) + the terminal fall; the float one per frame of its curve (~60) x a few vx bins (its
+inertia); ground walk and run - about 200 in all, x 2 for 'air dash used' in the air. The DASH AND THE JUMP DO NOT
+MULTIPLY THE TABLES: they are items of the action lists / edges whose results land in these same tables (the jump
+from the ground ends in the fall curve at a phase; the air dash + air sprint ends falling at some vy = the fall table
+of that phase; the bounce and the Clawline end at an apex = fall phase 0). Their timing and length are parameters
+of the list item, not keys.
 
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
