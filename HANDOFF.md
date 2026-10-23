@@ -11939,3 +11939,146 @@ the start-state turn and the exit lag, which are already in 475f66a), then the d
    polygons are Hang_04's (other rooms: from their terrain).
 6. Data: `C:\ssbot\data\m2_play\map2\m2` (`cache\{fit,held,old}` traces, `val_{fit,held,old}.json / .txt` every
    number, `margins.log`, `overlay_png`, `scripts` incl. the exploration scripts, `replay_475f66a`).
+
+## Task map2 - stage M3: the search and the acceptance suite (offline; M1's envelope passes + M2's predict() in a closed-loop search with the windows bound to the enemy, the commit / reveal / reactive-steering rule, the coarse exit check, the expected and terminal value, hysteresis, the time cap, the log and combo library formats; CONTINGENT PLANS - a continuation per reaction to a hook; the acceptance suite run twice: primitives only and with the library) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §94)
+
+The task: docs/plans/forum_map_v2.md section 1 L3, 1b and section 0 - the search as a module with M1's engine and M2's
+predict(), then the acceptance suite (offline), run twice (primitives + the strike module only, the real test; and with
+the combo library): situations for P1-P5 and the regression moves from the recordings and forced setups, a recognizer
+per move, the table found same / found different / not found (why) with the model's safety and hits, the decision
+time per tick and the needed horizons. Plus the person's three hook cases of 10-22 (MOVES_TODO P1). No live run (M4
+waits for the person's eye check of M2's overlay). u: world units, centre to centre; frames: game frames, 0 = the
+decision. The earlier M3 agent (cut off by the power outage) committed 50d4924 (the search) and 3c3eabb (the down slash
+windows at both sides of the body) without docs; this stage resumed from there: 556bcb6 (contingent plans, the
+recognizers and situations for the hook cases, the Clawline lock, the exit through a big rune, tick_check), e12c84f
+(anytime depth slices, the reaction labels on every outcome, `run --timeouts-of`).
+
+### The search (`brain/ssbot/map2/search.py`, `strike.py`, `combos.py`, `recognize.py`)
+
+- One decision (`Searcher.decide`): predict() under her do-nothing path; nodes (her exact state at a frame, the plan so
+  far, the Clappers re-predicted after its hits) expanded to depth 3, beam 4. Per node: M1 passes from her exact state
+  (<= 1 event / 60 f and <= 2 events / 30 f) in the union danger of the branches (margins on) + the walls; the WINDOWS
+  bound to the enemy (strike.py: per branch, Clapper and frame the down slash's press region on its robust body - the
+  intersection over the timing variants, both sides of its centre - and the hooked Clawline's ray / height band)
+  intersected with the clusters' end-condition bits -> press points -> witness keys (M1); safe-endpoint candidates; the
+  library's macros when given. A landed strike makes a child node (the pogo bounce, the Clawline's control).
+- The closed-loop evaluation (`Evaluator.evaluate`): the concrete keys simulated with HERO2 + the strike module against
+  each branch; a hit that can change a Clapper (on Idle, in a move's last frames, killing) re-predicts and the branches
+  consistent with the history carry on. Per outcome (branch x timing view early / late x hook variant): COMMIT / REVEAL
+  / REACTIVE STEERING - her hurtbox vs the branch's damage (margins, not in the pogo i-frames); a collision before the
+  branch's reveal + 2 f is unsafe, after it allowed if an exit exists from that frame (her hits after it do not count);
+  a Clawline block delays the deviation to control. The COARSE EXIT CHECK: an M1 pass (40 f, <= 1 event) in that
+  branch's danger from the plan's end / the deviation must keep a cluster - stretched to a big rune's last lit frame
+  when one is pending (up to 180 f). VALUE: hits + the terminal value (wall room, the facing-to-the-wall rule +-0.5,
+  the distance to the nearest body) - 0.002 per frame; expected over the outcomes; safe = every outcome safe.
+- Hysteresis (the kept plan shifted and re-evaluated first; a new one must beat it by 0.05), the time cap (best so far
+  / the kept plan / none -> the current planner), ANYTIME DEPTH SLICES (depth 1 may use 45 % of the cap, depth 2 up to
+  80 %, each beam node an equal part of what is left, candidates round robin over primitive x Clapper).
+- In-move margins (`knowledge/1.0.30000/enemies/forum/clapper_m3_margins.json`, `ssbot.tools.m3_search margins`): a
+  shape of a move already under way is grown by its own state's table at k frames since its start was seen (slam 12 f
+  0.2 u, 24 - 36 f 0.5, 60 f 0.75, 90 f 1.0; jump / jcast <= 0.2 up to 60 f), else M2's look-ahead margins.
+- The log format (`plan_log` / `plan_steps`): per segment its anchor (start / the i-th Clawline's control), the key
+  changes, the strike events, a contingent plan's per-reaction continuations as nested steps; the expected value /
+  hits / p_safe and the top outcomes.
+- The combo library (`knowledge/1.0.30000/enemies/forum/combos/<NAME>.json`, `combos.py`): name, zh, status, source,
+  evidence, anchor (a Clapper state and its frame range / a bomb ring), preconditions as ranges, steps with timing
+  windows and grids, branch points, uncertain mechanics, impl. CLAWSTRIKE, SLAMSTRIKE, JUMPTRAP, LOWHOP; no P1-P5 macro.
+- Recognizers (`recognize.py`, the definitions in its docstring): CLAWSTRIKE, SLAMSTRIKE, P1-idle / -slam / -cast /
+  -jump / -locked, P2, P3-face, P3-cross, P4, P5, JUMPTRAP, LOWHOP on the nominal outcome; the reaction labels on every
+  outcome: P1-idle-slam (the first window: a down slash contact in Slam 0 / 1 or Slam Antic j >= 44; '+umb' when the
+  umbrella opened between control and it), P1-idle-slam2 (the second window, j 20 - 43), P1-idle-evade (a second hook),
+  P1-far-jump (the far list's JUMP ridden: P4 after control), P1-far-jcast (the JUMP CAST struck, the outcome safe).
+
+### Contingent plans (556bcb6)
+
+- `reaction_key(branch, P)`: the Clappers' choices made in P + 7 .. P + 21 (the earliest control P + 23 minus the 2 f
+  lag) and revealed by then - what she has seen at control.
+- A hooked Clawline whose hit splits the future into reactions gets one child node per reaction (p >= 4 %, <= 4): its
+  prediction holds only that reaction's branches (its own danger: with the union of all reactions every cluster at the
+  Clapper's face died in the first frame - why the earlier runs found only 'hook and leave'), its children are
+  evaluated CONDITIONALLY (the cascade starts from the node's group and keeps that reaction's branches).
+- `_combine`: per reaction the best continuation (its exits checked) joined into one plan - the most probable
+  reaction's as the default, the others in `Seg.out_alt` - and evaluated whole (each outcome plays its reaction's
+  continuation; a reaction whose continuation is not the path its group was predicted with is re-predicted under its
+  own path); a reaction failing in the joined plan falls back to its next continuation (twice), else the plan ends at
+  control there (its exit). The next Clawline's lock (control + 13, M0) is in the passes.
+- `Evaluator.tick_check`: the per-tick check of a committed plan (one prediction, every branch simulated to its reveal +
+  lag; no re-prediction at its hits, no exits - those are the background search's).
+
+### The acceptance suite (`brain/ssbot/tools/m3_accept.py`; data `C:\ssbot\data\m2_play\map2\m3`)
+
+236 situations: forced 63 (the live probes' kind; for the hook cases: an Idle Clapper at 3.5 / 5 / 7 u -> slam / evade,
+at 9 / 10 u -> the far list, ground and air), the person's 30 slam strikes of 10-15, 143 from the recordings (SP14 +
+SP-AIR1 b11-16, per move up to 12, half within 120 f before an HP loss). Cap 60 s, depth 3, 6 jobs at Idle priority.
+same / alt / not (alt: another plan chosen, a safe plan with the move's label found):
+
+| move | n | primitives only | with the library | not found, why (primitives) |
+|---|---|---|---|---|
+| P1-idle | 25 | 15 / 5 / 5 | 15 / 5 / 5 | exit 2, conditions 2, hit 1 |
+| P1-idle-slam (the first window) | 19 | 6 / 8 / 5 | 7 / 7 / 5 | conditions 3, reaction not predicted 1, exit 1 |
+| P1-idle-evade (hook again) | 19 | 0 / 11 / 8 | 0 / 11 / 8 | reaction not predicted 3, timeout 3, conditions 2 |
+| P1-far-jump (the ride) | 14 | 6 / 1 / 7 | 6 / 1 / 7 | reaction not predicted 3, conditions 3, timeout 1 |
+| P1-far-jcast | 15 | 6 / 0 / 9 | 6 / 0 / 9 | reaction not predicted 6, timeout 2, conditions 1 |
+| P1-slam (antic <= 11) | 14 | 1 / 11 / 2 | 1 / 11 / 2 | conditions 2 |
+| P1-cast | 7 | 1 / 6 / 0 | 1 / 6 / 0 | |
+| P1-jump | 13 | 3 / 9 / 1 | 3 / 9 / 1 | conditions 1 |
+| P1-locked | 2 | 2 / 0 / 0 | 2 / 0 / 0 | |
+| P2 | 16 | 13 / 3 / 0 | 13 / 3 / 0 | |
+| P3-face | 14 | 0 / 2 / 12 | 0 / 2 / 12 | conditions 10, timeout 2 |
+| P3-cross | 2 | 0 / 1 / 1 | 0 / 0 / 2 | hit 1 |
+| P4 | 16 | 9 / 5 / 2 | 9 / 5 / 2 | conditions 2 |
+| P5 | 17 | 12 / 4 / 1 | 12 / 4 / 1 | no window 1 |
+| CLAWSTRIKE | 14 | 2 / 10 / 2 | 2 / 10 / 2 | conditions 2 |
+| SLAMSTRIKE | 42 | 17 / 24 / 1 | 11 / 31 / 0 | conditions 1 |
+| JUMPTRAP | 15 | 4 / 11 / 0 | 4 / 11 / 0 | |
+| LOWHOP | 15 | 15 / 0 / 0 | 15 / 0 / 0 | |
+
+- The person's hook cases, forced (primitives only): the far hook (9 / 10 u, ground and air) 6 / 6 - the JUMP ridden
+  (a down slash on the rising body ~10 - 15 f after control) and the JUMP CAST struck on its head / in its flight with
+  the exit through the burst; the near hook (5 - 7 u) - the SLAM struck in the first window in 5 of 9 (3 with the
+  umbrella between control and the contact), the second window or another plan in 4; the EVADE answered by a second
+  hook in every forced case as a safe plan, never chosen (a down slash after its evade valued a bit higher). 38 / 40
+  chosen plans are contingent.
+- Why not / different: the recorded hook cases mostly 'reaction not predicted' (the other Clapper attacking -> the
+  buddy lock cancels the reaction: a free hit, P1-locked; V4 memory) or 'conditions'; P3-face - the forced Idle
+  Clapper (j 8, her in Slam Range) evades / casts before she lands, so no contact is on an Idle / Walk Clapper (the
+  facing rule acts only as the terminal value); CLAWSTRIKE / P1-slam - the hook + Slam 0 strike is found safe each time
+  but the standing jump strike on Slam 0 (SLAMSTRIKE) is valued the same and a frame sooner; SLAMSTRIKE with the
+  library: 9 of the person's 30 take the library's CLAWSTRIKE variant.
+- Times (primitives only): the full search p50 / p90 / p99 19 / 76 / 115 s (forced 18 s, the person's 3.9 s, recorded
+  one Clapper 9.7 s, two Clappers 60 s); 44 hit the 60 s cap; THE PER-TICK CHECK of the committed plan 5 / 23 / 51 ms
+  (4 fail it); the kept plan's full re-check 205 / 1,286 / 5,766 ms; predict calls 375 / 773 / 1,267, exit passes
+  201 / 1,500 / 3,582 per decision. The 44 capped situations (40 recorded two-Clapper, 4 forced) re-run with a 240 s
+  cap: almost no change (their move entries: same 14 -> 15, not 11 -> 11), the chosen plans' expected hits 2.10 ->
+  2.23; 8 still capped (p50 196 s) - time is not what the not-found ones lack.
+- Horizons: the chosen plans' frames to the last contact 54 / 94 / 136, plan length 61 / 110 / 152; in the recordings
+  the last safe exit vanished 25 - 40 f before an HP loss (11 of 15 losses, p50 25, p90 30; 4 had an exit to the end:
+  model / choice errors) - so the exact part to the next branch point (10 - 40 f), the exit check 40 f (to a big rune's
+  end), as the spec estimated.
+
+### Identity, tests
+
+- No switch: nothing in the bot imports `ssbot.map2` (`tests/test_map2_search.py::test_m3_tools_only_import_map2`);
+  since M2 (9f56070) no bot file changed (only map2, the m3 tools, tests and two knowledge files read by map2 only), so
+  the decisions are bit-identical (M2's frozen-checkout replay stands).
+- `tests/test_map2_search.py` 13 pass (the contact, the hook timeline, robust boxes, simulate / state_at, the in-move
+  margins, the search on an Idle Clapper and a Clapper under her, the library, the import check, hysteresis, the
+  reaction key and the contingent segment, the Clawline lock, the far hook's contingent plan). Full suite at e12c84f
+  (this worktree, Idle priority): 2,106 passed, 8 failed - M0's known 5 (test_import_firewall, the test_three_layer
+  bell test, the three test_harness_recovery tests stopped by the existing DEMO_SOON file) and 3 in the untracked
+  test_sg8_review.py (not this stage's, as in M1) - 1 skipped, 1 xfailed (`map2\m3\fullsuite_e12c84f.log`).
+
+### Open items
+
+1. The person's eye check of M2's overlay before any live use (M4).
+2. SPEED: with two Clappers predict() takes 130 - 500 ms (Python; particles p50 280 / p90 920) and is ~70 % of the
+   search; the full search is 3 orders of magnitude over the spec's 10 ms per frame. M4 needs predict compiled or cached
+   (shared path prefixes) and the long search in the background between branch points, with tick_check per frame.
+3. Split on a down slash's hit on an Idle Clapper too (only hooks split now) - P3 / P5's continuations.
+4. P3's forced setups need redesign (the Idle Clapper evades first); the recognizer could also take 'she is on its wall
+   side when its next move starts'.
+5. The third depth (the strike after a second hook) is often not reached in time.
+6. Mechanics the plans may lean on that were not measured live: the air dash's shape and the dash with jump held (M1),
+   the hooked Clapper's contact damage back at control + 0.2 s (M0): a forced trial before live use.
+7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
+   horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
