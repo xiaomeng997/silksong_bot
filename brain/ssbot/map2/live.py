@@ -101,6 +101,8 @@ class LiveCfg:
     end_lead: int = 20             # the 'end' trigger: the plan in control has this few committed frames left
     commits_per_tick: int = 2      # commit checks per tick at most (the rest wait)
     mem_gb: float = 6.0            # a worker above this RSS exits after its search (the controller restarts it)
+    hang_s: float = 3.0            # a search running this long: the worker reports its stack (and dumps the snapshot)
+    dump_dir: str = ""             # where a hung search's snapshot is pickled ('': not)
     ready_s: float = 240.0         # the workers' start-up wait
     replay: bool = False           # an offline replay: her position is the recording's, not her keys' result - the
     #                                hero tolerances are logged, not enforced
@@ -792,6 +794,36 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0)
                 cond.notify_all()
     th = threading.Thread(target=reader, daemon=True, name="map2-reader")
     th.start()
+    main_id = threading.get_ident()
+
+    def watchdog():
+        # a search past hang_s: its stack to the bot (and its snapshot to dump_dir), once per search
+        seen = None
+        while not state["stop"]:
+            time.sleep(0.5)
+            cur, t_cur = state.get("cur"), state.get("t_cur")
+            if cur is None or t_cur is None or cur["seq"] == seen or time.perf_counter() - t_cur < cfg.hang_s:
+                continue
+            seen = cur["seq"]
+            import sys as _sys
+            import traceback
+            fr = _sys._current_frames().get(main_id)
+            msg = {"kind": "error", "where": "hang", "part": part, "seq": cur["seq"], "ep": cur.get("ep"),
+                   "s": round(time.perf_counter() - t_cur, 1),
+                   "stack": "".join(traceback.format_stack(fr))[-3000:] if fr is not None else ""}
+            if cfg.dump_dir:
+                try:
+                    import pickle
+                    Path(cfg.dump_dir).mkdir(parents=True, exist_ok=True)
+                    with open(Path(cfg.dump_dir) / f"hang_{inst}_{part}_{cur['seq']}.pkl", "wb") as fh:
+                        pickle.dump(cur, fh)
+                except Exception as e:  # noqa: BLE001
+                    msg["dump"] = repr(e)[:200]
+            try:
+                out_q.put(msg)
+            except Exception:  # noqa: BLE001
+                pass
+    threading.Thread(target=watchdog, daemon=True, name="map2-watchdog").start()
     out_q.put({"kind": "ready", "part": part, "boost": boost, "os_pid": os.getpid(),
                "warm_s": round(time.perf_counter() - t0, 1)})
     done = -1
@@ -803,6 +835,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0)
                 break
             snap = state["latest"]
             state["cur"] = snap
+            state["t_cur"] = time.perf_counter()
             state["abort"] = False
             plans = dict(state["plans"])
         done = snap["seq"]
@@ -999,7 +1032,9 @@ class Map2Controller:
                 elif k == "ready":
                     self.ready[msg["part"]] = msg
                 elif k in ("error", "exit"):
-                    self.st["w_" + k] += 1
+                    self.st["w_" + k + ("_" + str(msg.get("where")) if msg.get("where") else "")] += 1
+                    self.last_msg = {"part": msg.get("part"), "seq": msg.get("seq"),
+                                     "status": f"{k}:{msg.get('where') or msg.get('why') or ''}", "s": msg.get("s")}
                     if len(self.errors) < 50:
                         self.errors.append(msg)
 
