@@ -351,8 +351,9 @@ and tables chain at steady states to any horizon (120 f and more - not 30). Cost
 decision in the middle of a transition (a jump, a dash, an umbrella opening); safety still holds by the reveal rule
 (a list must be safe for every enemy outcome until the next steady state, with left / right steering after the
 reveal); the loss is some adaptivity in fast exchanges - keep a small set of EMERGENCY deviations (dash / umbrella /
-Clawline from mid-transition) for model errors. To do as M1b after M3 (M3 already chains <= 2-event segments at
-canonical junctions, the same direction).
+Clawline from mid-transition) for model errors. DEFERRED (the person, 2026-10-22: 'not fully thought through yet;
+if the tables already built work, use them for now'): M3 / M4 use M1's tables as they are; revisit this scheme (and the
+natural selection below) after M4's live results (M3 already chains <= 2-event segments at canonical junctions).
 TABLE KEYS UNDER THIS SCHEME (the person, 2026-10-22): the fall keeps one table per frame of the fall from rest (each
 vy until the terminal speed: ~30) + the terminal fall; the float one per frame of its curve (~60) x a few vx bins (its
 inertia); ground walk and run - about 200 in all, x 2 for 'air dash used' in the air. The DASH AND THE JUMP DO NOT
