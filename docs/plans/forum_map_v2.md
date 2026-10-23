@@ -363,7 +363,8 @@ of the list item, not keys.
 NATURAL SELECTION OF THE ACTION LISTS (the person, 2026-10-22): the action space may be huge; a list SURVIVES only if
 it reaches some space-time point with FEWER actions (key presses / events) than every other list - otherwise it is
 eliminated. In the offline build, per reachable (point, ARRIVAL STATE) keep the list with the fewest presses (ties:
-the earlier arrival, then the larger clearance); the back-pointers are the survivors, so a reconstructed path is the
+the earlier arrival, then the more options kept - the air dash unused, the attack ready sooner; NOT a clearance:
+the build has no danger yet, the person 2026-10-22 - danger-aware choices are made online); the back-pointers are the survivors, so a reconstructed path is the
 simplest one (fewer presses = fewer timing errors; the old key-change penalty was the same idea). Two cautions: (1)
 compare only lists that arrive in the SAME state (vy, flags), not just the same point (the A -> B -> C lesson);
 (2) keep a few DIVERSE survivors per endpoint (different routes: under / over / a different height on the way),
