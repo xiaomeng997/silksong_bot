@@ -1133,7 +1133,7 @@ class Map2Controller:
         elif self.last_hit >= fo - 1:
             self._drop("hit")
             why = "hit"
-        inflight = np.asarray(inflight, np.int64)
+        inflight = self._eff_inflight(fo, f, inflight)
         hold_t = hold_tuple(hold)
         lat_s = int((raw.get("act") or {}).get("mask") or 0)
         # 1. commit
@@ -1160,7 +1160,7 @@ class Map2Controller:
                     if r_ <= len(_pre):
                         return int(_pre[r_ - 1])
                     return int(_o.cmds[r_]) if r_ < len(_o.cmds) else -1
-                bridge_ok = pre is not None and all(self.sent_hist.get(k) == expect(k)
+                bridge_ok = pre is not None and all(self._sent_at(k) == expect(k)
                                                     for k in range(lp.t_a + 1, f + 2))
                 self.st["bridge_" + ("ok" if bridge_ok else "broken")] += 1
                 try:
@@ -1271,6 +1271,26 @@ class Map2Controller:
         self.ms_pre.append((time.perf_counter() - t0) * 1e3)
         return mask
 
+    def _sent_at(self, k: int) -> int | None:
+        """The command the oracle applies at frame k: the ACTION sent for k, else the last one before it (an ACTION
+        holds its keys from its frame on: a frame whose tick was skipped keeps the previous keys); None: unknown."""
+        v = self.sent_hist.get(k)
+        if v is not None:
+            return v
+        before = [kk for kk in self.sent_hist if kk < k]
+        return self.sent_hist[max(before)] if before else None
+
+    def _eff_inflight(self, fo: int, f: int, inflight) -> np.ndarray:
+        """The keys in flight for frames fo + 1 .. f + 1 as the oracle applies them (_sent_at; the policy's prefix
+        counts a frame without an ACTION as no key) - the policy's where this controller has no record."""
+        pol = np.asarray(inflight, np.int64)
+        out = pol.copy()
+        for q, k in enumerate(range(int(fo) + 1, int(f) + 2)):
+            v = self._sent_at(k)
+            if v is not None and q < len(out):
+                out[q] = v
+        return out
+
     def _left(self, fo: int) -> int:
         lp = self.ctrl
         if lp is None or not self.ctrl_idx:
@@ -1319,6 +1339,7 @@ class Map2Controller:
         workers (module docstring, WORKERS), the per-tick log row."""
         t0 = time.perf_counter()
         S0 = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
+        inflight = self._eff_inflight(fo, f, inflight)
         row = self.row if self.row.get("f") == f else {"f": int(f), "fo": int(fo)}
         if sup and self.ctrl is not None:
             self._drop("sup")
