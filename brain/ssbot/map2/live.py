@@ -4,8 +4,10 @@ runs and the bot's decisions stay bit-identical. With it on SSBOT_FORUM_HERO2 mu
 
 THE PARTS
 - WORKERS (worker_main): their own processes (parts=N, default 2: M4b's split search, Searcher.part = (i, N)), boosted
-  like the live bot's worker (High, the P-cores, EcoQoS off; never Idle). A reader thread keeps the NEWEST snapshot the
-  bot sent; the search loop takes it whenever it is free (the background refresh) and runs Searcher.decide from it with
+  (High, EcoQoS off; never Idle) on the E-cores by default (LiveCfg.cpus: on the P-cores they slowed the bot's own
+  tick by 4 - 6 ms p50 in the smoke), numba on 2 threads. A worker raises a shared idle flag while it waits; the bot
+  sends it the NEWEST snapshot then (a reader thread keeps the newest), so each search starts from the newest observed
+  state (the background refresh: a free worker gets the next one) and runs Searcher.decide from it with
   the snapshot's PREFIX - the keys on their way to the game and the BRIDGE the bot expects to play while the search
   runs (the plan in control's own keys, or the fallback planner's plan), passed through the oracle's hold filter
   (kinematics.hold_filter: the search's masks are LATCHED masks) - and the plan in control re-anchored as the kept
@@ -84,7 +86,9 @@ def enabled() -> bool:
 class LiveCfg:
     parts: int = 2                 # search worker processes per game instance (M4b's split search)
     prio: str = "high"             # the workers' priority: high (the live bot's rule) / as (as started: tests)
-    cpus: str = "0-15"             # the workers' CPUs (the live bot's rule: the 13900K's P-cores 0-15)
+    cpus: str = "16-31"            # the workers' CPUs: the 13900K's E-cores (High, EcoQoS off) - on the P-cores (the
+    #                                live bot's rule, 0-15) two workers per instance slowed the bot's own tick by 4 - 6 ms
+    #                                p50 (the M4c smoke: 2 replays at a time), here ~1 ms with the same plans
     numba_threads: int = 2         # the workers' numba threads (the parallel envelope pass); the bot keeps its own
     cap_fb: float = 0.25           # the search's cap (s) while the fallback has the keys
     cap_ch: float = 0.6            # ... while map2 has them (the chained search, anchored after its bridge)
@@ -622,7 +626,7 @@ def boost_self(prio: str, cpus_spec: str | None = None) -> str:
                 cpus += range(int(a), int(b) + 1)
             elif part.strip():
                 cpus.append(int(part))
-        cpus = [c for c in cpus if c < (psutil.cpu_count() or 0)]
+        cpus = [c for c in cpus if c < (psutil.cpu_count() or 0)] or list(range(psutil.cpu_count() or 1))
         if cpus:
             p.cpu_affinity(cpus)
             msgs.append(f"cpus {cpus[0]}-{cpus[-1]}")
