@@ -121,9 +121,9 @@ def trial_adash_claw(rng: random.Random, d: int) -> tuple[list[int], dict]:
     """(a): the restore by the unhooked Clawline (the dash at control)."""
     md, mo = _dkeys(d)
     pre = rng.random() < 0.75
-    H = rng.randint(10, 18)
-    k = rng.randint(3, 12)
-    c = rng.randint(2, 30)
+    H = rng.randint(15, 18)                   # a full jump, the dash near its apex: the Clawline still airborne
+    k = rng.randint(10, 20)
+    c = rng.randint(2, 24)
     j = rng.randint(0, 8)
     p = {"d": d, "pre": pre, "H": H, "k": k, "c": c, "j": j}
     fc = k + c                                # the Clawline press (the same frame in the control group)
@@ -260,8 +260,10 @@ def gen_hook_touch(rng: random.Random, R: Runner):
     p["f_press"] = s["f"] + 2
     for i in range(3):
         s = yield (M_CLAW | toward)
-    act = rng.choices(("dash", "walk", "none"), (60, 25, 15))[0]
-    k = rng.randint(0, 16) if act == "dash" else rng.randint(0, 10)
+    act = rng.choices(("dash", "walk", "none"), (80, 10, 10))[0]
+    # the dash enters its body (the gap at control ~0.8 - 4 u) a few frames later and crosses its 3.6 u in ~9 frames:
+    # k <= 8 mostly spans the Harpoon FSM's Idle (control + 12 / 13)
+    k = (rng.randint(0, 8) if rng.random() < 0.75 else rng.randint(9, 16)) if act == "dash" else rng.randint(0, 4)
     p.update(act=act, k=k)
     s, n = yield from _until_control(s)
     p["f_ctrl_seen"] = s["f"]
