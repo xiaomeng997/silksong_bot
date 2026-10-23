@@ -60,7 +60,7 @@ HERO_EXPS = ("adash", "adash_claw", "gdash_jump", "dash_end")
 CLAP_EXPS = ("hook_touch", "hook_pd", "bounce_jump")
 STOP_FILES = (r"C:\ssbot\sandbox\STOP_AGENTS", r"C:\ssbot\sandbox\HUMAN_PRACTICE", r"C:\ssbot\sandbox\DEMO_SOON",
               r"C:\ssbot\sandbox\m4_probe.stop")
-OPT = {"force_cancel": "", "inv_share": 0.5}
+OPT = {"force_cancel": "", "inv_share": 0.5, "cancels": "", "c_range": (0, 24), "gdj": "", "bj_k": (2, 28)}
 
 
 def stop_requested() -> str | None:
@@ -96,7 +96,9 @@ def trial_adash(rng: random.Random, d: int) -> tuple[list[int], dict]:
     h = rng.randint(2, 3) if tap else rng.randint(6, 45)
     after = rng.choice((0, md))               # the direction key after the press (the dash's own key is md)
     cancel = OPT["force_cancel"] or rng.choices(CANCELS, (30, 14, 14, 16, 12, 14))[0]
-    c = rng.randint(0, 24)
+    if OPT["cancels"]:                        # --cancels atk:datk:jump (equal weights)
+        cancel = rng.choice(OPT["cancels"].split(":"))
+    c = rng.randint(*OPT["c_range"])
     p = {"d": d, "jh": jh, "k": k, "H": H, "tap": tap, "h": h, "after": "d" if after else "0", "cancel": cancel, "c": c}
     n = k + max(h, c + 3) + 60
     m = [0] * n
@@ -147,8 +149,32 @@ def trial_gdash_jump(rng: random.Random, d: int) -> tuple[list[int], dict]:
     """(b) on the ground: 'dj' dash then jump j frames after the dash press; 'jd' jump then dash j frames later."""
     md, mo = _dkeys(d)
     v = rng.choices(("dj", "jd"), (65, 35))[0]
+    if OPT["gdj"]:                            # --gdj dja:dj (equal weights)
+        v = rng.choice(OPT["gdj"].split(":"))
     key = rng.choice((0, md))
     p: dict = {"d": d, "v": v, "key": "d" if key else "0"}
+    if v == "dja":
+        # a ground dash (tapped or held into the sprint), the jump j frames after its press (held H), then the dash
+        # again m frames after the jump press: the jump resets the dash cooldown to 0.05 s (an air dash 3 / 4 frames
+        # after the jump although the ground dash's 0.425 s has not run out)?
+        held = rng.random() < 0.4
+        h = rng.randint(12, 24) if held else rng.randint(2, 3)
+        j = rng.randint(4, 14)
+        H = rng.randint(10, 18)
+        mm = rng.randint(2, 12)
+        p.update(held=held, h=h, j=j, H=H, m=mm)
+        n = j + mm + 3 + 70
+        m = [key] * 4 + [0] * n
+        for i in range(n):
+            x = key
+            if i < h:
+                x |= M_DASH | md
+            if j <= i < j + H:
+                x |= M_J
+            if j + mm <= i < j + mm + 3:
+                x |= M_DASH | md
+            m[4 + i] = x
+        return m, p
     if v == "dj":
         held = rng.random() < 0.3
         h = rng.randint(12, 30) if held else rng.randint(2, 3)
@@ -246,7 +272,7 @@ def gen_hook_touch(rng: random.Random, R: Runner):
     """(c): hook the Idle Clapper, then into its body at control + k."""
     p: dict = {}
     s = yield
-    inv = rng.random() >= OPT["inv_share"]
+    inv = rng.random() < OPT["inv_share"]
     p["inv"] = inv
     R.pd.set(isInvincible="true" if inv else "false")
     p["hp0"] = hp(s)
@@ -291,7 +317,7 @@ def gen_hook_pd(rng: random.Random, R: Runner):
     """(a) / (c): the hooked Clawline after an air dash; the air dash again at control + j."""
     p: dict = {}
     s = yield
-    inv = rng.random() >= OPT["inv_share"]
+    inv = rng.random() < OPT["inv_share"]
     p["inv"] = inv
     R.pd.set(isInvincible="true" if inv else "false")
     p["hp0"] = hp(s)
@@ -370,7 +396,7 @@ def gen_bounce_jump(rng: random.Random, R: Runner):
         n += 1
     p["press_state"] = {"f": s["f"], "y": hyb(s), "vy": hvy(s), "x": hx(s), "box": bb}
     p["f_press"] = s["f"] + 2
-    k = rng.randint(2, 28)
+    k = rng.randint(*OPT["bj_k"])
     J = rng.randint(4, 30)
     g = rng.choice((0, M_L, M_R))
     p.update(k=k, J=J, g={0: "0", M_L: "L", M_R: "R"}[g])
@@ -398,13 +424,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=r"C:\ssbot\data\runs\m2\map2_m4")
     ap.add_argument("--force-cancel", default="", help="adash: always this cancel")
     ap.add_argument("--inv-share", type=float, default=0.5, help="hook_touch / hook_pd: the share of invincible trials")
+    ap.add_argument("--cancels", default="", help="adash: the cancels drawn (':'-separated, equal weights)")
+    ap.add_argument("--c-range", default="0,24", help="adash: the cancel press frames after the dash press lo,hi")
+    ap.add_argument("--gdj", default="", help="gdash_jump: the variants drawn (':'-separated: dj, jd, dja)")
+    ap.add_argument("--bj-k", default="2,28", help="bounce_jump: the jump press frames after the down slash lo,hi")
     a = ap.parse_args(argv)
 
     from ssbot.probes.common import load_slot
     from ssbot.record.recorder import Recorder
 
     exps = [x.strip() for x in re.split(r"[,:]", a.exps) if x.strip()]
-    OPT.update(force_cancel=a.force_cancel, inv_share=a.inv_share)
+    OPT.update(force_cancel=a.force_cancel, inv_share=a.inv_share, cancels=a.cancels, gdj=a.gdj,
+               c_range=tuple(int(v) for v in a.c_range.split(",")), bj_k=tuple(int(v) for v in a.bj_k.split(",")))
     for x in exps:
         if x not in HERO_EXPS + CLAP_EXPS:
             raise SystemExit(f"unknown experiment {x}")
