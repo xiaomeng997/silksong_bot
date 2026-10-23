@@ -391,6 +391,8 @@ def _run_one(args) -> dict:
     cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else (),
                  **extra.get("cfg", {}))
     S = ms.Searcher(_W, cfg)
+    if extra.get("part") is not None:
+        S.part = tuple(extra["part"])                 # M4b: one part of a split search
     t0 = time.perf_counter()
     try:
         r = S.decide(sit)
@@ -410,7 +412,8 @@ def _run_one(args) -> dict:
         S.ev.reset()
         tick = S.ev.tick_check(sit, ch.plan)
     ms_tick = (time.perf_counter() - t1) * 1e3 - (tick[2] if tick else 0.0)
-    res = {"i": i, "name": sit.name, "meta": sit.meta, "ms": round(ms_dec, 1), "ms_tick": round(ms_tick, 1),
+    res = {"i": i, "part": list(extra["part"]) if extra.get("part") else None, "name": sit.name, "meta": sit.meta,
+           "ms": round(ms_dec, 1), "ms_tick": round(ms_tick, 1),
            "n_cand": r.n_cand, "n_pred": r.n_pred, "n_exit": r.n_exit, "timed_out": r.timed_out,
            "ms_pred": round(r.ms_pred, 1), "ms_exit": round(r.ms_exit, 1), "stats": dict(S.stats),
            "labels": labels, "origin": ch.plan.origin if ch is not None else None,
@@ -508,6 +511,65 @@ def _reaction_seen(tried, react: str, far: bool) -> bool:
     return False
 
 
+def merge_split(res: list) -> list:
+    """A split search's parts merged per situation (M4b): the chosen plan is the best part's (safe first, then
+    the value), its labels; per move found when any part found it (the best value), 'same' when the merged chosen
+    plan has the move's label; the times: the slowest part; the counters summed."""
+    by: dict = {}
+    for r in res:
+        by.setdefault(r["i"], []).append(r)
+    out = []
+    for i, rr in sorted(by.items()):
+        ok = [r for r in rr if "error" not in r]
+        if not ok:
+            out.append(dict(rr[0], part=None))
+            continue
+        best = max(ok, key=lambda r: (bool(r["safe"]), r["value"] if r["value"] is not None else -9.0))
+        m = dict(best)
+        m["part"] = None
+        m["parts"] = len(rr)
+        m["ms"] = max(r["ms"] for r in ok)
+        for k in ("n_cand", "n_pred", "n_exit"):
+            m[k] = sum(r.get(k) or 0 for r in ok)
+        m["timed_out"] = any(r.get("timed_out") for r in ok)
+        fs = [r.get("first_safe_ms") for r in ok if r.get("first_safe_ms") is not None]
+        m["first_safe_ms"] = min(fs) if fs else None
+        ev = sorted([a_ for r in ok for a_ in (r.get("anytime") or [])], key=lambda a_: a_[1])
+        trace, cur = [], None
+        for a_ in ev:
+            if cur is None or (a_[3], a_[2]) > (cur[3], cur[2]):
+                cur = a_
+                trace.append(a_)
+        m["anytime"] = trace
+        st: dict = {}
+        for r in ok:
+            for k, v in (r.get("stats") or {}).items():
+                if isinstance(v, (int, float)):
+                    st[k] = st.get(k, 0) + v
+        m["stats"] = st
+        per = {}
+        for mv in best["per"]:
+            infos = [r["per"][mv] for r in ok if mv in r.get("per", {})]
+            found = [x for x in infos if x.get("found")]
+            if found:
+                info = dict(max(found, key=lambda x: x.get("value") or -9.0))
+            else:
+                info = dict(next((x for x in infos if x.get("why") == "timeout"), infos[0]))
+            want = MOVE_LABEL[mv]
+            if info.get("alt_label") and info.get("found"):
+                info["result"] = "alt"
+            elif any(w in m["labels"] for w in want):
+                info["result"] = "same"
+            elif info.get("found"):
+                info["result"] = "alt"
+            else:
+                info["result"] = "not"
+            per[mv] = info
+        m["per"] = per
+        out.append(m)
+    return out
+
+
 def cmd_run(a) -> int:
     idle_priority()
     with open(OUT / "sits.pkl", "rb") as fh:
@@ -525,7 +587,15 @@ def cmd_run(a) -> int:
         names = {r["name"] for r in prev if r.get("timed_out")}
         sits = [s for s in sits if s.name in names]
     extra = {"prio": a.prio, "cfg": {"pass2_after": a.pass2_after}} if (a.prio != "idle" or a.pass2_after) else {}
-    jobs = [(i, s, a.lib, a.cap, a.depth) + ((extra,) if extra else ()) for i, s in enumerate(sits)]
+    if a.safe_ts:
+        extra.setdefault("cfg", {})["safe_ts"] = tuple(int(x) for x in a.safe_ts.split(","))
+    if a.split > 1:
+        # a split search (M4b): each part of a situation its own job, merged per situation (merge_split)
+        jobs = [(i, s, a.lib, a.cap, a.depth, dict(extra, part=(q, a.split))) for i, s in enumerate(sits)
+                for q in range(a.split)]
+    else:
+        jobs = [(i, s, a.lib, a.cap, a.depth) + ((extra,) if extra else ()) for i, s in enumerate(sits)]
+    jid = (lambda j: (j[0], j[5]["part"][0]) if len(j) > 5 and j[5].get("part") else (j[0], 0))
     t0 = time.time()
     res = []
     # every result as a line as it comes (M4a: a run whose pool lost its workers hung with 231 / 236 results in
@@ -536,9 +606,9 @@ def cmd_run(a) -> int:
         for line in part.read_text("utf-8").splitlines():
             if line.strip():
                 r = json.loads(line)
-                done[r["i"]] = r
+                done[(r["i"], (r.get("part") or [0])[0])] = r
         res = list(done.values())
-        jobs = [j for j in jobs if j[0] not in done]
+        jobs = [j for j in jobs if jid(j) not in done]
         print(f"resume: {len(done)} done, {len(jobs)} to run", flush=True)
     elif part.exists():
         part.unlink()
@@ -552,7 +622,7 @@ def cmd_run(a) -> int:
         from concurrent.futures import ProcessPoolExecutor, as_completed
         from concurrent.futures.process import BrokenProcessPool
         tries = Counter()
-        left = {j[0]: j for j in jobs}
+        left = {jid(j): j for j in jobs}
         n = len(res)
         with part.open("a", encoding="utf-8") as fh:
             while left:
@@ -575,7 +645,8 @@ def cmd_run(a) -> int:
                     for i in list(left):
                         tries[i] += 1
                         if tries[i] >= 3:
-                            r = {"i": i, "name": left[i][1].name, "error": "worker lost"}
+                            r = {"i": i[0], "part": [i[1], a.split] if a.split > 1 else None,
+                                 "name": left[i][1].name, "error": "worker lost"}
                             res.append(r)
                             fh.write(json.dumps(r, default=str) + "\n")
                             fh.flush()
@@ -590,6 +661,8 @@ def cmd_run(a) -> int:
     if load is not None:
         from ssbot.tools.m4b_speed import stop_load
         stop_load(*load)
+    if a.split > 1:
+        res = merge_split(res)
     res.sort(key=lambda r: r["i"])
     out = OUT / f"run_{a.lib}{a.tag}.json"
     out.write_text(json.dumps(res, indent=1, default=str), "utf-8")
@@ -823,6 +896,8 @@ def main(argv=None) -> int:
                    help="the workers' priority: idle (offline), high (the live worker's rule, M4b)")
     p.add_argument("--pass2-after", type=int, default=0, help="Cfg.pass2_after (M4b's anytime order)")
     p.add_argument("--load", action="store_true", help="the simulated load of 2 games + 2 bots (M4b)")
+    p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation (M4b)")
+    p.add_argument("--safe-ts", default="", help="Cfg.safe_ts, comma-separated frames (M4b)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")

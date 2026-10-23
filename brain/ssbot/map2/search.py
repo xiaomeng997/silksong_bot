@@ -1067,6 +1067,30 @@ def timing_views(br) -> list:
     return views
 
 
+_PK_NONE: dict = {}
+
+
+def _packed_danger(br, k0: int, H: int, ifr_until: int, margins: bool) -> tuple:
+    """The exit check's danger: per frame k0 .. k0 + H the branch's boxes (none up to ifr_until: the pogo's
+    i-frames) and the walls - the list, and packed (boxes, frame offsets) - cached on the branch (M4b: every outcome
+    of a view that ends at the same frame shares it)."""
+    c = br.__dict__.setdefault("_pk", {}) if br is not None else _PK_NONE
+    key = (k0, H, ifr_until, margins)
+    v = c.get(key)
+    if v is None:
+        dz = []
+        for t in range(H + 1):
+            k = k0 + t
+            b = branch_danger(br, k, margins) if (br is not None and k > ifr_until) else np.zeros((0, 4))
+            dz.append(np.concatenate([b, WALL_BOXES]))
+        off = np.zeros(H + 2, np.int64)
+        off[1:] = np.cumsum([len(d) for d in dz])
+        v = (dz, np.concatenate(dz), off)
+        if br is not None or len(c) < 4096:
+            c[key] = v
+    return v
+
+
 class Evaluator:
     def __init__(self, W: World, cfg: Cfg):
         self.W, self.cfg = W, cfg
@@ -1241,19 +1265,12 @@ class Evaluator:
         """The coarse exit check: an envelope pass from S at frame k0 in the branch's danger (+ the walls) for
         H (cfg.exit_h) frames; returns the clusters alive at the end (0: no exit)."""
         H = self.cfg.exit_h if H is None else H
-        dz = []
-        for t in range(H + 1):
-            k = k0 + t
-            b = branch_danger(br, k, self.cfg.margins) if (br is not None and k > ifr_until) else np.zeros((0, 4))
-            dz.append(np.concatenate([b, WALL_BOXES]))
+        dz, boxes, off = _packed_danger(br, k0, H, ifr_until, self.cfg.margins)
         t0 = time.perf_counter()
         self.n_exit += 1
         if self.cfg.exit_probe:
             # M4b: a few concrete key sequences first - one that touches no danger box is an exit (the pass, which
             # contains it, would keep a cluster: the same verdict for a fraction of the cost)
-            off = np.zeros(H + 2, np.int64)
-            off[1:] = np.cumsum([len(d) for d in dz])
-            boxes = np.concatenate(dz)
             cu_ = np.array([-1.0, 0, 0, 0, 0, 0, 0]) if cu is None else np.asarray(cu, np.float64)
             i = ej.probe_exit(np.asarray(S, np.float64), cu_, _probe_masks(S, H), self.W.E.udt, self.W.E.P,
                               self.W.TT, boxes, off, PROBE_EPS)
