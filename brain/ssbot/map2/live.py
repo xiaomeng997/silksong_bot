@@ -533,6 +533,8 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
         return False, "future", info
     L = len(inflight)
     r0 = s + L + 1                           # the frame being chosen (f + 2)
+    if all(lp.outs[i].kc < r0 for i in (range(len(lp.outs)) if idx is None else idx)):
+        return False, "expired", info        # every outcome's committed part ends before the frame being chosen
     cons, bad_h, bad_c = lp.consistent(s, her_xy, obs, cfg, idx=idx, hero=False)
     info["cons"] = len(cons)
     tol = cfg.tol_commit if tol is None else tol
@@ -791,8 +793,11 @@ def _warm_search(S, W, n_rec: int = 6) -> float:
     return time.perf_counter() - t0
 
 
-def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0) -> None:
-    """One search worker (module docstring, WORKERS): runs until a {'stop': True} snapshot or its queue closes."""
+def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0, idle=None) -> None:
+    """One search worker (module docstring, WORKERS): runs until a {'stop': True} snapshot or its queue closes. idle:
+    a shared flag the worker raises while it waits for a snapshot (the bot sends one only then: a snapshot every
+    tick cost the bot's thread its pickling under the GIL); a message with 'note' set only updates the plan registry
+    and the abort rule (a hit, another plan in control, a new episode)."""
     cfg = LiveCfg(**cfg_d)
     boost = boost_self(cfg.prio, cfg.cpus)
     try:
@@ -830,7 +835,8 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0)
                     state["plans"][snap["ctrl"][0]] = po
                     if len(state["plans"]) > 16:
                         state["plans"].pop(next(iter(state["plans"])))
-                state["latest"] = snap
+                if not snap.get("note"):
+                    state["latest"] = snap
                 cur = state["cur"]
                 if cur is not None and ("hit" in (snap.get("trig") or ()) or snap.get("ep") != cur.get("ep") or
                                         (snap.get("ctrl") or (None,))[0] != (cur.get("ctrl") or (None,))[0]):
@@ -874,7 +880,11 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0)
     while True:
         with cond:
             while not state["stop"] and (state["latest"] is None or state["latest"]["seq"] <= done):
+                if idle is not None:
+                    idle.value = 1
                 cond.wait(0.5)
+            if idle is not None:
+                idle.value = 0
             if state["stop"]:
                 break
             snap = state["latest"]
@@ -923,6 +933,8 @@ class Map2Controller:
         self.log_path: Path | None = (self.log_dir / f"map2_i{instance}.jsonl") if self.log_dir else None
         self.procs: list = []
         self.in_qs: list = []
+        self.idles: list = []               # the workers' idle flags (shared): a snapshot goes to a waiting worker only
+        self._note_key = None
         self.out_q = None
         self._ctx = None
         self.ready: dict = {}
@@ -949,13 +961,15 @@ class Map2Controller:
         for part in range(n):
             q = self._ctx.Queue()
             self.in_qs.append(q)
+            self.idles.append(self._ctx.Value("b", 0))
             self.procs.append(self._spawn(part, n, q))
         if wait:
             self._wait_ready(n, t0)
         return time.perf_counter() - t0
 
     def _spawn(self, part: int, n: int, q):
-        p = self._ctx.Process(target=worker_main, args=(self.cfg.as_dict(), part, n, q, self.out_q, self.instance),
+        p = self._ctx.Process(target=worker_main, args=(self.cfg.as_dict(), part, n, q, self.out_q, self.instance,
+                                                        self.idles[part] if part < len(self.idles) else None),
                               daemon=True, name=f"map2-worker-{self.instance}-{part}")
         p.start()
         return p
@@ -973,9 +987,9 @@ class Map2Controller:
             elif msg.get("kind") == "error":
                 self.errors.append(msg)
 
-    def attach_inproc(self, in_qs: list, out_q) -> None:
-        """Tests: workers run elsewhere (threads) on these queues."""
-        self.in_qs, self.out_q = list(in_qs), out_q
+    def attach_inproc(self, in_qs: list, out_q, idles: list | None = None) -> None:
+        """Tests: workers run elsewhere (threads) on these queues (idles: their flags; None: a snapshot every tick)."""
+        self.in_qs, self.out_q, self.idles = list(in_qs), out_q, list(idles or [])
 
     def stop(self) -> None:
         for q in self.in_qs:
@@ -1315,7 +1329,20 @@ class Map2Controller:
             if len(self.bridges) > 80:
                 self.bridges = self.bridges[-80:]
         busy = self._busy(fo, raw)
-        if self.in_qs:
+        ctrl_t = None if self.ctrl is None else (self.ctrl.pid, int(self.ctrl.t_a))
+        note_key = (self.ep, None if ctrl_t is None else ctrl_t[0], "hit" in self.trig)
+        if self.in_qs and (note_key != self._note_key or self.new_plan_obj is not None):
+            # a note to every worker (busy ones too): the plan in control (its plan for the kept-plan check) and her
+            # hit - a search from before them is cut
+            note = {"note": True, "ep": self.ep, "ctrl": ctrl_t, "trig": sorted(set(self.trig))}
+            if self.new_plan_obj is not None and self.ctrl is not None:
+                note["plan_obj"] = self.new_plan_obj
+            self.new_plan_obj = None
+            self._note_key = note_key
+            for q in self.in_qs:
+                q.put(note)
+        want = [i for i in range(len(self.in_qs)) if not self.idles or self.idles[i].value == 1]
+        if want and not busy and (not self.idles or self.trk.obs()):
             snap = {"seq": self.seq, "ep": self.ep, "f": int(f), "fo": int(fo), "S": S0.copy(),
                     "cmds": np.concatenate([np.asarray(inflight, np.int64), [int(mask)],
                                             np.asarray(bridge, np.int64)]).astype(np.int64),
@@ -1324,12 +1351,12 @@ class Map2Controller:
                     "obs": self.trk.obs(), "mems": self.trk.mems(), "hazards": self.trk.hazards(self.K),
                     "ctrl": None if self.ctrl is None else (self.ctrl.pid, int(self.ctrl.t_a)),
                     "trig": sorted(set(self.trig)), "busy": busy, "own": own}
-            if self.new_plan_obj is not None and self.ctrl is not None:
-                snap["plan_obj"] = self.new_plan_obj
-                self.new_plan_obj = None
-            for q in self.in_qs:
-                q.put(snap)
+            for i in want:
+                self.in_qs[i].put(snap)
+                if self.idles:
+                    self.idles[i].value = 0
             self.seq += 1
+            self.st["snapshots"] += 1
         if self.trig:
             row["trig"] = sorted(set(self.trig))
         if busy:

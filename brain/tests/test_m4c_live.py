@@ -188,8 +188,10 @@ def test_controller_commit_execute_handover(W, live_plan):
     m = ctl.pre(100, 100, raw, sit.S, np.array([o0.cmds[1]], np.int64), hold)
     assert ctl.took and ctl.ctrl is lp and m is not None
     ctl.post(100, 100, raw, sit.S, np.array([o0.cmds[1]], np.int64), hold, m, "m2", None, False)
+    note = in_q.get_nowait()                                          # the plan in control, to every worker
+    assert note.get("note") and note["ctrl"] == (lp.pid, 100) and note.get("plan_obj") is not None
     snap = in_q.get_nowait()
-    assert snap["ctrl"] == (lp.pid, 100) and snap.get("plan_obj") is not None
+    assert snap["ctrl"] == (lp.pid, 100) and not snap.get("note")
     assert len(snap["cmds"]) > snap["n_inflight"]                     # the bridge: the plan's own keys
     # the next frames along the plan: map2 keeps the keys (the most probable consistent outcome's commands)
     kept = 0
@@ -241,3 +243,33 @@ def test_clappers_match_inside_the_timing_spread():
     assert not lv._clappers_ok(o, 12, [_obs("Idle", C, face=-1, j=5)], cfg)
     assert not lv._clappers_ok(o, 12, [_obs("Slam Antic", C + 0.5, face=-1, j=5)], cfg)
     assert not lv._clappers_ok(o, 12, [_obs("Slam Antic", C, face=1, j=5)], cfg)
+
+
+def test_worker_protocol_in_a_thread(W):
+    """worker_main (in a thread here): ready, raises its idle flag, searches a snapshot it is sent, answers with a
+    LivePlan or a status for that snapshot, a note does not start a search, stops on {'stop': True}."""
+    import threading
+    import time
+
+    class Flag:
+        value = 0
+    in_q, out_q, fl = queue.Queue(), queue.Queue(), Flag()
+    cfg = lv.LiveCfg(prio="as", parts=1, warm_rec=0, cap_min=0.5, cap_fb=0.5).as_dict()
+    th = threading.Thread(target=lv.worker_main, args=(cfg, 0, 1, in_q, out_q, 0, fl), daemon=True)
+    th.start()
+    msg = out_q.get(timeout=600)
+    assert msg["kind"] == "ready"
+    t0 = time.time()
+    while fl.value != 1 and time.time() - t0 < 30:
+        time.sleep(0.05)
+    assert fl.value == 1
+    in_q.put({"note": True, "ep": 0, "ctrl": None, "trig": []})
+    time.sleep(0.3)
+    assert out_q.empty()                                              # a note starts no search
+    sit = ms.Situation(_ground(W, C - 7.0), [_obs("Idle", C, face=-1, j=8)], {1: cm.Memory()})
+    in_q.put(_snap(sit, seq=1))
+    msg = out_q.get(timeout=120)
+    assert (msg.seq if isinstance(msg, lv.LivePlan) else msg["seq"]) == 1
+    in_q.put({"stop": True})
+    th.join(timeout=30)
+    assert not th.is_alive()
