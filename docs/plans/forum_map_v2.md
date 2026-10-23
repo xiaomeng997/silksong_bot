@@ -353,7 +353,8 @@ decision in the middle of a transition (a jump, a dash, an umbrella opening); sa
 reveal); the loss is some adaptivity in fast exchanges - keep a small set of EMERGENCY deviations (dash / umbrella /
 Clawline from mid-transition) for model errors. DEFERRED (the person, 2026-10-22: 'not fully thought through yet;
 if the tables already built work, use them for now'): M3 / M4 use M1's tables as they are; revisit this scheme (and the
-natural selection below) after M4's live results (M3 already chains <= 2-event segments at canonical junctions).
+natural selection below) after M4's live results (M3 already chains <= 2-event segments at canonical junctions);
+made concrete by the person on 2026-10-23: THE A1_n RECURSIVE TABLES below.
 TABLE KEYS UNDER THIS SCHEME (the person, 2026-10-22): the fall keeps one table per frame of the fall from rest (each
 vy until the terminal speed: ~30) + the terminal fall; the float one per frame of its curve (~60) x a few vx bins (its
 inertia); ground walk and run - about 200 in all, x 2 for 'air dash used' in the air. The DASH AND THE JUMP DO NOT
@@ -371,6 +372,49 @@ compare only lists that arrive in the SAME state (vy, flags), not just the same 
 (2) keep a few DIVERSE survivors per endpoint (different routes: under / over / a different height on the way),
 because online danger can cut the simplest one - the online cluster pass with every event stays the fallback. M1b
 reports how many lists of the library survive.
+THE A1_n RECURSIVE TABLES (the person, 2026-10-23 morning; agreed with the lead's points 1-6 below; BUILD AFTER M4's
+GATE RESULT - and if M4b cannot reach live speed, this is the next step). The person's design, for the free fall:
+- A1_n = the free-fall table whose space-time origin has the vertical velocity of n steps of falling from rest
+  (A1_0: at rest, A1_1: one step of fall, ...). x, y, t are relative to the origin.
+- NO REDUNDANCY: A1_0 = A1_1 referenced one step later (moved by the fall of that step, its left / right envelope
+  widened by one step) + ONLY what the actions pressed at frame 0 add - nothing else. A dash pressed at frame 10 is
+  NOT in A1_0: it sits in A1_10, reached through the chain A1_0 -> A1_1 -> ... -> A1_10, each link widening the x
+  reach by one step. Exact: the normal fall's run is instant and has no memory (8.25 u/s = 0.165 u per step).
+- Frame 0's actions: the dash with its hold lengths, the Clawline, the umbrella (the person's estimate ~1000; see 5).
+  A pressed action leaves a space-time trajectory (an x interval per step, left / right free) kept in THIS table
+  until it reaches a steady state, labelled per step: LOCKED (can be hit, cannot attack), TRANSITIONAL (can be hit,
+  can attack), INVINCIBLE (cannot be hit, cannot attack - 'as if she were not on the field', but see 4). At the
+  steady state the table stores the endpoint (its relative position interval and time), the REFERENCE (which table
+  to insert at that point) and the action id it came by. An action always starts at the origin.
+- Why it fixes M1's count: M1's 23,831 exact clusters in 16 f from rest (286 without the air dash) are mostly the
+  air dash pressed at each frame 0..15 times its cancel variants (rough: ~1,500 per start frame), all carried in one
+  forward set; here each sits once in its own A1_n, so the storage does not grow with the horizon (120 f and more).
+- The air dash ends exactly on the lattice, no snapping: M4a measured that the dash zeroes vy every step and gravity
+  then acts in the step, so vy in the air sprint runs -1.2, -2.4, ... per step like the fall from rest. To check: the
+  air sprint's eased fall clamp (-10 -> -30 u/s over 1 s) may bite at the end of a long sprint.
+Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
+1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
+   0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
+   + 13; the umbrella re-open lock until release + 12). Flags that cannot be waited out become table keys: the air
+   dash used (restored only by a landing, a pogo hit or a hooked Clawline - M4a) -> A1 x 2.
+2. The dash with the jump held is OFF the lattice (M4a: gravity 0.1 in the dash steps, vy +1.08 u/s for good, until
+   a bounce or a landing): its own chain (the same recursion, the origin vy offset by 1.08) or not offered.
+3. Time in 50 Hz physics steps inside the tables: some 60 fps frames have no step (seen in M4a's dash), so 'n frames
+   of fall' does not fix vy. Convert at the interface (as the recursion paragraph above says).
+4. INVINCIBLE segments keep their positions: the Clapper chooses from her position even while she is invincible
+   (Close Range <= 8.05 u: slam / evade / cast; the Jump aim from her x; FaceObject), and walls / the ceiling / the
+   floor change the endpoint. Positions only, labelled 'cannot be hit, cannot attack' - cheap.
+5. The action count: the air sprint runs while the dash key is held (M4a: Air Sprint Loop, the regain with the key
+   up) and every sprint frame allows the attack / jump / Clawline / dash cancels, so direction x hold length x
+   cancel x cancel frame is over 1,000. Alternative with the same recursion: 'sprinting at step m' as its own chain
+   (S_m = S_m+1 one step later + the release / cancels at m); frame 0's actions then shrink to a handful (dash L / R,
+   Clawline L / R, umbrella, nothing). Both exact; the chain has more but tiny tables. Decide at build time.
+6. Floor / walls / ceiling are absolute and the tables relative: cut at use time (the person: a landing is a branch
+   where the envelope meets the ground, not a steady state).
+Use: the search looks the tables up instead of rolling the physics per frame online (M4b's limit on 10-23: within
+0.25 s the plans are worth 0.38 expected hits on the recorded w7 situations vs 1.9 for the 60 s search); a bounding
+box per action (its trajectory + its endpoint table's reach) prunes the lookups. The same pattern applies to A2 (the
+bounce), A3 (the float, keyed by vx) and the ground.
 
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
