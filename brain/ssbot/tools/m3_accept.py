@@ -539,7 +539,9 @@ def cmd_run(a) -> int:
         with part.open("a", encoding="utf-8") as fh:
             while left:
                 try:
-                    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
+                    # (workers recycled every 8 situations: a worker's caches grew to 11.7 GB and stalled the
+                    # M4a run on a situation that takes 33 s alone)
+                    with ProcessPoolExecutor(max_workers=a.jobs, max_tasks_per_child=8) as ex:
                         futs = {ex.submit(_run_one, j): i for i, j in left.items()}
                         for f in as_completed(futs):
                             i = futs[f]
