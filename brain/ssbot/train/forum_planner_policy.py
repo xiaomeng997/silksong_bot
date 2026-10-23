@@ -84,6 +84,11 @@ COG = kin.B_UP | kin.B_QUICKCAST
 COG_FRAMES = 2
 COG_MAX = 4                # fo_A's Cogwork Flier uses
 FORCED_STREAK_GAP = 30     # a FORCED_RISK tick after this many ticks without one starts a streak (logged as an event)
+# map v2 stage M4c (SSBOT_FORUM_MAP2, default off; ssbot.map2.live): the map2 search plays live - its worker processes
+# search from the newest observed state, a plan passes the exact HERO2 re-simulation from the current state before it
+# takes the keys, a failed per-frame check or no plan hands them back to this planner (and its scripts). Needs
+# SSBOT_FORUM_HERO2=1. Off: ssbot.map2 is not imported and nothing below changes.
+MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
 BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
@@ -244,6 +249,16 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._play_tick: dict | None = None
         self.own_trace: list = []                 # SP10a: see reset()
         self._own_last: tuple | None = None
+        # M4c (SSBOT_FORUM_MAP2): the map2 controller (its workers start in warmup); None: off
+        self.m2 = None
+        if MAP2:
+            if not kin.hero2_on():
+                raise ValueError("SSBOT_FORUM_MAP2=1 needs SSBOT_FORUM_HERO2=1 (the map2 search's hero model)")
+            if crest != "Wanderer":
+                raise ValueError("SSBOT_FORUM_MAP2: the Wanderer crest only (the search's hero model)")
+            from ssbot.map2 import live as m2live
+            self.m2 = m2live.Map2Controller(instance=instance, log_dir=log_dir)
+            self._m2_final: tuple | None = None
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -347,6 +362,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             push_cast.warm(self.params)       # SP13b: the cast route's over planner
         if air_show.AIRSHOW:
             air_show.warm(self.params)        # SP-AIR1: the air show's planner
+        if self.m2 is not None:
+            self.m2.warm()                    # M4c: the commit check's compiled paths
+            if not self.m2.procs:
+                self.m2.start()               # the search workers (spawned, warmed; waits until they are ready)
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -481,6 +500,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         # every tick where one of them changes (own: plan / sup / slam / stab / low / chase / two:<part> / cog)
         self.own_trace: list = []
         self._own_last: tuple | None = None
+        if self.m2 is not None:
+            self.m2.reset(self.episode)          # M4c: a new tracker, no plan, the episode's log
+            self._m2_final = None
 
     # ---- perception hooks ----
 
@@ -489,6 +511,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         unpredicted-hit check reads them (PlannerPolicy._catch_up / act call this first)."""
         raw0 = self.raw.get(ws.stamp.frame) or s
         fo = ws.stamp.frame
+        if self.m2 is not None:
+            self.m2.feed(raw0, fo)               # M4c: the Clapper tracker, every STATE
         b = (raw0.get("hero") or {}).get("box")
         if b:
             self._boxes[fo] = (b, ws.stamp.t_game_s)
@@ -788,6 +812,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                           np.int64)
         t1 = time.perf_counter()
         S0 = self._start_state(ws, raw)
+        # M4c (SSBOT_FORUM_MAP2): map2's keys for f + 2 (a received plan committed after its exact re-simulation from
+        # this state, or the plan in control's next keys while its per-frame check holds); None: the fallback's
+        m2_mask = self.m2.pre(f, fo, raw, S0, prefix, hold) if self.m2 is not None else None
         # SP-AIR1 (SSBOT_FORUM_AIRSHOW): while the show owns the keys its planner and this one alternate (the tick's
         # cost): on the show's ticks the last plan result stands for the supervisor
         air_tick = False
@@ -831,6 +858,16 @@ class ForumPlannerPolicy(PlannerPolicy):
         mask = res.mask if r.mask is None else r.mask
         own = "plan" if r.mask is None else "sup"
         play = None
+        # M4c: map2 has the keys (the supervisor's still win): the scripts are not stepped (their runs aborted on the
+        # tick it takes them), the planner above keeps planning from the keys actually sent (the clean handover)
+        m2_on = m2_mask is not None and r.mask is None and not self.pause_owned
+        if m2_on:
+            mask = play = int(m2_mask)
+            own = "m2"
+            self.counts["map2"] += 1
+            self._play_tick = None
+            if self.m2.took:
+                self._m2_take()
         # SP11-0 (SSBOT_FORUM_TWO_GUARD): the other Clapper's danger spans for the one-Clapper scripts (None: off)
         gsp = (self.two.guard_spans(f, s, ws.stamp.t_game_s)
                if (two_play.GUARD and self.two is not None) else None)
@@ -853,7 +890,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         # come from TwoPlay.step below; the supervisor's still win)
         rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
         asw_crit = asw_crit or rt_crit
-        if self.air_show is not None and not self.pause_owned and r.mask is None:
+        if self.air_show is not None and not self.pause_owned and r.mask is None and not m2_on:
             # SP-AIR1 (SSBOT_FORUM_AIRSHOW): the air show owns the keys to the kill (no other script is stepped)
             trk_ = self.v2feed.trk if self.v2feed is not None else None
             abk = None
@@ -869,7 +906,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 own = "air"
                 asw_crit = True
                 self.counts["air_show"] += 1
-        if self.slam_play is not None and not low_crit and not asw_crit:
+        if self.slam_play is not None and not low_crit and not asw_crit and not m2_on:
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
@@ -1033,6 +1070,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        if self.m2 is not None:
+            # M4c: the snapshot to the search workers (the keys in flight with this one, the bridge expected while
+            # they search) and map2's per-tick log row
+            self.m2.post(f, fo, raw, S0, prefix, hold, int(mask), own, getattr(res, "cmd", None),
+                         r.mask is not None or self.pause_owned)
+            self._m2_final = (own, int(mask))
         self.sent[f + 2] = int(mask)
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
@@ -1071,6 +1114,14 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred, wt, kill_hp, ykill, streak)
         return int(mask)
 
+    def _m2_take(self) -> None:
+        """M4c: map2 takes the keys - the scripts' runs end (aborted, as when the supervisor takes them), so they start
+        afresh when the keys come back."""
+        for sc in (self.slam_play, self.claw, self.cast_stab, self.rune_lowhop, self.evade_chase):
+            if sc is not None and sc.active():
+                sc.abort("map2")
+                self.counts["map2_aborted"] += 1
+
     def _cogfly(self, f, ws, raw, res, r, fcast, S0, wt) -> int | None:
         """The Cogfly throw (module docstring, 5): the second frame of a throw under way, or a new one."""
         cg, c = self.rules.cogfly, self.cog
@@ -1107,6 +1158,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         return COG
 
     def _pause_tick(self, s: dict, f: int, fo: int, ws, raw: dict, t0: float) -> int:
+        if self.m2 is not None:
+            self.m2.yield_sup(f, fo)             # M4c: the pause machine has the keys: map2 drops its plan
         unpred = self._unpredicted(raw, fo) + self._unpred_backlog
         self._unpred_backlog = 0
         src, self._unpred_src = tuple(self._unpred_src), []
@@ -1172,6 +1225,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             # the chosen plan relies on a clash: w (every clash in it happens), clashes, ranked in FORCED_RISK (partial,
             # or w below clash_min_p)
             rec["clash"] = [round(res.clash[0], 4), res.clash[1], bool(res.clash[2])]
+        if self.m2 is not None and self._m2_final is not None:
+            rec["final"] = list(self._m2_final)  # M4c: who sent the keys (map2 / the fallback's owner) and the mask
         hit = any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ())
         event = hit or streak or (r.decision.pause_pending and self.counts["_pend_logged"] == 0)
         if r.decision.pause_pending:
@@ -1228,6 +1283,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"rune_lowhop": self.rune_lowhop.stats()} if self.rune_lowhop is not None else {}),
                 **({"two_play": self.two.stats()} if self.two is not None else {}),
                 **({"air_show": self.air_show.stats()} if self.air_show is not None else {}),
+                **({"map2": self.m2.stats()} if self.m2 is not None else {}),
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),

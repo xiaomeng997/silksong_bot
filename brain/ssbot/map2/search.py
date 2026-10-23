@@ -1682,6 +1682,9 @@ class Searcher:
         # M4b: one part of a split search (i, n) - this searcher takes the root's candidates whose key hashes to i
         # (the safe endpoints and the library: part 0) and the whole subtree below them; None: all of it
         self.part: tuple | None = None
+        # M4c: a callable plan -> plan applied to every plan the search builds (_merge) before it is evaluated (the
+        # live worker's: its masks as the oracle's hold filter latches them, ssbot.map2.live.HoldRealizer); None: none
+        self.realizer = None
 
     def _mine(self, c) -> bool:
         if self.part is None:
@@ -2054,10 +2057,33 @@ class Searcher:
         return Seg(np.asarray(w["masks"], np.int64).copy(), [], None, "safe")
 
     # ---- the decision ----
-    def root(self, sit: Situation) -> Node:
-        noop = Plan([Seg(np.zeros(1, np.int64))], "noop")
+    def root(self, sit: Situation, prefix: Seg | None = None) -> Node:
+        """The root node: her state now, the prediction under her do-nothing path. prefix (M4c, the live worker): the
+        keys already on their way to the game and the bridge she is expected to play while the search runs (latched
+        masks, down slash presses with their targets, no Clawline) - every plan then starts with them: the root is
+        the node after the prefix (its nominal outcome's state and prediction, as a node after a strike is), the noop
+        is the prefix and one frame of no key. None: as before (M3 / M4b)."""
+        if prefix is None:
+            noop = Plan([Seg(np.zeros(1, np.int64))], "noop")
+            ev = self.ev.evaluate(sit, noop, exits=False)
+            nd = Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0)
+            nd.noop_ev = ev
+            return nd
+        if prefix.claw is not None:
+            raise ValueError("a root prefix cannot end in a Clawline")
+        n = len(prefix.masks)
+        pre = np.asarray(prefix.masks, np.int64)
+        noop = Plan([Seg(np.concatenate([pre, np.zeros(1, np.int64)]), list(prefix.dsl), None, "pre")], "noop")
         ev = self.ev.evaluate(sit, noop, exits=False)
-        nd = Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0)
+        rep = ev.nominal
+        st = state_at(self.W, rep.tr, n) if rep is not None else None
+        S = st[0] if st is not None else self.W.roll(sit.S, pre).final[:, 0].copy()
+        pred = ev.pred
+        nx = 0
+        if rep is not None and rep.tr.contacts:
+            pred = self._node_pred(rep, ()) or ev.pred
+            nx = max([kc for (kc, _, kd) in rep.tr.contacts if kd == "down"], default=-99) + sk.SLASH_NEXT_F - 3
+        nd = Node(Plan([Seg(pre.copy(), list(prefix.dsl), None, "pre")], "prim"), n, S, pred, None, 0, max(nx, 0))
         nd.noop_ev = ev
         return nd
 
@@ -2103,7 +2129,8 @@ class Searcher:
             prev.claw = seg.claw
             prev.tag = (prev.tag + "+" + seg.tag).strip("+")
             plan.segs.pop()
-        return plan
+        # M4c: the live worker's realizer (the keys as the oracle's hold filter will latch them); None: as before
+        return plan if self.realizer is None else self.realizer(plan)
 
     def child(self, sit: Situation, node: Node, seg: Seg, origin: str, cand=None) -> tuple[Plan, Eval]:
         if node.plan.segs and node.plan.segs[-1].claw is not None:
@@ -2351,7 +2378,9 @@ class Searcher:
                     pick[rk] += 1
         return made
 
-    def decide(self, sit: Situation, prev: Plan | None = None, cap_s: float | None = None) -> "Result":
+    def decide(self, sit: Situation, prev: Plan | None = None, cap_s: float | None = None,
+               prefix: Seg | None = None) -> "Result":
+        """One decision (module docstring). prefix (M4c): the keys every plan starts with (root())."""
         t0 = time.perf_counter()
         cap = self.cfg.cap_s if cap_s is None else cap_s
         cfg = self.cfg
@@ -2386,7 +2415,7 @@ class Searcher:
                 kept = e
                 tried.append(e)
                 note(kept)
-        rt = self.root(sit)
+        rt = self.root(sit) if prefix is None else self.root(sit, prefix)
         mark("root")
         beam = [rt]
         best = kept
@@ -2395,7 +2424,8 @@ class Searcher:
         elif cfg.reuse_root:
             noop = self.ev.finish(rt.noop_ev, stop=False)      # M4b: the root's noop evaluation, its exits run
         else:
-            noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop"))
+            noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop") if prefix is None else
+                                    rt.noop_ev.plan.copy())
         tried.append(noop)
         mark("noop")
 
