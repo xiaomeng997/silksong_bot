@@ -340,6 +340,20 @@ BOUNDS (the lead's proposal, 2026-10-22, asked by the person; M3 checks them on 
   -12.2 .. +9 u (the floor below, the jumps and bounces above, the ceiling caps it); walls / floor / ceiling are
   applied at use time as terrain events. Other rooms: their own bounds from the terrain map.
 
+STEADY-STATE TABLES + ACTION LISTS (the person, 2026-10-22 evening, after M1's numbers: 1,758 start-state tables,
+30 f horizon, 23,831 exact clusters in 16 f from rest - the air dash cancellable on every frame): open a table ONLY at
+a steady state (ground walk, ground run, air at rest, the float steady, the terminal fall - a handful, not 1,758);
+between two steady states the discrete events follow ONE action list from a fixed library (e.g. ~2000 lists: the
+dash / air sprint and its length, the jump hold, the umbrella open / close frames, the Clawline - whatever is
+needed), chosen at the steady state and not changed during the transition; left / right stays free every frame (an
+x interval, the instant run). Each list = one vertical curve + its x reach, so a table = the union over its lists,
+and tables chain at steady states to any horizon (120 f and more - not 30). Cost of the restriction: no new discrete
+decision in the middle of a transition (a jump, a dash, an umbrella opening); safety still holds by the reveal rule
+(a list must be safe for every enemy outcome until the next steady state, with left / right steering after the
+reveal); the loss is some adaptivity in fast exchanges - keep a small set of EMERGENCY deviations (dash / umbrella /
+Clawline from mid-transition) for model errors. To do as M1b after M3 (M3 already chains <= 2-event segments at
+canonical junctions, the same direction).
+
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
   primitives at branch points. Branch points = the end of her discrete commitments (a slash's lock, the Clawline's
