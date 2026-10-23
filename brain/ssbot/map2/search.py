@@ -1349,12 +1349,15 @@ class Evaluator:
                     return False
         return True
 
-    def evaluate(self, sit: Situation, plan: Plan, exits: bool = True, tag: tuple = (), start=None) -> Eval:
+    def evaluate(self, sit: Situation, plan: Plan, exits: bool = True, tag: tuple = (), start=None,
+                 until=None) -> Eval | None:
         """The closed-loop evaluation (module docstring, step 3). tag / start: a CONDITIONAL evaluation inside the
         reactions of tag (a contingent plan's continuation searched per reaction): the cascade starts from the node's
         group (start = its hits, the choice sets before its last hit, a branch of it for her path) and keeps only the
         branches of those reactions - its value is the plan's given those reactions, not the plan's (only _combine's
-        joined plan is evaluated whole)."""
+        joined plan is evaluated whole). until (M4b's hard cap): checked before each re-prediction of the cascade -
+        true: the evaluation is abandoned and None returned (a joined two-Clapper plan's cascade ran 200 predictions,
+        40 s past a 2 s cap)."""
         t0 = time.perf_counter()
         self.units += 1
         W, cfg = self.W, self.cfg
@@ -1428,6 +1431,8 @@ class Evaluator:
                             # (her path after the hit differs with the continuation played: its own re-prediction)
                             buckets.setdefault((k, iid, h[0], akey), []).append((wb, b, tr, tuple(pre)))
                 for akey, lst in redo.items():
+                    if until is not None and until():
+                        return None
                     trr = lst[0][1]
                     hits: dict = {}
                     for (ii, kk), v in fixed.items():
@@ -1438,6 +1443,8 @@ class Evaluator:
                     kf3 = [(Ps, rk) for (_, Ps, rk) in trr.alts]
                     work.append((P3, sum(x[0] for x in lst), cons, fixed, last_hit, kf3, False))
                 for (k, iid, kind, ak), lst in buckets.items():
+                    if until is not None and until():
+                        return None
                     fx = dict(fixed)
                     for (kk, ii, hh) in lst[0][3]:
                         fx[(ii, kk)] = hh
@@ -2133,7 +2140,12 @@ class Searcher:
                 "screen_" + (why.split("@")[0] or "pass"), 0) + 1
             if why:
                 return Eval(plan, [], -1.0, 0.0, False, 0.0, 0.0, 0, 0, None, None, -1.0, False, True)
-        return self.ev.evaluate(sit, plan, exits=False, tag=node.tag, start=node.start)
+        e = self.ev.evaluate(sit, plan, exits=False, tag=node.tag, start=node.start,
+                             until=getattr(self, "_until", None))
+        if e is None:                         # (the hard cap: cut at the time - unsafe, finished, no outcomes)
+            self.stats["cut"] = self.stats.get("cut", 0) + 1
+            return Eval(plan, [], -1.0, 0.0, False, 0.0, 0.0, 0, 0, None, None, -1.0, False, True)
+        return e
 
     # ---- nodes (after a landed strike) and the contingent splits ----
     def _in_tag(self, o: Outcome, tag: tuple) -> bool:
@@ -2316,7 +2328,10 @@ class Searcher:
                 first.out_alt = alt or None
                 plan = Plan([x.copy() for x in base.segs] + [first] + [x.copy() for x in conts[dflt][1:]],
                             base.origin, "contingent")
-                e = self.ev.evaluate(sit, plan, exits=False, tag=ptag, start=sp.get("start") if ptag else None)
+                e = self.ev.evaluate(sit, plan, exits=False, tag=ptag, start=sp.get("start") if ptag else None,
+                                     until=(lambda: self._now() > t_end) if self.cfg.hard_cap else None)
+                if e is None:
+                    return made                      # (the hard cap: the joined plan's cascade cut at the time)
                 e.tag = ptag
                 if e.open_ok:
                     self.ev.finish(e, stop=False, until=(lambda: self._now() > t_end) if self.cfg.hard_cap else None)
@@ -2348,6 +2363,8 @@ class Searcher:
         now = self._now
         t0c = now()
         self.stats = {}
+        # (M4b's hard cap: a candidate's evaluation in progress at the cap is abandoned between its re-predictions)
+        self._until = (lambda: now() - t0c > cap) if cfg.hard_cap else None
         self.splits = {}
         self.anytime = []
         self.marks = []                # (wall ms, what): the decision's phases and candidates (the speed work)

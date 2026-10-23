@@ -270,3 +270,19 @@ def test_live_config_with_a_contingent_plan(W):
     r = S.decide(sit)
     assert r.ev is not None and r.ev.safe
     assert _t.perf_counter() - t < 2.0 * 1.25 + 1.5
+
+
+def test_evaluate_cut_by_until(W):
+    """The hard cap inside an evaluation: until true before a re-prediction abandons it (None); never true - the
+    same evaluation as without until."""
+    sit = _sits(W)[0]
+    S = ms.Searcher(W, ms.Cfg(cap_s=2.0, depth=1))
+    S.vclock = 0.01
+    r = S.decide(sit)
+    e = next(e for e in r.tried if e.outcomes and any(o.hits for o in e.outcomes))
+    S.ev.reset()
+    a = S.ev.evaluate(sit, e.plan, exits=False)
+    S.ev.reset()
+    b = S.ev.evaluate(sit, e.plan, exits=False, until=lambda: False)
+    assert a.value == b.value and a.p_safe == b.p_safe and len(a.outcomes) == len(b.outcomes)
+    assert S.ev.evaluate(sit, e.plan, exits=False, until=lambda: True) is None
