@@ -417,6 +417,14 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   on their own chain); one bridge per segment between refills (a pogo, a hooked Clawline or a landing restores the
   dash, so the next segment may bridge again). Cost: interval shifts and intersections over ~120 start frames x the
   bundle's variants grouped by (dy, T, end state), instead of a forward set multiplied by every dash (M1's 23,831).
+- FLATTENED AND CHAINED, BOTH (the person asked 2026-10-23 'chain the tables one by one, or one flattened
+  version?'): keep a FLATTENED union per start state and frame (where she can be, not how; small whatever the cluster
+  count - the dash's 23,831 clusters are a few x intervals per frame) AND the CHAINED tables. The flattened union is
+  built without danger, so it is an UPPER BOUND: (1) prune - a strike window outside it is out of reach, skip it;
+  (2) exact until the danger first touches it - before that frame use it as is. From that frame on CHAIN: step the
+  tables frame by frame and cut each frame's danger (the flattened union cannot be cut: it does not know which point
+  came from which). Reconstruct the keys only along the chain (the action ids of the references; back-pointers on
+  clusters, never on the flattened maps - the A -> B -> C lesson).
 Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
