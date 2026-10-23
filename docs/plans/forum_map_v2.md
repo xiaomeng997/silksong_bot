@@ -360,6 +360,15 @@ MULTIPLY THE TABLES: they are items of the action lists / edges whose results la
 from the ground ends in the fall curve at a phase; the air dash + air sprint ends falling at some vy = the fall table
 of that phase; the bounce and the Clawline end at an apex = fall phase 0). Their timing and length are parameters
 of the list item, not keys.
+NATURAL SELECTION OF THE ACTION LISTS (the person, 2026-10-22): the action space may be huge; a list SURVIVES only if
+it reaches some space-time point with FEWER actions (key presses / events) than every other list - otherwise it is
+eliminated. In the offline build, per reachable (point, ARRIVAL STATE) keep the list with the fewest presses (ties:
+the earlier arrival, then the larger clearance); the back-pointers are the survivors, so a reconstructed path is the
+simplest one (fewer presses = fewer timing errors; the old key-change penalty was the same idea). Two cautions: (1)
+compare only lists that arrive in the SAME state (vy, flags), not just the same point (the A -> B -> C lesson);
+(2) keep a few DIVERSE survivors per endpoint (different routes: under / over / a different height on the way),
+because online danger can cut the simplest one - the online cluster pass with every event stays the fallback. M1b
+reports how many lists of the library survive.
 
 L3 SEARCH:
 - Candidates = the combo library (the existing scripts as macro actions with their calibrated timings) + single
