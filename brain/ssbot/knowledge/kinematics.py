@@ -689,10 +689,24 @@ P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 #                  sprint FSM's states entered in FixedUpdate read the previous frame's input): a key re-pressed on the
 #                  dash's end frame runs, it does not sprint (m4 dash_end: 3 / 3 live, 18 / 18 the rule)
 H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD = 1, 2, 4, 8, 16, 32
+# map v2 stage M4 S1 (the safety fixes before the w7 gate; forum.md 100; LEAD NOTES 3 (b) / 4 of m4\PROGRESS.txt):
+#   H2_POGO_DASH   a pogo bounce restores the air dash (DownspikeBounce -> ResetAirMoves: M0 28 / 28 pre-dashed
+#                  contacts, M4a 11 / 11 after a hooked Clawline - the hook's forced bounce is a downspike bounce
+#                  too): kin_jit's EV_POGO clears AIRDASHED, and the estimator (ForumRows: state_table /
+#                  StateTracker) clears it at the onset of cState.downSpikeBouncing (the M4a recordings: 66 / 66
+#                  hooked controls show it, 0 / 69 unhooked ones); before, the air dash stayed spent after a pogo or
+#                  a hook until the ground / a wall
+#   H2_CLAW_SPR    the Clawline from the air sprint (env_jit.claw_allowed; M4a: at once from any air-sprint frame,
+#                  P + 3 .. P + 22, 29 / 29 - only the dash's two steps make it wait): the envelope offers it there and
+#                  the search's press check allows it (before: normal control and the umbrella's float / deflate)
 H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END = 64, 128, 256
-H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |     H2_SPR_JUMP | H2_DASH_END
+H2_POGO_DASH, H2_CLAW_SPR = 512, 1024
+H2_ALL = (H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |
+          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR)
+H2_S1 = H2_POGO_DASH | H2_CLAW_SPR      # the M4 S1 bits (SSBOT_FORUM_HERO2_OFF=1536: the hero model of M4d2)
 H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
+HERO2_OFF_ENV = "SSBOT_FORUM_HERO2_OFF"  # HERO2 bits taken out (an int, default 0): the identity checks of new bits
 # the M0 calibration (ssbot.tools.m0_calib; forum.md 91): the bits and the fitted restart
 HERO2_OVERRIDES = {"hero2": H2_ALL, "h2_pogo_rs_t": 0.1083, "h2_pogo_j2": 8}
 
@@ -720,7 +734,20 @@ def hero2(params: HeroParams, on: bool | None = None) -> HeroParams:
         return params
     d = params.to_json()
     d.update(HERO2_OVERRIDES)
+    off = hero2_off()
+    if off:
+        d["hero2"] = int(d["hero2"]) & ~off
     return HeroParams.from_json(d)
+
+
+def hero2_off() -> int:
+    """SSBOT_FORUM_HERO2_OFF: HERO2 bits taken out of HERO2_OVERRIDES (default 0: none) - e.g. 1536 (H2_S1) is the
+    hero model of M4d2, for the identity checks of the M4 S1 bits."""
+    import os
+    v = os.environ.get(HERO2_OFF_ENV, "").strip()
+    return int(v, 0) if v else 0
+
+
 THK_STRIDE = 1 + 2 * THUNK_MAXV
 
 
@@ -2606,6 +2633,13 @@ class ForumRows:
             S[DASH_T] = float(self.dash_t)
         if ground or sliding:
             self.airdashed = False
+        bnc = False
+        if int(p.hero2) & H2_POGO_DASH:
+            # M4 S1: a pogo bounce (a down slash contact, a hooked Clawline's control) restores the air dash
+            # (DownspikeBounce -> ResetAirMoves): the onset of cState.downSpikeBouncing
+            bnc = bool(flag("downSpikeBouncing"))
+            if bnc and not (pr and pr.get("bnc")):
+                self.airdashed = False
         S[AIRDASHED] = 1.0 if self.airdashed else 0.0
         tm = r.get("tm")
         dcd = float(tm[TM_KEYS.index("dash_cd")]) if tm is not None else np.nan
@@ -2618,7 +2652,7 @@ class ForumRows:
                      "recoiling": bool(flag("recoilingLeft") or flag("recoilingRight")),
                      "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph,
                      "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0)),
-                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0}
+                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0, "bnc": bnc}
 
 
 def _neutral_forum_rows(S: np.ndarray) -> None:
@@ -2818,7 +2852,8 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
     if params.abilities:
         fr = ForumRows(params)
         fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand",
-                                       "attacking", "upAttacking", "altAttack", "recoilingLeft", "recoilingRight")}
+                                       "attacking", "upAttacking", "altAttack", "recoilingLeft", "recoilingRight",
+                                       "downSpikeBouncing")}
         for i in range(n):
             r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
                  "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],

@@ -50,7 +50,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
     H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD, H2_JUMP_DCD_T, P_H2, P_H2_RST,
-    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX)
+    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1907,6 +1907,8 @@ def apply_events(x, ev, P):
         x[GROUND] = 0.0
         x[JQ] = -1.0
         x[INV_T] = max(x[INV_T], P[P_POGO_INV])
+        if P[P_ABIL] != 0 and (np.int64(P[P_H2]) & H2_POGO_DASH) != 0:
+            x[AIRDASHED] = 0.0            # M4 S1: DownspikeBounce -> ResetAirMoves (M0 28 / 28, M4a 11 / 11)
     for b in range(2):
         bit = EV_HURT_L if b == 0 else EV_HURT_R
         side = -1.0 if b == 0 else 1.0

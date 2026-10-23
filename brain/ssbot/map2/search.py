@@ -70,6 +70,7 @@ from ssbot.map2 import clapper as cm
 from ssbot.map2 import clapper_jit as cj
 from ssbot.map2 import env_jit as ej
 from ssbot.map2 import envelope as env
+from ssbot.map2 import press
 from ssbot.map2 import strike as sk
 
 WALL_L, WALL_R = cm.WALL_L, cm.WALL_R
@@ -331,7 +332,8 @@ def _rows_sig(bx, lo: int, hi: int):
 
 
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
-             alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None) -> Traj:
+             alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None,
+             claw_lock: int = -99) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
@@ -339,10 +341,18 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     plan follows the continuation of the reaction she has seen by control (Seg.out_alt, reaction_key).
     rec: a list that receives every input read from the branch (M4b's trajectory memo, Evaluator.sim): ("rows", iid,
     lo, hi, rows) the box rows lo .. hi - 1 a strike looked at (with the array's length and its last row), ("rk", P,
-    key) a reaction key - the trajectory is a function of the plan, the start and these reads only."""
+    key) a reaction key - the trajectory is a function of the plan, the start and these reads only.
+    M4 S1 (press.ON, press.SIDE; HANDOFF 'S1'): a down slash is credited only when the kin state starts one (at the
+    press or, queued, up to press.LOOK frames later: its contact then counts from that start) - else it is a miss
+    ('dslash:<kind>'); a Clawline pressed where the kin state does not allow it (press.claw_state_ok, the lock of a
+    previous one: claw_lock, an absolute frame, and control + 13 inside the plan) is a forced collision at its press
+    (Traj.bad: the plan cannot be played from there); a down slash out of the air dash / sprint whose contact is a
+    side contact (her box bottom below the body's top) is the body's contact - a forced collision at that frame, no
+    pogo (LEAD NOTE 3 (a))."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
+    bad: list = []                   # M4 S1: forced collisions [(frame, why)]
     S = S0.copy()
     k0 = 0
     face = face0
@@ -351,6 +361,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     segs = list(plan.segs)
     played = []
     last_P = None
+    lock_until = int(claw_lock)      # a Clawline pressed before this frame is lost (the previous one's control + 13)
     si = -1
     while si + 1 < len(segs):
         si += 1
@@ -381,20 +392,39 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         # the down slashes: contacts in order, each re-rolled with its bounce
         r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
         fac = sk.facing_track(face, masks if n else np.zeros(1, np.int64))
+        chk = press.ON[0] and n > 0
+        kt = None
         for (i, iid) in sorted(seg.dsl):
             t = i + 1                                     # the press frame (rollout index)
+            ts, kind = t, "down"
+            if chk:
+                # M4 S1: the press credited only when the kin state starts a down slash (the trace is re-made after
+                # each bounce: the events changed)
+                if kt is None:
+                    kt = press.trace(W, S, masks, ev, [i_ + 1 for (i_, _) in seg.dsl])
+                ts, kind = press.ds_start(kt, t, dt=float(W.params.frame_time))
+                if kind not in ("down", "lock"):
+                    missed.append(("dslash:" + kind, k0 + t, iid))
+                    continue
             bx = boxes_fn(iid)
             if rec is not None:
-                lo_, hi_ = k0 + t + sk.DS_ACTIVE[0], k0 + min(t + sk.DS_ACTIVE[1], n) + 1
+                lo_, hi_ = k0 + ts + sk.DS_ACTIVE[0], k0 + min(ts + sk.DS_ACTIVE[1], n) + 1
                 rec.append(("rows", iid, lo_, hi_, _rows_sig(bx, lo_, hi_)))
             rel = bx[k0:] if bx is not None else np.full((1, 4), np.nan)
             gnd = (r.flags[0] & km.F_GROUND) != 0
-            c = sk.dslash_contact(r.pos[0], fac, gnd, t, rel)
+            c = sk.dslash_contact(r.pos[0], fac, gnd, ts, rel)
             if c < 0:
                 missed.append(("dslash", k0 + t, iid))
                 continue
+            if chk and press.SIDE[0] and kind == "down" and press.out_of_sprint(kt, ts) and \
+                    r.box[0, c, 1] < rel[c, 3] + press.SIDE_DY:
+                # M4 S1 (LEAD NOTE 3 (a)): a side contact out of the air sprint - the body meets her first (no pogo)
+                bad.append((k0 + c, "side_spr"))
+                missed.append(("dslash:side_spr", k0 + t, iid))
+                continue
             ev[c - 1] |= km.EV_POGO                       # the events' index 0 = rollout index 1
             r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
+            kt = None
             hits.setdefault(iid, {})[k0 + c] = ("down", sk.DS_DMG)
             contacts.append((k0 + c, iid, "down"))
         rolls.append((k0, S.copy(), masks.copy(), ev.copy()))
@@ -414,6 +444,17 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         pre_ev = 0
         if seg.claw is not None:
             d, iid = seg.claw
+            if press.ON[0]:
+                # M4 S1: the Clawline only where the kin state allows it (env_jit.claw_allowed's rule before the press
+                # frame's Update; the lock of a previous Clawline): else the plan cannot be played from P
+                okc = k0 >= lock_until
+                if okc and nn > 0:
+                    kc_ = press.trace(W, rolls[-1][1], rolls[-1][2], rolls[-1][3])
+                    okc = press.claw_state_ok(kc_, nn, W.params.vector())
+                elif okc:
+                    okc = not (S[km.GROUND] > 0)
+                if not okc:
+                    bad.append((k0, "claw_state"))
             bx = boxes_fn(iid)
             if rec is not None:
                 lo_, hi_ = k0 + sk.HOOK_HIT_F, k0 + 62
@@ -452,6 +493,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                 pre_ev = km.EV_POGO
             face = d
             k0 = ctrl
+            lock_until = ctrl + press.CLAW_LOCK_F
     if pre_ev:                       # a plan ending at a Clawline's control: its forced bounce's first frame
         r = W.roll(S, np.zeros(1, np.int64), np.array([pre_ev]))
         rolls.append((k0, S.copy(), np.zeros(1, np.int64), np.array([pre_ev])))
@@ -463,7 +505,22 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
               np.concatenate(I_), np.concatenate(C_), hits, contacts, hooks, rolls, k0, starts, missed, variant.name,
               claws, alts)
     tr.segs = played                 # the segments played (the reaction's continuation and the hook variant's in place)
+    tr.bad = bad
     return tr
+
+
+def claw_lock_of(sit) -> int:
+    """M4 S1: the frame (from the decision) before which a Clawline is still locked by one pressed before it
+    (Situation.meta 'claw_ctrl': that one's control frame, from the decision - the live worker's snapshot), -99: none."""
+    c = (sit.meta or {}).get("claw_ctrl")
+    return -99 if c is None else int(c) + press.CLAW_LOCK_F
+
+
+def bad_frame(tr: Traj, k0: int, k1: int) -> int | None:
+    """M4 S1: the first forced collision of the trajectory in frames k0 .. k1 (a Clawline the kin state would not
+    start, a side contact out of the air sprint: Traj.bad), None: none."""
+    ks = [k for (k, _) in getattr(tr, "bad", ()) if k0 <= k <= k1]
+    return min(ks) if ks else None
 
 
 def state_at(W: World, tr: Traj, k: int) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1034,14 +1091,19 @@ def first_collision(br, tr: "Traj", k0: int, k1: int, margins: bool) -> int | No
     kb, _ = brnum.first_hit(np.ascontiguousarray(pos[:, 0]), np.ascontiguousarray(pos[:, 1]), tr.ifr, k0, k1, g.off,
                             g.BX, g.IIDB, hki, hlo, hhi, _HW, _HH, _HDY, WALL_L, WALL_R, g.coff, g.CO)
     top = kb - 1 if kb >= 0 else k1
+    res = kb if kb >= 0 else None
     if len(g.rare_k):
         for k in g.rare_k[(g.rare_k >= k0) & (g.rare_k <= top)]:
             k = int(k)
             if tr.ifr[k]:
                 continue
             if shapes_hit(g.rare_grown(br, k, margins), cm.hurtbox(*pos[k])):
-                return k
-    return kb if kb >= 0 else None
+                res = k
+                break
+    kx = bad_frame(tr, k0, k1)           # M4 S1: a forced collision (a press the game would not play as planned)
+    if kx is not None and (res is None or kx < res):
+        return kx
+    return res
 
 
 _EMPTY_I = np.zeros(0, np.int64)
@@ -1152,7 +1214,8 @@ class Evaluator:
         looked at, the reaction keys); a branch whose reads are equal gets the same trajectory. A plan without a
         strike reads nothing: one trajectory for every outcome."""
         self.n_sim += 1
-        key = (id(plan), var.name, lag, face0, id(sit.S), sit.alpha_c, b is None)
+        lock = claw_lock_of(sit)
+        key = (id(plan), var.name, lag, face0, id(sit.S), sit.alpha_c, b is None, lock)
         ent = self._simm.get(key)
         if ent is None:
             ent = self._simm[key] = (plan, sit.S, [])
@@ -1161,12 +1224,12 @@ class Evaluator:
                 self.n_sim_hit += 1
                 return tr
         if b is None:
-            tr = simulate(self.W, plan, lambda iid: None, face0, sit.S, var, sit.alpha_c)
+            tr = simulate(self.W, plan, lambda iid: None, face0, sit.S, var, sit.alpha_c, claw_lock=lock)
             ent[2].append(((), tr))
             return tr
         rec: list = []
         tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
-                      lag=lag, rec=rec)
+                      lag=lag, rec=rec, claw_lock=lock)
         ent[2].append((tuple(rec), tr))
         if len(ent[2]) > 24:
             ent[2].pop(0)
@@ -1245,6 +1308,9 @@ class Evaluator:
                             shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                         bad = k if bad is None else min(bad, k)
                         break
+                kx = bad_frame(tr, 1, kmax)
+                if kx is not None:
+                    bad = kx if bad is None else min(bad, kx)
         return bad is None, bad, (time.perf_counter() - t0) * 1e3
 
     def quick(self, sit: Situation, plan: Plan, pred, k_from: int, n_branch: int = 3) -> str:
@@ -1273,6 +1339,9 @@ class Evaluator:
                                 shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                             ks_.append(k)
                             break
+                    kx = bad_frame(tr, k_from + 1, kmax)
+                    if kx is not None:
+                        ks_ = [min(ks_ + [kx])]
                 for k in ks_:
                     rv = _reveal(b, 1)
                     tv = getattr(b, "t_reveal", None)
@@ -1509,6 +1578,9 @@ class Evaluator:
                 if shapes_hit(bdamage(br, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                     k_col = k
                     break
+            kx = bad_frame(tr, 1, tr.end)
+            if kx is not None and (k_col is None or kx < k_col):
+                k_col = kx
         rv = _reveal(br, 1)
         tv = getattr(br, "t_reveal", None)
         if tv is not None and tv >= 1:
@@ -2003,15 +2075,73 @@ class Searcher:
         last = int(masks[-1]) if len(masks) else 0
         if kind == "dslash":
             dc = extra
-            press = (last & DIRS) | M_DS
+            if press.ON[0]:
+                return self._realize_ds(node, masks, tp, iid, dc)
+            pm = (last & DIRS) | M_DS
             tail = np.zeros(sk.DS_ACTIVE[1], np.int64)
             # the direction of the approach kept to the expected contact, then no key (the swing's window)
             tail[:max(dc - 1, 0)] = last & DIRS
-            masks = np.concatenate([masks, [press], tail])
+            masks = np.concatenate([masks, [pm], tail])
             return Seg(masks, [(tp, iid)], None, f"ds@{iid}")
         d = extra
+        if press.ON[0]:
+            return self._realize_claw(node, masks, d, iid)
         masks = np.concatenate([masks, [km.B_RIGHT if d > 0 else km.B_LEFT]])
         return Seg(masks, [], (d, iid), f"claw@{iid}")
+
+    def _realize_ds(self, node: Node, masks: np.ndarray, tp: int, iid, dc: int) -> Seg | None:
+        """M4 S1 (press.ON): the down slash press after the witness keys, made so the kin state STARTS a down slash -
+        (a) M3's press (the approach's direction, the jump / dash keys let go on the press frame) when it starts one
+        there; else (b) the witness's held jump / dash kept on the press frame (out of the umbrella's float a release
+        closes it in that frame and the attack is lost - kin H2_REL_LOSS; the air sprint's loop ends on the dash's
+        release); else (c) as (b) with down (and the direction, the dash) held on until the slash starts (the air
+        sprint's Attack Cancel swings from InputHandler's queue up to press.LOOK frames later with the keys held then:
+        a side slash once down is let go). None: no variant starts one (the witness is rejected; the airceil
+        verifier's 'no-slash' presses)."""
+        last = int(masks[-1]) if len(masks) else 0
+        t = int(tp) + 1
+        base = np.zeros(sk.DS_ACTIVE[1], np.int64)
+        base[:max(dc - 1, 0)] = last & DIRS
+        held = last & (DIRS | km.B_JUMP | km.B_DASH)
+        cands = [((last & DIRS) | M_DS, base, False)]
+        if held & (km.B_JUMP | km.B_DASH):
+            cands.append((held | M_DS, base, False))
+        hold_c = (last & (DIRS | km.B_DASH)) | km.B_DOWN
+        cands.append((held | M_DS, np.concatenate([np.full(press.LOOK, hold_c, np.int64), base]), True))
+        dt = float(self.W.params.frame_time)
+        for (pm, tail, through) in cands:
+            mm = np.concatenate([masks, [pm], tail]).astype(np.int64)
+            kt = press.trace(self.W, node.S, mm, None, [t])
+            ts, kd = press.ds_start(kt, t, dt=dt)
+            if kd == "lock" or (kd == "down" and (ts == t or through)):
+                if through:
+                    # down held only until the slash starts, then the approach's tail
+                    mm = np.concatenate([masks, [pm], np.full(ts - t, hold_c, np.int64), base]).astype(np.int64)
+                    self.stats["realize_ds_hold"] = self.stats.get("realize_ds_hold", 0) + 1
+                elif pm != cands[0][0]:
+                    self.stats["realize_ds_keep"] = self.stats.get("realize_ds_keep", 0) + 1
+                return Seg(mm, [(int(tp), iid)], None, f"ds@{iid}")
+        self.stats["realize_ds_none"] = self.stats.get("realize_ds_none", 0) + 1
+        return None
+
+    def _realize_claw(self, node: Node, masks: np.ndarray, d: int, iid) -> Seg | None:
+        """M4 S1 (press.ON): the Clawline press (the direction key on the segment's last frame: P) where the kin state
+        allows it (press.claw_state_ok: env_jit.claw_allowed's rule; the lock of a previous Clawline, control + 13) -
+        at the witness's end or up to 2 frames later with the direction held; None: not there (rejected)."""
+        dk = km.B_RIGHT if d > 0 else km.B_LEFT
+        lock = -99 if node.claw_ctrl is None else int(node.claw_ctrl) + press.CLAW_LOCK_F
+        Pv = self.W.params.vector()
+        for j in range(3):
+            mm = np.concatenate([masks, np.full(j + 1, dk, np.int64)]).astype(np.int64)
+            if node.k0 + len(mm) < lock:
+                continue
+            kt = press.trace(self.W, node.S, mm)
+            if press.claw_state_ok(kt, len(mm), Pv):
+                if j:
+                    self.stats["realize_claw_late"] = self.stats.get("realize_claw_late", 0) + 1
+                return Seg(mm, [], (d, iid), f"claw@{iid}")
+        self.stats["realize_claw_none"] = self.stats.get("realize_claw_none", 0) + 1
+        return None
 
     def _variants(self, fw, node: Node, c) -> list:
         """The refinement of a down slash window: the press 1 - 2 frames earlier / later at the same x, and the same
@@ -2067,10 +2197,12 @@ class Searcher:
         masks, down slash presses with their targets, no Clawline) - every plan then starts with them: the root is
         the node after the prefix (its nominal outcome's state and prediction, as a node after a strike is), the noop
         is the prefix and one frame of no key. None: as before (M3 / M4b)."""
+        cc = (sit.meta or {}).get("claw_ctrl")     # M4 S1: a Clawline pressed before the decision (its control frame)
+        cc = None if (cc is None or not press.ON[0]) else int(cc)
         if prefix is None:
             noop = Plan([Seg(np.zeros(1, np.int64))], "noop")
             ev = self.ev.evaluate(sit, noop, exits=False)
-            nd = Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0)
+            nd = Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0, claw_ctrl=cc)
             nd.noop_ev = ev
             return nd
         if prefix.claw is not None:
@@ -2087,7 +2219,8 @@ class Searcher:
         if rep is not None and rep.tr.contacts:
             pred = self._node_pred(rep, ()) or ev.pred
             nx = max([kc for (kc, _, kd) in rep.tr.contacts if kd == "down"], default=-99) + sk.SLASH_NEXT_F - 3
-        nd = Node(Plan([Seg(pre.copy(), list(prefix.dsl), None, "pre")], "prim"), n, S, pred, None, 0, max(nx, 0))
+        nd = Node(Plan([Seg(pre.copy(), list(prefix.dsl), None, "pre")], "prim"), n, S, pred, None, 0, max(nx, 0),
+                  claw_ctrl=cc)
         nd.noop_ev = ev
         return nd
 

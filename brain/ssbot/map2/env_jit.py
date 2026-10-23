@@ -48,7 +48,7 @@ from ssbot.knowledge.kinematics import (
     GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
     B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP)
+    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
 CB_J, CB_A, CB_D = B_JUMP, B_ATTACK, B_DASH          # 1, 2, 4
@@ -287,11 +287,16 @@ def tick_frozen(x, dt, udt):
 # ---- the unhooked Clawline -----------------------------------------------------------------------------------
 
 @njit(cache=True, error_model="numpy")
-def claw_allowed(x, cu):
+def claw_allowed(x, cu, P):
+    """The Clawline may be pressed this frame (her state after its physics steps): airborne, not in a block or its
+    lock, in normal control or the umbrella's float / deflate; HERO2 H2_CLAW_SPR (M4 S1, M4a's probes: at once from
+    any air-sprint frame, 29 / 29) also in the air sprint (the dash's own two steps: no - it waits for their end)."""
     if cu[C_CJ] >= 0 or cu[C_CLOCK] > 0 or x[GROUND] > 0:
         return False
     m = x[MODE]
     if m == M_NORMAL:
+        return True
+    if m == M_SPRINT and x[PHASE] <= 1.0 and (np.int64(P[P_H2]) & H2_CLAW_SPR) != 0:
         return True
     return m == M_GLIDE and (x[PHASE] == 2.0 or x[PHASE] == 3.0)
 
@@ -474,7 +479,7 @@ def gen_cands(x, cu, P, opts, dt, out):
         # cooldown): it keeps / starts the air hang (a no-op elsewhere, dropped by the dominance filter)
         out[n] = CB_J | CB_JH
         n += 1
-    if (opts & OPT_CLAW) != 0 and claw_allowed(x, cu):
+    if (opts & OPT_CLAW) != 0 and claw_allowed(x, cu, P):
         out[n] = CB_CLAW | CB_DIR
         out[n + 1] = CB_CLAW | CB_DIR | CB_RIGHT
         n += 2
@@ -569,7 +574,7 @@ def cond_of(x, cu, P):
         c |= COND_ATK
         if air:
             c |= COND_DSLASH
-    if claw_allowed(x, cu):
+    if claw_allowed(x, cu, P):
         c |= COND_CLAW
     if not air and m == M_NORMAL:
         c |= COND_GROUND
@@ -1753,7 +1758,7 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
                         elif mv == -cu[C_RD]:
                             cu[C_RV] = 0.0
                         cu[C_RV] *= CLAW_END_DECAY
-            if (m & B_CLAW) != 0 and claw_allowed(x, cu):
+            if (m & B_CLAW) != 0 and claw_allowed(x, cu, P):
                 d = x[FACE]
                 if (m & B_RIGHT) != 0 and (m & B_LEFT) == 0:
                     d = 1.0

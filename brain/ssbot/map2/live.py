@@ -82,6 +82,22 @@ off is M4d):
 - THE REPLAY ONLY: replay_push (a Clapper the recording's hero just hit matched with a wider x); audit_runs (each
   control run's keys as sent re-simulated in the outcomes still possible: the safety audit).
 
+M4 S1 (the safety fixes before the w7 gate; HANDOFF 'S1', forum.md 100; LiveCfg switches, on by default - all off
+with SSBOT_FORUM_HERO2_OFF=1536 is M4d2):
+- PRESS VALIDITY (press_check; ssbot.map2.press): a strike is credited only when her kin state starts it - the
+  search's realizer keeps the witness's held jump / dash on a down slash's press frame (or holds down through the air
+  sprint's Attack Cancel) or rejects the witness, simulate credits a down slash only where kin starts one and a
+  Clawline only where env_jit.claw_allowed's rule holds (else the plan cannot be played: a forced collision); the
+  snapshot carries the last Clawline's control (its lock, control + 13). The commit check, the repair, the audit and
+  every outcome the bot executes come from simulate.
+- THE LOW SIDE DOWN SLASH OUT OF THE AIR SPRINT (side_spr): a side contact of a slash out of the air dash / sprint is
+  the body's contact (a forced collision), not a pogo.
+- THE AIR DASH AFTER A POGO (HERO2 H2_POGO_DASH, kinematics / kin_jit): restored at a pogo bounce / a hooked control.
+- THE LATE TICK (late_check): frames whose tick was skipped keep the previous ACTION's keys; when one of them is not
+  the plan in control's own key there (its press / release slipped), the plan is re-checked from the keys actually
+  sent (late_check: her anchor state, every key sent, the plan's own commands after; its down slash presses where the
+  keys latch them) before it goes on, and dropped ('late') when the slip makes it unsafe.
+
 Frames: STATE frames (the oracle applies a tick's keys at f + 2); a plan's frame 0 is its snapshot's observation frame
 (its anchor), its command index k applies to frame anchor + k. u: world units, her transform (kin pos).
 """
@@ -103,6 +119,7 @@ from numba import njit
 from ssbot.knowledge import kinematics as km
 from ssbot.map2 import brnum
 from ssbot.map2 import clapper as cm
+from ssbot.map2 import press
 from ssbot.map2 import search as ms
 from ssbot.map2 import strike as sk
 
@@ -232,6 +249,13 @@ class LiveCfg:
     audit_runs: bool = False       # (the smoke's safety audit) each control run's keys as sent, re-simulated from its
     #                                commit state in every outcome still possible at its end, against that outcome's
     #                                danger to the run's last frame (audit_run); off: nothing
+    # M4 S1 (the safety fixes; on by default, a switch each - all off with SSBOT_FORUM_HERO2_OFF=1536: M4d2)
+    press_check: bool = True       # a strike credited only when the kin state starts it (ssbot.map2.press.ON: the
+    #                                realizer, simulate, the commit check); the last Clawline's lock in the snapshot
+    side_spr: bool = True          # a side contact of a slash out of the air sprint is the body's (press.SIDE)
+    late_check: bool = True        # a skipped tick slipped a key of the plan in control: re-checked from the keys
+    tol_late: float = 0.5          # actually sent (late_check; the path from now within tol_late), dropped if unsafe
+    plan_dump: str = ""            # a directory: every plan a worker sends pickled there (the press scan); '': not
     log: bool = True
 
     @classmethod
@@ -252,6 +276,13 @@ class LiveCfg:
 
     def as_dict(self) -> dict:
         return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+def set_switches(cfg: LiveCfg) -> None:
+    """M4 S1: the search's module switches from the configuration (the workers and the bot's thread: the commit
+    check simulates too)."""
+    press.ON[0] = bool(cfg.press_check)
+    press.SIDE[0] = bool(cfg.side_spr)
 
 
 # ---- the oracle's hold filter, one lane (kinematics.hold_filter, compiled) ------------------------------------------
@@ -694,10 +725,11 @@ def _clapper_pred(o: OutData, n: int) -> dict:
 
 # ---- re-anchoring and the exact commit check ---------------------------------------------------------------------
 
-def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int) -> tuple:
+def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int, move: int = 0) -> tuple:
     """The outcome's played segments from frame s on, with the LATCHED masks lat (frames s + 1 .. s + len(lat)); its
     down slash presses kept where the latched masks press them (a rising attack with down); lat_s: the latched mask at
-    frame s. (Plan, '') or (None, why)."""
+    frame s. M4 S1 move > 0 (the late check): a press the keys latch up to `move` frames later is moved there (one
+    they do not latch is left out: that strike is not played). (Plan, '') or (None, why)."""
     segs = []
     first = True
     for si, (k0, masks, dsl, claw) in enumerate(o.segs):
@@ -726,7 +758,12 @@ def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int) -> tuple:
             q = lo + j
             pm = int(lat[q - 1]) if q > 0 else int(lat_s)
             if (int(lat[q]) & M_DS) != M_DS or (pm & km.B_ATTACK):
-                return None, "press moved"
+                if move <= 0:
+                    return None, "press moved"
+                q2 = _press_at(lat, q, lat_s if q == 0 else int(lat[q - 1]), look=move)
+                if q2 < 0 or q2 >= hi:
+                    continue
+                j = q2 - lo
             nd.append((j, int(iid)))
         segs.append(ms.Seg(m, nd, claw, "re"))
         first = False
@@ -756,12 +793,19 @@ def _first_collision_out(o: OutData, tr, s: int, k1: int) -> int | None:
     kb, _ = brnum.first_hit(px, py, ifr, s + 1, k1, off, BX, IIDB, hki, hlo, hhi, ms._HW, ms._HH, ms._HDY,
                             ms.WALL_L, ms.WALL_R, coff, CO)
     top = kb - 1 if kb >= 0 else k1
+    res = kb if kb >= 0 else None
     for k in o.rare_k:
         k = int(k)
         if s + 1 <= k <= top and not ifr[k]:
             if ms.shapes_hit(o.rare[k], cm.hurtbox(px[k], py[k])):
-                return k
-    return kb if kb >= 0 else None
+                res = k
+                break
+    # M4 S1: a forced collision of the re-simulation (a Clawline the kin state would not start, a side contact out
+    # of the air sprint: search.Traj.bad, frames from s)
+    kx = ms.bad_frame(tr, 1, k1 - s)
+    if kx is not None and (res is None or kx + s < res):
+        return kx + s
+    return res
 
 
 def _claw_dirs(d: int) -> tuple:
@@ -854,7 +898,8 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
             if plan is None:
                 return False, why, info
             boxes = {iid: b[s:] for iid, b in o.boxes.items()}
-            tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c)
+            tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
+                             claw_lock=int(getattr(lp, "claw_lock", -99)) - s)
             memo[key] = tr
             n_sim += 1
         kk = min(o.kc - s, len(tr.pos) - 1)
@@ -897,7 +942,8 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
             out.append((int(i), None, why))
             continue
         boxes = {iid: b[s:] for iid, b in o.boxes.items()}
-        tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c)
+        tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
+                         claw_lock=int(getattr(lp, "claw_lock", -99)) - s)
         kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
         out.append((int(i), None if kc is None else int(kc), ""))
     return out
@@ -960,7 +1006,8 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
         plan, why = reanchor_outcome(o, 0, lat, lp.lat_a)
         if plan is None:
             return False, why, info
-        tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c)
+        tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
+                         claw_lock=int(getattr(lp, "claw_lock", -99)))
         n_sim += 1
         kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
         if kk < r0:
@@ -981,6 +1028,72 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
         po[:kk + 1] = tr.pos[:kk + 1]
         pos_over[i] = po
     info.update(alive=alive, pos_over=pos_over, dev=round(dev_max, 3), n_sim=n_sim,
+                ms=round((time.perf_counter() - t0) * 1e3, 2))
+    return True, "ok", info
+
+
+def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, tol: float,
+               pos_ref: dict | None = None) -> tuple:
+    """M4 S1 (LiveCfg.late_check): the plan in control after a skipped tick slipped one of its keys (the oracle held
+    the previous ACTION for that frame) - re-simulated from her ANCHOR state (the snapshot's) with the keys actually
+    applied for frames t_a + 1 .. f + 1 (keys: a skipped frame's held keys) and the plan's own commands from f + 2,
+    through the snapshot's hold filter state, in every outcome idx still possible; a down slash press the keys latch up
+    to 2 frames late is moved there (simulate then credits it only where it lands: press.ON), a Clawline that no longer
+    latches at its P with her facing toward the target, or a press the plan does not have, fails it. Each must touch
+    none of its danger from the anchor to its committed end and stay within tol of its planned path from now (fo; the
+    path re-simulated at its commit / last re-anchoring: pos_ref). (ok, why, info) as commit_check's."""
+    t0 = time.perf_counter()
+    s = int(fo - lp.t_a)
+    r0 = int(f + 2 - lp.t_a)
+    info = {"s": s, "late": True}
+    S_a = lp.S_a
+    face0 = int(S_a[km.FACE]) if S_a[km.FACE] != 0 else 1
+    alpha_c = int(round(float(S_a[km.ALPHA]) * 6.0)) % 6
+    keys = np.asarray(keys, np.int64)
+    pos_over, dev_max, n_sim = {}, 0.0, 0
+    for i in idx:
+        o = lp.outs[i]
+        cmds = np.concatenate([keys, o.cmds[r0:o.end + 1]])
+        lat = hold_filter1(cmds, lp.hold_a)
+        planned = {k for (k, _) in o.presses}
+        claws = {int(k0) + len(m): c for (k0, m, _, c) in o.segs if c is not None}
+        fac = sk.facing_track(face0, lat) if claws else None
+        pm = int(lp.lat_a)
+        for q in range(min(len(lat), o.kc)):
+            m = int(lat[q])
+            k = 1 + q
+            if _rising(m, pm, km.B_ATTACK) and not any(0 <= k - kp <= 2 for kp in planned):
+                return False, "unplanned slash", info
+            if _rising(m, pm, M_CLAW) and k not in claws:
+                return False, "unplanned Clawline", info
+            if k in claws and not (_rising(m, pm, M_CLAW) and int(fac[q + 1]) == (1 if claws[k][0] > 0 else -1)):
+                return False, "claw latch", info
+            pm = m
+        plan, why = reanchor_outcome(o, 0, lat, lp.lat_a, move=2)
+        if plan is None:
+            return False, why, info
+        tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
+                         claw_lock=int(getattr(lp, "claw_lock", -99)))
+        n_sim += 1
+        kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
+        if kk < r0:
+            return False, "short", info
+        kc_ = _first_collision_out(o, tr, 0, o.kc)
+        if kc_ is not None:
+            info.update(col=int(kc_), out=i)
+            return False, "danger", info
+        ref = (pos_ref or {}).get(i, o.pos)
+        kk = min(kk, len(ref) - 1)
+        dev = np.abs(tr.pos[s:kk + 1] - ref[s:kk + 1]).max(axis=1)
+        dmax = float(dev.max()) if len(dev) else 0.0
+        dev_max = max(dev_max, dmax)
+        if dmax > tol:
+            info.update(dev=round(dmax, 3), dev_k=int(np.argmax(dev)) + s, out=i)
+            return False, "path", info
+        po = np.array(ref, copy=True)
+        po[:kk + 1] = tr.pos[:kk + 1]
+        pos_over[i] = po
+    info.update(alive=list(idx), pos_over=pos_over, dev=round(dev_max, 3), n_sim=n_sim,
                 ms=round((time.perf_counter() - t0) * 1e3, 2))
     return True, "ok", info
 
@@ -1101,6 +1214,8 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
         return {**base, "status": "busy:" + why}
     sit = ms.Situation(np.asarray(snap["S"], float), list(snap["obs"]), dict(snap["mems"]), list(snap["hazards"]),
                        name=f"f{snap['fo']}")
+    if snap.get("claw_ctl") is not None:
+        sit.meta["claw_ctrl"] = int(snap["claw_ctl"]) - int(snap["fo"])     # M4 S1: a Clawline's lock (control + 13)
     ctrl = snap.get("ctrl")
     prev = None
     carried = False
@@ -1242,7 +1357,9 @@ def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, 
                     cmds_pre=np.asarray(snap["cmds"], np.int64)[:n_pre].copy(), final=bool(final),
                     S_a=np.asarray(snap["S"], float).reshape(km.K, -1)[:, 0].copy(), hold_a=snap["hold"],
                     lat_a=int(snap.get("lat_s") or 0),
-                    rev=bool(snap.get("rev")), alt=False, n_sent=0)
+                    rev=bool(snap.get("rev")), alt=False, n_sent=0,
+                    claw_lock=-99 if snap.get("claw_ctl") is None else
+                    int(snap["claw_ctl"]) - int(snap["fo"]) + press.CLAW_LOCK_F)
 
 
 WARM_SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")   # the acceptance set (M3): the warm-up's situations
@@ -1294,6 +1411,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     tick cost the bot's thread its pickling under the GIL); a message with 'note' set only updates the plan registry
     and the abort rule (a hit, another plan in control, a new episode)."""
     cfg = LiveCfg(**cfg_d)
+    set_switches(cfg)
     boost = boost_self(cfg.prio, cfg.cpus)
     try:
         import numba
@@ -1418,9 +1536,23 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             state["abort"] = False
             plans = dict(state["plans"])
         done = snap["seq"]
+
+        def _dump(m):
+            # M4 S1 (plan_dump): every plan sent, pickled for the press scan (ssbot.tools.press_scan)
+            if not cfg.plan_dump:
+                return
+            try:
+                import pickle
+                Path(cfg.plan_dump).mkdir(parents=True, exist_ok=True)
+                with open(Path(cfg.plan_dump) / f"plans_i{inst}_p{part}.pkl", "ab") as fh:
+                    pickle.dump(m, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception:  # noqa: BLE001
+                pass
+
         def _send(m):
             if isinstance(m, LivePlan):
                 state["carry"] = {"plan": m.plan, "t_a": m.t_a, "ep": m.ep}
+                _dump(m)
             try:
                 out_q.put(m)
             except Exception:  # noqa: BLE001
@@ -1430,6 +1562,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
                               dropped=state["dropped"])
             if isinstance(msg, LivePlan):
                 state["carry"] = {"plan": msg.plan, "t_a": msg.t_a, "ep": msg.ep}
+                _dump(msg)
         except Exception as e:  # noqa: BLE001 - one bad snapshot must not end the worker
             import traceback
             msg = {"kind": "error", "part": part, "seq": snap["seq"], "ep": snap["ep"], "error": repr(e)[:300],
@@ -1461,6 +1594,7 @@ class Map2Controller:
 
     def __init__(self, instance: int = 0, log_dir=None, cfg: LiveCfg | None = None):
         self.cfg = cfg or LiveCfg.from_env()
+        set_switches(self.cfg)
         self.instance = instance
         self.K = cm.Know.load()
         self.W = ms.World(self.K)
@@ -1624,6 +1758,11 @@ class Map2Controller:
         self._run = None                    # the control run's commit data (audit_runs)
         self.hit_k: dict = {}               # iid -> the frame its HP last fell (replay_push)
         self._short_next = False            # the next snapshot with the short bridge (unsafe_short)
+        # M4 S1
+        self._claw_P = None                 # her last Clawline's press (a rising Clawline latched) ...
+        self._claw_ctl = None               # ... and its control (her input back from P + 3): the lock to control + 13
+        self._lat_prev = 0
+        self._f_prev = None                 # the previous tick's frame (the late check: frames whose tick was skipped)
 
     def _inc(self, key: str, n: int = 1) -> None:
         self.st[key] += n
@@ -1657,7 +1796,17 @@ class Map2Controller:
             dt = 1.0 / 60.0 if dt_ is None else float(dt_)
             self.g = 0.0 if self.g is None else self.g + min(max(dt, 0.0), 0.05) * 60.0
             self.trk.feed(raw, int(round(self.g)))
-            self.lat_hist.append((int(f), int((raw.get("act") or {}).get("mask") or 0)))
+            lm = int((raw.get("act") or {}).get("mask") or 0)
+            self.lat_hist.append((int(f), lm))
+            # M4 S1: her Clawline's press and control (the next one's lock: control + 13) for the snapshot
+            if (lm & M_CLAW) and not (self._lat_prev & M_CLAW):
+                self._claw_P, self._claw_ctl = int(f), None
+            elif self._claw_P is not None and self._claw_ctl is None and int(f) >= self._claw_P + 3:
+                h = raw.get("hero") or {}
+                clip = str(((h.get("anim") or {}).get("clip")) or "")
+                if bool(h.get("hero_accepting_input", True)) and not clip.startswith("Harpoon"):
+                    self._claw_ctl = int(f)
+            self._lat_prev = lm
             if not (self.cfg.dt_lo <= dt * 60.0 <= self.cfg.dt_hi):
                 self.last_freeze = int(f)
             for ev in raw.get("ev") or ():
@@ -2025,6 +2174,12 @@ class Map2Controller:
                     # M4d2: the plans of this decision and older ones are done with
                     self.pending = [x for x in self.pending if getattr(x, "seq", -1) > getattr(lp, "seq", -1)]
                     break
+        # M4 S1 (late_check): frames since the previous tick whose tick was skipped kept that tick's ACTION; a key of the
+        # plan in control slipped there -> the plan re-checked from the keys actually sent before it goes on
+        f_prev, self._f_prev = self._f_prev, int(f)
+        if self.cfg.late_check and why is None and self.ctrl is not None and f_prev is not None and \
+                int(f) > int(f_prev) + 1 and not self.took:
+            why = self._late(f_prev, f, fo, row)
         # M4d: the newer search's verdict on the plan still in control: its noop (the bridge, then stop) was safe -
         # the plan is cut after that bridge
         if self._verdict is not None and self.ctrl is not None and self._verdict[0] == self.ctrl.pid and                 self._verdict[1] is not None:
@@ -2077,6 +2232,47 @@ class Map2Controller:
         row["why"] = why
         self._tm("pre", (time.perf_counter() - t0) * 1e3)
         return mask
+
+    def _late(self, f_prev: int, f: int, fo: int, row: dict) -> str | None:
+        """M4 S1 (late_check): the frames f_prev + 3 .. f + 1 got no ACTION (their ticks were skipped: the oracle held
+        f_prev + 2's keys). When the plan in control wanted another key at one of them (in no outcome still possible
+        it is the held one), it is re-checked (late_check) from the keys actually sent; failed: dropped ('late').
+        Returns the drop's why or None."""
+        lp = self.ctrl
+        idx = self._exe[2] if (self._exe is not None and self._exe[0] == lp.pid) else list(self.ctrl_idx)
+        if not idx:
+            return None
+        k_lo = max(int(f_prev) + 3, int(self.ctrl_since or 0) + 2)
+        slip = []
+        for k in range(k_lo, int(f) + 2):
+            if k in self.sent_hist:
+                continue
+            held = self._sent_at(k)
+            r = k - int(lp.t_a)
+            want = {int(lp.outs[i].cmds[r]) for i in idx if 0 <= r < len(lp.outs[i].cmds)}
+            if held is not None and want and int(held) not in want:
+                slip.append(int(k))
+        if not slip:
+            return None
+        self._inc("late_slip")
+        tc = time.perf_counter()
+        keys = np.array([self._sent_at(k) or 0 for k in range(int(lp.t_a) + 1, int(f) + 2)], np.int64)
+        try:
+            ok, why_l, info = late_check(self.W, lp, fo, f, keys, idx, self.cfg.tol_late, pos_ref=self.ctrl_pos)
+        except Exception as e:  # noqa: BLE001
+            ok, why_l, info = False, "error", {"error": repr(e)[:200]}
+        msc = (time.perf_counter() - tc) * 1e3
+        self._tm("check", msc)
+        row.setdefault("chk", []).append([lp.pid, bool(ok), "late:" + why_l, round(msc, 2), info.get("s"), slip,
+                                          info.get("dev"), info.get("col")])
+        self._inc("late_" + ("ok" if ok else why_l.replace(" ", "_")))
+        if ok:
+            self.ctrl_idx = [i for i in self.ctrl_idx if i in info["alive"]] or list(info["alive"])
+            self.ctrl_pos.update(info["pos_over"])
+            return None
+        row["late"] = slip
+        self._drop("late")
+        return "late"
 
     def _ready(self, x: LivePlan, f: int) -> bool:
         """M4d2 (wait_parts): a received plan is checked for its commit once every part of its decision has answered
@@ -2382,7 +2578,10 @@ class Map2Controller:
                     "trig": sorted(set(self.trig)), "busy": busy, "own": own,
                     # M4d2: the wall time (the worker's deadline), the plan in control's frames left (alt), the cut
                     "t_wall": time.time(), "left": None if self.ctrl is None else int(self._left(fo)),
-                    "rev": bool(rev)}
+                    "rev": bool(rev),
+                    # M4 S1: her last Clawline's control while its lock lasts (control + 13)
+                    "claw_ctl": self._claw_ctl if (self.cfg.press_check and self._claw_ctl is not None and
+                                                   self._claw_ctl + press.CLAW_LOCK_F > int(fo)) else None}
             if rev:
                 snap["cut"] = self.seq - 1      # every search from an older snapshot is cut (the reader's rule)
                 self.rev_log.append([int(self.rev_new[0]), *self.rev_new[1], self.seq, int(f)])

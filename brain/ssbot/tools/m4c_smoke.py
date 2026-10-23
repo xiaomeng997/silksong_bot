@@ -78,6 +78,10 @@ def cmd_run(a) -> int:
                 env.update({"NUMBA_NUM_THREADS": "4", "PYTHONIOENCODING": "utf-8"})
                 if a.set and arm == "map2":
                     env["SSBOT_FORUM_MAP2_SET"] = a.set
+                if a.dump and arm == "map2":
+                    # M4 S1: every plan the workers send pickled per replay (the press scan)
+                    env["SSBOT_FORUM_MAP2_SET"] = ",".join(filter(None, [env.get("SSBOT_FORUM_MAP2_SET", ""),
+                                                                         f"plan_dump={out / ('plans_' + t)}"]))
                 for kv in filter(None, (x.strip() for x in (a.env or "").split(","))):
                     k_, _, v_ = kv.partition("=")
                     env[k_.strip()] = v_.strip()             # M4d2: extra environment (e.g. a script switched off)
@@ -274,6 +278,8 @@ def main(argv=None) -> int:
     r.add_argument("--co", default="")
     r.add_argument("--only", default="")
     r.add_argument("--env", default="", help="extra environment K=V,... for every arm (M4d2)")
+    r.add_argument("--dump", action="store_true", help="every plan the workers send pickled to <out>/plans_<arm>_<tag> "
+                                                       "(M4 S1: the press scan)")
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
     a = ap.parse_args(argv)
