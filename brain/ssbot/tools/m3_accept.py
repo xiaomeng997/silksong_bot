@@ -514,13 +514,53 @@ def cmd_run(a) -> int:
     jobs = [(i, s, a.lib, a.cap, a.depth) for i, s in enumerate(sits)]
     t0 = time.time()
     res = []
+    # every result as a line as it comes (M4a: a run whose pool lost its workers hung with 231 / 236 results in
+    # memory): --resume takes the finished ones from it and runs the rest
+    part = OUT / f"run_{a.lib}{a.tag}.partial.jsonl"
+    done = {}
+    if a.resume and part.exists():
+        for line in part.read_text("utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                done[r["i"]] = r
+        res = list(done.values())
+        jobs = [j for j in jobs if j[0] not in done]
+        print(f"resume: {len(done)} done, {len(jobs)} to run", flush=True)
+    elif part.exists():
+        part.unlink()
     if a.jobs > 1:
-        from multiprocessing import Pool
-        with Pool(a.jobs) as pool:
-            for n, r in enumerate(pool.imap_unordered(_run_one, jobs)):
-                res.append(r)
-                if n % 10 == 0:
-                    print(f"{n + 1}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
+        # concurrent.futures: a worker that dies breaks the pool (BrokenProcessPool) instead of hanging it; the jobs
+        # not finished are then re-submitted to a new pool (a job lost twice is recorded as an error)
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures.process import BrokenProcessPool
+        tries = Counter()
+        left = {j[0]: j for j in jobs}
+        n = len(res)
+        with part.open("a", encoding="utf-8") as fh:
+            while left:
+                try:
+                    with ProcessPoolExecutor(max_workers=a.jobs) as ex:
+                        futs = {ex.submit(_run_one, j): i for i, j in left.items()}
+                        for f in as_completed(futs):
+                            i = futs[f]
+                            r = f.result()
+                            res.append(r)
+                            fh.write(json.dumps(r, default=str) + "\n")
+                            fh.flush()
+                            left.pop(i, None)
+                            n += 1
+                            if n % 10 == 0:
+                                print(f"{n}/{len(sits)} {time.time() - t0:.0f}s", flush=True)
+                except BrokenProcessPool:
+                    for i in list(left):
+                        tries[i] += 1
+                        if tries[i] >= 3:
+                            r = {"i": i, "name": left[i][1].name, "error": "worker lost"}
+                            res.append(r)
+                            fh.write(json.dumps(r, default=str) + "\n")
+                            fh.flush()
+                            left.pop(i)
+                    print(f"a worker died: {len(left)} jobs re-submitted", flush=True)
     else:
         for j in jobs:
             res.append(_run_one(j))
@@ -755,6 +795,7 @@ def main(argv=None) -> int:
     p.add_argument("--only", default="")
     p.add_argument("--tag", default="")
     p.add_argument("--timeouts-of", default="", help="only the situations that timed out in this run json")
+    p.add_argument("--resume", action="store_true", help="keep the finished situations of the partial results")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")
