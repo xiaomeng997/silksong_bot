@@ -132,6 +132,8 @@ def run_one(args) -> dict:
               e.plan.origin) for e in r.tried]
     h = hashlib.md5(repr(tried).encode()).hexdigest()
     first = next((a for a in S.anytime if a[3] and a[4] != "noop"), None)
+    probe = dict(ms.PROBE_STATS)
+    ms.PROBE_STATS.update(checked=0, violations=0)
     first_any = next((a for a in S.anytime if a[3]), None)
     return {"i": i, "name": sit.name, "group": group_of(sit), "moves": sit.meta.get("moves"), "ms": round(ms_dec, 1),
             "timed_out": bool(r.timed_out), "n_cand": r.n_cand, "n_pred": r.n_pred, "n_exit": r.n_exit,
@@ -141,8 +143,9 @@ def run_one(args) -> dict:
             "p_safe": _r9(ch.p_safe) if ch is not None else None, "hits": _r9(ch.hits) if ch is not None else None,
             "origin": ch.plan.origin if ch is not None else None,
             "labels": rz.classify(ch, sit) if ch is not None else [],
-            "stats": dict(S.stats), "tried_hash": h, "n_tried": len(tried),
+            "stats": dict(S.stats), "tried_hash": h, "n_tried": len(tried), "probe": probe,
             "anytime": [(round(a[0], 4), round(a[1], 1), round(a[2], 4), a[3], a[4], a[5]) for a in S.anytime],
+            "marks": [m for m in S.marks if m[0] < 1500][:60],
             "first_safe_ms": None if first is None else first[1], "first_any_ms": None if first_any is None else
             first_any[1], "log": ms.plan_log(ch) if ch is not None else None}
 

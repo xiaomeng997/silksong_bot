@@ -1300,6 +1300,34 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
     return x, cu
 
 
+@njit(cache=True, error_model="numpy")
+def probe_exit(S0, cu0, masks, udt, P, TT, boxes, box_off, eps):
+    """M4b's exit probes: the key sequences masks [n, H] (constant masks within the pass's event limit: going on,
+    left / right, one jump press) rolled by the reference model from S0 and checked against the danger boxes in her
+    centre's space (frame t's rows box_off[t] .. box_off[t + 1] - 1, frame 0 = the start; each box grown by eps,
+    closed) at frames 0 .. H. A probe that touches no box is a concrete exit: the envelope contains it (M1 / M4a: 0
+    escapes) and the cuts keep it, so the pass would keep a cluster. Returns the first such probe or -1."""
+    n = masks.shape[0]
+    H = masks.shape[1]
+    xy = np.empty((H + 1, 2))
+    md = np.empty(H + 1, dtype=np.int64)
+    for i in range(n):
+        ref_rollout(S0, cu0, masks[i], udt, P, TT, xy, md)
+        ok = True
+        for t in range(H + 1):
+            x = xy[t, 0]
+            y = xy[t, 1]
+            for b in range(box_off[t], box_off[t + 1]):
+                if boxes[b, 0] - eps <= x <= boxes[b, 2] + eps and boxes[b, 1] - eps <= y <= boxes[b, 3] + eps:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if ok:
+            return i
+    return -1
+
+
 @njit(cache=True, parallel=True, error_model="numpy")
 def ref_many(S0s, cu0s, masks, udt, P, TT):
     n, T = masks.shape

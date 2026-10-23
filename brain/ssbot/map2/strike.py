@@ -121,16 +121,21 @@ def robust_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
         return cache[iid]
     T = br.T if T is None else T
     lo = np.full((T + 1, 4), np.nan)
-    rows = []
-    for r in br.recs.get(iid, ()):
-        k0, a, b = r[0], r[1], r[2]
-        k_lo, k_hi = max(k0 + a, 0), min(k0 + b, T)
-        if k_lo > k_hi:
-            continue
-        bx = _rec_box(r, br.K)
-        rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
+    from ssbot.map2 import brnum
+    if brnum.ON[0]:
+        A = brnum.robust_rows(br, iid, T)                 # M4b: the same rows from the record arrays
+        rows = len(A)
+    else:
+        rows = []
+        for r in br.recs.get(iid, ()):
+            k0, a, b = r[0], r[1], r[2]
+            k_lo, k_hi = max(k0 + a, 0), min(k0 + b, T)
+            if k_lo > k_hi:
+                continue
+            bx = _rec_box(r, br.K)
+            rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
+        A = np.asarray(rows, float) if rows else None
     if rows:
-        A = np.asarray(rows, float)
         n = (A[:, 1] - A[:, 0] + 1).astype(np.int64)
         idx = np.repeat(A[:, 0].astype(np.int64), n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
         B = np.repeat(A[:, 2:], n, axis=0)
@@ -151,6 +156,9 @@ def robust_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
 def state_at(br: cm.Branch, iid: int, k: int) -> tuple | None:
     """(state, frame in state, x, y, face) of the Clapper at frame k in the branch's nominal timing (the record
     whose k is k; None if none)."""
+    from ssbot.map2 import brnum
+    if brnum.ON[0]:
+        return brnum.state_at(br, iid, k)                # M4b: the first record of frame k from the arrays
     for r in br.recs.get(iid, ()):
         if r[0] == k:
             return (r[3], r[4], r[5], r[6], r[7])

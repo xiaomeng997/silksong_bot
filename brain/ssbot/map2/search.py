@@ -47,6 +47,7 @@ u world units, centre to centre.
 from __future__ import annotations
 
 import math
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -54,7 +55,9 @@ import numpy as np
 
 from ssbot.knowledge import hero2
 from ssbot.knowledge import kinematics as km
+from ssbot.map2 import brnum
 from ssbot.map2 import clapper as cm
+from ssbot.map2 import clapper_jit as cj
 from ssbot.map2 import env_jit as ej
 from ssbot.map2 import envelope as env
 from ssbot.map2 import strike as sk
@@ -85,6 +88,8 @@ class Cfg:
     exit_h_max: int = 180                  # ... stretched to a big rune's last lit frame (a jump cast's burst lights
     #                                        ~65 - 72 f after its landing: the spec's 3 s while a jump cast is on)
     exit_events: int = 1
+    exit_probe: bool = True                # M4b: concrete probe exits before the pass (the same verdict, faster)
+    jit_predict: bool = True               # M4b: the compiled predict (clapper_jit: the same branches, faster)
     t_pred: int = 72                       # the prediction horizon at least (frames; else the plan + 72)
     depth: int = 3                         # strike segments chained
     beam: int = 4                          # nodes kept per depth
@@ -116,6 +121,10 @@ class Cfg:
     split_max: int = 4                     # reactions expanded per split
     combine_top: int = 6                   # continuations per reaction whose exits are checked when recombining
     combine_splits: int = 4                # top-level splits recombined (the best by the open value; nested first)
+    # M4b ANYTIME ORDER: > 0 - a node's later passes (the 2-event pass: 35 - 370 ms on the w7 recordings) are run only
+    # after this many of the first pass's candidates were evaluated (or its queue ran out); their candidates then join
+    # the M3 round robin for the rest of the node's queue. 0: every pass up front (M3).
+    pass2_after: int = 0
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -281,13 +290,23 @@ def _ev(n: int) -> np.ndarray:
     return np.zeros(n, np.int64)
 
 
+def _rows_sig(bx, lo: int, hi: int):
+    """What a strike reads of a box array: its length, the rows lo .. hi - 1 and its last row (None: no array)."""
+    if bx is None:
+        return None
+    return (len(bx), bx[lo:hi].tobytes(), bx[-1].tobytes() if len(bx) else b"")
+
+
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
-             alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2) -> Traj:
+             alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
     frames of no keys appended after the last segment. br: the outcome's branch - after a Clawline the rest of the
-    plan follows the continuation of the reaction she has seen by control (Seg.out_alt, reaction_key)."""
+    plan follows the continuation of the reaction she has seen by control (Seg.out_alt, reaction_key).
+    rec: a list that receives every input read from the branch (M4b's trajectory memo, Evaluator.sim): ("rows", iid,
+    lo, hi, rows) the box rows lo .. hi - 1 a strike looked at (with the array's length and its last row), ("rk", P,
+    key) a reaction key - the trajectory is a function of the plan, the start and these reads only."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
@@ -306,6 +325,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         if si > 0 and segs[si - 1].claw is not None:
             if seg.out_alt and br is not None and last_P is not None:
                 rk = reaction_key(br, last_P, lag)
+                if rec is not None:
+                    rec.append(("rk", last_P, rk))
                 alt = seg.out_alt.get(rk)
                 if alt is not None:
                     segs = segs[:si] + list(alt)
@@ -330,6 +351,9 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         for (i, iid) in sorted(seg.dsl):
             t = i + 1                                     # the press frame (rollout index)
             bx = boxes_fn(iid)
+            if rec is not None:
+                lo_, hi_ = k0 + t + sk.DS_ACTIVE[0], k0 + min(t + sk.DS_ACTIVE[1], n) + 1
+                rec.append(("rows", iid, lo_, hi_, _rows_sig(bx, lo_, hi_)))
             rel = bx[k0:] if bx is not None else np.full((1, 4), np.nan)
             gnd = (r.flags[0] & km.F_GROUND) != 0
             c = sk.dslash_contact(r.pos[0], fac, gnd, t, rel)
@@ -358,6 +382,9 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         if seg.claw is not None:
             d, iid = seg.claw
             bx = boxes_fn(iid)
+            if rec is not None:
+                lo_, hi_ = k0 + sk.HOOK_HIT_F, k0 + 62
+                rec.append(("rows", iid, lo_, hi_, _rows_sig(bx, lo_, hi_)))
             bxa = bx if bx is not None else np.full((k0 + 60, 4), np.nan)
             if len(bxa) < k0 + 60:
                 bxa = np.concatenate([bxa, np.full((k0 + 60 - len(bxa), 4), np.nan)])
@@ -527,6 +554,10 @@ def move_spans(br) -> dict:
     c = getattr(br, "_spans", None)
     if c is not None:
         return c
+    if brnum.ON[0]:
+        out = brnum.move_spans(br)                       # M4b: the same from the record arrays
+        br._spans = out
+        return out
     out = {}
     for iid, rr in br.recs.items():
         starts = {}
@@ -656,6 +687,22 @@ def shapes_hit(shapes, hb) -> bool:
     return False
 
 
+PROBE_EPS = 1e-4                   # the exit probes' boxes grown by this (closed): a probe this near a box is not trusted
+PROBE_VERIFY = [os.environ.get("SSBOT_M4B_PROBE_VERIFY", "") == "1"]   # also run the pass after a probe and count
+PROBE_STATS = {"checked": 0, "violations": 0}                         # a probe exit the pass did not keep
+
+
+def _probe_masks(S: np.ndarray, H: int) -> np.ndarray:
+    """The exit probes (within one event): her held jump / dash kept (going on is free), with no direction, left,
+    right; and when jump is not held, a jump pressed and held (one event) with no direction, left, right."""
+    base = int(S[km.PREV]) & (km.B_JUMP | km.B_DASH)
+    ms_ = [base, base | km.B_LEFT, base | km.B_RIGHT]
+    if not base & km.B_JUMP:
+        j = base | km.B_JUMP
+        ms_ += [j, j | km.B_LEFT, j | km.B_RIGHT]
+    return np.repeat(np.array(ms_, np.int64)[:, None], H, axis=1)
+
+
 SLAB = 0.25                        # the slab height a polygon / circle is cut into for the envelope's danger boxes
 
 
@@ -700,7 +747,8 @@ def _poly_slabs(poly: np.ndarray, hw: float, hh: float, off: float, dy: float = 
 
 def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     """[n, 4] her box-centre configuration-space boxes of the branch's damage at frame k (a box grown by her
-    hurtbox; a polygon / circle as slabs), cached on the branch. skip: as bdamage."""
+    hurtbox; a polygon / circle as slabs), cached on the branch. skip: as bdamage. (M4b: from the branch's Geo - the
+    same boxes, the body boxes first.)"""
     c = getattr(br, "_dz", None)
     if c is None:
         c = {}
@@ -710,6 +758,28 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     if v is not None:
         return v
     hw, hh = HB[0], HB[1]
+    if brnum.ON[0]:
+        g = geo(br, margins)
+        if 0 <= k < len(g.off) - 1:
+            a, b = int(g.off[k]), int(g.off[k + 1])
+            B = g.BX[a:b]
+            if skip:
+                B = B[~np.isin(g.IIDB[a:b], skip)]
+            parts = [np.stack([B[:, 0] - hw, B[:, 1] - hh - HB_OFF, B[:, 2] + hw, B[:, 3] + hh - HB_OFF], axis=1)]
+            out = []
+            for s in g.rare_grown(br, k, margins):
+                if s.box is not None:
+                    x0, y0, x1, y1 = s.box
+                    out.append((x0 - hw, y0 - hh - HB_OFF, x1 + hw, y1 + hh - HB_OFF))
+                else:
+                    out += poly_slabs(s.polygon(16), hw, hh, HB_OFF)
+            if out:
+                parts.append(np.asarray(out, float).reshape(-1, 4))
+            v = np.concatenate(parts) if len(parts) > 1 else parts[0]
+        else:
+            v = np.zeros((0, 4))
+        c[key] = v
+        return v
     out = []
     for s in bdamage(br, k, margins, skip):
         if s.box is not None:
@@ -722,6 +792,171 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     return v
 
 
+# ---- M4b: a branch's damage per frame as arrays (Geo) ---------------------------------------------------------------
+
+def _tab_vec(tab, ks: np.ndarray) -> np.ndarray:
+    """_tab / Know.margin's lookup for an array of k: the first row whose kk >= k (the table's last past its end)."""
+    kk = np.array([float(t[0]) for t in tab])
+    mm = np.array([float(t[1]) for t in tab])
+    i = np.searchsorted(kk, ks, side="left")
+    return mm[np.minimum(i, len(mm) - 1)]
+
+
+def _kmargin_vec(K, mv: str, ks: np.ndarray) -> np.ndarray:
+    """Know.margin(mv, k) for an array of k."""
+    mt = K.d.get("margins") or {}
+    tab = mt.get("by_move", {}).get(mv)
+    if not tab:
+        return np.full(len(ks), float(mt.get("default", 0.0)))
+    return _tab_vec(tab, ks)
+
+
+def _margins_vec(br, iid: int, st, ks: np.ndarray) -> np.ndarray:
+    """margin_of for the body shapes of one Clapper in one state at the frames ks."""
+    mvn = cm.MOVE_OF.get(st, "idle")
+    T_ = inmove_table()
+    tab = (T_.get("by_state", {}).get(mvn) or {}).get(st) if st is not None else None
+    tab = tab or T_.get("by_move", {}).get(mvn)
+    base = _kmargin_vec(br.K, mvn, ks)
+    if tab:
+        for (m_, r0) in move_spans(br).get(iid, ()):
+            if m_ == mvn:
+                use = r0 <= ks
+                if use.any():
+                    base = base.copy()
+                    base[use] = _tab_vec(tab, ks[use] - max(r0, 0))
+                break
+    return base
+
+
+class Geo:
+    """One branch's damage per frame (branch_frames + bdamage as arrays): the body boxes of frame k are rows
+    off[k] .. off[k + 1] - 1 of BX (grown by their margins x MARGIN_SCALE; IIDB their Clapper); the rare shapes (the
+    hammers, the bombs, the big rune) as Shape objects per frame (rare), grown on use as bdamage grows them."""
+    __slots__ = ("off", "BX", "IIDB", "rare", "rare_k", "_grown")
+
+    def rare_grown(self, br, k: int, margins: bool) -> list:
+        g = self._grown.get(k)
+        if g is None:
+            v = self.rare.get(k, ())
+            if margins:
+                g = [grow_shape(x, MARGIN_SCALE[0] * margin_of(br, x, st, k, br.K)) for (x, st) in v]
+            else:
+                g = [x for (x, st) in v]
+            self._grown[k] = g
+        return g
+
+
+def geo(br, margins: bool) -> Geo:
+    """The branch's Geo (cached per margins and MARGIN_SCALE): branch_frames' rule (brnum.emit: a record drawn at
+    k + a .. k + b unless an earlier record with the same rounded key drew that frame; frames past T hold frame T's;
+    the hazards' circles while lit) and bdamage's margins (margin_of, vectorized per Clapper and state)."""
+    c = br.__dict__.get("_geo")
+    if c is None:
+        c = {}
+        br.__dict__["_geo"] = c
+    key = (margins, MARGIN_SCALE[0])
+    g = c.get(key)
+    if g is not None:
+        return g
+    arr, tb = brnum.barr(br)
+    F = brnum.flags(tb, br.K)
+    T = br.T
+    T_h = max([T] + [int(h[1][5]) for h in br.hazards])
+    il = list(arr.keys())
+    A = np.concatenate([arr[i] for i in il]) if il else np.zeros((0, 9))
+    IIDc = np.concatenate([np.full(len(arr[i]), i, np.int64) for i in il]) if il else np.zeros(0, np.int64)
+    EK, EI = brnum.emit(np.ascontiguousarray(A), IIDc, T)
+    if T_h > T:
+        selT = EI[EK == T]
+        EK = np.concatenate([EK, np.repeat(np.arange(T + 1, T_h + 1), len(selT))])
+        EI = np.concatenate([EI, np.tile(selT, T_h - T)])
+    o = np.argsort(EK, kind="stable")
+    EK, EI = EK[o], EI[o]
+    st = A[EI, 3].astype(np.int64) if len(EI) else np.zeros(0, np.int64)
+    sts = np.maximum(st, 0)
+    body = (st >= 0) & ~F.nobody[sts]
+    EKb, EIb, stb = EK[body], EI[body], sts[body]
+    j = A[EIb, 4].astype(np.int64)
+    JS = F.BSPAN.shape[1]
+    sp = np.where((j < JS)[:, None], F.BSPAN[stb, np.minimum(j, JS - 1)], tb.BOXL[stb])
+    x, y, face = A[EIb, 5], A[EIb, 6], A[EIb, 7]
+    xa = x + face * sp[:, 0]
+    xb = x + face * sp[:, 1]
+    BX = np.stack([np.minimum(xa, xb), y + sp[:, 2], np.maximum(xa, xb), y + sp[:, 3]], axis=1)
+    IIDB = IIDc[EIb]
+    if margins and len(EIb):
+        m = np.zeros(len(EIb))
+        combo = IIDB * 4096 + stb
+        for cv in np.unique(combo):
+            idx = np.flatnonzero(combo == cv)
+            iid = int(IIDB[idx[0]])
+            m[idx] = MARGIN_SCALE[0] * _margins_vec(br, iid, tb.names[int(stb[idx[0]])], EKb[idx].astype(float))
+        gm = np.where(m > 0, m, 0.0)
+        BX = BX + np.stack([-gm, -gm, gm, gm], axis=1)
+    off = np.zeros(T_h + 2, np.int64)
+    off[1:] = np.cumsum(np.bincount(EKb, minlength=T_h + 1)[:T_h + 1])
+    rare: dict = {}
+    hm = np.flatnonzero(body & (A[EI, 8] != 0)) if len(EI) else np.zeros(0, np.int64)
+    for q in hm:
+        kk, i = int(EK[q]), int(EI[q])
+        r = A[i]
+        iid = int(IIDc[i])
+        tup = cj._rec_tuple(r, tb.names)
+        for s in cm.rec_shapes(tup, iid, br.K)[1:]:
+            rare.setdefault(kk, []).append((s, tup[3]))
+    seen: dict = {}
+    for iid, hz in br.hazards:
+        kind, hx, hy, rad, t0, t1 = hz
+        s = cm.Shape(cm.DAMAGE, iid, kind, circle=(hx, hy, rad), mv=kind)
+        hkey = (iid, kind, round(hx, 2), round(hy, 2))
+        for kk in range(max(t0, 0), min(t1, T_h) + 1):
+            sk_ = seen.setdefault(kk, set())
+            if hkey not in sk_:
+                sk_.add(hkey)
+                rare.setdefault(kk, []).append((s, None))
+    g = Geo()
+    g.off, g.BX, g.IIDB = off, np.ascontiguousarray(BX), np.ascontiguousarray(IIDB)
+    g.rare, g.rare_k = rare, np.array(sorted(rare), np.int64)
+    g._grown = {}
+    c[key] = g
+    return g
+
+
+_HW, _HH, _HDY = cm.HURTBOX
+
+
+def first_collision(br, tr: "Traj", k0: int, k1: int, margins: bool) -> int | None:
+    """The first frame k0 .. k1 (her i-frames skipped) where her hurtbox leaves the walls or meets the branch's damage
+    (the hooked Clapper's body skipped in its window: hook_body_off) - the loops of _outcome / quick / tick_check with
+    bdamage + shapes_hit, on the Geo's arrays (brnum.first_hit) and the rare shapes."""
+    if k1 < k0:
+        return None
+    g = geo(br, margins)
+    hk = [(h.iid, h.P + sk.HOOK_BODY_OFF[0], h.ctrl + sk.HOOK_BODY_OFF[1]) for h in tr.hooks if h.ok]
+    if hk:
+        hki = np.array([h[0] for h in hk], np.int64)
+        hlo = np.array([h[1] for h in hk], np.int64)
+        hhi = np.array([h[2] for h in hk], np.int64)
+    else:
+        hki = hlo = hhi = _EMPTY_I
+    pos = tr.pos
+    kb, _ = brnum.first_hit(np.ascontiguousarray(pos[:, 0]), np.ascontiguousarray(pos[:, 1]), tr.ifr, k0, k1, g.off,
+                            g.BX, g.IIDB, hki, hlo, hhi, _HW, _HH, _HDY, WALL_L, WALL_R)
+    top = kb - 1 if kb >= 0 else k1
+    if len(g.rare_k):
+        for k in g.rare_k[(g.rare_k >= k0) & (g.rare_k <= top)]:
+            k = int(k)
+            if tr.ifr[k]:
+                continue
+            if shapes_hit(g.rare_grown(br, k, margins), cm.hurtbox(*pos[k])):
+                return k
+    return kb if kb >= 0 else None
+
+
+_EMPTY_I = np.zeros(0, np.int64)
+
+
 def timing_views(br) -> list:
     """The branch's TIMING VARIANTS as separate outcomes: every record drawn at its earliest (k + a) / latest (k + b)
     offset - two exact timelines instead of their union (M2 draws the union). Each view carries t_reveal, the first
@@ -731,6 +966,15 @@ def timing_views(br) -> list:
     c = getattr(br, "_views", None)
     if c is not None:
         return c
+    if brnum.ON[0]:
+        vs = brnum.views(br, cj.JBranch)                 # M4b: the same views from the record arrays
+        if vs is None:
+            br.t_reveal = None
+            br.tview = ""
+            br._views = [br]
+        else:
+            br._views = vs
+        return br._views
     spread = any(r[1] != r[2] for rr in br.recs.values() for r in rr)
     if not spread:
         br.t_reveal = None
@@ -775,16 +1019,85 @@ class Evaluator:
         self.ms_pred = 0.0
         self.ms_exit = 0.0
         self.units = 0                 # work units (closed-loop evaluations + exit checks): the virtual clock's ticks
+        self._simm: dict = {}          # the trajectory memo (sim)
+        self.n_sim = 0
+        self.n_sim_hit = 0
+        self.n_probe = 0               # exit checks settled by a probe (exit_ok)
+
+    def reset(self) -> None:
+        """Drop the per-decision memos (a new situation)."""
+        self._simm = {}
+
+    def sim(self, sit: Situation, plan: Plan, var: sk.HookVariant, face0: int, b=None, T: int | None = None,
+            lag: int = 2) -> Traj:
+        """simulate() of the plan from the situation's state in one outcome (b: its branch, T: its prediction's
+        horizon; None: no Clapper - the do-nothing path's trajectory), MEMOIZED EXACTLY (M4b): a trajectory is a
+        function of the plan, the start and the branch inputs it read (simulate's rec: the box rows its strikes
+        looked at, the reaction keys); a branch whose reads are equal gets the same trajectory. A plan without a
+        strike reads nothing: one trajectory for every outcome."""
+        self.n_sim += 1
+        key = (id(plan), var.name, lag, face0, id(sit.S), sit.alpha_c, b is None)
+        ent = self._simm.get(key)
+        if ent is None:
+            ent = self._simm[key] = (plan, sit.S, [])
+        for reads, tr in ent[2]:
+            if b is None or self._reads_ok(reads, b, T, lag):
+                self.n_sim_hit += 1
+                return tr
+        if b is None:
+            tr = simulate(self.W, plan, lambda iid: None, face0, sit.S, var, sit.alpha_c)
+            ent[2].append(((), tr))
+            return tr
+        rec: list = []
+        tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
+                      lag=lag, rec=rec)
+        ent[2].append((tuple(rec), tr))
+        if len(ent[2]) > 24:
+            ent[2].pop(0)
+        return tr
+
+    @staticmethod
+    def _reads_ok(reads: tuple, b, T, lag: int) -> bool:
+        for r in reads:
+            if r[0] == "rows":
+                if _rows_sig(sk.robust_boxes(b, r[1], T), r[2], r[3]) != r[4]:
+                    return False
+            elif reaction_key(b, r[1], lag) != r[2]:
+                return False
+        return True
+
+    def _predict_fn(self):
+        """clapper.predict, or its compiled port (Cfg.jit_predict; the same Prediction: clapper_jit)."""
+        return cj.predict if self.cfg.jit_predict else cm.predict
 
     def predict(self, sit: Situation, path: cm.HeroPath, T: int):
         t0 = time.perf_counter()
-        P = cm.predict(sit.obs, sit.mems, path, self.W.K, T=T, hazards=sit.hazards)
+        P = self._predict_fn()(sit.obs, sit.mems, path, self.W.K, T=T, hazards=sit.hazards)
         self.n_pred += 1
         self.ms_pred += (time.perf_counter() - t0) * 1e3
         return P
 
     def tick_check(self, sit: Situation, plan: Plan) -> tuple:
-        """THE PER-TICK CHECK of a committed plan (what runs every frame between the background searches): one
+        """THE FULL CHECK of a committed plan from a new observation (M4b): the closed-loop evaluation without its
+        exit checks - the prediction over the evaluation's horizon, re-predicted at the plan's own hits that change a
+        Clapper (a hook's reaction: the contingent plan's continuation), every timing view and hook variant - and the
+        commit rule (a collision before the branch's reveal + lag, a Clawline block moving it to control) -> (ok, the
+        first failing frame or None, ms). M3's version (tick_check_m3) predicted with none of her hits over the plan's
+        length only: the hooked Clapper never reacted (its Idle future instead) and the timing groups were not the
+        evaluation's, so plans the evaluation called safe failed it (M3 open item 8: 4 of v4's chosen plans - the far
+        hooks' contingent plans 8 / 14, the locked hook 185; and situation 97, an unsafe fallback). The per-frame
+        check on the bot's thread is TickCheck (the committed evaluation's outcomes against the observations)."""
+        t0 = time.perf_counter()
+        e = self.evaluate(sit, plan, exits=False)
+        bad = None
+        for o in e.outcomes:
+            if o.why.startswith("hit@"):
+                k = int(o.why[4:])
+                bad = k if bad is None else min(bad, k)
+        return bad is None, bad, (time.perf_counter() - t0) * 1e3
+
+    def tick_check_m3(self, sit: Situation, plan: Plan) -> tuple:
+        """M3's PER-TICK CHECK of a committed plan (what runs every frame between the background searches): one
         prediction under the plan's path, the plan simulated in every branch (both timing views, the first hook
         variant, its reaction's continuation) and her hurtbox checked against the branch's damage (margins) up to
         the branch's reveal + lag (the committed part; after it she re-plans) - (ok, the first failing frame or None,
@@ -792,18 +1105,22 @@ class Evaluator:
         t0 = time.perf_counter()
         W, cfg = self.W, self.cfg
         face0 = int(sit.S[km.FACE]) if sit.S[km.FACE] != 0 else 1
-        tr0 = simulate(W, plan, lambda iid: None, face0, sit.S, sk.HOOK_VARIANTS[0], sit.alpha_c)
+        tr0 = self.sim(sit, plan, sk.HOOK_VARIANTS[0], face0)
         T = tr0.end + 2
-        P = cm.predict(sit.obs, sit.mems, hero_path(tr0, T, {}), W.K, T=T, hazards=sit.hazards)
+        P = self._predict_fn()(sit.obs, sit.mems, hero_path(tr0, T, {}), W.K, T=T, hazards=sit.hazards)
         bad = None
         for b0 in P.branches:
             for b in timing_views(b0):
-                tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S,
-                              sk.HOOK_VARIANTS[0], sit.alpha_c, br=b, lag=cfg.lag)
+                tr = self.sim(sit, plan, sk.HOOK_VARIANTS[0], face0, b, P.T, cfg.lag)
                 rv = _reveal(b, 1)
                 tv = getattr(b, "t_reveal", None)
                 rv = tv if rv is None else (rv if tv is None else min(rv, tv))
                 kmax = min(tr.end, P.T, (rv + cfg.lag) if rv is not None else tr.end)
+                if brnum.ON[0]:
+                    k = first_collision(b, tr, 1, kmax, cfg.margins)
+                    if k is not None:
+                        bad = k if bad is None else min(bad, k)
+                    continue
                 for k in range(1, kmax + 1):
                     if tr.ifr[k]:
                         continue
@@ -823,23 +1140,29 @@ class Evaluator:
         brs = sorted(pred.branches, key=lambda b: -b.p)[:n_branch]
         for b0 in brs:
             for b in timing_views(b0):
-                tr = simulate(self.W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, pred.T), face0, sit.S,
-                              sk.HOOK_VARIANTS[0], sit.alpha_c, br=b, lag=cfg.lag)
+                tr = self.sim(sit, plan, sk.HOOK_VARIANTS[0], face0, b, pred.T, cfg.lag)
                 if not any(kc > k_from for (kc, _, _) in tr.contacts):
                     return "miss"
                 kmax = min(tr.end, pred.T)
-                for k in range(k_from + 1, kmax + 1):
-                    if tr.ifr[k]:
-                        continue
-                    hb = cm.hurtbox(*tr.pos[k])
-                    if hb[0] < WALL_L or hb[2] > WALL_R or \
-                            shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
-                        rv = _reveal(b, 1)
-                        tv = getattr(b, "t_reveal", None)
-                        rv = tv if rv is None else (rv if tv is None else min(rv, tv))
-                        if rv is None or k < rv + cfg.lag:
-                            return f"hit@{k}"
-                        break
+                if brnum.ON[0]:
+                    ks_ = [first_collision(b, tr, k_from + 1, kmax, cfg.margins)]
+                    ks_ = [k for k in ks_ if k is not None]
+                else:
+                    ks_ = []
+                    for k in range(k_from + 1, kmax + 1):
+                        if tr.ifr[k]:
+                            continue
+                        hb = cm.hurtbox(*tr.pos[k])
+                        if hb[0] < WALL_L or hb[2] > WALL_R or \
+                                shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
+                            ks_.append(k)
+                            break
+                for k in ks_:
+                    rv = _reveal(b, 1)
+                    tv = getattr(b, "t_reveal", None)
+                    rv = tv if rv is None else (rv if tv is None else min(rv, tv))
+                    if rv is None or k < rv + cfg.lag:
+                        return f"hit@{k}"
         return ""
 
     def _hit_matters(self, sit: Situation, b, fixed: dict, pre: list, k: int, iid: int, h) -> bool:
@@ -868,9 +1191,31 @@ class Evaluator:
             b = branch_danger(br, k, self.cfg.margins) if (br is not None and k > ifr_until) else np.zeros((0, 4))
             dz.append(np.concatenate([b, WALL_BOXES]))
         t0 = time.perf_counter()
+        self.n_exit += 1
+        if self.cfg.exit_probe:
+            # M4b: a few concrete key sequences first - one that touches no danger box is an exit (the pass, which
+            # contains it, would keep a cluster: the same verdict for a fraction of the cost)
+            off = np.zeros(H + 2, np.int64)
+            off[1:] = np.cumsum([len(d) for d in dz])
+            boxes = np.concatenate(dz)
+            cu_ = np.array([-1.0, 0, 0, 0, 0, 0, 0]) if cu is None else np.asarray(cu, np.float64)
+            i = ej.probe_exit(np.asarray(S, np.float64), cu_, _probe_masks(S, H), self.W.E.udt, self.W.E.P,
+                              self.W.TT, boxes, off, PROBE_EPS)
+            if i >= 0:
+                self.n_probe += 1
+                if not PROBE_VERIFY[0]:
+                    self.ms_exit += (time.perf_counter() - t0) * 1e3
+                    return 1
+                st = self.W.E.start_state(S, cu=cu)
+                fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=self.cfg.exit_events,
+                                      claw=False)
+                PROBE_STATS["checked"] += 1
+                if fw.count(H) <= 0:
+                    PROBE_STATS["violations"] += 1
+                self.ms_exit += (time.perf_counter() - t0) * 1e3
+                return fw.count(H)
         st = self.W.E.start_state(S, cu=cu)
         fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=self.cfg.exit_events, claw=False)
-        self.n_exit += 1
         self.ms_exit += (time.perf_counter() - t0) * 1e3
         return fw.count(H)
 
@@ -897,15 +1242,13 @@ class Evaluator:
         T = cfg.t_pred
         variants = sk.HOOK_VARIANTS if any(s.claw is not None for s in plan.segs) else sk.HOOK_VARIANTS[:1]
         if start is None:
-            nomb = lambda iid: None  # noqa: E731
-            tr0 = simulate(W, plan, nomb, face0, sit.S, variants[0], sit.alpha_c)
+            tr0 = self.sim(sit, plan, variants[0], face0)
             T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
             P0 = self.predict(sit, hero_path(tr0, T, {}), T)
             groups = [(P0, 1.0, None, {}, -1)]
         else:
             fixed0, cons0, lh0, rb = start
-            tr0 = simulate(W, plan, lambda iid: sk.robust_boxes(rb, iid, rb.T), face0, sit.S, variants[0],
-                           sit.alpha_c, br=rb, lag=cfg.lag)
+            tr0 = self.sim(sit, plan, variants[0], face0, rb, rb.T, cfg.lag)
             T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
             hits0: dict = {}
             for (ii, kk), v in fixed0.items():
@@ -938,8 +1281,7 @@ class Evaluator:
                 for b0 in brs:
                     vws = timing_views(b0)
                     for b, var in [(b_, v_) for b_ in vws for v_ in variants]:
-                        tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S, var,
-                                      sit.alpha_c, br=b, lag=cfg.lag)
+                        tr = self.sim(sit, plan, var, face0, b, P.T, cfg.lag)
                         wb = w * b0.p / ptot / len(variants) / len(vws)
                         akey = tuple(rk for (_, _, rk) in tr.alts)
                         if redo_ok and p_akey is not None and akey != p_akey:
@@ -1000,8 +1342,7 @@ class Evaluator:
                 if (cons is None or _choice_set(b0, last_hit) in cons) and (not tag or self._tag_ok(b0, tag, fixed)):
                     vws = timing_views(b0)
                     for b in vws:
-                        tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S,
-                                      variants[0], sit.alpha_c, br=b, lag=cfg.lag)
+                        tr = self.sim(sit, plan, variants[0], face0, b, P.T, cfg.lag)
                         results.append((w * b0.p / len(vws), b, tr, P, cons, last_hit, fixed))
         outs = []
         ptot = sum(x[0] for x in results) or 1.0
@@ -1025,17 +1366,20 @@ class Evaluator:
     def _outcome(self, sit: Situation, p: float, br, tr: Traj, exits: bool) -> Outcome:
         cfg = self.cfg
         k_col = None
-        for k in range(1, tr.end + 1):
-            if tr.ifr[k]:
-                continue
-            x, y = tr.pos[k]
-            hb = cm.hurtbox(x, y)
-            if hb[0] < WALL_L or hb[2] > WALL_R:
-                k_col = k
-                break
-            if shapes_hit(bdamage(br, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
-                k_col = k
-                break
+        if brnum.ON[0]:
+            k_col = first_collision(br, tr, 1, tr.end, cfg.margins)
+        else:
+            for k in range(1, tr.end + 1):
+                if tr.ifr[k]:
+                    continue
+                x, y = tr.pos[k]
+                hb = cm.hurtbox(x, y)
+                if hb[0] < WALL_L or hb[2] > WALL_R:
+                    k_col = k
+                    break
+                if shapes_hit(bdamage(br, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
+                    k_col = k
+                    break
         rv = _reveal(br, 1)
         tv = getattr(br, "t_reveal", None)
         if tv is not None and tv >= 1:
@@ -1120,10 +1464,13 @@ class Evaluator:
                 continue
             to_wall = 1 if wall > x0 else -1
             nxt = None
-            for r in br.recs.get(iid, ()):
-                if 1 <= r[0] <= k + 40 and r[3] in MOVE_STARTS and r[4] <= 1:
-                    if nxt is None or r[0] < nxt[0]:
-                        nxt = (r[0], r[7])
+            if brnum.ON[0]:
+                nxt = brnum.next_move(br, iid, k + 40)        # M4b: the same from the record arrays
+            else:
+                for r in br.recs.get(iid, ()):
+                    if 1 <= r[0] <= k + 40 and r[3] in MOVE_STARTS and r[4] <= 1:
+                        if nxt is None or r[0] < nxt[0]:
+                            nxt = (r[0], r[7])
             if nxt is not None:
                 v += cfg.w_face * (1.0 if nxt[1] == to_wall else -1.0)
             elif s_ in ("Idle", "Walk"):
@@ -1170,7 +1517,7 @@ def _union_danger(pred, k0: int, H: int, margins: bool, body_off: tuple | None =
 def _alive(pred) -> list:
     iids = set()
     for b in pred.branches:
-        iids |= set(b.recs.keys())
+        iids |= set(brnum.iids(b))
     return sorted(iids)
 
 
@@ -1195,7 +1542,8 @@ class Searcher:
         return time.perf_counter() if self.vclock is None else self.ev.units * self.vclock
 
     # ---- the pass and the windows ----
-    def passes(self, node: Node) -> list:
+    def passes(self, node: Node, which=None) -> list:
+        """The approach passes from the node (cfg.passes; which: only these indices)."""
         out = []
         cu = None
         if node.claw_ctrl is not None:
@@ -1204,15 +1552,165 @@ class Searcher:
         bo = None
         if node.claw_ctrl is not None and node.hook_iid is not None:
             bo = (node.hook_iid, node.claw_ctrl + sk.HOOK_BODY_OFF[1])
-        for (ne, H) in self.cfg.passes:
+        for pi, (ne, H) in enumerate(self.cfg.passes):
+            if which is not None and pi not in which:
+                continue
             dz = _union_danger(node.pred, node.k0, H, self.cfg.margins, bo)
             st = self.W.E.start_state(node.S, cu=cu)
             fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False)
             out.append(fw)
         return out
 
+    @staticmethod
+    def _rows(fw) -> dict:
+        """Every frame's rows of the pass at once: frame, cluster, x interval, height, vy, end-condition bits."""
+        R = getattr(fw, "_rows_all", None)
+        if R is not None:
+            return R
+        ts, gs_, x0s, x1s, ys = [], [], [], [], []
+        for tp in range(1, fw.T + 1):
+            g, x0, x1, y0, y1 = fw.frame_rows(tp)
+            if len(g):
+                ts.append(np.full(len(g), tp)), gs_.append(g), x0s.append(x0), x1s.append(x1), ys.append(y1)
+        if ts:
+            R = {"t": np.concatenate(ts), "g": np.concatenate(gs_), "x0": np.concatenate(x0s),
+                 "x1": np.concatenate(x1s), "y": np.concatenate(ys)}
+            R["vy"] = fw.cl_vy[R["g"]]
+            R["cond"] = fw.cl_cond[R["g"]]
+        else:
+            R = {"t": np.zeros(0, np.int64)}
+        fw._rows_all = R
+        return R
+
     def windows(self, node: Node, fw) -> list:
-        """Candidate presses: (kind, t_rel, cluster, x, y, iid, d, c_abs) from the windows bound to the enemy."""
+        """Candidate presses: (kind, t_rel, cluster, x, y, iid, d, c_abs) from the windows bound to the enemy - the
+        same list as windows_ref (M3's loops), computed with array operations (M4b; tests/test_m4b_speed.py)."""
+        cfg = self.cfg
+        cands = []
+        brs = sorted(node.pred.branches, key=lambda b: -b.p)[:cfg.n_branch]
+        R = self._rows(fw)
+        n = len(R["t"])
+        for b in brs:
+            for iid in brnum.iids(b):
+                boxes = sk.robust_boxes(b, iid, node.pred.T)
+                nb_ = len(boxes)
+                found = {"dslash": [], "claw": []}
+                if "dslash" in cfg.prims and n:
+                    done = np.zeros(n, bool)
+                    base = (R["t"] + node.k0 >= node.next_atk) & ((R["cond"] & ej.COND_DSLASH) != 0)
+                    for dc in (4, 3, 6):                  # the contact at press + dc (the press in tp + 1)
+                        c = node.k0 + R["t"] + 1 + dc
+                        cc = np.minimum(c, nb_ - 1)
+                        bx = boxes[cc]
+                        ok = base & ~done & (c < nb_) & ~np.isnan(bx[:, 0])
+                        if not ok.any():
+                            continue
+                        rx0, rx1 = bx[:, 0] - 1.742, bx[:, 2] + 1.742
+                        ry0, ry1 = bx[:, 1] + 0.368 - sk.CTR_DY, bx[:, 3] + 2.676 - sk.CTR_DY
+                        yc = R["y"] + R["vy"] * dc / 60.0 - 0.5 * 60.0 * (dc / 60.0) ** 2
+                        sel = ok & (R["x1"] >= rx0 - 0.5) & (R["x0"] <= rx1 + 0.5) & (yc >= ry0) & (yc <= ry1)
+                        done |= sel
+                        I = np.flatnonzero(sel)
+                        if not len(I):
+                            continue
+                        a_ = np.maximum(R["x0"][I], rx0[I] - 0.5)
+                        bb_ = np.minimum(R["x1"][I], rx1[I] + 0.5)
+                        cx = 0.5 * (bx[I, 0] + bx[I, 2])
+                        mid = 0.5 * (a_ + bb_)
+                        X = np.empty((len(I), 3))
+                        V = np.zeros((len(I), 3), bool)
+                        X[:, 0], V[:, 0] = mid, True
+                        # the middle of the overlap and, when wide, both sides of its centre (the contact's side
+                        # steers its next move's facing: P3)
+                        for col, sd in ((1, -0.9), (2, 0.9)):
+                            xv = np.minimum(np.maximum(cx + sd, a_ + 0.1), bb_ - 0.1)
+                            X[:, col] = xv
+                            V[:, col] = (bb_ - a_ > 0.2) & ((xv - cx) * sd > 0.3) & (np.abs(xv - mid) > 0.3)
+                        m = V.ravel()
+                        k_ = np.repeat(I, 3)[m]
+                        xm = X.ravel()[m]
+                        found["dslash"].append((R["t"][k_], R["g"][k_], xm, R["y"][k_], np.full(len(k_), dc),
+                                                np.abs(xm - np.repeat(cx, 3)[m])))
+                if "claw" in cfg.prims and n:
+                    hit = node.k0 + R["t"] + 1 + sk.HOOK_HIT_F
+                    hh = np.minimum(hit, nb_ - 1)
+                    bx = boxes[hh]
+                    ok = ((R["cond"] & ej.COND_CLAW) != 0) & (hit < nb_) & ~np.isnan(bx[:, 0])
+                    if ok.any():
+                        bbh = R["y"] - sk.HALF_H + 0.0774 * np.clip(R["vy"], -10.0, 5.0)
+                        band = (bx[:, 1] < bbh + sk.RAY_BAND[1]) & (bx[:, 3] > bbh + sk.RAY_BAND[0])
+                        for d in (1, -1):
+                            if d > 0:
+                                rx0, rx1 = bx[:, 0] - sk.RAY_U - 1.5, bx[:, 2]
+                            else:
+                                rx0, rx1 = bx[:, 0], bx[:, 2] + sk.RAY_U + 1.5
+                            sel = ok & band & (R["x1"] >= rx0) & (R["x0"] <= rx1)
+                            I = np.flatnonzero(sel)
+                            if not len(I):
+                                continue
+                            a_ = np.maximum(R["x0"][I], rx0[I])
+                            bb_ = np.minimum(R["x1"][I], rx1[I])
+                            near = bx[I, 0] if d > 0 else bx[I, 2]
+                            # the point nearest the body (the shortest pull) but not inside it
+                            xm = (bb_ - 0.3) if d > 0 else (a_ + 0.3)
+                            xm = np.minimum(np.maximum(xm, a_), bb_)
+                            keep = (near - xm) * d >= 0.3
+                            I, xm, near = I[keep], xm[keep], near[keep]
+                            found["claw"].append((R["t"][I], R["g"][I], xm, R["y"][I], np.full(len(I), d),
+                                                  np.abs(near - xm)))
+                for kind, parts in found.items():
+                    if not parts:
+                        continue
+                    T_ = np.concatenate([q[0] for q in parts])
+                    if not len(T_):
+                        continue
+                    G_ = np.concatenate([q[1] for q in parts])
+                    X_ = np.concatenate([q[2] for q in parts])
+                    Y_ = np.concatenate([q[3] for q in parts])
+                    E_ = np.concatenate([q[4] for q in parts])
+                    D_ = np.concatenate([q[5] for q in parts])
+                    # spread over the whole horizon: per 6-frame bin the best rows (dslash: up to 3 x points of the
+                    # earliest frame in the bin; claw: the nearest), bins taken evenly up to n_win rows
+                    o = np.lexsort((D_, T_))                       # stable: ties keep the order found
+                    T_, G_, X_, Y_, E_, D_ = T_[o], G_[o], X_[o], Y_[o], E_[o], D_[o]
+
+                    def row(i):
+                        return (int(T_[i]), int(G_[i]), float(X_[i]), float(Y_[i]), int(E_[i]), float(D_[i]))
+                    keys, starts = np.unique(T_ // 6, return_index=True)
+                    ends = np.append(starts[1:], len(T_))
+                    pos = list(range(len(keys)))
+                    nb = max(1, cfg.n_win)
+                    if len(pos) > nb:
+                        pos = [pos[int(round(i))] for i in np.linspace(0, len(pos) - 1, nb)]
+                    for pi in pos:
+                        s0, s1 = int(starts[pi]), int(ends[pi])
+                        nf = s0 + int(np.searchsorted(T_[s0:s1], T_[s0], side="right"))
+                        sel_rows = [row(s0)]
+                        if kind == "claw":
+                            # the hold height matters (the bounce from control): the lowest, the highest and the
+                            # middle press heights of the bin
+                            yr = [round(float(v), 2) for v in Y_[s0:s1]]
+                            ys = sorted(set(yr))
+                            for yv in (ys[-1], ys[len(ys) // 2]):
+                                r2 = row(s0 + yr.index(yv))
+                                if r2 not in sel_rows:
+                                    sel_rows.append(r2)
+                        elif nf - s0 > 1:
+                            sel_rows += [row(i) for i in range(s0 + 1, min(nf, s0 + 3))]   # the sides of its centre
+                        for r in sel_rows:
+                            cands.append((kind, r[0], r[1], r[2], r[3], iid, r[4], b))
+        # dedupe
+        seen, out = set(), []
+        for c in cands:
+            key = (c[0], c[1], round(c[3] * 2) / 2, c[5], c[6])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+        return out
+
+    def windows_ref(self, node: Node, fw) -> list:
+        """M3's windows (the loops; the reference of the M4b version's test)."""
         cfg = self.cfg
         cands = []
         brs = sorted(node.pred.branches, key=lambda b: -b.p)[:cfg.n_branch]
@@ -1689,12 +2187,18 @@ class Searcher:
         self.ev.n_pred = self.ev.n_exit = 0
         self.ev.ms_pred = self.ev.ms_exit = 0.0
         self.ev.units = 0
+        self.ev.reset()
+        self.ev.n_sim = self.ev.n_sim_hit = self.ev.n_probe = 0
         now = self._now
         t0c = now()
         self.stats = {}
         self.splits = {}
         self.anytime = []
+        self.marks = []                # (wall ms, what): the decision's phases and candidates (the speed work)
         last_noted = [None]
+
+        def mark(what):
+            self.marks.append((round((time.perf_counter() - t0) * 1e3, 2), what))
 
         def note(e):
             if e is not None and e is not last_noted[0]:
@@ -1710,10 +2214,12 @@ class Searcher:
                 tried.append(e)
                 note(kept)
         rt = self.root(sit)
+        mark("root")
         beam = [rt]
         best = kept
         noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop"))
         tried.append(noop)
+        mark("noop")
 
         def consider(e):
             # the exit checks only for a plan that could become the best (a conditional evaluation inside a
@@ -1764,28 +2270,60 @@ class Searcher:
                     timed_out = True
                     break
                 node_end = now() + max(0.0, depth_end - now()) / (len(beam) - ni)
-                fws = self.passes(node)
-                cands = []
-                for fw in fws:
-                    ws = self.windows(node, fw)
-                    for c in ws:
-                        self.stats[f"win_{c[0]}_d{depth}"] = self.stats.get(f"win_{c[0]}_d{depth}", 0) + 1
-                    cands += [(fw, c) for c in ws]
-                # round robin over (primitive, Clapper): a time slice spent on one of them alone finds nothing else
-                groups: dict = {}
-                for fc in cands:
-                    groups.setdefault((fc[1][0], fc[1][5]), []).append(fc)
-                cands = [g[i] for i in range(max((len(g) for g in groups.values()), default=0))
-                         for g in groups.values() if i < len(g)]
+                lazy = cfg.pass2_after > 0 and len(cfg.passes) > 1
+                fws = self.passes(node, (0,) if lazy else None)
+                mark(f"passes d{depth}")
+
+                def node_cands(fws_):
+                    cs = []
+                    for fw in fws_:
+                        ws = fw.__dict__.get("_win")
+                        if ws is None:
+                            ws = self.windows(node, fw)
+                            fw.__dict__["_win"] = ws
+                            for c in ws:
+                                self.stats[f"win_{c[0]}_d{depth}"] = self.stats.get(f"win_{c[0]}_d{depth}", 0) + 1
+                        cs += [(fw, c) for c in ws]
+                    # round robin over (primitive, Clapper): a time slice spent on one of them alone finds nothing else
+                    groups: dict = {}
+                    for fc in cs:
+                        groups.setdefault((fc[1][0], fc[1][5]), []).append(fc)
+                    return [g[i] for i in range(max((len(g) for g in groups.values()), default=0))
+                            for g in groups.values() if i < len(g)]
+                cands = node_cands(fws)
+                mark(f"windows d{depth} {len(cands)}")
                 if depth == 1:
                     for fw in fws[:1]:
                         cands = [(fw, c) for c in self.safe_cands(node, fw)] + cands
                 refine = []
                 queue = list(cands)
                 qi = 0
-                while qi < len(queue):
+                n_main = len(queue)                       # the queue's candidates before the refinements
+                n_ev_node = 0
+                while qi < len(queue) or lazy:
+                    if lazy and (qi >= n_main or n_ev_node >= cfg.pass2_after):
+                        # the later passes: all passes' candidates in the M3 round robin, those not taken yet
+                        lazy = False
+                        if now() - t0c > cap:
+                            timed_out = True
+                            break
+                        if now() > node_end:
+                            self.stats[f"sliced_d{depth}"] = self.stats.get(f"sliced_d{depth}", 0) + 1
+                            break
+                        fws = fws + self.passes(node, tuple(range(1, len(cfg.passes))))
+                        mark(f"passes2 d{depth}")
+                        done_ = {id(x[1]) for x in queue[:qi]}
+                        rest = [x for x in queue[qi:n_main] if x[1][0] == "safe"]      # safe endpoints not taken
+                        rest += [x for x in node_cands(fws) if id(x[1]) not in done_]
+                        queue = queue[:qi] + rest + queue[n_main:]
+                        n_main = qi + len(rest)
+                        mark(f"windows2 d{depth} {len(rest)}")
+                        continue
+                    if qi >= len(queue):
+                        break
                     fw, c = queue[qi]
                     qi += 1
+                    n_ev_node += 1
                     if now() - t0c > cap:
                         timed_out = True
                         break
@@ -1800,6 +2338,7 @@ class Searcher:
                     e = consider(e)
                     n_cand += 1
                     tried.append(e)
+                    mark((depth, c[0], bool(e.safe), bool(e.open_ok), len(e.outcomes)))
                     if self.debug:
                         nm = e.nominal
                         self.trace.append((depth, c[0], node.k0 + c[1], round(c[3], 2), round(c[4], 2), c[5], c[6],
@@ -1855,9 +2394,78 @@ class Searcher:
             chosen = kept                                            # hysteresis
             note(kept)
         ms = (time.perf_counter() - t0) * 1e3
+        self.stats.update(n_sim=self.ev.n_sim, n_sim_hit=self.ev.n_sim_hit, n_probe=self.ev.n_probe)
         res = Result(chosen, tried, ms, timed_out, n_cand, self.ev.n_pred, self.ev.n_exit, self.ev.ms_pred,
                      self.ev.ms_exit, kept is not None and chosen is kept)
         return res
+
+
+class TickCheck:
+    """THE PER-FRAME CHECK of a committed plan on the bot's thread (M4b): the commit-time evaluation is kept - per
+    outcome (a branch's timing view x hook variant, judged safe there) its Clappers' records per frame, her planned
+    positions and the frame its committed part ends (the reveal + lag, a Clawline block moving it to control; else
+    the plan's end) - and each frame's observation is matched against it: ok while some outcome is consistent with
+    what she sees (every Clapper's state, its frame in the state within +- tol_j, its x within tol_x, its facing; her
+    position within tol_hero) with frames of its committed part left. It neither predicts nor simulates (the commit
+    already checked every outcome); an observation outside every outcome (an unpredicted move or timing, her keys
+    missed, a model error) fails it - the bot then falls back while the background search re-plans (tick_check is
+    the full check from a new observation)."""
+
+    def __init__(self, ev: Eval, tol_j: int = 1, tol_x: float = 0.35, tol_hero: float = 0.2):
+        self.tol_j, self.tol_x, self.tol_hero = tol_j, tol_x, tol_hero
+        self.out = []
+        for o in ev.outcomes:
+            if not o.safe:
+                continue
+            kc = int(getattr(o, "k_end", o.tr.end))
+            arr, tb = brnum.barr(o.branch)
+            recs = {}
+            for iid, a in arr.items():
+                a = a[(a[:, 0] >= 0) & (a[:, 0] <= kc)]
+                a = a[np.argsort(a[:, 0], kind="stable")]
+                recs[iid] = (a[:, 0].astype(np.int64), a[:, 3].astype(np.int64), a[:, 4], a[:, 5], a[:, 7])
+            self.out.append((float(o.p), kc, np.asarray(o.tr.pos[:kc + 1]), recs, tb))
+
+    def check(self, n: int, her_xy, obs: list) -> tuple:
+        """(ok, frames of the committed part left in the consistent outcomes (the most), consistent outcomes' p) at
+        frame n after the commit: her transform (x, y), the Clappers as observed (Obs: st, j, x, face)."""
+        left, pc = -1, 0.0
+        hx, hy = float(her_xy[0]), float(her_xy[1])
+        for (p, kc, pos, recs, tb) in self.out:
+            if n > kc:
+                continue
+            if abs(pos[n, 0] - hx) > self.tol_hero or abs(pos[n, 1] - hy) > self.tol_hero:
+                continue
+            ok = True
+            for o in obs:
+                r = recs.get(o.iid)
+                if r is None:
+                    continue                             # a Clapper the outcome does not hold (dead): no constraint
+                ks, st, j, x, f = r
+                a, b = np.searchsorted(ks, n), np.searchsorted(ks, n, side="right")
+                sid = tb.sid.get(o.st, -9)
+                oj = o.j if o.j is not None else int(round(o.t * 60.0))
+                if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= self.tol_j) &
+                              (np.abs(x[a:b] - o.x) <= self.tol_x) & (f[a:b] == o.face)):
+                    ok = False
+                    break
+            if ok:
+                left = max(left, kc - n)
+                pc += p
+        return left >= 0, left, pc
+
+
+def observe_branch(sit: Situation, br, n: int) -> list:
+    """The Clappers' observations at frame n of a branch (each one's record of frame n as an Obs) - what TickCheck
+    is fed along an outcome offline."""
+    out = []
+    for ob in sit.obs:
+        r = sk.state_at(br, ob.iid, n)
+        if r is None:
+            continue
+        s_, j, x, y, face = r
+        out.append(cm.Obs(ob.iid, s_, j / 60.0, x, y, 0.0, 0.0, face, ob.hp, ob.clip, None, 10 ** 6, ob.charged, j))
+    return out
 
 
 def advance(W: World, sit: Situation, ev: Eval, n: int) -> Situation:
