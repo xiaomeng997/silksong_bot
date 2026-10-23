@@ -126,6 +126,8 @@ class Cfg:
     # after this many of the first pass's candidates were evaluated (or its queue ran out); their candidates then join
     # the M3 round robin for the rest of the node's queue. 0: every pass up front (M3).
     pass2_after: int = 0
+    safe_ts: tuple = ()                    # M4b: safe endpoints also at these frames of the first pass (before its
+    #                                        end's; a short plan is ready sooner and keeps its exits more often)
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -1933,9 +1935,10 @@ class Searcher:
             out.append((kind, t2, int(gg[i]), float(x2), float(y1[i]), iid, dc, br, "ref"))
         return out
 
-    def safe_cands(self, node: Node, fw) -> list:
-        """The safe endpoints: clusters alive at the pass's end, spread in x (ground first, then the air)."""
-        T = fw.T
+    def safe_cands(self, node: Node, fw, T: int | None = None) -> list:
+        """The safe endpoints: clusters alive at the pass's end (or frame T), spread in x (ground first, then the
+        air)."""
+        T = fw.T if T is None else min(int(T), fw.T)
         g, x0, x1, y0, y1 = fw.frame_rows(T)
         if not len(g):
             return []
@@ -2360,7 +2363,8 @@ class Searcher:
                 mark(f"windows d{depth} {len(cands)}")
                 if depth == 1:
                     for fw in fws[:1]:
-                        cands = [(fw, c) for c in self.safe_cands(node, fw)] + cands
+                        early = [(fw, c) for t_ in cfg.safe_ts for c in self.safe_cands(node, fw, t_)]
+                        cands = early + [(fw, c) for c in self.safe_cands(node, fw)] + cands
                 refine = []
                 queue = list(cands) if depth > 1 else [x for x in cands if self._mine(x[1])]
                 qi = 0

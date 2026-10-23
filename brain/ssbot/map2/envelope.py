@@ -325,6 +325,9 @@ class Engine:
             cap_pc *= 2 if fl[1] else 1
             cap_iv *= 2 if fl[2] else 1
             cap_cl *= 2 if fl[3] else 1
+        # (M4b: the outputs are slices of the pass's preallocated buffers - cap_cl / cap_pc / cap_iv rows, ~0.4 GB -
+        # copied, so a kept pass holds only its rows: the search keeps tens of passes and grew to 8 - 48 GB)
+        out = tuple(a.copy() for a in out)
         return Fwd(self, st, T, TT, *out, seconds=sec)
 
     # ---- the reference rollouts ----

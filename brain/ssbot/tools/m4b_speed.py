@@ -111,6 +111,7 @@ def run_one(args) -> dict:
     part = args[5] if len(args) > 5 else None
     if prio:
         boost_self(prio)
+    _mem_guard()
     from ssbot.map2 import search as ms, recognize as rz
     W = _world()
     if vclock is not None:
@@ -121,7 +122,8 @@ def run_one(args) -> dict:
     cfg = ms.Cfg(**cfg_kw)
     S = ms.Searcher(W, cfg)
     S.vclock = vclock
-    S.part = part
+    if part is not None:
+        S.part = part
     t0 = time.perf_counter()
     try:
         r = S.decide(sit)
@@ -134,8 +136,9 @@ def run_one(args) -> dict:
               e.plan.origin) for e in r.tried]
     h = hashlib.md5(repr(tried).encode()).hexdigest()
     first = next((a for a in S.anytime if a[3] and a[4] != "noop"), None)
-    probe = dict(ms.PROBE_STATS)
-    ms.PROBE_STATS.update(checked=0, violations=0)
+    probe = dict(getattr(ms, "PROBE_STATS", {}))
+    if hasattr(ms, "PROBE_STATS"):
+        ms.PROBE_STATS.update(checked=0, violations=0)
     first_any = next((a for a in S.anytime if a[3]), None)
     return {"i": i, "part": part, "name": sit.name, "group": group_of(sit), "moves": sit.meta.get("moves"),
             "ms": round(ms_dec, 1),
@@ -148,22 +151,71 @@ def run_one(args) -> dict:
             "labels": rz.classify(ch, sit) if ch is not None else [],
             "stats": dict(S.stats), "tried_hash": h, "n_tried": len(tried), "probe": probe,
             "anytime": [(round(a[0], 4), round(a[1], 1), round(a[2], 4), a[3], a[4], a[5]) for a in S.anytime],
-            "marks": [m for m in S.marks if m[0] < 1500][:60],
+            "marks": [m for m in getattr(S, "marks", []) if m[0] < 1500][:60],
             "first_safe_ms": None if first is None else first[1], "first_any_ms": None if first_any is None else
             first_any[1], "log": ms.plan_log(ch) if ch is not None else None}
 
 
+MEM_LIMIT_GB = float(os.environ.get("SSBOT_M4B_MEM_GB", "10"))
+
+
+def _mem_guard() -> None:
+    """A worker that grows past MEM_LIMIT_GB of private memory ends itself (M4b: the M3 code's caches reached 48 GB
+    on one two-Clapper situation and starved the machine) - the pool re-submits its job once, then records it."""
+    import threading
+    if getattr(_mem_guard, "on", False):
+        return
+    _mem_guard.on = True
+
+    def watch():
+        import psutil
+        p = psutil.Process()
+        while True:
+            try:
+                if p.memory_info().private > MEM_LIMIT_GB * 2 ** 30:
+                    os._exit(9)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.5)
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def _pool_run(jobs: list, n_workers: int, out_path: Path, max_tasks: int = 8) -> list:
+    """The jobs in worker processes; every result as a line as it comes (<out>.partial.jsonl); a worker lost (the
+    memory guard) breaks the pool - the unfinished jobs are re-submitted, a job lost twice is recorded as an error."""
     from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures.process import BrokenProcessPool
+    from collections import Counter as _C
     res = []
     t0 = time.time()
-    with ProcessPoolExecutor(max_workers=n_workers, max_tasks_per_child=max_tasks) as ex:
-        futs = {ex.submit(run_one, j): j[0] for j in jobs}
-        for n, f in enumerate(as_completed(futs)):
-            r = f.result()
-            res.append(r)
-            if (n + 1) % 20 == 0:
-                print(f"{n + 1}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
+    part = out_path.with_suffix(".partial.jsonl")
+    left = {n: j for n, j in enumerate(jobs)}
+    tries = _C()
+    with part.open("w", encoding="utf-8") as fh:
+        while left:
+            try:
+                with ProcessPoolExecutor(max_workers=n_workers, max_tasks_per_child=max_tasks) as ex:
+                    futs = {ex.submit(run_one, j): n for n, j in left.items()}
+                    for f in as_completed(futs):
+                        n = futs[f]
+                        r = f.result()
+                        res.append(r)
+                        fh.write(json.dumps(r, default=str) + chr(10))
+                        fh.flush()
+                        left.pop(n, None)
+                        if len(res) % 20 == 0:
+                            print(f"{len(res)}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
+            except BrokenProcessPool:
+                for n in list(left):
+                    tries[n] += 1
+                    if tries[n] >= 3:
+                        j = left.pop(n)
+                        r = {"i": j[0], "part": j[5] if len(j) > 5 else None, "name": j[1].name,
+                             "error": "worker lost (memory guard)"}
+                        res.append(r)
+                        fh.write(json.dumps(r, default=str) + chr(10))
+                        fh.flush()
+                print(f"a worker was lost: {len(left)} jobs re-submitted", flush=True)
     res.sort(key=lambda r: r["i"])
     out_path.write_text(json.dumps(res, indent=1, default=str), "utf-8")
     print(f"done {len(res)} in {time.time() - t0:.0f}s -> {out_path}", flush=True)
@@ -186,7 +238,7 @@ def cmd_ident(a) -> int:
     cfg_kw = dict(cap_s=a.units * 0.01, depth=a.depth)
     jobs = [(i, s, cfg_kw, 0.01, "idle") for i, s in _select(sits, a)]
     OUT.mkdir(parents=True, exist_ok=True)
-    _pool_run(jobs, a.jobs, OUT / f"ident_{a.tag}.json")
+    _pool_run(jobs, a.jobs, OUT / f"ident_{a.tag}.json", max_tasks=1)
     return 0
 
 
@@ -264,7 +316,7 @@ def stop_load(ps, stop: str) -> None:
 def cmd_first(a) -> int:
     sits = load_sits()
     cfg_kw = dict(cap_s=a.cap, depth=a.depth)
-    for kv in (a.cfg or "").split(","):
+    for kv in (a.cfg or "").split(";"):
         if kv.strip():
             k, v = kv.split("=")
             cfg_kw[k.strip()] = type(getattr(__import__("ssbot.map2.search", fromlist=["Cfg"]).Cfg(), k.strip()))(
@@ -524,7 +576,7 @@ def main(argv=None) -> int:
     p.add_argument("--load-bot", type=int, default=2)
     p.add_argument("--groups", default="")
     p.add_argument("--limit", type=int, default=0)
-    p.add_argument("--cfg", default="", help="Cfg overrides k=v,k=v")
+    p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v")
     p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation in parallel")
     p.set_defaults(fn=cmd_first)
     p = sub.add_parser("tick")
