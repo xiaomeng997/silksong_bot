@@ -105,6 +105,9 @@ class LiveCfg:
     #                                Clappers still consistent): the collision check stays exact
     stale: int = 45                # a received plan older than this (frames since its anchor) is dropped
     end_lead: int = 20             # the 'end' trigger: the plan in control has this few committed frames left
+    carry_f: int = 40              # a worker's last sent plan (not taken) is its next search's kept plan while it is this
+    #                                young (frames): re-checked exactly from the newer snapshot and sent again when it
+    #                                still wins - its anchor nearer the commit (the fallback's bridge rarely holds 10 f)
     commits_per_tick: int = 2      # commit checks per tick at most (the rest wait)
     mem_gb: float = 6.0            # a worker above this RSS exits after its search (the controller restarts it)
     hang_s: float = 3.0            # a search running this long: the worker reports its stack (and dumps the snapshot)
@@ -705,7 +708,7 @@ def reanchor_prev(plan, t_a: int, fo: int, pre) -> object | None:
     return ms.Plan([ms.Seg(masks, dsl, seg0.claw, seg0.tag)] + [x.copy() for x in plan.segs[1:]], plan.origin, "kept")
 
 
-def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) -> object:
+def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, carry: dict | None = None) -> object:
     base = {"kind": "status", "part": part, "seq": snap["seq"], "ep": snap["ep"], "fo": snap["fo"],
             "ctrl_seen": (snap.get("ctrl") or (None,))[0]}
     if snap.get("busy"):
@@ -719,8 +722,12 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
                        name=f"f{snap['fo']}")
     ctrl = snap.get("ctrl")
     prev = None
+    carried = False
     if ctrl is not None and ctrl[0] in plans:
         prev = reanchor_prev(plans[ctrl[0]], ctrl[1], snap["fo"], pre)
+    elif ctrl is None and carry and carry.get("ep") == snap["ep"] and 0 < snap["fo"] - carry["t_a"] <= cfg.carry_f:
+        prev = reanchor_prev(carry["plan"], carry["t_a"], snap["fo"], pre)
+        carried = prev is not None
     lead = len(pre.masks) - int(snap["n_inflight"])
     cap = min(max((lead - 2) / 60.0, cfg.cap_min), cfg.cap_ch if ctrl is not None else cfg.cap_fb)
     if aborted():
@@ -737,7 +744,7 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
     e = res.ev
     if e is None:
         return {**base, "status": "none"}
-    if res.kept:
+    if res.kept and not carried:
         return {**base, "status": "kept", "value": round(float(e.value), 3)}
     if not e.safe:
         return {**base, "status": "unsafe"}
@@ -746,7 +753,7 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
     outs = build_outs(e, S.cfg.margins)
     if not outs:
         return {**base, "status": "unsafe"}
-    pid = f"{part}:{snap['seq']}"
+    pid = f"{part}:{snap['seq']}" + ("c" if (carried and res.kept) else "")
     log = ms.plan_log(e, snap["fo"])
     return LivePlan(pid=pid, part=part, ep=snap["ep"], seq=snap["seq"], t_a=int(snap["fo"]), f_snap=int(snap["f"]),
                     n_pre=len(pre.masks), n_inflight=int(snap["n_inflight"]), plan=e.plan, outs=outs,
@@ -754,6 +761,7 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
                     note=e.plan.note, ms=round(ms_, 1), cap=cap, ctrl_seen=base["ctrl_seen"],
                     had_prev=prev is not None, n_cand=res.n_cand, timed_out=bool(res.timed_out),
                     steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time(),
+                    carried=bool(carried and res.kept),
                     cmds_pre=np.asarray(snap["cmds"], np.int64)[:len(pre.masks)].copy())
 
 
@@ -901,7 +909,9 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             plans = dict(state["plans"])
         done = snap["seq"]
         try:
-            msg = _search_one(S, cfg, snap, part, plans, lambda: state["abort"])
+            msg = _search_one(S, cfg, snap, part, plans, lambda: state["abort"], carry=state.get("carry"))
+            if isinstance(msg, LivePlan):
+                state["carry"] = {"plan": msg.plan, "t_a": msg.t_a, "ep": msg.ep}
         except Exception as e:  # noqa: BLE001 - one bad snapshot must not end the worker
             import traceback
             msg = {"kind": "error", "part": part, "seq": snap["seq"], "ep": snap["ep"], "error": repr(e)[:300],
@@ -1197,7 +1207,7 @@ class Map2Controller:
                     row["commit"] = {"pid": lp.pid, "t_a": lp.t_a, "value": round(lp.value, 3), "hits": round(lp.hits, 3),
                                      "origin": lp.origin, "note": lp.note, "ms": lp.ms, "n_pre": lp.n_pre,
                                      "outs": len(lp.outs), "alive": len(info["alive"]), "steps": lp.steps,
-                                     "bridge": bool(info.get("bridge")),
+                                     "bridge": bool(info.get("bridge")), "carried": bool(getattr(lp, "carried", False)),
                                      "outcomes": lp.outcomes,
                                      "cp": sorted({(k, i, kd) for o in lp.outs for (k, i, kd) in o.contacts})}
                     self.trig.append("commit")

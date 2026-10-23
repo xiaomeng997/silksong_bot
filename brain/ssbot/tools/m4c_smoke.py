@@ -176,6 +176,7 @@ def report(out: Path) -> dict:
                       "worker_status": dict(wst.most_common()), "worker_ms": _pct(wms),
                       "commits": len(commits), "commit_origin": dict(Counter(c["origin"] for c in commits)),
                       "commits_bridge_ok": sum(1 for c in commits if c.get("bridge")),
+                      "commits_carried": sum(1 for c in commits if c.get("carried")),
                       "commit_hits": round(float(np.mean([c["hits"] for c in commits])), 3) if commits else None,
                       "commit_value": round(float(np.mean([c["value"] for c in commits])), 3) if commits else None,
                       "control_runs": _pct(runs, (50, 90, 100)), "n_runs": len(runs),
