@@ -697,12 +697,16 @@ PROBE_STATS = {"checked": 0, "violations": 0}                         # a probe 
 
 def _probe_masks(S: np.ndarray, H: int) -> np.ndarray:
     """The exit probes (within one event): her held jump / dash kept (going on is free), with no direction, left,
-    right; and when jump is not held, a jump pressed and held (one event) with no direction, left, right."""
+    right; when jump is not held, a jump pressed and held (one event) with no direction, left, right; when dash is not
+    held, a dash pressed and held to the left / right."""
     base = int(S[km.PREV]) & (km.B_JUMP | km.B_DASH)
     ms_ = [base, base | km.B_LEFT, base | km.B_RIGHT]
     if not base & km.B_JUMP:
         j = base | km.B_JUMP
         ms_ += [j, j | km.B_LEFT, j | km.B_RIGHT]
+    if not base & km.B_DASH:
+        d = base | km.B_DASH                          # a dash pressed and held, left / right (one event)
+        ms_ += [d | km.B_LEFT, d | km.B_RIGHT]
     return np.repeat(np.array(ms_, np.int64)[:, None], H, axis=1)
 
 
@@ -1103,6 +1107,7 @@ class Evaluator:
         self.n_sim = 0
         self.n_sim_hit = 0
         self.n_probe = 0               # exit checks settled by a probe (exit_ok)
+        self._exm_none: dict = {}      # exit_ok's memo without a branch
 
     def reset(self) -> None:
         """Drop the per-decision memos (a new situation)."""
@@ -1265,9 +1270,22 @@ class Evaluator:
         """The coarse exit check: an envelope pass from S at frame k0 in the branch's danger (+ the walls) for
         H (cfg.exit_h) frames; returns the clusters alive at the end (0: no exit)."""
         H = self.cfg.exit_h if H is None else H
+        self.n_exit += 1
+        # M4b: the same check (her state, the branch, the frames) answered once - e.g. both hook variants of a plan
+        # without a hook, or two timing views' outcomes ending in the same state on the same danger
+        memo = br.__dict__.setdefault("_exm", {}) if br is not None else self._exm_none
+        mkey = (np.asarray(S, np.float64).tobytes(), None if cu is None else np.asarray(cu, np.float64).tobytes(),
+                k0, H, ifr_until, self.cfg.margins)
+        v = memo.get(mkey)
+        if v is None:
+            v = self._exit_compute(S, cu, k0, br, ifr_until, H)
+            if br is not None or len(memo) < 4096:
+                memo[mkey] = v
+        return v
+
+    def _exit_compute(self, S: np.ndarray, cu, k0: int, br, ifr_until: int, H: int) -> int:
         dz, boxes, off = _packed_danger(br, k0, H, ifr_until, self.cfg.margins)
         t0 = time.perf_counter()
-        self.n_exit += 1
         if self.cfg.exit_probe:
             # M4b: a few concrete key sequences first - one that touches no danger box is an exit (the pass, which
             # contains it, would keep a cluster: the same verdict for a fraction of the cost)
@@ -2496,11 +2514,13 @@ class TickCheck:
     position within tol_hero) with frames of its committed part left. It neither predicts nor simulates (the commit
     already checked every outcome); an observation outside every outcome (an unpredicted move or timing, her keys
     missed, a model error) fails it - the bot then falls back while the background search re-plans (tick_check is
-    the full check from a new observation)."""
+    the full check from a new observation). It holds arrays and dicts only: the worker process that searched pickles
+    it to the bot's thread (a few hundred kB)."""
 
     def __init__(self, ev: Eval, tol_j: int = 1, tol_x: float = 0.35, tol_hero: float = 0.2):
         self.tol_j, self.tol_x, self.tol_hero = tol_j, tol_x, tol_hero
         self.out = []
+        sid_of: dict = {}
         for o in ev.outcomes:
             if not o.safe:
                 continue
@@ -2511,14 +2531,15 @@ class TickCheck:
                 a = a[(a[:, 0] >= 0) & (a[:, 0] <= kc)]
                 a = a[np.argsort(a[:, 0], kind="stable")]
                 recs[iid] = (a[:, 0].astype(np.int64), a[:, 3].astype(np.int64), a[:, 4], a[:, 5], a[:, 7])
-            self.out.append((float(o.p), kc, np.asarray(o.tr.pos[:kc + 1]), recs, tb))
+            self.out.append((float(o.p), kc, np.asarray(o.tr.pos[:kc + 1]).copy(), recs,
+                             sid_of.setdefault(id(tb), dict(tb.sid))))
 
     def check(self, n: int, her_xy, obs: list) -> tuple:
         """(ok, frames of the committed part left in the consistent outcomes (the most), consistent outcomes' p) at
         frame n after the commit: her transform (x, y), the Clappers as observed (Obs: st, j, x, face)."""
         left, pc = -1, 0.0
         hx, hy = float(her_xy[0]), float(her_xy[1])
-        for (p, kc, pos, recs, tb) in self.out:
+        for (p, kc, pos, recs, sids) in self.out:
             if n > kc:
                 continue
             if abs(pos[n, 0] - hx) > self.tol_hero or abs(pos[n, 1] - hy) > self.tol_hero:
@@ -2530,7 +2551,7 @@ class TickCheck:
                     continue                             # a Clapper the outcome does not hold (dead): no constraint
                 ks, st, j, x, f = r
                 a, b = np.searchsorted(ks, n), np.searchsorted(ks, n, side="right")
-                sid = tb.sid.get(o.st, -9)
+                sid = sids.get(o.st, -9)
                 oj = o.j if o.j is not None else int(round(o.t * 60.0))
                 if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= self.tol_j) &
                               (np.abs(x[a:b] - o.x) <= self.tol_x) & (f[a:b] == o.face)):

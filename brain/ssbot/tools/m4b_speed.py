@@ -479,6 +479,7 @@ def run_tick(args) -> dict:
     t = time.perf_counter()
     tc = ms.TickCheck(ch)
     ms_build = (time.perf_counter() - t) * 1e3
+    kb_pickle = len(pickle.dumps(tc)) / 1024.0
     frames, oks, n_out = [], [], 0
     for o in ch.outcomes:
         if not o.safe:
@@ -497,7 +498,7 @@ def run_tick(args) -> dict:
         for ob in obs:
             ob.x += 1.0
         moved = bool(tc.check(5, nom.tr.pos[5], obs)[0])
-    out.update(full_ok=bool(ok), full_bad=bad, ms_full=round(ms_full, 2), m3_ok=bool(ok3), m3_bad=bad3,
+    out.update(kb_pickle=round(kb_pickle, 1), full_ok=bool(ok), full_bad=bad, ms_full=round(ms_full, 2), m3_ok=bool(ok3), m3_bad=bad3,
                ms_m3=round(ms_m3, 2), ms_build=round(ms_build, 2), n_outcomes=n_out,
                frame_ms=[round(x, 4) for x in frames], frame_ok=sum(oks), frame_n=len(oks), moved_ok=moved)
     return out
@@ -537,7 +538,8 @@ def report_tick(res: list) -> str:
         fr = [x for r in rr for x in r["frame_ms"]]
         lines.append(f"{g:10s} n {len(rr):3d}  per-frame check ms p50/p90/p99/max {_pct(fr, (50, 90, 99, 100), '{:.3f}')}"
                      f" (frames {len(fr)}, consistent {sum(r['frame_ok'] for r in rr)}/{sum(r['frame_n'] for r in rr)})"
-                     f"  build {_pct([r['ms_build'] for r in rr], fmt='{:.1f}')}  full check {_pct([r['ms_full'] for r in rr], fmt='{:.1f}')}"
+                     f"  build {_pct([r['ms_build'] for r in rr], fmt='{:.1f}')} ms, {_pct([r.get('kb_pickle') for r in rr], fmt='{:.0f}')} kB"
+                     f"  full check {_pct([r['ms_full'] for r in rr], fmt='{:.1f}')}"
                      f" (fails {sum(1 for r in rr if not r['full_ok'])}; unsafe chosen {sum(1 for r in rr if not r['safe'])})"
                      f"  M3 check {_pct([r['ms_m3'] for r in rr], fmt='{:.1f}')} (fails {sum(1 for r in rr if not r['m3_ok'])})"
                      f"  moved 1 u still ok {sum(1 for r in rr if r.get('moved_ok'))}")
