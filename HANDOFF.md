@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -12268,3 +12268,222 @@ are left open and frozen.
    worker does in ~50 s); recycling every 8 situations is not enough for the last ones - bound the caches (or recycle
    per situation) before the search runs live for long.
 9. Only the acceptance ran the new search rules; nothing of M4a has run live in a fight yet (M4c).
+
+### M4b - the search made fast enough to act live (offline; no live run): profiled, the hot paths compiled / vectorized / memoized with the same results, the anytime order, a split search over two processes, a hard cap, the per-frame check of a committed plan; M3 open item 8 explained and fixed
+
+The task: the M3 search (p50 19 s / p90 76 s a decision) acting live - the first safe plan after a branch point p90
+<= 15 frames (0.25 s) of wall time with the search in its own worker process(es) while 2 game instances and the bots
+load the machine (the recorded w7 one-Clapper situations decide), the anytime value at 0.25 / 0.5 / 1 / 2 s against
+M3's 60 s (v4), tick_check per frame p99 <= 8 ms and M3 open item 8 (4 chosen plans failing it), the acceptance at
+1 s and 0.25 s. Bot files untouched (only ssbot.map2, the m3_accept / m4b_speed tools and tests changed; nothing in
+the bot imports ssbot.map2, so its decisions are bit-identical by construction). Commits 7ae2a1d .. e85e8c7. Tool
+`brain/ssbot/tools/m4b_speed.py` (ident / identcmp / first / tick / report); data and every number in
+`C:\ssbot\data\m2_play\map2\m4\m4b` (`first_*.json`, `tick_*.json`, `ident_*.json`, `final_runs*.log` - the final
+numbers in `final_runs4.log`, `accept_*_cmp.txt`, `accept_*_vs_*.txt`, `fullsuite_*.log`, `scripts\`), the acceptance
+runs `map2\m3\run_none_m4b_*.json` (`*_v2`: the final code).
+
+**Result**: the targets are met with the split search (two worker processes per decision): the first safe plan on the
+w7 one-Clapper recordings p50 / p90 / p99 **65 / 119 / 951 ms** (M4a's code 337 / 804 / none in 2 s for 2), the
+per-frame check w7 p99 **1.3 ms** (all 236: 4.6 ms); one worker reaches p90 258 ms. A 1 s decision reaches ~75 % of
+the 60 s value; the hook-reaction moves need more (see the acceptance). live_capable for M4c with the split search.
+
+#### Where the time went (M4a's code, profiled)
+
+- One w7 one-Clapper decision (cap 60 s, 70.8 s under cProfile): predict 16.4 s (23 %; 755 calls), simulate 17.6 s
+  (25 %; 22,326 calls), the outcomes' collision loops 17.3 s (24 %; bdamage / branch_frames / margins - Python objects
+  per branch and frame, rebuilt for every new prediction), the exit checks 12.9 s (18 %; 1,595 envelope passes of 7 ms).
+- Two Clappers: predict 70 - 95 % (pure Python particles; one decision at 400 work units spent 313 s of 376 s in
+  predict; a do-nothing prediction over 250 frames 667 ms with 903 particles). The 2-event approach pass (30 frames):
+  35 - 430 ms on the w7 recordings (20k - 205k clusters).
+- Memory: the envelope pass returned slices of its preallocated buffers (cap_cl / cap_pc / cap_iv, ~0.4 GB a pass);
+  every kept pass held them: a one-Clapper decision peaked at 8.1 GB, the two-Clapper ones at 29 - 48 GB private (the
+  cause of M4a's 11.7 - 11.9 GB acceptance workers, M4a open item 8). Fixed (ceb4e8a: the outputs copied): 1.6 GB.
+
+#### Exact paths (the same results; Cfg.jit_predict, Cfg.exit_probe on by default)
+
+- **predict compiled** (`ssbot/map2/clapper_jit.py`): Sim / predict's particle loop in numba - the same fork order
+  (depth first, the last option first), the snapshot before a step that may choose, the records as a per-frame tree,
+  the stable truncation; Python's sum() is Neumaier's compensated sum since 3.12 (walk_bins' rest, V4's weights: one
+  ulp in 10 predictions until ported); round(x, 3) of the dedupe keys exact (a half settled by Python); the hypot of
+  the roof's normal by Python. 10,689 predictions of the search (every situation) identical (p, choices, reveal,
+  records, hazards, n_merged, particles); 3 - 8x faster (two Clappers' worst cases 15 - 50x).
+- **The records as arrays** (`clapper_jit.JBranch`: tuples made on use; `ssbot/map2/brnum.py`; `search.Geo`): the
+  timing views, robust boxes, state_at, move spans, the next move start, branch_frames' first-occurrence rule (numba),
+  the body boxes grown by margin_of (one compiled pass, `brnum.geo_boxes`), the hazards' circles; `first_collision`
+  (her hurtbox against the frame's boxes and circles compiled, the hammers' polygons in Python) replaces the loops of
+  _outcome / quick / tick_check; branch_danger from the Geo. Checked on every call of a 60-unit search on all 236
+  situations against the tuple loops: 91,965 views, 215,111 collisions, 1,480,161 danger frames, 4,734,207 robust
+  boxes, 557,697 state lookups, 563,778 span sets, 179,323 next moves - 0 differ.
+- **The windows vectorized** (windows_ref kept): 344 node passes identical; 3x.
+- **A trajectory memo** (`Evaluator.sim`): a plan's trajectory is a function of the plan, the start and the branch
+  rows its strikes read (and the reaction keys): reused for every branch whose reads are equal (hookless plans: one
+  trajectory for all outcomes).
+- **Exit probes** (`env_jit.probe_exit`): 8 constant key sequences within the pass's one event (holds kept; left /
+  right; a jump; a dash left / right) rolled by the reference model; one touching no box (grown 1e-4) is an exit the
+  pass keeps (M1 / M4a containment). SSBOT_M4B_PROBE_VERIFY=1 runs the pass too: 75,861 probe exits, 0 violations.
+  Plus an exact exit memo (her state, the branch, the frames) and the danger packed once per branch and frame range.
+- **The envelope pass**: its typed dict replaced by an open-addressing table (the same lookups); `env_jit.forward_par`
+  - each frame's per-parent work (physics, children, keys, dominance, cuts, key hashes) in parallel chunks, the merge
+  in the parents' order, the clusters' interval unions in parallel at prefix-sum offsets - bit for bit forward's arrays
+  (120 approach passes of the recordings; a test). The heavy 2-event passes 410 -> ~165 ms on 4 threads (the merge
+  stays serial). Both passes nogil (a background thread can run one).
+- **The whole search**: a virtual clock (`Searcher.vclock`: the cap counted in evaluations + exit checks) makes a
+  decision deterministic; M4a's code (7ae2a1d + the memory fix, snapshot `m4b\code_7ae2a1d`) and the final code
+  compared on every tried plan's key, value, safety, the chosen plan, the counters and the anytime trace: **236 / 236
+  identical** (142 at 200 units; the 94 two-Clapper situations at 40 units - at 200 M4a's code needed > 14 GB or
+  minutes each); re-checked after the last commit (e85e8c7, the switches off): 36 / 36 identical.
+
+#### The anytime order and the hard cap (behaviour; default off, `Cfg.live()` turns them on)
+
+- `pass2_after` / `pass2_bg`: a node's 2-event pass is started on a background thread at the node's start and its
+  candidates join the M3 round robin when it is done (or after 6 of the first pass's candidates / when their queue
+  ends); `fwd_threads`: the approach passes threaded.
+- `reuse_root` (the noop is the root's evaluation with its exits run: the same plan, one prediction less),
+  `defer_noop` (the noop fallback's exits at the end, skipped when a safe plan is already worth its open value: 5 - 90
+  ms before the first candidate saved).
+- `hard_cap`: the candidates', the contingent plans' and the noop's exit checks stop at the cap (c095693, 0850306),
+  and an evaluation in progress is abandoned before its next re-prediction (e85e8c7: `Evaluator.evaluate(until=)`;
+  the main loop's candidate in progress counts as unsafe, a joined contingent plan is dropped). Without it a 2 s
+  two-Clapper decision took up to 59 s; the last case - the forced 'locked dx5.0', one joined contingent plan's cascade
+  of 214 predictions - 45 s -> 2.1 s. With the split search at a 2 s cap the decisions now take p50 / p90 / p99 2.15 /
+  2.60 / 2.94 s, max 3.27 s (0850306: max 45 s).
+- **The split search** (`Searcher.part = (i, n)`): each of n worker processes takes the root's candidates whose key
+  hashes to its part (the safe endpoints and the library: part 0) and their whole subtrees; the better result wins.
+  Tried and dropped: `safe_ts` (safe endpoints at earlier frames: the first safe plan later, not sooner).
+
+#### Measurements (wall clock; 2 situations at a time as 2 instances' searches; the workers High priority, P-cores, EcoQoS off; the simulated load: 4 busy processes standing in for the 2 games' threads at Normal priority unpinned, 2 'bots' at High on the P-cores doing 8 ms of work per 16.7 ms frame, plus the 2 real game instances open and frozen; cap 2 s)
+
+The first safe plan (a strike or a safe endpoint, not the 1-frame noop) after the decision's start, over the
+situations where M4a's 60 s run (m4a2, the current models) had one ('none': not by 2 s, counted as infinite):
+
+| group | n | M4a code | one worker (Cfg.live flags, 4 threads; 4c02ba8) | split over 2 processes (Cfg.live; e85e8c7) |
+|---|---|---|---|---|
+| **recorded w7, one Clapper** | 32 | 337 / 804 / inf ms (2 none) | 73 / 258 / 883 | **65 / 119 / 951** |
+| recorded w13, one Clapper | 8 | 382 / 827 / 827 | 64 / 196 / 196 | 75 / 130 / 130 |
+| recorded w13, two Clappers | 95 | 788 / inf / inf (26 none) | 162 / 637 / inf (3) | 132 / 423 / inf (1) |
+| forced, one Clapper | 56 | 415 / 576 / 990 | 56 / 111 / 205 | 49 / 83 / 193 |
+| forced, two Clappers | 5 | 650 / 802 / 802 | 38 / 103 / 103 | 49 / 117 / 117 |
+| the person's slam strikes | 30 | 279 / 339 / 394 | 36 / 43 / 75 | 39 / 44 / 50 |
+| all | 226 | 444 / inf / inf (28) | 75 / 359 / inf (3) | 63 / 239 / 951 (1) |
+
+(p50 / p90 / p99.) The target (w7 p90 <= 250 ms) is met by the split search; one worker reaches 258 ms. The split
+search ran 3 times (c095693 / 0850306 / e85e8c7): w7 p90 117 / 120 / 119 ms. The tail: P2 floats over a slam antic
+(few safe options; the first safe plan needs the 2-event pass).
+
+The anytime value - the mean value of the best safe plan by t (v4: M3's 60 s run, 2.13 on w7; m4a2: 2.18):
+
+| group | M4a code 0.25 / 0.5 / 1 / 2 s | one worker | split | v4 / m4a2 60 s |
+|---|---|---|---|---|
+| recorded w7 (34) | 0.08 / 0.60 / 1.04 / 1.47 | 0.67 / 1.03 / 1.48 / 1.84 | **0.79 / 1.17 / 1.64 / 1.90** | 2.13 / 2.18 |
+| recorded w13, two Clappers (101) | -0.22 / -0.04 / 0.31 / 0.57 | -0.25 / 0.23 / 0.69 / 1.07 | 0.17 / 0.52 / 0.83 / 1.17 | 1.65 / 1.54 |
+| all (236) | -0.02 / 0.35 / 0.73 / 1.08 | 0.31 / 0.67 / 1.17 / 1.45 | 0.59 / 1.01 / 1.26 / 1.51 | 1.95 / 1.84 |
+
+On w7 the split search has a safe strike / endpoint plan by 0.25 s in 88 % (M4a's code 24 %) and is within 0.05 of
+v4's value in 6 / 18 / 41 / 47 % of the situations at 0.25 / 0.5 / 1 / 2 s (M4a's code 3 / 9 / 15 / 32 %); a 1 s
+search reaches ~75 % of the 60 s value (the hits of a plan: one by 0.25 s, two by 1 s; v4's third hit and the
+contingent continuations need more time). The 3 runs of the split search: w7 at 0.25 s 0.91 / 0.87 / 0.79, at 1 s
+1.61 / 1.64 / 1.64, at 2 s 1.86 / 1.89 / 1.90 (timing noise at the start). Candidates evaluated in 2 s: w7 p50 56 ->
+100 (one worker), two Clappers 15 -> 59.
+
+#### The checks of a committed plan
+
+- **M3 open item 8 - a defect**: M3's tick_check (kept as `tick_check_m3`) predicted with none of her hits and over
+  the plan's length only (T = its end + 2): the hooked Clapper never reacted (its Idle future instead: a contingent
+  plan's continuation was checked against a world without the reaction) and the shorter horizon grouped the
+  particles differently (wider timing unions). v4's 4 fails: the far hooks' contingent plans (8, 14), the locked hook
+  (185) and situation 97 (no safe plan: the fallback, a correct fail); today the CLAWSTRIKE plan of 22 still fails
+  M3's check at its frame 44 (the Slam 0 body's wider union) though the evaluation called it safe. **`tick_check`
+  now is the closed-loop evaluation without its exits** (the evaluation's horizon, re-predicted at the plan's own
+  hits, every timing view and hook variant, the commit rule): on all 236 chosen plans it fails only the 2 unsafe
+  fallbacks (97, 128); M3's fails 3 (+ 22). Its time: w7 17 / 46 / 63 ms (p50 / p90 / p99), all 15 / 43 / 131 ms -
+  the worker's re-check at a branch point, not the per-frame one.
+- **The per-frame check on the bot's thread: `search.TickCheck`** - built from the committed evaluation (0.4 / 0.9 /
+  2.8 ms; pickled 74 / 195 / 616 kB, sent from the search worker): per outcome its branch's Clapper records per frame,
+  her planned positions, the frame its committed part ends; each frame the observation is matched (every Clapper's
+  state, its frame +-1, x within 0.35 u, the facing; her position within 0.2 u): ok while some outcome is consistent
+  with frames left. Along every safe outcome of the 236 chosen plans (269,770 frames, all consistent): **w7 p50 / p90
+  / p99 / max 0.24 / 0.78 / 1.31 / 1.9 ms**, all 0.37 / 1.22 / 4.56 / 9.5 ms (two Clappers p99 5.4); a Clapper moved
+  1 u fails it in 236 / 236. (`tick_final2.json`; M3's tick_check, one call per plan: w7 4.5 / 8.6 / 11.7 ms.)
+
+#### The acceptance at a realistic budget (`m3_accept run --prio high --load`, the simulated load; same / alt / not per move; the final code e85e8c7, `accept_*_v2_cmp.txt`)
+
+| move | n | v4 60 s | m4a2 60 s | M4a code 1 s | 1 s one worker | 1 s split | 0.25 s split |
+|---|---|---|---|---|---|---|---|
+| P1-idle | 25 | 15 / 5 / 5 | 14 / 8 / 3 | 14 / 0 / 11 | 14 / 3 / 8 | 13 / 4 / 8 | 14 / 3 / 8 |
+| P1-idle-slam | 19 | 6 / 8 / 5 | 7 / 6 / 6 | 0 / 0 / 19 | 0 / 0 / 19 | 0 / 4 / 15 | 0 / 0 / 19 |
+| P1-idle-evade | 19 | 0 / 11 / 8 | 0 / 11 / 8 | 0 / 0 / 19 | 0 / 0 / 19 | 0 / 0 / 19 | 0 / 0 / 19 |
+| P1-far-jump | 14 | 6 / 1 / 7 | 6 / 0 / 8 | 1 / 0 / 13 | 0 / 6 / 8 | 0 / 3 / 11 | 0 / 0 / 14 |
+| P1-far-jcast | 13 | 6 / 0 / 7 | 0 / 6 / 7 | 0 / 0 / 13 | 0 / 6 / 7 | 0 / 4 / 9 | 0 / 0 / 13 |
+| P1-slam | 14 | 1 / 11 / 2 | 9 / 2 / 3 | 7 / 0 / 7 | 9 / 1 / 4 | 9 / 1 / 4 | 4 / 1 / 9 |
+| P1-cast | 7 | 1 / 6 / 0 | 3 / 4 / 0 | 3 / 1 / 3 | 3 / 3 / 1 | 4 / 3 / 0 | 6 / 1 / 0 |
+| P1-jump | 11 | 3 / 7 / 1 | 4 / 6 / 1 | 4 / 2 / 5 | 4 / 3 / 4 | 4 / 3 / 4 | 5 / 2 / 4 |
+| P1-locked | 2 | 2 / 0 / 0 | 2 / 0 / 0 | 2 / 0 / 0 | 2 / 0 / 0 | 2 / 0 / 0 | 2 / 0 / 0 |
+| P2 | 16 | 13 / 3 / 0 | 12 / 3 / 1 | 12 / 0 / 4 | 10 / 2 / 4 | 11 / 2 / 3 | 8 / 1 / 7 |
+| P3-face | 14 | 0 / 2 / 12 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 |
+| P3-cross | 2 | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 0 / 2 | 0 / 0 / 2 | 0 / 0 / 2 | 0 / 0 / 2 |
+| P4 | 16 | 9 / 5 / 2 | 10 / 3 / 3 | 3 / 3 / 10 | 8 / 2 / 6 | 7 / 3 / 6 | 2 / 4 / 10 |
+| P5 | 17 | 12 / 4 / 1 | 12 / 3 / 2 | 10 / 3 / 4 | 11 / 3 / 3 | 12 / 3 / 2 | 8 / 2 / 7 |
+| CLAWSTRIKE | 14 | 2 / 10 / 2 | 11 / 1 / 2 | 6 / 0 / 8 | 9 / 1 / 4 | 9 / 1 / 4 | 4 / 0 / 10 |
+| SLAMSTRIKE | 42 | 17 / 24 / 1 | 7 / 33 / 2 | 13 / 19 / 10 | 9 / 26 / 7 | 6 / 29 / 7 | 2 / 1 / 39 |
+| JUMPTRAP | 15 | 4 / 11 / 0 | 2 / 13 / 0 | 9 / 5 / 1 | 4 / 11 / 0 | 3 / 12 / 0 | 13 / 1 / 1 |
+| LOWHOP | 15 | 15 / 0 / 0 | 14 / 1 / 0 | 5 / 8 / 2 | 11 / 2 / 2 | 13 / 2 / 0 | 8 / 3 / 4 |
+| **all** | 275 | 112 / 109 / 54 | 113 / 101 / 61 | 89 / 41 / 145 | **94 / 69 / 112** | **93 / 74 / 108** | 76 / 19 / 180 |
+
+- **At the same budget the speed work only adds**: M4a's code at 1 s found 130 of 275 move cases, the new search 163
+  (one worker) / 167 (split): +34 / -1 and +40 / -3 (`accept_before_vs_1s*_v2.txt`). The lost, with their reasons:
+  one worker - w13 @329 P1-jump: M3's depth shares (depth 1 gets 45 % of the cap) sliced the root's queue after 5
+  candidates, nothing landed, so the decision ended at 0.46 s before the labelled candidate (M4a's code reached it as
+  its 8th; open item 4); split - the same situation (the labelled candidate not reached: the order of the parts and
+  the lazy 2-event pass), w13 @938 SLAMSTRIKE (not reached; M4a's code found it among 15 candidates at 1.01 s, the new
+  one evaluated 40, 4 cut at the cap) and the forced 'idle air dx10 bb5' P1-far-jump: M4a's plan was a contingent
+  combination whose branch plans fell into the two different parts - **a split search combines only its own part's
+  plans** (one worker finds it; open item 1).
+- **Against v4's 60 s** (221 found) the 1 s search loses 54 (split) / 58 (one worker), every one with its reason in
+  `accept_1s*_v2_cmp.txt`: 'model' (M4a's model changes: not found by m4a2's 60 s run either) 10 / 11 - P3-face 2,
+  P1-idle-slam 2, one each of P1-far-jump, P1-idle-evade, P1-slam, P4, P5, SLAMSTRIKE (+ P2 in one worker); 'budget'
+  (found at 60 s, not within 1 s) the rest 44 / 47 - mostly the hook's REACTION moves (P1-idle-slam 8 - 12,
+  P1-idle-evade 10, the far hooks' continuations 0 - 5): they need the third depth and the contingent recombination,
+  which v4 reached in 19 - 77 s; a 1 s decision gets depth 1 - 2. At 0.25 s 95 found (budget: e.g. the person's slam
+  strikes - a safe 1-hit plan by 40 - 90 ms, the standing jump strike's window candidate not reached).
+- Run-to-run noise: the same configurations at 0850306 (before the last hard-cap commit) gave 97 / 71 / 107 (one
+  worker) and 92 / 74 / 109 (split); the cases near the cap move with the load.
+- Decision times (e85e8c7, the hard cap): 1 s split p50 / p90 / p99 1.07 / 1.31 / 1.61 s (0850306: 1.09 / 1.46 /
+  3.24); one worker 1.01 / 1.27 / 1.41 s; 0.25 s 0.27 / 0.36 / 0.71 s (v4 19.2 / 76.3 / 115.7 s).
+
+#### Code (commits 7ae2a1d, 52240e6, 057f571, ceb4e8a, 59b669a, 7b941e0, cd180bb, b2c21cc, 4c02ba8, c095693, 0850306, e85e8c7)
+
+- `ssbot/map2/clapper_jit.py` (predict, Tables, JBranch), `ssbot/map2/brnum.py` (the array paths, emit,
+  geo_boxes, first_hit), `env_jit.probe_exit / forward_par / _fin_*` and the hash table, `envelope.Engine.forward(par=)`
+  and the output copy, `search`: Searcher.vclock / anytime / marks / part / _until, Evaluator.sim / reset /
+  _exit_compute / evaluate(until=), Geo / geo / first_collision / _packed_danger, windows (windows_ref), TickCheck /
+  observe_branch, tick_check (tick_check_m3), Cfg.jit_predict / exit_probe / fwd_threads / pass2_after / pass2_bg /
+  reuse_root / defer_noop / hard_cap / safe_ts and Cfg.live(); `strike.robust_boxes / state_at` on the arrays.
+- `ssbot/tools/m4b_speed.py`; `m3_accept run --prio high --load --split --cfg --safe-ts --pass2-after` (the
+  anytime trace per situation); `tests/test_m4b_speed.py` (13: predict, Neumaier, the array paths, the collision,
+  the windows, the trajectory memo, the probes, the checks, the lazy pass, the threaded pass, the background pass,
+  Cfg.live on a contingent plan, the evaluation cut by until); the import allow-lists of the three map2 tests.
+- Tests: the full suite at e85e8c7 (Idle priority) 2,146 passed, 8 failed - the 5 known (HANDOFF M0 / M3) + the 3 in the untracked test_sg8_review.py - 1 skipped, 1 xfailed (`m4bullsuite_e85e8c7.log`; at 0850306 2,145 / the same 8, `fullsuite_0850306.log`).
+
+#### Open items (for M4c)
+
+1. The live worker: per game instance two search processes (parts (0, 2) / (1, 2)), High priority on the P-cores,
+   NUMBA_NUM_THREADS >= 2, `Cfg.live()`; at a branch point both get the Situation (Tracker obs / memory / hazards,
+   her estimate_state), return their plan + value + a pickled TickCheck; the bot keeps the better and checks it every
+   frame; a failed check or the committed part's end is the next branch point. The kept plan (decide(prev=)) is
+   re-checked first (hysteresis) - not measured here (every measured decision started from scratch). The parts'
+   contingent combinations: each part combines only its own plans (a cross-part combination is lost - the forced
+   far-hook case above); send the parts' per-branch plans to one combine.
+2. TickCheck's tolerances (her position 0.2 u, a Clapper's x 0.35 u, its frame +-1) are guesses: calibrate on the
+   live runs (her open-loop keys drift; a too tight check re-plans too often).
+3. Two Clappers stay slower (first safe plan p90 423 ms, 1 safe-plan miss in 95; the anytime value ~0.7 of 60 s at
+   2 s): the 2-event pass's serial merge, the cascades of re-predictions.
+4. M3's depth shares (depth 1: 45 % of the cap): a decision whose depth 1 was sliced and landed nothing ends early
+   (1 s split: 4 / 236 decisions ended before 0.8 s with a sliced node, one worker 21) - continue the sliced queues
+   until the cap. And the reaction moves (P1-idle-slam / -evade, the far hooks' continuations) need more than 1 s: the
+   worker could keep searching the same situation between branch points (the kept plan as the incumbent) - not built.
+5. A decision may still overrun its cap by the combine's 25 % and the prediction in progress (2 s cap: max 3.3 s).
+6. The load was simulated (busy processes + the 2 real instances frozen), not 2 games being played; the numba threads
+   take from the games' CPU budget - check live.
+7. M1's prebuilt tables still need a rebuild (M4a open item 4; still unused).
+8. Data: `C:\ssbot\data\m2_play\map2\m4\m4b` (see the top); the reference code snapshot `m4b\code_7ae2a1d` (M4a's
+   search + the memory fix) for the identity runs.
