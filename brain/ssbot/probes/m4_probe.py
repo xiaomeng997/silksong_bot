@@ -413,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
     rec = None
     t_end = time.monotonic() + 60 * a.minutes
     try:
+        # an instance frozen at the title by a block's end (time scale 1e-4) takes no menu input: unfreeze first
+        link.rpc("time.scale", timeout_s=10, scale=1.0)
         load_slot(link, 1)
         link.rpc("guards.set", save_suppression=True)
         link.rpc("fsmtap.set", all=True)
