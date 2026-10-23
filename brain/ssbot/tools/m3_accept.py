@@ -403,7 +403,8 @@ def _run_one(args) -> dict:
         if int(extra["hold"]) == 2:
             from ssbot.knowledge import kinematics as km
             from ssbot.map2 import live as lv
-            S.realizer = lv.HoldRealizer(1, lv.hold_tuple(km.HoldState.idle(1)))
+            f0 = float(np.asarray(sit.S, float).reshape(km.K, -1)[km.FACE, 0])
+            S.realizer = lv.HoldRealizer(1, lv.hold_tuple(km.HoldState.idle(1)), face0=1 if f0 >= 0 else -1)
     t0 = time.perf_counter()
     try:
         r = S.decide(sit) if pre is None else S.decide(sit, prefix=pre)

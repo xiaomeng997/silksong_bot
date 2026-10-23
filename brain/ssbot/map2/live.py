@@ -43,6 +43,23 @@ THE PARTS
      search's latency, the planned vs observed hero position and Clappers (state, frame in it, x) of the best
      consistent outcome, the commit checks with their reasons, the worker messages.
 
+M4D (the review findings; HANDOFF 'M4d', forum.md 98; LiveCfg switches views_exact / ctl_check / dis_hold /
+unsafe_drop, on by default):
+- POSSIBLE OUTCOMES: the spread match (_clappers_ok) cannot tell a branch's two timing views apart; an outcome whose
+  OWN timeline (its view's records) or whose Clawline control (her accepting input) the observation contradicts is no
+  longer a possible truth (possible(); sticky for the plan in control; none left: all consistent ones). The plan ENDS
+  when a possible outcome's committed part has ended (M3: it deviates at reveal + lag, a collision follows) - the
+  commit check rejects it then ('ended'); possible outcomes disagreeing on a key: the agreed bits, the rest as sent
+  for the frame before (no press none of them is sure of); the bridge is their agreed keys.
+- the Clawline latched at its press P with her facing toward the target (the realizer moves the press later until it
+  is; the commit check rejects 'claw latch'), a Clawline press the plan does not have ('unplanned Clawline', 'in a
+  Clawline'), no commit while she has no control;
+- a freeze / slow-time / long frame or her hit on a skipped tick drops the plan (hits counted by who had the keys);
+  a newer search that found the plan in control unsafe drops it (or cuts it after its bridge when that is safe);
+- the Cogfly throw's keys out of the model's keys; the bot side never raises (pre / post / feed fall back); the
+  stats per episode; the workers exit with the bot, the bot's exit never waits on a worker's queue, the background
+  pass thread's numba threads.
+
 Frames: STATE frames (the oracle applies a tick's keys at f + 2); a plan's frame 0 is its snapshot's observation frame
 (its anchor), its command index k applies to frame anchor + k. u: world units, her transform (kin pos).
 """
@@ -71,6 +88,8 @@ MAP2_ENV = "SSBOT_FORUM_MAP2"
 SET_ENV = "SSBOT_FORUM_MAP2_SET"
 M_CLAW = 1 << 4                    # the Clawline button (ssbot.ipc.framing BUTTONS order; combat.claw_strike.M_CLAW)
 M_DS = km.B_DOWN | km.B_ATTACK
+COG = km.B_UP | km.B_QUICKCAST     # the Cogfly throw's keys (forum_planner_policy.COG: not the kinematics')
+_COG_BITS = tuple(b for b in range(22) if (COG >> b) & 1)
 CLAW_PRESS_F = 3                   # the Clawline key and the direction held this many frames from P (the probes')
 DS_WIN = sk.DS_ACTIVE[1] + 1       # a slash's contact can still come this many frames after its press
 CLAW_BLOCK_F = 36                  # a Clawline pressed this recently: she may still be in its block (control P + 34)
@@ -118,6 +137,19 @@ class LiveCfg:
     #                                hero tolerances are logged, not enforced
     replay_strict: bool = False    # ... and a received plan is committed only when the keys sent since its anchor are
     #                                its prefix (in flight + bridge): the live path check's proxy in a replay
+    # M4d (the review findings; on by default, a switch each to compare with M4c's rule)
+    views_exact: bool = True       # an outcome whose OWN timeline (its timing view's records) the observation contradicts
+    #                                is no longer a possible truth; the plan ENDS when any possible outcome's committed
+    #                                part has ended (M3's deviation at reveal + lag) - none possible (a timing between
+    #                                the views): all consistent ones count. Off: M4c (the most probable alive one's keys)
+    ctl_check: bool = True         # her accepting input against each outcome's Clawline control (the hook variant seen)
+    dis_hold: bool = True          # possible outcomes disagreeing on a key: the bits they agree on, the others as sent
+    #                                for the frame before (no press nobody planned); the bridge stops there
+    unsafe_drop: bool = True       # a newer search that evaluated the plan in control (kept plan) unsafe: dropped, or
+    #                                cut after its bridge when the search's noop (the bridge, then stop) was safe
+    dt_lo: float = 0.9             # a STATE frame with dt x 60 outside dt_lo .. dt_hi (a hit-stop freeze, its slow-time
+    dt_hi: float = 1.25            # ramp, a long frame) counts as a freeze: the plan in control is dropped
+    err_max: int = 20              # errors on the bot's side in one episode: map2 off for the rest of it
     log: bool = True
 
     @classmethod
@@ -237,13 +269,16 @@ class HoldRealizer:
     CLAW_PRESS_F frames) and a block of no key; a down slash press moves to its latched press frame (dropped when the
     filter takes the press away: the strike is then not in the plan)."""
 
-    def __init__(self, n_pre: int, hold_after: tuple):
+    def __init__(self, n_pre: int, hold_after: tuple, face0: int | None = None):
         self.n_pre, self.hold = int(n_pre), hold_after
+        self.face0 = None if face0 is None else (1 if face0 >= 0 else -1)   # her facing at the plan's start
         self.n_moved = 0
         self.n_dropped = 0
+        self.n_claw_shift = 0              # M4d: Clawline presses moved later so she faces the target at P
+        self.n_claw_bad = 0                # ... none of the shifts does it (the commit check rejects the plan)
 
-    def _seg(self, s, h: tuple, base: int) -> tuple:
-        m = np.asarray(s.masks, np.int64)
+    @staticmethod
+    def _run(m: np.ndarray, h: tuple, base: int) -> tuple:
         if base > 0:
             head = m[:base]
             tail, h2 = hold_run(m[base:], h)
@@ -252,6 +287,46 @@ class HoldRealizer:
         else:
             lat, h2 = hold_run(m, h)
             prev = 0
+        return lat, prev, h2
+
+    def _claw(self, m: np.ndarray, d: int, h: tuple, base: int, face) -> tuple:
+        """M4d: a Clawline segment as it is sent (outcome_cmds: the key with the direction from its P, the segment's
+        last mask frame) and latched: the game throws the Clawline toward her FACING at P (strike.facing_track: the
+        last direction key latched), so at P the Clawline must latch (a rising edge) with her facing toward the
+        target - the direction latched with it, or none and she already faced it (face: her facing at the segment's
+        start; None: unknown - the direction must latch). M4c modelled the keys from P + 1 and sent them from P: a tap
+        of the other direction at P - 1 stayed latched at P (its minimum press) - the throw went the other way. When it
+        cannot be so at P the press moves j frames later with the direction alone first (j <= 3); the evaluation then
+        decides from the actual press frame. (latched masks to the press, prev, state after the press and the block)."""
+        dk, opp = _claw_dirs(d)
+        body = m[:-1]
+        lat_b, prev, hb = self._run(body, h, min(base, len(body)))
+        pm0 = int(lat_b[-1]) if len(lat_b) else prev
+        fb = None if face is None else int(sk.facing_track(face, lat_b)[-1])
+        for j in range(4):
+            cmds = np.array([dk] * j + [M_CLAW | dk] * CLAW_PRESS_F + [0] * 22, np.int64)
+            out, h2 = hold_run(cmds, hb)
+            mp = int(out[j])
+            pj = int(out[j - 1]) if j > 0 else pm0
+            if fb is None:
+                faces = bool(mp & dk) and not (mp & opp)
+            else:
+                faces = int(sk.facing_track(fb, out[:j + 1])[-1]) == (1 if d > 0 else -1)
+            if (mp & M_CLAW) and not (pj & M_CLAW) and faces:
+                if j:
+                    self.n_claw_shift += 1
+                break
+        else:
+            self.n_claw_bad += 1
+        lat = np.concatenate([lat_b, (out[:j + 1] & ~M_CLAW)]).astype(np.int64)
+        return lat, prev, h2
+
+    def _seg(self, s, h: tuple, base: int, face) -> tuple:
+        m = np.asarray(s.masks, np.int64)
+        if s.claw is not None and len(m):
+            lat, prev, h2 = self._claw(m, int(s.claw[0]), h, base, face)
+        else:
+            lat, prev, h2 = self._run(m, h, base)
         dsl = []
         for (i, iid) in s.dsl:
             if i < base:
@@ -264,23 +339,23 @@ class HoldRealizer:
             if j != i:
                 self.n_moved += 1
             dsl.append((j, iid))
-        if s.claw is not None:
-            dk = km.B_RIGHT if s.claw[0] > 0 else km.B_LEFT
-            _, h2 = hold_run(np.array([M_CLAW | dk] * CLAW_PRESS_F + [0] * 22, np.int64), h2)
         return lat, dsl, h2
 
-    def _chain(self, segs: list, h: tuple, base0: int) -> list:
+    def _chain(self, segs: list, h: tuple, base0: int, face) -> list:
         out = []
         for si, s in enumerate(segs):
-            lat, dsl, h2 = self._seg(s, h, base0 if si == 0 else 0)
-            var_alt = None if s.var_alt is None else {k: self._chain([v], h, 0)[0] for k, v in s.var_alt.items()}
-            out_alt = None if s.out_alt is None else {k: self._chain(v, h, 0) for k, v in s.out_alt.items()}
+            lat, dsl, h2 = self._seg(s, h, base0 if si == 0 else 0, face)
+            var_alt = None if s.var_alt is None else {k: self._chain([v], h, 0, face)[0]
+                                                      for k, v in s.var_alt.items()}
+            out_alt = None if s.out_alt is None else {k: self._chain(v, h, 0, face) for k, v in s.out_alt.items()}
             out.append(ms.Seg(lat, dsl, s.claw, s.tag, var_alt, out_alt))
             h = h2
+            if s.claw is not None:
+                face = 1 if s.claw[0] > 0 else -1          # after a hook she faces its direction (simulate)
         return out
 
     def __call__(self, plan):
-        return ms.Plan(self._chain(list(plan.segs), self.hold, self.n_pre), plan.origin, plan.note)
+        return ms.Plan(self._chain(list(plan.segs), self.hold, self.n_pre, self.face0), plan.origin, plan.note)
 
 
 def hold_tuple(hold: km.HoldState) -> tuple:
@@ -318,9 +393,11 @@ class OutData:
     later collision, else its end), end, cmds (outcome_cmds), pos [kc + 1, 2] her planned transform, recs / sids
     (TickCheck's records of the Clappers to kc), segs [(start frame, masks, dsl, claw)] as played, presses [(frame,
     iid)], variant, boxes {iid: robust body rows} (the strikes' targets), geo (off, BX, IIDB, coff, CO to kc), rare
-    {k: grown shapes} (the hammers), rare_k, label."""
+    {k: grown shapes} (the hammers), rare_k, label; M4d: why ('dev': its committed part ends at a deviation because a
+    collision follows), kcol (that collision's frame), ctrls [(P, control)] of its hooked / unhooked Clawlines whose
+    control is known (her accepting input from control on: the hook variant seen live)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
-                 "rare", "rare_k", "label", "contacts", "blocks")
+                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
@@ -391,10 +468,16 @@ def build_outs(ev, margins: bool = True) -> list:
         d.label = o.branch.label() if hasattr(o.branch, "label") else ""
         d.contacts = [(int(k), int(i), str(kd)) for (k, i, kd) in tr.contacts]
         d.blocks = []
+        d.ctrls = []
         for si, (k0, m, _, c) in enumerate(d.segs):
             if c is not None:
                 P = k0 + len(m)
                 d.blocks.append((P, d.segs[si + 1][0] if si + 1 < len(d.segs) else P + 34))
+                if si + 1 < len(d.segs):
+                    d.ctrls.append((P, d.segs[si + 1][0]))
+        d.why = str(getattr(o, "why", "") or "")
+        kcol = getattr(o, "k_col", None)
+        d.kcol = int(kcol) if (kcol is not None and kc < tr.end) else None
         outs.append(d)
     return outs
 
@@ -445,6 +528,73 @@ def _clappers_ok(o: OutData, n: int, obs: list, cfg: LiveCfg) -> bool:
                       (f[:b] == ob.face)):
             return False
     return True
+
+
+def _exact_ok(o: OutData, n: int, obs: list, cfg: LiveCfg) -> bool:
+    """M4d: the outcome's OWN timeline at frame n (its timing view's records, M4b TickCheck's rule): every observed
+    Clapper with a record at n matches one of them (state, frame in it within tol_j, x within tol_x, facing). No record
+    at n: no evidence. False: this timing view is not the truth (the spread rule, _clappers_ok, cannot tell the two
+    views of a branch apart)."""
+    for ob in obs:
+        r = o.vrecs.get(ob.iid)
+        if r is None:
+            continue
+        ks, st, j, x, f = r
+        a = int(np.searchsorted(ks, n, side="left"))
+        b = int(np.searchsorted(ks, n, side="right"))
+        if a == b:
+            continue
+        sid = o.sids.get(ob.st, -9)
+        oj = ob.j if ob.j is not None else int(round(ob.t * 60.0))
+        if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= cfg.tol_j) & (np.abs(x[a:b] - ob.x) <= cfg.tol_x) &
+                      (f[a:b] == ob.face)):
+            return False
+    return True
+
+
+def _control_ok(o: OutData, n: int, acc) -> bool:
+    """M4d: her accepting input at frame n against the outcome's Clawline controls (the hook variant): from the press
+    she has no control until control (M4a probes: 0 of 250 accepting in P + 3 .. control - 1), and has it from control
+    on. False: control seen before this outcome's (n <= control - 2), or not seen after it (control + 1 .. + 3)."""
+    if acc is None:
+        return True
+    for (P, c) in o.ctrls:
+        if P + 3 <= n <= c - 2 and acc:
+            return False
+        if c + 1 <= n <= c + CTRL_SETTLE + 1 and not acc:
+            return False
+    return True
+
+
+def possible(lp: "LivePlan", cons: list, n: int, obs: list, cfg: LiveCfg, acc=None, excl: set | None = None) -> list:
+    """M4d: the consistent outcomes (cons) that can still be the truth - not contradicted on their own timeline
+    (_exact_ok) or by her control (_control_ok) at frame n, nor before (excl: the sticky set of the plan in control,
+    updated here). None left (a timing between the views, a control between the variants): all of cons."""
+    if not cfg.views_exact and not cfg.ctl_check:
+        return list(cons)
+    out = []
+    for i in cons:
+        if excl is not None and i in excl:
+            continue
+        o = lp.outs[i]
+        if (cfg.views_exact and not _exact_ok(o, n, obs, cfg)) or (cfg.ctl_check and not _control_ok(o, n, acc)):
+            if excl is not None:
+                excl.add(i)
+            continue
+        out.append(i)
+    return out or list(cons)
+
+
+def _merge_keys(keys: list, prev: int) -> tuple:
+    """M4d: one command from the possible outcomes' commands for a frame: theirs when they agree; else the bits they
+    agree on and, for the others, the bit as sent for the frame before (no press none of them is sure of: a key
+    pressed in a Clawline's pull is queued to its control) - (mask, disagreeing bits)."""
+    a = o_ = int(keys[0])
+    for k in keys[1:]:
+        a &= int(k)
+        o_ |= int(k)
+    dis = a ^ o_
+    return (a | (dis & int(prev))), dis
 
 
 def _clapper_pred(o: OutData, n: int) -> dict:
@@ -530,11 +680,18 @@ def _first_collision_out(o: OutData, tr, s: int, k1: int) -> int | None:
     return kb if kb >= 0 else None
 
 
+def _claw_dirs(d: int) -> tuple:
+    return (km.B_RIGHT, km.B_LEFT) if d > 0 else (km.B_LEFT, km.B_RIGHT)
+
+
 def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray, hold: tuple, lat_s: int, her_xy,
-                 obs: list, cfg: LiveCfg, idx=None, tol: float | None = None) -> tuple:
+                 obs: list, cfg: LiveCfg, idx=None, tol: float | None = None, acc=None) -> tuple:
     """THE EXACT HERO2 SIMULATION CHECK FROM THE CURRENT STATE of a received plan (module docstring, 1): (ok, why,
     info) - info: the outcomes kept (alive at f + 2), their re-simulated paths (pos_over), the max path deviation,
-    the outcomes checked and simulated, ms."""
+    the outcomes checked and simulated, ms. M4d: the outcomes that can still be the truth (possible(): not contradicted
+    on their own timing view's records, her control) must all reach the frame being chosen ('ended': one of them has to
+    deviate before it), every one is re-simulated; a Clawline press the plan does not have, or one of its own not
+    latched with the direction toward its target at P (the game throws it toward her facing), rejects it."""
     t0 = time.perf_counter()
     s = int(fo - lp.t_a)
     info = {"s": s}
@@ -544,6 +701,8 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
     r0 = s + L + 1                           # the frame being chosen (f + 2)
     if all(lp.outs[i].kc < r0 for i in (range(len(lp.outs)) if idx is None else idx)):
         return False, "expired", info        # every outcome's committed part ends before the frame being chosen
+    if int(lat_s) & M_CLAW:
+        return False, "in a Clawline", info  # a Clawline latched now: she is in its antic / pull (no control)
     cons, bad_h, bad_c = lp.consistent(s, her_xy, obs, cfg, idx=idx, hero=False)
     info["cons"] = len(cons)
     tol = cfg.tol_commit if tol is None else tol
@@ -554,7 +713,18 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
             info["pred"] = {str(k % 1000): v for k, v in _clapper_pred(o_, s).items()}
             info["obs"] = [[ob.iid % 1000, ob.st, ob.j, round(float(ob.x), 2), ob.face] for ob in obs]
         return False, "clappers", info
-    alive = [i for i in cons if lp.outs[i].kc >= r0]
+    if cfg.views_exact:
+        poss = possible(lp, cons, s, obs, cfg, acc)
+        info["poss"] = len(poss)
+        ended = [i for i in poss if lp.outs[i].kc < r0]
+        if ended:
+            # a possible truth's committed part ends before the frame being chosen (M3: she deviates there - a
+            # collision follows with the plan's keys): not this plan's keys then
+            info.update(out=ended[0], kc=int(lp.outs[ended[0]].kc))
+            return False, "ended", info
+        alive = poss
+    else:
+        alive = [i for i in cons if lp.outs[i].kc >= r0]
     if not alive:
         return False, "short", info
     face0 = int(S0[km.FACE]) if S0[km.FACE] != 0 else 1
@@ -567,13 +737,22 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
         o = lp.outs[i]
         cmds = np.concatenate([np.asarray(inflight, np.int64), o.cmds[r0:o.end + 1]])
         lat = hold_filter1(cmds, hold)
-        # a press of the fallback's still in flight (or one the filter moved) that the plan does not have
+        # a press of the fallback's still in flight (or one the filter moved) that the plan does not have; M4d: the
+        # same for a Clawline press, and the plan's own Clawline latched at its P with the direction toward the target
         planned = {k for (k, _) in o.presses}
+        claws = {int(k0) + len(m): c for (k0, m, _, c) in o.segs if c is not None}
+        fac = sk.facing_track(face0, lat) if claws else None
         pm = int(lat_s)
         for q in range(min(len(lat), max(0, o.kc - s))):
             m = int(lat[q])
-            if _rising(m, pm, km.B_ATTACK) and (s + 1 + q) not in planned:
+            k = s + 1 + q
+            if _rising(m, pm, km.B_ATTACK) and k not in planned:
                 return False, "unplanned slash", info
+            if _rising(m, pm, M_CLAW) and k not in claws:
+                return False, "unplanned Clawline", info
+            if k in claws and not (_rising(m, pm, M_CLAW) and int(fac[q + 1]) == (1 if claws[k][0] > 0 else -1)):
+                info.update(claw_lat=int(m), claw_k=int(k))
+                return False, "claw latch", info
             pm = m
         key = (o.variant, lat.tobytes(), tuple((iid, o.boxes[iid].tobytes()) for iid in sorted(o.boxes)),
                tuple((k0, c) for (k0, _, _, c) in o.segs))
@@ -733,12 +912,24 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
     if aborted():
         return {**base, "status": "abort"}
     S.abort_fn = aborted
-    S.realizer = HoldRealizer(len(pre.masks), pre.hold_after)
+    f0 = float(np.asarray(snap["S"], float).reshape(km.K, -1)[km.FACE, 0])
+    S.realizer = HoldRealizer(len(pre.masks), pre.hold_after, face0=1 if f0 >= 0 else -1)
     t0 = time.perf_counter()
     res = S.decide(sit, prev=prev, cap_s=cap, prefix=pre)
     ms_ = (time.perf_counter() - t0) * 1e3
+    # M4d: the plan in control (the kept plan) evaluated from this newer snapshot: safe or not; and whether its
+    # bridge is safe to follow - every plan of this search starts with the prefix (the keys in flight and that
+    # bridge): the noop (the prefix, then stop) or the chosen plan safe. The controller drops the plan in control on
+    # 'not safe', or cuts it after the bridge when the bridge is (noop_safe)
+    noop_ev = next((e for e in res.tried if e is not None and e.plan.origin == "noop"), None)
+    ch = res.ev
     base.update(ms=round(ms_, 1), cap=round(cap, 3), n_pre=len(pre.masks), n_cand=res.n_cand, had_prev=prev is not None,
-                moved=S.realizer.n_moved, dropped=S.realizer.n_dropped)
+                moved=S.realizer.n_moved, dropped=S.realizer.n_dropped, claw_shift=S.realizer.n_claw_shift,
+                claw_bad=S.realizer.n_claw_bad,
+                prev_safe=None if (prev is None or carried) else any(e is not None and e.plan is prev and e.safe
+                                                                     for e in res.tried),
+                noop_safe=bool((noop_ev is not None and getattr(noop_ev, "finished", True) and noop_ev.safe) or
+                               (ch is not None and ch.safe and getattr(ch, "finished", True))))
     if aborted():
         return {**base, "status": "abort"}
     e = res.ev
@@ -761,7 +952,7 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
                     note=e.plan.note, ms=round(ms_, 1), cap=cap, ctrl_seen=base["ctrl_seen"],
                     had_prev=prev is not None, n_cand=res.n_cand, timed_out=bool(res.timed_out),
                     steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time(),
-                    carried=bool(carried and res.kept),
+                    carried=bool(carried and res.kept), prev_safe=base["prev_safe"], noop_safe=base["noop_safe"],
                     cmds_pre=np.asarray(snap["cmds"], np.int64)[:len(pre.masks)].copy())
 
 
@@ -817,8 +1008,12 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     boost = boost_self(cfg.prio, cfg.cpus)
     try:
         import numba
-        numba.set_num_threads(max(1, min(int(cfg.numba_threads), numba.config.NUMBA_NUM_THREADS)))
-        boost += f", numba {numba.get_num_threads()}"
+        nt = max(1, min(int(cfg.numba_threads), numba.config.NUMBA_NUM_THREADS))
+        numba.set_num_threads(nt)
+        # M4d: numba's thread count is per thread - the search's background pass thread (search._bg_pool) ran its
+        # parallel pass on NUMBA_NUM_THREADS threads; set there too
+        nb = ms._bg_pool().submit(lambda: (numba.set_num_threads(nt), numba.get_num_threads())[1]).result()
+        boost += f", numba {numba.get_num_threads()} (bg {nb})"
     except Exception as e:  # noqa: BLE001
         boost += f", numba threads unchanged ({e})"
     W = ms.World()
@@ -861,11 +1056,26 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     th.start()
     main_id = threading.get_ident()
 
+    parent = None
+    try:
+        import multiprocessing as _mp
+        parent = _mp.parent_process()            # None in the bot's own process (a worker in a thread: tests)
+    except Exception:  # noqa: BLE001
+        parent = None
+
     def watchdog():
-        # a search past hang_s: its stack to the bot (and its snapshot to dump_dir), once per search
+        # a search past hang_s: its stack to the bot (and its snapshot to dump_dir), once per search; M4d: the bot's
+        # process gone (killed outright: its exit handlers never ran) -> this worker exits (M4c's orphans kept running)
         seen = None
         while not state["stop"]:
             time.sleep(0.5)
+            if parent is not None:
+                try:
+                    alive = parent.is_alive()
+                except Exception:  # noqa: BLE001
+                    alive = True
+                if not alive:
+                    os._exit(0)
             cur, t_cur = state.get("cur"), state.get("t_cur")
             if cur is None or t_cur is None or cur["seq"] == seen or time.perf_counter() - t_cur < cfg.hang_s:
                 continue
@@ -957,19 +1167,19 @@ class Map2Controller:
         self.ready: dict = {}
         self.ep = -1
         self.seq = 0
-        self.st = Counter()                 # counters over the run
-        self.ms_pre: list = []
-        self.ms_post: list = []
-        self.ms_check: list = []
-        self.lat: list = []                 # sent plans: the search's ms
-        self.age_commit: list = []          # frames from a committed plan's anchor to its commit
-        self.bridge_hist = {"plan": Counter(), "m2": Counter(), "script": Counter()}   # frames a bridge was followed
+        self.st = Counter()                 # counters over the run (stats()['run_counts'])
+        self.run_ms = {"pre": [], "post": [], "check": [], "search": [], "age": []}   # the run's times (stats()['run'])
         self.errors: list = []
+        self._stopped = False
         self._reset_ep()
 
     # ---- processes ----
     def start(self, wait: bool = True) -> float:
-        """Spawn the workers (their own processes) and wait until each reports ready (warmed)."""
+        """Spawn the workers (their own processes) and wait until each reports ready (warmed). M4d: the workers'
+        input queues never block the bot's exit (cancel_join_thread: notes still unsent to a worker that stopped
+        reading are dropped - M4c's bot could hang at exit on a full pipe to a dead or warming worker), and stop() runs
+        at exit (atexit: before multiprocessing's own exit handler)."""
+        import atexit
         import multiprocessing as mp
         t0 = time.perf_counter()
         self._ctx = mp.get_context("spawn")
@@ -977,9 +1187,11 @@ class Map2Controller:
         n = max(1, int(self.cfg.parts))
         for part in range(n):
             q = self._ctx.Queue()
+            q.cancel_join_thread()
             self.in_qs.append(q)
             self.idles.append(self._ctx.Value("b", 0))
             self.procs.append(self._spawn(part, n, q))
+        atexit.register(self.stop)
         if wait:
             self._wait_ready(n, t0)
         return time.perf_counter() - t0
@@ -1008,21 +1220,36 @@ class Map2Controller:
         """Tests: workers run elsewhere (threads) on these queues (idles: their flags; None: a snapshot every tick)."""
         self.in_qs, self.out_q, self.idles = list(in_qs), out_q, list(idles or [])
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 5.0) -> None:
+        """The workers asked to stop, joined (timeout), the ones still alive terminated (they are this bot's own
+        processes); safe to call twice (M4d: also at exit)."""
+        if self._stopped:
+            return
+        self._stopped = True
         for q in self.in_qs:
             try:
                 q.put({"stop": True})
             except Exception:  # noqa: BLE001
                 pass
+        t_end = time.perf_counter() + timeout
         for p in self.procs:
-            p.join(timeout=5)
+            try:
+                p.join(timeout=max(0.0, t_end - time.perf_counter()))
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=1.0)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _check_procs(self) -> None:
         for part, p in enumerate(self.procs):
             if not p.is_alive():
-                self.st["worker_restarts"] += 1
+                self._inc("worker_restarts")
                 self.errors.append({"kind": "restart", "part": part, "exitcode": p.exitcode, "ep": self.ep})
-                self.procs[part] = self._spawn(part, len(self.procs), self.in_qs[part])
+                try:
+                    self.procs[part] = self._spawn(part, len(self.procs), self.in_qs[part])
+                except Exception as e:  # noqa: BLE001 - (M4d) e.g. CreateProcess failing under memory pressure
+                    self._error("spawn", e)
 
     def warm(self) -> float:
         """The bot side's compiled paths (the hold filter, a re-simulation, the collision kernel)."""
@@ -1058,26 +1285,68 @@ class Map2Controller:
         self.rows: list = []
         self.row: dict = {}
         self.last_msg: dict = {}
-        self.ep_c = Counter()
+        self.ep_c = Counter()               # this episode's counters (stats()['counts']; M4d: every counter, per episode)
+        # this episode's times (M4d: the stats per episode - an attempt row is one episode)
+        self.ms_pre: list = []
+        self.ms_post: list = []
+        self.ms_check: list = []
+        self.lat: list = []                 # sent plans: the search's ms
+        self.age_commit: list = []          # frames from a committed plan's anchor to its commit
+        self.bridge_hist = {"plan": Counter(), "m2": Counter(), "script": Counter()}   # frames a bridge was followed
         self.bridges: list = []             # [kind, first frame, keys, frames followed, alive] (the bridge audit)
+        # M4d
+        self.ctrl_excl: set = set()         # the plan in control's outcomes contradicted so far (not the truth)
+        self.ctrl_cut = None                # its last frame allowed by a newer search (its bridge, then stop)
+        self._exe = None                    # the last execution: (pid, r, possible outcomes, best)
+        self._fo_prev = -10 ** 9            # the previous tick's observation frame (a freeze / hit between ticks)
+        self._verdict = None                # a newer search's verdict on the plan in control: (pid, cut frame | None)
+        self.own_hist: dict = {}            # frame -> who sent its keys ('m2', 'cog', the fallback's owner)
+        self.dmg_frames: list = []          # her damage frames this episode
+        self.n_err = 0
+        self.disabled = False               # too many errors on the bot's side: map2 off for this episode
+        self.last_drop = None               # (frame, why) of the last plan dropped (end_dev: a 'dev' outcome's end)
+
+    def _inc(self, key: str, n: int = 1) -> None:
+        self.st[key] += n
+        self.ep_c[key] += n
+
+    def _error(self, where: str, e: BaseException) -> None:
+        """M4d: an exception on the bot's side (pre / post / feed): logged, the plan dropped by the caller, the fallback
+        has the keys; after err_max in an episode map2 is off for the rest of it."""
+        import traceback
+        self.n_err += 1
+        self._inc("errors_" + where)
+        if len(self.errors) < 50:
+            self.errors.append({"kind": "bot", "where": where, "error": repr(e)[:300],
+                                "tb": traceback.format_exc()[-1500:], "ep": self.ep})
+        if self.n_err >= self.cfg.err_max:
+            self.disabled = True
 
     def reset(self, episode: int) -> None:
-        self.flush()
+        try:
+            self.flush()
+        except Exception as e:  # noqa: BLE001 - the log is not worth the episode
+            self._error("flush", e)
         self.ep = int(episode)
         self._reset_ep()
 
     def feed(self, raw: dict, f: int) -> None:
-        """Every STATE (ticks and caught-up frames): the Clapper tracker in game frames, her latched keys."""
-        dt_ = raw.get("dt")
-        dt = 1.0 / 60.0 if dt_ is None else float(dt_)
-        self.g = 0.0 if self.g is None else self.g + min(max(dt, 0.0), 0.05) * 60.0
-        self.trk.feed(raw, int(round(self.g)))
-        self.lat_hist.append((int(f), int((raw.get("act") or {}).get("mask") or 0)))
-        if dt <= 0.0:
-            self.last_freeze = int(f)
-        for ev in raw.get("ev") or ():
-            if ev.get("k") == "damage":
-                self.last_hit = int(f)
+        """Every STATE (ticks and caught-up frames): the Clapper tracker in game frames, her latched keys, her freezes
+        (M4d: any frame whose dt is not one game frame - the freeze, its slow-time ramp) and hits."""
+        try:
+            dt_ = raw.get("dt")
+            dt = 1.0 / 60.0 if dt_ is None else float(dt_)
+            self.g = 0.0 if self.g is None else self.g + min(max(dt, 0.0), 0.05) * 60.0
+            self.trk.feed(raw, int(round(self.g)))
+            self.lat_hist.append((int(f), int((raw.get("act") or {}).get("mask") or 0)))
+            if not (self.cfg.dt_lo <= dt * 60.0 <= self.cfg.dt_hi):
+                self.last_freeze = int(f)
+            for ev in raw.get("ev") or ():
+                if ev.get("k") == "damage":
+                    self.last_hit = int(f)
+                    self.dmg_frames.append(int(f))
+        except Exception as e:  # noqa: BLE001 - map2 must not end the run (M4d)
+            self._error("feed", e)
 
     # ---- the tick ----
     def _drain(self, fo: int) -> None:
@@ -1089,40 +1358,98 @@ class Map2Controller:
             except (queue.Empty, EOFError, OSError):
                 break
             if isinstance(msg, LivePlan):
-                self.st["plans_recv"] += 1
+                self._inc("plans_recv")
                 self.lat.append(msg.ms)
+                self.run_ms["search"].append(msg.ms)
                 self.last_msg = {"part": msg.part, "seq": msg.seq, "status": "plan", "ms": msg.ms, "pid": msg.pid,
                                  "value": round(msg.value, 3), "n_cand": msg.n_cand, "n_pre": msg.n_pre}
                 if msg.ep != self.ep:
-                    self.st["stale_ep"] += 1
+                    self._inc("stale_ep")
                     continue
+                self._note_verdict(getattr(msg, "ctrl_seen", None), getattr(msg, "prev_safe", None),
+                                   getattr(msg, "noop_safe", False), msg.t_a, msg.n_pre, "plan")
                 msg.t_recv_f = int(fo)
                 self.pending.append(msg)
-                self.ep_c["plans"] += 1
+                self._inc("plans")
             elif isinstance(msg, dict):
                 k = msg.get("kind")
                 if k == "status":
-                    self.st["w_" + str(msg.get("status")).split(":")[0]] += 1
+                    self._inc("w_" + str(msg.get("status")).split(":")[0])
                     self.last_msg = {kk: msg.get(kk) for kk in ("part", "seq", "status", "ms", "cap", "n_pre", "n_cand",
-                                                                "moved", "dropped", "value") if msg.get(kk) is not None}
+                                                                "moved", "dropped", "value", "prev_safe")
+                                     if msg.get(kk) is not None}
+                    if msg.get("ep") == self.ep:
+                        self._note_verdict(msg.get("ctrl_seen"), msg.get("prev_safe"), msg.get("noop_safe", False),
+                                           msg.get("fo"), msg.get("n_pre"), str(msg.get("status")))
                 elif k == "ready":
                     self.ready[msg["part"]] = msg
                 elif k in ("error", "exit"):
-                    self.st["w_" + k + ("_" + str(msg.get("where")) if msg.get("where") else "")] += 1
+                    self._inc("w_" + k + ("_" + str(msg.get("where")) if msg.get("where") else ""))
                     self.last_msg = {"part": msg.get("part"), "seq": msg.get("seq"),
                                      "status": f"{k}:{msg.get('where') or msg.get('why') or ''}", "s": msg.get("s")}
                     if len(self.errors) < 50:
                         self.errors.append(msg)
 
-    def _drop(self, why: str) -> None:
+    def _note_verdict(self, ctrl_seen, prev_safe, noop_safe, fo_snap, n_pre, status: str) -> None:
+        """M4d: a search from a newer snapshot evaluated the plan in control (its kept plan) and found it UNSAFE: the
+        plan is cut after that search's bridge when its noop (the bridge, then stop) was safe, else dropped (pre)."""
+        if not self.cfg.unsafe_drop or self.ctrl is None or ctrl_seen != self.ctrl.pid or prev_safe is not False or                 status.startswith("abort"):
+            return
+        cut = int(fo_snap) + int(n_pre) if (noop_safe and fo_snap is not None and n_pre is not None) else None
+        self._inc("verdict_" + ("cut" if cut is not None else "drop"))
+        v = self._verdict
+        if v is None or v[0] != self.ctrl.pid or (v[1] is not None and (cut is None or cut < v[1])):
+            self._verdict = (self.ctrl.pid, cut, status)
+
+    def _drop(self, why: str, info: dict | None = None) -> None:
         if self.ctrl is not None:
-            self.st["drop_" + why] += 1
-            self.ep_c["drop_" + why] += 1
+            self._inc("drop_" + why)
             self.trig.append("drop")
+            self.last_drop = (int(self._fo_prev), str(why))
         self.ctrl, self.ctrl_idx, self.ctrl_pos, self.ctrl_since = None, [], {}, None
+        self.ctrl_excl, self.ctrl_cut, self._exe, self._verdict = set(), None, None, None
+
+    def _tm(self, kind: str, v: float) -> None:
+        getattr(self, {"pre": "ms_pre", "post": "ms_post", "check": "ms_check", "age": "age_commit"}[kind]).append(v)
+        self.run_ms[kind].append(v)
 
     def pre(self, f: int, fo: int, raw: dict, S0: np.ndarray, inflight: np.ndarray, hold) -> int | None:
-        """The keys map2 sends for frame f + 2, or None (the fallback's): module docstring 1 - 2."""
+        """The keys map2 sends for frame f + 2, or None (the fallback's): module docstring 1 - 2. M4d: an exception
+        here drops the plan and returns None (the fallback), as the commit check's always did."""
+        if self.disabled:
+            self.row = {"f": int(f), "fo": int(fo), "why": "off"}
+            return None
+        try:
+            return self._pre(f, fo, raw, S0, inflight, hold)
+        except Exception as e:  # noqa: BLE001 - map2 must not end the run
+            self._error("pre", e)
+            self._drop("error")
+            self.pending = []
+            self.took = False
+            self.row = {"f": int(f), "fo": int(fo), "why": "error"}
+            return None
+
+    def _hit_owner(self, f0: int, f1: int) -> None:
+        """M4d: her hits in frames f0 + 1 .. f1 by who sent the keys applied at the hit frame (map2 or the fallback) -
+        drop_hit counts only the hits the plan in control saw."""
+        for d in self.dmg_frames:
+            if f0 < d <= f1:
+                own = self._own_at(d)
+                self._inc("hits")
+                self._inc("hit_" + ("m2" if own == "m2" else "fb"))
+                ld = self.last_drop
+                if own != "m2" and ld is not None and 0 <= d - ld[0] <= 40:
+                    # (the stage audit, S6: a hit within 40 frames after map2 handed the keys back, by why)
+                    self._inc("hit_after_drop_" + ld[1])
+
+    def _own_at(self, k: int) -> str | None:
+        v = self.own_hist.get(k)
+        if v is not None:
+            return v
+        before = [kk for kk in self.own_hist if kk < k]
+        return self.own_hist[max(before)] if before else None
+
+    def _pre(self, f: int, fo: int, raw: dict, S0: np.ndarray, inflight: np.ndarray, hold) -> int | None:
         t0 = time.perf_counter()
         S0 = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
         row = {"f": int(f), "fo": int(fo)}
@@ -1133,21 +1460,41 @@ class Map2Controller:
         self._drain(fo)
         h = raw.get("hero") or {}
         her = h.get("pos")
+        acc = bool(h.get("hero_accepting_input", True))
         obs = self.trk.obs()
-        self._triggers(fo, obs)
+        # M4d: a hit or a freeze since the previous tick (a skipped tick's frames too: the plan's frame count is
+        # STATE frames, a freeze stops the game's), the hit first (its own freeze follows it)
+        prev_fo, self._fo_prev = self._fo_prev, int(fo)
+        hit_new = self.last_hit > prev_fo
+        if hit_new:
+            self._hit_owner(prev_fo, fo)
+        self._triggers(fo, obs, hit_new)
         why = None
         dt_ = raw.get("dt")
-        if her is None or (dt_ is not None and float(dt_) <= 0.0):
-            self._drop("freeze")
-            why = "freeze"
-        elif self.last_hit >= fo - 1:
+        if hit_new or self.last_hit >= fo - 1:
             self._drop("hit")
             why = "hit"
+        elif her is None or (dt_ is not None and float(dt_) <= 0.0) or self.last_freeze > prev_fo:
+            self._drop("freeze")
+            why = "freeze"
+        elif self._verdict is not None and self.ctrl is not None and self._verdict[0] == self.ctrl.pid and \
+                self._verdict[1] is None:
+            # M4d: a newer search found the plan in control unsafe and its noop unsafe or unchecked (a replacement may
+            # still be committed below)
+            row["verdict"] = self._verdict[2]
+            self._drop("unsafe")
+            why = "unsafe"
         inflight = self._eff_inflight(fo, f, inflight)
-        hold_t = hold_tuple(hold)
+        hold_t = self._hold_clean(hold_tuple(hold), fo)
         lat_s = int((raw.get("act") or {}).get("mask") or 0)
-        # 1. commit
-        if why is None and self.pending:
+        if self._cog_near(fo):
+            lat_s &= ~COG                    # M4d: a Cogfly throw's keys are not the kinematics' (the policy's rule)
+        # 1. commit (M4d: never while she has no control - a Clawline under way, its antic, a stun)
+        no_input = (not acc) or bool(self._busy_claw(fo, h))
+        if no_input and self.pending and why is None:
+            self._inc("commit_wait_noinput")
+            row["noinput"] = 1
+        if why in (None, "unsafe") and self.pending and not no_input:
             self.pending = [x for x in self.pending if fo - x.t_a <= self.cfg.stale and x.t_a > self.last_freeze]
             cands = self.pending
             if self.ctrl is not None:
@@ -1172,13 +1519,13 @@ class Map2Controller:
                     return int(_o.cmds[r_]) if r_ < len(_o.cmds) else -1
                 bridge_ok = pre is not None and all(self._sent_at(k) == expect(k)
                                                     for k in range(lp.t_a + 1, f + 2))
-                self.st["bridge_" + ("ok" if bridge_ok else "broken")] += 1
+                self._inc("bridge_" + ("ok" if bridge_ok else "broken"))
                 try:
                     if self.cfg.replay and self.cfg.replay_strict and not bridge_ok:
                         ok, why_c, info = False, "bridge", {"s": int(fo - lp.t_a)}
                     else:
                         ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s,
-                                                       her, obs, self.cfg)
+                                                       her, obs, self.cfg, acc=acc)
                     info["bridge"] = bool(bridge_ok)
                 except Exception as e:  # noqa: BLE001 - a bad plan is dropped, the bot goes on
                     ok, why_c, info = False, "error", {"error": repr(e)[:200]}
@@ -1187,31 +1534,38 @@ class Map2Controller:
                         self.errors.append({"kind": "check", "error": repr(e)[:300],
                                             "tb": traceback.format_exc()[-1200:]})
                 msc = (time.perf_counter() - tc) * 1e3
-                self.ms_check.append(msc)
+                self._tm("check", msc)
                 self.pending.remove(lp)
                 row.setdefault("chk", []).append([lp.pid, bool(ok), why_c, round(msc, 2), info.get("s"),
                                                   info.get("cons"), info.get("dev"), info.get("col")] +
                                                  ([info.get("pred"), info.get("obs")] if "pred" in info else []))
-                self.st["check_" + why_c] += 1
-                self.ep_c["check_" + why_c] += 1
+                self._inc("check_" + why_c)
                 if ok:
                     if self.ctrl is not None:
-                        self.st["replaced"] += 1
+                        self._inc("replaced")
+                    self.ctrl_excl, self.ctrl_cut, self._exe, self._verdict = set(), None, None, None
                     self.ctrl, self.ctrl_idx, self.ctrl_pos = lp, list(info["alive"]), dict(info["pos_over"])
                     self.ctrl_since = int(f)
                     self.took = True
+                    why = None
                     self.new_plan_obj = lp.plan
-                    self.age_commit.append(int(fo - lp.t_a))
-                    self.st["commits"] += 1
-                    self.ep_c["commits"] += 1
+                    self._tm("age", int(fo - lp.t_a))
+                    self._inc("commits")
                     row["commit"] = {"pid": lp.pid, "t_a": lp.t_a, "value": round(lp.value, 3), "hits": round(lp.hits, 3),
                                      "origin": lp.origin, "note": lp.note, "ms": lp.ms, "n_pre": lp.n_pre,
                                      "outs": len(lp.outs), "alive": len(info["alive"]), "steps": lp.steps,
                                      "bridge": bool(info.get("bridge")), "carried": bool(getattr(lp, "carried", False)),
-                                     "outcomes": lp.outcomes,
+                                     "outcomes": lp.outcomes, "poss": info.get("poss"),
+                                     "dev": sorted({(o.kc, o.kcol) for o in lp.outs if o.kcol is not None}),
                                      "cp": sorted({(k, i, kd) for o in lp.outs for (k, i, kd) in o.contacts})}
                     self.trig.append("commit")
                     break
+        # M4d: the newer search's verdict on the plan still in control: its noop (the bridge, then stop) was safe -
+        # the plan is cut after that bridge
+        if self._verdict is not None and self.ctrl is not None and self._verdict[0] == self.ctrl.pid and                 self._verdict[1] is not None:
+            self.ctrl_cut = self._verdict[1] if self.ctrl_cut is None else min(self.ctrl_cut, self._verdict[1])
+            row["cut"] = int(self.ctrl_cut)
+            self._verdict = None
         # 2. execute
         mask = None
         if self.ctrl is not None and why is None:
@@ -1220,20 +1574,19 @@ class Map2Controller:
             r = int(f + 2 - lp.t_a)
             cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=not self.cfg.replay,
                                                pos_over=self.ctrl_pos)
-            alive = [i for i in cons if lp.outs[i].kc >= r and r < len(lp.outs[i].cmds)]
             if not cons and bad_h:
                 # her position left the path while the Clappers are consistent: the plan re-anchored to her state
                 # now (the exact re-simulation, the collisions; the path within tol_reanchor) or dropped
                 tc = time.perf_counter()
                 try:
                     ok, why_r, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs, self.cfg,
-                                                   idx=self.ctrl_idx, tol=self.cfg.tol_reanchor)
+                                                   idx=self.ctrl_idx, tol=self.cfg.tol_reanchor, acc=acc)
                 except Exception as e:  # noqa: BLE001
                     ok, why_r, info = False, "error", {"error": repr(e)[:200]}
-                self.ms_check.append((time.perf_counter() - tc) * 1e3)
+                self._tm("check", (time.perf_counter() - tc) * 1e3)
                 row.setdefault("chk", []).append([lp.pid, bool(ok), "re:" + why_r, round((time.perf_counter() - tc) * 1e3, 2),
                                                   info.get("s"), info.get("cons"), info.get("dev"), info.get("col")])
-                self.st["reanchor_" + why_r] += 1
+                self._inc("reanchor_" + why_r)
                 if ok:
                     self.ctrl_idx, self.ctrl_pos = list(info["alive"]), dict(info["pos_over"])
                     cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=True,
@@ -1252,34 +1605,70 @@ class Map2Controller:
                         row["dh"] = [round(float(her[0] - pos[n, 0]), 3), round(float(her[1] - pos[n, 1]), 3)]
                 self._drop("hero" if bad_h and not bad_c else "clappers")
                 why = "fail:" + ("hero" if bad_h and not bad_c else "clappers")
-            elif not alive:
-                self._drop("end")
-                why = "end"
             else:
-                best = max(alive, key=lambda i: lp.outs[i].p)
-                mask = int(lp.outs[best].cmds[r])
-                agree = all(int(lp.outs[i].cmds[r]) == mask for i in alive)
-                why = "commit" if self.took else "keep"
-                row.update(pid=lp.pid, n=n, left=max(lp.outs[i].kc for i in alive) - r,
-                           pc=round(sum(lp.outs[i].p for i in cons), 3), age=int(fo - lp.t_a), lat=lp.ms)
-                if not agree:
-                    row["dis"] = len({int(lp.outs[i].cmds[r]) for i in alive})
-                    self.st["disagree"] += 1
-                o = lp.outs[best]
-                pos = self.ctrl_pos.get(best, o.pos)
-                if her is not None and n < len(pos):
-                    row["dh"] = [round(float(her[0] - pos[n, 0]), 3), round(float(her[1] - pos[n, 1]), 3)]
-                pc_ = _clapper_pred(o, n)
-                row["dc"] = [[ob.iid % 1000, ob.st, *(pc_.get(ob.iid) or (None, None, None))[:1],
-                              None if ob.iid not in pc_ else int((ob.j or 0) - pc_[ob.iid][1]),
-                              None if ob.iid not in pc_ else round(float(ob.x - pc_[ob.iid][2]), 3)] for ob in obs]
-                if any(k == n for o_ in (lp.outs[i] for i in cons) for (k, _, _) in o_.contacts):
-                    row["cp"] = "contact"
+                mask, why = self._execute(lp, cons, n, r, f, her, obs, acc, row)
         if mask is None and why is None:
             why = "none" if not self.pending else "wait"
         row["why"] = why
-        self.ms_pre.append((time.perf_counter() - t0) * 1e3)
+        self._tm("pre", (time.perf_counter() - t0) * 1e3)
         return mask
+
+    def _execute(self, lp: LivePlan, cons: list, n: int, r: int, f: int, her, obs: list, acc: bool, row: dict) -> tuple:
+        """The plan in control's command for frame r (from its anchor) from its consistent outcomes cons (module
+        docstring 2). M4d: only the POSSIBLE ones (possible(): the sticky exclusions of the timing views and the hook
+        variants) count, and the plan ENDS as soon as one of them has to deviate (its committed part ended: M3's
+        reveal + lag before a collision) - M4c ran on with another outcome's keys (a late timing view's) into the
+        collision the search had avoided only by deviating; disagreeing outcomes: the bits they agree on, the others
+        as sent for the frame before. (mask | None, why)."""
+        cfg = self.cfg
+        if cfg.views_exact or cfg.ctl_check:
+            poss = possible(lp, cons, n, obs, cfg, acc, self.ctrl_excl)
+        else:
+            poss = list(cons)
+        if self.ctrl_cut is not None and f + 2 > self.ctrl_cut:
+            self._drop("cut")
+            return None, "cut"
+        if cfg.views_exact:
+            ended = [i for i in poss if lp.outs[i].kc < r or r >= len(lp.outs[i].cmds)]
+            if ended:
+                o = lp.outs[ended[0]]
+                row["ended"] = [int(o.kc), o.why, o.kcol, len(poss), len(cons)]
+                # (S6: a 'dev' outcome's end - a collision follows its committed part; the fallback must take the
+                # escape the search's exit check found - counted apart for the gate's audit)
+                self._drop("end_dev" if any(lp.outs[i].kcol is not None for i in ended) else "end")
+                return None, "end"
+            alive = poss
+        else:
+            alive = [i for i in poss if lp.outs[i].kc >= r and r < len(lp.outs[i].cmds)]   # (both off: M4c's rule)
+            if not alive:
+                self._drop("end")
+                return None, "end"
+        best = max(alive, key=lambda i: lp.outs[i].p)
+        keys = [int(lp.outs[i].cmds[r]) for i in alive]
+        mask = int(lp.outs[best].cmds[r])
+        agree = all(k == mask for k in keys)
+        if not agree:
+            row["dis"] = len(set(keys))
+            self._inc("disagree")
+            if cfg.dis_hold:
+                prev = self._sent_at(int(f) + 1)
+                mask, dis = _merge_keys(keys, 0 if prev is None else prev)
+                row["dis_bits"] = int(dis)
+        self._exe = (lp.pid, r, list(alive), best)
+        why = "commit" if self.took else "keep"
+        row.update(pid=lp.pid, n=n, left=min(lp.outs[i].kc for i in alive) - r,
+                   pc=round(sum(lp.outs[i].p for i in cons), 3), age=int(n), lat=lp.ms, poss=len(alive))
+        o = lp.outs[best]
+        pos = self.ctrl_pos.get(best, o.pos)
+        if her is not None and n < len(pos):
+            row["dh"] = [round(float(her[0] - pos[n, 0]), 3), round(float(her[1] - pos[n, 1]), 3)]
+        pc_ = _clapper_pred(o, n)
+        row["dc"] = [[ob.iid % 1000, ob.st, *(pc_.get(ob.iid) or (None, None, None))[:1],
+                      None if ob.iid not in pc_ else int((ob.j or 0) - pc_[ob.iid][1]),
+                      None if ob.iid not in pc_ else round(float(ob.x - pc_[ob.iid][2]), 3)] for ob in obs]
+        if any(k == n for o_ in (lp.outs[i] for i in cons) for (k, _, _) in o_.contacts):
+            row["cp"] = "contact"
+        return mask, why
 
     def _sent_at(self, k: int) -> int | None:
         """The command the oracle applies at frame k: the ACTION sent for k, else the last one before it (an ACTION
@@ -1292,22 +1681,43 @@ class Map2Controller:
 
     def _eff_inflight(self, fo: int, f: int, inflight) -> np.ndarray:
         """The keys in flight for frames fo + 1 .. f + 1 as the oracle applies them (_sent_at; the policy's prefix
-        counts a frame without an ACTION as no key) - the policy's where this controller has no record."""
+        counts a frame without an ACTION as no key) - the policy's where this controller has no record. M4d: a Cogfly
+        throw's keys (Up + QuickCast) stripped as the policy's prefix strips them (the kinematics would cast)."""
         pol = np.asarray(inflight, np.int64)
         out = pol.copy()
         for q, k in enumerate(range(int(fo) + 1, int(f) + 2)):
             v = self._sent_at(k)
             if v is not None and q < len(out):
+                if self._own_at(k) == "cog":
+                    v = int(v) & ~COG
                 out[q] = v
         return out
 
+    def _cog_near(self, fo: int) -> bool:
+        """M4d: a Cogfly throw's keys sent for a frame near fo (fo - 3 .. fo + 2: latched now or on their way)."""
+        return any(self.own_hist.get(k) == "cog" for k in range(int(fo) - 3, int(fo) + 3))
+
+    def _hold_clean(self, hold_t: tuple, fo: int) -> tuple:
+        """M4d: the hold filter's state with a Cogfly throw's Up + QuickCast taken out (the policy's prefix has no
+        such keys; latched they make the kinematics cast)."""
+        if not self._cog_near(fo):
+            return hold_t
+        lat, des, pen, age = (np.array(x, copy=True) for x in hold_t)
+        for b in _COG_BITS:
+            lat[b], des[b], pen[b] = False, False, 0
+        return lat, des, pen, age
+
     def _left(self, fo: int) -> int:
+        """The plan in control's committed frames left: M4d: to the first end of its possible outcomes (where it ends),
+        M4c: to the last of its outcomes."""
         lp = self.ctrl
         if lp is None or not self.ctrl_idx:
             return -1
-        return max(lp.outs[i].kc for i in self.ctrl_idx) - int(fo - lp.t_a)
+        idx = self._exe[2] if (self._exe is not None and self._exe[0] == lp.pid) else self.ctrl_idx
+        kcs = [lp.outs[i].kc for i in idx]
+        return (min(kcs) if self.cfg.views_exact else max(kcs)) - int(fo - lp.t_a)
 
-    def _triggers(self, fo: int, obs: list) -> None:
+    def _triggers(self, fo: int, obs: list, hit_new: bool = False) -> None:
         for ob in obs:
             key = (ob.st, int(self.trk.cl.get(ob.iid, {}).get("ent") or 0))
             if self._st_seen.get(ob.iid) not in (None, key):
@@ -1317,10 +1727,18 @@ class Map2Controller:
             if hp0 is not None and ob.hp < hp0:
                 self.trig.append("landed")
             self._hp_seen[ob.iid] = ob.hp
-        if self.last_hit >= fo - 1:
+        if hit_new or self.last_hit >= fo - 1:
             self.trig.append("hit")
         if self.ctrl is not None and self._left(fo) <= self.cfg.end_lead:
             self.trig.append("end")
+
+    def _busy_claw(self, fo: int, h: dict) -> str | None:
+        """She is in a Clawline (pressed in the last CLAW_BLOCK_F frames, its Harpoon clip on or no control)."""
+        if any(m & M_CLAW for (fr, m) in self.lat_hist if fo - CLAW_BLOCK_F < fr <= fo):
+            clip = str(((h.get("anim") or {}).get("clip")) or "")
+            if clip.startswith("Harpoon") or not bool(h.get("hero_accepting_input", True)):
+                return "Clawline"
+        return None
 
     def _busy(self, fo: int, raw: dict) -> str | None:
         h = raw.get("hero") or {}
@@ -1337,16 +1755,56 @@ class Map2Controller:
             if _rising(m, pm, km.B_ATTACK):
                 return "slash"
             pm = m
-        if any(m & M_CLAW for (fr, m) in self.lat_hist if fo - CLAW_BLOCK_F < fr <= fo):
-            clip = str(((h.get("anim") or {}).get("clip")) or "")
-            if clip.startswith("Harpoon") or not bool(h.get("hero_accepting_input", True)):
-                return "Clawline"
-        return None
+        return self._busy_claw(fo, h)
 
     def post(self, f: int, fo: int, raw: dict, S0: np.ndarray, inflight: np.ndarray, hold, mask: int, own: str,
              res_cmd, sup: bool) -> None:
         """After the keys are chosen: the controller's state when the supervisor took the keys, the snapshot to the
-        workers (module docstring, WORKERS), the per-tick log row."""
+        workers (module docstring, WORKERS), the per-tick log row. M4d: an exception here is logged and dropped (the
+        plan too); the fallback's keys stand."""
+        try:
+            self._post(f, fo, raw, S0, inflight, hold, mask, own, res_cmd, sup)
+        except Exception as e:  # noqa: BLE001 - map2 must not end the run
+            self._error("post", e)
+            self._drop("error")
+            self.sent_hist[int(f) + 2] = int(mask)
+            self.own_hist[int(f) + 2] = str(own)
+            self.trig = []
+            self.row = {}
+
+    def _bridge_keys(self, f: int) -> tuple:
+        """The plan in control's keys expected from frame f + 3 on (the bridge): M4d: the keys its POSSIBLE outcomes
+        (as the execution chose them this tick) agree on, to the first end among them (the plan ends there), a newer
+        search's cut, a Clawline press or ch_lead frames - M4c took the most probable outcome of all those kept at the
+        commit, which after a hook could be the other variant's keys. (keys, [(frame, target)] down slash presses)."""
+        lp = self.ctrl
+        r = int(f + 3 - lp.t_a)
+        if self._exe is not None and self._exe[0] == lp.pid:
+            idx, best = self._exe[2], self._exe[3]
+        else:
+            idx = [i for i in self.ctrl_idx if lp.outs[i].kc >= r]
+            best = max(idx, key=lambda i: lp.outs[i].p) if idx else None
+        if best is None or not idx:
+            return [], []
+        ks = [lp.outs[i].kc for i in idx]
+        hi = min(min(ks) if self.cfg.views_exact else lp.outs[best].kc, lp.outs[best].end, r + self.cfg.ch_lead - 1)
+        if self.ctrl_cut is not None:
+            hi = min(hi, int(self.ctrl_cut) - lp.t_a)
+        bridge = []
+        for k in range(r, hi + 1):
+            vals = {int(lp.outs[i].cmds[k]) for i in idx if k < len(lp.outs[i].cmds)}
+            if len(vals) == 0 or (self.cfg.dis_hold and len(vals) != 1):
+                break
+            c = int(lp.outs[best].cmds[k])
+            if c & M_CLAW:
+                break
+            bridge.append(c)
+        pk = {int(k): iid for (k, iid) in lp.outs[best].presses}
+        presses = [(lp.t_a + k, pk[k]) for k in range(r, r + len(bridge)) if k in pk]
+        return bridge, presses
+
+    def _post(self, f: int, fo: int, raw: dict, S0: np.ndarray, inflight: np.ndarray, hold, mask: int, own: str,
+              res_cmd, sup: bool) -> None:
         t0 = time.perf_counter()
         S0 = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
         inflight = self._eff_inflight(fo, f, inflight)
@@ -1356,35 +1814,24 @@ class Map2Controller:
             row["why"] = "sup"
         row.update(own=own, mask=int(mask), m2=int(own == "m2"))
         if own == "m2":
-            self.st["ticks_m2"] += 1
-            self.ep_c["ticks_m2"] += 1
-        self.st["ticks"] += 1
-        self.ep_c["ticks"] += 1
+            self._inc("ticks_m2")
+        self._inc("ticks")
         # the bridge: the keys expected while the search runs
         bridge, presses = [], []
         if own == "m2" and self.ctrl is not None:
-            lp = self.ctrl
-            r = int(f + 3 - lp.t_a)
-            cons = [i for i in self.ctrl_idx if lp.outs[i].kc >= r]
-            if cons:
-                o = lp.outs[max(cons, key=lambda i: lp.outs[i].p)]
-                hi = min(o.kc, o.end, r + self.cfg.ch_lead - 1)
-                for k in range(r, hi + 1):
-                    c = int(o.cmds[k])
-                    if c & M_CLAW:
-                        break
-                    bridge.append(c)
-                pk = {int(k): iid for (k, iid) in o.presses}
-                presses = [(lp.t_a + k, pk[k]) for k in range(r, r + len(bridge)) if k in pk]
+            bridge, presses = self._bridge_keys(f)
         elif own == "plan" and res_cmd is not None and len(res_cmd) > 1 and int(res_cmd[0]) == int(mask):
             bridge = [int(x) for x in np.asarray(res_cmd, np.int64)[1:1 + self.cfg.fb_lead]]
         elif own not in ("sup", "m2", "plan", "cog"):
             bridge = [int(mask)] * self.cfg.sc_lead     # a script: its keys ahead are unknown - the held key (a guess)
         self._bridge_audit(f, int(mask))
         self.sent_hist[int(f) + 2] = int(mask)
+        self.own_hist[int(f) + 2] = str(own)
         if len(self.sent_hist) > 240:
             for k in [k for k in self.sent_hist if k < f - 180]:
                 del self.sent_hist[k]
+            for k in [k for k in self.own_hist if k < f - 180]:
+                del self.own_hist[k]
         if bridge:
             kind = own if own in ("plan", "m2") else "script"
             self.bridges.append([kind, int(f) + 3, list(bridge), 0, True])
@@ -1401,15 +1848,19 @@ class Map2Controller:
                 note["plan_obj"] = self.new_plan_obj
             self.new_plan_obj = None
             self._note_key = note_key
-            for q in self.in_qs:
+            for i, q in enumerate(self.in_qs):
+                if i < len(self.procs) and not self.procs[i].is_alive():
+                    continue                    # (M4d: not into a dead worker's queue)
                 q.put(note)
         want = [i for i in range(len(self.in_qs)) if not self.idles or self.idles[i].value == 1]
         if want and not busy and (not self.idles or self.trk.obs()):
+            m_ = int(mask) & ~COG if own == "cog" else int(mask)
             snap = {"seq": self.seq, "ep": self.ep, "f": int(f), "fo": int(fo), "S": S0.copy(),
-                    "cmds": np.concatenate([np.asarray(inflight, np.int64), [int(mask)],
+                    "cmds": np.concatenate([np.asarray(inflight, np.int64), [m_],
                                             np.asarray(bridge, np.int64)]).astype(np.int64),
-                    "n_inflight": len(inflight) + 1, "hold": hold_tuple(hold),
-                    "lat_s": int((raw.get("act") or {}).get("mask") or 0), "presses": presses,
+                    "n_inflight": len(inflight) + 1, "hold": self._hold_clean(hold_tuple(hold), fo),
+                    "lat_s": int((raw.get("act") or {}).get("mask") or 0) & (~COG if self._cog_near(fo) else -1),
+                    "presses": presses,
                     "obs": self.trk.obs(), "mems": self.trk.mems(), "hazards": self.trk.hazards(self.K),
                     "ctrl": None if self.ctrl is None else (self.ctrl.pid, int(self.ctrl.t_a)),
                     "trig": sorted(set(self.trig)), "busy": busy, "own": own}
@@ -1418,7 +1869,7 @@ class Map2Controller:
                 if self.idles:
                     self.idles[i].value = 0
             self.seq += 1
-            self.st["snapshots"] += 1
+            self._inc("snapshots")
         if self.trig:
             row["trig"] = sorted(set(self.trig))
         if busy:
@@ -1430,7 +1881,7 @@ class Map2Controller:
             self.last_msg = {}
         self.trig = []
         ms_ = (time.perf_counter() - t0) * 1e3
-        self.ms_post.append(ms_)
+        self._tm("post", ms_)
         row["ms"] = round((self.ms_pre[-1] if self.ms_pre and self.row is row else 0.0) + ms_, 2)
         if self.cfg.log:
             self.rows.append(row)
@@ -1459,10 +1910,14 @@ class Map2Controller:
 
     def yield_sup(self, f: int, fo: int) -> None:
         """A pause tick of the supervisor: map2 drops its plan."""
-        self._drop("sup")
-        self.st["ticks"] += 1
-        if self.cfg.log:
-            self.rows.append({"f": int(f), "fo": int(fo), "own": "sup", "why": "pause", "m2": 0})
+        try:
+            self._drop("sup")
+            self._inc("ticks")
+            self._inc("ticks_pause")
+            if self.cfg.log:
+                self.rows.append({"f": int(f), "fo": int(fo), "own": "sup", "why": "pause", "m2": 0})
+        except Exception as e:  # noqa: BLE001
+            self._error("pause", e)
 
     # ---- logs and stats ----
     def flush(self) -> None:
@@ -1476,18 +1931,30 @@ class Map2Controller:
         self.rows = []
 
     def stats(self) -> dict:
-        """The run's counters (counts: since the start; episode: this episode's), the bot-side times, the search
-        latency, the workers, the first errors (the per-tick rows are flushed to the log)."""
-        self.flush()
-        st = dict(self.st)
-        return {"cfg": self.cfg.as_dict(), "counts": st, "episode": {"ep": self.ep, **dict(self.ep_c)},
-                "share_m2": round(st.get("ticks_m2", 0) / max(1, st.get("ticks", 0)), 4),
+        """THIS EPISODE's counters and times (M4d: an attempt row is one episode - M4c's counters and times added up
+        over the controller's life, one combat_run chunk of 4 episodes: summing the rows counted episode 1 four
+        times), the run's in run_counts / run; the workers, the first errors (the per-tick rows are flushed to the
+        log). 'episode' (M4c's per-episode block) is kept: the same counters with the episode number."""
+        try:
+            self.flush()
+        except Exception as e:  # noqa: BLE001
+            self._error("flush", e)
+        st, ep = dict(self.st), dict(self.ep_c)
+        rm = self.run_ms
+        return {"cfg": self.cfg.as_dict(), "ep": self.ep, "counts": ep, "run_counts": st,
+                "episode": {"ep": self.ep, **ep},
+                "share_m2": round(ep.get("ticks_m2", 0) / max(1, ep.get("ticks", 0)), 4),
                 "pre_ms_p50": _pct(self.ms_pre, 50), "pre_ms_p99": _pct(self.ms_pre, 99),
                 "post_ms_p50": _pct(self.ms_post, 50), "post_ms_p99": _pct(self.ms_post, 99),
                 "check_ms_p50": _pct(self.ms_check, 50), "check_ms_p99": _pct(self.ms_check, 99),
                 "search_ms_p50": _pct(self.lat, 50), "search_ms_p90": _pct(self.lat, 90),
                 "commit_age_p50": _pct(self.age_commit, 50), "commit_age_p90": _pct(self.age_commit, 90),
                 "bridge_followed": {k: dict(sorted(v.items())) for k, v in self.bridge_hist.items()},
+                "run": {"share_m2": round(st.get("ticks_m2", 0) / max(1, st.get("ticks", 0)), 4),
+                        "pre_ms_p50": _pct(rm["pre"], 50), "pre_ms_p99": _pct(rm["pre"], 99),
+                        "check_ms_p99": _pct(rm["check"], 99), "search_ms_p50": _pct(rm["search"], 50),
+                        "search_ms_p90": _pct(rm["search"], 90)},
+                "disabled": bool(self.disabled),
                 "workers": {str(k): v for k, v in self.ready.items()}, "errors": self.errors[:20]}
 
 
