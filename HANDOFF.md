@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99, §100)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -12999,3 +12999,127 @@ M4d's behaviour one switch string away: `SSBOT_FORUM_MAP2_SET=fb_hold=0,sync=0,w
 6. The fallback's FORCED_RISK on its own ticks rose 8.5 -> 10.1 % (w7 strict; w13 25.6 -> 28.2 %) - a different mix of
    ticks (the ones map2 leaves); an effect of the hold itself is not separated from it.
 7. M4c's open items 2 - 8 and M4d's open items 1, 3 and 4 stand.
+
+### S1 - the safety fixes before the w7 gate (offline; no live run): the press validity, the low side down slash out of the air sprint, the air dash after a pogo, the late tick (the person's decision of 2026-10-23 15:40: fix these first, then the w7 gate tonight with the share bar at 30 %; the speed work later)
+
+The task (LEAD NOTES 3, 4 and 5 of `C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt`; the airceil verifier's
+`verify\stage3.txt` 2.1 / 4.1 and `recs\stage2b.txt` 5 / 6): (1) a strike credited only when the game would start it
+from the concrete kin state at the press - the realizer keeps the witness's held jump / dash on the press frame (or
+holds down through the air sprint's cancel) or rejects it; simulate, the commit check, TickCheck and the contingent
+plans credit a down slash only when the kin state starts it and a Clawline only where `env_jit.claw_allowed` holds
+(aligned with M4a: at once from the air sprint); (2) a down slash out of an air sprint beside the Clapper's body not
+credited as a pogo (the 4 real hits of stage2b now predicted); (3) the air dash restored by a pogo / a hooked
+Clawline in kin_jit and the live estimator; (4) a key slipped by a skipped tick re-checked from the keys actually sent.
+Then the identity with the switches off, the smokes (strict / open, before / after), the press scan of every map2
+plan, the tests, a frozen gate checkout. No game instance was touched, nothing ran live. Commits 378f510 (the fixes,
+`tests/test_m4s1.py`), 5a70ccd (a trace reused), a62c2b7 (a bad press at the deviation frame unsafe; the late check's
+slip effect), then the docs. Data `C:\ssbot\data\m2_play\map2\m4\s1` (`smoke_*` with every sent plan pickled in
+`plans_map2_<rec>\` and `press_scan.json`, `final_report.txt`, `press_scan_summary.txt`, `replay_s1_378f510_*`
+identity, `hits*.json`, `logs\`, `scripts\`).
+
+#### Result
+
+- **The press scan** (`scripts\press_scan.py`: pcheck.py's / indep.py's press rules on kinematics.rollout alone -
+  not `ssbot.map2.press`, not simulate's check - over every plan the workers SENT (committed or not), every safe
+  outcome, the presses of its committed part (to kc; later ones are never sent)): after (a62c2b7, 3 strict + 2 open
+  runs of the 4 recordings) **0 invalid credited presses** in 499 strict plans (6,898 outcomes; 360 down slashes
+  credited - 356 started at the press, 4 queued to the air sprint's Attack Cancel, 0 on kin's downspike lock only -,
+  2,804 Clawlines, 442 of them from the air sprint) and 357 open plans (155 / 2,481; 9 on the lock only, >= 10 f after
+  the pogo onset). Before (every S1 switch off + `SSBOT_FORUM_HERO2_OFF=1536` = M4d2, the same session): 5 of 318
+  strict plans (13 presses: 10 no slash - the umbrella's float with the jump let go, the air sprint -, 2 side contacts
+  out of the sprint, 1 contact outside the started slash's window) and 4 of 159 open plans (30 presses) - **committed:
+  2 of 122 strict (one a side contact out of the air sprint) and 2 of 68 open**. (The first after-code 378f510 left 2
+  plans in 3 strict runs with a Clawline the state does not allow AT their deviation frame - M3 accepts a collision
+  there; never committable: the commit check's 'danger' / 'dev gap' - made unsafe by a62c2b7.)
+- **The 4 real hits of stage2b.txt 5 are predicted** (`scripts\hits4.py`: airceil's replay3 on this branch): all 4
+  at k = 10 / 20 / 30 frames before the hit (before: 0 / 3 / 4 of 4). Each is a down slash pressed in the air sprint
+  that kin starts 2 - 3 frames later (down still held - the game swung at the same frames, DownSlashAlt) out of the
+  sprint, a side contact (her box bottom below the body's top): no pogo now, so no i-frames hide the body's contact at
+  k - 1 / k. The hit recall over all 83 failed show episodes (the model's collision within 4 frames of a real hit,
+  her replayed path within 0.35 u): k 10 92 / 100 (M4d2's search with airceil's dash fix: 85 / 98), k 20 91 / 96
+  (88 / 93), k 30 88 / 92 (86 / 89).
+- **The air dash after a pogo**: kin_jit's EV_POGO clears AIRDASHED (H2_POGO_DASH; test); the estimator restores it at
+  the onset of downSpikeBouncing - a pogo and a hooked Clawline's control alike (the M4a recordings: 66 / 66 hooked
+  controls show it, 0 / 69 unhooked). On a show recording (140550) the live StateTracker restores it on 828 of 1,841
+  frames, where the game's can.dash is true on 626 (it also needs the dash's cooldown over).
+- **The late tick**: frames whose tick was skipped hold the previous ACTION; the plan in control is re-checked when one
+  of its keys slipped there. Final strict w7 (3 runs, 150 control runs): 28 slips, 16 ok, 12 dropped (8 'danger' - the
+  slip made a collision in a possible outcome -, 2 'claw latch' - the Clawline latched a frame late -, 2 'path');
+  **the safety audit: 0 collisions in 150 strict w7 control runs** (open: 0 in 111; w13 0 in 37 / 35); before (S1 off):
+  1 in 101 strict w7 runs - again a key change a frame late after a skipped tick (plan 0:111i0: its 'RJ' at r 20 came
+  at r 21; the collision at r 33 in 6 outcomes), as in M4d2's audit.
+- **The share of the engaged ticks** (the gate's bar is 30 % now): strict w7 before 33.5 % (2 runs) -> after 35.3 %
+  (3 runs, per recording 27 - 41 %), open w7 40.1 % -> 40.8 %; w13 strict 5.1 -> 4.1 %, open 6.7 -> 6.2 %. (The first
+  after-code 378f510 gave strict w7 24.9 %: its late check compared her re-simulated path with the plan's path
+  re-simulated at the commit - in the replay from her RECORDED position - and dropped 44 plans, 25 of the 54 committed
+  Clawline plans before their press; a62c2b7 measures the slip's own effect.) map2's Clawline presses strict w7 13 per
+  run (before 19.5); into a slam's first window 0 (the fallback's script 12 in 3 runs).
+- **Times** (final, the machine quieter than the before runs): the search p50 92 - 104 / p90 184 - 205 ms (before 98 -
+  107 / 176 - 192); a commit check p99 20 - 25 ms (before 7 - 11: the press traces in its re-simulations); map2 on the
+  bot's thread p50 0.1 / p99 2.5 - 3.1 ms per tick; the bot's tick p50 17.5 - 19.6 / p99 29.5 - 32.4 ms.
+
+#### What changed
+
+- **`ssbot.map2.press`** (new): `trace` (kin_jit's frame loop at World.roll's nominal timing: per frame the state
+  before its Update - after its physics steps and events, what a press meets - and the attack after it; at the press
+  frames also the Update with kin's downspike lock lifted), `ds_start` (a down slash pressed at t starts at t .. t + 7
+  - the attack queue; 'down' / 'side' / 'lock' (only kin's lock held it, >= FREE_MIN 10 frames after the pogo onset:
+  the game's recovery is 9 - 11 f and no down slash started < 10 f in 657, the airceil verifier) / 'early' / 'none'),
+  `claw_state_ok` (claw_allowed's rule on the state before P's Update), `out_of_sprint`. Switches `press.ON`,
+  `press.SIDE` (LiveCfg `press_check`, `side_spr`).
+- **`search.Searcher.realize`** (press.ON): a down slash press (a) M3's when kin starts it at the press, else (b) the
+  witness's held jump / dash kept on the press frame, else (c) down (the direction, the dash) held until the slash
+  starts; none: the witness rejected (`stats` realize_ds_keep / _hold / _none). A Clawline press where claw_state_ok
+  holds (and after a previous one's lock), at the witness's end or up to 2 frames later, else rejected (most rejects:
+  the witness in the umbrella's antic / inflate while the cluster's lanes were not).
+- **`search.simulate`**: a down slash credited only as ds_start says (its contact from the actual start; 'side' /
+  'none' / 'early': a miss `dslash:<kind>`); a Clawline the state does not allow or inside the lock (`claw_lock`: a
+  previous one's control + 13, from Situation.meta 'claw_ctrl' - the snapshot's) and a side contact out of the air
+  sprint are FORCED COLLISIONS (`Traj.bad`; `bad_frame` in first_collision, the loops of _outcome / quick / tick_check
+  and live's `_first_collision_out`); `_outcome`: such a press at or before the deviation frame is unsafe ('press@k').
+  The root node gets the Clawline lock of the snapshot (Node.claw_ctrl).
+- **HERO2 bits** (`kinematics.H2_POGO_DASH` 512, `H2_CLAW_SPR` 1024, in H2_ALL; `H2_S1`): kin_jit EV_POGO clears
+  AIRDASHED; ForumRows (state_table / StateTracker) clears it at the downSpikeBouncing onset; `env_jit.claw_allowed(x,
+  cu, P)` allows the air sprint (phase 0 / 1). `SSBOT_FORUM_HERO2_OFF` takes bits out (1536: M4d2's hero model).
+- **`ssbot.map2.live`**: `set_switches` (the workers and the bot's thread), the Clawline's press / control tracked in
+  feed() and sent in the snapshot (`claw_ctl`, LivePlan.claw_lock; the commit / repair / audit / late checks pass it);
+  `late_check` + `Map2Controller._late` (LiveCfg `late_check`, `tol_late` 0.5: frames f_prev + 3 .. f + 1 without an
+  ACTION whose held key is not the plan's in any possible outcome -> re-simulation from the anchor with the keys
+  actually applied - its down slash presses moved where the keys latch them, up to 2 f (`reanchor_outcome(move=)`) -,
+  danger from the anchor, the slip's own effect on her path within tol_late; failed -> drop 'late'); `plan_dump`.
+- Tools: `m4c_smoke run --dump`; the scripts in `s1\scripts` (press_scan, hits4, hits4_why, tracker_check,
+  claw_why, final_report, smoke / runs, replay_ident_s1.ps1 + ident_cmp.sh).
+
+#### Identity, tests
+
+- 378f510 (the worktree), SSBOT_FORUM_MAP2 unset: **24 / 24 replays byte-identical** to M4c's base 9bff134 - the rnjb
+  env and M0's env, w7 192006 i0 e1 (2,073 ticks), 084036 i1 e0 (1,778), w13 144051 i1 e0 (1,541), 102908 i0 e0 (1,659),
+  each with SSBOT_FORUM_HERO2 unset, =1 with SSBOT_FORUM_HERO2_OFF=1536 and =1 with the S1 bits (these four did not
+  change either). The commits after 378f510 change only `ssbot.map2` (not imported with the switch off) and tests.
+- `tests/test_m4s1.py` 12 (the pogo's restore in kin and the estimator, claw_allowed in the air sprint, the trace
+  against the rollout, ds_start's cases - normal, the umbrella's antic, the float with the jump let go / held, the air
+  sprint with down held / let go -, simulate's crediting, the side contact out of the sprint, the Clawline's state and
+  lock, the realizer's held jump, the late check and the controller's slip detection, a bad press at the deviation);
+  the map2 / M4 tests pass; the full suite at 378f510 (Idle): 2,177 passed, 8 failed - the same 8 as M4d2 (the known 5
+  of M0 / M3 + the 3 in the untracked test_sg8_review.py) - `map2\fullsuite_s1_378f510.log`; at a62c2b7:
+  `map2\fullsuite_s1_a62c2b7.log` (see PROGRESS.txt).
+
+#### The checkout for the gate
+
+Frozen with `1v1_freeze.ps1 -rev <head>` and warmed by a smoke from it (the path in PROGRESS.txt). Arm `m2` as before
+(the S1 rules are on by default). M4d2's behaviour: `SSBOT_FORUM_MAP2_SET=press_check=0,side_spr=0,late_check=0` with
+`SSBOT_FORUM_HERO2_OFF=1536`.
+
+#### Open items
+
+1. The downspike lock: a press only kin's lock (DS_REC 15 f) holds is credited from 10 frames after the pogo onset
+   (the game's recovery 9 - 11 f, 18 - 23 f in 14 of 361 bounces); the slash at a hooked Clawline's control + 11 (10 f
+   after its forced bounce) is lost when the game's recovery runs 11 f or more (~1 / 3 by the recordings) - a model
+   question for a live probe (kin's DS_REC against the game's), not changed here.
+2. The side contact out of the air sprint is now a collision (conservative: also where the game might bounce); a live
+   probe (the sprint's x, the body against the slash) would settle it.
+3. The late check sees skipped ticks (no ACTION sent for a frame); an ACTION that reaches the game late (applied a
+   frame after its own) is not seen - live, act.mask in STATE would show it.
+4. The commit check is slower (p99 20 - 25 ms on the bot's thread): the press traces; a compiled re-simulation would
+   cut it.
+5. The reveal latency, the A1_n tables, two Clappers (M4d2's open items 1 - 3, 5) stand.
