@@ -107,7 +107,8 @@ def _r9(v) -> float:
 
 def run_one(args) -> dict:
     """One situation: decide() with the given clock; the digest, the anytime trace, the first safe plan."""
-    i, sit, cfg_kw, vclock, prio = args
+    i, sit, cfg_kw, vclock, prio = args[:5]
+    part = args[5] if len(args) > 5 else None
     if prio:
         boost_self(prio)
     from ssbot.map2 import search as ms, recognize as rz
@@ -120,6 +121,7 @@ def run_one(args) -> dict:
     cfg = ms.Cfg(**cfg_kw)
     S = ms.Searcher(W, cfg)
     S.vclock = vclock
+    S.part = part
     t0 = time.perf_counter()
     try:
         r = S.decide(sit)
@@ -135,7 +137,8 @@ def run_one(args) -> dict:
     probe = dict(ms.PROBE_STATS)
     ms.PROBE_STATS.update(checked=0, violations=0)
     first_any = next((a for a in S.anytime if a[3]), None)
-    return {"i": i, "name": sit.name, "group": group_of(sit), "moves": sit.meta.get("moves"), "ms": round(ms_dec, 1),
+    return {"i": i, "part": part, "name": sit.name, "group": group_of(sit), "moves": sit.meta.get("moves"),
+            "ms": round(ms_dec, 1),
             "timed_out": bool(r.timed_out), "n_cand": r.n_cand, "n_pred": r.n_pred, "n_exit": r.n_exit,
             "units": S.ev.units, "ms_pred": round(r.ms_pred, 1), "ms_exit": round(r.ms_exit, 1),
             "chosen": plan_digest(ch.plan) if ch is not None else None,
@@ -266,16 +269,53 @@ def cmd_first(a) -> int:
             k, v = kv.split("=")
             cfg_kw[k.strip()] = type(getattr(__import__("ssbot.map2.search", fromlist=["Cfg"]).Cfg(), k.strip()))(
                 eval(v))  # noqa: S307 - our own command line
-    jobs = [(i, s, cfg_kw, None, "high") for i, s in _select(sits, a)]
+    if a.split > 1:
+        jobs = [(i, s, cfg_kw, None, "high", (q, a.split)) for i, s in _select(sits, a) for q in range(a.split)]
+    else:
+        jobs = [(i, s, cfg_kw, None, "high") for i, s in _select(sits, a)]
     OUT.mkdir(parents=True, exist_ok=True)
     load = start_load(a.load_game, a.load_bot) if a.load else None
     try:
-        res = _pool_run(jobs, a.workers, OUT / f"first_{a.tag}.json", max_tasks=a.max_tasks)
+        res = _pool_run(jobs, a.workers * max(1, a.split), OUT / f"first_{a.tag}.json", max_tasks=a.max_tasks)
     finally:
         if load is not None:
             stop_load(*load)
+    if a.split > 1:
+        res = merge_parts(res)
+        (OUT / f"first_{a.tag}.json").write_text(json.dumps(res, indent=1, default=str), "utf-8")
     print(report_first({a.tag: res}))
     return 0
+
+
+def merge_parts(res: list) -> list:
+    """A split search's parts merged per situation: the best plan (safe first, then the value), the anytime traces
+    joined (at each change the best so far over the parts), the first safe plan the earliest over the parts."""
+    by = defaultdict(list)
+    for r in res:
+        by[r["i"]].append(r)
+    out = []
+    for i, rr in sorted(by.items()):
+        ok = [r for r in rr if "error" not in r]
+        if not ok:
+            out.append(rr[0])
+            continue
+        best = max(ok, key=lambda r: (bool(r["safe"]), r["value"] if r["value"] is not None else -9))
+        m = dict(best)
+        ev = sorted([a for r in ok for a in r["anytime"]], key=lambda a: a[1])
+        trace, cur = [], None
+        for a in ev:
+            if cur is None or (a[3], a[2]) > (cur[3], cur[2]):
+                cur = a
+                trace.append(a)
+        m["anytime"] = trace
+        fs = [r["first_safe_ms"] for r in ok if r["first_safe_ms"] is not None]
+        fa = [r["first_any_ms"] for r in ok if r["first_any_ms"] is not None]
+        m["first_safe_ms"] = min(fs) if fs else None
+        m["first_any_ms"] = min(fa) if fa else None
+        m["ms"] = max(r["ms"] for r in ok)
+        m["parts"] = len(rr)
+        out.append(m)
+    return out
 
 
 def _pct(v, qs=(50, 90, 99), fmt="{:.0f}"):
@@ -297,8 +337,51 @@ def value_at(anytime: list, t_ms: float):
     return v
 
 
+def value_safe_at(anytime: list, t_ms: float):
+    """The best SAFE plan's value at wall time t_ms (None: no safe plan yet; the noop counts)."""
+    v = None
+    for a in anytime:
+        if a[1] <= t_ms and a[3]:
+            v = a[2]
+    return v
+
+
+_V4: dict = {}
+
+
+def v4_values() -> dict:
+    """M3's 60 s run (v4, primitives only): situation name -> (value, safe)."""
+    if not _V4:
+        p = SITS.parent / "run_none_v4.json"
+        for r in json.loads(p.read_text("utf-8")):
+            if "error" not in r:
+                _V4[r["name"]] = (r["value"], r["safe"])
+    return _V4
+
+
+TS = (250, 500, 1000, 2000)
+
+
 def report_first(runs: dict) -> str:
     lines = []
+    v4 = v4_values()
+    for tag, res in runs.items():
+        ok = [r for r in res if "error" not in r]
+        lines.append(f"=== {tag}: the anytime value (the best safe plan's value at t; v4 = M3's 60 s run) - mean value / "
+                     f"share >= v4 - 0.05 / share with a safe strike or endpoint plan")
+        for g in GROUPS + ("all",):
+            rr = [r for r in ok if (g == "all" or r["group"] == g) and r["name"] in v4]
+            if not rr:
+                continue
+            cells = []
+            for t in TS:
+                vs = [value_safe_at(r["anytime"], t) for r in rr]
+                good = [v is not None and v >= (v4[r["name"]][0] or -1) - 0.05 for v, r in zip(vs, rr)]
+                strike = [any(a[1] <= t and a[3] and a[4] != "noop" for a in r["anytime"]) for r in rr]
+                mv = np.mean([v if v is not None else -1.0 for v in vs])
+                cells.append(f"{t / 1000:g}s {mv:5.2f} {np.mean(good):4.2f} {np.mean(strike):4.2f}")
+            v4m = np.mean([v4[r["name"]][0] if v4[r["name"]][0] is not None else -1.0 for r in rr])
+            lines.append(f"{g:10s} n {len(rr):3d}  " + "  |  ".join(cells) + f"  |  v4 {v4m:5.2f}")
     for tag, res in runs.items():
         ok = [r for r in res if "error" not in r]
         lines.append(f"=== {tag}: {len(res)} situations, errors {len(res) - len(ok)}")
@@ -312,6 +395,100 @@ def report_first(runs: dict) -> str:
             fa = [r["first_any_ms"] for r in rr]
             lines.append(f"{g:10s} {len(rr):4d}  {_pct(fs):24s} ({sum(1 for x in fs if x is None):3d})   "
                          f"{_pct(fa):22s}  {_pct([r['ms'] for r in rr])}")
+    return "\n".join(lines)
+
+
+def run_tick(args) -> dict:
+    """One situation: decide (wall clock, cap), then the checks of the chosen plan: the full tick_check (and M3's)
+    at the decision, TickCheck's build and its per-frame check along every safe outcome (the Clappers observed from
+    that outcome's branch, her position from its trajectory), and one observation moved 1 u (must fail)."""
+    i, sit, cfg_kw, prio, max_frames = args
+    if prio:
+        boost_self(prio)
+    from ssbot.map2 import search as ms
+    W = _world()
+    S = ms.Searcher(W, ms.Cfg(**cfg_kw))
+    try:
+        r = S.decide(sit)
+    except Exception as ex:  # noqa: BLE001
+        import traceback
+        return {"i": i, "name": sit.name, "error": repr(ex), "tb": traceback.format_exc()[-2000:]}
+    ch = r.ev
+    out = {"i": i, "name": sit.name, "group": group_of(sit), "ms": round(r.ms, 1),
+           "safe": bool(ch.safe) if ch is not None else None}
+    if ch is None or not ch.plan.segs:
+        return out
+    if not ch.finished:
+        S.ev.finish(ch)
+    S.ev.reset()
+    ok, bad, ms_full = S.ev.tick_check(sit, ch.plan)
+    S.ev.reset()
+    ok3, bad3, ms_m3 = S.ev.tick_check_m3(sit, ch.plan)
+    t = time.perf_counter()
+    tc = ms.TickCheck(ch)
+    ms_build = (time.perf_counter() - t) * 1e3
+    frames, oks, n_out = [], [], 0
+    for o in ch.outcomes:
+        if not o.safe:
+            continue
+        n_out += 1
+        for n in range(0, min(int(getattr(o, "k_end", o.tr.end)), max_frames) + 1):
+            obs = ms.observe_branch(sit, o.branch, n)
+            t = time.perf_counter()
+            okn, left, pc = tc.check(n, o.tr.pos[n], obs)
+            frames.append((time.perf_counter() - t) * 1e3)
+            oks.append(bool(okn))
+    nom = ch.nominal
+    moved = None
+    if nom is not None and nom.safe and nom.k_end >= 5:
+        obs = ms.observe_branch(sit, nom.branch, 5)
+        for ob in obs:
+            ob.x += 1.0
+        moved = bool(tc.check(5, nom.tr.pos[5], obs)[0])
+    out.update(full_ok=bool(ok), full_bad=bad, ms_full=round(ms_full, 2), m3_ok=bool(ok3), m3_bad=bad3,
+               ms_m3=round(ms_m3, 2), ms_build=round(ms_build, 2), n_outcomes=n_out,
+               frame_ms=[round(x, 4) for x in frames], frame_ok=sum(oks), frame_n=len(oks), moved_ok=moved)
+    return out
+
+
+def cmd_tick(a) -> int:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    sits = load_sits()
+    cfg_kw = dict(cap_s=a.cap, depth=a.depth, pass2_after=a.pass2_after)
+    jobs = [(i, s, cfg_kw, "high", a.frames) for i, s in _select(sits, a)]
+    load = start_load(a.load_game, a.load_bot) if a.load else None
+    res = []
+    t0 = time.time()
+    try:
+        with ProcessPoolExecutor(max_workers=a.workers, max_tasks_per_child=24) as ex:
+            futs = [ex.submit(run_tick, j) for j in jobs]
+            for n, f in enumerate(as_completed(futs)):
+                res.append(f.result())
+                if (n + 1) % 20 == 0:
+                    print(f"{n + 1}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
+    finally:
+        if load is not None:
+            stop_load(*load)
+    res.sort(key=lambda r: r["i"])
+    (OUT / f"tick_{a.tag}.json").write_text(json.dumps(res, indent=1, default=str), "utf-8")
+    print(report_tick(res))
+    return 0
+
+
+def report_tick(res: list) -> str:
+    ok = [r for r in res if "error" not in r and "full_ok" in r]
+    lines = [f"tick checks: {len(ok)} situations with a plan ({len(res) - len(ok)} without / errors)"]
+    for g in GROUPS + ("all",):
+        rr = [r for r in ok if g == "all" or r["group"] == g]
+        if not rr:
+            continue
+        fr = [x for r in rr for x in r["frame_ms"]]
+        lines.append(f"{g:10s} n {len(rr):3d}  per-frame check ms p50/p90/p99/max {_pct(fr, (50, 90, 99, 100), '{:.3f}')}"
+                     f" (frames {len(fr)}, consistent {sum(r['frame_ok'] for r in rr)}/{sum(r['frame_n'] for r in rr)})"
+                     f"  build {_pct([r['ms_build'] for r in rr], fmt='{:.1f}')}  full check {_pct([r['ms_full'] for r in rr], fmt='{:.1f}')}"
+                     f" (fails {sum(1 for r in rr if not r['full_ok'])}; unsafe chosen {sum(1 for r in rr if not r['safe'])})"
+                     f"  M3 check {_pct([r['ms_m3'] for r in rr], fmt='{:.1f}')} (fails {sum(1 for r in rr if not r['m3_ok'])})"
+                     f"  moved 1 u still ok {sum(1 for r in rr if r.get('moved_ok'))}")
     return "\n".join(lines)
 
 
@@ -348,7 +525,21 @@ def main(argv=None) -> int:
     p.add_argument("--groups", default="")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--cfg", default="", help="Cfg overrides k=v,k=v")
+    p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation in parallel")
     p.set_defaults(fn=cmd_first)
+    p = sub.add_parser("tick")
+    p.add_argument("--tag", required=True)
+    p.add_argument("--cap", type=float, default=1.0)
+    p.add_argument("--depth", type=int, default=3)
+    p.add_argument("--pass2-after", type=int, default=6)
+    p.add_argument("--workers", type=int, default=2)
+    p.add_argument("--frames", type=int, default=60)
+    p.add_argument("--load", action="store_true")
+    p.add_argument("--load-game", type=int, default=4)
+    p.add_argument("--load-bot", type=int, default=2)
+    p.add_argument("--groups", default="")
+    p.add_argument("--limit", type=int, default=0)
+    p.set_defaults(fn=cmd_tick)
     p = sub.add_parser("report")
     p.add_argument("--tags", required=True)
     p.set_defaults(fn=cmd_report)

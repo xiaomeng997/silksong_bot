@@ -376,11 +376,20 @@ def _run_one(args) -> dict:
     """One situation: the search, the labels of the chosen plan, the best plan per wanted move among the tried ones
     (finished: its exits checked), the reasons when none."""
     global _W
-    i, sit, lib, cap, depth = args
+    i, sit, lib, cap, depth = args[:5]
+    extra = args[5] if len(args) > 5 else {}
     from ssbot.map2 import search as ms, recognize as rz, combos as cb
+    if extra.get("prio") == "high":
+        from ssbot.tools.m4b_speed import boost_self
+        boost_self("high")
     if _W is None:
-        _W = ms.World()
-    cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else ())
+        if extra.get("prio") == "high":
+            from ssbot.tools.m4b_speed import _world
+            _W = _world()                                 # warmed like a live worker
+        else:
+            _W = ms.World()
+    cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else (),
+                 **extra.get("cfg", {}))
     S = ms.Searcher(_W, cfg)
     t0 = time.perf_counter()
     try:
@@ -396,7 +405,9 @@ def _run_one(args) -> dict:
     t1 = time.perf_counter()
     tick = None
     if ch is not None and ch.plan.segs:
+        S.ev.reset()                                  # (M4b: no trajectory memo from the search)
         S.ev.evaluate(sit, ch.plan)
+        S.ev.reset()
         tick = S.ev.tick_check(sit, ch.plan)
     ms_tick = (time.perf_counter() - t1) * 1e3 - (tick[2] if tick else 0.0)
     res = {"i": i, "name": sit.name, "meta": sit.meta, "ms": round(ms_dec, 1), "ms_tick": round(ms_tick, 1),
@@ -410,6 +421,8 @@ def _run_one(args) -> dict:
            "log": ms.plan_log(ch) if ch is not None else None,
            "ms_check": round(tick[2], 1) if tick else None, "check_ok": bool(tick[0]) if tick else None,
            "contingent": getattr(ch, "contingent", None) if ch is not None else None,
+           "anytime": [(round(a[0], 4), round(a[1], 1), round(a[2], 4), a[3], a[4], a[5]) for a in S.anytime],
+           "first_safe_ms": next((a[1] for a in S.anytime if a[3] and a[4] != "noop"), None),
            "reactions": {k: (round(v[0], 3), v[1]) for k, v in rz.reaction_table(ch).items()} if ch is not None
            else {}}
     if ch is not None and ch.nominal is not None:
@@ -511,7 +524,8 @@ def cmd_run(a) -> int:
         prev = json.loads(Path(a.timeouts_of).read_text("utf-8"))
         names = {r["name"] for r in prev if r.get("timed_out")}
         sits = [s for s in sits if s.name in names]
-    jobs = [(i, s, a.lib, a.cap, a.depth) for i, s in enumerate(sits)]
+    extra = {"prio": a.prio, "cfg": {"pass2_after": a.pass2_after}} if (a.prio != "idle" or a.pass2_after) else {}
+    jobs = [(i, s, a.lib, a.cap, a.depth) + ((extra,) if extra else ()) for i, s in enumerate(sits)]
     t0 = time.time()
     res = []
     # every result as a line as it comes (M4a: a run whose pool lost its workers hung with 231 / 236 results in
@@ -528,6 +542,10 @@ def cmd_run(a) -> int:
         print(f"resume: {len(done)} done, {len(jobs)} to run", flush=True)
     elif part.exists():
         part.unlink()
+    load = None
+    if a.load:
+        from ssbot.tools.m4b_speed import start_load
+        load = start_load(4, 2)                      # the simulated load: 2 game instances, 2 bots (m4b_speed)
     if a.jobs > 1:
         # concurrent.futures: a worker that dies breaks the pool (BrokenProcessPool) instead of hanging it; the jobs
         # not finished are then re-submitted to a new pool (a job lost twice is recorded as an error)
@@ -569,6 +587,9 @@ def cmd_run(a) -> int:
             r = res[-1]
             print(r.get("name"), r.get("labels"), {m: v.get("result") for m, v in (r.get("per") or {}).items()},
                   r.get("ms"), r.get("error", ""), flush=True)
+    if load is not None:
+        from ssbot.tools.m4b_speed import stop_load
+        stop_load(*load)
     res.sort(key=lambda r: r["i"])
     out = OUT / f"run_{a.lib}{a.tag}.json"
     out.write_text(json.dumps(res, indent=1, default=str), "utf-8")
@@ -798,6 +819,10 @@ def main(argv=None) -> int:
     p.add_argument("--tag", default="")
     p.add_argument("--timeouts-of", default="", help="only the situations that timed out in this run json")
     p.add_argument("--resume", action="store_true", help="keep the finished situations of the partial results")
+    p.add_argument("--prio", default="idle", choices=("idle", "high"),
+                   help="the workers' priority: idle (offline), high (the live worker's rule, M4b)")
+    p.add_argument("--pass2-after", type=int, default=0, help="Cfg.pass2_after (M4b's anytime order)")
+    p.add_argument("--load", action="store_true", help="the simulated load of 2 games + 2 bots (M4b)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")

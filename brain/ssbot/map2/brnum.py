@@ -299,10 +299,12 @@ def emit(A, IIDc, T):
 
 
 @njit(cache=True)
-def first_hit(px, py, ifr, k0, k1, off, BX, IIDB, hk_iid, hk_lo, hk_hi, hw, hh, dy, wl, wr):
+def first_hit(px, py, ifr, k0, k1, off, BX, IIDB, hk_iid, hk_lo, hk_hi, hw, hh, dy, wl, wr, coff, CO):
     """The first frame k0 .. k1 (not in her i-frames) where her hurtbox (transform px, py; HeroBox hw, hh, its centre
-    dy below) leaves the walls (1) or meets a body box of the frame (2: BX rows off[k] .. off[k + 1] - 1, open
-    overlap; a box of a hooked Clapper inside its window hk_lo .. hk_hi skipped): (k, 1 / 2), or (-1, 0)."""
+    dy below) leaves the walls (1), meets a body box of the frame (2: BX rows off[k] .. off[k + 1] - 1, open overlap;
+    a box of a hooked Clapper inside its window hk_lo .. hk_hi skipped) or a hazard's circle (3: CO rows coff[k] ..
+    coff[k + 1] - 1, cx, cy, r: shapes_hit's bounding-box test, then Shape.hits_box's distance): (k, 1 / 2 / 3), or
+    (-1, 0)."""
     nf = off.shape[0] - 1
     for k in range(k0, k1 + 1):
         if ifr[k]:
@@ -327,8 +329,128 @@ def first_hit(px, py, ifr, k0, k1, off, BX, IIDB, hk_iid, hk_lo, hk_hi, hw, hh, 
                 continue
             if BX[b, 0] < h2 and BX[b, 2] > h0 and BX[b, 1] < h3 and BX[b, 3] > h1:
                 return k, 2
+        if k < coff.shape[0] - 1:
+            for c in range(coff[k], coff[k + 1]):
+                cx = CO[c, 0]
+                cy = CO[c, 1]
+                r = CO[c, 2]
+                if cx - r >= h2 or cx + r <= h0 or cy - r >= h3 or cy + r <= h1:
+                    continue
+                ddx = max(h0 - cx, 0.0, cx - h2)
+                ddy = max(h1 - cy, 0.0, cy - h3)
+                if ddx * ddx + ddy * ddy < (r + 0.0) * (r + 0.0):
+                    return k, 3
     return -1, 0
 
 
 __all__ = ["barr", "iids", "views", "robust_rows", "state_at", "move_spans", "next_move", "emit", "first_hit",
            "flags", "MOVE_STARTS"]
+
+
+# ---- the Geo's body boxes in one compiled pass ----------------------------------------------------------------------
+
+@njit(cache=True)
+def _lookup(TK, TM, TOFF, t, k):
+    """_tab / Know.margin's table t: the first row with k <= kk, else its last."""
+    a, b = TOFF[t], TOFF[t + 1]
+    for i in range(a, b):
+        if k <= TK[i]:
+            return TM[i]
+    return TM[b - 1]
+
+
+@njit(cache=True)
+def geo_boxes(A, IIDc, IQ, T, T_h, nobody, BSPAN, BOXL, MVOF, TABST, R0, BASE, default_m, TK, TM, TOFF, scale,
+              margins):
+    """search.geo's body boxes: branch_frames' (frame, record) pairs (emit; frames past T hold frame T's), stably
+    sorted by frame, the body box of each (box_span mirrored by the facing) grown by its margin x scale (margin_of:
+    the in-move table TABST[state] from the move's first frame R0[Clapper, move] on, else Know.margin's BASE[move]
+    or default_m). Returns (off, BX, IIDB, EK, EI, body): the boxes of frame k are rows off[k] .. off[k + 1] - 1;
+    EK / EI / body every pair (also the ones without a body)."""
+    EK0, EI0 = emit(A, IIDc, T)
+    n0 = EK0.shape[0]
+    nT = 0
+    for q in range(n0):
+        if EK0[q] == T:
+            nT += 1
+    extra = nT * max(T_h - T, 0)
+    n = n0 + extra
+    EKx = np.empty(n, np.int64)
+    EIx = np.empty(n, np.int64)
+    EKx[:n0] = EK0
+    EIx[:n0] = EI0
+    m = n0
+    for kk in range(T + 1, T_h + 1):
+        for q in range(n0):
+            if EK0[q] == T:
+                EKx[m] = kk
+                EIx[m] = EI0[q]
+                m += 1
+    # stable counting sort by frame
+    cnt = np.zeros(T_h + 2, np.int64)
+    for q in range(n):
+        cnt[EKx[q] + 1] += 1
+    for k in range(T_h + 1):
+        cnt[k + 1] += cnt[k]
+    pos = cnt.copy()
+    EK = np.empty(n, np.int64)
+    EI = np.empty(n, np.int64)
+    for q in range(n):
+        k = EKx[q]
+        p = pos[k]
+        EK[p] = k
+        EI[p] = EIx[q]
+        pos[k] = p + 1
+    body = np.zeros(n, np.bool_)
+    nb = 0
+    for q in range(n):
+        st = np.int64(A[EI[q], 3])
+        if st >= 0 and not nobody[st]:
+            body[q] = True
+            nb += 1
+    BX = np.empty((nb, 4))
+    IIDB = np.empty(nb, np.int64)
+    off = np.zeros(T_h + 2, np.int64)
+    JS = BSPAN.shape[1]
+    b = 0
+    for q in range(n):
+        if not body[q]:
+            continue
+        r = A[EI[q]]
+        st = np.int64(r[3])
+        j = np.int64(r[4])
+        if j < JS:
+            s0, s1, s2, s3 = BSPAN[st, j, 0], BSPAN[st, j, 1], BSPAN[st, j, 2], BSPAN[st, j, 3]
+        else:
+            s0, s1, s2, s3 = BOXL[st, 0], BOXL[st, 1], BOXL[st, 2], BOXL[st, 3]
+        x, y, face = r[5], r[6], r[7]
+        xa = x + face * s0
+        xb = x + face * s1
+        x0, y0, x1, y1 = min(xa, xb), y + s2, max(xa, xb), y + s3
+        if margins:
+            k = EK[q]
+            mv = MVOF[st]
+            ti = TABST[st]
+            r0 = R0[IQ[EI[q]], mv]
+            if ti >= 0 and not np.isnan(r0) and r0 <= k:
+                mg = _lookup(TK, TM, TOFF, ti, k - max(r0, 0.0))
+            elif BASE[mv] >= 0:
+                mg = _lookup(TK, TM, TOFF, BASE[mv], np.float64(k))
+            else:
+                mg = default_m
+            mg = scale * mg
+            if mg > 0:
+                x0 = x0 + (-mg)
+                y0 = y0 + (-mg)
+                x1 = x1 + mg
+                y1 = y1 + mg
+        BX[b, 0] = x0
+        BX[b, 1] = y0
+        BX[b, 2] = x1
+        BX[b, 3] = y1
+        IIDB[b] = IIDc[EI[q]]
+        off[EK[q] + 1] += 1
+        b += 1
+    for k in range(T_h + 1):
+        off[k + 1] += off[k]
+    return off, BX, IIDB, EK, EI, body

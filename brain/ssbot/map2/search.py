@@ -49,6 +49,7 @@ from __future__ import annotations
 import math
 import os
 import time
+import zlib
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -773,6 +774,10 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
                     out.append((x0 - hw, y0 - hh - HB_OFF, x1 + hw, y1 + hh - HB_OFF))
                 else:
                     out += poly_slabs(s.polygon(16), hw, hh, HB_OFF)
+            for c_ in range(int(g.coff[k]), int(g.coff[k + 1])):          # the hazards' circles (grown)
+                cx, cy, r = g.CO[c_]
+                out += poly_slabs(cm.Shape(cm.DAMAGE, 0, "", circle=(float(cx), float(cy), float(r))).polygon(16),
+                                  hw, hh, HB_OFF)
             if out:
                 parts.append(np.asarray(out, float).reshape(-1, 4))
             v = np.concatenate(parts) if len(parts) > 1 else parts[0]
@@ -794,10 +799,16 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
 
 # ---- M4b: a branch's damage per frame as arrays (Geo) ---------------------------------------------------------------
 
+_TABV: dict = {}
+
+
 def _tab_vec(tab, ks: np.ndarray) -> np.ndarray:
     """_tab / Know.margin's lookup for an array of k: the first row whose kk >= k (the table's last past its end)."""
-    kk = np.array([float(t[0]) for t in tab])
-    mm = np.array([float(t[1]) for t in tab])
+    v = _TABV.get(id(tab))
+    if v is None or v[0] is not tab:
+        v = (tab, np.array([float(t[0]) for t in tab]), np.array([float(t[1]) for t in tab]))
+        _TABV[id(tab)] = v
+    _, kk, mm = v
     i = np.searchsorted(kk, ks, side="left")
     return mm[np.minimum(i, len(mm) - 1)]
 
@@ -833,7 +844,7 @@ class Geo:
     """One branch's damage per frame (branch_frames + bdamage as arrays): the body boxes of frame k are rows
     off[k] .. off[k + 1] - 1 of BX (grown by their margins x MARGIN_SCALE; IIDB their Clapper); the rare shapes (the
     hammers, the bombs, the big rune) as Shape objects per frame (rare), grown on use as bdamage grows them."""
-    __slots__ = ("off", "BX", "IIDB", "rare", "rare_k", "_grown")
+    __slots__ = ("off", "BX", "IIDB", "coff", "CO", "rare", "rare_k", "_grown")
 
     def rare_grown(self, br, k: int, margins: bool) -> list:
         g = self._grown.get(k)
@@ -845,6 +856,42 @@ class Geo:
                 g = [x for (x, st) in v]
             self._grown[k] = g
         return g
+
+
+_MTABS: dict = {}
+
+
+def _margin_tabs(tb, K) -> dict:
+    """The margin tables as flat arrays for brnum.geo_boxes (per state table): each state's move (MOVE_OF, else
+    idle), its in-move table (by state, else by move; -1: none), Know.margin's table per move (-1: the default)."""
+    c = _MTABS.get(id(tb))
+    if c is not None and c["tb"] is tb:
+        return c
+    mt = K.d.get("margins") or {}
+    T_ = inmove_table()
+    mvs = sorted(set(cm.MOVE_OF.values()) | {"idle"} | set(mt.get("by_move", {})) | set(T_.get("by_move", {})))
+    mvi = {m: i for i, m in enumerate(mvs)}
+    tabs, ids = [], {}
+
+    def tid(t):
+        if not t:
+            return -1
+        if id(t) not in ids:
+            ids[id(t)] = len(tabs)
+            tabs.append(t)
+        return ids[id(t)]
+    MVOF = np.array([mvi[cm.MOVE_OF.get(nm, "idle")] for nm in tb.names], np.int64)
+    TABST = np.array([tid((T_.get("by_state", {}).get(cm.MOVE_OF.get(nm, "idle")) or {}).get(nm) or
+                          T_.get("by_move", {}).get(cm.MOVE_OF.get(nm, "idle"))) for nm in tb.names], np.int64)
+    BASE = np.array([tid(mt.get("by_move", {}).get(m)) for m in mvs], np.int64)
+    TK = np.array([float(r[0]) for t in tabs for r in t] + [0.0])
+    TM = np.array([float(r[1]) for t in tabs for r in t] + [0.0])
+    TOFF = np.zeros(len(tabs) + 1, np.int64)
+    TOFF[1:] = np.cumsum([len(t) for t in tabs])
+    c = {"tb": tb, "mv": mvs, "mvi": mvi, "MVOF": MVOF, "TABST": TABST, "BASE": BASE, "TK": TK, "TM": TM,
+         "TOFF": TOFF, "default": float(mt.get("default", 0.0))}
+    _MTABS[id(tb)] = c
+    return c
 
 
 def geo(br, margins: bool) -> Geo:
@@ -864,38 +911,19 @@ def geo(br, margins: bool) -> Geo:
     T = br.T
     T_h = max([T] + [int(h[1][5]) for h in br.hazards])
     il = list(arr.keys())
-    A = np.concatenate([arr[i] for i in il]) if il else np.zeros((0, 9))
+    A = np.ascontiguousarray(np.concatenate([arr[i] for i in il])) if il else np.zeros((0, 9))
     IIDc = np.concatenate([np.full(len(arr[i]), i, np.int64) for i in il]) if il else np.zeros(0, np.int64)
-    EK, EI = brnum.emit(np.ascontiguousarray(A), IIDc, T)
-    if T_h > T:
-        selT = EI[EK == T]
-        EK = np.concatenate([EK, np.repeat(np.arange(T + 1, T_h + 1), len(selT))])
-        EI = np.concatenate([EI, np.tile(selT, T_h - T)])
-    o = np.argsort(EK, kind="stable")
-    EK, EI = EK[o], EI[o]
-    st = A[EI, 3].astype(np.int64) if len(EI) else np.zeros(0, np.int64)
-    sts = np.maximum(st, 0)
-    body = (st >= 0) & ~F.nobody[sts]
-    EKb, EIb, stb = EK[body], EI[body], sts[body]
-    j = A[EIb, 4].astype(np.int64)
-    JS = F.BSPAN.shape[1]
-    sp = np.where((j < JS)[:, None], F.BSPAN[stb, np.minimum(j, JS - 1)], tb.BOXL[stb])
-    x, y, face = A[EIb, 5], A[EIb, 6], A[EIb, 7]
-    xa = x + face * sp[:, 0]
-    xb = x + face * sp[:, 1]
-    BX = np.stack([np.minimum(xa, xb), y + sp[:, 2], np.maximum(xa, xb), y + sp[:, 3]], axis=1)
-    IIDB = IIDc[EIb]
-    if margins and len(EIb):
-        m = np.zeros(len(EIb))
-        combo = IIDB * 4096 + stb
-        for cv in np.unique(combo):
-            idx = np.flatnonzero(combo == cv)
-            iid = int(IIDB[idx[0]])
-            m[idx] = MARGIN_SCALE[0] * _margins_vec(br, iid, tb.names[int(stb[idx[0]])], EKb[idx].astype(float))
-        gm = np.where(m > 0, m, 0.0)
-        BX = BX + np.stack([-gm, -gm, gm, gm], axis=1)
-    off = np.zeros(T_h + 2, np.int64)
-    off[1:] = np.cumsum(np.bincount(EKb, minlength=T_h + 1)[:T_h + 1])
+    IQ = np.concatenate([np.full(len(arr[i]), q, np.int64) for q, i in enumerate(il)]) if il else IIDc
+    MT = _margin_tabs(tb, br.K)
+    R0 = np.full((max(len(il), 1), len(MT["mv"])), np.nan)
+    if margins:
+        sp_ = move_spans(br)
+        for q, i in enumerate(il):
+            for (m_, r0) in sp_.get(i, ()):
+                R0[q, MT["mvi"][m_]] = r0
+    off, BX, IIDB, EK, EI, body = brnum.geo_boxes(
+        A, IIDc, IQ, T, T_h, F.nobody, F.BSPAN, tb.BOXL, MT["MVOF"], MT["TABST"], R0, MT["BASE"], MT["default"],
+        MT["TK"], MT["TM"], MT["TOFF"], float(MARGIN_SCALE[0]), bool(margins))
     rare: dict = {}
     hm = np.flatnonzero(body & (A[EI, 8] != 0)) if len(EI) else np.zeros(0, np.int64)
     for q in hm:
@@ -905,19 +933,45 @@ def geo(br, margins: bool) -> Geo:
         tup = cj._rec_tuple(r, tb.names)
         for s in cm.rec_shapes(tup, iid, br.K)[1:]:
             rare.setdefault(kk, []).append((s, tup[3]))
-    seen: dict = {}
-    for iid, hz in br.hazards:
-        kind, hx, hy, rad, t0, t1 = hz
-        s = cm.Shape(cm.DAMAGE, iid, kind, circle=(hx, hy, rad), mv=kind)
-        hkey = (iid, kind, round(hx, 2), round(hy, 2))
-        for kk in range(max(t0, 0), min(t1, T_h) + 1):
-            sk_ = seen.setdefault(kk, set())
-            if hkey not in sk_:
-                sk_.add(hkey)
-                rare.setdefault(kk, []).append((s, None))
+    rare_k = np.array(sorted(rare), np.int64)        # the frames with hammers (checked in Python)
+    # the hazards' circles while lit (branch_frames' rule: a hazard key drawn once per frame, the first in order)
+    CO = np.zeros((0, 3))
+    coff = np.zeros(T_h + 2, np.int64)
+    hz = br.hazards
+    if hz:
+        keys: dict = {}
+        kid, lo_, n_, hv, kinds = [], [], [], [], []
+        for iid, h in hz:
+            kind, hx, hy, rad, t0, t1 = h
+            kid.append(keys.setdefault((iid, kind, round(hx, 2), round(hy, 2)), len(keys)))
+            lo, hi = max(t0, 0), min(t1, T_h)
+            lo_.append(lo)
+            n_.append(max(hi - lo + 1, 0))
+            hv.append((hx, hy, rad))
+            kinds.append(kind)
+        n_ = np.array(n_, np.int64)
+        if n_.sum():
+            hidx = np.repeat(np.arange(len(hz)), n_)
+            kk = np.repeat(np.array(lo_, np.int64), n_) + (np.arange(int(n_.sum())) - np.repeat(np.cumsum(n_) - n_, n_))
+            code = np.array(kid, np.int64)[hidx] * (T_h + 1) + kk
+            _, first = np.unique(code, return_index=True)
+            sel = np.sort(first)
+            hidx, kk = hidx[sel], kk[sel]
+            o = np.argsort(kk, kind="stable")
+            hidx, kk = hidx[o], kk[o]
+            HV = np.array(hv, float)
+            CO = HV[hidx].copy()
+            if margins:
+                ka = np.array(kinds)
+                for kind in sorted(set(kinds)):
+                    q = ka[hidx] == kind
+                    m = MARGIN_SCALE[0] * _kmargin_vec(br.K, kind, kk[q].astype(float))
+                    CO[q, 2] = np.where(m > 0, CO[q, 2] + m, CO[q, 2])
+            coff[1:] = np.cumsum(np.bincount(kk, minlength=T_h + 1)[:T_h + 1])
     g = Geo()
     g.off, g.BX, g.IIDB = off, np.ascontiguousarray(BX), np.ascontiguousarray(IIDB)
-    g.rare, g.rare_k = rare, np.array(sorted(rare), np.int64)
+    g.coff, g.CO = coff, CO
+    g.rare, g.rare_k = rare, rare_k
     g._grown = {}
     c[key] = g
     return g
@@ -942,7 +996,7 @@ def first_collision(br, tr: "Traj", k0: int, k1: int, margins: bool) -> int | No
         hki = hlo = hhi = _EMPTY_I
     pos = tr.pos
     kb, _ = brnum.first_hit(np.ascontiguousarray(pos[:, 0]), np.ascontiguousarray(pos[:, 1]), tr.ifr, k0, k1, g.off,
-                            g.BX, g.IIDB, hki, hlo, hhi, _HW, _HH, _HDY, WALL_L, WALL_R)
+                            g.BX, g.IIDB, hki, hlo, hhi, _HW, _HH, _HDY, WALL_L, WALL_R, g.coff, g.CO)
     top = kb - 1 if kb >= 0 else k1
     if len(g.rare_k):
         for k in g.rare_k[(g.rare_k >= k0) & (g.rare_k <= top)]:
@@ -1537,6 +1591,18 @@ class Searcher:
         # the ANYTIME trace of the last decide(): (clock s, wall ms, value, safe, origin, plan frames) each time the
         # best plan changed (the noop included)
         self.anytime: list = []
+        # M4b: one part of a split search (i, n) - this searcher takes the root's candidates whose key hashes to i
+        # (the safe endpoints and the library: part 0) and the whole subtree below them; None: all of it
+        self.part: tuple | None = None
+
+    def _mine(self, c) -> bool:
+        if self.part is None:
+            return True
+        i, n = self.part
+        if c[0] == "safe":
+            return i == 0
+        key = (c[0], int(c[1]), -1 if c[5] is None else int(c[5]), int(round(float(c[3]) * 4)), int(c[6]))
+        return zlib.crc32(repr(key).encode()) % n == i
 
     def _now(self) -> float:
         return time.perf_counter() if self.vclock is None else self.ev.units * self.vclock
@@ -2246,7 +2312,7 @@ class Searcher:
 
         # the library's macros (anchored on the observed state)
         lib_nodes = []
-        for combo in cfg.library:
+        for combo in (cfg.library if self.part is None or self.part[0] == 0 else ()):
             for plan in combo.instantiate(self.W, sit, rt.pred):
                 if now() - t0c > cap:
                     timed_out = True
@@ -2296,7 +2362,7 @@ class Searcher:
                     for fw in fws[:1]:
                         cands = [(fw, c) for c in self.safe_cands(node, fw)] + cands
                 refine = []
-                queue = list(cands)
+                queue = list(cands) if depth > 1 else [x for x in cands if self._mine(x[1])]
                 qi = 0
                 n_main = len(queue)                       # the queue's candidates before the refinements
                 n_ev_node = 0
@@ -2314,7 +2380,7 @@ class Searcher:
                         mark(f"passes2 d{depth}")
                         done_ = {id(x[1]) for x in queue[:qi]}
                         rest = [x for x in queue[qi:n_main] if x[1][0] == "safe"]      # safe endpoints not taken
-                        rest += [x for x in node_cands(fws) if id(x[1]) not in done_]
+                        rest += [x for x in node_cands(fws) if id(x[1]) not in done_ and (depth > 1 or self._mine(x[1]))]
                         queue = queue[:qi] + rest + queue[n_main:]
                         n_main = qi + len(rest)
                         mark(f"windows2 d{depth} {len(rest)}")
