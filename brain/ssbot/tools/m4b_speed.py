@@ -381,6 +381,17 @@ def stop_load(ps, stop: str) -> None:
             p.terminate()
 
 
+def _cfg_over(spec: str) -> dict:
+    """Cfg overrides 'k=v;k=v' (the values Python literals, cast to the field's type)."""
+    from ssbot.map2 import search as ms
+    out = {}
+    for kv in (spec or "").split(";"):
+        if kv.strip():
+            k, v = kv.split("=")
+            out[k.strip()] = type(getattr(ms.Cfg(), k.strip()))(eval(v))  # noqa: S307 - our own command line
+    return out
+
+
 def cmd_first(a) -> int:
     sits = load_sits()
     cfg_kw = dict(cap_s=a.cap, depth=a.depth)
@@ -586,6 +597,7 @@ def cmd_tick(a) -> int:
     from concurrent.futures import ProcessPoolExecutor, as_completed
     sits = load_sits()
     cfg_kw = dict(cap_s=a.cap, depth=a.depth, pass2_after=a.pass2_after)
+    cfg_kw.update(_cfg_over(a.cfg))
     jobs = [(i, s, cfg_kw, "high", a.frames) for i, s in _select(sits, a)]
     load = start_load(a.load_game, a.load_bot) if a.load else None
     res = []
@@ -667,6 +679,7 @@ def main(argv=None) -> int:
     p.add_argument("--pass2-after", type=int, default=6)
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--frames", type=int, default=60)
+    p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v")
     p.add_argument("--load", action="store_true")
     p.add_argument("--load-game", type=int, default=4)
     p.add_argument("--load-bot", type=int, default=2)

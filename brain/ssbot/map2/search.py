@@ -40,6 +40,15 @@ THE LOOP (one decision; re-planned every tick, receding horizon):
  5. LOG: every chosen plan as a row in the combo library's step format (plan_steps): per segment its anchor (the
     decision frame or a Clawline's control), the key changes and the strike events, the hits, the outcomes.
 
+SPEED (stage M4b; HANDOFF 'Task map2 - stage M4' / 'M4b'). Exact paths - the same decisions, checked on all 236
+acceptance situations with a virtual clock (Searcher.vclock): predict() compiled (clapper_jit, Cfg.jit_predict), the
+branches' records as arrays (clapper_jit.JBranch, brnum, Geo, first_collision), the windows vectorized, a trajectory
+memo (Evaluator.sim), exit probes and an exit memo (Cfg.exit_probe), the envelope pass threaded (Cfg.fwd_threads).
+The ANYTIME order (behaviour, default off; Cfg.live() turns it on): the 2-event pass after the first pass's first
+candidates or on a background thread (Cfg.pass2_after / pass2_bg), the noop's evaluation reused and its exits deferred
+(Cfg.reuse_root / defer_noop), a split search over processes (Searcher.part). The per-frame check of a committed plan
+on the bot's thread is TickCheck; tick_check is the full check from a new observation.
+
 Frames: game frames from the decision (0 = now); a plan's masks apply to frames 1 .. n (kin_jit's latched masks).
 Positions: her transform (kin pos) for the Clapper model and the slash polygons, her box centre for the envelope;
 u world units, centre to centre.
@@ -141,6 +150,16 @@ class Cfg:
         d = dict(self.__dict__)
         d.update(kw)
         return Cfg(**d)
+
+    @classmethod
+    def live(cls, **kw) -> "Cfg":
+        """M4b's configuration for the live worker (HANDOFF 'Task map2 - stage M4' / 'M4b'): the anytime order (the
+        2-event pass on the background thread, joined when done or after the first pass's queue), the passes on 2
+        threads, the noop's evaluation reused and its exits deferred, a 1 s cap; with two worker processes per game
+        instance each searcher takes a part (Searcher.part = (0, 2) / (1, 2)) and the better result wins."""
+        d = dict(cap_s=1.0, pass2_after=6, pass2_bg=True, fwd_threads=2, reuse_root=True, defer_noop=True)
+        d.update(kw)
+        return cls(**d)
 
 
 # ---- the world ----------------------------------------------------------------------------------------------------
