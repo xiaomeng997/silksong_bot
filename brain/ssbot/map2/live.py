@@ -60,6 +60,28 @@ unsafe_drop, on by default):
   stats per episode; the workers exit with the bot, the bot's exit never waits on a worker's queue, the background
   pass thread's numba threads.
 
+M4D2 (the map in control and the reveal latency; HANDOFF 'M4d2', forum.md 99; LiveCfg switches, on by default - all
+off is M4d):
+- THE FALLBACK FOLLOWS ITS BRIDGE (fb_hold): while a search from the planner's bridge runs (a part not answered, or
+  its plan received and not decided), hold_row() gives the planner that bridge as its CONTINUE row; ForumPlanner
+  ranks it first among its safe rows (below every safety key) and envelopes it first, so it is left only when the
+  planner's own checks need a change - then the search is cut (a note with 'cut': break_cut). After a drop on the
+  Clappers / her position / its end the dropped plan's bridge is held the same way and its searches go on
+  (drop_keep; a kept answer comes back as a plan), or restarted at once with the short bridge (drop_rev).
+- ONE DECISION, TWO PARTS (sync): a snapshot only when every worker is idle, the same one to each; a received plan
+  waits for the other part (and its own better anytime plans) until its root (wait_parts); the search's cap is the
+  frames to its root less dl_margin and the time already gone (deadline); the first safe plan and each one better
+  by w_switch go out at once (first_send: final=False).
+- MORE PLANS COMMITTED: a strike pressed right after the bridge is not 'too short' (short_fix); the noop (the bridge,
+  then stop) loses to the best safe non-noop plan within alt_slack when map2 has no plan or its plan is ending
+  (alt_noop); a plan whose bridge was not followed is REPAIRED from the keys actually sent (repair; repair_check in
+  the strict replay); 'no input' in the umbrella / the sprint (the hero model's states) does not block a commit or a
+  search (noinput_kin); a search that found nothing safe is followed by one with the short bridge (unsafe_short).
+- THE REVEAL (rev_cut): a Clapper's move start (the antic's first frame) cuts the searches from before it and sends
+  the newest snapshot to every worker at once with a bridge of rev_lead frames.
+- THE REPLAY ONLY: replay_push (a Clapper the recording's hero just hit matched with a wider x); audit_runs (each
+  control run's keys as sent re-simulated in the outcomes still possible: the safety audit).
+
 Frames: STATE frames (the oracle applies a tick's keys at f + 2); a plan's frame 0 is its snapshot's observation frame
 (its anchor), its command index k applies to frame anchor + k. u: world units, her transform (kin pos).
 """
@@ -94,6 +116,11 @@ CLAW_PRESS_F = 3                   # the Clawline key and the direction held thi
 DS_WIN = sk.DS_ACTIVE[1] + 1       # a slash's contact can still come this many frames after its press
 CLAW_BLOCK_F = 36                  # a Clawline pressed this recently: she may still be in its block (control P + 34)
 CTRL_SETTLE = 2                    # frames after a Clawline's control still treated as its block (the forced bounce)
+# M4d2 (LiveCfg.noinput_kin): her clips whose 'no input' frames the hero model covers (HERO2: the umbrella's antic /
+# inflate / float / deflate / turn, the air dash's sprint and its cancels, the ground sprint's turn and skid)
+KIN_CLIPS = frozenset(("Umbrella Inflate Antic", "Umbrella Inflate", "Umbrella Float", "Umbrella Deflate",
+                       "Umbrella Turn", "Sprint", "Sprint Air", "Sprint Air Short", "Sprint Turn", "Skid End 1",
+                       "Skid End 2"))
 VARIANTS = {v.name: v for v in sk.HOOK_VARIANTS}
 
 
@@ -154,6 +181,57 @@ class LiveCfg:
     dt_lo: float = 0.9             # a STATE frame with dt x 60 outside dt_lo .. dt_hi (a hit-stop freeze, its slow-time
     dt_hi: float = 1.25            # ramp, a long frame) counts as a freeze: the plan in control is dropped
     err_max: int = 20              # errors on the bot's side in one episode: map2 off for the rest of it
+    # M4d2 (the map in control and the reveal latency; on by default, a switch each - all off: M4d)
+    fb_hold: bool = True           # the fallback FOLLOWS the bridge it sent while a search from it runs: the planner's
+    #                                CONTINUE row is that bridge, first among its safe rows (only its own safety check
+    #                                changes it); a key off a pending search's bridge cuts that search (M4d: the planner
+    #                                re-planned every tick, 15 - 17 % of its 16-frame bridges were followed on w7)
+    break_cut: bool = True         # a pending search whose bridge the keys left is cut (its plan could only be repaired)
+    sync: bool = True              # a snapshot goes to every worker at once (the parts of one decision: M4b's split
+    #                                search; M4d sent each idle worker its own snapshot - half a search each)
+    wait_parts: bool = True        # a received plan waits for its decision's other parts until its root is near
+    short_fix: bool = True         # a plan with a press after its prefix is never 'too short' (min_frames dropped
+    #                                strikes pressed 1 - 3 frames after the bridge as 'noop')
+    alt_noop: bool = True          # the search's best is the noop (with no plan in control) or the plan in control kept
+    #                                near its end (left <= alt_left): its best safe non-noop plan within alt_slack of
+    #                                that value is sent ('alt') - the noop is the fallback's bridge, then stop
+    alt_slack: float = 0.3
+    alt_left: int = 24
+    deadline: bool = True          # the search's cap: the frames to its plan's root (the first own key) less dl_margin,
+    dl_margin: int = 3             # less the wall time since the snapshot (M4d: (lead - 2) / 60, the queue's delay not
+    cap_lo: float = 0.04           # counted); at least cap_lo
+    first_send: bool = True        # anytime: the search's first safe plan goes to the bot at once, each one better by
+    #                                w_switch after it; the bot commits the best by its root (wait_parts)
+    rev_cut: bool = True           # a Clapper's MOVE START (the antic's first frame: the reveal of its choice) cuts the
+    #                                searches from before it and the newest snapshot goes to every worker at once
+    rev_lead: int = 6              # ... with a bridge of this many frames (the search rooted near now)
+    rev_wait: int = 12             # a reveal not sent within this many frames (no search possible: busy) is dropped
+    repair: bool = True            # a received plan whose bridge was NOT followed is REPAIRED instead of dropped: its own
+    #                                commands after the keys actually sent, re-simulated from her state (live: observed
+    #                                now; the strict replay: the plan's anchor state with the keys sent since), every
+    #                                possible outcome within tol_repair of its planned path, collisions exact, no press
+    #                                it does not have
+    tol_repair: float = 0.3
+    search_lag: int = 0            # the search's reaction lag after a reveal (Cfg.lag; 0: its own, 2 - M3: re-planning
+    #                                at once): a plan's committed part ends there in an outcome that must deviate
+    unsafe_short: bool = True      # a search that found nothing safe (the bridge itself unsafe by the map) is followed by
+    #                                one from the newest snapshot with the short bridge (rev_lead)
+    drop_rev: bool = True          # a plan dropped on the Clappers / her position restarts the search at once from the
+    #                                newest snapshot with the short bridge (as a move start: rev_cut)
+    noinput_kin: bool = True       # her 'no input' frames in the umbrella / the sprint / a skid (clips KIN_CLIPS: the
+    #                                hero model's own states - M0 / M4a; the keys still act there: the cancels) count as
+    #                                control for the commit and the search's start (M4d: no commit, no search); a
+    #                                Clawline, the roar lock, a stun stay 'no input'
+    replay_push: bool = True       # the REPLAY only (cfg.replay): a Clapper the recording's hero just hit (its HP fell
+    push_tol: float = 0.55         # within push_f frames) is matched with its x within tol_x + push_tol - the
+    push_f: int = 20               # recording's side slashes push it 0.36 - 0.48 u (clapper.RECOIL_*), map2's plans
+    #                                (down slashes, the Clawline) do not; live this never acts
+    drop_keep: bool = True         # a plan dropped on the Clappers / her position / its end: the searches from its bridge
+    #                                go on (not cut), the fallback holds that bridge (fb_hold: its own check permitting)
+    #                                and a search that kept the dropped plan sends it back (re-checked at the commit)
+    audit_runs: bool = False       # (the smoke's safety audit) each control run's keys as sent, re-simulated from its
+    #                                commit state in every outcome still possible at its end, against that outcome's
+    #                                danger to the run's last frame (audit_run); off: nothing
     log: bool = True
 
     @classmethod
@@ -528,7 +606,8 @@ def _clappers_ok(o: OutData, n: int, obs: list, cfg: LiveCfg) -> bool:
         w = hi[:b] >= n
         sid = o.sids.get(ob.st, -9)
         oj = ob.j if ob.j is not None else int(round(ob.t * 60.0))
-        if not np.any(w & (st[:b] == sid) & (np.abs(j[:b] - oj) <= cfg.tol_j) & (np.abs(x[:b] - ob.x) <= cfg.tol_x) &
+        tx = getattr(ob, "xtol", None) or cfg.tol_x                    # (M4d2: replay_push)
+        if not np.any(w & (st[:b] == sid) & (np.abs(j[:b] - oj) <= cfg.tol_j) & (np.abs(x[:b] - ob.x) <= tx) &
                       (f[:b] == ob.face)):
             return False
     return True
@@ -550,7 +629,8 @@ def _exact_ok(o: OutData, n: int, obs: list, cfg: LiveCfg) -> bool:
             continue
         sid = o.sids.get(ob.st, -9)
         oj = ob.j if ob.j is not None else int(round(ob.t * 60.0))
-        if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= cfg.tol_j) & (np.abs(x[a:b] - ob.x) <= cfg.tol_x) &
+        tx = getattr(ob, "xtol", None) or cfg.tol_x                    # (M4d2: replay_push)
+        if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= cfg.tol_j) & (np.abs(x[a:b] - ob.x) <= tx) &
                       (f[a:b] == ob.face)):
             return False
     return True
@@ -798,6 +878,113 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
     return True, "ok", info
 
 
+def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: tuple, lat_s: int, idx: list,
+              k_last: int) -> list:
+    """M4d2 (LiveCfg.audit_runs, the smoke's safety audit): a control run's keys AS SENT - the keys in flight at its
+    commit and map2's keys after it (cmds, frames s + 1 .. of the plan; the plan's own commands after the run complete
+    its segments) - re-simulated from the commit's state S0 in each outcome idx still possible at the run's end and
+    checked against that outcome's danger to frame k_last (from the anchor): [(outcome, collision frame or None, why)]."""
+    out = []
+    face0 = int(S0[km.FACE]) if S0[km.FACE] != 0 else 1
+    alpha_c = int(round(float(S0[km.ALPHA]) * 6.0)) % 6
+    for i in idx:
+        o = lp.outs[i]
+        n_run = len(cmds)
+        tail = o.cmds[s + n_run + 1:o.end + 1] if s + n_run + 1 <= o.end else np.zeros(0, np.int64)
+        lat = hold_filter1(np.concatenate([np.asarray(cmds, np.int64), tail]), hold)
+        plan, why = reanchor_outcome(o, s, lat, lat_s)
+        if plan is None:
+            out.append((int(i), None, why))
+            continue
+        boxes = {iid: b[s:] for iid, b in o.boxes.items()}
+        tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c)
+        kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
+        out.append((int(i), None if kc is None else int(kc), ""))
+    return out
+
+
+def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs: list, cfg: LiveCfg,
+                 acc=None) -> tuple:
+    """M4d2 (repair, the strict replay): a received plan whose bridge was not followed, judged on the keys actually
+    sent: her ANCHOR state (the snapshot's) with the keys sent for frames t_a + 1 .. f + 1 (keys) and the plan's own
+    commands from f + 2 on, through the snapshot's hold filter state, re-simulated in every outcome that can still be
+    the truth at fo (the Clappers seen now: commit_check's rule); each must stay within tol_repair of its planned path
+    from now (fo) to its committed end, touch none of its danger from the anchor on and press nothing the plan does not
+    have. (ok, why, info) as commit_check's."""
+    t0 = time.perf_counter()
+    s = int(fo - lp.t_a)
+    info = {"s": s, "repair": True}
+    r0 = int(f + 2 - lp.t_a)
+    if s < 0:
+        return False, "future", info
+    cons, bad_h, bad_c = lp.consistent(s, her_xy, obs, cfg, hero=False)
+    info["cons"] = len(cons)
+    if not cons:
+        return False, "clappers", info
+    if cfg.views_exact:
+        poss = possible(lp, cons, s, obs, cfg, acc)
+        ended = [i for i in poss if lp.outs[i].kc < r0]
+        if ended:
+            return False, "ended", info
+        alive = poss
+    else:
+        alive = [i for i in cons if lp.outs[i].kc >= r0]
+    if not alive:
+        return False, "short", info
+    if cfg.dev_gap > 0 and any(lp.outs[i].kcol is not None and lp.outs[i].kcol - lp.outs[i].kc < cfg.dev_gap
+                               for i in alive):
+        return False, "dev gap", info
+    S_a = lp.S_a
+    face0 = int(S_a[km.FACE]) if S_a[km.FACE] != 0 else 1
+    alpha_c = int(round(float(S_a[km.ALPHA]) * 6.0)) % 6
+    keys = np.asarray(keys, np.int64)
+    pos_over, dev_max, n_sim = {}, 0.0, 0
+    for i in alive:
+        o = lp.outs[i]
+        cmds = np.concatenate([keys, o.cmds[r0:o.end + 1]])
+        lat = hold_filter1(cmds, lp.hold_a)
+        planned = {k for (k, _) in o.presses}
+        claws = {int(k0) + len(m): c for (k0, m, _, c) in o.segs if c is not None}
+        fac = sk.facing_track(face0, lat) if claws else None
+        pm = int(lp.lat_a)
+        for q in range(min(len(lat), o.kc)):
+            m = int(lat[q])
+            k = 1 + q
+            if _rising(m, pm, km.B_ATTACK) and k not in planned:
+                return False, "unplanned slash", info
+            if _rising(m, pm, M_CLAW) and k not in claws:
+                return False, "unplanned Clawline", info
+            if k in claws and not (_rising(m, pm, M_CLAW) and int(fac[q + 1]) == (1 if claws[k][0] > 0 else -1)):
+                return False, "claw latch", info
+            pm = m
+        plan, why = reanchor_outcome(o, 0, lat, lp.lat_a)
+        if plan is None:
+            return False, why, info
+        tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c)
+        n_sim += 1
+        kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
+        if kk < r0:
+            return False, "short", info
+        # the path from now on (frames s .. its committed end: the past is played - as live, where the check starts
+        # from her observed state)
+        dev = np.abs(tr.pos[s:kk + 1] - o.pos[s:kk + 1]).max(axis=1)
+        dmax = float(dev.max()) if len(dev) else 0.0
+        dev_max = max(dev_max, dmax)
+        if dmax > cfg.tol_repair:
+            info.update(dev=round(dmax, 3), dev_k=int(np.argmax(dev)) + s, out=i)
+            return False, "path", info
+        kc_ = _first_collision_out(o, tr, 0, o.kc)
+        if kc_ is not None:
+            info.update(col=int(kc_), out=i)
+            return False, "danger", info
+        po = o.pos.copy()
+        po[:kk + 1] = tr.pos[:kk + 1]
+        pos_over[i] = po
+    info.update(alive=alive, pos_over=pos_over, dev=round(dev_max, 3), n_sim=n_sim,
+                ms=round((time.perf_counter() - t0) * 1e3, 2))
+    return True, "ok", info
+
+
 # ---- the worker process ---------------------------------------------------------------------------------------------
 
 def boost_self(prio: str, cpus_spec: str | None = None) -> str:
@@ -899,7 +1086,10 @@ def reanchor_prev(plan, t_a: int, fo: int, pre) -> object | None:
     return ms.Plan([ms.Seg(masks, dsl, seg0.claw, seg0.tag)] + [x.copy() for x in plan.segs[1:]], plan.origin, "kept")
 
 
-def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, carry: dict | None = None) -> object:
+def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, carry: dict | None = None,
+                send=None, dropped=None) -> object:
+    """One search from a snapshot (module docstring, WORKERS): a LivePlan or a status dict. M4d2: send (a callable:
+    the worker's queue) gets the anytime plans (first_send: final=False) while the search runs."""
     base = {"kind": "status", "part": part, "seq": snap["seq"], "ep": snap["ep"], "fo": snap["fo"],
             "ctrl_seen": (snap.get("ctrl") or (None,))[0]}
     if snap.get("busy"):
@@ -920,14 +1110,43 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
         prev = reanchor_prev(carry["plan"], carry["t_a"], snap["fo"], pre)
         carried = prev is not None
     lead = len(pre.masks) - int(snap["n_inflight"])
-    cap = min(max((lead - 2) / 60.0, cfg.cap_min), cfg.cap_ch if ctrl is not None else cfg.cap_fb)
+    cap_hi = cfg.cap_ch if ctrl is not None else cfg.cap_fb
+    if cfg.deadline and snap.get("t_wall") is not None:
+        # M4d2: the plan must reach the bot dl_margin frames before its root (the first own key: the tick choosing it
+        # is root - 2), the time since the snapshot already gone (the queue, an aborted search before it)
+        avail = (lead + 1 - cfg.dl_margin) / 60.0 - max(0.0, time.time() - float(snap["t_wall"]))
+        cap = min(max(avail, cfg.cap_lo), cap_hi)
+    else:
+        cap = min(max((lead - 2) / 60.0, cfg.cap_min), cap_hi)
     if aborted():
         return {**base, "status": "abort"}
     S.abort_fn = aborted
     f0 = float(np.asarray(snap["S"], float).reshape(km.K, -1)[km.FACE, 0])
     S.realizer = HoldRealizer(len(pre.masks), pre.hold_after, face0=1 if f0 >= 0 else -1)
+    n_pre = len(pre.masks)
+    sent = {"e": None, "n": 0}
+
+    def on_best(e, kept):
+        # M4d2 (first_send): the first safe plan at once, each one better by w_switch after it (the bot waits for the
+        # best by the plan's root); never the kept plan's equal (the search's own hysteresis)
+        if send is None or aborted():
+            return
+        if kept is not None and e.value < kept.value + S.cfg.w_switch:
+            return
+        if _short(e, n_pre, cfg) or (sent["e"] is not None and e.value < sent["e"].value + S.cfg.w_switch):
+            return
+        lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, carried, (time.perf_counter() - t0) * 1e3,
+                        res_meta=None, final=False, pid=f"{part}:{snap['seq']}i{sent['n']}")
+        if lp is not None:
+            sent["e"] = e
+            sent["n"] += 1
+            send(lp)
+    S.on_best = on_best if (cfg.first_send and send is not None) else None
     t0 = time.perf_counter()
-    res = S.decide(sit, prev=prev, cap_s=cap, prefix=pre)
+    try:
+        res = S.decide(sit, prev=prev, cap_s=cap, prefix=pre)
+    finally:
+        S.on_best = None
     ms_ = (time.perf_counter() - t0) * 1e3
     # M4d: the plan in control (the kept plan) evaluated from this newer snapshot: safe or not; and whether its
     # bridge is safe to follow - every plan of this search starts with the prefix (the keys in flight and that
@@ -947,25 +1166,83 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
     e = res.ev
     if e is None:
         return {**base, "status": "none"}
-    if res.kept and not carried:
-        return {**base, "status": "kept", "value": round(float(e.value), 3)}
-    if not e.safe:
+    is_kept = bool(res.kept and not carried)
+    # M4d2 (drop_keep): the plan in control was dropped while this search ran - its kept answer goes back as a plan
+    back = bool(ctrl is not None and dropped is not None and ctrl[0] in dropped)
+    if back and is_kept:
+        is_kept = False
+        base["back"] = True
+    noop_like = e.safe and (e.plan.origin == "noop" or _short(e, n_pre, cfg))
+    alt = False
+    # (M4d2: the plan in control's frames left at this search's END - the search took frames of it)
+    left_now = None if snap.get("left") is None else int(snap["left"]) - (
+        int((time.time() - float(snap["t_wall"])) * 60.0) if snap.get("t_wall") is not None else 0)
+    ending = ctrl is not None and left_now is not None and left_now <= cfg.alt_left
+    if cfg.alt_noop and e.safe and (((ctrl is None or back) and noop_like) or (ending and (noop_like or is_kept))):
+        # M4d2: the noop is the fallback's bridge, then stop (or the plan in control's, at its end): the best safe
+        # non-noop plan of this search within alt_slack of it keeps the map in control
+        others = [x for x in res.tried if x is not None and x is not e and x.safe and x.finished and
+                  not getattr(x, "tag", ()) and x.plan.origin != "noop" and (prev is None or x.plan is not prev) and
+                  not _short(x, n_pre, cfg)]
+        if others:
+            b = max(others, key=lambda x: x.value)
+            if b.value >= e.value - cfg.alt_slack:
+                base["alt_from"] = [("kept" if is_kept else "noop"), round(float(e.value), 3)]
+                e, alt = b, True
+    if not alt:
+        if is_kept:
+            return {**base, "status": "kept", "value": round(float(e.value), 3)}
+        if not e.safe:
+            return {**base, "status": "unsafe"}
+        if noop_like:
+            return {**base, "status": "noop", "value": round(float(e.value), 3)}
+    if e is sent["e"]:
+        # M4d2: the final answer is the plan already sent (anytime): the part's decision is done
+        return {**base, "status": "sent", "value": round(float(e.value), 3), "n_sent": sent["n"]}
+    lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, carried, ms_, res_meta=res, final=True,
+                    pid=f"{part}:{snap['seq']}" + ("c" if (carried and res.kept) else "") + ("a" if alt else "") +
+                    ("k" if base.get("back") else ""))
+    if lp is None:
         return {**base, "status": "unsafe"}
-    if e.plan.origin == "noop" or e.plan.n_frames() - len(pre.masks) < cfg.min_frames:
-        return {**base, "status": "noop", "value": round(float(e.value), 3)}
+    lp.alt = alt
+    lp.n_sent = sent["n"]
+    return lp
+
+
+def _short(e, n_pre: int, cfg: LiveCfg) -> bool:
+    """A plan too short past its prefix to be sent (min_frames). M4d2 (short_fix): one with a press after its prefix
+    (a down slash, a Clawline, a segment after one) never is - M4d sent strikes pressed 1 - 3 frames after the bridge
+    as 'noop'."""
+    if e.plan.n_frames() - n_pre >= cfg.min_frames:
+        return False
+    if cfg.short_fix:
+        s0 = e.plan.segs[0]
+        if len(e.plan.segs) > 1 or s0.claw is not None or any(int(i) >= n_pre for (i, _) in s0.dsl):
+            return False
+    return True
+
+
+def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, prev, carried: bool, ms_: float,
+               res_meta=None, final: bool = True, pid: str = "") -> "LivePlan | None":
+    """The LivePlan of one evaluated plan of a search (its safe outcomes' data, build_outs); None: no safe outcome."""
     outs = build_outs(e, S.cfg.margins)
     if not outs:
-        return {**base, "status": "unsafe"}
-    pid = f"{part}:{snap['seq']}" + ("c" if (carried and res.kept) else "")
+        return None
     log = ms.plan_log(e, snap["fo"])
     return LivePlan(pid=pid, part=part, ep=snap["ep"], seq=snap["seq"], t_a=int(snap["fo"]), f_snap=int(snap["f"]),
-                    n_pre=len(pre.masks), n_inflight=int(snap["n_inflight"]), plan=e.plan, outs=outs,
+                    n_pre=n_pre, n_inflight=int(snap["n_inflight"]), plan=e.plan, outs=outs,
                     value=float(e.value), hits=float(e.hits), p_safe=float(e.p_safe), origin=e.plan.origin,
                     note=e.plan.note, ms=round(ms_, 1), cap=cap, ctrl_seen=base["ctrl_seen"],
-                    had_prev=prev is not None, n_cand=res.n_cand, timed_out=bool(res.timed_out),
+                    had_prev=prev is not None,
+                    n_cand=res_meta.n_cand if res_meta is not None else -1,
+                    timed_out=bool(res_meta.timed_out) if res_meta is not None else False,
                     steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time(),
-                    carried=bool(carried and res.kept), prev_safe=base["prev_safe"], noop_safe=base["noop_safe"],
-                    cmds_pre=np.asarray(snap["cmds"], np.int64)[:len(pre.masks)].copy())
+                    carried=bool(carried and res_meta is not None and res_meta.kept),
+                    prev_safe=base.get("prev_safe"), noop_safe=base.get("noop_safe", False),
+                    cmds_pre=np.asarray(snap["cmds"], np.int64)[:n_pre].copy(), final=bool(final),
+                    S_a=np.asarray(snap["S"], float).reshape(km.K, -1)[:, 0].copy(), hold_a=snap["hold"],
+                    lat_a=int(snap.get("lat_s") or 0),
+                    rev=bool(snap.get("rev")), alt=False, n_sent=0)
 
 
 WARM_SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")   # the acceptance set (M3): the warm-up's situations
@@ -1029,7 +1306,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     except Exception as e:  # noqa: BLE001
         boost += f", numba threads unchanged ({e})"
     W = ms.World()
-    S = _Searcher(W, ms.Cfg.live())
+    S = _Searcher(W, ms.Cfg.live(**({"lag": int(cfg.search_lag)} if cfg.search_lag > 0 else {})))
     if nparts > 1:
         S.part = (part, nparts)
     t0 = time.perf_counter()
@@ -1037,7 +1314,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
         _warm_search(S, W, cfg.warm_rec)
     except Exception as e:  # noqa: BLE001 - reported, the worker goes on
         out_q.put({"kind": "error", "part": part, "where": "warm", "error": repr(e)[:400]})
-    state = {"latest": None, "plans": {}, "abort": False, "cur": None, "stop": False}
+    state = {"latest": None, "plans": {}, "abort": False, "cur": None, "stop": False, "dropped": set()}
     cond = threading.Condition()
 
     def reader():
@@ -1060,8 +1337,19 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
                 if not snap.get("note"):
                     state["latest"] = snap
                 cur = state["cur"]
+                chg = cur is not None and (snap.get("ctrl") or (None,))[0] != (cur.get("ctrl") or (None,))[0]
+                if chg and snap.get("keep") and snap.get("ctrl") is None:
+                    # M4d2 (drop_keep): the plan in control was dropped, its bridge held by the fallback - the search
+                    # from it goes on; a kept answer is sent back as a plan
+                    if len(state["dropped"]) > 64:
+                        state["dropped"].clear()
+                    state["dropped"].add((cur.get("ctrl") or (None,))[0])
+                    chg = False
                 if cur is not None and ("hit" in (snap.get("trig") or ()) or snap.get("ep") != cur.get("ep") or
-                                        (snap.get("ctrl") or (None,))[0] != (cur.get("ctrl") or (None,))[0]):
+                                        chg or
+                                        # M4d2: a cut - the search's bridge broken (the fallback left it) or a newer
+                                        # snapshot after a Clapper's move start (rev_cut)
+                                        (snap.get("cut") is not None and cur["seq"] <= int(snap["cut"]))):
                     state["abort"] = True
                 cond.notify_all()
     th = threading.Thread(target=reader, daemon=True, name="map2-reader")
@@ -1130,8 +1418,16 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             state["abort"] = False
             plans = dict(state["plans"])
         done = snap["seq"]
+        def _send(m):
+            if isinstance(m, LivePlan):
+                state["carry"] = {"plan": m.plan, "t_a": m.t_a, "ep": m.ep}
+            try:
+                out_q.put(m)
+            except Exception:  # noqa: BLE001
+                pass
         try:
-            msg = _search_one(S, cfg, snap, part, plans, lambda: state["abort"], carry=state.get("carry"))
+            msg = _search_one(S, cfg, snap, part, plans, lambda: state["abort"], carry=state.get("carry"), send=_send,
+                              dropped=state["dropped"])
             if isinstance(msg, LivePlan):
                 state["carry"] = {"plan": msg.plan, "t_a": msg.t_a, "ep": msg.ep}
         except Exception as e:  # noqa: BLE001 - one bad snapshot must not end the worker
@@ -1258,6 +1554,9 @@ class Map2Controller:
             if not p.is_alive():
                 self._inc("worker_restarts")
                 self.errors.append({"kind": "restart", "part": part, "exitcode": p.exitcode, "ep": self.ep})
+                self.ready.pop(part, None)          # (M4d2: not waited for by the snapshots until it is warm again)
+                for d in self.snaps_out.values():
+                    d["parts"].discard(part)
                 try:
                     self.procs[part] = self._spawn(part, len(self.procs), self.in_qs[part])
                 except Exception as e:  # noqa: BLE001 - (M4d) e.g. CreateProcess failing under memory pressure
@@ -1317,6 +1616,14 @@ class Map2Controller:
         self.n_err = 0
         self.disabled = False               # too many errors on the bot's side: map2 off for this episode
         self.last_drop = None               # (frame, why) of the last plan dropped (end_dev: a 'dev' outcome's end)
+        # M4d2
+        self.snaps_out: dict = {}           # seq -> the snapshot's bridge and owner, its parts not answered yet
+        self._hold = None                   # (seq, the key expected for f + 2) of this tick's held bridge
+        self.rev_new = None                 # (fo, [iid, state]) of a Clapper's move start not searched from yet
+        self.rev_log: list = []             # [fo of the move start, iid, state, seq of the snapshot from it, f sent]
+        self._run = None                    # the control run's commit data (audit_runs)
+        self.hit_k: dict = {}               # iid -> the frame its HP last fell (replay_push)
+        self._short_next = False            # the next snapshot with the short bridge (unsafe_short)
 
     def _inc(self, key: str, n: int = 1) -> None:
         self.st[key] += n
@@ -1371,6 +1678,10 @@ class Map2Controller:
                 break
             if isinstance(msg, LivePlan):
                 self._inc("plans_recv")
+                if getattr(msg, "final", True):
+                    self._answered(msg.seq, msg.part)
+                else:
+                    self._inc("plans_interim")
                 self.lat.append(msg.ms)
                 self.run_ms["search"].append(msg.ms)
                 self.last_msg = {"part": msg.part, "seq": msg.seq, "status": "plan", "ms": msg.ms, "pid": msg.pid,
@@ -1386,7 +1697,12 @@ class Map2Controller:
             elif isinstance(msg, dict):
                 k = msg.get("kind")
                 if k == "status":
+                    self._answered(msg.get("seq"), msg.get("part"))
+                    if self.cfg.unsafe_short and msg.get("status") == "unsafe" and msg.get("ep") == self.ep and                             msg.get("seq") == self.seq - 1:
+                        self._short_next = True     # M4d2: the next snapshot with the short bridge
                     self._inc("w_" + str(msg.get("status")).split(":")[0])
+                    if msg.get("alt_from"):
+                        self._inc("w_alt_" + str(msg["alt_from"][0]))
                     self.last_msg = {kk: msg.get(kk) for kk in ("part", "seq", "status", "ms", "cap", "n_pre", "n_cand",
                                                                 "moved", "dropped", "value", "prev_safe")
                                      if msg.get(kk) is not None}
@@ -1396,6 +1712,8 @@ class Map2Controller:
                 elif k == "ready":
                     self.ready[msg["part"]] = msg
                 elif k in ("error", "exit"):
+                    if msg.get("where") != "hang":
+                        self._answered(msg.get("seq"), msg.get("part"), all_=k == "exit")
                     self._inc("w_" + k + ("_" + str(msg.get("where")) if msg.get("where") else ""))
                     self.last_msg = {"part": msg.get("part"), "seq": msg.get("seq"),
                                      "status": f"{k}:{msg.get('where') or msg.get('why') or ''}", "s": msg.get("s")}
@@ -1413,11 +1731,100 @@ class Map2Controller:
         if v is None or v[0] != self.ctrl.pid or (v[1] is not None and (cut is None or cut < v[1])):
             self._verdict = (self.ctrl.pid, cut, status)
 
+    def _answered(self, seq, part, all_: bool = False) -> None:
+        """M4d2: a worker's final answer to a snapshot (a plan, a status, an error): that part is done with it."""
+        d = self.snaps_out.get(seq) if seq is not None else None
+        if d is None:
+            return
+        if all_ or part is None:
+            d["parts"].clear()
+        else:
+            d["parts"].discard(int(part))
+
+    def hold_row(self, f: int):
+        """M4d2 (fb_hold): the planner's CONTINUE row for this tick - the bridge it sent with the newest snapshot whose
+        search still runs (a part not answered), from frame f + 2 on (the planner's full plan of that tick, aligned by
+        the frames elapsed) - or None: no hold (map2 has the keys, the bridge is over or was not the planner's)."""
+        self._hold = None
+        if not self.cfg.fb_hold or self.disabled or self.ctrl is not None:
+            return None
+        try:
+            best = None
+            pend = {getattr(x, "seq", None) for x in self.pending}
+            for seq, d in self.snaps_out.items():
+                # a search still running, or its plan received and not decided yet (waiting for its root / her input)
+                if not (d["parts"] or seq in pend) or d.get("broken") or not (d["own"] == "plan" or (
+                        d["own"] == "m2" and self.cfg.drop_keep)):
+                    continue
+                if d["k0"] <= f + 2 <= d["k0"] + len(d["bridge"]) - 1 and (best is None or seq > best[0]):
+                    best = (seq, d)
+            if best is None:
+                return None
+            d = best[1]
+            i = int(f + 2 - d["k2"])
+            row = np.asarray(d["res_cmd"], np.int64)[i:]
+            if not len(row):
+                return None
+            self._hold = (best[0], int(row[0]))
+            self._inc("hold_ticks")
+            self.row["hold"] = int(best[0])
+            return row
+        except Exception as e:  # noqa: BLE001 - map2 must not end the run
+            self._error("hold", e)
+            return None
+
+    def _audit_end(self) -> None:
+        """M4d2 (audit_runs): the control run that ends now (a drop, a replacement) - its keys as sent, re-simulated
+        (audit_run) in the outcomes still possible; collisions counted ('audit_col') and logged on the row."""
+        r_ = getattr(self, "_run", None)
+        self._run = None
+        if r_ is None or self.ctrl is None or r_["lp"] is not self.ctrl:
+            return
+        try:
+            lp = r_["lp"]
+            ks = [k for k, v in self.own_hist.items() if v == "m2" and k >= r_["f"] + 2]
+            if not ks:
+                return
+            k1 = max(ks)
+            idx = (self._exe[2] if (self._exe is not None and self._exe[0] == lp.pid) else self.ctrl_idx)
+            if self.cfg.replay and self.cfg.replay_strict and getattr(lp, "S_a", None) is not None:
+                # the strict replay's world: her ANCHOR state and every key sent since the anchor (her observed state
+                # is the recording's)
+                cmds = []
+                for k in range(lp.t_a + 1, k1 + 1):
+                    v = self._sent_at(k)
+                    v = 0 if v is None else int(v)
+                    cmds.append(v & ~COG if self._own_at(k) == "cog" else v)
+                res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a),
+                                list(idx), int(k1 - lp.t_a))
+            else:
+                cmds = list(np.asarray(r_["inflight"], np.int64))
+                for k in range(r_["f"] + 2, k1 + 1):
+                    v = self._sent_at(k)
+                    cmds.append(0 if v is None else int(v))
+                res = audit_run(self.W, lp, int(r_["fo"] - lp.t_a), r_["S0"], np.asarray(cmds, np.int64),
+                                r_["hold"], r_["lat_s"], list(idx), int(k1 - lp.t_a))
+            self._inc("audit_runs")
+            self._inc("audit_out", len(res))
+            cols = [x for x in res if x[1] is not None]
+            if cols:
+                self._inc("audit_col")
+            for x in res:
+                if x[2]:
+                    self._inc("audit_skip_" + x[2].replace(" ", "_"))
+            self.row["audit"] = [lp.pid, len(res), [list(x) for x in res if x[1] is not None or x[2]], int(k1)]
+        except Exception as e:  # noqa: BLE001 - an audit never ends the run
+            self._error("audit", e)
+
     def _drop(self, why: str, info: dict | None = None) -> None:
+        if self.ctrl is not None and self.cfg.audit_runs:
+            self._audit_end()
         if self.ctrl is not None:
             self._inc("drop_" + why)
             self.trig.append("drop")
             self.last_drop = (int(self._fo_prev), str(why))
+            if self.cfg.drop_rev and why in ("clappers", "hero"):
+                self.rev_new = (int(self._fo_prev), [-1, "drop:" + why])      # M4d2: restart now (rev_cut's path)
         self.ctrl, self.ctrl_idx, self.ctrl_pos, self.ctrl_since = None, [], {}, None
         self.ctrl_excl, self.ctrl_cut, self._exe, self._verdict = set(), None, None, None
 
@@ -1467,12 +1874,15 @@ class Map2Controller:
         row = {"f": int(f), "fo": int(fo)}
         self.row = row
         self.took = False
+        self._hold = None                    # M4d2: set by hold_row (after this, before the planner) when it holds
         if self.procs and f % 120 == 0:
             self._check_procs()
         self._drain(fo)
         h = raw.get("hero") or {}
         her = h.get("pos")
         acc = bool(h.get("hero_accepting_input", True))
+        # M4d2 (noinput_kin): 'no input' in a clip the hero model covers counts as control for the commit
+        acc_c = acc or (self.cfg.noinput_kin and str(((h.get("anim") or {}).get("clip")) or "") in KIN_CLIPS)
         obs = self.trk.obs()
         # M4d: a hit or a freeze since the previous tick (a skipped tick's frames too: the plan's frame count is
         # STATE frames, a freeze stops the game's), the hit first (its own freeze follows it)
@@ -1481,6 +1891,17 @@ class Map2Controller:
         if hit_new:
             self._hit_owner(prev_fo, fo)
         self._triggers(fo, obs, hit_new)
+        if self.cfg.replay and self.cfg.replay_push and self.hit_k:
+            # M4d2 (replay only): a Clapper the recording's hero just hit - its x pushed by the recording's slash
+            import copy as _copy
+            obs2 = []
+            for ob in obs:
+                if fo - self.hit_k.get(ob.iid, -10 ** 9) <= self.cfg.push_f:
+                    ob = _copy.copy(ob)
+                    ob.xtol = self.cfg.tol_x + self.cfg.push_tol
+                    self._inc("replay_push_obs")
+                obs2.append(ob)
+            obs = obs2
         why = None
         dt_ = raw.get("dt")
         if hit_new or self.last_hit >= fo - 1:
@@ -1502,7 +1923,7 @@ class Map2Controller:
         if self._cog_near(fo):
             lat_s &= ~COG                    # M4d: a Cogfly throw's keys are not the kinematics' (the policy's rule)
         # 1. commit (M4d: never while she has no control - a Clawline under way, its antic, a stun)
-        no_input = (not acc) or bool(self._busy_claw(fo, h))
+        no_input = (not acc_c) or bool(self._busy_claw(fo, h))
         if no_input and self.pending and why is None:
             self._inc("commit_wait_noinput")
             row["noinput"] = 1
@@ -1515,6 +1936,14 @@ class Map2Controller:
                 left = self._left(fo)
                 cands = [x for x in cands if x.ctrl_seen == self.ctrl.pid and
                          (x.had_prev or left <= self.cfg.end_lead)]
+                # M4d2: an 'alt' plan (sent over the noop / the kept plan) only once the plan in control is ending
+                cands = [x for x in cands if not getattr(x, "alt", False) or left <= self.cfg.alt_left]
+            if self.cfg.wait_parts:
+                # M4d2: a plan waits for its decision's other parts (and its own better anytime plans) until its root
+                n0 = len(cands)
+                cands = [x for x in cands if self._ready(x, f)]
+                if len(cands) < n0:
+                    row["wait_parts"] = n0 - len(cands)
             cands = sorted(cands, key=lambda x: (-x.value, -x.t_a))[:self.cfg.commits_per_tick]
             for lp in cands:
                 tc = time.perf_counter()
@@ -1533,8 +1962,24 @@ class Map2Controller:
                                                     for k in range(lp.t_a + 1, f + 2))
                 self._inc("bridge_" + ("ok" if bridge_ok else "broken"))
                 try:
-                    if self.cfg.replay and self.cfg.replay_strict and not bridge_ok:
+                    if self.cfg.repair and not bridge_ok and getattr(lp, "S_a", None) is not None:
+                        # M4d2: the plan REPAIRED from the keys actually sent - the strict replay from its anchor state
+                        # (her observed one follows the recording), live from her state now with a wider path check
+                        if self.cfg.replay and self.cfg.replay_strict:
+                            keys_ = np.array([self._sent_at(k) or 0 for k in range(lp.t_a + 1, f + 2)], np.int64)
+                            ok, why_c, info = repair_check(self.W, lp, fo, f, keys_, her, obs, self.cfg, acc=acc)
+                        else:
+                            ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs,
+                                                           self.cfg, acc=acc, tol=self.cfg.tol_repair)
+                            info["repair"] = True
+                        self._inc("repair_" + ("ok" if ok else why_c.replace(" ", "_")))
+                    elif self.cfg.replay and self.cfg.replay_strict and not bridge_ok:
                         ok, why_c, info = False, "bridge", {"s": int(fo - lp.t_a)}
+                        # M4d2: the first frame off (from the anchor), the key expected and sent, who sent it
+                        k_ = next((k for k in range(lp.t_a + 1, f + 2) if self._sent_at(k) != expect(k)), None)
+                        if k_ is not None:
+                            info["col"] = [int(k_ - lp.t_a), int(lp.n_pre), expect(k_), self._sent_at(k_),
+                                           self._own_at(k_)]
                     else:
                         ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s,
                                                        her, obs, self.cfg, acc=acc)
@@ -1556,14 +2001,20 @@ class Map2Controller:
                     if self.ctrl is not None:
                         self._inc("replaced")
                     self.ctrl_excl, self.ctrl_cut, self._exe, self._verdict = set(), None, None, None
+                    self._audit_end()
                     self.ctrl, self.ctrl_idx, self.ctrl_pos = lp, list(info["alive"]), dict(info["pos_over"])
                     self.ctrl_since = int(f)
+                    if self.cfg.audit_runs:
+                        self._run = {"lp": lp, "fo": int(fo), "f": int(f), "S0": S0.copy(),
+                                     "inflight": np.asarray(inflight, np.int64).copy(), "hold": hold_t,
+                                     "lat_s": int(lat_s)}
                     self.took = True
                     why = None
                     self.new_plan_obj = lp.plan
                     self._tm("age", int(fo - lp.t_a))
                     self._inc("commits")
                     row["commit"] = {"pid": lp.pid, "t_a": lp.t_a, "value": round(lp.value, 3), "hits": round(lp.hits, 3),
+                                     "repair": bool(info.get("repair")),
                                      "origin": lp.origin, "note": lp.note, "ms": lp.ms, "n_pre": lp.n_pre,
                                      "outs": len(lp.outs), "alive": len(info["alive"]), "steps": lp.steps,
                                      "bridge": bool(info.get("bridge")), "carried": bool(getattr(lp, "carried", False)),
@@ -1571,6 +2022,8 @@ class Map2Controller:
                                      "dev": sorted({(o.kc, o.kcol) for o in lp.outs if o.kcol is not None}),
                                      "cp": sorted({(k, i, kd) for o in lp.outs for (k, i, kd) in o.contacts})}
                     self.trig.append("commit")
+                    # M4d2: the plans of this decision and older ones are done with
+                    self.pending = [x for x in self.pending if getattr(x, "seq", -1) > getattr(lp, "seq", -1)]
                     break
         # M4d: the newer search's verdict on the plan still in control: its noop (the bridge, then stop) was safe -
         # the plan is cut after that bridge
@@ -1624,6 +2077,14 @@ class Map2Controller:
         row["why"] = why
         self._tm("pre", (time.perf_counter() - t0) * 1e3)
         return mask
+
+    def _ready(self, x: LivePlan, f: int) -> bool:
+        """M4d2 (wait_parts): a received plan is checked for its commit once every part of its decision has answered
+        (their finals) or when its root - its first own key, after the prefix - is due within a frame."""
+        d = self.snaps_out.get(getattr(x, "seq", None))
+        if d is None or not d["parts"]:
+            return True
+        return int(f) + 2 >= int(x.t_a) + int(x.n_pre)
 
     def _execute(self, lp: LivePlan, cons: list, n: int, r: int, f: int, her, obs: list, acc: bool, row: dict) -> tuple:
         """The plan in control's command for frame r (from its anchor) from its consistent outcomes cons (module
@@ -1735,10 +2196,13 @@ class Map2Controller:
             if self._st_seen.get(ob.iid) not in (None, key):
                 self.trig.append("reveal")
                 self.row.setdefault("rev", []).append([ob.iid % 1000, ob.st])   # (M4d: the reveal latency audit)
+                if ob.st in brnum.MOVE_STARTS:
+                    self.rev_new = (int(fo), [ob.iid % 1000, ob.st])           # M4d2: a move start (rev_cut)
             self._st_seen[ob.iid] = key
             hp0 = self._hp_seen.get(ob.iid)
             if hp0 is not None and ob.hp < hp0:
                 self.trig.append("landed")
+                self.hit_k[ob.iid] = int(fo)    # M4d2 (replay_push)
             self._hp_seen[ob.iid] = ob.hp
         if hit_new or self.last_hit >= fo - 1:
             self.trig.append("hit")
@@ -1755,7 +2219,8 @@ class Map2Controller:
 
     def _busy(self, fo: int, raw: dict) -> str | None:
         h = raw.get("hero") or {}
-        if not bool(h.get("hero_accepting_input", True)):
+        if not bool(h.get("hero_accepting_input", True)) and not (
+                self.cfg.noinput_kin and str(((h.get("anim") or {}).get("clip")) or "") in KIN_CLIPS):
             return "no input"
         if self.last_freeze >= fo - 1:
             return "freeze"
@@ -1838,6 +2303,13 @@ class Map2Controller:
         elif own not in ("sup", "m2", "plan", "cog"):
             bridge = [int(mask)] * self.cfg.sc_lead     # a script: its keys ahead are unknown - the held key (a guess)
         self._bridge_audit(f, int(mask))
+        # M4d2: the key sent for f + 2 against the pending searches' bridges (a break cuts those searches); a Clawline
+        # pressed (whoever sent it) logged with the Clappers' states (the CLAWSTRIKE count)
+        self._check_bridges(f, fo, int(mask), own, row)
+        pm_ = self._sent_at(int(f) + 1)
+        if (int(mask) & M_CLAW) and not ((pm_ or 0) & M_CLAW):
+            row["claw"] = [str(own), [[ob.iid % 1000, ob.st, ob.j, round(float(ob.x), 2), ob.face]
+                                      for ob in self.trk.obs()]]
         self.sent_hist[int(f) + 2] = int(mask)
         self.own_hist[int(f) + 2] = str(own)
         if len(self.sent_hist) > 240:
@@ -1857,6 +2329,11 @@ class Map2Controller:
             # a note to every worker (busy ones too): the plan in control (its plan for the kept-plan check) and her
             # hit - a search from before them is cut
             note = {"note": True, "ep": self.ep, "ctrl": ctrl_t, "trig": sorted(set(self.trig))}
+            ld = self.last_drop
+            if self.cfg.drop_keep and ctrl_t is None and "hit" not in self.trig and ld is not None and \
+                    ld[0] == int(self._fo_prev) and ld[1] in ("clappers", "hero", "end", "end_dev"):
+                note["keep"] = True             # M4d2: the searches from the dropped plan's bridge go on
+                self._inc("drop_keep")
             if self.new_plan_obj is not None and self.ctrl is not None:
                 note["plan_obj"] = self.new_plan_obj
             self.new_plan_obj = None
@@ -1865,28 +2342,73 @@ class Map2Controller:
                 if i < len(self.procs) and not self.procs[i].is_alive():
                     continue                    # (M4d: not into a dead worker's queue)
                 q.put(note)
-        want = [i for i in range(len(self.in_qs)) if not self.idles or self.idles[i].value == 1]
-        if want and not busy and (not self.idles or self.trk.obs()):
+        obs_now = self.trk.obs()
+        row["nc"] = len(obs_now)
+        # (the workers alive and warmed: a restarted one warming up does not hold the others' snapshots back)
+        alive = [i for i in range(len(self.in_qs)) if i >= len(self.procs) or
+                 (self.procs[i].is_alive() and (i in self.ready or not self.ready))]
+        idle = [i for i in alive if not self.idles or self.idles[i].value == 1]
+        rev = False
+        if self.rev_new is not None:
+            if not self.cfg.rev_cut or fo - self.rev_new[0] > self.cfg.rev_wait:
+                if self.cfg.rev_cut:
+                    self._inc("rev_expired")
+                self.rev_new = None
+            elif not busy and obs_now and alive:
+                rev = True                      # M4d2: the newest snapshot to every worker now, their searches cut
+        if rev:
+            want = alive
+        elif self.cfg.sync and self.idles:
+            want = alive if (alive and len(idle) == len(alive)) else []
+        else:
+            want = idle
+        if want and not busy and (not self.idles or obs_now):
             m_ = int(mask) & ~COG if own == "cog" else int(mask)
+            short = rev or self._short_next
+            self._short_next = False
+            if short:
+                if not rev:
+                    self._inc("short_sent")
+                bridge = list(bridge)[:self.cfg.rev_lead]
+                presses = [p_ for p_ in presses if p_[0] < int(f) + 3 + self.cfg.rev_lead]
             snap = {"seq": self.seq, "ep": self.ep, "f": int(f), "fo": int(fo), "S": S0.copy(),
                     "cmds": np.concatenate([np.asarray(inflight, np.int64), [m_],
                                             np.asarray(bridge, np.int64)]).astype(np.int64),
                     "n_inflight": len(inflight) + 1, "hold": self._hold_clean(hold_tuple(hold), fo),
                     "lat_s": int((raw.get("act") or {}).get("mask") or 0) & (~COG if self._cog_near(fo) else -1),
                     "presses": presses,
-                    "obs": self.trk.obs(), "mems": self.trk.mems(), "hazards": self.trk.hazards(self.K),
+                    "obs": obs_now, "mems": self.trk.mems(), "hazards": self.trk.hazards(self.K),
                     "ctrl": None if self.ctrl is None else (self.ctrl.pid, int(self.ctrl.t_a)),
-                    "trig": sorted(set(self.trig)), "busy": busy, "own": own}
+                    "trig": sorted(set(self.trig)), "busy": busy, "own": own,
+                    # M4d2: the wall time (the worker's deadline), the plan in control's frames left (alt), the cut
+                    "t_wall": time.time(), "left": None if self.ctrl is None else int(self._left(fo)),
+                    "rev": bool(rev)}
+            if rev:
+                snap["cut"] = self.seq - 1      # every search from an older snapshot is cut (the reader's rule)
+                self.rev_log.append([int(self.rev_new[0]), *self.rev_new[1], self.seq, int(f)])
+                row["rev_sent"] = [self.seq, int(self.rev_new[0])]
+                self._inc("rev_sent")
+                self.rev_new = None
             for i in want:
                 self.in_qs[i].put(snap)
                 if self.idles:
                     self.idles[i].value = 0
+            res_cmd_ = [m_] + [int(x) for x in bridge]
+            if own == "plan" and res_cmd is not None and len(res_cmd) > 1 and int(res_cmd[0]) == int(mask):
+                res_cmd_ = [int(x) for x in np.asarray(res_cmd, np.int64)]
+            self.snaps_out[self.seq] = {"f": int(f), "k0": int(f) + 3, "k2": int(f) + 2, "bridge": list(bridge),
+                                        "res_cmd": res_cmd_, "own": str(own), "parts": set(want), "rev": bool(rev)}
+            if len(self.snaps_out) > 64:
+                for k_ in sorted(self.snaps_out)[:-64]:
+                    del self.snaps_out[k_]
             self.seq += 1
             self._inc("snapshots")
         if self.trig:
             row["trig"] = sorted(set(self.trig))
         if busy:
             row["busy"] = busy
+            if busy == "no input":
+                row["clip"] = str((((raw.get("hero") or {}).get("anim") or {}).get("clip")) or "")
         if self.pending:
             row["pend"] = len(self.pending)
         if self.last_msg:
@@ -1899,6 +2421,35 @@ class Map2Controller:
         if self.cfg.log:
             self.rows.append(row)
         self.row = {}
+
+    def _check_bridges(self, f: int, fo: int, mask: int, own: str, row: dict) -> None:
+        """M4d2: the key sent for f + 2 against every pending search's bridge (a snapshot with a part not answered):
+        a different key breaks it - those searches are cut (a note: their prefix will not be played) and their
+        workers start from the newest snapshot. The hold's audit: the held key followed or not."""
+        k = int(f) + 2
+        if self._hold is not None:
+            ok_ = int(mask) == int(self._hold[1])
+            self._inc("hold_" + ("followed" if ok_ else "broken"))
+            if not ok_:
+                row["hold_broken"] = [self._hold[0], str(own)]
+        cut = None
+        pend = {getattr(x, "seq", None) for x in self.pending}
+        for seq, d in self.snaps_out.items():
+            if not (d["parts"] or seq in pend) or d.get("broken"):
+                continue
+            j = k - d["k0"]
+            if 0 <= j < len(d["bridge"]) and int(d["bridge"][j]) != int(mask):
+                d["broken"] = True
+                self._inc("bridge_cut_" + str(d["own"]).split(":")[0])
+                cut = seq if cut is None else max(cut, seq)
+        if cut is not None and self.cfg.fb_hold and self.cfg.break_cut and self.in_qs:
+            note = {"note": True, "ep": self.ep, "cut": int(cut), "trig": [],
+                    "ctrl": None if self.ctrl is None else (self.ctrl.pid, int(self.ctrl.t_a))}
+            for i, q in enumerate(self.in_qs):
+                if i < len(self.procs) and not self.procs[i].is_alive():
+                    continue
+                q.put(note)
+            row["cut_seq"] = int(cut)
 
     def _bridge_audit(self, f: int, mask: int) -> None:
         """The keys the bridges expected against the key sent for frame f + 2: per bridge the frames followed before

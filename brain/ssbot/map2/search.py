@@ -1686,6 +1686,9 @@ class Searcher:
         # M4c: a callable plan -> plan applied to every plan the search builds (_merge) before it is evaluated (the
         # live worker's: its masks as the oracle's hold filter latches them, ssbot.map2.live.HoldRealizer); None: none
         self.realizer = None
+        # M4d2: a callable (eval, kept eval | None) called with each new safe best that is not the kept plan nor the
+        # noop (the live worker sends it at once: anytime); None: none (the search itself is unchanged by it)
+        self.on_best = None
 
     def _mine(self, c) -> bool:
         if self.part is None:
@@ -2408,6 +2411,12 @@ class Searcher:
                 last_noted[0] = e
                 self.anytime.append((now() - t0c, (time.perf_counter() - t0) * 1e3, float(e.value), bool(e.safe),
                                      e.plan.origin, e.plan.n_frames()))
+                # M4d2 (the live worker; None: nothing): each new best that is safe, finished and not the kept plan
+                # nor the noop goes to the caller at once (anytime: the first safe plan sent, the better ones after)
+                cb = self.on_best
+                if cb is not None and e.safe and e.finished and e is not kept and e.plan.origin != "noop" and \
+                        not getattr(e, "tag", ()):
+                    cb(e, kept)
         tried = []
         kept = None
         if prev is not None and prev.segs:

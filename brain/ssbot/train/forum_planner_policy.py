@@ -815,6 +815,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         # M4c (SSBOT_FORUM_MAP2): map2's keys for f + 2 (a received plan committed after its exact re-simulation from
         # this state, or the plan in control's next keys while its per-frame check holds); None: the fallback's
         m2_mask = self.m2.pre(f, fo, raw, S0, prefix, hold) if self.m2 is not None else None
+        if self.m2 is not None:
+            # M4d2: while map2 searches from the bridge this planner sent, its CONTINUE row is that bridge (followed
+            # unless its own checks need a change); None: no hold (map2 has the keys, or nothing searched from it)
+            self.planner.hold_row = None if m2_mask is not None else self.m2.hold_row(f)
         # SP-AIR1 (SSBOT_FORUM_AIRSHOW): while the show owns the keys its planner and this one alternate (the tick's
         # cost): on the show's ticks the last plan result stands for the supervisor
         air_tick = False

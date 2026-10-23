@@ -226,6 +226,18 @@ CHASE_FAMS = (None, "CC_EVADE", "CC_ENTRY")   # its instance then (idle / walk: 
 CHASE_RUNE_S = 1.1            # no chase rows this long after a jump cast (its rune circle bursts 0.75-0.87 s after it)
 
 
+def _hold_pad(row, T: int) -> np.ndarray:
+    """M4d2: the held bridge as a CONTINUE row of T frames (padded like candidates.continue_plan: its last frame's
+    movement keys)."""
+    r = np.asarray(row, np.int64).reshape(-1)
+    out = np.zeros(T, np.int64)
+    k = min(len(r), T)
+    out[:k] = r[:k]
+    if k < T:
+        out[k:] = (int(r[-1]) if len(r) else 0) & (kin.B_LEFT | kin.B_RIGHT)
+    return out
+
+
 def chase_tier_low(R: np.ndarray, safe: np.ndarray, xe: np.ndarray, cx: float | None, ref: float,
                    near_u: float = CHASE_TIER_U) -> np.ndarray:
     """SSBOT_FORUM_CHASE (SG5): [N] the rows the readiness tier puts after the others: safe, ending within near_u of
@@ -3329,8 +3341,15 @@ class ForumPlanner(Planner):
             if n_map and i == M0:
                 return "SPECIAL MAP"
             return cs.name(i)
+        # map v2 M4d2 (only with SSBOT_FORUM_MAP2: ssbot.map2.live.Map2Controller.hold_row sets it; None otherwise and
+        # nothing below changes): the bridge this planner sent while map2's search from it runs - the CONTINUE row is
+        # that bridge (its frames from f + 2, aligned by the frames actually elapsed) and ranks first among the safe
+        # rows (below every safety key), so the fallback follows it unless its own checks need a change
+        hold_row = getattr(self, "hold_row", None)
+        hold_on = hold_row is not None and cont
         if cont:
-            rows_.append(cmod.continue_plan(self.prev_cmd, 1, T)[None])
+            rows_.append((cmod.continue_plan(self.prev_cmd, 1, T) if not hold_on else
+                          _hold_pad(hold_row, T))[None])
         cmd = np.concatenate(rows_)
         rem0 = self.jump_until - self.ticks
         if rem0 > 0:
@@ -3600,6 +3619,17 @@ class ForumPlanner(Planner):
                 n_core = len(prio)
         if cont and pass1[N - 1] and not core[N - 1] and (N - 1) not in prio:
             prio.append(N - 1)
+        if hold_on and pass1[N - 1] and not hf:
+            # M4d2: the held bridge is enveloped first and never cut by the deadline (its own checks decide the hold;
+            # a busy tick otherwise left it unchecked - not safe - and the hold broke)
+            if (N - 1) in prio[:n_core]:
+                prio.remove(N - 1)
+                prio.insert(0, N - 1)
+            else:
+                if (N - 1) in prio:
+                    prio.remove(N - 1)
+                prio.insert(0, N - 1)
+                n_core += 1
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
         top = rest[:fcfg.K_b]
         # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
@@ -4117,6 +4147,15 @@ class ForumPlanner(Planner):
                 kept_[kr] = bool(safe[kr] and keep[kr] and mkeep[kr])
                 self.audit.kp_sw_unsafe += int(not kept_[kr])
                 kk_ = (~kept_,)
+            if hold_on:
+                # M4d2: the held bridge (the CONTINUE row) first among the safe rows that keep the commitments; unsafe
+                # it ranks as any row (the hold is broken by the planner's own check)
+                hm_ = np.zeros(N, bool)
+                hm_[N - 1] = bool(safe[N - 1] and keep[N - 1] and mkeep[N - 1])
+                kk_ = kk_ + (~hm_,)
+                hs_ = self.__dict__.setdefault("hold_stats", {"ticks": 0, "safe": 0})
+                hs_["ticks"] += 1
+                hs_["safe"] += int(hm_[N - 1])
             gf_ = ()
             gfirst_ = getattr(prefs, "ground_first", None) or ()
             if v2 and gfirst_:
