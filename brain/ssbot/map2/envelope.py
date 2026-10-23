@@ -29,6 +29,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+import numba
 import numpy as np
 
 from ssbot.knowledge import kinematics as km
@@ -289,7 +290,7 @@ class Engine:
     def forward(self, st: Start, T: int, danger=None, terrain=None, claw: bool | None = None,
                 tf8: bool | None = None, opts: int = 0, max_events: int = 0, band_t: int = -1, band_n: int = 0,
                 qy: float = 0.25, qv: float = 1.2, cap_frame: int = 20000, cap_pc: int = 4_000_000,
-                cap_iv: int = 4_000_000, cap_cl: int = 2_000_000, keep_keys: bool = False) -> Fwd:
+                cap_iv: int = 4_000_000, cap_cl: int = 2_000_000, keep_keys: bool = False, par: int = 0) -> Fwd:
         """The cluster forward pass over T frames. danger: None, or a list of T + 1 arrays [n, 4] of boxes (x0, y0,
         x1, y1) in her centre's space (already grown by her hurtbox), per frame; terrain: None (free space: the
         tables' infinite height) or a Terrain2D / packed array. The far layer (bands, an over-approximation): from
@@ -315,8 +316,13 @@ class Engine:
         while True:
             t0 = time.perf_counter()
             o = opts | (ej.OPT_CLAW if claw else 0) | (ej.OPT_TF8 if (claw and tf8) else 0) | (min(max_events, 15) << 8)
-            out = ej.forward(st.L, st.cu, st.ivs, T, self.udt, self.P, TT, boxes, off, o, cap_frame, cap_pc,
-                             cap_iv, cap_cl, keep_keys, band_t, band_n, qy, qv)
+            if par > 1 and band_t < 0 and band_n <= 0:
+                # M4b: each frame's per-parent work on par threads, merged in the parents' order (the same result)
+                out = ej.forward_par(st.L, st.cu, st.ivs, T, self.udt, self.P, TT, boxes, off, o, cap_frame, cap_pc,
+                                     cap_iv, cap_cl, keep_keys, max(par, numba.config.NUMBA_NUM_THREADS), 256)
+            else:
+                out = ej.forward(st.L, st.cu, st.ivs, T, self.udt, self.P, TT, boxes, off, o, cap_frame, cap_pc,
+                                 cap_iv, cap_cl, keep_keys, band_t, band_n, qy, qv)
             sec = time.perf_counter() - t0
             fl = out[-1]
             if not fl.any():

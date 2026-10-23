@@ -222,6 +222,70 @@ def _pool_run(jobs: list, n_workers: int, out_path: Path, max_tasks: int = 8) ->
     return res
 
 
+def _proc_child(job, q) -> None:
+    try:
+        q.put((job[0], job[5] if len(job) > 5 else None, run_one(job)))
+    except Exception as ex:  # noqa: BLE001
+        q.put((job[0], None, {"i": job[0], "name": job[1].name, "error": repr(ex)}))
+
+
+def _proc_run(jobs: list, n_workers: int, out_path: Path, tries_max: int = 2) -> list:
+    """One process per job (the identity runs: nothing carried between situations); a process that dies without a
+    result (the memory guard) is retried once, then recorded - only that job (a broken pool would fail them all)."""
+    import multiprocessing as mp
+    from collections import Counter as _C
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    todo = list(range(len(jobs)))
+    running: dict = {}
+    got: dict = {}
+    tries = _C()
+    res = []
+    t0 = time.time()
+    part = out_path.with_suffix(".partial.jsonl")
+    with part.open("w", encoding="utf-8") as fh:
+        while todo or running:
+            while todo and len(running) < n_workers:
+                n = todo.pop(0)
+                pr = ctx.Process(target=_proc_child, args=(jobs[n], q), daemon=True)
+                pr.start()
+                running[n] = pr
+            try:
+                while True:
+                    i, _, r = q.get(timeout=0.2)
+                    n = next((m for m in running if jobs[m][0] == i and m not in got), None)
+                    if n is None:
+                        continue
+                    got[n] = r
+                    res.append(r)
+                    fh.write(json.dumps(r, default=str) + chr(10))
+                    fh.flush()
+                    if len(res) % 20 == 0:
+                        print(f"{len(res)}/{len(jobs)} {time.time() - t0:.0f}s", flush=True)
+            except Exception:  # noqa: BLE001 - queue empty
+                pass
+            for n, pr in list(running.items()):
+                if n in got:
+                    pr.join(timeout=5)
+                    running.pop(n)
+                elif not pr.is_alive():
+                    running.pop(n)
+                    tries[n] += 1
+                    if tries[n] < tries_max:
+                        todo.append(n)
+                        print(f"job {jobs[n][0]} lost (exit {pr.exitcode}): retried", flush=True)
+                    else:
+                        r = {"i": jobs[n][0], "name": jobs[n][1].name, "error": f"worker lost (exit {pr.exitcode})"}
+                        got[n] = r
+                        res.append(r)
+                        fh.write(json.dumps(r, default=str) + chr(10))
+                        fh.flush()
+    res.sort(key=lambda r: r["i"])
+    out_path.write_text(json.dumps(res, indent=1, default=str), "utf-8")
+    print(f"done {len(res)} in {time.time() - t0:.0f}s -> {out_path}", flush=True)
+    return res
+
+
 def _select(sits: list, a) -> list:
     out = list(enumerate(sits))
     if getattr(a, "groups", ""):
@@ -236,9 +300,13 @@ def cmd_ident(a) -> int:
     boost_self("idle")
     sits = load_sits()
     cfg_kw = dict(cap_s=a.units * 0.01, depth=a.depth)
-    jobs = [(i, s, cfg_kw, 0.01, "idle") for i, s in _select(sits, a)]
+    sel = _select(sits, a)
+    if a.only_i:
+        keep = {int(x) for x in a.only_i.split(",") if x.strip()}
+        sel = [(i, s) for i, s in sel if i in keep]
+    jobs = [(i, s, cfg_kw, 0.01, "idle") for i, s in sel]
     OUT.mkdir(parents=True, exist_ok=True)
-    _pool_run(jobs, a.jobs, OUT / f"ident_{a.tag}.json", max_tasks=1)
+    _proc_run(jobs, a.jobs, OUT / f"ident_{a.tag}.json")
     return 0
 
 
@@ -374,7 +442,7 @@ def _pct(v, qs=(50, 90, 99), fmt="{:.0f}"):
     v = np.asarray([x for x in v if x is not None], float)
     if not len(v):
         return "-"
-    return " / ".join(fmt.format(np.percentile(v, q)) for q in qs)
+    return " / ".join(fmt.format(np.percentile(v, q, method="higher")) for q in qs)   # (no interpolation: inf stays)
 
 
 GROUPS = ("rec w7 1", "rec w13 1", "rec w13 2", "forced", "forced2", "person")
@@ -398,17 +466,21 @@ def value_safe_at(anytime: list, t_ms: float):
     return v
 
 
-_V4: dict = {}
+_REF: dict = {}
+
+
+def ref_values(tag: str = "v4") -> dict:
+    """An M3-era 60 s run (primitives only): situation name -> (value, safe, origin). v4: M3's (the M3 models);
+    m4a2: M4a's re-run at e6a4513 (the current models)."""
+    if tag not in _REF:
+        p = SITS.parent / f"run_none_{tag}.json"
+        _REF[tag] = {r["name"]: (r["value"], r["safe"], r["origin"]) for r in json.loads(p.read_text("utf-8"))
+                     if "error" not in r}
+    return _REF[tag]
 
 
 def v4_values() -> dict:
-    """M3's 60 s run (v4, primitives only): situation name -> (value, safe)."""
-    if not _V4:
-        p = SITS.parent / "run_none_v4.json"
-        for r in json.loads(p.read_text("utf-8")):
-            if "error" not in r:
-                _V4[r["name"]] = (r["value"], r["safe"])
-    return _V4
+    return ref_values("v4")
 
 
 TS = (250, 500, 1000, 2000)
@@ -416,36 +488,42 @@ TS = (250, 500, 1000, 2000)
 
 def report_first(runs: dict) -> str:
     lines = []
-    v4 = v4_values()
+    for ref in ("v4", "m4a2"):
+        v4 = ref_values(ref)
+        for tag, res in runs.items():
+            ok = [r for r in res if "error" not in r]
+            lines.append(f"=== {tag}: the anytime value (the best safe plan's value at t; {ref} = that 60 s run) - "
+                         f"mean value / share >= {ref} - 0.05 / share with a safe strike or endpoint plan")
+            for g in GROUPS + ("all",):
+                rr = [r for r in ok if (g == "all" or r["group"] == g) and r["name"] in v4]
+                if not rr:
+                    continue
+                cells = []
+                for t in TS:
+                    vs = [value_safe_at(r["anytime"], t) for r in rr]
+                    good = [v is not None and v >= (v4[r["name"]][0] if v4[r["name"]][0] is not None else -1) - 0.05
+                            for v, r in zip(vs, rr)]
+                    strike = [any(a[1] <= t and a[3] and a[4] != "noop" for a in r["anytime"]) for r in rr]
+                    mv = np.mean([v if v is not None else -1.0 for v in vs])
+                    cells.append(f"{t / 1000:g}s {mv:5.2f} {np.mean(good):4.2f} {np.mean(strike):4.2f}")
+                v4m = np.mean([v4[r["name"]][0] if v4[r["name"]][0] is not None else -1.0 for r in rr])
+                lines.append(f"{g:10s} n {len(rr):3d}  " + "  |  ".join(cells) + f"  |  {ref} {v4m:5.2f}")
+    # the first safe plan, over the situations where the current models' 60 s run (m4a2) had a safe non-noop plan
+    m4 = ref_values("m4a2")
     for tag, res in runs.items():
         ok = [r for r in res if "error" not in r]
-        lines.append(f"=== {tag}: the anytime value (the best safe plan's value at t; v4 = M3's 60 s run) - mean value / "
-                     f"share >= v4 - 0.05 / share with a safe strike or endpoint plan")
-        for g in GROUPS + ("all",):
-            rr = [r for r in ok if (g == "all" or r["group"] == g) and r["name"] in v4]
-            if not rr:
-                continue
-            cells = []
-            for t in TS:
-                vs = [value_safe_at(r["anytime"], t) for r in rr]
-                good = [v is not None and v >= (v4[r["name"]][0] or -1) - 0.05 for v, r in zip(vs, rr)]
-                strike = [any(a[1] <= t and a[3] and a[4] != "noop" for a in r["anytime"]) for r in rr]
-                mv = np.mean([v if v is not None else -1.0 for v in vs])
-                cells.append(f"{t / 1000:g}s {mv:5.2f} {np.mean(good):4.2f} {np.mean(strike):4.2f}")
-            v4m = np.mean([v4[r["name"]][0] if v4[r["name"]][0] is not None else -1.0 for r in rr])
-            lines.append(f"{g:10s} n {len(rr):3d}  " + "  |  ".join(cells) + f"  |  v4 {v4m:5.2f}")
-    for tag, res in runs.items():
-        ok = [r for r in res if "error" not in r]
-        lines.append(f"=== {tag}: {len(res)} situations, errors {len(res) - len(ok)}")
+        lines.append(f"=== {tag}: {len(res)} situations, errors {len(res) - len(ok)}; the first safe plan over the "
+                     f"situations where m4a2's 60 s search had a safe strike / endpoint plan (none: not by the cap)")
         lines.append(f"{'group':10s} {'n':>4s}  first safe plan ms p50/p90/p99 (none)   first safe incl. noop   "
                      f"decide ms p50/p90")
         for g in GROUPS + ("all",):
-            rr = [r for r in ok if g == "all" or r["group"] == g]
+            rr = [r for r in ok if (g == "all" or r["group"] == g) and r["name"] in m4 and m4[r["name"]][1]
+                  and m4[r["name"]][2] != "noop"]
             if not rr:
                 continue
-            fs = [r["first_safe_ms"] for r in rr]
-            fa = [r["first_any_ms"] for r in rr]
-            lines.append(f"{g:10s} {len(rr):4d}  {_pct(fs):24s} ({sum(1 for x in fs if x is None):3d})   "
+            fs = [r["first_safe_ms"] if r["first_safe_ms"] is not None else np.inf for r in rr]   # none: never
+            fa = [r["first_any_ms"] if r["first_any_ms"] is not None else np.inf for r in rr]
+            lines.append(f"{g:10s} {len(rr):4d}  {_pct(fs):24s} ({sum(1 for x in fs if not np.isfinite(x)):3d})   "
                          f"{_pct(fa):22s}  {_pct([r['ms'] for r in rr])}")
     return "\n".join(lines)
 
@@ -562,6 +640,7 @@ def main(argv=None) -> int:
     p.add_argument("--jobs", type=int, default=6)
     p.add_argument("--groups", default="")
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--only-i", default="", help="only these situation indices (comma-separated)")
     p.set_defaults(fn=cmd_ident)
     p = sub.add_parser("identcmp")
     p.add_argument("a")

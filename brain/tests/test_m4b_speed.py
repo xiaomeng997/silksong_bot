@@ -234,3 +234,27 @@ def test_lazy_second_pass_decides(W):
         r = S.decide(sit)
         assert r.ev is not None and r.n_cand > 5
         assert any(str(m[1]).startswith("passes2") for m in S.marks) == (after > 0)
+
+
+def test_parallel_pass_equals_the_pass(W):
+    """env_jit.forward_par (each frame's per-parent work on threads, the merge in the parents' order, the clusters
+    finalized in parallel) gives forward's arrays bit for bit."""
+    names = ["cl_off", "cl_y", "cl_ylo", "cl_vy", "cl_cond", "cl_mode", "cl_phase", "cl_iv0", "cl_ivn", "IV", "pc_cl",
+             "pc_par", "pc_cand", "pc_lo", "pc_hi", "pc_dlo", "pc_dhi", "stats", "flags"]
+    for sit in _sits(W):
+        S = ms.Searcher(W, ms.Cfg())
+        rt = S.root(sit)
+        for (ne, H) in S.cfg.passes:
+            dz = ms._union_danger(rt.pred, 0, H, True, None)
+            st = W.E.start_state(rt.S)
+            a = W.E.forward(st, H, danger=dz, terrain=W.TT, max_events=ne, claw=False)
+            b = W.E.forward(st, H, danger=dz, terrain=W.TT, max_events=ne, claw=False, par=4)
+            for nm in names:
+                assert np.array_equal(getattr(a, nm), getattr(b, nm)), nm
+
+
+def test_background_pass_and_threads_decide(W):
+    sit = _sits(W)[1]
+    S = ms.Searcher(W, ms.Cfg(cap_s=1.0, depth=2, pass2_after=6, pass2_bg=True, fwd_threads=4, reuse_root=True))
+    r = S.decide(sit)
+    assert r.ev is not None and r.ev.safe and any(str(m[1]).startswith("passes2") for m in S.marks)

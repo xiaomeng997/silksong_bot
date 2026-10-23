@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import math
 
+import numba
 import numpy as np
 from numba import njit, prange
 from numba import types
@@ -773,7 +774,7 @@ def cut_danger(lo, hi, ylo, yhi, boxes, b0, b1, olo, ohi, wlo, whi):
 
 # ---- the forward pass ---------------------------------------------------------------------------------------------
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, nogil=True, error_model="numpy")
 def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_pc, cap_iv, cap_cl,
             keep_keys, band_t, band_n, qy, qv):
     """The cluster forward pass from one start cluster.
@@ -873,11 +874,19 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
     ohi = np.empty(64)
     sl = np.empty(256)
     sh_ = np.empty(256)
+    # the frame's clusters by key: an open-addressing table of cluster indices (M4b: was a typed dict with chains -
+    # the same lookups, faster)
+    HSZ = 1
+    while HSZ < 4 * cap_frame:
+        HSZ *= 2
+    HMASK = HSZ - 1
+    htab = np.full(HSZ, -1, dtype=np.int64)
     for t in range(1, T + 1):
         if not band and ((band_t >= 0 and t >= band_t) or (band_n > 0 and ncl > band_n)):
             band = True                              # from here on the far layer (stays on)
         stats[t, 6] = 1 if band else 0
-        d = Dict.empty(key_type=types.int64, value_type=types.int64)
+        for i in range(HSZ):
+            htab[i] = -1
         nch = 0
         nfp = 0
         b0 = box_off[t]
@@ -1048,13 +1057,15 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                 # find / insert the child
                 h = khash(kkey[k])
                 idx = -1
-                if h in d:
-                    j = d[h]
-                    while j >= 0:
-                        if keq(kbuf[j], kkey[k]):
-                            idx = j
-                            break
-                        j = knext[j]
+                slot = h & HMASK
+                while True:
+                    j = htab[slot]
+                    if j < 0:
+                        break
+                    if khs[j] == h and keq(kbuf[j], kkey[k]):
+                        idx = j
+                        break
+                    slot = (slot + 1) & HMASK
                 if idx < 0:
                     if nch >= cap_frame:
                         flags[0] = 1
@@ -1067,8 +1078,7 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                         cun[idx, i] = kcu[k, i]
                     kbuf[idx, :] = kkey[k]
                     khs[idx] = h
-                    knext[idx] = d[h] if h in d else -1
-                    d[h] = idx
+                    htab[slot] = idx
                     ch_first[idx] = -1
                 else:
                     stats[t, 4] += 1
@@ -1173,6 +1183,467 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
         stats[t, 0] = nch
         stats[t, 1] = nfp
         # swap buffers
+        cur, nxt = nxt, cur
+        cuc, cun = cun, cuc
+        ncl = nch
+        if ncl == 0:
+            for tt in range(t + 1, T + 1):
+                cl_off[tt + 1] = ntot
+            break
+    return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot], cl_phase[:ntot], cl_iv0[:ntot],
+            cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc], pc_cand[:npc], pc_lo[:npc], pc_hi[:npc],
+            pc_dlo[:npc], pc_dhi[:npc], cl_key[:ntot] if keep_keys else cl_key[:0], stats, flags)
+
+
+# ---- the pass with its per-parent work in parallel (M4b) ---------------------------------------------------
+
+@njit(cache=True, error_model="numpy")
+def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, IV, iv0, ivn, hh,
+              tmp, tcu, cands, kid, kcu, kkey, kkeep, kcand, kuse, key1, key2, olo, ohi, wlo, whi,
+              npc_out, plo_out, phi_out, dl_out, dh_out, st_out):
+    """forward's per-parent work (exact mode): this frame's physics on the parent's lanes, its children (one per
+    candidate; their keys, the dominance filter) and each kept child's pieces (the parent's intervals shifted by the
+    child's lane displacements, cut by the danger at its height). Returns the children made (kid / kcu / kkey /
+    kcand / kkeep rows 0 .. nk - 1); per child its pieces in plo_out / phi_out [k, 0 .. npc_out[k]) and dl / dh;
+    st_out: (children tried, diverged lanes)."""
+    tmp[0, :] = tmp_in0
+    tmp[1, :] = tmp_in1
+    for i in range(NC):
+        tcu[i] = cuc_c[i]
+    x0l = tmp[0, PX]
+    x0h = tmp[1, PX]
+    ctl = False
+    inblk = tcu[C_CJ] >= 0
+    dtl = 0.0
+    steps = 0
+    xv_hi = tmp[1, XVX] if (tmp[1, XVX] > 0 and tmp[1, MODE] == M_NORMAL) else 0.0
+    xv_lo = tmp[0, XVX] if (tmp[0, XVX] < 0 and tmp[0, MODE] == M_NORMAL) else 0.0
+    for ln in range(2):
+        dt, steps = lane_timing(tmp[ln], udt, P)
+        dtl = dt
+        if inblk:
+            ctl = claw_frame(tmp[ln], tcu, steps, P)
+            tick_frozen(tmp[ln], dt, udt)
+        else:
+            for _ in range(steps):
+                fixed_step(tmp[ln], P, TT)
+    if inblk:
+        tcu[C_CJ] = tcu[C_CJ] + 1.0
+        if ctl:
+            rv = abs(tmp[1, VX])
+            claw_control(tmp[0])
+            claw_control(tmp[1])
+            tcu[C_CJ] = -1.0
+            tcu[C_CLOCK] = CLAW_NEXT_F
+            tcu[C_RD] = tcu[C_CD]
+            tcu[C_RV] = rv
+    else:
+        if tcu[C_CLOCK] > 0:
+            tcu[C_CLOCK] -= 1.0
+        if xv_hi != 0.0 or xv_lo != 0.0:
+            e1 = xvx_extra(xv_hi, steps, P)
+            e0 = xvx_extra(xv_lo, steps, P)
+            tmp[1, PX] += e1
+            tmp[1, SX] = tmp[1, PX]
+            tmp[0, PX] += e0
+            tmp[0, SX] = tmp[0, PX]
+            if tmp[1, XVX] > tmp[1, VX]:
+                tmp[1, VX] = tmp[1, XVX]
+            if tmp[0, XVX] < tmp[0, VX]:
+                tmp[0, VX] = tmp[0, XVX]
+        ex = residual(tmp[1] if tcu[C_RD] > 0 else tmp[0], tcu, steps, P)
+        if ex > 0:
+            tmp[1, PX] += ex
+            tmp[1, SX] = tmp[1, PX]
+        elif ex < 0:
+            tmp[0, PX] += ex
+            tmp[0, SX] = tmp[0, PX]
+    nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands)
+    pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
+    u0 = hold_useful(tmp[1], P)
+    st_out[0] = nc
+    st_out[1] = 0
+    nk = 0
+    for k in range(nc):
+        cd = cands[k]
+        kid[nk, 0, :] = tmp[0]
+        kid[nk, 1, :] = tmp[1]
+        for i in range(NC):
+            kcu[nk, i] = tcu[i]
+        if (cd & CB_CONT) != 0:
+            pass
+        elif (cd & CB_CLAW) != 0:
+            dd = 1.0 if (cd & CB_RIGHT) != 0 else -1.0
+            tf = 8.0 if (cd & CB_TF8) != 0 else 9.0
+            claw_enter(kid[nk, 0], kcu[nk], dd, tf)
+            claw_enter(kid[nk, 1], kcu[nk], dd, tf)
+            tick_frozen(kid[nk, 0], dtl, udt)
+            tick_frozen(kid[nk, 1], dtl, udt)
+        else:
+            for ln in range(2):
+                if (cd & CB_JH) != 0:
+                    kid[nk, ln, PREV] = np.float64(np.int64(kid[nk, ln, PREV]) | B_JUMP)
+                update(kid[nk, ln], lane_mask(cd, ln), 0, dtl, udt, P, TT)
+        vkey(kid[nk, 1], kcu[nk], P, floor, key1)
+        vkey(kid[nk, 0], kcu[nk], P, floor, key2)
+        kcand[nk] = cd
+        kkeep[nk] = True
+        kcu[nk, C_EV] += n_events(cd, pbits, u0)
+        kuse[nk] = hold_useful(kid[nk, 1], P)
+        if not keq(key1, key2):
+            st_out[1] += 1
+        kkey[nk, :] = key1
+        nk += 1
+        for j in range(nk - 1, nk):
+            for q in range(j):
+                if not kkeep[q]:
+                    continue
+                if keq_noop(kkey[q], kkey[j], kuse[j]):
+                    kkeep[j] = False
+                    break
+                if keq_noop(kkey[j], kkey[q], kuse[q]):
+                    kkeep[q] = False
+                    if kcu[q, C_EV] < kcu[j, C_EV]:
+                        kcu[j, C_EV] = kcu[q, C_EV]
+    for k in range(nk):
+        npc_out[k] = 0
+        if not kkeep[k]:
+            continue
+        dlo = kid[k, 0, PX] - x0l
+        dhi = kid[k, 1, PX] - x0h
+        dl_out[k] = dlo
+        dh_out[k] = dhi
+        ya = kid[k, 0, PY] + hh
+        yb = kid[k, 1, PY] + hh
+        ylo = min(ya, yb)
+        yhi = max(ya, yb)
+        npcs = 0
+        for q in range(ivn):
+            a = IV[iv0 + q, 0] + dlo
+            b = IV[iv0 + q, 1] + dhi
+            if b0 < b1:
+                m = cut_danger(a, b, ylo, yhi, boxes, b0, b1, olo, ohi, wlo, whi)
+                for r in range(m):
+                    if npcs < 64:
+                        plo_out[k, npcs] = olo[r]
+                        phi_out[k, npcs] = ohi[r]
+                        npcs += 1
+            else:
+                if npcs < 64:
+                    plo_out[k, npcs] = a
+                    phi_out[k, npcs] = b
+                    npcs += 1
+        npc_out[k] = npcs
+    return nk
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def _phase_a(c0, c1, cur, cuc, cl_iv0, cl_ivn, base_g, udt, P, TT, opts, floor, boxes, b0, b1, IV, hh,
+             S_tmp, S_tcu, S_cands, S_kkeep, S_kuse, S_key1, S_key2, S_olo, S_ohi, S_wlo, S_whi,
+             A_nk, A_kid, A_kcu, A_key, A_cand, A_keep, A_np, A_plo, A_phi, A_dl, A_dh, A_st, A_h):
+    """The parents c0 .. c1 - 1 of a frame in parallel (each into its chunk slot c - c0; the scratch by thread)."""
+    for c in prange(c0, c1):
+        s = c - c0
+        th = numba.get_thread_id()
+        g = base_g + c
+        nk = _children(cur[c, 0], cur[c, 1], cuc[c], udt, P, TT, opts, floor, boxes, b0, b1, IV, cl_iv0[g], cl_ivn[g],
+                       hh, S_tmp[th], S_tcu[th], S_cands[th], A_kid[s], A_kcu[s], A_key[s], S_kkeep[th], A_cand[s],
+                       S_kuse[th], S_key1[th], S_key2[th], S_olo[th], S_ohi[th], S_wlo[th], S_whi[th], A_np[s],
+                       A_plo[s], A_phi[s], A_dl[s], A_dh[s], A_st[s])
+        A_nk[s] = nk
+        for k in range(nk):
+            A_keep[s, k] = S_kkeep[th, k]
+            if S_kkeep[th, k] and A_np[s, k] > 0:
+                A_h[s, k] = khash(A_key[s, k])
+
+
+@njit(cache=True, error_model="numpy")
+def _fin_union(c, ch_first, fp_lo, fp_hi, fp_next, sl, sh_):
+    """One cluster's pieces (its chain, at most 256) sorted by lo (insertion sort) and united in place: returns the
+    intervals' count (forward's finalize, the same arithmetic)."""
+    m = 0
+    j = ch_first[c]
+    while j >= 0 and m < 256:
+        sl[m] = fp_lo[j]
+        sh_[m] = fp_hi[j]
+        m += 1
+        j = fp_next[j]
+    for i in range(1, m):
+        a = sl[i]
+        b = sh_[i]
+        q = i - 1
+        while q >= 0 and sl[q] > a:
+            sl[q + 1] = sl[q]
+            sh_[q + 1] = sh_[q]
+            q -= 1
+        sl[q + 1] = a
+        sh_[q + 1] = b
+    n = 0
+    for i in range(m):
+        if n > 0 and sl[i] <= sh_[n - 1] + 1e-9:
+            if sh_[i] > sh_[n - 1]:
+                sh_[n - 1] = sh_[i]
+        else:
+            sl[n] = sl[i]
+            sh_[n] = sh_[i]
+            n += 1
+    return n
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def _fin_count(nch, ch_first, fp_lo, fp_hi, fp_next, S_olo, S_ohi, F_n):
+    for c in prange(nch):
+        th = numba.get_thread_id()
+        F_n[c] = _fin_union(c, ch_first, fp_lo, fp_hi, fp_next, S_olo[th], S_ohi[th])
+
+
+@njit(cache=True, parallel=True, error_model="numpy")
+def _fin_write(nch, gb, niv, ch_first, fp_lo, fp_hi, fp_next, S_olo, S_ohi, F_off, F_n, IV, cl_iv0, cl_ivn, nxt, cun,
+               P, hh, cl_y, cl_ylo, cl_vy, cl_cond, cl_mode, cl_phase, keep_keys, cl_key, kbuf):
+    for c in prange(nch):
+        th = numba.get_thread_id()
+        n = _fin_union(c, ch_first, fp_lo, fp_hi, fp_next, S_olo[th], S_ohi[th])
+        o = F_off[c]
+        for i in range(n):
+            IV[o + i, 0] = S_olo[th, i]
+            IV[o + i, 1] = S_ohi[th, i]
+        gc = gb + c
+        cl_iv0[gc] = o
+        cl_ivn[gc] = n
+        if n > 0:
+            for ln in range(2):
+                dx = (IV[o, 0] if ln == 0 else IV[o + n - 1, 1]) - nxt[c, ln, PX]
+                nxt[c, ln, PX] += dx
+                nxt[c, ln, QX] += dx
+                nxt[c, ln, SX] += dx
+        cl_y[gc] = nxt[c, 1, PY] + hh
+        cl_ylo[gc] = nxt[c, 0, PY] + hh
+        cl_vy[gc] = nxt[c, 1, VY]
+        cl_cond[gc] = cond_of(nxt[c, 1], cun[c], P)
+        cl_mode[gc] = np.int64(nxt[c, 1, MODE])
+        cl_phase[gc] = np.int64(nxt[c, 1, PHASE])
+        if keep_keys:
+            for i in range(kbuf.shape[1]):
+                cl_key[gc, i] = kbuf[c, i]
+
+
+@njit(cache=True, nogil=True, error_model="numpy")
+def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_pc, cap_iv, cap_cl,
+                keep_keys, nthreads, chunk):
+    """forward (exact mode, no bands) with each frame's per-parent work in parallel chunks (_phase_a) and the merge
+    of the children into the frame's clusters in the parents' order (the same order as forward: the same clusters,
+    lanes, intervals, pieces and stats, bit for bit; tests/test_m4b_speed.py)."""
+    fdt = P[P_FDT]
+    hh = 0.5 * (P[P_HEAD] - P[P_FOOT])
+    floor = TT[0] > 0
+    cl_off = np.zeros(T + 2, dtype=np.int64)
+    cl_y = np.empty(cap_cl)
+    cl_vy = np.empty(cap_cl)
+    cl_cond = np.empty(cap_cl, dtype=np.int64)
+    cl_mode = np.empty(cap_cl, dtype=np.int64)
+    cl_phase = np.empty(cap_cl, dtype=np.int64)
+    cl_iv0 = np.empty(cap_cl, dtype=np.int64)
+    cl_ivn = np.empty(cap_cl, dtype=np.int64)
+    IV = np.empty((cap_iv, 2))
+    pc_cl = np.empty(cap_pc, dtype=np.int64)
+    pc_par = np.empty(cap_pc, dtype=np.int64)
+    pc_cand = np.empty(cap_pc, dtype=np.int64)
+    pc_lo = np.empty(cap_pc)
+    pc_hi = np.empty(cap_pc)
+    pc_dlo = np.empty(cap_pc)
+    pc_dhi = np.empty(cap_pc)
+    cl_ylo = np.empty(cap_cl)
+    stats = np.zeros((T + 1, 8), dtype=np.int64)
+    cl_key = np.empty((cap_cl if keep_keys else 1, NKEY))
+    flags = np.zeros(4, dtype=np.int64)
+    cur = np.empty((cap_frame, 2, K))
+    cuc = np.empty((cap_frame, NC))
+    nxt = np.empty((cap_frame, 2, K))
+    cun = np.empty((cap_frame, NC))
+    cur[0, 0, :] = L0[0]
+    cur[0, 1, :] = L0[1]
+    cuc[0, :] = cu0
+    ncl = 1
+    niv = 0
+    npc = 0
+    for i in range(ivs0.shape[0]):
+        IV[niv, 0] = ivs0[i, 0]
+        IV[niv, 1] = ivs0[i, 1]
+        niv += 1
+    cl_y[0] = L0[1, PY] + hh
+    cl_ylo[0] = L0[0, PY] + hh
+    cl_vy[0] = L0[1, VY]
+    cl_cond[0] = cond_of(L0[1], cu0, P)
+    cl_mode[0] = np.int64(L0[1, MODE])
+    cl_phase[0] = np.int64(L0[1, PHASE])
+    cl_iv0[0] = 0
+    cl_ivn[0] = niv
+    cl_off[0] = 0
+    cl_off[1] = 1
+    stats[0, 0] = 1
+    ntot = 1
+    kbuf = np.empty((cap_frame, NKEY))
+    knext = np.empty(cap_frame, dtype=np.int64)
+    ch_first = np.empty(cap_frame, dtype=np.int64)
+    fp_next = np.empty(8 * cap_frame, dtype=np.int64)
+    fp_cap = fp_next.shape[0]
+    fp_ch = np.empty(fp_cap, dtype=np.int64)
+    fp_par = np.empty(fp_cap, dtype=np.int64)
+    fp_cand = np.empty(fp_cap, dtype=np.int64)
+    fp_lo = np.empty(fp_cap)
+    fp_hi = np.empty(fp_cap)
+    fp_dlo = np.empty(fp_cap)
+    fp_dhi = np.empty(fp_cap)
+    sl = np.empty(256)
+    sh_ = np.empty(256)
+    # the per-thread scratch and the chunk's per-parent slots
+    MK = 48
+    S_tmp = np.empty((nthreads, 2, K))
+    S_tcu = np.empty((nthreads, NC))
+    S_cands = np.empty((nthreads, 32), dtype=np.int64)
+    S_kkeep = np.empty((nthreads, MK), dtype=np.bool_)
+    S_kuse = np.empty((nthreads, MK), dtype=np.int64)
+    S_key1 = np.empty((nthreads, NKEY))
+    S_key2 = np.empty((nthreads, NKEY))
+    S_olo = np.empty((nthreads, 64))
+    S_ohi = np.empty((nthreads, 64))
+    S_wlo = np.empty((nthreads, 64))
+    S_whi = np.empty((nthreads, 64))
+    A_nk = np.zeros(chunk, dtype=np.int64)
+    A_kid = np.empty((chunk, MK, 2, K))
+    A_kcu = np.empty((chunk, MK, NC))
+    A_key = np.empty((chunk, MK, NKEY))
+    A_cand = np.empty((chunk, MK), dtype=np.int64)
+    A_keep = np.zeros((chunk, MK), dtype=np.bool_)
+    A_np = np.zeros((chunk, MK), dtype=np.int64)
+    A_plo = np.empty((chunk, MK, 64))
+    A_phi = np.empty((chunk, MK, 64))
+    A_dl = np.empty((chunk, MK))
+    A_dh = np.empty((chunk, MK))
+    A_st = np.zeros((chunk, 2), dtype=np.int64)
+    A_h = np.zeros((chunk, MK), dtype=np.int64)
+    F_n = np.zeros(cap_frame, dtype=np.int64)
+    F_off = np.zeros(cap_frame, dtype=np.int64)
+    S_olo = np.empty((nthreads, 256))
+    S_ohi = np.empty((nthreads, 256))
+    # the frame's clusters by key: an open-addressing table of cluster indices (the same lookups as forward's dict)
+    HSZ = 1
+    while HSZ < 4 * cap_frame:
+        HSZ *= 2
+    HMASK = HSZ - 1
+    htab = np.full(HSZ, -1, dtype=np.int64)
+    khs = np.empty(cap_frame, dtype=np.int64)
+    for t in range(1, T + 1):
+        for i in range(HSZ):
+            htab[i] = -1
+        nch = 0
+        nfp = 0
+        b0 = box_off[t]
+        b1 = box_off[t + 1]
+        base_g = cl_off[t - 1]
+        for c0 in range(0, ncl, chunk):
+            c1 = min(c0 + chunk, ncl)
+            _phase_a(c0, c1, cur, cuc, cl_iv0, cl_ivn, base_g, udt, P, TT, opts, floor, boxes, b0, b1, IV, hh,
+                     S_tmp, S_tcu, S_cands, S_kkeep, S_kuse, S_key1, S_key2, S_olo, S_ohi, S_wlo, S_whi,
+                     A_nk, A_kid, A_kcu, A_key, A_cand, A_keep, A_np, A_plo, A_phi, A_dl, A_dh, A_st, A_h)
+            for c in range(c0, c1):
+                s = c - c0
+                g = base_g + c
+                stats[t, 5] += A_st[s, 0]
+                stats[t, 3] += A_st[s, 1]
+                for k in range(A_nk[s]):
+                    if not A_keep[s, k]:
+                        continue
+                    npcs = A_np[s, k]
+                    if npcs == 0:
+                        stats[t, 2] += 1
+                        continue
+                    h = A_h[s, k]
+                    idx = -1
+                    slot = h & HMASK
+                    while True:
+                        j = htab[slot]
+                        if j < 0:
+                            break
+                        if khs[j] == h and keq(kbuf[j], A_key[s, k]):
+                            idx = j
+                            break
+                        slot = (slot + 1) & HMASK
+                    if idx < 0:
+                        if nch >= cap_frame:
+                            flags[0] = 1
+                            continue
+                        idx = nch
+                        nch += 1
+                        nxt[idx, 0, :] = A_kid[s, k, 0]
+                        nxt[idx, 1, :] = A_kid[s, k, 1]
+                        for i in range(NC):
+                            cun[idx, i] = A_kcu[s, k, i]
+                        kbuf[idx, :] = A_key[s, k]
+                        khs[idx] = h
+                        htab[slot] = idx
+                        ch_first[idx] = -1
+                    else:
+                        stats[t, 4] += 1
+                        if A_kid[s, k, 0, VX] < nxt[idx, 0, VX]:
+                            nxt[idx, 0, VX] = A_kid[s, k, 0, VX]
+                        if A_kid[s, k, 1, VX] > nxt[idx, 1, VX]:
+                            nxt[idx, 1, VX] = A_kid[s, k, 1, VX]
+                        if A_kid[s, k, 1, XVX] > nxt[idx, 1, XVX]:
+                            nxt[idx, 1, XVX] = A_kid[s, k, 1, XVX]
+                        if A_kid[s, k, 0, XVX] < nxt[idx, 0, XVX]:
+                            nxt[idx, 0, XVX] = A_kid[s, k, 0, XVX]
+                        if A_kcu[s, k, C_EV] < cun[idx, C_EV]:
+                            cun[idx, C_EV] = A_kcu[s, k, C_EV]
+                    for r in range(npcs):
+                        if nfp >= fp_cap:
+                            flags[1] = 1
+                            break
+                        fp_ch[nfp] = idx
+                        fp_par[nfp] = g
+                        fp_cand[nfp] = A_cand[s, k]
+                        fp_lo[nfp] = A_plo[s, k, r]
+                        fp_hi[nfp] = A_phi[s, k, r]
+                        fp_dlo[nfp] = A_dl[s, k]
+                        fp_dhi[nfp] = A_dh[s, k]
+                        fp_next[nfp] = ch_first[idx]
+                        ch_first[idx] = nfp
+                        nfp += 1
+        gb = ntot
+        if ntot + nch > cap_cl:
+            flags[3] = 1
+            nch = cap_cl - ntot
+        # the frame's clusters finalized in parallel: each one's pieces united into intervals (counted first, then
+        # written at their prefix-sum offsets - the same layout as forward's cluster-by-cluster appends)
+        _fin_count(nch, ch_first, fp_lo, fp_hi, fp_next, S_olo, S_ohi, F_n)
+        tot = 0
+        for c in range(nch):
+            F_off[c] = niv + tot
+            tot += F_n[c]
+        if niv + tot > cap_iv:
+            flags[2] = 1
+        else:
+            _fin_write(nch, gb, niv, ch_first, fp_lo, fp_hi, fp_next, S_olo, S_ohi, F_off, F_n, IV, cl_iv0, cl_ivn,
+                       nxt, cun, P, hh, cl_y, cl_ylo, cl_vy, cl_cond, cl_mode, cl_phase, keep_keys, cl_key, kbuf)
+            niv += tot
+        for j in range(nfp):
+            if fp_ch[j] >= nch:
+                continue
+            if npc >= cap_pc:
+                flags[1] = 1
+                break
+            pc_cl[npc] = gb + fp_ch[j]
+            pc_par[npc] = fp_par[j]
+            pc_cand[npc] = fp_cand[j]
+            pc_lo[npc] = fp_lo[j]
+            pc_hi[npc] = fp_hi[j]
+            pc_dlo[npc] = fp_dlo[j]
+            pc_dhi[npc] = fp_dhi[j]
+            npc += 1
+        ntot += nch
+        cl_off[t + 1] = ntot
+        stats[t, 0] = nch
+        stats[t, 1] = nfp
         cur, nxt = nxt, cur
         cuc, cun = cun, cuc
         ncl = nch

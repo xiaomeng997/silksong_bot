@@ -126,6 +126,12 @@ class Cfg:
     # after this many of the first pass's candidates were evaluated (or its queue ran out); their candidates then join
     # the M3 round robin for the rest of the node's queue. 0: every pass up front (M3).
     pass2_after: int = 0
+    reuse_root: bool = False               # M4b: the noop plan is the root's evaluation with its exits run (one
+    #                                        prediction less; the same plan and value - M3 evaluated it twice)
+    fwd_threads: int = 0                   # M4b: the approach passes' per-parent work on this many threads (> 1;
+    #                                        env_jit.forward_par: the same pass)
+    pass2_bg: bool = False                 # M4b: with pass2_after, the later passes run on a background thread from
+    #                                        the node's start and join when done (the order then depends on time)
     safe_ts: tuple = ()                    # M4b: safe endpoints also at these frames of the first pass (before its
     #                                        end's; a short plan is ready sooner and keeps its exits more often)
 
@@ -1612,6 +1618,17 @@ def _alive(pred) -> list:
     return sorted(iids)
 
 
+_BG: list = []
+
+
+def _bg_pool():
+    """The search's background thread (the 2-event pass while the first pass's candidates are evaluated)."""
+    if not _BG:
+        from concurrent.futures import ThreadPoolExecutor
+        _BG.append(ThreadPoolExecutor(max_workers=1, thread_name_prefix="map2-pass"))
+    return _BG[0]
+
+
 class Searcher:
     def __init__(self, W: World | None = None, cfg: Cfg | None = None):
         self.W = W or World()
@@ -1645,8 +1662,9 @@ class Searcher:
         return time.perf_counter() if self.vclock is None else self.ev.units * self.vclock
 
     # ---- the pass and the windows ----
-    def passes(self, node: Node, which=None) -> list:
-        """The approach passes from the node (cfg.passes; which: only these indices)."""
+    def passes(self, node: Node, which=None, bg: bool = False) -> list:
+        """The approach passes from the node (cfg.passes; which: only these indices). bg: started on the background
+        thread (the pass runs without the GIL: M4b's cfg.pass2_bg) - a list of futures."""
         out = []
         cu = None
         if node.claw_ctrl is not None:
@@ -1660,7 +1678,12 @@ class Searcher:
                 continue
             dz = _union_danger(node.pred, node.k0, H, self.cfg.margins, bo)
             st = self.W.E.start_state(node.S, cu=cu)
-            fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False)
+            if bg:
+                out.append(_bg_pool().submit(self.W.E.forward, st, H, danger=dz, terrain=self.W.TT, max_events=ne,
+                                             claw=False, par=self.cfg.fwd_threads))
+                continue
+            fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False,
+                                  par=self.cfg.fwd_threads)
             out.append(fw)
         return out
 
@@ -2000,7 +2023,9 @@ class Searcher:
     def root(self, sit: Situation) -> Node:
         noop = Plan([Seg(np.zeros(1, np.int64))], "noop")
         ev = self.ev.evaluate(sit, noop, exits=False)
-        return Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0)
+        nd = Node(Plan([], "prim"), 0, sit.S.copy(), ev.pred, None, 0, 0)
+        nd.noop_ev = ev
+        return nd
 
     def _after_claw(self, seg: Seg) -> Seg:
         # after a Clawline: the segment is anchored at its control; its first frame is the forced bounce's (EV_POGO,
@@ -2321,7 +2346,10 @@ class Searcher:
         mark("root")
         beam = [rt]
         best = kept
-        noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop"))
+        if cfg.reuse_root:
+            noop = self.ev.finish(rt.noop_ev, stop=False)      # M4b: the root's noop evaluation, its exits run
+        else:
+            noop = self.ev.evaluate(sit, Plan([Seg(np.zeros(1, np.int64))], "noop"))
         tried.append(noop)
         mark("noop")
 
@@ -2377,6 +2405,9 @@ class Searcher:
                 lazy = cfg.pass2_after > 0 and len(cfg.passes) > 1
                 fws = self.passes(node, (0,) if lazy else None)
                 mark(f"passes d{depth}")
+                # (M4b: the later passes started now on the background thread, joined when done)
+                futs = self.passes(node, tuple(range(1, len(cfg.passes))), bg=True) if (lazy and cfg.pass2_bg) \
+                    else None
 
                 def node_cands(fws_):
                     cs = []
@@ -2406,7 +2437,8 @@ class Searcher:
                 n_main = len(queue)                       # the queue's candidates before the refinements
                 n_ev_node = 0
                 while qi < len(queue) or lazy:
-                    if lazy and (qi >= n_main or n_ev_node >= cfg.pass2_after):
+                    if lazy and ((futs is None and n_ev_node >= cfg.pass2_after) or qi >= n_main or
+                                 (futs is not None and all(f.done() for f in futs))):
                         # the later passes: all passes' candidates in the M3 round robin, those not taken yet
                         lazy = False
                         if now() - t0c > cap:
@@ -2415,7 +2447,9 @@ class Searcher:
                         if now() > node_end:
                             self.stats[f"sliced_d{depth}"] = self.stats.get(f"sliced_d{depth}", 0) + 1
                             break
-                        fws = fws + self.passes(node, tuple(range(1, len(cfg.passes))))
+                        fws = fws + ([f.result() for f in futs] if futs is not None else
+                                     self.passes(node, tuple(range(1, len(cfg.passes)))))
+                        futs = None
                         mark(f"passes2 d{depth}")
                         done_ = {id(x[1]) for x in queue[:qi]}
                         rest = [x for x in queue[qi:n_main] if x[1][0] == "safe"]      # safe endpoints not taken
