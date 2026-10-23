@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -12813,3 +12813,189 @@ rule one switch away: `SSBOT_FORUM_MAP2_SET=views_exact=0,ctl_check=0,dis_hold=0
 4. The emulation follows the truth's planned path; live, the possible-outcome exclusion, the control check and the
    disagreement rule are untested (the gate).
 5. M4c's open items 1 - 8 stand.
+
+### M4d2 - the map in control and the reveal latency (offline; no live run): the fallback follows the bridge it sent, one snapshot per decision, the anytime plans, the noop's alternative, the repair from the keys sent, a drop's continuation, the move start's cut; the share before / after, the reveal latency, the safety audit
+
+The task (the lead, 09:45 on 10-23): in M4c's smoke map2 held the keys in w7 5 - 15 % / w13 0.1 - 3 % of the ticks
+(strict replay w7 5 - 11 %) - the fallback planner re-plans every frame and rarely follows the bridge it sent, so most
+received plans failed the exact commit check, and the gate needs map2 in control for >= 50 % of the engaged ticks. (1)
+raise the share on w7 to >= 50 % of the engaged ticks in the strict replay without losing safety; (2) the reveal
+latency (the lead's notes of 07:50 / 07:55: per move start the frames to the first committed plan searched from a
+snapshot at / after it; a cut and restart, target <= ~6 frames to a plan that can press at antic 5; the Clawline into
+a slam's first window counted for map2 and for the fallback's script); (3) identity with the switch off, the smoke,
+the tests, a frozen checkout, the docs. No game instance was touched, nothing ran live. Commits 282601b (the code and
+the tests), 2b8c02c (the smoke's report), then the docs. Data `C:\ssbot\data\m2_play\map2\m4\m4d2` (`smoke_fin_*` the
+final smokes and `final_report.txt` their pooled numbers, `smoke_base_strict` / `smoke_dev*` the development runs,
+`snaps\` the captured snapshots and the offline scans, `replay_m4d2_*` + `ident_*.txt` the identity, `scripts\`).
+
+#### Result
+
+- **The share of the engaged ticks rose about threefold but stays under 50 %** (the gate's condition is not met:
+  share_ok false). ENGAGED = a Clapper observed, outside the battle's intro (the Clappers' and her Roar Lock) and a
+  supervisor pause (`m4c_smoke.engaged_share`). The final smokes, all four recordings two at a time, pooled (the
+  machine loaded: another workflow's six Idle jobs plus this stage's identity replays and full suite - the bot's tick
+  p50 22 - 26 ms; live 14 - 17):
+
+  | | strict w7 | strict w13 | open w7 | open w13 |
+  |---|---|---|---|---|
+  | before (M4d: every M4d2 switch off), 2 runs | 11.0 % (394 / 3,582) | 0.6 % | 16.8 % | 3.3 % |
+  | after (the defaults), strict 3 runs, open 2 | 31.1 % (1,692 / 5,440; per recording 26 - 36 %) | 3.2 % | 35.9 % | 4.8 % |
+
+  Development runs of the same code on a quieter machine (the bot's tick p50 18 - 20 ms): strict w7a 36 - 45 %, w7b
+  23 - 39 % (the run-to-run spread is about +-8 points; `smoke_dev11` .. `smoke_dev13`). Commits per w7 recording run 21
+  (before 9); control runs p50 ~13 frames, p90 ~35 - 45. Two Clappers (w13) stay near zero: the search's best within its
+  cap is mostly the noop or unsafe (M4c open item 4).
+- **Why map2 still does not hold the keys** (the 3,748 fallback ticks among the engaged ticks of the final strict w7
+  runs): the fallback's scripts own 47 % of them (the slam playbook 20 %, the low hop 17 %, the chase 7 %, the stab 3 %),
+  the planner 53 %; 27 % are 'slash' busy (a slash's contact may still come: no search starts). The last worker answer
+  before those ticks: the noop 29 % (the bridge then stop is the best, no safe alternative within alt_slack), a cut search
+  28 % (the bridge left, a move start, a commit or a drop), a plan not committed 21 % (the last commit check: the
+  Clappers 22 % - mostly the replay's, below -, expired 8 %, an unplanned slash 7 %, the path 7 %, dev gap 6 %, claw
+  latch 3 %), unsafe 11 %. The plans in control end on the Clappers (55 of 125), their end (36, 17 of them a 'dev' end),
+  a newer search's verdict (12). The scripts start at the move starts the moment map2 is not in control - often right
+  after its plan was dropped there because the move (chosen from the RECORDED hero's position) was not among its
+  outcomes.
+- **Safety**: no collision in the open runs' audits (116 control runs, w7 + w13; `audit_runs`: each control run's keys AS SENT
+  re-simulated in every outcome still possible at its end, against that outcome's danger); ONE in the strict runs' (1 of
+  149 control runs; the strict audit runs from the plan's anchor state with every key sent since): a planned jump at
+  frame 31 came one frame late because the bot's tick for that frame was skipped (the oracle keeps the previous ACTION)
+  - in the model her hurtbox meets the Clapper's damage at 31 in its 4 possible outcomes (finding 6). The before runs'
+  audits (112 control runs) had none. The fallback while it holds its bridge: the held row is taken exactly when it is
+  safe by the planner's own checks and keeps its commitments (test, 7 cases), it was followed on 1,167 ticks and left
+  on 149 (11 %) in the final strict w7 runs (94 % followed in a non-real-time replay); on the fallback's own ticks its
+  chosen row was unsafe (S) on 34.8 % (before 36.7 %), FORCED_RISK 10.1 % (before 8.5 %; w13 28.2 vs 25.6 %) - the
+  fallback now gets the ticks map2 leaves, a different mix. Identity 16 / 16 byte-identical with the switch unset.
+- **The reveal latency is not shortened** (target <= ~6 frames: not met). Per move start (all five kinds, the final
+  strict w7 runs): before 26 of 56 starts got a committed map2 plan from a snapshot at / after it within 60 frames, its
+  first key p50 / p90 23.5 / 51 frames after the start (its first own key 25 / 55); after 60 of 84, 25 / 45 (26.5 / 49).
+  The search is the limit (finding 5): a plan that can press at antic 5 needs its root by antic ~4 and its search done
+  within ~3 frames, while the first strike plan at a move start takes 70 - 250 ms. **CLAWSTRIKE: map2 pressed the
+  Clawline into a slam's first window 0 times** (its 46 Clawline presses in the final strict w7 runs were elsewhere), the
+  fallback's script 8 times (before: 8).
+
+#### What changed (`ssbot.map2.live`, LiveCfg switches - on by default, every one off = M4d; `ForumPlanner`, `ForumPlannerPolicy` and `Searcher` only through hooks that are unset / None with SSBOT_FORUM_MAP2 unset)
+
+- **fb_hold - the fallback follows the bridge it sent**: while a search from the planner's bridge runs (a part not
+  answered, or its plan received and not decided), `Map2Controller.hold_row(f)` hands `ForumPlanner` that bridge (its
+  plan of that tick, aligned by the frames elapsed) as its CONTINUE row; the planner envelopes it first (inside the
+  core: never cut by the deadline) and ranks it first among its safe rows that keep the commitments (a key just above
+  the kept-template key, below ~mkeep / ~keep / clash / S / U / hz), so it leaves the bridge only when its own checks
+  (S, the hazards, the escape check - ESC_CARRIED -, the tail) need a change; a key off a pending search's bridge cuts
+  that search (a note with `cut`; `break_cut`). `drop_keep`: a plan dropped on its end keeps the searches from its
+  bridge (the note's `keep`), the planner holds the dropped plan's bridge the same way, and a search that kept the
+  dropped plan sends it back ('k'); `drop_rev`: a drop on the Clappers / her position restarts the search at once with
+  the short bridge.
+- **One decision, two parts**: `sync` - a snapshot only when every (warm) worker is idle, the same to each (M4d sent each
+  idle worker its own snapshot: half a search each); `wait_parts` - a received plan waits for the other part (and its own
+  better anytime plans) until its root is due; `deadline` - the cap is the frames to the plan's root less `dl_margin` (3)
+  less the wall time since the snapshot (`t_wall`); `first_send` - the search's first safe plan, then each one better by
+  w_switch, goes out at once (`Searcher.on_best`; `final=False`).
+- **More plans committed**: `short_fix` (a plan with a press after its prefix is never 'too short' - min_frames sent
+  strikes pressed 1 - 2 frames after the bridge as 'noop'); `alt_noop` (when the best is the noop - with no plan in
+  control - or the kept plan in control near its end, `alt_left` 24 frames counted at the search's END, the best safe
+  non-noop plan within `alt_slack` 0.3 is sent: 'a'; an alt replaces a plan in control only when that one is ending);
+  `repair` (a plan whose bridge was not followed is re-simulated from the keys actually sent - live: `commit_check` with
+  `tol_repair` 0.3; the strict replay: `repair_check` - her anchor state, every key sent since the anchor, then the
+  plan's own commands; each possible outcome within 0.3 u of its planned path from now on, collisions from the anchor,
+  no press the plan does not have); `noinput_kin` ('no input' frames in the umbrella / sprint / skid clips - the hero
+  model's own states, M0 / M4a; `KIN_CLIPS` - block neither a commit nor a snapshot; a Clawline, the roar lock, a stun
+  still do); `unsafe_short` (after an 'unsafe' answer the next snapshot has the short bridge).
+- **The reveal**: `rev_cut` - a Clapper's MOVE START (Slam / Spell / Jump / Cast Slam Antic, Evade Scuttle: the antic's
+  first frame) sends the newest snapshot to every worker at once (busy ones too) with a bridge of `rev_lead` 6 frames and
+  `cut` = the older snapshots (the workers' readers abort those searches); not sendable (busy) within `rev_wait` 12
+  frames: dropped.
+- **The replay only**: `replay_push` (a Clapper whose HP fell within `push_f` 20 frames - the recording's hero hit it -
+  is matched with x within tol_x + `push_tol` 0.55: the recording's side slashes push it 0.36 - 0.48 u, map2's plans
+  push nothing); `audit_runs` (off by default; the smokes set it).
+- **Logs / tools**: the per-tick log's `nc` (Clappers seen), `clip` (on 'no input'), `hold`, `hold_broken`, `cut_seq`,
+  `rev_sent`, `claw` (a rising Clawline sent: its owner and the Clappers), `wait_parts`, `audit`, a 'bridge'
+  rejection's first frame off; counters `hold_*`, `bridge_cut_<owner>`, `repair_*`, `rev_sent` / `rev_expired`,
+  `drop_keep`, `plans_interim`, `w_alt_*`, `short_sent`, `audit_*`, `replay_push_obs`; `m4c_smoke report`:
+  share_engaged, share_engaged_input, reveal (per move start: starts, with a plan, first key p50 / p90, root p50 / p90),
+  claw (presses by owner and into a slam's first window); `m4c_smoke run --env`. `search_lag` (the worker's Cfg.lag;
+  0: its own 2).
+
+#### Findings on the way
+
+1. **The noop answers** (an offline scan of 100 snapshots from the fallback's bridges, w7a, the live cap;
+   `snaps\scan_w7a_live.json`): 84 answers were the noop; 63 of them had a safe alternative whose value was p50 0.09 /
+   p90 0.18 below the noop's (the noop is short: w_time; 55 safe endpoints, 8 strikes), and 2 of the strikes (value
+   ~1.0, a hit) were 'too short' only because they pressed 1 - 2 frames after the bridge. Fixed (short_fix, alt_noop).
+2. **The hold broke under load** (dev1 - dev6): the CONTINUE row was enveloped after the core rows and the deadline (8
+   ms) cut it - unchecked is not safe - so each new snapshot's bridge broke within 1 - 3 ticks (a cycle of cuts with no
+   candidate searched). Enveloping the held row first fixed it (w7a strict 36 -> 45 % in the next run).
+3. **The replay's artifacts** (her state, keys and hits are the recording's): (a) 31 of 35 'x' mismatches of a plan's
+   Clapper came <= 30 frames after the recording's own hit (a side slash's recoil, 0.36 - 0.42 u) - replay_push; (b) the
+   Clappers choose their moves from the RECORDED hero's position (Close / Far Range, evades), so a plan's outcomes miss
+   the move started at its frame: most of the remaining 'clappers' drops (Spell Antic -> Idle, Idle -> Evade, Slam 2 ->
+   Air, ...); (c) busy 'slash' (27 % of the fallback's engaged ticks) is the recording's slashes (act.mask); (d) the 'no
+   input' frames were the recording's umbrella (200 of 339 in w7a), sprint and Roar Lock. Live none of these comes from
+   a recording; whether the live share is higher is for a live run to show.
+4. **The scripts are not the limit**: with the scripts off (the planner alone as the fallback; an informational run,
+   `smoke_dev11_noscript`) the share was 35.5 % (w7a) / 16.9 % (w7b) - no higher. The search's answers are (the noop,
+   unsafe, the Clappers at the commit).
+5. **The search's time at a move start** (offline, 12 move-start snapshots of w7a with a 6-frame bridge;
+   `snaps\ms_w7a_*.json`): the first safe plan (a safe endpoint) after 20 - 110 ms, the first strike (a down slash on
+   the evading / casting Clapper, value 0.9 - 1.4) after 70 - 250 ms; at the 60 ms cap the answer was the noop for 9 of
+   12. In the smokes 70 of ~170 rev snapshots answered the noop and 36 were cut again before answering. rev_lead 3 / 6 /
+   10 and search_lag 4 / 6 (a longer committed part after a reveal) measured within the run-to-run spread.
+6. **Late ticks delay key changes**: a skipped tick keeps the previous ACTION for its frame, so a plan's key change comes
+   a frame late - the audit's one collision (Result). M4c's open item 3 said the hero check and the re-anchoring catch
+   the drift; they catch it a tick AFTER it happened, too late for a plan timed to the frame.
+7. **The audit's world**: in the strict replay her observed state is the recording's, so re-simulating a control run
+   from the commit's observed state flagged repaired plans (her recorded position 4.5 u from the plan); the strict audit
+   runs from the plan's anchor state with every key sent since (the world of repair_check).
+
+#### Identity, tests
+
+- With SSBOT_FORUM_MAP2 unset nothing of the new code runs (`hold_row` is never set - ForumPlanner reads
+  `getattr(self, "hold_row", None)` -, `Searcher.on_best` stays None). 282601b, the switch unset: 16 / 16 replays
+  byte-identical to M4c's base 9bff134 (`scripts\replay_ident_m4d2.ps1`, `ident_cmp.sh`; the rnjb env and M0's env,
+  SSBOT_FORUM_HERO2 unset and =1; w7 192006 i0 e1 2,073 ticks, 084036 i1 e0 1,778, w13 144051 i1 e0 1,541, 102908 i0 e0
+  1,659; `ident_rnjb.txt`, `ident_m0.txt`).
+- `tests/test_m4d2_live.py` 9 (short_fix; one snapshot per decision, the held bridge and its alignment, the cut on a
+  break; the move start's snapshot to busy workers; wait_parts; noinput_kin; the anytime plans; repair_check - its own
+  keys ok, an unplanned slash, a flipped bridge; the alternative over the noop; ForumPlanner takes the held row exactly
+  when its own checks pass, 7 cases). The map2 / M4 / forum planner tests: 134 passed. Full suite at 2b8c02c (this
+  worktree, Idle): 2,166 passed, 8 failed - the known 5 (HANDOFF M0 / M3) and the 3 in the untracked
+  test_sg8_review.py -, 1 skipped, 1 xfailed (`map2\fullsuite_m4d2_2b8c02c.log`; 2,176 collected, M4d's log 2,179
+  without the 9 new ones - the difference not traced, no test file but the new one changed).
+
+#### The real-time smoke (the final runs, `final_report.txt`)
+
+- 0 tracebacks and 0 errors in every run (17 final and ~20 development runs).
+- map2 on the bot's thread p50 0.1 - 0.2 / p99 2.7 - 4.4 ms per tick (M4d's switches off: 1.3 - 2.0), a commit check
+  p99 8 - 11 ms (3 - 5: the repair's re-simulations); the search p50 95 - 101 / p90 157 - 193 ms (163 - 190 / 264 - 293:
+  the deadline cap); the bot's tick p50 22 - 26 ms under the load, the same before / after.
+- Per w7 strict recording run: snapshots 134, plans 58 (46 anytime), commits 21, repairs ok 4 of ~20, held ticks 195
+  followed / 25 left, rev snapshots 20, alternatives over the noop 8.
+
+#### The checkout for the gate
+
+Frozen with `1v1_freeze.ps1 -rev <head>` (the path in PROGRESS.txt) and run once (the smoke from it) so its numba
+caches are warm. **Not ready for the gate as it stands**: the share is under the gate's 50 % (w7 strict 31 %), the
+audit found one late-tick collision, and the lead's notes 3 and 4 of PROGRESS.txt (the side contact after an Air
+Sprint scored as a pogo; the air dash kept spent after a pogo / hooked Clawline; the press-validity defect) are not
+fixed in this branch - NOTE_FROM_LEAD_safety.txt says the gate must not run without them. Arms as M4c (m2 default);
+M4d's behaviour one switch string away: `SSBOT_FORUM_MAP2_SET=fb_hold=0,sync=0,wait_parts=0,short_fix=0,alt_noop=0,`
+`deadline=0,first_send=0,rev_cut=0,repair=0,drop_rev=0,drop_keep=0,noinput_kin=0,replay_push=0,unsafe_short=0`.
+
+#### Open items
+
+1. The gate's condition (>= 50 % of the engaged ticks) is not met in the strict replay (w7 31 %; a quieter machine
+   33 - 40 %): the replay's own artifacts (finding 3) bound it, the search's answers (the noop, unsafe, the Clappers at
+   the commit) and the fallback's scripts in map2's gaps hold the rest. The person decides: run the gate with a lower
+   share, or first the A1_n tables (the search's speed), contingent continuations per move start, or a fallback that
+   yields to map2's pending plans.
+2. Late ticks (finding 6): a plan's key change one frame late by a skipped tick. Options: commit only plans that stay
+   collision-free with each key change a frame late too; an ACTION that carries the next frame's keys (the oracle);
+   fewer skipped ticks.
+3. The reveal latency (target <= ~6 frames to a plan that can press at antic 5) and map2's own CLAWSTRIKE (0 presses
+   into a slam's first window) wait for a faster search (the A1_n tables) or the lead's 'stronger fix' (contingent
+   continuations per Clapper reveal: the plan in control already holds 'if the slam starts at k, press at k + 5 .. 11').
+4. The lead's notes 3 (09:55) and 4 (11:00) in PROGRESS.txt - not in this stage's task, not done; required before the
+   gate (NOTE_FROM_LEAD_safety.txt).
+5. Two Clappers (w13 ~3 %): M4c's open item 4.
+6. The fallback's FORCED_RISK on its own ticks rose 8.5 -> 10.1 % (w7 strict; w13 25.6 -> 28.2 %) - a different mix of
+   ticks (the ones map2 leaves); an effect of the hold itself is not separated from it.
+7. M4c's open items 2 - 8 and M4d's open items 1, 3 and 4 stand.
