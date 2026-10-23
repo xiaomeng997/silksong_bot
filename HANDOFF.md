@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -12656,3 +12656,160 @@ Arm `m2` (or `m2p`); 1v1_live.ps1's warm replay starts the workers (a cold start
 6. The supervisor still judges with the fallback's plan (res.S, FORCED_RISK) while map2 has the keys.
 7. The realizer changes plans after M1 found them; the engine should only offer filter-feasible keys (M1 / A1_n).
 8. M4b's open items 1 (the split parts' contingent combination), 2 (the tolerances), 4 (the depth shares) still open.
+
+### M4d - the review findings on M4c's integration (offline; no live run): possible outcomes and the end of a committed part, the hook variants told apart by her control, the Clawline's facing at its press, Clawline presses a plan does not have, freezes / hits between ticks, a newer search's verdict, the Cogfly keys, the bot side's exceptions, the per-episode stats, the workers' life with the bot
+
+The task: three reviewers (lenses timing, robustness, safety) read M4c's integration and sent 20 findings; check each
+(read the code, reproduce offline), fix the confirmed ones with tests, say which are refuted and why; then the identity
+with the switch off (w7, w13), the real-time smoke, the map2 tests and the full suite; freeze a checkout for the gate.
+No game instance was touched, nothing ran live. Commits 3a7bc48 (the fixes and tests), 3e60a1c (dev_gap, the audit
+counters), 725fdc7 (the reveal state in the log), then the docs. Data `C:\ssbot\data\m2_play\map2\m4\m4d` (`exec_ctl_*`
+the execution emulation, `claw_latch_m4d.*`, `accept\`, `replay_m4d_*` identity, `smoke_m4d_*`, `scripts\`).
+
+#### Result
+
+- **All 20 findings confirmed, at least in part** (14 distinct defects: six were seen by two lenses); all fixed, each
+  with a test (`tests/test_m4d_live.py`, 14). Refuted in part: of the review's Clawline presses "without the direction
+  latched at P", the ones where she already faced the target are right (the game throws toward her FACING, which a
+  press with no direction key keeps) - only the opposite key latched at P (or no key while facing away) is wrong.
+  Safety 6 (the fallback after a 'dev' end) is a design limit: mitigated (`dev_gap`), audited at the gate.
+- **The execution emulation** (`scripts\exec_ctl.py`: the controller's own pre() driven with every safe outcome of a
+  searched plan as the truth - its view's Clapper records, her planned position, her control from its Clawline):
+  one Clapper (20 acceptance situations, 634 truths) M4c's rule 179 truths got keys past their own committed end, 18 of
+  the 167 'dev' truths still had map2's keys at their collision frame, 90 got keys different from their own, 14 got a
+  press they do not have; M4d's rule 0 / 0 / 0 / 0 (4 'dev' truths with the collision AT the deviation frame - M3
+  accepts those, the commit check rejects them: 'danger' at kc). Two Clappers (12 situations, 522 truths): M4c 224 past
+  kc, 59 extra presses, 9 wrong; M4d 0 / 0 / 0. The cost: M4d runs 90 % of the truths' committed frames (32,432 of
+  36,136; 70 of 634 truths end >= 10 frames early because another possible truth deviates there).
+- The M3 acceptance at M4c's deterministic budget through the live realizer (`--hold 2 --vclock 0.005`): same / alt /
+  not 99 / 99 / 81 in both, per move identical, mean value 1.434 vs 1.437, hits 1.603 vs 1.609, safe chosen 231 / 231
+  (`accept\m4c_h2_vs_m4d_h2.txt`; the first, stricter realizer that required the direction KEY at P: 101 / 100 / 78).
+
+#### The findings, one by one
+
+1. **Timing 1 / safety 1 - the timing views always matched together** (cc01d8a: each outcome matched on its BASE
+   branch's records with their spread). The early view of a branch whose committed part ends at its reveal + lag (a
+   collision follows: M3 deviates there) and the late view that runs on stayed consistent together, so execution took
+   the late view's keys past the early view's end into its collision (review: sit 4 frames 32 - 36 into the hammer at
+   34; sit 16 45 - 49). Confirmed (`dev_dive`, `exec_emul`, the emulation above). Fixed: **possible outcomes**
+   (`possible()`): an outcome whose OWN timeline (its view's records at the observed frame: state, frame in it within
+   tol_j, x, facing - M4b's TickCheck rule) the observation contradicts can no longer be the truth (sticky for the plan
+   in control); none left (a timing between the views: both contradicted) -> all consistent ones count. **The plan ends
+   when any possible outcome's committed part has ended** (M3's deviation), and the commit check rejects a plan then
+   ('ended'). A timing between the views: the late view's keys only while the observation is the late view's (the
+   states are the late one's until the in-between change), then both contradicted -> the earliest end -> the plan ends
+   on the change (test: early, late and a +2 timing). `LiveCfg.views_exact` (off: M4c).
+2. **Timing 2 / safety 4 - the hook variants' keys mixed.** After a Clawline the early / late variants have their own
+   control and continuation; with equal p the first one's keys went out (the early jump during the late pull: queued to
+   its control). Confirmed (emulation: 90 truths with wrong keys, 14 with extra presses). Fixed: **her control tells the
+   variants apart** (`_control_ok`: she has no control from P + 3 to an outcome's control - M4a probes 0 of 250
+   accepting there - and has it from control on: control seen at <= control - 2 or not seen at control + 1 .. + 3
+   contradicts that outcome; `ctl_check`); **possible outcomes disagreeing on a key** send the bits they agree on and
+   the others as sent for the frame before (`_merge_keys`: no press none of them is sure of; `dis_hold`). The cost: the
+   early variant's first press after control comes 2 frames late when it pressed at control + 0 / + 1 (her control is
+   seen at control, keys go 2 frames ahead); the hero check / re-anchoring then decide.
+3. **Timing 3 / safety 3 - the Clawline's direction at its press.** The realizer filtered the segment's last mask (the
+   direction) as a plain key and modelled the Clawline from P + 1; outcome_cmds sent it from P: a tap of the other
+   direction at P - 1 stayed latched at P (its minimum press) and the game threw the Clawline the other way.
+   Confirmed for the opposite key (4 of 502 in the review's sample); refuted for "no direction latched at P" when she
+   already faced the target (7 of 502: the game keeps her facing; `strike.facing_track`). Fixed: the realizer models the
+   Clawline exactly as sent (from P) and, when at P the Clawline would not latch as a rising edge with her FACING toward
+   the target, moves the press 1 - 3 frames later with the direction alone first (`HoldRealizer(face0=)`; the
+   evaluation decides from the actual press); the commit check rejects a plan whose Clawline would not ('claw latch').
+   After: 780 of 780 presses in 40 situations latched facing the target (765 with the key, 15 without it but facing),
+   0 the opposite (`claw_latch_m4d.txt`).
+4. **Timing 4 / safety 2 - a Clawline the plan does not have.** The commit check stripped the Clawline bit from the keys
+   in flight and looked only for unplanned slashes; nothing stopped a commit during a Harpoon. Confirmed
+   (`inflight_check`: a press in flight ok, dev 0.0). Fixed: 'unplanned Clawline' (a rising Clawline not at one of the
+   plan's P), 'in a Clawline' (latched now), and no commit while she has no control (not accepting input or in a
+   Clawline: the plans wait; `commit_wait_noinput`).
+5. **Timing 5 / safety 7 - freezes and hits between ticks.** feed() recorded every freeze frame but pre() dropped the
+   plan only on the observed frame's dt <= 0, and checked the hit after the freeze (her hit's own freeze took it).
+   Confirmed by the code and the recordings (`scripts\dt_hist.py`: 8 - 12 frames at dt 0 then ramps of 0.33 / 0.67 or
+   0.42 / 0.83 frames). Fixed: any frame since the previous tick with dt x 60 outside 0.9 .. 1.25 (`dt_lo` / `dt_hi`:
+   a freeze, its ramp, a long frame) drops the plan; a hit since the previous tick first; hits counted by who sent the
+   keys at the hit frame (`hits`, `hit_m2`, `hit_fb`).
+6. **Timing 6 / safety 5 - a newer search's 'unsafe' was only counted.** Confirmed (the smokes: 12 'unsafe' answers
+   while map2 had the keys, the plan kept). Fixed (`unsafe_drop`): the worker reports whether the plan in control (its
+   kept plan) evaluated safe from the newer snapshot (`prev_safe`) and whether that search's prefix - the keys in flight
+   and the plan's own bridge - is safe to follow (its noop or its chosen plan safe: every plan of the search starts with
+   it); not safe -> the plan is dropped ('unsafe'; a replacement may still commit that tick), else it is cut after that
+   bridge ('cut').
+7. **Timing 7 - the Cogfly throw's keys.** _eff_inflight took them back from sent_hist (the policy strips Up +
+   QuickCast on its frames; HERO2 casts with them). Confirmed. Fixed: the controller knows who sent each frame's keys
+   (`own_hist`); the throw's keys stay out of the keys in flight, the hold state and the snapshots.
+8. **Timing 8 - the bridge from the wrong outcome.** post() took the most probable of all outcomes kept at the commit.
+   Fixed: the bridge is the possible outcomes' agreed keys (as the execution chose them this tick), to the first end
+   among them, a cut, a Clawline press or ch_lead.
+9. **Robustness 1 - orphan workers.** Confirmed (review: alive 5 s after the bot's os._exit). Fixed: the worker's
+   watchdog exits when `multiprocessing.parent_process()` is gone (test: a bot that dies outright).
+10. **Robustness 2 - the bot's exit could hang on a dead worker's queue.** Reproduced (40 notes of 2 KB to a dead
+   worker: still running at 90 s, killed by the timeout). Fixed: `cancel_join_thread` on the workers' input queues,
+   `stop()` at exit (atexit; terminates what is left), no notes into a dead worker's queue (test: exits at once).
+11. **Robustness 3 - numba threads of the background pass.** Confirmed (thread-local). Fixed: set in the search's
+   background thread too (the ready message: `numba 2 (bg 2)`).
+12. **Robustness 4 - cumulative stats.** Fixed: `stats()` is this episode's (counts, times, bridge audit; `ep`), the
+   run's in `run_counts` / `run`.
+13. **Robustness 5 - exceptions on the bot's thread.** Confirmed by the code (no input found that raises). Fixed: pre /
+   post / feed / the pause tick never raise - logged (`errors_<where>`), the plan dropped, the fallback's keys; after
+   `err_max` (20) errors in an episode map2 is off for the rest of it; a worker restart that fails is logged.
+14. **Safety 6 - the fallback after a 'dev' end.** The search checked an exit (M1 envelope, 40 f, 1 event) from the
+   planned end state; nothing makes the fallback take it. Partly confirmed (no re-check; whether rnjb escapes is not
+   measurable offline). Measured: of 217 'dev' outcomes in the emulation's plans the collision follows the end by 0 (4:
+   M3 accepts those, the commit check rejects them), 1 - 2 (4), 3 - 5 (18), 11 - 20 (43), > 20 frames (148). Mitigated:
+   `dev_gap` 6 - a plan with a possible 'dev' outcome closer than 6 frames to its collision is not committed ('dev
+   gap'); the gate's audit: `drop_end_dev` (a plan ended at a 'dev' outcome) and `hit_after_drop_<why>` (the fallback's
+   hits within 40 frames after map2 handed the keys back). The proper fix (the exit's keys as the plan's own tail) is
+   open.
+
+#### Identity, tests
+
+- The bot's files are unchanged since cb50554 (only `ssbot/map2/live.py`, `ssbot/tools/m3_accept.py` and the tests);
+  with SSBOT_FORUM_MAP2 unset nothing of map2 is imported. The identity at 725fdc7 (the worktree), switch unset: 16 /
+  16 replays byte-identical to M4c's base 9bff134 (`scripts\replay_ident_m4d.ps1`, `ident_cmp.sh`; the rnjb env and
+  M0's env, SSBOT_FORUM_HERO2 unset and =1; w7 192006 i0 e1 2,073 ticks, 084036 i1 e0 1,778, w13 144051 i1 e0 1,541,
+  102908 i0 e0 1,659; `ident_rnjb.txt`, `ident_m0.txt`).
+- `tests/test_m4d_live.py` 14 (the views' end rule incl. a timing between them, the commit's 'ended' and 'dev gap',
+  the variants by control, the bridge, the realizer's facing at P, the unplanned / latched Clawline, no commit without
+  control, a freeze / ramp / hit on a skipped tick, the verdict's drop and cut, the Cogfly keys, the exceptions, the
+  per-episode stats, a worker outliving its bot, the exit with a dead worker's queue full); the map2 tests (85) pass.
+  Full suite at 725fdc7 (this worktree, Idle): 2,169 passed, 8 failed - the known 5 (HANDOFF M0 / M3) and the 3 in
+  the untracked test_sg8_review.py -, 1 skipped, 1 xfailed (`map2\fullsuite_m4d_725fdc7.log`).
+
+#### The real-time smoke
+
+- `ssbot.tools.m4c_smoke` at 725fdc7 (the worktree), the default configuration, four recorded episodes two at a time
+  (`smoke_m4d_open`, `smoke_m4d_strict`; `scripts\smoke_m4d.sh`): 0 tracebacks, 0 errors on the bot's side or in the
+  workers (11,700 controller ticks); the workers report `numba 2 (bg 2)`.
+- The share of ticks under map2 - open: w7 11.5 / 15.7 %, w13 1.9 / 1.6 % (M4c's smoke7: 14.2 / 15.1, 5.7 / 1.2);
+  strict (the live path check's proxy): w7 6.4 / 14.6 %, w13 1.1 / 0.08 % (M4c: 5.0 / 10.7, 1.4 / 0.07).
+- The new rules at work (per run, open / strict): commit checks 'dev gap' 0 - 3, 'claw latch' 0 - 1; drops 'cut' (a
+  newer search's verdict) 0 - 4, 'unsafe' 0 - 1, 'end_dev' 1 - 5; commits waiting for her control 2 - 81 ticks.
+- map2 on the bot's thread p50 0.11 - 0.13 / p99 0.3 - 1.8 ms per tick, a commit check p99 1.6 - 7.5 ms; the search
+  p50 134 - 186 / p90 227 - 338 ms; the bot's tick p50 w7 17.2 - 17.9 ms, w13 20.9 - 21.7 ms (a busy machine: another
+  workflow's 8 Idle processes; M4c 16.0 - 16.7 / 18.6 - 20.3).
+- **The reveal-to-plan latency** (the lead's note of 07:50, measured only: `scripts\reveal_latency.py`,
+  `reveal_latency_open.txt`): of 349 Clapper state entries in the open smoke, 108 had a committed map2 plan from a
+  snapshot at / after the entry within 60 frames, p50 33 / p90 55 frames from the entry to the plan's first key (Slam
+  Antic: 19 entries, 2 within 60 f); strict 64 of 351, p50 31 / p90 55. Far above the ~6 frames the lead asked for:
+  the fix (a Clapper's new state restarts the search from the newest snapshot, the first safe plan sent at once) is
+  open.
+
+#### The checkout for the gate
+
+Frozen with `1v1_freeze.ps1 -rev <head>` (the path in PROGRESS.txt) and run once (the smoke on w7a / w13a) so its
+numba caches are warm. Arm `m2` (or `m2p`) as in M4c; the M4d rules are on by default (`LiveCfg`), M4c's execution
+rule one switch away: `SSBOT_FORUM_MAP2_SET=views_exact=0,ctl_check=0,dis_hold=0,unsafe_drop=0,dev_gap=0`.
+
+#### Open items
+
+1. S6's proper fix: the exit the search found from a 'dev' end kept as the plan's own tail (or the exit re-checked
+   from the re-simulated state at the commit) - and the gate's audit of `hit_after_drop_end_dev`.
+2. The lead's notes in PROGRESS.txt not done in M4d (its task was the findings): the reveal-to-plan latency (07:50 /
+   07:55 - measured on the smoke below, not fixed) and the two model defects of 09:55 (the side contact after an Air
+   Sprint scored as a pogo; EV_POGO / the live estimator keeping the air dash spent after a pogo or a hook).
+3. The variants' continuations are planned as if the variant were known at control (M3); live it is known 2 frames
+   later at best - the search should plan the presses of control .. control + lag the same in both variants.
+4. The emulation follows the truth's planned path; live, the possible-outcome exclusion, the control check and the
+   disagreement rule are untested (the gate).
+5. M4c's open items 1 - 8 stand.
