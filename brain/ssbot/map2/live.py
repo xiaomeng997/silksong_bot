@@ -84,6 +84,8 @@ def enabled() -> bool:
 class LiveCfg:
     parts: int = 2                 # search worker processes per game instance (M4b's split search)
     prio: str = "high"             # the workers' priority: high (the live bot's rule) / as (as started: tests)
+    cpus: str = "0-15"             # the workers' CPUs (the live bot's rule: the 13900K's P-cores 0-15)
+    numba_threads: int = 2         # the workers' numba threads (the parallel envelope pass); the bot keeps its own
     cap_fb: float = 0.25           # the search's cap (s) while the fallback has the keys
     cap_ch: float = 0.6            # ... while map2 has them (the chained search, anchored after its bridge)
     cap_min: float = 0.12
@@ -596,9 +598,9 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
 
 # ---- the worker process ---------------------------------------------------------------------------------------------
 
-def boost_self(prio: str) -> str:
-    """The live bot's worker rule (combat_run.boost_worker): High, the P-cores (SSBOT_WORKER_CPUS, default 0-15),
-    EcoQoS off; 'as': as started."""
+def boost_self(prio: str, cpus_spec: str | None = None) -> str:
+    """The live bot's worker rule (combat_run.boost_worker): High, the P-cores (cpus_spec, else SSBOT_WORKER_CPUS,
+    default 0-15), EcoQoS off; 'as': as started."""
     if prio != "high":
         return "as started"
     if os.name != "nt" or os.environ.get("SSBOT_WORKER_BOOST", "1").strip() == "0":
@@ -610,7 +612,7 @@ def boost_self(prio: str) -> str:
         p = psutil.Process()
         p.nice(psutil.HIGH_PRIORITY_CLASS)
         msgs.append("High")
-        spec = os.environ.get("SSBOT_WORKER_CPUS", "0-15")
+        spec = cpus_spec or os.environ.get("SSBOT_WORKER_CPUS", "0-15")
         cpus = []
         for part in spec.split(","):
             if "-" in part:
@@ -792,7 +794,13 @@ def _warm_search(S, W, n_rec: int = 6) -> float:
 def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0) -> None:
     """One search worker (module docstring, WORKERS): runs until a {'stop': True} snapshot or its queue closes."""
     cfg = LiveCfg(**cfg_d)
-    boost = boost_self(cfg.prio)
+    boost = boost_self(cfg.prio, cfg.cpus)
+    try:
+        import numba
+        numba.set_num_threads(max(1, min(int(cfg.numba_threads), numba.config.NUMBA_NUM_THREADS)))
+        boost += f", numba {numba.get_num_threads()}"
+    except Exception as e:  # noqa: BLE001
+        boost += f", numba threads unchanged ({e})"
     W = ms.World()
     S = _Searcher(W, ms.Cfg.live())
     if nparts > 1:
