@@ -1085,6 +1085,7 @@ def timing_views(br) -> list:
             recs[iid] = out
         v = cm.Branch(br.p * 0.5, br.choices, br.reveal, recs, br.hazards, br.K, br.T, br.n_merged)
         v.tview = "early" if mode == 1 else "late"
+        v._base = br                                   # M4c: the branch it was drawn from (its records' spreads)
         views.append(v)
         states.append(st_at)
     tr_ = None

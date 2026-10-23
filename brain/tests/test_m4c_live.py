@@ -164,7 +164,7 @@ def _obs_at(o, n):
     """The Clappers of an outcome at frame n as Obs (its records)."""
     inv = {v: k for k, v in o.sids.items()}
     out = []
-    for iid, (ks, st, j, x, f) in o.recs.items():
+    for iid, (ks, st, j, x, f) in o.vrecs.items():
         a = int(np.searchsorted(ks, n))
         if a < len(ks) and ks[a] == n:
             out.append(cm.Obs(iid, inv[int(st[a])], float(j[a]) / 60.0, float(x[a]), cm.STAND_Y, 0.0, 0.0, int(f[a]),
@@ -201,10 +201,12 @@ def test_controller_commit_execute_handover(W, live_plan):
         assert m is not None, ctl.row
         kept += 1
         ctl.post(100 + n, 100 + n, raw, sit.S, np.array([o0.cmds[n + 1]], np.int64), hold, m, "m2", None, False)
-    # her 1 u off the plan: the per-frame check fails, the fallback has the keys
+    # her 1 u off the plan: the per-frame check fails, the re-anchoring's path check too (> tol_reanchor), the
+    # fallback has the keys
     raw["hero"]["pos"] = [float(o0.pos[4, 0]) + 1.0, float(o0.pos[4, 1])]
     ctl.trk = _Trk(_obs_at(o0, 4))
-    assert ctl.pre(104, 104, raw, sit.S, np.array([0], np.int64), hold) is None
+    S4 = km.initial_state(W.params, float(o0.pos[4, 0]) + 1.0, float(o0.pos[4, 1]), ground=True, facing=1)
+    assert ctl.pre(104, 104, raw, S4, np.array([0], np.int64), hold) is None
     assert ctl.ctrl is None and ctl.row["why"] == "fail:hero"
     ctl.post(104, 104, raw, sit.S, np.array([0], np.int64), hold, 0, "plan", None, False)
     st = ctl.stats()
@@ -223,3 +225,19 @@ def test_bot_imports_map2_only_with_the_switch():
     src = Path(importlib.import_module("ssbot.train.forum_planner_policy").__file__).read_text(encoding="utf-8")
     lines = [ln for ln in src.splitlines() if re.search(r"(from|import)\s+ssbot\.map2", ln)]
     assert lines == ["            from ssbot.map2 import live as m2live"]
+
+
+def test_clappers_match_inside_the_timing_spread():
+    """An observed timing between the two timing views' extremes is consistent (the record seen at k + a .. k + b)."""
+    o = lv.OutData()
+    o.sids = {"Idle": 3, "Slam Antic": 7}
+    o.recs = {1: (np.array([10, 10]), np.array([14, 14]), np.array([7, 7]), np.array([5.0, 6.0]),
+                  np.array([C, C]), np.array([-1, -1]))}
+    cfg = lv.LiveCfg(prio="as")
+    seen = [_obs("Slam Antic", C, face=-1, j=5)]
+    assert lv._clappers_ok(o, 12, seen, cfg)                  # inside 10 .. 14
+    assert lv._clappers_ok(o, 14, [_obs("Slam Antic", C, face=-1, j=7)], cfg)   # j 6 +- 1
+    assert not lv._clappers_ok(o, 16, seen, cfg)              # past the spread
+    assert not lv._clappers_ok(o, 12, [_obs("Idle", C, face=-1, j=5)], cfg)
+    assert not lv._clappers_ok(o, 12, [_obs("Slam Antic", C + 0.5, face=-1, j=5)], cfg)
+    assert not lv._clappers_ok(o, 12, [_obs("Slam Antic", C, face=1, j=5)], cfg)

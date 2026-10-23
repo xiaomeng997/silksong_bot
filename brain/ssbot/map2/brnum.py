@@ -120,6 +120,7 @@ def views(br, branch_cls) -> list:
         v = branch_cls(br.p * 0.5, br.choices, br.reveal, None, br.hazards, br.K, br.T, br.n_merged)
         v._arr, v._tb, v._names = arr2, tb, tb.names
         v.tview = "early" if mode == 1 else "late"
+        v._base = br                                   # M4c: the branch it was drawn from (its records' spreads)
         views_.append(v)
         maps.append({iid: _last_map(b, br.T) for iid, b in arr2.items()})
     tr_ = None

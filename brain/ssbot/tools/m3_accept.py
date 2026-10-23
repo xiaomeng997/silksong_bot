@@ -393,9 +393,20 @@ def _run_one(args) -> dict:
     S = ms.Searcher(_W, cfg)
     if extra.get("part") is not None:
         S.part = tuple(extra["part"])                 # M4b: one part of a split search
+    if extra.get("vclock"):
+        S.vclock = float(extra["vclock"])             # the cap in work units (deterministic)
+    pre = None
+    if extra.get("hold"):
+        # M4c: every plan starts with one frame of no key (the live root's prefix: the key in flight); hold 2: and
+        # every plan as the oracle's hold filter latches it (live.HoldRealizer: a press / release lasts >= 2 frames)
+        pre = ms.Seg(np.zeros(1, np.int64), [], None, "pre")
+        if int(extra["hold"]) == 2:
+            from ssbot.knowledge import kinematics as km
+            from ssbot.map2 import live as lv
+            S.realizer = lv.HoldRealizer(1, lv.hold_tuple(km.HoldState.idle(1)))
     t0 = time.perf_counter()
     try:
-        r = S.decide(sit)
+        r = S.decide(sit) if pre is None else S.decide(sit, prefix=pre)
     except Exception as ex:                                       # a bug: count it, keep going
         import traceback
         return {"i": i, "name": sit.name, "error": repr(ex), "tb": traceback.format_exc()[-1500:]}
@@ -589,6 +600,10 @@ def cmd_run(a) -> int:
     extra = {"prio": a.prio, "cfg": {"pass2_after": a.pass2_after}} if (a.prio != "idle" or a.pass2_after) else {}
     if a.safe_ts:
         extra.setdefault("cfg", {})["safe_ts"] = tuple(int(x) for x in a.safe_ts.split(","))
+    if a.hold:
+        extra["hold"] = int(a.hold)                  # M4c: the live prefix (1) and the hold filter's realizer (2)
+    if a.vclock:
+        extra["vclock"] = float(a.vclock)
     if a.cfg:
         # Cfg overrides k=v;k=v (M4b: the live configuration's flags)
         from ssbot.map2 import search as ms_
@@ -906,6 +921,9 @@ def main(argv=None) -> int:
     p.add_argument("--load", action="store_true", help="the simulated load of 2 games + 2 bots (M4b)")
     p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation (M4b)")
     p.add_argument("--safe-ts", default="", help="Cfg.safe_ts, comma-separated frames (M4b)")
+    p.add_argument("--hold", type=int, default=0, help="M4c: 1 = every plan after one frame of no key (the live "
+                                                         "prefix), 2 = and through the oracle's hold filter")
+    p.add_argument("--vclock", type=float, default=0.0, help="the cap in work units: seconds per unit (deterministic)")
     p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v (M4b)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")

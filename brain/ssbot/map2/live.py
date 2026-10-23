@@ -72,6 +72,7 @@ M_DS = km.B_DOWN | km.B_ATTACK
 CLAW_PRESS_F = 3                   # the Clawline key and the direction held this many frames from P (the probes')
 DS_WIN = sk.DS_ACTIVE[1] + 1       # a slash's contact can still come this many frames after its press
 CLAW_BLOCK_F = 36                  # a Clawline pressed this recently: she may still be in its block (control P + 34)
+CTRL_SETTLE = 2                    # frames after a Clawline's control still treated as its block (the forced bounce)
 VARIANTS = {v.name: v for v in sk.HOOK_VARIANTS}
 
 
@@ -94,6 +95,8 @@ class LiveCfg:
     tol_x: float = 0.35
     tol_j: int = 1
     tol_commit: float = 0.2        # the commit re-simulation against the planned path (u)
+    tol_reanchor: float = 0.5      # ... when the plan in control is re-anchored after her position left its path (the
+    #                                Clappers still consistent): the collision check stays exact
     stale: int = 45                # a received plan older than this (frames since its anchor) is dropped
     end_lead: int = 20             # the 'end' trigger: the plan in control has this few committed frames left
     commits_per_tick: int = 2      # commit checks per tick at most (the rest wait)
@@ -302,8 +305,13 @@ class OutData:
     (TickCheck's records of the Clappers to kc), segs [(start frame, masks, dsl, claw)] as played, presses [(frame,
     iid)], variant, boxes {iid: robust body rows} (the strikes' targets), geo (off, BX, IIDB, coff, CO to kc), rare
     {k: grown shapes} (the hammers), rare_k, label."""
-    __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "sids", "segs", "presses", "variant", "boxes", "geo", "rare",
-                 "rare_k", "label", "contacts")
+    __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
+                 "rare", "rare_k", "label", "contacts", "blocks")
+
+    def in_block(self, n: int) -> bool:
+        """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
+        first frames) - her position is the pull's, not her keys'."""
+        return any(P < n <= c + CTRL_SETTLE for (P, c) in self.blocks)
 
 
 def _geo_cut(br, kc: int, margins: bool) -> tuple:
@@ -335,12 +343,25 @@ def build_outs(ev, margins: bool = True) -> list:
         d.cmds = outcome_cmds(tr)
         d.pos = np.asarray(tr.pos[:kc + 1], float).copy()
         arr, tb = brnum.barr(o.branch)
-        recs = {}
+        vrecs = {}
         for iid, a in arr.items():
             a = a[(a[:, 0] >= 0) & (a[:, 0] <= kc)]
             a = a[np.argsort(a[:, 0], kind="stable")]
-            recs[iid] = (a[:, 0].astype(np.int64), a[:, 3].astype(np.int64), a[:, 4], a[:, 5], a[:, 7])
+            vrecs[iid] = (a[:, 0].astype(np.int64), a[:, 3].astype(np.int64), a[:, 4], a[:, 5], a[:, 7])
+        d.vrecs = vrecs
+        # the matching uses the branch the timing view was drawn from: a record (state, frame in it, x, facing) is
+        # seen at any frame k + a .. k + b of its spread (an observed timing between the two views' extremes)
+        arr0, tb0 = brnum.barr(getattr(o.branch, "_base", o.branch))
+        recs = {}
+        for iid, a in arr0.items():
+            lo, hi = a[:, 0] + a[:, 1], a[:, 0] + a[:, 2]
+            a, lo, hi = a[(hi >= 0) & (lo <= kc)], lo[(hi >= 0) & (lo <= kc)], hi[(hi >= 0) & (lo <= kc)]
+            o_ = np.argsort(lo, kind="stable")
+            recs[iid] = (lo[o_].astype(np.int64), hi[o_].astype(np.int64), a[o_, 3].astype(np.int64), a[o_, 4],
+                         a[o_, 5], a[o_, 7])
         d.recs = recs
+        if tb0 is not tb:
+            assert dict(tb0.sid) == dict(tb.sid)
         d.sids = sid_of.setdefault(id(tb), dict(tb.sid))
         d.segs = [(int(k0), np.asarray(s.masks, np.int64).copy(), list(s.dsl), s.claw)
                   for s, k0 in zip(getattr(tr, "segs", ()), tr.seg_start)]
@@ -355,6 +376,11 @@ def build_outs(ev, margins: bool = True) -> list:
         d.rare_k = np.array(sorted(d.rare), np.int64)
         d.label = o.branch.label() if hasattr(o.branch, "label") else ""
         d.contacts = [(int(k), int(i), str(kd)) for (k, i, kd) in tr.contacts]
+        d.blocks = []
+        for si, (k0, m, _, c) in enumerate(d.segs):
+            if c is not None:
+                P = k0 + len(m)
+                d.blocks.append((P, d.segs[si + 1][0] if si + 1 < len(d.segs) else P + 34))
         outs.append(d)
     return outs
 
@@ -378,7 +404,7 @@ class LivePlan:
             pos = pos_over.get(i, o.pos) if pos_over else o.pos
             if n >= len(pos):
                 continue
-            if hero and (abs(pos[n, 0] - hx) > cfg.tol_hero or abs(pos[n, 1] - hy) > cfg.tol_hero):
+            if hero and not o.in_block(n) and (abs(pos[n, 0] - hx) > cfg.tol_hero or abs(pos[n, 1] - hy) > cfg.tol_hero):
                 bad_h += 1
                 continue
             if not _clappers_ok(o, n, obs, cfg):
@@ -389,16 +415,20 @@ class LivePlan:
 
 
 def _clappers_ok(o: OutData, n: int, obs: list, cfg: LiveCfg) -> bool:
+    """TickCheck's rule with the timing spread: every observed Clapper matches a record of the outcome's branch seen
+    at frame n (n inside its k + a .. k + b), its state, its frame in it within tol_j, its x within tol_x, its
+    facing."""
     for ob in obs:
         r = o.recs.get(ob.iid)
         if r is None:
             continue
-        ks, st, j, x, f = r
-        a, b = np.searchsorted(ks, n), np.searchsorted(ks, n, side="right")
+        lo, hi, st, j, x, f = r
+        b = np.searchsorted(lo, n, side="right")
+        w = hi[:b] >= n
         sid = o.sids.get(ob.st, -9)
         oj = ob.j if ob.j is not None else int(round(ob.t * 60.0))
-        if not np.any((st[a:b] == sid) & (np.abs(j[a:b] - oj) <= cfg.tol_j) & (np.abs(x[a:b] - ob.x) <= cfg.tol_x) &
-                      (f[a:b] == ob.face)):
+        if not np.any(w & (st[:b] == sid) & (np.abs(j[:b] - oj) <= cfg.tol_j) & (np.abs(x[:b] - ob.x) <= cfg.tol_x) &
+                      (f[:b] == ob.face)):
             return False
     return True
 
@@ -407,7 +437,7 @@ def _clapper_pred(o: OutData, n: int) -> dict:
     """The outcome's Clappers at frame n: {iid: (state, frame in it, x)} (its first record of frame n)."""
     inv = {v: k for k, v in o.sids.items()}
     out = {}
-    for iid, (ks, st, j, x, f) in o.recs.items():
+    for iid, (ks, st, j, x, f) in o.vrecs.items():
         a = np.searchsorted(ks, n)
         if a < len(ks) and ks[a] == n:
             out[iid] = (inv.get(int(st[a]), "?"), int(j[a]), round(float(x[a]), 2))
@@ -425,7 +455,7 @@ def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int) -> tuple:
     for si, (k0, masks, dsl, claw) in enumerate(o.segs):
         k1 = k0 + len(masks)                    # the segment's last frame (a Clawline's press P)
         if k1 <= s:
-            if claw is not None and si + 1 < len(o.segs) and o.segs[si + 1][0] > s:
+            if claw is not None and si + 1 < len(o.segs) and o.segs[si + 1][0] + CTRL_SETTLE > s:
                 return None, "in a Clawline"
             if claw is not None and si + 1 >= len(o.segs) and k1 + 34 > s:
                 return None, "in a Clawline"
@@ -487,7 +517,7 @@ def _first_collision_out(o: OutData, tr, s: int, k1: int) -> int | None:
 
 
 def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray, hold: tuple, lat_s: int, her_xy,
-                 obs: list, cfg: LiveCfg) -> tuple:
+                 obs: list, cfg: LiveCfg, idx=None, tol: float | None = None) -> tuple:
     """THE EXACT HERO2 SIMULATION CHECK FROM THE CURRENT STATE of a received plan (module docstring, 1): (ok, why,
     info) - info: the outcomes kept (alive at f + 2), their re-simulated paths (pos_over), the max path deviation,
     the outcomes checked and simulated, ms."""
@@ -498,9 +528,15 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
         return False, "future", info
     L = len(inflight)
     r0 = s + L + 1                           # the frame being chosen (f + 2)
-    cons, bad_h, bad_c = lp.consistent(s, her_xy, obs, cfg, hero=False)
+    cons, bad_h, bad_c = lp.consistent(s, her_xy, obs, cfg, idx=idx, hero=False)
     info["cons"] = len(cons)
+    tol = cfg.tol_commit if tol is None else tol
     if not cons:
+        # the log: the most probable outcome's Clappers at s against the observed ones
+        o_ = max(lp.outs, key=lambda o: o.p) if lp.outs else None
+        if o_ is not None:
+            info["pred"] = {str(k % 1000): v for k, v in _clapper_pred(o_, s).items()}
+            info["obs"] = [[ob.iid % 1000, ob.st, ob.j, round(float(ob.x), 2), ob.face] for ob in obs]
         return False, "clappers", info
     alive = [i for i in cons if lp.outs[i].kc >= r0]
     if not alive:
@@ -540,7 +576,7 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
         dev = np.abs(tr.pos[:kk + 1] - o.pos[s:s + kk + 1]).max(axis=1) if kk >= 0 else np.zeros(0)
         dmax = float(dev.max()) if len(dev) else 0.0
         dev_max = max(dev_max, dmax)
-        if dmax > cfg.tol_commit and not cfg.replay:
+        if dmax > tol and not cfg.replay:
             info.update(dev=round(dmax, 3), dev_k=int(np.argmax(dev)) + s, out=i)
             return False, "path", info
         kc_ = _first_collision_out(o, tr, s, o.kc)
@@ -816,12 +852,12 @@ class Map2Controller:
         self.ep = -1
         self.seq = 0
         self.st = Counter()                 # counters over the run
-        self.ep_stats: list = []
         self.ms_pre: list = []
         self.ms_post: list = []
         self.ms_check: list = []
         self.lat: list = []                 # sent plans: the search's ms
         self.age_commit: list = []          # frames from a committed plan's anchor to its commit
+        self.bridge_hist = {"plan": Counter(), "m2": Counter(), "script": Counter()}   # frames a bridge was followed
         self.errors: list = []
         self._reset_ep()
 
@@ -914,11 +950,10 @@ class Map2Controller:
         self.row: dict = {}
         self.last_msg: dict = {}
         self.ep_c = Counter()
+        self.bridges: list = []             # [kind, first frame, keys, frames followed, alive] (the bridge audit)
 
     def reset(self, episode: int) -> None:
         self.flush()
-        if self.ep >= 0:
-            self.ep_stats.append({"ep": self.ep, **dict(self.ep_c)})
         self.ep = int(episode)
         self._reset_ep()
 
@@ -1026,7 +1061,8 @@ class Map2Controller:
                 self.ms_check.append(msc)
                 self.pending.remove(lp)
                 row.setdefault("chk", []).append([lp.pid, bool(ok), why_c, round(msc, 2), info.get("s"),
-                                                  info.get("cons"), info.get("dev"), info.get("col")])
+                                                  info.get("cons"), info.get("dev"), info.get("col")] +
+                                                 ([info.get("pred"), info.get("obs")] if "pred" in info else []))
                 self.st["check_" + why_c] += 1
                 self.ep_c["check_" + why_c] += 1
                 if ok:
@@ -1055,6 +1091,23 @@ class Map2Controller:
             cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=not self.cfg.replay,
                                                pos_over=self.ctrl_pos)
             alive = [i for i in cons if lp.outs[i].kc >= r and r < len(lp.outs[i].cmds)]
+            if not cons and bad_h:
+                # her position left the path while the Clappers are consistent: the plan re-anchored to her state
+                # now (the exact re-simulation, the collisions; the path within tol_reanchor) or dropped
+                tc = time.perf_counter()
+                try:
+                    ok, why_r, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs, self.cfg,
+                                                   idx=self.ctrl_idx, tol=self.cfg.tol_reanchor)
+                except Exception as e:  # noqa: BLE001
+                    ok, why_r, info = False, "error", {"error": repr(e)[:200]}
+                self.ms_check.append((time.perf_counter() - tc) * 1e3)
+                row.setdefault("chk", []).append([lp.pid, bool(ok), "re:" + why_r, round((time.perf_counter() - tc) * 1e3, 2),
+                                                  info.get("s"), info.get("cons"), info.get("dev"), info.get("col")])
+                self.st["reanchor_" + why_r] += 1
+                if ok:
+                    self.ctrl_idx, self.ctrl_pos = list(info["alive"]), dict(info["pos_over"])
+                    cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=True,
+                                                       pos_over=self.ctrl_pos)
             if not cons:
                 self._drop("hero" if bad_h and not bad_c else "clappers")
                 why = "fail:" + ("hero" if bad_h and not bad_c else "clappers")
@@ -1165,6 +1218,12 @@ class Map2Controller:
             bridge = [int(x) for x in np.asarray(res_cmd, np.int64)[1:1 + self.cfg.fb_lead]]
         elif own not in ("sup", "m2", "plan", "cog"):
             bridge = [int(mask)] * self.cfg.sc_lead     # a script: its keys ahead are unknown - the held key (a guess)
+        self._bridge_audit(f, int(mask))
+        if bridge:
+            kind = own if own in ("plan", "m2") else "script"
+            self.bridges.append([kind, int(f) + 3, list(bridge), 0, True])
+            if len(self.bridges) > 80:
+                self.bridges = self.bridges[-80:]
         busy = self._busy(fo, raw)
         if self.in_qs:
             snap = {"seq": self.seq, "ep": self.ep, "f": int(f), "fo": int(fo), "S": S0.copy(),
@@ -1198,6 +1257,27 @@ class Map2Controller:
             self.rows.append(row)
         self.row = {}
 
+    def _bridge_audit(self, f: int, mask: int) -> None:
+        """The keys the bridges expected against the key sent for frame f + 2: per bridge the frames followed before
+        the first difference (or all of them)."""
+        k = int(f) + 2
+        keep = []
+        for b in self.bridges:
+            kind, k0, keys, n, alive = b
+            if not alive:
+                continue
+            if k0 <= k < k0 + len(keys):
+                if int(keys[k - k0]) == mask:
+                    b[3] += 1
+                    if b[3] == len(keys):
+                        self.bridge_hist[kind][len(keys)] += 1
+                        continue
+                else:
+                    self.bridge_hist[kind][n] += 1
+                    continue
+            keep.append(b)
+        self.bridges = keep
+
     def yield_sup(self, f: int, fo: int) -> None:
         """A pause tick of the supervisor: map2 drops its plan."""
         self._drop("sup")
@@ -1217,15 +1297,18 @@ class Map2Controller:
         self.rows = []
 
     def stats(self) -> dict:
+        """The run's counters (counts: since the start; episode: this episode's), the bot-side times, the search
+        latency, the workers, the first errors (the per-tick rows are flushed to the log)."""
         self.flush()
         st = dict(self.st)
-        return {"cfg": self.cfg.as_dict(), "counts": st, "episodes": self.ep_stats + [{"ep": self.ep, **dict(self.ep_c)}],
+        return {"cfg": self.cfg.as_dict(), "counts": st, "episode": {"ep": self.ep, **dict(self.ep_c)},
                 "share_m2": round(st.get("ticks_m2", 0) / max(1, st.get("ticks", 0)), 4),
                 "pre_ms_p50": _pct(self.ms_pre, 50), "pre_ms_p99": _pct(self.ms_pre, 99),
                 "post_ms_p50": _pct(self.ms_post, 50), "post_ms_p99": _pct(self.ms_post, 99),
                 "check_ms_p50": _pct(self.ms_check, 50), "check_ms_p99": _pct(self.ms_check, 99),
                 "search_ms_p50": _pct(self.lat, 50), "search_ms_p90": _pct(self.lat, 90),
                 "commit_age_p50": _pct(self.age_commit, 50), "commit_age_p90": _pct(self.age_commit, 90),
+                "bridge_followed": {k: dict(sorted(v.items())) for k, v in self.bridge_hist.items()},
                 "workers": {str(k): v for k, v in self.ready.items()}, "errors": self.errors[:20]}
 
 
