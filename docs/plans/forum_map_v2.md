@@ -404,6 +404,19 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   reference no-dash tables. A dash-version table = its no-dash twin's content (its Clawline / umbrella endpoints
   pointing at dash versions) + one reference to the bundle. The bulk of the storage is then the bundle, not the
   tables.
+- MEET IN THE MIDDLE, THE DASH BUNDLE AS THE BRIDGE (the person, 2026-10-23): between two refills a path has at
+  most one air dash, so every path is no-dash -> (at most one dash) -> no-dash. Push the small no-dash tables FORWARD
+  from her state and BACKWARD from the goal (the next strike window's press region: the down slash on a body, the
+  hooked Clawline's reach; or a safe endpoint), and join them with the dash bundle where the gap matches: a dash
+  variant d (displacement dx_d - an interval, left / right are free in the sprint -, dy_d, duration T_d, end state
+  e_d) bridges at t1 if F(t1) shifted by d meets B_e_d(t1 + T_d). Without a dash: F(t) meets B(t) directly. The dash
+  ignores her vy at the press, so the forward side only needs WHERE and WHEN an air-dash press is allowed (airborne,
+  the dash unused, no lock such as the umbrella's antic) - any vy. Conditions: the dash's own tube (~17 f) is cut by
+  the danger too (the start x's whose tube stays clear = the intersection of each dash frame's danger-free set shifted
+  back to the start); the backward tables are keyed by the dash's end states (the A1 lattice; the jump-held variants
+  on their own chain); one bridge per segment between refills (a pogo, a hooked Clawline or a landing restores the
+  dash, so the next segment may bridge again). Cost: interval shifts and intersections over ~120 start frames x the
+  bundle's variants grouped by (dy, T, end state), instead of a forward set multiplied by every dash (M1's 23,831).
 Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
