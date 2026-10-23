@@ -163,7 +163,7 @@ def report(out: Path) -> dict:
                     cur_p = {"f": x["f"], "pid": c["pid"], "age": x.get("age"), "origin": c["origin"],
                              "value": c["value"], "hits": c["hits"], "outs": c["outs"], "alive": c["alive"],
                              "search_ms": c["ms"], "check": None if ck is None else ck[2:8], "ticks": 0,
-                             "end": None, "contacts": len(c.get("cp") or ())}
+                             "end": None, "contacts": len(c.get("cp") or ()), "bridge": c.get("bridge")}
                     plans.append(cur_p)
                 if cur_p is not None:
                     if x.get("m2") and x.get("pid") == cur_p["pid"]:
@@ -175,6 +175,7 @@ def report(out: Path) -> dict:
                       "busy": dict(busy.most_common()), "checks": dict(chk.most_common()),
                       "worker_status": dict(wst.most_common()), "worker_ms": _pct(wms),
                       "commits": len(commits), "commit_origin": dict(Counter(c["origin"] for c in commits)),
+                      "commits_bridge_ok": sum(1 for c in commits if c.get("bridge")),
                       "commit_hits": round(float(np.mean([c["hits"] for c in commits])), 3) if commits else None,
                       "commit_value": round(float(np.mean([c["value"] for c in commits])), 3) if commits else None,
                       "control_runs": _pct(runs, (50, 90, 100)), "n_runs": len(runs),

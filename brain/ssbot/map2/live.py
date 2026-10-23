@@ -113,6 +113,8 @@ class LiveCfg:
     warm_rec: int = 6              # recorded situations searched in a worker's warm-up (the compiled paths)
     replay: bool = False           # an offline replay: her position is the recording's, not her keys' result - the
     #                                hero tolerances are logged, not enforced
+    replay_strict: bool = False    # ... and a received plan is committed only when the keys sent since its anchor are
+    #                                its prefix (in flight + bridge): the live path check's proxy in a replay
     log: bool = True
 
     @classmethod
@@ -751,7 +753,8 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted) ->
                     value=float(e.value), hits=float(e.hits), p_safe=float(e.p_safe), origin=e.plan.origin,
                     note=e.plan.note, ms=round(ms_, 1), cap=cap, ctrl_seen=base["ctrl_seen"],
                     had_prev=prev is not None, n_cand=res.n_cand, timed_out=bool(res.timed_out),
-                    steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time())
+                    steps=log.get("steps"), outcomes=log.get("outcomes"), t_sent=time.time(),
+                    cmds_pre=np.asarray(snap["cmds"], np.int64)[:len(pre.masks)].copy())
 
 
 WARM_SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")   # the acceptance set (M3): the warm-up's situations
@@ -1034,6 +1037,7 @@ class Map2Controller:
         self.ctrl_pos: dict = {}
         self.ctrl_since = None
         self.pending: list = []
+        self.sent_hist: dict = {}           # frame -> the command sent for it (this controller's view of the keys)
         self.trig: list = []
         self.took = False
         self.last_freeze = -10 ** 9
@@ -1145,9 +1149,27 @@ class Map2Controller:
             cands = sorted(cands, key=lambda x: (-x.value, -x.t_a))[:self.cfg.commits_per_tick]
             for lp in cands:
                 tc = time.perf_counter()
+                # the keys sent since the plan's anchor against its prefix (the keys in flight then and the bridge):
+                # followed -> the re-simulation reproduces the planned path; not -> it decides (live) / the strict
+                # replay's proxy rejects it
+                pre = getattr(lp, "cmds_pre", None)
+                o_b = max(lp.outs, key=lambda o_: o_.p)
+
+                def expect(k, _pre=pre, _o=o_b, _t=lp.t_a):
+                    r_ = k - _t
+                    if r_ <= len(_pre):
+                        return int(_pre[r_ - 1])
+                    return int(_o.cmds[r_]) if r_ < len(_o.cmds) else -1
+                bridge_ok = pre is not None and all(self.sent_hist.get(k) == expect(k)
+                                                    for k in range(lp.t_a + 1, f + 2))
+                self.st["bridge_" + ("ok" if bridge_ok else "broken")] += 1
                 try:
-                    ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s,
-                                                   her, obs, self.cfg)
+                    if self.cfg.replay and self.cfg.replay_strict and not bridge_ok:
+                        ok, why_c, info = False, "bridge", {"s": int(fo - lp.t_a)}
+                    else:
+                        ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s,
+                                                       her, obs, self.cfg)
+                    info["bridge"] = bool(bridge_ok)
                 except Exception as e:  # noqa: BLE001 - a bad plan is dropped, the bot goes on
                     ok, why_c, info = False, "error", {"error": repr(e)[:200]}
                     if len(self.errors) < 50:
@@ -1175,6 +1197,7 @@ class Map2Controller:
                     row["commit"] = {"pid": lp.pid, "t_a": lp.t_a, "value": round(lp.value, 3), "hits": round(lp.hits, 3),
                                      "origin": lp.origin, "note": lp.note, "ms": lp.ms, "n_pre": lp.n_pre,
                                      "outs": len(lp.outs), "alive": len(info["alive"]), "steps": lp.steps,
+                                     "bridge": bool(info.get("bridge")),
                                      "outcomes": lp.outcomes,
                                      "cp": sorted({(k, i, kd) for o in lp.outs for (k, i, kd) in o.contacts})}
                     self.trig.append("commit")
@@ -1327,6 +1350,10 @@ class Map2Controller:
         elif own not in ("sup", "m2", "plan", "cog"):
             bridge = [int(mask)] * self.cfg.sc_lead     # a script: its keys ahead are unknown - the held key (a guess)
         self._bridge_audit(f, int(mask))
+        self.sent_hist[int(f) + 2] = int(mask)
+        if len(self.sent_hist) > 240:
+            for k in [k for k in self.sent_hist if k < f - 180]:
+                del self.sent_hist[k]
         if bridge:
             kind = own if own in ("plan", "m2") else "script"
             self.bridges.append([kind, int(f) + 3, list(bridge), 0, True])
