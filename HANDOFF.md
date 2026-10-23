@@ -12082,3 +12082,189 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
    the hooked Clapper's contact damage back at control + 0.2 s (M0): a forced trial before live use.
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
+
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95)
+
+The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
+the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
+
+### M4a - live probes (instances 0 / 1, w7): the air dash and its cancels, the dash with jump held, the hooked body's contact after control, the jump in the pogo bounce, the kin_jit leftovers; the models fixed where they were off
+
+The task: M3 open item 6 and M0 open items 2 - 3 - measure before any plan runs live, compare with the M1 engine
+(ssbot.map2.envelope / env_jit), the strike module and HERO2's kinematics, fix the models. Probe
+`brain/ssbot/probes/m4_probe.py` (M0's harness), analysis `brain/ssbot/tools/m4_calib.py`; data and the report
+`C:\ssbot\data\m2_play\map2\m4` (`probes_report.txt` every number, `rows_b1.pkl` / `rows_b2.pkl` the trial rows,
+`calib_b1.json` / `calib_b2.json`, `kin_*.json` the model checks, `m1chk\` M1's containment re-run, `fsm\` the
+hornet_sprint FSM dump, `scripts\`), recordings `C:\ssbot\data\runs\m2\map2_m4_{smoke,b1,b2}`. Blocks: smoke (12 + 9),
+b1 (220 + 110), b2 (200 + 110); 420 hero-only trials, 220 Clapper trials. P = the first frame whose latched act.mask
+holds the key; AS = the Air Sprint L / R entry frame.
+
+#### Results
+
+1. **The air dash** (245 airborne presses): dashing from P, two 28 u/s steps (vy reset to 0 each step, then gravity
+   1 - or 0.1 with the jump held - acts in the step), the Air Sprint from P + 3 / 4 for 14 frames, control at P + 17 /
+   18 (no cancel); dx P + 10 4.02 - 4.42 u, P + 15 5.17 - 5.83 u. kin_jit had the shape exactly (22 / 22 taps within
+   0.01 u). **The cancels were off:**
+   - **attack** (86): the Attack Cancel and the swing at **max(AS + 4, press + 1)** (AS + 3 after a 2-step entry frame:
+     the gate is time - the 0.1 s Attack Cooldown less the FixedUpdate entry's 0.02 s), the press read through
+     InputHandler's **0.1 s attack queue** (a press at f is read at f + 1 .. f + 7: kept from up to 3 frames before
+     AS, lost from 4 frames before - 2 / 2); after it the sprint's x velocity stays as an **extra air move velocity**
+     (Retain Extra Velocity: x0.8 per step, added only while no move key is held, gone at a turn / landing / regain;
+     live 18.10 -> 8.25 with the key -> 11.58, 9.27, 7.41 without). The model cancelled on the press frame, swung a
+     frame later from the attack queue, had no extra velocity.
+   - **jump** (33): Queue Sprint Jump? on the press frame - the umbrella at once when it can open (Set Air Jump),
+     else (near the floor) the loop and a regain the next frame; a press on the dash's last frame acts at AS (the
+     state's OnEnter in FixedUpdate reads the frame before), two frames before: nothing (6 / 6).
+   - **the Clawline** (51): at once from any air-sprint frame (29 / 29); in the dash's steps it waits for the dash's end
+     while held. **The dash again**: no dash (used), the sprint restarted (the model had it).
+   - **Restore**: the hooked Clawline restores the air dash (27 / 27 at once at control); **the unhooked one does
+     not** (can.dash false at control 23 / 24 after an air dash, no air dash 19 / 24; 14 / 16 at once without one).
+2. **The dash with jump held**: in the air the dash's steps at gravity 0.1 -> ~0.3 u higher by the sprint's end, as M1
+   said and kin_jit models (0.000 - 0.034 u). **On the ground the jump sets the dash cooldown to 0.05 s** (HeroJump): a
+   dash pressed in the jump's first 3 frames waits / is lost, and a ground dash's 0.425 s cooldown ends at a jump. A
+   jump in a ground dash held into the sprint (or in the ground sprint) is the sprint FSM's **shuttlecock jump**
+   (6-frame antic at the sprint's speed, then vx 18 u/s fixed while rising) and an attack in the ground sprint the
+   **Wanderer's dash attack** - neither in the model (1.5 - 8 u off).
+3. **The hooked Clapper's body** (105 hooked, 47 invincible + 58 not): the Harpoon FSM's Idle at control + 13 (96) /
+   + 12 (6); Idle's ResetRecordedDamageHero turns the body's DamageHero back on - with her HeroBox inside the body
+   across the Idle the first contact attempt (invincible: damage_blocked) and **the real damage at Idle + 1** (34 / 38;
+   Idle + 2: 2; none: 2): the body hurts from control + 13 at the earliest, + 14 usually, never before. M0's 'control +
+   0.2 s' is right to a frame; the M3 search treated the body as hurting all the time.
+4. **A jump in the pogo bounce** (45): pressed P + 3 .. 6 (contact + 0 .. 3) lost (14 / 14, the slash's lock, not
+   queued); from P + 7 (the slash's Bounce event) the umbrella in the press frame (31 / 31). HERO2 (M0's restart)
+   predicts it: 43 / 45 within 0.1 u to the landing.
+5. **kin_jit leftovers**: a ground dash re-pressed around its end sprints only with the key held on its last dashing
+   frame (12 / 12 vs 27 / 27); the umbrella's antic 5 vs 6 frames is the frame time (5 frames once their time reaches
+   5 / 60 s: 313 / 326 of M0's opens; the model's fit 306 / 326) - left to the timing lanes.
+
+#### Code (101800e, cde450f, e6a4513; the probe 3211ac0, 91c7964, d14daf1, 71ab4e3; the runner 00e6c68, 6e7adcd)
+
+- **HERO2 bits (kin_jit; SSBOT_FORUM_HERO2, off by default)**: `H2_JUMP_DCD`, `H2_SPR_ATK` (params `h2_spr_atk_t`
+  0.08, `h2_xv_decay` 10; kin rows **ABUF** (the attack queue) and **XVX** (the extra air velocity): `kinematics.K`
+  81 -> 83, `kinematics.pad_state` pads saved states), `H2_SPR_JUMP`, `H2_DASH_END`. Off: every rule gated, the new
+  rows 0 (the estimator writes ABUF only with the bit).
+- **The envelope** (`env_jit`): `xvx_extra` (the lane on the extra's side moves max(run, |xv|) per step; its velocity
+  carries the faster member's into a move entered after it - the umbrella's inertia, the Clawline's antic); the attack
+  offered in the air dash (its queue); no jump press in the ground dash / ground sprint and no attack in the ground
+  sprint (the reference rollouts drop them too); `claw_control` keeps the air dash used; the key slot K_ABUF, the jump
+  buffer kept in the dash / sprint; the key slot K_XVD (cde450f: the extra velocity's side while it is faster than
+  the run - a left and a right air sprint cancelled on the same frame merged and shared the larger extra on both
+  sides; the witness test's interval end was 0.21 u over); `ref_rollout` strips exactly what `gen_cands` does not
+  offer (e6a4513: it had stripped a skid's jump too - 4 / 1600 witnesses 0.02 - 0.35 u off vertically).
+- **The search** (`strike.HOOK_BODY_OFF`, `strike.hook_body_off`; `search.bdamage` / `branch_danger` with a skip):
+  the hooked body harmless P + 17 .. control + 12 in the outcome check, `tick_check`, `quick` and the passes after a
+  hook (`Node.hook_iid`); `strike.control_state(..., airdashed)` - the unhooked control keeps the air dash used.
+- `m0_calib.kin_check(..., trials_name, exps)`; `m3_accept` / `m1_envelope` pad saved states; tests
+  `tests/test_m4_hero2.py` (12), `tests/test_m4_probe.py` (3).
+
+#### Checks
+
+| model check (hero-only, within 0.1 u throughout) | M0's HERO2 | HERO2 with M4a |
+|---|---|---|
+| air dash + cancels (adash) | 149 / 251 | **243 / 251** |
+| jump then dash (jd) | 10 / 16 | **16 / 16** |
+| dash then jump (dj) | 13 / 19 | **16 / 19** |
+| dash, jump, dash again (dja) | 4 / 52 | **27 / 52** (25: the shuttlecock jump) |
+| ground dash re-pressed at its end | 30 / 39 | **39 / 39** |
+| air dash + Clawline (to its press) | 43 / 43 | 43 / 43 |
+| **all M4a** | **249 / 420** | **384 / 420** |
+| M0's 484 trials | 466 | **469** (no new miss) |
+
+M1's containment (`m4\m1chk`, starts.npz, HERO2 with M4a): exact 12 f 120 x 300: **0 escapes** (8 small ones,
+0.04 - 0.09 u, before the lane velocity / the dash's attack were added; clusters at T p50 102,271 at 101800e, 107,743
+with K_XVD, M1 74,464); <= 2 events 30 f on the floor 400 x 300: **0** (again 0 at e6a4513); the same + 4 random moving
+danger boxes 300 x 300: **0**, 0 leaks. The witness check (M1's 1,600 targets, <= 2 events 30 f, e6a4513): 1,600 / 1,600
+found, 1,565 within 0.1 u (1,562 before e6a4513), 0 vertical misses (4 before), the interval ends <= 0.17 u.
+
+The M3 acceptance re-run with the changed models (`m3_accept run`, cap 60 s, depth 3, primitives only; first with
+the models of 101800e - tag `_m4a` -, then at the final e6a4513 - tag `_m4a2`, 5 jobs; data `map2\m3\run_none_m4a.json`
+/ `run_none_m4a2.json`, `report_m4a.txt` / `report_m4a2.txt`; comparisons `map2\m4\accept_none_cmp.txt`,
+`accept_none2_cmp.txt`, `accept_none_m4a_vs_m4a2.txt`), same / alt / not against M3's v4:
+
+| move | n | M3 v4 | M4a (101800e) | M4a final (e6a4513) |
+|---|---|---|---|---|
+| P1-idle | 25 | 15 / 5 / 5 | 13 / 9 / 3 | 14 / 8 / 3 |
+| P1-idle-slam | 19 | 6 / 8 / 5 | 7 / 6 / 6 | 7 / 6 / 6 |
+| P1-idle-evade | 19 | 0 / 11 / 8 | 0 / 12 / 7 | 0 / 11 / 8 |
+| P1-far-jump | 14 | 6 / 1 / 7 | 6 / 0 / 8 | 6 / 0 / 8 |
+| P1-far-jcast | 13 | 6 / 0 / 7 | 2 / 4 / 7 | 0 / 6 / 7 |
+| P1-slam | 14 | 1 / 11 / 2 | **9 / 2 / 3** | **9 / 2 / 3** |
+| P1-cast | 7 | 1 / 6 / 0 | 3 / 4 / 0 | 3 / 4 / 0 |
+| P1-jump | 11 | 3 / 7 / 1 | 4 / 6 / 1 | 4 / 6 / 1 |
+| P1-locked | 2 | 2 / 0 / 0 | 2 / 0 / 0 | 2 / 0 / 0 |
+| P2 | 16 | 13 / 3 / 0 | 12 / 3 / 1 | 12 / 3 / 1 |
+| P3-face | 14 | 0 / 2 / 12 | 0 / 0 / 14 | 0 / 0 / 14 |
+| P3-cross | 2 | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 1 / 1 |
+| P4 | 16 | 9 / 5 / 2 | 9 / 4 / 3 | 10 / 3 / 3 |
+| P5 | 17 | 12 / 4 / 1 | 12 / 3 / 2 | 12 / 3 / 2 |
+| CLAWSTRIKE | 14 | 2 / 10 / 2 | **11 / 1 / 2** | **11 / 1 / 2** |
+| SLAMSTRIKE | 42 | 17 / 24 / 1 | 7 / 33 / 2 | 7 / 33 / 2 |
+| JUMPTRAP | 15 | 4 / 11 / 0 | 2 / 13 / 0 | 2 / 13 / 0 |
+| LOWHOP | 15 | 15 / 0 / 0 | 14 / 1 / 0 | 14 / 1 / 0 |
+| all | 275 | 112 / 109 / 54 | 113 / 102 / 60 | **113 / 101 / 61** |
+
+What moved: with the hooked body harmless to control + 12 the hook + Slam 0 strike is now the chosen plan in the forced
+slam setups (P1-slam same 1 -> 9, CLAWSTRIKE 2 -> 11) and in 25 of the 42 slam-strike situations (v4: 4) - SLAMSTRIKE
+same 17 -> 7 (the person's 30: 12 / 18 / 0 -> 3 / 26 / 1), found 41 -> 40; plans that leaned on the old (too early)
+air-sprint attack cancel are gone (e.g. the w7 float case 151548 @835: v4's P2 plan pressed the down slash in the air
+sprint 3 frames after its start - the model swung at once, live it would wait to AS + 4 - no P2 candidate now). Final
+against v4: 31 per-move results better, 34 worse, the rest the same. Between the two M4a runs 5 situations moved (2
+better, 3 worse): the envelope's K_XVD / reference fixes changed tie-breaks - e.g. the forced 'idle air dx9.0 bb4.2'
+chose the same hits (2.281) with value 2.148 -> 2.153 and lost the far-jcast reaction branch from its plan; 'idle g dx3.5
+s-1' kept its plan (P1-other + P4, value 2.763) at 59.7 s of the 60 s cap. Times (final): p50 / p90 / p99 28.0 / 79.1 /
+177.2 s (v4 19.2 / 76.3 / 115.7), capped 54 (43); per-tick check of the committed plan 7 / 28 / 67 ms (fails 2);
+contingent plans chosen 43. The passes themselves are not slower (`m1_envelope timing`, 100 starts: <= 1 event 60 f p50
+12.5 ms (M1 13.7), <= 2 events 30 f 47 ms (67)); the counts grew ~10 % (predict calls p50 375 -> 421, exit passes
+201 -> 226, p99 3,582 -> 5,098) and each check got slower (the kept plan's re-check p50 205 -> 336 ms, the per-tick
+check 5 -> 7 ms): the runs had 5 jobs (v4 6) on a shared machine (the full suite ran beside the first half of the final
+run) and the hooked-body skip is part of the danger cache's key - not separated yet.
+
+With the library (`run_full_m4a.json`, `accept_full_cmp.txt`; models of 101800e, not re-run at e6a4513): 107 / 114 / 54
+-> 111 / 105 / 59; SLAMSTRIKE 11 / 31 / 0 -> 5 / 37 / 0 (the hook + Slam 0 chosen in 28 of the 42); times 30.1 / 80.4 /
+166.1 s, capped 54 (42); 31 better, 30 worse.
+
+The runner: a first run's multiprocessing pool sat for 14 min on 5 situations with 231 results in memory (a worker's
+caches at 11.7 GB on a situation that takes 33 s alone): `m3_accept run` now writes every result as it comes
+(`--resume`), recycles workers every 8 situations and survives a lost one (00e6c68, 6e7adcd). In the final run a worker
+again grew to 11.9 GB on the last situation (40 min of CPU); stopped by hand, the pool re-submitted it and a fresh
+worker finished it in ~50 s - the per-process caches (envelope / prediction) grow without bound across situations.
+
+Identity: nothing in the bot imports ssbot.map2; with SSBOT_FORUM_HERO2 unset the frozen 101800e replays
+(`scripts\replay_ident_m0.ps1`, 4000 frames) are **byte-identical** to M0's reference (replay_ref, 83789a9) on w7
+192006 i0 e1 (2,073 ticks) / 084036 i1 e0 (1,778) and w13 144051 i1 e0 (1,541) / 102908 i0 e0 (1,659)
+(`map2\replay_m4a_101800e`); with SSBOT_FORUM_HERO2=1 all four ran, 0 tracebacks. The commits after 101800e touch
+only ssbot.map2 and ssbot.tools.m3_accept (offline). Tests: the full suite at e6a4513 2,121 passed, 8 failed - the 5
+known (HANDOFF M0 / M3) + the 3 in the untracked test_sg8_review.py (`map2\fullsuite_m4a_e6a4513.log`); at 6e7adcd a
+9th, the envelope's witness test (an interval end 0.21 u over), fixed by cde450f.
+
+#### Live blocks
+
+The instances were not running: launched 21:43 with the new `C:\ssbot\sandbox\launch_m4.ps1 -Rev <sha>`
+(ssbot.tools.launcher -n 2 --detach from a frozen checkout, WMI; `launch_sp8.ps1`'s checkout live_1v1_6e6b760 is
+gone). `m4_go.ps1` (display wake, `m4_boost.ps1`: High / P-cores / EcoQoS off) -> `sp4_block.ps1` (DEMO_SOON paused
+and restored, both instances frozen at time scale 1e-4 after) -> `m4_probe.ps1`; experiment lists ':'-separated and
+`-X0 / -X1` extras unquoted (a ',' list or quoted extras made the first two attempts exit at once). Frozen checkouts
+`C:\ssbot\live_1v1_{3211ac0, 91c7964, d14daf1, 71ab4e3, 101800e}`. No NOTE_FROM_LEAD, no human practice, weekly usage
+15 - 16 %; no game process stopped, no oracle deploy, only instances 0 / 1; the trading bot untouched. Both instances
+are left open and frozen.
+
+#### Open items
+
+1. Not in the model (the envelope does not offer them): the ground sprint's jump (the shuttlecock jump: Jump Antic ~6
+   frames at the sprint's speed, then vx 18 u/s while rising, jumped_steps -5, dash cooldown 0.1 s; HeroController
+   OnShuttleCockJump / ShuttleCockCancel) and attack (the Wanderer dash attack: the Sprint FSM's Wanderer states).
+2. The envelope does not offer the Clawline from the air sprint (live: at once, 29 / 29) nor in the dash's steps
+   (queued to its end while held); only normal control and the float.
+3. The search's unhooked Clawline control still starts at rest: HarpoonDashEnd's residual drift (M0: +1.62 u with no
+   key; env_jit has it) is not in `search.simulate`.
+4. M1's canonical tables (`map2\m1\tables_*.npz`) were built with M0's HERO2: rebuild before anything uses them
+   (nothing does now).
+5. The exact (unlimited) passes grew with the attack option in the air dash and the ABUF / K_XVD keys (12 f: clusters
+   p50 107,743 vs 74,464); the event-limited ones the search uses did not.
+6. The umbrella's antic 5 / 6 frames: left to the timing lanes (the 5 / 60 s rule would fix 7 of the 20 misses).
+7. The acceptance runs are slower than v4 (p50 28 s vs 19 s, 54 capped vs 43; ~10 % more predict calls / exit passes,
+   each check ~1.5x slower, on a shared machine) - not separated; M4b's speed work starts from `report_m4a2.txt`.
+8. `m3_accept` workers' caches grow without bound across situations (11.7 - 11.9 GB on one situation that a fresh
+   worker does in ~50 s); recycling every 8 situations is not enough for the last ones - bound the caches (or recycle
+   per situation) before the search runs live for long.
+9. Only the acceptance ran the new search rules; nothing of M4a has run live in a fight yet (M4c).
