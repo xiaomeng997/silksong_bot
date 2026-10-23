@@ -162,6 +162,10 @@ def test_commit_check_rejects_a_plan_whose_possible_view_ended(views):
                                  _obs(early, 44), cfg)
     assert not ok and why == "ended"
     assert lv.possible(lp, [0, 1], 34, _obs(late, 34), cfg) == [1]           # early contradicted (slam vs Idle)
+    # finding safety 6: the early view hands the keys back 5 frames before its collision (< dev_gap 6): not committed
+    ok, why, info = lv.commit_check(W, lp, 10, np.zeros(km.K), np.array([R], np.int64), IDLE_H, 0, HER,
+                                    _obs(early, 10), cfg)
+    assert not ok and why == "dev gap" and info["col"] - info["kc"] == 5
 
 
 def _variant_outs():

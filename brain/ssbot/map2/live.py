@@ -147,6 +147,10 @@ class LiveCfg:
     #                                for the frame before (no press nobody planned); the bridge stops there
     unsafe_drop: bool = True       # a newer search that evaluated the plan in control (kept plan) unsafe: dropped, or
     #                                cut after its bridge when the search's noop (the bridge, then stop) was safe
+    dev_gap: int = 6               # a 'dev' outcome (its committed part ends at a deviation: a collision follows) must
+    #                                leave the fallback this many frames from that end to the collision, else the plan
+    #                                is not committed ('dev gap'; M3 accepts 0 - the commit check caught only a collision
+    #                                AT the deviation frame); 0: M4c
     dt_lo: float = 0.9             # a STATE frame with dt x 60 outside dt_lo .. dt_hi (a hit-stop freeze, its slow-time
     dt_hi: float = 1.25            # ramp, a long frame) counts as a freeze: the plan in control is dropped
     err_max: int = 20              # errors on the bot's side in one episode: map2 off for the rest of it
@@ -727,6 +731,14 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
         alive = [i for i in cons if lp.outs[i].kc >= r0]
     if not alive:
         return False, "short", info
+    if cfg.dev_gap > 0:
+        near = [i for i in alive if lp.outs[i].kcol is not None and lp.outs[i].kcol - lp.outs[i].kc < cfg.dev_gap]
+        if near:
+            # (finding safety 6) a possible truth hands the keys back just before a collision: the fallback would have
+            # fewer than dev_gap frames to take the escape the search's exit check found
+            o_ = lp.outs[near[0]]
+            info.update(out=near[0], kc=int(o_.kc), col=int(o_.kcol))
+            return False, "dev gap", info
     face0 = int(S0[km.FACE]) if S0[km.FACE] != 0 else 1
     alpha_c = int(round(float(S0[km.ALPHA]) * 6.0)) % 6
     memo: dict = {}
