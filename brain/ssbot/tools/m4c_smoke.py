@@ -78,6 +78,9 @@ def cmd_run(a) -> int:
                 env.update({"NUMBA_NUM_THREADS": "4", "PYTHONIOENCODING": "utf-8"})
                 if a.set and arm == "map2":
                     env["SSBOT_FORUM_MAP2_SET"] = a.set
+                for kv in filter(None, (x.strip() for x in (a.env or "").split(","))):
+                    k_, _, v_ = kv.partition("=")
+                    env[k_.strip()] = v_.strip()             # M4d2: extra environment (e.g. a script switched off)
                 cmd = [str(uv), "run", "python", "-m", "ssbot.tools.forum_policy_replay", "--run",
                        f"C:/ssbot/data/runs/m2/{run}", "--instance", str(inst), "--episode", str(ep), "--frames",
                        str(a.frames), "--wave-frames", "1", "--crest", "Wanderer", "--clash", "main", "--realtime",
@@ -114,6 +117,69 @@ def cmd_run(a) -> int:
 def _pct(v, qs=(50, 90, 99)):
     v = [x for x in v if x is not None]
     return [round(float(np.percentile(v, q)), 2) for q in qs] if v else None
+
+
+MOVE_STARTS = ("Slam Antic", "Spell Antic", "Jump Antic", "Cast Slam Antic", "Evade Scuttle")
+
+
+def engaged_share(rows: list) -> dict:
+    """M4d2: map2's share of the ENGAGED ticks - a Clapper observed (the log's nc; M4d2 logs) outside the battle's
+    intro (the Clappers' and her Roar Lock) and outside a supervisor pause - and of those with her accepting input
+    (busy != 'no input')."""
+    eng = [x for x in rows if (x.get("nc") or 0) > 0 and x.get("busy") != "intro" and x.get("why") != "pause" and
+           x.get("clip") != "Roar Lock"]
+    inp = [x for x in eng if x.get("busy") != "no input"]
+    m = sum(1 for x in eng if x.get("m2"))
+    mi = sum(1 for x in inp if x.get("m2"))
+    return {"engaged": len(eng), "engaged_m2": m, "share_engaged": round(m / max(1, len(eng)), 4),
+            "engaged_input": len(inp), "share_engaged_input": round(mi / max(1, len(inp)), 4)}
+
+
+def reveal_latency(rows: list, horizon: int = 60) -> dict:
+    """M4d2 (the lead's 07:50 note): per Clapper MOVE START seen (a row's rev entry with a move-start state at its
+    observation frame fo_r), the first COMMITTED map2 plan whose snapshot was taken at / after it (commit.t_a >= fo_r):
+    'lat' = the commit tick's f + 2 (its first key) - fo_r, 'root' = its first own key (t_a + n_pre + 1) - fo_r;
+    within horizon frames or none. Per move: starts, with a plan, p50 / p90 of both."""
+    commits = [(x["f"], x["commit"]["t_a"], x["commit"].get("n_pre") or 0) for x in rows if x.get("commit")]
+    per: dict = {}
+    for x in rows:
+        for (iid, st) in x.get("rev") or ():
+            if st not in MOVE_STARTS:
+                continue
+            fo_r = x["fo"]
+            d = per.setdefault(st, {"n": 0, "lat": [], "root": []})
+            d["n"] += 1
+            c = next(((f, ta, npre) for (f, ta, npre) in commits if ta >= fo_r and f + 2 - fo_r <= horizon), None)
+            if c is not None:
+                d["lat"].append(c[0] + 2 - fo_r)
+                d["root"].append(c[1] + c[2] + 1 - fo_r)
+    out = {}
+    alll, allr, n = [], [], 0
+    for st, d in per.items():
+        n += d["n"]
+        alll += d["lat"]
+        allr += d["root"]
+        out[st] = [d["n"], len(d["lat"]), _pct(d["lat"], (50, 90)), _pct(d["root"], (50, 90))]
+    out["all"] = [n, len(alll), _pct(alll, (50, 90)), _pct(allr, (50, 90))]
+    return out
+
+
+def claw_presses(rows: list) -> dict:
+    """M4d2 (the lead's 07:55 note): the Clawline presses sent (a rising Clawline key; the log's claw) by owner, and
+    those into a slam's FIRST window - a Clapper in Slam Antic at frame 5 - 11 of it at the press (its frame in state
+    at the observation + the frames to the press, f + 2 - fo)."""
+    c: Counter = Counter()
+    for x in rows:
+        cl = x.get("claw")
+        if not cl:
+            continue
+        own, obs = cl
+        kind = "m2" if own == "m2" else str(own)
+        c[kind] += 1
+        d = x["f"] + 2 - x["fo"]
+        if any(st == "Slam Antic" and j is not None and 5 <= j + d <= 11 for (_, st, j, _, _) in obs):
+            c[kind + ":slam1"] += 1
+    return dict(c)
 
 
 def report(out: Path) -> dict:
@@ -171,6 +237,8 @@ def report(out: Path) -> dict:
                     elif cur_p["end"] is None and x["f"] > cur_p["f"]:
                         cur_p["end"] = x.get("why")
                         cur_p = None
+            r.update(engaged_share(rows))
+            r.update({"reveal": reveal_latency(rows), "claw": claw_presses(rows)})
             r.update({"rows": len(rows), "own": dict(own.most_common()), "why": dict(why.most_common()),
                       "busy": dict(busy.most_common()), "checks": dict(chk.most_common()),
                       "worker_status": dict(wst.most_common()), "worker_ms": _pct(wms),
@@ -205,6 +273,7 @@ def main(argv=None) -> int:
     r.add_argument("--set", default="")
     r.add_argument("--co", default="")
     r.add_argument("--only", default="")
+    r.add_argument("--env", default="", help="extra environment K=V,... for every arm (M4d2)")
     p = sub.add_parser("report")
     p.add_argument("--out", required=True)
     a = ap.parse_args(argv)
