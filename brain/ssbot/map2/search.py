@@ -449,7 +449,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                 # frame's Update; the lock of a previous Clawline): else the plan cannot be played from P
                 okc = k0 >= lock_until
                 if okc and nn > 0:
-                    kc_ = press.trace(W, rolls[-1][1], rolls[-1][2], rolls[-1][3])
+                    # (the segment's trace with its final events when its slashes made one)
+                    kc_ = kt if kt is not None else press.trace(W, rolls[-1][1], rolls[-1][2], rolls[-1][3])
                     okc = press.claw_state_ok(kc_, nn, W.params.vector())
                 elif okc:
                     okc = not (S[km.GROUND] > 0)
