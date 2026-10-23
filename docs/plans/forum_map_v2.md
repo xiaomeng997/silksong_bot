@@ -392,6 +392,18 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
 - The air dash ends exactly on the lattice, no snapping: M4a measured that the dash zeroes vy every step and gravity
   then acts in the step, so vy in the air sprint runs -1.2, -2.4, ... per step like the fall from rest. To check: the
   air sprint's eased fall clamp (-10 -> -30 u/s over 1 s) may bite at the end of a long sprint.
+- THE AIR DASH GOES ONE WAY INSIDE THE TABLES (the person, 2026-10-23): it is used once per airborne stretch and
+  nothing inside the tables restores it (the unhooked Clawline and the umbrella keep the flag - M4a; only a landing,
+  a pogo hit or a hooked Clawline restore it, and those are use-time events). So every table needs its NO-DASH
+  version, and once the dash is used every later recursive element is a no-dash one. The no-dash tables are SMALL:
+  M1 counted 286 exact clusters in 16 f from rest without the air dash vs 23,831 with it; frame 0's actions there are
+  only the Clawline L / R, the umbrella (with its close timings) and nothing.
+- ONE SHARED DASH BUNDLE (follows from the above and M4a): the dash zeroes vy every step, so its whole family
+  (direction x hold length x cancel x cancel frame, ~1000 trajectories) is the SAME from every A1_n - it depends only
+  on the physics-step phase of the press frame and on the jump being held. Store it ONCE per phase; its endpoints
+  reference no-dash tables. A dash-version table = its no-dash twin's content (its Clawline / umbrella endpoints
+  pointing at dash versions) + one reference to the bundle. The bulk of the storage is then the bundle, not the
+  tables.
 Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
