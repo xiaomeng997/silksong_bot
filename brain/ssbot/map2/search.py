@@ -387,7 +387,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
             B_.append(np.stack([pos[1:, 0] - sk.HALF_W, bb, pos[1:, 0] + sk.HALF_W, bb + 2 * sk.HALF_H], axis=1))
             G_.append(np.zeros(m, bool)), F_.append(np.full(m, d)), M_.append(np.full(m, km.M_NORMAL))
             I_.append(np.zeros(m, bool)), C_.append(np.ones(m, bool))
-            S = sk.control_state(W.params, hk, float(S[km.ALPHA]))
+            S = sk.control_state(W.params, hk, float(S[km.ALPHA]), airdashed=float(S[km.AIRDASHED]))
             if hk.ok:
                 pre_ev = km.EV_POGO
             face = d
@@ -625,17 +625,19 @@ def grow_shape(x, m: float):
     return cm.Shape(x.kinds, x.iid, x.name, poly=g + p0, mv=x.mv)
 
 
-def bdamage(br, k: int, margins: bool) -> list:
-    """The branch's damage shapes at frame k grown by their margins (margin_of), cached on the branch."""
+def bdamage(br, k: int, margins: bool, skip: tuple = ()) -> list:
+    """The branch's damage shapes at frame k grown by their margins (margin_of), cached on the branch. skip: the
+    Clappers whose BODY does not hurt then (a hooked Clawline's window, strike.hook_body_off; M4a)."""
     c = getattr(br, "_dmg", None)
     if c is None:
         c = {}
         br._dmg = c
-    key = (k, margins)
+    key = (k, margins, skip)
     v = c.get(key)
     if v is None:
         fr = branch_frames(br)
-        v = [(x, st) for (x, st) in (fr[k] if 0 <= k < len(fr) else []) if x.kinds & cm.DAMAGE]
+        v = [(x, st) for (x, st) in (fr[k] if 0 <= k < len(fr) else []) if x.kinds & cm.DAMAGE
+             and not (skip and x.iid in skip and x.name == "body")]
         if margins:
             v = [grow_shape(x, MARGIN_SCALE[0] * margin_of(br, x, st, k, br.K)) for (x, st) in v]
         else:
@@ -696,20 +698,20 @@ def _poly_slabs(poly: np.ndarray, hw: float, hh: float, off: float, dy: float = 
     return out
 
 
-def branch_danger(br, k: int, margins: bool) -> np.ndarray:
+def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     """[n, 4] her box-centre configuration-space boxes of the branch's damage at frame k (a box grown by her
-    hurtbox; a polygon / circle as slabs), cached on the branch."""
+    hurtbox; a polygon / circle as slabs), cached on the branch. skip: as bdamage."""
     c = getattr(br, "_dz", None)
     if c is None:
         c = {}
         br._dz = c
-    key = (k, margins)
+    key = (k, margins, skip)
     v = c.get(key)
     if v is not None:
         return v
     hw, hh = HB[0], HB[1]
     out = []
-    for s in bdamage(br, k, margins):
+    for s in bdamage(br, k, margins, skip):
         if s.box is not None:
             x0, y0, x1, y1 = s.box
             out.append((x0 - hw, y0 - hh - HB_OFF, x1 + hw, y1 + hh - HB_OFF))
@@ -805,7 +807,8 @@ class Evaluator:
                     if tr.ifr[k]:
                         continue
                     hb = cm.hurtbox(*tr.pos[k])
-                    if hb[0] < WALL_L or hb[2] > WALL_R or shapes_hit(bdamage(b, k, cfg.margins), hb):
+                    if hb[0] < WALL_L or hb[2] > WALL_R or \
+                            shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                         bad = k if bad is None else min(bad, k)
                         break
         return bad is None, bad, (time.perf_counter() - t0) * 1e3
@@ -828,7 +831,8 @@ class Evaluator:
                     if tr.ifr[k]:
                         continue
                     hb = cm.hurtbox(*tr.pos[k])
-                    if hb[0] < WALL_L or hb[2] > WALL_R or shapes_hit(bdamage(b, k, cfg.margins), hb):
+                    if hb[0] < WALL_L or hb[2] > WALL_R or \
+                            shapes_hit(bdamage(b, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                         rv = _reveal(b, 1)
                         tv = getattr(b, "t_reveal", None)
                         rv = tv if rv is None else (rv if tv is None else min(rv, tv))
@@ -1027,7 +1031,7 @@ class Evaluator:
             if hb[0] < WALL_L or hb[2] > WALL_R:
                 k_col = k
                 break
-            if shapes_hit(bdamage(br, k, cfg.margins), hb):
+            if shapes_hit(bdamage(br, k, cfg.margins, sk.hook_body_off(tr.hooks, k)), hb):
                 k_col = k
                 break
         rv = _reveal(br, 1)
@@ -1143,14 +1147,18 @@ class Node:
     tag: tuple = ()                 # the contingency path: ((split plan key, P, reaction key), ...) of the reactions
     #                                 this node lives in (its pred holds only their branches)
     claw_ctrl: int | None = None    # after a Clawline: its control frame (the next Clawline's lock, control + 13)
+    hook_iid: int | None = None     # after a HOOKED Clawline: its target, whose body does not hurt to control + 12
     start: tuple | None = None      # inside a reaction (tag): where its children's conditional evaluation starts
     #                                 (the group's hits, choice sets before the last hit, last hit, a branch)
 
 
-def _union_danger(pred, k0: int, H: int, margins: bool) -> list:
+def _union_danger(pred, k0: int, H: int, margins: bool, body_off: tuple | None = None) -> list:
+    """Per frame k0 .. k0 + H the union of the branches' danger and the walls; body_off (iid, k_last): that Clapper's
+    body left out through frame k_last (a hooked Clawline's window, strike.HOOK_BODY_OFF; M4a)."""
     out = []
     for t in range(H + 1):
-        parts = [branch_danger(b, k0 + t, margins) for b in pred.branches]
+        skip = (body_off[0],) if (body_off is not None and k0 + t <= body_off[1]) else ()
+        parts = [branch_danger(b, k0 + t, margins, skip) for b in pred.branches]
         parts.append(WALL_BOXES)
         out.append(np.concatenate(parts))
     return out
@@ -1181,8 +1189,11 @@ class Searcher:
         if node.claw_ctrl is not None:
             # the next Clawline from control + 13 (M0: hooked 0 / 18 before + 12, 1 / 2 at + 12, 9 / 9 at + 13)
             cu = np.array([-1.0, 0, 0, max(0.0, float(ej.CLAW_NEXT_F - (node.k0 - node.claw_ctrl))), 0, 0, 0])
+        bo = None
+        if node.claw_ctrl is not None and node.hook_iid is not None:
+            bo = (node.hook_iid, node.claw_ctrl + sk.HOOK_BODY_OFF[1])
         for (ne, H) in self.cfg.passes:
-            dz = _union_danger(node.pred, node.k0, H, self.cfg.margins)
+            dz = _union_danger(node.pred, node.k0, H, self.cfg.margins, bo)
             st = self.W.E.start_state(node.S, cu=cu)
             fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False)
             out.append(fw)
@@ -1390,7 +1401,8 @@ class Searcher:
         cache = node.__dict__.setdefault("_alt_cache", {})
         if var not in cache:                     # the variant's passes and windows once per node
             nv = Node(node.plan, k0, S, node.pred, node.ev, node.depth, node.next_atk, tag=node.tag,
-                      claw_ctrl=None if node.claw_ctrl is None else k0 - 1, start=node.start)
+                      claw_ctrl=None if node.claw_ctrl is None else k0 - 1, start=node.start,
+                      hook_iid=node.hook_iid)
             cache[var] = (nv, [(fw, c) for fw in self.passes(nv) for c in self.windows(nv, fw)])
         nv, allw = cache[var]
         kind, tp, _, x, _, iid, extra, _ = cand[:8]
@@ -1504,6 +1516,7 @@ class Searcher:
             nd.var_states, nd.nom_var = vs, tr.variant
             if tr.claws:
                 nd.claw_ctrl = int(tr.claws[-1][5])
+                nd.hook_iid = int(tr.claws[-1][1]) if tr.claws[-1][3] else None
         return nd
 
     def _mk_nodes(self, plan: Plan, e: Eval, depth: int, tag: tuple = ()) -> list:

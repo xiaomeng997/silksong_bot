@@ -18,8 +18,11 @@ What a strike does, from her exact kin_jit state at the press, against one predi
                (the body may move: an evade) or 6 steps, control 5 / 6 frames after the stop (M0: control P + 23 ..
                32, p50 26); two hero VARIANTS (early: dash P + 17, gap 1.7, control stop + 5; late: dash P + 19, gap
                2.5, control stop + 6). At control: vy 0, the forced bounce (kin_jit EV_POGO from rest: 4.09 u), NO
-               i-frames, the attack cooled 0.15 s (control + 10 / 11), the air dash restored (M1's assumption). The
-               enemy sees a 'claw' hit (4 damage) at the needle's hit.
+               i-frames, the attack cooled 0.15 s (control + 10 / 11), the air dash restored (M4a live: 11 / 11 -
+               the hooked path's bounce; the UNHOOKED Clawline does not restore it). The hooked Clapper's BODY does
+               not hurt from the dash (SetDamageHeroAndRecord) through control + 12 (M4a live: its first contact
+               attempt at the Harpoon FSM's Idle + 1 = control + 13 / 14, 17 / 20 + 2 / 20 overlaps across it; the
+               real damage the same); its attacks do. The enemy sees a 'claw' hit (4 damage) at the needle's hit.
   (side / up slashes: not in this version - a missing primitive for the acceptance table when a move needs one)
 
 WINDOWS (bound to the enemy): per branch, Clapper and frame the press regions in her box-centre space (u) that the
@@ -66,6 +69,7 @@ DASH_MAX_STEPS = 6                 # the dash's Wait 0.1 s
 CLAW_DMG = 4
 CLAW_ATK_CD = 0.15                 # the attack's extra cooldown at control (s)
 HOOK_NEXT_F = hero2.HOOK_NEXT_F    # 12: a second Clawline from control + 12 / 13
+HOOK_BODY_OFF = (17, 12)           # M4a: the hooked body harmless from P + 17 (the early dash) to control + 12
 
 
 @dataclass(frozen=True)
@@ -302,13 +306,21 @@ def claw_hook(S_P: np.ndarray, P: int, d: int, iid: int, boxes: np.ndarray, var:
     return Hook(P, d, iid, var.name, np.array(list(zip(xs, ys)))[:ctrl_j + 1], hit, P + ctrl_j, x, y_hold)
 
 
-def control_state(params: km.HeroParams, hook: Hook, alpha: float = 0.0) -> np.ndarray:
+def control_state(params: km.HeroParams, hook: Hook, alpha: float = 0.0, airdashed: float = 0.0) -> np.ndarray:
     """Her kin state at the hooked Clawline's control (before the forced bounce: the caller rolls on with EV_POGO
-    in the first frame): at rest at the stop, facing d, airborne, the attack cooled CLAW_ATK_CD, the air dash free."""
+    in the first frame): at rest at the stop, facing d, airborne, the attack cooled CLAW_ATK_CD, the air dash free
+    (hooked: its bounce restores it). For an UNHOOKED Clawline the caller passes airdashed = the state before it (M4a:
+    not restored)."""
     S = km.initial_state(params, hook.x_stop, hook.y_hold, ground=False, facing=hook.d, alpha=alpha)
     S[km.ATK_CD] = CLAW_ATK_CD
-    S[km.AIRDASHED] = 0.0
+    S[km.AIRDASHED] = 0.0 if hook.ok else float(airdashed)
     return S
+
+
+def hook_body_off(hooks, k: int) -> tuple:
+    """The Clappers (iid) whose body does not hurt at frame k: each hooked Clawline's window P + 17 .. control + 12
+    (HOOK_BODY_OFF; M4a)."""
+    return tuple(h.iid for h in hooks if h.ok and h.P + HOOK_BODY_OFF[0] <= k <= h.ctrl + HOOK_BODY_OFF[1])
 
 
 # ---- her keys -> facing per frame ----------------------------------------------------------------------------------
@@ -330,4 +342,5 @@ def facing_track(face0: int, masks: np.ndarray) -> np.ndarray:
 
 __all__ = ["DOWN", "DOWN_ALT", "DS_ACTIVE", "DS_IFR", "SLASH_NEXT_F", "HOOK_HIT_F", "HOOK_VARIANTS", "HookVariant",
            "Hook", "robust_boxes", "state_at", "dslash_contact", "dslash_region", "claw_region", "ray_meets",
-           "claw_hook", "control_state", "facing_track", "centre_of", "hold_bb", "CTR_DY", "FOOT", "HALF_H"]
+           "claw_hook", "control_state", "facing_track", "centre_of", "hold_bb", "CTR_DY", "FOOT", "HALF_H",
+           "HOOK_BODY_OFF", "hook_body_off"]

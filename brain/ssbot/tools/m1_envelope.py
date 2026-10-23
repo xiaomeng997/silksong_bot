@@ -348,6 +348,7 @@ def timing_cmd(args) -> int:
     start states (the Forum floor), single thread, the pass only."""
     d = np.load(args.a)
     S = d["S"][args.start:args.start + (args.n or len(d["S"]))]
+    S = np.pad(S, [(0, 0), (0, max(0, km.K - S.shape[1]))])     # states saved before M4a's rows (K 81 -> 83)
     E = env.Engine()
     terr = env.floor_terrain()
     E.forward(E.start_state(S[0]), 2, terrain=terr)
@@ -407,6 +408,7 @@ def main(argv=None) -> int:
         return timing_cmd(args)
     d = np.load(args.a)
     S, lab = d["S"], d["labels"]
+    S = np.pad(S, [(0, 0), (0, max(0, km.K - S.shape[1]))])     # states saved before M4a's rows (K 81 -> 83)
     if args.n or args.start:
         S, lab = S[args.start:args.start + (args.n or len(S))], lab[args.start:args.start + (args.n or len(S))]
     E = env.Engine()

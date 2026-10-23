@@ -49,7 +49,8 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     P_RPR_TLOBE1, AB_THUNK, AB_SLOPES, ATK_KIND, ALT, ALT_T, ATK_PDIR, P_THK_ON, P_THK_OFF, P_THK_OFF_UP, P_THK,
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
-    H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, P_H2, P_H2_RST, P_H2_PJ2)
+    H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD, H2_JUMP_DCD_T, P_H2, P_H2_RST,
+    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -816,6 +817,7 @@ def begin_wallslide(x, require_input, mask):
     x[WSIDE] = side
     grav_off(x)
     x[DASH_CD] = 0.0
+    x[XVX] = 0.0                          # BeginWallSlide clears the extra air move velocities
     return True
 
 
@@ -874,7 +876,9 @@ def relinquish_nv(x):
 
 @njit(cache=True, error_model="numpy")
 def regain(x, mask):
-    """RegainControl at the end of an FSM move: control and the move input back."""
+    """RegainControl at the end of an FSM move: control and the move input back (and the extra air move velocities
+    cleared: SetStartingMotionState; XVX is 0 unless HERO2's H2_SPR_ATK set it)."""
+    x[XVX] = 0.0
     x[MODE] = M_NORMAL
     x[MODE_T] = 0.0
     x[PHASE] = 0.0
@@ -1248,9 +1252,52 @@ def forum_dash_input(x, mask, pressed, P):
 
 
 @njit(cache=True, error_model="numpy")
-def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
+def sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT):
+    """HERO2 M4a (H2_SPR_ATK / H2_SPR_JUMP): the air sprint's Attack Cancel and Queue Sprint Jump (hornet_sprint Air
+    Sprint L / R and Air Sprint Loop; the action order: the attack's queue before ListenForJump). The attack: the
+    queue (a press seen from the next frame, 0.1 s) once the state is h2_spr_atk_t old; the cancel swings at once
+    (RegainControl -> DoAttack) and keeps the sprint's x velocity as XVX (Retain Extra Velocity). The jump: the press
+    this frame or the queue; the umbrella at once when it can open (Set Air Jump), else Allow Shuttlecock -> the loop
+    (the sprint ends at the next frame with the dash key up)."""
+    h2 = np.int64(P[P_H2])
+    if (h2 & H2_SPR_ATK) != 0:
+        ap = abuf0 > 0 and ge32(x[MODE_T], P[P_H2_SAT])
+    else:
+        ap = (pressed & B_ATTACK) != 0
+    if (h2 & H2_SPR_JUMP) != 0:
+        # the press this frame, or - at the Air Sprint's first frame (its OnEnter in FixedUpdate reads the frame
+        # before's input) - a press in the frame before (its queue timer still full)
+        jp = (pressed & B_JUMP) != 0 or (x[PHASE] == 0 and x[MODE_T] < 1.5 * dt and jbuf0 >= 0.0999)
+    else:
+        jp = (pressed & B_JUMP) != 0
+    if ap:
+        if (h2 & H2_SPR_ATK) != 0:
+            if (pressed & B_ATTACK) == 0:
+                x[ABUF] = 0.0             # consumed (a press this frame stays queued)
+            vx = x[VX]
+            regain(x, mask)
+            x[XVX] = vx
+            do_attack(x, mask, P)
+        else:
+            regain(x, mask)
+        return
+    if jp:
+        if (h2 & H2_SPR_JUMP) != 0:
+            x[JBUF] = 0.0
+            if x[WLOCK] < 0 and can_float(x, P, TT):
+                regain(x, mask)
+                start_glide(x, mask, P)
+            else:
+                x[PHASE] = 1.0            # Allow Shuttlecock -> Air Sprint Loop
+        else:
+            regain(x, mask)
+
+
+@njit(cache=True, error_model="numpy")
+def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
     """After LookForQueueInput: the wall slide checks and the cling, the FSM-driven moves' Update side (phase
-    timers and transitions), cooldowns, and LateUpdate's wall velocity."""
+    timers and transitions), cooldowns, and LateUpdate's wall velocity. jbuf0 / abuf0: InputHandler's jump / attack
+    queue timers before this frame's presses (HERO2 H2_SPR_JUMP / H2_SPR_ATK: what the sprint FSM reads)."""
     ab = np.int64(P[P_ABIL])
     if x[WSIDE] != 0:
         x[AIRDASHED] = 0.0
@@ -1375,10 +1422,15 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT):
                     regain_jump(x, mask, P)
             elif wall or (ph == 1 and (mask & B_DASH) == 0):
                 regain_jump(x, mask, P)   # END
+            elif (np.int64(P[P_H2]) & (H2_SPR_ATK | H2_SPR_JUMP)) != 0:
+                sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT)
             elif (pressed & (B_ATTACK | B_JUMP)) != 0:
                 regain(x, mask)           # Attack Cancel / Queue Sprint Jump: control back, the press acts
         elif ph == 2:
-            if (mask & B_DASH) == 0:      # released: SKID END
+            rel = (mask & B_DASH) == 0
+            if not rel and (np.int64(P[P_H2]) & H2_DASH_END) != 0 and x[MODE_T] < 1.5 * dt and                     (np.int64(x[PREV]) & B_DASH) == 0:
+                rel = True                # HERO2 M4a: the dash's end frame reads the frame before's key (FixedUpdate)
+            if rel:                       # released: SKID END
                 if not ge32(x[MODE_T], P[P_SPR_GRACE]) or abs(x[VX]) < P[P_SKID_VMIN]:
                     regain_jump(x, mask, P)   # Sprint Timer under Sprint Grace (or slower than 4): no skid, Regain
                 else:                     # Control To Idle
@@ -1550,8 +1602,13 @@ def fixed_step(x, P, TT):
             x[RSTEPS] = x[RSTEPS] - 1
 
     ab = np.int64(P[P_ABIL])
+    if x[XVX] != 0:                       # HERO2 M4a: the extra air move velocity decays first (FixedUpdate)
+        xv = f32(x[XVX] - x[XVX] * f32(P[P_H2_XVD] * fdt))
+        x[XVX] = 0.0 if abs(xv) < 0.01 else xv
     mv = 0.0 if (x[DS_REC] >= 0 and x[GROUND] > 0) else x[MOVE]
     vx = mv * P[P_RUN] if normal else x[VX]
+    if normal and mv == 0 and x[XVX] != 0:
+        vx = vx + x[XVX]                  # Move: added unless a move key is held (SkipApplyWhileMoving)
     can_turn = normal and not (x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC])
     if ab != 0 and normal and (x[WSIDE] != 0 or x[WLOCK] >= 0):
         can_turn = False                  # DoMovement: no turning while wall sliding or wall locked
@@ -1561,6 +1618,7 @@ def fixed_step(x, P, TT):
     if can_turn and mv != 0 and sg != x[FACE]:
         x[FACE] = sg
         x[ATTACKING] = 0.0
+        x[XVX] = 0.0                      # FlipSprite: CancelOnTurn
     rv = P[P_RV]
     if normal and x[RDIR] < 0:
         vx = -rv if vx > 0 else vx - rv
@@ -1714,6 +1772,7 @@ def fixed_step(x, P, TT):
     if lands:
         x[JUMPING] = 0.0
         x[JSTEPS] = 0.0
+        x[XVX] = 0.0                      # BackOnGround clears the extra air move velocities
     if was and not now and x[JUMPING] <= 0 and x[MODE] == M_NORMAL:
         x[LEDGE] = P[P_LEDGE]
     land_sp = (landed or resolve or (under and now)) and x[MODE] == M_DS_SPIKE
@@ -1856,6 +1915,7 @@ def apply_events(x, ev, P):
                 cancel_wallslide(x)
                 x[WLOCK] = -1.0
                 x[DASH_T] = 0.0
+                x[XVX] = 0.0              # (ResetMotion)
             x[MODE] = M_HURT_FREEZE
             x[MODE_T] = 0.0
             x[MODE_N] = 0.0
@@ -1887,6 +1947,11 @@ def apply_events(x, ev, P):
 
 @njit(cache=True, inline="always", error_model="numpy")
 def hero_jump(x, P):
+    if P[P_ABIL] != 0 and (np.int64(P[P_H2]) & H2_JUMP_DCD) != 0:
+        x[DASH_CD] = f32(H2_JUMP_DCD_T)   # HeroJump: dashCooldownTimer = 0.05 (M4a)
+    if P[P_ABIL] != 0 and (np.int64(P[P_H2]) & H2_SPR_JUMP) != 0:
+        x[JBUF] = 0.0                     # HeroJump: ClearJumpInputState (the press is spent: the air sprint after a
+        #                                   dash pressed right after the jump does not see it, m4 'jd' 16 / 16)
     x[JUMPING] = 1.0
     x[JSTEPS] = 0.0
     x[JDSTEPS] = 0.0
@@ -1942,13 +2007,22 @@ def update(x, mask, ev, dt, udt, P, TT):
     accept = normal or noinput(mode)
     ab = np.int64(P[P_ABIL])
     falling = False
+    jbuf0 = 0.0
+    abuf0 = 0.0
     if ab != 0:
         if (ab & AB_THUNK) != 0:
             x[ALT_T] = f32(x[ALT_T] + dt)  # Time.timeSinceLevelLoad - altAttackTime
+        jbuf0 = x[JBUF]
+        abuf0 = x[ABUF]
         if (pressed & B_JUMP) != 0:       # InputHandler.UpdateButtonQueueing (before the hero's Update)
             x[JBUF] = 0.1
         elif x[JBUF] > 0:
             x[JBUF] = f32(x[JBUF] - udt)
+        if (np.int64(P[P_H2]) & H2_SPR_ATK) != 0:
+            if (pressed & B_ATTACK) != 0:
+                x[ABUF] = 0.1
+            elif x[ABUF] > 0:
+                x[ABUF] = f32(x[ABUF] - udt)
         falling = x[VY] <= EPS_F and x[GROUND] <= 0
         if (ab & AB_HARD_LAND) != 0:
             forum_fall_check(x, dt, P)
@@ -2090,7 +2164,7 @@ def update(x, mask, ev, dt, udt, P, TT):
     if ab != 0:
         if (x[WSIDE] != 0 or x[WSLASH] > 0 or x[WSTICK] > 0 or x[CLING_CD] > 0 or x[DASH_CD] > 0 or x[GL_CD] > 0
                 or x[MODE] >= M_GLIDE):
-            forum_after_queue(x, mask, pressed, mode0, dt, P, TT)
+            forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0, abuf0)
 
     # timers
     if x[ATK_CD] > 0:

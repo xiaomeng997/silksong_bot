@@ -811,11 +811,13 @@ KIN_EXPS = ("fl_atk", "fl_claw", "drift", "claw_air", "claw_gnd", "dash_g", "ds_
 KIN_KEYS = ("hero", "input", "act", "game", "fs", "dt", "udt", "ts", "ev", "pause", "f")
 
 
-def kin_check(recs, params=None, tol: float = 0.1, replay: bool = True, verbose: int = 0) -> dict:
+def kin_check(recs, params=None, tol: float = 0.1, replay: bool = True, verbose: int = 0,
+              trials_name: str = "m0_trials.jsonl", exps=None) -> dict:
     """Roll the hero model (kinematics / kin_jit) from each hero-only trial's last standing frame with the logged
     latched masks (and, replay=True, the logged dt / physics steps), compare her box centre frame by frame; a Clawline
     press ends the comparison (the model has no Clawline). Returns per trial the first frame over tol (its clip and
-    the model's mode), the max error and the error at the end."""
+    the model's mode), the max error and the error at the end. trials_name / exps: another probe's trial log and
+    hero-only experiments (m4_probe)."""
     from ssbot.knowledge import kinematics as km
     from ssbot.record.recorder import RecordingReader
     params = params or km.HeroParams.load(km.REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json")
@@ -828,9 +830,9 @@ def kin_check(recs, params=None, tol: float = 0.1, replay: bool = True, verbose:
             if isinstance(m, dict) and m.get("scene_raw"):
                 terr = km.Terrain2D.from_message(m, params.scene(m["scene_raw"]))
                 break
-        trials = [json.loads(l) for l in (rec / "m0_trials.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        trials = [json.loads(l) for l in (rec / trials_name).read_text(encoding="utf-8").splitlines() if l.strip()]
         for t in trials:
-            if t["exp"] not in KIN_EXPS:
+            if t["exp"] not in (exps or KIN_EXPS):
                 continue
             res = t.get("res") or {}
             f0, f1 = res.get("f0"), res.get("f1")

@@ -499,6 +499,9 @@ def cmd_run(a) -> int:
     idle_priority()
     with open(OUT / "sits.pkl", "rb") as fh:
         sits = pickle.load(fh)
+    from ssbot.knowledge import kinematics as km
+    for s_ in sits:                          # states saved before M4a's rows (K 81 -> 83)
+        s_.S = km.pad_state(s_.S)
     if a.limit:
         sits = sits[:a.limit]
     if a.only:

@@ -237,12 +237,16 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  ALT,             # cState.altAttack (the next side / up slash is the alternate one)
  ALT_T,           # scaled seconds since altAttackTime (the last slash); past recovery + ALT_ATTACK_RESET altAttack clears
  ATK_PDIR,        # prevAttackDir: 0 normal, 1 up, 2 down, -1 none (a new direction clears altAttack)
- K) = range(82)
+ # map v2 M4a (HERO2 bits H2_SPR_ATK; 0 otherwise, never read with the bits off):
+ ABUF,            # InputHandler's attack press queue timer (unscaled s, 0.1 at a press; the sprint FSM reads it)
+ XVX,             # the extra air move x velocity of the air sprint's Attack Cancel (Retain Extra Velocity -> a
+                  # DecayingVelocity: decay 10 / s, skipped while a move key is held, gone at a turn / landing / regain)
+ K) = range(84)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir").split()
+             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir abuf xvx").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -517,6 +521,11 @@ class HeroParams:
     h2_pogo_rs_t: float = 0.1083       # the Wanderer slash's "Bounce" animation event after the press (s): the bounce
     #                                    restarts there (NailSlash.DownBounce -> DownspikeBounce, FinishDownspike vy -10)
     h2_pogo_j2: int = 8                # ... with its own jump steps (the slash config: one step at the bounce speed)
+    # map v2 stage M4a (forum.md 95; the m4_probe recordings)
+    h2_spr_atk_t: float = 0.08         # the air sprint's Attack Cancel opens when its state time reaches this (its
+    #                                    Attack Cooldown 0.1 s less the 0.02 its OnEnter in FixedUpdate takes: live
+    #                                    4 frames after the Air Sprint entry, 3 frames after a 2-step entry frame)
+    h2_xv_decay: float = 10.0          # Regain Control Shared: HeroAddExtraAirMoveVelocity Decay (per s)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -549,7 +558,7 @@ class HeroParams:
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
               "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
               "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact",
-              "hero2", "h2_pogo_rs_t", "h2_pogo_j2")
+              "hero2", "h2_pogo_rs_t", "h2_pogo_j2", "h2_spr_atk_t", "h2_xv_decay")
 
     def vector(self) -> np.ndarray:
         """The scalar parameters (P_* order); with AB_THUNK a tail from P_THK: per THUNK_SLOTS slot the vertex count
@@ -644,8 +653,8 @@ class HeroParams:
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
  P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_THK_ON, P_THK_OFF, P_THK_OFF_UP,
  P_SLOPE_CONTACT,
- P_H2, P_H2_RST, P_H2_PJ2,
- NP) = range(155)
+ P_H2, P_H2_RST, P_H2_PJ2, P_H2_SAT, P_H2_XVD,
+ NP) = range(157)
 assert NP == len(HeroParams.VECTOR)
 P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 # HeroParams.hero2 bits (map v2 stage M0, forum.md 91; kin_jit only, with abilities != 0):
@@ -660,11 +669,42 @@ P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 #                  FSM's Update), not a frame later from the attack queue
 #   H2_INFL_END    the jump released before the Inflate ends: Start -> Float Idle -> END -> Deflate in the Inflate's
 #                  last frame (the model entered the Deflate a frame later), that Deflate one frame longer
-H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END = 1, 2, 4, 8, 16
-H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END
+# map v2 stage M4a (forum.md 95; the m4_probe recordings):
+#   H2_JUMP_DCD    HeroJump sets dashCooldownTimer = 0.05 s (HeroController.cs 8787; it overwrites a longer one): a
+#                  dash pressed in a jump's first 3 / 4 frames is queued (it fires when the cooldown runs out if the
+#                  key is still held) or lost, and a ground dash's 0.425 s cooldown ends at a jump
+#   H2_SPR_ATK     the air sprint's Attack Cancel (hornet_sprint Air Sprint L / R, Air Sprint Loop): the FSM reads
+#                  InputHandler's 0.1 s attack queue (GetWasButtonPressedQueued, before InputHandler's own Update: a
+#                  press at f is seen at f + 1 .. f + 7, so a press in the dash is kept), only from h2_spr_atk_t into
+#                  the Air Sprint state (its 5th frame); the cancel swings at once (SetStartWithAttack) and keeps the
+#                  sprint's x velocity as an extra air move velocity (Retain Extra Velocity: decay h2_xv_decay / s,
+#                  added only while no move key is held, gone at a turn, a landing, a regain); the model before
+#                  cancelled on the press frame itself, swung a frame later from the attack queue, no extra velocity
+#   H2_SPR_JUMP    the air sprint's jump (ListenForJump: the press this frame; at the state's entry - in FixedUpdate,
+#                  before the frame's input - the press of the frame before, so a press on the dash's last frame acts
+#                  at the sprint's first): Queue Sprint Jump? -> the umbrella at once when it can open (Set Air Jump
+#                  -> regain -> Float), else Allow Shuttlecock -> Air Sprint Loop (the sprint ends a frame later when
+#                  the dash key is up); HeroJump spends the press (ClearJumpInputState)
+#   H2_DASH_END    a ground dash's end enters the ground sprint only with the dash key held in the frame before (the
+#                  sprint FSM's states entered in FixedUpdate read the previous frame's input): a key re-pressed on the
+#                  dash's end frame runs, it does not sprint (m4 dash_end: 3 / 3 live, 18 / 18 the rule)
+H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD = 1, 2, 4, 8, 16, 32
+H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END = 64, 128, 256
+H2_ALL = H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |     H2_SPR_JUMP | H2_DASH_END
+H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 # the M0 calibration (ssbot.tools.m0_calib; forum.md 91): the bits and the fitted restart
 HERO2_OVERRIDES = {"hero2": H2_ALL, "h2_pogo_rs_t": 0.1083, "h2_pogo_j2": 8}
+
+
+def pad_state(S: np.ndarray) -> np.ndarray:
+    """A kin state saved before rows were appended (M4a: ABUF, XVX; K 81 -> 83) padded with zeros to K rows (the
+    first axis); a state of K rows is returned as it is."""
+    S = np.asarray(S)
+    if S.shape[0] >= K:
+        return S
+    pad = [(0, K - S.shape[0])] + [(0, 0)] * (S.ndim - 1)
+    return np.pad(S, pad)
 
 
 def hero2_on() -> bool:
@@ -2352,6 +2392,7 @@ class ForumRows:
         self.scr_pending = 0.0
         self.gl_vx: float | None = None
         self.jbuf = np.float32(0.0)
+        self.abuf = np.float32(0.0)
         self.atk_kind = 0.0
         self.alt_t = np.float32(9.0)
         self.atk_pdir = -1.0
@@ -2456,6 +2497,14 @@ class ForumRows:
         elif self.jbuf > 0:
             self.jbuf = np.float32(self.jbuf - np.float32(r.get("udt", r["dt"])))
         S[JBUF] = float(max(self.jbuf, 0.0))
+        # ... and its attack queue (M4a, only with HERO2's H2_SPR_ATK: the rows stay 0 otherwise; the extra air
+        # velocity XVX is not observable: left 0)
+        if int(p.hero2) & H2_SPR_ATK:
+            if m_now & B_ATTACK and not (pr and pr["mask"] & B_ATTACK):
+                self.abuf = np.float32(0.1)
+            elif self.abuf > 0:
+                self.abuf = np.float32(self.abuf - np.float32(r.get("udt", r["dt"])))
+            S[ABUF] = float(max(self.abuf, 0.0))
         S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
         S[PREV_GS] = 1.0
         S[DQ] = -1.0
