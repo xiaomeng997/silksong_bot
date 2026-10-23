@@ -1241,11 +1241,14 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
     run = P[P_RUN]
     for t in range(1, T + 1):
         m = masks[t - 1]
-        gsp = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] >= 2.0))
+        # (as gen_cands: no jump press on the ground in the dash or the ground sprint - the skid's jump is a plain
+        # full jump, kept -; no attack press in the ground sprint or its skid)
+        no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0))
+        no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
         for b in (B_JUMP, B_ATTACK):
             if (m & b) == 0:
                 strip &= ~b
-            elif (m_prev & b) == 0 and gsp and (b == B_JUMP or x[MODE] == M_SPRINT):
+            elif (m_prev & b) == 0 and (no_j if b == B_JUMP else no_a):
                 strip |= b
         m_prev = m
         m = m & ~strip
