@@ -1109,6 +1109,17 @@ class Map2Controller:
                     cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=True,
                                                        pos_over=self.ctrl_pos)
             if not cons:
+                # the log: the most probable kept outcome's Clappers and her position against the observed ones
+                o = max((lp.outs[i] for i in self.ctrl_idx), key=lambda o_: o_.p, default=None)
+                if o is not None:
+                    pc_ = _clapper_pred(o, n)
+                    row["dc"] = [[ob.iid % 1000, ob.st, *(pc_.get(ob.iid) or (None, None, None))[:1],
+                                  None if ob.iid not in pc_ else int((ob.j or 0) - pc_[ob.iid][1]),
+                                  None if ob.iid not in pc_ else round(float(ob.x - pc_[ob.iid][2]), 3)] for ob in obs]
+                    i_ = lp.outs.index(o)
+                    pos = self.ctrl_pos.get(i_, o.pos)
+                    if her is not None and 0 <= n < len(pos):
+                        row["dh"] = [round(float(her[0] - pos[n, 0]), 3), round(float(her[1] - pos[n, 1]), 3)]
                 self._drop("hero" if bad_h and not bad_c else "clappers")
                 why = "fail:" + ("hero" if bad_h and not bad_c else "clappers")
             elif not alive:

@@ -129,7 +129,7 @@ def report(out: Path) -> dict:
         if m:
             r.update({k: m.get(k) for k in ("share_m2", "pre_ms_p50", "pre_ms_p99", "post_ms_p50", "post_ms_p99",
                                             "check_ms_p50", "check_ms_p99", "search_ms_p50", "search_ms_p90",
-                                            "commit_age_p50", "commit_age_p90")})
+                                            "commit_age_p50", "commit_age_p90", "bridge_followed")})
             r["counts"] = m.get("counts")
             r["errors"] = len(m.get("errors") or [])
             r["workers"] = {k: v.get("boost") for k, v in (m.get("workers") or {}).items()}
@@ -153,6 +153,24 @@ def report(out: Path) -> dict:
             if cur:
                 runs.append(cur)
             dh = [abs(x["dh"][0]) for x in rows if x.get("dh")]
+            # per commit: its plan, its check, how long it kept the keys and why it ended
+            plans = []
+            cur_p = None
+            for x in rows:
+                if x.get("commit"):
+                    c = x["commit"]
+                    ck = next((q for q in x.get("chk") or () if q[0] == c["pid"]), None)
+                    cur_p = {"f": x["f"], "pid": c["pid"], "age": x.get("age"), "origin": c["origin"],
+                             "value": c["value"], "hits": c["hits"], "outs": c["outs"], "alive": c["alive"],
+                             "search_ms": c["ms"], "check": None if ck is None else ck[2:8], "ticks": 0,
+                             "end": None, "contacts": len(c.get("cp") or ())}
+                    plans.append(cur_p)
+                if cur_p is not None:
+                    if x.get("m2") and x.get("pid") == cur_p["pid"]:
+                        cur_p["ticks"] += 1
+                    elif cur_p["end"] is None and x["f"] > cur_p["f"]:
+                        cur_p["end"] = x.get("why")
+                        cur_p = None
             r.update({"rows": len(rows), "own": dict(own.most_common()), "why": dict(why.most_common()),
                       "busy": dict(busy.most_common()), "checks": dict(chk.most_common()),
                       "worker_status": dict(wst.most_common()), "worker_ms": _pct(wms),
@@ -160,7 +178,8 @@ def report(out: Path) -> dict:
                       "commit_hits": round(float(np.mean([c["hits"] for c in commits])), 3) if commits else None,
                       "commit_value": round(float(np.mean([c["value"] for c in commits])), 3) if commits else None,
                       "control_runs": _pct(runs, (50, 90, 100)), "n_runs": len(runs),
-                      "dh_abs": _pct(dh), "bot_ms_map2": _pct([x.get("ms") for x in rows])})
+                      "dh_abs": _pct(dh), "bot_ms_map2": _pct([x.get("ms") for x in rows]),
+                      "plans": plans, "plan_end": dict(Counter(p_["end"] for p_ in plans).most_common())})
         res[t] = r
     return res
 
