@@ -165,3 +165,59 @@ def test_hysteresis_keeps_a_valid_plan(W):
     S2 = ms.Searcher(W, ms.Cfg(depth=1, cap_s=60, w_switch=10.0))   # a huge switch penalty: the kept plan stays
     r1 = S2.decide(sit1, prev=prev)
     assert r1.kept and r1.ev.safe
+
+
+def test_reaction_key_and_the_contingent_segment(W):
+    """A hook's reaction is what she has seen by the earliest control (choices made from P + 7 and revealed by
+    P + 23 - lag); a contingent plan plays the continuation of the outcome's reaction (Seg.out_alt)."""
+    K = cm.Know.load()
+    rec = [(k, 0, 0, "Idle", k, C, cm.STAND_Y, -1, 0) for k in range(0, 60)]
+    slam = cm.Branch(0.5, {1: [["close", "SLAM", 12, 12, 13]]}, 12, {1: rec}, [], K, 59)
+    late = cm.Branch(0.5, {1: [["close", "CAST", 30, 30, 31]]}, 30, {1: rec}, [], K, 59)
+    assert ms.reaction_key(slam, 4) == frozenset({(1, "SLAM")})
+    assert ms.reaction_key(late, 4) == frozenset()                  # decided after control: not seen
+    S0 = _ground(W, 25.0)
+    a = ms.Seg(np.array([km.B_RIGHT] * 5, np.int64), [], (1, 1))
+    dflt = ms.Seg(np.array([0] + [km.B_LEFT] * 10, np.int64))
+    alt = ms.Seg(np.array([0] + [km.B_RIGHT] * 10, np.int64))
+    dflt.out_alt = {frozenset({(1, "SLAM")}): [alt]}
+    plan = ms.Plan([a, dflt])
+    boxes = np.tile(np.array([31.13, 3.0, 34.35, 6.9]), (120, 1))
+    t1 = ms.simulate(W, plan, lambda iid: boxes, 1, S0, sk.HOOK_VARIANTS[0], br=slam)
+    t2 = ms.simulate(W, plan, lambda iid: boxes, 1, S0, sk.HOOK_VARIANTS[0], br=late)
+    assert t1.claws and t1.claws[0][3] and t1.alts and t1.alts[0][2] == frozenset({(1, "SLAM")})
+    assert not t2.alts and t1.pos[-1, 0] > t2.pos[-1, 0] + 2.0      # right vs left after control
+    steps = ms.plan_steps(plan)
+    assert any("alt" in st and "1:SLAM" in st["alt"] for st in steps)
+
+
+def test_second_clawline_lock_after_control(W):
+    """After a hooked Clawline's control the next Clawline waits to control + 13 (M0): no Clawline window before."""
+    S = km.initial_state(W.params, 26.0, cm.FLOOR + 3.0 + sk.FOOT, ground=False, facing=1)
+    sr = ms.Searcher(W, ms.Cfg())
+    rec = [(k, 0, 0, "Idle", k, C, cm.STAND_Y, -1, 0) for k in range(0, 140)]
+    pred = cm.Prediction([cm.Branch(1.0, {}, None, {1: rec}, [], cm.Know.load(), 139)], 139, 1, 0.0)
+    nd = ms.Node(ms.Plan([]), 40, S, pred, None, 1, 0, claw_ctrl=39)
+    fw = sr.passes(nd)[0]
+    first = None
+    for t in range(1, 40):
+        g, *_ = fw.frame_rows(t)
+        if len(g) and np.any(fw.cl_cond[g] & ms.ej.COND_CLAW):
+            first = t
+            break
+    assert first is not None and nd.k0 + first >= 39 + 12
+    nd0 = ms.Node(ms.Plan([]), 40, S, pred, None, 1, 0)                 # no lock: from the first frame
+    fw0 = sr.passes(nd0)[0]
+    g, *_ = fw0.frame_rows(1)
+    assert np.any(fw0.cl_cond[g] & ms.ej.COND_CLAW)
+
+
+def test_contingent_plan_for_a_far_hook(W):
+    """The person's far case (MOVES_TODO P1, 10-22): a hook on an Idle Clapper from beyond Slam Range draws the far
+    list; the search plans a continuation per reaction - the JUMP ridden (a down slash on its rising body)."""
+    sit = ms.Situation(_ground(W, C - 9.0), [_obs("Idle", C, face=-1, j=8)], {1: cm.Memory()})
+    res = ms.Searcher(W, ms.Cfg(depth=2, cap_s=120)).decide(sit)
+    assert res.ev is not None and res.ev.safe
+    labels = rz.classify(res.ev, sit)
+    assert "P1-far-jump" in labels
+    assert res.ev.plan.note == "contingent" and any(s.out_alt for s in res.ev.plan.segs)

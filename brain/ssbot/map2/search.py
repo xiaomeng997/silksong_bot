@@ -82,6 +82,8 @@ WALL_BOXES = np.array([(-1.0e4, -1.0e4, WALL_L + sk.HALF_W, 1.0e4), (WALL_R - sk
 class Cfg:
     passes: tuple = ((1, 60), (2, 30))     # the approach passes: (event limit, frames)
     exit_h: int = 40                       # the coarse exit check's frames
+    exit_h_max: int = 180                  # ... stretched to a big rune's last lit frame (a jump cast's burst lights
+    #                                        ~65 - 72 f after its landing: the spec's 3 s while a jump cast is on)
     exit_events: int = 1
     t_pred: int = 72                       # the prediction horizon at least (frames; else the plan + 72)
     depth: int = 3                         # strike segments chained
@@ -103,6 +105,16 @@ class Cfg:
     w_time: float = 0.002                  # per frame to the plan's end (hits per second: sooner is better)
     face_wall_u: float = 12.0              # the facing rule acts within this of a wall (the person, 10-19)
     library: tuple = ()                    # combo macros (combos.Combo) - empty: primitives + the strike module only
+    # CONTINGENT PLANS (the reaction to a hook is seen at the needle's hit, P + 8 / 9, long before control, P + 23 ..
+    # 34: she re-plans at control per reaction - slam -> the first window, evade -> a second Clawline, jump -> the
+    # ride, the person 10-22): a hooked Clawline whose hit splits the Clappers' future into reactions gets one child
+    # node per reaction (its own danger, its own continuation), recombined into one plan with a continuation per
+    # reaction (Seg.out_alt)
+    split: bool = True
+    split_min_p: float = 0.04              # reactions below this probability are not expanded (they keep the exit)
+    split_max: int = 4                     # reactions expanded per split
+    combine_top: int = 6                   # continuations per reaction whose exits are checked when recombining
+    combine_splits: int = 4                # top-level splits recombined (the best by the open value; nested first)
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -176,10 +188,14 @@ class Seg:
     tag: str = ""
     var_alt: dict | None = None                   # after a Clawline: the segment re-planned at control per hook
     #                                               variant (control is a branch point: she sees it and re-plans)
+    out_alt: dict | None = None                   # after a Clawline: {reaction key: [Seg, ...]} the rest of the plan
+    #                                               (this segment and the later ones) per reaction to the hook seen
+    #                                               by control (reaction_key); a key not listed plays this one
 
     def copy(self) -> "Seg":
         return Seg(self.masks.copy(), list(self.dsl), self.claw, self.tag,
-                   None if self.var_alt is None else {k: v.copy() for k, v in self.var_alt.items()})
+                   None if self.var_alt is None else {k: v.copy() for k, v in self.var_alt.items()},
+                   None if self.out_alt is None else {k: [s.copy() for s in v] for k, v in self.out_alt.items()})
 
 
 @dataclass
@@ -201,11 +217,40 @@ class Plan:
             return None
         s0 = self.segs[0]
         seg = Seg(s0.masks[n:].copy(), [(i - n, iid) for (i, iid) in s0.dsl if i - n >= 0], s0.claw, s0.tag,
-                  s0.var_alt)
+                  s0.var_alt, s0.out_alt)
         return Plan([seg] + [x.copy() for x in self.segs[1:]], self.origin, self.note)
 
     def key(self) -> tuple:
-        return tuple((tuple(int(v) for v in s.masks), tuple(s.dsl), s.claw) for s in self.segs)
+        out = []
+        for s in self.segs:
+            k = (tuple(int(v) for v in s.masks), tuple(s.dsl), s.claw)
+            if s.out_alt:
+                k += (tuple(sorted((tuple(sorted(rk)), Plan(v).key()) for rk, v in s.out_alt.items())),)
+            out.append(k)
+        return tuple(out)
+
+
+# ---- the reaction to a hook (contingent plans) ----------------------------------------------------------------------
+
+REACT_LO, REACT_HI = 7, 23        # the reaction's choices are made from the needle's hit (P + 8 / 9; the frame before
+#                                   allowed) and seen by the earliest control (P + 23, strike.claw_hook's clamp)
+
+
+def reaction_key(br, P: int, lag: int = 2) -> frozenset:
+    """The Clappers' choices of the branch that she has SEEN by the earliest control of a Clawline pressed at P: made
+    in P + 7 .. P + 23 - lag and revealed by then - (iid, outcome) pairs (e.g. {(1, 'SLAM')}); empty: no reaction
+    (the hook's hit changed nothing yet, or what changed is not visible by control)."""
+    hi = P + REACT_HI - lag
+    out = []
+    for iid, chs in br.choices.items():
+        for c in chs:
+            if P + REACT_LO <= c[2] <= hi and c[3] is not None and c[3] <= hi:
+                out.append((int(iid), str(c[1])))
+    return frozenset(out)
+
+
+def rk_label(rk: frozenset) -> str:
+    return ",".join(f"{iid % 1000}:{o}" for (iid, o) in sorted(rk)) or "none"
 
 
 @dataclass
@@ -227,6 +272,8 @@ class Traj:
     seg_start: list                # the absolute start frame of each segment
     missed: list = field(default_factory=list)   # strikes that found no target: [(kind, frame, iid)]
     variant: str = ""
+    claws: list = field(default_factory=list)    # every Clawline press: (P, iid, d, hooked, hit, ctrl)
+    alts: list = field(default_factory=list)     # the reaction continuations played: (segment index, P, key)
 
 
 def _ev(n: int) -> np.ndarray:
@@ -234,25 +281,43 @@ def _ev(n: int) -> np.ndarray:
 
 
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
-             alpha_c: int = 0, extra: int = 0) -> Traj:
+             alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
-    frames of no keys appended after the last segment."""
+    frames of no keys appended after the last segment. br: the outcome's branch - after a Clawline the rest of the
+    plan follows the continuation of the reaction she has seen by control (Seg.out_alt, reaction_key)."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
-    contacts, hooks, rolls, starts, missed = [], [], [], [], []
+    contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
     S = S0.copy()
     k0 = 0
     face = face0
     pre_ev = 0                       # an event for the segment's first frame (the Clawline's forced bounce)
     first = True
-    for si, seg in enumerate(plan.segs):
-        if si > 0 and plan.segs[si - 1].claw is not None and seg.var_alt and variant.name in seg.var_alt:
-            seg = seg.var_alt[variant.name]
+    segs = list(plan.segs)
+    played = []
+    last_P = None
+    si = -1
+    while si + 1 < len(segs):
+        si += 1
+        seg = segs[si]
+        if si > 0 and segs[si - 1].claw is not None:
+            if seg.out_alt and br is not None and last_P is not None:
+                rk = reaction_key(br, last_P, lag)
+                alt = seg.out_alt.get(rk)
+                if alt is not None:
+                    segs = segs[:si] + list(alt)
+                    alts.append((si, last_P, rk))
+                    if si >= len(segs):
+                        break
+                    seg = segs[si]
+            if seg.var_alt and variant.name in seg.var_alt:
+                seg = seg.var_alt[variant.name]
         starts.append(k0)
+        played.append(seg)
         masks = np.asarray(seg.masks, np.int64)
-        if si == len(plan.segs) - 1 and extra and seg.claw is None:
+        if si == len(segs) - 1 and extra and seg.claw is None:
             masks = np.concatenate([masks, np.zeros(extra, np.int64)])
         n = len(masks)
         ev = _ev(max(n, 1))
@@ -296,12 +361,14 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
             if len(bxa) < k0 + 60:
                 bxa = np.concatenate([bxa, np.full((k0 + 60 - len(bxa), 4), np.nan)])
             hk = sk.claw_hook(S, k0, d, iid, bxa, variant, alpha_c)
+            last_P = k0
             if hk.ok:
                 hooks.append(hk)
                 hits.setdefault(iid, {})[hk.hit] = ("claw", sk.CLAW_DMG)
                 contacts.append((hk.hit, iid, "claw"))
                 pos = hk.pos
                 ctrl = hk.ctrl
+                claws.append((k0, iid, d, True, hk.hit, ctrl))
             else:
                 missed.append(("claw", k0, iid))
                 # the unhooked Clawline (M0's track), control at P + 32 as an A1 start
@@ -312,6 +379,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                 ctrl = k0 + tr.ctrl
                 hk = sk.Hook(k0, d, iid, "unhooked", pos, -1, ctrl, float(tr.x[-1]), float(tr.bb[-1]) + sk.FOOT,
                              False, "ray")
+                claws.append((k0, iid, d, False, -1, ctrl))
             m = len(pos) - 1
             P_.append(pos[1:])
             bb = pos[1:, 1] - sk.FOOT
@@ -331,7 +399,9 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         k0 += 1
     pos = np.concatenate(P_)
     tr = Traj(pos, np.concatenate(B_), np.concatenate(G_), np.concatenate(F_), np.concatenate(M_),
-              np.concatenate(I_), np.concatenate(C_), hits, contacts, hooks, rolls, k0, starts, missed, variant.name)
+              np.concatenate(I_), np.concatenate(C_), hits, contacts, hooks, rolls, k0, starts, missed, variant.name,
+              claws, alts)
+    tr.segs = played                 # the segments played (the reaction's continuation and the hook variant's in place)
     return tr
 
 
@@ -393,6 +463,12 @@ class Eval:
     def short(self) -> str:
         return (f"{self.plan.origin} v={self.value:.2f} hits={self.hits:.2f} p_safe={self.p_safe:.2f} "
                 f"out={len(self.outcomes)} {self.ms:.0f}ms")
+
+
+def _open(o) -> bool:
+    """No collision before the outcome's end / deviation (its exit check may have failed or not run: a parent whose
+    child's strike makes it safe is still expanded)."""
+    return o.safe or o.why.startswith("exit") or o.why == "unchecked"
 
 
 def hero_path(tr: Traj, T: int, hits: dict) -> cm.HeroPath:
@@ -479,15 +555,24 @@ def margin_of(br, s, st, k: int, K) -> float:
     return K.margin(mvn, k)
 
 
+def rune_end(br) -> int | None:
+    """The last lit frame of the branch's big runes (None: none)."""
+    v = [h[1][5] for h in br.hazards if h[1][0] == "rune"]
+    return max(v) if v else None
+
+
 def branch_frames(br) -> list:
     """Per frame 0 .. T the branch's shapes with the state of the record that drew them: [(Shape, state)] (as
-    clapper.build_frames, the hazards with state None)."""
+    clapper.build_frames, the hazards with state None). Beyond T, up to the last hazard's lit end (a big rune lit
+    after the prediction's horizon, its landing inside it): the hazards and the frame T's other shapes held (the
+    caster stands through its burst)."""
     c = getattr(br, "_sframes", None)
     if c is not None:
         return c
     T = br.T
-    frames = [[] for _ in range(T + 1)]
-    seen = [set() for _ in range(T + 1)]
+    T_h = max([T] + [int(h[1][5]) for h in br.hazards])
+    frames = [[] for _ in range(T_h + 1)]
+    seen = [set() for _ in range(T_h + 1)]
     for iid, rr in br.recs.items():
         for r in rr:
             k, a, b = r[0], r[1], r[2]
@@ -503,11 +588,13 @@ def branch_frames(br) -> list:
                     sh = [(x, r[3]) for x in cm.rec_shapes(r, iid, br.K)]
                 seen[kk].add(key)
                 frames[kk].extend(sh)
+    for kk in range(T + 1, T_h + 1):
+        frames[kk] = list(frames[T])
     for iid, hz in br.hazards:
         kind, x, y, rad, t0, t1 = hz
         s = cm.Shape(cm.DAMAGE, iid, kind, circle=(x, y, rad), mv=kind)
         key = (iid, kind, round(x, 2), round(y, 2))
-        for kk in range(max(t0, 0), min(t1, T) + 1):
+        for kk in range(max(t0, 0), min(t1, T_h) + 1):
             if key not in seen[kk]:
                 seen[kk].add(key)
                 frames[kk].append((s, None))
@@ -692,6 +779,36 @@ class Evaluator:
         self.ms_pred += (time.perf_counter() - t0) * 1e3
         return P
 
+    def tick_check(self, sit: Situation, plan: Plan) -> tuple:
+        """THE PER-TICK CHECK of a committed plan (what runs every frame between the background searches): one
+        prediction under the plan's path, the plan simulated in every branch (both timing views, the first hook
+        variant, its reaction's continuation) and her hurtbox checked against the branch's damage (margins) up to
+        the branch's reveal + lag (the committed part; after it she re-plans) - (ok, the first failing frame or None,
+        ms). No re-prediction at the plan's own hits and no exit check (those are the background search's)."""
+        t0 = time.perf_counter()
+        W, cfg = self.W, self.cfg
+        face0 = int(sit.S[km.FACE]) if sit.S[km.FACE] != 0 else 1
+        tr0 = simulate(W, plan, lambda iid: None, face0, sit.S, sk.HOOK_VARIANTS[0], sit.alpha_c)
+        T = tr0.end + 2
+        P = cm.predict(sit.obs, sit.mems, hero_path(tr0, T, {}), W.K, T=T, hazards=sit.hazards)
+        bad = None
+        for b0 in P.branches:
+            for b in timing_views(b0):
+                tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S,
+                              sk.HOOK_VARIANTS[0], sit.alpha_c, br=b, lag=cfg.lag)
+                rv = _reveal(b, 1)
+                tv = getattr(b, "t_reveal", None)
+                rv = tv if rv is None else (rv if tv is None else min(rv, tv))
+                kmax = min(tr.end, P.T, (rv + cfg.lag) if rv is not None else tr.end)
+                for k in range(1, kmax + 1):
+                    if tr.ifr[k]:
+                        continue
+                    hb = cm.hurtbox(*tr.pos[k])
+                    if hb[0] < WALL_L or hb[2] > WALL_R or shapes_hit(bdamage(b, k, cfg.margins), hb):
+                        bad = k if bad is None else min(bad, k)
+                        break
+        return bad is None, bad, (time.perf_counter() - t0) * 1e3
+
     def quick(self, sit: Situation, plan: Plan, pred, k_from: int, n_branch: int = 3) -> str:
         """A cheap pre-screen before the closed-loop evaluation: the plan simulated in the given prediction's most
         probable branches (both timing views, the first hook variant; no re-prediction) - '' when it lands a strike
@@ -702,7 +819,7 @@ class Evaluator:
         for b0 in brs:
             for b in timing_views(b0):
                 tr = simulate(self.W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, pred.T), face0, sit.S,
-                              sk.HOOK_VARIANTS[0], sit.alpha_c)
+                              sk.HOOK_VARIANTS[0], sit.alpha_c, br=b, lag=cfg.lag)
                 if not any(kc > k_from for (kc, _, _) in tr.contacts):
                     return "miss"
                 kmax = min(tr.end, pred.T)
@@ -735,10 +852,10 @@ class Evaluator:
         dmg = sum(v[1] for (ii, kk), v in fixed.items() if ii == iid) +             sum(hh[1] for (kk, ii, hh) in pre if ii == iid) + h[1]
         return hp - dmg <= 0
 
-    def exit_ok(self, S: np.ndarray, cu: np.ndarray, k0: int, br, ifr_until: int = -1) -> int:
+    def exit_ok(self, S: np.ndarray, cu: np.ndarray, k0: int, br, ifr_until: int = -1, H: int | None = None) -> int:
         """The coarse exit check: an envelope pass from S at frame k0 in the branch's danger (+ the walls) for
-        cfg.exit_h frames; returns the clusters alive at the end (0: no exit)."""
-        H = self.cfg.exit_h
+        H (cfg.exit_h) frames; returns the clusters alive at the end (0: no exit)."""
+        H = self.cfg.exit_h if H is None else H
         dz = []
         for t in range(H + 1):
             k = k0 + t
@@ -751,37 +868,80 @@ class Evaluator:
         self.ms_exit += (time.perf_counter() - t0) * 1e3
         return fw.count(H)
 
-    def evaluate(self, sit: Situation, plan: Plan, exits: bool = True) -> Eval:
-        """The closed-loop evaluation (module docstring, step 3)."""
+    def _tag_ok(self, b, tag: tuple, fixed: dict) -> bool:
+        """The branch belongs to the reactions of tag (checked for a split only once its hook's hit is in the
+        group's hits: before it the branches carry no reaction)."""
+        for (_, Ps, rk) in tag:
+            if any(v[0] == "claw" and Ps < kk <= Ps + 12 for (ii, kk), v in fixed.items()):
+                if reaction_key(b, Ps, self.cfg.lag) != rk:
+                    return False
+        return True
+
+    def evaluate(self, sit: Situation, plan: Plan, exits: bool = True, tag: tuple = (), start=None) -> Eval:
+        """The closed-loop evaluation (module docstring, step 3). tag / start: a CONDITIONAL evaluation inside the
+        reactions of tag (a contingent plan's continuation searched per reaction): the cascade starts from the node's
+        group (start = its hits, the choice sets before its last hit, a branch of it for her path) and keeps only the
+        branches of those reactions - its value is the plan's given those reactions, not the plan's (only _combine's
+        joined plan is evaluated whole)."""
         t0 = time.perf_counter()
         W, cfg = self.W, self.cfg
         n0p, n0e = self.n_pred, self.n_exit
         face0 = int(sit.S[km.FACE]) if sit.S[km.FACE] != 0 else 1
         T = cfg.t_pred
         variants = sk.HOOK_VARIANTS if any(s.claw is not None for s in plan.segs) else sk.HOOK_VARIANTS[:1]
-        nomb = lambda iid: None  # noqa: E731
-        tr0 = simulate(W, plan, nomb, face0, sit.S, variants[0], sit.alpha_c)
-        T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
-        P0 = self.predict(sit, hero_path(tr0, T, {}), T)
+        if start is None:
+            nomb = lambda iid: None  # noqa: E731
+            tr0 = simulate(W, plan, nomb, face0, sit.S, variants[0], sit.alpha_c)
+            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
+            P0 = self.predict(sit, hero_path(tr0, T, {}), T)
+            groups = [(P0, 1.0, None, {}, -1)]
+        else:
+            fixed0, cons0, lh0, rb = start
+            tr0 = simulate(W, plan, lambda iid: sk.robust_boxes(rb, iid, rb.T), face0, sit.S, variants[0],
+                           sit.alpha_c, br=rb, lag=cfg.lag)
+            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
+            hits0: dict = {}
+            for (ii, kk), v in fixed0.items():
+                hits0.setdefault(ii, {})[kk] = v
+            P0 = self.predict(sit, hero_path(tr0, T, hits0), T)
+            groups = [(P0, 1.0, cons0, dict(fixed0), lh0)]
         results = []
-        groups = [(P0, 1.0, None, {}, -1)]
         best_group = (0.0, P0)
+        has_alt = any(sg.out_alt for sg in plan.segs)
         for _level in range(5):
             new_groups = []
-            for (P, w, cons, fixed, last_hit) in groups:
+            work = [g + (None, has_alt) for g in groups]
+            while work:
+                (P, w, cons, fixed, last_hit, kf, redo_ok) = work.pop(0)
                 brs = [b for b in P.branches if cons is None or _choice_set(b, last_hit) in cons]
+                if tag:
+                    brs = [b for b in brs if self._tag_ok(b, tag, fixed)]
+                    if not brs:
+                        continue
+                if kf is not None:
+                    brs = [b for b in brs if all(reaction_key(b, Ps, cfg.lag) == rk for (Ps, rk) in kf)]
+                    if not brs:
+                        continue
                 if not brs:
                     brs = list(P.branches)
                 ptot = sum(b.p for b in brs) or 1.0
                 buckets: dict = {}
+                redo: dict = {}
+                p_akey = getattr(P, "_akey", None)
                 for b0 in brs:
                     vws = timing_views(b0)
                     for b, var in [(b_, v_) for b_ in vws for v_ in variants]:
                         tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S, var,
-                                      sit.alpha_c)
+                                      sit.alpha_c, br=b, lag=cfg.lag)
+                        wb = w * b0.p / ptot / len(variants) / len(vws)
+                        akey = tuple(rk for (_, _, rk) in tr.alts)
+                        if redo_ok and p_akey is not None and akey != p_akey:
+                            # a contingent plan: this reaction plays another continuation than the path the group
+                            # was predicted with - its future re-predicted under its own path (below)
+                            redo.setdefault(akey, []).append((wb, tr))
+                            continue
                         new = sorted((k, iid, h) for iid, hh in tr.hits.items() for k, h in hh.items()
                                      if (iid, k) not in fixed)
-                        wb = w * b0.p / ptot / len(variants) / len(vws)
                         # only a hit that can change the Clapper's future re-predicts: one on an Idle Clapper (or
                         # in a state's last frames before Idle: M2's hit_idle), or a killing one; the others are
                         # carried in the hits (hp) of the next re-prediction
@@ -792,22 +952,34 @@ class Evaluator:
                                 break
                             pre.append((k, iid, h))
                         if mat is None:
-                            results.append((wb, b, tr))
+                            results.append((wb, b, tr, P, cons, last_hit, fixed))
                         else:
                             k, iid, h = mat
-                            buckets.setdefault((k, iid, h[0]), []).append((wb, b, tr, tuple(pre)))
-                for (k, iid, kind), lst in buckets.items():
+                            # (her path after the hit differs with the continuation played: its own re-prediction)
+                            buckets.setdefault((k, iid, h[0], akey), []).append((wb, b, tr, tuple(pre)))
+                for akey, lst in redo.items():
+                    trr = lst[0][1]
+                    hits: dict = {}
+                    for (ii, kk), v in fixed.items():
+                        hits.setdefault(ii, {})[kk] = v
+                    T2 = max(P.T, trr.end + max(cfg.exit_h, cfg.t_pred) + 2)
+                    P3 = self.predict(sit, hero_path(trr, T2, hits), T2)
+                    P3._akey = akey
+                    kf3 = [(Ps, rk) for (_, Ps, rk) in trr.alts]
+                    work.append((P3, sum(x[0] for x in lst), cons, fixed, last_hit, kf3, False))
+                for (k, iid, kind, ak), lst in buckets.items():
                     fx = dict(fixed)
                     for (kk, ii, hh) in lst[0][3]:
                         fx[(ii, kk)] = hh
                     fx[(iid, k)] = (kind, sk.DS_DMG if kind == "down" else sk.CLAW_DMG)
                     lst = [x[:3] for x in lst]
-                    hits: dict = {}
+                    hits = {}
                     for (ii, kk), v in fx.items():
                         hits.setdefault(ii, {})[kk] = v
                     trr = lst[0][2]
                     T2 = max(T, trr.end + max(cfg.exit_h, cfg.t_pred) + 2)
                     P2 = self.predict(sit, hero_path(trr, T2, hits), T2)
+                    P2._akey = ak
                     wsum = sum(x[0] for x in lst)
                     cons2 = {_choice_set(b, k) for (_, b, _) in lst}
                     new_groups.append((P2, wsum, cons2, fx, k))
@@ -818,16 +990,19 @@ class Evaluator:
                 break
         for (P, w, cons, fixed, last_hit) in groups:     # a cascade cut by the level cap: as plain outcomes
             for b0 in P.branches:
-                if cons is None or _choice_set(b0, last_hit) in cons:
+                if (cons is None or _choice_set(b0, last_hit) in cons) and (not tag or self._tag_ok(b0, tag, fixed)):
                     vws = timing_views(b0)
                     for b in vws:
                         tr = simulate(W, plan, lambda iid, b=b: sk.robust_boxes(b, iid, P.T), face0, sit.S,
-                                      variants[0], sit.alpha_c)
-                        results.append((w * b0.p / len(vws), b, tr))
+                                      variants[0], sit.alpha_c, br=b, lag=cfg.lag)
+                        results.append((w * b0.p / len(vws), b, tr, P, cons, last_hit, fixed))
         outs = []
         ptot = sum(x[0] for x in results) or 1.0
-        for (wb, b, tr) in results:
-            outs.append(self._outcome(sit, wb / ptot, b, tr, exits))
+        for (wb, b, tr, P_, cons_, lh_, fx_) in results:
+            o = self._outcome(sit, wb / ptot, b, tr, exits)
+            # the outcome's group: its prediction after the hits, the choice sets before its last hit, its hits
+            o.P, o.cons, o.last_hit, o.fixed = P_, cons_, lh_, fx_
+            outs.append(o)
         value = sum(o.p * o.value for o in outs)
         p_safe = sum(o.p for o in outs if o.safe)
         hits = sum(o.p * o.hits for o in outs)
@@ -837,6 +1012,7 @@ class Evaluator:
                   (time.perf_counter() - t0) * 1e3, self.n_pred - n0p, self.n_exit - n0e, best_group[1], nominal,
                   sum(o.p * o.value_open for o in outs), all(o.safe or o.why.startswith("exit") for o in outs),
                   not pend)
+        ev.tag, ev.start = tag, start
         return ev
 
     def _outcome(self, sit: Situation, p: float, br, tr: Traj, exits: bool) -> Outcome:
@@ -886,18 +1062,22 @@ class Evaluator:
         if st is None:
             o.safe, o.why, o.value = False, "exit:block", -1.0
             return
-        o.exit_n = self.exit_ok(st[0], st[1], o.k_end, o.branch, o.ifr_until)
+        H = self.cfg.exit_h
+        re_ = rune_end(o.branch)
+        if re_ is not None and re_ > o.k_end + H:
+            H = min(re_ - o.k_end + 2, self.cfg.exit_h_max)        # through a big rune's burst
+        o.exit_n = self.exit_ok(st[0], st[1], o.k_end, o.branch, o.ifr_until, H)
         if o.exit_n <= 0:
             o.safe, o.why, o.value = False, f"exit@{o.k_end}", -1.0
 
-    def finish(self, ev: Eval) -> Eval:
-        """Run the pending exit checks (most probable outcome first; stop at the first failure) and settle the
-        plan's safety and value."""
+    def finish(self, ev: Eval, stop: bool = True) -> Eval:
+        """Run the pending exit checks (most probable outcome first; stop at the first failure unless stop is False)
+        and settle the plan's safety and value."""
         t0 = time.perf_counter()
         for o in sorted(ev.outcomes, key=lambda o: -o.p):
             if getattr(o, "pending", False):
                 self._exit(o)
-                if not o.safe:
+                if not o.safe and stop:
                     break
         for o in ev.outcomes:
             if getattr(o, "pending", False):
@@ -959,6 +1139,11 @@ class Node:
     next_atk: int = 0              # the earliest frame of the next swing (the slash cadence)
     var_states: dict | None = None  # after a Clawline: {hook variant: (frame, state)} in the nominal branch
     nom_var: str = ""
+    tag: tuple = ()                 # the contingency path: ((split plan key, P, reaction key), ...) of the reactions
+    #                                 this node lives in (its pred holds only their branches)
+    claw_ctrl: int | None = None    # after a Clawline: its control frame (the next Clawline's lock, control + 13)
+    start: tuple | None = None      # inside a reaction (tag): where its children's conditional evaluation starts
+    #                                 (the group's hits, choice sets before the last hit, last hit, a branch)
 
 
 def _union_danger(pred, k0: int, H: int, margins: bool) -> list:
@@ -984,15 +1169,20 @@ class Searcher:
         self.ev = Evaluator(self.W, self.cfg)
         MARGIN_SCALE[0] = float(self.cfg.margin_scale)
         self.stats: dict = {}
+        self.splits: dict = {}
         self.debug = False
         self.trace: list = []
 
     # ---- the pass and the windows ----
     def passes(self, node: Node) -> list:
         out = []
+        cu = None
+        if node.claw_ctrl is not None:
+            # the next Clawline from control + 13 (M0: hooked 0 / 18 before + 12, 1 / 2 at + 12, 9 / 9 at + 13)
+            cu = np.array([-1.0, 0, 0, max(0.0, float(ej.CLAW_NEXT_F - (node.k0 - node.claw_ctrl))), 0, 0, 0])
         for (ne, H) in self.cfg.passes:
             dz = _union_danger(node.pred, node.k0, H, self.cfg.margins)
-            st = self.W.E.start_state(node.S)
+            st = self.W.E.start_state(node.S, cu=cu)
             fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False)
             out.append(fw)
         return out
@@ -1196,15 +1386,19 @@ class Searcher:
         """The same strike re-planned from another hook variant's control: the windows of the same primitive on the
         same Clapper nearest in time to the nominal one (up to n, realized)."""
         k0, S = node.var_states[var]
-        nv = Node(node.plan, k0, S, node.pred, node.ev, node.depth, node.next_atk)
+        cache = node.__dict__.setdefault("_alt_cache", {})
+        if var not in cache:                     # the variant's passes and windows once per node
+            nv = Node(node.plan, k0, S, node.pred, node.ev, node.depth, node.next_atk, tag=node.tag,
+                      claw_ctrl=None if node.claw_ctrl is None else k0 - 1, start=node.start)
+            cache[var] = (nv, [(fw, c) for fw in self.passes(nv) for c in self.windows(nv, fw)])
+        nv, allw = cache[var]
         kind, tp, _, x, _, iid, extra, _ = cand[:8]
         want = node.k0 + tp
         found = []
-        for fw in self.passes(nv):
-            for c in self.windows(nv, fw):
-                if c[0] != kind or c[5] != iid:
-                    continue
-                found.append((abs(k0 + c[1] - want) + (0 if c[6] == extra else 0.5) + 0.1 * abs(c[3] - x), fw, c))
+        for fw, c in allw:
+            if c[0] != kind or c[5] != iid:
+                continue
+            found.append((abs(k0 + c[1] - want) + (0 if c[6] == extra else 0.5) + 0.1 * abs(c[3] - x), fw, c))
         out = []
         for _, fw, c in sorted(found, key=lambda t: t[0])[:n]:
             sg = self.realize(nv, fw, c)
@@ -1260,28 +1454,207 @@ class Searcher:
                 "screen_" + (why.split("@")[0] or "pass"), 0) + 1
             if why:
                 return Eval(plan, [], -1.0, 0.0, False, 0.0, 0.0, 0, 0, None, None, -1.0, False, True)
-        return self.ev.evaluate(sit, plan, exits=False)
+        return self.ev.evaluate(sit, plan, exits=False, tag=node.tag, start=node.start)
 
-    def _mk_node(self, plan: Plan, e: Eval, depth: int) -> Node | None:
-        """A node after a plan whose strike landed in its nominal outcome (no collision before its end): her state at
-        the plan's end there; after a Clawline the hook variants' control states (each re-planned)."""
-        if not e.open_ok or e.nominal is None or not e.nominal.tr.contacts:
+    # ---- nodes (after a landed strike) and the contingent splits ----
+    def _in_tag(self, o: Outcome, tag: tuple) -> bool:
+        return all(reaction_key(o.branch, P, self.cfg.lag) == rk for (_, P, rk) in tag)
+
+    def _node_pred(self, o: Outcome, tag: tuple):
+        """The prediction a node continues in: the outcome's group prediction (after the plan's hits), its branches
+        consistent with the history before the last hit and with the node's reactions (tag)."""
+        P = getattr(o, "P", None)
+        if P is None:
             return None
-        tr = e.nominal.tr
+        cons, lh = getattr(o, "cons", None), getattr(o, "last_hit", -1)
+        brs = [b for b in P.branches if (cons is None or _choice_set(b, lh) in cons) and
+               all(reaction_key(b, Pk, self.cfg.lag) == rk for (_, Pk, rk) in tag)]
+        if not brs:
+            return None
+        return cm.Prediction(brs, P.T, P.n_particles, 0.0)
+
+    def _one_node(self, plan: Plan, outs: list, depth: int, tag: tuple) -> Node | None:
+        rep = max(outs, key=lambda o: o.p)
+        tr = rep.tr
+        if not tr.contacts:
+            return None
         st = state_at(self.W, tr, tr.end)
         if st is None:
             return None
+        pred = self._node_pred(rep, tag)
+        if pred is None:
+            return None
         nx_atk = max([kc for (kc, _, kd) in tr.contacts if kd == "down"], default=-99) + sk.SLASH_NEXT_F - 3
-        nd = Node(plan, tr.end, st[0], e.pred, e, depth, nx_atk)
+        nd = Node(plan, tr.end, st[0], pred, None, depth, nx_atk, tag=tag)
+        if tag:
+            nd.start = (dict(getattr(rep, "fixed", {}) or {}), getattr(rep, "cons", None),
+                        getattr(rep, "last_hit", -1), rep.branch)
+        ptot = sum(o.p for o in outs) or 1.0
+        nd.v = sum(o.p * o.value_open for o in outs) / ptot
+        nd.rep = rep
+        nd.rk = None
         if plan.segs[-1].claw is not None:
             vs = {}
-            for o in e.outcomes:
-                if o.branch is e.nominal.branch and o.tr.variant not in vs:
+            for o in outs:
+                if o.branch is rep.branch and o.tr.variant not in vs:
                     so = state_at(self.W, o.tr, o.tr.end)
                     if so is not None:
                         vs[o.tr.variant] = (o.tr.end, so[0])
             nd.var_states, nd.nom_var = vs, tr.variant
+            if tr.claws:
+                nd.claw_ctrl = int(tr.claws[-1][5])
         return nd
+
+    def _mk_nodes(self, plan: Plan, e: Eval, depth: int, tag: tuple = ()) -> list:
+        """The nodes after a plan whose strike landed (no collision before its end) in the outcomes of the node's own
+        reactions (tag): her state at the plan's end there; after a Clawline the hook variants' control states (each
+        re-planned). A hooked Clawline whose hit splits the Clappers' future into reactions she sees by control gives
+        ONE NODE PER REACTION (cfg.split): its own prediction (only that reaction's branches: its own danger), its
+        own continuation - recombined later (_combine)."""
+        if e.nominal is None or not e.outcomes:
+            return []
+        outs = [o for o in e.outcomes if self._in_tag(o, tag)]
+        if not outs or not all(_open(o) for o in outs):
+            return []
+        nd = self._one_node(plan, outs, depth, tag)
+        if nd is None:
+            return []
+        rep = nd.rep
+        if not (self.cfg.split and plan.segs[-1].claw is not None and rep.tr.claws and rep.tr.claws[-1][3]):
+            return [nd]
+        P_last = int(rep.tr.claws[-1][0])
+        groups: dict = {}
+        for o in outs:
+            groups.setdefault(reaction_key(o.branch, P_last, self.cfg.lag), []).append(o)
+        if len(groups) < 2:
+            return [nd]
+        ptot = sum(o.p for o in outs) or 1.0
+        pkey = plan.key()
+        rks = sorted(groups, key=lambda rk: -sum(o.p for o in groups[rk]))
+        rks = [rk for rk in rks if sum(o.p for o in groups[rk]) >= self.cfg.split_min_p * ptot][:self.cfg.split_max]
+        nodes = []
+        for rk in rks:
+            n2 = self._one_node(plan, groups[rk], depth, tag + ((pkey, P_last, rk),))
+            if n2 is not None:
+                n2.rk = rk
+                nodes.append(n2)
+        if not nodes:
+            return [nd]
+        self.splits.setdefault(pkey, {"plan": plan, "ev": e, "P": P_last, "tag": tag, "depth": depth,
+                                      "start": getattr(e, "start", None),
+                                      "rks": [n.rk for n in nodes],
+                                      "p": {rk: sum(o.p for o in groups[rk]) / ptot for rk in groups}})
+        self.stats["splits"] = self.stats.get("splits", 0) + 1
+        return nodes
+
+    def _gval(self, e: Eval, tag: tuple, finish: bool) -> tuple | None:
+        """(safe, value, p) of the plan's outcomes in the reactions of tag (finish: their exit checks run)."""
+        outs = [o for o in e.outcomes if self._in_tag(o, tag)]
+        if not outs:
+            return None
+        if finish:
+            for o in sorted(outs, key=lambda o: -o.p):
+                if getattr(o, "pending", False):
+                    self.ev._exit(o)
+                    if not o.safe:
+                        break
+            for o in outs:
+                if getattr(o, "pending", False):
+                    o.safe, o.why, o.value = False, "unchecked", -1.0
+        p = sum(o.p for o in outs) or 1e-12
+        if not finish:
+            return (all(_open(o) for o in outs), sum(o.p * o.value_open for o in outs) / p, p)
+        return (all(o.safe for o in outs), sum(o.p * o.value for o in outs) / p, p)
+
+    def _combine(self, sit: Situation, tried: list, t_end: float) -> list:
+        """The CONTINGENT PLANS: per split (a hooked Clawline whose reactions were expanded separately; the deepest
+        first, so a nested split's combination competes in its parent's), per reaction the best continuation found
+        under it (safe in that reaction's outcomes with its exits checked, best first by the open value, up to
+        cfg.combine_top checked; none: the plan ends at control with its exit there), joined into one plan - the
+        most probable reaction's continuation as the default, the others in Seg.out_alt - and evaluated in the
+        closed loop like any plan (a reaction whose continuation fails there falls back to its next one, twice)."""
+        made = []
+        lag = self.cfg.lag
+        idx: dict = {}                        # tag prefix -> the conditional evaluations under it
+
+        def index(e):
+            tg = getattr(e, "tag", ())
+            for i in range(len(tg)):
+                idx.setdefault(tg[:i + 1], []).append(e)
+        for e in tried:
+            if e.outcomes:
+                index(e)
+        # the splits with a continuation searched under some reaction, the deepest first, then by the open value
+        order = [kv for kv in self.splits.items()
+                 if any(kv[1]["tag"] + ((kv[0], kv[1]["P"], rk),) in idx for rk in kv[1]["rks"])]
+        order.sort(key=lambda kv: (-len(kv[1]["tag"]), -kv[1]["ev"].value_open))
+        n_top = 0
+        for pkey, sp in order:
+            if not sp["tag"]:
+                n_top += 1
+                if n_top > self.cfg.combine_splits:
+                    break
+            if time.perf_counter() > t_end:
+                break
+            base, ptag, P = sp["plan"], sp["tag"], sp["P"]
+            nb = len(base.segs)
+            options = {}
+            for rk in sp["rks"]:
+                pre = ptag + ((pkey, P, rk),)
+                cands = [e for e in idx.get(pre, ()) if len(e.plan.segs) > nb]
+                scored = []
+                for e in cands:
+                    g = self._gval(e, pre, finish=False)
+                    if g is not None and g[0]:
+                        scored.append((g[1], e))
+                ok = []
+                for _, e in sorted(scored, key=lambda t: -t[0])[:self.cfg.combine_top]:
+                    if time.perf_counter() > t_end:
+                        break
+                    g = self._gval(e, pre, finish=True)
+                    if g is not None and g[0]:
+                        ok.append((g[1], e))
+                        if len(ok) >= 3:
+                            break
+                if ok:
+                    options[rk] = [[s_.copy() for s_ in e.plan.segs[nb:]] for _, e in sorted(ok, key=lambda t: -t[0])]
+            if not options:
+                continue
+            p_of = sp["p"]
+            pick = {rk: 0 for rk in options}
+            for _try in range(3):
+                conts = {rk: options[rk][i] for rk, i in pick.items() if i < len(options[rk])}
+                if not conts:
+                    break
+                dflt = max(conts, key=lambda rk: p_of.get(rk, 0.0))
+                first = conts[dflt][0].copy()
+                alt = {rk: [x.copy() for x in v] for rk, v in conts.items() if rk != dflt}
+                # the reactions without a continuation of their own: the plan ends at control there (its exit)
+                for rk in p_of:
+                    if rk not in conts:
+                        alt[rk] = [Seg(np.zeros(1, np.int64))]
+                first.out_alt = alt or None
+                plan = Plan([x.copy() for x in base.segs] + [first] + [x.copy() for x in conts[dflt][1:]],
+                            base.origin, "contingent")
+                e = self.ev.evaluate(sit, plan, exits=False, tag=ptag, start=sp.get("start") if ptag else None)
+                e.tag = ptag
+                if e.open_ok:
+                    self.ev.finish(e, stop=False)
+                e.contingent = {rk_label(rk): len(v) for rk, v in conts.items()}
+                made.append(e)
+                if e.outcomes:
+                    index(e)
+                self.stats["combined"] = self.stats.get("combined", 0) + 1
+                if e.safe or time.perf_counter() > t_end:
+                    break
+                # the reactions that failed in the joined plan: their next continuation (or none)
+                bad = {reaction_key(o.branch, P, lag) for o in e.outcomes if not o.safe}
+                bad &= set(conts)
+                if not bad:
+                    break
+                for rk in bad:
+                    pick[rk] += 1
+        return made
 
     def decide(self, sit: Situation, prev: Plan | None = None, cap_s: float | None = None) -> "Result":
         t0 = time.perf_counter()
@@ -1290,6 +1663,7 @@ class Searcher:
         self.ev.n_pred = self.ev.n_exit = 0
         self.ev.ms_pred = self.ev.ms_exit = 0.0
         self.stats = {}
+        self.splits = {}
         tried = []
         kept = None
         if prev is not None and prev.segs:
@@ -1304,7 +1678,10 @@ class Searcher:
         tried.append(noop)
 
         def consider(e):
-            # the exit checks only for a plan that could become the best
+            # the exit checks only for a plan that could become the best (a conditional evaluation inside a
+            # reaction never does: its exits are checked when the contingent plan is joined)
+            if getattr(e, "tag", ()):
+                return e
             if not e.finished and e.open_ok and (best is None or not best.safe or e.value_open > best.value + 1e-9):
                 self.ev.finish(e)
             return e
@@ -1330,13 +1707,12 @@ class Searcher:
                     timed_out = True
                     break
                 e = consider(self.ev.evaluate(sit, plan, exits=False))
+                e.tag = ()
                 n_cand += 1
                 tried.append(e)
                 if e.finished and better(e, best):
                     best = e
-                nd = self._mk_node(plan, e, 1)          # a macro that landed a strike: the search goes on after it
-                if nd is not None:
-                    lib_nodes.append(nd)
+                lib_nodes += self._mk_nodes(plan, e, 1)  # a macro that landed a strike: the search goes on after it
         for depth in range(1, cfg.depth + 1):
             nxt = list(lib_nodes) if depth == 1 else []
             for node in beam:
@@ -1366,6 +1742,7 @@ class Searcher:
                     if seg is None:
                         continue
                     plan, e = self.child(sit, node, seg, "prim" if c[0] != "safe" else "safe", c)
+                    e.tag = node.tag
                     e = consider(e)
                     n_cand += 1
                     tried.append(e)
@@ -1374,7 +1751,7 @@ class Searcher:
                         self.trace.append((depth, c[0], node.k0 + c[1], round(c[3], 2), round(c[4], 2), c[5], c[6],
                                            e.safe, round(e.hits, 2), round(e.value, 2),
                                            None if nm is None else (nm.why, nm.tr.contacts, nm.tr.missed), e))
-                    if e.finished and better(e, best):
+                    if e.finished and not e.tag and better(e, best):
                         best = e
                     # the +-1-2 f / +-0.4 u refinement near a tight window (the spec's coarse grid then refinement): a
                     # down slash whose plan failed by a collision just before its contact or missed its target
@@ -1388,24 +1765,34 @@ class Searcher:
                                 queue.append((fw, c2))
                     # a child node continues after a landed strike (in the nominal outcome)
                     if c[0] != "safe":
-                        nd = self._mk_node(plan, e, depth)
-                        if nd is not None:
-                            nxt.append(nd)
+                        nxt += self._mk_nodes(plan, e, depth, node.tag)
             if not nxt or timed_out:
                 break
-            # the beam: the best by the open value, diverse in the strikes (kind, target, 4-frame time bucket) and the
-            # height at the node (a Clawline's hold sets the bounce)
-            nxt.sort(key=lambda n: -n.ev.value_open)
-            beam, seen_k = [], set()
+            # the beam: the best by the open value (in the node's own reactions), diverse in the strikes (kind,
+            # target, 4-frame time bucket) and the height at the node (a Clawline's hold sets the bounce); a split's
+            # reaction nodes come in together (up to cfg.beam parents, each with all its reactions)
+            nxt.sort(key=lambda n: -n.v)
+            beam, parents, seen_k = [], set(), set()
             for n_ in nxt:
-                key = (tuple((kc // 4, iid, kd) for (kc, iid, kd) in n_.ev.nominal.tr.contacts),
-                       round(float(n_.S[km.PY]) * 2.0))
+                pk = (tuple((kc // 4, iid, kd) for (kc, iid, kd) in n_.rep.tr.contacts),
+                      round(float(n_.S[km.PY]) * 2.0), n_.tag[:-1] if n_.rk is not None else n_.tag)
+                if pk not in parents:
+                    if len(parents) >= cfg.beam:
+                        continue
+                    parents.add(pk)
+                key = (pk, n_.rk)
                 if key in seen_k:
                     continue
                 seen_k.add(key)
                 beam.append(n_)
-                if len(beam) >= cfg.beam:
-                    break
+        # the contingent plans (one continuation per reaction to a hook), within a quarter of the cap more
+        if self.splits:
+            t_end = max(time.perf_counter(), t0 + cap) + 0.25 * cap
+            for e in self._combine(sit, tried, t_end):
+                tried.append(e)
+                n_cand += 1
+                if e.finished and not e.tag and better(e, best):
+                    best = e
         chosen = best
         if kept is not None and best is not None and best is not kept and best.safe and \
                 best.value < kept.value + cfg.w_switch:
@@ -1487,6 +1874,10 @@ def plan_steps(plan: Plan) -> list:
         if s.claw is not None:
             out.append({"seg": si, "anchor": anchor, "f": len(s.masks), "do": "claw", "dir": int(s.claw[0]),
                         "iid": int(s.claw[1])})
+        if s.out_alt:
+            # a contingent plan: the rest of the plan per reaction seen by control (its own steps, anchored there)
+            out.append({"seg": si, "anchor": anchor, "f": 0, "alt": {rk_label(rk): plan_steps(Plan(v))
+                                                                    for rk, v in s.out_alt.items()}})
     return sorted(out, key=lambda r: (r["seg"], r["f"], "do" in r))
 
 
@@ -1497,8 +1888,10 @@ def plan_log(ev: Eval, t0: int = 0) -> dict:
     for o in sorted(ev.outcomes, key=lambda o: -o.p)[:8]:
         outs.append({"p": round(o.p, 3), "branch": o.branch.label() if o.branch is not None else "-",
                      "var": o.tr.variant, "hits": o.hits, "safe": o.safe, "why": o.why,
+                     "alt": [rk_label(rk) for (_, _, rk) in o.tr.alts],
                      "contacts": [(int(k), int(i), kd) for (k, i, kd) in o.tr.contacts]})
-    return {"t": int(t0), "origin": ev.plan.origin, "value": round(ev.value, 3), "hits": round(ev.hits, 3),
+    return {"t": int(t0), "origin": ev.plan.origin, "note": ev.plan.note, "value": round(ev.value, 3),
+            "hits": round(ev.hits, 3),
             "p_safe": round(ev.p_safe, 3), "steps": plan_steps(ev.plan), "outcomes": outs}
 
 

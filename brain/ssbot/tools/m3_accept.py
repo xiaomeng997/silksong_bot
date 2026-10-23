@@ -35,13 +35,24 @@ from ssbot.tools import m2_validate as mv
 from ssbot.tools.m2_clapper import DATA as M2DATA, idle_priority
 
 OUT = Path(r"C:\ssbot\data\m2_play\map2\m3")
-MOVE_LABEL = {"P1-idle": ("P1-idle",), "P1-slam": ("P1-slam",), "P1-cast": ("P1-cast",), "P1-jump": ("P1-jump",),
+MOVE_LABEL = {"P1-idle": ("P1-idle",), "P1-idle-slam": ("P1-idle-slam",), "P1-idle-evade": ("P1-idle-evade",),
+              "P1-far-jump": ("P1-far-jump",), "P1-far-jcast": ("P1-far-jcast",), "P1-slam": ("P1-slam",),
+              "P1-cast": ("P1-cast",), "P1-jump": ("P1-jump",),
               "P1-locked": ("P1-locked",), "P2": ("P2",), "P3-face": ("P3-face",), "P3-cross": ("P3-cross",),
               "P4": ("P4",), "P5": ("P5",), "CLAWSTRIKE": ("CLAWSTRIKE",), "SLAMSTRIKE": ("SLAMSTRIKE",),
               "JUMPTRAP": ("JUMPTRAP",), "LOWHOP": ("LOWHOP",)}
 PRIM_OF = {"P1-idle": "claw", "P1-slam": "claw", "P1-cast": "claw", "P1-jump": "claw", "P1-locked": "claw",
+           "P1-idle-slam": "claw", "P1-idle-evade": "claw", "P1-far-jump": "claw", "P1-far-jcast": "claw",
            "CLAWSTRIKE": "claw", "P2": "dslash", "P3-face": "dslash", "P4": "dslash", "P5": "dslash",
            "SLAMSTRIKE": "dslash", "P3-cross": "safe", "JUMPTRAP": "safe", "LOWHOP": "safe"}
+# a label that counts as the same move done another way (found, different kind): the slam struck in its second window
+ALT_LABEL = {"P1-idle-slam": ("P1-idle-slam2",)}
+# the person's three hook cases (MOVES_TODO P1, 2026-10-22): the reaction each one needs (and the far list's for the
+# far ones) - when no outcome of any tried plan shows it, the model says it cannot happen there
+REACTION_OF = {"P1-idle-slam": ("SLAM", False), "P1-idle-evade": ("EVADE", False), "P1-far-jump": ("JUMP", True),
+               "P1-far-jcast": ("JUMP CAST", True)}
+CLOSE_IDLE = ["P1-idle-slam", "P1-idle-evade"]
+FAR_IDLE = ["P1-far-jump", "P1-far-jcast"]
 
 
 # ---- situations -----------------------------------------------------------------------------------------------------
@@ -94,13 +105,18 @@ def forced_situations(W) -> list:
     out = []
     C = 33.0
     # P1 on an Idle Clapper (in front of it: it faces her), from the ground and from the air
-    for dx in (3.5, 5.0, 7.0, 9.0):
+    # (the person's three cases, MOVES_TODO P1 2026-10-22: within Slam Range at the needle's hit the close list -
+    # a SLAM -> the first window with an umbrella in between, an EVADE -> a second Clawline; from beyond it, ~8.3 u
+    # centre to centre, the far list - a JUMP -> the ride, a JUMP CAST -> high / over its landing)
+    for dx in (3.5, 5.0, 7.0, 9.0, 10.0):
         for side in (-1, 1):
+            mv_ = ["P1-idle"] + (CLOSE_IDLE if dx <= 7.5 else FAR_IDLE if dx >= 8.5 else [])
             out.append(_sit(_her(W, C + side * dx, face=-side), [_obs("Idle", C, face=side, j=8)],
-                            f"idle g dx{dx} s{side}", ["P1-idle"]))
-    for dx, bb in ((5.0, 4.0), (7.0, 4.5), (6.0, 5.5)):
+                            f"idle g dx{dx} s{side}", mv_))
+    for dx, bb in ((5.0, 4.0), (7.0, 4.5), (6.0, 5.5), (9.0, 4.2), (10.0, 5.0)):
+        mv_ = ["P1-idle"] + (CLOSE_IDLE if dx <= 7.5 else FAR_IDLE)
         out.append(_sit(_her(W, C - dx, False, bb, face=1), [_obs("Idle", C, face=-1, j=8)],
-                        f"idle air dx{dx} bb{bb}", ["P1-idle"]))
+                        f"idle air dx{dx} bb{bb}", mv_))
     # P1 in a slam antic = CLAWSTRIKE's situations (SP13: from 5.6 u, k <= 14)
     for dx in (5.6, 7.0, 8.5, 10.0):
         for j in (2, 5):
@@ -241,8 +257,8 @@ def _rec_scan(path: str) -> list:
                 mv_ = ["P1-jump", "P4"] + (["JUMPTRAP"] if len(E.iids) > 1 else [])
             elif b == "Cast 2" and ground and abs(hx - cx) <= 7.0:
                 mv_ = ["LOWHOP"]
-            elif b == "Idle" and 3.0 <= abs(hx - cx) <= 9.5:
-                mv_ = ["P1-idle"]
+            elif b == "Idle" and 3.0 <= abs(hx - cx) <= 10.5:
+                mv_ = ["P1-idle"] + (CLOSE_IDLE if abs(hx - cx) <= 7.5 else FAR_IDLE if abs(hx - cx) >= 8.5 else [])
                 wall = cm.WALL_L if cx - cm.WALL_L < cm.WALL_R - cx else cm.WALL_R
                 if abs(cx - wall) <= 12.0:
                     mv_.append("P3-face")
@@ -375,11 +391,14 @@ def _run_one(args) -> dict:
     ms_dec = (time.perf_counter() - t0) * 1e3
     ch = r.ev
     labels = rz.classify(ch, sit) if ch is not None else []
-    # the per-tick re-check (the hysteresis path: the kept plan re-evaluated) - its time
+    # the kept plan's full re-check (the hysteresis path: re-evaluated in the closed loop with its exits) and the
+    # per-tick check of the committed part (search.Evaluator.tick_check) - their times
     t1 = time.perf_counter()
+    tick = None
     if ch is not None and ch.plan.segs:
         S.ev.evaluate(sit, ch.plan)
-    ms_tick = (time.perf_counter() - t1) * 1e3
+        tick = S.ev.tick_check(sit, ch.plan)
+    ms_tick = (time.perf_counter() - t1) * 1e3 - (tick[2] if tick else 0.0)
     res = {"i": i, "name": sit.name, "meta": sit.meta, "ms": round(ms_dec, 1), "ms_tick": round(ms_tick, 1),
            "n_cand": r.n_cand, "n_pred": r.n_pred, "n_exit": r.n_exit, "timed_out": r.timed_out,
            "ms_pred": round(r.ms_pred, 1), "ms_exit": round(r.ms_exit, 1), "stats": dict(S.stats),
@@ -388,20 +407,32 @@ def _run_one(args) -> dict:
            "hits": round(float(ch.hits), 3) if ch is not None else None,
            "p_safe": round(float(ch.p_safe), 3) if ch is not None else None,
            "safe": bool(ch.safe) if ch is not None else False,
-           "log": ms.plan_log(ch) if ch is not None else None}
+           "log": ms.plan_log(ch) if ch is not None else None,
+           "ms_check": round(tick[2], 1) if tick else None, "check_ok": bool(tick[0]) if tick else None,
+           "contingent": getattr(ch, "contingent", None) if ch is not None else None,
+           "reactions": {k: (round(v[0], 3), v[1]) for k, v in rz.reaction_table(ch).items()} if ch is not None
+           else {}}
     if ch is not None and ch.nominal is not None:
         cts = [k for (k, _, _) in ch.nominal.tr.contacts]
         res["last_contact"] = max(cts) if cts else None
         res["plan_frames"] = int(ch.nominal.tr.end)
     per = {}
+    lab_of = {}
+    for e in r.tried:
+        if e.outcomes:
+            lab_of[id(e)] = rz.classify(e, sit)
     for m in sit.meta.get("moves", []):
         want = MOVE_LABEL[m]
         cands = []
         for e in r.tried:
-            lb = rz.classify(e, sit)
+            lb = lab_of.get(id(e), ())
             if any(w in lb for w in want):
                 cands.append(e)
+        alt_w = ALT_LABEL.get(m, ())
         info = {"n_label": len(cands)}
+        if not cands and alt_w:
+            cands = [e for e in r.tried if any(w in lab_of.get(id(e), ()) for w in alt_w)]
+            info["alt_label"] = bool(cands)
         if cands:
             ok = [e for e in cands if e.open_ok]
             best = None
@@ -425,10 +456,14 @@ def _run_one(args) -> dict:
         else:
             prim = PRIM_OF[m]
             nwin = sum(v for k, v in S.stats.items() if k.startswith(f"win_{prim}"))
-            info.update(found=False, why=("timeout" if r.timed_out else
-                                          "no window" if prim != "safe" and nwin == 0 else
-                                          "no candidate with the move's conditions"), n_win=int(nwin))
-        if any(w in labels for w in want):
+            why = ("timeout" if r.timed_out else "no window" if prim != "safe" and nwin == 0 else
+                   "no candidate with the move's conditions")
+            if m in REACTION_OF and not _reaction_seen(r.tried, *REACTION_OF[m]):
+                why = "reaction not predicted"
+            info.update(found=False, why=why, n_win=int(nwin))
+        if info.get("alt_label") and info.get("found"):
+            info["result"] = "alt"
+        elif any(w in labels for w in want):
             info["result"] = "same"
         elif info.get("found"):
             info["result"] = "alt"
@@ -437,6 +472,27 @@ def _run_one(args) -> dict:
         per[m] = info
     res["per"] = per
     return res
+
+
+def _reaction_seen(tried, react: str, far: bool) -> bool:
+    """Some outcome of a tried plan hooks an Idle / Walk Clapper that answers with `react` (from the far list when
+    far) - the model predicts that reaction there."""
+    from ssbot.map2 import search as ms, strike as sk
+    for e in tried:
+        for o in e.outcomes:
+            for (P, iid, d, hooked, hit, ctrl) in getattr(o.tr, "claws", ()):
+                if not hooked:
+                    continue
+                st = sk.state_at(o.branch, iid, P)
+                if st is None or st[0] not in ("Idle", "Walk"):
+                    continue
+                rk = ms.reaction_key(o.branch, P)
+                if (iid, react) not in rk:
+                    continue
+                if far and not any(c[0] == "far" and P + 7 <= c[2] <= P + 23 for c in o.branch.choices.get(iid, ())):
+                    continue
+                return True
+    return False
 
 
 def cmd_run(a) -> int:
@@ -523,9 +579,26 @@ def report_runs(runs: dict) -> str:
                          f"{np.mean(hits[m]):.2f}     " + ", ".join(f"{k} {v}" for k, v in whys[m].most_common(4)))
             if alt_lab[m]:
                 lines.append(f"{'':11s} alt chosen: " + ", ".join(f"{k} {v}" for k, v in alt_lab[m].most_common(4)))
+        # the person's hook cases: how the chosen plans do them
+        det = defaultdict(Counter)
+        for r in res:
+            if "error" in r:
+                continue
+            for lb, (p_, d_) in (r.get("reactions") or {}).items():
+                det[lb]["n"] += 1
+                if "+umb" in str(d_):
+                    det[lb]["umbrella"] += 1
+        if det:
+            lines.append("chosen plans showing a reaction move (situations; umbrella between control and the contact): " +
+                         ", ".join(f"{lb} {c['n']}" + (f" (umb {c['umbrella']})" if c['umbrella'] else "")
+                                   for lb, c in sorted(det.items())))
+        ncont = sum(1 for r in res if r.get("contingent"))
+        lines.append(f"contingent plans chosen (a continuation per reaction to a hook): {ncont}")
         ok = [r for r in res if "error" not in r]
         lines.append(f"decision time per situation (ms, p50 / p90 / p99): full search {_pct([r['ms'] for r in ok])}; "
-                     f"the kept plan's re-check (per tick) {_pct([r['ms_tick'] for r in ok])}; predict calls "
+                     f"the per-tick check of the committed plan {_pct([r.get('ms_check') for r in ok])} (fails "
+                     f"{sum(1 for r in ok if r.get('check_ok') is False)}); "
+                     f"the kept plan's full re-check {_pct([r['ms_tick'] for r in ok])}; predict calls "
                      f"{_pct([r['n_pred'] for r in ok])}, exit passes {_pct([r['n_exit'] for r in ok])}, candidates "
                      f"{_pct([r['n_cand'] for r in ok])}; timed out {sum(1 for r in ok if r['timed_out'])}")
         lines.append(f"horizon: chosen plans' frames to the last contact {_pct([r.get('last_contact') for r in ok])}, "

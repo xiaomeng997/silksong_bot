@@ -2,7 +2,9 @@
 
 A plan (search.Eval) is classified on its most probable outcome (the nominal one; every outcome's safety and hits are
 reported separately): the strike events with the target's state at the press / contact (the outcome branch's records
-at nominal timing), her trajectory (mode, ground, position) and the Clappers' predicted paths. Labels:
+at nominal timing), her trajectory (mode, ground, position) and the Clappers' predicted paths. A CONTINGENT plan (a
+continuation per reaction to a hook, search.Seg.out_alt) is classified per reaction as well: the reaction labels
+below are read on every outcome of the plan (each plays its reaction's continuation). Labels:
 
   CLAWSTRIKE   a hooked Clawline on a Clapper in Slam Antic pressed at antic frame 4 .. 12 (its frame in the state at
                the press, the model's j; SP13: k 5 - 11) and a later down slash contact on the same Clapper in Slam 0
@@ -25,6 +27,17 @@ at nominal timing), her trajectory (mode, ground, position) and the Clappers' pr
                of it (behind its landing along its flight) and passed under it (her x crossed its x while it flew)
   LOWHOP       a lit bomb ring under her x during the plan while she is airborne with her box bottom above the bombs'
                top, on the ground before the hop
+ THE REACTIONS TO A HOOK ON AN IDLE / WALK CLAPPER (the person, 2026-10-22, MOVES_TODO P1), read in the outcomes where
+ that reaction happens (the search.reaction_key of the hook: what she has seen by control):
+  P1-idle-slam    it answers with a SLAM and she strikes it in the FIRST window: a later down slash contact on it in
+                  Slam 0 / Slam 1 or Slam Antic j >= 44 ('+umb' in the details when the umbrella opened between
+                  control and the contact)
+  P1-idle-slam2   the same reaction, struck in the second window instead (a head pogo at Slam Antic j 20 .. 43)
+  P1-idle-evade   it answers with an EVADE and she hooks it again (a second hooked Clawline on it after control)
+  P1-far-jump     a hook from beyond Slam Range (the far list) answered with a JUMP and she RIDES it (P4 on it after
+                  control: a contact on its rising body or two in its flight)
+  P1-far-jcast    the same answered with a JUMP CAST and she strikes it (any down slash contact on it in its move
+                  after control: the ride or a head pogo through the burst) with the outcome safe
 Several labels may hold at once.
 """
 from __future__ import annotations
@@ -39,7 +52,9 @@ SLAM_HIT_STATES = ("Slam 0", "Slam 1")
 MOVE_STARTS = ("Slam Antic", "Spell Antic", "Jump Antic", "Cast Slam Antic", "Evade Scuttle")
 FLIGHT = ("Jump", "Air")
 JUMP_MOVE = ("Jump Antic", "Jump Aim", "Jump", "Air", "Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump", "Charged?")
+JCAST_MOVE = ("Cast Slam Antic", "Cast Slam Antic 2", "Cast Jump", "Jump", "Air", "Charged?")
 ATTACKING = set(cm.ATTACKING)
+REACTION_LABELS = ("P1-idle-slam", "P1-idle-slam2", "P1-idle-evade", "P1-far-jump", "P1-far-jcast")
 
 
 def _st(br, iid, k):
@@ -48,9 +63,10 @@ def _st(br, iid, k):
 
 def presses(plan, tr) -> list:
     """[(kind, frame, iid)] of the plan's strike presses in this trajectory's frames (a down slash press at its mask
-    frame, a Clawline at its P)."""
+    frame, a Clawline at its P) - the segments this outcome played (a reaction's continuation, a hook variant's)."""
     out = []
-    for si, seg in enumerate(plan.segs):
+    segs = getattr(tr, "segs", None) or plan.segs
+    for si, seg in enumerate(segs):
         k0 = tr.seg_start[si] if si < len(tr.seg_start) else 0
         for (i, iid) in seg.dsl:
             out.append(("dslash", k0 + i + 1, iid))
@@ -59,14 +75,24 @@ def presses(plan, tr) -> list:
     return out
 
 
-def classify(ev, sit) -> list:
-    """The labels of the plan's nominal outcome (see the module docstring)."""
-    o = ev.nominal
-    if o is None:
-        return []
+def _p4(br, downs, iid) -> bool:
+    fl = []
+    for (kc, i2) in downs:
+        if i2 != iid:
+            continue
+        st = _st(br, iid, kc)
+        st1 = _st(br, iid, kc + 1)
+        if st is not None and st[0] in FLIGHT:
+            rising = st1 is not None and st1[3] > st[3]
+            fl.append((kc, rising))
+    return len(fl) >= 2 or any(r for (_, r) in fl)
+
+
+def classify_outcome(o, plan, sit) -> list:
+    """The labels of one outcome of the plan (module docstring, without the reaction labels)."""
     tr, br = o.tr, o.branch
     labels = set()
-    ps = presses(ev.plan, tr)
+    ps = presses(plan, tr)
     contacts = sorted(tr.contacts)
     iids = sorted(br.recs.keys())
     ground0 = bool(sit.S[km.GROUND] > 0)
@@ -132,16 +158,7 @@ def classify(ev, sit) -> list:
                     labels.add("P3-face")
     # P4: contacts on its flight
     for iid in iids:
-        fl = []
-        for (kc, i2) in downs:
-            if i2 != iid:
-                continue
-            st = _st(br, iid, kc)
-            st1 = _st(br, iid, kc + 1)
-            if st is not None and st[0] in FLIGHT:
-                rising = st1 is not None and st1[3] > st[3]
-                fl.append((kc, rising))
-        if len(fl) >= 2 or any(r for (_, r) in fl):
+        if _p4(br, downs, iid):
             labels.add("P4")
     # ---- P2: umbrella open -> closed by the plan -> a down slash contact ----
     mode = tr.mode
@@ -196,7 +213,87 @@ def classify(ev, sit) -> list:
         if under and not tr.ground[k] and bb > cm.FLOOR + 0.3 and ground0:
             labels.add("LOWHOP")
             break
+    return labels
+
+
+def reaction_details(o, lag: int = 2) -> list:
+    """The reaction labels of one outcome: [(label, detail)] per hooked Clawline on an Idle / Walk Clapper (module
+    docstring)."""
+    from ssbot.map2.search import reaction_key
+    tr, br = o.tr, o.branch
+    out = []
+    contacts = sorted(tr.contacts)
+    downs = [(k, iid) for (k, iid, kd) in contacts if kd == "down"]
+    for (P, iid, d, hooked, hit, ctrl) in getattr(tr, "claws", ()):
+        if not hooked:
+            continue
+        st = _st(br, iid, P)
+        if st is None or st[0] not in ("Idle", "Walk"):
+            continue
+        rk = reaction_key(br, P, lag)
+        react = {out_ for (i2, out_) in rk if i2 == iid}
+        chs = br.choices.get(iid, ())
+        far = any(c[0] == "far" and P + 7 <= c[2] <= P + 23 for c in chs)
+        later = [(k, i2) for (k, i2) in downs if i2 == iid and k > ctrl]
+        if "SLAM" in react:
+            first = second = None
+            for (kc, _) in later:
+                stc = _st(br, iid, kc)
+                if stc is None:
+                    continue
+                if stc[0] in SLAM_HIT_STATES or (stc[0] == "Slam Antic" and stc[1] >= 44):
+                    first = first or (kc, stc[0], stc[1])
+                elif stc[0] == "Slam Antic" and 20 <= stc[1] <= 43:
+                    second = second or (kc, stc[0], stc[1])
+            if first is not None:
+                umb = bool(np.any(tr.mode[ctrl:first[0] + 1] == km.M_GLIDE)) if ctrl < len(tr.mode) else False
+                out.append(("P1-idle-slam", f"contact {first[0]} {first[1]} j{first[2]}" + (" +umb" if umb else "")))
+            elif second is not None:
+                out.append(("P1-idle-slam2", f"contact {second[0]} {second[1]} j{second[2]}"))
+        if "EVADE" in react:
+            again = [c for c in tr.claws if c[1] == iid and c[3] and c[0] > ctrl]
+            if again:
+                c2 = again[0]
+                st2 = _st(br, iid, c2[0])
+                out.append(("P1-idle-evade", f"second hook P {c2[0]} on {None if st2 is None else st2[0]}"))
+        if far and "JUMP" in react and _p4(br, later, iid):
+            out.append(("P1-far-jump", f"ride contacts {[k for (k, _) in later]}"))
+        if far and "JUMP CAST" in react and o.safe:
+            hits_ = [(kc, (_st(br, iid, kc) or ("?",))[0]) for (kc, _) in later]
+            hits_ = [h for h in hits_ if h[1] in JCAST_MOVE or h[1] in ("Idle",)]
+            if hits_:
+                out.append(("P1-far-jcast", f"contacts {hits_}"))
+    return out
+
+
+def classify(ev, sit) -> list:
+    """The labels of the plan: its nominal outcome's (module docstring) and, over all its outcomes, the reaction
+    labels (a contingent plan plays a continuation per reaction)."""
+    o = ev.nominal
+    if o is None:
+        return []
+    labels = set(classify_outcome(o, ev.plan, sit))
+    seen = set()
+    for oo in ev.outcomes:
+        if not getattr(oo.tr, "claws", None):
+            continue
+        key = (id(oo.branch.choices), oo.tr.variant)
+        if key in seen:
+            continue
+        seen.add(key)
+        for (lb, _) in reaction_details(oo):
+            labels.add(lb)
     return sorted(labels)
 
 
-__all__ = ["classify", "presses"]
+def reaction_table(ev) -> dict:
+    """{reaction label: (p of the outcomes that show it, a detail)} over the plan's outcomes (the acceptance report)."""
+    out: dict = {}
+    for oo in ev.outcomes:
+        for (lb, det) in reaction_details(oo):
+            p, d0 = out.get(lb, (0.0, det))
+            out[lb] = (p + oo.p, d0)
+    return out
+
+
+__all__ = ["classify", "classify_outcome", "presses", "reaction_details", "reaction_table", "REACTION_LABELS"]
