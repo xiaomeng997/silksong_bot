@@ -472,6 +472,14 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   precomputed danger-free sets - the backward sets B(window shape, dash end table): then the bridge lookup returns the
   keys too - and on the flattened forward union before the danger first touches it. Measure the storage (it grows
   with the conflicting merges).
+  SIMPLER: TAG EACH FLATTENED ENTRY WITH ITS ORIGIN TABLE AND NODE (the person, 2026-10-24: 'when flattening, B's
+  original position is mostly not in this table but in a referenced one - record B's original table number on the
+  flattened table: is it unique then?' - yes): (table, node) + the position IS the exact state, so entries of
+  different origins at one position stay separate and each keeps ONE source (its previous-frame entry): following
+  the sources back always gives a path that works (the state alone decides the future - the chain's own guarantee).
+  Not 'the only path' - many reach a state; keep the best by the natural-selection rule (fewest presses, then the
+  earliest arrival). The flattened map becomes 'per position, per state an interval'; the pure position union for
+  the prune is derived from it. Measure the entry count (the tables bound the states).
 - THE LONG-TERM POSITIONING PLANNER (the person, 2026-10-24: 'the 180 f look-ahead is really a long-term
   positioning planner - besides the escape nodes it should tell the strike planner roughly where to stand and whom
   to hit; the hand rules should now come out of modules automatically'): on the funnel, a LONG-TERM VALUE per
