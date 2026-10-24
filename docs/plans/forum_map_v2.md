@@ -408,8 +408,12 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   bridge is allowed only if the dash is unused there); the tables carry per frame only whether a dash PRESS is
   allowed (airborne, no lock such as the umbrella's antic). The bundle's endpoints include its cancels' outcomes (the
   jump cancel into the umbrella = an A3 entry by vx; the Clawline out of the sprint = a hook (a refill) or an unhooked
-  Clawline transient; the attack cancel with its extra air velocity) and land in no-dash tables. The GROUND dash is
-  unlimited (>= 25 f apart) and stays an action of the ground tables.
+  Clawline transient; the attack cancel with its extra air velocity) and land in no-dash tables. THE GROUND DASH IS
+  NOT IN THE TABLES EITHER (the person, 2026-10-23 evening: 'the dash does not go into the ordinary tables' - this
+  replaces the lead's earlier 'the ground dash stays a ground-table action'): the ground tables hold only walk / run
+  / the jump; the ground dash (and the ground sprint it leads into) is a bundle of its own used as a bridge too. It
+  is unlimited (the next one >= 25 f after the press), so a ground stretch may hold several bridges: forward ->
+  dash -> ground no-dash -> dash -> ... -> backward, each gap >= 25 f.
 - MEET IN THE MIDDLE, THE DASH BUNDLE AS THE BRIDGE (the person, 2026-10-23): between two refills a path has at
   most one air dash, so every path is no-dash -> (at most one dash) -> no-dash. Push the small no-dash tables FORWARD
   from her state and BACKWARD from the goal (the next strike window's press region: the down slash on a body, the
