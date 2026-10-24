@@ -460,6 +460,18 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   first frame (the jump cancel; vx as an interval), A1_0 after an unhooked Clawline. So the backward set from a goal
   is needed only INTO those end tables, and since the tables and the windows are both relative, B(window shape, end
   table) can be PRECOMPUTED offline per pair: the bridge check becomes a lookup.
+- PATHS ON FLATTENED MAPS (the person, 2026-10-24: 'having found A - B - C, look whether the table's B came from A:
+  if so C points to B; if not, store B and A both as C's source - the head is a fixed point, so backtracking long
+  enough always stores the whole path'). Today: the per-decision chain merges clusters only on a bit-equal full state,
+  so any path into B continues with any path out of B (the state alone decides the future): one source per piece
+  (its parent, its action, its x interval) is enough and the path is the piece containing the target x, followed
+  back; the witness tracker fills left / right. The FLATTENED maps merge by position (different states at one
+  position), so they carry no sources today (upper bound only). The person's rule makes them carry paths: a node
+  keeps its source, and where the stored source of B is not the A of this path, C keeps the pair (B, A) - longer
+  suffixes while the conflict persists - a path tree with shared prefixes, unique back to the fixed head. Use it on the
+  precomputed danger-free sets - the backward sets B(window shape, dash end table): then the bridge lookup returns the
+  keys too - and on the flattened forward union before the danger first touches it. Measure the storage (it grows
+  with the conflicting merges).
 - THE LONG-TERM POSITIONING PLANNER (the person, 2026-10-24: 'the 180 f look-ahead is really a long-term
   positioning planner - besides the escape nodes it should tell the strike planner roughly where to stand and whom
   to hit; the hand rules should now come out of modules automatically'): on the funnel, a LONG-TERM VALUE per
