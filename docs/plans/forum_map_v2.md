@@ -444,10 +444,14 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
 - INTO AN INERTIA STATE THE REFERENCE SPLITS BY vx (the person, 2026-10-23: 'A1 whose next frame is a left, a
   middle and a right A3 cannot reference one 3-wide envelope like A1 - it references three times'): A1 has no
   horizontal memory, so one widened interval covers every key; the float's future depends on its vx, so entering it
-  needs one reference per vx, each with its own x interval. There may be more than three: the umbrella's antic (5 - 6
-  frames, the 1-frame key lag, accel 1.0 / decel 0.25 per step) gives a vx per key pattern - merge only bit-equal vx
-  (as M1's clusters), or, if too many, group them and bound each group by its always-left / always-right lanes (an
-  over-approximation: a few extra candidates, rejected by the final exact simulation; nothing reachable is lost).
+  needs one reference per vx, each with its own x interval. M1 found THREE entry classes (left / none / right): the
+  umbrella antic's strong accel (8.5 per step) brings vx near the held direction's float speed by the Inflate's end;
+  check at build time that every key pattern of the antic gives a bit-equal vx per class - if not, one reference per
+  distinct vx, or groups bounded by their always-left / always-right lanes (an over-approximation: a few extra
+  candidates, rejected by the final exact simulation; nothing reachable is lost). Inside the float vx changes slowly
+  (accel 1.0 / decel 0.25 per step, a full Umbrella Turn ~19 f): those in-between vx are covered by each class's lanes,
+  not by more classes. The float's vy is one fixed curve (+0.5 at the Inflate's end, -0.13 u/s per physics step to -6
+  in ~60 f; M1: phases 0 .. 58) - no vertical classes; so ~59 phases x 3 entry classes (x the physics-step phase).
   They MERGE BACK once the lanes saturate: after a few steps of a held key the lanes reach the float's max speed
   whatever the entry vx, so from then on every branch widens by the same constant per step (like A1, another speed)
   and the branches' intervals unite into one reference. The split lives only in that transient (an unspent 'timer',
