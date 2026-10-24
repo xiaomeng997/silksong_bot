@@ -33,9 +33,9 @@ the search of M4d2.
 M4 S1b (the two verifiers' findings on S1; HANDOFF 'Task map2 - stage M4' / 'S1b', forum.md 101; LiveCfg free_pogo,
 ds_shrink, side_rule / side_lag, spr_xvx - their S1 values give S1's search):
 - the lock credit by the bounce's cause (finding presses 1): after a down slash POGO the game's downSpikeRecovery runs
-  9 - 11 frames (2,465 airborne pogo bounces of the show recordings: 9 253, 10 462, 11 466; 17 - 23: 66), after a
-  hooked Clawline's forced bounce 1 frame (54 / 54; slashes pressed 10 - 12 frames after it all started, 0 - 1 frame
-  late): a press only kin's lock holds is credited FREE_POGO (12) frames after a pogo onset, FREE_MIN (10) after the
+  9 - 11 frames (1,292 airborne pogo bounces in 60 show / film episodes: 9 253, 10 462, 11 466, <= 8 44, 15 - 23
+  67), after a hooked Clawline's forced bounce 1 frame (54 / 54; slashes pressed 10 - 12 frames after it all started,
+  0 - 1 frame late; s1bec_after_bounce.json): a press only kin's lock holds is credited FREE_POGO (12) frames after a pogo onset, FREE_MIN (10) after the
   hook's (ds_start's hook_onset: the frame of the hook's forced bounce - simulate's own, the realizer's node after a
   Clawline - is the lock's onset; a start state's running lock counts as a pogo's).
 - the contact's slack (finding presses 2): both alternations must meet the robust body box SHRUNK by SHRINK (0.05 u)
