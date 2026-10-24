@@ -452,6 +452,19 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   grows likewise with k; the far part is re-computed from fresh observations many times before it is used, so the
   margin costs little there. Safety valve: if the shrunken funnel closes (a tight trap) but the exact one is open,
   run the exact one (a thin way beats none) and flag the decision for an early re-check.
+- THE LONG-TERM POSITIONING PLANNER (the person, 2026-10-24: 'the 180 f look-ahead is really a long-term
+  positioning planner - besides the escape nodes it should tell the strike planner roughly where to stand and whom
+  to hit; the hand rules should now come out of modules automatically'): on the funnel, a LONG-TERM VALUE per
+  position from the model: (1) the room - the funnel's width and its time to closure from there; (2) the strike
+  opportunities - the strike windows (the shapes) reachable from there in the next 1 - 2 s per Clapper under its
+  predicted moves (whose windows dominate = whom to hit). The strike planner keeps its short goal-directed chains and
+  ranks their end states by this value (it replaces M3's hand terms: wall room, facing-to-the-wall, body distance).
+  The person's two-Clapper rules are CHECKS the value must reproduce, not code: (1) stand between the two Clappers;
+  (2) between them, hit the one farther from its wall; (3) when both must be on one side, pin them in the corner,
+  never be pinned; (4) when they are far apart, drive the focus Clapper toward the middle. Measure per rule on the
+  recorded two-Clapper situations whether the value prefers it; a disagreement means a missing mechanic (find it) or
+  a horizon too short (rule 4 may need seconds: then a longer-term position term). Next stage after the A1_n tables
+  are in the search.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
