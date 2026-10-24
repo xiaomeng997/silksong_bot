@@ -452,6 +452,14 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   grows likewise with k; the far part is re-computed from fresh observations many times before it is used, so the
   margin costs little there. Safety valve: if the shrunken funnel closes (a tight trap) but the exact one is open,
   run the exact one (a thin way beats none) and flag the decision for an early re-check.
+- THE BRIDGE'S BACKWARD SIDE ONLY OVER THE DASH'S END TABLES (the person, 2026-10-24: 'after a dash comes a fixed
+  table? then the backward search should search only that table'): each dash variant ends in ONE fixed table
+  whatever it started from (the dash zeroes vy; only the physics phase matters - T2: the bundle identical for every
+  A1_n, 31 / 31 x 6); different variants (hold length, cancel type and frame) end in different tables, but all of
+  them in a small set - A1 lattice tables (the sprint's end, the attack cancel after its extra velocity), the float's
+  first frame (the jump cancel; vx as an interval), A1_0 after an unhooked Clawline. So the backward set from a goal
+  is needed only INTO those end tables, and since the tables and the windows are both relative, B(window shape, end
+  table) can be PRECOMPUTED offline per pair: the bridge check becomes a lookup.
 - THE LONG-TERM POSITIONING PLANNER (the person, 2026-10-24: 'the 180 f look-ahead is really a long-term
   positioning planner - besides the escape nodes it should tell the strike planner roughly where to stand and whom
   to hit; the hand rules should now come out of modules automatically'): on the funnel, a LONG-TERM VALUE per
