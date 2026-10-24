@@ -131,6 +131,13 @@ def ident(L, cu, P, absy, alf, out):
     """The node identity of the relative lanes L [2, K] (y relative unless absy) and cu: vkey_rel (floor-strict),
     + each lane's horizontal state, the time scale, a phase instance's phase (alf, -1: none)."""
     vkey_rel(L, cu, P, True, absy, out)
+    if absy and L[1, MODE] == M_DASH and L[1, GROUND] > 0:
+        # the ground dash: its end translates her from the DRAWN position (QY + phase (SY - QY): the previous / last
+        # step's heights - a recorded ground start a little off the rest height still settles there), so a ground
+        # dash's floor instance holds them (absolute, as the engine's key); a phase dependence they leave (QY != SY)
+        # makes the expansion's phase runs differ: phase instances (I_ADEP)
+        out[_KQY] = L[1, QY] + 0.0
+        out[_KSY] = L[1, SY] + 0.0
     o = NKEY
     for ln in range(2):
         for i in range(NHD):
@@ -335,11 +342,11 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
     alf = NVY[n, V_ALF]
     a1 = ALPHA_S[s][0] if alf < 0 else alf
     a2 = ALPHA_S[s][1] if alf < 0 else alf
-    if alf < 0 and NL[n, 1, MODE] == M_DASH and NL[n, 1, GROUND] > 0:
-        # the ground dash: its end translates her from the DRAWN position (QY + phase (SY - QY): the previous /
-        # last step's heights, which the identity does not hold - a recorded ground start a little off the rest
-        # height still settles there): every cluster expands it at its own phase and QY / SY (phase instances)
-        NINT[n, I_ADEP] |= 3
+    # both edge lists are written, then committed together (a table filling up between them must not leave the
+    # first one set and the event-limit one empty: the retry redoes both)
+    e_start = CNT[C_EDGES]
+    oe0 = np.zeros(2, dtype=np.int64)
+    on = np.zeros(2, dtype=np.int64)
     for md in range(2):
         cu0 = NCU[n].copy()
         o = opts
@@ -418,10 +425,12 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
             cid = node_get(C, ccu, absy and gnd, -1.0, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key,
                            ckey)
             if cid < 0:
+                CNT[C_EDGES] = e_start
                 return False
             e = e0 + ne
             if e >= EI.shape[0]:
                 CNT[C_OVF] |= 2
+                CNT[C_EDGES] = e_start
                 return False
             # the lane displacements at the two phases: equal, or the drawn-position slope (affine in the phase)
             slo = 0.0
@@ -445,8 +454,11 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
             EF[e, EF_SV] = sv
             ne += 1
         CNT[C_EDGES] = e0 + ne
-        EOFF[n, s, md, 0] = e0
-        EOFF[n, s, md, 1] = ne
+        oe0[md] = e0
+        on[md] = ne
+    for md in range(2):
+        EOFF[n, s, md, 0] = oe0[md]
+        EOFF[n, s, md, 1] = on[md]
     CNT[C_EXP] += 1
     return True
 
@@ -1654,9 +1666,10 @@ class Lib:
         lib.ICK[:ni] = z["ICK"]
         lib.CNT[:] = z["CNT"]
         lib.CNT[C_OVF] = 0
-        # the ground dash's frames: per cluster (its phase and QY / SY) - also in a library built before that rule
-        gd = (lib.NL[:n, 1, MODE] == km.M_DASH) & (lib.NL[:n, 1, GROUND] > 0) & (lib.NVY[:n, V_ALF] < 0)
-        lib.NINT[:n, I_ADEP][gd] |= 3
+        # (a library saved before the edge lists were committed together: an expansion whose event-limit list was
+        # lost to a full table is expanded again)
+        bad = (lib.EOFF[:n, :, 0, 0] >= 0) & (lib.EOFF[:n, :, 1, 0] < 0)
+        lib.EOFF[:n][bad] = -1
         _idents(lib.NL, lib.NCU, lib.NINT, lib.NVY, lib.P, n, lib.NID)
         _rehash(lib.HT, lib.NINT[:, I_HASH].copy(), n)
         _rehash(lib.CHT, lib.CH, c)

@@ -110,3 +110,16 @@ def test_a1_recursion(lib):
         if k > 0:
             assert abs(lib.EF[e1, tb.EF_DLO] + run) < 1e-12 and abs(lib.EF[e1, tb.EF_DHI] - run) < 1e-12
         n = c
+
+
+def test_tables_growing_keep_both_edge_lists():
+    """A library grown from tiny tables (every expansion may meet a full table): the event-limited chain still equals
+    the engine (both edge lists of a node are committed together)."""
+    lib = tb.Lib(cap_nodes=1 << 8, cap_edges=1 << 8, cap_cls=1 << 8, cap_inst=1 << 8, claw=False, terrain="arena")
+    for kind, ph, var in (("A3", 6, "L"), ("G", 0, "")):
+        S, _ = env.canonical(lib.params, kind, ph, 1, var, False)
+        fe = lib.eng.forward(lib.eng.start_state(S), 40, terrain=lib.terr, opts=ej.OPT_NO_ADASH, max_events=1,
+                             claw=False, tf8=False)
+        ft = lib.forward(S, 40, floor=True, maxev=1)
+        r = t1.compare(fe, ft, 40)
+        assert r["ok"], (kind, r)
