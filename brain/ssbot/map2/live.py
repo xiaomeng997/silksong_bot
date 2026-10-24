@@ -1519,7 +1519,11 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             lib_gb = (psutil.Process().memory_info().rss - r0) / 2 ** 30
             boost += (f", tables {ms.TABLE_STATS.get('file', '')} {lib.n_nodes if lib is not None else 'refused'} "
                       f"nodes {lib_gb:.1f} GB")
-            lib_gb += max(0, int(cfg.tables_budget)) * 5.0e3 / 2 ** 30      # (its growth budget: ~4.6 kB a node)
+            # (its growth: T4 - the whole preallocated room, which one decision may fill past the budget before the
+            # next decision's reset - the verifiers' finding; ~5 kB a node with its edges; the library never
+            # reallocates in the search: Lib.fixed)
+            room = (lib.room - lib.n_nodes) if lib is not None else int(cfg.tables_budget)
+            lib_gb += max(0, room) * 5.0e3 / 2 ** 30
         except Exception as e:  # noqa: BLE001 - the engine's passes then
             boost += f", tables failed ({e!r})"[:200]
     if nparts > 1:

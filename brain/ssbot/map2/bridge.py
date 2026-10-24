@@ -33,6 +33,12 @@ the piece's lane displacement [dlo, dhi] (the instant run; a translation in the 
 as the forward) and the cuts (danger, walls) are the pieces' own: per cluster the x set from which the goal is still
 reachable (the tube forward x backward). The bridge's presses on the tube are the pieces whose candidate presses the
 air dash in the air (bridge_presses).
+EXACT ONLY WITHOUT INERTIA (T4, the verifiers' finding): the rule 'x reaches x' iff x' - x is in [dlo, dhi]' holds for
+the instant run (every member at x has the same choices) and the committed blocks (translations); inside the float's
+inertia the piece's displacement depends on the member's vx, which the cluster does not hold per x - there the
+backward set is an UPPER BOUND (A3 'N', the goal the middle of the cluster at frame 24: the tube spans the whole
+cluster at frame 12, its end members miss the goal by 1.66 u). Back.exact says which; a use that needs the exact set
+(an escape funnel's 'inside') must confirm an inexact one forward (a witness rolled through the danger).
 """
 from __future__ import annotations
 
@@ -147,6 +153,10 @@ class Back:
     def __init__(self, fw, b_iv0, b_ivn, BIV):
         self.fw = fw
         self.b_iv0, self.b_ivn, self.BIV = b_iv0, b_ivn, BIV
+        # T4: exact when no cluster on the tube is in the float's inertia (the umbrella: M_GLIDE) - else an upper
+        # bound (module docstring)
+        on = np.flatnonzero(b_ivn > 0)
+        self.exact = not bool(np.any(fw.cl_mode[on] == km.M_GLIDE)) if len(on) else True
 
     def intervals(self, g: int) -> np.ndarray:
         return self.BIV[self.b_iv0[g]:self.b_iv0[g] + self.b_ivn[g]]
@@ -161,7 +171,8 @@ class Back:
 
 
 def backward(fw, goal_cl, goal_lo, goal_hi, eps: float = 1e-9) -> Back:
-    """THE BACKWARD SET of a goal region (rows: cluster, x interval) over fw's pieces (see the module docstring)."""
+    """THE BACKWARD SET of a goal region (rows: cluster, x interval) over fw's pieces (see the module docstring:
+    exact without the float's inertia on the tube, an upper bound with it - Back.exact)."""
     ncl = int(fw.cl_off[-1])
     ix = getattr(fw, "_back_ix", None)
     if ix is None:                                   # (the pieces by child, once per pass)

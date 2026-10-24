@@ -92,3 +92,69 @@ def ds_judge(boxes, k0, x0, ty, xs_path, ground, face) -> bool:
     """The strike module's judge on one concrete path (her transform x per index): both alternations meet."""
     pos = np.stack([xs_path, ty], axis=1)
     return sk.dslash_contact(pos, np.full(len(ty), face), ground, 1, boxes[k0:k0 + len(ty)] if k0 >= 0 else boxes) >= 0
+
+
+# ---- T4: the shapes from a tables' pass (the search's windows; tools.t2_tables' shapes) ---------------------------
+
+def abs_lane(lib, fw, g: int, ln: int, alpha: float) -> np.ndarray:
+    """Cluster g's lane ln of a tables' pass (fw.node) as an absolute kin state (x 0, her height, the frame's phase,
+    its air dash)."""
+    from ssbot.knowledge import kinematics as km
+    from ssbot.map2 import tables as tb
+    nd = int(fw.node[g])
+    x = lib.NL[nd, ln].copy()
+    if lib.NINT[nd, tb.I_ABS] == 0:
+        py = float(fw.cl_y[g] - lib.hh)
+        for f in (km.PY, km.QY, km.SY, km.RY0):
+            x[f] += py
+    x[km.AIRDASHED] = float(fw.ad[g])
+    x[km.ALPHA] = alpha
+    return x
+
+
+def swing_paths(lib, fw, gs, k0_alpha: float):
+    """Per cluster g of a tables' pass (frame t): her transform height, the run's reach and the ground flag over a
+    down slash pressed in frame t + 1 (index 0 = the cluster's frame), rolled by the reference model from the node's
+    representative at her height and the frame's phase: (ty [n, 11], L, R, ground)."""
+    from ssbot.knowledge import kinematics as km
+    from ssbot.map2 import env_jit as ej
+    from ssbot.map2 import tables as tb
+    n = len(gs)
+    S0 = np.zeros((3 * n, km.K))
+    cu0 = np.zeros((3 * n, ej.NC))
+    masks = np.zeros((3 * n, 10), np.int64)
+    AD = km.B_ATTACK | km.B_DOWN
+    for i, g in enumerate(gs):
+        t = int(np.searchsorted(fw.cl_off, g, side="right") - 1)
+        nd = int(fw.node[g])
+        al = lib.steps(k0_alpha, t + 1)[t][1] if t > 0 else k0_alpha
+        for j, h in enumerate((0, km.B_LEFT, km.B_RIGHT)):
+            x = abs_lane(lib, fw, g, 0 if j == 1 else 1, al)       # (the left reach from the left lane: its MOVE
+            S0[3 * i + j] = x                                       # acts in the press frame's steps)
+            cu0[3 * i + j] = lib.NCU[nd]
+            masks[3 * i + j, 0] = AD | h
+            masks[3 * i + j, 1:] = h
+    xy, md = ej.ref_many(S0, cu0, masks, lib.udt, lib.P, lib.TTg)
+    ty = xy[0::3, :, 1] - lib.hh
+    L = xy[1::3, :, 0] - xy[1::3, :1, 0]
+    R = xy[2::3, :, 0] - xy[2::3, :1, 0]
+    ground = xy[0::3, :, 1] <= tb.FLOOR_TOP + lib.params.foot + lib.hh + 1e-6
+    return ty, L, R, ground
+
+
+def cluster_windows(boxes: np.ndarray, k0: int, ivs: np.ndarray, ty, L, R, ground) -> list:
+    """THE PRESS REGION of one cluster (its frame k0, its x intervals ivs) - both facings, inside the cluster:
+    [(lo, hi)] (the facing F of the swing is a member that stepped toward F in the press frame's step or stood)."""
+    shp = []
+    for face in (-1, 1):
+        Lf, Rf = L.copy(), R.copy()
+        if face > 0:
+            Lf[1:] -= L[1]
+        else:
+            Rf[1:] -= R[1]
+        for lo, hi in ds_press_set(boxes, k0, ty, Lf, Rf, ground, face):
+            for a, c in ivs:
+                u, v = max(lo, a), min(hi, c)
+                if u <= v:
+                    shp.append((u, v))
+    return shp

@@ -237,9 +237,30 @@ def claw_state_ok(kt: np.ndarray, t: int, P) -> bool:
     return m == km.M_GLIDE and (ph == 2.0 or ph == 3.0)
 
 
+def unmodelled(kt: np.ndarray, masks: np.ndarray, prev: int = 0) -> list:
+    """T4 (the verifiers' finding: an attack pressed in the ground dash or the ground sprint - the Wanderer's dash
+    attack, a lunge M4a measured 2.6 - 3.9 u off the model; kin_jit's stand-in regains control at once): the rollout
+    indices t where masks press the attack with her state before frame t's Update on the ground in the dash or the
+    sprint. The envelope never offers it and its reference drops it (env_jit.ref_rollout); a plan with one is not
+    played (search.simulate)."""
+    m = np.asarray(masks, np.int64).reshape(-1)
+    out = []
+    pm = int(prev)
+    for i in range(len(m)):
+        t = i + 1
+        pressed = (int(m[i]) & km.B_ATTACK) != 0 and (pm & km.B_ATTACK) == 0
+        pm = int(m[i])
+        if not pressed or t >= len(kt) or kt[t, C_GND] <= 0:
+            continue
+        md = int(kt[t, C_MODE])
+        if md == km.M_DASH or (md == km.M_SPRINT and kt[t, C_PH] >= 2.0):
+            out.append(t)
+    return out
+
+
 def state_name(kt: np.ndarray, t: int) -> str:
     return f"{km.MODE_NAMES[int(kt[t, C_MODE])]}{int(kt[t, C_PH])}"
 
 
 __all__ = ["ON", "SIDE", "LOOK", "FREE_MIN", "FREE_POGO", "SHRINK", "SIDE_RULE", "SIDE_LAG", "XVX_MIN", "trace",
-           "started", "ds_start", "out_of_sprint", "side_hit", "claw_state_ok", "state_name", "CLAW_LOCK_F"]
+           "started", "ds_start", "out_of_sprint", "side_hit", "claw_state_ok", "state_name", "CLAW_LOCK_F", "unmodelled"]

@@ -87,9 +87,16 @@ def test_witness_reaches_interval_ends(eng):
     S = km.initial_state(eng.params, 0.0, 20.0, ground=False)
     fw = eng.forward(eng.start_state(S), 20, max_events=2)
     misses = []
-    for _ in range(12):
+    n = 0
+    while n < 12:
         t = int(rng.integers(8, 21))
         g = int(rng.integers(fw.cl_off[t], fw.cl_off[t + 1]))
+        if int(fw.cl_cond[g]) & ej.COND_CLAWBLK:
+            # (T4: inside a Clawline block each member drifts with its own velocity - a cluster merged from members
+            # of other velocities (the dash left / right, the Clawline thrown one way) is the lanes' hull, an
+            # over-approximation the engine documents: not this test's instant run)
+            continue
+        n += 1
         a, b = fw.intervals(g)[0]
         for x in (a, b):
             w = fw.witness(t, float(x), float(fw.cl_y[g]))

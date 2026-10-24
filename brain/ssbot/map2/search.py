@@ -88,6 +88,8 @@ HB = cm.HURTBOX                    # (0.2277, 1.1249, -0.3799)
 HB_OFF = HB[2] + sk.CTR_DY         # her hurtbox centre relative to her box centre (+0.1336)
 M_DS = km.B_ATTACK | km.B_DOWN
 DIRS = km.B_LEFT | km.B_RIGHT
+WITNESS_TOL = 0.1                  # T4: a realized window / endpoint's keys end at most this far (u) from its point
+#                                    (T1's tightness criterion; the verifiers saw keys 0.65 u off used as they were)
 
 
 def arena_terrain() -> km.Terrain2D:
@@ -166,6 +168,11 @@ class Cfg:
     # engine as before (bit-identical). tables_file: '' = T2's search library (tables_file()), 'warm' / a path
     tables: bool = False
     tables_file: str = ""
+    exec_only: bool = True                 # T4: the passes and exits in the bot's executable family (env_jit.OPT_EXEC:
+    #                                        no up slash / free attack / hidden jump press - their keys hold a slash the
+    #                                        live controller rejects as unplanned); False: every child of the engine
+    shapes: bool = False                   # T4: the exact down slash window shapes (wshape) add the windows the
+    #                                        predicate misses (contacts at press + 5 / 7 / 8 / 9) - tables on only
     tables_budget: int = 400_000           # the nodes the library may grow by (lazy expansions: it does not converge -
     #                                        10 - 200 k new nodes per decision on the recorded w7 situations, ~4.6 kB
     #                                        each) before it is reset to its loaded state at a decision's start; 0: never
@@ -174,6 +181,14 @@ class Cfg:
         d = dict(self.__dict__)
         d.update(kw)
         return Cfg(**d)
+
+    @property
+    def h_pass(self) -> int:
+        """T4 (the verifiers' finding: a long pass (1, 120, 60) ran past its node's prediction - pred.T = the plan's
+        end + 74 - so its frames after ~75 saw no Clapper's danger): the longest approach pass; the predictions reach
+        the plan's end + this (evaluate) so every pass's danger is the Clappers'. The default passes (60 / 30 f) are
+        under t_pred: unchanged."""
+        return max([int(pz[1]) for pz in self.passes] or [0])
 
     @classmethod
     def live(cls, **kw) -> "Cfg":
@@ -244,25 +259,38 @@ class World:
         return lib
 
     def envelope(self, S: np.ndarray, H: int, danger, max_events: int, cu=None, par: int = 0, tables: bool = False,
-                 blocking: bool = True, name: str = ""):
+                 blocking: bool = True, name: str = "", stop=None, exec_only: bool = False):
         """One envelope pass from her exact state S over H frames in the danger (the search's: the air dash in, no
         Clawline, the arena's floor and ceiling): with tables (T3) the A1_n chain (tables.Lib.forward with the dash
         bridge: the engine's clusters, its Fwd queries), else - or when the library is busy on another thread and
-        blocking is False, or her state has no table (a time scale / world freeze) - the M1 engine."""
+        blocking is False, or her state has no table (a time scale / world freeze) - the M1 engine. stop (T4): an
+        int64 [1] the caller may set non-zero from another thread - the pass is abandoned and None returned (a
+        background pass the search left behind: Searcher._stop_bg). exec_only (T4): the bot's executable family
+        (env_jit.OPT_EXEC - no child of an attack in normal control; Cfg.exec_only)."""
         if tables and S[km.TS] == 1.0 and S[km.WF_S] == 1.0:
             lib = self.table_lib(name)
             if lib is not None:
                 t0 = time.perf_counter()
-                fw = lib.forward(S, H, danger=danger, floor=True, maxev=max_events, cu=cu, dash=True,
-                                 blocking=blocking)
+                try:
+                    fw = lib.forward(S, H, danger=danger, floor=True, maxev=max_events, cu=cu, dash=True,
+                                     blocking=blocking, stop=stop, exec_only=exec_only)
+                except Exception as e:                      # (T4: TablesFull - the room of this decision used up)
+                    if type(e).__name__ != "TablesFull":
+                        raise
+                    TABLE_STATS["full"] = TABLE_STATS.get("full", 0) + 1
+                    fw = None
                 if fw is not None:
                     _tstat("passes", (time.perf_counter() - t0) * 1e3, fw)
                     return fw
+                if stop is not None and stop[0] != 0:
+                    TABLE_STATS["stopped"] = TABLE_STATS.get("stopped", 0) + 1
+                    return None
                 TABLE_STATS["busy"] = TABLE_STATS.get("busy", 0) + 1
             else:
                 TABLE_STATS["no_lib"] = TABLE_STATS.get("no_lib", 0) + 1
         st = self.E.start_state(S, cu=cu)
-        return self.E.forward(st, H, danger=danger, terrain=self.TT, max_events=max_events, claw=False, par=par)
+        return self.E.forward(st, H, danger=danger, terrain=self.TT, max_events=max_events, claw=False, par=par,
+                              stop=stop, opts=ej.OPT_EXEC if exec_only else 0)
 
 
 # T3: the table libraries of this process (path -> tables.Lib), the counters of the passes made from them
@@ -307,6 +335,7 @@ def table_lib(name: str = "", spare: int = 400_000):
             t0 = time.perf_counter()
             lib = tb.Lib.load(p, spare=spare)
             lib.mark()
+            lib.fixed = True           # (T4: never reallocated in a decision - a full room: the engine's pass)
             TABLE_STATS["load_s"] = round(time.perf_counter() - t0, 2)
             TABLE_STATS["file"] = str(p)
             _LIBS[str(p)] = lib
@@ -510,6 +539,14 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         fac = sk.facing_track(face, masks if n else np.zeros(1, np.int64))
         chk = press.ON[0] and n > 0
         kt = None
+        if chk and np.any((masks & km.B_ATTACK) != 0):
+            # T4: an attack pressed in the ground dash / sprint (the Wanderer's dash attack: not modelled) - the plan
+            # cannot be played from there (a forced collision at its press); the trace is the one the down slashes
+            # below take
+            kt = press.trace(W, S, masks, ev, [i_ + 1 for (i_, _) in seg.dsl])
+            um = press.unmodelled(kt, masks, int(S[km.PREV]))
+            if um:
+                bad.append((k0 + um[0], "dash_attack"))
         for (i, iid) in sorted(seg.dsl):
             t = i + 1                                     # the press frame (rollout index)
             ts, kind = t, "down"
@@ -1527,7 +1564,8 @@ class Evaluator:
                     self.ms_exit += (time.perf_counter() - t0) * 1e3
                     return 1
                 fw = self.W.envelope(np.asarray(S, np.float64), H, dz, self.cfg.exit_events, cu=cu,
-                                     tables=self.cfg.tables, blocking=False, name=self.cfg.tables_file)
+                                     tables=self.cfg.tables, blocking=False, name=self.cfg.tables_file,
+                                     exec_only=self.cfg.exec_only)
                 PROBE_STATS["checked"] += 1
                 if fw.count(H) <= 0:
                     PROBE_STATS["violations"] += 1
@@ -1536,7 +1574,7 @@ class Evaluator:
         # (T3: the tables' chain when the library is free - the background pass may hold it: then the engine, the
         # same clusters)
         fw = self.W.envelope(np.asarray(S, np.float64), H, dz, self.cfg.exit_events, cu=cu, tables=self.cfg.tables,
-                             blocking=False, name=self.cfg.tables_file)
+                             blocking=False, name=self.cfg.tables_file, exec_only=self.cfg.exec_only)
         self.ms_exit += (time.perf_counter() - t0) * 1e3
         return fw.count(H)
 
@@ -1567,13 +1605,13 @@ class Evaluator:
         variants = sk.HOOK_VARIANTS if any(s.claw is not None for s in plan.segs) else sk.HOOK_VARIANTS[:1]
         if start is None:
             tr0 = self.sim(sit, plan, variants[0], face0)
-            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
+            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred, cfg.h_pass) + 2)
             P0 = self.predict(sit, hero_path(tr0, T, {}), T)
             groups = [(P0, 1.0, None, {}, -1)]
         else:
             fixed0, cons0, lh0, rb = start
             tr0 = self.sim(sit, plan, variants[0], face0, rb, rb.T, cfg.lag)
-            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred) + 2)
+            T = max(T, tr0.end + max(cfg.exit_h, cfg.t_pred, cfg.h_pass) + 2)
             hits0: dict = {}
             for (ii, kk), v in fixed0.items():
                 hits0.setdefault(ii, {})[kk] = v
@@ -1637,7 +1675,7 @@ class Evaluator:
                     hits: dict = {}
                     for (ii, kk), v in fixed.items():
                         hits.setdefault(ii, {})[kk] = v
-                    T2 = max(P.T, trr.end + max(cfg.exit_h, cfg.t_pred) + 2)
+                    T2 = max(P.T, trr.end + max(cfg.exit_h, cfg.t_pred, cfg.h_pass) + 2)
                     P3 = self.predict(sit, hero_path(trr, T2, hits), T2)
                     P3._akey = akey
                     kf3 = [(Ps, rk) for (_, Ps, rk) in trr.alts]
@@ -1654,7 +1692,7 @@ class Evaluator:
                     for (ii, kk), v in fx.items():
                         hits.setdefault(ii, {})[kk] = v
                     trr = lst[0][2]
-                    T2 = max(T, trr.end + max(cfg.exit_h, cfg.t_pred) + 2)
+                    T2 = max(T, trr.end + max(cfg.exit_h, cfg.t_pred, cfg.h_pass) + 2)
                     P2 = self.predict(sit, hero_path(trr, T2, hits), T2)
                     P2._akey = ak
                     wsum = sum(x[0] for x in lst)
@@ -1862,9 +1900,10 @@ def _alive(pred) -> list:
 
 
 def _long_pass(W: "World", t_from: int, args: tuple, kw: dict):
-    """One approach pass; T3: a long pass's windows start after frame t_from (Searcher.windows)."""
+    """One approach pass; T3: a long pass's windows start after frame t_from (Searcher.windows). None: abandoned
+    (T4: its stop was set - a background pass the search left behind)."""
     fw = W.envelope(*args, **kw)
-    if t_from > 0:
+    if fw is not None and t_from > 0:
         fw.t_from = t_from
     return fw
 
@@ -1905,6 +1944,7 @@ class Searcher:
         # M4d2: a callable (eval, kept eval | None) called with each new safe best that is not the kept plan nor the
         # noop (the live worker sends it at once: anytime); None: none (the search itself is unchanged by it)
         self.on_best = None
+        self._bg: list = []            # T4: the background passes started and not joined (_stop_bg)
 
     def _mine(self, c) -> bool:
         if self.part is None:
@@ -1938,12 +1978,35 @@ class Searcher:
             dz = _union_danger(node.pred, node.k0, H, self.cfg.margins, bo)
             # (T3, cfg.tables: the A1_n chain - the same clusters; a background pass waits for the library)
             args = (np.asarray(node.S, np.float64), H, dz, ne)
-            kw = dict(cu=cu, par=self.cfg.fwd_threads, tables=self.cfg.tables, name=self.cfg.tables_file)
+            kw = dict(cu=cu, par=self.cfg.fwd_threads, tables=self.cfg.tables, name=self.cfg.tables_file,
+                      exec_only=self.cfg.exec_only)
             if bg:
-                out.append(_bg_pool().submit(_long_pass, self.W, t_from, args, kw))
+                # (T4: each background pass carries a stop flag - a pass the search leaves behind (the cap, the node's
+                # time slice, an abort) is abandoned at its next frame instead of running on: with the tables it held
+                # the library's lock and made the next passes and the decision's reset wait - the verifiers' finding)
+                stop = np.zeros(1, dtype=np.int64)
+                kw["stop"] = stop
+                f = _bg_pool().submit(_long_pass, self.W, t_from, args, kw)
+                f._map2_stop = stop
+                self._bg.append(f)
+                out.append(f)
                 continue
             out.append(_long_pass(self.W, t_from, args, kw))
         return out
+
+    def _stop_bg(self) -> int:
+        """T4: every background pass this searcher started and did not join: cancelled before it starts, abandoned
+        at its next frame when running (its stop flag). Returns how many were still pending."""
+        n = 0
+        for f in self._bg:
+            if not f.done():
+                n += 1
+                f.cancel()
+                f._map2_stop[0] = 1
+        self._bg = []
+        if n:
+            self.stats["bg_stopped"] = self.stats.get("bg_stopped", 0) + n
+        return n
 
     @staticmethod
     def _rows(fw) -> dict:
@@ -2019,6 +2082,13 @@ class Searcher:
                         xm = X.ravel()[m]
                         found["dslash"].append((R["t"][k_], R["g"][k_], xm, R["y"][k_], np.full(len(k_), dc),
                                                 np.abs(xm - np.repeat(cx, 3)[m])))
+                    if cfg.shapes and getattr(fw, "node", None) is not None:
+                        # T4 (the verifiers' finding: the predicate tests the contact at press + 4 / 3 / 6 only; the
+                        # exact shapes have 27 % more windows - contacts at + 5 / 7 / 8 / 9): the rows the predicate
+                        # did not take, by the shape (wshape: the press region, both alternations, her keys free)
+                        sh = self._shape_rows(node, fw, R, base & ~done, boxes)
+                        if sh is not None:
+                            found["dslash"].append(sh)
                 if "claw" in cfg.prims and n:
                     hit = node.k0 + R["t"] + 1 + sk.HOOK_HIT_F
                     hh = np.minimum(hit, nb_ - 1)
@@ -2059,7 +2129,9 @@ class Searcher:
                     D_ = np.concatenate([q[5] for q in parts])
                     # spread over the whole horizon: per 6-frame bin the best rows (dslash: up to 3 x points of the
                     # earliest frame in the bin; claw: the nearest), bins taken evenly up to n_win rows
-                    o = np.lexsort((D_, T_))                       # stable: ties keep the order found
+                    # (stable: ties keep the order found; T4 - the distances rounded to 1e-9 u: the tables' x is the
+                    # engine's to ~1e-13 u, and such a difference flipped ties - the verifiers' finding)
+                    o = np.lexsort((np.round(D_, 9), T_))
                     T_, G_, X_, Y_, E_, D_ = T_[o], G_[o], X_[o], Y_[o], E_[o], D_[o]
 
                     def row(i):
@@ -2096,6 +2168,52 @@ class Searcher:
             seen.add(key)
             out.append(c)
         return out
+
+    def _shape_rows(self, node: Node, fw, R: dict, sel: np.ndarray, boxes: np.ndarray):
+        """T4: the down slash windows by the exact shape (wshape.cluster_windows) among the rows sel of a tables'
+        pass - the rows whose body box comes near in press + 3 .. + 9 first (a vectorized pre-filter) -, one window per
+        row: the middle of its widest piece (contact assumed at press + 5 for the realizer's tail). (T, G, X, Y, dc, D)
+        arrays as windows' found lists, or None."""
+        from ssbot.map2 import wshape as wsh
+        lib = self.W.table_lib(self.cfg.tables_file)
+        I = np.flatnonzero(sel)
+        nb_ = len(boxes)
+        if lib is None or not len(I) or not nb_:
+            return None
+        near = np.zeros(len(I), bool)
+        for dc in range(3, 10):
+            c = np.minimum(node.k0 + R["t"][I] + 1 + dc, nb_ - 1)
+            bx = boxes[c]
+            ok = ~np.isnan(bx[:, 0])
+            near |= ok & (bx[:, 2] >= R["x0"][I] - 3.0) & (bx[:, 0] <= R["x1"][I] + 3.0) & \
+                (bx[:, 3] >= R["y"][I] - 6.0) & (bx[:, 1] <= R["y"][I] + 2.0)
+        I = I[near]
+        if not len(I):
+            return None
+        sw = fw.__dict__.setdefault("_swing", {})
+        gs = np.unique(R["g"][I])
+        new = [int(g) for g in gs if int(g) not in sw]
+        if new:
+            ty, L, Rr, gnd = wsh.swing_paths(lib, fw, np.array(new), float(node.S[km.ALPHA]))
+            for j, g in enumerate(new):
+                sw[g] = (ty[j], L[j], Rr[j], gnd[j])
+        T_, G_, X_, Y_, D_ = [], [], [], [], []
+        for i in I:
+            g = int(R["g"][i])
+            t = int(R["t"][i])
+            ty, L, Rr, gnd = sw[g]
+            shp = wsh.cluster_windows(boxes, node.k0 + t, np.array([[R["x0"][i], R["x1"][i]]]), ty, L, Rr, gnd)
+            if not shp:
+                continue
+            u, v = max(shp, key=lambda p: p[1] - p[0])
+            x = 0.5 * (u + v)
+            c = min(node.k0 + t + 6, nb_ - 1)
+            cx = 0.5 * (boxes[c, 0] + boxes[c, 2]) if not np.isnan(boxes[c, 0]) else x
+            T_.append(t), G_.append(g), X_.append(x), Y_.append(float(R["y"][i])), D_.append(abs(x - cx))
+        self.stats["win_shape"] = self.stats.get("win_shape", 0) + len(T_)
+        if not T_:
+            return None
+        return (np.array(T_), np.array(G_), np.array(X_), np.array(Y_), np.full(len(T_), 5), np.array(D_))
 
     def windows_ref(self, node: Node, fw) -> list:
         """M3's windows (the loops; the reference of the M4b version's test)."""
@@ -2218,7 +2336,7 @@ class Searcher:
         condition bits say what a press in frame tp + 1 does), then the press in frame tp + 1."""
         kind, tp, g, x, y, iid, extra, br = cand[:8]
         w = fw.witness(tp, x, y, tol_y=1e-6)
-        if w is None:
+        if w is None or not self._witness_ok(w):
             return None
         masks = np.asarray(w["masks"], np.int64).copy()
         last = int(masks[-1]) if len(masks) else 0
@@ -2325,7 +2443,7 @@ class Searcher:
         xs = np.concatenate([x0, x1, 0.5 * (x0 + x1)])
         gs = np.concatenate([g, g, g])
         ys = np.concatenate([y1, y1, y1])
-        order = np.argsort(xs)
+        order = np.argsort(np.round(xs, 9), kind="stable")     # (T4: ties as windows')
         n = self.cfg.n_safe
         idx = np.unique(np.linspace(0, len(order) - 1, n).astype(int))
         out = []
@@ -2334,10 +2452,22 @@ class Searcher:
             out.append(("safe", T, int(gs[j]), float(xs[j]), float(ys[j]), None, 0, None))
         return out
 
+    def _witness_ok(self, w) -> bool:
+        """T4 (the verifiers' finding: the witness's keys were used without their miss): the keys, rolled as they
+        are, follow the chain's vertical history (her height at the target within 1e-6 u: a CB_JH frame whose hidden
+        press could not be written opens the umbrella) and end within WITNESS_TOL of the target's x."""
+        if abs(w["miss_y"]) > 1e-6:
+            self.stats["realize_miss_y"] = self.stats.get("realize_miss_y", 0) + 1
+            return False
+        if abs(w["miss_x"]) > WITNESS_TOL:
+            self.stats["realize_miss_x"] = self.stats.get("realize_miss_x", 0) + 1
+            return False
+        return True
+
     def realize_safe(self, fw, cand) -> Seg | None:
         _, tp, g, x, y, *_ = cand
         w = fw.witness(tp, x, y, tol_y=1e-6)
-        if w is None:
+        if w is None or not self._witness_ok(w):
             return None
         return Seg(np.asarray(w["masks"], np.int64).copy(), [], None, "safe")
 
@@ -2677,6 +2807,7 @@ class Searcher:
         self.ev.units = 0
         self.ev.reset()
         self.ev.n_sim = self.ev.n_sim_hit = self.ev.n_probe = 0
+        self._stop_bg()                # (T4: a pass an earlier decision left behind - an exception, an abort)
         if cfg.tables:
             # T3: the library's growth since it was loaded, dropped once over the budget (it does not converge)
             lib = self.W.table_lib(cfg.tables_file, cfg.tables_budget)
@@ -2686,6 +2817,14 @@ class Searcher:
         now = self._now
         t0c = now()
         self.stats = {}
+        try:
+            return self._decide(sit, prev, cap, prefix, t0, t0c)
+        finally:
+            self._stop_bg()            # (T4: the last node's background passes left behind)
+
+    def _decide(self, sit: Situation, prev, cap: float, prefix, t0: float, t0c: float) -> "Result":
+        cfg = self.cfg
+        now = self._now
         # (M4b's hard cap: a candidate's evaluation in progress at the cap is abandoned between its re-predictions)
         self._until = (lambda: now() - t0c > cap) if cfg.hard_cap else None
         self.splits = {}
@@ -2878,6 +3017,8 @@ class Searcher:
                     # a child node continues after a landed strike (in the nominal outcome)
                     if c[0] != "safe":
                         nxt += self._mk_nodes(plan, e, depth, node.tag)
+                if futs is not None:
+                    self._stop_bg()    # (T4: the node's later passes not joined - left behind: abandoned now)
             if not nxt or timed_out:
                 break
             # the beam: the best by the open value (in the node's own reactions), diverse in the strikes (kind,

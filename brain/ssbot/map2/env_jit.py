@@ -40,15 +40,16 @@ from numba import njit, prange
 from numba import types
 from numba.typed import Dict
 
-from ssbot.knowledge.kin_jit import fixed_step, update, can_dash, f32, ge32, move_y
+from ssbot.knowledge.kin_jit import fixed_step, update, can_dash, f32, ge32, move_y, roof_ray
 from ssbot.knowledge.kinematics import (
     K, PX, PY, QX, QY, SX, SY, VX, VY, ALPHA, GS, FACE, GROUND, MODE, MODE_T, JUMPING, JSTEPS, JDSTEPS, JQ, AQ,
     AIRHANG, ATTACKING, ATK_T, ATK_CD, RDIR, RSTEPS, DS_REC, BOUNCE, MOVE, JHELD, PREV, INV_T, LEDGE, TOUCH, PHASE,
     TS, QQ, LANDQ, WF_S, WSIDE, WTOUCH, CLING, CLING_CD, WSTICK, UNSTICK, WLOCK, WJ_V, WJ_CHAIN, WJQ, WSLASH, PREV_GS,
-    GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
-    B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
+    GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR, ATK_KIND,
+    B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, B_UP, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD, P_H2_SAT,
+    AB_DASH, AB_THUNK, P_THK, THK_STRIDE, P_THK_OFF_UP,
+    ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD, P_H2_SAT,
     P_SKIN, P_SLOP_LO, P_SLOP_HI)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
@@ -62,7 +63,17 @@ CB_JH = 1 << 13         # an air dash pressed with jump already held (no new pre
                         # and the hang ramp keeps the scale low while jump is held (kin_jit; reachable when jump was
                         # pressed earlier without opening the umbrella: in an attack's recovery, the umbrella's 0.1 s
                         # cooldown, after a jump's hang) - offered at every air dash press, an over-approximation for
-                        # the first frames of an airtime
+                        # the first frames of an airtime. T4 (the verifiers' finding): not before its hidden press can
+                        # come - an attack's recovery: frame 2 for the hang, frame 7 for a dash pressed with it (jh_early;
+                        # forward / the tables' chain drop those children); the witness writes the press (Fwd.witness)
+CB_FREE = 1 << 15       # T4: an attack in normal control that costs no event (the person's 'event': not an attack in
+                        # normal control) - offered where its lock changes what a held key does later: a held, queued
+                        # dash that cannot fire yet is held back until the attack's recovery ends (the verifiers'
+                        # finding: such a dash otherwise needed a release and a re-press, two events)
+CB_UP = 1 << 14         # T4: an UP slash (attack + up) in normal control in the air - offered only where its terrain
+                        # thunker meets a ceiling within its window (kin_jit.thunk_step's RecoilDown: the rise stops,
+                        # vy 0 - AB_THUNK in the Forum loadout; upslash_thunks), the one attack in normal control that
+                        # moves her (the verifiers' finding: the arena's ceiling 15.15)
 
 # ---- options (forward / gen_cands): the Clawline and its P + 8 throw; for experiments, mechanics switched off
 OPT_CLAW, OPT_TF8, OPT_NO_DASH, OPT_NO_JH, OPT_NO_CANCEL, OPT_NO_UMB = 1, 2, 4, 8, 16, 32
@@ -73,6 +84,11 @@ OPT_ATK = 64
 # frame's steps); the air dash (the press, the umbrella's dash cancel, the dash with jump held, a queued dash firing in
 # the air) is the bridge's (T2), not the tables'. The ground dash stays.
 OPT_NO_ADASH = 128
+# T4: THE BOT'S EXECUTABLE FAMILY - without the children an attack in normal control makes (the up slash at the
+# ceiling CB_UP, the free attack holding a queued dash CB_FREE, the jump held without a press CB_JH, whose press needs
+# an attack before it): the live controller rejects a plan whose keys hold a slash it does not plan (live.repair_check
+# 'unplanned slash'), so the search's passes and exits take this family (Cfg.exec_only); the exactness checks take all
+OPT_EXEC = 1 << 12
 # bits 8 .. 11: the event limit (0: none) - the 'segment family' of the spec: the choices other than going on
 
 # ---- custom per-cluster fields ---------------------------------------------------------------------------------
@@ -122,7 +138,12 @@ _XVXD = int(np.flatnonzero(_KEEP == XVXD)[0])
 # that stop at <= 0 (ATK_CD, CLING_CD, GL_CD, DASH_CD, JBUF: max 0), PREV (jump / attack / dash bits), the direction of
 # a committed block (dash FACE, sprint SP_X, Clawline), the custom fields
 K_JDS, K_ATKT, K_ATKCD, K_CLCD, K_GLCD, K_DCD, K_JBUF, K_PREV, K_DIR, K_ABUF, K_XVD = range(NK0, NK0 + 11)
-K_C0 = NK0 + 11
+# T4 (the verifiers' finding: a LEFT extra air velocity - the sprint jump's ShuttleCockCancel, 5 / s - lives on lane 0
+# only, lane 1 holds right and its turn clears it): lane 0's extra-velocity side and decay are keys too (key_l0) -
+# before, clusters with and without a left extra merged and the merged lane 0 kept the first child's decay (10 / s for
+# 5 / s: the left end lagged up to 0.24 u); vkey of one lane writes its own values here
+K_XVD0, K_XVXD0 = NK0 + 11, NK0 + 12
+K_C0 = NK0 + 13
 NKEY = K_C0 + NC
 # fields a no-op press may change (the filter compares children of one parent without them): the press edges and
 # the queues a fresh press reproduces (a buffered jump / queued dash fires in the frame a new press would)
@@ -194,6 +215,8 @@ def vkey(x, cu, P, floor, out):
     out[K_XVD] = (1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0
     if xv == 0.0:
         out[_XVXD] = 0.0               # (T1b: the decay of an extra velocity that is gone)
+    out[K_XVD0] = out[K_XVD]           # (T4: lane 0's slots - key_l0 sets them from lane 0 for a cluster's key)
+    out[K_XVXD0] = out[_XVXD]
     # (T2: a queued jump also while the key is up in normal control in the air - the candidate CB_JH holds jump again
     # without a press, and the queue then fires on landing: two clusters differing only in a stale queue merged and the
     # merged one's 'jump held' child kept the first child's queue - a library node made elsewhere had none)
@@ -250,6 +273,75 @@ def keq(a, b):
         if a[i] != b[i]:
             return False
     return True
+
+
+@njit(cache=True, error_model="numpy")
+def key_l0(key, x0, P):
+    """T4: a cluster's merge key = lane 1's vkey + lane 0's extra air velocity (its side while faster than the run,
+    its decay while it runs): vkey's canonicalisation on lane 0's state."""
+    xv = x0[XVX]
+    key[K_XVD0] = ((1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0) + 0.0
+    key[K_XVXD0] = (0.0 if xv == 0.0 else x0[XVXD]) + 0.0
+
+
+@njit(cache=True, error_model="numpy")
+def keq_lanes(a, b):
+    """The two lanes' vkeys agree in the vertical (the divergence check): every slot but the extra air velocity's
+    side / decay, which are horizontal (a left extra on lane 0 only)."""
+    for i in range(a.shape[0]):
+        if i == K_XVD or i == _XVXD or i == K_XVD0 or i == K_XVXD0:
+            continue
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+JH_DASH_T = 7           # T4: the first frame a dash pressed with jump held without a press (CB_JH | CB_D) can come
+
+
+@njit(cache=True, error_model="numpy")
+def drop_child(cd, t, opts):
+    """T4: a child dropped after the dominance filter - a hidden jump press too early (jh_early), or (OPT_EXEC) a
+    child of an attack in normal control."""
+    if (opts & OPT_EXEC) != 0 and (cd & (CB_UP | CB_FREE | CB_JH)) != 0:
+        return True
+    return jh_early(cd, t)
+
+
+@njit(cache=True, error_model="numpy")
+def jh_early(cd, t):
+    """T4: a jump held without a press (CB_JH) needs its press at an earlier frame where it was inert - an attack's
+    recovery: an attack at t - 1 and the press at t for the hang (t >= 2); for a dash pressed with it the dash must
+    wait for the attack's recovery (0.1 s): the attack at t - 6 at the latest (t >= JH_DASH_T). Earlier the child is
+    unreachable (the verifiers' finding: the witness's keys pressed the jump there and opened the umbrella) - the
+    engine and the tables' chain drop it."""
+    if (cd & CB_JH) == 0:
+        return False
+    return t < (JH_DASH_T if (cd & CB_D) != 0 else 2)
+
+
+@njit(cache=True, error_model="numpy")
+def hcover(a, b):
+    """T4: child b's horizontal reach lies within child a's (both of one parent): b's lanes inside a's x and their
+    velocities / extra velocities no further out - the dominance filter may then drop b (its x set is a's). Before,
+    the filter compared the vertical keys only: a held / queued dash forced left and its right twin with equal keys
+    (the dash not started that Update) - the right one was dropped, 0.33 u of x lost (the verifiers' finding)."""
+    return (b[0, PX] >= a[0, PX] and b[1, PX] <= a[1, PX] and b[0, VX] >= a[0, VX] and b[1, VX] <= a[1, VX]
+            and b[0, XVX] >= a[0, XVX] and b[1, XVX] <= a[1, XVX] and b[0, MOVE] >= a[0, MOVE] and
+            b[1, MOVE] <= a[1, MOVE] and b[0, FACE] >= a[0, FACE] and b[1, FACE] <= a[1, FACE])
+
+
+@njit(cache=True, error_model="numpy")
+def merge_h(dst, src):
+    """A merge's lanes (dst the first child's, src another child of the same key): the extreme horizontal state -
+    lane 0 the lower velocity / extra velocity / held direction / facing, lane 1 the higher (T4: the held direction
+    and the facing too - a direction forced by a dash / Clawline press moves her in the next frame's steps from MOVE:
+    a held dash forced left and its right twin merged kept the left one's MOVE, the right one's next step lost)."""
+    for f in (VX, XVX, MOVE, FACE):
+        if src[0, f] < dst[0, f]:
+            dst[0, f] = src[0, f]
+        if src[1, f] > dst[1, f]:
+            dst[1, f] = src[1, f]
 
 
 _NOOP_POS = np.zeros(NK0, dtype=np.bool_)
@@ -441,14 +533,61 @@ def claw_control(x):
 # ---- candidates -------------------------------------------------------------------------------------------------
 
 @njit(cache=True, error_model="numpy")
-def gen_cands(x, cu, P, opts, dt, out):
+def upslash_reach(vy, P, dt):
+    """T4: how far over her box top an up slash pressed now can meet a ceiling (its thunker's top over her box
+    top + her rise at vy over its window + 0.5 u); 0 without AB_THUNK. tables.near routes a cluster within it of the
+    ceiling through its terrain instance (the free node has no ceiling, so no up slash)."""
+    if (np.int64(P[P_ABIL]) & AB_THUNK) == 0:
+        return 0.0
+    base = P_THK + 2 * THK_STRIDE
+    n = np.int64(P[base])
+    if n < 3:
+        return 0.0
+    top = -1.0e9
+    for i in range(n):
+        top = max(top, P[base + 2 + 2 * i])
+    return 0.5 * (P[P_HEAD] - P[P_FOOT]) + top - P[P_HEAD] + max(vy, 0.0) * (P[P_THK_OFF_UP] + 4.0 * dt) + 0.5
+
+
+@njit(cache=True, error_model="numpy")
+def upslash_thunks(x, P, TT, dt, udt, hold):
+    """T4: an up slash pressed in this frame's Update (x: the lane after the frame's steps - normal control in the air,
+    the attack ready) meets a ceiling with its terrain thunker before its window ends (kin_jit.thunk_step's RecoilDown:
+    the rise stops, vy 0), the keys `hold` (the jump / dash bits the child keeps) held on: a cheap gate (a ceiling over
+    her within the thunker's top + her rise over the window) then the kin rollout on a copy."""
+    if (np.int64(P[P_ABIL]) & AB_THUNK) == 0 or TT[0] <= 0:
+        return False
+    head = x[PY] + P[P_HEAD]
+    reach = upslash_reach(x[VY], P, dt)
+    if reach <= 0.0 or not roof_ray(x[PX], head, reach, TT, False):
+        return False
+    y = x.copy()
+    update(y, hold | B_ATTACK | B_UP, 0, dt, udt, P, TT)
+    if y[ATTACKING] <= 0 or y[ATK_KIND] != 3.0 or y[ATK_T] != 0.0:
+        return False                   # (no fresh up slash this Update: cooldown, another mode)
+    for _ in range(16):
+        dt2, steps = lane_timing(y, udt, P)
+        for _s in range(steps):
+            fixed_step(y, P, TT)
+            if y[ATK_KIND] < 0:
+                return True
+        if y[ATTACKING] <= 0 or y[ATK_KIND] <= 0 or ge32(y[ATK_T], P[P_THK_OFF_UP]):
+            return False
+        update(y, hold, 0, dt2, udt, P, TT)
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def gen_cands(x, cu, P, opts, dt, out, TT, udt):
     """The vertical choices of this frame for a cluster after its steps (x: its lane 1), fewest presses first.
     Returns the count. Only choices that can change the vertical state or the mode: a jump press (the jump, the
     umbrella, the sprint's jump cancel), a held jump where holding acts (the rise, the hang, the umbrella, a queued
     jump), a dash press left / right (normal control, the dash ready) or as the umbrella's cancel, a held dash where
     holding acts (the dash / sprint, a queued dash: then with its direction), the attack as the umbrella's or the
-    sprint's cancel (in normal control the Wanderer's slashes do not move her: only restrictive, never offered),
-    the unhooked Clawline left / right. The children are deduplicated afterwards (no-op presses)."""
+    sprint's cancel (in normal control the Wanderer's slashes do not move her: only restrictive, never offered - T4:
+    but the UP slash whose thunker meets a ceiling, CB_UP, upslash_thunks), the unhooked Clawline left / right. The
+    children are deduplicated afterwards (no-op presses). TT / udt: the terrain and the frame time (the up slash's
+    look-ahead)."""
     if cu[C_CJ] >= 0:
         out[0] = CB_CONT
         return 1
@@ -510,6 +649,12 @@ def gen_cands(x, cu, P, opts, dt, out):
         # cooldown cannot run at the jump's start - the dash, the sprint and its 7-frame antic outlast it)
         ao[1] = CB_A
         na = 2
+    elif ((prev & B_DASH) != 0 and (prev & B_ATTACK) == 0 and m == M_NORMAL and 0 <= x[DQ] <= P[P_DQ] and
+          not cdash and x[ATTACKING] <= 0 and x[ATK_CD] <= 0):
+        # T4: a held, queued dash that cannot fire this Update (its cooldown, a lock): an attack now holds it back
+        # until its recovery ends (can_dash) - a later dash with no further event (CB_FREE: no event)
+        ao[1] = CB_A | CB_FREE
+        na = 2
     n = 0
     # fewest presses first: (j, d, a) in order of the sum of their indices
     for tot in range(0, 5):
@@ -528,6 +673,11 @@ def gen_cands(x, cu, P, opts, dt, out):
         # jump held without a press (pressed earlier where the umbrella could not open: an attack's recovery, its
         # cooldown): it keeps / starts the air hang (a no-op elsewhere, dropped by the dominance filter)
         out[n] = CB_J | CB_JH
+        n += 1
+    if m == M_NORMAL and not ground and (prev & B_ATTACK) == 0 and x[ATK_CD] <= 0 and \
+            upslash_thunks(x, P, TT, dt, udt, (jo[0] | do[0]) & (B_JUMP | B_DASH)):
+        # T4: the up slash that meets the ceiling (its RecoilDown stops the rise) - with the default jump / dash keys
+        out[n] = jo[0] | do[0] | CB_A | CB_UP
         n += 1
     if (opts & OPT_CLAW) != 0 and claw_allowed(x, cu, P):
         out[n] = CB_CLAW | CB_DIR
@@ -593,6 +743,9 @@ def n_events(cd, pbits, useful):
     if (cd & CB_CLAW) != 0:
         return 1.0
     cb = cd & (B_JUMP | B_DASH | B_ATTACK)
+    if (cd & CB_FREE) != 0:
+        cb &= ~B_ATTACK                # T4: an attack in normal control (no event)
+        pbits &= ~B_ATTACK
     if (cd & CB_JH) != 0:
         cb &= ~B_JUMP                  # the jump held without a press: its press was earlier (not counted here)
         pbits &= ~B_JUMP
@@ -607,6 +760,8 @@ def n_events(cd, pbits, useful):
 @njit(cache=True, error_model="numpy")
 def lane_mask(cand, lane):
     m = cand & (B_JUMP | B_ATTACK | B_DASH)
+    if (cand & CB_UP) != 0:
+        m |= B_UP
     if (cand & CB_DIR) != 0:
         return m | (B_RIGHT if (cand & CB_RIGHT) != 0 else B_LEFT)
     return m | (B_RIGHT if lane == 1 else B_LEFT)
@@ -889,14 +1044,15 @@ def cut_danger(lo, hi, ylo, yhi, boxes, b0, b1, olo, ohi, wlo, whi):
 
 @njit(cache=True, nogil=True, error_model="numpy")
 def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_pc, cap_iv, cap_cl,
-            keep_keys, band_t, band_n, qy, qv):
+            keep_keys, band_t, band_n, qy, qv, stop):
     """The cluster forward pass from one start cluster.
 
     L0 [2, K]: the start's lanes (lane 0 left extreme, lane 1 right), cu0 [NC], ivs0 [m, 2] its x intervals; T frames;
     udt the unscaled frame time; P, TT kin_jit's parameter vector and packed terrain; boxes [nb, 4] the danger boxes in
     her centre's space, frame t's rows box_off[t] .. box_off[t + 1] - 1 (frame 0 = the start); caps: clusters per frame,
     pieces, intervals and clusters in all. Returns the per-frame cluster table, the intervals, the pieces (child, parent,
-    candidate, the piece's interval, the parent's lane displacements) and the stats."""
+    candidate, the piece's interval, the parent's lane displacements) and the stats. stop [1] (T4): non-zero - the pass
+    is abandoned at the next frame (another thread's request: the search's background pass left behind)."""
     fdt = P[P_FDT]
     hh = 0.5 * (P[P_HEAD] - P[P_FOOT])
     floor = TT[0] > 0                               # any floor / ceiling segment in the terrain
@@ -995,6 +1151,10 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
     HMASK = HSZ - 1
     htab = np.full(HSZ, -1, dtype=np.int64)
     for t in range(1, T + 1):
+        if stop[0] != 0:
+            for tt in range(t, T + 1):
+                cl_off[tt + 1] = ntot
+            break
         if not band and ((band_t >= 0 and t >= band_t) or (band_n > 0 and ncl > band_n)):
             band = True                              # from here on the far layer (stays on)
         stats[t, 6] = 1 if band else 0
@@ -1060,7 +1220,7 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                         if tmp[0, XVX] < tmp[0, VX]:
                             tmp[0, VX] = tmp[0, XVX]
             # candidates
-            nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands)
+            nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt)
             pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
             u0 = hold_useful(tmp[1], P)
             stats[t, 5] += nc
@@ -1092,9 +1252,11 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                 kcu[nk, C_EV] += n_events(cd, pbits, u0)
                 kuse[nk] = hold_useful(kid[nk, 1], P)
                 if not band:
-                    # an exact cluster: the lanes must agree (vertical independent of left / right)
-                    if not keq(key1, key2):
+                    # an exact cluster: the lanes must agree (vertical independent of left / right; T4: but the
+                    # extra air velocity, a horizontal field - lane 0's goes into the key)
+                    if not keq_lanes(key1, key2):
                         stats[t, 3] += 1
+                    key_l0(key1, kid[nk, 0], P)
                     kkey[nk, :] = key1
                     nk += 1
                 elif dkey_eq(key1, key2):
@@ -1123,16 +1285,16 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                         vkey(kid[nk + j, 1], kcu[nk + j], P, floor, key1)
                         band_key(key1, kid[nk + j, 0], kid[nk + j, 1], hh, qy, qv, P, kkey[nk + j])
                     nk += 2
-                # dominance among the parent's children (same x set): a child that holds more keys and is otherwise
-                # equal adds nothing (either order)
+                # dominance among the parent's children: a child that holds more keys and is otherwise equal adds
+                # nothing (either order) - T4: when its x set lies within the other's (hcover)
                 for j in range(nk - 1, nk):
                     for q in range(j):
                         if not kkeep[q]:
                             continue
-                        if keq_noop(kkey[q], kkey[j], kuse[j]):
+                        if keq_noop(kkey[q], kkey[j], kuse[j]) and hcover(kid[q], kid[j]):
                             kkeep[j] = False
                             break
-                        if keq_noop(kkey[j], kkey[q], kuse[q]):
+                        if keq_noop(kkey[j], kkey[q], kuse[q]) and hcover(kid[j], kid[q]):
                             kkeep[q] = False
                             if kcu[q, C_EV] < kcu[j, C_EV]:
                                 kcu[j, C_EV] = kcu[q, C_EV]
@@ -1140,6 +1302,8 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
             for k in range(nk):
                 if not kkeep[k]:
                     continue
+                if drop_child(kcand[k], t, opts):
+                    continue                # T4: the start has no earlier frame for a hidden jump press
                 dlo = kid[k, 0, PX] - x0l
                 dhi = kid[k, 1, PX] - x0h
                 ya = kid[k, 0, PY] + hh
@@ -1193,16 +1357,10 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                     ch_first[idx] = -1
                 else:
                     stats[t, 4] += 1
-                    # the merged lanes: the extreme velocities (the inertia modes; equal elsewhere) and, for bands,
-                    # the vertical corners
-                    if kid[k, 0, VX] < nxt[idx, 0, VX]:
-                        nxt[idx, 0, VX] = kid[k, 0, VX]
-                    if kid[k, 1, VX] > nxt[idx, 1, VX]:
-                        nxt[idx, 1, VX] = kid[k, 1, VX]
-                    if kid[k, 1, XVX] > nxt[idx, 1, XVX]:      # (HERO2's extra air velocity: the larger reach)
-                        nxt[idx, 1, XVX] = kid[k, 1, XVX]
-                    if kid[k, 0, XVX] < nxt[idx, 0, XVX]:
-                        nxt[idx, 0, XVX] = kid[k, 0, XVX]
+                    # the merged lanes: the extreme velocities (the inertia modes; equal elsewhere), extra air
+                    # velocities (HERO2: the larger reach), held directions and facings (T4) - merge_h - and, for
+                    # bands, the vertical corners
+                    merge_h(nxt[idx], kid[k])
                     if kcu[k, C_EV] < cun[idx, C_EV]:
                         cun[idx, C_EV] = kcu[k, C_EV]
                     if band:
@@ -1366,7 +1524,7 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
                     tmp[1, VX] = tmp[1, XVX]
                 if tmp[0, XVX] < tmp[0, VX]:
                     tmp[0, VX] = tmp[0, XVX]
-    nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands)
+    nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt)
     pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
     u0 = hold_useful(tmp[1], P)
     st_out[0] = nc
@@ -1398,18 +1556,19 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
         kkeep[nk] = True
         kcu[nk, C_EV] += n_events(cd, pbits, u0)
         kuse[nk] = hold_useful(kid[nk, 1], P)
-        if not keq(key1, key2):
+        if not keq_lanes(key1, key2):
             st_out[1] += 1
+        key_l0(key1, kid[nk, 0], P)          # (T4: lane 0's extra air velocity in the key)
         kkey[nk, :] = key1
         nk += 1
         for j in range(nk - 1, nk):
             for q in range(j):
                 if not kkeep[q]:
                     continue
-                if keq_noop(kkey[q], kkey[j], kuse[j]):
+                if keq_noop(kkey[q], kkey[j], kuse[j]) and hcover(kid[q], kid[j]):
                     kkeep[j] = False
                     break
-                if keq_noop(kkey[j], kkey[q], kuse[q]):
+                if keq_noop(kkey[j], kkey[q], kuse[q]) and hcover(kid[j], kid[q]):
                     kkeep[q] = False
                     if kcu[q, C_EV] < kcu[j, C_EV]:
                         kcu[j, C_EV] = kcu[q, C_EV]
@@ -1537,7 +1696,7 @@ def _fin_write(nch, gb, niv, ch_first, fp_lo, fp_hi, fp_next, S_olo, S_ohi, F_of
 
 @njit(cache=True, nogil=True, error_model="numpy")
 def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_pc, cap_iv, cap_cl,
-                keep_keys, nthreads, chunk):
+                keep_keys, nthreads, chunk, stop):
     """forward (exact mode, no bands) with each frame's per-parent work in parallel chunks (_phase_a) and the merge
     of the children into the frame's clusters in the parents' order (the same order as forward: the same clusters,
     lanes, intervals, pieces and stats, bit for bit; tests/test_m4b_speed.py)."""
@@ -1642,6 +1801,10 @@ def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, c
     htab = np.full(HSZ, -1, dtype=np.int64)
     khs = np.empty(cap_frame, dtype=np.int64)
     for t in range(1, T + 1):
+        if stop[0] != 0:                            # (T4: abandoned - forward's stop)
+            for tt in range(t, T + 1):
+                cl_off[tt + 1] = ntot
+            break
         for i in range(HSZ):
             htab[i] = -1
         nch = 0
@@ -1662,6 +1825,8 @@ def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, c
                 for k in range(A_nk[s]):
                     if not A_keep[s, k]:
                         continue
+                    if drop_child(A_cand[s, k], t, opts):
+                        continue            # T4: the start has no earlier frame for a hidden jump press
                     npcs = A_np[s, k]
                     if npcs == 0:
                         stats[t, 2] += 1
@@ -1693,14 +1858,7 @@ def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, c
                         ch_first[idx] = -1
                     else:
                         stats[t, 4] += 1
-                        if A_kid[s, k, 0, VX] < nxt[idx, 0, VX]:
-                            nxt[idx, 0, VX] = A_kid[s, k, 0, VX]
-                        if A_kid[s, k, 1, VX] > nxt[idx, 1, VX]:
-                            nxt[idx, 1, VX] = A_kid[s, k, 1, VX]
-                        if A_kid[s, k, 1, XVX] > nxt[idx, 1, XVX]:
-                            nxt[idx, 1, XVX] = A_kid[s, k, 1, XVX]
-                        if A_kid[s, k, 0, XVX] < nxt[idx, 0, XVX]:
-                            nxt[idx, 0, XVX] = A_kid[s, k, 0, XVX]
+                        merge_h(nxt[idx], A_kid[s, k])
                         if A_kcu[s, k, C_EV] < cun[idx, C_EV]:
                             cun[idx, C_EV] = A_kcu[s, k, C_EV]
                     for r in range(npcs):
@@ -1821,10 +1979,11 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
     for t in range(1, T + 1):
         m = masks[t - 1]
         # (as gen_cands: no jump press on the ground in the dash or the ground sprint - the skid's jump is a plain
-        # full jump, kept -; no attack press in the ground sprint or its skid)
+        # full jump, kept -; no attack press in the ground sprint or its skid; T4: nor in the ground dash - its end
+        # into the sprint takes it as the Wanderer's dash attack, not modelled: press.unmodelled)
         no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and \
             (np.int64(P[P_H2]) & H2_SHUTTLE) == 0
-        no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
+        no_a = (x[MODE] == M_SPRINT and x[PHASE] >= 2.0) or (x[MODE] == M_DASH and x[GROUND] > 0)
         for b in (B_JUMP, B_ATTACK):
             if (m & b) == 0:
                 strip &= ~b
@@ -1923,6 +2082,8 @@ def ref_many(S0s, cu0s, masks, udt, P, TT):
 @njit(cache=True, error_model="numpy")
 def _vbits(vm):
     m = vm & (B_JUMP | B_ATTACK | B_DASH)
+    if (vm & CB_UP) != 0:
+        m |= B_UP
     if (vm & CB_CLAW) != 0:
         m |= B_CLAW | ((1 << 31) if (vm & CB_TF8) != 0 else 0)
     return m

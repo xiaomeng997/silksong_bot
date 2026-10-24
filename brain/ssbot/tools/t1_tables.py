@@ -650,12 +650,15 @@ def flat_cmd(args) -> int:
     lib = tb.Lib.load(args.lib or tb.tables_path(not args.no_claw, args.terrain))
     T, mev = args.T, args.maxev
     tabs, stat = {}, {}
+    alphas, free = {}, {}
     t0 = time.perf_counter()
     for kind, ph, var in FLAT_KEYS:
         for ac in range(6):
             S, terr = env.canonical(lib.params, kind, ph, ac, var, False)
             fl = lib.flat(S, T, maxev=mev, floor=(kind == "G"), dash=args.dash)
             name = f"{kind}{var}@{ph}/a{ac}"
+            alphas[name] = float(S[km.ALPHA])          # (T4: the exact phase it bounds - Tables.valid_until)
+            free[name] = kind != "G"
             tabs[name] = {"all": fl[0], "dslash": fl[ej.COND_DSLASH], "claw": fl[ej.COND_CLAW],
                           "_counts": fl["clusters"]}
             stat[name] = {"ms": round(fl["seconds"] * 1e3, 2), "rows_T": len(fl[0][-1]),
@@ -666,7 +669,9 @@ def flat_cmd(args) -> int:
     arrs = {"_meta": np.array(json.dumps({"version": tb.VERSION, "T": T, "maxev": mev, "q": env.QROW,
                                           "keys": list(tabs), "claw": lib.claw, "terrain": lib.terrain,
                                           "hero2": int(lib.P[km.P_H2]), "params_vector_sha1": tb._sha1(lib.P),
-                                          "built_s": round(build_s, 1), "dash": bool(args.dash)}))}
+                                          "built_s": round(build_s, 1), "dash": bool(args.dash),
+                                          "alpha": alphas, "free": free, "dt": float(np.float32(lib.udt)),
+                                          "fdt": float(lib.P[km.P_FDT])}))}
     for k, tbl in tabs.items():
         for c in ("all", "dslash", "claw"):
             fr = tbl[c]

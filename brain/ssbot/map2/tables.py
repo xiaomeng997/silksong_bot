@@ -75,6 +75,10 @@ from ssbot.map2 import env_jit as ej
 from ssbot.map2.env_jit import _children, vkey, khash, keq, cond_of, claw_allowed, NKEY, NC, C_EV, C_CJ
 
 VERSION = 1
+# T4: the engine revision a library's edges come from (the merge key with lane 0's extra velocity, the dominance
+# filter's horizontal cover, the up slash at the ceiling, no hidden jump press at a pass's start): a library built by
+# another engine is refused (Lib.load) - its edges and classes are another engine's
+ENGINE_REV = "t4b"
 TABLES_PATH = km.REPO / "knowledge" / "1.0.30000" / "kinematics" / f"a1n_tables_v{VERSION}.npz"
 
 
@@ -151,6 +155,7 @@ def vkey_rel(L, cu, P, floor, absy, out):
     canonicalised beyond the engine's own (the raw fall timer and the ground sprint's time stay, as in the engine:
     its merges - and with an event limit the events a merged cluster keeps - are reproduced exactly)."""
     vkey(L[1], cu, P, floor, out)
+    ej.key_l0(out, L[0], P)                     # (T4: lane 0's extra air velocity, as the engine's cluster key)
     out[_KPY] = L[1, PY] if absy else 0.0
     out[_KQY] = 0.0
     out[_KSY] = 0.0
@@ -262,6 +267,12 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     for i in range(NKEY):
         ckey[i] = key[i]
     ckey[_KPY] = 0.0
+    # (T4, the verifiers' finding: a ground dash's floor instance holds its representative's QY / SY in its identity,
+    # but the chain carries each cluster's own QY / SY in the merge (hq / hs) - with them in the class too, two
+    # clusters of equal QY / SY whose nodes came from representatives 0.015 u apart did not merge where the engine
+    # merged them: extra clusters, other candidates)
+    ckey[_KQY] = 0.0
+    ckey[_KSY] = 0.0
     c = _cls_get(CHT, CK, CH, CNT, ckey)
     if c < 0:
         return -1
@@ -276,6 +287,8 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     for i in range(NKEY):
         ckey[i] = key[i]
     ckey[_KPY] = 0.0
+    ckey[_KQY] = 0.0
+    ckey[_KSY] = 0.0
     c1 = _cls_get(CHT, CK, CH, CNT, ckey)
     if c1 < 0:
         return -1
@@ -583,12 +596,14 @@ def _cond(c, dbit):
     return c if (c & ej.COND_CLAWBLK) != 0 else c | dbit
 
 @njit(cache=True, error_model="numpy")
-def near(py, ylo, TP, P):
+def near(py, ylo, TP, P, vy):
     """A cluster at her PY in [ylo, py] (a band: its range) is within the terrain's reach: its frame is the terrain
-    instance's. TP: (has_floor, floor top, clear, has_ceiling, ceiling bottom, clear up)."""
+    instance's. TP: (has_floor, floor top, clear, has_ceiling, ceiling bottom, clear up). T4: the ceiling's reach
+    also covers an up slash's thunker at her vy (env_jit.upslash_reach: the up slash at the ceiling is a candidate
+    only over the terrain)."""
     if TP[0] > 0 and (ylo - P[P_FOOT] - TP[1]) < TP[2]:
         return True
-    return TP[3] > 0 and (TP[4] - (py + P[P_HEAD])) < TP[5]
+    return TP[3] > 0 and (TP[4] - (py + P[P_HEAD])) < max(TP[5], ej.upslash_reach(vy, P, 0.0168))
 
 
 @njit(cache=True, error_model="numpy")
@@ -687,18 +702,12 @@ def _merge(a, b, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ck
     with the extreme lane velocities (lane 0 the lower vx / extra vx, lane 1 the higher)."""
     L = NL[a].copy()
     ch = False
-    if NL[b, 0, VX] < L[0, VX] or NL[b, 1, VX] > L[1, VX] or NL[b, 1, XVX] > L[1, XVX] or NL[b, 0, XVX] < L[0, XVX]:
-        ch = True
+    for f in (VX, XVX, MOVE, FACE):              # (T4: the held direction and the facing too - env_jit.merge_h)
+        if NL[b, 0, f] < L[0, f] or NL[b, 1, f] > L[1, f]:
+            ch = True
     if not ch:
         return a                                 # the same lane velocities: the engine keeps the first child's
-    if NL[b, 0, VX] < L[0, VX]:
-        L[0, VX] = NL[b, 0, VX]
-    if NL[b, 1, VX] > L[1, VX]:
-        L[1, VX] = NL[b, 1, VX]
-    if NL[b, 1, XVX] > L[1, XVX]:
-        L[1, XVX] = NL[b, 1, XVX]
-    if NL[b, 0, XVX] < L[0, XVX]:
-        L[0, XVX] = NL[b, 0, XVX]
+    ej.merge_h(L, NL[b])
     CNT[C_MERGE] += 1
     return node_get(L, NCU[a].copy(), NINT[a, I_ABS] == 1, NVY[a, V_ALF], P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT,
                     CK, CH, CNT, key, ckey)
@@ -707,7 +716,7 @@ def _merge(a, b, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ck
 @njit(cache=True, nogil=True, error_model="numpy")
 def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, wlo, whi, dflags, band_q, P, udt, TTf,
           TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT, ICK, ICT, cap_frame, cap_pc,
-          cap_iv, cap_cl):
+          cap_iv, cap_cl, stop):
     """The table chain from one start (node n0 at her height py0 - her PY -, x intervals ivs0, her physics phase
     alpha0) over T frames: env_jit.forward's outputs (the same clusters and pieces) plus each cluster's node and
     events. boxes / box_off: the danger per frame (her centre's space), maxev the event limit (0: none), the floor
@@ -718,7 +727,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     the engine), bit 2 a landing restores the dash (HERO2 H2_LAND_DASH; the no-dash lists' clusters drop the bit when
     the edge lands). band_q > 0: the flattened layer - clusters of one node whose
     heights lie within band_q merge into a band (y range [cl_ylo, cl_y]; an upper bound, never for witnesses). TP: the
-    terrain's reach (near; has_floor = TP[0] > 0)."""
+    terrain's reach (near; has_floor = TP[0] > 0). stop [1] (T4): non-zero - abandoned at the next frame (flags[4]
+    bit 128: the search's background pass left behind; Lib.forward returns None)."""
     has_floor = TP[0] > 0 or TP[3] > 0
     fl = 1 if has_floor else 0
     fdt = P[P_FDT]
@@ -735,6 +745,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     cl_node = np.empty(cap_cl, dtype=np.int64)
     cl_ev = np.empty(cap_cl)
     cl_ad = np.empty(cap_cl, dtype=np.int64)
+    cl_qs = np.empty((cap_cl, 2))                # (T4: each cluster's QY / SY - the merge key's; diagnostics)
     IV = np.empty((cap_iv, 2))
     pc_cl = np.empty(cap_pc, dtype=np.int64)
     pc_par = np.empty(cap_pc, dtype=np.int64)
@@ -765,6 +776,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     ad0 = dflags & 1
     dmode = (dflags & 2) != 0
     ldash = (dflags & 4) != 0
+    xopt = ej.OPT_EXEC if (dflags & 8) != 0 else 0     # (T4: bit 3 - the bot's executable family, env_jit.OPT_EXEC)
     cur_d[0] = ad0
     cur_n[0] = n0
     cur_y[0] = py0
@@ -784,6 +796,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     cl_vy[0] = NVY[n0, V_VY]
     cl_cond[0] = _cond(NINT[n0, I_COND], ej.COND_DASHED if ad0 else 0)
     cl_ad[0] = ad0
+    cl_qs[0, 0] = qy0
+    cl_qs[0, 1] = sy0
     cl_mode[0] = NINT[n0, I_MODE]
     cl_phase[0] = NINT[n0, I_PHASE]
     cl_iv0[0] = 0
@@ -827,6 +841,11 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     alpha = alpha0
     yb = np.empty(1)
     for t in range(1, T + 1):
+        if stop[0] != 0:
+            flags[4] |= 128
+            for tt in range(t, T + 1):
+                cl_off[tt + 1] = ntot
+            break
         for i in range(nhu):
             htab[hused[i]] = -1
         nhu = 0
@@ -847,14 +866,14 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             n = cur_n[c]
             py = cur_y[c]
             src = n
-            if NINT[n, I_ABS] == 0 and has_floor and near(py, cur_yl[c], TP, P):
+            if NINT[n, I_ABS] == 0 and has_floor and near(py, cur_yl[c], TP, P, NVY[n, V_VY]):
                 src = _instance(n, py, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key, ckey)
                 if src < 0:
                     flags[4] |= CNT[C_OVF]
                     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
                             cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                             pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
-                            cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+                            cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot], cl_qs[:ntot])
             # the edge list this cluster takes (T2): no air dash (T1: du 0); in the dash mode every candidate in the
             # engine's order (du 1 with the air dash unused: the no-dash children - T1's list - and the bridge's entries
             # among them; du 2 with it used)
@@ -879,12 +898,14 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                 return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
                         cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                         pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
-                        cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+                        cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot], cl_qs[:ntot])
             pg = NINT[src, I_GROUND]
             e0 = EOFF[src, s, 4 * du + 2 * fl + lim, 0]
             ne = EOFF[src, s, 4 * du + 2 * fl + lim, 1]
             stats[t, 5] += ne
             for e in range(e0, e0 + ne):
+                if ej.drop_child(EI[e, EI_CAND], t, xopt):
+                    continue                             # T4: no hidden jump press that early (as the engine)
                 cad = EI[e, EI_AD]                       # (the kernel's: a landing restores it, H2_LAND_DASH)
                 ch = EI[e, EI_CH]
                 dlo = EF[e, EF_DLO] + EF[e, EF_SLO] * a_st
@@ -941,7 +962,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     continue
                 # the merge class at the height (the engine's key; the band layer: the node within band_q, away from
                 # the floor)
-                use_band = band_q > 0.0 and not (has_floor and near(cy + 1.0, cyl - 1.0, TP, P))
+                use_band = band_q > 0.0 and not (has_floor and near(cy + 1.0, cyl - 1.0, TP, P, NVY[ch, V_VY]))
                 if use_band:
                     hb = np.int64(math.floor(cyl / band_q))
                     hc = 4 * ch + 2 * cad + 1
@@ -998,7 +1019,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                             return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot],
                                     cl_mode[:ntot], cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv],
                                     pc_cl[:npc], pc_par[:npc], pc_cand[:npc], pc_lo[:npc], pc_hi[:npc],
-                                    pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+                                    pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot], cl_qs[:ntot])
                         nxt_n[idx] = mg
                         stats[t, 3] += 1
                     if ev < nxt_e[idx]:
@@ -1065,6 +1086,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             cl_vy[gc] = NVY[nd, V_VY]
             cl_cond[gc] = _cond(NINT[nd, I_COND], ej.COND_DASHED if nxt_d[c] else 0)
             cl_ad[gc] = nxt_d[c]
+            cl_qs[gc, 0] = nxt_q[c]
+            cl_qs[gc, 1] = nxt_s[c]
             cl_mode[gc] = NINT[nd, I_MODE]
             cl_phase[gc] = NINT[nd, I_PHASE]
             cl_node[gc] = nd
@@ -1116,7 +1139,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             break
     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot], cl_phase[:ntot],
             cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc], pc_cand[:npc], pc_lo[:npc],
-            pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+            pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot], cl_qs[:ntot])
 
 
 
@@ -1140,7 +1163,7 @@ def route_du(n, py, qy, sy, s, alpha, du, TP, P, udt, TTf, TTg, opts, hh, NL, NC
     ckey = np.empty(NKEY)
     fl = 1 if (TP[0] > 0 or TP[3] > 0) else 0
     src = n
-    if NINT[n, I_ABS] == 0 and fl == 1 and near(py, py, TP, P):
+    if NINT[n, I_ABS] == 0 and fl == 1 and near(py, py, TP, P, NVY[n, V_VY]):
         src = _instance(n, py, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key, ckey)
         if src < 0:
             return -1
@@ -1167,7 +1190,7 @@ def member_frame(x, cu, m_raw, m_prev, strip, udt, P, TT):
     m = m_raw
     no_j = (x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and
             (np.int64(P[km.P_H2]) & km.H2_SHUTTLE) == 0)
-    no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
+    no_a = (x[MODE] == M_SPRINT and x[PHASE] >= 2.0) or (x[MODE] == M_DASH and x[GROUND] > 0)   # (T4: as ref_rollout)
     for b in (B_JUMP, B_ATTACK):
         if (m & b) == 0:
             strip &= ~b
@@ -1379,6 +1402,10 @@ def _start_node(L, cu, absy, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, 
     return node_get(L, cu, absy, -1.0, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ckey)
 
 
+class TablesFull(RuntimeError):
+    """T4: a fixed library (Lib.fixed) has no room left for this pass."""
+
+
 K_TRANS, K_A1, K_A1OFF, K_A4, K_A2, K_A3, K_G, K_R, K_HANG = range(9)
 KIND_NAMES = ("transient", "A1", "A1~", "A4", "A2", "A3", "G", "R", "hang")
 
@@ -1445,8 +1472,16 @@ class Lib:
         # at a time - the search's background pass and its exit checks on the main thread share one library (the
         # chain runs without the GIL: the other thread's Python work goes on meanwhile)
         self.lock = threading.RLock()
+        # T4 (the verifiers' finding: a decision could grow the search's library past its preallocated room and the
+        # node arrays then doubled, +3.5 GB): fixed - no reallocation; a pass that needs more room raises TablesFull
+        # (the search then takes the engine for it and resets the library at its next decision)
+        self.fixed = False
 
     # ---- capacity ----
+    @property
+    def room(self) -> int:
+        """The nodes the arrays hold without a reallocation."""
+        return int(self.NL.shape[0])
     @property
     def n_nodes(self) -> int:
         return int(self.CNT[C_NODES])
@@ -1459,6 +1494,9 @@ class Lib:
         ovf = int(self.CNT[C_OVF])
         if ovf & 8:
             raise RuntimeError("tables: the phase choice does not give the step count (ALPHA_S)")
+        if self.fixed and (ovf & (1 | 2 | 4 | 16)):
+            self.CNT[C_OVF] = 0
+            raise TablesFull(f"tables: the preallocated room is full ({self.n_nodes} nodes of {self.room})")
         if ovf & 1:
             n = self.NL.shape[0] * 2
             for nm in self._NODE_ARR:
@@ -1562,25 +1600,31 @@ class Lib:
     def forward(self, S: np.ndarray, T: int, danger=None, floor: bool = False, maxev: int = 0,
                 x0: float | None = None, x1: float | None = None, cu=None, wall=None, band_q: float = 0.0,
                 cap_frame: int = 20000, cap_pc: int = 4_000_000, cap_iv: int = 4_000_000, cap_cl: int = 2_000_000,
-                dash: bool = False, blocking: bool = True):
+                dash: bool = False, blocking: bool = True, stop: np.ndarray | None = None, exec_only: bool = False):
         """The chain from her exact state S over T frames (danger: None or T + 1 arrays of boxes [n, 4] in her
         centre's space; floor: the library's terrain (the Forum floor, and the ceiling for 'arena') - else free
-        space; maxev: the event limit; wall: (x_lo, x_hi) of her centre or None;
+        space; maxev: the event limit; wall: (x_lo, x_hi) of her centre or None - an x CLIP only (T4, the verifiers'
+        finding: the game's walls also change the vertical - the wall slide and cling, kin_jit's WSIDE / CLING - so a
+        clipped set misses those heights where she touches a wall; the spec's use-time clip is incomplete there; the
+        search never uses it: its walls are closed danger boxes at her half width, she never touches one; fw.wall_clip);
         band_q > 0: the flattened layer's bands; dash (T2): the forward set WITH THE AIR DASH - the no-dash chain + the
         bridge's entries (the air dash pressed / held / queued, its own frames and every frame after it on the full
         lists), the engine's pass without OPT_NO_ADASH. Returns an envelope.Fwd (the engine's arrays: regions,
         contains, witness) with .node / .events / .ad (the air dash used) per cluster and .lib_stats. One pass at a
-        time per library (T3: self.lock); blocking False: None when another thread's pass holds it."""
+        time per library (T3: self.lock); blocking False: None when another thread's pass holds it. stop (T4): an
+        int64 [1] another thread may set non-zero - the chain is abandoned at its next frame and None returned (the
+        search's background pass left behind must not hold the lock). exec_only (T4): the bot's executable family
+        (env_jit.OPT_EXEC: no child of an attack in normal control)."""
         if not self.lock.acquire(blocking=blocking):
             return None
         try:
             return self._forward(S, T, danger, floor, maxev, x0, x1, cu, wall, band_q, cap_frame, cap_pc, cap_iv,
-                                 cap_cl, dash)
+                                 cap_cl, dash, stop, exec_only)
         finally:
             self.lock.release()
 
     def _forward(self, S, T, danger, floor, maxev, x0, x1, cu, wall, band_q, cap_frame, cap_pc, cap_iv, cap_cl,
-                 dash):
+                 dash, stop=None, exec_only=False):
         from ssbot.map2 import envelope as env
         S = np.asarray(S, dtype=np.float64).reshape(-1)
         if S[TS] != 1.0 or S[WF_S] != 1.0:
@@ -1598,16 +1642,19 @@ class Lib:
             boxes = np.concatenate(parts) if off[-1] else np.zeros((0, 4))
         wl, wh = (wall if wall is not None else (-1e9, 1e9))
         c0 = self.CNT.copy()
+        stp = np.zeros(1, dtype=np.int64) if stop is None else stop
         while True:
             t0 = time.perf_counter()
-            dfl = (1 if dashed else 0) | (2 if dash else 0) | (4 if self.ldash else 0)
+            dfl = (1 if dashed else 0) | (2 if dash else 0) | (4 if self.ldash else 0) | (8 if exec_only else 0)
             out = chain(n0, float(S[PY]), float(S[QY]), float(S[SY]), st.ivs, float(S[ALPHA]), T, boxes, off, maxev,
                         self.TP if floor else self.TP_free, wall is not None, float(wl), float(wh), dfl,
                         float(band_q), self.P, self.udt, self.TTf,
                         self.TTg, self.opts, self.hh, *self._lib(), self.ICK, self.ICT, cap_frame, cap_pc, cap_iv,
-                        cap_cl)
+                        cap_cl, stp)
             sec = time.perf_counter() - t0
             fl = out[18]
+            if fl[4] & 128:
+                return None                          # (T4: abandoned - stop)
             if fl[4]:
                 if fl[4] & 32:
                     raise RuntimeError("tables.forward: a frame with two physics steps")
@@ -1625,7 +1672,9 @@ class Lib:
         fw.node = out[19]
         fw.events = out[20]
         fw.ad = out[21]
+        fw.qs = out[22]                              # (T4: QY / SY per cluster)
         fw.floor = bool(floor)
+        fw.wall_clip = wall is not None              # (T4: an x clip, not the wall's vertical - see forward)
         d = self.CNT - c0
         fw.lib_stats = {"expanded": int(d[C_EXP]), "new_nodes": int(d[C_NODES]), "instances": int(d[C_INST]),
                         "merges": int(d[C_MERGE]), "avdep": int(d[C_AVDEP]), "dyupd": int(d[C_DYUPD])}
@@ -1661,23 +1710,34 @@ class Lib:
         mode, ph = X[:, MODE], X[:, PHASE]
         air = X[:, GROUND] <= 0
         normal = mode == km.M_NORMAL
+        held = X[:, PREV].astype(np.int64)
+        # T4 (the verifiers' finding: nodes labelled A1~ / A4 / G whose future differs from their table's origin):
+        # the hidden state a later press reads is spent too - no key held (a held jump turns the next press into a
+        # hold: no umbrella; a held dash queues), the jump / dash / attack queues dead, the sprint's target speed gone,
+        # no hard landing on its way (the fall timer runs at the terminal fall only: FALL_T 0 above it, A4 steady once
+        # HARD is set - the timer then reads nothing)
+        dead = lambda q, lim: (X[:, q] < 0) | (X[:, q] > lim)            # noqa: E731
         spent = ((X[:, ATTACKING] <= 0) & (X[:, km.ATK_CD] <= 0) & (X[:, INV_T] <= 0) & (X[:, XVX] == 0) &
                  (X0[:, XVX] == 0) & (cu[:, C_CJ] < 0) & (cu[:, ej.C_CLOCK] <= 0) & (cu[:, ej.C_RV] <= 0) &
                  (X[:, km.DS_REC] < 0) & (X[:, km.DASH_CD] <= 0) & (X[:, km.JBUF] <= 0) & (X[:, km.GL_CD] <= 0) &
-                 (X[:, km.LEDGE] <= 0))
+                 (X[:, km.LEDGE] <= 0) & dead(km.JQ, P[km.P_JQ]) & dead(km.DQ, P[km.P_DQ]) &
+                 dead(km.AQ, P[km.P_AQ]) & (X[:, km.ABUF] <= 0) & (X[:, SP_X] == 0))
+        keys_up = (held & (B_JUMP | B_DASH | B_ATTACK)) == 0
+        no_hard = (X[:, km.FALL_T] <= 0) & (X[:, HARD] <= 0)
         k = np.zeros(n, dtype=np.int64)
         rise = normal & air & ((X[:, km.JUMPING] > 0) | (X[:, km.BOUNCE] >= 0))
         hang = normal & air & ~rise & ((X[:, km.GS] < 1.0) | (X[:, km.AIRHANG] <= 0))
-        fall = normal & air & ~rise & ~hang & spent
+        fall = normal & air & ~rise & ~hang & spent & keys_up
         lat = np.isin(X[:, VY], self.lattice())
         term = X[:, VY] <= -P[km.P_MAXFALL]
-        k[fall & lat & ~term] = K_A1
-        k[fall & ~lat & ~term] = K_A1OFF
-        k[fall & term] = K_A4
+        k[fall & lat & ~term & no_hard] = K_A1
+        k[fall & ~lat & ~term & no_hard] = K_A1OFF
+        k[fall & term & (X[:, HARD] > 0)] = K_A4
         k[rise & (cu[:, C_CJ] < 0) & (X[:, ATTACKING] <= 0) & (X[:, INV_T] <= 0)] = K_A2
-        k[hang & spent] = K_HANG
-        k[(mode == km.M_GLIDE) & (ph == 2.0) & (X[:, INV_T] <= 0) & (X[:, ATTACKING] <= 0)] = K_A3
-        k[normal & ~air & spent] = K_G
+        k[hang & spent & no_hard] = K_HANG
+        k[(mode == km.M_GLIDE) & (ph == 2.0) & (X[:, INV_T] <= 0) & (X[:, ATTACKING] <= 0) &
+          ((held & (B_DASH | B_ATTACK)) == 0) & dead(km.DQ, P[km.P_DQ])] = K_A3
+        k[normal & ~air & spent & keys_up & no_hard] = K_G
         k[(mode == km.M_SPRINT) & (ph == 2.0) & ~air & (np.abs(X[:, VX]) == P[km.P_SPR_SPEED]) &
           (X[:, MODE_T] >= P[km.P_SPR_GRACE])] = K_R
         return k
@@ -1829,7 +1889,7 @@ class Lib:
                 "claw": self.claw, "terrain": self.terrain, "clear": CLEAR, "clear_up": CLEAR_UP,
                 "floor_top": FLOOR_TOP, "ceil_bot": CEIL_BOT, "K": K, "NC": NC, "NKEY": NKEY, "NIDK": NIDK,
                 "nodes": n, "edges": e, "classes": c, "instances": ni, "params_vector_sha1": _sha1(self.P),
-                "lists_lazy": True}
+                "lists_lazy": True, "engine": ENGINE_REV}
         meta = {**{k: v for k, v in self.meta.items() if k not in meta}, **meta}   # (a loaded library's build meta
         if extra:                                                                 # kept, its counts the current ones)
             meta.update(extra)
@@ -1855,6 +1915,9 @@ class Lib:
             raise ValueError(f"tables {path}: built before T2's per-dash merge classes - rebuild (t1_tables build)")
         if meta.get("params_vector_sha1") != _sha1(lib.P) or meta.get("version") != VERSION:
             raise ValueError(f"tables {path}: built with another hero model or version (params / HERO2 bits)")
+        if meta.get("NKEY") != NKEY or meta.get("NIDK") != NIDK or meta.get("engine") != ENGINE_REV:
+            raise ValueError(f"tables {path}: built with another engine (merge key / candidates: T4's lane-0 extra "
+                             f"velocity, the dominance filter, the up slash at the ceiling) - rebuild (t1_tables build)")
         for nm in ("NL", "NCU", "NINT", "NVY", "PFL"):
             getattr(lib, nm)[:n] = z[nm]
         eo = z["EOFF"]

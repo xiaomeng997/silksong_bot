@@ -26,6 +26,7 @@ Positions are her box centre (u, world units; x the collider centre, y its middl
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -37,6 +38,8 @@ from ssbot.map2 import env_jit as ej
 
 PARAMS_PATH = km.REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json"
 FLOOR_BB = 3.015           # the Forum floor (her box bottom standing)
+WIDE_BEAM = 128            # T4: the witness's second beam (a target the first beam misses by > 0.01 u: the float's
+#                            interior points)
 COND = {"atk": ej.COND_ATK, "dslash": ej.COND_DSLASH, "claw": ej.COND_CLAW, "ground": ej.COND_GROUND,
         "run": ej.COND_RUN, "float": ej.COND_FLOAT, "air": ej.COND_AIR, "clawblk": ej.COND_CLAWBLK,
         "dashed": ej.COND_DASHED}
@@ -251,9 +254,69 @@ class Fwd:
                           o2)
             if abs(o2[t, 0] - x) < abs(oxy[t, 0] - x):
                 masks, oxy = m2, o2
-        return {"cluster": g, "masks": masks, "vmask": vm, "xpath": xp, "xy": oxy,
-                "miss_x": float(oxy[t, 0] - x), "miss_y": float(oxy[t, 1] - self.cl_y[g]),
-                "y": float(self.cl_y[g]), "clusters": cls}
+            # T4 (the verifiers' finding: interior points of the float's clusters missed by 0.1 - 0.65 u that a dense
+            # left / none / right search reaches): a wider beam once the first one misses
+            if beam < WIDE_BEAM and abs(oxy[t, 0] - x) > 0.01:
+                m3 = np.zeros(t, dtype=np.int64)
+                o3 = np.zeros((t + 1, 2))
+                ej.track_beam(S0, self.start.cu.copy(), vm, tlo, thi, self.eng.udt, self.eng.P, self.terrain,
+                              WIDE_BEAM, m3, o3)
+                if abs(o3[t, 0] - x) < abs(oxy[t, 0] - x):
+                    masks, oxy = m3, o3
+        # T4: a CB_JH frame (jump held without a press) is reached in the game by a jump pressed where it is inert -
+        # in an attack's recovery: the trackers hold it by setting her previous keys, the keys they return press it
+        # there (the umbrella opens) - the press written in (an attack 1 - 7 frames before, the jump pressed in its
+        # recovery and held), each kept only when the keys reproduce the tracked path
+        jh = np.flatnonzero((vm & ej.CB_JH) != 0)
+        hidden = []
+        if len(jh):
+            masks, hidden = self._hidden_press(S0, masks, oxy, jh)
+        # the keys rolled as they are (the reference model, no hidden state): the true miss
+        xy = self._roll(S0, masks)
+        dev = float(np.max(np.abs(xy - oxy))) if len(xy) else 0.0
+        return {"cluster": g, "masks": masks, "vmask": vm, "xpath": xp, "xy": xy,
+                "miss_x": float(xy[t, 0] - x), "miss_y": float(xy[t, 1] - self.cl_y[g]),
+                "y": float(self.cl_y[g]), "clusters": cls, "path_dev": dev, "hidden": hidden}
+
+    def _roll(self, S0: np.ndarray, masks: np.ndarray) -> np.ndarray:
+        """Her centres along masks from S0 (the reference model: kin_jit + the Clawline, no hidden state)."""
+        n = len(masks)
+        xy = np.zeros((n + 1, 2))
+        md = np.zeros(n + 1, dtype=np.int64)
+        ej.ref_rollout(S0.copy(), self.start.cu.copy(), np.asarray(masks, np.int64), self.eng.udt, self.eng.P,
+                       self.terrain, xy, md)
+        return xy
+
+    def _hidden_press(self, S0: np.ndarray, masks: np.ndarray, oxy: np.ndarray, jh: np.ndarray):
+        """T4: the keys for the chain's CB_JH frames (jump held without a press at index i): an attack at i - k - 1
+        and the jump pressed at i - k (inert in the attack's recovery: the umbrella cannot open) held through i, k
+        = 0 .. 6 (a dash pressed with it held needs the attack's recovery over by i: k >= 5); a variant is kept when
+        the keys rolled as they are reproduce the tracked path (every frame within 1e-6 u). Returns (masks,
+        [(index, k) or (index, None) when none fits])."""
+        m = np.asarray(masks, np.int64).copy()
+        done = []
+        jl = [int(v) for v in jh]
+        for q, i in enumerate(jl):
+            # (checked up to the next CB_JH frame - its press not written yet - or the end: the dash pressed with it
+            # shows in the steps after its frame)
+            end = jl[q + 1] if q + 1 < len(jl) else len(m)
+            ok = None
+            for k in range(0, 7):
+                f1, f0 = i - k, i - k - 1
+                if f0 < 0:
+                    break
+                mm = m.copy()
+                if (int(mm[f0]) & (km.B_JUMP | km.B_ATTACK)) != 0:
+                    continue                       # (a frame that already presses: not this variant)
+                mm[f0] |= km.B_ATTACK
+                mm[f1:i + 1] |= km.B_JUMP
+                xy = self._roll(S0, mm[:end])
+                if np.max(np.abs(xy - oxy[:end + 1])) <= 1e-6:
+                    ok = k
+                    m = mm
+                    break
+            done.append((i, ok))
+        return m, done
 
 
 class Engine:
@@ -290,12 +353,14 @@ class Engine:
     def forward(self, st: Start, T: int, danger=None, terrain=None, claw: bool | None = None,
                 tf8: bool | None = None, opts: int = 0, max_events: int = 0, band_t: int = -1, band_n: int = 0,
                 qy: float = 0.25, qv: float = 1.2, cap_frame: int = 20000, cap_pc: int = 4_000_000,
-                cap_iv: int = 4_000_000, cap_cl: int = 2_000_000, keep_keys: bool = False, par: int = 0) -> Fwd:
+                cap_iv: int = 4_000_000, cap_cl: int = 2_000_000, keep_keys: bool = False, par: int = 0,
+                stop: np.ndarray | None = None) -> Fwd | None:
         """The cluster forward pass over T frames. danger: None, or a list of T + 1 arrays [n, 4] of boxes (x0, y0,
         x1, y1) in her centre's space (already grown by her hurtbox), per frame; terrain: None (free space: the
         tables' infinite height) or a Terrain2D / packed array. The far layer (bands, an over-approximation): from
         frame band_t (>= 0), or from the first frame with more than band_n clusters (> 0); bins qy (u) / qv (u/s).
-        Exact (the default) otherwise."""
+        Exact (the default) otherwise. stop (T4): an int64 [1] another thread may set non-zero - the pass is then
+        abandoned at its next frame and None returned."""
         if danger is None:
             boxes = np.zeros((0, 4))
             off = np.zeros(T + 2, dtype=np.int64)
@@ -313,17 +378,20 @@ class Engine:
             TT = terrain.packed()
         claw = self.claw if claw is None else claw
         tf8 = self.tf8 if tf8 is None else tf8
+        stp = np.zeros(1, dtype=np.int64) if stop is None else stop
         while True:
             t0 = time.perf_counter()
             o = opts | (ej.OPT_CLAW if claw else 0) | (ej.OPT_TF8 if (claw and tf8) else 0) | (min(max_events, 15) << 8)
             if par > 1 and band_t < 0 and band_n <= 0:
                 # M4b: each frame's per-parent work on par threads, merged in the parents' order (the same result)
                 out = ej.forward_par(st.L, st.cu, st.ivs, T, self.udt, self.P, TT, boxes, off, o, cap_frame, cap_pc,
-                                     cap_iv, cap_cl, keep_keys, max(par, numba.config.NUMBA_NUM_THREADS), 256)
+                                     cap_iv, cap_cl, keep_keys, max(par, numba.config.NUMBA_NUM_THREADS), 256, stp)
             else:
                 out = ej.forward(st.L, st.cu, st.ivs, T, self.udt, self.P, TT, boxes, off, o, cap_frame, cap_pc,
-                                 cap_iv, cap_cl, keep_keys, band_t, band_n, qy, qv)
+                                 cap_iv, cap_cl, keep_keys, band_t, band_n, qy, qv, stp)
             sec = time.perf_counter() - t0
+            if stp[0] != 0:
+                return None
             fl = out[-1]
             if not fl.any():
                 break
@@ -558,6 +626,17 @@ def save_tables(path, tables: dict, meta: dict) -> None:
     np.savez_compressed(path, **arrs)
 
 
+def steps_pattern(alpha: float, T: int, dt: float, fdt: float) -> list:
+    """The physics steps of each of T frames from phase alpha (the tables' chain's own arithmetic)."""
+    a, out = float(alpha), []
+    for _ in range(T):
+        a_ = a + dt / fdt
+        s = math.floor(a_ + 1e-9)
+        a = min(max(a_ - s, 0.0), 1.0)
+        out.append(s)
+    return out
+
+
 class Tables:
     """The stored tables: lookup by (key name, cond, frame) -> (bin, xa, xb) rows relative to her start (translate
     to her position); the backward (meet in the middle) region is the point reflection."""
@@ -573,11 +652,43 @@ class Tables:
         a, b = int(off[t]), int(off[t + 1])
         return np.column_stack([self.z[f"{key}|{cond}|bin"][a:b], self.z[f"{key}|{cond}|x"][a:b]])
 
-    def contains(self, key: str, cond: str, t: int, dx: float, dy: float) -> bool:
-        """Whether the offset (dx, dy) from the start (centre to centre) is in the table's region at frame t."""
+    def contains(self, key: str, cond: str, t: int, dx: float, dy: float, tol: float = 1e-9) -> bool:
+        """Whether the offset (dx, dy) from the start (centre to centre) is in the table's region at frame t (T4:
+        within tol - a height on a bin boundary, dy = -1.8e-15 for 0, fell into the bin below)."""
         r = self.rows(key, cond, t)
-        s = r[r[:, 0] == np.floor(dy / self.q)]
-        return bool(np.any((s[:, 1] <= dx) & (dx <= s[:, 2])))
+        b0, b1 = np.floor((dy - tol) / self.q), np.floor((dy + tol) / self.q)
+        s = r[(r[:, 0] >= b0) & (r[:, 0] <= b1)]
+        return bool(np.any((s[:, 1] - tol <= dx) & (dx <= s[:, 2] + tol)))
+
+    def valid_until(self, key: str, S: np.ndarray, P: np.ndarray, floor_top: float | None = None,
+                    ceil_bot: float | None = None, clear: float = 2.5, clear_up: float = 1.0) -> int:
+        """T4 (the verifiers' finding: the flattened layer is no upper bound for the states it is keyed by): the last
+        frame up to which table `key` bounds her reach from her state S - -1 when S's physics phase gives another
+        step pattern over the table's frames than the build's (each phase class was built at its exact alpha c / 6:
+        a start a fraction of a step later in the class has other heights), and an air table (built in free space)
+        only before its rows come within `clear` of the floor (her box bottom: a landing, the umbrella's ground ray)
+        or `clear_up` of the ceiling. The flat layer is not used by the search."""
+        meta = self.meta
+        a0 = meta.get("alpha", {}).get(key)
+        T = int(meta.get("T", 0))
+        if a0 is None or "dt" not in meta:
+            return -1                                      # (a file from before T4: no phase recorded)
+        dt, fdt = float(meta["dt"]), float(meta["fdt"])
+        if steps_pattern(float(S[km.ALPHA]), T, dt, fdt) != steps_pattern(float(a0), T, dt, fdt):
+            return -1
+        if not meta.get("free", {}).get(key, False) or (floor_top is None and ceil_bot is None):
+            return T
+        cy = float(S[km.PY]) + 0.5 * (P[km.P_HEAD] - P[km.P_FOOT])
+        hh = 0.5 * (P[km.P_HEAD] + P[km.P_FOOT])          # her box's half height (centre to bottom / top)
+        for t in range(T + 1):
+            r = self.rows(key, "all", t)
+            if not len(r):
+                continue
+            ylo = cy + float(r[:, 0].min()) * self.q - hh
+            yhi = cy + (float(r[:, 0].max()) + 1.0) * self.q + hh
+            if (floor_top is not None and ylo - floor_top < clear) or (ceil_bot is not None and ceil_bot - yhi < clear_up):
+                return t - 1
+        return T
 
     def backward(self, key: str, cond: str, t: int) -> np.ndarray:
         """Meet in the middle: the offsets (start - goal) from which the end condition `cond` is reachable at frame
