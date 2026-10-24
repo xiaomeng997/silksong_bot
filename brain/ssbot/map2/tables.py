@@ -335,6 +335,11 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
     alf = NVY[n, V_ALF]
     a1 = ALPHA_S[s][0] if alf < 0 else alf
     a2 = ALPHA_S[s][1] if alf < 0 else alf
+    if alf < 0 and NL[n, 1, MODE] == M_DASH and NL[n, 1, GROUND] > 0:
+        # the ground dash: its end translates her from the DRAWN position (QY + phase (SY - QY): the previous /
+        # last step's heights, which the identity does not hold - a recorded ground start a little off the rest
+        # height still settles there): every cluster expands it at its own phase and QY / SY (phase instances)
+        NINT[n, I_ADEP] |= 3
     for md in range(2):
         cu0 = NCU[n].copy()
         o = opts
@@ -462,6 +467,12 @@ def closure(i0, i1, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, P
 
 
 # ---- the chain ----------------------------------------------------------------------------------------------------
+
+@njit(cache=True, error_model="numpy")
+def _cond(c, dbit):
+    """A node's end-condition bits with the pass's air-dash-used bit (env_jit.cond_of: not inside a Clawline block,
+    whose bits are the block's alone)."""
+    return c if (c & ej.COND_CLAWBLK) != 0 else c | dbit
 
 @njit(cache=True, error_model="numpy")
 def near(py, ylo, TP, P):
@@ -652,7 +663,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     cl_y[0] = py0 + hh
     cl_ylo[0] = py0 + hh
     cl_vy[0] = NVY[n0, V_VY]
-    cl_cond[0] = NINT[n0, I_COND] | dbit
+    cl_cond[0] = _cond(NINT[n0, I_COND], dbit)
     cl_mode[0] = NINT[n0, I_MODE]
     cl_phase[0] = NINT[n0, I_PHASE]
     cl_iv0[0] = 0
@@ -918,7 +929,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             cl_y[gc] = nxt_y[c] + hh
             cl_ylo[gc] = nxt_yl[c] + hh
             cl_vy[gc] = NVY[nd, V_VY]
-            cl_cond[gc] = NINT[nd, I_COND] | dbit
+            cl_cond[gc] = _cond(NINT[nd, I_COND], dbit)
             cl_mode[gc] = NINT[nd, I_MODE]
             cl_phase[gc] = NINT[nd, I_PHASE]
             cl_node[gc] = nd
@@ -1643,6 +1654,9 @@ class Lib:
         lib.ICK[:ni] = z["ICK"]
         lib.CNT[:] = z["CNT"]
         lib.CNT[C_OVF] = 0
+        # the ground dash's frames: per cluster (its phase and QY / SY) - also in a library built before that rule
+        gd = (lib.NL[:n, 1, MODE] == km.M_DASH) & (lib.NL[:n, 1, GROUND] > 0) & (lib.NVY[:n, V_ALF] < 0)
+        lib.NINT[:n, I_ADEP][gd] |= 3
         _idents(lib.NL, lib.NCU, lib.NINT, lib.NVY, lib.P, n, lib.NID)
         _rehash(lib.HT, lib.NINT[:, I_HASH].copy(), n)
         _rehash(lib.CHT, lib.CH, c)
