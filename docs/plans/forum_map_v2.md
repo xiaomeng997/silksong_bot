@@ -47,13 +47,14 @@ Attributions '(the person, date)' mark the person's ideas and decisions; '(the l
 | A1_n 递归表 | 做好、和引擎逐帧一致；开关默认关（实战状态不重复，实机反而更慢）。两个验证者 10-24 上午跑完；T4 正在跑：修了它们找到的问题（4 次提交，库已重建），验收还在跑、没报告 | 等 T4 报告；"状态重复"的修复你定了放后面 |
 | 搜索 L3 | 做好、在用；w7 第一个安全计划 p90 119 ms；1 秒约达 60 秒价值的 75 % | 评估加速（逃生漏斗、每招每帧危险、窗口形状）；T4 已有漏斗和 eps(k) 的中期试验 |
 | 实机控制 | 做好（SSBOT_FORUM_MAP2，默认关）；回放审计 0 碰撞；w7 掌控约 33 % | 交接（丢计划规则、动作中途重规划、半途出招时的兜底、没预测到的钩子反应）；"计划当管道"算不算在 E2 里，来源不一致（Q24） |
-| 评估/交接流程 ev | 10:50 开始，除了开始那一行还没有任何产出 | T4 和 ev 是什么关系、漏斗归谁做，待定（Q20） |
+| 评估/交接流程 ev | 脚本已写好，还没启动（只写了进度文件的开头一行）：等 T4 结束、你看过这份文档再启动 | E1 先读 T4 的漏斗和 eps(k) 中期结果、在其上继续（Q20 已定） |
 | 反射层 | 表做好（427 万格），默认关、没接进 bot | 你定的：只留搜索来不及的窗口（约 1 %） |
 | 长期站位规划 | 只有设计 | 在顺序里的位置待你定（Q12） |
 | w7 闸门（10-23） | 没过：跑 2 局，0 局无伤；5 次掉血时按键都是默认规划器的，3 次紧跟 map2 丢计划 | 评估和交接做完后你决定下一次闸门 |
 
 最需要你拍板的几件（第 6 节）：眼看规则（Q1）、下次闸门标准（Q2）、验收按多少计算时间算"搜到"（Q3）、
-A1_n 表还是不是 L2 的目标（Q5）、长期规划和反射层排在哪（Q12、Q13）、T4 和 ev 的关系（Q20）。
+A1_n 表还是不是 L2 的目标（Q5）、长期规划和反射层排在哪（Q12、Q13）、不落地演示算不算 map v2 的目标（Q21）。
+Q20、Q22、Q23、Q24、Q27 是事实性问题，负责人已据实回答（见第 6 节）。快速反应部分按你 10-24 的意见改成"自动生成的固定套路"（3.5）。
 
 ---------------------------------------------------------------------------------------------------------------------
 
@@ -1083,6 +1084,25 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
   bridge (the next ~8 f) and the thread fires a matching verdict (< 1 ms). Then a live smoke.
 - Its relation to the shapes: the windows are to move onto the exact shapes after the tables (3.6); the built table is
   cell-based (Q13).
+- WHAT IT SHOULD BECOME - AUTO-GENERATED FIXED ROUTINES (the person, 2026-10-24: 'what is needed is still fixed
+  routines like before, but they must not be hand-made - they must be generated automatically'): the old scripts
+  (CLAWSTRIKE, SLAMSTRIKE, LOWHOP, JUMPTRAP) were hand-made; the reflex table's 11 window TYPES and their macro shapes
+  are hand-chosen too (only their parameters are generated). Generate the routines themselves: per (Clapper move,
+  frame) x her relative state (as shapes, 3.6) an offline search over short key sequences (a few events, inside the
+  move's window) keeps those that strike in every timing view, touch nothing and leave an exit; among them the
+  natural-selection order (fewest presses, then the earliest strike, then the largest margin); stored as trigger
+  shape + keys + outcome; validated on the live presses as the reflex was (precision first). Live: before the reveal,
+  a worker checks along her planned path which routines a reveal would trigger and pre-runs their safety check against
+  everything else (the other Clapper, lit runes); at the reveal the routine fires at once. The generated library can
+  also replace M3's hand-made combo library as search candidates. Scope first: the latency gap only (above).
+- IS IT NEEDED AT ALL (the person asked 2026-10-24; the lead's comparison): the need is only the reveal latency gap -
+  the slam's first-window Clawline must be decided within ~0 - 9 f (0 - 150 ms) of seeing the antic, the search finds
+  that plan in 70 - 250 ms [M4d2]. Rewriting in C++ does not close it (the hot parts are numba-compiled already: ~1.5 -
+  2x at best vs the 2 - 5x needed). Three ways: (1) the routine / reflex lookup (its safety check must move before the
+  reveal); (2) a faster search restarted at the reveal (E1, uncertain to reach < ~50 ms); (3) responses to the
+  Clapper's possible moves prepared in the background before the reveal (the contingent plans extended from the hook
+  reactions to its own move starts). (3) with the generated routines as its content is the preferred form; E1 / E2
+  measure whether (2) / (3) fit the gap.
 
 ### 3.6 The strike windows as shapes (the person, 2026-10-23: 'aren't the windows polygons?')
 
@@ -1377,23 +1397,20 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   then A4 at -31.2 u/s, and the flattened layer's '31 A1_n' tables.
 - Q19 IDLE'S DURATION: the spec's 'Idle 0.65 s -> Walk' vs M2's 'Idle Time read at the Idle entry (1.15 s with a living
   buddy)'; the solo value is not restated by M2.
-- Q20 T4 AND THE ev WORKFLOW: T4 (the verifiers' fixes, planned 10-23 19:55) is running and has also taken items the
-  lead's notes gave to T3 (the funnel trial, eps(k): NOTE_FROM_LEAD_funnel / funnel2, 10-24 07:25 / 07:35) and
-  `Cfg.shapes`, while ev's E1 (logged 10:50) names the funnel and the window shapes too, and ev has no artifact yet. How
-  do the two relate, and which one carries E1?
+- Q20 RESOLVED (the lead, 10-24): the ev workflow has NOT been launched (only its PROGRESS header line exists); it
+  starts after T4 ends and after the person has read this document. E1 carries the funnel, eps(k) and the shapes, and
+  builds on T4's interim funnel / eps(k) trial and `Cfg.shapes` (read them first, do not redo them).
 - Q21 SCOPE: the no-landing query (branch airceil, Cfg.no_land) shares the search but is not in the spec; is the
   no-landing / air show goal part of map v2, and are its query gaps (no re-plan at a reveal under no_land, the pass
   horizon) to be merged?
-- Q22 AN UNSOURCED SPEC NUMBER: the spec's A1_n 'Use' paragraph cites 'M4b's limit on 10-23: within 0.25 s the plans are
-  worth 0.38 expected hits on the recorded w7 situations vs 1.9 for the 60 s search'; no stage report has these
-  numbers (M4b: the anytime value on w7 0.79 at 0.25 s vs 2.13 at 60 s; T3's acceptance at 0.25 s: mean hits 0.566).
-- Q23 THE GATE'S MACHINE LOAD: M4_GATE.txt and HANDOFF G (open item 5) say another worktree's reflex_build jobs (5 + 3
-  Idle workers) ran throughout the gate; the lead's notes (reflex/NOTE_FROM_LEAD_suspended.txt.done 19:25,
-  NOTE_FROM_LEAD_resumed.txt 19:45) and reflex/REPORT.txt say the lead suspended them 19:25 - 19:45, which covers the
-  gate (19:29:54 - 19:31:06). Suspended processes may still have been listed. Which held?
-- Q24 THE TUBE IN E2: the person's 10-24 ~10:40 decision puts 'the plan as a tube' in the handover work; ev's PROGRESS
-  line lists E2 without it (the drop rule, mid-action re-plan, the fallback mid-swing, the unpredicted hook reaction).
-  Does E2 cover the tube?
+- Q22 RESOLVED (the lead, 10-24): '0.38 vs 1.9' was M4b's INTERIM run (map2/m4/m4b/final_runs.log, 'afterE', 04:57 on
+  10-23, rec w7 one Clapper); M4b's final numbers replace it: 0.79 at 0.25 s vs 2.13 at 60 s.
+- Q23 RESOLVED (the lead, 10-24): the reflex_build jobs were SUSPENDED (psutil suspend of both process trees, 12
+  processes, 'stopped') from ~19:25 to 19:45, covering the gate (19:29:54 - 19:31:06); they still existed, which is why
+  M4_GATE.txt / HANDOFF G list them as running. The gate ran without their load.
+- Q24 RESOLVED (the lead, 10-24): yes - E2 item (a) of the (not yet launched) ev script is 'the drop rule AND THE PLAN
+  AS A TUBE' (events fixed at their frames, a per-frame x corridor shrunk by eps(k), steering inside it); the PROGRESS
+  header line was written before the tube was added.
 - Q25 THE SUITE'S SIZE: M3's own acceptance table sums to 279 move cases (112 / 111 / 56; P1-far-jcast 15, P1-jump 13);
   M4a's and M4b's tables give the same M3 v4 run as 275 (112 / 109 / 54; P1-far-jcast 13, P1-jump 11); T3 uses 279.
   Which count is right for the v4 reference?
@@ -1401,9 +1418,9 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   1 s) may bite at the end of a long sprint' was not reported by any stage; T2 shows the bundle's ends equal for every
   A1_n of one step pattern, not that they lie on the A1 lattice. Is the dash's end on or off the lattice after a long
   sprint?
-- Q27 THE GROUND DASH DECISION'S TIME: the spec and the lead's note NOTE_FROM_LEAD_ground_dash2.txt say ~20:15 (it
-  supersedes a '20:05' note), but the file is dated 19:56 and its commits are 19:53 (b3d9a8f, the ground dash as a
-  bridge) and 19:56 (bc452fa, the ground dash in the ground tables), close to the ~19:50 'build the tables' decision.
+- Q27 RESOLVED (the lead, 10-24): the commit times are right (b3d9a8f 19:53 the ground dash as a bridge, bc452fa 19:56
+  the ground dash back in the ground tables, both 10-23); the '20:05' / '20:15' in the notes were the lead's rough
+  clock. The decision itself stands.
 
 ### 6.2 Known gaps in the models (not measured or not modelled)
 
@@ -1445,12 +1462,13 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 
 ## 7. Next steps (in the person's order)
 
-1. NOW [RUNNING] (the person, 2026-10-24 ~10:40; the ev workflow, offline): E0 profile; E1 the fast closed-loop
-   evaluation - the escape funnel (3.3.4), the danger per Clapper move / frame (Q9), the window shapes (3.6); E2 the
-   handover - the drop rule on a one-frame shift, re-plan from mid-action (the swing in progress at the root, the busy
-   rule after a drop), the fallback mid-swing, the unpredicted hook reaction; the plan as a tube (3.4.8) is in the
-   person's handover priority but not in ev's E2 as logged (Q24); two verifiers; E3 fixes + a frozen checkout.
-   Alongside it T4 [RUNNING] (the verifiers' fixes to the tables; its funnel / eps(k) trial overlaps E1 - Q20).
+1. NEXT (the person, 2026-10-24 ~10:40; the ev workflow, offline; NOT launched - it starts after T4 ends and after the
+   person has read this document): E0 profile; E1 the fast closed-loop evaluation - the escape funnel (3.3.4), the
+   danger per Clapper move / frame (Q9), the window shapes (3.6), building on T4's funnel / eps(k) trial; E2 the
+   handover - the drop rule on a one-frame shift together with the plan as a tube (3.4.8), re-plan from mid-action (the
+   swing in progress at the root, the busy rule after a drop), the fallback mid-swing, the unpredicted hook reaction;
+   E1 / E2 also measure whether a faster search or responses prepared before the reveal close the reveal gap (3.5);
+   two verifiers; E3 fixes + a frozen checkout. T4 [RUNNING] finishes first.
 2. THEN the person decides on the next live gate (Q1, Q2) [P-ev].
 3. LATER (the person, 2026-10-24): the tables' state-recurrence fix (Q5).
 4. Decided in scope, not yet ordered by the person (Q12, Q13): the reflex reduced to the latency-gap windows and
