@@ -13753,3 +13753,297 @@ Commits (branch worktree-wf_f1846551-5f9-1, not merged): 2947cbf (the dash mode,
 ca271b8 (bridge / wshape / t2_tables / tests), 56fd1d4 (the per-dash classes, du 3, the flattened layer with the dash,
 touch_frame), 845d316 (the stale jump queue key, Lib.save's counts), 26a02f3 (the bundle at a Clawline), and the docs /
 header commit.
+
+## Task map2 - A1_n recursive tables - stage T3: the tables as the search's envelope (offline; search.Cfg.tables / LiveCfg.tables, default off; the library's growth budget and reset; the long pass; on vs off: the M3 acceptance at a deterministic budget and at 1 / 0.25 s, the first safe plan, the strict / open real-time smokes; why the tables do not make the search much faster) (branch worktree-wf_f1846551-5f9-1, 2026-10-24; forum.md §105)
+
+The task (the person's decision of 2026-10-23 ~19:50 after the failed w7 gate: 'build the recursive tables directly';
+docs/plans/forum_map_v2.md on main, 'THE A1_n RECURSIVE TABLES'): behind a search Cfg switch and a LiveCfg switch,
+both default off (off: the search and the bot bit-identical), the approach passes and the exit checks from the tables
+(forward from her state, the dash bridge, the danger cut per frame, the witnesses from the chain; the backward sets and
+the flattened prune where they help), the longer horizon the tables allow (3+ events, 120 f); the closed-loop
+evaluation, the press rules, the commit check and TickCheck unchanged; measured on vs off - the M3 acceptance (0.25 s,
+1 s, a deterministic budget), the first safe plan / decision time / anytime value on the recorded w7 situations, the
+strict and open real-time smokes (the share of the engaged ticks on w7 / w13, the audit collisions, the press scan, the
+reveal latency); a frozen checkout with the switches; no live run. Offline only: no game process, instance or oracle
+was touched. Data `C:\ssbot\data\m2_play\map2\a1n\t3` (`verify\` the exactness re-runs, `ident\` the digests,
+`accept\` the acceptance runs and `acc_*.txt`, `first\` the times, `smoke\` the smokes and `summary_t3.txt`,
+`replay_head_*` the bot's identity replays, `code_f585386` / `code_f27ac9c` the code snapshots the runs used,
+`scripts\`).
+
+### Result
+
+- **The switch works and is exact.** Off: the search's deterministic digests equal T3's base f585386 in 236 / 236
+  situations (M3's and the live configuration) and the bot's replays are byte-identical (24 / 24). On: at the same
+  deterministic budget the M3 acceptance is the same in every one of the 279 move cases and every chosen plan is the
+  same (236 / 236); T2's exactness runs re-run after T3's changes are exact (the search's passes 236 / 236 + 236 /
+  236, windows equal, exit checks 673 / 673; T1 / T2 sweeps 479 / 479, 395 / 395; entry 1,217 / 1,218 as in T2).
+- **It does not make the search much faster.** At 1 s it evaluates ~40 % more candidates (p50 52 -> 72) and finds
+  more (159 -> 166 / 177 move cases, mean value 1.17 / 1.21 -> 1.32 / 1.35, two runs); at 0.25 s nothing (80 -> 78);
+  the first safe plan on w7 comes ~20 ms later (p50 / p90 66 / 156 -> 84 / 206 ms; run 2 65 / 167 -> 86 / 190); and in
+  the real-time smokes map2 holds the keys LESS - strict w7 32.6 -> 23.0 % of the engaged ticks, open 36.8 -> 28.6 %,
+  w13 4.5 -> 2.5 % (the safety audit 0 collisions and 0 invalid committed presses in every arm). The reasons, each
+  measured: the library does not converge on the search's states (10 - 200 k new exact states per decision, +1.0 M
+  nodes in 15 s of a recorded episode), a new node costs ~6 x the engine's frame (after T3 made it 3 x cheaper), the
+  live searches are short and start cold, and the passes are only ~1 / 4 of a decision's time. **Keep the switch off
+  for a live run.**
+- **The longer horizon the tables allow is the 1-event pass over 2 s** ((1, 120, 60): 20 ms engine, 3 ms warm); 2
+  events over 60+ frames cost 0.2 - 0.8 s and 3 events 2 - 26 s in a decision (cold or warm), so 3+ events / 120 f do
+  not fit a live decision. The long pass changes little: at a fixed budget 2 move cases better, 0 worse, nothing new
+  found; at 1 s within the run-to-run spread; in the smokes it lowers the share further (strict / open w7 21.3 / 19.1
+  %).
+- **Memory**: a search process holds the library (3.3 GB resident) and its growth up to the budget (400 k nodes, then
+  reset): 5 - 8 GB, up to 20 GB in a large two-Clapper decision; the four live workers would take 20 - 40 GB more.
+
+### What was built (commit f27ac9c; `brain/ssbot/map2/search.py`, `tables.py`, `live.py`; tools `m3_accept.py`, `m4b_speed.py`; `tests/test_t3_tables.py`)
+
+- **The switch** `search.Cfg.tables` (default False) / `LiveCfg.tables` (default False; `SSBOT_FORUM_MAP2_SET=tables=1`):
+  `World.envelope(S, H, danger, max_events, cu, ...)` is the one pass function of the search - the approach passes
+  (`Searcher.passes`, also on the background thread) and the exit checks (`Evaluator._exit_compute`, after the probes)
+  call it. Off: the M1 engine exactly as before. On: `tables.Lib.forward(S, H, danger, floor=True, maxev, cu,
+  dash=True)` - the no-dash chain + the air-dash bridge entered at every frame where a press is allowed + the post-dash
+  chain, merged as the engine merges (T2), returning the engine's `envelope.Fwd` (rows, `cl_cond`, `witness` / `chain`
+  on the pieces' back-pointers), so the windows, the safe endpoints, the witnesses, the realizer, the closed-loop
+  evaluation, the press rules, the commit check and TickCheck are untouched. The engine is used instead when the
+  library is busy on the other thread (an exit check while the background pass runs: `blocking=False`; counted
+  `TABLE_STATS['busy']`), when her state has no table (a time scale / world freeze) or when the library cannot be
+  loaded / belongs to another hero model (`refused`).
+- **The library in the search** (`search.table_lib` / `World.table_lib`; `Cfg.tables_file`: '' = T2's search
+  library `knowledge/1.0.30000/kinematics/a1n_tables_v1_arena_noclaw.npz`, 815,147 nodes): loaded once per process (3
+  s), with room for `Cfg.tables_budget` (400,000) more nodes (`Lib.load(spare=)`: no reallocation before a reset),
+  `Lib.mark()`-ed; at a decision's start a library grown past the budget is `Lib.reset()` to its loaded state.
+  `Lib.reset` drops every node / edge / merge class / instance appended after the mark exactly (open addressing with
+  linear probing: a key of the mark's state never probes past a slot filled after it, so clearing those slots restores
+  the tables; the edge lists expanded after the mark on the mark's nodes are unset and re-expanded when met) - 35 ms.
+  The chain runs without the GIL (`chain` nogil) under `Lib.lock` (one pass at a time per library).
+- **Cheaper cold expansions** (the same edges; T2's sits / exactness runs re-run, below): the chain makes only the
+  edge list a cluster takes (`expand_md`: the every-choice list or the event-limit list - T1 made both); the slope run
+  at a second physics phase only for a node that can read the drawn position (`phase_pair`: a lane on the ground or in
+  the dash / sprint - in the search library every slope edge (11,916 of 4.55 M) and every phase-dependent node (25) is
+  a ground dash's); the per-frame merge table cleared by the slots it used (T1 cleared 131 k slots every frame). A cold
+  expansion 26.6 - 32 us -> 8.8 - 11.7 us (the engine's cluster-frame: 1.6 us).
+- **The long pass**: `Cfg.passes` entries may be (events, frames, t_from) - a pass whose windows are taken after
+  frame t_from only (`Searcher.windows`), e.g. `((1, 60), (2, 30), (1, 120, 60))`: the 1-event family over 2 s with
+  its windows beyond the first pass; with `pass2_after` / `pass2_bg` it runs on the background thread after the 2-event
+  pass. `LiveCfg.passes` = 'events:frames[:t_from]/...' (e.g. `1:60/2:30/1:120:60`).
+- **The live worker** (`live.search_kw`, `worker_main`): `Cfg.live(tables=..., tables_file, tables_budget, passes)`,
+  the library loaded before the warm-up (its compiled chain warmed by the warm-up's searches), the worker's memory
+  guard raised by the library's resident size + its budget (~4.6 kB a node).
+- Tools: `m3_accept` (`SSBOT_M3_OUT`: the runs' directory; the library loaded before the timed decision),
+  `m4b_speed` (`SSBOT_M4B_OUT`; `ident --cfg`; `first --prio idle`; the library before the timed decision).
+  `C:\ssbot\sandbox\1v1_freeze.ps1` (backup `.bak_t3`): the search's git-ignored library
+  (`knowledge/1.0.30000/kinematics/a1n_tables_v1_arena_noclaw*.npz`) goes into the read-only content store and is
+  hard-linked into the frozen checkout like the Forum knowledge files.
+- Not wired, and why: the BACKWARD sets (T2's `bridge.backward`) - the search takes its windows from the forward rows
+  (forward x window region = the press points) and its keys from the chain's back-pointers, which is what a backward
+  set would give it (T2: every window's backward set holds her start); the FLATTENED prune - the flat tables exist only
+  for the canonical starts (her exact state is not one) and on the search's own exit checks the danger touches her
+  flattened union within 0 - 25 frames (T2: 673 / 673), so it answers none.
+
+### Why the tables do not make the search much faster (measured; `t3\scripts\prof0.py`, `prof1.py`, `econ1.py`, `econ2.py`, `exp_cost.py`, `newnodes.py`, `long_cost.py`)
+
+1. **The library does not converge on the search's states** (T1's open item 1, now measured on live-like states): a
+   decision meets 10 - 200 k NEW nodes (the recorded w7 situations, the live configuration); along a recorded w7
+   episode (60 consecutive live snapshots of M4d2's capture `w7a.pkl`, ~15 s of play, the library kept growing) it
+   grew by 1.0 M nodes (~4.6 GB) and still met 10 - 70 k new nodes per search at the end. What is new (30 searches,
+   697 k nodes): 59 % FLOOR INSTANCES (a free node within 2.5 u of the floor gets its own node per exact height - the
+   landing, the umbrella's ground ray and the slash's thunk read the floor: the ground sprint 7 %, the air sprint near
+   the floor 18 %, the plain fall 13 %, the float 12 %, the dash 4 %), 41 % free states off the lattice (the dash 11 %,
+   normal 10 %, the air sprint 10 %, the float 10 %: her exact vy / vx / timers from the recorded start and from every
+   event frame). Exact states do not recur across decisions; within one decision they do (the two approach passes
+   share their first frames, the exit checks from one state share).
+2. **A cold node costs more than the engine's frame**: per expansion 26.6 - 32 us before T3's changes, 8.8 - 11.7 us
+   after (the engine: 1.6 us per cluster-frame - one _children call plus its keys); a cold pass ((1, 60) / (2, 30) on 16
+   w7 roots, the base library reset per root) 8.3 / 6.0 x the engine before, 3.0 / 2.0 x after; a warm pass 0.23 /
+   0.16 x (4 - 6 x faster). On the 236 M3 situations (T2's sits re-run after T3's changes): warm pass 1 1.6 ms (engine
+   9.8), pass 2 7.8 ms (42.6), exit checks 0.96 ms (5.4); cold p50 / p90 2.2 / 18 ms and 10.5 / 177 ms (T2: 4.1 / 61,
+   16.2 / 501).
+3. **The passes are a quarter of a decision**: cProfile / timers of live-configuration decisions on the recorded w7
+   situations - the engine's passes 26 % (1 s cap) / 32 % (0.25 s) of the decision's wall time; the rest is the
+   closed-loop evaluation (simulate, the collision loops, the danger geometry, predict) 50 %, the windows 10 %, the
+   witnesses 8 %, the passes' danger lists 7 %. Even free passes would make a decision ~1.3 x faster.
+4. **Per decision** (8 w7 situations x 2 parts, Cfg.live without the background thread, 100 work units, wall time):
+   the engine 31.7 s; the tables with the library reset to its loaded state before each decision 40.4 s (x 1.27; 63.0
+   s = x 2.0 before T3's expansion changes); the same decision run again (all warm) 27.2 s (x 0.86, the bound). Along
+   the w7 episode (the library growing): engine 65.2 s, tables 67.9 s (x 1.04; 87.4 s before).
+5. **Longer horizons** (10 w7 roots, the search's danger; ms p50 / p90 - engine / tables cold / tables warm):
+
+       pass         engine            cold              warm
+       (1, 60)      25 / 36           40 / 66           2.2 / 3.9
+       (2, 30)      58 / 104          141 / 198         10.8 / 13.3
+       (1, 120)     20 / 47           21 / 126          3.4 / 8.6
+       (2, 60)      211 / 383         377 / 736         48 / 71
+       (2, 90)      512 / 744         685 / 1,784       106 / 142
+       (2, 120)     732 / 979         809 / 2,553       147 / 200
+       (3, 40)      3,694 / 6,582     2,381 / 3,407     549 / 1,150
+       (3, 60)      17,430 / 26,355   10,977 / 14,263   3,810 / 6,515
+
+   Only the 1-event family affords 120 frames inside a live decision (0.12 - 0.6 s caps); 2 events over 60+ frames
+   cost 0.2 - 0.8 s, 3 events 2 - 26 s, cold or not. 'The longer horizon the tables allow' is therefore the long
+   1-event pass (1, 120, 60).
+
+### The measurements, on vs off (`C:\ssbot\data\m2_play\map2\a1n\t3`; every run at Idle priority but the smokes' replays and workers - boosted as S1 / S1b ran them; the wall-clock runs alone on the machine, interleaved per arm; arms: off = the engine, on = `tables=True`, onlong = on + the long pass `passes=((1,60),(2,30),(1,120,60))`)
+
+(1) **The M3 acceptance** (`accept\acc_*.txt`; `m3_accept run --split 2 --hold 2 --jobs 4 --prio idle --cfg
+"pass2_after=6;reuse_root=True;fwd_threads=2;pass2_bg=True;defer_noop=True;hard_cap=True[;tables=True[;passes=...]]"`
+from the snapshot of f27ac9c, `code_f27ac9c` with the library beside it; the deterministic budget without the split
+and the background thread, `--cap 2 --vclock 0.01`; same / alt / not per move, 279 move cases):
+
+| move | n | 200 units off = on | + long | 1 s off (run 2 / 1) | 1 s on | 1 s onlong | 0.25 s off | 0.25 s on | 0.25 s onlong |
+|---|---|---|---|---|---|---|---|---|---|
+| CLAWSTRIKE | 14 | 4 / 4 / 6 | 4 / 4 / 6 | 4 / 3 / 7 | 5 / 3 / 6 | 4 / 3 / 7 | 2 / 0 / 12 | 1 / 0 / 13 | 1 / 0 / 13 |
+| JUMPTRAP | 15 | 4 / 11 / 0 | 5 / 10 / 0 | 9 / 6 / 0 | 5 / 10 / 0 | 4 / 11 / 0 | 11 / 3 / 1 | 10 / 4 / 1 | 12 / 2 / 1 |
+| LOWHOP | 15 | 13 / 2 / 0 | 13 / 2 / 0 | 9 / 6 / 0 | 10 / 4 / 1 | 13 / 2 / 0 | 2 / 6 / 7 | 4 / 7 / 4 | 3 / 5 / 7 |
+| P1-cast | 7 | 3 / 4 / 0 | 3 / 4 / 0 | 2 / 5 / 0 | 2 / 5 / 0 | 2 / 5 / 0 | 4 / 0 / 3 | 3 / 2 / 2 | 2 / 1 / 4 |
+| P1-far-jcast | 15 | 0 / 6 / 9 | 0 / 6 / 9 | 0 / 3 / 12 | 0 / 4 / 11 | 0 / 4 / 11 | 0 / 1 / 14 | 0 / 0 / 15 | 0 / 0 / 15 |
+| P1-far-jump | 14 | 0 / 6 / 8 | 0 / 6 / 8 | 0 / 5 / 9 | 5 / 0 / 9 | 5 / 0 / 9 | 0 / 1 / 13 | 0 / 1 / 13 | 0 / 2 / 12 |
+| P1-idle | 25 | 17 / 4 / 4 | 17 / 4 / 4 | 13 / 3 / 9 | 12 / 6 / 7 | 15 / 3 / 7 | 14 / 0 / 11 | 14 / 0 / 11 | 11 / 1 / 13 |
+| P1-idle-evade | 19 | 0 / 12 / 7 | 0 / 12 / 7 | 1 / 0 / 18 | 4 / 2 / 13 | 1 / 3 / 15 | 0 / 0 / 19 | 0 / 0 / 19 | 0 / 0 / 19 |
+| P1-idle-slam | 19 | 0 / 10 / 9 | 0 / 10 / 9 | 0 / 1 / 18 | 0 / 4 / 15 | 0 / 1 / 18 | 0 / 0 / 19 | 0 / 0 / 19 | 0 / 0 / 19 |
+| P1-jump | 13 | 5 / 7 / 1 | 6 / 6 / 1 | 4 / 7 / 2 | 3 / 9 / 1 | 4 / 8 / 1 | 6 / 3 / 4 | 2 / 2 / 9 | 2 / 3 / 8 |
+| P1-locked | 2 | 2 / 0 / 0 | 2 / 0 / 0 | 1 / 0 / 1 | 2 / 0 / 0 | 2 / 0 / 0 | 1 / 0 / 1 | 1 / 0 / 1 | 1 / 0 / 1 |
+| P1-slam | 14 | 5 / 4 / 5 | 5 / 4 / 5 | 4 / 3 / 7 | 5 / 3 / 6 | 4 / 3 / 7 | 2 / 0 / 12 | 1 / 0 / 13 | 1 / 0 / 13 |
+| P2 | 16 | 11 / 5 / 0 | 11 / 5 / 0 | 10 / 2 / 4 | 12 / 1 / 3 | 11 / 2 / 3 | 5 / 1 / 10 | 3 / 0 / 13 | 4 / 0 / 12 |
+| P3-cross | 2 | 0 / 0 / 2 | 0 / 0 / 2 | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 1 / 1 | 0 / 0 / 2 | 0 / 0 / 2 | 0 / 0 / 2 |
+| P3-face | 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 | 0 / 0 / 14 |
+| P4 | 16 | 7 / 6 / 3 | 7 / 6 / 3 | 8 / 4 / 4 | 9 / 3 / 4 | 10 / 2 / 4 | 1 / 3 / 12 | 0 / 4 / 12 | 1 / 2 / 13 |
+| P5 | 17 | 11 / 3 / 3 | 11 / 3 / 3 | 11 / 3 / 3 | 11 / 3 / 3 | 13 / 1 / 3 | 9 / 2 / 6 | 8 / 1 / 8 | 10 / 1 / 6 |
+| SLAMSTRIKE | 42 | 12 / 24 / 6 | 12 / 24 / 6 | 13 / 18 / 11 | 13 / 21 / 8 | 15 / 20 / 7 | 3 / 0 / 39 | 6 / 4 / 32 | 4 / 4 / 34 |
+| **all** | 279 | **94 / 108 / 77** | **96 / 106 / 77** | **89 / 70 / 120** | **98 / 79 / 102** | **103 / 69 / 107** | **60 / 20 / 199** | **53 / 25 / 201** | **52 / 21 / 206** |
+| found | | 202 | 202 | 159 (159) | 177 (166) | 172 (170) | 80 | 78 | 73 |
+| mean value / hits | | 1.476 / 1.639 | 1.469 / 1.630 | 1.210 / 1.364 (1.171) | 1.354 / 1.506 (1.323) | 1.330 / 1.478 (1.325) | 0.418 / 0.566 | 0.446 / 0.597 | 0.423 / 0.577 |
+| candidates p50 | | 174 | 181 | 52 | 72 | 70 | 7 | 6 | 6 |
+| decision ms p50 / p90 / p99 | | - | - | 1,055 / 1,302 / 1,546 | 1,084 / 1,291 / 1,462 | 1,097 / 1,297 / 1,429 | 268 / 366 / 458 | 283 / 415 / 818 | 281 / 402 / 853 |
+
+- 200 units: on = off in every one of the 279 move cases (the tables' clusters are the engine's); the long pass: 2
+  better (JUMPTRAP, P1-jump: alt -> same), 0 worse, the same 202 found; it changed 3 chosen plans, each to a lower value
+  (its candidates take budget from the deeper continuations); no case not found becomes found.
+- 1 s (two runs per arm; run 1 of 'off' lost situations 0 - 6 to the snapshot's first numba compile - 49 - 69 s
+  decisions -, so run 2 is the table's): on vs off better 30 / worse 15, lost 4 / gained 22; every lost case is the
+  budget - 3 time-capped with the labelled candidate not reached, 1 (w13 @479 LOWHOP) a decision that ended at 537 ms
+  with 9 candidates instead of 12: the 2-event pass on the background thread joined at another point of the queue
+  (the order depends on time, Cfg.pass2_bg) -; none is the model or the envelope (the 200-unit runs are equal). The
+  tables evaluate ~40 % more candidates in a second: inside one decision and across the 8 decisions a pool worker
+  runs, the passes and exit checks find most of their nodes warm.
+- 0.25 s (two runs off / on, the table is run 1): found 80 / 76 vs 78 / 84, mean value 0.418 / 0.399 vs 0.446 / 0.503,
+  candidates p50 7 vs 6 / 7 - within the run-to-run spread (+-8 found between runs of one arm); a decision's first
+  passes are mostly cold, and a cold pass cannot be cut at the cap (decision p99 818 / 840 vs 458 / 523 ms).
+
+(2) **The times** (`first\first_t3*.json`, `m4b_speed first --cap 2 --workers 2 --split 2 --prio idle --groups "rec w7
+1"`, M4b's method without the simulated load; the 32 w7 one-Clapper situations where M4a's 60 s run had a safe strike /
+endpoint plan):
+
+| arm (run 1 / run 2) | first safe plan ms p50 / p90 / p99 (none) | decision ms p50 / p90 | anytime value 0.25 / 0.5 / 1 / 2 s (v4 60 s: 2.13) |
+|---|---|---|---|
+| off | 66 / 156 / inf (3); 65 / 167 / inf (2) | 2,141 / 2,562; 2,150 / 2,585 | 0.74 / 1.26 / 1.54 / 1.79; 0.76 / 1.21 / 1.55 / 1.86 |
+| on | 84 / 206 / inf (2); 86 / 190 / inf (2) | 2,161 / 2,639; 2,145 / 2,517 | 0.84 / 1.21 / 1.54 / 1.88; 0.81 / 1.21 / 1.51 / 1.89 |
+| onlong | 81 / 336 / inf (2); 79 / 181 / inf (2) | 2,189 / 2,449; 2,171 / 2,533 | 0.80 / 1.24 / 1.51 / 1.81; 0.74 / 1.04 / 1.51 / 1.81 |
+
+(M4b on the same 32 situations at High priority with the simulated load: 65 / 119 / 951 ms.) The first safe plan comes
+~20 ms LATER with the tables in both runs (its pass is the decision's first, cold); the anytime value is within the
+spread.
+
+(3) **The real-time replay smokes** (`smoke\summary_t3.txt`, `t3\scripts\smoke_t3.py`; m4c_smoke as S1 / S1b ran it:
+the four recordings two at a time at 60 STATEs a second, the replays and the map2 workers boosted like the live bot,
+`--set parts=2,audit_runs=1[,replay_strict=1][,tables=1[,passes=1:60/2:30/1:120:60]]`, every sent plan dumped and
+scanned with S1b's press rules; the worktree at f27ac9c, interleaved per arm: strict x 3, open x 2):
+
+| | strict off | strict on | strict onlong | open off | open on | open onlong |
+|---|---|---|---|---|---|---|
+| map2's share of the engaged ticks, w7 | **32.6 %** (2,197 / 6,740; 26 - 40 % per recording) | 23.0 % (18 - 28) | 21.3 % (14 - 29) | **36.8 %** (32 - 42) | 28.6 % (20 - 39) | 19.1 % (14 - 28) |
+| ... w13 | 4.5 % | 2.5 % | 1.5 % | 5.6 % | 4.6 % | 3.2 % |
+| commits w7 / w13 | 139 / 41 | 106 / 26 | 74 / 10 | 104 / 36 | 67 / 19 | 52 / 12 |
+| safety audit: control runs w7 + w13, collisions | 180, **0** | 132, **0** | 84, **0** | 140, **0** | 86, **0** | 64, **0** |
+| press scan: plans / committed, with an invalid press | 554 / 180: 1 (claw-state, not committed) / **0** | 379 / 132: 0 / **0** | 249 / 84: 0 / **0** | 353 / 140: 0 / **0** | 203 / 86: 0 / **0** | 146 / 64: 0 / **0** |
+| reveal (w7): move starts with a committed plan within 60 f; its first key p50 / p90 | 64 / 84; 20 / 43 f | 54 / 84; 23 / 44 | 28 / 84; 35 / 49 | 46 / 56; 21 / 39 | 31 / 56; 19 / 43 | 25 / 56; 30 / 51 |
+| the search ms p50 / p90 / p99 (w7) | 87 / 255 / 584 | 96 / 325 / 761 | 97 / 336 / 704 | 85 / 247 / 666 | 101 / 374 / 778 | 106 / 405 / 810 |
+| drops with a slash in flight (w7); frames to map2's next keys p50 / p90 | 38; 40 / 121 | 32; 36 / 136 | 21; 136 / 254 | 30; 30 / 71 | 17; 45 / 145 | 17; 40 / 159 |
+
+- 0 tracebacks, 0 errors in every run; the workers loaded the library (3.3 GB each) before their warm-up.
+- **The tables LOWER map2's share** (strict w7 32.6 -> 23.0 %, open 36.8 -> 28.6 %; with the long pass 21.3 / 19.1 %)
+  and the move starts answered by a committed plan (64 -> 54 -> 28 of 84): the workers' answers on w7 strict, off / on
+  / onlong (3 runs) - a plan 23 / 18 / 14 %, 'unsafe' (nothing safe by the cap) 6 / 12 / 13 %, the noop 20 / 22 / 26
+  %, cut searches 25 / 28 / 31 %. The live searches are short (the deadline: 40 - 250 ms) and start from states the library has
+  not seen, so their first passes run cold; the search's time p90 grows 255 -> 325 ms.
+- Safety holds: no collision in any control run, no invalid press in any committed plan (the one invalid press of the
+  'off' runs is S1b's open item 2, the Clawline at the dash -> sprint boundary, in a plan never committed).
+- The drops mid-strike (the gate's problems 2 / 5): map2 regains the keys 30 - 136 frames (p50) after a plan dropped
+  with a slash in flight, in every arm - the tables do not change it (Findings 5).
+
+### Exactness and identity
+
+- **The switch off is the old search, bit for bit**: m4b_speed's deterministic digest (a virtual clock; every tried
+  plan's key, value and safety, the chosen plan, the counters, the anytime trace) of the base f585386 (a code
+  snapshot) against the T3 commit with the tables off - M3's configuration 130 / 130 (one Clapper, 200 units) and 106 /
+  106 (two Clappers, 40 units), the live flags 130 / 130 and 106 / 106 (`t3\ident\identcmp.txt`; the first base run
+  of M3's one-Clapper set lost 126 jobs to 0xC0000142 process starts while a stopped runner's console went away - re-run
+  as base_m3_1b). The bot (SSBOT_FORUM_MAP2 unset, nothing imports ssbot.map2): 24 / 24 replays byte-identical
+  (`t3\scripts\replay_ident_t3.ps1`, `ident_cmp_t3.sh`; w7 192006 i0 e1, 084036 i1 e0, w13 144051 i1 e0, 102908 i0 e0;
+  the rnjb and M0 envs; HERO2 unset = M4c's base 'new', =1 with HERO2_OFF=15872 = M4c's base 'h2', =1 with
+  HERO2_OFF=12288 = S1b's worktree 'h2' - T3 changes no bot file and no hero bit).
+- **The tables in the search are exact** (T2's tools re-run after T3's expansion changes, the search's library):
+  the 236 M3 situations' approach passes 236 / 236 + 236 / 236 exact (worst 8.5e-14 u), their windows 69,874 + 37,056
+  equal, the exit checks 673 / 673; T2's exactS_ev2_t30_danger 395 / 395; T1's t1_exactS_ev2_t30 479 / 479; T2's
+  exactD_ev1_t60 (the default library) 479 / 479; entry from 406 transitional states with the dash (every event 10 f /
+  <= 1 event 60 f / <= 2 events 30 f) 1,217 / 1,218 - the same one sprint-jump attack cancel start 0.032 u off as in
+  T2 (`t3\verify\`). (A first entry run with every event over 24 frames - a wrong --T - grew to 65 M nodes / 200 GB
+  committed and died of a MemoryError after 15 minutes - two library loads of a concurrent digest run failed for
+  lack of memory meanwhile (situations 177 / 178, re-run: the same digest); the trading bot was unaffected.)
+- **The search with the tables on = off at a deterministic budget**: the digest with the live flags - the chosen plan,
+  its value, safety, hits and labels the same in 236 / 236 situations; every tried plan the same in 216 / 236 (the 20
+  others: the same candidates in another order or one more / fewer - a window's tie between equal distances broken by
+  the 1e-13 u rounding of relative vs absolute x). The M3 acceptance at 200 work units (the live flags without the
+  background thread, the hold filter's realizer): on and off the same in every one of the 279 move cases (94 / 108 /
+  77), the same mean value 1.476 and hits 1.639, 230 / 236 safe.
+- Tests: `tests/test_t3_tables.py` 9 (the switch off = the engine bit for bit; on = the engine's clusters with
+  danger; Lib.reset restores the library - the pass before the mark warm and the same arrays, the dropped nodes come back
+  exact; the busy library falls back to the engine; a decision with / without the tables the same; the long pass's
+  windows; the budget reset at a decision; LiveCfg -> the worker's Cfg); the map2 / M4 / T1 / T2 tests 106 passed.
+
+### Findings for the person
+
+1. **The tables are exact inside the search but they are a memo, not a closed set** - every live decision meets tens of
+   thousands of exact states the library has never seen (59 % of them floor instances by exact height within 2.5 u of
+   the floor, 41 % free states off the A1 lattice), so most of a short live search runs cold, and a cold node costs ~6
+   x the engine's frame. In the real-time smokes this makes map2 hold the keys LESS (see the smokes), and the first safe
+   plan comes ~20 ms later. Keep the switch off for a live run.
+2. Where the tables pay: long or repeated work on the same states - a 1 s search (+40 % candidates, more move cases
+   found in the M3 suite), a 3-event 60-frame pass warm 3.8 s vs the engine's 17 s, the exactness / analysis tools.
+3. Even free passes would make a decision only ~1.3 x faster: the closed-loop evaluation (simulate, the collision
+   loops, the danger geometry, predict) is about half of it, the windows and the witnesses another fifth.
+4. 3+ events over 120 frames do not fit a live decision with either the engine or the tables (2 - 26 s for 3 events);
+   the 1-event family over 2 s does (20 ms), and adds little at the search's budgets.
+5. The plan dropped mid-strike (the gate's problems 2 / 5; the lead's note entry): in the strict smokes, after a drop
+   with a slash in flight map2 gets the keys back only 40 - 110 frames later (p50) - no search may start while a slash's
+   contact can still come (busy 'slash'), and the evaluation cannot credit a swing that started before its root. The
+   tables (and the engine) can start a pass from the mid-slash state (entry from any state, exact); the missing part is
+   the evaluation's and the controller's, not the envelope's.
+
+### Open items
+
+1. If the tables are to speed the live search, the node identity must make states recur: a floor instance only for a
+   frame that actually reads the terrain at that height (a per-node clearance found by expansion instead of the fixed
+   2.5 u), and/or the library shared between the worker processes (an uncompressed memory-mapped base, copy-on-write) -
+   each needs the full exactness sweep again. Snapping (the person ruled it out) is not an option.
+2. The search's speed is mostly the evaluation: compile simulate's loop and the collision checks, share the
+   trajectory memo across the two split parts, cut the per-candidate Python overhead (the windows, the danger lists).
+3. Re-planning from mid-action: a root that carries the swing in progress (its target, start frame) so simulate credits
+   its contact, and the controller's busy rule relaxed after a drop; then the drop rule on a one-frame timing shift
+   (re-check on the observed state, keep a plan that is still safe) - the gate's problems 2 / 5.
+4. The memory of a worker with the tables (5 - 20 GB) and the cold first pass; a warm library file was not made (the
+   library grows ~1 M nodes per 15 s of play: a warm file would be several GB per worker and still miss most states).
+5. T2's one entry case off by 0.032 u and the engine's merge that is not monotone in its options (T2 open items 2, 7).
+6. Nothing ran live; no merge to main.
+
+### The frozen checkout
+
+`C:\ssbot\live_1v1_f27ac9c` (1v1_freeze.ps1 -rev f27ac9c: the T3 code; the later commits are docs only), the
+search's library hard-linked from the content store (`knowledge\1.0.30000\kinematics\a1n_tables_v1_arena_noclaw.npz`),
+warmed by a strict smoke from it with the tables on and one with them off (w7a + w13a; `t3\smoke_frozen_f27ac9c\`:
+on w7a 29.2 % / w13a 2.1 % of the engaged ticks, off 33.2 % / 5.3 %; 0 tracebacks, 0 errors, the audit 0 collisions in
+22 / 36 control runs; the workers loaded the checkout's own library). Arm `m2` as before - the switch off is the gate's
+map2 with T1b / T2's hero bits (H2_SHUTTLE, H2_LAND_DASH) and T2's engine key fixes; the tables:
+`SSBOT_FORUM_MAP2_SET=tables=1` (+ `passes=1:60/2:30/1:120:60` for the long pass) - not recommended for a live run
+(the smokes above). Not run live.
+
+Commits (branch worktree-wf_f1846551-5f9-1, not merged, not pushed): f27ac9c (the switch, the library budget and reset,
+the cheaper expansions, the long pass, LiveCfg, the tools, the tests), then the docs commit.
