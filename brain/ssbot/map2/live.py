@@ -267,7 +267,8 @@ class LiveCfg:
     #                                S1: 0 (any non-zero - 40 frames of residue after a cancel)
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
-    #                                Cogfly keys stripped), not the snapshot's anchor (S1: the anchor, the keys from it)
+    #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
+    #                                (S1: the anchor, the keys from it, as sent)
     log: bool = True
 
     @classmethod
@@ -2180,8 +2181,13 @@ class Map2Controller:
                 # replay's proxy rejects it
                 pre = getattr(lp, "cmds_pre", None)
                 o_b = max(lp.outs, key=lambda o_: o_.p)
-                # M4 S1b (late_base): the state this check simulates from - her observed one (commit_check)
-                base_c = {"s": int(fo - lp.t_a), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}
+                # M4 S1b (late_base): the world the late check re-simulates in - live (and the open replay) her observed
+                # state now, where commit_check / the repair check the plan; the strict replay's proxy world is the
+                # anchor's (its repair_check and its audit's: her observed state is the recording's there)
+                if self.cfg.replay and self.cfg.replay_strict and getattr(lp, "S_a", None) is not None:
+                    base_c = {"s": 0, "S": lp.S_a, "hold": lp.hold_a, "lat": int(lp.lat_a)}
+                else:
+                    base_c = {"s": int(fo - lp.t_a), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}
 
                 def expect(k, _pre=pre, _o=o_b, _t=lp.t_a):
                     r_ = k - _t
@@ -2198,7 +2204,6 @@ class Map2Controller:
                         if self.cfg.replay and self.cfg.replay_strict:
                             keys_ = np.array([self._sent_at(k) or 0 for k in range(lp.t_a + 1, f + 2)], np.int64)
                             ok, why_c, info = repair_check(self.W, lp, fo, f, keys_, her, obs, self.cfg, acc=acc)
-                            base_c = {"s": 0, "S": lp.S_a, "hold": lp.hold_a, "lat": int(lp.lat_a)}
                         else:
                             ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs,
                                                            self.cfg, acc=acc, tol=self.cfg.tol_repair)
