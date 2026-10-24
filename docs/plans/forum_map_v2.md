@@ -460,26 +460,11 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   first frame (the jump cancel; vx as an interval), A1_0 after an unhooked Clawline. So the backward set from a goal
   is needed only INTO those end tables, and since the tables and the windows are both relative, B(window shape, end
   table) can be PRECOMPUTED offline per pair: the bridge check becomes a lookup.
-- PATHS ON FLATTENED MAPS (the person, 2026-10-24: 'having found A - B - C, look whether the table's B came from A:
-  if so C points to B; if not, store B and A both as C's source - the head is a fixed point, so backtracking long
-  enough always stores the whole path'). Today: the per-decision chain merges clusters only on a bit-equal full state,
-  so any path into B continues with any path out of B (the state alone decides the future): one source per piece
-  (its parent, its action, its x interval) is enough and the path is the piece containing the target x, followed
-  back; the witness tracker fills left / right. The FLATTENED maps merge by position (different states at one
-  position), so they carry no sources today (upper bound only). The person's rule makes them carry paths: a node
-  keeps its source, and where the stored source of B is not the A of this path, C keeps the pair (B, A) - longer
-  suffixes while the conflict persists - a path tree with shared prefixes, unique back to the fixed head. Use it on the
-  precomputed danger-free sets - the backward sets B(window shape, dash end table): then the bridge lookup returns the
-  keys too - and on the flattened forward union before the danger first touches it. Measure the storage (it grows
-  with the conflicting merges).
-  SIMPLER: TAG EACH FLATTENED ENTRY WITH ITS ORIGIN TABLE AND NODE (the person, 2026-10-24: 'when flattening, B's
-  original position is mostly not in this table but in a referenced one - record B's original table number on the
-  flattened table: is it unique then?' - yes): (table, node) + the position IS the exact state, so entries of
-  different origins at one position stay separate and each keeps ONE source (its previous-frame entry): following
-  the sources back always gives a path that works (the state alone decides the future - the chain's own guarantee).
-  Not 'the only path' - many reach a state; keep the best by the natural-selection rule (fewest presses, then the
-  earliest arrival). The flattened map becomes 'per position, per state an interval'; the pure position union for
-  the prune is derived from it. Measure the entry count (the tables bound the states).
+- PATHS ON FLATTENED MAPS - ANALYSED, NOT BUILT (the person's two ideas of 2026-10-24: C keeps (B, A) when B's stored
+  source is not A; or tag each flattened entry with its origin table and node): both come down to entries keyed by
+  the exact state with one source each - exactly what the per-decision chain already does (bit-equal merges, one
+  source per piece); storing it per start state does not pay (T3: live states do not recur). Precomputed sets keep
+  their own chain's back-pointers; the position-flattened maps stay pointer-free (an upper bound for the prune).
 - THE LONG-TERM POSITIONING PLANNER (the person, 2026-10-24: 'the 180 f look-ahead is really a long-term
   positioning planner - besides the escape nodes it should tell the strike planner roughly where to stand and whom
   to hit; the hand rules should now come out of modules automatically'): on the funnel, a LONG-TERM VALUE per
