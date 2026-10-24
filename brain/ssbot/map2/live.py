@@ -256,6 +256,18 @@ class LiveCfg:
     late_check: bool = True        # a skipped tick slipped a key of the plan in control: re-checked from the keys
     tol_late: float = 0.5          # actually sent (late_check; the path from now within tol_late), dropped if unsafe
     plan_dump: str = ""            # a directory: every plan a worker sends pickled there (the press scan); '': not
+    # M4 S1b (the verifiers' findings on S1; on by default - each at its S1 value gives S1's behaviour)
+    free_pogo: int = 12            # press.FREE_POGO: a press only kin's downspike lock holds, credited this many frames
+    #                                after a pogo's onset (the game's recovery 9 - 11 f); after a hooked Clawline's forced
+    #                                bounce press.FREE_MIN (its recovery 1 f) - S1: 10 for both
+    ds_shrink: float = 0.05        # press.SHRINK: a down slash contact meets the body box shrunk by this (u); S1: 0
+    side_rule: str = "lag"         # press.SIDE_RULE ('lag' / 'top' / 'top0' = S1's) and its lead (u)
+    side_lag: float = 0.5
+    spr_xvx: float = 1.0           # press.XVX_MIN: 'out of the sprint' by the retained extra velocity from |XVX| (u/s);
+    #                                S1: 0 (any non-zero - 40 frames of residue after a cancel)
+    late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
+    #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
+    #                                Cogfly keys stripped), not the snapshot's anchor (S1: the anchor, the keys from it)
     log: bool = True
 
     @classmethod
@@ -283,6 +295,11 @@ def set_switches(cfg: LiveCfg) -> None:
     check simulates too)."""
     press.ON[0] = bool(cfg.press_check)
     press.SIDE[0] = bool(cfg.side_spr)
+    press.FREE_POGO[0] = int(cfg.free_pogo)          # M4 S1b
+    press.SHRINK[0] = float(cfg.ds_shrink)
+    press.SIDE_RULE[0] = str(cfg.side_rule)
+    press.SIDE_LAG[0] = float(cfg.side_lag)
+    press.XVX_MIN[0] = float(cfg.spr_xvx)
 
 
 # ---- the oracle's hold filter, one lane (kinematics.hold_filter, compiled) ------------------------------------------
@@ -508,9 +525,10 @@ class OutData:
     iid)], variant, boxes {iid: robust body rows} (the strikes' targets), geo (off, BX, IIDB, coff, CO to kc), rare
     {k: grown shapes} (the hammers), rare_k, label; M4d: why ('dev': its committed part ends at a deviation because a
     collision follows), kcol (that collision's frame), ctrls [(P, control)] of its hooked / unhooked Clawlines whose
-    control is known (her accepting input from control on: the hook variant seen live)."""
+    control is known (her accepting input from control on: the hook variant seen live); M4 S1b: tops {iid: the
+    highest body top per frame} (strike.union_tops: the side rule's; unset in older plans - the robust top then)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
-                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls")
+                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
@@ -573,6 +591,7 @@ def build_outs(ev, margins: bool = True) -> list:
         d.variant = tr.variant or sk.HOOK_VARIANTS[0].name
         tgt = {iid for (_, iid) in d.presses} | {int(c[1]) for (_, _, _, c) in d.segs if c is not None}
         d.boxes = {iid: np.asarray(sk.robust_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
+        d.tops = {iid: np.asarray(sk.union_tops(o.branch, iid, None), float) for iid in sorted(tgt)}
         key = (id(o.branch), kc)
         if key not in gcache:
             gcache[key] = _geo_cut(o.branch, kc, margins)
@@ -808,6 +827,15 @@ def _first_collision_out(o: OutData, tr, s: int, k1: int) -> int | None:
     return res
 
 
+def _tops_fn(o: OutData, s: int = 0):
+    """M4 S1b: simulate's tops_fn for a re-simulation of the outcome from frame s (None: an older plan without tops -
+    the robust box's top)."""
+    tops = getattr(o, "tops", None)
+    if tops is None:
+        return None
+    return lambda iid: (tops[iid][s:] if iid in tops else None)
+
+
 def _claw_dirs(d: int) -> tuple:
     return (km.B_RIGHT, km.B_LEFT) if d > 0 else (km.B_LEFT, km.B_RIGHT)
 
@@ -891,7 +919,8 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
                 return False, "claw latch", info
             pm = m
         key = (o.variant, lat.tobytes(), tuple((iid, o.boxes[iid].tobytes()) for iid in sorted(o.boxes)),
-               tuple((k0, c) for (k0, _, _, c) in o.segs))
+               tuple((k0, c) for (k0, _, _, c) in o.segs),
+               tuple((iid, t_.tobytes()) for iid, t_ in sorted((getattr(o, "tops", None) or {}).items())))
         tr = memo.get(key)
         if tr is None:
             plan, why = reanchor_outcome(o, s, lat, lat_s)
@@ -899,7 +928,7 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
                 return False, why, info
             boxes = {iid: b[s:] for iid, b in o.boxes.items()}
             tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
-                             claw_lock=int(getattr(lp, "claw_lock", -99)) - s)
+                             claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s))
             memo[key] = tr
             n_sim += 1
         kk = min(o.kc - s, len(tr.pos) - 1)
@@ -943,7 +972,7 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
             continue
         boxes = {iid: b[s:] for iid, b in o.boxes.items()}
         tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
-                         claw_lock=int(getattr(lp, "claw_lock", -99)) - s)
+                         claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s))
         kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
         out.append((int(i), None if kc is None else int(kc), ""))
     return out
@@ -1007,7 +1036,7 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
         if plan is None:
             return False, why, info
         tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
-                         claw_lock=int(getattr(lp, "claw_lock", -99)))
+                         claw_lock=int(getattr(lp, "claw_lock", -99)), tops_fn=_tops_fn(o, 0))
         n_sim += 1
         kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
         if kk < r0:
@@ -1033,7 +1062,7 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
 
 
 def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, tol: float,
-               pos_ref: dict | None = None, slip: list | None = None) -> tuple:
+               pos_ref: dict | None = None, slip: list | None = None, base: dict | None = None) -> tuple:
     """M4 S1 (LiveCfg.late_check): the plan in control after a skipped tick slipped one of its keys (the oracle held
     the previous ACTION for that frame) - re-simulated from her ANCHOR state (the snapshot's) with the keys actually
     applied for frames t_a + 1 .. f + 1 (keys: a skipped frame's held keys) and the plan's own commands from f + 2,
@@ -1044,25 +1073,35 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
     the same re-simulation with the slipped frames' keys as the plan has them (slip: their frames; the model and the
     anchor the same, so a model drift or a replay's recorded position does not count) - must stay within tol. The
     path of the plan in control (pos_ref: its re-simulated path at the commit / the last re-anchoring) moves by that
-    effect (info pos_over). (ok, why, info) as commit_check's."""
+    effect (info pos_over). (ok, why, info) as commit_check's.
+    M4 S1b base (LiveCfg.late_base): {'s', 'S', 'hold', 'lat'} - re-simulated from that state instead (frame s from
+    the anchor: the commit's / the re-anchoring's observed state, its hold filter state and latched mask; keys: the
+    keys applied for frames t_a + s + 1 .. f + 1) - the world in which the commit checked the plan (the strict
+    replay's repair: the anchor, s 0); the press scan then starts after s, as the commit check's does."""
     t0 = time.perf_counter()
     s = int(fo - lp.t_a)
     r0 = int(f + 2 - lp.t_a)
     info = {"s": s, "late": True}
-    S_a = lp.S_a
-    face0 = int(S_a[km.FACE]) if S_a[km.FACE] != 0 else 1
-    alpha_c = int(round(float(S_a[km.ALPHA]) * 6.0)) % 6
+    if base is None:
+        sb, S_b, hold_b, lat_b = 0, lp.S_a, lp.hold_a, int(lp.lat_a)
+    else:
+        sb, S_b, hold_b, lat_b = int(base["s"]), base["S"], base["hold"], int(base["lat"])
+        info["base"] = sb
+    face0 = int(S_b[km.FACE]) if S_b[km.FACE] != 0 else 1
+    alpha_c = int(round(float(S_b[km.ALPHA]) * 6.0)) % 6
     keys = np.asarray(keys, np.int64)
     pos_over, dev_max, n_sim = {}, 0.0, 0
+    lock = int(getattr(lp, "claw_lock", -99)) - sb
 
     def sim(o, kk_):
         cmds = np.concatenate([kk_, o.cmds[r0:o.end + 1]])
-        lat = hold_filter1(cmds, lp.hold_a)
-        plan, why_ = reanchor_outcome(o, 0, lat, lp.lat_a, move=2)
+        lat = hold_filter1(cmds, hold_b)
+        plan, why_ = reanchor_outcome(o, sb, lat, lat_b, move=2)
         if plan is None:
             return None, lat, why_
-        tr_ = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
-                          claw_lock=int(getattr(lp, "claw_lock", -99)))
+        boxes = {iid: b[sb:] for iid, b in o.boxes.items()}
+        tr_ = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S_b, VARIANTS[o.variant], alpha_c,
+                          claw_lock=lock, tops_fn=_tops_fn(o, sb))
         return tr_, lat, ""
     for i in idx:
         o = lp.outs[i]
@@ -1070,10 +1109,10 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
         planned = {k for (k, _) in o.presses}
         claws = {int(k0) + len(m): c for (k0, m, _, c) in o.segs if c is not None}
         fac = sk.facing_track(face0, lat) if claws else None
-        pm = int(lp.lat_a)
-        for q in range(min(len(lat), o.kc)):
+        pm = lat_b
+        for q in range(min(len(lat), o.kc - sb)):
             m = int(lat[q])
-            k = 1 + q
+            k = sb + 1 + q
             if _rising(m, pm, km.B_ATTACK) and not any(0 <= k - kp <= 2 for kp in planned):
                 return False, "unplanned slash", info
             if _rising(m, pm, M_CLAW) and k not in claws:
@@ -1084,25 +1123,26 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
         if tr is None:
             return False, why, info
         n_sim += 1
-        kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
+        kk = min(o.kc, sb + len(tr.pos) - 1, len(o.pos) - 1)
         if kk < r0:
             return False, "short", info
-        kc_ = _first_collision_out(o, tr, 0, o.kc)
+        kc_ = _first_collision_out(o, tr, sb, o.kc)
         if kc_ is not None:
             info.update(col=int(kc_), out=i)
             return False, "danger", info
         # the slip's own effect: the same keys with the slipped frames' as the plan has them
         ks = keys.copy()
         for k in (slip or ()):
-            q = int(k) - int(lp.t_a) - 1
+            q = int(k) - int(lp.t_a) - sb - 1
             if 0 <= q < len(ks) and int(k) - int(lp.t_a) < len(o.cmds):
                 ks[q] = int(o.cmds[int(k) - int(lp.t_a)])
         trb, _, _ = sim(o, ks)
         n_sim += 1
         if trb is None:
             trb = tr
-        kk = min(kk, len(trb.pos) - 1)
-        eff = tr.pos[:kk + 1] - trb.pos[:kk + 1]
+        kk = min(kk, sb + len(trb.pos) - 1)
+        eff = np.zeros((kk + 1, 2))
+        eff[sb:kk + 1] = tr.pos[:kk + 1 - sb] - trb.pos[:kk + 1 - sb]
         dev = np.abs(eff[s:kk + 1]).max(axis=1) if kk >= s else np.zeros(0)
         dmax = float(dev.max()) if len(dev) else 0.0
         dev_max = max(dev_max, dmax)
@@ -1724,6 +1764,22 @@ class Map2Controller:
         S0 = km.initial_state(self.W.params, 26.0, sk.FLOOR + sk.FOOT, ground=True, facing=1)
         ms.simulate(self.W, ms.Plan([ms.Seg(np.full(6, km.B_RIGHT, np.int64))]), lambda iid: None, 1, S0,
                     sk.HOOK_VARIANTS[0], 0)
+        # M4 S1b (finding others 2): the press check's compiled trace and the strike paths - a credited down slash
+        # with its bounce re-roll, a hooked Clawline and the slash after its control (the trace's first load cost 16 ms
+        # on the bot's thread at the first commit check of a strike plan: a 2 - 4 frame stall at the commit tick)
+        Sa = km.initial_state(self.W.params, 30.0, sk.FLOOR + 3.0 + sk.FOOT, ground=False, vy=-2.0, facing=1)
+        md = np.array([0, 0, M_DS, km.B_DOWN, 0, 0, 0, 0, 0, 0, 0, 0], np.int64)
+        press.trace(self.W, Sa, md, None, [3])
+        body = np.tile(np.array([[29.0, sk.FLOOR, 31.0, sk.FLOOR + 2.4]]), (90, 1))
+        side = np.tile(np.array([[33.0, sk.FLOOR + 1.0, 35.0, sk.FLOOR + 6.0]]), (90, 1))
+        for bx in (body, side):
+            ms.simulate(self.W, ms.Plan([ms.Seg(md, [(2, 7)])]), lambda iid, b_=bx: b_, 1, Sa, sk.HOOK_VARIANTS[0],
+                        0, tops_fn=lambda iid, b_=bx: b_[:, 3])
+        for bx in (side, body):
+            ms.simulate(self.W, ms.Plan([ms.Seg(np.array([0, 0, km.B_RIGHT], np.int64), [], (1, 7)),
+                                         ms.Seg(np.zeros(16, np.int64) | np.array([0] * 10 + [M_DS] + [0] * 5),
+                                                [(10, 7)])]),
+                        lambda iid, b_=bx: b_, 1, Sa, sk.HOOK_VARIANTS[0], 0, tops_fn=lambda iid, b_=bx: b_[:, 3])
         z = np.zeros(3)
         brnum.first_hit(z, z, np.zeros(3, np.bool_), 1, 2, np.zeros(4, np.int64), np.zeros((0, 4)),
                         np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64),
@@ -1739,6 +1795,7 @@ class Map2Controller:
         self.ctrl_idx: list = []
         self.ctrl_pos: dict = {}
         self.ctrl_since = None
+        self.ctrl_base: dict | None = None  # M4 S1b (late_base): the state the commit / re-anchoring checked it from
         self.pending: list = []
         self.sent_hist: dict = {}           # frame -> the command sent for it (this controller's view of the keys)
         self.trig: list = []
@@ -1997,6 +2054,7 @@ class Map2Controller:
                 self.rev_new = (int(self._fo_prev), [-1, "drop:" + why])      # M4d2: restart now (rev_cut's path)
         self.ctrl, self.ctrl_idx, self.ctrl_pos, self.ctrl_since = None, [], {}, None
         self.ctrl_excl, self.ctrl_cut, self._exe, self._verdict = set(), None, None, None
+        self.ctrl_base = None
 
     def _tm(self, kind: str, v: float) -> None:
         getattr(self, {"pre": "ms_pre", "post": "ms_post", "check": "ms_check", "age": "age_commit"}[kind]).append(v)
@@ -2122,6 +2180,8 @@ class Map2Controller:
                 # replay's proxy rejects it
                 pre = getattr(lp, "cmds_pre", None)
                 o_b = max(lp.outs, key=lambda o_: o_.p)
+                # M4 S1b (late_base): the state this check simulates from - her observed one (commit_check)
+                base_c = {"s": int(fo - lp.t_a), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}
 
                 def expect(k, _pre=pre, _o=o_b, _t=lp.t_a):
                     r_ = k - _t
@@ -2138,6 +2198,7 @@ class Map2Controller:
                         if self.cfg.replay and self.cfg.replay_strict:
                             keys_ = np.array([self._sent_at(k) or 0 for k in range(lp.t_a + 1, f + 2)], np.int64)
                             ok, why_c, info = repair_check(self.W, lp, fo, f, keys_, her, obs, self.cfg, acc=acc)
+                            base_c = {"s": 0, "S": lp.S_a, "hold": lp.hold_a, "lat": int(lp.lat_a)}
                         else:
                             ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs,
                                                            self.cfg, acc=acc, tol=self.cfg.tol_repair)
@@ -2174,6 +2235,7 @@ class Map2Controller:
                     self._audit_end()
                     self.ctrl, self.ctrl_idx, self.ctrl_pos = lp, list(info["alive"]), dict(info["pos_over"])
                     self.ctrl_since = int(f)
+                    self.ctrl_base = base_c
                     if self.cfg.audit_runs:
                         self._run = {"lp": lp, "fo": int(fo), "f": int(f), "S0": S0.copy(),
                                      "inflight": np.asarray(inflight, np.int64).copy(), "hold": hold_t,
@@ -2230,6 +2292,7 @@ class Map2Controller:
                 self._inc("reanchor_" + why_r)
                 if ok:
                     self.ctrl_idx, self.ctrl_pos = list(info["alive"]), dict(info["pos_over"])
+                    self.ctrl_base = {"s": int(n), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}   # (S1b)
                     cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=True,
                                                        pos_over=self.ctrl_pos)
             if not cons:
@@ -2277,10 +2340,18 @@ class Map2Controller:
             return None
         self._inc("late_slip")
         tc = time.perf_counter()
-        keys = np.array([self._sent_at(k) or 0 for k in range(int(lp.t_a) + 1, int(f) + 2)], np.int64)
+        base = self.ctrl_base if (self.cfg.late_base and self.ctrl_base is not None) else None
+        if self.cfg.late_base:
+            # M4 S1b: from the commit's own state (the keys applied since it), a Cogfly throw's keys stripped (the
+            # audit's / the keys in flight's rule: the kinematics would cast)
+            k0 = int(lp.t_a) + (int(base["s"]) if base is not None else 0) + 1
+            keys = np.array([(int(v) & ~COG if self._own_at(k) == "cog" else int(v)) if v is not None else 0
+                             for k in range(k0, int(f) + 2) for v in (self._sent_at(k),)], np.int64)
+        else:
+            keys = np.array([self._sent_at(k) or 0 for k in range(int(lp.t_a) + 1, int(f) + 2)], np.int64)
         try:
             ok, why_l, info = late_check(self.W, lp, fo, f, keys, idx, self.cfg.tol_late, pos_ref=self.ctrl_pos,
-                                         slip=slip)
+                                         slip=slip, base=base)
         except Exception as e:  # noqa: BLE001
             ok, why_l, info = False, "error", {"error": repr(e)[:200]}
         msc = (time.perf_counter() - tc) * 1e3

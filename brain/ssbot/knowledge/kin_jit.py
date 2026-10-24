@@ -50,7 +50,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
     H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD, H2_JUMP_DCD_T, P_H2, P_H2_RST,
-    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH)
+    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH, H2_SPR_FIN)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1404,8 +1404,10 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
                     x[MODE_T] = 0.0
     elif mode == M_SPRINT:
         ph = x[PHASE]
+        fin = False
         if ph == 0 and ge32(x[MODE_T], P[P_ASPR_T]):
             x[PHASE] = 1.0
+            fin = True
         ph = x[PHASE]
         wall = wall_near(x[PX], x[PY], x[FACE], P[P_SKIN] + P[P_W_CONTACT], P, TT)
         if ph <= 1:
@@ -1421,7 +1423,14 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
                 else:
                     regain_jump(x, mask, P)
             elif wall or (ph == 1 and (mask & B_DASH) == 0):
-                regain_jump(x, mask, P)   # END
+                h2f = np.int64(P[P_H2])
+                if fin and not wall and (h2f & H2_SPR_FIN) != 0 and (h2f & H2_SPR_ATK) != 0 and abuf0 > 0 and \
+                        ge32(x[MODE_T], P[P_H2_SAT]):
+                    # HERO2 M4 S1b: the Loop's entry this Update reads the attack queue before its END (the Attack
+                    # Cancel swings; sprint_cancels_h2 takes the attack: its queue test is this one)
+                    sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT)
+                else:
+                    regain_jump(x, mask, P)   # END
             elif (np.int64(P[P_H2]) & (H2_SPR_ATK | H2_SPR_JUMP)) != 0:
                 sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT)
             elif (pressed & (B_ATTACK | B_JUMP)) != 0:

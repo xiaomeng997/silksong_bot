@@ -321,7 +321,7 @@ def test_the_controller_rechecks_a_slipped_key(W, live_plan, monkeypatch):
         ctl.sent_hist[k] = int(o.cmds[k - 100])
     calls = []
 
-    def fake(W_, lp_, fo, f, keys, idx, tol, pos_ref=None, slip=None):
+    def fake(W_, lp_, fo, f, keys, idx, tol, pos_ref=None, slip=None, **kw):
         calls.append((fo, f, [int(x) for x in keys], slip))
         return False, "danger", {"s": fo - lp_.t_a}
     monkeypatch.setattr(lv, "late_check", fake)

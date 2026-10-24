@@ -699,11 +699,19 @@ H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD =
 #   H2_CLAW_SPR    the Clawline from the air sprint (env_jit.claw_allowed; M4a: at once from any air-sprint frame,
 #                  P + 3 .. P + 22, 29 / 29 - only the dash's two steps make it wait): the envelope offers it there and
 #                  the search's press check allows it (before: normal control and the umbrella's float / deflate)
+# map v2 stage M4 S1b (the verifiers' findings on S1; forum.md 101):
+#   H2_SPR_FIN     the air sprint's last L / R frame with the dash released and an attack queued: the Wait's FINISHED
+#                  -> Allow Shuttlecock -> Air Sprint Loop in that Update, whose entry reads the attack queue
+#                  (GetWasButtonPressedQueued) before its ListenForDash ends it (from its next Update) - the Attack
+#                  Cancel swings there (the show recordings: 26 of 253 clean sprint pogos pressed in the last 1 - 3
+#                  frames, DownSlashAlt on that frame); the model took END (regain) first and lost the attack
 H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END = 64, 128, 256
 H2_POGO_DASH, H2_CLAW_SPR = 512, 1024
+H2_SPR_FIN = 2048
 H2_ALL = (H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |
-          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR)
+          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR | H2_SPR_FIN)
 H2_S1 = H2_POGO_DASH | H2_CLAW_SPR      # the M4 S1 bits (SSBOT_FORUM_HERO2_OFF=1536: the hero model of M4d2)
+H2_S1B = H2_SPR_FIN                     # the M4 S1b bit (SSBOT_FORUM_HERO2_OFF=2048: S1's hero model; 3584: M4d2's)
 H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 HERO2_OFF_ENV = "SSBOT_FORUM_HERO2_OFF"  # HERO2 bits taken out (an int, default 0): the identity checks of new bits

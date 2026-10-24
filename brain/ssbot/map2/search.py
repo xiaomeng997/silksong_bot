@@ -333,7 +333,7 @@ def _rows_sig(bx, lo: int, hi: int):
 
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
              alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None,
-             claw_lock: int = -99) -> Traj:
+             claw_lock: int = -99, tops_fn=None) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
@@ -348,7 +348,11 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     previous one: claw_lock, an absolute frame, and control + 13 inside the plan) is a forced collision at its press
     (Traj.bad: the plan cannot be played from there); a down slash out of the air dash / sprint whose contact is a
     side contact (her box bottom below the body's top) is the body's contact - a forced collision at that frame, no
-    pogo (LEAD NOTE 3 (a))."""
+    pogo (LEAD NOTE 3 (a)).
+    M4 S1b (press.FREE_POGO / SHRINK / SIDE_RULE; HANDOFF 'S1b'): a press only kin's downspike lock holds is credited
+    press.FREE_MIN frames after a hooked Clawline's forced bounce (the lock's onset at its frame), press.FREE_POGO
+    after a pogo (or a start state's lock); the contact needs both alternations on the body box shrunk by press.SHRINK; the side rule is press.side_hit
+    (tops_fn(iid): the highest body top per frame - strike.union_tops - or None: the robust box's top)."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
@@ -362,6 +366,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     played = []
     last_P = None
     lock_until = int(claw_lock)      # a Clawline pressed before this frame is lost (the previous one's control + 13)
+    hook_bnc = None                  # M4 S1b: the frame of the last hooked Clawline's forced bounce (absolute)
     si = -1
     while si + 1 < len(segs):
         si += 1
@@ -389,6 +394,7 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         ev = _ev(max(n, 1))
         if pre_ev:
             ev[0] = pre_ev
+            hook_bnc = k0 + 1
         # the down slashes: contacts in order, each re-rolled with its bounce
         r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
         fac = sk.facing_track(face, masks if n else np.zeros(1, np.int64))
@@ -402,7 +408,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                 # each bounce: the events changed)
                 if kt is None:
                     kt = press.trace(W, S, masks, ev, [i_ + 1 for (i_, _) in seg.dsl])
-                ts, kind = press.ds_start(kt, t, dt=float(W.params.frame_time))
+                ts, kind = press.ds_start(kt, t, dt=float(W.params.frame_time),
+                                          hook_onset=None if hook_bnc is None else hook_bnc - k0)
                 if kind not in ("down", "lock"):
                     missed.append(("dslash:" + kind, k0 + t, iid))
                     continue
@@ -412,16 +419,24 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                 rec.append(("rows", iid, lo_, hi_, _rows_sig(bx, lo_, hi_)))
             rel = bx[k0:] if bx is not None else np.full((1, 4), np.nan)
             gnd = (r.flags[0] & km.F_GROUND) != 0
-            c = sk.dslash_contact(r.pos[0], fac, gnd, ts, rel)
+            c = sk.dslash_contact(r.pos[0], fac, gnd, ts, rel, press.SHRINK[0] if chk else 0.0)
             if c < 0:
                 missed.append(("dslash", k0 + t, iid))
                 continue
-            if chk and press.SIDE[0] and kind == "down" and press.out_of_sprint(kt, ts) and \
-                    r.box[0, c, 1] < rel[c, 3] + press.SIDE_DY:
-                # M4 S1 (LEAD NOTE 3 (a)): a side contact out of the air sprint - the body meets her first (no pogo)
-                bad.append((k0 + c, "side_spr"))
-                missed.append(("dslash:side_spr", k0 + t, iid))
-                continue
+            if chk and press.SIDE[0] and kind == "down" and press.out_of_sprint(kt, ts):
+                # M4 S1 (LEAD NOTE 3 (a)): a side contact out of the air sprint - the body meets her first (no pogo);
+                # S1b: press.side_hit (the highest top of the frame's records, the sprint's x lag)
+                tp = tops_fn(iid) if tops_fn is not None else None
+                tp_rel = tp[k0:] if tp is not None else None
+                if rec is not None:
+                    rec.append(("rows", iid, k0 + ts, k0 + c + 1, _rows_sig(bx, k0 + ts, k0 + c + 1)))
+                    if tops_fn is not None:
+                        rec.append(("tops", iid, k0 + ts, k0 + c + 1, _rows_sig(tp, k0 + ts, k0 + c + 1)))
+                kb = press.side_hit(r.pos[0], rel, tp_rel, ts, c, int(fac[ts]), r.box[0])
+                if kb >= 0:
+                    bad.append((k0 + kb, "side_spr"))
+                    missed.append(("dslash:side_spr", k0 + t, iid))
+                    continue
             ev[c - 1] |= km.EV_POGO                       # the events' index 0 = rollout index 1
             r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
             kt = None
@@ -1230,7 +1245,7 @@ class Evaluator:
             return tr
         rec: list = []
         tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
-                      lag=lag, rec=rec, claw_lock=lock)
+                      lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T))
         ent[2].append((tuple(rec), tr))
         if len(ent[2]) > 24:
             ent[2].pop(0)
@@ -1241,6 +1256,9 @@ class Evaluator:
         for r in reads:
             if r[0] == "rows":
                 if _rows_sig(sk.robust_boxes(b, r[1], T), r[2], r[3]) != r[4]:
+                    return False
+            elif r[0] == "tops":
+                if _rows_sig(sk.union_tops(b, r[1], T), r[2], r[3]) != r[4]:
                     return False
             elif reaction_key(b, r[1], lag) != r[2]:
                 return False
@@ -2119,7 +2137,9 @@ class Searcher:
         for (pm, tail, through) in cands:
             mm = np.concatenate([masks, [pm], tail]).astype(np.int64)
             kt = press.trace(self.W, node.S, mm, None, [t])
-            ts, kd = press.ds_start(kt, t, dt=dt)
+            # (S1b: a node after a hooked Clawline - its forced bounce at control + 1 is the lock's onset)
+            ts, kd = press.ds_start(kt, t, dt=dt, hook_onset=None if node.claw_ctrl is None else
+                                    int(node.claw_ctrl) + 1 - int(node.k0))
             if kd == "lock" or (kd == "down" and (ts == t or through)):
                 if through:
                     # down held only until the slash starts, then the approach's tail

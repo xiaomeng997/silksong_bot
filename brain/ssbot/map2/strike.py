@@ -153,6 +153,46 @@ def robust_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
     return lo
 
 
+def union_tops(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
+    """M4 S1b: [T + 1] the HIGHEST top of the Clapper's body over the records drawn at each frame (robust_boxes takes
+    their intersection - the lowest top - where two records of a timing view fall on one frame); NaN: none / no body.
+    The side rule's body top (press.side_hit). Cached on the branch."""
+    cache = getattr(br, "_utops", None)
+    if cache is None:
+        cache = {}
+        try:
+            br._utops = cache
+        except AttributeError:
+            pass
+    if iid in cache:
+        return cache[iid]
+    T = br.T if T is None else T
+    out = np.full(T + 1, np.nan)
+    from ssbot.map2 import brnum
+    if brnum.ON[0]:
+        A = brnum.robust_rows(br, iid, T)
+    else:
+        rows = []
+        for r in br.recs.get(iid, ()):
+            k0, a, b = r[0], r[1], r[2]
+            k_lo, k_hi = max(k0 + a, 0), min(k0 + b, T)
+            if k_lo > k_hi:
+                continue
+            bx = _rec_box(r, br.K)
+            rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
+        A = np.asarray(rows, float) if rows else None
+    if A is not None and len(A):
+        n = (A[:, 1] - A[:, 0] + 1).astype(np.int64)
+        idx = np.repeat(A[:, 0].astype(np.int64), n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
+        y1 = np.repeat(A[:, 5], n)
+        top = np.full(T + 1, -np.inf)
+        np.maximum.at(top, idx, y1)
+        ok = np.isfinite(top)
+        out[ok] = top[ok]
+    cache[iid] = out
+    return out
+
+
 def state_at(br: cm.Branch, iid: int, k: int) -> tuple | None:
     """(state, frame in state, x, y, face) of the Clapper at frame k in the branch's nominal timing (the record
     whose k is k; None if none)."""
@@ -172,14 +212,20 @@ def slash_polys(face: int) -> tuple[np.ndarray, np.ndarray]:
     return DOWN * s, DOWN_ALT * s
 
 
-def _poly_box(p: np.ndarray, b) -> bool:
+def _poly_box(p: np.ndarray, b, shrink: float = 0.0) -> bool:
+    if shrink > 0.0:
+        b = (b[0] + shrink, b[1] + shrink, b[2] - shrink, b[3] - shrink)
+        if b[0] >= b[2] or b[1] >= b[3]:
+            return False
     return cm.poly_box_hit(p, (b[0], b[1], b[2], b[3]))
 
 
-def dslash_contact(pos: np.ndarray, face: np.ndarray, ground: np.ndarray, t: int, boxes: np.ndarray) -> int:
+def dslash_contact(pos: np.ndarray, face: np.ndarray, ground: np.ndarray, t: int, boxes: np.ndarray,
+                   shrink: float = 0.0) -> int:
     """The first frame c in t + 3 .. t + 9 where both slash alternations at her transform pos[c] meet the robust box
     boxes[c] ([T, 4], NaN rows = none) - each alternation's first contact, the later of the two; -1 when either misses
-    (or she lands first: the swing ends)."""
+    (or she lands first: the swing ends). M4 S1b shrink: the box shrunk by this on every side (a contact needs that
+    much overlap: press.SHRINK)."""
     n = len(pos)
     first = [-1, -1]
     for c in range(t + DS_ACTIVE[0], min(t + DS_ACTIVE[1], n - 1) + 1):
@@ -189,7 +235,7 @@ def dslash_contact(pos: np.ndarray, face: np.ndarray, ground: np.ndarray, t: int
             continue
         pa, pb = slash_polys(int(face[c]))
         for i, p in enumerate((pa, pb)):
-            if first[i] < 0 and _poly_box(p + pos[c], boxes[c]):
+            if first[i] < 0 and _poly_box(p + pos[c], boxes[c], shrink):
                 first[i] = c
         if first[0] >= 0 and first[1] >= 0:
             return max(first)
@@ -348,7 +394,7 @@ def facing_track(face0: int, masks: np.ndarray) -> np.ndarray:
     return f
 
 
-__all__ = ["DOWN", "DOWN_ALT", "DS_ACTIVE", "DS_IFR", "SLASH_NEXT_F", "HOOK_HIT_F", "HOOK_VARIANTS", "HookVariant",
+__all__ = ["union_tops", "DOWN", "DOWN_ALT", "DS_ACTIVE", "DS_IFR", "SLASH_NEXT_F", "HOOK_HIT_F", "HOOK_VARIANTS", "HookVariant",
            "Hook", "robust_boxes", "state_at", "dslash_contact", "dslash_region", "claw_region", "ray_meets",
            "claw_hook", "control_state", "facing_track", "centre_of", "hold_bb", "CTR_DY", "FOOT", "HALF_H",
            "HOOK_BODY_OFF", "hook_body_off"]

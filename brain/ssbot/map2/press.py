@@ -29,6 +29,25 @@ frames later with the keys held then, a side slash once down is let go; a Clawli
 
 Switches (module level, the live worker and the bot set them from LiveCfg): ON (press_check), SIDE (side_spr); both off:
 the search of M4d2.
+
+M4 S1b (the two verifiers' findings on S1; HANDOFF 'Task map2 - stage M4' / 'S1b', forum.md 101; LiveCfg free_pogo,
+ds_shrink, side_rule / side_lag, spr_xvx - their S1 values give S1's search):
+- the lock credit by the bounce's cause (finding presses 1): after a down slash POGO the game's downSpikeRecovery runs
+  9 - 11 frames (2,465 airborne pogo bounces of the show recordings: 9 253, 10 462, 11 466; 17 - 23: 66), after a
+  hooked Clawline's forced bounce 1 frame (54 / 54; slashes pressed 10 - 12 frames after it all started, 0 - 1 frame
+  late): a press only kin's lock holds is credited FREE_POGO (12) frames after a pogo onset, FREE_MIN (10) after the
+  hook's (ds_start's hook_onset: the frame of the hook's forced bounce - simulate's own, the realizer's node after a
+  Clawline - is the lock's onset; a start state's running lock counts as a pogo's).
+- the contact's slack (finding presses 2): both alternations must meet the robust body box SHRUNK by SHRINK (0.05 u)
+  on every side - a contact on a sliver (1e-5 u^2 in a committed plan) is not a pogo (her model x is good to 0.01 -
+  0.1 u); the danger checks keep the full (grown) boxes.
+- the side rule (findings presses 3, others 1 / 2): out_of_sprint's extra-velocity clause only while |XVX| >= XVX_MIN
+  (1 u/s; the residue 0.01 - 0.1 u/s of an earlier cancel is not 'out of the sprint'); the body's top is the HIGHEST
+  of the records drawn at that frame (strike.union_tops; robust_boxes intersects them); SIDE_RULE 'lag' (default):
+  the body meets her first when her hurtbox, carried SIDE_LAG (0.5 u: her model x in the sprint lags the recording by
+  0.1 - 0.5 u, airceil stage2b 5) further in her travel direction, overlaps the body box at a frame from the slash's
+  start to its contact - 'top' (S1's rule with the highest top): her box bottom below the body's top at the contact;
+  'top0': S1's rule as it was (the robust box's top).
 """
 from __future__ import annotations
 
@@ -46,7 +65,13 @@ from ssbot.knowledge.kinematics import (
 ON = [True]
 SIDE = [True]
 LOOK = 7                  # frames after a press its slash may still start (the 0.1 s attack queue: f + 1 .. f + 7)
-FREE_MIN = 10             # frames after a pogo onset before the game starts a down slash (airceil: 0 / 657 earlier)
+FREE_MIN = 10             # frames after a hooked Clawline's forced bounce before kin's lock is lifted (M0: the attack
+#                           cooled to control + 10 / 11; the game's recovery 1 f there - S1b: 54 / 54)
+FREE_POGO = [12]          # M4 S1b: the same after a down slash POGO (the game's recovery 9 - 11 f in 95 %; S1: 10)
+SHRINK = [0.05]           # M4 S1b: a down slash contact must meet the body box shrunk by this (u) on every side (S1: 0)
+SIDE_RULE = ["lag"]       # M4 S1b: the side rule out of the air sprint - 'lag' / 'top' / 'top0' (S1), module docstring
+SIDE_LAG = [0.5]          # M4 S1b: her lead in the travel direction the 'lag' rule allows for (u)
+XVX_MIN = [1.0]           # M4 S1b: the sprint's retained extra velocity counts from this |XVX| (u/s; S1: any non-zero)
 SIDE_DY = 0.0             # a contact with her box bottom below the body's top + SIDE_DY is a side contact
 CLAW_LOCK_F = 13          # a Clawline from a previous one's control + 13 (env_jit.CLAW_NEXT_F; M0 9 / 9 at + 13)
 
@@ -133,25 +158,69 @@ def started(kt: np.ndarray, t: int) -> bool:
     return bool(kt[t, C_ATK] > 0 and kt[t, C_ATKT] == 0.0 and not (kt[t, C_ATK0] > 0 and kt[t, C_ATKT0] == 0.0))
 
 
-def ds_start(kt: np.ndarray, t: int, look: int = LOOK, dt: float = 1.0 / 60.0) -> tuple:
+def ds_start(kt: np.ndarray, t: int, look: int = LOOK, dt: float = 1.0 / 60.0, free_min: int | None = None,
+             hook_onset: int | None = None) -> tuple:
     """(rollout index of the start, kind) of a down slash pressed at rollout index t: 'down' (a down slash starts at
     t .. t + look: the first attack that starts there), 'side' (that attack is not a down slash), 'lock' (none starts
-    and kin's downspike lock alone held it at t, FREE_MIN frames or more after the pogo onset: credited at t), 'early'
-    (the same inside the game's recovery: < FREE_MIN frames), 'none'."""
+    and kin's downspike lock alone held it at t, free_min frames or more after the bounce's onset: credited at t),
+    'early' (the same inside the game's recovery: < free_min frames), 'none'. S1b: free_min (unless given) is
+    FREE_MIN when the lock's onset (t - its age) is a hooked Clawline's forced bounce - hook_onset, its rollout index
+    (<= 0: before the trace), within a frame - else FREE_POGO[0] (a pogo's, or a start state's running lock)."""
     n = len(kt) - 1
     for t2 in range(t, min(t + look, n) + 1):
         if started(kt, t2):
             return (t2, "down") if kt[t2, C_PDIR] == 2.0 else (t2, "side")
     if 1 <= t <= n and kt[t, C_UNL] > 0 and (kt[t, C_BNC] >= 0 or kt[t, C_DSR] >= 0):
         since = kt[t, C_DSR] / dt if kt[t, C_DSR] >= 0 else 99.0
-        return (t, "lock") if since >= FREE_MIN - 0.5 else (t, "early")
+        fm = free_min
+        if fm is None:
+            hook = hook_onset is not None and kt[t, C_DSR] >= 0 and abs((t - since) - hook_onset) <= 1.5
+            fm = FREE_MIN if hook else FREE_POGO[0]
+        return (t, "lock") if since >= fm - 0.5 else (t, "early")
     return t, "none"
 
 
 def out_of_sprint(kt: np.ndarray, t: int) -> bool:
     """A slash started at rollout index t out of the air dash / sprint: its Attack Cancel (her mode before the
-    Update the air sprint or the dash) or with the sprint's retained extra velocity on (HERO2 H2_SPR_ATK)."""
-    return bool(int(kt[t, C_MODE]) in (km.M_SPRINT, km.M_DASH) or kt[t, C_XVX] != 0.0)
+    Update the air sprint or the dash) or with the sprint's retained extra velocity on (HERO2 H2_SPR_ATK) - S1b: from
+    |XVX| >= XVX_MIN[0] (XVX_MIN 0: any non-zero, S1)."""
+    if int(kt[t, C_MODE]) in (km.M_SPRINT, km.M_DASH):
+        return True
+    xv = abs(float(kt[t, C_XVX]))
+    return bool(xv != 0.0 and xv >= XVX_MIN[0])
+
+
+def side_hit(pos: np.ndarray, rel: np.ndarray, tops, ts: int, c: int, face: int, hb: np.ndarray) -> int:
+    """M4 S1b: the side rule for a down slash out of the air dash / sprint started at rollout index ts with its
+    contact at c (pos: her transforms, hb: her kin boxes per rollout index; rel: the robust body boxes from the
+    segment's start; tops: the highest top of the records per frame (strike.union_tops, from the segment's start) or
+    None; face: her travel direction): the rollout index where the body meets her first, -1: a pogo. SIDE_RULE:
+    'top0' / 'top' - her box bottom below the robust / the highest top at c (S1's rule: at c); 'lag' - her hurtbox
+    carried SIDE_LAG[0] further in her travel direction overlaps the body (its x range, the highest top, its bottom)
+    at a frame ts .. c (the first such frame)."""
+    from ssbot.map2 import clapper as cm
+    rule = SIDE_RULE[0]
+
+    def top_at(k):
+        if tops is not None and k < len(tops) and np.isfinite(tops[k]):
+            return float(tops[k])
+        return float(rel[k, 3])
+    if rule in ("top0", "top"):
+        tp = float(rel[c, 3]) if rule == "top0" else top_at(c)
+        return c if hb[c, 1] < tp + SIDE_DY else -1
+    lag = SIDE_LAG[0]
+    d = 1 if face >= 0 else -1
+    for k in range(max(ts, 0), c + 1):
+        if k >= len(rel) or np.isnan(rel[k, 0]):
+            continue
+        x0, y0, x1, y1 = cm.hurtbox(float(pos[k, 0]), float(pos[k, 1]))
+        if d > 0:
+            x1 += lag
+        else:
+            x0 -= lag
+        if y0 < top_at(k) and y1 > rel[k, 1] and x0 < rel[k, 2] and x1 > rel[k, 0]:
+            return k
+    return -1
 
 
 def claw_state_ok(kt: np.ndarray, t: int, P) -> bool:
@@ -172,5 +241,5 @@ def state_name(kt: np.ndarray, t: int) -> str:
     return f"{km.MODE_NAMES[int(kt[t, C_MODE])]}{int(kt[t, C_PH])}"
 
 
-__all__ = ["ON", "SIDE", "LOOK", "FREE_MIN", "trace", "started", "ds_start", "out_of_sprint", "claw_state_ok",
-           "state_name", "CLAW_LOCK_F"]
+__all__ = ["ON", "SIDE", "LOOK", "FREE_MIN", "FREE_POGO", "SHRINK", "SIDE_RULE", "SIDE_LAG", "XVX_MIN", "trace",
+           "started", "ds_start", "out_of_sprint", "side_hit", "claw_state_ok", "state_name", "CLAW_LOCK_F"]
