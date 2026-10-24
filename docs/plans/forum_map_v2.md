@@ -473,6 +473,17 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   recorded two-Clapper situations whether the value prefers it; a disagreement means a missing mechanic (find it) or
   a horizon too short (rule 4 may need seconds: then a longer-term position term). Next stage after the A1_n tables
   are in the search.
+  PREDICT ITS AIM AND STEER IT (the person, 2026-10-24: 'predicting the Clapper's aim timing and steering it into its
+  moves belongs to the 180 f process'): today the model has the aim rules (FaceObject at every state start; Close /
+  Far by her position - <= 8.05 u slam / evade / cast, else jump / cast / jump cast, a hook's reaction by her throw
+  position; the Jump Aim at her x - 5 x its facing; the V4 memory; the buddy lock) and the search uses them only
+  implicitly - each candidate's path goes into predict() within the plan's ~1 - 2 s - with one hand term
+  (facing-to-the-wall). The long-term planner does it on purpose: (1) predict each Clapper's next decision / aim
+  frames from its state's timers; (2) for her candidate positions at those frames, the resulting choice distribution
+  and the jump's landing spot, each valued by the long-term value (room + strike opportunities); (3) the best place
+  at that frame becomes an AIM NODE of the funnel, given to the strike planner with the escape nodes - e.g. inside
+  8.05 u at its choice frame to draw a slam (a window), its jump's landing drawn to the middle / under her for a ride
+  / out of the corner. Part of the person's two-Clapper rules may come out of exactly this.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
