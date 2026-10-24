@@ -44,7 +44,7 @@ Attributions '(the person, date)' mark the person's ideas and decisions; '(the l
 | L1 Clapper 模型 | 做好、map2 开着就在用；录像里 92-93 % 能找到真实分支；叠加层眼看一直没做 | 你定：下次实机前还要不要眼看（Q1） |
 | 主角模型 HERO2 | 做好，默认关，map2 会打开它；928 次实测 899 次误差 < 0.1 u | 下劈恢复锁、冲刺侧面接触等几处待实机探针 |
 | M1 包络引擎 | 做好、在用；随机按键 0 次逃出包络 | — |
-| A1_n 递归表 | 做好、和引擎逐帧一致；开关默认关（实战状态不重复，实机反而更慢）。两个验证者 10-24 上午跑完；T4 正在跑：修了它们找到的问题（4 次提交，库已重建），验收还在跑、没报告 | 等 T4 报告；"状态重复"的修复你定了放后面 |
+| A1_n 递归表 | 做好、和引擎逐帧一致；开关默认关。T4（10-24 下午做完）修了验证者的 20 条后，开表的搜索在离线实测里第一次领先：1 秒内找到的招 164→183、156→181，0.25 秒 76→87；回放里 w7 掌控 33.1%→35.3%，0 碰撞、0 无效按键。但 0.15 秒的短决策仍落后，长查询（多动作长时间）开了更差 | 实机开不开表你定（Q5）；冻结代码 live_1v1_499df40 |
 | 搜索 L3 | 做好、在用；w7 第一个安全计划 p90 119 ms；1 秒约达 60 秒价值的 75 % | 评估加速（逃生漏斗、每招每帧危险、窗口形状）；T4 已有漏斗和 eps(k) 的中期试验 |
 | 实机控制 | 做好（SSBOT_FORUM_MAP2，默认关）；回放审计 0 碰撞；w7 掌控约 33 % | 交接（丢计划规则、动作中途重规划、半途出招时的兜底、没预测到的钩子反应）；"计划当管道"算不算在 E2 里，来源不一致（Q24） |
 | 评估/交接流程 ev | 脚本已写好，还没启动（只写了进度文件的开头一行）：等 T4 结束、你看过这份文档再启动 | E1 先读 T4 的漏斗和 eps(k) 中期结果、在其上继续（Q20 已定） |
@@ -1350,6 +1350,12 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   T1 - T3 measured a non-converging memo with no live speed-up. Does the A1_n design remain the L2 target (with the
   state-recurrence fix: a per-node terrain clearance, a shared memory-mapped library - only in T3's open items) or does
   the M1 engine stay the live envelope? The person deferred the fix (10-24) without saying which is the target.
+  T4 FINAL (10-24 afternoon, HANDOFF T4 / forum.md 106, 8bf5a59): after the 20 verifier fixes the tables-on search LEADS
+  offline for the first time - found at 1 s 164 -> 183 and 156 -> 181, at 0.25 s 76 -> 87, every source group up; the
+  strict smoke share w7 33.1 -> 35.3 % (T3 had 32.6 -> 23.0), w13 4.2 -> 5.2 %, 0 collisions, 0 invalid presses in
+  1,091 plans; still behind at 0.15 s decisions (lock contention with the background pass), the long pass worse at
+  every budget (keep it off), first safe plan 68 / 186 -> 73 / 192 ms. Frozen checkout C:\ssbot\live_1v1_499df40. Turning
+  `tables=1` on live is the person's decision.
 - Q6 B(window shape, end table) precomputed (the person, 10-24: 'the bridge check becomes a lookup') vs T2: with the
   danger touching her within ~8 f the chain is needed anyway; the backward set over the chain is cheap and exact
   without the float's inertia, an upper bound with it (Back.exact, T4); T3 did not wire backward sets because the
@@ -1361,13 +1367,17 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   384 / 420, 899 / 928); an interim per-k fit exists in T4's data (a1n/t4/funnel/eps.json: the M0 + M4a trials, a
   sync every 6 f, p99 0.031 u at k 1 .. 2.59 u at k 60, per experiment type too) but is not reported; the live
   tolerances (tol_hero 0.2, tol_x 0.35, tol_j +-1, tol_commit 0.2, tol_reanchor 0.5, tol_repair 0.3, tol_late 0.5,
-  dev_gap 6) are guesses (M4b open item 2); the tube design replaces them. Which measurement defines eps(k) (per action
-  type, frames since a sync) is open until T4 reports.
+  dev_gap 6) are guesses (M4b open item 2); the tube design replaces them. T4 FINAL: eps(k) p99 0.03 u at 1 f, 0.51 at
+  10 f, 1.24 at 30 f, 2.6 - 2.8 u from 60 f (p90 <= 0.02 u) - the far tail is wide; per action type still to be split.
 - Q9 'THE DANGER PER CLAPPER MOVE / FRAME' (the person's 10-24 item for E1) is not described in the spec or the stage
   reports - its design is not in the sources.
 - Q10 THE FUNNEL'S PARAMETERS: 120 or 180 f, how many branches per decision, and how it meets the 'dev' end (S6's proper
   fix: the exit's keys as the plan's own tail) are not fixed; nor whether its 'inside' uses Back.exact or a forward
-  confirmation where the backward set is only an upper bound (the float, T4).
+  confirmation where the backward set is only an upper bound (the float, T4). T4 FINAL (707 funnels): forward 4.2 ms
+  warm vs the engine 23.7, backward 0.4 ms, 486 exact; but 407 / 570 open funnels CLOSE under the measured eps(k) (half
+  by frame 30), and against the exit checks on 3,260 endpoints: agree 2,538, exit-only 678 (the funnel too strict), funnel-
+  only 44 (must be explained before any use). So ONE funnel per decision cannot replace the exit checks yet; T4
+  proposes a funnel per beam node (~5 ms each warm) - E1 takes it from there, with the safety valve (3.3.4).
 - Q11 THE SCORE'S WEIGHTS: 'a score far below any normal one (e.g. worth many hits)' - no number; until the planner
   exists the value is M3's hand terms.
 - Q12 THE ORDER OF THE LONG-TERM PLANNER: the spec says 'next stage after the A1_n tables are in the search' (they are,
@@ -1468,7 +1478,7 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
    handover - the drop rule on a one-frame shift together with the plan as a tube (3.4.8), re-plan from mid-action (the
    swing in progress at the root, the busy rule after a drop), the fallback mid-swing, the unpredicted hook reaction;
    E1 / E2 also measure whether a faster search or responses prepared before the reveal close the reveal gap (3.5);
-   two verifiers; E3 fixes + a frozen checkout. T4 [RUNNING] finishes first.
+   two verifiers; E3 fixes + a frozen checkout. (T4 finished 10-24 afternoon - Q5, Q8, Q10.)
 2. THEN the person decides on the next live gate (Q1, Q2) [P-ev].
 3. LATER (the person, 2026-10-24): the tables' state-recurrence fix (Q5).
 4. Decided in scope, not yet ordered by the person (Q12, Q13): the reflex reduced to the latency-gap windows and
