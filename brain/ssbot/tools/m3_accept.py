@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pickle
 import sys
 import time
@@ -35,6 +36,9 @@ from ssbot.tools import m2_validate as mv
 from ssbot.tools.m2_clapper import DATA as M2DATA, idle_priority
 
 OUT = Path(r"C:\ssbot\data\m2_play\map2\m3")
+SITS_DIR = OUT                          # (the situations: m3/sits.pkl)
+# T3: the runs' / reports' directory (SSBOT_M3_OUT; default m3 itself)
+RUN_OUT = Path(os.environ.get("SSBOT_M3_OUT", str(OUT)))
 MOVE_LABEL = {"P1-idle": ("P1-idle",), "P1-idle-slam": ("P1-idle-slam",), "P1-idle-evade": ("P1-idle-evade",),
               "P1-far-jump": ("P1-far-jump",), "P1-far-jcast": ("P1-far-jcast",), "P1-slam": ("P1-slam",),
               "P1-cast": ("P1-cast",), "P1-jump": ("P1-jump",),
@@ -390,6 +394,8 @@ def _run_one(args) -> dict:
             _W = ms.World()
     cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else (),
                  **extra.get("cfg", {}))
+    if getattr(cfg, "tables", False):
+        _W.table_lib(cfg.tables_file, cfg.tables_budget)     # (T3: loaded once per worker, before the timed decision)
     S = ms.Searcher(_W, cfg)
     if extra.get("part") is not None:
         S.part = tuple(extra["part"])                 # M4b: one part of a split search
@@ -624,7 +630,8 @@ def cmd_run(a) -> int:
     res = []
     # every result as a line as it comes (M4a: a run whose pool lost its workers hung with 231 / 236 results in
     # memory): --resume takes the finished ones from it and runs the rest
-    part = OUT / f"run_{a.lib}{a.tag}.partial.jsonl"
+    RUN_OUT.mkdir(parents=True, exist_ok=True)
+    part = RUN_OUT / f"run_{a.lib}{a.tag}.partial.jsonl"
     done = {}
     if a.resume and part.exists():
         for line in part.read_text("utf-8").splitlines():
@@ -688,7 +695,7 @@ def cmd_run(a) -> int:
     if a.split > 1:
         res = merge_split(res)
     res.sort(key=lambda r: r["i"])
-    out = OUT / f"run_{a.lib}{a.tag}.json"
+    out = RUN_OUT / f"run_{a.lib}{a.tag}.json"
     out.write_text(json.dumps(res, indent=1, default=str), "utf-8")
     print(f"done {len(res)} in {time.time() - t0:.0f}s -> {out}")
     return 0
@@ -778,11 +785,11 @@ def report_runs(runs: dict) -> str:
 def cmd_report(a) -> int:
     runs = {}
     for lib in ("none", "full"):
-        p = OUT / f"run_{lib}{a.tag}.json"
+        p = RUN_OUT / f"run_{lib}{a.tag}.json"
         if p.exists():
             runs[lib] = json.loads(p.read_text("utf-8"))
     txt = report_runs(runs)
-    (OUT / f"report{a.tag}.txt").write_text(txt, "utf-8")
+    (RUN_OUT / f"report{a.tag}.txt").write_text(txt, "utf-8")
     print(txt)
     return 0
 

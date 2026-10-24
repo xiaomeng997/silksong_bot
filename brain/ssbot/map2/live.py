@@ -265,6 +265,16 @@ class LiveCfg:
     side_lag: float = 0.5
     spr_xvx: float = 1.0           # press.XVX_MIN: 'out of the sprint' by the retained extra velocity from |XVX| (u/s);
     #                                S1: 0 (any non-zero - 40 frames of residue after a cancel)
+    # T3 (HANDOFF 'Task map2 - A1_n recursive tables - stage T3'): the workers' envelope passes (the approach passes
+    # and the exit checks) from the A1_n table library (search.Cfg.tables: the same clusters as the engine's pass) -
+    # off: the M1 engine (bit-identical); tables_file ('' T2's search library; 'warm' / a path: search.tables_file),
+    # tables_budget (the library's growth in nodes before it is reset at a search's start; ~4.6 kB a
+    # node); passes: the approach passes 'events:frames[:t_from]/...' ('' = the search's (1, 60), (2, 30); e.g.
+    # '1:60/2:30/1:120:60' adds the long 1-event pass over 2 s whose windows start after frame 60)
+    tables: bool = False
+    tables_file: str = ""
+    tables_budget: int = 400000
+    passes: str = ""
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -1211,6 +1221,18 @@ class _Searcher(ms.Searcher):
         return t + 1.0e6 if (f is not None and f()) else t
 
 
+def search_kw(cfg: LiveCfg) -> dict:
+    """The worker's search.Cfg.live overrides from the live configuration (the lag; T3: the tables, the passes)."""
+    kw: dict = {}
+    if cfg.search_lag > 0:
+        kw["lag"] = int(cfg.search_lag)
+    if cfg.tables:
+        kw.update(tables=True, tables_file=str(cfg.tables_file), tables_budget=int(cfg.tables_budget))
+    if cfg.passes:
+        kw["passes"] = tuple(tuple(int(v) for v in x.split(":")) for x in str(cfg.passes).split("/") if x.strip())
+    return kw
+
+
 def build_prefix(snap: dict) -> tuple:
     """The snapshot's commands (in flight + bridge) through the hold filter -> (Seg of latched masks with the down
     slash presses of the plan in control, '') or (None, why) when a press the search cannot place is in flight (the
@@ -1486,7 +1508,20 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     except Exception as e:  # noqa: BLE001
         boost += f", numba threads unchanged ({e})"
     W = ms.World()
-    S = _Searcher(W, ms.Cfg.live(**({"lag": int(cfg.search_lag)} if cfg.search_lag > 0 else {})))
+    S = _Searcher(W, ms.Cfg.live(**search_kw(cfg)))
+    lib_gb = 0.0
+    if cfg.tables:
+        # T3: the table library before the warm-up (3 - 10 s; its compiled chain warmed by the warm-up's searches)
+        try:
+            import psutil
+            r0 = psutil.Process().memory_info().rss
+            lib = W.table_lib(cfg.tables_file, cfg.tables_budget)
+            lib_gb = (psutil.Process().memory_info().rss - r0) / 2 ** 30
+            boost += (f", tables {ms.TABLE_STATS.get('file', '')} {lib.n_nodes if lib is not None else 'refused'} "
+                      f"nodes {lib_gb:.1f} GB")
+            lib_gb += max(0, int(cfg.tables_budget)) * 5.0e3 / 2 ** 30      # (its growth budget: ~4.6 kB a node)
+        except Exception as e:  # noqa: BLE001 - the engine's passes then
+            boost += f", tables failed ({e!r})"[:200]
     if nparts > 1:
         S.part = (part, nparts)
     t0 = time.perf_counter()
@@ -1638,7 +1673,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
         if cfg.mem_gb > 0:
             try:
                 import psutil
-                if psutil.Process().memory_info().rss > cfg.mem_gb * 2 ** 30:
+                if psutil.Process().memory_info().rss > (cfg.mem_gb + lib_gb) * 2 ** 30:
                     out_q.put({"kind": "exit", "part": part, "why": "memory"})
                     return
             except Exception:  # noqa: BLE001

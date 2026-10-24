@@ -49,6 +49,13 @@ candidates or on a background thread (Cfg.pass2_after / pass2_bg), the noop's ev
 (Cfg.reuse_root / defer_noop), a split search over processes (Searcher.part). The per-frame check of a committed plan
 on the bot's thread is TickCheck; tick_check is the full check from a new observation.
 
+THE A1_n TABLES AS THE ENVELOPE (stage T3; HANDOFF 'Task map2 - A1_n recursive tables - stage T3'; default off):
+Cfg.tables - the approach passes and the exit checks from the table library (World.envelope -> tables.Lib.forward with
+the air dash bridge: the engine's clusters, its Fwd queries and witnesses; the engine when the library is busy on the
+other thread or her state has no table), the library loaded once per process and reset to its loaded state when it has
+grown past Cfg.tables_budget nodes at a decision's start (it does not converge: every decision meets new exact states).
+Cfg.passes may hold a LONG pass (events, frames, t_from) whose windows start after t_from.
+
 Frames: game frames from the decision (0 = now); a plan's masks apply to frames 1 .. n (kin_jit's latched masks).
 Positions: her transform (kin pos) for the Clapper model and the slash polygons, her box centre for the envelope;
 u world units, centre to centre.
@@ -57,6 +64,7 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -94,7 +102,9 @@ WALL_BOXES = np.array([(-1.0e4, -1.0e4, WALL_L + sk.HALF_W, 1.0e4), (WALL_R - sk
 
 @dataclass
 class Cfg:
-    passes: tuple = ((1, 60), (2, 30))     # the approach passes: (event limit, frames)
+    passes: tuple = ((1, 60), (2, 30))     # the approach passes: (event limit, frames); T3: (event limit, frames,
+    #                                        t_from) - a LONG pass whose windows are taken after frame t_from only (the
+    #                                        shorter passes have the earlier ones), e.g. (1, 120, 60)
     exit_h: int = 40                       # the coarse exit check's frames
     exit_h_max: int = 180                  # ... stretched to a big rune's last lit frame (a jump cast's burst lights
     #                                        ~65 - 72 f after its landing: the spec's 3 s while a jump cast is on)
@@ -149,6 +159,16 @@ class Cfg:
     #                                        the node's start and join when done (the order then depends on time)
     safe_ts: tuple = ()                    # M4b: safe endpoints also at these frames of the first pass (before its
     #                                        end's; a short plan is ready sooner and keeps its exits more often)
+    # T3 (HANDOFF 'Task map2 - A1_n recursive tables - stage T3'): THE A1_n RECURSIVE TABLES AS THE ENVELOPE - the
+    # approach passes and the exit checks come from the table library (ssbot.map2.tables: the no-dash chain + the air
+    # dash bridge, merged as the engine merges; T1 / T2: the same clusters as the engine's pass, exact) instead of the
+    # engine's per-frame physics; the witnesses from the chain's back-pointers (the same Fwd queries). Off: the M1
+    # engine as before (bit-identical). tables_file: '' = T2's search library (tables_file()), 'warm' / a path
+    tables: bool = False
+    tables_file: str = ""
+    tables_budget: int = 400_000           # the nodes the library may grow by (lazy expansions: it does not converge -
+    #                                        10 - 200 k new nodes per decision on the recorded w7 situations, ~4.6 kB
+    #                                        each) before it is reset to its loaded state at a decision's start; 0: never
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -201,6 +221,96 @@ class World:
             m = np.zeros(1, np.int64)
         ev = None if events is None else np.asarray(events, np.int64)[None]
         return km.rollout(S0, m[None], self.params, self.terr, events=ev)
+
+    def table_lib(self, name: str = "", spare: int = 400_000):
+        """T3: the search's A1_n table library (loaded once per process, shared by every World; checked against this
+        World's hero model and terrain). None when it cannot be used here (another hero model: SSBOT_FORUM_HERO2_OFF;
+        no file) - the passes then stay the engine's."""
+        lib = self.__dict__.get("_lib", False)
+        if lib is False:
+            lib = None
+            try:
+                lib = table_lib(name, spare)
+                if not (np.array_equal(lib.P, self.E.P) and np.array_equal(lib.TTg, self.TT) and
+                        lib.udt == self.E.udt):
+                    TABLE_STATS["refused"] = TABLE_STATS.get("refused", 0) + 1
+                    TABLE_STATS["refused_why"] = "hero model / terrain"
+                    lib = None
+            except (OSError, ValueError) as e:
+                TABLE_STATS["refused"] = TABLE_STATS.get("refused", 0) + 1
+                TABLE_STATS["refused_why"] = repr(e)[:200]
+                lib = None
+            self.__dict__["_lib"] = lib
+        return lib
+
+    def envelope(self, S: np.ndarray, H: int, danger, max_events: int, cu=None, par: int = 0, tables: bool = False,
+                 blocking: bool = True, name: str = ""):
+        """One envelope pass from her exact state S over H frames in the danger (the search's: the air dash in, no
+        Clawline, the arena's floor and ceiling): with tables (T3) the A1_n chain (tables.Lib.forward with the dash
+        bridge: the engine's clusters, its Fwd queries), else - or when the library is busy on another thread and
+        blocking is False, or her state has no table (a time scale / world freeze) - the M1 engine."""
+        if tables and S[km.TS] == 1.0 and S[km.WF_S] == 1.0:
+            lib = self.table_lib(name)
+            if lib is not None:
+                t0 = time.perf_counter()
+                fw = lib.forward(S, H, danger=danger, floor=True, maxev=max_events, cu=cu, dash=True,
+                                 blocking=blocking)
+                if fw is not None:
+                    _tstat("passes", (time.perf_counter() - t0) * 1e3, fw)
+                    return fw
+                TABLE_STATS["busy"] = TABLE_STATS.get("busy", 0) + 1
+            else:
+                TABLE_STATS["no_lib"] = TABLE_STATS.get("no_lib", 0) + 1
+        st = self.E.start_state(S, cu=cu)
+        return self.E.forward(st, H, danger=danger, terrain=self.TT, max_events=max_events, claw=False, par=par)
+
+
+# T3: the table libraries of this process (path -> tables.Lib), the counters of the passes made from them
+_LIBS: dict = {}
+_LIBS_LOCK = threading.Lock()
+TABLE_STATS: dict = {}
+
+
+def _tstat(k: str, ms_: float, fw) -> None:
+    TABLE_STATS[k] = TABLE_STATS.get(k, 0) + 1
+    TABLE_STATS[k + "_ms"] = TABLE_STATS.get(k + "_ms", 0.0) + ms_
+    ls = getattr(fw, "lib_stats", None) or {}
+    if ls.get("expanded"):
+        TABLE_STATS["cold"] = TABLE_STATS.get("cold", 0) + 1
+        TABLE_STATS["expanded"] = TABLE_STATS.get("expanded", 0) + int(ls["expanded"])
+
+
+def tables_file(name: str = ""):
+    """The search's table library file (the Clawline out, the arena's floor and ceiling - the search's passes): ''
+    or 'base' T2's build (knowledge/.../a1n_tables_v1_arena_noclaw.npz: the depth-6 core and the nodes of the
+    search's passes from the canonical and the recorded starts, 815 k nodes), 'warm' a library grown further and saved
+    as ..._warm.npz (none is shipped: T3 - it does not converge and costs ~4.6 kB a node in each worker); anything
+    else a path."""
+    from pathlib import Path
+    from ssbot.map2 import tables as tb
+    base = tb.tables_path(claw=False, terrain="arena")
+    if name in ("", "base"):
+        return base
+    if name == "warm":
+        return base.with_name(base.stem + "_warm.npz")
+    return Path(name)
+
+
+def table_lib(name: str = "", spare: int = 400_000):
+    """The table library of this process (loaded once: 3 - 10 s, ~4 kB a node with its edges), with room for spare
+    more nodes (the growth budget: no reallocation before a reset) and its state marked (Lib.reset returns to it)."""
+    p = tables_file(name)
+    with _LIBS_LOCK:
+        lib = _LIBS.get(str(p))
+        if lib is None:
+            from ssbot.map2 import tables as tb
+            t0 = time.perf_counter()
+            lib = tb.Lib.load(p, spare=spare)
+            lib.mark()
+            TABLE_STATS["load_s"] = round(time.perf_counter() - t0, 2)
+            TABLE_STATS["file"] = str(p)
+            _LIBS[str(p)] = lib
+        return lib
 
 
 @dataclass
@@ -1416,16 +1526,17 @@ class Evaluator:
                 if not PROBE_VERIFY[0]:
                     self.ms_exit += (time.perf_counter() - t0) * 1e3
                     return 1
-                st = self.W.E.start_state(S, cu=cu)
-                fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=self.cfg.exit_events,
-                                      claw=False)
+                fw = self.W.envelope(np.asarray(S, np.float64), H, dz, self.cfg.exit_events, cu=cu,
+                                     tables=self.cfg.tables, blocking=False, name=self.cfg.tables_file)
                 PROBE_STATS["checked"] += 1
                 if fw.count(H) <= 0:
                     PROBE_STATS["violations"] += 1
                 self.ms_exit += (time.perf_counter() - t0) * 1e3
                 return fw.count(H)
-        st = self.W.E.start_state(S, cu=cu)
-        fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=self.cfg.exit_events, claw=False)
+        # (T3: the tables' chain when the library is free - the background pass may hold it: then the engine, the
+        # same clusters)
+        fw = self.W.envelope(np.asarray(S, np.float64), H, dz, self.cfg.exit_events, cu=cu, tables=self.cfg.tables,
+                             blocking=False, name=self.cfg.tables_file)
         self.ms_exit += (time.perf_counter() - t0) * 1e3
         return fw.count(H)
 
@@ -1750,6 +1861,14 @@ def _alive(pred) -> list:
     return sorted(iids)
 
 
+def _long_pass(W: "World", t_from: int, args: tuple, kw: dict):
+    """One approach pass; T3: a long pass's windows start after frame t_from (Searcher.windows)."""
+    fw = W.envelope(*args, **kw)
+    if t_from > 0:
+        fw.t_from = t_from
+    return fw
+
+
 _BG: list = []
 
 
@@ -1811,18 +1930,19 @@ class Searcher:
         bo = None
         if node.claw_ctrl is not None and node.hook_iid is not None:
             bo = (node.hook_iid, node.claw_ctrl + sk.HOOK_BODY_OFF[1])
-        for pi, (ne, H) in enumerate(self.cfg.passes):
+        for pi, pz in enumerate(self.cfg.passes):
             if which is not None and pi not in which:
                 continue
+            ne, H = int(pz[0]), int(pz[1])
+            t_from = int(pz[2]) if len(pz) > 2 else 0
             dz = _union_danger(node.pred, node.k0, H, self.cfg.margins, bo)
-            st = self.W.E.start_state(node.S, cu=cu)
+            # (T3, cfg.tables: the A1_n chain - the same clusters; a background pass waits for the library)
+            args = (np.asarray(node.S, np.float64), H, dz, ne)
+            kw = dict(cu=cu, par=self.cfg.fwd_threads, tables=self.cfg.tables, name=self.cfg.tables_file)
             if bg:
-                out.append(_bg_pool().submit(self.W.E.forward, st, H, danger=dz, terrain=self.W.TT, max_events=ne,
-                                             claw=False, par=self.cfg.fwd_threads))
+                out.append(_bg_pool().submit(_long_pass, self.W, t_from, args, kw))
                 continue
-            fw = self.W.E.forward(st, H, danger=dz, terrain=self.W.TT, max_events=ne, claw=False,
-                                  par=self.cfg.fwd_threads)
-            out.append(fw)
+            out.append(_long_pass(self.W, t_from, args, kw))
         return out
 
     @staticmethod
@@ -1853,6 +1973,10 @@ class Searcher:
         cands = []
         brs = sorted(node.pred.branches, key=lambda b: -b.p)[:cfg.n_branch]
         R = self._rows(fw)
+        tf = getattr(fw, "t_from", 0)
+        if tf and len(R["t"]):
+            sel_ = R["t"] > tf                       # (T3: a long pass - the frames the shorter passes do not reach)
+            R = {k: v[sel_] for k, v in R.items()}
         n = len(R["t"])
         for b in brs:
             for iid in brnum.iids(b):
@@ -2553,6 +2677,12 @@ class Searcher:
         self.ev.units = 0
         self.ev.reset()
         self.ev.n_sim = self.ev.n_sim_hit = self.ev.n_probe = 0
+        if cfg.tables:
+            # T3: the library's growth since it was loaded, dropped once over the budget (it does not converge)
+            lib = self.W.table_lib(cfg.tables_file, cfg.tables_budget)
+            if lib is not None and cfg.tables_budget > 0 and lib.grown() > cfg.tables_budget:
+                lib.reset()
+                TABLE_STATS["resets"] = TABLE_STATS.get("resets", 0) + 1
         now = self._now
         t0c = now()
         self.stats = {}

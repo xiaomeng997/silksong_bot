@@ -47,11 +47,18 @@ on the engine's key, so the chain's clusters are the engine's (heights bit-equal
 vs absolute coordinates, < 1e-13 u). THE CLOSURE DOES NOT CONVERGE: exact vertical states multiply with the event
 history (the float's close / attack cancel, the Clawline's antic decay, the hang leave off-lattice vy), so the library
 is the memoised engine - a depth-limited core plus the nodes the search's own passes meet -, not a few hundred tables.
+
+T3 (the tables as the search's envelope): the chain runs without the GIL under the library's lock (Lib.lock; forward
+with blocking False returns None when another thread's pass holds it), makes only the edge list a cluster takes
+(expand_md), the slope run at a second physics phase only for a node that can read the drawn position (phase_pair: a
+lane on the ground or in the dash / sprint - every slope edge and phase-dependent node seen), clears its per-frame merge
+table by the slots it used; Lib.mark / grown / reset drop the growth since a mark exactly (the search's budget).
 """
 from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from pathlib import Path
 
@@ -350,8 +357,32 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
     engine's floor-strict merge key and dominance filter -, 0: free space - its free-space key) and dash status du
     (T2: 0 no air dash - T1's lists -, 1 every candidate with the air dash unused, 2 with it used):
     EOFF[n, s, 4 du + 2 fl + lim]. Returns False when a table is full."""
+    return expand_md(n, s, fl, du, 2, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+                     CK, CH, CNT)
+
+
+@njit(cache=True, error_model="numpy")
+def phase_pair(n, NL, NVY):
+    """T3: whether node n's frame needs the slope run at a second physics phase - only a frame that can read the
+    drawn position (a lane on the ground or in the dash / sprint: every slope edge and phase-dependent node of the
+    libraries is a ground dash's); a phase instance has one phase."""
+    if NVY[n, V_ALF] >= 0:
+        return False
+    for ln in range(2):
+        if NL[n, ln, GROUND] > 0 or NL[n, ln, MODE] == M_DASH or NL[n, ln, MODE] == M_SPRINT:
+            return True
+    return False
+
+
+@njit(cache=True, error_model="numpy")
+def expand_md(n, s, fl, du, msel, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+              CK, CH, CNT):
+    """expand for the lists msel (T3: 0 the every-choice list, 1 the event-limit list, 2 both) - each list is the
+    same whenever it is made (the chain makes the one a cluster takes)."""
     base = 4 * du + 2 * fl
-    if EOFF[n, s, base, 0] >= 0:
+    need0 = msel != 1 and EOFF[n, s, base, 0] < 0
+    need1 = msel != 0 and EOFF[n, s, base + 1, 0] < 0
+    if not need0 and not need1:
         return True
     if du == 1 or du == 2:
         opts = opts & ~ej.OPT_NO_ADASH
@@ -398,7 +429,10 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
     e_start = CNT[C_EDGES]
     oe0 = np.zeros(2, dtype=np.int64)
     on = np.zeros(2, dtype=np.int64)
+    r0 = 0 if phase_pair(n, NL, NVY) else 1
     for md in range(2):
+        if (md == 0 and not need0) or (md == 1 and not need1):
+            continue
         cu0 = NCU[n].copy()
         o = opts
         if md == 1:
@@ -407,7 +441,7 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
         # the slope run first (a second phase of the same step count): the drawn position (a ground dash's end
         # translates from it) is the only phase dependence in the frame
         nk2 = 0
-        for rep in range(2):
+        for rep in range(r0, 2):
             a = a2 if rep == 0 else a1
             L[0, :] = NL[n, 0]
             L[1, :] = NL[n, 1]
@@ -419,7 +453,9 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
             cu = cu0.copy()
             nk = _children(L[0], L[1], cu, udt, P, TT, o, fl == 1, boxes, 0, 0, IV, 0, 1, hh, tmp, tcu, cands, kid,
                            kcu, kkey, kkeep, kcand, kuse, key1, key2, olo, ohi, wlo, whi, npc, plo, phi, dl, dh, st)
-            if rep == 0:
+            if rep == 0 or r0 == 1:
+                # (the slope run's children; without it - T3, phase_pair - the main run's: no slope, no phase
+                # dependence)
                 nk2 = nk
                 for k in range(nk):
                     dl2[k] = dl[k] if kkeep[k] else 0.0
@@ -516,8 +552,9 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
         oe0[md] = e0
         on[md] = ne
     for md in range(2):
-        EOFF[n, s, base + md, 0] = oe0[md]
-        EOFF[n, s, base + md, 1] = on[md]
+        if (md == 0 and need0) or (md == 1 and need1):
+            EOFF[n, s, base + md, 0] = oe0[md]
+            EOFF[n, s, base + md, 1] = on[md]
     CNT[C_EXP] += 1
     return True
 
@@ -667,7 +704,7 @@ def _merge(a, b, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ck
                     CK, CH, CNT, key, ckey)
 
 
-@njit(cache=True, error_model="numpy")
+@njit(cache=True, nogil=True, error_model="numpy")
 def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, wlo, whi, dflags, band_q, P, udt, TTf,
           TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT, ICK, ICT, cap_frame, cap_pc,
           cap_iv, cap_cl):
@@ -785,11 +822,14 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
         HSZ *= 2
     HMASK = HSZ - 1
     htab = np.full(HSZ, -1, dtype=np.int64)
+    hused = np.empty(cap_frame, dtype=np.int64)      # (T3: the slots filled in the frame - cleared at the next one)
+    nhu = 0
     alpha = alpha0
     yb = np.empty(1)
     for t in range(1, T + 1):
-        for i in range(HSZ):
-            htab[i] = -1
+        for i in range(nhu):
+            htab[hused[i]] = -1
+        nhu = 0
         a_ = alpha + dt / fdt
         s = np.int64(math.floor(a_ + 1e-9))
         a_st = alpha
@@ -824,21 +864,22 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             else:
                 du = 0 if adc == 0 else 3
             bad = False
-            if EOFF[src, s, 4 * du + 2 * fl, 0] < 0:
-                bad = not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF,
-                                 HT, CHT, CK, CH, CNT)
+            lim = 1 if (maxev > 0 and cur_e[c] >= maxev) else 0
+            # (T3: only the list the cluster takes is made - the every-choice list or the event-limit one)
+            if EOFF[src, s, 4 * du + 2 * fl + lim, 0] < 0:
+                bad = not expand_md(src, s, fl, du, lim, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF,
+                                    PFL, EI, EF, HT, CHT, CK, CH, CNT)
             if not bad and (NINT[src, I_ADEP] & (1 << s)) != 0:
                 src = _ainst(src, a_st, py, cur_q[c], cur_s[c], P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH,
                              CNT, ICK, ICT, key, ckey)
-                bad = src < 0 or not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF,
-                                            PFL, EI, EF, HT, CHT, CK, CH, CNT)
+                bad = src < 0 or not expand_md(src, s, fl, du, lim, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT,
+                                               NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT)
             if bad:
                 flags[4] |= CNT[C_OVF] | 64
                 return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
                         cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                         pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
                         cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
-            lim = 1 if (maxev > 0 and cur_e[c] >= maxev) else 0
             pg = NINT[src, I_GROUND]
             e0 = EOFF[src, s, 4 * du + 2 * fl + lim, 0]
             ne = EOFF[src, s, 4 * du + 2 * fl + lim, 1]
@@ -945,6 +986,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     khs_q[idx] = hq
                     khs_s[idx] = hs
                     htab[slot] = idx
+                    hused[nhu] = slot
+                    nhu += 1
                     ch_first[idx] = -1
                 else:
                     stats[t, 4] += 1
@@ -1398,6 +1441,10 @@ class Lib:
         self.ICK = np.zeros((cap_inst, 5), dtype=np.int64)
         self.ICT = np.full(_pow2(4 * cap_inst), -1, dtype=np.int64)
         self.CNT = np.zeros(NCNT, dtype=np.int64)
+        # T3: the library grows inside a pass (nodes / edges expanded on the fly, the arrays reallocated), so one pass
+        # at a time - the search's background pass and its exit checks on the main thread share one library (the
+        # chain runs without the GIL: the other thread's Python work goes on meanwhile)
+        self.lock = threading.RLock()
 
     # ---- capacity ----
     @property
@@ -1438,6 +1485,36 @@ class Lib:
             self.ICT = np.full(_pow2(4 * n), -1, dtype=np.int64)
             _rehash(self.ICT, _ic_hashes(self.ICK, int(self.CNT[C_INST])), int(self.CNT[C_INST]))
         self.CNT[C_OVF] = 0
+
+    # ---- T3: the growth since a mark, dropped (bounded memory: the library does not converge) ----
+    def mark(self) -> None:
+        """Remember the library's state now: reset() returns to it (nodes, edges, merge classes, instances)."""
+        self._mark = (self.n_nodes, self.n_edges, int(self.CNT[C_CLS]), int(self.CNT[C_INST]))
+
+    def grown(self) -> int:
+        """The nodes appended since the mark (0 without one)."""
+        m = getattr(self, "_mark", None)
+        return 0 if m is None else self.n_nodes - m[0]
+
+    def reset(self) -> None:
+        """Drop everything appended since the mark: the nodes / edges / classes / instances after it leave the hash
+        tables (open addressing with linear probing: a key of the mark's state never probes past a slot filled after
+        it, so clearing those slots restores the mark's tables exactly) and the edge lists expanded after it on the
+        mark's nodes are unset (expanded again when met; the press flags and the phase-dependence bits written then
+        are facts of the node, the same when recomputed)."""
+        n0, e0, c0, i0 = self._mark
+        with self.lock:
+            for T_, lim in ((self.HT, n0), (self.CHT, c0), (self.ICT, i0)):
+                T_[T_ >= lim] = -1
+            v = self.EOFF[:n0]
+            m = v[..., 0] >= e0
+            v[..., 0][m] = -1
+            v[..., 1][m] = 0
+            self.CNT[C_NODES] = n0
+            self.CNT[C_EDGES] = e0
+            self.CNT[C_CLS] = c0
+            self.CNT[C_INST] = i0
+            self.CNT[C_OVF] = 0
 
     def _lib(self):
         return (self.NL, self.NCU, self.NID, self.NINT, self.NVY, self.EOFF, self.PFL, self.EI, self.EF, self.HT,
@@ -1485,14 +1562,25 @@ class Lib:
     def forward(self, S: np.ndarray, T: int, danger=None, floor: bool = False, maxev: int = 0,
                 x0: float | None = None, x1: float | None = None, cu=None, wall=None, band_q: float = 0.0,
                 cap_frame: int = 20000, cap_pc: int = 4_000_000, cap_iv: int = 4_000_000, cap_cl: int = 2_000_000,
-                dash: bool = False):
+                dash: bool = False, blocking: bool = True):
         """The chain from her exact state S over T frames (danger: None or T + 1 arrays of boxes [n, 4] in her
         centre's space; floor: the library's terrain (the Forum floor, and the ceiling for 'arena') - else free
         space; maxev: the event limit; wall: (x_lo, x_hi) of her centre or None;
         band_q > 0: the flattened layer's bands; dash (T2): the forward set WITH THE AIR DASH - the no-dash chain + the
         bridge's entries (the air dash pressed / held / queued, its own frames and every frame after it on the full
         lists), the engine's pass without OPT_NO_ADASH. Returns an envelope.Fwd (the engine's arrays: regions,
-        contains, witness) with .node / .events / .ad (the air dash used) per cluster and .lib_stats."""
+        contains, witness) with .node / .events / .ad (the air dash used) per cluster and .lib_stats. One pass at a
+        time per library (T3: self.lock); blocking False: None when another thread's pass holds it."""
+        if not self.lock.acquire(blocking=blocking):
+            return None
+        try:
+            return self._forward(S, T, danger, floor, maxev, x0, x1, cu, wall, band_q, cap_frame, cap_pc, cap_iv,
+                                 cap_cl, dash)
+        finally:
+            self.lock.release()
+
+    def _forward(self, S, T, danger, floor, maxev, x0, x1, cu, wall, band_q, cap_frame, cap_pc, cap_iv, cap_cl,
+                 dash):
         from ssbot.map2 import envelope as env
         S = np.asarray(S, dtype=np.float64).reshape(-1)
         if S[TS] != 1.0 or S[WF_S] != 1.0:
@@ -1740,7 +1828,8 @@ class Lib:
                 "hero2": int(self.P[km.P_H2]), "abilities": int(self.P[km.P_ABIL]), "opts": int(self.opts),
                 "claw": self.claw, "terrain": self.terrain, "clear": CLEAR, "clear_up": CLEAR_UP,
                 "floor_top": FLOOR_TOP, "ceil_bot": CEIL_BOT, "K": K, "NC": NC, "NKEY": NKEY, "NIDK": NIDK,
-                "nodes": n, "edges": e, "classes": c, "instances": ni, "params_vector_sha1": _sha1(self.P)}
+                "nodes": n, "edges": e, "classes": c, "instances": ni, "params_vector_sha1": _sha1(self.P),
+                "lists_lazy": True}
         meta = {**{k: v for k, v in self.meta.items() if k not in meta}, **meta}   # (a loaded library's build meta
         if extra:                                                                 # kept, its counts the current ones)
             meta.update(extra)
@@ -1751,13 +1840,16 @@ class Lib:
         return path
 
     @classmethod
-    def load(cls, path=None, params: km.HeroParams | None = None) -> "Lib":
+    def load(cls, path=None, params: km.HeroParams | None = None, spare: int = 0) -> "Lib":
+        """A saved library; spare (T3): room for this many more nodes (and edges / classes / instances in the same
+        proportion) beyond the default quarter, so a bounded growth (the search's budget, reset()) never reallocates."""
         path = Path(path or TABLES_PATH)
         z = np.load(path)
         meta = json.loads(str(z["_meta"]))
         n, e, c, ni = meta["nodes"], meta["edges"], meta["classes"], meta["instances"]
-        lib = cls(params, cap_nodes=max(1 << 10, int(n * 1.25)), cap_edges=max(1 << 12, int(e * 1.25)),
-                  cap_cls=max(1 << 10, int(c * 1.25)), cap_inst=max(1 << 10, int(ni * 1.25)),
+        sp = max(0, int(spare))                      # (a new node brings ~4.4 edges, <= 4 classes, ~1 instance)
+        lib = cls(params, cap_nodes=max(1 << 10, int(n * 1.25) + sp), cap_edges=max(1 << 12, int(e * 1.25) + 6 * sp),
+                  cap_cls=max(1 << 10, int(c * 1.25) + 2 * sp), cap_inst=max(1 << 10, int(ni * 1.25) + sp),
                   claw=meta.get("claw", True), terrain=meta.get("terrain", "floor"))
         if z["NINT"].shape[1] < NINTC:
             raise ValueError(f"tables {path}: built before T2's per-dash merge classes - rebuild (t1_tables build)")
@@ -1779,8 +1871,8 @@ class Lib:
         lib.CNT[:] = z["CNT"]
         lib.CNT[C_OVF] = 0
         # (a library saved before the edge lists were committed together: an expansion whose event-limit list was
-        # lost to a full table is expanded again)
-        for f0 in range(0, 4 * NDU, 2):
+        # lost to a full table is expanded again; T3's libraries make each list on its own - 'lists_lazy')
+        for f0 in (range(0, 4 * NDU, 2) if not meta.get("lists_lazy") else ()):
             bad = (lib.EOFF[:n, :, f0, 0] >= 0) & (lib.EOFF[:n, :, f0 + 1, 0] < 0)
             v = lib.EOFF[:n, :, f0:f0 + 2]
             v[bad] = -1

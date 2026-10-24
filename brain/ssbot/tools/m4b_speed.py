@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-OUT = Path(r"C:\ssbot\data\m2_play\map2\m4\m4b")
+OUT = Path(os.environ.get("SSBOT_M4B_OUT", r"C:\ssbot\data\m2_play\map2\m4\m4b"))   # (T3: SSBOT_M4B_OUT)
 SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")
 
 
@@ -120,6 +120,8 @@ def run_one(args) -> dict:
         ms._GROWN.clear()
         ms._SLABS.clear()
     cfg = ms.Cfg(**cfg_kw)
+    if getattr(cfg, "tables", False):
+        W.table_lib(cfg.tables_file, cfg.tables_budget)      # (T3: loaded once per worker, before the timed decision)
     S = ms.Searcher(W, cfg)
     S.vclock = vclock
     if part is not None:
@@ -300,6 +302,7 @@ def cmd_ident(a) -> int:
     boost_self("idle")
     sits = load_sits()
     cfg_kw = dict(cap_s=a.units * 0.01, depth=a.depth)
+    cfg_kw.update(_cfg_over(getattr(a, "cfg", "")))       # (T3: e.g. the live flags, the tables)
     sel = _select(sits, a)
     if a.only_i:
         keep = {int(x) for x in a.only_i.split(",") if x.strip()}
@@ -400,10 +403,11 @@ def cmd_first(a) -> int:
             k, v = kv.split("=")
             cfg_kw[k.strip()] = type(getattr(__import__("ssbot.map2.search", fromlist=["Cfg"]).Cfg(), k.strip()))(
                 eval(v))  # noqa: S307 - our own command line
+    pr = getattr(a, "prio", "high")             # (T3: 'idle' - the stage's runs at Idle priority)
     if a.split > 1:
-        jobs = [(i, s, cfg_kw, None, "high", (q, a.split)) for i, s in _select(sits, a) for q in range(a.split)]
+        jobs = [(i, s, cfg_kw, None, pr, (q, a.split)) for i, s in _select(sits, a) for q in range(a.split)]
     else:
-        jobs = [(i, s, cfg_kw, None, "high") for i, s in _select(sits, a)]
+        jobs = [(i, s, cfg_kw, None, pr) for i, s in _select(sits, a)]
     OUT.mkdir(parents=True, exist_ok=True)
     load = start_load(a.load_game, a.load_bot) if a.load else None
     try:
@@ -653,6 +657,7 @@ def main(argv=None) -> int:
     p.add_argument("--groups", default="")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--only-i", default="", help="only these situation indices (comma-separated)")
+    p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v (T3)")
     p.set_defaults(fn=cmd_ident)
     p = sub.add_parser("identcmp")
     p.add_argument("a")
@@ -671,6 +676,7 @@ def main(argv=None) -> int:
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v")
     p.add_argument("--split", type=int, default=1, help="a split search: this many parts per situation in parallel")
+    p.add_argument("--prio", default="high", choices=("high", "idle"), help="the workers' priority (T3: idle)")
     p.set_defaults(fn=cmd_first)
     p = sub.add_parser("tick")
     p.add_argument("--tag", required=True)
