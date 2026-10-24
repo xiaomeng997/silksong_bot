@@ -732,11 +732,19 @@ H2_SPR_FIN = 2048
 #                  (HeroController OnShuttleCockJump / ShuttleCockCancel, hornet_sprint Ground Sprint R / L -> Jump
 #                  Antic -> Jump); before: the jump press there was dropped by the envelope (1.5 - 8 u off)
 H2_SHUTTLE = 4096
+# map v2 stage T2 (the A1_n tables' dash bridge: 'a landing restores the dash' - the spec's refill rule; T1's open item
+# 3):
+#   H2_LAND_DASH   BackOnGround sets airDashed false (decompiled HeroController 10292 - 10293: on the transition to the
+#                  ground only, after its early return when already grounded): a landing restores the air dash. Before,
+#                  kin_jit kept AIRDASHED set after an air dash until a pogo / a wall, so an air dash -> landing -> jump
+#                  -> air dash did not dash in the model
+H2_LAND_DASH = 8192
 H2_ALL = (H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |
-          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR | H2_SPR_FIN | H2_SHUTTLE)
+          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR | H2_SPR_FIN | H2_SHUTTLE | H2_LAND_DASH)
 H2_S1 = H2_POGO_DASH | H2_CLAW_SPR      # the M4 S1 bits (SSBOT_FORUM_HERO2_OFF=1536: the hero model of M4d2)
 H2_S1B = H2_SPR_FIN                     # the M4 S1b bit (SSBOT_FORUM_HERO2_OFF=2048: S1's hero model; 3584: M4d2's)
 H2_T1B = H2_SHUTTLE                     # the T1b bit (SSBOT_FORUM_HERO2_OFF=4096: S1b's hero model, the w7 gate's)
+H2_T2 = H2_LAND_DASH                    # the T2 bit (SSBOT_FORUM_HERO2_OFF=8192: T1b's hero model)
 H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 HERO2_OFF_ENV = "SSBOT_FORUM_HERO2_OFF"  # HERO2 bits taken out (an int, default 0): the identity checks of new bits

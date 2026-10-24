@@ -106,6 +106,16 @@ NINTC = 10
 V_VY, V_ALF = 0, 1
 # edge columns
 EI_CH, EI_CAND, EI_YABS = range(3)
+# T2: the child's air dash used after the frame (EI_AD: the lanes' AIRDASHED - the dash fired, or a landing restored
+# it, HERO2 H2_LAND_DASH) and EI_ENT: a BRIDGE ENTRY (the full candidates' air-dash children: a dash pressed / held /
+# queued in the air - every candidate OPT_NO_ADASH drops)
+EI_AD, EI_ENT = 3, 4
+NEI = 5
+# T2: the edge lists per node and step count: EOFF[n, s, 4 du + 2 fl + lim] - du 0: no air dash (T1: OPT_NO_ADASH, the
+# air dash unused), du 1: every candidate with the air dash unused (the entries marked), du 2: every candidate with
+# the air dash used (the lanes' AIRDASHED set: the dash's own frames, the umbrella's dash press that only closes it, a
+# queued dash) - fl the pass kind, lim the event limit reached
+NDU = 3
 EF_DLO, EF_DHI, EF_DY, EF_SLO, EF_SHI, EF_NEV, EF_QM, EF_QV, EF_SM, EF_SV = range(10)
 NEF = 10
 # the child's QY / SY (the engine's key holds them absolute) from the parent's: QM 0 QY kept, 1 QY = the parent's PY
@@ -264,7 +274,7 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     NVY[n, V_VY] = L[1, VY]
     NVY[n, V_ALF] = alf
     for s in range(2):
-        for md in range(4):
+        for md in range(4 * NDU):
             EOFF[n, s, md, 0] = -1
             EOFF[n, s, md, 1] = 0
     HT[slot] = n
@@ -308,13 +318,18 @@ def _press_flags(x0, cu, dt, udt, P, TT):
 
 
 @njit(cache=True, error_model="numpy")
-def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT):
+def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH,
+           CNT):
     """The node's edges for step count s (both the full list and the one with the event limit reached), as the
     engine's frame (env_jit._children) on its representative lanes, for a pass kind fl (1: over the terrain - the
-    engine's floor-strict merge key and dominance filter -, 0: free space - its free-space key): EOFF[n, s, 2 fl + lim].
-    Returns False when a table is full."""
-    if EOFF[n, s, 2 * fl, 0] >= 0:
+    engine's floor-strict merge key and dominance filter -, 0: free space - its free-space key) and dash status du
+    (T2: 0 no air dash - T1's lists -, 1 every candidate with the air dash unused, 2 with it used):
+    EOFF[n, s, 4 du + 2 fl + lim]. Returns False when a table is full."""
+    base = 4 * du + 2 * fl
+    if EOFF[n, s, base, 0] >= 0:
         return True
+    if du > 0:
+        opts = opts & ~ej.OPT_NO_ADASH
     MK = 48
     absy = NINT[n, I_ABS] == 1
     TT = TTg if absy else TTf
@@ -373,6 +388,9 @@ def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, 
             L[1, :] = NL[n, 1]
             L[0, ALPHA] = a
             L[1, ALPHA] = a
+            if du == 2:
+                L[0, AIRDASHED] = 1.0
+                L[1, AIRDASHED] = 1.0
             cu = cu0.copy()
             nk = _children(L[0], L[1], cu, udt, P, TT, o, fl == 1, boxes, 0, 0, IV, 0, 1, hh, tmp, tcu, cands, kid,
                            kcu, kkey, kkeep, kcand, kuse, key1, key2, olo, ohi, wlo, whi, npc, plo, phi, dl, dh, st)
@@ -386,8 +404,9 @@ def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, 
         steps = np.int64(math.floor(a1 + dt / fdt + 1e-9))
         if steps != s:
             CNT[C_OVF] |= 8                          # (the phase choice does not give s steps: a parameter error)
-        if md == 0:
+        if md == 0 and du == 0:
             PFL[n, s] = _press_flags(tmp[1], tcu, dt, udt, P, TT)
+        air_st = tmp[1, GROUND] <= 0                 # (after the frame's steps: an entry is a dash candidate there)
         e0 = CNT[C_EDGES]
         ne = 0
         ypar = NL[n, 1, PY]
@@ -401,6 +420,8 @@ def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, 
                 NINT[n, I_ADEP] |= 1 << s
             C = kid[k].copy()
             ccu = kcu[k].copy()
+            cad = 1 if C[1, AIRDASHED] > 0 else 0
+            ent = 1 if (du == 1 and (kcand[k] & ej.CB_D) != 0 and air_st) else 0
             # the QY / SY rules (bit-checked on the representative, the natural rule of the step count first)
             pyp, qyp, syp = L[1, PY], L[1, QY], L[1, SY]
             cq, cs, cp = C[1, QY], C[1, SY], C[1, PY]
@@ -453,6 +474,8 @@ def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, 
             EI[e, EI_CH] = cid
             EI[e, EI_CAND] = kcand[k]
             EI[e, EI_YABS] = 1 if yabs else 0
+            EI[e, EI_AD] = cad
+            EI[e, EI_ENT] = ent
             EF[e, EF_DLO] = dl[k] - slo * a1
             EF[e, EF_DHI] = dh[k] - shi * a1
             EF[e, EF_DY] = dy
@@ -468,8 +491,8 @@ def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, 
         oe0[md] = e0
         on[md] = ne
     for md in range(2):
-        EOFF[n, s, 2 * fl + md, 0] = oe0[md]
-        EOFF[n, s, 2 * fl + md, 1] = on[md]
+        EOFF[n, s, base + md, 0] = oe0[md]
+        EOFF[n, s, base + md, 1] = on[md]
     CNT[C_EXP] += 1
     return True
 
@@ -482,8 +505,8 @@ def closure(i0, i1, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, P
     i = i0
     while i < CNT[C_NODES] and i < i1:
         for s in range(2):
-            if not expand(i, s, 1, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
-                          CH, CNT):
+            if not expand(i, s, 1, 0, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+                          CK, CH, CNT):
                 return i
         i += 1
     return i
@@ -620,14 +643,18 @@ def _merge(a, b, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ck
 
 
 @njit(cache=True, error_model="numpy")
-def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, wlo, whi, dashed, band_q, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT, ICK,
-          ICT, cap_frame, cap_pc, cap_iv, cap_cl):
+def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, wlo, whi, dflags, band_q, P, udt, TTf,
+          TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT, ICK, ICT, cap_frame, cap_pc,
+          cap_iv, cap_cl):
     """The table chain from one start (node n0 at her height py0 - her PY -, x intervals ivs0, her physics phase
     alpha0) over T frames: env_jit.forward's outputs (the same clusters and pieces) plus each cluster's node and
     events. boxes / box_off: the danger per frame (her centre's space), maxev the event limit (0: none), the floor
     (has_floor, its top) routes clusters whose box bottom is under clear over it through their floor instances; wall:
-    clip the x intervals to [wlo, whi] after every step (the spec's use-time walls: not the engine's); dashed: the air
-    dash used (the segment's property: the cond bit only). band_q > 0: the flattened layer - clusters of one node whose
+    clip the x intervals to [wlo, whi] after every step (the spec's use-time walls: not the engine's); dflags (T2): bit 0
+    the air dash used at the start, bit 1 THE DASH MODE (the forward set with the air dash: each cluster carries its
+    air-dash bit - unused: the no-dash lists + the bridge's entries; used: the full lists -, a key of the merge as in
+    the engine), bit 2 a landing restores the dash (HERO2 H2_LAND_DASH; the no-dash lists' clusters drop the bit when
+    the edge lands). band_q > 0: the flattened layer - clusters of one node whose
     heights lie within band_q merge into a band (y range [cl_ylo, cl_y]; an upper bound, never for witnesses). TP: the
     terrain's reach (near; has_floor = TP[0] > 0)."""
     has_floor = TP[0] > 0 or TP[3] > 0
@@ -645,6 +672,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     cl_ivn = np.empty(cap_cl, dtype=np.int64)
     cl_node = np.empty(cap_cl, dtype=np.int64)
     cl_ev = np.empty(cap_cl)
+    cl_ad = np.empty(cap_cl, dtype=np.int64)
     IV = np.empty((cap_iv, 2))
     pc_cl = np.empty(cap_pc, dtype=np.int64)
     pc_par = np.empty(cap_pc, dtype=np.int64)
@@ -670,6 +698,12 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     nxt_y = np.empty(cap_frame)
     nxt_yl = np.empty(cap_frame)
     nxt_e = np.empty(cap_frame)
+    cur_d = np.empty(cap_frame, dtype=np.int64)
+    nxt_d = np.empty(cap_frame, dtype=np.int64)
+    ad0 = dflags & 1
+    dmode = (dflags & 2) != 0
+    ldash = (dflags & 4) != 0
+    cur_d[0] = ad0
     cur_n[0] = n0
     cur_y[0] = py0
     cur_yl[0] = py0
@@ -683,11 +717,11 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
         IV[niv, 0] = ivs0[i, 0]
         IV[niv, 1] = ivs0[i, 1]
         niv += 1
-    dbit = ej.COND_DASHED if dashed else 0
     cl_y[0] = py0 + hh
     cl_ylo[0] = py0 + hh
     cl_vy[0] = NVY[n0, V_VY]
-    cl_cond[0] = _cond(NINT[n0, I_COND], dbit)
+    cl_cond[0] = _cond(NINT[n0, I_COND], ej.COND_DASHED if ad0 else 0)
+    cl_ad[0] = ad0
     cl_mode[0] = NINT[n0, I_MODE]
     cl_phase[0] = NINT[n0, I_PHASE]
     cl_iv0[0] = 0
@@ -755,30 +789,39 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
                             cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                             pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
-                            cl_node[:ntot], cl_ev[:ntot])
-            if EOFF[src, s, 2 * fl, 0] < 0:
-                if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
-                              CK, CH, CNT):
-                    flags[4] |= CNT[C_OVF] | 64
-                    return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
-                            cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
-                            pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
-                            cl_node[:ntot], cl_ev[:ntot])
-            if (NINT[src, I_ADEP] & (1 << s)) != 0:
+                            cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+            # the edge list this cluster takes (T2): no air dash (T1: du 0); in the dash mode every candidate in the
+            # engine's order (du 1 with the air dash unused: the no-dash children - T1's list - and the bridge's entries
+            # among them; du 2 with it used)
+            adc = cur_d[c]
+            du = 0 if not dmode else (1 if adc == 0 else 2)
+            bad = False
+            if EOFF[src, s, 4 * du + 2 * fl, 0] < 0:
+                bad = not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF,
+                                 HT, CHT, CK, CH, CNT)
+            if not bad and (NINT[src, I_ADEP] & (1 << s)) != 0:
                 src = _ainst(src, a_st, py, cur_q[c], cur_s[c], P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH,
                              CNT, ICK, ICT, key, ckey)
-                if src < 0 or not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI,
-                                         EF, HT, CHT, CK, CH, CNT):
-                    flags[4] |= CNT[C_OVF] | 64
-                    return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
-                            cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
-                            pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
-                            cl_node[:ntot], cl_ev[:ntot])
-            md = 2 * fl + (1 if (maxev > 0 and cur_e[c] >= maxev) else 0)
-            e0 = EOFF[src, s, md, 0]
-            ne = EOFF[src, s, md, 1]
+                bad = src < 0 or not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF,
+                                            PFL, EI, EF, HT, CHT, CK, CH, CNT)
+            if bad:
+                flags[4] |= CNT[C_OVF] | 64
+                return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
+                        cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
+                        pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
+                        cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
+            lim = 1 if (maxev > 0 and cur_e[c] >= maxev) else 0
+            pg = NINT[src, I_GROUND]
+            e0 = EOFF[src, s, 4 * du + 2 * fl + lim, 0]
+            ne = EOFF[src, s, 4 * du + 2 * fl + lim, 1]
             stats[t, 5] += ne
             for e in range(e0, e0 + ne):
+                if du == 0:
+                    cad = adc
+                    if ldash and adc == 1 and pg == 0 and NINT[EI[e, EI_CH], I_GROUND] == 1:
+                        cad = 0                          # (a landing restores the dash: H2_LAND_DASH)
+                else:
+                    cad = EI[e, EI_AD]
                 ch = EI[e, EI_CH]
                 dlo = EF[e, EF_DLO] + EF[e, EF_SLO] * a_st
                 dhi = EF[e, EF_DHI] + EF[e, EF_SHI] * a_st
@@ -788,7 +831,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                 else:
                     cy = py + EF[e, EF_DY]
                     cyl = cur_yl[c] + EF[e, EF_DY]
-                ev = cur_e[c] + (EF[e, EF_NEV] if md == 2 * fl else 0.0)
+                ev = cur_e[c] + (EF[e, EF_NEV] if lim == 0 else 0.0)
                 qm = EF[e, EF_QM]
                 if qm == 0.0:
                     cq = cur_q[c]
@@ -837,7 +880,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                 use_band = band_q > 0.0 and not (has_floor and near(cy + 1.0, cyl - 1.0, TP, P))
                 if use_band:
                     hb = np.int64(math.floor(cyl / band_q))
-                    hc = 2 * ch + 1
+                    hc = 4 * ch + 2 * cad + 1
                     hq = np.int64(0)
                     hs = np.int64(0)
                 else:
@@ -848,7 +891,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     vv = qsb.view(np.int64)
                     hq = vv[0]
                     hs = vv[1]
-                    hc = 2 * NINT[ch, I_CLS if has_floor else I_CLSF]
+                    hc = 4 * NINT[ch, I_CLS if has_floor else I_CLSF] + 2 * cad
                 h = _ich(hc, hb, hq, hs)
                 idx = -1
                 slot = h & HMASK
@@ -871,6 +914,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     nxt_y[idx] = cy
                     nxt_yl[idx] = cyl
                     nxt_e[idx] = ev
+                    nxt_d[idx] = cad
                     nxt_q[idx] = cq
                     nxt_s[idx] = cs
                     khs_c[idx] = hc
@@ -888,7 +932,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                             return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot],
                                     cl_mode[:ntot], cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv],
                                     pc_cl[:npc], pc_par[:npc], pc_cand[:npc], pc_lo[:npc], pc_hi[:npc],
-                                    pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot])
+                                    pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
                         nxt_n[idx] = mg
                         stats[t, 3] += 1
                     if ev < nxt_e[idx]:
@@ -953,7 +997,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             cl_y[gc] = nxt_y[c] + hh
             cl_ylo[gc] = nxt_yl[c] + hh
             cl_vy[gc] = NVY[nd, V_VY]
-            cl_cond[gc] = _cond(NINT[nd, I_COND], dbit)
+            cl_cond[gc] = _cond(NINT[nd, I_COND], ej.COND_DASHED if nxt_d[c] else 0)
+            cl_ad[gc] = nxt_d[c]
             cl_mode[gc] = NINT[nd, I_MODE]
             cl_phase[gc] = NINT[nd, I_PHASE]
             cl_node[gc] = nd
@@ -995,6 +1040,9 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
         ty = cur_s
         cur_s = nxt_s
         nxt_s = ty
+        td = cur_d
+        cur_d = nxt_d
+        nxt_d = td
         ncl = nch
         if ncl == 0:
             for tt in range(t + 1, T + 1):
@@ -1002,7 +1050,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             break
     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot], cl_phase[:ntot],
             cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc], pc_cand[:npc], pc_lo[:npc],
-            pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot])
+            pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags, cl_node[:ntot], cl_ev[:ntot], cl_ad[:ntot])
 
 
 
@@ -1011,6 +1059,14 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
 @njit(cache=True, error_model="numpy")
 def route(n, py, qy, sy, s, alpha, TP, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
           CK, CH, CNT, ICK, ICT):
+    """route_du for the no-dash lists (T1)."""
+    return route_du(n, py, qy, sy, s, alpha, 0, TP, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI,
+                    EF, HT, CHT, CK, CH, CNT, ICK, ICT)
+
+
+@njit(cache=True, error_model="numpy")
+def route_du(n, py, qy, sy, s, alpha, du, TP, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF,
+             HT, CHT, CK, CH, CNT, ICK, ICT):
     """The node whose edges a cluster of node n at height py (her PY) uses in a frame of s steps starting at phase
     alpha (the chain's rule: a free node within clear of the floor -> its floor instance; a phase-dependent frame ->
     the phase instance), expanded. -1: a table is full."""
@@ -1022,17 +1078,17 @@ def route(n, py, qy, sy, s, alpha, TP, P, udt, TTf, TTg, opts, hh, NL, NCU, NID,
         src = _instance(n, py, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key, ckey)
         if src < 0:
             return -1
-    if EOFF[src, s, 2 * fl, 0] < 0:
-        if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
-                      CH, CNT):
+    if EOFF[src, s, 4 * du + 2 * fl, 0] < 0:
+        if not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+                      CK, CH, CNT):
             return -1
     if (NINT[src, I_ADEP] & (1 << s)) != 0:
         src = _ainst(src, alpha, py, qy, sy, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key,
                      ckey)
         if src < 0:
             return -1
-        if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
-                      CH, CNT):
+        if not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+                      CK, CH, CNT):
             return -1
     return src
 
@@ -1301,16 +1357,17 @@ class Lib:
         self.TP_free = np.zeros(6)
         self.opts = (ej.OPT_CLAW | ej.OPT_TF8 if claw else 0) | ej.OPT_NO_ADASH
         self.eng = env.Engine(self.params)
+        self.ldash = (int(self.P[km.P_H2]) & km.H2_LAND_DASH) != 0      # T2: a landing restores the air dash
         self.meta: dict = {}
         self.NL = np.zeros((cap_nodes, 2, K))
         self.NCU = np.zeros((cap_nodes, NC))
         self.NID = np.zeros((cap_nodes, NIDK))
         self.NINT = np.zeros((cap_nodes, NINTC), dtype=np.int64)
         self.NVY = np.zeros((cap_nodes, 2))
-        self.EOFF = np.full((cap_nodes, 2, 4, 2), -1, dtype=np.int64)
+        self.EOFF = np.full((cap_nodes, 2, 4 * NDU, 2), -1, dtype=np.int64)
         self.PFL = np.zeros((cap_nodes, 2), dtype=np.int64)
         self.HT = np.full(_pow2(4 * cap_nodes), -1, dtype=np.int64)
-        self.EI = np.zeros((cap_edges, 3), dtype=np.int64)
+        self.EI = np.zeros((cap_edges, NEI), dtype=np.int64)
         self.EF = np.zeros((cap_edges, NEF))
         self.CK = np.zeros((cap_cls, NKEY))
         self.CH = np.zeros(cap_cls, dtype=np.int64)
@@ -1404,12 +1461,15 @@ class Lib:
     # ---- the chain ----
     def forward(self, S: np.ndarray, T: int, danger=None, floor: bool = False, maxev: int = 0,
                 x0: float | None = None, x1: float | None = None, cu=None, wall=None, band_q: float = 0.0,
-                cap_frame: int = 20000, cap_pc: int = 4_000_000, cap_iv: int = 4_000_000, cap_cl: int = 2_000_000):
+                cap_frame: int = 20000, cap_pc: int = 4_000_000, cap_iv: int = 4_000_000, cap_cl: int = 2_000_000,
+                dash: bool = False):
         """The chain from her exact state S over T frames (danger: None or T + 1 arrays of boxes [n, 4] in her
         centre's space; floor: the library's terrain (the Forum floor, and the ceiling for 'arena') - else free
         space; maxev: the event limit; wall: (x_lo, x_hi) of her centre or None;
-        band_q > 0: the flattened layer's bands). Returns an envelope.Fwd (the engine's arrays: regions, contains,
-        witness) with .node / .events per cluster and .lib_stats."""
+        band_q > 0: the flattened layer's bands; dash (T2): the forward set WITH THE AIR DASH - the no-dash chain + the
+        bridge's entries (the air dash pressed / held / queued, its own frames and every frame after it on the full
+        lists), the engine's pass without OPT_NO_ADASH. Returns an envelope.Fwd (the engine's arrays: regions,
+        contains, witness) with .node / .events / .ad (the air dash used) per cluster and .lib_stats."""
         from ssbot.map2 import envelope as env
         S = np.asarray(S, dtype=np.float64).reshape(-1)
         if S[TS] != 1.0 or S[WF_S] != 1.0:
@@ -1429,8 +1489,9 @@ class Lib:
         c0 = self.CNT.copy()
         while True:
             t0 = time.perf_counter()
+            dfl = (1 if dashed else 0) | (2 if dash else 0) | (4 if self.ldash else 0)
             out = chain(n0, float(S[PY]), float(S[QY]), float(S[SY]), st.ivs, float(S[ALPHA]), T, boxes, off, maxev,
-                        self.TP if floor else self.TP_free, wall is not None, float(wl), float(wh), dashed,
+                        self.TP if floor else self.TP_free, wall is not None, float(wl), float(wh), dfl,
                         float(band_q), self.P, self.udt, self.TTf,
                         self.TTg, self.opts, self.hh, *self._lib(), self.ICK, self.ICT, cap_frame, cap_pc, cap_iv,
                         cap_cl)
@@ -1452,6 +1513,7 @@ class Lib:
         fw = env.Fwd(self.eng, st, T, TT, *out[:17], np.zeros((0, NKEY)), out[17], out[18][:4], seconds=sec)
         fw.node = out[19]
         fw.events = out[20]
+        fw.ad = out[21]
         fw.floor = bool(floor)
         d = self.CNT - c0
         fw.lib_stats = {"expanded": int(d[C_EXP]), "new_nodes": int(d[C_NODES]), "instances": int(d[C_INST]),
@@ -1517,15 +1579,16 @@ class Lib:
         return "transitional" if (self.NINT[nd, I_COND] & ej.COND_ATK) else "locked"
 
     def edges(self, nd: int, py: float, s: int, alpha: float = 0.5, floor: bool = False, qy: float | None = None,
-              sy: float | None = None) -> range:
-        """The node's edges for a frame of s steps (routed and expanded as the chain does)."""
+              sy: float | None = None, du: int = 0) -> range:
+        """The node's edges for a frame of s steps (routed and expanded as the chain does; du: the dash status of the
+        list, T2)."""
         qy = py if qy is None else qy
         sy = py if sy is None else sy
         while True:
-            src = route(nd, py, qy, sy, s, alpha, self.TP if floor else self.TP_free, self.P, self.udt, self.TTf, self.TTg,
-                        self.opts, self.hh, *self._lib(), self.ICK, self.ICT)
+            src = route_du(nd, py, qy, sy, s, alpha, du, self.TP if floor else self.TP_free, self.P, self.udt, self.TTf,
+                           self.TTg, self.opts, self.hh, *self._lib(), self.ICK, self.ICT)
             if src >= 0:
-                md = 2 if floor else 0
+                md = 4 * du + (2 if floor else 0)
                 return range(int(self.EOFF[src, s, md, 0]), int(self.EOFF[src, s, md, 0] + self.EOFF[src, s, md, 1]))
             self._grow()
 
@@ -1681,8 +1744,9 @@ class Lib:
         if eo.shape[2] == 2:                        # (a library from before the per-pass-kind lists: floor-strict)
             lib.EOFF[:n, :, 2:4] = eo
         else:
-            lib.EOFF[:n] = eo
-        lib.EI[:e] = z["EI"]
+            lib.EOFF[:n, :, :eo.shape[2]] = eo      # (T1's: the no-dash lists only)
+        ei = z["EI"]
+        lib.EI[:e, :ei.shape[1]] = ei
         lib.EF[:e] = z["EF"]
         lib.CK[:c] = z["CK"]
         lib.CH[:c] = z["CH"]
@@ -1691,7 +1755,7 @@ class Lib:
         lib.CNT[C_OVF] = 0
         # (a library saved before the edge lists were committed together: an expansion whose event-limit list was
         # lost to a full table is expanded again)
-        for f0 in (0, 2):
+        for f0 in range(0, 4 * NDU, 2):
             bad = (lib.EOFF[:n, :, f0, 0] >= 0) & (lib.EOFF[:n, :, f0 + 1, 0] < 0)
             v = lib.EOFF[:n, :, f0:f0 + 2]
             v[bad] = -1

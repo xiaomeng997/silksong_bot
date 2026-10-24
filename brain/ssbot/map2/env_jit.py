@@ -48,7 +48,7 @@ from ssbot.knowledge.kinematics import (
     GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
     B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD,
+    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD, P_H2_SAT,
     P_SKIN, P_SLOP_LO, P_SLOP_HI)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
@@ -178,9 +178,15 @@ def vkey(x, cu, P, floor, out):
     # (HERO2 M4a: the air sprint reads the jump buffer itself - the umbrella at its first frame, no floor needed - and
     # InputHandler's attack queue for its Attack Cancel)
     sq = m == M_DASH or m == M_SPRINT
+    # (T2: a dash pressed later in normal control carries both queues into the dash / sprint, which reads them - the
+    # air sprint's jump at its first frame and its Attack Cancel, the sprint's buffered jump at its regain: kept while
+    # a dash can still start - on the ground, or with the air dash unused. Before, two normal clusters differing only in
+    # the jump buffer merged and the dash from the merged one kept the first child's buffer: the sprint's jump queue a
+    # frame off)
+    dl = m == M_NORMAL and (x[GROUND] > 0 or x[AIRDASHED] <= 0) and (np.int64(P[P_ABIL]) & AB_DASH) != 0
     out[K_JBUF] = max(x[JBUF], 0.0) if ((floor and m != M_NORMAL and m != M_HARD_LAND) or
-                                        (sq and (h2 & H2_SPR_JUMP) != 0)) else 0.0
-    out[K_ABUF] = max(x[ABUF], 0.0) if (sq and (h2 & H2_SPR_ATK) != 0) else 0.0
+                                        ((sq or dl) and (h2 & H2_SPR_JUMP) != 0)) else 0.0
+    out[K_ABUF] = max(x[ABUF], 0.0) if ((sq or dl) and (h2 & H2_SPR_ATK) != 0) else 0.0
     # the extra air velocity's side while it is faster than the run (beyond that the lanes bound it): clusters with
     # opposite extras (a dash left / right cancelled the same frame) must not share lanes (the lane on each side
     # takes the larger extra of a merge)
@@ -211,8 +217,15 @@ def vkey(x, cu, P, floor, out):
     out[K_C0 + C_EV] = 0.0
     # the FSM timer where no transition reads it: normal control, Float Idle / Bump, the held air sprint
     ph = x[PHASE]
-    if m == M_NORMAL or (m == M_GLIDE and (ph == 2.0 or ph == 5.0)) or (m == M_SPRINT and ph == 1.0):
+    if m == M_NORMAL or (m == M_GLIDE and (ph == 2.0 or ph == 5.0)):
         out[_MT] = 0.0
+    elif m == M_SPRINT and ph == 1.0:
+        # the held air sprint's loop: its timer is read only by the Attack Cancel's gate (HERO2 H2_SPR_ATK: the queue
+        # acts once the state is h2_spr_atk_t old) - kept below the gate, canonical past it (T2: the loop entered early
+        # by a jump press near the floor - Allow Shuttlecock - is still under the gate; merging it with a loop past the
+        # gate kept the first child's timer, and the attack cancel swung a frame early or late in the merged cluster)
+        if (h2 & H2_SPR_ATK) == 0 or ge32(x[MODE_T], P[P_H2_SAT]):
+            out[_MT] = 0.0
     for i in range(NKEY):
         out[i] += 0.0                 # -0.0 -> 0.0 (equal keys must hash equally)
 

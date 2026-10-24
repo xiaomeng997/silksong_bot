@@ -51,7 +51,8 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     THK_STRIDE, ALT_ATTACK_RESET, P_SLOPE_CONTACT, AB_DOWN_SLASH, EV_PARRY_RECOVER)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
     H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD, H2_JUMP_DCD_T, P_H2, P_H2_RST,
-    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH, H2_SPR_FIN)
+    P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH, H2_SPR_FIN,
+    H2_LAND_DASH)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1176,6 +1177,8 @@ def forum_contacts(x, landed, P, TT):
                     x[JUMPING] = 0.0
                     x[JSTEPS] = 0.0
                     x[LANDQ] = 1.0
+                    if (np.int64(P[P_H2]) & H2_LAND_DASH) != 0:
+                        x[AIRDASHED] = 0.0    # HERO2 T2: airDashed = false
     if landed and x[HARD] > 0 and (mode == M_NORMAL or mode == M_DASH or mode == M_SPRINT):
         x[MODE] = M_HARD_LAND
         x[MODE_T] = 0.0
@@ -1818,6 +1821,8 @@ def fixed_step(x, P, TT):
         x[JUMPING] = 0.0
         x[JSTEPS] = 0.0
         x[XVX] = 0.0                      # BackOnGround clears the extra air move velocities
+        if not was and (np.int64(P[P_H2]) & H2_LAND_DASH) != 0:
+            x[AIRDASHED] = 0.0            # HERO2 T2: BackOnGround's airDashed = false (a landing restores the dash)
     if was and not now and x[JUMPING] <= 0 and x[MODE] == M_NORMAL:
         x[LEDGE] = P[P_LEDGE]
     land_sp = (landed or resolve or (under and now)) and x[MODE] == M_DS_SPIKE
