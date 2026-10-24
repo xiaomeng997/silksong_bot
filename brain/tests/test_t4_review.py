@@ -131,6 +131,25 @@ def test_hcover_and_merge_h():
     assert (c[0, km.VX], c[1, km.VX]) == (-8.25, 8.25)
 
 
+def test_forced_direction_in_the_key(W):
+    """The held direction is a key slot when both lanes hold the same one (a dash forced left vs its right twin: two
+    clusters for that frame, not one hull claiming the 0.33 u between them); the free keys (lane 0 left, lane 1 right)
+    give 0."""
+    P = W.E.P
+    S = km.initial_state(W.params, 30.0, 8.0, ground=False, vy=-2.0, facing=1)
+    cu = np.array([-1.0, 0, 0, 0, 0, 0, 0])
+    keys = {}
+    for name, (m0, m1) in {"left": (-1.0, -1.0), "right": (1.0, 1.0), "free": (-1.0, 1.0)}.items():
+        a, b = S.copy(), S.copy()
+        a[km.MOVE], b[km.MOVE] = m0, m1
+        k = np.empty(ej.NKEY)
+        ej.vkey(b, cu, P, True, k)
+        ej.key_l0(k, a, P)
+        keys[name] = k
+    assert keys["left"][ej.K_MOVEF] == -1.0 and keys["right"][ej.K_MOVEF] == 1.0 and keys["free"][ej.K_MOVEF] == 0.0
+    assert not ej.keq(keys["left"], keys["right"])
+
+
 def test_queued_dash_twins_contained(W):
     """Airborne just over the floor with the air dash used and the dash held and queued: the landing restores the
     dash, a jump press with the dash and right held - the queued dash fires later in the air (the jump's dash

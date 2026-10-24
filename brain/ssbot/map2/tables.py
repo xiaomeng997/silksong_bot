@@ -78,7 +78,7 @@ VERSION = 1
 # T4: the engine revision a library's edges come from (the merge key with lane 0's extra velocity, the dominance
 # filter's horizontal cover, the up slash at the ceiling, no hidden jump press at a pass's start): a library built by
 # another engine is refused (Lib.load) - its edges and classes are another engine's
-ENGINE_REV = "t4b"
+ENGINE_REV = "t4c"
 TABLES_PATH = km.REPO / "knowledge" / "1.0.30000" / "kinematics" / f"a1n_tables_v{VERSION}.npz"
 
 

@@ -145,7 +145,12 @@ K_JDS, K_ATKT, K_ATKCD, K_CLCD, K_GLCD, K_DCD, K_JBUF, K_PREV, K_DIR, K_ABUF, K_
 # before, clusters with and without a left extra merged and the merged lane 0 kept the first child's decay (10 / s for
 # 5 / s: the left end lagged up to 0.24 u); vkey of one lane writes its own values here
 K_XVD0, K_XVXD0 = NK0 + 11, NK0 + 12
-K_C0 = NK0 + 13
+# T4: the held direction when both lanes hold the same one (a dash / Clawline press forces it: the next frame's steps
+# move every member that way) - 0 when the lanes differ (the free keys: lane 0 left, lane 1 right). A dash's left and
+# right twins (the dash not started) then stay two clusters for that frame - merged, their hull claimed the 0.33 u
+# between them no member reaches (the witness missed by 0.33 u); a frame later they merge as interval sets (exact)
+K_MOVEF = NK0 + 13
+K_C0 = NK0 + 14
 NKEY = K_C0 + NC
 # fields a no-op press may change (the filter compares children of one parent without them): the press edges and
 # the queues a fresh press reproduces (a buffered jump / queued dash fires in the frame a new press would)
@@ -219,6 +224,7 @@ def vkey(x, cu, P, floor, out):
         out[_XVXD] = 0.0               # (T1b: the decay of an extra velocity that is gone)
     out[K_XVD0] = out[K_XVD]           # (T4: lane 0's slots - key_l0 sets them from lane 0 for a cluster's key)
     out[K_XVXD0] = out[_XVXD]
+    out[K_MOVEF] = x[MOVE]             # (T4: this lane's; key_l0 keeps it only when lane 0 holds the same)
     # (T2: a queued jump also while the key is up in normal control in the air - the candidate CB_JH holds jump again
     # without a press, and the queue then fires on landing: two clusters differing only in a stale queue merged and the
     # merged one's 'jump held' child kept the first child's queue - a library node made elsewhere had none)
@@ -280,10 +286,13 @@ def keq(a, b):
 @njit(cache=True, error_model="numpy")
 def key_l0(key, x0, P):
     """T4: a cluster's merge key = lane 1's vkey + lane 0's extra air velocity (its side while faster than the run,
-    its decay while it runs): vkey's canonicalisation on lane 0's state."""
+    its decay while it runs): vkey's canonicalisation on lane 0's state; and the held direction when both lanes hold
+    the same one (K_MOVEF)."""
     xv = x0[XVX]
     key[K_XVD0] = ((1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0) + 0.0
     key[K_XVXD0] = (0.0 if xv == 0.0 else x0[XVXD]) + 0.0
+    if x0[MOVE] != key[K_MOVEF]:
+        key[K_MOVEF] = 0.0             # (the lanes hold different keys: free)
 
 
 @njit(cache=True, error_model="numpy")
@@ -291,7 +300,7 @@ def keq_lanes(a, b):
     """The two lanes' vkeys agree in the vertical (the divergence check): every slot but the extra air velocity's
     side / decay, which are horizontal (a left extra on lane 0 only)."""
     for i in range(a.shape[0]):
-        if i == K_XVD or i == _XVXD or i == K_XVD0 or i == K_XVXD0:
+        if i == K_XVD or i == _XVXD or i == K_XVD0 or i == K_XVXD0 or i == K_MOVEF:
             continue
         if a[i] != b[i]:
             return False
