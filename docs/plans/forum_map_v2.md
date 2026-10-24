@@ -435,6 +435,17 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   (x0.8 per step, one-sided) stays inside the transient's stored trajectory until it is spent. At use time: after a
   danger cut the set has holes - widen each piece and merge (still exact); walls are absolute - clip to the arena
   (x 14.01 .. 48.99) after every widening step, then go on widening (she can run along the wall or back).
+- INTO AN INERTIA STATE THE REFERENCE SPLITS BY vx (the person, 2026-10-23: 'A1 whose next frame is a left, a
+  middle and a right A3 cannot reference one 3-wide envelope like A1 - it references three times'): A1 has no
+  horizontal memory, so one widened interval covers every key; the float's future depends on its vx, so entering it
+  needs one reference per vx, each with its own x interval. There may be more than three: the umbrella's antic (5 - 6
+  frames, the 1-frame key lag, accel 1.0 / decel 0.25 per step) gives a vx per key pattern - merge only bit-equal vx
+  (as M1's clusters), or, if too many, group them and bound each group by its always-left / always-right lanes (an
+  over-approximation: a few extra candidates, rejected by the final exact simulation; nothing reachable is lost).
+  They MERGE BACK once the lanes saturate: after a few steps of a held key the lanes reach the float's max speed
+  whatever the entry vx, so from then on every branch widens by the same constant per step (like A1, another speed)
+  and the branches' intervals unite into one reference. The split lives only in that transient (an unspent 'timer',
+  as for the steady-state rule).
 Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
