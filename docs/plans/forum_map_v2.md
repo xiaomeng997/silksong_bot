@@ -422,6 +422,15 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   found exactly by bisection with the strike module's judge. Then: no partial cells (the reflex's 8.5 - 150 ms
   re-check was mostly the partial cells), and the windows ARE the backward tables' goal regions (window x envelope
   = interval against interval). Build them with the tables (T2's goal regions); move the reflex onto them after.
+- LONG HORIZON = FEW EVENTS, MANY EVENTS = SHORT HORIZON (the person, 2026-10-24): an 'event' is a discrete key
+  change that changes the vertical / the mode (a jump press / hold / release, a dash, the umbrella open / close, the
+  Clawline, their cancels) - not left / right (free every frame, inside the envelope's widening) and not an attack in
+  normal control. Looking ~2 s ahead is needed only for TRAPS - the safe region closing from afar until it vanishes,
+  e.g. a far Clapper's jump cast (the big rune): during its antic plan to pass under it as it jumps - and escaping is
+  just running (0 - 1 event: at most one jump / dash). So: the long checks (the exits, the traps; 120 - 180 f) run
+  with <= 1 event - cheap with the tables (1 event 60 f: 1.5 ms); several events only in the short goal-directed
+  chains toward a strike window (the hook -> umbrella -> down slash class, < ~1 s), backward from the window and
+  bridged. No '3+ events x 120 f' passes (T2 measured 2.4 s for 3 events x 60 f - not needed).
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
