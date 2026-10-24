@@ -1,10 +1,11 @@
 {
  "version": 1,
- "what": "map2 stage T1: the A1_n no-dash table library (ssbot.map2.tables) - the M1 engine's per-cluster frame memoised on relative cluster states (nodes), with their edges per physics-step count; the flattened rows of the canonical steady starts",
+ "what": "map2 stages T1 / T2: the A1_n table library (ssbot.map2.tables) - the M1 engine's per-cluster frame memoised on relative cluster states (nodes), with their edges per physics-step count and dash status (T2: the no-dash lists, every candidate with the air dash unused - the bridge's entries - and used; the air dash's own frames expand lazily); the flattened rows of the canonical steady starts without / with the dash",
  "rebuild": [
   "python -m ssbot.tools.t1_tables build OUT.json --depth 6",
   "python -m ssbot.tools.t1_tables build OUT.json --depth 6 --no-claw --terrain arena",
-  "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1"
+  "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1",
+  "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1 --dash"
  ],
  "hero_model": "kinematics/hero_wanderer_forum.json + SSBOT_FORUM_HERO2 (kinematics.HERO2_OVERRIDES, every H2 bit of the build: the 'hero2' field); a library refuses to load under another hero model (params_vector_sha1)",
  "files": {
@@ -12,34 +13,46 @@
    "version": 1,
    "claw": true,
    "terrain": "floor",
-   "hero2": 8191,
-   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
+   "hero2": 16383,
+   "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
    "T": 120,
    "maxev": 1,
    "q": 0.05,
-   "bytes": 53198784,
-   "sha1": "f46722699c4532211f13f86d7a750917bef46df0"
+   "bytes": 53198795,
+   "sha1": "ff19eccd8df6af2a5b09c52206d4ff2b1e8708fb"
+  },
+  "a1n_flat_v1_ev1_t120_dash.npz": {
+   "version": 1,
+   "claw": true,
+   "terrain": "floor",
+   "hero2": 16383,
+   "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
+   "T": 120,
+   "maxev": 1,
+   "q": 0.05,
+   "bytes": 86445714,
+   "sha1": "3ca26f986e12dc828fafef4d9bf5e2d40d3ff66a"
   },
   "a1n_tables_v1.npz": {
    "version": 1,
    "kind": "map2 A1_n no-dash tables (stage T1)",
    "claw": true,
    "terrain": "floor",
-   "hero2": 8191,
+   "hero2": 16383,
    "abilities": 1007,
    "opts": 131,
    "clear": 2.5,
    "clear_up": 1.0,
    "floor_top": 3.015,
    "ceil_bot": 15.15,
-   "nodes": 2264311,
-   "edges": 7803821,
-   "classes": 1329371,
-   "instances": 864651,
+   "nodes": 2404844,
+   "edges": 8445699,
+   "classes": 1730415,
+   "instances": 893734,
    "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
-   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
-   "built": "2026-10-23 23:28:18",
-   "build_s": 42.8,
+   "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
+   "built": "2026-10-24 02:06:48",
+   "build_s": 48.9,
    "depth_limit": 6,
    "warm_passes": [
     [
@@ -52,29 +65,29 @@
     ]
    ],
    "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
-   "bytes": 194086364,
-   "sha1": "22bf891d066bd35d079f86c7d3ba2290dcf605a0"
+   "bytes": 223041211,
+   "sha1": "4c78fe2edc88e5a082e00fb6fff2d6551f8d180d"
   },
   "a1n_tables_v1_arena_noclaw.npz": {
    "version": 1,
    "kind": "map2 A1_n no-dash tables (stage T1)",
    "claw": false,
    "terrain": "arena",
-   "hero2": 8191,
+   "hero2": 16383,
    "abilities": 1007,
    "opts": 128,
    "clear": 2.5,
    "clear_up": 1.0,
    "floor_top": 3.015,
    "ceil_bot": 15.15,
-   "nodes": 721029,
-   "edges": 2234642,
-   "classes": 609392,
-   "instances": 230508,
+   "nodes": 815147,
+   "edges": 2482927,
+   "classes": 787449,
+   "instances": 249115,
    "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
-   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
-   "built": "2026-10-23 23:27:51",
-   "build_s": 15.6,
+   "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
+   "built": "2026-10-24 02:07:47",
+   "build_s": 17.4,
    "depth_limit": 6,
    "warm_passes": [
     [
@@ -87,8 +100,8 @@
     ]
    ],
    "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
-   "bytes": 71454018,
-   "sha1": "4a59814aa46b4d0ec37559b864548ab693648e07"
+   "bytes": 84458975,
+   "sha1": "1bf38e1dc49e1dcbbb129f00f503bc544d8234d8"
   }
  }
 }

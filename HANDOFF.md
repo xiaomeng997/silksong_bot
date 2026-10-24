@@ -13546,3 +13546,197 @@ now allows tools/t1_tables.py like the other two.
 Commits (branch worktree-wf_f1846551-5f9-1, not merged): 6ea46f8 (the library, the chain, the tool), 9e7939c,
 708dc66 (fixes found by the sweep), 44f7912 (T1b: the sprint jump), 6fd447d (the engine with the sprint jump: its
 attack and Clawline cancels, lane_drift), 558104a (the Clawline block's floor), and the docs / header commit.
+
+## Task map2 - A1_n recursive tables - stage T2: the air dash as the bridge (offline; the forward set with the air dash from the tables, exact against the M1 engine with the dash and with the search's danger; the dash bundle; the backward sets of goal regions; the strike windows as shapes; the flattened union's first touch) (branch worktree-wf_f1846551-5f9-1, 2026-10-24; forum.md §104)
+
+The task: docs/plans/forum_map_v2.md (main) 'THE A1_n RECURSIVE TABLES' - the dash bundle once per physics phase, the
+backward tables from a goal region, the bridge (meet in the middle: F(t1) shifted by a dash variant meets B_e(t1 +
+T_d), the dash tube cut by danger, one bridge per segment between refills), the flattened union per start (with and
+without the dash) as the upper bound and prune; exactness against the M1 engine WITH the air dash (a) on the 400
+recorded starts, (b) with M3's 236 situations' danger as the search builds it, (c) on the strike windows of those
+situations; the lead's note windows (the goal regions as shapes). Offline only; nothing in the bot imports
+`ssbot.map2` (the import firewalls gain `tools/t2_tables.py`). Data `C:\ssbot\data\m2_play\map2\a1n\t2` (`final\`
+the sweep after every fix, `final\SUMMARY.txt`, `scripts\`).
+
+### What was built
+
+- **Edge lists per dash status** (`tables.py`): every node holds its edges per step count, pass kind and DASH STATUS -
+  du 0 T1's no-dash lists (OPT_NO_ADASH, the dash unused), du 1 every candidate with the dash unused (the BRIDGE'S
+  ENTRIES marked `EI_ENT`: a dash pressed / held / queued in the air), du 2 every candidate with the dash used (the
+  dash's own frames - its hold, the attack / jump / Clawline cancels, the re-press -, the umbrella's dash press that
+  only closes it, a queued dash), du 3 the no-dash lists with the dash used (T1's chain from a start whose dash is
+  used); `EI_AD` the child's air dash after the frame (a landing restores it). `EOFF[n, s, 4 du + 2 fl + lim]`.
+- **The forward set WITH the air dash** (`Lib.forward(..., dash=True)`): each cluster carries its air-dash bit (a key
+  of the merge, as the engine's vkey holds AIRDASHED; the merge classes per status `I_CLS1 / I_CLSF1`: the engine's key
+  reads AIRDASHED); a cluster with the dash unused takes du 1 in the engine's candidate order (the no-dash children =
+  T1's list, checked, and the bridge's entries among them), with it used du 2. This is the no-dash chain + the dash
+  bundle entered at every frame where a press is allowed + the post-dash chain, merged as the engine merges.
+- **The dash bundle** (`bridge.bundle`, `bundle_relative`; `t2_tables bundle`): from a state, the entries of the press
+  frame and the dash family on the full lists until each branch leaves the dash (out of M_DASH / the air sprint, or on
+  the ground): per frame the tube rows (node, dy, x offsets, label), the ends grouped by (end node, dt, dy) with their
+  x offset intervals. In the library the bundle is the dash family's nodes and edges, memoised per node and step count
+  (per physics phase through the step pattern) - the spec's 'once per phase'.
+- **The backward set** (`bridge.backward`, numba): a goal region (rows: cluster, x interval) pulled back over a pass's
+  pieces (x at the parent reaches x' iff x' - x is in the piece's lane displacement; the danger / wall cuts are the
+  pieces' own): per cluster the x set from which the goal is reached - the tube forward x backward; `Back.reached`
+  (her start), `bridge_presses` (the air-dash presses on the tube: the bridge's t1 and x). Works on the engine's
+  passes and the tables' alike.
+- **The strike windows as shapes** (`wshape.py`; the lead's note windows): the down slash's PRESS REGION per press
+  frame x her state at the press (her vertical after the press - the swing does not move her -, the swing's run reach
+  from her lanes, the facing mirroring the polygons): the x set of her transform from which both alternations meet the
+  robust body box in press + 3 .. + 9 before she lands - exact boundaries (the polygon's x extent inside the box's slab;
+  the two alternations' contact frames chained by interval arithmetic), checked against the strike judge
+  (`strike.dslash_contact`) on simulated key sequences.
+- **The flattened union with the dash** (`Lib.flat(dash)`, `t1_tables flat --dash`) and `bridge.touch_frame` (the
+  first frame her flattened union - the pass without danger, walls clipped - meets a danger box; before it the
+  danger-cut pass is that pass frame for frame).
+- **The hero model: a landing restores the air dash** - HERO2 bit `H2_LAND_DASH` (8192, in H2_ALL;
+  `SSBOT_FORUM_HERO2_OFF=8192` gives T1b's model): BackOnGround sets airDashed false (decompiled HeroController
+  10292 - 10293, on the transition to the ground); kin_jit kept it set after an air dash (T1's open item 3). The spec's
+  refill rule ('a pogo, a hooked Clawline or a landing restores the dash') matches the game; the engine did not.
+  kin_check on M4a's 432 + M0's 496 hero-only trials: 899 / 928 within 0.1 u with and without the bit, 0 trials
+  changed (no trial dashes, lands and dashes again).
+- **Three engine keys that merged states with different futures** (env_jit.vkey; found by the exactness runs with the
+  dash - the tables' node made in another pass had another value of the canonicalised field): the air sprint loop's
+  timer (read by the Attack Cancel's gate h2_spr_atk_t: a loop entered early by a jump press near the floor - Allow
+  Shuttlecock - is still under it); the jump / attack queues in normal control while a dash can still start (the
+  sprint reads them: its first frame's jump, its Attack Cancel, its buffered jump at the regain); a queued jump in its
+  window while the key is up in normal air control (the candidate CB_JH holds jump again without a press; the queue
+  then fires on landing). Each made the engine keep the first merged child's value - an over-approximation in the
+  engine itself; the tables met another child first.
+- Lib.save keeps a grown library's counts (a loaded library's build meta overwrote them: a library saved after lazy
+  growth could not be loaded); tests `tests/test_map2_bridge.py` (14).
+
+### Numbers (`C:\ssbot\data\m2_play\map2\a1n\t2\final`, after every fix; `SUMMARY.txt`, `scripts\summarize.py`)
+
+Libraries rebuilt with T2's code (`t1_tables build --depth 6`): the default (Clawline in, the floor) 2,404,844 nodes /
+8.4M edges, 48.9 s + save 31.6 s, 223 MB, load 9.3 s; the search's (no Clawline, floor + ceiling) 815,147 nodes /
+2.5M edges, 17.4 s + 11.3 s, 84 MB, load 3.2 s. They hold no dash-family nodes yet (du 1 / 2 expand lazily: the
+'cold' column).
+
+(a) Exactness WITH the air dash (Engine.forward opts 0 vs Lib.forward(dash=True); per frame the x interval sets per
+(height, end-condition bits), heights bit-equal, ends within 1e-9 u; D = the default library on the floor, S = the
+search's on the arena; ms one query, warm / cold = the first query on a freshly loaded library; x the median speed-up):
+
+    run                       starts  exact  worst dx   eng p50/p90     tab p50/p90    cold p50/p90   x p50
+    exactD_ev1_t60               479    479   6.4e-14     13.5/30.1        2.7/5.9      13.1/265.1    5.32
+    exactD_ev2_t30               479    479   1.3e-13     58.4/179.2      12.3/42.0     71.0/1293.1   5.06
+    exactD_ev2_t30_danger        395    395   1.3e-13     53.2/163.3      11.2/39.4     47.3/1175.4   4.45
+    exactD_ev3_t20               479    479   7.8e-14    207.0/551.3      54.8/103.2    99.5/611.5    3.93
+    exactD_free_t12 (no limit)    63     63   4.3e-14   1231.9/1748.1    308.6/442.5   310.7/449.5    3.95
+    exactS_ev1_t60               479    479   6.4e-14     12.5/20.1        2.3/4.8       9.3/180.7    4.90
+    exactS_ev1_t60_danger        395    395   6.4e-14     10.9/16.5        2.1/4.4       3.8/145.5    4.26
+    exactS_ev2_t30               479    479   1.3e-13     47.4/128.2       8.7/24.6     63.3/906.9    5.76
+    exactS_ev2_t30_danger        395    395   1.3e-13     42.3/109.0       7.4/20.6     32.5/738.6    5.36
+    exactS_ev2_t60               197    197   2.6e-13    274.0/534.6      43.9/107.8   444.6/4522.7   6.09
+    exactS_ev3_t40                99     99   1.7e-13   2383.6/4888.8    628.5/1127.6 1223.2/6651.0   3.96
+
+    T1's no-dash chain after T2's key fixes: t1_exact_floor_ev1_t60 479 / 479, t1_exactS_ev2_t30 479 / 479 (before
+    the per-dash classes 475 / 479: 4 pogo starts with the dash used), T1's entry from 406 transitional states 1,218 /
+    1,218. Entry from any state WITH the dash (t1_tables entry --dash, the search's library, every event 10 f / <= 1
+    event 60 f / <= 2 events 30 f): 1,217 / 1,218 exact - one sprint-jump attack cancel start (scancel+12, <= 1 event
+    60 f) 0.032 u short at frame 60: a merged cluster's left lane with the air sprint attack cancel's extra velocity
+    -16.2 where the engine's had ~-18.2 (open item 2).
+
+(b) M3's 236 situations, the search's own passes (the root's prediction, the union of the branches' damage with the
+margins + the walls, the arena, no Clawline): <= 1 event 60 f 236 / 236 exact, <= 2 events 30 f 236 / 236, the exit
+check per branch (<= 1 event 40 f in that branch's danger) 673 / 673 exact, the same verdict 673 / 673:
+
+    pass                engine p50/p90/p99     tables warm p50/p90/p99   cold p50/p90     x p50   no-dash chain p50/p90
+    <= 1 event 60 f     9.9 / 18.8 / 38.1      2.6 / 5.0 / 12.7          4.1 / 61.2        3.59    2.2 / 11.7
+    <= 2 events 30 f    44.4 / 103.1 / 323.1   9.3 / 23.2 / 91.2         16.2 / 501.3      4.79    7.1 / 27.8
+    exit check (673)    5.5 / 11.8 / 20.6      1.5 / 3.0 / 6.1           -                 ~3.7
+
+    One decision as M3 / M4a counted it (the two approach passes + ~220 exit passes, p50): engine ~1.3 s, tables
+    ~0.35 s (M4b's exit probes answer most exits before a pass in the live search: there the gain is mostly the
+    approach passes').
+
+(c) The strike windows (search.Searcher.windows' rows before its selection) of those passes: 69,874 (<= 1 event 60 f)
+and 37,056 (<= 2 events 30 f) windows, the engine's and the tables' equal in every situation (the same window keys,
+the same x intervals per height); every window's BACKWARD set over the tables' chain holds her start (69,874 / 69,874,
+37,056 / 37,056); the no-dash chain's windows are a subset in every situation, and 2,810 / 3,692 windows are reached
+ONLY through the bridge (the air dash; its press frame on their tubes p50 26 / 8, p90 40 / 17); the backward set of
+one window 0.03 - 0.9 ms (<= 1 event 60 f) / 0.2 - 12 ms (<= 2 events 30 f), p50 - p100. Longer passes
+(`sits_long.json`, no exits: <= 2 events 120 f and <= 3 events 60 f): exact and the windows equal in every situation
+run; e.g. engine 0.9 / 8.4 s, tables 0.16 / 2.5 s per pass.
+
+The bundle (`bundle_search6.json`, `bundle_default6.json`; free space, A1_n n = 0 .. 30 x the 6 phase classes,
+grouped by the physics-step pattern of the press frame): the ends' (dt, dy, x offsets) are THE SAME for every A1_n of
+one step pattern (31 / 31 in each of the 6 patterns: the spec's 'the same bundle from every A1_n' holds - the dash
+zeroes vy every step), and the end NODES too but one of ~4,900 (it carries the press frame's vy). Per bundle: 5
+entries (the press left / right, with the jump held left / right, the queue); the search's library (no Clawline)
+8.7k - 12k states and 4,689 - 5,121 end groups (end node, dt, dy); with the Clawline (the default) 24k - 37k states
+and 19.8k - 30.2k end groups (a Clawline out of every sprint frame, both ways, both throws). A2 / A4 alike; A3 (Float
+Idle) 3 entries (the umbrella's dash cancel), 3 ends.
+
+The flattened layer with the dash (`a1n_flat_v1_ev1_t120_dash.npz`, 330 canonical tables x 120 f, <= 1 event):
+86 MB, 13.4 s; every checked frame's rows are the chain's own raster (4,800 / 4,800), 9,485 chain points inside,
+39,782 points of danger-cut chains inside (an upper bound); without the dash (rebuilt) 53 MB. On the situations' exit
+checks (`flat_sits.json`, the walls clipped): her flattened union meets the branch's danger at frame 0 - 25 (p50 8) in
+673 / 673 checks - none is answered by the flat union alone; before the touch the danger-cut chain equals it frame for
+frame (673 / 673).
+
+The window shapes (`shapes.json`, 235 situations, the <= 1 event 60 f pass, the down slash, per (branch, Clapper,
+cluster at frame t)): the search's predicate 406,428 / the shape 513,231 / both 402,839; the predicate ALONE 3,589
+(0.9 %: false windows - its 0.5 u slack and its extrapolated height); the shape alone 110,392 (+27 %: contacts at
+press + 5 / 7 / 8 / 9, which the predicate's dc 3 / 4 / 6 do not test, and the alternations' frames apart). The judge
+check (concrete key sequences rolled by the reference model, strike.dslash_contact): points just inside the shape
+1,176 / 1,194 hit (the 18 others - exhaustive 3^10 sequences, none - all at a cluster's interval end: the shape unites
+both facings, and a member at the very end of a cluster faces one way only), points just outside 0 / 268 hit.
+
+### Findings for the person
+
+1. THE SPEC'S BRIDGE IS EXACT AS A CHAIN: the forward set with the air dash = the no-dash chain + the bundle entered
+   at every frame where a press is allowed + the post-dash chain, merged as the engine merges - every exactness run
+   equal to the engine, with and without danger. The bundle IS shared by every A1_n (per physics-step pattern), as
+   the person said; in the library it is memoised per node, not a separate table.
+2. The tables are 4 - 6 x faster than the engine with the dash (warm), but a cold query on the prebuilt library is
+   slower than the engine (p90 0.5 - 4.5 s: the dash family's nodes are expanded on the fly) - the library must be
+   warmed with dash passes before it is used live (open item 1).
+3. Longer horizons stay expensive with full event families: <= 3 events 60 f is 2.5 s in the tables (8.4 s in the
+   engine) - 120 f / 3+ events need the meet in the middle with precomputed backward tables or a coarser layer; in the
+   M3 situations the danger touches her flattened union within 0 - 25 frames (p50 8), so the flat layer prunes little
+   near the Clappers.
+4. The search's window predicate misses ~27 % of the down slash windows the exact shapes find and has ~0.9 % false
+   ones (its dc 3 / 4 / 6 only and the extrapolated height); the shapes are exact against the strike judge (but the
+   facing at a cluster's end).
+5. The game restores the air dash on landing (BackOnGround); the model did not (H2_LAND_DASH now). No trial covers an
+   air dash -> landing -> air dash: a forced trial before a plan leans on it.
+6. Four merge-key holes in the engine (the air sprint loop's timer, the queues while a dash can start, a stale jump
+   queue under CB_JH, the dash status in the classes) - each made the engine's own result depend on which member came
+   first; fixed (the engine's passes are a little finer now).
+
+### The spec's points (as built)
+
+- The air dash is not in the no-dash tables: du 0 are T1's lists; the bundle is the du 1 entries + the du 2 frames in
+  the dash; 'the dash used' is per cluster (the segment's property), restored by a landing (H2_LAND_DASH), a pogo
+  (EV_POGO) or a hooked Clawline (the strike module) - one bridge per segment between refills is what the bit gives.
+- The dash tube cut by danger: every frame of the bundle is cut at its own height (the chain's pieces), as the engine
+  does; the bridge's presses on a goal's tube come from the backward set.
+- The jump-held variants: the bundle's CB_JH entries (the dash's steps at gravity 0.1) - their own nodes, off the A1
+  lattice ('Points to settle' 2).
+- Backward tables: per goal over the chain's pieces (exact with danger and terrain), not precomputed per dash end
+  state (open item 3).
+- Flattened unions with and without the dash per canonical start: built (knowledge files), the first-touch rule
+  checked on the situations.
+
+### Open items
+
+1. Warm the search's library with dash passes (the M3 situations / recordings) before T3 uses it: cold queries 0.5 -
+   4.5 s p90 now; memory ~3 KB per node + its edges (building the default library took ~11 GB).
+2. The one entry case off by 0.032 u (sprint-jump attack cancel, <= 1 event 60 f, frame 60):
+   `t2\scripts\dbg_entry.py` reproduces it (the library reloaded every 40 starts; starts 361 .. 380 of
+   t1_tables.transitional_starts seed 1) - a merged cluster's extra velocity; not found yet.
+3. Precomputed backward tables per dash end state (B_e = the goal minus the end state's flattened forward table) and a
+   meet query that skips the post-dash chains: not built (with the danger touching within ~8 frames they would need
+   the chain anyway in the M3 situations); the backward set over the chain is exact and cheap.
+4. Window shapes: the down slash only; the hooked Clawline's shape (the ray's reach, the hold height, the control), the
+   shapes as precomputed knowledge per (Clapper move, frame) and the reflex branch's validation events: not done; the
+   facing at a cluster's interval end (<= 2 run steps) is over-approximated.
+5. T1's open items 2 and 4 stand (the sprint's dash attack, the Clawline from the ground).
+6. Nothing ran live; no merge to main.
+
+Commits (branch worktree-wf_f1846551-5f9-1, not merged): 2947cbf (the dash mode, H2_LAND_DASH, two key fixes),
+ca271b8 (bridge / wshape / t2_tables / tests), 56fd1d4 (the per-dash classes, du 3, the flattened layer with the dash,
+touch_frame), 845d316 (the stale jump queue key, Lib.save's counts), 26a02f3 (the bundle at a Clawline), and the docs /
+header commit.
