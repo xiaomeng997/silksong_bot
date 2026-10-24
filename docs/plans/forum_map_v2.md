@@ -452,6 +452,16 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   (accel 1.0 / decel 0.25 per step, a full Umbrella Turn ~19 f): those in-between vx are covered by each class's lanes,
   not by more classes. The float's vy is one fixed curve (+0.5 at the Inflate's end, -0.13 u/s per physics step to -6
   in ~60 f; M1: phases 0 .. 58) - no vertical classes; so ~59 phases x 3 entry classes (x the physics-step phase).
+  SUPERSEDED THE SAME DAY - THE FLOAT'S HORIZONTAL IS AN ENVELOPE TOO (the person, 2026-10-23: 'planned ahead she can
+  reach any x in between closely enough'): always-left gives the leftmost lane, always-right the rightmost, and with
+  planned key changes every x in between is reached closely enough, so the float's x reach per frame is the interval
+  between the two lanes - an envelope like A1's, only its growth follows the lanes instead of a constant. The entry vx
+  needs no classes either: the reference carries an x interval AND a vx interval; the low lane starts from (x_lo,
+  vx_lo) holding left, the high lane from (x_hi, vx_hi) holding right. One float table per vertical phase (~59).
+  Checks at build time: (1) monotonicity - a start further left / slower never reaches further right later -
+  including the Umbrella Turn (~19 f) on a reversal; (2) the gaps - key changes are per frame, so the in-between x are
+  dense discrete points: measure the largest gap, it must be well under a strike window's width; (3) the keys and the
+  vx at a chosen x come from M1's horizontal tracker (the witness), and the final exact simulation confirms them.
   They MERGE BACK once the lanes saturate: after a few steps of a held key the lanes reach the float's max speed
   whatever the entry vx, so from then on every branch widens by the same constant per step (like A1, another speed)
   and the branches' intervals unite into one reference. The split lives only in that transient (an unspent 'timer',
