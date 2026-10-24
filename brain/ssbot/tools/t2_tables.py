@@ -241,7 +241,10 @@ def sits_cmd(args) -> int:
     if args.n:
         sits = sits[:args.n]
     W = ms.World()
-    sr = ms.Searcher(W, ms.Cfg())
+    cfg = ms.Cfg()
+    if args.passes:
+        cfg = cfg.replace(passes=tuple(tuple(int(v) for v in x.split(":")) for x in args.passes.split(",")))
+    sr = ms.Searcher(W, cfg)
     if not np.array_equal(W.TT, lib.TTg):
         print("note: the search's terrain differs from the library's (the engine runs on the library's)", flush=True)
     per = []
@@ -297,7 +300,7 @@ def sits_cmd(args) -> int:
                 "bridge_press_t": press_t, "ms_windows": ms_we, "ms_back_per_window": ms_back})
         # the exit check per branch from her state (the search's: <= 1 event, 40 frames, the branch's danger)
         ex = []
-        for b in node.pred.branches:
+        for b in ([] if args.no_exits else node.pred.branches):
             dz, _, _ = ms._packed_danger(b, node.k0, sr.cfg.exit_h, -1, sr.cfg.margins)
             fe = E.forward(E.start_state(S), sr.cfg.exit_h, danger=dz, terrain=lib.terr,
                            max_events=sr.cfg.exit_events, claw=False, opts=0)
@@ -310,7 +313,7 @@ def sits_cmd(args) -> int:
         per.append(rec)
         ok = all(p["ok"] and p["windows_equal"] for p in rec["passes"]) and all(e["ok"] for e in ex)
         if not ok or si % 20 == 0:
-            p0, p1 = rec["passes"]
+            p0, p1 = rec["passes"][0], rec["passes"][-1]
             print(f"{si:3d} ok {ok} pass1 {p0['ok']} w {p0['windows_e']}/{p0['windows_t']} eq {p0['windows_equal']} "
                   f"bridge {p0['bridge_only']} ms {p0['ms_e']:.1f}/{p0['ms_t']:.1f} | pass2 {p1['ok']} w "
                   f"{p1['windows_e']}/{p1['windows_t']} eq {p1['windows_equal']} bridge {p1['bridge_only']} ms "
@@ -559,9 +562,68 @@ def shapes_cmd(args) -> int:
     return 0
 
 
+def flat_cmd(args) -> int:
+    """FLATTENED AND CHAINED, BOTH, on M3's situations: per situation her pass WITHOUT danger (the flattened union of
+    her state, with the dash) for the exit check's horizon, its first touch of each branch's danger (bridge.touch_frame)
+    - the danger-cut chain equals it frame for frame before the touch (checked), and an exit check whose danger never
+    touches it is answered by it (alive at the horizon) - against the per-branch chains: the verdicts and the times."""
+    t1.idle()
+    from ssbot.map2 import search as ms
+    from ssbot.tools import m4b_speed as m4b
+    lib = _lib(args)
+    sits = m4b.load_sits()
+    if args.n:
+        sits = sits[:args.n]
+    W = ms.World()
+    sr = ms.Searcher(W, ms.Cfg())
+    H, ne = sr.cfg.exit_h, sr.cfg.exit_events
+    res = {"exits": 0, "untouched": 0, "verdict_equal": 0, "prefix_equal": 0, "prefix_frames": 0, "touch": [],
+           "ms_flat": [], "ms_touch": [], "ms_chain": []}
+    t0 = time.perf_counter()
+    for si, sit in enumerate(sits):
+        try:
+            node = sr.root(sit)
+        except Exception:
+            continue
+        S = node.S
+        # (the walls clip - the spec's use-time rule; the search cuts them as danger boxes: the same sets)
+        wall = (float(ms.WALL_BOXES[0, 2]), float(ms.WALL_BOXES[1, 0]))
+        lib.forward(S, H, floor=True, maxev=ne, dash=True, wall=wall)
+        f0 = lib.forward(S, H, floor=True, maxev=ne, dash=True, wall=wall)
+        res["ms_flat"].append(f0.seconds * 1e3)
+        for b in node.pred.branches:
+            dz, _, _ = ms._packed_danger(b, node.k0, H, -1, sr.cfg.margins)
+            dzb = [ms.branch_danger(b, node.k0 + t, sr.cfg.margins) for t in range(H + 1)]
+            t_ = time.perf_counter()
+            tf = br.touch_frame(f0, dzb)
+            res["ms_touch"].append((time.perf_counter() - t_) * 1e3)
+            fd = lib.forward(S, H, danger=dz, floor=True, maxev=ne, dash=True)
+            res["ms_chain"].append(fd.seconds * 1e3)
+            res["exits"] += 1
+            res["touch"].append(tf)
+            upto = H if tf < 0 else tf - 1
+            ok = all(t1.frame_sets(f0, t) == t1.frame_sets(fd, t) for t in range(upto + 1))
+            res["prefix_equal"] += int(ok)
+            res["prefix_frames"] += upto + 1
+            if tf < 0:
+                res["untouched"] += 1
+                res["verdict_equal"] += int((f0.count(H) > 0) == (fd.count(H) > 0))
+        if si % 40 == 0:
+            print(f"{si:3d} exits {res['exits']} untouched {res['untouched']} prefix_equal {res['prefix_equal']} "
+                  f"{time.perf_counter() - t0:.0f} s", flush=True)
+    summ = {"situations": len(sits), "exits": res["exits"], "untouched_by_danger": res["untouched"],
+            "untouched_verdict_equal": res["verdict_equal"], "prefix_equal": res["prefix_equal"],
+            "touch_frame": _q([t for t in res["touch"] if t >= 0], (0, 10, 50, 90, 100)),
+            "ms_flat_per_state": _q(res["ms_flat"]), "ms_touch_per_branch": _q(res["ms_touch"]),
+            "ms_chain_per_branch": _q(res["ms_chain"]), "wall_s": round(time.perf_counter() - t0, 1)}
+    print(json.dumps(summ), flush=True)
+    Path(args.out).write_text(json.dumps(summ, default=float))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["exact", "bundle", "sits", "shapes"])
+    ap.add_argument("cmd", choices=["exact", "bundle", "sits", "shapes", "flat"])
     ap.add_argument("out")
     ap.add_argument("--lib", default="")
     ap.add_argument("--T", type=int, default=30)
@@ -574,9 +636,11 @@ def main(argv=None) -> int:
     ap.add_argument("--terrain", default="floor", choices=list(tb.TERRAINS))
     ap.add_argument("--reload", type=int, default=0)
     ap.add_argument("--danger", action="store_true")
+    ap.add_argument("--passes", default="", help="sits: the passes (events:frames, ...; default the search's)")
+    ap.add_argument("--no-exits", action="store_true")
     ap.add_argument("--check", type=int, default=0, help="shapes: the judge check on this many (cluster, window)s")
     args = ap.parse_args(argv)
-    return {"exact": exact_cmd, "bundle": bundle_cmd, "sits": sits_cmd, "shapes": shapes_cmd}[args.cmd](args)
+    return {"exact": exact_cmd, "bundle": bundle_cmd, "sits": sits_cmd, "shapes": shapes_cmd, "flat": flat_cmd}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -654,7 +654,7 @@ def flat_cmd(args) -> int:
     for kind, ph, var in FLAT_KEYS:
         for ac in range(6):
             S, terr = env.canonical(lib.params, kind, ph, ac, var, False)
-            fl = lib.flat(S, T, maxev=mev, floor=(kind == "G"))
+            fl = lib.flat(S, T, maxev=mev, floor=(kind == "G"), dash=args.dash)
             name = f"{kind}{var}@{ph}/a{ac}"
             tabs[name] = {"all": fl[0], "dslash": fl[ej.COND_DSLASH], "claw": fl[ej.COND_CLAW],
                           "_counts": fl["clusters"]}
@@ -662,11 +662,11 @@ def flat_cmd(args) -> int:
                           "box_T": fl["box"][-1].tolist()}
     build_s = time.perf_counter() - t0
     out_path = Path(args.lib_out) if args.lib_out else tb.tables_path(lib.claw, lib.terrain).with_name(
-        f"a1n_flat_v{tb.VERSION}_ev{mev}_t{T}.npz")
+        f"a1n_flat_v{tb.VERSION}_ev{mev}_t{T}{'_dash' if args.dash else ''}.npz")
     arrs = {"_meta": np.array(json.dumps({"version": tb.VERSION, "T": T, "maxev": mev, "q": env.QROW,
                                           "keys": list(tabs), "claw": lib.claw, "terrain": lib.terrain,
                                           "hero2": int(lib.P[km.P_H2]), "params_vector_sha1": tb._sha1(lib.P),
-                                          "built_s": round(build_s, 1)}))}
+                                          "built_s": round(build_s, 1), "dash": bool(args.dash)}))}
     for k, tbl in tabs.items():
         for c in ("all", "dslash", "claw"):
             fr = tbl[c]
@@ -695,7 +695,7 @@ def flat_cmd(args) -> int:
         kind = "G" if kind_var.startswith("G") else kind_var[:2]
         var = kind_var[1:] if kind == "G" else kind_var[2:]
         S, terr = env.canonical(lib.params, kind, ph, ac, var, False)
-        fw = lib.forward(S, T, floor=(kind == "G"), maxev=mev)
+        fw = lib.forward(S, T, floor=(kind == "G"), maxev=mev, dash=args.dash)
         xs, ys = float(S[km.PX]), float(S[km.PY] + lib.hh)
         for t in rng.choice(np.arange(1, T + 1), size=8, replace=False):
             g, x0, x1, y0, y1 = fw.frame_rows(int(t))
@@ -708,7 +708,7 @@ def flat_cmd(args) -> int:
         # (the first version compared the cut chain 'before its first touch' found from whole children killed
         # only - a partial cut went unseen and its frames counted as unequal)
         dz = m1.random_danger(rng, S, T, lib.hh)
-        fd = lib.forward(S, T, floor=(kind == "G"), maxev=mev, danger=dz)
+        fd = lib.forward(S, T, floor=(kind == "G"), maxev=mev, danger=dz, dash=args.dash)
         for t in range(1, T + 1):
             first_n += 1
             r = fw.frame_rows(t)
@@ -944,6 +944,7 @@ def main(argv=None) -> int:
     ap.add_argument("--view-depth", type=int, default=30, help="checks: the table view's depth (frames)")
     ap.add_argument("--reload", type=int, default=0, help="reload the library every n starts (bounds the lazy growth)")
     ap.add_argument("--danger", action="store_true", help="exact: m1's random moving danger boxes cut both passes")
+    ap.add_argument("--dash", action="store_true", help="flat: the union with the air dash (T2's bridge)")
     args = ap.parse_args(argv)
     return {"build": build_cmd, "exact": exact_cmd, "contain": contain_cmd, "witness": witness_cmd,
             "checks": checks_cmd, "flat": flat_cmd, "header": header_cmd, "entry": entry_cmd}[args.cmd](args)

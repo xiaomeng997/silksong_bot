@@ -167,3 +167,21 @@ def test_window_shape_hit_interval_matches_the_judge():
                 assert np.array_equal(hit[inside], np.ones(inside.sum(), bool))
                 outside = (xs < iv[0] - 1e-9) | (xs > iv[1] + 1e-9)
                 assert not hit[outside].any()
+
+
+@pytest.mark.parametrize("dash", [False, True])
+def test_dash_used_start_equals_engine(lib_s, dash):
+    """A start with the air dash used (the T1 chain's lists with it used - du 3 -, the merge classes with it used:
+    the engine's key drops the queues then): exact without and with the bridge (a landing restores the dash)."""
+    for kind, ph, var in (("A1", 4, ""), ("A3", 3, "N")):
+        S, _ = env.canonical(lib_s.params, kind, ph, 1, var, True)
+        S = S.copy()
+        dy = tb.FLOOR_TOP + lib_s.params.foot + 3.0 - S[km.PY]
+        for f in (km.PY, km.QY, km.SY):
+            S[f] += dy
+        S[km.JBUF] = 0.05
+        fe = lib_s.eng.forward(lib_s.eng.start_state(S), 30, terrain=lib_s.terr, max_events=2, claw=False, tf8=False,
+                               opts=0 if dash else ej.OPT_NO_ADASH)
+        ft = lib_s.forward(S, 30, floor=True, maxev=2, dash=dash)
+        r = t1.compare(fe, ft, 30)
+        assert r["ok"], (kind, r)

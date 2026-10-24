@@ -98,7 +98,11 @@ _MT = ej._MT
 # node int columns (I_CLS: the merge class with the floor-strict key - the floor passes; I_CLSF: the engine's
 # free-space key - the free passes merge as the engine does there)
 I_HASH, I_CLS, I_ABS, I_COND, I_MODE, I_PHASE, I_GROUND, I_KIND, I_CLSF, I_ADEP = range(10)
-NINTC = 10
+# T2: the same two merge classes with the air dash USED (the engine's key reads AIRDASHED: the jump / attack queues in
+# normal control are keys only while a dash can still start) - the node's identity is the dash-unused one (its lanes
+# hold AIRDASHED 0), a cluster with the dash used merges on these
+I_CLS1, I_CLSF1 = 10, 11
+NINTC = 12
 # node float columns: the representative's vy, and a PHASE INSTANCE's physics phase (-1: none). A node whose frame
 # depends on the phase beyond its x (the drawn position read by a ground sprint's start when her y is still settling:
 # a recorded ground start a little off the model's rest height) gets I_ADEP's bit s; the chain then expands it at
@@ -115,7 +119,8 @@ NEI = 5
 # air dash unused), du 1: every candidate with the air dash unused (the entries marked), du 2: every candidate with
 # the air dash used (the lanes' AIRDASHED set: the dash's own frames, the umbrella's dash press that only closes it, a
 # queued dash) - fl the pass kind, lim the event limit reached
-NDU = 3
+NDU = 4
+# (du 3: the no-dash candidates with the air dash used - T1's chain from a start whose air dash is used)
 EF_DLO, EF_DHI, EF_DY, EF_SLO, EF_SHI, EF_NEV, EF_QM, EF_QV, EF_SM, EF_SV = range(10)
 NEF = 10
 # the child's QY / SY (the engine's key holds them absolute) from the parent's: QM 0 QY kept, 1 QY = the parent's PY
@@ -235,6 +240,9 @@ def _cls_get(CHT, CK, CH, CNT, key):
 def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, key, ckey):
     """The node of relative lanes L / cu (absy: a floor instance, y absolute; alf >= 0: a phase instance): its id,
     appended when new (-1 when a table is full: CNT[C_OVF] set)."""
+    L = L.copy()
+    L[0, AIRDASHED] = 0.0                           # (the identity: the air dash unused - the lists hold the status)
+    L[1, AIRDASHED] = 0.0
     ident(L, cu, P, absy, alf, key)
     h = khash(key)
     slot, j = _hfind(HT, h, NID, key, NINT)
@@ -254,6 +262,21 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     cf = _cls_get(CHT, CK, CH, CNT, ckey)
     if cf < 0:
         return -1
+    L1 = L.copy()
+    L1[0, AIRDASHED] = 1.0
+    L1[1, AIRDASHED] = 1.0
+    ident(L1, cu, P, absy, alf, key)
+    for i in range(NKEY):
+        ckey[i] = key[i]
+    ckey[_KPY] = 0.0
+    c1 = _cls_get(CHT, CK, CH, CNT, ckey)
+    if c1 < 0:
+        return -1
+    vkey_rel(L1, cu, P, False, False, ckey)
+    cf1 = _cls_get(CHT, CK, CH, CNT, ckey)
+    if cf1 < 0:
+        return -1
+    ident(L, cu, P, absy, alf, key)
     NL[n, 0, :] = L[0]
     NL[n, 1, :] = L[1]
     NL[n, 0, AIRDASHED] = 0.0
@@ -270,6 +293,8 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     NINT[n, I_GROUND] = 1 if L[1, GROUND] > 0 else 0
     NINT[n, I_KIND] = -1
     NINT[n, I_CLSF] = cf
+    NINT[n, I_CLS1] = c1
+    NINT[n, I_CLSF1] = cf1
     NINT[n, I_ADEP] = 0
     NVY[n, V_VY] = L[1, VY]
     NVY[n, V_ALF] = alf
@@ -328,7 +353,7 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
     base = 4 * du + 2 * fl
     if EOFF[n, s, base, 0] >= 0:
         return True
-    if du > 0:
+    if du == 1 or du == 2:
         opts = opts & ~ej.OPT_NO_ADASH
     MK = 48
     absy = NINT[n, I_ABS] == 1
@@ -388,7 +413,7 @@ def expand(n, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EO
             L[1, :] = NL[n, 1]
             L[0, ALPHA] = a
             L[1, ALPHA] = a
-            if du == 2:
+            if du >= 2:
                 L[0, AIRDASHED] = 1.0
                 L[1, AIRDASHED] = 1.0
             cu = cu0.copy()
@@ -794,7 +819,10 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             # engine's order (du 1 with the air dash unused: the no-dash children - T1's list - and the bridge's entries
             # among them; du 2 with it used)
             adc = cur_d[c]
-            du = 0 if not dmode else (1 if adc == 0 else 2)
+            if dmode:
+                du = 1 if adc == 0 else 2
+            else:
+                du = 0 if adc == 0 else 3
             bad = False
             if EOFF[src, s, 4 * du + 2 * fl, 0] < 0:
                 bad = not expand(src, s, fl, du, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF,
@@ -816,12 +844,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             ne = EOFF[src, s, 4 * du + 2 * fl + lim, 1]
             stats[t, 5] += ne
             for e in range(e0, e0 + ne):
-                if du == 0:
-                    cad = adc
-                    if ldash and adc == 1 and pg == 0 and NINT[EI[e, EI_CH], I_GROUND] == 1:
-                        cad = 0                          # (a landing restores the dash: H2_LAND_DASH)
-                else:
-                    cad = EI[e, EI_AD]
+                cad = EI[e, EI_AD]                       # (the kernel's: a landing restores it, H2_LAND_DASH)
                 ch = EI[e, EI_CH]
                 dlo = EF[e, EF_DLO] + EF[e, EF_SLO] * a_st
                 dhi = EF[e, EF_DHI] + EF[e, EF_SHI] * a_st
@@ -891,7 +914,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                     vv = qsb.view(np.int64)
                     hq = vv[0]
                     hs = vv[1]
-                    hc = 4 * NINT[ch, I_CLS if has_floor else I_CLSF] + 2 * cad
+                    hc = 4 * NINT[ch, (I_CLS1 if cad else I_CLS) if has_floor else (I_CLSF1 if cad else I_CLSF)] + 2 * cad
                 h = _ich(hc, hb, hq, hs)
                 idx = -1
                 slot = h & HMASK
@@ -1683,14 +1706,14 @@ class Lib:
         return res
 
     def flat(self, S: np.ndarray, T: int, maxev: int = 1, floor: bool = False, q: float = 0.05,
-             conds=(0, ej.COND_DSLASH, ej.COND_CLAW)) -> dict:
+             conds=(0, ej.COND_DSLASH, ej.COND_CLAW), dash: bool = False) -> dict:
         """THE FLATTENED LAYER of one start (no danger): per frame and end condition the union of the chain's
         clusters as rows of q (y bins relative to her centre, x relative to her x: env.raster's conservative rows) and
         the frame's bounding box. Exact for the pass's event family (maxev; 0 = every event, only for short T) up to
         the rows' q in y; an upper bound of the danger-cut chain (prune: a window outside it is out of reach; the
-        chain's frames before the first danger touch are these)."""
+        chain's frames before the first danger touch are these). dash (T2): the union WITH the air dash (the bridge)."""
         from ssbot.map2 import envelope as env
-        fw = self.forward(S, T, floor=floor, maxev=maxev)
+        fw = self.forward(S, T, floor=floor, maxev=maxev, dash=dash)
         xs, ys = float(S[PX]), float(S[PY] + self.hh)
         out = {c: [] for c in conds}
         box = np.full((T + 1, 4), np.nan)
@@ -1736,6 +1759,8 @@ class Lib:
         lib = cls(params, cap_nodes=max(1 << 10, int(n * 1.25)), cap_edges=max(1 << 12, int(e * 1.25)),
                   cap_cls=max(1 << 10, int(c * 1.25)), cap_inst=max(1 << 10, int(ni * 1.25)),
                   claw=meta.get("claw", True), terrain=meta.get("terrain", "floor"))
+        if z["NINT"].shape[1] < NINTC:
+            raise ValueError(f"tables {path}: built before T2's per-dash merge classes - rebuild (t1_tables build)")
         if meta.get("params_vector_sha1") != _sha1(lib.P) or meta.get("version") != VERSION:
             raise ValueError(f"tables {path}: built with another hero model or version (params / HERO2 bits)")
         for nm in ("NL", "NCU", "NINT", "NVY", "PFL"):

@@ -163,11 +163,15 @@ class Back:
 def backward(fw, goal_cl, goal_lo, goal_hi, eps: float = 1e-9) -> Back:
     """THE BACKWARD SET of a goal region (rows: cluster, x interval) over fw's pieces (see the module docstring)."""
     ncl = int(fw.cl_off[-1])
-    order = np.argsort(fw.pc_cl, kind="stable")
-    pstart = np.searchsorted(fw.pc_cl[order], np.arange(ncl + 1)).astype(np.int64)
+    ix = getattr(fw, "_back_ix", None)
+    if ix is None:                                   # (the pieces by child, once per pass)
+        order = np.argsort(fw.pc_cl, kind="stable").astype(np.int64)
+        ix = (order, np.searchsorted(fw.pc_cl[order], np.arange(ncl + 1)).astype(np.int64))
+        fw._back_ix = ix
+    order, pstart = ix
     cap = max(1 << 14, 4 * len(fw.pc_cl) + 4 * len(goal_cl))
     while True:
-        r = _backward(ncl, fw.cl_iv0, fw.cl_ivn, fw.IV, order.astype(np.int64), pstart, fw.pc_par, fw.pc_lo, fw.pc_hi,
+        r = _backward(ncl, fw.cl_iv0, fw.cl_ivn, fw.IV, order, pstart, fw.pc_par, fw.pc_lo, fw.pc_hi,
                       fw.pc_dlo, fw.pc_dhi, np.asarray(goal_cl, np.int64), np.asarray(goal_lo, np.float64),
                       np.asarray(goal_hi, np.float64), cap, eps)
         if not r[3]:
@@ -193,6 +197,26 @@ def bridge_presses(bk: Back, lib=None) -> list:
         t = int(np.searchsorted(fw.cl_off, c, side="right") - 1)
         out.append((t, par, bk.intervals(par).tolist()))
     return out
+
+
+# ---- the flattened union: exact until the danger first touches it ---------------------------------------------
+
+def touch_frame(fw, danger) -> int:
+    """The first frame whose clusters (a pass without danger: the flattened union of her state) meet a danger box
+    (the cut's own test: the box's y range holds the cluster's height, the x ranges overlap); -1: none. Before it the
+    danger-cut pass is this pass, frame for frame (it cuts nothing)."""
+    for t in range(fw.T + 1):
+        if t >= len(danger) or danger[t] is None or not len(danger[t]):
+            continue
+        g, x0, x1, y0, y1 = fw.frame_rows(t)
+        if not len(g):
+            continue
+        b = np.asarray(danger[t], np.float64).reshape(-1, 4)
+        yin = (b[None, :, 1] <= y0[:, None]) & (y1[:, None] <= b[None, :, 3])
+        xin = ~((b[None, :, 2] < x0[:, None]) | (b[None, :, 0] > x1[:, None]))
+        if np.any(yin & xin):
+            return t
+    return -1
 
 
 # ---- the dash bundle --------------------------------------------------------------------------------------------
