@@ -431,6 +431,13 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   with <= 1 event - cheap with the tables (1 event 60 f: 1.5 ms); several events only in the short goal-directed
   chains toward a strike window (the hook -> umbrella -> down slash class, < ~1 s), backward from the window and
   bridged. No '3+ events x 120 f' passes (T2 measured 2.4 s for 3 events x 60 f - not needed).
+- NO COARSE FAR LAYER (the person asked 2026-10-24 'the far term needs no lower resolution?' - no): the long checks
+  have <= 1 event, the tables are exact and cheap there (1 event 60 f 1.5 ms warm; the 1-event 120 f flattened union
+  is prebuilt), and with one event the per-frame states grow only linearly and saturate. The far term's uncertainty
+  is the funnel's time-growing shrink eps(k), not coarse cells (coarse cells would close real narrow ways). The
+  'coarse far layer' (0.25 u, vy bins) of the earlier sections (lines ~142, 168, 175, 192, 264) is superseded. What
+  does widen far out is the enemy's branching (the union of its later moves) - a prediction matter, met by
+  re-computing on each reveal.
 - THE ESCAPE FUNNEL AND ITS KEY NODES (the person, 2026-10-24: 'the 180 f search is there to see the trap and find
   how to run; take the key nodes out of the found route, then optimise - strike on the way to the nodes'): once per
   decision (per branch until the reveal, then the revealed one) push the tables BACKWARD from the region still safe
