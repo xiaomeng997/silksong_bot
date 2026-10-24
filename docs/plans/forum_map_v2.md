@@ -409,11 +409,16 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   allowed (airborne, no lock such as the umbrella's antic). The bundle's endpoints include its cancels' outcomes (the
   jump cancel into the umbrella = an A3 entry by vx; the Clawline out of the sprint = a hook (a refill) or an unhooked
   Clawline transient; the attack cancel with its extra air velocity) and land in no-dash tables. THE GROUND DASH IS
-  NOT IN THE TABLES EITHER (the person, 2026-10-23 evening: 'the dash does not go into the ordinary tables' - this
-  replaces the lead's earlier 'the ground dash stays a ground-table action'): the ground tables hold only walk / run
-  / the jump; the ground dash (and the ground sprint it leads into) is a bundle of its own used as a bridge too. It
-  is unlimited (the next one >= 25 f after the press), so a ground stretch may hold several bridges: forward ->
-  dash -> ground no-dash -> dash -> ... -> backward, each gap >= 25 f.
+  IN THE GROUND TABLES (the person, 2026-10-23 ~20:15: 'the ground should do the dash; after a ground sprint jump she
+  can still air-dash' - this replaces the lead's short-lived 'ground dash as a bridge' of the same evening): the
+  ground dash and the air dash are different resources - a ground dash does not use the air dash (M4a: after a ground
+  dash and a jump the air dash fires 4 frames after the jump, 27 / 27; the sprint jump sets the dash cooldown to 0.1
+  s). So the ground tables hold walk / run, the ground dash (3.5 - 4.05 u, the next press >= 25 f later), the ground
+  sprint it leads into (17.5 u/s) and the jumps out of it - the SPRINT (shuttlecock) jump: the sprint FSM's Jump
+  Antic ~6 f, then vx 18 u/s fixed while rising, jumped_steps -5 - and the sprint's dash attack (the Wanderer lunge);
+  leaving the ground starts an air segment with its one air-dash bridge available. GAP: the shuttlecock jump and the
+  dash attack are not in kin_jit yet (M4a: 25 + 3 trials, 1.5 - 8 u off; the envelope does not offer them) - model
+  them from M4a's trials before they go into the ground tables.
 - MEET IN THE MIDDLE, THE DASH BUNDLE AS THE BRIDGE (the person, 2026-10-23): between two refills a path has at
   most one air dash, so every path is no-dash -> (at most one dash) -> no-dash. Push the small no-dash tables FORWARD
   from her state and BACKWARD from the goal (the next strike window's press region: the down slash on a body, the
