@@ -413,6 +413,15 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   re-plan from mid-action - this also answers the gate's drop: map2 re-plans from the mid down slash itself instead
   of handing the keys to a fallback that does not know she is in one (the drop rule on a 1-frame timing shift is a
   separate fix: re-check the safety on the observed state and keep the plan if safe).
+- THE STRIKE WINDOWS ARE SHAPES, NOT GRID CELLS (the person, 2026-10-23: 'aren't the windows polygons?'): the
+  reflex branch's first windows table (clapper_windows_v1/v2: 4.25 M cells - dx 0.25 u x height 0.25 u x vy 1.2 u/s
+  bins, 'full' / 'partial' cells from sampled corners) is a first version. The windows belong in the map's own
+  representation: per (Clapper move, frame in it) x her EXACT vertical state (the table and its phase - A1_n step,
+  float frame, bounce step: no vy bins once the tables exist) an x INTERVAL SET PER HEIGHT (a polygon-like shape,
+  the envelopes' and the danger's structure), mirrored by its facing, the walls clipped at use time; the boundaries
+  found exactly by bisection with the strike module's judge. Then: no partial cells (the reflex's 8.5 - 150 ms
+  re-check was mostly the partial cells), and the windows ARE the backward tables' goal regions (window x envelope
+  = interval against interval). Build them with the tables (T2's goal regions); move the reflex onto them after.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
