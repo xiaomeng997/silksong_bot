@@ -439,6 +439,12 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   them it is wide and she strikes freely. Every strike candidate's exit check becomes a LOOKUP - its end state inside
   the funnel at its end frame - instead of one envelope pass per candidate (hundreds per decision). Recompute the
   funnel after each hit that can change a Clapper (cheap); shrink it by the tube's error widening.
+  THE SHRINK GROWS WITH TIME (the person, 2026-10-24: 'near-term exact, far-term a little error'): her position error
+  and the enemy's prediction both grow with the frames from now, so frame k of the funnel shrinks by eps(k) - the
+  measured p99 deviation k frames after a sync (M0 / M4a frame-by-frame trials), ~0 near, larger far - and the danger
+  grows likewise with k; the far part is re-computed from fresh observations many times before it is used, so the
+  margin costs little there. Safety valve: if the shrunken funnel closes (a tight trap) but the exact one is open,
+  run the exact one (a thin way beats none) and flag the decision for an early re-check.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
