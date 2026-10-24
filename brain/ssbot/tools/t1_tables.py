@@ -8,6 +8,7 @@ the build-time checks, timings. Offline; nothing in the bot imports it.
     python -m ssbot.tools.t1_tables checks OUT.json
     python -m ssbot.tools.t1_tables flat OUT.json [--T 120] [--maxev 1]
     python -m ssbot.tools.t1_tables header OUT.json        # the tracked knowledge header of the generated files
+    python -m ssbot.tools.t1_tables entry OUT.json [--floor]   # entry from any state: transitional starts
 
 exact: per start (the canonical starts and the 400 recorded start states of M1, C:/ssbot/data/m2_play/map2/m1/
 starts.npz) the engine's exact pass with the air dash off (env_jit.OPT_NO_ADASH; Engine.forward) against the table
@@ -348,7 +349,8 @@ def walk(lib, S, T: int, rng, floor: bool, p_go: float = 0.85):
         if src < 0:
             lib._grow()
             return None
-        e0, ne = int(lib.EOFF[src, s, 0, 0]), int(lib.EOFF[src, s, 0, 1])
+        md = 2 if floor else 0
+        e0, ne = int(lib.EOFF[src, s, md, 0]), int(lib.EOFF[src, s, md, 1])
         if ne == 0:
             return "dead"
         es = np.arange(e0, e0 + ne)
@@ -727,6 +729,142 @@ def flat_cmd(args) -> int:
     return 0
 
 
+# ---- entry from any state: transitional starts -------------------------------------------------------------------
+
+ENTRY_KINDS = ("dslash", "claw", "pogo", "umbrella", "deflate", "gdash", "skid", "hang", "cancel")
+
+
+def transitional_starts(lib, S_all, lab, rng, n_per: int = 40):
+    """Exact states in the middle of an action (the lead's note 'ENTRY FROM ANY STATE', spec on main): from recorded
+    starts (and canonical ones), the action pressed at frame 0 and the state k frames into it, rolled by the
+    reference model (env_jit.ref_rollout: kin_jit + the Clawline block; km.rollout for the pogo event): mid down
+    slash, mid Clawline (its block: cu), a pogo bounce's lock, the umbrella's antic / inflate, the Deflate, a ground
+    dash / sprint, the sprint's skid, the hang (jump held through the apex), the float's attack cancel. Returns
+    [(S, cu, label)]."""
+    P, udt = lib.P, lib.udt
+    air = [i for i in range(len(S_all)) if S_all[i][km.GROUND] <= 0 and S_all[i][km.MODE] == km.M_NORMAL
+           and S_all[i][km.TS] == 1.0]
+    gnd = [i for i in range(len(S_all)) if S_all[i][km.GROUND] > 0 and S_all[i][km.MODE] == km.M_NORMAL
+           and S_all[i][km.TS] == 1.0]
+    flt = [i for i in range(len(S_all)) if S_all[i][km.MODE] == km.M_GLIDE and S_all[i][km.PHASE] == 2.0
+           and S_all[i][km.TS] == 1.0]
+    cu0 = np.array([-1.0, 0, 0, 0, 0, 0, 0])
+    out = []
+
+    def roll(S, masks, TT=None):
+        masks = np.asarray(masks, dtype=np.int64)
+        xy = np.zeros((len(masks) + 1, 2))
+        md = np.zeros(len(masks) + 1, dtype=np.int64)
+        x, cu = ej.ref_rollout(np.asarray(S, np.float64).copy(), cu0.copy(), masks, udt, P,
+                               lib.TTf if TT is None else TT, xy, md)
+        return x, cu
+
+    for kind in ENTRY_KINDS:
+        src = {"gdash": gnd, "skid": gnd, "deflate": flt, "cancel": flt}.get(kind, air)
+        if not src:
+            continue
+        for i in rng.choice(src, size=min(n_per, len(src)), replace=False):
+            S0 = S_all[i]
+            d = int(rng.choice([km.B_LEFT, km.B_RIGHT]))
+            TT = lib.TTg if kind in ("gdash", "skid") else None
+            if kind == "dslash":
+                k = int(rng.choice([1, 2, 4, 6, 9, 12]))
+                ms = [km.B_ATTACK | km.B_DOWN] + [0] * (k - 1)
+            elif kind == "claw":
+                k = int(rng.choice([1, 3, 8, 12, 18, 22, 26, 30]))
+                ms = [ej.B_CLAW | d] + [d] * (k - 1)
+            elif kind == "umbrella":
+                k = int(rng.choice([1, 3, 5, 8, 12, 16]))
+                ms = [km.B_JUMP | d] * k
+            elif kind == "deflate":
+                k = int(rng.choice([1, 2, 4, 6, 8]))
+                ms = [int(S0[km.PREV]) & ~km.B_JUMP] * k
+            elif kind == "gdash":
+                k = int(rng.choice([1, 3, 5, 7, 10, 16]))
+                ms = [km.B_DASH | d] * k
+            elif kind == "skid":
+                k = int(rng.choice([1, 3, 6, 9]))
+                ms = [km.B_DASH | d] * 24 + [0] * k
+            elif kind == "hang":
+                k = int(rng.choice([2, 5, 8, 12]))
+                ms = [km.B_JUMP] * k                       # (from normal air: the umbrella opens unless the hang)
+            elif kind == "cancel":
+                k = int(rng.choice([1, 3, 6, 10]))
+                ms = [km.B_JUMP | km.B_ATTACK] + [km.B_JUMP] * (k - 1)
+            else:  # pogo
+                k = int(rng.choice([1, 2, 4, 7, 10, 14]))
+                masks = np.zeros(k, dtype=np.int64)
+                ev = np.zeros(k, dtype=np.int64)
+                ev[0] = km.EV_POGO
+                x = env._roll_final(lib.params, S0, masks, ev)
+                out.append((x, cu0.copy(), f"{kind}+{k}/{lab[i]}"))
+                continue
+            x, cu = roll(S0, ms, TT)
+            out.append((x, cu, f"{kind}+{k}/{lab[i]}"))
+    return out
+
+
+def entry_cmd(args) -> int:
+    """ENTRY FROM ANY STATE (the lead's note, the spec on main): the chain from transitional exact states - the rest
+    of the transient rolled online with the exact model (the engine's frame, every remaining choice: the nodes not
+    in the library are expanded on the fly) until the branches reach the library's nodes - against the engine."""
+    idle()
+    lib = _new_lib(args) if args.lib == "none" else tb.Lib.load(args.lib or tb.tables_path(not args.no_claw,
+                                                                                        args.terrain))
+    E = lib.eng
+    rng = np.random.default_rng(args.seed)
+    S_all, lab = load_starts()
+    starts = transitional_starts(lib, S_all, lab, rng, n_per=args.n or 40)
+    terr = lib.terr if args.floor else None
+    opts = ej.OPT_NO_ADASH
+    per = []
+    t0 = time.perf_counter()
+    kd = lib.kinds()
+    for j, (S, cu, lb) in enumerate(starts):
+        if not args.floor and S[km.GROUND] > 0:
+            continue
+        for mev, T in ((0, args.T), (1, 60), (2, 30)):
+            fe = E.forward(E.start_state(S, cu=cu), T, terrain=terr, opts=opts, max_events=mev, claw=lib.claw,
+                           tf8=lib.claw)
+            ft = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu)
+            ft2 = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu)
+            r = compare(fe, ft, T)
+            # the transient: frames until every cluster sits on a node the library had before this start
+            n_lib = len(kd)
+            tr = next((t for t in range(T + 1) if np.all(ft.node[int(ft.cl_off[t]):int(ft.cl_off[t + 1])] < n_lib)),
+                      None)
+            r.update({"label": lb, "kind": lb.split("+")[0], "mev": mev, "T": T, "mode": int(S[km.MODE]),
+                      "phase": int(S[km.PHASE]), "in_block": bool(cu[ej.C_CJ] >= 0),
+                      "ms_engine": fe.seconds * 1e3, "ms_tables": ft2.seconds * 1e3,
+                      "ms_tables_cold": ft.seconds * 1e3, "transient_frames": tr, "lazy": ft.lib_stats})
+            per.append(r)
+            if not r["ok"]:
+                print(f"{j:3d} {lb:44s} mev {mev} T {T} ok {r['ok']} {r}", flush=True)
+        if args.reload and j and j % args.reload == 0 and args.lib != "none":
+            lib = tb.Lib.load(args.lib or tb.tables_path(not args.no_claw, args.terrain))
+            kd = lib.kinds()
+        if j % 25 == 0:
+            print(f"{j:3d}/{len(starts)} {lb:44s} ok so far {sum(p['ok'] for p in per)}/{len(per)}", flush=True)
+    by = {}
+    for p in per:
+        b = by.setdefault(f"{p['kind']} ev{p['mev']}", {"n": 0, "exact": 0, "ms_e": [], "ms_t": [], "tr": []})
+        b["n"] += 1
+        b["exact"] += int(p["ok"])
+        b["ms_e"].append(p["ms_engine"])
+        b["ms_t"].append(p["ms_tables"])
+        if p["transient_frames"] is not None:
+            b["tr"].append(p["transient_frames"])
+    summ = {"floor": args.floor, "claw": lib.claw, "terrain": lib.terrain, "starts": len(starts), "passes": len(per),
+            "exact": sum(p["ok"] for p in per), "worst_dx": max([p["worst_dx"] for p in per] or [0.0]),
+            "by_kind": {k: {"n": v["n"], "exact": v["exact"], "ms_engine_p50": _q(v["ms_e"], (50,)),
+                            "ms_tables_p50": _q(v["ms_t"], (50,)), "transient_frames": _q(v["tr"], (50, 90, 100))}
+                        for k, v in sorted(by.items())},
+            "wall_s": round(time.perf_counter() - t0, 1)}
+    print(json.dumps(summ), flush=True)
+    Path(args.out).write_text(json.dumps({"summary": summ, "per": per}, default=float))
+    return 0
+
+
 def header_cmd(args) -> int:
     """The tracked knowledge header (knowledge/1.0.30000/kinematics/a1n_tables_v1.json) of the generated, untracked
     library files: their version, hero model, configuration, counts, sizes and sha1 - and how to rebuild them."""
@@ -764,7 +902,7 @@ def header_cmd(args) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["build", "exact", "contain", "witness", "checks", "flat", "header"])
+    ap.add_argument("cmd", choices=["build", "exact", "contain", "witness", "checks", "flat", "header", "entry"])
     ap.add_argument("out")
     ap.add_argument("--lib", default="", help="the library file (default: the knowledge file)")
     ap.add_argument("--T", type=int, default=24)
@@ -787,7 +925,7 @@ def main(argv=None) -> int:
     ap.add_argument("--danger", action="store_true", help="exact: m1's random moving danger boxes cut both passes")
     args = ap.parse_args(argv)
     return {"build": build_cmd, "exact": exact_cmd, "contain": contain_cmd, "witness": witness_cmd,
-            "checks": checks_cmd, "flat": flat_cmd, "header": header_cmd}[args.cmd](args)
+            "checks": checks_cmd, "flat": flat_cmd, "header": header_cmd, "entry": entry_cmd}[args.cmd](args)
 
 
 if __name__ == "__main__":

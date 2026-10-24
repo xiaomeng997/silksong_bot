@@ -241,12 +241,15 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  ABUF,            # InputHandler's attack press queue timer (unscaled s, 0.1 at a press; the sprint FSM reads it)
  XVX,             # the extra air move x velocity of the air sprint's Attack Cancel (Retain Extra Velocity -> a
                   # DecayingVelocity: decay 10 / s, skipped while a move key is held, gone at a turn / landing / regain)
- K) = range(84)
+ # map v2 T1b (HERO2 bit H2_SHUTTLE; 0 otherwise, never read with the bit off):
+ SHUT,            # the sprint (shuttlecock) jump's x speed while it runs (cState.shuttleCock; signed, 0 = off)
+ XVXD,            # the decay of the extra air velocity XVX now (per s; 0 = h2_xv_decay, the sprint's Attack Cancel's)
+ K) = range(86)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir abuf xvx").split()
+             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir abuf xvx shut xvxd").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -526,6 +529,12 @@ class HeroParams:
     #                                    Attack Cooldown 0.1 s less the 0.02 its OnEnter in FixedUpdate takes: live
     #                                    4 frames after the Air Sprint entry, 3 frames after a 2-step entry frame)
     h2_xv_decay: float = 10.0          # Regain Control Shared: HeroAddExtraAirMoveVelocity Decay (per s)
+    # map v2 T1b (H2_SHUTTLE; the M4a gdash_jump trials: 25 sprint jumps)
+    h2_shut_antic_t: float = 0.1083    # the sprint FSM's Jump Antic (clip Shuttlecock Antic, entered in FixedUpdate):
+    #                                    the jump in the 7th Update from its entry (25 / 25 trials: 7 frames of the
+    #                                    clip, the lift in its last; 6.5 frames, robust to the frame time's jitter)
+    h2_shut_speed: float = 18.0        # SHUTTLECOCK_SPEED (hero_constants): her x speed while the jump rises
+    h2_shut_xvd: float = 5.0           # ShuttleCockCancel's DecayingVelocity Decay (per s)
     jump_heights: list = field(default_factory=list)   # per jump hold length: logged and model apex spread
     scenes: dict = field(default_factory=dict)       # scene -> {"enable": [go names], "disable": [go names]}
     source: dict = field(default_factory=dict)       # key -> provenance note
@@ -558,7 +567,8 @@ class HeroParams:
               "scr_detach", "rpr_thunk_decel", "rpr_thunk_reach0", "rpr_thunk_reach1", "rpr_thunk_reach_t",
               "rpr_thunk_lobe0", "rpr_thunk_lobe1", "sprint_shift", "sprint_grace", "skid_decel_move",
               "skid_min_speed", "air_fall_clamp_lag", "thunk_on", "thunk_off", "thunk_off_up", "slope_contact",
-              "hero2", "h2_pogo_rs_t", "h2_pogo_j2", "h2_spr_atk_t", "h2_xv_decay")
+              "hero2", "h2_pogo_rs_t", "h2_pogo_j2", "h2_spr_atk_t", "h2_xv_decay", "h2_shut_antic_t",
+              "h2_shut_speed", "h2_shut_xvd")
 
     def vector(self) -> np.ndarray:
         """The scalar parameters (P_* order); with AB_THUNK a tail from P_THK: per THUNK_SLOTS slot the vertex count
@@ -653,8 +663,8 @@ class HeroParams:
  P_SCR_ROOF_T, P_SCR_DETACH, P_RPR_TDEC, P_RPR_TREACH0, P_RPR_TREACH1, P_RPR_TREACH_T, P_RPR_TLOBE0, P_RPR_TLOBE1,
  P_SPR_SHIFT, P_SPR_GRACE, P_SKID_DEC_MV, P_SKID_VMIN, P_AFC_LAG, P_THK_ON, P_THK_OFF, P_THK_OFF_UP,
  P_SLOPE_CONTACT,
- P_H2, P_H2_RST, P_H2_PJ2, P_H2_SAT, P_H2_XVD,
- NP) = range(157)
+ P_H2, P_H2_RST, P_H2_PJ2, P_H2_SAT, P_H2_XVD, P_H2_SHA, P_H2_SHV, P_H2_SHD,
+ NP) = range(160)
 assert NP == len(HeroParams.VECTOR)
 P_THK = NP           # AB_THUNK: the slash polygons' tail (HeroParams.vector)
 # HeroParams.hero2 bits (map v2 stage M0, forum.md 91; kin_jit only, with abilities != 0):
@@ -708,10 +718,25 @@ H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD =
 H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END = 64, 128, 256
 H2_POGO_DASH, H2_CLAW_SPR = 512, 1024
 H2_SPR_FIN = 2048
+# map v2 stage T1b (the A1_n tables; the lead's note ground_dash2 / the spec on main: the sprint jump in the ground
+# tables):
+#   H2_SHUTTLE     the SPRINT (shuttlecock) JUMP: a jump pressed in the ground sprint or in a ground dash held into
+#                  it (InputHandler's 0.1 s jump queue with the jump held, read by Ground Sprint's ListenForJump in
+#                  FixedUpdate after the step's AccelerateToX) -> the sprint FSM's Jump Antic (Shuttlecock Antic: control taken, her x speed
+#                  kept from that step) for h2_shut_antic_t -> Jump: RegainControl -> HeroJump (the lift) + OnShuttleCockJump
+#                  (jumped_steps -5, the dash cooldown 0.1 s, shuttlecockSpeed = h2_shut_speed along her facing): in
+#                  FixedUpdate her x speed is that while it runs (no turn: TrySetCorrectFacing needs it off), it ends
+#                  on the ground with vy <= 0, and in Update when attacking / falling without jumping / in a down
+#                  spike antic / control relinquished (ShuttleCockCancel: in the air an extra air move velocity of that
+#                  speed, decay h2_shut_xvd / s, skipped while moving, gone at a turn) - M4a's gdash_jump trials
+#                  (HeroController OnShuttleCockJump / ShuttleCockCancel, hornet_sprint Ground Sprint R / L -> Jump
+#                  Antic -> Jump); before: the jump press there was dropped by the envelope (1.5 - 8 u off)
+H2_SHUTTLE = 4096
 H2_ALL = (H2_GLIDE_GRAV | H2_REL_LOSS | H2_POGO_RS | H2_GLIDE_ATK | H2_INFL_END | H2_JUMP_DCD | H2_SPR_ATK |
-          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR | H2_SPR_FIN)
+          H2_SPR_JUMP | H2_DASH_END | H2_POGO_DASH | H2_CLAW_SPR | H2_SPR_FIN | H2_SHUTTLE)
 H2_S1 = H2_POGO_DASH | H2_CLAW_SPR      # the M4 S1 bits (SSBOT_FORUM_HERO2_OFF=1536: the hero model of M4d2)
 H2_S1B = H2_SPR_FIN                     # the M4 S1b bit (SSBOT_FORUM_HERO2_OFF=2048: S1's hero model; 3584: M4d2's)
+H2_T1B = H2_SHUTTLE                     # the T1b bit (SSBOT_FORUM_HERO2_OFF=4096: S1b's hero model, the w7 gate's)
 H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 HERO2_OFF_ENV = "SSBOT_FORUM_HERO2_OFF"  # HERO2 bits taken out (an int, default 0): the identity checks of new bits
@@ -720,8 +745,8 @@ HERO2_OVERRIDES = {"hero2": H2_ALL, "h2_pogo_rs_t": 0.1083, "h2_pogo_j2": 8}
 
 
 def pad_state(S: np.ndarray) -> np.ndarray:
-    """A kin state saved before rows were appended (M4a: ABUF, XVX; K 81 -> 83) padded with zeros to K rows (the
-    first axis); a state of K rows is returned as it is."""
+    """A kin state saved before rows were appended (M4a: ABUF, XVX, K 81 -> 83; T1b: SHUT, XVXD, K 83 -> 85) padded
+    with zeros to K rows (the first axis); a state of K rows is returned as it is."""
     S = np.asarray(S)
     if S.shape[0] >= K:
         return S

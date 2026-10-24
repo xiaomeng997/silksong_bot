@@ -48,7 +48,7 @@ from ssbot.knowledge.kinematics import (
     GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
     B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR)
+    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
 CB_J, CB_A, CB_D = B_JUMP, B_ATTACK, B_DASH          # 1, 2, 4
@@ -102,7 +102,7 @@ COND_DASHED = 256     # the air dash used
 _KEEP = np.array([PY, QY, SY, VY, GS, GROUND, MODE, MODE_T, JUMPING, JSTEPS, JQ, AQ, AIRHANG, ATTACKING, DS_REC,
                   BOUNCE, JHELD, INV_T, LEDGE, TOUCH, PHASE, QQ, LANDQ, WSIDE, WTOUCH, CLING, WSTICK, UNSTICK, WLOCK,
                   WJ_V, WJ_CHAIN, WJQ, WSLASH, PREV_GS, DASH_T, AIRDASHED, DQ, FALL_T, HARD, WCON, SHOVE, ATK_PDIR,
-                  RDIR, RSTEPS], dtype=np.int64)
+                  RDIR, RSTEPS, SHUT, XVXD], dtype=np.int64)
 NK0 = _KEEP.shape[0]
 _JH = int(np.flatnonzero(_KEEP == JHELD)[0])
 _MT = int(np.flatnonzero(_KEEP == MODE_T)[0])
@@ -116,6 +116,7 @@ _JQ = int(np.flatnonzero(_KEEP == JQ)[0])
 _DQ = int(np.flatnonzero(_KEEP == DQ)[0])
 _AQ = int(np.flatnonzero(_KEEP == AQ)[0])
 _QQ = int(np.flatnonzero(_KEEP == QQ)[0])
+_XVXD = int(np.flatnonzero(_KEEP == XVXD)[0])
 # canonicalised: JDSTEPS (min with jump_steps_min: only '>=' is read), ATK_T (only while attacking), the cooldowns
 # that stop at <= 0 (ATK_CD, CLING_CD, GL_CD, DASH_CD, JBUF: max 0), PREV (jump / attack / dash bits), the direction of
 # a committed block (dash FACE, sprint SP_X, Clawline), the custom fields
@@ -149,8 +150,8 @@ def hold_useful(x, P):
     # (a release while rising halves vy - in normal control, the dash, the hard landing: Update reads the key there)
     cut = (m == M_NORMAL or m == M_DASH or m == M_HARD_LAND) and x[VY] > 0 and x[JDSTEPS] >= P[P_JSTEPS_MIN]
     if (x[JUMPING] > 0 or cut or jheld_matters(x) or m == M_GLIDE or (0 <= x[JQ] <= P[P_JQ])
-            or (x[JBUF] > 0 and m != M_NORMAL)):
-        u |= B_JUMP
+            or (x[JBUF] > 0 and m != M_NORMAL) or (m == M_SPRINT and x[PHASE] == 4.0)):
+        u |= B_JUMP                    # (HERO2 T1b: the sprint jump's antic - its jump reads the key held then)
     if m == M_DASH or m == M_SPRINT or (0 <= x[DQ] <= P[P_DQ]):
         u |= B_DASH
     return u
@@ -184,6 +185,8 @@ def vkey(x, cu, P, floor, out):
     # takes the larger extra of a merge)
     xv = x[XVX]
     out[K_XVD] = (1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0
+    if xv == 0.0:
+        out[_XVXD] = 0.0               # (T1b: the decay of an extra velocity that is gone)
     out[_JQ] = x[JQ] if (floor and (prv & B_JUMP) != 0 and 0 <= x[JQ] <= P[P_JQ]) else -1.0
     out[_DQ] = x[DQ] if ((prv & B_DASH) != 0 and 0 <= x[DQ] <= P[P_DQ]) else -1.0
     out[_AQ] = -1.0
@@ -422,7 +425,8 @@ def gen_cands(x, cu, P, opts, dt, out):
             jo[0] = CB_J
             jo[1] = 0
             nj = 2
-    elif m != M_HARD_LAND and not (ground and (m == M_DASH or (m == M_SPRINT and ph == 2.0))):
+    elif m != M_HARD_LAND and ((np.int64(P[P_H2]) & H2_SHUTTLE) != 0 or
+                               not (ground and (m == M_DASH or (m == M_SPRINT and ph == 2.0)))):
         # (in the dash too: a held jump keeps the dash's gravity off ramping as a hang; NOT on the ground in the dash
         # or the sprint: the sprint FSM's Jump Antic -> the shuttlecock jump (18 u/s, 6 frames' antic) is not in the
         # model - M4a: a model 'regain + jump' was 1.5 - 3.2 u off)
@@ -1725,7 +1729,8 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
         m = masks[t - 1]
         # (as gen_cands: no jump press on the ground in the dash or the ground sprint - the skid's jump is a plain
         # full jump, kept -; no attack press in the ground sprint or its skid)
-        no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0))
+        no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and \
+            (np.int64(P[P_H2]) & H2_SHUTTLE) == 0
         no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
         for b in (B_JUMP, B_ATTACK):
             if (m & b) == 0:

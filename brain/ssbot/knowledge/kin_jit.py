@@ -34,6 +34,7 @@ from ssbot.knowledge.kinematics import (
     FREEZE_PRESETS, WF_ORDER)
 from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
     AB_BROLLY, AB_CLING, AB_DASH, AB_HARD_LAND, AB_RPR_DOWN, AB_WALL, AB_WALLSLASH_SLOW, AIRDASHED, B_DASH, CLING,
+    SHUT, XVXD, P_H2_SHA, P_H2_SHV, P_H2_SHD, H2_SHUTTLE,
     CLING_CD, DASH_CD, DASH_T, DQ, FALL_T, GL_CD, HARD, M_DASH, M_GLIDE, M_HARD_LAND, M_RPR_DS, M_SPRINT, P_ABIL,
     P_ADASH_T, P_AFC0, P_AFC1, P_AFC_T, P_ASPR_SPEED, P_ASPR_T, P_DASH_CD, P_DASH_SPEED, P_DASH_T, P_DQ, P_GL_AACC,
     P_GL_ACC, P_GL_ANTIC, P_GL_BRAY, P_GL_BVX, P_GL_CD, P_GL_DEC, P_GL_DEFLATE, P_GL_GRAY, P_GL_INFLATE,
@@ -1067,13 +1068,25 @@ def forum_fixed(x, vx, vy, normal, rx0, ry0, P, TT):
                 if x[PHASE] == 2:
                     sprint_translate(x, rx0, ry0, P)
                 x[VX] = accel_to(x[VX], P[P_SPR_ACC], x[SP_X])   # Air / Ground Sprint: AccelerateToX OnEnter
+                if x[PHASE] == 2 and (np.int64(P[P_H2]) & H2_SHUTTLE) != 0 and x[JBUF] > 0 and                         (pm & B_JUMP) != 0 and (pm & B_DASH) != 0:
+                    x[PHASE] = 4.0        # HERO2 T1b: its ListenForJump (the 0.1 s queue) -> Jump Antic
+                    x[MODE_T] = 0.0
             return x[VX], x[VY]
         vx = x[FACE] * P[P_DASH_SPEED]
         vy = 0.0
         x[DASH_T] = f32(x[DASH_T] - P[P_FDT])
     elif mode == M_SPRINT:
         ph = x[PHASE]
-        vx = accel_to(vx, P[P_SPR_ACC], x[SP_X])
+        if ph != 4:
+            vx = accel_to(vx, P[P_SPR_ACC], x[SP_X])
+        if ph == 2 and (np.int64(P[P_H2]) & H2_SHUTTLE) != 0 and x[JBUF] > 0 and x[GROUND] > 0 and                 (pm & B_JUMP) != 0 and (pm & B_DASH) != 0:
+            # HERO2 T1b: Ground Sprint's ListenForJump in FixedUpdate (after the step's AccelerateToX) reads the jump
+            # queue with the jump (and the dash: the sprint's own state) held -> Jump Antic: her x speed kept from
+            # here (live: the antic's speed is the sprint's after that step, 25 / 25 trials; a jump tapped in the
+            # dash and let go, or the dash let go, jumps at the regain)
+            x[PHASE] = 4.0
+            x[MODE_T] = 0.0
+            ph = 4.0
         if ph == 0:
             # Air Sprint: Fall Clamp eased linearly (easeType 21) from air_fall_clamp0 to air_fall_clamp1
             u = min(max(x[MODE_T] - P[P_AFC_LAG], 0.0) / P[P_AFC_T], 1.0)
@@ -1277,6 +1290,7 @@ def sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT):
             vx = x[VX]
             regain(x, mask)
             x[XVX] = vx
+            x[XVXD] = 0.0
             do_attack(x, mask, P)
         else:
             regain(x, mask)
@@ -1291,6 +1305,17 @@ def sprint_cancels_h2(x, mask, pressed, jbuf0, abuf0, dt, P, TT):
                 x[PHASE] = 1.0            # Allow Shuttlecock -> Air Sprint Loop
         else:
             regain(x, mask)
+
+
+@njit(cache=True, error_model="numpy")
+def shuttle_jump(x, mask, P):
+    """HERO2 T1b: the Jump Antic's end - RegainControl (startWithShuttlecock) -> HeroJump(checkSprint: false) and
+    OnShuttleCockJump: jumped_steps -5, the dash cooldown 0.1 s, shuttlecockSpeed along her facing."""
+    regain(x, mask)
+    hero_jump(x, P)
+    x[JDSTEPS] = -5.0
+    x[DASH_CD] = f32(0.1)
+    x[SHUT] = x[FACE] * P[P_H2_SHV]
 
 
 @njit(cache=True, error_model="numpy")
@@ -1449,10 +1474,13 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
             elif x[GROUND] <= 0:
                 x[PHASE] = 0.0            # Allow Air Jump -> Air Sprint (the ground target speed kept)
                 x[MODE_T] = 0.0
-            elif (pressed & (B_ATTACK | B_JUMP)) != 0 or wall:
+            elif (pressed & B_ATTACK) != 0 or wall or ((pressed & B_JUMP) != 0 and
+                                                       (np.int64(P[P_H2]) & H2_SHUTTLE) == 0):
                 regain(x, mask)
         elif ph == 3 and ge32(x[MODE_T], P[P_SKID_T]):
             regain_jump(x, mask, P)
+        elif ph == 4 and ge32(x[MODE_T], P[P_H2_SHA]):
+            shuttle_jump(x, mask, P)      # HERO2 T1b: Jump -> RegainControl -> HeroJump + OnShuttleCockJump
     elif mode == M_RPR_DS:
         ph = x[PHASE]
         if ph == 0 and ge32(x[MODE_T], P[P_RPR_ANTIC]):
@@ -1612,13 +1640,16 @@ def fixed_step(x, P, TT):
 
     ab = np.int64(P[P_ABIL])
     if x[XVX] != 0:                       # HERO2 M4a: the extra air move velocity decays first (FixedUpdate)
-        xv = f32(x[XVX] - x[XVX] * f32(P[P_H2_XVD] * fdt))
+        xvd = x[XVXD] if x[XVXD] > 0 else P[P_H2_XVD]    # (T1b: the shuttlecock cancel's own decay)
+        xv = f32(x[XVX] - x[XVX] * f32(xvd * fdt))
         x[XVX] = 0.0 if abs(xv) < 0.01 else xv
+        if x[XVX] == 0:
+            x[XVXD] = 0.0
     mv = 0.0 if (x[DS_REC] >= 0 and x[GROUND] > 0) else x[MOVE]
     vx = mv * P[P_RUN] if normal else x[VX]
     if normal and mv == 0 and x[XVX] != 0:
         vx = vx + x[XVX]                  # Move: added unless a move key is held (SkipApplyWhileMoving)
-    can_turn = normal and not (x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC])
+    can_turn = normal and not (x[ATTACKING] > 0 and x[ATK_T] < P[P_ATK_REC]) and x[SHUT] == 0
     if ab != 0 and normal and (x[WSIDE] != 0 or x[WLOCK] >= 0):
         can_turn = False                  # DoMovement: no turning while wall sliding or wall locked
         if x[WSIDE] != 0:
@@ -1633,6 +1664,11 @@ def fixed_step(x, P, TT):
         vx = -rv if vx > 0 else vx - rv
     elif normal and x[RDIR] > 0:
         vx = rv if vx < 0 else vx + rv
+    if x[SHUT] != 0:                      # HERO2 T1b: the shuttlecock jump's x speed (FixedUpdate), off on the ground
+        if x[GROUND] > 0 and x[VY] <= 0:
+            x[SHUT] = 0.0
+        elif normal:
+            vx = x[SHUT]
     vy = x[VY]
     jmp = normal and x[JUMPING] > 0
     rise = jmp and x[JSTEPS] <= P[P_JSTEPS]
@@ -2037,6 +2073,13 @@ def update(x, mask, ev, dt, udt, P, TT):
         falling = x[VY] <= EPS_F and x[GROUND] <= 0
         if (ab & AB_HARD_LAND) != 0:
             forum_fall_check(x, dt, P)
+        if x[SHUT] != 0 and (x[ATTACKING] > 0 or (falling and x[JUMPING] <= 0) or x[MODE] == M_DS_ANTIC or
+                             relinq(x[MODE])):
+            # HERO2 T1b: ShuttleCockCancel (Update) - in the air an extra air move velocity of its speed
+            if x[GROUND] <= 0:
+                x[XVX] = x[SHUT]
+                x[XVXD] = P[P_H2_SHD]
+            x[SHUT] = 0.0
         if mode == M_DASH or mode == M_HARD_LAND:
             accept = True                 # hero_state is not no_input: LookForInput reads the move input
 

@@ -255,7 +255,7 @@ def node_get(L, cu, absy, alf, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH
     NVY[n, V_VY] = L[1, VY]
     NVY[n, V_ALF] = alf
     for s in range(2):
-        for md in range(2):
+        for md in range(4):
             EOFF[n, s, md, 0] = -1
             EOFF[n, s, md, 1] = 0
     HT[slot] = n
@@ -299,10 +299,12 @@ def _press_flags(x0, cu, dt, udt, P, TT):
 
 
 @njit(cache=True, error_model="numpy")
-def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT):
+def expand(n, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT):
     """The node's edges for step count s (both the full list and the one with the event limit reached), as the
-    engine's frame (env_jit._children) on its representative lanes. Returns False when a table is full."""
-    if EOFF[n, s, 0, 0] >= 0:
+    engine's frame (env_jit._children) on its representative lanes, for a pass kind fl (1: over the terrain - the
+    engine's floor-strict merge key and dominance filter -, 0: free space - its free-space key): EOFF[n, s, 2 fl + lim].
+    Returns False when a table is full."""
+    if EOFF[n, s, 2 * fl, 0] >= 0:
         return True
     MK = 48
     absy = NINT[n, I_ABS] == 1
@@ -363,8 +365,8 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
             L[0, ALPHA] = a
             L[1, ALPHA] = a
             cu = cu0.copy()
-            nk = _children(L[0], L[1], cu, udt, P, TT, o, True, boxes, 0, 0, IV, 0, 1, hh, tmp, tcu, cands, kid, kcu,
-                           kkey, kkeep, kcand, kuse, key1, key2, olo, ohi, wlo, whi, npc, plo, phi, dl, dh, st)
+            nk = _children(L[0], L[1], cu, udt, P, TT, o, fl == 1, boxes, 0, 0, IV, 0, 1, hh, tmp, tcu, cands, kid,
+                           kcu, kkey, kkeep, kcand, kuse, key1, key2, olo, ohi, wlo, whi, npc, plo, phi, dl, dh, st)
             if rep == 0:
                 nk2 = nk
                 for k in range(nk):
@@ -457,8 +459,8 @@ def expand(n, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL,
         oe0[md] = e0
         on[md] = ne
     for md in range(2):
-        EOFF[n, s, md, 0] = oe0[md]
-        EOFF[n, s, md, 1] = on[md]
+        EOFF[n, s, 2 * fl + md, 0] = oe0[md]
+        EOFF[n, s, 2 * fl + md, 1] = on[md]
     CNT[C_EXP] += 1
     return True
 
@@ -471,7 +473,7 @@ def closure(i0, i1, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, P
     i = i0
     while i < CNT[C_NODES] and i < i1:
         for s in range(2):
-            if not expand(i, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
+            if not expand(i, s, 1, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
                           CH, CNT):
                 return i
         i += 1
@@ -620,6 +622,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
     heights lie within band_q merge into a band (y range [cl_ylo, cl_y]; an upper bound, never for witnesses). TP: the
     terrain's reach (near; has_floor = TP[0] > 0)."""
     has_floor = TP[0] > 0 or TP[3] > 0
+    fl = 1 if has_floor else 0
     fdt = P[P_FDT]
     dt = f32(udt)
     cl_off = np.zeros(T + 2, dtype=np.int64)
@@ -744,8 +747,8 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                             cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                             pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
                             cl_node[:ntot], cl_ev[:ntot])
-            if EOFF[src, s, 0, 0] < 0:
-                if not expand(src, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
+            if EOFF[src, s, 2 * fl, 0] < 0:
+                if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT,
                               CK, CH, CNT):
                     flags[4] |= CNT[C_OVF] | 64
                     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
@@ -755,14 +758,14 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             if (NINT[src, I_ADEP] & (1 << s)) != 0:
                 src = _ainst(src, a_st, py, cur_q[c], cur_s[c], P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH,
                              CNT, ICK, ICT, key, ckey)
-                if src < 0 or not expand(src, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI,
+                if src < 0 or not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI,
                                          EF, HT, CHT, CK, CH, CNT):
                     flags[4] |= CNT[C_OVF] | 64
                     return (cl_off, cl_y[:ntot], cl_ylo[:ntot], cl_vy[:ntot], cl_cond[:ntot], cl_mode[:ntot],
                             cl_phase[:ntot], cl_iv0[:ntot], cl_ivn[:ntot], IV[:niv], pc_cl[:npc], pc_par[:npc],
                             pc_cand[:npc], pc_lo[:npc], pc_hi[:npc], pc_dlo[:npc], pc_dhi[:npc], stats, flags,
                             cl_node[:ntot], cl_ev[:ntot])
-            md = 1 if (maxev > 0 and cur_e[c] >= maxev) else 0
+            md = 2 * fl + (1 if (maxev > 0 and cur_e[c] >= maxev) else 0)
             e0 = EOFF[src, s, md, 0]
             ne = EOFF[src, s, md, 1]
             stats[t, 5] += ne
@@ -776,7 +779,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
                 else:
                     cy = py + EF[e, EF_DY]
                     cyl = cur_yl[c] + EF[e, EF_DY]
-                ev = cur_e[c] + (EF[e, EF_NEV] if md == 0 else 0.0)
+                ev = cur_e[c] + (EF[e, EF_NEV] if md == 2 * fl else 0.0)
                 qm = EF[e, EF_QM]
                 if qm == 0.0:
                     cq = cur_q[c]
@@ -1004,22 +1007,23 @@ def route(n, py, qy, sy, s, alpha, TP, P, udt, TTf, TTg, opts, hh, NL, NCU, NID,
     the phase instance), expanded. -1: a table is full."""
     key = np.empty(NIDK)
     ckey = np.empty(NKEY)
+    fl = 1 if (TP[0] > 0 or TP[3] > 0) else 0
     src = n
-    if NINT[n, I_ABS] == 0 and (TP[0] > 0 or TP[3] > 0) and near(py, py, TP, P):
+    if NINT[n, I_ABS] == 0 and fl == 1 and near(py, py, TP, P):
         src = _instance(n, py, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key, ckey)
         if src < 0:
             return -1
-    if EOFF[src, s, 0, 0] < 0:
-        if not expand(src, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH,
-                      CNT):
+    if EOFF[src, s, 2 * fl, 0] < 0:
+        if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
+                      CH, CNT):
             return -1
     if (NINT[src, I_ADEP] & (1 << s)) != 0:
         src = _ainst(src, alpha, py, qy, sy, P, NL, NCU, NID, NINT, NVY, EOFF, HT, CHT, CK, CH, CNT, ICK, ICT, key,
                      ckey)
         if src < 0:
             return -1
-        if not expand(src, s, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH,
-                      CNT):
+        if not expand(src, s, fl, P, udt, TTf, TTg, opts, hh, NL, NCU, NID, NINT, NVY, EOFF, PFL, EI, EF, HT, CHT, CK,
+                      CH, CNT):
             return -1
     return src
 
@@ -1030,7 +1034,7 @@ def member_frame(x, cu, m_raw, m_prev, strip, udt, P, TT):
     bit 31 its P + 8 throw) for one concrete key mask, WITHOUT THE AIR DASH as the engine's OPT_NO_ADASH: the dash key
     is dropped whenever she is airborne after the frame's steps. Returns (strip, m_prev)."""
     m = m_raw
-    no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0))
+    no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and         (np.int64(P[km.P_H2]) & km.H2_SHUTTLE) == 0
     no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
     for b in (B_JUMP, B_ATTACK):
         if (m & b) == 0:
@@ -1105,6 +1109,7 @@ def follow(S0, cu0, n0, masks, TP, tol, P, udt, TTf, TTg, opts, hh, NL, NCU, NID
     fdt = P[P_FDT]
     dt = f32(udt)
     TT = TTg if (TP[0] > 0 or TP[3] > 0) else TTf
+    fl = 1 if (TP[0] > 0 or TP[3] > 0) else 0
     LMAX = 512
     cq_ = np.empty(LMAX)
     cs_ = np.empty(LMAX)
@@ -1153,8 +1158,8 @@ def follow(S0, cu0, n0, masks, TP, tol, P, udt, TTf, TTg, opts, hh, NL, NCU, NID
                             NVY, EOFF, PFL, EI, EF, HT, CHT, CK, CH, CNT, ICK, ICT)
                 if src < 0:
                     return -2
-                e0 = EOFF[src, s, 0, 0]
-                ne = EOFF[src, s, 0, 1]
+                e0 = EOFF[src, s, 2 * fl, 0]
+                ne = EOFF[src, s, 2 * fl, 1]
                 for e in range(e0, e0 + ne):
                     yy = EF[e, EF_DY] if EI[e, EI_YABS] == 1 else cy[j] + EF[e, EF_DY]
                     if yy != my:
@@ -1292,7 +1297,7 @@ class Lib:
         self.NID = np.zeros((cap_nodes, NIDK))
         self.NINT = np.zeros((cap_nodes, NINTC), dtype=np.int64)
         self.NVY = np.zeros((cap_nodes, 2))
-        self.EOFF = np.full((cap_nodes, 2, 2, 2), -1, dtype=np.int64)
+        self.EOFF = np.full((cap_nodes, 2, 4, 2), -1, dtype=np.int64)
         self.PFL = np.zeros((cap_nodes, 2), dtype=np.int64)
         self.HT = np.full(_pow2(4 * cap_nodes), -1, dtype=np.int64)
         self.EI = np.zeros((cap_edges, 3), dtype=np.int64)
@@ -1456,7 +1461,7 @@ class Lib:
             out.append(vy)
         return np.array(out)
 
-    def kinds(self) -> np.ndarray:
+    def kinds(self, lo: int = 0) -> np.ndarray:
         """Each node's kind (KIND_NAMES): the steady states the spec opens tables at - A1 (normal control in the air,
         every timer and lock spent, gravity 1, no hang to come, on the fall-from-rest lattice: A1_n), A1~ (the same off
         the lattice: an offset chain, e.g. the fall after the umbrella's Deflate continues the float's vy), A4 (the
@@ -1465,9 +1470,10 @@ class Lib:
         transient (a timer / lock running: the attack, its cooldown, the umbrella's re-open lock, the Clawline block
         or lock or its residual drift, the air sprint's extra velocity, a queue, the downspike recovery, i-frames)."""
         n = self.n_nodes
-        X = self.NL[:n, 1]
-        X0 = self.NL[:n, 0]
-        cu = self.NCU[:n]
+        X = self.NL[lo:n, 1]
+        X0 = self.NL[lo:n, 0]
+        cu = self.NCU[lo:n]
+        n = n - lo
         P = self.P
         mode, ph = X[:, MODE], X[:, PHASE]
         air = X[:, GROUND] <= 0
@@ -1509,7 +1515,8 @@ class Lib:
             src = route(nd, py, qy, sy, s, alpha, self.TP if floor else self.TP_free, self.P, self.udt, self.TTf, self.TTg,
                         self.opts, self.hh, *self._lib(), self.ICK, self.ICT)
             if src >= 0:
-                return range(int(self.EOFF[src, s, 0, 0]), int(self.EOFF[src, s, 0, 0] + self.EOFF[src, s, 0, 1]))
+                md = 2 if floor else 0
+                return range(int(self.EOFF[src, s, md, 0]), int(self.EOFF[src, s, md, 0] + self.EOFF[src, s, md, 1]))
             self._grow()
 
     def steps(self, alpha: float, T: int) -> list:
@@ -1576,7 +1583,8 @@ class Lib:
                     hi2 = hi + float(self.EF[e, EF_DHI] + self.EF[e, EF_SHI] * a)
                     y2 = yy + float(self.EF[e, EF_DY])
                     stack.append((c2, t + 1, lo2, hi2, y2, traj + [(t + 1, lo2, hi2, y2, self.label(c2))]))
-                    kd = kd if c2 < len(kd) else self.kinds()
+                    if c2 >= len(kd):
+                        kd = np.concatenate([kd, self.kinds(len(kd))])
         return {"node": int(nd), "kind": KIND_NAMES[kd[nd]], "vy": float(self.NVY[nd, V_VY]), "alpha": alpha,
                 "s0": s0, "continue": cont, "n_edges": len(es), "actions": leaves, "truncated": trunc}
 
@@ -1657,8 +1665,13 @@ class Lib:
                   claw=meta.get("claw", True), terrain=meta.get("terrain", "floor"))
         if meta.get("params_vector_sha1") != _sha1(lib.P) or meta.get("version") != VERSION:
             raise ValueError(f"tables {path}: built with another hero model or version (params / HERO2 bits)")
-        for nm in ("NL", "NCU", "NINT", "NVY", "EOFF", "PFL"):
+        for nm in ("NL", "NCU", "NINT", "NVY", "PFL"):
             getattr(lib, nm)[:n] = z[nm]
+        eo = z["EOFF"]
+        if eo.shape[2] == 2:                        # (a library from before the per-pass-kind lists: floor-strict)
+            lib.EOFF[:n, :, 2:4] = eo
+        else:
+            lib.EOFF[:n] = eo
         lib.EI[:e] = z["EI"]
         lib.EF[:e] = z["EF"]
         lib.CK[:c] = z["CK"]
@@ -1668,8 +1681,11 @@ class Lib:
         lib.CNT[C_OVF] = 0
         # (a library saved before the edge lists were committed together: an expansion whose event-limit list was
         # lost to a full table is expanded again)
-        bad = (lib.EOFF[:n, :, 0, 0] >= 0) & (lib.EOFF[:n, :, 1, 0] < 0)
-        lib.EOFF[:n][bad] = -1
+        for f0 in (0, 2):
+            bad = (lib.EOFF[:n, :, f0, 0] >= 0) & (lib.EOFF[:n, :, f0 + 1, 0] < 0)
+            v = lib.EOFF[:n, :, f0:f0 + 2]
+            v[bad] = -1
+            lib.EOFF[:n, :, f0:f0 + 2] = v
         _idents(lib.NL, lib.NCU, lib.NINT, lib.NVY, lib.P, n, lib.NID)
         _rehash(lib.HT, lib.NINT[:, I_HASH].copy(), n)
         _rehash(lib.CHT, lib.CH, c)

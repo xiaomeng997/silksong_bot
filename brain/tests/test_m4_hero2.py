@@ -40,12 +40,13 @@ def _att_on(r, after=0):
 
 
 def test_row_layout_and_pad():
-    assert kin.K == 83 and kin.ROW_NAMES[kin.ABUF] == "abuf" and kin.ROW_NAMES[kin.XVX] == "xvx"
+    assert kin.K == 85 and kin.ROW_NAMES[kin.ABUF] == "abuf" and kin.ROW_NAMES[kin.XVX] == "xvx"
+    assert kin.ROW_NAMES[kin.SHUT] == "shut" and kin.ROW_NAMES[kin.XVXD] == "xvxd"      # (T1b: K 83 -> 85)
     old = np.arange(81.0)
     p = kin.pad_state(old)
-    assert p.shape == (83,) and np.array_equal(p[:81], old) and p[81:].sum() == 0
-    assert kin.pad_state(np.zeros(83)).shape == (83,)
-    assert kin.pad_state(np.ones((81, 3))).shape == (83, 3)
+    assert p.shape == (85,) and np.array_equal(p[:81], old) and p[81:].sum() == 0
+    assert kin.pad_state(np.zeros(85)).shape == (85,)
+    assert kin.pad_state(np.ones((83, 3))).shape == (85, 3)
 
 
 def test_jump_sets_the_dash_cooldown(h2):
@@ -241,3 +242,33 @@ def test_hooked_body_window():
     p = kin.HeroParams.load(WANDERER)
     assert sk.control_state(p, h, airdashed=1.0)[kin.AIRDASHED] == 0.0
     assert sk.control_state(p, u, airdashed=1.0)[kin.AIRDASHED] == 1.0
+
+
+def test_t1b_sprint_jump():
+    """HERO2 T1b (H2_SHUTTLE): a ground dash held into the sprint with a jump pressed in it -> the sprint FSM's Jump
+    Antic (7 frames, her x speed kept) -> the sprint (shuttlecock) jump: 18 u/s along her facing while rising, the
+    extra air velocity after its apex; with the bit off the old model (no antic)."""
+    base = kin.HeroParams.load(kin.REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_wanderer_forum.json")
+    on = kin.hero2(base, on=True)
+    off = kin.HeroParams.from_json(dict(on.to_json(), hero2=int(on.hero2) & ~kin.H2_SHUTTLE))
+    terr = kin.Terrain2D.from_boxes([(-1.0e4, 1.0, 1.0e4, 3.015)])
+    masks = np.array([kin.B_DASH | kin.B_RIGHT] * 12 + [kin.B_DASH | kin.B_RIGHT | kin.B_JUMP] * 14 +
+                     [kin.B_RIGHT] * 20, dtype=np.int64)
+    res = {}
+    for nm, prm in (("on", on), ("off", off)):
+        S = kin.initial_state(prm, 20.0, 3.015 + prm.foot, ground=True, alpha=0.5)
+        res[nm] = kin.rollout(S, masks[None], prm, terr)
+    xs = res["on"].centre[0, :, 0]
+    ys = res["on"].centre[0, :, 1]
+    lift = 5 + int(np.flatnonzero(ys[5:] > ys[5] + 0.01)[0])      # (the start settles onto the floor first)
+    dx = np.diff(xs)
+    # the antic before the lift: her x speed constant (steps of one size, frames without a step 0)
+    a = dx[lift - 7:lift - 1]
+    a = a[a > 0]
+    assert len(a) >= 4 and np.ptp(a) < 1e-9 and a[0] > 0.3
+    # rising: 18 u/s
+    r = dx[lift + 1:lift + 6]
+    r = r[r > 0]
+    assert np.allclose(r, 18.0 * on.fdt, atol=1e-6)
+    # the bit off: no sprint jump (the press is not offered there; the old model's x differs)
+    assert not np.allclose(res["off"].centre[0, :, 0], xs)
