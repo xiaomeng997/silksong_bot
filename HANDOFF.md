@@ -13778,7 +13778,8 @@ was touched. Data `C:\ssbot\data\m2_play\map2\a1n\t3` (`verify\` the exactness r
   same (236 / 236); T2's exactness runs re-run after T3's changes are exact (the search's passes 236 / 236 + 236 /
   236, windows equal, exit checks 673 / 673; T1 / T2 sweeps 479 / 479, 395 / 395; entry 1,217 / 1,218 as in T2).
 - **It does not make the search much faster.** At 1 s it evaluates ~40 % more candidates (p50 52 -> 72) and finds
-  more (159 -> 166 / 177 move cases, mean value 1.17 / 1.21 -> 1.32 / 1.35, two runs); at 0.25 s nothing (80 -> 78);
+  more (159 -> 166 / 177 move cases, mean value 1.17 / 1.21 -> 1.32 / 1.35, two runs - T4: only in the synthetic
+  groups, the recorded w7 situations found none more; see stage T4); at 0.25 s nothing (80 -> 78);
   the first safe plan on w7 comes ~20 ms later (p50 / p90 66 / 156 -> 84 / 206 ms; run 2 65 / 167 -> 86 / 190); and in
   the real-time smokes map2 holds the keys LESS - strict w7 32.6 -> 23.0 % of the engaged ticks, open 36.8 -> 28.6 %,
   w13 4.5 -> 2.5 % (the safety audit 0 collisions and 0 invalid committed presses in every arm). The reasons, each
@@ -14047,3 +14048,419 @@ map2 with T1b / T2's hero bits (H2_SHUTTLE, H2_LAND_DASH) and T2's engine key fi
 
 Commits (branch worktree-wf_f1846551-5f9-1, not merged, not pushed): f27ac9c (the switch, the library budget and reset,
 the cheaper expansions, the long pass, LiveCfg, the tools, the tests), then the docs commit.
+
+## Task map2 - A1_n recursive tables - stage T4: the two verifiers' findings on T1 - T3 (offline; each finding reproduced, the confirmed ones fixed in the engine and the tables alike with tests, the libraries rebuilt, T1 / T2's exactness and T3's measurements re-run; the escape funnel and eps(k) the lead's notes asked for) (branch worktree-wf_f1846551-5f9-1, 2026-10-24; forum.md §106)
+
+The task: the two independent verifiers' findings (lenses exactness / search, 20 items: 13 + 7) on stages T1 - T3 -
+check each offline, fix the confirmed ones with tests (rebuild the tables if needed), say which are refuted and why;
+re-run T1 / T2's exactness checks and T3's measurements; refreeze the checkout. Offline only: no game process,
+instance or oracle was touched. Data `C:\ssbot\data\m2_play\map2\a1n\t4` (`repro\` / `dbg\` the reproductions,
+`build\` / `build2\` the rebuilt libraries (engine t4c / t4d), `verify\` / `verify2\` the exactness / containment /
+witness / steady re-runs at a2cf22b / 499df40, `kinds\` the steady states, `ident\` `accept\` `search\` the search's
+measurements (the first-safe-plan files in `ident\first_*`), `smoke\` the real-time smokes, `funnel\` eps(k) and the
+funnel, `code_a2cf22b\` the code snapshot the search campaigns ran, `tests\` the test logs, `scripts\`); the
+verifiers' own scripts and data stay in `review_exactness\` / `review_search\`.
+
+### Result
+
+- **All 20 findings were real; none is refuted.** 14 are fixed in the code (the engine and the tables together, with
+  tests), one partly (finding 11: the attack that holds a queued dash back is now offered, an attack's queue read by
+  the air sprint's cancel is not); 3 are limits of the representation that the code and the docs now state and the
+  measurements bound (the lanes' hull inside the float / a Clawline block after a cut or a merge, the backward set in
+  the float, the wall clip); T3's '1 s finds more' is corrected (it came from the synthetic groups); the funnel the
+  lead's notes asked for is built and measured.
+- **The tables = the engine again on every check T1 - T3 ran**, on the final engine (499df40): the search's passes 236
+  + 236, windows equal, exits 673 / 673, the 2-event sweeps 395 / 395 and 479 / 479, the default library's 479 / 479,
+  entry from transitional states 1,218 / 1,218 (T3: 1,217), and the bot's executable family 708 passes + 1,689 exit
+  checks. The re-run caught one defect of T4's own (the up slash's offer read the physics phase: 1,212 / 1,218 at
+  a2cf22b) - fixed.
+- **Against the game's model** (the verifiers' own checkers, the same seeds): escaping rollouts 114 / 378 / 309 ->
+  79 / 285 / 185, every one left but two an attack pressed in the ground dash / sprint (the Wanderer's dash attack -
+  not in the hero model; no plan can contain it). The witness: off the height 277 -> 66, the reported path not the
+  real one 288 -> 0. The steady states: 0 nodes differ in every kind (before A1~ 5, A4 68, G 47, A3 122).
+- **The search with the tables on is now ahead of off at a live budget** (T3: not): the M3 acceptance at 1 s found 164
+  -> 183 and 156 -> 181 move cases (two runs), at 0.25 s 76 -> 87, gains in every source group including the
+  recordings (w7 23 -> 26 / 27, w13 44 -> 50, 42 -> 49), candidates p50 +35 %; at the deterministic budget on = off
+  exactly; the first safe plan +5 ms (T3: +20). The lock no longer carries over between decisions (0.15 s: decisions
+  waiting 81 -> 11 / 102), but inside a decision the foreground still waits for the background pass (2 s: ~0.3 s per
+  decision, the first safe plan 53 -> 103 ms) and short decisions are still behind off (0.15 s: no first safe plan 32
+  vs 16). In the real-time smokes the tables no longer cost map2 its share
+  (T3: strict w7 32.6 -> 23.0 %): strict w7 33.1 -> 35.3 %, open 37.0 -> 37.8 %, w13 4.2 -> 5.2 % / 6.0 -> 5.3 %; 0
+  collisions, 0 invalid presses.
+- **The long pass made honest is too expensive** (finding S2's fix: the predictions reach 123 frames): at every budget
+  it is now worse than without it (1 s 164 -> 146, 0.25 s 76 -> 59, deterministic 207 -> 155; a two-Clapper decision
+  of 28 min and a 34 GB worker at the deterministic budget). Keep the default passes.
+- **The funnel cannot replace the exit checks** as the notes hoped: the root's funnel is stricter (on the search's
+  safe endpoints it disagrees with the exit check in 722 of 3,260, 678 of them the funnel saying no) because the
+  root's family has spent its event where the exit check grants a fresh one; under eps(k) 71 % of the open funnels
+  close (half of them by 0.5 s). A funnel per beam node is the next step.
+- Offline only: no game process, instance or oracle was touched; no merge to main. The frozen checkout:
+  `C:\ssbot\live_1v1_499df40` (the switches as before: `SSBOT_FORUM_MAP2_SET=tables=1` turns the tables on).
+
+### The findings, one by one (checked offline; fixed in the engine AND the tables where they are the engine's)
+
+Exactness lens:
+
+1. **The float piece after a danger cut keeps the cluster's extreme lane velocities** (env_jit's merge / cut; the
+   chain the same) - CONFIRMED (rev_cut: A3 'N' cut at frame 8: 0.34 u at the cut side). It is the lanes'
+   documented over-approximation inside an inertia (the engine's docstring said so; the spec's 'widen each piece and
+   merge (still exact)' does not hold for A3 - the design is wrong there, the game (the dense rollouts) is tighter).
+   NOT changed: a tighter bound needs the (x, vx) coupling the lanes do not carry. The same holds inside a Clawline
+   block (each member drifts with its own velocity; a cluster merged from the dash's two twins is the hull). What it
+   costs the search, measured (`exit_valid.py`: every 'alive' exit verdict of T2's 673 exit checks confirmed by a
+   concrete key sequence from the endpoint - the witness, rolled): 647 alive, 645 confirmed, 2 not (both from a float
+   endpoint; 262 of the alive ones start in the float) - an exit verdict resting on the hull strip is rare.
+2. **The merge key held lane 1's extra air velocity only** - CONFIRMED (dbg_shut: 0.032 - 0.239 u; 0 / 111 after)
+   and FIXED: `env_jit.key_l0` adds lane 0's extra-velocity side and decay to every cluster key (the divergence
+   check `keq_lanes` ignores these horizontal slots); the tables' `vkey_rel` the same.
+3. **A held / queued dash's left / right twins: the dominance filter dropped the right one** - CONFIRMED (dbg_dq:
+   0.33 u) and FIXED: the filter drops a child only when its horizontal reach lies inside the other's
+   (`env_jit.hcover`: lane x, vx, extra vx, held direction, facing); the held direction both lanes hold is a key
+   slot (`K_MOVEF`: the twins stay two clusters for the forced frame, then merge as interval sets - a first version
+   merged them at once into one hull that claimed the 0.33 u between them, and the witness missed by 0.33 u in 241
+   targets of the verifiers' check); a merge takes the extreme vx / extra vx / held direction / facing (`merge_h`).
+4. **CB_JH (jump held without a press) from a pass's first frame; the witness hid the press** - CONFIRMED and FIXED in
+   two parts: the engine / the chain drop a CB_JH child in frame 1 when the start does not hold jump (no earlier
+   frame for its press; `drop_child`); `Fwd.witness` writes the keys for every CB_JH frame after a frame without jump
+   - (a) jump held since its last earlier frame with it (the dominance filter keeps a hold that does nothing as a
+   release), else (b) an attack 1 - 7 frames before and the jump pressed in its recovery - each kept only when the
+   keys rolled as they are reproduce the tracked path, and the returned `miss_x / miss_y / xy` are the honest rollout
+   (before: the tracker's own rollout with the previous key set by hand). Not fixed: a CB_JH child from a later frame
+   that neither (a) nor (b) realizes (e.g. a dash with jump held 7 frames after a start at rest: the attack would
+   have to come before the start) - the over-approximation stays; the witness reports it (`hidden: (i, None)`), the
+   search rejects it (below, 8). A first version dropped CB_JH by frame (1, and the dash with it before frame 7) and
+   lost the dash with jump really held (108 escapes in the verifiers' cA) - replaced.
+5. **The tables' node identity had no lane-0 decay** - CONFIRMED (dbg_xvxd_ident: order-dependent 0.166 / 0.446 u),
+   FIXED by 2 (the identity holds the key).
+6. **The up slash's ceiling thunk** - CONFIRMED (dbg_ceil) and FIXED: `CB_UP` (attack + up) is a candidate in normal
+   air control where the ceiling lies within `upslash_band` over her head at the frame's start (the thunker's top over
+   her box top + her rise over the slash's window + 0.5 u, + her rise in the frame) and a fresh up slash starts in
+   this Update (`upslash_thunks`); `tables.near` routes a cluster within the same band of the ceiling through its
+   terrain instance (the free node has no ceiling). 1 event (it changes the vertical). An up slash that then meets
+   nothing is a real, inert press (its child exact). The first version gated by a kin look-ahead over the slash's
+   window; the re-run entry check found it read the lane's physics phase (ALPHA - a node does not carry it: the same
+   state got the offer at phase 0.5 and not at 0.25) and, from the lane after the frame's steps, a jump fired in the
+   step widened the engine's band past the chain's: 2 pogo starts x 3 passes with one cluster more in the chain
+   (1,212 / 1,218) - fixed (499df40: the gate reads the frame-start lane, the same function `tables.near` reads;
+   1,218 / 1,218). The frame a jump fires in gets the up slash only within the frame-start speed's band (the next
+   frame's band holds the jump's speed).
+7. **The attack in the ground dash / sprint (kin_jit's 'regain')** - CONFIRMED as a hero-model boundary: the game's
+   Wanderer dash attack is not modelled (M4a: 2.6 - 3.9 u off), so the model must say so - FIXED: the reference
+   rollout drops an attack pressed in the ground DASH too (it dropped one in the ground sprint), `press.unmodelled`
+   flags such a press and `search.simulate` makes it a forced collision (a plan with one is never played; none can
+   come from the envelope). kinematics.rollout itself still regains (the containment checkers that roll it count
+   the class 'gdash_atk' / 'sprint_atk' - by design).
+8. **The witness missed reachable interior points of the float; realize used keys without their miss** - CONFIRMED and
+   FIXED: a second beam of 128 when the first misses by > 0.01 u (`envelope.WIDE_BEAM`), and `Searcher._witness_ok`:
+   realize / realize_safe reject keys whose honest rollout ends > 0.1 u off the point or off its height
+   (stats realize_miss_x / realize_miss_y).
+9. **bridge.backward over-approximates in the float** - CONFIRMED (rev_back: 1.66 u) and documented (module
+   docstring, `Back.exact`: False when a float cluster is on the tube - an upper bound; a use that needs the exact
+   set must confirm forward). Not used by the search.
+10. **The flat layer is no upper bound for its keys** - CONFIRMED: (a) free space, (b) the class's exact alpha c / 6
+   is a step-pattern boundary (dt / fdt = 0.8333004 < 5 / 6), (c) the bin edge. FIXED: `Tables.contains` with a
+   tolerance (c); `Tables.valid_until(key, S, P, floor_top)` - -1 when S's physics-step pattern over the table's frames
+   is not the build's, an air table only up to its rows' reach of the floor (a, b); the file's meta holds each key's
+   alpha, free flag, dt / fdt (rebuilt). Not used by the search.
+11. **Attack presses in normal control change state a later dash / sprint reads** - CONFIRMED (dbg_var, cH's
+   'dash_queued'): an event-accounting difference - the person's 'event' leaves attacks in normal control free, the
+   engine never offered them. PARTLY FIXED: `CB_FREE` - an attack (no event) offered where a held, queued dash cannot
+   fire yet: its lock holds the dash back to its recovery's end (cH: 6 of 7 such escapes contained). Left: an attack's
+   queue (InputHandler's 0.1 s, H2_SPR_ATK) read by the air sprint's Attack Cancel - the engine charges the cancel one
+   event (a subset of the person's family: fewer exits / windows, never a false one); the containment re-run keeps one
+   such rollout in cB and one in cH (an attack pressed with the dash held, read later).
+12. **Lib.kinds' steady states** - CONFIRMED and FIXED: steady also needs no key held (A3: jump only), the jump / dash
+   / attack queues dead, the attack buffer empty, the sprint's target speed gone, no hard landing on its way (A1 / A1~
+   / G / hang: FALL_T 0, HARD 0; A4 steady once HARD is set), the jump counter past JSTEPS_MIN (a pogo / wall jump
+   leaves it low: a release while rising is not cut), and A3 every timer / queue spent but the float's own lock. The
+   verifiers' check (each labelled node rolled against the clean state with 60 random key sequences, free and over
+   the arena; A4's clean state with its hard landing): A1 0 / 35, A1~ 5 -> 0 / 400, A4 68 -> 0 / 86, G 47 -> 0 / 400,
+   A3 122 -> 0 / 400 (A3 1,265 nodes, 2,187 before).
+13. **The wall clip ignores the wall's vertical** - CONFIRMED (the game's walls slide / cling): the spec's use-time
+   clip is incomplete; documented (Lib.forward, fw.wall_clip). The search never touches a wall (closed danger boxes
+   at her half width).
+
+Search lens:
+
+1. **Left-behind background passes held the library's lock** - CONFIRMED and FIXED: each background pass carries a
+   stop flag the engine's and the chain's frame loops read (abandoned at the next frame, None returned);
+   `Searcher._stop_bg` cancels / stops every pass not joined - after a node's queue, at a decision's start (before the
+   library's reset) and at its end (a finally: an abort or exception too). The verifiers' script: at 0.15 s the decisions that waited > 5 ms for the lock 81 -> 11 / 102 (p90 349 -> 5 ms),
+   no first safe plan 71 -> 32; the wait INSIDE a decision remains (2 s: p50 313 -> 294 ms - the background 2-event
+   pass and a foreground pass share the one lock, T3's design; open item).
+2. **The long pass ran past the prediction** - CONFIRMED (pred.T 75) and FIXED: `Cfg.h_pass` (the longest pass) joins
+   the predictions' horizon in evaluate (the default passes are under t_pred: unchanged). The verifiers' own script on
+   the 12 w7 roots: pred.T 123 in all (before 75), the danger list has the Clappers to frame 120 (before: only the walls
+   after ~75); the long pass's windows 277 at t 61 - 117 (before 80 at 61 - 66).
+3. **The 1 s gain came from the synthetic groups** - CONFIRMED from T3's own runs, grouped by the situations' source
+   (found move cases, off -> on, run 1 / run 2): forced 65 -> 70 / 80, person 26 -> 27 / 27, rec w13 44 -> 45 / 46,
+   rec w7 24 -> 24 / 24; at 0.25 s rec w7 16 -> 12. T3's 'finds more' is the synthetic groups; corrected in T3's
+   section (a pointer to here). T4's own wall-clock runs gain in the recorded groups too (below).
+4. **The windows from the coarse predicate** - CONFIRMED; FIXED as an option: `Cfg.shapes` (tables on, default off)
+   adds the rows the predicate did not take by the exact down-slash shape (`wshape.cluster_windows`, a vectorized
+   pre-filter by the body box). At the deterministic budget: found 204 vs 207 (6 lost, 3 gained) at 4 x the wall
+   time (the shape test is outside the budget's units) - keep it off.
+5. **The funnel notes not done** - CONFIRMED; done here as far as it carries (below, 'The escape funnel').
+6. **The chain kept clusters split that the engine merged; ties** - CONFIRMED (sit 14: 72 vs 68 clusters at frame 18)
+   and FIXED: a ground dash's floor instance holds its representative's QY / SY in its identity but the chain carries
+   each cluster's own - the merge CLASS no longer holds them; the windows' and the safe endpoints' sort keys rounded
+   to 1e-9 u. The deterministic identity, tables on vs off: 126 / 130 + 106 / 106 (T3: 112 / 130,
+   102 / 106); the 4 left differ in one tried plan's keys only (a witness's tie between equal pieces - below).
+7. **The worker's memory guard** - PLAUSIBLE (not observed) and FIXED: the search's library is fixed (`Lib.fixed`: a
+   pass that would reallocate raises `TablesFull`, World.envelope takes the engine's pass; the next decision resets);
+   the guard counts the whole preallocated room.
+
+A process finding (T4's own): **numba's on-disk cache does not see a change in a function another module calls** -
+tables.chain kept an older env_jit.drop_child compiled in after env_jit changed and tables.py did not (the chain then
+differed from the engine: 49 clusters at frame 2 of a start holding jump). Every check above ran after clearing
+`brain/ssbot/map2/__pycache__/*.nbi / *.nbc`; after a change in env_jit, clear them (or touch every module that calls
+it: tables, bridge, press) before trusting a comparison.
+
+### What was built (commits 29ae48e, b2c9cf0, a2cf22b, 499df40; `brain/ssbot/map2/env_jit.py`, `tables.py`, `envelope.py`, `search.py`, `press.py`, `wshape.py`, `bridge.py`, `live.py`, `tools/t1_tables.py`; `tests/test_t4_review.py`)
+
+- **The engine (and with it the tables - every edge is the engine's own frame)**: the cluster key holds lane 0's extra
+  air velocity and the held direction both lanes hold (`key_l0`, `K_XVD0 / K_XVXD0 / K_MOVEF`; `keq_lanes` the lanes'
+  vertical check); the dominance filter needs the horizontal cover (`hcover`) and a merge takes the extreme held
+  direction and facing too (`merge_h`); `drop_child` (after the dominance, in the engine's frame loops and the tables'
+  chain alike): CB_JH not in a pass's first frame from a start that does not hold jump, and OPT_EXEC's children; the
+  candidates `CB_UP` (the up slash that can meet a ceiling: `upslash_band` / `upslash_thunks` - read from the
+  frame-start lane, the band `tables.near` reads) and `CB_FREE` (an attack, no event, that holds back a held queued
+  dash); the reference rollout drops an attack in the ground dash; a stop flag read every frame (`forward`,
+  `forward_par`, `tables.chain`; Engine.forward / Lib.forward / World.envelope `stop=` - None when abandoned).
+- **OPT_EXEC / `Cfg.exec_only` (default True): THE BOT'S EXECUTABLE FAMILY** - the search's passes and exits without the
+  children of an attack in normal control (CB_UP, CB_FREE): the live controller rejects a plan with a slash it does
+  not plan (live.repair_check 'unplanned slash' - the first T4 commit's search put a hidden press's attack into a
+  plan and test_m4d2_live caught it); the search's witnesses write a CB_JH frame only as a hold (`attack_ok=False`).
+  The exactness checks run the full family.
+- **The tables**: `vkey_rel` / the node identity with lane 0's slots; the merge CLASS without a ground dash's QY / SY
+  (the chain carries every cluster's own); `near(.., vy)` - the ceiling's reach covers the up slash's band
+  (`upslash_band`); `Lib.fixed` / `TablesFull` / `Lib.room`; `Lib.forward(stop=, exec_only=)`; `fw.qs` (each
+  cluster's QY / SY), `fw.wall_clip`; `Lib.kinds` (keys up, queues dead, ABUF, SP_X, FALL_T / HARD, the jump counter;
+  A3 with the fall's spent timers but its own lock); `ENGINE_REV = 't4d'` and a key-layout check in `Lib.load` (a
+  library of another engine is refused - rebuild with `t1_tables build`, the header's commands).
+- **The witness** (`envelope.Fwd.witness`): `WIDE_BEAM` 128 after a miss > 0.01 u; `_hidden_press` (a CB_JH frame after
+  a frame without jump: (a) held since its last earlier frame with jump / the start's, (b) with `attack_ok` an attack
+  1 - 7 frames before and the press in its recovery; each checked by rolling); `miss_x / miss_y / xy` from the keys
+  rolled as they are (`_roll`), `path_dev`, `hidden`.
+- **The search** (`search.py`): `_witness_ok` (realize / realize_safe reject a miss > `WITNESS_TOL` 0.1 u or off the
+  height); `_stop_bg` / `self._bg` / `decide` split into `decide` + `_decide` (the finally stops the leftovers);
+  `Cfg.h_pass`; the windows' / safe endpoints' sort keys rounded; `Cfg.shapes` + `_shape_rows` (wshape's exact down
+  slash windows for the rows the predicate did not take; tables on); `simulate` makes an unmodelled ground-dash attack
+  a forced collision ('dash_attack'); World.envelope falls back to the engine on `TablesFull` (TABLE_STATS 'full') and
+  returns None on a stop ('stopped').
+- `press.unmodelled`; `wshape.abs_lane / swing_paths / cluster_windows` (shared with tools.t2_tables' shapes);
+  `bridge.Back.exact`; `envelope.Tables.contains(tol)`, `Tables.valid_until`, `steps_pattern`; `t1_tables flat` writes
+  each key's alpha / free flag / dt / fdt; `live.worker_main`'s guard counts `lib.room`.
+- Tests `tests/test_t4_review.py` (18): the key with lane 0's extra (and the node identity), the sprint jump's left
+  cancel contained, hcover / merge_h, the forced direction in the key, the queued dash's twins contained, no CB_JH at
+  the start, the dash with jump really held contained, the witness's keys (rolled) on the cluster's heights, the up
+  slash at the ceiling contained, the up slash's offer from the frame-start lane (every phase alike; the engine = the
+  tables on rises and jumps under the ceiling), the ground dash's attack dropped / flagged, the stop flag,
+  Searcher._stop_bg, h_pass, the fixed library, the flat layer's tolerance / validity, the steady states (the keys
+  up, the jump counter), _witness_ok. `test_map2_envelope`'s witness test skips the Clawline block's inertia hull and
+  the documented CB_JH over-approximation. The map2 / M4 suites: 179 passed.
+- The libraries rebuilt (`t1_tables build`, engine t4d; `knowledge/1.0.30000/kinematics/a1n_tables_v1.json` the
+  tracked header): the search's (no Clawline, the arena) 537,020 nodes / 988,633 edges / 362,300 merge classes /
+  247,549 instances, 54.9 MB; the default (the Clawline, the floor) 1,833,868 nodes / 3,450,600 edges, 161.0 MB (the
+  floor-only library has no ceiling: the same counts as t4c's).
+
+### Numbers (`C:\ssbot\data\m2_play\map2\a1n\t4`; every run at Idle; the libraries rebuilt with T4's engine after clearing the numba cache)
+
+**Exactness**, T1 / T2 / T3's checks re-run (`verify\` at a2cf22b, `verify2\` at 499df40 - the final engine; the
+chain = the engine: every height bit-identical, x within 1e-13 u):
+
+    check                                                  T3 (f27ac9c)       a2cf22b           499df40 (final)
+    T2 sits: the search's pass (1, 60) / (2, 30), 236 M3   236 + 236          236 + 236         236 + 236
+      windows equal (69,628 + 36,598), backward hits all   yes                yes               yes
+      exit checks (<= 1 event, 40 f)                       673 / 673          673 / 673         673 / 673
+    T2 exact, 2 events 30 f, the search's danger (395)     395                395               395
+    T1 exact, 2 events 30 f, canonical (479)               479                479               479
+    T2 exact, 1 event 60 f, the default library (479)      -                  479               479
+    entry from transitional states (406 x 3 passes)        1,217 / 1,218      1,212 / 1,218     1,218 / 1,218
+    the executable family (search's passes / exits)        -                  708 + 1,689       708 + 1,689
+    the flat layer: rows = the chain (4,800 frames x 2)    yes                yes               yes
+
+  (a2cf22b's 6: the up slash's look-ahead read the physics phase / the lane after the steps - finding 6, fixed in
+  499df40.)
+
+**Containment against kinematics.rollout** (the verifiers' own checker rev_contain, the same seeds, 239,100 random key
+sequences each; escaping rollouts by class - the verifiers' run on T3 / after T4):
+
+    run                                     before (T3)                                        after (499df40)
+    cA  1 event, 120 f                      114: sprint_atk 79, upslash_ceil 31, other 4       79: gdash_atk 79
+    cB  2 events, 60 f                      378: sprint_atk 280, upslash_ceil 87, other 11     285: gdash_atk 284, dash_queued 1
+    cH  1 event, 60 f, both lanes' keys     309: gdash_atk 184, xvx_left 47, upslash 71, other 7   185: gdash_atk 184, dash_queued 1
+
+  gdash_atk / sprint_atk (one class: an attack pressed in the ground dash / sprint - kinematics.rollout's 'regain', the
+  game's dash attack the hero model does not have; a plan cannot contain one) are by design; the 'dash_queued' one in
+  cB / cH is finding 11's remainder (an attack pressed with the dash held, its queue read later).
+
+**The witness** (the verifiers' rev_witness, 5,176 targets, the search's library, <= 1 event 60 f): off the height
+277 -> 66, x missed by > 0.1 u 290 -> 132, the reported path not the real rollout 288 -> 0; CB_JH targets bad 295 / 493
+-> 86 / 461 (each reported, the search rejects them); the rest (52) the float's inertia hull (finding 1: no keys
+exist).
+
+**The steady states** (`kinds\`, `verify2\steady*`; the verifiers' rev_steady, A4 against the clean fall with its hard
+landing): A1 0 / 35, A1~ 5 -> 0 / 400, A4 68 -> 0 / 86, G 47 -> 0 / 400 (637 nodes), A3 122 -> 0 / 400 (1,265 nodes).
+
+**The flat layer** (`flat_valid.json`: the knowledge file's rows vs kinematics.rollout points of random <= 1 event key
+sequences, 16 tables x as built / 6 u over the floor / phase + 0.12): every point inside wherever `valid_until`
+holds, but GR@0/a3 as built - 2 rollouts, both an attack in the ground sprint (by design); the phase + 0.12 cases
+of tables built at a step-pattern boundary get valid_until -1 (finding 10).
+
+**The float cut / the backward set** (the verifiers' rev_cut / rev_back re-run): the cut piece's over-approximation
+at the cut side 0.335 u (A3N), 0.02 / 0.01 u (A3L / A3R) - unchanged, documented (finding 1); the backward tube's
+end misses the goal by up to 0.77 u in the float (finding 9, `Back.exact` False).
+
+**eps(k)** (`funnel\eps.json`; 928 hero-only trials of M0 / M4a, re-synced every 6 frames - 12,341 syncs - the model
+rolled with the logged keys / dt / steps): her x deviation k frames after a sync, p50 0 at every k, p90 <= 0.02 u, p99
+0.03 (1 f), 0.14 (2), 0.35 (5), 0.51 (10), 0.86 (20), 1.24 (30), 1.82 (45), 2.6 - 2.8 u (60+; made non-decreasing:
+the long trials are few). A heavy tail: 1 % of the syncs (mid-action states whose hidden timers the estimate does
+not recover, the attack / Clawline trials) carry it.
+
+### The search, re-measured (T3's campaign: `ident\`, `accept\acc_*.txt`, `first\` / `ident\first_*`, `search\`, `smoke\`; from the code snapshot `code_a2cf22b` with its libraries - the final commit 499df40 changes only the up slash's offer, which the executable family drops: the search's envelope is the same; the smokes from the worktree at 499df40)
+
+- **Identity, tables on vs off** (m4b_speed ident, the live flags, a deterministic budget of 200 / 40 units): one
+  Clapper 126 / 130 identical (T3: 112 / 130), two 106 / 106 (T3: 102 / 106). The 4 differ only in the tried plans'
+  hash: re-run with search_cmp_env (499df40) every envelope call of those decisions is exact and in the engine's order,
+  the chosen plan the same; 1 - 3 of 305 - 647 witnesses take the other of two pieces holding the same point (equal
+  x - both valid keys), so one tried plan's keys differ. Also the verifiers' four situations: every envelope call
+  exact, the tried plans the same (sit 36: 174 / 174 - before 302 vs 268 candidates; 14: 262 / 262; 52: 274 / 274;
+  46: 33 / 33).
+- **The M3 acceptance at the deterministic budget** (`--cap 2 --vclock 0.01`, 279 move cases, same / alt / not):
+
+      arm                  found   same/alt/not      mean value   safe      cands p50   decide p50 (wall)
+      off                  207     95 / 112 / 72     1.479        229/236   158         5.3 s
+      on                   207     95 / 112 / 72     1.479        229/236   158         5.5 s
+      on + long pass       155     79 / 76 / 124     1.122        225/236   87          4.3 s (p99 288 s)
+      on + shapes          204     96 / 108 / 75     1.473        229/236   172         20.6 s
+      (T3 off / on: 202, 94 / 108 / 77, 1.476, 230/236, 174)
+
+  On = off exactly. Against T3's engine (same budget) 6 move cases gained, 1 lost, one situation lost its safe plan
+  (174, w13: T3's plan came from windows the twins' / key changes moved). The long pass: see finding 6 for the
+  person. Shapes: 3 more lost than gained and 4 x the wall time (the shape test is not in the budget's units) - keep
+  it off.
+- **Wall clock** (`--split 2 --hold 2 --jobs 4 --prio idle`, the live flags with the background thread; the runs alone
+  on the machine):
+
+      budget    arm       found (by source: forced / person / rec w13 / rec w7)   mean value   safe      cands p50
+      1 s       off       164 (72 / 25 / 44 / 23)                                  1.228        228/236   48
+      1 s       on        183 (80 / 27 / 50 / 26)                                  1.349        230/236   64
+      1 s       onlong    146 (63 / 27 / 34 / 22)                                  1.086        226/236   31
+      1 s (2)   off       156 (66 / 25 / 42 / 23)                                  1.230        228/236   47
+      1 s (2)   on        181 (78 / 27 / 49 / 27)                                  1.328        231/236   65
+      0.25 s    off       76 (38 / 0 / 25 / 13)                                    0.351        224/236   7
+      0.25 s    on        87 (43 / 3 / 27 / 14)                                    0.533        227/236   9
+      0.25 s    onlong    59 (30 / 2 / 15 / 12)                                    0.214        212/236   4
+
+  Unlike T3 (1 s: 159 -> 166 / 177, from the synthetic groups; 0.25 s: nothing), the tables now gain in every group,
+  the recorded ones too (w7 23 -> 26 / 27, w13 44 -> 50 / 42 -> 49), at 0.25 s as well (76 -> 87). Not separated
+  which of T4's changes did it; candidates: the background passes no longer hold the lock into the next decision
+  (below), and the chain no longer splits clusters the engine merges (S6: fewer, the engine's clusters).
+- **The first safe plan** (m4b_speed first, the 32 recorded w7 situations, 2 workers; ms p50 / p90): off 68 / 186, on 73
+  / 192 (T3: +20 ms, now +5), onlong 129 / 312.
+- **The lock wait** (the verifiers' script, back-to-back live-like decisions on the w7 situations; per decision the
+  time Lib.forward waited for the library's lock):
+
+      cap      arm        wait p50 / p90 / max ms   decisions waiting > 5 ms   no first safe plan   safe    mean value
+      0.15 s   on before  72 / 349 / 1,012          81 / 102                   71                   75      -0.19
+      0.15 s   on now     0 / 5 / 174               11 / 102                   32                   88      0.17
+      0.15 s   off now    0 / 0 / 0                 0                          16                   90      0.29
+      2 s      on before  313 / 683 / 907           29 / 34                    3                    32      1.84
+      2 s      on now     294 / 601 / 828           29 / 34                    3                    32      1.71
+
+  The passes left behind by the previous decision are gone (carried 0); what remains is the wait INSIDE a decision -
+  the background 2-event pass holds the lock while a foreground pass waits (by T3's design: one library, one lock) -
+  the first safe plan at 2 s 53 ms off vs 103 ms on. Short decisions with the tables on are still behind off at 0.15 s
+  (no first safe plan 32 vs 16).
+- **The long pass's danger** (the verifiers' search_longpass on the 12 w7 roots): pred.T 123 in all (before 75), the
+  danger list has the Clappers to frame 120 (before: only the walls after ~75), the long pass's windows 272 at t 61 -
+  117 (before 80 at 61 - 66).
+- **The real-time smokes** (m4c_smoke as T3 ran them; the bot's own replays): strict (2 runs each, the share of the engaged
+  ticks map2 held) w7 off 33.1 % -> on 35.3 % (T3: 32.6 -> 23.0 %), w13 4.2 -> 5.2 % (T3: 4.5 -> 2.5 %); open (1 run)
+  w7 37.0 -> 37.8 % (T3: 36.8 -> 28.6 %), w13 6.0 -> 5.3 %; committed plans (strict) 99 -> 111; the long pass
+  (strict) w7 11.2 %, w13 0.0 %. Every arm: the audit 0 collisions, 0 invalid presses in 1,091 plans / 413 committed
+  (`smoke\summary_t4.txt`).
+
+### The escape funnel and eps(k) (the lead's notes funnel / funnel2 / horizon / nocoarse; search finding 5 - `funnel\`, `scripts\funnel_sits.py`, `eps_fit.py`)
+
+- **eps(k)** - numbers above: the shrink grows with k as the notes expected (p99 0.03 u one frame after a sync, 0.5 u
+  at 10 frames, 1.2 u at 30, 2.6 - 2.8 u past 60); it is a tail, not a spread (p90 <= 0.02 u at every k).
+- **The funnel on M3's situations** (per root x prediction branch, the arena and the branch's danger, the <= 1 event
+  forward pass to H = 120 / 180 and the backward set of what is alive at H over its pieces - bridge.backward; 707
+  funnels): forward 4.2 / 7.0 / 11.6 ms p50 / p90 / p99 warm at H 120 (engine 23.7 / 34.1 / 56.0, cold 10.7 / 66 /
+  152), backward 0.4 / 0.7 / 1.3 ms. Exact (no float on the tube) 486, an upper bound 221. Open at the root 570, closed
+  137. The valve - the funnel shrunk by eps(k) closes while the exact one is open: 407 of the 570 open ones, at frame
+  10 / 30 / 67 (p10 / p50 / p90); the shrunk funnel stays open in 163. If the shrunk funnel closes, take the exact one
+  and re-check early (the notes' rule): 71 % of the open funnels need that re-check, half of them by frame 30 (0.5 s).
+- **The funnel instead of the exit checks?** On the search's own safe endpoints (frame 60 of the first pass) the
+  root's funnel and the exit check (<= 1 event, 40 f from the endpoint) agree in 2,538 of 3,260 (same 1,239, both no
+  1,299); the exit check alone says safe in 678, the funnel alone in 44. The root's funnel holds only the root's own
+  <= 1 event family - an endpoint reached by that family's one event has none left, while the exit check grants it a
+  fresh one - so it is stricter by design and cannot replace the per-endpoint checks; a funnel per beam node (each
+  strike's end state its own root) would be the replacement, at one forward + backward pass per node (~5 ms warm).
+
+### Findings for the person
+
+1. **None of the 20 findings was wrong.** 14 are fixed in the code (the engine and the tables together, with tests),
+   one partly (11: an attack's queue read by the air sprint's cancel stays one event), 3 are limits of the
+   representation that the code now states and the measurements bound (the float / Clawline block's hull after a cut
+   or a merge, the backward set in the float, the wall clip), T3's '1 s finds more' is corrected (the synthetic groups
+   only), and the funnel is measured (it cannot replace the exit checks the way the notes hoped - below).
+2. **The re-run found one more defect, in T4's own fix**: the up slash's offer read the lane's physics phase (a node
+   does not carry it) - the entry check went 1,217 -> 1,212 / 1,218 at a2cf22b; fixed in 499df40 (1,218 / 1,218).
+   Every exactness check T1 - T3 ran is exact again on the final engine.
+3. **Containment against the game's model is clean but for one class by design**: the verifiers' own checker, the
+   same seeds - every escape left is an attack pressed in the ground dash / sprint (the Wanderer's dash attack, which
+   the hero model does not have; a plan can never contain one), plus one rollout each in cB / cH of finding 11's
+   remainder. Before: 114 / 378 / 309 escaping rollouts in cA / cB / cH; after: 79 / 285 / 185.
+4. **A trap for everyone who changes env_jit**: numba's cache keeps a caller compiled against an older callee from
+   another module - the tables' chain ran an outdated rule after env_jit changed and the comparison showed 49
+   clusters missing. Clear `brain/ssbot/map2/__pycache__/*.nbi / *.nbc` after an env_jit change.
+5. **The bot's executable family**: an attack in normal control (the ceiling's up slash, the attack that holds back
+   a queued dash, an attack that makes a jump press inert) is real in the game, but the live controller rejects a plan
+   with a slash it does not plan - the search now plans only without them (`Cfg.exec_only`); the full family is what
+   the exactness checks compare. Its envelope still holds CB_JH clusters only an attack could make (a dash with jump
+   held, no earlier frame to hold it from): realize rejects their keys (11,297 rejections in the 236 decisions at the
+   deterministic budget, in 224 situations) - see open item 2.
+6. **The long pass is now honest, and too expensive**: with the predictions reaching its 120 frames (finding S2) its
+   late windows see the Clappers, but the prediction tree over 123 frames multiplies the evaluation's work (at the
+   deterministic budget: candidates p50 158 -> 87, found 207 -> 155, safe 229 -> 225; one two-Clapper w13 decision
+   took 28 min of wall time and a 34 GB worker). Keep `passes` at its default (no long pass).
+7. **The tables in the search are worth having on at a live budget now - not yet live**: ahead of off at 1 s and
+   0.25 s in every source group, the smokes at par or slightly ahead, nothing unsafe; still behind in the shortest
+   decisions (0.15 s), a foreground wait for the background pass inside a decision (~0.3 s at 2 s), 3 - 8 GB per
+   search process (T3), and no live run. Turning `tables=1` on live is the person's call.
+8. **The funnel (the lead's notes)**: cheap (4 ms forward + 0.4 ms backward warm over 120 frames) and mostly
+   exact (486 / 707; the float makes the rest an upper bound), but the root's funnel cannot stand in for the exit
+   checks (stricter in 678 of 3,260 safe endpoints: the root's event is spent on the way); under eps(k) 71 % of the
+   open funnels close, half by 0.5 s - a funnel per beam node is the next step.
+
+### Open items
+
+1. The lanes' hull inside an inertia (the float after a cut, a Clawline block merged from other velocities): an exact
+   set needs the (x, vx) coupling per cluster; on the exit checks it shows in 2 of 647 'alive' verdicts.
+2. CB_JH (jump held without a press) from a frame too early for its press: still offered after frame 1 (the witness
+   reports it, the search rejects it - in the executable family most CB_JH clusters that need an attack); an exact
+   rule needs a per-cluster 'jump may be held' flag in the key (more clusters) - not done.
+3. The person's event count: an attack in normal control is free, but its queue read by the air sprint's Attack Cancel
+   costs the engine one event (its family is a subset there).
+4. The funnel as the exit checks' replacement: needs a funnel per beam node (or a backward pass over each node's own
+   family) - the root's cannot see the strike end states; eps(k)'s p99 tail closes most funnels within ~1 s.
+5. The flattened layer is valid only at its build phase and above the floor's reach (valid_until); a per-step-pattern
+   build is not done (it is not used by the search).
+6. A cheaper danger for the long pass (predictions to 120 f only for its danger cut, not for every evaluation) - not
+   done; the long pass stays off.
+7. Nothing ran live; no merge to main.
+
+The frozen checkout for a live run: `C:\ssbot\live_1v1_499df40` (`1v1_freeze.ps1 -rev 499df40`: git archive + the Forum
+knowledge and the search's library `a1n_tables_v1_arena_noclaw.npz` (engine t4d) hard-linked from the read-only store;
+the slam maps warmed) - the bot as at T3 (map2 with the tables off by default); the tables:
+`SSBOT_FORUM_MAP2_SET=tables=1` (no long pass). Not run live.
+
+Commits (branch worktree-wf_f1846551-5f9-1, not merged, not pushed): 29ae48e (the 20 findings' fixes: the keys, the
+dominance / merge, CB_JH, the up slash, the free attack, the dash attack unmodelled, the witness, the executable family,
+the stop flags, h_pass, the fixed library, the shapes, the flat layer's validity, the steady states), b2c9cf0 (CB_JH by
+the start's hold, the witness's hold / attack), a2cf22b (the held direction in the key), 499df40 (the up slash's offer
+from the frame-start lane, the steady states' jump counter / A3), then the docs commit.
+

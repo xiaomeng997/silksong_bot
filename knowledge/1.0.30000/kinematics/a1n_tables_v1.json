@@ -18,8 +18,8 @@
    "T": 120,
    "maxev": 1,
    "q": 0.05,
-   "bytes": 53198795,
-   "sha1": "ff19eccd8df6af2a5b09c52206d4ff2b1e8708fb"
+   "bytes": 53203753,
+   "sha1": "232a36932fb3f074fa3d28870a62c2f15990c755"
   },
   "a1n_flat_v1_ev1_t120_dash.npz": {
    "version": 1,
@@ -30,8 +30,8 @@
    "T": 120,
    "maxev": 1,
    "q": 0.05,
-   "bytes": 86445714,
-   "sha1": "3ca26f986e12dc828fafef4d9bf5e2d40d3ff66a"
+   "bytes": 86381761,
+   "sha1": "0d26914d0627745eb0caf84c17c658adafe5878b"
   },
   "a1n_tables_v1.npz": {
    "version": 1,
@@ -45,14 +45,14 @@
    "clear_up": 1.0,
    "floor_top": 3.015,
    "ceil_bot": 15.15,
-   "nodes": 2404844,
-   "edges": 8445699,
-   "classes": 1730415,
-   "instances": 893734,
+   "nodes": 1833868,
+   "edges": 3450600,
+   "classes": 1029829,
+   "instances": 878843,
    "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
    "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
-   "built": "2026-10-24 02:06:48",
-   "build_s": 48.9,
+   "built": "2026-10-24 12:30:53",
+   "build_s": 23.2,
    "depth_limit": 6,
    "warm_passes": [
     [
@@ -65,8 +65,8 @@
     ]
    ],
    "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
-   "bytes": 223041211,
-   "sha1": "4c78fe2edc88e5a082e00fb6fff2d6551f8d180d"
+   "bytes": 161028746,
+   "sha1": "536e95add5295063ecd4a342290d1233664cc8d9"
   },
   "a1n_tables_v1_arena_noclaw.npz": {
    "version": 1,
@@ -80,13 +80,13 @@
    "clear_up": 1.0,
    "floor_top": 3.015,
    "ceil_bot": 15.15,
-   "nodes": 815147,
-   "edges": 2482927,
-   "classes": 787449,
-   "instances": 249115,
+   "nodes": 537020,
+   "edges": 988633,
+   "classes": 362300,
+   "instances": 247549,
    "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
    "params_vector_sha1": "a044601cfb1c9a2edfa1c13ccb13589b27748325",
-   "built": "2026-10-24 02:07:47",
+   "built": "2026-10-24 12:30:20",
    "build_s": 17.4,
    "depth_limit": 6,
    "warm_passes": [
@@ -100,8 +100,8 @@
     ]
    ],
    "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
-   "bytes": 84458975,
-   "sha1": "1bf38e1dc49e1dcbbb129f00f503bc544d8234d8"
+   "bytes": 54921029,
+   "sha1": "a033cf92a97d433d57defb60b580933476869198"
   }
  }
 }
