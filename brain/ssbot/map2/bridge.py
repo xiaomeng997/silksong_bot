@@ -222,7 +222,10 @@ def touch_frame(fw, danger) -> int:
 # ---- the dash bundle --------------------------------------------------------------------------------------------
 
 def _in_dash(lib, n: int) -> bool:
-    return int(lib.NINT[n, tb.I_MODE]) in DASH_MODES and lib.NINT[n, tb.I_GROUND] == 0
+    """In the dash's own frames: M_DASH / the air sprint, airborne, not in a Clawline block (a Clawline pressed out of
+    the sprint ends the bundle: its block is the Clawline's transient, an end state)."""
+    return (int(lib.NINT[n, tb.I_MODE]) in DASH_MODES and lib.NINT[n, tb.I_GROUND] == 0 and
+            lib.NCU[n, ej.C_CJ] < 0)
 
 
 def _qs(lib, e, py, qy, sy, py2, a_st):
