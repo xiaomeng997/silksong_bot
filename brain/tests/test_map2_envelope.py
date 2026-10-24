@@ -154,7 +154,7 @@ def test_no_live_module_imports_map2():
         rel = p.relative_to(root).as_posix()
         if rel.startswith("map2/") or rel in ("tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py",
                                                "tools/m3_search.py", "tools/m3_accept.py",
-                                               "tools/m4b_speed.py",
+                                               "tools/m4b_speed.py", "tools/t1_tables.py",
                                                # M4c: only inside SSBOT_FORUM_MAP2 (tests/test_m4c_live.py)
                                                "train/forum_planner_policy.py"):
             continue

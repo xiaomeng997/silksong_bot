@@ -68,6 +68,10 @@ OPT_CLAW, OPT_TF8, OPT_NO_DASH, OPT_NO_JH, OPT_NO_CANCEL, OPT_NO_UMB = 1, 2, 4, 
 # the attack pressed in normal control (its lock blocks the umbrella / the dash and delays a jump press's effect:
 # the slashes do not move her, so it only matters through those locks - off by default, see forum.md 92)
 OPT_ATK = 64
+# the A1_n tables (stage T1, ssbot.map2.tables): NO AIR DASH - a dash press or hold only on the ground (after the
+# frame's steps); the air dash (the press, the umbrella's dash cancel, the dash with jump held, a queued dash firing in
+# the air) is the bridge's (T2), not the tables'. The ground dash stays.
+OPT_NO_ADASH = 128
 # bits 8 .. 11: the event limit (0: none) - the 'segment family' of the spec: the choices other than going on
 
 # ---- custom per-cluster fields ---------------------------------------------------------------------------------
@@ -497,11 +501,13 @@ def gen_cands(x, cu, P, opts, dt, out):
                 out[k] = out[i]
                 k += 1
         n = k
-    if (opts & (OPT_NO_DASH | OPT_NO_JH | OPT_NO_CANCEL | OPT_NO_UMB)) != 0:   # experiments: mechanics off
+    if (opts & (OPT_NO_DASH | OPT_NO_JH | OPT_NO_CANCEL | OPT_NO_UMB | OPT_NO_ADASH)) != 0:   # mechanics off
         k = 0
         for i in range(n):
             c = out[i]
             if (opts & OPT_NO_DASH) != 0 and (c & CB_D) != 0:
+                continue
+            if (opts & OPT_NO_ADASH) != 0 and (c & CB_D) != 0 and not ground:
                 continue
             if (opts & OPT_NO_JH) != 0 and (c & CB_JH) != 0:
                 continue
