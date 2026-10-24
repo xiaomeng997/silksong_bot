@@ -401,9 +401,15 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
 - ONE SHARED DASH BUNDLE (follows from the above and M4a): the dash zeroes vy every step, so its whole family
   (direction x hold length x cancel x cancel frame, ~1000 trajectories) is the SAME from every A1_n - it depends only
   on the physics-step phase of the press frame and on the jump being held. Store it ONCE per phase; its endpoints
-  reference no-dash tables. A dash-version table = its no-dash twin's content (its Clawline / umbrella endpoints
-  pointing at dash versions) + one reference to the bundle. The bulk of the storage is then the bundle, not the
-  tables.
+  reference no-dash tables. (Superseded by the next two bullets: there are no dash-version tables.)
+- THE AIR DASH IS NOT IN THE TABLES (the person, 2026-10-23): the bundle is an independent module used ONLY as the
+  bridge between the forward and the backward no-dash sets (next bullet). Every table is a no-dash table; 'the air
+  dash used' is no table key but a property of the segment between two refills (known at the segment's start; the
+  bridge is allowed only if the dash is unused there); the tables carry per frame only whether a dash PRESS is
+  allowed (airborne, no lock such as the umbrella's antic). The bundle's endpoints include its cancels' outcomes (the
+  jump cancel into the umbrella = an A3 entry by vx; the Clawline out of the sprint = a hook (a refill) or an unhooked
+  Clawline transient; the attack cancel with its extra air velocity) and land in no-dash tables. The GROUND dash is
+  unlimited (>= 25 f apart) and stays an action of the ground tables.
 - MEET IN THE MIDDLE, THE DASH BUNDLE AS THE BRIDGE (the person, 2026-10-23): between two refills a path has at
   most one air dash, so every path is no-dash -> (at most one dash) -> no-dash. Push the small no-dash tables FORWARD
   from her state and BACKWARD from the goal (the next strike window's press region: the down slash on a body, the
@@ -450,7 +456,8 @@ Points to settle when building (the lead, 2026-10-23, the person agreed to recor
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
    + 13; the umbrella re-open lock until release + 12). Flags that cannot be waited out become table keys: the air
-   dash used (restored only by a landing, a pogo hit or a hooked Clawline - M4a) -> A1 x 2.
+   dash used (restored only by a landing, a pogo hit or a hooked Clawline - M4a) -> A1 x 2. [Superseded 2026-10-23:
+   the air dash is not in the tables; 'used' is a segment property checked by the bridge - no x 2.]
 2. The dash with the jump held is OFF the lattice (M4a: gravity 0.1 in the dash steps, vy +1.08 u/s for good, until
    a bounce or a landing): its own chain (the same recursion, the origin vy offset by 1.08) or not offered.
 3. Time in 50 Hz physics steps inside the tables: some 60 fps frames have no step (seen in M4a's dash), so 'n frames
