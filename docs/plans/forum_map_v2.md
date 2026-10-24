@@ -431,6 +431,14 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   with <= 1 event - cheap with the tables (1 event 60 f: 1.5 ms); several events only in the short goal-directed
   chains toward a strike window (the hook -> umbrella -> down slash class, < ~1 s), backward from the window and
   bridged. No '3+ events x 120 f' passes (T2 measured 2.4 s for 3 events x 60 f - not needed).
+- THE ESCAPE FUNNEL AND ITS KEY NODES (the person, 2026-10-24: 'the 180 f search is there to see the trap and find
+  how to run; take the key nodes out of the found route, then optimise - strike on the way to the nodes'): once per
+  decision (per branch until the reveal, then the revealed one) push the tables BACKWARD from the region still safe
+  at the long horizon (<= 1 event, 120 - 180 f): per frame the set from which she can still escape - a FUNNEL. Its
+  narrow places are the key nodes ('under the jumping Clapper at frame 40', 'left of x 20 by frame 90'); between
+  them it is wide and she strikes freely. Every strike candidate's exit check becomes a LOOKUP - its end state inside
+  the funnel at its end frame - instead of one envelope pass per candidate (hundreds per decision). Recompute the
+  funnel after each hit that can change a Clapper (cheap); shrink it by the tube's error widening.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
