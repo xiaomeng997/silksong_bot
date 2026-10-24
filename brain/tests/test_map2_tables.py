@@ -149,7 +149,7 @@ def test_follow_contains_claw_in_sprint_jump(lib):
 
 def test_claw_block_meets_the_floor(lib):
     """The Clawline pressed while falling just over the floor: the block's antic lands on it (kin_jit.move_y; before,
-    the block had no terrain and sank her up to ~1.4 u into the floor, where the jumps after it bumped inside the
+    the block had no terrain and sank her up to ~0.8 u into the floor, where the jumps after it bumped inside the
     floor box: containment escapes) - she never goes below the standing height, and the graph holds every member."""
     S, _ = env.canonical(lib.params, "A1", 0, 3, "", False)
     stand = tb.FLOOR_TOP + lib.params.foot

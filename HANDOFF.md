@@ -13308,3 +13308,241 @@ number is `M4_GATE.txt`; the traces `C:\ssbot\data\m2_play\map2\m4\gate\traces\`
 4. The fallback's own hits (P1 a rune bomb, P4 the slam script + an air dash) - in 60 recent default w7 episodes 1 had
    a hit before the kill.
 5. Not run: episodes 3 - 16, w13; no fix tried. Another worktree's reflex_build jobs (5 + 3 Idle workers) ran throughout.
+
+## Task map2 - A1_n recursive tables - stage T1: the no-dash table library (offline; the M1 engine's frame memoised on relative cluster states, the chain with the engine's own merges, entry from any state, the spec's table view; exactness / containment / tightness against the engine with the air dash off; T1b the sprint jump in the hero model) (branch worktree-wf_f1846551-5f9-1, 2026-10-23; forum.md §103)
+
+The task: the person's decision after the failed w7 gate (2026-10-23 ~19:50 PDT, `C:\ssbot\data\m2_play\map2\M4_GATE.txt`):
+'build the recursive tables directly' - docs/plans/forum_map_v2.md (main) section 1 L2, 'THE COLLAPSE AND THE
+RECURSION', 'THE A1_n RECURSIVE TABLES' with its 'Points to settle'; stage T1 = the no-dash table library, the
+build-time checks, exactness against the M1 engine with the air dash off (the 400 recorded start states of M1 and the
+canonical starts), containment of random key sequences, tightness of the reconstructed keys, build time / size /
+lookup time. The lead's notes during the stage (`C:\ssbot\data\m2_play\map2\a1n\NOTE_FROM_LEAD_*.txt`, the spec on main
+updated the same evening): ENTRY FROM ANY STATE (transitional starts tested too); THE GROUND DASH IS IN THE GROUND
+TABLES (kept - only the air dash is out) with the sprint (shuttlecock) jump and the sprint's dash attack to be
+modelled from M4a's trials first (T1b: the sprint jump done, the dash attack not); the strike windows as shapes is
+T2's. Offline only (no game, no instance, no oracle); nothing in the bot imports `ssbot.map2` (the three import tests' lists
+gain `tools/t1_tables.py`). Data, scripts, logs: `C:\ssbot\data\m2_play\map2\a1n` (`final\` the numbers below,
+`final_pre_t1b\` the same sweep before T1b's hero model, `scripts\` the debug scripts).
+
+### What was built (`brain/ssbot/map2/tables.py`, `brain/ssbot/tools/t1_tables.py`; `env_jit.OPT_NO_ADASH`)
+
+- **The recursive element = a NODE**: one cluster state of the M1 engine made relative - both lanes' full kin_jit
+  states, x relative to each lane's own x (the interval end it carries), y relative to her height ('free': infinite
+  height, the spec's tables) or absolute over the terrain ('floor instance': the ground, and a free node within CLEAR
+  2.5 u (box bottom) of the floor / CLEAR_UP 1.0 u (box top) of the ceiling, where the terrain changes the frame).
+  Identity = the engine's merge key (env_jit.vkey, floor-strict) without PY / QY / SY and without the air dash used +
+  each lane's horizontal state (vx, the extra air velocity, facing, move, the left / right keys, the last step's x
+  offsets, the down spike / hurt / sprint speeds, the swing kind) + the time scale; a ground dash's floor instance
+  also holds QY / SY (its end translates her from the drawn position).
+- **The edges**: per node, per frame STEP COUNT s in {0, 1} (the 50 Hz physics phase is a global clock - every
+  cluster has the same s in a frame - so nodes are phase-free and only edges depend on s: exact for any phase, the
+  spec's 'time in physics steps'), per PASS KIND (free space / over the terrain: the engine's two merge keys and
+  dominance filters) and for 'every choice' / 'the event limit reached': every child of `env_jit._children` (the
+  engine's own per-cluster frame: the same candidates with the air dash off, the same dominance) on the node's
+  representative lanes = (child node, candidate code, the x OFFSET INTERVAL [dlo, dhi] + a phase slope where the drawn
+  position moves her, dy (one addition: heights bit-equal), the events spent, the QY / SY rule). Two phases of the
+  same s are expanded: a frame whose vertical depends on the phase (a recorded ground start settling onto the floor)
+  becomes a PHASE INSTANCE expanded per cluster at her exact phase and QY / SY. Both edge lists of a node are
+  committed together (a full table between them had left the event-limit list empty: fixed, 708dc66).
+- **A1_n**: the nodes on the fall-from-rest lattice (vy_n = kin_jit's own arithmetic; terminal -31.2 u/s after its
+  clamp-then-gravity); the going-on edge with s = 1 is A1_n -> A1_n+1 widened by exactly +-0.164999935 u (run x fdt),
+  with s = 0 A1_n -> itself, [0, 0]: NO REDUNDANCY (a press at frame 10 is an edge of the node reached at frame 10).
+  A1_n's frame-0 actions without the air dash: the jump press (the umbrella), the unhooked Clawline L / R and its
+  P + 8 throw L / R (5 edges; the search's configuration: the umbrella only).
+- **The chain** (`Lib.forward` -> envelope.Fwd, the engine's own arrays: regions, contains, witness; pieces with
+  back-pointers on clusters, never on a flattened map): per frame each cluster (node, PY / QY / SY, x interval set,
+  events) maps through its node's edges; children merge on the engine's key (the merge class + the three heights' bits:
+  the engine keeps clusters apart that differ only in QY / SY or a raw timer, and with an event limit each keeps its own
+  event count - first version merged them, 22 / 395 danger passes then differed by up to 1 u) taking the fewest events
+  and the extreme lane velocities, as the engine. Danger cuts each child at its height (`env_jit.cut_danger`); walls
+  clip (option: the spec's use-time rule; the engine has none, the search cuts walls as danger boxes); the terrain
+  routes clusters near it through their floor instances. **ENTRY FROM ANY STATE** (the lead's note): her exact state
+  is the start node; a transitional one (mid dash / sprint / sprint jump, down slash, Clawline, umbrella antic /
+  inflate / deflate, bounce, attack cancel, hang) is expanded on the fly with the engine's kernel over its remaining
+  choices until its branches meet library nodes, then the cached edges carry it. The air dash used: not a key - the
+  pass's property (cond's bit; kin_jit never changes it in a no-dash pass).
+- **The spec's table view** (`Lib.kinds`, `Lib.table`): kinds A1 (lattice), A1~ (an offset chain), A4 (terminal), A2
+  (a rise), A3 (Float Idle), G, R, hang; transient (a timer / lock running). `table(node)` = the continue reference
+  (the going-on edge: next node, x offset interval, dy) + the frame-0 actions followed through transient nodes
+  (branching) until steady nodes: per step the x offset interval relative to the origin, dy, the label (locked /
+  transitional / invincible) and the press flags; the end reference (target node and kind, dt, dy, x offset
+  interval, the lanes' vx interval). `Lib.press_flags`: per cluster what a press next frame meets (the Clawline; an
+  attack / a down slash that starts at once; AN AIR DASH PRESS ALLOWED; airborne) - press.py's rules on the state after
+  the frame's steps. `Lib.flat`: the flattened rows per frame and end condition (exact for the pass's event family).
+- **Files** (generated, gitignored; the tracked header `knowledge/1.0.30000/kinematics/a1n_tables_v1.json`: version,
+  hero bits, counts, sizes, sha1, the rebuild commands; a library refuses another hero model - the params vector's
+  sha1): `a1n_tables_v1.npz` (the Clawline in, the floor: the spec's actions), `a1n_tables_v1_arena_noclaw.npz` (the
+  search's passes: no Clawline, the floor + the ceiling), `a1n_flat_v1_ev1_t120.npz` (the flattened rows of the
+  canonical steady starts). The library = a depth-6 breadth-first core from the 10 canonical roots + the nodes the
+  search's own passes (<= 1 event 60 f, <= 2 events 30 f) meet from the canonical starts x 6 phases and the even
+  recorded starts (the odd ones stay cold).
+
+### T1b - the sprint (shuttlecock) jump in the hero model (the lead's note ground_dash2; kin_jit / kinematics / env_jit)
+
+- HERO2 bit **H2_SHUTTLE** (4096, in H2_ALL; `SSBOT_FORUM_HERO2_OFF=4096` gives S1b's model, the gate's), from the
+  decompiled HeroController (OnShuttleCockJump / ShuttleCockCancel / FixedUpdate) and hornet_sprint (Ground Sprint R /
+  L -> JUMP -> Jump Antic -> Jump: SetStartWithShuttlecock), fitted on M4a's 25 sprint-jump trials (C:\ssbot\data\
+  m2_play\map2\m4\rows_b1 / b2.pkl): Ground Sprint's ListenForJump runs in FixedUpdate after the step's AccelerateToX
+  and reads InputHandler's 0.1 s jump queue with jump and dash held -> the Jump Antic (control taken, her x speed kept
+  from that step: 25 / 25 trials' antic speed is the sprint's after it) for h2_shut_antic_t 0.1083 s (the jump in the
+  antic's 7th Update: 25 / 25) -> RegainControl -> HeroJump (the lift) + OnShuttleCockJump: jumped_steps -5, the dash
+  cooldown 0.1 s, her x speed 18 u/s (SHUTTLECOCK_SPEED) along her facing in every FixedUpdate while it runs, no turn;
+  it ends on the ground with vy <= 0 and in Update when attacking / falling without jumping / in a down spike antic /
+  control relinquished (ShuttleCockCancel: in the air an extra air move velocity of 18, decay 5 / s, skipped while
+  moving). Kin rows SHUT / XVXD (K 83 -> 85; `kinematics.pad_state`), params h2_shut_antic_t / h2_shut_speed /
+  h2_shut_xvd. The envelope offers the jump press in the ground dash / sprint with the bit (and the reference rollout
+  keeps it); holding jump in the antic acts (its jump reads the key).
+- Model check (`scripts\kin_t1b.py`: m0_calib.kin_check on M4a's 432 and M0's 496 hero-only trials, within 0.1 u
+  throughout): HERO2 without the bit 875 / 928, **with it 899 / 928**: gdash_jump 'dja' 27 -> **50 / 52**, 'dj' 16 ->
+  17 / 19, 'jd' 17 / 17; **0 trials worse**, every other experiment's per-trial errors unchanged (M0's 481 / 496 as
+  before). Left: 2 dja (one antic frame, one apex), 2 dj (the queued jump at the regain, pre-existing).
+- **The engine with it** (found by the containment run after T1b, fixed before the final sweep): an attack while
+  the sprint jump runs MOVES her (its next Update's ShuttleCockCancel ends the 18 u/s, leaves the decaying extra
+  velocity and frees the turn), but the engine offers the attack in normal control only with OPT_ATK ('the slashes
+  do not move her', forum.md 92): 17 of the first 26 recorded starts had random key sequences escaping 0.03 - 0.3 u
+  a few frames after an attack in a sprint jump (the exactness runs could not see it: the chain and the engine
+  shared the gap). gen_cands now offers the attack press while SHUT != 0 (the cooldown cannot run at the jump's
+  start: the dash, the sprint and the 7-frame antic outlast its 0.3 s). With it the lane on the extra's side is
+  extended by `env_jit.xvx_extra`, which took the attack cancel's decay (10 / s) for every extra: it takes the
+  lane's own XVXD now (ShuttleCockCancel's 5 / s) with kin_jit's f32 arithmetic. Test
+  `test_follow_contains_shuttle_cancel` (the sprint jump cancelled at three frames x three dash lengths, with and
+  without a key: 18 escapes before, 0 after), the transitional starts 'sjump' / 'scancel'.
+- **The Clawline in a sprint jump** (the next escape, 1 in 300 x 6 starts): the press relinquishes control without
+  the velocity (live, M0's claw trials: `relq` from the Harpoon Antic frame, her velocity kept ->
+  RelinquishControlNotVelocity -> ResetMotionNotVelocity -> ShuttleCockCancel, decompiled HeroController 7450 /
+  10168 / 2948): the 18 u/s ends and the extra air velocity (decay 5 / s) is left; HeroController.FixedUpdate decays
+  the extra velocities in every step, the block's too, and Move adds them after control without a key. The model had
+  kept SHUT through the block and froze XVX there (M4a's attack-cancel extra too). Now `env_jit.claw_enter` does the
+  cancel, `claw_frame` decays XVX per step, and the lanes' extension after control bounds the SUM of the extra and
+  the HarpoonDashEnd residual drift (`env_jit.lane_drift`; before, each was bounded on its own: max(run, residual)
+  and max(run, extra) - a member without a key moves both); test `test_follow_contains_claw_in_sprint_jump`.
+- **The Clawline block meets the floor** (the last escapes, 7 in the first 60 starts x 300 rolls, not T1b's: a
+  pre-existing gap of M0's block): the block moved her without terrain, so a press while falling just over the floor
+  sank her up to ~0.8 u into it (the antic's clamped fall, <= 8.75 u/s x 0.875 per step; live the block never
+  goes below the standing height: M0's 222 Clawline trials, min py 4.5676); inside the floor box the jumps
+  after it bumped against the box from inside, where the tables' floor
+  instance and the member part. `env_jit.claw_frame` now moves her vertically with `kin_jit.move_y` (a floor stops
+  the antic's fall, vy 0; a ceiling its rise); test `test_claw_block_meets_the_floor` (falling 1.2 u over the floor:
+  before 0.25 u under the standing height, now >= it). The libraries were rebuilt and the whole sweep below rerun
+  after these fixes.
+- NOT modelled: the sprint's dash attack (the Wanderer lunge: Dash Stab Dir -> Start Attack -> Wanderer Set / Nml /
+  Attacking / Recovery with its bump / hit branches; 3 trials only - the adash misses in 'Wanderer Dash Attack') - the
+  envelope still does not offer an attack in the ground sprint.
+
+### The spec's points to settle (docs/plans/forum_map_v2.md, 'Points to settle when building') - as built
+
+1. STEADY (`Lib.kinds`): A1 / A1~ / A4 = normal control in the air with every timer that can be waited out spent -
+   the attack and its cooldown, i-frames, the extra air velocity (the air sprint's attack cancel x 0.8 / step, T1b's
+   sprint-jump cancel x 0.9 / step), the Clawline block / lock (control + 13) / residual drift, the downspike
+   recovery, the dash cooldown, the jump buffer, the umbrella's re-open lock, the ledge buffer -, gravity 1, no hang
+   to come ('hang' otherwise); A1 on the fall-from-rest lattice, A1~ off it; A3 Float Idle; A2 a rise (jump / bounce);
+   G standing / walking; R the ground sprint past Sprint Grace; everything else 'transient'. The air dash used is no
+   key (superseded in the spec: a segment property).
+2. The dash with the jump held is an AIR dash thing - out of T1 (T2's bridge); the ground dash's jump is T1b's sprint
+   jump (in the ground tables).
+3. Time in physics steps: the edges are per step count s in {0, 1}; the phase is a global clock (dt / fdt =
+   0.8333004 = 5/6 - 3.3e-5 in kin_jit's f32 timing: the 6-frame pattern [0 1 1 1 1 0 | 1 1 1 1 1 0] drifts one step
+   in ~30,000 frames, so no fixed period is assumed); 11 nodes have a phase-dependent frame (phase instances), 10,078
+   edges a phase slope (the drawn position).
+4. Invincible segments keep their positions: the table view labels each step (locked / transitional / invincible).
+5. The action count: the recursion IS the 'sprinting at step m as its own chain' alternative - every frame's choices
+   are the edges of the node reached at that frame; A1_n's frame-0 actions are 5 (the umbrella, the Clawline L / R
+   and its P + 8 throw L / R; 1 in the search's library: the umbrella).
+6. Terrain absolute: floor / ceiling instances near the terrain (CLEAR 2.5 u under her box bottom, CLEAR_UP 1.0 u over
+   her box top; a free node's frame elsewhere), walls clipped at use time (option; the search cuts them as danger).
+
+The build-time checks (`t1_tables checks`, `final\checks_v1.json`): the A1 chain A1_0 .. A1_25 on the lattice (26
+distinct vy in the library, kin_jit's own arithmetic) then A4 at -31.2 u/s; the going-on edge widens by exactly
++-0.164999935 u per step; jump-held offset chains (A1~) 103,494 nodes over 27,316 distinct vy, hang nodes 32,778;
+the float's monotonicity (incl. the Umbrella Turn) 20,000 random key sequences x 40 steps over a vx grid of 35, 4,000
+reversals: 0 order violations, 0 members outside the lanes; its gaps <= 0.025 u (the reachable x inside the lanes at
+k = 4 .. 10 steps); the float's entry vx is bit-equal over all 3^11 antic key patterns (1 distinct value; the lanes
++-8.5 u/s). Kinds in the default library: transient 2,018,489, A1 10,289, A1~ 103,494, A4 2,254, A2 6,884, A3 85,503,
+G 1,022, R 3,598, hang 32,778.
+
+### Numbers (`C:\ssbot\data\m2_play\map2\a1n\final`, the libraries after every fix; `scripts\summarize.py`)
+
+Builds: the default library (Clawline in, the floor) 2,264,311 nodes, 7,803,821 edges (1,329,371 merge classes,
+864,651 terrain / phase instances): 42.8 s + 26.4 s save, 194.1 MB, load 7.0 s; the search's (no Clawline, floor +
+ceiling) 721,029 nodes, 2,234,642 edges: 15.6 s + 8.9 s, 71.5 MB, load 2.3 s; the flattened layer 330 tables (31 A1_n
++ A4 + A2 x 2 + A3 x 18 + G x 3, x 6 phase classes; <= 1 event, 120 f) 8.1 s, 53.2 MB. Before T1b: 2.17M nodes /
+175.8 MB, 0.63M / 62.8 MB.
+
+Exactness (the chain vs Engine.forward with OPT_NO_ADASH; per start the heights bit-equal and the x sets per frame
+and end condition within 1e-9 u; ms = one query, engine / tables warm, cold = the first query on a freshly loaded
+library; x = the median speed-up):
+
+    (A run name: exact_ = the default library, exactS_ = the search's; free / floor; evN = <= N events, tN = N
+    frames, danger = M1's random moving boxes cut both passes; starts: the 400 recorded M1 starts usable here +
+    the canonical starts x 6 phase classes where --canon; dead = passes the danger emptied)
+    run                            starts  exact  worst dx    eng p50/p90    tab p50/p90   cold p50/p90  x p50   clusters@T p50/max
+    exact_free_t24                    233    233   7.1e-15   60.9/ 722.4   7.57/100.70   75.0/ 387.4   7.32     8727/  153697  dead 0
+    exact_floor_t20                   479    479   6.4e-14  475.2/ 843.8 127.92/245.87  216.5/ 592.0   3.91    90620/  202160  dead 0
+    exact_floor_ev1_t60               479    479   4.6e-14    9.7/  12.2   1.84/  3.42    2.0/  28.0   5.09      178/     661  dead 0
+    exact_floor_ev2_t30               479    479   6.4e-14   41.8/  65.5   7.56/ 13.96    9.1/  98.9   5.36     3330/    7650  dead 0
+    exact_floor_ev3_t20               479    479   6.4e-14   85.1/ 104.6  19.45/ 26.21   58.7/ 439.5   4.30    15829/   22845  dead 0
+    exact_floor_ev2_t30_danger        395    395   1.2e-13   36.3/  58.3   7.18/ 11.22    9.0/  87.4   4.63     3099/    7570  dead 40
+    exactS_ev1_t60                    479    479   4.6e-14    7.8/   9.3   1.50/  1.98    1.6/  11.0   4.48      167/     260  dead 0
+    exactS_ev2_t30                    479    479   6.4e-14   29.9/  37.1   4.30/  6.64    5.3/  43.5   5.93     1756/    2003  dead 0
+    exactS_ev1_t40                    395    395   7.1e-15    4.6/   6.0   1.16/  1.89    1.3/   8.8   3.85      126/     146  dead 0
+    exactS_ev1_t60_danger             395    395   5.7e-14    7.4/  11.2   1.70/  2.91    1.9/  12.9   3.77      123/     214  dead 44
+    exactS_ev2_t30_danger             395    395   1.2e-13   26.4/  35.2   4.28/  6.41    5.8/  44.5   5.44     1422/    2003  dead 40
+    exactS_t20                        479    479   6.4e-14  331.3/ 488.6  54.19/ 82.06   71.5/ 215.8   6.23    42087/   65000  dead 0
+    exactS_ev2_t60                    197    197   7.8e-14  140.6/ 168.2  17.36/ 23.03   79.1/ 439.8   7.20     3503/    5837  dead 0
+    exactS_ev3_t40                    197    197   6.4e-14  471.2/ 619.4  80.82/107.78  232.7/1323.2   6.19    23831/   28958  dead 0
+    exactS_ev2_t120                    99     99   7.1e-14  513.4/ 574.2  62.02/ 73.14  174.7/1144.8   7.98     4184/    9355  dead 0
+    exactS_ev3_t60_danger              99     99   1.6e-13 1406.6/1910.0 285.42/426.38  564.5/1876.3   4.92    44554/   55189  dead 9
+
+    All 16 runs exact: 5,758 passes, worst x 1.6e-13 u. The tables answer the same query 3.8 - 8.0 x faster
+    (p50); a cold query (lazy expansion) 1.1 - 3 x the warm one.
+
+The search's runs before T1b's hero model (`final_pre_t1b\`): the same 100 % exact; e.g. <= 2 events 30 f 20.8 / 3.2 ms
+(x 5.8, 1,336 clusters at T), now 29.9 / 4.3 ms (x 5.9, 1,756: the sprint jump's branches). One known residual: a
+start may hold a few more clusters in the chain than in the engine with the same union (exact_floor_t20 start 300:
+166,364 vs 166,332 - ground dash floor instances made from representatives with other QY / SY).
+
+Entry from any state (`t1_tables entry`: 406 transitional states - mid down slash, Clawline block, pogo bounce lock,
+umbrella antic / inflate, Deflate, ground dash / sprint, skid, hang, the float's attack cancel, the sprint jump's
+antic / rise and its attack cancel -, each x every choice / <= 1 / <= 2 events, 20 f): the default library 1,218 /
+1,218 exact, the search's 1,218 / 1,218, free space 915 / 915 (worst dx 5.7e-14); the transient part before the
+first library node 1 - 40 frames.
+
+Containment (`t1_tables contain`: 300 random key sequences x 120 f per recorded start, the reference member without
+the air dash, followed through the graph): the floor 0 escapes in 118,500 rollouts (395 starts), free space 0 in
+50,100 (167 starts), the search's library 0 in 118,500 (395 starts). (The first run after T1b: escapes in 17 of the first 26 starts -
+the sprint-jump attack, then the Clawline in it and the block's floor, fixed above.)
+
+Tightness (`t1_tables witness`: random paths through the graph, a target at an interval end or inside, keys
+reconstructed by env_jit.track / track_beam): the floor 120 f 1,537 / 1,580 within 0.1 u (97.3 %; miss p50 0.002, p90
+0.049, p99 0.32, max 0.87 u), free space 60 f 662 / 668 (99.1 %; max 0.96 u); every miss over 0.1 u on the floor
+had a Clawline in its path (43 / 43; free 5 / 6), mostly targets inside intervals 6 - 17 u wide (the hull of two
+lanes after the block's residual drift - the engine's own; the chain equals it).
+
+The flattened layer (`t1_tables flat`): every checked frame's rows are the chain's own raster bit for bit (4,800 /
+4,800), 9,397 sampled chain points inside, 33,865 points of danger-cut chains inside (an upper bound); a point lookup
+(env.Tables.contains, Python) 0.8 ms.
+
+Model checks: kin_check on M4a's 432 and M0's 496 hero-only trials within 0.1 u, HERO2 without H2_SHUTTLE 875 / 928,
+with it 899 / 928 (0 worse). Tests: test_map2_tables (10), test_m4_hero2, test_map2_envelope; the full suite 2,212
+passed, the 8 known failures (test_harness_recovery x 3, test_import_firewall's oracle check, test_sg8_review x 3 -
+another stage's untracked file -, test_three_layer's bell) + the map2 import firewall of test_map2_search, which
+now allows tools/t1_tables.py like the other two.
+
+### Open items
+
+1. THE CLOSURE DOES NOT CONVERGE (no 'few hundred tables'): the library is the memoised engine; nodes / edges a
+   search meets that are not in it are expanded on the fly (cold queries 1.1 - 5x the warm time). T2 / T3 decide
+   whether to grow the library from the search's own logs.
+2. The sprint's dash attack (the Wanderer lunge) is not modelled (3 trials in M4a): the engine offers no attack in
+   the ground sprint.
+3. kin_jit never restores the air dash on landing (the game's BackOnGround sets airDashed false; a rollout air dash ->
+   land -> jump -> dash does not dash): irrelevant here (no air dash in T1), T2's bridge must fix it first.
+4. The Clawline from the ground (M0's claw_gnd trials: the game allows it) is not offered (claw_allowed: airborne).
+5. The Clawline block moves her horizontally without terrain (walls: the dash at 70 u/s); the tables have no walls.
+6. Tightness: 2.7 % of the floor targets missed 0.1 u, all after a Clawline (the hull after the residual drift).
+7. The strike windows as shapes (the lead's note windows): T2.
+8. Not done: the person's eye check of anything (nothing live); no merge to main.
+
+Commits (branch worktree-wf_f1846551-5f9-1, not merged): 6ea46f8 (the library, the chain, the tool), 9e7939c,
+708dc66 (fixes found by the sweep), 44f7912 (T1b: the sprint jump), 6fd447d (the engine with the sprint jump: its
+attack and Clawline cancels, lane_drift), 558104a (the Clawline block's floor), and the docs / header commit.

@@ -1,0 +1,94 @@
+{
+ "version": 1,
+ "what": "map2 stage T1: the A1_n no-dash table library (ssbot.map2.tables) - the M1 engine's per-cluster frame memoised on relative cluster states (nodes), with their edges per physics-step count; the flattened rows of the canonical steady starts",
+ "rebuild": [
+  "python -m ssbot.tools.t1_tables build OUT.json --depth 6",
+  "python -m ssbot.tools.t1_tables build OUT.json --depth 6 --no-claw --terrain arena",
+  "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1"
+ ],
+ "hero_model": "kinematics/hero_wanderer_forum.json + SSBOT_FORUM_HERO2 (kinematics.HERO2_OVERRIDES, every H2 bit of the build: the 'hero2' field); a library refuses to load under another hero model (params_vector_sha1)",
+ "files": {
+  "a1n_flat_v1_ev1_t120.npz": {
+   "version": 1,
+   "claw": true,
+   "terrain": "floor",
+   "hero2": 8191,
+   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
+   "T": 120,
+   "maxev": 1,
+   "q": 0.05,
+   "bytes": 53198784,
+   "sha1": "f46722699c4532211f13f86d7a750917bef46df0"
+  },
+  "a1n_tables_v1.npz": {
+   "version": 1,
+   "kind": "map2 A1_n no-dash tables (stage T1)",
+   "claw": true,
+   "terrain": "floor",
+   "hero2": 8191,
+   "abilities": 1007,
+   "opts": 131,
+   "clear": 2.5,
+   "clear_up": 1.0,
+   "floor_top": 3.015,
+   "ceil_bot": 15.15,
+   "nodes": 2264311,
+   "edges": 7803821,
+   "classes": 1329371,
+   "instances": 864651,
+   "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
+   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
+   "built": "2026-10-23 23:28:18",
+   "build_s": 42.8,
+   "depth_limit": 6,
+   "warm_passes": [
+    [
+     1,
+     60
+    ],
+    [
+     2,
+     30
+    ]
+   ],
+   "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
+   "bytes": 194086364,
+   "sha1": "22bf891d066bd35d079f86c7d3ba2290dcf605a0"
+  },
+  "a1n_tables_v1_arena_noclaw.npz": {
+   "version": 1,
+   "kind": "map2 A1_n no-dash tables (stage T1)",
+   "claw": false,
+   "terrain": "arena",
+   "hero2": 8191,
+   "abilities": 1007,
+   "opts": 128,
+   "clear": 2.5,
+   "clear_up": 1.0,
+   "floor_top": 3.015,
+   "ceil_bot": 15.15,
+   "nodes": 721029,
+   "edges": 2234642,
+   "classes": 609392,
+   "instances": 230508,
+   "params": "knowledge/1.0.30000/kinematics/hero_wanderer_forum.json",
+   "params_vector_sha1": "c150e5d4e2700306a3e2b51e82687ca71e3a3d0e",
+   "built": "2026-10-23 23:27:51",
+   "build_s": 15.6,
+   "depth_limit": 6,
+   "warm_passes": [
+    [
+     1,
+     60
+    ],
+    [
+     2,
+     30
+    ]
+   ],
+   "warm_starts": "canonical x 6 phases + recorded starts 0, 2, 4, ...",
+   "bytes": 71454018,
+   "sha1": "4a59814aa46b4d0ec37559b864548ab693648e07"
+  }
+ }
+}

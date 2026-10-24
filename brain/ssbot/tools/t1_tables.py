@@ -643,8 +643,8 @@ def flat_cmd(args) -> int:
     """The flattened tables of the canonical steady starts (FLAT_KEYS x the 6 physics-phase classes; the air ones in
     free space, the ground ones on the floor): per frame and end condition the union rows (q 0.05 u) of the chain's
     <= args.maxev-event family over args.T frames, saved as a knowledge npz (env.save_tables' layout); checks: the
-    file's rows hold the chain's exact points (sampled), the danger-cut chain equals them before the first touch,
-    the lookup time."""
+    file's rows hold the chain's exact points (sampled), every frame's rows are the chain's own raster (bit for bit),
+    the danger-cut chain's points lie inside them (an upper bound), the lookup time."""
     idle()
     from ssbot.tools import m1_envelope as m1
     lib = tb.Lib.load(args.lib or tb.tables_path(not args.no_claw, args.terrain))
@@ -687,6 +687,7 @@ def flat_cmd(args) -> int:
     rng = np.random.default_rng(args.seed)
     miss = tot = 0
     first_ok = first_n = 0
+    cut_n = cut_out = 0
     for name in rng.choice(list(tabs), size=min(40, len(tabs)), replace=False):
         kind_var, rest = name.split("@")
         ph = int(rest.split("/")[0])
@@ -703,15 +704,21 @@ def flat_cmd(args) -> int:
                 tot += 1
                 if not ft.contains(name, "all", int(t), x - xs, float(y0[k]) - ys):
                     miss += 1
-        # the danger-cut chain before its first touch: the flattened rows
+        # every frame's rows are the chain's own raster (bit for bit), and the danger-cut chain stays inside them
+        # (the first version compared the cut chain 'before its first touch' found from whole children killed
+        # only - a partial cut went unseen and its frames counted as unequal)
         dz = m1.random_danger(rng, S, T, lib.hh)
         fd = lib.forward(S, T, floor=(kind == "G"), maxev=mev, danger=dz)
-        touch = next((t for t in range(T + 1) if fd.stats[t, 2] > 0 or fd.count(t) != fw.count(t)), T + 1)
-        for t in range(1, min(touch, T + 1)):
+        for t in range(1, T + 1):
             first_n += 1
-            a = env.raster(np.column_stack([fd.frame_rows(t)[3], fd.frame_rows(t)[4], fd.frame_rows(t)[1],
-                                            fd.frame_rows(t)[2]]), xs, ys)
+            r = fw.frame_rows(t)
+            a = env.raster(np.column_stack([r[3], r[4], r[1], r[2]]), xs, ys)
             first_ok += int(np.array_equal(np.asarray(a, np.float64), np.asarray(tabs[name]["all"][t], np.float64)))
+            g, x0, x1, y0, y1 = fd.frame_rows(t)
+            for k in rng.choice(len(g), size=min(10, len(g)), replace=False) if len(g) else []:
+                cut_n += 1
+                if not ft.contains(name, "all", t, float(rng.uniform(x0[k], x1[k])) - xs, float(y0[k]) - ys):
+                    cut_out += 1
     # lookup time
     names = list(tabs)
     q = [(names[int(rng.integers(len(names)))], int(rng.integers(1, T + 1)), float(rng.uniform(-6, 6)),
@@ -723,7 +730,8 @@ def flat_cmd(args) -> int:
     rep = {"T": T, "maxev": mev, "tables": len(tabs), "file": str(out_path), "file_MB": round(size / 1e6, 2),
            "build_s": round(build_s, 1), "ms_per_table": _q([v["ms"] for v in stat.values()]),
            "rows_T": _q([v["rows_T"] for v in stat.values()]), "points": tot, "outside": miss,
-           "frames_before_first_touch": first_n, "equal_there": first_ok, "lookup_us": round(look_us, 2)}
+           "frames_checked": first_n, "rows_equal_chain": first_ok, "danger_cut_points": cut_n,
+           "danger_cut_outside": cut_out, "lookup_us": round(look_us, 2)}
     print(json.dumps(rep), flush=True)
     Path(args.out).write_text(json.dumps({"summary": rep, "stat": stat}, default=float))
     return 0
@@ -888,6 +896,11 @@ def header_cmd(args) -> int:
                                          "instances", "params", "params_vector_sha1", "built", "build_s",
                                          "depth_limit", "warm_passes", "warm_starts", "T", "maxev", "q")
                 if k in meta}
+        if keep.get("params"):                    # (the tracked header: the hero file relative to the repository)
+            try:
+                keep["params"] = Path(keep["params"]).resolve().relative_to(km.REPO.resolve()).as_posix()
+            except ValueError:
+                keep["params"] = Path(keep["params"]).name
         keep.update({"bytes": p.stat().st_size, "sha1": h})
         files[p.name] = keep
     out = {"version": tb.VERSION, "what": "map2 stage T1: the A1_n no-dash table library (ssbot.map2.tables) - the "

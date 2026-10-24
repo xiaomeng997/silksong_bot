@@ -335,7 +335,7 @@ def claw_frame(x, cu, steps, P, TT):
     OnEnter (throw: v 0; dash: 70 u/s along d; catch: x 0.75). Returns True at control. The vertical move meets the
     terrain (kin_jit.move_y: a floor stops the antic's fall, vy 0; a ceiling its rise) - live the block never goes
     below the standing height (M0's 222 Clawline trials, min py 4.5676); before T1 the block had no terrain and a
-    press while falling just over the floor sank her up to ~1.4 u into it (the hero model's collisions are not
+    press while falling just over the floor sank her up to ~0.8 u into it (the hero model's collisions are not
     meaningful inside the floor: containment escapes after a jump there)."""
     j = np.int64(cu[C_CJ]) + 1
     sh = np.int64(cu[C_CTF]) - CLAW_THROW_F
