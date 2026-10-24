@@ -402,6 +402,17 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   (direction x hold length x cancel x cancel frame, ~1000 trajectories) is the SAME from every A1_n - it depends only
   on the physics-step phase of the press frame and on the jump being held. Store it ONCE per phase; its endpoints
   reference no-dash tables. (Superseded by the next two bullets: there are no dash-version tables.)
+- ENTRY FROM ANY STATE (the person, 2026-10-23 evening: 'a transitional state has no table of its own - the gate's
+  bug (a plan dropped mid down slash) would get worse: dropped on a transitional state with not even a table'): the
+  tables start only at steady states, so the library must have an ENTRY for any exact state: (1) steady (every timer
+  spent, a table's origin state) -> that table; (2) transitional (mid dash / sprint, mid down slash, the umbrella's
+  antic / inflate / deflate, the Clawline's pull, a bounce's lock) -> roll the REST OF THE TRANSIENT online with the
+  exact hero model from her exact state over its few remaining choices (its cancels) until every branch is steady,
+  then chain the tables (a transient is short: the dash ~17 f, the Clawline ~32 f; milliseconds). (An index from a
+  transitional state to 'action a of table T at step k' is an optimisation for later.) The search must be able to
+  re-plan from mid-action - this also answers the gate's drop: map2 re-plans from the mid down slash itself instead
+  of handing the keys to a fallback that does not know she is in one (the drop rule on a 1-frame timing shift is a
+  separate fix: re-check the safety on the observed state and keep the plan if safe).
 - THE AIR DASH IS NOT IN THE TABLES (the person, 2026-10-23): the bundle is an independent module used ONLY as the
   bridge between the forward and the backward no-dash sets (next bullet). Every table is a no-dash table; 'the air
   dash used' is no table key but a property of the segment between two refills (known at the segment's start; the
