@@ -245,6 +245,35 @@ def test_up_slash_at_the_ceiling_contained(W):
     assert thunked >= 2
 
 
+def test_up_slash_offer_reads_the_frame_start(W):
+    """The up slash's offer reads only the frame-start lane (env_jit.upslash_band of her vy / head then: what
+    tables.near reads), never the physics phase (ALPHA: the tables' nodes do not carry it) nor the lane after the
+    steps (a jump fired in the step rises faster than the node's vy) - T4's entry check: a pogo's rise under the
+    ceiling got the offer at phase 0.5 and not at 0.25 from a look-ahead over the later frames' steps, and a jump
+    fired in the step widened the engine's band past the chain's: the chain and the engine had different clusters.
+    The same frame-start state at every phase gets the same answer, and the engine and the tables agree on rises and
+    jumps under the ceiling (every choice, 10 frames)."""
+    P = W.params.vector()
+    TT = W.terr.packed()
+    udt = float(np.float32(W.params.frame_time))
+    S = km.initial_state(W.params, 44.0, 11.75, vy=9.0, alpha=0.5)
+    got = set()
+    for a in (0.0, 0.25, 0.5, 0.75, 0.99):
+        x = np.asarray(S, np.float64).copy()
+        x[km.ALPHA] = a
+        dt, steps = ej.lane_timing(x, udt, P)
+        for _ in range(steps):
+            ej.fixed_step(x, P, TT)
+        got.add(bool(ej.upslash_thunks(x, P, TT, dt, udt, 0, S[km.VY], S[km.PY])))
+    assert got == {True}
+    for y, vy in ((11.4, 10.2), (11.6, -0.6), (12.6, 4.0)):
+        for a in (0.2248, 0.6):
+            S = km.initial_state(W.params, 44.0, y, vy=vy, alpha=a)
+            fe = W.envelope(S, 10, None, 0)
+            ft = W.envelope(S, 10, None, 0, tables=True)
+            assert np.array_equal(fe.cl_off, ft.cl_off), (y, vy, a)
+
+
 # ---- the ground dash's attack: unmodelled (finding 7) -------------------------------------------------------
 
 def test_ground_dash_attack_is_unmodelled(W):
@@ -357,6 +386,13 @@ def test_kinds_need_the_keys_up(W):
         lib.node_of(L, st.cu, absy)
     k = lib.kinds()
     assert k[0] in (tb.K_A1, tb.K_A1OFF) and k[1] not in (tb.K_A1, tb.K_A1OFF)
+    # (the re-check) a pogo's low jump counter: not the fall from rest either
+    for row, v in ((km.JDSTEPS, -19.0),):
+        S2 = S.copy()
+        S2[row] = v
+        st, L, absy, dashed = lib.start_lanes(S2)
+        n = lib.node_of(L, st.cu, absy)
+        assert lib.kinds()[n] not in (tb.K_A1, tb.K_A1OFF)
 
 
 # ---- the witness's miss in the search (finding 8) ------------------------------------------------------------

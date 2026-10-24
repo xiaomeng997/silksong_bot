@@ -72,9 +72,16 @@ CB_FREE = 1 << 15       # T4: an attack in normal control that costs no event (t
                         # dash that cannot fire yet is held back until the attack's recovery ends (the verifiers'
                         # finding: such a dash otherwise needed a release and a re-press, two events)
 CB_UP = 1 << 14         # T4: an UP slash (attack + up) in normal control in the air - offered only where its terrain
-                        # thunker meets a ceiling within its window (kin_jit.thunk_step's RecoilDown: the rise stops,
+                        # thunker can meet a ceiling within its window (kin_jit.thunk_step's RecoilDown: the rise stops,
                         # vy 0 - AB_THUNK in the Forum loadout; upslash_thunks), the one attack in normal control that
-                        # moves her (the verifiers' finding: the arena's ceiling 15.15)
+                        # moves her (the verifiers' finding: the arena's ceiling 15.15). The offer is a gate on the
+                        # frame-start lane alone (the ceiling within upslash_band of her head at the frame's start, a
+                        # fresh up slash this Update): a look-ahead over the later frames read the lane's physics
+                        # phase, which the tables' nodes do not carry, and the lane after the steps can rise faster
+                        # than the node's vy (a jump fires in the step) - T4's entry check: the chain offered it where
+                        # the engine did not; tables.near reads the same band. An up slash that then meets nothing is
+                        # a real, inert press (exact child, 1 event); the frame a jump fires in gets it only within
+                        # the frame-start speed's band (the next frame's band holds the jump's speed)
 
 # ---- options (forward / gen_cands): the Clawline and its P + 8 throw; for experiments, mechanics switched off
 OPT_CLAW, OPT_TF8, OPT_NO_DASH, OPT_NO_JH, OPT_NO_CANCEL, OPT_NO_UMB = 1, 2, 4, 8, 16, 32
@@ -549,35 +556,40 @@ def upslash_reach(vy, P, dt):
 
 
 @njit(cache=True, error_model="numpy")
-def upslash_thunks(x, P, TT, dt, udt, hold):
-    """T4: an up slash pressed in this frame's Update (x: the lane after the frame's steps - normal control in the air,
-    the attack ready) meets a ceiling with its terrain thunker before its window ends (kin_jit.thunk_step's RecoilDown:
-    the rise stops, vy 0), the keys `hold` (the jump / dash bits the child keeps) held on: a cheap gate (a ceiling over
-    her within the thunker's top + her rise over the window) then the kin rollout on a copy."""
-    if (np.int64(P[P_ABIL]) & AB_THUNK) == 0 or TT[0] <= 0:
-        return False
-    head = x[PY] + P[P_HEAD]
-    reach = upslash_reach(x[VY], P, dt)
-    if reach <= 0.0 or not roof_ray(x[PX], head, reach, TT, False):
-        return False
-    y = x.copy()
-    update(y, hold | B_ATTACK | B_UP, 0, dt, udt, P, TT)
-    if y[ATTACKING] <= 0 or y[ATK_KIND] != 3.0 or y[ATK_T] != 0.0:
-        return False                   # (no fresh up slash this Update: cooldown, another mode)
-    for _ in range(16):
-        dt2, steps = lane_timing(y, udt, P)
-        for _s in range(steps):
-            fixed_step(y, P, TT)
-            if y[ATK_KIND] < 0:
-                return True
-        if y[ATTACKING] <= 0 or y[ATK_KIND] <= 0 or ge32(y[ATK_T], P[P_THK_OFF_UP]):
-            return False
-        update(y, hold, 0, dt2, udt, P, TT)
-    return False
+def upslash_band(vy, P):
+    """T4 (t4d): the up slash's offer band over her head at a frame's start (vy: the frame-start speed) - the reach
+    plus her rise in the frame's steps (two frames at vy). env_jit.upslash_thunks gates on it and tables.near routes
+    a cluster within it through its terrain instance: the same function of the same frame-start state on both
+    sides, so the engine and the tables offer the up slash alike."""
+    r = upslash_reach(vy, P, 0.0168)
+    if r <= 0.0:
+        return 0.0
+    return r + 2.0 * 0.0168 * max(vy, 0.0)
 
 
 @njit(cache=True, error_model="numpy")
-def gen_cands(x, cu, P, opts, dt, out, TT, udt):
+def upslash_thunks(x, P, TT, dt, udt, hold, v0, y0):
+    """T4: an up slash pressed in this frame's Update (x: the lane after the frame's steps - normal control in the air,
+    the attack ready; v0 / y0: lane 1's vy / PY at the frame's start) CAN meet a ceiling with its terrain thunker
+    before its window ends (kin_jit.thunk_step's RecoilDown: the rise stops, vy 0), the keys `hold` (the jump / dash
+    bits the child keeps) held on: a ceiling within upslash_band(v0) over her frame-start head and a fresh up slash in
+    this Update (one kin update on a copy: the cooldown, the mode). No look-ahead over the later frames (their physics
+    steps follow the lane's phase, ALPHA, which a table node does not carry) and no band from the lane after the steps
+    (a jump fired in the step: faster than the node's vy) - the gate reads what tables.near reads, so the engine and
+    the tables offer it alike (T4's entry check). Where the slash then meets nothing it is an inert press: a real
+    state, rolled exactly."""
+    if (np.int64(P[P_ABIL]) & AB_THUNK) == 0 or TT[0] <= 0:
+        return False
+    reach = upslash_band(v0, P)
+    if reach <= 0.0 or not roof_ray(x[PX], y0 + P[P_HEAD], reach, TT, False):
+        return False
+    y = x.copy()
+    update(y, hold | B_ATTACK | B_UP, 0, dt, udt, P, TT)
+    return y[ATTACKING] > 0 and y[ATK_KIND] == 3.0 and y[ATK_T] == 0.0   # (a fresh up slash this Update)
+
+
+@njit(cache=True, error_model="numpy")
+def gen_cands(x, cu, P, opts, dt, out, TT, udt, v0, y0):
     """The vertical choices of this frame for a cluster after its steps (x: its lane 1), fewest presses first.
     Returns the count. Only choices that can change the vertical state or the mode: a jump press (the jump, the
     umbrella, the sprint's jump cancel), a held jump where holding acts (the rise, the hang, the umbrella, a queued
@@ -585,8 +597,8 @@ def gen_cands(x, cu, P, opts, dt, out, TT, udt):
     holding acts (the dash / sprint, a queued dash: then with its direction), the attack as the umbrella's or the
     sprint's cancel (in normal control the Wanderer's slashes do not move her: only restrictive, never offered - T4:
     but the UP slash whose thunker meets a ceiling, CB_UP, upslash_thunks), the unhooked Clawline left / right. The
-    children are deduplicated afterwards (no-op presses). TT / udt: the terrain and the frame time (the up slash's
-    look-ahead)."""
+    children are deduplicated afterwards (no-op presses). TT / udt: the terrain and the frame time; v0 / y0: lane 1's
+    vy / PY at the frame's start (the up slash's gate)."""
     if cu[C_CJ] >= 0:
         out[0] = CB_CONT
         return 1
@@ -674,7 +686,7 @@ def gen_cands(x, cu, P, opts, dt, out, TT, udt):
         out[n] = CB_J | CB_JH
         n += 1
     if m == M_NORMAL and not ground and (prev & B_ATTACK) == 0 and x[ATK_CD] <= 0 and \
-            upslash_thunks(x, P, TT, dt, udt, (jo[0] | do[0]) & (B_JUMP | B_DASH)):
+            upslash_thunks(x, P, TT, dt, udt, (jo[0] | do[0]) & (B_JUMP | B_DASH), v0, y0):
         # T4: the up slash that meets the ceiling (its RecoilDown stops the rise) - with the default jump / dash keys
         out[n] = jo[0] | do[0] | CB_A | CB_UP
         n += 1
@@ -1219,7 +1231,7 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                         if tmp[0, XVX] < tmp[0, VX]:
                             tmp[0, VX] = tmp[0, XVX]
             # candidates
-            nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt)
+            nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt, cur[c, 1, VY], cur[c, 1, PY])
             pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
             u0 = hold_useful(tmp[1], P)
             stats[t, 5] += nc
@@ -1523,7 +1535,7 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
                     tmp[1, VX] = tmp[1, XVX]
                 if tmp[0, XVX] < tmp[0, VX]:
                     tmp[0, VX] = tmp[0, XVX]
-    nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt)
+    nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands, TT, udt, tmp_in1[VY], tmp_in1[PY])
     pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
     u0 = hold_useful(tmp[1], P)
     st_out[0] = nc

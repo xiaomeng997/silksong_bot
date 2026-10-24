@@ -77,8 +77,10 @@ from ssbot.map2.env_jit import _children, vkey, khash, keq, cond_of, claw_allowe
 VERSION = 1
 # T4: the engine revision a library's edges come from (the merge key with lane 0's extra velocity, the dominance
 # filter's horizontal cover, the up slash at the ceiling, no hidden jump press at a pass's start): a library built by
-# another engine is refused (Lib.load) - its edges and classes are another engine's
-ENGINE_REV = "t4c"
+# another engine is refused (Lib.load) - its edges and classes are another engine's; t4d: the up slash's offer a gate
+# on the frame-start lane alone (env_jit.upslash_band: no look-ahead reading the physics phase a node does not carry,
+# no band from the lane after the steps)
+ENGINE_REV = "t4d"
 TABLES_PATH = km.REPO / "knowledge" / "1.0.30000" / "kinematics" / f"a1n_tables_v{VERSION}.npz"
 
 
@@ -599,11 +601,11 @@ def _cond(c, dbit):
 def near(py, ylo, TP, P, vy):
     """A cluster at her PY in [ylo, py] (a band: its range) is within the terrain's reach: its frame is the terrain
     instance's. TP: (has_floor, floor top, clear, has_ceiling, ceiling bottom, clear up). T4: the ceiling's reach
-    also covers an up slash's thunker at her vy (env_jit.upslash_reach: the up slash at the ceiling is a candidate
-    only over the terrain)."""
+    also covers the up slash's offer band at her vy (env_jit.upslash_band - the engine's gate reads the same band
+    of the same frame-start state: the up slash at the ceiling is a candidate only over the terrain)."""
     if TP[0] > 0 and (ylo - P[P_FOOT] - TP[1]) < TP[2]:
         return True
-    return TP[3] > 0 and (TP[4] - (py + P[P_HEAD])) < max(TP[5], ej.upslash_reach(vy, P, 0.0168))
+    return TP[3] > 0 and (TP[4] - (py + P[P_HEAD])) < max(TP[5], ej.upslash_band(vy, P) + 1e-6)
 
 
 @njit(cache=True, error_model="numpy")
@@ -1724,19 +1726,27 @@ class Lib:
                  dead(km.AQ, P[km.P_AQ]) & (X[:, km.ABUF] <= 0) & (X[:, SP_X] == 0))
         keys_up = (held & (B_JUMP | B_DASH | B_ATTACK)) == 0
         no_hard = (X[:, km.FALL_T] <= 0) & (X[:, HARD] <= 0)
+        # (T4, the re-check: the air kinds' rises as from rest - a jump released while rising is cut only past
+        # JSTEPS_MIN steps since the jump; a pogo / wall jump leaves the counter low - a key slot, K_JDS)
+        calm = X[:, km.JDSTEPS] >= P[km.P_JSTEPS_MIN]
         k = np.zeros(n, dtype=np.int64)
         rise = normal & air & ((X[:, km.JUMPING] > 0) | (X[:, km.BOUNCE] >= 0))
         hang = normal & air & ~rise & ((X[:, km.GS] < 1.0) | (X[:, km.AIRHANG] <= 0))
-        fall = normal & air & ~rise & ~hang & spent & keys_up
+        fall = normal & air & ~rise & ~hang & spent & keys_up & calm
         lat = np.isin(X[:, VY], self.lattice())
         term = X[:, VY] <= -P[km.P_MAXFALL]
         k[fall & lat & ~term & no_hard] = K_A1
         k[fall & ~lat & ~term & no_hard] = K_A1OFF
         k[fall & term & (X[:, HARD] > 0)] = K_A4
         k[rise & (cu[:, C_CJ] < 0) & (X[:, ATTACKING] <= 0) & (X[:, INV_T] <= 0)] = K_A2
-        k[hang & spent & no_hard] = K_HANG
-        k[(mode == km.M_GLIDE) & (ph == 2.0) & (X[:, INV_T] <= 0) & (X[:, ATTACKING] <= 0) &
-          ((held & (B_DASH | B_ATTACK)) == 0) & dead(km.DQ, P[km.P_DQ])] = K_A3
+        k[hang & spent & no_hard & calm] = K_HANG
+        # A3: the float's own lock (GL_CD) is part of its state; every other timer / queue spent as for the fall, the
+        # jump may be held (the float's key), no dash / attack held
+        spent3 = ((X[:, ATTACKING] <= 0) & (X[:, km.ATK_CD] <= 0) & (X[:, INV_T] <= 0) & (cu[:, C_CJ] < 0) &
+                  (X[:, km.DS_REC] < 0) & (X[:, km.DASH_CD] <= 0) & (X[:, km.JBUF] <= 0) & (X[:, km.ABUF] <= 0) &
+                  dead(km.JQ, P[km.P_JQ]) & dead(km.DQ, P[km.P_DQ]) & dead(km.AQ, P[km.P_AQ]) & (X[:, SP_X] == 0))
+        k[(mode == km.M_GLIDE) & (ph == 2.0) & spent3 & calm & no_hard &
+          ((held & (B_DASH | B_ATTACK)) == 0)] = K_A3
         k[normal & ~air & spent & keys_up & no_hard] = K_G
         k[(mode == km.M_SPRINT) & (ph == 2.0) & ~air & (np.abs(X[:, VX]) == P[km.P_SPR_SPEED]) &
           (X[:, MODE_T] >= P[km.P_SPR_GRACE])] = K_R
