@@ -2335,7 +2335,7 @@ class Searcher:
         """The witness keys to the window's press point at frame tp (the cluster's state after frame tp: its end-
         condition bits say what a press in frame tp + 1 does), then the press in frame tp + 1."""
         kind, tp, g, x, y, iid, extra, br = cand[:8]
-        w = fw.witness(tp, x, y, tol_y=1e-6)
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only)
         if w is None or not self._witness_ok(w):
             return None
         masks = np.asarray(w["masks"], np.int64).copy()
@@ -2466,7 +2466,7 @@ class Searcher:
 
     def realize_safe(self, fw, cand) -> Seg | None:
         _, tp, g, x, y, *_ = cand
-        w = fw.witness(tp, x, y, tol_y=1e-6)
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only)
         if w is None or not self._witness_ok(w):
             return None
         return Seg(np.asarray(w["masks"], np.int64).copy(), [], None, "safe")

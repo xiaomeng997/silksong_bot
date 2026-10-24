@@ -163,6 +163,25 @@ def test_no_hidden_press_at_the_start(W):
             assert not np.any((fw.pc_cand[p1] & ej.CB_JH) != 0)
 
 
+def test_dash_with_jump_really_held_contained(W):
+    """A start holding jump (no hang left: holding it alone does nothing) - the dash pressed with it held from frame 1
+    on, and the umbrella's dash cancel with jump held whose queued dash fires next: inside the engine's and the
+    tables' passes, the executable family too (the jump is held for real - no hidden press, no attack)."""
+    worst = 0.0
+    S = km.initial_state(W.params, 30.0, 9.0, ground=False, vy=-2.0, facing=1)
+    S[km.PREV] = float(B_J)
+    T = 16
+    for ex in (False, True):
+        fe = W.envelope(S, T, None, 1, exec_only=ex)
+        ft = W.envelope(S, T, None, 1, tables=True, exec_only=ex)
+        for f in range(1, 6):
+            for d in (B_L, B_R):
+                m = _seq([(1, B_J), (f, B_J | B_D | d)], T)
+                r = _roll(W, S, m)
+                worst = max(worst, _contained(fe, r.centre[0]), _contained(ft, r.centre[0]))
+    assert worst == 0.0
+
+
 def test_witness_writes_the_hidden_press(W):
     """Every witness's keys, rolled as they are (no hidden previous key), follow its cluster's heights: a CB_JH frame
     gets its press written (an attack before, the jump pressed in its recovery) or the witness reports the miss."""

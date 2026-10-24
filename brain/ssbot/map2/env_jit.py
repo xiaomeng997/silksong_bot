@@ -63,9 +63,10 @@ CB_JH = 1 << 13         # an air dash pressed with jump already held (no new pre
                         # and the hang ramp keeps the scale low while jump is held (kin_jit; reachable when jump was
                         # pressed earlier without opening the umbrella: in an attack's recovery, the umbrella's 0.1 s
                         # cooldown, after a jump's hang) - offered at every air dash press, an over-approximation for
-                        # the first frames of an airtime. T4 (the verifiers' finding): not before its hidden press can
-                        # come - an attack's recovery: frame 2 for the hang, frame 7 for a dash pressed with it (jh_early;
-                        # forward / the tables' chain drop those children); the witness writes the press (Fwd.witness)
+                        # the first frames of an airtime. T4 (the verifiers' finding): never in a pass's first frame from
+                        # a start that does not hold jump (drop_child); the witness writes the hold / the press
+                        # (Fwd.witness: held since its last frame with jump, else an attack and the press in its
+                        # recovery - not in the executable family)
 CB_FREE = 1 << 15       # T4: an attack in normal control that costs no event (the person's 'event': not an attack in
                         # normal control) - offered where its lock changes what a held key does later: a held, queued
                         # dash that cannot fire yet is held back until the attack's recovery ends (the verifiers'
@@ -85,9 +86,10 @@ OPT_ATK = 64
 # the air) is the bridge's (T2), not the tables'. The ground dash stays.
 OPT_NO_ADASH = 128
 # T4: THE BOT'S EXECUTABLE FAMILY - without the children an attack in normal control makes (the up slash at the
-# ceiling CB_UP, the free attack holding a queued dash CB_FREE, the jump held without a press CB_JH, whose press needs
-# an attack before it): the live controller rejects a plan whose keys hold a slash it does not plan (live.repair_check
-# 'unplanned slash'), so the search's passes and exits take this family (Cfg.exec_only); the exactness checks take all
+# ceiling CB_UP, the free attack holding a queued dash CB_FREE): the live controller rejects a plan whose keys hold a
+# slash it does not plan (live.repair_check 'unplanned slash'), so the search's passes and exits take this family
+# (Cfg.exec_only; the witness then writes a CB_JH frame only as a hold since an earlier frame); the exactness checks
+# take all
 OPT_EXEC = 1 << 12
 # bits 8 .. 11: the event limit (0: none) - the 'segment family' of the spec: the choices other than going on
 
@@ -296,28 +298,16 @@ def keq_lanes(a, b):
     return True
 
 
-JH_DASH_T = 7           # T4: the first frame a dash pressed with jump held without a press (CB_JH | CB_D) can come
-
-
 @njit(cache=True, error_model="numpy")
-def drop_child(cd, t, opts):
-    """T4: a child dropped after the dominance filter - a hidden jump press too early (jh_early), or (OPT_EXEC) a
-    child of an attack in normal control."""
-    if (opts & OPT_EXEC) != 0 and (cd & (CB_UP | CB_FREE | CB_JH)) != 0:
+def drop_child(cd, t, opts, pprev):
+    """T4: a child dropped after the dominance filter - (OPT_EXEC) a child of an attack in normal control (the up slash
+    at the ceiling, the free attack), or a jump held without a press (CB_JH) in a pass's first frame from a start that
+    does not hold jump: no earlier frame for its press (pprev: the parent's previous keys - the start's at t = 1). Later
+    a CB_JH child stands for a jump held since an earlier frame where holding it alone did nothing (the dominance filter
+    keeps such a hold as a release) or pressed where it was inert (an attack's recovery): Fwd.witness writes the keys."""
+    if (opts & OPT_EXEC) != 0 and (cd & (CB_UP | CB_FREE)) != 0:
         return True
-    return jh_early(cd, t)
-
-
-@njit(cache=True, error_model="numpy")
-def jh_early(cd, t):
-    """T4: a jump held without a press (CB_JH) needs its press at an earlier frame where it was inert - an attack's
-    recovery: an attack at t - 1 and the press at t for the hang (t >= 2); for a dash pressed with it the dash must
-    wait for the attack's recovery (0.1 s): the attack at t - 6 at the latest (t >= JH_DASH_T). Earlier the child is
-    unreachable (the verifiers' finding: the witness's keys pressed the jump there and opened the umbrella) - the
-    engine and the tables' chain drop it."""
-    if (cd & CB_JH) == 0:
-        return False
-    return t < (JH_DASH_T if (cd & CB_D) != 0 else 2)
+    return (cd & CB_JH) != 0 and t == 1 and (pprev & B_JUMP) == 0
 
 
 @njit(cache=True, error_model="numpy")
@@ -1302,7 +1292,7 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
             for k in range(nk):
                 if not kkeep[k]:
                     continue
-                if drop_child(kcand[k], t, opts):
+                if drop_child(kcand[k], t, opts, pbits):
                     continue                # T4: the start has no earlier frame for a hidden jump press
                 dlo = kid[k, 0, PX] - x0l
                 dhi = kid[k, 1, PX] - x0h
@@ -1825,7 +1815,7 @@ def forward_par(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, c
                 for k in range(A_nk[s]):
                     if not A_keep[s, k]:
                         continue
-                    if drop_child(A_cand[s, k], t, opts):
+                    if drop_child(A_cand[s, k], t, opts, np.int64(cur[c, 1, PREV])):
                         continue            # T4: the start has no earlier frame for a hidden jump press
                     npcs = A_np[s, k]
                     if npcs == 0:

@@ -207,7 +207,7 @@ class Fwd:
         return cls, [0] + cands, xs
 
     def witness(self, t: int, x: float, y: float | None = None, cond: int = 0, tol_y: float = 1e-6,
-                look: int = 3, beam: int = 24) -> dict | None:
+                look: int = 3, beam: int = 24, attack_ok: bool = True) -> dict | None:
         """Concrete keys that bring her to x (at height y, or any height when None; with the end condition bits
         `cond`) at frame t: the cluster chain backtracked to the start (the vertical choices per frame and the
         tube of x from which the target stays reachable), then the horizontal keys by a beam search in that tube
@@ -267,10 +267,12 @@ class Fwd:
         # in an attack's recovery: the trackers hold it by setting her previous keys, the keys they return press it
         # there (the umbrella opens) - the press written in (an attack 1 - 7 frames before, the jump pressed in its
         # recovery and held), each kept only when the keys reproduce the tracked path
-        jh = np.flatnonzero((vm & ej.CB_JH) != 0)
-        hidden = []
+        p0 = int(self.start.L[1][km.PREV])
+        jh = np.array([i for i in np.flatnonzero((vm & ej.CB_JH) != 0)
+                       if ((int(masks[i - 1]) if i > 0 else p0) & km.B_JUMP) == 0], dtype=np.int64)
+        hidden = []                     # (a CB_JH frame after a frame holding jump holds it for real: no press)
         if len(jh):
-            masks, hidden = self._hidden_press(S0, masks, oxy, jh)
+            masks, hidden = self._hidden_press(S0, masks, oxy, jh, attack_ok)
         # the keys rolled as they are (the reference model, no hidden state): the true miss
         xy = self._roll(S0, masks)
         dev = float(np.max(np.abs(xy - oxy))) if len(xy) else 0.0
@@ -287,21 +289,30 @@ class Fwd:
                        self.terrain, xy, md)
         return xy
 
-    def _hidden_press(self, S0: np.ndarray, masks: np.ndarray, oxy: np.ndarray, jh: np.ndarray):
-        """T4: the keys for the chain's CB_JH frames (jump held without a press at index i): an attack at i - k - 1
-        and the jump pressed at i - k (inert in the attack's recovery: the umbrella cannot open) held through i, k
-        = 0 .. 6 (a dash pressed with it held needs the attack's recovery over by i: k >= 5); a variant is kept when
-        the keys rolled as they are reproduce the tracked path (every frame within 1e-6 u). Returns (masks,
-        [(index, k) or (index, None) when none fits])."""
+    def _hidden_press(self, S0: np.ndarray, masks: np.ndarray, oxy: np.ndarray, jh: np.ndarray,
+                      attack_ok: bool = True):
+        """T4: the keys for the chain's CB_JH frames (jump held without a press at index i, the frame before without
+        jump): (a) jump held since the last earlier frame with it (or the start's held jump) - the dominance filter
+        keeps a hold that does nothing as a release; else (b, attack_ok) an attack at i - k - 1 and the jump pressed at
+        i - k (inert in the attack's recovery: the umbrella cannot open) held through i, k = 0 .. 6. A variant is kept
+        when the keys rolled as they are reproduce the tracked path (every frame within 1e-6 u, up to the next such
+        frame or the end). Returns (masks, [(index, 'held' / k / None when none fits)])."""
         m = np.asarray(masks, np.int64).copy()
         done = []
         jl = [int(v) for v in jh]
+        p0 = int(self.start.L[1][km.PREV])
         for q, i in enumerate(jl):
-            # (checked up to the next CB_JH frame - its press not written yet - or the end: the dash pressed with it
-            # shows in the steps after its frame)
             end = jl[q + 1] if q + 1 < len(jl) else len(m)
             ok = None
-            for k in range(0, 7):
+            prev_j = [j for j in range(i) if (int(m[j]) & km.B_JUMP) != 0]
+            j0 = prev_j[-1] + 1 if prev_j else (0 if (p0 & km.B_JUMP) != 0 else None)
+            if j0 is not None:
+                mm = m.copy()
+                mm[j0:i + 1] |= km.B_JUMP
+                xy = self._roll(S0, mm[:end])
+                if np.max(np.abs(xy - oxy[:end + 1])) <= 1e-6:
+                    ok, m = "held", mm
+            for k in (range(0, 7) if (ok is None and attack_ok) else ()):
                 f1, f0 = i - k, i - k - 1
                 if f0 < 0:
                     break
@@ -312,8 +323,7 @@ class Fwd:
                 mm[f1:i + 1] |= km.B_JUMP
                 xy = self._roll(S0, mm[:end])
                 if np.max(np.abs(xy - oxy[:end + 1])) <= 1e-6:
-                    ok = k
-                    m = mm
+                    ok, m = k, mm
                     break
             done.append((i, ok))
         return m, done

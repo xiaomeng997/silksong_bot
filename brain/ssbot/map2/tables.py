@@ -904,7 +904,7 @@ def chain(n0, py0, qy0, sy0, ivs0, alpha0, T, boxes, box_off, maxev, TP, wall, w
             ne = EOFF[src, s, 4 * du + 2 * fl + lim, 1]
             stats[t, 5] += ne
             for e in range(e0, e0 + ne):
-                if ej.drop_child(EI[e, EI_CAND], t, xopt):
+                if ej.drop_child(EI[e, EI_CAND], t, xopt, np.int64(NL[src, 1, PREV])):
                     continue                             # T4: no hidden jump press that early (as the engine)
                 cad = EI[e, EI_AD]                       # (the kernel's: a landing restores it, H2_LAND_DASH)
                 ch = EI[e, EI_CH]
