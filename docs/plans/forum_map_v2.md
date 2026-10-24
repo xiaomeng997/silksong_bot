@@ -482,6 +482,11 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   plus that widening - a TUBE; safe = the tube misses the grown danger; executing, the plan stays while the observed
   state is inside the tube (instead of the hand-set tolerances tol_hero 0.2 / tol_x 0.35 / tol_j 1 and the fixed
   timing views - the gate's drop on a Clapper one frame late becomes 'still inside the time widening: keep it').
+  STEERING INSIDE THE TUBE (the person asked 2026-10-24 'are the planned routes all with width?' - not yet: the search
+  uses envelopes to FIND candidates, but commits one concrete key sequence, a line per outcome, with hand-set
+  tolerances): the committed plan = its discrete events at their frames + per frame an x corridor (its own envelope
+  with those events, left / right free, cut by the danger, shrunk by eps(k)); each frame the left / right inside the
+  corridor is chosen to keep off its edges and correct the drift, the presses keep their frames.
   Discrete alternatives are NOT widened but branched like the enemy's moves (the pogo recovery 9 - 11 vs 18 - 23 f,
   the bounce 3.74 vs 4.09 u): a width covering them would be too wide and would kill good plans.
 - THE AIR DASH IS NOT IN THE TABLES (the person, 2026-10-23): the bundle is an independent module used ONLY as the
