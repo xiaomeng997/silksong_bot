@@ -91,6 +91,62 @@ def test_follow_contains_random_keys(lib):
     assert np.all(out[:, 0] < 0), out[out[:, 0] >= 0]
 
 
+def test_follow_contains_shuttle_cancel(lib_s):
+    """T1b: a ground dash held into the sprint, the sprint (shuttlecock) jump, an attack cancelling it in the air ->
+    the extra air velocity of 18 u/s with ShuttleCockCancel's decay (5 / s): a member without a key outruns the run
+    lane for several frames and the lane on its side must carry it (env_jit.xvx_extra with the lane's own decay; the
+    first version used the attack cancel's for every extra: escapes of 0.03 - 0.3 u)."""
+    S, _ = env.canonical(lib_s.params, "G", 0, 1, "", False)
+    T = 50
+    rows = []
+    for a in (12, 14, 16):
+        for c in (a + 9, a + 11, a + 13):
+            for key in (0, km.B_RIGHT):
+                m = [km.B_DASH | km.B_RIGHT] * a + [km.B_DASH | km.B_RIGHT | km.B_JUMP] * (c - a) + [key] * (T - c)
+                m[c] |= km.B_ATTACK
+                rows.append(m)
+    masks = np.array(rows, np.int64)
+    st, L, absy, dashed = lib_s.start_lanes(S, floor=True)
+    n0 = lib_s.node_of(L, st.cu, absy)
+    out = np.zeros((len(masks), 3))
+    xy = np.zeros((len(masks), T + 1, 2))
+    while tb.follow(st.L[1].copy(), st.cu.copy(), n0, masks, lib_s.TP, 1e-6, *t1._lib_args(lib_s), out, xy) == -2:
+        lib_s._grow()
+    assert np.all(out[:, 0] < 0), out[out[:, 0] >= 0]
+    # the no-key members do pass the key-held ones (the extension matters)
+    assert max(float(np.max(xy[2 * j, :, 0] - xy[2 * j + 1, :, 0])) for j in range(len(masks) // 2)) > 0.3
+
+
+def test_follow_contains_claw_in_sprint_jump(lib):
+    """T1b: the Clawline pressed in a sprint jump relinquishes control - ShuttleCockCancel leaves the extra air
+    velocity, which decays through the block and moves a member without a key after control together with the
+    HarpoonDashEnd residual drift (env_jit.lane_drift: the lanes bound their sum)."""
+    S, _ = env.canonical(lib.params, "G", 0, 1, "", False)
+    T = 80
+    rows = []
+    for a in (12, 15):
+        for c in (a + 9, a + 12):
+            for after in (0, km.B_RIGHT, km.B_LEFT):
+                m = [km.B_DASH | km.B_RIGHT] * a + [km.B_DASH | km.B_RIGHT | km.B_JUMP] * (c - a) + [after] * (T - c)
+                m[c] |= ej.B_CLAW
+                rows.append(m)
+    masks = np.array(rows, np.int64)
+    st, L, absy, dashed = lib.start_lanes(S, floor=True)
+    n0 = lib.node_of(L, st.cu, absy)
+    out = np.zeros((len(masks), 3))
+    xy = np.zeros((len(masks), T + 1, 2))
+    while tb.follow(st.L[1].copy(), st.cu.copy(), n0, masks, lib.TP, 1e-6, *t1._lib_args(lib), out, xy) == -2:
+        lib._grow()
+    assert np.all(out[:, 0] < 0), out[out[:, 0] >= 0]
+    # the press did cancel the sprint jump: after the block a member without a key does not keep 18 u/s
+    x = st.L[1].copy()
+    cu = st.cu.copy()
+    strip, mp = 0, int(x[km.PREV])
+    for t in range(12 + 9 + 1):                       # (rows[0]: a = 12, the press at frame index c = 21)
+        strip, mp = tb.member_frame(x, cu, masks[0, t], mp, strip, lib.udt, lib.P, lib.TTg)
+    assert x[km.SHUT] == 0.0 and x[km.XVX] == 18.0 and cu[ej.C_CJ] >= 0
+
+
 def test_a1_recursion(lib):
     """A1_n: the going-on edge of a physics step leads one lattice step on, widened by one run step each side; a frame
     without a step keeps the node."""

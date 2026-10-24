@@ -48,7 +48,7 @@ from ssbot.knowledge.kinematics import (
     GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
     B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE)
+    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
 CB_J, CB_A, CB_D = B_JUMP, B_ATTACK, B_DASH          # 1, 2, 4
@@ -309,9 +309,16 @@ def claw_allowed(x, cu, P):
 
 
 @njit(cache=True, error_model="numpy")
-def claw_enter(x, cu, d, tf):
+def claw_enter(x, cu, d, tf, P):
     """The press at P (this frame's Update): Harpoon Antic OnEnter - ClampVelocity2D (x +-20, y -10 .. 5), one
-    DecelerateXY (0.975, 0.875)."""
+    DecelerateXY (0.975, 0.875). HERO2 T1b: the press relinquishes control without the velocity (live: relq from the
+    Harpoon Antic frame, her velocity kept) - RelinquishControlNotVelocity -> ResetMotionNotVelocity ->
+    ShuttleCockCancel: a sprint jump running leaves the extra air move velocity of its speed (decay 5 / s; the list
+    is not cleared - it decays through the block and acts after control without a key)."""
+    if x[SHUT] != 0:
+        x[XVX] = x[SHUT]
+        x[XVXD] = P[P_H2_SHD]
+        x[SHUT] = 0.0
     x[VX] = min(max(x[VX], -20.0), 20.0) * CLAW_ANTIC_DX
     x[VY] = min(max(x[VY], CLAW_VY_LO), CLAW_VY_HI) * CLAW_ANTIC_DY
     cu[C_CJ] = 0.0
@@ -337,6 +344,12 @@ def claw_frame(x, cu, steps, P):
             vy *= CLAW_ANTIC_DY
         elif j > cF:
             vx *= CLAW_CATCH_DECEL
+        if x[XVX] != 0:                # (HeroController.FixedUpdate decays the extra air move velocities in every
+            xvd = x[XVXD] if x[XVXD] > 0 else P[P_H2_XVD]     # step, the block's too: kin_jit's arithmetic)
+            xv = f32(x[XVX] - x[XVX] * f32(xvd * fdt))
+            x[XVX] = 0.0 if abs(xv) < 0.01 else xv
+            if x[XVX] == 0:
+                x[XVXD] = 0.0
         x[QX] = px
         x[QY] = py
         px += vx * fdt
@@ -464,8 +477,11 @@ def gen_cands(x, cu, P, opts, dt, out):
         # Attack Cancel at its 0.08 s)
         ao[1] = CB_A
         na = 2
-    elif ((opts & OPT_ATK) != 0 and (prev & B_ATTACK) == 0 and m == M_NORMAL and x[ATTACKING] <= 0
-          and x[ATK_CD] <= 0):
+    elif (((opts & OPT_ATK) != 0 or x[SHUT] != 0) and (prev & B_ATTACK) == 0 and m == M_NORMAL and
+          x[ATTACKING] <= 0 and x[ATK_CD] <= 0):
+        # (HERO2 T1b: while the sprint jump runs an attack DOES move her - its next Update's ShuttleCockCancel ends
+        # the 18 u/s and leaves the decaying extra velocity, the turn free again: offered without OPT_ATK; the
+        # cooldown cannot run at the jump's start - the dash, the sprint and its 7-frame antic outlast it)
         ao[1] = CB_A
         na = 2
     n = 0
@@ -600,6 +616,59 @@ def cond_of(x, cu, P):
 
 
 @njit(cache=True, error_model="numpy")
+def lane_drift(xv_hi, xd_hi, xv_lo, xd_lo, xl, cu, steps, P):
+    """The lanes' extension over this frame's steps for the members WITHOUT a key: the extra air velocity (xvx_extra,
+    from lane 1's XVX > 0 / lane 0's < 0 before the steps, decaying with their XVXD) and the HarpoonDashEnd residual
+    drift (residual: cu's C_RV along C_RD, on the lane xl on its side) move such a member BOTH (kin_jit adds the
+    extra, the block's residual is added after each step) - so the extreme on each side moves max(run, extra +
+    residual) per step (T1b: a Clawline pressed in a sprint jump leaves both; before, each was bounded on its own).
+    The residual is dropped on the ground / out of normal control, and once residual + the extra on its side cannot
+    pass the run. Returns (extra x of lane 1, of lane 0)."""
+    run = P[P_RUN]
+    fdt = P[P_FDT]
+    rv = cu[C_RV]
+    rd = cu[C_RD]
+    if rv > 0 and (xl[GROUND] > 0 or xl[MODE] != M_NORMAL):
+        cu[C_RV] = 0.0
+        cu[C_RD] = 0.0
+        rv = 0.0
+        rd = 0.0
+    if rv <= 0:
+        rv = 0.0
+    hv = xv_hi
+    lv = xv_lo
+    hd = xd_hi if xd_hi > 0 else P[P_H2_XVD]
+    ld = xd_lo if xd_lo > 0 else P[P_H2_XVD]
+    e1 = 0.0
+    e0 = 0.0
+    for _ in range(steps):
+        if hv != 0.0:
+            hv = f32(hv - hv * f32(hd * fdt))
+            if abs(hv) < 0.01:
+                hv = 0.0
+        if lv != 0.0:
+            lv = f32(lv - lv * f32(ld * fdt))
+            if abs(lv) < 0.01:
+                lv = 0.0
+        r = rv * rd
+        vh = hv + (r if r > 0 else 0.0)
+        vl = lv + (r if r < 0 else 0.0)
+        if vh > run:
+            e1 += (vh - run) * fdt
+        if vl < -run:
+            e0 += (vl + run) * fdt
+        rv *= CLAW_END_DECAY
+    if cu[C_RV] > 0:
+        side = hv if rd > 0 else -lv
+        if rv + side <= run:
+            rv = 0.0
+        cu[C_RV] = rv
+        if rv == 0.0:
+            cu[C_RD] = 0.0
+    return e1, e0
+
+
+@njit(cache=True, error_model="numpy")
 def residual(xl, cu, steps, P):
     """The HarpoonDashEnd drift after an unhooked Clawline's control, on the lane on its side: a member without a key
     moves the residual (x 0.923 per step), one with the key toward it the run speed, one turning cancels it - so the
@@ -628,24 +697,27 @@ def residual(xl, cu, steps, P):
 
 
 @njit(cache=True, error_model="numpy")
-def xvx_extra(xv0, steps, P):
+def xvx_extra(xv0, xvd0, steps, P):
     """HERO2 M4a: the air sprint's Attack Cancel leaves an extra air x velocity (kin_jit XVX: decays first in every
     physics step, added only while no move key is held). The lanes always hold a key, so they skip it: a member
     without a key moves |xv| per step where the lane on its side moves the run speed - the extreme is max(run, |xv|).
-    Returns the extra x of the lane on its side over this frame's steps (signed), from the lane's XVX before them."""
+    Returns the extra x of the lane on its side over this frame's steps (signed), from the lane's XVX / XVXD before
+    them, with kin_jit's own decay arithmetic (the lane's XVXD when set: T1b's ShuttleCockCancel 5 / s; the attack
+    cancel's P_H2_XVD otherwise). The engine's frame uses lane_drift (the extra with the Clawline's residual drift);
+    this is its extra alone."""
     if xv0 == 0.0:
         return 0.0
     run = P[P_RUN]
     fdt = P[P_FDT]
-    k = 1.0 - P[P_H2_XVD] * fdt
-    xv = abs(xv0)
+    xvd = xvd0 if xvd0 > 0 else P[P_H2_XVD]
+    xv = xv0
     ex = 0.0
     for _ in range(steps):
-        xv = xv * k
-        if xv < 0.01:
+        xv = f32(xv - xv * f32(xvd * fdt))
+        if abs(xv) < 0.01:
             break
-        if xv > run:
-            ex += (xv - run) * fdt
+        if abs(xv) > run:
+            ex += (abs(xv) - run) * fdt
     return ex if xv0 > 0 else -ex
 
 
@@ -921,6 +993,8 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
             dtl = 0.0
             xv_hi = tmp[1, XVX] if (tmp[1, XVX] > 0 and tmp[1, MODE] == M_NORMAL) else 0.0
             xv_lo = tmp[0, XVX] if (tmp[0, XVX] < 0 and tmp[0, MODE] == M_NORMAL) else 0.0
+            xd_hi = tmp[1, XVXD]
+            xd_lo = tmp[0, XVXD]
             for ln in range(2):
                 dt, steps = lane_timing(tmp[ln], udt, P)
                 dtl = dt
@@ -943,26 +1017,22 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
             else:
                 if tcu[C_CLOCK] > 0:
                     tcu[C_CLOCK] -= 1.0
-                if xv_hi != 0.0 or xv_lo != 0.0:
-                    e1 = xvx_extra(xv_hi, steps, P)
-                    e0 = xvx_extra(xv_lo, steps, P)
-                    tmp[1, PX] += e1
-                    tmp[1, SX] = tmp[1, PX]
-                    tmp[0, PX] += e0
-                    tmp[0, SX] = tmp[0, PX]
-                    # a move entered from here reads the velocity (the umbrella's inertia, the Clawline's antic
-                    # drift): the lane on the extra's side carries the faster member's (no key: the extra)
-                    if tmp[1, XVX] > tmp[1, VX]:
-                        tmp[1, VX] = tmp[1, XVX]
-                    if tmp[0, XVX] < tmp[0, VX]:
-                        tmp[0, VX] = tmp[0, XVX]
-                ex = residual(tmp[1] if tcu[C_RD] > 0 else tmp[0], tcu, steps, P)
-                if ex > 0:
-                    tmp[1, PX] += ex
-                    tmp[1, SX] = tmp[1, PX]
-                elif ex < 0:
-                    tmp[0, PX] += ex
-                    tmp[0, SX] = tmp[0, PX]
+                if xv_hi != 0.0 or xv_lo != 0.0 or tcu[C_RV] > 0:
+                    e1, e0 = lane_drift(xv_hi, xd_hi, xv_lo, xd_lo, tmp[1] if tcu[C_RD] > 0 else tmp[0], tcu,
+                                        steps, P)
+                    if e1 != 0.0 or xv_hi != 0.0 or xv_lo != 0.0:
+                        tmp[1, PX] += e1
+                        tmp[1, SX] = tmp[1, PX]
+                    if e0 != 0.0 or xv_hi != 0.0 or xv_lo != 0.0:
+                        tmp[0, PX] += e0
+                        tmp[0, SX] = tmp[0, PX]
+                    if xv_hi != 0.0 or xv_lo != 0.0:
+                        # a move entered from here reads the velocity (the umbrella's inertia, the Clawline's antic
+                        # drift): the lane on the extra's side carries the faster member's (no key: the extra)
+                        if tmp[1, XVX] > tmp[1, VX]:
+                            tmp[1, VX] = tmp[1, XVX]
+                        if tmp[0, XVX] < tmp[0, VX]:
+                            tmp[0, VX] = tmp[0, XVX]
             # candidates
             nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands)
             pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
@@ -980,8 +1050,8 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                 elif (cd & CB_CLAW) != 0:
                     dd = 1.0 if (cd & CB_RIGHT) != 0 else -1.0
                     tf = 8.0 if (cd & CB_TF8) != 0 else 9.0
-                    claw_enter(kid[nk, 0], kcu[nk], dd, tf)
-                    claw_enter(kid[nk, 1], kcu[nk], dd, tf)
+                    claw_enter(kid[nk, 0], kcu[nk], dd, tf, P)
+                    claw_enter(kid[nk, 1], kcu[nk], dd, tf, P)
                     tick_frozen(kid[nk, 0], dtl, udt)
                     tick_frozen(kid[nk, 1], dtl, udt)
                 else:
@@ -1233,6 +1303,8 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
     steps = 0
     xv_hi = tmp[1, XVX] if (tmp[1, XVX] > 0 and tmp[1, MODE] == M_NORMAL) else 0.0
     xv_lo = tmp[0, XVX] if (tmp[0, XVX] < 0 and tmp[0, MODE] == M_NORMAL) else 0.0
+    xd_hi = tmp[1, XVXD]
+    xd_lo = tmp[0, XVXD]
     for ln in range(2):
         dt, steps = lane_timing(tmp[ln], udt, P)
         dtl = dt
@@ -1255,24 +1327,19 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
     else:
         if tcu[C_CLOCK] > 0:
             tcu[C_CLOCK] -= 1.0
-        if xv_hi != 0.0 or xv_lo != 0.0:
-            e1 = xvx_extra(xv_hi, steps, P)
-            e0 = xvx_extra(xv_lo, steps, P)
-            tmp[1, PX] += e1
-            tmp[1, SX] = tmp[1, PX]
-            tmp[0, PX] += e0
-            tmp[0, SX] = tmp[0, PX]
-            if tmp[1, XVX] > tmp[1, VX]:
-                tmp[1, VX] = tmp[1, XVX]
-            if tmp[0, XVX] < tmp[0, VX]:
-                tmp[0, VX] = tmp[0, XVX]
-        ex = residual(tmp[1] if tcu[C_RD] > 0 else tmp[0], tcu, steps, P)
-        if ex > 0:
-            tmp[1, PX] += ex
-            tmp[1, SX] = tmp[1, PX]
-        elif ex < 0:
-            tmp[0, PX] += ex
-            tmp[0, SX] = tmp[0, PX]
+        if xv_hi != 0.0 or xv_lo != 0.0 or tcu[C_RV] > 0:
+            e1, e0 = lane_drift(xv_hi, xd_hi, xv_lo, xd_lo, tmp[1] if tcu[C_RD] > 0 else tmp[0], tcu, steps, P)
+            if e1 != 0.0 or xv_hi != 0.0 or xv_lo != 0.0:
+                tmp[1, PX] += e1
+                tmp[1, SX] = tmp[1, PX]
+            if e0 != 0.0 or xv_hi != 0.0 or xv_lo != 0.0:
+                tmp[0, PX] += e0
+                tmp[0, SX] = tmp[0, PX]
+            if xv_hi != 0.0 or xv_lo != 0.0:
+                if tmp[1, XVX] > tmp[1, VX]:
+                    tmp[1, VX] = tmp[1, XVX]
+                if tmp[0, XVX] < tmp[0, VX]:
+                    tmp[0, VX] = tmp[0, XVX]
     nc = gen_cands(tmp[1], tcu, P, opts, dtl, cands)
     pbits = np.int64(tmp[1, PREV]) & (B_JUMP | B_DASH | B_ATTACK)
     u0 = hold_useful(tmp[1], P)
@@ -1290,8 +1357,8 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
         elif (cd & CB_CLAW) != 0:
             dd = 1.0 if (cd & CB_RIGHT) != 0 else -1.0
             tf = 8.0 if (cd & CB_TF8) != 0 else 9.0
-            claw_enter(kid[nk, 0], kcu[nk], dd, tf)
-            claw_enter(kid[nk, 1], kcu[nk], dd, tf)
+            claw_enter(kid[nk, 0], kcu[nk], dd, tf, P)
+            claw_enter(kid[nk, 1], kcu[nk], dd, tf, P)
             tick_frozen(kid[nk, 0], dtl, udt)
             tick_frozen(kid[nk, 1], dtl, udt)
         else:
@@ -1776,7 +1843,7 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
                 elif (m & B_LEFT) != 0 and (m & B_RIGHT) == 0:
                     d = -1.0
                 x[FACE] = d
-                claw_enter(x, cu, d, 8.0 if (m & (1 << 31)) != 0 else 9.0)
+                claw_enter(x, cu, d, 8.0 if (m & (1 << 31)) != 0 else 9.0, P)
                 tick_frozen(x, dt, udt)
                 x[PREV] = np.float64(m & ~B_CLAW & ~(1 << 31))
             else:

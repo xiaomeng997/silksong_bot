@@ -731,7 +731,8 @@ def flat_cmd(args) -> int:
 
 # ---- entry from any state: transitional starts -------------------------------------------------------------------
 
-ENTRY_KINDS = ("dslash", "claw", "pogo", "umbrella", "deflate", "gdash", "skid", "hang", "cancel")
+ENTRY_KINDS = ("dslash", "claw", "pogo", "umbrella", "deflate", "gdash", "skid", "hang", "cancel", "sjump",
+               "scancel")
 
 
 def transitional_starts(lib, S_all, lab, rng, n_per: int = 40):
@@ -739,8 +740,8 @@ def transitional_starts(lib, S_all, lab, rng, n_per: int = 40):
     starts (and canonical ones), the action pressed at frame 0 and the state k frames into it, rolled by the
     reference model (env_jit.ref_rollout: kin_jit + the Clawline block; km.rollout for the pogo event): mid down
     slash, mid Clawline (its block: cu), a pogo bounce's lock, the umbrella's antic / inflate, the Deflate, a ground
-    dash / sprint, the sprint's skid, the hang (jump held through the apex), the float's attack cancel. Returns
-    [(S, cu, label)]."""
+    dash / sprint, the sprint's skid, the hang (jump held through the apex), the float's attack cancel, the sprint
+    (shuttlecock) jump's antic / rise and its attack cancel (T1b). Returns [(S, cu, label)]."""
     P, udt = lib.P, lib.udt
     air = [i for i in range(len(S_all)) if S_all[i][km.GROUND] <= 0 and S_all[i][km.MODE] == km.M_NORMAL
            and S_all[i][km.TS] == 1.0]
@@ -760,13 +761,13 @@ def transitional_starts(lib, S_all, lab, rng, n_per: int = 40):
         return x, cu
 
     for kind in ENTRY_KINDS:
-        src = {"gdash": gnd, "skid": gnd, "deflate": flt, "cancel": flt}.get(kind, air)
+        src = {"gdash": gnd, "skid": gnd, "sjump": gnd, "scancel": gnd, "deflate": flt, "cancel": flt}.get(kind, air)
         if not src:
             continue
         for i in rng.choice(src, size=min(n_per, len(src)), replace=False):
             S0 = S_all[i]
             d = int(rng.choice([km.B_LEFT, km.B_RIGHT]))
-            TT = lib.TTg if kind in ("gdash", "skid") else None
+            TT = lib.TTg if kind in ("gdash", "skid", "sjump", "scancel") else None
             if kind == "dslash":
                 k = int(rng.choice([1, 2, 4, 6, 9, 12]))
                 ms = [km.B_ATTACK | km.B_DOWN] + [0] * (k - 1)
@@ -782,6 +783,13 @@ def transitional_starts(lib, S_all, lab, rng, n_per: int = 40):
             elif kind == "gdash":
                 k = int(rng.choice([1, 3, 5, 7, 10, 16]))
                 ms = [km.B_DASH | d] * k
+            elif kind == "sjump":                         # (T1b: mid sprint jump - its antic / the 18 u/s rise)
+                k = int(rng.choice([1, 3, 5, 7, 9, 12, 16]))
+                ms = [km.B_DASH | d] * 12 + [km.B_DASH | d | km.B_JUMP] * k
+            elif kind == "scancel":                       # (T1b: the sprint jump cancelled by an attack: the extra
+                k = int(rng.choice([8, 10, 12]))          # air velocity, ShuttleCockCancel's decay)
+                ms = ([km.B_DASH | d] * 12 + [km.B_DASH | d | km.B_JUMP] * k + [km.B_ATTACK] +
+                      [0] * int(rng.choice([1, 2, 4, 6])))
             elif kind == "skid":
                 k = int(rng.choice([1, 3, 6, 9]))
                 ms = [km.B_DASH | d] * 24 + [0] * k

@@ -211,7 +211,10 @@ def test_envelope_holds_the_extra_velocity():
             assert me.point_dist(fw, fidx, t, xy[i, t, 0], xy[i, t, 1]) == 0, (i, t)
     # the no-key rollouts do pass the key-held ones (the extension matters)
     assert max(float(np.max(xy[2 * j, :, 0] - xy[2 * j + 1, :, 0])) for j in range(9)) > 0.3
-    assert ej.xvx_extra(18.0, 1, eng.P) > 0 and ej.xvx_extra(-18.0, 1, eng.P) < 0 and ej.xvx_extra(5.0, 1, eng.P) == 0
+    assert ej.xvx_extra(18.0, 0.0, 1, eng.P) > 0 and ej.xvx_extra(-18.0, 0.0, 1, eng.P) < 0
+    assert ej.xvx_extra(5.0, 0.0, 1, eng.P) == 0
+    # (T1b: the lane's own decay - ShuttleCockCancel's 5 / s keeps the extra above the run longer)
+    assert ej.xvx_extra(18.0, 5.0, 3, eng.P) > ej.xvx_extra(18.0, 0.0, 3, eng.P)
 
 
 def test_unhooked_claw_control_keeps_the_air_dash():

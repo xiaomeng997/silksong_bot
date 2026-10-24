@@ -1,43 +1,52 @@
 """Map v2 stage T1: THE A1_n RECURSIVE TABLES - the no-dash table library (docs/plans/forum_map_v2.md, section 'THE
 A1_n RECURSIVE TABLES' and the recursion paragraph 'THE COLLAPSE AND THE RECURSION'; the person's decision of
-2026-10-23 after the failed w7 gate: 'build the recursive tables directly'). Offline / planning code: nothing in the
-live bot imports it.
+2026-10-23 after the failed w7 gate: 'build the recursive tables directly'; HANDOFF 'Task map2 - A1_n recursive
+tables - stage T1', forum.md 103). Offline / planning code: nothing in the live bot imports it.
 
     from ssbot.map2 import tables as tb
     lib = tb.Lib.load()                                  # knowledge/1.0.30000/kinematics/a1n_tables_v1.npz
     fw = lib.forward(S, T=60, danger=boxes, floor=True)  # envelope.Fwd: the same clusters as Engine.forward with
     #                                                      opts OPT_NO_ADASH (the air dash off), only no physics
-    lib.table(node, alpha_c)                             # the spec's table view: continue reference + frame-0 actions
+    lib.table(node, alpha)                               # the spec's table view: continue reference + frame-0 actions
 
 THE RECURSIVE ELEMENT. A NODE is one cluster state of the M1 engine (ssbot.map2.env_jit) made RELATIVE: both lanes'
 full kin_jit states with x relative to each lane's own x (the interval end it carries) and y relative to her height
-(a 'free' node: the tables assume infinite height), or y absolute over the floor (a 'floor instance': the ground, and
-a free node within CLEAR of the floor, where the floor changes the frame). Its identity is the engine's own merge key
-(env_jit.vkey, the floor-strict variant) without the height, plus each lane's horizontal state (vx, the extra air
-velocity, facing, move, the left / right keys held, the last step's x offsets, ...): everything that changes where she
-can be later. The air dash used is NOT in it (no table key: a segment property, carried per pass; T2's bridge).
+(a 'free' node: the tables assume infinite height), or y absolute over the terrain (a 'floor instance': the ground,
+and a free node within CLEAR of the floor / CLEAR_UP of the ceiling, where the terrain changes the frame). Its
+identity is the engine's own merge key (env_jit.vkey, the floor-strict variant) without the heights, plus each lane's
+horizontal state (vx, the extra air velocity, facing, move, the left / right keys held, the last step's x offsets,
+...): everything that changes where she can be later (a ground dash's floor instance also holds QY / SY: its end
+translates her from the drawn position). The air dash used is NOT in it (no table key: a segment property, carried
+per pass; T2's bridge).
 
-Per node and per frame STEP COUNT s (0 or 1: 50 Hz physics in 60 fps frames; the physics phase is a global clock, so
-the node is phase-free and the edges are per s) the node holds its EDGES: every child of the engine's frame (the same
-candidates - env_jit.gen_cands with the air dash off -, the same dominance filter) with (child node, candidate code,
-the lane displacements [dlo, dhi] = the x OFFSET INTERVAL, dy, the events it spends). A1_0 'continue' -> A1_1 is the
-going-on edge (one step later, widened by [-0.165, +0.165] in the instant run): NO REDUNDANCY - a press at frame 10
-lives in the node reached at frame 10, not in A1_0. References compose by interval addition ([lo1 + lo2, hi1 + hi2]);
-a node's x reach through [a, b] is [x_lo + a, x_hi + b] (the WIDEN of the state: the instant run's +-0.165 u / step,
-the float's lanes from its vx interval - the lane states are in the node).
+Per node, per frame STEP COUNT s (0 or 1: 50 Hz physics in 60 fps frames; the physics phase is a global clock, so the
+node is phase-free and only the edges depend on s) and per PASS KIND (free space / over the terrain: the engine's two
+merge keys and dominance filters) the node holds its EDGES: every child of the engine's frame (env_jit._children on
+the node's representative lanes: the same candidates - gen_cands with the air dash off -, the same dominance filter)
+with (child node, candidate code, the lane displacements [dlo, dhi] = the x OFFSET INTERVAL - with a phase slope where
+the drawn position moves her -, dy, the events it spends, the QY / SY rules); a list for 'every choice' and one for
+'the event limit reached'. A1_0 'continue' -> A1_1 is the going-on edge (one step later, widened by +-0.165 u in the
+instant run; a frame without a step keeps the node): NO REDUNDANCY - a press at frame 10 lives in the node reached at
+frame 10, not in A1_0. References compose by interval addition; a node's x reach through [a, b] is
+[x_lo + a, x_hi + b] (the WIDEN of the state: the instant run's +-0.165 u / step, the float's lanes from its vx
+interval - the lane states are in the node). A frame that depends on the phase beyond x (a recorded ground start
+settling onto the floor) is expanded per cluster at her exact phase and QY / SY (a phase instance).
 
-THE CHAIN (forward): from her exact state (one start node, translated to her x / y), frame by frame: each cluster
-(node, height, x interval set) maps through its node's edges for the frame's s; children with the engine's merge key
-merge (their sets unite; a merge of two lane states takes the engine's extreme velocities). Danger boxes cut each
-child at its height, walls clip (optional, the spec's use-time rule), the floor routes a cluster near it through its
-floor instance. Back-pointers are kept on clusters (pieces), never on a flattened map. Nodes / edges missing from the
-library (a recorded start's own first frames, a floor instance at a new height) are expanded on the fly with the
-engine's kernel and cached.
+THE CHAIN (forward): from her exact state (ENTRY FROM ANY STATE: a steady state's node is in the library; a
+transitional one - mid dash, down slash, Clawline, umbrella antic / inflate / deflate, bounce, sprint jump - is
+expanded on the fly with the engine's kernel over its remaining choices until its branches meet the library's nodes),
+frame by frame: each cluster (node, PY / QY / SY, x interval set, events) maps through its node's edges for the frame's
+s; children with the engine's merge key (the class and the three heights' bits) merge as the engine merges them (the
+sets unite, the fewest events, the extreme lane velocities). Danger boxes cut each child at its height, walls clip
+(optional, the spec's use-time rule; the search cuts walls as danger), the terrain routes a cluster near it through
+its floor instance. Back-pointers are kept on clusters (pieces), never on a flattened map. Nodes / edges missing from
+the library are expanded on the fly and kept.
 
-EXACTNESS: every edge is the engine's own per-cluster frame (env_jit._children) on the node's representative lanes,
-so the chain's clusters are the engine's (heights bit-equal; x equal to float rounding of relative vs absolute
-coordinates, ~1e-13 u), modulo the engine's own merge-key canonicalisation (a node's representative stands for
-every state with its key, as the engine's first child does).
+EXACTNESS: every edge is the engine's own per-cluster frame on the node's representative lanes and the chain merges
+on the engine's key, so the chain's clusters are the engine's (heights bit-equal; x equal to the rounding of relative
+vs absolute coordinates, < 1e-13 u). THE CLOSURE DOES NOT CONVERGE: exact vertical states multiply with the event
+history (the float's close / attack cancel, the Clawline's antic decay, the hang leave off-lattice vy), so the library
+is the memoised engine - a depth-limited core plus the nodes the search's own passes meet -, not a few hundred tables.
 """
 from __future__ import annotations
 
@@ -1034,7 +1043,8 @@ def member_frame(x, cu, m_raw, m_prev, strip, udt, P, TT):
     bit 31 its P + 8 throw) for one concrete key mask, WITHOUT THE AIR DASH as the engine's OPT_NO_ADASH: the dash key
     is dropped whenever she is airborne after the frame's steps. Returns (strip, m_prev)."""
     m = m_raw
-    no_j = x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and         (np.int64(P[km.P_H2]) & km.H2_SHUTTLE) == 0
+    no_j = (x[GROUND] > 0 and (x[MODE] == M_DASH or (x[MODE] == M_SPRINT and x[PHASE] == 2.0)) and
+            (np.int64(P[km.P_H2]) & km.H2_SHUTTLE) == 0)
     no_a = x[MODE] == M_SPRINT and x[PHASE] >= 2.0
     for b in (B_JUMP, B_ATTACK):
         if (m & b) == 0:
@@ -1084,7 +1094,7 @@ def member_frame(x, cu, m_raw, m_prev, strip, udt, P, TT):
             elif (m & B_LEFT) != 0 and (m & B_RIGHT) == 0:
                 d = -1.0
             x[FACE] = d
-            ej.claw_enter(x, cu, d, 8.0 if (m & (1 << 31)) != 0 else 9.0)
+            ej.claw_enter(x, cu, d, 8.0 if (m & (1 << 31)) != 0 else 9.0, P)
             ej.tick_frozen(x, dt, udt)
             x[PREV] = np.float64(m & ~ej.B_CLAW & ~(1 << 31))
         else:
