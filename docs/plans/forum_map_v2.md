@@ -422,6 +422,16 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   found exactly by bisection with the strike module's judge. Then: no partial cells (the reflex's 8.5 - 150 ms
   re-check was mostly the partial cells), and the windows ARE the backward tables' goal regions (window x envelope
   = interval against interval). Build them with the tables (T2's goal regions); move the reflex onto them after.
+- THE REFLEX ONLY COVERS THE SEARCH'S LATENCY GAP (the person, 2026-10-24: 'the windows bound on the Clapper are
+  for the fast reaction - only the first ~10 frames the normal search is too slow for; later ones the search finds
+  in time anyway'): the reflex table (reflex branch) covers every window of every move - 4.25 M cells, the bulk long
+  windows the search can foresee from the reveal (the cast head pogo 2.37 M full cells, the slam head pogo 0.60 M) -
+  and in the replays it fires ~28 / min, each fire a 8.5 - 150 ms safety check that competes with the search. Keep in
+  the reflex ONLY the windows whose last press frame falls inside the search's reaction gap after the reveal (~25 f
+  today, shorter after the evaluation work): the Clawline into the slam's first window (press at antic 5 - 11; ~17 k
+  full cells), the small rune's first-frame Clawline (~20 k), the chase of an evade's start (~5 k) - ~1 % of the
+  table. Every other window goes to the search as a goal shape (the candidate generation). Better than the existing
+  scope: 100x smaller, far fewer runtime checks, no duplicate / competing strikes.
 - LONG HORIZON = FEW EVENTS, MANY EVENTS = SHORT HORIZON (the person, 2026-10-24): an 'event' is a discrete key
   change that changes the vertical / the mode (a jump press / hold / release, a dash, the umbrella open / close, the
   Clawline, their cancels) - not left / right (free every frame, inside the envelope's widening) and not an attack in
