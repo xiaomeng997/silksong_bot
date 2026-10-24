@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99, §100, §101)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99, §100, §101, §102)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -13244,3 +13244,67 @@ late_check=0 and 3584).
 4. The machine load: under another worktree's reflex_build job (5 Idle workers) the replay share of S1's own rules
    fell from 35 to 26 % (strict w7); the gate's 30 % bar wants a quiet machine.
 5. S1's open items 3 (an ACTION applied late is not seen), 5 (the reveal latency, the A1_n tables, two Clappers) stand.
+
+### G - the person's gate on w7 (live, 2026-10-23 19:26 - 19:31 PDT): FAILED in the first episode on both instances, stopped - 0 / 2 hitless kills, pooled map2 share 33.3 %
+
+The task (the person's decision of 2026-10-23 15:40: the safety items first - S1 / S1b -, then the w7 gate tonight with
+the map2 share bar lowered from 50 % to 30 %; the speed work later): 16 episodes on Forum_W_w7 (fo_cl_w7w), instances
+0 / 1, 1.0x, arm `m2` (the w7 default rnjb + SSBOT_FORUM_HERO2=1 + SSBOT_FORUM_MAP2=1, every LiveCfg switch at its
+default) from the frozen checkout `C:\ssbot\live_1v1_c0329d2`; pass = 16 / 16 kills with no HP lost AND a pooled map2
+share >= 30 % of the engaged ticks; any problem -> stop, freeze, write `C:\ssbot\data\m2_play\map2\M4_GATE.txt` with
+every episode and a trace of each problem, no fixes (the person looks first). The full write-up with every frame
+number is `M4_GATE.txt`; the traces `C:\ssbot\data\m2_play\map2\m4\gate\traces\`.
+
+#### Result
+
+- NOTE_FROM_LEAD_safety.txt's condition held (LEAD NOTES 3 and 4 fixed in c0329d2: S1 / S1b). A harness smoke with
+  the switch OFF (arm h2, one episode per instance): 2 / 2 hitless kills (15.8 / 17.3 s), the check and the freeze
+  worked.
+- The gate (switch ON, both instances in parallel, 19:29:54 - 19:31:06): **ep1 i0 CLEAR in 31.9 s with 3 HP lost
+  before the kill; ep2 i1 QUIT_EMULATED (HP 1 after its third hit), no kill.** The stop rule ended both drivers after
+  their first episode: 2 of 16 run, 0 hitless kills. map2's share of the engaged ticks 33.8 % / 32.8 %, pooled 33.3 %
+  (903 / 2,709) - above the 30 % bar, but the gate failed on the wins.
+- map2's moves (the recordings' hits on the Clapper credited to the owner of the press's keys): down slash strikes
+  9 (on Idle, Air, Spell Antic, Slam Antic, one slam strike on Slam 0 j0 that got no bounce), Clawline hooks 5 (Spell
+  Antic, Cast Slam Antic 2, Evade Scuttle, Idle), rides 0, CLAWSTRIKE 0 (the fallback's slam script 2); the fallback
+  2 strikes, 2 hooks, 19 side slashes. 0 map2 errors, 0 tracebacks; map2 on the bot's thread p99 1.4 / 1.9 ms; late
+  ticks 29 % / 35 %; her behaviour within the default planner's range (no stuck / still / flicker).
+- **No HP was lost while a map2 plan had the keys** (every hit frame's owner was the default planner; map2's own
+  counters: hit_fb 9 / 7 of 9 / 7 contacts). **3 of the 5 HP losses followed a map2 plan dropped on a Clapper mismatch
+  next to an attacking Clapper**: both of map2's slam strikes (plans 1:86i0 / 0:143i0) were dropped ('fail:clappers')
+  at the frame of their planned down slash contact because all 4 outcomes of each (var 'early' only) had the Slam
+  Antic -> Slam 0 change one frame before the game's; the handover gave the default planner a mid-slash state beside
+  the lunge, and its keys (jump -> umbrella on the contact frame, no pogo bounce; air dashes) met the body / the hammer.
+  A hook on an Idle Clapper (1:42i0, outcomes CAST / SLAM reactions) was dropped at the hook because the Clapper's slam
+  matched none of its outcomes; the fallback floated into the slam. The other 2 HP losses were the fallback's own (a
+  small rune bomb after a map2 hook ended beside the casting Clapper; the slam script + an air dash into the hammer).
+  The kill took 31.9 s (the default: 16 - 20 s).
+
+#### The harness and the check (`C:\ssbot\sandbox\m4g_go.ps1`, `m4g_live.ps1`; `brain/ssbot/tools/m4_gate.py`)
+
+- `m4g_go.ps1 -Rev -Arm -Name -Episodes [-Map2]`: no block while HUMAN_PRACTICE / STOP_AGENTS / a human_session; the
+  display woken; `boost_workers.ps1` on the combat_run workers (the map2 search workers boost themselves, E-cores);
+  `sp4_block.ps1` (DEMO_SOON paused and restored, both instances frozen after); launched detached (WMI).
+- `m4g_live.ps1`: 1v1_live.ps1's driver with ONE episode per combat_run and the gate's check run synchronously after
+  each (Idle priority): a problem writes `m4g_<name>.stop` and no further episode starts on either instance (a check
+  racing combat_run's own between-episode stop check could not have stopped the next episode in time).
+- `ssbot.tools.m4_gate`: `check` (per episode: no kill / a timeout / a harness failure / the worker's exit / a traceback
+  / HP lost before the kill / map2 errors or no per-tick log / her behaviour past bars set above the default planner's
+  60 recent w7 episodes - still > 240 f, > 12 left / right reversals in 60 f, kill > 40 s, > 16 map2 / fallback owner
+  switches in 60 f), `baseline`, `report` (the share as M4d2 measured it - `m4c_smoke.engaged_share` -, pooled over the
+  episodes; the moves: the recording's hits on the Clapper by kind, credited to the per-tick log's owner of the press's
+  keys; rides = >= 2 strikes in one Jump / Air flight; slam strikes; CLAWSTRIKE = a hook at Slam Antic j 4 - 12 and a
+  slam strike after), `trace` (the frames around a problem with the owner, the per-tick log's map2 fields and the
+  COMMIT rows). The win: as every 1v1 summary, hits after the kill (the tail: wave 8 arriving; 12 of 60 default
+  episodes) are reported apart - none happened here. Tests `tests/test_m4_gate.py` (4).
+
+#### Open items (for the person; nothing was changed after the gate)
+
+1. The Slam Antic length: the committed slam strikes had only 'early' timing outcomes and a 1-frame longer antic in
+   the game dropped them at the contact frame (2 / 2 slam strikes in the gate).
+2. The handover on a drop mid-strike / mid-hook: the default planner takes a state its own plans did not lead to,
+   beside an attacking Clapper (hit_after_drop_clappers 6 / 1).
+3. A hook's reaction outside the plan's outcomes (P3 of M4_GATE.txt).
+4. The fallback's own hits (P1 a rune bomb, P4 the slam script + an air dash) - in 60 recent default w7 episodes 1 had
+   a hit before the kill.
+5. Not run: episodes 3 - 16, w13; no fix tried. Another worktree's reflex_build (5 Idle workers) ran throughout.
