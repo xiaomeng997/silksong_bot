@@ -12083,7 +12083,7 @@ same / alt / not (alt: another plan chosen, a safe plan with the move's label fo
 7. Data: `C:\ssbot\data\m2_play\map2\m3` (sits.pkl, run_{none,full}_v4.json / report_v4.txt, run_none_v4long.json,
    horizon_held.json, margins_inmove_*, scripts; v1 - v3 earlier rounds).
 
-## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99, §100)
+## Task map2 - stage M4: the map played live (the person's decision of 2026-10-22 ~11:10 PDT: test the map live - 'if the win rate is 100 % it is right and you continue; if there is a problem, stop and wait for me to look'; a win = the Clapper killed with no HP lost) (branch worktree-wf_f1846551-5f9-1, 2026-10-22; forum.md §95, §96, §97, §98, §99, §100, §101)
 
 The stages: M4a live probes of the mechanics the M3 plans lean on, M4b speed, M4c integration, reviews, M4d fixes, M4e
 the person's gate on w7, M4f after a passed gate (C:\ssbot\data\m2_play\map2\m4\PROGRESS.txt: one entry per stage).
@@ -13123,3 +13123,124 @@ Frozen with `1v1_freeze.ps1 -rev <head>` and warmed by a smoke from it (the path
 4. The commit check is slower (p99 20 - 25 ms on the bot's thread): the press traces; a compiled re-simulation would
    cut it.
 5. The reveal latency, the A1_n tables, two Clappers (M4d2's open items 1 - 3, 5) stand.
+
+### S1b - the two verifiers' findings on S1 (offline; no live run): the downspike lock by the bounce's cause, the down slash contact's slack, the side rule out of the air sprint (the highest top, the sprint's x lag, the extra velocity's residue), the air sprint's last frame, the late check's world and press scan, the bot side's warm-up, the Cogfly keys in the late check
+
+The task: the 10 findings of two adversarial verifiers (lenses presses / others) on S1 - check each offline, fix the
+confirmed ones with tests, say which are refuted and why; then the identity, the strict / open smokes with the
+independent press scan, the tests, a refrozen and warmed gate checkout (the person's decision of 2026-10-23 15:40:
+safety first, then the w7 gate tonight at a 30 % share bar). No game instance was touched, nothing ran live. Commits
+d422940 (the fixes, `tests/test_m4s1b.py`), 314cea0 (the strict replay's late check in its proxy world), c0329d2 (a
+docstring), then the docs. Data `C:\ssbot\data\m2_play\map2\m4\s1b` (`smoke_*` with `plans_map2_<rec>\` and
+`press_scan.json`, `summary.txt`, `press_scan_summary.txt`, `side_eval_*.json/.out.txt`, `rec_after_bounce.*`,
+`replay_wt_*` identity, `scripts\`).
+
+#### The findings, one by one
+
+1. **presses 1 - the 'lock' credit (`press.py` FREE_MIN)**: CONFIRMED for a pogo, REFUTED for the failure scenario
+   given (the hooked Clawline). `scripts\rec_after_bounce.py` (60 show / film episodes, the game's flags):
+   after a down slash POGO the game's downSpikeRecovery runs 9 - 11 frames (1,292 airborne bounces: 9 253, 10 462,
+   11 466, <= 8 44, 15 - 23 67), so a press only kin's lock (16 f) holds, 10 - 11 frames after a pogo's onset, is
+   lost in ~36 %; after a HOOKED Clawline's forced bounce the recovery is 1 frame (54 / 54) and the slashes pressed 10,
+   11 and 12 frames after it all started (9 / 9, 0 - 1 frame late). Every lock credit in S1's dumps was that hook case
+   (since 10, 'hook-control': 24 + 7) plus 2 pogo cases at since 14. Fix (LiveCfg `free_pogo`, press.FREE_POGO 12):
+   `ds_start(..., hook_onset=)` credits a lock-held press FREE_MIN (10) frames after the onset when the lock's onset
+   is a hooked Clawline's forced bounce (simulate: its own bounce frame; the realizer: a node after a Clawline,
+   control + 1), else from 12 (a pogo; a start state's running lock). Kept: the 15 - 23 f recoveries (5 %) also block
+   kin's own starts at 16 - 22 f (open item).
+2. **presses 2 - the contact's slack (`strike.dslash_contact`)**: CONFIRMED. A contact was credited on any overlap
+   (1.2e-5 u^2 in a committed S1 plan); in S1's dumps 52 of 908 credited contacts in committed parts had <= 0.01 u
+   slack, 173 < 0.05 u. Fix (LiveCfg `ds_shrink` 0.05, press.SHRINK): both alternations must meet the robust body box
+   shrunk by 0.05 u on every side (her model x is good to 0.01 - 0.1 u; the danger keeps its grown boxes). The fresh
+   before runs (S1's code) had 10 committed plans with such a sliver contact (the S1b scan's 'thin'); after: 0.
+3. **presses 3 - the side rule's top**: CONFIRMED IN PART. The Evaluator simulates each TIMING VIEW as its own outcome,
+   so robust_boxes is a view's box, not an intersection across views (that part is refuted: the taller view's
+   outcome gets its own side test); but inside a view two records can fall on one frame (an offset shrinking) and
+   robust_boxes intersects them (the lower top). Fix: `strike.union_tops` (the highest top of the frame's records,
+   cached; the array and record paths agree), simulate's `tops_fn` (the Evaluator's memo records its reads; live
+   `OutData.tops`, every re-simulation passes it; older plans without it use the robust top).
+4. **others 1 - the late check's world (`live.late_check`)**: CONFIRMED (rv_audit_w13.py: from the anchor 'ok', the
+   audit from her observed state a forced collision at r 12). Fix (LiveCfg `late_base`): late_check takes a base -
+   the state the commit checked the plan from (commit_check / the live repair: her observed state at the commit, its
+   hold filter state and latched mask; a re-anchoring replaces it) and the keys applied since; the strict replay keeps
+   its proxy world (the anchor, as its repair_check and its audit). The scan of unplanned presses then starts after
+   the base, as the commit check's (finding 6).
+5. **others 2 - the bot side's warm-up**: CONFIRMED (16.4 ms for press._trace's first load). `Map2Controller.warm()`
+   now runs the press trace, a credited down slash with its bounce re-roll (a body under her and one beside her: the
+   side rule) and a hooked Clawline with the slash after its control. `scripts\cold_check.py` (a fresh process, a
+   late check on real strike plans): without warm() the first 187 - 191 ms, with it 0.7 - 1.3 ms (the next ones 0.2 -
+   0.7). In the smokes the first commit check per recording is 0.1 - 8.4 ms (S1's final runs: 20 - 31 ms); the commit
+   check p99 7 - 15 ms per recording (S1: 20 - 25), two w13 outliers 80 / 86 ms.
+6. **others 3 - the late check's press scan from frame 1**: CONFIRMED; fixed by 4 (the scan after the base). Smokes:
+   'late: unplanned slash' drops before 1 (open), after 0.
+7. **others 4 - the side rule too wide**: CONFIRMED. `scripts\side_eval.py` on the real recordings (A: 253 clean down
+   slash contacts pressed out of the air dash / sprint; C: 215 clean double pogos; B: the hit recall of the 83 failed
+   show episodes and the 4 body-first hits of airceil stage2b): S1's rule made a 'side_spr' collision in 64 of the
+   253 clean contacts (40 in the nominal outcome); the S1b rule 'lag' (her hurtbox carried 0.5 u - the sprint's
+   measured x lag - further in her travel direction overlaps the body box, its highest top, from the slash's start to
+   its contact) 39 (22); 'top' (S1's rule with the highest top) 67 (40). The 4 real hits stay predicted at k 10 / 20 /
+   30 in EVERY variant - also with no side rule at all: S1's press timing (the slash out of the sprint starts 2 - 3 f
+   late, its contact after the body's) is what predicts them; the side rule is the margin for the x lag. Recall k 10
+   92 / 100, k 20 91 / 96, k 30 87 / 91 (S1 88 / 92: one case's path left 0.35 u with the shrink). LiveCfg
+   `side_rule` 'lag' / `side_lag` 0.5 ('top0' = S1).
+8. **others 5 - out_of_sprint's XVX residue**: CONFIRMED. Fix (LiveCfg `spr_xvx` 1.0, press.XVX_MIN): the extra
+   velocity counts from |XVX| >= 1 u/s (the residue of an earlier cancel is 0.01 - 0.1 u/s). C: second pogos made
+   'side_spr' S1 26 of 215 -> 10 ('lag' with XVX_MIN 0: 14).
+9. **others 6 - the air sprint's last frame (kin_jit)**: CONFIRMED (hornet_sprint: the Wait's FINISHED -> Allow
+   Shuttlecock -> Air Sprint Loop in one Update; the Loop's entry reads the attack queue before its ListenForDash ends
+   it). Fix: HERO2 bit `H2_SPR_FIN` (2048, in H2_ALL; `SSBOT_FORUM_HERO2_OFF=2048` = S1's hero model, 3584 = M4d2's):
+   with the dash released and an attack queued, the transition frame takes the Attack Cancel instead of END. The 253
+   real sprint pogos: kin starts no slash 26 -> 0. The bit changes nothing where the model already swung (test).
+10. **others 7 - the Cogfly keys in `_late`**: CONFIRMED by reading (not seen in the smokes). Fix under `late_base`:
+    the keys from the base on with a Cogfly throw's Up + QuickCast stripped (the audit's / the keys in flight's rule).
+
+#### The smokes (interleaved, the machine loaded by another worktree's reflex_build job - 5 Idle workers - throughout:
+bot tick p50 20 - 26 ms against S1's 17.5 - 19.6; both arms the same load; `summary.txt`)
+
+- **Share of the engaged ticks** (the gate's bar 30 %): strict w7 after (d422940 + 314cea0) 29.9 % (3 runs, per
+  recording 17 - 36 %), the d422940 runs 24.3 % (3), before (every S1b switch at its S1 value + HERO2_OFF=2048) 25.6 %
+  (3, 14 - 33 %); open w7 after 28.6 % (2, 19 - 39 %), before 32.3 % (2, 26 - 38 %); w13 strict 3.9 / 2.5 %, open 4.7 /
+  3.1 %. Under this load S1's own rules give 26 / 32 % (S1 measured 35 / 41 % on a quieter machine): the share at the
+  gate depends on the machine's load.
+- **The safety audit**: 0 collisions in every run - after strict w7 139 + 121 control runs, w13 35 + 29; open w7 87,
+  w13 24; before 118 / 32 / 106 / 24.
+- **Late checks** (after strict w7, 3 runs): 60 slips, 37 ok, 23 dropped (13 danger, 5 claw latch, 4 path, 1 short).
+- **The press scan** (`scripts\press_scan.py`: S1's independent scan with the S1b rules - lock 10 after a hook / 12
+  after a pogo, 'thin' below 0.05 u slack, the lag side rule with the highest top, XVX >= 1): after 1,189 plans, 435
+  committed: **0 invalid presses in committed plans**; 1 uncommitted plan with a Clawline at the dash -> sprint
+  boundary frame ('claw-state', below). Before (S1's code) 733 plans, 280 committed: 24 plans with an invalid press by
+  the S1b rules (23 'thin', 97 presses), 11 of them committed (10 thin, 1 claw-state); by S1's own rules 0 except
+  that claw-state plan.
+- 0 tracebacks, 0 errors.
+
+#### Identity, tests
+
+- d422940's code (the worktree, SSBOT_FORUM_MAP2 unset): **24 / 24 replays byte-identical** to M4c's base 9bff134
+  (rnjb + M0 envs; w7 192006 i0 e1, 084036 i1 e0; w13 144051 i1 e0, 102908 i0 e0; HERO2 unset, =1 with HERO2_OFF=3584,
+  =1 with every bit - H2_SPR_FIN included: no change in these four). The later commits change only ssbot.map2.
+- `tests/test_m4s1b.py` 11 (the switches, the lock by cause in ds_start and simulate, the sliver contact, union_tops,
+  out_of_sprint's residue, side_hit's rules, H2_SPR_FIN, late_check from a base and its scan, the controller's base and
+  the Cogfly strip, warm()); test_m4s1's fake late_check takes the new keyword; the far hook's JUMP-ridden pogo
+  (test_map2_search) needed the realizer's hook onset (fixed). Full suite at c0329d2 (Idle): 2,189 passed, 8 failed -
+  the same 8 as S1 (the known 5 + the 3 in the untracked test_sg8_review.py); `map2ullsuite_s1b_c0329d2.log`.
+
+#### The checkout for the gate
+
+`C:\ssbot\live_1v1_c0329d2` (1v1_freeze.ps1, maps warmed; numba caches warmed by a strict smoke from it:
+`smoke_frozen_c0329d2`, w7a + w13a, 0 tracebacks / errors, share 28.1 % / 7.2 %, audit 0 collisions). Arm m2 as
+before (S1 + S1b rules on by default). S1's behaviour: `SSBOT_FORUM_MAP2_SET=free_pogo=10,ds_shrink=0,
+side_rule=top0,spr_xvx=0,late_base=0` with `SSBOT_FORUM_HERO2_OFF=2048` (M4d2's: add press_check=0,side_spr=0,
+late_check=0 and 3584).
+
+#### Open items
+
+1. The long pogo recoveries (15 - 23 f, 5 % of 1,292) block a slash kin starts at 16 - 22 f too - a 5 % risk on a
+   pogo chain's second slash pressed in that range (rare in the plans: lock credits 2 in the after runs).
+2. The scan's Clawline convention at the dash -> sprint boundary: her state after P - 1 the air dash, before P's
+   Update (the model's, claw_allowed) the sprint - 1 plan after (not committed), 1 before (committed); at most a
+   1-frame later throw if the game reads the earlier state (M4a: the dash's steps make it wait, not lose it).
+3. The side rule's lag (0.5 u) and the hook's 1-frame recovery are taken from recordings; a live probe (the sprint's
+   x against the body, a slash at hooked control + 10 / 11) would settle both.
+4. The machine load: under another worktree's reflex_build job (5 Idle workers) the replay share of S1's own rules
+   fell from 35 to 26 % (strict w7); the gate's 30 % bar wants a quiet machine.
+5. S1's open items 3 (an ACTION applied late is not seen), 5 (the reveal latency, the A1_n tables, two Clappers) stand.
