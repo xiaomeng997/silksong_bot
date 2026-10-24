@@ -425,6 +425,16 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   tables frame by frame and cut each frame's danger (the flattened union cannot be cut: it does not know which point
   came from which). Reconstruct the keys only along the chain (the action ids of the references; back-pointers on
   clusters, never on the flattened maps - the A -> B -> C lesson).
+- A REFERENCE CARRIES THE ENVELOPE'S WIDENING (the person, 2026-10-23): when a frame references the next one it
+  carries the left / right growth, so a reference is (target table, dt, dy, an x OFFSET INTERVAL [lo, hi]), not a
+  point; references compose by adding intervals ([lo1 + lo2, hi1 + hi2]); a table's trajectories (x intervals relative
+  to its origin) seen through [a, b] become [x_lo + a, x_hi + b]. The data structure needs a WIDEN method (an x interval
+  set, the state, the steps -> the widened set): A1 (the instant run, no memory) +-0.165 u per step each side, exact;
+  A3 (the float's inertia) per its vx class - the low end follows the always-left lane, the high end the always-right
+  lane (M1's lanes), the growth stored per frame of the float tables; the extra air velocity after a sprint cancel
+  (x0.8 per step, one-sided) stays inside the transient's stored trajectory until it is spent. At use time: after a
+  danger cut the set has holes - widen each piece and merge (still exact); walls are absolute - clip to the arena
+  (x 14.01 .. 48.99) after every widening step, then go on widening (she can run along the wall or back).
 Points to settle when building (the lead, 2026-10-23, the person agreed to record them):
 1. STEADY = every hidden state that affects later actions equals the target table's origin. Wait out the timers (the
    0.1 s attack queue; the extra air velocity after a sprint cancel, x0.8 per step; the Clawline lock until control
