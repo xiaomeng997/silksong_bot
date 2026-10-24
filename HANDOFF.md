@@ -13307,4 +13307,4 @@ number is `M4_GATE.txt`; the traces `C:\ssbot\data\m2_play\map2\m4\gate\traces\`
 3. A hook's reaction outside the plan's outcomes (P3 of M4_GATE.txt).
 4. The fallback's own hits (P1 a rune bomb, P4 the slam script + an air dash) - in 60 recent default w7 episodes 1 had
    a hit before the kill.
-5. Not run: episodes 3 - 16, w13; no fix tried. Another worktree's reflex_build (5 Idle workers) ran throughout.
+5. Not run: episodes 3 - 16, w13; no fix tried. Another worktree's reflex_build jobs (5 + 3 Idle workers) ran throughout.
