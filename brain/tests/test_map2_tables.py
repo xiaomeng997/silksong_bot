@@ -147,6 +147,34 @@ def test_follow_contains_claw_in_sprint_jump(lib):
     assert x[km.SHUT] == 0.0 and x[km.XVX] == 18.0 and cu[ej.C_CJ] >= 0
 
 
+def test_claw_block_meets_the_floor(lib):
+    """The Clawline pressed while falling just over the floor: the block's antic lands on it (kin_jit.move_y; before,
+    the block had no terrain and sank her up to ~1.4 u into the floor, where the jumps after it bumped inside the
+    floor box: containment escapes) - she never goes below the standing height, and the graph holds every member."""
+    S, _ = env.canonical(lib.params, "A1", 0, 3, "", False)
+    stand = tb.FLOOR_TOP + lib.params.foot
+    T = 70
+    rows = []
+    for k in (0, 3, 6):
+        for after in (0, km.B_RIGHT, km.B_LEFT, km.B_JUMP, km.B_JUMP | km.B_LEFT):
+            m = [0] * k + [ej.B_CLAW] + [after] * (T - k - 1)
+            rows.append(m)
+    masks = np.array(rows, np.int64)
+    S = S.copy()
+    S[km.PY] = stand + 1.2
+    S[km.QY] = S[km.PY]
+    S[km.SY] = S[km.PY]
+    S[km.VY] = -9.0
+    st, L, absy, dashed = lib.start_lanes(S, floor=True)
+    n0 = lib.node_of(L, st.cu, absy)
+    out = np.zeros((len(masks), 3))
+    xy = np.zeros((len(masks), T + 1, 2))
+    while tb.follow(st.L[1].copy(), st.cu.copy(), n0, masks, lib.TP, 1e-6, *t1._lib_args(lib), out, xy) == -2:
+        lib._grow()
+    assert np.all(out[:, 0] < 0), out[out[:, 0] >= 0]
+    assert float(np.min(xy[:, :, 1])) >= stand + lib.hh - 1e-9
+
+
 def test_a1_recursion(lib):
     """A1_n: the going-on edge of a physics step leads one lattice step on, widened by one run step each side; a frame
     without a step keeps the node."""

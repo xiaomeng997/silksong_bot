@@ -40,7 +40,7 @@ from numba import njit, prange
 from numba import types
 from numba.typed import Dict
 
-from ssbot.knowledge.kin_jit import fixed_step, update, can_dash, f32, ge32
+from ssbot.knowledge.kin_jit import fixed_step, update, can_dash, f32, ge32, move_y
 from ssbot.knowledge.kinematics import (
     K, PX, PY, QX, QY, SX, SY, VX, VY, ALPHA, GS, FACE, GROUND, MODE, MODE_T, JUMPING, JSTEPS, JDSTEPS, JQ, AQ,
     AIRHANG, ATTACKING, ATK_T, ATK_CD, RDIR, RSTEPS, DS_REC, BOUNCE, MOVE, JHELD, PREV, INV_T, LEDGE, TOUCH, PHASE,
@@ -48,7 +48,8 @@ from ssbot.knowledge.kinematics import (
     GL_CD, DASH_T, DASH_CD, AIRDASHED, DQ, FALL_T, HARD, SP_X, WCON, SHOVE, RX0, RY0, JBUF, ATK_PDIR,
     B_JUMP, B_ATTACK, B_DASH, B_LEFT, B_RIGHT, M_NORMAL, M_GLIDE, M_DASH, M_SPRINT, M_HARD_LAND,
     P_FDT, P_RUN, P_HW, P_FOOT, P_HEAD, P_JSTEPS_MIN, P_GL_INFLATE, P_JQ, P_DQ, P_ATK_DUR, P_ATK_REC, P_ABIL,
-    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD)
+    AB_DASH, ABUF, XVX, P_H2, P_H2_XVD, H2_SPR_ATK, H2_SPR_JUMP, H2_CLAW_SPR, SHUT, XVXD, H2_SHUTTLE, P_H2_SHD,
+    P_SKIN, P_SLOP_LO, P_SLOP_HI)
 
 # ---- candidate codes (one per child): the vertical key bits of the frame's mask + a direction override --------
 CB_J, CB_A, CB_D = B_JUMP, B_ATTACK, B_DASH          # 1, 2, 4
@@ -329,9 +330,13 @@ def claw_enter(x, cu, d, tf, P):
 
 
 @njit(cache=True, error_model="numpy")
-def claw_frame(x, cu, steps, P):
+def claw_frame(x, cu, steps, P, TT):
     """One frame of the block for a lane (velocities in its VX / VY): the steps' decel and move, the frame end's
-    OnEnter (throw: v 0; dash: 70 u/s along d; catch: x 0.75). Returns True at control."""
+    OnEnter (throw: v 0; dash: 70 u/s along d; catch: x 0.75). Returns True at control. The vertical move meets the
+    terrain (kin_jit.move_y: a floor stops the antic's fall, vy 0; a ceiling its rise) - live the block never goes
+    below the standing height (M0's 222 Clawline trials, min py 4.5676); before T1 the block had no terrain and a
+    press while falling just over the floor sank her up to ~1.4 u into it (the hero model's collisions are not
+    meaningful inside the floor: containment escapes after a jump there)."""
     j = np.int64(cu[C_CJ]) + 1
     sh = np.int64(cu[C_CTF]) - CLAW_THROW_F
     tF, dF, cF, n = CLAW_THROW_F + sh, CLAW_DASH_F + sh, CLAW_CATCH_F + sh, CLAW_CTRL_F + sh
@@ -353,7 +358,11 @@ def claw_frame(x, cu, steps, P):
         x[QX] = px
         x[QY] = py
         px += vx * fdt
-        py += vy * fdt
+        ny, landed, _t, bumped = move_y(px, py, vy * fdt, P[P_HW], P[P_SKIN], P[P_FOOT], P[P_HEAD], P[P_SLOP_LO],
+                                        P[P_SLOP_HI], TT)
+        py = ny
+        if landed or bumped:
+            vy = 0.0
     if j == tF:
         vx = 0.0
         vy = 0.0
@@ -999,7 +1008,7 @@ def forward(L0, cu0, ivs0, T, udt, P, TT, boxes, box_off, opts, cap_frame, cap_p
                 dt, steps = lane_timing(tmp[ln], udt, P)
                 dtl = dt
                 if inblk:
-                    ctl = claw_frame(tmp[ln], tcu, steps, P)
+                    ctl = claw_frame(tmp[ln], tcu, steps, P, TT)
                     tick_frozen(tmp[ln], dt, udt)
                 else:
                     for _ in range(steps):
@@ -1309,7 +1318,7 @@ def _children(tmp_in0, tmp_in1, cuc_c, udt, P, TT, opts, floor, boxes, b0, b1, I
         dt, steps = lane_timing(tmp[ln], udt, P)
         dtl = dt
         if inblk:
-            ctl = claw_frame(tmp[ln], tcu, steps, P)
+            ctl = claw_frame(tmp[ln], tcu, steps, P, TT)
             tick_frozen(tmp[ln], dt, udt)
         else:
             for _ in range(steps):
@@ -1808,7 +1817,7 @@ def ref_rollout(S0, cu0, masks, udt, P, TT, out_xy, out_mode):
         m = m & ~strip
         dt, steps = lane_timing(x, udt, P)
         if cu[C_CJ] >= 0:
-            ctl = claw_frame(x, cu, steps, P)
+            ctl = claw_frame(x, cu, steps, P, TT)
             tick_frozen(x, dt, udt)
             cu[C_CJ] += 1.0
             if ctl:

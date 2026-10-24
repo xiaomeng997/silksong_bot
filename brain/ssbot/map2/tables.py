@@ -1056,7 +1056,7 @@ def member_frame(x, cu, m_raw, m_prev, strip, udt, P, TT):
     fdt = P[P_FDT]
     dt, steps = ej.lane_timing(x, udt, P)
     if cu[C_CJ] >= 0:
-        ctl = ej.claw_frame(x, cu, steps, P)
+        ctl = ej.claw_frame(x, cu, steps, P, TT)
         ej.tick_frozen(x, dt, udt)
         cu[C_CJ] += 1.0
         if ctl:
