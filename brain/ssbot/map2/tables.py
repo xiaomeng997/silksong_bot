@@ -1741,8 +1741,8 @@ class Lib:
                 "claw": self.claw, "terrain": self.terrain, "clear": CLEAR, "clear_up": CLEAR_UP,
                 "floor_top": FLOOR_TOP, "ceil_bot": CEIL_BOT, "K": K, "NC": NC, "NKEY": NKEY, "NIDK": NIDK,
                 "nodes": n, "edges": e, "classes": c, "instances": ni, "params_vector_sha1": _sha1(self.P)}
-        meta.update(self.meta)
-        if extra:
+        meta = {**{k: v for k, v in self.meta.items() if k not in meta}, **meta}   # (a loaded library's build meta
+        if extra:                                                                 # kept, its counts the current ones)
             meta.update(extra)
         np.savez_compressed(path, _meta=np.array(json.dumps(meta, default=str)), NL=self.NL[:n], NCU=self.NCU[:n],
                             NINT=self.NINT[:n], NVY=self.NVY[:n], EOFF=self.EOFF[:n], PFL=self.PFL[:n],

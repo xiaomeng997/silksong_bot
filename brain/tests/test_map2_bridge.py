@@ -185,3 +185,18 @@ def test_dash_used_start_equals_engine(lib_s, dash):
         ft = lib_s.forward(S, 30, floor=True, maxev=2, dash=dash)
         r = t1.compare(fe, ft, 30)
         assert r["ok"], (kind, r)
+
+
+def test_vkey_keeps_a_stale_jump_queue_while_jump_can_be_held_again(lib):
+    """Normal control in the air, jump up: a queued jump within its window is a key over the terrain (the candidate
+    CB_JH holds jump again without a press and the queue fires on landing)."""
+    P = lib.P
+    x = km.initial_state(lib.params, 0.0, 5.0, ground=False)
+    cu = np.array([-1.0, 0, 0, 0, 0, 0, 0])
+    k1, k2 = np.empty(ej.NKEY), np.empty(ej.NKEY)
+    x[km.PREV] = 0.0
+    x[km.JQ] = 1.0
+    ej.vkey(x, cu, P, True, k1)
+    x[km.JQ] = -1.0
+    ej.vkey(x, cu, P, True, k2)
+    assert not ej.keq(k1, k2)

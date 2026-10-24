@@ -506,6 +506,8 @@ def shapes_cmd(args) -> int:
             for g, a, b in rr:
                 pred.setdefault((k[1], k[2], int(np.searchsorted(ft.cl_off, g, side="right") - 1), g), []).append((a, b))
         R_ = sr._rows(ft)
+        if not len(R_["t"]):
+            continue
         cand = np.flatnonzero(((R_["cond"] & ej.COND_DSLASH) != 0) & (R_["t"] + node.k0 >= node.next_atk))
         gs = np.unique(R_["g"][cand])
         if not len(gs):

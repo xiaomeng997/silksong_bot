@@ -194,7 +194,11 @@ def vkey(x, cu, P, floor, out):
     out[K_XVD] = (1.0 if xv > 0 else -1.0) if abs(xv) > P[P_RUN] else 0.0
     if xv == 0.0:
         out[_XVXD] = 0.0               # (T1b: the decay of an extra velocity that is gone)
-    out[_JQ] = x[JQ] if (floor and (prv & B_JUMP) != 0 and 0 <= x[JQ] <= P[P_JQ]) else -1.0
+    # (T2: a queued jump also while the key is up in normal control in the air - the candidate CB_JH holds jump again
+    # without a press, and the queue then fires on landing: two clusters differing only in a stale queue merged and the
+    # merged one's 'jump held' child kept the first child's queue - a library node made elsewhere had none)
+    out[_JQ] = x[JQ] if (floor and 0 <= x[JQ] <= P[P_JQ] and
+                         ((prv & B_JUMP) != 0 or (m == M_NORMAL and x[GROUND] <= 0))) else -1.0
     out[_DQ] = x[DQ] if ((prv & B_DASH) != 0 and 0 <= x[DQ] <= P[P_DQ]) else -1.0
     out[_AQ] = -1.0
     out[_QQ] = -1.0

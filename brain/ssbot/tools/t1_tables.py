@@ -832,7 +832,7 @@ def entry_cmd(args) -> int:
     S_all, lab = load_starts()
     starts = transitional_starts(lib, S_all, lab, rng, n_per=args.n or 40)
     terr = lib.terr if args.floor else None
-    opts = ej.OPT_NO_ADASH
+    opts = 0 if args.dash else ej.OPT_NO_ADASH         # (T2: with the air dash - the chain with the bridge)
     per = []
     t0 = time.perf_counter()
     kd = lib.kinds()
@@ -842,8 +842,8 @@ def entry_cmd(args) -> int:
         for mev, T in ((0, args.T), (1, 60), (2, 30)):
             fe = E.forward(E.start_state(S, cu=cu), T, terrain=terr, opts=opts, max_events=mev, claw=lib.claw,
                            tf8=lib.claw)
-            ft = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu)
-            ft2 = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu)
+            ft = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu, dash=args.dash)
+            ft2 = lib.forward(S, T, floor=args.floor, maxev=mev, cu=cu, dash=args.dash)
             r = compare(fe, ft, T)
             # the transient: frames until every cluster sits on a node the library had before this start
             n_lib = len(kd)
@@ -903,13 +903,16 @@ def header_cmd(args) -> int:
                 keep["params"] = Path(keep["params"]).name
         keep.update({"bytes": p.stat().st_size, "sha1": h})
         files[p.name] = keep
-    out = {"version": tb.VERSION, "what": "map2 stage T1: the A1_n no-dash table library (ssbot.map2.tables) - the "
+    out = {"version": tb.VERSION, "what": "map2 stages T1 / T2: the A1_n table library (ssbot.map2.tables) - the "
                                           "M1 engine's per-cluster frame memoised on relative cluster states "
-                                          "(nodes), with their edges per physics-step count; the flattened rows of "
-                                          "the canonical steady starts",
+                                          "(nodes), with their edges per physics-step count and dash status (T2: the "
+                                          "no-dash lists, every candidate with the air dash unused - the bridge's "
+                                          "entries - and used; the air dash's own frames expand lazily); the "
+                                          "flattened rows of the canonical steady starts without / with the dash",
            "rebuild": ["python -m ssbot.tools.t1_tables build OUT.json --depth 6",
                        "python -m ssbot.tools.t1_tables build OUT.json --depth 6 --no-claw --terrain arena",
-                       "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1"],
+                       "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1",
+                       "python -m ssbot.tools.t1_tables flat OUT.json --T 120 --maxev 1 --dash"],
            "hero_model": "kinematics/hero_wanderer_forum.json + SSBOT_FORUM_HERO2 (kinematics.HERO2_OVERRIDES, every "
                          "H2 bit of the build: the 'hero2' field); a library refuses to load under another hero model "
                          "(params_vector_sha1)",
@@ -944,7 +947,7 @@ def main(argv=None) -> int:
     ap.add_argument("--view-depth", type=int, default=30, help="checks: the table view's depth (frames)")
     ap.add_argument("--reload", type=int, default=0, help="reload the library every n starts (bounds the lazy growth)")
     ap.add_argument("--danger", action="store_true", help="exact: m1's random moving danger boxes cut both passes")
-    ap.add_argument("--dash", action="store_true", help="flat: the union with the air dash (T2's bridge)")
+    ap.add_argument("--dash", action="store_true", help="flat / entry: with the air dash (T2's bridge)")
     args = ap.parse_args(argv)
     return {"build": build_cmd, "exact": exact_cmd, "contain": contain_cmd, "witness": witness_cmd,
             "checks": checks_cmd, "flat": flat_cmd, "header": header_cmd, "entry": entry_cmd}[args.cmd](args)
