@@ -13657,8 +13657,12 @@ the same x intervals per height); every window's BACKWARD set over the tables' c
 37,056 / 37,056); the no-dash chain's windows are a subset in every situation, and 2,810 / 3,692 windows are reached
 ONLY through the bridge (the air dash; its press frame on their tubes p50 26 / 8, p90 40 / 17); the backward set of
 one window 0.03 - 0.9 ms (<= 1 event 60 f) / 0.2 - 12 ms (<= 2 events 30 f), p50 - p100. Longer passes
-(`sits_long.json`, no exits: <= 2 events 120 f and <= 3 events 60 f): exact and the windows equal in every situation
-run; e.g. engine 0.9 / 8.4 s, tables 0.16 / 2.5 s per pass.
+(`sits_long.json`, the first 80 situations, no exits): <= 2 events 120 f 80 / 80 exact, 26,646 windows equal, every
+backward set holds her start, 3,523 only through the bridge, engine p50 / p90 888 / 1,022 ms, tables 163 / 232 ms (x
+5.2; cold p90 2.4 s); <= 3 events 60 f 80 / 80 exact, 23,960 windows equal, 3,582 only through the bridge, engine
+8.1 / 9.8 s, tables 2.4 / 3.4 s (x 3.3), the backward set of a window 77 - 198 ms. In one of the 80 the no-dash
+chain's windows are NOT a subset of the pass with the dash (<= 3 events 60 f): the engine's own merge is not monotone
+in the option set (a merged cluster keeps its first child's hidden state; both chains equal the engine) - open item 7.
 
 The bundle (`bundle_search6.json`, `bundle_default6.json`; free space, A1_n n = 0 .. 30 x the 6 phase classes,
 grouped by the physics-step pattern of the press frame): the ends' (dt, dy, x offsets) are THE SAME for every A1_n of
@@ -13693,7 +13697,7 @@ both facings, and a member at the very end of a cluster faces one way only), poi
 2. The tables are 4 - 6 x faster than the engine with the dash (warm), but a cold query on the prebuilt library is
    slower than the engine (p90 0.5 - 4.5 s: the dash family's nodes are expanded on the fly) - the library must be
    warmed with dash passes before it is used live (open item 1).
-3. Longer horizons stay expensive with full event families: <= 3 events 60 f is 2.5 s in the tables (8.4 s in the
+3. Longer horizons stay expensive with full event families: <= 3 events 60 f is 2.4 s in the tables (8.1 s in the
    engine) - 120 f / 3+ events need the meet in the middle with precomputed backward tables or a coarser layer; in the
    M3 situations the danger touches her flattened union within 0 - 25 frames (p50 8), so the flat layer prunes little
    near the Clappers.
@@ -13735,6 +13739,15 @@ both facings, and a member at the very end of a cluster faces one way only), poi
    facing at a cluster's interval end (<= 2 run steps) is over-approximated.
 5. T1's open items 2 and 4 stand (the sprint's dash attack, the Clawline from the ground).
 6. Nothing ran live; no merge to main.
+7. The engine's merge is not monotone in its options: in 1 of 80 situations (<= 3 events 60 f) a window of the
+   no-dash pass is missing from the pass with the dash - a merged cluster keeps its first child's canonicalised
+   ('hidden') state, as with the four key holes fixed here; another hidden field remains (both chains equal the
+   engine, so the tables inherit it).
+
+Tests: `tests/test_map2_bridge.py` 14; the related files (map2 / m4 / kinematics) 170 passed; the full suite 2,216
+passed, the 8 known failures (test_harness_recovery x 3, test_import_firewall's oracle check, test_sg8_review x 3 -
+another stage's untracked file -, test_three_layer's bell). Identity: nothing in the bot imports ssbot.map2; the new
+HERO2 bit acts only with SSBOT_FORUM_HERO2 (off by default: the bot's decisions unchanged).
 
 Commits (branch worktree-wf_f1846551-5f9-1, not merged): 2947cbf (the dash mode, H2_LAND_DASH, two key fixes),
 ca271b8 (bridge / wshape / t2_tables / tests), 56fd1d4 (the per-dash classes, du 3, the flattened layer with the dash,
