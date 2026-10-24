@@ -484,6 +484,18 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   at that frame becomes an AIM NODE of the funnel, given to the strike planner with the escape nodes - e.g. inside
   8.05 u at its choice frame to draw a slam (a window), its jump's landing drawn to the middle / under her for a ride
   / out of the corner. Part of the person's two-Clapper rules may come out of exactly this.
+  SCORES ON INTERVALS, THE STRIKE PLANNER DECIDES (the person, 2026-10-24: 'score intervals, not points; set the
+  scores sensibly; the inescapable intervals get a large enough negative score; the strike controller chooses by its
+  strike situation'): the long-term output is a SCORE FIELD in the envelopes' own structure - per frame and vertical
+  state, x intervals each with a score (piecewise constant or smooth), broken where the score jumps: the 8.05 u range
+  line of each Clapper, the funnel's edge, the window shapes' edges, the jump-landing boundaries. Units: expected
+  future hits minus the expected HP loss, the same as the strike value, so the two add. Outside the funnel (no escape
+  from there) a score far below any normal one (e.g. worth many hits) - never chosen while anything else exists, yet
+  still ordered when nothing else does. The weights from the model (room, strike opportunities), checked on the
+  recordings (high-score places should really be followed by more hits and fewer losses). The strike planner keeps
+  safety as the hard rule (its tube inside the funnel) and ranks the safe candidates by its strike value + the score
+  of its END CORRIDOR (an interval: take the minimum over it - conservative); so a weaker strike ending well can beat
+  a stronger one ending pinned.
 - ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
   error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
   position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
