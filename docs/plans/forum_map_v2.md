@@ -413,6 +413,17 @@ GATE RESULT - and if M4b cannot reach live speed, this is the next step). The pe
   re-plan from mid-action - this also answers the gate's drop: map2 re-plans from the mid down slash itself instead
   of handing the keys to a fallback that does not know she is in one (the drop rule on a 1-frame timing shift is a
   separate fix: re-check the safety on the observed state and keep the plan if safe).
+- ERRORS AS WIDENING - A PLAN IS A TUBE (the person asked 2026-10-23: 'now every position is an envelope - is the
+  error easier to describe?' - yes): small continuous model errors become one more widening of the intervals: her
+  position error eps_x(state, k frames since the last sync) - measured as the p99 deviation per action type in the
+  M0 / M4a frame-by-frame trials (e.g. 384 / 420 hero-only trials within 0.1 u; the sprint's x lag 0.1 - 0.5 u) -, the
+  timing error as a time widening (frame t's set = the union over t - 1 .. t + 1: a late tick, a Clapper a frame
+  early / late), the enemy's error as its margins and timing views (already a widening). A plan is then its path
+  plus that widening - a TUBE; safe = the tube misses the grown danger; executing, the plan stays while the observed
+  state is inside the tube (instead of the hand-set tolerances tol_hero 0.2 / tol_x 0.35 / tol_j 1 and the fixed
+  timing views - the gate's drop on a Clapper one frame late becomes 'still inside the time widening: keep it').
+  Discrete alternatives are NOT widened but branched like the enemy's moves (the pogo recovery 9 - 11 vs 18 - 23 f,
+  the bounce 3.74 vs 4.09 u): a width covering them would be too wide and would kill good plans.
 - THE AIR DASH IS NOT IN THE TABLES (the person, 2026-10-23): the bundle is an independent module used ONLY as the
   bridge between the forward and the backward no-dash sets (next bullet). Every table is a no-dash table; 'the air
   dash used' is no table key but a property of the segment between two refills (known at the segment's start; the
