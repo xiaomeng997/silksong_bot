@@ -315,8 +315,10 @@ class LiveCfg:
     views_fill: bool = False       # search (search.Cfg.views_fill: the views' danger without that hole)
     baseline: bool = False         # (e) THE BASELINE PLAN: the search evaluates escape probes after its root
     #                                (search.Cfg.baseline); a final noop / unsafe / none answer sends the best safe one
-    base_lead: int = 8             # ... a baseline plan in control: the bridge (frames) its next searches start after
+    base_lead: int = 16            # ... a baseline plan in control: the bridge (frames) its next searches start after
     base_n: int = 2                # ... the probes the search evaluates at most (each part of the split search half)
+    base_last: bool = True         # ... evaluated after the strike search, only when it found no safe strike
+    #                                (search.Cfg.base_last; False: right after the root, before the strikes)
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -1751,6 +1753,7 @@ def search_kw(cfg: LiveCfg) -> dict:
     if getattr(cfg, "baseline", False):                                                  # (E2 (e): only when on)
         kw["baseline"] = True
         kw["base_n"] = int(cfg.base_n)
+        kw["base_last"] = bool(cfg.base_last)
     if getattr(cfg, "views_fill", False):                                                # (E2 (a): only when on)
         kw["views_fill"] = True
     return kw

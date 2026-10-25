@@ -197,6 +197,8 @@ class Cfg:
     base_h: int = 40
     base_n: int = 4
     base_frac: float = 0.2
+    base_last: bool = False                # the baseline after the strike search (in the last base_frac of the cap,
+    #                                        only when it found no safe strike) - the strikes keep the cap
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -3190,7 +3192,7 @@ class Searcher:
                     pick[rk] += 1
         return made
 
-    def _baseline(self, sit: Situation, node: Node, t0c: float, cap: float) -> list:
+    def _baseline(self, sit: Situation, node: Node, t0c: float, cap: float, t_from: float | None = None) -> list:
         """E2 (e) (Cfg.baseline): the escape probes from the root (its prefix, then _probe_masks' constant keys for
         base_h frames, through the realizer) evaluated in closed loop - away from the nearest Clapper first, then no
         direction, then toward it; each order the held keys, a jump, a dash -, up to base_n (the first always, the
@@ -3211,7 +3213,7 @@ class Searcher:
             d = 1 if m & km.B_RIGHT else (-1 if m & km.B_LEFT else 0)
             return (0 if (d == away and d != 0) else 1 if d == 0 else 2, bool(m & km.B_DASH), bool(m & km.B_JUMP))
         out = []
-        t_lim = t0c + cfg.base_frac * cap
+        t_lim = (t0c + cfg.base_frac * cap) if t_from is None else (t0c + cap)
         order = sorted(range(len(masks)), key=rank)
         # the screen (compiled, ~1 ms): a probe that touches the union of the root's branches' danger is not
         # evaluated - none left: no baseline here (the strike search keeps the whole cap)
@@ -3270,6 +3272,11 @@ class Searcher:
         cfg = self.cfg
         now = self._now
         # (M4b's hard cap: a candidate's evaluation in progress at the cap is abandoned between its re-predictions)
+        cap_all = cap
+        if cfg.baseline and cfg.base_last:
+            # E2 (e) (base_last): the strike search keeps (1 - base_frac) of the cap, the baseline the rest - at the end,
+            # only when nothing safe but the noop was found
+            cap = cap * (1.0 - float(cfg.base_frac))
         self._until = (lambda: now() - t0c > cap) if cfg.hard_cap else None
         self.splits = {}
         self.anytime = []
@@ -3328,7 +3335,7 @@ class Searcher:
             note(best)
         timed_out = False
         n_cand = 0
-        if cfg.baseline and kept is None:
+        if cfg.baseline and kept is None and not cfg.base_last:
             # E2 (e): the baseline plan - map2's own escape before the strike search (a candidate like any other)
             for e in self._baseline(sit, rt, t0c, cap):
                 e.tag = ()
@@ -3492,6 +3499,19 @@ class Searcher:
                     continue
                 seen_k.add(key)
                 beam.append(n_)
+        if cfg.baseline and cfg.base_last and kept is None and (best is None or not best.safe or
+                                                                 float(best.hits) <= 1e-9):
+            # E2 (e) (base_last): the baseline after the strike search found no safe strike (the noop, a safe
+            # endpoint or nothing)
+            self._until = (lambda: now() - t0c > cap_all) if cfg.hard_cap else None
+            for e in self._baseline(sit, rt, t0c, cap_all, t_from=now()):
+                e.tag = ()
+                tried.append(e)
+                n_cand += 1
+                if e.finished and better(e, best):
+                    best = e
+                    note(best)
+            mark("baseline")
         # the contingent plans (one continuation per reaction to a hook), within a quarter of the cap more
         if self.splits:
             t_end = max(now(), t0c + cap) + 0.25 * cap

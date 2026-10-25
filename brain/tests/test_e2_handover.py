@@ -432,7 +432,7 @@ def test_switches_default_off():
     assert lv.GEO_EXT[0] == 0
     lv.set_switches(lv.LiveCfg(swing_hold=True))
     assert lv.GEO_EXT[0] > 0
-    assert lv.search_kw(lv.LiveCfg(baseline=True)) == {"baseline": True, "base_n": 2}
+    assert lv.search_kw(lv.LiveCfg(baseline=True)) == {"baseline": True, "base_n": 2, "base_last": True}
     assert press.ON[0]
 
 
