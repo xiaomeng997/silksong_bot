@@ -186,6 +186,10 @@ class Cfg:
     witness_fast: bool = False             # (d) the witness's wide beam (envelope.WIDE_BEAM, T4) only when the 24-beam
     #                                        misses by more than WITNESS_TOL (0.1 u; T4: by 0.01 u) - a miss <= 0.1 u is
     #                                        accepted by _witness_ok anyway (honest keys; other keys than T4's there)
+    witness_retry: bool = False            # E3 (the verifiers' finding on witness_fast; default off): the rolled keys of
+    #                                        a witness whose tracked end was within WITNESS_TOL miss it (a hidden press,
+    #                                        the reference model) - the wide beam after all where T4's 0.01 u trigger
+    #                                        would have run it (envelope.Fwd.witness retry)
     # E2 (e) (HANDOFF '... stage E2'; default off - off: as before): THE BASELINE PLAN - right after the root (no kept
     # plan) the exit probes (_probe_masks: her held keys kept / left / right, a jump, a dash, base_h frames) appended to
     # the root's prefix are evaluated in closed loop (away from the nearest Clapper first; up to base_n, within
@@ -591,7 +595,25 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                                       c_min=1)
                 if c >= 1 and (best_ is None or c < best_[0]):
                     best_ = (c, iid)
-            if best_ is not None:
+            side_ = None
+            if best_ is not None and len(swing) > 3 and swing[3] and press.ON[0] and press.SIDE[0]:
+                # E3 (the verifiers' finding): a carried slash started out of the air sprint / dash - the side rule
+                # as on the press path (press.side_hit from frame 1: the frames before are past) - a side contact is
+                # the body's (a forced collision), no pogo
+                c, iid = best_
+                bx = boxes_fn(iid)
+                tp = tops_fn(iid) if tops_fn is not None else None
+                if rec is not None:
+                    rec.append(("rows", iid, k0 + 1, k0 + c + 1, _rows_sig(bx, k0 + 1, k0 + c + 1)))
+                    if tops_fn is not None:
+                        rec.append(("tops", iid, k0 + 1, k0 + c + 1, _rows_sig(tp, k0 + 1, k0 + c + 1)))
+                kb = press.side_hit(r.pos[0], bx[k0:], tp[k0:] if tp is not None else None, 1, c,
+                                    int(fac[min(1, len(fac) - 1)]), r.box[0])
+                if kb >= 0:
+                    side_ = kb
+                    bad.append((k0 + kb, "side_spr"))
+                    missed.append(("dslash:side_spr", k0, iid))
+            if best_ is not None and side_ is None:
                 c, iid = best_
                 ev[c - 1] |= km.EV_POGO
                 r = W.roll(S, masks, ev)
@@ -738,19 +760,27 @@ def swing_of(sit) -> tuple | None:
     v = (sit.meta or {}).get("swing")
     if not v:
         return None
+    if len(v) > 3 and v[3]:
+        return int(v[0]), tuple(int(i) for i in v[1]), int(v[2]), 1         # E3: out of the air sprint (side rule)
     return int(v[0]), tuple(int(i) for i in v[1]), int(v[2]) if len(v) > 2 else 0
 
 
 POGO_STEP_F = 60.0 / 50.0          # frames per physics step (the bounce's counter counts steps)
 
 
-def swing_from_state(S: np.ndarray, iids, dt: float) -> tuple | None:
+def swing_from_state(S: np.ndarray, iids, dt: float, pogo: bool = True, spr: bool = False) -> tuple | None:
     """E2 (b): the swing her kin state S carries (search.simulate's swing): a down slash under way (ATTACKING on,
-    ATK_PDIR 2 - the tracker sets them from the observed attack) whose contact can still come: (t_s, iids, 0) with
-    t_s = -(its timer in frames), the frames since its start; or a pogo bounce already under way (BOUNCE: steps
-    since its onset) whose i-frames still run: (0, (), ifr0). None: neither."""
+    ATK_PDIR 2 - the hero model's own state of a down slash; E3: the live controller's copy of the tracker's state
+    has it from her clip, LiveCfg.swing_fix) whose contact can still come: (t_s, iids, 0) with t_s = -(its timer in
+    frames), the frames since its start; or a pogo bounce already under way (BOUNCE: steps since its onset) whose
+    i-frames still run: (0, (), ifr0). None: neither.
+    E3 (the verifiers' findings; the live controller's LiveCfg.swing_fix passes them): pogo False - the bounce under
+    way is a hooked Clawline's forced bounce, no pogo i-frames (M0 measured them for the down slash's pogo only; the
+    hook's bounce shows the same BOUNCE) - a down slash under way is then still carried; spr True - the slash under
+    way was started out of the air sprint / dash: (t_s, iids, 0, 1), its contact judged by the side rule (press.SIDE,
+    press.side_hit) as a press's is."""
     S = np.asarray(S, float).reshape(km.K, -1)[:, 0]
-    if S[km.BOUNCE] >= 0:
+    if S[km.BOUNCE] >= 0 and pogo:
         ifr0 = sk.DS_IFR[1] - int(math.floor(float(S[km.BOUNCE]) * POGO_STEP_F))
         return (0, (), int(ifr0)) if ifr0 > 0 else None
     if not (S[km.ATTACKING] > 0 and S[km.ATK_PDIR] == 2.0):
@@ -758,6 +788,8 @@ def swing_from_state(S: np.ndarray, iids, dt: float) -> tuple | None:
     ts = -int(round(float(S[km.ATK_T]) / float(dt)))
     if ts + sk.DS_ACTIVE[1] < 1 or not iids:
         return None
+    if spr:
+        return ts, tuple(int(i) for i in iids), 0, 1
     return ts, tuple(int(i) for i in iids), 0
 
 
@@ -2727,7 +2759,8 @@ class Searcher:
         """The witness keys to the window's press point at frame tp (the cluster's state after frame tp: its end-
         condition bits say what a press in frame tp + 1 does), then the press in frame tp + 1."""
         kind, tp, g, x, y, iid, extra, br = cand[:8]
-        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol())
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol(),
+                       retry=self._wit_retry())
         if w is None or not self._witness_ok(w):
             return None
         masks = np.asarray(w["masks"], np.int64).copy()
@@ -2848,10 +2881,21 @@ class Searcher:
         """The witness's wide-beam trigger (envelope.Fwd.witness wide_tol): T4's 0.01 u; E1's witness_fast: WITNESS_TOL."""
         return WITNESS_TOL if getattr(self.cfg, "witness_fast", False) else 0.01
 
+    def _wit_retry(self):
+        """E3 (Cfg.witness_retry, with witness_fast): the witness's retry (T4's trigger, the acceptance tolerance)."""
+        if getattr(self.cfg, "witness_fast", False) and getattr(self.cfg, "witness_retry", False):
+            return (0.01, WITNESS_TOL)
+        return None
+
     def _witness_ok(self, w) -> bool:
         """T4 (the verifiers' finding: the witness's keys were used without their miss): the keys, rolled as they
         are, follow the chain's vertical history (her height at the target within 1e-6 u: a CB_JH frame whose hidden
         press could not be written opens the umbrella) and end within WITNESS_TOL of the target's x."""
+        if w.get("retried"):
+            # E3 (witness_retry): the wide beam re-run after the rolled keys missed (1: no closer end; 2: replaced)
+            k_ = "witness_retry_" + ("ok" if (abs(w["miss_y"]) <= 1e-6 and abs(w["miss_x"]) <= WITNESS_TOL) else
+                                     "miss") + str(int(w["retried"]))
+            self.stats[k_] = self.stats.get(k_, 0) + 1
         if abs(w["miss_y"]) > 1e-6:
             self.stats["realize_miss_y"] = self.stats.get("realize_miss_y", 0) + 1
             return False
@@ -2862,7 +2906,8 @@ class Searcher:
 
     def realize_safe(self, fw, cand) -> Seg | None:
         _, tp, g, x, y, *_ = cand
-        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol())
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol(),
+                       retry=self._wit_retry())
         if w is None or not self._witness_ok(w):
             return None
         return Seg(np.asarray(w["masks"], np.int64).copy(), [], None, "safe")

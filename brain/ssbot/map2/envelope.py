@@ -207,13 +207,18 @@ class Fwd:
         return cls, [0] + cands, xs
 
     def witness(self, t: int, x: float, y: float | None = None, cond: int = 0, tol_y: float = 1e-6,
-                look: int = 3, beam: int = 24, attack_ok: bool = True, wide_tol: float = 0.01) -> dict | None:
+                look: int = 3, beam: int = 24, attack_ok: bool = True, wide_tol: float = 0.01,
+                retry: tuple | None = None) -> dict | None:
         """Concrete keys that bring her to x (at height y, or any height when None; with the end condition bits
         `cond`) at frame t: the cluster chain backtracked to the start (the vertical choices per frame and the
         tube of x from which the target stays reachable), then the horizontal keys by a beam search in that tube
         (beam > 0; else the greedy tracker with `look` frames), re-simulated with the reference model (kin_jit + the
         Clawline). Returns masks, the planned x path, the re-simulated centres and the miss at t; None when no
-        cluster holds the point."""
+        cluster holds the point.
+        E3 retry (search.Cfg.witness_retry, the verifiers' finding on E1's witness_fast): (tol0, accept_x) - when the
+        wide beam did not run (the tracker's own miss within wide_tol) but the keys rolled as they are miss the target
+        by more than accept_x (or its height), the wide beam runs after all where T4's trigger tol0 would have run it
+        (the tracker's miss past tol0), T4's choice (the closer tracked end) and the rolled keys made again."""
         best = None
         for g in self.frame(t):
             if y is not None and abs(self.cl_y[g] - y) > tol_y:
@@ -241,6 +246,7 @@ class Fwd:
         tlo, thi = x - chi, x - clo
         masks = np.zeros(t, dtype=np.int64)
         oxy = np.zeros((t + 1, 2))
+        wide_done = False
         S0 = self.start.L[1].copy()
         dx0 = xp[0] - S0[km.PX]
         S0[km.PX] += dx0
@@ -258,12 +264,39 @@ class Fwd:
             # left / none / right search reaches): a wider beam once the first one misses
             # (E1, search.Cfg.witness_fast: wide_tol = the search's acceptance tolerance - a smaller miss is used as it is)
             if beam < WIDE_BEAM and abs(oxy[t, 0] - x) > wide_tol:
-                m3 = np.zeros(t, dtype=np.int64)
-                o3 = np.zeros((t + 1, 2))
-                ej.track_beam(S0, self.start.cu.copy(), vm, tlo, thi, self.eng.udt, self.eng.P, self.terrain,
-                              WIDE_BEAM, m3, o3)
-                if abs(o3[t, 0] - x) < abs(oxy[t, 0] - x):
-                    masks, oxy = m3, o3
+                masks, oxy = self._wide(S0, vm, tlo, thi, t, x, masks, oxy)
+                wide_done = True
+        masks, oxy, hidden, xy = self._honest(S0, vm, masks, oxy, attack_ok)
+        if (retry is not None and beam > 0 and not wide_done and beam < WIDE_BEAM and
+                abs(oxy[t, 0] - x) > float(retry[0]) and
+                (abs(xy[t, 0] - x) > float(retry[1]) or abs(xy[t, 1] - self.cl_y[g]) > 1e-6)):
+            # E3 (witness_retry): the rolled keys miss though the tracker's end did not - T4's wide beam after all
+            m3, o3 = self._wide(S0, vm, tlo, thi, t, x, masks, oxy)
+            retried = 1
+            if m3 is not masks:
+                retried = 2
+                masks, oxy, hidden, xy = self._honest(S0, vm, m3, o3, attack_ok)
+        else:
+            retried = 0
+        dev = float(np.max(np.abs(xy - oxy))) if len(xy) else 0.0
+        out = {"cluster": g, "masks": masks, "vmask": vm, "xpath": xp, "xy": xy,
+               "miss_x": float(xy[t, 0] - x), "miss_y": float(xy[t, 1] - self.cl_y[g]),
+               "y": float(self.cl_y[g]), "clusters": cls, "path_dev": dev, "hidden": hidden}
+        if retried:
+            out["retried"] = retried            # E3: 1 the wide beam ran (no closer end), 2 its keys replaced the first
+        return out
+
+    def _wide(self, S0, vm, tlo, thi, t: int, x: float, masks, oxy) -> tuple:
+        """T4's wide beam (WIDE_BEAM) in the tube: its keys when its tracked end is closer to x, else the given ones."""
+        m3 = np.zeros(t, dtype=np.int64)
+        o3 = np.zeros((t + 1, 2))
+        ej.track_beam(S0, self.start.cu.copy(), vm, tlo, thi, self.eng.udt, self.eng.P, self.terrain, WIDE_BEAM, m3, o3)
+        if abs(o3[t, 0] - x) < abs(oxy[t, 0] - x):
+            return m3, o3
+        return masks, oxy
+
+    def _honest(self, S0, vm, masks, oxy, attack_ok: bool) -> tuple:
+        """The tracked keys made playable and rolled as they are: (masks, oxy, hidden, xy)."""
         # T4: a CB_JH frame (jump held without a press) is reached in the game by a jump pressed where it is inert -
         # in an attack's recovery: the trackers hold it by setting her previous keys, the keys they return press it
         # there (the umbrella opens) - the press written in (an attack 1 - 7 frames before, the jump pressed in its
@@ -276,10 +309,7 @@ class Fwd:
             masks, hidden = self._hidden_press(S0, masks, oxy, jh, attack_ok)
         # the keys rolled as they are (the reference model, no hidden state): the true miss
         xy = self._roll(S0, masks)
-        dev = float(np.max(np.abs(xy - oxy))) if len(xy) else 0.0
-        return {"cluster": g, "masks": masks, "vmask": vm, "xpath": xp, "xy": xy,
-                "miss_x": float(xy[t, 0] - x), "miss_y": float(xy[t, 1] - self.cl_y[g]),
-                "y": float(self.cl_y[g]), "clusters": cls, "path_dev": dev, "hidden": hidden}
+        return masks, oxy, hidden, xy
 
     def _roll(self, S0: np.ndarray, masks: np.ndarray) -> np.ndarray:
         """Her centres along masks from S0 (the reference model: kin_jit + the Clawline, no hidden state)."""

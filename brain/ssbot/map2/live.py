@@ -134,6 +134,11 @@ CLAW_PRESS_F = 3                   # the Clawline key and the direction held thi
 DS_WIN = sk.DS_ACTIVE[1] + 1       # a slash's contact can still come this many frames after its press
 CLAW_BLOCK_F = 36                  # a Clawline pressed this recently: she may still be in its block (control P + 34)
 CTRL_SETTLE = 2                    # frames after a Clawline's control still treated as its block (the forced bounce)
+# E3 (LiveCfg.hold_fix): the drops that end the swing hold / after which none starts (an exact verdict on the observed
+# state or a newer search found the plan unsafe); (swing_fix) her clips before a down slash out of the air sprint / dash
+HOLD_END = ("hit", "freeze", "sup", "error", "pause")
+HOLD_NOT = HOLD_END + ("unsafe", "cut", "tube_danger", "late")
+SPR_CLIPS = ("Sprint", "Air Dash", "Dash")
 # M4d2 (LiveCfg.noinput_kin): her clips whose 'no input' frames the hero model covers (HERO2: the umbrella's antic /
 # inflate / float / deflate / turn, the air dash's sprint and its cancels, the ground sprint's turn and skid)
 KIN_CLIPS = frozenset(("Umbrella Inflate Antic", "Umbrella Inflate", "Umbrella Float", "Umbrella Deflate",
@@ -319,6 +324,34 @@ class LiveCfg:
     base_n: int = 2                # ... the probes the search evaluates at most (each part of the split search half)
     base_last: bool = True         # ... evaluated after the strike search, only when it found no safe strike
     #                                (search.Cfg.base_last; False: right after the root, before the strikes)
+    # E3 (HANDOFF 'Task map2 - the evaluation and the handover - stage E3': the two verifiers' findings on E1 / E2;
+    # each default off - off: E2's behaviour)
+    swing_fix: bool = False        # THE SWING FROM HER OBSERVED STATE (midswing / the tube's re-check / the hold): the
+    #                                tracker marks the Wanderer's down slash ATK_PDIR 0 (the hero model: 2, ATK_KIND 0) -
+    #                                map2's copy of her state gets the model's values from her clip (DownSlash*), so the
+    #                                carried swing's contact, bounce and i-frames are credited; a hooked Clawline's forced
+    #                                bounce credits no pogo i-frames (M0 measured them for the pogo only); a slash started
+    #                                out of the air sprint / dash carries the side rule (press.side_hit)
+    tube_fix: bool = False         # THE TUBE'S KEEP TESTED AT HER OBSERVED OFFSET: her x and y off the path (and its
+    #                                drift since the previous tick, extrapolated tube_vh frames) against each later
+    #                                frame's danger rows (the time widening, the vertical band her hurtbox +- cor_dy +
+    #                                eps(k)), her possible x +- eps(k); a planned down slash contact ahead re-tested on
+    #                                the shifted path (else the exact re-check); the hazards' circles kept on both timings
+    #                                when a Clapper is shifted; outcomes shifted without a re-check (a Clawline's block)
+    #                                re-checked exactly once she is out of it; two Clappers shifted: the committed end and
+    #                                the collision frame by the earliest
+    tube_vh: int = 4
+    cor_dy: float = 0.1
+    hold_fix: bool = False         # THE SWING HOLD: ended by a hit / freeze / the supervisor, not started after a drop
+    #                                on an unsafe verdict (a newer search's 'unsafe' / 'cut', the tube's 'danger', 'late'),
+    #                                re-validated every tick (the Clappers still on a held outcome's timing; live:
+    #                                re-checked from her observed state with the swing carried - the strict replay: from
+    #                                the commit's base with the keys sent)
+    late_act: bool = False         # THE ORACLE'S LATE APPLY (live only): her latched keys at the observation frame
+    #                                against the keys sent through the hold filter from the previous tick's state - a
+    #                                difference re-checks the plan in control exactly (the tube's re-check / the
+    #                                re-anchoring); the gate's P3
+    witness_retry: bool = False    # search.Cfg.witness_retry (with witness_fast)
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -347,6 +380,7 @@ class LiveCfg:
 
 GEO_EXT = [0]      # E2 (c): a sent plan's danger geometry kept this many frames past each outcome's committed end
 VIEWS_GAP = [False]   # E2 (a) (LiveCfg.views_gap): build_outs holds a state on through its successor's spread
+TUBE_FIX = [False]    # E3 (LiveCfg.tube_fix): shift_outcome keeps the circles on both timings, the earliest end
 
 
 def set_switches(cfg: LiveCfg) -> None:
@@ -354,6 +388,7 @@ def set_switches(cfg: LiveCfg) -> None:
     check simulates too)."""
     GEO_EXT[0] = int(cfg.swing_hold_f) + DS_WIN if getattr(cfg, "swing_hold", False) else 0     # E2 (c)
     VIEWS_GAP[0] = bool(getattr(cfg, "views_gap", False) or getattr(cfg, "tube", False))       # E2 (a)
+    TUBE_FIX[0] = bool(getattr(cfg, "tube_fix", False))                                       # E3
     press.ON[0] = bool(cfg.press_check)
     press.SIDE[0] = bool(cfg.side_spr)
     press.FREE_POGO[0] = int(cfg.free_pogo)          # M4 S1b
@@ -589,7 +624,7 @@ class OutData:
     control is known (her accepting input from control on: the hook variant seen live); M4 S1b: tops {iid: the
     highest body top per frame} (strike.union_tops: the side rule's; unset in older plans - the robust top then)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
-                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig")
+                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig", "face", "gnd")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
@@ -671,6 +706,8 @@ def build_outs(ev, margins: bool = True) -> list:
         d.p, d.kc, d.end = float(o.p), kc, int(tr.end)
         d.cmds = outcome_cmds(tr)
         d.pos = np.asarray(tr.pos[:kc + 1], float).copy()
+        d.face = np.asarray(tr.face[:kc + 1], np.int64).copy()      # (E3: the tube's contact re-test)
+        d.gnd = np.asarray(tr.ground[:kc + 1], bool).copy()
         arr, tb = brnum.barr(o.branch)
         vrecs = {}
         for iid, a in arr.items():
@@ -961,7 +998,21 @@ def shift_outcome(o: OutData, sh: dict) -> OutData:
     off2, ri = _remap_rows(off, np.asarray(IIDB), maps)
     BX2, IIDB2 = BX[ri].copy(), np.asarray(IIDB)[ri].copy()
     ncf = len(coff) - 1
-    if ncf > 0 and len(CO) and len(o.recs) == 1 and len(sh) == 1:
+    if TUBE_FIX[0] and ncf > 0 and len(CO):
+        # E3 (the verifiers' finding): a circle row is world-fixed once its hazard spawned (a bomb row / rune of a
+        # cast before the anchor, or before the shifted transition) or follows its Clapper's timeline (a cast to
+        # come) - its source is not in the geometry: the rows kept on the planned timing AND on every shifted one
+        maps_c = [_src_map(ncf, d, t0) for (d, t0) in sh.values()]
+        parts_c, coff2 = [], np.zeros(ncf + 1, np.int64)
+        for k in range(ncf):
+            rows_k = [np.arange(coff[k], coff[k + 1])] + [np.arange(coff[int(m_[k])], coff[int(m_[k]) + 1])
+                                                          for m_ in maps_c]
+            cat_ = np.unique(np.concatenate(rows_k))
+            parts_c.append(cat_)
+            coff2[k + 1] = coff2[k] + len(cat_)
+        ci = np.concatenate(parts_c).astype(np.int64) if parts_c else np.zeros(0, np.int64)
+        CO2 = CO[ci].copy()
+    elif ncf > 0 and len(CO) and len(o.recs) == 1 and len(sh) == 1:
         d, t0 = list(sh.values())[0]
         coff2, ci = _remap_rows(coff, np.zeros(len(CO), np.int64), {0: _src_map(ncf, d, t0)})
         CO2 = CO[ci].copy()
@@ -998,8 +1049,22 @@ def shift_outcome(o: OutData, sh: dict) -> OutData:
             if k >= t0:
                 return k + d
         return k
-    c.kc = int(min(max(_fr(int(o.kc)), 0), o.end))
-    c.kcol = None if o.kcol is None else int(_fr(int(o.kcol)))
+    if TUBE_FIX[0] and len(sh) > 1:
+        # E3: two Clappers shifted differently - the committed end and its collision frame moved together by one
+        # shift, the one giving the earliest collision (a 'dev' outcome), else the earliest end
+        def _fr1(k, d_t0):
+            return k + d_t0[0] if k >= d_t0[1] else k
+        cand = list(sh.values())
+        if o.kcol is not None:
+            dd = min(cand, key=lambda v: _fr1(int(o.kcol), v))
+            c.kc = int(min(max(_fr1(int(o.kc), dd), 0), o.end))
+            c.kcol = int(_fr1(int(o.kcol), dd))
+        else:
+            c.kc = int(min(max(min(_fr1(int(o.kc), v) for v in cand), 0), o.end))
+            c.kcol = None
+    else:
+        c.kc = int(min(max(_fr(int(o.kc)), 0), o.end))
+        c.kcol = None if o.kcol is None else int(_fr(int(o.kcol)))
     c.contacts = [(int(_fr(int(k), int(i))), int(i), kd) for (k, i, kd) in o.contacts]
     c._orig = getattr(o, "_orig", o)
     return c
@@ -1157,6 +1222,145 @@ def tube_window(cor: tuple, pos: np.ndarray, n: int, cap: float) -> tuple:
     return max(dlo, -cap), min(dhi, cap)
 
 
+def tube_rows(o: OutData, pos: np.ndarray, dt: int) -> dict:
+    """E3 (LiveCfg.tube_fix; the verifiers' findings on E2's corridor): the outcome's danger along its path pos for
+    the per-tick keep test (tube_keep) - per frame k 1 .. its committed end the rows of the frames k - dt .. k + dt
+    (the bodies but a hooked one's harmless span, the hammers' and the circles' boxes), each as her centre's x interval
+    (A, B) that meets it and its vertical gaps to her planned hurtbox (Y0 = its bottom - her top, Y1 = its top - her
+    bottom: it meets her hurtbox moved by y and grown by b when Y0 < y + b and Y1 > y - b); none in her Clawline blocks
+    (free: no test there) and in her pogo i-frames (but their last dt frames: a contact a frame early ends them
+    sooner)."""
+    off, BX, IIDB, coff, CO = o.geo
+    hw, hh, hdy = cm.HURTBOX
+    nk = int(min(o.kc, len(pos) - 1))
+    nn = max(nk + 1, 1)
+    free = np.zeros(nn, bool)
+    ifr = np.zeros(nn, bool)
+    out = {"nk": nk, "free": free, "px": np.asarray(pos[:nn, 0], float).copy()}
+    K_, A_, B_, Y0_, Y1_ = [], [], [], [], []
+    if nk >= 1:
+        for (kc_, iid, kd) in o.contacts:
+            if kd == "down":
+                ifr[max(kc_ + sk.DS_IFR[0], 0):max(min(kc_ + sk.DS_IFR[1] - int(dt) + 1, nk + 1), 0)] = True
+        hooked = []
+        for si_, (k0, m, _, c_) in enumerate(o.segs):
+            if c_ is not None:
+                P = k0 + len(m)
+                ctl = o.segs[si_ + 1][0] if si_ + 1 < len(o.segs) else P + 34
+                if any(kd == "claw" and int(i) == int(c_[1]) for (_, i, kd) in o.contacts):
+                    hooked.append((int(c_[1]), P + sk.HOOK_BODY_OFF[0], ctl + sk.HOOK_BODY_OFF[1]))
+        nf = len(off) - 1
+        ncf = len(coff) - 1
+        for k in range(1, nk + 1):
+            if o.in_block(k):
+                free[k] = True
+                continue
+            if ifr[k]:
+                continue
+            yb = float(pos[k, 1]) + hdy - hh
+            yt = float(pos[k, 1]) + hdy + hh
+            for kk in range(max(k - int(dt), 0), k + int(dt) + 1):
+                if kk < nf:
+                    rows = BX[off[kk]:off[kk + 1]]
+                    if len(rows):
+                        if hooked:
+                            ii = IIDB[off[kk]:off[kk + 1]]
+                            m = np.ones(len(rows), bool)
+                            for (hid, a_, b_) in hooked:
+                                if a_ <= kk <= b_:
+                                    m &= ii != hid
+                            rows = rows[m]
+                        K_.append(np.full(len(rows), k, np.int64))
+                        A_.append(rows[:, 0] - hw)
+                        B_.append(rows[:, 2] + hw)
+                        Y0_.append(rows[:, 1] - yt)
+                        Y1_.append(rows[:, 3] - yb)
+                for s_ in (o.rare.get(kk, ()) if o.rare else ()):
+                    bx0, by0, bx1, by1 = s_.bbox()
+                    K_.append(np.array([k], np.int64))
+                    A_.append(np.array([bx0 - hw]))
+                    B_.append(np.array([bx1 + hw]))
+                    Y0_.append(np.array([by0 - yt]))
+                    Y1_.append(np.array([by1 - yb]))
+                if kk < ncf:
+                    cc = CO[coff[kk]:coff[kk + 1]]
+                    if len(cc):
+                        K_.append(np.full(len(cc), k, np.int64))
+                        A_.append(cc[:, 0] - cc[:, 2] - hw)
+                        B_.append(cc[:, 0] + cc[:, 2] + hw)
+                        Y0_.append(cc[:, 1] - cc[:, 2] - yt)
+                        Y1_.append(cc[:, 1] + cc[:, 2] - yb)
+    out["K"] = np.concatenate(K_) if K_ else np.zeros(0, np.int64)
+    for nm, L_ in (("A", A_), ("B", B_), ("Y0", Y0_), ("Y1", Y1_)):
+        out[nm] = np.concatenate(L_) if L_ else np.zeros(0)
+    return out
+
+
+def tube_keep(tr: dict, n: int, dx: float, dy: float, rx: float, ry: float, vh: int, cap: float,
+              band0: float) -> bool:
+    """E3 (LiveCfg.tube_fix): her observed offset off the path at frame n (dx, dy) and its drift per frame since the
+    previous tick (rx, ry), held after vh frames: at every later frame of the outcome's committed part her centre's x
+    interval (the path's x + the offset +- eps(k - n)) and her hurtbox moved by the y offset and grown by band0 +
+    eps(k - n) meet none of its danger rows (tube_rows) nor the walls; |dx| (now and extrapolated) within cap."""
+    hw = cm.HURTBOX[0]
+    if abs(dx) > cap or abs(dx + rx * vh) > cap:
+        return False
+    nk = int(tr["nk"])
+    if n >= nk:
+        return True
+    ks = np.arange(n + 1, nk + 1)
+    e = eps_x(ks - n)
+    h = np.minimum(ks - n, int(vh)).astype(float)
+    xs = tr["px"][n + 1:nk + 1] + dx + rx * h
+    yo = dy + ry * h
+    act = ~tr["free"][n + 1:nk + 1]
+    if np.any(act & ((xs - e < ms.WALL_L + hw) | (xs + e > ms.WALL_R - hw))):
+        return False
+    K = tr["K"]
+    sel = K > n
+    if np.any(sel):
+        q = K[sel] - (n + 1)
+        b = band0 + e[q]
+        hit = ((tr["Y0"][sel] < yo[q] + b) & (tr["Y1"][sel] > yo[q] - b) &
+               (tr["A"][sel] < xs[q] + e[q]) & (tr["B"][sel] > xs[q] - e[q]))
+        if np.any(hit):
+            return False
+    return True
+
+
+def contact_kept(o: OutData, pos: np.ndarray, n: int, dx: float, dy: float, rx: float, ry: float, vh: int) -> bool:
+    """E3 (LiveCfg.tube_fix): every planned down slash contact after frame n still comes at its frame on the path
+    moved by her offset (dx, dy) + its drift (rx, ry) to the contact (held after vh frames), at the offsets +- eps of
+    the contact (strike.dslash_contact, both alternations, from the press's frame; the frames up to n are past) - else
+    the tube does not keep the outcome (the exact re-check judges it: a contact a frame off moves the bounce and its
+    i-frames)."""
+    ahead = [(int(k), int(i)) for (k, i, kd) in o.contacts if kd == "down" and n < int(k) <= o.kc]
+    if not ahead:
+        return True
+    face, gnd = getattr(o, "face", None), getattr(o, "gnd", None)
+    if face is None or gnd is None:
+        return False
+    for (kc_, iid) in ahead:
+        kps = [int(k) for (k, i) in o.presses
+               if int(i) == iid and kc_ - sk.DS_ACTIVE[1] <= int(k) <= kc_ - sk.DS_ACTIVE[0]]
+        bx = o.boxes.get(iid)
+        if not kps or bx is None:
+            return False
+        kp = max(kps)
+        hh_ = float(min(kc_ - n, int(vh)))
+        e = float(eps_x([kc_ - n])[0])
+        m = min(len(pos), len(face), len(gnd), kp + sk.DS_ACTIVE[1] + 2)
+        for (ex, ey) in ((0.0, 0.0), (-e, -e), (-e, e), (e, -e), (e, e)):
+            ps = np.array(pos[:m], float, copy=True)
+            ps[n + 1:, 0] += dx + rx * hh_ + ex
+            ps[n + 1:, 1] += dy + ry * hh_ + ey
+            c = sk.dslash_contact(ps, face[:m], gnd[:m], kp, bx, press.SHRINK[0] if press.ON[0] else 0.0,
+                                  c_min=n + 1 if kp + sk.DS_ACTIVE[0] <= n else None)
+            if c != kc_:
+                return False
+    return True
+
+
 def _contact_ahead(o: OutData, n: int) -> bool:
     """A planned strike contact (a down slash, a hook) at frame n or after it in the outcome's committed part (on a
     timing a frame off it comes a frame later)."""
@@ -1230,18 +1434,19 @@ def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int, move: int 
     return p, ""
 
 
-def _swing_for(plan, S: np.ndarray, iids, dt: float, on: bool):
+def _swing_for(plan, S: np.ndarray, iids, dt: float, on: bool, swc: dict | None = None):
     """E2 (b): the swing a re-simulation from her state S carries (search.simulate's swing): the kin state's (its
     start, the plan's own target when the plan pressed it - reanchor_outcome's carry - else every Clapper); a pogo
-    already under way: its i-frames. None: off or none."""
+    already under way: its i-frames. None: off or none. E3 swc (LiveCfg.swing_fix: {'pogo', 'spr'} of that state -
+    the controller's): search.swing_from_state's."""
     if not on:
         return None
-    sw = ms.swing_from_state(S, iids, dt)
+    sw = ms.swing_from_state(S, iids, dt, **(swc or {}))
     psw = getattr(plan, "swing", None) if plan is not None else None
     if sw is None:
         return None
     if sw[1] and psw is not None:
-        return (sw[0], psw[1], 0)
+        return (sw[0], psw[1], 0) + tuple(sw[3:])
     return sw
 
 
@@ -1295,7 +1500,7 @@ def _claw_dirs(d: int) -> tuple:
 
 
 def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray, hold: tuple, lat_s: int, her_xy,
-                 obs: list, cfg: LiveCfg, idx=None, tol: float | None = None, acc=None) -> tuple:
+                 obs: list, cfg: LiveCfg, idx=None, tol: float | None = None, acc=None, swc: dict | None = None) -> tuple:
     """THE EXACT HERO2 SIMULATION CHECK FROM THE CURRENT STATE of a received plan (module docstring, 1): (ok, why,
     info) - info: the outcomes kept (alive at f + 2), their re-simulated paths (pos_over), the max path deviation,
     the outcomes checked and simulated, ms. M4d: the outcomes that can still be the truth (possible(): not contradicted
@@ -1382,7 +1587,7 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
             if plan is None:
                 return False, why, info
             boxes = {iid: b[s:] for iid, b in o.boxes.items()}
-            sw = _swing_for(plan, S0, iids_all, float(W.params.frame_time), cfg.midswing)
+            sw = _swing_for(plan, S0, iids_all, float(W.params.frame_time), cfg.midswing, swc)
             tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
                              claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s), swing=sw)
             memo[key] = tr
@@ -1424,7 +1629,7 @@ def hold_cmds(lp: LivePlan, idx: list, r0: int, k_end: int, pm: int) -> list:
 
 def swing_check(W, lp: LivePlan, idx: list, s: int, f: int, S0: np.ndarray, inflight, hold: tuple, lat_s: int,
                 k_end: int, obs: list, shifts: dict | None = None, base: dict | None = None,
-                keys: np.ndarray | None = None) -> tuple:
+                keys: np.ndarray | None = None, swc: dict | None = None) -> tuple:
     """E2 (c) (LiveCfg.swing_hold): the continuation the swing hold plays (hold_cmds from f + 2 to k_end, then no key)
     re-simulated against each outcome's danger on the Clappers' observed timing (shifts {i: {iid: d}}: match_shift's
     at the drop), to k_end + 4 - (ok, why). From base {'s', 'S', 'hold', 'lat'} (the commit's / the last re-check's
@@ -1443,19 +1648,39 @@ def swing_check(W, lp: LivePlan, idx: list, s: int, f: int, S0: np.ndarray, infl
     if base is not None and keys is not None:
         sb, Sb, hold_b, lat_b = int(base["s"]), np.asarray(base["S"], float), base["hold"], int(base["lat"])
         cmds = np.asarray([int(x) for x in np.asarray(keys, np.int64)] + infl[len(infl):] + hc + [0] * 4, np.int64)
+        swc = base.get("swc")
     else:
         sb, Sb, hold_b, lat_b = int(s), np.asarray(S0, float), hold, int(lat_s)
         cmds = np.asarray(infl + hc + [0] * 4, np.int64)
-    Sb = Sb.reshape(km.K, -1)[:, 0]
+    res = hold_sim(W, lp, idx, sb, Sb, hold_b, lat_b, cmds, int(k_end) + 4, iids, shifts, swc, need=int(k_end))
+    for (i, kc, why_) in res:
+        if why_:
+            return False, why_
+        if kc is not None:
+            sh = (shifts or {}).get(i) or {}
+            return False, f"col@{kc} {sorted(sh.items())}"
+    return True, "ok"
+
+
+def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int, cmds: np.ndarray, k_last: int,
+             iids, shifts: dict | None = None, swc: dict | None = None, need: int | None = None) -> list:
+    """E2 (c) / E3: the keys cmds (frames sb + 1 .. of the plan, from the anchor) played from her state Sb at frame sb
+    (the hold filter state hold_b, the latched mask lat_b) - the outcomes' down slash presses after sb where the keys
+    latch them (up to 2 frames late), a slash under way carried (search.simulate's swing; swc: the state's flags) - in
+    each outcome idx (moved to its observed timing: shifts {i: {iid: (d, t0)}}), against its danger to frame k_last
+    (its geometry ends GEO_EXT frames after the committed end): [(i, the first collision frame or None, why)] - why
+    'no data' when the danger does not reach need. The swing hold's check and the hold's audit."""
+    Sb = np.asarray(Sb, float).reshape(km.K, -1)[:, 0]
     face0 = int(Sb[km.FACE]) if Sb[km.FACE] != 0 else 1
     alpha_c = int(round(float(Sb[km.ALPHA]) * 6.0)) % 6
-    sw = ms.swing_from_state(Sb, iids, float(W.params.frame_time))
-    lat = hold_filter1(cmds, hold_b)
+    sw = ms.swing_from_state(Sb, iids, float(W.params.frame_time), **(swc or {}))
+    lat = hold_filter1(np.asarray(cmds, np.int64), hold_b)
+    out = []
     for i in idx:
         o = lp.outs[i]
-        k1 = min(int(k_end) + 4, sb + len(lat), len(o.geo[0]) - 2)
-        if k1 < int(k_end):
-            return False, "no data"
+        k1 = min(int(k_last), sb + len(lat), len(o.geo[0]) - 2)
+        if need is not None and k1 < int(need):
+            return [(int(i), None, "no data")]
         # the outcome's down slash presses after the base, where the keys latch them (up to 2 frames late)
         dsl, pm_ = [], lat_b
         planned = sorted(int(k) for (k, _) in o.presses if int(k) > sb)
@@ -1470,13 +1695,14 @@ def swing_check(W, lp: LivePlan, idx: list, s: int, f: int, S0: np.ndarray, infl
         tr = ms.simulate(W, plan, lambda iid, _b=boxes: _b.get(iid), face0, Sb, VARIANTS[o.variant], alpha_c,
                          claw_lock=int(getattr(lp, "claw_lock", -99)) - sb, tops_fn=_tops_fn(od, sb), swing=sw)
         kc = _first_collision_out(od, tr, sb, k1)
-        if kc is not None:
-            return False, f"col@{kc} {sorted(sh.items())}"
-    return True, "ok"
+        out.append((int(i), None if kc is None else int(kc), ""))
+        if kc is not None and need is not None:
+            break
+    return out
 
 
 def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: tuple, lat_s: int, idx: list,
-              k_last: int, midswing: bool = False, iids=()) -> list:
+              k_last: int, midswing: bool = False, iids=(), swc: dict | None = None) -> list:
     """M4d2 (LiveCfg.audit_runs, the smoke's safety audit): a control run's keys AS SENT - the keys in flight at its
     commit and map2's keys after it (cmds, frames s + 1 .. of the plan; the plan's own commands after the run complete
     its segments) - re-simulated from the commit's state S0 in each outcome idx still possible at the run's end and
@@ -1496,7 +1722,7 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
         boxes = {iid: b[s:] for iid, b in o.boxes.items()}
         tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
                          claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s),
-                         swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing))
+                         swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing, swc))
         kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
         out.append((int(i), None if kc is None else int(kc), ""))
     return out
@@ -1626,8 +1852,8 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
         if plan is None:
             return None, lat, why_
         boxes = {iid: b[sb:] for iid, b in o.boxes.items()}
-        sw_ = (_swing_for(plan, S_b, tuple(iids), float(W.params.frame_time), True) if sb > 0 else
-               getattr(lp, "swing_a", None)) if midswing else None
+        sw_ = (_swing_for(plan, S_b, tuple(iids), float(W.params.frame_time), True, (base or {}).get("swc"))
+               if sb > 0 else getattr(lp, "swing_a", None)) if midswing else None
         tr_ = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S_b, VARIANTS[o.variant], alpha_c,
                           claw_lock=lock, tops_fn=_tops_fn(o, sb), swing=sw_)
         return tr_, lat, ""
@@ -1747,7 +1973,7 @@ def search_kw(cfg: LiveCfg) -> dict:
         kw.update(tables=True, tables_file=str(cfg.tables_file), tables_budget=int(cfg.tables_budget))
     if cfg.passes:
         kw["passes"] = tuple(tuple(int(v) for v in x.split(":")) for x in str(cfg.passes).split("/") if x.strip())
-    for k in ("fast_danger", "fast_windows", "witness_fast", "fg_nowait", "shapes"):   # (E1: only when on)
+    for k in ("fast_danger", "fast_windows", "witness_fast", "fg_nowait", "shapes", "witness_retry"):   # (only when on)
         if getattr(cfg, k, False):
             kw[k] = True
     if getattr(cfg, "baseline", False):                                                  # (E2 (e): only when on)
@@ -1994,6 +2220,7 @@ def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, 
                     S_a=np.asarray(snap["S"], float).reshape(km.K, -1)[:, 0].copy(), hold_a=snap["hold"],
                     lat_a=int(snap.get("lat_s") or 0),
                     rev=bool(snap.get("rev")), alt=False, n_sent=0, swing_a=snap.get("swing"),
+                    swc_a=snap.get("swc"),                                           # E3 (swing_fix)
                     claw_lock=-99 if snap.get("claw_ctl") is None else
                     int(snap["claw_ctl"]) - int(snap["fo"]) + press.CLAW_LOCK_F,
                     base=e.plan.origin == "base")                                    # E2 (e)
@@ -2439,6 +2666,13 @@ class Map2Controller:
         self._tube_kinds = None             # (a) this tick's tube verdicts (the steering's)
         self._hold_sw = None                # (c) the swing hold after a drop mid-swing
         self._obs_last: list = []
+        # E3
+        self._ds_on = None                  # (swing_fix) the last down slash's onset: (frame, out of the air sprint)
+        self._clip_prev = ""
+        self._swc = None                    # (swing_fix) this tick's state flags ({'pogo', 'spr'}) for swing_from_state
+        self._tube_prev: dict = {}          # (tube_fix) per outcome the previous tick's (n, dx, dy) off its path
+        self._tube_unchk: set = set()       # (tube_fix) outcomes shifted without an exact re-check (a Clawline's block)
+        self._hold_prev = None              # (late_act) the previous tick's (fo, hold filter state)
 
     def _inc(self, key: str, n: int = 1) -> None:
         self.st[key] += n
@@ -2483,6 +2717,13 @@ class Map2Controller:
                 if bool(h.get("hero_accepting_input", True)) and not clip.startswith("Harpoon"):
                     self._claw_ctl = int(f)
             self._lat_prev = lm
+            if self.cfg.swing_fix:
+                # E3: a down slash's onset (her clip turns DownSlash*) and whether it came out of the air sprint / dash
+                h_ = raw.get("hero") or {}
+                clip_ = str(((h_.get("anim") or {}).get("clip")) or "")
+                if clip_.startswith("DownSlash") and clip_ != self._clip_prev:
+                    self._ds_on = (int(f), self._clip_prev.startswith(SPR_CLIPS))
+                self._clip_prev = clip_
             if not (self.cfg.dt_lo <= dt * 60.0 <= self.cfg.dt_hi):
                 self.last_freeze = int(f)
             for ev in raw.get("ev") or ():
@@ -2621,14 +2862,16 @@ class Map2Controller:
                     v = 0 if v is None else int(v)
                     cmds.append(v & ~COG if self._own_at(k) == "cog" else v)
                 res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a),
-                                list(idx), int(k1 - lp.t_a), **self._msw_kw())
+                                list(idx), int(k1 - lp.t_a), **self._msw_kw(),
+                                **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
             else:
                 cmds = list(np.asarray(r_["inflight"], np.int64))
                 for k in range(r_["f"] + 2, k1 + 1):
                     v = self._sent_at(k)
                     cmds.append(0 if v is None else int(v))
                 res = audit_run(self.W, lp, int(r_["fo"] - lp.t_a), r_["S0"], np.asarray(cmds, np.int64),
-                                r_["hold"], r_["lat_s"], list(idx), int(k1 - lp.t_a), **self._msw_kw())
+                                r_["hold"], r_["lat_s"], list(idx), int(k1 - lp.t_a), **self._msw_kw(),
+                                **({"swc": r_.get("swc")} if self.cfg.swing_fix else {}))
             self._inc("audit_runs")
             self._inc("audit_out", len(res))
             cols = [x for x in res if x[1] is not None]
@@ -2642,11 +2885,15 @@ class Map2Controller:
             self._error("audit", e)
 
     def _drop(self, why: str, info: dict | None = None) -> None:
+        if self.cfg.hold_fix and why in HOLD_END and self._hold_sw is not None:
+            self._hold_end("cancel_" + why)          # E3: a hit / freeze / the supervisor ends the swing hold
+        run_ = self._run
         if self.ctrl is not None and self.cfg.audit_runs:
             self._audit_end()
-        if self.ctrl is not None and self.cfg.swing_hold and why not in ("hit", "freeze", "sup", "error", "pause"):
+        no_hold = HOLD_NOT if self.cfg.hold_fix else HOLD_END
+        if self.ctrl is not None and self.cfg.swing_hold and why not in no_hold:
             try:
-                self._hold_start(why)
+                self._hold_start(why, run_)
             except Exception as e:  # noqa: BLE001
                 self._error("hold", e)
         if self.ctrl is not None:
@@ -2663,6 +2910,46 @@ class Map2Controller:
     def _msw_kw(self) -> dict:
         """E2 (b): the re-simulations' swing switch (only when on: the calls stay as before)."""
         return {"midswing": True, "iids": [ob.iid for ob in self.trk.obs()]} if self.cfg.midswing else {}
+
+    def _mstate(self, S0: np.ndarray, fo: int, raw: dict, count: bool = True) -> tuple:
+        """E3 (LiveCfg.swing_fix): map2's copy of her kin state and its swing flags {'pogo', 'spr'}: the tracker marks the
+        Wanderer crest's down slash ATK_PDIR 0 / ATK_KIND 1 - 2 (its side slash's), the hero model ATK_PDIR 2 /
+        ATK_KIND 0 (kin_jit.forum_swing: the pogo's restart, no terrain thunk) - set from her clip (DownSlash*);
+        'pogo' False when the bounce under way began after a Clawline's press (its forced bounce at control: no pogo
+        i-frames); 'spr' when the slash under way began out of the air sprint / dash (its clip before)."""
+        S = np.array(S0, float, copy=True)
+        h = raw.get("hero") or {}
+        clip = str(((h.get("anim") or {}).get("clip")) or "")
+        spr = False
+        if S[km.ATTACKING] > 0 and clip.startswith("DownSlash"):
+            if S[km.ATK_PDIR] != 2.0:
+                S[km.ATK_PDIR] = 2.0
+                S[km.ATK_KIND] = 0.0
+                if count:
+                    self._inc("swing_pdir")
+            on = self._ds_on
+            if on is not None and on[1]:
+                age = float(S[km.ATK_T]) / float(self.W.params.frame_time)
+                spr = abs((int(fo) - int(on[0])) - age) <= 2.0
+        pogo = True
+        if S[km.BOUNCE] >= 0 and self._claw_P is not None:
+            b0 = int(fo) - int(math.floor(float(S[km.BOUNCE]) * ms.POGO_STEP_F))
+            if b0 >= self._claw_P + 3 and (self._claw_ctl is None or b0 <= self._claw_ctl + 2):
+                pogo = False
+                if count:
+                    self._inc("swing_hook_bounce")
+        return S, {"pogo": bool(pogo), "spr": bool(spr)}
+
+    def _exp_lat(self, fo: int) -> int | None:
+        """E3 (late_act): the latched mask expected at frame fo - the keys sent for the frames since the previous
+        tick through the hold filter from its state then (None: no previous tick within 3 frames, a key unknown)."""
+        hp = self._hold_prev
+        if hp is None or not 1 <= int(fo) - int(hp[0]) <= 3:
+            return None
+        cmds = [self._sent_at(k) for k in range(int(hp[0]) + 1, int(fo) + 1)]
+        if any(c is None for c in cmds):
+            return None
+        return int(hold_filter1(np.asarray(cmds, np.int64), hp[1])[-1])
 
     def _tm(self, kind: str, v: float) -> None:
         getattr(self, {"pre": "ms_pre", "post": "ms_post", "check": "ms_check", "age": "age_commit"}[kind]).append(v)
@@ -2714,6 +3001,8 @@ class Map2Controller:
         if self.procs and f % 120 == 0:
             self._check_procs()
         self._drain(fo)
+        if self.cfg.swing_fix:
+            S0, self._swc = self._mstate(S0, fo, raw)       # E3: map2's copy of her state, the swing flags
         h = raw.get("hero") or {}
         her = h.get("pos")
         acc = bool(h.get("hero_accepting_input", True))
@@ -2794,8 +3083,12 @@ class Map2Controller:
                 # anchor's (its repair_check and its audit's: her observed state is the recording's there)
                 if self.cfg.replay and self.cfg.replay_strict and getattr(lp, "S_a", None) is not None:
                     base_c = {"s": 0, "S": lp.S_a, "hold": lp.hold_a, "lat": int(lp.lat_a)}
+                    if self.cfg.swing_fix:
+                        base_c["swc"] = getattr(lp, "swc_a", None)
                 else:
                     base_c = {"s": int(fo - lp.t_a), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}
+                    if self.cfg.swing_fix:
+                        base_c["swc"] = self._swc
 
                 def expect(k, _pre=pre, _o=o_b, _t=lp.t_a):
                     r_ = k - _t
@@ -2814,7 +3107,7 @@ class Map2Controller:
                             ok, why_c, info = repair_check(self.W, lp, fo, f, keys_, her, obs, self.cfg, acc=acc)
                         else:
                             ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs,
-                                                           self.cfg, acc=acc, tol=self.cfg.tol_repair)
+                                                           self.cfg, acc=acc, tol=self.cfg.tol_repair, swc=self._swc)
                             info["repair"] = True
                         self._inc("repair_" + ("ok" if ok else why_c.replace(" ", "_")))
                     elif self.cfg.replay and self.cfg.replay_strict and not bridge_ok:
@@ -2826,7 +3119,7 @@ class Map2Controller:
                                            self._own_at(k_)]
                     else:
                         ok, why_c, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s,
-                                                       her, obs, self.cfg, acc=acc)
+                                                       her, obs, self.cfg, acc=acc, swc=self._swc)
                     info["bridge"] = bool(bridge_ok)
                 except Exception as e:  # noqa: BLE001 - a bad plan is dropped, the bot goes on
                     ok, why_c, info = False, "error", {"error": repr(e)[:200]}
@@ -2850,11 +3143,14 @@ class Map2Controller:
                     self.ctrl_since = int(f)
                     self.ctrl_base = base_c
                     self.ctrl_cor = {}
+                    if self._hold_sw is not None:
+                        self._hold_end("commit")
                     self._hold_sw = None
+                    self._tube_prev, self._tube_unchk = {}, set()
                     if self.cfg.audit_runs:
                         self._run = {"lp": lp, "fo": int(fo), "f": int(f), "S0": S0.copy(),
                                      "inflight": np.asarray(inflight, np.int64).copy(), "hold": hold_t,
-                                     "lat_s": int(lat_s)}
+                                     "lat_s": int(lat_s), "swc": self._swc}
                     self.took = True
                     why = None
                     self.new_plan_obj = lp.plan
@@ -2884,6 +3180,16 @@ class Map2Controller:
             self.ctrl_cut = self._verdict[1] if self.ctrl_cut is None else min(self.ctrl_cut, self._verdict[1])
             row["cut"] = int(self.ctrl_cut)
             self._verdict = None
+        # E3 (late_act, live only): the oracle applied a key late - her latched keys now are not the keys sent
+        # through the hold filter: the plan in control re-checked exactly below
+        force_re = False
+        if self.cfg.late_act and not self.cfg.replay:
+            exp = self._exp_lat(fo) if (self.ctrl is not None and why is None and not self._cog_near(fo)) else None
+            if exp is not None and int(exp) != int(lat_s) and not self.took:
+                self._inc("late_act")
+                row["late_act"] = [int(exp), int(lat_s)]
+                force_re = True
+            self._hold_prev = (int(fo), hold_t)
         # 2. execute
         mask = None
         if self.ctrl is not None and why is None and self.cfg.tube:
@@ -2891,7 +3197,7 @@ class Map2Controller:
             lp = self.ctrl
             n = int(fo - lp.t_a)
             r = int(f + 2 - lp.t_a)
-            cons, tw = self._tube(lp, n, r, f, fo, her, obs, acc, S0, inflight, hold_t, lat_s, row)
+            cons, tw = self._tube(lp, n, r, f, fo, her, obs, acc, S0, inflight, hold_t, lat_s, row, force=force_re)
             if cons is None:
                 o = max((lp.outs[i] for i in self.ctrl_idx), key=lambda o_: o_.p, default=None)
                 if o is not None:
@@ -2912,13 +3218,16 @@ class Map2Controller:
             r = int(f + 2 - lp.t_a)
             cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=not self.cfg.replay,
                                                pos_over=self.ctrl_pos)
+            if force_re and cons:
+                cons, bad_h = [], max(int(bad_h), 1)        # E3 (late_act): re-anchored exactly from her state now
             if not cons and bad_h:
                 # her position left the path while the Clappers are consistent: the plan re-anchored to her state
                 # now (the exact re-simulation, the collisions; the path within tol_reanchor) or dropped
                 tc = time.perf_counter()
                 try:
                     ok, why_r, info = commit_check(self.W, lp, fo, S0, inflight, hold_t, lat_s, her, obs, self.cfg,
-                                                   idx=self.ctrl_idx, tol=self.cfg.tol_reanchor, acc=acc)
+                                                   idx=self.ctrl_idx, tol=self.cfg.tol_reanchor, acc=acc,
+                                                   swc=self._swc)
                 except Exception as e:  # noqa: BLE001
                     ok, why_r, info = False, "error", {"error": repr(e)[:200]}
                 self._tm("check", (time.perf_counter() - tc) * 1e3)
@@ -2928,6 +3237,8 @@ class Map2Controller:
                 if ok:
                     self.ctrl_idx, self.ctrl_pos = list(info["alive"]), dict(info["pos_over"])
                     self.ctrl_base = {"s": int(n), "S": S0.copy(), "hold": hold_t, "lat": int(lat_s)}   # (S1b)
+                    if self.cfg.swing_fix:
+                        self.ctrl_base["swc"] = self._swc
                     cons, bad_h, bad_c = lp.consistent(n, her, obs, self.cfg, idx=self.ctrl_idx, hero=True,
                                                        pos_over=self.ctrl_pos)
             if not cons:
@@ -2963,11 +3274,12 @@ class Map2Controller:
         key = (i, id(o), id(pos))
         c = self.ctrl_cor.get(key)
         if c is None:
-            c = self.ctrl_cor[key] = tube_corridor(o, pos, int(self.cfg.tube_dt))
+            # (E3 tube_fix: the danger rows for the per-tick test at her offset; E2: the corridor)
+            c = self.ctrl_cor[key] = (tube_rows if self.cfg.tube_fix else tube_corridor)(o, pos, int(self.cfg.tube_dt))
         return c
 
     def _tube(self, lp: LivePlan, n: int, r: int, f: int, fo: int, her, obs: list, acc: bool, S0, inflight,
-              hold_t, lat_s, row: dict) -> tuple:
+              hold_t, lat_s, row: dict, force: bool = False) -> tuple:
         """E2 (a): the outcomes of the plan in control the observation keeps - (cons, kind) with kind 'keep' (each on
         its last exact check's path within tube_sync and its Clappers on its timing, or inside its tube: the Clappers
         within +-tube_dt frames - not when a strike lies ahead -, her y within tube_y and her x off the path inside
@@ -2978,7 +3290,11 @@ class Map2Controller:
         hero_on = not cfg.replay
         widen = [s * k for k in range(1, int(cfg.tube_dt) + 1) for s in (1, -1)]
         keep, kinds = [], Counter()
-        for i in self.ctrl_idx:
+        if cfg.tube_fix and self._tube_unchk and not (int(lat_s) & M_CLAW) and \
+                not all(lp.outs[i].in_block(n) for i in self.ctrl_idx):
+            force = True                # E3: outcomes shifted in a Clawline's block - re-checked once she is out of it
+            self._inc("tube_unchk_recheck")
+        for i in ([] if force else self.ctrl_idx):
             o = lp.outs[i]
             if n < 0 or n > o.kc:
                 continue
@@ -2997,9 +3313,26 @@ class Map2Controller:
                 kinds["in"] += 1
                 continue
             dx, dy = float(her[0] - pos[n, 0]), float(her[1] - pos[n, 1])
+            if cfg.tube_fix:
+                # E3: her drift off the path since the previous tick (a velocity off the path's - a key a frame
+                # late), extrapolated tube_vh frames by tube_keep / contact_kept
+                pv = self._tube_prev.get(i)
+                self._tube_prev[i] = (int(n), dx, dy)
+                rx = ry = 0.0
+                if pv is not None and 1 <= n - pv[0] <= 3:
+                    rx, ry = (dx - pv[1]) / (n - pv[0]), (dy - pv[2]) / (n - pv[0])
             if on_t and abs(dx) <= cfg.tube_sync and abs(dy) <= cfg.tube_sync:
                 keep.append(i)
                 kinds["sync"] += 1
+                continue
+            if cfg.tube_fix:
+                if abs(dy) <= cfg.tube_y and \
+                        tube_keep(self._cor(i, o, pos), n, dx, dy, rx, ry, int(cfg.tube_vh), cfg.tube_dx,
+                                  cfg.cor_dy) and contact_kept(o, pos, n, dx, dy, rx, ry, int(cfg.tube_vh)):
+                    keep.append(i)
+                    kinds["tube"] += 1
+                    continue
+                kinds["out_h"] += 1
                 continue
             if abs(dy) <= cfg.tube_y:
                 dlo, dhi = tube_window(self._cor(i, o, pos), pos, n, cfg.tube_dx)
@@ -3044,6 +3377,8 @@ class Map2Controller:
                 lp.outs[i] = sh_outs[i]
             self.ctrl_idx = list(idx2)
             self.ctrl_cor = {}
+            if cfg.tube_fix and shifts:
+                self._tube_unchk |= set(shifts)          # E3: shifted without a re-check - re-checked out of the block
             self._inc("tube_block_keep")
             row["tube_shift"] = sorted({(k % 1000, v) for sh in shifts.values() for k, v in sh.items()})
             return list(idx2), "block"
@@ -3064,7 +3399,7 @@ class Map2Controller:
                                              base=base, midswing=True, iids=[ob.iid for ob in obs])
             else:
                 ok, why_r, info = commit_check(self.W, lp2, fo, S0, inflight, hold_t, lat_s, her, obs, cfg_r,
-                                               idx=idx2, tol=cfg.tube_path, acc=acc)
+                                               idx=idx2, tol=cfg.tube_path, acc=acc, swc=self._swc)
         except Exception as e:  # noqa: BLE001
             ok, why_r, info = False, "error", {"error": repr(e)[:200]}
         msc = (time.perf_counter() - tc) * 1e3
@@ -3084,7 +3419,10 @@ class Map2Controller:
         self.ctrl_excl -= set(self.ctrl_idx)
         if not proxy:
             self.ctrl_base = {"s": int(n), "S": np.asarray(S0, float).copy(), "hold": hold_t, "lat": int(lat_s)}
+            if cfg.swing_fix:
+                self.ctrl_base["swc"] = self._swc
         self.ctrl_cor = {}
+        self._tube_prev, self._tube_unchk = {}, set()
         return list(self.ctrl_idx), "recheck"
 
     def _steer(self, lp: LivePlan, alive: list, best: int, n: int, r: int, her, mask: int, row: dict) -> int:
@@ -3118,7 +3456,7 @@ class Map2Controller:
         return m2
 
     # ---- E2 (c): the swing hold ----
-    def _hold_start(self, why: str) -> None:
+    def _hold_start(self, why: str, run_: dict | None = None) -> None:
         """E2 (c): the plan in control is being dropped - with one of its down slashes sent within DS_WIN frames (its
         contact may still come) map2 keeps the plan's continuation until the swing resolves (re-checked first)."""
         lp = self.ctrl
@@ -3150,26 +3488,99 @@ class Map2Controller:
         until = min(kp + DS_WIN + sk.DS_IFR[1], f_ + 2 + int(self.cfg.swing_hold_f))
         self._hold_sw = {"lp": lp, "idx": list(idx), "kp": kp, "until": int(until), "checked": False, "why": why,
                          "f0": f_, "shifts": shifts,
-                         "base": dict(self.ctrl_base) if self.ctrl_base is not None else None}
+                         "base": dict(self.ctrl_base) if self.ctrl_base is not None else None,
+                         "run": run_ if (run_ is not None and run_.get("lp") is lp) else None}
         self._inc("swing_hold_start")
+
+    def _hold_end(self, why: str) -> None:
+        """E3: the swing hold ends - its keys audited (audit_runs: E2 audited none of them), the hold cleared."""
+        hs = self._hold_sw
+        self._hold_sw = None
+        if hs is None:
+            return
+        if why.startswith("cancel_"):
+            self._inc("swing_hold_" + why)
+        if self.cfg.audit_runs:
+            try:
+                self._audit_hold(hs)
+            except Exception as e:  # noqa: BLE001 - an audit never ends the run
+                self._error("audit", e)
+
+    def _audit_hold(self, hs: dict) -> None:
+        """E3 (audit_runs; the verifiers' finding: the hold's keys were never audited): the control run that ended in
+        the hold - its keys as sent from its commit through the hold's last key, played from the commit's state (the
+        strict replay: the anchor's, its proxy world) in each held outcome on its observed timing, against its danger
+        to that frame (hold_sim)."""
+        lp, r_ = hs["lp"], hs.get("run")
+        ks = [k for k, v in self.own_hist.items() if v == "m2" and k >= int(hs["f0"]) + 2]
+        if not ks or r_ is None:
+            return
+        k1 = max(ks)
+        iids = [ob.iid for ob in self.trk.obs()]
+        if self.cfg.replay and self.cfg.replay_strict and getattr(lp, "S_a", None) is not None:
+            cmds = []
+            for k in range(lp.t_a + 1, k1 + 1):
+                v = self._sent_at(k)
+                v = 0 if v is None else int(v)
+                cmds.append(v & ~COG if self._own_at(k) == "cog" else v)
+            sb, Sb, hb, lb, swc = 0, lp.S_a, lp.hold_a, int(lp.lat_a), getattr(lp, "swc_a", None)
+        else:
+            cmds = list(np.asarray(r_["inflight"], np.int64))
+            for k in range(int(r_["f"]) + 2, k1 + 1):
+                v = self._sent_at(k)
+                cmds.append(0 if v is None else int(v))
+            sb, Sb, hb, lb, swc = int(r_["fo"] - lp.t_a), r_["S0"], r_["hold"], int(r_["lat_s"]), r_.get("swc")
+        res = hold_sim(self.W, lp, list(hs["idx"]), sb, Sb, hb, lb, np.asarray(cmds, np.int64), int(k1 - lp.t_a),
+                       iids, hs.get("shifts"), swc)
+        self._inc("audit_hold_runs")
+        self._inc("audit_hold_frames", len([k for k in ks]))
+        cols = [x for x in res if x[1] is not None]
+        if cols:
+            self._inc("audit_hold_col")
+        self.row["audit_hold"] = [lp.pid, len(res), [list(x) for x in cols], int(k1)]
 
     def _swing_step(self, f: int, fo: int, S0, inflight, hold_t, lat_s, obs: list, row: dict) -> int | None:
         hs = self._hold_sw
         lp = hs["lp"]
         r = int(f + 2 - lp.t_a)
         if f + 2 > hs["until"]:
-            self._hold_sw = None
+            self._hold_end("end")
             self._inc("swing_hold_end")
             return None
         Sv = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
         if f + 1 > hs["kp"] + DS_WIN and not Sv[km.BOUNCE] >= 0:
-            self._hold_sw = None                           # the swing is over (no contact in its window)
+            self._hold_end("over")                         # the swing is over (no contact in its window)
             self._inc("swing_hold_over")
             return None
         idx = list(hs["idx"])
+        if self.cfg.hold_fix:
+            # E3: re-validated every tick - the Clappers still on a held outcome's timing, then the hold's keys
+            # re-checked (live: from her observed state now, the swing carried; the strict replay: from the base)
+            n_ = int(fo - lp.t_a)
+            shifts = {}
+            for i in idx:
+                sh = {}
+                for ob in obs:
+                    d = match_shift(lp.outs[i], n_, ob, self.cfg, max(1, int(self.cfg.tube_dmax)))
+                    if d is None:
+                        sh = None
+                        break
+                    if d[0]:
+                        sh[int(ob.iid)] = (int(d[0]), int(d[1]))
+                if sh is not None:
+                    shifts[i] = sh
+            idx = [i for i in idx if i in shifts]
+            if not idx:
+                self._hold_end("clappers")
+                self._inc("swing_hold_clappers")
+                return None
+            hs["idx"], hs["shifts"] = list(idx), shifts
+            hs["checked"] = False
         if not hs["checked"]:
             hs["checked"] = True
             base, keys = hs.get("base"), None
+            if self.cfg.hold_fix and not self.cfg.replay:
+                base = None                                # E3: live - from her observed state now
             if base is not None and int(base["s"]) <= int(fo - lp.t_a):
                 k0 = int(lp.t_a) + int(base["s"]) + 1
                 keys = np.array([(int(v) & ~COG if self._own_at(k) == "cog" else int(v)) if v is not None else 0
@@ -3177,10 +3588,11 @@ class Map2Controller:
             else:
                 base = None
             ok, why_s = swing_check(self.W, lp, idx, int(fo - lp.t_a), int(f), Sv, inflight, hold_t, lat_s,
-                                    int(hs["until"] - lp.t_a), obs, shifts=hs.get("shifts"), base=base, keys=keys)
+                                    int(hs["until"] - lp.t_a), obs, shifts=hs.get("shifts"), base=base, keys=keys,
+                                    swc=self._swc)
             row.setdefault("chk", []).append([lp.pid, bool(ok), "swing:" + why_s])
             if not ok:
-                self._hold_sw = None
+                self._hold_end("unsafe")
                 self._inc("swing_hold_unsafe")
                 return None
         prev = self._sent_at(int(f) + 1)
@@ -3451,11 +3863,16 @@ class Map2Controller:
               res_cmd, sup: bool) -> None:
         t0 = time.perf_counter()
         S0 = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
+        swc = None
+        if self.cfg.swing_fix:
+            S0, swc = self._mstate(S0, fo, raw, count=False)       # E3: the snapshot's state and swing flags
         inflight = self._eff_inflight(fo, f, inflight)
         row = self.row if self.row.get("f") == f else {"f": int(f), "fo": int(fo)}
         if sup and self.ctrl is not None:
             self._drop("sup")
             row["why"] = "sup"
+        if sup and self.cfg.hold_fix and self._hold_sw is not None:
+            self._hold_end("cancel_sup")                           # E3: the supervisor's keys end the hold
         row.update(own=own, mask=int(mask), m2=int(own == "m2"))
         if own == "m2":
             self._inc("ticks_m2")
@@ -3492,7 +3909,8 @@ class Map2Controller:
         swing = None
         if self.cfg.midswing:
             # E2 (b): a down slash under way (or its pogo's i-frames) is carried by the search's root - not busy
-            swing = ms.swing_from_state(S0, [ob.iid for ob in self.trk.obs()], float(self.W.params.frame_time))
+            swing = ms.swing_from_state(S0, [ob.iid for ob in self.trk.obs()], float(self.W.params.frame_time),
+                                        **(swc or {}))
             if busy == "slash" and swing is not None:
                 busy = self._busy_claw(fo, raw.get("hero") or {})
                 self._inc("midswing_snap")
@@ -3559,7 +3977,8 @@ class Map2Controller:
                     # M4 S1: her last Clawline's control while its lock lasts (control + 13)
                     "claw_ctl": self._claw_ctl if (self.cfg.press_check and self._claw_ctl is not None and
                                                    self._claw_ctl + press.CLAW_LOCK_F > int(fo)) else None,
-                    **({"swing": swing} if self.cfg.midswing else {})}
+                    **({"swing": swing} if self.cfg.midswing else {}),
+                    **({"swc": swc} if self.cfg.swing_fix else {})}
             if rev:
                 snap["cut"] = self.seq - 1      # every search from an older snapshot is cut (the reader's rule)
                 self.rev_log.append([int(self.rev_new[0]), *self.rev_new[1], self.seq, int(f)])
