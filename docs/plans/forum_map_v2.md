@@ -138,7 +138,40 @@ search's plans, the reflex for the search's latency gap, and the long-term posit
 
 ---------------------------------------------------------------------------------------------------------------------
 
-## 2. Status (2026-10-24, ~14:40 PDT)
+## 2. Status (2026-10-25, ~16:00 PDT)
+
+UPDATE 2026-10-25 ~16:00 - THE t1 WORKFLOW (the person's decision of ~07:10 after the live audit: fix together - side /
+up slashes for map2, plans that carry their follow-up and an escape tail, the per-frame tier 1, map2 never hands the keys
+to the old planner in danger; S1 - S3 offline, HANDOFF 'Task map2 - fix together (t1)' S1 - S3, forum.md 111 - 113;
+nothing live):
+- S1 SIDE / UP SLASH as map2 primitives (search.Cfg.prims 'side' / 'up', LiveCfg.prims_su): validated on 6,997 recorded
+  presses before any search use (the live run's old-planner presses 77 / 77 landed predicted, 0 false; with the direction
+  key held precision 1.000, recall 0.988; the contact on the Clapper's previous-frame shape at its position now, physics-
+  step frames). Strict w7 share 0.515 -> 0.537, planned contacts per s of control 0.84 -> 0.97.
+- S2 THE PER-FRAME TIER 1 (tier1.py, LiveCfg.tier1; 3.4.8b's tier 1 BUILT): every snapshot answered with the best
+  proven-safe plan else the least-risk one, its escape tail appended; the bot plays the newest plan whose prefix it
+  followed, every tick tier 2 has none. Tier 1 alone (parts 0) holds w7 0.93 / w13 0.60 of the engaged ticks in the strict
+  replay (the deep search 0.54 / 0.11); the 36-frame look-ahead (t1_h 36) w13 0.70. Not 100 %: the decision latency after
+  a plan ends (the fallback's keys break the next plan's bridge). Multi-event moves (CLAWSTRIKE, P1-slam) 0 of 14 for
+  tier 1 alone (the deep search 8 - 9).
+- S3 THE VERIFIERS' 15 FINDINGS on S1 / S2: none refuted; 13 fixed (su_fix: a side / up hit re-predicts - its 0.48 u
+  recoil -, a swing credits every Clapper it meets, the up slash's recoil in the air, a left press's keys, the tube's side
+  contact re-test; t1_fix: tier 1 plays an outcome only to its committed end kc, past it the outcome's own keys up to the
+  frame before its collision and never into a Clawline (t1_past 1), the bridge to that limit, a stale plan with no
+  consistent outcome replaceable, tier 1 holds its own Clawline block, no-exit outcomes ranked with the hits, the audit of
+  runs with no consistent outcome; t1_lazy: _drain 75 -> 4.5 ms max); su_band and t1_aim built, kept off. The 19 live hit
+  situations at the measured latency: hit by the hit's frame + 2 in 5 / 19 (S2's set) -> 2 (t1_fix alone 1); strict w7
+  share 0.921 -> 0.914, w13 0.636 -> 0.582 (w13 noisy); the deep acceptance's expected hits 1.639 -> 1.578 (S1's
+  over-credit removed). Identity 130 / 130 + 106 / 106 with every switch off.
+- RECOMMENDED LIVE SET (the person decides the run): tables=1,fast_danger=1,fast_windows=1,witness_fast=1,fg_nowait=1,
+  views_gap=1,views_fill=1,tube=1,midswing=1,swing_hold=1,baseline=1,swing_fix=1,tube_fix=1,hold_fix=1,late_act=1,
+  prims_su=1,parts=0,tier1=1,t1_workers=2,t1_h=36,su_fix=1,t1_fix=1,t1_lazy=1 on the frozen checkout
+  C:\ssbot\live_1v1_b52a470 (warmed: strict w7a 0.933 / w13a 0.538, 0 tracebacks, the audit 0 collisions of proven-safe
+  runs); with the deep search next to tier 1: parts=2,t1_workers=1,t2_tail=1. live_1v1_e5cab9f is superseded.
+- OPEN: w13 (the combined set below single switches in every run so far); a dev outcome whose collision is 1 - 2 f after
+  kc still ends the plan and the fallback holds the keys (needs a dev tail there); with no outcome consistent tier 1 plays
+  the most probable one's keys; tier 1 alone strikes less than the deep search and finds no multi-event move; the side
+  swing under way is not carried into a re-simulation; F5 / F11 only visible live.
 
 UPDATE 2026-10-25 06:00 - THE LIVE w7 MEASUREMENT (16 episodes run through, arm m2e3 = E3's recommended set, checkout
 live_1v1_0c662ce; C:/ssbot/data/m2_play/map2/live/live_run.txt; the audit is held until the person is back):
@@ -192,7 +225,8 @@ E0 - E3, forum.md 107 - 109; frozen checkout C:\ssbot\live_1v1_0c662ce, warmed; 
   1 u path tolerance to calibrate live; the per-frame tier 1; P5.
 
 WHERE: everything on branch worktree-wf_f1846551-5f9-1 (not merged to main, not pushed); the reflex on branch reflex;
-the no-landing query on branch airceil (from 9bff134). Frozen checkouts: C:\ssbot\live_1v1_c0329d2 (the gate's, S1 +
+the no-landing query on branch airceil (from 9bff134). Frozen checkouts: C:\ssbot\live_1v1_b52a470 (t1 S3: the
+recommended live set above), C:\ssbot\live_1v1_0c662ce (E3), C:\ssbot\live_1v1_c0329d2 (the gate's, S1 +
 S1b), C:\ssbot\live_1v1_f27ac9c (T3; the tables library hard-linked in; the switch off by default; the switch off is the
 gate's map2 with T1b / T2's hero bits and T2's engine key fixes [T3]). Arms (C:\ssbot\sandbox\1v1_arms.txt): m2 = the w7
 default rnjb + SSBOT_FORUM_HERO2=1 + SSBOT_FORUM_MAP2=1; m2p the workers on the P-cores; m2p1 one worker; h2 = rnjb +
