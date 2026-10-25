@@ -315,6 +315,8 @@ class LiveCfg:
     views_fill: bool = False       # search (search.Cfg.views_fill: the views' danger without that hole)
     baseline: bool = False         # (e) THE BASELINE PLAN: the search evaluates escape probes after its root
     #                                (search.Cfg.baseline); a final noop / unsafe / none answer sends the best safe one
+    base_lead: int = 8             # ... a baseline plan in control: the bridge (frames) its next searches start after
+    base_n: int = 2                # ... the probes the search evaluates at most (each part of the split search half)
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -1748,6 +1750,7 @@ def search_kw(cfg: LiveCfg) -> dict:
             kw[k] = True
     if getattr(cfg, "baseline", False):                                                  # (E2 (e): only when on)
         kw["baseline"] = True
+        kw["base_n"] = int(cfg.base_n)
     if getattr(cfg, "views_fill", False):                                                # (E2 (a): only when on)
         kw["views_fill"] = True
     return kw
@@ -1974,7 +1977,7 @@ def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, 
     if not outs:
         return None
     log = ms.plan_log(e, snap["fo"])
-    return LivePlan(pid=pid, part=part, ep=snap["ep"], seq=snap["seq"], t_a=int(snap["fo"]), f_snap=int(snap["f"]),
+    return LivePlan(pid=pid + ("b" if e.plan.origin == "base" and not pid.endswith("b") else ""), part=part, ep=snap["ep"], seq=snap["seq"], t_a=int(snap["fo"]), f_snap=int(snap["f"]),
                     n_pre=n_pre, n_inflight=int(snap["n_inflight"]), plan=e.plan, outs=outs,
                     value=float(e.value), hits=float(e.hits), p_safe=float(e.p_safe), origin=e.plan.origin,
                     note=e.plan.note, ms=round(ms_, 1), cap=cap, ctrl_seen=base["ctrl_seen"],
@@ -1989,7 +1992,8 @@ def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, 
                     lat_a=int(snap.get("lat_s") or 0),
                     rev=bool(snap.get("rev")), alt=False, n_sent=0, swing_a=snap.get("swing"),
                     claw_lock=-99 if snap.get("claw_ctl") is None else
-                    int(snap["claw_ctl"]) - int(snap["fo"]) + press.CLAW_LOCK_F)
+                    int(snap["claw_ctl"]) - int(snap["fo"]) + press.CLAW_LOCK_F,
+                    base=e.plan.origin == "base")                                    # E2 (e)
 
 
 WARM_SITS = Path(r"C:\ssbot\data\m2_play\map2\m3\sits.pkl")   # the acceptance set (M3): the warm-up's situations
@@ -3408,7 +3412,10 @@ class Map2Controller:
         if best is None or not idx:
             return [], []
         ks = [lp.outs[i].kc for i in idx]
-        hi = min(min(ks) if self.cfg.views_exact else lp.outs[best].kc, lp.outs[best].end, r + self.cfg.ch_lead - 1)
+        # (E2 (e): a baseline plan in control bridges only base_lead frames - the next search is rooted near now, a
+        # strike found there replaces the escape at once instead of after its 40 frames)
+        lead = int(self.cfg.base_lead) if getattr(lp, "base", False) else int(self.cfg.ch_lead)
+        hi = min(min(ks) if self.cfg.views_exact else lp.outs[best].kc, lp.outs[best].end, r + lead - 1)
         if self.ctrl_cut is not None:
             hi = min(hi, int(self.ctrl_cut) - lp.t_a)
         bridge = []

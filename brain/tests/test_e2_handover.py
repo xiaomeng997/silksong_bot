@@ -432,7 +432,7 @@ def test_switches_default_off():
     assert lv.GEO_EXT[0] == 0
     lv.set_switches(lv.LiveCfg(swing_hold=True))
     assert lv.GEO_EXT[0] > 0
-    assert lv.search_kw(lv.LiveCfg(baseline=True)) == {"baseline": True}
+    assert lv.search_kw(lv.LiveCfg(baseline=True)) == {"baseline": True, "base_n": 2}
     assert press.ON[0]
 
 
@@ -463,3 +463,18 @@ def test_steering_toward_the_path_inside_the_tube(W, p2):
     assert ctl._steer(lp, [i], i, n, n + 2, her_r, m0, row) & km.B_LEFT
     her_0 = (float(o.pos[n, 0]) + 0.05, float(o.pos[n, 1]))
     assert ctl._steer(lp, [i], i, n, n + 2, her_0, m0, row) == m0              # within steer_dx: the plan's keys
+
+
+def test_a_baseline_in_control_bridges_only_base_lead_frames(live_plan):
+    """A baseline plan in control: its bridge (the keys the next search starts after) is base_lead frames, not
+    ch_lead - a strike found from near now replaces the escape at once."""
+    sit, lp0 = live_plan
+    lens = {}
+    for base in (False, True):
+        lp = lv.LivePlan(**{**lp0.__dict__, "outs": list(lp0.outs)})
+        lp.base = base
+        ctl = lv.Map2Controller(cfg=lv.LiveCfg(prio="as", baseline=True))
+        ctl.ctrl, ctl.ctrl_idx = lp, list(range(len(lp.outs)))
+        lens[base] = len(ctl._bridge_keys(100)[0])
+    assert lens[True] <= lv.LiveCfg().base_lead
+    assert lens[False] >= lens[True]
