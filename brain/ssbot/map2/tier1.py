@@ -438,6 +438,11 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
         st = ms.state_at(W, o.tr, k0)
         if st is None:
             continue
+        Sk = np.asarray(st[0], float).reshape(km.K, -1)[:, 0]
+        if Sk[km.ATTACKING] > 0 or Sk[km.BOUNCE] >= 0:
+            # (mid-swing / mid-bounce at the deviation: the probe's plain roll would miss the strike's contact, its
+            # recoil and its bounce - the smokes' audit found such tails colliding; no tail there)
+            continue
         masks = ms._probe_masks(st[0], int(H))
         _, boxes, off = ms._packed_danger(o.branch, k0, int(H), int(getattr(o, "ifr_until", -1)), cfg.margins)
         cu = np.array([-1.0, 0, 0, 0, 0, 0, 0])

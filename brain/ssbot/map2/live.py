@@ -827,6 +827,8 @@ def build_outs(ev, margins: bool = True, all_outs: bool = False, light: bool = F
         d.rare_k = np.array(sorted(d.rare), np.int64)
         d.label = o.branch.label() if hasattr(o.branch, "label") else ""
         d.contacts = [(int(k), int(i), str(kd)) for (k, i, kd) in tr.contacts]
+        if dtl is not None:
+            d.contacts = [c for c in d.contacts if c[0] <= k0t]       # (the replaced keys' later strikes do not come)
         d.blocks = []
         d.ctrls = []
         for si, (k0, m, _, c) in enumerate(d.segs):
@@ -3620,6 +3622,10 @@ class Map2Controller:
                         continue
                     pos_over = dict(info.get("pos_over") or {})
                     lp._rep_k = int(f) + 2
+                    if not (cfg.replay and cfg.replay_strict):
+                        # (the repair's world - her state now, the keys in flight: the audit re-simulates from it)
+                        lp._rep_base = (int(fo), np.asarray(S0_, float).copy(), np.asarray(infl_, np.int64).copy(),
+                                        hold_, int(lat_))
                 self._t1_end("new")
                 self.t1_ctrl = lp
                 lp._pos_over = pos_over
@@ -3852,9 +3858,17 @@ class Map2Controller:
                 self._inc("audit_t1_incons")
                 return
             idx = self.t1_exe[1]
-            res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a), list(idx),
-                            int(k1 - lp.t_a), **self._msw_kw(),
-                            **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
+            rb = getattr(lp, "_rep_base", None)
+            if rb is not None:
+                # (a plan repaired live / in the open replay: from the repair's own state and the keys sent after it)
+                fo_r, S_r, inf_r, hold_r, lat_r = rb
+                cm_r = list(inf_r) + [int(self._sent_at(k) or 0) for k in range(int(lp._rep_k), k1 + 1)]
+                res = audit_run(self.W, lp, int(fo_r - lp.t_a), S_r, np.asarray(cm_r, np.int64), hold_r, int(lat_r),
+                                list(idx), int(k1 - lp.t_a), **self._msw_kw())
+            else:
+                res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a), list(idx),
+                                int(k1 - lp.t_a), **self._msw_kw(),
+                                **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
             self._inc("audit_t1_runs")
             self._inc("audit_t1_runs_" + ("safe" if lp.t1_safe else "risk"))
             cols = [x for x in res if x[1] is not None]

@@ -310,3 +310,13 @@ def test_a_plan_unaware_of_the_plan_in_hand_replaces_it_only_when_better(W):
     ctl.pre(102, 102, raw, sit.S, inf, hold)
     c = ctl.stats()["counts"]
     assert ctl.t1_ctrl is a and c.get("t1_unaware", 0) + c.get("t1_broken", 0) >= 1
+
+
+def test_no_dev_tail_from_a_swing():
+    """A dev tail is not made from a state mid-swing / mid-bounce (the probe's plain roll misses the strike's contact
+    and bounce) and a dev-tailed outcome lists no contact after its tail's start."""
+    import inspect
+    src = inspect.getsource(t1.t1_tail)
+    assert "km.ATTACKING] > 0 or Sk[km.BOUNCE] >= 0" in src
+    src2 = inspect.getsource(lv.build_outs)
+    assert "c[0] <= k0t" in src2
