@@ -1197,6 +1197,20 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
   two-Clapper situations whether the value prefers it; a disagreement means a missing mechanic (find it) or a horizon
   too short (rule 4 may need seconds: then a longer-term position term). Part of these rules may come out of the aim
   steering.
+- THE KNOWLEDGE LAYER - DISTILLED OFFLINE (the person, 2026-10-24: ''stand between the two', 'drive the Clapper to the
+  middle' are knowledge - maybe they need to be summarised offline'): the online value sees ~3 s (the funnel, the next
+  1 - 2 s of windows); such rules pay off over many seconds (herding takes a while; standing between them makes their
+  later moves easier for a long time), so they come from data: (1) a few configuration features - her place between /
+  outside the two, each Clapper's distance to its nearest wall, their distance, the focus Clapper's distance to the
+  middle, the facings, their current moves; (2) from the recordings (the bot's and the person's real play, never
+  _excluded) the outcome of the next 5 - 10 s per moment - hits landed, HP lost - as a table 'configuration -> long-term
+  value'; (3) the model's simulation where the recordings are thin (both pinned in a corner) and for counterfactuals
+  (the same configuration played from between vs from one side); (4) the outputs: the table as the long-term
+  planner's terminal value beyond its horizon, and a readable rule list with measured effect sizes - the person's four
+  rules checked one by one, new ones possibly found. Cautions: the recordings' outcomes are the old policy's - re-learn
+  from map2's own fights later; simulation error grows with the horizon, so recordings first. The recordings part needs
+  no code changes and can run beside other offline work (not during a profiling run); the simulation part with the
+  planner.
 - WHEN: 'next stage after the A1_n tables are in the search' [spec] (Q12).
 
 ---------------------------------------------------------------------------------------------------------------------
