@@ -140,6 +140,16 @@ search's plans, the reflex for the search's latency gap, and the long-term posit
 
 ## 2. Status (2026-10-24, ~14:40 PDT)
 
+UPDATE 2026-10-25 06:00 - THE LIVE w7 MEASUREMENT (16 episodes run through, arm m2e3 = E3's recommended set, checkout
+live_1v1_0c662ce; C:/ssbot/data/m2_play/map2/live/live_run.txt; the audit is held until the person is back):
+- 15 / 16 kills, 4 hitless; 18 hits / 34 HP before the kills (the hammer 11, the body 3, the rune slam 2, a bomb 2); kill
+  median 39 s (28.6 - 63.4) vs the switch-off smokes of the same morning 6 / 6 hitless in 16 - 19 s.
+- map2 held the keys 59.5 % of the engaged ticks (the gate 33 %); on every hit frame the keys were the FALLBACK's (17) or
+  its slam script's (1), never a map2 plan; in 7 of 18 map2's plan had ended / dropped within 20 f before the hit.
+- Moves: map2 85 down-slash strikes, 122 hooks, 21 slam strikes, 1 Clawline into a slam's first window, 0 rides, 0 SIDE
+  SLASHES (the fallback 123) - search.Cfg.prims has no side / up slash; the person saw it jump for nothing and stand in
+  front of the Clapper without slashing. Late ticks 25 %.
+
 UPDATE 2026-10-25 03:20 - THE ev WORKFLOW (E0 - E3, offline; HANDOFF 'Task map2 - the evaluation and the handover'
 E0 - E3, forum.md 107 - 109; frozen checkout C:\ssbot\live_1v1_0c662ce, warmed; nothing live):
 - E0 profile (live w7): Python danger geometry 43.6 % of a decision, the envelope passes 19 %, witness + windows 18 %,
