@@ -369,13 +369,14 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
     first. COMMON: one probe appended to the plan itself (after a Clawline: a segment anchored at its control, every
     hook variant), the extended plan re-realized (the hold filter) and re-simulated in every safe outcome that ends at
     the plan's end - kept only when every one keeps its strikes and path to the end and touches no danger of its branch
-    (margins on) through the tail. DEV: an outcome whose committed part ends at a deviation (a collision follows after
-    its reveal + lag) gets its own probe from that frame, checked against its branch's danger (env_jit.probe_exit).
+    (margins on) through the tail. DEV: the outcomes whose committed part ends at a deviation (a collision follows after
+    their reveal + lag), grouped by that frame: the plan cut there and one probe appended, re-realized and re-simulated in
+    each of them the same way - kept outcomes replace theirs (a plan of one segment without a Clawline; not inside the
+    prefix, not from a state mid-swing / mid-bounce).
     n_min: the plan's own keys start there (the prefix before it is played whatever happens): no dev tail before it.
     -> (the Eval with the common tail's outcomes - or e itself -, {id(outcome): (k0, masks, pos)} the dev tails)."""
     import copy as _copy
     import dataclasses as _dc
-    from ssbot.map2 import env_jit as ej
     W, cfg = S.W, S.cfg
     face0 = int(sit.S[km.FACE]) if sit.S[km.FACE] != 0 else 1
     outs = list(e.outcomes)
@@ -430,29 +431,68 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
                     e_ext.nominal = rep.get(id(e.nominal), e.nominal) if e.nominal is not None else None
                     e_ext.t1_tail = int(i)
                     break
+    # DEV: the outcomes that must deviate (grouped by their deviation frame): the plan cut there and one probe
+    # appended, re-realized and re-simulated exactly in each of them (as the common tail) - plans of one segment
+    # without a Clawline only; the outcomes so tailed replace theirs (their own keys and path from the deviation on)
     dev_tails = {}
+    by_k: dict = {}
     for o in dev:
-        k0 = int(o.k_end)
-        if k0 < int(n_min):
+        by_k.setdefault(int(o.k_end), []).append(o)
+    one_seg = len(e.plan.segs) == 1 and e.plan.segs[0].claw is None
+    rep_dev = {}
+    for k0, grp in sorted(by_k.items()):
+        if k0 < int(n_min) or not one_seg:
             continue
-        st = ms.state_at(W, o.tr, k0)
+        o0 = max(grp, key=lambda o: o.p)
+        st = ms.state_at(W, o0.tr, k0)
         if st is None:
             continue
         Sk = np.asarray(st[0], float).reshape(km.K, -1)[:, 0]
         if Sk[km.ATTACKING] > 0 or Sk[km.BOUNCE] >= 0:
-            # (mid-swing / mid-bounce at the deviation: the probe's plain roll would miss the strike's contact, its
-            # recoil and its bounce - the smokes' audit found such tails colliding; no tail there)
+            # (mid-swing / mid-bounce at the deviation: no tail there - b0fffa1's smokes)
+            continue
+        seg0 = e.plan.segs[0]
+        if k0 > len(seg0.masks):
             continue
         masks = ms._probe_masks(st[0], int(H))
-        _, boxes, off = ms._packed_danger(o.branch, k0, int(H), int(getattr(o, "ifr_until", -1)), cfg.margins)
-        cu = np.array([-1.0, 0, 0, 0, 0, 0, 0])
         for i in _away_rank(masks, st[0], sit):
-            if ej.probe_exit(np.asarray(st[0], np.float64), cu, masks[i:i + 1], W.E.udt, W.E.P, W.TT, boxes, off,
-                             ms.PROBE_EPS) >= 0:
-                r = W.roll(st[0], masks[i])
-                dev_tails[id(o)] = (k0, masks[i].copy(), np.asarray(r.pos[0, 1:], float).copy())
+            sg = ms.Seg(np.concatenate([np.asarray(seg0.masks[:k0], np.int64), masks[i]]).astype(np.int64),
+                        [(j, iid) for (j, iid) in seg0.dsl if j < k0], None, (seg0.tag + "+dtail").strip("+"))
+            pe = ms.Plan([sg], e.plan.origin, (e.plan.note + " dtail").strip())
+            if S.realizer is not None:
+                pe = S.realizer(pe)
+            new, ok = [], True
+            for o in grp:
+                T = int(getattr(getattr(o, "P", None), "T", None) or e.pred.T)
+                var = next((v for v in sk.HOOK_VARIANTS if v.name == o.tr.variant), sk.HOOK_VARIANTS[0])
+                tr = S.ev.sim(sit, pe, var, face0, o.branch, T, cfg.lag)
+                same = (len(tr.pos) > k0 and
+                        sorted(c for c in tr.contacts if c[0] <= k0) == sorted(c for c in o.tr.contacts if c[0] <= k0)
+                        and np.allclose(tr.pos[:k0 + 1], o.tr.pos[:k0 + 1], atol=1e-9))
+                if not same:
+                    ok = False
+                    break
+                k1 = min(int(tr.end), T)
+                kc = ms.first_collision(o.branch, tr, k0 + 1, k1, cfg.margins) if k1 > k0 else None
+                kx = ms.bad_frame(tr, k0 + 1, int(tr.end))
+                if kc is not None or kx is not None:
+                    ok = False
+                    break
+                o2 = _dc.replace(o, tr=tr, safe=True, why="tail", k_col=None, dev=None)
+                for k_, v_ in o.__dict__.items():
+                    if k_ not in {f.name for f in _dc.fields(o)}:
+                        o2.__dict__[k_] = v_
+                o2.k_end = int(tr.end)
+                new.append((o, o2))
+            if ok:
+                for (a, b) in new:
+                    rep_dev[id(a)] = b
                 break
-    # the dev tails belong to the outcomes of the returned Eval (the common tail replaced only the non-dev ones)
+    if rep_dev:
+        if e_ext is e:
+            e_ext = _copy.copy(e)
+        e_ext.outcomes = [rep_dev.get(id(o), o) for o in e_ext.outcomes]
+        e_ext.t1_dev = len(rep_dev)
     return e_ext, dev_tails
 
 

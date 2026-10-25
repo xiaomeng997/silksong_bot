@@ -219,6 +219,11 @@ def test_the_tail_starts_after_the_prefix(W):
             assert o.k_end >= 8                     # (no deviation inside the prefix)
     e2, dev = t1.t1_tail(S, sit, r.ev, 40, n_min=8)
     assert all(v[0] >= 8 for v in dev.values())
+    for o in e2.outcomes:
+        if o.why == "tail":                         # (a dev outcome given its own exact tail: safe to its new end)
+            T = o.P.T if hasattr(o, "P") else e2.pred.T
+            assert o.safe and o.k_end == o.tr.end and ms.first_collision(o.branch, o.tr, 9, min(o.tr.end, T),
+                                                                          True) is None
 
 
 def test_the_controller_repairs_a_plan_to_take_over(W):

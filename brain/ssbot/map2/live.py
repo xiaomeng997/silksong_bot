@@ -2368,7 +2368,7 @@ def _t1_search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted,
     lp.t1, lp.t1_safe, lp.t1_kind, lp.t1_risk = True, bool(r.safe), str(r.kind), tuple(r.risk)
     lp.n_cand = int(r.n_cand)
     lp.t1_tail = getattr(e, "t1_tail", None)
-    lp.t1_dev = len(dev)
+    lp.t1_dev = len(dev) or int(getattr(e, "t1_dev", 0) or 0)
     lp.t1_root_ms = r.stats.get("root_ms")
     lp.t1_st = {k: r.stats.get(k) for k in ("root_ms", "ms_cont", "ms_esc", "ms_pass", "ms_strikes", "ms_esc2",
                                             "n_strike_eval", "capped", "prefix_dev")}
