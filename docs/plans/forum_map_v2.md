@@ -1090,6 +1090,14 @@ coverage depth be made the same as the old planner's?') [DESIGNED; E2]
   one dash action in the bundle. CHECK BEFORE DROPPING TIER 2: tier 1 alone, re-planned every frame in closed loop,
   on M3's acceptance situations - which of P1 - P5 and the regression moves still come out, vs the deep search; a move
   that does not marks a real need for a multi-event commitment. Until then no new work on tier 2 (its code stays).
+- THE COMMIT CHECK BELONGS TO THE ASYNCHRONOUS TIER ONLY (the person asked 2026-10-24 'what is the commit check, does the
+  old planner need it?'): the deep search's plan comes back from a snapshot several to tens of frames old, so before
+  it takes the keys it is re-simulated exactly from her observed state (the keys in flight + its commands, every
+  outcome consistent with the Clappers seen now; path within 0.2 u, no danger touched) - p99 20 - 25 ms, and 21 % of
+  the plans failed it (M4d2). The old planner plans every frame from the current state and uses the plan at once
+  (its CONTINUE is just one more row checked that tick), so it needs none; neither does tier 1 (synchronous, the exact
+  tables + the exact per-branch danger; only the press validity stays). Dropping tier 2 drops the commit check, its
+  cost and its 21 % of lost plans - one more reason for it.
 
 #### 3.4.9 Logs and tools [M4c, M4d2, G]
 
