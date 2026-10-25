@@ -394,6 +394,14 @@ def _run_one(args) -> dict:
             _W = ms.World()
     cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else (),
                  **extra.get("cfg", {}))
+    if extra.get("su_fix"):
+        # t1 S3 (LiveCfg.su_fix / su_band; tier1 t1_fix / t1_aim): the verifiers' fixes in the worker
+        from ssbot.map2 import clapper as cm_, tier1 as t1m_
+        ms.SU_FIX[0], cm_.UP_RECOIL[0] = True, True
+        ms.SU_BAND[0] = float(extra.get("su_band", 0.0))
+    if extra.get("t1_fix") or extra.get("t1_aim"):
+        from ssbot.map2 import tier1 as t1m_
+        t1m_.T1_FIX[0], t1m_.T1_AIM[0] = bool(extra.get("t1_fix")), bool(extra.get("t1_aim"))
     if extra.get("tier1"):
         # t1 S2 ('tier 1 alone'): tier 1's decision (depth 1, the 1-event 60-frame pass), chained greedily at the nodes
         # its chosen plan reaches (ssbot.map2.tier1.t1_chain) - cap per decision
@@ -629,6 +637,11 @@ def cmd_run(a) -> int:
     if a.tier1:
         extra["tier1"] = int(a.tier1)
         extra["t1_first"] = int(a.t1_first)
+    for k_ in ("su_fix", "t1_fix", "t1_aim"):                   # t1 S3
+        if getattr(a, k_, False):
+            extra[k_] = True
+    if getattr(a, "su_band", 0.0):
+        extra["su_band"] = float(a.su_band)
     if a.cfg:
         # Cfg overrides k=v;k=v (M4b: the live configuration's flags)
         from ssbot.map2 import search as ms_
@@ -955,6 +968,10 @@ def main(argv=None) -> int:
                                                            "with its choice as CONT, the windows rotated)")
     p.add_argument("--tier1", type=int, default=0, help="t1 S2: 'tier 1 alone' - tier 1's decision chained this many "
                                                         "times at its plans' nodes (cap per decision); 0: the search")
+    p.add_argument("--su-fix", dest="su_fix", action="store_true", help="t1 S3: LiveCfg.su_fix in the search")
+    p.add_argument("--su-band", dest="su_band", type=float, default=0.0, help="t1 S3: LiveCfg.su_band (with --su-fix)")
+    p.add_argument("--t1-fix", dest="t1_fix", action="store_true", help="t1 S3: tier1.T1_FIX (the least-risk order)")
+    p.add_argument("--t1-aim", dest="t1_aim", action="store_true", help="t1 S3: tier1.T1_AIM (the tail's aim check)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")

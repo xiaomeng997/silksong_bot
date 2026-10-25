@@ -47,6 +47,13 @@ from ssbot.map2 import search as ms
 from ssbot.map2 import strike as sk
 
 
+T1_FIX = [False]   # t1 S3 (LiveCfg.t1_fix): risk_key counts an outcome without an exit (no escape after the plan's
+#                    end: it ends in danger, the next decision or the fallback inherits it) with the colliding ones
+T1_AIM = [False]   # t1 S3 (LiveCfg.t1_aim): the escape tail also checked against the Clappers RE-PREDICTED under the
+#                    tailed path (their Jump Aim / Close-Far / Slam Range follow her real path, not her end position)
+AIM_STATS = {"checked": 0, "rejected": 0, "unmatched": 0, "pred": 0}
+
+
 @dataclass
 class T1Result:
     ev: object                   # the chosen plan's Eval (search.Eval)
@@ -83,7 +90,45 @@ def risk_key(e) -> tuple:
         elif not o.safe:
             pe += o.p
     kmean = kh / ph if ph > 0 else 999.0
+    if T1_FIX[0]:
+        # t1 S3: an outcome with no exit is unsafe as a colliding one is (its danger lies past the plan's end, where
+        # no audit looks): first the p of every unsafe outcome, then the later collisions, then the colliding share
+        return (round(pp, 4), round(ph + pe, 4), -round(kmean, 2), round(ph, 4), -round(float(e.value_open), 4))
     return (round(pp, 4), round(ph, 4), -round(kmean, 2), round(pe, 4), -round(float(e.value_open), 4))
+
+
+def _aim_ok(S, sit, o, tr, k0: int, k1: int, cache: dict) -> bool:
+    """t1 S3 (T1_AIM): the tail k0 + 1 .. k1 of the tailed trajectory tr in outcome o, checked against the Clappers
+    re-predicted under the tailed path (o's hits fixed; E1's aim check): every branch view with o's choices before k0
+    (its timing view) collision-free. A tail none matches is rejected."""
+    AIM_STATS["checked"] += 1
+    hits: dict = {}
+    for (ii, kk), v in (getattr(o, "fixed", None) or {}).items():
+        hits.setdefault(ii, {})[kk] = v
+    T = int(k1) + 2
+    key = (np.asarray(tr.pos[:T + 1]).tobytes(), repr(sorted((i, sorted(h.items())) for i, h in hits.items())), T)
+    P2 = cache.get(key)
+    if P2 is None:
+        P2 = cache[key] = S.ev.predict(sit, ms.hero_path(tr, T, hits), T)
+        AIM_STATS["pred"] += 1
+    base = o.branch
+    cs = ms._choice_set(getattr(base, "_base", base), int(k0))
+    view = getattr(base, "tview", "")
+    matched = 0
+    for b2 in P2.branches:
+        if ms._choice_set(b2, int(k0)) != cs:
+            continue
+        for v2 in ms.timing_views(b2):
+            if view and getattr(v2, "tview", "") not in ("", view):
+                continue
+            matched += 1
+            if ms.first_collision(v2, tr, int(k0) + 1, int(k1), S.cfg.margins) is not None:
+                AIM_STATS["rejected"] += 1
+                return False
+    if not matched:
+        AIM_STATS["unmatched"] += 1
+        return False
+    return True
 
 
 def _rv(b) -> int | None:
@@ -387,6 +432,7 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
     nd = [o for o in outs if o.safe and int(getattr(o, "k_end", o.tr.end)) == int(o.tr.end)]
     dev = [o for o in outs if o.safe and int(getattr(o, "k_end", o.tr.end)) < int(o.tr.end)]
     e_ext = e
+    aim_cache: dict = {}
     if nd:
         o0 = max(nd, key=lambda o: o.p)
         st = ms.state_at(W, o0.tr, int(o0.tr.end))
@@ -419,6 +465,9 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
                     kc = ms.first_collision(o.branch, tr, k0 + 1, k1, cfg.margins) if k1 > k0 else None
                     kx = ms.bad_frame(tr, k0 + 1, int(tr.end))
                     if kc is not None or kx is not None:
+                        ok = False
+                        break
+                    if T1_AIM[0] and k1 > k0 and not _aim_ok(S, sit, o, tr, k0, k1, aim_cache):
                         ok = False
                         break
                     o2 = _dc.replace(o, tr=tr)
@@ -480,6 +529,9 @@ def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -
                 kc = ms.first_collision(o.branch, tr, k0 + 1, k1, cfg.margins) if k1 > k0 else None
                 kx = ms.bad_frame(tr, k0 + 1, int(tr.end))
                 if kc is not None or kx is not None:
+                    ok = False
+                    break
+                if T1_AIM[0] and k1 > k0 and not _aim_ok(S, sit, o, tr, k0, k1, aim_cache):
                     ok = False
                     break
                 o2 = _dc.replace(o, tr=tr, safe=True, why="tail", k_col=None, dev=None)

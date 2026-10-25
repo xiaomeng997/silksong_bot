@@ -398,6 +398,27 @@ class LiveCfg:
     #                                strict replay: repair_check) and adopted when it passes - the takeover from the
     #                                fallback, whose keys rarely follow the bridge it sent
     t1_rep_tol: float = 1.0        # u: that repair's path tolerance (the tube's tube_path: the collisions stay exact)
+    # t1 S3 (HANDOFF 'Task map2 - fix together (t1) - stage S3'; the verifiers' findings on S1 / S2; default off - off:
+    # S1 / S2 as before)
+    su_fix: bool = False           # (with prims_su) a side / up hit re-predicts the Clapper (its recoil moves it 0.48 u
+    #                                in every state), a swing credits every Clapper its polygons meet, an up slash's hit
+    #                                in the air pushes it up (clapper.UP_RECOIL), a left-facing slash's keys decoded as
+    #                                the right-facing one's, the tube re-tests a side / up contact ahead on her offset
+    #                                path (su_kept) instead of always dropping to the exact re-check
+    su_band: float = 0.0           # (with su_fix) u: a side / up press the model calls a miss whose polygons meet the
+    #                                target box grown by this is a forced collision (uncertain: the game may land it)
+    t1_fix: bool = False           # tier 1: an outcome is played only to its committed end kc (the plan ends when a
+    #                                possible outcome's kc passed - tier 2's M4d rule; none consistent: only outcomes
+    #                                within their kc), its bridge capped at the alive outcomes' kc, a newer proven-safe
+    #                                plan replaces one with no consistent outcome (and the plan in hand is valued by
+    #                                what is left of it), tier 1 holds the keys through its own Clawline's block, the
+    #                                least-risk order counts outcomes without an exit as hits (tier1.T1_FIX), the
+    #                                runs with no consistent outcome audited too
+    t1_aim: bool = False           # tier 1's escape tail checked against the Clappers re-predicted under the tail
+    #                                (their Jump Aim / Close-Far / Slam Range follow her real path - tier1.T1_AIM)
+    t1_lazy: bool = False          # a tier-1 plan's outcomes travel as one pickled blob (LivePlan.lazy_outs), unpickled
+    #                                on the bot's thread only when the plan is used (adopted / checked) - not for every
+    #                                plan received (_drain's time on the bot's thread: the 'drms' log field)
     log: bool = True
 
     @classmethod
@@ -444,6 +465,14 @@ def set_switches(cfg: LiveCfg) -> None:
     SU[0] = bool(getattr(cfg, "prims_su", False))                                          # t1 S1
     T1[0] = bool(getattr(cfg, "tier1", False))                                             # t1 S2
     ms.SU_SHRINK[0] = float(getattr(cfg, "su_shrink", 0.05))
+    # t1 S3 (the verifiers' findings on S1): su_fix - a side / up hit re-predicts, the swing credits every Clapper it
+    # meets, the up slash's recoil in the air, a left-facing slash's keys; su_band - the uncertain band of a miss
+    ms.SU_FIX[0] = bool(getattr(cfg, "su_fix", False))
+    ms.SU_BAND[0] = float(getattr(cfg, "su_band", 0.0)) if ms.SU_FIX[0] else 0.0
+    cm.UP_RECOIL[0] = ms.SU_FIX[0]
+    from ssbot.map2 import tier1 as _t1m
+    _t1m.T1_FIX[0] = bool(getattr(cfg, "t1_fix", False))
+    _t1m.T1_AIM[0] = bool(getattr(cfg, "t1_aim", False))
 
 
 # ---- the oracle's hold filter, one lane (kinematics.hold_filter, compiled) ------------------------------------------
@@ -675,12 +704,15 @@ class OutData:
     highest body top per frame} (strike.union_tops: the side rule's; unset in older plans - the robust top then)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
                  "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig", "face", "gnd",
-                 "sboxes", "safe")
+                 "sboxes", "safe", "susw", "cen")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
         first frames) - her position is the pull's, not her keys'."""
         return any(P < n <= c + CTRL_SETTLE for (P, c) in self.blocks)
+
+
+LAZY_STATS = {"unpacked": 0}
 
 
 def _geo_cut(br, kc: int, margins: bool) -> tuple:
@@ -814,8 +846,13 @@ def build_outs(ev, margins: bool = True, all_outs: bool = False, light: bool = F
         d.boxes = {iid: np.asarray(sk.robust_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
         d.tops = {iid: np.asarray(sk.union_tops(o.branch, iid, None), float) for iid in sorted(tgt)}
         if SU[0]:
-            # t1 S1: the side / up slashes' target boxes (strike.su_boxes) of every target
-            d.sboxes = {iid: np.asarray(sk.su_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
+            # t1 S1: the side / up slashes' target boxes (strike.su_boxes) of every target (t1 S3 su_fix: of every
+            # Clapper - a swing damages each it meets; the swings' records and her box centres for the tube's re-test)
+            sids_ = sorted(tgt) if not ms.SU_FIX[0] else sorted(set(tgt) | {int(i) for i in brnum.barr(o.branch)[0]})
+            d.sboxes = {iid: np.asarray(sk.su_boxes(o.branch, iid, None), float) for iid in sids_}
+            if ms.SU_FIX[0] and getattr(tr, "susw", None):
+                d.susw = list(tr.susw)
+                d.cen = 0.5 * (np.asarray(tr.box[:kc + 1, :2], float) + np.asarray(tr.box[:kc + 1, 2:], float))
         key = (id(o.branch), kc)
         if light:
             d.geo, d.rare = None, {}                    # (t1 S2: the tier-1 plan's execution needs no geometry)
@@ -853,6 +890,25 @@ class LivePlan:
 
     def __init__(self, **kw):
         self.__dict__.update(kw)
+
+    def __getattr__(self, name):
+        # t1 S3 (LiveCfg.t1_lazy): a tier-1 plan's outcomes travel pickled (lazy_outs) - unpickled on the bot's thread
+        # at their first use (the plan adopted / checked), not for every plan received
+        if name == "outs":
+            z = self.__dict__.get("_outz")
+            if z is not None:
+                import pickle
+                self.__dict__["outs"] = pickle.loads(z)
+                del self.__dict__["_outz"]
+                LAZY_STATS["unpacked"] += 1
+                return self.__dict__["outs"]
+        raise AttributeError(name)
+
+    def lazy_outs(self) -> None:
+        """t1 S3 (t1_lazy): the outcomes pickled into one blob (the worker, before the plan is sent)."""
+        import pickle
+        if "outs" in self.__dict__:
+            self.__dict__["_outz"] = pickle.dumps(self.__dict__.pop("outs"), protocol=pickle.HIGHEST_PROTOCOL)
 
     def consistent(self, n: int, her_xy, obs: list, cfg: LiveCfg, idx=None, hero: bool = True,
                    pos_over: dict | None = None) -> tuple:
@@ -1423,7 +1479,8 @@ def contact_kept(o: OutData, pos: np.ndarray, n: int, dx: float, dy: float, rx: 
     the tube does not keep the outcome (the exact re-check judges it: a contact a frame off moves the bounce and its
     i-frames)."""
     if SU[0] and any(kd in sk.SU_KINDS and n < int(k) <= o.kc for (k, _, kd) in o.contacts):
-        return False                      # (t1 S1: a side / up contact ahead - the exact re-check judges it)
+        if not (ms.SU_FIX[0] and su_kept(o, pos, n, dx, dy, rx, ry, vh)):
+            return False                  # (t1 S1: a side / up contact ahead - the exact re-check judges it)
     ahead = [(int(k), int(i)) for (k, i, kd) in o.contacts if kd == "down" and n < int(k) <= o.kc]
     if not ahead:
         return True
@@ -1447,6 +1504,48 @@ def contact_kept(o: OutData, pos: np.ndarray, n: int, dx: float, dy: float, rx: 
             c = sk.dslash_contact(ps, face[:m], gnd[:m], kp, bx, press.SHRINK[0] if press.ON[0] else 0.0,
                                   c_min=n + 1 if kp + sk.DS_ACTIVE[0] <= n else None)
             if c != kc_:
+                return False
+    return True
+
+
+def su_kept(o: OutData, pos: np.ndarray, n: int, dx: float, dy: float, rx: float, ry: float, vh: int) -> bool:
+    """t1 S3 (su_fix; the verifiers' finding: a side / up contact ahead always sent the tube to its exact re-check,
+    which refuses a side swing under way - the plan was dropped mid-swing): every planned side / up contact after
+    frame n still comes at its frame with her box centres moved by her offset (dx, dy) + its drift (rx, ry) as
+    contact_kept moves the path, at the offsets +- eps of the contact (strike.su_contact on the outcome's sboxes, the
+    swing's own facing / kin alive / physics steps as simulated). False: a contact without its swing record."""
+    sw = getattr(o, "susw", None)
+    cen0 = getattr(o, "cen", None)
+    if not sw or cen0 is None or getattr(o, "sboxes", None) is None:
+        return False
+    rec = {(int(c), int(i)): (int(kp), str(kd), int(fc), al, st) for (kp, c, i, kd, fc, al, st) in sw}
+    for (k, iid, kd) in o.contacts:
+        k, iid = int(k), int(iid)
+        if kd not in sk.SU_KINDS or not (n < k <= o.kc):
+            continue
+        r_ = rec.get((k, iid))
+        bx = o.sboxes.get(iid)
+        if r_ is None or bx is None:
+            return False
+        kp, kd_, fc, al, st = r_
+        m = min(len(cen0), len(pos), len(o.pos), kp + len(al))
+        if k >= m:
+            return False
+        alive = np.ones(m, bool)
+        steps = np.ones(m, np.int64)
+        alive[kp:m] = al[:m - kp]
+        steps[kp:m] = st[:m - kp]
+        hh_ = float(min(k - n, int(vh)))
+        e = float(eps_x([k - n])[0])
+        base = np.asarray(cen0[:m], float) + (np.asarray(pos[:m], float) - np.asarray(o.pos[:m], float))
+        a_ = sk.su_active(kd_)[0]
+        for (ex, ey) in ((0.0, 0.0), (-e, -e), (-e, e), (e, -e), (e, e)):
+            cs = base.copy()
+            cs[n + 1:, 0] += dx + rx * hh_ + ex
+            cs[n + 1:, 1] += dy + ry * hh_ + ey
+            c = sk.su_contact(cs, fc, kp, bx, kd_, ms.SU_SHRINK[0], alive=alive, steps=steps,
+                              c_min=n + 1 if kp + a_ <= n else None)
+            if c != k:
                 return False
     return True
 
@@ -1586,7 +1685,10 @@ def _su_fn(o: OutData, s: int = 0):
     sb = getattr(o, "sboxes", None)
     if not SU[0] or sb is None:
         return None
-    return lambda iid: (sb[iid][s:] if iid in sb else None)
+    fn = lambda iid: (sb[iid][s:] if iid in sb else None)   # noqa: E731
+    if ms.SU_FIX[0]:
+        fn.ids = tuple(sorted(int(i) for i in sb))              # t1 S3: every Clapper the swing meets
+    return fn
 
 
 def _tops_fn(o: OutData, s: int = 0):
@@ -1809,7 +1911,7 @@ def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int,
 
 
 def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: tuple, lat_s: int, idx: list,
-              k_last: int, midswing: bool = False, iids=(), swc: dict | None = None) -> list:
+              k_last: int, midswing: bool = False, iids=(), swc: dict | None = None, mark_kc: bool = False) -> list:
     """M4d2 (LiveCfg.audit_runs, the smoke's safety audit): a control run's keys AS SENT - the keys in flight at its
     commit and map2's keys after it (cmds, frames s + 1 .. of the plan; the plan's own commands after the run complete
     its segments) - re-simulated from the commit's state S0 in each outcome idx still possible at the run's end and
@@ -1832,8 +1934,10 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
                          swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing, swc),
                          su_fn=_su_fn(o, s))
         kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
-        out.append((int(i), None if kc is None else int(kc), ""))
+        out.append((int(i), None if kc is None else int(kc), "past kc" if (kc is None and mark_kc and
+                                                                           int(k_last) > int(o.kc)) else ""))
     return out
+
 
 
 def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs: list, cfg: LiveCfg,
@@ -2360,8 +2464,10 @@ def _t1_search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted,
     if r.ev is None:
         return {**base, "status": "none", "ms": round(r.ms, 1)}
     e, dev = r.ev, {}
+    aim0, tt0 = dict(t1m.AIM_STATS), time.perf_counter()
     if cfg.t1_tail:
         e, dev = t1m.t1_tail(S, sit, r.ev, int(cfg.exit_tail_h), n_min=n_pre)
+    tail_ms = (time.perf_counter() - tt0) * 1e3
     ms_ = (time.perf_counter() - t0) * 1e3
     lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, False, ms_, res_meta=None, final=True,
                     pid=f"t{part % 100}:{snap['seq']}", all_outs=True, light=False, dev_tails=dev)
@@ -2374,8 +2480,14 @@ def _t1_search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted,
     lp.t1_root_ms = r.stats.get("root_ms")
     lp.t1_st = {k: r.stats.get(k) for k in ("root_ms", "ms_cont", "ms_esc", "ms_pass", "ms_strikes", "ms_esc2",
                                             "n_strike_eval", "capped", "prefix_dev")}
+    if cfg.t1_aim or cfg.t1_fix:
+        # t1 S3: the tail's time and the aim check's counts in this decision (the plan dumps)
+        lp.t1_st["ms_tail"] = round(tail_ms, 2)
+        lp.t1_st["aim"] = {k: int(t1m.AIM_STATS[k] - aim0.get(k, 0)) for k in t1m.AIM_STATS}
     lp.had_prev = prev is not None
     lp.t1_prev_pid = str(tp[2]) if (prev is not None and tp is not None and len(tp) > 2) else None
+    if cfg.t1_lazy:
+        lp.lazy_outs()                                      # t1 S3: the outcomes unpickled only when the bot uses them
     return lp
 
 
@@ -2913,6 +3025,7 @@ class Map2Controller:
         self.t1_ms: list = []               # the tier-1 decisions' ms (worker)
         self.t1_age: list = []              # frames from a tier-1 plan's anchor to its adoption
         self.t1_tick_ms: list = []          # the tier-1 part of the bot's tick (ms)
+        self.t1_drain_ms: list = []         # t1 S3: _drain's part of the tick with tier 1 (the plans' unpickling, ms)
         # (the log's 't1n' on a tick tier 1 did not hold: why - the tick's code, the plans received and refused, the
         # last plan's end and the frames since, since the last snapshot sent / plan received, the last status)
         self._t1_why = None
@@ -3276,7 +3389,14 @@ class Map2Controller:
         self._hold = None                    # M4d2: set by hold_row (after this, before the planner) when it holds
         if self.procs and f % 120 == 0:
             self._check_procs()
-        self._drain(fo)
+        if self.cfg.tier1:
+            td_ = time.perf_counter()
+            self._drain(fo)
+            dms_ = (time.perf_counter() - td_) * 1e3                # t1 S3: the plans' unpickling on the bot's thread
+            self.t1_drain_ms.append(dms_)
+            row["drms"] = round(dms_, 3)
+        else:
+            self._drain(fo)
         if self.cfg.swing_fix:
             S0, self._swc = self._mstate(S0, fo, raw)       # E3: map2's copy of her state, the swing flags
         h = raw.get("hero") or {}
@@ -3543,7 +3663,8 @@ class Map2Controller:
             # t1 S2: tier 1 - its newest plan adopted (also while tier 2 has the keys: ready when it ends); its keys
             # whenever tier 2 and the swing hold have none, she has control and no freeze / hit this tick
             t1c = time.perf_counter()
-            m_ = self._t1_tick(f, fo, her, obs, row, mask is None and why not in ("hit", "freeze") and acc_c,
+            m_ = self._t1_tick(f, fo, her, obs, row, mask is None and why not in ("hit", "freeze") and
+                               (acc_c or (self.cfg.t1_fix and self._t1_in_block(fo))),
                                (S0, inflight, hold_t, lat_s, acc))
             t1ms_ = (time.perf_counter() - t1c) * 1e3
             self.t1_tick_ms.append(t1ms_)
@@ -3567,6 +3688,24 @@ class Map2Controller:
         return mask
 
     # ---- t1 S2: tier 1 ----
+    def _t1_in_block(self, fo: int) -> bool:
+        """t1 S3 (t1_fix; the verifiers' finding: live, her 'no input' in tier 1's own Clawline made tier 1 yield to
+        the fallback, whose keys then left the plan at the hook's control): the tier-1 plan being played is inside
+        its own Clawline's block at frame fo in an outcome it played last."""
+        lp, ex = self.t1_ctrl, self.t1_exe
+        if lp is None or ex is None or ex[0] != lp.pid:
+            return False
+        n = int(fo) - int(lp.t_a)
+        return any(lp.outs[i].in_block(n) for i in ex[1] if 0 <= i < len(lp.outs))
+
+    def _t1_left_value(self, lp: LivePlan, fo: int) -> float:
+        """t1 S3 (t1_fix): the plan in hand's value less its contacts already played (frames <= fo - t_a), p-weighted
+        over its outcomes (search.Cfg.w_hit per contact) - the anchor-time value still counted them."""
+        n = int(fo) - int(lp.t_a)
+        pt = sum(o.p for o in lp.outs) or 1.0
+        played = sum(o.p * sum(1 for (k, _, _) in o.contacts if int(k) <= n) for o in lp.outs) / pt
+        return float(lp.value) - float(ms.Cfg.w_hit) * played
+
     def _t1_followed(self, lp: LivePlan, f: int) -> bool:
         """A tier-1 plan still applies: every key sent for frames t_a + 1 .. f + 1 was its prefix's (the keys in flight
         at its snapshot and the bridge) or, after the prefix, one of its outcomes' own keys."""
@@ -3607,8 +3746,16 @@ class Map2Controller:
                     self._t1_rej.append("stale")
                     continue
                 cur = self.t1_ctrl
-                if cur is not None and getattr(lp, "t1_prev_pid", None) != str(cur.pid) and cur.t1_safe and \
-                        not (lp.t1_safe and float(lp.value) > float(cur.value) + float(cfg.t1_switch)) and \
+                cur_v = float(cur.value) if cur is not None else 0.0
+                cur_safe = bool(cur.t1_safe) if cur is not None else False
+                if cfg.t1_fix and cur is not None:
+                    # t1 S3: the plan in hand valued by what is left of it; with no outcome consistent on its last
+                    # tick it is proven safe no more - a newer proven-safe plan replaces it
+                    cur_v = self._t1_left_value(cur, fo)
+                    if self.t1_exe is not None and self.t1_exe[0] == cur.pid and self.t1_exe[3] and lp.t1_safe:
+                        cur_safe = False
+                if cur is not None and getattr(lp, "t1_prev_pid", None) != str(cur.pid) and cur_safe and \
+                        not (lp.t1_safe and float(lp.value) > cur_v + float(cfg.t1_switch)) and \
                         self._t1_followed(cur, f):
                     # (a decision that did not know the plan in hand as its CONT - from a snapshot before it was
                     # adopted - replaces it only when better by t1_switch: tier 2's 'the replacement had it as its kept
@@ -3695,10 +3842,28 @@ class Map2Controller:
             if getattr(lp, "_excl", None) is None:
                 lp._excl = set()
             cons = possible(lp, cons, n, obs, cfg, acc=(now[4] if now is not None else None), excl=lp._excl)
-        alive = [i for i in cons if r < len(outs[i].cmds)]
-        incons = not alive
-        if not alive:
-            alive = [i for i in range(len(outs)) if r < len(outs[i].cmds)]
+        if cfg.t1_fix:
+            # t1 S3 (the verifiers' finding): an outcome is played only to its committed end kc - a possible outcome
+            # whose kc passed ends the plan (tier 2's M4d rule: its keys after kc are the ones the search allowed only
+            # by deviating there); none consistent: only the outcomes still within their kc
+            ended = [i for i in cons if int(outs[i].kc) < r]
+            if ended:
+                o_ = outs[ended[0]]
+                row["t1_ended"] = [lp.pid, int(o_.kc), o_.why, o_.kcol, len(cons)]
+                self._inc("t1_end_kc" + ("_dev" if any(outs[i].kcol is not None for i in ended) else ""))
+                self._t1_why = "end_kc"
+                self._t1_end("end_kc")
+                self.t1_ctrl = None
+                return None
+            alive = [i for i in cons if r < len(outs[i].cmds)]
+            incons = not alive
+            if not alive:
+                alive = [i for i in range(len(outs)) if r <= int(outs[i].kc) and r < len(outs[i].cmds)]
+        else:
+            alive = [i for i in cons if r < len(outs[i].cmds)]
+            incons = not alive
+            if not alive:
+                alive = [i for i in range(len(outs)) if r < len(outs[i].cmds)]
         if not alive:
             self._inc("t1_exhausted")
             self._t1_why = "exhausted"
@@ -3773,7 +3938,10 @@ class Map2Controller:
         idx, best = self.t1_exe[1], self.t1_exe[2]
         r = int(f) + 3 - int(lp.t_a)
         bridge = []
+        k_hi = min(int(lp.outs[i].kc) for i in idx) if (self.cfg.t1_fix and idx) else 10 ** 9   # t1 S3: to kc
         for k in range(r, r + int(lead)):
+            if k > k_hi:
+                break
             vals = {int(lp.outs[i].cmds[k]) for i in idx if k < len(lp.outs[i].cmds)}
             if len(vals) != 1:
                 break
@@ -3875,7 +4043,7 @@ class Map2Controller:
         run, self.t1_run = self.t1_run, None
         if why in ("sup", "exhausted"):
             self.t1_ctrl = None
-        if why in ("sup", "exhausted", "left", "late"):
+        if why in ("sup", "exhausted", "left", "late", "end_kc"):
             self._t1_endw = (str(why), int(self._fo_prev) if self._fo_prev is not None else None)
         if run is None or not self.cfg.audit_runs or not run["k"]:
             return
@@ -3889,11 +4057,14 @@ class Map2Controller:
                 v = self._sent_at(k)
                 v = 0 if v is None else int(v)
                 cmds.append(v & ~COG if self._own_at(k) == "cog" else v)
+            incons_ = False
             if self.t1_exe is None or self.t1_exe[0] != lp.pid or self.t1_exe[3]:
                 # (no outcome of the plan consistent with the observation at its last tick: the replay's Clapper did
                 # something else - nothing to audit it against)
                 self._inc("audit_t1_incons")
-                return
+                if not (self.cfg.t1_fix and self.t1_exe is not None and self.t1_exe[0] == lp.pid):
+                    return
+                incons_ = True       # t1 S3: audited against the outcomes it played (counted apart: '_incons')
             idx = self.t1_exe[1]
             rb = getattr(lp, "_rep_base", None)
             if rb is not None:
@@ -3901,16 +4072,17 @@ class Map2Controller:
                 fo_r, S_r, inf_r, hold_r, lat_r = rb
                 cm_r = list(inf_r) + [int(self._sent_at(k) or 0) for k in range(int(lp._rep_k), k1 + 1)]
                 res = audit_run(self.W, lp, int(fo_r - lp.t_a), S_r, np.asarray(cm_r, np.int64), hold_r, int(lat_r),
-                                list(idx), int(k1 - lp.t_a), **self._msw_kw())
+                                list(idx), int(k1 - lp.t_a), **self._msw_kw(), mark_kc=bool(self.cfg.t1_fix))
             else:
                 res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a), list(idx),
-                                int(k1 - lp.t_a), **self._msw_kw(),
+                                int(k1 - lp.t_a), **self._msw_kw(), mark_kc=bool(self.cfg.t1_fix),
                                 **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
-            self._inc("audit_t1_runs")
-            self._inc("audit_t1_runs_" + ("safe" if lp.t1_safe else "risk"))
+            sfx_ = "_incons" if incons_ else ""
+            self._inc("audit_t1_runs" + sfx_)
+            self._inc("audit_t1_runs_" + ("safe" if lp.t1_safe else "risk") + sfx_)
             cols = [x for x in res if x[1] is not None]
             if cols:
-                self._inc("audit_t1_col_" + ("safe" if lp.t1_safe else "risk"))
+                self._inc("audit_t1_col_" + ("safe" if lp.t1_safe else "risk") + sfx_)
             for x in res:
                 if x[2]:
                     self._inc("audit_t1_skip_" + x[2].replace(" ", "_"))
@@ -4781,7 +4953,10 @@ class Map2Controller:
                 "disabled": bool(self.disabled),
                 "t1": {"ms_p50": _pct(self.t1_ms, 50), "ms_p90": _pct(self.t1_ms, 90),
                        "age_p50": _pct(self.t1_age, 50), "age_p90": _pct(self.t1_age, 90),
-                       "tick_ms_p50": _pct(self.t1_tick_ms, 50), "tick_ms_p99": _pct(self.t1_tick_ms, 99)}
+                       "tick_ms_p50": _pct(self.t1_tick_ms, 50), "tick_ms_p99": _pct(self.t1_tick_ms, 99),
+                       "drain_ms_p50": _pct(self.t1_drain_ms, 50), "drain_ms_p90": _pct(self.t1_drain_ms, 90),
+                       "drain_ms_p99": _pct(self.t1_drain_ms, 99), "drain_ms_max": max(self.t1_drain_ms, default=None),
+                       "geo_unpacked": LAZY_STATS["unpacked"]}
                 if self.cfg.tier1 else None,
                 "workers": {str(k): v for k, v in self.ready.items()}, "errors": self.errors[:20]}
 

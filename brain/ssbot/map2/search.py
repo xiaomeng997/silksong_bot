@@ -497,6 +497,13 @@ def _rows_sig(bx, lo: int, hi: int):
     return (len(bx), bx[lo:hi].tobytes(), bx[-1].tobytes() if len(bx) else b"")
 
 
+SU_FIX = [False]                   # t1 S3 (LiveCfg.su_fix; the verifiers' findings on S1): a side / up hit re-predicts
+#                                    the Clapper (its recoil moves it in every state), the swing credits every Clapper
+#                                    its polygons meet (the game damages each), a left-facing slash's keys decoded right
+SU_BAND = [0.0]                    # t1 S3 (LiveCfg.su_band; > 0 with SU_FIX): a side / up press the model calls a miss
+#                                    whose polygons meet the target box GROWN by this (u) is uncertain - the game may
+#                                    land it (V1's recall 0.976 at the 0.05 slack; r13: up to 0.19 u short) - a forced
+#                                    collision at that frame ('su_band': the plan is not played into it)
 SU_SHRINK = [0.05]                 # t1 S1: a side / up slash contact needs this overlap (u) on every side of the target
 #                                    box (the down slash's press.SHRINK; V1: precision 1.000 at 0 and 0.05, recall
 #                                    0.988 / 0.976 - the safe side under the search's choice of edge windows)
@@ -540,6 +547,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
     bad: list = []                   # M4 S1: forced collisions [(frame, why)]
+    susw: list = []                  # t1 S3 (SU_FIX): the side / up swings credited [(press, contact, iid, kind, face,
+    #                                  alive, steps)] - the live tube re-tests their contact on a shifted path
     S = S0.copy()
     k0 = 0
     face = face0
@@ -654,19 +663,47 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                             rec.append(("srows", iid, lo_, hi_, _rows_sig(sbx, lo_, hi_)))
                         rel_s = sbx[k0:] if sbx is not None else np.full((1, 4), np.nan)
                         cen = 0.5 * (r.box[0, :, :2] + r.box[0, :, 2:])
-                        c = sk.su_contact(cen, sface, t2, rel_s, skd, SU_SHRINK[0], alive=st_[:, press.S_ATK] > 0,
-                                          steps=st_[:, press.S_STEPS])
-                        if c < 0:
+                        alv_, stp_ = st_[:, press.S_ATK] > 0, st_[:, press.S_STEPS]
+                        c = sk.su_contact(cen, sface, t2, rel_s, skd, SU_SHRINK[0], alive=alv_, steps=stp_)
+                        got = [(c, iid)] if c >= 0 else []
+                        if SU_FIX[0]:
+                            # t1 S3: the game's swing damages every Clapper its polygons meet (the recordings: 34 of
+                            # 7,700 swings hit two) - the others' hits credited too (re-predicted: _hit_matters), on the
+                            # box without the slack (an unplanned hit is the risk here: V1's recall side)
+                            for iid2 in getattr(su_fn, "ids", ()):
+                                if iid2 == iid:
+                                    continue
+                                sb2 = su_fn(iid2)
+                                if sb2 is None:
+                                    continue
+                                if rec is not None:
+                                    rec.append(("srows", iid2, lo_, hi_, _rows_sig(sb2, lo_, hi_)))
+                                c2 = sk.su_contact(cen, sface, t2, sb2[k0:], skd, 0.0, alive=alv_, steps=stp_)
+                                if c2 >= 0:
+                                    got.append((c2, iid2))
+                            if not got and SU_BAND[0] > 0:
+                                gb_ = float(SU_BAND[0])
+                                rel_g = rel_s + np.array([-gb_, -gb_, gb_, gb_])
+                                cb = sk.su_contact(cen, sface, t2, rel_g, skd, 0.0, alive=alv_, steps=stp_)
+                                if cb >= 0:
+                                    bad.append((k0 + cb, "su_band"))
+                        if not got:
                             missed.append((skd, k0 + t, iid))
                             continue
+                        c = min(c_ for (c_, _) in got)
                         if skd == "side":
                             ev[c - 1] |= km.EV_RECOIL_L if sface > 0 else km.EV_RECOIL_R
                         else:
                             ev[c - 1] |= km.EV_RECOIL_DOWN
                         r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
                         kt = None
-                        hits.setdefault(iid, {})[k0 + c] = (skd, sk.SU_DMG)
-                        contacts.append((k0 + c, iid, skd))
+                        for (c_, iid_) in got:
+                            hits.setdefault(iid_, {})[k0 + c_] = (skd, sk.SU_DMG)
+                            contacts.append((k0 + c_, iid_, skd))
+                            if SU_FIX[0]:
+                                susw.append((k0 + t2, k0 + c_, int(iid_), skd, int(sface),
+                                             np.asarray(alv_[t2:t2 + 9], bool).copy(),
+                                             np.asarray(stp_[t2:t2 + 9]).copy()))
                         continue
                     if skd in ("combo", "glide"):
                         bad.append((k0 + t2, "su_" + skd))
@@ -786,6 +823,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
               claws, alts)
     tr.segs = played                 # the segments played (the reaction's continuation and the hook variant's in place)
     tr.bad = bad
+    if susw:
+        tr.susw = susw
     return tr
 
 
@@ -1815,6 +1854,8 @@ class Evaluator:
             return tr
         rec: list = []
         su_fn = (lambda iid: sk.su_boxes(b, iid, T)) if self.su else None       # t1 S1 (Cfg.prims side / up)
+        if su_fn is not None and SU_FIX[0]:
+            su_fn.ids = tuple(int(o.iid) for o in sit.obs)                     # t1 S3: every Clapper the swing meets
         tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
                       lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T), swing=sw,
                       su_fn=su_fn)
@@ -1951,6 +1992,8 @@ class Evaluator:
         s_, j = st[0], st[1]
         if s_ in ("Idle", "Walk"):
             return True
+        if SU_FIX[0] and h[0] in sk.SU_KINDS:
+            return True                         # t1 S3: the recoil moves the Clapper (0.48 u) in every state
         nxt = cm.NEXT.get(s_)
         if nxt == "Idle":
             d = b.K.durations(s_)
@@ -2944,6 +2987,8 @@ class Searcher:
             return None
         face = 1 if extra > 0 else -1
         dc = abs(int(extra)) % 10
+        if SU_FIX[0]:
+            dc = int(extra) - 10 * face             # t1 S3: extra = face x 10 + dc (-9 for face -1, dc 1: 1, not 9)
         dk = km.B_RIGHT if face > 0 else km.B_LEFT
         last = int(masks[-1]) if len(masks) else 0
         t = int(tp) + 1

@@ -751,7 +751,20 @@ def _step(r, L, H, FC, k, hx_arr, hbox, steps_a, use_steps, hk, hd, buddy_att, h
             _clamp_x(r, np.int64(r[F_ST]), BOX, BOXN, BOXL)
         if not INTRO[st]:
             _grounded_y(r, steps, BOX, BOXN, BOXL)
-    if r[F_RECOIL] > 0 and steps:
+    if r[F_RECOIL] > 0 and steps and r[F_RECDIR] == 2.0:
+        # t1 S3 (clapper.UP_RECOIL): an up slash's recoil - up while airborne, none on the ground
+        n = min(steps, np.int64(r[F_RECOIL]))
+        r[F_RECOIL] -= n
+        if st == SID[S_JUMP] or st == SID[S_AIR]:
+            bx = _box(BOX, BOXN, BOXL, SID[S_AIR], 0)
+            if r[F_Y] + bx[2] > FLOOR + 1e-9:
+                r[F_Y] += RECOIL_V * DT * n
+                lo = r[F_X] + min(r[F_FACE] * bx[0], r[F_FACE] * bx[1])
+                hi = r[F_X] + max(r[F_FACE] * bx[0], r[F_FACE] * bx[1])
+                ry = _roof_y(lo if r[F_X] < 0.5 * (WALL_L + WALL_R) else hi, RL, RR)
+                if r[F_Y] + bx[3] > ry:
+                    r[F_Y] = ry - bx[3]
+    elif r[F_RECOIL] > 0 and steps:
         n = min(steps, np.int64(r[F_RECOIL]))
         r[F_RECOIL] -= n
         r[F_X] += r[F_RECDIR] * RECOIL_V * DT * n
@@ -771,6 +784,9 @@ def _step(r, L, H, FC, k, hx_arr, hbox, steps_a, use_steps, hk, hd, buddy_att, h
         if hkind == 1:                                    # a side slash: the recoil
             r[F_RECOIL] = RECOIL_N
             r[F_RECDIR] = 1.0 if r[F_X] > hx_arr[_at(hx_arr, k)] else -1.0
+        elif hkind == 3 and (st == SID[S_JUMP] or st == SID[S_AIR]):
+            r[F_RECOIL] = RECOIL_N                        # t1 S3: an up slash in the air - up (RECDIR 2)
+            r[F_RECDIR] = 2.0
         r[F_HP] -= hd[k]
         if r[F_HP] <= 0:
             r[F_DEAD] = 1.0
@@ -1297,7 +1313,7 @@ def predict(obs: list, mems: dict, hero: cm.HeroPath, K: cm.Know, T: int = 120, 
         for k, h in (hero.hits.get(s.iid) or {}).items():
             if 0 <= k <= T + 1 and h is not None:
                 kind, dmg = (h, cm.NAIL_DMG) if isinstance(h, str) else (h[0], h[1])
-                HK[i, k] = 1 if kind == "side" else 2
+                HK[i, k] = 1 if kind == "side" else 3 if (kind == "up" and cm.UP_RECOIL[0]) else 2
                 HD[i, k] = int(dmg)
     status, ps, pp, PF, PL, PH, NPAR, NREC, PHIST, n_max, n_nodes = run_particles(
         F0, L0, H0, T, hx, hb, steps_a, use_steps, HK, HD, tb.args(), max_particles)

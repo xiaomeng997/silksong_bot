@@ -81,6 +81,9 @@ GRAV_STEP = 1.68               # gravity scale 1.4: 84 u/s^2, per 0.02 s step
 JUMP_CLAMP = 12.0
 TARGET_U = 5.0                 # Jump Aim's target: her x - 5 x its facing
 RECOIL_V, RECOIL_N = 3.0, 8    # a side slash's push (Recoil: 3 u/s for 0.15 s; measured 0.42 / 0.48)
+UP_RECOIL = [False]            # t1 S3 (LiveCfg.su_fix): an up slash's hit on a Clapper in the air (Jump / Air) pushes it
+#                                UP the same 0.06 u per physics step for 8 steps (the recordings: 32 UpSlash hits in Air,
+#                                dy over the pre-hit parabola 0 .. 0.48 u, dx 0; on the ground ~0) - rec_dir 2
 NAIL_DMG = 10                  # a nail hit's damage on its hp (Wanderer: 10; the oracle's 'dealt' 9)
 BOMB_DX = 4.2
 BOMB_DY = -3.8                 # a bomb's centre below its transform at Cast 2
@@ -889,7 +892,20 @@ class Sim:
                 self._clamp_x()
             if st not in INTRO:
                 self._grounded_y(steps)
-        if self.recoil > 0 and steps:
+        if self.recoil > 0 and steps and self.rec_dir == 2:
+            # t1 S3: an up slash's recoil - up while airborne (the flight's velocity unchanged), none on the ground
+            n = min(steps, self.recoil)
+            self.recoil -= n
+            if st in ("Jump", "Air"):
+                bx = self.K.box("Air", 0)
+                if self.y + bx[2] > FLOOR + 1e-9:
+                    self.y += RECOIL_V * DT * n
+                    lo = self.x + min(self.face * bx[0], self.face * bx[1])
+                    hi = self.x + max(self.face * bx[0], self.face * bx[1])
+                    ry = roof_y(lo if self.x < 0.5 * (WALL_L + WALL_R) else hi)
+                    if self.y + bx[3] > ry:
+                        self.y = ry - bx[3]
+        elif self.recoil > 0 and steps:
             # Recoil (0.15 s from the hit): 0.06 u per physics step away from her on top of its own motion, in the
             # air too (the flight's velocity unchanged; fit: +0.06 per step over the flight's, 0.42 - 0.48 in all)
             n = min(steps, self.recoil)
@@ -910,6 +926,8 @@ class Sim:
             kind, dmg = (hit, NAIL_DMG) if isinstance(hit, str) else (hit[0], hit[1])
             if kind == "side":
                 self.recoil, self.rec_dir = RECOIL_N, (1 if self.x > float(hero.x[hero.at(k)]) else -1)
+            elif kind == "up" and UP_RECOIL[0] and st in ("Jump", "Air"):
+                self.recoil, self.rec_dir = RECOIL_N, 2                 # t1 S3: up (rec_dir 2)
             self.hp -= int(dmg)
             if self.hp <= 0:
                 self.dead = True
