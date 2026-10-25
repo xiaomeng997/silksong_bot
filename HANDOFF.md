@@ -15255,3 +15255,60 @@ detector only.
 a commit is unchanged. swing_fix credits a swing under way where E2 credited none (the model's own state of a down
 slash; its contact still found by the strike module on the robust box, both alternations) and removes the hook
 bounce's i-frames; every other E3 change makes a keep stricter, ends a hold sooner, or only detects / audits.
+
+## Task map2 - live w7 measurement 2026-10-25 (the person's request of ~05:20 PDT: 16 live w7 episodes with E3's recommended set, all run through, report the control share, the HP losses and their causes - a MEASUREMENT, not the gate; the audit asked again at ~05:55 with the three things of the lead notes) (branch worktree-wf_f1846551-5f9-1, 2026-10-25; forum.md §110)
+
+The run (L1): arm `m2e3` (appended to `C:\ssbot\sandbox\1v1_arms.txt`) = rnjb + SSBOT_FORUM_HERO2=1 + SSBOT_FORUM_MAP2=1
++ E3's recommended SSBOT_FORUM_MAP2_SET, frozen checkout `C:\ssbot\live_1v1_0c662ce`, Forum_W_w7, instances 0 / 1,
+1.0x, 05:33:30 - 05:45:49 PDT, `--seed 9800000 + k`; the harness copies `C:\ssbot\data\m2_play\map2\live\scripts\l1_*`.
+The audit (L2): offline, no live run, no code change. Data and reports `C:\ssbot\data\m2_play\map2\live`
+(`live_run.txt` the run, `LIVE_W7_REPORT.txt` the audit, `l2_*.txt` the measures, `l2_hit_traces.txt` a condensed
+trace per HP loss); scripts `live\scripts\l2_*.py` (caches of the 16 episodes and 36 reference default-planner
+episodes in `live\l2_cache`).
+
+### Result
+
+- **15 / 16 kills, 4 hitless; 18 hits / 34 HP before the kills** (the hammer 11, the body 3, the jump cast's big rune 2,
+  a small bomb 2); #2 QUIT_EMULATED after its third hit; kill median 39 s (28.6 - 63.4); 0 harness failures, 0 map2
+  errors. Switch-off smokes the same morning: 6 / 6 hitless, 16.1 - 18.9 s.
+- **map2's share 59.5 %** of the engaged ticks (strict / open replay of the set: 50.4 / 61.2 %): committed strike plans
+  22.9 %, no-strike plans 11.8 %, baseline escapes 23.9 %, the swing hold 0.9 %; the default planner 30.6 %, its scripts
+  9.9 %.
+- **The causes**: every hit frame's keys were the fallback's (17) or its slam script's (1), but:
+  A (8 hits / 16 HP) map2's strike or hook landed and the predicted reaction happened, then the plan ENDED at its
+  contact / at the Clawline's control with no committed continuation (the follow-ups rejected by the commit check:
+  'path', 'dev gap'); the default planner, handed a state beside an attacking Clapper with n_safe 0, moved into the
+  hammer / body / rune (the gate's P5 pattern). B1 (3 / 6) a newer search's 'unsafe' verdict dropped the plan in control
+  1 - 6 f before its next press. B2 (2 / 4) a Clawline latched a frame late, late_act's re-check called it 'unplanned'
+  and dropped the plan at the press; the hook landed, the slam came as planned, the fallback had the keys. C (1 / 2,
+  #2's third hit) map2's safe-endpoint plan air-dashed past the lunge with the Clapper one frame late; the tube's
+  re-check (dev 19.5 u - the re-simulation, she was 0.19 u off) dropped it mid-dash. D (1 / 1) a baseline escape's
+  'dev' end. E (3 / 5) the fallback's own, 55 - 72 f after map2's last control (a big rune burst, a bomb, cornered).
+- **The lead notes**: (jump slam) two events at ~05:35:35 (#4 f 10398885) and ~05:36:09 (#3 f 10398903) were PLANNED by
+  map2 (plans 1:79i0 / 1:160i0: the down slash's contact planned on the landing frame, 1 - 3 f late in the game); the
+  landing hammer touched her 3 - 4 times with no HP lost - measured: every damage event 0 - 10 f after a down-slash
+  contact took no HP (live 83 / 83, reference 244 / 244), the first taken at +12; 'pogo the landing' is repeatable (6
+  contacts at Slam 2 j1 - j4, the hammer never took HP). (attack rate) 0.519 landed hits / s vs 1.48 - 1.53 for the old
+  default; search.Cfg.prims = ('dslash', 'claw') - map2 has no side / up slash, the old default's side slashes are 81 %
+  of its hits; map2's strike plans 1.08 / s, its baseline escapes 0.015 / s, the fallback in the mixed arm 0.25 / s.
+  (jumps) take-offs 25 / min vs 28, those without an attack or hit 8.4 / min vs 2.3 (map2 54 of 84: baseline 20,
+  safe-endpoint plans 15, strikes that did not come 15); airborne without attacking 54 % of the fight vs 33 %; in
+  side-slash reach of a slashable Clapper not attacking 65 % of the frames vs 37 %, half under map2.
+- **(3)** her observed path vs the committed plan's: |dx| p99 0.02 - 0.04 u outside the Clawline's block (1 tick of
+  16,134 above 0.2 u) - the tube's 1 u tolerance is not what fails; the 'path' failures are the re-simulation (tube
+  re-check 'path' dev p50 1.85 u, max 19.5; commit 'path' rejections 906, p50 1.35 u, 22 % exactly 1.4 u = one 50 Hz
+  step of the Clawline's dash). Reveal live: 312 / 383 move starts with a committed plan within 60 f, first key p50 /
+  p90 22 / 46 f (strict replay 16 / 36).
+- Planned contacts (the most probable outcome of each commit) 347, landed 232 (67 %); missed 88 by a plan end / drop
+  before the contact, 27 ran to the contact without a hit.
+
+### Open items (for the person; nothing changed)
+
+1. The handover after a strike / hook (A, B): the plan's exit as its own tail, tier 1, or the commit check's 'path'
+   rejections of the follow-ups - the order is the person's.
+2. late_act's handling (a plan's own late-latched Clawline / slash judged unplanned).
+3. 'unsafe' verdicts on the plan in control (no hold after them).
+4. The side / up slash as search primitives (the attack rate).
+5. The pogo's protection >= 10 f (the model 8 f); 'pogo the landing' as a routine.
+6. The re-simulation behind the 'path' checks before calibrating the tube's tolerance.
+7. Not merged, not pushed; the instances frozen after the run.
