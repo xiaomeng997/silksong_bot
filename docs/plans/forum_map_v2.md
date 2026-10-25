@@ -1471,10 +1471,15 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   dev_gap 6) are guesses (M4b open item 2); the tube design replaces them. T4 FINAL: eps(k) p99 0.03 u at 1 f, 0.51 at
   10 f, 1.24 at 30 f, 2.6 - 2.8 u from 60 f (p90 <= 0.02 u) - the far tail is wide; per action type still to be split.
 - Q9 ANSWERED (the lead, 2026-10-24, the person asked 'weren't the Clapper's damage boxes done before? what does the
-  old planner use?'): the boxes exist three times - the old planner's EnemyTables + MultiForecast (support templates per
-  enemy state and frame from 107 recorded fights, 0.05 u cells dilated by her hurtbox + measured margins; one
-  conservative union over every logged branch / dwell for the next 0.6 - 0.8 s, computed ONCE per tick and queried by
-  all rows in one batch - fast, conservative, her-independent apart from the separate aim zones); move_data (SG1: per
+  old planner use?'): the boxes exist in several forms - the OLD PLANNER AS PLAYED (the default arm rnjb has
+  SSBOT_FORUM_V2=1: combat.forum_v2, the w13 hitless clears of 5 - 18 / 64 came from it) tests rows against the
+  ATTACK-RANGE ESTIMATE (combat.attack_range, the person 2026-10-10: per enemy family, branch and frames since the
+  antic start the union of the real damage colliders of clean recorded instances, relative to the enemy, as a
+  raster; its median displacement - the Clapper jump's landing from her offset at the antic start; margins m(type,
+  k) from the error statistics added at decision time; an attack counts only once its antic is seen, idle bodies
+  carried by their velocity), plus the aim zones for pending aims, the rune-bomb rows, the hit branch's reaction
+  template and the escape-ready check - built once per tick and shared by all rows; the EARLIER planner (v2 off) used
+  the EnemyTables + MultiForecast support (logged-branch unions, 0.05 u cells, 107 fights); move_data (SG1: per
   move, state and frame the damage / target boxes with timing variants - the slam map and the old specials table come
   from it); map2's Clapper model (M2: per branch and frame DAMAGE / BODY / POGO shapes with measured margins and
   timing views, her-dependent choices and aims). 'The danger per move / frame' (E1 (b)) therefore means USING map2's
