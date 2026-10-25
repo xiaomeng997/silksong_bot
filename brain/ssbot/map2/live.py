@@ -3559,6 +3559,10 @@ class Map2Controller:
             n_ = int(fo - lp.t_a)
             shifts = {}
             for i in idx:
+                if n_ > lp.outs[i].kc:
+                    # (past the committed end the outcome has no records - its timing as matched last)
+                    shifts[i] = (hs.get("shifts") or {}).get(i) or {}
+                    continue
                 sh = {}
                 for ob in obs:
                     d = match_shift(lp.outs[i], n_, ob, self.cfg, max(1, int(self.cfg.tube_dmax)))
