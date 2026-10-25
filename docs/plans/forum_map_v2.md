@@ -865,6 +865,20 @@ shared between the workers, memory-mapped) is deferred by the person (2026-10-24
 - The 'dev' end (a plan ending at an outcome's deviation): the exit's keys as the plan's own tail is not built;
   mitigated by `dev_gap` 6 (no commit when a possible 'dev' outcome is closer than 6 f to its collision) [M4d].
 
+- THE AIM AT AIM TIME - A GAP TODAY (the person asked 2026-10-24: 'the old planner computes where to stand when the
+  Clapper aims, incl. the inescapable zones at aim time - who does it in map2?'): the old planner has the AIM ZONES
+  (forum.md 40 - 42; knowledge aim_zones_CC_JUMP / CC_JUMP_CAST / ...json: per aimed move, height and terrain band,
+  the places from which, once it aims at her, no escape exists). In map2 nobody does this explicitly: inside a plan the
+  Clapper model aims from her planned path (right), but BEYOND the plan's end `search.hero_path` holds her last
+  position, so the next aimed move (the Jump Aim from her x, the Close / Far choice) is aimed at that frozen spot and
+  the exit check / funnel tests escapes against a danger that does not follow her as she runs - it can call a trap
+  escapable (she runs, but live the jump would land on her escape path). FIX (E1, with the funnel): AIM-AWARE exits -
+  at each predicted aim frame inside the horizon the aimed move's danger is conditioned on her position at that frame
+  (per x interval of the escape set: the aim follows her), i.e. the aim zones recomputed with map2's model per
+  situation, or precomputed per (aimed move, aim frame, her height, wall band) relative to the Clapper like the old
+  tables; their 'no escape' intervals become the score field's far-negative intervals of the long-term planner (3.7),
+  whose aim nodes are the positive side of the same computation.
+
 #### 3.3.5 The value
 
 - AS BUILT [M3]: hits + the terminal value (wall room, the facing-to-the-wall rule +-0.5, the distance to the nearest
