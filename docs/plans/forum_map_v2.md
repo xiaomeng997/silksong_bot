@@ -150,6 +150,20 @@ live_1v1_0c662ce; C:/ssbot/data/m2_play/map2/live/live_run.txt; the audit is hel
   SLASHES (the fallback 123) - search.Cfg.prims has no side / up slash; the person saw it jump for nothing and stand in
   front of the Clapper without slashing. Late ticks 25 %.
 
+THE AUDIT OF THE LIVE MEASUREMENT (2026-10-25; LIVE_W7_REPORT.txt + an independent re-check, verify/hits/H01 - H19; facts
+18 / 18 agree, classes 15 / 18): the main pattern - map2's strike lands, the Clapper reacts as predicted, map2's plan ENDS
+at the contact / the hook's control with nothing committed after it, the keys go to the fallback while it has NO safe
+option (n_safe 0 for 20 - 46 f), and the fallback fails in three repeating ways - an air dash away then the umbrella 3 -
+8 f later (vx 23 - 28 -> <= 8.5 u/s, left inside the hammer's reach: 5 hits), hovering in the umbrella with left / right
+flicker (5), a dash toward the Clapper with the direction key lost (2); in 7 of 18 map2 HAD a follow-up plan (values 0.94,
+1.09) that the forced fallback broke by leaving the bridge 1 - 4 f before its commit. Others: a plan of map2's own
+air-dashing at a Clapper a frame late (1), the baseline escape's handover (1), the fallback's own (a jump cast's big
+rune: 35 f hovering inside it; a bomb; a wall). The jump slam met with a down slash: two events, both map2's plans (the
+slash on the landing frame; >= 9 f without damage after a down slash's contact: 83 / 83 live, 244 / 244 recorded) -
+repeatable, a routine candidate. The attack rate: 0.52 hits/s vs 1.48 (damage 33 %); 81 % of the old default's hits are
+side slashes, map2 has none; 40 % of map2's control time was baseline escapes (2 hits in 132 s). Take-offs with no attack
+8.1 vs 1.9 / min; within side-slash reach without slashing 55 % vs 22 %.
+
 UPDATE 2026-10-25 03:20 - THE ev WORKFLOW (E0 - E3, offline; HANDOFF 'Task map2 - the evaluation and the handover'
 E0 - E3, forum.md 107 - 109; frozen checkout C:\ssbot\live_1v1_0c662ce, warmed; nothing live):
 - E0 profile (live w7): Python danger geometry 43.6 % of a decision, the envelope passes 19 %, witness + windows 18 %,
