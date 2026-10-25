@@ -52,8 +52,8 @@ Attributions '(the person, date)' mark the person's ideas and decisions; '(the l
 | 长期站位规划 | 只有设计 | 在顺序里的位置待你定（Q12） |
 | w7 闸门（10-23） | 没过：跑 2 局，0 局无伤；5 次掉血时按键都是默认规划器的，3 次紧跟 map2 丢计划 | 评估和交接做完后你决定下一次闸门 |
 
-最需要你拍板的几件（第 6 节）：眼看规则（Q1）、下次闸门标准（Q2）、验收按多少计算时间算"搜到"（Q3）、
-A1_n 表还是不是 L2 的目标（Q5）、长期规划和反射层排在哪（Q12、Q13）、不落地演示算不算 map v2 的目标（Q21）。
+你 10-24 的答复已写进第 6 节：不做眼看、直接测（Q1）；map2 要有保底方案（Q2）；递归表实机打开、是主力（Q5）；
+不落地演示不算 map v2 的目标（Q21）。Q3 的解释和建议、Q12 的顺序建议见第 6 节。
 Q20、Q22、Q23、Q24、Q27 是事实性问题，负责人已据实回答（见第 6 节）。快速反应部分按你 10-24 的意见改成"自动生成的固定套路"（3.5）。
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -1157,6 +1157,30 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
 
 ---------------------------------------------------------------------------------------------------------------------
 
+### 3.8 The old planner, map2 and the reflex - roles, and when map2 replaces the old planner (the person asked 2026-10-24)
+
+- THE OLD PLANNER ('the hard-coded rules', the default arm rnjb) [ON]: hand-written rules and scripts (CLAWSTRIKE,
+  SLAMSTRIKE, LOWHOP, JUMPTRAP, the chase / stab scripts, the TWO_* two-Clapper rules), with the person's OLD SPECIALS
+  TABLE (forum.md 48 / 53, 2026-10-11 / 12: offline strike rows bound to the Clapper slam's antic frame and her relative
+  position / vy class - v1 5,757 entries, v2 5,938 entries / 12,472 core cells, built in 5 s from T1's grid; the
+  planner generates ~840 - 1,300 'walk to the cell, strike at its frame' rows per tick, 10 - 11 ms single-thread). In
+  the m2 arm it is the FALLBACK (w7 ~65 % of the engaged ticks, w13 ~95 %).
+- MAP2 [ON in m2]: the general planner from the model (L1 + L2 tables + L3 + live control). The old specials table's
+  'where to strike, and the way there' is the search's job here: the window shapes as goals, the envelope / tables to
+  reach them, the keys from the chain.
+- THE REFLEX [OFF] = the old specials table's successor for the instant part only: it fires a routine when she is
+  already inside a window, it plans no approach; its scope the search's latency gap (3.5). So the reflex alone does not
+  replace the old specials table; map2's search + the reflex together do.
+- REPLACEMENT CRITERIA (the lead's proposal 2026-10-24, to confirm): map2 + the reflex replace the old planner + its
+  specials table when (1) map2 holds the keys >= 95 % of the engaged ticks on w7 and w13 (it always has a plan - the
+  baseline plan of Q2); (2) in an A/B its hitless rate is not below the old default's (w7 13 - 15 / 16; w13 hitless
+  clears 5 - 18 / 64); (3) the old scripts' moves appear live at least as often (CLAWSTRIKE, SLAMSTRIKE, JUMPTRAP,
+  LOWHOP); (4) no handover / stuck problems. Then the old planner stays only as an emergency fallback for unknown
+  states, and before retiring its specials table check offline that its entries and the old fixed-point successes
+  fall inside the new window shapes / reflex cells.
+
+---------------------------------------------------------------------------------------------------------------------
+
 ## 4. Cross-cutting rules
 
 - EXACTNESS, NO SNAPPING (the person, 2026-10-21): tables and passes are exact (heights bit-equal, x within 1e-9 u in
@@ -1335,27 +1359,23 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 
 ### 6.1 Decisions the sources leave to the person, or where they disagree
 
-- Q1 THE EYE CHECK: the rule validate-predictions-first and the spec's M4 ('after the person's eye check') require the
-  person's eye check of M2's overlay before live use; M4 went live on the person's 10-22 decision; no source records the
-  check as done or waived. Does it apply before the next gate?
-- Q2 THE NEXT GATE: the 10-22 gate (16 / 16 hitless kills + share >= 30 %) vs the spec's M4 criterion (fixed points >=
-  90 % on P1 - P5 and the regression situations, then w7 / w13 A/Bs). Which one, and is the share bar kept (at what
-  value)? The person decides after the ev workflow [P-ev].
-- Q3 THE ACCEPTANCE BUDGET: 'found by the search' was measured at 60 s (M3), 200 units, 1 s and 0.25 s; the results
-  differ widely (202 / 159 - 177 / 78 - 80 found of 279). Which budget defines 'found'?
+- Q1 DECIDED (the person, 2026-10-24): no overlay eye check before the next live run - test live directly.
+- Q2 DECIDED (the person, 2026-10-24: 'map2 needs a baseline plan'): map2 must always provide a safe plan of its own - when its
+  best is the noop or nothing, it sends its safest escape (just running out of the danger, the exit / funnel's surviving
+  path) instead of handing the keys back; the fallback only for unknown / unmodelled states. The next gate (the
+  lead's proposal, to confirm): w7, 16 / 16 hitless kills with map2 holding the keys >= 90 % of the engaged ticks.
+- Q3 EXPLAINED / PROPOSED (the person asked what it means, 2026-10-24): the offline acceptance runs the search on fixed
+  situations and asks whether it finds the target move; more search time finds more (of 279 cases: 202 at 60 s, ~160 -
+  183 at 1 s, ~80 - 87 at 0.25 s). Proposal: 'found' = found within the LIVE budget (the workers' caps: 0.25 s while the
+  fallback has the keys, 0.6 s while map2 has them), with the 60 s run as the ceiling for reference.
 - Q4 P3-FACE is never found (0 same in every run): the forced Idle Clapper evades / casts before she lands, so no contact
   is on an Idle / Walk Clapper; M3 suggests redesigned setups or a recognizer 'she is on its wall side when its next
   move starts'. Undecided.
-- Q5 THE ROLE OF THE A1_n TABLES: the design assumed a closed few-hundred-table set looked up instead of rolling physics;
-  T1 - T3 measured a non-converging memo with no live speed-up. Does the A1_n design remain the L2 target (with the
-  state-recurrence fix: a per-node terrain clearance, a shared memory-mapped library - only in T3's open items) or does
-  the M1 engine stay the live envelope? The person deferred the fix (10-24) without saying which is the target.
-  T4 FINAL (10-24 afternoon, HANDOFF T4 / forum.md 106, 8bf5a59): after the 20 verifier fixes the tables-on search LEADS
-  offline for the first time - found at 1 s 164 -> 183 and 156 -> 181, at 0.25 s 76 -> 87, every source group up; the
-  strict smoke share w7 33.1 -> 35.3 % (T3 had 32.6 -> 23.0), w13 4.2 -> 5.2 %, 0 collisions, 0 invalid presses in
-  1,091 plans; still behind at 0.15 s decisions (lock contention with the background pass), the long pass worse at
-  every budget (keep it off), first safe plan 68 / 186 -> 73 / 192 ms. Frozen checkout C:\ssbot\live_1v1_499df40. Turning
-  `tables=1` on live is the person's decision.
+- Q5 DECIDED (the person, 2026-10-24: 'turn them on; they are the main engine'): the A1_n tables are the L2 engine,
+  on live (`tables=1`) from the next live run; T4 final: the tables-on search leads offline (1 s 164 -> 183 / 156 -> 181;
+  0.25 s 76 -> 87; strict w7 share 33.1 -> 35.3 %, 0 collisions; behind at 0.15 s; the long pass off). The
+  state-recurrence fix (a per-node terrain clearance, a shared memory-mapped library) and the workers' memory growth
+  (T3: 5 - 20 GB per search process) become important; keep the memory cap. Frozen checkout C:\ssbot\live_1v1_499df40.
 - Q6 B(window shape, end table) precomputed (the person, 10-24: 'the bridge check becomes a lookup') vs T2: with the
   danger touching her within ~8 f the chain is needed anyway; the backward set over the chain is cheap and exact
   without the float's inertia, an upper bound with it (Back.exact, T4); T3 did not wire backward sets because the
@@ -1380,9 +1400,14 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   proposes a funnel per beam node (~5 ms each warm) - E1 takes it from there, with the safety valve (3.3.4).
 - Q11 THE SCORE'S WEIGHTS: 'a score far below any normal one (e.g. worth many hits)' - no number; until the planner
   exists the value is M3's hand terms.
-- Q12 THE ORDER OF THE LONG-TERM PLANNER: the spec says 'next stage after the A1_n tables are in the search' (they are,
-  behind a switch kept off); the person put the evaluation / handover first (10-24). Where does it go?
-- Q13 THE REFLEX: (a) the latency-gap scope (~1 %) vs the built v2 table (all windows, cells keyed by vy bins) - rebuild
+- Q12 / Q13 ORDER (the person asked 2026-10-24 'are the auto-generated routines the reflex? isn't it done?'): the reflex
+  TABLE is built (11 hand-chosen window types, generated parameters, precision 0.999) but NOT wired into the bot, its
+  safety check too slow for the bot's thread (8.5 - 151 ms: it must run on a worker before the reveal), its scope still
+  all windows; the latency-gap scope (~1 %) and the auto-generation of the routines themselves are not done. Proposed
+  order after the evaluation / handover work: (1) wire the reflex's latency-gap types of the built table (claw_slam0,
+  cast_claw, evade_claw) with the pre-reveal check on a worker, then a live smoke; (2) the long-term positioning
+  planner; (3) the auto-generated routines replacing the hand-chosen window types.
+- Q13 (folded into Q12's order above) THE REFLEX: (a) the latency-gap scope (~1 %) vs the built v2 table (all windows, cells keyed by vy bins) - rebuild
   the kept windows as shapes first, or wire the v2 cells of those types? (b) '~25 f' reaction gap: the measured reveal
   latency is p50 20 - 25 / p90 43 - 55 f - p50 or p90 decides which windows stay? (c) its integration was planned 'after
   M4's gate' - the gate failed; when?
@@ -1410,9 +1435,9 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 - Q20 RESOLVED (the lead, 10-24): the ev workflow has NOT been launched (only its PROGRESS header line exists); it
   starts after T4 ends and after the person has read this document. E1 carries the funnel, eps(k) and the shapes, and
   builds on T4's interim funnel / eps(k) trial and `Cfg.shapes` (read them first, do not redo them).
-- Q21 SCOPE: the no-landing query (branch airceil, Cfg.no_land) shares the search but is not in the spec; is the
-  no-landing / air show goal part of map v2, and are its query gaps (no re-plan at a reveal under no_land, the pass
-  horizon) to be merged?
+- Q21 DECIDED (the person, 2026-10-24): the no-landing show is NOT a goal of map v2. (If it is ever done: the lead's
+  analysis prefers a negative ground score in the long-term planner's score field - hitless > no landing > hits - over
+  a fake damage box on the floor, which would make a landing equal to a real hit.)
 - Q22 RESOLVED (the lead, 10-24): '0.38 vs 1.9' was M4b's INTERIM run (map2/m4/m4b/final_runs.log, 'afterE', 04:57 on
   10-23, rec w7 one Clapper); M4b's final numbers replace it: 0.79 at 0.25 s vs 2.13 at 60 s.
 - Q23 RESOLVED (the lead, 10-24): the reflex_build jobs were SUSPENDED (psutil suspend of both process trees, 12
@@ -1470,20 +1495,18 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 
 ---------------------------------------------------------------------------------------------------------------------
 
-## 7. Next steps (in the person's order)
+## 7. Next steps (in the person's order; updated 2026-10-24 after the person's answers)
 
-1. NEXT (the person, 2026-10-24 ~10:40; the ev workflow, offline; NOT launched - it starts after T4 ends and after the
-   person has read this document): E0 profile; E1 the fast closed-loop evaluation - the escape funnel (3.3.4), the
-   danger per Clapper move / frame (Q9), the window shapes (3.6), building on T4's funnel / eps(k) trial; E2 the
-   handover - the drop rule on a one-frame shift together with the plan as a tube (3.4.8), re-plan from mid-action (the
-   swing in progress at the root, the busy rule after a drop), the fallback mid-swing, the unpredicted hook reaction;
-   E1 / E2 also measure whether a faster search or responses prepared before the reveal close the reveal gap (3.5);
-   two verifiers; E3 fixes + a frozen checkout. (T4 finished 10-24 afternoon - Q5, Q8, Q10.)
-2. THEN the person decides on the next live gate (Q1, Q2) [P-ev].
-3. LATER (the person, 2026-10-24): the tables' state-recurrence fix (Q5).
-4. Decided in scope, not yet ordered by the person (Q12, Q13): the reflex reduced to the latency-gap windows and
-   integrated on a worker with a live smoke; the long-term positioning planner (the score field, the aim nodes, the
-   two-Clapper rules as checks).
-5. Probes the stages proposed (not ordered): the downspike recovery after a hooked Clawline (a slash at control + 10 /
-   11), the side contact out of the air sprint (the sprint's x against the body), an air dash -> landing -> air dash,
-   the hook's far reach.
+1. NOW (the ev workflow, offline): E0 profile; E1 the fast closed-loop evaluation - the escape funnel PER BEAM NODE (T4's
+   proposal; the 44 funnel-only endpoints explained before any use), the danger per Clapper move / frame (Q9), the
+   window shapes (3.6); E2 the handover - the drop rule with the plan as a tube (3.4.8), re-plan from mid-action, the
+   fallback mid-swing, the unpredicted hook reaction, and THE BASELINE PLAN (Q2: map2 always provides a safe plan);
+   every measurement with the tables ON (Q5) and the workers' memory watched; two verifiers; E3 fixes + a frozen
+   checkout.
+2. Wire the reflex's latency-gap types of the built table (claw_slam0, cast_claw, evade_claw) with the pre-reveal
+   safety check on a worker; a live smoke (Q12).
+3. The next w7 gate, no eye check (Q1): 16 / 16 hitless kills with map2 holding the keys >= 90 % (Q2 - the bar to
+   confirm).
+4. The long-term positioning planner (3.7).
+5. The auto-generated routines replacing the reflex's hand-chosen window types (3.5).
+6. The tables' state-recurrence fix and memory (Q5 - now that they are the main engine); the probes of section 6.2.
