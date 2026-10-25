@@ -1068,6 +1068,17 @@ coverage depth be made the same as the old planner's?') [DESIGNED; E2]
   mid-swing - the gate's failure mode) and than E2 (e)'s first form 'commit the deep search's noop / escape' (that
   answer is only as fresh as the last deep search). Measure: tier 1's per-tick time on the bot's thread / a worker,
   the share map2 holds, collisions 0, invalid presses 0.
+- TIER 1 IS MOSTLY LOOKUPS (the person, 2026-10-24: 'her current state has a table with the reach of every later
+  frame - finding a point next to the damage boxes should be fast'): split the danger by whether it depends on her.
+  INDEPENDENT of her (most frames): once a Clapper has chosen its move (a slam, a cast, a jump's landing), its damage per
+  frame is fixed up to its timing views - reach (the tables) minus that danger per frame is the safe set, a strike /
+  safe point is an interval intersection, the keys come from the chain: sub-millisecond and EXACT, no closed-loop
+  re-evaluation. DEPENDENT on her (a few moments): a Clapper's choice / aim frame inside the horizon (Close / Far by her
+  distance, the Jump Aim from her x) and her hits that can change it (an Idle hit's reaction) - only a candidate whose
+  path crosses such a moment needs the re-prediction, split by her position interval at that frame (the same
+  computation as the aim-aware exits, 3.3.4). Today every candidate is re-evaluated in closed loop over its whole
+  length (~15 ms each at 1 s: T4's 64 candidates) even where the Clapper's move is already fixed. Needs the danger
+  precomputed per Clapper move / frame (E1 (b)).
 - PROBABLY NO TIER 2 (the person, 2026-10-24: 'very likely tier 2 is not needed - add the long-term planner for
   switching targets and the long-distance escape, that is enough'): an event is a motion key, an attack is not, so
   most strikes are ONE event (a hop + down slash, a Clawline + the slash after control, the umbrella close + the
