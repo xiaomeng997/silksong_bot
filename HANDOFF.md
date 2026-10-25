@@ -15312,3 +15312,217 @@ episodes in `live\l2_cache`).
 5. The pogo's protection >= 10 f (the model 8 f); 'pogo the landing' as a routine.
 6. The re-simulation behind the 'path' checks before calibrating the tube's tolerance.
 7. Not merged, not pushed; the instances frozen after the run.
+
+## Task map2 - fix together (t1) - stage S1 (side / up slash): the Wanderer's side and up slashes as map2 strike primitives (offline; validated on 6,997 recorded presses before any search use; behind search.Cfg.prims 'side' / 'up' and LiveCfg.prims_su, default off - off: the search and the bot bit-identical; the M3 acceptance and the strict / open smokes with the switch on) (branch worktree-wf_f1846551-5f9-1, 2026-10-25; forum.md §111)
+
+The task (the person's decision of 2026-10-25 ~07:10 PDT after the live w7 audit: fix together - side and up slashes for
+map2, plans that carry their follow-up and an escape tail, the per-frame tier 1, map2 never hands the keys to the old
+planner in danger; offline only, the person decides on the next live run): stage S1 of the t1 workflow - add the side /
+up slash to what the search can plan (the audit's finding 1: search.Cfg.prims = ('dslash', 'claw'), 0 side slashes
+live, 81 % of the old default's hits are side slashes, 0.52 vs 1.48 hits / s), validate the primitive on the live
+presses before anything else (precision first), then the M3 acceptance and the strict / open smokes with the switch on.
+No game process, instance or oracle was touched; nothing merged, nothing pushed. Data `C:\ssbot\data\m2_play\map2\t1`
+(`PROGRESS.txt`; `v1\` the validation - `V1_REPORT.txt`, per-press rows `rows\`, the extracted frames `frs\`, the
+tests' fixture `fixture_presses.pkl`; `ident\`, `accept\` - `acc_025s.txt`, `acc_1s.txt`, `acc_1sb.txt` -, `smoke\`,
+`summary_smoke.txt`, `extra_smoke.txt`, `extra_smoke_e3.txt`, `camp.log`, `tests\`); scripts `t1\scripts\` (env.sh,
+v1_presses.py, v1_report.py, v1_debug.py, v1_fixture.py, press_scan_su.py, s1_smoke_extra.py, s1_acc.py, s1_camp.sh,
+s1_memwatch.py, d1 - d4 dev probes).
+
+### Result
+
+- **The primitive predicts the old planner's side slashes and their recoil (V1, below).** On the live run's old-planner
+  presses outside the intro: 197 credited side / up presses, 77 landed - all 77 predicted (74 on the landed frame, 3
+  one or two frames later), 0 false, 0 missed. Over every set (6,997 presses; 5,373 credited, 4,431 landed): precision
+  0.998 (8 false
+  contacts, every one a press WITHOUT a direction key), recall 0.989, the contact frame exact in 97.1 %; with the
+  direction key held at the press - how map2 presses it - 4,412 credited, 3,733 landed: precision 1.000 (0 false),
+  recall 0.988. The up slash: 238 / 138, precision 1.000, recall 0.942. The recoil: EV_RECOIL on the hit frame puts her
+  rollout on her recorded path (|x err| p90 0.000 u over the next 12 frames; 1.92 u without it, 0.24 u a frame off).
+- **The rule the data chose**: the contact is tested only on frames with a physics step, against the Clapper's SHAPE of
+  the previous frame at its position now (the trigger runs in the physics step and meets the collider the last frame's
+  animation left) - the plain box of the contact frame put 17 % of the contacts a frame early.
+- **The search plans them.** M3 acceptance at 1 s (two paired runs): the chosen safe plans' expected hits per second of
+  plan 1.80 / 1.80 -> 2.17 / 2.19 (+21 %), their mean expected hits 1.56 / 1.56 -> 1.64 / 1.60, 104 - 107 of 230 chosen
+  plans carry a side / up contact; at 0.25 s 1.94 -> 2.30 /s. BUT the moves 'found' fall: 188 / 181 -> 177 / 170 at 1 s,
+  107 -> 92 at 0.25 s - the hook moves above all (P1-idle-evade 8 / 7 -> 3 / 1, P1-idle-slam 7 / 5 -> 4 / 4), lost to
+  the time cap (the side / up windows join the round robin and take a share of it), while P2 / SLAMSTRIKE / JUMPTRAP
+  gain; P1-idle as a whole 19 / 19 -> 18 / 17.
+- **The smokes (paired, one campaign, e3 = E3's recommended live set vs e3su = + prims_su)**: strict w7 share 0.515 ->
+  0.537, w13 0.105 -> 0.110; open w7 0.598 -> 0.609, w13 0.193 -> 0.151 (one run each); the planned contacts map2 played
+  while holding the keys, strict w7: 52 (down 14, claw 38) -> 62 (side 27, down 8, claw 27), per second of map2's
+  control 0.84 -> 0.97, per engaged second 0.45 -> 0.54 (open w7 0.39 -> 0.52); the audit 0 collisions in every arm
+  (194 + 56 control runs strict e3su); the press scan with the side / up rules (independent of strike / press: the
+  rollout, the attack table's polygons, its own clipping) 0 invalid presses - 346 side contacts credited in committed
+  strict plans, 346 valid. The replay's Clapper is the recorded one: planned contacts are not landed hits - live decides.
+- **Identity**: with prims at their default the search's deterministic digests 130 / 130 + 106 / 106 equal E1's base
+  (tables on, the live flags); the map2 / M4 suites with S1's 124 passed (11 files, `t1\tests\tests_final.log`).
+- Nothing ran live; no merge; no frozen checkout (the person decides on the next live run).
+
+
+### What was built (commits f1f1a87, 2cfead1; `brain/ssbot/map2/strike.py`, `press.py`, `search.py`, `brnum.py`, `live.py`, `brain/ssbot/tools/m3_accept.py`; `tests/test_t1_s1.py`)
+
+Every new behaviour is behind `search.Cfg.prims` holding 'side' / 'up' (default `("dslash", "claw")`) and
+`LiveCfg.prims_su` (default off; `su_kinds` "side,up", `su_shrink` 0.05); off, nothing of it runs (the identity below).
+
+- **strike.py** - the slashes reused from the crest's attack table (`ssbot.knowledge.attack_shapes.AttackTable
+  ("Wanderer")`: the 'normal' / 'alt' / 'up' polygons the old planner's kernel uses, relative to her box centre, their
+  live frames (1, 7)): `su_polys`, `su_active`, `su_contact` (the first frame of start + 1 .. + 7 where the polygons -
+  both alternations of the side slash - placed at her box centre with her facing at the swing's start meet the target
+  box shrunk by the slack; frames without a physics step skipped; a cancelled swing - ATTACKING off, a turn after the
+  recovery - ends the look), `su_boxes` (the target per frame: each record's box in the SHAPE of the same Clapper's record
+  of the frame before at its own position, intersected over the records drawn at the frame as robust_boxes does;
+  `brnum.su_rows` the array path, a tuple path for brnum.ON off), `su_region`, `SU_KINDS`, `SU_DMG` (10). No clash /
+  tink: the Clapper has no TINK collider and its hammers let a slash pass (clapper.py's shapes; clash.json has no
+  Clapper clash).
+- **press.py** - `trace_su` (the kin frame loop recording per frame the attack before / after the Update, its direction
+  / kind, her facing, the wall side, the physics steps, her mode time), `su_start` (the first attack that starts at the
+  press .. + 7: 'side' / 'up' / 'down' / 'wall' / 'combo' - within COMBO_F 9 frames after a dash / sprint frame, the
+  Wanderer's dash combo, not modelled - / 'glide' - out of the umbrella's antic or the inflate before its GLIDE_ATK_F 6th
+  frame - / 'none'), `su_started`.
+- **search.py** - `simulate(su_fn=)`: a nail press of `seg.dsl` whose kin attack is not a down slash
+  (`press.ds_start`'s 'side') and that `su_start` makes a side / up slash is credited by `strike.su_contact` on
+  `su_fn(iid)` (`SU_SHRINK` 0.05; the trajectory memo records the rows read, 'srows', and `Evaluator._reads_ok` checks
+  them); on the contact her nail recoil (`EV_RECOIL_L` facing right / `EV_RECOIL_R`; the up slash's `EV_RECOIL_DOWN`) on
+  the contact frame, the re-roll, the Clapper's ('side' | 'up', 10) hit (clapper.py: a side hit pushes it 0.48 u; an
+  Idle / Walk hit re-predicts - `_hit_matters` as for every hit); a 'combo' / 'glide' start is a forced collision at the
+  press (the plan is not played from there), a 'none' / 'wall' start a miss. `Evaluator.su` (Cfg.prims) passes su_fn.
+  The windows (`Searcher._su_windows`, from `windows` per branch and Clapper): the pass's rows whose state swings at once
+  (COND_ATK: the press in tp + 1 starts it), the contact at press + 1 / 2 / 4, either facing, her box centre in
+  `su_region` of `su_boxes` at the contact (x within 0.5 u of the row's interval, her height kept on the ground and
+  extrapolated in the air), the side slash's her box out of the body on its side, the point nearest the slash's middle
+  reach; extra = facing x 10 + dc. The realizer (`_realize_su`): the attack with the direction key toward the target
+  (and up), that direction held to the expected contact (dc - 1 frames), no key to the swing's end; the jump / dash let go
+  or kept; accepted only when su_start gives that slash facing the target AT the press. The fx damage and the node's
+  next swing (`_next_atk`: a side / up contact + 17) know the kinds. Cfg.prims' default unchanged.
+- **live.py** - `SU` (set_switches from prims_su; `search.SU_SHRINK` from su_shrink), `search_kw` adds the kinds to the
+  worker's prims; `OutData.sboxes` (build_outs: su_boxes of every target; shift_outcome moves them as the boxes);
+  `_su_fn(o, s)` passed to every re-simulation (commit, late check, the tube's re-check, hold_sim, the audit); the hold
+  filter's realizer (`HoldRealizer(su=)`), `_press_at(su=)`, `reanchor_outcome`, the late check and `build_prefix` accept
+  a planned nail press without down (any rising attack: the kin state decides the swing); a side / up swing under way is
+  'slash under way' even with midswing (no carry: swing_from_state carries down slashes only); a side / up contact ahead
+  sends the tube to its exact re-check (`contact_kept`). The snapshot's busy rule ('slash' for DS_WIN frames after a
+  press) is unchanged - the search does not restart inside a side swing.
+- **m3_accept.py** - the hold realizer with su when the Cfg's prims hold them.
+- **tests/test_t1_s1.py** (7): the primitive against V1's recorded presses (fixture
+  `C:\ssbot\data\m2_play\map2\t1\v1\fixture_presses.pkl`: 20 landed side / up slashes, 12 misses - the kin start, its
+  kind and facing, the contact frame and Clapper), su_start's rules (the facing to the key, up, the dash combo, the
+  inflate frames), simulate's credit and recoil only with su_fn (the miss as before without), su_boxes = the previous
+  frame's shape at the position now (array = tuple path), the search plans a side slash only when prims has it, the live
+  realizer, the switches off. The map2 / M4 suites with it: 124 passed (11 files).
+
+### V1 - the validation on the recorded presses (before any search use; `t1\v1\V1_REPORT.txt`, scripts `t1\scripts\v1_presses.py`, `v1_report.py`, `v1_debug.py`, `v1_fixture.py`)
+
+Every nail press (the latched attack's rising edge) of: the 16 live m2e3 episodes of this morning (the old planner's
+presses there; the L2 caches), the 30 rnjb w7 episodes of 10-18 and the 6 switch-off smokes (h2) of today, and the 131
+episodes of the m2 caches (fit / held / old: SP8 .. SP14, SP-AIR1, w7 and w13) that have a landed UpSlash - 6,997
+presses after the battle's intro (658: her Roar Lock / a Clapper in an intro state - map2 never plans there) and the
+presses where she was hit about the swing (42: her Stun clip; the recording's keys do not carry the damage). Per press:
+her kin state at the frame before it (kinematics.StateTracker over the recording - the bot's tracker), the recorded
+latched masks from the press rolled with map2's World (HERO2, the arena), press.trace_su / su_start, and
+strike.su_contact against the Clapper's model body box built from its OBSERVED Control state / frame / x / y / facing
+per frame (the strike module with the true timing; a frame where the entity is missing - a killing blow - holds its
+last state). The truth: a hit event on a Clapper from Slash / AltSlash / UpSlash / WallSlash within press .. + 17.
+
+The variants decided the rule (all sets; credited side / up presses; TP / FP / FN, precision, recall, the contact frame
+exact among the TP):
+
+    variant                                          TP     FP   FN   precision  recall  frame exact (-1 frame)
+    box of frame c, every frame                      4,336  10   95    0.9977    0.979    72.6 % (17.2 %)
+    box of frame c, frames with a physics step       4,327  10  104    0.9977    0.977    87.2 % (1.5 %)
+    box of frame c - 1, physics-step frames          4,399  15   32    0.9966    0.993    95.8 % (0.3 %)
+    the intersection of c - 1 and c, physics steps   4,322   8  109    0.9982    0.975    87.2 %
+    THE SHAPE OF c - 1 AT ITS POSITION AT c,         4,384   8   47    0.9982    0.989    97.1 % (0.3 %)  <- su_boxes
+      physics-step frames (box_shift_st)
+    ... with the 0.05 u slack (SU_SHRINK, default)   4,336   8   95    0.9982    0.979    95.2 %
+    ... her recorded positions instead of her        4,343   8   88    0.9982    0.980    98.0 %
+      rollout
+    the recorded root collider for the model box     4,223  10  208    0.9976    0.953    (no better: the model's
+      (frame c, every frame)                                                                body box is not the error)
+
+(the exact rows: V1_REPORT.txt 'all'; 13 TP hit the other Clapper of a w13 pair first.) Why the previous frame's shape:
+the physics step of frame c meets the Clapper's collider as frame c - 1's animation left it (an Idle -> Evade change at c
+shrank the box after the hit had registered: the hit at c, the box of c misses it), moved to where its body is at c (an
+evading Clapper's box of c - 1 credits a contact it has left: ref30 10235917). The one-frame-early contacts of the
+plain box were frames without a physics step (the trigger runs in the step).
+
+By set, the chosen rule (box_shift_st, no slack), credited side / up presses (landed):
+
+    set                                                     credited (landed)  TP     FP   FN   precision  recall
+    live m2e3 run, the old planner's presses                  197 (77)          77     0    0    1.000      1.000
+    rnjb w7 runs of 10-18                                     600 (486)        481     1    5    0.998      0.990
+    h2 smokes of 10-25                                        125 (98)          96     0    2    1.000      0.980
+    m2 caches (SP8 - SP14, SP-AIR1; w7 / w13)               4,451 (3,770)     3,730    7   40    0.998      0.989
+    all                                                     5,373 (4,431)     4,384    8   47    0.998      0.989
+    all, the direction key held at the press                4,412 (3,733)     3,687    0   46    1.000      0.988
+    up slashes (every set)                                    238 (138)         130    0    8    1.000      0.942
+
+- Every false contact (8) is a press WITHOUT a direction key, the side slash facing off: the kin model turned her during
+  a pogo bounce / an evade chase where the game did not (ref27 10229274: R held into the bounce, the game's facing stayed
+  left). map2's presses always hold the direction toward the target (TrySetCorrectFacing at the swing's start): 0 false
+  contacts in 4,412 such presses. The 47 misses are reach-edge hits (the slash's tip 3.13 u from her centre on the body's
+  edge, |dx| ~6 u to the transform) and Drop In / Idle-start frames.
+- The recoil: her recorded box x after a landed side hit against the rollout with EV_RECOIL_L / R on the hit frame:
+  |x err| over the hit .. + 12 p50 / p90 / p99 0.000 / 0.000 / 1.03 u (without the event 1.10 / 1.92 / 1.92; a frame late
+  0.24 / 0.24; a frame early 0.24 / 0.24); the recorded recoil flag's onset IS the hit frame (4,291 / 4,293), away from
+  her facing (4,290). The up slash's RecoilDown on the hit frame: |y err| p50 / p90 0.015 / 0.135 u (without 0.015 / 2.13).
+- The press validity (kin kind x the game's swing, every press): kin side -> the game's side 5,074 / 5,085 (no clip 9,
+  up 1, wall 1); kin up -> up 238 / 238; kin 'none' while the game swung 480 side / 30 up (the kin's cooldown / queue
+  disagreeing: not credited, a recall loss: 108 landed hits); the umbrella: kin starts at the inflate's frame 4 never
+  swung in the game (29 / 29), at 5 39 / 41, from 6 87 / 87 -> GLIDE_ATK_F 6 (24 landed hits not credited); the dash
+  combo window: 4 presses (the old planner vetoes the rest - no data: kept out).
+- The two alternations: requiring both (the later first contact) or the kin's own alternation changed nothing at the
+  1e-3 level; both kept (the alternation is not tracked, as the down slash's).
+
+### The measurements (`camp.log`; s1_camp.sh at 2cfead1, one campaign, the arms interleaved; every job at Idle but the smokes' replays / workers, which m4c_smoke boosts as the live bot - the method of S1 / T3 / T4 / E0 - E3; peak memory 15.5 GB in total, 3.5 GB in one process)
+
+    identity (m4b_speed ident, a virtual clock, tables on, the live flags; prims at the default):  130 / 130 + 106 / 106 = E1's base
+
+    M3 acceptance (279 move cases; same / alt / not, found; e3s = E3's search switches - tables, fast_danger,
+    fast_windows, witness_fast, fg_nowait, baseline (base_n 2, base_last), views_fill -; e3su = + prims side / up;
+    s1_acc.py: the chosen safe plans' expected hits over their length)
+                     e3s                       e3su                      chosen plans' hits / s of plan, with side / up
+    0.25 s           72 / 35 / 172  107        57 / 35 / 187   92        1.94 -> 2.30;  77 of 226
+    1 s              97 / 91 / 91   188        93 / 84 / 102  177        1.80 -> 2.17; 107 of 230
+    1 s (b)          97 / 84 / 98   181        89 / 81 / 109  170        1.80 -> 2.19; 104 of 230
+    per move at 1 s (a / b; found): P1-idle-evade 8 / 7 -> 3 / 1, P1-idle-slam 7 / 5 -> 4 / 4, P1-idle 19 / 19 -> 18 / 17,
+    P1-jump 12 / 12 -> 12 / 12, P2 14 / 14 -> 16 / 16, SLAMSTRIKE 34 / 34 -> 34 / 33, LOWHOP 15 / 15 -> 15 / 15,
+    JUMPTRAP 15 / 15 -> 15 / 15, P4 12 / 11 -> 11 / 9, P5 15 / 15 -> 14 / 14; of the 20 lost cases (run a) 13
+    are 'timeout' (the cap), 4 'unsafe', 3 'no candidate' - the side / up windows take their share of the round robin
+    over (primitive, Clapper).
+
+    smokes (share of the engaged ticks; strict 3 runs each, open 1; the planned contacts each committed plan's most
+    probable outcome holds - its 'cp' - that map2 still held the keys for; s1_smoke_extra.py)
+                       share w7  share w13  played contacts w7 (side / down / claw)  per s of control  per engaged s
+    e3 strict          0.515     0.105      52 (0 / 14 / 38)                         0.84              0.45
+    e3su strict        0.537     0.110      62 (27 / 8 / 27)                         0.97              0.54
+    e3 open            0.598     0.193      15 (0 / 5 / 10)                          0.63              0.39
+    e3su open          0.609     0.151      20 (9 / 7 / 4)                           0.82              0.52
+    (w13: strict 11 -> 9 played, 0.72 -> 0.54 per s of control - two Clappers, few plans)
+    every arm: audit 0 collisions (e3su strict 194 + 56 control runs), 0 tracebacks, 0 errors; the press scan with the
+    side / up rules (press_scan_su.py = S1b's scan + the side / up checks) 0 invalid presses in all and in committed
+    plans - side contacts credited 755 (strict, all plans) / 346 (committed), every one valid; the up slash: 1 planned
+    contact in a committed plan, none credited in a committed part. Reveal (strict w7): 81 / 84 move starts with a
+    plan within 60 f, first key p50 / p90 16 / 30 f (e3 80 / 84, 16 / 30). The S1b scan's 'mismatch' 14 in two e3 runs is the midswing carry the scan's re-simulation
+    does not pass (plans whose root carries a down slash under way: lp.swing_a), not S1's.
+
+### Open items
+
+1. The moves found at the acceptance fall with side / up on (188 / 181 -> 177 / 170 at 1 s; 107 -> 92 at 0.25 s), the
+   hook moves most (P1-idle-evade / -slam) - the time cap shared by more windows. Options for the person: a smaller
+   n_win / a later slot for side / up in the round robin, or tier 1 (S2) where the side slash is a one-event plan.
+2. The side slash in the replay is a planned contact: whether the hit lands and the recoil is as modelled only live will
+   tell (V1 says it should: 1.000 precision with the direction key, the recoil p90 0.000 u).
+3. Not credited (recall, not precision): a kin attack start the game made a frame earlier or later ('none' while the
+   game swung: 480 side / 30 up of 6,997 presses, 108 landed hits - the kin's cooldown / attack queue), the dash combo
+   window (no data: the old planner vetoes those presses), the inflate's frames 1 - 5, the reach edge (the slash's tip on
+   the body's edge).
+4. A side / up swing under way is not carried into a new search (midswing carries down slashes only): the snapshot stays
+   'busy: slash' for DS_WIN frames after a side press, the search restarts after it.
+5. The windows offer the up slash where its polygon meets the body (beside / under it); the smokes chose none (the
+   acceptance 3 - 4) - its value is the ride (P4) and a Clapper above her; the up slash's RecoilDown error p90 0.135 u.
+6. The S1b press scan's re-simulation does not carry a root swing (14 'mismatch' outcomes in two e3 runs).
+7. Nothing ran live; no merge; no frozen checkout.
+
+### The switch for a live run (the person decides)
+
+`SSBOT_FORUM_MAP2_SET=<E3's recommended set>,prims_su=1` (su_kinds 'side,up', su_shrink 0.05 at their defaults).
