@@ -197,8 +197,8 @@ class Cfg:
     base_h: int = 40
     base_n: int = 4
     base_frac: float = 0.2
-    base_last: bool = False                # the baseline after the strike search (in the last base_frac of the cap,
-    #                                        only when it found no safe strike) - the strikes keep the cap
+    base_last: bool = False                # the baseline after the strike search (only when it found no safe strike,
+    #                                        within base_frac of the cap past it) - the strikes keep the whole cap
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -3272,11 +3272,9 @@ class Searcher:
         cfg = self.cfg
         now = self._now
         # (M4b's hard cap: a candidate's evaluation in progress at the cap is abandoned between its re-predictions)
-        cap_all = cap
-        if cfg.baseline and cfg.base_last:
-            # E2 (e) (base_last): the strike search keeps (1 - base_frac) of the cap, the baseline the rest - at the end,
-            # only when nothing safe but the noop was found
-            cap = cap * (1.0 - float(cfg.base_frac))
+        # E2 (e) (base_last): the strike search keeps the whole cap; the baseline after it - only when it found no safe
+        # strike - may run base_frac of the cap past it (its plan then arrives a little later: the commit re-anchors it)
+        cap_all = cap * (1.0 + float(cfg.base_frac)) if (cfg.baseline and cfg.base_last) else cap
         self._until = (lambda: now() - t0c > cap) if cfg.hard_cap else None
         self.splits = {}
         self.anytime = []
