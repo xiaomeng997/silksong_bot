@@ -1036,6 +1036,25 @@ antic 5 needs its root by antic ~4 and its search done within ~3 f, while the fi
   eps(k)); each frame the left / right inside the corridor is chosen to keep off its edges and correct the drift; the
   presses keep their frames.
 
+#### 3.4.8b Two tiers - a per-frame map2 tier as the baseline plan (the person, 2026-10-24: 'can the new planner's
+coverage depth be made the same as the old planner's?') [DESIGNED; E2]
+
+- WHY THE OLD PLANNER ALWAYS HAS KEYS: it re-plans every frame (~12 - 16 ms per tick) over cheap candidate rows with
+  precomputed danger (the aim zones, the slam map) and always takes its best row, proven safe or not; map2 searches
+  deep (0.1 - 1 s per decision, the Clapper re-predicted in closed loop, every outcome) and acts only on a plan safe in
+  every outcome - so it hands back often (M4d2, strict w7: the worker's best was the noop 29 %, the search cut 28 %,
+  the plan failed the commit 21 %, nothing safe found only 11 %).
+- THE DESIGN: TIER 1, per frame, the same depth and speed as the old planner but with map2's model - a short horizon
+  (<= 1 event, ~60 f), the tables for her reach, the danger precomputed per Clapper move / frame (E1), the exit as
+  the funnel lookup, within a few ms - always outputs keys: the BASELINE PLAN (Q2), the least-risk escape when
+  nothing is proven safe. TIER 2 = today's deep search in the background (multi-event, contingent plans, strikes):
+  when it finds a plan better than tier 1's it commits it (the tube) and tier 1 yields. TIER 0 = the reflex for the
+  latency-gap windows (3.5). The old planner then only covers states the model does not know.
+- BETTER THAN today's 'hand the keys back to the old planner' (one model everywhere; no handover between models
+  mid-swing - the gate's failure mode) and than E2 (e)'s first form 'commit the deep search's noop / escape' (that
+  answer is only as fresh as the last deep search). Measure: tier 1's per-tick time on the bot's thread / a worker,
+  the share map2 holds, collisions 0, invalid presses 0.
+
 #### 3.4.9 Logs and tools [M4c, M4d2, G]
 
 The per-tick log `map2_i<N>.jsonl` (owner, why, plan id, frames since its anchor, committed frames left, the possible
