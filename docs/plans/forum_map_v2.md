@@ -1470,8 +1470,16 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   tolerances (tol_hero 0.2, tol_x 0.35, tol_j +-1, tol_commit 0.2, tol_reanchor 0.5, tol_repair 0.3, tol_late 0.5,
   dev_gap 6) are guesses (M4b open item 2); the tube design replaces them. T4 FINAL: eps(k) p99 0.03 u at 1 f, 0.51 at
   10 f, 1.24 at 30 f, 2.6 - 2.8 u from 60 f (p90 <= 0.02 u) - the far tail is wide; per action type still to be split.
-- Q9 'THE DANGER PER CLAPPER MOVE / FRAME' (the person's 10-24 item for E1) is not described in the spec or the stage
-  reports - its design is not in the sources.
+- Q9 ANSWERED (the lead, 2026-10-24, the person asked 'weren't the Clapper's damage boxes done before? what does the
+  old planner use?'): the boxes exist three times - the old planner's EnemyTables + MultiForecast (support templates per
+  enemy state and frame from 107 recorded fights, 0.05 u cells dilated by her hurtbox + measured margins; one
+  conservative union over every logged branch / dwell for the next 0.6 - 0.8 s, computed ONCE per tick and queried by
+  all rows in one batch - fast, conservative, her-independent apart from the separate aim zones); move_data (SG1: per
+  move, state and frame the damage / target boxes with timing variants - the slam map and the old specials table come
+  from it); map2's Clapper model (M2: per branch and frame DAMAGE / BODY / POGO shapes with measured margins and
+  timing views, her-dependent choices and aims). 'The danger per move / frame' (E1 (b)) therefore means USING map2's
+  shapes the old planner's way: built once per decision per branch and shared by all candidates, re-predicted only at
+  the her-dependent moments (3.4.8b 'TIER 1 IS MOSTLY LOOKUPS') - the old planner's speed with map2's exactness.
 - Q10 THE FUNNEL'S PARAMETERS: 120 or 180 f, how many branches per decision, and how it meets the 'dev' end (S6's proper
   fix: the exit's keys as the plan's own tail) are not fixed; nor whether its 'inside' uses Back.exact or a forward
   confirmation where the backward set is only an upper bound (the float, T4). T4 FINAL (707 funnels): forward 4.2 ms
