@@ -1606,3 +1606,7 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 6. The tables' state-recurrence fix and memory (Q5 - now that they are the main engine); the probes of section 6.2.
 7. LATER, once map2 can replace the old controller (3.8) and positioning knowledge is needed (the person, 2026-10-24):
    the knowledge layer's recordings statistics with the clean-material rules (3.7).
+8. LISTED, NOT STARTED - its priority to be weighed once the current work is done (the person, 2026-10-24): the old
+   planner's attack-range estimate (combat.attack_range) UNITED with map2's danger for attacks already started, as a
+   cheap safety net for colliders map2's model misses (its contact coverage 96 - 100 %); measure how much danger it
+   adds (= the model's gaps, to be fixed in the model) and whether it makes plans too conservative.
