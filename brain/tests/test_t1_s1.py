@@ -6,6 +6,7 @@ search's windows / realizer, the live plumbing (the realizer's press, the re-anc
 from __future__ import annotations
 
 import pickle
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -81,17 +82,21 @@ def test_su_start_rules(W):
     st = press.trace_su(W, S, np.array([DS | R, DS | R] + [R] * 6 + [A | R] + [0] * 8, np.int64))
     t2, kd, _ = press.su_start(st, 9)
     assert kd in ("combo", "none")
-    # out of the umbrella's antic / inflate: not credited
-    S_air = km.initial_state(W.params, 30.0, sk.FLOOR + 6.0 + sk.FOOT, ground=False, vy=-2.0, facing=1)
-    m = [J] * 3 + [J | A | R] + [J] * 8
-    st = press.trace_su(W, S_air, np.array(m, np.int64))
-    n_glide = 0
-    for t in range(1, len(m) + 1):
-        if st[t, press.S_MODE] == km.M_GLIDE and st[t, press.S_PH] <= 1 and press.su_started(st, t):
-            assert press.su_start(st, t)[1] == "glide"
-            n_glide += 1
-    t2, kd, _ = press.su_start(st, 4)
-    assert kd != "side" or not (st[t2, press.S_MODE] == km.M_GLIDE and st[t2, press.S_PH] <= 1)
+    # out of the umbrella's antic / the inflate's first frames: not credited (V1: from the inflate's 6th frame)
+    S_air = km.initial_state(W.params, 30.0, sk.FLOOR + 7.0 + sk.FOOT, ground=False, vy=-2.0, facing=1)
+    seen = Counter()
+    for d in range(0, 16):
+        m = [J] * d + [J | A | R] + [J] * 10
+        st = press.trace_su(W, S_air, np.array(m, np.int64))
+        t2, kd, _ = press.su_start(st, d + 1)
+        if kd == "none":
+            continue
+        gl = st[t2, press.S_MODE] == km.M_GLIDE
+        early = gl and (st[t2, press.S_PH] < 1 or (st[t2, press.S_PH] == 1 and
+                                                   st[t2, press.S_MT] * 60.0 < press.GLIDE_ATK_F - 0.5))
+        assert (kd == "glide") == bool(early), (d, kd, st[t2, press.S_PH], st[t2, press.S_MT] * 60.0)
+        seen[(kd, bool(gl))] += 1
+    assert seen[("glide", True)] >= 1 and seen[("side", True)] >= 1, seen
 
 
 def test_simulate_credits_a_side_slash_with_its_recoil_only_when_on(W):

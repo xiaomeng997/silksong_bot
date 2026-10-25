@@ -270,8 +270,11 @@ def state_name(kt: np.ndarray, t: int) -> str:
 # the normal / alternate side slash, 3 up, 4 the wall slash), its facing (do_attack turns her to the direction key she
 # holds at the swing's start; the facing cannot change while ATK_T < the attack recovery, a turn after it cancels the
 # swing: ATTACKING off). trace_su records per frame what that needs; kin_trace (trace) is unchanged.
-S_MODE, S_PH, S_GND, S_XVX, S_ATK0, S_ATKT0, S_ATK, S_ATKT, S_PDIR, S_KIND, S_FACE, S_WSIDE, S_STEPS = range(13)
-SNCOL = 13
+S_MODE, S_PH, S_GND, S_XVX, S_ATK0, S_ATKT0, S_ATK, S_ATKT, S_PDIR, S_KIND, S_FACE, S_WSIDE, S_STEPS, S_MT = range(14)
+SNCOL = 14
+GLIDE_ATK_F = 6           # a side / up slash out of the umbrella's inflate is credited from its 6th frame (her mode time
+#                           before the start's Update >= 5.5 frames): V1 - kin starts at its frame 4 none swung in the game
+#                           (29 / 29), at 5 39 / 41, from 6 87 / 87 (M0: lost at its frames 1 - 4, at once from the 6th)
 COMBO_F = 9               # the Wanderer's dash combo: an attack within 0.15 s (DASHCOMBO_WINDOW_TIME) after a dash /
 #                           sprint frame is another move (the old planner's veto, forum_planner.WANDERER_COMBO_F) - not
 #                           modelled: a side / up press there is not credited and its plan cannot be played
@@ -318,6 +321,7 @@ def _trace_su(S0, masks, events, udt, P, TT):
         out[t, S_XVX] = x[XVX]
         out[t, S_ATK0] = x[ATTACKING]
         out[t, S_ATKT0] = x[ATK_T]
+        out[t, S_MT] = x[MODE_T]
         update(x, m, ev, dt, udt, P, TT)
         out[t, S_ATK] = x[ATTACKING]
         out[t, S_ATKT] = x[ATK_T]
@@ -354,7 +358,7 @@ def su_start(st: np.ndarray, t: int, look: int = LOOK) -> tuple:
     t .. t + look - 'side' (a normal / alternate side slash), 'up', 'down' (the Wanderer's down slash), 'wall' (a
     wall slash: the polygon behind her, not a strike), 'combo' (it starts within COMBO_F frames after a dash / sprint
     frame of the trace: the Wanderer's dash combo, not modelled), 'glide' (it starts out of the umbrella's antic /
-    inflate: the game loses it there); 'none' (no attack starts: not credited)."""
+    the inflate before its GLIDE_ATK_F-th frame: the game loses it there); 'none' (no attack starts: not credited)."""
     n = len(st) - 1
     for t2 in range(t, min(t + look, n) + 1):
         if su_started(st, t2):
@@ -362,9 +366,10 @@ def su_start(st: np.ndarray, t: int, look: int = LOOK) -> tuple:
             for q in range(max(t2 - COMBO_F, 0), t2 + 1):
                 if int(st[q, S_MODE]) in (km.M_DASH, km.M_SPRINT):
                     return t2, "combo", face
-            if int(st[t2, S_MODE]) == km.M_GLIDE and st[t2, S_PH] <= 1.0:
-                # out of the umbrella's antic / inflate (M0: the attack lost in the antic, in the inflate's frames
-                # 1 - 4; V1: 4 of 4 such kin starts were no slash in the game) - not credited
+            if int(st[t2, S_MODE]) == km.M_GLIDE and (st[t2, S_PH] < 1.0 or (
+                    st[t2, S_PH] == 1.0 and st[t2, S_MT] * 60.0 < GLIDE_ATK_F - 0.5)):
+                # out of the umbrella's antic / the inflate's first 5 frames (M0: the attack lost in the antic and the
+                # inflate's frames 1 - 4; V1: GLIDE_ATK_F) - not credited
                 return t2, "glide", face
             pd, kd = st[t2, S_PDIR], abs(st[t2, S_KIND])
             if pd == 2.0:
