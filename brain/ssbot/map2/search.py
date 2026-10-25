@@ -186,6 +186,17 @@ class Cfg:
     witness_fast: bool = False             # (d) the witness's wide beam (envelope.WIDE_BEAM, T4) only when the 24-beam
     #                                        misses by more than WITNESS_TOL (0.1 u; T4: by 0.01 u) - a miss <= 0.1 u is
     #                                        accepted by _witness_ok anyway (honest keys; other keys than T4's there)
+    # E2 (e) (HANDOFF '... stage E2'; default off - off: as before): THE BASELINE PLAN - right after the root (no kept
+    # plan) the exit probes (_probe_masks: her held keys kept / left / right, a jump, a dash, base_h frames) appended to
+    # the root's prefix are evaluated in closed loop (away from the nearest Clapper first; up to base_n, within
+    # base_frac of the cap after the first) - map2's own escape, origin 'base', a candidate like any other
+    baseline: bool = False
+    # E2 (a) (default off): a timing view's empty frames hold its previous record (brnum.fill_gaps: the late view of a
+    # slam antic had no body and no state at the frame between the antic's last record and Slam 0's late start)
+    views_fill: bool = False
+    base_h: int = 40
+    base_n: int = 4
+    base_frac: float = 0.2
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -482,7 +493,7 @@ def _rows_sig(bx, lo: int, hi: int):
 
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
              alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None,
-             claw_lock: int = -99, tops_fn=None) -> Traj:
+             claw_lock: int = -99, tops_fn=None, swing=None) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
@@ -501,7 +512,12 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     M4 S1b (press.FREE_POGO / SHRINK / SIDE_RULE; HANDOFF 'S1b'): a press only kin's downspike lock holds is credited
     press.FREE_MIN frames after a hooked Clawline's forced bounce (the lock's onset at its frame), press.FREE_POGO
     after a pogo (or a start state's lock); the contact needs both alternations on the body box shrunk by press.SHRINK; the side rule is press.side_hit
-    (tops_fn(iid): the highest body top per frame - strike.union_tops - or None: the robust box's top)."""
+    (tops_fn(iid): the highest body top per frame - strike.union_tops - or None: the robust box's top).
+    E2 swing (HANDOFF 'stage E2' (b), RE-PLAN FROM MID-ACTION): (t_s, iids, ifr0) - a down slash already under way at
+    S0 (her kin state carries it: ATTACKING, ATK_T, ATK_PDIR 2), started at rollout index t_s <= 0; its contact is
+    credited in the first segment against the first of iids whose robust body it meets (frames 1 on: frame 0 is the
+    observation), with its bounce and i-frames as a press's; ifr0: the pogo i-frames of a contact before S0 still
+    running at frames 1 .. ifr0 (swing_from_state). None: no swing (as before)."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
@@ -557,6 +573,29 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
             um = press.unmodelled(kt, masks, int(S[km.PREV]))
             if um:
                 bad.append((k0 + um[0], "dash_attack"))
+        if swing is not None and si == 0 and n > 0:
+            # E2 (b): the swing carried in from before the plan's start - its contact on the first target it meets
+            ts_ = int(swing[0])
+            gnd_ = (r.flags[0] & km.F_GROUND) != 0
+            best_ = None
+            for iid in swing[1]:
+                bx = boxes_fn(iid)
+                if bx is None:
+                    continue
+                if rec is not None:
+                    lo_, hi_ = 1, min(ts_ + sk.DS_ACTIVE[1], n) + 1
+                    rec.append(("rows", iid, lo_, hi_, _rows_sig(bx, lo_, hi_)))
+                c = sk.dslash_contact(r.pos[0], fac, gnd_, ts_, bx[k0:], press.SHRINK[0] if press.ON[0] else 0.0,
+                                      c_min=1)
+                if c >= 1 and (best_ is None or c < best_[0]):
+                    best_ = (c, iid)
+            if best_ is not None:
+                c, iid = best_
+                ev[c - 1] |= km.EV_POGO
+                r = W.roll(S, masks, ev)
+                kt = None
+                hits.setdefault(iid, {})[k0 + c] = ("down", sk.DS_DMG)
+                contacts.append((k0 + c, iid, "down"))
         for (i, iid) in sorted(seg.dsl):
             t = i + 1                                     # the press frame (rollout index)
             ts, kind = t, "down"
@@ -605,6 +644,8 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
         P_.append(r.pos[0, sl]), B_.append(r.box[0, sl]), G_.append(((r.flags[0] & km.F_GROUND) != 0)[sl])
         F_.append(fac[sl]), M_.append(r.mode[0, sl])
         ifr = np.zeros(nn + 1, bool)
+        if swing is not None and si == 0 and len(swing) > 2 and int(swing[2]) > 0:
+            ifr[1:int(swing[2]) + 1] = True               # E2 (b): a pogo before S0, its i-frames still on
         for (kc, iid_, kind) in contacts:
             if kind == "down" and k0 <= kc <= k0 + nn:
                 ifr[kc - k0 + sk.DS_IFR[0]:kc - k0 + sk.DS_IFR[1] + 1] = True
@@ -687,6 +728,35 @@ def claw_lock_of(sit) -> int:
     (Situation.meta 'claw_ctrl': that one's control frame, from the decision - the live worker's snapshot), -99: none."""
     c = (sit.meta or {}).get("claw_ctrl")
     return -99 if c is None else int(c) + press.CLAW_LOCK_F
+
+
+def swing_of(sit) -> tuple | None:
+    """E2 (b): the down slash under way at the situation's start (Situation.meta 'swing': (t_s, (iid, ...), ifr0) -
+    the live worker's snapshot from a mid-swing state, LiveCfg.midswing), None: none."""
+    v = (sit.meta or {}).get("swing")
+    if not v:
+        return None
+    return int(v[0]), tuple(int(i) for i in v[1]), int(v[2]) if len(v) > 2 else 0
+
+
+POGO_STEP_F = 60.0 / 50.0          # frames per physics step (the bounce's counter counts steps)
+
+
+def swing_from_state(S: np.ndarray, iids, dt: float) -> tuple | None:
+    """E2 (b): the swing her kin state S carries (search.simulate's swing): a down slash under way (ATTACKING on,
+    ATK_PDIR 2 - the tracker sets them from the observed attack) whose contact can still come: (t_s, iids, 0) with
+    t_s = -(its timer in frames), the frames since its start; or a pogo bounce already under way (BOUNCE: steps
+    since its onset) whose i-frames still run: (0, (), ifr0). None: neither."""
+    S = np.asarray(S, float).reshape(km.K, -1)[:, 0]
+    if S[km.BOUNCE] >= 0:
+        ifr0 = sk.DS_IFR[1] - int(math.floor(float(S[km.BOUNCE]) * POGO_STEP_F))
+        return (0, (), int(ifr0)) if ifr0 > 0 else None
+    if not (S[km.ATTACKING] > 0 and S[km.ATK_PDIR] == 2.0):
+        return None
+    ts = -int(round(float(S[km.ATK_T]) / float(dt)))
+    if ts + sk.DS_ACTIVE[1] < 1 or not iids:
+        return None
+    return ts, tuple(int(i) for i in iids), 0
 
 
 def bad_frame(tr: Traj, k0: int, k1: int) -> int | None:
@@ -1616,6 +1686,7 @@ class Evaluator:
     def __init__(self, W: World, cfg: Cfg):
         self.W, self.cfg = W, cfg
         FAST_DZ[0] = bool(getattr(cfg, "fast_danger", False))
+        brnum.VIEWS_FILL[0] = bool(getattr(cfg, "views_fill", False))          # E2 (a)
         sk.FAST[0] = FAST_DZ[0]
         self.n_pred = 0
         self.n_exit = 0
@@ -1641,7 +1712,8 @@ class Evaluator:
         strike reads nothing: one trajectory for every outcome."""
         self.n_sim += 1
         lock = claw_lock_of(sit)
-        key = (id(plan), var.name, lag, face0, id(sit.S), sit.alpha_c, b is None, lock)
+        sw = swing_of(sit)                      # E2 (b): a down slash under way at the situation's start (None: none)
+        key = (id(plan), var.name, lag, face0, id(sit.S), sit.alpha_c, b is None, lock) + ((sw,) if sw else ())
         ent = self._simm.get(key)
         if ent is None:
             ent = self._simm[key] = (plan, sit.S, [])
@@ -1650,12 +1722,12 @@ class Evaluator:
                 self.n_sim_hit += 1
                 return tr
         if b is None:
-            tr = simulate(self.W, plan, lambda iid: None, face0, sit.S, var, sit.alpha_c, claw_lock=lock)
+            tr = simulate(self.W, plan, lambda iid: None, face0, sit.S, var, sit.alpha_c, claw_lock=lock, swing=sw)
             ent[2].append(((), tr))
             return tr
         rec: list = []
         tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
-                      lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T))
+                      lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T), swing=sw)
         ent[2].append((tuple(rec), tr))
         if len(ent[2]) > 24:
             ent[2].pop(0)
@@ -3118,6 +3190,56 @@ class Searcher:
                     pick[rk] += 1
         return made
 
+    def _baseline(self, sit: Situation, node: Node, t0c: float, cap: float) -> list:
+        """E2 (e) (Cfg.baseline): the escape probes from the root (its prefix, then _probe_masks' constant keys for
+        base_h frames, through the realizer) evaluated in closed loop - away from the nearest Clapper first, then no
+        direction, then toward it; each order the held keys, a jump, a dash -, up to base_n (the first always, the
+        others within base_frac of the cap), stopping after two safe ones. [Eval] (origin 'base')."""
+        cfg = self.cfg
+        now = self._now
+        S = np.asarray(node.S, float)
+        masks = _probe_masks(S, int(cfg.base_h))
+        x = float(S[km.PX])
+        cxs = [float(o.x) for o in sit.obs]
+        away = 0
+        if cxs:
+            near = min(cxs, key=lambda c: abs(c - x))
+            away = 1 if x >= near else -1
+
+        def rank(i):
+            m = int(masks[i, 0])
+            d = 1 if m & km.B_RIGHT else (-1 if m & km.B_LEFT else 0)
+            return (0 if (d == away and d != 0) else 1 if d == 0 else 2, bool(m & km.B_DASH), bool(m & km.B_JUMP))
+        out = []
+        t_lim = t0c + cfg.base_frac * cap
+        order = sorted(range(len(masks)), key=rank)
+        # the screen (compiled, ~1 ms): a probe that touches the union of the root's branches' danger is not
+        # evaluated - none left: no baseline here (the strike search keeps the whole cap)
+        dz = _union_danger(node.pred, int(node.k0), int(cfg.base_h), cfg.margins)
+        if isinstance(dz, Packed):
+            boxes, off = dz.boxes, dz.off
+        else:
+            off = np.zeros(len(dz) + 1, np.int64)
+            off[1:] = np.cumsum([len(d) for d in dz])
+            boxes = np.concatenate(dz) if dz else np.zeros((0, 4))
+        cu_ = np.array([-1.0, 0, 0, 0, 0, 0, 0])
+        order = [i for i in order if ej.probe_exit(S, cu_, masks[i:i + 1], self.W.E.udt, self.W.E.P, self.W.TT,
+                                                   boxes, off, PROBE_EPS) >= 0]
+        self.stats["base_screened"] = len(order)
+        if self.part is not None:                       # the split search: the parts take every n-th probe
+            order = order[self.part[0]::max(1, self.part[1])]
+        for j, i in enumerate(order[:int(cfg.base_n)]):
+            if j > 0 and now() > t_lim:
+                break
+            plan = self._merge(node, Seg(masks[i].copy(), [], None, "base"), "base")
+            e = self.ev.evaluate(sit, plan, until=self._until)
+            if e is None:
+                break
+            out.append(e)
+            if sum(1 for x_ in out if x_.safe) >= 2:
+                break
+        return out
+
     def decide(self, sit: Situation, prev: Plan | None = None, cap_s: float | None = None,
                prefix: Seg | None = None) -> "Result":
         """One decision (module docstring). prefix (M4c): the keys every plan starts with (root())."""
@@ -3206,6 +3328,16 @@ class Searcher:
             note(best)
         timed_out = False
         n_cand = 0
+        if cfg.baseline and kept is None:
+            # E2 (e): the baseline plan - map2's own escape before the strike search (a candidate like any other)
+            for e in self._baseline(sit, rt, t0c, cap):
+                e.tag = ()
+                tried.append(e)
+                n_cand += 1
+                if e.finished and (best is None or (e.safe and (not best.safe or e.value > best.value))):
+                    best = e
+                    note(best)
+            mark("baseline")
 
         def better(a, b):
             if b is None:

@@ -233,14 +233,16 @@ def _poly_box(p: np.ndarray, b, shrink: float = 0.0) -> bool:
 
 
 def dslash_contact(pos: np.ndarray, face: np.ndarray, ground: np.ndarray, t: int, boxes: np.ndarray,
-                   shrink: float = 0.0) -> int:
+                   shrink: float = 0.0, c_min: int | None = None) -> int:
     """The first frame c in t + 3 .. t + 9 where both slash alternations at her transform pos[c] meet the robust box
     boxes[c] ([T, 4], NaN rows = none) - each alternation's first contact, the later of the two; -1 when either misses
     (or she lands first: the swing ends). M4 S1b shrink: the box shrunk by this on every side (a contact needs that
-    much overlap: press.SHRINK)."""
+    much overlap: press.SHRINK). E2 c_min (a swing carried into a plan's start, t <= 0: search.simulate's swing): the
+    frames before c_min are not looked at (her start state already shows no contact there)."""
     n = len(pos)
     first = [-1, -1]
-    for c in range(t + DS_ACTIVE[0], min(t + DS_ACTIVE[1], n - 1) + 1):
+    c0 = t + DS_ACTIVE[0] if c_min is None else max(t + DS_ACTIVE[0], int(c_min))
+    for c in range(c0, min(t + DS_ACTIVE[1], n - 1) + 1):
         if ground[c]:
             break
         if c >= len(boxes) or np.isnan(boxes[c, 0]):

@@ -25,6 +25,7 @@ from ssbot.map2 import clapper as cm
 from ssbot.map2 import clapper_jit as cj
 
 ON = [True]                     # the array paths on (False: the tuple loops, for the identity checks)
+VIEWS_FILL = [False]            # E2 (search.Cfg.views_fill): a timing view's empty frames hold its previous record
 MOVE_STARTS = {"Slam Antic": "slam", "Spell Antic": "cast", "Jump Antic": "jump", "Cast Slam Antic": "jcast",
                "Evade Scuttle": "evade"}            # = search.MOVE_STARTS
 MV_NAMES = list(dict.fromkeys(MOVE_STARTS.values()))
@@ -100,6 +101,31 @@ def _last_map(a: np.ndarray, T: int) -> np.ndarray:
     return out
 
 
+def fill_gaps(b: np.ndarray) -> np.ndarray:
+    """E2 (VIEWS_FILL): a view's records (frame-ordered, a = b = 0) with each empty frame between two drawn ones
+    holding the last record drawn before it, its frame in state counting on - the late view of a state whose
+    successor's start spreads (the slam antic's 48 / 49 f: its records end at 47, Slam 0's late start is 2 frames
+    later) has no record at the frame between: no body there and no state an observation could match (the w7 gate's
+    P2 / P5)."""
+    if len(b) < 2:
+        return b
+    o = np.argsort(b[:, 0], kind="stable")
+    b = b[o]
+    ks = np.round(b[:, 0]).astype(np.int64)
+    gap = np.flatnonzero(ks[1:] - ks[:-1] > 1)
+    if not len(gap):
+        return b
+    add = []
+    for i in gap:
+        for q in range(1, int(ks[i + 1] - ks[i])):
+            r = b[i].copy()
+            r[0] += q
+            r[4] += q
+            add.append(r)
+    out = np.concatenate([b, np.array(add)])
+    return out[np.argsort(out[:, 0], kind="stable")]
+
+
 def views(br, branch_cls) -> list:
     """search.timing_views on the arrays: two views (every record drawn at k + a / k + b, a = b = 0), each
     branch_cls (JBranch) with t_reveal = the first frame 1 .. T where the views' states differ (the last record of
@@ -116,7 +142,7 @@ def views(br, branch_cls) -> list:
             b[:, 0] = a[:, 0] + a[:, mode]
             b[:, 1] = 0.0
             b[:, 2] = 0.0
-            arr2[iid] = b
+            arr2[iid] = fill_gaps(b) if VIEWS_FILL[0] else b
         v = branch_cls(br.p * 0.5, br.choices, br.reveal, None, br.hazards, br.K, br.T, br.n_merged)
         v._arr, v._tb, v._names = arr2, tb, tb.names
         v.tview = "early" if mode == 1 else "late"
