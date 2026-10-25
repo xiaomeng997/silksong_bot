@@ -3047,12 +3047,24 @@ class Map2Controller:
             self._inc("tube_block_keep")
             row["tube_shift"] = sorted({(k % 1000, v) for sh in shifts.values() for k, v in sh.items()})
             return list(idx2), "block"
+        proxy = cfg.replay and cfg.replay_strict and self.ctrl_base is not None
         try:
             # (the re-check carries a down slash of the plan already pressed: midswing's rule - the tube's re-checks
             # come mid-strike, the gate's P2 / P5)
             cfg_r = cfg if cfg.midswing else LiveCfg(**{**cfg.as_dict(), "midswing": True})
-            ok, why_r, info = commit_check(self.W, lp2, fo, S0, inflight, hold_t, lat_s, her, obs, cfg_r, idx=idx2,
-                                           tol=cfg.tube_path, acc=acc)
+            if proxy:
+                # the strict replay: her observed state is the recording's, not her keys' result - the re-check runs
+                # in the replay's proxy world (the commit's base, every key sent since: the late check's / the
+                # audit's), as the commit's repair does there
+                base = self.ctrl_base
+                k0 = int(lp.t_a) + int(base["s"]) + 1
+                keys = np.array([(int(v) & ~COG if self._own_at(k) == "cog" else int(v)) if v is not None else 0
+                                 for k in range(k0, int(f) + 2) for v in (self._sent_at(k),)], np.int64)
+                ok, why_r, info = late_check(self.W, lp2, fo, f, keys, idx2, 1.0e9, pos_ref=self.ctrl_pos, slip=[],
+                                             base=base, midswing=True, iids=[ob.iid for ob in obs])
+            else:
+                ok, why_r, info = commit_check(self.W, lp2, fo, S0, inflight, hold_t, lat_s, her, obs, cfg_r,
+                                               idx=idx2, tol=cfg.tube_path, acc=acc)
         except Exception as e:  # noqa: BLE001
             ok, why_r, info = False, "error", {"error": repr(e)[:200]}
         msc = (time.perf_counter() - tc) * 1e3
@@ -3068,9 +3080,10 @@ class Map2Controller:
         if shifts:
             self._inc("tube_shifted")
             row["tube_shift"] = sorted({(k % 1000, v) for sh in shifts.values() for k, v in sh.items()})
-        self.ctrl_idx, self.ctrl_pos = list(info["alive"]), dict(info["pos_over"])
+        self.ctrl_idx, self.ctrl_pos = list(info["alive"]), {**self.ctrl_pos, **dict(info["pos_over"])}
         self.ctrl_excl -= set(self.ctrl_idx)
-        self.ctrl_base = {"s": int(n), "S": np.asarray(S0, float).copy(), "hold": hold_t, "lat": int(lat_s)}
+        if not proxy:
+            self.ctrl_base = {"s": int(n), "S": np.asarray(S0, float).copy(), "hold": hold_t, "lat": int(lat_s)}
         self.ctrl_cor = {}
         return list(self.ctrl_idx), "recheck"
 
