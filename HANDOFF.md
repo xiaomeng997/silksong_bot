@@ -14977,12 +14977,12 @@ setting away (`tube_path=1e9`) - to decide with live data.
 - With every E2 switch off the search's deterministic digests (m4b_speed ident: a virtual clock, tables on, the live
   flags; one Clapper 200 units, two Clappers 40) are identical to E1's base digests: 130 / 130 + 106 / 106 (the final
   code, d9deaa5); with SSBOT_FORUM_MAP2 unset nothing of `ssbot.map2` is imported (unchanged).
-- `tests/test_e2_handover.py` (17): the swing carried = the full simulation, the evaluator's swing, the shifted outcome
+- `tests/test_e2_handover.py` (16): the swing carried = the full simulation, the evaluator's swing, the shifted outcome
   and the match on a synthetic plan, the tube's drop on no matching timing, the corridor, the gate's P2 fixture (the
   old rule drops at 23, views_gap / the tube keep it; the shift (2, 22) of its early views; the commit check carrying
   its swing; the swing hold through its pogo; the steering in its jump phase), the hold's keys, the baseline probes,
   the worker's baseline answer, a baseline in control bridging base_lead frames, the switches off. The map2 / M4 suites
-  (8 files) 97 passed.
+  (9 files) 99 passed at the final code.
 
 ### The recommended live set (for E3 / the next gate)
 
