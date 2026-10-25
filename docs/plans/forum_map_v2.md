@@ -140,6 +140,33 @@ search's plans, the reflex for the search's latency gap, and the long-term posit
 
 ## 2. Status (2026-10-24, ~14:40 PDT)
 
+UPDATE 2026-10-25 03:20 - THE ev WORKFLOW (E0 - E3, offline; HANDOFF 'Task map2 - the evaluation and the handover'
+E0 - E3, forum.md 107 - 109; frozen checkout C:\ssbot\live_1v1_0c662ce, warmed; nothing live):
+- E0 profile (live w7): Python danger geometry 43.6 % of a decision, the envelope passes 19 %, witness + windows 18 %,
+  predict 2.9 % (11 % on w13); 63 % Python; the fixed costs before the first candidate take 51 % of the cap, so 71 % of
+  decisions end at the depth-1 slice (1.1 candidates per live decision); 91 % of the noop / unsafe answers are OUT OF
+  TIME, not 'nothing safe'.
+- E1: fast_danger (bit-identical), fast_windows, witness_fast, fg_nowait; the window shapes online too slow (3.6); one
+  funnel per beam node sound for only ~12 % of endpoints at 2x the exit checks' cost - not wired; the aim gap: 1.8 % (one
+  Clapper) / 14 % (two) of the relied-on exits exist only because the aim stood still; only 0.8 % of the deep search's
+  evaluations keep the root's danger unchanged (its candidates almost all cross a choice frame or a hit).
+- E2: the gate's P2 / P5 CAUSE - the late timing view had a ONE-FRAME GAP between the slam antic's last frame and Slam 0
+  (no outcome matched a one-frame-longer antic: the plan dropped at its first contact) -> views_gap / views_fill; then
+  swing_hold (map2 keeps its keys until the bounce's i-frames end) - P2 rebuilt: no hit; P5 bounces but then has no
+  safe next step (Slam 1) - open; P3 was no model gap - the oracle applied the jump and the Clawline a frame late, so
+  the reaction came 2 f late; the tube keeps that plan to control. midswing, the baseline in its SIMPLE form (the deep
+  search's escape probes; the PER-FRAME TIER 1 OF 3.4.8b WAS NOT BUILT, and 'tier 1 alone on the acceptance' NOT RUN).
+- E3 (15 verifier findings, 12 fixed behind swing_fix / tube_fix / hold_fix / late_act): the tracker's Wanderer down
+  slash ATK_PDIR 0 vs the model's 2 had kept midswing from ever acting; the hooked bounce had been given 8 f of i-frames
+  the game does not give (plans through a hammer / bombs could pass) - both fixed.
+- SHARE (strict replay, paired, 3 runs; the replay understates it - the recorded Clapper reacts to the recorded her): w7
+  E1 0.373 -> E2 0.524 -> E2 + fixes 0.504; w13 0.058 -> 0.107 -> 0.075 (spread 0.04 - 0.15); open w7 0.42 -> 0.61. Audit 0
+  collisions, 0 invalid committed presses in every arm. Acceptance 1 s 157 - 163 (flat).
+- RECOMMENDED LIVE SET: tables=1,fast_danger=1,fast_windows=1,witness_fast=1,fg_nowait=1,views_gap=1,views_fill=1,tube=1,
+  midswing=1,swing_hold=1,baseline=1,swing_fix=1,tube_fix=1,hold_fix=1,late_act=1. OPEN: plans robust to a key applied a
+  frame late (the remaining unsafe cases in the emulation); late_act's re-check still assumes on-time keys; the tube's
+  1 u path tolerance to calibrate live; the per-frame tier 1; P5.
+
 WHERE: everything on branch worktree-wf_f1846551-5f9-1 (not merged to main, not pushed); the reflex on branch reflex;
 the no-landing query on branch airceil (from 9bff134). Frozen checkouts: C:\ssbot\live_1v1_c0329d2 (the gate's, S1 +
 S1b), C:\ssbot\live_1v1_f27ac9c (T3; the tables library hard-linked in; the switch off by default; the switch off is the
@@ -1526,9 +1553,8 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
   wrong in 2/3 of the phases (no measurable control error); (4) a killing pogo bounces (77.6 % live) but the model
   drops the killed body and with it the contact (the search counts a kill as a miss). None appears in the map2 open
   items.
-- Q15 THE SLAM ANTIC LENGTH (the gate's P2 / P5): every outcome of the two committed slam strikes was the 'early' timing
-  view; why no 'late' view was among them (the timing spread conditioned on the frames spent, or the commit's selection)
-  is not explained.
+- Q15 ANSWERED (E2, 2026-10-25): not 'all outcomes early' - the late view had a one-frame gap between the slam
+  antic's last frame and Slam 0, so a one-frame-longer antic matched no outcome (views_gap / views_fill fix it).
 - Q16 THE HOOKED CONTROL FRAME by convention: the spec's 'control +26 - 34' (and MOVES_TODO's 'hooked control P+26-34')
   counts from SP13's P (2 f earlier than M0's); M3 uses 'the earliest control P + 23' in M0's convention; the spec's
   hooked 'dash +19 - 22 at 70 u/s for 3 - 7 f' is in SP13's convention too and no stage restates it in M0's. One
