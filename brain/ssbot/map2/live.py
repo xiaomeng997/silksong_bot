@@ -389,7 +389,7 @@ class LiveCfg:
     #                                more strikes; the fast workers keep its plan as CONT and react sooner to a reveal
     t1_stale: int = 24             # a tier-1 plan arriving this many frames after its anchor is not adopted
     t1_esc: int = 2                # the escapes a tier-1 decision evaluates in closed loop (the safest by the screen)
-    t1_h: int = 60                 # the escapes' frames
+    t1_h: int = 60                 # tier 1's look-ahead: its 1-event pass's and its escapes' frames
     t1_tail: bool = True           # (with tier1) the escape tail appended to every tier-1 plan (tier1.t1_tail: its exit
     exit_tail_h: int = 40          # probe, exit_tail_h frames) - the plan never ends at a contact / a hook's control
     t2_tail: bool = False          # the same tail appended to the deep search's (tier 2's) plans before they are sent
@@ -2484,9 +2484,9 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
         boost += f", numba threads unchanged ({e})"
     W = ms.World()
     if role == "t1":
-        # t1 S2: a tier-1 worker - depth 1, the 1-event 60-frame pass (ssbot.map2.tier1.t1_cfg), no split
+        # t1 S2: a tier-1 worker - depth 1, the 1-event pass of t1_h frames (60; ssbot.map2.tier1.t1_cfg), no split
         from ssbot.map2 import tier1 as _t1m
-        S = _Searcher(W, _t1m.t1_cfg(ms.Cfg.live(**search_kw(cfg))))
+        S = _Searcher(W, _t1m.t1_cfg(ms.Cfg.live(**search_kw(cfg)), passes=((1, int(cfg.t1_h)),)))
     else:
         S = _Searcher(W, ms.Cfg.live(**search_kw(cfg)))
     lib_gb = 0.0
@@ -2913,6 +2913,14 @@ class Map2Controller:
         self.t1_ms: list = []               # the tier-1 decisions' ms (worker)
         self.t1_age: list = []              # frames from a tier-1 plan's anchor to its adoption
         self.t1_tick_ms: list = []          # the tier-1 part of the bot's tick (ms)
+        # (the log's 't1n' on a tick tier 1 did not hold: why - the tick's code, the plans received and refused, the
+        # last plan's end and the frames since, since the last snapshot sent / plan received, the last status)
+        self._t1_why = None
+        self._t1_rej: list = []
+        self._t1_endw = None                # (why, fo) the last tier-1 plan's end (left / late / exhausted / sup)
+        self._t1_snap_fo = None
+        self._t1_recv_fo = None
+        self._t1_st = None                  # (status, fo) the last status a tier-1 worker answered with
 
     def _inc(self, key: str, n: int = 1) -> None:
         self.st[key] += n
@@ -2992,12 +3000,14 @@ class Map2Controller:
                     d_["open"] = False
                 if msg.ep == self.ep:
                     msg.t_recv_f = int(fo)
+                    self._t1_recv_fo = int(fo)
                     self.t1_in.append(msg)
                     if len(self.t1_in) > 8:
                         self.t1_in = self.t1_in[-8:]
                 continue
             if isinstance(msg, dict) and msg.get("role") == "t1" and msg.get("kind") == "status":
                 self._inc("t1_w_" + str(msg.get("status")).split(":")[0])
+                self._t1_st = (str(msg.get("status")), int(fo))
                 d_ = self.t1_snaps.get(msg.get("seq"))
                 if d_ is not None:
                     d_["open"] = False
@@ -3535,7 +3545,19 @@ class Map2Controller:
             t1c = time.perf_counter()
             m_ = self._t1_tick(f, fo, her, obs, row, mask is None and why not in ("hit", "freeze") and acc_c,
                                (S0, inflight, hold_t, lat_s, acc))
-            self.t1_tick_ms.append((time.perf_counter() - t1c) * 1e3)
+            t1ms_ = (time.perf_counter() - t1c) * 1e3
+            self.t1_tick_ms.append(t1ms_)
+            row["t1ms"] = round(t1ms_, 3)
+            if m_ is None and mask is None:
+                # (the log: why tier 1 did not hold this tick - s2_t1gap.py's causes)
+                ew = self._t1_endw
+                row["t1n"] = [self._t1_why, list(self._t1_rej),
+                              None if ew is None else ew[0],
+                              None if (ew is None or ew[1] is None) else int(fo) - int(ew[1]),
+                              None if self._t1_snap_fo is None else int(fo) - int(self._t1_snap_fo),
+                              None if self._t1_recv_fo is None else int(fo) - int(self._t1_recv_fo),
+                              None if self._t1_st is None else [self._t1_st[0], int(fo) - int(self._t1_st[1])],
+                              int(acc_c), sum(1 for d_ in self.t1_snaps.values() if d_.get("open"))]
             if m_ is not None:
                 mask, why = m_, "t1"
         if mask is None and why is None:
@@ -3573,6 +3595,7 @@ class Map2Controller:
         (TickCheck's rule; none: every outcome - tier 1 always answers), the most probable one's key, the bits they
         agree on when they disagree. None: no tier-1 plan applies (none received, its keys left, played to its end)."""
         cfg = self.cfg
+        self._t1_why, self._t1_rej = None, []
         if self.t1_in:
             cur_ta = int(self.t1_ctrl.t_a) if self.t1_ctrl is not None else -10 ** 9
             for lp in sorted(self.t1_in, key=lambda x: -int(x.t_a)):
@@ -3581,6 +3604,7 @@ class Map2Controller:
                 if lp.ep != self.ep or int(lp.t_a) > int(fo) or int(fo) - int(lp.t_a) > cfg.t1_stale or \
                         int(lp.t_a) <= self.last_freeze:
                     self._inc("t1_stale")
+                    self._t1_rej.append("stale")
                     continue
                 cur = self.t1_ctrl
                 if cur is not None and getattr(lp, "t1_prev_pid", None) != str(cur.pid) and cur.t1_safe and \
@@ -3590,6 +3614,7 @@ class Map2Controller:
                     # adopted - replaces it only when better by t1_switch: tier 2's 'the replacement had it as its kept
                     # plan' - else a slower worker's strike was lost to a faster worker's older escape)
                     self._inc("t1_unaware")
+                    self._t1_rej.append("unaware")
                     continue
                 pos_over = {}
                 if not self._t1_followed(lp, f):
@@ -3600,6 +3625,7 @@ class Map2Controller:
                     cur_ok = self.t1_ctrl is not None and self._t1_followed(self.t1_ctrl, f)
                     if not (cfg.t1_repair and lp.t1_safe and not cur_ok and now is not None and
                             not getattr(lp, "_rep_tried", False)):
+                        self._t1_rej.append("broken")
                         continue
                     lp._rep_tried = True
                     tc = time.perf_counter()
@@ -3621,6 +3647,7 @@ class Map2Controller:
                     row.setdefault("t1_rep", []).append([lp.pid, bool(ok), why_c,
                                                          round((time.perf_counter() - tc) * 1e3, 2)])
                     if not ok:
+                        self._t1_rej.append("rep:" + str(why_c))
                         continue
                     pos_over = dict(info.get("pos_over") or {})
                     lp._rep_k = int(f) + 2
@@ -3640,19 +3667,23 @@ class Map2Controller:
             self.t1_in = []
         lp = self.t1_ctrl
         if lp is None:
+            self._t1_why = "noplan"
             return None
         if not play:
+            self._t1_why = "noplay"
             if self.t1_run is not None:
                 self._t1_end("yield")
             return None
         if not self._t1_followed(lp, f):
             self._inc("t1_left")
+            self._t1_why = "left"
             self._t1_end("left")
             self.t1_ctrl = None
             return None
         n, r = int(fo) - int(lp.t_a), int(f) + 2 - int(lp.t_a)
         outs = lp.outs
         if cfg.late_check and not self._t1_late(lp, f, fo, her, obs, row):
+            self._t1_why = "late"
             self._t1_end("late")
             self.t1_ctrl = None
             return None
@@ -3670,6 +3701,7 @@ class Map2Controller:
             alive = [i for i in range(len(outs)) if r < len(outs[i].cmds)]
         if not alive:
             self._inc("t1_exhausted")
+            self._t1_why = "exhausted"
             self._t1_end("exhausted")
             return None
         best = max(alive, key=lambda i: outs[i].p)
@@ -3832,6 +3864,7 @@ class Map2Controller:
             for k_ in sorted(self.t1_snaps)[:-64]:
                 del self.t1_snaps[k_]
         self._inc("t1_snapshots")
+        self._t1_snap_fo = int(fo)
         row.setdefault("t1_snap", []).append([seq, len(bridge), int(k)])
 
     def _t1_end(self, why: str) -> None:
@@ -3842,6 +3875,8 @@ class Map2Controller:
         run, self.t1_run = self.t1_run, None
         if why in ("sup", "exhausted"):
             self.t1_ctrl = None
+        if why in ("sup", "exhausted", "left", "late"):
+            self._t1_endw = (str(why), int(self._fo_prev) if self._fo_prev is not None else None)
         if run is None or not self.cfg.audit_runs or not run["k"]:
             return
         lp = run["lp"]
