@@ -1789,6 +1789,8 @@ def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int,
         dsl, pm_ = [], lat_b
         planned = sorted(int(k) for (k, _) in o.presses if int(k) > sb)
         for kp in planned:
+            if kp - sb - 1 >= len(lat):
+                break                   # (t1 S2: a press after the keys' end - a tailed plan's - is not in this run)
             q = _press_at(lat, kp - sb - 1, lat_b if kp - sb - 1 == 0 else int(lat[kp - sb - 2]), look=2, su=SU[0])
             if q >= 0:
                 dsl.append((q, next(int(ii) for (k, ii) in o.presses if int(k) == kp)))
