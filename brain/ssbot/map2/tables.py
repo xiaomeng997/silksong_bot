@@ -1636,6 +1636,8 @@ class Lib:
         if danger is None:
             boxes = np.zeros((0, 4))
             off = np.zeros(T + 2, dtype=np.int64)
+        elif getattr(danger, "off", None) is not None and len(danger.off) == T + 2:
+            boxes, off = danger.boxes, danger.off          # (E1: search.Packed - the same boxes, already packed)
         else:
             parts = [np.asarray(danger[t], dtype=np.float64).reshape(-1, 4) if t < len(danger) and danger[t] is not None
                      else np.zeros((0, 4)) for t in range(T + 1)]

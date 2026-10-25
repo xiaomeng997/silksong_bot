@@ -275,6 +275,14 @@ class LiveCfg:
     tables_file: str = ""
     tables_budget: int = 400000
     passes: str = ""
+    # E1 (HANDOFF 'Task map2 - the evaluation and the handover - stage E1'): the workers' search switches (each off by
+    # default; off: the search as before) - search.Cfg.fast_danger / fast_windows (the same plans, faster: the danger
+    # lists from each branch's all-frames arrays, the windows' predicate on the rows that can pass it), witness_fast
+    # (the witness's wide beam only past the acceptance tolerance), shapes (T4's exact down slash shapes, tables on)
+    fast_danger: bool = False
+    fast_windows: bool = False
+    witness_fast: bool = False
+    shapes: bool = False
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -1230,6 +1238,9 @@ def search_kw(cfg: LiveCfg) -> dict:
         kw.update(tables=True, tables_file=str(cfg.tables_file), tables_budget=int(cfg.tables_budget))
     if cfg.passes:
         kw["passes"] = tuple(tuple(int(v) for v in x.split(":")) for x in str(cfg.passes).split("/") if x.strip())
+    for k in ("fast_danger", "fast_windows", "witness_fast", "shapes"):       # (E1: only when on - off: as before)
+        if getattr(cfg, k, False):
+            kw[k] = True
     return kw
 
 

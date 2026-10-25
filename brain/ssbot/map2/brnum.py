@@ -455,3 +455,32 @@ def geo_boxes(A, IIDc, IQ, T, T_h, nobody, BSPAN, BOXL, MVOF, TABST, R0, BASE, d
     for k in range(T_h + 1):
         off[k + 1] += off[k]
     return off, BX, IIDB, EK, EI, body
+
+
+# ---- E1: strike.robust_boxes / union_tops' per-frame intersection / maximum in one compiled pass ----------------------
+
+@njit(cache=True)
+def frame_minmax(A, T):
+    """strike.robust_boxes' rows A [n, 6] (k_lo, k_hi, x0, y0, x1, y1): per frame 0 .. T the intersection of the boxes
+    drawn there (x0 / y0 their maximum from -inf, x1 / y1 their minimum from +inf) and the highest top (y1's maximum
+    from -inf) - np.maximum.at / np.minimum.at's values (a maximum / minimum is exact in any order)."""
+    x0 = np.full(T + 1, -np.inf)
+    y0 = np.full(T + 1, -np.inf)
+    x1 = np.full(T + 1, np.inf)
+    y1 = np.full(T + 1, np.inf)
+    top = np.full(T + 1, -np.inf)
+    for i in range(A.shape[0]):
+        lo = np.int64(A[i, 0])
+        hi = np.int64(A[i, 1])
+        for k in range(lo, hi + 1):
+            if A[i, 2] > x0[k]:
+                x0[k] = A[i, 2]
+            if A[i, 3] > y0[k]:
+                y0[k] = A[i, 3]
+            if A[i, 4] < x1[k]:
+                x1[k] = A[i, 4]
+            if A[i, 5] < y1[k]:
+                y1[k] = A[i, 5]
+            if A[i, 5] > top[k]:
+                top[k] = A[i, 5]
+    return x0, y0, x1, y1, top

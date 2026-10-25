@@ -176,6 +176,14 @@ class Cfg:
     tables_budget: int = 400_000           # the nodes the library may grow by (lazy expansions: it does not converge -
     #                                        10 - 200 k new nodes per decision on the recorded w7 situations, ~4.6 kB
     #                                        each) before it is reset to its loaded state at a decision's start; 0: never
+    # E1 (HANDOFF 'Task map2 - the evaluation and the handover - stage E1'; every switch default off - off: as before)
+    fast_danger: bool = False              # (b) the danger lists from each branch's all-frames arrays (DZB, _assemble)
+    #                                        and the shapes' caches without tuple keys: the same boxes, bit for bit
+    fast_windows: bool = False             # (d) the windows' predicate on the rows that can pass its x test (a per-frame
+    #                                        prefilter, Searcher._prefilter): the same windows
+    witness_fast: bool = False             # (d) the witness's wide beam (envelope.WIDE_BEAM, T4) only when the 24-beam
+    #                                        misses by more than WITNESS_TOL (0.1 u; T4: by 0.01 u) - a miss <= 0.1 u is
+    #                                        accepted by _witness_ok anyway (honest keys; other keys than T4's there)
 
     def replace(self, **kw) -> "Cfg":
         d = dict(self.__dict__)
@@ -887,8 +895,38 @@ def branch_frames(br) -> list:
     return frames
 
 
-_GROWN: dict = {}
+class _Cache(dict):
+    """A shape cache whose clear() also clears its companions (E1: the fast path's caches keyed the same way - the
+    tools clear _GROWN / _SLABS between the deterministic runs' situations)."""
+
+    def __init__(self):
+        super().__init__()
+        self.companions: list = []
+
+    def clear(self) -> None:
+        super().clear()
+        for c in self.companions:
+            c.clear()
+
+
+_GROWN: dict = _Cache()
 MARGIN_SCALE = [1.0]               # set by the Searcher from Cfg.margin_scale (the branch caches are per Searcher run)
+# E1 (b) (HANDOFF 'Task map2 - the evaluation and the handover - stage E1'): THE DANGER BUILT ONCE PER BRANCH - every
+# frame's configuration-space boxes of a branch in one array operation (_dzb) and the exit checks' / passes' danger
+# lists assembled from them by index arithmetic (_assemble), the polygons' / circles' slabs and grown hulls from
+# caches keyed by the same rounded relative shape as before but without the per-call tuple keys (_poly_slabs_arr,
+# grow_shape); the same boxes, bit for bit, in the same order. Set by the Searcher / Evaluator from Cfg.fast_danger.
+FAST_DZ = [False]
+_GROWN_F: dict = {}
+_GROWN.companions.append(_GROWN_F)
+
+
+def _rkey(a: np.ndarray) -> bytes:
+    """The key of a relative polygon as the old caches' tuple(np.round(a, 4).ravel()): equal bytes <=> equal tuples
+    (the -0.0 of a rounded small negative made +0.0; no NaN in a polygon)."""
+    r = np.round(a, 4)
+    r += 0.0
+    return r.tobytes()
 
 
 def grow_shape(x, m: float):
@@ -900,6 +938,14 @@ def grow_shape(x, m: float):
         return x.grown(m)
     p0 = x.poly[0]
     rel = x.poly - p0
+    if FAST_DZ[0]:
+        key = (_rkey(rel), rel.shape, m)
+        g = _GROWN_F.get(key)
+        if g is None:
+            g = x.grown(m).poly - p0
+            if len(_GROWN_F) < 20000:
+                _GROWN_F[key] = g
+        return cm.Shape(x.kinds, x.iid, x.name, poly=g + p0, mv=x.mv)
     key = (tuple(np.round(rel, 4).ravel()), m)
     g = _GROWN.get(key)
     if g is None:
@@ -963,7 +1009,32 @@ def _probe_masks(S: np.ndarray, H: int) -> np.ndarray:
 SLAB = 0.25                        # the slab height a polygon / circle is cut into for the envelope's danger boxes
 
 
-_SLABS: dict = {}
+_SLABS: dict = _Cache()
+_SLABS_F: dict = {}
+_SLABS.companions.append(_SLABS_F)
+_A16 = np.linspace(0.0, 2.0 * math.pi, 16, endpoint=False) + math.pi / 16
+_C16, _S16 = np.cos(_A16), np.sin(_A16)
+_R16 = math.cos(math.pi / 16)
+
+
+def _circle16(cx: float, cy: float, r: float) -> np.ndarray:
+    """Shape(circle=(cx, cy, r)).polygon(16), the same vertices (its angles' cos / sin computed once)."""
+    R = r / _R16
+    return np.stack([cx + R * _C16, cy + R * _S16], axis=1)
+
+
+def _poly_slabs_arr(poly: np.ndarray, hw: float, hh: float, off: float, dy: float = SLAB) -> np.ndarray:
+    """poly_slabs as an [n, 4] array (E1: the same slabs - the relative slabs cached under the same rounded relative
+    shape, the first polygon's; the key as bytes, not a tuple of floats)."""
+    p0 = poly[0]
+    d = poly - p0
+    key = (_rkey(d), d.shape, hw, hh, off, dy)
+    rel = _SLABS_F.get(key)
+    if rel is None:
+        rel = np.asarray(_poly_slabs(d, hw, hh, off, dy), float).reshape(-1, 4)
+        if len(_SLABS_F) < 50000:
+            _SLABS_F[key] = rel
+    return rel + np.array([p0[0], p0[1], p0[0], p0[1]])
 
 
 def poly_slabs(poly: np.ndarray, hw: float, hh: float, off: float, dy: float = SLAB) -> list:
@@ -1015,6 +1086,10 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     if v is not None:
         return v
     hw, hh = HB[0], HB[1]
+    if brnum.ON[0] and FAST_DZ[0]:
+        v = _bd_frame(_dzb(br, margins), br, k, margins, skip)   # E1 (b): the same boxes, the all-frames arrays
+        c[key] = v
+        return v
     if brnum.ON[0]:
         g = geo(br, margins)
         if 0 <= k < len(g.off) - 1:
@@ -1051,6 +1126,173 @@ def branch_danger(br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
     v = np.asarray(out, float).reshape(-1, 4)
     c[key] = v
     return v
+
+
+# ---- E1 (b): a branch's danger for every frame at once ----------------------------------------------------------------
+
+_Z4 = np.zeros((0, 4))
+
+
+class DZB:
+    """One branch's configuration-space danger for every frame (branch_danger's boxes, E1): DB [nb, 4] the body boxes
+    grown by her hurtbox (rows off[k] .. off[k + 1] - 1 of frame k, as the Geo's), IIDB their Clapper, RF their frame;
+    exk the frames with rare shapes (the hammers grown by their margins: a box, else the polygon's slabs) or the
+    hazards' circles (slabs), computed when a frame is first asked for (ex {k: [m, 4]}) - in branch_danger's order
+    (the bodies, the rare shapes, the circles) and in the old code's order of first requests, so the shape caches
+    keyed by a rounded relative shape (the first polygon's vertices) see the same sequence: the same boxes, bit for
+    bit."""
+    __slots__ = ("DB", "off", "IIDB", "RF", "ex", "exk", "exs", "nf", "g")
+
+
+def _dzb(br, margins: bool) -> DZB:
+    c = br.__dict__.get("_dzb")
+    if c is None:
+        c = {}
+        br.__dict__["_dzb"] = c
+    key = (margins, MARGIN_SCALE[0])
+    d = c.get(key)
+    if d is not None:
+        return d
+    g = geo(br, margins)
+    hw, hh = HB[0], HB[1]
+    B = g.BX
+    d = DZB()
+    if len(B):
+        d.DB = np.stack([B[:, 0] - hw, B[:, 1] - hh - HB_OFF, B[:, 2] + hw, B[:, 3] + hh - HB_OFF], axis=1)
+    else:
+        d.DB = _Z4
+    d.off = g.off
+    d.nf = len(g.off) - 1
+    d.IIDB = g.IIDB
+    d.RF = np.repeat(np.arange(d.nf, dtype=np.int64), np.diff(g.off)) if d.nf > 0 else np.zeros(0, np.int64)
+    ks = set(int(k) for k in g.rare_k if 0 <= int(k) < d.nf)
+    nco = min(len(g.coff) - 1, d.nf)
+    if nco > 0:
+        ks |= set(np.flatnonzero(np.diff(g.coff[:nco + 1]) > 0).tolist())
+    d.exk = np.array(sorted(ks), np.int64)
+    d.exs = set(ks)
+    d.ex = {}
+    d.g = g
+    c[key] = d
+    return d
+
+
+def _dz_extra(d: DZB, br, k: int, margins: bool):
+    """The rare shapes' and circles' boxes of frame k (None: none), computed at the first request."""
+    if k not in d.exs:
+        return None
+    e = d.ex.get(k)
+    if e is not None:
+        return e
+    g = d.g
+    hw, hh = HB[0], HB[1]
+    parts = []
+    for s in g.rare_grown(br, k, margins):
+        if s.box is not None:
+            x0, y0, x1, y1 = s.box
+            parts.append(np.array([[x0 - hw, y0 - hh - HB_OFF, x1 + hw, y1 + hh - HB_OFF]], float))
+        else:
+            parts.append(_poly_slabs_arr(s.polygon(16), hw, hh, HB_OFF))
+    if k < len(g.coff) - 1:
+        for c_ in range(int(g.coff[k]), int(g.coff[k + 1])):
+            cx, cy, r = g.CO[c_]
+            parts.append(_poly_slabs_arr(_circle16(float(cx), float(cy), float(r)), hw, hh, HB_OFF))
+    parts = [p for p in parts if len(p)]
+    e = (np.concatenate(parts) if len(parts) > 1 else parts[0]) if parts else _Z4
+    d.ex[k] = e
+    return e
+
+
+def _bd_frame(d: DZB, br, k: int, margins: bool, skip: tuple = ()) -> np.ndarray:
+    """branch_danger(br, k, margins, skip) from the branch's DZB: the same boxes in the same order."""
+    if not (0 <= k < d.nf):
+        return _Z4
+    a, b = int(d.off[k]), int(d.off[k + 1])
+    B = d.DB[a:b]
+    if skip:
+        B = B[~np.isin(d.IIDB[a:b], skip)]
+    e = _dz_extra(d, br, k, margins)
+    if e is None or not len(e):
+        return B
+    return np.concatenate([B, e])
+
+
+def _arange_runs(starts: np.ndarray, lens: np.ndarray) -> np.ndarray:
+    """The concatenated ranges starts[i] .. starts[i] + lens[i] - 1."""
+    n = int(lens.sum())
+    if n <= 0:
+        return np.zeros(0, np.int64)
+    cs = np.cumsum(lens) - lens
+    return np.repeat(starts - cs, lens) + np.arange(n, dtype=np.int64)
+
+
+class Packed(list):
+    """A danger list (per frame an [n, 4] array) that also carries its packed form (boxes [N, 4], off [T + 2]) - the
+    envelope passes and the exit probes use the packed arrays as they are (E1: the same boxes, not re-packed)."""
+    __slots__ = ("boxes", "off")
+
+
+def _assemble(brs: list, margins: bool, k0: int, H: int, skip_iid: int = -10 ** 9, skip_last: int = -10 ** 9,
+              empty_until: int = -10 ** 9) -> Packed:
+    """Per frame k0 .. k0 + H the boxes of the branches in order (each: its bodies - those of Clapper skip_iid left
+    out through frame skip_last -, its rare shapes and circles; none for a frame <= empty_until) and the walls -
+    _union_danger's / _packed_danger's lists, bit for bit, assembled by index arithmetic (the rare shapes asked for
+    frame by frame, the branches in order within a frame: the old loops' order)."""
+    nT = H + 1
+    nbr = len(brs)
+    dzbs = [_dzb(b, margins) for b in brs]
+    cnt = np.zeros((nbr, nT), np.int64)
+    body = []
+    exs = [[] for _ in range(nbr)]
+    ranges = []
+    for j, d in enumerate(dzbs):
+        ka, kb = max(k0, empty_until + 1, 0), min(k0 + H, d.nf - 1)
+        ranges.append((ka, kb))
+        if ka <= kb:
+            r0, r1 = int(d.off[ka]), int(d.off[kb + 1])
+            rows = np.arange(r0, r1, dtype=np.int64)
+            if skip_last >= ka and len(rows):
+                keep = ~((d.IIDB[r0:r1] == skip_iid) & (d.RF[r0:r1] <= skip_last))
+                rows = rows[keep]
+            t = d.RF[rows] - k0
+            nb = np.bincount(t, minlength=nT)[:nT] if len(rows) else np.zeros(nT, np.int64)
+            cnt[j] += nb
+            body.append((rows, t, nb))
+        else:
+            body.append(None)
+    # the rare shapes / circles: frame by frame, the branches in order within a frame
+    fr = sorted({int(k) for j, d in enumerate(dzbs) if len(d.exk) for k in
+                 d.exk[(d.exk >= ranges[j][0]) & (d.exk <= ranges[j][1])]})
+    for k in fr:
+        for j, d in enumerate(dzbs):
+            ka, kb = ranges[j]
+            if ka <= k <= kb and k in d.exs:
+                e = _dz_extra(d, brs[j], k, margins)
+                if len(e):
+                    exs[j].append((k - k0, e))
+                    cnt[j, k - k0] += len(e)
+    tot = cnt.sum(axis=0) + len(WALL_BOXES)
+    off = np.zeros(nT + 1, np.int64)
+    off[1:] = np.cumsum(tot)
+    out = np.empty((int(off[-1]), 4))
+    start = off[:-1].copy()                     # the next free row of each frame
+    for j, d in enumerate(dzbs):
+        bj = body[j]
+        if bj is not None:
+            rows, t, nb = bj
+            if len(rows):
+                rank = np.arange(len(rows), dtype=np.int64) - (np.cumsum(nb) - nb)[t]
+                out[start[t] + rank] = d.DB[rows]
+            start += nb
+        for (tt, e) in exs[j]:
+            s_ = int(start[tt])
+            out[s_:s_ + len(e)] = e
+            start[tt] += len(e)
+    for w in range(len(WALL_BOXES)):
+        out[start + w] = WALL_BOXES[w]
+    pk = Packed(out[off[t]:off[t + 1]] for t in range(nT))
+    pk.boxes, pk.off = out, off
+    return pk
 
 
 # ---- M4b: a branch's damage per frame as arrays (Geo) ---------------------------------------------------------------
@@ -1182,8 +1424,18 @@ def geo(br, margins: bool) -> Geo:
         MT["TK"], MT["TM"], MT["TOFF"], float(MARGIN_SCALE[0]), bool(margins))
     rare: dict = {}
     hm = np.flatnonzero(body & (A[EI, 8] != 0)) if len(EI) else np.zeros(0, np.int64)
+    shp_i: dict = {}
     for q in hm:
         kk, i = int(EK[q]), int(EI[q])
+        if FAST_DZ[0]:
+            # E1: a record drawn at several frames (its timing spread, the frames past T) - its shapes made once
+            sh = shp_i.get(i)
+            if sh is None:
+                tup = cj._rec_tuple(A[i], tb.names)
+                sh = shp_i[i] = [(s, tup[3]) for s in cm.rec_shapes(tup, int(IIDc[i]), br.K)[1:]]
+            if sh:
+                rare.setdefault(kk, []).extend(sh)
+            continue
         r = A[i]
         iid = int(IIDc[i])
         tup = cj._rec_tuple(r, tb.names)
@@ -1337,6 +1589,13 @@ def _packed_danger(br, k0: int, H: int, ifr_until: int, margins: bool) -> tuple:
     c = br.__dict__.setdefault("_pk", {}) if br is not None else _PK_NONE
     key = (k0, H, ifr_until, margins)
     v = c.get(key)
+    if v is None and FAST_DZ[0] and brnum.ON[0]:
+        # E1 (b): assembled from the branch's all-frames boxes (the same lists, bit for bit)
+        pk = _assemble([br] if br is not None else [], margins, k0, H, empty_until=ifr_until)
+        v = (pk, pk.boxes, pk.off)
+        if br is not None or len(c) < 4096:
+            c[key] = v
+        return v
     if v is None:
         dz = []
         for t in range(H + 1):
@@ -1354,6 +1613,8 @@ def _packed_danger(br, k0: int, H: int, ifr_until: int, margins: bool) -> tuple:
 class Evaluator:
     def __init__(self, W: World, cfg: Cfg):
         self.W, self.cfg = W, cfg
+        FAST_DZ[0] = bool(getattr(cfg, "fast_danger", False))
+        sk.FAST[0] = FAST_DZ[0]
         self.n_pred = 0
         self.n_exit = 0
         self.ms_pred = 0.0
@@ -1883,6 +2144,11 @@ class Node:
 def _union_danger(pred, k0: int, H: int, margins: bool, body_off: tuple | None = None) -> list:
     """Per frame k0 .. k0 + H the union of the branches' danger and the walls; body_off (iid, k_last): that Clapper's
     body left out through frame k_last (a hooked Clawline's window, strike.HOOK_BODY_OFF; M4a)."""
+    if FAST_DZ[0] and brnum.ON[0]:
+        # E1 (b): assembled from the branches' all-frames boxes (the same lists, bit for bit; packed)
+        if body_off is not None:
+            return _assemble(list(pred.branches), margins, k0, H, int(body_off[0]), int(body_off[1]))
+        return _assemble(list(pred.branches), margins, k0, H)
     out = []
     for t in range(H + 1):
         skip = (body_off[0],) if (body_off is not None and k0 + t <= body_off[1]) else ()
@@ -2041,16 +2307,20 @@ class Searcher:
             sel_ = R["t"] > tf                       # (T3: a long pass - the frames the shorter passes do not reach)
             R = {k: v[sel_] for k, v in R.items()}
         n = len(R["t"])
+        fast_w = bool(getattr(cfg, "fast_windows", False))
         for b in brs:
             for iid in brnum.iids(b):
                 boxes = sk.robust_boxes(b, iid, node.pred.T)
                 nb_ = len(boxes)
                 found = {"dslash": [], "claw": []}
                 if "dslash" in cfg.prims and n:
-                    done = np.zeros(n, bool)
-                    base = (R["t"] + node.k0 >= node.next_atk) & ((R["cond"] & ej.COND_DSLASH) != 0)
+                    Rd = R
+                    if fast_w and not cfg.shapes:
+                        Rd = self._prefilter(R, node, boxes, "dslash")
+                    done = np.zeros(len(Rd["t"]), bool)
+                    base = (Rd["t"] + node.k0 >= node.next_atk) & ((Rd["cond"] & ej.COND_DSLASH) != 0)
                     for dc in (4, 3, 6):                  # the contact at press + dc (the press in tp + 1)
-                        c = node.k0 + R["t"] + 1 + dc
+                        c = node.k0 + Rd["t"] + 1 + dc
                         cc = np.minimum(c, nb_ - 1)
                         bx = boxes[cc]
                         ok = base & ~done & (c < nb_) & ~np.isnan(bx[:, 0])
@@ -2058,14 +2328,14 @@ class Searcher:
                             continue
                         rx0, rx1 = bx[:, 0] - 1.742, bx[:, 2] + 1.742
                         ry0, ry1 = bx[:, 1] + 0.368 - sk.CTR_DY, bx[:, 3] + 2.676 - sk.CTR_DY
-                        yc = R["y"] + R["vy"] * dc / 60.0 - 0.5 * 60.0 * (dc / 60.0) ** 2
-                        sel = ok & (R["x1"] >= rx0 - 0.5) & (R["x0"] <= rx1 + 0.5) & (yc >= ry0) & (yc <= ry1)
+                        yc = Rd["y"] + Rd["vy"] * dc / 60.0 - 0.5 * 60.0 * (dc / 60.0) ** 2
+                        sel = ok & (Rd["x1"] >= rx0 - 0.5) & (Rd["x0"] <= rx1 + 0.5) & (yc >= ry0) & (yc <= ry1)
                         done |= sel
                         I = np.flatnonzero(sel)
                         if not len(I):
                             continue
-                        a_ = np.maximum(R["x0"][I], rx0[I] - 0.5)
-                        bb_ = np.minimum(R["x1"][I], rx1[I] + 0.5)
+                        a_ = np.maximum(Rd["x0"][I], rx0[I] - 0.5)
+                        bb_ = np.minimum(Rd["x1"][I], rx1[I] + 0.5)
                         cx = 0.5 * (bx[I, 0] + bx[I, 2])
                         mid = 0.5 * (a_ + bb_)
                         X = np.empty((len(I), 3))
@@ -2080,7 +2350,7 @@ class Searcher:
                         m = V.ravel()
                         k_ = np.repeat(I, 3)[m]
                         xm = X.ravel()[m]
-                        found["dslash"].append((R["t"][k_], R["g"][k_], xm, R["y"][k_], np.full(len(k_), dc),
+                        found["dslash"].append((Rd["t"][k_], Rd["g"][k_], xm, Rd["y"][k_], np.full(len(k_), dc),
                                                 np.abs(xm - np.repeat(cx, 3)[m])))
                     if cfg.shapes and getattr(fw, "node", None) is not None:
                         # T4 (the verifiers' finding: the predicate tests the contact at press + 4 / 3 / 6 only; the
@@ -2090,31 +2360,32 @@ class Searcher:
                         if sh is not None:
                             found["dslash"].append(sh)
                 if "claw" in cfg.prims and n:
-                    hit = node.k0 + R["t"] + 1 + sk.HOOK_HIT_F
+                    Rc = R if not fast_w else self._prefilter(R, node, boxes, "claw")
+                    hit = node.k0 + Rc["t"] + 1 + sk.HOOK_HIT_F
                     hh = np.minimum(hit, nb_ - 1)
                     bx = boxes[hh]
-                    ok = ((R["cond"] & ej.COND_CLAW) != 0) & (hit < nb_) & ~np.isnan(bx[:, 0])
+                    ok = ((Rc["cond"] & ej.COND_CLAW) != 0) & (hit < nb_) & ~np.isnan(bx[:, 0])
                     if ok.any():
-                        bbh = R["y"] - sk.HALF_H + 0.0774 * np.clip(R["vy"], -10.0, 5.0)
+                        bbh = Rc["y"] - sk.HALF_H + 0.0774 * np.clip(Rc["vy"], -10.0, 5.0)
                         band = (bx[:, 1] < bbh + sk.RAY_BAND[1]) & (bx[:, 3] > bbh + sk.RAY_BAND[0])
                         for d in (1, -1):
                             if d > 0:
                                 rx0, rx1 = bx[:, 0] - sk.RAY_U - 1.5, bx[:, 2]
                             else:
                                 rx0, rx1 = bx[:, 0], bx[:, 2] + sk.RAY_U + 1.5
-                            sel = ok & band & (R["x1"] >= rx0) & (R["x0"] <= rx1)
+                            sel = ok & band & (Rc["x1"] >= rx0) & (Rc["x0"] <= rx1)
                             I = np.flatnonzero(sel)
                             if not len(I):
                                 continue
-                            a_ = np.maximum(R["x0"][I], rx0[I])
-                            bb_ = np.minimum(R["x1"][I], rx1[I])
+                            a_ = np.maximum(Rc["x0"][I], rx0[I])
+                            bb_ = np.minimum(Rc["x1"][I], rx1[I])
                             near = bx[I, 0] if d > 0 else bx[I, 2]
                             # the point nearest the body (the shortest pull) but not inside it
                             xm = (bb_ - 0.3) if d > 0 else (a_ + 0.3)
                             xm = np.minimum(np.maximum(xm, a_), bb_)
                             keep = (near - xm) * d >= 0.3
                             I, xm, near = I[keep], xm[keep], near[keep]
-                            found["claw"].append((R["t"][I], R["g"][I], xm, R["y"][I], np.full(len(I), d),
+                            found["claw"].append((Rc["t"][I], Rc["g"][I], xm, Rc["y"][I], np.full(len(I), d),
                                                   np.abs(near - xm)))
                 for kind, parts in found.items():
                     if not parts:
@@ -2146,7 +2417,17 @@ class Searcher:
                         s0, s1 = int(starts[pi]), int(ends[pi])
                         nf = s0 + int(np.searchsorted(T_[s0:s1], T_[s0], side="right"))
                         sel_rows = [row(s0)]
-                        if kind == "claw":
+                        if kind == "claw" and fast_w:
+                            # (E1 fast_windows: the same rows - Python's round of each distinct height once, the
+                            # first row of a rounded height by its distinct heights' first rows)
+                            uq, first_ = np.unique(Y_[s0:s1], return_index=True)
+                            ru = [round(float(u), 2) for u in uq]
+                            ys = sorted(set(ru))
+                            for yv in (ys[-1], ys[len(ys) // 2]):
+                                r2 = row(s0 + int(min(int(first_[q]) for q in range(len(uq)) if ru[q] == yv)))
+                                if r2 not in sel_rows:
+                                    sel_rows.append(r2)
+                        elif kind == "claw":
                             # the hold height matters (the bounce from control): the lowest, the highest and the
                             # middle press heights of the bin
                             yr = [round(float(v), 2) for v in Y_[s0:s1]]
@@ -2168,6 +2449,37 @@ class Searcher:
             seen.add(key)
             out.append(c)
         return out
+
+    @staticmethod
+    def _prefilter(R: dict, node: Node, boxes: np.ndarray, kind: str) -> dict:
+        """E1 (Cfg.fast_windows): the pass's rows that can pass the windows' x test at one of the tested contact
+        frames (down slash: press + 4 / 3 / 6; the Clawline: its hit frame) - per frame the union of the x ranges the
+        predicate tests, the same expressions - with the primitive's end-condition bit; every row the predicate takes
+        is kept, in order (the same windows, fewer rows in the predicate's array operations)."""
+        nb_ = len(boxes)
+        t = R["t"]
+        if not len(t) or not nb_:
+            return R
+        tt = np.arange(int(t.max()) + 1)
+        lo = np.full(len(tt), np.inf)
+        hi = np.full(len(tt), -np.inf)
+        if kind == "dslash":
+            for dc in (4, 3, 6):
+                c = node.k0 + tt + 1 + dc
+                bx = boxes[np.minimum(c, nb_ - 1)]
+                v = (c < nb_) & ~np.isnan(bx[:, 0])
+                lo = np.where(v, np.minimum(lo, (bx[:, 0] - 1.742) - 0.5), lo)
+                hi = np.where(v, np.maximum(hi, (bx[:, 2] + 1.742) + 0.5), hi)
+            keep = (R["cond"] & ej.COND_DSLASH) != 0
+        else:
+            c = node.k0 + tt + 1 + sk.HOOK_HIT_F
+            bx = boxes[np.minimum(c, nb_ - 1)]
+            v = (c < nb_) & ~np.isnan(bx[:, 0])
+            lo = np.where(v, bx[:, 0] - sk.RAY_U - 1.5, lo)
+            hi = np.where(v, bx[:, 2] + sk.RAY_U + 1.5, hi)
+            keep = (R["cond"] & ej.COND_CLAW) != 0
+        keep &= (R["x1"] >= lo[t]) & (R["x0"] <= hi[t])
+        return {k: v_[keep] for k, v_ in R.items()}
 
     def _shape_rows(self, node: Node, fw, R: dict, sel: np.ndarray, boxes: np.ndarray):
         """T4: the down slash windows by the exact shape (wshape.cluster_windows) among the rows sel of a tables'
@@ -2335,7 +2647,7 @@ class Searcher:
         """The witness keys to the window's press point at frame tp (the cluster's state after frame tp: its end-
         condition bits say what a press in frame tp + 1 does), then the press in frame tp + 1."""
         kind, tp, g, x, y, iid, extra, br = cand[:8]
-        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only)
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol())
         if w is None or not self._witness_ok(w):
             return None
         masks = np.asarray(w["masks"], np.int64).copy()
@@ -2452,6 +2764,10 @@ class Searcher:
             out.append(("safe", T, int(gs[j]), float(xs[j]), float(ys[j]), None, 0, None))
         return out
 
+    def _wide_tol(self) -> float:
+        """The witness's wide-beam trigger (envelope.Fwd.witness wide_tol): T4's 0.01 u; E1's witness_fast: WITNESS_TOL."""
+        return WITNESS_TOL if getattr(self.cfg, "witness_fast", False) else 0.01
+
     def _witness_ok(self, w) -> bool:
         """T4 (the verifiers' finding: the witness's keys were used without their miss): the keys, rolled as they
         are, follow the chain's vertical history (her height at the target within 1e-6 u: a CB_JH frame whose hidden
@@ -2466,7 +2782,7 @@ class Searcher:
 
     def realize_safe(self, fw, cand) -> Seg | None:
         _, tp, g, x, y, *_ = cand
-        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only)
+        w = fw.witness(tp, x, y, tol_y=1e-6, attack_ok=not self.cfg.exec_only, wide_tol=self._wide_tol())
         if w is None or not self._witness_ok(w):
             return None
         return Seg(np.asarray(w["masks"], np.int64).copy(), [], None, "safe")

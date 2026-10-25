@@ -207,7 +207,7 @@ class Fwd:
         return cls, [0] + cands, xs
 
     def witness(self, t: int, x: float, y: float | None = None, cond: int = 0, tol_y: float = 1e-6,
-                look: int = 3, beam: int = 24, attack_ok: bool = True) -> dict | None:
+                look: int = 3, beam: int = 24, attack_ok: bool = True, wide_tol: float = 0.01) -> dict | None:
         """Concrete keys that bring her to x (at height y, or any height when None; with the end condition bits
         `cond`) at frame t: the cluster chain backtracked to the start (the vertical choices per frame and the
         tube of x from which the target stays reachable), then the horizontal keys by a beam search in that tube
@@ -256,7 +256,8 @@ class Fwd:
                 masks, oxy = m2, o2
             # T4 (the verifiers' finding: interior points of the float's clusters missed by 0.1 - 0.65 u that a dense
             # left / none / right search reaches): a wider beam once the first one misses
-            if beam < WIDE_BEAM and abs(oxy[t, 0] - x) > 0.01:
+            # (E1, search.Cfg.witness_fast: wide_tol = the search's acceptance tolerance - a smaller miss is used as it is)
+            if beam < WIDE_BEAM and abs(oxy[t, 0] - x) > wide_tol:
                 m3 = np.zeros(t, dtype=np.int64)
                 o3 = np.zeros((t + 1, 2))
                 ej.track_beam(S0, self.start.cu.copy(), vm, tlo, thi, self.eng.udt, self.eng.P, self.terrain,
@@ -374,6 +375,8 @@ class Engine:
         if danger is None:
             boxes = np.zeros((0, 4))
             off = np.zeros(T + 2, dtype=np.int64)
+        elif getattr(danger, "off", None) is not None and len(danger.off) == T + 2:
+            boxes, off = danger.boxes, danger.off          # (E1: search.Packed - the same boxes, already packed)
         else:
             parts = [np.asarray(danger[t], dtype=np.float64).reshape(-1, 4) if t < len(danger) and danger[t] is not None
                      else np.zeros((0, 4)) for t in range(T + 1)]

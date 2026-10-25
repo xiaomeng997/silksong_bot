@@ -106,6 +106,9 @@ def _rec_box(r: tuple, K: cm.Know) -> tuple | None:
     return (min(xa, xb), y + bx[2], max(xa, xb), y + bx[3])
 
 
+FAST = [False]                     # E1 (search.Cfg.fast_danger): robust_boxes / union_tops compiled (the same values)
+
+
 def robust_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
     """[T + 1, 4] the Clapper's body box per frame that holds in EVERY timing variant of the branch (the
     intersection of the records drawn at that frame; NaN when none / no body / it varies so much that nothing is
@@ -135,7 +138,12 @@ def robust_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
             bx = _rec_box(r, br.K)
             rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
         A = np.asarray(rows, float) if rows else None
-    if rows:
+    if rows and FAST[0] and brnum.ON[0]:
+        # E1: the same intersection in one compiled pass (np.maximum.at / np.minimum.at are slow)
+        x0, y0, x1, y1, _ = brnum.frame_minmax(np.ascontiguousarray(A, np.float64), int(T))
+        ok = (x0 < x1) & (y0 < y1) & np.isfinite(x0) & np.isfinite(x1)
+        lo[ok, 0], lo[ok, 1], lo[ok, 2], lo[ok, 3] = x0[ok], y0[ok], x1[ok], y1[ok]
+    elif rows:
         n = (A[:, 1] - A[:, 0] + 1).astype(np.int64)
         idx = np.repeat(A[:, 0].astype(np.int64), n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
         B = np.repeat(A[:, 2:], n, axis=0)
@@ -181,7 +189,11 @@ def union_tops(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
             bx = _rec_box(r, br.K)
             rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
         A = np.asarray(rows, float) if rows else None
-    if A is not None and len(A):
+    if A is not None and len(A) and FAST[0] and brnum.ON[0]:
+        top = brnum.frame_minmax(np.ascontiguousarray(A, np.float64), int(T))[4]      # (E1: the same, compiled)
+        ok = np.isfinite(top)
+        out[ok] = top[ok]
+    elif A is not None and len(A):
         n = (A[:, 1] - A[:, 0] + 1).astype(np.int64)
         idx = np.repeat(A[:, 0].astype(np.int64), n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
         y1 = np.repeat(A[:, 5], n)
