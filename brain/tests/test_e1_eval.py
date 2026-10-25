@@ -148,11 +148,46 @@ def test_witness_wide_tol(W):
             assert np.array_equal(a["masks"], c["masks"]) or abs(c["miss_x"]) <= ms.WITNESS_TOL + 1e-9
 
 
+def test_fg_nowait_takes_the_engine_when_the_library_is_busy(W):
+    """fg_nowait (tables on): a foreground pass while the library's lock is held is the engine's - the same clusters."""
+    sit = _sits(W)[1]
+    cfg = ms.Cfg.live(tables=True, fg_nowait=True)
+    lib = W.table_lib(cfg.tables_file, cfg.tables_budget)
+    if lib is None:
+        pytest.skip("no table library")
+    S = ms.Searcher(W, cfg)
+    rt = S.root(sit)
+    a = S.passes(rt, (0,))[0]
+    import threading
+    held, done = threading.Event(), threading.Event()
+
+    def hold():                                  # (another thread holds the library: the lock is re-entrant)
+        with lib.lock:
+            held.set()
+            done.wait(30)
+    th = threading.Thread(target=hold, daemon=True)
+    th.start()
+    held.wait(10)
+    n0 = ms.TABLE_STATS.get("busy", 0)
+    try:
+        b = S.passes(rt, (0,))[0]
+    finally:
+        done.set()
+        th.join(10)
+    assert ms.TABLE_STATS.get("busy", 0) == n0 + 1
+    for t in (1, 20, 60):                         # (the chain = the engine: heights bit-equal, x within 1e-9 u)
+        ra, rb = a.frame_rows(t), b.frame_rows(t)
+        assert len(ra[0]) == len(rb[0])
+        assert np.array_equal(np.sort(ra[4]), np.sort(rb[4]))
+        assert np.allclose(np.sort(ra[1]), np.sort(rb[1]), atol=1e-9, rtol=0)
+        assert np.allclose(np.sort(ra[2]), np.sort(rb[2]), atol=1e-9, rtol=0)
+
+
 def test_live_config_passes_the_switches_only_when_on():
     from ssbot.map2 import live as lv
     kw = lv.search_kw(lv.LiveCfg())
-    assert not any(k in kw for k in ("fast_danger", "fast_windows", "witness_fast", "shapes"))
-    kw = lv.search_kw(lv.LiveCfg(fast_danger=True, fast_windows=True, witness_fast=True))
-    assert kw["fast_danger"] and kw["fast_windows"] and kw["witness_fast"] and "shapes" not in kw
+    assert not any(k in kw for k in ("fast_danger", "fast_windows", "witness_fast", "fg_nowait", "shapes"))
+    kw = lv.search_kw(lv.LiveCfg(fast_danger=True, fast_windows=True, witness_fast=True, fg_nowait=True))
+    assert kw["fast_danger"] and kw["fast_windows"] and kw["witness_fast"] and kw["fg_nowait"] and "shapes" not in kw
     c = ms.Cfg.live(**kw)
-    assert c.fast_danger and c.fast_windows and c.witness_fast
+    assert c.fast_danger and c.fast_windows and c.witness_fast and c.fg_nowait

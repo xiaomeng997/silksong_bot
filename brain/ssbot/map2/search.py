@@ -181,6 +181,8 @@ class Cfg:
     #                                        and the shapes' caches without tuple keys: the same boxes, bit for bit
     fast_windows: bool = False             # (d) the windows' predicate on the rows that can pass its x test (a per-frame
     #                                        prefilter, Searcher._prefilter): the same windows
+    fg_nowait: bool = False                # (d) tables on: a foreground approach pass takes the M1 engine (the same
+    #                                        clusters) when the background pass holds the library's lock (T4 open item)
     witness_fast: bool = False             # (d) the witness's wide beam (envelope.WIDE_BEAM, T4) only when the 24-beam
     #                                        misses by more than WITNESS_TOL (0.1 u; T4: by 0.01 u) - a miss <= 0.1 u is
     #                                        accepted by _witness_ok anyway (honest keys; other keys than T4's there)
@@ -2257,6 +2259,10 @@ class Searcher:
                 self._bg.append(f)
                 out.append(f)
                 continue
+            if getattr(self.cfg, "fg_nowait", False) and self.cfg.tables:
+                # (E1: a foreground pass does not wait for the library's lock while the background pass holds it -
+                # the M1 engine's pass then, the same clusters; the wait's tail was 115 ms p90 in a 0.25 s decision)
+                kw = dict(kw, blocking=False)
             out.append(_long_pass(self.W, t_from, args, kw))
         return out
 
