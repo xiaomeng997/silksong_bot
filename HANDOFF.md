@@ -14464,3 +14464,299 @@ the stop flags, h_pass, the fixed library, the shapes, the flat layer's validity
 the start's hold, the witness's hold / attack), a2cf22b (the held direction in the key), 499df40 (the up slash's offer
 from the frame-start lane, the steady states' jump counter / A3), then the docs commit.
 
+
+## Task map2 - the evaluation and the handover - stage E1: the fast closed-loop evaluation (offline; E0's three biggest costs attacked behind switches, default off: the danger built once per branch, the windows' prefilter, the witness's wide beam, the window shapes measured; the escape funnel per beam node against the exit checks, T4's 44 'funnel only' explained, the aim at aim time measured; every arm with the A1_n tables on) (branch worktree-wf_f1846551-5f9-1, 2026-10-24; forum.md §107)
+
+The task (the ev workflow's stage E1; the person's decisions of 2026-10-24: attack the closed-loop evaluation, the tables
+ON in every measurement, every new behaviour behind a switch default off with the switches off bit-identical, the final
+exact closed-loop check before a commit stays the safety net; 'the no-landing show is not a goal of map v2'): make the
+evaluation fast - (a) the escape funnel per beam node, (b) the danger precomputed per Clapper move / frame, (c) the
+window shapes, (d) whatever else E0 shows dominant; measure each switch and all together vs off; recommend the switch
+set for live. Offline only: no game process, instance or oracle was touched; nothing merged, nothing pushed. Data
+`C:\ssbot\data\m2_play\map2\ev\e1` (`ident\` the deterministic digests, `sits_*` the timed offline decisions, `first\`
+the first safe plan, `accept\` the M3 acceptance, `smoke\` the real-time smokes, `funnel_all.json` the funnel study,
+`aim_s3.json` the aim study, `dep_one.json` / `dep_two.json` the re-prediction count, `camp.log` /
+`camp2.log`); scripts `ev\scripts\e1_*` (e1_dz_check, e1_win_check, e1_ident.sh, e1_sits, e1_cmp, e1_funnel, e1_aim,
+e1_dep, e1_acc, e1_camp.sh, e1_camp2.sh).
+
+### Result
+
+- **The danger geometry, E0's biggest cost, is cut by ~60 %, bit for bit** (`Cfg.fast_danger`): each branch's boxes of
+  every frame built once in one array operation, the exit checks' and the passes' danger lists assembled from them and
+  handed to the envelope packed (35.9 -> 14.3 ms per 0.25 s decision for the lists; the geometry item 57 -> 38 ms
+  p50). With `Cfg.fast_windows` (the windows' prefilter, x 1.63) the plans are the same: the danger lists 236 / 236
+  situations bit-identical, the windows 118 / 118, the search's deterministic digests 130 / 130 + 106 / 106 for each.
+- **`Cfg.witness_fast`** (the witness's wide beam only past the 0.1 u acceptance tolerance) halves the witness trackers'
+  time (17.8 -> 8.5 ms per decision); other keys than T4's only where the 24-beam missed by 0.01 - 0.1 u.
+- **Together (`e1` = the three, tables on) against the tables-on search of T4**: strict real-time smoke w7 share
+  **33.2 % -> 44.4 %**, w13 4.4 -> 5.7 % (open: w7 35.5 -> 40.5 %, w13 3.1 -> 8.6 %); the audit **0 collisions**, the press
+  scan **0 invalid presses** (438 plans / 156 committed); the reveal's first key p50 / p90 20 / 36 -> 18 / 34 f; the first
+  safe plan on w7 p50 / p90 101 / 279 -> 101 / 202 ms; the M3 acceptance found 154 / 150 -> 159 / 158 at 1 s and 69 -> 80
+  at 0.25 s (mean value 0.293 -> 0.423); offline at 0.25 s the safe strike / endpoint plans 61 -> 79 of 136.
+- **`Cfg.fg_nowait`** (built after the campaign: a foreground pass takes the engine while the background pass holds the
+  library's lock - the lock wait's tail was 97 - 115 ms p90 in a 0.25 s decision): the wait gone, the first safe plan
+  92 / 186 ms, the acceptance at 1 s 165 / 163, the decisions' p99 1.67 -> 1.46 s; the strict smoke w7 40.2 %, w13 6.8 %
+  (two runs each: w7 4 points under `e1`, w13 1 over - inside the smokes' spread). Measured, not in the recommended set
+  yet.
+- **(c) the window shapes (`Cfg.shapes`) are far too slow at wall clock** (the shape test in Python: windows 336 ms per
+  0.25 s decision; the acceptance at 1 s found 24 of 279): keep off.
+- **(a) the funnel per beam node cannot replace the exit checks**: stricter by design (19 - 22 % 'exit only'), sound
+  only where the end state lies in the node's own family (12 % of the root's endpoints, ~1 % of a child's), and ~2 x the
+  exit checks' cost; **T4's 44 'funnel only' are explained** (re-run: 23 + 7 - another cluster of the same height, the
+  witness off its point, the float's inexact backward set, and a new one: the end state's own last key fixes her next
+  frame's motion, which the cluster's backward set treats as free).
+- **The aim at aim time** (the lead's note): of the exits the search relied on, 1.8 % with one Clapper and 14 % with two
+  exist only because the aim stood still (every continuation tried collides once the Clappers aim at her real path);
+  14 of 79 chosen plans have such an outcome. Not fixed here (the aim-aware exit belongs to the funnel / the long-term
+  planner).
+- **Lookups instead of re-prediction** (the lead's note 'lookups'): only 0.8 % of the closed-loop evaluations see the
+  root's danger unchanged; 52 - 57 % change a Clapper's choice (her position decides it), 38 % land a hit that
+  re-predicts; where the choices match, the danger is the root's up to frame 27 / 70 / 72 (p10 / p50 / p90, one
+  Clapper) - lookups hold up to a Clapper's next choice / aim frame, past it the split by her position interval.
+- RECOMMENDED FOR LIVE: `SSBOT_FORUM_MAP2_SET=tables=1,fast_danger=1,fast_windows=1,witness_fast=1` (shapes off;
+  fg_nowait to be decided by E2's smokes). Offline only: nothing ran live; no frozen checkout (E3).
+
+### What was built (commits d6e209a, aeb6fa4; `brain/ssbot/map2/search.py`, `strike.py`, `brnum.py`, `envelope.py`, `tables.py`, `live.py`; `tests/test_e1_eval.py`)
+
+- **`search.Cfg.fast_danger` (E1 (b); exact)**: E0's biggest item was the danger geometry in Python - every new
+  prediction's branches (each evaluation re-predicts) rebuilt their per-frame configuration-space boxes frame by frame
+  (`branch_danger`: an `np.stack` of a few body boxes, every hammer polygon and lit circle cut into slabs again, ~20 -
+  40 us a frame, 600 - 1,400 frames a decision). Now each branch's boxes of EVERY frame come from one array operation
+  on its Geo (`DZB`: the body boxes grown by her hurtbox, their frame and Clapper), the rare shapes (the grown hammers,
+  the hazards' circles) per frame at its first request, and the exit checks' lists (`_packed_danger`) and the passes'
+  union lists (`_union_danger`, the hooked Clapper's body left out) are assembled by index arithmetic (`_assemble`)
+  and handed to the envelope already packed (`search.Packed`: a list of the per-frame arrays carrying `boxes` / `off`;
+  `envelope.Engine.forward` and `tables.Lib._forward` use them as they are). The slab / hull caches keyed by the same
+  rounded relative shape as before but by bytes instead of a tuple of floats (`_poly_slabs_arr`, `grow_shape`), the
+  16-gon of a circle from precomputed angles (`_circle16`), a record's hammer shapes made once per Geo (a record drawn
+  at several frames), `strike.robust_boxes` / `union_tops`' per-frame intersection in one compiled pass
+  (`brnum.frame_minmax`; `np.maximum.at` was slow). THE SAME BOXES, BIT FOR BIT: the shape caches hold the first
+  polygon's own relative vertices per rounded key, so the order of first requests matters - the rare shapes are
+  computed in the old loops' order (frame by frame, the branches in order within a frame); a first version that
+  computed a branch's rare shapes all at once differed in the last bits in 3 of 236 situations (fixed before any
+  measurement).
+- **`Cfg.fast_windows` (E1 (d); exact)**: the windows' predicate (E0: 4.6 - 6.4 ms a call, numpy over every row of
+  every pass) runs on the rows that can pass its x test at one of the tested contact frames (`Searcher._prefilter`:
+  per frame the union of the predicate's own x ranges - the same expressions -, with the primitive's end-condition
+  bit); the Clawline bins' heights rounded once per distinct height (Python's round, as before). The same windows.
+- **`Cfg.witness_fast` (E1 (d); a behaviour change)**: T4's wide beam (128) re-tracked ~60 % of the witnesses (3.5 ms
+  each) whenever the 24-beam missed by > 0.01 u; with the switch it runs only past `WITNESS_TOL` (0.1 u) - a smaller miss
+  is accepted by `_witness_ok` anyway (the keys rolled honestly; the closed-loop evaluation judges them). Other keys
+  than T4's where the 24-beam missed by 0.01 - 0.1 u (`envelope.Fwd.witness(wide_tol=)`).
+- `LiveCfg.fast_danger / fast_windows / witness_fast / fg_nowait / shapes` (`SSBOT_FORUM_MAP2_SET`), passed to the workers'
+  `Cfg.live` by `search_kw` only when on.
+- **`Cfg.fg_nowait`** (commit aeb6fa4; tables on): a foreground approach pass takes `World.envelope(blocking=False)`
+  - the M1 engine's pass, the same clusters - while the background 2-event pass holds the library's lock (T4's open
+  item: the wait inside a decision). `LiveCfg.fg_nowait`.
+- Not built: a `Cfg.funnel` lookup (below: it cannot replace the exit checks soundly and costs more than they do), the
+  content sharing of branches between predictions and a prediction cache (measured: few duplicates, below).
+- Tests `tests/test_e1_eval.py` (6): the danger lists / branch_danger / robust boxes / union tops / the Geo's rare
+  shapes bit-identical on slam / cast / jump cast / two-Clapper situations, the windows the same, a decision's tried
+  plans identical with both exact switches, the witness's wide-beam tolerance, fg_nowait's engine pass while another thread holds the library (the
+  same clusters), the live switches.
+
+### Identity and exactness (tables on, the live flags)
+
+- The danger lists, fast vs old (`e1_dz_check.py`: per M3 situation the root's union lists of both passes and with the
+  hooked body left out, every branch's and timing view's exit lists at three (k0, H, i-frames) settings, branch_danger
+  at five frames with and without a skip): **236 / 236 situations, 18,206 comparisons bit-identical**.
+- The windows (`e1_win_check.py`, the root's passes and a child node's): **118 / 118 situations, 10,749 windows the same**;
+  `windows()` x 1.63 faster.
+- The search's deterministic digests (m4b_speed ident: a virtual clock, every tried plan's key / value / safety, the
+  anytime trace; one Clapper 200 units, two Clappers 40 units): fast_danger **130 / 130 + 106 / 106 identical**;
+  fast_danger + fast_windows **130 / 130 + 106 / 106 identical**.
+- The bot with SSBOT_FORUM_MAP2 unset imports nothing of `ssbot.map2` (unchanged: every E1 change is in `ssbot.map2`),
+  so the bot's replays are untouched; with MAP2 on and the switches off the workers' search is the digests above.
+- The map2 / M4 test suites (13 files): 142 passed, 1 failed - `test_m4b_speed::test_background_pass_and_threads_decide`,
+  a wall-clock test (the 2-event pass on the background thread must join inside a 1 s cap) that passes and fails
+  alternately on the same code with the default Cfg (no E1 path); `test_e1_eval` 6 passed.
+
+### The measurements (tables on in every arm; `camp.log`, `camp2.log`; the machine had two game instances of another session open, ~0.5 core each, and every job ran at Idle but the smokes' replays / workers, which m4c_smoke boosts as the live bot - the method of S1 / T3 / T4 / E0; the arms ran back to back)
+
+Arms: base (T4's search, tables on), exact (+ fast_danger + fast_windows), e1 (+ witness_fast), e1sh (+ shapes), e1nw
+(+ fg_nowait; campaign 2, with e1 re-run beside it offline).
+
+1. OFFLINE, the recorded w7 situations (`e1_sits.py`: 34 x the 2 parts, the live configuration, a wall-clock cap, E0's
+   timers; 0.25 s two runs pooled):
+
+       rec w7 0.25 s (136 part-decisions)        base          exact         e1            e1sh          e1nw
+       candidates per decision mean / p50        5.3 / 5       5.8 / 5       6.8 / 6       0.7 / 0       6.5 / 6
+       chosen safe / a safe strike or endpoint   120 / 61      120 / 64      119 / 79      48 / 8        120 / 77
+       the chosen plan's mean value              0.312         0.336         0.444         -0.575        0.477
+       danger geometry ms p50 / p90 (% of wall)  57 / 96 (28)  38 / 68 (18)  44 / 68 (18)  -             48 / 78 (21)
+         of it the danger lists (ms / decision)  35.9          -             14.3          -             -
+       witness trackers (ms / decision)          17.8          -             8.5           -             -
+       envelope passes (% of wall)               35            41            44            6             35
+       windows / witness (% of wall)             18            20            14            91 (336 ms)   16
+       the foreground's lock wait p90 (ms)       13            -             115           -             0
+
+       rec w7 0.6 s (68)                          base          exact         e1            e1nw
+       candidates mean / safe strike or endpoint  15.1 / 49     15.3 / 48     18.4 / 51     18.1 / 50
+       mean value / danger geometry ms p50        0.793 / 139   0.761 / 108   0.832 / 114   0.832 / 117
+
+       rec w13 2 (two Clappers) 0.25 s (202)     base          e1            e1nw
+       candidates mean / safe strike or endpoint 2.6 / 51      4.0 / 70      4.2 / 70
+       mean value / danger geometry % of wall    0.014 / 40    0.083 / 30    0.095 / 30
+
+2. THE FIRST SAFE PLAN (m4b_speed first, M4b's method: the 32 w7 situations where the 60 s search had a safe plan, the
+   two parts on 2 workers each, Idle; ms p50 / p90, none by the 2 s cap): base 101 / 279 (3), exact 112 / 261 (3), e1
+   101 / 202 (3), e1nw 92 / 186 (3), e1sh inf (22). The anytime value at 0.25 / 0.5 / 1 / 2 s: base 0.51 / 0.89 / 1.38
+   / 1.60, exact 0.56 / 0.98 / 1.39 / 1.62, e1 0.63 / 1.02 / 1.39 / 1.62, e1nw 0.67 / 1.02 / 1.39 / 1.67 (60 s: 2.13) -
+   the gain is at the short budgets the live workers have. (T4, alone on the machine: off 68 / 186, on 73 / 192.)
+3. THE M3 ACCEPTANCE (`accept\acc_*.txt`, `acc2_*.txt`; 279 move cases same / alt / not, primitives only, the live flags
+   with the background pass, the split search, wall clock):
+
+       budget     base                       e1                         e1nw                       e1sh
+       1 s        94 / 60 / 125, found 154   98 / 61 / 120, found 159   95 / 70 / 114, found 165   21 / 3 / 255, found 24
+       1 s (2)    89 / 61 / 129, found 150   94 / 64 / 121, found 158   94 / 69 / 116, found 163   -
+       0.25 s     53 / 16 / 210, found 69    56 / 24 / 199, found 80    55 / 22 / 202, found 77    -
+
+   Mean value 1 s 1.155 / 1.142 -> 1.215 / 1.210 -> 1.238 / 1.261; 0.25 s 0.293 -> 0.423 -> 0.416; safe 229 - 230 / 236
+   (0.25 s: 223 -> 226 -> 224); candidates p50 1 s 38 / 36 -> 48 / 48 -> 52 / 54, 0.25 s 4 -> 7 -> 6; decide ms p99 1 s
+   1,662 / 1,617 -> 1,666 / 1,763 -> 1,460 / 1,507. (T4 alone on the machine: 1 s off 164 / on 183, 0.25 s 76 / 87 - the
+   absolute numbers here are lower on the loaded machine; e1 vs base: better 15 / worse 7 (lost 5, gained 10) at 1 s,
+   better 16 / worse 10 at 0.25 s.)
+4. THE REAL-TIME SMOKES (`smoke\summary_e1.txt`, `summary_e1b.txt`; m4c_smoke as T3 / T4 ran them, the bot's own replays;
+   strict x 2, open x 1; the share of the engaged ticks map2 held):
+
+       arm      strict w7           strict w13        open w7     open w13    commits strict w7 / w13
+       base     33.2 % (1530/4604)  4.4 % (219/4939)  35.5 %      3.1 %       107 / 26
+       e1       44.4 % (2025/4558)  5.7 % (281/4891)  40.5 %      8.6 %       117 / 39
+       e1nw     40.2 % (1829/4548)  6.8 % (332/4899)  38.9 %      7.0 %       111 / 37
+       per recording, strict w7: base 0.35 / 0.26 / 0.39 / 0.32, e1 0.48 / 0.46 / 0.42 / 0.43, e1nw 0.41 / 0.36 / 0.42 / 0.41
+
+   Every arm: the audit 0 collisions (every control run re-simulated as sent), the press scan 0 invalid presses (e1:
+   438 plans / 156 committed), 0 tracebacks / errors. The reveal (strict w7, a Clapper's move start to the first key of
+   a committed plan): 45 / 56 move starts within 60 f in all three, the first key p50 / p90 base 20 / 36 f, e1 18 / 34,
+   e1nw 16 / 35; w13 32 -> 49 -> 44 of 98. The workers' answers ms p50 / p90 85 / 220 -> 73 / 225 -> 74 / 222. Drops with
+   a slash in flight (strict w7) 29 -> 25 -> 28, the frames to map2's next keys after one p50 26 -> 24 -> 25.
+
+### (a) The escape funnel per beam node (`e1_funnel.py`, `funnel_all.json`; T4's trial extended)
+
+Per node - the root and the first child node of a landed strike (her state after the strike: 'each strike's end state
+its own root', T4's proposal) - and its 3 most probable branches (the branch's own danger, tables on, the executable
+family): the <= 1 event forward pass, the backward set of what is alive at the horizon (`bridge.backward`), and the
+node's safe endpoints (the first pass's frame 60: witness keys, her honest end state) - the exit check's verdict (<= 1
+event, 40 f from the endpoint) against the funnel (horizon 100: the same frames). 236 situations, 449 root and 562
+child funnels, 2,055 + 1,540 endpoints:
+
+    funnel vs exit check              root            child
+    agree (both yes / both no)        850 / 799       584 / 613
+    exit only (the funnel too strict) 383 (19 %)      336 (22 %)
+    funnel only                       23 (1.1 %)      7 (0.5 %)
+    the funnel's cost (warm)          forward 120 f p50 / p90 6.9 / 11.7 ms + backward 1.0 / 1.6 ms (child 5.2 / 14.5 + 0.5 / 2.0)
+    the exit checks it would answer   4.0 ms per funnel (root), 4.7 ms (child) - its 5 endpoints, the memo empty
+
+- **The 'funnel only' verdicts (T4: 44; this re-run on the final code 23 + 7) are all explained**: (1) T4's test matched
+  the endpoint to ANY frame-60 cluster of its height (10: another cluster - a different vertical state - held the x);
+  (2) the witness's honest end not on its point (12: the keys end within 0.1 u, the funnel was asked at the end's x of
+  another member); (3) the backward set an upper bound in the float (5: `Back.exact` False); (4) NEW (3, all exact
+  backward sets on the witness's own cluster): THE END STATE'S OWN LAST KEY - her horizontal motion in a frame follows
+  the key of the frame before (kin's latched input: a key at frame k moves her from k + 1), so a concrete end state
+  reached holding no key at the interval's end stays put in its next frame, while the cluster's backward set lets
+  every member at that x take the cluster's whole displacement range (the members still free to press at that
+  frame): the funnel says 'escapes left', the exit check from the concrete state finds the danger box at frame 61
+  (x0 35.95 u) closing on her standing at 36.08 u - every child dead at its first frame. A lookup must take her
+  committed next frame first (her x at k + 1 against the backward set at k + 1) and confirm forward.
+- **So the funnel per node cannot replace the exit checks** in the search's candidate evaluation: it is stricter by
+  design (the node's family spends its event on the way: 19 - 22 % 'exit only'), it applies soundly only where the end
+  state is a member of the node's family with the witness on its point and the backward set exact (247 of 2,055 root
+  endpoints, 16 of 1,540 child ones: a strike's end state is never in its node's family - the strike is an event of
+  its own), and it costs about twice the exit checks it would answer (the exit checks are mostly probes and memo hits:
+  p50 0.8 ms). Not wired (no `Cfg.funnel`): a lookup that never admits a plan the exact exit check rejects would have to
+  confirm every 'yes' with that exit check - no time saved. Its use is tier 1 (E2: one funnel per branch per reveal,
+  reused over many frames) and the long-term planner (3.7), with the lookup one frame later and the valve.
+
+### The aim at aim time (the lead's note 'aim', design document 3.3.4; `e1_aim.py`, `aim_s3.json`)
+
+Beyond a plan's end `search.hero_path` holds her last position, so the exit check's danger is the Clappers' future with
+her standing still. Measured on every third M3 situation (79 decisions at the deterministic budget, tables on): every
+outcome the search judged safe with an exit was re-checked AIM-AWARE - up to 4 surviving clusters of its exit pass
+spread in x, their witness keys as her continuation, the Clappers RE-PREDICTED under the plan + that continuation (with
+the outcome's hits), the branches with the outcome's choices before its end and its timing view, her hurtbox against
+their danger over the exit window:
+
+    verdict (outcomes)                      all     one Clapper (forced / person / rec w7 / rec w13 1)   two (rec w13 2 / forced2)
+    the same danger bit for bit (no aim)    826     570                                                 256
+    a continuation safe aim-aware           1,668   762                                                 906
+    AIM-DEPENDENT (every one tried hits)    209     25 (1.8 %)                                          184 (14 %)
+    unmatched (no branch with its choices)  153     52                                                  101
+    decisions whose CHOSEN plan has one     14 / 79
+
+- An aim-dependent exit is an exit that existed only because the aim stood still (an upper bound: up to 4 members of
+  the exit pass tried, not all). Rare with one Clapper (1.8 % of the checked exits), frequent with two (14 %: the
+  other Clapper's Close / Far choice and Jump Aim follow her escape). The aim-aware exit (the exit pass's danger
+  conditioned on her position at each aim frame, per x interval) is not built - it belongs to the funnel / the long-term
+  planner (3.3.4, 3.7); the recorded HP losses were not re-checked (open item).
+
+### How many candidates need the closed-loop re-prediction (the lead's note 'lookups', 19:11; `e1_dep.py`, `dep_one.json`, `dep_two.json`)
+
+Where a Clapper's move is already chosen its damage per frame does not depend on her, so a candidate whose path crosses
+no choice / aim frame and lands no hit that can change a Clapper could be judged against the root's prediction by
+lookups. Measured on M3's situations (the search at a deterministic budget, tables on, fast_danger; every closed-loop
+evaluation's first prediction - under the candidate's own path - against the decision's root prediction, the branches
+matched by their choices, each matched branch's danger compared bit for bit over the candidate's frames and its exit
+window):
+
+    evaluations                                       one Clapper (130 sits, 100 units)   two Clappers (36 sits, 40 units)
+    the same danger over [0, end + 40], no hit        37 (0.8 %)                          0
+    the same to its end, not in its exit window       306 (7.0 %)                         0
+    the danger differs before its end (timing)        99 (2.3 %)                          13 (5.1 %)
+    a choice differs (her position decides it)        2,282 (52 %)                        144 (57 %)
+    a hit that can change a Clapper re-predicted      1,642 (38 %)                        97 (38 %)
+
+- A 'choice differs' is real dependence on her (checked on examples: Close vs Far - slam vs jump - by her position at
+  the decision frame, the evade draw's frame, a draw past the root's shorter horizon). Where the branches match, the
+  danger is the root's up to frame p10 / p50 / p90 27 / 70 / 72 (one Clapper) and 26 / 29 / 72 (two). So 'tier 1 is
+  mostly lookups' holds for the frames up to a Clapper's next choice / aim frame (often 30 - 70 f away); past it the
+  danger must be split by her position interval at that frame (the aim-aware computation), and a strike on an Idle /
+  ending Clapper re-predicts (38 % of the evaluations). Tier 1's per-tick time built this way is E2's.
+
+### (b) / (c) measured, not built further
+
+- THE DANGER PER CLAPPER MOVE AND FRAME (Q9): built as the per-branch arrays above - the body boxes already come from
+  the per (state, frame-in-state) box tables mirrored by the facing (Know.box_span: `geo_boxes`), the hammers' / circles'
+  slabs from the relative-shape caches (a template per shape and margin, shifted); what cost the time was the per-frame
+  Python around them, not the geometry. SHARING BETWEEN PREDICTIONS by content (the same records, hazards, horizon):
+  1,560 Geo builds in 34 w7 decisions, 1,368 distinct within their decisions (12 % duplicates: the horizon T follows
+  the plan's length and the records follow her path) - not worth a content key; the exit checks' computations 669, 409
+  distinct (39 % duplicates: different branch objects, the same end state and danger) - a content-keyed exit memo would
+  save ~1 - 2 % of a decision (not built).
+- PREDICT CACHED BY (Clapper state, her path prefix): 204 predictions in the same decisions, 198 distinct paths - a
+  path cache does not hit; a prefix cache needs checkpoints inside the compiled particle run (predict is 2.9 % of a live
+  w7 decision, 10 % on w13) - not built.
+- (c) THE WINDOW SHAPES (`Cfg.shapes`, T4's, tables on): measured at wall clock - the first safe plan inf (22 of 32 none by 2 s), the acceptance at 1 s found 24 of 279, the windows 336 ms per 0.25 s decision (91 % of it). Keep it off; the
+  shape test (`_shape_rows`: wshape.cluster_windows per row in Python) would have to be compiled before it can run
+  live.
+
+### The switch set for live (the recommendation)
+
+`SSBOT_FORUM_MAP2_SET=tables=1,fast_danger=1,fast_windows=1,witness_fast=1` - the two exact switches (the same plans,
+faster) and witness_fast (the keys judged by the same closed-loop evaluation and the commit's exact re-simulation; 0
+collisions / 0 invalid presses in its smokes); the best strict w7 share measured (44.4 %), ahead offline at every budget.
+`fg_nowait=1`: better offline (no lock wait, the first safe plan, the 1 s acceptance, the decisions' tail) but 4 points
+under e1 on the strict w7 smoke (two runs each, inside the smokes' spread) - re-measure beside e1 in E2's smokes before
+adding it. `shapes`: off. The safety net is unchanged: every committed plan is still re-simulated exactly from the
+observed state (`commit_check`), the per-frame checks and the late check run as before.
+
+### Open items
+
+1. THE ENVELOPE PASSES ARE NOW THE BIGGEST ITEM (35 - 44 % of a 0.25 s decision, the tables' chain: the cold
+   expansions of a library that does not converge - the person's later item, the state-recurrence fix); then the
+   windows / witness (14 - 16 %) and the Geo builds of every new prediction's branch views (~8 %: `geo`, `move_spans`,
+   `rec_shapes` - compilable; not done).
+2. The aim-aware exit (the exit pass's danger conditioned on her position at each aim frame) is not built; measured: 1.8
+   % (one Clapper) / 14 % (two) of the relied-on exits are aim-dependent (an upper bound), 14 of 79 chosen plans have such
+   an outcome; the recorded HP losses were not re-checked for it.
+3. The funnel for tier 1 (E2): the lookup must take her committed next frame first (her x at k + 1 against the backward
+   set at k + 1 - the end state's own last key) and confirm forward where the backward set is an upper bound (the
+   float); one funnel per branch per reveal, reused.
+4. `witness_fast`'s keys differ from T4's where the 24-beam missed by 0.01 - 0.1 u (not identity-checked by design).
+5. `fg_nowait` undecided (above). The cross-part duplicate work of the split search (both parts compute the root, its
+   noop evaluation and its passes) is not addressed.
+6. The shapes' test (`_shape_rows`: wshape.cluster_windows per row, Python) must be compiled before `shapes` can run live.
+7. A content-keyed exit memo (39 % of the exit computations are duplicates across branch objects: ~1 - 2 % of a
+   decision) and a prediction cache by path prefix (checkpoints in the compiled particle run) - not built.
+8. `test_m4b_speed::test_background_pass_and_threads_decide` is timing-flaky (passes and fails alternately on the same
+   code, the default configuration).
+9. Nothing ran live; no merge to main; no frozen checkout (E3).
