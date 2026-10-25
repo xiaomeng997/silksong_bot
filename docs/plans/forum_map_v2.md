@@ -1207,8 +1207,18 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
   value'; (3) the model's simulation where the recordings are thin (both pinned in a corner) and for counterfactuals
   (the same configuration played from between vs from one side); (4) the outputs: the table as the long-term
   planner's terminal value beyond its horizon, and a readable rule list with measured effect sizes - the person's four
-  rules checked one by one, new ones possibly found. Cautions: the recordings' outcomes are the old policy's - re-learn
-  from map2's own fights later; simulation error grows with the horizon, so recordings first. The recordings part needs
+  rules checked one by one, new ones possibly found. CLEAN MATERIAL (the person, 2026-10-24: 'the material must be
+  clean - do not learn from recordings of a buggy controller that the positioning was bad'): the PRIMARY signal is the
+  situation's quality by the model, independent of who played - per recorded moment the funnel's width and time to
+  closure, the windows reachable in the next 1 - 3 s; the realized outcomes are only a check and are filtered by the
+  cause audit first (an HP loss the audit puts on the controller - a handover, a script clash, an invalid press, a
+  late tick, a planner error - is dropped; only losses where the model shows no escape existed count against the
+  configuration); counterfactuals by simulation with an offline, generously budgeted search as the policy (only model
+  error left); sources kept apart - the person's real play (cleanest, but their style), the bot's audited runs; never
+  the gate runs (the handover bug), the no-landing show runs (another goal) or _excluded sessions. Cautions: the
+  recordings' situations come from the old policy - re-learn from map2's own fights later; simulation error grows with
+  the horizon. Cost: tokens only for writing / checking the tool (one agent, ~0.3 - 0.6 M); the counting itself is
+  machine time; make it a reusable tool (features and windows as parameters) so later re-runs cost no tokens. The recordings part needs
   no code changes and can run beside other offline work (not during a profiling run); the simulation part with the
   planner.
 - WHEN: 'next stage after the A1_n tables are in the search' [spec] (Q12).
