@@ -14760,3 +14760,250 @@ observed state (`commit_check`), the per-frame checks and the late check run as 
 8. `test_m4b_speed::test_background_pass_and_threads_decide` is timing-flaky (passes and fails alternately on the same
    code, the default configuration).
 9. Nothing ran live; no merge to main; no frozen checkout (E3).
+
+## Task map2 - the evaluation and the handover - stage E2: the handover the gate exposed (offline; the drop rule and the plan as a tube, re-planning from mid-swing, the fallback mid-swing, the unpredicted hook reaction, the baseline plan - each behind a switch, default off; the gate's problems P2, P3, P5 rebuilt from its recordings; the M3 acceptance; the strict / open smokes; tables on everywhere) (branch worktree-wf_f1846551-5f9-1, 2026-10-24; forum.md §108)
+
+The task (the ev workflow's stage E2; the person's decisions of 2026-10-24: fix the handover the gate exposed, the
+tables ON and the main engine in every measurement, map2 must always provide a BASELINE plan of its own, the next gate
+needs no eye check, the no-landing show is not a goal of map v2; every new behaviour behind a switch default off with
+the switches off bit-identical; the final exact closed-loop check before a commit stays the safety net): (a) the drop
+rule and the plan as a tube, (b) re-plan from mid-action, (c) the fallback mid-swing, (d) the unpredicted hook
+reaction, (e) the baseline plan; verify on the gate's failure frames, then the smokes. Offline only: no game process,
+instance or oracle was touched; nothing merged, nothing pushed. Data `C:\ssbot\data\m2_play\map2\ev\e2` (`gate\` the
+rebuilt problems - `cap_<inst>.pkl` the controller's inputs captured from the gate's recordings, `noworker\` /
+`worker\` the emulations and their `report.txt`, `p2_fixture.pkl` the tests' fixture -; `smoke\` the real-time smokes,
+`summary_e2*.txt`, `extra_*.txt`, `mem.log`; `accept\` the M3 acceptance, `acc_025s.txt`, `acc_1s.txt`; `tube\` the
+execution emulation; `ident\` the identity digests; `hook_scan_m0.jsonl` the Clawline antics of M0's probes); scripts
+`ev\scripts\e2_*` (e2_gate, e2_fixture, e2_hook_scan, e2_tube_emul, e2_acc.sh, e2_camp*.sh, e2_memwatch,
+e2_smoke_extra, e2_ident.sh).
+
+### Result
+
+- **The gate's P2 / P5 cause (Q15) is a hole in the late timing view, not 'every outcome a frame early'.** The committed
+  slam strike had both timing views (the 'var early' in the gate's log is the HOOK variant's name): the early ones with
+  Slam 0 drawn at plan frame 22 (contact 23), the late ones with Slam 0 at 24 (contact 25 - the game's timing). The
+  late view's records end the slam antic at frame 22 (j47) and start Slam 0 at 24: frame 23 has no record, so the antic
+  one frame longer (j48 at 23) matched no outcome and the plan was dropped at its first planned contact; the same hole
+  leaves the late view without the Clapper's body box at frame 23 (the search's own danger, 0 boxes there).
+  `views_gap` (a sent plan's records hold a state on through its successor's spread) keeps the plan at 23 on its late
+  views (the early ones excluded on their own timeline, as M4d's rule meant); `views_fill` closes the danger's hole.
+- **What hurt next in P2 is the handover inside the swing**: the strike plan ends at its contact frame (25) - the
+  fallback took the keys mid down slash and pressed jump (the umbrella: no bounce). With the swing hold (c) map2 keeps
+  the plan's keys (no new press; re-checked first from the commit's state with the keys sent, on the observed timing)
+  through the pogo's i-frames: the rebuilt P2 bounces at 4699793 as the recording did and touches nothing (the
+  recorded colliders, the model's body) to 30 frames past the gate's hit - with the gate's plan alone and with map2's
+  search running in the loop. Stripping the fallback's jump / dash while a swing is under way ('tell the fallback',
+  emulated only) also avoids P2's hit. P5: the same cause and fixes, the bounce lands (4701901), but after the hold the
+  search finds nothing safe from the bounce (two 'unsafe' answers) and the recorded fallback keys meet Slam 1's hammer
+  at 4701910 - not solved.
+- **P3 (d) is not a model gap**: the hook's reaction set had the SLAM. The oracle applied the plan's keys a frame late
+  (the jump sent for 4701074 latched at 4701075, the Clawline sent for 4701075 at 4701076 - S1's open item 3, the late
+  check sees only skipped ticks), so the Clawline started from the air with her run's velocity zeroed (the jump's
+  no-direction frame met a physics step) instead of from the ground with it (the model's antic drift 1.15 u); the
+  needle hit 2 frames late and the reaction began 2 frames after the plan's. The tube keeps the hook's outcomes through
+  it (a transition delayed 2 frames, matched; the block kept to control). After control the rebuilt P3 depends on the
+  next plans and the recorded Clapper does not react to her new path - the emulation cannot judge it.
+- **The baseline plan (e) carries map2's share; the handover switches keep the plans it has**: strict smoke w7 **0.410 ->
+  0.548** (E1's recommended set vs + every E2 switch, the final configuration; quiet machine; 3 / 2 runs), w13 0.086 ->
+  0.094; open w7 0.434 -> 0.585, w13 0.077 -> 0.201. Every arm: the audit **0 collisions**, the press scan **0 invalid
+  presses in committed plans**. The 90 % target is far (below: what the replay holds back). The M3 acceptance with the
+  final search switches is at par with E1's set (1 s: 158 -> 163 found; 0.25 s: 79 -> 78) - the baseline after the
+  strike search costs the strikes nothing.
+- **The tube against the fixed tolerances (an execution emulation)**: under a Clapper transition a frame late the tube
+  drops fewer plans than the fixed tolerances (d +1 / +2: 73 / 83 vs 83 / 97 of 153), under small position drifts more
+  (0.1 u: 125 vs 79 of 249 - eps(k)'s p99 closes the tube near a danger and the re-check fails its 1 u path
+  tolerance); without that path tolerance ('drop only if unsafe') it keeps the most (dropped 249 vs 295 of 747) - the
+  emulation's crude truth cannot judge those keeps (below). On the gate's frames it does what they needed.
+- Nothing ran live; nothing merged; no frozen checkout (E3).
+
+### What was built (commits 78f1f59, 9a0ea8b, 37de6d6, 2b023aa, 742cf22, ca3547e, d9deaa5; `brain/ssbot/map2/live.py`, `search.py`, `strike.py`, `brnum.py`; `tests/test_e2_handover.py`)
+
+Every switch is off by default; `SSBOT_FORUM_MAP2_SET` sets them (the recommended set at the end).
+
+- **(a) The timing views' gap** - `LiveCfg.views_gap`: `build_outs` holds a state's last spread record on through the
+  frames its successor's start still spreads over (`_spread_hold`) and fills a view's own empty frames with its
+  previous record, frame in state counting on (`_view_hold`); `LiveCfg.views_fill` -> `search.Cfg.views_fill` ->
+  `brnum.VIEWS_FILL` (`brnum.fill_gaps` in `views`): the workers' timing views without the hole (their danger too).
+- **(a) The plan as a tube** - `LiveCfg.tube` (implies views_gap): per tick and outcome of the plan in control (`_tube`):
+  'sync' (her position within `tube_sync` 0.02 u of the last exact check's path, the Clappers on its timing), 'in'
+  (the replay: the Clappers only), 'tube' (the Clappers within +-`tube_dt` 1 frame - not with a strike contact at or
+  after now -, her y within `tube_y` 0.2 u, her x off the path inside the window of the outcome's corridor:
+  `tube_corridor` - per frame the danger-free x interval of her transform at the path's height around the path, the
+  danger of the frames k - 1 .. k + 1, the walls, none in her pogo i-frames and Clawline blocks, at a planned down
+  slash contact the x range it still lands from -, `tube_window` - the offsets keeping the shifted path in it at every
+  later frame, each shrunk by eps(k) (T4's p99 x deviation k frames after a sync, `eps_x`), capped `tube_dx` 0.5 u).
+  Outcomes so kept go on; when none is, THE EXACT RE-CHECK ON THE OBSERVED STATE: each outcome's Clappers matched to
+  their observed timing (`match_shift`: the run of the observed state started as planned but ended - its next
+  transition delayed d = n - t0 + 1 -, or started d frames off, or the whole timeline a few frames off - the step phase
+  of a moving body, Q14 -; |d| <= `tube_dmax` 3), the outcome moved there (`shift_outcome`: records, the danger rows per
+  Clapper, hammers, the hazards' circles with one Clapper, the targets' robust boxes and tops, the committed end and its
+  collision frame), then `commit_check` from her state now (live; with midswing's carry; path within `tube_path` 1 u) -
+  in the strict replay `late_check` from the commit's base with every key sent (the replay's proxy world: her observed
+  state there is the recording's) - and only an unsafe one drops the plan ('fail:tube:<why>'). A Clawline press latched
+  / its block: the shifted outcomes kept without a re-check (no key to send; re-checked when off the path at control).
+  `steer` (`steer_dx` 0.12 u): inside the tube the frame's left / right toward the path when no press is within +-2
+  frames and no contact within 12 - built, unit-tested only (the replay cannot show it, the emulation prescribes her
+  path), off.
+- **(b) Re-plan from mid-action** - `search.simulate(swing=)`: a down slash under way at the start (`swing_from_state`:
+  her kin state's ATTACKING, ATK_T, ATK_PDIR 2 - its start, the possible targets) has its contact credited from frame 1
+  (both alternations, `strike.dslash_contact(c_min=)`), its bounce and i-frames; a pogo already under way carries its
+  i-frames (`ifr0`); `Evaluator.sim` reads `Situation.meta['swing']`. `LiveCfg.midswing`: the snapshot is not 'busy:
+  slash' when her state carries a down slash or its pogo and carries `swing`; the commit check, re-anchoring, late
+  check, repair and audit carry a planned press already played (`reanchor_outcome(carry=)`, `_swing_for`) instead of
+  'slash under way'.
+- **(c) The fallback mid-swing** - `LiveCfg.swing_hold` (`swing_hold_f` 14): when the plan in control is dropped or ends
+  with one of its down slashes sent within DS_WIN frames, map2 keeps its continuation (`hold_cmds`: the possible
+  outcomes' agreed bits, no new press, no Clawline, no key past the plan's end) until the slash's window is over without
+  a contact or the bounce's i-frames end - first re-checked (`swing_check`) from the commit's base with the keys sent
+  since and the hold's keys, on each outcome's observed timing; unsafe: the fallback. `GEO_EXT` keeps a sent plan's
+  danger geometry that long past its committed end. The other option, 'tell the fallback' (its jump / dash presses
+  stripped during the swing), is only emulated in e2_gate (arm 'nojump'), not built into the bot.
+- **(e) The baseline plan** - `search.Cfg.baseline` (`base_h` 40, `base_n`, `base_frac` 0.2, `base_last`): the exit
+  probes (her held keys kept / left / right, a jump, a dash; away from the nearest Clapper first) after the root's
+  prefix, screened against the union of the root's branches' danger (`env_jit.probe_exit`, compiled: a probe touching it
+  is not evaluated), evaluated in closed loop (origin 'base'); with `base_last` after the strike search, only when it
+  found no safe strike, within base_frac of the cap past it. `LiveCfg.baseline` (`base_n` 2, `base_last` True,
+  `base_lead` 16): a worker answer that would be the noop / unsafe / nothing sends the best safe baseline
+  (`LivePlan.base`, pid suffix 'b'); an ending plan in control is extended by one only when the bridge covered its end
+  and its strikes are played; alt_noop no longer picks a baseline; a baseline plan in control bridges only base_lead
+  frames. This is E2 (e)'s simpler form (the lead's note 'tier1'): the escape probes in the deep search - the per-frame
+  tier 1 is not built, so 'tier 1 alone on the acceptance' (note 'tier1_alone') was not run.
+- Tools (data dir): `e2_gate.py` (capture the controller's inputs from a gate run; rebuild a committed plan from its
+  logged steps and evaluate it from the captured snapshot; drive the controller frame by frame, the truth the recording
+  until the keys differ, then the kin simulation of the keys sent against the recorded Clapper - its model body for the
+  pogo, its recorded damage colliders and model body for the hits -; arms; an emulated worker (`_search_one` on a
+  virtual clock, the answer 5 frames later) or none), `e2_fixture.py`, `e2_hook_scan.py`, `e2_tube_emul.py`,
+  `e2_smoke_extra.py`, `e2_memwatch.py`.
+
+### The gate's frames rebuilt (`gate\noworker\report.txt`: the gate's plan alone; `gate\worker\report.txt`: map2's search in the loop)
+
+The committed plan of each problem, rebuilt from its logged steps and evaluated from the captured snapshot, gives the
+gate's outcomes exactly (P2 / P5: four outcomes, contacts 23 / 25; P3: eight, the claw at 22). The old rule reproduces
+the gate's drops (P2 4699791, P5 4701898, P3 4701084, all 'fail:clappers').
+
+    arm                       P2 (gate hits 4699796 / 807)       P5 (gate hit 4701905)               P3 (gate hit 4701143)
+    old                       drop at the contact frame          drop at the contact frame           drop at the hook
+    views_gap                 kept to its end (25), the pogo at  kept to its end, the pogo at        dropped at the hook (a 2-frame
+                              4699793; then the recorded         4701901; the recorded fallback:     delay is not a spread)
+                              fallback: the body at 4699802      Slam 1 at 4701910
+    tube                      as views_gap                       as views_gap                        kept through the block to control;
+                                                                                                     worker: map2's strike at 4701121,
+                                                                                                     a hit at 4701155
+    swing_hold (+ gap / tube) the hold through the i-frames to   the hold to 4701905, then Slam 1    as tube
+                              4699800: NO HIT to 4699837         at 4701910
+    'tell the fallback'       NO HIT                             Slam 1 at 4701910                   Slam Collider 1 at 4701139
+    all (+ baseline)          NO HIT (worker: map2's keys to     as the hold                         as tube (worker: a hit at 4701155)
+                              4699831)
+
+(The truth after the keys diverge is the recorded Clapper, which reacted to the recorded hero: a hit long after the
+change of keys is not a verdict on the new keys.)
+
+### (d) the hook reaction in detail
+
+- Gate P3's frames: sent J for 4701074 and L + Clawline for 4701075 (map2's log), applied L at 4701074, J at 4701075,
+  J + Clawline at 4701076 (the recording's latched masks) - every key one frame late, no skipped tick there: the
+  oracle's late apply (S1 open 3).
+- The Clawline antic's start velocity (`e2_hook_scan.py` over the gate's 7 antics and M0's 256): with the direction
+  held into the press the run's velocity decays 0.975 per step (M0: 24 / 24 such presses), as the hook model has it; a
+  frame with no direction key before the press zeroes it when a physics step falls between (the gate's 3 of 4 such
+  antics; the 4th had no step on its press frame) - the model's rule given the right press frame.
+- So the reaction set, the V4 memory, the throw position and the buddy lock are not at fault; the fix belongs to the
+  late-apply detection (open item) and the tube (it keeps the outcomes on the observed timing).
+
+### The smokes (`smoke\summary_e2_quiet*.txt`, `extra_*.txt`; m4c_smoke as T3 / T4 / E0 / E1 ran them, alone on the machine; tables on; share = map2's share of the engaged ticks)
+
+    arm                                         strict w7          strict w13  open w7  open w13  committed down slashes / run
+    e1 (E1's set; 3 / 1 runs)                   0.410 (.389-.438)  0.086       0.434    0.077     111 / 98 / 119
+    e2h (+ views_fill, tube, midswing,          0.387              0.076       -        -         84
+        swing_hold; 1 run)
+    e2 (+ baseline first, a 40-f bridge)        0.603              0.150       0.662    0.256     84 / 44
+    e2L (baseline first, base_lead 8)           0.636              0.155       0.683    0.248     8 / 31
+    e2C (baseline last, 20 % reserved)          0.545              0.119       0.613    0.218     32 / 30
+    e2G (the final set: baseline last with      0.548 (.498-.581)  0.094       0.585    0.201     19 / 51
+        the whole cap, base_lead 16)
+
+- Every arm: the audit 0 collisions (every control run re-simulated as sent), the press scan 0 invalid presses in the
+  committed plans, 0 tracebacks; peak memory 15.5 GB in total, 3.5 GB in one process. (One audit collision in the run
+  before the last fix, e2F: the tube's re-checks in the strict replay ran from the recording's state - fixed, d9deaa5.)
+- The reveal (strict w7: a Clapper's move start to the first key of a committed plan): e1 69 / 84 move starts within
+  60 f, the first key p50 / p90 19 / 43 f; e2G 56 / 56, 18 / 35 f.
+- Drops with a slash in flight (strict w7): e1 38 in 3 runs, map2's next keys p50 / p90 24 / 64 frames after; e2G 29
+  in 2 runs, 24 / 50; e2h 9 in 1 run (the tube and the hold keep those plans). w13: 146 / 241 -> 110 / 275 frames.
+- What holds the share back in the replay (e2G's counters): the tube drops on Clappers the replay pushes off every
+  modelled timing (they react to the recorded hero; 'tube:clappers' 17 - 30 per recording), searches cut by a broken
+  bridge, the strict proxy's commit rejections ('path', 'clappers', 'danger'), the busy states left (a Clawline's
+  block, side slashes), the two-Clapper searches mostly 'unsafe' within their caps.
+- The committed down slashes fall in most baseline arms (8 - 85 per run vs 98 - 119) but scatter (e2F 69 / 107): once
+  map2 holds the keys the recording no longer follows them, so each arm's later situations differ - the acceptance
+  (below) is the check of the strike search.
+
+### The M3 acceptance (`accept\acc_025s.txt`, `acc_1s.txt`; 279 move cases, the live flags with the background pass, the split search, wall clock, Idle, alone on the machine)
+
+    budget   e1 (E1's set)            final search switches (e2o:     views_fill only    baseline only (bo)
+                                      baseline last + views_fill)
+    0.25 s   60 / 19 / 200, found 79  54 / 24 / 201, found 78         64 / 17 / 198, 81  61 / 28 / 190, 89
+    1 s      95 / 63 / 121, found 158 104 / 59 / 116, found 163       94 / 66 / 119, 160 98 / 66 / 115, 164
+
+(same / alt / not.) The first version (the baseline reserving 20 % of the cap) lost 9 of 158 at 1 s - replaced by
+the whole cap for the strikes and the baseline after it.
+
+### The tube against the fixed tolerances (`tube\emul_b.txt`, `emul_c.txt`; `e2_tube_emul.py`)
+
+The controller's execution (M4d's exec_ctl) with each of the 6 most probable safe outcomes of a searched plan as the
+truth (16 one-Clapper M3 situations, a 1 s virtual-clock search each), perturbed: one of its Clapper transitions -1 /
+0 / +1 / +2 frames off (the observation from the outcome's own records with the transition moved), her position
+drifting linearly to 0 / 0.1 / 0.3 u at its committed end (her kin state moved with it) - 747 runs per arm:
+
+    arm                          dropped  kept to the end  frames kept  drops by timing d -1 / 0 / +1 / +2   by drift 0 / 0.1 / 0.3 u
+    old (tol_hero 0.2, tol_x     295      452              24,390       67 / 48 / 83 / 97 ('clappers' 237)    79 / 79 / 137
+        0.35, tol_j 1, re-anchor
+        0.5)
+    tube (tube_path 1 u)         328      419              23,059       72 / 100 / 73 / 83 ('path' 220,      46 / 125 / 157
+                                                                         'danger' 28, re-checks ok 301)
+    tube, no path tolerance      249      498              26,092       56 / 73 / 60 / 60 ('danger' 93,      38 / 88 / 123
+                                                                         re-checks ok 709)
+
+The emulation's truth for the safety of a kept plan is crude (the planned path plus the drift against the true
+timing's danger; the hooked body's harmless window not modelled): it flags 14 / 19 / 50 runs, including unperturbed
+ones (both arms), and after a re-check the real path is the re-simulated one the re-check judged, not 'planned + drift'
+- so these counts do not separate the arms. What it does show: the fixed tolerances drop on any timing outside the
+views; the tube converts those into re-checks, most of which pass on the timing but fail the path tolerance when the
+strike's contact moves (its bounce comes earlier / later). The default keeps the 1 u tolerance (the plan's prediction
+was made for her planned path); 'drop only if unsafe' (no tolerance) is the person's rule as written and is one
+setting away (`tube_path=1e9`) - to decide with live data.
+
+### Identity, tests
+
+- With every E2 switch off the search's deterministic digests (m4b_speed ident: a virtual clock, tables on, the live
+  flags; one Clapper 200 units, two Clappers 40) are identical to E1's base digests: 130 / 130 + 106 / 106 (the final
+  code, d9deaa5); with SSBOT_FORUM_MAP2 unset nothing of `ssbot.map2` is imported (unchanged).
+- `tests/test_e2_handover.py` (17): the swing carried = the full simulation, the evaluator's swing, the shifted outcome
+  and the match on a synthetic plan, the tube's drop on no matching timing, the corridor, the gate's P2 fixture (the
+  old rule drops at 23, views_gap / the tube keep it; the shift (2, 22) of its early views; the commit check carrying
+  its swing; the swing hold through its pogo; the steering in its jump phase), the hold's keys, the baseline probes,
+  the worker's baseline answer, a baseline in control bridging base_lead frames, the switches off. The map2 / M4 suites
+  (8 files) 97 passed.
+
+### The recommended live set (for E3 / the next gate)
+
+`SSBOT_FORUM_MAP2_SET=tables=1,fast_danger=1,fast_windows=1,witness_fast=1,views_gap=1,views_fill=1,tube=1,midswing=1,swing_hold=1,baseline=1`
+(steer off; base_last / base_lead / base_n at their defaults). The exact closed-loop check before a commit is
+unchanged; the tube's re-check and the hold's check are exact re-simulations too.
+
+### Open items
+
+1. P5 after the bounce: no safe continuation found (the exit the plan's check relied on is not its own tail - S6's
+   'dev end'); the 90 % share is not reached in the replay (0.55 strict w7) - the replay's own artifacts bound it
+   (above); live will tell.
+2. The oracle's late ACTION (P3): detect it from the observed latched masks (the plan's latched masks against STATE
+   act.mask at the observation frame) and re-check then - not built.
+3. Re-planning from the middle of a Clawline's pull (the root at its control) - not built; the snapshot stays busy
+   there.
+4. A carried swing's contact needs both alternations from frame 1 (the earlier frames are past): a re-check right at
+   the end of a swing can miss a contact the full simulation finds - the hold therefore re-checks from the commit's base.
+5. `steer` untested in closed loop; `tube_path` 1 u and eps(k)'s p99 (it closes the tube within ~10 frames near a
+   danger: most off-path ticks go to the exact re-check) are guesses to calibrate live.
+6. The per-frame tier 1 (the lead's notes 'tier1', 'tier1_alone', 'lookups') is not built; the baseline is the simpler
+   form inside the deep search.
+7. `fg_nowait` (E1's open choice) was not re-measured here.
+8. Nothing ran live; no merge; no frozen checkout (E3).
