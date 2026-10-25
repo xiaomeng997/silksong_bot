@@ -273,14 +273,20 @@ def test_tier1_plays_an_outcome_only_to_its_committed_end(W):
             assert whys == ["t1"] * 5 and not c.get("t1_end_kc_dev")
 
 
-def test_tier1_plays_on_past_kc_without_a_press_while_the_collision_is_far(W):
-    """t1_past (with t1_fix): past kc, while the collision kcol is >= t1_past frames ahead, the outcome's keys are
-    played without a new press (no attack / Clawline) - the bridge carries the same keys; then the plan ends."""
+def test_tier1_plays_on_past_kc_to_the_collision_or_a_clawline(W):
+    """t1_past (with t1_fix): past kc the outcome's own keys are played up to t1_past frames before its collision and
+    never into a Clawline pressed after kc - the bridge carries the same keys; then the plan ends."""
+    assert lv.t1_lim(type("O", (), {"kc": 4, "kcol": 16, "cmds": np.zeros(40, np.int64)})(), 1) == 15
+    cl = np.zeros(40, np.int64)
+    cl[11] = lv.M_CLAW
+    assert lv.t1_lim(type("O", (), {"kc": 4, "kcol": 16, "cmds": cl})(), 1) == 10
+    assert lv.t1_lim(type("O", (), {"kc": 4, "kcol": None, "cmds": cl})(), 1) == 10
+    assert lv.t1_lim(type("O", (), {"kc": 4, "kcol": 16, "cmds": cl})(), 0) == 4
     ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, True, t1_past=8)
+    c0 = np.asarray(lp.outs[0].cmds, np.int64).copy() & ~np.int64(lv.M_CLAW)
     for o in lp.outs:
         o.kc, o.kcol, o.why = 4, 16, "dev"
-        o.cmds = np.asarray(o.cmds, np.int64).copy()
-        o.cmds[5:9] |= A
+        o.cmds = c0.copy()                       # (one key per frame: no disagreement merge)
     out_q.put(lp)
     sent, whys = [], []
     for k in range(1, 12):
@@ -290,10 +296,11 @@ def test_tier1_plays_on_past_kc_without_a_press_while_the_collision_is_far(W):
             sent.append((102 + k - int(lp.t_a), int(m)))
             if k == 3:
                 br, _ = ctl._t1_bridge(100 + k, 10)
-                assert br and all(not (b & A) for b in br) and len(br) <= 8 - (100 + k + 3 - int(lp.t_a)) + 1
+                assert br and len(br) <= 8 - (100 + k + 3 - int(lp.t_a)) + 1
         ctl.post(100 + k, 100 + k, raw, sit.S, inf, hold, 0 if m is None else m, "m2" if m is not None else "plan",
                  None, False)
-    assert all(not (m & A) for (r, m) in sent if r > 4) and max(r for (r, _) in sent) == 8, (sent, whys)
+    assert max(r for (r, _) in sent) == max(lv.t1_lim(o, 8) for o in lp.outs) == 8, (sent, whys)
+    assert all(m == int(c0[r]) for (r, m) in sent), sent                  # (its own keys past kc)
     assert ctl.stats()["counts"].get("ticks_t1_past", 0) >= 3
 
 

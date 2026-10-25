@@ -414,11 +414,11 @@ class LiveCfg:
     #                                what is left of it), tier 1 holds the keys through its own Clawline's block, the
     #                                least-risk order counts outcomes without an exit as hits (tier1.T1_FIX), the
     #                                runs with no consistent outcome audited too
-    t1_past: int = 1               # (with t1_fix) past an outcome's committed end kc its keys are played on WITHOUT a
-    #                                new press (no attack, no Clawline) up to this many frames before its collision
-    #                                kcol - the keys a reveal at kc - lag leaves her until a newer plan applies (the next
-    #                                decision's ~8 f); the bridge carries exactly those keys; 0: the plan ends at kc.
-    #                                S3's smokes / hit emulation: 1 (never into the collision frame) beat 8 (the latency)
+    t1_past: int = 1               # (with t1_fix) past an outcome's committed end kc its OWN keys are played on up to
+    #                                this many frames before its collision kcol and never into a Clawline pressed after
+    #                                kc - the path the outcome simulated, collision-free to kcol, while a reveal at kc -
+    #                                lag waits for a newer plan (the next decision's ~8 f); the bridge carries exactly
+    #                                those keys; 0: the plan ends at kc. S3's smokes / hit emulation: 1 beat 8
     t1_aim: bool = False           # tier 1's escape tail checked against the Clappers re-predicted under the tail
     #                                (their Jump Aim / Close-Far / Slam Range follow her real path - tier1.T1_AIM)
     t1_lazy: bool = False          # a tier-1 plan's outcomes travel as one pickled blob (LivePlan.lazy_outs), unpickled
@@ -721,25 +721,26 @@ class OutData:
 LAZY_STATS = {"unpacked": 0}
 GEO_TO_COL = [False]   # t1 S3 (t1_fix): an outcome's danger geometry kept to its collision kcol (the audit of the keys
 #                        played past kc - LiveCfg.t1_past)
-STRIP = km.B_ATTACK | M_CLAW   # t1 S3 (t1_past): the press bits an outcome's keys lose past its committed end
-
-
 def t1_lim(o, past: int) -> int:
-    """t1 S3 (t1_fix): the last frame of the outcome's keys tier 1 plays - kc; with past > 0 and a collision kcol at
-    least past frames after it, kcol - past (the keys after kc without a new press: t1_key); an outcome without a
-    collision ahead (kcol None): its keys' end."""
+    """t1 S3 (t1_fix): the last frame of the outcome's keys tier 1 plays - kc; with past > 0 its own keys after kc up to
+    past frames before its collision kcol (its simulated path: collision-free there) and before the first Clawline
+    pressed after kc (a long commitment into an outcome past its committed part - the verifiers' case); an outcome
+    without a collision ahead (kcol None): its keys' end, before such a Clawline. (Stripping the presses instead made
+    the path one the outcome never simulated: the warm-up smoke's audit found such a run colliding before kcol.)"""
     kc = int(o.kc)
     if past <= 0:
         return kc
-    if o.kcol is None:
-        return max(kc, len(o.cmds) - 1)
-    return max(kc, int(o.kcol) - int(past))
+    lim = len(o.cmds) - 1 if o.kcol is None else int(o.kcol) - int(past)
+    cm_ = np.asarray(o.cmds[kc + 1:lim + 1], np.int64)
+    hit = np.flatnonzero((cm_ & M_CLAW) != 0)
+    if len(hit):
+        lim = kc + int(hit[0])                 # (the frame before the press)
+    return max(kc, lim)
 
 
 def t1_key(o, r: int) -> int:
-    """t1 S3: the outcome's key for frame r - past its kc without a new press (STRIP)."""
-    c = int(o.cmds[r])
-    return c & ~STRIP if r > int(o.kc) else c
+    """t1 S3: the outcome's key for frame r (its own keys, past kc too - t1_lim bounds them)."""
+    return int(o.cmds[r])
 
 
 def _geo_cut(br, kc: int, margins: bool) -> tuple:
