@@ -61,15 +61,19 @@ class T1Result:
 
 
 def risk_key(e) -> tuple:
-    """The least-risk order of an evaluated plan (smaller is better): (p of the outcomes colliding before their reveal +
-    lag - 'hit@' / a bad press 'press@' -, minus the p-weighted mean frame of those collisions (later is better), p of the
-    other unsafe outcomes - no exit / unchecked -, minus the open value)."""
+    """The least-risk order of an evaluated plan (smaller is better): (p of the outcomes whose plan cannot be played - a
+    press the kin state would not start, 'press@' -, p of the outcomes colliding before their reveal + lag - 'hit@' and
+    those -, minus the p-weighted mean frame of those collisions (later is better), p of the other unsafe outcomes - no
+    exit / unchecked -, minus the open value). (The smokes' press scan: a least-risk CONT whose Clawline could no longer
+    be pressed was played when every other candidate collided too.)"""
     outs = getattr(e, "outcomes", None) or ()
     if not outs:
-        return (1.0, 0.0, 1.0, 1.0)
-    ph = kh = pe = 0.0
+        return (1.0, 1.0, 0.0, 1.0, 1.0)
+    ph = kh = pe = pp = 0.0
     for o in outs:
         w = str(o.why or "")
+        if w.startswith("press@"):
+            pp += o.p
         if w.startswith(("hit@", "press@")):
             ph += o.p
             try:
@@ -79,7 +83,7 @@ def risk_key(e) -> tuple:
         elif not o.safe:
             pe += o.p
     kmean = kh / ph if ph > 0 else 999.0
-    return (round(ph, 4), -round(kmean, 2), round(pe, 4), -round(float(e.value_open), 4))
+    return (round(pp, 4), round(ph, 4), -round(kmean, 2), round(pe, 4), -round(float(e.value_open), 4))
 
 
 def _rv(b) -> int | None:
@@ -359,7 +363,7 @@ def t1_decide(S: ms.Searcher, sit: ms.Situation, prefix: ms.Seg | None = None, p
     stats.update({k: v for k, v in S.stats.items() if isinstance(v, (int, float))})
     ms_ = (time.perf_counter() - t0) * 1e3
     return T1Result(b, bool(b is not None and b.safe), kinds.get(id(b), "") if b is not None else "",
-                    risk_key(b) if b is not None else (1.0, 0.0, 1.0, 1.0), tried, n_cand[0], ms_, stats, kinds)
+                    risk_key(b) if b is not None else (1.0, 1.0, 0.0, 1.0, 1.0), tried, n_cand[0], ms_, stats, kinds)
 
 
 def t1_tail(S: ms.Searcher, sit: ms.Situation, e, H: int = 40, n_min: int = 0) -> tuple:

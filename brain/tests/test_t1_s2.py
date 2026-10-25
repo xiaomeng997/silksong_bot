@@ -325,3 +325,16 @@ def test_no_dev_tail_from_a_swing():
     assert "km.ATTACKING] > 0 or Sk[km.BOUNCE] >= 0" in src
     src2 = inspect.getsource(lv.build_outs)
     assert "c[0] <= k0t" in src2
+
+
+def test_risk_key_ranks_an_unplayable_press_last():
+    """A plan whose outcome holds a press the kin state would not start ('press@') ranks after any plan whose outcomes
+    only collide; among colliding ones the later collision first."""
+    from types import SimpleNamespace as NS
+
+    def ev(*outs):
+        return NS(outcomes=[NS(p=p, why=w, safe=False) for (p, w) in outs], value_open=0.0)
+    a = ev((1.0, "hit@5"))
+    b = ev((1.0, "hit@20"))
+    c = ev((0.5, "press@30"), (0.5, "hit@25"))
+    assert t1.risk_key(b) < t1.risk_key(a) < t1.risk_key(c)
