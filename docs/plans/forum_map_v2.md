@@ -1184,6 +1184,12 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
   does not test) and has 0.9 % false ones (its 0.5 u slack, its extrapolated height). Not done: the hooked Clawline's
   shape (the ray's reach, the hold height, the control), the shapes as precomputed knowledge per (Clapper move, frame),
   the reflex's validation events.
+- E1 AT WALL CLOCK (forum.md 107, HANDOFF E1 (c)): `Cfg.shapes` computes the shape test ONLINE, per envelope row, in
+  Python (`_shape_rows` -> `wshape.cluster_windows`) - 336 ms per 0.25 s decision (91 % of it); the first safe plan
+  missing in 22 of 32 situations by 2 s; the acceptance at 1 s 24 of 279 (T4 at a deterministic budget: 204 vs 207
+  found, 4x the wall time). KEPT OFF. The design meant something else - the shapes PRECOMPUTED offline per (Clapper
+  move, frame) x her exact table state, so that online they are only a lookup and an interval intersection with the
+  envelope's rows; build them that way (or at least compile the test) before turning them on.
 
 ### 3.7 The long-term positioning planner [DESIGNED]
 
