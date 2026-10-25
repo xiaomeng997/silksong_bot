@@ -15007,3 +15007,251 @@ unchanged; the tube's re-check and the hold's check are exact re-simulations too
    form inside the deep search.
 7. `fg_nowait` (E1's open choice) was not re-measured here.
 8. Nothing ran live; no merge; no frozen checkout (E3).
+
+## Task map2 - the evaluation and the handover - stage E3: the two verifiers' findings on E1 / E2 (offline; each finding checked, the confirmed ones fixed behind switches default off with tests, E1's and E2's measurements re-run paired, a frozen checkout with the recommended set warmed by a strict smoke; tables on everywhere) (branch worktree-wf_f1846551-5f9-1, 2026-10-25; forum.md §109)
+
+The task (the ev workflow's stage E3; the person's decisions of 2026-10-24 as in E2: the tables on and the main engine,
+map2 always provides a baseline plan, the next gate needs no eye check, the no-landing show is not a goal of map v2,
+every new behaviour behind a switch default off with the switches off bit-identical, the final exact closed-loop check
+before a commit stays the safety net): two independent adversarial verifiers (lenses evaluation / handover) sent 15
+findings on E1 / E2 - check each offline, fix the confirmed ones with tests, say which are refuted; re-run E1's and E2's
+measurements; freeze a checkout with the recommended switch set, warmed by a strict smoke; nothing live (the person
+decides on the next gate). No game process, instance or oracle was touched; nothing merged, nothing pushed. Data
+`C:\ssbot\data\m2_play\map2\ev\e3` (`repro\` the reproductions, `ident\`, `sits\`, `accept\`, `smoke\`,
+`summary_smoke.txt`, `extra_smoke.txt`, `tube\`, `gate\`, `lateact.txt`, `smoke_frozen_0c662ce\`, `camp.log`); scripts
+`ev\scripts\e3_*` (e3_camp.sh, e3_sits.py, e3_sits_report.py, e3_acc.py, e3_smoke_extra.py, e3_memwatch.py,
+e3_tube_emul.py, e3_tube_trace.py, e3_gate.py, e3_lateact.py).
+
+### Result
+
+- **None of the 15 findings is refuted; 12 are fixed behind four new switches, 3 were measurement findings (re-measured
+  paired).** The two that mattered most: (handover 1) the tracker never marks the Wanderer's down slash the way the
+  hero model does (ATK_PDIR 0, the model 2) - E2's re-planning from mid-swing never carried a down slash from an
+  observed state (0 of the E2 smokes' 1,303 plan roots), and the tube's mid-swing re-checks failed 'danger' where the
+  swing's contact protects her; (handover 2) a hooked Clawline's forced bounce was credited the pogo's i-frames (no
+  evidence the game gives any: cState.invulnerable 0 after all 17 bounces of the gate's recordings) - a plan through the
+  hooked Clapper's hammer / a rune bomb / the second Clapper in those frames could be committed as safe.
+- **The switches (all default off; off: E2's behaviour - the search's digests 130 / 130 + 106 / 106 identical to E1's
+  base, E2's 16 tests unchanged):** `swing_fix` (the swing from her observed state: the model's down slash state from
+  her clip, no pogo i-frames on a hook's bounce, the side rule for a slash out of the air sprint), `tube_fix` (the
+  tube's keep tested per tick at her observed x / y offset and its drift, a contact ahead re-tested, the circles on
+  both timings, two Clappers' end by the earliest, outcomes shifted in a block re-checked), `hold_fix` (a hit ends the
+  swing hold, none after an unsafe verdict, re-validated every tick from her observed state), `late_act` (the oracle's
+  late apply detected live, the plan re-checked); the hold's keys are audited (audit_runs); `witness_retry` (search)
+  built and measured - no gain, not recommended.
+- **Re-measured, paired (interleaved in one campaign, quiet machine):** strict smoke w7 share e1 0.373 / e1nw 0.389 / e2
+  0.524 / e3 0.504, w13 0.058 / 0.061 / 0.107 / 0.075 (3 runs each; per recording 0.43 - 0.61 on w7); open w7 0.417 /
+  0.424 / 0.593 / 0.612, w13 0.088 / 0.102 / 0.174 / 0.181; the audit 0 collisions and 0 invalid committed presses in
+  every arm (e3: the hold's keys audited too, 0 collisions); M3 acceptance 1 s e1 160 / 163 (two runs), e1nw 162 / 163,
+  e2s 157, 0.25 s e1 80, e1nw 76, e2s 80. E3's switches do not move the replay's share (the replay never exercises the
+  tube's keep test or late_act; the swing / hold fixes change which plans continue mid-swing) - they remove unsound
+  keeps and credits.
+- **E1's attribution (evaluation 3) and fg_nowait (evaluation 4), re-measured paired:** offline 0.25 s on rec w7, wall
+  clock, 2 reps: candidates per decision base 3.6 / 3.8, exact (fast_danger + fast_windows) 4.5 / 4.5, witness_fast alone
+  3.9 / 3.9, e1 4.9 / 5.0; chosen safe non-noop 23 / 23, 28 / 29, 25 / 23, 30 / 32; mean wall 206 - 217 ms in every arm
+  (no overrun) - so the exact speed-ups alone buy ~ +0.8 candidates and +5 safe strikes / endpoints per 68 decisions,
+  witness_fast ~ +1 to +2 on top; E1's '61 -> 79' mixed both and longer decisions (the verifier's numbers reproduce on
+  E1's pickles). fg_nowait paired: share at par or above (strict w7 +1.6 points, w13 +0.3; open +0.7 / +1.4), the M3
+  acceptance at par at 1 s (162 / 163 vs 160 / 163), 76 vs 80 at 0.25 s, the decision's tail cut (p99 0.25 s 416 vs 627
+  ms, 1 s 1,513 / 1,532 vs 1,794 / 1,610 ms) - E1's '4 points under' was noise; recommended now.
+- **witness_fast's hidden loss (evaluation 5) is ~0:** with the retry (T4's wide beam after the rolled keys missed)
+  the wide beam ran 5,944 times on M3's 122 one-Clapper situations (virtual clock, both parts) and 34 on rec w7 (wall),
+  found a closer tracked end 67 times and acceptable keys 0 times (the misses are her height: realize_miss_y 7,319 -
+  a hidden press the wide beam does not fix).
+- **The tube against E2's tube (an execution emulation with perturbations E2's lacked: her path 0.15 u above / below,
+  a key a frame late with the kin rollout as the truth; 776 runs per arm):** E3's tube keeps 1,091 frames unchecked
+  against E2's 4,135, re-checks 844 times ok (E2 517), drops 412 runs against 337 (the re-check's 1 u path tolerance
+  193 / 131, 'danger' 78 / 70); the emulation's unsafe flags 13 / 14, all explained: 8 a plan whose key change one
+  frame before a rune bomb lands a frame late (her path equals the plan's up to the collision frame - no observation
+  can see it; the 'plans robust to a key a frame late' item), 5 the crude truth (E2's).
+- **The gate's frames rebuilt (e3all vs e2all, with and without the emulated worker):** identical outcomes - P2 no hit
+  (the pogo at 4699793, map2's keys to 4699831 with the worker), P5 Slam 1 at 4701910 (open, as E2), P3 not judgeable
+  after control (the recorded Clapper).
+- **Frozen checkout `C:\ssbot\live_1v1_0c662ce`** (1v1_freeze.ps1 -rev 0c662ce: the E3 code; the later commits docs
+  only), warmed by a strict smoke from it with the recommended set (w7a 50.4 %, w13a 6.1 % of the engaged ticks; 0
+  tracebacks, 0 errors, the audit 0 collisions in 38 + 6 control runs; the workers loaded the checkout's own table
+  library). Not run live.
+
+### The findings, one by one (each checked offline; data `e3\repro\`, the verifiers' scripts `ev\review_handover\` and the scratchpad's `tube_y.py` / `wall.py`)
+
+Evaluation lens:
+
+1. **The tube kept an outcome without a re-check when her y was off by up to tube_y (0.2 u) but its corridor looked
+   only at the danger within 0.1 u of her planned hurtbox** (live.py `_tube` / `tube_corridor`) - CONFIRMED: the
+   verifier's synthetic case (`e3\repro\tube_y.txt`: a body box 0.15 u below her planned feet / above her head, her y
+   0.18 u toward it - E2 keeps it, her real hurtbox meets the box). Not exercised by any smoke (the replay keeps every
+   matching outcome as 'in'). FIXED (`tube_fix`): the keep is a per-tick test at her observed offset - `tube_rows` (per
+   frame the danger rows of the frames k - 1 .. k + 1 as her centre's x interval and the vertical gaps to her planned
+   hurtbox, none in her blocks / pogo i-frames but their last frame) and `tube_keep` (her x interval path + offset +-
+   eps(k) and her hurtbox moved by the y offset, grown by cor_dy 0.1 + eps(k), against every later frame's rows and the
+   walls). Test `test_the_tube_tests_her_observed_height_offset`.
+2. **eps(k) assumes a full state sync; the tube compared her position only - a velocity off the path's (a key a frame
+   late) was not bounded** - CONFIRMED by construction (the keep condition never read a velocity); its size measured in
+   the E3 execution emulation ('late': the plan's first key change a frame late, her truth the kin rollout) below.
+   FIXED (`tube_fix`): her offset's drift since the previous tick (dx, dy per frame) extrapolated `tube_vh` 4 frames
+   (then held) in `tube_keep` and in the contact re-test; the cap applies to the extrapolated offset too. Test
+   `test_the_tube_extrapolates_her_drift`.
+3. **E1's offline 0.25 s gain came mostly from witness_fast's behaviour and longer decisions, not from the exact
+   speed-ups** - CONFIRMED (`e3\repro\wall_e1.txt`, the verifier's `wall.py` on E1's pickles: mean wall base 211 / 218,
+   exact 221 / 209, e1 227 / 253 / 234 / 245 ms; > 300 ms base 9 - 12 %, e1 15 - 19 %; safe non-noop exact 33 / 31 vs
+   base 30 / 31, e1 38 - 43). Re-measured below with witness_fast alone and on a virtual clock (the same work per
+   decision): the exact speed-ups alone do buy depth at the same wall time (candidates per decision 3.7 -> 4.5, safe
+   non-noop 23 -> 28.5 of 68; e1 4.95 / 31), see the measurements.
+4. **fg_nowait was judged on an unpaired comparison** - CONFIRMED (e1_camp2.sh ran only e1nw; camp.log / camp2.log).
+   Re-measured paired below (e1 and e1nw interleaved, strict x 3, acceptance 1 s x 2): at par or above on the share, at par on the acceptance at 1 s, the decision's tail
+   cut - recommended now.
+5. **witness_fast's wide-beam trigger reads the tracker's own end, the acceptance the honest roll's** - CONFIRMED in
+   the code; its size ~0: the retry ran 5,944 times (122 one-Clapper situations, a virtual clock) + 34 (rec w7, wall)
+   and gave acceptable keys 0 times (a closer tracked end 67 times, still missing: the misses are her height). FIXED behind `witness_retry` (search.Cfg / LiveCfg, with witness_fast): when the rolled
+   keys miss though the tracker's end did not, the wide beam runs after all where T4's 0.01 u trigger would have run it
+   (T4's choice of the closer tracked end, the keys made playable and rolled again; counters witness_retry_*).
+
+Handover lens:
+
+6. **swing_from_state recognised a down slash only by ATK_PDIR 2, which the tracker never sets for the Wanderer's down
+   slash** - CONFIRMED: the gate's P2 frames 16 - 24 have ATTACKING 1, ATK_PDIR 0 (`e3\repro\rh_tube_strike3.txt`);
+   the re-check from the recorded state at 20 of an early outcome (contact 23) fails 'danger' col 24 / 25 at every
+   offset, 0 of 1,350 kept offsets fail with ATK_PDIR forced to 2 (`rh_tube_strike_pdir.txt`); the E2 smokes' 1,303
+   dumped plans carried a down slash 0 times, a bounce's i-frames 22 times (`swing_a_e2.txt`). The tracker is right
+   about the game's flags but not in the hero model's convention (kin_jit.forum_swing: a down slash is ATK_PDIR 2 /
+   ATK_KIND 0 - the pogo's restart at the slash's Bounce event, no terrain thunk). FIXED (`swing_fix`, the tracker
+   untouched - the old planner and the switches-off bot unchanged): the controller's copy of her state gets the
+   model's values when her clip is DownSlash* (`Map2Controller._mstate`, every tick in pre and post: the snapshot's S
+   too). Test `test_the_trackers_down_slash_is_the_models` (the re-check from the recorded state at 20: 'danger'
+   without, ok with).
+7. **A hooked Clawline's forced bounce was credited pogo i-frames** - CONFIRMED: the gate's P3 capture at 4701102 - 04
+   (Harpoon Catch / DownSpikeBounce 1) gives swing (0, (), 8 / 7 / 6) (`rh_hookbounce.txt`); the game's
+   cState.invulnerable is 0 after both kinds of bounce in the gate's recordings (7 hook bounces, 10 pogos:
+   `inv_flags.txt` - M0's pogo 'i-frames' are not that flag either; the hook's were never measured). FIXED
+   (`swing_fix`): a bounce whose onset (fo - BOUNCE steps) lies after a Clawline's press + 3 and by its control + 2
+   credits none (`swing_from_state(pogo=False)`; a slash under way is still carried). Test
+   `test_a_hooked_clawlines_bounce_carries_no_pogo_iframes`.
+8. **shift_outcome moved the hazards' circles with a shifted Clapper (one Clapper), world-fixed bombs too; two
+   Clappers: the end / collision frame by whichever shift came first** - CONFIRMED (`rh_circles.txt`: shift (2, 20)
+   removes the x 50.89 bomb at 26 - 27, (-1, 0) ends the 38.29 one a frame early). FIXED (`tube_fix`): the circle rows
+   kept on the planned timing AND every shifted one (the geometry has no source per row: the union is the safe side);
+   two Clappers: the committed end and its collision frame moved together by the shift giving the earliest collision
+   (else the earliest end). Tests `test_the_circles_stay_on_both_timings`, `test_two_clappers_shifted_end_by_the_earliest`.
+9. **A hit did not cancel the swing hold; no per-tick re-validation** - CONFIRMED (the P2 fixture with a hit on the
+   hold's second tick: E2's hold resumes after it - `test_a_hit_ends_the_swing_hold`). FIXED (`hold_fix`): a hit /
+   freeze / error / pause / the supervisor's keys end the hold; every tick the held outcomes' Clappers re-matched (up
+   to each outcome's committed end - past it no records, the last shifts kept), none left: ended; the hold's keys
+   re-checked every tick (live from her observed state with the swing carried - possible since 6's fix; the strict
+   replay from the commit's base with the keys sent). In E2's smokes 8 holds resumed after a hit (e2G / e2h, e.g.
+   e2G_strict_r5 w7b 1958354).
+10. **The hold overrode a fresh unsafe verdict and ignored her observed state** - CONFIRMED (`_drop` started a hold
+   after 'tube_danger', 'unsafe', 'cut', 'late'; its check ran from ctrl_base, never from S0 live). FIXED (`hold_fix`):
+   no hold after those drops (`HOLD_NOT`); live the check from her observed state. Test `test_no_hold_after_an_unsafe_verdict`.
+11. **The hold's keys were never audited** - CONFIRMED. FIXED (with audit_runs, no switch - an audit sends no key):
+   when a hold ends, the control run's keys from its commit through the hold's last key are re-simulated in the held
+   outcomes on their observed timing (`hold_sim`, the hold's own check's simulation): counters audit_hold_runs /
+   audit_hold_col. Test `test_the_holds_keys_are_audited`.
+12. **Outcomes shifted in a Clawline's block were kept without a check, then kept as 'sync'** - CONFIRMED in the
+   code (no case in the data: the rebuilt P3's plan ended at control). FIXED (`tube_fix`): such outcomes are marked
+   and re-checked exactly on the first tick out of the block (no 'sync' / 'tube' keep before). Test
+   `test_outcomes_shifted_in_a_block_are_rechecked_out_of_it`.
+13. **E2's 'no skipped tick' at P3 was wrong** - CONFIRMED: map2_i1.jsonl has no row at 4701074 (rows 73, 75); the
+   latched masks 74 0x100000, 75 0x1, 76 0x11, 77 0x100010 are every key one frame late through the hold filter (J's
+   2-frame press, L's 2-frame release). The late apply (ticks 72 / 73's ACTIONs) coincides with the bot's lag there.
+   BUILT (`late_act`, live only - the replay's latched masks are the recording's): every tick the latched mask
+   expected at the observation frame (the keys sent since the previous tick through the hold filter from its state
+   then) against the observed one; a difference re-checks the plan in control exactly (the tube's re-check / the
+   re-anchoring). On the gate's live frames (`e3_lateact.py`, `e3\lateact.txt`): 1,468 tick pairs, fired 5 times -
+   all keys applied a frame late (2 with map2 in control: P3 at 4701075, a dash at 4700698; 3 the fallback's). What
+   the re-check does with it (the plan's keys still assume the on-time apply) stays open.
+14. **The carried swing skipped the side rule out of the air sprint** - CONFIRMED (latent, live with 6's fix): S1's
+   case carried in from mid-swing gave a pogo where the press path gives the body's contact
+   (`test_a_carried_slash_out_of_the_air_sprint_keeps_the_side_rule`). FIXED (`swing_fix`): the controller marks a
+   down slash whose clip came straight after a sprint / dash clip (Sprint*, Air Dash, Dash) and the carried branch
+   applies press.side_hit (frames 1 ..: the earlier ones are past). A slash pressed after the sprint ended with its
+   extra velocity's residue (S1b's XVX rule) is not seen from the clips (the tracker has no XVX) - open.
+15. **The 'tube' keep's y band and the contact's x-only extent** (the evaluation lens' 1 seen from the handover side,
+   plus the contact) - CONFIRMED as 1; the contact part FIXED (`tube_fix`): a planned down slash contact after now
+   keeps the outcome only when strike.dslash_contact on the path moved by her offset (+ drift) at +- eps(k) of the
+   contact gives the planned frame (`contact_kept`) - else the exact re-check.
+
+None refuted. 3, 4 and 5 are measurement findings (re-measured below); 13's fact corrected, its handling built as the
+detector only.
+
+### What was built (commits e79f74c, 0c662ce; `brain/ssbot/map2/live.py`, `search.py`, `envelope.py`; `tests/test_e3_review.py`)
+
+- `LiveCfg.swing_fix`: `Map2Controller._mstate` (every tick in pre and post; feed records a down slash's onset clip and
+  whether the clip before it was a sprint / dash one) - map2's copy of her state with ATK_PDIR 2 / ATK_KIND 0 when the
+  attack under way shows a DownSlash* clip; its flags {'pogo', 'spr'} go with every state map2 re-simulates from (the
+  commit's / re-anchoring's / re-check's base dicts 'swc', the audit run, the snapshot 'swc' -> LivePlan.swc_a) into
+  `search.swing_from_state(pogo=, spr=)` (pogo False: no i-frames for the bounce; spr: the 4-tuple swing, simulate's
+  carried branch applies press.side_hit from frame 1).
+- `LiveCfg.tube_fix` (`tube_vh` 4, `cor_dy` 0.1): `tube_rows` / `tube_keep` / `contact_kept` replace E2's corridor in
+  `_tube`'s 'tube' kind (her offset's drift from the previous tick, `_tube_prev`); `TUBE_FIX` in shift_outcome (the
+  circles' union over the planned and every shifted timing; two shifts: the end and collision frame by one shift, the
+  earliest collision / end); `_tube_unchk` (outcomes shifted in a block: the first tick out of it forces the exact
+  re-check). OutData carries `face` / `gnd` per frame (build_outs, always: the contact re-test).
+- `LiveCfg.hold_fix`: `HOLD_END` (hit, freeze, sup, error, pause) end the hold in `_drop` / post; `HOLD_NOT` (+ unsafe,
+  cut, tube_danger, late) start none; `_swing_step` re-matches the Clappers per tick (up to each outcome's committed
+  end) and re-runs `swing_check` every tick (live from S0 with the swing carried; the strict replay from the base).
+- The hold audit (audit_runs): `_hold_end` / `_audit_hold` / `hold_sim` (swing_check's simulation, factored out).
+- `LiveCfg.late_act` (live only): `_exp_lat` from the previous tick's (fo, hold filter state) `_hold_prev`; a difference
+  forces the tube's re-check (or the re-anchoring without the tube).
+- `search.Cfg.witness_retry` / `LiveCfg.witness_retry` (with witness_fast): `envelope.Fwd.witness(retry=)` (`_wide`,
+  `_honest` factored out; the result's 'retried'), counters witness_retry_ok / miss 1 / 2.
+- Tests `tests/test_e3_review.py` (14: each finding's case, the switches off); the map2 / M4 suites (10 files, E2's 16
+  and E3's 14 included) 113 passed at the final code (`e3\tests_final.log`).
+
+### The measurements (`camp.log`; e3_camp.sh at 0c662ce, one campaign, the arms interleaved; every job at Idle but the smokes' replays / workers, which m4c_smoke boosts as the live bot - the method of S1 / T3 / T4 / E0 - E2)
+
+    identity (m4b_speed ident, a virtual clock, tables on, the live flags; every E3 switch off):  130 / 130 + 106 / 106 = E1's base
+
+    offline rec w7, 0.25 s wall, 2 reps (e3_sits_report: sits\report.txt)
+                                 base       exact      wf (alone)  e1         e1r (+ retry)
+    candidates / decision        3.6 / 3.8  4.5 / 4.5  3.9 / 3.9   4.9 / 5.0  5.0 / 5.1
+    wall mean ms                 206 / 208  202 / 209  208 / 205   208 / 213  211 / 217
+    share > 300 ms               .07 / .09  .10 / .12  .10 / .09   .07 / .09  .10 / .09
+    chosen safe non-noop (/68)   23 / 23    28 / 29    25 / 23     30 / 32    29 / 30
+    witness retries / replaced   -          -          -           -          34 / 0
+
+    M3 acceptance (279 cases; same / alt / not, found)
+    0.25 s   e1 61/19/199 80   e1nw 53/23/203 76   e1r 54/18/207 72   e2s 58/22/199 80   e2sr 56/23/200 79
+    1 s      e1 98/62/119 160  e1nw 91/71/117 162  e1r 90/70/119 160  e2s 94/63/122 157  e2sr 93/62/124 155
+    1 s (b)  e1 93/70/116 163  e1nw 92/71/116 163
+    decide ms p99: 0.25 s e1 627, e1nw 416; 1 s e1 1,794 / 1,610, e1nw 1,513 / 1,532
+
+    smokes (share of the engaged ticks; strict 3 runs each, e3r 2, open 1)
+                     strict w7   strict w13  open w7  open w13  audit coll.  invalid committed presses
+    e1               0.373       0.058       0.417    0.088     0            0
+    e1nw (+fg_nowait) 0.389      0.061       0.424    0.102     0            0
+    e2 (E2's set)    0.524       0.107       0.593    0.174     0            0
+    e3 (+ E3's four) 0.504       0.075       0.612    0.181     0 (+ 4 hold audits) 0
+    e3r (+ retry)    0.488       0.097       -        -         0            0
+
+- Reveal (strict w7, a move start to the first key of a committed plan): e1 73 / 84 within 60 f, first key p50 / p90
+  19 / 41 f; e1nw 73, 16 / 34; e2 77, 16 / 33; e3 81, 16 / 36. Drops with a slash in flight -> map2's next keys p50 /
+  p90: e1 26 / 48, e2 26 / 54, e3 24 / 57 frames.
+- What E3 changed in the replay (`extra_smoke.txt`, strict): swing_pdir 107 / 93 ticks (w7 / w13) - snapshots sent
+  mid-swing 197 / 193 (e2 88 / 103); the swing holds few (3 / 1 starts; one ended by a hit); the commit checks' 'danger'
+  73 vs 57 (more mid-swing plans checked with their swing). The w13 strict share's fall (0.107 -> 0.075; e3r 0.097, open
+  0.174 -> 0.181) is within the per-recording spread (0.036 - 0.150) - not a measured loss, not a gain.
+- The tube emulation (`tube\emul_a.txt`, 16 situations, 6 truths each, 776 runs per arm) and the gate (`gate\worker`,
+  `gate\noworker`): as in the result.
+
+### Open items
+
+1. The plans' robustness to a key applied a frame late (the emulation's 8 unsafe runs; the gate's P3; late_act only
+   detects it after the fact): a plan whose key change one frame before a danger slips - a search-side margin
+   (evaluate each plan with its key changes also a frame late) is the remedy; not built.
+2. late_act's handling: the re-check still assumes the keys apply on time; the detector fired 5 times in the gate's
+   1,468 tick pairs.
+3. A slash out of the air sprint with only the extra velocity's residue (S1b's XVX rule) is not recognised from the
+   clips (the tracker has no XVX): its carried contact is a pogo.
+4. The tube's 1 u re-check path tolerance now decides most drops in the emulation (193 / 412); E3's tube keeps fewer
+   frames unchecked - calibrate with live data ('drop only if unsafe' is `tube_path=1e9`).
+5. The 90 % share, P5 after its bounce, tier 1 - as E2's open items; the replay cannot show the tube's / late_act's
+   live effect.
+6. Nothing ran live; no merge.
+
+### The recommended live set (for the next gate)
+
+`SSBOT_FORUM_MAP2_SET=tables=1,fast_danger=1,fast_windows=1,witness_fast=1,fg_nowait=1,views_gap=1,views_fill=1,tube=1,midswing=1,swing_hold=1,baseline=1,swing_fix=1,tube_fix=1,hold_fix=1,late_act=1`
+(witness_retry and steer off), on the frozen checkout `C:\ssbot\live_1v1_0c662ce`. The exact closed-loop check before
+a commit is unchanged. swing_fix credits a swing under way where E2 credited none (the model's own state of a down
+slash; its contact still found by the strike module on the robust box, both alternations) and removes the hook
+bounce's i-frames; every other E3 change makes a keep stricter, ends a hold sooner, or only detects / audits.
