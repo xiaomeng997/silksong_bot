@@ -15526,3 +15526,221 @@ By set, the chosen rule (box_shift_st, no slack), credited side / up presses (la
 ### The switch for a live run (the person decides)
 
 `SSBOT_FORUM_MAP2_SET=<E3's recommended set>,prims_su=1` (su_kinds 'side,up', su_shrink 0.05 at their defaults).
+
+## Task map2 - fix together (t1) - stage S2 (tier 1): no handover in danger - the tier 1 that always answers with keys, the escape tail, follow-ups kept on tier 1's bridge (offline; behind LiveCfg.tier1 / t2_tail, default off - off: the search and the bot bit-identical; tier 1 alone first, then with the deep search; the strict / open smokes, the live audit's 19 hit situations emulated, 'tier 1 alone' on the M3 acceptance; the lead's share100 note: every tick tier 1 did not hold by cause, a 36-frame look-ahead next to the 60-frame one) (branch worktree-wf_f1846551-5f9-1, 2026-10-25; forum.md §112)
+
+The task (the person's decision of 2026-10-25 ~07:10 PDT after the live w7 audit: fix together - side / up slashes, plans
+that carry their follow-up and an escape tail, the per-frame tier 1, map2 never hands the keys to the old planner in
+danger; offline only, the person decides on the next live run; the lead's notes: tier 1 as THE planner, 'tier 1 alone'
+first, nothing on the deep search's bridge rule - the bridge note withdrawn; 10:05 share100: why not 100 % - every
+engaged tick tier 1 did not hold by cause, the 36-frame look-ahead if the budget is a cause): stage S2 of the t1
+workflow. No game process, instance or oracle was touched; nothing merged, nothing pushed. Data
+`C:\ssbot\data\m2_play\map2\t1\s2` (`dev\` the development smokes, `ident\`, `accept\` - `acc_cmp.txt` -, `smoke\` (the
+campaign at c95dcbe: t1a / t1s / t12), `smoke_t1a_final\` (t1a at 7b8975f), `smoke_gap\` (t1a and t1h36 at 1eac0d6, the
+per-tick causes), `smoke_41afaef\` / `smoke_b0fffa1\` (superseded), `extra_smoke*.txt`, `gap_breakdown.txt`,
+`handover.txt`, `hits\` (c95dcbe: e3su / t1 / t1s / t12 - `summary.txt`, `hit_*.json`, the captures `cap_*.pkl`),
+`hits_h36\` (1eac0d6: t1 / t1h36), `camp.log`, `tests\`); scripts `t1\scripts\` (s2_prof.py, s2_try.py, s2_hits.py,
+s2_hits_sum.py, s2_smoke_extra.py, s2_handover.py, s2_t1gap.py, press_scan_s2.py, s2_memwatch.py, s2_camp.sh,
+s2_gap_camp.sh).
+
+### Result
+
+- **Tier 1 holds the keys in danger, w7**: tier 1 alone (t1a: two tier-1 workers, cap 0.08 s, the 60-frame look-ahead)
+  holds **0.932 / 0.939** of the engaged ticks in the strict replay (two campaigns of 3 runs; target >= 0.90; the deep
+  search with E3's live set + S1's side / up slash, e3su: 0.537), open 0.940 / 0.924 (e3su 0.609). w13 (two Clappers)
+  **0.585 / 0.596** (e3su 0.110), open 0.583 / 0.624. With the deep search (t12, c95dcbe): w7 0.872, w13 0.472. When the
+  deep search's plan ends, tier 1 takes the keys in 69 of 103 cases (t12 strict w7; e3su: the fallback in 131 / 131 -
+  the live audit's pattern A).
+- **Why not 100 % (the lead's breakdown, `gap_breakdown.txt`, s2_t1gap.py on the log's per-tick 't1n', 1eac0d6)**: NOT
+  the bot thread - tier 1's part of a tick 0.15 / 0.46 / 2.5 ms p50 / p90 / p99 (w7; w13 0.05 / 1.0 / 3.7), over a
+  frame's 16.7 ms on 6 of 10,949 and 7 of 8,321 ticks, 0.00 ms p50 on the ticks it did not hold (it had nothing to
+  play). The ticks it did not hold (t1a strict, 3 runs):
+
+                                          w7 (6,896 engaged)     w13 (7,305)
+      held                                0.939                  0.596
+      busy by design                      113  0.016             918  0.126   (slash under way 65 / 516, her own hit 48 / 112,
+                                                                               hit-stop 0 / 270, no input 0 / 20; intro not engaged)
+      supervisor                          0                      0            (the replay: the supervisor never took the keys)
+      model-unknown / no output           4    0.001             10   0.001   (the worker's 'busy' / 'abort' status)
+      tier 1 over the bot thread's frame  0                      0
+      WAITING FOR A DECISION              240  0.035             1,728 0.237  (no plan applies; a decision in flight)
+      plan refused (broken / stale)       23   0.003             205  0.028   (the keys sent left its bridge: 190)
+      plan ended this tick                28   0.004             50   0.007   (left 24, exhausted 16, late 10 in w13)
+      other                               11   0.002             39   0.005
+
+  THE CAUSE IS THE DECISION'S LATENCY AFTER TIER 1'S PLAN ENDS: in w13 the waits follow the hit-stop (403 ticks), the
+  plan left (375: the keys sent during a hit / hit-stop tick were the fallback's), her hit (314), a plan played to its
+  end (259). A new plan needs a snapshot after the event and a decision (~100 ms p50 in w13, 6 frames); meanwhile the
+  fallback has the keys and leaves the bridge the next plan assumed (190 refused 'broken'), so a gap lasts **27 - 30
+  ticks p50, 54 - 79 p90** (3 - 5 decisions). The per-frame decision itself is not the limit (the bot thread), the
+  workers' latency and the fallback's keys between decisions are. Busy by design is S1's open item for the most part:
+  no snapshot inside a side / up swing (7.1 % of w13).
+- **The 36-frame look-ahead (t1h36, `t1_h=36`: the 1-event pass and the escapes 36 frames; strict x 3 + open next to
+  t1a at 1eac0d6)**: w13 **0.596 -> 0.704** (open 0.624 -> 0.712; the waits 0.237 -> 0.172, the slash under way 0.071 ->
+  0.029), w7 0.939 -> 0.925 (open 0.924 -> 0.925); decisions 88 / 109 -> 85 / 100 ms p50 / p90 (w7), 102 / 166 -> 94 /
+  137 (w13), the plan 8 -> 7 frames old at adoption; planned contacts played (strict w7, 3 runs) **24 -> 46** (side 7 ->
+  20, claw 13 -> 25, down 4 -> 1), w13 4 -> 1; the audit: **0 collisions of proven-safe tier-1 runs in both** (t1a 493,
+  t1h36 511 safe runs), the least-risk runs' collisions w7 4 of 72 -> 13 of 70, w13 46 of 189 -> 67 of 259; the 19 hit
+  situations: map2's keys at 17 / 19 live hit frames in both, the emulated path hit inside the valid truth 0 in both
+  (by the live hit's frame + 2: 5 -> 3). WHICH: the 36-frame one on these numbers (w13 + 0.11, twice the strikes in w7,
+  the proven-safe plans as safe) - with its price: the least-risk plans in w7 collide more (13 vs 4), it sees 0.6 s
+  ahead. The lead's preference holds: the gap is latency after a plan ends, and reusing work across frames (tier 1
+  keeping its plan through her hit / the hit-stop, re-anchored or repaired, and holding its own bridge while it waits
+  instead of the fallback) attacks it directly - not built (open item 1).
+- **Safety (the replay's audit)**: every tier-1 run re-simulated as its keys were sent (from its anchor; a repaired one
+  from its repair) in its possible outcomes: 0 collisions of proven-safe tier-1 plans in every final arm (t1a 7b8975f
+  strict 439 safe runs, open 129; t12 161; t1s 257; the gap campaign above); tier-2 runs 0 collisions. The first
+  campaign (41afaef) found 6 colliding proven-safe tier-1 runs - dev tails made from a state mid-swing (b0fffa1) and
+  checked on the plain probe roll (c95dcbe): fixed. The press scan (S1's, tier-1 plans adopted counted as committed):
+  1 - 4 flagged plans per run of ~1,000 (t1a 1eac0d6 6 of 3,980, t1h36 5 of 4,498; 7b8975f 1): a Clawline on a mode's
+  first frame (NORMAL0 on the ground, GLIDE0 / 1, the air dash turning into the air sprint - the model's kin trace
+  allows it, the scan reads the state a step earlier), 'glide' / 'no-slash GLIDE0' (the scan's pre-2cfead1 umbrella
+  rule) and one 'facing' (t1h36) - several adopted and played through the press; not resolved (open item 6). 7
+  least-risk CONT plans with a Clawline the model itself marked unplayable ('press@', c95dcbe) - ranked last since
+  7b8975f.
+- **Strikes: tier 1 alone strikes less than the deep search** (S1's rule, strict w7, 3 runs): t1a 17 / 24 (7b8975f /
+  1eac0d6), t1h36 46, t1s (cap 0.12 s) 32, t12 31 vs e3su 62 (side 27, down 8, claw 27); per second of map2's control
+  0.15 - 0.41 vs 0.97. A decision's 0.08 s holds ~2 closed-loop strike evaluations (CONT 15 ms and the pass + windows 23
+  ms come first).
+- **The live audit's 19 hit situations emulated** (`s2_hits.py`: the controller from 90 frames before each hit, the live
+  recording the truth until the keys sent differ, then her path by the kin simulation of the keys sent against the
+  RECORDED Clapper and its damage colliders - the Clapper does not react to her new path, so the truth holds only while
+  it stays on map2's predicted outcomes): tier 1 alone has the keys at 17 of 19 live hit frames (e3su emulated: 7, t1s
+  14, t12 16); its emulated path is hit inside the valid truth in 0 of 19 (e3su 4, t1s 2, t12 2), by the live hit's
+  frame + 2 in 5 (e3su 6) - those after the recorded Clapper left tier 1's predicted outcomes. H14 never diverges.
+- **'Tier 1 alone' on the M3 acceptance** (279 move cases; the chain of tier-1 decisions - 4 at the situation, re-planned
+  with the windows rotated, then at each node its plan reaches by a landed strike / hook, 3 in a row): found 129 at 0.08
+  s, 144 at 0.12 s, 152 at 0.25 s per decision vs the deep search 177 / 170 at 1 s and 92 at 0.25 s; one decision alone
+  62. **Moves that need a multi-event commitment** (the deep search finds them, tier 1 alone never): **CLAWSTRIKE 0 of
+  14** (deep 8 - 9) and **P1-slam 0 of 14** (deep 9) - a Clawline into a slam antic is safe only through the down slash
+  on Slam 0 after control (its pogo's i-frames); tier 1's 1-event exit check finds no escape from the hammer (12 of 14
+  'unsafe: exit'). Weaker for the same reason: P4 6 - 8 vs 9 - 11, P2 11 vs 16, SLAMSTRIKE 22 - 29 vs 33 - 34. Tier 1
+  better: P1-idle-evade 4 - 6 vs 1 - 3, P1-far-jcast 6 vs 4, P1-far-jump 6 vs 4 - 5; LOWHOP / JUMPTRAP at par.
+- **Identity**: every S2 switch off: the search's digests 130 / 130 + 106 / 106 = E1's base; with MAP2 unset nothing of
+  ssbot.map2 imported; tier1 / t2_tail off: the controller's paths the earlier ones (de394ee's guard only where hold_sim
+  raised; 1eac0d6's log fields and t1_h's pass only with tier1).
+- Nothing ran live; nothing merged or pushed; no frozen checkout (the person decides on the next live run).
+
+### What was built (commits 41afaef, b0fffa1, c95dcbe, de394ee, 7b8975f, 1eac0d6; `brain/ssbot/map2/tier1.py` (new), `live.py`, `brain/ssbot/tools/m3_accept.py`; `tests/test_t1_s2.py`)
+
+Every new behaviour is behind `LiveCfg.tier1` (default off) and `LiveCfg.t2_tail` (default off); with both off nothing
+of it runs (the identity above).
+
+- **One tier-1 decision** (`tier1.t1_decide`; the measured costs first - `s2_prof.py` on rec w7: the compiled predict
+  0.6 ms p50, every branch view's danger arrays 1.8 ms, 8 escape probes simulated 0.5 ms, their collisions 0.4 ms, the
+  1-event 60-frame tables pass 4.9 ms, the windows of the four primitives 6 ms, a closed-loop evaluation with exits 6.5 /
+  24 ms p50 / p90): from the newest snapshot (the keys in flight + a bridge of the keys the bot will send as its prefix),
+  depth 1, the single 1-event pass of `t1_h` frames (60; `t1_cfg`): CONT (the plan tier 1 plays, re-anchored after the
+  prefix, cut to the horizon) re-checked first - the hysteresis; the escape probes screened OPEN-LOOP against the root's
+  prediction (`open_risk`: the probability of a collision before that branch's reveal + lag), the safest evaluated in
+  closed loop only when CONT is not proven safe, more after the strikes when nothing is; the strikes of every primitive
+  in Cfg.prims (S1's side / up slash, the down slash, the Clawline) from the pass's windows, realized and evaluated in
+  closed loop, round robin over (primitive, Clapper) ROTATED ACROSS DECISIONS; the pass's safe endpoints last. THE
+  CHOICE: the best proven-safe plan (every outcome safe, exits checked) by value, else the LEAST-RISK one (`risk_key`:
+  first the probability of an outcome it cannot play - a press the kin state would not start, 7b8975f -, then of an
+  outcome colliding before its reveal + lag, then the latest such collision, the outcomes without an exit, the open
+  value) - every decision answers with a plan; the first plan's exits always run to their end. THE PREFIX IS COMMITTED
+  (`_prefix_dev`): an outcome the reveal rule let deviate inside the prefix cannot - its collision before the prefix's
+  end + lag makes it unsafe, else its deviation moves to the prefix's end and its exit is checked from there.
+- **The escape tail** (`tier1.t1_tail`): the plan's own exit appended as its committed tail - the exit probes from the
+  state at its end, away from the nearest Clapper first; COMMON: one probe appended to the plan itself (after a Clawline:
+  a segment anchored at its control, every hook variant), re-realized through the hold filter and re-simulated in every
+  safe outcome ending at the plan's end; DEV (c95dcbe, exact): the outcomes that must deviate, grouped by their deviation
+  frame, get the plan cut there with one probe appended, re-realized and re-simulated in each (a plan of one segment
+  without a Clawline) - not inside the prefix, not from a state mid-swing / mid-bounce (b0fffa1). `build_outs(all_outs,
+  light, dev_tails)`: every outcome of a tier-1 plan (a least-risk plan's unsafe ones too). Tier-1 plans always carry it;
+  tier 2's behind `t2_tail` (its plans sent with the tail, a segment of the plan re-simulated by every check).
+- **The tier-1 workers** (`worker_main(role='t1')`, parts 100 + k, `t1_workers`, default 2): `_t1_search_one` answers
+  every snapshot with a LivePlan (`t1`, `t1_safe`, `t1_kind`, `t1_risk`, `t1_prev_pid`, `t1_st` - its time split) or a
+  status. Cap `t1_cap` (0.08 s), at most the prefix's deadline (its bridge `t1_lead` 10 frames, + `t1_lead2` 4 per
+  further Clapper, less dl_margin 3).
+- **The controller's tier 1** (`Map2Controller._t1_tick` / `_t1_snap` / `_t1_put` / `_t1_bridge` / `_t1_late` / `_t1_end`;
+  the bot's thread): every tick the newest tier-1 plan whose prefix the keys sent followed is ADOPTED (also while tier 2
+  has the keys: a standby) - a plan from a decision that did not have the proven-safe plan in hand as its CONT replaces it
+  only when better by `t1_switch`; NO PLAN APPLIES: the newest proven-safe plan REPAIRED from her state now (`t1_repair`,
+  `t1_rep_tol` 1 u) - the takeover; a skipped tick's one-frame SLIP re-checked exactly (`_t1_late`); its key for f + 2
+  from its POSSIBLE outcomes consistent with the observation (none consistent: every outcome) - WHENEVER TIER 2 AND THE
+  SWING HOLD HAVE NO KEYS, she has control and no freeze / hit this tick (own 'm2', why 't1'). The snapshots: to each idle
+  tier-1 worker every tick (a Clapper's move start: to every one) with its own bridge; tier 2's snapshots take tier 1's
+  plan as their bridge while tier 1 has the keys; the fallback's hold row follows a tier-1 snapshot's bridge. The old
+  planner keeps: no Clapper, the intro, no control / a freeze, the supervisor, and the ticks no tier-1 plan applies.
+  The audit (audit_runs): each tier-1 plan's run as sent - collisions counted for proven-safe and least-risk plans apart.
+  The log (1eac0d6): 't1ms' every tick, 't1n' on a tick tier 1 did not hold (the code - no plan / not playing / left /
+  late / exhausted -, the plans refused, the last plan's end and the frames since, since the last snapshot / plan, the
+  last status, the snapshots open).
+- de394ee: the swing hold's re-simulation (hold_sim) stops at a planned press after the keys' end (a tailed plan's).
+- `m3_accept --tier1 N --t1-first M` ('tier 1 alone' on the acceptance: `tier1.t1_chain`).
+- Tests `tests/test_t1_s2.py` (13). The map2 / M4 suites (12 files): 141 passed at de394ee (`s2\tests\tests_final.log`);
+  test_t1_s2 13 at 1eac0d6.
+
+### The measurements (`camp.log`; every job at Idle but the smokes' replays / workers, which m4c_smoke boosts as the live bot)
+
+    smokes (share of the engaged ticks; strict 3 runs, open 1; planned contacts played = S1's rule)
+                           share w7  w13    contacts w7 (side/down/claw)  tier-1 audit coll. safe / risk   decision p50 / p90 (w7)  age
+    e3su strict (S1)       0.537     0.110  62 (27 / 8 / 27)              -                                -                        -
+    t1a strict (7b8975f)   0.932     0.585  17 (6 / 4 / 7)                0 / 6 (w13 0 / 29)               88 / 114 ms              8 f
+    t1a strict (1eac0d6)   0.939     0.596  24 (7 / 4 / 13)               0 / 4 (w13 0 / 46)               88 / 109                 8
+    t1h36 strict (1eac0d6) 0.925     0.704  46 (20 / 1 / 25)              0 / 13 (w13 0 / 67)              85 / 100                 7
+    t1s strict (c95dcbe)   0.877     0.472  32 (8 / 3 / 21)               0 / 7 (w13 0 / 20)               126 / 146                10
+    t12 strict (c95dcbe)   0.872     0.472  31 (12 / 8 / 11)              0 / 6 (w13 0 / 21)               88 / 111                 8
+    e3su open (S1)         0.609     0.151  20
+    t1a open (7b8975f)     0.940     0.583  9                             0 / 2
+    t1a open (1eac0d6)     0.924     0.624  8                             0 / 2
+    t1h36 open (1eac0d6)   0.925     0.712  14                            0 / 5
+    t1s open               0.870     0.548  11                            0 / 4
+    t12 open               0.925     0.552  16                            0 / 2
+    every arm: 0 tracebacks; errors 0 but one t12 run's hold_sim IndexError (de394ee)
+
+    the M3 acceptance (279 move cases; found = same + alt; `accept\acc_cmp.txt`)
+    move             n    deep 1 s   deep 1 s (b)   deep 0.25 s   t1 0.08 s   t1 0.12 s   t1 0.25 s   one t1 decision
+    CLAWSTRIKE      14     8          9              0             0           0           0           0
+    JUMPTRAP        15    15         15             15            14          15          15          10
+    LOWHOP          15    15         15             15            15          15          15          13
+    P1-cast          7     7          6              5             5           5           7           4
+    P1-far-jcast    15     4          4              0             6           6           6           0
+    P1-far-jump     14     5          4              1             6           6           6           0
+    P1-idle         25    18         17             13            16          17          18           6
+    P1-idle-evade   19     3          1              0             6           4           5           0
+    P1-idle-slam    19     4          4              0             2           4           4           0
+    P1-jump         13    12         12             10             7          12          12           5
+    P1-locked        2     2          2              1             1           2           2           1
+    P1-slam         14     9          9              0             0           0           0           0
+    P2              16    16         16              5            11          11          11           3
+    P3-cross / face 16     0          0              0             0           0           0           0
+    P4              16    11          9              5             6           7           8           4
+    P5              17    14         14             12            12          13          14           8
+    SLAMSTRIKE      42    34         33             10            22          27          29           8
+    all            279   177        170             92           129         144         152          62
+
+    the 19 hit situations (`hits\summary.txt` c95dcbe; `hits_h36\summary.txt` 1eac0d6)
+                                          e3su   t1     t1s    t12    | t1 (1eac0d6)  t1h36
+    map2's keys at the live hit            7     17     14     16     | 17            17
+    the emulated path hit inside the       4      0      2      2     |  0             0
+      valid truth
+    hit by the live hit's frame + 2        6      5      5      4     |  5             3
+
+### Open items
+
+1. THE GAPS AFTER A PLAN ENDS (the lead's question): tier 1 waits for a new decision after her hit, the hit-stop, a plan
+   left during them or played to its end - 3.5 % of w7's engaged ticks, 23.7 % of w13's (17.2 % at 36 frames), 27 - 30
+   ticks p50 per gap because the fallback's keys break the next plans' bridges. Reuse across frames, not built: keep
+   tier 1's plan through the hit / hit-stop (re-anchored, or repaired from her state when it ends), tier 1 sending its
+   own bridge while it waits (the fallback's hold row breaks half the time in w13), the previous decision's escapes
+   re-checked from the new state first.
+2. ATTACK RATE: tier 1 alone plays 1 / 4 - 3 / 4 of the deep search's planned contacts (17 - 46 vs 62, strict w7).
+3. MULTI-EVENT MOVES: CLAWSTRIKE and P1-slam (0 of 14 each for tier 1 alone; deep 8 - 9) need the follow-up strike as
+   part of the commitment; either the deep search stays for them (t12) or tier 1's exit check counts a planned strike's
+   i-frames - the person's call.
+4. W13: half of tier 1's decisions are least-risk (two Clappers, no proven-safe plan within ~100 ms); their runs collide
+   in 24 - 26 % of the audited ones.
+5. A side / up swing under way is not carried into a new decision (no snapshot: 0.9 - 7.1 % of the engaged ticks).
+6. The press scan flags 1 - 4 adopted tier-1 plans per run at a mode's first frame (the model's kin trace vs the scan's
+   state a step earlier), the scan's old umbrella rule and one 'facing' - which is the game's: a probe or the live presses.
+7. The emulation's truth is the recorded Clapper - after it leaves the plan's outcomes 'tier 1 got hit later' is no verdict.
+8. Nothing ran live; no merge; no frozen checkout.
+
+### The switch set for a live run (the person decides)
+
+Tier 1 alone: `SSBOT_FORUM_MAP2_SET=<E3's recommended set>,prims_su=1,tier1=1,parts=0` (t1_workers 2, t1_cap 0.08,
+t1_lead 10 at their defaults) + `t1_h=36` for the 36-frame look-ahead (the measured better one above); with the deep
+search: `...,prims_su=1,tier1=1,parts=2,t1_workers=1,t2_tail=1`. Not frozen; the next live run is the person's decision.
