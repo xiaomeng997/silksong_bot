@@ -352,6 +352,16 @@ class LiveCfg:
     #                                difference re-checks the plan in control exactly (the tube's re-check / the
     #                                re-anchoring); the gate's P3
     witness_retry: bool = False    # search.Cfg.witness_retry (with witness_fast)
+    prims_su: bool = False         # t1 S1: THE SIDE AND UP SLASHES AS map2 STRIKE PRIMITIVES - the worker's search plans
+    #                                them (search.Cfg.prims + su_kinds: their windows, the press with the direction key
+    #                                toward the target, the contact on strike.su_boxes, her nail recoil, the Clapper's
+    #                                'side' / 'up' hit); every re-simulation here credits them the same way (the
+    #                                outcomes carry their target boxes, OutData.sboxes); the hold filter's realizer, the
+    #                                commit / re-anchoring / late checks and the root prefix accept a planned nail press
+    #                                without down; a side / up swing under way is not carried (busy 'slash' / 'slash
+    #                                under way'), a side / up contact ahead sends the tube to its exact re-check
+    su_kinds: str = "side,up"      # the kinds prims_su adds ("side" alone: no up slash)
+    su_shrink: float = 0.05        # search.SU_SHRINK: a side / up contact's overlap on every side of the target box (u)
     late_base: bool = True         # the late check re-simulates from the commit's own state (her observed one and the
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
@@ -381,6 +391,7 @@ class LiveCfg:
 GEO_EXT = [0]      # E2 (c): a sent plan's danger geometry kept this many frames past each outcome's committed end
 VIEWS_GAP = [False]   # E2 (a) (LiveCfg.views_gap): build_outs holds a state on through its successor's spread
 TUBE_FIX = [False]    # E3 (LiveCfg.tube_fix): shift_outcome keeps the circles on both timings, the earliest end
+SU = [False]          # t1 S1 (LiveCfg.prims_su): side / up slashes planned - their presses and contacts accepted
 
 
 def set_switches(cfg: LiveCfg) -> None:
@@ -396,6 +407,8 @@ def set_switches(cfg: LiveCfg) -> None:
     press.SIDE_RULE[0] = str(cfg.side_rule)
     press.SIDE_LAG[0] = float(cfg.side_lag)
     press.XVX_MIN[0] = float(cfg.spr_xvx)
+    SU[0] = bool(getattr(cfg, "prims_su", False))                                          # t1 S1
+    ms.SU_SHRINK[0] = float(getattr(cfg, "su_shrink", 0.05))
 
 
 # ---- the oracle's hold filter, one lane (kinematics.hold_filter, compiled) ------------------------------------------
@@ -474,14 +487,15 @@ def hold_run(cmds, hold: tuple) -> tuple:
     return out, (l2, d2, p2, a2)
 
 
-def _press_at(lat: np.ndarray, i: int, prev: int, look: int = 2) -> int:
+def _press_at(lat: np.ndarray, i: int, prev: int, look: int = 2, su: bool = False) -> int:
     """The frame (index) of the latched down slash press for one commanded at i: the first rising attack with down
-    in i .. i + look; -1 when the filter takes it away."""
+    in i .. i + look; -1 when the filter takes it away. t1 S1 su: any rising attack (a side / up slash press too:
+    the kin state decides the swing - search.simulate)."""
     for j in range(i, min(i + look + 1, len(lat))):
         m = int(lat[j])
         pm = int(lat[j - 1]) if j > 0 else int(prev)
         if _rising(m, pm, km.B_ATTACK):
-            return j if (m & M_DS) == M_DS else -1
+            return j if ((m & M_DS) == M_DS or su) else -1
     return -1
 
 
@@ -495,8 +509,9 @@ class HoldRealizer:
     CLAW_PRESS_F frames) and a block of no key; a down slash press moves to its latched press frame (dropped when the
     filter takes the press away: the strike is then not in the plan)."""
 
-    def __init__(self, n_pre: int, hold_after: tuple, face0: int | None = None):
+    def __init__(self, n_pre: int, hold_after: tuple, face0: int | None = None, su: bool = False):
         self.n_pre, self.hold = int(n_pre), hold_after
+        self.su = bool(su)                 # t1 S1: a side / up slash press is kept (moved to its latched frame) too
         self.face0 = None if face0 is None else (1 if face0 >= 0 else -1)   # her facing at the plan's start
         self.n_moved = 0
         self.n_dropped = 0
@@ -558,7 +573,7 @@ class HoldRealizer:
             if i < base:
                 dsl.append((i, iid))
                 continue
-            j = _press_at(lat, int(i), prev)
+            j = _press_at(lat, int(i), prev, su=self.su)
             if j < 0:
                 self.n_dropped += 1
                 continue
@@ -624,7 +639,8 @@ class OutData:
     control is known (her accepting input from control on: the hook variant seen live); M4 S1b: tops {iid: the
     highest body top per frame} (strike.union_tops: the side rule's; unset in older plans - the robust top then)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
-                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig", "face", "gnd")
+                 "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig", "face", "gnd",
+                 "sboxes")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
@@ -739,6 +755,9 @@ def build_outs(ev, margins: bool = True) -> list:
         tgt = {iid for (_, iid) in d.presses} | {int(c[1]) for (_, _, _, c) in d.segs if c is not None}
         d.boxes = {iid: np.asarray(sk.robust_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
         d.tops = {iid: np.asarray(sk.union_tops(o.branch, iid, None), float) for iid in sorted(tgt)}
+        if SU[0]:
+            # t1 S1: the side / up slashes' target boxes (strike.su_boxes) of every target
+            d.sboxes = {iid: np.asarray(sk.su_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
         key = (id(o.branch), kc)
         if key not in gcache:
             # (E2 (c): GEO_EXT frames more - the swing hold's check runs past a plan's end inside a swing)
@@ -1042,6 +1061,8 @@ def shift_outcome(o: OutData, sh: dict) -> OutData:
     c.boxes = {iid: _arr(b, int(iid)) for iid, b in o.boxes.items()}
     if getattr(o, "tops", None) is not None:
         c.tops = {iid: _arr(t, int(iid)) for iid, t in o.tops.items()}
+    if getattr(o, "sboxes", None) is not None:
+        c.sboxes = {iid: _arr(b, int(iid)) for iid, b in o.sboxes.items()}             # t1 S1
 
     def _fr(k, iid=None):
         ds = [sh[iid]] if iid in sh else (list(sh.values()) if iid is None else [])
@@ -1334,6 +1355,8 @@ def contact_kept(o: OutData, pos: np.ndarray, n: int, dx: float, dy: float, rx: 
     the contact (strike.dslash_contact, both alternations, from the press's frame; the frames up to n are past) - else
     the tube does not keep the outcome (the exact re-check judges it: a contact a frame off moves the bounce and its
     i-frames)."""
+    if SU[0] and any(kd in sk.SU_KINDS and n < int(k) <= o.kc for (k, _, kd) in o.contacts):
+        return False                      # (t1 S1: a side / up contact ahead - the exact re-check judges it)
     ahead = [(int(k), int(i)) for (k, i, kd) in o.contacts if kd == "down" and n < int(k) <= o.kc]
     if not ahead:
         return True
@@ -1412,15 +1435,19 @@ def reanchor_outcome(o: OutData, s: int, lat: np.ndarray, lat_s: int, move: int 
                 if kp + DS_WIN > s:
                     if not carry:
                         return None, "slash under way"
+                    if SU[0] and 0 <= int(i) < len(masks) and not (int(masks[int(i)]) & km.B_DOWN):
+                        return None, "slash under way"       # (t1 S1: a side / up swing is not carried)
                     swing = (int(kp - s), (int(iid),), 0)
                 continue
             j = kp - (a + 1)
             q = lo + j
             pm = int(lat[q - 1]) if q > 0 else int(lat_s)
-            if (int(lat[q]) & M_DS) != M_DS or (pm & km.B_ATTACK):
+            # (t1 S1, SU: a side / up press - any rising attack; the kin state decides the swing in simulate)
+            moved = (int(lat[q]) & M_DS) != M_DS if not SU[0] else not (int(lat[q]) & km.B_ATTACK)
+            if moved or (pm & km.B_ATTACK):
                 if move <= 0:
                     return None, "press moved"
-                q2 = _press_at(lat, q, lat_s if q == 0 else int(lat[q - 1]), look=move)
+                q2 = _press_at(lat, q, lat_s if q == 0 else int(lat[q - 1]), look=move, su=SU[0])
                 if q2 < 0 or q2 >= hi:
                     continue
                 j = q2 - lo
@@ -1484,6 +1511,15 @@ def _first_collision_out(o: OutData, tr, s: int, k1: int) -> int | None:
     if kx is not None and (res is None or kx + s < res):
         return kx + s
     return res
+
+
+def _su_fn(o: OutData, s: int = 0):
+    """t1 S1: simulate's su_fn for a re-simulation of the outcome from frame s - None when SU is off (as before) or
+    the outcome has no side / up targets (an older plan: its side / up presses then a miss)."""
+    sb = getattr(o, "sboxes", None)
+    if not SU[0] or sb is None:
+        return None
+    return lambda iid: (sb[iid][s:] if iid in sb else None)
 
 
 def _tops_fn(o: OutData, s: int = 0):
@@ -1589,7 +1625,8 @@ def commit_check(W, lp: LivePlan, fo: int, S0: np.ndarray, inflight: np.ndarray,
             boxes = {iid: b[s:] for iid, b in o.boxes.items()}
             sw = _swing_for(plan, S0, iids_all, float(W.params.frame_time), cfg.midswing, swc)
             tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
-                             claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s), swing=sw)
+                             claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s), swing=sw,
+                             su_fn=_su_fn(o, s))
             memo[key] = tr
             n_sim += 1
         kk = min(o.kc - s, len(tr.pos) - 1)
@@ -1685,7 +1722,7 @@ def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int,
         dsl, pm_ = [], lat_b
         planned = sorted(int(k) for (k, _) in o.presses if int(k) > sb)
         for kp in planned:
-            q = _press_at(lat, kp - sb - 1, lat_b if kp - sb - 1 == 0 else int(lat[kp - sb - 2]), look=2)
+            q = _press_at(lat, kp - sb - 1, lat_b if kp - sb - 1 == 0 else int(lat[kp - sb - 2]), look=2, su=SU[0])
             if q >= 0:
                 dsl.append((q, next(int(ii) for (k, ii) in o.presses if int(k) == kp)))
         plan = ms.Plan([ms.Seg((lat & ~M_CLAW).astype(np.int64), dsl, None, "hold")], "hold")
@@ -1693,7 +1730,8 @@ def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int,
         od = shift_outcome(o, sh) if sh else o
         boxes = {iid: b[sb:] for iid, b in od.boxes.items()}
         tr = ms.simulate(W, plan, lambda iid, _b=boxes: _b.get(iid), face0, Sb, VARIANTS[o.variant], alpha_c,
-                         claw_lock=int(getattr(lp, "claw_lock", -99)) - sb, tops_fn=_tops_fn(od, sb), swing=sw)
+                         claw_lock=int(getattr(lp, "claw_lock", -99)) - sb, tops_fn=_tops_fn(od, sb), swing=sw,
+                         su_fn=_su_fn(od, sb))
         kc = _first_collision_out(od, tr, sb, k1)
         out.append((int(i), None if kc is None else int(kc), ""))
         if kc is not None and need is not None:
@@ -1722,7 +1760,8 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
         boxes = {iid: b[s:] for iid, b in o.boxes.items()}
         tr = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S0, VARIANTS[o.variant], alpha_c,
                          claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s),
-                         swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing, swc))
+                         swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing, swc),
+                         su_fn=_su_fn(o, s))
         kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
         out.append((int(i), None if kc is None else int(kc), ""))
     return out
@@ -1787,7 +1826,7 @@ def repair_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, her_xy, obs
             return False, why, info
         tr = ms.simulate(W, plan, lambda iid: o.boxes.get(iid), face0, S_a, VARIANTS[o.variant], alpha_c,
                          claw_lock=int(getattr(lp, "claw_lock", -99)), tops_fn=_tops_fn(o, 0),
-                         swing=getattr(lp, "swing_a", None) if cfg.midswing else None)
+                         swing=getattr(lp, "swing_a", None) if cfg.midswing else None, su_fn=_su_fn(o, 0))
         n_sim += 1
         kk = min(o.kc, len(tr.pos) - 1, len(o.pos) - 1)
         if kk < r0:
@@ -1855,7 +1894,7 @@ def late_check(W, lp: LivePlan, fo: int, f: int, keys: np.ndarray, idx: list, to
         sw_ = (_swing_for(plan, S_b, tuple(iids), float(W.params.frame_time), True, (base or {}).get("swc"))
                if sb > 0 else getattr(lp, "swing_a", None)) if midswing else None
         tr_ = ms.simulate(W, plan, lambda iid: boxes.get(iid), face0, S_b, VARIANTS[o.variant], alpha_c,
-                          claw_lock=lock, tops_fn=_tops_fn(o, sb), swing=sw_)
+                          claw_lock=lock, tops_fn=_tops_fn(o, sb), swing=sw_, su_fn=_su_fn(o, sb))
         return tr_, lat, ""
     for i in idx:
         o = lp.outs[i]
@@ -1982,6 +2021,9 @@ def search_kw(cfg: LiveCfg) -> dict:
         kw["base_last"] = bool(cfg.base_last)
     if getattr(cfg, "views_fill", False):                                                # (E2 (a): only when on)
         kw["views_fill"] = True
+    if getattr(cfg, "prims_su", False):                                                  # (t1 S1: only when on)
+        kw["prims"] = ("dslash", "claw") + tuple(k for k in str(cfg.su_kinds).replace("+", ",").split(",")
+                                                 if k.strip() in sk.SU_KINDS)
     return kw
 
 
@@ -2005,7 +2047,7 @@ def build_prefix(snap: dict) -> tuple:
             n = q
             break
         if _rising(m, pm, km.B_ATTACK):
-            iid = presses.get(fo + 1 + q) if (m & M_DS) == M_DS else None
+            iid = presses.get(fo + 1 + q) if ((m & M_DS) == M_DS or SU[0]) else None
             if iid is None:
                 if q < L:
                     return None, "slash in flight"
@@ -2075,7 +2117,7 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
         return {**base, "status": "abort"}
     S.abort_fn = aborted
     f0 = float(np.asarray(snap["S"], float).reshape(km.K, -1)[km.FACE, 0])
-    S.realizer = HoldRealizer(len(pre.masks), pre.hold_after, face0=1 if f0 >= 0 else -1)
+    S.realizer = HoldRealizer(len(pre.masks), pre.hold_after, face0=1 if f0 >= 0 else -1, su=SU[0])
     n_pre = len(pre.masks)
     sent = {"e": None, "n": 0}
 

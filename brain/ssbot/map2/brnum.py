@@ -189,6 +189,41 @@ def robust_rows(br, iid: int, T: int) -> np.ndarray:
     return rows
 
 
+def su_rows(br, iid: int, T: int) -> np.ndarray:
+    """t1 S1 (strike.su_boxes): robust_rows with each record's box drawn in the SHAPE of the record of the frame before
+    (the same Clapper's last record at nominal frame k - 1; the first record its own) at its own position and facing -
+    the physics step of frame c meets the collider the previous frame's animation left, moved to its position at c
+    (V1: the side / up slash's contacts on the recordings). (k_lo, k_hi, x0, y0, x1, y1) rows; a record or its
+    predecessor without a body: (inf, inf, -inf, -inf)."""
+    arr, tb = barr(br)
+    a = arr.get(iid)
+    if a is None or not len(a):
+        return np.zeros((0, 6))
+    F = flags(tb, br.K)
+    ks = a[:, 0].astype(np.int64)
+    last: dict = {}
+    for i in range(len(a)):
+        last[int(ks[i])] = i
+    pi = np.array([last.get(int(ks[i]) - 1, i) for i in range(len(a))], np.int64)
+    k_lo = np.maximum(a[:, 0] + a[:, 1], 0.0)
+    k_hi = np.minimum(a[:, 0] + a[:, 2], float(T))
+    ok = k_lo <= k_hi
+    st = a[:, 3].astype(np.int64)
+    sp = st[pi]
+    jp = a[pi, 4].astype(np.int64)
+    sps = np.maximum(sp, 0)
+    inr = (jp >= 0) & (jp < tb.BOXN[sps])
+    bx = np.where(inr[:, None], tb.BOX[sps, np.clip(jp, 0, tb.BOX.shape[1] - 1)], tb.BOXL[sps])
+    x, y, face = a[:, 5], a[:, 6], a[:, 7]
+    xa = x + face * bx[:, 0]
+    xb = x + face * bx[:, 1]
+    rows = np.stack([k_lo, k_hi, np.minimum(xa, xb), y + bx[:, 2], np.maximum(xa, xb), y + bx[:, 3]], axis=1)
+    sts = np.maximum(st, 0)
+    nb = (st < 0) | F.nobox[sts] | (sp < 0) | F.nobox[sps]
+    rows[nb, 2:] = (np.inf, np.inf, -np.inf, -np.inf)
+    return rows[ok]
+
+
 def _first_rows(br, iid: int) -> dict:
     c = br.__dict__.get("_firstrow")
     if c is None:

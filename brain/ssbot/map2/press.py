@@ -35,7 +35,8 @@ ds_shrink, side_rule / side_lag, spr_xvx - their S1 values give S1's search):
 - the lock credit by the bounce's cause (finding presses 1): after a down slash POGO the game's downSpikeRecovery runs
   9 - 11 frames (1,292 airborne pogo bounces in 60 show / film episodes: 9 253, 10 462, 11 466, <= 8 44, 15 - 23
   67), after a hooked Clawline's forced bounce 1 frame (54 / 54; slashes pressed 10 - 12 frames after it all started,
-  0 - 1 frame late; s1bec_after_bounce.json): a press only kin's lock holds is credited FREE_POGO (12) frames after a pogo onset, FREE_MIN (10) after the
+  0 - 1 frame late; s1b
+ec_after_bounce.json): a press only kin's lock holds is credited FREE_POGO (12) frames after a pogo onset, FREE_MIN (10) after the
   hook's (ds_start's hook_onset: the frame of the hook's forced bounce - simulate's own, the realizer's node after a
   Clawline - is the lock's onset; a start state's running lock counts as a pogo's).
 - the contact's slack (finding presses 2): both alternations must meet the robust body box SHRUNK by SHRINK (0.05 u)
@@ -61,6 +62,7 @@ from ssbot.knowledge.kin_jit import apply_events, f32, fixed_step, update
 from ssbot.knowledge.kinematics import (
     ALPHA, ATK_PDIR, ATK_T, ATTACKING, BOUNCE, DS_REC, GROUND, MODE, MODE_T, P_ABIL, P_FDT, PHASE, QX, QY, RX0, RY0, SX,
     SY, TS, WF_S, XVX)
+from ssbot.knowledge.kinematics import ATK_KIND, FACE, WSIDE  # (t1 S1: trace_su)
 
 ON = [True]
 SIDE = [True]
@@ -262,5 +264,117 @@ def state_name(kt: np.ndarray, t: int) -> str:
     return f"{km.MODE_NAMES[int(kt[t, C_MODE])]}{int(kt[t, C_PH])}"
 
 
+# ---- t1 S1: the side / up slash presses (search.Cfg.prims 'side' / 'up'; the side slash and up slash primitives) ----
+# A side / up slash is credited only where her kin state STARTS one (the same rule as ds_start's): the first attack
+# that starts at the press .. + LOOK and its direction (kin_jit.forum_swing: ATK_PDIR 0 normal, 1 up; ATK_KIND 1 / 2
+# the normal / alternate side slash, 3 up, 4 the wall slash), its facing (do_attack turns her to the direction key she
+# holds at the swing's start; the facing cannot change while ATK_T < the attack recovery, a turn after it cancels the
+# swing: ATTACKING off). trace_su records per frame what that needs; kin_trace (trace) is unchanged.
+S_MODE, S_PH, S_GND, S_XVX, S_ATK0, S_ATKT0, S_ATK, S_ATKT, S_PDIR, S_KIND, S_FACE, S_WSIDE, S_STEPS = range(13)
+SNCOL = 13
+COMBO_F = 9               # the Wanderer's dash combo: an attack within 0.15 s (DASHCOMBO_WINDOW_TIME) after a dash /
+#                           sprint frame is another move (the old planner's veto, forum_planner.WANDERER_COMBO_F) - not
+#                           modelled: a side / up press there is not credited and its plan cannot be played
+
+
+@njit(cache=True, error_model="numpy")
+def _trace_su(S0, masks, events, udt, P, TT):
+    """kin_jit.run_lane's frame loop for one lane at nominal timing (as _trace), recording per frame t = 0 .. T the
+    state before its Update (mode, phase, ground, XVX, the attack) and after it (the attack, its direction / kind,
+    her facing, the wall slide side)."""
+    T = masks.shape[0]
+    out = np.zeros((T + 1, SNCOL))
+    x = S0.copy()
+    fdt = P[P_FDT]
+    out[0, S_MODE] = x[MODE]
+    out[0, S_PH] = x[PHASE]
+    out[0, S_GND] = x[GROUND]
+    out[0, S_XVX] = x[XVX]
+    out[0, S_ATK0] = x[ATTACKING]
+    out[0, S_ATKT0] = x[ATK_T]
+    out[0, S_ATK] = x[ATTACKING]
+    out[0, S_ATKT] = x[ATK_T]
+    out[0, S_PDIR] = x[ATK_PDIR]
+    out[0, S_KIND] = x[ATK_KIND]
+    out[0, S_FACE] = x[FACE]
+    out[0, S_WSIDE] = x[WSIDE]
+    for t in range(1, T + 1):
+        m = masks[t - 1]
+        ev = events[t - 1]
+        if P[P_ABIL] != 0:
+            x[RX0] = x[QX] + x[ALPHA] * (x[SX] - x[QX])
+            x[RY0] = x[QY] + x[ALPHA] * (x[SY] - x[QY])
+        dt = f32(udt * (x[TS] if x[WF_S] == 1.0 else x[TS] * x[WF_S]))
+        a = x[ALPHA] + dt / fdt
+        steps = np.int64(math.floor(a + 1e-9))
+        x[ALPHA] = a - steps
+        x[ALPHA] = min(max(x[ALPHA], 0.0), 1.0)
+        for _ in range(steps):
+            fixed_step(x, P, TT)
+        apply_events(x, ev, P)
+        out[t, S_MODE] = x[MODE]
+        out[t, S_PH] = x[PHASE]
+        out[t, S_GND] = x[GROUND]
+        out[t, S_XVX] = x[XVX]
+        out[t, S_ATK0] = x[ATTACKING]
+        out[t, S_ATKT0] = x[ATK_T]
+        update(x, m, ev, dt, udt, P, TT)
+        out[t, S_ATK] = x[ATTACKING]
+        out[t, S_ATKT] = x[ATK_T]
+        out[t, S_PDIR] = x[ATK_PDIR]
+        out[t, S_KIND] = x[ATK_KIND]
+        out[t, S_FACE] = x[FACE]
+        out[t, S_WSIDE] = x[WSIDE]
+        out[t, S_STEPS] = steps
+    return out
+
+
+def trace_su(W, S0: np.ndarray, masks: np.ndarray, events: np.ndarray | None = None) -> np.ndarray:
+    """t1 S1: the side / up slash trace of a segment (search.World W; masks / events as simulate rolls them).
+    [T + 1, SNCOL]."""
+    m = np.ascontiguousarray(np.asarray(masks, np.int64).reshape(-1))
+    if not len(m):
+        m = np.zeros(1, np.int64)
+    ev = np.zeros(len(m), np.int64) if events is None else np.ascontiguousarray(
+        np.asarray(events, np.int64).reshape(-1)[:len(m)])
+    if len(ev) < len(m):
+        ev = np.concatenate([ev, np.zeros(len(m) - len(ev), np.int64)])
+    udt = float(np.float32(W.params.frame_time))
+    return _trace_su(np.ascontiguousarray(np.asarray(S0, np.float64).reshape(-1)), m, ev, udt, W.params.vector(),
+                     W.TT)
+
+
+def su_started(st: np.ndarray, t: int) -> bool:
+    """An attack starts in frame t's Update (trace_su's columns; started()'s rule)."""
+    return bool(st[t, S_ATK] > 0 and st[t, S_ATKT] == 0.0 and not (st[t, S_ATK0] > 0 and st[t, S_ATKT0] == 0.0))
+
+
+def su_start(st: np.ndarray, t: int, look: int = LOOK) -> tuple:
+    """(rollout index of the start, kind, facing) of a nail press at rollout index t: the first attack that starts at
+    t .. t + look - 'side' (a normal / alternate side slash), 'up', 'down' (the Wanderer's down slash), 'wall' (a
+    wall slash: the polygon behind her, not a strike), 'combo' (it starts within COMBO_F frames after a dash / sprint
+    frame of the trace: the Wanderer's dash combo, not modelled), 'glide' (it starts out of the umbrella's antic /
+    inflate: the game loses it there); 'none' (no attack starts: not credited)."""
+    n = len(st) - 1
+    for t2 in range(t, min(t + look, n) + 1):
+        if su_started(st, t2):
+            face = 1 if st[t2, S_FACE] >= 0 else -1
+            for q in range(max(t2 - COMBO_F, 0), t2 + 1):
+                if int(st[q, S_MODE]) in (km.M_DASH, km.M_SPRINT):
+                    return t2, "combo", face
+            if int(st[t2, S_MODE]) == km.M_GLIDE and st[t2, S_PH] <= 1.0:
+                # out of the umbrella's antic / inflate (M0: the attack lost in the antic, in the inflate's frames
+                # 1 - 4; V1: 4 of 4 such kin starts were no slash in the game) - not credited
+                return t2, "glide", face
+            pd, kd = st[t2, S_PDIR], abs(st[t2, S_KIND])
+            if pd == 2.0:
+                return t2, "down", face
+            if kd == 4.0 or st[t2, S_WSIDE] != 0:
+                return t2, "wall", face
+            return t2, ("up" if pd == 1.0 else "side"), face
+    return t, "none", 0
+
+
 __all__ = ["ON", "SIDE", "LOOK", "FREE_MIN", "FREE_POGO", "SHRINK", "SIDE_RULE", "SIDE_LAG", "XVX_MIN", "trace",
-           "started", "ds_start", "out_of_sprint", "side_hit", "claw_state_ok", "state_name", "CLAW_LOCK_F", "unmodelled"]
+           "started", "ds_start", "out_of_sprint", "side_hit", "claw_state_ok", "state_name", "CLAW_LOCK_F", "unmodelled",
+           "trace_su", "su_start", "su_started", "COMBO_F"]

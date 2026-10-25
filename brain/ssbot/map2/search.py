@@ -497,9 +497,14 @@ def _rows_sig(bx, lo: int, hi: int):
     return (len(bx), bx[lo:hi].tobytes(), bx[-1].tobytes() if len(bx) else b"")
 
 
+SU_SHRINK = [0.05]                 # t1 S1: a side / up slash contact needs this overlap (u) on every side of the target
+#                                    box (the down slash's press.SHRINK; V1: precision 1.000 at 0 and 0.05, recall
+#                                    0.988 / 0.976 - the safe side under the search's choice of edge windows)
+
+
 def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant: sk.HookVariant,
              alpha_c: int = 0, extra: int = 0, br=None, lag: int = 2, rec: list | None = None,
-             claw_lock: int = -99, tops_fn=None, swing=None) -> Traj:
+             claw_lock: int = -99, tops_fn=None, swing=None, su_fn=None) -> Traj:
     """The plan from S0 in one outcome: boxes_fn(iid) -> the robust body boxes per frame of that branch. Each down
     slash press finds its contact (both alternations, robust box) and the bounce (EV_POGO); a Clawline hooks its
     target (strike.claw_hook) or, when the ray misses, is played unhooked (hero2.claw_unhooked) - a miss. extra:
@@ -523,7 +528,14 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     S0 (her kin state carries it: ATTACKING, ATK_T, ATK_PDIR 2), started at rollout index t_s <= 0; its contact is
     credited in the first segment against the first of iids whose robust body it meets (frames 1 on: frame 0 is the
     observation), with its bounce and i-frames as a press's; ifr0: the pogo i-frames of a contact before S0 still
-    running at frames 1 .. ifr0 (swing_from_state). None: no swing (as before)."""
+    running at frames 1 .. ifr0 (swing_from_state). None: no swing (as before).
+    t1 S1 su_fn (search.Cfg.prims 'side' / 'up'; None: as before - a nail press whose attack is not a down slash is a
+    miss): su_fn(iid) -> the side / up slash's target boxes per frame (strike.su_boxes). A press of seg.dsl whose kin
+    state starts a SIDE or UP slash (press.su_start, with press.ON) is credited where strike.su_contact meets that
+    Clapper (her box centre, her facing at the swing's start, frames with a physics step, both alternations,
+    SU_SHRINK); on its contact her nail recoil (EV_RECOIL_L / R away from it; the up slash's EV_RECOIL_DOWN) and the
+    Clapper's 'side' / 'up' hit; a start out of the Wanderer's dash combo window or the umbrella's antic / inflate is a
+    forced collision at the press (an unmodelled move / the game loses it: her path is not the plan's)."""
     P_, B_, G_, F_, M_, I_, C_ = [], [], [], [], [], [], []
     hits: dict = {}
     contacts, hooks, rolls, starts, missed, claws, alts = [], [], [], [], [], [], []
@@ -630,6 +642,36 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
                     kt = press.trace(W, S, masks, ev, [i_ + 1 for (i_, _) in seg.dsl])
                 ts, kind = press.ds_start(kt, t, dt=float(W.params.frame_time),
                                           hook_onset=None if hook_bnc is None else hook_bnc - k0)
+                if kind == "side" and su_fn is not None:
+                    # t1 S1: the attack that starts is not a down slash - a side / up slash, credited by its own
+                    # contact (the trace_su of the segment with its events so far)
+                    st_ = press.trace_su(W, S, masks, ev)
+                    t2, skd, sface = press.su_start(st_, t)
+                    if skd in ("side", "up"):
+                        sbx = su_fn(iid)
+                        lo_, hi_ = k0 + t2 + 1, k0 + min(t2 + 7, n) + 1
+                        if rec is not None:
+                            rec.append(("srows", iid, lo_, hi_, _rows_sig(sbx, lo_, hi_)))
+                        rel_s = sbx[k0:] if sbx is not None else np.full((1, 4), np.nan)
+                        cen = 0.5 * (r.box[0, :, :2] + r.box[0, :, 2:])
+                        c = sk.su_contact(cen, sface, t2, rel_s, skd, SU_SHRINK[0], alive=st_[:, press.S_ATK] > 0,
+                                          steps=st_[:, press.S_STEPS])
+                        if c < 0:
+                            missed.append((skd, k0 + t, iid))
+                            continue
+                        if skd == "side":
+                            ev[c - 1] |= km.EV_RECOIL_L if sface > 0 else km.EV_RECOIL_R
+                        else:
+                            ev[c - 1] |= km.EV_RECOIL_DOWN
+                        r = W.roll(S, masks if n else np.zeros(1, np.int64), ev)
+                        kt = None
+                        hits.setdefault(iid, {})[k0 + c] = (skd, sk.SU_DMG)
+                        contacts.append((k0 + c, iid, skd))
+                        continue
+                    if skd in ("combo", "glide"):
+                        bad.append((k0 + t2, "su_" + skd))
+                    missed.append(("su:" + skd, k0 + t, iid))
+                    continue
                 if kind not in ("down", "lock"):
                     missed.append(("dslash:" + kind, k0 + t, iid))
                     continue
@@ -745,6 +787,13 @@ def simulate(W: World, plan: Plan, boxes_fn, face0: int, S0: np.ndarray, variant
     tr.segs = played                 # the segments played (the reaction's continuation and the hook variant's in place)
     tr.bad = bad
     return tr
+
+
+def _next_atk(contacts) -> int:
+    """The earliest frame of a node's next swing after the plan's nail contacts: a down slash's contact + 15 (its
+    press + 18 at the earliest contact, press + 3); t1 S1 a side / up slash's + 17 (contact at press + 1 earliest)."""
+    return max([kc + sk.SLASH_NEXT_F - (3 if kd == "down" else 1) for (kc, _, kd) in contacts
+                if kd == "down" or kd in sk.SU_KINDS], default=-99 + sk.SLASH_NEXT_F - 3)
 
 
 def claw_lock_of(sit) -> int:
@@ -1733,6 +1782,11 @@ class Evaluator:
         self.n_probe = 0               # exit checks settled by a probe (exit_ok)
         self._exm_none: dict = {}      # exit_ok's memo without a branch
 
+    @property
+    def su(self) -> bool:
+        """t1 S1: side / up slashes credited (Cfg.prims holds 'side' or 'up')."""
+        return any(k in tuple(self.cfg.prims) for k in sk.SU_KINDS)
+
     def reset(self) -> None:
         """Drop the per-decision memos (a new situation)."""
         self._simm = {}
@@ -1760,8 +1814,10 @@ class Evaluator:
             ent[2].append(((), tr))
             return tr
         rec: list = []
+        su_fn = (lambda iid: sk.su_boxes(b, iid, T)) if self.su else None       # t1 S1 (Cfg.prims side / up)
         tr = simulate(self.W, plan, lambda iid: sk.robust_boxes(b, iid, T), face0, sit.S, var, sit.alpha_c, br=b,
-                      lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T), swing=sw)
+                      lag=lag, rec=rec, claw_lock=lock, tops_fn=lambda iid: sk.union_tops(b, iid, T), swing=sw,
+                      su_fn=su_fn)
         ent[2].append((tuple(rec), tr))
         if len(ent[2]) > 24:
             ent[2].pop(0)
@@ -1775,6 +1831,9 @@ class Evaluator:
                     return False
             elif r[0] == "tops":
                 if _rows_sig(sk.union_tops(b, r[1], T), r[2], r[3]) != r[4]:
+                    return False
+            elif r[0] == "srows":                                # t1 S1: a side / up slash's target rows
+                if _rows_sig(sk.su_boxes(b, r[1], T), r[2], r[3]) != r[4]:
                     return False
             elif reaction_key(b, r[1], lag) != r[2]:
                 return False
@@ -2055,7 +2114,8 @@ class Evaluator:
                     fx = dict(fixed)
                     for (kk, ii, hh) in lst[0][3]:
                         fx[(ii, kk)] = hh
-                    fx[(iid, k)] = (kind, sk.DS_DMG if kind == "down" else sk.CLAW_DMG)
+                    fx[(iid, k)] = (kind, sk.DS_DMG if kind == "down" else sk.SU_DMG if kind in sk.SU_KINDS else
+                                    sk.CLAW_DMG)
                     lst = [x[:3] for x in lst]
                     hits = {}
                     for (ii, kk), v in fx.items():
@@ -2499,6 +2559,9 @@ class Searcher:
                             I, xm, near = I[keep], xm[keep], near[keep]
                             found["claw"].append((Rc["t"][I], Rc["g"][I], xm, Rc["y"][I], np.full(len(I), d),
                                                   np.abs(near - xm)))
+                for skind in sk.SU_KINDS:
+                    if skind in cfg.prims and n:
+                        found[skind] = self._su_windows(node, R, sk.su_boxes(b, iid, node.pred.T), skind)
                 for kind, parts in found.items():
                     if not parts:
                         continue
@@ -2560,6 +2623,55 @@ class Searcher:
                 continue
             seen.add(key)
             out.append(c)
+        return out
+
+    @staticmethod
+    def _su_windows(node: Node, R: dict, sbx: np.ndarray, kind: str) -> list:
+        """t1 S1: the side / up slash windows of one Clapper in one branch - rows of the pass whose state swings at once
+        (COND_ATK: the press in tp + 1 starts the slash) from which the slash's contact at press + dc (1 / 2 / 4) can
+        meet the target box (strike.su_boxes) facing either way: her box centre at the contact in su_region (her x
+        within 0.5 u of the row's interval: she moves at most ~0.14 u a frame on the direction key; her height kept on
+        the ground, its ballistic extrapolation in the air), a side slash with her box out of the body on the slash's
+        side. Per row the middle of the reach. The found lists' arrays (T, G, X, Y, extra = facing x 10 + dc, D = the
+        distance from the side slash's middle reach / the up slash's body edge)."""
+        out = []
+        nb_ = len(sbx)
+        if not nb_:
+            return out
+        qx0, qx1, qy0, qy1 = sk._su_table()[kind + ":ext"]
+        base = (R["t"] + node.k0 >= node.next_atk) & ((R["cond"] & ej.COND_ATK) != 0)
+        gnd = (R["cond"] & ej.COND_GROUND) != 0
+        done = {1: np.zeros(len(R["t"]), bool), -1: np.zeros(len(R["t"]), bool)}
+        for dc in (1, 2, 4):
+            c = node.k0 + R["t"] + 1 + dc
+            bx = sbx[np.minimum(c, nb_ - 1)]
+            ok0 = base & (c < nb_) & ~np.isnan(bx[:, 0])
+            if not ok0.any():
+                continue
+            yc = np.where(gnd, R["y"], R["y"] + R["vy"] * dc / 60.0 - 0.5 * 60.0 * (dc / 60.0) ** 2)
+            ry0, ry1 = bx[:, 1] - qy1, bx[:, 3] - qy0
+            for face in (1, -1):
+                if face > 0:
+                    rx0, rx1 = bx[:, 0] - qx1, bx[:, 2] - qx0
+                    if kind == "side":
+                        rx1 = np.minimum(rx1, bx[:, 0] - sk.HALF_W - 0.1)
+                    tgt = bx[:, 0] - 0.5 * (qx0 + qx1) if kind == "side" else bx[:, 0]
+                else:
+                    rx0, rx1 = bx[:, 0] + qx0, bx[:, 2] + qx1
+                    if kind == "side":
+                        rx0 = np.maximum(rx0, bx[:, 2] + sk.HALF_W + 0.1)
+                    tgt = bx[:, 2] + 0.5 * (qx0 + qx1) if kind == "side" else bx[:, 2]
+                sel = ok0 & ~done[face] & (rx0 < rx1) & (R["x1"] >= rx0 - 0.5) & (R["x0"] <= rx1 + 0.5) & \
+                    (yc >= ry0) & (yc <= ry1)
+                done[face] |= sel
+                I = np.flatnonzero(sel)
+                if not len(I):
+                    continue
+                a_ = np.maximum(R["x0"][I], rx0[I] - 0.5)
+                b_ = np.minimum(R["x1"][I], rx1[I] + 0.5)
+                xm = np.minimum(np.maximum(tgt[I], a_), b_) if kind == "side" else 0.5 * (a_ + b_)
+                out.append((R["t"][I], R["g"][I], xm, R["y"][I], np.full(len(I), face * 10 + dc),
+                            np.abs(xm - tgt[I])))
         return out
 
     @staticmethod
@@ -2775,6 +2887,8 @@ class Searcher:
             tail[:max(dc - 1, 0)] = last & DIRS
             masks = np.concatenate([masks, [pm], tail])
             return Seg(masks, [(tp, iid)], None, f"ds@{iid}")
+        if kind in sk.SU_KINDS:
+            return self._realize_su(node, masks, tp, iid, kind, int(extra))
         d = extra
         if press.ON[0]:
             return self._realize_claw(node, masks, d, iid)
@@ -2816,6 +2930,37 @@ class Searcher:
                     self.stats["realize_ds_keep"] = self.stats.get("realize_ds_keep", 0) + 1
                 return Seg(mm, [(int(tp), iid)], None, f"ds@{iid}")
         self.stats["realize_ds_none"] = self.stats.get("realize_ds_none", 0) + 1
+        return None
+
+    def _realize_su(self, node: Node, masks: np.ndarray, tp: int, iid, kind: str, extra: int) -> Seg | None:
+        """t1 S1: the side / up slash press after the witness keys - the attack with the direction key toward the
+        target (TrySetCorrectFacing: she faces it at the swing's start; V1: every false contact of the old planner's
+        presses was a press without it) and up for the up slash, then that direction held to the expected contact
+        (dc - 1 frames; the old planner's chase follows the knockback the same way) and no key to the swing's end -
+        (a) the jump / dash keys let go on the press frame, else (b) the witness's held jump / dash kept on it; the
+        variant whose kin state STARTS that slash facing the target at the press (press.su_start; not out of the dash
+        combo window or the umbrella's antic / inflate). None: neither does (the witness is rejected)."""
+        if not press.ON[0]:
+            return None
+        face = 1 if extra > 0 else -1
+        dc = abs(int(extra)) % 10
+        dk = km.B_RIGHT if face > 0 else km.B_LEFT
+        last = int(masks[-1]) if len(masks) else 0
+        t = int(tp) + 1
+        pm = km.B_ATTACK | dk | (km.B_UP if kind == "up" else 0)
+        tail = np.zeros(7, np.int64)
+        tail[:max(dc - 1, 0)] = dk
+        held = last & (km.B_JUMP | km.B_DASH)
+        cands = [pm] + ([pm | held] if held else [])
+        for pm_ in cands:
+            mm = np.concatenate([masks, [pm_], tail]).astype(np.int64)
+            st = press.trace_su(self.W, node.S, mm)
+            t2, kd, f2 = press.su_start(st, t)
+            if kd == kind and f2 == face and t2 == t:
+                if pm_ != pm:
+                    self.stats["realize_su_keep"] = self.stats.get("realize_su_keep", 0) + 1
+                return Seg(mm, [(int(tp), iid)], None, f"{kind[0]}s@{iid}")
+        self.stats["realize_su_none"] = self.stats.get("realize_su_none", 0) + 1
         return None
 
     def _realize_claw(self, node: Node, masks: np.ndarray, d: int, iid) -> Seg | None:
@@ -2940,7 +3085,7 @@ class Searcher:
         nx = 0
         if rep is not None and rep.tr.contacts:
             pred = self._node_pred(rep, ()) or ev.pred
-            nx = max([kc for (kc, _, kd) in rep.tr.contacts if kd == "down"], default=-99) + sk.SLASH_NEXT_F - 3
+            nx = _next_atk(rep.tr.contacts)
         nd = Node(Plan([Seg(pre.copy(), list(prefix.dsl), None, "pre")], "prim"), n, S, pred, None, 0, max(nx, 0),
                   claw_ctrl=cc)
         nd.noop_ev = ev
@@ -3061,7 +3206,7 @@ class Searcher:
         pred = self._node_pred(rep, tag)
         if pred is None:
             return None
-        nx_atk = max([kc for (kc, _, kd) in tr.contacts if kd == "down"], default=-99) + sk.SLASH_NEXT_F - 3
+        nx_atk = _next_atk(tr.contacts)
         nd = Node(plan, tr.end, st[0], pred, None, depth, nx_atk, tag=tag)
         if tag:
             nd.start = (dict(getattr(rep, "fixed", {}) or {}), getattr(rep, "cons", None),

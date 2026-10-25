@@ -23,7 +23,17 @@ What a strike does, from her exact kin_jit state at the press, against one predi
                not hurt from the dash (SetDamageHeroAndRecord) through control + 12 (M4a live: its first contact
                attempt at the Harpoon FSM's Idle + 1 = control + 13 / 14, 17 / 20 + 2 / 20 overlaps across it; the
                real damage the same); its attacks do. The enemy sees a 'claw' hit (4 damage) at the needle's hit.
-  (side / up slashes: not in this version - a missing primitive for the acceptance table when a move needs one)
+  SIDE / UP    (t1 S1; search.Cfg.prims 'side' / 'up', default off) the Wanderer's side slash (its normal / alternate
+  SLASH        polygons) and up slash from the crest's attack table (knowledge/.../attacks/wanderer.json, the polygons
+               the old planner's kernel uses: ssbot.knowledge.attack_shapes), placed at her box centre (the table's
+               frame) and mirrored by her facing at the swing's start; the contact is the first frame of start + 1 ..
+               start + 7 (the table's live frames) where the polygon(s) meet the target's ROBUST body box (shrunk by
+               press.SHRINK); a turn after the attack recovery cancels the swing (kin ATTACKING off). The press is
+               credited only where her kin state starts that slash (press.su_start). On a hit: her nail recoil away
+               from it (kin EV_RECOIL_L / R: 3.75 u/s for 8 steps) / the up slash's RecoilDown (EV_RECOIL_DOWN); the
+               enemy sees a 'side' (10 damage; the Clapper's Recoil push, clapper.RECOIL_*) / 'up' hit. No clash /
+               tink: the Clapper has no TINK collider (every collider parry 4; clash.json: 0 clashes) and its hammers
+               let a slash pass.
 
 WINDOWS (bound to the enemy): per branch, Clapper and frame the press regions in her box-centre space (u) that the
 strike needs - the down slash's (the Minkowski box of the robust body and the slash polygons' extent, at the contact
@@ -267,6 +277,139 @@ def dslash_region(box, face: int | None = None) -> tuple[float, float, float, fl
         qx0, qx1 = float(q[:, 0].min()), float(q[:, 0].max())
     qy0, qy1 = -2.676, -0.368
     return (box[0] - qx1, box[2] - qx0, box[1] - qy1 - CTR_DY, box[3] - qy0 - CTR_DY)
+
+
+# ---- the side and up slashes (t1 S1; search.Cfg.prims 'side' / 'up') ----------------------------------------------
+
+SU_KINDS = ("side", "up")
+SU_DMG = cm.NAIL_DMG               # 10 (the recordings: side 10.1 mean, the same as the down slash)
+SU_SLOTS = {"side": ("normal", "alt"), "up": ("up",)}
+_SU: dict = {}
+
+
+def _su_table() -> dict:
+    """The Wanderer's side / up slash polygons (each slot's polygons, relative to her box centre, facing +1) and their
+    live frames (the attack table: knowledge/1.0.30000/attacks/wanderer.json - the old planner's kernel shapes)."""
+    if not _SU:
+        from ssbot.knowledge.attack_shapes import AttackTable
+        tab = AttackTable.load("Wanderer")
+        for kind, slots in SU_SLOTS.items():
+            _SU[kind] = tuple(tuple(np.ascontiguousarray(np.asarray(p, float)) for p in tab[s].polys) for s in slots)
+            fr = tab[slots[0]].frames
+            _SU[kind + ":frames"] = (int(fr[0]), int(fr[1])) if fr else (1, 7)
+            v = np.concatenate([np.concatenate(tab[s].polys) for s in slots])
+            _SU[kind + ":ext"] = (float(v[:, 0].min()), float(v[:, 0].max()), float(v[:, 1].min()), float(v[:, 1].max()))
+    return _SU
+
+
+def su_active(kind: str) -> tuple[int, int]:
+    """(a, b): the slash's collider is on in frames start + a .. start + b (the table's live frames: (1, 7))."""
+    return _su_table()[kind + ":frames"]
+
+
+def su_polys(kind: str, face: int) -> tuple:
+    """Per slot (side: normal, alternate; up: one) its polygons relative to her box centre, mirrored by her facing."""
+    t = _su_table()[kind]
+    if face >= 0:
+        return t
+    return tuple(tuple(p * np.array([-1.0, 1.0]) for p in slot) for slot in t)
+
+
+def su_contact(cen: np.ndarray, face: int, ts: int, boxes: np.ndarray, kind: str, shrink: float = 0.0,
+               alive: np.ndarray | None = None, c_min: int | None = None, both: bool = True,
+               steps: np.ndarray | None = None) -> int:
+    """The first frame c in ts + a .. ts + b (su_active) where the slash of `kind` started at rollout index ts, its
+    polygons placed at her box centre cen[c] ([n, 2]) with her facing at the start, meets the robust box boxes[c]
+    ([T, 4], NaN rows = none) shrunk by `shrink` on every side - the side slash's both alternations (both=True: the
+    later of their first contacts - the alternation is not tracked, as the down slash's) or the first slot only; -1:
+    none. alive[c] False (the swing cancelled: a turn after its recovery, kin ATTACKING off) ends the look; c_min: the
+    frames before it are not looked at (a swing carried into a plan's start)."""
+    a, b = su_active(kind)
+    slots = su_polys(kind, face)
+    if not both:
+        slots = slots[:1]
+    n = len(cen)
+    first = [-1] * len(slots)
+    c0 = ts + a if c_min is None else max(ts + a, int(c_min))
+    for c in range(c0, min(ts + b, n - 1) + 1):
+        if alive is not None and c < len(alive) and not alive[c]:
+            break
+        if c >= len(boxes) or np.isnan(boxes[c, 0]):
+            continue
+        if steps is not None and c < len(steps) and steps[c] <= 0:
+            continue                       # (the trigger meets the body in a physics step: none in this frame)
+        for i, polys in enumerate(slots):
+            if first[i] < 0 and any(_poly_box(p + cen[c], boxes[c], shrink) for p in polys):
+                first[i] = c
+        if all(f >= 0 for f in first):
+            return max(first)
+    return -1
+
+
+def su_boxes(br: cm.Branch, iid: int, T: int | None = None) -> np.ndarray:
+    """[T + 1, 4] the side / up slash's target box per frame: robust_boxes' intersection over the records drawn at the
+    frame, each record's box in the SHAPE of the record of the frame before at its own position (brnum.su_rows: the
+    physics step of frame c meets the Clapper's collider as the previous frame's animation left it, moved to its
+    position at c - V1 on 7,000 recorded presses: precision 1.000 with the direction key at the press, the contact
+    frame exact in 97 %; the box of frame c itself put contacts a frame early / late). NaN: none. Cached."""
+    cache = getattr(br, "_su", None)
+    if cache is None:
+        cache = {}
+        try:
+            br._su = cache
+        except AttributeError:
+            pass
+    if iid in cache:
+        return cache[iid]
+    T = br.T if T is None else T
+    lo = np.full((T + 1, 4), np.nan)
+    from ssbot.map2 import brnum
+    if brnum.ON[0]:
+        A = brnum.su_rows(br, iid, T)
+    else:
+        rr = list(br.recs.get(iid, ()))
+        last = {}
+        for i, r in enumerate(rr):
+            last[int(r[0])] = i
+        rows = []
+        for i, r in enumerate(rr):
+            k0, a, b = r[0], r[1], r[2]
+            k_lo, k_hi = max(k0 + a, 0), min(k0 + b, T)
+            if k_lo > k_hi:
+                continue
+            p = rr[last.get(int(k0) - 1, i)]
+            bx = None
+            if _rec_box(r, br.K) is not None and _rec_box(p, br.K) is not None:
+                bxp = br.K.box(p[3], p[4])
+                xa, xb = r[5] + r[7] * bxp[0], r[5] + r[7] * bxp[1]
+                bx = (min(xa, xb), r[6] + bxp[2], max(xa, xb), r[6] + bxp[3])
+            rows.append((k_lo, k_hi) + ((np.inf, np.inf, -np.inf, -np.inf) if bx is None else bx))
+        A = np.asarray(rows, float) if rows else np.zeros((0, 6))
+    if len(A):
+        n = (A[:, 1] - A[:, 0] + 1).astype(np.int64)
+        idx = np.repeat(A[:, 0].astype(np.int64), n) + (np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n))
+        B = np.repeat(A[:, 2:], n, axis=0)
+        x0 = np.full(T + 1, -np.inf)
+        y0 = np.full(T + 1, -np.inf)
+        x1 = np.full(T + 1, np.inf)
+        y1 = np.full(T + 1, np.inf)
+        np.maximum.at(x0, idx, B[:, 0])
+        np.maximum.at(y0, idx, B[:, 1])
+        np.minimum.at(x1, idx, B[:, 2])
+        np.minimum.at(y1, idx, B[:, 3])
+        ok = (x0 < x1) & (y0 < y1) & np.isfinite(x0) & np.isfinite(x1)
+        lo[ok, 0], lo[ok, 1], lo[ok, 2], lo[ok, 3] = x0[ok], y0[ok], x1[ok], y1[ok]
+    cache[iid] = lo
+    return lo
+
+
+def su_region(box, kind: str, face: int) -> tuple[float, float, float, float]:
+    """Her box-centre region (x0, x1, y0, y1) at the contact frame from which the slash of `kind` facing `face` can
+    meet the body box (x0, y0, x1, y1): the box minus the polygons' extent (both alternations)."""
+    qx0, qx1, qy0, qy1 = _su_table()[kind + ":ext"]
+    if face < 0:
+        qx0, qx1 = -qx1, -qx0
+    return (box[0] - qx1, box[2] - qx0, box[1] - qy1, box[3] - qy0)
 
 
 # ---- the hooked Clawline -------------------------------------------------------------------------------------------
