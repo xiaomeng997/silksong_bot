@@ -273,6 +273,30 @@ def test_tier1_plays_an_outcome_only_to_its_committed_end(W):
             assert whys == ["t1"] * 5 and not c.get("t1_end_kc_dev")
 
 
+def test_tier1_plays_on_past_kc_without_a_press_while_the_collision_is_far(W):
+    """t1_past (with t1_fix): past kc, while the collision kcol is >= t1_past frames ahead, the outcome's keys are
+    played without a new press (no attack / Clawline) - the bridge carries the same keys; then the plan ends."""
+    ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, True)
+    for o in lp.outs:
+        o.kc, o.kcol, o.why = 4, 16, "dev"
+        o.cmds = np.asarray(o.cmds, np.int64).copy()
+        o.cmds[5:9] |= A
+    out_q.put(lp)
+    sent, whys = [], []
+    for k in range(1, 12):
+        m = ctl.pre(100 + k, 100 + k, raw, sit.S, inf, hold)
+        whys.append(ctl.row.get("why"))
+        if m is not None:
+            sent.append((102 + k - int(lp.t_a), int(m)))
+            if k == 3:
+                br, _ = ctl._t1_bridge(100 + k, 10)
+                assert br and all(not (b & A) for b in br) and len(br) <= 8 - (100 + k + 3 - int(lp.t_a)) + 1
+        ctl.post(100 + k, 100 + k, raw, sit.S, inf, hold, 0 if m is None else m, "m2" if m is not None else "plan",
+                 None, False)
+    assert all(not (m & A) for (r, m) in sent if r > 4) and max(r for (r, _) in sent) == 8, (sent, whys)
+    assert ctl.stats()["counts"].get("ticks_t1_past", 0) >= 3
+
+
 def test_tier1_bridge_capped_at_kc(W):
     """Finding 9: _t1_bridge extended to the cmds' end - past the outcomes' kc. t1_fix: capped there."""
     for fix in (False, True):
@@ -280,7 +304,7 @@ def test_tier1_bridge_capped_at_kc(W):
         out_q.put(lp)
         ctl.pre(101, 101, raw, sit.S, inf, hold)
         for o in lp.outs:
-            o.kc = 8
+            o.kc, o.kcol = 8, 12                      # (the collision near: t1_past's limit is kc)
         br, _ = ctl._t1_bridge(101, 10)
         r = 101 + 3 - int(lp.t_a)
         assert (len(br) <= 8 - r + 1) == fix or len(lp.outs[0].cmds) <= 9

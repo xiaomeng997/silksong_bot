@@ -414,6 +414,11 @@ class LiveCfg:
     #                                what is left of it), tier 1 holds the keys through its own Clawline's block, the
     #                                least-risk order counts outcomes without an exit as hits (tier1.T1_FIX), the
     #                                runs with no consistent outcome audited too
+    t1_past: int = 8               # (with t1_fix) past an outcome's committed end kc its keys are played on WITHOUT a
+    #                                new press (no attack, no Clawline) while its collision kcol is at least this many
+    #                                frames ahead (the next decision's latency) - the keys a reveal at kc - lag leaves
+    #                                her until a newer plan applies; the bridge carries exactly those keys; 0: the plan
+    #                                ends at kc
     t1_aim: bool = False           # tier 1's escape tail checked against the Clappers re-predicted under the tail
     #                                (their Jump Aim / Close-Far / Slam Range follow her real path - tier1.T1_AIM)
     t1_lazy: bool = False          # a tier-1 plan's outcomes travel as one pickled blob (LivePlan.lazy_outs), unpickled
@@ -472,6 +477,7 @@ def set_switches(cfg: LiveCfg) -> None:
     cm.UP_RECOIL[0] = ms.SU_FIX[0]
     from ssbot.map2 import tier1 as _t1m
     _t1m.T1_FIX[0] = bool(getattr(cfg, "t1_fix", False))
+    GEO_TO_COL[0] = bool(getattr(cfg, "t1_fix", False))       # (the past-kc keys audited to their limit)
     _t1m.T1_AIM[0] = bool(getattr(cfg, "t1_aim", False))
 
 
@@ -713,6 +719,27 @@ class OutData:
 
 
 LAZY_STATS = {"unpacked": 0}
+GEO_TO_COL = [False]   # t1 S3 (t1_fix): an outcome's danger geometry kept to its collision kcol (the audit of the keys
+#                        played past kc - LiveCfg.t1_past)
+STRIP = km.B_ATTACK | M_CLAW   # t1 S3 (t1_past): the press bits an outcome's keys lose past its committed end
+
+
+def t1_lim(o, past: int) -> int:
+    """t1 S3 (t1_fix): the last frame of the outcome's keys tier 1 plays - kc; with past > 0 and a collision kcol at
+    least past frames after it, kcol - past (the keys after kc without a new press: t1_key); an outcome without a
+    collision ahead (kcol None): its keys' end."""
+    kc = int(o.kc)
+    if past <= 0:
+        return kc
+    if o.kcol is None:
+        return max(kc, len(o.cmds) - 1)
+    return max(kc, int(o.kcol) - int(past))
+
+
+def t1_key(o, r: int) -> int:
+    """t1 S3: the outcome's key for frame r - past its kc without a new press (STRIP)."""
+    c = int(o.cmds[r])
+    return c & ~STRIP if r > int(o.kc) else c
 
 
 def _geo_cut(br, kc: int, margins: bool) -> tuple:
@@ -853,13 +880,15 @@ def build_outs(ev, margins: bool = True, all_outs: bool = False, light: bool = F
             if ms.SU_FIX[0] and getattr(tr, "susw", None):
                 d.susw = list(tr.susw)
                 d.cen = 0.5 * (np.asarray(tr.box[:kc + 1, :2], float) + np.asarray(tr.box[:kc + 1, 2:], float))
-        key = (id(o.branch), kc)
+        kcg_ = getattr(o, "k_col", None) if (GEO_TO_COL[0] and dtl is None and kc < tr.end) else None
+        kg = kc if kcg_ is None else max(kc, int(kcg_))
+        key = (id(o.branch), kg)
         if light:
             d.geo, d.rare = None, {}                    # (t1 S2: the tier-1 plan's execution needs no geometry)
         else:
             if key not in gcache:
                 # (E2 (c): GEO_EXT frames more - the swing hold's check runs past a plan's end inside a swing)
-                gcache[key] = _geo_cut(o.branch, kc + GEO_EXT[0], margins)
+                gcache[key] = _geo_cut(o.branch, kg + GEO_EXT[0], margins)
             d.geo, d.rare = gcache[key]
         d.rare_k = np.array(sorted(d.rare), np.int64)
         d.label = o.branch.label() if hasattr(o.branch, "label") else ""
@@ -1911,7 +1940,8 @@ def hold_sim(W, lp: LivePlan, idx: list, sb: int, Sb, hold_b: tuple, lat_b: int,
 
 
 def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: tuple, lat_s: int, idx: list,
-              k_last: int, midswing: bool = False, iids=(), swc: dict | None = None, mark_kc: bool = False) -> list:
+              k_last: int, midswing: bool = False, iids=(), swc: dict | None = None, mark_kc: bool = False,
+              past: int = 0) -> list:
     """M4d2 (LiveCfg.audit_runs, the smoke's safety audit): a control run's keys AS SENT - the keys in flight at its
     commit and map2's keys after it (cmds, frames s + 1 .. of the plan; the plan's own commands after the run complete
     its segments) - re-simulated from the commit's state S0 in each outcome idx still possible at the run's end and
@@ -1933,9 +1963,10 @@ def audit_run(W, lp: LivePlan, s: int, S0: np.ndarray, cmds: np.ndarray, hold: t
                          claw_lock=int(getattr(lp, "claw_lock", -99)) - s, tops_fn=_tops_fn(o, s),
                          swing=_swing_for(plan, S0, tuple(iids), float(W.params.frame_time), midswing, swc),
                          su_fn=_su_fn(o, s))
-        kc = _first_collision_out(o, tr, s, min(int(k_last), int(o.kc)))
+        lim = t1_lim(o, past) if mark_kc else int(o.kc)
+        kc = _first_collision_out(o, tr, s, min(int(k_last), lim))
         out.append((int(i), None if kc is None else int(kc), "past kc" if (kc is None and mark_kc and
-                                                                           int(k_last) > int(o.kc)) else ""))
+                                                                           int(k_last) > lim) else ""))
     return out
 
 
@@ -3724,7 +3755,8 @@ class Map2Controller:
             if r_ <= len(pre):
                 if int(pre[r_ - 1]) & ~COG != v:
                     return False
-            elif not any(r_ < len(o.cmds) and int(o.cmds[r_]) & ~COG == v for o in lp.outs):
+            elif not any(r_ < len(o.cmds) and (int(o.cmds[r_]) & ~COG == v or
+                                               (self.cfg.t1_fix and t1_key(o, r_) & ~COG == v)) for o in lp.outs):
                 return False
         return True
 
@@ -3846,7 +3878,8 @@ class Map2Controller:
             # t1 S3 (the verifiers' finding): an outcome is played only to its committed end kc - a possible outcome
             # whose kc passed ends the plan (tier 2's M4d rule: its keys after kc are the ones the search allowed only
             # by deviating there); none consistent: only the outcomes still within their kc
-            ended = [i for i in cons if int(outs[i].kc) < r]
+            past_ = int(cfg.t1_past)
+            ended = [i for i in cons if t1_lim(outs[i], past_) < r]
             if ended:
                 o_ = outs[ended[0]]
                 row["t1_ended"] = [lp.pid, int(o_.kc), o_.why, o_.kcol, len(cons)]
@@ -3858,7 +3891,7 @@ class Map2Controller:
             alive = [i for i in cons if r < len(outs[i].cmds)]
             incons = not alive
             if not alive:
-                alive = [i for i in range(len(outs)) if r <= int(outs[i].kc) and r < len(outs[i].cmds)]
+                alive = [i for i in range(len(outs)) if r <= t1_lim(outs[i], past_) and r < len(outs[i].cmds)]
         else:
             alive = [i for i in cons if r < len(outs[i].cmds)]
             incons = not alive
@@ -3870,8 +3903,14 @@ class Map2Controller:
             self._t1_end("exhausted")
             return None
         best = max(alive, key=lambda i: outs[i].p)
-        keys = [int(outs[i].cmds[r]) for i in alive]
-        mask = int(outs[best].cmds[r])
+        if cfg.t1_fix:
+            keys = [t1_key(outs[i], r) for i in alive]          # (t1 S3: past kc without a new press)
+            mask = t1_key(outs[best], r)
+            if r > int(outs[best].kc):
+                self._inc("ticks_t1_past")
+        else:
+            keys = [int(outs[i].cmds[r]) for i in alive]
+            mask = int(outs[best].cmds[r])
         if any(k != mask for k in keys):
             prev = self._sent_at(int(f) + 1)
             mask, _ = _merge_keys(keys, 0 if prev is None else prev)
@@ -3906,7 +3945,8 @@ class Map2Controller:
             r_ = k - int(lp.t_a)
             if held is None:
                 continue
-            want = {int(o.cmds[r_]) & ~COG for o in lp.outs if r_ < len(o.cmds)} if r_ > len(lp.cmds_pre) else                 {int(lp.cmds_pre[r_ - 1]) & ~COG}
+            want = {(t1_key(o, r_) if self.cfg.t1_fix else int(o.cmds[r_])) & ~COG for o in lp.outs
+                    if r_ < len(o.cmds)} if r_ > len(lp.cmds_pre) else                 {int(lp.cmds_pre[r_ - 1]) & ~COG}
             if any(w != int(held) & ~COG for w in want):
                 new.append(k)
         if not new:
@@ -3938,11 +3978,15 @@ class Map2Controller:
         idx, best = self.t1_exe[1], self.t1_exe[2]
         r = int(f) + 3 - int(lp.t_a)
         bridge = []
-        k_hi = min(int(lp.outs[i].kc) for i in idx) if (self.cfg.t1_fix and idx) else 10 ** 9   # t1 S3: to kc
+        fix = bool(self.cfg.t1_fix)
+        # (t1 S3: to the outcomes' limit - kc, past it the keys without a new press while the collision is far: the
+        # keys tier 1 will send)
+        k_hi = min(t1_lim(lp.outs[i], int(self.cfg.t1_past)) for i in idx) if (fix and idx) else 10 ** 9
         for k in range(r, r + int(lead)):
             if k > k_hi:
                 break
-            vals = {int(lp.outs[i].cmds[k]) for i in idx if k < len(lp.outs[i].cmds)}
+            vals = {(t1_key(lp.outs[i], k) if fix else int(lp.outs[i].cmds[k])) for i in idx
+                    if k < len(lp.outs[i].cmds)}
             if len(vals) != 1:
                 break
             c = vals.pop()
@@ -4072,10 +4116,12 @@ class Map2Controller:
                 fo_r, S_r, inf_r, hold_r, lat_r = rb
                 cm_r = list(inf_r) + [int(self._sent_at(k) or 0) for k in range(int(lp._rep_k), k1 + 1)]
                 res = audit_run(self.W, lp, int(fo_r - lp.t_a), S_r, np.asarray(cm_r, np.int64), hold_r, int(lat_r),
-                                list(idx), int(k1 - lp.t_a), **self._msw_kw(), mark_kc=bool(self.cfg.t1_fix))
+                                list(idx), int(k1 - lp.t_a), **self._msw_kw(), mark_kc=bool(self.cfg.t1_fix),
+                                past=int(self.cfg.t1_past))
             else:
                 res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a), list(idx),
                                 int(k1 - lp.t_a), **self._msw_kw(), mark_kc=bool(self.cfg.t1_fix),
+                                past=int(self.cfg.t1_past),
                                 **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
             sfx_ = "_incons" if incons_ else ""
             self._inc("audit_t1_runs" + sfx_)
