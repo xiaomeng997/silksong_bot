@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pickle
 import queue
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -433,3 +434,32 @@ def test_switches_default_off():
     assert lv.GEO_EXT[0] > 0
     assert lv.search_kw(lv.LiveCfg(baseline=True)) == {"baseline": True}
     assert press.ON[0]
+
+
+def test_steering_toward_the_path_inside_the_tube(W, p2):
+    """LiveCfg.steer (with the tube): her x off the reference path by more than steer_dx while inside the tube - the
+    frame's left / right toward the path; no change with a press within +-2 frames or her on the path (P2's plan:
+    its jump-left phase)."""
+    fx, sit, e = p2
+    lv.set_switches(lv.LiveCfg())
+    lp = _p2_plan(fx, e)
+    o = max(lp.outs, key=lambda o_: o_.p)
+    i = lp.outs.index(o)
+    ctl = lv.Map2Controller(cfg=lv.LiveCfg(prio="as", tube=True, steer=True))
+    ctl.ctrl, ctl.ctrl_pos = lp, {}
+    ctl._tube_kinds = Counter({"tube": 1})
+    c = o.cmds
+    quiet = [n for n in range(1, min(o.kc, len(c) - 3) - 1)
+             if all(((int(c[k]) ^ int(c[k - 1])) & ~lv.DIRS_K) == 0 for k in range(max(n, 1), min(n + 5, len(c))))
+             and not any(n <= int(k_) <= n + 14 for (k_, _, _) in o.contacts) and not o.in_block(n + 2)]
+    if not quiet:
+        pytest.skip("no frame without a press nearby")
+    n = quiet[0]
+    row: dict = {}
+    m0 = int(c[n + 2]) & ~lv.DIRS_K
+    her_l = (float(o.pos[n, 0]) - 0.3, float(o.pos[n, 1]))
+    assert ctl._steer(lp, [i], i, n, n + 2, her_l, m0, row) & km.B_RIGHT       # left of the path: steer right
+    her_r = (float(o.pos[n, 0]) + 0.3, float(o.pos[n, 1]))
+    assert ctl._steer(lp, [i], i, n, n + 2, her_r, m0, row) & km.B_LEFT
+    her_0 = (float(o.pos[n, 0]) + 0.05, float(o.pos[n, 1]))
+    assert ctl._steer(lp, [i], i, n, n + 2, her_0, m0, row) == m0              # within steer_dx: the plan's keys
