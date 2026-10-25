@@ -15744,3 +15744,178 @@ of it runs (the identity above).
 Tier 1 alone: `SSBOT_FORUM_MAP2_SET=<E3's recommended set>,prims_su=1,tier1=1,parts=0` (t1_workers 2, t1_cap 0.08,
 t1_lead 10 at their defaults) + `t1_h=36` for the 36-frame look-ahead (the measured better one above); with the deep
 search: `...,prims_su=1,tier1=1,parts=2,t1_workers=1,t2_tail=1`. Not frozen; the next live run is the person's decision.
+
+## Task map2 - fix together (t1) - stage S3: the verifiers' 15 findings on S1 / S2 (offline; each checked, the confirmed ones fixed behind switches default off with tests - off: S1 / S2 bit-identical; the identity, S1's press validation, S2's smokes and the 19 hit situations re-run paired; a frozen checkout with the recommended set warmed by a strict smoke) (branch worktree-wf_f1846551-5f9-1, 2026-10-25; forum.md §113)
+
+The task (the person's decision of 2026-10-25 ~07:10 PDT: fix together - side / up slashes, plans that carry their
+follow-up and an escape tail, the per-frame tier 1, map2 never hands the keys to the old planner in danger; offline only,
+the person decides on the next live run): stage S3 of the t1 workflow - the verifiers' findings (6 on S1's slashes, 9 on
+S2's tier 1) checked one by one, the confirmed ones fixed with tests, the measurements re-run, the checkout frozen. No game
+process, instance or oracle was touched; nothing merged, nothing pushed. Data `C:\ssbot\data\m2_play\map2\t1\s3`
+(`camp.log`; `ident\`, `v1\` (V1 re-run: `V1_REPORT.txt`), `r7c\`, `hits_rec\` (the final code; `hits\` / `hits_p1\` the
+t1_past variants, `hits_5892cff\` the first code), `smoke\` (the final campaign: t1h36 / s3 / s3na / s3p1 / s3t12 at
+9b627b3 - the strip-press past rule -, rec / fx / su at b52a470), `smoke_5892cff\`, `smoke_e5cab9f\`, `extra_smoke.txt`,
+`accept\` - `acc_deep.txt`, `acc_t1.txt` -, `smoke_frozen_e5cab9f\` (superseded), `smoke_frozen_b52a470\`, `tests\`);
+scripts `t1\s3\scripts\` (s3_camp.sh / s3_camp2.sh / s3_camp3.sh / s3_acc_camp.sh, s3_hits.py (+ _dbg), s3_hits_sum.py,
+s3_smoke_extra.py, s3_tails.py, s3_acc.py, r7c_double.py, v1_presses_s3.py, v1_report_s3.py); the verifiers' scripts
+`t1\review_slashes\`, `t1\review_tier1\`.
+
+### Result
+
+- **None of the 15 findings refuted; 13 fixed, 2 fixed but kept off** (su_band, t1_aim: small measured value against their
+  cost). One proposed fix refuted: shipping tier-1 plans without geometry when the audit is off (F15's sketch) would break
+  the late check and the repair, which re-simulate against it - the outcomes are shipped as one lazily unpickled blob
+  instead. The switches: `su_fix` (F1 - F5), `su_band` (F6), `t1_fix` + `t1_past` (F7 - F11, F14; F8 the audit),
+  `t1_aim` (F12), `t1_lazy` (F15); F13 is the measurement (re-run).
+- **The handover in danger, measured (the 19 live hit situations at the measured tier-1 latency 8 f, `hits_rec\summary.txt`)**:
+  the emulated path hit by the live hit's frame + 2: S2's set (t1h36) 5 / 19, + su_fix 5, + t1_fix 1, the recommended set
+  (both) 2 - within 30 frames 7 / 7 / 3 / 5; map2's keys at the live hit frame 17 / 17 / 16 / 16 (the deep search with E3's
+  set: 6 / 8, keys 7). The first t1_fix (5892cff: end the plan at kc) handed the keys to the fallback at the dev point:
+  keys at 12 / 19 hit frames, share w7 0.916 -> 0.862 - refined twice (9b627b3, b52a470; below).
+- **The smokes (strict x 3, paired, one campaign at b52a470; t1h36 = S2's recommended set)**: share w7 0.921 (t1h36) /
+  0.921 (su) / 0.919 (fx) / 0.914 (rec); w13 0.636 / 0.626 / 0.627 / 0.582 (w13 varies 0.04 - 0.11 run to run); open rec
+  0.919 / 0.629 (t1h36 0.938 / 0.708, one run each); planned contacts played w7 45 / 44 / 37 / 51; proven-safe tier-1
+  collisions in the audit 0 + 1 (t1h36: w7 + w13) / 0 / 0 / 0, and in the runs the S2 audit skipped (no consistent outcome
+  at their end, now audited) fx 0 / rec 1 + 1 (one a skipped tick's slip the late check then dropped; one played with no
+  outcome consistent - the most probable outcome's keys collide in four other outcomes); keys past an audited outcome's
+  limit 0 everywhere. The bot thread: _drain max 73 - 75 ms on a w13 tick with S2's code, <= 4.5 ms with t1_lazy (p99
+  4.4 -> 1.3 ms).
+- **Acceptance (`accept\acc_deep.txt`, `acc_t1.txt`)**: the deep search 1 s (split 2, as S1): found 170 -> 171 with su_fix,
+  the chosen plans' expected hits 1.639 -> 1.578 (S1 credited later contacts on a Clapper its side hit had pushed 0.48 u -
+  the over-credit removed). Tier 1 alone 0.08 s: 129 (none, = S2) / 123 (su_fix) / 129 (t1_aim) / 125 (t1_fix's risk order)
+  / 120 (all three) - one run each.
+- **Identity**: every switch off: the search's digests 130 / 130 + 106 / 106 = E1's base (`ident\cmp_off*.txt`); V1's
+  report re-run at 5892cff byte-identical (strike / press unchanged); the map2 / M4 / t1 suites 165 passed
+  (`tests\tests_final.log`; test_t1_s3.py 16 tests, 17 cases).
+- **Frozen checkout `C:\ssbot\live_1v1_b52a470`** (1v1_freeze.ps1 -rev b52a470; no new file in the knowledge store - all
+  235 already there, hard links only), warmed by a strict smoke from it with the recommended set (`smoke_frozen_b52a470\`:
+  w7a 0.933, w13a 0.538 of the engaged ticks, 0 tracebacks, the audit 0 collisions of proven-safe tier-1 runs in 157
+  audited + 33 with no consistent outcome; the workers loaded the checkout's own table library).
+  `C:\ssbot\live_1v1_e5cab9f` (frozen before the last fix: the strip-press past rule) is superseded - not for a live run.
+- Nothing ran live; nothing merged or pushed.
+
+### The findings, one by one
+
+1. **(slashes, search.py _hit_matters) a side hit not re-predicted** - CONFIRMED (code: only Idle / Walk / pre-Idle / a kill
+   re-predict; clapper.py recoils a side hit 0.48 u in every state; the verifiers' r9: 223 lost later contacts in safe
+   outcomes). FIXED (su_fix): a side / up hit always re-predicts. Test; deep acceptance hits 1.639 -> 1.578, found 170 ->
+   171. (r9's own count is 0 by construction once every side hit re-predicts.)
+2. **(slashes, _realize_su) a left-facing window's dc decoded as 9 / 8 / 6** - CONFIRMED (reproduced: Clapper on her left,
+   L held 7 frames after the press, the mirror 0 - 3). FIXED (su_fix): dc = extra - 10 x face. Test on the mirrored pair.
+3. **(slashes, clapper.py / clapper_jit) an up hit with no recoil** - CONFIRMED (r4: 32 UpSlash hits in Air, +0.06 u per
+   physics step to 0.48 u; on the ground ~0). FIXED (su_fix -> clapper.UP_RECOIL): an up hit in Jump / Air pushes the body
+   up 0.06 u per physics step for 8 steps (rec_dir 2; clamped under the roof; none once landed), both models. Test (py and
+   jit: +0.40 - 0.49 u, x unchanged).
+4. **(slashes, simulate) the swing tested on its own target only** - CONFIRMED (r3: 34 of 7,700 recorded swings hit two;
+   r7: 1.5 p-weighted chosen side contacts). FIXED (su_fix): the swing's polygons tested on every Clapper's su_boxes (the
+   others without the 0.05 slack - an unplanned hit is the risk), each credited ('side' / 'up' hit, re-predicted: an Idle
+   one starts its Dmg Attack in the prediction), one recoil (the first contact). r7c with su_fix (106 two-Clapper
+   situations): chosen 3.2 p-weighted other hits, all credited; tried 5,452 credited, 128 (2.3 %) still flagged by the
+   scan - not examined (the scan reads the target without slack, the credit with it: a frame apart). Test.
+5. **(slashes, live.py tube) a side / up contact ahead always dropped to the exact re-check, which refuses a side swing
+   under way** - CONFIRMED by the code (contact_kept False -> re-check -> reanchor_outcome 'slash under way'). FIXED
+   (su_fix): su_kept re-tests each side / up contact ahead with her box centres moved by her offset + drift (the swing's
+   facing, kin alive, physics steps recorded by simulate: Traj.susw / OutData.susw, cen), +- eps as contact_kept. Unit
+   test (0.03 u kept, 1.5 u not). NOT MEASURABLE OFFLINE: the strict / open replays never test her offset (hero_on off) -
+   tier 2's tube only (tier 1 has no tube); live decides. The carry of a side swing into a re-simulation (the other fix
+   sketched) not built: the 'out_ct' timing case still re-checks and drops.
+6. **(slashes, simulate) a predicted miss inside the game's slack** - CONFIRMED as possible (r8: 626 of 12,642 tried
+   predicted-miss presses meet the target at shrink 0; chosen plans 0 of 3.0). BUILT behind su_band (u; default 0): a miss
+   whose polygons meet the target grown by su_band is a forced collision 'su_band'. Test. NOT RECOMMENDED now: its cost
+   (outcomes made unsafe) not measured, its value in the chosen plans 0. The kin alternation instead of 'both': V1 measured
+   no difference at 1e-3 - not changed.
+7. **(tier 1, _t1_tick) an outcome played past its committed end kc** - CONFIRMED (code; the verifiers' Clawline into Slam
+   0). FIXED (t1_fix + t1_past): an outcome is played to t1_lim - kc, or, with t1_past > 0, its OWN keys to t1_past frames
+   before its collision kcol and never into a Clawline pressed after kc; a possible outcome past its limit ends the plan;
+   none consistent: only outcomes within their limit. The verifiers' case (kc 9, collision 14 / 17, a Clawline at kc + 1)
+   ends at kc. History: 5892cff ended every plan at kc (the 16 - 38 'dev' ends per 3 runs had their collision 19 - 66 f
+   later: the fallback took the keys at the dev point - worse); 9b627b3 played the keys past kc without presses (the
+   warm-up smoke's audit found such a run colliding before kcol on that never-simulated path); b52a470 the outcome's own
+   keys (t1_past default 1 - beat 8 in the smokes / hits). Tests.
+8. **(tier 1, _t1_end) the audit blind to runs with no consistent outcome and past kc** - CONFIRMED (S2: 18 - 40 % of runs
+   skipped). FIXED (t1_fix): such runs audited against the outcomes played ('_incons'), the geometry kept to each
+   outcome's collision (GEO_TO_COL), collisions checked to its limit, keys sent past it marked 'past kc'. Results above.
+9. **(tier 1, _t1_bridge) the bridge past kc** - CONFIRMED (code). FIXED (t1_fix): the bridge runs to the alive outcomes'
+   limit (min t1_lim) - exactly the keys tier 1 will send. Test.
+10. **(tier 1, the 'unaware' rule) newer proven-safe plans refused while the plan in hand had no consistent outcome** -
+    CONFIRMED (t1_unaware 238 vs 177 adoptions in one w7 run). FIXED (t1_fix): a plan in hand whose last tick had no
+    consistent outcome is not 'proven safe' against a newer proven-safe plan; it is valued by what is left of it (its value
+    less the contacts already played). (s3 r1: unaware 238 -> 100, adoptions 177 -> 216.) Re-anchoring CONT past the first
+    segment (the other part) not built. Test.
+11. **(tier 1) her 'no input' in tier 1's own Clawline gave the keys to the fallback** - CONFIRMED by the code (acc_c False
+    in the Harpoon clips; play needs it). FIXED (t1_fix): tier 1 plays through its own Clawline's block (an outcome it played
+    last in_block). Unit test; the replays cannot show it (the recorded hero was never in the bot's Clawline).
+12. **(tier 1, t1_tail) the tail checked against danger aimed at her end position** - CONFIRMED in mechanism, MEASURED RARE:
+    t1_aim (the tail re-checked against the Clappers re-predicted under the tailed path, E1's branch match) rejected 17 of
+    12,239 (w7) / 14 of 8,523 (w13) tail checks (0.14 / 0.16 %; no matching branch 0.46 / 0.29 %), at +6 / +16 ms tail p90 and
+    +10 ms decision p90; strikes 48 -> 40 (s3na vs s3, strict w7, noisy); the hit situations identical with and without.
+    BUILT behind t1_aim, OFF in the recommended set.
+13. **(s2_hits.py) the hit situations' headline** - CONFIRMED. Re-run at the measured latency (8 f, s3_hits.py `_lat1`) with
+    'hit by the live hit's frame + 2' as the headline (above). The valid-truth window stays a diagnostic only.
+14. **(tier 1, risk_key) no-exit outcomes ranked after a 1 % hit** - CONFIRMED (code). FIXED (t1_fix -> tier1.T1_FIX): the
+    second key is the p of every unsafe outcome (hit + no exit), then the later collision, then the hit share. Test. Its
+    effect is inside the smokes' least-risk numbers (no separate run).
+15. **(tier 1) the bot thread's real cost** - CONFIRMED (S2's code: _drain 73 - 75 ms max on a w13 tick, p99 4.4 ms; the
+    plans 150 - 310 KB p50, 390 - 890 KB p90). FIXED differently from the sketch (light plans would break the late check / repair):
+    t1_lazy - a tier-1 plan's outcomes travel as one pickled blob, unpickled on the bot thread when the plan is used
+    (LivePlan.__getattr__); _drain timed per tick ('drms'). Max <= 4.5 ms, p99 0.4 / 1.3 ms (w7 / w13).
+
+### What was built (commits 5892cff, 9b627b3, e5cab9f, b52a470; `search.py`, `clapper.py`, `clapper_jit.py`, `live.py`, `tier1.py`, `tools/m3_accept.py`; `tests/test_t1_s3.py`)
+
+- `LiveCfg.su_fix` (search.SU_FIX, clapper.UP_RECOIL), `su_band` (search.SU_BAND), `t1_fix` (tier1.T1_FIX, live.GEO_TO_COL),
+  `t1_past` (default 1; with t1_fix), `t1_aim` (tier1.T1_AIM), `t1_lazy`; set_switches sets the module switches in the
+  workers and the bot's thread. Every one default off; off, the S1 / S2 paths are unchanged.
+- search.simulate: the other Clappers via `su_fn.ids` (Evaluator: the situation's Clappers; live `_su_fn`: the outcome's
+  sboxes, every Clapper with su_fix), `Traj.susw`; `_hit_matters`; `_realize_su`'s dc. live: `su_kept`, `t1_lim`,
+  `t1_key`, `_t1_in_block`, `_t1_left_value`, `LivePlan.lazy_outs` / `__getattr__`, `audit_run(mark_kc, past)`;
+  `build_outs` (sboxes of every Clapper, susw / cen, the geometry to kcol); `_t1_search_one` logs the tail's time and the
+  aim counts in `t1_st`. tier1: `_aim_ok`, `AIM_STATS`, risk_key. m3_accept `--su-fix --su-band --t1-fix --t1-aim`.
+- tests/test_t1_s3.py (16 tests): the switches; the mirrored side press; re-prediction of side / up hits; the up recoil (py,
+  jit); every Clapper credited; su_band; su_kept; tier 1 to kc / past kc to the collision or a Clawline; the bridge's cap;
+  the Clawline block; the newer proven-safe plan; risk_key; the lazy outcomes; the aim check.
+
+### The measurements (`camp.log`; the smokes alone on the machine, the replays / workers boosted by m4c_smoke; the rest at Idle)
+
+    smokes, strict x 3 (s3 / s3na / s3p1 at 9b627b3 - the strip-press past rule -, rec / fx / su at b52a470; t1h36 = S2's
+    recommended set, the reference; share of the engaged ticks; contacts = planned contacts played, S1's rule)
+                   share w7   w13    contacts w7 (side/up/down/claw)  safe coll. (incons)  ended at kc w7 / w13   _drain max w7 / w13
+    t1h36          0.921      0.636  45 (12/0/5/28)                   0 + 1 (-)            -                     3.5 / 75 ms
+    su             0.921      0.626  44 (11/0/5/28)                   0 + 0 (-)            -                     4.4 / 73
+    fx             0.919      0.627  37 (12/0/6/19)                   0 + 0 (0 + 0)        4 / 21                1.3 / 3.1
+    rec            0.914      0.582  51 (13/0/4/34)                   0 + 0 (1 + 1)        11 / 18               1.4 / 4.5
+    s3 (past 8, aim)  0.896   0.520  40                               0 + 0 (0 + 0)        20 / 49               0.9 / 4.4
+    s3na (past 8)  0.889      0.578  48                               0 + 0 (0 + 1)        20 / 41               0.7 / 4.7
+    s3p1 (strip, aim) 0.920   0.581  44                               0 + 0 (1 + 0)        9 / 25                0.8 / 3.7
+    open x 1: t1h36 0.938 / 0.708, rec 0.919 / 0.629, s3p1 0.914 / 0.587, s3 0.925 / 0.609, s3na 0.909 / 0.585
+    s3t12 (tier 1 + tier 2, strict x 2): 0.878 / 0.521, tier-2 audit 0 collisions in 117 commits (the tube's offset test
+    never runs in a replay)
+    tier-1 decision p50 / p90 (w7): 86 / 101 ms without t1_aim, 89 / 108 - 111 with it; plan age at adoption 7 - 7.5 f
+
+    the 19 hit situations (lat1 8 f; hit by the live hit's frame + 2 / within 30 f / map2's keys at the live hit frame)
+    t1h36 5 / 7 / 17   su 5 / 7 / 17   fx 1 / 3 / 16   rec 2 / 5 / 16   (S2 at lat1 6: t1h36 3 / - / 17)
+    the strip-press rule: s3 (past 8) 2 / 5 / 13, s3p1 (past 1) 2 / 4 / 17; the end-at-kc rule (5892cff) 1 / 7 / 12
+
+    acceptance: deep 1 s split 2 (e3su / + su_fix): found 170 / 171, chosen expected hits 1.639 / 1.578, safe 230 / 229;
+    tier 1 alone 0.08 s: none 129, su_fix 123, t1_aim 129, t1_fix 125, all three 120
+
+### Open items
+
+1. W13: the recommended set's strict share 0.582 vs 0.626 - 0.636 for su / fx / S2's set alone (the open run 0.629 vs
+   0.708): within w13's run-to-run spread but every combination run was lower - a paired re-run with more runs would say.
+2. t1_past keeps an outcome's own keys up to the frame before its collision; a dev outcome whose collision is near (kc + 1
+   .. 2) still ends the plan at kc and the fallback holds the keys until a newer plan applies (4 - 21 per 3 runs): the real
+   cure is a dev tail for those outcomes (mid-swing / inside the prefix / multi-segment plans have none - S2's rule).
+3. With no outcome consistent tier 1 plays the most probable outcome's keys; the audit now sees that the others may collide
+   (1 of 129 such runs in w7) - a choice among the consistent-by-her-position outcomes would be better.
+4. The side swing under way is still not carried into a re-simulation (F5's other half) - tier 2's 'out_ct' still drops.
+5. F5 / F11 can only be seen live (the replays do not test her offset nor put her into the bot's Clawline).
+6. su_band and t1_aim built, not recommended (cost against a measured value of ~0 / 0.15 %).
+7. Nothing ran live; no merge; the person decides on the live run.
+
+### The switch set for a live run (the person decides)
+
+`SSBOT_FORUM_MAP2_SET=tables=1,fast_danger=1,fast_windows=1,witness_fast=1,fg_nowait=1,views_gap=1,views_fill=1,tube=1,
+midswing=1,swing_hold=1,baseline=1,swing_fix=1,tube_fix=1,hold_fix=1,late_act=1,prims_su=1,parts=0,tier1=1,t1_workers=2,
+t1_h=36,su_fix=1,t1_fix=1,t1_lazy=1` (t1_past 1 at its default; t1_aim and su_band off) on the frozen checkout
+`C:\ssbot\live_1v1_b52a470`. With the deep search next to tier 1: `...,parts=2,t1_workers=1,t2_tail=1` instead of
+`parts=0,t1_workers=2`.
