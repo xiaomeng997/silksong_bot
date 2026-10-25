@@ -3029,9 +3029,10 @@ class Map2Controller:
             self._inc("tube_out_clappers")
             return None, "clappers"
         lp2 = LivePlan(**{**lp.__dict__, "outs": [sh_outs.get(i, o) for i, o in enumerate(lp.outs)]})
-        if her is not None and all(sh_outs[i].in_block(n) for i in idx2):
-            # in a Clawline's block she has no control and the plan sends no key: the shifted outcomes kept (the
-            # re-check runs from her state once she is out of it - at control - when she is off the path then)
+        if her is not None and (all(sh_outs[i].in_block(n) for i in idx2) or int(lat_s) & M_CLAW):
+            # in a Clawline (its press latched, its block) she has no control and the plan sends no key: the shifted
+            # outcomes kept (the re-check runs from her state once she is out of it - at control - when she is off
+            # the path then)
             for i in idx2:
                 lp.outs[i] = sh_outs[i]
             self.ctrl_idx = list(idx2)
@@ -3040,7 +3041,10 @@ class Map2Controller:
             row["tube_shift"] = sorted({(k % 1000, v) for sh in shifts.values() for k, v in sh.items()})
             return list(idx2), "block"
         try:
-            ok, why_r, info = commit_check(self.W, lp2, fo, S0, inflight, hold_t, lat_s, her, obs, cfg, idx=idx2,
+            # (the re-check carries a down slash of the plan already pressed: midswing's rule - the tube's re-checks
+            # come mid-strike, the gate's P2 / P5)
+            cfg_r = cfg if cfg.midswing else LiveCfg(**{**cfg.as_dict(), "midswing": True})
+            ok, why_r, info = commit_check(self.W, lp2, fo, S0, inflight, hold_t, lat_s, her, obs, cfg_r, idx=idx2,
                                            tol=cfg.tube_path, acc=acc)
         except Exception as e:  # noqa: BLE001
             ok, why_r, info = False, "error", {"error": repr(e)[:200]}
