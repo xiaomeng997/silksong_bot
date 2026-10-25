@@ -253,7 +253,7 @@ def test_tier1_plays_an_outcome_only_to_its_committed_end(W):
     keys into the collision the search avoided only by deviating). t1_fix: the plan ends when a possible outcome's kc
     passed (tier 2's M4d rule); off: it plays on."""
     for fix in (False, True):
-        ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, fix)
+        ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, fix, t1_past=8)
         for o in lp.outs:
             o.kc, o.kcol, o.why = 4, 9, "dev"
         out_q.put(lp)
@@ -276,7 +276,7 @@ def test_tier1_plays_an_outcome_only_to_its_committed_end(W):
 def test_tier1_plays_on_past_kc_without_a_press_while_the_collision_is_far(W):
     """t1_past (with t1_fix): past kc, while the collision kcol is >= t1_past frames ahead, the outcome's keys are
     played without a new press (no attack / Clawline) - the bridge carries the same keys; then the plan ends."""
-    ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, True)
+    ctl, out_q, lp, sit, raw, hold, inf = _ctl_with_plan(W, True, t1_past=8)
     for o in lp.outs:
         o.kc, o.kcol, o.why = 4, 16, "dev"
         o.cmds = np.asarray(o.cmds, np.int64).copy()
@@ -305,6 +305,7 @@ def test_tier1_bridge_capped_at_kc(W):
         ctl.pre(101, 101, raw, sit.S, inf, hold)
         for o in lp.outs:
             o.kc, o.kcol = 8, 12                      # (the collision near: t1_past's limit is kc)
+        ctl.cfg.t1_past = 8
         br, _ = ctl._t1_bridge(101, 10)
         r = 101 + 3 - int(lp.t_a)
         assert (len(br) <= 8 - r + 1) == fix or len(lp.outs[0].cmds) <= 9

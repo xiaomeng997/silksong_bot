@@ -414,11 +414,11 @@ class LiveCfg:
     #                                what is left of it), tier 1 holds the keys through its own Clawline's block, the
     #                                least-risk order counts outcomes without an exit as hits (tier1.T1_FIX), the
     #                                runs with no consistent outcome audited too
-    t1_past: int = 8               # (with t1_fix) past an outcome's committed end kc its keys are played on WITHOUT a
-    #                                new press (no attack, no Clawline) while its collision kcol is at least this many
-    #                                frames ahead (the next decision's latency) - the keys a reveal at kc - lag leaves
-    #                                her until a newer plan applies; the bridge carries exactly those keys; 0: the plan
-    #                                ends at kc
+    t1_past: int = 1               # (with t1_fix) past an outcome's committed end kc its keys are played on WITHOUT a
+    #                                new press (no attack, no Clawline) up to this many frames before its collision
+    #                                kcol - the keys a reveal at kc - lag leaves her until a newer plan applies (the next
+    #                                decision's ~8 f); the bridge carries exactly those keys; 0: the plan ends at kc.
+    #                                S3's smokes / hit emulation: 1 (never into the collision frame) beat 8 (the latency)
     t1_aim: bool = False           # tier 1's escape tail checked against the Clappers re-predicted under the tail
     #                                (their Jump Aim / Close-Far / Slam Range follow her real path - tier1.T1_AIM)
     t1_lazy: bool = False          # a tier-1 plan's outcomes travel as one pickled blob (LivePlan.lazy_outs), unpickled
