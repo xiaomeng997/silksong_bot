@@ -1218,7 +1218,9 @@ them 0.36 - 0.48 u; the 'no input' / 'slash' busy frames are the recording's) bo
   the gate runs (the handover bug), the no-landing show runs (another goal) or _excluded sessions. Cautions: the
   recordings' situations come from the old policy - re-learn from map2's own fights later; simulation error grows with
   the horizon. Cost: tokens only for writing / checking the tool (one agent, ~0.3 - 0.6 M); the counting itself is
-  machine time; make it a reusable tool (features and windows as parameters) so later re-runs cost no tokens. The recordings part needs
+  machine time; make it a reusable tool (features and windows as parameters) so later re-runs cost no tokens.
+  WHEN (the person, 2026-10-24): recorded for later - do it once map2 can replace the old controller (3.8's criteria)
+  and the positioning knowledge is needed; not before. The recordings part needs
   no code changes and can run beside other offline work (not during a profiling run); the simulation part with the
   planner.
 - WHEN: 'next stage after the A1_n tables are in the search' [spec] (Q12).
@@ -1578,3 +1580,5 @@ THE DISPOSITION LIST: C:/ssbot/data/m2_play/map2/design/disposition.txt maps eve
 4. The long-term positioning planner (3.7).
 5. The auto-generated routines replacing the reflex's hand-chosen window types (3.5).
 6. The tables' state-recurrence fix and memory (Q5 - now that they are the main engine); the probes of section 6.2.
+7. LATER, once map2 can replace the old controller (3.8) and positioning knowledge is needed (the person, 2026-10-24):
+   the knowledge layer's recordings statistics with the clean-material rules (3.7).
