@@ -1054,6 +1054,17 @@ coverage depth be made the same as the old planner's?') [DESIGNED; E2]
   mid-swing - the gate's failure mode) and than E2 (e)'s first form 'commit the deep search's noop / escape' (that
   answer is only as fresh as the last deep search). Measure: tier 1's per-tick time on the bot's thread / a worker,
   the share map2 holds, collisions 0, invalid presses 0.
+- PROBABLY NO TIER 2 (the person, 2026-10-24: 'very likely tier 2 is not needed - add the long-term planner for
+  switching targets and the long-distance escape, that is enough'): an event is a motion key, an attack is not, so
+  most strikes are ONE event (a hop + down slash, a Clawline + the slash after control, the umbrella close + the
+  strike, a jump + the ride's slashes); a sequence becomes a chain of one-event plans re-planned every frame - after a
+  hook the reaction is revealed at the needle's hit (P + 8 / 9), 15+ f before control, so tier 1 plans the follow-up
+  then, no contingent plan needed; the long-term planner (3.7) keeps every step out of dead ends (the funnel) and
+  steers toward places with a follow-up (the score field), and does the target switching and the long escapes. Keys
+  that must be pressed inside a transient (the air sprint's attack / jump cancels, the sprint jump) are variants of the
+  one dash action in the bundle. CHECK BEFORE DROPPING TIER 2: tier 1 alone, re-planned every frame in closed loop,
+  on M3's acceptance situations - which of P1 - P5 and the regression moves still come out, vs the deep search; a move
+  that does not marks a real need for a multi-event commitment. Until then no new work on tier 2 (its code stays).
 
 #### 3.4.9 Logs and tools [M4c, M4d2, G]
 
