@@ -366,6 +366,38 @@ class LiveCfg:
     #                                keys sent since - where the commit / repair / re-anchoring checked the plan; the
     #                                strict replay: the anchor, its proxy world, as its audit), the Cogfly keys stripped
     #                                (S1: the anchor, the keys from it, as sent)
+    # t1 S2 (HANDOFF 'Task map2 - fix together (t1) - stage S2 (tier 1)'; design 3.4.8b; default off - off: nothing of
+    # it runs, the bot and the search as before)
+    tier1: bool = False            # THE PER-FRAME TIER 1: t1_workers tier-1 workers (live.worker_main role 't1':
+    #                                ssbot.map2.tier1.t1_decide - <= 1 event, 60 frames from the newest snapshot with the
+    #                                keys in flight + t1_lead frames of the keys the bot will send as its prefix; CONT /
+    #                                the escapes / the strikes of every primitive; the best proven-safe plan, else the
+    #                                least-risk one, its escape tail appended) answer every snapshot; the bot plays the
+    #                                newest tier-1 plan whose prefix it followed, every tick tier 2 (the deep search,
+    #                                `parts` workers - 0: tier 1 alone) has no plan in control and the swing hold none:
+    #                                no handover to the old planner - it keeps only the states the model does not know
+    #                                (no Clapper, the intro, no control / a freeze, the supervisor) and a tier-1 plan
+    #                                played to its end with no newer one
+    t1_workers: int = 2
+    t1_cap: float = 0.08           # a tier-1 decision's cap (s; at most its prefix's deadline less dl_margin frames)
+    t1_lead: int = 10              # the bridge a tier-1 snapshot carries (frames of the keys the bot expects to send)
+    t1_lead2: int = 4              # ... frames more per further Clapper (its decision takes longer: the plan must arrive
+    #                                before the bridge ends)
+    t1_switch: float = 0.05        # a tier-1 plan whose decision did not have the proven-safe plan in hand as its CONT
+    #                                replaces it only when better by this (its value)
+    t1_slow: str = ""              # 'cap:lead' for the LAST tier-1 worker ('': as the others) - a slower decision with
+    #                                more strikes; the fast workers keep its plan as CONT and react sooner to a reveal
+    t1_stale: int = 24             # a tier-1 plan arriving this many frames after its anchor is not adopted
+    t1_esc: int = 2                # the escapes a tier-1 decision evaluates in closed loop (the safest by the screen)
+    t1_h: int = 60                 # the escapes' frames
+    t1_tail: bool = True           # (with tier1) the escape tail appended to every tier-1 plan (tier1.t1_tail: its exit
+    exit_tail_h: int = 40          # probe, exit_tail_h frames) - the plan never ends at a contact / a hook's control
+    t2_tail: bool = False          # the same tail appended to the deep search's (tier 2's) plans before they are sent
+    t1_repair: bool = True         # (with tier1) no tier-1 plan applies: the newest proven-safe one whose prefix the keys
+    #                                sent left is re-simulated exactly from her state now (commit_check, tol_repair; the
+    #                                strict replay: repair_check) and adopted when it passes - the takeover from the
+    #                                fallback, whose keys rarely follow the bridge it sent
+    t1_rep_tol: float = 1.0        # u: that repair's path tolerance (the tube's tube_path: the collisions stay exact)
     log: bool = True
 
     @classmethod
@@ -392,6 +424,8 @@ GEO_EXT = [0]      # E2 (c): a sent plan's danger geometry kept this many frames
 VIEWS_GAP = [False]   # E2 (a) (LiveCfg.views_gap): build_outs holds a state on through its successor's spread
 TUBE_FIX = [False]    # E3 (LiveCfg.tube_fix): shift_outcome keeps the circles on both timings, the earliest end
 SU = [False]          # t1 S1 (LiveCfg.prims_su): side / up slashes planned - their presses and contacts accepted
+T1 = [False]          # t1 S2 (LiveCfg.tier1): an outcome's target boxes include every contact's target (a swing carried in
+#                       from before the plan's start has no press of its own: its target's box for the re-simulations)
 
 
 def set_switches(cfg: LiveCfg) -> None:
@@ -408,6 +442,7 @@ def set_switches(cfg: LiveCfg) -> None:
     press.SIDE_LAG[0] = float(cfg.side_lag)
     press.XVX_MIN[0] = float(cfg.spr_xvx)
     SU[0] = bool(getattr(cfg, "prims_su", False))                                          # t1 S1
+    T1[0] = bool(getattr(cfg, "tier1", False))                                             # t1 S2
     ms.SU_SHRINK[0] = float(getattr(cfg, "su_shrink", 0.05))
 
 
@@ -640,7 +675,7 @@ class OutData:
     highest body top per frame} (strike.union_tops: the side rule's; unset in older plans - the robust top then)."""
     __slots__ = ("p", "kc", "end", "cmds", "pos", "recs", "vrecs", "sids", "segs", "presses", "variant", "boxes", "geo",
                  "rare", "rare_k", "label", "contacts", "blocks", "why", "kcol", "ctrls", "tops", "_orig", "face", "gnd",
-                 "sboxes")
+                 "sboxes", "safe")
 
     def in_block(self, n: int) -> bool:
         """Frame n inside a Clawline's block (its press .. control + CTRL_SETTLE: no control, the forced bounce's
@@ -709,12 +744,18 @@ def _view_hold(r: tuple) -> tuple:
     return tuple(c[o] for c in cat)
 
 
-def build_outs(ev, margins: bool = True) -> list:
+def build_outs(ev, margins: bool = True, all_outs: bool = False, light: bool = False, dev_tails: dict | None = None
+               ) -> list:
+    """The safe outcomes' OutData of an evaluated plan. t1 S2 (tier 1; the defaults: as before): all_outs - every
+    outcome (a least-risk plan has unsafe ones: their keys are played too), light - no danger geometry (the tier-1
+    plan's execution needs none; the smoke's audit does), dev_tails {id(outcome): (k0, masks, pos)} - an outcome whose
+    committed part ends at a deviation (a collision follows) carries its own escape from k0 (tier1.t1_tail): its keys and
+    path from k0 replaced, its committed part to the tail's end."""
     outs = []
     gcache: dict = {}
     sid_of: dict = {}
     for o in ev.outcomes:
-        if not o.safe:
+        if not o.safe and not all_outs:
             continue
         tr = o.tr
         kc = int(getattr(o, "k_end", tr.end))
@@ -724,6 +765,15 @@ def build_outs(ev, margins: bool = True) -> list:
         d.pos = np.asarray(tr.pos[:kc + 1], float).copy()
         d.face = np.asarray(tr.face[:kc + 1], np.int64).copy()      # (E3: the tube's contact re-test)
         d.gnd = np.asarray(tr.ground[:kc + 1], bool).copy()
+        dtl = (dev_tails or {}).get(id(o))
+        if dtl is not None:
+            k0t, mt, pt = int(dtl[0]), np.asarray(dtl[1], np.int64), np.asarray(dtl[2], float)
+            d.cmds = np.concatenate([d.cmds[:k0t + 1], mt])
+            d.pos = np.concatenate([np.asarray(tr.pos[:k0t + 1], float), pt[:len(mt)]])
+            d.face = np.concatenate([d.face[:k0t + 1], np.full(len(mt), d.face[min(k0t, len(d.face) - 1)])])
+            d.gnd = np.concatenate([d.gnd[:k0t + 1], np.zeros(len(mt), bool)])
+            kc = k0t + len(mt)
+            d.kc, d.end = kc, kc
         arr, tb = brnum.barr(o.branch)
         vrecs = {}
         for iid, a in arr.items():
@@ -750,19 +800,30 @@ def build_outs(ev, margins: bool = True) -> list:
         d.sids = sid_of.setdefault(id(tb), dict(tb.sid))
         d.segs = [(int(k0), np.asarray(s.masks, np.int64).copy(), list(s.dsl), s.claw)
                   for s, k0 in zip(getattr(tr, "segs", ()), tr.seg_start)]
+        if dtl is not None and d.segs:
+            # (t1 S2: the dev outcome's own tail - its last segment cut at the deviation, the tail after it)
+            k0l, ml, dl, cl = d.segs[-1]
+            n_ = max(0, k0t - k0l)
+            d.segs[-1] = (k0l, ml[:n_], [(i, iid) for (i, iid) in dl if i < n_], None)
+            d.segs.append((k0t, np.asarray(dtl[1], np.int64).copy(), [], None))
         d.presses = [(int(k0) + 1 + int(i), int(iid)) for (k0, _, dsl, _) in d.segs for (i, iid) in dsl]
         d.variant = tr.variant or sk.HOOK_VARIANTS[0].name
         tgt = {iid for (_, iid) in d.presses} | {int(c[1]) for (_, _, _, c) in d.segs if c is not None}
+        if T1[0]:
+            tgt |= {int(i) for (_, i, _) in tr.contacts}          # (t1 S2: a carried swing's target too)
         d.boxes = {iid: np.asarray(sk.robust_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
         d.tops = {iid: np.asarray(sk.union_tops(o.branch, iid, None), float) for iid in sorted(tgt)}
         if SU[0]:
             # t1 S1: the side / up slashes' target boxes (strike.su_boxes) of every target
             d.sboxes = {iid: np.asarray(sk.su_boxes(o.branch, iid, None), float) for iid in sorted(tgt)}
         key = (id(o.branch), kc)
-        if key not in gcache:
-            # (E2 (c): GEO_EXT frames more - the swing hold's check runs past a plan's end inside a swing)
-            gcache[key] = _geo_cut(o.branch, kc + GEO_EXT[0], margins)
-        d.geo, d.rare = gcache[key]
+        if light:
+            d.geo, d.rare = None, {}                    # (t1 S2: the tier-1 plan's execution needs no geometry)
+        else:
+            if key not in gcache:
+                # (E2 (c): GEO_EXT frames more - the swing hold's check runs past a plan's end inside a swing)
+                gcache[key] = _geo_cut(o.branch, kc + GEO_EXT[0], margins)
+            d.geo, d.rare = gcache[key]
         d.rare_k = np.array(sorted(d.rare), np.int64)
         d.label = o.branch.label() if hasattr(o.branch, "label") else ""
         d.contacts = [(int(k), int(i), str(kd)) for (k, i, kd) in tr.contacts]
@@ -777,6 +838,10 @@ def build_outs(ev, margins: bool = True) -> list:
         d.why = str(getattr(o, "why", "") or "")
         kcol = getattr(o, "k_col", None)
         d.kcol = int(kcol) if (kcol is not None and kc < tr.end) else None
+        if dtl is not None:
+            d.why, d.kcol = "tail", None
+        if all_outs:
+            d.safe = bool(o.safe)
         outs.append(d)
     return outs
 
@@ -2121,6 +2186,17 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
     n_pre = len(pre.masks)
     sent = {"e": None, "n": 0}
 
+    def _tl(e_):
+        # t1 S2 (LiveCfg.t2_tail): the plan's escape tail appended (tier1.t1_tail: its exit probe as its own committed
+        # tail - it never ends at a contact / a hook's control with nothing after it); off: the plan as it is
+        if not (cfg.t2_tail and getattr(e_, "safe", False)):
+            return e_, {}
+        try:
+            from ssbot.map2 import tier1 as t1m
+            return t1m.t1_tail(S, sit, e_, int(cfg.exit_tail_h), n_min=n_pre)
+        except Exception:  # noqa: BLE001 - the plan without its tail
+            return e_, {}
+
     def on_best(e, kept):
         # M4d2 (first_send): the first safe plan at once, each one better by w_switch after it (the bot waits for the
         # best by the plan's root); never the kept plan's equal (the search's own hysteresis)
@@ -2130,8 +2206,9 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
             return
         if _short(e, n_pre, cfg) or (sent["e"] is not None and e.value < sent["e"].value + S.cfg.w_switch):
             return
-        lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, carried, (time.perf_counter() - t0) * 1e3,
-                        res_meta=None, final=False, pid=f"{part}:{snap['seq']}i{sent['n']}")
+        e_t, dv = _tl(e)
+        lp = _live_plan(S, e_t, snap, part, n_pre, base, cap, prev, carried, (time.perf_counter() - t0) * 1e3,
+                        res_meta=None, final=False, pid=f"{part}:{snap['seq']}i{sent['n']}", dev_tails=dv)
         if lp is not None:
             sent["e"] = e
             sent["n"] += 1
@@ -2217,14 +2294,84 @@ def _search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, ca
     if e is sent["e"]:
         # M4d2: the final answer is the plan already sent (anytime): the part's decision is done
         return {**base, "status": "sent", "value": round(float(e.value), 3), "n_sent": sent["n"]}
-    lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, carried, ms_, res_meta=res, final=True,
-                    pid=f"{part}:{snap['seq']}" + ("c" if (carried and res.kept) else "") + ("a" if alt else "") +
+    e_t, dv = _tl(e)
+    lp = _live_plan(S, e_t, snap, part, n_pre, base, cap, prev, carried, ms_, res_meta=res, final=True,
+                    dev_tails=dv, pid=f"{part}:{snap['seq']}" + ("c" if (carried and res.kept) else "") + ("a" if alt else "") +
                     ("k" if base.get("back") else "") + ("b" if base.get("base_from") else ""))
     if lp is None:
         return {**base, "status": "unsafe"}
     lp.alt = alt
     lp.base = bool(base.get("base_from")) or e.plan.origin == "base"     # E2 (e)
     lp.n_sent = sent["n"]
+    return lp
+
+
+def _t1_search_one(S, cfg: LiveCfg, snap: dict, part: int, plans: dict, aborted, carry: dict | None = None,
+                   send=None, dropped=None) -> object:
+    """t1 S2: ONE TIER-1 DECISION from a snapshot (ssbot.map2.tier1.t1_decide: <= 1 event, 60 frames, CONT / the
+    escapes / the strikes; the best proven-safe plan, else the least-risk one) -> a LivePlan (t1=True; every outcome,
+    unsafe ones too; the escape tail appended, tier1.t1_tail) or a status dict (busy, no Clapper, no prefix)."""
+    from ssbot.map2 import tier1 as t1m
+    base = {"kind": "status", "role": "t1", "part": part, "seq": snap["seq"], "ep": snap["ep"], "fo": snap["fo"],
+            "ctrl_seen": None}
+    if snap.get("busy"):
+        return {**base, "status": "busy:" + str(snap["busy"])}
+    if not snap.get("obs"):
+        return {**base, "status": "no clapper"}
+    pre, why = build_prefix(snap)
+    if pre is None:
+        return {**base, "status": "busy:" + why}
+    sit = ms.Situation(np.asarray(snap["S"], float), list(snap["obs"]), dict(snap["mems"]), list(snap["hazards"]),
+                       name=f"f{snap['fo']}")
+    if snap.get("claw_ctl") is not None:
+        sit.meta["claw_ctrl"] = int(snap["claw_ctl"]) - int(snap["fo"])
+    if snap.get("swing"):
+        sit.meta["swing"] = tuple(snap["swing"])
+    prev = None
+    tp = snap.get("t1_prev")
+    if tp is not None:
+        prev = reanchor_prev(tp[0], int(tp[1]), snap["fo"], pre)
+        if prev is not None and prev.segs and prev.segs[-1].claw is None:
+            # (CONT cut to the decision's horizon: its far tail is appended again after the decision - t1_tail -, the
+            # re-check of a 100-frame plan cost the decision ~20 - 50 ms)
+            n_keep = len(pre.masks) + int(cfg.t1_h) - sum(len(sg.masks) for sg in prev.segs[:-1])
+            last = prev.segs[-1]
+            if 0 < n_keep < len(last.masks):
+                prev.segs[-1] = ms.Seg(last.masks[:n_keep].copy(), [(i, iid) for (i, iid) in last.dsl if i < n_keep],
+                                       None, last.tag, last.var_alt, last.out_alt)
+    lead = len(pre.masks) - int(snap["n_inflight"])
+    avail = (lead + 1 - cfg.dl_margin) / 60.0 - (max(0.0, time.time() - float(snap["t_wall"]))
+                                                 if snap.get("t_wall") is not None else 0.0)
+    cap = min(max(avail, cfg.cap_lo), float(snap.get("t1_cap", cfg.t1_cap)))
+    if aborted():
+        return {**base, "status": "abort"}
+    S.abort_fn = aborted
+    f0 = float(np.asarray(snap["S"], float).reshape(km.K, -1)[km.FACE, 0])
+    S.realizer = HoldRealizer(len(pre.masks), pre.hold_after, face0=1 if f0 >= 0 else -1, su=SU[0])
+    n_pre = len(pre.masks)
+    t0 = time.perf_counter()
+    r = t1m.t1_decide(S, sit, pre, prev, cap, n_esc=int(cfg.t1_esc), h=int(cfg.t1_h))
+    if aborted():
+        return {**base, "status": "abort"}
+    if r.ev is None:
+        return {**base, "status": "none", "ms": round(r.ms, 1)}
+    e, dev = r.ev, {}
+    if cfg.t1_tail:
+        e, dev = t1m.t1_tail(S, sit, r.ev, int(cfg.exit_tail_h), n_min=n_pre)
+    ms_ = (time.perf_counter() - t0) * 1e3
+    lp = _live_plan(S, e, snap, part, n_pre, base, cap, prev, False, ms_, res_meta=None, final=True,
+                    pid=f"t{part % 100}:{snap['seq']}", all_outs=True, light=False, dev_tails=dev)
+    if lp is None:
+        return {**base, "status": "none", "ms": round(ms_, 1)}
+    lp.t1, lp.t1_safe, lp.t1_kind, lp.t1_risk = True, bool(r.safe), str(r.kind), tuple(r.risk)
+    lp.n_cand = int(r.n_cand)
+    lp.t1_tail = getattr(e, "t1_tail", None)
+    lp.t1_dev = len(dev)
+    lp.t1_root_ms = r.stats.get("root_ms")
+    lp.t1_st = {k: r.stats.get(k) for k in ("root_ms", "ms_cont", "ms_esc", "ms_pass", "ms_strikes", "ms_esc2",
+                                            "n_strike_eval", "capped", "prefix_dev")}
+    lp.had_prev = prev is not None
+    lp.t1_prev_pid = str(tp[2]) if (prev is not None and tp is not None and len(tp) > 2) else None
     return lp
 
 
@@ -2242,9 +2389,10 @@ def _short(e, n_pre: int, cfg: LiveCfg) -> bool:
 
 
 def _live_plan(S, e, snap: dict, part: int, n_pre: int, base: dict, cap: float, prev, carried: bool, ms_: float,
-               res_meta=None, final: bool = True, pid: str = "") -> "LivePlan | None":
-    """The LivePlan of one evaluated plan of a search (its safe outcomes' data, build_outs); None: no safe outcome."""
-    outs = build_outs(e, S.cfg.margins)
+               res_meta=None, final: bool = True, pid: str = "", **bo_kw) -> "LivePlan | None":
+    """The LivePlan of one evaluated plan of a search (its safe outcomes' data, build_outs); None: no safe outcome.
+    bo_kw (t1 S2): build_outs' tier-1 options (all_outs, light, dev_tails)."""
+    outs = build_outs(e, S.cfg.margins, **bo_kw)
     if not outs:
         return None
     log = ms.plan_log(e, snap["fo"])
@@ -2311,7 +2459,8 @@ def _warm_search(S, W, n_rec: int = 6) -> float:
     return time.perf_counter() - t0
 
 
-def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0, idle=None) -> None:
+def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0, idle=None, role: str = "t2"
+                ) -> None:
     """One search worker (module docstring, WORKERS): runs until a {'stop': True} snapshot or its queue closes. idle:
     a shared flag the worker raises while it waits for a snapshot (the bot sends one only then: a snapshot every
     tick cost the bot's thread its pickling under the GIL); a message with 'note' set only updates the plan registry
@@ -2330,7 +2479,12 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
     except Exception as e:  # noqa: BLE001
         boost += f", numba threads unchanged ({e})"
     W = ms.World()
-    S = _Searcher(W, ms.Cfg.live(**search_kw(cfg)))
+    if role == "t1":
+        # t1 S2: a tier-1 worker - depth 1, the 1-event 60-frame pass (ssbot.map2.tier1.t1_cfg), no split
+        from ssbot.map2 import tier1 as _t1m
+        S = _Searcher(W, _t1m.t1_cfg(ms.Cfg.live(**search_kw(cfg))))
+    else:
+        S = _Searcher(W, ms.Cfg.live(**search_kw(cfg)))
     lib_gb = 0.0
     if cfg.tables:
         # T3: the table library before the warm-up (3 - 10 s; its compiled chain warmed by the warm-up's searches)
@@ -2348,7 +2502,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             lib_gb += max(0, room) * 5.0e3 / 2 ** 30
         except Exception as e:  # noqa: BLE001 - the engine's passes then
             boost += f", tables failed ({e!r})"[:200]
-    if nparts > 1:
+    if nparts > 1 and role != "t1":
         S.part = (part, nparts)
     t0 = time.perf_counter()
     try:
@@ -2440,7 +2594,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             except Exception:  # noqa: BLE001
                 pass
     threading.Thread(target=watchdog, daemon=True, name="map2-watchdog").start()
-    out_q.put({"kind": "ready", "part": part, "boost": boost, "os_pid": os.getpid(),
+    out_q.put({"kind": "ready", "part": part, "role": role, "boost": boost, "os_pid": os.getpid(),
                "warm_s": round(time.perf_counter() - t0, 1)})
     done = -1
     while True:
@@ -2481,7 +2635,7 @@ def worker_main(cfg_d: dict, part: int, nparts: int, in_q, out_q, inst: int = 0,
             except Exception:  # noqa: BLE001
                 pass
         try:
-            msg = _search_one(S, cfg, snap, part, plans, lambda: state["abort"], carry=state.get("carry"), send=_send,
+            msg = (_t1_search_one if role == "t1" else _search_one)(S, cfg, snap, part, plans, lambda: state["abort"], carry=state.get("carry"), send=_send,
                               dropped=state["dropped"])
             if isinstance(msg, LivePlan):
                 state["carry"] = {"plan": msg.plan, "t_a": msg.t_a, "ep": msg.ep}
@@ -2526,6 +2680,11 @@ class Map2Controller:
         self.procs: list = []
         self.in_qs: list = []
         self.idles: list = []               # the workers' idle flags (shared): a snapshot goes to a waiting worker only
+        # t1 S2 (tier1): the tier-1 workers (their own queues and idle flags; parts 100 + k), the tier-1 snapshots' seq
+        self.t1_procs: list = []
+        self.t1_qs: list = []
+        self.t1_idles: list = []
+        self.t1_seq = 0
         self._note_key = None
         self.out_q = None
         self._ctx = None
@@ -2549,16 +2708,23 @@ class Map2Controller:
         t0 = time.perf_counter()
         self._ctx = mp.get_context("spawn")
         self.out_q = self._ctx.Queue()
-        n = max(1, int(self.cfg.parts))
+        n = max(0 if self.cfg.tier1 else 1, int(self.cfg.parts))     # (t1 S2: parts 0 with tier1 - tier 1 alone)
         for part in range(n):
             q = self._ctx.Queue()
             q.cancel_join_thread()
             self.in_qs.append(q)
             self.idles.append(self._ctx.Value("b", 0))
             self.procs.append(self._spawn(part, n, q))
+        if self.cfg.tier1:
+            for k in range(max(1, int(self.cfg.t1_workers))):
+                q = self._ctx.Queue()
+                q.cancel_join_thread()
+                self.t1_qs.append(q)
+                self.t1_idles.append(self._ctx.Value("b", 0))
+                self.t1_procs.append(self._spawn_t1(k))
         atexit.register(self.stop)
         if wait:
-            self._wait_ready(n, t0)
+            self._wait_ready(n + len(self.t1_procs), t0)
         return time.perf_counter() - t0
 
     def _spawn(self, part: int, n: int, q):
@@ -2568,12 +2734,20 @@ class Map2Controller:
         p.start()
         return p
 
+    def _spawn_t1(self, k: int):
+        """t1 S2: tier-1 worker k (worker_main role 't1', part 100 + k)."""
+        p = self._ctx.Process(target=worker_main, args=(self.cfg.as_dict(), 100 + k, len(self.t1_qs), self.t1_qs[k],
+                                                        self.out_q, self.instance, self.t1_idles[k], "t1"),
+                              daemon=True, name=f"map2-t1-{self.instance}-{k}")
+        p.start()
+        return p
+
     def _wait_ready(self, n: int, t0: float) -> None:
         while len(self.ready) < n and time.perf_counter() - t0 < self.cfg.ready_s:
             try:
                 msg = self.out_q.get(timeout=1.0)
             except queue.Empty:
-                if not all(p.is_alive() for p in self.procs):
+                if not all(p.is_alive() for p in self.procs + self.t1_procs):
                     break
                 continue
             if msg.get("kind") == "ready":
@@ -2581,9 +2755,12 @@ class Map2Controller:
             elif msg.get("kind") == "error":
                 self.errors.append(msg)
 
-    def attach_inproc(self, in_qs: list, out_q, idles: list | None = None) -> None:
-        """Tests: workers run elsewhere (threads) on these queues (idles: their flags; None: a snapshot every tick)."""
+    def attach_inproc(self, in_qs: list, out_q, idles: list | None = None, t1_qs: list | None = None,
+                      t1_idles: list | None = None) -> None:
+        """Tests: workers run elsewhere (threads) on these queues (idles: their flags; None: a snapshot every tick);
+        t1 S2: the tier-1 workers' queues / flags."""
         self.in_qs, self.out_q, self.idles = list(in_qs), out_q, list(idles or [])
+        self.t1_qs, self.t1_idles = list(t1_qs or []), list(t1_idles or [])
 
     def stop(self, timeout: float = 5.0) -> None:
         """The workers asked to stop, joined (timeout), the ones still alive terminated (they are this bot's own
@@ -2591,13 +2768,13 @@ class Map2Controller:
         if self._stopped:
             return
         self._stopped = True
-        for q in self.in_qs:
+        for q in self.in_qs + self.t1_qs:
             try:
                 q.put({"stop": True})
             except Exception:  # noqa: BLE001
                 pass
         t_end = time.perf_counter() + timeout
-        for p in self.procs:
+        for p in self.procs + self.t1_procs:
             try:
                 p.join(timeout=max(0.0, t_end - time.perf_counter()))
                 if p.is_alive():
@@ -2617,6 +2794,14 @@ class Map2Controller:
                 try:
                     self.procs[part] = self._spawn(part, len(self.procs), self.in_qs[part])
                 except Exception as e:  # noqa: BLE001 - (M4d) e.g. CreateProcess failing under memory pressure
+                    self._error("spawn", e)
+        for k, p in enumerate(self.t1_procs):
+            if not p.is_alive():
+                self._inc("t1_worker_restarts")
+                self.ready.pop(100 + k, None)
+                try:
+                    self.t1_procs[k] = self._spawn_t1(k)
+                except Exception as e:  # noqa: BLE001
                     self._error("spawn", e)
 
     def warm(self) -> float:
@@ -2715,6 +2900,15 @@ class Map2Controller:
         self._tube_prev: dict = {}          # (tube_fix) per outcome the previous tick's (n, dx, dy) off its path
         self._tube_unchk: set = set()       # (tube_fix) outcomes shifted without an exact re-check (a Clawline's block)
         self._hold_prev = None              # (late_act) the previous tick's (fo, hold filter state)
+        # t1 S2 (tier1)
+        self.t1_ctrl = None                 # the tier-1 plan adopted (played whenever tier 2 has no plan in control)
+        self.t1_in: list = []               # tier-1 plans received, not adopted yet
+        self.t1_snaps: dict = {}            # seq -> a tier-1 snapshot's bridge (the fallback's hold) while undecided
+        self.t1_exe = None                  # (pid, alive outcomes, best) of the tier-1 plan's last played tick
+        self.t1_run = None                  # the tier-1 plan being played: its frames (audit_runs)
+        self.t1_ms: list = []               # the tier-1 decisions' ms (worker)
+        self.t1_age: list = []              # frames from a tier-1 plan's anchor to its adoption
+        self.t1_tick_ms: list = []          # the tier-1 part of the bot's tick (ms)
 
     def _inc(self, key: str, n: int = 1) -> None:
         self.st[key] += n
@@ -2784,6 +2978,26 @@ class Map2Controller:
                 msg = self.out_q.get_nowait()
             except (queue.Empty, EOFError, OSError):
                 break
+            if isinstance(msg, LivePlan) and getattr(msg, "t1", False):
+                # t1 S2: a tier-1 plan - not the commit path: adopted by _t1_tick when its prefix was followed
+                self._inc("t1_plans")
+                self._inc("t1_plans_" + ("safe" if msg.t1_safe else "risk"))
+                self.t1_ms.append(msg.ms)
+                d_ = self.t1_snaps.get(msg.seq)
+                if d_ is not None:
+                    d_["open"] = False
+                if msg.ep == self.ep:
+                    msg.t_recv_f = int(fo)
+                    self.t1_in.append(msg)
+                    if len(self.t1_in) > 8:
+                        self.t1_in = self.t1_in[-8:]
+                continue
+            if isinstance(msg, dict) and msg.get("role") == "t1" and msg.get("kind") == "status":
+                self._inc("t1_w_" + str(msg.get("status")).split(":")[0])
+                d_ = self.t1_snaps.get(msg.get("seq"))
+                if d_ is not None:
+                    d_["open"] = False
+                continue
             if isinstance(msg, LivePlan):
                 self._inc("plans_recv")
                 if getattr(msg, "final", True):
@@ -2866,6 +3080,12 @@ class Map2Controller:
                     continue
                 if d["k0"] <= f + 2 <= d["k0"] + len(d["bridge"]) - 1 and (best is None or seq > best[0]):
                     best = (seq, d)
+            if best is None and self.cfg.tier1:
+                # t1 S2: a tier-1 snapshot sent with the fallback's bridge, its decision not answered yet
+                for seq, d in self.t1_snaps.items():
+                    if d.get("open") and not d.get("broken") and d["own"] == "plan" and \
+                            d["k0"] <= f + 2 <= d["k0"] + len(d["bridge"]) - 1 and (best is None or seq > best[0]):
+                        best = (seq, d)
             if best is None:
                 return None
             d = best[1]
@@ -3305,11 +3525,349 @@ class Map2Controller:
             m_ = self._swing_step(f, fo, S0, inflight, hold_t, lat_s, obs, row)
             if m_ is not None:
                 mask, why = m_, "swing"
+        if self.cfg.tier1:
+            # t1 S2: tier 1 - its newest plan adopted (also while tier 2 has the keys: ready when it ends); its keys
+            # whenever tier 2 and the swing hold have none, she has control and no freeze / hit this tick
+            t1c = time.perf_counter()
+            m_ = self._t1_tick(f, fo, her, obs, row, mask is None and why not in ("hit", "freeze") and acc_c,
+                               (S0, inflight, hold_t, lat_s, acc))
+            self.t1_tick_ms.append((time.perf_counter() - t1c) * 1e3)
+            if m_ is not None:
+                mask, why = m_, "t1"
         if mask is None and why is None:
             why = "none" if not self.pending else "wait"
         row["why"] = why
         self._tm("pre", (time.perf_counter() - t0) * 1e3)
         return mask
+
+    # ---- t1 S2: tier 1 ----
+    def _t1_followed(self, lp: LivePlan, f: int) -> bool:
+        """A tier-1 plan still applies: every key sent for frames t_a + 1 .. f + 1 was its prefix's (the keys in flight
+        at its snapshot and the bridge) or, after the prefix, one of its outcomes' own keys."""
+        pre = getattr(lp, "cmds_pre", None)
+        if pre is None:
+            return False
+        # (a plan repaired at frame f_r (t1_repair): the keys up to f_r + 1 were the re-simulation's own inputs)
+        for k in range(max(int(lp.t_a) + 1, int(getattr(lp, "_rep_k", 0))), int(f) + 2):
+            v = self.sent_hist.get(k)
+            if v is None:
+                # (no ACTION for frame k: a skipped tick - the oracle held the previous keys, a one-frame slip the next
+                # plan's prefix carries - or no record yet: the snapshot's keys in flight were the policy's)
+                continue
+            v = int(v) & ~COG                   # (the Cogfly throw's keys are not the plan's: stripped both sides)
+            r_ = k - int(lp.t_a)
+            if r_ <= len(pre):
+                if int(pre[r_ - 1]) & ~COG != v:
+                    return False
+            elif not any(r_ < len(o.cmds) and int(o.cmds[r_]) & ~COG == v for o in lp.outs):
+                return False
+        return True
+
+    def _t1_tick(self, f: int, fo: int, her, obs: list, row: dict, play: bool, now: tuple | None = None) -> int | None:
+        """t1 S2: the newest tier-1 plan whose prefix the keys sent followed is adopted (also while tier 2 has the keys:
+        a standby when its plan ends); with play its command for f + 2 - its outcomes consistent with the observation
+        (TickCheck's rule; none: every outcome - tier 1 always answers), the most probable one's key, the bits they
+        agree on when they disagree. None: no tier-1 plan applies (none received, its keys left, played to its end)."""
+        cfg = self.cfg
+        if self.t1_in:
+            cur_ta = int(self.t1_ctrl.t_a) if self.t1_ctrl is not None else -10 ** 9
+            for lp in sorted(self.t1_in, key=lambda x: -int(x.t_a)):
+                if int(lp.t_a) <= cur_ta:
+                    break
+                if lp.ep != self.ep or int(lp.t_a) > int(fo) or int(fo) - int(lp.t_a) > cfg.t1_stale or \
+                        int(lp.t_a) <= self.last_freeze:
+                    self._inc("t1_stale")
+                    continue
+                cur = self.t1_ctrl
+                if cur is not None and getattr(lp, "t1_prev_pid", None) != str(cur.pid) and cur.t1_safe and \
+                        not (lp.t1_safe and float(lp.value) > float(cur.value) + float(cfg.t1_switch)) and \
+                        self._t1_followed(cur, f):
+                    # (a decision that did not know the plan in hand as its CONT - from a snapshot before it was
+                    # adopted - replaces it only when better by t1_switch: tier 2's 'the replacement had it as its kept
+                    # plan' - else a slower worker's strike was lost to a faster worker's older escape)
+                    self._inc("t1_unaware")
+                    continue
+                pos_over = {}
+                if not self._t1_followed(lp, f):
+                    self._inc("t1_broken")
+                    # (t1_repair: no tier-1 plan applies now - the fallback / tier 2 / a skipped bridge left it - the
+                    # newest proven-safe plan re-simulated exactly from her state now with the keys actually sent, as
+                    # the commit's repair; once per plan)
+                    cur_ok = self.t1_ctrl is not None and self._t1_followed(self.t1_ctrl, f)
+                    if not (cfg.t1_repair and lp.t1_safe and not cur_ok and now is not None and
+                            not getattr(lp, "_rep_tried", False)):
+                        continue
+                    lp._rep_tried = True
+                    tc = time.perf_counter()
+                    S0_, infl_, hold_, lat_, acc_ = now
+                    try:
+                        if cfg.replay and cfg.replay_strict:
+                            keys_ = np.array([self._sent_at(k) or 0 for k in range(int(lp.t_a) + 1, int(f) + 2)],
+                                             np.int64)
+                            ok, why_c, info = repair_check(self.W, lp, fo, f, keys_, her, obs,
+                                                           LiveCfg(**{**cfg.as_dict(), "tol_repair": cfg.t1_rep_tol}),
+                                                           acc=acc_)
+                        else:
+                            ok, why_c, info = commit_check(self.W, lp, fo, S0_, infl_, hold_, lat_, her, obs, cfg,
+                                                           acc=acc_, tol=cfg.t1_rep_tol, swc=self._swc)
+                    except Exception as e:  # noqa: BLE001
+                        ok, why_c, info = False, "error", {"error": repr(e)[:200]}
+                    self._tm("check", (time.perf_counter() - tc) * 1e3)
+                    self._inc("t1_repair_" + ("ok" if ok else str(why_c).replace(" ", "_")))
+                    row.setdefault("t1_rep", []).append([lp.pid, bool(ok), why_c,
+                                                         round((time.perf_counter() - tc) * 1e3, 2)])
+                    if not ok:
+                        continue
+                    pos_over = dict(info.get("pos_over") or {})
+                    lp._rep_k = int(f) + 2
+                self._t1_end("new")
+                self.t1_ctrl = lp
+                lp._pos_over = pos_over
+                self.t1_age.append(int(fo) - int(lp.t_a))
+                self._inc("t1_adopt")
+                self._inc("t1_adopt_" + ("safe" if lp.t1_safe else "risk"))
+                row["t1_adopt"] = [lp.pid, int(fo) - int(lp.t_a), int(lp.t1_safe), lp.t1_kind,
+                                   list(lp.t1_risk)[:2], lp.n_cand, lp.ms]
+                break
+            self.t1_in = []
+        lp = self.t1_ctrl
+        if lp is None:
+            return None
+        if not play:
+            if self.t1_run is not None:
+                self._t1_end("yield")
+            return None
+        if not self._t1_followed(lp, f):
+            self._inc("t1_left")
+            self._t1_end("left")
+            self.t1_ctrl = None
+            return None
+        n, r = int(fo) - int(lp.t_a), int(f) + 2 - int(lp.t_a)
+        outs = lp.outs
+        if cfg.late_check and not self._t1_late(lp, f, fo, her, obs, row):
+            self._t1_end("late")
+            self.t1_ctrl = None
+            return None
+        cons = lp.consistent(n, her, obs, cfg, hero=not cfg.replay, pos_over=getattr(lp, "_pos_over", None)
+                             )[0] if her is not None else []
+        if cons:
+            # (M4d's possible outcomes: a timing view contradicted on its own records, a hook variant by her control -
+            # sticky per plan; the two views of a branch otherwise look alike and their keys can differ after a reveal)
+            if getattr(lp, "_excl", None) is None:
+                lp._excl = set()
+            cons = possible(lp, cons, n, obs, cfg, acc=(now[4] if now is not None else None), excl=lp._excl)
+        alive = [i for i in cons if r < len(outs[i].cmds)]
+        incons = not alive
+        if not alive:
+            alive = [i for i in range(len(outs)) if r < len(outs[i].cmds)]
+        if not alive:
+            self._inc("t1_exhausted")
+            self._t1_end("exhausted")
+            return None
+        best = max(alive, key=lambda i: outs[i].p)
+        keys = [int(outs[i].cmds[r]) for i in alive]
+        mask = int(outs[best].cmds[r])
+        if any(k != mask for k in keys):
+            prev = self._sent_at(int(f) + 1)
+            mask, _ = _merge_keys(keys, 0 if prev is None else prev)
+            self._inc("t1_disagree")
+        self.t1_exe = (lp.pid, list(alive), best, bool(incons))
+        if incons:
+            self._inc("t1_incons")
+        self._inc("ticks_t1")
+        self._inc("ticks_t1_" + ("safe" if lp.t1_safe else "risk"))
+        if self._own_at(int(f) + 1) != "m2":
+            self.took = True                    # tier 1 takes the keys: the fallback's scripts are not stepped
+        if self.t1_run is None or self.t1_run["lp"] is not lp:
+            self.t1_run = {"lp": lp, "k": []}
+        self.t1_run["k"].append(int(f) + 2)
+        row["t1"] = [lp.pid, n, r, len(cons), int(lp.t1_safe), lp.t1_kind, len(outs[best].cmds) - r]
+        return int(mask)
+
+    def _t1_late(self, lp: LivePlan, f: int, fo: int, her, obs: list, row: dict) -> bool:
+        """t1 S2 (with late_check): a frame of the tier-1 plan whose tick was skipped held the previous keys - when that
+        held key differs from the plan's own there (a slip), the plan is re-checked exactly as S1's late check does it
+        (late_check: from its anchor with the keys actually applied, its outcomes still possible, the slip's own effect
+        within tol_late) - False: unsafe now, dropped (the next tier-1 plan carries the keys applied as its prefix)."""
+        seen = getattr(lp, "_slips", None)
+        if seen is None:
+            seen = lp._slips = set()
+        new = []
+        for k in range(max(int(lp.t_a) + 1, int(getattr(lp, "_rep_k", 0))), int(f) + 2):
+            if k in seen or self.sent_hist.get(k) is not None:
+                continue
+            seen.add(k)
+            held = self._sent_at(k)
+            r_ = k - int(lp.t_a)
+            if held is None:
+                continue
+            want = {int(o.cmds[r_]) & ~COG for o in lp.outs if r_ < len(o.cmds)} if r_ > len(lp.cmds_pre) else                 {int(lp.cmds_pre[r_ - 1]) & ~COG}
+            if any(w != int(held) & ~COG for w in want):
+                new.append(k)
+        if not new:
+            return True
+        self._inc("t1_slip")
+        idx = self.t1_exe[1] if (self.t1_exe is not None and self.t1_exe[0] == lp.pid) else list(range(len(lp.outs)))
+        idx = [i for i in idx if getattr(lp.outs[i], "safe", True)] or idx
+        keys = np.array([(int(self._sent_at(k) or 0) & ~COG) if self._own_at(k) == "cog" else int(self._sent_at(k) or 0)
+                         for k in range(int(lp.t_a) + 1, int(f) + 2)], np.int64)
+        tc = time.perf_counter()
+        try:
+            ok, why_l, info = late_check(self.W, lp, fo, f, keys, list(idx), float(self.cfg.tol_late),
+                                         pos_ref=getattr(lp, "_pos_over", None), slip=new, **self._msw_kw())
+        except Exception as e:  # noqa: BLE001
+            ok, why_l, info = False, "error", {"error": repr(e)[:200]}
+        self._tm("check", (time.perf_counter() - tc) * 1e3)
+        self._inc("t1_late_" + ("ok" if ok else str(why_l).replace(" ", "_")))
+        row.setdefault("t1_late", []).append([lp.pid, bool(ok), why_l, new, round((time.perf_counter() - tc) * 1e3, 2)])
+        if ok:
+            lp._pos_over = {**(getattr(lp, "_pos_over", None) or {}), **dict(info.get("pos_over") or {})}
+        return bool(ok)
+
+    def _t1_bridge(self, f: int, lead: int) -> tuple:
+        """t1 S2: the tier-1 plan's keys from frame f + 3 for lead frames (the bits its played outcomes agree on; up
+        to a Clawline press) and its strike presses there - the bridge of a snapshot while tier 1 has the keys."""
+        lp = self.t1_ctrl
+        if lp is None or self.t1_exe is None or self.t1_exe[0] != lp.pid:
+            return [], []
+        idx, best = self.t1_exe[1], self.t1_exe[2]
+        r = int(f) + 3 - int(lp.t_a)
+        bridge = []
+        for k in range(r, r + int(lead)):
+            vals = {int(lp.outs[i].cmds[k]) for i in idx if k < len(lp.outs[i].cmds)}
+            if len(vals) != 1:
+                break
+            c = vals.pop()
+            if c & M_CLAW:
+                break
+            bridge.append(c)
+        pk = {int(k): iid for (k, iid) in lp.outs[best].presses}
+        presses = [(int(lp.t_a) + k, pk[k]) for k in range(r, r + len(bridge)) if k in pk]
+        return bridge, presses
+
+    def _t1_snap(self, f: int, fo: int, raw: dict, S0, inflight, hold, mask: int, own: str, res_cmd, busy, swing,
+                 swc, row: dict, t1_own: bool) -> None:
+        """t1 S2: the newest state to each idle tier-1 worker (a Clapper's move start: to every one, the older
+        decisions cut) with the keys the bot expects to send for t1_lead frames as the bridge (tier 2's plan in
+        control, tier 1's own plan, the fallback's plan or a script's held key) and tier 1's plan as its CONT."""
+        cfg = self.cfg
+        obs_now = self.trk.obs()
+        if busy or not obs_now:
+            return
+        alive = [k for k in range(len(self.t1_qs)) if k >= len(self.t1_procs) or
+                 (self.t1_procs[k].is_alive() and (100 + k) in self.ready)]
+        rev = any(st in brnum.MOVE_STARTS for (_, st) in (row.get("rev") or ()))
+        idle = [k for k in alive if not self.t1_idles or self.t1_idles[k].value == 1]
+        want = alive if rev else idle
+        if not want:
+            return
+        extra = int(cfg.t1_lead2) * max(0, len(obs_now) - 1)                    # (two Clappers: a longer decision)
+        caps = {k: (float(cfg.t1_cap), int(cfg.t1_lead) + extra) for k in want}
+        if cfg.t1_slow and len(self.t1_qs) > 1 and (len(self.t1_qs) - 1) in caps:
+            # the last tier-1 worker the slow one (t1_slow 'cap:lead'): more candidates (strikes), a longer bridge -
+            # the fast ones keep its plan as CONT (the hysteresis) and react sooner to a reveal
+            c_, l_ = str(cfg.t1_slow).split(":")
+            caps[len(self.t1_qs) - 1] = (float(c_), int(l_) + extra)
+        lead = max(v[1] for v in caps.values())
+        if own == "m2" and self.ctrl is not None:
+            bridge, presses = self._bridge_keys(f)
+        elif t1_own:
+            bridge, presses = self._t1_bridge(f, lead)
+        elif own == "plan" and res_cmd is not None and len(res_cmd) > 1 and int(res_cmd[0]) == int(mask):
+            bridge, presses = [int(x) for x in np.asarray(res_cmd, np.int64)[1:1 + lead]], []
+        elif own not in ("sup", "m2", "plan", "cog"):
+            bridge, presses = [int(mask)] * min(int(cfg.sc_lead), lead), []
+        else:
+            bridge, presses = [], []
+        bridge0 = list(bridge)[:lead]
+        presses0 = list(presses)
+        m_ = int(mask) & ~COG if own == "cog" else int(mask)
+        for k in want:
+            bridge = bridge0[:caps[k][1]]
+            presses = [p_ for p_ in presses0 if p_[0] < int(f) + 3 + len(bridge)]
+            self._t1_put(k, f, fo, raw, S0, inflight, hold, own, res_cmd, mask, m_, bridge, presses, obs_now, rev,
+                         swing, swc, t1_own, caps[k][0], row)
+
+    def _t1_put(self, k: int, f: int, fo: int, raw: dict, S0, inflight, hold, own: str, res_cmd, mask: int, m_: int,
+                bridge: list, presses: list, obs_now: list, rev: bool, swing, swc, t1_own: bool, cap: float,
+                row: dict) -> None:
+        """t1 S2: one tier-1 worker's snapshot (its own bridge length and cap)."""
+        cfg = self.cfg
+        seq = self.t1_seq
+        self.t1_seq += 1
+        snap = {"seq": seq, "t1_cap": float(cap), "ep": self.ep, "f": int(f), "fo": int(fo),
+                "S": np.asarray(S0, float).copy(),
+                "cmds": np.concatenate([np.asarray(inflight, np.int64), [m_],
+                                        np.asarray(bridge, np.int64)]).astype(np.int64),
+                "n_inflight": len(inflight) + 1, "hold": self._hold_clean(hold_tuple(hold), fo),
+                "lat_s": int((raw.get("act") or {}).get("mask") or 0) & (~COG if self._cog_near(fo) else -1),
+                "presses": presses, "obs": obs_now, "mems": self.trk.mems(), "hazards": self.trk.hazards(self.K),
+                "ctrl": None, "trig": sorted(set(self.trig)), "busy": None, "own": own, "t_wall": time.time(),
+                "left": None, "rev": bool(rev),
+                "claw_ctl": self._claw_ctl if (cfg.press_check and self._claw_ctl is not None and
+                                               self._claw_ctl + press.CLAW_LOCK_F > int(fo)) else None,
+                "t1_prev": (self.t1_ctrl.plan, int(self.t1_ctrl.t_a), str(self.t1_ctrl.pid))
+                if (t1_own and self.t1_ctrl is not None) else None,
+                **({"swing": swing} if cfg.midswing else {}), **({"swc": swc} if cfg.swing_fix else {})}
+        if rev:
+            snap["cut"] = seq - 1
+            self._inc("t1_rev")
+        self.t1_qs[k].put(snap)
+        if self.t1_idles:
+            self.t1_idles[k].value = 0
+        res_cmd_ = [m_] + [int(x) for x in bridge]
+        if own == "plan" and res_cmd is not None and len(res_cmd) > 1 and int(res_cmd[0]) == int(mask):
+            res_cmd_ = [int(x) for x in np.asarray(res_cmd, np.int64)]
+        self.t1_snaps[seq] = {"k0": int(f) + 3, "k2": int(f) + 2, "bridge": list(bridge), "res_cmd": res_cmd_,
+                              "own": str(own), "open": True}
+        if len(self.t1_snaps) > 64:
+            for k_ in sorted(self.t1_snaps)[:-64]:
+                del self.t1_snaps[k_]
+        self._inc("t1_snapshots")
+        row.setdefault("t1_snap", []).append([seq, len(bridge), int(k)])
+
+    def _t1_end(self, why: str) -> None:
+        """t1 S2: the tier-1 plan being played stops (a newer one, its keys left, played to its end, tier 2 / the
+        fallback / the supervisor has the keys): with audit_runs its keys as sent re-simulated from its anchor state in
+        its outcomes played last (audit_run, the strict audit's world) - collisions counted by whether it was a
+        proven-safe plan or a least-risk one."""
+        run, self.t1_run = self.t1_run, None
+        if why in ("sup", "exhausted"):
+            self.t1_ctrl = None
+        if run is None or not self.cfg.audit_runs or not run["k"]:
+            return
+        lp = run["lp"]
+        try:
+            if not lp.outs or getattr(lp.outs[0], "geo", None) is None:
+                return
+            k1 = max(run["k"])
+            cmds = []
+            for k in range(int(lp.t_a) + 1, k1 + 1):
+                v = self._sent_at(k)
+                v = 0 if v is None else int(v)
+                cmds.append(v & ~COG if self._own_at(k) == "cog" else v)
+            if self.t1_exe is None or self.t1_exe[0] != lp.pid or self.t1_exe[3]:
+                # (no outcome of the plan consistent with the observation at its last tick: the replay's Clapper did
+                # something else - nothing to audit it against)
+                self._inc("audit_t1_incons")
+                return
+            idx = self.t1_exe[1]
+            res = audit_run(self.W, lp, 0, lp.S_a, np.asarray(cmds, np.int64), lp.hold_a, int(lp.lat_a), list(idx),
+                            int(k1 - lp.t_a), **self._msw_kw(),
+                            **({"swc": getattr(lp, "swc_a", None)} if self.cfg.swing_fix else {}))
+            self._inc("audit_t1_runs")
+            self._inc("audit_t1_runs_" + ("safe" if lp.t1_safe else "risk"))
+            cols = [x for x in res if x[1] is not None]
+            if cols:
+                self._inc("audit_t1_col_" + ("safe" if lp.t1_safe else "risk"))
+            for x in res:
+                if x[2]:
+                    self._inc("audit_t1_skip_" + x[2].replace(" ", "_"))
+            if cols or any(x[2] for x in res):
+                self.row["audit_t1"] = [lp.pid, int(lp.t1_safe), [list(x) for x in res if x[1] is not None or x[2]],
+                                        int(k1)]
+        except Exception as e:  # noqa: BLE001 - an audit never ends the run
+            self._error("audit_t1", e)
 
     # ---- E2 (a): the tube ----
     def _cor(self, i: int, o: OutData, pos: np.ndarray) -> tuple:
@@ -3925,8 +4483,11 @@ class Map2Controller:
         self._inc("ticks")
         # the bridge: the keys expected while the search runs
         bridge, presses = [], []
+        t1_own = own == "m2" and self.ctrl is None and row.get("why") == "t1"
         if own == "m2" and self.ctrl is not None:
             bridge, presses = self._bridge_keys(f)
+        elif t1_own:
+            bridge, presses = self._t1_bridge(f, int(self.cfg.fb_lead))     # t1 S2: tier 1's own plan
         elif own == "plan" and res_cmd is not None and len(res_cmd) > 1 and int(res_cmd[0]) == int(mask):
             bridge = [int(x) for x in np.asarray(res_cmd, np.int64)[1:1 + self.cfg.fb_lead]]
         elif own not in ("sup", "m2", "plan", "cog"):
@@ -4045,6 +4606,11 @@ class Map2Controller:
                     del self.snaps_out[k_]
             self.seq += 1
             self._inc("snapshots")
+        if self.cfg.tier1 and self.t1_qs:
+            try:
+                self._t1_snap(f, fo, raw, S0, inflight, hold, mask, own, res_cmd, busy, swing, swc, row, t1_own)
+            except Exception as e:  # noqa: BLE001 - map2 must not end the run
+                self._error("t1snap", e)
         if self.trig:
             row["trig"] = sorted(set(self.trig))
         if busy:
@@ -4118,6 +4684,7 @@ class Map2Controller:
         """A pause tick of the supervisor: map2 drops its plan."""
         try:
             self._drop("sup")
+            self._t1_end("sup")
             self._inc("ticks")
             self._inc("ticks_pause")
             if self.cfg.log:
@@ -4161,6 +4728,10 @@ class Map2Controller:
                         "check_ms_p99": _pct(rm["check"], 99), "search_ms_p50": _pct(rm["search"], 50),
                         "search_ms_p90": _pct(rm["search"], 90)},
                 "disabled": bool(self.disabled),
+                "t1": {"ms_p50": _pct(self.t1_ms, 50), "ms_p90": _pct(self.t1_ms, 90),
+                       "age_p50": _pct(self.t1_age, 50), "age_p90": _pct(self.t1_age, 90),
+                       "tick_ms_p50": _pct(self.t1_tick_ms, 50), "tick_ms_p99": _pct(self.t1_tick_ms, 99)}
+                if self.cfg.tier1 else None,
                 "workers": {str(k): v for k, v in self.ready.items()}, "errors": self.errors[:20]}
 
 

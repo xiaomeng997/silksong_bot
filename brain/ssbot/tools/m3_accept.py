@@ -394,6 +394,11 @@ def _run_one(args) -> dict:
             _W = ms.World()
     cfg = ms.Cfg(cap_s=cap, depth=depth, library=tuple(cb.load_library()) if lib == "full" else (),
                  **extra.get("cfg", {}))
+    if extra.get("tier1"):
+        # t1 S2 ('tier 1 alone'): tier 1's decision (depth 1, the 1-event 60-frame pass), chained greedily at the nodes
+        # its chosen plan reaches (ssbot.map2.tier1.t1_chain) - cap per decision
+        from ssbot.map2 import tier1 as t1m
+        cfg = t1m.t1_cfg(cfg)
     if getattr(cfg, "tables", False):
         _W.table_lib(cfg.tables_file, cfg.tables_budget)     # (T3: loaded once per worker, before the timed decision)
     S = ms.Searcher(_W, cfg)
@@ -414,7 +419,16 @@ def _run_one(args) -> dict:
                                          su=any(k in tuple(cfg.prims) for k in ("side", "up")))     # (t1 S1)
     t0 = time.perf_counter()
     try:
-        r = S.decide(sit) if pre is None else S.decide(sit, prefix=pre)
+        if extra.get("tier1"):
+            S.anytime = []
+            S.ev.n_pred = S.ev.n_exit = 0
+            ch_ = t1m.t1_chain(S, sit, pre, cap=cap, steps=int(extra["tier1"]), n_first=int(extra.get("t1_first", 1)))
+            r = ms.Result(ch_["chosen"], [e for e in ch_["tried"] if e is not None], ch_["ms"], False,
+                          len(ch_["tried"]), S.ev.n_pred, S.ev.n_exit, 0.0, 0.0)
+            S.stats = dict(ch_["first"].stats, t1_steps=ch_["steps"], t1_first_kind=ch_["first"].kind,
+                           t1_first_safe=int(ch_["first"].safe))
+        else:
+            r = S.decide(sit) if pre is None else S.decide(sit, prefix=pre)
     except Exception as ex:                                       # a bug: count it, keep going
         import traceback
         return {"i": i, "name": sit.name, "error": repr(ex), "tb": traceback.format_exc()[-1500:]}
@@ -612,6 +626,9 @@ def cmd_run(a) -> int:
         extra["hold"] = int(a.hold)                  # M4c: the live prefix (1) and the hold filter's realizer (2)
     if a.vclock:
         extra["vclock"] = float(a.vclock)
+    if a.tier1:
+        extra["tier1"] = int(a.tier1)
+        extra["t1_first"] = int(a.t1_first)
     if a.cfg:
         # Cfg overrides k=v;k=v (M4b: the live configuration's flags)
         from ssbot.map2 import search as ms_
@@ -934,6 +951,10 @@ def main(argv=None) -> int:
                                                          "prefix), 2 = and through the oracle's hold filter")
     p.add_argument("--vclock", type=float, default=0.0, help="the cap in work units: seconds per unit (deterministic)")
     p.add_argument("--cfg", default="", help="Cfg overrides k=v;k=v (M4b)")
+    p.add_argument("--t1-first", type=int, default=1, help="t1 S2: tier 1's decisions at the situation itself (re-planned "
+                                                           "with its choice as CONT, the windows rotated)")
+    p.add_argument("--tier1", type=int, default=0, help="t1 S2: 'tier 1 alone' - tier 1's decision chained this many "
+                                                        "times at its plans' nodes (cap per decision); 0: the search")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("report")
     p.add_argument("--tag", default="")
