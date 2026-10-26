@@ -72,6 +72,10 @@ def _types(name: str, d: tuple) -> tuple:
 
 
 LEAD_L = _ienv("SSBOT_FORUM_WINDOWS_PRESS_L", 3)          # the bridge (frames): the press from the snapshot's f + L + 2
+# (F2, the review's finding 11) the bridge with two or more Clappers alive (0: LEAD_L): the check that finds a press
+# takes p50 33 / p90 81 / p99 185 ms there (w7: 14 / 26 / 48) and its verdict must be in by the tick f + L - on the
+# recorded w13 slams L = 5 has a verdict in time at antic j <= 6 in 203 / 432 slams, L = 3 in 68 (f2_cover)
+LEAD_L2 = _ienv("SSBOT_FORUM_WINDOWS_PRESS_L2", 0)
 TYPES = _types("SSBOT_FORUM_WINDOWS_PRESS_TYPES", SLAM_TYPES)
 APPR = _types("SSBOT_FORUM_WINDOWS_PRESS_APPR", APPR_TYPES)   # 'none' -> () (no approach checks)
 if os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_APPR", "").strip() == "none":
@@ -518,6 +522,7 @@ class WinPress:
         self.win = win                     # oldwin.WindowRows: its Clapper tracker (game clock) and gates
         self.inproc = bool(inproc)
         self.L = int(L)
+        self.L2 = int(LEAD_L2)             # (F2) the bridge with two or more Clappers (0: L)
         self.K = cm.Know.load()
         self.ck: Checker | None = None
         self.proc = None
@@ -1064,24 +1069,27 @@ class WinPress:
             if own == "win":
                 self._recheck(f, fo, S0, prefix, hold, mask, raw)
             return
-        if own not in self.own or res_cmd is None or len(res_cmd) < self.L:
-            return
         win = self.win
+        allo = win.obs()
+        L = self.L
+        if self.L2 and sum(1 for o in allo if o.st is not None and o.hp > 0 and o.st not in cm.DEAD) >= 2:
+            L = self.L2                     # (F2) two Clappers: the check's press-finding time p50 33 / p99 185 ms
+        if own not in self.own or res_cmd is None or len(res_cmd) < L:
+            return
         st0 = swing_fix(S0, raw) if self.f2 else np.asarray(S0).reshape(km.K, -1)[:, 0]
         hx = float(st0[km.PX])
-        allo = win.obs()
         live = [o for o in allo if o.st is not None and o.hp > 0 and abs(o.x - hx) <= REACH_U]
-        lead = f + 1 - fo + self.L
+        lead = f + 1 - fo + L
         if not any(rx.in_states(o.st, int(o.j) + lead + jj, w.anchor) for o in live for w in
                    (rx.WINDOWS[t] for t in TYPES) for jj in (0, 2)):
             return
-        bridge = np.concatenate([[mask], np.asarray(res_cmd[1:self.L], np.int64)]).astype(np.int64)
+        bridge = np.concatenate([[mask], np.asarray(res_cmd[1:L], np.int64)]).astype(np.int64)
         inflight = np.concatenate([np.asarray(prefix, np.int64), bridge])
         claw_busy = self.claw_P is not None and self.claw_ctl is None and f - self.claw_P < 36
         lock = (self.claw_ctl + 13) if self.claw_ctl is not None else None
         self.seq += 1
         sn = {"seq": self.seq, "S0": st0.copy(), "inflight": inflight, "hold": hold, "obs": list(allo),
-              "mems": win.trk.mems(), "hazards": win.trk.hazards(self.K), "fo": fo, "f": f, "L": self.L,
+              "mems": win.trk.mems(), "hazards": win.trk.hazards(self.K), "fo": fo, "f": f, "L": L,
               "claw_free": not claw_busy, "lat_s": int((raw.get("act") or {}).get("mask") or 0),
               "claw_lock_until": lock, "intro": False}
         self.st["snap"] += 1

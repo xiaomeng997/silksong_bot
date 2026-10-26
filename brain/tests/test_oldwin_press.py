@@ -333,6 +333,19 @@ def test_f2_positions_held_against_her_rendered_position():
     assert wp.commit is not None and wp.st["commit_pos"] == 0
 
 
+def test_f2_the_bridge_with_two_clappers():
+    """SSBOT_FORUM_WINDOWS_PRESS_L2: the snapshot's bridge L2 frames long while two Clappers live (finding 11)."""
+    sent = []
+    for obs, want in (([_o(j=10)], 3), ([_o(j=10), _o(iid=8, j=10, x=40.0)], 5)):
+        wp = _wp(obs)
+        wp.L2 = 5
+        wp._send = lambda sn, out, _s=sent: _s.append(sn)
+        S0 = np.zeros(km.K)
+        S0[km.PX] = 30.0
+        wp._post(100, 99, _raw(99), S0, np.zeros(2, np.int64), None, 0, "plan", np.zeros(12, np.int64), False)
+        assert sent and sent[-1]["L"] == want and len(sent[-1]["inflight"]) == 2 + want
+
+
 def test_f2_swing_fix_sets_the_down_slash_flags():
     S = np.zeros(km.K)
     S[km.ATTACKING], S[km.ATK_PDIR], S[km.ATK_KIND] = 0.2, 0.0, 1.0
