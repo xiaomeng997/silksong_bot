@@ -269,8 +269,12 @@ class WindowRows:
                                   dec=(S.copy(), [_advance(x, P) for x in self.obs()], e.macro) if AUDIT else None,
                                   pk=int(pk), macro=e.macro))
 
-    def _approach(self, start, lat_p, ro, lat_full, M, names, live, P: int, T: int, cands: list, info: dict) -> None:
-        """APPROACH rows: the shapes' states at every frame j keyed (vectorized) against each Clapper's cells there."""
+    def _approach(self, start, lat_p, ro, lat_full, M, names, live, P: int, T: int, cands: list, info: dict,
+                  types: tuple | None = None, margin: bool | None = None) -> None:
+        """APPROACH rows: the shapes' states at every frame j keyed (vectorized) against each Clapper's cells there.
+        (stage N, oldwin_press: types / margin - the window types keyed and the dx margin; None: DS_TYPES / MARGIN)"""
+        types = DS_TYPES if types is None else types
+        margin = MARGIN if margin is None else bool(margin)
         phys, vel, mode, flags = ro.phys, ro.vel, ro.mode, ro.flags
         n, T1 = mode.shape
         js = np.arange(1, T - 2)
@@ -292,7 +296,7 @@ class WindowRows:
         hits = []
         for o in live:
             j_lo, j_hi = int(o.j) + P + 1, int(o.j) + P + T - 3
-            for wn in _types_in(o.st, j_lo, j_hi, DS_TYPES):
+            for wn in _types_in(o.st, j_lo, j_hi, types):
                 wt = rx.WINDOWS[wn]
                 jj = int(o.j) + P + js                                # the Clapper's frame at each cut
                 ok_j = np.array([rx.in_states(o.st, int(v), wt.anchor) for v in jj])
@@ -325,7 +329,7 @@ class WindowRows:
                     ii = np.searchsorted(self.keys, pk)
                     ii = np.minimum(ii, len(self.keys) - 1)
                     found = m_ & self._has(pk)
-                    if MARGIN:
+                    if margin:
                         found &= self._margin(pk)
                     for r_, c_ in zip(*np.nonzero(found)):
                         hits.append((o, wn, int(r_), int(js[c_]), int(pk[r_, c_]), float(cd[c_])))

@@ -1424,8 +1424,15 @@ class Reflex:
          fewest frames) -> a Press, else None."""
 
     def __init__(self, table: Table, W=None, lead: int | None = None, max_cand: int = 1, check: bool = True,
-                 T: int = 120, tol_j: int = 1, tol_x: float = 0.35, cl_partial: bool = True):
+                 T: int = 120, tol_j: int = 1, tol_x: float = 0.35, cl_partial: bool = True,
+                 types: tuple | None = None, cl_ready: bool = False):
         self.table = table
+        # task oldwin stage N (ssbot.map2.oldwin_press; the defaults: as before): types - only these window types are
+        # looked up (None: every generated one); cl_ready - a Clawline window only when her state on the frame before
+        # its press is in normal control with no attack / recoil under way (oldwin stage L's live H1: a Clawline pressed
+        # inside a side slash's attack lock never fired - the hook model starts it regardless)
+        self.types = None if types is None else frozenset(types)
+        self.cl_ready = bool(cl_ready)
         self.W = W
         self.lead = lead
         self.max_cand = max_cand                   # candidates checked per tick (the best first; cost: one check)
@@ -1509,13 +1516,15 @@ class Reflex:
     # ---- the tick ----
     def check(self, S0: np.ndarray, inflight, hold, obs: list, mems: dict | None, hazards: list | None, fo: int,
               f: int, claw_free: bool = True, lat_s: int = 0, claw_lock_until: int | None = None,
-              intro: bool = False, inflight_latched: bool = False) -> Press | None:
+              intro: bool = False, inflight_latched: bool = False, bridge: int = 0) -> Press | None:
         """The Press to take now (the class docstring), or None. S0: her kin state at the observation frame fo;
         inflight: the COMMANDS of frames fo + 1 .. f + 1 (inflight_latched: already latched - then `hold` is the hold
         filter's state AFTER them); hold: the filter's state (km.HoldState or the live hold tuple) before them; obs /
         mems / hazards: the tracker's Clappers (Obs, Memory) and the leftover hazards; lat_s: the latched mask at fo;
         claw_lock_until: the first frame a Clawline may be pressed (the previous one's control + 13; None: free);
-        intro: the caller's tracker sees a Clapper in its intro."""
+        intro: the caller's tracker sees a Clapper in its intro. bridge (task oldwin stage N): the last `bridge` frames of
+        `inflight` are keys not sent yet (the caller's planned bridge to the press): step B checks her collisions from
+        the bridge's first frame (0: from the macro's first frame, as before)."""
         t0 = time.perf_counter()
         self.last = {"f": int(f)}
         S0 = np.asarray(S0, float).reshape(km.K, -1)[:, 0]
@@ -1547,6 +1556,8 @@ class Reflex:
         for o in live:
             j = int(o.j or 0) + lead
             for wt in windows_for(o.st, j):
+                if self.types is not None and wt.name not in self.types:
+                    continue
                 o2 = replace(o, j=j, x=o.x + float(o.vx) * lead / 60.0)
                 key = cell_of(S, o2, wt)
                 e = self.table.get(key)
@@ -1584,6 +1595,9 @@ class Reflex:
                 if wt.name in SOLO_ONLY and len(live) > 1:
                     why.append("solo only")            # (stage 4) the model cannot vouch for it with another Clapper
                     continue
+                if self.cl_ready and not _cl_ready(self.W, S, raw):
+                    why.append("claw attack")          # (oldwin stage N) an attack / recoil at the press: eaten live
+                    continue
             elif float(S[km.ATK_CD]) > (e.macro.t - 1) / 60.0 + 1e-6:
                 why.append("attack")
                 continue
@@ -1596,7 +1610,8 @@ class Reflex:
             if self.do_check:
                 n_checked += 1
                 tc = time.perf_counter()
-                ok, r, info = self._check(S0, lat_inf, S, lead, int(fo), live, mems, hazards, o, wt, e.macro, d)
+                ok, r, info = self._check(S0, lat_inf, S, lead, int(fo), live, mems, hazards, o, wt, e.macro, d,
+                                          k_lo=(lead + 1 - int(bridge)) if bridge else None)
                 self.ms["check"].append((time.perf_counter() - tc) * 1e3)
                 if not ok:
                     why.append(r)
@@ -1616,7 +1631,7 @@ class Reflex:
         return out
 
     def _check(self, S0, lat_inf, S, lead: int, fo: int, live: list, mems, hazards, o, wt: Window, m: Macro,
-               d: int) -> tuple:
+               d: int, k_lo: int | None = None) -> tuple:
         """(ok, why, info): steps A and B of the check (the class docstring); info: a Clawline window's (reference
         stops per variant, the drift latency)."""
         her0 = (float(S0[km.PX]), float(S0[km.PY]))
@@ -1628,7 +1643,7 @@ class Reflex:
             ok, r, _, paths = _check_ds(self.W, w, idx, n + lead, S, o.iid, wt, m, d)
             if not ok:
                 return False, "A:" + r, None
-            ok, r = _closed_ds(self.W, S0, lat_inf, S, lead, live, mems, hazards, o, wt, m, d, paths)
+            ok, r = _closed_ds(self.W, S0, lat_inf, S, lead, live, mems, hazards, o, wt, m, d, paths, k_lo)
             return ok, r, None
         tw_ = time.perf_counter()
         w = _target_world(self.W, o, mems, hazards, fo, her0, self.T, S0)
@@ -1636,7 +1651,7 @@ class Reflex:
         ok, r, info, paths = _check_cl(self.W, w, lead, S, o, wt, m, d)
         if not ok:
             return False, "A:" + r, None
-        ok, r = _closed_cl(self.W, S0, lat_inf, S, lead, live, mems, hazards, o, wt, m, d, info, paths)
+        ok, r = _closed_cl(self.W, S0, lat_inf, S, lead, live, mems, hazards, o, wt, m, d, info, paths, k_lo)
         return ok, r, info
 
     def candidates(self, S_pred: np.ndarray, obs: list, hold=None, claw_free: bool = True) -> list:
@@ -1655,6 +1670,15 @@ class Reflex:
                 continue                                      # the filter would change it (a key held / just pressed)
             out.append((o, wt, key, e, raw.pre))
         return out
+
+
+def _cl_ready(W, S: np.ndarray, raw: Raw) -> bool:
+    """(task oldwin stage N) her state on the frame before a Clawline macro's press (S: the frame before the macro's
+    first key, rolled through the macro's keys before the press): normal control, no attack and no recoil under way -
+    the game eats a Clawline pressed inside an attack's lock (oldwin stage L's live H1)."""
+    n = len(raw.pre)
+    Sx = W.roll(S, raw.pre[:n - 1]).final[:, 0] if n > 1 else np.asarray(S, float).reshape(km.K, -1)[:, 0]
+    return int(Sx[km.MODE]) == km.M_NORMAL and float(Sx[km.ATTACKING]) <= 0.0 and int(Sx[km.RSTEPS]) <= 0
 
 
 def _value(wt: Window) -> float:
@@ -1870,7 +1894,7 @@ KILL_HP = 230
 
 
 def _closed_ds(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: Window, m: Macro, d: int,
-               paths: list) -> tuple:
+               paths: list, k_lo: int | None = None) -> tuple:
     """Step B of a down slash window's check (the Reflex docstring): per step A path (one per contact frame), every
     Clapper predicted fresh at fo under it; in every outcome the robust contact re-derived, in the window's target
     states, the bounce rolled from it (a killing slash bounces too: KILL_HP), no collision with anything over the
@@ -1907,7 +1931,7 @@ def _closed_ds(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: W
                 pos = np.concatenate([pre[:lead], rb.pos[0, :n + 1]])
                 ifr = np.zeros(lead + n + 1, bool)
                 ifr[lead + c + sk.DS_IFR[0]:lead + c + sk.DS_IFR[1] + 1] = True
-                kc = _collision(v, pos, ifr, [], lead + 1, lead + n, None)
+                kc = _collision(v, pos, ifr, [], lead + 1 if k_lo is None else int(k_lo), lead + n, None)
                 if kc is not None:
                     return False, f"B:hit@{kc - lead}"
                 H = _exit_h(v, lead + n, P.T)
@@ -1982,7 +2006,7 @@ def _check_cl(W, w: _World, n0: int, S: np.ndarray, o, wt: Window, m: Macro, d: 
 
 
 def _closed_cl(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: Window, m: Macro, d: int, info,
-               paths: list) -> tuple:
+               paths: list, k_lo: int | None = None) -> tuple:
     """Step B of a Clawline window's check (the Reflex docstring): per hook variant, every Clapper predicted fresh at
     fo under its nominal path; in every outcome that variant's hook on the target's boxes there, the continuation the
     runtime picks for the stop and control it shows (pick_alt over step A's reference stops; none -> the press would
@@ -2030,7 +2054,7 @@ def _closed_cl(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: W
                     pos = np.concatenate([pre[:lead], np.asarray(tr.pos, float)])
                     ifr = np.concatenate([np.zeros(lead, bool), np.asarray(tr.ifr, bool)])
                     hk = [_ShiftHook(x, lead) for x in tr.hooks]
-                    kc = _collision(v, pos, ifr, hk, lead + 1, lead + Lt - 1, None)
+                    kc = _collision(v, pos, ifr, hk, lead + 1 if k_lo is None else int(k_lo), lead + Lt - 1, None)
                     if kc is not None:
                         return False, f"B:hit@{kc - lead}:{vn}"
                     st_e = ms.state_at(W, tr, tr.end)

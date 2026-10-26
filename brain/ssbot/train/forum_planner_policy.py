@@ -162,6 +162,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
     win = None                  # task oldwin: ssbot.map2.oldwin.WindowRows with SSBOT_FORUM_WINDOWS=1 (a class default:
     #                             off, no instance attribute is added - see __init__)
+    wpress = None               # task oldwin stage N: ssbot.map2.oldwin_press.WinPress with SSBOT_FORUM_WINDOWS_PRESS=1
+    #                             (the slam windows by the reflex's exact check on a worker; a class default as win)
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
                  real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
@@ -270,6 +272,15 @@ class ForumPlannerPolicy(PlannerPolicy):
                 raise ValueError("SSBOT_FORUM_WINDOWS=1 needs SSBOT_FORUM_HERO2=1 (the table's hero model)")
             from ssbot.map2 import oldwin as m2oldwin
             self.win = m2oldwin.WindowRows()
+            # stage N (SSBOT_FORUM_WINDOWS_PRESS=1, default off): the slam windows (claw_slam0, claw_head2, hop_slam0,
+            # drop_slam0, pogo_head2) by the reflex's own path - the exact check on a worker, a bridge of the planner's
+            # keys, a Press owning the keys with its phases confirmed (ssbot.map2.oldwin_press); meant with the slam
+            # scripts off (SSBOT_FORUM_SLAM_PLAY=0 SSBOT_FORUM_CLAWSTRIKE=0)
+            if os.environ.get("SSBOT_FORUM_WINDOWS_PRESS", "0").strip() == "1":
+                from ssbot.map2 import oldwin_press as m2op
+                self.wpress = m2op.WinPress(self.win)
+        elif os.environ.get("SSBOT_FORUM_WINDOWS_PRESS", "0").strip() == "1":
+            raise ValueError("SSBOT_FORUM_WINDOWS_PRESS=1 needs SSBOT_FORUM_WINDOWS=1 (its Clapper tracker)")
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -365,6 +376,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.win.warm(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot), self.params,
                           Terrain2D.empty(), self.threads, _hf, HoldState.idle(1))     # task oldwin
             planner.warm_win(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot))
+            if self.wpress is not None and self.wpress.ready is None:
+                self.wpress.start()           # stage N: the check worker (spawned, warmed; inproc: the checker here)
         if air_chain.AIRCHAIN or claw_strike.AIRSTRIKE:
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         if claw_strike.CLAWSTRIKE:
@@ -523,6 +536,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self._m2_final = None
         if self.win is not None:
             self.win.reset()                     # task oldwin: a new Clapper tracker, no continued row
+        if self.wpress is not None:
+            self.wpress.reset()                  # stage N: no snapshot / commit / Press carried over
 
     # ---- perception hooks ----
 
@@ -535,6 +550,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.m2.feed(raw0, fo)               # M4c: the Clapper tracker, every STATE
         if self.win is not None:
             self.win.feed(raw0, fo)              # task oldwin: the window table's Clapper tracker, every STATE
+        if self.wpress is not None:
+            self.wpress.feed(raw0, fo)           # stage N: her clip / input / hits / freezes (the Press's phases)
         b = (raw0.get("hero") or {}).get("box")
         if b:
             self._boxes[fo] = (b, ws.stamp.t_game_s)
@@ -847,6 +864,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.air_show is not None and not self.air_show.done and self.planner_last is not None:
             self._air_k += 1
             air_tick = self._air_k % 2 == 1
+        if self.wpress is not None:
+            # stage N: while a committed press's bridge runs the planner's CONTINUE row is that bridge (M4d2's hold)
+            self.planner.hold_row = self.wpress.hold_row(f)
         if air_tick:
             res = self.planner_last
         else:
@@ -916,6 +936,17 @@ class ForumPlannerPolicy(PlannerPolicy):
         # come from TwoPlay.step below; the supervisor's still win)
         rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
         asw_crit = asw_crit or rt_crit
+        if self.wpress is not None:
+            # stage N (SSBOT_FORUM_WINDOWS_PRESS): a committed slam-window press / its bridge owns the keys; the scripts
+            # are not stepped (as under map2); a script's critical window (LOWHOP's bomb hop, ASW) defers a new commit
+            wm_ = self.wpress.decide(f, fo, raw, S0, prefix, hold, res, self.sent,
+                                     r.mask is not None or self.pause_owned or m2_on, crit=low_crit or asw_crit)
+            if wm_ is not None:
+                mask = play = int(wm_)
+                own = "win"
+                m2_on = True                      # (the scripts' own gates: not stepped while it has the keys)
+                self.counts["win_press"] += 1
+                self._play_tick = None
         if self.air_show is not None and not self.pause_owned and r.mask is None and not m2_on:
             # SP-AIR1 (SSBOT_FORUM_AIRSHOW): the air show owns the keys to the kill (no other script is stepped)
             trk_ = self.v2feed.trk if self.v2feed is not None else None
@@ -1096,6 +1127,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
+        if self.wpress is not None:
+            # stage N: the snapshot to the check worker (a slam window may open: the planner's row as the bridge) or
+            # a running press's re-check
+            self.wpress.post(f, fo, raw, S0, prefix, hold, int(mask), own, getattr(res, "cmd", None),
+                             r.mask is not None or self.pause_owned)
         if self.m2 is not None:
             # M4c: the snapshot to the search workers (the keys in flight with this one, the bridge expected while
             # they search) and map2's per-tick log row

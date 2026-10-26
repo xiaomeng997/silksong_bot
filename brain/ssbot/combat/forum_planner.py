@@ -267,7 +267,15 @@ WIN_PLC = os.environ.get("SSBOT_FORUM_WINDOWS_PLC", "1").strip() != "0"
 # stage F: SSBOT_FORUM_WINDOWS_CORE=1 enveloped as core rows (never cut by the deadline) with their hit enemy's reaction
 # under the old cap (d13788fa); default 0: after the old planner's own rows, cut by the deadline, their reaction checked
 # outside the cap without spending it (h2's rows keep their order, time and reaction budget)
-WIN_CORE = os.environ.get("SSBOT_FORUM_WINDOWS_CORE", "0").strip() == "1"
+WIN_CORE = os.environ.get("SSBOT_FORUM_WINDOWS_CORE", "0").strip() in ("1", "2")
+# stage N: SSBOT_FORUM_WINDOWS_CORE=2 - enveloped as core rows (never cut by the deadline: stage L's live 0 / 984) with
+# their hit enemy's reaction checked OUTSIDE the cap without spending it (stage F's fix for the cap starving them); =1:
+# d13788fa's core order under the cap
+WIN_CORE_CAP = os.environ.get("SSBOT_FORUM_WINDOWS_CORE", "0").strip() == "1"
+# stage N: SSBOT_FORUM_WINDOWS_RANK=1 (default 0) - a safe CERTAIN window row (the two models agree on its contact, or
+# its credited strike past the horizon) ranks first among the safe rows with the same keys above the landed hits (below
+# every safety / commitment key: hz, U, S, clash, keep, the kept / held rows, NODASH & co.): ahead of v2_nh / v2_ff
+WIN_RANK = os.environ.get("SSBOT_FORUM_WINDOWS_RANK", "0").strip() == "1"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -549,6 +557,7 @@ class EnvelopeAudit:
     sm_full_ticks: int = 0        # SSBOT_FORUM_SPECIAL_FAST (G3): ticks that rolled the whole template set
     sm_board_cached: int = 0      #   ticks whose BOARD is the last full tick's strike spot
     win_ticks: int = 0            # task oldwin (SSBOT_FORUM_WINDOWS): ticks with window rows given to the checks
+    win_rank_ticks: int = 0       # stage N (SSBOT_FORUM_WINDOWS_RANK): ticks with a safe certain window row ranked first
     win_rows: int = 0             #   the rows
     win_chosen: int = 0           #   ticks a window row was chosen (safe)
     win_forced_out: int = 0       #   stage F: FORCED_RISK ticks whose certain window rows were taken out of the ranking
@@ -3969,7 +3978,7 @@ class ForumPlanner(Planner):
             if hr_ds is not None and len(hr_ds):
                 budget["hitfx_ds"] = budget.get("hitfx_ds", 0) + len(hr_ds)      # (the other rows' room unchanged)
                 isw_ = win_rows_[hr_ds]
-                for grp_, cap_ in ((hr_ds[~isw_], True), (hr_ds[isw_], WIN_CORE)):
+                for grp_, cap_ in ((hr_ds[~isw_], True), (hr_ds[isw_], WIN_CORE_CAP)):
                     if not len(grp_):
                         continue
                     # stage F: the window rows (enveloped after the old order) get their hit enemy's reaction checked
@@ -4435,17 +4444,27 @@ class ForumPlanner(Planner):
                 self.audit.rx_ticks += 1
                 self.audit.rx_split += int(rxl_.any() and (safe & ~rxl_).any())
                 nd_ = nd_ + (rxl_.astype(np.int64),)
+            wk_ = ()
+            if WIN_RANK and n_ds and win_rows_.any():
+                # stage N (SSBOT_FORUM_WINDOWS_RANK): the safe certain window rows first above the landed hits
+                wr_ = np.zeros(N, bool)
+                wr_[D0:D0 + n_ds] = (ds.cert | (ds.extra > 0)) & win_rows_[D0:D0 + n_ds]
+                wr_ &= safe
+                if wr_.any():
+                    wk_ = ((~wr_).astype(np.int64),)
+                    self.audit.win_rank_ticks += 1
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V,
-                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + nd_ + kk_ +
+                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + wk_ + nd_ + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V, v2_ff
-                                    ) + gf_ + (v2_nh, offl) + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
+                                    ) + gf_ + (v2_nh, offl) + wk_ + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
+                                                                              hz))
             order = order[sel[order]]
             i = int(order[0])
             tail_ok = None
