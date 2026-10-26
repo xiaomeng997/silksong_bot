@@ -30,6 +30,20 @@ in is either the rnjb scripts (CLAWSTRIKE for the slam, CLAW_CHASE for the evade
 worker (map2.reflex, integration plan) - see HANDOFF 'Task oldwin'.
 
 Only FULL cells (every sample point of the cell a window) are used.
+
+STAGE F (the review of d13788fa; HANDOFF 'Task oldwin - stage F'):
+  - the Clapper tracker runs on the GAME-frame clock (dt x 60 summed, as map2.live.Map2Controller.feed: a hit-stop
+    freeze is not a Clapper frame - the table's j); a CONT row ends at a freeze (a STATE frame with dt x 60 outside
+    FREEZE_LO .. FREEZE_HI) and checks the Clapper's frame by the game clock;
+  - the dx margin needs both neighbours FULL cells (a partial neighbour: a failing sample point one bin away);
+  - the reflex's gates before the lookup: no rows while a Clapper is in its intro (cm.INTRO) or her Clawline is latched
+    / on its way (M_CLAW in the keys in flight or the last latched mask, her clip Harpoon*);
+  - a CONT row is re-keyed from her current state while its approach is ahead (her rollout to the macro's start in the
+    stored cell, else dropped) and, once its macro runs, checked on her velocity too; it carries the audit's decision.
+The planner side (forum_planner._win_rows): a row is a certain hit only when the planner's own strike model meets the
+same target on the table's contact frame (else it is judged on its own lane as any row); the bounce on the mask before
+the contact (the table's convention); FORCED_RISK leaves certain window rows out; the window rows are enveloped after
+the old planner's own rows (cut by the deadline); a long row's tail checked on both lanes by the box's corners.
 """
 from __future__ import annotations
 
@@ -71,6 +85,9 @@ _DX1 = 1 << 25                     # dx's place in the packed key (the fields af
 _J, _L, _R = km.B_JUMP, km.B_LEFT, km.B_RIGHT
 AUDIT = os.environ.get("SSBOT_FORUM_WINDOWS_AUDIT", "0").strip() == "1"   # (offline: the chosen rows kept for the
 #                                  reflex's exact check - WindowRows.log; the replay dumps it)
+FREEZE_LO, FREEZE_HI = 0.9, 1.25   # a STATE frame with dt x 60 outside: a freeze / its ramp / a long frame (map2 LiveCfg)
+CONT_VTOL = 1.2                    # u/s: her observed velocity vs the chosen row's lane once its macro runs (VY_Q / 2)
+M_CLAW = 1 << 4                    # the Clawline button (reflex.M_CLAW)
 
 
 def enabled() -> bool:
@@ -91,6 +108,9 @@ class Cand:
     n_macro: int                   # the macro's frames (latched unchanged required)
     tpl: str = ""                  # the approach shape
     dec: tuple | None = None       # (her state at the macro's decision, the Clappers there, the macro): the audit
+    pk: int = 0                    # the cell's packed key (the CONT re-key)
+    macro: object = None           # the cell's Macro
+    cert: bool = True              # set by the planner: judged as a certain hit (False: on its own lane as any row)
 
 
 def _pack_np(wt, st, j, band, dxq, cls, bbq, sub, vxc, adash, cvx, chg) -> np.ndarray:
@@ -145,21 +165,39 @@ class WindowRows:
         if self.table._arr is None:
             raise ValueError("WindowRows needs a loaded table (Table.load)")
         self.keys = self.table._arr[0]
-        self.trk = cm.Tracker()
-        self._obs_k = None
-        self._obs: list = []
+        conf = np.asarray(self.table._arr[5])
+        self.full = conf[:, 0] == conf[:, 1]          # per key: a full cell (every sample point a window)
         self._tpl: dict = {}
-        self.prev = None           # the chosen row's continuation state (note_chosen)
         self.audit = Counter()
         self.log: list = []        # AUDIT: the chosen rows (note_chosen) for the offline exact check
+        self.reset()
 
     # ---- the tracker ----
     def reset(self) -> None:
         self.trk = cm.Tracker()
         self._obs_k, self._obs, self.prev = None, [], None
+        self.g = None              # the game-frame clock (dt x 60 summed; Map2Controller.feed's)
+        self.fo = None             # the last STATE frame fed, its game clock (rounded), the last freeze's STATE frame
+        self.gk = 0
+        self.last_freeze = None
+        self.lat_s = 0             # her latched mask on the last STATE (act.mask)
+        self.harpoon = False       # her clip on the last STATE is a Clawline's (Harpoon*)
 
     def feed(self, raw: dict, fo: int) -> None:
-        self.trk.feed(raw, fo)
+        """Every STATE: the Clapper tracker on the game-frame clock (stage F: a hit-stop freeze / its slow-time ramp is
+        not a Clapper frame - the table's j counts game frames, as map2's tracker), the freezes, her latched mask and
+        clip (the Clawline gate)."""
+        dt_ = raw.get("dt")
+        dt = 1.0 / 60.0 if dt_ is None else float(dt_)
+        self.g = 0.0 if self.g is None else self.g + min(max(dt, 0.0), 0.05) * 60.0
+        self.gk = int(round(self.g))
+        self.fo = int(fo)
+        self.trk.feed(raw, self.gk)
+        if not (FREEZE_LO <= dt * 60.0 <= FREEZE_HI):
+            self.last_freeze = int(fo)
+        self.lat_s = int((raw.get("act") or {}).get("mask") or 0)
+        h = raw.get("hero") or {}
+        self.harpoon = str(((h.get("anim") or {}).get("clip")) or "").startswith("Harpoon")
 
     def obs(self) -> list:
         if self._obs_k != self.trk.k:
@@ -173,6 +211,18 @@ class WindowRows:
         pk = np.asarray(pk, np.int64)
         ii = np.minimum(np.searchsorted(self.keys, pk), len(self.keys) - 1)
         return self.keys[ii] == pk
+
+    def _has_full(self, pk: np.ndarray) -> np.ndarray:
+        """Packed keys present in the table as FULL cells."""
+        pk = np.asarray(pk, np.int64)
+        ii = np.minimum(np.searchsorted(self.keys, pk), len(self.keys) - 1)
+        return (self.keys[ii] == pk) & self.full[ii]
+
+    def _margin(self, pk: np.ndarray) -> np.ndarray:
+        """The dx margin (MARGIN): both dx neighbours of the keys are full cells (stage F: a partial neighbour has a
+        failing sample point one bin away - the edge the margin is for)."""
+        pk = np.asarray(pk, np.int64)
+        return self._has_full(pk + _DX1) & self._has_full(pk - _DX1)
 
     def _entry(self, pk: int):
         e = self.table._entry(int(pk))
@@ -202,7 +252,7 @@ class WindowRows:
                 if wn not in DS_TYPES:
                     info["off"][wn] += 1                      # a type not given as rows (SSBOT_FORUM_WINDOWS_TYPES)
                     continue
-                if MARGIN and not self._has(np.array([pk + _DX1, pk - _DX1], np.int64)).all():
+                if MARGIN and not bool(self._margin(np.array([pk], np.int64))[0]):
                     info["edge"][wn] += 1                     # an edge cell: a dx neighbour is no window
                     continue
                 if not full:
@@ -216,7 +266,8 @@ class WindowRows:
                 ks = e.k_strike or (e.macro.t + 3,)
                 cands.append(Cand("now", wn, int(o.iid), raw.pre.copy(), 0, P + int(ks[0]), P + int(ks[-1]),
                                   key.short(), e.macro.label(), len(raw.pre),
-                                  dec=(S.copy(), [_advance(x, P) for x in self.obs()], e.macro) if AUDIT else None))
+                                  dec=(S.copy(), [_advance(x, P) for x in self.obs()], e.macro) if AUDIT else None,
+                                  pk=int(pk), macro=e.macro))
 
     def _approach(self, start, lat_p, ro, lat_full, M, names, live, P: int, T: int, cands: list, info: dict) -> None:
         """APPROACH rows: the shapes' states at every frame j keyed (vectorized) against each Clapper's cells there."""
@@ -275,7 +326,7 @@ class WindowRows:
                     ii = np.minimum(ii, len(self.keys) - 1)
                     found = m_ & self._has(pk)
                     if MARGIN:
-                        found &= self._has(pk + _DX1) & self._has(pk - _DX1)
+                        found &= self._margin(pk)
                     for r_, c_ in zip(*np.nonzero(found)):
                         hits.append((o, wn, int(r_), int(js[c_]), int(pk[r_, c_]), float(cd[c_])))
         info["appr_found"] += len(hits)
@@ -329,10 +380,13 @@ class WindowRows:
                 cands.append(Cand("appr", wn, int(o.iid), cmd, j, P + j + int(ks[0]), P + j + int(ks[-1]), key.short(),
                                   e.macro.label(), len(raw.pre), names[r_],
                                   dec=(np.asarray(S).copy(), [_advance(x, P + j) for x in self.obs()], e.macro)
-                                  if AUDIT else None))
+                                  if AUDIT else None, pk=int(pk), macro=e.macro))
 
-    def _cont(self, start, prefix: np.ndarray, f: int, fo: int, P: int, live: list, cands: list, info: dict) -> None:
-        """CONT: last tick's chosen window row, shifted by the frames elapsed, while she follows it."""
+    def _cont(self, start, prefix: np.ndarray, hold, hold_filter, f: int, fo: int, P: int, live: list, cands: list,
+              info: dict) -> None:
+        """CONT: last tick's chosen window row, shifted by the frames elapsed, while she follows it (stage F: no freeze
+        since; the Clapper's frame by the game clock; while the approach is ahead her rollout to the macro's start
+        re-keyed into the stored cell, once the macro runs her velocity on the lane's)."""
         pv, self.prev = self.prev, None
         if pv is None:
             return
@@ -340,6 +394,9 @@ class WindowRows:
         k0 = pv["fo"] + pv["k0"] - fo
         if d <= 0 or d >= len(pv["cmd"]) or k0 <= P:
             info["cont_end"] += 1
+            return
+        if self.last_freeze is not None and self.last_freeze > pv["fo"]:
+            info["cont_freeze"] += 1                  # a freeze since: the Clapper's frame / her lane are off
             return
         sent = pv["cmd"][max(d - P, 0):d]
         if len(sent) and not np.array_equal(np.asarray(prefix[-len(sent):], np.int64), sent):
@@ -352,20 +409,49 @@ class WindowRows:
             info["cont_dev"] += 1
             return
         o = next((o for o in live if int(o.iid) == pv["iid"]), None)
-        if o is None or o.st != pv["st"] or int(o.j) != pv["oj"] + (fo - pv["fo"]):
+        if o is None or o.st != pv["st"] or int(o.j) != pv["oj"] + (self.gk - pv["g"]):
             info["cont_clapper"] += 1
             return
-        cands.append(Cand("cont", pv["wt"], pv["iid"], pv["cmd"][d:].copy(), max(pv["j"] - d, 0), k0,
+        cmd = pv["cmd"][d:].copy()
+        jr = pv["j"] - d                              # the approach's frames still ahead of the macro
+        dec = None
+        if jr > 0:
+            # the re-key (as an APPROACH pick's): her rollout through the keys in flight and the approach's rest
+            seq = np.concatenate([np.asarray(prefix, np.int64), cmd[:jr]])
+            lat = hold_filter(seq[None], hold)[0][0]
+            S = km.rollout(start, lat[None], self._params, self._terrain, threads=1).final[:, 0]
+            on = _advance(o, P + jr)
+            key = rx.cell_of(S, on, rx.WINDOWS[pv["wt"]])
+            mac = pv["macro"]
+            if key is None or rx.pack_key(key) != pv["pk"] or \
+                    (mac is not None and float(S[km.ATK_CD]) > (mac.t - 1) / 60.0 + 1e-6):
+                info["cont_rekey"] += 1
+                return
+            if AUDIT:
+                dec = (np.asarray(S).copy(), [_advance(x, P + jr) for x in self.obs()], mac)
+        else:
+            vl = pv["vel"]
+            if vl is None or not (0 <= li < len(vl)) or abs(float(st0[km.VX]) - vl[li, 0]) > CONT_VTOL or \
+                    abs(float(st0[km.VY]) - vl[li, 1]) > CONT_VTOL:
+                info["cont_vel"] += 1
+                return
+        cands.append(Cand("cont", pv["wt"], pv["iid"], cmd, max(jr, 0), k0,
                           pv["fo"] + pv["k1"] - fo, pv["key"], pv["label"],
-                          max(pv["n_macro"] - max(d - pv["j"], 0), 0), pv["tpl"]))
+                          max(pv["n_macro"] - max(d - pv["j"], 0), 0), pv["tpl"], dec=dec, pk=pv["pk"],
+                          macro=pv["macro"]))
         info["cont"] += 1
 
-    def note_chosen(self, c: "Cand | None", f: int, fo: int, lane_phys: np.ndarray | None) -> None:
+    def note_chosen(self, c: "Cand | None", f: int, fo: int, lane_phys: np.ndarray | None,
+                    lane_vel: np.ndarray | None = None) -> None:
         """The planner's chosen row this tick (None: not a window row): its continuation next tick."""
+        if c is not None:
+            self.audit[f"chosen_{c.kind}{'' if c.cert else '_nocert'}"] += 1
+            if c.dec is None:
+                self.audit["chosen_nodec"] += 1          # (a CONT whose macro runs: its decision was audited)
         if AUDIT and c is not None and c.dec is not None:
             self.log.append({"f": f, "fo": fo, "kind": c.kind, "wt": c.wt, "iid": c.iid, "key": c.key, "label": c.label,
                              "k0": c.k0, "j": c.j, "P": f + 1 - fo, "S": c.dec[0], "obs": c.dec[1], "macro": c.dec[2],
-                             "mems": self.trk.mems()})
+                             "mems": self.trk.mems(), "cert": bool(c.cert)})
         if c is None or lane_phys is None:
             self.prev = None
             return
@@ -373,9 +459,10 @@ class WindowRows:
         if o is None:
             self.prev = None
             return
-        self.prev = {"f": f, "fo": fo, "k0": c.k0, "k1": c.k1, "cmd": np.asarray(c.cmd, np.int64), "iid": c.iid,
-                     "wt": c.wt, "st": o.st, "oj": int(o.j), "key": c.key, "label": c.label, "j": c.j,
-                     "n_macro": c.n_macro, "tpl": c.tpl, "lane": np.asarray(lane_phys)}
+        self.prev = {"f": f, "fo": fo, "g": self.gk, "k0": c.k0, "k1": c.k1, "cmd": np.asarray(c.cmd, np.int64),
+                     "iid": c.iid, "wt": c.wt, "st": o.st, "oj": int(o.j), "key": c.key, "label": c.label, "j": c.j,
+                     "n_macro": c.n_macro, "tpl": c.tpl, "lane": np.asarray(lane_phys), "pk": int(c.pk),
+                     "macro": c.macro, "vel": None if lane_vel is None else np.asarray(lane_vel)}
 
     def warm(self, S, params, terrain, threads: int, hold_filter, hold) -> float:
         """The numba paths a window tick uses (the shapes' rollout at the planner's threads, the one-row rollouts,
@@ -405,16 +492,29 @@ class WindowRows:
         info = {"cl": Counter(), "part": Counter(), "cd": Counter(), "off": Counter(), "edge": Counter(),
                 "appr_found": 0,
                 "appr_rekey_miss": 0,
-                "cont": 0, "cont_end": 0, "cont_keys": 0, "cont_dev": 0, "cont_clapper": 0}
+                "cont": 0, "cont_end": 0, "cont_keys": 0, "cont_dev": 0, "cont_clapper": 0, "cont_freeze": 0,
+                "cont_rekey": 0, "cont_vel": 0, "gate": ""}
         P = len(prefix)
         st0 = np.asarray(start).reshape(km.K, -1)[:, 0]
         hx = float(st0[km.PX])
-        live = [o for o in self.obs() if abs(o.x - hx) <= REACH_U and
-                _types_in(o.st, int(o.j) + P, int(o.j) + P + T, DS_TYPES + CL_TYPES)]
         cands: list = []
+        # stage F: the reflex's gates before the lookup (reflex.Reflex.tick 0.): a Clapper in its intro (its body and
+        # first move are in no check), her Clawline latched / on its way / flying (the old hero model has none)
+        allo = self.obs()
+        if any(o.st in cm.INTRO for o in allo if o.hp > 0):
+            info["gate"] = "intro"
+        elif (self.lat_s & M_CLAW) or bool((np.asarray(prefix, np.int64) & M_CLAW).any()) or self.harpoon:
+            info["gate"] = "claw"
+        if info["gate"]:
+            self.prev = None
+            self.audit["gate_" + info["gate"]] += 1
+            info["ms"] = (time.perf_counter() - t0) * 1e3
+            return cands, info
+        live = [o for o in allo if abs(o.x - hx) <= REACH_U and
+                _types_in(o.st, int(o.j) + P, int(o.j) + P + T, DS_TYPES + CL_TYPES)]
         self._params, self._terrain, self._threads = params, terrain, int(threads)
         if self.prev is not None:
-            self._cont(start, np.asarray(prefix, np.int64), f, fo, P, live, cands, info)
+            self._cont(start, np.asarray(prefix, np.int64), hold, hold_filter, f, fo, P, live, cands, info)
         if not live:
             info["ms"] = (time.perf_counter() - t0) * 1e3
             return cands, info

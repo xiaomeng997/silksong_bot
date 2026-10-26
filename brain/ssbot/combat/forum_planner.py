@@ -258,9 +258,15 @@ MAP_LANE_TOL_Y = 0.12
 # envelope / escape / clash deadlines (with deadlines on, replays: the escape check ran out of time on +63 % ticks and
 # the chosen rows were left unchecked); SSBOT_FORUM_SPECIAL_MAP_DL=0: they count (SG4)
 MAP_DL_SHIFT = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_DL", "1").strip() != "0"
-# task oldwin (with SSBOT_FORUM_WINDOWS): SSBOT_FORUM_WINDOWS_MEASURE=1 (offline) also predicts each window row's contact
-# with the planner's own body model (_ds_hits on the miss lane) for last_info['win'] - a measurement, off live
+# task oldwin (with SSBOT_FORUM_WINDOWS): SSBOT_FORUM_WINDOWS_MEASURE=1 was d13788fa's offline measurement of the planner's
+# own contact on the window rows; since stage F that contact is always computed (it decides a row's certainty) - unused
 WIN_MEASURE = os.environ.get("SSBOT_FORUM_WINDOWS_MEASURE", "0").strip() == "1"
+# stage F: SSBOT_FORUM_WINDOWS_PLC (default 1) - a window row is a certain hit only when the planner's own strike model
+# meets its target on the table's contact frame (else judged on its own lane); 0: every in-horizon row certain (d13788fa)
+WIN_PLC = os.environ.get("SSBOT_FORUM_WINDOWS_PLC", "1").strip() != "0"
+# stage F: SSBOT_FORUM_WINDOWS_CORE=1 enveloped as core rows (never cut by the deadline: d13788fa); default 0: after the
+# old planner's own rows, cut by the deadline (h2's rows keep their order and time)
+WIN_CORE = os.environ.get("SSBOT_FORUM_WINDOWS_CORE", "0").strip() == "1"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -544,6 +550,7 @@ class EnvelopeAudit:
     win_ticks: int = 0            # task oldwin (SSBOT_FORUM_WINDOWS): ticks with window rows given to the checks
     win_rows: int = 0             #   the rows
     win_chosen: int = 0           #   ticks a window row was chosen (safe)
+    win_forced_out: int = 0       #   stage F: FORCED_RISK ticks whose certain window rows were taken out of the ranking
     ds_ticks: int = 0             # SSBOT_FORUM_DSLASH (task 1v1 G3): ticks the family ran (a real target in reach)
     ds_tpl: int = 0               #   templates rolled out to their press
     ds_pass: int = 0              #   templates through the prefilter (the blade meets a predicted body)
@@ -3092,24 +3099,22 @@ class ForumPlanner(Planner):
 
     def warm_win(self, S) -> None:
         """Task oldwin: _win_rows' rollout paths with their array layouts (the bounce lanes: fancy-indexed rows with
-        events; the long rows' tail in two parts from sliced views) - the first window tick of a replay compiled them
-        mid-fight (1.8 s)."""
+        events; the miss lanes and the long tails from contiguous arrays) and the planner's strike model on them
+        (stage F: always on) - the first window tick of a replay compiled them mid-fight (1.8 s)."""
         T, P, th = int(self.fcfg.T), 2, self.cfg.threads
         lat = np.zeros((3, P + T + 24), np.int64)
         ev = np.zeros((3, P + T), np.int64)
         ev[:, 12] = kin.EV_POGO
         ci = np.array([0, 2], np.int64)
         kin.rollout(S, lat[ci, :P + T], self.params, self.terrain, events=ev[ci], threads=th)
-        lt_ = np.zeros((2, P + T + 24), np.int64)
-        evl = np.zeros_like(lt_)
+        lw_ = np.zeros((3, P + T + 24), np.int64)
+        rm = kin.rollout(S, lw_, self.params, self.terrain, threads=th)
+        evl = np.zeros((2, P + T + 24), np.int64)
         evl[:, P + T + 5] = kin.EV_POGO
-        rp = kin.rollout(S, lt_[:, :P + T], self.params, self.terrain, events=evl[:, :P + T], threads=th)
-        kin.rollout(rp.final, lt_[:, P + T:], self.params, self.terrain, events=evl[:, P + T:], threads=th)
-        if WIN_MEASURE:
-            rm = kin.rollout(S, lat[ci, :P + T], self.params, self.terrain, threads=th)
-            tb = np.full((1, P + T + 1, 4), np.nan)
-            self._ds_hits(rm, lat[ci, :P + T], 1, tb, np.zeros((1, P + T + 1), np.bool_), np.ones(1, np.bool_),
-                          np.full(2, P + 1, np.int64), 0.0, np.zeros(0, np.int64))
+        kin.rollout(S, np.ascontiguousarray(lw_[ci]), self.params, self.terrain, events=evl, threads=th)
+        tb = np.full((1, P + T + 25, 4), np.nan)
+        self._ds_hits(rm, lw_, 1, tb, np.zeros((1, P + T + 25), np.bool_), np.ones(1, np.bool_),
+                      np.full(3, P + 1, np.int64), 0.0, np.zeros(0, np.int64))
 
     def _win_rows(self, win_, ws, f, start, hold, prefix, prefs, T: int, posture: str, ds):
         """Task oldwin (SSBOT_FORUM_WINDOWS=1; the policy sets self.win = ssbot.map2.oldwin.WindowRows, None: nothing
@@ -3118,8 +3123,9 @@ class ForumPlanner(Planner):
         the family): the macro latched unchanged by the hold filter after the keys in flight, the contact from the
         table (k_strike's earliest outcome) on its target, the bounce lane from the contact; a contact past the
         horizon (<= LONG_MAX frames): the row within the horizon as any row, its tail to the contact + POST_F against
-        the support with the bounce, the strike credited ('extra'). Every other check is the planner's own. The
-        planner's own contact prediction on the miss lane is kept for the measurement (last_info['win'])."""
+        the support with the bounce, the strike credited ('extra'). Every other check is the planner's own. Stage F:
+        certain (the bounce lane / the credit) only where the planner's own strike model agrees with the table's
+        contact (frame and target), else judged on its own lane; the bounce on the mask before the contact."""
         t0 = time.perf_counter()
         a_ = self.audit
         P = len(prefix)
@@ -3131,9 +3137,12 @@ class ForumPlanner(Planner):
         for k_ in ("cl", "part", "cd", "off", "edge"):
             if info[k_]:
                 self._win_info[k_] = dict(info[k_])
-        for k_ in ("appr_found", "appr_rekey_miss", "cont", "cont_end", "cont_keys", "cont_dev", "cont_clapper"):
+        for k_ in ("appr_found", "appr_rekey_miss", "cont", "cont_end", "cont_keys", "cont_dev", "cont_clapper",
+                   "cont_freeze", "cont_rekey", "cont_vel"):
             if info[k_]:
                 self._win_info[k_] = int(info[k_])
+        if info["gate"]:
+            self._win_info["gate"] = info["gate"]
         if not cands:
             self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
             return ds
@@ -3147,10 +3156,9 @@ class ForumPlanner(Planner):
         lat, _ = hold_filter_jit(np.concatenate([pre, X], axis=1), hold)
         keep_q, why = [], Counter()
         for q, c in enumerate(cands):
-            k0 = int(c.k0) - int(dslash.EVPRE)
             if not np.array_equal(lat[q, P:P + len(c.cmd)], X[q, :len(c.cmd)]):
                 why["hold"] += 1                       # the filter changes the macro: not the table's keys
-            elif c.k0 <= P or k0 < 0:
+            elif c.k0 <= P:                            # (the bounce's mask c.k0 - 1 is in the prefix)
                 why["past"] += 1
             elif c.k0 > P + T + LONG_MAX:
                 why["far"] += 1
@@ -3166,83 +3174,92 @@ class ForumPlanner(Planner):
         n = len(cands)
         c1 = np.array([int(c.k0) for c in cands], np.int64)
         inh = c1 < P + T
+        th = self.cfg.threads
+        ft = self.params.frame_time
+        st_ = np.asarray(start).reshape(kin.K, -1)
+        face0 = 1 if st_[kin.FACE, 0] >= 0 else -1
+        # stage F (review findings 1 / 7): the planner's own strike model on the row's own lane (no bounce: the lane if
+        # the slash missed). A row is a certain hit (judged on its bounce lane) only when the planner's first strike
+        # contact is on the row's target AT the table's contact frame - two independent models agree; otherwise it is
+        # judged on its own (miss) lane as any row (the scorer credits a hit only where its model sees one) and a long
+        # row gets no strike credit, its tail judged without the bounce. SSBOT_FORUM_WINDOWS_PLC=0: every row certain
+        li = np.flatnonzero(~inh)
+        Lt = T
+        if len(li):
+            Lt = max(T + 1, int(max(int(c1[q]) - P + POST_F for q in li)))
+        Lw = P + max(Lt, T)
+        lw_ = np.zeros((n, Lw), np.int64)               # the rows' latched keys to the long tails' end (no keys after)
+        w_ = min(Lw, lat.shape[1])
+        lw_[:, :w_] = lat[:, :w_]
+        rm = kin.rollout(start, lw_, self.params, self.terrain, threads=th)     # the miss lanes
+        c_pl = np.full(n, -1, np.int64)
+        tk_e = np.arange(Lw + 1, dtype=np.float64) * ft
+        tbox, tok, _tw, keep = self._forum_targets(ws, f, tk_e, prefs)
+        if len(keep):
+            treal = np.array([not t.hazard and not getattr(t, "blocked", False) for t in keep], np.bool_)
+            _, cc, tt, _ = self._ds_hits(rm, lw_, face0, tbox, tok, treal, np.full(n, P + 1, np.int64), 0.0,
+                                         np.zeros(0, np.int64))
+            for q in range(n):
+                c_pl[q] = int(cc[q]) if cc[q] >= 0 and int(keep[int(tt[q])].iid) == cands[q].iid \
+                    else (-1 if cc[q] < 0 else -3)
+        agree = (c_pl == c1) | (not WIN_PLC)
+        cert = inh & agree
         ev = np.zeros((n, P + T), np.int64)
-        ev[np.flatnonzero(inh), c1[inh] - int(dslash.EVPRE)] = kin.EV_POGO
+        # stage F (finding 5): the bounce on the mask BEFORE the contact frame (the table's / map2's ev[c - 1]; the
+        # rollout's state c follows mask c - 1), whatever SSBOT_FORUM_DSLASH_EVPRE says for the family's rows
+        ev[np.flatnonzero(cert), c1[cert] - 1] = kin.EV_POGO
         extra = np.zeros(n, np.int64)
         ok = np.ones(n, bool)
         lane = None
-        if inh.any():
-            ci = np.flatnonzero(inh)
-            rb = kin.rollout(start, lat[ci, :P + T], self.params, self.terrain, events=ev[ci], threads=self.cfg.threads)
+        if cert.any():
+            ci = np.flatnonzero(cert)
+            rb = kin.rollout(start, lat[ci, :P + T], self.params, self.terrain, events=ev[ci], threads=th)
             lane = {nm: getattr(rb, nm) for nm in ("phys", "pos", "vel", "mode", "flags", "box")}
             lane["final"] = rb.final
-        if (~inh).any():
-            # the long rows' tail past the horizon (to the contact + POST_F) against the support, with the bounce
-            li = np.flatnonzero(~inh)
-            Lt = int(min(L, max(int(c1[q]) - P + POST_F for q in li)))
-            Lt = max(Lt, T + 1)
-            lt_ = np.zeros((len(li), P + Lt), np.int64)
-            lt_[:, :min(P + Lt, lat.shape[1])] = lat[li, :P + Lt]
-            evl = np.zeros((len(li), P + Lt), np.int64)
+        if len(li):
+            # the long rows' tail past the horizon (to the contact + POST_F; past the row's keys none) against the
+            # support - stage F (finding 11): every corner of her box and its centre, F_INVULN skipped; a row the two
+            # models agree on with the bounce (its strike credited), any other one on its miss lane (no credit)
+            ag = agree[li]
+            evl = np.zeros((len(li), Lw), np.int64)
             for m_, q in enumerate(li):
-                if int(c1[q]) - int(dslash.EVPRE) < P + Lt:
-                    evl[m_, int(c1[q]) - int(dslash.EVPRE)] = kin.EV_POGO
-            rp = kin.rollout(start, lt_[:, :P + T], self.params, self.terrain, events=evl[:, :P + T],
-                             threads=self.cfg.threads)
-            rt = kin.rollout(rp.final, lt_[:, P + T:], self.params, self.terrain, events=evl[:, P + T:],
-                             threads=self.cfg.threads)
+                if ag[m_] and int(c1[q]) - 1 < Lw:
+                    evl[m_, int(c1[q]) - 1] = kin.EV_POGO
+            rt = kin.rollout(start, np.ascontiguousarray(lw_[li]), self.params, self.terrain, events=evl, threads=th)
             T1 = P + T + 1
-            ft = self.params.frame_time
-            bx = rt.box[:, 1:]
+            bx = rt.box[:, T1:]
             tq = (T1 + np.arange(bx.shape[1])) * ft
-            o = f.occupied(0.5 * (bx[..., 0] + bx[..., 2]), 0.5 * (bx[..., 1] + bx[..., 3]), tq)
-            o &= (rt.flags[:, 1:] & F_INVULN) == 0
+            o = np.zeros(bx.shape[:2], bool)
+            for xs, ys in ((0.5 * (bx[..., 0] + bx[..., 2]), 0.5 * (bx[..., 1] + bx[..., 3])),
+                           (bx[..., 0], bx[..., 1]), (bx[..., 2], bx[..., 1]), (bx[..., 0], bx[..., 3]),
+                           (bx[..., 2], bx[..., 3])):
+                o |= f.occupied(np.ascontiguousarray(xs), np.ascontiguousarray(ys), tq)
+            o &= (rt.flags[:, T1:] & F_INVULN) == 0
             for m_, q in enumerate(li):
                 lim = int(c1[q]) - P + POST_F - T
                 if o[m_, :max(lim, 1)].any():
                     ok[q] = False
-                else:
+                elif ag[m_]:
                     extra[q] = 1
             self._win_info["tail_fail"] = int((~ok[li]).sum())
-        # the planner's own contact on the miss lane (the measurement: its prediction vs the table's; offline only)
-        c_pl = np.full(n, -2, np.int64)
-        try:
-            if WIN_MEASURE and inh.any():
-                ci = np.flatnonzero(inh & ok)
-                if len(ci):
-                    tk_e = np.arange(P + T + 1, dtype=np.float64) * self.params.frame_time
-                    tbox, tok, _tw, keep = self._forum_targets(ws, f, tk_e, prefs)
-                    if len(keep):
-                        treal = np.array([not t.hazard and not getattr(t, "blocked", False) for t in keep], np.bool_)
-                        rm = kin.rollout(start, lat[ci, :P + T], self.params, self.terrain, threads=self.cfg.threads)
-                        st_ = np.asarray(start).reshape(kin.K, -1)
-                        face0 = 1 if st_[kin.FACE, 0] >= 0 else -1
-                        _, cc, tt, _ = self._ds_hits(rm, lat[ci, :P + T], face0, tbox, tok, treal,
-                                                     np.full(len(ci), P + 1, np.int64), 0.0, np.zeros(0, np.int64))
-                        for m_, q in enumerate(ci):
-                            c_pl[q] = int(cc[m_]) if cc[m_] >= 0 and int(keep[int(tt[m_])].iid) == cands[q].iid \
-                                else (-1 if cc[m_] < 0 else -3)
-        except Exception as e:  # noqa: BLE001  (a measurement only)
-            self._win_info["c_pl_err"] = repr(e)[:80]
         sel = np.flatnonzero(ok)
+        self._win_info["nocert"] = int((inh & ~agree).sum())
         if not len(sel):
             self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
             return ds
+        for q in range(n):
+            cands[q].cert = bool(cert[q] or extra[q])
         cands = [cands[q] for q in sel]
-        cert = inh[sel]
-        if lane is not None:
-            cm_ = np.flatnonzero(inh)                    # lane rows = the in-horizon rows in order
-            pos_ = {int(q): m_ for m_, q in enumerate(cm_)}
-            pick = [pos_[int(q)] for q in sel if inh[q]]
-            lane = {nm: (v[pick] if nm != "final" else v[:, pick]) for nm, v in lane.items()} if pick else None
-        names = [f"WIN {c.kind} {c.wt} {c.label}" + (f" {c.tpl}@{c.j}" if c.kind == "appr" else "") for c in cands]
+        names = [f"WIN {c.kind} {c.wt} {c.label}" + (f" {c.tpl}@{c.j}" if c.kind == "appr" else "") +
+                 ("" if c.cert else " nc") for c in cands]
         ext = [X[q, :max(len(cands[m_].cmd), T)] for m_, q in enumerate(sel)]
-        wr = DsRows(X[sel, :T], names, ext, ev[sel], cert.astype(bool), c1[sel], np.full(len(sel), -1, np.int64),
+        # the lane rows = the certain rows in order (every certain row is in sel: only long rows fail ok)
+        wr = DsRows(X[sel, :T], names, ext, ev[sel], cert[sel].astype(bool), c1[sel], np.full(len(sel), -1, np.int64),
                     np.array([c.iid for c in cands], np.int64), extra[sel], lane, n, len(sel), 0, 0.0)
         self._win_info["gen"] = dict(Counter(c.wt for c in cands))
         self._win_info["kind"] = dict(Counter(c.kind for c in cands))
         self._win_info["rows"] = [[c.kind, c.wt, int(c.k0) - P, int(c_pl[q]) - P if c_pl[q] >= 0 else int(c_pl[q]),
-                                   int(extra[q])] for c, q in zip(cands, sel)]
+                                   int(extra[q]), int(cert[q])] for c, q in zip(cands, sel)]
         a_.win_rows += len(sel)
         a_.win_ticks += 1
         if ds is None:
@@ -3548,6 +3565,9 @@ class ForumPlanner(Planner):
         core = np.concatenate([core0, np.zeros(n_spec + n_ds + n_map + int(cont), bool)]) if not n_hop else \
             np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop - n_chase, bool), np.zeros(n_chase, bool),
                             np.zeros(n_ds + n_map + int(cont), bool)])
+        win_rows_ = np.zeros(N, bool)         # task oldwin: the window rows (stage F: their own place in the order)
+        if n_ds and win_ is not None and getattr(self, "_win_c", None):
+            win_rows_[D0 + getattr(self, "_win_off", 0):D0 + n_ds] = True
         full = np.empty((N, P + T), np.int64)
         full[:, :P] = prefix
         full[:, P:] = cmd
@@ -3801,8 +3821,11 @@ class ForumPlanner(Planner):
                 prio += [int(i) for i in sctx.rows if pass1[i] and int(i) not in prio]
                 n_core = len(prio)                    # (as the core rows: not cut by the deadline)
             if n_ds:
-                # G3: the family rows that passed stage 1 are always enveloped (after the core and special rows)
-                prio += [D0 + q for q in range(n_ds) if pass1[D0 + q] and (D0 + q) not in prio]
+                # G3: the family rows that passed stage 1 are always enveloped (after the core and special rows);
+                # stage F: the window rows (task oldwin) only with SSBOT_FORUM_WINDOWS_CORE=1 - by default they come
+                # after every row of the old order below (cut by the deadline)
+                prio += [D0 + q for q in range(n_ds) if pass1[D0 + q] and (D0 + q) not in prio and
+                         (WIN_CORE or not win_rows_[D0 + q])]
                 n_core = len(prio)
         if cont and pass1[N - 1] and not core[N - 1] and (N - 1) not in prio:
             prio.append(N - 1)
@@ -3817,7 +3840,7 @@ class ForumPlanner(Planner):
                     prio.remove(N - 1)
                 prio.insert(0, N - 1)
                 n_core += 1
-        rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1)]
+        rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1) and not win_rows_[i]]
         top = rest[:fcfg.K_b]
         # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
         # IndexError; with a CONTINUE the map row read the CONTINUE's slot)
@@ -3836,6 +3859,12 @@ class ForumPlanner(Planner):
             if i not in seen:
                 prio.append(i)
                 seen.add(i)
+        if win_rows_.any():
+            # stage F: the window rows that passed stage 1 after the old order's rows (enveloped while time remains)
+            for i in pre:
+                if win_rows_[i] and pass1[i] and int(i) not in seen:
+                    prio.append(int(i))
+                    seen.add(int(i))
         n_prio = len(prio)
         queue = prio + [i for i in rest if i not in seen]
         budget = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": {}}
@@ -4140,6 +4169,15 @@ class ForumPlanner(Planner):
             # the FORCED_RISK ranking it would look safer than it is; out (the fallback is the normal rows)
             sel[sctx.rows] = False
             self.audit.sm_forced_out += 1
+        if forced and win_rows_.any() and n_ds:
+            # stage F (review finding 2): the certain window rows likewise (their stage-1 share, first contact and hit
+            # branch read off the bounce lane, which rises away from the target by construction); the uncertain ones
+            # were judged on their own lane as any row and stay
+            wc_ = np.zeros(N, bool)
+            wc_[D0:D0 + n_ds] = (ds.cert | (ds.extra > 0)) & win_rows_[D0:D0 + n_ds]
+            if (sel & wc_).any():
+                self.audit.win_forced_out += 1
+            sel[wc_] = False
         Pcm = np.zeros(N)                     # commit_rank's keys (0 on every row otherwise: the order is unchanged)
         Pf = np.zeros(N)
         eml_k = np.zeros(N)                   # track A "eml": FORCED_RISK's tie-break after the first contacts
@@ -4495,7 +4533,7 @@ class ForumPlanner(Planner):
                 ch_ = wc_[q_] if (wc_ is not None and n_ds and D0 <= i < D0 + n_ds and 0 <= q_ < len(wc_)
                                   and not S[i]) else None
                 win_.note_chosen(ch_, int(ws.stamp.frame) + P - 1, int(ws.stamp.frame),
-                                 r1.phys[i] if ch_ is not None else None)
+                                 r1.phys[i] if ch_ is not None else None, r1.vel[i] if ch_ is not None else None)
                 if ch_ is not None:
                     a.win_chosen += 1
                     self._ds_prev = None          # (DSLASH on: no 'DS cont' of a window row - its own continuation)
