@@ -16119,3 +16119,48 @@ Measurements on 0128cc30 (open loop, --ident; d13788fa in brackets):
 - Frozen `C:\ssbot\live_1v1_0128cc30` (1v1_freeze.ps1 -rev 0128cc30: 236 knowledge files linked), warmed by three h2w
   replays from it (warmup 115 s cold, then 7.4 / 6.7 s; max tick 151 / 71 ms; window part max 1.5 ms).
   `C:\ssbot\sandbox\1v1_arms.txt`: a comment line - h2w unchanged as env, run it from live_1v1_0128cc30.
+
+### Stage L - the paired live w7 measurement h2 vs h2w (2026-10-25 19:02 - 19:17 PDT; no code change; forum.md §114)
+The person's decision of ~17:00 (keep the old planner as the controller, its specials connected to the reflex's
+strike-window table first). Report `C:\ssbot\data\m2_play\oldwin\LIVE_REPORT.txt`; data / scripts
+`C:\ssbot\data\m2_play\oldwin\live` (lw_go.ps1 / lw_live.ps1 = L1's l1_go / l1_live with the arms interleaved per
+episode; lw_load.py, lw_report.py, lw_trace.py; lw_replay.py / lw_win.py - open-loop replays of the live h2w episodes).
+
+Setup: one frozen checkout `C:\ssbot\live_1v1_0128cc30` for both arms (h2 = rnjb + HERO2; h2w = h2 +
+SSBOT_FORUM_WINDOWS=1), Forum_W_w7, instances 0 / 1, 1.0x; pair j = seed 9800000 + j runs both arms on each instance back
+to back (order alternating, instance 1 reversed; the same 16 effective seeds as L1's m2e3 run); the arm verified from
+every worker log's switch line (16 / 16 + 16 / 16); 32 / 32 episodes run through, no harness stop; DEMO_SOON paused and
+restored, both instances frozen after, boost on / off, detached WMI launch. The checkout had no `.venv`: the harness's
+`uv run` created it before the launch (no code / knowledge file touched).
+
+Result (16 episodes each):
+- h2: 16 kills, HITLESS 15 / 16, kill median 17.45 s, 1.30 hits/s on the Clapper (1.72 from its intro's end), HP lost
+  0.43 / fight minute (1 loss, 2 HP); h2w: 16 kills, HITLESS 16 / 16, 17.62 s, 1.27 (1.67), 0. Paired by seed h2w - h2
+  kill time +0.41 s (SE 0.40; 7 faster, 9 slower): noise.
+- THE WINDOWS WERE NEVER USED LIVE: h2w's planner audit - window rows on 921 of 20,235 ticks (1,394 rows), chosen 0,
+  FORCED_RISK picks 0. h2w sent h2's keys; the arms differ by the windows' cost (late ticks 22.6 -> 25.3 %,
+  deadline-cut ticks 49.9 -> 52.8 %, tick p50 +0.2 ms) and run-to-run variation.
+- Why (open-loop replays of the 16 live h2w episodes): (1) with the live 8 ms deadline the envelope never reached a
+  window row (stage F puts them after core + top + siblings, deadline-cut): passing 0 on all 984 window ticks; (2) with
+  no deadline 825 ticks had a safe pogo_cast row, chosen on 37 (22 moves) - the rest lost the old order on v2_ff (409:
+  a core row's side slash lands before the pogo's contact) or v2_nh (375: more landed hits), the exact key from the
+  selection's own key tuple; best safe window row's place p50 18; (3) all 37 chosen ticks fell inside LOWHOP's run (the
+  pogo_cast window is the Clapper's small-rune cast, LOWHOP's domain; its side slashes landed 2 - 4 times after each of
+  the 22 moves, no HP lost); (4) types: pogo_cast 93 % of the rows, drop_slam0 108 rows never safe (no planner contact),
+  pogo_head2 2; the slam has no window rows on w7 (Clawline types not rows, hop_slam0 off) - SLAM_PLAY / CLAWSTRIKE
+  are untouched.
+- The one HP loss (h2, seed 9800006 i0, f 13341878, Slam 1 hammer, 2 HP): CLAWSTRIKE pressed the Clawline at Slam Antic
+  j5 - 6 inside a side slash's attack lock (the evade chase's attack 1 f before its plan) - the hook never fired; its
+  cs_lock phase (slam_play.py 1366) takes 'not a Harpoon clip, > 12 f after the press' as control, so it went to the
+  strike phase from her real stop 5.45 u in front, found no strike, played the open-loop press (k 47) standing still
+  for ~35 f and was hit by the hammer. Not window-related.
+
+Open items (decisions for the lead / the person; nothing built):
+1. To let the windows act: envelope them with the core (SSBOT_FORUM_WINDOWS_CORE=1 exists - re-check its reaction cap);
+   a ranking place for a CERTAIN window row above v2_ff / v2_nh (its bounce's value); a way for a chosen window row to
+   pre-empt LOWHOP / SLAM_PLAY (or the scripts consult the table); a Clawline in the old hero model for the Clawline
+   types (all slam windows on w7 are Clawline or hop types).
+2. CLAWSTRIKE's cs_lock needs a hook confirmation with an abort (the planner still had safe rows at j9 - 13).
+3. The live policy logs no per-tick window info (the decision rows carry only the chosen row's name; logged 90 ticks
+   before / 10 after a damage event): the types came from the replays. A 'win' field in the decision row would make the
+   live audit direct.
