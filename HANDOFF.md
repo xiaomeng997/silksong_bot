@@ -16052,3 +16052,70 @@ two h2w replays from it (`smoke_frozen_d13788fa`, `_2`: warmup 7.4 s, max tick 1
 3. The table rebuilt under this branch's models (or the exact check as a gate) before hop_slam0 comes back.
 4. The 3-tick layout dependence of the old code.
 5. The map2 long-term positioning score (the person: later).
+
+### Stage F - the review's 12 findings on d13788fa (commits dfc8dbfa, 0128cc30; frozen C:\ssbot\live_1v1_0128cc30)
+Data `C:\ssbot\data\m2_play\oldwin\stageF` (`final\` - h2w on 0128cc30, --ident + AUDIT, `exact_*.log`; `ident\` - the
+switch-off identity; `timing\` - h2 / h2b (a second h2: the jitter baseline) / h2w with the deadline, 6 concurrent;
+`final_dfc8dbfa\` - the first pass; `smoke_frozen_0128cc30*\`); scripts `stageF\scripts\` (ow_replay_f.py = ow_replay +
+win_audit.json; ow_sumF.py - the stage F counters; ow_exact.py by kind / certainty; ow_sum.py reads 6-field rows).
+
+Verdicts (F = fixed, with tests in tests/test_oldwin.py where unit-testable; R = refuted / not fixed, with the reason):
+1. F - certain hit with no planner-side check, the miss lane never judged. A window row is now certain (the bounce lane;
+   a long row's strike credit) ONLY when the planner's own strike model (`_ds_hits` on the row's own lane, no bounce)
+   meets the row's target on the table's contact frame - two independent models agree; otherwise the row is judged on
+   its own (miss) lane by every old check as any row (the scorer credits a hit only where its model sees one), a long
+   row then without credit and its tail judged without the bounce. `SSBOT_FORUM_WINDOWS_PLC=0`: d13788fa. drop_slam0
+   (the planner sees no contact on 25 / 27 hits-set rows, 93 / 94 w13) is thereby judged on the miss lane and never
+   passes - SLAM_PLAY plays it. Uncertain rows: w7 40 / 394, w13 134 / 873, hits 191 / 1,196.
+2. F - FORCED_RISK leaves the certain window rows out (as the special rows); the uncertain ones (own lane) stay.
+   FORCED_RISK picks of window rows on the replays: 0 (d13788fa: w7 21, w13 72, hits 14 ticks).
+3. F - CONT re-keyed: while its approach is ahead, her rollout (keys in flight + the approach's rest) must land in the
+   stored cell (packed key) with the attack ready, else dropped (hits: 5 of 30 CONT); once the macro runs, her velocity
+   within 1.2 u/s of the lane's too; a CONT carries the audit's decision. hits: 19 CONT chosen, all audited.
+4. F - the tracker counts GAME frames (dt x 60 summed, as Map2Controller.feed); a CONT ends at a freeze (dt x 60 outside
+   0.9 - 1.25) and checks the Clapper's frame by the game clock (test_tracker_counts_game_frames, test_cont_ends_...).
+5. F - the bounce on the mask before the contact (ev[c - 1], the table's / map2's convention; the rollout's state c then
+   equals the miss lane's and rises from c + 1; EVPRE=0 had put it one frame late) for every window row and tail
+   (test_bounce_event_on_the_mask_before_the_contact).
+6. F - the dx margin needs both neighbours FULL cells (`_has_full`; test_margin_needs_full_neighbours).
+7. F (by 1) - a row whose first planner contact is on another Clapper (c_pl = -3) is not certain (w13 1 + 1, hits 0).
+8. R - the Cast 2-anchored pogo_cast cells were judged without the cast's bomb row, but the old planner never takes a
+   row's safety from the table: it judges the bounce lane (certain rows) or the own lane (the others) with its own
+   support, which holds the per-bomb small-rune forecast (SSBOT_FORUM_RUNE_BOMB=1 in h2: forum_v2 `bomb_occ` inside
+   `occupied`), and the long tails now with every box corner. Past the horizon nothing is judged at the decision - as
+   for every old row (re-judged each tick). The exact check on 57 distinct chosen hits-set rows: 0 collisions.
+9. F - the reflex's gates: no rows while any Clapper is in cm.INTRO, or her Clawline is latched (act.mask), in the keys in
+   flight, or her clip is Harpoon* (test_gates_intro_and_clawline). Gate ticks: w7 416 + 15, w13 329 + 18, hits 840 +
+   119 of 2,344 / 6,119 / 11,947 live ticks.
+10. Partly R / F - the premise (h2w sends other keys than h2 because of the windows' cost) is mostly deadline jitter:
+   h2 vs a second h2 under the same load differs in the SENT mask on 64 (w7) / 121 (w13) planner-owned ticks, h2w vs h2
+   on 81 / 104 (d13788fa: 45 / 121). Fixed anyway: the window rows are enveloped AFTER the old order's rows (core + top +
+   siblings), cut by the deadline, and their hit enemy's reaction is checked outside the reaction cap without spending
+   it (dfc8dbfa without that: the cap spent by h2's rows set them unsafe unchecked - pogo_cast passing 73 -> 32 % w7);
+   `SSBOT_FORUM_WINDOWS_CORE=1`: d13788fa's order under the cap. Tick p50 / p99 h2w vs h2: w7 23.4 / 49.5 vs 22.9 /
+   50.6 ms, w13 25.8 / 39.8 vs 25.5 / 38.9; window part p99 2.7 / 2.8 ms, max 5.6.
+11. F - a long row's tail runs to the contact + POST_F past the row's own keys (none after), checked by every corner of
+   her box and its centre (F_INVULN skipped), with the bounce only where the models agree (else the miss tail, no
+   credit). Not added: the envelope's variants / hazard hull / hit branch on the tail (the row is re-judged within the
+   horizon on later ticks; tail failures w7 2, w13 64, hits 19).
+12. R (not fixed) - the 3 hits ticks (f 10430446 - 49, a SLAM_PLAY jump release) are unchanged by stage F: the switch-off
+   run of 0128cc30 differs from base on exactly those 3 of 33,756 (w7 8,002 / 8,002, w13 12,224 / 12,224). Not a string
+   hash order (the -I processes have random hash seeds; reruns reproduced it); the planner's np.empty arrays are fully
+   written. Pre-existing in the old code, a live risk for SLAM_PLAY only through layout - needs its own bisect (open
+   item 4 above).
+
+Measurements on 0128cc30 (open loop, --ident; d13788fa in brackets):
+- Generated / passing / chosen per fight minute: w7 pogo_cast 169 / 129 / 0.4 (230 / 168 / 4.5), drop_slam0 7.6 / 0 / 0,
+  pogo_head2 0.9 / 0.4 / 0.4; w13 pogo_cast 229 / 102 / 5.9 (303 / 129 / 6.8), drop_slam0 28 / 0 / 0; hits pogo_cast
+  123 / 89 / 8.4 (144 / 109 / 12.1), drop 2.9 / 0 / 0, pogo_head2 2.1 / 0 / 0.
+- THE EXACT CHECK on every chosen row (CONT included): w7 2 / 2 windows, w13 14 / 16 (the 2 = f 10442727 / 28, the cell
+  this branch's judge refutes and the reflex branch's accepts - 'lands 0 / 28, safe 28 / 28', finding 3 of the build),
+  hits 57 / 57 (appr 48, cont 4, now 5) - landed, safe and exit in every outcome (d13788fa: 108 / 111 safe, 94 landed,
+  2 exit failures).
+- Sent keys vs h2 (deadline inf): w7 0, w13 0, hits 0 ticks (d13788fa: 0 / 0 / 93 - the forced-risk pogo_head2 pick
+  before H01 is gone). Every chosen window row is still chosen while LOWHOP / SLAM_PLAY owns the keys: a live h2w run
+  measures h2 plus the planner's timing (finding 1 of the build stands).
+- Switch-off identity: w7 / w13 identical, hits 33,753 / 33,756 (the 3 layout ticks).
+- Frozen `C:\ssbot\live_1v1_0128cc30` (1v1_freeze.ps1 -rev 0128cc30: 236 knowledge files linked), warmed by three h2w
+  replays from it (warmup 115 s cold, then 7.4 / 6.7 s; max tick 151 / 71 ms; window part max 1.5 ms).
+  `C:\ssbot\sandbox\1v1_arms.txt`: a comment line - h2w unchanged as env, run it from live_1v1_0128cc30.
