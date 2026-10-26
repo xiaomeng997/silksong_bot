@@ -16236,6 +16236,10 @@ Offered (open loop: her recorded states are the scripts'): h2 w7 30 / 44 slams, 
 26 / 35, rnjb w13 242 / 353, jt w13 265 / 369 - against the scripts' recorded strikes (a DownSlash hit by antic + 75)
 0.89 - 0.91 (w7), 0.69 - 0.70 (w13); 325 of the 621 first offers at antic j <= 6; the first offers' judge 608 / 621.
 The check's time p50 3 - 5, p90 15 - 50, p99 54 - 170 ms (w13 the heavy end).
+(Stage F2 correction: these WIN counts are the generator's own judge one frame later - the model's frame-to-frame
+self-agreement, not precision on live presses. Against what live really pressed: only drop_slam0 NOW and claw_slam0 NOW
+offers ever coincide with recorded presses - rc_live: 42 drop NOW landed 39, the 3 misses clashes with no damage; F2's
+f2_val: 58 coinciding presses, 0 hurt -; the drop_slam0 / hop_slam0 approach presses have no live evidence at all.)
 
 V2 - THE OPEN-LOOP POLICY REPLAYS (ns_replay.py: h2 / h2ns / h2wns on the 16 live h2 episodes of stage L, w7 10, w13 6;
 deadline on; the slams from the recordings' fsm events):
@@ -16246,9 +16250,15 @@ deadline on; the slams from the recordings' fsm events):
   commits themselves (lw 13, w7 6, w13 2 slams; per fight minute lw drop 2.2, claw 0.17, hop 0.17) are open-loop
   limited: the recorded states follow the scripts' keys, so most verdicts are refused ('pos', 'keys') and the started
   presses end 'off lane' at once.
+  (Stage F2 correction: the 0.45 is NOT a strike rate and not the built path - it is the lookahead's 'found' for ANY
+  bridge L 3 .. 27 on ANY owner's tick; the live rule (L = 3, snapshots on planner-owned ticks) finds 18 / 107 with L <= 3
+  and 12 / 107 = 0.11 on planner ticks; 16 slams were found only on LOWHOP-owned ticks. Most of the 'pos' / 'off lane'
+  refusals were not the open loop but a stage N bug - the rendered rollout positions held against her kin PX / PY -, fixed
+  in F2.)
 - Bot thread (worker mode, the h2 / h2wns pair concurrent, lw): tick p50 17.08 vs 17.24 ms, p99 38.3 vs 37.1; the press
   path's part decide p50 0.06 / p99 0.12 ms, post p50 0.01 / p99 0.06 ms; ticks with the Press p50 17.4 / p99 19.9.
-  Worker: the check p50 2.3 / p99 17 ms (inside the 3-frame bridge), the judge re-check p50 16 / p99 71 ms; verdict
+  Worker: the check p50 2.3 / p99 17 ms over ALL checks (97 % find nothing: cheap; F2 correction - the checks that find
+  a press: w7 p50 14 / p99 48 ms, w13 p50 33 / p90 81 / p99 185 ms, 27 % > 50 ms), the judge re-check p50 16 / p99 71 ms; verdict
   latency 1 / 2 ticks p50 / p99 (replay ticks). Inproc (9 concurrent): +0.6 - 0.8 ms p50 (the checks on the thread).
 - Collisions: every committed press passed the exact check in every outcome (the bridge included); invalid presses 0 by
   construction (the macro after the keys in flight and the bridge latched unchanged by the hold filter, else no press).
@@ -16256,7 +16266,8 @@ deadline on; the slams from the recordings' fsm events):
   (smoke_frozen_f8af0179_1 / _2: warm-up 231 s cold - the venv -, then 8.9 s; worker check p99 9.4 ms; max tick 145 ms).
 
 Findings for the lead:
-1. The window table can strike about HALF of the slams from the planner's own positions (0.45 of 107 offline), with
+1. (Superseded by stage F2: 0.45 is the any-L / any-owner lookahead, the live rule 0.11 - see the V2 correction above.)
+   The window table can strike about HALF of the slams from the planner's own positions (0.45 of 107 offline), with
    98 - 100 % of its presses confirmed by the exact judge from a later observation - but the scripts struck 0.91 and the
    planner alone ~0. SLAM_PLAY's value is its positioning (the walk into its stand, then the hop): the window path's hop
    presses come where the script walked her (V1 hop first offers at antic j p50 13 - 19), and its own approach to a
@@ -16270,3 +16281,106 @@ Findings for the lead:
 
 Open items: the live paired run (the lead's call); a Clawline re-check once judge_cl matches the generator again; a
 'win' field in the live decision rows (the press path logs its commits / ends only in its own counters).
+
+### Stage F2 - the two reviews' 14 findings on stage N (commits bd7d4467, e8a03d8b; frozen C:\ssbot\live_1v1_e8a03d8b, warmed; arms h2ns2 / h2wns2)
+Data / scripts `C:\ssbot\data\m2_play\oldwin\ns\f2` (`scripts\`: f2_val.py + f2_sum.py - the recorded slams, f2_cover.py,
+f2_pos.py, f2_own.py, f2_v2.ps1 + f2_v2diff.py, f2_ident.ps1 + f2_ident_cmp.py; `val\`, `v2\`, `ident\`). All new
+behaviour sits inside the press path (SSBOT_FORUM_WINDOWS_PRESS=1, itself default off; SSBOT_FORUM_WINDOWS_PRESS_F2=0
+gives stage N's path back) or behind switches default off; with the switches off the bot is as before (identity below).
+
+Result: 12 of 14 confirmed (1, 2, 4, 5, 6, 7, 11, 13 fixed in code; 8, 9, 12 corrected in this document; 14 checked), the
+LOWHOP part of 2 refuted, 3 fixed for the eaten Clawline only, 10 built behind a switch and left off - and one more found
+while measuring 6: STAGE N HELD THE CHECK'S RENDERED POSITIONS AGAINST HER KIN STATE. The commit's 'pos' test and the
+Press's 'off lane' compared the rollout's rendered positions (hero.pos) with her kin PX / PY, which are > 0.15 u apart on
+17 % of the recorded frames (33 % in the air): on the recorded presses whose bridge keys ARE the recorded ones the commit
+refused 24 - 27 %, and 'off lane' ended 8 of 53 live presses before the strike. Held against her observed hero.pos (F2):
+refused 0.1 %, 'off lane' 0 / 53 (the rendered model vs the observed position: 0.4 % > 0.15 u a frame on; f2_pos.py).
+Stage N's "most verdicts refused ('pos'), the presses end 'off lane' at once" was largely this bug, not the open loop.
+
+The findings one by one (R1 = the safety review, R2 = the coverage / honesty review):
+1. (R1) A Clawline latched a frame late ended the Press while the hook fired - CONFIRMED (synthetic; map2 L1's live B2).
+   FIXED: a latch at P .. P + 2 (the Clawline key's frames) shifts the hook timeline (P, base, the variants' control and
+   slash frames, the end) to the observed latch; once the Clawline key is sent (frames <= f + 1) nothing ends the Press
+   until control but the latch's own 'claw not latched' (none by P + 2), 'no hook' and 'hook missed'. The recorded live
+   Clawline presses latched at P 16 / 16 (the late latch is rare, but live in map2).
+2. (R1) No drop on her hit, no world consistency - CONFIRMED. FIXED: 'hurt' (a damage event after the snapshot's
+   observation, as map2 / SLAM_PLAY); 'world': the check's step B closed-loop predictions (reflex._SINK, default None:
+   nothing kept) as an envelope - every observed Clapper must match a record of one branch at the game frame, map2's
+   TickCheck rule with the timing spread (live._clappers_ok: state, j +- 1, x 0.35 u - 0.6 u within 20 frames after her
+   hit on it -, facing) plus 1 frame of timing slack; at the commit, every bridge tick and every Press tick while she has
+   control; a Clapper the check never saw fails. Without the slack the game's real timeline fell between the timing views
+   (the slam antic to j 48 where the model's last record is j 47; a lunge frame's x a frame late) and live presses that
+   landed unhurt ended at f0 + 1. On the 58 recorded presses the bot really made (commands = the recorded keys through the
+   strike; lw 5 + SP14 53: 53 landed unhurt, 5 missed - clashes, the hook's stop -, 0 hurt): 'world' ends 0 BEFORE the
+   strike and 19 after the contact (from f0 + 6 for drops, + 46 for Clawlines) - the Clapper's lunge stops short of the
+   model's after her hit (2.6 u in one trace), a real deviation: the Press's tail then leaves the way out to the planner,
+   which sees the real Clapper. The Clawline continuation is re-checked by the judge after control (as a down-slash
+   press). The LOWHOP part is REFUTED: LOWHOP cannot become critical while a bridge / Press runs - its run is yielded on
+   the tick the press path sends keys and is not stepped after (as under SLAM_PLAY in h2); a critical tick now ends a
+   bridge / Press anyway (not a hook in flight).
+3. (R1) Every end hands the keys to the planner unchecked - CONFIRMED, PARTLY FIXED: the end the Press cannot recover
+   from, the EATEN Clawline (stage L's H1), must leave her an exit - a Clawline press is offered only when her path with
+   its keys minus the Clawline to P + 7 (the planner's first key) collides with nothing and has an exit (reflex_gen._exit's
+   probes) in every outcome of a closed-loop prediction under that path, else the NOW check runs again without the
+   Clawline types. SP14: 44 of 165 Clawline NOW offers refused (27 %), lw 1 / 9. The other ends (world, hurt, off lane,
+   freeze, no swing / contact, a failing re-check) still hand the keys back without an escape check: the planner is the
+   fallback there, as it is for every slam in h2ns2 - open item, a live run measures it.
+4. (R1) and 11. (R2) SLAM_PLAY=0 also dropped SP4's NODASH / NOPOGO - CONFIRMED (gauntlet gated them on the script's
+   switch). FIXED: SSBOT_FORUM_SLAM_PLAY_PREFS=1 (default off: as before) gates them on NODASH / NOPOGO alone. lw, h2ns
+   with vs without (deadline inf, open loop): the planner's keys differ on 383 / 21,033 ticks (1.8 %).
+5. (R1) A freeze in the bridge's last frames went unseen - CONFIRMED. FIXED: a freeze after the snapshot's observation and
+   before the strike's press ends it (stage N: from f0 - 1).
+6. (R1) The commit's world test saw her position, the target and freezes only - CONFIRMED. FIXED: her latched keys since
+   the snapshot = the hold filter's of the keys in flight + the bridge ('lat'), her ATTACKING / ATK_CD = the model's
+   (1.5 f: 'atk'), the world envelope, her damage. False refusals on the recorded presses (bridge = the recorded keys;
+   latency 1 / 2 ticks; SP14, 5,526 offers): atk 1.1 / 1.0 %, world 0.2 / 0.4 %, lat 0.1 %; with the position fix the
+   commit passes 98.6 % (stage N's rule 72 - 75 %).
+7. (R1) No swing_fix on the snapshot - CONFIRMED (the tracker's flags). FIXED: map2 E3's swing flags on the snapshot's and
+   the re-checks' S0 (a DownSlash clip while attacking: ATK_PDIR 2, ATK_KIND 0). Not measured separately.
+8. (R2) The 0.45 is not a strike rate - CONFIRMED; stage N's text corrected in place (the any-L / any-owner lookahead; the
+   live rule 12 / 107 = 0.11). The recorded-slam coverage under 11 replaces it.
+9. (R2) V1's precision is the judge against itself - CONFIRMED; stage N's text annotated. Live evidence: the 58 presses
+   under 2 (0 hurt; drop NOW 39 / 42 landed in rc_live, the misses clashes without damage); the approach presses have
+   none - only a live run tests them.
+10. (R2) No snapshot under LOWHOP / chase - CONFIRMED; BUILT, LEFT OFF: SSBOT_FORUM_WINDOWS_PRESS_OWN=plan,low,chase (the
+   bridge = the key sent + the planner's row; a commit pre-empts a non-critical LOWHOP as SLAM_PLAY did in h2). With the
+   scripts off the planner owns a tick in the antic's first 13 frames of 106 / 107 slams (LOWHOP the first tick in 19,
+   only LOWHOP / chase in 1; h2ns replays): small, and pre-empting LOWHOP is the person's call (LOWHOP as in rnjb).
+11. (R2) The check's time - CONFIRMED: the checks that find a press take w7 p50 14 / p90 26 / p99 48 ms, w13 p50 33 /
+   p90 81 / p99 185 ms (6 jobs on the machine; 63 / 156 / 357 with 10), and a verdict must be in by the tick f + L.
+   FIXED behind SSBOT_FORUM_WINDOWS_PRESS_L2 (the bridge with two or more Clappers; default 0 = L): on the 801 recorded
+   SP14 slams (f2_cover.py; the loaded run's check times) with two Clappers a verdict in time at antic j <= 6 (her state
+   still the planner's) in 203 / 432 slams with L 5 vs 68 / 433 with L 3 (late verdicts 9 % vs 50 %); one Clapper 64 /
+   102 (L 5) vs 76 / 123 (L 3) - L 3 stays for one Clapper, L2 = 5 in h2wns2.
+12. (R2) The scripts' side hits in the antic are not replaced - CONFIRMED, NOT FIXED (no window type is a side slash):
+   SLAM_PLAY landed 0.70 - 1.00 side hits per slam inside the antic besides its down slash (rc_sum); a live h2 vs
+   h2wns2 comparison must count them (hits / s, kill time) - the window path replaces the down slash only.
+13. (R2) h2wns also carried the planner's window rows (their cost, 0 chosen) - CONFIRMED. FIXED: SSBOT_FORUM_WINDOWS_ROWS=0
+   (the tracker without the rows; default 1); h2wns2 uses it: h2ns2 vs h2wns2 differ by the press path only.
+14. (R2) The identity was not re-run on the hits set - CHECKED: the stage N code (= live_1v1_f8af0179) 33,756 / 33,756
+   ticks identical to ident/base_hits; the F2 code w7 8,002 / 8,002, w13 12,224 / 12,224, hits 33,753 / 33,756 - the
+   same 3 ticks stage F traced to a layout dependence of the old code (one SLAM_PLAY decision at f 10430446 - 49;
+   deterministic, an episode re-run gives the same 3). Run the h2 control from the same checkout as the new arms.
+
+Measurements (`val\`: the recorded slams as V1 - lead 1, the recorded keys as the bridge, the F2 checker; `v2\`):
+- Offers (SP14, 801 slams): drop_slam0 approach 3,996, hop_slam0 NOW 1,048, drop_slam0 NOW 324, claw_slam0 NOW 121 (165
+  before the eaten check), pogo_head2 37; lw (89 slams): 557 / 119 / 36 / 8.
+- The open-loop replays (ns_replay inproc, deadline on: f2L3 = h2wns2 with L 3, f2L5, f2own; lw / w13) cannot measure the
+  closed-loop commit rate: the recorded latched keys are the original bot's, so 'lat' now refuses where the replay's
+  keys differ (lw 20 - 26 of ~1,800 snapshots - the role 'pos' played in stage N); commits lw 2 - 5 per 44 slams, each
+  re-checked OK; tick p50 19 - 21 ms, ticks with the Press p99 43 - 54 ms.
+- Tests: tests/test_oldwin_press.py 23 (F2: 15); the planner / oldwin / reflex / gauntlet / slam_play / policy suites
+  136 pass + 3 xfail.
+
+Frozen checkout and arms: C:\ssbot\live_1v1_e8a03d8b (236 knowledge links; C:\ssbot\live_1v1_bd7d4467 is the same without
+L2 - superseded), warmed by worker-mode h2wns2 replays from it (ns\f2\smoke_frozen_e8a03d8b_1: lw 2 episodes, warm-up
+229 s cold - the venv and the worker's first compile, 111 s of it -, tick p50 13 / p99 33 ms; _2: w13 1 episode with the
+L2 bridge, warm-up 8.5 s, the worker ready in 0.9 s, tick p50 15 / p99 21 ms, check p99 11 ms). 1v1_arms.txt: h2ns / h2wns
+marked superseded; h2ns2 = h2ns + SSBOT_FORUM_SLAM_PLAY_PREFS=1; h2wns2 = h2ns2 + SSBOT_FORUM_WINDOWS=1 +
+SSBOT_FORUM_WINDOWS_PRESS=1 + SSBOT_FORUM_WINDOWS_ROWS=0 + SSBOT_FORUM_WINDOWS_PRESS_L2=5. A live comparison: h2 / h2ns2
+/ h2wns2, all three from live_1v1_e8a03d8b.
+
+Open items: the ends other than the eaten Clawline hand the keys to the planner unchecked (3); the approach presses have
+no live evidence (9); the side hits in the antic (12); LOWHOP pre-emption (10, the person's call); the post-contact
+'world' ends hand the way out to the planner on about a third of the landed presses (2) - a live run shows whether that
+costs anything.
