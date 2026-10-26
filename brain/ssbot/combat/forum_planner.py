@@ -70,6 +70,7 @@ gate and I3 follow FilterContext.free).
 import math
 import os
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -257,6 +258,9 @@ MAP_LANE_TOL_Y = 0.12
 # envelope / escape / clash deadlines (with deadlines on, replays: the escape check ran out of time on +63 % ticks and
 # the chosen rows were left unchecked); SSBOT_FORUM_SPECIAL_MAP_DL=0: they count (SG4)
 MAP_DL_SHIFT = os.environ.get("SSBOT_FORUM_SPECIAL_MAP_DL", "1").strip() != "0"
+# task oldwin (with SSBOT_FORUM_WINDOWS): SSBOT_FORUM_WINDOWS_MEASURE=1 (offline) also predicts each window row's contact
+# with the planner's own body model (_ds_hits on the miss lane) for last_info['win'] - a measurement, off live
+WIN_MEASURE = os.environ.get("SSBOT_FORUM_WINDOWS_MEASURE", "0").strip() == "1"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
 
@@ -537,6 +541,9 @@ class EnvelopeAudit:
     v2_corner_rows: int = 0       # v2: safe rows ranked last for ending in a Clapper's corner (forum_v2.corner_zones)
     sm_full_ticks: int = 0        # SSBOT_FORUM_SPECIAL_FAST (G3): ticks that rolled the whole template set
     sm_board_cached: int = 0      #   ticks whose BOARD is the last full tick's strike spot
+    win_ticks: int = 0            # task oldwin (SSBOT_FORUM_WINDOWS): ticks with window rows given to the checks
+    win_rows: int = 0             #   the rows
+    win_chosen: int = 0           #   ticks a window row was chosen (safe)
     ds_ticks: int = 0             # SSBOT_FORUM_DSLASH (task 1v1 G3): ticks the family ran (a real target in reach)
     ds_tpl: int = 0               #   templates rolled out to their press
     ds_pass: int = 0              #   templates through the prefilter (the blade meets a predicted body)
@@ -3083,6 +3090,181 @@ class ForumPlanner(Planner):
                       np.array([r_["c2"] for r_ in rows], np.int64), np.array([r_["tgt"] for r_ in rows], np.int64),
                       np.array([r_["extra"] for r_ in rows], np.int64), lane, len(M), len(surv), n_chain, ms)
 
+    def warm_win(self, S) -> None:
+        """Task oldwin: _win_rows' rollout paths with their array layouts (the bounce lanes: fancy-indexed rows with
+        events; the long rows' tail in two parts from sliced views) - the first window tick of a replay compiled them
+        mid-fight (1.8 s)."""
+        T, P, th = int(self.fcfg.T), 2, self.cfg.threads
+        lat = np.zeros((3, P + T + 24), np.int64)
+        ev = np.zeros((3, P + T), np.int64)
+        ev[:, 12] = kin.EV_POGO
+        ci = np.array([0, 2], np.int64)
+        kin.rollout(S, lat[ci, :P + T], self.params, self.terrain, events=ev[ci], threads=th)
+        lt_ = np.zeros((2, P + T + 24), np.int64)
+        evl = np.zeros_like(lt_)
+        evl[:, P + T + 5] = kin.EV_POGO
+        rp = kin.rollout(S, lt_[:, :P + T], self.params, self.terrain, events=evl[:, :P + T], threads=th)
+        kin.rollout(rp.final, lt_[:, P + T:], self.params, self.terrain, events=evl[:, P + T:], threads=th)
+        if WIN_MEASURE:
+            rm = kin.rollout(S, lat[ci, :P + T], self.params, self.terrain, threads=th)
+            tb = np.full((1, P + T + 1, 4), np.nan)
+            self._ds_hits(rm, lat[ci, :P + T], 1, tb, np.zeros((1, P + T + 1), np.bool_), np.ones(1, np.bool_),
+                          np.full(2, P + 1, np.int64), 0.0, np.zeros(0, np.int64))
+
+    def _win_rows(self, win_, ws, f, start, hold, prefix, prefs, T: int, posture: str, ds):
+        """Task oldwin (SSBOT_FORUM_WINDOWS=1; the policy sets self.win = ssbot.map2.oldwin.WindowRows, None: nothing
+        here runs): the strike-window table's rows (now / approach / the chosen one's continuation; win_.rows finds
+        them) as certain-hit family rows (combat.dslash G3) appended to this tick's family rows `ds` (None: they are
+        the family): the macro latched unchanged by the hold filter after the keys in flight, the contact from the
+        table (k_strike's earliest outcome) on its target, the bounce lane from the contact; a contact past the
+        horizon (<= LONG_MAX frames): the row within the horizon as any row, its tail to the contact + POST_F against
+        the support with the bounce, the strike credited ('extra'). Every other check is the planner's own. The
+        planner's own contact prediction on the miss lane is kept for the measurement (last_info['win'])."""
+        t0 = time.perf_counter()
+        a_ = self.audit
+        P = len(prefix)
+        fo = int(ws.stamp.frame)
+        fr = fo + P - 1                       # the policy's frame (the prefix holds fo + 1 .. fr + 1)
+        cands, info = win_.rows(start, prefix, hold, T, self.params, self.terrain, hold_filter_jit, fr, fo,
+                                self.cfg.threads, posture)
+        self._win_info = {"ms": round(info["ms"], 3)}
+        for k_ in ("cl", "part", "cd", "off", "edge"):
+            if info[k_]:
+                self._win_info[k_] = dict(info[k_])
+        for k_ in ("appr_found", "appr_rekey_miss", "cont", "cont_end", "cont_keys", "cont_dev", "cont_clapper"):
+            if info[k_]:
+                self._win_info[k_] = int(info[k_])
+        if not cands:
+            self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
+            return ds
+        LONG_MAX, POST_F = 24, dslash.POST_F
+        L = max(T, max(len(c.cmd) for c in cands))
+        n = len(cands)
+        X = np.zeros((n, L), np.int64)
+        for q, c in enumerate(cands):
+            X[q, :len(c.cmd)] = c.cmd
+        pre = np.broadcast_to(np.asarray(prefix, np.int64), (n, P))
+        lat, _ = hold_filter_jit(np.concatenate([pre, X], axis=1), hold)
+        keep_q, why = [], Counter()
+        for q, c in enumerate(cands):
+            k0 = int(c.k0) - int(dslash.EVPRE)
+            if not np.array_equal(lat[q, P:P + len(c.cmd)], X[q, :len(c.cmd)]):
+                why["hold"] += 1                       # the filter changes the macro: not the table's keys
+            elif c.k0 <= P or k0 < 0:
+                why["past"] += 1
+            elif c.k0 > P + T + LONG_MAX:
+                why["far"] += 1
+            else:
+                keep_q.append(q)
+        if why:
+            self._win_info["drop"] = dict(why)
+        if not keep_q:
+            self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
+            return ds
+        cands = [cands[q] for q in keep_q]
+        X, lat = X[keep_q], lat[keep_q]
+        n = len(cands)
+        c1 = np.array([int(c.k0) for c in cands], np.int64)
+        inh = c1 < P + T
+        ev = np.zeros((n, P + T), np.int64)
+        ev[np.flatnonzero(inh), c1[inh] - int(dslash.EVPRE)] = kin.EV_POGO
+        extra = np.zeros(n, np.int64)
+        ok = np.ones(n, bool)
+        lane = None
+        if inh.any():
+            ci = np.flatnonzero(inh)
+            rb = kin.rollout(start, lat[ci, :P + T], self.params, self.terrain, events=ev[ci], threads=self.cfg.threads)
+            lane = {nm: getattr(rb, nm) for nm in ("phys", "pos", "vel", "mode", "flags", "box")}
+            lane["final"] = rb.final
+        if (~inh).any():
+            # the long rows' tail past the horizon (to the contact + POST_F) against the support, with the bounce
+            li = np.flatnonzero(~inh)
+            Lt = int(min(L, max(int(c1[q]) - P + POST_F for q in li)))
+            Lt = max(Lt, T + 1)
+            lt_ = np.zeros((len(li), P + Lt), np.int64)
+            lt_[:, :min(P + Lt, lat.shape[1])] = lat[li, :P + Lt]
+            evl = np.zeros((len(li), P + Lt), np.int64)
+            for m_, q in enumerate(li):
+                if int(c1[q]) - int(dslash.EVPRE) < P + Lt:
+                    evl[m_, int(c1[q]) - int(dslash.EVPRE)] = kin.EV_POGO
+            rp = kin.rollout(start, lt_[:, :P + T], self.params, self.terrain, events=evl[:, :P + T],
+                             threads=self.cfg.threads)
+            rt = kin.rollout(rp.final, lt_[:, P + T:], self.params, self.terrain, events=evl[:, P + T:],
+                             threads=self.cfg.threads)
+            T1 = P + T + 1
+            ft = self.params.frame_time
+            bx = rt.box[:, 1:]
+            tq = (T1 + np.arange(bx.shape[1])) * ft
+            o = f.occupied(0.5 * (bx[..., 0] + bx[..., 2]), 0.5 * (bx[..., 1] + bx[..., 3]), tq)
+            o &= (rt.flags[:, 1:] & F_INVULN) == 0
+            for m_, q in enumerate(li):
+                lim = int(c1[q]) - P + POST_F - T
+                if o[m_, :max(lim, 1)].any():
+                    ok[q] = False
+                else:
+                    extra[q] = 1
+            self._win_info["tail_fail"] = int((~ok[li]).sum())
+        # the planner's own contact on the miss lane (the measurement: its prediction vs the table's; offline only)
+        c_pl = np.full(n, -2, np.int64)
+        try:
+            if WIN_MEASURE and inh.any():
+                ci = np.flatnonzero(inh & ok)
+                if len(ci):
+                    tk_e = np.arange(P + T + 1, dtype=np.float64) * self.params.frame_time
+                    tbox, tok, _tw, keep = self._forum_targets(ws, f, tk_e, prefs)
+                    if len(keep):
+                        treal = np.array([not t.hazard and not getattr(t, "blocked", False) for t in keep], np.bool_)
+                        rm = kin.rollout(start, lat[ci, :P + T], self.params, self.terrain, threads=self.cfg.threads)
+                        st_ = np.asarray(start).reshape(kin.K, -1)
+                        face0 = 1 if st_[kin.FACE, 0] >= 0 else -1
+                        _, cc, tt, _ = self._ds_hits(rm, lat[ci, :P + T], face0, tbox, tok, treal,
+                                                     np.full(len(ci), P + 1, np.int64), 0.0, np.zeros(0, np.int64))
+                        for m_, q in enumerate(ci):
+                            c_pl[q] = int(cc[m_]) if cc[m_] >= 0 and int(keep[int(tt[m_])].iid) == cands[q].iid \
+                                else (-1 if cc[m_] < 0 else -3)
+        except Exception as e:  # noqa: BLE001  (a measurement only)
+            self._win_info["c_pl_err"] = repr(e)[:80]
+        sel = np.flatnonzero(ok)
+        if not len(sel):
+            self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
+            return ds
+        cands = [cands[q] for q in sel]
+        cert = inh[sel]
+        if lane is not None:
+            cm_ = np.flatnonzero(inh)                    # lane rows = the in-horizon rows in order
+            pos_ = {int(q): m_ for m_, q in enumerate(cm_)}
+            pick = [pos_[int(q)] for q in sel if inh[q]]
+            lane = {nm: (v[pick] if nm != "final" else v[:, pick]) for nm, v in lane.items()} if pick else None
+        names = [f"WIN {c.kind} {c.wt} {c.label}" + (f" {c.tpl}@{c.j}" if c.kind == "appr" else "") for c in cands]
+        ext = [X[q, :max(len(cands[m_].cmd), T)] for m_, q in enumerate(sel)]
+        wr = DsRows(X[sel, :T], names, ext, ev[sel], cert.astype(bool), c1[sel], np.full(len(sel), -1, np.int64),
+                    np.array([c.iid for c in cands], np.int64), extra[sel], lane, n, len(sel), 0, 0.0)
+        self._win_info["gen"] = dict(Counter(c.wt for c in cands))
+        self._win_info["kind"] = dict(Counter(c.kind for c in cands))
+        self._win_info["rows"] = [[c.kind, c.wt, int(c.k0) - P, int(c_pl[q]) - P if c_pl[q] >= 0 else int(c_pl[q]),
+                                   int(extra[q])] for c, q in zip(cands, sel)]
+        a_.win_rows += len(sel)
+        a_.win_ticks += 1
+        if ds is None:
+            self._win_off = 0
+            self._win_c = cands
+            self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
+            return wr
+        # appended to the family's own rows (SSBOT_FORUM_DSLASH on too)
+        self._win_off = len(ds.cmd)
+        self._win_c = cands
+        if ds.lane is None or wr.lane is None:
+            ln = ds.lane if wr.lane is None else wr.lane
+        else:
+            ln = {nm: (np.concatenate([ds.lane[nm], wr.lane[nm]]) if nm != "final" else
+                       np.concatenate([ds.lane[nm], wr.lane[nm]], axis=1)) for nm in ds.lane}
+        out = DsRows(np.concatenate([ds.cmd, wr.cmd]), list(ds.names) + names, list(ds.ext) + ext,
+                     np.concatenate([ds.ev, wr.ev]), np.concatenate([ds.cert, wr.cert]), np.concatenate([ds.c1, wr.c1]),
+                     np.concatenate([ds.c2, wr.c2]), np.concatenate([ds.tgt, wr.tgt]),
+                     np.concatenate([ds.extra, wr.extra]), ln, ds.n_tpl, ds.n_pass, ds.n_chain, ds.ms)
+        self._win_info["ms_all"] = round((time.perf_counter() - t0) * 1e3, 3)
+        return out
+
     def _special_ctx(self, f, start, hold, prefix, latched, r1, rows: np.ndarray, exts: list, T: int):
         """The special mode's tick context (combat.special_mode): the special rows' contact with E's move (the bounce
         event), their bounce lanes spliced into r1 (stage 1 and the score read the bounce from the press on), the
@@ -3304,6 +3486,11 @@ class ForumPlanner(Planner):
         ds = None
         if v2 and dslash.DSLASH and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
             ds = self._ds_rows(ws, f, start, hold, prefix, prefs, T, posture)
+        win_ = getattr(self, "win", None)        # task oldwin (SSBOT_FORUM_WINDOWS; None: off, nothing runs)
+        if win_ is not None:
+            self._win_c, self._win_info = None, None
+            if v2 and self.down_slash and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
+                ds = self._win_rows(win_, ws, f, start, hold, prefix, prefs, T, posture, ds)
         self._ds = ds
         n_ds = 0 if ds is None else len(ds.cmd)
         D0 = N0 + n_spec + n_hop
@@ -4301,6 +4488,28 @@ class ForumPlanner(Planner):
                     a.ds_chosen_cert += int(ds.cert[q_])
                     a.ds_chosen_chain += int(ds.c2[q_] >= 0)
                     self._ds_prev = np.asarray(ds.ext[q_], np.int64)
+            if win_ is not None:
+                # task oldwin: the chosen window row (safe) continues next tick while she follows it (WindowRows.cont)
+                wc_ = getattr(self, "_win_c", None)
+                q_ = i - D0 - getattr(self, "_win_off", 0)
+                ch_ = wc_[q_] if (wc_ is not None and n_ds and D0 <= i < D0 + n_ds and 0 <= q_ < len(wc_)
+                                  and not S[i]) else None
+                win_.note_chosen(ch_, int(ws.stamp.frame) + P - 1, int(ws.stamp.frame),
+                                 r1.phys[i] if ch_ is not None else None)
+                if ch_ is not None:
+                    a.win_chosen += 1
+                    self._ds_prev = None          # (DSLASH on: no 'DS cont' of a window row - its own continuation)
+                if self._win_info is not None:
+                    self._win_info["chosen"] = None if ch_ is None else [ch_.kind, ch_.wt, ch_.label, ch_.key,
+                                                                         int(cmd[i][0])]
+                    if wc_:
+                        ps_ = Counter()
+                        for m_, c_ in enumerate(wc_):
+                            r_ = D0 + getattr(self, "_win_off", 0) + m_
+                            if r_ < len(safe) and safe[r_]:
+                                ps_[c_.wt] += 1
+                        self._win_info["pass"] = dict(ps_)
+                    self._win_info["S"] = int(S[i])
             if sctx is not None and i in set(sctx.rows.tolist()):
                 q_ = int(np.searchsorted(sctx.rows, i))
                 if sctx.appr_fail[q_] < 0:
@@ -4444,6 +4653,8 @@ class ForumPlanner(Planner):
                                     bool(0 <= res.idx < len(rxl_) and rxl_[res.idx])]
         if map_info is not None:
             self.last_info["map"] = map_info
+        if getattr(self, "win", None) is not None and getattr(self, "_win_info", None) is not None:
+            self.last_info["win"] = self._win_info           # task oldwin
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,

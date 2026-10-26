@@ -160,6 +160,8 @@ def true_wave(raw: dict) -> tuple[int | None, bool]:
 
 class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
+    win = None                  # task oldwin: ssbot.map2.oldwin.WindowRows with SSBOT_FORUM_WINDOWS=1 (a class default:
+    #                             off, no instance attribute is added - see __init__)
 
     def __init__(self, view: str = "oracle", threads: int = 4, log_dir: Path | None = None, instance: int = 0,
                  real_quit_p: float = 0.0, playbook: Path | str | None = None, tables: EnemyTables | None = None,
@@ -259,6 +261,15 @@ class ForumPlannerPolicy(PlannerPolicy):
             from ssbot.map2 import live as m2live
             self.m2 = m2live.Map2Controller(instance=instance, log_dir=log_dir)
             self._m2_final: tuple | None = None
+        # task oldwin (SSBOT_FORUM_WINDOWS=1, default off): the strike-window table's rows in this planner
+        # (ssbot.map2.oldwin.WindowRows: its Clapper tracker fed every STATE; the planner's _win_rows). Off: the class's
+        # None (no instance attribute: an added one moved the slam script's decision on 3 replay ticks - HANDOFF),
+        # ssbot.map2 not imported. The table was generated with HERO2: needs it on.
+        if os.environ.get("SSBOT_FORUM_WINDOWS", "0").strip() == "1":
+            if not kin.hero2_on():
+                raise ValueError("SSBOT_FORUM_WINDOWS=1 needs SSBOT_FORUM_HERO2=1 (the table's hero model)")
+            from ssbot.map2 import oldwin as m2oldwin
+            self.win = m2oldwin.WindowRows()
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -349,6 +360,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             S = kin.initial_state(self.params, x, FLOOR_Y + self.params.foot, mode=mode)
             planner.tick(ws, S, HoldState.idle(1), np.zeros(1, np.int64), fcast, prefs, ctx)
         planner.warm_kernels()
+        if self.win is not None:
+            from ssbot.combat.holdfilter import hold_filter_jit as _hf
+            self.win.warm(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot), self.params,
+                          Terrain2D.empty(), self.threads, _hf, HoldState.idle(1))     # task oldwin
+            planner.warm_win(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot))
         if air_chain.AIRCHAIN or claw_strike.AIRSTRIKE:
             air_chain.warm(self.params)       # SP10b: the air chain's numba paths (else compiled inside a tick)
         if claw_strike.CLAWSTRIKE:
@@ -398,6 +414,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                         fcfg, crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
+        if self.win is not None:
+            self.planner.win = self.win           # task oldwin
         if self.ab:
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
@@ -503,6 +521,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.m2 is not None:
             self.m2.reset(self.episode)          # M4c: a new tracker, no plan, the episode's log
             self._m2_final = None
+        if self.win is not None:
+            self.win.reset()                     # task oldwin: a new Clapper tracker, no continued row
 
     # ---- perception hooks ----
 
@@ -513,6 +533,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         fo = ws.stamp.frame
         if self.m2 is not None:
             self.m2.feed(raw0, fo)               # M4c: the Clapper tracker, every STATE
+        if self.win is not None:
+            self.win.feed(raw0, fo)              # task oldwin: the window table's Clapper tracker, every STATE
         b = (raw0.get("hero") or {}).get("box")
         if b:
             self._boxes[fo] = (b, ws.stamp.t_game_s)
