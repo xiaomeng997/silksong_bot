@@ -167,7 +167,9 @@ def test_no_live_module_imports_map2():
                                                "tools/m3_search.py", "tools/m3_accept.py",
                                                "tools/m4b_speed.py", "tools/t1_tables.py", "tools/t2_tables.py",
                                                # M4c: only inside SSBOT_FORUM_MAP2 (tests/test_m4c_live.py)
-                                               "train/forum_planner_policy.py"):
+                                               "train/forum_planner_policy.py",
+                                               # the reflex's offline tools (HANDOFF 'Task reflex')
+                                               "tools/reflex_val.py", "tools/reflex_build.py"):
             continue
         if pat.search(p.read_text(encoding="utf-8", errors="ignore")):
             offenders.append(rel)

@@ -142,6 +142,7 @@ def test_m3_tools_only_import_map2():
     allowed = {"tools/m1_envelope.py", "tools/m2_validate.py", "tools/zone_overlay.py", "tools/m3_search.py",
                "tools/m3_accept.py", "tools/m4b_speed.py", "tools/t1_tables.py", "tools/t2_tables.py",   # (T1 / T2: the offline tables tools)
                "train/forum_planner_policy.py"}     # M4c: only inside SSBOT_FORUM_MAP2 (tests/test_m4c_live.py)
+    allowed |= {"tools/reflex_val.py", "tools/reflex_build.py"}   # the reflex's offline tools (HANDOFF 'Task reflex')
     offenders = []
     for p in root.rglob("*.py"):
         rel = p.relative_to(root).as_posix()
