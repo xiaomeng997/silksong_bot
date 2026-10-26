@@ -120,6 +120,9 @@ JB_GROUND_FIRST = ("jump: under and behind (landed)", "jump: under and behind (f
 # ground_hit checked (None, CC_EVADE) only (SP4 t3: no ground_hit while it idled after a small rune cast; the pogo
 # counted 2 landed hits)
 SP4_IDLE_FAMS = (None, "CC_EVADE", CC_IDLE)
+# SSBOT_FORUM_SLAM_PLAY_PREFS=1 (task oldwin stage F2, default off): SP4's NODASH / NOPOGO preferences without the slam
+# script (they were gated on SSBOT_FORUM_SLAM_PLAY: arms h2ns / h2wns lost them - the review's finding)
+SP4_PREFS = os.environ.get("SSBOT_FORUM_SLAM_PLAY_PREFS", "0").strip() == "1"
 # SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7; since SP9a follows SSBOT_FORUM_V2, =0 off; forum.md 71 / 76): with two Clappers in play (and nobody else), L2's
 # goal is RUSH on the focus (GauntletTactics._two_focus), never KITE (SP7's baseline: 8 of 8 w13 episodes QUIT at 1 HP,
 # most hits under KITE(EVADE) with the hero in the air)
@@ -1355,11 +1358,14 @@ class GauntletTactics:
                                                                jump_behind.CFG["corner_walk_end_f"]):
                 out = replace(out, no_dash=frozenset(out.no_dash) | frozenset({g.target}))
                 self.stats["esc_corner_walk"] = self.stats.get("esc_corner_walk", 0) + 1
-        if (slam_play.ENABLED and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
+        # task oldwin stage F2 (SSBOT_FORUM_SLAM_PLAY_PREFS=1, default off: as before): SP4's two planner preferences
+        # NODASH / NOPOGO (dodge-side rules, not the slam script) kept with the slam script off (SSBOT_FORUM_SLAM_PLAY=0)
+        sp4_on = slam_play.ENABLED or SP4_PREFS
+        if (sp4_on and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
                 and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
             out = replace(out, no_dash=frozenset({g.target}))
-        if (slam_play.ENABLED and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
+        if (sp4_on and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
                 and s.family in SP4_IDLE_FAMS):
             # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air, and (its idle family
             # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only

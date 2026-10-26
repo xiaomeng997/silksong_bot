@@ -1268,6 +1268,9 @@ STOP_TOL = 0.5                     # u: her stop at control within this of a var
 #                                    variants stop 0.8 / 1.7 / 2.5 u short: half their spacing); farther: the press ends
 CTRL_LATE = 36                     # a Clawline press with no control seen by P + 36 ends (the model's control <= P + 34)
 EXIT_H, EXIT_H_MAX = 40, 180       # the exit check's horizon after a macro (to a big rune's end, at most 180 f)
+# (task oldwin stage F2) a list: step B's closed-loop predictions of the last Reflex._check, (P, lead) per path / hook
+# variant - the worlds the check passed (oldwin_press's world-consistency envelope); None (the default): nothing kept
+_SINK: list | None = None
 LOW_HP_CL = sk.CLAW_DMG + sk.DS_DMG    # a target this low is not taken by a Clawline window (its hook / slash kills it:
 #                                         the pull and control after a killing needle are not in the model)
 SOLO_ONLY = ("evade_claw", "cast_claw")   # the HOOK-ONLY windows: taken only with no other Clapper alive - their safety
@@ -1634,6 +1637,8 @@ class Reflex:
                d: int, k_lo: int | None = None) -> tuple:
         """(ok, why, info): steps A and B of the check (the class docstring); info: a Clawline window's (reference
         stops per variant, the drift latency)."""
+        if _SINK is not None:
+            _SINK.clear()
         her0 = (float(S0[km.PX]), float(S0[km.PY]))
         if m.family == "ds":
             raw = render(m, d)
@@ -1914,6 +1919,8 @@ def _closed_ds(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: W
     rolled = {}
     for (pos_nom, _, c_nom) in paths[:2]:
         P = _predict_closed(W, pre, pos_nom, lead, live, mems, hazards, S0, {iid: {int(c_nom): ("down", sk.DS_DMG)}})
+        if _SINK is not None:
+            _SINK.append((P, lead))
         for b in P.branches:
             for v in ms.timing_views(b):
                 B = _rb(v, iid, P.T)
@@ -2027,6 +2034,8 @@ def _closed_cl(W, S0, lat_inf, S, lead: int, live: list, mems, hazards, o, wt: W
     with _Robust(True, variants=tuple(_VARS[x[0]] for x in paths)):
         for (vn, pos_nom, hits_nom) in paths:
             P = _predict_closed(W, pre, pos_nom, lead, live, mems, hazards, S0, hits_nom)
+            if _SINK is not None:
+                _SINK.append((P, lead))
             for b in P.branches:
                 for v in ms.timing_views(b):
                     bx = _rb(v, iid, P.T)[lead:]

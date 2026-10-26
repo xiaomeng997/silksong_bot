@@ -158,6 +158,13 @@ def true_wave(raw: dict) -> tuple[int | None, bool]:
     return (int(b["wave"]) if b.get("started") and b.get("wave") is not None else None), False
 
 
+def _win_rows_on() -> bool:
+    """Task oldwin stage F2: SSBOT_FORUM_WINDOWS_ROWS=0 keeps the window table's Clapper tracker (the slam press path's,
+    SSBOT_FORUM_WINDOWS_PRESS) without its rows in the planner (stage L: 0 rows chosen live, their cost late / deadline-
+    cut ticks +3 %); default 1: as before."""
+    return os.environ.get("SSBOT_FORUM_WINDOWS_ROWS", "1").strip() != "0"
+
+
 class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
     win = None                  # task oldwin: ssbot.map2.oldwin.WindowRows with SSBOT_FORUM_WINDOWS=1 (a class default:
@@ -375,7 +382,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             from ssbot.combat.holdfilter import hold_filter_jit as _hf
             self.win.warm(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot), self.params,
                           Terrain2D.empty(), self.threads, _hf, HoldState.idle(1))     # task oldwin
-            planner.warm_win(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot))
+            if _win_rows_on():
+                planner.warm_win(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot))
             if self.wpress is not None and self.wpress.ready is None:
                 self.wpress.start()           # stage N: the check worker (spawned, warmed; inproc: the checker here)
         if air_chain.AIRCHAIN or claw_strike.AIRSTRIKE:
@@ -427,8 +435,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                         fcfg, crest=self.crest)
         self.planner.params = self.params
         self.planner.terrain = self.terrain
-        if self.win is not None:
-            self.planner.win = self.win           # task oldwin
+        if self.win is not None and _win_rows_on():
+            self.planner.win = self.win           # task oldwin (stage F2: SSBOT_FORUM_WINDOWS_ROWS=0 - the tracker only)
         if self.ab:
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)

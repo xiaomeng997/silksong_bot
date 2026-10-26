@@ -90,6 +90,127 @@ HOOK_F = 3                         # a Harpoon clip by the Clawline's press + HO
 FREEZE_LO, FREEZE_HI = 0.9, 1.25
 FRAME_MS = 1000.0 / 60.0
 
+# ---- STAGE F2 (the reviewers' safety findings on stage N; SSBOT_FORUM_WINDOWS_PRESS_F2=0: stage N's path as it was) ----
+#   the world      the check's closed-loop Clapper timelines (reflex._SINK: every outcome it passed) as an envelope; the
+#                  commit, every bridge tick and every Press tick need the observed Clappers in one of them (map2's
+#                  TickCheck rule with the timing spread, live._clappers_ok, on the game clock: the state, its frame
+#                  within WORLD_TOL_J, x within WORLD_TOL_X, the facing) - 'world'; her damage since the snapshot ends
+#                  it - 'hurt' (map2's drops, SLAM_PLAY's 'hurt')
+#   the commit     also needs her latched keys since the snapshot = the hold filter's of the keys in flight + the bridge
+#                  ('lat'), her attack state at the observation = the model's (ATTACKING / ATK_CD within ATK_TOL: 'atk')
+#   a freeze       after the snapshot's observation, before the strike's press, ends it (stage N: from f0 - 1 only)
+#   the Clawline   latched at P .. P + CLAW_PRESS_F - 1 (its key's frames; map2's late_act): the Press's hook timeline
+#                  shifted to the observed latch; after control the continuation re-checked by the judge as a down
+#                  slash press (as a down-slash press's re-checks); a press whose EATEN Clawline (no hook: the keys
+#                  without the Clawline to the planner's first key, P + EATEN_TO) has no exit in every outcome is not
+#                  offered ('eaten')
+#   crit           a script's critical window (LOWHOP's bomb hop, ASW) ends a bridge / Press (h2's order: SLAM_PLAY is
+#                  not stepped in it)
+#   swing          her S0 with the down slash's swing flags as the hero model has them (map2 E3 swing_fix: the tracker
+#                  marks the Wanderer crest's down slash ATK_PDIR 0 / ATK_KIND 1 - 2)
+F2 = os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_F2", "1").strip() != "0"
+WORLD_TOL_J = _ienv("SSBOT_FORUM_WINDOWS_PRESS_TOLJ", 1)
+# frames of timing slack around a record's spread (the recorded slams: the game's Slam Antic runs to j 48 where the
+# model's last record is j 47, a lunge frame's x a frame late - the live presses that landed unhurt ended 'world' at
+# f0 + 1 without it; f2_val)
+WORLD_TOL_T = _ienv("SSBOT_FORUM_WINDOWS_PRESS_TOLT", 1)
+WORLD_TOL_X = 0.35                 # u (Reflex.tol_x)
+WORLD_TOL_X_HIT = 0.6              # u: a Clapper she hit in the last HIT_PUSH_F frames (its push; map2's push_tol)
+HIT_PUSH_F = 20
+ATK_TOL = 1.5 / 60.0               # s
+LAT_BITS = DIRS | km.B_JUMP | km.B_ATTACK | km.B_DASH | km.B_DOWN | M_CLAW
+EATEN_TO = HOOK_F + 4              # an eaten Clawline: the planner's keys from P + HOOK_F + lead (<= 2) + 2
+# the owners of the keys a snapshot is taken under (SSBOT_FORUM_WINDOWS_PRESS_OWN, comma separated; stage N: 'plan'):
+# 'low' / 'chase' - a non-critical LOWHOP run or the evade chase, which SLAM_PLAY pre-empted in h2 the same way
+OWN = tuple(x for x in os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_OWN", "plan").replace(" ", "").split(",") if x) \
+    or ("plan",)
+
+
+def swing_fix(S0, raw: dict | None) -> np.ndarray:
+    """Her kin state with the down slash's swing flags as the hero model has them (map2 live._mstate's E3 swing_fix):
+    attacking with a DownSlash* clip -> ATK_PDIR 2, ATK_KIND 0."""
+    S = np.array(np.asarray(S0, float).reshape(km.K, -1)[:, 0], float, copy=True)
+    h = (raw or {}).get("hero") or {}
+    clip = str(((h.get("anim") or {}).get("clip")) or "")
+    if S[km.ATTACKING] > 0 and clip.startswith("DownSlash") and S[km.ATK_PDIR] != 2.0:
+        S[km.ATK_PDIR] = 2.0
+        S[km.ATK_KIND] = 0.0
+    return S
+
+
+def envelope(sink: list, iids: list, n_hi: int | None = None) -> dict | None:
+    """The check's closed-loop Clapper outcomes (reflex._SINK's predictions: every branch of every path / hook
+    variant) as map2's TickCheck sees them (live._clappers_ok: a record seen at the frames k + a .. k + b of its timing
+    spread - the timing views' two exact timelines miss the frames between them, where the game often is): {'iids',
+    'names' {state: code}, 'T' (the shortest prediction's horizon), 'br': [{iid: (lo, hi, state code, j, x, face)}
+    per branch]}; frames from the snapshot's observation."""
+    from ssbot.map2 import brnum
+    names: dict = {}
+    brs, T = [], None
+    cmaps: dict = {}
+    for (P, _) in sink:
+        T = int(P.T) if T is None else min(T, int(P.T))
+        for b in P.branches:
+            d = {}
+            if brnum.ON[0]:
+                arr, tb = brnum.barr(b)
+                cmap = cmaps.get(id(tb))
+                if cmap is None:
+                    cmap = np.array([names.setdefault(nm, len(names) + 1) for nm in tb.names] + [0], np.int16)
+                    cmaps[id(tb)] = cmap
+                for iid in iids:
+                    A = arr.get(iid)
+                    if A is None or not len(A):
+                        continue
+                    sc = cmap[np.where(A[:, 3] >= 0, A[:, 3], len(cmap) - 1).astype(np.int64)]
+                    d[int(iid)] = (A[:, 0] + A[:, 1], A[:, 0] + A[:, 2], sc, A[:, 4].copy(), A[:, 5].copy(),
+                                   A[:, 7].copy())
+            else:
+                for iid in iids:
+                    rr = (getattr(b, "recs", None) or {}).get(iid) or ()
+                    if not rr:
+                        continue
+                    A = np.array([(r[0], r[1], r[2], r[4], r[5], r[7]) for r in rr], float)
+                    sc = np.array([names.setdefault(r[3], len(names) + 1) if r[3] is not None else 0 for r in rr],
+                                  np.int16)
+                    d[int(iid)] = (A[:, 0] + A[:, 1], A[:, 0] + A[:, 2], sc, A[:, 3], A[:, 4], A[:, 5])
+            brs.append(d)
+    if not brs or not iids:
+        return None
+    return {"iids": [int(i) for i in iids], "names": names, "T": T, "br": brs}
+
+
+def world_ok(env: dict | None, n: int, obs: list, hit_iids: frozenset = frozenset()) -> bool:
+    """The observed Clappers (n game frames after the snapshot's observation) consistent with one of the check's
+    outcomes - map2's TickCheck rule (live._clappers_ok): every live one matches a record of that branch seen at n (its
+    timing spread, +- WORLD_TOL_T frames), in the same state, its frame within WORLD_TOL_J, its x within WORLD_TOL_X
+    (WORLD_TOL_X_HIT after her hit on it: its push), its facing; a Clapper the check never saw fails. True past the
+    prediction's horizon."""
+    if env is None or n < 0 or (env.get("T") is not None and n > env["T"]):
+        return True
+    live = [o for o in obs if o.st is not None and o.hp > 0 and o.st not in cm.DEAD]
+    for o in live:
+        if int(o.iid) not in env["iids"]:
+            return False                                  # a Clapper the check never saw
+    for d in env["br"]:
+        ok = True
+        for o in live:
+            r = d.get(int(o.iid))
+            if r is None:
+                continue
+            lo, hi, st, j, x, fc = r
+            tx = WORLD_TOL_X_HIT if int(o.iid) in hit_iids else WORLD_TOL_X
+            code = env["names"].get(o.st, -1)
+            oj = o.j if o.j is not None else int(round(o.t * 60.0))
+            if not np.any((lo - WORLD_TOL_T <= n) & (hi + WORLD_TOL_T >= n) & (st == code) &
+                          (np.abs(j - oj) <= WORLD_TOL_J) &
+                          (np.abs(x - float(o.x)) <= tx) & (fc == int(o.face))):
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
 
 # ---- the check (the worker's; inproc too; the offline V1 uses it) ------------------------------------------------------
 
@@ -108,6 +229,10 @@ class Checker:
         self.n_appr = int(n_appr)
         self.stats = Counter()
         self.ev = None                                # the judge's evaluator (the re-check; made on first use)
+        self.f2 = F2
+        self.R2 = None                                # (F2) the NOW check without the Clawline types (an eaten reject)
+        if self.f2:
+            rx._SINK = []                             # step B's predictions kept (the world envelope)
 
     def check(self, sn: dict) -> dict:
         """sn: S0 (her kin state at fo), inflight (the commands fo + 1 .. f + 1 + L: in flight then the bridge), hold
@@ -121,11 +246,27 @@ class Checker:
         S0 = np.asarray(sn["S0"], float).reshape(km.K, -1)[:, 0]
         inflight = np.asarray(sn["inflight"], np.int64)
         out = {"press": None, "kind": None, "why": None, "seq": sn.get("seq"), "f": int(sn["f"]), "L": L}
-        p = self.R.check(S0, inflight, sn["hold"], sn["obs"], sn["mems"], sn["hazards"], int(sn["fo"]), f_t,
-                         claw_free=bool(sn["claw_free"]), lat_s=int(sn["lat_s"]),
-                         claw_lock_until=sn["claw_lock_until"], intro=bool(sn["intro"]), bridge=L)
+        kw = dict(claw_free=bool(sn["claw_free"]), lat_s=int(sn["lat_s"]), claw_lock_until=sn["claw_lock_until"],
+                  intro=bool(sn["intro"]), bridge=L)
+        p = self.R.check(S0, inflight, sn["hold"], sn["obs"], sn["mems"], sn["hazards"], int(sn["fo"]), f_t, **kw)
         why = list(self.R.last.get("why") or ())
         kind = "now" if p is not None else None
+        if p is not None and self.f2 and p.p_abs is not None:
+            # (F2) a Clawline press only when its EATEN Clawline leaves her an exit (the planner gets the keys then)
+            tc = time.perf_counter()
+            ok_e, w_e = self._eaten_ok(sn, S0, inflight, p)
+            self.R.ms["eaten"].append((time.perf_counter() - tc) * 1e3)
+            if not ok_e:
+                why.append(w_e)
+                self.stats["eaten_reject"] += 1
+                if self.R2 is None:
+                    self.R2 = rx.Reflex(self.table, W=self.W, types=tuple(t for t in (self.R.types or SLAM_TYPES)
+                                                                         if not t.startswith("claw")),
+                                        cl_ready=True, max_cand=2)
+                p = self.R2.check(S0, inflight, sn["hold"], sn["obs"], sn["mems"], sn["hazards"], int(sn["fo"]),
+                                  f_t, **kw)
+                why += list(self.R2.last.get("why") or ())
+                kind = "now" if p is not None else None
         if p is None and self.appr and not any(w in ("intro", "in a Clawline") for w in why):
             p, w2 = self._approach(sn, S0, inflight, f_t)
             why += w2
@@ -142,10 +283,59 @@ class Checker:
             else:
                 rl = W.roll(S, p.cmds[:max(p.p_abs - p.f0 + 1, 1)])
                 out["lane"] = np.asarray(rl.pos[0], float)
+            if self.f2:
+                # (F2) the commit's world: the check's closed-loop Clapper outcomes, her latched keys and attack state
+                iids = sorted({int(o.iid) for o in sn["obs"] if o.st is not None and o.hp > 0 and o.st not in cm.DEAD})
+                out["env"] = envelope(list(rx._SINK or ()), iids, int(p.end) - int(sn["fo"]) + 4)
+                out["pred_lat"] = np.asarray(lat_inf, np.int64)
+                atk = [(float(S0[km.ATTACKING]), float(S0[km.ATK_CD]))]
+                for i in range(1, len(lat_inf) + 1):
+                    Si = W.roll(S0, lat_inf[:i]).final[:, 0]
+                    atk.append((float(Si[km.ATTACKING]), float(Si[km.ATK_CD])))
+                out["pred_atk"] = np.asarray(atk, float)
         out["ms"] = (time.perf_counter() - t0) * 1e3
         self.stats["checks"] += 1
         self.stats["press_" + str(kind)] += 1
         return out
+
+    def _eaten_ok(self, sn: dict, S0, inflight, p) -> tuple:
+        """(F2; the safety review's finding 3: every end of a Press hands the keys to the old planner, whose escape
+        no check saw) A Clawline press's failure the Press cannot recover - the Clawline EATEN (no Harpoon clip: 'no
+        hook', stage L's H1) - leaves her in control in front of the Clapper and hands the keys back at P + HOOK_F +
+        lead + 2: her path with the press's keys without the Clawline to P + EATEN_TO, every Clapper predicted fresh in
+        closed loop under it (reflex._predict_closed, as step B), no collision on it (from the bridge's first frame) and
+        an exit after it (reflex_gen._exit's probes, as step B's) in every outcome. (ok, why)."""
+        from ssbot.map2 import reflex_gen as rg
+        from ssbot.map2 import search as ms
+        W = self.W
+        hold = sn["hold"]
+        inflight = np.asarray(inflight, np.int64)
+        lat_inf = rx._hold_run(inflight, hold) if (hold is not None and len(inflight)) else inflight
+        lead = len(lat_inf)
+        S = W.roll(S0, lat_inf).final[:, 0] if lead else S0
+        b = int(p.f0) - 1
+        n_e = int(p.p_abs) + EATEN_TO - b
+        keys = np.zeros(n_e, np.int64)
+        m = min(len(p.cmds), n_e)
+        keys[:m] = np.asarray(p.cmds[:m], np.int64) & ~np.int64(M_CLAW)
+        r = W.roll(S, keys)
+        pos_m = np.asarray(r.pos[0, :n_e + 1], float)
+        pre = rx._pre_pos(W, S0, lat_inf, lead)
+        live = [o for o in sn["obs"] if o.st is not None and o.hp > 0 and o.st not in cm.DEAD]
+        P = rx._predict_closed(W, pre, pos_m, lead, live, sn["mems"], sn["hazards"], S0)
+        pos = np.concatenate([pre[:lead], pos_m])
+        ifr = np.zeros(len(pos), bool)
+        k_lo = max(lead + 1 - int(sn["L"]), 1)
+        S_e = r.final[:, 0]
+        for br in P.branches:
+            for v in ms.timing_views(br):
+                kc = rx._collision(v, pos, ifr, [], k_lo, lead + n_e, None)
+                if kc is not None:
+                    return False, f"eaten:hit@{kc - lead}"
+                H = rx._exit_h(v, lead + n_e, P.T)
+                if not rg._exit(W, None, S_e, lead + n_e, v, -1, H, False):
+                    return False, "eaten:exit"
+        return True, ""
 
     def recheck(self, sn: dict) -> dict:
         """THE RE-CHECK of a running down-slash press (the bridge's rest and the press's keys from the snapshot's f + 2
@@ -337,6 +527,8 @@ class WinPress:
         self.ms: dict = {k: deque(maxlen=200000) for k in ("decide", "post", "check", "latency_f", "recheck",
                                                              "recheck_latency_f")}
         self.log: list = []                # (offline) the commits / presses / ends
+        self.f2 = F2
+        self.own = OWN
         self.reset()
 
     # ---- processes ----
@@ -396,6 +588,7 @@ class WinPress:
         self.hits: deque = deque(maxlen=64)          # (f, ent, src)
         self.verdict = None
         self.abort_f = None
+        self.last_dmg = None               # (F2) her last damage event's frame
 
     def feed(self, raw: dict, f: int) -> None:
         """Every STATE (the policy's _wake, after WindowRows.feed): her clip / input / latched keys, her hits, freezes,
@@ -420,6 +613,8 @@ class WinPress:
             if e.get("k") == "hit":
                 d = e.get("d") or {}
                 self.hits.append((int(f), int(d.get("ent") or 0), str(d.get("src") or "")))
+            elif e.get("k") == "damage":
+                self.last_dmg = int(f)
 
     # ---- helpers ----
     def _clip_at(self, k: int):
@@ -435,6 +630,35 @@ class WinPress:
 
     def busy(self) -> bool:
         return self.press is not None or self.commit is not None
+
+    def _hit_iids(self, fo: int) -> frozenset:
+        """(F2) the Clappers she hit in the last HIT_PUSH_F frames (their push: the wider x tolerance)."""
+        return frozenset(ent for (ff, ent, src) in self.hits if 0 <= fo - ff <= HIT_PUSH_F)
+
+    def _her_pos(self, fo: int, st0) -> tuple:
+        """Her position to hold against the check's predictions ('pred', 'lane': the rollout's RENDERED positions,
+        hero.pos): (F2) her observed hero.pos at fo (the recorded slams: rendered model vs observed 0.4 % > 0.15 u a
+        frame on); stage N compared them with her kin state's PX / PY, which is not the rendered position (17 % of
+        the recorded frames > 0.15 u apart at the same frame, 33 % in the air: false 'pos' / 'off lane')."""
+        if self.f2:
+            for (ff, c, a, x, y, lm) in reversed(self.clip_hist):
+                if ff == fo:
+                    if x == x and y == y:
+                        return float(x), float(y)
+                    break
+                if ff < fo:
+                    break
+        return float(st0[km.PX]), float(st0[km.PY])
+
+    def _world(self, env, g0: int, fo: int) -> bool:
+        return world_ok(env, int(self.win.gk) - int(g0), list(self.win.obs()), self._hit_iids(fo))
+
+    @staticmethod
+    def _shift(p, dl: int):
+        """(F2) a Clawline press latched dl frames after its P: its hook timeline (P, the continuation's base, the
+        variants' control / slash frames, its end) dl frames later; the keys before the latch as they were sent."""
+        alts = {v: (a[0] + dl, a[1], a[2], None if a[3] is None else a[3] + dl, a[4]) for v, a in p.alts.items()}
+        return replace(p, p_abs=int(p.p_abs) + dl, base=int(p.base) + dl, end=int(p.end) + dl, alts=alts)
 
     def hold_row(self, f: int):
         """The old planner's CONTINUE row while a commit's bridge runs (its keys from f + 2), else None."""
@@ -473,6 +697,18 @@ class WinPress:
                 self.st["commit_sup"] += 1
                 self.commit = None
             return None
+        p_ = self.press
+        if crit and self.f2 and (p_ is not None or self.commit is not None) and not (
+                p_ is not None and p_.p_abs is not None and f + 1 >= int(p_.p_abs) and self.pinfo.get("ctrl") is None):
+            # (F2) a script's critical window (LOWHOP's bomb hop, ASW) takes the keys as it did from SLAM_PLAY in h2
+            # (not a Clawline's hook in flight)
+            if self.press is not None:
+                self._end("crit", f)
+            if self.commit is not None:
+                self.st["commit_crit_cancel"] += 1
+                self.commit = None
+            self._drain(f)
+            return None
         self._drain(f)
         if self.press is None and self.commit is None and self.verdict is not None:
             self._try_commit(f, fo, S0, sent, crit)
@@ -494,6 +730,8 @@ class WinPress:
             self.press = c["press"]
             self.pinfo = {"kind": c["kind"], "lane": c.get("lane"), "contact": None, "hooked": False,
                           "ctrl": None, "dx": None, "f_commit": c["f_commit"]}
+            if self.f2:
+                self.pinfo.update(sfo=c["fo"], sg=c["g"], env=c.get("env"), latched=None)
             self.commit = None
             self.st["press_" + self.press.window] += 1
             self.log.append({"ev": "press", "f": f, "window": self.press.window, "iid": self.press.iid,
@@ -514,10 +752,29 @@ class WinPress:
         i = fo - c["fo"]
         pred = c["pred"]
         st0 = np.asarray(S0).reshape(km.K, -1)[:, 0]
-        if 0 <= i < len(pred) and (abs(float(st0[km.PX]) - pred[i, 0]) > POS_TOL or
-                                   abs(float(st0[km.PY]) - pred[i, 1]) > POS_TOL):
+        hx, hy = self._her_pos(fo, st0)
+        if 0 <= i < len(pred) and (abs(hx - pred[i, 0]) > POS_TOL or abs(hy - pred[i, 1]) > POS_TOL):
             self.st["commit_pos"] += 1
             return False
+        if self.f2:
+            if self.last_dmg is not None and self.last_dmg > c["fo"]:
+                self.st["commit_hurt"] += 1
+                return False
+            pl = c.get("pred_lat")
+            if pl is not None:
+                for (ff, cl, a, x, y, lm) in self.clip_hist:
+                    k = ff - c["fo"] - 1
+                    if c["fo"] < ff <= fo and 0 <= k < len(pl) and (int(lm) & LAT_BITS) != (int(pl[k]) & LAT_BITS):
+                        self.st["commit_lat"] += 1
+                        return False
+            pa = c.get("pred_atk")
+            if pa is not None and 0 <= i < len(pa) and (abs(float(st0[km.ATTACKING]) - pa[i, 0]) > ATK_TOL or
+                                                         abs(float(st0[km.ATK_CD]) - pa[i, 1]) > ATK_TOL):
+                self.st["commit_atk"] += 1
+                return False
+            if not self._world(c.get("env"), c["g"], fo):
+                self.st["commit_world"] += 1
+                return False
         return True
 
     def _drain(self, f: int) -> None:
@@ -591,7 +848,8 @@ class WinPress:
         tgt = next((x for x in o["obs"] if int(x.iid) == int(p.iid)), None)
         c = {"press": p, "kind": v.get("kind"), "lane": v.get("lane"), "pred": v["pred"], "fo": o["fo"], "g": o["g"],
              "iid": p.iid, "st": None if tgt is None else tgt.st, "oj": None if tgt is None else int(tgt.j),
-             "bridge": o["bridge"], "k2": o["f"] + 2, "f0": p.f0, "f_commit": f}
+             "bridge": o["bridge"], "k2": o["f"] + 2, "f0": p.f0, "f_commit": f, "env": v.get("env"),
+             "pred_lat": v.get("pred_lat"), "pred_atk": v.get("pred_atk")}
         if not self._still(c, fo, S0, f):
             return
         self.commit = c
@@ -613,10 +871,27 @@ class WinPress:
                     break
         o = self._obs(iid)
         strike_k = p.t_abs if p.t_abs is not None else None
+        # (F2) the freeze rule from the snapshot's observation (stage N: from f0 - 1 - a freeze in the bridge's last
+        # frames went unseen); her damage and the world (every observed Clapper in one of the check's outcomes) on
+        # every tick she has control (not while the Clawline's hook has her: its continuation is re-checked at control)
+        sfo = pi.get("sfo")
+        sfo = int(p.f0) - 2 if sfo is None else int(sfo)
+        fz0 = (sfo + 1) if self.f2 else (p.f0 - 1)
+        if self.f2:
+            if self.last_dmg is not None and self.last_dmg > sfo:
+                self._end("hurt", f)
+                return None
+            # a Clawline whose key for P is sent (at a tick before this one: frames <= f + 1) cannot be called back -
+            # ending then hands the planner a hook in flight (map2 L1's B2): from then to control no end but the
+            # latch's / the hook's own
+            claw_out = p.p_abs is not None and f + 1 >= int(p.p_abs) and pi.get("ctrl") is None
+            if not claw_out and pi.get("sg") is not None and not self._world(pi.get("env"), pi["sg"], fo):
+                self._end("world", f)
+                return None
         if p.p_abs is None:
             # a down slash press (incl. an approach): the lane before the press, the swing, the contact
             if fo < p.t_abs:
-                if self.last_freeze is not None and self.last_freeze >= p.f0 - 1:
+                if self.last_freeze is not None and self.last_freeze >= fz0:
                     self._end("freeze", f)
                     return None
                 if o is None or o.hp <= 0:
@@ -625,8 +900,8 @@ class WinPress:
                 lane = pi.get("lane")
                 i = fo - (p.f0 - 1)
                 if lane is not None and 0 <= i < len(lane):
-                    st0 = np.asarray(S0).reshape(km.K, -1)[:, 0]
-                    if abs(float(st0[km.PX]) - lane[i, 0]) > LANE_TOL or abs(float(st0[km.PY]) - lane[i, 1]) > LANE_TOL:
+                    hx, hy = self._her_pos(fo, np.asarray(S0).reshape(km.K, -1)[:, 0])
+                    if abs(hx - lane[i, 0]) > LANE_TOL or abs(hy - lane[i, 1]) > LANE_TOL:
                         self._end("off lane", f)
                         return None
             elif fo >= p.t_abs + SWING_F and pi.get("contact") is None:
@@ -636,8 +911,10 @@ class WinPress:
                     return None
         else:
             P = int(p.p_abs)
-            if fo < P:
-                if self.last_freeze is not None and self.last_freeze >= p.f0 - 1:
+            if fo < P and self.f2 and f + 1 >= P:
+                pass                                    # (F2) the Clawline's key is out: its latch decides
+            elif fo < P:
+                if self.last_freeze is not None and self.last_freeze >= fz0:
                     self._end("freeze", f)
                     return None
                 if o is None or o.hp <= 0:
@@ -646,13 +923,29 @@ class WinPress:
                 lane = pi.get("lane")
                 i = fo - (p.f0 - 1)
                 if lane is not None and 0 <= i < len(lane):
-                    st0 = np.asarray(S0).reshape(km.K, -1)[:, 0]
-                    if abs(float(st0[km.PX]) - lane[i, 0]) > LANE_TOL or abs(float(st0[km.PY]) - lane[i, 1]) > LANE_TOL:
+                    hx, hy = self._her_pos(fo, np.asarray(S0).reshape(km.K, -1)[:, 0])
+                    if abs(hx - lane[i, 0]) > LANE_TOL or abs(hy - lane[i, 1]) > LANE_TOL:
                         self._end("off lane", f)
                         return None
+            elif self.f2 and pi.get("latched") is None:
+                # (F2) the Clawline latched at P .. P + CLAW_PRESS_F - 1 (the frames its key is sent; map2's late_act:
+                # the oracle applies a key a frame late): the hook timeline shifted to the latch; none by then -> ended
+                lat_f = next((ff for (ff, c, a, x, y, lm) in self.clip_hist
+                              if P <= ff <= min(fo, P + rx.CLAW_PRESS_F - 1) and (lm & M_CLAW)), None)
+                if lat_f is None:
+                    if fo >= P + rx.CLAW_PRESS_F - 1:
+                        self._end("claw not latched", f)
+                        return None
+                else:
+                    pi["latched"] = int(lat_f)
+                    if lat_f > P:
+                        self.press = p = self._shift(p, int(lat_f) - P)
+                        self.st["claw_late"] += 1
+                        self.log.append({"ev": "claw_late", "f": f, "P": P, "latched": int(lat_f)})
+                    return self._step(f, fo, raw, S0)
             else:
                 cP = self._clip_at(P)
-                if cP is not None and not (cP[4] & M_CLAW):
+                if not self.f2 and cP is not None and not (cP[4] & M_CLAW):
                     self._end("claw not latched", f)
                     return None
                 if fo >= P + HOOK_F and not pi.get("harpoon"):
@@ -716,25 +1009,43 @@ class WinPress:
                 self.out = None
                 self.st["post_error"] += 1
 
-    def _recheck(self, f, fo, S0, prefix, hold, mask) -> None:
+    def _recheck(self, f, fo, S0, prefix, hold, mask, raw=None) -> None:
         """A running / committed down-slash press re-checked from this observation (its keys from f + 2: the bridge's
-        rest and the press's), while its slash is still ahead; a failing re-check ends it (_drain)."""
+        rest and the press's), while its slash is still ahead; a failing re-check ends it (_drain). (F2) A Clawline
+        press's continuation after control the same way (the picked variant's keys and down slash as a down-slash
+        press)."""
         p = self.press if self.press is not None else (self.commit or {}).get("press")
-        if p is None or p.t_abs is None or f + 2 >= p.t_abs:
+        if p is None:
             return
-        if self.commit is not None:
-            c = self.commit
-            i = f + 2 - c["k2"]
-            rest = np.concatenate([np.asarray(c["bridge"][max(i, 0):], np.int64), np.asarray(p.cmds, np.int64)])
+        if p.t_abs is not None:
+            t_abs = int(p.t_abs)
+            if f + 2 >= t_abs:
+                return
+            if self.commit is not None:
+                c = self.commit
+                i = f + 2 - c["k2"]
+                rest = np.concatenate([np.asarray(c["bridge"][max(i, 0):], np.int64), np.asarray(p.cmds, np.int64)])
+            else:
+                rest = np.asarray(p.cmds[max(f + 2 - p.f0, 0):], np.int64)
+        elif self.f2 and self.press is not None and self.pinfo.get("ctrl") is not None and p.strike == "down":
+            ctrl, dx = self.pinfo["ctrl"], self.pinfo.get("dx")
+            a = p.pick(ctrl, dx)
+            if a is None or a[1][3] is None:
+                return
+            t_abs = int(a[1][3])
+            if f + 2 >= t_abs:
+                return
+            rest = p.cmds_from(f + 2, ctrl, dx)
         else:
-            rest = np.asarray(p.cmds[max(f + 2 - p.f0, 0):], np.int64)
+            return
         if not len(rest) or int(rest[0]) != int(mask):
             return
         win = self.win
         self.seq += 1
-        sn = {"kind": "recheck", "seq": self.seq, "S0": np.asarray(S0).reshape(km.K, -1)[:, 0].copy(),
+        S0r = swing_fix(S0, raw) if self.f2 else np.asarray(S0).reshape(km.K, -1)[:, 0].copy()
+        sn = {"kind": "recheck", "seq": self.seq, "S0": S0r,
               "inflight": np.asarray(prefix, np.int64), "hold": hold, "obs": list(win.obs()), "mems": win.trk.mems(),
-              "hazards": win.trk.hazards(self.K), "fo": fo, "f": f, "rest": rest, "t_rel": int(p.t_abs) - (f + 1),
+              "hazards": win.trk.hazards(self.K), "fo": fo, "f": f, "rest": rest, "t_rel": t_abs - (f + 1),
               "iid": int(p.iid), "window": p.window, "d": int(p.d)}
         self.st["recheck_sent"] += 1
         self._send(sn, {"seq": self.seq, "f": f, "fo": fo, "kind": "recheck", "pk": (p.window, p.f0)})
@@ -751,12 +1062,12 @@ class WinPress:
             return
         if self.busy():
             if own == "win":
-                self._recheck(f, fo, S0, prefix, hold, mask)
+                self._recheck(f, fo, S0, prefix, hold, mask, raw)
             return
-        if own != "plan" or res_cmd is None or len(res_cmd) < self.L:
+        if own not in self.own or res_cmd is None or len(res_cmd) < self.L:
             return
         win = self.win
-        st0 = np.asarray(S0).reshape(km.K, -1)[:, 0]
+        st0 = swing_fix(S0, raw) if self.f2 else np.asarray(S0).reshape(km.K, -1)[:, 0]
         hx = float(st0[km.PX])
         allo = win.obs()
         live = [o for o in allo if o.st is not None and o.hp > 0 and abs(o.x - hx) <= REACH_U]
