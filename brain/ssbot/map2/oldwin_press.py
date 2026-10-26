@@ -78,6 +78,10 @@ if os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_APPR", "").strip() == "none":
     APPR = ()
 N_APPR = _ienv("SSBOT_FORUM_WINDOWS_PRESS_NAPPR", 2)      # approach candidates checked per snapshot (the earliest first)
 INPROC = os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_INPROC", "0").strip() == "1"
+# the re-check of a running down-slash press: 'judge' (default: reflex.judge_press - the generator's exact judge, the
+# project's exact check in stages B / F; V1: the runtime check from two frames later refuted 2.5 % fewer than the judge
+# from one frame later) or 'check' (Reflex._check, the runtime check's steps A / B)
+RECHECK = os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_RECHECK", "judge").strip() or "judge"
 REACH_U = 12.0
 POS_TOL = 0.15                     # u: her observed position vs the bridge's predicted (the commit)
 LANE_TOL = 0.25                    # u: ... vs the macro's predicted lane before the strike's press (the Press)
@@ -103,6 +107,7 @@ class Checker:
         self.appr = tuple(t for t in appr if t in ow.ALL_DS)
         self.n_appr = int(n_appr)
         self.stats = Counter()
+        self.ev = None                                # the judge's evaluator (the re-check; made on first use)
 
     def check(self, sn: dict) -> dict:
         """sn: S0 (her kin state at fo), inflight (the commands fo + 1 .. f + 1 + L: in flight then the bridge), hold
@@ -165,11 +170,23 @@ class Checker:
             out.update(ok=True, why="past the press")
         elif any(o.st in cm.INTRO for o in sn["obs"] if o.st is not None and o.hp > 0):
             out["why"] = "intro"
-        else:
+        elif RECHECK == "check":
             m = rx.Macro("ds", raw=(rest, 0, np.zeros(0, np.int64), [t_rel]))
             ok, r, _ = self.R._check(S0, lat_inf, S, lead, int(sn["fo"]), live, sn["mems"], sn["hazards"], o0,
                                      rx.WINDOWS[sn["window"]], m, int(sn["d"]))
             out.update(ok=bool(ok), why=r)
+        else:
+            # THE JUDGE (map2.reflex.judge_press: the generator's exact judge, the stage B / F audits' authority) from
+            # her state at the observation with the keys in flight prepended to the press's rest - every Clapper as
+            # observed, in closed loop over the whole path
+            if self.ev is None:
+                self.ev = rx.judge_evaluator(W)
+            obs_j = [o for o in live if o.st not in cm.INTRO]
+            m = rx.Macro("ds", raw=(np.concatenate([np.asarray(lat_inf, np.int64), rest]), 0, np.zeros(0, np.int64),
+                                    [lead + t_rel]))
+            v = rx.judge_press(W, self.ev, S0, obs_j, int(sn["iid"]), rx.WINDOWS[sn["window"]], m, mems=sn["mems"],
+                               hazards=sn["hazards"])
+            out.update(ok=bool(v.window), why=v.why, n=(v.lands, v.safe, v.exit, v.n))
         out["ms"] = (time.perf_counter() - t0) * 1e3
         self.stats["recheck_" + ("ok" if out["ok"] else "fail")] += 1
         return out
@@ -291,6 +308,12 @@ def warm_checker(ck: Checker) -> float:
                 km.HoldState, "idle") else None, "obs": [o], "mems": {7: cm.Memory()}, "hazards": [], "fo": 1000,
                   "f": 1000, "L": 3, "claw_free": True, "lat_s": 0, "claw_lock_until": None, "intro": False}
             ck.check(sn)
+        rest = np.zeros(30, np.int64)
+        rest[:12] |= km.B_JUMP
+        rest[18:20] |= km.B_ATTACK | km.B_DOWN
+        ck.recheck({"S0": S0, "inflight": np.zeros(2, np.int64), "hold": sn["hold"], "obs": [o], "mems": {7: cm.Memory()},
+                    "hazards": [], "fo": 1000, "f": 1001, "rest": rest, "t_rel": 19, "iid": 7, "window": "hop_slam0",
+                    "d": 1})
     except Exception:  # noqa: BLE001 - a failed warm-up only costs the first check's compile
         pass
     return (time.perf_counter() - t0) * 1e3
