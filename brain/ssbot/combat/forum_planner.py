@@ -264,8 +264,9 @@ WIN_MEASURE = os.environ.get("SSBOT_FORUM_WINDOWS_MEASURE", "0").strip() == "1"
 # stage F: SSBOT_FORUM_WINDOWS_PLC (default 1) - a window row is a certain hit only when the planner's own strike model
 # meets its target on the table's contact frame (else judged on its own lane); 0: every in-horizon row certain (d13788fa)
 WIN_PLC = os.environ.get("SSBOT_FORUM_WINDOWS_PLC", "1").strip() != "0"
-# stage F: SSBOT_FORUM_WINDOWS_CORE=1 enveloped as core rows (never cut by the deadline: d13788fa); default 0: after the
-# old planner's own rows, cut by the deadline (h2's rows keep their order and time)
+# stage F: SSBOT_FORUM_WINDOWS_CORE=1 enveloped as core rows (never cut by the deadline) with their hit enemy's reaction
+# under the old cap (d13788fa); default 0: after the old planner's own rows, cut by the deadline, their reaction checked
+# outside the cap without spending it (h2's rows keep their order, time and reaction budget)
 WIN_CORE = os.environ.get("SSBOT_FORUM_WINDOWS_CORE", "0").strip() == "1"
 WAITS_ON = os.environ.get("SSBOT_FORUM_WAITS", "0") == "1"   # 1: the timing rows (candidates.build_forum waits)
 
@@ -3967,10 +3968,19 @@ class ForumPlanner(Planner):
                 hr_ds, hr = hr[isd], hr[~isd]
             if hr_ds is not None and len(hr_ds):
                 budget["hitfx_ds"] = budget.get("hitfx_ds", 0) + len(hr_ds)      # (the other rows' room unchanged)
-                sh, oh, cp = self._hit_branch(f, start, latched, sc_ds, hr_ds, tk, enemy_only, budget,
-                                              ev_base=self._ds_evb(hr_ds, D0, ds))
-                S[hr_ds] |= sh
-                self._note_hit(hr_ds, sh, oh, cp, sc_ds, t_hit, hit_occ, capped_rows, T1)
+                isw_ = win_rows_[hr_ds]
+                for grp_, cap_ in ((hr_ds[~isw_], True), (hr_ds[isw_], WIN_CORE)):
+                    if not len(grp_):
+                        continue
+                    # stage F: the window rows (enveloped after the old order) get their hit enemy's reaction checked
+                    # outside the reaction cap and without spending it (the old rows' budget as in h2)
+                    r0_ = budget["react"]
+                    sh, oh, cp = self._hit_branch(f, start, latched, sc_ds, grp_, tk, enemy_only, budget, cap=cap_,
+                                                  ev_base=self._ds_evb(grp_, D0, ds))
+                    if not cap_:
+                        budget["react"] = r0_
+                    S[grp_] |= sh
+                    self._note_hit(grp_, sh, oh, cp, sc_ds, t_hit, hit_occ, capped_rows, T1)
             if len(hr):
                 room = fcfg.hitfx_k - budget["hitfx"]
                 over = hr[max(room, 0):]
