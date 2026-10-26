@@ -16164,3 +16164,109 @@ Open items (decisions for the lead / the person; nothing built):
 3. The live policy logs no per-tick window info (the decision rows carry only the chosen row's name; logged 90 ticks
    before / 10 after a damage event): the types came from the replays. A 'win' field in the decision row would make the
    live audit direct.
+
+### Stage N - the slam scripts off, the window table instead (the person, 2026-10-25 ~21:00 PDT: "turn off the old planner's specials and see whether the new window table can take over"; offline build + validation; commits 9b676851, f8af0179; frozen C:\ssbot\live_1v1_f8af0179, warmed; arms h2ns / h2wns)
+Data `C:\ssbot\data\m2_play\oldwin\ns` (`v1\` - the recorded slams, `cache\lw\` - today's 32 live episodes as traces,
+`v2\` - the open-loop policy replays, `ident\`, `smoke_frozen_f8af0179_*\`, `tests_ns.txt`); scripts `ns\scripts\`
+(ns_slams2.py + ns_v1sum2.py - V1; ns_replay.py + ns_replay_go.ps1 / ns_go2.ps1 + ns_v2sum.py - V2). The old specials
+TABLE was already off in rnjb; its special strikes are the scripts SLAM_PLAY (the slam playbook) and CLAWSTRIKE (the
+Clawline approach into the slam strike): turned off (SSBOT_FORUM_SLAM_PLAY=0 SSBOT_FORUM_CLAWSTRIKE=0, arm h2ns), the
+window table's slam windows play instead (arm h2wns). LOWHOP, JUMP_BEHIND, RUNE_HOP as in rnjb.
+
+What was built (all behind switches, default off; off = bit-identical: the identity w7 8,002 / 8,002, w13 12,224 /
+12,224 ticks vs ident/base_*):
+- THE PATH CHOSEN: the reflex's own path (the integration plan of 'Task reflex - stage 4'), not a Clawline in the old
+  hero model - the reflex's exact check exists and was validated on live presses (0.999); a Clawline in
+  kinematics.rollout would be a new, unvalidated model, and every slam window but hop / drop is a Clawline type.
+  `ssbot/map2/oldwin_press.py` (SSBOT_FORUM_WINDOWS_PRESS=1, needs SSBOT_FORUM_WINDOWS=1 for its Clapper tracker):
+  * a WORKER process (spawned at warm-up; High on the E-cores 16 - 31 as map2's workers; SSBOT_WORKER_BOOST=0: as
+    started) runs Checker.check on a snapshot the bot sends while a slam window may open (a Clapper within 12 u in a
+    slam type's anchor; one snapshot at a time): the keys in flight, then the old planner's chosen row for L = 3 frames
+    (THE BRIDGE; SSBOT_FORUM_WINDOWS_PRESS_L). NOW: Reflex(types = claw_slam0, claw_head2, hop_slam0, drop_slam0,
+    pogo_head2; cl_ready).check(..., bridge=L) - the table looked up for her state at the bridge's end, step B's
+    collisions from the bridge's first frame. With none NOW, APPROACH: oldwin's approach shapes keyed into a drop_slam0
+    cell (no dx margin), the approach + the cell's macro exact-checked as ONE macro (Reflex._check steps A and B).
+    hop_slam0 comes back only as a NOW press through this check; its approach presses and pogo_head2's stay off (V1).
+  * the bot COMMITS a verdict that arrives in time (the press's first frame f0 = the snapshot's f + L + 2 still ahead)
+    while the world is the snapshot's: the keys sent since are the bridge's, no freeze since, the target in the same
+    move at the frame the game clock gives, her observed position on the bridge's predicted path (0.15 u); the planner's
+    CONTINUE row is held to the bridge (M4d2's hold_row) and a planner that leaves it (its own check) cancels.
+  * the PRESS owns the keys (own 'win'; the scripts are not stepped; the supervisor's keys win and end it; a script's
+    critical window - LOWHOP's bomb hop, ASW - defers a new commit) and CONFIRMS EACH PHASE from the STATE stream:
+    the lane before the press (0.25 u), the target alive, no freeze before the strike; a Clawline: M_CLAW latched at its
+    press P, a Harpoon clip by P + 3 ('no hook' - CLAWSTRIKE's live failure of stage L: an eaten Clawline taken as
+    control), the hook's dash / catch clip before control ('hook missed'), control and her stop picking the
+    continuation (reflex.pick_alt; 'no control' / 'off model'); a down slash: its swing (a DownSlash clip) by the press
+    + 2 ('no swing') and its contact (a DownSlash hit on the target) by the active frames' end ('no contact'). A running
+    down-slash press is RE-CHECKED from every newer observation the worker can take (the judge: reflex.judge_press from
+    her state with the keys in flight prepended to the press's rest; SSBOT_FORUM_WINDOWS_PRESS_RECHECK=check: the
+    runtime check instead); a failing re-check ends it. Any end hands the keys back to the planner.
+  * reflex.py: Reflex(types=, cl_ready=) (cl_ready: a Clawline window only with her in normal control, no attack /
+    recoil on the frame before its press - the game eats a Clawline pressed in an attack's lock) and check(bridge=);
+    defaults as before. oldwin.WindowRows._approach(types=, margin=). Offline: SSBOT_FORUM_WINDOWS_PRESS_INPROC=1 runs
+    the check in the bot's process with its latency modelled (ceil(ms / 16.7) frames). tests/test_oldwin_press.py (8).
+- (1) THE PLANNER'S WINDOW ROWS: SSBOT_FORUM_WINDOWS_CORE=2 (enveloped with the core rows - never deadline-cut, stage
+  L's live 0 / 984 - with their reaction outside the cap: stage F's starvation fix) and SSBOT_FORUM_WINDOWS_RANK=1 (a
+  safe certain window row first among the rows equal on every key above the landed hits: below hz / U / S / clash /
+  keep / the kept and held rows / NODASH & co., above v2_nh / v2_ff). On the 16 live h2 episodes (scripts off): the
+  defaults choose 0 window rows (as stage L); CORE=2 + RANK=1 choose them on 693 ticks (676 approach + 17 CONT, all
+  pogo_cast) - every one while LOWHOP owned the keys: the sent keys unchanged. LOWHOP is NOT pre-empted: stage L's live
+  numbers (LOWHOP's side slashes landed 2 - 4 times in every one of the 22 cast windows, no HP lost) against one down
+  slash per pogo row - the old keys' verdict (v2_ff / v2_nh) is the honest one there. Both sub-switches off in h2wns.
+- drop_slam0, who is right on live presses: map2's judge - reflex stage 1's live validation, 141 live drop_slam0 presses
+  141 TP / 0 FP; the planner's _ds_hits saw no contact on 200 / 201 (w13) and 72 / 72 (w7) of the table's drop rows
+  (stage B): its slam body model lacks the Slam 0 lunge. Not changed in the planner (its window rows stay judged on
+  their miss lane, never certain); the drop is played by the Press path on map2's check and judge.
+
+V1 - THE RECORDED SLAMS (precision per type first; ns_slams2.py, 890 slams: today's 32 live h2 / h2w w7 episodes and the
+SP14 held set - rnjb / jt w7 and w13 - as the worker runs: lead 1, the recorded keys as the bridge; each offered press
+judged exactly from the recorded state at f0 - 1 - judge_press, every Clapper as recorded there -, a down-slash press
+after the first judge re-check from f0 - 2):
+
+| type | first-of-run presses | the first re-check passes | then the judge from f0 - 1 WIN |
+|---|---|---|---|
+| claw_slam0 NOW (no re-check) | 129 | - | 127 (early 1, late 1) |
+| hop_slam0 NOW | 540 | 524 | 523 |
+| drop_slam0 NOW | 257 | 251 | 251 |
+| pogo_head2 NOW | 17 | 15 | 15 |
+| drop_slam0 APPROACH | 2,231 | 2,154 | 2,111 (98.0 %; hit 30, miss 5, exit 4, noswing 4) |
+| hop_slam0 APPROACH (off) | lw only: 194 | 143 (the runtime check) | 121 - refuted |
+
+Offered (open loop: her recorded states are the scripts'): h2 w7 30 / 44 slams, h2w w7 28 / 45, rnjb w7 30 / 44, jt w7
+26 / 35, rnjb w13 242 / 353, jt w13 265 / 369 - against the scripts' recorded strikes (a DownSlash hit by antic + 75)
+0.89 - 0.91 (w7), 0.69 - 0.70 (w13); 325 of the 621 first offers at antic j <= 6; the first offers' judge 608 / 621.
+The check's time p50 3 - 5, p90 15 - 50, p99 54 - 170 ms (w13 the heavy end).
+
+V2 - THE OPEN-LOOP POLICY REPLAYS (ns_replay.py: h2 / h2ns / h2wns on the 16 live h2 episodes of stage L, w7 10, w13 6;
+deadline on; the slams from the recordings' fsm events):
+- THE SLAM STRUCK RATE (107 slams: lw 44, w7 26, w13 37): the scripts (h2, recorded) 97 = 0.91; THE PLANNER ALONE (h2ns:
+  a down slash it sends in the slam's strike window, antic 28 .. 75) 1 = 0.01; THE WINDOW PATH (h2wns: a validated press
+  found along the planner's own chosen row from the antic's first 6 frames - the bridge 3 .. 27 frames, p50 9 - 13.5 -,
+  her state still the planner's there) 48 = 0.45: drop_slam0 approach 32, hop_slam0 10, claw_slam0 5, pogo_head2 1. The
+  commits themselves (lw 13, w7 6, w13 2 slams; per fight minute lw drop 2.2, claw 0.17, hop 0.17) are open-loop
+  limited: the recorded states follow the scripts' keys, so most verdicts are refused ('pos', 'keys') and the started
+  presses end 'off lane' at once.
+- Bot thread (worker mode, the h2 / h2wns pair concurrent, lw): tick p50 17.08 vs 17.24 ms, p99 38.3 vs 37.1; the press
+  path's part decide p50 0.06 / p99 0.12 ms, post p50 0.01 / p99 0.06 ms; ticks with the Press p50 17.4 / p99 19.9.
+  Worker: the check p50 2.3 / p99 17 ms (inside the 3-frame bridge), the judge re-check p50 16 / p99 71 ms; verdict
+  latency 1 / 2 ticks p50 / p99 (replay ticks). Inproc (9 concurrent): +0.6 - 0.8 ms p50 (the checks on the thread).
+- Collisions: every committed press passed the exact check in every outcome (the bridge included); invalid presses 0 by
+  construction (the macro after the keys in flight and the bridge latched unchanged by the hold filter, else no press).
+- Frozen C:\ssbot\live_1v1_f8af0179 (236 knowledge links), warmed by two h2wns worker-mode replays from it
+  (smoke_frozen_f8af0179_1 / _2: warm-up 231 s cold - the venv -, then 8.9 s; worker check p99 9.4 ms; max tick 145 ms).
+
+Findings for the lead:
+1. The window table can strike about HALF of the slams from the planner's own positions (0.45 of 107 offline), with
+   98 - 100 % of its presses confirmed by the exact judge from a later observation - but the scripts struck 0.91 and the
+   planner alone ~0. SLAM_PLAY's value is its positioning (the walk into its stand, then the hop): the window path's hop
+   presses come where the script walked her (V1 hop first offers at antic j p50 13 - 19), and its own approach to a
+   hop cell is refuted by the judge a frame later (67 - 85 %) - a hop from a planned walk is not exact-checkable at that
+   precision with these models.
+2. A live h2 / h2ns / h2wns run would measure what offline cannot: the closed loop (where the planner leaves her in the
+   antic without SLAM_PLAY, its dodges, kill time, HP) - h2ns has never run live, and SLAM_PLAY's way out after its
+   strike is gone too.
+3. The Clawline presses have no re-check (judge_cl drifted on this branch: the 3 xfail tests); the drop approach's 2 %
+   judge refutations after one re-check are left to the continuous re-checks.
+
+Open items: the live paired run (the lead's call); a Clawline re-check once judge_cl matches the generator again; a
+'win' field in the live decision rows (the press path logs its commits / ends only in its own counters).
