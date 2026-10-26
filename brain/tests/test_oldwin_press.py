@@ -382,3 +382,41 @@ def test_f2_switches_default_to_the_old(monkeypatch):
     if not any(k in __import__("os").environ for k in ("SSBOT_FORUM_SLAM_PLAY_PREFS", "SSBOT_FORUM_WINDOWS_PRESS_OWN")):
         assert gauntlet.SP4_PREFS is False
         assert op.OWN == ("plan",)
+
+
+# ---- stage L2: the live trace ----------------------------------------------------------------------------------------
+
+def test_l2_trace_rows_and_json_safe():
+    """The live trace (WinPress.tr -> trace_dict -> the policy's episode stats, json.dumps'd without a default): a
+    verdict, a refused commit with its reason, a commit, the Press's ticks and its end, all JSON-safe."""
+    import json
+    wp = _wp([_o(j=10)])
+    wp.f2 = True
+    p = rx.Press("hop_slam0", 7, None, rx.Macro("ds", t=9), (1, 1), 105, np.zeros(20, np.int64), 124, (117, 119),
+                 {}, 0, 10.0, 0.0, d=1, t_abs=113, strike="down")
+    wp.out = {"seq": 1, "f": 100, "fo": 100, "g": 0, "bridge": np.array([km.B_RIGHT, km.B_RIGHT, 0], np.int64),
+              "obs": [_o(j=10)], "kind": "check"}
+    pred = np.tile(np.array([[30.0, 4.5]]), (8, 1))
+    wp.pend = [(101, {"kind": "now", "seq": 1, "press": p, "pred": pred, "lane": None, "ms": np.float64(5.0),
+                      "pred_lat": np.array([km.B_RIGHT, km.B_RIGHT, km.B_RIGHT, 0], np.int64),
+                      "pred_atk": np.zeros((5, 2))})]
+    S0 = np.zeros(km.K)
+    S0[km.PX], S0[km.PY] = 30.0, 4.5
+    wp.feed(_raw(101, mask=km.B_LEFT), 101)
+    wp._decide(101, 101, _raw(101), S0, np.zeros(1, np.int64), None, None, {102: km.B_RIGHT}, False, False)
+    ev = [r[0] for r in wp.tr]
+    assert ev == ["verdict", "refuse"] and wp.tr[1][2] == "lat" and wp.tr[0][3] == "hop_slam0"
+    wp2 = _wp([_o()])
+    cmds = np.zeros(30, np.int64)
+    cmds[8:10] = km.B_ATTACK | km.B_DOWN
+    wp2.press = rx.Press("hop_slam0", 7, None, rx.Macro("ds", t=9), (1, 1), 100, cmds, 129, (112, 114), {}, 0, 10.0,
+                         0.0, d=1, t_abs=108, strike="down")
+    wp2.pinfo = {"kind": "now", "lane": None, "contact": None, "hooked": False, "ctrl": None, "dx": None}
+    _run(wp2, range(99, 112), {})
+    ev2 = [r[0] for r in wp2.tr]
+    assert ev2[-1] == "end" and wp2.tr[-1][2] == "no swing" and "step" in ev2
+    d = wp.trace_dict()
+    s = json.dumps({"a": d, "b": wp2.trace_dict()})
+    assert '"refuse"' in s and '"no swing"' in s
+    wp2.reset()
+    assert wp2.tr == [] and wp2.trace_dict()["log"] == []

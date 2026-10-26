@@ -128,6 +128,26 @@ EATEN_TO = HOOK_F + 4              # an eaten Clawline: the planner's keys from 
 # 'low' / 'chase' - a non-critical LOWHOP run or the evade chase, which SLAM_PLAY pre-empted in h2 the same way
 OWN = tuple(x for x in os.environ.get("SSBOT_FORUM_WINDOWS_PRESS_OWN", "plan").replace(" ", "").split(",") if x) \
     or ("plan",)
+# (stage L2) the live trace: WinPress.tr - one row per event of the press path (a snapshot, a verdict, a commit or its
+# refusal and why, every bridge / Press tick with its phases and key, every end), returned by trace_dict() into the
+# policy's episode stats ('win_press') so a live run's windows are audited directly; a log only (no decision reads it)
+TRACE_MAX = 40000
+
+
+def _js(x):
+    """JSON-safe (the attempt row is json.dumps'd without a default): numpy scalars / arrays, tuples, dicts."""
+    if isinstance(x, (str, bool)) or x is None:
+        return x
+    if isinstance(x, (int, np.integer)):
+        return int(x)
+    if isinstance(x, (float, np.floating)):
+        v = float(x)
+        return round(v, 3) if v == v else None
+    if isinstance(x, dict):
+        return {str(k): _js(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple, np.ndarray)):
+        return [_js(v) for v in x]
+    return str(x)
 
 
 def swing_fix(S0, raw: dict | None) -> np.ndarray:
@@ -594,6 +614,19 @@ class WinPress:
         self.verdict = None
         self.abort_f = None
         self.last_dmg = None               # (F2) her last damage event's frame
+        self.tr: list = []                 # (L2) the live trace (trace_dict)
+        self._log0 = len(self.log)
+        self._why = None                   # (L2) the last _still refusal's reason
+
+    def _t(self, *row) -> None:
+        """(L2) one trace row: [event, f, ...] (a log only)."""
+        if len(self.tr) < TRACE_MAX:
+            self.tr.append(_js(row))
+
+    def trace_dict(self) -> dict:
+        """(L2) the episode's trace, the offline log since the reset and the counters / timings, JSON-safe."""
+        return _js({"trace": self.tr, "log": self.log[self._log0:], "stats": self.stats(), "L": self.L,
+                    "L2": self.L2, "f2": self.f2, "inproc": self.inproc})
 
     def feed(self, raw: dict, f: int) -> None:
         """Every STATE (the policy's _wake, after WindowRows.feed): her clip / input / latched keys, her hits, freezes,
@@ -682,6 +715,8 @@ class WinPress:
             self.st["end_" + why.split(":")[0]] += 1
             self.log.append({"ev": "end", "f": int(f), "why": why, "window": p.window, "iid": p.iid,
                              "f0": p.f0, **{k: v for k, v in self.pinfo.items() if k in ("kind", "contact", "ctrl")}})
+            self._t("end", f, why, p.window, p.f0, p.iid, self.pinfo.get("kind"), self.pinfo.get("contact"),
+                    self.pinfo.get("ctrl"), self.pinfo.get("latched"))
         self.press = None
         self.pinfo = {}
 
@@ -700,6 +735,7 @@ class WinPress:
                 self._end("supervisor", f)
             if self.commit is not None:
                 self.st["commit_sup"] += 1
+                self._t("drop", f, "sup", self.commit["press"].window, self.commit["f0"])
                 self.commit = None
             return None
         p_ = self.press
@@ -711,6 +747,7 @@ class WinPress:
                 self._end("crit", f)
             if self.commit is not None:
                 self.st["commit_crit_cancel"] += 1
+                self._t("drop", f, "crit", self.commit["press"].window, self.commit["f0"])
                 self.commit = None
             self._drain(f)
             return None
@@ -726,11 +763,14 @@ class WinPress:
                 if c["f_commit"] != f and res is not None and len(getattr(res, "cmd", ())) and int(res.cmd[0]) != bk:
                     self.st["commit_planner_left"] += 1
                     self.log.append({"ev": "cancel", "f": f, "why": "planner left the bridge", "window": c["press"].window})
+                    self._t("drop", f, "planner_left", c["press"].window, c["f0"], int(res.cmd[0]), bk)
                     self.commit = None
                     return None
                 if not self._still(c, fo, S0, f):
+                    self._t("drop", f, self._why, c["press"].window, c["f0"])
                     self.commit = None
                     return None
+                self._t("bridge", f, fo, bk, c["press"].window, c["f0"])
                 return bk
             self.press = c["press"]
             self.pinfo = {"kind": c["kind"], "lane": c.get("lane"), "contact": None, "hooked": False,
@@ -741,18 +781,27 @@ class WinPress:
             self.st["press_" + self.press.window] += 1
             self.log.append({"ev": "press", "f": f, "window": self.press.window, "iid": self.press.iid,
                              "f0": self.press.f0, "kind": self.pinfo["kind"], "label": self.press.macro.label()})
+            self._t("press", f, fo, self.press.window, self.press.f0, self.press.iid, self.pinfo["kind"],
+                    self.press.p_abs, self.press.t_abs)
         if self.press is None:
             return None
-        return self._step(f, fo, raw, S0)
+        m_ = self._step(f, fo, raw, S0)
+        if self.press is not None:
+            pi = self.pinfo
+            self._t("step", f, fo, m_, self.press.window, pi.get("contact"), pi.get("latched"), pi.get("harpoon"),
+                    pi.get("hooked"), pi.get("ctrl"))
+        return m_
 
     def _still(self, c: dict, fo: int, S0, f: int) -> bool:
         """The world still the snapshot's (the commit and each bridge tick)."""
         if self.last_freeze is not None and self.last_freeze > c["fo"]:
             self.st["commit_freeze"] += 1
+            self._why = "freeze"
             return False
         o = self._obs(c["iid"])
         if o is None or o.st != c["st"] or int(o.j) != c["oj"] + (self.win.gk - c["g"]):
             self.st["commit_clapper"] += 1
+            self._why = "clapper"
             return False
         i = fo - c["fo"]
         pred = c["pred"]
@@ -760,10 +809,12 @@ class WinPress:
         hx, hy = self._her_pos(fo, st0)
         if 0 <= i < len(pred) and (abs(hx - pred[i, 0]) > POS_TOL or abs(hy - pred[i, 1]) > POS_TOL):
             self.st["commit_pos"] += 1
+            self._why = "pos"
             return False
         if self.f2:
             if self.last_dmg is not None and self.last_dmg > c["fo"]:
                 self.st["commit_hurt"] += 1
+                self._why = "hurt"
                 return False
             pl = c.get("pred_lat")
             if pl is not None:
@@ -771,14 +822,17 @@ class WinPress:
                     k = ff - c["fo"] - 1
                     if c["fo"] < ff <= fo and 0 <= k < len(pl) and (int(lm) & LAT_BITS) != (int(pl[k]) & LAT_BITS):
                         self.st["commit_lat"] += 1
+                        self._why = "lat"
                         return False
             pa = c.get("pred_atk")
             if pa is not None and 0 <= i < len(pa) and (abs(float(st0[km.ATTACKING]) - pa[i, 0]) > ATK_TOL or
                                                          abs(float(st0[km.ATK_CD]) - pa[i, 1]) > ATK_TOL):
                 self.st["commit_atk"] += 1
+                self._why = "atk"
                 return False
             if not self._world(c.get("env"), c["g"], fo):
                 self.st["commit_world"] += 1
+                self._why = "world"
                 return False
         return True
 
@@ -805,16 +859,19 @@ class WinPress:
             o = self.out
             if o is None or v.get("seq") != o["seq"]:
                 self.st["verdict_stale"] += 1
+                self._t("stale", f, v.get("seq"))
                 continue
             self.out = None
             if v.get("kind") == "error":
                 self.st["verdict_error"] += 1
+                self._t("verr", f, v.get("seq"), str(v.get("error") or "")[:200])
                 continue
             if o.get("kind") == "recheck":
                 self.ms["recheck"].append(float(v.get("ms") or 0.0))
                 self.ms["recheck_latency_f"].append(f - o["f"])
                 ok = bool(v.get("ok"))
                 self.st["recheck_" + ("ok" if ok else "fail")] += 1
+                self._t("rchk", f, o["f"], ok, str(v.get("why") or ""), v.get("ms"), o["pk"][0], o["pk"][1])
                 p_now = self.press if self.press is not None else (self.commit or {}).get("press")
                 if not ok and p_now is not None and (p_now.window, p_now.f0) == o["pk"]:
                     why = "recheck " + str(v.get("why") or "")
@@ -831,9 +888,12 @@ class WinPress:
             self.ms["latency_f"].append(f - o["f"])
             if v.get("press") is None:
                 self.st["verdict_none"] += 1
+                self._t("vnone", f, o["f"], v.get("ms"))
                 continue
             v["_snap"] = o
             self.verdict = v
+            p_ = v["press"]
+            self._t("verdict", f, o["f"], p_.window, v.get("kind"), p_.iid, p_.f0, v.get("ms"), p_.macro.label())
 
     def _try_commit(self, f: int, fo: int, S0, sent: dict, crit: bool) -> None:
         v, self.verdict = self.verdict, None
@@ -841,14 +901,18 @@ class WinPress:
         p = v["press"]
         if crit:
             self.st["commit_crit"] += 1                   # a script's critical window (LOWHOP's bomb hop): not now
+            self._t("refuse", f, "crit", p.window, p.f0)
             return
         if f + 2 > p.f0:
             self.st["commit_late"] += 1
+            self._t("refuse", f, "late", p.window, p.f0)
             return
         # the keys sent since the snapshot (f_s + 2 .. f + 1) are the bridge's
         for k in range(o["f"] + 2, f + 2):
             if int(sent.get(k, -1)) != int(o["bridge"][k - (o["f"] + 2)]):
                 self.st["commit_keys"] += 1
+                self._t("refuse", f, "keys", p.window, p.f0, k, int(sent.get(k, -1)),
+                        int(o["bridge"][k - (o["f"] + 2)]))
                 return
         tgt = next((x for x in o["obs"] if int(x.iid) == int(p.iid)), None)
         c = {"press": p, "kind": v.get("kind"), "lane": v.get("lane"), "pred": v["pred"], "fo": o["fo"], "g": o["g"],
@@ -856,9 +920,11 @@ class WinPress:
              "bridge": o["bridge"], "k2": o["f"] + 2, "f0": p.f0, "f_commit": f, "env": v.get("env"),
              "pred_lat": v.get("pred_lat"), "pred_atk": v.get("pred_atk")}
         if not self._still(c, fo, S0, f):
+            self._t("refuse", f, self._why, p.window, p.f0)
             return
         self.commit = c
         self.st["commit"] += 1
+        self._t("commit", f, fo, p.window, v.get("kind"), p.iid, p.f0, o["f"], p.macro.label())
         self.log.append({"ev": "commit", "f": f, "window": p.window, "iid": p.iid, "f0": p.f0, "kind": v.get("kind"),
                          "label": p.macro.label(), "snap_f": o["f"], "check_ms": v.get("ms")})
 
@@ -1053,6 +1119,7 @@ class WinPress:
               "hazards": win.trk.hazards(self.K), "fo": fo, "f": f, "rest": rest, "t_rel": t_abs - (f + 1),
               "iid": int(p.iid), "window": p.window, "d": int(p.d)}
         self.st["recheck_sent"] += 1
+        self._t("rsnap", f, fo, p.window, p.f0)
         self._send(sn, {"seq": self.seq, "f": f, "fo": fo, "kind": "recheck", "pk": (p.window, p.f0)})
 
     def _post(self, f, fo, raw, S0, prefix, hold, mask, own, res_cmd, sup) -> None:
@@ -1093,6 +1160,7 @@ class WinPress:
               "claw_free": not claw_busy, "lat_s": int((raw.get("act") or {}).get("mask") or 0),
               "claw_lock_until": lock, "intro": False}
         self.st["snap"] += 1
+        self._t("snap", f, fo, L, own, [[o.iid, o.st, o.j, round(float(o.x), 2)] for o in live])
         self._send(sn, {"seq": self.seq, "f": f, "fo": fo, "g": win.gk, "bridge": bridge, "obs": list(allo),
                         "kind": "check"})
 

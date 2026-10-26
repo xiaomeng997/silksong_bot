@@ -1354,6 +1354,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"two_play": self.two.stats()} if self.two is not None else {}),
                 **({"air_show": self.air_show.stats()} if self.air_show is not None else {}),
                 **({"map2": self.m2.stats()} if self.m2 is not None else {}),
+                # task oldwin stage L2: the press path's live trace (its snapshots, verdicts, commits / refusals, the
+                # bridge / Press ticks with their phases, the ends) and counters - only with SSBOT_FORUM_WINDOWS_PRESS=1
+                **({"win_press": self.wpress.trace_dict()} if self.wpress is not None else {}),
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),
