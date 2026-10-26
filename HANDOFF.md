@@ -15919,3 +15919,136 @@ midswing=1,swing_hold=1,baseline=1,swing_fix=1,tube_fix=1,hold_fix=1,late_act=1,
 t1_h=36,su_fix=1,t1_fix=1,t1_lazy=1` (t1_past 1 at its default; t1_aim and su_band off) on the frozen checkout
 `C:\ssbot\live_1v1_b52a470`. With the deep search next to tier 1: `...,parts=2,t1_workers=1,t2_tail=1` instead of
 `parts=0,t1_workers=2`.
+
+## Task oldwin - the strike windows in the old planner (offline; the reflex's strike-window table as rows of the old planner behind SSBOT_FORUM_WINDOWS=1, default off - off: the old planner as before; ported, built, measured on the recorded w7 / w13 replays and the live audit's hit situations side by side with h2, a frozen checkout warmed, the arm h2w appended) (branch worktree-wf_f1846551-5f9-1, 2026-10-25)
+
+The task (the person's decision of 2026-10-25 ~17:00 PDT: keep the OLD planner - the default arm rnjb - as the
+controller and change it where needed; first connect its specials table to the reflex's strike-window table; the map2
+long-term positioning later): stage B, offline. Nothing live, no game process touched, nothing merged or pushed. Data
+`C:\ssbot\data\m2_play\oldwin` (`PROGRESS.txt`; `ident\` - the identity and the first h2w runs, `ident\bis*` the layout
+probe -, `audit\` - the first h2w audit and its exact checks -, `final\` - the final code: `h2_*` / `h2w_*` (--ident,
+h2w with AUDIT + MEASURE), `timing_*`, `exact_*.log` -, `smoke\`, `smoke_frozen_d13788fa*\`); scripts `oldwin\scripts\`
+(ow_replay.py - the policy open loop on recorded episodes, sets w7 / w13 / hits -, ow_sum.py, ow_ident.py, ow_exact.py,
+ow_exact_one.py / ow_exact_one_rb.py).
+
+### The port (b1ca937f)
+`git checkout reflex -- brain/ssbot/map2/reflex.py brain/ssbot/map2/reflex_gen.py brain/ssbot/tools/reflex_build.py
+brain/ssbot/tools/reflex_val.py brain/tests/test_reflex.py` (branch reflex at 089cf204; it only ADDS files over the
+common base 9bff134f); the table `knowledge/1.0.30000/enemies/forum/clapper_windows_v2.npz` copied (md5 6d0e17ac...,
+gitignored like every forum npz; the freeze links it). One fix: `reflex._Robust`'s patched `strike.dslash_contact`
+passes this branch's new `shrink` / `c_min` arguments. test_reflex: 32 pass, 3 xfail - the Clawline judge (`judge_cl`)
+under this branch's search / strike modules misses the late variant's slash (not traced; the 82 map2 commits since the
+reflex's base: HERO2's state K 83 -> 85 - SHUT / XVXD -, the S1b contact shrink, ...). The table lookup the old planner
+uses is unaffected.
+
+### What was built (d13788fa)
+- `ssbot/map2/oldwin.py` `WindowRows` (the policy owns it with the switch; its own map2 `clapper.Tracker` fed every STATE
+  in `_wake`): per planner tick, for each Clapper within 12 u with a window anchored in the frames ahead -
+  NOW rows: her exact state after the keys in flight (state index P) in a cell of the Clapper's move + frame (its j + P,
+  a flying body's x by its vx) -> the cell's macro (`reflex.render`); APPROACH rows: the old shapes (walk L / R / stand;
+  a jump now held 3 / 8 / 14 / 20 with the drift L / R / N; in the air the drift L / R / N - specials._templates'
+  holds) rolled once; at every frame j her state there (ground, or falling in normal control) keyed VECTORIZED (packed
+  keys searched in the table's sorted keys) against the Clapper's move at P + j; the picks (the earliest strike per
+  Clapper / type / shape, <= 2 per type, <= 8 rows) re-keyed EXACTLY from a rollout truncated at P + j
+  (`reflex.cell_of` on its final state; a mismatch is dropped) -> approach[:j] + the macro; CONT rows: the chosen row
+  while she follows it (the keys in flight are its keys, her observed position within 0.12 u of its lane, the Clapper's
+  move / frame as expected, its contact ahead). Only FULL cells; the attack ready at the press; the default types
+  (`SSBOT_FORUM_WINDOWS_TYPES`): every generated down-slash type but hop_slam0 (below); a dx-neighbour margin
+  (`SSBOT_FORUM_WINDOWS_MARGIN=1`: both dx neighbour cells windows too).
+- `ForumPlanner._win_rows`: the rows join this tick's certain-hit family rows (combat.dslash G3's `DsRows`; with
+  SSBOT_FORUM_DSLASH off they ARE the family) - the macro must be latched unchanged by the oracle's hold filter after the
+  keys in flight (else dropped: no invalid press by construction), the contact = the table's earliest k_strike on its
+  target, the bounce lane from it (stage 1 / the envelope on the lane, the score with the contact anchored -
+  `_ds_anchor` -, the hit branch with the hit enemy's reaction from the lane, the escape / escape-ready checks, the
+  forced-risk order, the ranking); a contact past the horizon (<= 24 f): the row within the horizon as any row, its tail
+  to the contact + 14 against the support with the bounce, the strike credited (dslash's 'extra'). Every other check is
+  the old planner's own (the ARE support with the other Clapper, aim zones, rune bombs, ...).
+- THE CLAWLINE TYPES (claw_slam0, claw_head2, cast_claw, evade_claw) ARE NOT ROWS: the old planner's hero model
+  (kinematics.rollout) has no Clawline, so no old check can judge one; they are counted (open now, with the reflex's
+  gates) for the measurement. Their ways in: rnjb's scripts (CLAWSTRIKE, CLAW_CHASE) or the reflex's own exact check on
+  a worker with a Press owning the keys (the reflex integration plan) - not built here.
+- Switch wiring: the policy builds WindowRows only with SSBOT_FORUM_WINDOWS=1 (raises without HERO2) and hands it to the
+  planner (`planner.win`); `win` is a CLASS default (None) - see the identity. `SSBOT_FORUM_WINDOWS_MEASURE=1` (offline)
+  also predicts each row's contact with the planner's own body model; `SSBOT_FORUM_WINDOWS_AUDIT=1` (offline) keeps the
+  chosen rows for the exact check. Warm paths (`WindowRows.warm`, `ForumPlanner.warm_win`): the first window tick had
+  compiled 1.8 s mid-replay. tests/test_oldwin.py (6).
+
+### Identity (switch off; ow_replay --ident: deadline inf; h2 = rnjb + HERO2)
+w7 (6 recorded rnjb episodes of the gate's baseline) 8,002 / 8,002 ticks identical (mask, own, name, S, forced); w13 (6
+episodes, the 10-18 22:08 - 22:10 runs) 12,224 / 12,224; the live audit's hit episodes (12 episodes of the 10-25 w7 m2
+run) 33,753 / 33,756: the 3 ticks (one SLAM_PLAY decision at f 10430446, its jump release a frame earlier) are a LAYOUT
+DEPENDENCE OF THE OLD CODE - the old code alone reproduces the base (old71e), the old code plus ONE UNRELATED INSTANCE
+ATTRIBUTE in the policy's `__init__` (bisR: `self._oldwin_probe = None`) moves them exactly the same way, the planner
+file's change alone (bisP) does not; making `win` a class default fixed the one-episode run (bisS) but not the
+12-episode process. A decision of the old code depends on the process's object / memory layout (suspects: an np.empty
+read, an id-ordered set) - not on the windows.
+
+### Measurements (final code; open loop: her positions are the recording's)
+- Tick (the timing pair, h2 and h2w concurrently, 4 processes, Idle, P-cores): w7 p50 19.5 vs 19.2 ms, p99 42.8 vs
+  43.0, max 214 vs 213; w13 21.1 vs 20.9, p99 33.1 vs 32.5, max 90 vs 84; the planner-owned ticks w7 13.40 vs 13.37 /
+  w13 19.96 vs 19.88 p50. The window part: p50 0.03 (w7) / 0.18 (w13) ms, p99 1.65 / 1.70, max 2.4 ms; the ticks with
+  window rows p50 24.2 / 24.9 ms. Within the old budget (+0.3 ms p50).
+- Window rows per fight minute, generated / passing (safe) / chosen (ticks): w7 (2.2 min) pogo_cast 230 / 168 / 4.5,
+  drop_slam0 32 / 1.8 / 0.9, pogo_head2 4.9 / 0.9 / 0.4; w13 (3.4 min) pogo_cast 303 / 129 / 6.8, drop_slam0 59 / 2.9 /
+  0.6, pogo_head2 1.8 / 0 / 0, pogo_jantic 0 (2 partial cells); hits set (9.4 min) pogo_cast 144 / 109 / 12.1, drop 6.9 /
+  0.5 / 0.1, pogo_head2 5.0 / 0.5 / 0.2. ride_up / ride_down: no cell met. Rows dropped by the hold filter (the macro
+  would change): w7 138, w13 368, hits 508; long rows' tail failing the support: 3 / 61 / 22.
+- SCRIPTS AND WINDOW ROWS: every chosen window row on w7 / w13 was chosen while a script owned the keys (pogo_cast under
+  the rune LOWHOP, drop_slam0 / pogo_head2 under SLAM_PLAY); the script's first key never equalled the row's; the
+  recorded bot (the same scripts) hit that Clapper within 60 frames after 100 % of them (w7 13 / 13, w13 25 / 25; hits
+  60 / 116). The sent keys differ from h2 on 0 (w7) / 0 (w13) ticks; on the hits set on 93 ticks (5 runs where the
+  planner's state after a window choice under a script changed its later rows, the forced-risk tick below, the 3 layout
+  ticks). -> On these replays h2w adds NO strike: rnjb's scripts own every situation the down-slash windows cover and
+  strike there. Passing window rows under a script: w7 284 ticks (low 279, slam 5), w13 360, hits 712.
+- The table's contact vs the planner's own body prediction (MEASURE, the miss lane): pogo_cast the same frame in 465 /
+  511 (w7), 948 / 1,027 (w13), 1,117 / 1,351 (hits) rows (most others 1 - 5 f later); pogo_head2 within 0 - 2 f;
+  drop_slam0: the planner sees NO contact in 200 / 201 (w13), 72 / 72 (w7) - its slam body model misses the lunge, so
+  those strikes count only by the table's credit.
+- THE EXACT CHECK on the chosen rows (map2.reflex.judge from her exact decision state with every Clapper predicted in
+  closed loop; no hazards passed - the rune bombs are the old support's): 111 distinct chosen rows (w7 11, w13 20, hits
+  80): safe in every outcome 108; 3 pogo_cast rows (2 cells, hits set) collide in 2 of 10 low-probability outcomes;
+  exit failures 2 (1 pogo_cast w7, 1 pogo_head2 hits); landed in every outcome 94 (the misses: this branch's judge
+  refutes some pogo_cast cells the reflex branch's judge accepts - f 10442727: 'WIN 28 / 28' there, 'lands 0 / 28'
+  here). Its cost here p50 20 - 63 ms, p99 110 - 448 ms per row (Idle, concurrent) - only on a worker.
+- hop_slam0 (OFF by default): its chosen approach rows were refuted by the exact check 4 / 10 (w13) and 9 / 18 (hits;
+  two of them while the planner owned the keys) - collisions hit@22 .. 40 after the strike (the slam's body), the same
+  with the target alone and with the reflex branch's own judge (ow_exact_one_rb.py, the state cut to K 83): the table's
+  bulk hop_slam0 cells do not hold from these exact states (the reflex's stage-4 finding 2: hop_slam0 is the type most
+  sensitive to the physics-step anchor the v1 bulk was judged with). SLAM_PLAY plays this strike in rnjb.
+- Invalid presses: 0 by construction (every row's macro latched unchanged by the hold filter, or dropped).
+- The live audit's 19 hit situations (the 10-25 w7 m2 run): h2w chose a window row within 90 frames before 1 hit (H16,
+  the small rune bomb, f 10424482: pogo_cast rows at -36 .. -28 under LOWHOP; the exact check: windows - the bomb is not
+  in that check); before H01 (f 10393327) both arms were in a forced-risk tick at -39 (no safe row) and h2w's least-risk
+  pick was a pogo_head2 window row (the forced-risk order as specified) - the keys then differ for 24 ticks in open loop.
+  No other hit situation sees a different key.
+- Clawline cells open now (counted, not rows; per fight minute): w7 cast_claw 24.7, claw_slam0 21.6, evade_claw 5.8;
+  w13 claw_slam0 32.1, cast_claw 8.2 (+ 18.0 with another Clapper alive: solo-only), evade_claw 2.1 (+ 25.9 solo-only);
+  hits cast_claw 16.7, claw_slam0 19.7, evade_claw 13.4 - this is where the table's value for the old planner lies.
+
+### Frozen checkout, arm
+`C:\ssbot\live_1v1_d13788fa` (1v1_freeze.ps1 -rev d13788fa: 236 knowledge files linked, the table among them), warmed by
+two h2w replays from it (`smoke_frozen_d13788fa`, `_2`: warmup 7.4 s, max tick 156 ms, window part max 2.2 ms).
+`C:\ssbot\sandbox\1v1_arms.txt` += `h2w` = the h2 line + `SSBOT_FORUM_WINDOWS=1` (types / margin at their defaults).
+
+### Findings for the lead
+1. With rnjb's scripts as they are, h2w executes the same keys as h2 on the recorded w7 / w13 replays (0 / 0 ticks):
+   the down-slash windows live exactly where SLAM_PLAY / LOWHOP own the keys. A live h2w run would measure h2. For the
+   windows to add strikes, either a passing window row pre-empts the script there (the person's call: 'keep the
+   scripts as they are' was the instruction) or the Clawline types come in (the reflex's check on a worker + a Press).
+2. The table without the exact check is not exact for every type: hop_slam0 approach states refuted 13 / 28 by both
+   judges; the other chosen types 108 / 111 safe. A full rebuild under the stage-4 generator (~31 CPU h, reflex open
+   item 3) or the exact check on a worker before a row may be chosen would close it.
+3. This branch's map2 judge has drifted from the generator's (3 Clawline tests xfail; pogo_cast cells refuted here and
+   accepted there): the exact check as an authority needs the table rebuilt with this branch's models.
+4. The old code's 3-tick layout dependence (identity above) - a pre-existing nondeterminism worth finding (bisR shows
+   it with any added policy attribute).
+5. forum_map_v2.md 3.8 (on main) could note the old specials table now connected to the window table behind
+   SSBOT_FORUM_WINDOWS [OFF]; not edited here (the design doc is not on this branch).
+
+### Open items
+1. The Clawline window types for the old planner (the reflex's exact check on a worker and a Press with control / stop
+   handling; or route them through CLAWSTRIKE / CLAW_CHASE).
+2. Whether window rows may pre-empt SLAM_PLAY / LOWHOP (the person).
+3. The table rebuilt under this branch's models (or the exact check as a gate) before hop_slam0 comes back.
+4. The 3-tick layout dependence of the old code.
+5. The map2 long-term positioning score (the person: later).
