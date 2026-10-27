@@ -1,0 +1,2 @@
+cd C:\modeling\silksong_bot\brain
+..\scripts\uv.cmd run rerun C:\ssbot\data\m2_forum_overlay\20261009_085824_zones.rrd
