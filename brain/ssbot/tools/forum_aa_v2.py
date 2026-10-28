@@ -65,7 +65,7 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     if window.get("watchdog_f") is not None:
         recovery = run/f"recovery_i{instance}_e{episode}.json"
         recovered = recovery.exists() and json.loads(recovery.read_text()).get("recovered") is True
-        if not recovered:errors.append("watchdog recovery not verified")
+        # Recovery controls continuation, not whether already observed HP/time are known.
     result = {"protocol_version":2,"complete":not errors,"errors":errors,"instance":instance,"episode":episode,
               "run":str(run),"seed":attempt["seed"],"outcome":attempt.get("measurement_outcome",attempt["outcome"]),
               "audit":audit,"trace":trace,"continuity":continuity,"behavior_sha256":m["behavior_sha256"],

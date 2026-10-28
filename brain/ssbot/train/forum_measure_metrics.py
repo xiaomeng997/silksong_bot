@@ -6,7 +6,7 @@ import math
 DOWN = {"DownSlash", "DownSlash New", "DownSlashAlt"}
 
 
-def audit_states(states, *, wake_f: int, end_f: int, target_ids=()) -> dict:
+def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_exposure=False) -> dict:
     problems, frames = [], {}
     for state in states:
         f = state["f"]
@@ -70,7 +70,7 @@ def audit_states(states, *, wake_f: int, end_f: int, target_ids=()) -> dict:
         if previous is not None and previous + change != total:
             problems.append(f"HP conservation mismatch at {f}")
         previous = total
-    if game_s <= 0:
+    if game_s < 0 or (game_s == 0 and not allow_zero_exposure):
         problems.append("zero game exposure")
 
     targets = set(target_ids)

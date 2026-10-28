@@ -41,3 +41,12 @@ def test_watchdog_in_postkill_tail_retains_primary_and_marks_operational_failure
     a=audit_window(rows,w.snapshot(),{"unit":"Forum_W_w13","f_wake":10,"outcome":"HARNESS_FAIL"})
     assert w.snapshot()["end_f"]==11 and w.snapshot()["tail_end_reason"]=="watchdog"
     assert a["complete"] and not a["success"] and a["K_star"]==120
+
+
+def test_known_zero_dt_tail_is_observed_not_missing_and_has_no_invented_rate():
+    w=window();rows=[state(9),state(10),state(11,dead=True),state(12,dead=True,paused=True,lost=True)]
+    rows[-1]['dt']=0
+    for s in rows[1:]:w.observe(s,s['f']*100_000_000)
+    a=audit_window(rows,w.snapshot(),{'unit':'Forum_W_w13','f_wake':10,'outcome':'HARNESS_FAIL'})
+    assert a['complete'] and not a['success']
+    assert a['tail']['metrics']['T']==0 and a['tail']['metrics']['HP_per_min'] is None

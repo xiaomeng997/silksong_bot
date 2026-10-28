@@ -25,7 +25,8 @@ def audit_window(states, measured, attempt):
                 "start_f": end + 1, "end_f": tail_end, "metrics": None, "lethal_events": []}
         if tail_end is not None and tail_end > end:
             tail["metrics"] = audit_states(states, wake_f=end + 1, end_f=tail_end,
-                                           target_ids=measured["target_ids"])
+                                           target_ids=measured["target_ids"],
+                                           allow_zero_exposure=measured.get("protocol_version") == 2)
             tail_complete &= tail["metrics"]["complete"]
             seen = set()
             for state in states:
