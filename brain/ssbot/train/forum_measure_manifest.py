@@ -128,8 +128,12 @@ def _known_runtime_bindings(policy, loaded):
                 value = _MISSING
                 break
             value = getattr(value, part)
-        # CLAWSTRIKE is constructed lazily: its unparsed settings remain unresolved.
+        # v2 has the real factory's pre-combat snapshot. Unprepared v1 keeps
+        # its original unresolved semantics; no parser is called in this writer.
+        prepared = getattr(getattr(policy, "measurement", None), "prepared_configs", {})
         if disabled and key == "SSBOT_FORUM_CLAWSTRIKE_SET":
+            if key in prepared:
+                out[key] = {f"policy.{path}": prepared[key]}
             continue
         converted = {"active": False, "reason": disabled} if disabled else json_value(value)
         if converted is not _MISSING:
@@ -258,6 +262,17 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
         entry["effective"] = entry["bindings"] or None
     configs = _config_objects(policy)
     behavior_configs, aliases = dict(configs), {}
+    prepared = getattr(getattr(policy, "measurement", None), "prepared_configs", {})
+    prepared_provenance = {}
+    key, path = "SSBOT_FORUM_CLAWSTRIKE_SET", "policy.slam_play._csx.cfg"
+    if key in prepared:
+        observed = configs.get(path, _MISSING)
+        prepared_provenance[key] = {"factory": "ssbot.combat.claw_strike.CsCfg.from_env",
+                                    "runtime_component_observed": observed is not _MISSING,
+                                    "parsed_value": prepared[key]}
+        if observed is not _MISSING and observed != prepared[key]:
+            unresolved.append(key + ": prepared/runtime config mismatch")
+        behavior_configs.setdefault(path, prepared[key])
     # ClawStrike constructs a second copy of the shared kinematics lazily. Keep
     # its full observed values, but do not make equal parameters change identity
     # merely because this episode reached the script. Unequal copies stay distinct.
@@ -271,7 +286,7 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
     encoded = json.dumps(behavior, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     unknown = sorted(k for k in env if k.startswith("SSBOT_FORUM_") and k not in switches)
     return {"schema": 1, "switches": dict(sorted(switches.items())), "configs": configs,
-            "config_aliases": aliases,
+            "config_aliases": aliases, "prepared_config_provenance": prepared_provenance,
             "source_sha256": source_hashes, "unresolved": sorted(unresolved),
             "unknown_environment_switches": unknown,
             "configuration_complete": not unresolved and not unknown,

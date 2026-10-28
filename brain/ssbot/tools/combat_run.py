@@ -479,6 +479,8 @@ def worker(a: argparse.Namespace) -> int:
         measurement_warmup = warm_query_kernels()
         print(f"[i{a.instance}] measurement query warm-up: "
               f"{sum(x['warmup_ms'] for x in measurement_warmup.values()):.1f} ms", flush=True)
+        from ssbot.train.measurement import prepare_lazy_configuration
+        prepare_lazy_configuration(policy, measurement)
         runtime_start = runtime_manifest()
     rev = git_rev()
     env = env_overrides()

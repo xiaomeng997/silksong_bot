@@ -91,6 +91,8 @@ def main(argv=None):
         observed = MeasurementTrace(diagnostics=diagnostics, protocol_version=2 if a.diagnostics else 1)
         observed.start_episode(a.episode)
         policy.measurement = observed
+        from ssbot.train.measurement import prepare_lazy_configuration
+        prepare_lazy_configuration(policy, observed)
         policy.planner.measurement_enabled = True
 
     class Socket:

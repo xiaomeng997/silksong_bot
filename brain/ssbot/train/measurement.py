@@ -62,6 +62,22 @@ def escape_evidence(info: dict | None, final_idx: int | None) -> dict:
             "scope": "planner_escape_check", "full_path_certified": False}
 
 
+def prepare_lazy_configuration(policy, measurement):
+    """Snapshot the real parser before combat, without constructing a script.
+
+    Only v2 uses this preparation. Manifest generation never imports a controller
+    module or invents a default; it joins this factory result to the later cfg.
+    """
+    if measurement.protocol_version != 2:
+        return
+    import sys
+    from ssbot.train.forum_measure_manifest import json_value
+    module = sys.modules.get("ssbot.combat.claw_strike")
+    measurement.prepared_configs = {}
+    if module is not None and getattr(policy, "slam_play", None) is not None:
+        measurement.prepared_configs["SSBOT_FORUM_CLAWSTRIKE_SET"] = json_value(module.CsCfg.from_env())
+
+
 class MeasurementTrace:
     def __init__(self, *, max_records: int = 100_000, receive_history: int = 4096,
                  clock_ns=None, detail: bool = True, protocol_version: int = 1, diagnostics=None):
@@ -70,6 +86,7 @@ class MeasurementTrace:
         if protocol_version not in (1, 2):
             raise ValueError("unsupported measurement protocol")
         self.protocol_version, self.diagnostics = protocol_version, diagnostics
+        self.prepared_configs = {}
         self.max_records = max_records
         self.receive_history = receive_history
         self.clock = clock_ns or time.perf_counter_ns

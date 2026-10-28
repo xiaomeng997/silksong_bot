@@ -76,3 +76,25 @@ def test_lazy_script_parameter_copy_preserves_identity_but_different_values_do_n
     different = fm.configuration_manifest(root, modules={}, environ={})
     assert different["behavior_sha256"] != baseline["behavior_sha256"]
     assert not different["config_aliases"]
+
+
+def test_v2_real_factory_snapshot_handles_early_exit_and_rejects_runtime_mismatch(tmp_path,monkeypatch):
+    from ssbot.train import forum_measure_manifest as fm
+    root=package(tmp_path,'NAME = "SSBOT_FORUM_CLAWSTRIKE_SET"\n')
+    cfg={"ctrl":[25,27],"cd_f":10}
+    policy=SimpleNamespace(slam_play=SimpleNamespace(_csx=None),
+                           measurement=SimpleNamespace(prepared_configs={"SSBOT_FORUM_CLAWSTRIKE_SET":cfg}))
+    observed={}
+    monkeypatch.setattr(fm,"_config_objects",lambda p:dict(observed))
+    modules={"ssbot.combat.example":SimpleNamespace(NAME="SSBOT_FORUM_CLAWSTRIKE_SET")}
+    early=fm.configuration_manifest(root,policy,modules=modules,environ={})
+    assert early['configuration_complete']
+    observed['policy.slam_play._csx.cfg']=cfg
+    policy.slam_play._csx=SimpleNamespace(cfg=cfg)
+    later=fm.configuration_manifest(root,policy,modules=modules,environ={})
+    assert later['configuration_complete'] and later['behavior_sha256']==early['behavior_sha256']
+    observed['policy.slam_play._csx.cfg']={**cfg,'cd_f':9}
+    policy.slam_play._csx.cfg=observed['policy.slam_play._csx.cfg']
+    changed=fm.configuration_manifest(root,policy,modules=modules,environ={})
+    assert not changed['configuration_complete']
+    assert any('mismatch' in x for x in changed['unresolved'])
