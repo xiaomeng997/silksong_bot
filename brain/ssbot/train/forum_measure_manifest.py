@@ -15,11 +15,26 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 BASE_REV = "dc95a60289c6d27399061d1a049c581189300923"
 _SWITCH = re.compile(r"SSBOT_FORUM_[A-Z][A-Z0-9_]*\Z")
 _MISSING = object()
+
+
+def runtime_manifest() -> dict:
+    import psutil
+    import numba
+    process = psutil.Process()
+    memory = process.memory_info()
+    return {"pid": process.pid, "cpu_affinity": process.cpu_affinity(), "priority": int(process.nice()),
+            "numba_threads": numba.get_num_threads(), "process_threads": process.num_threads(),
+            "rss": memory.rss, "peak_wset": getattr(memory, "peak_wset", None),
+            "process_cpu_times": process.cpu_times()._asdict(),
+            "system_cpu_times": psutil.cpu_times()._asdict(), "available_memory": psutil.virtual_memory().available,
+            "process_count": len(psutil.pids()), "monotonic_ns": time.perf_counter_ns(),
+            "timer_resolution_s": time.get_clock_info("perf_counter").resolution}
 
 
 def json_value(value, depth=0):
@@ -79,7 +94,8 @@ def _config_objects(policy):
             for name, value in vars(obj).items():
                 is_config = (dataclasses.is_dataclass(value) and not isinstance(value, type)
                              and (name.endswith("cfg") or name in {
-                                 "params0", "params", "pb", "rules", "l2_rules", "_pq_emulated"}))
+                                 "params0", "params", "pb", "rules", "l2_rules", "_pq_emulated"}
+                                  or type(value).__name__.endswith(("Config", "Cfg", "Rules", "Params", "Playbook"))))
                 if is_config or name in {
                         "threads", "crest", "clash", "ab_arm", "free", "view", "l2_rules", "rules"}:
                     converted = json_value(value)
@@ -273,6 +289,10 @@ def code_manifest(repo: Path) -> dict:
             deps[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             deps[name] = None
+    identity_files = {}
+    for path in (repo / "versions.lock", *sorted(Path(r"C:\ssbot\game\train\BepInEx\plugins").rglob("*Oracle*.dll"))):
+        if path.is_file():
+            identity_files[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     return {"base_revision": BASE_REV, "head_revision": git("rev-parse", "HEAD"),
             "working_tree": git("status", "--porcelain"), "files_sha256": files,
-            "python": sys.version, "dependencies": deps}
+            "python": sys.version, "dependencies": deps, "runtime_identity_files": identity_files}

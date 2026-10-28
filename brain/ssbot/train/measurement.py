@@ -144,6 +144,9 @@ class MeasurementTrace:
                    "f": ctx["f"] if ctx else None,
                    "owner": ctx.get("owner") if ctx else "harness",
                    "tick_start_ns": ctx["tick_start_ns"] if ctx else None}
+            latest = next(reversed(self._received), None)
+            row["latest_received_frame_at_send"] = latest
+            row["target_already_observed"] = latest >= target if latest is not None else None
             if ctx is not None:
                 if ctx.get("decision_start_ns") is None:
                     row["owner"] = ctx["owner"] = "harness"

@@ -19,9 +19,25 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
+def h2_environment(raw: bytes) -> dict[str, str]:
+    arm = {k: str(v) for k, v in json.loads(raw)["env"].items() if k.startswith("SSBOT_")}
+    required = dict(SSBOT_FORUM_FR="seen_cf", SSBOT_FORUM_REACT="escape+n+g", SSBOT_FORUM_MARGIN="state",
+                    SSBOT_FORUM_V2="1", SSBOT_FORUM_V2_EVERY="1", SSBOT_FORUM_V2_CORNER="13",
+                    SSBOT_FORUM_RUNE_NOPRE="1", SSBOT_FORUM_RUNE_BOMB="1", SSBOT_FORUM_RUNE_HOP="1",
+                    SSBOT_FORUM_NOGLIDE="1", SSBOT_FORUM_RUNE_FACE="3", SSBOT_FORUM_SLAM_PLAY="1",
+                    SSBOT_FORUM_JUMP_BEHIND="1", SSBOT_FORUM_HERO2="1")
+    if (any(arm.get(k) != v for k, v in required.items())
+            or any(k.startswith("SSBOT_FORUM_") and k not in required for k in arm)):
+        raise ValueError("reference config is not the canonical h2 common environment + arm")
+    return arm
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--code-root", type=Path, required=True)
+    ap.add_argument("--arm-config", type=Path, default=Path(
+        r"C:\ssbot\data\runs\m2\20261025_225113_Forum_W_w7_eval_planner_oracle_clashM\config.json"),
+        help="canonical h2 run config, including its common FR/REACT/MARGIN environment")
     ap.add_argument("--run", type=Path, required=True)
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--episode", type=int, default=0)
@@ -33,15 +49,15 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
     sys.path.insert(0, str(a.code_root.resolve() / "brain"))
-    # Apply the verified h2 arm before importing modules that resolve defaults.
+    # The arm line alone omits the launcher common environment. The original run
+    # config is the source of truth for both, before any control module imports.
     for key in list(os.environ):
-        if key.startswith("SSBOT_FORUM_"):
+        if key.startswith("SSBOT_"):
             del os.environ[key]
-    arm = dict(SSBOT_FORUM_V2="1", SSBOT_FORUM_V2_EVERY="1", SSBOT_FORUM_V2_CORNER="13",
-               SSBOT_FORUM_RUNE_NOPRE="1", SSBOT_FORUM_RUNE_BOMB="1", SSBOT_FORUM_RUNE_HOP="1",
-               SSBOT_FORUM_NOGLIDE="1", SSBOT_FORUM_RUNE_FACE="3", SSBOT_FORUM_SLAM_PLAY="1",
-               SSBOT_FORUM_JUMP_BEHIND="1", SSBOT_FORUM_HERO2="1")
+    arm_source = a.arm_config.read_bytes()
+    arm = h2_environment(arm_source)
     os.environ.update(arm)
+    os.environ["NUMBA_NUM_THREADS"] = "4"
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import RecordingReader
     from ssbot.train.encounters import ENCOUNTERS
@@ -130,6 +146,8 @@ def main(argv=None):
               "clock_step": a.clock_step, "clock_reads": reads, "pattern": pattern,
               "interpretation": "open-loop output identity only", "ticks": len(rows), "rows": rows}
     result["controller_sources_sha256"] = controller_sources
+    result["arm_source"] = str(a.arm_config)
+    result["arm_source_sha256"] = hashlib.sha256(arm_source).hexdigest()
     result["identity_sha256"] = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
     a.out.parent.mkdir(parents=True, exist_ok=True)
     with a.out.open("x", encoding="utf-8") as first:

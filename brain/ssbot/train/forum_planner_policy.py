@@ -27,6 +27,7 @@ Cogfly throws, Binds. Decision log (decisions_i<N>.jsonl): 90 ticks before each 
 first tick of a FORCED_RISK streak, 10 after.
 """
 import math
+import copy
 import os
 import random
 import time
@@ -1189,10 +1190,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             pw["streaks"] += int(streak)
         self.counts[f"tier_{r.decision.tier}"] += 1
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred, wt, kill_hp, ykill, streak)
-        self._measure_choice(own, mask, res, prefix=prefix, hold=hold)
+        self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs)
         return int(mask)
 
-    def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None) -> None:
+    def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None) -> None:
         if getattr(self, "measurement", None) is None:
             return
         if not self.measurement.detail:
@@ -1200,7 +1201,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.train.measurement import escape_evidence
         idx = int(res.idx) if res is not None else None
         fresh = res is not None and getattr(self.planner, "measurement_result", None) is res
-        esc = escape_evidence(self.planner.last_info if fresh else None, idx)
+        info = self.planner.last_info if fresh else {}
+        esc = escape_evidence(info, idx)
+        score = float(res.J) if res is not None and hasattr(res, "J") else None
+        goal = copy.deepcopy({k: getattr(getattr(self, "tac", None), "last", {}).get(k)
+                              for k in ("goal", "goal_why")})
         self.measurement_choice = {
             "owner": owner, "planner_row": idx,
             "planner_name": res.name if res is not None else None,
@@ -1209,6 +1214,15 @@ class ForumPlannerPolicy(PlannerPolicy):
             "planner_escape": esc,
             "final_key_escape": esc["status"] if owner == "plan" else "unchecked",
             "plan_ms": float(res.t_ms.get("total", 0.0)) if res is not None else None,
+            "candidate_S": int(res.S) if res is not None and hasattr(res, "S") else None,
+            "forced_risk": bool(res.forced_risk) if res is not None and hasattr(res, "forced_risk") else None,
+            "score": score if score is None or math.isfinite(score) else {"float": str(score)},
+            "deadline_cut": bool(info["cut"]) if "cut" in info else None,
+            "deadline_overrun": bool(info["overrun"]) if "overrun" in info else None,
+            "enveloped_rows": int(info["enveloped"]) if "enveloped" in info else None,
+            "target_iid": int(prefs.target) if prefs is not None and prefs.target is not None else None,
+            "stance_x": float(prefs.stance_x) if prefs is not None else None,
+            "mode": prefs.mode if prefs is not None else None, **goal,
             "inflight_prefix": prefix.tolist() if prefix is not None else None,
             "planner_hold": {k: getattr(hold, k).tolist() for k in ("latched", "desired", "pending", "age")}
                 if hold is not None else None}
