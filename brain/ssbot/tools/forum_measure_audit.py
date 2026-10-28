@@ -10,6 +10,41 @@ from ssbot.train.forum_measure_metrics import audit_states
 from ssbot.train.forum_measure_window import MeasurementWindow
 
 
+def audit_window(states, measured, attempt):
+    """Primary ends at the first endpoint; post-kill losses stay in the tail."""
+    wake, end = attempt["f_wake"], measured["end_f"]
+    audited = audit_states(states, wake_f=wake, end_f=end, target_ids=measured["target_ids"])
+    if measured["T"] is not None and measured["T"] != audited["T"]:
+        audited["problems"].append("online/offline game-clock mismatch")
+        audited["complete"] = False
+    tail, tail_complete = None, True
+    tail_end = measured.get("tail_end_f")
+    if measured["end_reason"] == "targets_dead":
+        tail_complete = tail_end is not None and measured.get("tail_end_reason") != "episode_harness_fail"
+        tail = {"complete": tail_complete, "end_reason": measured.get("tail_end_reason"),
+                "start_f": end + 1, "end_f": tail_end, "metrics": None, "lethal_events": []}
+        if tail_end is not None and tail_end > end:
+            tail["metrics"] = audit_states(states, wake_f=end + 1, end_f=tail_end,
+                                           target_ids=measured["target_ids"])
+            tail_complete &= tail["metrics"]["complete"]
+            seen = set()
+            for state in states:
+                for ev in state.get("ev") or ():
+                    ef = ev.get("f", state["f"])
+                    if (ev.get("k") in {"catastrophe", "would_die", "die", "hero_dead", "player_dead"}
+                            and isinstance(ef, int) and end < ef <= tail_end):
+                        key = json.dumps(ev, sort_keys=True)
+                        if key not in seen:
+                            seen.add(key)
+                            tail["lethal_events"].append(ev)
+        tail["complete"] = tail_complete
+    success = measured["end_reason"] == "targets_dead"
+    return {"metrics": audited, "tail": tail,
+            "complete": measured["complete"] and audited["complete"] and tail_complete,
+            "success": success, "episode_outcome": attempt.get("outcome"),
+            "K_star": audited["T"] if success else 120.0 if attempt["unit"].endswith("w13") else 60.0}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", type=Path, required=True)
@@ -36,17 +71,12 @@ def main(argv=None):
     if attempt.get("outcome") != "CLEAR":
         window.finish_at(last, "episode_" + str(attempt.get("outcome", "unknown")).lower())
     measured = window.snapshot()
-    end = measured["end_f"] if measured["end_f"] is not None else last
-    audited = audit_states(states, wake_f=wake, end_f=end, target_ids=measured["target_ids"])
-    if measured["T"] is not None and measured["T"] != audited["T"]:
-        audited["problems"].append("online/offline game-clock mismatch")
-        audited["complete"] = False
+    if measured["end_f"] is None:
+        measured["end_f"] = last  # remains incomplete; expose observed facts for diagnosis
     result = {"run": str(a.run), "instance": a.instance, "episode": a.episode,
               "historical_recalculation": "measurement" not in attempt,
-              "window": measured, "metrics": audited,
-              "complete": measured["complete"] and audited["complete"]}
-    result["success"] = measured["end_reason"] == "targets_dead" and attempt.get("outcome") == "CLEAR"
-    result["K_star"] = audited["T"] if result["success"] else 120.0 if is_two else 60.0
+              "window": measured, **audit_window(states, measured, attempt)}
+    audited = result["metrics"]
     a.out.parent.mkdir(parents=True, exist_ok=True)
     with a.out.open("x", encoding="utf-8") as out:
         json.dump(result, out, indent=1, allow_nan=False)
