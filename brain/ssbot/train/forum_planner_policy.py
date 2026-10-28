@@ -791,6 +791,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        diag = self.measurement.diagnostics if self.measurement is not None else None
+        if diag is not None: diag.phase("catch_up")
         if self.measurement is not None:
             self.measurement_choice = None
         if self.real_quit_active:
@@ -802,6 +804,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.raw[f] = s
         for old in [k for k in self.raw if k < f - 12]:
             del self.raw[old]
+        if diag is not None: diag.phase("observe")
         ws = self.backend.feed(s)
         if ws is None:
             self.sent[f + 2] = 0
@@ -814,6 +817,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._first_tick(ws, raw)
         self.trk.push(raw)
         self._wake(ws, s, tap)
+        if diag is not None: diag.phase("prediction")
         self.fc.update(ws)
         wt = self._wave_check(raw, fo)
         fcast = self.fc.forecast(HORIZON_S)
@@ -825,7 +829,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.forecasts.append((fo, fcast, ws.stamp.t_game_s))
         self._support = fcast.support_set(ws)
         if self.sc.pq is not None:
+            if diag is not None: diag.phase("pause_script")
             return self._pause_tick(s, f, fo, ws, raw, t0)
+        if diag is not None: diag.phase("tactics")
         d = self.decision
         h, _ = self.sc.h_now(s, obs=raw, ws=ws)
         esc_on = self.two is not None and (two_play.ESC or two_play.ASW)
@@ -866,6 +872,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         prefix = np.array([self.sent.get(fr, 0) & ~(COG if fr in cogf else 0) for fr in range(fo + 1, f + 2)],
                           np.int64)
         t1 = time.perf_counter()
+        if diag is not None: diag.phase("planner")
         S0 = self._start_state(ws, raw)
         # M4c (SSBOT_FORUM_MAP2): map2's keys for f + 2 (a received plan committed after its exact re-simulation from
         # this state, or the plan in control's next keys while its per-frame check holds); None: the fallback's
@@ -897,6 +904,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                 self._pin_ticks0 is not None and pt > self._pin_ticks0))
         self._pin_ticks0 = pt
         t2 = time.perf_counter()
+        if diag is not None: diag.phase("scripts")
         unpred = self._unpredicted(raw, fo) + self._unpred_backlog
         self._unpred_backlog = 0
         src, self._unpred_src = tuple(self._unpred_src), []
@@ -1189,7 +1197,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             pw["forced"] += int(res.forced_risk)
             pw["streaks"] += int(streak)
         self.counts[f"tier_{r.decision.tier}"] += 1
+        if diag is not None: diag.phase("logging")
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred, wt, kill_hp, ykill, streak)
+        if diag is not None: diag.phase("choice_capture")
         self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs)
         return int(mask)
 

@@ -31,6 +31,7 @@ the data).
 """
 import argparse
 import hashlib
+import math
 import json
 import os
 import re
@@ -439,10 +440,16 @@ def worker(a: argparse.Namespace) -> int:
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
     measurement = None
     measurement_code = None
+    diagnostics = None
     if getattr(a, "measure", False):
         from ssbot.train.measurement import MeasurementTrace
         from ssbot.train.forum_measure_manifest import code_manifest
-        measurement = MeasurementTrace(max_records=a.measure_max_records,
+        if getattr(a, "measure_diagnostics", False):
+            from ssbot.train.stall_diagnostics import StallDiagnostics
+            diagnostics = StallDiagnostics(stall_ms=a.measure_stall_ms, stall_tick=a.measure_stall_tick,
+                                           stall_episode=a.measure_stall_episode).install()
+        measurement = MeasurementTrace(protocol_version=getattr(a, "measurement_protocol", 1),
+                                       diagnostics=diagnostics, max_records=a.measure_max_records,
                                        detail=not getattr(a, "measure_timing_only", False))
         measurement_code = code_manifest(Path(__file__).resolve().parents[3])
     link = OracleLink(instance=a.instance, connect_timeout_s=120,
@@ -564,6 +571,11 @@ def worker(a: argparse.Namespace) -> int:
                 d["measurement"]["complete"] = bool(trace_summary["complete"]
                     and manifest["configuration_complete"] and d["measurement"]["window"]
                     and d["measurement"]["window"]["complete"])
+            if measurement is not None and measurement.protocol_version == 2:
+                d["measurement"]["protocol_version"] = 2
+                d["measurement_outcome"] = ("WATCHDOG" if d["measurement"]["window"].get("watchdog_f") is not None
+                                              else rec.outcome)
+                d["engineering_probe"] = bool(getattr(a, "engineering_probe", False))
             out.write(json.dumps(d) + "\n")
             out.flush()
             if measurement is not None and not d["measurement"]["complete"]:
@@ -580,6 +592,16 @@ def worker(a: argparse.Namespace) -> int:
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
             after_episode(link, enc, a.instance, d)
+            if measurement is not None and measurement.protocol_version == 2 and d.get("measurement_outcome") == "WATCHDOG":
+                from ssbot.train.recovery import is_paused
+                recovered = not link.closed and not is_paused(link.state)
+                recovery_path = run_dir / f"recovery_i{a.instance}_e{k-1}.json"
+                with recovery_path.open("x", encoding="utf-8") as rf:
+                    json.dump({"episode": k-1, "instance": a.instance, "outcome": "WATCHDOG",
+                               "recovered": recovered, "last_frame": link.frame,
+                               "game": (link.state or {}).get("game")}, rf, indent=1)
+                if not recovered:
+                    raise RuntimeError("v2 watchdog recovery not verified; stop before another episode")
             fails_in_row = fails_in_row + 1 if rec.outcome == "HARNESS_FAIL" else 0
             if fails_in_row >= 5:
                 print(f"[i{a.instance}] 5 harness failures in a row, stopping; {_describe(link.state)}", flush=True)
@@ -596,6 +618,8 @@ def worker(a: argparse.Namespace) -> int:
             except (Exception, SystemExit) as e:
                 print(f"[i{a.instance}] could not set time.scale back to 1: {e}", flush=True)
         link.close()
+        if diagnostics is not None:
+            diagnostics.close()
     print(f"[i{a.instance}] done: {dict(counts)}", flush=True)
     return 0
 
@@ -811,6 +835,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--rotate", type=int, default=25)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--no-record", action="store_true")
+        p.add_argument("--measurement-protocol", type=int, choices=(1, 2), default=1)
+        p.add_argument("--measure-diagnostics", action="store_true")
+        p.add_argument("--engineering-probe", action="store_true")
+        p.add_argument("--measure-stall-ms", type=float, default=0)
+        p.add_argument("--measure-stall-tick", type=int, default=200)
+        p.add_argument("--measure-stall-episode", type=int, default=0)
         p.add_argument("--measure", action="store_true",
                        help="diagnostic controller measurement: bounded per-tick/ACTION trace and resolved-config "
                             "manifest; does not certify a run for A/A")
@@ -863,6 +893,15 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("stop", "seal"):
         sub.add_parser(name).add_argument("run_dir", type=Path)
     a = ap.parse_args(argv)
+    if getattr(a, "measurement_protocol", 1) == 2 or getattr(a, "measure_diagnostics", False):
+        if not a.measure:
+            ap.error("v2/diagnostics require --measure")
+    if getattr(a, "measure_stall_ms", 0):
+        if not (a.measure and a.measure_diagnostics and a.engineering_probe and a.measurement_protocol == 2):
+            ap.error("stall injection requires v2 diagnostics and explicit --engineering-probe")
+    if hasattr(a, "measure_stall_ms") and (not math.isfinite(a.measure_stall_ms) or a.measure_stall_ms < 0
+                                           or a.measure_stall_tick < 1 or a.measure_stall_episode < 0):
+        ap.error("invalid stall injection parameters")
     if getattr(a, "measure_timing_only", False) and not a.measure:
         ap.error("--measure-timing-only requires --measure")
     if getattr(a, "measure", False):

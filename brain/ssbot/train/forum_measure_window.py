@@ -14,7 +14,11 @@ CLAPPER = "Song Heavy Sentry"
 class MeasurementWindow:
     def __init__(self, tap, *, wave: int, expected_targets: int, game_limit: float,
                  wall_limit: float = 180.0, tail_seconds: float = 2.0, max_frames: int = 100_000,
-                 defer_wake: bool = False):
+                 defer_wake: bool = False, protocol_version: int = 1):
+        if protocol_version not in (1, 2):
+            raise ValueError("unsupported measurement protocol")
+        self.protocol_version = protocol_version
+        self.watchdog_f = None
         self.tap = tap
         self.wave = wave
         self.expected_targets = expected_targets
@@ -42,7 +46,7 @@ class MeasurementWindow:
                 else:
                     # The wave intro can rebase tap.wake_frame after the reader
                     # already observed battle start. Retain facts until it commits.
-                    self._pending.append(({k: state.get(k) for k in ("f", "dt", "ents", "ev", "room")}, received_ns))
+                    self._pending.append(({k: state.get(k) for k in ("f", "dt", "ents", "ev", "room", "game", "act")}, received_ns))
                 return
             self._observe(state, received_ns)
 
@@ -88,6 +92,12 @@ class MeasurementWindow:
         else:
             wall_s = (received_ns - self.wake_ns) / 1e9
         candidates = []
+        watchdog = (self.protocol_version == 2 and (state.get("game") or {}).get("paused") is True
+                    and bool((state.get("act") or {}).get("lost")))
+        if watchdog and self.watchdog_f is None:
+            self.watchdog_f = f
+        if watchdog:
+            candidates.append((f, 0.5, "watchdog"))
         for entity in state.get("ents") or ():
             if entity.get("type_key") != CLAPPER:
                 continue
@@ -129,7 +139,9 @@ class MeasurementWindow:
         battles = (state.get("room") or {}).get("battles") or ()
         next_wave = any(b.get("started") and isinstance(b.get("wave"), int)
                         and b["wave"] > self.wave for b in battles)
-        if next_wave:
+        if watchdog and self.end_f is not None:
+            self.tail_end_f, self.tail_end_reason = f, "watchdog"
+        elif next_wave:
             if self.end_f is None:
                 self.errors.add("next wave without target death evidence")
             self.tail_end_f, self.tail_end_reason = f - 1, "next_wave"
@@ -143,7 +155,7 @@ class MeasurementWindow:
 
     def snapshot(self) -> dict:
         with self.lock:
-            return {"wake_f": self.wake_f, "last_f": self.last_f, "game_s": self.game_s,
+            result = {"wake_f": self.wake_f, "last_f": self.last_f, "game_s": self.game_s,
                     "target_ids": sorted(self.targets), "deaths": {str(k): v for k, v in self.deaths.items()},
                     "end_f": self.end_f, "end_reason": self.end_reason, "T": self.end_game_s,
                     "tail_end_f": self.tail_end_f, "tail_end_reason": self.tail_end_reason,
@@ -152,6 +164,11 @@ class MeasurementWindow:
                     "errors": sorted(self.errors), "complete": self.end_f is not None and not self.errors
                         and self.end_game_s is not None and self.end_game_s > 0,
                     "time_convention": "sum raw dt for wake_f <= f <= end_f; frame-end boundary"}
+            if self.protocol_version == 2:
+                result.update(protocol_version=2, watchdog_f=self.watchdog_f,
+                              operational_failure=self.watchdog_f is not None,
+                              exposure_terminated_by_failure=self.end_reason == "watchdog")
+            return result
 
     def finish_at(self, frame: int, reason: str) -> None:
         """A controller quit/episode fault is a failure, never a technical exclusion."""
@@ -165,5 +182,5 @@ class MeasurementWindow:
             self.tail_end_f, self.tail_end_reason = frame, reason
             if self.end_game_s is None:
                 self.errors.add("failure frame missing from raw clock")
-            if reason == "episode_harness_fail":
+            if reason == "episode_harness_fail" and not (self.protocol_version == 2 and self.watchdog_f is not None):
                 self.errors.add("episode fault: unobserved HP/time interval cannot be assumed empty")

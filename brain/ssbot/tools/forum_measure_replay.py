@@ -47,7 +47,10 @@ def main(argv=None):
                     help="deterministic seconds per perf_counter read; zero fixes the clock")
     ap.add_argument("--measure", action="store_true")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--diagnostics", action="store_true")
     a = ap.parse_args(argv)
+    if a.diagnostics and not a.measure:
+        ap.error("diagnostics requires --measure")
     sys.path.insert(0, str(a.code_root.resolve() / "brain"))
     # The arm line alone omits the launcher common environment. The original run
     # config is the source of truth for both, before any control module imports.
@@ -83,7 +86,9 @@ def main(argv=None):
     observed = None
     if a.measure:
         from ssbot.train.measurement import MeasurementTrace
-        observed = MeasurementTrace()
+        from ssbot.train.stall_diagnostics import StallDiagnostics
+        diagnostics = StallDiagnostics().install() if a.diagnostics else None
+        observed = MeasurementTrace(diagnostics=diagnostics, protocol_version=2 if a.diagnostics else 1)
         observed.start_episode(a.episode)
         policy.measurement = observed
         policy.planner.measurement_enabled = True
@@ -157,6 +162,8 @@ def main(argv=None):
         from ssbot.train.forum_measure_manifest import configuration_manifest
         trace_path = a.out.with_suffix(".trace.jsonl")
         observed.write(trace_path)
+        if observed.diagnostics is not None:
+            observed.diagnostics.close()
         result["trace_check"] = validate_trace(trace_path)
         manifest = configuration_manifest(a.code_root / "brain" / "ssbot", policy)
         a.out.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True), "utf-8")

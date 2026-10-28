@@ -38,7 +38,7 @@ def audit_window(states, measured, attempt):
                             seen.add(key)
                             tail["lethal_events"].append(ev)
         tail["complete"] = tail_complete
-    success = measured["end_reason"] == "targets_dead"
+    success = measured["end_reason"] == "targets_dead" and not measured.get("operational_failure", False)
     return {"metrics": audited, "tail": tail,
             "complete": measured["complete"] and audited["complete"] and tail_complete,
             "success": success, "episode_outcome": attempt.get("outcome"),
@@ -51,13 +51,15 @@ def main(argv=None):
     ap.add_argument("--instance", type=int, required=True)
     ap.add_argument("--episode", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--protocol-version", type=int, choices=(1, 2))
     a = ap.parse_args(argv)
     attempt = next(json.loads(line) for line in (a.run / f"attempts_i{a.instance}.jsonl").read_text("utf-8").splitlines()
                    if line and json.loads(line).get("episode") == a.episode)
+    version = a.protocol_version or (attempt.get("measurement") or {}).get("protocol_version", 1)
     wake, last = attempt["f_wake"], attempt["f_end"]
     is_two = attempt["unit"] == "Forum_W_w13"
     window = MeasurementWindow(SimpleNamespace(wake_frame=wake), wave=13 if is_two else 7,
-                               expected_targets=2 if is_two else 1, game_limit=120 if is_two else 60)
+                               expected_targets=2 if is_two else 1, game_limit=120 if is_two else 60, protocol_version=version)
     reader, states = RecordingReader(attempt["recording"]), []
     for _, received_ns, _, flags, _, payload in reader.records("state"):
         frame = formats.peek(payload, ("f",), flags).get("f")
@@ -65,7 +67,7 @@ def main(argv=None):
             continue
         if frame > last + 2:
             break
-        state = formats.peek(payload, ("f", "dt", "hero", "ents", "ev", "room"), flags)
+        state = formats.peek(payload, ("f", "dt", "hero", "ents", "ev", "room", "game", "act"), flags)
         states.append(state)
         window.observe(state, received_ns)
     if attempt.get("outcome") != "CLEAR":

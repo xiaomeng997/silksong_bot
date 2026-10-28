@@ -300,10 +300,14 @@ def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
     measurement = getattr(link, "measurement", None)
     if measurement is not None:
         measurement.begin_decision()
+    if measurement is not None and measurement.diagnostics is not None:
+        measurement.diagnostics.inject_if_due()
     m = policy.act(s, tap)
     flags = int(getattr(policy, "action_flags", 0) or 0)
     if measurement is not None:
         measurement.decision(getattr(policy, "measurement_choice", None), returned_mask=m, flags=flags)
+    if measurement is not None and measurement.diagnostics is not None:
+        measurement.diagnostics.phase("send")
     link.act(last + 2, m, hold_frames=0, flags=flags)
 
 
@@ -372,7 +376,8 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         is_two = enc.name.endswith("w13")
         measurement.window = MeasurementWindow(tap, wave=13 if is_two else 7,
                                                 expected_targets=2 if is_two else 1,
-                                                game_limit=120.0 if is_two else 60.0, defer_wake=True)
+                                                game_limit=120.0 if is_two else 60.0, defer_wake=True,
+                                                protocol_version=measurement.protocol_version)
     s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
@@ -437,7 +442,10 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                     last = s["f"]
                     rec.outcome = CLEAR if measured["end_reason"] == "targets_dead" else \
                         WOULD_DIE if measured["end_reason"] == "lethal" else STUCK
-                    rec.reason = "measurement window: " + str(measured["end_reason"])
+                    if measured.get("watchdog_f") is not None:
+                        rec.outcome = HARNESS_FAIL
+                    rec.reason = "measurement window: " + ("watchdog" if measured.get("watchdog_f") is not None
+                                                          else str(measured["end_reason"]))
                     break
             now = time.perf_counter()
             if t_turn is not None:

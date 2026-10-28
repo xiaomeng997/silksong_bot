@@ -64,9 +64,12 @@ def escape_evidence(info: dict | None, final_idx: int | None) -> dict:
 
 class MeasurementTrace:
     def __init__(self, *, max_records: int = 100_000, receive_history: int = 4096,
-                 clock_ns=None, detail: bool = True):
+                 clock_ns=None, detail: bool = True, protocol_version: int = 1, diagnostics=None):
         if max_records < 1 or receive_history < 1:
             raise ValueError("measurement buffer limits must be positive")
+        if protocol_version not in (1, 2):
+            raise ValueError("unsupported measurement protocol")
+        self.protocol_version, self.diagnostics = protocol_version, diagnostics
         self.max_records = max_records
         self.receive_history = receive_history
         self.clock = clock_ns or time.perf_counter_ns
@@ -81,6 +84,8 @@ class MeasurementTrace:
         self.window = None
 
     def start_episode(self, episode: int) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.start_episode(episode)
         with self._lock:
             if self._contexts:
                 raise MeasurementError("cannot reset measurement during a tick")
@@ -118,6 +123,8 @@ class MeasurementTrace:
         started = self.clock()
         tid = threading.get_ident()
         frame = state["f"]
+        if self.diagnostics is not None:
+            self.diagnostics.begin_tick(frame)
         with self._lock:
             if tid in self._contexts:
                 raise MeasurementError("nested measurement tick")
@@ -135,6 +142,8 @@ class MeasurementTrace:
             self._contexts[tid] = ctx
 
     def begin_decision(self) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.phase("policy")
         with self._lock:
             ctx = self._contexts.get(threading.get_ident())
             if ctx is not None:
@@ -189,6 +198,8 @@ class MeasurementTrace:
             ctx = self._contexts.pop(threading.get_ident(), None)
             if ctx is None:
                 raise MeasurementError("measurement tick was not started")
+            if self.diagnostics is not None:
+                ctx["diagnostic_phases"] = self.diagnostics.end_tick()
             ctx["error"] = error
             self._append_locked(ctx)
             # Includes record construction, lock acquisition and insertion in the buffer.
@@ -216,6 +227,11 @@ class MeasurementTrace:
             self.episode = None
         summary = {"kind": "footer", "schema": SCHEMA, "ep": episode, "detail": self.detail,
                    "records": len(rows), "overflow": overflow, "complete": overflow == 0}
+        if self.protocol_version == 2:
+            summary["protocol_version"] = 2
+        if self.diagnostics is not None:
+            summary["diagnostics"] = self.diagnostics.finish_episode()
+            summary["complete"] &= summary["diagnostics"]["complete"]
         started = self.clock()
         try:
             path = Path(path)
