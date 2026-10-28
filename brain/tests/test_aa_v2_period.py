@@ -32,3 +32,14 @@ def test_unscheduled_v2_and_engineering_data_are_rejected(tmp_path):
     with pytest.raises(ValueError):collector.run_period({'schema':2,'status':'FROZEN','periods':[{'planned_start':None}]},0,root=tmp_path,environment={},output_root=tmp_path)
     with pytest.raises(ValueError):analyze([{'protocol_version':1}])
     with pytest.raises(ValueError):analyze([{'protocol_version':2,'production_eligible':False}])
+
+
+def test_audit_subprocess_resolves_the_owning_worktree_without_parent_sys_path():
+    import os,subprocess,sys
+    from pathlib import Path
+    env=collector.audit_environment()
+    result=subprocess.run([sys.executable,"-B","-c",
+        "import ssbot.tools.forum_measure_audit as m;print(m.__file__)"],
+        env=env,cwd=Path(sys.executable).parent,capture_output=True,text=True)
+    assert result.returncode==0,result.stderr
+    assert Path(result.stdout.strip()).resolve()==Path(collector.__file__).with_name("forum_measure_audit.py").resolve()

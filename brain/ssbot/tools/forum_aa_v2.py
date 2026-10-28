@@ -18,6 +18,13 @@ def write_new(path, value):
         json.dump(value, out, indent=1, allow_nan=False, default=str)
 
 
+def audit_environment():
+    # A caller's sys.path changes do not propagate to a new Python process.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    return env
+
+
 def verify_episode(run, instance, episode=0, *, production=False, context=None):
     run = Path(run)
     attempt = next(json.loads(s) for s in (run/f"attempts_i{instance}.jsonl").read_text().splitlines()
@@ -30,7 +37,8 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     audit_path = run/f"audit_i{instance}_e{episode}.json"
     args = [sys.executable,"-B","-m","ssbot.tools.forum_measure_audit","--run",str(run),
             "--instance",str(instance),"--episode",str(episode),"--out",str(audit_path)]
-    result = subprocess.run(args,capture_output=True,text=True,timeout=120)
+    result = subprocess.run(args,capture_output=True,text=True,timeout=120,env=audit_environment(),
+                            cwd=Path(__file__).resolve().parents[3])
     (run/f"audit_i{instance}_e{episode}.log").write_text(result.stdout+result.stderr,encoding="utf-8")
     if not audit_path.exists():
         raise RuntimeError(result.stdout+result.stderr)
