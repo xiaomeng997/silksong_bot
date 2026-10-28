@@ -297,8 +297,14 @@ def boss_entity(s: dict, boss_type: str) -> dict | None:
 def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
     """The policy's mask for STATE `last`, applied at last + 2, with the ACTION flags the policy asks for after its
     tick (policy.action_flags: the pause machine's keys go out EXCLUSIVE, framing.ACTION_EXCLUSIVE)."""
+    measurement = getattr(link, "measurement", None)
+    if measurement is not None:
+        measurement.begin_decision()
     m = policy.act(s, tap)
-    link.act(last + 2, m, hold_frames=0, flags=int(getattr(policy, "action_flags", 0) or 0))
+    flags = int(getattr(policy, "action_flags", 0) or 0)
+    if measurement is not None:
+        measurement.decision(getattr(policy, "measurement_choice", None), returned_mask=m, flags=flags)
+    link.act(last + 2, m, hold_frames=0, flags=flags)
 
 
 def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig,
@@ -309,6 +315,9 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
     except (OracleError, TimeoutError, RuntimeError, KeyError, TypeError, ConnectionError) as e:
         rec.outcome, rec.reason = HARNESS_FAIL, f"{type(e).__name__}: {e}"
     finally:
+        measurement = getattr(link, "measurement", None)
+        if measurement is not None and measurement.window is not None and measurement._last_frame is not None:
+            measurement.window.finish_at(measurement._last_frame, "episode_" + rec.outcome.lower())
         try:
             link.act(link.frame + 2, 0, hold_frames=0)
             link.rpc("input.release", timeout_s=10)
@@ -355,6 +364,15 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         tap.reset(enc)
     else:
         tap.reset()
+    measurement = getattr(link, "measurement", None)
+    if measurement is not None:
+        from ssbot.train.forum_measure_window import MeasurementWindow
+        if enc.name not in ("Forum_W_w7", "Forum_W_w13"):
+            raise RuntimeError("measurement window requires Forum_W_w7 or Forum_W_w13")
+        is_two = enc.name.endswith("w13")
+        measurement.window = MeasurementWindow(tap, wave=13 if is_two else 7,
+                                                expected_targets=2 if is_two else 1,
+                                                game_limit=120.0 if is_two else 60.0)
     s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
@@ -381,6 +399,11 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         rec.intro = list(rec.intro or ()) + [{"boss_hp_frac": frac, "set": r.get("set")}]
 
     policy.reset(random.Random(cfg.seed), enc)
+    measurement = getattr(link, "measurement", None)
+    if measurement is not None:
+        planner = getattr(policy, "planner", None)
+        if planner is not None:
+            planner.measurement_enabled = measurement.detail
     timebox = cfg.timebox_s or enc.timebox_s
     post_f = round(getattr(enc, "post_clear_s", POST_CLEAR_FRAMES / 60.0) * 60)
     if os.environ.get("SSBOT_POST_CLEAR_S"):
@@ -399,112 +422,134 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     t_turn = None
     while True:
         s = link.wait_state(newer_than=last, timeout_s=2.0)
-        now = time.perf_counter()
-        if t_turn is not None:
-            gap_ms = (now - t_turn) * 1000.0
-            rec.loop_gap_ms_max = round(max(rec.loop_gap_ms_max or 0.0, gap_ms), 1)
-            rec.loop_gaps_250 += gap_ms >= 250.0
-        t_turn = now
-        if s["f"] > last + 1:
-            rec.late_states += 1
-        last = s["f"]
-        game = s.get("game") or {}
-        if (tap.death_frame is not None and getattr(policy, "pause_owned", False)
-                and getattr(policy, "episode_outcome", None) is None
-                and last - tap.death_frame < PAUSE_AFTER_KILL_FRAMES):
-            # a supervisor pause raised around the kill (the boss-death slow motion keeps the pause gate shut for
-            # 1.35 s, m0:N13): its pause machine keeps the keys until its quit is done, as in a real run, instead of
-            # being cut off by the post-kill zeros (the pause stress test injects hits within 3 frames of kills)
+        if measurement is not None:
+            measurement.check()
+            measurement.begin_tick(s)
+        tick_error = None
+        try:
+            if measurement is not None:
+                measured = measurement.window.snapshot()
+                if measured["errors"]:
+                    raise RuntimeError("measurement window: " + "; ".join(measured["errors"]))
+                if measured["tail_end_f"] is not None and measured["tail_end_f"] <= s["f"]:
+                    last = s["f"]
+                    rec.outcome = CLEAR if measured["end_reason"] == "targets_dead" else \
+                        WOULD_DIE if measured["end_reason"] == "lethal" else STUCK
+                    rec.reason = "measurement window: " + str(measured["end_reason"])
+                    break
+            now = time.perf_counter()
+            if t_turn is not None:
+                gap_ms = (now - t_turn) * 1000.0
+                rec.loop_gap_ms_max = round(max(rec.loop_gap_ms_max or 0.0, gap_ms), 1)
+                rec.loop_gaps_250 += gap_ms >= 250.0
+            t_turn = now
+            if s["f"] > last + 1:
+                rec.late_states += 1
+            last = s["f"]
+            game = s.get("game") or {}
+            if (tap.death_frame is not None and getattr(policy, "pause_owned", False)
+                    and getattr(policy, "episode_outcome", None) is None
+                    and last - tap.death_frame < PAUSE_AFTER_KILL_FRAMES):
+                # a supervisor pause raised around the kill (the boss-death slow motion keeps the pause gate shut for
+                # 1.35 s, m0:N13): its pause machine keeps the keys until its quit is done, as in a real run, instead of
+                # being cut off by the post-kill zeros (the pause stress test injects hits within 3 frames of kills)
+                if tap.lethal and cfg.mode == "eval":
+                    rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
+                    break
+                # the boss is dead: CLEAR (any other outcome ends the loop). Was `rec.outcome or CLEAR`, which kept the
+                # record's default HARNESS_FAIL when the pause began before the kill (a pause triggered 1-3 frames before
+                # a committed blow: pause stress chunk 20261002_232051 ep 26 and 39, "quit after the kill")
+                rec.outcome = CLEAR
+                _act(link, last, policy, s, tap)
+                rec.acts += 1
+                if getattr(policy, "episode_outcome", None) == QUIT:
+                    rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
+                    if tail:
+                        rec.outcome = QUIT      # the encounter had not ended: the tail's quiet never came (DESIGN §3.5.7)
+                    end_after = last
+                continue
             if tap.lethal and cfg.mode == "eval":
-                rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
+                # before the kill check: a lethal hit in the same STATE as the kill, or in the post-clear window, is a
+                # death all the same
+                rec.outcome = WOULD_DIE
+                rec.reason = "lethal hit" if tap.death_frame is None else "lethal hit at/after the kill"
                 break
-            # the boss is dead: CLEAR (any other outcome ends the loop). Was `rec.outcome or CLEAR`, which kept the
-            # record's default HARNESS_FAIL when the pause began before the kill (a pause triggered 1-3 frames before
-            # a committed blow: pause stress chunk 20261002_232051 ep 26 and 39, "quit after the kill")
-            rec.outcome = CLEAR
+            if end_after is not None:
+                if last >= end_after:
+                    break
+                # zeros after a kill, unless the policy asks to keep acting or the encounter is a gauntlet (the pause
+                # stress test's hit injected just after the killing blow must reach the supervisor, which then owns the
+                # keys through the block above)
+                # a certified killing blow's plan (PlannerPolicy kill_commit_active) is played through the slow motion:
+                # the plan the safety filter certified is the path executed, not the zeros (DESIGN §3.7.3 exception)
+                after = (act_after or getattr(policy, "kill_commit_active", False)) and rec.outcome == CLEAR                 and not rec.reason
+                if after:
+                    _act(link, last, policy, s, tap)
+                else:
+                    link.act(last + 2, 0, hold_frames=0)
+                continue
+            if in_tail:
+                # the post-kill tail (Encounter.tail_quiet_s): CLEAR once no damage source has been live for that long
+                # (game time, FightTap.tail_quiet_g); the policy keeps playing (the planner dodges the bells), and a hit
+                # here is a hit like any other (a lethal one: WOULD_DIE above, a supervisor quit: QUIT)
+                if game.get("scene") != enc.scene and not getattr(policy, "real_quit_active", False):
+                    rec.tail_end = f"scene {game.get('scene')}"      # the room is gone, and what was live in it
+                    break
+                if tap.tail_quiet_g() >= enc.tail_quiet_s:
+                    rec.tail_end = "quiet"
+                    break
+                if game.get("paused") and not getattr(policy, "pause_owned", False):
+                    rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} (post-kill tail; " \
+                                                            f"{_pause_cause(tap, s)})"
+                    break
+                if tap.tail_g > enc.tail_max_s or last - tap.death_frame > PAUSE_AFTER_KILL_FRAMES + enc.tail_max_s * 60:
+                    rec.outcome, rec.reason = STUCK, f"post-kill tail: damage sources live for {enc.tail_max_s:.0f} s"
+                    break
+                if act_after or getattr(policy, "kill_commit_active", False):
+                    _act(link, last, policy, s, tap)
+                    rec.acts += 1
+                else:
+                    link.act(last + 2, 0, hold_frames=0)
+                if getattr(policy, "episode_outcome", None) == QUIT:
+                    rec.outcome = QUIT
+                    rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
+                    break
+                continue
+            if tap.death_frame is not None and measurement is None:
+                rec.outcome = CLEAR
+                if tail:
+                    in_tail = True
+                else:
+                    end_after = last + post_f
+                if getattr(policy, "kill_commit_active", False) or (tail and act_after):
+                    _act(link, last, policy, s, tap)          # the kill commitment keeps its keys from the kill frame on
+                    rec.acts += 1
+                continue
+            quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
+            if game.get("paused") and not getattr(policy, "pause_owned", False):
+                # the reason names the cause (recovery.pause_cause): almost always the oracle's brain-lost watchdog after
+                # this worker sent no ACTION for 250 ms (60 of 61, 2026-10-02 .. 06); the worker resumes the game
+                # (combat_run.after_harness_fail) and the next episode goes on
+                rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} ({_pause_cause(tap, s)})"
+                break
+            if game.get("scene") != enc.scene and not quitting:
+                rec.outcome, rec.reason = HARNESS_FAIL, f"left the scene: {game.get('scene')}"
+                break
+            if measurement is None and (last - (tap.wake_frame or rec.f_reset)) / 60.0 > timebox:
+                rec.outcome, rec.reason = STUCK, f"timebox {timebox:.0f} s"
+                break
             _act(link, last, policy, s, tap)
             rec.acts += 1
             if getattr(policy, "episode_outcome", None) == QUIT:
-                rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
-                if tail:
-                    rec.outcome = QUIT      # the encounter had not ended: the tail's quiet never came (DESIGN §3.5.7)
-                end_after = last
-            continue
-        if tap.lethal and cfg.mode == "eval":
-            # before the kill check: a lethal hit in the same STATE as the kill, or in the post-clear window, is a
-            # death all the same
-            rec.outcome = WOULD_DIE
-            rec.reason = "lethal hit" if tap.death_frame is None else "lethal hit at/after the kill"
-            break
-        if end_after is not None:
-            if last >= end_after:
+                rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)
                 break
-            # zeros after a kill, unless the policy asks to keep acting or the encounter is a gauntlet (the pause
-            # stress test's hit injected just after the killing blow must reach the supervisor, which then owns the
-            # keys through the block above)
-            # a certified killing blow's plan (PlannerPolicy kill_commit_active) is played through the slow motion:
-            # the plan the safety filter certified is the path executed, not the zeros (DESIGN §3.7.3 exception)
-            after = (act_after or getattr(policy, "kill_commit_active", False)) and rec.outcome == CLEAR                 and not rec.reason
-            if after:
-                _act(link, last, policy, s, tap)
-            else:
-                link.act(last + 2, 0, hold_frames=0)
-            continue
-        if in_tail:
-            # the post-kill tail (Encounter.tail_quiet_s): CLEAR once no damage source has been live for that long
-            # (game time, FightTap.tail_quiet_g); the policy keeps playing (the planner dodges the bells), and a hit
-            # here is a hit like any other (a lethal one: WOULD_DIE above, a supervisor quit: QUIT)
-            if game.get("scene") != enc.scene and not getattr(policy, "real_quit_active", False):
-                rec.tail_end = f"scene {game.get('scene')}"      # the room is gone, and what was live in it
-                break
-            if tap.tail_quiet_g() >= enc.tail_quiet_s:
-                rec.tail_end = "quiet"
-                break
-            if game.get("paused") and not getattr(policy, "pause_owned", False):
-                rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} (post-kill tail; " \
-                                                        f"{_pause_cause(tap, s)})"
-                break
-            if tap.tail_g > enc.tail_max_s or last - tap.death_frame > PAUSE_AFTER_KILL_FRAMES + enc.tail_max_s * 60:
-                rec.outcome, rec.reason = STUCK, f"post-kill tail: damage sources live for {enc.tail_max_s:.0f} s"
-                break
-            if act_after or getattr(policy, "kill_commit_active", False):
-                _act(link, last, policy, s, tap)
-                rec.acts += 1
-            else:
-                link.act(last + 2, 0, hold_frames=0)
-            if getattr(policy, "episode_outcome", None) == QUIT:
-                rec.outcome = QUIT
-                rec.reason = f"quit after the kill: {getattr(policy, 'outcome_reason', None)}"
-                break
-            continue
-        if tap.death_frame is not None:
-            rec.outcome = CLEAR
-            if tail:
-                in_tail = True
-            else:
-                end_after = last + post_f
-            if getattr(policy, "kill_commit_active", False) or (tail and act_after):
-                _act(link, last, policy, s, tap)          # the kill commitment keeps its keys from the kill frame on
-                rec.acts += 1
-            continue
-        quitting = getattr(policy, "real_quit_active", False)     # a real quit: menus, then the main menu
-        if game.get("paused") and not getattr(policy, "pause_owned", False):
-            # the reason names the cause (recovery.pause_cause): almost always the oracle's brain-lost watchdog after
-            # this worker sent no ACTION for 250 ms (60 of 61, 2026-10-02 .. 06); the worker resumes the game
-            # (combat_run.after_harness_fail) and the next episode goes on
-            rec.outcome, rec.reason = HARNESS_FAIL, f"paused unasked at frame {last} ({_pause_cause(tap, s)})"
-            break
-        if game.get("scene") != enc.scene and not quitting:
-            rec.outcome, rec.reason = HARNESS_FAIL, f"left the scene: {game.get('scene')}"
-            break
-        if (last - (tap.wake_frame or rec.f_reset)) / 60.0 > timebox:
-            rec.outcome, rec.reason = STUCK, f"timebox {timebox:.0f} s"
-            break
-        _act(link, last, policy, s, tap)
-        rec.acts += 1
-        if getattr(policy, "episode_outcome", None) == QUIT:
-            rec.outcome, rec.reason = QUIT, getattr(policy, "outcome_reason", None)
-            break
+        except BaseException as exc:
+            tick_error = type(exc).__name__
+            raise
+        finally:
+            if measurement is not None:
+                measurement.end_tick(error=tick_error)
+                measurement.check()
     rec.f_end = last
     if cfg.mode == "eval" and rec.outcome == CLEAR and tap.lethal_frames():
         # a lethal hit the reader thread delivered after the loop's last look (the STATE that closed the window)

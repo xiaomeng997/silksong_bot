@@ -218,6 +218,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.terrain_msg: dict | None = None      # offline replay: the recording's TERRAIN message
         self._inbox = None
         self._last_f = None
+        self.measurement = None
+        self.measurement_choice = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self.keys_path = (Path(log_dir) / f"keys_i{instance}.jsonl") if log_dir else None
@@ -788,8 +790,12 @@ class ForumPlannerPolicy(PlannerPolicy):
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        if self.measurement is not None:
+            self.measurement_choice = None
         if self.real_quit_active:
-            return self._real_quit_step(s, f)
+            mask = self._real_quit_step(s, f)
+            self._measure_choice("real_quit", mask)
+            return mask
         self._catch_up(f, tap)
         self.keylog.observe(f, (s.get("act") or {}).get("mask", 0))
         self.raw[f] = s
@@ -799,6 +805,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if ws is None:
             self.sent[f + 2] = 0
             self.keylog.tick(f, f + 2, (0,))
+            self._measure_choice("no_world_state", 0)
             return 0
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
@@ -1182,7 +1189,29 @@ class ForumPlannerPolicy(PlannerPolicy):
             pw["streaks"] += int(streak)
         self.counts[f"tier_{r.decision.tier}"] += 1
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred, wt, kill_hp, ykill, streak)
+        self._measure_choice(own, mask, res, prefix=prefix, hold=hold)
         return int(mask)
+
+    def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None) -> None:
+        if getattr(self, "measurement", None) is None:
+            return
+        if not self.measurement.detail:
+            return
+        from ssbot.train.measurement import escape_evidence
+        idx = int(res.idx) if res is not None else None
+        fresh = res is not None and getattr(self.planner, "measurement_result", None) is res
+        esc = escape_evidence(self.planner.last_info if fresh else None, idx)
+        self.measurement_choice = {
+            "owner": owner, "planner_row": idx,
+            "planner_name": res.name if res is not None else None,
+            "planner_mask": int(res.mask) if res is not None else None,
+            "script_override": owner not in ("plan", "no_world_state"),
+            "planner_escape": esc,
+            "final_key_escape": esc["status"] if owner == "plan" else "unchecked",
+            "plan_ms": float(res.t_ms.get("total", 0.0)) if res is not None else None,
+            "inflight_prefix": prefix.tolist() if prefix is not None else None,
+            "planner_hold": {k: getattr(hold, k).tolist() for k in ("latched", "desired", "pending", "age")}
+                if hold is not None else None}
 
     def _m2_take(self) -> None:
         """M4c: map2 takes the keys - the scripts' runs end (aborted, as when the supervisor takes them), so they start
@@ -1259,6 +1288,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "pq": None if pq is None else pq.state,
                "outcome": r.outcome}
         self._emit(rec, any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ()))
+        self._measure_choice("sup", mask)
         return mask
 
     # ---- logs and stats ----

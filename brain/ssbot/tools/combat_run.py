@@ -437,12 +437,25 @@ def worker(a: argparse.Namespace) -> int:
     enc = encs[0]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
-    link = OracleLink(instance=a.instance, connect_timeout_s=120)
+    measurement = None
+    measurement_code = None
+    if getattr(a, "measure", False):
+        from ssbot.train.measurement import MeasurementTrace
+        from ssbot.train.forum_measure_manifest import code_manifest
+        measurement = MeasurementTrace(max_records=a.measure_max_records,
+                                       detail=not getattr(a, "measure_timing_only", False))
+        measurement_code = code_manifest(Path(__file__).resolve().parents[3])
+    link = OracleLink(instance=a.instance, connect_timeout_s=120,
+                      **({"measurement": measurement} if measurement is not None else {}))
     tap = make_tap(link, enc)
+    if measurement is not None:
+        link.subscribe_state(measurement.observe_state)  # tap updates wake before this observer
     policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
                          gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None,
                          crest="Wanderer" if enc.savestate == "fo_W" or enc.name.startswith("Forum_W_w") else "Reaper",
                          clash=a.forum_clash)
+    if measurement is not None:
+        policy.measurement = measurement
     if a.silk_reserve:
         pb = getattr(getattr(policy, "inner", policy), "pb", None)
         if pb is not None:
@@ -496,6 +509,8 @@ def worker(a: argparse.Namespace) -> int:
                                            "view": a.view, "time_scale": a.time_scale}).start()
             seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
             enc = encs[k % len(encs)]
+            if measurement is not None:
+                measurement.start_episode(k)
             why, game_scale = ready_for_episode(link, a.time_scale, a.instance)
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
@@ -517,8 +532,31 @@ def worker(a: argparse.Namespace) -> int:
             d["time_scale_game"] = game_scale       # Time.timeScale read back before the episode (None: no RPC)
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
+            if measurement is not None:
+                from ssbot.train.forum_measure_manifest import configuration_manifest
+                trace_path = run_dir / f"measurement_i{a.instance}_e{k}.jsonl"
+                trace_summary = measurement.write(trace_path)
+                manifest = configuration_manifest(Path(__file__).resolve().parents[1], policy)
+                manifest.update(code=measurement_code, instance=a.instance, episode=k,
+                                seed=seed, cli=vars(a), oracle_hello=link.hello,
+                                trace=trace_summary, certified_for_aa=False)
+                manifest_path = run_dir / f"measurement_manifest_i{a.instance}_e{k}.json"
+                with manifest_path.open("x", encoding="utf-8") as mf:
+                    json.dump(manifest, mf, sort_keys=True, indent=1, allow_nan=False, default=str)
+                    mf.write("\n")
+                d["measurement"] = {**trace_summary, "manifest": str(manifest_path),
+                                    "configuration_complete": manifest["configuration_complete"],
+                                    "unresolved": manifest["unresolved"],
+                                    "behavior_sha256": manifest["behavior_sha256"]}
+                d["measurement"]["window"] = measurement.window.snapshot() if measurement.window else None
+                d["measurement"]["trace_complete"] = trace_summary["complete"]
+                d["measurement"]["complete"] = bool(trace_summary["complete"]
+                    and manifest["configuration_complete"] and d["measurement"]["window"]
+                    and d["measurement"]["window"]["complete"])
             out.write(json.dumps(d) + "\n")
             out.flush()
+            if measurement is not None and not d["measurement"]["complete"]:
+                raise RuntimeError("measurement incomplete; stop before another episode")
             counts[rec.outcome] += 1
             if rec.gauntlet is not None:
                 g = rec.gauntlet
@@ -602,6 +640,10 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--start-hp", str(a.start_hp[0]), str(a.start_hp[1])]
         if a.no_record:
             cmd.append("--no-record")
+        if getattr(a, "measure", False):
+            cmd += ["--measure", "--measure-max-records", str(a.measure_max_records)]
+            if a.measure_timing_only:
+                cmd.append("--measure-timing-only")
         log = (run_dir / f"worker_i{i}.log").open("w", encoding="utf-8")
         procs.append((i, subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "PYTHONUNBUFFERED": "1"}), log))
         print(f"worker i{i}: pid {procs[-1][1].pid}", flush=True)
@@ -758,6 +800,14 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--rotate", type=int, default=25)
         p.add_argument("--seed", type=int, default=0)
         p.add_argument("--no-record", action="store_true")
+        p.add_argument("--measure", action="store_true",
+                       help="diagnostic controller measurement: bounded per-tick/ACTION trace and resolved-config "
+                            "manifest; does not certify a run for A/A")
+        p.add_argument("--measure-max-records", type=int, default=100_000,
+                       help="maximum buffered measurement records per episode (overflow invalidates and stops)")
+        p.add_argument("--measure-timing-only", action="store_true",
+                       help="G3 calibration control: same measurement window and full-tick timer, omit detailed "
+                            "receive/ACTION/choice capture; not eligible for A/A")
         p.add_argument("--view", choices=("oracle", "degraded", "degraded_dust", "degraded_tell"), default="oracle")
         p.add_argument("--threads", type=int, default=8)
         p.add_argument("--timebox", type=float, default=0.0,
@@ -802,6 +852,19 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("stop", "seal"):
         sub.add_parser(name).add_argument("run_dir", type=Path)
     a = ap.parse_args(argv)
+    if getattr(a, "measure_timing_only", False) and not a.measure:
+        ap.error("--measure-timing-only requires --measure")
+    if getattr(a, "measure", False):
+        if not set(a.encounter.split(",")).issubset({"Forum_W_w7", "Forum_W_w13"}):
+            ap.error("--measure currently supports Forum_W_w7 and Forum_W_w13 only")
+        if a.no_record or a.mode != "eval" or a.view != "oracle" or a.policy != "planner":
+            ap.error("--measure requires recorded eval/planner/oracle episodes")
+        if a.inject_hits or a.time_scale != 1.0 or a.threads != 4:
+            ap.error("--measure requires no injected hits, game 1x and four Numba threads")
+        if a.measure_max_records < 1:
+            ap.error("--measure-max-records must be positive")
+        if os.environ.get("SSBOT_FORUM_AB", "").strip():
+            ap.error("--measure requires one fixed configuration, not SSBOT_FORUM_AB")
     if a.cmd == "run":
         return run(a)
     if a.cmd == "_worker":

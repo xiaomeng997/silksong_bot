@@ -1278,6 +1278,8 @@ class ForumPlanner(Planner):
         self.prev_esc_unsafe = False      # the last chosen row was S = 1 by the escape check (a carried CONTINUE keeps it)
         self.audit = EnvelopeAudit()
         self.last_info: dict = {}
+        self.measurement_enabled = False
+        self.measurement_result = None
         self.debug = False                # offline forensics (tools.forum_hit_forensics): last_info["dbg"] keeps the
         #                                   tick's rows (nominal boxes, flags, J, ...); no effect on any decision
         self.last_sel: dict | None = None
@@ -3475,6 +3477,8 @@ class ForumPlanner(Planner):
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
              ) -> PlanResult:
         t0 = time.perf_counter()
+        if self.measurement_enabled:
+            self.measurement_result = None
         cfg, fcfg, params = self.cfg, self.fcfg, self.params
         v2 = bool(fcfg.v2 and getattr(f, "v2", False))
         prefix = np.asarray(prefix, np.int64).reshape(-1)
@@ -4507,6 +4511,8 @@ class ForumPlanner(Planner):
                     a.esc_cut += int(self.esc_cut)
                     esc_info.update(fail=nf, checked=nchk, threats=nth, forced=bool(forced), cut=self.esc_cut,
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
+                    if self.measurement_enabled:
+                        esc_info["row"] = esc_row
                     if v2 and forum_v2.ESC_TAIL and esc_row is not None and nf == 0 and esc_row in self._v2_esc_first:
                         esc_tail = (int(esc_row), self._esc_cmds(forum_v2.ESC_F)[self._v2_esc_first[esc_row]])
                     if esc_row is not None:
@@ -4740,4 +4746,6 @@ class ForumPlanner(Planner):
         res.t_ms = {"filter": (t1 - t0) * 1e3, "rollout": (t2 - t1) * 1e3, "score": (t3 - t2) * 1e3,
                     "envelope": (t4 - t3) * 1e3, "prob_bind": (t5 - t4) * 1e3, "select": (t6 - t5) * 1e3,
                     "total": (t6 - t0) * 1e3, "s1_rollout": (t1r - t1) * 1e3, "s1_support": (t2 - t1r) * 1e3}
+        if self.measurement_enabled:
+            self.measurement_result = res
         return res

@@ -24,7 +24,9 @@ class OracleError(RuntimeError):
 
 
 class OracleLink:
-    def __init__(self, instance: int = 0, host: str = "127.0.0.1", connect_timeout_s: float = 30.0):
+    def __init__(self, instance: int = 0, host: str = "127.0.0.1", connect_timeout_s: float = 30.0,
+                 measurement=None):
+        self.measurement = measurement
         deadline = time.monotonic() + connect_timeout_s
         while True:
             try:
@@ -85,6 +87,8 @@ class OracleLink:
                 if length < HEADER.size - 4 or length > MAX_MESSAGE:
                     raise OracleError(f"bad frame length {length}")
                 body = self._recv_exact(length)
+                measurement = getattr(self, "measurement", None)
+                received_ns = measurement.clock() if measurement is not None else None
                 msg_type = body[0]
                 payload = body[HEADER.size - 4:]
                 if msg_type in (MsgType.STATE, MsgType.TERRAIN, MsgType.PROGRESS):
@@ -92,6 +96,8 @@ class OracleLink:
                         fn(msg_type, head + body)
                 if msg_type == MsgType.STATE:
                     state = msgpack.unpackb(payload, raw=False, strict_map_key=False)
+                    if measurement is not None:
+                        measurement.received(state["f"], int.from_bytes(body[4:8], "little"), received_ns)
                     for fn in self._state_subscribers:
                         fn(state)
                     with self._state_cv:
@@ -149,6 +155,10 @@ class OracleLink:
         with self._send_lock:
             self._seq += 1
             self.sock.sendall(encode(msg_type, self._seq, payload))
+            measurement = getattr(self, "measurement", None)
+            if measurement is not None and msg_type == MsgType.ACTION:
+                sent_ns = measurement.clock()
+                measurement.sent(self._seq & 0xFFFFFFFF, msgpack.unpackb(payload), sent_ns)
 
     def act(self, target_frame: int, buttons: int, hold_frames: int = 0, ack_seq: int = 0, flags: int = 0) -> None:
         """Hold exactly `buttons` from target_frame on (for hold_frames frames if > 0). flags: framing.ACTION_*
