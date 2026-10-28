@@ -40,6 +40,28 @@ def test_wake_origin_is_preserved_when_targets_spawn_later_and_deaths_are_separa
     assert result["complete"]
 
 
+def test_wave_intro_commits_rebased_wake_after_reader_already_observed_activation():
+    tap = SimpleNamespace(wake_frame=8)
+    obj = MeasurementWindow(tap, wave=13, expected_targets=2, game_limit=120, defer_wake=True)
+    for f in range(8, 13):
+        obj.observe(state(f, ents=(entity(), entity(2)) if f >= 10 else (entity(99),)), f * 100_000_000)
+    tap.wake_frame = 10
+    obj.start_at(tap.wake_frame)  # activation frame was already delivered by the reader
+    obj.observe(state(13, ents=(entity(dead=True), entity(2, dead=True))), 1_300_000_000)
+    result = obj.snapshot()
+    assert result["complete"] and result["wake_f"] == 10
+    assert result["target_ids"] == [1, 2] and result["T"] == pytest.approx(.4)
+
+
+def test_intro_buffer_is_bounded_and_missing_final_wake_never_passes():
+    obj = window(defer_wake=True, max_frames=1)
+    obj.observe(state(9), 0)
+    obj.observe(state(10), 1)
+    obj.start_at(None)
+    assert not obj.snapshot()["complete"]
+    assert set(obj.snapshot()["errors"]) == {"intro STATE buffer capacity exceeded", "intro did not provide final f_wake"}
+
+
 def test_lethal_same_frame_as_both_deaths_wins_and_does_not_invent_hp_loss():
     obj = window()
     obj.observe(state(10, ents=(entity(), entity(2))), 0)

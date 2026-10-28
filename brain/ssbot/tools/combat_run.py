@@ -465,8 +465,13 @@ def worker(a: argparse.Namespace) -> int:
     if hasattr(policy, "warmup"):
         print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
     runtime_start = None
+    measurement_warmup = None
     if measurement is not None:
+        from ssbot.train.measurement import warm_query_kernels
         from ssbot.train.forum_measure_manifest import runtime_manifest
+        measurement_warmup = warm_query_kernels()
+        print(f"[i{a.instance}] measurement query warm-up: "
+              f"{sum(x['warmup_ms'] for x in measurement_warmup.values()):.1f} ms", flush=True)
         runtime_start = runtime_manifest()
     rev = git_rev()
     env = env_overrides()
@@ -544,6 +549,7 @@ def worker(a: argparse.Namespace) -> int:
                 manifest.update(code=measurement_code, instance=a.instance, episode=k,
                                 seed=seed, cli=vars(a), oracle_hello=link.hello,
                                 trace=trace_summary, certified_for_aa=False,
+                                measurement_warmup=measurement_warmup,
                                 runtime_before=runtime_start, runtime_after=runtime_manifest())
                 manifest_path = run_dir / f"measurement_manifest_i{a.instance}_e{k}.json"
                 with manifest_path.open("x", encoding="utf-8") as mf:

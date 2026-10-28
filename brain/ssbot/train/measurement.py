@@ -20,6 +20,33 @@ class MeasurementError(RuntimeError):
     pass
 
 
+def warm_query_kernels() -> dict:
+    """Compile the real query signatures before measurement, without policy state.
+
+    The old empty-forecast warmup never reaches these nonempty support paths.
+    Signatures follow the contiguous arrays built by their production callers.
+    """
+    from numba import types
+    from ssbot.combat import enemy_tables, fastquery, multi_forecast
+    u1 = types.Array(types.uint8, 1, "C")
+    i1, i2 = (types.Array(types.int64, dim, "C") for dim in (1, 2))
+    f1, f2 = (types.Array(types.float64, dim, "C") for dim in (1, 2))
+    b2 = types.Array(types.boolean, 2, "C")
+    targets = [
+        (enemy_tables._query_win_par, (u1, i2, i2, f2, f1, f2, f2, b2, types.int64, f2, f2)),
+        (multi_forecast._bbox_boxes, (f1, f2, i2, i1, f1, f1, f1, f1, f1, f1, f1, i1, f1, types.float64)),
+        (multi_forecast._box_hits, (f2, f2, f2, f2, f2, f2, b2, types.float64, types.float64)),
+        (fastquery._query_par, (u1, i1, i2, f2, u1, f1, f2, f2, b2, types.int64, f2, f2)),
+    ]
+    result = {}
+    for dispatcher, signature in targets:
+        started = time.perf_counter_ns()
+        dispatcher.compile(signature)
+        result[dispatcher.py_func.__module__ + "." + dispatcher.py_func.__name__] = {
+            "signature": str(signature), "warmup_ms": (time.perf_counter_ns() - started) / 1e6}
+    return result
+
+
 def escape_evidence(info: dict | None, final_idx: int | None) -> dict:
     """A zero failure count without an identified, checked final row is no pass."""
     esc = (info or {}).get("esc") or {}

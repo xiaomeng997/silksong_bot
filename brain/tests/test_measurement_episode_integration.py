@@ -68,7 +68,8 @@ class Policy:
 
 
 @pytest.mark.parametrize("quit_at", [None, 5])
-def test_episode_uses_raw_clock_and_keeps_quits_as_failures(monkeypatch, tmp_path, quit_at):
+@pytest.mark.parametrize("rebase", [False, True])
+def test_episode_uses_raw_clock_and_keeps_quits_as_failures(monkeypatch, tmp_path, quit_at, rebase):
     monkeypatch.setattr(ep, "wait_settled", lambda link, *a, **kw: link.wait_state())
     monkeypatch.setattr(ep, "_summarise", lambda *a: None)
     tap, policy = Tap(), Policy(quit_at)
@@ -76,6 +77,10 @@ def test_episode_uses_raw_clock_and_keeps_quits_as_failures(monkeypatch, tmp_pat
     def intro(ctx):
         while ctx.tap.wake_frame is None:
             ctx.link.wait_state()
+        if rebase:
+            while ctx.link.frame < 4:
+                ctx.link.wait_state()
+            ctx.tap.wake_frame = 4
     enc = SimpleNamespace(name="Forum_W_w13", scene="Hang_04_boss", savestate="test", timebox_s=120,
                           intro=intro, waves=(1,))
     rec = ep.AttemptRecord(unit=enc.name, stage="t", profile="t", build="t", code_rev=None,
@@ -85,13 +90,14 @@ def test_episode_uses_raw_clock_and_keeps_quits_as_failures(monkeypatch, tmp_pat
     assert result["complete"]
     if quit_at is None:
         assert rec.outcome == ep.CLEAR and rec.f_end == 10
-        assert result["end_f"] == 6 and result["T"] == 1.25
+        assert result["end_f"] == 6 and result["T"] == (.75 if rebase else 1.25)
         assert result["tail_end_reason"] == "next_wave"
         assert max(policy.calls) == 9
     else:
         assert rec.outcome == ep.QUIT and rec.f_end == 5
         assert result["end_reason"] == "episode_quit"
-        assert result["T"] == 1.0
+        assert result["T"] == (.5 if rebase else 1.0)
+    assert rec.f_wake == result["wake_f"] == (4 if rebase else 2)
     assert all(mask == 7 for _, _, mask, _ in link.acts[:-1])
     assert link.acts[-1][2] == 0
     path = tmp_path / "episode.jsonl"

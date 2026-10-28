@@ -257,12 +257,21 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
             unresolved.append(name)
         entry["effective"] = entry["bindings"] or None
     configs = _config_objects(policy)
+    behavior_configs, aliases = dict(configs), {}
+    # ClawStrike constructs a second copy of the shared kinematics lazily. Keep
+    # its full observed values, but do not make equal parameters change identity
+    # merely because this episode reached the script. Unequal copies stay distinct.
+    lazy_params = "policy.slam_play._csx.params"
+    if lazy_params in configs and configs.get("policy.params") == configs[lazy_params]:
+        aliases[lazy_params] = "policy.params"
+        del behavior_configs[lazy_params]
     behavior = {"switches": {k: {"raw": v["raw"], "present": v["present"],
                                  "bindings": v["bindings"], "resolution": v["resolution"]}
-                             for k, v in sorted(switches.items())}, "configs": configs}
+                             for k, v in sorted(switches.items())}, "configs": behavior_configs}
     encoded = json.dumps(behavior, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     unknown = sorted(k for k in env if k.startswith("SSBOT_FORUM_") and k not in switches)
     return {"schema": 1, "switches": dict(sorted(switches.items())), "configs": configs,
+            "config_aliases": aliases,
             "source_sha256": source_hashes, "unresolved": sorted(unresolved),
             "unknown_environment_switches": unknown,
             "configuration_complete": not unresolved and not unknown,

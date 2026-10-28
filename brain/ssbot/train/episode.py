@@ -372,7 +372,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         is_two = enc.name.endswith("w13")
         measurement.window = MeasurementWindow(tap, wave=13 if is_two else 7,
                                                 expected_targets=2 if is_two else 1,
-                                                game_limit=120.0 if is_two else 60.0)
+                                                game_limit=120.0 if is_two else 60.0, defer_wake=True)
     s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
@@ -382,6 +382,8 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
     finally:
         rec.intro = ctx.log
     rec.f_wake = tap.wake_frame
+    if measurement is not None:
+        measurement.window.start_at(rec.f_wake)
     args = {"seed": cfg.seed, "wait_frames": list(cfg.wait_frames)}
     for k in ("hp", "silk", "dx"):
         v = getattr(cfg, k)

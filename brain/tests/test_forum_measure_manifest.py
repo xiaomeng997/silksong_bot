@@ -59,3 +59,20 @@ def test_key_name_alias_does_not_pretend_to_be_a_resolved_setting(tmp_path):
     result = configuration_manifest(root, modules={"ssbot.combat.example": SimpleNamespace(ENV_NAME="SSBOT_FORUM_ALIAS")},
                                     environ={})
     assert result["unresolved"] == ["SSBOT_FORUM_ALIAS"]
+
+
+def test_lazy_script_parameter_copy_preserves_identity_but_different_values_do_not(tmp_path, monkeypatch):
+    from ssbot.train import forum_measure_manifest as fm
+    root = package(tmp_path, "")
+    configs = {"policy.params": {"hero2": True, "speed": 8.5}}
+    monkeypatch.setattr(fm, "_config_objects", lambda policy: dict(configs))
+    baseline = fm.configuration_manifest(root, modules={}, environ={})
+    configs["policy.slam_play._csx.params"] = dict(configs["policy.params"])
+    same = fm.configuration_manifest(root, modules={}, environ={})
+    assert same["behavior_sha256"] == baseline["behavior_sha256"]
+    assert "policy.slam_play._csx.params" in same["configs"]
+    assert same["config_aliases"] == {"policy.slam_play._csx.params": "policy.params"}
+    configs["policy.slam_play._csx.params"]["speed"] = 9.0
+    different = fm.configuration_manifest(root, modules={}, environ={})
+    assert different["behavior_sha256"] != baseline["behavior_sha256"]
+    assert not different["config_aliases"]
