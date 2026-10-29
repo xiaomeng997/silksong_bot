@@ -460,14 +460,16 @@ class Hook:
 
 
 def claw_hook(S_P: np.ndarray, P: int, d: int, iid: int, boxes: np.ndarray, var: HookVariant,
-              alpha_c: int = 0) -> Hook:
+              alpha_c: int = 0, *, discrete_stop: bool = False, hold_steps: int = 7,
+              dash_max_steps: int = DASH_MAX_STEPS, dash_damager: bool = False,
+              dash_motion_lag: int = 0) -> Hook:
     """The hooked Clawline from her kin state at the end of frame P's physics (the free flight's state at P), toward
     d, at the Clapper whose robust body boxes per frame are `boxes` (absolute frames). ok False with why when the ray
     misses at the hit frame or the dash cannot reach the stop."""
     x0, py0 = float(S_P[km.PX]), float(S_P[km.PY])
     vx0, vy0 = float(S_P[km.VX]), float(S_P[km.VY])
     bb0 = py0 - FOOT
-    bbh = hold_bb(bb0, vy0)
+    bbh = hold_bb(bb0, vy0) if hold_steps == 7 else hero2.hold_bb(bb0, vy0, hold_steps)
     # the antic: hero2's per-step decel of the clamped velocity (x), the height to the hold
     vx = min(max(vx0, -20.0), 20.0) * hero2.CLAW_ANTIC_DECEL[0]
     xs, ys = [x0], [py0]
@@ -483,28 +485,43 @@ def claw_hook(S_P: np.ndarray, P: int, d: int, iid: int, boxes: np.ndarray, var:
     if not ray_meets(xs[HOOK_HIT_F], bbh, d, hb):
         return Hook(P, d, iid, var.name, np.array(list(zip(xs, ys))), hit, -1, x, bbh + FOOT, False, "ray")
     y_hold = bbh + FOOT
+    def dash_meets(px, bx):
+        # Harpoon Dash Damager's local box: [-3,-1.05,0,.45]
+        # facing left, mirrored right. It stops on DamageEnemies contact,
+        # not at a desired body-gap coordinate.
+        if np.isnan(bx[0]):
+            return False
+        xa, xb = (px, px + 3.0) if d > 0 else (px - 3.0, px)
+        return xa < bx[2] and xb > bx[0] and y_hold - 1.05 < bx[3] and y_hold + .45 > bx[1]
     # frozen until the dash, then 1.4 u per step toward the body's front at that frame
     stop_f, n_steps = None, 0
     j = HOOK_THROW_F
     while True:
         j += 1
         k = P + j
-        if j < var.dash_f:
+        if j < var.dash_f + dash_motion_lag:
             xs.append(x), ys.append(y_hold)
             continue
         bx = boxes[k] if k < len(boxes) else boxes[-1]
         front = (bx[0] if d > 0 else bx[2]) if not np.isnan(bx[0]) else None
         target = None if front is None else front - d * (var.gap + HALF_W)
         for _ in range(steps_of(k, alpha_c)):
-            if target is not None and (target - x) * d <= 0:
+            if (dash_damager and n_steps > 0 and dash_meets(x, bx)) or (not dash_damager and target is not None and (target - x) * d <= 0):
                 break
-            if n_steps >= DASH_MAX_STEPS:
+            if n_steps >= dash_max_steps:
                 break
-            step = DASH_STEP_U if target is None else min(DASH_STEP_U, (target - x) * d)
+            # Legacy users keep the exact-stop approximation. The opt-in knife
+            # component follows Rigidbody velocity: a final FixedUpdate still
+            # moves the full 70 * .02 u, then the FSM observes the stop.
+            step = DASH_STEP_U if target is None or discrete_stop else min(DASH_STEP_U, (target - x) * d)
             x += d * max(step, 0.0)
             n_steps += 1
         xs.append(x), ys.append(y_hold)
-        if (target is not None and (target - x) * d <= 1e-9) or n_steps >= DASH_MAX_STEPS:
+        # Trigger contact is delivered by physics after the newly enabled
+        # damager has moved; a pre-existing overlap does not cancel that first
+        # whole step during the preceding Update.
+        reached = n_steps > 0 and dash_meets(x, bx) if dash_damager else target is not None and (target - x) * d <= 1e-9
+        if reached or n_steps >= dash_max_steps:
             stop_f = j
             break
         if j > 60:
