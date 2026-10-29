@@ -130,3 +130,70 @@ def test_target_on_right_cannot_silently_turn_a_left_wire_press():
     boxes = np.tile([4., 3., 7., 8.], (90, 1))
     with pytest.raises(ValueError, match="ray"):
         oldwin_claw.rollout(state, commands, params, None, boxes, 7)
+
+
+
+def test_reused_hook_hit_branch_is_exactly_the_full_rollout():
+    from ssbot.ipc.framing import mask
+    from ssbot.map2.envelope import load_params
+    params = load_params(hero2=True)
+    state = km.initial_state(params, 0, 6, ground=False)
+    commands = np.zeros(75, np.int64)
+    commands[:2] = mask("clawline") | km.B_RIGHT
+    commands[43:45] = km.B_ATTACK | km.B_DOWN
+    boxes = np.tile([4., 3., 7., 8.], (90, 1))
+    base = oldwin_claw.rollout(state, commands, params, None, boxes, 7)
+    original = base.bound.copy()
+    events = np.zeros((len(base.hooks), len(commands)), np.int64)
+    # Distinct contacts, including a late event: every phase and suffix must
+    # stay attached to its own hook, not the first or most favorable outcome.
+    for q in range(len(events)):
+        events[q, 49 + q % 3] = km.EV_POGO
+    direct = oldwin_claw.rollout(state, commands, params, None, boxes, 7, events=events)
+    reused = oldwin_claw.with_events(base, params, None, events)
+    for name in ("phys", "pos", "vel", "mode", "flags", "box", "bound", "flags_all", "flags_any", "final"):
+        assert np.array_equal(getattr(direct, name), getattr(reused, name)), name
+    assert np.array_equal(base.bound, original)
+    assert not (base.flags & km.F_INVULN).any()
+    assert (reused.flags_all & km.F_INVULN).any()
+    for q, c in enumerate(base.control_frames):
+        assert np.array_equal(reused.bound[q, :c + 1], base.bound[q, :c + 1])
+
+
+def test_reused_hook_rejects_events_that_could_change_the_hook():
+    import pytest
+    state, boxes = fixture()
+    params = km.HeroParams()
+    commands = np.zeros(70, np.int64)
+    commands[:2] = (1 << 4) | km.B_RIGHT
+    base = oldwin_claw.rollout(state, commands, params, None, boxes, 7)
+    events = np.zeros_like(commands)
+    events[10] = km.EV_POGO
+    with pytest.raises(ValueError, match="inside hook/prefix"):
+        oldwin_claw.with_events(base, params, None, events)
+
+
+
+def test_reused_hook_with_a_new_drift_and_shorter_endpoint_is_exact():
+    from ssbot.ipc.framing import mask
+    from ssbot.map2.envelope import load_params
+    import pytest
+    params = load_params(hero2=True)
+    state = km.initial_state(params, 0, 6, ground=False)
+    keys = np.zeros(75, np.int64)
+    keys[:2] = mask("clawline") | km.B_RIGHT
+    boxes = np.tile([4., 3., 7., 8.], (90, 1))
+    base = oldwin_claw.rollout(state, keys, params, None, boxes, 7)
+    for length, direction in ((75, km.B_RIGHT), (75, km.B_LEFT), (38, km.B_RIGHT)):
+        commands = keys[:length].copy()
+        commands[2:] |= direction
+        direct = oldwin_claw.rollout(state, commands, params, None, boxes, 7)
+        reused = oldwin_claw.with_commands(base, commands, params, None)
+        for name in ("phys", "pos", "vel", "mode", "flags", "box", "bound", "flags_all", "flags_any", "final"):
+            assert np.array_equal(getattr(direct, name), getattr(reused, name)), name
+    changed = keys.copy(); changed[0] ^= km.B_RIGHT | km.B_LEFT
+    with pytest.raises(ValueError, match="changed hook/prefix"):
+        oldwin_claw.with_commands(base, changed, params, None)
+    changed = keys.copy(); changed[10] = km.B_ATTACK
+    with pytest.raises(ValueError, match="uncancellable hook"):
+        oldwin_claw.with_commands(base, changed, params, None)

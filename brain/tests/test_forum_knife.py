@@ -127,3 +127,41 @@ def test_clear_fixed_row_is_appended_with_its_real_hook_envelope():
     assert custom["final"].shape == (km.K,)
     assert np.array_equal(custom["latched"], hold_filter_jit(
         np.r_[0, result.cmd[0]][None], km.HoldState.idle())[0][0])
+
+
+
+def test_safety_support_extends_without_mutating_the_planner_forecast(monkeypatch):
+    from ssbot.combat import forum_v2 as v2
+    cv = v2.Canvas(cell=.25, box=(0, 0, 4, 4))
+    rs = v2.RangeSupport(cv, (0, 2), k_shift=-1)
+    rs.trk, rs.margin_mode = object(), "zero"
+    rs.stack[:, 1, 1] = True
+    rs.raw[0] = [(7, np.ones((1, 1), bool), 1, 1, 0., None)]
+    rs.bombs = np.array([[7., 1., 1., .5, 0., 10.]])
+    original = rs.stack.copy()
+    def build(cls, trk, *, samples, k_shift, **kwargs):
+        assert trk is rs.trk and samples == (7,) and k_shift == -1
+        extra = v2.RangeSupport(cv, samples, k_shift)
+        extra.stack[:, 2, 2] = True
+        extra.stack_esc = np.zeros_like(extra.stack)
+        return extra
+    monkeypatch.setattr(v2.RangeSupport, "build", classmethod(build))
+    f = v2.V2Forecast(SimpleNamespace(fc=None), rs)
+    out = fk.safety_forecast(f, 6)
+    assert out.rs is not rs and out.rs.samples == (0, 2, 7)
+    assert max(out.rs.samples) + out.rs.k_shift == 6
+    assert np.array_equal(rs.stack, original) and rs.samples == (0, 2)
+    assert np.array_equal(out.rs.stack[:2], original)
+    assert out.rs.stack[2, 2, 2]
+    assert np.array_equal(out.rs.stack_esc[:2], original)
+    assert not out.rs.stack_esc[2].any()
+    assert out.rs.bombs is rs.bombs and out.rs.raw[0] is rs.raw[0]
+    assert fk.safety_forecast(out, 6) is out
+
+
+def test_escape_support_horizon_uses_the_forecast_origin_shift():
+    planner = SimpleNamespace()
+    forecast = SimpleNamespace(rs=SimpleNamespace(samples=(0, 62), k_shift=-2))
+    with pytest.raises(ValueError, match="support horizon"):
+        fk.common_escape(planner, forecast, [], np.zeros(38, np.int64),
+                         np.zeros(2, np.int64), km.HoldState.idle(), 38)

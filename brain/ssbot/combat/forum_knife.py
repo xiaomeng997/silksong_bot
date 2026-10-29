@@ -7,13 +7,14 @@ the planner horizon. No executor, worker, handoff or commitment is introduced.
 from __future__ import annotations
 
 from dataclasses import replace
+import copy
 import os
 import time
 
 import numpy as np
 
 from ssbot.knowledge import kinematics as km
-from ssbot.map2 import oldwin as ow, oldwin_claw as claw, reflex as rx
+from ssbot.map2 import oldwin as ow, oldwin_claw as claw
 from ssbot.map2 import clapper as cm
 
 ENV = "SSBOT_FORUM_KNIFE_ROWS"
@@ -48,7 +49,8 @@ def fixed_keys(macro, direction, *, drift=None):
     drifts = {int(dd) for _, _, dd in alternatives}
     dd = next(iter(drifts)) if len(drifts) == 1 else 0
     fixed = replace(macro, k=k, dd=dd if drift is None else int(drift), cont=())
-    raw = rx.render(fixed, direction)
+    # Use the existing oldwin table adapter; the combat layer adds no reflex controller.
+    raw = ow.rx.render(fixed, direction)
     commands = np.concatenate((raw.pre, raw.post))
     p = len(raw.pre)
     commands[p - 1:p + 1] |= ow.M_CLAW | (km.B_RIGHT if direction > 0 else km.B_LEFT)
@@ -115,6 +117,38 @@ def slam_body_paths(observation, paths, knowledge):
     return out
 
 
+def safety_forecast(forecast, through_frame):
+    """Extend this tick's existing support to the complete checked tail.
+
+    Preserve every original sample and owner. One extra endpoint uses the
+    same tracker, margins and escape rules; no new enemy model or verdict.
+    """
+    from ssbot.combat import forum_v2
+    rs = forecast.rs
+    samples = getattr(rs, "samples", ())
+    if not samples or max(samples) + rs.k_shift >= through_frame:
+        return forecast
+    needed = int(through_frame) - rs.k_shift
+    if needed > 120 or not isinstance(rs, forum_v2.RangeSupport):
+        raise ValueError("unsupported safety horizon")
+    extra = forum_v2.RangeSupport.build(rs.trk, samples=(needed,), k_shift=rs.k_shift,
+                inner_fc=rs.fc._inner, margin_mode=rs.margin_mode, canvas=rs.cv, focus=rs.focus)
+    layout = forum_v2.LayerSupport(rs.cv, rs.samples + (needed,), rs.k_shift, rs.fc._inner)
+    extended = copy.copy(rs)
+    extended.samples, extended._lo, extended._hi = layout.samples, layout._lo, layout._hi
+    extended.stack = np.concatenate((rs.stack, extra.stack))
+    if rs.stack_esc is not None or extra.stack_esc is not None:
+        extended.stack_esc = np.concatenate((rs.stack if rs.stack_esc is None else rs.stack_esc,
+                                            extra.stack if extra.stack_esc is None else extra.stack_esc))
+    offset = len(rs.samples)
+    extended.raw = {**rs.raw, **{si + offset: parts for si, parts in extra.raw.items()}}
+    extended.layers = {**rs.layers, **{si + offset: parts for si, parts in extra.layers.items()}}
+    if rs.stack_dash is not None or extra.stack_dash is not None:
+        extended.stack_dash = np.concatenate((np.zeros_like(rs.stack) if rs.stack_dash is None else rs.stack_dash,
+                                              np.zeros_like(extra.stack) if extra.stack_dash is None else extra.stack_dash))
+    return forum_v2.V2Forecast(forecast._inner, extended)
+
+
 def _clear(planner, forecast, rollout, audit=None, label="path"):
     """Use the planner's hull sampler, including its too-wide rejection."""
     bounds = rollout.bound
@@ -142,7 +176,7 @@ def common_escape(planner, forecast, paths, row, prefix, hold, horizon):
     audited_end = max([horizon] + [r.flags.shape[1] - 1 for r in paths if hasattr(r, "flags")])
     length = max(forum_v2.ESC_F, audited_end - horizon)
     samples = getattr(forecast.rs, "samples", None)
-    if samples and max(samples) - getattr(forecast.rs, "k_shift", 0) < horizon + length:
+    if samples and max(samples) + getattr(forecast.rs, "k_shift", 0) < horizon + length:
         raise ValueError("escape support horizon unavailable")
     options = planner._esc_cmds(length)
     full = np.concatenate((prefix, row[:horizon - len(prefix)]))
@@ -227,8 +261,8 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
         info["gate"] = "multiple_or_unknown_targets"
         return ds
     o = ow._advance(obs[0], P)
-    wt = rx.WINDOWS["claw_slam0"]
-    if not rx.in_states(o.st, o.j, wt.anchor):
+    wt = ow.rx.WINDOWS["claw_slam0"]
+    if not ow.rx.in_states(o.st, o.j, wt.anchor):
         info["gate"] = "window"
         return ds
     memo = {} if memo is None else memo
@@ -237,11 +271,11 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
         memo["prefix_state"] = km.rollout(start, pre_lat, planner.params, planner.terrain,
                             threads=planner.cfg.threads).final[:, 0] if P else np.asarray(start).reshape(km.K)
     state = memo["prefix_state"]
-    key = rx.cell_of(state, o, wt)
+    key = ow.rx.cell_of(state, o, wt)
     if key is None:
         info["gate"] = "cell"
         return ds
-    pk = rx.pack_key(key)
+    pk = ow.rx.pack_key(key)
     if not win._has_full(np.array([pk]))[0]:
         info["gate"] = "cell_absent_or_partial"
         return ds
@@ -286,9 +320,28 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
     rollouts = []
     contacts = []
     try:
-        for body in paths[ti]:
-            miss = claw.rollout(start, lat[0], planner.params, planner.terrain, body, o.iid,
-                                threads=planner.cfg.threads)
+        safety_end = max(L, H + 24)
+        forecast_key = ("safety_forecast", safety_end)
+        if forecast_key not in memo:
+            memo[forecast_key] = safety_forecast(f, safety_end)
+        safe_f = memo[forecast_key]
+        info["checks"].append({"check": "support_horizon", "status": "passed", "through_frame": safety_end})
+        for bi, body in enumerate(paths[ti]):
+            # All drift proposals this tick share the same physical hook when
+            # their actual launch prefix agrees. Recheck every new suffix.
+            hook_key = ("hook", L, ti, bi, lat[0, :P + press].tobytes())
+            if hook_key in memo:
+                miss = claw.with_commands(memo[hook_key], lat[0], planner.params, planner.terrain,
+                                          threads=planner.cfg.threads)
+            else:
+                miss = claw.rollout(start, lat[0], planner.params, planner.terrain, body, o.iid,
+                                    threads=planner.cfg.threads)
+                memo[hook_key] = miss
+            safety = {}
+            if not _clear(planner, safe_f, miss, safety, "miss"):
+                safety["hit"] = {"status": "unchecked", "reason": "miss path already rejected"}
+                info.setdefault("path_safety", []).append(safety)
+                raise ValueError("full_path")
             n = len(miss.hooks)
             masks = np.broadcast_to(lat, (n, L)).copy()
             sw, cc, tt, robust = planner._ds_hits(
@@ -309,21 +362,19 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
                 raise ValueError("down_contact_or_FREE_MIN")
             ev = np.zeros((n, L), np.int64)
             ev[np.arange(n), cc - 1] = km.EV_POGO
-            hit = claw.rollout(start, lat[0], planner.params, planner.terrain, body, o.iid,
-                               events=ev, threads=planner.cfg.threads)
+            hit = claw.with_events(miss, planner.params, planner.terrain, ev,
+                                   threads=planner.cfg.threads)
             # Full danger remains, on both miss and bounce paths. A table cell
             # never removes the target's body or the rest of the world.
-            safety = {}
-            miss_clear = _clear(planner, f, miss, safety, "miss")
-            hit_clear = _clear(planner, f, hit, safety, "hit")
+            hit_clear = _clear(planner, safe_f, hit, safety, "hit")
             info.setdefault("path_safety", []).append(safety)
-            if not miss_clear or not hit_clear:
+            if not hit_clear:
                 raise ValueError("full_path")
             rollouts.extend((miss, hit))
             contacts.extend(cc.tolist())
         info["checks"].append({"check": "all_paths_and_strikes", "status": "passed",
                                 "outcomes": sum(len(r.hooks) for r in rollouts)})
-        e = common_escape(planner, f, rollouts[::2], row, np.asarray(prefix), hold, H)
+        e = common_escape(planner, safe_f, rollouts[::2], row, np.asarray(prefix), hold, H)
         if e is None:
             raise ValueError("common_escape")
         info["checks"].append({"check": "escape", "status": "passed", "command": e,
@@ -340,8 +391,8 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
             "final": None, "bound": bound, "flags_all": flags, "escape": e,
             "checks": info["checks"], "latched": lat[0, :H].copy()}
     # The main endpoint is computed at exactly H, not at the longer audit tail.
-    end = claw.rollout(start, lat[0, :H], planner.params, planner.terrain, paths[ti][0], o.iid,
-                        threads=planner.cfg.threads)
+    end = claw.with_commands(rollouts[0], lat[0, :H], planner.params, planner.terrain,
+                             threads=planner.cfg.threads)
     data["final"] = end.final[:, 0]
     base = 0 if ds is None else len(ds.cmd)
     cand = ow.Cand("now", "claw_slam0", o.iid, row, 0, min(contacts), max(contacts),
@@ -375,8 +426,10 @@ def warm(planner):
                            threads=planner.cfg.threads)
     ev = np.zeros((len(initial.hooks), len(masks)), np.int64)
     ev[:, 50] = km.EV_POGO
-    claw.rollout(state, masks, planner.params, planner.terrain, body, 1,
-                 events=ev, threads=planner.cfg.threads)
+    claw.with_events(initial, planner.params, planner.terrain, ev, threads=planner.cfg.threads)
+    changed = masks.copy()
+    changed[2:] |= km.B_LEFT
+    claw.with_commands(initial, changed, planner.params, planner.terrain, threads=planner.cfg.threads)
     # Hook rows carry explicit int64 block flags; normal h2 warm-up uses
     # int32 flags, a different Numba signature. Warm this real path too.
     n = len(initial.hooks)

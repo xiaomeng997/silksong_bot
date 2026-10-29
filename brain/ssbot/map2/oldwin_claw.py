@@ -24,6 +24,7 @@ class ClawRollout(km.Rollout):
     control_frames: np.ndarray | None = None
     control_states: dict = field(default_factory=dict)
     launch_frame: int = 0
+    commands: np.ndarray | None = None
 
 
 def launch_supported(state: np.ndarray, *, locked: bool = False) -> bool:
@@ -243,4 +244,72 @@ def rollout(state, masks, params, terrain, boxes, iid, *, events=None, threads=1
         finals.append(ro.final[:, j])
     return ClawRollout(**{nm: np.stack(values) for nm, values in arrays.items()},
                        final=np.stack(finals, axis=1), hooks=hooks,
-                       control_frames=controls, control_states=initial, launch_frame=p)
+                       control_frames=controls, control_states=initial, launch_frame=p,
+                       commands=commands.copy())
+
+
+
+def with_events(base: ClawRollout, params, terrain, events, *, threads=1, commands=None):
+    """Re-roll post-control physics of this exact fixed row, retaining its hook.
+
+    Events cannot change the hook or its prefix. Every outcome keeps its own
+    recovery pose, physics phase and timing bounds. No safety verdict is reused.
+    """
+    if base.commands is None or base.control_frames is None:
+        raise ValueError("fixed row commands and recovery states required")
+    if commands is None:
+        commands = base.commands
+    else:
+        from ssbot.ipc.framing import mask
+        commands = np.asarray(commands, np.int64).reshape(-1)
+        p = base.launch_frame
+        claw = mask("clawline")
+        if (len(commands) <= int(base.control_frames.max())
+                or not np.array_equal(commands[:p], base.commands[:p])
+                or not np.array_equal((commands & claw) != 0, (base.commands[:len(commands)] & claw) != 0)):
+            raise ValueError("changed hook/prefix or unsupported endpoint")
+        for c in base.control_frames:
+            if np.any(commands[p:int(c)] & km.B_ATTACK):
+                raise ValueError("attack held inside uncancellable hook")
+    n, T = len(base.hooks), len(commands)
+    ev = np.asarray(events, np.int64)
+    if ev.ndim == 1:
+        ev = np.broadcast_to(ev, (n, T))
+    if ev.shape != (n, T) or np.any(ev[:, :int(base.control_frames.max())]):
+        raise ValueError("unsupported event inside hook/prefix")
+    groups = {}
+    for q, c in enumerate(base.control_frames):
+        state = base.control_states[q]
+        key = (int(c), state.tobytes(), ev[q, int(c):].tobytes())
+        groups.setdefault(int(c), {}).setdefault(key, []).append(q)
+    names = ("phys", "pos", "vel", "mode", "flags", "box", "bound", "flags_all", "flags_any")
+    arrays = {nm: np.empty((n, T + 1) + getattr(base, nm).shape[2:],
+                           dtype=getattr(base, nm).dtype) for nm in names}
+    final = np.empty_like(base.final)
+    for c, by_state in groups.items():
+        row_groups = list(by_state.values())
+        first = [qs[0] for qs in row_groups]
+        starts = np.stack([base.control_states[q] for q in first], axis=1)
+        masks = np.broadcast_to(commands[c:], (len(first), T - c)).copy()
+        ro = km.rollout(starts, masks, params, terrain, events=ev[first, c:].copy(),
+                        variants="bounds", threads=threads)
+        for j, qs in enumerate(row_groups):
+            for nm in names:
+                tail = getattr(ro, nm)[j, 1:]
+                if nm == "bound":
+                    tail = tail + np.array([-COMPONENT_MARGIN_U, -COMPONENT_MARGIN_U,
+                                            COMPONENT_MARGIN_U, COMPONENT_MARGIN_U])
+                for q in qs:
+                    arrays[nm][q, :c + 1] = getattr(base, nm)[q, :c + 1]
+                    arrays[nm][q, c + 1:] = tail
+            final[:, qs] = ro.final[:, j:j + 1]
+    return ClawRollout(**arrays, final=final, hooks=base.hooks,
+                       control_frames=base.control_frames, control_states=base.control_states,
+                       launch_frame=base.launch_frame, commands=commands.copy())
+
+
+
+def with_commands(base: ClawRollout, commands, params, terrain, *, threads=1):
+    """Reuse an identical hook with new post-control keys, never a verdict."""
+    ev = np.zeros((len(base.hooks), len(commands)), np.int64)
+    return with_events(base, params, terrain, ev, threads=threads, commands=commands)
