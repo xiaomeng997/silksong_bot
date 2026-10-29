@@ -117,8 +117,9 @@ def test_shared_exit_can_keep_lane_specific_contacts_and_one_command(case):
         rs=SimpleNamespace(samples=(0,100),k_shift=0,occupied_esc=lambda x,y,t:np.zeros(x.shape,bool)),
         occupied=lambda x,y,t,c:np.zeros(x.shape,bool))
     audit={}
-    cert=hit.common_escape(planner,forecast,paths,first,last,raw,hold,audit=audit,
+    world=hit.HitWorld("single",forecast,paths,np.full(n,43),first,last,np.ones(n,bool),
         reroll=lambda ev,commands:lanes.rollout(base,params,events=ev,commands=commands))
+    cert=hit.common_escape(planner,[world],raw,hold,horizon=37,audit=audit)
     assert cert is not None and cert.start==int(last.max())+1 and cert.through>=cert.start+24
     assert all(np.count_nonzero(p.pogo_events)==n for p in cert.paths)
     for p,cc in zip(cert.paths,cert.contacts):
@@ -134,7 +135,8 @@ def test_exit_cannot_swap_clock_identity_even_if_row_count_is_unchanged(case):
         ro.clock_indices=np.roll(ro.clock_indices,1)
         return ro
     with pytest.raises(ValueError,match="outcome identity"):
-        hit.common_escape(planner,None,paths,np.full(n,47),np.full(n,47),raw,hold,reroll=swapped)
+        world=hit.HitWorld("single",None,paths,np.full(n,43),np.full(n,47),np.full(n,47),np.ones(n,bool),swapped)
+        hit.common_escape(planner,[world],raw,hold,horizon=37)
 
 
 def test_uniform_contacts_reunite_to_the_original_bounds_and_protection(case):

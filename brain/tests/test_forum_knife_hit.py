@@ -65,14 +65,15 @@ def test_complete_contacts_checks_frame_zero_and_keeps_invulnerability_and_width
 def test_common_exit_begins_after_all_bounces_and_keeps_the_planned_strike(scenario):
     _,_,raw,hold,base,_,planner,forecast=scenario
     n=len(base.hooks);audit={}
-    cert=hit.common_escape(planner,forecast,base,np.full(n,48),np.full(n,50),raw,hold,audit=audit)
+    world=hit.HitWorld("single",forecast,base,np.full(n,43),np.full(n,48),np.full(n,50),np.ones(n,bool))
+    cert=hit.common_escape(planner,[world],raw,hold,horizon=37,audit=audit)
     assert cert is not None and cert.start==51 and cert.through>=75
     assert np.array_equal(cert.raw[:cert.start],raw[:cert.start])
     assert cert.raw[42]&km.B_ATTACK
     assert len(cert.paths)==3 and len(cert.contacts)==3
     assert all(not (p.flags_any[:,-10:]&km.F_INVULN).any() for p in cert.paths)
     forecast.occupied=lambda x,y,t,c:np.broadcast_to(t==0,x.shape)
-    assert hit.common_escape(planner,forecast,base,np.full(n,48),np.full(n,50),raw,hold) is None
+    assert hit.common_escape(planner,[world],raw,hold,horizon=37) is None
     forecast.occupied=lambda x,y,t,c:np.zeros(x.shape,bool)
     forecast.rs.occupied_esc=lambda x,y,t:np.ones(x.shape,bool)
-    assert hit.common_escape(planner,forecast,base,np.full(n,48),np.full(n,50),raw,hold) is None
+    assert hit.common_escape(planner,[world],raw,hold,horizon=37) is None
