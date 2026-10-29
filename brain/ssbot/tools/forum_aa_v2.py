@@ -10,7 +10,7 @@ import time
 from ssbot.record.recorder import RecordingReader
 from ssbot.train.measurement import validate_trace
 from ssbot.train.stall_diagnostics import tail_summary
-from ssbot.train.aa_v2 import validate_production_cli
+from ssbot.train.aa_v2 import validate_production_cli, runtime_errors
 
 
 def write_new(path, value):
@@ -48,7 +48,7 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     window = audit["window"]
     have_boundaries = isinstance(window["wake_f"], int) and isinstance(window["end_f"], int)
     tail = tail_summary(rows if have_boundaries else [],wake_f=window["wake_f"],end_f=window["end_f"])
-    errors = []
+    errors = runtime_errors(manifest)
     if m.get("protocol_version") != 2:
         errors.append("attempt is not protocol v2")
     if production and not rows[-1].get("diagnostics", {}).get("complete"):

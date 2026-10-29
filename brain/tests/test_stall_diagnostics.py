@@ -58,3 +58,13 @@ def test_injected_data_cannot_be_used_in_production_and_tail_keeps_extreme_tick(
     rows=[{"kind":"tick","f":f,"total_tick_ms":v} for f,v in ((10,1),(11,300),(12,2))]
     data=tail_summary(rows,wake_f=10,end_f=12)
     assert data["total"]["over_250ms"]==1 and data["longest_ticks"][0]["f"]==11
+
+
+def test_worker_resource_contract_checks_both_ends_and_does_not_accept_missing_runtime():
+    from ssbot.train.aa_v2 import runtime_errors
+    value={'cpu_affinity':list(range(16)),'priority':128,'numba_threads':4}
+    manifest={'runtime_before':dict(value),'runtime_after':dict(value)}
+    assert not runtime_errors(manifest)
+    manifest['runtime_after']['numba_threads']=16
+    assert runtime_errors(manifest)
+    assert len(runtime_errors({}))==2
