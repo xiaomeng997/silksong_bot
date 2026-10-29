@@ -26,7 +26,14 @@ def hit_events(base, first, last, length=None):
 def full_contacts(planner, forecast, rollout, *, start=0, escape=False):
     """Same hull sampler/width rejection, including the first queried frame."""
     from ssbot.combat.planner import _hull_points
-    bound=rollout.bound[:,start:];flags=rollout.flags_all[:,start:]
+    inverse=None
+    ix=getattr(rollout,"query_index",None)
+    if (ix is not None and getattr(rollout,"_query_bound",None) is rollout.bound
+            and getattr(rollout,"_query_flags",None) is rollout.flags_all
+            and not rollout.bound.flags.writeable and not rollout.flags_all.flags.writeable):
+        bound=rollout.bound[ix,start:];flags=rollout.flags_all[ix,start:]
+        inverse=rollout.query_inverse
+    else:bound=rollout.bound[:,start:];flags=rollout.flags_all[:,start:]
     tk=np.arange(start,start+bound.shape[1])*planner.params.frame_time
     hx,hy=forecast.fc.half
     x,y,rows,wide=_hull_points(np.ascontiguousarray(bound),hx,hy,planner.cfg.max_points)
@@ -36,7 +43,7 @@ def full_contacts(planner, forecast, rollout, *, start=0, escape=False):
     if len(rows):occ[rows]|=hit[n:].reshape(-1,len(rows),hit.shape[1]).any(axis=0)
     occ|=wide
     occ &= (flags&km.F_INVULN)==0
-    return occ
+    return occ if inverse is None else occ[inverse]
 
 
 @dataclass
@@ -50,7 +57,7 @@ class HitExit:
     contacts: list
 
 
-def common_escape(planner, forecast, base, first, last, raw, hold, *, audit=None):
+def common_escape(planner, forecast, base, first, last, raw, hold, *, audit=None, reroll=None):
     """Re-roll the full original prefix, pogo and exit; never restart protection.
 
     The common exit begins at J after the latest possible bounce. Retain every
@@ -62,9 +69,22 @@ def common_escape(planner, forecast, base, first, last, raw, hold, *, audit=None
     if raw.shape!=base.commands.shape:raise ValueError("raw/fixed command length mismatch")
     wire,_=hold_filter_jit(raw[None],hold)
     if not np.array_equal(wire[0],base.commands):raise ValueError("latched prefix mismatch")
+    def integrate(ev,commands=None):
+        ro=(claw.with_events(base,planner.params,planner.terrain,ev,threads=planner.cfg.threads,commands=commands)
+            if reroll is None else reroll(ev,commands))
+        wire=base.commands if commands is None else commands
+        if len(ro.hooks)!=len(base.hooks) or not np.array_equal(ro.commands,wire):
+            raise ValueError("hit continuation changed outcome identity or commands")
+        for name in ("control_frames","hook_indices","clock_indices"):
+            old=getattr(base,name,None)
+            if old is not None and not np.array_equal(getattr(ro,name,None),old):
+                raise ValueError("hit continuation changed outcome identity")
+        recorded=getattr(ro,"pogo_events",None)
+        if recorded is not None and not np.array_equal(recorded,ev):
+            raise ValueError("hit continuation changed pogo events")
+        return ro
     events=list(hit_events(base,first,last))
-    branches=[claw.with_events(base,planner.params,planner.terrain,ev,threads=planner.cfg.threads)
-              for _,ev in events]
+    branches=[integrate(ev) for _,ev in events]
     # Start only after every bounce and once all modeled outcomes accept input.
     j=int(np.max(last))+1
     while j<len(raw) and any(np.any(r.flags_any[:,j]&(km.F_NO_INPUT|km.F_RELINQ)) for r in branches):j+=1
@@ -88,7 +108,7 @@ def common_escape(planner, forecast, base, first, last, raw, hold, *, audit=None
         for contact,_ in events:
             ev=np.zeros((len(base.hooks),through),np.int64)
             ev[np.arange(len(base.hooks)),contact-1]=km.EV_POGO
-            ro=claw.with_events(base,planner.params,planner.terrain,ev,threads=planner.cfg.threads,commands=latched)
+            ro=integrate(ev,latched)
             occ=full_contacts(planner,forecast,ro)
             esc=full_contacts(planner,forecast,ro,start=j,escape=True)
             bad=np.union1d(np.flatnonzero(occ.any(axis=0)),j+np.flatnonzero(esc.any(axis=0)))
