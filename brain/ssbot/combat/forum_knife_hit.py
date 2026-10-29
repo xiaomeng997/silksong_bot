@@ -69,6 +69,7 @@ class HitExit:
     paths: list
     contacts: list
     world_keys: list
+    horizon: int
 
 
 FREE_MIN = 10
@@ -241,6 +242,6 @@ def common_escape(planner, worlds, raw, hold, *, horizon, audit=None):
                                    unsafe_frames=sorted(unsafe)))
         if not failed:
             log.update(status="passed", option=option)
-            return HitExit(j, through, option, full, latched, paths, contacts, world_keys)
+            return HitExit(j, through, option, full, latched, paths, contacts, world_keys, int(horizon))
     log.update(status="failed", reason="no_common_exit")
     return None

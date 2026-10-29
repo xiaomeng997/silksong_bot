@@ -3674,9 +3674,24 @@ class ForumPlanner(Planner):
                 getattr(r1, nm)[rc] = ds.lane[nm]
             r1.final[:, rc] = ds.lane["final"]
         knife_data = {} if not n_ds or ds.custom is None else {D0 + q: data for q, data in ds.custom.items()}
+        knife_tails = {}  # this tick only; no continuation inherits its certificate
         for row_, data in knife_data.items():
+            if data.get("checked_tail") is not None:
+                from ssbot.combat.forum_knife_plan import CheckedTail
+                try:
+                    tail_ = data["checked_tail"]
+                    if not isinstance(tail_, CheckedTail):
+                        raise ValueError("checked tail type unavailable")
+                    future_ = tail_.for_row(frame=int(ws.stamp.frame), start=start, hold=hold,
+                                            prefix=prefix, T=T, cmd=cmd[row_], latched=latched[row_])
+                    if ok[row_]:
+                        knife_tails[row_] = future_
+                except ValueError as exc:
+                    ok[row_] = False
+                    data["checks"].append({"check": "checked_tail_identity", "status": "failed", "reason": str(exc)})
             if not np.array_equal(latched[row_], data["latched"]):
                 ok[row_] = False
+                knife_tails.pop(row_, None)
                 data["checks"].append({"check": "final_latched_identity", "status": "failed"})
             for nm, value in data["nominal"].items():
                 getattr(r1, nm)[row_] = value
@@ -4074,9 +4089,23 @@ class ForumPlanner(Planner):
                 if tier:
                     if not hasattr(self, "_v2_esc_first"):
                         self._v2_esc_first = {}
-                    nf_, lb_ = self._escape_fail_v2(f, r1, hold_end, np.asarray(tier, np.int64))
+                    if knife_tails and any(r_ in knife_tails for r_ in tier):
+                        # A fresh full hit/exit certificate already checks its
+                        # common J-tail. A no-hook escape from H is a different path.
+                        ordinary_ = np.asarray([r_ for r_ in tier if r_ not in knife_tails], np.int64)
+                        nf_ = np.zeros(len(tier), np.int64)
+                        lb_ = [[] for _ in tier]
+                        if len(ordinary_):
+                            no_, lo_ = self._escape_fail_v2(f, r1, hold_end, ordinary_)
+                            positions_ = {int(r_): q_ for q_, r_ in enumerate(tier)}
+                            for r_, n_, l_ in zip(ordinary_, no_, lo_):
+                                q_ = positions_[int(r_)]
+                                nf_[q_], lb_[q_] = n_, l_
+                    else:
+                        nf_, lb_ = self._escape_fail_v2(f, r1, hold_end, np.asarray(tier, np.int64))
                     e1_ = getattr(self, "_v2_esc_first", {})
-                    hf_ok_.update({int(r_): (int(n_), l_, e1_.get(int(r_))) for r_, n_, l_ in zip(tier, nf_, lb_)})
+                    hf_ok_.update({int(r_): (int(n_), l_, None if r_ in knife_tails else e1_.get(int(r_)))
+                                   for r_, n_, l_ in zip(tier, nf_, lb_)})
                     if (nf_ == 0).any():
                         hf_h = int(hk[tier[int(np.argmax(nf_ == 0))]])
                         rest_q = queue[pos:]
@@ -4527,7 +4556,8 @@ class ForumPlanner(Planner):
                     self._hf_esc = hf_ok_ if (hf_ok_ and v2) else None
                     if knife_data and v2:
                         self._hf_esc = {**(self._hf_esc or {}),
-                                        **{r: (0, [], d["escape"]) for r, d in knife_data.items()}}
+                                        **{r: (0, [], None if r in knife_tails else d["escape"])
+                                           for r, d in knife_data.items() if ok[r]}}
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
                         fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
@@ -4538,7 +4568,8 @@ class ForumPlanner(Planner):
                                     ms=round((time.perf_counter() - te) * 1e3, 3), why=sorted(set(lab)))
                     if self.measurement_enabled:
                         esc_info["row"] = esc_row
-                    if v2 and forum_v2.ESC_TAIL and esc_row is not None and nf == 0 and esc_row in self._v2_esc_first:
+                    if (v2 and forum_v2.ESC_TAIL and esc_row is not None and nf == 0
+                            and esc_row in self._v2_esc_first and esc_row not in knife_tails):
                         esc_tail = (int(esc_row), self._esc_cmds(forum_v2.ESC_F)[self._v2_esc_first[esc_row]])
                     if esc_row is not None:
                         a.esc_ticks += int(not forced)
@@ -4563,7 +4594,11 @@ class ForumPlanner(Planner):
                 a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
-                i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
+                if knife_tails:
+                    from ssbot.combat.forum_knife_plan import pick_tail
+                    i, tail_ok = pick_tail(self, f, r1, hold_end, ranked, P + T, i, knife_tails)
+                else:
+                    i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
             elif carried:
                 tail_ok = True
             self.last_sel["chosen"] = i
@@ -4682,7 +4717,16 @@ class ForumPlanner(Planner):
             # the chosen special row's plan is its whole template (the next CONTINUE runs on into the press and
             # the bounce, judged as a special row again)
             self.prev_cmd = np.asarray(self._prev_sm["ext"], np.int64)
-        if esc_tail is not None and esc_tail[0] == res.idx and getattr(self, "_prev_sm", None) is None:
+        checked_future = None
+        if knife_tails:
+            from ssbot.combat.forum_knife_plan import selected_tail
+            checked_future = selected_tail(res, knife_tails, T=T)
+        if checked_future is not None:
+            # Keep H -> strike -> bounce -> J -> exit. This grants no next-tick
+            # safety verdict: the hook's ordinary CONTINUE remains disabled.
+            self.prev_cmd = checked_future
+            a.v2_esc_tail += 1
+        elif esc_tail is not None and esc_tail[0] == res.idx and getattr(self, "_prev_sm", None) is None:
             # v2: the escape that kept this row safe is its plan's tail: the next tick's CONTINUE runs into it
             # (forum_v2.ESC_TAIL) instead of idling where the row ends
             self.prev_cmd = np.concatenate([np.asarray(sel_cmd, np.int64), esc_tail[1]])
@@ -4757,7 +4801,8 @@ class ForumPlanner(Planner):
             self.last_info["knife"] = {**getattr(self, "_knife_info", {}),
                                        "chosen_row": res.idx if res.idx in knife_data else None,
                                        "final_mask": res.mask if hasattr(res, "mask") else int(sel_cmd[0]),
-                                       "escape_status": "passed" if res.idx in knife_data and not res.S else "not_selected"}
+                                       "escape_status": "passed" if res.idx in knife_data and not res.S else "not_selected",
+                                       "full_checked_tail_frames": 0 if checked_future is None else len(checked_future)}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,
