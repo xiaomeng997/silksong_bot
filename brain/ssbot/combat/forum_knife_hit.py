@@ -3,7 +3,7 @@
 Not connected to append_rows until contact/geometry/continuation gates pass.
 Never checks a missed strike or replaces the planned strike with an H abort.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from ssbot.knowledge import kinematics as km
 from ssbot.map2 import oldwin_claw as claw
@@ -71,6 +71,51 @@ class HitExit:
     world_keys: list
     horizon: int
     expected_world_keys: tuple
+    _proof: object = field(default=None, init=False, repr=False, compare=False)
+
+
+
+_EXIT_ISSUER = object()
+
+
+def _array_payload(values):
+    """Keep one immutable byte snapshot per distinct array in this payload."""
+    cache = {}
+    result = []
+    for value in values:
+        key = id(value)
+        if key not in cache:
+            a = np.asarray(value)
+            cache[key] = (a.dtype.str, a.shape, a.tobytes())
+        result.append(cache[key])
+    return tuple(result)
+
+
+def _exit_payload(cert):
+    return (cert.start, cert.through, cert.option, cert.horizon,
+            tuple(cert.world_keys), tuple(cert.expected_world_keys),
+            _array_payload((cert.raw, cert.latched, *cert.contacts)),
+            tuple((id(p), id(p.bound), p.bound.shape) for p in cert.paths))
+
+
+def _issued_exit(*args):
+    """Called only by the successful common_escape branch."""
+    import weakref
+    cert = HitExit(*args)
+    cert._proof = (_EXIT_ISSUER, weakref.ref(cert), _exit_payload(cert))
+    return cert
+
+
+def _require_issued_exit(cert):
+    try:
+        proof = cert._proof
+        good = (type(cert) is HitExit and proof is not None
+                and proof[0] is _EXIT_ISSUER and proof[1]() is cert
+                and proof[2] == _exit_payload(cert))
+    except (AttributeError, TypeError, ValueError, IndexError):
+        good = False
+    if not good:
+        raise ValueError("hit/exit certificate was not issued or has changed")
 
 
 FREE_MIN = 10
@@ -278,6 +323,6 @@ def common_escape(planner, worlds, raw, hold, *, horizon, expected_worlds, audit
                                    unsafe_frames=sorted(unsafe)))
         if not failed:
             log.update(status="passed", option=option)
-            return HitExit(j, through, option, full, latched, paths, contacts, world_keys, int(horizon), reference)
+            return _issued_exit(j, through, option, full, latched, paths, contacts, world_keys, int(horizon), reference)
     log.update(status="failed", reason="no_common_exit")
     return None

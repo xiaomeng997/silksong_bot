@@ -4,7 +4,7 @@ This is tick-local transport, not a controller or a continuation certificate.
 The producer still owns contact/forecast certification. A new tick must rebuild
 and recheck its candidate; retaining keys grants no right to execute them.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.knowledge import kinematics as km
@@ -36,6 +36,34 @@ def _hold(value):
     return arrays
 
 
+
+_TAIL_ISSUER = object()
+
+
+def _tail_payload(tail):
+    from ssbot.combat.forum_knife_hit import _array_payload
+    return (tail.frame, tail.horizon, tail.T, tail.jump, tail.through, tail.worlds,
+            _array_payload((tail.prefix, tail.start, tail.raw, tail.latched, *tail.hold)))
+
+
+def _issue_tail(tail):
+    import weakref
+    object.__setattr__(tail, "_proof", (_TAIL_ISSUER, weakref.ref(tail), _tail_payload(tail)))
+    return tail
+
+
+def _require_issued_tail(tail):
+    try:
+        proof = tail._proof
+        good = (type(tail) is CheckedTail and proof is not None
+                and proof[0] is _TAIL_ISSUER and proof[1]() is tail
+                and proof[2] == _tail_payload(tail))
+    except (AttributeError, TypeError, ValueError, IndexError):
+        good = False
+    if not good:
+        raise ValueError("checked tail was not issued or has changed")
+
+
 @dataclass(frozen=True)
 class CheckedTail:
     """Immutable copy of one exit, tied to this origin and actual P/T/H."""
@@ -50,12 +78,12 @@ class CheckedTail:
     jump: int
     through: int
     worlds: tuple
+    _proof: object = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def from_exit(cls, cert, *, frame, start, hold, prefix, T, world_keys):
-        from ssbot.combat.forum_knife_hit import HitExit
-        if not isinstance(cert, HitExit):
-            raise ValueError("complete hit/exit certificate required")
+        from ssbot.combat.forum_knife_hit import _require_issued_exit
+        _require_issued_exit(cert)
         frame = _integer(frame, "origin frame")
         T = _integer(T, "T")
         if frame < 0:
@@ -91,12 +119,13 @@ class CheckedTail:
                     or not np.array_equal(ro.commands, wire)
                     or ro.bound.shape[:2] != (len(contact), cert.through + 1)):
                 raise ValueError("checked path/contact identity changed")
-        return cls(frame, _copy(prefix), H, T, _copy(_state(start)),
+        return _issue_tail(cls(frame, _copy(prefix), H, T, _copy(_state(start)),
                    tuple(_copy(a) for a in _hold(hold)), _copy(raw), _copy(wire),
-                   int(cert.start), int(cert.through), worlds)
+                   int(cert.start), int(cert.through), worlds))
 
     def for_row(self, *, frame, start, hold, prefix, T, cmd, latched):
         """Reject stale origins, altered in-flight keys, HoldState or row keys."""
+        _require_issued_tail(self)
         P = len(self.prefix)
         if (_integer(frame, "origin frame") != self.frame or _integer(T, "T") != self.T
                 or not np.array_equal(np.asarray(prefix), self.prefix)

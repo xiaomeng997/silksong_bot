@@ -499,6 +499,7 @@ class EnvelopeAudit:
     v2_dash_unsafe: int = 0       # ... of them in contact only with that margin
     v2_esc_more: int = 0          # v2: rows the escape check looked at past the first v2_esc_k (forum_v2.ESC_MORE)
     v2_esc_tail: int = 0          # v2: chosen rows whose passing escape became the plan's tail (forum_v2.ESC_TAIL)
+    knife_checked_tail: int = 0  # chosen knife rows keeping their checked strike/J-exit tail
     spec_ticks: int = 0           # specials (SSBOT_FORUM_SPECIALS): ticks with arrive-and-strike rows, the rows, the ones
     spec_rows: int = 0            #   safe after every check, the ticks that chose one
     spec_safe: int = 0
@@ -3680,7 +3681,7 @@ class ForumPlanner(Planner):
                 from ssbot.combat.forum_knife_plan import CheckedTail
                 try:
                     tail_ = data["checked_tail"]
-                    if not isinstance(tail_, CheckedTail):
+                    if type(tail_) is not CheckedTail:
                         raise ValueError("checked tail type unavailable")
                     future_ = tail_.for_row(frame=int(ws.stamp.frame), start=start, hold=hold,
                                             prefix=prefix, T=T, cmd=cmd[row_], latched=latched[row_])
@@ -4725,7 +4726,7 @@ class ForumPlanner(Planner):
             # Keep H -> strike -> bounce -> J -> exit. This grants no next-tick
             # safety verdict: the hook's ordinary CONTINUE remains disabled.
             self.prev_cmd = checked_future
-            a.v2_esc_tail += 1
+            a.knife_checked_tail += 1
         elif esc_tail is not None and esc_tail[0] == res.idx and getattr(self, "_prev_sm", None) is None:
             # v2: the escape that kept this row safe is its plan's tail: the next tick's CONTINUE runs into it
             # (forum_v2.ESC_TAIL) instead of idling where the row ends

@@ -9,6 +9,37 @@ from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.knowledge import kinematics as k
 
 
+WORLD = (7, (47, 4, 3, 4, 14), 0)
+
+
+def certified_exit(raw, hold):
+    """Controlled motion/contact oracle; exercise the REAL successful factory."""
+    wire = hold_filter_jit(raw[None], hold)[0][0]
+    base = SimpleNamespace(hooks=[object()], commands=wire, control_frames=np.array([20]),
+                           control_states={0: np.zeros(k.K)})
+    def reroll(ev, commands):
+        bound = np.tile([0., 0., .5, 2.], (1, len(commands)+1, 1))
+        flags = np.zeros(bound.shape[:2], np.int64)
+        blocked = flags.copy(); blocked[:,49:52] = k.F_NO_INPUT
+        return SimpleNamespace(hooks=base.hooks, commands=commands.copy(), bound=bound,
+            flags_all=flags, flags_any=blocked, control_frames=base.control_frames.copy(),
+            control_states={q:s.copy() for q,s in base.control_states.items()}, pogo_events=ev.copy())
+    occ = lambda x,y,t,*args: np.zeros(x.shape, bool)
+    fc = SimpleNamespace(fc=SimpleNamespace(half=(.5,1.2)), occupied=occ,
+        rs=SimpleNamespace(samples=(0,100), k_shift=0, occupied_esc=occ,
+                           knife_coupled_world=dict(iid=7,durations=WORLD[1],shift=0)))
+    planner = SimpleNamespace(params=SimpleNamespace(frame_time=1/60),terrain=None,
+        cfg=SimpleNamespace(threads=1,max_points=2),
+        _esc_cmds=lambda n:np.full((1,n),k.B_LEFT,np.int64))
+    world = hit.HitWorld(WORLD,fc,base,np.array([44]),np.array([48]),np.array([48]),
+                         np.array([True]),reroll)
+    cert = hit.common_escape(planner,[world],raw,hold,horizon=37,expected_worlds=(WORLD,))
+    assert cert is not None and cert.start == 52 and cert.through == 85
+    assert np.array_equal(cert.raw, raw)
+    return cert
+
+
+
 @pytest.fixture
 def case():
     prefix = np.array([k.B_RIGHT], np.int64)
@@ -17,11 +48,10 @@ def case():
     raw[52:] = k.B_LEFT
     hold = k.HoldState.idle()
     wire = hold_filter_jit(raw[None], hold)[0][0]
-    ro = SimpleNamespace(hooks=[object()], commands=wire.copy(), bound=np.zeros((1, 86, 4)))
-    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37, ("world",))
+    cert = certified_exit(raw, hold)
     state = k.initial_state(k.HeroParams(), 3., 8., ground=False)
     args = dict(frame=1000, start=state, hold=hold, prefix=prefix, T=36)
-    tail = plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
+    tail = plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args)
     row = dict(**args, cmd=raw[1:37].copy(), latched=wire[:37].copy())
     return tail, cert, row
 
@@ -75,7 +105,7 @@ def test_incomplete_or_mismatched_exit_cannot_become_a_tail(case, change):
     if change == "partial": cert.raw = cert.raw[:60]; cert.latched = cert.latched[:60]
     if change == "contact": cert.contacts = [np.array([37])]
     with pytest.raises(ValueError):
-        plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
+        plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args)
 
 
 def test_an_unsafe_or_different_selection_does_not_retain_the_checked_tail(case):
@@ -138,13 +168,12 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
     raw = np.zeros(85, np.int64); raw[:1] = prefix
     raw[43:45] = k.B_DOWN | k.B_ATTACK; raw[52:] = k.B_LEFT
     wire = hold_filter_jit(raw[None], hold)[0][0]
-    ro = SimpleNamespace(hooks=[object()], commands=wire, bound=np.zeros((1, 86, 4)))
-    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37, ("world",))
+    cert = certified_exit(raw, hold)
     ws = _world(27.); ws.stamp.frame = 1000
     tail = plan.CheckedTail.from_exit(cert, frame=1000, start=start, hold=hold, prefix=prefix, T=36,
-                                      world_keys=["world"])
+                                      world_keys=[WORLD])
     if stale:
-        tail = replace(tail, frame=999)
+        ws.stamp.frame = 1001  # issued proof intact; the live tick has advanced
     main = k.rollout(start, wire[:37][None], params, arena, variants="bounds")
     custom = {"checked_tail": tail, "latched": wire[:37],
               "nominal": {n: getattr(main, n)[0] for n in ("phys", "pos", "vel", "mode", "flags", "box")},
@@ -173,11 +202,15 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
         assert planner.last_info["knife"]["full_checked_tail_frames"] == 0
         assert custom["checks"][0]["check"] == "checked_tail_identity"
         assert custom["checks"][0]["status"] == "failed"
+        assert planner.audit.knife_checked_tail == 0
+        assert planner.audit.v2_esc_tail == 1
     else:
         assert result.name == "WIN knife synthetic" and result.S == 0
         assert np.array_equal(planner.prev_cmd, raw[1:])
         assert planner.last_info["knife"]["full_checked_tail_frames"] == 84
         assert not custom["checks"]
+        assert planner.audit.knife_checked_tail == 1
+        assert planner.audit.v2_esc_tail == 0
 
 
 def test_forced_selection_and_shortened_result_do_not_keep_a_tail(case):
@@ -197,12 +230,68 @@ def test_zero_lane_certificate_cannot_carry_a_checked_tail(case):
     cert.contacts = [np.array([], np.int64)]
     args = {n: row[n] for n in ("frame", "start", "hold", "prefix", "T")}
     with pytest.raises(ValueError):
-        plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
+        plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args)
 
 
 def test_tail_cannot_drop_a_declared_world_from_the_exit_certificate(case):
     tail, cert, row = case
-    cert.expected_world_keys = ("world", "missing_world")
+    cert.expected_world_keys = (WORLD, (7, WORLD[1], 1))
     args = {n: row[n] for n in ("frame", "start", "hold", "prefix", "T")}
-    with pytest.raises(ValueError, match="expected world domain"):
-        plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
+    with pytest.raises(ValueError, match="not issued or has changed"):
+        plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args)
+
+
+@pytest.mark.parametrize("method", ["constructor", "copy", "deepcopy", "replace"])
+def test_hand_built_or_cloned_exit_is_not_a_successful_common_escape_result(case, method):
+    import copy
+    from dataclasses import fields
+    _, cert, row = case
+    if method == "constructor":
+        other = hit.HitExit(**{f.name:getattr(cert,f.name) for f in fields(cert) if f.init})
+    elif method == "replace":
+        other = replace(cert)
+    else:
+        other = getattr(copy, method)(cert)
+    args = {n:row[n] for n in ("frame","start","hold","prefix","T")}
+    with pytest.raises(ValueError, match="not issued or has changed"):
+        plan.CheckedTail.from_exit(other, world_keys=[WORLD], **args)
+    # The real, unchanged issuer result remains usable.
+    assert plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args).for_row(**row).shape == (84,)
+
+
+@pytest.mark.parametrize("method", ["constructor", "copy", "deepcopy", "replace"])
+def test_hand_built_or_cloned_tail_cannot_bypass_the_receiver_factory(case, method):
+    import copy
+    from dataclasses import fields
+    tail, _, row = case
+    if method == "constructor":
+        other = plan.CheckedTail(**{f.name:getattr(tail,f.name) for f in fields(tail) if f.init})
+    elif method == "replace":
+        other = replace(tail)
+    else:
+        other = getattr(copy, method)(tail)
+    with pytest.raises(ValueError, match="not issued or has changed"):
+        other.for_row(**row)
+
+
+def test_consistently_changing_exit_keys_does_not_reuse_its_old_check(case):
+    _, cert, row = case
+    cert.raw[60:] = 0
+    cert.latched = hold_filter_jit(cert.raw[None], row["hold"])[0][0]
+    for path in cert.paths:
+        path.commands = cert.latched.copy()
+    args = {n:row[n] for n in ("frame","start","hold","prefix","T")}
+    # Raw, wire and path commands agree; the old successful check still belongs
+    # to different exit keys, so structural consistency alone must not accept it.
+    with pytest.raises(ValueError, match="not issued or has changed"):
+        plan.CheckedTail.from_exit(cert, world_keys=[WORLD], **args)
+
+
+def test_changing_only_the_post_H_tail_cannot_keep_the_old_factory_proof(case):
+    tail, _, row = case
+    tail.raw.setflags(write=True)
+    tail.raw[70] = 0
+    tail.raw.setflags(write=False)
+    # All first-T raw/wire keys and the live origin are unchanged.
+    with pytest.raises(ValueError, match="not issued or has changed"):
+        tail.for_row(**row)
