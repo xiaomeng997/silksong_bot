@@ -78,6 +78,9 @@ class CheckedTail:
         worlds = tuple(world_keys)
         if not worlds or len(set(worlds)) != len(worlds) or None in worlds:
             raise ValueError("explicit unique target worlds required")
+        declared = tuple(cert.expected_world_keys)
+        if not declared or len(set(declared)) != len(declared) or set(declared) != set(worlds):
+            raise ValueError("certificate expected world domain changed")
         if (not cert.paths or len(cert.paths) != len(cert.contacts)
                 or len(cert.paths) != len(cert.world_keys) or set(cert.world_keys) != set(worlds)):
             raise ValueError("certificate world coverage changed")

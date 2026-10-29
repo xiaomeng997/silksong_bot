@@ -114,12 +114,12 @@ def test_shared_exit_can_keep_lane_specific_contacts_and_one_command(case):
     planner=SimpleNamespace(params=params,terrain=None,cfg=SimpleNamespace(threads=1,max_points=2),
         _esc_cmds=lambda length:np.zeros((1,length),np.int64))
     forecast=SimpleNamespace(fc=SimpleNamespace(half=(.5,1.2)),
-        rs=SimpleNamespace(samples=(0,100),k_shift=0,occupied_esc=lambda x,y,t:np.zeros(x.shape,bool)),
+        rs=SimpleNamespace(knife_coupled_world=dict(iid=7,durations=(47,4,3,4,14),shift=0),samples=(0,100),k_shift=0,occupied_esc=lambda x,y,t:np.zeros(x.shape,bool)),
         occupied=lambda x,y,t,c:np.zeros(x.shape,bool))
     audit={}
-    world=hit.HitWorld("single",forecast,paths,np.full(n,43),first,last,np.ones(n,bool),
+    world=hit.HitWorld((7,(47,4,3,4,14),0),forecast,paths,np.full(n,43),first,last,np.ones(n,bool),
         reroll=lambda ev,commands:lanes.rollout(base,params,events=ev,commands=commands))
-    cert=hit.common_escape(planner,[world],raw,hold,horizon=37,audit=audit)
+    cert=escape(planner,[world],raw,hold,horizon=37,audit=audit)
     assert cert is not None and cert.start==int(last.max())+1 and cert.through>=cert.start+24
     assert all(np.count_nonzero(p.pogo_events)==n for p in cert.paths)
     for p,cc in zip(cert.paths,cert.contacts):
@@ -135,8 +135,8 @@ def test_exit_cannot_swap_clock_identity_even_if_row_count_is_unchanged(case):
         ro.clock_indices=np.roll(ro.clock_indices,1)
         return ro
     with pytest.raises(ValueError,match="outcome identity"):
-        world=hit.HitWorld("single",None,paths,np.full(n,43),np.full(n,47),np.full(n,47),np.ones(n,bool),swapped)
-        hit.common_escape(planner,[world],raw,hold,horizon=37)
+        world=hit.HitWorld((7,(47,4,3,4,14),0),SimpleNamespace(rs=SimpleNamespace(knife_coupled_world=dict(iid=7,durations=(47,4,3,4,14),shift=0))),paths,np.full(n,43),np.full(n,47),np.full(n,47),np.ones(n,bool),swapped)
+        escape(planner,[world],raw,hold,horizon=37)
 
 
 def test_uniform_contacts_reunite_to_the_original_bounds_and_protection(case):
@@ -177,3 +177,9 @@ def test_geometry_query_dedup_keeps_every_verdict_and_invalidates_on_replacement
     actual=hit.full_contacts(planner,forecast,paths)
     plain.bound=paths.bound.copy()
     assert np.array_equal(actual,hit.full_contacts(planner,forecast,plain))
+
+
+def escape(planner, worlds, raw, hold, **kwargs):
+    """Small synthetic domain for these component tests, not a runtime factory."""
+    kwargs.setdefault("expected_worlds", tuple(w.key for w in worlds))
+    return hit.common_escape(planner, worlds, raw, hold, **kwargs)

@@ -70,6 +70,7 @@ class HitExit:
     contacts: list
     world_keys: list
     horizon: int
+    expected_world_keys: tuple
 
 
 FREE_MIN = 10
@@ -94,7 +95,33 @@ def contacts_fit(world, horizon, length):
                 and np.all(swing >= controls) and np.all(swing - controls >= FREE_MIN))
 
 
-def common_escape(planner, worlds, raw, hold, *, horizon, audit=None):
+
+def _world_key(key):
+    """Canonical immutable identity for this coupled Slam's declared world."""
+    if not isinstance(key, tuple) or len(key) != 3:
+        raise ValueError("target world identity unavailable")
+    iid, durations, shift = key
+    def integer(x):
+        return not isinstance(x, (bool, np.bool_)) and isinstance(x, (int, np.integer))
+    if (not integer(iid) or not isinstance(durations, tuple) or len(durations) != 5
+            or any(not integer(x) or x <= 0 for x in durations) or not integer(shift)):
+        raise ValueError("target world identity unavailable")
+    return int(iid), tuple(map(int, durations)), int(shift)
+
+
+def _expected_domain(expected_worlds):
+    try:
+        reference = tuple(_world_key(k) for k in expected_worlds)
+    except TypeError as exc:
+        raise ValueError("explicit expected target world domain required") from exc
+    if not reference:
+        raise ValueError("nonempty expected target world domain required")
+    if len(set(reference)) != len(reference):
+        raise ValueError("duplicate target world in expected domain")
+    return tuple(sorted(reference))
+
+
+def common_escape(planner, worlds, raw, hold, *, horizon, expected_worlds, audit=None):
     """One global input edge and one escape option for every supplied world.
 
     Re-roll from the original control states/events and check frame zero.
@@ -112,25 +139,34 @@ def common_escape(planner, worlds, raw, hold, *, horizon, audit=None):
     log = {} if audit is None else audit
     log.update(status="unchecked", horizon=horizon, length=length,
                worlds=[], options=[], contact_gate=False)
+    import hashlib
+    import json
+    reference = _expected_domain(expected_worlds)
+    actual = tuple(_world_key(w.key) for w in worlds)
+    if len(set(actual)) != len(actual):
+        raise ValueError("duplicate target world identity")
+    missing = set(reference) - set(actual)
+    extra = set(actual) - set(reference)
+    log.update(expected_world_count=len(reference),
+               expected_world_sha256=hashlib.sha256(json.dumps(reference, separators=(",", ":")).encode()).hexdigest(),
+               missing_worlds=sorted(missing), extra_worlds=sorted(extra))
+    if missing or extra:
+        log.update(reason="target_world_domain_mismatch")
+        raise ValueError("target world domain mismatch")
     wire = hold_filter_jit(raw[None], hold)[0][0]
-    keys = set()
     failed_contacts = []
     for q, w in enumerate(worlds):
-        if w.key is None:
-            raise ValueError("target world identity unavailable")
-        try:
-            if w.key in keys:
-                raise ValueError("duplicate target world identity")
-            keys.add(w.key)
-        except TypeError as exc:
-            raise ValueError("hashable target world identity required") from exc
         if not np.array_equal(w.base.commands, wire):
             raise ValueError("latched prefix mismatch")
         origin = getattr(getattr(w.forecast, "rs", None), "knife_coupled_world", None)
-        if origin is not None:
-            expected = (origin["iid"], tuple(origin["durations"]), origin["shift"])
-            if w.key != expected:
-                raise ValueError("forecast target world identity mismatch")
+        if not isinstance(origin, dict) or any(k not in origin for k in ("iid", "durations", "shift")):
+            raise ValueError("paired forecast target world marker required")
+        try:
+            paired = _world_key((origin["iid"], tuple(origin["durations"]), origin["shift"]))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("paired forecast target world marker invalid") from exc
+        if _world_key(w.key) != paired:
+            raise ValueError("forecast target world identity mismatch")
         good = contacts_fit(w, horizon, length)
         if not good:
             failed_contacts.append(q)
@@ -242,6 +278,6 @@ def common_escape(planner, worlds, raw, hold, *, horizon, audit=None):
                                    unsafe_frames=sorted(unsafe)))
         if not failed:
             log.update(status="passed", option=option)
-            return HitExit(j, through, option, full, latched, paths, contacts, world_keys, int(horizon))
+            return HitExit(j, through, option, full, latched, paths, contacts, world_keys, int(horizon), reference)
     log.update(status="failed", reason="no_common_exit")
     return None

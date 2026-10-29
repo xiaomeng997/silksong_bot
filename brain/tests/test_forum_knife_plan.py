@@ -18,7 +18,7 @@ def case():
     hold = k.HoldState.idle()
     wire = hold_filter_jit(raw[None], hold)[0][0]
     ro = SimpleNamespace(hooks=[object()], commands=wire.copy(), bound=np.zeros((1, 86, 4)))
-    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37)
+    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37, ("world",))
     state = k.initial_state(k.HeroParams(), 3., 8., ground=False)
     args = dict(frame=1000, start=state, hold=hold, prefix=prefix, T=36)
     tail = plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
@@ -139,7 +139,7 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
     raw[43:45] = k.B_DOWN | k.B_ATTACK; raw[52:] = k.B_LEFT
     wire = hold_filter_jit(raw[None], hold)[0][0]
     ro = SimpleNamespace(hooks=[object()], commands=wire, bound=np.zeros((1, 86, 4)))
-    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37)
+    cert = hit.HitExit(52, 85, 2, raw, wire, [ro], [np.array([48])], ["world"], 37, ("world",))
     ws = _world(27.); ws.stamp.frame = 1000
     tail = plan.CheckedTail.from_exit(cert, frame=1000, start=start, hold=hold, prefix=prefix, T=36,
                                       world_keys=["world"])
@@ -197,4 +197,12 @@ def test_zero_lane_certificate_cannot_carry_a_checked_tail(case):
     cert.contacts = [np.array([], np.int64)]
     args = {n: row[n] for n in ("frame", "start", "hold", "prefix", "T")}
     with pytest.raises(ValueError):
+        plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)
+
+
+def test_tail_cannot_drop_a_declared_world_from_the_exit_certificate(case):
+    tail, cert, row = case
+    cert.expected_world_keys = ("world", "missing_world")
+    args = {n: row[n] for n in ("frame", "start", "hold", "prefix", "T")}
+    with pytest.raises(ValueError, match="expected world domain"):
         plan.CheckedTail.from_exit(cert, world_keys=["world"], **args)

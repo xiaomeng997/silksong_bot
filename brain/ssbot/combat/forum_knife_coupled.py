@@ -120,3 +120,34 @@ def conditioned_slam(forecast,observation,durations,shift,roots):
     out.knife_coupled_world=dict(iid=iid,durations=tuple(durations),shift=int(shift),
         callback_sweep=1,within_state_geometry="full existing union",position="same contact root path",runtime_promoted=False)
     return v2.V2Forecast(forecast._inner,out)
+
+
+def expected_slam_worlds(observation, knowledge):
+    """Declare the full domain independently of candidates/contact survivors.
+
+    Same duration ranges and shifts as the existing body/timing proposal family.
+    An observed Antic age only removes durations already contradicted by that
+    observation. This is not a calibration-based pruning rule.
+    """
+    from itertools import product
+    from ssbot.combat.dslash import CERT_SHIFTS
+    age = observation.j
+    if (observation.st != STATES[0] or isinstance(age, (bool, np.bool_))
+            or not isinstance(age, (int, np.integer)) or age < 0):
+        raise ValueError("supported observed Slam Antic age required")
+    domains = []
+    for state in STATES:
+        duration = knowledge.durations(state)
+        if (duration is None or len(duration) != 3
+                or any(isinstance(x, (bool, np.bool_)) or not isinstance(x, (int, np.integer)) for x in duration)):
+            raise ValueError("complete integer Slam duration domain required")
+        lo, mid, hi = map(int, duration)
+        if not 0 < lo <= mid <= hi:
+            raise ValueError("ordered positive Slam duration domain required")
+        domains.append(range(lo, hi + 1))
+    shifts = tuple(sorted({0, *map(int, CERT_SHIFTS)}))
+    worlds = tuple((int(observation.iid), tuple(d), s)
+                   for d in product(*domains) if age < d[0] for s in shifts)
+    if not worlds:
+        raise ValueError("observed age contradicts every declared Slam world")
+    return worlds

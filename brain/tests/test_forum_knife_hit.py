@@ -21,7 +21,7 @@ def scenario():
     base=claw.rollout(state,latched,params,None,boxes,7)
     planner=SimpleNamespace(params=params,terrain=None,cfg=SimpleNamespace(threads=1,max_points=2),
         _esc_cmds=lambda length:np.zeros((1,length),np.int64))
-    rs=SimpleNamespace(samples=(0,100),k_shift=0,occupied_esc=lambda x,y,t:np.zeros(x.shape,bool))
+    rs=SimpleNamespace(knife_coupled_world=dict(iid=7,durations=(47,4,3,4,14),shift=0),samples=(0,100),k_shift=0,occupied_esc=lambda x,y,t:np.zeros(x.shape,bool))
     forecast=SimpleNamespace(fc=SimpleNamespace(half=(.5,1.2)),rs=rs,
         occupied=lambda x,y,t,c:np.zeros(x.shape,bool))
     return params,state,raw,hold,base,boxes,planner,forecast
@@ -65,15 +65,21 @@ def test_complete_contacts_checks_frame_zero_and_keeps_invulnerability_and_width
 def test_common_exit_begins_after_all_bounces_and_keeps_the_planned_strike(scenario):
     _,_,raw,hold,base,_,planner,forecast=scenario
     n=len(base.hooks);audit={}
-    world=hit.HitWorld("single",forecast,base,np.full(n,43),np.full(n,48),np.full(n,50),np.ones(n,bool))
-    cert=hit.common_escape(planner,[world],raw,hold,horizon=37,audit=audit)
+    world=hit.HitWorld((7,(47,4,3,4,14),0),forecast,base,np.full(n,43),np.full(n,48),np.full(n,50),np.ones(n,bool))
+    cert=escape(planner,[world],raw,hold,horizon=37,audit=audit)
     assert cert is not None and cert.start==51 and cert.through>=75
     assert np.array_equal(cert.raw[:cert.start],raw[:cert.start])
     assert cert.raw[42]&km.B_ATTACK
     assert len(cert.paths)==3 and len(cert.contacts)==3
     assert all(not (p.flags_any[:,-10:]&km.F_INVULN).any() for p in cert.paths)
     forecast.occupied=lambda x,y,t,c:np.broadcast_to(t==0,x.shape)
-    assert hit.common_escape(planner,[world],raw,hold,horizon=37) is None
+    assert escape(planner,[world],raw,hold,horizon=37) is None
     forecast.occupied=lambda x,y,t,c:np.zeros(x.shape,bool)
     forecast.rs.occupied_esc=lambda x,y,t:np.ones(x.shape,bool)
-    assert hit.common_escape(planner,[world],raw,hold,horizon=37) is None
+    assert escape(planner,[world],raw,hold,horizon=37) is None
+
+
+def escape(planner, worlds, raw, hold, **kwargs):
+    """Small synthetic domain for these component tests, not a runtime factory."""
+    kwargs.setdefault("expected_worlds", tuple(w.key for w in worlds))
+    return hit.common_escape(planner, worlds, raw, hold, **kwargs)
