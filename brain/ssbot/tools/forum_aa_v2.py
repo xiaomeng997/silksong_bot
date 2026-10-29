@@ -46,7 +46,8 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     continuity = RecordingReader(attempt["recording"]).check(deep=True).as_dict()
     rows = [json.loads(s) for s in Path(m["path"]).read_text().splitlines()]
     window = audit["window"]
-    tail = tail_summary(rows,wake_f=window["wake_f"],end_f=window["end_f"])
+    have_boundaries = isinstance(window["wake_f"], int) and isinstance(window["end_f"], int)
+    tail = tail_summary(rows if have_boundaries else [],wake_f=window["wake_f"],end_f=window["end_f"])
     errors = []
     if m.get("protocol_version") != 2:
         errors.append("attempt is not protocol v2")
@@ -57,7 +58,7 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     online = m["window"]
     for key in ("wake_f","end_f","T","target_ids","watchdog_f","tail_end_f","tail_end_reason"):
         if online.get(key) != window.get(key):errors.append("online/offline window mismatch: "+key)
-    for state in RecordingReader(attempt["recording"]).states(window["wake_f"],window["tail_end_f"]):
+    for state in (RecordingReader(attempt["recording"]).states(window["wake_f"],window["tail_end_f"]) if have_boundaries else []):
         game,hero = state.get("game") or {},state.get("hero") or {}
         if not isinstance(game.get("cheat"),int) or game["cheat"]&3 or hero.get("is_invincible") or hero.get("invincibility_source"):
             errors.append("cheat or missing cheat status");break
@@ -72,7 +73,7 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
               "recovered":recovered,"diagnostic_tail":tail,
               "main_ticks":{"n":tail["total"]["n"],"p50":tail["total"]["p50_ms"],"p99":tail["total"]["p99_ms"],
                             "gap_ge3":sum((x.get("processed_frame_gap") or 0)>=3 for x in rows
-                                          if x.get("kind")=="tick" and window["wake_f"]<=x["f"]<=window["end_f"])/max(1,tail["total"]["n"])},
+                                          if have_boundaries and x.get("kind")=="tick" and window["wake_f"]<=x["f"]<=window["end_f"])/max(1,tail["total"]["n"])},
               "diagnostics":rows[-1].get("diagnostics"),"production_eligible":production and not errors}
     result.update(context or {})
     write_new(run/f"verified_i{instance}_e{episode}.json",result)

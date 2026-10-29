@@ -50,3 +50,23 @@ def test_known_zero_dt_tail_is_observed_not_missing_and_has_no_invented_rate():
     a=audit_window(rows,w.snapshot(),{'unit':'Forum_W_w13','f_wake':10,'outcome':'HARNESS_FAIL'})
     assert a['complete'] and not a['success']
     assert a['tail']['metrics']['T']==0 and a['tail']['metrics']['HP_per_min'] is None
+
+
+def test_disconnect_missing_summary_end_produces_incomplete_prefix_report(monkeypatch,tmp_path):
+    import json,msgpack
+    from ssbot.tools import forum_measure_audit as tool
+    rows=[state(f) for f in range(9,13)]
+    class Reader:
+        def __init__(self,path):pass
+        def records(self,kind):
+            for row in rows:yield None,row['f']*100_000_000,None,0,None,msgpack.packb(row,use_bin_type=True)
+    monkeypatch.setattr(tool,'RecordingReader',Reader)
+    attempt={'episode':0,'f_wake':10,'f_end':None,'unit':'Forum_W_w13','outcome':'HARNESS_FAIL',
+             'recording':'unused','measurement':{'protocol_version':2,'window':{'last_f':11}}}
+    (tmp_path/'attempts_i0.jsonl').write_text(json.dumps(attempt)+'\n')
+    target=tmp_path/'audit.json'
+    assert tool.main(['--run',str(tmp_path),'--instance','0','--out',str(target)])==1
+    result=json.loads(target.read_text())
+    assert not result['complete'] and result['summary_end_missing']
+    assert result['window']['end_f']==11 and result['metrics']['T']==pytest.approx(.2)
+    assert 'episode fault: unobserved HP/time interval cannot be assumed empty' in result['window']['errors']

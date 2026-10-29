@@ -58,6 +58,21 @@ def main(argv=None):
                    if line and json.loads(line).get("episode") == a.episode)
     version = a.protocol_version or (attempt.get("measurement") or {}).get("protocol_version", 1)
     wake, last = attempt["f_wake"], attempt["f_end"]
+    summary_end_missing = not isinstance(last, int)
+    if summary_end_missing:
+        # A disconnect may leave AttemptRecord.f_end unset. This is a read bound
+        # for observed-prefix diagnostics, never evidence of an unseen endpoint.
+        last = ((attempt.get("measurement") or {}).get("window") or {}).get("last_f")
+    if not isinstance(wake, int) or not isinstance(last, int):
+        result = {"run": str(a.run), "instance": a.instance, "episode": a.episode,
+                  "complete": False, "success": False, "K_star": None,
+                  "window": {"wake_f": wake, "end_f": None, "tail_end_f": None, "T": None,
+                             "target_ids": [], "complete": False, "errors": ["missing episode boundaries"]},
+                  "metrics": {"complete": False, "L": None, "T": None, "HP_per_min": None,
+                              "problems": ["missing episode boundaries"]}, "tail": None}
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        with a.out.open("x", encoding="utf-8") as out: json.dump(result, out, indent=1, allow_nan=False)
+        return 1
     is_two = attempt["unit"] == "Forum_W_w13"
     window = MeasurementWindow(SimpleNamespace(wake_frame=wake), wave=13 if is_two else 7,
                                expected_targets=2 if is_two else 1, game_limit=120 if is_two else 60, protocol_version=version)
@@ -70,7 +85,8 @@ def main(argv=None):
             break
         state = formats.peek(payload, ("f", "dt", "hero", "ents", "ev", "room", "game", "act"), flags)
         states.append(state)
-        window.observe(state, received_ns)
+        if frame <= last:
+            window.observe(state, received_ns)
     if attempt.get("outcome") != "CLEAR":
         window.finish_at(last, "episode_" + str(attempt.get("outcome", "unknown")).lower())
     measured = window.snapshot()
@@ -78,6 +94,8 @@ def main(argv=None):
         measured["end_f"] = last  # remains incomplete; expose observed facts for diagnosis
     result = {"run": str(a.run), "instance": a.instance, "episode": a.episode,
               "historical_recalculation": "measurement" not in attempt,
+              "summary_end_missing": summary_end_missing,
+              "prefix_bound_source": "producer raw-window last_f" if summary_end_missing else "episode summary",
               "window": measured, **audit_window(states, measured, attempt)}
     audited = result["metrics"]
     a.out.parent.mkdir(parents=True, exist_ok=True)
