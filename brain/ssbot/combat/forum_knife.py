@@ -117,7 +117,7 @@ def slam_body_paths(observation, paths, knowledge):
     return out
 
 
-def safety_forecast(forecast, through_frame):
+def _extend_forecast(forecast, through_frame):
     """Extend this tick's existing support to the complete checked tail.
 
     Preserve every original sample and owner. One extra endpoint uses the
@@ -147,6 +147,100 @@ def safety_forecast(forecast, through_frame):
         extended.stack_dash = np.concatenate((np.zeros_like(rs.stack) if rs.stack_dash is None else rs.stack_dash,
                                               np.zeros_like(extra.stack) if extra.stack_dash is None else extra.stack_dash))
     return forum_v2.V2Forecast(forecast._inner, extended)
+
+
+def _slam_clock_support(rs, iid):
+    """Resolve the started Slam's critical bins on its one Antic clock.
+
+    Audit prototype: not promoted into append_rows (cost/geometry gates open).
+    Other owners and this owner's spawned hazards keep their original sparse
+    occupancy. The core
+    keeps the existing spatial template/margin, with the previous game bin
+    included for callbacks delivered after the exported arc turns off.
+    """
+    from ssbot.combat import attack_range as ar, forum_v2 as v2
+    if not isinstance(rs, v2.RangeSupport) or rs.focus != iid:
+        raise ValueError("Slam clock needs the focused RangeSupport")
+    tk_name, _, inst = rs.trk.now[iid]
+    if tk_name != v2.CLAPPER or inst is None or inst.fam != "CC_SLAM":
+        raise ValueError("Slam clock needs a started CC_SLAM")
+    tab = rs.trk.tables[tk_name]
+    tp = tab.templates[("CC_SLAM", "main")]
+    if rs.haz_raw:
+        raise ValueError("unsupported split hazard support")
+    if tp.sst is None:
+        raise ValueError("missing Slam state clock")
+    critical = [b for b, states in enumerate(tp.sst)
+                if {"Slam 0", "Slam 1", "Slam 2"}.intersection(states)]
+    if not critical:
+        raise ValueError("missing Slam critical bins")
+    age = ar.bin_of(rs.trk.T - inst.t0)
+    # Include a clear endpoint AFTER the last swept bin. Otherwise a last
+    # live raster would be held again until the next sparse sample.
+    lo, hi = min(critical) - age - 1, max(critical) - age + 2
+    dense = range(max(0, lo), min(rs.samples[-1], hi) + 1)
+    samples = tuple(sorted(set(rs.samples).union(dense)))
+    layer = v2.LayerSupport(rs.cv, samples, rs.k_shift, rs.fc._inner)
+    estimates = {}
+    def estimate(k):
+        if k not in estimates:
+            e = rs.trk.estimate(iid, k)
+            if e is None or e.core is None:
+                raise ValueError("missing separable Slam core")
+            estimates[k] = e
+        return estimates[k]
+    # A core can be replaced only when the original piece is exactly the
+    # tracker's complete estimate. Unknown additions must remain a rejection.
+    for si, k in enumerate(rs.samples):
+        own = [p for p in rs.raw[si] if p[0] == iid]
+        if len(own) != 1 or any(p[0] == iid for p in rs.layers[si]):
+            raise ValueError("unrecognized Slam support pieces")
+        e = estimate(k)
+        c, x, y = v2.coarse(e.raw, tab.cell, rs.cv.cell)
+        p = own[0]
+        if (p[2:4] != (x, y) or not np.array_equal(p[1], c)
+                or p[4] != rs.m_of(iid, tk_name, k)):
+            raise ValueError("Slam support does not match its tracker")
+    for si, k in enumerate(samples):
+        a, b = int(rs._lo[k]), int(rs._hi[k])
+        for old in sorted({a, b}):
+            for owner, mask, x, y in rs.layers[old]:
+                layer.add(si, owner, mask, x, y)
+            for owner, c, x, y, m, em in rs.raw[old]:
+                if owner != iid or k < lo or k > hi:
+                    layer.add_raw(si, owner, c, x, y, m, em)
+                else:
+                    haz = estimate(rs.samples[old]).haz
+                    if haz is not None and haz.m.size and haz.m.any():
+                        c, x, y = v2.coarse(haz, tab.cell, rs.cv.cell)
+                        layer.add_raw(si, owner, c, x, y, m, em)
+        if lo <= k <= hi:
+            for q in sorted({max(0, k - 1), k}):
+                c, x, y = v2.coarse(estimate(q).core, tab.cell, rs.cv.cell)
+                m = rs.m_of(iid, tk_name, q)
+                layer.add_raw(si, iid, c, x, y, m,
+                              m if k + rs.k_shift >= v2.ESC_FROM_K else None)
+    layer.finish()
+    out = copy.copy(rs)
+    for name in ("samples", "_lo", "_hi", "layers", "raw", "stack", "stack_esc"):
+        setattr(out, name, getattr(layer, name))
+    # These pointwise clocks are unchanged; keep bombs, pending aims and the
+    # stricter dash field. No old verdict or future observed clock is reused.
+    if rs.stack_dash is not None:
+        ks = np.asarray(samples)
+        out.stack_dash = rs.stack_dash[rs._lo[ks]] | rs.stack_dash[rs._hi[ks]]
+    out.knife_slam_clock = {"iid": iid, "age": age, "dense_from": lo,
+                            "dense_through": hi, "previous_game_bin": True}
+    return out
+
+
+def safety_forecast(forecast, through_frame, *, slam_iid=None):
+    """Complete tail coverage, then knife-only committed Slam timing."""
+    extended = _extend_forecast(forecast, through_frame)
+    if slam_iid is None:
+        return extended
+    from ssbot.combat import forum_v2
+    return forum_v2.V2Forecast(extended._inner, _slam_clock_support(extended.rs, slam_iid))
 
 
 def _clear(planner, forecast, rollout, audit=None, label="path"):

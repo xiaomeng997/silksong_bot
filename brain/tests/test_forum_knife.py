@@ -165,3 +165,93 @@ def test_escape_support_horizon_uses_the_forecast_origin_shift():
     with pytest.raises(ValueError, match="support horizon"):
         fk.common_escape(planner, forecast, [], np.zeros(38, np.int64),
                          np.zeros(2, np.int64), km.HoldState.idle(), 38)
+
+
+@pytest.fixture
+def slam_support():
+    from ssbot.combat import attack_range as ar, forum_v2 as v2
+    cv=v2.Canvas(cell=.25,box=(0,0,12,12))
+    inst=SimpleNamespace(fam="CC_SLAM",t0=0.)
+    tp=SimpleNamespace(sst=[{"Slam 1":None} if k==2 else {"Slam 2":None} if k==4 else {} for k in range(8)])
+    tab=SimpleNamespace(cell=.25,templates={("CC_SLAM","main"):tp})
+    def estimate(iid,k):
+        # The real short-lived core, a far standing body, and a persistent
+        # same-owner hazard. The hazard overlaps one part of the old arc.
+        core=ar.Mask(np.ones((1,8),bool) if k==2 else np.ones((1,1),bool),12 if k==2 else 36,12)
+        hazard=ar.Mask(np.ones((1,1),bool),12,12)
+        return SimpleNamespace(core=core,haz=hazard,raw=ar.union([core,hazard]))
+    trk=SimpleNamespace(now={7:(v2.CLAPPER,{},inst)},tables={v2.CLAPPER:tab},T=0.,estimate=estimate)
+    rs=v2.RangeSupport(cv,(0,2,7),k_shift=-1)
+    rs.trk,rs.focus,rs.margin_mode=trk,7,"focus"
+    rs.bombs=np.array([[7.,8.,8.,.25,0.,10.]])
+    for si,k in enumerate(rs.samples):
+        c,x,y=v2.coarse(estimate(7,k).raw,tab.cell,cv.cell)
+        rs.add_raw(si,7,c,x,y,rs.m_of(7,v2.CLAPPER,k),.5)
+        # A different owner whose sparse danger must be byte-for-byte equal
+        # pointwise, including its distinct escape margin.
+        rs.add_raw(si,9,np.ones((1,1),bool),20+k,20,.25,.75)
+    rs.finish()
+    return rs
+
+
+def test_slam_clock_removes_sparse_hold_but_preserves_hazards_and_other_owners(slam_support):
+    rs=slam_support
+    old_stack=rs.stack.copy()
+    out=fk._slam_clock_support(rs,7)
+    assert rs.samples==(0,2,7) and np.array_equal(rs.stack,old_stack)
+    assert out.bombs is rs.bombs and out.trk is rs.trk
+    assert out.knife_slam_clock==dict(iid=7,age=0,dense_from=1,dense_through=6,previous_game_bin=True)
+    # Canvas points distinguish vanished arc from a hazard in the same owner.
+    x=np.array([[4.8,4.8,4.8],[3.1,3.1,3.1],[8.,8.,8.]])
+    y=np.array([[3.1]*3,[3.1]*3,[8.]*3])
+    tk=np.array([2.,3.,4.])/60  # tracker bins 3,4,5 with k_shift=-1
+    before=rs.occupied_only(x,y,tk,[7]);after=out.occupied_only(x,y,tk,[7])
+    assert before[0].all() and after[0].tolist()==[True,False,False]
+    assert after[1:].all()  # overlapping same-owner hazard and per-bomb clocks survive
+    xx,yy=np.meshgrid(np.arange(.125,12,.25),np.arange(.125,12,.25))
+    for j in range(7):
+        times=np.full(xx.shape,j/60)
+        assert np.array_equal(out.occupied_only(xx,yy,times,[9]),rs.occupied_only(xx,yy,times,[9]))
+    assert out.stack_esc is not None
+
+
+def test_slam_clock_unknown_pieces_or_owner_are_rejected(slam_support):
+    rs=slam_support
+    with pytest.raises(ValueError,match="focused"):
+        fk._slam_clock_support(rs,8)
+    rs.raw[0].append(rs.raw[0][0])
+    with pytest.raises(ValueError,match="unrecognized"):
+        fk._slam_clock_support(rs,7)
+
+
+def test_slam_clock_keeps_the_observed_absolute_age(slam_support):
+    rs=slam_support
+    rs.trk.T=1/60
+    out=fk._slam_clock_support(rs,7)
+    assert out.knife_slam_clock["age"]==1
+    assert out.knife_slam_clock["dense_from"]==0
+    assert out.knife_slam_clock["dense_through"]==5
+
+
+def test_slam_clock_does_not_hold_the_last_swept_bin_until_a_late_sample(slam_support):
+    from ssbot.combat import attack_range as ar
+    rs=slam_support
+    original=rs.trk.estimate
+    def estimate(iid,k):
+        e=original(iid,k)
+        if k==4:
+            e.core=ar.Mask(np.ones((1,8),bool),12,12)
+            e.raw=ar.union([e.core,e.haz])
+        return e
+    rs.trk.estimate=estimate
+    out=fk._slam_clock_support(rs,7)
+    # Last dangerous bin 4, lagged callback bin 5, first clear bin 6.
+    times=np.array([3.,4.,5.,6.])/60
+    x=np.full((1,4),4.8);y=np.full((1,4),3.1)
+    assert out.occupied_only(x,y,times,[7]).tolist()==[[True,True,False,False]]
+
+
+def test_slam_clock_does_not_replace_an_unknown_split_hazard_support(slam_support):
+    slam_support.haz_raw={7:[object()]}
+    with pytest.raises(ValueError,match="split hazard"):
+        fk._slam_clock_support(slam_support,7)
