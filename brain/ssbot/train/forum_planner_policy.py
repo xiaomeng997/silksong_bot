@@ -291,6 +291,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.wpress = m2op.WinPress(self.win)
         elif os.environ.get("SSBOT_FORUM_WINDOWS_PRESS", "0").strip() == "1":
             raise ValueError("SSBOT_FORUM_WINDOWS_PRESS=1 needs SSBOT_FORUM_WINDOWS=1 (its Clapper tracker)")
+        if os.environ.get("SSBOT_FORUM_KNIFE_ROWS", "0").strip() == "1":
+            from ssbot.combat import forum_knife
+            forum_knife.validate_environment()
+            self.win.knife = True
+            self.win.knife_scope = False
+            from ssbot.map2.clapper import Know
+            self.win.knife_knowledge = Know.load()
 
     @staticmethod
     def _ab_arms() -> list[tuple[str, dict]]:
@@ -387,6 +394,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                           Terrain2D.empty(), self.threads, _hf, HoldState.idle(1))     # task oldwin
             if _win_rows_on():
                 planner.warm_win(kin.initial_state(self.params, 30.0, FLOOR_Y + self.params.foot))
+            if getattr(self.win, "knife", False):
+                from ssbot.combat import forum_knife
+                forum_knife.warm(planner)
             if self.wpress is not None and self.wpress.ready is None:
                 self.wpress.start()           # stage N: the check worker (spawned, warmed; inproc: the checker here)
         if air_chain.AIRCHAIN or claw_strike.AIRSTRIKE:
@@ -444,6 +454,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
+        if self.win is not None and getattr(self.win, "knife", False):
+            self.win.knife_scope = enc.name == "Forum_W_w7"
         mh = getattr(self.planner, "_map", None)
         if mh is not None and not mh._loaded:
             # SG8 (stalls, forum.md 64): the slam map and every wall bucket with the arena's terrain here (the episode's

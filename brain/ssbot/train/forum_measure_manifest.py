@@ -134,6 +134,8 @@ def _known_runtime_bindings(policy, loaded):
         if disabled and key == "SSBOT_FORUM_CLAWSTRIKE_SET":
             if key in prepared:
                 out[key] = {f"policy.{path}": prepared[key]}
+            elif getattr(getattr(policy, "win", None), "knife", False):
+                out[key] = {f"policy.{path}": {"active": False, "reason": disabled}}
             continue
         converted = {"active": False, "reason": disabled} if disabled else json_value(value)
         if converted is not _MISSING:
@@ -156,6 +158,9 @@ def _known_runtime_bindings(policy, loaded):
         out["SSBOT_FORUM_WINDOWS_ROWS"] = {"active": False, "reason": "window tracker not constructed"}
     elif getattr(policy, "planner", None) is not None:
         out["SSBOT_FORUM_WINDOWS_ROWS"] = {"policy.planner.win.constructed": policy.planner.win is not None}
+    out["SSBOT_FORUM_KNIFE_ROWS"] = {"policy.win.knife": bool(getattr(getattr(policy, "win", None), "knife", False))}
+    if getattr(getattr(policy, "win", None), "knife", False):
+        out["SSBOT_FORUM_REFLEX"] = {"policy.win.uses_reflex_controller": False}
     tables = getattr(getattr(policy, "fc", None), "tables", None)
     if tables is not None:
         out["SSBOT_FORUM_MARGIN"] = {"policy.fc.tables.source": tables.source,

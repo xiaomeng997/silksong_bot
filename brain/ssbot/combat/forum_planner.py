@@ -981,6 +981,7 @@ class DsRows:
     n_pass: int = 0
     n_chain: int = 0
     ms: float = 0.0
+    custom: dict | None = None  # opt-in knife rows: explicit hook lanes and complete envelopes
 
 
 def forum_kill_hp(mf, z: float = KILL_Z) -> float | None:
@@ -3488,6 +3489,11 @@ class ForumPlanner(Planner):
         cs, core0 = (self.fsets_nc if mode0 in NO_CONTROL_MODES else self.fsets)[posture]
         N0, T = len(cs.cmd), cs.T
         cont = self.prev_cmd is not None
+        knife_on = bool(getattr(getattr(self, "win", None), "knife", False))
+        if knife_on:
+            self._knife_info = {"gate": "not_eligible", "rows": 0}
+        if knife_on and (self.win.harpoon or str(self.prev_name).startswith("WIN knife")):
+            cont = False  # no normal-kinematics CONTINUE of an unsupported hook
         rows_ = [cs.cmd]
         self._spec_meta = None
         pv_sm = getattr(self, "_prev_sm", None)          # the special mode: last tick's chosen special row
@@ -3522,6 +3528,9 @@ class ForumPlanner(Planner):
             self._win_c, self._win_info = None, None
             if v2 and self.down_slash and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
                 ds = self._win_rows(win_, ws, f, start, hold, prefix, prefs, T, posture, ds)
+                if knife_on:
+                    from ssbot.combat import forum_knife
+                    ds = forum_knife.append_rows(self, win_, ws, f, start, hold, prefix, prefs, T, posture, ds)
         self._ds = ds
         n_ds = 0 if ds is None else len(ds.cmd)
         D0 = N0 + n_spec + n_hop
@@ -3664,6 +3673,14 @@ class ForumPlanner(Planner):
             for nm in ("phys", "pos", "vel", "mode", "flags", "box"):
                 getattr(r1, nm)[rc] = ds.lane[nm]
             r1.final[:, rc] = ds.lane["final"]
+        knife_data = {} if not n_ds or ds.custom is None else {D0 + q: data for q, data in ds.custom.items()}
+        for row_, data in knife_data.items():
+            if not np.array_equal(latched[row_], data["latched"]):
+                ok[row_] = False
+                data["checks"].append({"check": "final_latched_identity", "status": "failed"})
+            for nm, value in data["nominal"].items():
+                getattr(r1, nm)[row_] = value
+            r1.final[:, row_] = data["final"]
         t1r = time.perf_counter()
         T1 = P + T + 1
         tk = np.arange(T1, dtype=np.float64) * params.frame_time
@@ -3941,6 +3958,11 @@ class ForumPlanner(Planner):
             else:
                 m_sp = None
                 r2 = kin.rollout(start, latched[ch], params, self.terrain, variants=fcfg.variants, threads=cfg.threads)
+            for q_, row_ in enumerate(ch):
+                if int(row_) in knife_data:
+                    data = knife_data[int(row_)]
+                    r2.bound[q_] = data["bound"]
+                    r2.flags_all[q_] = data["flags_all"]
             skip = ((r2.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(r2.flags_all.shape, bool)
             occ = self._contacts(f, r2.bound, tk, skip)
             if m_sp is not None:
@@ -4503,6 +4525,9 @@ class ForumPlanner(Planner):
                     # review2 (HITS_FIRST): the rows its tiers checked keep their results (the same _escape_fail_v2 on
                     # the same lanes), so the deadline cannot cut them into "unchecked" (the strike flagged unsafe)
                     self._hf_esc = hf_ok_ if (hf_ok_ and v2) else None
+                    if knife_data and v2:
+                        self._hf_esc = {**(self._hf_esc or {}),
+                                        **{r: (0, [], d["escape"]) for r, d in knife_data.items()}}
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
                         fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
@@ -4567,7 +4592,7 @@ class ForumPlanner(Planner):
                 q_ = i - D0 - getattr(self, "_win_off", 0)
                 ch_ = wc_[q_] if (wc_ is not None and n_ds and D0 <= i < D0 + n_ds and 0 <= q_ < len(wc_)
                                   and not S[i]) else None
-                win_.note_chosen(ch_, int(ws.stamp.frame) + P - 1, int(ws.stamp.frame),
+                win_.note_chosen(ch_ if i not in knife_data else None, int(ws.stamp.frame) + P - 1, int(ws.stamp.frame),
                                  r1.phys[i] if ch_ is not None else None, r1.vel[i] if ch_ is not None else None)
                 if ch_ is not None:
                     a.win_chosen += 1
@@ -4728,6 +4753,11 @@ class ForumPlanner(Planner):
             self.last_info["map"] = map_info
         if getattr(self, "win", None) is not None and getattr(self, "_win_info", None) is not None:
             self.last_info["win"] = self._win_info           # task oldwin
+        if knife_on:
+            self.last_info["knife"] = {**getattr(self, "_knife_info", {}),
+                                       "chosen_row": res.idx if res.idx in knife_data else None,
+                                       "final_mask": res.mask if hasattr(res, "mask") else int(sel_cmd[0]),
+                                       "escape_status": "passed" if res.idx in knife_data and not res.S else "not_selected"}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,

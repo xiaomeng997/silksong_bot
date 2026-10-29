@@ -35,6 +35,23 @@ def dynamic():
     assert not result["configuration_complete"]
 
 
+def test_knife_configuration_records_disabled_script_and_table_only_reflex(tmp_path):
+    root = package(tmp_path, '''
+A = "SSBOT_FORUM_KNIFE_ROWS"
+B = "SSBOT_FORUM_CLAWSTRIKE_SET"
+C = "SSBOT_FORUM_REFLEX"
+''')
+    module = SimpleNamespace(A="SSBOT_FORUM_KNIFE_ROWS", B="SSBOT_FORUM_CLAWSTRIKE_SET",
+                             C="SSBOT_FORUM_REFLEX")
+    policy = SimpleNamespace(win=SimpleNamespace(knife=True), slam_play=None)
+    result = configuration_manifest(root, policy, modules={"ssbot.combat.example": module}, environ={})
+    assert result["configuration_complete"]
+    switches = result["switches"]
+    assert switches["SSBOT_FORUM_KNIFE_ROWS"]["effective"]["policy.win.knife"] is True
+    assert switches["SSBOT_FORUM_CLAWSTRIKE_SET"]["effective"]["policy.slam_play._csx.cfg"]["active"] is False
+    assert switches["SSBOT_FORUM_REFLEX"]["effective"]["policy.win.uses_reflex_controller"] is False
+
+
 def test_module_not_imported_is_explicit_and_not_assigned_a_guessed_default(tmp_path):
     root = package(tmp_path, 'ON = os.environ.get("SSBOT_FORUM_UNUSED", "1") == "1"\n')
     result = configuration_manifest(root, modules={}, environ={})

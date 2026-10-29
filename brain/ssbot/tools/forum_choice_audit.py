@@ -98,6 +98,9 @@ class ChoiceAudit:
         self.rows = 0
         self.ranked = 0
         self.body_calls = 0
+        self.knife_rows = 0
+        self.knife_chosen = 0
+        self.knife_unsafe = 0
         self.errors = []
         self.restore = []
 
@@ -175,6 +178,10 @@ class ChoiceAudit:
             packet["planner_result"] = {"idx": result.idx, "name": result.name, "mask": result.mask,
                                          "S": result.S, "forced_risk": result.forced_risk}
             packet["last_info"] = freeze(planner.last_info)
+            knife = planner.last_info.get("knife", {})
+            audit.knife_rows += int(knife.get("rows", 0))
+            audit.knife_chosen += int(knife.get("chosen_row") is not None)
+            audit.knife_unsafe += int(knife.get("chosen_row") is not None and result.S != 0)
             if "rank_error" in packet:
                 audit.errors.append(packet["rank_error"])
             audit.calls.append(packet)
@@ -216,10 +223,13 @@ def main(argv=None):
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--ticks", type=int, default=800)
     ap.add_argument("--tv", choices=("0", "1"), required=True)
+    ap.add_argument("--knife", choices=("0", "1"), default="0")
     ap.add_argument("--reference", type=Path, help="matching unaudited replay output for identity validation")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--e-cores-idle", action="store_true", help="limit this process before importing / warming")
     a = ap.parse_args(argv)
+    if a.knife == "1" and a.tv != "0":
+        ap.error("knife audit requires TV off")
     if a.e_cores_idle:
         import psutil
         proc = psutil.Process()
@@ -244,6 +254,10 @@ def main(argv=None):
         def arm(raw):
             env = environment(raw)
             env["SSBOT_FORUM_TV"] = a.tv
+            if a.knife == "1":
+                env.update(SSBOT_FORUM_KNIFE_ROWS="1", SSBOT_FORUM_WINDOWS="1", SSBOT_FORUM_WINDOWS_CORE="2",
+                           SSBOT_FORUM_WINDOWS_PRESS="0", SSBOT_FORUM_SLAM_PLAY="0", SSBOT_FORUM_CLAWSTRIKE="0",
+                           SSBOT_FORUM_SLAM_PLAY_PREFS="1")
             os.environ.update(env)
             audit.install()
             return env
@@ -269,11 +283,16 @@ def main(argv=None):
               "real_selector_captured": audit.ranked > 0, "schema_errors_absent": not audit.errors}
     if a.tv == "1":
         checks["real_body_field_captured"] = audit.body_calls > 0
+    if a.knife == "1":
+        checks.update(knife_rows_seen=audit.knife_rows > 0, knife_chosen_seen=audit.knife_chosen > 0,
+                      unsafe_knife_choice_absent=audit.knife_unsafe == 0)
     if identity is not None:
         checks["output_and_clock_identity"] = all(identity.values())
     summary = {"complete": all(checks.values()), "checks": checks, "identity": identity,
                "ticks": audit.rows, "ranked_calls": audit.ranked, "body_calls": audit.body_calls,
                "schema_errors": audit.errors[:20], "tv": int(a.tv), "replay": str(replay_path),
+               "knife": {"enabled": int(a.knife), "rows": audit.knife_rows, "chosen": audit.knife_chosen,
+                         "unsafe_chosen": audit.knife_unsafe},
                "choices": str(choices_path), "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                "scope": "offline selector and ACTION provenance; no closed-loop benefit or live latency claim"}
     a.out.write_text(json.dumps(summary, indent=1, allow_nan=False), encoding="utf-8")

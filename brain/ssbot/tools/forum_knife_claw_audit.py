@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -150,6 +151,66 @@ def audit_case(case: dict, params, model: str = "legacy") -> dict:
                    frames=[{"f": fp + k, "actual": actual[k].tolist(), "lo": lo[k].tolist(),
                             "hi": hi[k].tolist(), "residual": residual[k].tolist()}
                            for k in range(len(actual))])
+        if model == "stepwise":
+            from ssbot.map2.oldwin_claw import control_state
+            # A second isolated component check starts at the real control
+            # edge, with its measured pose/phase. It is not an end-to-end
+            # claim that the forecast chose that exact edge.
+            hc = frames[fc]["hero"]
+            sc = _her_state(rr, case["recording"], fc, params)
+            hook = SimpleNamespace(x_stop=(hc["box"][0] + hc["box"][2]) / 2,
+                                   y_hold=hc["box"][1] + params.foot, d=direction)
+            state = control_state(params, hook, _terrain(rr, case["recording"], params), alpha=sc[km.ALPHA])
+            post_frames = [frames[f] for f in range(fc + 1, attack + 2)]
+            post_masks = np.array([[s["act"]["mask"] for s in post_frames]], np.int64)
+            post = km.rollout(state, post_masks, params, _terrain(rr, case["recording"], params),
+                              dt=np.array([s["dt"] for s in post_frames]),
+                              fs=np.array([s["fs"] for s in post_frames]),
+                              udt=np.array([s["udt"] for s in post_frames]), threads=1)
+            actual_pos = np.array([frames[fc]["hero"]["pos"][:2]] +
+                                  [s["hero"]["pos"][:2] for s in post_frames])
+            error = np.abs(post.pos[0] - actual_pos)
+            starts = np.flatnonzero(((post.flags[0, 1:] & km.F_ATTACKING) != 0) &
+                                    ((post.flags[0, :-1] & km.F_ATTACKING) == 0)) + 1
+            predicted_start = None if not len(starts) else fc + int(starts[0])
+            post_ok = bool(predicted_start == attack and int(post.final[km.ATK_PDIR, 0]) == 2
+                           and (error <= POSITION_TOL_U).all() and state[km.INV_T] == 0)
+            out["post_control"] = {"scope": "real control edge pose/phase plus real keys and timing",
+                                   "max_error_u": error.max(axis=0).tolist(),
+                                   "predicted_attack_start_f": predicted_start,
+                                   "actual_attack_start_f": attack, "passed": post_ok,
+                                   "initial_invulnerability_s": float(state[km.INV_T])}
+            out["passed"] = bool(out["passed"] and post_ok)
+            from ssbot.map2.oldwin_claw import rollout as claw_rollout
+            full_masks = np.array([frames[f]["act"]["mask"] for f in range(fp, attack + 2)], np.int64)
+            full_boxes = np.vstack((body_box(frames[fp - 1], iid), boxes))
+            joined = claw_rollout(sp, full_masks, params, _terrain(rr, case["recording"], params),
+                                  full_boxes, iid)
+            actual_states = [frames[f] for f in range(fp - 1, attack + 2)]
+            actual_boxes = np.array([s["hero"]["box"] for s in actual_states])
+            bound = np.concatenate((joined.bound[..., :2].min(axis=0),
+                                    joined.bound[..., 2:].max(axis=0)), axis=1)
+            box_covered = bool((bound[:, :2] <= actual_boxes[:, :2] + 1e-6).all()
+                               and (bound[:, 2:] >= actual_boxes[:, 2:] - 1e-6).all())
+            box_residual = np.maximum(np.maximum(bound[:, :2] - actual_boxes[:, :2],
+                                                 actual_boxes[:, 2:] - bound[:, 2:]), 0)
+            failures = np.flatnonzero((box_residual > 1e-6).any(axis=1))
+            start_frames = []
+            for flags in joined.flags:
+                rises = np.flatnonzero(((flags[1:] & km.F_ATTACKING) != 0) &
+                                      ((flags[:-1] & km.F_ATTACKING) == 0)) + 1
+                start_frames.append(None if not len(rises) else fp - 1 + int(rises[0]))
+            attack_covered = all(f == attack for f in start_frames)
+            out["compound"] = {"scope": "one pre-hook observed state, real fixed keys, nominal future clock; recorded target path",
+                               "box_covered": box_covered, "all_attack_starts_match": attack_covered,
+                               "max_box_residual_u": box_residual.max(axis=0).tolist(),
+                               "first_box_failure_f": None if not len(failures) else fp - 1 + int(failures[0]),
+                               "predicted_start_frames": sorted(set(start_frames), key=lambda x: -1 if x is None else x),
+                               "model_outcomes": len(joined.final.T), "passed": box_covered and attack_covered}
+            out["compound"]["zero_scaled_clock_frames"] = [
+                {"f": int(s["f"]), "dt": s["dt"], "fs": s["fs"], "udt": s["udt"]}
+                for s in actual_states if s["dt"] == 0]
+            out["passed"] = bool(out["passed"] and out["compound"]["passed"])
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         out["errors"].append(f"{type(exc).__name__}: {exc}")
     return out
