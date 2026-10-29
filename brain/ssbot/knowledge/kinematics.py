@@ -745,6 +745,9 @@ H2_S1 = H2_POGO_DASH | H2_CLAW_SPR      # the M4 S1 bits (SSBOT_FORUM_HERO2_OFF=
 H2_S1B = H2_SPR_FIN                     # the M4 S1b bit (SSBOT_FORUM_HERO2_OFF=2048: S1's hero model; 3584: M4d2's)
 H2_T1B = H2_SHUTTLE                     # the T1b bit (SSBOT_FORUM_HERO2_OFF=4096: S1b's hero model, the w7 gate's)
 H2_T2 = H2_LAND_DASH                    # the T2 bit (SSBOT_FORUM_HERO2_OFF=8192: T1b's hero model)
+# Diagnostic-only opt-ins (OP3): deliberately excluded from H2_ALL/defaults.
+H2_SHADOW_GLIDE_CANCEL_LATE = 16384
+H2_SHADOW_GLIDE_DASH_NOW = 32768
 H2_JUMP_DCD_T = 0.05                   # HeroJump's dashCooldownTimer (s)
 HERO2_ENV = "SSBOT_FORUM_HERO2"
 HERO2_OFF_ENV = "SSBOT_FORUM_HERO2_OFF"  # HERO2 bits taken out (an int, default 0): the identity checks of new bits

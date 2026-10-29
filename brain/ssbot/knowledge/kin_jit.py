@@ -52,7 +52,7 @@ from ssbot.knowledge.kinematics import (  # Forum loadout (abilities)
 from ssbot.knowledge.kinematics import (  # map v2 M0 (SSBOT_FORUM_HERO2): HeroParams.hero2 bits, 0 = as before
     H2_GLIDE_GRAV, H2_REL_LOSS, H2_POGO_RS, H2_GLIDE_ATK, H2_INFL_END, H2_JUMP_DCD, H2_JUMP_DCD_T, P_H2, P_H2_RST,
     P_H2_PJ2, H2_SPR_ATK, H2_SPR_JUMP, H2_DASH_END, P_H2_SAT, P_H2_XVD, ABUF, XVX, H2_POGO_DASH, H2_SPR_FIN,
-    H2_LAND_DASH)
+    H2_LAND_DASH, H2_SHADOW_GLIDE_CANCEL_LATE, H2_SHADOW_GLIDE_DASH_NOW)
 
 # world freeze presets in start order (kinematics.WF_ORDER): event bit, rampDown, wait, rampUp, target
 _WF = np.array([[float(b), *FREEZE_PRESETS[b]] for b in WF_ORDER])
@@ -1399,7 +1399,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
             if (h2 & H2_GLIDE_ATK) != 0 and (pressed & B_ATTACK) != 0:
                 do_attack(x, mask, P)     # the Deflate's own ListenForAttack on its last frame (live: the slash then)
                 x[AQ] = -1.0
-        if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= 0.075) or x[PHASE] == 3
+        cancel_t = 0.075 + (dt if (h2 & H2_SHADOW_GLIDE_CANCEL_LATE) != 0 else 0.0)
+        if x[MODE] == M_GLIDE and (x[PHASE] == 2 or (x[PHASE] == 1 and x[MODE_T] >= cancel_t) or x[PHASE] == 3
                                    or x[PHASE] == 5):
             if ((pressed & B_ATTACK) != 0 or ((pressed & B_DASH) != 0 and (ab & AB_DASH) != 0)) and \
                     not (ended and (h2 & H2_REL_LOSS) != 0):
@@ -1410,6 +1411,8 @@ def forum_after_queue(x, mask, pressed, mode0, dt, P, TT, jbuf0=0.0, abuf0=0.0):
                 if (h2 & H2_GLIDE_ATK) != 0 and (pressed & B_ATTACK) != 0:
                     do_attack(x, mask, P)  # SetStartWithAttack -> RegainControl -> DoAttack in the FSM's own Update
                     x[AQ] = -1.0          # (live: the slash on the press frame; the queue would swing a frame late)
+                elif (h2 & H2_SHADOW_GLIDE_DASH_NOW) != 0 and (pressed & B_DASH) != 0 and can_dash(x, P):
+                    hero_dash(x, mask, P)  # shadow only: same cancel-frame attempt, with the normal eligibility gates
         if x[MODE] == M_GLIDE and (x[PHASE] == 1 or x[PHASE] == 2):
             rx, ry = rend_x(x), rend_y(x)
             bl = hray(rx, ry, -1.0, P[P_GL_BRAY], TT)
