@@ -197,3 +197,90 @@ def test_reused_hook_with_a_new_drift_and_shorter_endpoint_is_exact():
     changed = keys.copy(); changed[10] = km.B_ATTACK
     with pytest.raises(ValueError, match="uncancellable hook"):
         oldwin_claw.with_commands(base, changed, params, None)
+
+
+
+def test_pogo_physics_clock_keeps_zero_step_frames_and_requires_every_phase():
+    params = km.HeroParams()
+    state = km.initial_state(params, 0., 10., ground=False)
+    state[km.ALPHA] = .25; state[km.ALO] = .1; state[km.AHI] = .9
+    events = np.zeros((1, 24), np.int64); events[0, 2] = km.EV_POGO
+    nominal, every, any_lane = oldwin_claw.pogo_protection(state, events, params)
+    assert not any_lane[:, :3].any()  # no protection before the contact
+    assert (every <= nominal).all() and (nominal <= any_lane).all()
+    assert not every[0, -1] and not any_lane[0, -1]
+    assert (any_lane & ~every).any()  # an advantageous phase cannot shield all lanes
+    # A near-zero dt does not spend a FixedUpdate or expire the counter.
+    alphas = np.array([[.1, .2, .3]])
+    slow = oldwin_claw._pogo_clock(alphas, events, .00001, params.fdt)
+    assert slow[:, :, 3:].all()
+
+
+def test_pogo_physics_clock_rejects_unvalidated_freezes_and_multi_step_contact():
+    import pytest
+    params = km.HeroParams()
+    state = km.initial_state(params, 0., 10., ground=False)
+    events = np.zeros((1, 24), np.int64); events[0, 2] = km.EV_POGO
+    state[km.TS] = .5
+    with pytest.raises(ValueError, match="normal time"):
+        oldwin_claw.pogo_protection(state, events, params)
+    with pytest.raises(ValueError, match="multi-step"):
+        oldwin_claw._pogo_clock(np.zeros((1, 3)), events, .05, .02)
+
+
+def test_new_pogo_flag_changes_no_motion_and_leaves_the_shared_params_unchanged():
+    from ssbot.map2.envelope import load_params
+    params = load_params(hero2=True)
+    state = km.initial_state(params, 0., 10., ground=False)[:, None]
+    commands = np.zeros((1, 28), np.int64)
+    events = np.zeros_like(commands); events[0, 3] = km.EV_POGO
+    old = km.rollout(state, commands, params, events=events, variants="bounds")
+    new = oldwin_claw._recovery_rollout(state, commands, params, None, events, 1)
+    for name in ("phys", "pos", "vel", "mode", "box", "bound"):
+        assert np.array_equal(getattr(old, name), getattr(new, name)), name
+    assert params.pogo_invul == .16
+    assert not (new.flags_all[:, :4] & km.F_INVULN).any()
+
+
+
+def test_pogo_phase_flags_match_fixed_updates_observed_in_kinematics_motion():
+    from dataclasses import replace
+    from ssbot.map2.envelope import load_params
+    from ssbot.tools.forum_knife_pogo_audit import counter_after_steps
+    params = load_params(hero2=True)
+    commands = np.full((1, 26), km.B_RIGHT, np.int64)
+    events = np.zeros_like(commands); events[0, 2] = km.EV_POGO
+    for phase in np.linspace(.05, .95, 6):
+        state = km.initial_state(params, 5., 12., ground=False)
+        state[km.VX] = params.run_speed
+        state[km.ALPHA] = phase
+        state[km.ALO], state[km.AHI] = max(phase-.08, 0.), min(phase+.08, 1.)
+        # Read actual physics steps from horizontal displacement of the old
+        # kinematics kernel, independently of the new phase integrator.
+        ro = km.rollout(state, commands, replace(params,pogo_invul=0.), events=events,
+                        variants="bounds", lanes=True)
+        steps = np.rint(np.diff(ro.var_box[0,:,:,0],axis=1)/(params.run_speed*params.fdt)).astype(int)
+        assert np.isin(steps, [0,1]).all()
+        protected = np.zeros((len(steps),27), bool)
+        for v, fs in enumerate(steps):
+            protected[v,3] = True
+            protected[v,4:] = counter_after_steps(8,fs[3:]) > 0
+        nominal, every, any_lane = oldwin_claw.pogo_protection(state,events,params)
+        assert np.array_equal(nominal[0],protected[0])
+        assert np.array_equal(every[0],protected.all(axis=0))
+        assert np.array_equal(any_lane[0],protected.any(axis=0))
+
+
+
+def test_invalid_pogo_clock_cannot_create_a_protected_tail():
+    import pytest
+    params = km.HeroParams()
+    events = np.zeros((1,20),np.int64);events[0,1] = km.EV_POGO
+    for field,value in ((km.ALPHA,np.nan),(km.AHI,np.inf),(km.ALO,1.1)):
+        state = km.initial_state(params,0.,10.,ground=False);state[field] = value
+        with pytest.raises(ValueError,match="invalid pogo"):
+            oldwin_claw.pogo_protection(state,events,params)
+    state = km.initial_state(params,0.,10.,ground=False)
+    events[0,10] = km.EV_POGO
+    with pytest.raises(ValueError,match="unsupported pogo events"):
+        oldwin_claw.pogo_protection(state,events,params)

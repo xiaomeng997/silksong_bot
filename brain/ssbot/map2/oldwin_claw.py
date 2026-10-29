@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from itertools import product
 
 import numpy as np
+import numba
 
 from ssbot.knowledge import hero2
 from ssbot.knowledge import kinematics as km
@@ -35,7 +36,8 @@ def launch_supported(state: np.ndarray, *, locked: bool = False) -> bool:
     """
     state = np.asarray(state, dtype=float).reshape(km.K)
     return bool(not locked and state[km.GROUND] <= 0 and int(state[km.MODE]) == km.M_NORMAL
-                and state[km.WF_PH] < 0 and abs(state[km.GS] - 1.) < 1e-6)
+                and state[km.WF_PH] < 0 and abs(state[km.GS] - 1.) < 1e-6
+                and abs(state[km.TS] - 1.) < 1e-6)
 
 
 def control_state(params, hook, terrain=None, *, alpha=None) -> np.ndarray:
@@ -119,6 +121,72 @@ def hook_variants(state: np.ndarray, direction: int, iid: int, boxes: np.ndarray
             seen[identity].append(rendered_hook)
             out.append(rendered_hook)
     return out
+
+
+@numba.njit(cache=True)
+def _pogo_clock(alphas, events, dt, fdt):
+    """Eight FixedUpdates AFTER a contact; reset is after that frame's physics.
+
+    Three phase clocks match the ordinary bounds lanes (nominal, low, high).
+    Timing-threshold variants share these clocks in this normal-time scope.
+    """
+    n, V, T = alphas.shape[0], alphas.shape[1], events.shape[1]
+    protected = np.zeros((n, V, T + 1), np.bool_)
+    for q in range(n):
+        for v in range(V):
+            alpha, left = alphas[q, v], 0
+            for t in range(T):
+                a = alpha + dt / fdt
+                steps = int(np.floor(a + 1e-9))
+                if steps > 1:
+                    raise ValueError("multi-step contact clock not validated")
+                alpha = min(max(a - steps, 0.), 1.)
+                left = max(left - steps, 0)
+                if events[q, t] & km.EV_POGO:
+                    left = 8
+                protected[q, v, t + 1] = left > 0
+    return protected
+
+
+def pogo_protection(starts, events, params):
+    """Nominal / every-lane / any-lane protection, independent of motion hulls."""
+    starts = np.asarray(starts).reshape(km.K, -1)
+    clocks = starts[[km.ALPHA, km.ALO, km.AHI, km.TS, km.WF_PH, km.WF_S]]
+    if (not np.isfinite(clocks).all() or not np.isfinite([params.frame_time, params.fdt]).all()
+            or params.frame_time <= 0 or params.fdt <= 0
+            or np.any(starts[km.ALPHA] < 0) or np.any(starts[km.ALPHA] > 1)
+            or np.any(starts[km.ALO] < 0) or np.any(starts[km.AHI] > 1)
+            or np.any(starts[km.ALO] > starts[km.AHI])):
+        raise ValueError("invalid pogo physics clock")
+    if (np.any(np.abs(starts[km.TS] - 1.) > 1e-6)
+            or np.any(starts[km.WF_PH] >= 0)
+            or np.any(np.abs(starts[km.WF_S] - 1.) > 1e-6)):
+        raise ValueError("pogo physics clock requires normal time")
+    ev = np.asarray(events, np.int64)
+    if (ev.ndim != 2 or ev.shape[0] != starts.shape[1] or np.any(ev & ~km.EV_POGO)
+            or np.any(np.count_nonzero(ev & km.EV_POGO, axis=1) > 1)):
+        raise ValueError("unsupported pogo events")
+    alphas = np.stack((starts[km.ALPHA], np.maximum(starts[km.ALO] - params.alpha_margin, 0.),
+                       starts[km.AHI] + params.alpha_margin), axis=1)
+    dt = float(np.float32(params.frame_time))
+    protected = _pogo_clock(alphas, ev, dt, params.fdt)
+    return protected[:, 0], protected.all(axis=1), protected.any(axis=1)
+
+
+def _recovery_rollout(starts, commands, params, terrain, events, threads):
+    if not np.any(events & km.EV_POGO):
+        return km.rollout(starts, commands, params, terrain, events=events,
+                          variants="bounds", threads=threads)
+    nominal, every, any_lane = pogo_protection(starts, events, params)
+    # The common h2 timer stays untouched. Only this experimental component
+    # replaces its pogo timer with the measured physics-step protection.
+    motion_params = replace(params, pogo_invul=0.)
+    ro = km.rollout(starts, commands, motion_params, terrain, events=events,
+                    variants="bounds", threads=threads)
+    ro.flags |= np.where(nominal, km.F_INVULN, 0)
+    ro.flags_all |= np.where(every, km.F_INVULN, 0)
+    ro.flags_any |= np.where(any_lane, km.F_INVULN, 0)
+    return ro
 
 
 def rollout(state, masks, params, terrain, boxes, iid, *, events=None, threads=1):
@@ -205,8 +273,7 @@ def rollout(state, masks, params, terrain, boxes, iid, *, events=None, threads=1
         starts[km.AHI] = np.minimum(1., alphas + 1 / 12)
         cmds = np.broadcast_to(commands[c:], (len(unique), T - c)).copy()
         suffix_events = np.stack([ev[x[2], c:] for x in unique])
-        ro = km.rollout(starts, cmds, params, terrain, events=suffix_events,
-                        variants="bounds", threads=threads)
+        ro = _recovery_rollout(starts, cmds, params, terrain, suffix_events, threads)
         for j, q in enumerate(rows):
             post[int(q)] = (ro, inverse[j], c)
             initial[int(q)] = starts[:, inverse[j]]
@@ -291,8 +358,7 @@ def with_events(base: ClawRollout, params, terrain, events, *, threads=1, comman
         first = [qs[0] for qs in row_groups]
         starts = np.stack([base.control_states[q] for q in first], axis=1)
         masks = np.broadcast_to(commands[c:], (len(first), T - c)).copy()
-        ro = km.rollout(starts, masks, params, terrain, events=ev[first, c:].copy(),
-                        variants="bounds", threads=threads)
+        ro = _recovery_rollout(starts, masks, params, terrain, ev[first, c:].copy(), threads)
         for j, qs in enumerate(row_groups):
             for nm in names:
                 tail = getattr(ro, nm)[j, 1:]
