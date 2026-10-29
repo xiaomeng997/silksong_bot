@@ -57,6 +57,37 @@ def fixed_keys(macro, direction, *, drift=None):
     return commands, p, k, fixed
 
 
+def align_throw(row, prefix, hold, press, direction, length):
+    """Bounded fixed-key proposals: turn must reach the wire before the throw.
+
+    A delayed claw keeps the fixed attack time. Its new launch, recovery,
+    FREE_MIN, contacts and whole path still require independent checks.
+    """
+    from ssbot.combat.holdfilter import hold_filter_jit
+    row=np.asarray(row,np.int64);prefix=np.asarray(prefix,np.int64)
+    want=km.B_RIGHT if direction>0 else km.B_LEFT
+    other=km.B_LEFT if direction>0 else km.B_RIGHT
+    for delay in range(3):
+        candidate=row.copy()
+        if delay:
+            candidate &= ~ow.M_CLAW
+            a=int(press)-1+delay;b=a+2
+            if b>len(candidate):continue
+            candidate[a:b] &= ~other
+            candidate[a:b] |= ow.M_CLAW|want
+        raw=np.zeros(length,np.int64)
+        if len(prefix)+len(candidate)>length:raise ValueError("fixed row exceeds horizon")
+        raw[:len(prefix)]=prefix;raw[len(prefix):len(prefix)+len(candidate)]=candidate
+        latched,_=hold_filter_jit(raw[None],hold);wire=latched[0]
+        active=(wire&ow.M_CLAW)!=0
+        edges=np.flatnonzero(active&~np.r_[False,active[:-1]])
+        launch=len(prefix)+int(press)+delay
+        if (len(edges)==1 and edges[0]+1==launch and wire[launch-1]&want
+                and not wire[launch-1]&other):
+            return candidate,int(press)+delay,raw,latched,delay
+    raise ValueError("latched throw direction unsupported")
+
+
 def envelope(rollouts, length=None):
     bounds = np.concatenate([r.bound[:, :length] for r in rollouts])
     flags = np.concatenate([r.flags_all[:, :length] for r in rollouts])
@@ -115,6 +146,45 @@ def slam_body_paths(observation, paths, knowledge):
         root = np.array([observation.x, observation.y, observation.x, observation.y])
         out.append(local + root + displacement)
     return out
+
+
+def slam_body_variants(observation, paths, knowledge, *, outer=False):
+    """Coherent alternatives over the existing duration domain, for contact audits.
+
+    Each yields (duration tuple, body path). No timing alternative is dropped:
+    their pointwise intersection equals slam_body_paths. outer=True instead
+    encloses the same animation samples, for earliest-possible contact bounds.
+    Runtime promotion is separate.
+    """
+    from itertools import product
+    states=("Slam Antic","Slam 0","Slam 1","Slam 2","Slam Recover")
+    if observation.st!="Slam Antic":raise ValueError("unsupported body timeline")
+    domains=[]
+    for st in states:
+        dur=knowledge.durations(st)
+        if dur is None:raise ValueError("missing Slam duration")
+        lo,_,hi=dur
+        domains.append(range(lo,hi+1))
+    length=len(paths[0]);root=np.array([observation.x,observation.y]*2)
+    for durations in product(*domains):
+        if observation.j>=durations[0]:continue
+        si=0;j=int(observation.j);local=[]
+        for _ in range(length):
+            if si==len(states):local.append(np.full(4,np.nan));continue
+            boxes=[]
+            for q in range(max(0,j-1),j+2):
+                b=knowledge.box(states[si],q)
+                x0,x1=observation.face*b[0],observation.face*b[1]
+                boxes.append([min(x0,x1),b[2],max(x0,x1),b[3]])
+            boxes=np.asarray(boxes)
+            b=(np.r_[boxes[:,:2].min(axis=0),boxes[:,2:].max(axis=0)] if outer else
+               np.r_[boxes[:,:2].max(axis=0),boxes[:,2:].min(axis=0)])
+            if b[0]>=b[2] or b[1]>=b[3]:b[:]=np.nan
+            local.append(b)
+            j+=1
+            if j>=durations[si]:si+=1;j=0
+        local=np.asarray(local)
+        for path in paths:yield durations,local+root+(path-path[0])
 
 
 def _extend_forecast(forecast, through_frame):
@@ -387,9 +457,12 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
         info["gate"] = "contact_scope"
         return ds
     L = max(H + 1, P + len(row), P + press + 63) + 4
-    raw = np.zeros(L, np.int64)
-    raw[:P], raw[P:P + len(row)] = prefix, row
-    lat, _ = hold_filter_jit(raw[None], hold)
+    try:
+        row,press,raw,lat,delay=align_throw(row,prefix,hold,press,direction,L)
+    except ValueError as exc:
+        info["checks"].append({"check":"launch_direction","status":"failed","reason":str(exc)})
+        return ds
+    info["proposal"].update(press=P+press,launch_delay=delay)
     differences = np.flatnonzero(lat[0] != raw)
     info["checks"].append({"check": "latched_keys", "status": "passed",
                             "changed_frames": differences.tolist(),

@@ -255,3 +255,39 @@ def test_slam_clock_does_not_replace_an_unknown_split_hazard_support(slam_suppor
     slam_support.haz_raw={7:[object()]}
     with pytest.raises(ValueError,match="split hazard"):
         fk._slam_clock_support(slam_support,7)
+
+
+def test_coherent_body_variants_keep_every_old_timing_and_animation_margin():
+    class Knowledge:
+        def box(self,st,j):
+            n={"Slam Antic":0,"Slam 0":1,"Slam 1":2,"Slam 2":3,"Slam Recover":4}[st]
+            return np.array([-1.-.1*j,1.+.1*j,-4.,float(n)+.1*j])
+        def durations(self,st):return (2,2,3)
+    obs=SimpleNamespace(st="Slam Antic",j=0,x=20.,y=7.,face=-1)
+    path=np.tile([19.,3.,21.,6.],(18,1));path[1:,0::2]+=.2
+    old=fk.slam_body_paths(obs,[path],Knowledge())[0]
+    variants=list(fk.slam_body_variants(obs,[path],Knowledge()))
+    assert len(variants)==2**5
+    bs=np.stack([p for _,p in variants])
+    intersection=np.concatenate((bs[...,:2].max(axis=0),bs[...,2:].min(axis=0)),axis=1)
+    assert np.allclose(intersection,old,equal_nan=True)
+    # The common prefix is reused by exact identity, not an epsilon test.
+    assert all(np.array_equal(v[:2],old[:2]) for _,v in variants)
+    outer=list(fk.slam_body_variants(obs,[path],Knowledge(),outer=True))
+    for (da,inner),(db,wide) in zip(variants,outer,strict=True):
+        assert da==db
+        finite=np.isfinite(inner).all(axis=1)
+        assert (wide[finite,:2]<=inner[finite,:2]).all()
+        assert (wide[finite,2:]>=inner[finite,2:]).all()
+
+
+def test_throw_waits_for_latched_turn_without_moving_the_fixed_attack():
+    row,p,k,_=fk.fixed_keys(rx.Macro("cl",k=41),-1)
+    aligned,press,raw,lat,delay=fk.align_throw(row,np.array([km.B_RIGHT]),km.HoldState.idle(),p,-1,80)
+    assert delay==1 and press==p+1
+    assert lat[0,press]&fk.ow.M_CLAW and lat[0,press]&km.B_LEFT
+    assert not lat[0,press]&km.B_RIGHT
+    assert np.array_equal(np.flatnonzero(aligned&km.B_ATTACK),np.flatnonzero(row&km.B_ATTACK))
+    assert np.array_equal(lat,hold_filter_jit(raw[None],km.HoldState.idle())[0])
+    same,press,_,_,delay=fk.align_throw(row,np.array([km.B_LEFT]),km.HoldState.idle(),p,-1,80)
+    assert delay==0 and press==p and np.array_equal(same,row)

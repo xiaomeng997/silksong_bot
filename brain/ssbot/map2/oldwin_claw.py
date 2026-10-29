@@ -331,9 +331,12 @@ def with_events(base: ClawRollout, params, terrain, events, *, threads=1, comman
         commands = np.asarray(commands, np.int64).reshape(-1)
         p = base.launch_frame
         claw = mask("clawline")
+        old_claw = np.zeros(len(commands), bool)
+        shared = min(len(commands), len(base.commands))
+        old_claw[:shared] = (base.commands[:shared] & claw) != 0
         if (len(commands) <= int(base.control_frames.max())
                 or not np.array_equal(commands[:p], base.commands[:p])
-                or not np.array_equal((commands & claw) != 0, (base.commands[:len(commands)] & claw) != 0)):
+                or not np.array_equal((commands & claw) != 0, old_claw)):
             raise ValueError("changed hook/prefix or unsupported endpoint")
         for c in base.control_frames:
             if np.any(commands[p:int(c)] & km.B_ATTACK):
