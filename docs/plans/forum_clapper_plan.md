@@ -524,7 +524,7 @@ Windows System USER32 1074事件核实了10-28 22:02:01.851293的StartMenuExperi
 
 ### 6.2 工作衔接与排期
 
-继续当前聊天，代码仍用独立刀口开发树，现行规格6.21、正式v0.1接收与源码9c956955见6.26。Sol单写计划并同步四份，继续具体族/真实历史/原生候选与Run接续；Opus第二批w7规则编制条件已满足，可按同一格式开始。此前OP5/未接收/未导入结论各限其历史SHA，最新范围不可混用；旧严格线仍暂停。
+继续当前聊天，代码仍用独立刀口开发树，现行规格6.21、正式v0.1接收见6.26，新链原生候选/选择/实际发送试验接线4ff53968与264项回归见6.27。Sol单写计划并同步四份，接续钩索运动/动作接受审计、自然覆盖和预算；Opus第二批w7规则编制条件已满足，可按同一格式开始。此前OP5/未接收/未导入结论各限其历史SHA，最新范围不可混用；旧严格线仍暂停。
 
 **计划保持单写入者：Sol。** Opus不编辑主计划或任何工作树中的计划副本。Opus提交`PLAN_INPUT.md`中的第3.6节建议段落，由Sol审核合入唯一主计划，再同步各工作树副本。
 
@@ -1032,7 +1032,7 @@ OP1的k36∪42影响已有描述性解释，暂不把A/A去并集对照扩成共
 
 初次快照因运行中说明文本变化被源码身份守卫拒绝，首次full-tick脚本漏传FilterContext也失败；日志与first_attempt均保留并排除在通过证据外，最终v4修正并标明条件上下文。A/A仍PAUSED64/128，冻结树/合同/排程/STOPPED未改；无留出、w7、脚本兜底或默认位变更。四份计划同步；OP5新源码可审，Opus backward保持独立诊断范围。本节270世界共同退出是开环基线，观测条件退出的新规格见6.16，运行尚未实现，不重标本节结果。
 
-### 6.21 10-29用户新决定：刀口链、灵活条件空间与手搓规则两处去向【现行路线；v0.1已接收，原生执行待接】
+### 6.21 10-29用户新决定：刀口链、灵活条件空间与手搓规则两处去向【现行路线；原生试验接线见6.27，实机未放行】
 
 **用户决定已生效。** ①刀口改为刀口链，整段脚本拆成链节，支持中途变招及从其他路径半截切入；②原严格准入作为本轮上线路线不可行，改为灵活条件空间，具体条件由仿真或实测确定；③所有战斗/站位手搓规则最终只有刀口表或长期站位打分两个去处，不好放入长期打分的进入表。此决定覆盖6.8–6.20旧准入及本计划原第6节主线；不是再给旧检查器增补一个逃生例外。
 
@@ -1150,6 +1150,20 @@ _measure_choice在测量/detail早返回前独立记录最终owner/mask，覆盖
 **下一步分工。** Opus可按同格式开始第二批w7现有规则（先列常开家族/共享节，再逐族交付），继续显列C模块/开关/四类验证及新manifest，不自动扩双怪专属路径或上线。Sol移植具体族/真实历史，保留未迁移规划模块接口，衔接私有草稿→实际原生候选/排序→最终owner/发送→观察的逐tickRun；补不同路径正例、漏动作/完整trace与预算，再做条件标定/有界w7。旧strict线、旧倒推/oracle暂停；Dash To Run待新仿真准入。计划接收与允许编制不冒称已向Opus另发消息。
 
 凭证：C:/ssbot/data/m2_play/clapper_plan/analysis/chain_v01_acceptance_20261029/REVIEW.md、acceptance.json、intake_manifest.json、manifest_recovery.json、numbers.json、sources.json、current_binding.json、peer385/、rerun_results.json、core_tests.log及core_port/。
+
+### 6.27 新链原生候选族与实际发送接线【4ff53968；264项回归，缺省关闭/钩索未适配】
+
+**本轮交付。** 用户要求继续新链原生候选和实际执行接线。具体族/历史适配器移入开发树，生产路径不导入opus目录；接受资产canonical digest仍91b62e8b…，24+5节/54字面量/C5边界不变。候选族以本tick链第一键为共同首键，取旧规划器同首键（缺则WAIT）的普通延续去重，稳定限32行并记录available/capped；这些延续不是未来链观察或整段脚本。独立行区间接入真实Hold、普通物理/打分/包络/退路和尾部；按真实MOVE/JUMP/各方向攻击/DASH等检查监督允许列表。至少两种普通安全延续才取得原有同类V排序特征，不越过安全/命中排序键；未检查或不安全行不由FORCED_RISK晋升，没有恢复旧270世界/CheckedTail。
+
+**真实提交与接续。** 按真实原点/prefix/Hold准备；原点落后或prefix缺成功发送回执记unchecked，不填0。私有草稿提出Offer，真实planner_result按本tick行/首键认选中；最终owner/键覆盖、未选中或发送失败丢弃/中断本链。仅episode._act中OracleLink.act成功返回后提交逻辑意图；下tick重新观察/生成/选择，不保留静态CONTINUE。后续STATE用target/applied/hf.desired核应用，缺STATE、不一致/看不到应用均中断后续Run，保留已排队键；传输/应用/latched/英雄动作/接触分开，不能凭发送制造弹起、8步保护或恢复输入。历史只有成功发送意图与真实观察，未知目标不推断按下边沿；外部入口历史用已绑定只读表的新空fork，不复制私有旧run或重复装载全表。
+
+**开关/支持范围。** SSBOT_FORUM_CHAIN_NATIVE缺省0；显式启probe须命名SSBOT_FORUM_CHAIN_PROBE、提供持续*.chain.jsonl、HERO2/Wanderer，拒绝MAP2/AirShow/WindowsPress及暂停严格行同时启用。29未拟合准入仍unchecked；命名probe只是标识，不是实机许可。仅单只存活Clapper范围；当前/在途钩索或Harpoon没有原生rollout适配，明确不生成可执行行，after/air退出缺Slam0两帧可见提前量亦未检查。probe模式停重复SLAM_PLAY持键，其他未迁移脚本可覆盖并记录，没有第三按键所有者或自动脚本兜底。
+
+**验证与耗时。** 8份相关测试264 passed，含受控真实旧规划器→episode/OracleLink/framing ACTION、连续三tick、覆盖/失败/回执/在途钩索/未知历史和原规划器/v2/尾段回归。原生选择正例用了受控双行集及测试J激励，不能当自然w7触发。关闭分支对e136基准：n_chain=0且只移除明确钩子后规划器/策略核心AST相等，原episode sender不变；不是1725 ACTION全回放。移植族以固定239模型依赖复跑回合0，1192比较tick按键/阶段/记录及原脚本对录像全0差；发生在历史fork优化前，正常回放不调用该外部入口helper，最终helper由新切入测试覆盖，不冒称原生分叉闭环效果。整表草稿拷贝合成p50 32.16ms→共享只读表0.468ms；全提案的重复历史装载88.66ms→空fork后100次p50 1.035ms/p99 2.239ms（含入口/32行生成）。均E16–31/Idle、合成look/无C搜索，不是P核High或完整tick预算。
+
+**尚未放行与接续。** 不以普通行S/回执当作整条链/弹起/命中认证；C5未迁移、29未拟合、32切入差异/另84等待出键、56未覆盖及其他路径零正例保留。持续journal保留本通道事件，但send_scope仍episode._act，harness结束/清理直发零未纳入、不是完整STATE录像；漏动作/计划未中须进一步连到真实接受/接触，不能当允许方差。Sol下一步补原生钩索运动/在途和动作接受审计，再做开发录像沿真实选择流程的提出/拒绝/预算裁剪/选中/覆盖/发出/锁存/命中与未知统计、其它路径正例、完整关闭一致性及实际预算；冻结有界probe后才按6.1上w7。Opus继续第二批既有w7规则，并可独立审4ff53968；本轮未代发消息。旧strict/倒推/oracle继续暂停，未动A/A/模型/留出或启游戏。
+
+凭证：C:/ssbot/data/m2_play/clapper_plan/analysis/chain_native_candidates_20261029/REVIEW.md、implementation.json、tests.log、off_path_check.json、family_replay/b_00.json、preview_cost_v1/v2.json、proposal_cost_v1/v2.json及finish_checks.json。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
@@ -1333,6 +1347,6 @@ _measure_choice在测量/detail早返回前独立记录最终owner/mask，覆盖
 
 - **CC_SLAM预测审计检查点（历史）**：刀口源码`b1e27680`、第6.7节及`step3/knife_20261028/progress_slam_b1e27680.json`保留原失败；时钟原型仅离线。当前安全合同见6.8，最新源码/验证/下一步见6.11。
 
-- **当前刀口链路线**：6.21为现行规格，v0.1已按6.26接收为原生实现输入，原manifest/三件恢复及证据在analysis/chain_v01_acceptance_20261029/；第二批w7规则可编。Sol最新源码9c956955（解释核心/不提交草稿，162回归/3553tick代表等价），具体族/原生生成执行待接；008e审计仍缺省关闭。32切入差异/84等待出键/29未拟合/其他路径无正例及C5未迁移显列。旧strict/倒推/oracle暂停，Dash To Run待新仿真准入，不以离线接收替代实机。
+- **当前刀口链路线**：6.21为现行规格，v0.1已按6.26接收，第二批w7规则可编。Sol最新源码4ff53968：具体族/原生普通延续候选族→旧排序→最终owner/实际发送→观察回执已接成默认关闭的probe路径（6.27，264回归）；钩索运动未适配，未拟合仍unchecked，没有新游戏/实机或实际w7效果。32切入差异/84等待出键/其他路径无正例及C5未迁移继续显列；接续真实动作接受/钩索适配、完整关闭回放、自然覆盖和完整tick预算。旧strict/倒推/oracle暂停，Dash To Run待新仿真准入。
 
 - **合并时序校准复核**：opus/calib55/原交付只读；Sol独立验收在C:/ssbot/data/m2_play/clapper_plan/analysis/calib55_review_20261029/（REVIEW.md、comparison.json、raw_checks.json、observed_timing_subset.json、source_equivalence.json）。数字接收及限定见6.10/6.19，未删除世界或修改预测器。
