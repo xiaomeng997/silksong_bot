@@ -82,7 +82,7 @@ def _instances(policy):
         out.setdefault((cls.__module__, cls.__name__), []).append((path, obj))
         for name, value in vars(obj).items():
             if name in {"planner", "tac", "local", "two", "claw", "slam_play", "rune_lowhop",
-                        "cast_stab", "evade_chase", "sc", "fc", "inner", "air_show", "rt", "_csx"}:
+                        "cast_stab", "evade_chase", "sc", "fc", "inner", "air_show", "rt", "_csx", "chain_native"}:
                 pending.append((f"{path}.{name}", value, depth + 1))
     return out
 
@@ -94,7 +94,7 @@ def _config_objects(policy):
             for name, value in vars(obj).items():
                 is_config = (dataclasses.is_dataclass(value) and not isinstance(value, type)
                              and (name.endswith("cfg") or name in {
-                                 "params0", "params", "pb", "rules", "l2_rules", "_pq_emulated"}
+                                 "params0", "params", "pb", "rules", "l2_rules", "_pq_emulated", "profile"}
                                   or type(value).__name__.endswith(("Config", "Cfg", "Rules", "Params", "Playbook"))))
                 if is_config or name in {
                         "threads", "crest", "clash", "ab_arm", "free", "view", "l2_rules", "rules"}:
@@ -169,7 +169,102 @@ def _known_runtime_bindings(policy, loaded):
     return out
 
 
-def configuration_manifest(package_root: Path, policy=None, *, environ=None, modules=None) -> dict:
+# These are explicit ownership joins, not an exemption for arbitrary CHAIN keys.
+_CHAIN_ROLES = {
+    "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
+    "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
+    "SSBOT_FORUM_CHAIN_SHORT_FRAMES": "control",
+    "SSBOT_FORUM_CHAIN_BATCH": "accounting", "SSBOT_FORUM_CHAIN_BUDGET": "accounting",
+    "SSBOT_FORUM_CHAIN_BLOCK": "accounting", "SSBOT_FORUM_CHAIN_ORDER": "accounting",
+    "SSBOT_FORUM_CHAIN_PROBE": "accounting", "SSBOT_FORUM_CHAIN_SCHEDULE": "accounting",
+}
+_WORKER_KEYS = ("SSBOT_WORKER_BOOST", "SSBOT_WORKER_CPUS")
+
+
+def _prefix_literal(node, parents):
+    """A literal used to BUILD env names is not itself an env lookup."""
+    parent=parents.get(node)
+    return (isinstance(node,ast.Constant) and isinstance(node.value,str) and node.value.endswith("_")
+            and isinstance(parent,ast.BinOp) and isinstance(parent.op,ast.Add))
+
+
+def _execution_bindings(policy, runtime_context):
+    """Read constructed B2/worker objects only; never re-run env parsers."""
+    out={};context=runtime_context or {}
+    chain=getattr(policy,"chain_native",_MISSING) if policy is not None else _MISSING
+    if chain is not _MISSING:
+        native=chain is not None and hasattr(chain,"runner_factory")
+        b2=native and bool(getattr(chain,"b2",False))
+        mode="b2" if b2 else "native" if native else "audit_only" if chain is not None else "off"
+        out["SSBOT_FORUM_CHAIN_B2"]={"policy.chain_native.b2":b2}
+        out["SSBOT_FORUM_CHAIN_NATIVE"]={"policy.chain_native.native_constructed":native}
+        out["SSBOT_FORUM_CHAIN_AUDIT"]={"policy.chain_native.audit_mode":
+            {"mode":mode,"audit_only_constructed":chain is not None and not native,
+             "audit_switch_used":not native}}
+        if not native:
+            for key in _CHAIN_ROLES:
+                out.setdefault(key,{"policy.chain_native":
+                    {"active":False,"reason":"native component not constructed","mode":mode}})
+        else:
+            if hasattr(chain,"probe_ref"):out["SSBOT_FORUM_CHAIN_PROBE"]={"policy.chain_native.probe_ref":chain.probe_ref}
+            if not b2:
+                for key in _CHAIN_ROLES:
+                    out.setdefault(key,{"policy.chain_native.b2":{"active":False,"reason":"B2 not constructed"}})
+            else:
+                if hasattr(chain,"arm"):out["SSBOT_FORUM_CHAIN_ARM"]={"policy.chain_native.arm":chain.arm}
+                profile=getattr(chain,"profile",None)
+                if hasattr(profile,"short_frames"):
+                    out["SSBOT_FORUM_CHAIN_SHORT_FRAMES"]={"policy.chain_native.profile.short_frames":profile.short_frames}
+                budget=getattr(chain,"budget",None)
+                if budget is not None:
+                    for key,name in (("SSBOT_FORUM_CHAIN_BATCH","batch"),("SSBOT_FORUM_CHAIN_BUDGET","path")):
+                        if hasattr(budget,name):out[key]={"policy.chain_native.budget."+name:getattr(budget,name)}
+                    state=getattr(budget,"state",None) or {}
+                    execution=state.get("execution") or {}
+                    conditions=execution.get("conditions")
+                    if isinstance(conditions,dict):
+                        crossover=conditions.get("crossover")
+                        snapshot=dict(getattr(chain,"_environment",()))
+                        request=snapshot.get("SSBOT_FORUM_CHAIN_SCHEDULE")
+                        if crossover is not None or not request:
+                            out["SSBOT_FORUM_CHAIN_SCHEDULE"]={"policy.chain_native.budget.execution.crossover":
+                                {"path_at_construction":request,"bound":crossover}}
+                    attempts=[a for a in state.get("attempts",()) if a.get("worker")==getattr(budget,"worker",None)
+                              and a.get("policy_episode")==getattr(chain,"episode",_MISSING)]
+                    if len(attempts)==1:
+                        attempt=attempts[0]
+                        for key,name in (("SSBOT_FORUM_CHAIN_BLOCK","block"),("SSBOT_FORUM_CHAIN_ORDER","order")):
+                            if name in attempt:
+                                out[key]={"policy.chain_native.budget.attempt."+name:attempt[name]}
+    worker=context.get("worker") or {}
+    observed=worker.get("runtime_before") or {}
+    requested=worker.get("requested_environment")
+    if (isinstance(requested,dict) and isinstance(worker.get("boost_result"),str)
+            and isinstance(observed.get("cpu_affinity"),list) and type(observed.get("priority")) is int):
+        actual={key:observed[key] for key in ("cpu_affinity","priority","numba_threads") if key in observed}
+        for key in _WORKER_KEYS:
+            if key in requested:
+                out[key]={"worker.executed_boost":
+                    {"requested_raw":requested[key],"result":worker["boost_result"],"observed":actual}}
+    return out
+
+
+def _execution_conflicts(policy, runtime_context, env):
+    problems=[];chain=getattr(policy,"chain_native",None)
+    snapshot=getattr(chain,"_environment",None)
+    if snapshot is not None:
+        captured=dict(snapshot)
+        for key in _CHAIN_ROLES:
+            if env.get(key)!=captured.get(key):problems.append(key+": environment changed after construction")
+    requested=((runtime_context or {}).get("worker") or {}).get("requested_environment")
+    if isinstance(requested,dict):
+        for key in _WORKER_KEYS:
+            if key in requested and env.get(key)!=requested[key]:
+                problems.append(key+": environment changed after worker boost")
+    return problems
+
+
+def configuration_manifest(package_root: Path, policy=None, *, environ=None, modules=None, runtime_context=None) -> dict:
     package_root = Path(package_root)
     env = os.environ if environ is None else environ
     loaded = sys.modules if modules is None else modules
@@ -241,7 +336,7 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
             if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
                 continue
             key = node.value
-            if not _SWITCH.fullmatch(key):
+            if not _SWITCH.fullmatch(key) or _prefix_literal(node,parents):
                 continue
             entry = switches.setdefault(key, {"raw": env.get(key), "present": key in env,
                                               "bindings": {}, "sources": [], "active_modules": []})
@@ -249,13 +344,22 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
             entry["bindings"].update(bindings.get(key, {}))
             if module is not None and module_name not in entry["active_modules"]:
                 entry["active_modules"].append(module_name)
-    for name, bindings in _known_runtime_bindings(policy, loaded).items():
+    execution_bindings=_execution_bindings(policy,runtime_context)
+    for name in _WORKER_KEYS:
+        if name in env or name in execution_bindings:
+            switches[name]={"raw":env.get(name),"present":name in env,"bindings":{},
+                            "sources":[{"path":"tools/combat_run.py","owner":"boost_worker"}],
+                            "active_modules":["ssbot.tools.combat_run"]}
+    for name, bindings in {**_known_runtime_bindings(policy, loaded),**execution_bindings}.items():
         if name in switches:
             for path, value in bindings.items():
                 converted = json_value(value)
                 if converted is not _MISSING:
                     switches[name]["bindings"][path] = converted
-    unresolved = []
+    for name,entry in switches.items():
+        if name in _CHAIN_ROLES:entry["role"]=_CHAIN_ROLES[name]
+        elif name in _WORKER_KEYS:entry["role"]="execution"
+    unresolved = _execution_conflicts(policy,runtime_context,env)
     for name, entry in switches.items():
         if entry["bindings"]:
             entry["resolution"] = "runtime_binding"
@@ -287,7 +391,7 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
         del behavior_configs[lazy_params]
     behavior = {"switches": {k: {"raw": v["raw"], "present": v["present"],
                                  "bindings": v["bindings"], "resolution": v["resolution"]}
-                             for k, v in sorted(switches.items())}, "configs": behavior_configs}
+                             for k, v in sorted(switches.items()) if v.get("role")!="accounting"}, "configs": behavior_configs}
     encoded = json.dumps(behavior, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     unknown = sorted(k for k in env if k.startswith("SSBOT_FORUM_") and k not in switches)
     return {"schema": 1, "switches": dict(sorted(switches.items())), "configs": configs,
@@ -295,6 +399,7 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
             "source_sha256": source_hashes, "unresolved": sorted(unresolved),
             "unknown_environment_switches": unknown,
             "configuration_complete": not unresolved and not unknown,
+            "behavior_scope":"control/execution bindings; accounting labels retained separately in switches",
             "behavior_sha256": hashlib.sha256(encoded).hexdigest()}
 
 

@@ -426,10 +426,76 @@ def boost_worker() -> str:
     return ", ".join(msgs)
 
 
-def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error):
+def _worker_runtime_snapshot() -> dict:
+    """Read actual worker execution state; never infer EcoQoS from a boost message."""
+    state={"pid":os.getpid(),"monotonic_ns":time.perf_counter_ns(),"query_errors":{}}
+    try:
+        import psutil
+        process=psutil.Process()
+        for key,read in (("cpu_affinity",process.cpu_affinity),("priority",lambda:int(process.nice()))):
+            try:state[key]=read()
+            except (psutil.Error,OSError) as exc:state["query_errors"][key]=type(exc).__name__+": "+str(exc)
+    except ImportError as exc:state["query_errors"]["psutil"]=str(exc)
+    power={"provider":"GetProcessInformation","info_class":4,"query_error":None}
+    if sys.platform!="win32":power.update(status="not_windows")
+    else:
+        try:
+            import ctypes
+            class PowerState(ctypes.Structure):
+                _fields_=[("version",ctypes.c_uint32),("control_mask",ctypes.c_uint32),("state_mask",ctypes.c_uint32)]
+            api=ctypes.WinDLL("kernel32",use_last_error=True)
+            current=api.GetCurrentProcess;current.argtypes=[];current.restype=ctypes.c_void_p
+            get=api.GetProcessInformation
+            get.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_void_p,ctypes.c_uint32];get.restype=ctypes.c_int
+            value=PowerState(1,0,0)
+            if not get(current(),4,ctypes.byref(value),ctypes.sizeof(value)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            power.update(version=int(value.version),control_mask=int(value.control_mask),state_mask=int(value.state_mask),
+                         execution_speed_controlled=bool(value.control_mask&1),execution_speed_throttled=bool(value.state_mask&1))
+        except (OSError,AttributeError,ValueError) as exc:power["query_error"]=type(exc).__name__+": "+str(exc)
+    state["power_throttling"]=power
+    return state
+
+
+def _b2_stop_details(chain_stop, budget_stop, budget_error, *, outcome, episode_reason):
+    """Choose primary evidence without changing any budget or completeness result."""
+    locked=isinstance(budget_stop,dict) and isinstance(budget_stop.get("reasons"),list)
+    locked_reason="B2 stopped: "+"; ".join(str(r) for r in budget_stop["reasons"]) if locked else None
+    if isinstance(chain_stop,str) and chain_stop:reason,origin=chain_stop,"chain.learning_stop"
+    elif locked:reason,origin=locked_reason,"budget.stop"
+    elif budget_error:reason,origin=budget_error,"budget.check"
+    elif outcome=="HARNESS_FAIL":reason,origin="harness/integrity failure: "+str(episode_reason),"harness"
+    else:return None
+    secondary=[]
+    if budget_error and budget_error not in {reason,locked_reason}:
+        secondary.append({"origin":"budget.check","reason":budget_error})
+    return {"reason":reason,"origin":origin,
+            "budget_stop":json.loads(json.dumps(budget_stop)) if locked else None,"secondary_errors":secondary}
+
+
+def _resolve_b2_stop(chain, *, outcome, episode_reason):
+    from ssbot.combat.knife_chain_budget import LearningStop
+    budget=getattr(chain,"budget",None);error=None
+    if budget is not None:
+        try:budget.check()
+        except LearningStop as exc:error=str(exc)
+    data=getattr(budget,"state",None) or {}
+    return _b2_stop_details(getattr(chain,"learning_stop",None),data.get("stop"),error,
+                           outcome=outcome,episode_reason=episode_reason)
+
+
+def _measurement_incomplete_detail(data):
+    measured=data.get("measurement") or {}
+    return {"origin":"measurement","reason":"measurement incomplete; stop before another episode",
+            "trace_complete":measured.get("trace_complete"),"configuration_complete":measured.get("configuration_complete"),
+            "unresolved":measured.get("unresolved"),"window":measured.get("window")}
+
+
+def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error, primary_error_origin=None, secondary_errors=()):
     """Try every owned resource even if one close fails; never manage game PIDs here."""
     b2=os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1"
-    result={"instance":a.instance,"stage":stage,"primary_error":primary_error,"resources":{},
+    result={"instance":a.instance,"stage":stage,"primary_error":primary_error,"primary_error_origin":primary_error_origin,
+            "secondary_errors":list(secondary_errors),"resources":{},
             "scope":"worker files/IPC only; Launcher game/Prefs cleanup needs separate receipt"}
     errors=[]
     def close(name,fn):
@@ -438,6 +504,7 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
         except Exception as exc:
             message=type(exc).__name__+": "+str(exc)
             result["resources"][name]={"failed":message};errors.append(name+": "+message)
+            result["secondary_errors"].append({"origin":"cleanup."+name,"reason":message})
     close("policy_log",getattr(policy,"flush_log",None))
     close("policy_keys",getattr(policy,"flush_keys",None))
     close("chain_journal",getattr(getattr(policy,"chain_native",None),"flush",None))
@@ -466,7 +533,9 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
 def worker(a: argparse.Namespace) -> int:
     from ssbot.combat.knife_chain_budget import preflight_environment,preflight_options
     preflight_options(a)
-    print(f"[i{a.instance}] worker boost: {boost_worker()}", flush=True)
+    worker_requested={key:os.environ.get(key) for key in ("SSBOT_WORKER_BOOST","SSBOT_WORKER_CPUS")}
+    worker_boost_result=boost_worker()
+    print(f"[i{a.instance}] worker boost: {worker_boost_result}", flush=True)
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import Recorder
     from ssbot.train.encounters import ENCOUNTERS
@@ -480,6 +549,8 @@ def worker(a: argparse.Namespace) -> int:
     link=rec_obj=diagnostics=policy=None
     counts=Counter()
     stage="bootstrap"
+    worker_primary_error=worker_primary_origin=None
+    worker_secondary_errors=[];b2_stop_details=None
     try:
         measurement = None
         measurement_code = None
@@ -538,6 +609,10 @@ def worker(a: argparse.Namespace) -> int:
             from ssbot.train.measurement import prepare_lazy_configuration
             prepare_lazy_configuration(policy, measurement)
             runtime_start = runtime_manifest()
+        worker_actual=_worker_runtime_snapshot()
+        worker_runtime_before={**(runtime_start or {}),**worker_actual}
+        worker_context={"requested_environment":worker_requested,"boost_result":worker_boost_result,
+                        "runtime_before":worker_runtime_before}
         rev = git_rev()
         env = env_overrides()
         fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,
@@ -619,11 +694,27 @@ def worker(a: argparse.Namespace) -> int:
             d["time_scale_game"] = game_scale       # Time.timeScale read back before the episode (None: no RPC)
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
+            chain=getattr(policy,"chain_native",None);b2_stop=None;b2_stop_details=None
+            if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+                from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
+                b2_stop_details=_resolve_b2_stop(chain,outcome=rec.outcome,episode_reason=rec.reason)
+                d["worker_execution"]=worker_context
+                if b2_stop_details is not None:
+                    b2_stop=b2_stop_details["reason"]
+                    d["b2_learning_stop"]=b2_stop
+                    d["b2_learning_stop_origin"]=b2_stop_details["origin"]
+                    d["b2_budget_stop"]=b2_stop_details["budget_stop"]
+                    worker_primary_error="LearningStop: "+b2_stop
+                    worker_primary_origin=b2_stop_details["origin"]
+                    worker_secondary_errors.extend(b2_stop_details["secondary_errors"])
+                    if b2_stop_details["origin"]=="harness":mark_integrity_halt(b2_stop)
+                    for problem in b2_stop_details["secondary_errors"]:mark_integrity_halt(problem["reason"])
             if measurement is not None:
                 from ssbot.train.forum_measure_manifest import configuration_manifest
                 trace_path = run_dir / f"measurement_i{a.instance}_e{k}.jsonl"
                 trace_summary = measurement.write(trace_path)
-                manifest = configuration_manifest(Path(__file__).resolve().parents[1], policy)
+                manifest = configuration_manifest(Path(__file__).resolve().parents[1], policy,
+                    runtime_context={"worker":worker_context,"attempt":rec.b2_context})
                 manifest.update(code=measurement_code, instance=a.instance, episode=k,
                                 seed=seed, cli=vars(a), oracle_hello=link.hello,
                                 trace=trace_summary, certified_for_aa=False,
@@ -647,23 +738,19 @@ def worker(a: argparse.Namespace) -> int:
                 d["measurement_outcome"] = ("WATCHDOG" if d["measurement"]["window"].get("watchdog_f") is not None
                                               else rec.outcome)
                 d["engineering_probe"] = bool(getattr(a, "engineering_probe", False))
-            chain = getattr(policy, "chain_native", None)
-            b2_stop = None
-            if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
-                from ssbot.combat.knife_chain_budget import LearningStop, mark_integrity_halt
-                try:
-                    if rec.outcome == "HARNESS_FAIL":
-                        reason = "harness/integrity failure: " + str(rec.reason)
-                        mark_integrity_halt(reason)
-                        raise LearningStop(reason)
-                    if chain is not None and chain.budget is not None:
-                        chain.budget.check()
-                except LearningStop as exc:
-                    b2_stop = str(exc)
-                    d["b2_learning_stop"] = b2_stop
+            measurement_failed=measurement is not None and not d["measurement"]["complete"]
+            if measurement_failed and os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+                detail=_measurement_incomplete_detail(d)
+                worker_secondary_errors.append(detail)
+                mark_integrity_halt(detail["reason"])
+            if worker_secondary_errors:d["secondary_errors"]=list(worker_secondary_errors)
             out.write(json.dumps(d) + "\n")
             out.flush()
-            if measurement is not None and not d["measurement"]["complete"]:
+            if measurement_failed:
+                if b2_stop is not None:
+                    error=LearningStop(b2_stop)
+                    for detail in worker_secondary_errors:error.add_note("secondary: "+json.dumps(detail,default=str))
+                    raise error
                 raise RuntimeError("measurement incomplete; stop before another episode")
             counts[rec.outcome] += 1
             if rec.gauntlet is not None:
@@ -697,14 +784,21 @@ def worker(a: argparse.Namespace) -> int:
             if link.closed:
                 break
     except BaseException as exc:
-        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
-            from ssbot.combat.knife_chain_budget import mark_integrity_halt
-            mark_integrity_halt(type(exc).__name__ + ": " + str(exc))
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+            from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
+            mark_integrity_halt(type(exc).__name__+": "+str(exc))
+            if b2_stop_details is not None and not (isinstance(exc,LearningStop) and str(exc)==b2_stop_details["reason"]):
+                detail={"origin":"worker.exception","reason":type(exc).__name__+": "+str(exc)}
+                worker_secondary_errors.append(detail)
+                primary=LearningStop(b2_stop_details["reason"])
+                for problem in worker_secondary_errors:primary.add_note("secondary: "+json.dumps(problem,default=str))
+                raise primary from exc
         raise
     finally:
         pending=sys.exc_info()[1]
         _close_worker(a,link=link,recorder=rec_obj,out=out,diagnostics=diagnostics,policy=policy,
-                      stage=stage,primary_error=None if pending is None else type(pending).__name__+": "+str(pending))
+                      stage=stage,primary_error=worker_primary_error or (None if pending is None else type(pending).__name__+": "+str(pending)),
+                      primary_error_origin=worker_primary_origin,secondary_errors=worker_secondary_errors)
     print(f"[i{a.instance}] done: {dict(counts)}", flush=True)
     return 0
 

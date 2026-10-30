@@ -96,6 +96,7 @@ class NativeChainB2(NativeChainCandidates):
         self._post_seed=None;self._post_kind=None
         self._post_keys={};self._post_key_move=None;self._post_prepare_cursor=0
         self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
+        self._hook_start=None;self._failed_hook_moves=set()
         if self.budget is not None:self.budget.check()
 
     def _note(self,event,**data):
@@ -256,6 +257,49 @@ class NativeChainB2(NativeChainCandidates):
         clip=str((h.get("anim") or {}).get("clip", ""))
         return "harpoon" in clip.lower() and not bool(h.get("hero_accepting_input",False))
 
+    def _arm_hook_start(self,offer,send):
+        # Only the already checked commitment path declares the window. Missing
+        # its keys never moves the window or permits a retry of the same slam.
+        path=offer.path
+        targets=tuple(path.origin+i+1 for i,m in enumerate(path.commands) if int(m)&B["CLAW"])
+        self._hook_start=None
+        if not targets:return
+        self._hook_start={"move":offer.move,"origin":send.frame,"targets":targets,
+                          "sent_targets":set(),"seen_frame":None}
+        self._note("b2_hook_start_expected",frame=send.frame,move=vars(offer.move),targets=list(targets),
+                   source="checked commitment nominal commands; keys only, not accepted hook")
+
+    def _observe_hook_start(self,state):
+        watch=self._hook_start
+        if (watch is None or self.commitment is None or watch["move"]!=self.commitment["move"] or
+                not watch["sent_targets"] or watch["seen_frame"] is not None):return
+        f=state["f"];clip=str(((state.get("hero") or {}).get("anim") or {}).get("clip", ""))
+        if f>=min(watch["sent_targets"]) and "harpoon" in clip.lower():
+            watch["seen_frame"]=f
+            self._note("b2_hook_start_seen",frame=f,move=vars(watch["move"]),clip=clip,
+                       source="actual Harpoon animation only; no strike/bounce credit")
+
+    def _check_hook_start(self,frame):
+        # Called BEFORE preview can advance its planned clock into lock/strike.
+        watch=self._hook_start
+        if watch is None:return False
+        if self.commitment is None or watch["move"]!=self.commitment["move"]:
+            self._hook_start=None;return False
+        if watch["seen_frame"] is not None:return False
+        reason=None
+        if not watch["sent_targets"]:
+            if frame+2>max(watch["targets"]):
+                reason="planned hook window elapsed without successful CLAW send"
+        elif frame>max(watch["sent_targets"])+4:
+            reason="sent CLAW had no observed Harpoon within four-frame upper bound"
+        if reason is None:return False
+        self._failed_hook_moves.add(watch["move"])
+        self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(watch["move"]),
+                   planned_targets=list(watch["targets"]),sent_targets=sorted(watch["sent_targets"]),
+                   hook_observed=False,no_retry_same_move=True)
+        self._recover(reason,frame)
+        return True
+
     def observe(self,state):
         f=state["f"];previous=self.last_observed
         if previous is not None and f>previous+1:self._stop("missing critical STATE frames",f)
@@ -263,6 +307,7 @@ class NativeChainB2(NativeChainCandidates):
         self.observe_learning(state,kill_frame=self._kill_frame)
         self._actual_state=state
         self._observe_application(state)
+        self._observe_hook_start(state)
         unresolved=self._pending
         self._pending={}  # opt1 owns this audit; do not inherit the old2-frame abandon
         try:super().observe(state)
@@ -293,7 +338,7 @@ class NativeChainB2(NativeChainCandidates):
         marker=counter>0 or flag(state,"downSpikeBouncing") or flag(state,"downSpikeBouncingShort")
         if self._hit is not None and marker and f>=self._hit:
             self.post_context={**c,"bounce":f,"hit":self._hit,"press":self._press}
-            self.commitment=None
+            self.commitment=None;self._hook_start=None
             if self.runner.run is not None:self.runner.run.v["bounced"]=True
             self._post_seed=logical_copy(self.runner);self._post_kind=None
             self._note("b2_real_bounce_handback",frame=f,hit=self._hit,press=self._press,
@@ -317,6 +362,7 @@ class NativeChainB2(NativeChainCandidates):
             self.recovery={"first":f,"reason":reason,"move":old_move}
             self._note("b2_hook_recovery_enter",frame=f,reason=reason,action="release/wait until observed hook end",path="unchecked")
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
+        self._hook_start=None
         self._post_keys.clear();self._post_key_move=None
         self._abandon(reason)
 
@@ -351,6 +397,9 @@ class NativeChainB2(NativeChainCandidates):
             self._no_candidate("single live Clapper scope" if es else "no live Clapper",frame=f,state=state);return None
         hist=HistView(list(self._ticks),self._receipts,f,lag=self.runner.cfg0.get("lag",0))
         an=hist.antic(es[0]["iid"],"Slam Antic",())
+        if an is not None and MoveInstance(int(an["iid"]),int(an["fa"]),"CC_SLAM") in self._failed_hook_moves:
+            self._no_candidate("planned hook failed for this Move; no automatic retry",frame=f,state=state)
+            return None
         self.runner.anchor.hist=hist
         self.runner.anchor.external=self.runner.run is None and hist.complete_antic_receipts(an)
         if self.runner.run is None and control(es[0])[0]!="Slam Antic" and not self.runner.anchor.external:
@@ -495,6 +544,9 @@ class NativeChainB2(NativeChainCandidates):
         if self.arm!="B":return None
         if self.budget is not None:self.budget.check()
         if self.recovery is not None:return B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
+        if self._check_hook_start(self.dispatch.frame):
+            return (B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
+                    if self.recovery is not None else None)
         try:bundle=self._preview()
         except ChainObservationNotReady as exc:
             self._note("b2_unchecked",frame=self.dispatch.frame,reason=str(exc));return None
@@ -504,6 +556,9 @@ class NativeChainB2(NativeChainCandidates):
             return None
         preview,move=bundle
         tick,sim,guard,bombs=self._context;f,state,game,ground,accepting=tick
+        if move in self._failed_hook_moves:
+            self._no_candidate("planned hook failed for this Move; no automatic retry",frame=f,state=state)
+            return None
         rs=getattr(forecast,"rs",None)
         observed=None if rs is None else getattr(rs.trk,"now",{}).get(move.target_iid)
         if observed is None:
@@ -665,6 +720,16 @@ class NativeChainB2(NativeChainCandidates):
                 self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
                     "predicted_bounce":selected.path.contact_frame}
                 self._press=self._accepted=self._hit=None
+                self._arm_hook_start(selected,sent)
+            watch=self._hook_start
+            if (watch is not None and self.commitment is not None and
+                    self.commitment["move"]==watch["move"] and selected.move==watch["move"] and
+                    selected.stage in {"commitment","active"} and sent.frame>=watch["origin"] and
+                    sent.desired_mask&B["CLAW"]):
+                watch["sent_targets"].add(sent.target_frame)
+                self._note("b2_hook_start_sent",frame=sent.frame,target=sent.target_frame,move=vars(watch["move"]),
+                           in_planned_window=sent.target_frame in watch["targets"],
+                           physical_action="unchecked; wait for actual Harpoon animation")
             if selected.stage=="continuation":self._post_kind=selected.details["kind"]
             if selected.mask&(B["D"]|B["A"])==(B["D"]|B["A"]):
                 prev=self._receipts.get(sent.target_frame-1)
