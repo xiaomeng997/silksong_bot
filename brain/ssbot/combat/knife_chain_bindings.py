@@ -126,6 +126,9 @@ def bind_chains(chains, *, primitives, observation_names, literal_names=(), cont
 
     entry_fields = {}
     for chain in chains.values():
+        overlap = contexts & set(chain.vars)
+        if overlap:
+            raise ChainFormatError(f"{chain.id}: context/vars names overlap {sorted(overlap)!r}")
         fields = {"needs": set(), "carry": set(), "adapter": set()}
         entry_fields[chain.id] = fields
         for name, rules in chain.rulesets.items():

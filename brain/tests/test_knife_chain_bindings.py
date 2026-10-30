@@ -177,3 +177,12 @@ def test_adapter_context_declaration_must_be_a_collection_of_field_names(context
     with pytest.raises(ChainFormatError):
         bind_chains(chains_from_json(sample()), primitives=registry(), observation_names={"x", "vy"},
                     context_names=context_names)
+
+
+@pytest.mark.parametrize("value", [None, 0])
+def test_context_and_chain_variable_names_must_not_overlap(value):
+    raw = sample()
+    raw["slam"]["vars"]["anchor"] = value
+    with pytest.raises(ChainFormatError, match="context/vars names overlap"):
+        bind_chains(chains_from_json(raw), primitives=registry(), observation_names={"x", "vy"},
+                    context_names={"sent", "anchor"})
