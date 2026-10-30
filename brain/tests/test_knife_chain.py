@@ -208,3 +208,104 @@ def test_predicate_preview_cannot_mutate_observed_or_fitted_context():
     assert evaluate_admission(a, actual, frame=100, fit_ref="fit:v1",
                               predicates={"region": mutate}).verdict == "pass"
     assert a == before_a and actual == before_actual
+
+
+@pytest.mark.parametrize("bad,match", [
+    ({"clock": "antci"}, "unknown clock"),
+    ({"keys": [{"mask": "R", "clock": "jumpp"}]}, "unknown clock"),
+    ({"keys": [{"mask": "D|ATTACK"}]}, "mask name"),
+    ({"keys": [{"mask": "D||A"}]}, "mask name"),
+    ({"keys": [{"mask": -1}]}, "mask specification"),
+    ({"keys": [{"mask": True}]}, "mask specification"),
+    ({"keys": [{"mask": 1.5}]}, "mask specification"),
+    ({"rules": [{"do": "try", "to": "air", "orelse": "continue"}]}, "orelse"),
+    ({"rules": [{"do": "set", "orelse": "hold"}]}, "orelse"),
+    ({"rules": [{"do": "set", "set": {"count": "cfg.delai"}}]}, "cfg reference"),
+    ({"rules": [{"do": "set", "pre": {"count": "var.coutn"}}]}, "var reference"),
+    ({"rules": [{"do": "set", "set": {"coutn": 2}}]}, "undeclared var"),
+    ({"rules": [{"do": "set", "set": {"count": {"sub": [1]}}}]}, "sub operands"),
+    ({"rules": [{"do": "set", "set": {"count": {"min": []}}}]}, "min operands"),
+    ({"rules": [{"do": "set", "set": {"count": {"add": [1], "sub": [1, 2]}}}]}, "one operator"),
+    ({"rules": [{"do": "set", "set": {"count": {"ad": [1, 2]}}}]}, "one operator"),
+    ({"rules": [{"do": "set", "set": {"count": "clk.antci"}}]}, "unknown clock"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit"}]}, "requires a mask"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit", "emit": "D|BOGUS"}]}, "mask name"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit", "emit": {"keys": "other"}}]}, "keys must"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit", "emit": {"or": "A"}}]}, "or needs"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit", "emit": {"keys": "self", "only": "jump"}}]}, "component selection"),
+    ({"rules": [{"do": "goto", "to": "air", "mode": "emit", "emit": {"keys": "self", "extra": 1}}]}, "mask specification"),
+    ({"entry": {"p": "cmp", "a": {"add": ["var.coutn", 1]}}}, "var reference"),
+    ({"keys": [{"gen": "test", "args": {"n": "cfg.delai"}}]}, "cfg reference"),
+])
+def test_table_syntax_errors_fail_at_load(bad, match):
+    raw = records()
+    raw["slam"]["vars"] = {"count": 0}
+    raw["slam"]["cfg"] = {"delay": 2}
+    raw["slam"]["links"]["walk"].update(bad)
+    with pytest.raises(ChainFormatError, match=match):
+        chains_from_json(raw)
+
+
+def test_expression_syntax_and_literals_survive_roundtrip():
+    raw = records()
+    raw["slam"]["vars"] = {"count": 0}
+    raw["slam"]["cfg"] = {"delay": 2}
+    link = raw["slam"]["links"]["walk"]
+    link["rules"] = [
+        {"do": "set", "pre": {"count": {"add": ["cfg.delay", {"sub": ["var.count", 1]}]}},
+         "set": {"count": {"fn": "pick", "values": [{"min": [1, 2]}, {"max": [2, 3]}]}}},
+        {"do": "goto", "to": "air", "mode": "emit", "emit": {"keys": "self", "only": ["absent_variant_key"],
+                                                               "or": ["D|A", "toward"]}},
+        {"do": "set", "why": "cfg.this_is_a_literal_reason", "set": {"count": {"lit": {"key": "var.literal"}}}},
+    ]
+    table = chains_from_json(raw)
+    # only is a filter, not a required component: original v0 air uses this.
+    assert table["slam"].links["walk"].rules[1].emit["only"] == ["absent_variant_key"]
+    again = {k: v.to_json() for k, v in table.items()}
+    assert {k: v.to_json() for k, v in chains_from_json(again).items()} == again
+
+
+def test_family_adapter_can_supply_its_registered_vocabulary(tmp_path):
+    from ssbot.combat.knife_chain_format import ChainVocabulary
+    raw = records()
+    raw["slam"]["links"]["walk"].update(clock="idle", keys=[{"mask": "facing"}])
+    with pytest.raises(ChainFormatError, match="unknown clock"):
+        chains_from_json(raw)
+    vocab = ChainVocabulary(clocks=frozenset({"antic", "idle"}), directions=frozenset({"facing"}))
+    table = chains_from_json(raw, vocabulary=vocab)
+    path = tmp_path / "chain.json"
+    path.write_text(json.dumps({k: c.to_json() for k, c in table.items()}))
+    assert table_digest(load_chains(path, vocabulary=vocab), vocabulary=vocab) == table_digest(table, vocabulary=vocab)
+
+
+@pytest.mark.parametrize("unfitted", [False, True])
+def test_misspelled_cutoff_is_rejected_even_before_fitting(unfitted):
+    a = fitted()
+    if unfitted:
+        a.status = "unfitted"
+    with pytest.raises(ValueError, match="undeclared observation"):
+        evaluate_admission(a, observations(x=5), frame=100, fit_ref="fit:v1", cutoffs={"xx": 98})
+
+
+def test_episode_reset_drops_history_and_invalidates_old_offers():
+    d = ChainDispatch()
+    d.begin_tick(100)
+    old = offer(d)
+    d.select(old)
+    d.record_send(frame=100, target_frame=102, desired_mask=3, wire_mask=2, owner=old.owner)
+    d.observe(observed_frame=102, target_frame=102, mask=2)
+    d.reset()
+    assert d.frame is None and d.selection is None and d.queued(after=0) == ()
+    with pytest.raises(ValueError, match="causal send"):
+        d.observe(observed_frame=102, target_frame=102, mask=2)
+    d.begin_tick(100)  # The new game's frame numbers may restart.
+    fresh = offer(d)
+    with pytest.raises(ValueError, match="stale"):
+        d.select(old)
+    d.select(fresh)
+    sent = d.record_send(frame=100, target_frame=102, desired_mask=3, wire_mask=3, owner=fresh.owner)
+    assert d.observe(observed_frame=102, target_frame=102, mask=3).sent is sent
+    d.reset()
+    d.reset()
+    d.begin_tick(1)
+    assert d.queued(after=0) == ()

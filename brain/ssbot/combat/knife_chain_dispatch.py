@@ -77,6 +77,18 @@ class ChainDispatch:
         self._sent: dict[int, SentAction] = {}
         self._latched: dict[int, LatchedAction] = {}
 
+    def reset(self) -> None:
+        """Call at episode start; invalidate offers and clear action/latch history.
+
+        Frame numbers may restart in the next episode. Serials remain monotonic
+        and select() still checks object identity, so old offers cannot re-enter.
+        """
+        self.frame = None
+        self._offers.clear()
+        self.selection = None
+        self._sent.clear()
+        self._latched.clear()
+
     def begin_tick(self, frame: int) -> None:
         if type(frame) is not int or (self.frame is not None and frame <= self.frame):
             raise ValueError("decision frames must increase")

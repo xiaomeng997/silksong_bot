@@ -54,13 +54,15 @@ def evaluate_admission(admission: Admission, observations: Mapping[str, Observat
     predicates, cutoffs = predicates or {}, cutoffs or {}
     if admission.status not in ("unfitted", "fitted"):
         raise ChainFormatError("unknown admission status")
+    declared = {o["name"] for o in admission.observations}
+    if not set(cutoffs) <= declared:
+        raise ValueError("cutoff uses undeclared observation names")
     if any(type(c) is not int or c > frame for c in cutoffs.values()):
         raise ValueError("observation cutoff must not be in the future")
     if admission.status == "unfitted" or not fit_ref:
         reason = "unfitted" if admission.status == "unfitted" else "fit reference missing"
         return AdmissionDecision(admission.link, "unchecked", frame, fit_ref,
                                  (ConditionResult("space", "unchecked", reason),))
-    declared = {o["name"] for o in admission.observations}
     checks = []
 
     def inputs(names):

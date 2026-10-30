@@ -16,6 +16,22 @@ MASK_NAMES = {"J": 1 << 0, "A": 1 << 1, "DASH": 1 << 2, "CLAW": 1 << 4, "U": 1 <
               "R": 1 << 21}
 
 
+@dataclass(frozen=True)
+class ChainVocabulary:
+    """Syntax supplied by the anchor adapter, not extra fields in rule data.
+
+    Defaults match the reviewed v0 SlamAnchor clocks/directions. Other families
+    must supply their actual registered names instead of widening the JSON.
+    Callable primitive resolution remains the family adapter's responsibility.
+    """
+    clocks: frozenset[str] = frozenset({"antic", "s0", "press", "jump", "turn", "mask",
+                                       "claw_press", "strike_press"})
+    directions: frozenset[str] = frozenset({"toward", "side", "turn_key", "over"})
+
+
+DEFAULT_VOCABULARY = ChainVocabulary()
+
+
 # ---- the format ------------------------------------------------------------------------------------------------
 
 @dataclass
@@ -35,7 +51,7 @@ class Rule:
 
 @dataclass
 class KeyComp:
-    mask: Any = None                         # "J" / "D|A" / "toward" / "away" / "side" / "over" / an int
+    mask: Any = None                         # "J" / "D|A" / "toward" / "turn_key" / "side" / "over" / an int
     gen: str | None = None                   # or a generator primitive's name
     args: dict = field(default_factory=dict)
     clock: str = "antic"                     # the window's timer basis
@@ -165,7 +181,135 @@ def _guard(g, where):
             _guard(child, where)
 
 
-def validate_chains(chains: dict[str, Chain]) -> None:
+def _clock(name, vocabulary, where):
+    if not isinstance(name, str) or name not in vocabulary.clocks:
+        _fail(f"{where}: unknown clock {name!r}")
+
+
+def _expr(value, chain, vocabulary, where):
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, str):
+        for prefix, names in (("cfg.", chain.cfg), ("var.", chain.vars)):
+            if value.startswith(prefix):
+                if value[len(prefix):] not in names:
+                    _fail(f"{where}: unknown {prefix[:-1]} reference {value!r}")
+                return
+        if value.startswith("clk."):
+            _clock(value[4:], vocabulary, where)
+        elif value.startswith("obs.") and not value[4:].isidentifier():
+            _fail(f"{where}: invalid observation reference {value!r}")
+        return  # Other strings are literals, including "k" (antic shorthand).
+    if isinstance(value, list):
+        for item in value:
+            _expr(item, chain, vocabulary, where)
+        return
+    if not isinstance(value, dict):
+        _fail(f"{where}: invalid expression")
+    ops = set(value) & {"add", "sub", "min", "max", "fn", "lit"}
+    if len(ops) != 1:
+        _fail(f"{where}: expression needs one operator; wrap literal objects in lit")
+    op = next(iter(ops))
+    if op == "fn":
+        if not isinstance(value[op], str) or not value[op]:
+            _fail(f"{where}: expression function name missing")
+        for key, arg in value.items():
+            if key != op:
+                _expr(arg, chain, vocabulary, where)
+        return
+    if set(value) != {op}:
+        _fail(f"{where}: unexpected expression fields")
+    if op == "lit":
+        return  # Literal payloads never interpret cfg./var. strings.
+    args = value[op]
+    if not isinstance(args, list) or (op == "sub" and len(args) != 2) or (op in {"min", "max"} and not args):
+        _fail(f"{where}: invalid {op} operands")
+    for arg in args:
+        _expr(arg, chain, vocabulary, where)
+
+
+def _guard_args(guard, chain, vocabulary, where):
+    if guard is None:
+        return
+    if "p" in guard:
+        for key, value in guard.items():
+            if key != "p":
+                _expr(value, chain, vocabulary, where)
+    elif "not" in guard:
+        _guard_args(guard["not"], chain, vocabulary, where)
+    else:
+        for child in guard.get("all", guard.get("any", [])):
+            _guard_args(child, chain, vocabulary, where)
+
+
+def _mask_spec(spec, vocabulary, where):
+    if type(spec) is int and spec >= 0:
+        return
+    if isinstance(spec, str):
+        parts = [p.strip() for p in spec.split("|")]
+        if any(not p or p not in MASK_NAMES and p not in vocabulary.directions for p in parts):
+            _fail(f"{where}: unknown or empty mask name {spec!r}")
+        return
+    if not isinstance(spec, dict) or not spec or set(spec) - {"keys", "only", "or"}:
+        _fail(f"{where}: invalid mask specification")
+    if "keys" in spec and spec["keys"] != "self":
+        _fail(f"{where}: mask keys must refer to self")
+    if "only" in spec:
+        names = spec["only"]
+        if spec.get("keys") != "self" or not isinstance(names, list) or any(not isinstance(n, str) or not n for n in names):
+            _fail(f"{where}: invalid mask component selection")
+        # only is a filter: inherited/variant rules may intentionally match
+        # no components on this link (v0 air selects absent hold_jump).
+    if "or" in spec:
+        if not isinstance(spec["or"], list):
+            _fail(f"{where}: mask or needs a list")
+        for child in spec["or"]:
+            _mask_spec(child, vocabulary, where)
+    if "keys" not in spec and "or" not in spec:
+        _fail(f"{where}: mask has no keys or operands")
+
+
+def _rule_syntax(rule, chain, vocabulary, where):
+    _guard_args(rule.when, chain, vocabulary, where)
+    for changes in (rule.set, rule.pre):
+        for name, value in changes.items():
+            if name not in chain.vars:
+                _fail(f"{where}: assignment to undeclared var {name!r}")
+            _expr(value, chain, vocabulary, where)
+    if rule.act is not None:
+        for name, value in rule.act.items():
+            if name != "a":
+                _expr(value, chain, vocabulary, where)
+    if isinstance(rule.why, dict):
+        _expr(rule.why, chain, vocabulary, where)
+    if rule.orelse not in (None, "hold") or rule.orelse is not None and rule.do != "try":
+        _fail(f"{where}: invalid orelse")
+    if rule.emit is not None:
+        _mask_spec(rule.emit, vocabulary, where)
+    elif rule.mode == "emit":
+        _fail(f"{where}: emit mode requires a mask (use 0 for no keys)")
+
+
+def _link_syntax(link, chain, vocabulary):
+    where = link.id
+    _clock(link.clock, vocabulary, where)
+    _guard_args(link.entry, chain, vocabulary, where)
+    for comp in link.keys:
+        _clock(comp.clock, vocabulary, where)
+        if comp.mask is not None:
+            _mask_spec(comp.mask, vocabulary, where)
+        if not isinstance(comp.args, dict):
+            _fail(f"{where}: generator args must be an object")
+        for arg in [comp.lo, comp.hi, *comp.args.values()]:
+            _expr(arg, chain, vocabulary, where)
+        _guard_args(comp.when, chain, vocabulary, where)
+    groups = [link.rules, link.after_keys, link.post, *[chain.rulesets[n] for n in link.inherit]]
+    for rules in groups:
+        for rule in rules:
+            _rule_syntax(rule, chain, vocabulary, where)
+
+
+def validate_chains(chains: dict[str, Chain], *, vocabulary: ChainVocabulary = DEFAULT_VOCABULARY) -> None:
     """Check references before any anchor/primitive is allowed to execute.
 
     Primitive names are data, never Python expressions. Resolving their fixed
@@ -177,6 +321,8 @@ def validate_chains(chains: dict[str, Chain]) -> None:
         if not isinstance(chain, Chain) or name != chain.id or "." in name or not name:
             _fail(f"{name}: chain identity mismatch")
         _json_finite(chain.to_json(), name)
+        if not isinstance(chain.vars, dict) or not isinstance(chain.cfg, dict):
+            _fail(f"{name}: vars/cfg must be objects")
         if not chain.links or chain.start not in chain.links:
             _fail(f"{name}: start link missing")
         if not isinstance(chain.admission, dict) or set(chain.admission) != set(chain.links):
@@ -247,16 +393,19 @@ def validate_chains(chains: dict[str, Chain]) -> None:
                     target = rule.to.split(".") if "." in rule.to else [name, rule.to]
                     if len(target) != 2 or target[0] not in chains or target[1] not in chains[target[0]].links:
                         _fail(f"{name}: transition target {rule.to!r} missing")
+                _rule_syntax(rule, chain, vocabulary, name)
+        for link in chain.links.values():
+            _link_syntax(link, chain, vocabulary)
 
 
-def chains_from_json(records: dict) -> dict[str, Chain]:
+def chains_from_json(records: dict, *, vocabulary: ChainVocabulary = DEFAULT_VOCABULARY) -> dict[str, Chain]:
     """Construct and validate v0 records; no file or interpreter side effects."""
     _json_finite(records)
     if not isinstance(records, dict):
         _fail("table: expected chain map")
     try:
         chains = {name: chain_from_json(record) for name, record in records.items()}
-        validate_chains(chains)
+        validate_chains(chains, vocabulary=vocabulary)
     except (TypeError, KeyError, AttributeError) as exc:
         raise ChainFormatError(f"invalid v0 record: {exc}") from exc
     return chains
@@ -271,18 +420,18 @@ def _unique_pairs(pairs):
     return result
 
 
-def load_chains(path) -> dict[str, Chain]:
+def load_chains(path, *, vocabulary: ChainVocabulary = DEFAULT_VOCABULARY) -> dict[str, Chain]:
     """Read UTF-8 v0 data; reject duplicate fields instead of silently replacing."""
     from pathlib import Path
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_pairs)
     except json.JSONDecodeError as exc:
         raise ChainFormatError(str(exc)) from exc
-    return chains_from_json(raw)
+    return chains_from_json(raw, vocabulary=vocabulary)
 
 
-def table_digest(chains: dict[str, Chain]) -> str:
+def table_digest(chains: dict[str, Chain], *, vocabulary: ChainVocabulary = DEFAULT_VOCABULARY) -> str:
     import hashlib
-    validate_chains(chains)
+    validate_chains(chains, vocabulary=vocabulary)
     data = {name: chain.to_json() for name, chain in chains.items()}
     return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
