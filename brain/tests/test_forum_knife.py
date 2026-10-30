@@ -88,7 +88,7 @@ def test_different_escapes_for_different_outcomes_are_not_a_common_escape(monkey
                             np.zeros(2, np.int64), km.HoldState.idle(), 38) is None
 
 
-def test_clear_fixed_row_is_appended_with_its_real_hook_envelope():
+def _native_hook_case(monkeypatch):
     """Exercise the accepted plumbing in an empty synthetic danger field.
 
     The contact oracle is controlled; this tests row/envelope/escape ownership,
@@ -111,22 +111,114 @@ def test_clear_fixed_row_is_appended_with_its_real_hook_envelope():
     def contacts(ro, masks, *args):
         n = len(ro.hooks)
         return np.full(n, 46), np.full(n, 49), np.zeros(n, np.int64), np.ones(n, bool)
-    planner = SimpleNamespace(params=params, terrain=None, cfg=SimpleNamespace(threads=1),
+    planner = SimpleNamespace(params=params, terrain=None, cfg=SimpleNamespace(threads=1, max_points=8),
+                               shapes=(None, None, None, np.zeros((4, 1))),
                                _forum_targets=targets, _ds_move_paths=lambda tr, keep, boxes: {0: [boxes[0]]},
                                _ds_hits=contacts, _contacts=lambda f, b, tk, sk: np.zeros(b.shape[:2], bool),
                                _contacts_fn=lambda f, b, tk, sk, fn: np.zeros(b.shape[:2], bool),
                                _esc_cmds=lambda length: np.zeros((1, length), np.int64))
-    forecast = SimpleNamespace(targets=lambda tk: [target], rs=SimpleNamespace(trk=None, occupied_esc=lambda *a: None))
+    from ssbot.combat import forum_knife_coupled as coupled
+    def occupied(x, y, t, *args): return np.zeros(x.shape, bool)
+    forecast = SimpleNamespace(targets=lambda tk: [target],
+        fc=SimpleNamespace(half=(.5, 1.2)), occupied=occupied,
+        rs=SimpleNamespace(trk=None, samples=(0, 200), k_shift=0, occupied_esc=occupied))
+    def paired(source, observation, durations, shift, roots):
+        return SimpleNamespace(fc=source.fc, occupied=source.occupied,
+            rs=SimpleNamespace(samples=source.rs.samples, k_shift=0, occupied_esc=source.rs.occupied_esc,
+                knife_coupled_world=dict(iid=observation.iid, durations=tuple(durations), shift=shift)))
+    monkeypatch.setattr(coupled, "conditioned_slam", paired)
     state = km.initial_state(params, 0., 6., ground=False)
-    result = fk.append_rows(planner, win, None, forecast, state, km.HoldState.idle(),
-                             np.zeros(1, np.int64), SimpleNamespace(), 36, "air", None)
+    ws = SimpleNamespace(stamp=SimpleNamespace(frame=100))
+    args = (planner, win, ws, forecast, state, km.HoldState.idle(),
+            np.zeros(1, np.int64), SimpleNamespace(), 36, "air", None)
+    return args
+
+
+def test_clear_fixed_row_is_appended_with_its_real_hook_envelope(monkeypatch):
+    args = _native_hook_case(monkeypatch)
+    result = fk.append_rows(*args)
+
     assert result is not None and len(result.cmd) == 1
     assert not result.cert[0] and result.extra[0] == 1
     custom = result.custom[0]
     assert custom["bound"].shape == (38, 4) and custom["escape"] == 0
     assert custom["final"].shape == (km.K,)
+    assert "worlds" not in args[0]._knife_info["hit_exit"]
+    assert set(args[0]._knife_info["phase_ms"]) == {"expected_domain", "support_hook_clocks_bodies",
+        "contact_worlds", "paired_forecasts", "common_escape", "checked_tail"}
     assert np.array_equal(custom["latched"], hold_filter_jit(
         np.r_[0, result.cmd[0]][None], km.HoldState.idle())[0][0])
+
+
+
+def test_native_generator_declares_worlds_before_contact_and_never_checks_miss(monkeypatch):
+    from ssbot.combat import forum_knife_coupled as coupled
+    args = _native_hook_case(monkeypatch)
+    order = []
+    original = coupled.expected_slam_worlds
+    monkeypatch.setattr(coupled, "expected_slam_worlds", lambda *a: (order.append("domain"), original(*a))[1])
+    contact = coupled.contact_bounds
+    monkeypatch.setattr(coupled, "contact_bounds", lambda *a, **kw: (order.append("contact"), contact(*a, **kw))[1])
+    def forbidden(*a, **kw): raise AssertionError("legacy miss/H-abort path was called")
+    monkeypatch.setattr(fk, "_clear", forbidden)
+    monkeypatch.setattr(fk, "common_escape", forbidden)
+    result = fk.append_rows(*args)
+    assert order[0] == "domain" and order.count("contact") == 5
+    tail = result.custom[0]["checked_tail"]
+    assert len(tail.worlds) == 5 and tail.horizon == 37 and tail.jump == 50
+    assert tail.through >= tail.jump + 24
+    assert tail.for_runtime_row(win=args[1], forecast=args[3], frame=100, start=args[4], hold=args[5],
+        prefix=args[6], T=36, cmd=result.cmd[0], latched=result.custom[0]["latched"]).shape[0] > 36
+
+
+@pytest.mark.parametrize("P,T,passed", [(1,32,True),(2,36,True),(3,40,True),(1,45,False),(1,48,False)])
+def test_native_generator_uses_actual_P_T_and_contact_boundary(monkeypatch,P,T,passed):
+    args = list(_native_hook_case(monkeypatch));args[6]=np.zeros(P,np.int64);args[8]=T
+    result = fk.append_rows(*args)
+    assert (result is not None) == passed
+    if passed:
+        tail = result.custom[0]["checked_tail"]
+        assert tail.horizon == P+T and result.cmd.shape == (1,T)
+    else:
+        assert args[0]._knife_info["gate"] == "unsupported_strike_inside_main_horizon"
+
+
+def test_native_generator_rejects_missing_body_world_as_contract_error(monkeypatch):
+    args = _native_hook_case(monkeypatch)
+    monkeypatch.setattr(fk, "slam_body_variants", lambda *a, **kw: iter(()))
+    assert fk.append_rows(*args) is None
+    info = args[0]._knife_info
+    assert info["contract_rejections"] == 3
+    assert all(a["checks"][-1]["stage"] == "contact_worlds" for a in info["attempts"])
+
+
+def test_native_generator_contact_failure_is_not_a_contract_error(monkeypatch):
+    from ssbot.combat import forum_knife_coupled as coupled
+    args = _native_hook_case(monkeypatch)
+    def failed(*a, **kw):
+        n = len(a[1].hooks)
+        return np.full(n, 46), np.full(n, 49), np.full(n, 49), np.zeros(n, bool)
+    monkeypatch.setattr(coupled, "contact_bounds", failed)
+    assert fk.append_rows(*args) is None
+    assert args[0]._knife_info["contract_rejections"] == 0
+    assert args[0]._knife_info["gate"] == "contact_gate"
+
+
+@pytest.mark.parametrize("change", ["domain", "forecast", "knowledge", "target"])
+def test_native_receiver_rechecks_current_source_and_domain(monkeypatch, change):
+    from ssbot.combat import forum_knife_coupled as coupled
+    args = _native_hook_case(monkeypatch)
+    result = fk.append_rows(*args); tail = result.custom[0]["checked_tail"]
+    win, forecast = args[1], args[3]
+    if change == "domain":
+        previous = coupled.expected_slam_worlds
+        monkeypatch.setattr(coupled, "expected_slam_worlds", lambda *a: previous(*a)[:-1])
+    elif change == "forecast": forecast = object()
+    elif change == "knowledge": win.knife_knowledge = object()
+    else: win.obs = lambda: []
+    with pytest.raises(ValueError):
+        tail.for_runtime_row(win=win, forecast=forecast, frame=100, start=args[4], hold=args[5],
+            prefix=args[6], T=36, cmd=result.cmd[0], latched=result.custom[0]["latched"])
 
 
 

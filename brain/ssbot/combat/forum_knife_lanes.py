@@ -1,4 +1,4 @@
-"""Audit-only hit paths retaining each hook outcome and every BOUNDS clock.
+"""Hit paths retaining each hook outcome and every BOUNDS clock.
 
 Events are per logical lane. Protection is the measured eight physics steps,
 not the common h2 timer. Extension always re-rolls from the original control

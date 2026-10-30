@@ -43,6 +43,7 @@ _TAIL_ISSUER = object()
 def _tail_payload(tail):
     from ssbot.combat.forum_knife_hit import _array_payload
     return (tail.frame, tail.horizon, tail.T, tail.jump, tail.through, tail.worlds,
+            tuple(id(x) for x in tail.runtime_source) if tail.runtime_source is not None else None,
             _array_payload((tail.prefix, tail.start, tail.raw, tail.latched, *tail.hold)))
 
 
@@ -78,10 +79,11 @@ class CheckedTail:
     jump: int
     through: int
     worlds: tuple
+    runtime_source: tuple | None = None
     _proof: object = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
-    def from_exit(cls, cert, *, frame, start, hold, prefix, T, world_keys):
+    def from_exit(cls, cert, *, frame, start, hold, prefix, T, world_keys, runtime_source=None):
         from ssbot.combat.forum_knife_hit import _require_issued_exit
         _require_issued_exit(cert)
         frame = _integer(frame, "origin frame")
@@ -119,9 +121,12 @@ class CheckedTail:
                     or not np.array_equal(ro.commands, wire)
                     or ro.bound.shape[:2] != (len(contact), cert.through + 1)):
                 raise ValueError("checked path/contact identity changed")
+        if runtime_source is not None and (not isinstance(runtime_source, tuple) or len(runtime_source) != 2
+                or any(x is None for x in runtime_source)):
+            raise ValueError("complete runtime forecast and knowledge source required")
         return _issue_tail(cls(frame, _copy(prefix), H, T, _copy(_state(start)),
                    tuple(_copy(a) for a in _hold(hold)), _copy(raw), _copy(wire),
-                   int(cert.start), int(cert.through), worlds))
+                   int(cert.start), int(cert.through), worlds, runtime_source))
 
     def for_row(self, *, frame, start, hold, prefix, T, cmd, latched):
         """Reject stale origins, altered in-flight keys, HoldState or row keys."""
@@ -136,6 +141,25 @@ class CheckedTail:
                 or not np.array_equal(np.asarray(latched), self.latched[:self.horizon])):
             raise ValueError("selected row changed checked keys")
         return self.raw[P:].copy()
+
+
+    def for_runtime_row(self, *, win, forecast, **origin):
+        """Recompute the domain from this tick, independently of the candidate."""
+        _require_issued_tail(self)
+        knowledge = getattr(win, "knife_knowledge", None)
+        if (self.runtime_source is None or self.runtime_source[0] is not forecast
+                or self.runtime_source[1] is not knowledge):
+            raise ValueError("checked tail runtime source changed or unavailable")
+        from ssbot.combat.forum_knife_coupled import expected_slam_worlds
+        from ssbot.combat.forum_knife_hit import _expected_domain
+        iids = {key[0] for key in self.worlds}
+        observations = [o for o in win.obs() if o.hp > 0]
+        if len(observations) != 1 or {o.iid for o in observations} != iids:
+            raise ValueError("checked tail target observation changed")
+        reference = _expected_domain(expected_slam_worlds(observations[0], knowledge))
+        if reference != _expected_domain(self.worlds):
+            raise ValueError("checked tail differs from current expected world domain")
+        return self.for_row(**origin)
 
 
 def pick_tail(planner, f, roll, hold_end, ranked, horizon, default, checked):

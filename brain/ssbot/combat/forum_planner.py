@@ -3683,12 +3683,14 @@ class ForumPlanner(Planner):
                     tail_ = data["checked_tail"]
                     if type(tail_) is not CheckedTail:
                         raise ValueError("checked tail type unavailable")
-                    future_ = tail_.for_row(frame=int(ws.stamp.frame), start=start, hold=hold,
+                    future_ = tail_.for_runtime_row(win=win_, forecast=f, frame=int(ws.stamp.frame), start=start, hold=hold,
                                             prefix=prefix, T=T, cmd=cmd[row_], latched=latched[row_])
                     if ok[row_]:
                         knife_tails[row_] = future_
                 except ValueError as exc:
                     ok[row_] = False
+                    from ssbot.combat.forum_knife import contract_reject
+                    contract_reject(self._knife_info, "receiver", exc, identity=int(row_))
                     data["checks"].append({"check": "checked_tail_identity", "status": "failed", "reason": str(exc)})
             if not np.array_equal(latched[row_], data["latched"]):
                 ok[row_] = False

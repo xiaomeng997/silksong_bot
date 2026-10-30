@@ -1,6 +1,6 @@
 """Full hit paths and a shared post-bounce exit for experimental knife rows.
 
-Not connected to append_rows until contact/geometry/continuation gates pass.
+Used by the opt-in native producer; this grants no cross-tick continuation.
 Never checks a missed strike or replaces the planned strike with an H abort.
 """
 from dataclasses import dataclass, field

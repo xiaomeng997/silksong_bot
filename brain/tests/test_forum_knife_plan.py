@@ -184,7 +184,11 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
         np.array([7]), np.ones(1, np.int64), None, custom={0: custom})
     planner = fp.ForumPlanner(params, arena, PlannerConfig(T=36, threads=1, variants="bounds"),
         fp.ForumConfig(v2=True, deadline_ms=math.inf, esc_deadline_ms=math.inf), crest="Wanderer")
-    planner.win = SimpleNamespace(knife=True, harpoon=False, note_chosen=lambda *a: None)
+    knowledge = object()
+    planner.win = SimpleNamespace(knife=True, harpoon=False, note_chosen=lambda *a: None,
+        knife_knowledge=knowledge, obs=lambda: [SimpleNamespace(iid=7, hp=100)])
+    from ssbot.combat import forum_knife_coupled as coupled
+    monkeypatch.setattr(coupled, "expected_slam_worlds", lambda *a: [WORLD])
     monkeypatch.setattr(planner, "_win_rows", lambda *a: rows)
     monkeypatch.setattr(fk, "append_rows", lambda *a: a[-1])
     monkeypatch.setattr(special_mode, "HITS_FIRST", hits_first)
@@ -195,6 +199,8 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
     if not stale:
         monkeypatch.setattr(planner, "_esc_cmds", forbidden_abort)
     forecast = v2.V2Forecast(_reed_forecaster(None, x=45.).forecast(.8), _support_with([]))
+    custom["checked_tail"] = plan.CheckedTail.from_exit(cert, frame=1000, start=start, hold=hold,
+        prefix=prefix, T=36, world_keys=[WORLD], runtime_source=(forecast, knowledge))
     result = planner.tick(ws, start, hold, prefix, forecast,
                           GoalPrefs("ENGAGE", 27., {"hit": 1000.}, hit_w={7: 1.}), _ctx())
     if stale:
@@ -202,6 +208,8 @@ def test_native_tick_preserves_the_checked_tail_without_an_H_abort(monkeypatch, 
         assert planner.last_info["knife"]["full_checked_tail_frames"] == 0
         assert custom["checks"][0]["check"] == "checked_tail_identity"
         assert custom["checks"][0]["status"] == "failed"
+        assert planner.last_info["knife"]["contract_rejections"] == 1
+        assert planner.last_info["knife"]["checks"][-1]["stage"] == "receiver"
         assert planner.audit.knife_checked_tail == 0
         assert planner.audit.v2_esc_tail == 1
     else:

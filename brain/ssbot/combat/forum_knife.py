@@ -89,6 +89,9 @@ def align_throw(row, prefix, hold, press, direction, length):
 
 
 def envelope(rollouts, length=None):
+    # Different worlds may reference the same immutable motion result. The
+    # union of identical objects is unchanged; keep every distinct outcome.
+    rollouts = list({id(r): r for r in rollouts}.values())
     bounds = np.concatenate([r.bound[:, :length] for r in rollouts])
     flags = np.concatenate([r.flags_all[:, :length] for r in rollouts])
     bound = np.concatenate((bounds[..., :2].min(axis=0), bounds[..., 2:].max(axis=0)), axis=1)
@@ -329,7 +332,10 @@ def _clear(planner, forecast, rollout, audit=None, label="path"):
 
 
 def common_escape(planner, forecast, paths, row, prefix, hold, horizon):
-    """One escape command must pass for every hook / post-control outcome.
+    """Historical H-abort prototype, retained only for old diagnostic callers.
+
+    Native proposals use forum_knife_hit.common_escape, never this function.
+    One escape command must pass for every hook / post-control outcome.
 
     Continue from the stored control edges, preserving suffix timing variants.
     This avoids collapsing their end states to the nominal rollout state.
@@ -392,13 +398,153 @@ def append_rows(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds)
         if result is not ds or "proposal" not in info:
             break
     planner._knife_info = {**info, "attempts": attempts,
+                            "contract_rejections": sum(a.get("contract_rejections", 0) for a in attempts),
                             "elapsed_ms": (time.perf_counter_ns() - real_start) / 1e6}
     return result
 
 
+
+def contract_reject(info, stage, reason, *, identity=None):
+    """A malformed/unsupported certificate is visible, never a coverage miss."""
+    info["contract_rejections"] = info.get("contract_rejections", 0) + 1
+    info.setdefault("checks", []).append(dict(check="knife_contract", status="failed",
+        stage=stage, reason=str(reason), identity=identity))
+
+
+def certify_hook(planner, win, ws, forecast, start, hold, prefix, prefs, T,
+                 obs, raw, wire, launch, info, memo):
+    """Native all-world hook proposal -> full hit paths -> one shared exit.
+
+    Declare the reference domain before inspecting any candidate contact. The
+    existing body, duration, shift, residual, danger and protection models are
+    unchanged. Physical-hook motion may be shared only after all target worlds
+    prove the same hook-supporting body, not by dropping an unsupported world.
+    """
+    from ssbot.combat import forum_knife_coupled as coupled
+    from ssbot.combat import forum_knife_hit as hit, forum_knife_lanes as lanes
+    from ssbot.combat.forum_knife_plan import CheckedTail
+    H, L = len(prefix) + T, len(raw)
+    knowledge = win.knife_knowledge
+    stage = "expected_domain"
+    phase_begin = time.perf_counter_ns()
+    phases = info.setdefault("phase_ms", {})
+    def phase(name):
+        nonlocal phase_begin
+        now = time.perf_counter_ns()
+        phases[name] = (now - phase_begin) / 1e6
+        phase_begin = now
+    try:
+        expected = hit._expected_domain(coupled.expected_slam_worlds(obs, knowledge))
+    except ValueError as exc:
+        contract_reject(info, stage, exc, identity=int(obs.iid))
+        return None
+    info["expected_world_count"] = len(expected)
+    phase("expected_domain")
+    # J can be delayed to L-1; every common exit is at least 24 frames long.
+    support_end = L + 24
+    try:
+        cache_key = ("hook_support", support_end, int(obs.iid))
+        if cache_key not in memo:
+            tk = np.arange(support_end + 1) * planner.params.frame_time
+            boxes, _, _, keep = planner._forum_targets(ws, forecast, tk, prefs)
+            ti = next((i for i, t in enumerate(keep) if t.iid == obs.iid and not t.hazard), None)
+            paths = planner._ds_move_paths(forecast.rs.trk, keep, boxes)
+            if ti is None or ti not in paths or len(paths[ti]) != 1:
+                info["gate"] = "unsupported_target_translation_domain"
+                return None
+            paths = paths[ti]
+            body = slam_body_paths(obs, paths, knowledge)[0]
+            safe = safety_forecast(forecast, support_end)
+            roots = np.array([obs.x, obs.y]) + paths[0][:, :2] - paths[0][0, :2]
+            memo[cache_key] = paths, body, safe, roots
+        paths, body, safe, roots = memo[cache_key]
+        hook_key = ("native_hook", L, int(obs.iid), wire[:launch].tobytes())
+        if hook_key not in memo:
+            memo[hook_key] = claw.rollout(start, wire, planner.params, planner.terrain, body,
+                                          obs.iid, threads=planner.cfg.threads)
+        hook_base = memo[hook_key]
+        if H <= int(hook_base.control_frames.max()):
+            info["gate"] = "unsupported_main_endpoint_inside_hook"
+            return None
+        base = lanes.rollout(hook_base, planner.params, planner.terrain,
+                             commands=wire, threads=planner.cfg.threads)
+        def reroll(events, commands):
+            return lanes.rollout(hook_base, planner.params, planner.terrain, events,
+                                 commands=commands, threads=planner.cfg.threads)
+        # This check proves that reuse of one hook path is valid in every
+        # contact world. A differing support is unsupported, never a survivor.
+        hook_end = int(hook_base.control_frames.max()) + 1
+        hook_start = hook_base.launch_frame + claw.sk.HOOK_HIT_F
+        inner = list(slam_body_variants(obs, paths, knowledge))
+        outer = list(slam_body_variants(obs, paths, knowledge, outer=True))
+    except ValueError as exc:
+        info["checks"].append(dict(check="hook_model", status="unchecked", reason=str(exc)))
+        return None
+    phase("support_hook_clocks_bodies")
+    stage = "contact_worlds"
+    try:
+        pairs = {}
+        for (dur, small), (dur2, large) in zip(inner, outer, strict=True):
+            if dur != dur2 or tuple(dur) in pairs:
+                raise ValueError("body duration identity changed")
+            pairs[tuple(dur)] = small, large
+        expected_durations = {key[1] for key in expected}
+        if set(pairs) != expected_durations:
+            raise ValueError("body duration domain differs from independent expected domain")
+        probes = []
+        for iid, durations, shift in expected:
+            small, large = pairs[durations]
+            ix = np.clip(np.arange(len(body)) + shift, 0, len(body) - 1)
+            if not all(np.array_equal(b[ix][hook_start:hook_end], body[hook_start:hook_end], equal_nan=True)
+                       for b in (small, large)):
+                info["checks"].append(dict(check="hook_world_support", status="unchecked",
+                    identity=(iid, durations, shift), reason="world changes hook-supporting body"))
+                return None
+            swing, first, last, robust = coupled.contact_bounds(planner, base, wire,
+                1 if np.asarray(start).reshape(km.K)[km.FACE] >= 0 else -1,
+                small[:L + 1], large[:L + 1], shift)
+            probe = hit.HitWorld((iid, durations, shift), None, base, swing, first, last, robust, reroll)
+            probes.append(probe)
+            if not hit.contacts_fit(probe, H, L):
+                info.update(gate="contact_gate", contact_worlds_checked=len(probes))
+                info["checks"].append(dict(check="robust_contact", status="failed", identity=probe.key,
+                    first=first.tolist(), last=last.tolist(), robust=robust.tolist()))
+                return None  # cheap denial, not a truncated reference domain
+        phase("contact_worlds")
+        stage = "paired_forecasts"
+        worlds = []
+        for probe in probes:
+            key = ("paired_forecast", support_end, probe.key)
+            if key not in memo:
+                memo[key] = coupled.conditioned_slam(safe, obs, probe.key[1], probe.key[2], roots)
+            worlds.append(replace(probe, forecast=memo[key]))
+        phase("paired_forecasts")
+        stage = "common_escape"
+        audit = {}
+        cert = hit.common_escape(planner, worlds, raw, hold, horizon=H,
+                                 expected_worlds=expected, audit=audit)
+        phase("common_escape")
+        # Keep the production tick log bounded. Detailed per-world motion and
+        # occupancy are diagnostic output, not per-ACTION logging payload.
+        info["hit_exit"] = {k: v for k, v in audit.items() if k not in ("worlds", "options")}
+        info["hit_exit"]["options"] = [dict(option=a["option"], failed_world_count=len(a["failed_worlds"]),
+            failed_world_sample=a["failed_worlds"][:4], unsafe_frames=a["unsafe_frames"]) for a in audit["options"]]
+        if cert is None:
+            info["gate"] = audit.get("reason", "hit_exit_failed")
+            return None
+        stage = "checked_tail"
+        tail = CheckedTail.from_exit(cert, frame=int(ws.stamp.frame), start=start, hold=hold,
+            prefix=prefix, T=T, world_keys=expected, runtime_source=(forecast, knowledge))
+    except ValueError as exc:
+        contract_reject(info, stage, exc, identity=int(obs.iid))
+        return None
+    phase("checked_tail")
+    info["checks"].append(dict(check="all_world_hit_exit", status="passed", worlds=len(expected),
+        paths=len(cert.paths), J=cert.start, through=cert.through, H=H))
+    return cert, tail, hook_base
+
 def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds, *, drift=None, memo=None):
     """Check a fixed proposal; failed and unchecked rows never reach ranking."""
-    from ssbot.combat import dslash
     from ssbot.combat.forum_planner import DsRows
     from ssbot.combat.holdfilter import hold_filter_jit
 
@@ -451,10 +597,11 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
     row, press, attack, fixed = fixed_keys(entry.macro, direction, drift=drift)
     info["proposal"] = {"cell": key.short(), "table_macro": entry.macro.label(),
                         "fixed_macro": fixed.label(), "press": P + press, "attack": P + attack}
-    # First path integration: no attack inside the main horizon, so h2's
-    # in-horizon hit-reaction replay cannot silently use a no-hook path.
     if P + attack <= H:
-        info["gate"] = "contact_scope"
+        # This checkpoint supplies new hook entries only. The native scorer
+        # still needs the owned-strike bridge before accepting an in-H press;
+        # this is unsupported execution scope, not a miss/abort safety rule.
+        info["gate"] = "unsupported_strike_inside_main_horizon"
         return ds
     L = max(H + 1, P + len(row), P + press + 63) + 4
     try:
@@ -467,100 +614,28 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
     info["checks"].append({"check": "latched_keys", "status": "passed",
                             "changed_frames": differences.tolist(),
                             "meaning": "all subsequent models use the filtered wire keys"})
-    tk = np.arange(L + 1) * planner.params.frame_time
-    if L not in memo:
-        tbox, tok, _, keep = planner._forum_targets(ws, f, tk, prefs)
-        ti = next((i for i, t in enumerate(keep) if t.iid == o.iid and not t.hazard), None)
-        paths = planner._ds_move_paths(f.rs.trk, keep, tbox)
-        if ti is not None and ti in paths:
-            try:
-                paths[ti] = slam_body_paths(obs[0], paths[ti], win.knife_knowledge)
-            except ValueError as exc:
-                info["checks"].append({"check": "body_timeline", "status": "unchecked", "reason": str(exc)})
-                return ds
-        memo[L] = ti, paths
-    ti, paths = memo[L]
-    if ti is None or ti not in paths:
-        info["checks"].append({"check": "target_paths", "status": "unchecked"})
-        return ds
-    info["body_source"] = "old move translations + clapper_m2 per-frame body intersection; full danger unchanged"
-    rollouts = []
-    contacts = []
-    try:
-        safety_end = max(L, H + 24)
-        forecast_key = ("safety_forecast", safety_end)
-        if forecast_key not in memo:
-            memo[forecast_key] = safety_forecast(f, safety_end)
-        safe_f = memo[forecast_key]
-        info["checks"].append({"check": "support_horizon", "status": "passed", "through_frame": safety_end})
-        for bi, body in enumerate(paths[ti]):
-            # All drift proposals this tick share the same physical hook when
-            # their actual launch prefix agrees. Recheck every new suffix.
-            hook_key = ("hook", L, ti, bi, lat[0, :P + press].tobytes())
-            if hook_key in memo:
-                miss = claw.with_commands(memo[hook_key], lat[0], planner.params, planner.terrain,
-                                          threads=planner.cfg.threads)
-            else:
-                miss = claw.rollout(start, lat[0], planner.params, planner.terrain, body, o.iid,
-                                    threads=planner.cfg.threads)
-                memo[hook_key] = miss
-            safety = {}
-            if not _clear(planner, safe_f, miss, safety, "miss"):
-                safety["hit"] = {"status": "unchecked", "reason": "miss path already rejected"}
-                info.setdefault("path_safety", []).append(safety)
-                raise ValueError("full_path")
-            n = len(miss.hooks)
-            masks = np.broadcast_to(lat, (n, L)).copy()
-            sw, cc, tt, robust = planner._ds_hits(
-                miss, masks, 1 if state[km.FACE] >= 0 else -1,
-                body[None], np.isfinite(body[:, 0])[None], np.ones(1, bool),
-                np.full(n, P + 1, np.int64), 0., dslash.CERT_SHIFTS)
-            info.setdefault("strikes", []).append({"start": sw.tolist(), "contact": cc.tolist(),
-                                                    "robust": robust.tolist(),
-                                                    "controls": miss.control_frames.tolist()})
-            if (not robust.all() or np.any(cc <= H) or np.any(cc >= L - dslash.POST_F)
-                    or np.any(sw - miss.control_frames < FREE_MIN)):
-                ks = range(max(1, int(sw.min())), min(L, int(sw.max()) + 11))
-                info["contact_probe"] = [
-                    {"k": k, "hero_box_lo": miss.box[:, k].min(axis=0).tolist(),
-                     "hero_box_hi": miss.box[:, k].max(axis=0).tolist(),
-                     "body": body[k].tolist(), "flags": sorted(set(miss.flags[:, k].tolist())),
-                     "mode": sorted(set(miss.mode[:, k].tolist()))} for k in ks]
-                raise ValueError("down_contact_or_FREE_MIN")
-            ev = np.zeros((n, L), np.int64)
-            ev[np.arange(n), cc - 1] = km.EV_POGO
-            hit = claw.with_events(miss, planner.params, planner.terrain, ev,
-                                   threads=planner.cfg.threads)
-            # Full danger remains, on both miss and bounce paths. A table cell
-            # never removes the target's body or the rest of the world.
-            hit_clear = _clear(planner, safe_f, hit, safety, "hit")
-            info.setdefault("path_safety", []).append(safety)
-            if not hit_clear:
-                raise ValueError("full_path")
-            rollouts.extend((miss, hit))
-            contacts.extend(cc.tolist())
-        info["checks"].append({"check": "all_paths_and_strikes", "status": "passed",
-                                "outcomes": sum(len(r.hooks) for r in rollouts)})
-        e = common_escape(planner, safe_f, rollouts[::2], row, np.asarray(prefix), hold, H)
-        if e is None:
-            raise ValueError("common_escape")
-        info["checks"].append({"check": "escape", "status": "passed", "command": e,
-                                "through_frame": max(H + 24, L)})
-    except ValueError as exc:
-        info["checks"].append({"check": str(exc), "status": "failed"})
-        info["checks"].append({"check": "escape", "status": "unchecked", "reason": "upstream path rejected"})
+    certified = certify_hook(planner, win, ws, f, start, hold, prefix, prefs,
+                             T, obs[0], raw, lat[0], P + press, info, memo)
+    if certified is None:
         info["ms"] = (time.perf_counter() - t0) * 1000
         return ds
-    bound, flags = envelope(rollouts, H + 1)
-    nominal = rollouts[0]
+    cert, tail, hook_base = certified
+    # Keep the entire newly checked strike/exit. Main-row motion comes from
+    # the hit paths; no miss-path safety check or H abort is performed.
+    bound, flags = envelope(cert.paths, H + 1)
+    nominal = cert.paths[0]
+    contacts = np.concatenate(cert.contacts)
+    row = cert.raw[P:].copy()
+    # Contact is outside H for a new proposal. Re-roll the same logical clocks
+    # to exactly H for the score endpoint, without inventing an H initializer.
+    from ssbot.combat import forum_knife_lanes as lanes
+    end = lanes.rollout(hook_base, planner.params, planner.terrain,
+                        commands=cert.latched[:H], threads=planner.cfg.threads)
     data = {"nominal": {nm: getattr(nominal, nm)[0, :H + 1] for nm in
                          ("phys", "pos", "vel", "mode", "flags", "box")},
-            "final": None, "bound": bound, "flags_all": flags, "escape": e,
-            "checks": info["checks"], "latched": lat[0, :H].copy()}
-    # The main endpoint is computed at exactly H, not at the longer audit tail.
-    end = claw.with_commands(rollouts[0], lat[0, :H], planner.params, planner.terrain,
-                             threads=planner.cfg.threads)
-    data["final"] = end.final[:, 0]
+            "final": end.final[:, 0], "bound": bound, "flags_all": flags,
+            "escape": cert.option, "checked_tail": tail,
+            "checks": info["checks"], "latched": cert.latched[:H].copy()}
     base = 0 if ds is None else len(ds.cmd)
     cand = ow.Cand("now", "claw_slam0", o.iid, row, 0, min(contacts), max(contacts),
                    key.short(), fixed.label(), len(row), pk=pk, macro=fixed, cert=True)
@@ -594,6 +669,11 @@ def warm(planner):
     ev = np.zeros((len(initial.hooks), len(masks)), np.int64)
     ev[:, 50] = km.EV_POGO
     claw.with_events(initial, planner.params, planner.terrain, ev, threads=planner.cfg.threads)
+    from ssbot.combat import forum_knife_lanes as lanes
+    expanded = lanes.rollout(initial, planner.params, planner.terrain, threads=planner.cfg.threads)
+    lane_events = np.zeros((len(expanded.hooks), len(masks)), np.int64)
+    lane_events[:, 50] = km.EV_POGO
+    lanes.rollout(initial, planner.params, planner.terrain, lane_events, threads=planner.cfg.threads)
     changed = masks.copy()
     changed[2:] |= km.B_LEFT
     claw.with_commands(initial, changed, planner.params, planner.terrain, threads=planner.cfg.threads)

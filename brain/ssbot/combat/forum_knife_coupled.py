@@ -1,6 +1,6 @@
-"""Audit-only pairing of one started Slam's contact and danger clocks.
+"""Pair one started Slam's contact and danger clocks for opt-in knife rows.
 
-No runtime integration, new enemy policy or margin reduction. Within-state
+No new enemy policy or margin reduction. Within-state
 geometry remains a conservative union of the existing template's state masks.
 """
 from __future__ import annotations
