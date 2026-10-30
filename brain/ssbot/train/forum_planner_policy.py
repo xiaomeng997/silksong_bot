@@ -425,7 +425,7 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- per episode ----
 
-    def _reset_chain_native(self) -> None:
+    def _reset_chain_native(self, *, observe_baseline=True) -> None:
         native = os.environ.get("SSBOT_FORUM_CHAIN_NATIVE", "0").strip() == "1"
         b2 = os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
         if b2 and not native:
@@ -460,10 +460,21 @@ class ForumPlannerPolicy(PlannerPolicy):
             frame = getattr(getattr(self, "link", None), "frame", None)
             self.chain_native.reset(self.episode, start_frame=frame if type(frame) is int else None)
             baseline = getattr(getattr(self, "link", None), "state", None)
-            if b2 and baseline is not None:
+            if b2 and observe_baseline and baseline is not None:
                 self.chain_native.observe_learning(baseline)
         if getattr(self, "planner", None) is not None:
             self.planner.chain_native = self.chain_native
+
+    def prepare_learning_batch(self, options):
+        """Resolve fixed B2 config/budget before warm-up, with no hero/action credit."""
+        from ssbot.combat.knife_chain_budget import execution_conditions,LearningStop
+        try:
+            self._reset_chain_native(observe_baseline=False)
+        except ValueError as exc:
+            raise LearningStop("B2 batch configuration failure: "+str(exc)) from exc
+        if not getattr(self.chain_native,"b2",False):raise LearningStop("B2 batch policy bridge missing")
+        self.chain_native.budget.bind_execution(execution_conditions(options))
+        return self.chain_native.budget
 
     def _begin_chain_native(self, state) -> None:
         audit = getattr(self, "chain_native", None)

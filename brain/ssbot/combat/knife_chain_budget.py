@@ -6,6 +6,7 @@ busy ledger is an integrity failure, not permission to reset the experiment.
 """
 from __future__ import annotations
 import json
+import hashlib
 import os
 from pathlib import Path
 
@@ -37,21 +38,24 @@ class LearningBudget:
                 if data.get("batch")!=self.batch or data.get("revision")!=self.revision:
                     raise LearningStop("B2 budget belongs to another batch/condition revision; use a NEW batch")
             else:data={"schema":1,"policy":"strict-2hp-v1","batch":self.batch,"revision":self.revision,
-                       "b_fight_hp":0,"tail_hp":0,"events":[],"stop":None}
+                       "b_fight_hp":0,"tail_hp":0,"events":[],"attempts":[],"execution":None,"stop":None}
             if event is not None and data["stop"] is None:
-                event={**event,"worker":self.worker}
-                event["id"]=f"{self.worker}:{event['episode']}:{event['frame']}:{event['arm']}:{event.get('fatal')}"
-                if not any(x["id"]==event["id"] for x in data["events"]):
-                    data["events"].append(event)
-                    if event["tail"]:data["tail_hp"]+=event["hp_loss"]
-                    elif event["arm"]=="B":data["b_fight_hp"]+=event["hp_loss"]
-                    reasons=[]
-                    if data["b_fight_hp"]>=2:reasons.append("B fight cumulative 2 HP")
-                    if not event["tail"] and event["arm"]=="B" and event["hp_loss"]>0 and event["chain_related"]:
-                        reasons.append("new chain-related fight injury; pause for diagnosis")
-                    if event.get("fatal"):reasons.append(event["fatal"])
-                    if reasons:data["stop"]={"frame":event["frame"],"episode":event["episode"],"worker":self.worker,
-                                               "reasons":reasons,"mode":"batch_end" if data["b_fight_hp"]>=2 else "pause"}
+                if event.get("kind")=="execution":self._bind_execution(data,event["conditions"])
+                elif event.get("kind")=="attempt":self._reserve_attempt(data,event)
+                else:
+                    event={**event,"worker":self.worker}
+                    event["id"]=f"{self.worker}:{event['episode']}:{event['frame']}:{event['arm']}:{event.get('fatal')}"
+                    if not any(x["id"]==event["id"] for x in data["events"]):
+                        data["events"].append(event)
+                        if event["tail"]:data["tail_hp"]+=event["hp_loss"]
+                        elif event["arm"]=="B":data["b_fight_hp"]+=event["hp_loss"]
+                        reasons=[]
+                        if data["b_fight_hp"]>=2:reasons.append("B fight cumulative 2 HP")
+                        if not event["tail"] and event["arm"]=="B" and event["hp_loss"]>0 and event["chain_related"]:
+                            reasons.append("new chain-related fight injury; pause for diagnosis")
+                        if event.get("fatal"):reasons.append(event["fatal"])
+                        if reasons:data["stop"]={"frame":event["frame"],"episode":event["episode"],"worker":self.worker,
+                                                   "reasons":reasons,"mode":"batch_end" if data["b_fight_hp"]>=2 else "pause"}
             temp=self.path.with_name(self.path.name+f".tmp.{os.getpid()}")
             with temp.open("w",encoding="utf-8") as f:
                 json.dump(data,f,ensure_ascii=False,indent=1);f.write("\n");f.flush();os.fsync(f.fileno())
@@ -65,6 +69,42 @@ class LearningBudget:
         finally:
             os.close(fd);lock.unlink()
 
+    def _bind_execution(self,data,conditions):
+        canonical=json.loads(json.dumps(conditions,sort_keys=True,allow_nan=False))
+        digest=hashlib.sha256(json.dumps(canonical,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        previous=data.get("execution")
+        if previous is not None and (previous["sha256"]!=digest or previous["conditions"]!=canonical):
+            raise LearningStop("B2 execution conditions changed; use a NEW batch")
+        data["execution"]={"sha256":digest,"conditions":canonical}
+
+    def _reserve_attempt(self,data,event):
+        attempts=data.setdefault("attempts",[])
+        identity=f"{self.worker}:{event['episode']}"
+        if any(a["id"]==identity for a in attempts):
+            raise LearningStop("B2 attempt already reserved; no automatic replacement/retry")
+        arm=event["arm"]
+        if len(attempts)>=8 or sum(a["arm"]==arm for a in attempts)>=4:
+            data["stop"]={"mode":"batch_end","reasons":["B2 smoke upper limit: 8 total / 4 per arm"],
+                          "worker":self.worker,"episode":event["episode"],"frame":None}
+            return
+        if data.get("execution") is None:raise LearningStop("B2 execution conditions must be bound before reservation")
+        attempts.append({"id":identity,"worker":self.worker,"episode":event["episode"],"arm":arm,
+                         "seed":event["seed"],"policy_episode":event.get("policy_episode"),
+                         "execution_sha256":data["execution"]["sha256"],"status":"reserved"})
+
+    def bind_execution(self,conditions):
+        """Freeze CLI / ordinary planner switches too; A/B arm and seeds vary explicitly."""
+        self._update({"kind":"execution","conditions":conditions})
+        self.check()
+
+    def begin_attempt(self,*,episode,arm,seed,policy_episode=None):
+        """Atomic reservation BEFORE ready/reset; failures consume their slot."""
+        if type(episode) is not int or episode<0 or arm not in {"A","B"} or type(seed) is not int:
+            raise ValueError("invalid B2 attempt reservation")
+        self._update({"kind":"attempt","episode":episode,"arm":arm,"seed":seed,"policy_episode":policy_episode})
+        self.check()
+        return dict(self.state["attempts"][-1])
+
     def _read(self):
         try:
             data=json.loads(self.path.read_text(encoding="utf-8"))
@@ -72,6 +112,8 @@ class LearningBudget:
                     or any(type(data.get(k)) is not int or data[k]<0 for k in ("b_fight_hp","tail_hp"))
                     or (data.get("stop") is not None and not isinstance(data["stop"],dict))):
                 raise ValueError("invalid budget schema")
+            if not isinstance(data.get("attempts",[]),list):raise ValueError("invalid attempts")
+            if data.get("stop") is not None and not isinstance(data["stop"].get("reasons"),list):raise ValueError("invalid stop reason")
             return data
         except (OSError,ValueError) as exc:raise LearningStop("B2 budget missing/corrupt; preserve evidence") from exc
 
@@ -123,3 +165,34 @@ def mark_integrity_halt(reason):
             json.dump({"batch":os.environ.get("SSBOT_FORUM_CHAIN_BATCH"),"reason":str(reason)},f)
             f.flush();os.fsync(f.fileno())
     except FileExistsError:pass  # never replace the first failure
+
+
+def preflight_options(options):
+    """First-smoke invocation constraints; no IPC, file creation or process start."""
+    preflight_environment(options.encounter,no_record=options.no_record)
+    if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":return
+    if (options.mode!="eval" or options.policy!="planner" or options.view!="oracle" or
+            options.time_scale!=1. or options.real_quit!=0. or options.inject_hits!=0.):
+        raise LearningStop("B2 smoke requires eval/planner/oracle at1x without injected hits or random real quits")
+    episodes=options.episodes
+    if type(episodes) is not int or not 1<=episodes<=4:
+        raise LearningStop("B2 first smoke allows 1..4 attempts per arm invocation")
+    instances=getattr(options,"instances",None)
+    if instances is not None:
+        try:ids=[int(v) for v in instances.split(",")]
+        except (TypeError,ValueError) as exc:raise LearningStop("invalid B2 instance list") from exc
+        if not ids or len(ids)!=len(set(ids)) or min(ids)<0 or len(ids)*episodes>4:
+            raise LearningStop("B2 invocation exceeds four attempts for one arm / invalid instances")
+
+
+def execution_conditions(options,environ=None):
+    """Condition identity shared by both arms; seeds are recorded per attempt."""
+    env=os.environ if environ is None else environ
+    keys=("encounter","mode","policy","view","threads","time_scale","timebox","real_quit","inject_hits",
+          "start_hp","start_silk","silk_reserve","key_cost","forum_clash","no_record","rotate","same_seeds",
+          "measure","measurement_protocol","measure_diagnostics","measure_timing_only","measure_max_records",
+          "measure_stall_ms","measure_stall_tick","measure_stall_episode","engineering_probe")
+    labels={"SSBOT_FORUM_CHAIN_ARM","SSBOT_FORUM_CHAIN_BATCH","SSBOT_FORUM_CHAIN_BUDGET"}
+    return {"schema":1,"smoke_limit":{"total":8,"per_arm":4},
+            "options":{k:getattr(options,k,None) for k in keys},
+            "environment":{k:v for k,v in sorted(env.items()) if k.startswith("SSBOT_") and k not in labels}}

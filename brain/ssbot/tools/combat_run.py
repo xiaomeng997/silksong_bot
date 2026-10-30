@@ -426,9 +426,46 @@ def boost_worker() -> str:
     return ", ".join(msgs)
 
 
+def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error):
+    """Try every owned resource even if one close fails; never manage game PIDs here."""
+    b2=os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1"
+    result={"instance":a.instance,"stage":stage,"primary_error":primary_error,"resources":{},
+            "scope":"worker files/IPC only; Launcher game/Prefs cleanup needs separate receipt"}
+    errors=[]
+    def close(name,fn):
+        if fn is None:result["resources"][name]="not_created";return
+        try:fn();result["resources"][name]="pass"
+        except Exception as exc:
+            message=type(exc).__name__+": "+str(exc)
+            result["resources"][name]={"failed":message};errors.append(name+": "+message)
+    close("policy_log",getattr(policy,"flush_log",None))
+    close("policy_keys",getattr(policy,"flush_keys",None))
+    close("chain_journal",getattr(getattr(policy,"chain_native",None),"flush",None))
+    close("recorder",None if recorder is None else recorder.close)
+    close("attempts",None if out is None else out.close)
+    if link is not None and a.time_scale!=1. and not link.closed:
+        close("time_scale",lambda:set_time_scale(link,1.,a.instance))
+    else:result["resources"]["time_scale"]="not_required"
+    close("ipc",None if link is None else link.close)
+    close("diagnostics",None if diagnostics is None else diagnostics.close)
+    result["complete"]=not errors
+    if b2:
+        from ssbot.combat.knife_chain_budget import mark_integrity_halt
+        try:
+            path=Path(a.run_dir)/f"worker_cleanup_i{a.instance}_{time.time_ns()}.json"
+            with path.open("x",encoding="utf-8") as f:
+                json.dump(result,f,ensure_ascii=False,indent=1);f.write("\n");f.flush();os.fsync(f.fileno())
+        except Exception as exc:errors.append("cleanup receipt: "+str(exc))
+        if errors:mark_integrity_halt("worker cleanup failed: "+"; ".join(errors))
+    if errors:
+        print(f"[i{a.instance}] worker cleanup failed: {'; '.join(errors)}",flush=True)
+        if primary_error is None:raise RuntimeError("worker cleanup failed: "+"; ".join(errors))
+    return result
+
+
 def worker(a: argparse.Namespace) -> int:
-    from ssbot.combat.knife_chain_budget import preflight_environment
-    preflight_environment(a.encounter, no_record=a.no_record)
+    from ssbot.combat.knife_chain_budget import preflight_environment,preflight_options
+    preflight_options(a)
     print(f"[i{a.instance}] worker boost: {boost_worker()}", flush=True)
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import Recorder
@@ -440,87 +477,103 @@ def worker(a: argparse.Namespace) -> int:
     enc = encs[0]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
-    measurement = None
-    measurement_code = None
-    diagnostics = None
-    if getattr(a, "measure", False):
-        from ssbot.train.measurement import MeasurementTrace
-        from ssbot.train.forum_measure_manifest import code_manifest
-        if getattr(a, "measure_diagnostics", False):
-            from ssbot.train.stall_diagnostics import StallDiagnostics
-            diagnostics = StallDiagnostics(stall_ms=a.measure_stall_ms, stall_tick=a.measure_stall_tick,
-                                           stall_episode=a.measure_stall_episode).install()
-        measurement = MeasurementTrace(protocol_version=getattr(a, "measurement_protocol", 1),
-                                       diagnostics=diagnostics, max_records=a.measure_max_records,
-                                       detail=not getattr(a, "measure_timing_only", False))
-        measurement_code = code_manifest(Path(__file__).resolve().parents[3])
-    link = OracleLink(instance=a.instance, connect_timeout_s=120,
-                      **({"measurement": measurement} if measurement is not None else {}))
-    tap = make_tap(link, enc)
-    if measurement is not None:
-        link.subscribe_state(measurement.observe_state)  # tap updates wake before this observer
-    policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
-                         gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None,
-                         crest="Wanderer" if enc.savestate == "fo_W" or enc.name.startswith("Forum_W_w") else "Reaper",
-                         clash=a.forum_clash)
-    if measurement is not None:
-        policy.measurement = measurement
-    if a.silk_reserve:
-        pb = getattr(getattr(policy, "inner", policy), "pb", None)
-        if pb is not None:
-            pb.bind_reserve_at_full_hp = True
-    if hasattr(policy, "attach"):
-        policy.attach(link)
-    if hasattr(policy, "warmup"):
-        print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
-    runtime_start = None
-    measurement_warmup = None
-    if measurement is not None:
-        from ssbot.train.measurement import warm_query_kernels
-        from ssbot.train.forum_measure_manifest import runtime_manifest
-        measurement_warmup = warm_query_kernels()
-        print(f"[i{a.instance}] measurement query warm-up: "
-              f"{sum(x['warmup_ms'] for x in measurement_warmup.values()):.1f} ms", flush=True)
-        from ssbot.train.measurement import prepare_lazy_configuration
-        prepare_lazy_configuration(policy, measurement)
-        runtime_start = runtime_manifest()
-    rev = git_rev()
-    env = env_overrides()
-    fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,
-                   {**env, "time_scale": str(a.time_scale)} if a.time_scale != 1.0 else env)
-    if env:
-        print(f"[i{a.instance}] SSBOT switches (in config_fp): {env}", flush=True)
-    from ssbot.train import recovery
-    # a previous run may have left it paused (a QUIT, or the oracle's brain-lost watchdog, which pauses a moment after
-    # the last ACTION), possibly in a pause sub-menu: resume from wherever the pause menus are
-    s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
-    if recovery.is_paused(s0) and (s0.get("game") or {}).get("scene"):
-        ok, steps = recovery.resume(link, log=lambda m: print(f"[i{a.instance}] {m}", flush=True))
-        print(f"[i{a.instance}] paused at the start ({recovery.where(s0)}): {'unpaused' if ok else 'still paused'}",
-              flush=True)
-    s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
-    if _in_game_without_control(s0):
-        # a game is loaded but Hornet takes no input: the post-kill memory scene after a CLEAR (gate run
-        # 20261002_150453 i3: the last episode of the chunk before was a kill, and load_slot waited 60 s for a main
-        # menu that never came). The encounter's savestate loads from there, as between episodes.
-        print(f"[i{a.instance}] in a game without control (scene {(s0.get('game') or {}).get('scene')}): "
-              f"loading the savestate", flush=True)
-        link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
-        from ssbot.train.episode import wait_settled
-        wait_settled(link, enc.scene, timeout_s=60)
-    back_into_slot(link, enc, a.instance)
-    set_time_scale(link, a.time_scale, a.instance)
-    rec_obj = None
-    deadline = time.monotonic() + a.hours * 3600 if a.hours else None
-    counts: Counter = Counter()
-    k = 0
-    fails_in_row = 0
+    link=rec_obj=diagnostics=policy=None
+    counts=Counter()
+    stage="bootstrap"
     try:
+        measurement = None
+        measurement_code = None
+        diagnostics = None
+        if getattr(a, "measure", False):
+            from ssbot.train.measurement import MeasurementTrace
+            from ssbot.train.forum_measure_manifest import code_manifest
+            if getattr(a, "measure_diagnostics", False):
+                from ssbot.train.stall_diagnostics import StallDiagnostics
+                diagnostics = StallDiagnostics(stall_ms=a.measure_stall_ms, stall_tick=a.measure_stall_tick,
+                                               stall_episode=a.measure_stall_episode).install()
+            measurement = MeasurementTrace(protocol_version=getattr(a, "measurement_protocol", 1),
+                                           diagnostics=diagnostics, max_records=a.measure_max_records,
+                                           detail=not getattr(a, "measure_timing_only", False))
+            measurement_code = code_manifest(Path(__file__).resolve().parents[3])
+        link = OracleLink(instance=a.instance, connect_timeout_s=120,
+                          **({"measurement": measurement} if measurement is not None else {}))
+        tap = make_tap(link, enc)
+        if measurement is not None:
+            link.subscribe_state(measurement.observe_state)  # tap updates wake before this observer
+        policy = make_policy(a.policy, a.view, run_dir, a.instance, a.threads, a.real_quit, a.inject_hits,
+                             gauntlet=bool(enc.waves), key_cost=tuple(a.key_cost) if a.key_cost else None,
+                             crest="Wanderer" if enc.savestate == "fo_W" or enc.name.startswith("Forum_W_w") else "Reaper",
+                             clash=a.forum_clash)
+        if measurement is not None:
+            policy.measurement = measurement
+        if a.silk_reserve:
+            pb = getattr(getattr(policy, "inner", policy), "pb", None)
+            if pb is not None:
+                pb.bind_reserve_at_full_hp = True
+        if hasattr(policy, "attach"):
+            policy.attach(link)
+        b2_budget=None
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+            from ssbot.combat.knife_chain_budget import LearningStop
+            prepare=getattr(policy,"prepare_learning_batch",None)
+            if prepare is None:raise LearningStop("B2 policy cannot prepare a learning batch")
+            b2_budget=prepare(a)
+        if hasattr(policy, "warmup"):
+            print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
+        runtime_start = None
+        measurement_warmup = None
+        if measurement is not None:
+            from ssbot.train.measurement import warm_query_kernels
+            from ssbot.train.forum_measure_manifest import runtime_manifest
+            measurement_warmup = warm_query_kernels()
+            print(f"[i{a.instance}] measurement query warm-up: "
+                  f"{sum(x['warmup_ms'] for x in measurement_warmup.values()):.1f} ms", flush=True)
+            from ssbot.train.measurement import prepare_lazy_configuration
+            prepare_lazy_configuration(policy, measurement)
+            runtime_start = runtime_manifest()
+        rev = git_rev()
+        env = env_overrides()
+        fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,
+                       {**env, "time_scale": str(a.time_scale)} if a.time_scale != 1.0 else env)
+        if env:
+            print(f"[i{a.instance}] SSBOT switches (in config_fp): {env}", flush=True)
+        from ssbot.train import recovery
+        # a previous run may have left it paused (a QUIT, or the oracle's brain-lost watchdog, which pauses a moment after
+        # the last ACTION), possibly in a pause sub-menu: resume from wherever the pause menus are
+        s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+        if recovery.is_paused(s0) and (s0.get("game") or {}).get("scene"):
+            ok, steps = recovery.resume(link, log=lambda m: print(f"[i{a.instance}] {m}", flush=True))
+            print(f"[i{a.instance}] paused at the start ({recovery.where(s0)}): {'unpaused' if ok else 'still paused'}",
+                  flush=True)
+        s0 = link.wait_state(lambda s: s.get("game") is not None, timeout_s=120)
+        if _in_game_without_control(s0):
+            # a game is loaded but Hornet takes no input: the post-kill memory scene after a CLEAR (gate run
+            # 20261002_150453 i3: the last episode of the chunk before was a kill, and load_slot waited 60 s for a main
+            # menu that never came). The encounter's savestate loads from there, as between episodes.
+            print(f"[i{a.instance}] in a game without control (scene {(s0.get('game') or {}).get('scene')}): "
+                  f"loading the savestate", flush=True)
+            link.rpc("savestate.load", timeout_s=40, name=enc.savestate, timeout=30)
+            from ssbot.train.episode import wait_settled
+            wait_settled(link, enc.scene, timeout_s=60)
+        back_into_slot(link, enc, a.instance)
+        set_time_scale(link, a.time_scale, a.instance)
+        rec_obj = None
+        deadline = time.monotonic() + a.hours * 3600 if a.hours else None
+        counts: Counter = Counter()
+        k = 0
+        fails_in_row = 0
+        stage="episodes"
         while k < a.episodes and (deadline is None or time.monotonic() < deadline):
             preflight_environment(a.encounter, no_record=a.no_record)
             if stop_requested(run_dir):
                 print(f"[i{a.instance}] stop requested, ending after {k} episodes", flush=True)
                 break
+            seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
+            enc = encs[k % len(encs)]
+            reservation=None
+            if b2_budget is not None:
+                reservation=b2_budget.begin_attempt(episode=k,arm=os.environ["SSBOT_FORUM_CHAIN_ARM"],seed=seed,
+                    policy_episode=getattr(policy,"episode",0)+1)
             if not a.no_record and k % a.rotate == 0:
                 if rec_obj is not None:
                     rec_obj.close()
@@ -528,8 +581,6 @@ def worker(a: argparse.Namespace) -> int:
                                    episode=f"i{a.instance}_{k // a.rotate:03d}",
                                    config={"encounter": a.encounter, "mode": a.mode, "policy": a.policy,
                                            "view": a.view, "time_scale": a.time_scale}).start()
-            seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
-            enc = encs[k % len(encs)]
             if measurement is not None:
                 measurement.start_episode(k)
             why, game_scale = ready_for_episode(link, a.time_scale, a.instance)
@@ -546,6 +597,7 @@ def worker(a: argparse.Namespace) -> int:
             else:
                 rec.reason = why          # the record's default outcome, HARNESS_FAIL; no episode ran
             d = asdict(rec)
+            if reservation is not None:d["b2_reservation"]=reservation
             d["instance"] = a.instance
             d["episode"] = k
             d["env"] = env
@@ -636,17 +688,9 @@ def worker(a: argparse.Namespace) -> int:
             mark_integrity_halt(type(exc).__name__ + ": " + str(exc))
         raise
     finally:
-        if rec_obj is not None:
-            rec_obj.close()
-        out.close()
-        if a.time_scale != 1.0 and not link.closed:
-            try:                         # leave the instance at 1x for whatever runs next (set_time_scale docstring)
-                set_time_scale(link, 1.0, a.instance)
-            except (Exception, SystemExit) as e:
-                print(f"[i{a.instance}] could not set time.scale back to 1: {e}", flush=True)
-        link.close()
-        if diagnostics is not None:
-            diagnostics.close()
+        pending=sys.exc_info()[1]
+        _close_worker(a,link=link,recorder=rec_obj,out=out,diagnostics=diagnostics,policy=policy,
+                      stage=stage,primary_error=None if pending is None else type(pending).__name__+": "+str(pending))
     print(f"[i{a.instance}] done: {dict(counts)}", flush=True)
     return 0
 
@@ -669,6 +713,8 @@ def new_run_dir(encounter: str, tag: str, root: Path | None = None, now: datetim
 
 
 def run(a: argparse.Namespace) -> int:
+    from ssbot.combat.knife_chain_budget import preflight_options
+    preflight_options(a)
     tag = a.mode if a.policy == "data" else a.policy if a.policy.startswith("data") else f"{a.mode}_{a.policy}_{a.view}"
     if a.time_scale != 1.0:
         tag += f"_x{a.time_scale:g}"
