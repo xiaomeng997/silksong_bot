@@ -2,7 +2,8 @@
 
 The family supplies a nominal path and h2 admission. A geometry adapter supplies
 contacts on THAT path, including its queued prefix. This module filters only the
-admitted target move; delayed hazards are always retained, even its own runes.
+admitted target move through the predicted bounce; later contacts are normal
+planner checks. Delayed hazards are always retained, even its own runes.
 It neither simulates a path nor grants admission / pogo protection from a future
 hit. The continuation threshold is an explicit empirical risk policy, not proof
 that the unexamined tails are clear. No ordinary-row horizon is imposed here.
@@ -35,6 +36,29 @@ class MoveInstance:
         if type(self.target_iid) is not int or not self.family:
             raise ValueError("invalid target move identity")
         _frame(self.antic_frame)
+
+
+@dataclass(frozen=True)
+class TargetMoveAdmission:
+    """A family guard result, bound to ONE antic and its predicted bounce.
+
+    The adapter must derive move and guard_ref from the h2 guard's same visible
+    event, not fill them from a candidate's desired target. This is audit context,
+    not a certificate or evidence that a real strike / bounce has happened.
+    """
+    move: MoveInstance
+    decision_frame: int
+    bounce_frame: int
+    guard_ref: str
+    verdict: str
+
+    def __post_init__(self):
+        _frame(self.decision_frame)
+        _frame(self.bounce_frame)
+        if (not self.guard_ref or self.verdict not in VERDICTS
+                or self.decision_frame < self.move.antic_frame
+                or self.bounce_frame < self.decision_frame):
+            raise ValueError("invalid target admission source/window/verdict")
 
 
 @dataclass(frozen=True)
@@ -84,19 +108,28 @@ class PathResult:
 
 def check_external_path(scan: ContactScan | None, *, path_ref: str,
                         target_move: MoveInstance, first_frame: int,
-                        last_frame: int) -> PathResult:
+                        last_frame: int,
+                        admission: TargetMoveAdmission | None = None) -> PathResult:
     """Check other enemies / delayed hazards, with inclusive path coverage.
 
     Geometry must scan the full path before applying this scope. Do not first
     drop the target iid, its runes, or contacts under a predicted pogo mask.
     Missing geometry / coverage is unchecked. Known retained contacts reject,
     even in an incomplete scan. A later or untagged move is not exempted simply
-    because it belongs to the target. Its family must admit it at a new decision.
+    because it belongs to the target. Admission is explicit and expires at the
+    predicted bounce. Omitting it (all post-bounce continuation checks) exempts
+    nothing, including this same move's remaining hammer/body. Actual execution
+    must release on an observed bounce, not on this predicted frame alone.
     """
     _frame(first_frame)
     _frame(last_frame)
     if not path_ref or last_frame < first_frame:
         raise ValueError("invalid requested path interval")
+    if admission is not None:
+        if admission.move != target_move:
+            raise ValueError("target admission move identity mismatch")
+        if admission.decision_frame != first_frame:
+            raise ValueError("target admission belongs to another decision frame")
     if scan is None:
         return PathResult("unchecked", "contact scan missing")
     if scan.path_ref != path_ref:
@@ -105,15 +138,19 @@ def check_external_path(scan: ContactScan | None, *, path_ref: str,
     for c in scan.contacts:
         if not first_frame <= c.frame <= last_frame:
             continue
-        dest = (trusted if c.kind in {"body", "move"} and c.move == target_move
-                else retained)
+        exempt = (admission is not None and admission.verdict == "pass"
+                  and c.frame <= admission.bounce_frame
+                  and c.kind in {"body", "move"} and c.move == admission.move)
+        dest = trusted if exempt else retained
         dest.append(c)
     if retained:
-        return PathResult("reject", "other enemy or delayed/unknown hazard contact",
+        return PathResult("reject", "planner-checked contact (target outside scope / other / delayed / unknown)",
                           tuple(retained), tuple(trusted))
     if not scan.complete or scan.first_frame > first_frame or scan.last_frame < last_frame:
         return PathResult("unchecked", "path coverage incomplete", (), tuple(trusted))
-    return PathResult("pass", "external path clear; target move uses family admission",
+    if admission is not None and admission.verdict != "pass":
+        return PathResult(admission.verdict, "target family admission did not pass")
+    return PathResult("pass", "checked path clear; any target exemption is bounded by admission",
                       (), tuple(trusted))
 
 
@@ -166,7 +203,9 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
                          minimum_kinds: int = 2) -> ContinuationResult:
     """Apply the user's N=2 lower bound at ONE predicted bounce state.
 
-    Each admitted executable type gets a short external-hazard check. At >=N
+    Each admitted executable type gets a NORMAL short planner check, including
+    the target's current/next moves and body. Pre-bounce admission is never passed
+    to either short or full scans here. At >=N
     types no complete exit is queried. Below N, fully check the surviving options
     until one reaches handback. No usable option => do not jump. Unknowns never
     count; rejection with unknown options remains unchecked. Repeated downslash

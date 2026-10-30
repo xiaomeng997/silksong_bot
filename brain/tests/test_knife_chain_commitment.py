@@ -4,12 +4,13 @@ from dataclasses import replace
 import pytest
 
 from ssbot.combat.knife_chain_commitment import (
-    ContactScan, Continuation, MoveInstance, PathContact,
+    ContactScan, Continuation, MoveInstance, PathContact, TargetMoveAdmission,
     assess_continuations, check_external_path,
 )
 
 MOVE = MoveInstance(12, 100, "CC_SLAM")
 BOUNCE = "nominal:12:100:bounce:149"
+GUARD = TargetMoveAdmission(MOVE, 100, 149, "h2:test:slam_jump:event100", "pass")
 
 
 def scan(*contacts, first=100, last=177, path="jump:12:100", complete=True):
@@ -17,7 +18,8 @@ def scan(*contacts, first=100, last=177, path="jump:12:100", complete=True):
 
 
 def check(s, **kw):
-    args = dict(path_ref="jump:12:100", target_move=MOVE, first_frame=100, last_frame=177)
+    args = dict(path_ref="jump:12:100", target_move=MOVE, first_frame=100, last_frame=177,
+                admission=GUARD)
     args.update(kw)
     return check_external_path(s, **args)
 
@@ -49,8 +51,8 @@ def test_62_frame_support_cannot_certify_a_77_frame_chain():
 
 
 def test_target_current_move_uses_family_admission_only():
-    body = PathContact(150, 12, "body", MOVE)
-    hammer = PathContact(154, 12, "move", MOVE)
+    body = PathContact(140, 12, "body", MOVE)
+    hammer = PathContact(145, 12, "move", MOVE)
     r = check(scan(body, hammer))
     assert r.verdict == "pass"
     assert r.trusted_target == (body, hammer)
@@ -176,3 +178,56 @@ def test_short_check_includes_bounce_and_needs_coverage():
     r = assess([opt, option("right", "right_landing")], lambda _: None)
     assert r.verdict == "unchecked"
     assert r.qualifying_kinds == ("right_landing",)
+
+
+@pytest.mark.parametrize("kind", ["body", "move"])
+def test_prebounce_admission_never_exempts_postbounce_contacts(kind):
+    contact = PathContact(150, 12, kind, MOVE)
+    r = check(scan(contact))
+    assert r.verdict == "reject"
+    assert r.retained == (contact,)
+
+
+def test_no_target_admission_means_normal_planner_check_even_before_bounce():
+    contact = PathContact(140, 12, "move", MOVE)
+    r = check(scan(contact), admission=None)
+    assert r.verdict == "reject"
+
+
+def test_guard_for_second_slam_cannot_admit_the_first_even_on_same_monster():
+    second = MoveInstance(MOVE.target_iid, 120, MOVE.family)
+    guard = TargetMoveAdmission(second, 120, 170, "h2:test:event120", "pass")
+    with pytest.raises(ValueError, match="move identity mismatch"):
+        check(scan(), admission=guard)
+
+
+def test_guard_cannot_be_reused_for_another_decision_frame():
+    with pytest.raises(ValueError, match="another decision frame"):
+        check(scan(), first_frame=101)
+
+
+@pytest.mark.parametrize("verdict", ["reject", "unchecked"])
+def test_guard_not_passed_never_grants_an_empty_path_admission(verdict):
+    r = check(scan(), admission=replace(GUARD, verdict=verdict))
+    assert r.verdict == verdict
+
+
+@pytest.mark.parametrize("kind", ["body", "move"])
+def test_continuations_check_remaining_current_slam_normally(kind):
+    target_contact = PathContact(152, 12, kind, MOVE)
+    opts = [option("left", "left_landing", contacts=(target_contact,)),
+            option("right", "right_landing")]
+    r = assess(opts, lambda o: scan(first=149, last=200, path=o.path_ref))
+    assert r.mode == "full_exit"
+    assert r.qualifying_kinds == ("right_landing",)
+    left = next(x for x in r.checks if x.option_id == "left")
+    assert left.path_result.retained == (target_contact,)
+
+
+def test_complete_exit_includes_targets_next_move():
+    next_move = MoveInstance(12, 170, "CC_JUMP")
+    contact = PathContact(175, 12, "move", next_move)
+    r = assess([option("dash", "dash_out")],
+               lambda o: scan(contact, first=149, last=200, path=o.path_ref))
+    assert r.verdict == "reject"
+    assert r.checks[-1].path_result.retained == (contact,)
