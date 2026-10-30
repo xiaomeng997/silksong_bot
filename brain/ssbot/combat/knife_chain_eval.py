@@ -22,6 +22,10 @@ FORMAT_VERSION = "0.1"
 CATEGORIES = {"A": "observation / math / hold filter", "B": "key template", "C": "planning module (not migrated)"}
 NOT_ENCODED = "not encoded:"
 
+class ChainObservationNotReady(RuntimeError):
+    """A native rule read an observed event before its required lead elapsed."""
+
+
 class Prims:
     """The fixed vocabulary, each entry with its kind and category (A / B / C, CATEGORIES)."""
 
@@ -214,7 +218,7 @@ class ChainRunner:
         fork.reset()
         return fork
 
-    def preview(self, *args, static_context=(), **kwargs):
+    def preview(self, *args, static_context=(), observed_history=None, observation_cutoff=None, **kwargs):
         """Evaluate a private draft without committing run state or touching input objects.
 
         Copy the runner AND inputs together to preserve aliases inside the draft.
@@ -229,9 +233,20 @@ class ChainRunner:
         if any(not any(obj is item for item in allowed) for obj in static_context):
             raise ValueError("preview static context must be the evaluator's table/registry/config")
         memo = {id(obj): obj for obj in static_context}
-        trial, copied_args, copied_kwargs = deepcopy((self, args, kwargs), memo)
-        mask = trial.step(*copied_args, **copied_kwargs)
+        if observed_history is not None:
+            # Only the caller-owned history snapshot attached to this anchor is
+            # borrowable. Family primitives read it; mutable plans/Run/inputs
+            # remain private. The default preview still copies its whole input.
+            from .knife_chain_history import HistView
+            if type(observed_history) is not HistView or observed_history is not getattr(self.anchor, "hist", None):
+                raise ValueError("preview history must be the anchor's observed HistView")
+            memo[id(observed_history)] = observed_history
         f = args[0] if args else kwargs["f"]
+        if observation_cutoff is not None and (type(observation_cutoff) is not int or observation_cutoff > f):
+            raise ValueError("observation cutoff must not be in the future")
+        trial, copied_args, copied_kwargs = deepcopy((self, args, kwargs), memo)
+        trial.observation_cutoff = observation_cutoff
+        mask = trial.step(*copied_args, **copied_kwargs)
         return ChainPreview(f, mask, trial)
 
     def reset(self) -> None:
@@ -258,7 +273,12 @@ class ChainRunner:
             if e.startswith("var.tmp."):
                 return x.tmp.get(e[8:])
             if e.startswith("var."):
-                return x.v.get(e[4:])
+                name = e[4:]
+                value = x.v.get(name)
+                read = getattr(self.anchor, "read_value", None)
+                if read is not None:
+                    read(x, name, value)
+                return value
             if e.startswith("tmp."):
                 raise KeyError(f"scratch reference {e!r}: write var.{e}")
             if e.startswith("clk."):

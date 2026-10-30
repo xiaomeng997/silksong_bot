@@ -354,6 +354,8 @@ def test_native_external_entry_reuses_binding_with_fresh_history_state(monkeypat
     result=a.rows(T=3,origin=100,prefix=np.array([0]),hold=hold(),hero_state=np.zeros(1),completions=ordinary)
     assert result is not None and a._draft.run.entered is not None
     assert a.runner.run is None and table_digest(a.runner.chains)==digest
+    assert not hasattr(a.runner.anchor.hist,"_start_cache")
+    assert a._draft.anchor._start_cache is not a.runner.anchor._start_cache
 
 
 @pytest.mark.parametrize("sent,expected", [({10:2}, []), ({8:0,10:2}, []), ({9:0,10:2}, [10])])
@@ -435,3 +437,86 @@ def test_production_policy_reuses_bound_native_controller_across_episodes(monkey
     with pytest.raises(ValueError,match="configuration changed"):
         policy._reset_chain_native()
     assert len(calls)==1
+
+
+@pytest.mark.parametrize("skew,missing,expected", [(0,False,True),(1,False,True),(2,False,False),(1,True,False)])
+def test_external_entry_clock_skew_never_fabricates_missing_receipts(skew, missing, expected):
+    from ssbot.combat.knife_chain_history import HistView
+    sent = {f: 0 for f in range(100, 107)}
+    if missing: del sent[101]
+    hist = HistView([], sent, 105)
+    assert hist.complete_antic_receipts({"first_tick":100+skew,"fa":100}) == expected
+
+
+def test_native_long_history_is_borrowed_while_mutable_run_and_state_are_private():
+    from ssbot.combat.knife_chain_history import HistView
+    class NoCopy(dict):
+        def __deepcopy__(self, memo):
+            raise AssertionError("preview copied a historical STATE")
+    a=audit();seed(a)
+    # All 1,200 records are owned observations. Copying just one fails this test.
+    for f in range(-1100, 99): a._ticks.append((f,NoCopy(f=f),f/60,True,True))
+    Policy(a).act(state(100),None)
+    assert len(a.runner.anchor.hist.rows) == 1200
+    assert a._draft.anchor.hist is a.runner.anchor.hist
+    assert a._draft.anchor is not a.runner.anchor and a.runner.run is None
+    a._draft.run.v["a"]=-999
+    assert a.runner.run is None
+    with pytest.raises(ValueError,match="anchor.*HistView"):
+        a.runner.preview(100,state(100),True,observed_history=HistView([],{},100))
+
+
+@pytest.mark.parametrize("owner,changed_tail", [("plan",False),("sup",False),("plan",True)])
+def test_equivalent_row_needs_whole_projection_and_successful_plan_send(owner, changed_tail):
+    a=audit();seed(a)
+    s=state(100)
+    a.begin(s);a.prepare(s,ground=True,accepting=True,sim=SimpleNamespace(fo=100,f=100))
+    R=MASK_NAMES["R"]
+    rows,_=a.rows(T=3,origin=100,prefix=np.array([0]),hold=hold(),hero_state=np.zeros(1),
+                  completions=np.array([[R,R,0]],np.int64))
+    ordinary=rows[0].copy()
+    if changed_tail: ordinary[-1]=R
+    assert a.register_equivalent(3,ordinary) == (not changed_tail)
+    a.planner_result(SimpleNamespace(idx=3,mask=R,name="ordinary"))
+    assert a.runner.run is None
+    a.final(owner,R)
+    episode._act(wire_link(a),100,SimpleNamespace(chain_native=a,act=lambda s,tap:R,action_flags=0),s,None)
+    assert bool(a.runner.run) == (owner=="plan" and not changed_tail)
+
+
+@pytest.mark.parametrize("stance", [29.,30.3,32.])
+@pytest.mark.parametrize("late_failure", [False,True])
+def test_full_candidate_set_natural_selection_retains_only_checked_equivalent_chain(monkeypatch, stance, late_failure):
+    import math
+    from ssbot.combat import forum_planner as fp, dslash, special_mode
+    from ssbot.combat.planner import PlannerConfig
+    from ssbot.combat.tactics.modes import GoalPrefs
+    from ssbot.knowledge import kinematics as k
+    from ssbot.map2.envelope import load_params
+    from tests.test_forum_planner import _ctx, _world, _reed_forecaster
+    params=load_params(hero2=True)
+    terrain=k.Terrain2D.from_boxes([(10.,0.,53.,3.)])
+    start=k.initial_state(params,27.,3.+params.foot)
+    h=k.HoldState.idle();prefix=np.array([0],np.int64)
+    planner=fp.ForumPlanner(params,terrain,PlannerConfig(T=36,threads=1,variants="bounds",tail_k=0),
+        fp.ForumConfig(v2=False,react="escape+n",deadline_ms=math.inf,esc_deadline_ms=math.inf),crest="Wanderer")
+    monkeypatch.setattr(dslash,"DSLASH",False)
+    monkeypatch.setattr(special_mode,"HITS_FIRST",False)
+    if late_failure:
+        monkeypatch.setattr(planner,"_escape_pick",lambda *args,**kw:(int(args[6][0]),1,1,1,[]))
+    a=audit();seed(a)
+    s=state(100);a.begin(s)
+    a.planner_input(origin=100,prefix=prefix,hold=h,hero_state=start)
+    a.prepare(s,ground=True,accepting=True,sim=SimpleNamespace(fo=100,f=100))
+    planner.chain_native=a
+    ws=_world(27.);ws.stamp.frame=100
+    # Complete real ordinary set, ordinary score only; no row pruning or bonus.
+    result=planner.tick(ws,start,h,prefix,_reed_forecaster(None,x=45.).forecast(.8),
+                        GoalPrefs("ENGAGE",stance,{"stance":10.}),_ctx())
+    assert result.mask==MASK_NAMES["R"] and not result.name.startswith("CHAIN")
+    a.planner_result(result);a.final("plan",result.mask)
+    assert bool(a.dispatch.selection) == (not late_failure)
+    if not late_failure:
+        assert planner.prev_cmd is None and a.counts["chain_equivalent_row"]==1
+    episode._act(wire_link(a),100,SimpleNamespace(chain_native=a,act=lambda s,tap:result.mask,action_flags=0),s,None)
+    assert bool(a.runner.run)==(not late_failure)

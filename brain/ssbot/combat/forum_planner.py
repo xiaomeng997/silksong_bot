@@ -4807,7 +4807,14 @@ class ForumPlanner(Planner):
             for q in range(n_chain):
                 cr = C0 + q
                 chain.row_results(cr, allowed=ok[cr], enveloped=env[cr], unsafe=S[cr], safe=safe[cr], score=J[cr])
-            if C0 <= res.idx < C0 + n_chain:
+            equivalent = False
+            if (0 <= res.idx < N0 and safe[res.idx] and not res.S and not esc_unsafe
+                    and (cfg.tail_k <= 0 or tail_ok is True)):
+                # Ranking may pick an identical ordinary row before its native
+                # duplicate. Keep that row/result unchanged and merge only the
+                # proven chain provenance, after all final checks have passed.
+                equivalent = chain.register_equivalent(int(res.idx), cmd[res.idx])
+            if C0 <= res.idx < C0 + n_chain or equivalent:
                 # Re-evaluate the chain on the next real observation; no static
                 # CONTINUE can inherit a logical run or its pulse-release tail.
                 self.prev_cmd = None

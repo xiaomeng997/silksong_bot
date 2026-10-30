@@ -163,6 +163,7 @@ class SlamAnchor:
         self.rg_circ: dict = {}
         self.csx = None
         self.cs_declines: dict = {}
+        self._start_cache: dict = {}          # derived scratch, never stored on borrowed HistView
         self._args = None
         self.entries: list = []               # external entries made [f, link, sources]
         self.handled_antics: set = set()      # external entry: antics (first tick) this runner closed a run of
@@ -241,12 +242,24 @@ class SlamAnchor:
         f, s, ground, accepting, t_game, skip, sim, guard, _ = self._args
         return self.step(x.R, f, s, ground, accepting, t_game, skip, sim, guard, None)
 
+    def require_slam0(self, x, seen_frame):
+        cutoff = getattr(x.R, "observation_cutoff", None)
+        if cutoff is not None and seen_frame is not None and seen_frame > cutoff:
+            raise CV.ChainObservationNotReady("Slam 0 observation lacks two-frame lead")
+
+    def read_value(self, x, name, value):
+        # Absence of Slam 0 does not block antic-clock attacks. Only a rule
+        # reading an actual observed Slam 0 may incur the native causal gate.
+        if name in ("s0", "ks0") and value is not None:
+            self.require_slam0(x, x.v.get("s0"))
+
     def clock(self, x, name: str):
         v = x.v
         k = v["k"]
         if name == "antic":
             return k
         if name == "s0":
+            self.require_slam0(x, v.get("s0"))
             return None if v.get("ks0") is None else k - v["ks0"]
         if name == "press":
             return None if v.get("k_press") is None else k - v["k_press"]
@@ -270,6 +283,7 @@ class SlamAnchor:
 
     def step(self, R, f, s, ground, accepting, t_game, skip, sim, guard, bombs):
         c = self.cfg
+        self._start_cache = {}
         self._args = (f, s, ground, accepting, t_game, skip, sim, guard, bombs)
         t = f / 60.0 if t_game is None else float(t_game)
         self.t = t
@@ -904,7 +918,7 @@ START_LINKS = ("look", "land")
                         "{link: look | land | walk (started) | closed, k_start, k_air, late, stand, band, x_start}")
 def v_h_start(x):
     H, an = _H(x)
-    cache = H.__dict__.setdefault("_start_cache", {})
+    cache = x.R.anchor._start_cache
     key = (an["iid"], an["first_tick"], x.obs.f)
     if key in cache:
         return cache[key]
@@ -958,6 +972,7 @@ def _side_decision(self, x):
     if kp is None or s0 is None:
         return None
     f_s0, ks0 = s0
+    self.require_slam0(x, f_s0)
     cond = "s_hit" if v0.get("cs") is not None else "vy_gt"
     fb = H.first_tick(an, kp, cond, self.cfg["bounce_vy"], v0["iid"], before_f=x.obs.f)
     if fb is None:

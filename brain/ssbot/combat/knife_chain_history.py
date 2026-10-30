@@ -68,6 +68,15 @@ class HistView:
         return {"iid": iid, "first_tick": f0, "ta": t0 - tin, "fa": int(f0 - round(tin * 60.0)),
                 "face": 1 if e.get("flipX") else -1}
 
+    def complete_antic_receipts(self, an: dict | None) -> bool:
+        """At most one state-clock frame of entry skew, never a missing send.
+
+        fa is measured from the observed FSM time, not a fabricated earlier
+        STATE. Unknown edge predecessors are still rejected by edges().
+        """
+        return (an is not None and 0 <= an["first_tick"] - an["fa"] <= 1
+                and all(F in self.sent for F in range(an["fa"] + 1, self.cut + 2)))
+
     def k_of_tick(self, f: int, an: dict) -> int:
         return int(round((self.t_game(f) - an["ta"]) * 60.0)) + SEND + self.lag
 

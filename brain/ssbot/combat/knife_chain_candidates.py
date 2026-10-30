@@ -97,6 +97,8 @@ class NativeChainCandidates(NativeChainAudit):
         self._draft = None
         self._offer = None
         self._context = None
+        self._projection = None
+        self._proposal_blocker = None
         self._ticks = deque(maxlen=1200)
         self._receipts = {}
         self._pending = {}
@@ -106,6 +108,8 @@ class NativeChainCandidates(NativeChainAudit):
         super().reset(episode, start_frame=start_frame)
 
     def _note(self, event, **data):
+        if event in ("chain_unchecked", "chain_no_proposal"):
+            self._proposal_blocker = data.get("reason", event)
         super()._note(event, **data)
         if self.journal:
             if self._journal_file is None:
@@ -122,14 +126,14 @@ class NativeChainCandidates(NativeChainAudit):
         if self.runner.run is not None:
             self._note("chain_interrupted", frame=self.last_observed, link=self.runner.run.lid, reason=why)
         self.runner.reset()
-        self._draft = self._offer = None
+        self._draft = self._offer = self._projection = None
 
     def begin(self, state, history=()):
         # A policy error/early return may have skipped the prior send callback.
         if self._draft is not None:
             self._abandon("previous draft had no successful send")
         super().begin(state, history)
-        self._context = None
+        self._context = self._projection = self._proposal_blocker = None
 
     def observe(self, state):
         f = state["f"]
@@ -209,8 +213,7 @@ class NativeChainCandidates(NativeChainAudit):
         hist = HistView(list(self._ticks), self._receipts, f, lag=self.runner.cfg0.get("lag", 0))
         # No private old-script state and no zero-padding of unknown sent keys.
         an = hist.antic(e["iid"], "Slam Antic", ())
-        full_history = (an is not None and an["first_tick"] == an["fa"] and
-                        all(F in self._receipts for F in range(an["fa"] + 1, f + 2)))
+        full_history = hist.complete_antic_receipts(an)
         self.runner.anchor.hist = hist
         self.runner.anchor.external = self.runner.run is None and full_history
         if self.runner.run is None and control(e)[0] != "Slam Antic" and not full_history:
@@ -219,11 +222,18 @@ class NativeChainCandidates(NativeChainAudit):
         t0 = time.perf_counter_ns()
         # The ported family never writes its rule records, binding or registry.
         # Sharing these removes repeated copies of 29 validated links, while its
-        # plans, observation history, inputs and all action-dependent state stay private.
+        # plans, inputs and action-dependent state stay private. The owned
+        # observed-history snapshot is read-only to this trusted family.
         static = (self.runner.chains, self.runner.P, self.runner.cfg0, self.runner.binding,
                   getattr(self.runner.anchor, "chains", None), getattr(self.runner.anchor, "cfg", None))
-        preview = self.runner.preview(f, state, ground, accepting, t_game=game, sim=sim, guard=guard, bombs=bombs,
-                                      static_context=tuple(x for x in static if x is not None))
+        from .knife_chain_eval import ChainObservationNotReady
+        try:
+            preview = self.runner.preview(f, state, ground, accepting, t_game=game, sim=sim, guard=guard, bombs=bombs,
+                                          static_context=tuple(x for x in static if x is not None),
+                                          observed_history=hist, observation_cutoff=f - 2)
+        except ChainObservationNotReady as exc:
+            self._note("chain_unchecked", frame=f, reason=str(exc))
+            return None
         ms = (time.perf_counter_ns() - t0) / 1e6
         run = preview.draft.run
         if preview.mask is None or run is None:
@@ -235,9 +245,6 @@ class NativeChainCandidates(NativeChainAudit):
         if mask & MASK_NAMES["CLAW"] or str((state.get("hero") or {}).get("anim", {}).get("clip", "")).startswith("Harpoon"):
             self._note("chain_unchecked", frame=f, link=lid, reason="hook motion needs a native rollout adapter",
                        generation_ms=ms)
-            return None
-        if run.link in ("after", "air") and self._slam0_seen.get(e["iid"], f) > f - 2:
-            self._note("chain_unchecked", frame=f, link=lid, reason="exit observation lacks two-frame lead")
             return None
         admission = evaluate_admission(preview.draft.chains[run.chain].admission[run.link], {}, frame=f)
         offer = self.dispatch.offer(lid, mask, table_ref=self.runner.binding["table_digest"], admission=admission)
@@ -261,6 +268,7 @@ class NativeChainCandidates(NativeChainAudit):
             cmd[:, 0] = mask
             projection = "ordinary_completions"
         self._draft, self._offer = preview.draft, offer
+        self._projection = cmd.copy()
         self._note("chain_proposal", frame=f, link=lid, mask=mask, generation_ms=ms,
                    admission=admission.verdict, probe_ref=self.probe_ref, projection=projection, T=T,
                    rows=len(cmd), available_completions=available, capped=available > len(cmd),
@@ -271,6 +279,23 @@ class NativeChainCandidates(NativeChainAudit):
         if self._offer is None:
             raise NativeChainAuditError("native row without a current draft")
         self.register_row(index, self._offer, probe_ref=self.probe_ref)
+
+    def register_equivalent(self, index, command):
+        """Attach provenance to a freshly checked ordinary row, without ranking it.
+
+        Called only after the planner's final safety/escape/tail checks. Exact
+        full-row equality is required, not merely a shared first key. Ordinary
+        rows, cached CONTINUE, overrides and transport keep their own checks.
+        """
+        if self._projection is None or self._offer is None or self._draft is None:
+            return False
+        command = np.asarray(command, np.int64)
+        if command.shape != self._projection.shape[1:] or not np.any(np.all(self._projection == command, axis=1)):
+            return False
+        self.register_candidate(index)
+        self._note("chain_equivalent_row", frame=self.dispatch.frame, row=index,
+                   link=self._offer.link, proof="identical full ordinary completion")
+        return True
 
     def row_results(self, index, *, allowed, enveloped, unsafe, safe, score):
         self._note("chain_row_evaluated", frame=self.dispatch.frame, row=index, allowed=bool(allowed),
@@ -285,12 +310,14 @@ class NativeChainCandidates(NativeChainAudit):
             del self._receipts[old]
         if sent.chain_outcome == "sent" and self._draft is not None and sent.selection.offer is self._offer:
             self.runner = self._draft
-            self._draft = self._offer = None
+            self._draft = self._offer = self._projection = None
             self._pending[sent.target_frame] = sent.desired_mask
             self._note("chain_intent_committed", frame=sent.frame, target=sent.target_frame,
                        link=self.runner.run.lid, physical_action="unchecked", contact="unchecked")
         else:
-            self._abandon("row unselected or final owner/keys overridden")
+            why = ("no proposal: " + self._proposal_blocker if self._offer is None and self._proposal_blocker
+                   else "row unselected or final owner/keys overridden")
+            self._abandon(why)
         self.flush()
         return sent
 

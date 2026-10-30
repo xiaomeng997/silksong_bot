@@ -136,3 +136,21 @@ def test_history_fork_has_fresh_mutable_state_and_reuses_only_bound_data():
     assert r.run.v == original and r.run.sent == [(12,1<<21)]
     with pytest.raises(ValueError, match="fresh anchor"):
         r.fork_empty(r.anchor)
+
+
+@pytest.mark.parametrize("observed,cutoff,blocked", [(None,98,False),(99,98,True),(98,98,False)])
+@pytest.mark.parametrize("name", ["s0","ks0"])
+def test_native_slam0_reads_require_lead_only_for_an_observed_event(observed, cutoff, blocked, name):
+    from ssbot.combat.knife_chain_slam import load_runner, Obs
+    from ssbot.combat.knife_chain_eval import ChainObservationNotReady
+    r=load_runner();r.observation_cutoff=cutoff
+    v={"s0":observed,"ks0":None if observed is None else 48,"k":49}
+    x=X(r,Run("slam_jump","air",v),SimpleNamespace(f=100))
+    if blocked:
+        with pytest.raises(ChainObservationNotReady): r.ev(x,"var."+name)
+        with pytest.raises(ChainObservationNotReady): r.anchor.clock(x,"s0")
+    else:
+        assert r.ev(x,"var."+name)==v[name]
+        assert r.anchor.clock(x,"s0")== (None if observed is None else 1)
+    # The independent antic clock never acquires that requirement.
+    assert r.anchor.clock(x,"antic")==49
