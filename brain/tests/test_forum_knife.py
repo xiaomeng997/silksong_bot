@@ -171,6 +171,21 @@ def test_native_generator_declares_worlds_before_contact_and_never_checks_miss(m
         prefix=args[6], T=36, cmd=result.cmd[0], latched=result.custom[0]["latched"]).shape[0] > 36
 
 
+
+def test_reference_domain_exists_before_table_proposal_filtering(monkeypatch):
+    from ssbot.combat import forum_knife_coupled as coupled
+    args = _native_hook_case(monkeypatch); seen = []
+    original = coupled.expected_slam_worlds
+    monkeypatch.setattr(coupled, "expected_slam_worlds", lambda *a: (seen.append("domain"), original(*a))[1])
+    def absent(keys):
+        assert seen == ["domain"]
+        seen.append("table")
+        return np.zeros(len(keys), bool)
+    args[1]._has_full = absent
+    assert fk.append_rows(*args) is None
+    assert seen == ["domain", "table"]
+
+
 @pytest.mark.parametrize("P,T,passed", [(1,32,True),(2,36,True),(3,40,True),(1,45,False),(1,48,False)])
 def test_native_generator_uses_actual_P_T_and_contact_boundary(monkeypatch,P,T,passed):
     args = list(_native_hook_case(monkeypatch));args[6]=np.zeros(P,np.int64);args[8]=T

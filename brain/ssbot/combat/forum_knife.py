@@ -412,7 +412,7 @@ def contract_reject(info, stage, reason, *, identity=None):
 
 
 def certify_hook(planner, win, ws, forecast, start, hold, prefix, prefs, T,
-                 obs, raw, wire, launch, info, memo):
+                 obs, raw, wire, launch, expected_worlds, info, memo):
     """Native all-world hook proposal -> full hit paths -> one shared exit.
 
     Declare the reference domain before inspecting any candidate contact. The
@@ -434,7 +434,7 @@ def certify_hook(planner, win, ws, forecast, start, hold, prefix, prefs, T,
         phases[name] = (now - phase_begin) / 1e6
         phase_begin = now
     try:
-        expected = hit._expected_domain(coupled.expected_slam_worlds(obs, knowledge))
+        expected = hit._expected_domain(expected_worlds)
     except ValueError as exc:
         contract_reject(info, stage, exc, identity=int(obs.iid))
         return None
@@ -575,6 +575,14 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
     if not ow.rx.in_states(o.st, o.j, wt.anchor):
         info["gate"] = "window"
         return ds
+    # Reference domain precedes table-cell/margin/proposal/contact filtering.
+    # It is derived only from the observed target and its original Know.
+    from ssbot.combat.forum_knife_coupled import expected_slam_worlds
+    try:
+        expected = expected_slam_worlds(obs[0], win.knife_knowledge)
+    except ValueError as exc:
+        contract_reject(info, "expected_domain", exc, identity=int(obs[0].iid))
+        return ds
     memo = {} if memo is None else memo
     if "prefix_state" not in memo:
         pre_lat, _ = hold_filter_jit(np.asarray(prefix)[None], hold)
@@ -615,7 +623,7 @@ def _append_once(planner, win, ws, f, start, hold, prefix, prefs, T, posture, ds
                             "changed_frames": differences.tolist(),
                             "meaning": "all subsequent models use the filtered wire keys"})
     certified = certify_hook(planner, win, ws, f, start, hold, prefix, prefs,
-                             T, obs[0], raw, lat[0], P + press, info, memo)
+                             T, obs[0], raw, lat[0], P + press, expected, info, memo)
     if certified is None:
         info["ms"] = (time.perf_counter() - t0) * 1000
         return ds
