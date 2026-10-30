@@ -433,7 +433,12 @@ class ForumPlannerPolicy(PlannerPolicy):
                 raise ValueError("native chain probe conflicts with another controller/cache")
             from ssbot.combat.knife_chain_candidates import NativeChainCandidates
             journal = None if self.log_path is None else str(self.log_path.with_suffix(".chain.jsonl"))
-            self.chain_native = NativeChainCandidates.from_env(journal=journal)
+            existing = getattr(self, "chain_native", None)
+            if isinstance(existing, NativeChainCandidates):
+                if not existing.can_reuse(journal=journal):
+                    raise ValueError("native probe configuration changed; start a new fixed-config controller")
+            else:
+                self.chain_native = NativeChainCandidates.from_env(journal=journal)
         elif os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
             self.chain_native = None
         elif type(getattr(self, "chain_native", None)).__name__ != "NativeChainAudit":

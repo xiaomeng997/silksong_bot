@@ -58,6 +58,7 @@ class NativeChainCandidates(NativeChainAudit):
         self.probe_ref = probe_ref
         self.journal = journal
         self._journal_file = None
+        self._environment = self.environment_key()
         super().__init__(trace_limit=trace_limit)
 
     @classmethod
@@ -69,9 +70,30 @@ class NativeChainCandidates(NativeChainAudit):
         return cls(runner_factory=load_runner, probe_ref=os.environ.get("SSBOT_FORUM_CHAIN_PROBE", ""),
                    journal=journal)
 
+    @staticmethod
+    def environment_key():
+        """A bound probe has fixed configuration; a reset cannot hot-reload it."""
+        import os
+        return tuple(sorted((k, v) for k, v in os.environ.items() if k.startswith("SSBOT_")))
+
+    def can_reuse(self, *, journal):
+        import os
+        return (self._environment == self.environment_key()
+                and self.probe_ref == os.environ.get("SSBOT_FORUM_CHAIN_PROBE", "")
+                and self.journal == journal)
+
     def reset(self, episode, *, start_frame=None):
         self.flush()
-        self.runner = self.runner_factory()
+        if getattr(self, "runner", None) is None:
+            self.runner = self.runner_factory()  # parse/bind once for this fixed probe
+        else:
+            self.runner.reset()
+        # These adapter inputs are not cleared by the generic anchor reset.
+        # Never retain an earlier episode's HistView or external-entry mode.
+        if hasattr(self.runner.anchor, "hist"):
+            self.runner.anchor.hist = None
+        if hasattr(self.runner.anchor, "external"):
+            self.runner.anchor.external = False
         self._draft = None
         self._offer = None
         self._context = None

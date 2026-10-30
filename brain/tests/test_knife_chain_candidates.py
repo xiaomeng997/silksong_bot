@@ -362,3 +362,53 @@ def test_production_activation_rejects_wrong_physics_crest_or_paused_generator(m
     monkeypatch.setattr(k,"hero2_on",lambda:hero2)
     policy=ForumPlannerPolicy.__new__(ForumPlannerPolicy);policy.crest=crest
     with pytest.raises(ValueError):policy._reset_chain_native()
+
+
+
+def test_episode_reset_reuses_binding_but_discards_history_and_private_state():
+    calls=[]
+    def factory():
+        calls.append(1)
+        return runner()
+    a=audit(factory=factory);seed(a)
+    episode._act(wire_link(a),100,Policy(a),state(100),None)
+    bound=a.runner.binding;tables=a.runner.chains
+    assert a.runner.anchor.hist is not None
+    for episode_id in (2,3,4):
+        a.reset(episode_id,start_frame=10)
+        assert a.runner.binding is bound and a.runner.chains is tables
+        assert a.runner.run is None and a.runner.done==[] and a.runner.fired=={}
+        assert a.runner.anchor.hist is None and a.runner.anchor.external is False
+        assert not a._receipts and not a._pending and not a._ticks and a._context is None
+        assert a.dispatch.sent_for(102) is None and a.counts=={}
+    assert len(calls)==1
+
+
+def test_production_policy_reuses_bound_native_controller_across_episodes(monkeypatch,tmp_path):
+    from ssbot.train.forum_planner_policy import ForumPlannerPolicy
+    from ssbot.combat import knife_chain_slam as family
+    from ssbot.knowledge import kinematics as k
+    calls=[]
+    def factory():
+        calls.append(1)
+        return runner()
+    monkeypatch.setenv("SSBOT_FORUM_CHAIN_NATIVE","1")
+    monkeypatch.setenv("SSBOT_FORUM_CHAIN_PROBE","offline:binding-reuse")
+    monkeypatch.setenv("SSBOT_FORUM_KNIFE_ROWS","0")
+    monkeypatch.setattr(k,"hero2_on",lambda:True)
+    monkeypatch.setattr(family,"load_runner",factory)
+    policy=ForumPlannerPolicy.__new__(ForumPlannerPolicy)
+    policy.crest="Wanderer";policy.log_path=tmp_path/'decisions_i0.jsonl'
+    policy.planner=SimpleNamespace(chain_native=None);policy.link=SimpleNamespace(frame=90)
+    policy.episode=0;policy.chain_native=None
+    policy._reset_chain_native();native=policy.chain_native
+    episode._act(wire_link(native),100,Policy(native),state(100),None)
+    policy.episode=1;policy.link.frame=200;policy._reset_chain_native()
+    assert policy.chain_native is native and policy.planner.chain_native is native
+    assert len(calls)==1 and native.episode==1 and native.last_observed==200
+    assert native.dispatch.sent_for(102) is None and native.counts=={}
+    monkeypatch.setenv("SSBOT_FORUM_SLAM_PLAY_SET","new-configuration")
+    policy.episode=2
+    with pytest.raises(ValueError,match="configuration changed"):
+        policy._reset_chain_native()
+    assert len(calls)==1
