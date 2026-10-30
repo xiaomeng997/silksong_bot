@@ -1229,7 +1229,7 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 ### 6.31 半截切入用例与投影断链分类【f3d365a8；审计增补，163项相关回归】
 
-**需求与范围。** 用户转交Opus关于劈第一只后空中转劈第二只的入口问题，现行规格已原位补6.21。核了单只范围及v0.1全局按键入口；误读是代码推断，未测双怪。不直接打开两只门槛或AIRCHAIN，不在首轮范围；当时36022b0c和e05的OP5分别在途；36022后已按6.32接收，本段e05/f3随后接收见6.33，本段不扩大其结论范围。
+**需求与范围。** 用户转交Opus关于劈第一只后空中转劈第二只的入口问题，现行规格已原位补6.21。核了单只范围及v0.1全局按键入口；误读是代码推断，未测双怪。不直接打开两只门槛或AIRCHAIN，不在首轮范围；当时36022b0c和e05的OP5分别在途；36022后已按6.32接收，e05/f3随后接收见6.33；本段不扩大其结论范围。
 
 **选择与提交分开记录。** 仍提出原顺序最多32条，另存未封顶去重族仅用于诊断。chain_projection_choice按actual selected row记ordinary/native/continue/other，relation为exact_in_projection（整行在已提案集）、exact_outside_cap（整行只在封顶外族）、same_first_different_tail（同首键但不在完整族）、different_first、no_matching_horizon；同时记最终安全、退路和尾段，未执行记None。正常真实发送返回后chain_projection_outcome再记intent是否提交/最终owner/chain_outcome；summary有projection_choices及projection_uncommitted逐回合计数。发送失败仍由transport_failed单列，不混进成功发键分母；提交意图不是应用/英雄动作/命中。只诊断，不按同首键直接认链，不放宽整行/新鲜模型/最终安全/owner/实际发送要求，不加分、不改物理或预测。
 
