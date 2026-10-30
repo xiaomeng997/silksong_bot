@@ -4818,6 +4818,12 @@ class ForumPlanner(Planner):
                 # Re-evaluate the chain on the next real observation; no static
                 # CONTINUE can inherit a logical run or its pulse-release tail.
                 self.prev_cmd = None
+            selected_kind = ("ordinary" if 0 <= res.idx < N0 else "native" if C0 <= res.idx < C0 + n_chain
+                             else "continue" if cont and res.idx == N - 1 else "other")
+            chain.note_projection_choice(int(res.idx), cmd[res.idx] if 0 <= res.idx < N else None,
+                                         kind=selected_kind, final_safe=not res.S,
+                                         escape_passed=not esc_unsafe if res.idx >= 0 else None,
+                                         tail_passed=tail_ok if res.idx >= 0 and cfg.tail_k > 0 else None)
         map_info = None
         if SPECIAL_MAP and self._map is not None:
             # SG4: the map row's outcome this tick (the overlay and the decision log read it), L2's spot

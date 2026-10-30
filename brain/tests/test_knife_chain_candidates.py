@@ -518,5 +518,42 @@ def test_full_candidate_set_natural_selection_retains_only_checked_equivalent_ch
     assert bool(a.dispatch.selection) == (not late_failure)
     if not late_failure:
         assert planner.prev_cmd is None and a.counts["chain_equivalent_row"]==1
+    assert a._projection_choice["relation"]=="exact_in_projection"
+    assert a._projection_choice["kind"]=="ordinary"
+    assert a._projection_choice["final_safe"] == (not late_failure)
     episode._act(wire_link(a),100,SimpleNamespace(chain_native=a,act=lambda s,tap:result.mask,action_flags=0),s,None)
     assert bool(a.runner.run)==(not late_failure)
+
+
+@pytest.mark.parametrize("choice,relation", [(0,"exact_in_projection"),(33,"exact_outside_cap"),
+    ("other_tail","same_first_different_tail"),("other_key","different_first")])
+@pytest.mark.parametrize("owner", ["plan","sup"])
+def test_projection_loss_diagnostics_never_relax_full_row_or_owner_checks(choice, relation, owner):
+    a=audit();seed(a)
+    s=state(100);a.begin(s)
+    a.prepare(s,ground=True,accepting=True,sim=SimpleNamespace(fo=100,f=100))
+    R=MASK_NAMES["R"]
+    pool=np.array([[R]+[R if q&(1<<j) else 0 for j in range(6)] for q in range(40)],np.int64)
+    rows,_=a.rows(T=7,origin=100,prefix=np.array([0]),hold=hold(),hero_state=np.zeros(1),completions=pool)
+    assert len(rows)==32 and len(a._projection_pool)==40
+    command=pool[choice].copy() if isinstance(choice,int) else rows[0].copy()
+    if choice=="other_tail": command[1:]=MASK_NAMES["DASH"]
+    if choice=="other_key": command[0]=MASK_NAMES["L"]
+    a.note_projection_choice(3,command,kind="ordinary",final_safe=True,escape_passed=True,tail_passed=None)
+    assert a._projection_choice["relation"]==relation
+    # Diagnostics alone never select an offer or advance a private run.
+    assert a.dispatch.selection is None and a.runner.run is None
+    exact=relation=="exact_in_projection"
+    assert a.register_equivalent(3,command)==exact
+    mask=int(command[0])
+    a.planner_result(SimpleNamespace(idx=3,mask=mask,name="ordinary"));a.final(owner,mask)
+    episode._act(wire_link(a),100,SimpleNamespace(chain_native=a,act=lambda s,tap:mask,action_flags=0),s,None)
+    committed=exact and owner=="plan"
+    assert bool(a.runner.run)==committed
+    assert a.summary()["projection_choices"]=={relation:1}
+    assert a.summary()["projection_uncommitted"]==({} if committed else {relation:1})
+    event=[x for x in a.events if x["event"]=="chain_projection_outcome"][-1]
+    assert event["committed"]==committed and event["choice"]["relation"]==relation
+    a.reset(2,start_frame=10)
+    assert a.summary()["projection_choices"]==a.summary()["projection_uncommitted"]=={}
+    assert a._projection_pool is None and a._projection_choice is None

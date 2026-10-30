@@ -10,7 +10,7 @@ default. Transport success commits logical intent, never hero contact/protection
 """
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -98,6 +98,10 @@ class NativeChainCandidates(NativeChainAudit):
         self._offer = None
         self._context = None
         self._projection = None
+        self._projection_pool = None
+        self._projection_choice = None
+        self._projection_choices = Counter()
+        self._projection_uncommitted = Counter()
         self._proposal_blocker = None
         self._ticks = deque(maxlen=1200)
         self._receipts = {}
@@ -126,14 +130,14 @@ class NativeChainCandidates(NativeChainAudit):
         if self.runner.run is not None:
             self._note("chain_interrupted", frame=self.last_observed, link=self.runner.run.lid, reason=why)
         self.runner.reset()
-        self._draft = self._offer = self._projection = None
+        self._draft = self._offer = self._projection = self._projection_pool = None
 
     def begin(self, state, history=()):
         # A policy error/early return may have skipped the prior send callback.
         if self._draft is not None:
             self._abandon("previous draft had no successful send")
         super().begin(state, history)
-        self._context = self._projection = self._proposal_blocker = None
+        self._context = self._projection = self._projection_pool = self._projection_choice = self._proposal_blocker = None
 
     def observe(self, state):
         f = state["f"]
@@ -264,11 +268,15 @@ class NativeChainCandidates(NativeChainAudit):
             if not len(same): same = ordinary[:1]
             _, indices = np.unique(same[:, 1:], axis=0, return_index=True)
             available = len(indices)
-            cmd = same[np.sort(indices)[:32]].copy()
-            cmd[:, 0] = mask
+            # Keep the uncapped family only for projection-loss diagnostics.
+            # It neither expands offered rows nor permits extra continuations.
+            pool = same[np.sort(indices)].copy()
+            pool[:, 0] = mask
+            cmd = pool[:32].copy()
             projection = "ordinary_completions"
         self._draft, self._offer = preview.draft, offer
         self._projection = cmd.copy()
+        self._projection_pool = cmd.copy() if completions is None else pool
         self._note("chain_proposal", frame=f, link=lid, mask=mask, generation_ms=ms,
                    admission=admission.verdict, probe_ref=self.probe_ref, projection=projection, T=T,
                    rows=len(cmd), available_completions=available, capped=available > len(cmd),
@@ -297,6 +305,32 @@ class NativeChainCandidates(NativeChainAudit):
                    link=self._offer.link, proof="identical full ordinary completion")
         return True
 
+    def note_projection_choice(self, index, command, *, kind, final_safe, escape_passed, tail_passed):
+        """Describe the selected row; this never grants chain ownership.
+
+        A full match outside the cap and a first-key-only match remain
+        unselected. Keep them separate from checked equivalents and overrides.
+        """
+        if self._projection is None or self._offer is None:
+            return
+        command = None if command is None else np.asarray(command, np.int64)
+        if command is None or command.shape != self._projection.shape[1:]:
+            relation = "no_matching_horizon"
+        elif np.any(np.all(self._projection == command, axis=1)):
+            relation = "exact_in_projection"
+        elif np.any(np.all(self._projection_pool == command, axis=1)):
+            relation = "exact_outside_cap"
+        elif int(command[0]) == self._offer.desired_mask:
+            relation = "same_first_different_tail"
+        else:
+            relation = "different_first"
+        self._projection_choice = {"row": int(index), "kind": str(kind), "relation": relation,
+                                   "final_safe": bool(final_safe),
+                                   "escape_passed": None if escape_passed is None else bool(escape_passed),
+                                   "tail_passed": None if tail_passed is None else bool(tail_passed)}
+        self._projection_choices[relation] += 1
+        self._note("chain_projection_choice", frame=self.dispatch.frame, **self._projection_choice)
+
     def row_results(self, index, *, allowed, enveloped, unsafe, safe, score):
         self._note("chain_row_evaluated", frame=self.dispatch.frame, row=index, allowed=bool(allowed),
                    enveloped=bool(enveloped), unsafe=bool(unsafe), safe=bool(safe), score=float(score))
@@ -308,9 +342,18 @@ class NativeChainCandidates(NativeChainAudit):
         # still retains every successful send, including already queued actions.
         for old in [f for f in self._receipts if f < sent.frame - 1202]:
             del self._receipts[old]
-        if sent.chain_outcome == "sent" and self._draft is not None and sent.selection.offer is self._offer:
+        committed = (sent.chain_outcome == "sent" and self._draft is not None
+                     and sent.selection.offer is self._offer)
+        if self._projection_choice is not None:
+            if not committed:
+                self._projection_uncommitted[self._projection_choice["relation"]] += 1
+            self._note("chain_projection_outcome", frame=sent.frame, target=sent.target_frame,
+                       choice=dict(self._projection_choice), committed=committed,
+                       final_owner=sent.owner, chain_outcome=sent.chain_outcome)
+        self._projection_choice = None
+        if committed:
             self.runner = self._draft
-            self._draft = self._offer = self._projection = None
+            self._draft = self._offer = self._projection = self._projection_pool = None
             self._pending[sent.target_frame] = sent.desired_mask
             self._note("chain_intent_committed", frame=sent.frame, target=sent.target_frame,
                        link=self.runner.run.lid, physical_action="unchecked", contact="unchecked")
@@ -332,6 +375,8 @@ class NativeChainCandidates(NativeChainAudit):
                 "projection": "ordinary_completions", "probe_ref": self.probe_ref,
                 "journal": str(self.journal) if self.journal else None,
                 "active_link": None if self.runner.run is None else self.runner.run.lid,
+                "projection_choices": dict(self._projection_choices),
+                "projection_uncommitted": dict(self._projection_uncommitted),
                 "hook_motion": "unchecked", "closed_loop_future": "unchecked",
                 "pending_application": sorted(self._pending),
                 "live_ready": False, "journal_scope": "episode._act and observed inbox; not a full STATE archive"}
