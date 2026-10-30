@@ -34,7 +34,7 @@ def sample():
 
 
 def bind(raw, **kwargs):
-    return bind_chains(chains_from_json(raw), primitives=registry(), observation_names={"x", "vy"}, **kwargs)
+    return bind_chains(chains_from_json(raw), primitives=registry(), observation_names={"x", "vy"}, context_names={"sent"}, **kwargs)
 
 
 def test_full_binding_never_executes_registry_and_preserves_records(tmp_path):
@@ -42,7 +42,7 @@ def test_full_binding_never_executes_registry_and_preserves_records(tmp_path):
     original = deepcopy(raw)
     p = tmp_path / "chain.json"
     p.write_text(json.dumps(raw))
-    chains, report = load_bound_chains(p, primitives=registry(), observation_names={"x", "vy"})
+    chains, report = load_bound_chains(p, primitives=registry(), observation_names={"x", "vy"}, context_names={"sent"})
     assert raw == original
     assert report["used"] == {"guards": ["airborne", "compare"], "acts": ["mark"], "gens": ["steer"],
                                "values": ["position"], "dirs": ["toward"], "observations": ["vy", "x"], "literals": []}
@@ -54,7 +54,7 @@ def test_missing_actual_registration_rejected(group):
     prims = registry()
     getattr(prims, group).clear()
     with pytest.raises(ChainFormatError, match="unregistered " + group):
-        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"})
+        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"}, context_names={"sent"})
 
 
 @pytest.mark.parametrize("change", [
@@ -118,11 +118,62 @@ def test_noncallable_registration_is_rejected(group):
     prims = registry()
     getattr(prims, group)["accidental_data"] = 1
     with pytest.raises(ChainFormatError, match="named callables"):
-        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"})
+        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"}, context_names={"sent"})
 
 
 def test_toward_direction_must_be_registered_even_though_syntax_allows_it():
     prims = registry()
     prims.dirs = {}
     with pytest.raises(ChainFormatError, match="unregistered dirs"):
-        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"})
+        bind_chains(chains_from_json(sample()), primitives=prims, observation_names={"x", "vy"}, context_names={"sent"})
+
+
+@pytest.mark.parametrize("field", ["needs", "carry"])
+@pytest.mark.parametrize("name", ["anchro", "sn et", "snet"])
+def test_cut_in_field_typos_fail_binding_instead_of_silent_refusal(field, name):
+    raw = sample()
+    raw["slam"]["links"]["air"][field] = [name]
+    with pytest.raises(ChainFormatError, match="unbound " + field):
+        bind(raw)
+
+
+def test_cut_in_names_need_independent_declaration_and_values_can_be_unknown():
+    raw = sample()
+    raw["slam"]["vars"]["anchor"] = None
+    chains = chains_from_json(raw)
+    with pytest.raises(ChainFormatError, match="unbound carry"):
+        bind_chains(chains, primitives=registry(), observation_names={"x", "vy"})
+    report = bind(raw)
+    assert report["entry_fields"] == {"slam": {"needs": ["anchor"], "carry": ["sent"], "adapter": ["sent"]}}
+    # Declaration only: no fake value is supplied, no admission/entry is run.
+    assert chains["slam"].vars["anchor"] is None
+
+
+def test_variable_in_another_chain_does_not_declare_this_entry_field():
+    raw = sample()
+    raw["slam"]["links"]["air"]["needs"] = ["other_only"]
+    other = deepcopy(raw["slam"])
+    other["id"] = "other"
+    other["vars"]["other_only"] = 0
+    other["links"]["air"]["needs"] = ["anchor"]
+    for key, link in other["links"].items():
+        link["id"] = "other." + key
+    for key, admission in other["admission"].items():
+        admission["link"] = "other." + key
+    raw["other"] = other
+    with pytest.raises(ChainFormatError, match="unbound needs"):
+        bind(raw)
+
+
+def test_observation_name_does_not_implicitly_declare_cut_in_context():
+    raw = sample()
+    raw["slam"]["links"]["air"]["carry"] = ["vy"]
+    with pytest.raises(ChainFormatError, match="unbound carry"):
+        bind(raw)
+
+
+@pytest.mark.parametrize("context_names", ["sent", {"bad name"}])
+def test_adapter_context_declaration_must_be_a_collection_of_field_names(context_names):
+    with pytest.raises(ChainFormatError):
+        bind_chains(chains_from_json(sample()), primitives=registry(), observation_names={"x", "vy"},
+                    context_names=context_names)

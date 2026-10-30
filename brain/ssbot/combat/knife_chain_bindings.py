@@ -15,11 +15,14 @@ from .knife_chain_format import (
 )
 
 
-def bind_chains(chains, *, primitives, observation_names, literal_names=(),
+def bind_chains(chains, *, primitives, observation_names, literal_names=(), context_names=(),
                 vocabulary: ChainVocabulary = DEFAULT_VOCABULARY):
     """Validate ALL links/rulesets against the family's actual callable maps.
 
     primitives exposes guards/acts/gens/values/dirs, matching the v0 registry.
+    context_names declares adapter-supplied cut-in fields (for example sent),
+    independent of table vars and interpreter observations. It validates field
+    names, not whether this tick can reconstruct their values.
     observation_names are interpreter-context attributes, not the separately
     derived empirical Admission features. A string expression is either a known
     reference, the antic shorthand k, or an explicitly registered literal. Use
@@ -38,9 +41,11 @@ def bind_chains(chains, *, primitives, observation_names, literal_names=(),
         if any(not isinstance(k, str) or not k or not callable(v) for k, v in values.items()):
             raise ChainFormatError(f"{name}: registry entries must be named callables")
         registry[name] = dict(values)
-    if isinstance(observation_names, str) or isinstance(literal_names, str):
-        raise ChainFormatError("observation/literal names must be collections, not strings")
-    observations, literals = frozenset(observation_names), frozenset(literal_names)
+    if any(isinstance(x, str) for x in (observation_names, literal_names, context_names)):
+        raise ChainFormatError("observation/literal/context names must be collections, not strings")
+    observations, literals, contexts = map(frozenset, (observation_names, literal_names, context_names))
+    if any(not isinstance(n, str) or not n.isidentifier() for n in contexts):
+        raise ChainFormatError("invalid registered context name")
     if any(not isinstance(n, str) or not n.isidentifier() for n in observations):
         raise ChainFormatError("invalid registered observation name")
     if any(not isinstance(n, str) for n in literals):
@@ -119,12 +124,22 @@ def bind_chains(chains, *, primitives, observation_names, literal_names=(),
         if value.emit is not None:
             mask(value.emit, where)
 
+    entry_fields = {}
     for chain in chains.values():
+        fields = {"needs": set(), "carry": set(), "adapter": set()}
+        entry_fields[chain.id] = fields
         for name, rules in chain.rulesets.items():
             for value in rules:
                 rule(value, chain.id + ".rulesets." + name)
         for link in chain.links.values():
             where = link.id
+            for field in ("needs", "carry"):
+                names = set(getattr(link, field))
+                missing = names - set(chain.vars) - contexts
+                if missing:
+                    raise ChainFormatError(f"{where}: unbound {field} fields {sorted(missing)!r}")
+                fields[field].update(names)
+                fields["adapter"].update(names - set(chain.vars))
             guard(link.entry, where)
             for comp in link.keys:
                 guard(comp.when, where)
@@ -138,10 +153,12 @@ def bind_chains(chains, *, primitives, observation_names, literal_names=(),
                 for value in rules:
                     rule(value, where)
     return {"table_digest": table_digest(chains, vocabulary=vocabulary),
-            "used": {name: sorted(values) for name, values in used.items()}}
+            "used": {name: sorted(values) for name, values in used.items()},
+            "entry_fields": {cid: {name: sorted(values) for name, values in fields.items()}
+                             for cid, fields in entry_fields.items()}}
 
 
-def load_bound_chains(path, *, primitives, observation_names, literal_names=(),
+def load_bound_chains(path, *, primitives, observation_names, literal_names=(), context_names=(),
                       vocabulary: ChainVocabulary = DEFAULT_VOCABULARY):
     """Family entry point: load, bind all names, then return data and audit summary.
 
@@ -151,5 +168,5 @@ def load_bound_chains(path, *, primitives, observation_names, literal_names=(),
     """
     chains = load_chains(path, vocabulary=vocabulary)
     report = bind_chains(chains, primitives=primitives, observation_names=observation_names,
-                         literal_names=literal_names, vocabulary=vocabulary)
+                         literal_names=literal_names, context_names=context_names, vocabulary=vocabulary)
     return chains, report
