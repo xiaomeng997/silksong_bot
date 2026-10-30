@@ -524,7 +524,7 @@ Windows System USER32 1074事件核实了10-28 22:02:01.851293的StartMenuExperi
 
 ### 6.2 工作衔接与排期
 
-继续当前聊天，Sol单写计划并同步四份。现行路线6.21/6.34：用户10-30已选择B2，旧逐tick普通尾竞争/自然抢键不再是上线主线。v0.1接收6.26，解释/历史/审计底座6.27–6.32复用，e05/f3与共享危险校正6.33保留；df859bd0先交外部危险范围和N=2后手判定，尚未接生产。接下来做名义长轨迹及逐危险来源适配→决策点候选/承诺执行与恢复→钩索/全动作接受及P核High完整预算→冻结学习预算后首轮w7。EV/RN、双怪空中切目标不作首轮前置；旧strict线、倒推/oracle及A/A继续暂停。
+继续当前聊天，Sol单写计划并同步四份。现行路线6.21/6.34：用户10-30已选择B2，旧逐tick普通尾竞争/自然抢键不再是上线主线。v0.1接收6.26，解释/历史/审计底座6.27–6.32复用，e05/f3与共享危险校正6.33保留，OP5/1233已核收、三例幻影圈说法已按场景切换撤回；df859bd0先交外部危险范围和N=2后手判定，尚未接生产。接下来做名义长轨迹及逐危险来源适配→决策点候选/承诺执行与恢复→钩索/全动作接受及P核High完整预算→冻结学习预算后首轮w7。EV/RN、双怪空中切目标不作首轮前置；旧strict线、倒推/oracle及A/A继续暂停。
 
 **计划保持单写入者：Sol。** Opus不编辑主计划或任何工作树中的计划副本。Opus提交`PLAN_INPUT.md`中的第3.6节建议段落，由Sol审核合入唯一主计划，再同步各工作树副本。
 
@@ -1257,11 +1257,11 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 凭证C:/ssbot/data/m2_play/clapper_plan/analysis/op5_360_runtime_20261030/REVIEW.md、implementation.json、replay_summary.json、never_summary.json、gc_comparison.json、gc_bench/、probe_scoring_input.json、scoring_checks.json、planner_checks/及planner_checks_weight/、regression.log与regression_final.log/xml。复算入口同目录run_replay.py、run_never.py、summarize.py、gc_probe.py、probe_scoring_input.py、planner_check.py/weight.py。
 
-### 6.33 OP5/e05与f3接收、孤儿余量和early_hit阶段审计【1233f0d4；242相关回归，未上机】
+### 6.33 OP5/e05、f3及1233接收；孤儿余量与early_hit阶段审计【现行B2/N=2见6.34；未上机】
 
 **审阅范围已核。** 两份各710快照/manifest/Git规范化换行比对通过；e05另22忽略数据件与原哈希和刀口树相同。e05 706项、f3 163项junit均0失败/错误/跳过，Sol不重跑旧严格测试。接收e05共享危险/最终护栏改动无P0/P1/P2及f3仅诊断无P0–P3；不抹掉e05继承的旧原生历史问题（已在6.30/6.32修），不扩大为最新运行整体放行。
 
-130有主人圈的模型接触圈组与真实同为10，8/8伤害提前预测，0.5u后25圈；6正例从落地到熄灭所有起点0拒绝，不称逐帧接触数完全相同。关闭路径18937tick支持差78、安全数组差18、行号差4、首键差1，S/FORCED/tail0差，全部225846且归因仅形状/偏移。48段/2092767帧有54孤儿，7大圈中4个主人离场后56点亮帧全画到，3个未观察到后续点亮而继续保留；小符文47，重现0。
+130有主人圈的模型接触圈组与真实同为10，8/8伤害提前预测，0.5u后25圈；6正例从落地到熄灭所有起点0拒绝，不称逐帧接触数完全相同。关闭路径18937tick支持差78、安全数组差18、行号差4、首键差1，S/FORCED/tail0差，全部225846且归因仅形状/偏移。48段/2092767帧有54孤儿，7大圈中4个主人离场后56点亮帧全画到，另3个未观察到后续点亮；后者现已查明发生在房间切换，撤回将其视为战斗内幻影圈的解释，取证见下段。小符文47，重现0。
 
 真实内层的e05条件回放1273提案tick/40736行、776tick至少一safe、9次链排第一（6正常返回、3末段拒绝），证明真实命中目标会影响选择；该版本支持域/GC与当前不同，仍每tick新planner/最小日志偏好/录像世界，不作当前闭环或自然覆盖分母。与6.32对合成探针的限定一致。f3逐回合[t,idx,mask,S,tail_ok]与36022的18937tick完全相同；重算2986分类=622投影内完整匹配（548提交、74未提交：69 S=1/5尾段）+64封顶外（全部另有未通过项）+2300异键，普通同键异尾0。仍受合成内层无Clapper评分目标限制；不能把特殊/hop/CONTINUE的异尾风险写成已不存在。
 
@@ -1269,7 +1269,11 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **三例真实动作与否决阶段。** 在当前源码和真实内层固定复查：225314 f14135926、225748 f14152316、225938 f14156625，均仍early_hit末段拒绝。新native_escape_unsafe/native_tail_ok/native_reject_checks在fallback前保存原结果，排序/门槛/S=1不改。三例原退路均0失败并通过，tail_ok=False，故明确是尾段失败；旧fallback把unsafe统一置True，不能据它称原退路过严。事实ACTION应用分别f14135928/14152318/14156627，target=applied=f+2、hf.desired与提案/录像键同，出现Slash，命中事件f14135929/14152319/14156629，短窗口health7不变，归属为旧h2脚本。只证实这三例事实接受/命中，不能据无伤放宽所有未来退出检查；后续追普通延续/尾段与链真实后继、模型和输入偏好。
 
-**尚未修与分工（本段历史问题，后续以6.34 B2为准）。** 圈对象消失撤销需先绑定iid并核视域/截断或明确销毁：Oracle仅导出view+6u、最多128实体，异常时ents可Nil；本轮不凭缺失删圈，三候选幻影保守成本仍在。Opus可补三例对象身份/视域证据；Sol转做B2链名义后继和外部危险检查，不再以普通尾自然抢键为主线。普通fallback尚未按每行退路失败数挑，仍取可选普通排序首个/S=1/unchecked。暂停严格线的haz_raw/cache及NONE clash仅登记；原生钩索、全发送/动作接受、P核High完整预算与Launcher仍待办。新链默认关闭，无游戏/A/A/留出，未代发消息。
+**取证结论与后续。** Opus已交三例对象/场景证据，Sol按原始录像有界核验：20261011_051105 f60765（owner429982，HP175，room5→6）、20261016_160059 f60844（owner884404，HP230，room26→27）、20261016_202025 f12833（owner443800，HP130，room5→6）。主人与绑定圈iid同帧消失，gates/battles转null，连续9帧ents=None后为0实体；附近type4 PROGRESS的scene由Hang_04转Hang_06b。不是已证实的战斗中圈随主人被删；“练习读档/离开”只是推测。撤回这三例作为幻影圈P3的实例支撑，不据owner/ents缺失删圈。room.current变化清空跨房间记忆可作后续健壮性项，本轮未改运行、不列B2首轮前置。普通fallback仍按普通排序首个/S=1/unchecked，暂停strict的haz_raw/cache及NONE clash仍仅登记。Sol主线为6.34 B2名义路径/决策点承诺/恢复及动作接受/预算；不回到B1逐tick自然抢键，新链默认关闭，无新游戏/A/A/留出。
+
+**OP5/1233正式接收（10-30）。** opus/review_1233f0d4/REVIEW.md无P0–P3结论限1233f0d4。Sol复核710/710快照文件与manifest及Git archive逐字节相同，junit242项无失败/错误/跳过；未重跑这242项。独立比较存档16回合18937个[t,idx,mask,S,tail_ok]，与f3逐tick0差异，分类/投影计数也同；这是结果文件比对，不是再跑规划器。16局无孤儿，不能以此证明孤儿改动在所有录像下行为不变；合成内层/开环限制仍按6.32。Opus已更正三次early_hit为尾段失败，与Sol已有原退路通过证据一致。
+
+三例场景证据由Sol独立解码原始state.raw.zst，在退出前2帧至后420帧及附近PROGRESS窗口核验，均见房间切换/9帧None/后续0实体。Opus的0.7–2.6s完整空窗时长本轮未按原时间基准另算，不据此扩大逐帧等价或物理认证。新凭证C:/ssbot/data/m2_play/clapper_plan/analysis/op5_1233_intake_20261030/（REVIEW.md、review_checks.json、raw_scene_checks.json、scene_summary.json、verify.py/log）。
 
 凭证C:/ssbot/data/m2_play/clapper_plan/analysis/op5_e05_f3_intake_20261030/REVIEW.md、intake_check.json、implementation.json、intake_e05c738f/、intake_f3d365a8/、regression_final.log/xml、two_owner_margin.json、early_hit_audit.json与early_hit_checks_final/。复算入口run_tests_final.py、check_two_owner_margin.py与early_hit_check_final.py。
 
@@ -1483,3 +1487,5 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 - **合并时序校准复核**：opus/calib55/原交付只读；Sol独立验收在C:/ssbot/data/m2_play/clapper_plan/analysis/calib55_review_20261029/（REVIEW.md、comparison.json、raw_checks.json、observed_timing_subset.json、source_equivalence.json）。数字接收及限定见6.10/6.19，未删除世界或修改预测器。
 
 - **10-30用户决定：B2与后手下界。** 首轮w7按6.34执行；用户指定N先取2，后手足够不逐条验完整尾，少于2类才完整查幸存者，0类不起跳。学习期掉血预算仍待定；本次只落规格/纯判定底座，不启动实机。
+
+- **10-30 OP5/1233接收与幻影圈更正。** 6.33已原位合入：710源码件、242 junit及18937tick存档比对通过；三个原始录像窗口均为场景切换，不再作战斗内删圈实例。B2/弹起/N=2现行规格仍在6.34，本段加指向；未改运行或恢复旧线。
