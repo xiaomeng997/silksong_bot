@@ -43,7 +43,7 @@ import time
 import numpy as np
 
 from ssbot.combat.attack_range import (FT, Mask, RangeTracker, _first_state, body_polys, carry_body, empty_mask,
-                                       union)
+                                       union, hazards_at)
 from ssbot.combat import jump_behind as _jb
 from ssbot.combat import rune_bombs as _rb
 from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
@@ -315,7 +315,8 @@ class LayerSupport:
         self.k_shift = int(k_shift)
         self.layers: dict = {i: [] for i in range(len(self.samples))}
         self.raw: dict = {i: [] for i in range(len(self.samples))}     # add_raw: (iid, coarse, ix0, iy0, m, esc_m)
-        self.haz_raw: dict = {}     # SPECIAL_MODE: {iid: [(si, coarse, ix0, iy0, m, esc_m)]} the hazard parts of raw
+        self.haz_raw: dict = {}     # independent delayed hazards (also used by SPECIAL_MODE): {iid: [(si, coarse, ix0, iy0, m, esc_m)]} the hazard parts of raw
+        self._hazard_cache: dict = {}
         self.pend: list = []        # pending aims (RangeSupport.build: pending_aims)
         self.stack_esc: np.ndarray | None = None    # the escape check's danger (add_esc), None: the stack
         self.stack_dash: np.ndarray | None = None   # the focus unit with its "rule" margin (rows dashing at it)
@@ -420,6 +421,14 @@ class LayerSupport:
         ids = {int(e) for e in ex if isinstance(e, (int, np.integer))}
         own = None if self.bombs is None else {int(o) for o in self.bombs[:, 0] if int(o) not in ids}
         return self.occ_stack_b(self._stack_of(lambda iid: iid not in ids), x, y, tk, own)
+
+    def occupied_hazards(self, x, y, tk, iids) -> np.ndarray:
+        """Already spawned hazards at their real clock, independently of body changes."""
+        ids = frozenset(int(i) for i in iids)
+        if ids not in self._hazard_cache:
+            parts = [p for iid in ids for p in self.haz_raw.get(iid, ())]
+            self._hazard_cache[ids] = self.parts_stacks(parts)[0]
+        return self.occ_stack_b(self._hazard_cache[ids], x, y, tk, ids)
 
     def occupied_only(self, x, y, tk, iids) -> np.ndarray:
         ids = {int(i) for i in iids}
@@ -636,6 +645,13 @@ class RangeSupport(LayerSupport):
                 # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable zone:
                 # the margin's growth is the replanning's business), moves and hazards with their margin
                 idle = e.fam is None
+                if e.haz is not None and e.haz.m.size and e.haz.m.any():
+                    # Preserve hazards separately even when a later branch skips
+                    # or freezes the owner (parry/knockback must not stop a rune).
+                    hm = (COMMIT_M if COMMIT and tk_name == CLAPPER and iid != rs.focus and m > COMMIT_M
+                          and (committed(trk.now[iid][2]) or e.core is not None) else m)
+                    ch_, hx_, hy_ = coarse(e.haz, tab.cell, cv.cell)
+                    rs.haz_raw.setdefault(iid, []).append((si, ch_, hx_, hy_, hm, hm if esc else None))
                 if COMMIT and tk_name == CLAPPER and iid != rs.focus and m > COMMIT_M:
                     # SSBOT_FORUM_TWO_COMMIT: a committed move (whole estimate) / its hazards with COMMIT_M
                     if committed(trk.now[iid][2]):
@@ -650,12 +666,22 @@ class RangeSupport(LayerSupport):
                         rs.n_commit = getattr(rs, "n_commit", 0) + 1
                         continue
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
-                if SPECIAL_MODE and e.haz is not None and e.haz.m.size and e.haz.m.any():
-                    ch_, hx_, hy_ = coarse(e.haz, tab.cell, cv.cell)
-                    rs.haz_raw.setdefault(iid, []).append((si, ch_, hx_, hy_, m, m if esc else None))
                 if esc and idle and e.haz is not None and e.haz.m.size and e.haz.m.any():
                     ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
                     rs.add_raw(si, iid, ch, hx0, hy0, None, m)
+        # Seen delayed hazards outlive the owner's presence/death. They keep
+        # their original position/facing/clock and never acquire a new body.
+        for iid, (tk_name, spawned) in getattr(trk, "orphan_hazards", {}).items():
+            tab = trk.tables[tk_name]
+            for si, k in enumerate(rs.samples):
+                hm = hazards_at(tab, spawned, None, trk.T, (0.0, 0.0), trk.T + k * FT)
+                if not hm.m.size or not hm.m.any():
+                    continue
+                c, ix0, iy0 = coarse(hm, tab.cell, cv.cell)
+                m = rs.m_of(iid, tk_name, k)
+                esc = k + k_shift >= ESC_FROM_K
+                rs.add_raw(si, iid, c, ix0, iy0, m, m if esc else None)
+                rs.haz_raw.setdefault(iid, []).append((si, c, ix0, iy0, m, m if esc else None))
         if VSLAM and trk.hero is not None:
             for iid in sorted(trk.now):
                 tk_name, e, inst = trk.now[iid]
@@ -811,6 +837,9 @@ class V2Forecast:
 
     def occupied_without(self, x, y, tk, exclude, comfort: bool = False) -> np.ndarray:
         return self.rs.occupied_without(x, y, tk, exclude)
+
+    def occupied_hazards(self, x, y, tk, iids) -> np.ndarray:
+        return self.rs.occupied_hazards(x, y, tk, iids)
 
     def occupied_only(self, x, y, tk, iids) -> np.ndarray:
         return self.rs.occupied_only(x, y, tk, iids)

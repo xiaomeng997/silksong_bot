@@ -189,7 +189,8 @@ def test_native_activation_needs_named_probe_and_journal(monkeypatch):
 
 @pytest.mark.parametrize("allowed", [True, False])
 @pytest.mark.parametrize("v2_on", [False, True])
-def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(monkeypatch, allowed, v2_on):
+@pytest.mark.parametrize("late_failure", [None, "escape", "tail", "no_ordinary"])
+def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(monkeypatch, allowed, v2_on, late_failure):
     import math
     from ssbot.combat import forum_planner as fp, forum_v2 as v2, dslash, special_mode
     from ssbot.combat.planner import PlannerConfig
@@ -202,8 +203,8 @@ def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(mon
     terrain = k.Terrain2D.from_boxes([(10., 0., 53., 3.)])
     start = k.initial_state(params, 27., 3. + params.foot)
     h = k.HoldState.idle(); prefix = np.array([0], np.int64)
-    planner = fp.ForumPlanner(params, terrain, PlannerConfig(T=36, threads=1, variants="bounds", tail_k=0),
-        fp.ForumConfig(v2=v2_on, deadline_ms=math.inf, esc_deadline_ms=math.inf), crest="Wanderer")
+    planner = fp.ForumPlanner(params, terrain, PlannerConfig(T=36, threads=1, variants="bounds", tail_k=1 if late_failure == "tail" else 0),
+        fp.ForumConfig(v2=v2_on, react="escape+n", deadline_ms=math.inf, esc_deadline_ms=math.inf), crest="Wanderer")
     monkeypatch.setattr(dslash, "DSLASH", False)
     monkeypatch.setattr(special_mode, "HITS_FIRST", False)
     a = audit(); seed(a)
@@ -223,10 +224,24 @@ def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(mon
         for i in a._rows: sc["J"][i] = 1e9
         return sc
     monkeypatch.setattr(planner, "_score_forum", score)
+    if late_failure in ("escape", "no_ordinary"):
+        monkeypatch.setattr(planner,"_escape_pick",lambda *args,**kw:(int(args[6][0]),1,1,1,[]))
+    elif late_failure == "tail":
+        monkeypatch.setattr(planner,"_tail_pick",lambda f,r,h,ranked,T0,default:(int(ranked[0]),False))
+    if late_failure == "no_ordinary":
+        native_rows=a.rows
+        def held_native(**kwargs):
+            result=native_rows(**kwargs)
+            if result is not None: result[0][:]=MASK_NAMES["R"]
+            return result
+        monkeypatch.setattr(a,"rows",held_native)
     forecast = _reed_forecaster(None, x=45.).forecast(.8)
     if v2_on: forecast = v2.V2Forecast(forecast, _support_with([]))
     ws = _world(27.); ws.stamp.frame = 100
     ctx = _ctx()
+    if late_failure == "no_ordinary":
+        from ssbot.core.primitives import Prim
+        ctx.allowed_mask[int(Prim.WAIT)] = False
     if not allowed:
         from ssbot.combat.candidates import Prim
         ctx.allowed_mask[int(Prim.MOVE)] = False
@@ -236,7 +251,8 @@ def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(mon
     ev = [e for e in a.events if e["event"] == "chain_row_evaluated"][-1]
     assert ev["allowed"] == allowed
     assert ev["enveloped"] == allowed
-    if allowed:
+    expected_owned = allowed and late_failure is None
+    if expected_owned:
         assert result.idx == cr and result.name == "CHAIN test.start" and result.mask == MASK_NAMES["R"]
         assert result.cmd.tolist() == [MASK_NAMES["R"]] + [0]*35
         assert planner.prev_cmd is None
@@ -251,7 +267,14 @@ def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(mon
     policy = SimpleNamespace(chain_native=a, act=lambda s,tap:result.mask, action_flags=0)
     link = wire_link(a)
     episode._act(link, 100, policy, state(100), None)
-    assert bool(a.runner.run) == allowed
+    assert bool(a.runner.run) == expected_owned
+    if allowed and late_failure is not None:
+        assert planner.last_info["esc"]["native_late_reject"] == cr
+        assert result.S == 1 and result.tail_ok is None
+        if late_failure == "no_ordinary":
+            assert result.idx == -1 and result.name == "NONE" and result.mask == 0
+            assert planner.audit.chosen_safe == 0 and planner.audit.forced == 1
+            assert result.vetoes and planner.jump_until == -1
     assert unpack(link.packets[-1])[:3] == [102, int(result.mask), 0]
 
 

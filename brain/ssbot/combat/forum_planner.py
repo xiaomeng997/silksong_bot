@@ -2208,11 +2208,12 @@ class ForumPlanner(Planner):
         occ[:, 0] = False
         return occ
 
-    def _contacts_only(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, iids) -> np.ndarray:
+    def _contacts_only(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, iids, *, hazards: bool = False) -> np.ndarray:
         """Planner._contacts against the support of the enemies `iids` only."""
         hx, hy = f.fc.half
         X, Y, rows, too_wide = _hull_points(np.ascontiguousarray(bound), hx, hy, self.cfg.max_points)
-        hit = f.occupied_only(X, Y, tk, list(iids))
+        hit = (f.occupied_hazards(X, Y, tk, list(iids)) if hazards
+               else f.occupied_only(X, Y, tk, list(iids)))
         N = bound.shape[0]
         occ = hit[:N].copy()
         if len(rows):
@@ -2248,6 +2249,10 @@ class ForumPlanner(Planner):
                 b2[:, j:, 1] -= gy
                 b2[:, j:, 3] += gy
                 o |= self._contacts_only(f, b2, tk2, skip[qs], [iid])
+            if getattr(f, "v2", False) and callable(getattr(f, "occupied_hazards", None)):
+                # Stopping the enemy's attack does not freeze the delayed damage
+                # objects it has already spawned. Query them at real times.
+                o |= self._contacts_only(f, bound[qs], tk, skip[qs], [iid for iid, _ in items], hazards=True)
             occ[qs] = o
         return occ
 
@@ -3527,6 +3532,7 @@ class ForumPlanner(Planner):
         chain_rows = (chain.rows(T=T, origin=int(ws.stamp.frame), prefix=prefix, hold=hold, hero_state=start, completions=cs.cmd)
                       if callable(getattr(chain, "rows", None)) else None)
         n_chain = 0 if chain_rows is None else len(chain_rows[0])
+        native_no_fallback = False
         C0 = N0 + n_spec + n_hop
         if n_chain:
             rows_.append(chain_rows[0])
@@ -4631,7 +4637,22 @@ class ForumPlanner(Planner):
                     i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
             elif carried:
                 tail_ok = True
-            self.last_sel["chosen"] = i
+            if n_chain and C0 <= i < C0 + n_chain and (esc_unsafe or (cfg.tail_k > 0 and tail_ok is not True)):
+                # Stage-1/2 safe is not a final escape/tail verdict. Never send a
+                # chain after its final check failed/was not reached. Fall back
+                # to an ordinary row from this same evaluated batch; its escape
+                # was not certified, so retain S=1 for the supervisor.
+                rejected = i
+                ordinary = order[(order < C0) | (order >= C0 + n_chain)]
+                if len(ordinary):
+                    i = int(ordinary[0])
+                else:
+                    native_no_fallback = True
+                esc_unsafe, tail_ok, esc_tail = True, None, None
+                esc_info = {**(esc_info or {}), "unsafe": True, "native_late_reject": rejected,
+                            "fallback_row": None if native_no_fallback else i,
+                            "fallback_escape": "unchecked"}
+            self.last_sel["chosen"] = -1 if native_no_fallback else i
             if kr is not None and len(kk_) and not kk_[0][kr]:
                 self.audit.kp_kept += int(i == kr)
                 self.audit.kp_sw_escape += int(i != kr)
@@ -4711,6 +4732,14 @@ class ForumPlanner(Planner):
             sel_cmd = np.zeros(T, np.int64)
             res = PlanResult(0, -1, "NONE", 1, True, n=N)
             a.forced += 1
+        if native_no_fallback:
+            a.chosen_safe -= int(not S[i])
+            a.chosen_safe_enveloped -= int(not S[i] and env[i])
+            a.forced += 1
+            sel_cmd = np.zeros(T, np.int64)
+            res = PlanResult(0, -1, "NONE", 1, True, 1.0, 0.0, False, n=N,
+                             cmd=sel_cmd, tail_ok=None)
+            self.prev_tail_ok, self.prev_esc_unsafe = False, True
         res.vetoes = {REASONS_FORUM[k]: int(v) for k, v in zip(*np.unique(why, return_counts=True)) if k}
         res.idle_clear = idle_clear
         if len(sel_cmd) and sel_cmd[0] & B_JUMP:

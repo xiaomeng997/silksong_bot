@@ -30,6 +30,7 @@ class HazardSpec:
       shape "row":    circles at x_trig + spacing m (abs(m) <= m_max, only where the R0 dev bombs ever stood),
                       ring = abs(m);
       shape "circle": one circle at (x_trig + s du, y_trig + dv).
+      shape "octagon": regular octagon, radius is its apothem (axis-aligned sides).
     Its real colliders are the AABBs of width box_w (+-0.03) of other entities (the pooled "damager" objects),
     attributed to the owner by the trigger rule (tools.attack_range_build.attach_hazards)."""
     name: str
@@ -46,6 +47,7 @@ class HazardSpec:
     on0: float | None = None   # the spawn rule's first hurting frame after the trigger: on0 + on_step x ring (the
     on_step: float = 0.0       # attribution takes the trigger that fits it within on_tol frames; None: the latest)
     on_tol: float = 3.0
+    du_by_face: tuple[float, float] | None = None  # (left, right), overrides legacy pooled table du
 
 
 @dataclass(frozen=True)

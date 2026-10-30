@@ -116,7 +116,10 @@ def poly_mask(polys, cell: float = CELL, pad: int = 1) -> Mask:
     ny = int(math.floor(allp[:, 1].max() / cell)) + pad - iy0 + 1
     img = np.zeros((ny, nx), np.uint8)
     pts = [np.round(((p / cell) - (ix0 + 0.5, iy0 + 0.5)) * 16.0).astype(np.int32) for p in polys]
-    cv2.fillPoly(img, pts, 1, lineType=cv2.LINE_8, shift=4)
+    # A batch fill treats overlapping contours as even/odd holes. These are
+    # independent damage colliders, so overlap must remain occupied.
+    for contour in pts:
+        cv2.fillPoly(img, [contour], 1, lineType=cv2.LINE_8, shift=4)
     return Mask(img.astype(bool), ix0, iy0)
 
 
@@ -405,7 +408,11 @@ class RangeTable:
         else:
             on, off = win[0]
             if t_lo + on * FT - 1e-6 <= t <= t_hi + off * FT + 1e-6:
-                polys.append(circle_poly(x + s * float(P.get("du", hz.du)), y + float(P.get("dv", hz.dv)), hz.radius))
+                du = (hz.du_by_face[0 if s < 0 else 1] if hz.du_by_face is not None
+                      else float(P.get("du", hz.du)))
+                cx, cy = x + s * du, y + float(P.get("dv", hz.dv))
+                shape = octagon_poly if hz.shape == "octagon" else circle_poly
+                polys.append(shape(cx, cy, hz.radius))
         return poly_mask(polys, self.cell)
 
 
@@ -475,6 +482,14 @@ def _inside(x: float, intervals) -> bool:
     if not intervals:
         return True
     return any(lo <= x <= hi for lo, hi in intervals)
+
+
+def octagon_poly(cx: float, cy: float, apothem: float) -> np.ndarray:
+    """Axis-aligned regular octagon; apothem is the distance to each side."""
+    a = float(apothem)
+    b = a * math.tan(math.pi / 8.0)
+    return np.asarray([(-b, -a), (b, -a), (a, -b), (a, b),
+                       (b, a), (-b, a), (-a, b), (-a, -b)]) + (cx, cy)
 
 
 def circle_poly(cx: float, cy: float, r: float, n: int = 64) -> np.ndarray:
@@ -733,6 +748,7 @@ class RangeTracker:
         self.T = 0.0
         self.dt = FT
         self.segs: dict = {}
+        self.orphan_hazards: dict = {}  # owner iid -> (type, seen triggers), until their own windows end
         self.now: dict = {}         # iid -> (type key, entity dict, inst or None)
         self.hero: tuple | None = None
         self.objs: dict = {}        # stage B: owner iid -> its projectiles in flight now (type_extra)
@@ -769,9 +785,30 @@ class RangeTracker:
                             tin, vx=None if not vel else float(vel[0]),
                             hero_y=None if self.hero is None else self.hero[1])
             now[iid] = (tk, e, inst)
-        self.now = now
+        # A delayed damager is an independent temporary object. Death, hiding
+        # or disappearance of its owner must not delete an already seen trigger.
         for iid in [i for i in self.segs if i not in now]:
-            del self.segs[iid]
+            tk = self.now[iid][0]
+            spawned = list(self.segs.pop(iid).spawned)
+            if spawned:
+                self.orphan_hazards[iid] = (tk, spawned)
+        for iid, (tk, spawned) in list(self.orphan_hazards.items()):
+            tab = self.tables[tk]
+            keep = []
+            for event in spawned:
+                hz, tt, *_ = event
+                windows = tab.hazard_params(hz).get("win") or []
+                off = max((w[1] for w in windows if w is not None), default=-1)
+                if self.T <= tt + (off + 1) * FT:
+                    keep.append(event)
+            if iid in now:
+                self.segs[iid].spawned[:0] = keep
+                self.orphan_hazards.pop(iid)
+            elif keep:
+                self.orphan_hazards[iid] = (tk, keep)
+            else:
+                self.orphan_hazards.pop(iid)
+        self.now = now
         self._feed_objs(s.get("ents") or ())
         if self.rune is not None:
             self._feed_rune()

@@ -19,7 +19,7 @@ Hazards (pooled "damager" objects; the damage events name them "rune bomb small(
                    the pool cut the row), floor + 0.65; ring abs(m) appears 10 abs(m) frames after Cast 2 and hurts
                    21 frames later for 5-17 frames (the table's measured window per ring); predicted from the Spell
                    Antic start with the Cast 2 time window before Cast 2 is seen
-  rune slam        Slam 2 entry of a CC_JUMP_CAST (the landing): one circle r 7.187, 6.48 u in front of the landing
+  rune slam        Slam 2 entry of a CC_JUMP_CAST (the landing): one octagon, apothem 7.187, 6.48 u left / 6.75 u right in front of the landing
                    at floor + 0.33, hurts 65 frames after the landing for p50 8 frames
 """
 import math
@@ -91,8 +91,8 @@ SPEC = EnemySpec(
     hazards=(
         HazardSpec(name="rune bomb small", shape="row", fams=frozenset({"CC_CAST"}), state="Cast 2", radius=2.166,
                    box_w=4.332, spacing=4.2, m_max=9, dv=-3.8, pre=True, on0=21.0, on_step=10.0),
-        HazardSpec(name="rune slam", shape="circle", fams=frozenset({"CC_JUMP_CAST"}), state="Slam 2", radius=7.187,
-                   box_w=14.374, du=6.48, dv=-3.27, on0=65.0),
+        HazardSpec(name="rune slam", shape="octagon", fams=frozenset({"CC_JUMP_CAST"}), state="Slam 2", radius=7.187,
+                   box_w=14.374, du=6.48, dv=-3.27, on0=65.0, du_by_face=(6.48, 6.75)),
     ),
     left_out=(
         ("Jump Antic", "CC_JUMP's landing is a pending aim until Jump Aim (0.48-0.52 s): only the antic body is drawn"),

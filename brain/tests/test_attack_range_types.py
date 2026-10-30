@@ -142,7 +142,7 @@ def test_clapper_bombs_predicted_before_cast2_then_spawned():
     assert e.haz.area() == pytest.approx(2 * math.pi * 2.166 ** 2, rel=0.05)
 
 
-def test_rune_slam_circle_in_front_of_the_landing():
+def test_rune_slam_octagon_in_front_of_the_landing():
     tab = _clapper_table()
     hz = next(h for h in tab.spec.hazards if h.name == "rune slam")
     assert not tab.hazard_mask(hz, 10.0, 10.0, 25.0, 6.6, -1, 10.0 + 64 * ar.FT).m.any()
@@ -150,7 +150,7 @@ def test_rune_slam_circle_in_front_of_the_landing():
     x0, y0, x1, y1 = m.bbox()
     assert 0.5 * (x0 + x1) == pytest.approx(25.0 - 6.48, abs=2 * C)
     assert 0.5 * (y0 + y1) == pytest.approx(6.6 - 3.27, abs=2 * C)
-    assert m.area() == pytest.approx(math.pi * 7.187 ** 2, rel=0.01)
+    assert m.area() == pytest.approx(8 * math.tan(math.pi / 8) * 7.187 ** 2, rel=0.015)
 
 
 def test_builder_attributes_hazard_episodes_by_the_spawn_rule():
