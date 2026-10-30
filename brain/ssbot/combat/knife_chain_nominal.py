@@ -115,7 +115,8 @@ def is_committing(run, profile=None):
     if run.chain=="slam_claw" or run.link in {"jump","air","after"}:return True
     # k is the target mask-frame clock (SEND_AHEAD=2). This is the user's
     # first-smoke decision boundary, independent of the table's stable links.
-    if abs(float(run.v.get("x_start") or 0.))<=profile.close_entry_u:return True
+    distance=run.v.get("_b2_entry_distance",run.v.get("x_start"))
+    if distance is not None and abs(float(distance))<=profile.close_entry_u:return True
     return float(run.v.get("k",0))-2>=profile.jump_decision_k
 
 
@@ -380,8 +381,58 @@ def post_paths(parent, params, terrain, *, profile=None):
     return paths,errors
 
 
+def compiled_signatures():
+    """Loaded ssbot numba dispatchers, for warm-up vs first-call evidence."""
+    import sys
+    out={}
+    for name,module in tuple(sys.modules.items()):
+        if not name.startswith("ssbot.") or module is None:continue
+        for key,value in tuple(vars(module).items()):
+            if hasattr(value,"signatures") and hasattr(value,"py_func"):
+                out[name+"."+key]=tuple(str(v) for v in value.signatures)
+    return out
+
+
 def warm_nominal(params):
-    """Load nominal timelines outside combat; no Run or model future is retained."""
-    state_names()
+    """Exercise B2's actual model call sites before combat; retain no future Run."""
+    import json,time
+    from pathlib import Path
+    from types import SimpleNamespace
+    from .knife_chain_format import chains_from_json
+    from .knife_chain_slam import make_runner
+    from . import claw_strike
+    from ssbot.map2.oldwin_claw import control_state
+    started=time.perf_counter();state_names()
     for antic in range(47,54):_timeline(antic)
-    # The existing planner/ClawStrike warm-up covers physics specializations.
+    terrain=km.Terrain2D.from_boxes([(-100.,0.,100.,3.015),(0.,0.,14.,40.),(49.,0.,100.,40.)])
+    S=km.initial_state(params,35.,4.568,ground=True,facing=-1,silk=9)
+    raw={"f":1000,"dt":params.frame_time,"hero":{"health":7,"silk":9,"cstate":[0,0],"cstate_int":[0,0,0,0]},
+         "ents":[{"iid":7,"type_key":"Song Heavy Sentry","hp":130,"flipX":True,"pos":[30.,7.449],
+                  "fsms":[{"name":"Control","state":"Slam Antic","t":0.}]}],"ev":[]}
+    # The warm runner is separate from the registered runtime runner. These cfg
+    # changes choose deterministic warm branches; they never change live tables.
+    chains=chains_from_json(json.loads(Path(__file__).with_name("knife_chain_slam_v01.json").read_text(encoding="utf-8")))
+    for chain in chains.values():chain.cfg.update(CLAWSTRIKE=False,EARLY=False)
+    R=make_runner(chains)
+    zero=km.rollout(S,np.zeros((1,0),np.int64),params,terrain)
+    _hero(raw,S,zero.box[0,0],zero.pos[0,0],zero.vel[0,0],int(zero.flags[0,0]))
+    sim=ChainSim(S,np.zeros(1,np.int64),km.HoldState.idle(1),params,terrain,1000,1000)
+    preview=R.preview(1000,raw,True,True,t_game=0.,sim=sim)
+    if preview.mask is None:raise NominalUnsupported("B2 warm runner has no nominal jump")
+    path=compile_path(preview.draft,raw,sim,0.,stage="commitment",first_mask=preview.mask)
+    posts,errors=post_paths(path,params,terrain)
+    if len(posts)!=3:raise NominalUnsupported("B2 warm post path missing: "+str(errors))
+    world=NominalWorld(raw,preview.draft.run,0.)
+    airborne=km.initial_state(params,40.,6.,ground=False,facing=-1,silk=9)
+    airborne[km.ALPHA]=airborne[km.ALO]=airborne[km.AHI]=.25
+    hook,_=_nominal_hook(airborne,world,0.,params,terrain,NominalProfile(),-1)
+    control=control_state(params,hook,terrain,alpha=.5)
+    # Including the hook-control view's layout is important: it can specialize
+    # separately from a contiguous free-flight copy.
+    for start in [S,control]:
+        km.rollout(start,np.zeros((1,0),np.int64),params,terrain)
+        km.rollout(start,np.zeros((1,1),np.int64),params,terrain)
+        km.rollout(start,np.zeros((1,1),np.int64),params,terrain,events=np.full((1,1),km.EV_POGO,np.int64))
+    claw_strike.warm(params)
+    return {"seconds":time.perf_counter()-started,"jump_to_bounce":len(path.commands),"post_paths":len(posts),
+            "hook_control":hook.ctrl,"compiled_signatures":compiled_signatures(),"scope":"warm models only, no real Run/contact credit"}

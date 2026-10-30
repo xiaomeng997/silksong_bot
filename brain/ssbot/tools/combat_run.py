@@ -520,6 +520,13 @@ def worker(a: argparse.Namespace) -> int:
             b2_budget=prepare(a)
         if hasattr(policy, "warmup"):
             print(f"[i{a.instance}] policy warm-up {policy.warmup():.1f} s", flush=True)
+        if b2_budget is not None:
+            report=getattr(policy,"b2_warmup_report",None)
+            if not isinstance(report,dict):
+                from ssbot.combat.knife_chain_budget import LearningStop
+                raise LearningStop("B2 exact-call warm-up receipt missing")
+            with (run_dir/f"b2_warmup_i{a.instance}.json").open("x",encoding="utf-8") as wf:
+                json.dump(report,wf,ensure_ascii=False,indent=1,allow_nan=False);wf.write("\n");wf.flush();os.fsync(wf.fileno())
         runtime_start = None
         measurement_warmup = None
         if measurement is not None:

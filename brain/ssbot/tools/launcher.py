@@ -560,20 +560,36 @@ def move_window(hwnd: int, x: int, y: int) -> None:
 
 
 def port_listening(port: int, pid: int | None = None) -> bool:
-    """Whether something (pid, if given) listens on 127.0.0.1:port. Reads the TCP table instead of connecting,
-    because the oracle serves one brain at a time and a probe connection would briefly take that slot."""
+    """Passive TCP/PID check. A probe socket would steal the oracle's one client."""
     try:
         import psutil
-        for c in psutil.net_connections(kind="tcp4"):
-            if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port and (pid is None or c.pid == pid):
-                return True
+    except ImportError:
         return False
-    except (ImportError, OSError):
+    try:
+        return any(c.status==psutil.CONN_LISTEN and c.laddr and c.laddr.port==port
+                   and (pid is None or c.pid==pid) for c in psutil.net_connections(kind="tcp4"))
+    except (psutil.Error,OSError):
+        return False  # query failure never relaxes PID ownership / opens a socket
+
+
+def listener_snapshot(port: int, pid: int | None = None) -> dict:
+    """Bounded read-only evidence on readiness failure; not a second ready gate."""
+    out={"port":port,"expected_pid":pid,"observer_pid":os.getpid(),"python":sys.executable,
+         "transport_probe":"none","listeners":[],"query_error":None}
+    try:
+        import psutil
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return True
-        except OSError:
-            return False
+            out["listeners"]=[{"pid":c.pid,"ip":c.laddr.ip,"port":c.laddr.port} for c in psutil.net_connections(kind="tcp4")
+                if c.status==psutil.CONN_LISTEN and c.laddr and c.laddr.port==port]
+        except (psutil.Error,OSError) as exc:out["query_error"]=type(exc).__name__+": "+str(exc)
+        if pid is not None:
+            try:
+                proc=psutil.Process(pid)
+                out["expected_process"]={"name":proc.name(),"created":proc.create_time(),"exe":proc.exe()}
+            except (psutil.Error,OSError) as exc:out["process_error"]=type(exc).__name__+": "+str(exc)
+    except ImportError as exc:out["query_error"]=type(exc).__name__+": "+str(exc)
+    out["matches_expected"]=out["query_error"] is None and any(pid is None or q["pid"]==pid for q in out["listeners"])
+    return out
 
 
 # ---- launcher ------------------------------------------------------------------------------------------
@@ -659,12 +675,26 @@ class Launcher:
             prev = inst
         return list(self.instances)
 
+    def _readiness_diagnostic(self,x: Instance,reason: str) -> None:
+        # Evidence failure cannot replace the original startup exception, and
+        # never starts/terminates a process or alters the listening predicate.
+        try:
+            report={"instance":x.index,"reason":reason,**listener_snapshot(x.port,x.pid)}
+            self.log_dir.mkdir(parents=True,exist_ok=True)
+            path=self.log_dir/f"readiness_i{x.index}_{time.time_ns()}.json"
+            with path.open("x",encoding="utf-8") as f:
+                json.dump(report,f,ensure_ascii=False,indent=1);f.write("\n")
+            self.log(f"[ready diagnostic] instance {x.index}: {path}; passive query error={report['query_error']}")
+        except Exception as exc:
+            self.log(f"[ready diagnostic] instance {x.index}: unavailable ({type(exc).__name__}: {exc})")
+
     def _wait_listening(self, x: Instance, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if x.proc.poll() is not None or self.listening(x.port, x.pid):
                 return True
             time.sleep(0.2)
+        self._readiness_diagnostic(x,"stagger_timeout")
         self.log(f"[launch] instance {x.index} not listening after {timeout_s:.0f} s; starting the next one anyway")
         return False
 
@@ -678,6 +708,7 @@ class Launcher:
         placed_at: dict[int, float] = {}
         while pending:
             if time.monotonic() > deadline:
+                for x in pending:self._readiness_diagnostic(x,"ready_timeout")
                 raise TimeoutError("not ready: " + ", ".join(f"instance {x.index}" for x in pending))
             for x in list(pending):
                 if x.proc.poll() is not None:

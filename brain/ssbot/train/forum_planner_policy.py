@@ -419,7 +419,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.m2.start()               # the search workers (spawned, warmed; waits until they are ready)
         if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
             from ssbot.combat.knife_chain_nominal import warm_nominal
-            warm_nominal(self.params)
+            self.b2_warmup_report=warm_nominal(self.params)
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -974,6 +974,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         cogf = self.cog["frames"]
         prefix = np.array([self.sent.get(fr, 0) & ~(COG if fr in cogf else 0) for fr in range(fo + 1, f + 2)],
                           np.int64)
+        if getattr(self.chain_native,"b2",False) and fo==f and len(prefix)==1:
+            desired,source=self.chain_native.queued_prefix(f,s)
+            if desired is not None:
+                prefix[0]=desired & ~(COG if f+1 in cogf else 0)
         t1 = time.perf_counter()
         if diag is not None: diag.phase("planner")
         S0 = self._start_state(ws, raw)

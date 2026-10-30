@@ -121,6 +121,7 @@ def native_committed(params,terrain):
     path=compile_path(p.draft,s,sim,0.,stage="commitment",first_mask=p.mask)
     native=NativeChainB2(runner_factory=runner,probe_ref="unit-b2")
     native.begin(s)
+    native._receipts[1001]=0  # the verified zero queued prefix supplied by this fixture's ChainSim
     offer=B2Offer("commitment",path,p.draft,B["D"]|B["A"],10.,MoveInstance(7,1000,"CC_SLAM"),{})
     planner=SimpleNamespace(measurement_enabled=False)
     result=native.install(offer,planner)
@@ -136,7 +137,7 @@ def native_committed(params,terrain):
 def next_state(f,*,counter=0,hit=None,dead=False):
     s=raw(f);s["ents"][0]["fsms"][0]["t"]=(f-1000)/60
     s["hero"]["cstate_int"][1]=counter
-    s["act"].update(target=f,applied=f,hf={"desired":B["D"]|B["A"]})
+    s["act"].update(target=f,applied=f,hf={"desired":0 if f==1001 else B["D"]|B["A"]})
     if hit:s["ev"]=[{"f":f,"k":"hit","d":{"iid":7,"src":hit}}]
     if dead:s["ents"][0]["hp"]=0
     return s
@@ -171,7 +172,7 @@ def test_hit_without_observed_bounce_does_not_handoff(params,terrain):
 def test_mismatched_application_is_fatal(params,terrain):
     n=native_committed(params,terrain)
     n.observe(next_state(1001))
-    s=next_state(1002);s["act"]["applied"]=1003
+    s=next_state(1002);s["act"]["hf"]["desired"]=0
     with pytest.raises(LearningStop,match="desync"):n.observe(s)
 
 
@@ -455,7 +456,7 @@ def test_late_send_is_stopped_before_transport(params,terrain):
     n=native_committed(params,terrain)
     n.begin(next_state(1001));n.final("plan",0)
     with pytest.raises(LearningStop,match="deadline"):
-        n.before_send(frame=1001,target=1003,mask=0,flags=0,received_frame=1003)
+        n.before_send(frame=1001,target=1003,mask=0,flags=0,received_frame=1008)
     assert n.dispatch.sent_for(1003) is None
 
 
@@ -505,3 +506,141 @@ def test_corrupt_budget_is_integrity_stop_not_counter_reset(tmp_path):
     p.write_text("broken")
     with pytest.raises(LearningStop,match="corrupt"):b.check()
     assert p.read_text()=="broken"
+
+
+def test_known_late_application_two_frames_is_accepted_without_pogo_credit(params,terrain):
+    n=native_committed(params,terrain)
+    for f in [1001,1002,1003]:
+        s=next_state(f);s["act"].update(target=1000,applied=1000,hf={"desired":0});n.observe(s)
+    s=next_state(1004);s["act"].update(target=1002,applied=1004,hf={"desired":B["D"]|B["A"]})
+    n.observe(s)
+    assert n._pending=={} and n.counts["b2_application_late"]==1
+    assert n._accepted is None and n._hit is None and n.post_context is None
+
+
+def test_skipped_target_bracket_compares_skipped_key_to_covering_report(params,terrain):
+    n=native_committed(params,terrain);wanted=B["D"]|B["A"]
+    n._receipts[1003]=wanted
+    n.observe(next_state(1001))
+    s=next_state(1002);s["act"].update(target=1000,applied=1000,hf={"desired":0});n.observe(s)
+    n.observe(next_state(1003))
+    assert 1002 not in n._pending
+    assert n._application[1002]["kind"]=="covered_same_key"
+    assert n._application[1002]["applied"] is None
+    assert n.counts["b2_application_skipped"]==1
+
+
+def test_changed_key_reporting_gap_is_covered_without_acceptance_credit(params,terrain):
+    n=native_committed(params,terrain)
+    n._receipts[1003]=0
+    n.observe(next_state(1001))
+    s=next_state(1002);s["act"].update(target=1001,applied=1001,hf={"desired":0});n.observe(s)
+    s=next_state(1003);s["act"].update(target=1003,applied=1003,hf={"desired":0});n.observe(s)
+    assert n._application[1002]["kind"]=="covered_changed_key"
+    assert n._application[1002]["applied"] is None and n._accepted is None
+    assert n.counts["b2_application_skipped_changed_key"]==1
+
+
+def test_no_cover_times_out_after_four_frames_and_missing_anchor_is_not_a_bracket(params,terrain):
+    n=native_committed(params,terrain)
+    for f in range(1001,1007):
+        s=next_state(f);s["act"].update(target=1000,applied=1000,hf={"desired":0});n.observe(s)
+    s=next_state(1007);s["act"].update(target=1000,applied=1000,hf={"desired":0})
+    with pytest.raises(LearningStop,match="four-frame"):n.observe(s)
+
+
+def test_held_prefix_uses_observed_own_desired_not_invented_zero(params,terrain):
+    n=native_committed(params,terrain)
+    s=next_state(1002)
+    desired,source=n.queued_prefix(1002,s)
+    assert desired==B["D"]|B["A"] and source=="held_observed_desired_no_queued_send"
+    s["act"]["hf"]["desired"]=0
+    assert n.queued_prefix(1002,s)[0] is None
+
+
+def test_missing_entry_distance_is_not_close_entry():
+    from ssbot.combat.knife_chain_nominal import is_committing
+    for value in [None]:
+        r=SimpleNamespace(chain="slam_jump",link="land",v={"x_start":value,"k":4})
+        assert not is_committing(r)
+        r.v["k"]=23
+        assert is_committing(r)
+
+
+def test_hook_recovery_wait_keeps_normal_planner_out_until_observed_control(params,terrain):
+    from ssbot.combat.forum_planner import ForumPlanner
+    n=native_committed(params,terrain)
+    s=next_state(1001);s["hero"]["anim"]["clip"]="Harpoon Dash";s["hero"]["hero_accepting_input"]=False
+    n.observe(s);n._recover("missing model prefix",1001)
+    assert n.recovery is not None and n.commitment is None
+    p=SimpleNamespace(chain_native=n,ticks=0,measurement_enabled=False,
+       _ordinary_tick=lambda *a:pytest.fail("ordinary planner used during unsupported hook"))
+    ctx=SimpleNamespace(allowed_mask=np.ones(64,bool));ws=SimpleNamespace(stamp=SimpleNamespace(frame=1001))
+    r=ForumPlanner.tick(p,ws,np.zeros(km.K),None,np.zeros(1,np.int64),None,None,ctx)
+    assert r.S==1 and r.forced_risk and r.mask==0
+    s=next_state(1002);s["hero"]["hero_accepting_input"]=True
+    n.observe(s)
+    assert n.recovery is None and n.counts["b2_hook_recovery_handoff"]==1
+
+
+def test_same_key_gap_requires_later_matching_report(params,terrain):
+    n=native_committed(params,terrain);wanted=B["D"]|B["A"]
+    n._receipts[1001]=wanted;n._receipts[1003]=wanted
+    s=next_state(1001);s["act"].update(target=1001,applied=1001,hf={"desired":wanted});n.observe(s)
+    s=next_state(1002);s["act"].update(target=1001,applied=1001,hf={"desired":wanted});n.observe(s)
+    assert 1002 in n._pending
+    n.observe(next_state(1003))
+    assert n._application[1002]["kind"]=="covered_same_key"
+    assert n._application[1002]["applied"] is None
+    assert n.counts["b2_application_skipped_same_key"]==1
+
+
+def test_b2_warmup_exercises_model_signatures_without_real_run(params,terrain):
+    from ssbot.combat.knife_chain_nominal import warm_nominal,compiled_signatures
+    report=warm_nominal(params)
+    assert report["jump_to_bounce"]>36 and report["post_paths"]==3 and report["hook_control"]>0
+    before=compiled_signatures()
+    _,p,s,sim=preview(params,terrain)
+    path=compile_path(p.draft,s,sim,0.,stage="commitment",first_mask=p.mask)
+    post_paths(path,params,terrain)
+    after=compiled_signatures()
+    assert all(before.get(k,())==v for k,v in after.items()),{k:v for k,v in after.items() if before.get(k,())!=v}
+
+
+def test_measured_entry_distance_is_carried_independently_of_missing_legacy_record():
+    from ssbot.combat.knife_chain_nominal import is_committing
+    r=SimpleNamespace(chain="slam_jump",link="land",v={"x_start":None,"k":4,"_b2_entry_distance":3.7})
+    assert not is_committing(r)
+    r.v["_b2_entry_distance"]=2.8
+    assert is_committing(r)
+
+
+def test_matching_later_report_can_cover_at_four_frame_boundary(params,terrain):
+    n=native_committed(params,terrain);n._receipts[1004]=0
+    n.observe(next_state(1001))
+    for f in range(1002,1006):
+        st=next_state(f);st["act"].update(target=1001,applied=1001,hf={"desired":0});n.observe(st)
+    st=next_state(1006);st["act"].update(target=1004,applied=1006,hf={"desired":0});n.observe(st)
+    assert n._pending=={} and n._application[1002]["kind"]=="covered_changed_key"
+    assert n._application[1002]["between"]==[1001,1004]
+
+
+def test_a_later_match_without_an_earlier_match_is_not_a_bracket(params,terrain):
+    n=native_committed(params,terrain);n._receipts.pop(1001);n._receipts[1003]=0
+    for f in range(1001,1003):
+        st=next_state(f);st["act"].update(target=1000,applied=1000,hf={"desired":0});n.observe(st)
+    for f in range(1003,1007):
+        st=next_state(f);st["act"].update(target=1003,applied=1003,hf={"desired":0});n.observe(st)
+    assert 1002 in n._pending
+    st=next_state(1007);st["act"].update(target=1003,applied=1003,hf={"desired":0})
+    with pytest.raises(LearningStop,match="four-frame"):n.observe(st)
+
+
+def test_first_cover_after_four_frame_deadline_does_not_revive_pending(params,terrain):
+    n=native_committed(params,terrain);n._receipts[1005]=0
+    n.observe(next_state(1001))
+    for f in range(1002,1007):
+        st=next_state(f);st["act"].update(target=1001,applied=1001,hf={"desired":0});n.observe(st)
+    st=next_state(1007);st["act"].update(target=1005,applied=1007,hf={"desired":0})
+    with pytest.raises(LearningStop,match="four-frame"):n.observe(st)
+    assert 1002 in n._pending and 1002 not in n._application

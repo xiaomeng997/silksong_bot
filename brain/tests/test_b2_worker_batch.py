@@ -105,6 +105,7 @@ class Rig:
                 rig.budget=b;return b
             def warmup(self):
                 rig.events.append("warmup")
+                self.b2_warmup_report={"scope":"fake model warm-up for worker transaction test","compiled_signatures":{}}
                 if rig.fault=="warmup":raise RuntimeError("warmup failed")
                 return 0.
             def flush_log(self):rig.events.append("policy.flush")

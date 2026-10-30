@@ -379,3 +379,38 @@ def test_window_api_takes_64_bit_handles():
     assert L.window_rect(bogus) == (0, 0, 0, 0)
     L.move_window(bogus, 10, 10)  # fails quietly (invalid handle), no exception
     assert L.find_window(0xFFFFFFF0) == 0  # a full enumeration completes
+
+
+def test_readiness_query_failure_never_connects_or_bypasses_pid(monkeypatch):
+    import psutil
+    import socket
+    monkeypatch.setattr(psutil,"net_connections",lambda **k:(_ for _ in ()).throw(psutil.AccessDenied()))
+    monkeypatch.setattr(socket,"create_connection",lambda *a,**k:pytest.fail("active oracle probe"))
+    assert L.port_listening(47017,123) is False
+    report=L.listener_snapshot(47017,None)
+    assert report["matches_expected"] is False and report["query_error"]
+    assert report["transport_probe"]=="none"
+
+
+def test_readiness_other_pid_is_diagnostic_only(monkeypatch):
+    import psutil
+    from types import SimpleNamespace
+    c=SimpleNamespace(status=psutil.CONN_LISTEN,laddr=SimpleNamespace(ip="127.0.0.1",port=47017),pid=999)
+    monkeypatch.setattr(psutil,"net_connections",lambda **k:[c])
+    assert not L.port_listening(47017,123)
+    assert L.port_listening(47017,999)
+    report=L.listener_snapshot(47017,123)
+    assert report["listeners"][0]["pid"]==999 and report["matches_expected"] is False
+
+
+def test_readiness_diagnostic_writes_evidence_without_changing_ready_state(tmp_path,monkeypatch):
+    import json
+    from types import SimpleNamespace
+    x=L.Instance(0,123,SimpleNamespace(),47017,tmp_path/"player.log")
+    report={"port":47017,"expected_pid":123,"listeners":[{"pid":999}],"query_error":None,"matches_expected":False}
+    monkeypatch.setattr(L,"listener_snapshot",lambda *a:report)
+    ln=L.Launcher(guard=object(),log_dir=tmp_path,log=lambda s:None,tile=False)
+    ln._readiness_diagnostic(x,"ready_timeout")
+    paths=list(tmp_path.glob("readiness_i0_*.json"))
+    assert len(paths)==1 and json.loads(paths[0].read_text())["matches_expected"] is False
+    assert x.ready_s is None and x.released is False

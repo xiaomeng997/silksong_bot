@@ -89,6 +89,7 @@ class NativeChainB2(NativeChainCandidates):
         self._last_budget_f=None;self._budget_hp=None;self._kill_frame=None;self.learning_stop=None
         self._episode_start=start_frame
         self._budget_targets=set();self._budget_dead=set()
+        self._application={};self._last_matching_report=None;self._actual_state=None;self.recovery=None
         self._post_seed=None;self._post_kind=None
         if self.budget is not None:self.budget.check()
 
@@ -128,7 +129,7 @@ class NativeChainB2(NativeChainCandidates):
                     self._note("b2_fight_end",frame=ef,source="actual final Clapper killing hit; inclusive")
         if kill_frame is not None:self._kill_frame=int(kill_frame) if self._kill_frame is None else min(self._kill_frame,int(kill_frame))
         tail=self._kill_frame is not None and f>self._kill_frame
-        related=bool(self.commitment or self.post_context or (self.runner.run is not None and self.arm=="B"))
+        related=bool(self.commitment or self.post_context or self.recovery or (self.runner.run is not None and self.arm=="B"))
         if self.budget is not None:
             try:self.budget.observe(episode=self.episode,frame=f,arm=self.arm,hp_loss=loss,chain_related=related,
                                    tail=tail,fatal="death" if hp<=0 or flag(state,"dead") else None)
@@ -136,21 +137,83 @@ class NativeChainB2(NativeChainCandidates):
                 self.learning_stop=str(exc);self._note("b2_learning_stop",frame=f,reason=str(exc));self.flush();raise
         if loss:self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related)
 
+    def _observe_application(self,state):
+        f=state["f"];act=state.get("act") or {}
+        target=act.get("target");applied=act.get("applied");desired=(act.get("hf") or {}).get("desired")
+        sent=self._receipts.get(target)
+        valid=False
+        if sent is not None and type(desired) is int:
+            if desired!=sent:self._stop("key application desync: desired differs from successful send",f)
+            valid=type(applied) is int and target<=applied<=min(f,target+2)
+            if target in self._pending and type(applied) is int and applied>target+2:
+                self._note("b2_application_outside_late_bound",frame=f,target=target,applied=applied,
+                           accepted="unchecked; await later matching report")
+        if valid:
+            previous=self._last_matching_report
+            for t,wanted in sorted(tuple(self._pending.items())):
+                direct=t==target
+                covered=previous is not None and previous["target"]<t<target
+                if (not direct and not covered) or f>t+4:continue
+                if direct and wanted!=desired:self._stop("key application desync",f)
+                self._pending.pop(t)
+                same=covered and wanted==desired  # skipped target vs its covering later report
+                proof={"target":t,"observed":f,"desired":wanted,"reported_target":target,
+                       "kind":"direct" if direct else "covered_same_key" if same else "covered_changed_key",
+                       "applied":applied if direct else None,
+                       "between":None if direct else [previous["target"],target]}
+                self._application[t]=proof
+                self._note("chain_application_observed",frame=f,**proof,hero_action="unchecked",contact="unchecked")
+                if covered:
+                    self._note("b2_application_skipped",frame=f,**proof)
+                    self._note("b2_application_skipped_same_key" if same else "b2_application_skipped_changed_key",frame=f,**proof)
+                elif applied>t:self._note("b2_application_late",frame=f,delay=applied-t,**proof)
+            if previous is None or target>previous["target"]:
+                self._last_matching_report={"target":target,"desired":desired,"observed":f}
+        # User opt1: valid reports bracket skipped targets, even across key
+        # changes. Coverage is not an exact application or accepted-action claim.
+        # Allow through T+4; on T+5 without any proof, stop.
+        if any(t<f-4 for t in self._pending):self._stop("missing critical application receipt beyond four-frame upper bound",f)
+
+    def queued_prefix(self,frame,state):
+        """Desired prefix from our send, or known held desired if no action queued.
+
+        Neither kind proves a HoldFilter latch, an accepted attack or a bounce.
+        """
+        wanted=self._receipts.get(frame+1)
+        if wanted is not None:return int(wanted),"queued_successful_send"
+        act=state.get("act") or {};t=act.get("target");a=act.get("applied")
+        desired=(act.get("hf") or {}).get("desired")
+        if (type(t) is int and type(a) is int and type(desired) is int and
+                t<=a<=frame and a<=t+2 and self._receipts.get(t)==desired):
+            return desired,"held_observed_desired_no_queued_send"
+        return None,"unknown_queued_or_held_desired"
+
+    @staticmethod
+    def _hook_in_flight(state):
+        h=(state or {}).get("hero") or {}
+        clip=str((h.get("anim") or {}).get("clip", ""))
+        return "harpoon" in clip.lower() and not bool(h.get("hero_accepting_input",False))
+
     def observe(self,state):
         f=state["f"];previous=self.last_observed
         if previous is not None and f>previous+1:self._stop("missing critical STATE frames",f)
         # Budget is also fed by the harness before its lethal/clear early exits.
         self.observe_learning(state,kill_frame=self._kill_frame)
-        prior_pending=dict(getattr(self,"_pending",{}))
-        act=state.get("act") or {};target=act.get("target")
-        if target in prior_pending and act.get("applied") is not None:
-            if act.get("applied")!=target or (act.get("hf") or {}).get("desired")!=prior_pending[target]:
-                self._stop("key application desync / missing desired log",f)
-        if any(t<f-2 and t!=target for t in prior_pending):self._stop("missing critical application receipt",f)
-        super().observe(state)
+        self._actual_state=state
+        self._observe_application(state)
+        unresolved=self._pending
+        self._pending={}  # opt1 owns this audit; do not inherit the old2-frame abandon
+        try:super().observe(state)
+        finally:self._pending=unresolved
         if self.post_context is not None and f>self.post_context["bounce"]+8 and flag(state,"onGround"):
             self._note("b2_post_landed",frame=f)
             self.post_context=None;self._post_seed=None;self._post_kind=None
+        if self.recovery is not None:
+            if not self._hook_in_flight(state):
+                self._note("b2_hook_recovery_handoff",frame=f,reason="observed hook ended / supported interrupted state")
+                self.recovery=None
+            elif f>self.recovery["first"]+self.profile.max_frames:
+                self._stop("hook recovery exceeded existing nominal max_frames without observed control return",f)
         c=self.commitment
         if c is None:return
         clip=str((state.get("hero",{}).get("anim") or {}).get("clip", ""))
@@ -187,6 +250,10 @@ class NativeChainB2(NativeChainCandidates):
 
     def _recover(self,reason,f):
         self._note("b2_recovery",frame=f,reason=reason,press=self._press,accepted=self._accepted,hit=self._hit)
+        old_move=None if self.commitment is None else self.commitment["move"]
+        if self._hook_in_flight(self._actual_state):
+            self.recovery={"first":f,"reason":reason,"move":old_move}
+            self._note("b2_hook_recovery_enter",frame=f,reason=reason,action="release/wait until observed hook end",path="unchecked")
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
         self._abandon(reason)
 
@@ -196,9 +263,15 @@ class NativeChainB2(NativeChainCandidates):
         f,state,game,ground,accepting=tick
         if sim.fo!=f or sim.f!=f or len(sim.prefix)!=1:
             self._note("b2_unchecked",frame=f,reason="lagged/current model mismatch");return None
-        receipt=self._receipts.get(f+1)
-        if receipt is None or receipt!=int(sim.prefix[0]):
-            self._note("b2_unchecked",frame=f,reason="queued prefix has no matching real receipt");return None
+        receipt,source=self.queued_prefix(f,state)
+        if receipt is None:
+            self._note("b2_unchecked",frame=f,reason=source);return None
+        if receipt!=int(sim.prefix[0]):
+            from .air_chain import ChainSim
+            sim=ChainSim(sim.start, np.array([receipt],np.int64),sim.hold,sim.params,sim.terrain,sim.fo,sim.f)
+            self._context=(tick,sim,guard,bombs)
+            self._note("b2_prefix_rebased",frame=f,source=source,desired=receipt)
+        elif source!="queued_successful_send":self._note("b2_prefix_held",frame=f,source=source,desired=receipt)
         from .knife_chain_history import HistView
         from .slam_play import clappers,control
         es=clappers(state)
@@ -218,6 +291,15 @@ class NativeChainB2(NativeChainCandidates):
         preview=ChainPreview(f,mask,draft) # first key f+2: actual information has >=2f lead
         if preview.mask is None or preview.draft.run is None:return None
         v=preview.draft.run.v
+        if "_b2_entry_distance" not in v:
+            distance=v.get("x_start")
+            if distance is None and self.runner.run is None:
+                from .slam_play import hero_x
+                h=state.get("hero") or {}
+                if (h.get("pos") or h.get("box")) and es[0].get("pos"):
+                    distance=abs(hero_x(state)-float(es[0]["pos"][0]))
+            v["_b2_entry_distance"]=None if distance is None else abs(float(distance))
+            v["_b2_entry_distance_frame"]=f
         if an is None or int(v["fa"])!=int(an["fa"]) or v["iid"]!=an["iid"]:
             self._note("b2_unchecked",frame=f,reason="h2 guard and observed antic identities differ");return None
         move=MoveInstance(int(v["iid"]),int(an["fa"]),"CC_SLAM")
@@ -257,11 +339,13 @@ class NativeChainB2(NativeChainCandidates):
         """One actual tick; active commitment bypasses ordinary-tail competition."""
         if self.arm!="B":return None
         if self.budget is not None:self.budget.check()
+        if self.recovery is not None:return B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
         try:bundle=self._preview()
         except ChainObservationNotReady as exc:
             self._note("b2_unchecked",frame=self.dispatch.frame,reason=str(exc));return None
         if bundle is None:
             if self.commitment:self._recover("current family program cannot continue",self.dispatch.frame)
+            if self.recovery is not None:return B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
             return None
         preview,move=bundle
         tick,sim,guard,bombs=self._context;f,state,game,ground,accepting=tick
@@ -357,6 +441,15 @@ class NativeChainB2(NativeChainCandidates):
         """Planner's selected B2 candidate; no physical action is sent here."""
         from .planner import PlanResult
         f=self.dispatch.frame
+        if offer.stage=="recovery":
+            planner.prev_cmd=None;planner.prev_tail_ok=False;planner.prev_esc_unsafe=True
+            res=PlanResult(0,-1,"CHAIN B2 hook recovery release",1,True,n=0,n_allowed=0,n_safe=0,tail_ok=None)
+            planner.prev_name=res.name
+            planner.last_info={"b2":{"stage":"recovery","reason":self.recovery["reason"]},
+                               "esc":{"unsafe":True,"b2":"hook_motion_unchecked_release_until_control"}}
+            if planner.measurement_enabled:planner.measurement_result=res
+            self._note("b2_hook_recovery_wait",frame=f,mask=0,path="unchecked")
+            return res
         # The named probe remains visible; h2 guard use isn't relabelled fitted.
         adm=AdmissionDecision(offer.draft.run.lid,"unchecked",f,None,
                              (ConditionResult("legacy_h2_guard","unchecked","named B2 learning protocol"),))
@@ -387,8 +480,11 @@ class NativeChainB2(NativeChainCandidates):
         return res
 
     def before_send(self, *, frame, target, mask, flags, received_frame):
-        if type(received_frame) is not int or received_frame>=target:
-            self._stop("send deadline missed / missing current frame; no late action sent",frame)
+        if type(received_frame) is not int or received_frame>target+4:
+            self._stop("send deadline beyond four frames / missing current frame",frame)
+        if received_frame>target:
+            self._note("b2_send_late",frame=frame,target=target,received_frame=received_frame,
+                       application="unchecked until bounded report/coverage")
         return super().before_send(frame=frame,target=target,mask=mask,flags=flags,received_frame=received_frame)
 
     def sent(self):
@@ -402,8 +498,10 @@ class NativeChainB2(NativeChainCandidates):
                 self._press=self._accepted=self._hit=None
             if selected.stage=="continuation":self._post_kind=selected.details["kind"]
             if selected.mask&(B["D"]|B["A"])==(B["D"]|B["A"]):
-                prev=self._receipts.get(sent.target_frame-1,0)
-                if not prev&B["A"] and self.commitment:self._press=sent.target_frame
+                prev=self._receipts.get(sent.target_frame-1)
+                if prev is None and self._actual_state is not None:
+                    prev,_=self.queued_prefix(sent.frame,self._actual_state)
+                if prev is not None and not prev&B["A"] and self.commitment:self._press=sent.target_frame
         elif self.commitment is not None:
             self._recover("final owner/keys overridden",sent.frame)
         elif self.post_context is not None:
@@ -416,5 +514,6 @@ class NativeChainB2(NativeChainCandidates):
                 "projection":"nominal_chain_program","commitment":None if self.commitment is None else
                 {**self.commitment,"move":vars(self.commitment["move"])},
                 "post_context":None if self.post_context is None else {**self.post_context,"move":vars(self.post_context["move"])},
+                "recovery":None if self.recovery is None else {**self.recovery,"move":None if self.recovery["move"] is None else vars(self.recovery["move"])},
                 "learning_stop":self.learning_stop,"budget":None if self.budget is None else self.budget.state,
                 "live_ready":False}
