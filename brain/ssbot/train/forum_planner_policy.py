@@ -423,12 +423,23 @@ class ForumPlannerPolicy(PlannerPolicy):
     # ---- per episode ----
 
     def _reset_chain_native(self) -> None:
-        if os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
+        native = os.environ.get("SSBOT_FORUM_CHAIN_NATIVE", "0").strip() == "1"
+        if native:
+            if not kin.hero2_on() or self.crest != "Wanderer":
+                raise ValueError("native chain probe needs HERO2 and the Wanderer crest")
+            if os.environ.get("SSBOT_FORUM_KNIFE_ROWS", "0").strip() == "1":
+                raise ValueError("new chains cannot activate the paused strict knife generator")
+            if any(getattr(self, n, None) is not None for n in ("m2", "air_show", "wpress")):
+                raise ValueError("native chain probe conflicts with another controller/cache")
+            from ssbot.combat.knife_chain_candidates import NativeChainCandidates
+            journal = None if self.log_path is None else str(self.log_path.with_suffix(".chain.jsonl"))
+            self.chain_native = NativeChainCandidates.from_env(journal=journal)
+        elif os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
             self.chain_native = None
-        else:
-            if getattr(self, "chain_native", None) is None:
-                from ssbot.combat.knife_chain_native import NativeChainAudit
-                self.chain_native = NativeChainAudit()
+        elif type(getattr(self, "chain_native", None)).__name__ != "NativeChainAudit":
+            from ssbot.combat.knife_chain_native import NativeChainAudit
+            self.chain_native = NativeChainAudit()
+        if self.chain_native is not None:
             frame = getattr(getattr(self, "link", None), "frame", None)
             self.chain_native.reset(self.episode, start_frame=frame if type(frame) is int else None)
         if getattr(self, "planner", None) is not None:
@@ -933,6 +944,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         else:
             if self.chain_native is not None:
                 self.chain_native.planner_input(origin=fo, prefix=prefix, hold=hold, hero_state=S0)
+            if callable(getattr(self.chain_native, "prepare", None)):
+                sim_chain = air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
+                self.chain_native.prepare(s, ground=ws.hero.contact.v == "GROUND",
+                    accepting=bool((s.get("hero") or {}).get("hero_accepting_input", True)), sim=sim_chain)
             res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
         if self.chain_native is not None:
@@ -1029,7 +1044,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 own = "air"
                 asw_crit = True
                 self.counts["air_show"] += 1
-        if self.slam_play is not None and not low_crit and not asw_crit and not m2_on:
+        if (self.slam_play is not None and not low_crit and not asw_crit and not m2_on
+                and not getattr(self.chain_native, "candidate_generation", False)):
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)

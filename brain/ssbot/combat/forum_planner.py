@@ -3521,6 +3521,17 @@ class ForumPlanner(Planner):
         n_hop = 0 if hop is None else len(hop[0])
         if n_hop:
             rows_.append(hop[0])                 # the person's hop rows (G2): after the special rows
+        # New chains are native candidates, not another final key owner. Their
+        # current pulse is evaluated by the same ordinary physics/ranking below.
+        chain = getattr(self, "chain_native", None)
+        chain_rows = (chain.rows(T=T, origin=int(ws.stamp.frame), prefix=prefix, hold=hold, hero_state=start, completions=cs.cmd)
+                      if callable(getattr(chain, "rows", None)) else None)
+        n_chain = 0 if chain_rows is None else len(chain_rows[0])
+        C0 = N0 + n_spec + n_hop
+        if n_chain:
+            rows_.append(chain_rows[0])
+            for q in range(n_chain):
+                chain.register_candidate(C0 + q)
         ds = None
         if v2 and dslash.DSLASH and mode0 not in NO_CONTROL_MODES and posture in ("ground", "air"):
             ds = self._ds_rows(ws, f, start, hold, prefix, prefs, T, posture)
@@ -3534,7 +3545,7 @@ class ForumPlanner(Planner):
                     ds = forum_knife.append_rows(self, win_, ws, f, start, hold, prefix, prefs, T, posture, ds)
         self._ds = ds
         n_ds = 0 if ds is None else len(ds.cmd)
-        D0 = N0 + n_spec + n_hop
+        D0 = N0 + n_spec + n_hop + n_chain
         self._ds_D0 = D0
         if n_ds:
             rows_.append(ds.cmd)                 # the delayed / chained down slashes (G3): after the hop rows
@@ -3564,6 +3575,8 @@ class ForumPlanner(Planner):
                 return "SPECIAL " + spec.entry[i - N0].id
             if N0 + n_spec <= i < N0 + n_spec + n_hop:
                 return hop[1][i - N0 - n_spec]
+            if C0 <= i < C0 + n_chain:
+                return chain_rows[1][i - C0]
             if D0 <= i < D0 + n_ds:
                 return ds.names[i - D0]
             if n_map and i == M0:
@@ -3586,9 +3599,9 @@ class ForumPlanner(Planner):
                 cmd = cmd.copy()
                 cmd[:N0][att, :min(rem0, T)] |= B_JUMP
         N = len(cmd)
-        core = np.concatenate([core0, np.zeros(n_spec + n_ds + n_map + int(cont), bool)]) if not n_hop else \
+        core = np.concatenate([core0, np.zeros(n_spec + n_chain + n_ds + n_map + int(cont), bool)]) if not n_hop else \
             np.concatenate([core0, np.zeros(n_spec, bool), np.ones(n_hop - n_chase, bool), np.zeros(n_chase, bool),
-                            np.zeros(n_ds + n_map + int(cont), bool)])
+                            np.zeros(n_chain + n_ds + n_map + int(cont), bool)])
         win_rows_ = np.zeros(N, bool)         # task oldwin: the window rows (stage F: their own place in the order)
         if n_ds and win_ is not None and getattr(self, "_win_c", None):
             win_rows_[D0 + getattr(self, "_win_off", 0):D0 + n_ds] = True
@@ -3624,6 +3637,11 @@ class ForumPlanner(Planner):
             hok = (hop[2] & ~okb) == 0
             ok = np.append(ok, hok)
             why = np.append(why, np.where(hok, 0, 1))
+        if n_chain:
+            from .knife_chain_candidates import rows_allowed
+            kok = rows_allowed(chain_rows[0], ctx.allowed_mask)
+            ok = np.append(ok, kok)
+            why = np.append(why, np.where(kok, 0, 1))
         if n_ds:
             kok = special_mode.row_keys_allowed(ds.cmd, ctx.allowed_mask)
             ok = np.append(ok, kok)
@@ -3893,7 +3911,7 @@ class ForumPlanner(Planner):
         top = rest[:fcfg.K_b]
         # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
         # IndexError; with a CONTINUE the map row read the CONTINUE's slot)
-        first = np.concatenate([cs.first, np.full(n_spec + n_hop + n_ds + n_map + int(cont), -1, cs.first.dtype)])
+        first = np.concatenate([cs.first, np.full(n_spec + n_hop + n_chain + n_ds + n_map + int(cont), -1, cs.first.dtype)])
         sib = []
         top_set = set(top)
         by_first: dict = {}
@@ -4220,6 +4238,11 @@ class ForumPlanner(Planner):
             a_.ds_safe += ns_
             a_.ds_safe_ticks += int(ns_ > 0)
         V[:N0] = counts[first[:N0]] >= 2
+        if n_chain:
+            # Same first command with multiple ordinary safe completions: the
+            # same diversity ranking trait used above, not chain admission or a
+            # promise that a recorded script is safe in an unobserved world.
+            V[C0:C0 + n_chain] = safe[C0:C0 + n_chain] & (safe[C0:C0 + n_chain].sum() >= 2)
         if cont:
             V[-1] = safe[-1]
         rem = self.jump_until - self.ticks
@@ -4241,6 +4264,10 @@ class ForumPlanner(Planner):
         sk_f = np.full(N, T1, np.int64)
         sk_c = np.zeros(N)
         sel = ok & known
+        if n_chain:
+            # Experimental native pulses cannot be promoted by FORCED_RISK.
+            # Unchecked/deadline-cut ordinary envelopes stay unselectable.
+            sel[C0:C0 + n_chain] &= safe[C0:C0 + n_chain]
         if forced and sctx is not None:
             # review: no safe row: a special row's stage-1 share and first contact were read without M's danger, so in
             # the FORCED_RISK ranking it would look safer than it is; out (the fallback is the normal rows)
@@ -4747,6 +4774,14 @@ class ForumPlanner(Planner):
                 self._ds_keep_b = int(nm_.rsplit("+c", 1)[1]) if ("+c" in nm_ and n_pr >= 2) else None
             else:
                 self._ds_keep_b = None
+        if n_chain:
+            for q in range(n_chain):
+                cr = C0 + q
+                chain.row_results(cr, allowed=ok[cr], enveloped=env[cr], unsafe=S[cr], safe=safe[cr], score=J[cr])
+            if C0 <= res.idx < C0 + n_chain:
+                # Re-evaluate the chain on the next real observation; no static
+                # CONTINUE can inherit a logical run or its pulse-release tail.
+                self.prev_cmd = None
         map_info = None
         if SPECIAL_MAP and self._map is not None:
             # SG4: the map row's outcome this tick (the overlay and the decision log read it), L2's spot

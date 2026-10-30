@@ -121,3 +121,18 @@ def test_entry_probe_recovers_values_but_does_not_emit_keys():
     run = Run("test", "start", {"a": None, "b": 2})
     assert r.probe_entry(X(r, run, SimpleNamespace(allow=True)), r.chains["test"].links["start"]) == "end"
     assert run.v["a"] == 9 and run.sent == []
+
+
+
+def test_history_fork_has_fresh_mutable_state_and_reuses_only_bound_data():
+    r = runner(); r.step(10, {}, True)
+    original = deepcopy(r.run.v)
+    fresh = r.fork_empty(Anchor())
+    assert fresh.run is None and fresh.done == [] and fresh.fired == {}
+    assert fresh.chains is r.chains and fresh.P is r.P and fresh.binding is r.binding
+    assert fresh.anchor is not r.anchor
+    fresh.step(11, {}, True)
+    fresh.run.v["a"] = -1
+    assert r.run.v == original and r.run.sent == [(12,1<<21)]
+    with pytest.raises(ValueError, match="fresh anchor"):
+        r.fork_empty(r.anchor)

@@ -199,14 +199,37 @@ class ChainRunner:
         self.cfg0 = deepcopy(cfg0) if cfg0 is not None else {}
         self.reset()
 
-    def preview(self, *args, **kwargs):
+    def fork_empty(self, anchor):
+        """Fresh logical state over this already bound read-only table/registry.
+
+        Family history reconstruction can replay observations without rebinding
+        all links or copying the same table. The caller supplies a NEW anchor;
+        neither the current Run nor observation memory is inherited.
+        """
+        if anchor is self.anchor:
+            raise ValueError("empty fork needs a fresh anchor")
+        fork = type(self).__new__(type(self))
+        fork.chains, fork.P, fork.cfg0, fork.binding = self.chains, self.P, self.cfg0, self.binding
+        fork.anchor = anchor
+        fork.reset()
+        return fork
+
+    def preview(self, *args, static_context=(), **kwargs):
         """Evaluate a private draft without committing run state or touching input objects.
 
         Copy the runner AND inputs together to preserve aliases inside the draft.
         This conservative copy has no certified live-tick budget; a family adapter
         must also keep primitive effects confined to its supplied context.
         """
-        trial, copied_args, copied_kwargs = deepcopy((self, args, kwargs))
+        # A trusted family may explicitly borrow its validated READ-ONLY table
+        # and registry. Mutable Run/anchor observation memory and supplied inputs
+        # are still copied together. This is not a sandbox for arbitrary plugins.
+        allowed = (self.chains, self.P, self.cfg0, self.binding,
+                   getattr(self.anchor, "chains", None), getattr(self.anchor, "cfg", None))
+        if any(not any(obj is item for item in allowed) for obj in static_context):
+            raise ValueError("preview static context must be the evaluator's table/registry/config")
+        memo = {id(obj): obj for obj in static_context}
+        trial, copied_args, copied_kwargs = deepcopy((self, args, kwargs), memo)
         mask = trial.step(*copied_args, **copied_kwargs)
         f = args[0] if args else kwargs["f"]
         return ChainPreview(f, mask, trial)
