@@ -279,6 +279,23 @@ def _nominal_hook(S, world, game, params, terrain, profile, direction):
     return h,phase
 
 
+def begin_post_branch(runner,raw,sim,game,branch,*,observed_history=None):
+    """Step the table on a CALLER-OWNED private Run, not a cached logical Run."""
+    R=runner
+    if observed_history is not None:R.anchor.hist=observed_history
+    if R.run is None:raise NominalUnsupported("no post branch seed")
+    face=R.run.v["face"]
+    R.run.chain="slam_jump";R.run.link="out_dash" if branch=="dash_out" else ("out_front" if branch=="right_landing" and face>0 or branch=="left_landing" and face<0 else "out_behind")
+    near=-1 if branch=="left_landing" else 1
+    R.run.v.update(bounced=True,near=near,near_u=float(R.cfg0.get("NEAR_STAND_U",5.)),
+                   side_why="b2_option",over_dir=None,k_dash=None)
+    R.observation_cutoff=sim.f
+    mask=R.step(sim.f,raw,bool(sim.start[km.GROUND]),bool(raw.get("hero",{}).get("hero_accepting_input",True)),
+                t_game=game,sim=sim)
+    if mask is None:raise NominalUnsupported("post-bounce branch has no first action")
+    return R,int(mask)
+
+
 def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
                  branch=None, known_press=None, observed_history=None):
     """Run a private chain copy forward with generated observations, never replay keys.
@@ -296,15 +313,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
     s=copy_model_observation(raw,R.run.v["iid"])
     world=NominalWorld(s,R.run,float(game))
     if branch is not None:
-        face=R.run.v["face"]
-        R.run.chain="slam_jump";R.run.link="out_dash" if branch=="dash_out" else ("out_front" if branch=="right_landing" and face>0 or branch=="left_landing" and face<0 else "out_behind")
-        near=-1 if branch=="left_landing" else 1
-        R.run.v.update(bounced=True,near=near,near_u=float(R.cfg0.get("NEAR_STAND_U",5.)),
-                       side_why="b2_option",over_dir=None,k_dash=None)
-        R.observation_cutoff=origin
-        first_mask=R.step(origin,s,bool(sim.start[km.GROUND]),bool(s.get("hero",{}).get("hero_accepting_input",True)),
-                          t_game=game,sim=sim)
-        if first_mask is None:raise NominalUnsupported("post-bounce branch has no first action")
+        R,first_mask=begin_post_branch(R,s,sim,game,branch)
     branch_draft=logical_copy(R) if branch is not None else None
     desired={origin+1:int(sim.prefix[0]),origin+2:int(first_mask)}
     S=np.asarray(sim.start,float).reshape(km.K).copy();hold=sim.hold.copy()
@@ -475,5 +484,7 @@ def warm_nominal(params):
         km.rollout(start,np.zeros((1,1),np.int64),params,terrain)
         km.rollout(start,np.zeros((1,1),np.int64),params,terrain,events=np.full((1,1),km.EV_POGO,np.int64))
     claw_strike.warm(params)
-    return {"seconds":time.perf_counter()-started,"jump_to_bounce":len(path.commands),"post_paths":len(posts),
+    from .knife_chain_step import NominalStepper
+    NominalStepper(params,terrain).trace(S,np.zeros(16,np.int64),0.)
+    return {"post_trace_warmed":True,"seconds":time.perf_counter()-started,"jump_to_bounce":len(path.commands),"post_paths":len(posts),
             "hook_control":hook.ctrl,"compiled_signatures":compiled_signatures(),"scope":"warm models only, no real Run/contact credit"}

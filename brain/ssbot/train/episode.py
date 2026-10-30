@@ -245,6 +245,7 @@ class AttemptRecord:
                                                  # STATE for as long shows here too, but does not trip the watchdog)
     loop_gaps_250: int = 0                       # turns that came 250 ms or more after the one before
     start_resume: list | None = None             # the taps of the resume a pause found before the reset needed
+    b2_context: dict | None = None               # reserved worker slot + actual policy/reset-frame binding
 
 
 def _rand(link: OracleLink, **args) -> dict:
@@ -329,6 +330,7 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
         _run(link, enc, tap, policy, cfg, rec)
     except (OracleError, TimeoutError, RuntimeError, KeyError, TypeError, ConnectionError) as e:
         rec.outcome, rec.reason = HARNESS_FAIL, f"{type(e).__name__}: {e}"
+        _b2_failure_end(link,rec)
     finally:
         measurement = getattr(link, "measurement", None)
         if measurement is not None and measurement.window is not None and measurement._last_frame is not None:
@@ -343,6 +345,36 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
         stats = getattr(policy, "stats", None)
         rec.policy = stats() if stats else {}
     return rec
+
+
+def _b2_failure_end(link, rec: AttemptRecord) -> None:
+    """Retain the observed stop endpoint before cleanup can advance the link."""
+    if rec.b2_context is None or type(rec.f_reset) is not int:return
+    try:
+        frame=link.frame
+        if type(frame) is int and frame>=rec.f_reset:
+            if rec.f_end is None:rec.f_end=frame
+            rec.b2_context["failure_frame"]={"status":"observed","source":"link.frame before release","frame":frame}
+        else:
+            rec.b2_context["failure_frame"]={"status":"unknown","reason":"no valid observed frame at/after reset"}
+    except Exception as exc:
+        rec.b2_context["failure_frame"]={"status":"unknown","reason":type(exc).__name__+": "+str(exc)}
+
+
+def _bind_b2_episode(policy, rec: AttemptRecord, frame: int) -> None:
+    """After the real reset, bind worker k to the policy's own episode counter."""
+    if rec.b2_context is None:return
+    from ssbot.combat.knife_chain_budget import LearningStop
+    chain=getattr(policy,"chain_native",None)
+    budget=getattr(chain,"budget",None)
+    context=dict(rec.b2_context)
+    if (not getattr(chain,"b2",False) or budget is None or chain.episode!=context["policy_episode_expected"]
+            or chain.arm!=context["arm"] or budget.batch!=context["batch"] or budget.revision!=context["revision"]):
+        raise LearningStop("B2 attempt/policy episode binding mismatch")
+    context.update(policy_episode=chain.episode,f_reset=rec.f_reset,f_wake=rec.f_wake,frame=frame)
+    rec.b2_context=context
+    chain._note("b2_episode_start",**context)
+    chain.flush()  # durable before the first combat ACTION, including a later stopped attempt
 
 
 def _pause_cause(tap, s: dict) -> str:
@@ -417,6 +449,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         rec.intro = list(rec.intro or ()) + [{"boss_hp_frac": frac, "set": r.get("set")}]
 
     policy.reset(random.Random(cfg.seed), enc)
+    _bind_b2_episode(policy,rec,link.frame)
     measurement = getattr(link, "measurement", None)
     if measurement is not None:
         planner = getattr(policy, "planner", None)

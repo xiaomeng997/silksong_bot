@@ -579,8 +579,9 @@ def worker(a: argparse.Namespace) -> int:
             enc = encs[k % len(encs)]
             reservation=None
             if b2_budget is not None:
+                from ssbot.combat.knife_chain_budget import attempt_labels
                 reservation=b2_budget.begin_attempt(episode=k,arm=os.environ["SSBOT_FORUM_CHAIN_ARM"],seed=seed,
-                    policy_episode=getattr(policy,"episode",0)+1)
+                    policy_episode=getattr(policy,"episode",0)+1,**attempt_labels(k))
             if not a.no_record and k % a.rotate == 0:
                 if rec_obj is not None:
                     rec_obj.close()
@@ -594,6 +595,12 @@ def worker(a: argparse.Namespace) -> int:
             rec = AttemptRecord(unit=enc.name, stage="TRAIN", profile="TRAIN" if a.view == "oracle" else "SIM_FINAL",
                                 build="1.0.30000", code_rev=rev,
                                 config_fp=fp, start_kind="savestate", mode=a.mode, seed=seed)
+            if reservation is not None:
+                rec.b2_context={"k":k,"instance":a.instance,"seed":seed,"arm":reservation["arm"],
+                    "batch":b2_budget.batch,"revision":b2_budget.revision,"code_rev":rev,
+                    "reservation_id":reservation["id"],"policy_episode_expected":reservation["policy_episode"],
+                    "execution_sha256":reservation["execution_sha256"],
+                    "block":reservation.get("block"),"order":reservation.get("order")}
             # the episode's timebox counts rendered frames / 60 (real seconds): at time scale s that is s times as
             # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
             timebox = (a.timebox or enc.timebox_s) / a.time_scale

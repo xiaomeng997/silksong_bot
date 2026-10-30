@@ -8,6 +8,7 @@ all later suggestions compete normally. Unfitted conditions remain probe-only.
 from __future__ import annotations
 
 from dataclasses import dataclass,asdict
+from collections import Counter
 from copy import deepcopy
 import hashlib
 import json
@@ -38,6 +39,7 @@ class B2Offer:
     value: float
     move: MoveInstance
     details: dict
+    proposal_ms: float | None = None
 
 
 class NativeChainB2(NativeChainCandidates):
@@ -92,7 +94,44 @@ class NativeChainB2(NativeChainCandidates):
         self._budget_targets=set();self._budget_dead=set()
         self._application={};self._last_matching_report=None;self._actual_state=None;self.recovery=None
         self._post_seed=None;self._post_kind=None
+        self._post_keys={};self._post_key_move=None;self._post_prepare_cursor=0
+        self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
         if self.budget is not None:self.budget.check()
+
+    def _note(self,event,**data):
+        started=getattr(self,"_proposal_started",None)
+        if event.startswith("b2_") and started is not None:
+            # Cumulative time to this event, not an exclusive child-stage cost.
+            data.setdefault("ms",(time.perf_counter()-started)*1000.)
+            data.setdefault("timing_scope","proposal_elapsed_to_event")
+        return super()._note(event,**data)
+
+    def _receipt_note(self,kind,frame,**data):
+        self._receipt_counts[kind]+=1
+        self._note("b2_receipt",frame=frame,kind=kind,**data,
+                   scope="pending chain command resolution; not hero action acceptance")
+
+    def _no_candidate(self,reason,*,frame=None,state=None):
+        f=self.dispatch.frame if frame is None else frame
+        if state is None:state=self._actual_state or {}
+        key=(f,reason)
+        if self._last_no_candidate==key:return
+        self._last_no_candidate=key
+        from .slam_play import clappers,control
+        antic=[]
+        for e in clappers(state):
+            st,tin=control(e)
+            if st=="Slam Antic":
+                # Do not infer an unseen entry from state time. Known fa is
+                # supplied only by a causal history observation.
+                fa=None
+                hist=getattr(self.runner.anchor,"hist",None)
+                if hist is not None:
+                    seen=hist.antic(e["iid"],"Slam Antic",())
+                    if seen is not None:fa=seen["fa"]
+                antic.append({"iid":e["iid"],"fa":fa,"observed_state":st,"state_time":tin})
+        self._note("b2_no_candidate",frame=f,reason=reason,antics=antic,
+                   observed_frame=state.get("f"),scope="current observation/history only")
 
     def rows(self,**kwargs):
         return None                 # never insert a short pulse + ordinary tail
@@ -131,12 +170,26 @@ class NativeChainB2(NativeChainCandidates):
         if kill_frame is not None:self._kill_frame=int(kill_frame) if self._kill_frame is None else min(self._kill_frame,int(kill_frame))
         tail=self._kill_frame is not None and f>self._kill_frame
         related=bool(self.commitment or self.post_context or self.recovery or (self.runner.run is not None and self.arm=="B"))
+        if loss:
+            sources=[]
+            for ev in state.get("ev") or ():
+                d=ev.get("d") or {}
+                if (ev.get("k")=="damage" and ev.get("f",f)==f and
+                        d.get("can_take",True) and not d.get("invuln")):
+                    source=d.get("source") or d.get("src")
+                    if source is not None:sources.append(str(source))
+            phase=("commitment" if self.commitment is not None else "post" if self.post_context is not None
+                   else "recovery" if self.recovery is not None else "approach" if related else "none")
+            # Budget.observe may raise on this very first injury. Preserve the
+            # actual HP event before the immutable stop/cleanup path begins.
+            self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related,phase=phase,
+                       sources=sorted(set(sources)) or ["unknown"],
+                       source_scope="same-frame eligible damage-call candidates; no predicted/near-frame attribution")
         if self.budget is not None:
             try:self.budget.observe(episode=self.episode,frame=f,arm=self.arm,hp_loss=loss,chain_related=related,
                                    tail=tail,fatal="death" if hp<=0 or flag(state,"dead") else None)
             except LearningStop as exc:
                 self.learning_stop=str(exc);self._note("b2_learning_stop",frame=f,reason=str(exc));self.flush();raise
-        if loss:self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related)
 
     def _observe_application(self,state):
         f=state["f"];act=state.get("act") or {}
@@ -144,7 +197,9 @@ class NativeChainB2(NativeChainCandidates):
         sent=self._receipts.get(target)
         valid=False
         if sent is not None and type(desired) is int:
-            if desired!=sent:self._stop("key application desync: desired differs from successful send",f)
+            if desired!=sent:
+                self._receipt_note("desired_mismatch",f,target=target,wanted=sent,reported_desired=desired)
+                self._stop("key application desync: desired differs from successful send",f)
             valid=type(applied) is int and target<=applied<=min(f,target+2)
             if target in self._pending and type(applied) is int and applied>target+2:
                 self._note("b2_application_outside_late_bound",frame=f,target=target,applied=applied,
@@ -163,6 +218,9 @@ class NativeChainB2(NativeChainCandidates):
                        "applied":applied if direct else None,
                        "between":None if direct else [previous["target"],target]}
                 self._application[t]=proof
+                self._receipt_note("skip_same_key" if same else "skip_key_change" if covered else "lag" if applied>t else "direct",
+                    f,target=t,reported_target=target,desired=wanted,lag=applied-t if direct else None,
+                    between=proof["between"],hero_action="unchecked",contact="unchecked")
                 self._note("chain_application_observed",frame=f,**proof,hero_action="unchecked",contact="unchecked")
                 if covered:
                     self._note("b2_application_skipped",frame=f,**proof)
@@ -173,7 +231,10 @@ class NativeChainB2(NativeChainCandidates):
         # User opt1: valid reports bracket skipped targets, even across key
         # changes. Coverage is not an exact application or accepted-action claim.
         # Allow through T+4; on T+5 without any proof, stop.
-        if any(t<f-4 for t in self._pending):self._stop("missing critical application receipt beyond four-frame upper bound",f)
+        overdue=[t for t in self._pending if t<f-4]
+        if overdue:
+            for t in overdue:self._receipt_note("uncovered_timeout",f,target=t,desired=self._pending[t],upper_bound=t+4)
+            self._stop("missing critical application receipt beyond four-frame upper bound",f)
 
     def queued_prefix(self,frame,state):
         """Desired prefix from our send, or known held desired if no action queued.
@@ -256,6 +317,7 @@ class NativeChainB2(NativeChainCandidates):
             self.recovery={"first":f,"reason":reason,"move":old_move}
             self._note("b2_hook_recovery_enter",frame=f,reason=reason,action="release/wait until observed hook end",path="unchecked")
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
+        self._post_keys.clear();self._post_key_move=None
         self._abandon(reason)
 
     def _prepare_tick_state(self,state):
@@ -265,14 +327,17 @@ class NativeChainB2(NativeChainCandidates):
         return state
 
     def _preview(self):
-        if self._context is None:return None
+        if self._context is None:
+            self._no_candidate("no current model context");return None
         tick,sim,guard,bombs=self._context
         f,state,game,ground,accepting=tick
         if sim.fo!=f or sim.f!=f or len(sim.prefix)!=1:
-            self._note("b2_unchecked",frame=f,reason="lagged/current model mismatch");return None
+            self._note("b2_unchecked",frame=f,reason="lagged/current model mismatch")
+            self._no_candidate("lagged/current model mismatch",frame=f,state=state);return None
         receipt,source=self.queued_prefix(f,state)
         if receipt is None:
-            self._note("b2_unchecked",frame=f,reason=source);return None
+            self._note("b2_unchecked",frame=f,reason=source)
+            self._no_candidate(source,frame=f,state=state);return None
         if receipt!=int(sim.prefix[0]):
             from .air_chain import ChainSim
             sim=ChainSim(sim.start, np.array([receipt],np.int64),sim.hold,sim.params,sim.terrain,sim.fo,sim.f)
@@ -282,12 +347,14 @@ class NativeChainB2(NativeChainCandidates):
         from .knife_chain_history import HistView
         from .slam_play import clappers,control
         es=clappers(state)
-        if len(es)!=1:return None
+        if len(es)!=1:
+            self._no_candidate("single live Clapper scope" if es else "no live Clapper",frame=f,state=state);return None
         hist=HistView(list(self._ticks),self._receipts,f,lag=self.runner.cfg0.get("lag",0))
         an=hist.antic(es[0]["iid"],"Slam Antic",())
         self.runner.anchor.hist=hist
         self.runner.anchor.external=self.runner.run is None and hist.complete_antic_receipts(an)
-        if self.runner.run is None and control(es[0])[0]!="Slam Antic" and not self.runner.anchor.external:return None
+        if self.runner.run is None and control(es[0])[0]!="Slam Antic" and not self.runner.anchor.external:
+            self._no_candidate("no active Run or traceable external antic entry",frame=f,state=state);return None
         # Family-specific fork: share read-only history/model configuration,
         # fork all active mutable state. Generic evaluator preview stays intact.
         from .air_chain import ChainSim
@@ -296,7 +363,8 @@ class NativeChainB2(NativeChainCandidates):
         model=ChainSim(sim.start.copy(),sim.prefix.copy(),sim.hold.copy(),sim.params,sim.terrain,sim.fo,sim.f)
         mask=draft.step(f,state,ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
         preview=ChainPreview(f,mask,draft) # first key f+2: actual information has >=2f lead
-        if preview.mask is None or preview.draft.run is None:return None
+        if preview.mask is None or preview.draft.run is None:
+            self._no_candidate("family program offered no current action",frame=f,state=state);return None
         v=preview.draft.run.v
         if "_b2_entry_distance" not in v:
             distance=v.get("x_start")
@@ -308,7 +376,8 @@ class NativeChainB2(NativeChainCandidates):
             v["_b2_entry_distance"]=None if distance is None else abs(float(distance))
             v["_b2_entry_distance_frame"]=f
         if an is None or int(v["fa"])!=int(an["fa"]) or v["iid"]!=an["iid"]:
-            self._note("b2_unchecked",frame=f,reason="h2 guard and observed antic identities differ");return None
+            self._note("b2_unchecked",frame=f,reason="h2 guard and observed antic identities differ")
+            self._no_candidate("h2 guard and observed antic identities differ",frame=f,state=state);return None
         move=MoveInstance(int(v["iid"]),int(an["fa"]),"CC_SLAM")
         return preview,move
 
@@ -359,7 +428,69 @@ class NativeChainB2(NativeChainCandidates):
                        for j in range(i+1,min(i+5,path.states.shape[1])))
         return False
 
+    def _post_cache_for(self,move):
+        if self._post_key_move!=move:
+            self._post_keys.clear();self._post_key_move=move;self._post_prepare_cursor=0
+
+    def _remember_post_keys(self,path,kind,move,frame):
+        from .knife_chain_post import PostKeys
+        self._post_cache_for(move)
+        try:
+            self._post_keys[kind]=PostKeys.from_path(path,move=move,kind=kind,source_frame=frame,
+                table_digest=self.runner.binding["table_digest"],profile=self.profile)
+        except NominalUnsupported:return
+        self._note("b2_post_keys_prepared",frame=frame,kind=kind,move=vars(move),origin=path.origin,
+                   through=path.through,scope="keys only; no safety credit")
+
+    def _post_path(self,seed,state,sim,game,*,kind,move,frame,mask,continuing=False,press=None):
+        from .knife_chain_post import reroll_post
+        self._post_cache_for(move)
+        template=self._post_keys.get(kind)
+        if template is not None:
+            try:
+                path=reroll_post(template,seed,state,sim,game,move=move,kind=kind,frame=frame,
+                    profile=self.profile,first_mask=mask,continuing=continuing,
+                    observed_history=self.runner.anchor.hist,known_press=press)
+                self._note("b2_post_keys_reused",frame=frame,kind=kind,template_source=template.source_frame,
+                           through=path.through,model_origin=sim.f,
+                           scope="fresh table key, rerolled physics; geometry still required")
+                return path
+            except (NominalUnsupported,ChainObservationNotReady) as exc:
+                self._note("b2_post_keys_miss",frame=frame,kind=kind,reason=str(exc))
+        path=compile_path(seed,state,sim,game,stage="continuation",first_mask=mask,
+            profile=self.profile,branch=None if continuing else kind,known_press=press,
+            observed_history=self.runner.anchor.hist)
+        self._remember_post_keys(path,kind,move,frame)
+        return path
+
+    def _prepare_post_keys(self,future,sim,move,frame):
+        # One missing key template per approach tick. This is speculative table
+        # work, never a future admission or a cached geometry result.
+        from .knife_chain_post import KINDS
+        from .air_chain import ChainSim
+        self._post_cache_for(move)
+        missing=[k for k in KINDS if k not in self._post_keys]
+        if not missing:return
+        kind=missing[self._post_prepare_cursor%len(missing)];self._post_prepare_cursor+=1
+        bs=ChainSim(future.states[:,-1],np.array([future.queued_next],np.int64),future.hold_end,
+                    sim.params,sim.terrain,future.through,future.through)
+        try:
+            path=compile_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),stage="continuation",
+                first_mask=0,profile=self.profile,branch=kind,known_press=future.press_frame)
+            self._remember_post_keys(path,kind,move,frame)
+        except (NominalUnsupported,ChainObservationNotReady) as exc:
+            self._note("b2_post_prepare_unchecked",frame=frame,kind=kind,reason=str(exc))
+
     def propose(self,planner,ws,start,hold,prefix,forecast,prefs,ctx):
+        """Time this synchronous proposal, separately from selection/send costs."""
+        self._proposal_started=time.perf_counter()
+        try:
+            offer=self._propose(planner,ws,start,hold,prefix,forecast,prefs,ctx)
+            if offer is not None:offer.proposal_ms=(time.perf_counter()-self._proposal_started)*1000.
+            return offer
+        finally:self._proposal_started=None
+
+    def _propose(self,planner,ws,start,hold,prefix,forecast,prefs,ctx):
         """One actual tick; active commitment bypasses ordinary-tail competition."""
         if self.arm!="B":return None
         if self.budget is not None:self.budget.check()
@@ -375,7 +506,8 @@ class NativeChainB2(NativeChainCandidates):
         tick,sim,guard,bombs=self._context;f,state,game,ground,accepting=tick
         rs=getattr(forecast,"rs",None)
         observed=None if rs is None else getattr(rs.trk,"now",{}).get(move.target_iid)
-        if observed is None:return None
+        if observed is None:
+            self._no_candidate("target tracker observation unavailable",frame=f,state=state);return None
         geo=B2Geometry(forecast,f,move,observed[2])
         if self.commitment is not None:
             if self.commitment["move"]!=move:
@@ -391,18 +523,20 @@ class NativeChainB2(NativeChainCandidates):
                     seed=preview.draft if continuing else (self._post_seed or self.runner)
                     # Reuse the current read-only actual history, never a modeled
                     # future or a stale branch decision from the bounce tick.
-                    path=compile_path(seed,state,sim,game,stage="continuation",first_mask=preview.mask,
-                        profile=self.profile,branch=None if continuing else kind,known_press=self._press,
-                        observed_history=self.runner.anchor.hist)
+                    path=self._post_path(seed,state,sim,game,kind=kind,move=move,frame=f,
+                        mask=preview.mask,continuing=continuing,press=self._press)
                     scan=geo.scan(path)
                     ok=check_external_path(scan,path_ref=geo.ref(path),target_move=move,first_frame=f,
                         last_frame=path.through,stage="continuation")
-                    if ok.verdict!="pass":continue
+                    if ok.verdict!="pass":
+                        self._note("b2_post_rejected",frame=f,kind=kind,verdict=ok.verdict,reason=ok.reason,
+                                   retained_contacts=len(ok.retained));continue
                     real=preview.draft if continuing else path.first_draft
                     mask=int(path.offered[0])
                     offers.append(B2Offer("continuation",path,real,int(mask),self._endpoint(planner,path,prefs),move,{"kind":kind}))
                 except (NominalUnsupported,GeometryUnavailable,ChainObservationNotReady) as exc:
                     self._note("b2_post_unchecked",frame=f,kind=kind,reason=str(exc))
+            if not offers:self._no_candidate("no checked post-bounce branch",frame=f,state=state)
             return max(offers,key=lambda o:o.value) if offers else None
         try:
             future=compile_path(preview.draft,state,sim,game,stage="commitment",first_mask=preview.mask,profile=self.profile)
@@ -414,6 +548,7 @@ class NativeChainB2(NativeChainCandidates):
                 preflight=geo.preflight(future)
                 if ok.verdict!="pass" or preflight.contacts:
                     self._note("b2_approach_rejected",frame=f,path=ok.reason,preflight=[asdict(c) for c in preflight.contacts]);return None
+                self._prepare_post_keys(future,sim,move,f)
                 return B2Offer("approach",path,preview.draft,int(preview.mask),0.,move,
                                {"preflight_through":future.through,"next_decision":path.assumptions.get("future_decision")})
             admission=TargetMoveAdmission(move,f,future.through,
@@ -423,7 +558,16 @@ class NativeChainB2(NativeChainCandidates):
                                    stage="commitment",admission=admission)
             if ok.verdict!="pass":
                 self._note("b2_commit_rejected",frame=f,reason=ok.reason,contacts=[asdict(c) for c in ok.retained]);return None
-            paths,errors=post_paths(future,sim.params,sim.terrain,profile=self.profile)
+            from .air_chain import ChainSim
+            from .knife_chain_post import KINDS
+            bs=ChainSim(future.states[:,-1],np.array([future.queued_next],np.int64),future.hold_end,
+                        sim.params,sim.terrain,future.through,future.through)
+            paths={};errors={}
+            for kind in KINDS:
+                try:
+                    paths[kind]=self._post_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
+                        kind=kind,move=move,frame=f,mask=0,press=future.press_frame)
+                except (NominalUnsupported,ChainObservationNotReady) as exc:errors[kind]=str(exc)
             bgeo=B2Geometry(forecast,f,move,observed[2])
             bounce_ref=f"{move}:{future.through}"
             opts=[]
@@ -500,7 +644,8 @@ class NativeChainB2(NativeChainCandidates):
                 press=p.press_frame,conditional_contact=p.contact_frame,assumptions=p.assumptions,
                 observations="private modeled future only; no actual application/contact credit")
         self._note("b2_selected",frame=f,stage=offer.stage,mask=offer.mask,move=vars(offer.move),
-                   through=None if p is None else p.through,value=offer.value,details=offer.details)
+                   through=None if p is None else p.through,value=offer.value,details=offer.details,
+                   ms=offer.proposal_ms,timing_scope="complete proposal only; excludes ordinary planner/install/send")
         return res
 
     def before_send(self, *, frame, target, mask, flags, received_frame):
@@ -540,4 +685,6 @@ class NativeChainB2(NativeChainCandidates):
                 "post_context":None if self.post_context is None else {**self.post_context,"move":vars(self.post_context["move"])},
                 "recovery":None if self.recovery is None else {**self.recovery,"move":None if self.recovery["move"] is None else vars(self.recovery["move"])},
                 "learning_stop":self.learning_stop,"budget":None if self.budget is None else self.budget.state,
+                "receipt_counts":dict(self._receipt_counts),
+                "receipt_scope":"pending chain command resolution; not all IPC/hero actions",
                 "live_ready":False}

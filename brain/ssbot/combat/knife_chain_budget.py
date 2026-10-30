@@ -88,8 +88,16 @@ class LearningBudget:
                           "worker":self.worker,"episode":event["episode"],"frame":None}
             return
         if data.get("execution") is None:raise LearningStop("B2 execution conditions must be bound before reservation")
+        crossover=data["execution"]["conditions"].get("crossover")
+        if crossover is not None:
+            planned=crossover["schedule"]["attempts"]
+            order=event.get("order")
+            if (type(order) is not int or order!=len(attempts) or order>=len(planned) or
+                    any(event.get(k)!=planned[order][k] for k in ("order","block","arm","seed"))):
+                raise LearningStop("B2 attempt differs from frozen crossover order/arm/block/seed")
         attempts.append({"id":identity,"worker":self.worker,"episode":event["episode"],"arm":arm,
                          "seed":event["seed"],"policy_episode":event.get("policy_episode"),
+                         "block":event.get("block"),"order":event.get("order"),
                          "execution_sha256":data["execution"]["sha256"],"status":"reserved"})
 
     def bind_execution(self,conditions):
@@ -97,11 +105,14 @@ class LearningBudget:
         self._update({"kind":"execution","conditions":conditions})
         self.check()
 
-    def begin_attempt(self,*,episode,arm,seed,policy_episode=None):
+    def begin_attempt(self,*,episode,arm,seed,policy_episode=None,block=None,order=None):
         """Atomic reservation BEFORE ready/reset; failures consume their slot."""
         if type(episode) is not int or episode<0 or arm not in {"A","B"} or type(seed) is not int:
             raise ValueError("invalid B2 attempt reservation")
-        self._update({"kind":"attempt","episode":episode,"arm":arm,"seed":seed,"policy_episode":policy_episode})
+        if any(v is not None and (type(v) is not int or v<0) for v in (block,order)):
+            raise ValueError("invalid B2 crossover labels")
+        self._update({"kind":"attempt","episode":episode,"arm":arm,"seed":seed,"policy_episode":policy_episode,
+                      "block":block,"order":order})
         self.check()
         return dict(self.state["attempts"][-1])
 
@@ -143,6 +154,8 @@ def preflight_environment(encounter, *, no_record=False):
     path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
     if not batch or not path or not os.environ.get("SSBOT_FORUM_CHAIN_PROBE","") or os.environ.get("SSBOT_FORUM_CHAIN_ARM") not in {"A","B"}:
         raise LearningStop("B2 needs named batch/probe, explicit arm and shared budget path")
+    attempt_labels(0)
+    crossover_schedule()
     p=Path(path)
     if p.with_name(p.name+".halt").exists():raise LearningStop("B2 integrity halt marker present; no retry")
     if p.with_name(p.name+".lock").exists():raise LearningStop("B2 budget lock present; no automatic retry")
@@ -192,7 +205,54 @@ def execution_conditions(options,environ=None):
           "start_hp","start_silk","silk_reserve","key_cost","forum_clash","no_record","rotate","same_seeds",
           "measure","measurement_protocol","measure_diagnostics","measure_timing_only","measure_max_records",
           "measure_stall_ms","measure_stall_tick","measure_stall_episode","engineering_probe")
-    labels={"SSBOT_FORUM_CHAIN_ARM","SSBOT_FORUM_CHAIN_BATCH","SSBOT_FORUM_CHAIN_BUDGET"}
+    labels={"SSBOT_FORUM_CHAIN_ARM","SSBOT_FORUM_CHAIN_BATCH","SSBOT_FORUM_CHAIN_BUDGET",
+            "SSBOT_FORUM_CHAIN_BLOCK","SSBOT_FORUM_CHAIN_ORDER"}
+    crossover=crossover_schedule(env)
     return {"schema":1,"smoke_limit":{"total":8,"per_arm":4},
+            **({"crossover":crossover} if crossover is not None else {}),
             "options":{k:getattr(options,k,None) for k in keys},
             "environment":{k:v for k,v in sorted(env.items()) if k.startswith("SSBOT_") and k not in labels}}
+
+
+def attempt_labels(episode, environ=None):
+    """Explicit crossover labels; ORDER is this invocation's first global slot.
+
+    No labels means unknown, never a block inferred from wall clock or episode.
+    When a frozen schedule is supplied its exact slot is checked atomically at
+    reservation. Multi-worker schedules must assign their slots explicitly.
+    """
+    env=os.environ if environ is None else environ
+    raw=[env.get("SSBOT_FORUM_CHAIN_"+k,"").strip() for k in ("BLOCK","ORDER")]
+    if not any(raw):return {"block":None,"order":None}
+    if not all(raw):raise LearningStop("B2 crossover BLOCK and ORDER must be supplied together")
+    try:values=[int(v) for v in raw]
+    except (TypeError,ValueError) as exc:raise LearningStop("invalid B2 crossover BLOCK/ORDER") from exc
+    if min(values)<0 or type(episode) is not int or episode<0:raise LearningStop("invalid B2 crossover BLOCK/ORDER")
+    return {"block":values[0],"order":values[1]+episode}
+
+
+def crossover_schedule(environ=None):
+    """Bind a reviewable frozen sequence, separately from per-attempt labels.
+
+    schema 1: {batch, attempts:[{order,block,arm,seed}, ...]}. Zero-based order is
+    contiguous; a short engineering trial may have fewer than eight entries.
+    The immutable content copy plus exact file hash is part of execution identity.
+    """
+    env=os.environ if environ is None else environ
+    path=env.get("SSBOT_FORUM_CHAIN_SCHEDULE","").strip()
+    if not path:return None
+    try:
+        raw=Path(path).read_bytes();schedule=json.loads(raw)
+        rows=schedule["attempts"]
+        if (schedule.get("schema")!=1 or schedule.get("batch")!=env.get("SSBOT_FORUM_CHAIN_BATCH")
+                or not isinstance(rows,list) or not 1<=len(rows)<=8):raise ValueError("schema/batch/attempts")
+        for i,row in enumerate(rows):
+            if (type(row.get("order")) is not int or row["order"]!=i or type(row.get("block")) is not int
+                    or row["block"]<0 or row.get("arm") not in {"A","B"} or type(row.get("seed")) is not int):
+                raise ValueError("invalid order/block/arm/seed")
+        if any(sum(r["arm"]==a for r in rows)>4 for a in ("A","B")):raise ValueError("per-arm limit")
+        labels=attempt_labels(0,env)
+        if labels["order"] is None:raise ValueError("schedule requires explicit BLOCK/ORDER")
+    except (OSError,ValueError,TypeError,KeyError,AttributeError) as exc:
+        raise LearningStop("B2 frozen crossover schedule invalid: "+str(exc)) from exc
+    return {"sha256":hashlib.sha256(raw).hexdigest(),"schedule":schedule}
