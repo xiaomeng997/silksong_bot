@@ -559,35 +559,127 @@ def move_window(hwnd: int, x: int, y: int) -> None:
     user32.SetWindowPos(hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
 
 
+# Windows' LISTENER table class filters membership in the native API itself.
+# Do not reinterpret status NONE/0 from an ALL table or psutil as LISTEN.
+_TCP_TABLE_OWNER_PID_LISTENER = 3
+_ERROR_INSUFFICIENT_BUFFER = 122
+_TCP_TABLE_BUFFER_LIMIT = 16 * 1024 * 1024
+_tcp_table_api = None
+
+
+class _TcpOwnerPidRow(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in
+                ("state", "local_addr", "local_port", "remote_addr", "remote_port", "pid")]
+
+
+def _get_tcp_table_api():
+    global _tcp_table_api
+    if _tcp_table_api is None:
+        try:
+            api = ctypes.WinDLL("iphlpapi.dll", use_last_error=True).GetExtendedTcpTable
+        except (OSError, AttributeError) as exc:
+            raise OSError("GetExtendedTcpTable unavailable: " + str(exc)) from exc
+        api.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int32,
+                        ctypes.c_uint32, ctypes.c_int32, ctypes.c_uint32]
+        api.restype = ctypes.c_uint32
+        _tcp_table_api = api
+    return _tcp_table_api
+
+
+def _windows_listener_rows() -> list[dict]:
+    """Passive AF_INET PID_LISTENER membership, with bounded buffer retries.
+
+    Each native MIB_TCPROW_OWNER_PID is six DWORDs (24 bytes), following the
+    DWORD entry count. raw_state is retained only for diagnostics: the API's
+    LISTENER class, not that field, is the evidence that these rows listen.
+    """
+    if ctypes.sizeof(_TcpOwnerPidRow) != 24:
+        raise OSError("unexpected native TCP owner/PID row layout")
+    api = _get_tcp_table_api()
+    size = ctypes.c_uint32(0)
+    try:
+        code = int(api(None, ctypes.byref(size), False, socket.AF_INET, _TCP_TABLE_OWNER_PID_LISTENER, 0))
+        if code not in (0, _ERROR_INSUFFICIENT_BUFFER):
+            raise OSError(code, "GetExtendedTcpTable listener size query failed")
+        for _ in range(3):
+            capacity = int(size.value)
+            if not 4 <= capacity <= _TCP_TABLE_BUFFER_LIMIT:
+                raise OSError("invalid native TCP listener buffer size")
+            buf = ctypes.create_string_buffer(capacity)
+            code = int(api(buf, ctypes.byref(size), False, socket.AF_INET, _TCP_TABLE_OWNER_PID_LISTENER, 0))
+            if code == _ERROR_INSUFFICIENT_BUFFER:
+                continue
+            if code:
+                raise OSError(code, "GetExtendedTcpTable listener query failed")
+            used = int(size.value)
+            if not 4 <= used <= capacity:
+                raise OSError("invalid returned native TCP listener buffer bounds")
+            count = ctypes.c_uint32.from_buffer_copy(buf, 0).value
+            if 4 + int(count) * 24 > used:
+                raise OSError("incomplete native TCP listener row/table")
+            rows = []
+            for i in range(count):
+                row = _TcpOwnerPidRow.from_buffer_copy(buf, 4 + i * 24)
+                rows.append({"pid": int(row.pid),
+                    "ip": socket.inet_ntoa(int(row.local_addr).to_bytes(4, sys.byteorder)),
+                    "port": socket.ntohs(int(row.local_port) & 0xffff),
+                    "raw_state": int(row.state)})
+            return rows
+        raise OSError("native TCP listener buffer remained insufficient after 3 attempts")
+    except (ctypes.ArgumentError, ValueError) as exc:
+        raise OSError("GetExtendedTcpTable listener query invalid: " + str(exc)) from exc
+
+
+def _psutil_listener_rows() -> list[dict]:
+    import psutil
+    try:
+        return [{"pid": c.pid, "ip": c.laddr.ip, "port": c.laddr.port, "raw_status": c.status}
+                for c in psutil.net_connections(kind="tcp4")
+                if c.status == psutil.CONN_LISTEN and c.laddr]
+    except (psutil.Error, OSError) as exc:
+        raise OSError("psutil listener query failed: " + str(exc)) from exc
+
+
+def _listener_provider() -> dict:
+    if sys.platform == "win32":
+        return {"provider": "GetExtendedTcpTable", "family": "AF_INET",
+                "table_class": "TCP_TABLE_OWNER_PID_LISTENER", "table_class_id": 3,
+                "status_basis": "native filtered listener-table membership"}
+    return {"provider": "psutil.net_connections", "family": "AF_INET", "kind": "tcp4",
+            "status_basis": "explicit psutil CONN_LISTEN"}
+
+
+def _listener_rows() -> list[dict]:
+    return _windows_listener_rows() if sys.platform == "win32" else _psutil_listener_rows()
+
+
 def port_listening(port: int, pid: int | None = None) -> bool:
-    """Passive TCP/PID check. A probe socket would steal the oracle's one client."""
+    """Passive listener/PID check; never open the oracle's one client socket."""
     try:
-        import psutil
-    except ImportError:
-        return False
-    try:
-        return any(c.status==psutil.CONN_LISTEN and c.laddr and c.laddr.port==port
-                   and (pid is None or c.pid==pid) for c in psutil.net_connections(kind="tcp4"))
-    except (psutil.Error,OSError):
-        return False  # query failure never relaxes PID ownership / opens a socket
+        return any(row["port"] == port and (pid is None or row["pid"] == pid) for row in _listener_rows())
+    except (OSError, ImportError):
+        return False  # native/API failure never falls back to uncertain NONE rows
 
 
 def listener_snapshot(port: int, pid: int | None = None) -> dict:
     """Bounded read-only evidence on readiness failure; not a second ready gate."""
     out={"port":port,"expected_pid":pid,"observer_pid":os.getpid(),"python":sys.executable,
-         "transport_probe":"none","listeners":[],"query_error":None}
+         "transport_probe":"none","listeners":[],"query_error":None,**_listener_provider()}
     try:
-        import psutil
+        rows = _listener_rows()
+        out["listener_row_count"] = len(rows)
+        out["listeners"] = [row for row in rows if row["port"] == port]
+    except (OSError, ImportError) as exc:
+        out["query_error"] = type(exc).__name__ + ": " + str(exc)
+    if pid is not None:
         try:
-            out["listeners"]=[{"pid":c.pid,"ip":c.laddr.ip,"port":c.laddr.port} for c in psutil.net_connections(kind="tcp4")
-                if c.status==psutil.CONN_LISTEN and c.laddr and c.laddr.port==port]
-        except (psutil.Error,OSError) as exc:out["query_error"]=type(exc).__name__+": "+str(exc)
-        if pid is not None:
-            try:
-                proc=psutil.Process(pid)
-                out["expected_process"]={"name":proc.name(),"created":proc.create_time(),"exe":proc.exe()}
-            except (psutil.Error,OSError) as exc:out["process_error"]=type(exc).__name__+": "+str(exc)
-    except ImportError as exc:out["query_error"]=type(exc).__name__+": "+str(exc)
+            import psutil
+            proc=psutil.Process(pid)
+            out["expected_process"]={"name":proc.name(),"created":proc.create_time(),"exe":proc.exe()}
+        except (ImportError, OSError) as exc:
+            out["process_error"] = type(exc).__name__ + ": " + str(exc)
+        except psutil.Error as exc:
+            out["process_error"] = type(exc).__name__ + ": " + str(exc)
     out["matches_expected"]=out["query_error"] is None and any(pid is None or q["pid"]==pid for q in out["listeners"])
     return out
 

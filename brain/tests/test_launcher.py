@@ -384,6 +384,7 @@ def test_window_api_takes_64_bit_handles():
 def test_readiness_query_failure_never_connects_or_bypasses_pid(monkeypatch):
     import psutil
     import socket
+    monkeypatch.setattr(L,"_listener_rows",L._psutil_listener_rows)
     monkeypatch.setattr(psutil,"net_connections",lambda **k:(_ for _ in ()).throw(psutil.AccessDenied()))
     monkeypatch.setattr(socket,"create_connection",lambda *a,**k:pytest.fail("active oracle probe"))
     assert L.port_listening(47017,123) is False
@@ -395,6 +396,7 @@ def test_readiness_query_failure_never_connects_or_bypasses_pid(monkeypatch):
 def test_readiness_other_pid_is_diagnostic_only(monkeypatch):
     import psutil
     from types import SimpleNamespace
+    monkeypatch.setattr(L,"_listener_rows",L._psutil_listener_rows)
     c=SimpleNamespace(status=psutil.CONN_LISTEN,laddr=SimpleNamespace(ip="127.0.0.1",port=47017),pid=999)
     monkeypatch.setattr(psutil,"net_connections",lambda **k:[c])
     assert not L.port_listening(47017,123)
