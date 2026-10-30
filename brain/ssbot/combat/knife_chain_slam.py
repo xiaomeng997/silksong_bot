@@ -548,6 +548,10 @@ def g_claw_bomb(x, plan):
     bk = x.obs.bombs
     if bk is None or not len(bk):
         return False
+    # Original h2 _claw_bomb checks another owner's rows only. Own delayed
+    # hazards remain in RangeSupport and B2Geometry, including the approach.
+    if all(int(row[0])==x.v["iid"] for row in bk):
+        return False
     raise NotImplementedError("bombs of another Clapper on the Clawline path: not encoded (two Clappers)")
 
 
