@@ -46,7 +46,8 @@ class NativeChainB2(NativeChainCandidates):
         if arm not in {"A","B"}:raise ValueError("B2 arm must be A or B")
         self.profile=profile or NominalProfile();self.arm=arm;self.budget=budget
         self.candidate_generation=arm=="B"
-        super().__init__(runner_factory=runner_factory,probe_ref=probe_ref,journal=journal,trace_limit=trace_limit)
+        from .knife_chain_eval_fast import bind_slam_runner
+        super().__init__(runner_factory=lambda:bind_slam_runner(runner_factory()),probe_ref=probe_ref,journal=journal,trace_limit=trace_limit)
 
     @classmethod
     def from_env(cls,*,journal):
@@ -257,6 +258,12 @@ class NativeChainB2(NativeChainCandidates):
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
         self._abandon(reason)
 
+    def _prepare_tick_state(self,state):
+        # Trusted Slam primitives only READ actual STATEs during this synchronous
+        # call. Historical rows still own their snapshot; modeled futures below
+        # copy every lane they mutate, never the whole oracle debug payload.
+        return state
+
     def _preview(self):
         if self._context is None:return None
         tick,sim,guard,bombs=self._context
@@ -287,7 +294,7 @@ class NativeChainB2(NativeChainCandidates):
         from .knife_chain_eval import ChainPreview
         draft=logical_copy(self.runner);draft.observation_cutoff=f
         model=ChainSim(sim.start.copy(),sim.prefix.copy(),sim.hold.copy(),sim.params,sim.terrain,sim.fo,sim.f)
-        mask=draft.step(f,deepcopy(state),ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
+        mask=draft.step(f,state,ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
         preview=ChainPreview(f,mask,draft) # first key f+2: actual information has >=2f lead
         if preview.mask is None or preview.draft.run is None:return None
         v=preview.draft.run.v
@@ -313,6 +320,23 @@ class NativeChainB2(NativeChainCandidates):
         if path.flags[-1]&km.F_GROUND:value+=float(w.get("ground",.2))
         if prefs.boss_x is not None and (prefs.boss_x-c[0])*path.states[km.FACE,-1]>0:value+=float(w.get("face",.3))
         return float(value)
+
+    def continuation_value_bound(self,prefs):
+        # Endpoint score is -stance*distance -risk*risk(x) +ground +facing.
+        # With a nonnegative stance coefficient, dropping that nonpositive
+        # term and taking optimistic risk/boolean terms is a true upper bound.
+        # No geometry/admission result or endpoint position is reused.
+        import math
+        if self.post_context is None or self.commitment is not None or self.recovery is not None:
+            return math.inf
+        w=prefs.weights
+        stance=float(w.get("stance",.6));rw=float(w.get("risk",3.))
+        ground=float(w.get("ground",.2));face=float(w.get("face",.3))
+        if stance<0 or not all(math.isfinite(v) for v in (stance,rw,ground,face)):return math.inf
+        risk=np.asarray(prefs.risk,float) if len(prefs.risk_x) else np.array([0.])
+        if not risk.size or not np.isfinite(risk).all():return math.inf
+        rv=float(risk.min() if rw>=0 else risk.max())
+        return math.nextafter(-rw*rv+max(0.,ground)+max(0.,face),math.inf)
 
     @staticmethod
     def continuation_executable(kind,path):
@@ -367,9 +391,9 @@ class NativeChainB2(NativeChainCandidates):
                     seed=preview.draft if continuing else (self._post_seed or self.runner)
                     # Reuse the current read-only actual history, never a modeled
                     # future or a stale branch decision from the bounce tick.
-                    seed=logical_copy(seed);seed.anchor.hist=self.runner.anchor.hist
                     path=compile_path(seed,state,sim,game,stage="continuation",first_mask=preview.mask,
-                        profile=self.profile,branch=None if continuing else kind,known_press=self._press)
+                        profile=self.profile,branch=None if continuing else kind,known_press=self._press,
+                        observed_history=self.runner.anchor.hist)
                     scan=geo.scan(path)
                     ok=check_external_path(scan,path_ref=geo.ref(path),target_move=move,first_frame=f,
                         last_frame=path.through,stage="continuation")

@@ -88,14 +88,20 @@ def logical_copy(runner):
     # mutable active vars / strike plans / anchor memory still fork privately.
     static = (runner.chains, runner.P, runner.cfg0, runner.binding,
               getattr(runner.anchor,"chains",None),getattr(runner.anchor,"cfg",None),
-              getattr(runner.anchor,"hist",None),getattr(runner.anchor,"_args",None))
+              getattr(runner.anchor,"hist",None),getattr(runner.anchor,"_args",None),
+              # These are immutable declarations derived from the bound table,
+              # not live observation memory. Merely memoizing `chains` does NOT
+              # memoize its separately referenced nested records on the anchor.
+              *(getattr(runner.anchor,n,None) for n in (
+                  "reopen_rule","entry_links","start","slam_states","keep_after","var_defaults")))
+    static+=tuple(getattr(runner,n,None) for n in ("_bound_values","_bound_guards","_bound_rules"))
     memo={id(v):v for v in static if v is not None}
     memo[id(runner.done)]=list(runner.done)
     if runner.run is not None:
         for name in ("trace","path","sent"):
             v=getattr(runner.run,name);memo[id(v)]=list(v)
     cs=getattr(runner.anchor,"csx",None)
-    for obj in (getattr(cs,"params",None),getattr(cs,"terrain",None)):
+    for obj in (getattr(cs,"params",None),getattr(cs,"terrain",None),getattr(cs,"cfg",None)):
         if obj is not None:memo[id(obj)]=obj
     return deepcopy(runner,memo)
 
@@ -129,6 +135,36 @@ def flag(raw, name):
     return i // 64 < len(bits) and bool((int(bits[i // 64]) >> (i % 64)) & 1)
 
 
+def copy_model_observation(raw,target_iid):
+    """Private write lanes; all other oracle data stays read-only.
+
+    NominalWorld.observe replaces target poses/verts/FSM state; _hero replaces
+    hero vectors/clock bits and updates tm/can/anim. No primitive writes through
+    the borrowed debug/other-entity payload. This is a Slam-family adapter, not a
+    generic STATE clone or a projection that removes hazards.
+    """
+    s=dict(raw);h=dict(raw.get("hero") or {});s["hero"]=h
+    for name in ("tm","can","anim"):h[name]=dict(h.get(name) or {})
+    es=[]
+    for entity in raw.get("ents") or ():
+        if entity.get("iid")!=target_iid:
+            es.append(entity);continue
+        e=dict(entity)
+        e["fsms"]=[dict(fs) for fs in entity.get("fsms") or ()]
+        e["colliders"]=[dict(c) for c in entity.get("colliders") or ()]
+        es.append(e)
+    s["ents"]=es
+    return s
+
+
+@lru_cache(maxsize=12)
+def _timeline_boxes(antic):
+    tl=_timeline(antic)
+    boxes=tl.world(np.arange(len(tl.state)))
+    boxes.flags.writeable=False
+    return boxes
+
+
 class NominalWorld:
     """One already-observed slam, advanced on one nominal game-time timeline."""
     def __init__(self, raw, run, game):
@@ -136,7 +172,7 @@ class NominalWorld:
         target = next((e for e in raw.get("ents") or () if e.get("iid") == run.v["iid"]), None)
         if target is None:
             raise NominalUnsupported("nominal target absent")
-        self.iid, self.base = run.v["iid"], deepcopy(target)
+        self.iid, self.base = run.v["iid"], dict(target)
         self.ta = float(run.v["ta"])
         self.k0 = max(0, int(round((game - self.ta) * 60)))
         st, tin = control(target)
@@ -149,14 +185,15 @@ class NominalWorld:
         body = SlamPlay._cs_box(target)
         if body is None:
             raise NominalUnsupported("no body anchor")
-        nominal = self.tl.world(np.array([self.k0]))[0]
+        self._poses=_timeline_boxes(antic)
+        nominal = self._poses[min(self.k0,len(self._poses)-1)]
         ncentre = np.array([.5*(nominal[0]+nominal[1])*self.face,
                             .5*(nominal[2]+nominal[3])])
         self.anchor = np.array([.5*(body[0]+body[2]), .5*(body[1]+body[3])]) - ncentre
 
     def box(self, game):
         k = max(0, min(len(self.tl.state)-1, int(round((game-self.ta)*60))))
-        q = self.tl.world(np.array([k]))[0]
+        q = self._poses[k]
         x0,x1 = sorted((q[0]*self.face+self.anchor[0],q[1]*self.face+self.anchor[0]))
         return np.array([x0,q[2]+self.anchor[1],x1,q[3]+self.anchor[1]])
 
@@ -243,7 +280,7 @@ def _nominal_hook(S, world, game, params, terrain, profile, direction):
 
 
 def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
-                 branch=None, known_press=None):
+                 branch=None, known_press=None, observed_history=None):
     """Run a private chain copy forward with generated observations, never replay keys.
 
     `runner` already contains the current real tick's preview (except a branch,
@@ -253,8 +290,10 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
     from .holdfilter import hold_filter_jit
     profile=profile or NominalProfile()
     if sim.fo!=sim.f or len(sim.prefix)!=1:raise NominalUnsupported("B2 needs current origin and one queued key")
-    R=logical_copy(runner);s=deepcopy(raw);origin=int(sim.f)
+    R=logical_copy(runner);origin=int(sim.f)
+    if observed_history is not None:R.anchor.hist=observed_history
     if R.run is None:raise NominalUnsupported("no admitted family program")
+    s=copy_model_observation(raw,R.run.v["iid"])
     world=NominalWorld(s,R.run,float(game))
     if branch is not None:
         face=R.run.v["face"]
@@ -269,7 +308,9 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
     branch_draft=logical_copy(R) if branch is not None else None
     desired={origin+1:int(sim.prefix[0]),origin+2:int(first_mask)}
     S=np.asarray(sim.start,float).reshape(km.K).copy();hold=sim.hold.copy()
-    init=km.rollout(S,np.zeros((1,0),np.int64),sim.params,sim.terrain)
+    from .knife_chain_step import NominalStepper
+    stepper=NominalStepper(sim.params,sim.terrain)
+    init=stepper.run(S,frames=0)
     boxes=[init.box[0,0]];poses=[init.pos[0,0]];flags=[int(init.flags[0,0])];checks=flags.copy()
     states=[S.copy()];games=[float(game)];commands=[];latched=[]
     press=known_press;contact=None;hook=None;hook_start=None;phase=None;end="horizon"
@@ -286,7 +327,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
         dt=sim.params.frame_time*float(S[km.TS])*float(S[km.WF_S]);game+=dt
         event=0
         if hook is None:
-            ro=km.rollout(S,np.array([[m & ~B["CLAW"]]],np.int64),sim.params,sim.terrain)
+            ro=stepper.run(S,m & ~B["CLAW"])
             S=ro.final[:,0].copy();box=ro.box[0,-1];pos=ro.pos[0,-1];vel=ro.vel[0,-1];fl=int(ro.flags[0,-1]);checkfl=fl
             if m&B["CLAW"] and not int(old[km.PREV])&B["CLAW"]:
                 if S[km.GROUND]>0 or int(S[km.MODE])!=km.M_NORMAL:
@@ -300,7 +341,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
                 from ssbot.map2.oldwin_claw import control_state
                 alpha=(float(old[km.ALPHA])+sim.params.frame_time/sim.params.fdt)%1.
                 S=control_state(sim.params,hook,sim.terrain,alpha=alpha)
-                ro=km.rollout(S,np.zeros((1,0),np.int64),sim.params,sim.terrain)
+                ro=stepper.run(S,frames=0)
                 box=ro.box[0,0];pos=ro.pos[0,0];vel=ro.vel[0,0];fl=int(ro.flags[0,0]);checkfl=fl;hook=None
             else:
                 S[[km.PX,km.PY]]=hook.pos[j];S[[km.SX,km.SY]]=hook.physical[j]
@@ -309,7 +350,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
                 S[km.MODE]=km.M_LOCKED;S[km.GROUND]=0.;S[km.INV_T]=0.
                 pos=hook.pos[j];vel=(hook.physical[j]-hook.physical[j-1])/sim.params.frame_time
                 S[[km.VX,km.VY]]=vel
-                ro=km.rollout(S,np.zeros((1,0),np.int64),sim.params,sim.terrain)
+                ro=stepper.run(S,frames=0)
                 box=ro.box[0,0];fl=int(ro.flags[0,0])&~km.F_INVULN;checkfl=fl
         # Accepted model downslash, not merely a requested D|A.
         down=(bool(fl&km.F_ATTACKING) and old[km.ATTACKING]<=0 and bool(m&B["D"]) and old[km.GROUND]<=0)
@@ -320,7 +361,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
             event=km.EV_POGO
             # Inject at this frame, not one frame earlier. Keep pre-contact flags
             # for foreign hazards on the commitment's last frame.
-            ro=km.rollout(old,np.array([[m]],np.int64),sim.params,sim.terrain,events=np.array([[event]],np.int64))
+            ro=stepper.run(old,m,event=event)
             S=ro.final[:,0].copy();box=ro.box[0,-1];pos=ro.pos[0,-1];vel=ro.vel[0,-1];fl=int(ro.flags[0,-1]);contact=F
         commands.append(cmd);latched.append(m);hold=hnext
         boxes.append(np.array(box));poses.append(np.array(pos));flags.append(fl);checks.append(checkfl)
@@ -331,7 +372,7 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
             # no-admission prefix for the real approach tick.
             approach_path=NominalPath(origin,"approach",np.asarray(commands,np.int64).copy(),np.asarray(latched,np.int64).copy(),
                 np.stack(states,axis=1),np.asarray(boxes).copy(),np.asarray(poses).copy(),np.asarray(flags,np.int64),
-                np.asarray(checks,np.int64),np.asarray(games),hold.copy(),deepcopy(s),logical_copy(R),
+                np.asarray(checks,np.int64),np.asarray(games),hold.copy(),copy_model_observation(s,world.iid),logical_copy(R),
                 int(desired[F+1]),"decision",None,None,{"future_decision":entry_frame,"admission":"none"})
         if event:
             s["ev"]=[{"f":F,"k":"hit","d":{"type_key":"Song Heavy Sentry","iid":world.iid,"src":"DownSlash"}}]

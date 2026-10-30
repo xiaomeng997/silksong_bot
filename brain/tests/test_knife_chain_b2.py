@@ -644,3 +644,127 @@ def test_first_cover_after_four_frame_deadline_does_not_revive_pending(params,te
     st=next_state(1007);st["act"].update(target=1005,applied=1007,hf={"desired":0})
     with pytest.raises(LearningStop,match="four-frame"):n.observe(st)
     assert 1002 in n._pending and 1002 not in n._application
+
+
+def test_nominal_copy_keeps_mutable_memory_private_and_static_records_shared(params,terrain):
+    from ssbot.combat.knife_chain_nominal import logical_copy
+    from ssbot.combat.claw_strike import ClawStrike
+    _,p,_,_=preview(params,terrain);r=p.draft
+    r.anchor.rg_circ={3:{"lit":False}}
+    r.anchor.csx=ClawStrike(params=params,terrain=terrain)
+    fork=logical_copy(r)
+    assert fork.anchor.entry_links is r.anchor.entry_links
+    assert fork.anchor.var_defaults is r.anchor.var_defaults
+    assert fork.anchor.csx.cfg is r.anchor.csx.cfg
+    assert fork.anchor.csx is not r.anchor.csx
+    fork.run.v["k_early"].append(9);fork.anchor.rg_circ[3]["lit"]=True
+    fork.anchor.closed.add(7);fork.fired["changed"]=1
+    assert r.run.v["k_early"]==[] and r.anchor.rg_circ[3]["lit"] is False
+    assert 7 not in r.anchor.closed and "changed" not in r.fired
+
+
+def test_nominal_model_write_lanes_do_not_change_any_actual_observation(params,terrain):
+    from ssbot.combat.knife_chain_nominal import copy_model_observation,NominalWorld,_hero
+    _,p,s,sim=preview(params,terrain)
+    s["ents"][0]["colliders"]=[{"name":"Song Heavy Sentry","layer":11,"verts_world":[1,2,3,4]}]
+    s["ents"].append({"iid":8,"type_key":"damager","colliders":[{"verts_world":[4,5]}]})
+    s["debug"]={"large_read_only":[1,2,3]}
+    before=deepcopy(s);m=copy_model_observation(s,7)
+    assert m["debug"] is s["debug"] and m["ents"][1] is s["ents"][1]
+    w=NominalWorld(m,p.draft.run,0.)
+    w.observe(m,1004,4/60)
+    _hero(m,sim.start,np.array([1,2,3,4]),np.array([1,2]),np.array([3,4]),0)
+    assert s==before
+    before=deepcopy(s)
+    compile_path(p.draft,s,sim,0.,stage="commitment",first_mask=p.mask)
+    assert s==before
+
+
+@pytest.mark.parametrize("phase",[.01,.25,.9])
+def test_prepacked_step_matches_existing_frame_loop_for_feedback_and_pogo(params,terrain,phase):
+    from ssbot.combat.knife_chain_step import NominalStepper
+    stepper=NominalStepper(params,terrain);before=params.vector();packed=stepper.params.copy()
+    s=km.initial_state(params,35.,8.,ground=False,facing=-1)
+    s[km.ALPHA]=s[km.ALO]=s[km.AHI]=phase
+    commands=[B["J"],B["J"],0,B["D"]|B["A"],0]*8
+    for i,mask in enumerate(commands):
+        ev=km.EV_POGO if i in (8,27) else 0
+        a=km.rollout(s,np.array([[mask]],np.int64),params,terrain,events=np.array([[ev]],np.int64))
+        b=stepper.run(s,mask,event=ev)
+        for field in ["box","pos","phys","mode","vel","flags","final"]:
+            np.testing.assert_array_equal(getattr(a,field),getattr(b,field))
+        s=a.final[:,0]
+        zero=km.rollout(s,np.zeros((1,0),np.int64),params,terrain)
+        q=stepper.run(s,frames=0)
+        for field in ["box","pos","vel","flags","final"]:
+            np.testing.assert_array_equal(getattr(zero,field),getattr(q,field))
+    np.testing.assert_array_equal(before,params.vector());np.testing.assert_array_equal(packed,stepper.params)
+
+
+def test_bound_evaluator_reads_current_values_lazily_and_keeps_history_hooks():
+    from ssbot.combat.knife_chain_eval_fast import _value,_guard,bind_slam_runner
+    from ssbot.combat.knife_chain_eval import X,Run
+    from ssbot.combat.knife_chain_nominal import logical_copy
+    r=runner();fast=bind_slam_runner(r);seen=[]
+    fast.anchor.read_value=lambda x,name,value:seen.append((name,value))
+    x=X(fast,Run("slam_jump","look",{"a":3}),SimpleNamespace(f=1001))
+    from copy import copy
+    fast.P=copy(fast.P);fast.P.values=dict(fast.P.values)
+    fast.P.values["test_fail"]=lambda x:(_ for _ in ()).throw(AssertionError("non-lazy"))
+    expr={"fn":"if","c":{"lit":True},"then":{"add":["var.a",2]},"else":{"fn":"test_fail"}}
+    compiled=_value(expr)
+    assert compiled(x)==5 and seen[-1]==("a",3)
+    x.v["a"]=7
+    assert compiled(x)==9 and seen[-1]==("a",7)
+    f=_value({"fn":"and","of":[False,{"fn":"test_fail"}]})
+    assert f(x) is False
+    fast.P.guards=dict(fast.P.guards);fast.P.guards["test_true"]=lambda x:True
+    assert _guard({"all":[{"p":"test_true"}]})(x)
+    fork=logical_copy(fast)
+    assert fork._bound_values is fast._bound_values and fork._bound_rules is fast._bound_rules
+    assert type(fork) is type(fast)
+
+
+def test_b2_preview_borrows_current_state_read_only_with_private_model_inputs(params,terrain):
+    s=raw();start=km.initial_state(params,35.,4.568,ground=True,facing=-1,silk=9)
+    hold=km.HoldState.idle(1);prefix=np.zeros(1,np.int64)
+    sim=ChainSim(start,prefix,hold,params,terrain,1000,1000)
+    n=NativeChainB2(runner_factory=runner,probe_ref="preview-isolation")
+    n.begin(s);n._receipts[1001]=0
+    before=deepcopy(s);before_start=start.copy();before_hold=deepcopy(hold)
+    n.prepare(s,ground=True,accepting=True,sim=sim)
+    assert n._context[0][1] is s
+    out=n._preview()
+    assert out is not None and n.runner.run is None
+    assert s==before
+    np.testing.assert_array_equal(start,before_start);np.testing.assert_array_equal(prefix,[0])
+    for field in ["latched","desired","pending","age"]:
+        np.testing.assert_array_equal(getattr(hold,field),getattr(before_hold,field))
+
+
+def test_continuation_bound_does_not_underestimate_negative_risk_or_boolean_terms(params,terrain):
+    n=native_committed(params,terrain);n.commitment=None;n.post_context={"bounce":1000}
+    prefs=SimpleNamespace(weights={"stance":.6,"risk":3.,"ground":.2,"face":.3},risk_x=np.array([0.,100.]),risk=np.array([-2.,4.]),stance_x=35.,boss_x=40.)
+    bound=n.continuation_value_bound(prefs)
+    assert bound>6.5
+    for x in np.linspace(0.,100.,41):
+        path=SimpleNamespace(box=np.array([[x-.25,3.,x+.25,5.]]),flags=np.array([km.F_GROUND]),states=np.zeros((km.K,1)))
+        path.states[km.FACE,-1]=1
+        assert n._endpoint(None,path,prefs)<bound
+    prefs.weights["stance"]=-1.
+    assert n.continuation_value_bound(prefs)==float("inf")
+
+
+@pytest.mark.parametrize("score,unsafe,forced,expected",[(.6,0,False,True),(.5,0,False,False),(20.,1,False,False),(20.,0,True,False)])
+def test_value_dominance_never_skips_ties_or_forced_ordinary_rows(params,terrain,score,unsafe,forced,expected):
+    from ssbot.combat.forum_planner import ForumPlanner
+    from ssbot.combat.planner import PlanResult
+    n=native_committed(params,terrain);n.commitment=None;n.post_context={"bounce":1000};calls=[]
+    prefs=SimpleNamespace(weights={},risk_x=np.array([]),risk=np.array([]))
+    n.propose=lambda *a:(calls.append("propose"),None)[1]
+    ordinary=PlanResult(0,-1,"ordinary",unsafe,forced,J=score)
+    p=SimpleNamespace(chain_native=n,_ordinary_tick=lambda *a:ordinary)
+    got=ForumPlanner.tick(p,SimpleNamespace(stamp=SimpleNamespace(frame=1001)),np.zeros(km.K),None,np.zeros(1,np.int64),None,prefs,None)
+    assert got is ordinary
+    assert ("propose" not in calls)==expected
+    assert bool(n.counts["b2_value_bound_pruned"])==expected

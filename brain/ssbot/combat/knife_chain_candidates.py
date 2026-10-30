@@ -181,12 +181,15 @@ class NativeChainCandidates(NativeChainAudit):
             self._abandon("oracle action application unobserved")
         super().observe(state)
 
+    def _prepare_tick_state(self,state):
+        return deepcopy(state)
+
     def prepare(self, state, *, ground, accepting, sim, guard=None, bombs=None):
         f = state["f"]
         if f != self.dispatch.frame or not self._clock_known:
             self._note("chain_unchecked", frame=f, reason="decision identity or game clock unavailable")
             return
-        tick = (f, deepcopy(state), self._clock, bool(ground), bool(accepting))
+        tick = (f, self._prepare_tick_state(state), self._clock, bool(ground), bool(accepting))
         if not self._ticks or self._ticks[-1][0] != f:
             historical = (f, snapshot_history_state(state), self._clock, bool(ground), bool(accepting))
             from .slam_play import clappers, control

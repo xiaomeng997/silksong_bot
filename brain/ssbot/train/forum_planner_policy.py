@@ -420,6 +420,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
             from ssbot.combat.knife_chain_nominal import warm_nominal
             self.b2_warmup_report=warm_nominal(self.params)
+            # A B2 smoke may run without the A/A measurement wrapper. It still
+            # needs the real nonempty parallel query signatures before combat.
+            from ssbot.train.measurement import warm_query_kernels
+            from ssbot.combat.knife_chain_nominal import compiled_signatures
+            self.b2_warmup_report["query_warmup"]=warm_query_kernels()
+            self.b2_warmup_report["compiled_signatures"]=compiled_signatures()
         self.fc.reset()
         return time.perf_counter() - t0
 

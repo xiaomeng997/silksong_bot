@@ -3487,7 +3487,21 @@ class ForumPlanner(Planner):
         if not getattr(chain, "b2", False) or getattr(chain, "arm", "A") != "B":
             return self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
         t0 = time.perf_counter()
-        offer = chain.propose(self, ws, start, hold, prefix, f, prefs, ctx)
+        ordinary = None
+        # At an OBSERVED bounce, every continuation competes normally. First
+        # evaluate the ordinary rows: if its safe score strictly exceeds the
+        # optimistic score of ANY continuation, expanding three tails cannot
+        # affect selection. Ties and unsafe/forced ordinary rows never prune.
+        bound = chain.continuation_value_bound(prefs) if callable(getattr(chain, "continuation_value_bound", None)) else math.inf
+        if math.isfinite(bound):
+            ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+        dominated = ordinary is not None and not ordinary.S and not ordinary.forced_risk and ordinary.J > bound
+        if dominated:
+            offer = None
+            chain._note("b2_value_bound_pruned", frame=int(ws.stamp.frame), stage="continuation",
+                        upper_bound=bound, ordinary_value=ordinary.J, safety="not queried; strict value dominance")
+        else:
+            offer = chain.propose(self, ws, start, hold, prefix, f, prefs, ctx)
         if offer is not None and not chain.first_allowed(offer, prefix, start, ctx):
             chain._note("b2_primitive_rejected", frame=int(ws.stamp.frame), stage=offer.stage, mask=offer.mask)
             if offer.stage == "active":
@@ -3500,7 +3514,8 @@ class ForumPlanner(Planner):
             self._prev_sm = None
             result = chain.install(offer, self)
         else:
-            ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+            if ordinary is None:
+                ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
             if offer is not None and (ordinary.S or ordinary.forced_risk or offer.value >= ordinary.J):
                 result = chain.install(offer, self, ordinary)
             else:
