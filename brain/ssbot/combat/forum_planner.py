@@ -4643,13 +4643,17 @@ class ForumPlanner(Planner):
                 # to an ordinary row from this same evaluated batch; its escape
                 # was not certified, so retain S=1 for the supervisor.
                 rejected = i
+                native_checks = {"native_escape_unsafe": bool(esc_unsafe),
+                                 "native_tail_ok": None if tail_ok is None else bool(tail_ok),
+                                 "native_reject_checks": (["escape"] if esc_unsafe else []) +
+                                 (["tail"] if cfg.tail_k > 0 and tail_ok is not True else [])}
                 ordinary = order[(order < C0) | (order >= C0 + n_chain)]
                 if len(ordinary):
                     i = int(ordinary[0])
                 else:
                     native_no_fallback = True
                 esc_unsafe, tail_ok, esc_tail = True, None, None
-                esc_info = {**(esc_info or {}), "unsafe": True, "native_late_reject": rejected,
+                esc_info = {**(esc_info or {}), **native_checks, "unsafe": True, "native_late_reject": rejected,
                             "fallback_row": None if native_no_fallback else i,
                             "fallback_escape": "unchecked"}
             self.last_sel["chosen"] = -1 if native_no_fallback else i

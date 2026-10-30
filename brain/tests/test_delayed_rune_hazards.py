@@ -113,3 +113,25 @@ def test_independent_per_bomb_hazard_keeps_owner_and_actual_clock():
     X=np.array([[30.]]);Y=np.array([[4.]]);tk=np.array([5*ar.FT])
     assert rs.occupied_hazards(X,Y,tk,[3]).item()
     assert not rs.occupied_hazards(X,Y,tk,[8]).item()
+
+
+@pytest.mark.parametrize("mode,expected", [("focus",.5),("rule",.5),("table",.5),("flat:0.2",.2),("zero",0.)])
+def test_orphan_anchor_does_not_inherit_walk_uncertainty(monkeypatch,mode,expected):
+    trk=tracker(monkeypatch)
+    for st in ("Cast Slam Antic","Jump","Slam 2"):feed(trk,st)
+    hz,tt,x,y,face=trk.segs[3].spawned[0]
+    feed(trk,"Idle",empty=True)
+    on=int(round(65-(trk.T-tt)/ar.FT))
+    rs=v2.RangeSupport.build(trk,samples=(on,),margin_mode=mode)
+    parts=rs.haz_raw[3]
+    assert parts and all(p[4]==expected and p[5]==expected for p in parts)
+    du=hz.du_by_face[0 if face<0 else 1]
+    cx=x+face*du
+    center=np.array([[cx]]);Y=np.array([[5.]]);times=np.array([on])*ar.FT
+    # A real lit orphan stays dangerous; a body-drift halo several units
+    # outside the same fixed circle must not block another target's path.
+    assert rs.occupied(center,Y,times).item()
+    assert rs.occupied_esc(center,Y,times).item()
+    assert rs.occupied_hazards(center,Y,times,[3]).item()
+    outside=np.array([[cx+hz.radius+2.]])
+    assert not rs.occupied_hazards(outside,np.array([[3.33]]),times,[3]).item()

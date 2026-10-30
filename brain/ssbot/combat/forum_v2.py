@@ -678,7 +678,10 @@ class RangeSupport(LayerSupport):
                 if not hm.m.size or not hm.m.any():
                     continue
                 c, ix0, iy0 = coarse(hm, tab.cell, cv.cell)
-                m = rs.m_of(iid, tk_name, k)
+                # The orphan is a spawned, anchored object, not an idle body
+                # that may walk during the horizon. Keep the measured flat
+                # focus margin; explicit flat/zero diagnostic modes still apply.
+                m = margin(tk_name, k, mode_) if mode_ == "zero" or mode_.startswith("flat:") else FOCUS_M
                 esc = k + k_shift >= ESC_FROM_K
                 rs.add_raw(si, iid, c, ix0, iy0, m, m if esc else None)
                 rs.haz_raw.setdefault(iid, []).append((si, c, ix0, iy0, m, m if esc else None))

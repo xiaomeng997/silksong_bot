@@ -270,6 +270,10 @@ def test_real_planner_evaluates_native_row_and_never_keeps_a_static_continue(mon
     assert bool(a.runner.run) == expected_owned
     if allowed and late_failure is not None:
         assert planner.last_info["esc"]["native_late_reject"] == cr
+        detail=planner.last_info["esc"]
+        assert detail["native_escape_unsafe"] == (late_failure in ("escape","no_ordinary"))
+        assert detail["native_reject_checks"] == (["tail"] if late_failure=="tail" else ["escape"])
+        if late_failure=="tail": assert detail["native_tail_ok"] is False
         assert result.S == 1 and result.tail_ok is None
         if late_failure == "no_ordinary":
             assert result.idx == -1 and result.name == "NONE" and result.mask == 0
