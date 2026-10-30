@@ -19,7 +19,7 @@ def scan(*contacts, first=100, last=177, path="jump:12:100", complete=True):
 
 def check(s, **kw):
     args = dict(path_ref="jump:12:100", target_move=MOVE, first_frame=100, last_frame=177,
-                admission=GUARD)
+                admission=GUARD, stage="commitment")
     args.update(kw)
     return check_external_path(s, **args)
 
@@ -190,7 +190,7 @@ def test_prebounce_admission_never_exempts_postbounce_contacts(kind):
 
 def test_no_target_admission_means_normal_planner_check_even_before_bounce():
     contact = PathContact(140, 12, "move", MOVE)
-    r = check(scan(contact), admission=None)
+    r = check(scan(contact), admission=None, stage="continuation")
     assert r.verdict == "reject"
 
 
@@ -231,3 +231,50 @@ def test_complete_exit_includes_targets_next_move():
                lambda o: scan(contact, first=149, last=200, path=o.path_ref))
     assert r.verdict == "reject"
     assert r.checks[-1].path_result.retained == (contact,)
+
+
+@pytest.mark.parametrize("stage", ["approach", "continuation"])
+def test_uncommitted_stages_cannot_borrow_current_or_future_admission(stage):
+    with pytest.raises(ValueError, match="only commitment"):
+        check(scan(), stage=stage)
+
+
+def test_approach_before_decision_checks_own_rune_without_creating_a_guard():
+    # Semantic fixture for a preparation-stage rune, not a replay of 225846.
+    contact = PathContact(96, 12, "delayed")
+    for current_frame in (90, 91, 92):
+        r = check_external_path(
+            scan(contact, first=current_frame, last=99, path="approach"),
+            path_ref="approach", target_move=MOVE,
+            first_frame=current_frame, last_frame=99, stage="approach")
+        assert r.verdict == "reject"
+        assert r.retained == (contact,)
+        assert r.trusted_target == ()
+
+
+def test_approach_normal_check_keeps_target_body_as_well_as_delayed_hazards():
+    contact = PathContact(140, 12, "body", MOVE)
+    r = check(scan(contact), admission=None, stage="approach")
+    assert r.verdict == "reject"
+    assert r.trusted_target == ()
+
+
+def test_missing_approach_prefix_coverage_is_unknown():
+    r = check(scan(first=101), admission=None, stage="approach")
+    assert r.verdict == "unchecked"
+
+
+def test_empty_commitment_path_without_guard_is_not_an_admission():
+    r = check(scan(), admission=None)
+    assert r.verdict == "unchecked"
+    assert r.reason == "commitment target admission missing"
+
+
+@pytest.mark.parametrize("stage", ["approach", "continuation"])
+def test_empty_uncommitted_paths_need_no_guard(stage):
+    assert check(scan(), admission=None, stage=stage).verdict == "pass"
+
+
+def test_unknown_stage_does_not_silently_exempt_anything():
+    with pytest.raises(ValueError, match="unknown chain path stage"):
+        check(scan(), stage="preparation_typo")

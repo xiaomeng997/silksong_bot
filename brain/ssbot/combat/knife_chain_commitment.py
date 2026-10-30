@@ -108,9 +108,14 @@ class PathResult:
 
 def check_external_path(scan: ContactScan | None, *, path_ref: str,
                         target_move: MoveInstance, first_frame: int,
-                        last_frame: int,
+                        last_frame: int, stage: str,
                         admission: TargetMoveAdmission | None = None) -> PathResult:
-    """Check other enemies / delayed hazards, with inclusive path coverage.
+    """Check an approach, commitment or continuation with inclusive coverage.
+
+    Approach is a separate uncommitted check refreshed on each actual approach
+    tick; it does not borrow a future decision's admission. Continuations are
+    normal planner checks too. Only commitment may carry the one-event h2 guard.
+    This stage contract does not itself generate/check a path or send any keys.
 
     Geometry must scan the full path before applying this scope. Do not first
     drop the target iid, its runes, or contacts under a predicted pogo mask.
@@ -121,6 +126,10 @@ def check_external_path(scan: ContactScan | None, *, path_ref: str,
     nothing, including this same move's remaining hammer/body. Actual execution
     must release on an observed bounce, not on this predicted frame alone.
     """
+    if stage not in {"approach", "commitment", "continuation"}:
+        raise ValueError("unknown chain path stage")
+    if stage != "commitment" and admission is not None:
+        raise ValueError("only commitment may carry target admission")
     _frame(first_frame)
     _frame(last_frame)
     if not path_ref or last_frame < first_frame:
@@ -148,6 +157,8 @@ def check_external_path(scan: ContactScan | None, *, path_ref: str,
                           tuple(retained), tuple(trusted))
     if not scan.complete or scan.first_frame > first_frame or scan.last_frame < last_frame:
         return PathResult("unchecked", "path coverage incomplete", (), tuple(trusted))
+    if stage == "commitment" and admission is None:
+        return PathResult("unchecked", "commitment target admission missing")
     if admission is not None and admission.verdict != "pass":
         return PathResult(admission.verdict, "target family admission did not pass")
     return PathResult("pass", "checked path clear; any target exemption is bounded by admission",
@@ -239,7 +250,8 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
         short = check_external_path(
             o.short_scan, path_ref=o.path_ref, target_move=target_move,
             first_frame=bounce_frame,
-            last_frame=min(o.handback_frame, bounce_frame + short_frames))
+            last_frame=min(o.handback_frame, bounce_frame + short_frames),
+            stage="continuation")
         checks.append(ContinuationCheck(o.option_id, o.kind, "short", short.verdict,
                                         short.reason, short))
         if short.verdict == "pass":
@@ -256,7 +268,7 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
         checked.append(o.option_id)
         result = check_external_path(
             full_scan(o), path_ref=o.path_ref, target_move=target_move,
-            first_frame=bounce_frame, last_frame=o.handback_frame)
+            first_frame=bounce_frame, last_frame=o.handback_frame, stage="continuation")
         checks.append(ContinuationCheck(o.option_id, o.kind, "full", result.verdict,
                                         result.reason, result))
         if result.verdict == "pass":
