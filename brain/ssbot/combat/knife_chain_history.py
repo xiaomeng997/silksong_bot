@@ -8,9 +8,41 @@ bounce flag, side) is in here; those are derived from these observations by slam
 """
 from __future__ import annotations
 
+from copy import deepcopy
+
 from ssbot.combat import slam_play as SP
 
 SEND = SP.SEND_AHEAD
+
+
+def snapshot_history_state(state):
+    """Owned history input for the accepted Slam family's read-only helpers.
+
+    The current preview still receives a full STATE. Historical reconstruction
+    reads hero observations, Clapper bodies/Control, rune-circle colliders and
+    target hit events; unrelated FSMs, damage meshes and debug probes are not
+    retained. Keep the entire hero record to preserve mode/cooldown extensions.
+    """
+    out = {k: deepcopy(state[k]) for k in ("f", "dt", "hero") if k in state}
+    entities = []
+    for e in state.get("ents") or ():
+        tk = e.get("type_key")
+        if tk not in (SP.CLAPPER, "damager"):
+            continue
+        saved = {k: deepcopy(e[k]) for k in ("iid", "type_key", "hp", "is_dead", "pos", "flipX") if k in e}
+        if tk == SP.CLAPPER:
+            saved["fsms"] = [deepcopy(m) for m in e.get("fsms") or () if m.get("name") == "Control"]
+        cols = []
+        for col in e.get("colliders") or ():
+            name = str(col.get("name") or "")
+            if tk == SP.CLAPPER and name != SP.CLAPPER and not name.startswith(SP.CLAPPER + " ("):
+                continue
+            cols.append({k: deepcopy(col[k]) for k in ("name", "enabled", "verts_world") if k in col})
+        saved["colliders"] = cols
+        entities.append(saved)
+    out["ents"] = entities
+    out["ev"] = [deepcopy(ev) for ev in state.get("ev") or () if ev.get("k") == "hit"]
+    return out
 
 
 class HistView:

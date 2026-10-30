@@ -19,7 +19,7 @@ import time
 import numpy as np
 
 from .knife_chain_admission import evaluate_admission
-from .knife_chain_history import HistView
+from .knife_chain_history import HistView, snapshot_history_state
 from .knife_chain_native import NativeChainAudit, NativeChainAuditError
 
 
@@ -104,6 +104,8 @@ class NativeChainCandidates(NativeChainAudit):
         self._projection_uncommitted = Counter()
         self._proposal_blocker = None
         self._ticks = deque(maxlen=1200)
+        self._history_antic = None
+        self._history_pruned = 0
         self._receipts = {}
         self._pending = {}
         self._clock = 0.0
@@ -186,7 +188,19 @@ class NativeChainCandidates(NativeChainAudit):
             return
         tick = (f, deepcopy(state), self._clock, bool(ground), bool(accepting))
         if not self._ticks or self._ticks[-1][0] != f:
-            self._ticks.append(tick)
+            historical = (f, snapshot_history_state(state), self._clock, bool(ground), bool(accepting))
+            from .slam_play import clappers, control
+            enemies = clappers(state)
+            current_antic = enemies[0]["iid"] if len(enemies) == 1 and control(enemies[0])[0] == "Slam Antic" else None
+            if current_antic is not None and current_antic != self._history_antic:
+                # A new observed antic supersedes older external-entry history.
+                # Keep two predecessor ticks; never manufacture a missing edge
+                # or move the origin to a later tick of this same antic.
+                while self._ticks and self._ticks[0][0] < f - 2:
+                    self._ticks.popleft()
+                    self._history_pruned += 1
+            self._history_antic = current_antic
+            self._ticks.append(historical)
         self._context = (tick, sim, guard, bombs)
 
     def rows(self, *, T, origin, prefix, hold, hero_state, completions=None):
@@ -375,6 +389,8 @@ class NativeChainCandidates(NativeChainAudit):
                 "projection": "ordinary_completions", "probe_ref": self.probe_ref,
                 "journal": str(self.journal) if self.journal else None,
                 "active_link": None if self.runner.run is None else self.runner.run.lid,
+                "history_schema": "slam-observations-v1", "history_ticks": len(self._ticks),
+                "history_pruned": self._history_pruned,
                 "projection_choices": dict(self._projection_choices),
                 "projection_uncommitted": dict(self._projection_uncommitted),
                 "hook_motion": "unchecked", "closed_loop_future": "unchecked",

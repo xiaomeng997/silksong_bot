@@ -456,6 +456,7 @@ def test_native_long_history_is_borrowed_while_mutable_run_and_state_are_private
     a=audit();seed(a)
     # All 1,200 records are owned observations. Copying just one fails this test.
     for f in range(-1100, 99): a._ticks.append((f,NoCopy(f=f),f/60,True,True))
+    a._history_antic=7  # Already inside the same observed antic; do not prune it.
     Policy(a).act(state(100),None)
     assert len(a.runner.anchor.hist.rows) == 1200
     assert a._draft.anchor.hist is a.runner.anchor.hist
@@ -557,3 +558,37 @@ def test_projection_loss_diagnostics_never_relax_full_row_or_owner_checks(choice
     a.reset(2,start_frame=10)
     assert a.summary()["projection_choices"]==a.summary()["projection_uncommitted"]=={}
     assert a._projection_pool is None and a._projection_choice is None
+
+
+
+def test_history_compaction_preserves_body_rune_hits_and_owned_hero():
+    from ssbot.combat.knife_chain_history import snapshot_history_state
+    from ssbot.combat import slam_play as SP, cast_stab
+    s=state(100);s["hero"].update(pos=[27.,4.568],vel=[0.,2.],box=[26.5,3.,27.5,5.],tm={"atk_cd":.1})
+    body={"name":SP.CLAPPER,"enabled":True,"verts_world":[24.,0.,27.,0.,27.,4.,24.,4.]}
+    s["ents"][0]["colliders"]=[body,{"name":"Slam Collider 2","enabled":True,"verts_world":[0.]*1000}]
+    s["ents"][0]["fsms"].append({"name":"Unrelated","state":"Ignore","huge":[{}]*100})
+    s["ents"].append({"iid":9,"type_key":"damager","pos":[30.,3.],"colliders":[{"enabled":True,"verts_world":[22.813,3.,37.187,3.]}]})
+    s["ents"].append({"iid":10,"type_key":"irrelevant","probe":[{}]*100})
+    s["ev"]=[{"k":"hit","d":{"type_key":SP.CLAPPER,"ent":7,"src":"DownSlash"}},{"k":"debug","d":[{}]*100}]
+    out=snapshot_history_state(s)
+    assert SP.SlamPlay._cs_box(out["ents"][0])==SP.SlamPlay._cs_box(s["ents"][0])
+    assert SP.SlamPlay._in_reach(out["ents"][0],25.,1,22.,1)==SP.SlamPlay._in_reach(s["ents"][0],25.,1,22.,1)
+    assert SP.SlamPlay._cs_s_hit(out,SimpleNamespace(iid=7))
+    assert cast_stab.rune_spans(out)==cast_stab.rune_spans(s)
+    assert len(out["ents"])==2 and len(out["ents"][0]["colliders"])==1
+    assert out["hero"]==s["hero"] and out["hero"] is not s["hero"]
+    s["hero"]["tm"]["atk_cd"]=9.;body["verts_world"][0]=-999.
+    assert out["hero"]["tm"]["atk_cd"]==.1 and out["ents"][0]["colliders"][0]["verts_world"][0]==24.
+
+
+def test_new_antic_prunes_old_history_but_same_antic_keeps_its_first_tick():
+    a=audit();seed(a)
+    for f in range(100,220):
+        s=state(f)
+        if f<180:s["ents"][0]["fsms"][0]["state"]="Idle"
+        a.begin(s);a.prepare(s,ground=True,accepting=True,sim=SimpleNamespace(fo=f,f=f))
+    assert a._ticks[0][0]==178 and len(a._ticks)==42
+    assert a._history_pruned==78
+    a.reset(2,start_frame=10)
+    assert a._history_antic is None and a._history_pruned==0
