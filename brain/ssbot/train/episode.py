@@ -308,7 +308,18 @@ def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
         measurement.decision(getattr(policy, "measurement_choice", None), returned_mask=m, flags=flags)
     if measurement is not None and measurement.diagnostics is not None:
         measurement.diagnostics.phase("send")
-    link.act(last + 2, m, hold_frames=0, flags=flags)
+    chain = getattr(policy, "chain_native", None)
+    if chain is None:
+        link.act(last + 2, m, hold_frames=0, flags=flags)
+        return
+    chain.before_send(frame=last, target=last + 2, mask=m, flags=flags,
+                      received_frame=getattr(link, "frame", None))
+    try:
+        link.act(last + 2, m, hold_frames=0, flags=flags)
+    except BaseException as exc:
+        chain.send_failed(type(exc).__name__)
+        raise
+    chain.sent()
 
 
 def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeConfig,

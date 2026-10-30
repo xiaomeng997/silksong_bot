@@ -145,6 +145,10 @@ class ChainDispatch:
         self._sent[target_frame] = sent
         return sent
 
+    def sent_for(self, target_frame: int) -> SentAction | None:
+        """Known transport receipt by target, without scanning the episode log."""
+        return self._sent.get(target_frame)
+
     def queued(self, *, after: int) -> tuple[SentAction, ...]:
         """Known in-flight actions, retaining desired/wire distinction and unknowns."""
         return tuple(self._sent[f] for f in sorted(self._sent) if f > after)

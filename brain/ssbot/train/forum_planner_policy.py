@@ -221,6 +221,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._last_f = None
         self.measurement = None
         self.measurement_choice = None
+        self.chain_native = None           # opt-in audit bridge, not a key owner
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self.keys_path = (Path(log_dir) / f"keys_i{instance}.jsonl") if log_dir else None
@@ -421,10 +422,33 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- per episode ----
 
+    def _reset_chain_native(self) -> None:
+        if os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
+            self.chain_native = None
+        else:
+            if getattr(self, "chain_native", None) is None:
+                from ssbot.combat.knife_chain_native import NativeChainAudit
+                self.chain_native = NativeChainAudit()
+            frame = getattr(getattr(self, "link", None), "frame", None)
+            self.chain_native.reset(self.episode, start_frame=frame if type(frame) is int else None)
+        if getattr(self, "planner", None) is not None:
+            self.planner.chain_native = self.chain_native
+
+    def _begin_chain_native(self, state) -> None:
+        audit = getattr(self, "chain_native", None)
+        if audit is None:
+            return
+        history = ()
+        if self._inbox is not None:
+            with self._inbox_lock:
+                history = tuple(self._inbox)
+        audit.begin(state, history)
+
     def reset(self, rng: random.Random, enc) -> None:
         self.flush_log()
         self.flush_keys()
         self.episode += 1
+        self._reset_chain_native()
         self.keylog.reset(self.episode)
         self._keys_done = False
         rng.randrange(1 << 30)
@@ -454,6 +478,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.ab_arm, over = self.ab[self.episode % len(self.ab)]
             self.planner.fcfg = replace(self._fcfg(self.clash), **over)
         self.planner.reset()
+        self.planner.chain_native = self.chain_native  # future row producer's audit hook; None when off
         if self.win is not None and getattr(self.win, "knife", False):
             self.win.knife_scope = enc.name == "Forum_W_w7"
         mh = getattr(self.planner, "_map", None)
@@ -803,6 +828,7 @@ class ForumPlannerPolicy(PlannerPolicy):
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        self._begin_chain_native(s)
         diag = self.measurement.diagnostics if self.measurement is not None else None
         if diag is not None: diag.phase("catch_up")
         if self.measurement is not None:
@@ -905,8 +931,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if air_tick:
             res = self.planner_last
         else:
+            if self.chain_native is not None:
+                self.chain_native.planner_input(origin=fo, prefix=prefix, hold=hold, hero_state=S0)
             res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
+        if self.chain_native is not None:
+            self.chain_native.planner_result(res, fresh=not air_tick)
         if two_play.RUNEEXIT and self.two is not None and getattr(prefs, "rune_exit", None):
             self.two.rx_note(f, self.planner.last_info.get("rx"))      # SP12a
         pt = self.planner.audit.pin_ticks
@@ -1216,6 +1246,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         return int(mask)
 
     def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None) -> None:
+        if getattr(self, "chain_native", None) is not None:
+            self.chain_native.final(owner, mask)
         if getattr(self, "measurement", None) is None:
             return
         if not self.measurement.detail:
@@ -1426,4 +1458,5 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),
+                **({"chain_native": self.chain_native.summary()} if self.chain_native is not None else {}),
                 "own_trace": self.own_trace}
