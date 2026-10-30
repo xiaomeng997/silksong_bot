@@ -3483,6 +3483,36 @@ class ForumPlanner(Planner):
 
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
              ) -> PlanResult:
+        chain = getattr(self, "chain_native", None)
+        if not getattr(chain, "b2", False) or getattr(chain, "arm", "A") != "B":
+            return self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+        t0 = time.perf_counter()
+        offer = chain.propose(self, ws, start, hold, prefix, f, prefs, ctx)
+        if offer is not None and not chain.first_allowed(offer, prefix, start, ctx):
+            chain._note("b2_primitive_rejected", frame=int(ws.stamp.frame), stage=offer.stage, mask=offer.mask)
+            if offer.stage == "active":
+                chain._recover("supervisor primitive disallowed", int(ws.stamp.frame))
+            offer = None
+        # The user explicitly keeps h2's approach, and a selected strike is not
+        # auctioned against ordinary tails on every subsequent tick.
+        if offer is not None and offer.stage in {"approach", "active"}:
+            self.ticks += 1
+            self._prev_sm = None
+            result = chain.install(offer, self)
+        else:
+            ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+            if offer is not None and (ordinary.S or ordinary.forced_risk or offer.value >= ordinary.J):
+                result = chain.install(offer, self, ordinary)
+            else:
+                result = ordinary
+                if offer is not None:
+                    chain._note("b2_value_not_selected", frame=int(ws.stamp.frame), chain_value=offer.value, ordinary_value=ordinary.J)
+        total_ms = (time.perf_counter() - t0) * 1e3
+        result.t_ms = {**result.t_ms, "total": total_ms, "b2_total": total_ms}
+        return result
+
+    def _ordinary_tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
+             ) -> PlanResult:
         t0 = time.perf_counter()
         if self.measurement_enabled:
             self.measurement_result = None

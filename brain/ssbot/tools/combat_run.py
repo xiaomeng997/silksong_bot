@@ -427,6 +427,8 @@ def boost_worker() -> str:
 
 
 def worker(a: argparse.Namespace) -> int:
+    from ssbot.combat.knife_chain_budget import preflight_environment
+    preflight_environment(a.encounter, no_record=a.no_record)
     print(f"[i{a.instance}] worker boost: {boost_worker()}", flush=True)
     from ssbot.ipc.oracle_link import OracleLink
     from ssbot.record.recorder import Recorder
@@ -515,6 +517,7 @@ def worker(a: argparse.Namespace) -> int:
     fails_in_row = 0
     try:
         while k < a.episodes and (deadline is None or time.monotonic() < deadline):
+            preflight_environment(a.encounter, no_record=a.no_record)
             if stop_requested(run_dir):
                 print(f"[i{a.instance}] stop requested, ending after {k} episodes", flush=True)
                 break
@@ -578,6 +581,20 @@ def worker(a: argparse.Namespace) -> int:
                 d["measurement_outcome"] = ("WATCHDOG" if d["measurement"]["window"].get("watchdog_f") is not None
                                               else rec.outcome)
                 d["engineering_probe"] = bool(getattr(a, "engineering_probe", False))
+            chain = getattr(policy, "chain_native", None)
+            b2_stop = None
+            if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
+                from ssbot.combat.knife_chain_budget import LearningStop, mark_integrity_halt
+                try:
+                    if rec.outcome == "HARNESS_FAIL":
+                        reason = "harness/integrity failure: " + str(rec.reason)
+                        mark_integrity_halt(reason)
+                        raise LearningStop(reason)
+                    if chain is not None and chain.budget is not None:
+                        chain.budget.check()
+                except LearningStop as exc:
+                    b2_stop = str(exc)
+                    d["b2_learning_stop"] = b2_stop
             out.write(json.dumps(d) + "\n")
             out.flush()
             if measurement is not None and not d["measurement"]["complete"]:
@@ -594,6 +611,9 @@ def worker(a: argparse.Namespace) -> int:
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
             after_episode(link, enc, a.instance, d)
+            if b2_stop is not None:
+                print(f"[i{a.instance}] B2 batch stopped; evidence retained: {b2_stop}", flush=True)
+                break
             if measurement is not None and measurement.protocol_version == 2 and d.get("measurement_outcome") == "WATCHDOG":
                 from ssbot.train.recovery import is_paused
                 recovered = not link.closed and not is_paused(link.state)
@@ -610,6 +630,11 @@ def worker(a: argparse.Namespace) -> int:
                 break
             if link.closed:
                 break
+    except BaseException as exc:
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
+            from ssbot.combat.knife_chain_budget import mark_integrity_halt
+            mark_integrity_halt(type(exc).__name__ + ": " + str(exc))
+        raise
     finally:
         if rec_obj is not None:
             rec_obj.close()

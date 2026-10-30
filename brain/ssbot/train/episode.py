@@ -467,6 +467,9 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
             if s["f"] > last + 1:
                 rec.late_states += 1
             last = s["f"]
+            learning_check = getattr(policy, "learning_check", None)
+            if learning_check is not None:
+                learning_check(s, tap)
             game = s.get("game") or {}
             if (tap.death_frame is not None and getattr(policy, "pause_owned", False)
                     and getattr(policy, "episode_outcome", None) is None

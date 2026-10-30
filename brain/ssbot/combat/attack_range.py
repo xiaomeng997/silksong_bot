@@ -509,7 +509,13 @@ def place_shape(sh: np.ndarray, iu0: int, iv0: int, px: float, py: float, s: int
 
 
 def table_path(spec: EnemySpec | None = None, root: Path = FORUM) -> Path:
-    return root / f"{(spec or CHORISTOR).table}.npz"
+    sp = spec or CHORISTOR
+    # First B2 A/B uses the SAME corrected measured shape model in both arms.
+    # Old/default probes keep their original frozen template choice. Only the
+    # hammer geometry differs; timing, positions, decisions and margins do not.
+    import os
+    poly = sp.type_key == "Song Heavy Sentry" and os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
+    return root / f"{sp.table}{'_poly' if poly else ''}.npz"
 
 
 def save_table(t: RangeTable, path: Path) -> Path:

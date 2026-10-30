@@ -417,6 +417,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.m2.warm()                    # M4c: the commit check's compiled paths
             if not self.m2.procs:
                 self.m2.start()               # the search workers (spawned, warmed; waits until they are ready)
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
+            from ssbot.combat.knife_chain_nominal import warm_nominal
+            warm_nominal(self.params)
         self.fc.reset()
         return time.perf_counter() - t0
 
@@ -424,6 +427,9 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     def _reset_chain_native(self) -> None:
         native = os.environ.get("SSBOT_FORUM_CHAIN_NATIVE", "0").strip() == "1"
+        b2 = os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
+        if b2 and not native:
+            raise ValueError("B2 requires explicit CHAIN_NATIVE=1")
         if native:
             if not kin.hero2_on() or self.crest != "Wanderer":
                 raise ValueError("native chain probe needs HERO2 and the Wanderer crest")
@@ -432,13 +438,19 @@ class ForumPlannerPolicy(PlannerPolicy):
             if any(getattr(self, n, None) is not None for n in ("m2", "air_show", "wpress")):
                 raise ValueError("native chain probe conflicts with another controller/cache")
             from ssbot.combat.knife_chain_candidates import NativeChainCandidates
+            selected = NativeChainCandidates
+            if b2:
+                if not self._fcfg(self.clash).v2:
+                    raise ValueError("B2 requires the live V2 danger tracker")
+                from ssbot.combat.knife_chain_b2 import NativeChainB2
+                selected = NativeChainB2
             journal = None if self.log_path is None else str(self.log_path.with_suffix(".chain.jsonl"))
             existing = getattr(self, "chain_native", None)
-            if isinstance(existing, NativeChainCandidates):
+            if type(existing) is selected:
                 if not existing.can_reuse(journal=journal):
                     raise ValueError("native probe configuration changed; start a new fixed-config controller")
             else:
-                self.chain_native = NativeChainCandidates.from_env(journal=journal)
+                self.chain_native = selected.from_env(journal=journal)
         elif os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
             self.chain_native = None
         elif type(getattr(self, "chain_native", None)).__name__ != "NativeChainAudit":
@@ -447,6 +459,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.chain_native is not None:
             frame = getattr(getattr(self, "link", None), "frame", None)
             self.chain_native.reset(self.episode, start_frame=frame if type(frame) is int else None)
+            baseline = getattr(getattr(self, "link", None), "state", None)
+            if b2 and baseline is not None:
+                self.chain_native.observe_learning(baseline)
         if getattr(self, "planner", None) is not None:
             self.planner.chain_native = self.chain_native
 
@@ -460,11 +475,34 @@ class ForumPlannerPolicy(PlannerPolicy):
                 history = tuple(self._inbox)
         audit.begin(state, history)
 
+    def learning_check(self, state, tap) -> None:
+        """Account actual HP before harness lethal/clear exits, including catch-up."""
+        audit = getattr(self, "chain_native", None)
+        if not getattr(audit, "b2", False):
+            return
+        history = ()
+        if self._inbox is not None:
+            with self._inbox_lock:
+                history = tuple(self._inbox)
+        for item in (*history, state):
+            if (audit._episode_start is None or item["f"] >= audit._episode_start) and item["f"] <= state["f"]:
+                audit.observe_learning(item, kill_frame=tap.death_frame)
+        if tap.lethal:
+            audit._stop("lethal hit", state["f"])
+
     def reset(self, rng: random.Random, enc) -> None:
         self.flush_log()
         self.flush_keys()
         self.episode += 1
-        self._reset_chain_native()
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1" and enc.name != "Forum_W_w7":
+            raise ValueError("first B2 learning profile is restricted to Forum_W_w7")
+        try:
+            self._reset_chain_native()
+        except ValueError as exc:
+            if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() != "1":
+                raise
+            from ssbot.combat.knife_chain_budget import LearningStop
+            raise LearningStop("B2 bootstrap/configuration failure: " + str(exc)) from exc
         self.keylog.reset(self.episode)
         self._keys_done = False
         rng.randrange(1 << 30)
@@ -951,8 +989,14 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.chain_native.planner_input(origin=fo, prefix=prefix, hold=hold, hero_state=S0)
             if callable(getattr(self.chain_native, "prepare", None)):
                 sim_chain = air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
+                b2_bombs = None
+                if getattr(self.chain_native, "b2", False) and self.v2feed is not None:
+                    from ssbot.combat import rune_bombs as _rbm
+                    trk_ = self.v2feed.trk
+                    b2_bombs = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
                 self.chain_native.prepare(s, ground=ws.hero.contact.v == "GROUND",
-                    accepting=bool((s.get("hero") or {}).get("hero_accepting_input", True)), sim=sim_chain)
+                    accepting=bool((s.get("hero") or {}).get("hero_accepting_input", True)), sim=sim_chain,
+                    **({"bombs": b2_bombs} if getattr(self.chain_native, "b2", False) else {}))
             res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
         if self.chain_native is not None:
