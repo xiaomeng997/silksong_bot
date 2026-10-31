@@ -2,7 +2,9 @@
 
 B2 interprets feedback every frame. Re-entering the public vector/shape/broadcast
 wrapper each time is unnecessary; simulate remains the one physics authority.
-No new movement rules, clock lanes, event timing or protected frames live here.
+No new movement rules, clock lanes or event timing live here. The current
+kinematics schema includes the observed POGO_OBS physical-step counter; keep
+these cached wrappers in sync when that compiled state authority changes.
 """
 from __future__ import annotations
 

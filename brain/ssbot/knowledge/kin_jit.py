@@ -21,7 +21,7 @@ from ssbot.knowledge.kinematics import (
     ALPHA, AQ, ATK_CD, ATK_T, ATTACKING, AIRHANG, B_ATTACK, B_BIND, B_DOWN, B_JUMP, B_LEFT, B_QUICKCAST, B_RIGHT,
     B_UP, BOUNCE, DS_HS, DS_REC, EPS, EV_CATCH, EV_HURT_L, EV_HURT_R, EV_LOCK, EV_POGO, EV_RECOIL_DOWN, EV_RECOIL_L,
     EV_RECOIL_R, EV_SILK, EV_UNLOCK, F_ATTACKING, F_GROUND, F_INVULN, F_JUMPING, F_NO_INPUT, F_RECOIL, F_RELINQ, FACE,
-    GROUND, GS, GTOL, HVX, HVY, INV_T, JDSTEPS, JHELD, JQ, JSTEPS, JUMPING, LEDGE, M_BIND, M_CAST, M_DS_ANTIC,
+    GROUND, GS, GTOL, HVX, HVY, INV_T, POGO_OBS, JDSTEPS, JHELD, JQ, JSTEPS, JUMPING, LEDGE, M_BIND, M_CAST, M_DS_ANTIC,
     M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_LOCKED, M_NORMAL, MODE, MODE_N, MODE_T, MOVE, P_AH_ACC, P_AH_G,
     P_AQ, P_ATK_CD, P_ATK_DUR, P_ATK_REC, P_BIND_DECAY, P_BIND_ENDVY, P_BIND_SILK, P_BIND_T, P_BIND_VYCAP,
     P_BIND_VYDOWN, P_BOUNCE, P_CAST_ANTIC, P_CAST_CATCH, P_CAST_CDECAY, P_CAST_CSPEED, P_CAST_DECAY, P_CAST_DECAY_G,
@@ -1624,6 +1624,7 @@ def forum_attack(x, mask, P):
 
 @njit(cache=True, inline="always", error_model="numpy")
 def fixed_step(x, P, TT):
+    x[POGO_OBS] = max(x[POGO_OBS] - 1.0, 0.0)
     fdt = P[P_FDT]
     hw = P[P_HW]
     skin = P[P_SKIN]
@@ -2312,7 +2313,7 @@ def flags_of(x):
     if relinq(m):
         f |= F_RELINQ
     ni = noinput(m)
-    if x[INV_T] > 0 or ni:
+    if x[INV_T] > 0 or x[POGO_OBS] > 0 or ni:
         f |= F_INVULN
     if ni:
         f |= F_NO_INPUT

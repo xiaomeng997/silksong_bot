@@ -244,12 +244,13 @@ DEFAULT_PARAMS = REPO / "knowledge" / "1.0.30000" / "kinematics" / "hero_hunter.
  # map v2 T1b (HERO2 bit H2_SHUTTLE; 0 otherwise, never read with the bit off):
  SHUT,            # the sprint (shuttlecock) jump's x speed while it runs (cState.shuttleCock; signed, 0 = off)
  XVXD,            # the decay of the extra air velocity XVX now (per s; 0 = h2_xv_decay, the sprint's Attack Cancel's)
- K) = range(86)
+ POGO_OBS,        # observed ENEMY-protection physical steps left; not a fresh EV_POGO or scaled timer
+ K) = range(87)
 ROW_NAMES = ("px py qx qy sx sy vx vy alpha gs face ground mode mode_t mode_n jumping jsteps jdsteps jq aq airhang "
              "attacking atk_t atk_cd rdir rsteps ds_hs ds_rec bounce hvx hvy move jheld prev silk inv_t ledge touch "
              "phase ts qq alo ahi landq wf_ph wf_t wf_s wf_down wf_wait wf_up wf_tgt wside wtouch cling cling_cd "
              "wstick unstick wlock wj_dir wj_v wj_chain wjq wslash prev_gs gl_cd dash_t dash_cd airdashed dq fall_t "
-             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir abuf xvx shut xvxd").split()
+             "hard sp_x wcon shove rx0 ry0 jbuf atk_kind alt alt_t atk_pdir abuf xvx shut xvxd pogo_obs").split()
 assert len(ROW_NAMES) == K
 
 M_NORMAL, M_DS_ANTIC, M_DS_SPIKE, M_HURT_FREEZE, M_HURT_RECOIL, M_CAST, M_BIND, M_LOCKED = range(8)
@@ -1105,6 +1106,7 @@ def _isin(mode, codes):
 def _fixed_step(X, P, hseg, vseg):
     """HeroController.FixedUpdate for the modelled modes plus one Rigidbody2D step, for every column of X."""
     fdt = P[P_FDT]
+    X[POGO_OBS] = np.maximum(X[POGO_OBS] - 1.0, 0.0)
     X[QX] = X[PX]
     X[QY] = X[PY]
     mode = X[MODE]
@@ -1551,7 +1553,7 @@ def _flags(X) -> np.ndarray:
     f |= np.where(X[ATTACKING] > 0, F_ATTACKING, 0)
     f |= np.where(X[RDIR] != 0, F_RECOIL, 0)
     f |= np.where(_isin(mode, RELINQUISHED), F_RELINQ, 0)
-    f |= np.where((X[INV_T] > 0) | _isin(mode, NO_INPUT), F_INVULN, 0)
+    f |= np.where((X[INV_T] > 0) | (X[POGO_OBS] > 0) | _isin(mode, NO_INPUT), F_INVULN, 0)
     f |= np.where(_isin(mode, NO_INPUT), F_NO_INPUT, 0)
     return f
 
@@ -2047,6 +2049,37 @@ def cstate_names() -> list[str]:
     return json.loads(CSTATE_NAMES_PATH.read_text(encoding="utf-8"))["bools"]
 
 
+def _pogo_steps(hero) -> float:
+    """Observed remaining ENEMY-protection steps; missing is not an event."""
+    ints = (hero or {}).get("cstate_int")
+    if not isinstance(ints, (list, tuple)) or len(ints) < 2:
+        return float("nan")
+    n = ints[1]
+    if isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer)):
+        return float("nan")
+    return float(n) if n >= 0 else float("nan")
+
+
+def _observed_pogo_count(steps: float, params: HeroParams) -> float:
+    """Carry an exported remaining count; decrement only in each lane's FixedUpdate.
+
+    No conversion to seconds: variant phases (including alpha_margin), freezes,
+    and multiple physics steps consume exactly their own remaining integer steps.
+    Missing/invalid/out-of-profile counts do not grant protection. Contact-event
+    injection and all motion are unchanged; this never synthesizes EV_POGO.
+    """
+    if not params.abilities or not np.isfinite(steps) or steps <= 0:
+        return 0.0
+    maximum = int(np.floor(params.pogo_invul / params.fdt + 1e-6))
+    return steps if steps == int(steps) and steps <= maximum else 0.0
+
+
+def _apply_pogo_steps(tr, S, params):
+    if tr.pogo_steps is not None:
+        S[POGO_OBS] = np.fromiter((_observed_pogo_count(float(n), params)
+                                  for n in tr.pogo_steps), float, count=len(tr))
+
+
 @dataclass(slots=True)
 class Trace:
     """Per-frame columns of a STATE stream, what the estimator, kin_fit and kin_check need (one row per frame)."""
@@ -2080,6 +2113,7 @@ class Trace:
     alpha_log: np.ndarray | None = None   # [n] hero.alpha when exported (NaN where missing)
     freeze: np.ndarray | None = None      # [n] FZ_* bits of the FreezeMoments started in that frame
     wall: np.ndarray | None = None        # [n] hero.wall: -1 touchingWallL, +1 touchingWallR, 0 (None: not exported)
+    pogo_steps: np.ndarray | None = None  # [n] cstate_int[1], observed remaining downspike ENEMY protection
 
     def __len__(self) -> int:
         return len(self.f)
@@ -2110,6 +2144,7 @@ class Trace:
                 "valid": bool(self.valid[i]),
                 "tm": self.tm[i] if self.tm is not None else np.full(len(TM_KEYS), np.nan),
                 "alpha": float(self.alpha_log[i]) if self.alpha_log is not None else np.nan,
+                "pogo_steps": float(self.pogo_steps[i]) if self.pogo_steps is not None else np.nan,
                 "load": bool(self.marks[i] & MK_SLIDE),
                 "wall": int(self.wall[i]) if self.wall is not None else None}
 
@@ -2140,9 +2175,11 @@ class Trace:
         nan_tm = [np.nan] * len(TM_KEYS)
         tm_rows: list = []
         alpha_rows: list = []
+        pogo_rows: list = []
         loads: list = []
         for s in states:
             h = s.get("hero")
+            pogo_rows.append(_pogo_steps(h))
             g = s.get("game") or {}
             tm = (h or {}).get("tm")
             tm_rows.append([float(tm[k]) if isinstance(tm, dict) and tm.get(k) is not None else np.nan
@@ -2223,6 +2260,7 @@ class Trace:
         arr = {k: np.asarray(v) for k, v in cols.items()}
         tm_arr = np.asarray(tm_rows, dtype=np.float64).reshape(-1, len(TM_KEYS))
         al = np.asarray(alpha_rows, dtype=np.float64)
+        pogo = np.asarray(pogo_rows, dtype=np.float64)
         tr = cls(f=arr["f"].astype(np.int64), fs=arr["fs"].astype(np.int64), dt=arr["dt"].astype(np.float64),
                  udt=arr["udt"].astype(np.float64), ts=arr["ts"].astype(np.float64),
                  pos=arr["pos"].astype(np.float64).reshape(-1, 2), phys=arr["phys"].astype(np.float64).reshape(-1, 2),
@@ -2236,6 +2274,7 @@ class Trace:
                  scene=arr["scene"].astype(np.int32), clips=list(clips), spells=list(spells), scenes=list(scenes),
                  mask_source=mask_source, tm=tm_arr if np.isfinite(tm_arr).any() else None,
                  alpha_log=al if np.isfinite(al).any() else None, freeze=arr["freeze"].astype(np.int16),
+                 pogo_steps=pogo if np.isfinite(pogo).any() else None,
                  wall=arr["wall"].astype(np.int8) if wall_seen else None)
         mark_load_slides(tr, loads, params)
         return tr
@@ -2919,6 +2958,7 @@ def _apply_exported(tr: Trace, S: np.ndarray, md: np.ndarray, params: HeroParams
         for r in (ALPHA, ALO, AHI):
             S[r] = np.where(ok, a, S[r])
     if tr.tm is None:
+        _apply_pogo_steps(tr, S, params)
         return
     col = {k: tr.tm[:, i] for i, k in enumerate(TM_KEYS)}
 
@@ -2948,6 +2988,7 @@ def _apply_exported(tr: Trace, S: np.ndarray, md: np.ndarray, params: HeroParams
             grew = np.isfinite(before) & (v > before) & ((tr.mask & bit) != 0)
         on = np.isfinite(v) & ((S[row] >= 0) | grew)
         S[row] = np.where(on, np.maximum(v, 0.0), S[row])
+    _apply_pogo_steps(tr, S, params)
 
 
 def _replay_gravity(tr: Trace, modes: np.ndarray, params: HeroParams) -> tuple[np.ndarray, np.ndarray]:
@@ -3131,7 +3172,7 @@ class StateTracker:
                                "ts": float(s.get("ts", 1.0) if s.get("ts") is not None else 1.0),
                                "mask": int((s.get("act") or {}).get("mask", 0) or 0), "dmg": dmg, "marks": mk,
                                "freeze": fz, "tm": tm_row, "alpha": float(a) if a is not None else np.nan,
-                               "load": load}
+                               "load": load, "pogo_steps": _pogo_steps(h)}
         if not h or not h.get("box") or not h.get("cstate"):
             row.update(phys=np.array([np.nan, np.nan]), vel=np.array([np.nan, np.nan]), box=np.full(4, np.nan),
                        facing=0, hero_state=-1, relinq=False, cs=np.zeros(len(self._bit), dtype=bool), silk=0,
@@ -3396,6 +3437,7 @@ class StateTracker:
                 grew = np.isfinite(before) and np.isfinite(v) and v > before and (mask & bit) != 0
                 if np.isfinite(v) and (S[row] >= 0 or grew):
                     S[row] = max(v, 0.0)
+        S[POGO_OBS] = _observed_pogo_count(float(r.get("pogo_steps", np.nan)), p)
         self._tm_prev = tmv
         # contact events (derive_events)
         ev = 0
