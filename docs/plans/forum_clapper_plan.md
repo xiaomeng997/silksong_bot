@@ -1587,6 +1587,8 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **已处理 Opus #45（接收记录）。** 任务8独立OP5已开，正在15e快照，P窗口只读静态；性能结束STATUS实际false后放行其计算。当前不把接收记录记成审阅通过。
 
+**上线准备（仍未开局）。** 新单局草稿在p_full_15e26dc3/{trial_15e26dc3.py,run_engineering.py}，新目录step3/b2_trial_20261031_15e26dc3尚未创建，缺source_review.json时不能prepare/execute。原Launcher/worker/清理主体不变，补已审per-PID资源门、唯一锁、STATUS心跳及真实清理后释放；合同准备时固定启动器/包装器/资源代码hash。499跟踪运行/知识文件及5个现有未跟踪aim_zones都只读绑hash，后5不修改/提交。动作审计audit_trial.py在旧8aba负对照上正确给passes=false：两次J/真实DownSlash/counter8通过，钩索的首J迟发/未实际离地失败，不因通关0HP放行。新八局草稿sol/overnight/smoke15e26dc3/仅换新源/证据/批次，ABBA/BAAB与原预算保留；无REVIEW_GATE/正式批次、还没check-draft（待新工程实际账本）。
+
 **下一步与边界。** 完整P关键tick与总体预算已过点界；等待Opus增量审15e（包括明确状态归属变化），核证后才自主新工程单局。实际J/CLAW/DownSlash/命中弹起、动作接受、严预算和Launcher清理通过后，才另冻新源8局；旧8aba、停止批、A/A与strict/B1/留出不动。计划只同步main/刀口/TV，SMOKE8冻结期间刀口HEAD不提交。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
