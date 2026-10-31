@@ -62,7 +62,9 @@ def adapter(monkeypatch,*,strict=True,ground=True,accepting=True,prior=None,f=10
 
 def test_initial_b2_ground_hop_has_three_frame_jump_lead(monkeypatch):
     assert B2_HOOK_JUMP_LEAD==3
-    assert adapter(monkeypatch)["p_min"]==1007
+    kw=adapter(monkeypatch)
+    assert kw["hop_from"]==1005 and kw["p_min"]==1008
+    assert kw["p_min"]-kw["hop_from"]==B2_HOOK_JUMP_LEAD
 
 
 @pytest.mark.parametrize("p_only",[1004,None])

@@ -15,8 +15,9 @@ from .knife_chain_nominal import state_names
 # the first CLAW is sent. This is a B2 candidate timing rule, not a retry.
 B2_HOOK_JUMP_LEAD = 3
 # First heavy commitment may consume two STATE intervals including queue time.
-# Plan two stable-hold frames before takeoff, rather than shifting late keys.
-B2_HOOK_PLAN_LEAD = 4
+# Plan three stable-hold command frames before takeoff. The whole wait is
+# checked in the new candidate; never shift an already-late plan's keys.
+B2_HOOK_PLAN_LEAD = 5
 
 
 def _observed_flag(state,name):

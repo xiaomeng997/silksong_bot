@@ -73,11 +73,11 @@ def test_fixed_press_before_new_takeoff_floor_is_not_shifted(monkeypatch):
     assert owner.plan(sim,ctx,True,True,hop_from=1004,p_only=1005,p_min=1007) is None
 
 
-def test_native_b2_plans_four_frame_dispatch_lead(monkeypatch):
+def test_native_b2_plans_five_frame_dispatch_lead(monkeypatch):
     from ssbot.combat.knife_chain_jump import B2_HOOK_PLAN_LEAD
-    assert B2_HOOK_PLAN_LEAD==4
+    assert B2_HOOK_PLAN_LEAD==5
     kw=adapter(monkeypatch)
-    assert kw['hop_from']==1004 and kw['p_min']==1007
+    assert kw['hop_from']==1005 and kw['p_min']==1008
 
 
 @pytest.mark.parametrize('fixed',[None,1007])
@@ -177,3 +177,15 @@ def test_adapter_uses_observed_unchanging_wait_not_neutral(monkeypatch):
 @pytest.mark.parametrize('prefix,desired',[((),cs.M_L),((cs.M_R,),cs.M_L),((cs.M_J,),cs.M_J),((0,),None)])
 def test_unknown_or_changing_wait_input_does_not_create_a_delayed_hop(monkeypatch,prefix,desired):
     assert adapter(monkeypatch,prefix=prefix,desired=desired) is None
+
+
+def test_lead5_candidate_rolls_all_three_stable_wait_frames(monkeypatch):
+    owner,sim,ctx,seen=delayed_model(monkeypatch)
+    p=owner.plan(sim,ctx,True,True,hop_from=1005,hop_wait_mask=cs.M_L,p_min=1008,first_feasible=True)
+    assert p is not None and (p.f0,p.hop,p.f_press,p.wait_mask)==(1005,3,1008,cs.M_L)
+    assert p.var_ok==[4]*4
+    for row in seen[0]:
+        assert list(row[:3])==[cs.M_L]*3
+        assert np.array_equal(np.flatnonzero(row & cs.M_J),[3,4,5])
+    assert all(cs.plan_mask(p,f,1)==cs.M_L for f in (1002,1003,1004))
+    assert cs.plan_mask(p,1005,1)&cs.M_J and cs.plan_mask(p,1008,1)&cs.M_CLAW
