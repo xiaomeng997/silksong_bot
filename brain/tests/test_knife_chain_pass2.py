@@ -108,3 +108,33 @@ def test_multiple_origin_lanes_keep_original_shape_failure(problem,monkeypatch,l
     with pytest.raises(ValueError):ac.evaluate(sim,ctx,deepcopy(plans),102)
     with pytest.raises(ValueError):ac.evaluate(sim,ctx,deepcopy(plans),102,reuse_no_event=True)
     assert not calls
+
+
+def test_complete_row_reuse_cannot_mutate_stored_physics(problem):
+    sim,ctx,plans=problem
+    ro=sim.roll(np.zeros((3,5),np.int64));before=deepcopy(ro)
+    got=ac._pass2_rows(ro,np.arange(3))
+    for name in ("phys","pos","vel","mode","flags","box","final"):
+        assert np.array_equal(getattr(ro,name),getattr(got,name))
+        assert not np.shares_memory(getattr(ro,name),getattr(got,name))
+        getattr(got,name)[:]=0
+        assert np.array_equal(getattr(ro,name),getattr(before,name))
+
+
+@pytest.mark.parametrize("strict,native,expected",[(False,True,{}),(True,True,{"reuse_no_event":True}),(True,False,{})])
+def test_b2_control_search_only_opts_native_evaluation_in(strict,native,expected,monkeypatch):
+    from types import SimpleNamespace as NS
+    from ssbot.combat import knife_chain_slam as ks
+    from ssbot.combat.claw_strike import CsCfg
+    calls=[]
+    def evaluate(sim,ctx,plans,F,**kw):
+        calls.append(kw)
+        assert plans and all(p.f_down is None for p in plans)
+        return []
+    monkeypatch.setattr(ac,"evaluate",evaluate)
+    if native:monkeypatch.setattr(ac,"_EVALUATE_AUTHORITY",evaluate)
+    monkeypatch.setattr(ks,"_csx",lambda x:NS(cfg=CsCfg()))
+    monkeypatch.setattr(ks,"_strike_ctx",lambda x:(object(),0))
+    x=NS(R=NS(anchor=NS(b2_strict_observations=strict)),v={"iid":7},tmp={},obs=NS(F=40,sim=object()))
+    ks.pl_strike_search(x,"var.tmp.plan",25,1)
+    assert calls==[expected] and x.tmp["plan"] is None

@@ -197,6 +197,7 @@ def margin(type_key: str, k: int, mode: str | None = None) -> float:
     return max(0.5, 0.3 + 11.0 * t * t)
 
 
+# New global dependencies here must also enter the B2 pure-dilation context key.
 def box_kernel(m: float, cell: float = CELL) -> tuple[np.ndarray, tuple[int, int]]:
     """(cv2 kernel, anchor) taking a raw damage raster (row 0 lowest y) to Bounds-centre space with margin m: cell p
     is set when, for some point of p's cell, the HeroBox there grown by m meets an occupied cell q (a CELL square).

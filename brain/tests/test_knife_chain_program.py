@@ -147,3 +147,13 @@ def test_unknown_later_hook_metadata_cannot_match_a_known_program(bad):
     r._act(x,HOOK)
     assert calls==[("claw_plan",30)] and x.tmp["hook"] is None
     assert r._selected_strike_info["model_hook_rechecks_omitted"]==0
+
+
+def test_held_hook_equals_fresh_recheck_after_original_plan_adopt():
+    from ssbot.combat.knife_chain_slam import pl_adopt
+    r,x,committed,_=hook_fixture();selected_claw_projection(r);r._act(x,HOOK)
+    held=x.tmp["hook"]
+    rechecked=deepcopy(committed);rechecked.f0=30;rechecked.hop=0
+    pl_adopt(x,"var.tmp.adopted",rechecked,committed)
+    assert x.tmp["adopted"]==held and rechecked is not held
+    assert rechecked.f0==committed.f0 and rechecked.hop==committed.hop

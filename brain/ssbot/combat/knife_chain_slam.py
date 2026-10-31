@@ -839,7 +839,10 @@ def pl_strike_search(x, store, k_ctrl, toward):
             for dk in ((0,) if d == 0 else (toward, -toward)):
                 m_ = 0 if dk == 0 else (M_R if dk > 0 else M_L)
                 plans.append(AC.Plan(F, m_, F + d, None, None, fp, fp - a_entry, v["iid"]))
-    ok = AC.evaluate(sim, actx, plans, F) if plans else []
+    if plans and getattr(x.R.anchor,"b2_strict_observations",False) and AC.evaluate is AC._EVALUATE_AUTHORITY:
+        ok=AC.evaluate(sim,actx,plans,F,reuse_no_event=True)
+    else:
+        ok = AC.evaluate(sim, actx, plans, F) if plans else []
     best = None
     if ok:
         ok.sort(key=lambda q_: (abs(q_.k_press - 47), q_.d_end - q_.f0, q_.c_strike - q_.f_press))

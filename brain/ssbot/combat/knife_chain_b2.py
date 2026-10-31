@@ -805,6 +805,9 @@ class NativeChainB2(NativeChainCandidates):
         res=PlanResult(offer.mask,0,"CHAIN B2 "+offer.stage+" "+offer.draft.run.lid,0,False,J=offer.value,V=True,
                        n=1,n_allowed=1,n_safe=1,cmd=cmd,path=None if p is None else p.box,
                        tail_ok=None,hits=1. if offer.stage=="commitment" else 0.)
+        if offer.stage=="commitment":
+            from .knife_chain_score_bound import clear_ordinary_action_memo
+            clear_ordinary_action_memo(planner)
         planner.prev_cmd=None if offer.stage!="continuation" else cmd.copy()
         planner.prev_name=res.name;planner.prev_tail_ok=False;planner.prev_esc_unsafe=False
         planner.last_info={"b2":{"stage":offer.stage,"move":vars(offer.move),"details":offer.details,

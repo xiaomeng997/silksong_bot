@@ -1453,11 +1453,11 @@ class ForumPlanner(Planner):
         hx, hy = float(ws.hero.pos.v[0]), float(ws.hero.pos.v[1])
         return fields, fields.kill_value(hx, hy, hit)
 
-    def _score_forum(self, ws, roll, latched, start, f, prefs, tk, ctx=None):
+    def _score_forum(self, ws, roll, latched, start, f, prefs, tk, ctx=None, *, prepared_targets=None):
         w = prefs.weights
         N, T1 = roll.flags.shape
         face0 = 1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
-        tbox, tok, tw, keep = self._forum_targets(ws, f, tk, prefs)
+        tbox, tok, tw, keep = self._forum_targets(ws, f, tk, prefs) if prepared_targets is None else prepared_targets
         t_tv = time.perf_counter()
         fields, kv = self._terminal(f, ctx)
         if kv and len(keep):
@@ -1503,6 +1503,58 @@ class ForumPlanner(Planner):
             out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv, J_tv=j_tv,
                        tv_ms=(time.perf_counter() - t_tv) * 1e3, field_ms=fields.ms)
         return out
+
+    def _zero_hit_value_bound(self,ws,f,prefs,ctx,*,start,P,T,N,cont,challenger):
+        # This is a narrow native-score proof. Unknown forecast/score adapters
+        # keep the old path; prepared targets are reused on a non-pruning miss.
+        if (getattr(self._score_forum,"__func__",None) is not _SCORE_FORUM_AUTHORITY or
+                getattr(self._forum_targets,"__func__",None) is not _FORUM_TARGETS_AUTHORITY or
+                getattr(self._under_bonus,"__func__",None) is not _UNDER_BONUS_AUTHORITY or
+                under_gains is not _UNDER_GAINS_AUTHORITY or self.tv is not None or
+                getattr(self._terminal,"__func__",None) is not _TERMINAL_AUTHORITY or
+                _forum_score_kernel is not _SCORE_KERNEL_AUTHORITY or kin.rollout is not _KIN_ROLLOUT_AUTHORITY or
+                not kin.HAVE_NUMBA or type(self.params) is not kin.HeroParams or type(self.terrain) is not kin.Terrain2D or
+                getattr(self.params.vector,"__func__",None) is not _PARAM_VECTOR_AUTHORITY or
+                getattr(self.terrain.packed,"__func__",None) is not _TERRAIN_PACK_AUTHORITY or
+                type(f) is not forum_v2.V2Forecast or type(f._inner) is not _NATIVE_MULTI_FORECAST or
+                getattr(f.targets,"__func__",None) is not _MULTI_TARGETS_AUTHORITY or
+                f._inner.__dict__.get("boss_fc",False) is not None):return None,None
+        from .knife_chain_score_bound import score_number
+        try:
+            score_number(prefs.stance_x)
+            if prefs.boss_x is not None:score_number(prefs.boss_x)
+            if type(start) is not np.ndarray or start.shape not in ((kin.K,),(kin.K,1)):return None,None
+            numeric_start=np.asarray(start,dtype=np.float64)
+            if not np.isfinite(numeric_start).all() or np.max(np.abs(numeric_start))>1e12:return None,None
+            if not (1e-6<=self.params.frame_time<=.1 and 1e-6<=self.params.fdt<=.1):return None,None
+            for values in (self.params.vector(),self.terrain.packed()):
+                if not np.isfinite(values).all() or np.max(np.abs(values),initial=0.)>1e12:return None,None
+        except (ValueError,TypeError,AttributeError):return None,None
+        data=self._forum_targets(ws,f,np.arange(P+T+1,dtype=np.float64)*self.params.frame_time,prefs)
+        upper=0.;eml=0.
+        try:
+            if "under" in self.fcfg.tac and len(data[3]):
+                typ,fam=under_gains()
+                # Share <=1; the maximum over every family covers the native
+                # current-family lookup without reading a future observation.
+                for target in data[3]:
+                    if target.hazard:continue
+                    gains=[score_number(typ.get(target.type_key,0.))]+[score_number(v) for (tk,_),v in fam.items() if tk==target.type_key]
+                    if not all(math.isfinite(v) for v in gains):return None,data
+                    upper+=max(0.,*gains)
+                wu=score_number(self.fcfg.w_under)
+                score_number(self.fcfg.under_dx_u)
+                upper*=max(0.,wu)
+            if "eml" in self.fcfg.tac:
+                coefficient=score_number(self.fcfg.eml_hits_per_mask)*score_number(prefs.weights.get("hit",10.))*score_number(self.fcfg.eml_mask)
+                if not math.isfinite(coefficient):return None,data
+                eml=max(0.,-coefficient)
+        except (ValueError,TypeError,KeyError,AttributeError):return None,data
+        from .knife_chain_score_bound import zero_hit_bound
+        proof=zero_hit_bound(prefs.weights,data[2],challenger=challenger,candidates=N,
+            risk_x=prefs.risk_x,risk=prefs.risk,max_hits=prefs.max_hits,continuation=bool(cont),
+            under_upper=upper,eml_bonus_upper=eml,whip_penalty=self.fcfg.w_whip_clash)
+        return proof,data
 
     # ---- hit branches ----
 
@@ -3488,6 +3540,7 @@ class ForumPlanner(Planner):
             return self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
         t0 = time.perf_counter()
         ordinary = None
+        native_bound=False
         # At an OBSERVED bounce, every continuation competes normally. First
         # evaluate the ordinary rows: if its safe score strictly exceeds the
         # optimistic score of ANY continuation, expanding three tails cannot
@@ -3515,8 +3568,26 @@ class ForumPlanner(Planner):
             result = chain.install(offer, self)
         else:
             if ordinary is None:
-                ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
-            if offer is not None and (ordinary.S or ordinary.forced_risk or offer.value >= ordinary.J):
+                native_bound=(offer is not None and offer.stage=="commitment" and
+                    getattr(self._ordinary_tick,"__func__",None) is _ORDINARY_TICK_AUTHORITY and type(self) is ForumPlanner)
+                if native_bound:
+                    ordinary=self._ordinary_tick(ws,start,hold,prefix,f,prefs,ctx,challenger_value=offer.value)
+                else:
+                    ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+            from .knife_chain_score_bound import ValueDominated
+            if isinstance(ordinary,ValueDominated):
+                if (not native_bound or offer is None or offer.stage!="commitment" or
+                        ordinary.challenger!=offer.value or not ordinary.upper_bound<offer.value):
+                    raise RuntimeError("ordinary value proof does not match current admitted offer")
+                # The chain's full admission/path/N=2 already passed. Losing
+                # ordinary safety is UNKNOWN, not a fabricated safe PlanResult.
+                self.ticks+=1;self.last_sel=self.last_safe=self.last_cs=None
+                result=chain.install(offer,self)
+                proof={"upper_bound":ordinary.upper_bound,"challenger":ordinary.challenger,
+                       "candidates":ordinary.candidates,"phase":ordinary.phase,"ordinary_safety":ordinary.safety,"witness":ordinary.witness}
+                self.last_info["b2"]["ordinary_value_bound"]=proof
+                chain._note("b2_ordinary_value_pruned",frame=int(ws.stamp.frame),**proof)
+            elif offer is not None and (ordinary.S or ordinary.forced_risk or offer.value >= ordinary.J):
                 result = chain.install(offer, self, ordinary)
             else:
                 result = ordinary
@@ -3526,8 +3597,10 @@ class ForumPlanner(Planner):
         result.t_ms = {**result.t_ms, "total": total_ms, "b2_total": total_ms}
         return result
 
-    def _ordinary_tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
-             ) -> PlanResult:
+    def _ordinary_tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext,
+                       *, challenger_value=None):
+        # Default returns PlanResult; the native B2 commitment caller may also
+        # receive ValueDominated, explicitly without an ordinary safety verdict.
         t0 = time.perf_counter()
         if self.measurement_enabled:
             self.measurement_result = None
@@ -3704,6 +3777,19 @@ class ForumPlanner(Planner):
         if cont:
             ok = np.append(ok, bool(ctx.allowed_mask.all()) or self._prev_allowed(ctx))
             why = np.append(why, 0 if ok[-1] else 1)
+        # First rollout scope: ordinary has no active kept/macro program or
+        # special/global-board side effects to reconstruct. Broader families
+        # retain the complete ordinary path, even if a raw score could lose.
+        value_prune_eligible=(challenger_value is not None and not (prefs.want_bind and ctx.want_bind) and
+                not (n_spec or n_hop or n_chain or n_ds or n_map or knife_on) and
+                self._spec_meta is None and self._map is None and pv_sm is None and
+                getattr(self,"_kp",None) is None and self.jump_until<=self.ticks and self.macro_until<=self.ticks and
+                not bool(getattr(win_,"harpoon",False)))
+        prepared_score_targets=None
+        if (value_prune_eligible and
+                getattr(self._zero_hit_value_bound,"__func__",None) is _ZERO_HIT_AUTHORITY):
+            proof,prepared_score_targets=self._zero_hit_value_bound(ws,f,prefs,ctx,start=start,P=P,T=T,N=N,cont=cont,challenger=challenger_value)
+            if proof is not None:return proof
         latched, hold_end = hold_filter_jit(full, hold)
         t1 = time.perf_counter()
         # ---- stage 1: the nominal lane, its box centre against the support ----
@@ -3797,7 +3883,8 @@ class ForumPlanner(Planner):
         k1 = o.argmax(axis=1)
         t_hit = np.where(S1, np.where(k1 > 0, fr[np.maximum(k1 - 1, 0)] + 1, fr[0]), T1)
         t2 = time.perf_counter()
-        sc = self._score_forum(ws, r1, latched, start, f, prefs, tk, ctx)
+        sc = (self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx,prepared_targets=prepared_score_targets)
+              if prepared_score_targets is not None else self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx))
         J = sc["J"]
         if sctx is not None:
             # (b) a down slash on an enemy in a move is a certain hit: a special row's strike (its contact with E's
@@ -3831,6 +3918,14 @@ class ForumPlanner(Planner):
             J -= fcfg.eml_hits_per_mask * prefs.weights.get("hit", 10.0) * fcfg.eml_mask * P1
         if cont:
             J[-1] += prefs.weights.get("cont", 0.0)
+        if value_prune_eligible:
+            from .knife_chain_score_bound import after_score_bound
+            proof=after_score_bound(J,np.asarray(sc["hits"]),challenger=challenger_value,
+                hit_weight=prefs.weights.get("hit",10.),whip_penalty=fcfg.w_whip_clash,
+                bind_possible=bool(prefs.want_bind and ctx.want_bind))
+            # From this point the only later J write is the nonnegative whip
+            # deduction. Any future positive score term must precede this gate.
+            if proof is not None:return proof
         unm = sc["unmod"] & ok
         why[unm] = R_UNMOD
         ok &= ~sc["unmod"]
@@ -4953,3 +5048,20 @@ class ForumPlanner(Planner):
         if self.measurement_enabled:
             self.measurement_result = res
         return res
+
+
+_ORDINARY_TICK_AUTHORITY=ForumPlanner._ordinary_tick
+
+_SCORE_FORUM_AUTHORITY=ForumPlanner._score_forum
+_FORUM_TARGETS_AUTHORITY=ForumPlanner._forum_targets
+_UNDER_BONUS_AUTHORITY=ForumPlanner._under_bonus
+_UNDER_GAINS_AUTHORITY=under_gains
+_ZERO_HIT_AUTHORITY=ForumPlanner._zero_hit_value_bound
+from ssbot.combat.multi_forecast import MultiForecast as _NATIVE_MULTI_FORECAST
+_MULTI_TARGETS_AUTHORITY=_NATIVE_MULTI_FORECAST.targets
+
+_TERMINAL_AUTHORITY=ForumPlanner._terminal
+_SCORE_KERNEL_AUTHORITY=_forum_score_kernel
+_KIN_ROLLOUT_AUTHORITY=kin.rollout
+_PARAM_VECTOR_AUTHORITY=kin.HeroParams.vector
+_TERRAIN_PACK_AUTHORITY=kin.Terrain2D.packed

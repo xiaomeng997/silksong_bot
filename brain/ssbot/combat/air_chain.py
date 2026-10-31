@@ -416,7 +416,8 @@ def _single_pass2_origin(sim):
 
 
 def _pass2_rows(ro,sel):
-    if len(sel)==ro.flags.shape[0] and np.array_equal(sel,np.arange(len(sel))):return ro
+    # Even a complete row set is copied: a later timeline cannot mutate the
+    # stored physics through an all-row alias if native checks evolve.
     return kin.Rollout(ro.phys[sel],ro.pos[sel],ro.vel[sel],ro.mode[sel],ro.flags[sel],ro.final[:,sel],ro.box[sel])
 
 
