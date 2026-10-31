@@ -257,7 +257,10 @@ class Canvas:
         return row, col, ok
 
 
-def dilate_group(parts, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:
+_BOX_KERNEL_AUTHORITY=box_kernel
+
+
+def _dilate_group_uncached(parts, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:
     """Coarse rasters [(mask, ix0, iy0)] on the CELL lattice, one dilation for all (the same margin m)."""
     import cv2
     parts = [p for p in parts if p[0].size]
@@ -275,6 +278,20 @@ def dilate_group(parts, m: float, cell: float = CELL) -> tuple[np.ndarray, int, 
         img[r:r + c.shape[0], q:q + c.shape[1]] |= c.view(np.uint8)
     d = cv2.dilate(img, k, anchor=(axn, ayn), borderType=cv2.BORDER_CONSTANT, borderValue=0)
     return d.view(bool), x0 - kw, y0 - kh
+
+
+_DILATE_GROUP_AUTHORITY=_dilate_group_uncached
+
+
+def dilate_group(parts, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:
+    from .knife_chain_raster_cache import current_dilation_cache
+    cache=current_dilation_cache()
+    if cache is None or box_kernel is not _BOX_KERNEL_AUTHORITY or _dilate_group_uncached is not _DILATE_GROUP_AUTHORITY:
+        return _dilate_group_uncached(parts,m,cell)
+    # Include all kernel globals as well as every pixel/coordinate/margin. The
+    # returned arrays are independent; owner, hazard, path and time queries still
+    # run in their original layers, with their original support/clock identity.
+    return cache.apply(parts,m,cell,_dilate_group_uncached,(HB_HX,HB_HY,HB_DY))
 
 
 def dilate(raw: Mask, from_cell: float, m: float, cell: float = CELL) -> tuple[np.ndarray, int, int]:

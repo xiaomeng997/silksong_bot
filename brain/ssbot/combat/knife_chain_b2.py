@@ -598,8 +598,12 @@ class NativeChainB2(NativeChainCandidates):
     def propose(self,planner,ws,start,hold,prefix,forecast,prefs,ctx):
         """Time this synchronous proposal, separately from selection/send costs."""
         self._proposal_started=time.perf_counter()
+        from .knife_chain_raster_cache import exact_dilation_scope
         try:
-            offer=self._propose(planner,ws,start,hold,prefix,forecast,prefs,ctx)
+            with exact_dilation_scope() as cache:
+                offer=self._propose(planner,ws,start,hold,prefix,forecast,prefs,ctx)
+            if cache.hits or cache.misses or cache.uncacheable:
+                self._note("b2_dilation_cache",frame=self.dispatch.frame,**cache.stats())
             if offer is not None:offer.proposal_ms=(time.perf_counter()-self._proposal_started)*1000.
             return offer
         finally:self._proposal_started=None

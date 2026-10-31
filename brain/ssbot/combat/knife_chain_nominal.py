@@ -494,7 +494,7 @@ def compiled_signatures():
 def warm_nominal(params):
     """Exercise B2's actual model call sites before combat; retain no future Run."""
     import json,time
-    from . import knife_chain_program  # load the model-only adapter before the first live hook tick
+    from . import knife_chain_program,knife_chain_raster_cache  # load private adapters before the first live hook tick
     from pathlib import Path
     from types import SimpleNamespace
     from .knife_chain_format import chains_from_json
