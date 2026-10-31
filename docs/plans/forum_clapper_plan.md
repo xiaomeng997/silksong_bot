@@ -1547,7 +1547,7 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **提速当前试验。** 通用进程pickle不可用：整图约940MiB，预载静态表后动态仍9.38MB，RPC55–57ms E而普通计算11–13ms，路线暂停。OMP后端的显式nogil/私有ordinary机制可重叠：同数学数组一致，6/6结果和全部非计时状态一致、仅esc.ms不同，父状态未改；这是机制证明，尚未接生产、不是新源完整tick预算。另单点分析的“首个可行候选优先”只省后续质量搜索，每个gap×ctrl仍须有实际通过的strike；“模型持有已选CsPlan”只定义相同固定候选，实际每tick复核不省，名义physics/全危险/N2仍重算。基线/hold/first/组合的CsPlan、价值、8项完整轨迹哈希全同；E组合约75ms，不能外推P。相关源已提交e92b4ccc；SELECTED_PROGRAM_REVIEW静态核对后的未知键P2已修，最终60份相关测试1108通过、外来模块0。未知计划字段直接不持有，不能以两个None键相同而复用。实际h2默认GOOD_OK=4和真实runner不变。当前另有尚未提交的单proposal精确dilation复用试验；仍未据提速候选放行。
 
-**cbd538c2精确dilation复用。** 在一次B2提案内只缓存纯dilate_group，同一原生数组的dtype/shape/全部像素、坐标、cell、余量、HB三常数及原计算身份全部相同才复用，返回独立副本；scope退出/异常立即清空，不跨tick。未知array子类/未知标量表示、kernel/compute适配覆盖都走原计算，目标/owner/hazard/path/time/扫掠/保护查询不缓存。RASTER_CACHE_REVIEW初轮两处unknown-representation P2均修；先前全量1122通过、修后35专项通过。真实f2973 origin/prefix/Hold/hero及offer除耗时逐字段相同（含CsPlan、价值与完整路径）；E 75.385→73.316ms仅诊断。正在独占P测B两次和A一次，尚无结果/新游戏，不能据E提速放行。
+**cbd538c2精确dilation复用。** 在一次B2提案内只缓存纯dilate_group，同一原生数组的dtype/shape/全部像素、坐标、cell、余量、HB三常数及原计算身份全部相同才复用，返回独立副本；scope退出/异常立即清空，不跨tick。未知array子类/未知标量表示、kernel/compute适配覆盖都走原计算，目标/owner/hazard/path/time/扫掠/保护查询不缓存。RASTER_CACHE_REVIEW初轮两处unknown-representation P2均修；先前全量1122通过、修后35专项通过。真实f2973 origin/prefix/Hold/hero及offer除耗时逐字段相同（含CsPlan、价值与完整路径）；E 75.385→73.316ms仅诊断。独占P复测已完成：B两次42.149/42.241ms，A33.186ms；四项输入全同、0错误/新签名，仍未达首J33.3ms。08:06:22.816505Z窗口真实结束、STATUS=false，无新游戏。target.json的scope文本误继承E/Idle，实际result的0–15 affinity/High与独占guard正确，SUMMARY明确更正，原输出保留。不能据此放行。
 
 **已处理 Opus #38（a324审阅核收）/#39（驱动轻量核收）。** 1084独立测试、183次地面J与161真实起跳、16回合开环新时序均限定接收；18真钩索17放行、未起跳0误放，J+3修复正确。18承诺开环全部因录下h2旧时序键不同而恢复，不能算新时序钩爪已执行；范围内21跳劈不变。分段发钩在T+3下仍不足J截止，#16①继续不恢复。smoke8三处diff和6项局前等待测试已被Opus轻量确认，34故障场景仍只归旧锁版；冻结期间HEAD不动，后续计划同步须先查SMOKE8 phase/ACTIVE锁，活动时只更新main，批后再同步其余活动树。不新增或伪造REVIEW_GATE。
 
@@ -1556,6 +1556,17 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 **已处理 Opus #35（驱动P2选择已落实，待新版本抽审）。** 接收34场景锁版动态故障注入，不混成当前全部版本通过。每局尚未started且尚未预约时，资源冲突每60秒重核源/新阻挡/STOP_REQUESTED/预算再试，最多30分钟；等待不算一局，不起游戏、不预约，超时停批。采样期间新stop也会再查；已started/已预约绝不走重试。6项控制通过。冻结HEAD策略选“从冻结到最后实际清理不向刀口树提交”，批后统一同步三计划，不放宽HEAD检查。new_blockers改成显式接收集合，已收新回执不能掩盖旧未决阻挡，4项控制通过；Gate须列齐旧已处理的#5/#8/#10/#16/#18/#19/#25及后续真正处理完的编号。未创建Gate/冻结批，旧draft散列已失效，新source稳定后重做check-draft。STATUS分类、DEMO缺失等P3仍登记，不宣称已全部修。
 
 **证据/下一步。** analysis/b2_hook_lead_20261030/、b2_turn_mask_20261030/、b2_turn_model_replay_177ddac3_20261030/，b2_hook_jump_20261030/p_critical_v1/及perf/{parallel_proto,thread_proto}/；sol/overnight/{HOOK_LEAD_REVIEW,resource_guard_tests,letter_gate_tests,prelaunch_wait_tests}。继续真实关键tick提速、完整回归/审阅/预算后再自主新工程局；只有新键实际接受、同目标命中弹起、严预算和清理均通过后才冻结8局。原夜间授权/严停止、默认关闭、A/A和strict/B1/留出暂停、原失败保留均不变。只同步main/刀口/TV，不写旧wf或Opus目录。
+
+
+### 6.48 无事件物理复用与剩余关键截止【10-31夜间；没有新实机】
+
+**45af1bf5。** B2私有exact_cs_step内，原生evaluate才显式传reuse_no_event=True。只在无先行下劈事件、单一广播start/Hold车道、原生ChainSim/模型及roll/contacts/unsafe权威未改、无variants/可选bound字段时，持有第一个时序的全行无事件pass2；后续时序按原全局sel选行。接触、晚端、事件位置、有事件pass3、ground与所有安全判定仍逐时序重算。默认A/h2不启用，适配器/多起点继续原调用及原错误；AC自行固定native evaluate标记，防首次CS导入前的适配覆盖被误认。
+
+**验证。** 回调边界版1139项全量相关回归、外来模块0；其后单origin/固定native标记防御补修的65专项全部通过，两批不相加。PASS2_REVIEW独立静态无P0–P3；真实f2973 offer、CsPlan、价值和8项整路径哈希对cbd逐字段相同，原点/prefix/Hold/hero全同。E诊断中eval_strike累计13.35→12.03ms、完整tick73.32→73.06ms，存在其他E任务，不能当P收益或正式预算。cProfile约106ms带探针开销，只用来定位通用rollout包装、参数打包和解释器成本，不作延迟门槛。
+
+**剩余提速。** 相同native样本的增量构建原型：63帧查询需22样本，可保留旧16、只补6；逐字段、查询前后缓存及120533布尔/134索引相同，无别名，7失效路径回full。但深epoch指纹约3.4ms，E完整9.43/增量9.99ms，当前方案无净收益，未接生产；若采用显式feed/reset epoch和模型只读版本仍须另验，不以当前原型直接放行。通用pickle仍暂停。私有ordinary/nogil并行正在同一入场状态做同步reference/并行语义核对，跨独立前缀被墙钟截止污染的状态差异不能当隔离成败，生产尚未接线。
+
+**已处理 Opus #40（任务接收记录）。** Opus接任务7独立定位compile_path解释器余项，e92/cbd增量OP5仍在途；Sol另验证控制搜索的预打包原数学kernel，双方不碰对方目录/源。当前最近源45af1bf5，旧cbd完整P关键约42.2ms仍大于首J33.3ms；继续提速、整tick复测和独立审阅，达到条件后按用户夜间授权自主新工程局。无REVIEW_GATE/正式8局、无新游戏/新样本；严规则、旧失败保留、冻结A/A/strict/B1/留出暂停均不变。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
