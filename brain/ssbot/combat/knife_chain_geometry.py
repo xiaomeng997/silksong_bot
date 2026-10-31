@@ -23,6 +23,23 @@ class B2Geometry:
     move: object
     instance: object
     _fresh: dict=field(default_factory=dict,init=False,repr=False)
+    _owners: dict=field(default_factory=dict,init=False,repr=False)
+
+    def _owner_occupancy(self,rs,x,y,tk,iid):
+        """Reuse one owner raster within this tick's immutable support snapshot.
+
+        Every path still has fresh points, clock, sweep and protection. A new
+        B2Geometry is made for every proposal; no positions/verdicts cross ticks.
+        Adapters overriding occupied_only retain their own query semantics.
+        """
+        from .forum_v2 import LayerSupport
+        if getattr(rs.occupied_only,"__func__",None) is not LayerSupport.occupied_only:
+            return rs.occupied_only(x,y,tk,{iid})
+        key=(id(rs),int(iid))
+        if key not in self._owners:
+            # Retain rs too: an id cannot be recycled within this query group.
+            self._owners[key]=(rs,rs._stack_of(lambda owner:owner==iid))
+        return rs.occ_stack_b(self._owners[key][1],x,y,tk,{iid})
 
     def support(self, length):
         from .forum_v2 import RangeSupport, SAMPLE_KS
@@ -72,7 +89,7 @@ class B2Geometry:
         contacts=[];covered=np.zeros(length+1,bool)
         for iid in sorted(owners):
             haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
-            total=np.asarray(rs.occupied_only(x,y,tk,{iid})).any(axis=0)&~inv
+            total=np.asarray(self._owner_occupancy(rs,x,y,tk,iid)).any(axis=0)&~inv
             covered|=total|haz
             for k in np.flatnonzero(haz):contacts.append(PathContact(path.origin+int(k),iid,"delayed"))
             if external_only and iid==self.move.target_iid:continue
