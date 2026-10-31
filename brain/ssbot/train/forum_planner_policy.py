@@ -372,6 +372,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         t0 = time.perf_counter()
         self.fc.warm()
         fcfg = self._fcfg(self.clash)
+        if fcfg.v2:
+            forum_v2.warm_aim_tables()
         self._set_react(fcfg)
         planner = ForumPlanner(self.params, Terrain2D.empty(), PlannerConfig(T=fcfg.T, threads=self.threads,
                                                                              variants="bounds_lo"), fcfg,

@@ -785,6 +785,19 @@ class RangeSupport(LayerSupport):
             return FOCUS_M
         return margin(type_key, k, self.margin_mode)
 
+def warm_aim_tables() -> None:
+    """Load pending-aim readers before combat without touching a tracker or query.
+
+    The same process-wide cache is used by pending_aims. Keep its optional-table
+    failure behavior: a failed load is retried by the ordinary per-tick path.
+    """
+    try:
+        from ssbot.tools import aim_zones as az
+        az.readers()
+    except Exception:  # noqa: BLE001  (same optional tables as pending_aims)
+        pass
+
+
 def pending_aims(trk: RangeTracker) -> list[dict]:
     """The enemies in a pending aimed antic with a packed zone table: {iid, name, reader, x, y, s, aim, d_lo, d_hi
     (tracker frames to the decision window), D, zones (side -> int8 zone, filled lazily)}."""
