@@ -19,9 +19,10 @@ from ssbot.knowledge import kinematics as km
 from .air_chain import ChainSim
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_eval import ChainObservationNotReady, Run
+from .knife_chain_commitment import ContinuationUnavailable
 
 
-class NominalUnsupported(ValueError):
+class NominalUnsupported(ContinuationUnavailable):
     pass
 
 

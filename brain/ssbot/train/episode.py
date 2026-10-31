@@ -313,8 +313,20 @@ def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
     if chain is None:
         link.act(last + 2, m, hold_frames=0, flags=flags)
         return
-    chain.before_send(frame=last, target=last + 2, mask=m, flags=flags,
-                      received_frame=getattr(link, "frame", None))
+    replacement = chain.before_send(frame=last, target=last + 2, mask=m, flags=flags,
+                                    received_frame=getattr(link, "frame", None))
+    if type(replacement) is int:
+        original, m = int(m), replacement
+        if isinstance(getattr(policy, "sent", None), dict):
+            policy.sent[last + 2] = m
+        choice = dict(getattr(policy, "measurement_choice", None) or {})
+        choice.update(owner="b2_deadline_abort", script_override=True, final_key_escape="unchecked",
+                      pre_send_original_mask=original, pre_send_replacement_mask=m)
+        policy.measurement_choice = choice
+        if measurement is not None:
+            # decision() updates this tick's context, not a duplicate record.
+            # Keep planner intent plus the final owner/key actually sent.
+            measurement.decision(choice, returned_mask=m, flags=flags)
     try:
         link.act(last + 2, m, hold_frames=0, flags=flags)
     except BaseException as exc:

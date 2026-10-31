@@ -14,6 +14,21 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+class ContinuationUnavailable(ValueError):
+    """One modeled continuation cannot currently supply a path/handback.
+
+    Expected unavailability is per candidate. It must not hide programming
+    defects, grant safety coverage or veto a previously passed N=2 threshold.
+    """
+
+
+def _unavailable_errors(errors):
+    if not isinstance(errors,tuple) or any(not isinstance(e,type) or not issubclass(e,Exception)
+            or e in {Exception,ValueError,RuntimeError} for e in errors):
+        raise TypeError("unavailable_errors requires specific exception classes")
+    return tuple(dict.fromkeys((ContinuationUnavailable,*errors)))
+
+
 VERDICTS = frozenset({"pass", "reject", "unchecked"})
 # Canonical TYPES, not row ids. Close variants of dash_out count only once.
 CONTINUATION_KINDS = frozenset({
@@ -219,8 +234,9 @@ class ContinuationResult:
 
 def assess_continuations(options: tuple[Continuation, ...], *, target_move: MoveInstance,
                          bounce_state_ref: str, bounce_frame: int, short_frames: int,
-                         full_scan: Callable[[Continuation], ContactScan | None],
-                         minimum_kinds: int = 2) -> ContinuationResult:
+                         full_scan: Callable[[Continuation], ContactScan | FullContinuationScan | None],
+                         minimum_kinds: int = 2,
+                         unavailable_errors: tuple[type[Exception], ...] = (ContinuationUnavailable,)) -> ContinuationResult:
     """Apply the user's N=2 lower bound at ONE predicted bounce state.
 
     Each admitted executable type gets a NORMAL short planner check, including
@@ -234,6 +250,7 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
     short_frames is explicit: its empirical calibration belongs to the caller,
     not a hidden 36-frame or new arbitrary constant in this policy.
     """
+    unavailable_errors=_unavailable_errors(unavailable_errors)
     _frame(bounce_frame)
     if (type(short_frames) is not int or short_frames < 1
             or type(minimum_kinds) is not int or minimum_kinds < 1
@@ -275,7 +292,12 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
     checked = []
     for o in eligible:
         checked.append(o.option_id)
-        resolved=full_scan(o)
+        try:resolved=full_scan(o)
+        except unavailable_errors as exc:
+            checks.append(ContinuationCheck(o.option_id,o.kind,"full","unchecked",
+                "full continuation unavailable: "+type(exc).__name__+": "+str(exc)))
+            if o.option_id not in unknown:unknown.append(o.option_id)
+            continue
         handback=o.handback_frame
         if isinstance(resolved,FullContinuationScan):
             if handback is not None and handback!=resolved.handback_frame:

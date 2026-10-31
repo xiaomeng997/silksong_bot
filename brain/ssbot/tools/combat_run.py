@@ -469,6 +469,10 @@ def _b2_stop_details(chain_stop, budget_stop, budget_error, *, outcome, episode_
     secondary=[]
     if budget_error and budget_error not in {reason,locked_reason}:
         secondary.append({"origin":"budget.check","reason":budget_error})
+    repeated={reason,locked_reason,"LearningStop: "+reason}
+    if locked_reason is not None:repeated.add("LearningStop: "+locked_reason)
+    if origin!="harness" and outcome=="HARNESS_FAIL" and episode_reason is not None and episode_reason not in repeated:
+        secondary.append({"origin":"episode.exception","reason":str(episode_reason)})
     return {"reason":reason,"origin":origin,
             "budget_stop":json.loads(json.dumps(budget_stop)) if locked else None,"secondary_errors":secondary}
 
@@ -523,7 +527,8 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
             with path.open("x",encoding="utf-8") as f:
                 json.dump(result,f,ensure_ascii=False,indent=1);f.write("\n");f.flush();os.fsync(f.fileno())
         except Exception as exc:errors.append("cleanup receipt: "+str(exc))
-        if errors:mark_integrity_halt("worker cleanup failed: "+"; ".join(errors))
+        if errors:mark_integrity_halt("worker cleanup failed: "+"; ".join(errors),
+            primary=primary_error,primary_origin=primary_error_origin,secondary_origin="cleanup")
     if errors:
         print(f"[i{a.instance}] worker cleanup failed: {'; '.join(errors)}",flush=True)
         if primary_error is None:raise RuntimeError("worker cleanup failed: "+"; ".join(errors))
@@ -546,7 +551,7 @@ def worker(a: argparse.Namespace) -> int:
     enc = encs[0]
     run_dir = Path(a.run_dir)
     out = (run_dir / f"attempts_i{a.instance}.jsonl").open("a", encoding="utf-8", newline="\n")
-    link=rec_obj=diagnostics=policy=None
+    link=rec_obj=diagnostics=policy=rec=None
     counts=Counter()
     stage="bootstrap"
     worker_primary_error=worker_primary_origin=None
@@ -708,7 +713,9 @@ def worker(a: argparse.Namespace) -> int:
                     worker_primary_origin=b2_stop_details["origin"]
                     worker_secondary_errors.extend(b2_stop_details["secondary_errors"])
                     if b2_stop_details["origin"]=="harness":mark_integrity_halt(b2_stop)
-                    for problem in b2_stop_details["secondary_errors"]:mark_integrity_halt(problem["reason"])
+                    for problem in b2_stop_details["secondary_errors"]:
+                        mark_integrity_halt(problem["reason"],primary=b2_stop,
+                            primary_origin=b2_stop_details["origin"],secondary_origin=problem["origin"])
             if measurement is not None:
                 from ssbot.train.forum_measure_manifest import configuration_manifest
                 trace_path = run_dir / f"measurement_i{a.instance}_e{k}.jsonl"
@@ -742,7 +749,8 @@ def worker(a: argparse.Namespace) -> int:
             if measurement_failed and os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
                 detail=_measurement_incomplete_detail(d)
                 worker_secondary_errors.append(detail)
-                mark_integrity_halt(detail["reason"])
+                mark_integrity_halt(detail["reason"],primary=b2_stop,
+                    primary_origin=None if b2_stop_details is None else b2_stop_details["origin"],secondary_origin="measurement")
             if worker_secondary_errors:d["secondary_errors"]=list(worker_secondary_errors)
             out.write(json.dumps(d) + "\n")
             out.flush()
@@ -786,8 +794,22 @@ def worker(a: argparse.Namespace) -> int:
     except BaseException as exc:
         if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
             from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
-            mark_integrity_halt(type(exc).__name__+": "+str(exc))
-            if b2_stop_details is not None and not (isinstance(exc,LearningStop) and str(exc)==b2_stop_details["reason"]):
+            if b2_stop_details is None:
+                # run_episode's finally may fail before it can return a record.
+                # Recover only an already-known policy/ledger stop; an unrelated
+                # shell exception retains its own original type and traceback.
+                found=_resolve_b2_stop(getattr(policy,"chain_native",None),outcome=getattr(rec,"outcome",None),
+                                       episode_reason=getattr(rec,"reason",None))
+                if found is not None and found["origin"] in {"chain.learning_stop","budget.stop"}:
+                    b2_stop_details=found
+                    worker_primary_error="LearningStop: "+found["reason"]
+                    worker_primary_origin=found["origin"]
+                    worker_secondary_errors.extend(found["secondary_errors"])
+            same_stop=b2_stop_details is not None and isinstance(exc,LearningStop) and str(exc)==b2_stop_details["reason"]
+            mark_integrity_halt(b2_stop_details["reason"] if same_stop else type(exc).__name__+": "+str(exc),
+                primary=None if b2_stop_details is None else b2_stop_details["reason"],
+                primary_origin=None if b2_stop_details is None else b2_stop_details["origin"],secondary_origin="worker.exception")
+            if b2_stop_details is not None and not same_stop:
                 detail={"origin":"worker.exception","reason":type(exc).__name__+": "+str(exc)}
                 worker_secondary_errors.append(detail)
                 primary=LearningStop(b2_stop_details["reason"])

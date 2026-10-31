@@ -167,15 +167,24 @@ def preflight_environment(encounter, *, no_record=False):
             raise LearningStop("B2 prior batch stopped or identity differs; no automatic retry")
 
 
-def mark_integrity_halt(reason):
-    """Keep a halt even when config/bootstrap failed before budget construction."""
+def mark_integrity_halt(reason, *, primary=None, primary_origin=None, secondary_origin=None):
+    """Keep the first halt, with known original stop ahead of a later shell fault.
+
+    Existing markers are immutable. Supplying primary changes provenance only:
+    the marker still blocks every later preflight exactly as before.
+    """
     path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
     if not path:return
     p=Path(path);p.parent.mkdir(parents=True,exist_ok=True)
     p=p.with_name(p.name+".halt")
     try:
         with p.open("x",encoding="utf-8") as f:
-            json.dump({"batch":os.environ.get("SSBOT_FORUM_CHAIN_BATCH"),"reason":str(reason)},f)
+            record={"batch":os.environ.get("SSBOT_FORUM_CHAIN_BATCH"),"reason":str(reason if primary is None else primary)}
+            if primary is not None:
+                record["primary_error_origin"]=primary_origin
+                if str(reason)!=str(primary):
+                    record["secondary_errors"]=[{"origin":secondary_origin or "integrity_halt","reason":str(reason)}]
+            json.dump(record,f)
             f.flush();os.fsync(f.fileno())
     except FileExistsError:pass  # never replace the first failure
 

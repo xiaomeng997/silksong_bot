@@ -46,7 +46,9 @@ def snapshot_history_state(state):
 
 
 class HistView:
-    def __init__(self, ticks: list, sent: dict, cut: int, lag: int = 0):
+    def __init__(self, ticks: list, sent: dict, cut: int, lag: int = 0, *, strict_pogo: bool = False):
+        if type(strict_pogo) is not bool:raise TypeError("strict_pogo must be an explicit bool")
+        self.strict_pogo = strict_pogo
         self.cut = cut
         self.lag = lag
         self.rows = [r for r in ticks if r[0] <= cut]
@@ -187,9 +189,13 @@ class HistView:
             if cond == "vy_gt" and float((h.get("vel") or [0, 0])[1]) > arg:
                 return f
             if cond == "s_hit":
-                from types import SimpleNamespace
-                if SP.SlamPlay._cs_s_hit(s, SimpleNamespace(iid=iid)):
-                    return f
+                if self.strict_pogo:
+                    from .knife_chain_observations import target_pogo_hit
+                    if target_pogo_hit(s,iid):return f
+                else:
+                    from types import SimpleNamespace
+                    if SP.SlamPlay._cs_s_hit(s, SimpleNamespace(iid=iid)):
+                        return f
             if cond == "ground" and g:
                 return f
             if cond == "ctrl" and a and not str((h.get("anim") or {}).get("clip") or "").startswith("Harpoon") \

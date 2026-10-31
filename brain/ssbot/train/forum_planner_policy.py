@@ -896,6 +896,44 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- the tick ----
 
+    def _b2_priority_chain(self):
+        chain=getattr(self,"chain_native",None)
+        return chain if (getattr(chain,"b2",False) and getattr(chain,"arm",None)=="B"
+                         and getattr(chain,"candidate_generation",False)) else None
+
+    @staticmethod
+    def _b2_policy_gate(*, low_crit, asw_crit, m2_on, supervisor):
+        if supervisor:return "supervisor"
+        if m2_on:return "m2"
+        if low_crit:return "low_crit"
+        if asw_crit:return "asw_crit"
+        return None
+
+    def _b2_script_critical(self, f, s):
+        # B2 must know the SAME current script gates before proposing. Observe
+        # LOWHOP once here; its later h2 priority block reuses this snapshot.
+        low=False
+        if self.rune_lowhop is not None:
+            self.rune_lowhop.observe(f,s)
+            low=self.rune_lowhop.critical()
+        skip=self.two.asw_skip() if (self.two is not None and two_play.ASW) else None
+        asw=(not low) and self.two is not None and two_play.ASW and self.two.asw_critical()
+        rt=(two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()
+        return low,skip,asw or rt,rt
+
+    def _b2_selected_for_policy(self, res, *, fresh):
+        chain=self._b2_priority_chain()
+        if chain is None or not fresh or not str(getattr(res,"name","")).startswith("CHAIN B2 "):
+            return False
+        info=self.planner.last_info.get("b2")
+        if not isinstance(info,dict):return False
+        selected=getattr(chain,"_b2_selected",None)
+        if selected is not None:
+            return selected.stage==info.get("stage") and int(selected.mask)==int(res.mask)
+        # Recovery release has no row/Run offer, but is still the planner's
+        # current B2 result. It must not be replaced by a lower-priority script.
+        return info.get("stage")=="recovery" and int(res.mask)==0
+
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
@@ -1003,6 +1041,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.wpress is not None:
             # stage N: while a committed press's bridge runs the planner's CONTINUE row is that bridge (M4d2's hold)
             self.planner.hold_row = self.wpress.hold_row(f)
+        b2_priority=self._b2_priority_chain()
+        b2_critical=None
+        if b2_priority is not None:
+            b2_critical=self._b2_script_critical(f,s)
+            b2_priority.policy_gate_reason=self._b2_policy_gate(low_crit=b2_critical[0],asw_crit=b2_critical[2],
+                m2_on=m2_mask is not None,supervisor=self.pause_owned or self.sc.pq is not None)
         if air_tick:
             res = self.planner_last
         else:
@@ -1074,19 +1118,22 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.evade_chase.observe(f, s)        # SP8c: the same for the chase
         # SP8d: while the low hop's hold or a bomb window over her is on, its script keeps the keys (the other scripts
         # are not stepped: they start from the air a few frames later)
-        low_crit = False
-        if self.rune_lowhop is not None:
-            self.rune_lowhop.observe(f, s)
-            low_crit = self.rune_lowhop.critical()
-        # SP9c (SSBOT_FORUM_TWO_ANTICSWITCH): the antic switch's F - the slam playbook and the low hop leave its move
-        asw_skip = self.two.asw_skip() if (self.two is not None and two_play.ASW) else None
-        # SP9c: its bomb hop over F's small runes at her x is committed - its script keeps the keys (the others are not
-        # stepped, like the low hop's critical window)
-        asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
-        # SP11a (SSBOT_FORUM_TWO_RUNETIER): the pogo tier's run holds the keys - no other script is stepped (its keys
-        # come from TwoPlay.step below; the supervisor's still win)
-        rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
-        asw_crit = asw_crit or rt_crit
+        if b2_critical is not None:
+            low_crit,asw_skip,asw_crit,rt_crit=b2_critical
+        else:
+            low_crit = False
+            if self.rune_lowhop is not None:
+                self.rune_lowhop.observe(f, s)
+                low_crit = self.rune_lowhop.critical()
+            # SP9c (SSBOT_FORUM_TWO_ANTICSWITCH): the antic switch's F - the slam playbook and the low hop leave its move
+            asw_skip = self.two.asw_skip() if (self.two is not None and two_play.ASW) else None
+            # SP9c: its bomb hop over F's small runes at her x is committed - its script keeps the keys (the others are not
+            # stepped, like the low hop's critical window)
+            asw_crit = (not low_crit) and self.two is not None and two_play.ASW and self.two.asw_critical()
+            # SP11a (SSBOT_FORUM_TWO_RUNETIER): the pogo tier's run holds the keys - no other script is stepped (its keys
+            # come from TwoPlay.step below; the supervisor's still win)
+            rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
+            asw_crit = asw_crit or rt_crit
         if self.wpress is not None:
             # stage N (SSBOT_FORUM_WINDOWS_PRESS): a committed slam-window press / its bridge owns the keys; the scripts
             # are not stepped (as under map2); a script's critical window (LOWHOP's bomb hop, ASW) defers a new commit
@@ -1114,6 +1161,15 @@ class ForumPlannerPolicy(PlannerPolicy):
                 own = "air"
                 asw_crit = True
                 self.counts["air_show"] += 1
+        if b2_priority is not None:
+            # Restore SLAM_PLAY's original script priority for a selected B2
+            # candidate. Critical scripts / map2 / supervisor still keep keys.
+            b2_priority.policy_gate_reason=self._b2_policy_gate(low_crit=low_crit,asw_crit=asw_crit,
+                m2_on=m2_on,supervisor=r.mask is not None or self.pause_owned)
+            if b2_priority.policy_gate_reason is None and self._b2_selected_for_policy(res,fresh=not air_tick):
+                mask=play=int(res.mask)
+                own="chain"
+                self.counts["b2_script_priority"]+=1
         if (self.slam_play is not None and not low_crit and not asw_crit and not m2_on
                 and not getattr(self.chain_native, "candidate_generation", False)):
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
@@ -1333,7 +1389,9 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None) -> None:
         if getattr(self, "chain_native", None) is not None:
-            self.chain_native.final(owner, mask)
+            # Public policy ownership is chain; the native dispatch still uses
+            # its original selected planner-row identity at the send boundary.
+            self.chain_native.final("plan" if owner=="chain" and self._b2_priority_chain() is not None else owner, mask)
         if getattr(self, "measurement", None) is None:
             return
         if not self.measurement.detail:
@@ -1350,9 +1408,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             "owner": owner, "planner_row": idx,
             "planner_name": res.name if res is not None else None,
             "planner_mask": int(res.mask) if res is not None else None,
-            "script_override": owner not in ("plan", "no_world_state"),
+            "script_override": owner not in ("plan", "chain", "no_world_state"),
             "planner_escape": esc,
-            "final_key_escape": esc["status"] if owner == "plan" else "unchecked",
+            "final_key_escape": esc["status"] if owner in ("plan", "chain") else "unchecked",
             "plan_ms": float(res.t_ms.get("total", 0.0)) if res is not None else None,
             "candidate_S": int(res.S) if res is not None and hasattr(res, "S") else None,
             "forced_risk": bool(res.forced_risk) if res is not None and hasattr(res, "forced_risk") else None,

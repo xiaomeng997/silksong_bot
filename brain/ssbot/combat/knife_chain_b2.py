@@ -92,12 +92,14 @@ class NativeChainB2(NativeChainCandidates):
         self._last_budget_f=None;self._budget_hp=None;self._kill_frame=None;self.learning_stop=None
         self._episode_start=start_frame
         self._budget_targets=set();self._budget_dead=set()
-        self._application={};self._last_matching_report=None;self._actual_state=None;self.recovery=None
+        self._application={};self._late_bound_targets=set();self._last_matching_report=None;self._actual_state=None;self.recovery=None
         self._post_seed=None;self._post_kind=None
         self._committed_future=None
         self._post_keys={};self._post_key_move=None;self._post_prepare_cursor=0
         self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
         self._hook_start=None;self._failed_hook_moves=set()
+        self._failure_exposures=[];self._jump_start=None;self.policy_gate_reason=None
+        self.runner.anchor.b2_strict_observations=self.arm=="B"
         if self.budget is not None:self.budget.check()
 
     def _note(self,event,**data):
@@ -171,7 +173,9 @@ class NativeChainB2(NativeChainCandidates):
                     self._note("b2_fight_end",frame=ef,source="actual final Clapper killing hit; inclusive")
         if kill_frame is not None:self._kill_frame=int(kill_frame) if self._kill_frame is None else min(self._kill_frame,int(kill_frame))
         tail=self._kill_frame is not None and f>self._kill_frame
-        related=bool(self.commitment or self.post_context or self.recovery or (self.runner.run is not None and self.arm=="B"))
+        for exposure in self._failure_exposures:exposure.observe(state,game_time=self._clock)
+        exposed=[x for x in self._failure_exposures if x.active(f)]
+        related=bool(exposed or self.commitment or self.post_context or self.recovery or (self.runner.run is not None and self.arm=="B"))
         if loss:
             sources=[]
             for ev in state.get("ev") or ():
@@ -180,18 +184,19 @@ class NativeChainB2(NativeChainCandidates):
                         d.get("can_take",True) and not d.get("invuln")):
                     source=d.get("source") or d.get("src")
                     if source is not None:sources.append(str(source))
-            phase=("commitment" if self.commitment is not None else "post" if self.post_context is not None
+            phase=("recovery_after_failure" if exposed else "commitment" if self.commitment is not None else "post" if self.post_context is not None
                    else "recovery" if self.recovery is not None else "approach" if related else "none")
             # Budget.observe may raise on this very first injury. Preserve the
             # actual HP event before the immutable stop/cleanup path begins.
             self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related,phase=phase,
-                       sources=sorted(set(sources)) or ["unknown"],
+                       failure_exposure=[x.as_dict() for x in exposed],sources=sorted(set(sources)) or ["unknown"],
                        source_scope="same-frame eligible damage-call candidates; no predicted/near-frame attribution")
         if self.budget is not None:
             try:self.budget.observe(episode=self.episode,frame=f,arm=self.arm,hp_loss=loss,chain_related=related,
                                    tail=tail,fatal="death" if hp<=0 or flag(state,"dead") else None)
             except LearningStop as exc:
                 self.learning_stop=str(exc);self._note("b2_learning_stop",frame=f,reason=str(exc));self.flush();raise
+
 
     def _observe_application(self,state):
         f=state["f"];act=state.get("act") or {}
@@ -204,6 +209,7 @@ class NativeChainB2(NativeChainCandidates):
                 self._stop("key application desync: desired differs from successful send",f)
             valid=type(applied) is int and target<=applied<=min(f,target+2)
             if target in self._pending and type(applied) is int and applied>target+2:
+                if applied<=f:self._late_bound_targets.add(target)
                 self._note("b2_application_outside_late_bound",frame=f,target=target,applied=applied,
                            accepted="unchecked; await later matching report")
         if valid:
@@ -215,16 +221,19 @@ class NativeChainB2(NativeChainCandidates):
                 if direct and wanted!=desired:self._stop("key application desync",f)
                 self._pending.pop(t)
                 same=covered and wanted==desired  # skipped target vs its covering later report
+                late_beyond=covered and t in self._late_bound_targets
                 proof={"target":t,"observed":f,"desired":wanted,"reported_target":target,
-                       "kind":"direct" if direct else "covered_same_key" if same else "covered_changed_key",
+                       "kind":"direct" if direct else "covered_late_beyond_bound" if late_beyond else "covered_same_key" if same else "covered_changed_key",
                        "applied":applied if direct else None,
                        "between":None if direct else [previous["target"],target]}
                 self._application[t]=proof
-                self._receipt_note("skip_same_key" if same else "skip_key_change" if covered else "lag" if applied>t else "direct",
+                self._receipt_note("late_beyond_bound" if late_beyond else "skip_same_key" if same else "skip_key_change" if covered else "lag" if applied>t else "direct",
                     f,target=t,reported_target=target,desired=wanted,lag=applied-t if direct else None,
                     between=proof["between"],hero_action="unchecked",contact="unchecked")
                 self._note("chain_application_observed",frame=f,**proof,hero_action="unchecked",contact="unchecked")
-                if covered:
+                if late_beyond:
+                    self._note("b2_application_late_beyond_bound_covered",frame=f,**proof)
+                elif covered:
                     self._note("b2_application_skipped",frame=f,**proof)
                     self._note("b2_application_skipped_same_key" if same else "b2_application_skipped_changed_key",frame=f,**proof)
                 elif applied>t:self._note("b2_application_late",frame=f,delay=applied-t,**proof)
@@ -237,6 +246,7 @@ class NativeChainB2(NativeChainCandidates):
         if overdue:
             for t in overdue:self._receipt_note("uncovered_timeout",f,target=t,desired=self._pending[t],upper_bound=t+4)
             self._stop("missing critical application receipt beyond four-frame upper bound",f)
+
 
     def queued_prefix(self,frame,state):
         """Desired prefix from our send, or known held desired if no action queued.
@@ -309,6 +319,9 @@ class NativeChainB2(NativeChainCandidates):
         self._actual_state=state
         self._observe_application(state)
         self._observe_hook_start(state)
+        if self._jump_start is not None and self._jump_start.observe(state):
+            self._note("b2_jump_start_seen",frame=f,move=vars(self._jump_start.move),
+                sent_targets=sorted(self._jump_start.sent_targets),source="actual observed airborne after own J")
         unresolved=self._pending
         self._pending={}  # opt1 owns this audit; do not inherit the old2-frame abandon
         try:super().observe(state)
@@ -317,13 +330,19 @@ class NativeChainB2(NativeChainCandidates):
             self._note("b2_post_landed",frame=f)
             self.post_context=None;self._post_seed=None;self._post_kind=None
         if self.recovery is not None:
-            if not self._hook_in_flight(state):
+            if self._hook_in_flight(state):self.recovery["hook_seen"]=True
+            waiting=(not self.recovery.get("hook_seen",False) and f<=self.recovery.get("uncertain_until",-1))
+            if not self._hook_in_flight(state) and not waiting:
                 self._note("b2_hook_recovery_handoff",frame=f,reason="observed hook ended / supported interrupted state")
                 self.recovery=None
             elif f>self.recovery["first"]+self.profile.max_frames:
                 self._stop("hook recovery exceeded existing nominal max_frames without observed control return",f)
         c=self.commitment
         if c is None:return
+        from .knife_chain_jump import grounded_strike
+        if self._press is not None and grounded_strike(state,self._press):
+            self._note("b2_controller_defect",frame=f,reason="planned downslash became grounded Slash",move=vars(c["move"]))
+            self._recover("planned downslash became grounded Slash",f);return
         clip=str((state.get("hero",{}).get("anim") or {}).get("clip", ""))
         accepted=("DownSlash" in clip or flag(state,"downSpikeAntic") or flag(state,"downSpiking"))
         if self._press is not None and f>=self._press and accepted and self._accepted is None:
@@ -339,7 +358,7 @@ class NativeChainB2(NativeChainCandidates):
         marker=counter>0 or flag(state,"downSpikeBouncing") or flag(state,"downSpikeBouncingShort")
         if self._hit is not None and marker and f>=self._hit:
             self.post_context={**c,"bounce":f,"hit":self._hit,"press":self._press}
-            self.commitment=None;self._hook_start=None
+            self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
             if self.runner.run is not None:self.runner.run.v["bounced"]=True
             self._post_seed=logical_copy(self.runner);self._post_kind=None
             self._note("b2_real_bounce_handback",frame=f,hit=self._hit,press=self._press,
@@ -356,17 +375,32 @@ class NativeChainB2(NativeChainCandidates):
             self._note("b2_controller_defect",frame=f,reason="missed planned strike",press=self._press,accepted=self._accepted)
             self._recover("strike not accepted" if self._accepted is None else "planned strike missed / no real bounce",f)
 
+
     def _recover(self,reason,f):
         self._note("b2_recovery",frame=f,reason=reason,press=self._press,accepted=self._accepted,hit=self._hit)
-        old_move=None if self.commitment is None else self.commitment["move"]
-        if self._hook_in_flight(self._actual_state):
-            self.recovery={"first":f,"reason":reason,"move":old_move}
+        source=self.commitment
+        old_move=None if source is None else source["move"]
+        if source is not None:
+            from .knife_chain_failure import FailureExposure
+            exposure=FailureExposure(old_move,source.get("responsibility_origin",source["origin"]),f,source.get("ta"))
+            if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
+            self._failure_exposures.append(exposure)
+            self._failed_hook_moves.add(old_move)
+            self._note("b2_failure_exposure",frame=f,exposure=exposure.as_dict())
+        self._jump_start=None
+        pending_hook=(self._hook_start is not None and bool(self._hook_start["sent_targets"]) and
+                      self._hook_start["seen_frame"] is None)
+        if self._hook_in_flight(self._actual_state) or pending_hook:
+            self.recovery={"first":f,"reason":reason,"move":old_move,
+                "hook_seen":self._hook_in_flight(self._actual_state),
+                "uncertain_until":max(self._hook_start["sent_targets"])+4 if pending_hook else -1}
             self._note("b2_hook_recovery_enter",frame=f,reason=reason,action="release/wait until observed hook end",path="unchecked")
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
         self._committed_future=None
         self._hook_start=None
         self._post_keys.clear();self._post_key_move=None
         self._abandon(reason)
+
 
     def _prepare_tick_state(self,state):
         # Trusted Slam primitives only READ actual STATEs during this synchronous
@@ -397,7 +431,7 @@ class NativeChainB2(NativeChainCandidates):
         es=clappers(state)
         if len(es)!=1:
             self._no_candidate("single live Clapper scope" if es else "no live Clapper",frame=f,state=state);return None
-        hist=HistView(list(self._ticks),self._receipts,f,lag=self.runner.cfg0.get("lag",0))
+        hist=HistView(list(self._ticks),self._receipts,f,lag=self.runner.cfg0.get("lag",0),strict_pogo=self.arm=="B")
         an=hist.antic(es[0]["iid"],"Slam Antic",())
         if an is not None and MoveInstance(int(an["iid"]),int(an["fa"]),"CC_SLAM") in self._failed_hook_moves:
             self._no_candidate("planned hook failed for this Move; no automatic retry",frame=f,state=state)
@@ -536,6 +570,31 @@ class NativeChainB2(NativeChainCandidates):
         except (NominalUnsupported,ChainObservationNotReady) as exc:
             self._note("b2_post_prepare_unchecked",frame=frame,kind=kind,reason=str(exc))
 
+    def _recovery_offer(self):
+        return None if self.recovery is None else B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
+
+
+    def _arm_jump_start(self,offer,send):
+        from .knife_chain_jump import JumpStartWatch
+        if self._jump_start is None and offer.path is not None:
+            self._jump_start=JumpStartWatch.from_path(offer.path,offer.move,send.frame,self._receipts)
+            if self._jump_start is not None:
+                self._note("b2_jump_start_expected",frame=send.frame,move=vars(offer.move),
+                           targets=list(self._jump_start.targets),source="first modeled ground-jump block")
+
+
+    def _check_jump_start(self,frame):
+        watch=self._jump_start
+        if watch is None:return False
+        reason=watch.failure(frame)
+        if reason is None:return False
+        self._failed_hook_moves.add(watch.move)
+        self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(watch.move),
+                   planned_targets=list(watch.targets),sent_targets=sorted(watch.sent_targets),no_retry_same_move=True)
+        self._recover(reason,frame)
+        return True
+
+
     def propose(self,planner,ws,start,hold,prefix,forecast,prefs,ctx):
         """Time this synchronous proposal, separately from selection/send costs."""
         self._proposal_started=time.perf_counter()
@@ -549,7 +608,12 @@ class NativeChainB2(NativeChainCandidates):
         """One actual tick; active commitment bypasses ordinary-tail competition."""
         if self.arm!="B":return None
         if self.budget is not None:self.budget.check()
+        gate=self.policy_gate_reason
+        if gate is not None:
+            if self.commitment is not None:self._recover("policy priority gate: "+str(gate),self.dispatch.frame)
+            self._no_candidate("policy priority gate: "+str(gate));return None
         if self.recovery is not None:return B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
+        if self._check_jump_start(self.dispatch.frame):return self._recovery_offer()
         if self._check_hook_start(self.dispatch.frame):
             return (B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
                     if self.recovery is not None else None)
@@ -570,9 +634,14 @@ class NativeChainB2(NativeChainCandidates):
         if observed is None:
             self._no_candidate("target tracker observation unavailable",frame=f,state=state);return None
         geo=B2Geometry(forecast,f,move,observed[2])
+        if preview.draft.run.v.get("bounced") and self.post_context is None:
+            self._failed_hook_moves.add(move)
+            self._note("b2_table_bounce_mismatch",frame=f,move=vars(move),observed_bounce=False)
+            self._recover("table claimed bounce without actual DownSlash/bounce observation",f)
+            return self._recovery_offer()
         if self.commitment is not None:
             if self.commitment["move"]!=move:
-                self._recover("commitment instance mismatch",f);return None
+                self._recover("commitment instance mismatch",f);return self._recovery_offer()
             if self._committed_future is not None and f<self._committed_future.through:
                 self._prepare_post_keys(self._committed_future,sim,move,f)
             return B2Offer("active",None,preview.draft,int(preview.mask),0.,move,{"commitment":True})
@@ -664,7 +733,8 @@ class NativeChainB2(NativeChainCandidates):
                 scan=replace(bgeo.scan(p),path_ref=option.path_ref)
                 return FullContinuationScan(scan,p.through)
             exits=assess_continuations(tuple(opts),target_move=move,bounce_state_ref=bounce_ref,bounce_frame=future.through,
-                short_frames=self.profile.short_frames,full_scan=full_scan)
+                short_frames=self.profile.short_frames,full_scan=full_scan,
+                unavailable_errors=(NominalUnsupported,GeometryUnavailable,ChainObservationNotReady))
             details={"nominal_contact":future.contact_frame,"assumptions":future.assumptions,
                      "continuations":asdict(exits),"unavailable_branches":errors,"admission":asdict(admission)}
             if exits.verdict!="pass":
@@ -672,16 +742,17 @@ class NativeChainB2(NativeChainCandidates):
                     reason=exits.reason,continuations=asdict(exits),no_repeat_downslash=True);return None
             # A guaranteed planned nail strike is valued in the SAME ordinary hit
             # unit (weights.hit), not by the known-zero static-body nh/hit_w.
-            # Explicit conservative value approximation: one fixed first
-            # qualifying type's actual modeled handback, rather than a max over
-            # three fully expanded tails. This changes ranking, never admission.
-            representative=(exits.full_checked[-1] if exits.mode=="full_exit" else
-                            next(k for k in KINDS if k in exits.qualifying_kinds))
-            stance=self._endpoint(planner,finish(representative),prefs)
-            details["value_projection"]={"mode":"one_qualifying_handback",
-                "kind":representative,"all_tails_max":False}
+            # Ranking is not a second admission gate. A wall-stuck modeled
+            # tail cannot erase an already passed N=2 short-path result.
+            from .knife_chain_value import handback_value
+            stance,projection=handback_value(paths,exits,finish,
+                lambda p:self._endpoint(planner,p,prefs),
+                unavailable_errors=(NominalUnsupported,GeometryUnavailable,ChainObservationNotReady))
+            details["value_projection"]=projection
+            if projection["value_fallback"]:
+                self._note("b2_value_fallback",frame=f,move=vars(move),projection=projection)
             self._note("b2_short_post",frame=f,short_kinds=list(exits.qualifying_kinds),
-                full_expanded=list(full_paths),value_kind=representative)
+                full_expanded=list(full_paths),value_kind=projection["kind"],value_projection=projection["mode"])
             value=float(prefs.weights.get("hit",10.))+stance
             return B2Offer("commitment",future,preview.draft,int(preview.mask),value,move,details)
         except (NominalUnsupported,GeometryUnavailable,ChainObservationNotReady) as exc:
@@ -751,6 +822,22 @@ class NativeChainB2(NativeChainCandidates):
     def before_send(self, *, frame, target, mask, flags, received_frame):
         if type(received_frame) is not int or received_frame>target+4:
             self._stop("send deadline beyond four frames / missing current frame",frame)
+        selected=self._b2_selected;last=None
+        if selected is not None and selected.stage=="commitment" and selected.path is not None:
+            slots=[selected.path.origin+i+1 for i,m in enumerate(selected.path.commands) if int(m)&B["CLAW"]]
+            if slots:last=max(slots)
+        watch=self._hook_start
+        if last is None and watch is not None and watch["seen_frame"] is None and int(mask)&B["CLAW"]:
+            last=max(watch["targets"])
+        if last is not None and selected is not None and int(mask)==selected.mask and received_frame>=last:
+            reason="hook dispatch window expired before actual send"
+            self._failed_hook_moves.add(selected.move)
+            self._note("b2_hook_send_veto",frame=frame,target=target,received_frame=received_frame,
+                last_hook_target=last,proposed_mask=int(mask),replacement_mask=0,reason=reason)
+            self._recover(reason,received_frame);self._b2_selected=None
+            self.final("b2_deadline_abort",0)
+            super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
+            return 0
         if received_frame>target:
             self._note("b2_send_late",frame=frame,target=target,received_frame=received_frame,
                        application="unchecked until bounded report/coverage")
@@ -762,6 +849,7 @@ class NativeChainB2(NativeChainCandidates):
         committed=selected is not None and sent.chain_outcome=="sent"
         if committed:
             if selected.stage=="commitment":
+                self._arm_jump_start(selected,sent)
                 self._committed_future=selected.path
                 self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
                     "predicted_bounce":selected.path.contact_frame}
@@ -776,6 +864,7 @@ class NativeChainB2(NativeChainCandidates):
                 self._note("b2_hook_start_sent",frame=sent.frame,target=sent.target_frame,move=vars(watch["move"]),
                            in_planned_window=sent.target_frame in watch["targets"],
                            physical_action="unchecked; wait for actual Harpoon animation")
+            if self._jump_start is not None:self._jump_start.record_send(sent.target_frame,sent.desired_mask)
             if selected.stage=="continuation":self._post_kind=selected.details["kind"]
             if selected.mask&(B["D"]|B["A"])==(B["D"]|B["A"]):
                 prev=self._receipts.get(sent.target_frame-1)
@@ -791,7 +880,7 @@ class NativeChainB2(NativeChainCandidates):
 
     def summary(self):
         return {**super().summary(),"mode":"b2_probe","arm":self.arm,"candidate_generation":self.candidate_generation,
-                "projection":"nominal_chain_program","commitment":None if self.commitment is None else
+                "projection":"nominal_chain_program","failure_exposures":[e.as_dict() for e in self._failure_exposures],"commitment":None if self.commitment is None else
                 {**self.commitment,"move":vars(self.commitment["move"])},
                 "post_context":None if self.post_context is None else {**self.post_context,"move":vars(self.post_context["move"])},
                 "recovery":None if self.recovery is None else {**self.recovery,"move":None if self.recovery["move"] is None else vars(self.recovery["move"])},

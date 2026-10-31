@@ -25,7 +25,9 @@ def test_chain_stop_and_locked_budget_are_primary_not_harness_wrapper():
 
 def test_integrity_failure_remains_secondary_to_original_stop():
     got=C._b2_stop_details(REASON,STOP,"B2 budget missing/corrupt",outcome="HARNESS_FAIL",episode_reason="wrapper")
-    assert got["reason"]==REASON and got["secondary_errors"]==[{"origin":"budget.check","reason":"B2 budget missing/corrupt"}]
+    assert got["reason"]==REASON and got["secondary_errors"]==[
+        {"origin":"budget.check","reason":"B2 budget missing/corrupt"},
+        {"origin":"episode.exception","reason":"wrapper"}]
     unknown=C._b2_stop_details(None,None,None,outcome="HARNESS_FAIL",episode_reason="unknown reset failure")
     assert unknown["origin"]=="harness" and "unknown reset failure" in unknown["reason"]
     assert C._b2_stop_details(None,None,None,outcome="CLEAR",episode_reason=None) is None
@@ -103,7 +105,8 @@ def test_two_hp_primary_survives_measurement_incomplete_and_cleanup(tmp_path,mon
     assert rig.events.count("ready")==1 and rig.links[0].closed
     assert rig.budget.state["b_fight_hp"]==2 and len(rig.budget.state["attempts"])==1
     halt=json.loads((tmp_path/"budget.json.halt").read_text())
-    assert halt["reason"]=="measurement incomplete; stop before another episode"
+    assert halt["reason"]==REASON and halt["primary_error_origin"]=="chain.learning_stop"
+    assert halt["secondary_errors"]==[{"origin":"measurement","reason":"measurement incomplete; stop before another episode"}]
 
 
 def test_manifest_exception_is_secondary_after_locked_stop(tmp_path,monkeypatch):

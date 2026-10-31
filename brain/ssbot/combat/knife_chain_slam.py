@@ -318,6 +318,7 @@ class SlamAnchor:
                 if st != self.antic_state or (e is not None and e.get("iid") == self.closed_iid):
                     return None
                 run = R.run = self._new_run(R, e, f, tin, ta)
+                self.restore_observed_land(R, run, f, s, ground, accepting, t, sim, guard, bombs, e, st, tin)
                 if (c["TWO_HANDOFF"] and c["TWO_PLAY"] and self.ho is not None and self.ho[0] != run.v["iid"]
                         and (t - self.ho[1]) * 60.0 <= SP.HO_GAP_F):
                     run.v["ho_cand"] = True
@@ -339,6 +340,46 @@ class SlamAnchor:
         return R.eval_link(x)
 
     # -- external entry (no active run) --
+
+    def restore_observed_land(self, R, run, f, s, ground, accepting, t, sim, guard, bombs, e, st, tin):
+        """Recover only an observed early-air approach, without inventing sends.
+
+        A missing decision/receipt keeps the general external dispatcher off.
+        Still, actual observations can prove she was already in the air before
+        k_air_max and has not left the land situation. Reuse that entry's own
+        causal history/guards; no unselected draft or modeled action survives.
+        """
+        H = self.hist
+        k = int(round((t - run.v["ta"]) * 60.0)) + SEND + self.cfg["lag"]
+        if (not getattr(self, "b2_strict_observations", False) or H is None or H.cut != f or ground or st != self.antic_state or
+                not self.cfg["air"] or k <= self.cfg["k_air_max"]):
+            return False
+        an = H.antic(run.v["iid"], self.antic_state, self.slam_states)
+        if (an is None or an["fa"] != run.v["fa"] or an["face"] != run.v["face"] or
+                abs(an["ta"] - run.v["ta"]) > 1e-6 or an["first_tick"] in self.handled_antics):
+            return False
+        # Probe on an independent provisional record. In particular, a failed
+        # probe must not leak late/k_air into the ordinary fresh look fallback.
+        v = dict(run.v)
+        v.update(k=k, antic_first=an["first_tick"])
+        candidate = CV.Run("slam_jump", "enter_land", v)
+        x = CV.X(R, candidate, Obs(f, s, ground, accepting, t, sim, guard, bombs, e, st, tin))
+        x.tmp["antic"] = an
+        target = R.probe_entry(x, R.link("slam_jump", "enter_land"))
+        ka = v.get("k_air")
+        if (target != "land" or type(ka) is not int or ka > self.cfg["k_air_max"] or
+                any(v.get(n) is None for n in R.link("slam_jump", "land").needs)):
+            return False
+        run.link = "land"
+        # Only the two historical approach facts and ordinary observed hp0
+        # travel. Never inherit an old Run, planner plan, or proposed key list.
+        run.v.update(k_air=ka, late=bool(v["late"]), hp0=v["hp0"], antic_first=an["first_tick"])
+        run.sent = list(H.sent_since(run.v["fa"], f))
+        run.entered = {"f": f, "link": "slam_jump.land", "via": "observed_early_air",
+                       "sources": {"k_air": "observed_history", "late": "observed_history", "hp0": "events"}}
+        run.path.append([f, "observed early air -> slam_jump.land", "enter"])
+        self.entries.append([f, "slam_jump.land", "observed_early_air"])
+        return True
 
     def situations(self, R, f, s, ground, accepting, t, sim, guard, bombs, e, st, tin, first_only=False) -> list:
         """The external entry links (priority order) that apply now: [(entry link, target, vars, sources)]. Each is
@@ -476,6 +517,9 @@ def g_harpoon(x):
 
 @P.guard("s_hit", doc="a hit event on the target this STATE that is not the Harpoon's")
 def g_s_hit(x):
+    if getattr(x.R.anchor,"b2_strict_observations",False) is True:
+        from .knife_chain_observations import target_pogo_hit
+        return target_pogo_hit(x.obs.s,x.v["iid"])
     return SP.SlamPlay._cs_s_hit(x.obs.s, SimpleNamespace(iid=x.v["iid"]))
 
 

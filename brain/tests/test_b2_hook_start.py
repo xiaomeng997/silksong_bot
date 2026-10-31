@@ -115,7 +115,8 @@ def test_real_harpoon_observation_keeps_existing_inflight_recovery_not_ordinary_
     n._recover("other actual interruption",2615)
     assert n.recovery is not None
     assert n.recovery["move"]==MOVE and n._hook_start is None
-    assert MOVE not in n._failed_hook_moves
+    # #16: any sent chain that ended without real bounce cannot retry this Move.
+    assert MOVE in n._failed_hook_moves
 
 
 def test_non_hook_commitment_keeps_original_path():
