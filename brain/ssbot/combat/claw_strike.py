@@ -163,7 +163,7 @@ class CsCtx:
 
 @dataclass
 class CsPlan:
-    f0: int                         # the mask frame of the plan's cmds index 0
+    f0: int                         # absolute first hop key; first mask frame for a no-hop plan
     hop: int                        # jump frames from f0 (0: none)
     f_press: int                    # the Clawline's mask frame
     k_press: int                    # S's antic frame of it
@@ -172,10 +172,12 @@ class CsPlan:
     bb_press: float | None = None   # her box bottom at the press (model)
     ctrl_k: tuple = ()              # S's antic frames of control in the variants
     strike: list = field(default_factory=list)   # a sample strike plan per variant (air_chain.Plan.row())
+    wait_mask: int = 0              # stable desired input before a deferred first hop
 
     def row(self) -> list:
-        return [self.f0, self.hop, self.f_press, self.k_press, self.n_ok, self.var_ok,
-                None if self.bb_press is None else round(self.bb_press, 2), list(self.ctrl_k)]
+        row = [self.f0, self.hop, self.f_press, self.k_press, self.n_ok, self.var_ok,
+               None if self.bb_press is None else round(self.bb_press, 2), list(self.ctrl_k)]
+        return row + [{"wait_mask":self.wait_mask}] if self.wait_mask else row
 
 
 def front_x(ctx: CsCtx) -> float:
@@ -267,18 +269,26 @@ class ClawStrike:
     # ---- the plan before the press ----
 
     def plan(self, sim: _ac.ChainSim, ctx: CsCtx, ground: bool, accepting: bool, hop_until: int | None = None,
-             p_only: int | None = None, p_min: int | None = None, first_feasible: bool = False) -> CsPlan | None:
+             p_only: int | None = None, p_min: int | None = None, first_feasible: bool = False,
+             hop_from: int | None = None, hop_wait_mask: int = 0) -> CsPlan | None:
         """The (hop, P) whose every Clawline variant has a strike plan (the most passing plans in the worst variant,
         then the earliest P; the search stops at GOOD_OK or BUDGET_S); None: none.
         hop_until: a hop under way - the jump held to this mask frame (exclusive), no new hop; p_only: this press only.
         p_min is an optional absolute mask-frame floor, applied before every
         feasibility test. None preserves the legacy h2 search domain.
         first_feasible changes candidate preference only; no variant/contact/
-        safety test is skipped. False keeps h2's GOOD_OK quality search."""
+        safety test is skipped. False keeps h2's GOOD_OK quality search.
+        hop_from optionally fixes the absolute first jump key. Leading stable-hold
+        masks are rolled as part of the candidate; rechecks retain both original
+        hop_from/hop_until. None preserves the legacy h2 command domain."""
         import time
         if type(first_feasible) is not bool:raise ValueError("invalid first-feasible search preference")
         if p_min is not None and (type(p_min) is not int or p_min < 0):
             raise ValueError("invalid absolute first-Clawline floor")
+        if hop_from is not None and (type(hop_from) is not int or hop_from < 0):
+            raise ValueError("invalid absolute hop start")
+        if type(hop_wait_mask) is not int or not 0 <= hop_wait_mask <= np.iinfo(np.int64).max:
+            raise ValueError("invalid stable hop wait mask")
         t0 = time.perf_counter()
         c = self.cfg
         F0 = sim.f + 2
@@ -286,11 +296,21 @@ class ClawStrike:
         toward = 1 if ctx.s_x > ctx.hero_x else -1
         fx = front_x(ctx)
         new_hop = ground and accepting and hop_until is None
+        jump_F = F0 if hop_from is None else hop_from
+        if hop_from is not None:
+            if new_hop and jump_F < F0:
+                raise ValueError("new absolute hop start precedes command horizon")
+            if not new_hop and (type(hop_until) is not int or hop_until <= jump_F):
+                raise ValueError("absolute hop start requires its original hold end")
+        if hop_from is not None and jump_F > F0 and hop_wait_mask & M_J:
+            return None  # a held J cannot stand for a new, later jump edge
         hops = c.hops if new_hop else (0,)
         p_hi = a_entry + c.k_last
         rows = []
         for h in hops:
-            lo = F0 + (2 if h else 1)
+            lo = jump_F + 2 if h else F0 + 1
+            if hop_from is not None and hop_until is not None:
+                lo = max(lo, jump_F + 2)
             if p_min is not None:lo = max(lo, p_min)
             for P in ((p_only,) if p_only is not None else range(lo, p_hi + 1)):
                 if lo <= P <= p_hi:
@@ -301,10 +321,14 @@ class ClawStrike:
         cm = np.zeros((len(rows), T), np.int64)
         tk = M_R if toward > 0 else M_L
         for n, (h, P) in enumerate(rows):
+            if h or hop_until is not None:
+                cm[n, :max(0, jump_F - F0)] = hop_wait_mask
             if h:
-                cm[n, :h] |= M_J
+                a = jump_F - F0
+                cm[n, a:min(a + h, T)] |= M_J
             elif hop_until is not None and hop_until > F0:
-                cm[n, :min(hop_until - F0, T)] |= M_J
+                a = max(0, jump_F - F0)
+                cm[n, a:min(hop_until - F0, T)] |= M_J
             if P - 1 - F0 >= 0:
                 cm[n, P - 1 - F0] |= tk
         ro = sim.roll(cm)
@@ -314,8 +338,10 @@ class ClawStrike:
             i = off + (P - F0)
             if i >= ro.box.shape[1]:
                 continue
-            # in the air from the frame after the first key to the press (a hop that lands again is no hop)
-            if ((ro.flags[n, off + 1:i + 1] & kin.F_GROUND) != 0).any():
+            # A planned wait may be grounded; from the frame after the actual
+            # first jump key to P the original airborne requirement is unchanged.
+            air0 = off + max(0, jump_F - F0) + 1
+            if ((ro.flags[n, air0:i + 1] & kin.F_GROUND) != 0).any():
                 continue
             bb = float(ro.box[n, i, 1]) - FLOOR
             vy = float(ro.vel[n, i, 1])
@@ -354,7 +380,7 @@ class ClawStrike:
                     break
             if len(var_ok) < len(c.gaps) * len(c.ctrl) or min(var_ok) == 0:
                 continue
-            p = CsPlan(F0, h, P, P - a_entry, sum(var_ok), var_ok, bb, tuple(ctrl_k), sample)
+            p = CsPlan(jump_F if h else F0, h, P, P - a_entry, sum(var_ok), var_ok, bb, tuple(ctrl_k), sample, hop_wait_mask)
             # Every gap/control variant has a real passing strike witness. B2
             # may stop at this first feasible candidate rather than spend the
             # remaining clock budget optimizing the number of future choices.
@@ -368,7 +394,7 @@ class ClawStrike:
 
 def plan_mask(p: CsPlan, F: int, toward: int) -> int:
     """The keys of the plan for mask frame F up to the press's second frame (the lock after it: no key)."""
-    m = 0
+    m = p.wait_mask if p.hop and F < p.f0 else 0
     if p.hop and p.f0 <= F < p.f0 + p.hop:
         m |= M_J
     tk = M_R if toward > 0 else M_L

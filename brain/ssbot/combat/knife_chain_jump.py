@@ -14,6 +14,9 @@ from .knife_chain_nominal import state_names
 # With SEND_AHEAD=2, C >= J+3 lets STATE(J+1) prove takeoff before
 # the first CLAW is sent. This is a B2 candidate timing rule, not a retry.
 B2_HOOK_JUMP_LEAD = 3
+# First heavy commitment may consume two STATE intervals including queue time.
+# Plan two stable-hold frames before takeoff, rather than shifting late keys.
+B2_HOOK_PLAN_LEAD = 4
 
 
 def _observed_flag(state,name):

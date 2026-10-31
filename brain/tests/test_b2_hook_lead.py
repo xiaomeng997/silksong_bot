@@ -44,7 +44,8 @@ def test_invalid_floor_is_not_an_admission_bypass(monkeypatch,p_min):
         owner.plan(sim,ctx,True,True,p_min=p_min)
 
 
-def adapter(monkeypatch,*,strict=True,ground=True,accepting=True,prior=None,f=1000,p_only=None):
+def adapter(monkeypatch,*,strict=True,ground=True,accepting=True,prior=None,f=1000,p_only=None,
+            prefix=(cs.M_L,),desired=cs.M_L):
     calls=[]
     class FakeCs:
         params=object()
@@ -52,16 +53,16 @@ def adapter(monkeypatch,*,strict=True,ground=True,accepting=True,prior=None,f=10
     monkeypatch.setattr(ks,"_csx",lambda x:FakeCs())
     monkeypatch.setattr(ks,"_cs_ctx",lambda x:None)
     x=NS(R=NS(anchor=NS(b2_strict_observations=strict)),v={"cs":prior},tmp={},
-         obs=NS(sim=NS(f=f)))
+         obs=NS(sim=NS(f=f,prefix=np.array(prefix)),s={"act":{"hf":{"desired":desired}}}))
     ks.pl_claw(x,"var.tmp.plan",ground,accepting,
                hop_until=None if prior is None else prior.f0+prior.hop,p_only=p_only)
     assert x.tmp["plan"] is None
-    return calls[0]
+    return calls[0] if calls else None
 
 
 def test_initial_b2_ground_hop_has_three_frame_jump_lead(monkeypatch):
     assert B2_HOOK_JUMP_LEAD==3
-    assert adapter(monkeypatch)["p_min"]==1005
+    assert adapter(monkeypatch)["p_min"]==1007
 
 
 @pytest.mark.parametrize("p_only",[1004,None])

@@ -784,15 +784,28 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
         cs.params, cs.terrain = sim.params, sim.terrain
     kwargs = {"hop_until": hop_until, "p_only": p_only}
     if getattr(x.R.anchor, "b2_strict_observations", False):
-        from .knife_chain_jump import B2_HOOK_JUMP_LEAD
+        from .knife_chain_jump import B2_HOOK_JUMP_LEAD, B2_HOOK_PLAN_LEAD
         prior = x.v.get("cs")
         if prior is not None and prior.hop:
             # Keep the ORIGINAL jump's absolute floor during p_only checks
             # and fallback searches. A later tick cannot pull it earlier.
+            kwargs["hop_from"] = int(prior.f0)
+            kwargs["hop_wait_mask"] = int(getattr(prior,"wait_mask",0))
             kwargs["p_min"] = int(prior.f0) + B2_HOOK_JUMP_LEAD
             kwargs["first_feasible"] = True
         elif ground and accepting:
-            kwargs["p_min"] = int(sim.f) + 2 + B2_HOOK_JUMP_LEAD
+            prefix=getattr(sim,"prefix",())
+            raw=getattr(x.obs,"s",None)
+            act=raw.get("act") if type(raw) is dict else None
+            hf=act.get("hf") if type(act) is dict else None
+            held=hf.get("desired") if type(hf) is dict else None
+            # A late/skipped wait send must leave exactly this same desired key.
+            # Unknown or changing queued input loses this candidate, not safety.
+            if type(held) is not int or len(prefix)!=1 or int(prefix[0])!=held or held&M_J:
+                x.tmp["plan_ms"]=0.;CV.store(x,store,None);return
+            kwargs["hop_wait_mask"] = held
+            kwargs["hop_from"] = int(sim.f) + B2_HOOK_PLAN_LEAD
+            kwargs["p_min"] = kwargs["hop_from"] + B2_HOOK_JUMP_LEAD
             kwargs["first_feasible"] = True
     t0 = time.perf_counter()
     res = cs.plan(sim, _cs_ctx(x), ground, accepting, **kwargs)
@@ -804,6 +817,7 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
 def pl_adopt(x, store, q, p):
     if q is not p:
         q.f0, q.hop = p.f0, p.hop
+        q.wait_mask = int(getattr(p,"wait_mask",0))
     CV.store(x, store, q)
 
 

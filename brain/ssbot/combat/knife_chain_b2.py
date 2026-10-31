@@ -99,6 +99,7 @@ class NativeChainB2(NativeChainCandidates):
         self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
         self._hook_start=None;self._failed_hook_moves=set()
         self._failure_exposures=[];self._jump_start=None;self.policy_gate_reason=None
+        self._vetoed_preparation=None
         self.runner.anchor.b2_strict_observations=self.arm=="B"
         if self.budget is not None:self.budget.check()
 
@@ -833,7 +834,16 @@ class NativeChainB2(NativeChainCandidates):
         if event=="b2_jump_send_veto":
             self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(selected.move),
                        no_retry_same_move=True,action="neutral recovery before unsupported hook")
+        preparation=None
+        if selected.stage=="commitment" and self.commitment is None:
+            # A vetoed first key is not a successful chain dispatch. Once its
+            # neutral replacement IS sent, it is nevertheless a sent failed
+            # preparation and retains the original strict HP responsibility.
+            preparation={"move":selected.move,"origin":frame,"target":target,"failed":received_frame,
+                         "ta":selected.draft.run.v.get("ta")}
+            self._press=self._accepted=self._hit=None
         self._recover(reason,received_frame);self._b2_selected=None
+        self._vetoed_preparation=preparation
         self.final("b2_deadline_abort",0)
         super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
         return 0
@@ -874,6 +884,17 @@ class NativeChainB2(NativeChainCandidates):
     def sent(self):
         selected=self._b2_selected
         sent=super().sent()
+        preparation=self._vetoed_preparation
+        if preparation is not None:
+            if sent.frame!=preparation["origin"] or sent.target_frame!=preparation["target"] or sent.desired_mask!=0:
+                self._stop("veto neutral replacement does not match successful send",sent.frame)
+            from .knife_chain_failure import FailureExposure
+            exposure=FailureExposure(preparation["move"],preparation["origin"],preparation["failed"],preparation["ta"])
+            if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
+            self._failure_exposures.append(exposure)
+            self._note("b2_failure_exposure",frame=preparation["failed"],exposure=exposure.as_dict(),
+                       source="successful neutral replacement after initial dispatch veto")
+            self._vetoed_preparation=None
         committed=selected is not None and sent.chain_outcome=="sent"
         if committed:
             if selected.stage=="commitment":
