@@ -136,6 +136,25 @@ class MeasurementTrace:
                 self._append_locked({"kind": "receive", "ep": self.episode, "f": frame,
                                      "state_seq": sequence, "recv_ns": received_ns})
 
+    def send_timing(self, target: int) -> dict | None:
+        """Read-only local receive-clock snapshot for a caller's dispatch guard.
+
+        This does not alter records or estimate application. Only target-1 or
+        target-2 is used; older/future frames cannot extend the send deadline.
+        """
+        with self._lock:
+            now = self.clock()
+            anchors = [(frame, self._received[frame][1]) for frame in (target - 1, target - 2)
+                       if frame in self._received]
+            if anchors:
+                frame, received = anchors[0]
+                result = {"now_ns": now, "anchor_frame": frame, "anchor_ns": received,
+                          "latest_received_frame": next(reversed(self._received))}
+                if len(anchors) == 2:
+                    result.update(earlier_frame=anchors[1][0], earlier_ns=anchors[1][1])
+                return result
+        return None
+
     def begin_tick(self, state: dict) -> None:
         started = self.clock()
         tid = threading.get_ident()

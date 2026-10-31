@@ -44,6 +44,7 @@ class B2Offer:
 
 class NativeChainB2(NativeChainCandidates):
     b2=True
+    require_send_clock=False  # direct offline transaction fixtures; from_env requires it
     def __init__(self,*,runner_factory,probe_ref,journal=None,profile=None,arm="B",budget=None,trace_limit=2048):
         if arm not in {"A","B"}:raise ValueError("B2 arm must be A or B")
         self.profile=profile or NominalProfile();self.arm=arm;self.budget=budget
@@ -82,8 +83,10 @@ class NativeChainB2(NativeChainCandidates):
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")
         budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()))
-        return cls(runner_factory=lambda:runner,probe_ref=os.environ.get("SSBOT_FORUM_CHAIN_PROBE",""),
-                   journal=journal,profile=profile,arm=arm,budget=budget)
+        instance=cls(runner_factory=lambda:runner,probe_ref=os.environ.get("SSBOT_FORUM_CHAIN_PROBE",""),
+                     journal=journal,profile=profile,arm=arm,budget=budget)
+        instance.require_send_clock=True
+        return instance
 
     def reset(self,episode,*,start_frame=None):
         super().reset(episode,start_frame=start_frame)
@@ -848,7 +851,7 @@ class NativeChainB2(NativeChainCandidates):
         super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
         return 0
 
-    def before_send(self, *, frame, target, mask, flags, received_frame):
+    def before_send(self, *, frame, target, mask, flags, received_frame, dispatch_clock=None):
         if type(received_frame) is not int or received_frame>target+4:
             self._stop("send deadline beyond four frames / missing current frame",frame)
         selected=self._b2_selected;last=None;jump=self._jump_start
@@ -869,8 +872,17 @@ class NativeChainB2(NativeChainCandidates):
             if int(mask)&B["J"]:
                 if not jump.sent_targets and target!=min(jump.targets):
                     reason="first pre-hook ground-jump target skipped before send"
-                elif target in jump.targets and received_frame>=target:
+                elif not jump.sent_targets and received_frame>=target:
                     reason="pre-hook ground-jump target already observed before send"
+                elif not jump.sent_targets and self.require_send_clock:
+                    from .knife_chain_deadline import first_jump_clock
+                    try:clock=first_jump_clock(dispatch_clock,target)
+                    except ValueError as exc:
+                        if self.require_send_clock:self._stop("missing critical first-J receive clock: "+str(exc),frame)
+                        reason="pre-hook ground-jump receive clock unknown"
+                    else:
+                        self._note("b2_jump_dispatch_clock",frame=frame,target=target,**clock)
+                        if clock["late"]:reason="pre-hook ground-jump calibrated send deadline elapsed"
             elif int(mask)&B["CLAW"]:
                 reason="pre-hook ground jump not observed before CLAW dispatch"
             if reason is not None:

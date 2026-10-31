@@ -104,3 +104,23 @@ def test_neutral_after_CLAW_send_keeps_existing_observation_wait_window():
     assert n._hook_start['seen_frame'] is None and n._hook_start['sent_targets']=={ORIGIN+7}
     assert n.before_send(frame=ORIGIN+6,target=ORIGIN+8,mask=0,flags=0,received_frame=ORIGIN+8) is None
     assert n.commitment is not None and n.counts['b2_hook_send_veto']==0
+
+
+@pytest.mark.parametrize("late_slot",[5,6])
+def test_late_J_hold_does_not_abort_after_a_successful_first_edge(late_slot):
+    n=deferred();stage(n,ORIGIN+2,B['J'])
+    n.before_send(frame=ORIGIN+2,target=ORIGIN+4,mask=B['J'],flags=0,received_frame=ORIGIN+2);n.sent()
+    if late_slot==6:
+        stage(n,ORIGIN+3,B['J'])
+        n.before_send(frame=ORIGIN+3,target=ORIGIN+5,mask=B['J'],flags=0,received_frame=ORIGIN+3);n.sent()
+    f=ORIGIN+late_slot-2;stage(n,f,B['J'])
+    assert n.before_send(frame=f,target=f+2,mask=B['J'],flags=0,received_frame=f+2) is None
+    assert n.sent().desired_mask==B['J'] and n.commitment is not None
+    assert n.counts['b2_send_late']==1 and n.counts['b2_jump_send_veto']==0
+    assert not n._failure_exposures and MOVE not in n._failed_hook_moves
+    seen=ORIGIN+late_slot
+    stage(n,seen,B['R']|B['CLAW'],ground=False,clip='Airborne',vy=18.6,
+          target=ORIGIN+4,desired=B['J'])
+    assert n._jump_start.seen_frame==seen
+    assert n.before_send(frame=seen,target=seen+2,mask=B['R']|B['CLAW'],flags=0,received_frame=seen) is None
+    n.sent();assert n._hook_start['sent_targets']=={seen+2}

@@ -313,8 +313,12 @@ def _act(link: OracleLink, last: int, policy, s: dict, tap) -> None:
     if chain is None:
         link.act(last + 2, m, hold_frames=0, flags=flags)
         return
+    send_context = {}
+    if getattr(chain, "b2", False):
+        clock = getattr(measurement, "send_timing", None)
+        send_context["dispatch_clock"] = clock(last + 2) if callable(clock) else None
     replacement = chain.before_send(frame=last, target=last + 2, mask=m, flags=flags,
-                                    received_frame=getattr(link, "frame", None))
+                                    received_frame=getattr(link, "frame", None), **send_context)
     if type(replacement) is int:
         original, m = int(m), replacement
         if isinstance(getattr(policy, "sent", None), dict):
