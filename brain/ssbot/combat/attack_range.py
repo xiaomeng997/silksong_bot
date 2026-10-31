@@ -900,11 +900,14 @@ class RangeTracker:
                           ctx={"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
                                "body": body_polys(e, tab.spec.body)})
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
-            if _jb.ENABLED and tk == _jb.CLAPPER and inst.fam in _jb.JUMP_FAMS and inst.states \
-                    and inst.states[-1] in _jb.LANDED_STATES:
-                # SSBOT_FORUM_JUMP_BEHIND (task 1v1 SP3): a landed jump ends in Idle, which turns it to a hero behind
-                # it: its front (2.25 u, p99 of the recorded turned bodies) then reaches her side (S2 live: 17 body
-                # hits at Idle 2.0-2.5 u behind the landing); the body of either facing from the landing on
+            if _jb.ENABLED and tk == _jb.CLAPPER and inst.states and (
+                    (inst.fam in _jb.JUMP_FAMS and inst.states[-1] in _jb.LANDED_STATES) or
+                    (inst.fam == "CC_SLAM" and inst.states[-1] in ("Slam 2", "Slam Recover"))):
+                # Landed jumps and the observed Slam 2 / Recover tail can end in
+                # Idle facing a hero behind them. Keep both standing facings:
+                # the asymmetric body edge moves about 0.9u on that turn.
+                # This conservative bound uses the current observed root; it
+                # does not change the attack's wall-clamped motion or margins.
                 est.raw = union([est.raw, _jb_turn_mask(float(p[0]), tab.cell)])
         if COMMIT_CORE:
             est.core = est.raw          # SSBOT_FORUM_TWO_COMMIT: the move / body without the hazards (forum_v2.build)
