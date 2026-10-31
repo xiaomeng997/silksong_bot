@@ -373,6 +373,11 @@ def test_complete_candidate_generation_with_clear_external_geometry(params,terra
     move=MoveInstance(7,1000,"CC_SLAM")
     monkeypatch.setattr(n,"_preview",lambda:(p,move))
     geo,rs,_=geometry
+    # A new slam must clear previous-Move keys BEFORE choosing the cold path.
+    # Those keys are deliberately unusable; they must never trigger _post_path.
+    n._post_key_move=MoveInstance(99,800,"CC_SLAM")
+    n._post_keys={k:object() for k in ("left_landing","right_landing","dash_out")}
+    monkeypatch.setattr(n,"_post_path",lambda *a,**kw:pytest.fail("old Move caused full cold expansion"))
     prefs=SimpleNamespace(weights={"hit":10.},stance_x=35.,boss_x=None,risk_x=np.array([]),risk=np.array([]))
     offer=n.propose(None,None,sim.start,sim.hold,sim.prefix,SimpleNamespace(rs=rs),prefs,None)
     assert offer is not None and offer.stage=="commitment",list(n.events)[-3:]

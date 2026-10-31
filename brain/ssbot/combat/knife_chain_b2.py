@@ -628,6 +628,7 @@ class NativeChainB2(NativeChainCandidates):
             # The N=2 contract asks only for short executable types. Do not
             # interpret every tail to ground merely to discover that threshold.
             paths={};errors={};full_paths={}
+            self._post_cache_for(move)
             for kind in KINDS:
                 try:
                     if kind in self._post_keys:
