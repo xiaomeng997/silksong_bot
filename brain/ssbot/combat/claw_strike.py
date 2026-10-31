@@ -199,6 +199,9 @@ def claw_phase(x_p: float, bb_p: float, vy_p: float, toward: int, fx: float, gap
     return x_s, bb, ctrl + n
 
 
+_AC_EVALUATE_AUTHORITY=_ac._EVALUATE_AUTHORITY
+
+
 class ClawStrike:
     def __init__(self, cfg: CsCfg | None = None, params=None, terrain=None):
         self.cfg = cfg or CsCfg.from_env()
@@ -254,7 +257,10 @@ class ClawStrike:
             return []
         ac_ctx = _ac.Ctx(b_iid=ctx.s_iid, b_x=ctx.s_x, b_y=ctx.s_y, b_face=ctx.s_face, kb0=csim.fo - a_entry,
                          a_box=ctx.other_box, hero_x=float(csim.start[kin.PX]), face=toward, tls=ctx.tls)
-        result = _ac.evaluate(csim, ac_ctx, plans, csim.f + 2)
+        if cache is not None and _ac.evaluate is _AC_EVALUATE_AUTHORITY:
+            result = _ac.evaluate(csim,ac_ctx,plans,csim.f+2,reuse_no_event=True)
+        else:
+            result = _ac.evaluate(csim, ac_ctx, plans, csim.f + 2)
         if key is not None:cache.put(key, result)
         return result
 

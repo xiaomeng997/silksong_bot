@@ -397,7 +397,30 @@ def _face(p: Plan, ctx: Ctx) -> int:
     return (1 if p.dirk == M_R else -1) if p.dirk and p.d_end > p.f0 else ctx.face
 
 
-def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int) -> list[Plan]:
+_CHAIN_ROLL_AUTHORITY=ChainSim.roll
+_KIN_ROLLOUT_AUTHORITY=kin.rollout
+_CONTACTS_AUTHORITY=_contacts
+_UNSAFE_AUTHORITY=_first_unsafe
+
+
+def _single_pass2_origin(sim):
+    # Filtering command lanes must never change which start/hold lane they
+    # receive. The B2 control model is explicitly one broadcast origin.
+    try:
+        if type(sim.start) is not np.ndarray or sim.start.shape not in ((kin.K,),(kin.K,1)):return False
+        if sim.start.dtype.kind not in "fiu" or type(sim.prefix) is not np.ndarray or sim.prefix.ndim!=1:return False
+        if type(sim.hold) is not kin.HoldState or type(sim.params) is not kin.HeroParams or type(sim.terrain) is not kin.Terrain2D:return False
+        return all(type(a) is np.ndarray and a.ndim==2 and a.shape[0]==1
+                   for a in (sim.hold.latched,sim.hold.desired,sim.hold.pending,sim.hold.age))
+    except (TypeError,AttributeError):return False
+
+
+def _pass2_rows(ro,sel):
+    if len(sel)==ro.flags.shape[0] and np.array_equal(sel,np.arange(len(sel))):return ro
+    return kin.Rollout(ro.phys[sel],ro.pos[sel],ro.vel[sel],ro.mode[sel],ro.flags[sel],ro.final[:,sel],ro.box[sel])
+
+
+def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_event: bool = False) -> list[Plan]:
     """The plans that pass in every timeline of ctx.tls (contact on B, the optional down slash's contact, safety)."""
     if not plans:
         return []
@@ -412,6 +435,12 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int) -> list[Plan]:
     p_down = np.array([off + ((p.f_down if p.f_down is not None else F0) - F0) for p in plans])
     p_strike = np.array([off + (p.f_press - F0) for p in plans])
     ro0 = sim.roll(cm[has_d]) if has_d.any() else None     # pass 1 (no events): the same in every timeline
+    # Only the explicitly opted-in native, lane-independent no-event pass may
+    # be reused. Every timeline still gets its own contact and hit/safety pass.
+    reuse=(reuse_no_event is True and not has_d.any() and type(sim) is ChainSim and _single_pass2_origin(sim) and
+           getattr(sim.roll,"__func__",None) is _CHAIN_ROLL_AUTHORITY and kin.rollout is _KIN_ROLLOUT_AUTHORITY and
+           _contacts is _CONTACTS_AUTHORITY and _first_unsafe is _UNSAFE_AUTHORITY)
+    pass2=None
     for tl in ctx.tls:
         ev = np.zeros_like(cm)
         if ro0 is not None:
@@ -425,7 +454,10 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int) -> list[Plan]:
         sel = np.flatnonzero(good)
         if not len(sel):
             return []
-        ro = sim.roll(cm[sel], ev[sel])
+        ro = _pass2_rows(pass2,sel) if pass2 is not None else sim.roll(cm[sel],ev[sel])
+        if reuse and pass2 is None and len(sel)==len(plans) and type(ro) is kin.Rollout and not ro.variants and all(
+                getattr(ro,k) is None for k in ("var_box","var_mode","var_flags","bound","flags_all","flags_any")):
+            pass2=ro
         j = _contacts(ro, p_strike[sel], faces[sel], ctx, tl, "b")
         good[sel[j < off]] = False
         hit = sel[j >= off]
@@ -455,6 +487,9 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int) -> list[Plan]:
         p.c_strike = F0 + int(c_strike[i]) - off
         out.append(p)
     return out
+
+
+_EVALUATE_AUTHORITY=evaluate
 
 
 def search(sim: ChainSim, ctx: Ctx) -> Plan | None:
