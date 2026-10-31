@@ -6,6 +6,7 @@
 **本机资源约束（10-29更新）**：10:00的period2启动失败，自有实例10:05:46清理完毕，随后独立确认golden和旧DEMO恢复。A/A续跑任务PAUSED，原14:00不执行；冻结排程和STOPPED保留，不自行重启/补跑/改期。任何另获授权的新采集仍从起点前10分钟保护至真实清理结束。Opus脚本对未complete的period2仍会拒绝计算，本任务不绕过；本段无新增归因数据。4.2的陷阱识别和被动代价验收保留。
 
 > **共享进度入口**：唯一更新源为 `C:/modeling/silksong_bot/docs/plans/forum_clapper_plan.md`。各工作树的同名文档是同步快照；Opus或其他代理接手前先读取这个绝对路径。代码分支、提交和证据入口见本页末尾。A/A冻结工作树与四个采集/分析脚本不得修改。
+> **当前同步范围（10-30，已处理 Opus #24）**：只维护main正本、`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`和`C:/Users/Meng/.codex/worktrees/forum-tv-prep/silksong_bot`的三份活动计划。停止向`C:/modeling/silksong_bot/.claude/worktrees/wf_f1846551-5f9-1`同步或在分支`worktree-wf_f1846551-5f9-1`提交；旧树、分支历史与未提交文件全部原样保留，不删除/归档/重置。Opus直接读main或刀口树；此前“四份计划”的完成记录保留为历史，不再作为未来同步目标。
 
 ---
 
@@ -190,7 +191,7 @@ Opus对64局完整episode记录列出114次伞内攻击/冲刺wire上升沿，So
 
 **缺证据与审核范围。** 按键归属仍取严格早于损血帧的最后一个tick，其中2次滞后2帧；6次实际生效ACTION的owner与前一tick不同，两种口径继续分列。安全行/forced均为规划器自身模型判断；逐次画面、反事实可躲性仍未完成。损血前输入/冷却追溯现已完成本批描述性检查，17帧wire与锁存差异仍无明确解释，不能继续写成“整项未做”或补成已解决。
 
-Sol现已完成两层审核：先只读核对更新REPORT 6.1/6.2、冻结事件循环及A/A分析器，再独立读取64局原始录像和measurement日志。`analysis/opus_independent_20261029/raw_crosscheck_v2.json`复现93次损血/172 HP、1951条Idle/628条命中、164条旧命中全在entry_f，以及24次can.input=false/46 HP、13次冷却已过、全部锁起点归plan、20次空中按跳、28次脚本持键中15次影子冲刺意图；这些项目无差异。`cooldown_spotcheck_v1.json`核对8次已报告的跨owner按下，原始动作起始延迟与明细逐项一致，但汇总文字存在上述分类/延迟错误。未独立复核机会几何、所有冷却阻挡的穷举/因果归属、符文施放者映射和反事实可躲性，新6.3取消规则/原始数据复核见上文，尚未逐帧认证完整HERO2时钟、资源真值及Sprint Air，不能把审核称为整份报告认证。程序在09:45:02完成主重算、09:47前完成有界核查，CPU16–31/Idle，未进入09:50保护；首版因缺tzdata未开始逐局复算即退出，失败日志保留，修正版按已核对的当日PDT偏移设09:48:30硬截止。保留先前按明细修正的跳落18/19、大符文21/22首帧比例、7次锤未知与亮起时间例外，没有照搬建议稿中仍过强的“全部第1帧”。前一轮来源SHA256：`PLAN_INPUT.md=a5bb0c87f7ffbfa1bda2e73a728444931eb028721cb2757e12afe9cf63a71c86`，`REPORT.md=aea78702df5417e5a875ed064b8c150d14afbcdb15438da5a28acb01de72b544`。period2启动失败、period3暂停，当前无新增归因数据；如用户另定后续采集，仍由Sol核验真实清理后通知，再原位替换本归因块并同步四份计划。
+Sol现已完成两层审核：先只读核对更新REPORT 6.1/6.2、冻结事件循环及A/A分析器，再独立读取64局原始录像和measurement日志。`analysis/opus_independent_20261029/raw_crosscheck_v2.json`复现93次损血/172 HP、1951条Idle/628条命中、164条旧命中全在entry_f，以及24次can.input=false/46 HP、13次冷却已过、全部锁起点归plan、20次空中按跳、28次脚本持键中15次影子冲刺意图；这些项目无差异。`cooldown_spotcheck_v1.json`核对8次已报告的跨owner按下，原始动作起始延迟与明细逐项一致，但汇总文字存在上述分类/延迟错误。未独立复核机会几何、所有冷却阻挡的穷举/因果归属、符文施放者映射和反事实可躲性，新6.3取消规则/原始数据复核见上文，尚未逐帧认证完整HERO2时钟、资源真值及Sprint Air，不能把审核称为整份报告认证。程序在09:45:02完成主重算、09:47前完成有界核查，CPU16–31/Idle，未进入09:50保护；首版因缺tzdata未开始逐局复算即退出，失败日志保留，修正版按已核对的当日PDT偏移设09:48:30硬截止。保留先前按明细修正的跳落18/19、大符文21/22首帧比例、7次锤未知与亮起时间例外，没有照搬建议稿中仍过强的“全部第1帧”。前一轮来源SHA256：`PLAN_INPUT.md=a5bb0c87f7ffbfa1bda2e73a728444931eb028721cb2757e12afe9cf63a71c86`，`REPORT.md=aea78702df5417e5a875ed064b8c150d14afbcdb15438da5a28acb01de72b544`。period2启动失败、period3暂停，当前无新增归因数据；如用户另定后续采集，仍由Sol核验真实清理后通知，再原位替换本归因块并同步main/刀口/TV三份活动计划（#24）。
 
 以上仅为描述，不作A/A推断、停止决策或权重选择。证据与口径：`C:/ssbot/data/m2_play/clapper_plan/opus/REPORT.md`、`PLAN_INPUT.md`、`p01_losses.csv/json`、`p01_hammers.csv`、`p01_idle_opportunity.csv/json`、`p01_input_trace.csv/json`；旧`p01_idles.csv`中的原审计命中字段不当作更正值。
 
@@ -524,13 +525,13 @@ Windows System USER32 1074事件核实了10-28 22:02:01.851293的StartMenuExperi
 
 ### 6.2 工作衔接与排期
 
-继续当前聊天，Sol单写并同步四份计划。当前源码e58e7f80（6.39），692项回归通过；它是在35a2369a工程预算点值过线、b11828df启动器现场通过及一次实际B失败之后的防护/审计检查点，不冒称新源已实测。原唯一实际B局因2HP停，未重开；关键钩索起手61.57ms仍须提前/摊分或有据降本，动作接受/窗口完整性/恢复期首损归属仍待。首轮只替SLAM_PLAY/CLAWSTRIKE、N=2和8局上限不变，默认关闭；8局尚未冻结/放行，不等EV/RN，不恢复旧strict/B1/倒推/A/A。
+继续当前聊天，Sol单写计划，当前仅同步main/刀口/TV三份活动计划（#24）。当前源码e58e7f80（6.39），692项回归通过；它是在35a2369a工程预算点值过线、b11828df启动器现场通过及一次实际B失败之后的防护/审计检查点，不冒称新源已实测。原唯一实际B局因2HP停，未重开；关键钩索起手61.57ms仍须提前/摊分或有据降本，动作接受/窗口完整性/恢复期首损归属仍待。首轮只替SLAM_PLAY/CLAWSTRIKE、N=2和8局上限不变，默认关闭；8局尚未冻结/放行，不等EV/RN，不恢复旧strict/B1/倒推/A/A。
 
-**计划保持单写入者：Sol。** Opus不编辑主计划或任何工作树中的计划副本。Opus提交`PLAN_INPUT.md`中的第3.6节建议段落，由Sol审核合入唯一主计划，再同步各工作树副本。
+**计划保持单写入者：Sol。** Opus不编辑主计划或任何工作树中的计划副本。Opus提交`PLAN_INPUT.md`中的第3.6节建议段落，由Sol审核合入唯一主计划，再同步main/刀口/TV三份活动计划；旧workflow树按#24停止同步和提交。
 
 |负责人|工作范围|交付|
 |---|---|---|
-|Sol|生产代码实现与提速单写：据热点证据减少重复展开/拷贝/查询，集成回归、P核High完整tick及动作接受核验、Launcher启动/停止/清理和有界w7；主计划单写|新源码SHA、行为/性能对照及完整预算、批次配置/停止/清理证据、四份计划；已跑一次实际失败工程局，8局未放行|
+|Sol|生产代码实现与提速单写：据热点证据减少重复展开/拷贝/查询，集成回归、P核High完整tick及动作接受核验、Launcher启动/停止/清理和有界w7；主计划单写|新源码SHA、行为/性能对照及完整预算、批次配置/停止/清理证据、三份活动计划；已跑一次实际失败工程局，8局未放行|
 |Opus|固定SHA的独立审阅、耗时分解和慢调用复现，提出有证据的优化建议；新SHA再独立复测。既有编表/命中机制任务仍有界，不作首轮额外闸门|review_4e6fc357/REVIEW.md已接收；#5–#6及#8的修复/决定见6.36，新源码b30a98d1可独立审。Opus的16局Opt1是旧快照加反事实补丁的开环；Sol另核当前代码回执及四个故障窗口，不混写成全量闭环。只写opus目录，不改生产源、主计划或冻结树，不启动实机|
 
 **本轮并行工单（10-29，用户要求增加Opus工作量）。** 按可复核交付推进。Sol保留控制代码实现主线，Opus连续领取下列工单；OP1–OP4按既定输入开始，OP5可读下面的新组件检查点。用户已确认“转给opus了。你也开始吧”，据此记用户已转发；随后OP1–OP4均已交付，Sol已按6.12完成有界独立审核，描述/未核机制/实机验收分开。Sol组件de6c48b9和影子检查点f92022d8均已交付，OP5对de6组件已审通过（9项独立测试）；f920影子审阅也已交、无P0/P1，独立11项测试通过；运行接线/每tick/性能仍记未检查。当前工具没有直连现有Opus聊天的入口，不另开聊天或冒称已代发。
@@ -577,7 +578,7 @@ Windows System USER32 1074事件核实了10-28 22:02:01.851293的StartMenuExperi
 
 **Opus数据批次与资源排期。** 现先分析period 0–1；period 2、3分别在对应时段采集与清理结束后补做，不在采集期间分析该段。所有分析以Idle优先级、CPU 16–31运行。洛杉矶时间09:50、13:50起至对应A/A真实采集和清理全部结束，暂停本项工作；E核/Idle不构成保护窗口内继续运行的例外。
 
-**10-29归因交接。** period 0–1的Opus成果已审核合入第3.6节，完整报告为`C:/ssbot/data/m2_play/clapper_plan/opus/REPORT.md`。今天10:00（period 2）和14:00（period 3）各自在真实采集、完整性核验及清理/配置恢复全部完成后，由Sol在本聊天通知用户一次，再由Opus补做该段归因，已由`scripts/run_periods.py`串行重跑全部步骤，Opus更正：每次全量重跑所选的全部已完成时段，计算约50秒×时段数（0–2约2.5分钟、0–3约3分钟），人工核对/报告更新时间另计；保护窗口未结束不得提前分析。Opus脚本会在步骤之间复查保护窗口，当前自设09:45/13:45起更早暂停，且只有对应`progress_after_period<N>.json`的complete/清理成功/自有实例释放都成立才放行，不替代Sol对真实清理和配置恢复的核验。Opus补完后原地更新同目录`PLAN_INPUT.md`，Sol审核后替换第3.6节现有归因块并同步四份计划，不追加重复或冲突的历史段落。A/A续跑自动化保留此通知要求，但当前因period2启动失败PAUSED、原14:00不执行；本段无归因放行（3.12）。冻结排程及停止规则不变。
+**10-29归因交接。** period 0–1的Opus成果已审核合入第3.6节，完整报告为`C:/ssbot/data/m2_play/clapper_plan/opus/REPORT.md`。今天10:00（period 2）和14:00（period 3）各自在真实采集、完整性核验及清理/配置恢复全部完成后，由Sol在本聊天通知用户一次，再由Opus补做该段归因，已由`scripts/run_periods.py`串行重跑全部步骤，Opus更正：每次全量重跑所选的全部已完成时段，计算约50秒×时段数（0–2约2.5分钟、0–3约3分钟），人工核对/报告更新时间另计；保护窗口未结束不得提前分析。Opus脚本会在步骤之间复查保护窗口，当前自设09:45/13:45起更早暂停，且只有对应`progress_after_period<N>.json`的complete/清理成功/自有实例释放都成立才放行，不替代Sol对真实清理和配置恢复的核验。Opus补完后原地更新同目录`PLAN_INPUT.md`，Sol审核后替换第3.6节现有归因块并同步main/刀口/TV三份活动计划（#24），不追加重复或冲突的历史段落。A/A续跑自动化保留此通知要求，但当前因period2启动失败PAUSED、原14:00不执行；本段无归因放行（3.12）。冻结排程及停止规则不变。
 
 工程与离线验证暂按1–2天、连同跨时段实机比较约3天排期；属于粗估，正式样本需求或实现返工可延长。Opus提供的周额度10–15%仅是其历史工作流经验预算，不直接换算为Codex消耗；阶段开始/结束记录本账户额度差值再校准预算。额度刷新不作为前置条件。开发验证、w7实机与A/A按3.12资源窗口交错，不同时启动游戏争用采集资源。
 
@@ -1452,7 +1453,7 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **已处理 Opus #23（可选P3观察登记，未作运行改动）。** 不增设试车前置、不改严预算或恢复规则。①GC：旧两工程局fight各一次约37ms二代GC；后续专项按每次钩索完整tick、两发钩槽余量、GC重叠/截止放弃统计。Opus的0.5–0.8%每次估计只来自频率×敏感窗，非已认证失效率；gc.freeze未启用，若比较须A/B同处理、同预算框架，不禁GC/删峰。②门控：按Move/机会分母报告policy priority gate恢复频率及low/asw/m2/主管原因；保留B2恢复后本招不重试而h2暂停的差异，不凭未测频率改行为。③价值：观察钩爪报价与普通行竞争、选中率及后手类型；相对e58同tick中位-1.98限开环prefs/普通落地候选，不据此直接调权或恢复表尾。三项可在后续已授权专项/冒烟顺带核，不要求先造新实验。
 
-**证据/下一步。** analysis/b2_priority_value_20261030/REPORT.md、source_manifest、regression_final.log/xml、replay_summary、budget_summary、peak_diagnostics、frozen_check；策略专项在analysis/b2_policy_priority_20261030/priority_fix/，重入在analysis/reentry_fix/。旧原始失败/批次/停止不改。Opus独立审阅1120b2bf已按#22接收。用户随后“准备好了就开始呗”明确授权一局，执行及2HP停止见6.42；当前批已停止，同因未修不重跑，正式8局不放行。默认关闭/8局未冻结放行，旧strict/B1/留出/A/A不启动；两冻结树、schedule/STOPPED哈希不变，ACTIVE.lock无。只在开发树提交代码，其他三树仅同步计划，未推送。
+**证据/下一步。** analysis/b2_priority_value_20261030/REPORT.md、source_manifest、regression_final.log/xml、replay_summary、budget_summary、peak_diagnostics、frozen_check；策略专项在analysis/b2_policy_priority_20261030/priority_fix/，重入在analysis/reentry_fix/。旧原始失败/批次/停止不改。Opus独立审阅1120b2bf已按#22接收。用户随后“准备好了就开始呗”明确授权一局，执行及2HP停止见6.42；当前批已停止，同因未修不重跑，正式8局不放行。默认关闭/8局未冻结放行，旧strict/B1/留出/A/A不启动；两冻结树、schedule/STOPPED哈希不变，ACTIVE.lock无。只在开发树提交代码，该检查点曾同步四份计划；今后同步范围按#24仅main/刀口/TV，未推送。
 
 ### 6.42 1120b2bf唯一新B工程局：两次jump成功、弹起后身体2HP停止【10-30；墙角冲程优先诊断，钩索未覆盖】
 
@@ -1468,7 +1469,7 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **实际清理。** 2026-10-30 20:24:49.862159 PDT（10-31T03:24:49.862159Z）自有Launcher清理通过：game已退出/released、worker RC1（严停止）、registry/live空、restore_pending=false、golden SHA fc41b9c5427b4e23ec60af1f16808a6b497507eded5704b90c9224b056ea0469、Prefs diff[]、旧DEMO恢复、errors[]。初始窗口Prefs差异6项记录保留，最终完整恢复。
 
-**凭证/状态。** step3/b2_trial_20261030_1120b2bf/REPORT_SOL.md、SOL_VERIFICATION、wall_stop_diagnostic、raw_selected_states、raw_manifest、report/smoke_report.*、run/rec及launch/cleanup。当前批停止、默认关闭/8局不放行，下一步离线诊断墙角运动/后手接续，同因未修不重跑。钩索P3价值无实机分母、门控恢复本局0，GC保留原诊断未freeze；旧strict/B1/留出/A/A不启动。四树只同步计划，运行源仍1120b2bf，未推送。
+**凭证/状态。** step3/b2_trial_20261030_1120b2bf/REPORT_SOL.md、SOL_VERIFICATION、wall_stop_diagnostic、raw_selected_states、raw_manifest、report/smoke_report.*、run/rec及launch/cleanup。当前批停止、默认关闭/8局不放行，下一步离线诊断墙角运动/后手接续，同因未修不重跑。钩索P3价值无实机分母、门控恢复本局0，GC保留原诊断未freeze；旧strict/B1/留出/A/A不启动。本检查点的四树计划同步为历史记录；后续按#24仅main/刀口/TV，运行源仍1120b2bf，未推送。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
@@ -1631,12 +1632,12 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 ## 附：代码和数据位置
 
-- **Opus接手入口**：先读本主计划3.12节的当前A/A及资源窗口、第6节的实机优先路线、4.2的陷阱/被动代价验收。当前A/A v2冻结代码为 `C:/Users/Meng/.codex/worktrees/forum-aa-v2/silksong_bot`，HEAD `dbdf268311c4f5715e8ae453addd95619118a888`；刀口开发从该提交另建工作树，不原地修改。旧v1冻结树 `C:/Users/Meng/.codex/worktrees/forum-measurement/silksong_bot`保持`75d0b956`。接线及审计工具在 `C:/Users/Meng/.codex/worktrees/forum-tv-prep/silksong_bot`；只选择性复用所需工具，不整批引入TV或台架实现。Opus项目树同步本文，代码合并另记。
+- **Opus接手入口**：先读本主计划3.12节的当前A/A及资源窗口、第6节的实机优先路线、4.2的陷阱/被动代价验收。当前A/A v2冻结代码为 `C:/Users/Meng/.codex/worktrees/forum-aa-v2/silksong_bot`，HEAD `dbdf268311c4f5715e8ae453addd95619118a888`；刀口开发从该提交另建工作树，不原地修改。旧v1冻结树 `C:/Users/Meng/.codex/worktrees/forum-measurement/silksong_bot`保持`75d0b956`。接线及审计工具在 `C:/Users/Meng/.codex/worktrees/forum-tv-prep/silksong_bot`；只选择性复用所需工具，不整批引入TV或台架实现。Opus直接读取main或刀口树本文；只维护main/刀口/TV三份活动计划，旧workflow树按#24保留且停止同步/提交。代码合并另记。
 - **当前证据**：新v2排程 `C:/ssbot/data/m2_play/clapper_plan/step0/v2/schedule_v2_20261028.json`、前两段凭证 `v2/progress_after_period0.json`、`v2/progress_after_period1.json`、交接 `v2/HANDOFF.md`及运行根`v2/run_20261028_v2/`；旧v1的`step0/aa/`保留并单独分析。接线严格验收在 `C:/ssbot/data/m2_play/clapper_plan/prerequisites/tv_wire/completion.json`，审计适配层验收在 `prerequisites/choice_audit/acceptance.json`。台架开发与未通过证据在 `prerequisites/closed_loop/`，当前未认证、仅作辅助排错，不阻塞w7路线。
 
 - 本次测量代码：`C:/Users/Meng/.codex/worktrees/forum-measurement/silksong_bot`，分支 `codex/forum-measurement`；G3实机控制/采集版本 `5e0b1af2`，独立尾段审计及结果提交 `2f998ac8`，后者不改变控制/采集热路径。工程证据和A/A草案分别在 `C:/ssbot/data/m2_play/clapper_plan/step0/g3_20261028_b/` 和 `step0/aa/`。
 
-- 代码：分支 `worktree-wf_f1846551-5f9-1`（含 oldwin 和拆分实验的提交 309f5dd0）；h2 的冻结检出是 `C:\ssbot\live_1v1_dc95a602`。main 上的 `brain/ssbot/combat/forum_planner.py` 和 `docs/facts/1.0.30000/forum.md` 都是 10 月初的旧版。下面的路径都在冻结检出的 `brain/ssbot/` 下。
+- 历史代码只读入口：分支 `worktree-wf_f1846551-5f9-1`（含 oldwin 和拆分实验的提交 309f5dd0；按10-30用户#24停止同步/提交，保留树、历史和未提交文件）；h2 的冻结检出是 `C:\ssbot\live_1v1_dc95a602`。main 上的 `brain/ssbot/combat/forum_planner.py` 和 `docs/facts/1.0.30000/forum.md` 都是 10 月初的旧版。下面的路径都在冻结检出的 `brain/ssbot/` 下。
 - 终点价值：`combat/terminal.py`（`_terminal_rows` 约 157 行，身体场约 341 行）；`combat/forum_planner.py`（`SSBOT_FORUM_TV`，`ForumConfig.terminal / w_E / w_trap / w_ov / w_H / w_K`，`_terminal` 约 1437 行，`_escape_pick` 约 2114 行，选择排序约 4461 行）；`combat/forum_v2.py`（`ESC_F` 约 132 行，`V2Forecast` 约 787 行）；事实文档 `docs/facts/1.0.30000/forum.md` §20。
 - 手搓规则：`combat/tactics/`（modes、gauntlet、forum_local）、`combat/two_play.py`、`combat/slam_play.py`；约 200 个 `SSBOT_FORUM_*` 开关、约 40 条 TWO_* 规则；脚本覆盖规划器按键：`train/forum_planner_policy.py` 约 989 行。
 - 回放与模拟：`tools/forum_tv_audit.py`、`tools/forum_policy_replay.py`（都不能原样用，见 4.3）；`map2/search.py`（`simulate`）、`map2/clapper.py`（`Sim`）；`tools/sg2_sim.py`（没有规划器）。
@@ -1696,3 +1697,5 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 - **已处理 Opus #22、#23（10-30）。** #22独立OP5无P0–P2已核收，928 case/20079回放tick/49策略窗口及规范化源码比对通过；#23只登记GC、门控恢复频率、钩爪价值三个可选观察项，不算已修复/不增加前置。源码仍1120b2bf，未开新实机，详6.41。
 
 - **10-30用户授权后唯一新工程局及墙角观察。** 1120b2bf运行：两次jump真命中/弹起，第二次弹起后27帧身体2HP，严停止并清理，钩索未覆盖。用户指出墙角提前停住，已核净位移2.41u/静态模板3.60u差异，按共享运动/几何模型离线重建；不是已证明全部因果。当前批停止、同因未修不重跑，详6.42。
+
+- **已处理 Opus #24（10-30，用户明确指示）。** 计划当前同步目标改为main正本、forum-knife-rows和forum-tv-prep三份；旧`wf_f1846551-5f9-1`不再同步、不再提交，树/分支及未提交文件原样保留。Opus关于未进main的历史提交和脏文件为保留理由，本轮未重新审计/整理旧树。只改活动计划，不改运行源、停止批次或冻结测量。
