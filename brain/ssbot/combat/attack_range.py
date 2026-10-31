@@ -51,6 +51,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.combat.are_spec import PARKED, CustomView, Decision, EnemySpec, HazardSpec  # noqa: F401 (re-exported)
+from ssbot.combat import observed_slam as _observed_slam
 from ssbot.combat import jump_behind as _jb
 from ssbot.combat import rune_bombs as _rb
 
@@ -282,6 +283,10 @@ class RangeTable:
             branch = self.branch_by_rule(fam, hero_du)
         if branch is not None and (fam, branch) in self.templates:
             brs = (branch,)
+        motion = ctx.get("observed_motion") if ctx is not None else None
+        if motion is not None:
+            return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now,
+                                      vel, observed_motion=motion) for br in brs if (fam, br) in self.templates])
         return union([self._place1(self.templates[(fam, br)], b, anchor, s, hero_du, fam, now, b_now, dec, st_now,
                                    vel) for br in brs if (fam, br) in self.templates])
 
@@ -335,7 +340,7 @@ class RangeTable:
 
     def _place1(self, tp: Template, b: int, anchor: tuple, s: int, hero_du: float, fam: str,
                 now: tuple | None = None, b_now: int | None = None, dec: dict | None = None,
-                st_now: str | None = None, vel: tuple | None = None) -> Mask:
+                st_now: str | None = None, vel: tuple | None = None, observed_motion=None) -> Mask:
         k0 = b_now is not None and b <= b_now
         if tp.b_dec is not None:
             if dec is None:                     # pending aim: nothing of the undecided move is drawn
@@ -352,7 +357,12 @@ class RangeTable:
         if now is not None and b_now is not None:
             qx, qy = self.position(tp, b_now, anchor, s, hero_du, fam)
             lo, hi = self.walls
-            px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
+            if observed_motion is not None:
+                inst, stop = observed_motion
+                dx, dy = _observed_slam.predicted_offset(self, inst, tp, b_now, b, stop)
+                px, py = min(max(now[0] + dx, lo), hi), now[1] + dy
+            else:
+                px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy
             if vel is not None and b > b_now and st_now in self.spec.coast:     # stage B: coasting on its velocity
                 px, py = coast(now, vel, b - b_now, self.spec.coast[st_now])
                 px = min(max(px, lo), hi)
@@ -751,6 +761,7 @@ class RangeTracker:
         self.reset()
 
     def reset(self) -> None:
+        self.observed_motion = _observed_slam.Monitor() if _observed_slam.ENABLED else None
         self.T = 0.0
         self.dt = FT
         self.segs: dict = {}
@@ -815,9 +826,21 @@ class RangeTracker:
             else:
                 self.orphan_hazards.pop(iid)
         self.now = now
+        if self.observed_motion is not None:
+            self.observed_motion.feed(s, now)
         self._feed_objs(s.get("ents") or ())
         if self.rune is not None:
             self._feed_rune()
+
+    def observed_stop(self, iid):
+        if not _observed_slam.ENABLED:
+            return None
+        monitor = getattr(self, "observed_motion", None)
+        if monitor is None or iid not in self.now:
+            return None
+        inst = self.now[iid][2]
+        stop = monitor.stop_for(iid, inst)
+        return (inst, stop) if stop is not None else None
 
     def _feed_rune(self) -> None:
         """The per-bomb forecast (rune_bombs): the Cast 2 entries spawned since the last frame, the frame's bombs."""
@@ -895,10 +918,12 @@ class RangeTracker:
             now = (float(p[0]), float(p[1]))
             vel = e.get("vel")
             v2 = (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None
+            context = {"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
+                       "body": body_polys(e, tab.spec.body)}
+            if _observed_slam.ENABLED:
+                context["observed_motion"] = self.observed_stop(iid)
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
-                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None, vel=v2,
-                          ctx={"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
-                               "body": body_polys(e, tab.spec.body)})
+                          dec=inst.dec, st_now=inst.states[-1] if inst.states else None, vel=v2, ctx=context)
             est = Estimate(iid, k, m, inst.fam, inst.branch, b, now)
             if _jb.ENABLED and tk == _jb.CLAPPER and inst.states and (
                     (inst.fam in _jb.JUMP_FAMS and inst.states[-1] in _jb.LANDED_STATES) or

@@ -82,6 +82,8 @@ class NativeChainB2(NativeChainCandidates):
             raise ValueError("B2 requires measured polygon hammer model in BOTH arms")
         digest.update(json.dumps(runner.cfg0,sort_keys=True,default=str).encode())
         digest.update(json.dumps(profile.__dict__,sort_keys=True).encode())
+        from .observed_slam import revision_fields
+        digest.update(json.dumps(revision_fields(),sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")
         budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()))

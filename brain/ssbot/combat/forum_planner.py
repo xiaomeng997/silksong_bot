@@ -77,6 +77,7 @@ from pathlib import Path
 import numba
 import numpy as np
 
+from ssbot.combat import observed_slam as _observed_slam
 from ssbot.combat import candidates as cmod
 from ssbot.combat import dslash, forum_v2, rune_bombs, special_mode, specials, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
@@ -1300,6 +1301,11 @@ class ForumPlanner(Planner):
         seen_contacts(*args)
         # "+s" and the aimed pins (the smoke of 2026-10-08 evening: a 1.8 s first call mid-fight)
         seen_contacts_swept(*args, 1.0 / 60.0, SEEN_SWEEP_MIN_U_S)
+        if _observed_slam.ENABLED:
+            # Compile the real finite path explicitly before the measured loop.
+            from .seen_lifetime import timed_seen
+            for sweep in (False, True):
+                timed_seen(*args, np.array([.1]), 1.0 / 60.0, SEEN_SWEEP_MIN_U_S, sweep)
         z = np.zeros((2, 5))
         pin_contacts_kernel(z, z, np.zeros((2, 5), np.bool_), 0.5, 0.5, np.array([1], np.int64), np.zeros(1),
                             np.zeros(1), PIN_AIM_F, np.ones(1), np.zeros(1), PIN_SPAWN_U, 0.5, np.zeros(5))
@@ -2934,8 +2940,13 @@ class ForumPlanner(Planner):
                 if tp is None:
                     continue
                 p0 = tab.position(tp, b, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
-                d = np.array([tab.position(tp, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
-                              for k in range(n)], np.float64) - np.asarray(p0, np.float64)[None]
+                motion = trk.observed_stop(t.iid) if hasattr(trk, "observed_stop") else None
+                if motion is not None:
+                    d = np.array([_observed_slam.predicted_offset(tab, inst, tp, b, b + k, motion[1])
+                                  for k in range(n)], np.float64)
+                else:
+                    d = np.array([tab.position(tp, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
+                                  for k in range(n)], np.float64) - np.asarray(p0, np.float64)[None]
                 paths.append(tbox[ti, 0][None, :] + np.stack([d[:, 0], d[:, 1], d[:, 0], d[:, 1]], axis=1))
             if paths:
                 out[ti] = paths
@@ -4445,8 +4456,14 @@ class ForumPlanner(Planner):
                 if len(pbox):
                     args = (np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1), verts, starts, pbox,
                             pvel, np.ascontiguousarray(tk, np.float64), np.ascontiguousarray(cand, np.int64), 0.0)
-                    cnt, fst = seen_contacts_swept(*args, self.params.frame_time, SEEN_SWEEP_MIN_U_S) \
-                        if fcfg.seen_sweep else seen_contacts(*args)
+                    expiry = _observed_slam.seen_expiries(ws, f) if _observed_slam.ENABLED else None
+                    if expiry is not None and len(expiry) == len(pbox) and np.isfinite(expiry).any():
+                        from .seen_lifetime import timed_seen
+                        cnt, fst = timed_seen(*args, expiry, self.params.frame_time, SEEN_SWEEP_MIN_U_S,
+                                              bool(fcfg.seen_sweep))
+                    else:
+                        cnt, fst = seen_contacts_swept(*args, self.params.frame_time, SEEN_SWEEP_MIN_U_S) \
+                            if fcfg.seen_sweep else seen_contacts(*args)
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
                 if fcfg.seen_sweep and pins:
                     # "+s": a row meeting an aimed pin (not thrown yet) is a seen contact too

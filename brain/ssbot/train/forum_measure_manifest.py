@@ -178,6 +178,7 @@ _CHAIN_ROLES = {
     "SSBOT_FORUM_CHAIN_BLOCK": "accounting", "SSBOT_FORUM_CHAIN_ORDER": "accounting",
     "SSBOT_FORUM_CHAIN_PROBE": "accounting", "SSBOT_FORUM_CHAIN_SCHEDULE": "accounting",
 }
+_MODEL_KEYS = ("SSBOT_FORUM_OBSERVED_SLAM",)
 _WORKER_KEYS = ("SSBOT_WORKER_BOOST", "SSBOT_WORKER_CPUS")
 
 
@@ -256,7 +257,7 @@ def _execution_conflicts(policy, runtime_context, env):
     snapshot=getattr(chain,"_environment",None)
     if snapshot is not None:
         captured=dict(snapshot)
-        for key in _CHAIN_ROLES:
+        for key in (*_CHAIN_ROLES, *_MODEL_KEYS):
             if env.get(key)!=captured.get(key):problems.append(key+": environment changed after construction")
     requested=((runtime_context or {}).get("worker") or {}).get("requested_environment")
     if isinstance(requested,dict):
@@ -360,6 +361,7 @@ def configuration_manifest(package_root: Path, policy=None, *, environ=None, mod
                     switches[name]["bindings"][path] = converted
     for name,entry in switches.items():
         if name in _CHAIN_ROLES:entry["role"]=_CHAIN_ROLES[name]
+        elif name in _MODEL_KEYS:entry["role"]="control"
         elif name in _WORKER_KEYS:entry["role"]="execution"
     unresolved = _execution_conflicts(policy,runtime_context,env)
     for name, entry in switches.items():
