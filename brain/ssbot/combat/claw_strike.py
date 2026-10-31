@@ -203,6 +203,7 @@ class ClawStrike:
     def __init__(self, cfg: CsCfg | None = None, params=None, terrain=None):
         self.cfg = cfg or CsCfg.from_env()
         self.params, self.terrain = params, terrain
+        self._exact_cs_step_cache = None  # explicit private B2 actual-step scope only
 
     # ---- the strike after control ----
 
@@ -238,12 +239,24 @@ class ClawStrike:
     def eval_strike(self, csim: _ac.ChainSim, ctx: CsCtx, a_entry: int, toward: int, coarse: bool = False) -> list:
         """The strike plans from control that pass in both slam timelines (air_chain.evaluate: S as B, the other one's
         body as A's box)."""
+        cache = self._exact_cs_step_cache
+        key = None
+        if cache is not None:
+            from .knife_chain_cs_cache import MISSING
+            key = cache.key(self, csim, ctx, a_entry, toward, coarse)
+            if key is not None:
+                cached = cache.lookup(key)
+                if cached is not MISSING:
+                    return cached
         plans = self.strike_plans(csim, ctx, a_entry, toward, coarse)
         if not plans:
+            if key is not None:cache.put(key, [])
             return []
         ac_ctx = _ac.Ctx(b_iid=ctx.s_iid, b_x=ctx.s_x, b_y=ctx.s_y, b_face=ctx.s_face, kb0=csim.fo - a_entry,
                          a_box=ctx.other_box, hero_x=float(csim.start[kin.PX]), face=toward, tls=ctx.tls)
-        return _ac.evaluate(csim, ac_ctx, plans, csim.f + 2)
+        result = _ac.evaluate(csim, ac_ctx, plans, csim.f + 2)
+        if key is not None:cache.put(key, result)
+        return result
 
     # ---- the plan before the press ----
 

@@ -410,7 +410,11 @@ class NativeChainB2(NativeChainCandidates):
         from .knife_chain_eval import ChainPreview
         draft=logical_copy(self.runner);draft.observation_cutoff=f
         model=ChainSim(sim.start.copy(),sim.prefix.copy(),sim.hold.copy(),sim.params,sim.terrain,sim.fo,sim.f)
-        mask=draft.step(f,state,ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
+        from .knife_chain_cs_cache import exact_cs_step
+        with exact_cs_step(draft.anchor,enabled=bool(draft.cfg0.get("CLAWSTRIKE")) and control(es[0])[0]=="Slam Antic") as cache:
+            mask=draft.step(f,state,ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
+        if cache is not None:
+            self._note("b2_cs_exact_step_cache",frame=f,**cache.stats())
         preview=ChainPreview(f,mask,draft) # first key f+2: actual information has >=2f lead
         if preview.mask is None or preview.draft.run is None:
             self._no_candidate("family program offered no current action",frame=f,state=state);return None
@@ -594,7 +598,7 @@ class NativeChainB2(NativeChainCandidates):
             if not offers:self._no_candidate("no checked post-bounce branch",frame=f,state=state)
             return max(offers,key=lambda o:o.value) if offers else None
         try:
-            future=compile_path(preview.draft,state,sim,game,stage="commitment",first_mask=preview.mask,profile=self.profile)
+            future=compile_path(preview.draft,state,sim,game,stage="commitment",first_mask=preview.mask,profile=self.profile,selected_claw=True)
             if not is_committing(preview.draft.run,self.profile):
                 path=future.approach
                 if path is None:raise NominalUnsupported("no next entry decision in nominal approach")
@@ -617,20 +621,42 @@ class NativeChainB2(NativeChainCandidates):
             from .knife_chain_post import KINDS
             bs=ChainSim(future.states[:,-1],np.array([future.queued_next],np.int64),future.hold_end,
                         sim.params,sim.terrain,future.through,future.through)
-            paths={};errors={}
+            # The N=2 contract asks only for short executable types. Do not
+            # interpret every tail to ground merely to discover that threshold.
+            paths={};errors={};full_paths={}
             for kind in KINDS:
                 try:
-                    paths[kind]=self._post_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
-                        kind=kind,move=move,frame=f,mask=0,press=future.press_frame)
+                    if kind in self._post_keys:
+                        paths[kind]=self._post_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
+                            kind=kind,move=move,frame=f,mask=0,press=future.press_frame)
+                    else:
+                        paths[kind]=compile_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
+                            stage="continuation",first_mask=0,profile=self.profile,branch=kind,
+                            known_press=future.press_frame,stop_after=self.profile.short_frames)
                 except (NominalUnsupported,ChainObservationNotReady) as exc:errors[kind]=str(exc)
             bgeo=B2Geometry(forecast,f,move,observed[2])
             bounce_ref=f"{move}:{future.through}"
             opts=[]
             for kind,path in paths.items():
                 short=bgeo.scan(path,min(self.profile.short_frames,len(path.commands)))
-                opts.append(Continuation(kind,kind,bounce_ref,bgeo.ref(path),path.through,self.continuation_executable(kind,path),"pass",short))
+                opts.append(Continuation(kind,kind,bounce_ref,bgeo.ref(path),
+                    path.through if path.end=="handback" else None,
+                    self.continuation_executable(kind,path),"pass",short))
+            def finish(kind):
+                if kind not in full_paths:
+                    from .knife_chain_nominal import finish_post
+                    full_paths[kind]=finish_post(paths[kind],sim.params,sim.terrain,profile=self.profile)
+                    self._remember_post_keys(full_paths[kind],kind,move,f)
+                return full_paths[kind]
+            def full_scan(option):
+                from dataclasses import replace
+                from .knife_chain_commitment import FullContinuationScan
+                p=finish(option.option_id)
+                # Same command program, now extended from its recorded checkpoint.
+                scan=replace(bgeo.scan(p),path_ref=option.path_ref)
+                return FullContinuationScan(scan,p.through)
             exits=assess_continuations(tuple(opts),target_move=move,bounce_state_ref=bounce_ref,bounce_frame=future.through,
-                short_frames=self.profile.short_frames,full_scan=lambda o:bgeo.scan(paths[o.option_id]))
+                short_frames=self.profile.short_frames,full_scan=full_scan)
             details={"nominal_contact":future.contact_frame,"assumptions":future.assumptions,
                      "continuations":asdict(exits),"unavailable_branches":errors,"admission":asdict(admission)}
             if exits.verdict!="pass":
@@ -638,7 +664,16 @@ class NativeChainB2(NativeChainCandidates):
                     reason=exits.reason,continuations=asdict(exits),no_repeat_downslash=True);return None
             # A guaranteed planned nail strike is valued in the SAME ordinary hit
             # unit (weights.hit), not by the known-zero static-body nh/hit_w.
-            stance=max(self._endpoint(planner,p,prefs) for p in paths.values())
+            # Explicit conservative value approximation: one fixed first
+            # qualifying type's actual modeled handback, rather than a max over
+            # three fully expanded tails. This changes ranking, never admission.
+            representative=(exits.full_checked[-1] if exits.mode=="full_exit" else
+                            next(k for k in KINDS if k in exits.qualifying_kinds))
+            stance=self._endpoint(planner,finish(representative),prefs)
+            details["value_projection"]={"mode":"one_qualifying_handback",
+                "kind":representative,"all_tails_max":False}
+            self._note("b2_short_post",frame=f,short_kinds=list(exits.qualifying_kinds),
+                full_expanded=list(full_paths),value_kind=representative)
             value=float(prefs.weights.get("hit",10.))+stance
             return B2Offer("commitment",future,preview.draft,int(preview.mask),value,move,details)
         except (NominalUnsupported,GeometryUnavailable,ChainObservationNotReady) as exc:
@@ -661,6 +696,8 @@ class NativeChainB2(NativeChainCandidates):
         return all(bool(ctx.allowed_mask[int(p)]) for p in needs)
 
     def install(self,offer,planner,ordinary=None):
+        if offer.draft is not None and getattr(offer.draft,"_nominal_projection_only",False):
+            raise NativeChainAuditError("model-only selected strike cannot own runtime input")
         """Planner's selected B2 candidate; no physical action is sent here."""
         from .planner import PlanResult
         f=self.dispatch.frame

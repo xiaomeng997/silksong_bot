@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 from numba import njit
 from ssbot.knowledge import kinematics as km, kin_jit
+from .holdfilter import _lane as _hold_lane
 
 
 @njit(cache=True, error_model="numpy")
@@ -62,3 +63,20 @@ class NominalStepper:
     def trace(self,start,latched,game):
         return _trace(np.ascontiguousarray(start,dtype=np.float64).reshape(km.K),np.ascontiguousarray(latched,dtype=np.int64),
                       float(game),self.frame_time,self.unscaled,self.params,self.terrain)
+
+
+@njit(cache=True)
+def _hold_one(cmd,latched,desired,pending,age):
+    # Same _lane authority as hold_filter_jit, with every button active.
+    # Idle button ageing is identical; no per-frame Python key scan.
+    masks=np.full((1,1),cmd,np.int64);out=np.zeros((1,1),np.int64)
+    sl=np.zeros_like(latched);sd=np.zeros_like(desired)
+    sp=np.zeros_like(pending);sa=np.zeros_like(age)
+    nb=latched.shape[1];keys=np.arange(nb,dtype=np.int64);kmask=np.ones(nb,np.bool_)
+    _hold_lane(0,masks,latched,desired,pending,age,2,2,3,out,sl,sd,sp,sa,keys,kmask)
+    return out[0,0],sl,sd,sp,sa
+
+
+def hold_one(cmd,state):
+    m,sl,sd,sp,sa=_hold_one(int(cmd),state.latched,state.desired,state.pending,state.age)
+    return int(m),km.HoldState(sl,sd,sp,sa)

@@ -297,17 +297,24 @@ def begin_post_branch(runner,raw,sim,game,branch,*,observed_history=None):
 
 
 def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
-                 branch=None, known_press=None, observed_history=None):
+                 branch=None, known_press=None, observed_history=None, selected_claw=False, stop_after=None, frame_budget=None):
     """Run a private chain copy forward with generated observations, never replay keys.
 
     `runner` already contains the current real tick's preview (except a branch,
     whose entry is evaluated here). The queued origin+1 key is always supplied by
     a real receipt, or by the parent nominal path when evaluating its bounce.
     """
-    from .holdfilter import hold_filter_jit
+    from .knife_chain_step import hold_one
     profile=profile or NominalProfile()
+    if stop_after is not None and (stage!="continuation" or type(stop_after) is not int or stop_after<=9):
+        raise ValueError("short checkpoint only for post continuation beyond protection")
     if sim.fo!=sim.f or len(sim.prefix)!=1:raise NominalUnsupported("B2 needs current origin and one queued key")
+    if frame_budget is not None and (stage!="continuation" or type(frame_budget) is not int or not 1<=frame_budget<=profile.max_frames):
+        raise ValueError("invalid remaining continuation frame budget")
     R=logical_copy(runner);origin=int(sim.f)
+    if selected_claw and stage=="commitment" and R.run is not None and R.run.chain=="slam_claw":
+        from .knife_chain_program import selected_claw_projection
+        R=selected_claw_projection(R)
     if observed_history is not None:R.anchor.hist=observed_history
     if R.run is None:raise NominalUnsupported("no admitted family program")
     s=copy_model_observation(raw,R.run.v["iid"])
@@ -328,11 +335,11 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
     approach_path=None
     assumptions={"timing":"nominal", "contact":"h2_guard_conditional_median_press_plus_4",
                  "profile":dict(profile.__dict__),"future_state":"model_only"}
-    for step in range(1,profile.max_frames+1):
+    for step in range(1,(profile.max_frames if frame_budget is None else frame_budget)+1):
         F=origin+step
         if F not in desired:raise NominalUnsupported("missing queued/compiled key")
-        cmd=int(desired[F]);lat,hnext=hold_filter_jit(np.array([[cmd]],np.int64),hold)
-        m=int(lat[0,0]);old=S.copy();is_hook=False
+        cmd=int(desired[F]);m,hnext=hold_one(cmd,hold)
+        old=S.copy();is_hook=False
         dt=sim.params.frame_time*float(S[km.TS])*float(S[km.WF_S]);game+=dt
         event=0
         if hook is None:
@@ -403,18 +410,58 @@ def compile_path(runner, raw, sim, game, *, stage, first_mask, profile=None,
                 end="handback";break
             raise NominalUnsupported(f"family aborted before conditional bounce at {F}; press={press}")
         desired[F+2]=int(mask)
+        if stop_after is not None and F>=origin+stop_after:
+            # Preserve the old executable-type test even if the branch initially
+            # waits on its clock: retain through its first actual action + 4
+            # frames, not necessarily the remainder to ground. Geometry still
+            # checks the configured short horizon; these extra frames establish
+            # only the same first-action execution evidence as the old full row.
+            bit=B["DASH"] if branch=="dash_out" else B["L"] if branch=="left_landing" else B["R"]
+            action=next((i for i,m_ in enumerate(latched[1:],1) if m_&bit and (branch!="dash_out" or not latched[i-1]&bit)),None)
+            if action is not None and len(commands)>=action+4:
+                assumptions["next_offer"]=int(mask)
+                assumptions["short_horizon"]=stop_after
+                end="short";break
         if entry_frame is None and is_committing(R.run,profile):
             entry_frame=F
             assumptions["future_entry_decision"]=F
         if stage=="approach" and is_committing(R.run,profile):
             stop_at=F+1
     if stage=="commitment" and end!="bounce":raise NominalUnsupported("no modeled accepted strike/bounce in horizon")
-    if stage=="continuation" and end!="handback":raise NominalUnsupported("post branch did not hand back in horizon")
+    if stage=="continuation" and end not in ({"handback","short"} if stop_after is not None else {"handback"}):raise NominalUnsupported("post branch did not hand back in horizon")
+    if getattr(R,"_nominal_projection_only",False):
+        assumptions["selected_strike_program"]=dict(R._selected_strike_info)
     through=origin+len(commands)
     if through+1 not in desired:raise NominalUnsupported("missing next queued command at endpoint")
     return NominalPath(origin,stage,np.asarray(commands,np.int64),np.asarray(latched,np.int64),
                        np.stack(states,axis=1),np.asarray(boxes),np.asarray(poses),np.asarray(flags,np.int64),
                        np.asarray(checks,np.int64),np.asarray(games),hold,s,R,int(desired[through+1]),end,press,contact,assumptions,approach_path,branch_draft)
+
+
+def finish_post(short,params,terrain,*,profile=None):
+    """Resume the exact checkpoint; no invented ground handback or fresh pogo.
+
+    Only model interpreter/physics continue here. Safety is always queried by
+    the caller against this full concatenated path on the current forecast.
+    """
+    if short.end=="handback":return short
+    if short.end!="short" or short.stage!="continuation":
+        raise NominalUnsupported("not a post short checkpoint")
+    from dataclasses import replace
+    sim=ChainSim(short.states[:,-1],np.array([short.queued_next],np.int64),short.hold_end,
+                 params,terrain,short.through,short.through)
+    profile=profile or NominalProfile()
+    remaining=profile.max_frames-len(short.commands)
+    if remaining<1:raise NominalUnsupported("post checkpoint exhausted original horizon")
+    tail=compile_path(short.runner_end,short.raw_end,sim,float(short.game[-1]),
+        stage="continuation",first_mask=short.assumptions["next_offer"],profile=profile,known_press=short.press_frame,
+        frame_budget=remaining)
+    return replace(tail,origin=short.origin,
+        commands=np.r_[short.commands,tail.commands],latched=np.r_[short.latched,tail.latched],
+        states=np.c_[short.states,tail.states[:,1:]],box=np.r_[short.box,tail.box[1:]],
+        pos=np.r_[short.pos,tail.pos[1:]],flags=np.r_[short.flags,tail.flags[1:]],
+        check_flags=np.r_[short.check_flags,tail.check_flags[1:]],game=np.r_[short.game,tail.game[1:]],
+        first_draft=short.first_draft,assumptions={**short.assumptions,"resumed_short_checkpoint":short.through})
 
 
 def post_paths(parent, params, terrain, *, profile=None):

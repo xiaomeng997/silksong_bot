@@ -171,7 +171,7 @@ class Continuation:
     kind: str
     bounce_state_ref: str
     path_ref: str
-    handback_frame: int
+    handback_frame: int | None
     first_executable: bool | None
     admission: str
     short_scan: ContactScan | None
@@ -180,11 +180,20 @@ class Continuation:
         if (not self.option_id or self.kind not in CONTINUATION_KINDS
                 or not self.bounce_state_ref or not self.path_ref):
             raise ValueError("invalid continuation identity/kind")
-        _frame(self.handback_frame)
+        if self.handback_frame is not None:_frame(self.handback_frame)
         if self.first_executable is not None and type(self.first_executable) is not bool:
             raise ValueError("first executable must be bool or unknown")
         if self.admission not in VERDICTS:
             raise ValueError("invalid continuation admission")
+
+
+@dataclass(frozen=True)
+class FullContinuationScan:
+    scan: ContactScan
+    handback_frame: int
+
+    def __post_init__(self):
+        _frame(self.handback_frame)
 
 
 @dataclass(frozen=True)
@@ -234,7 +243,7 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
         raise ValueError("duplicate continuation option")
     if any(o.bounce_state_ref != bounce_state_ref for o in options):
         raise ValueError("cannot combine continuations from different bounce states")
-    if any(o.handback_frame < bounce_frame for o in options):
+    if any(o.handback_frame is not None and o.handback_frame < bounce_frame for o in options):
         raise ValueError("handback precedes bounce")
     eligible, unknown, checks = [], [], []
     for o in options:
@@ -250,7 +259,7 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
         short = check_external_path(
             o.short_scan, path_ref=o.path_ref, target_move=target_move,
             first_frame=bounce_frame,
-            last_frame=min(o.handback_frame, bounce_frame + short_frames),
+            last_frame=min(o.handback_frame if o.handback_frame is not None else bounce_frame + short_frames, bounce_frame + short_frames),
             stage="continuation")
         checks.append(ContinuationCheck(o.option_id, o.kind, "short", short.verdict,
                                         short.reason, short))
@@ -266,9 +275,20 @@ def assess_continuations(options: tuple[Continuation, ...], *, target_move: Move
     checked = []
     for o in eligible:
         checked.append(o.option_id)
-        result = check_external_path(
-            full_scan(o), path_ref=o.path_ref, target_move=target_move,
-            first_frame=bounce_frame, last_frame=o.handback_frame, stage="continuation")
+        resolved=full_scan(o)
+        handback=o.handback_frame
+        if isinstance(resolved,FullContinuationScan):
+            if handback is not None and handback!=resolved.handback_frame:
+                raise ValueError("resolved continuation handback differs")
+            handback=resolved.handback_frame;resolved=resolved.scan
+        if handback is None:
+            result=PathResult("unchecked","full continuation handback missing")
+        elif handback<bounce_frame:
+            raise ValueError("resolved handback precedes bounce")
+        else:
+            result = check_external_path(
+                resolved, path_ref=o.path_ref, target_move=target_move,
+                first_frame=bounce_frame, last_frame=handback, stage="continuation")
         checks.append(ContinuationCheck(o.option_id, o.kind, "full", result.verdict,
                                         result.reason, result))
         if result.verdict == "pass":
