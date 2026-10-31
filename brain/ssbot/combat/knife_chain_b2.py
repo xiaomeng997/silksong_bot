@@ -859,20 +859,28 @@ class NativeChainB2(NativeChainCandidates):
                 from .knife_chain_jump import JumpStartWatch
                 jump=JumpStartWatch.from_path(selected.path,selected.move,frame,self._receipts)
         watch=self._hook_start
-        if last is None and watch is not None and watch["seen_frame"] is None and int(mask)&B["CLAW"]:
+        # A deferred first J is emitted by an active tick, not the original
+        # commitment tick. Its absolute jump block still belongs to this hook.
+        if last is None and watch is not None and watch["seen_frame"] is None:
             last=max(watch["targets"])
         matches=selected is not None and int(mask)==selected.mask
         if matches and last is not None and jump is not None and jump.seen_frame is None:
             reason=None
-            if int(mask)&B["J"] and target in jump.targets and received_frame>=target:
-                reason="pre-hook ground-jump target already observed before send"
+            if int(mask)&B["J"]:
+                if not jump.sent_targets and target!=min(jump.targets):
+                    reason="first pre-hook ground-jump target skipped before send"
+                elif target in jump.targets and received_frame>=target:
+                    reason="pre-hook ground-jump target already observed before send"
             elif int(mask)&B["CLAW"]:
                 reason="pre-hook ground jump not observed before CLAW dispatch"
             if reason is not None:
                 return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
                     received_frame=received_frame,event="b2_jump_send_veto",reason=reason,
                     jump_targets=list(jump.targets),jump_seen=jump.seen_frame)
-        if last is not None and matches and received_frame>=last:
+        # Retain the hook deadline's original commitment/CLAW scope; a later
+        # neutral tick may still be waiting for an already sent hook to appear.
+        if (last is not None and matches and received_frame>=last and
+                (selected.stage=="commitment" or int(mask)&B["CLAW"])):
             return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
                 received_frame=received_frame,event="b2_hook_send_veto",
                 reason="hook dispatch window expired before actual send",last_hook_target=last)
