@@ -11,6 +11,10 @@ from ssbot.knowledge import kinematics as km
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import state_names
 
+# With SEND_AHEAD=2, C >= J+3 lets STATE(J+1) prove takeoff before
+# the first CLAW is sent. This is a B2 candidate timing rule, not a retry.
+B2_HOOK_JUMP_LEAD = 3
+
 
 def _observed_flag(state,name):
     """Tri-state: missing cState data is unknown, never observed airborne."""

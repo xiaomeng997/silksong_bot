@@ -261,11 +261,15 @@ class ClawStrike:
     # ---- the plan before the press ----
 
     def plan(self, sim: _ac.ChainSim, ctx: CsCtx, ground: bool, accepting: bool, hop_until: int | None = None,
-             p_only: int | None = None) -> CsPlan | None:
+             p_only: int | None = None, p_min: int | None = None) -> CsPlan | None:
         """The (hop, P) whose every Clawline variant has a strike plan (the most passing plans in the worst variant,
         then the earliest P; the search stops at GOOD_OK or BUDGET_S); None: none.
-        hop_until: a hop under way - the jump held to this mask frame (exclusive), no new hop; p_only: this press only."""
+        hop_until: a hop under way - the jump held to this mask frame (exclusive), no new hop; p_only: this press only.
+        p_min is an optional absolute mask-frame floor, applied before every
+        feasibility test. None preserves the legacy h2 search domain."""
         import time
+        if p_min is not None and (type(p_min) is not int or p_min < 0):
+            raise ValueError("invalid absolute first-Clawline floor")
         t0 = time.perf_counter()
         c = self.cfg
         F0 = sim.f + 2
@@ -278,6 +282,7 @@ class ClawStrike:
         rows = []
         for h in hops:
             lo = F0 + (2 if h else 1)
+            if p_min is not None:lo = max(lo, p_min)
             for P in ((p_only,) if p_only is not None else range(lo, p_hi + 1)):
                 if lo <= P <= p_hi:
                     rows.append((h, P))

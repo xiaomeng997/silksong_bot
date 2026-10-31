@@ -782,8 +782,18 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
     sim = x.obs.sim
     if cs.params is None:
         cs.params, cs.terrain = sim.params, sim.terrain
+    kwargs = {"hop_until": hop_until, "p_only": p_only}
+    if getattr(x.R.anchor, "b2_strict_observations", False):
+        from .knife_chain_jump import B2_HOOK_JUMP_LEAD
+        prior = x.v.get("cs")
+        if prior is not None and prior.hop:
+            # Keep the ORIGINAL jump's absolute floor during p_only checks
+            # and fallback searches. A later tick cannot pull it earlier.
+            kwargs["p_min"] = int(prior.f0) + B2_HOOK_JUMP_LEAD
+        elif ground and accepting:
+            kwargs["p_min"] = int(sim.f) + 2 + B2_HOOK_JUMP_LEAD
     t0 = time.perf_counter()
-    res = cs.plan(sim, _cs_ctx(x), ground, accepting, hop_until=hop_until, p_only=p_only)
+    res = cs.plan(sim, _cs_ctx(x), ground, accepting, **kwargs)
     x.tmp["plan_ms"] = round(1e3 * (time.perf_counter() - t0), 1)
     CV.store(x, store, res)
 
