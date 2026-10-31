@@ -337,6 +337,8 @@ class SlamAnchor:
         if v["hp0"] is not None and obs.hp < v["hp0"]:
             self.close(x, "abort", "hurt")
             return None
+        if getattr(self,"b2_c5_catchup",None) is not None:
+            _catchup_claw_recheck(x)
         return R.eval_link(x)
 
     # -- external entry (no active run) --
@@ -821,6 +823,25 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
     if calls is not None:calls.append({"p_only":p_only,"ok":res is not None})
     x.tmp["plan_ms"] = round(1e3 * (time.perf_counter() - t0), 1)
     CV.store(x, store, res)
+
+
+def _catchup_claw_recheck(x):
+    """Pay a deferred C5 at the last checkable fixed-P tick, without re-timing.
+
+    The table normally rechecks only F < P-1. A skipped decision can land at
+    F=P-1 after a fast J; C5 still has an actual candidate for the ORIGINAL P.
+    Check that fixed plan now, preserve h2 KEEP (including failure), and leave
+    the table's current keys unchanged. At F>=P, C5's candidate floor excludes
+    that P: do not pretend its early return is a completed physical recheck.
+    """
+    A=x.R.anchor;move=getattr(A,"b2_c5_catchup",None);cs=x.v.get("cs")
+    calls=getattr(A,"b2_c5_calls",None)
+    if (not getattr(A,"b2_strict_observations",False) or move is None or calls is None or
+            x.run.lid!="slam_claw.pre" or cs is None or not cs.hop or x.obs.sim is None or
+            x.v["iid"]!=move.target_iid or x.v["fa"]!=move.antic_frame or x.obs.F!=cs.f_press-1):return
+    before=len(calls)
+    pl_claw(x,"tmp.b2_late_check",False,x.obs.accepting,hop_until=cs.f0+cs.hop,p_only=cs.f_press)
+    if len(calls)>before:calls[-1]["source"]="late_fixed_plan_recheck"
 
 
 @P.planner("plan_adopt", doc="a re-planned CsPlan keeps the committed hop's frames (f0, hop) -> store")

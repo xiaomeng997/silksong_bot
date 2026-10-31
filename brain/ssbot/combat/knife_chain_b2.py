@@ -458,12 +458,18 @@ class NativeChainB2(NativeChainCandidates):
         model=ChainSim(sim.start.copy(),sim.prefix.copy(),sim.hold.copy(),sim.params,sim.terrain,sim.fo,sim.f)
         from .knife_chain_cs_cache import exact_cs_step
         calls=[] if self._fast_j_mode else None
-        if self._fast_j_mode:draft.anchor.b2_fast_j=fast;draft.anchor.b2_c5_calls=calls
+        if self._fast_j_mode:
+            draft.anchor.b2_fast_j=fast;draft.anchor.b2_c5_calls=calls
+            pending=self._fast_j_sent
+            draft.anchor.b2_c5_catchup=(pending["move"] if fast is None and pending is not None and
+                pending["deferred"] is None and f>pending["frame"] and self.commitment is not None and
+                pending["move"]==self.commitment["move"] else None)
         try:
             with exact_cs_step(draft.anchor,enabled=bool(draft.cfg0.get("CLAWSTRIKE")) and control(es[0])[0]=="Slam Antic") as cache:
                 mask=draft.step(f,state,ground,accepting,t_game=game,sim=model,guard=deepcopy(guard),bombs=deepcopy(bombs))
         finally:
-            if self._fast_j_mode:draft.anchor.b2_fast_j=None;draft.anchor.b2_c5_calls=None
+            if self._fast_j_mode:
+                draft.anchor.b2_fast_j=None;draft.anchor.b2_c5_calls=None;draft.anchor.b2_c5_catchup=None
         self._last_c5_calls=calls
         if cache is not None:
             self._note("b2_cs_exact_step_cache",frame=f,**cache.stats())
@@ -693,7 +699,7 @@ class NativeChainB2(NativeChainCandidates):
             if self.commitment["move"]!=move:
                 self._recover("commitment instance mismatch",f);return self._recovery_offer()
             if fast is not None:
-                details={"commitment":True,"fast_j":{"key":list(fast["key"]),"delta":fast["delta"],
+                details={"commitment":True,"fast_j":{"tick":fast["tick"],"key":list(fast["key"]),"delta":fast["delta"],
                     "application":fast["application"],"owners":fast["owners"],
                     "skipped":["C5 rule-0 recheck","_prepare_post_keys"]}}
                 self._note("b2_fast_j",frame=f,move=vars(move),mask=int(preview.mask),**details["fast_j"])
@@ -811,9 +817,12 @@ class NativeChainB2(NativeChainCandidates):
                 full_expanded=list(full_paths),value_kind=projection["kind"],value_projection=projection["mode"])
             value=float(prefs.weights.get("hit",10.))+stance
             if self._fast_j_mode:
-                from .knife_chain_hook_fast import owners
+                from .knife_chain_hook_fast import owners,target_obs,observed_hold,hold_equivalent
+                e=next((e for e in state.get("ents") or () if e.get("iid")==move.target_iid),None)
+                known_hold=observed_hold((state.get("act") or {}).get("hf"))
                 self._fast_j_pending_commit={"move":move,"frame":f,"instance":observed[2],
-                                             "owners":owners(forecast),"hold_start":sim.hold.copy()}
+                    "owners":owners(forecast),"hold_start":sim.hold.copy(),"target":target_obs(e),
+                    "hold_known":known_hold is not None and hold_equivalent(known_hold,sim.hold)}
             return B2Offer("commitment",future,preview.draft,int(preview.mask),value,move,details)
         except (NominalUnsupported,GeometryUnavailable,ChainObservationNotReady) as exc:
             self._note("b2_unchecked",frame=f,reason=str(exc));return None
@@ -986,9 +995,16 @@ class NativeChainB2(NativeChainCandidates):
                     from .knife_chain_hook_fast import plan_key
                     self._fast_j_commit={**pending,"origin":sent.frame,"path":selected.path,
                         "key":plan_key(self.runner.run.v.get("cs"))}
-            elif selected.stage=="active" and selected.details.get("fast_j") is not None and sent.desired_mask&B["J"]:
-                self._fast_j_sent={"move":selected.move,"frame":sent.frame,"target":sent.target_frame,"deferred":None}
+            elif selected.stage=="active" and selected.details.get("fast_j") is not None:
+                # One record per Move for the skipped re-plans (wait step, first J); it owes a full C5
+                # on a LATER tick. A wait step's key has no J: target stays None, no jump send is claimed.
+                tick=selected.details["fast_j"].get("tick","J");fs=self._fast_j_sent
+                if fs is None or fs["move"]!=selected.move or fs["deferred"] is not None:
+                    fs=self._fast_j_sent={"move":selected.move,"frame":sent.frame,"target":None,"deferred":None,"skips":[]}
+                fs["frame"]=sent.frame;fs["skips"].append(tick)
+                if sent.desired_mask&B["J"]:fs["target"]=sent.target_frame
                 self._note("b2_fast_j_sent",frame=sent.frame,target=sent.target_frame,move=vars(selected.move),
+                           tick=tick,j_sent=bool(sent.desired_mask&B["J"]),skips=list(fs["skips"]),
                            deferred="full C5 required on a later tick before CLAW")
             watch=self._hook_start
             if (watch is not None and self.commitment is not None and

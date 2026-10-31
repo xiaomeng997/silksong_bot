@@ -12,17 +12,26 @@ from ssbot.combat.knife_chain_eval import ChainObservationNotReady
 from tests.test_b2_deferred_dispatch_guard import deferred,stage,MOVE,ORIGIN
 
 
-def eligible():
+HF={'latched':B['R'],'desired':B['R'],'pending':[0]*22,'age':[255]*22}
+
+
+def eligible(kind='J'):
+    """Fresh-check inputs that pass: the wait tick (target J-1) or the first-J tick (target J)."""
     n=deferred();n.profile=replace(n.profile,fast_hook=True);n._fast_j_mode=True
-    stage(n,ORIGIN+2,B['J']);f=ORIGIN+2
+    f=ORIGIN+2 if kind=='J' else ORIGIN+1
+    if kind=='J':stage(n,f,B['J'])
+    else:stage(n,f,B['R'],target=ORIGIN+1,desired=B['R'])
+    n._actual_state['act']['hf']=dict(HF,pending=list(HF['pending']),age=list(HF['age']))
     cs=CsPlan(ORIGIN+4,3,ORIGIN+7,7,wait_mask=B['R']);n.runner.run.v['cs']=cs
     path=n._committed_future;S=np.zeros(km.K);S[km.PX]=35.;S[km.PY]=4.568;S[km.GROUND]=1;S[km.FACE]=-1
     path.states[:]=S[:,None]
-    model=NS(start=S,prefix=np.array([B['R']]),f=f,fo=f,hold=km.HoldState.idle())
-    n._context=((f,n._actual_state,2/60,True,True),model,None,None)
+    model=NS(start=S,prefix=np.array([B['R']]),f=f,fo=f,hold=km.HoldState.from_hf(HF))
+    n._context=((f,n._actual_state,(f-ORIGIN)/60,True,True),model,None,None)
     instance=object();rs=NS(trk=NS(now={7:(None,None,instance)},orphan_hazards={}),haz_raw={},raw={},layers={},bombs=None)
     fc=NS(rs=rs)
-    n._fast_j_commit={'move':MOVE,'key':fast.plan_key(cs),'path':path,'instance':instance,'owners':frozenset({7})}
+    n._fast_j_commit={'move':MOVE,'key':fast.plan_key(cs),'path':path,'instance':instance,'owners':frozenset({7}),
+                      'hold_start':km.HoldState.from_hf(HF),'hold_known':True,
+                      'target':{'pos':(30.,7.449),'flip':True,'state':'Slam Antic','k':0}}
     return n,fc
 
 
@@ -39,7 +48,7 @@ def test_fresh_input_or_instance_mismatch_returns_full_path(which):
     elif which=='key':n.runner.run.v['cs'].f_press+=1
     elif which=='prefix':sim.prefix[0]=B['L']
     elif which=='receipt':n._receipts[ORIGIN+1]=B['L']
-    elif which=='latch':n._actual_state['act']['mask']=None
+    elif which=='latch':n._actual_state['act']['hf']['latched']=None
     elif which=='owner':fc.rs.haz_raw[99]=object()
     elif which=='target':fc.rs.trk.now[7]=(None,None,object())
     elif which=='position':sim.start[km.PX]+=.050001
@@ -59,9 +68,10 @@ def test_outside_KEEP_cannot_defer_a_recheck_that_can_abort():
     assert fast.admit(n,fc) is None
 
 
-def test_first_J_only_no_optimization_for_waiting_tick_yet():
-    n,fc=eligible();n.dispatch.frame=ORIGIN+1
-    assert fast.admit(n,fc) is None
+def test_waiting_tick_is_eligible_and_keeps_the_stable_wait_key():
+    n,fc=eligible('wait');r=fast.admit(n,fc)
+    assert r['tick']=='wait' and r['mask']==B['R'] and not n._jump_start.sent_targets
+    n,fc=eligible('J');assert fast.admit(n,fc)['tick']=='J'
 
 
 def test_observation_readiness_is_still_required_for_the_primitive(monkeypatch):
