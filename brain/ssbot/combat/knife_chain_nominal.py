@@ -33,12 +33,14 @@ class NominalProfile:
     short_frames: int = 12
     jump_decision_k: int = 21
     close_entry_u: float = 3.
+    fast_hook: bool = False       # explicit work deferral; ordinary h2 remains off
     # Explicit nominal hook, not a favorable member selected after checking safety.
     hook_dash_frame: int = 18
     hook_control_after: int = 5
     hook_dash_steps: int = 5
 
     def __post_init__(self):
+        if type(self.fast_hook) is not bool:raise ValueError("fast_hook must be boolean")
         if not 3 <= self.contact_delay <= 9 or self.max_frames < 24 or self.short_frames <= 9 or self.jump_decision_k<0 or self.close_entry_u<0:
             raise ValueError("invalid nominal profile")
 

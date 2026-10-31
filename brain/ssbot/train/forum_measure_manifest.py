@@ -173,7 +173,7 @@ def _known_runtime_bindings(policy, loaded):
 _CHAIN_ROLES = {
     "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
     "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
-    "SSBOT_FORUM_CHAIN_SHORT_FRAMES": "control",
+    "SSBOT_FORUM_CHAIN_SHORT_FRAMES": "control", "SSBOT_FORUM_CHAIN_FAST_HOOK": "control",
     "SSBOT_FORUM_CHAIN_BATCH": "accounting", "SSBOT_FORUM_CHAIN_BUDGET": "accounting",
     "SSBOT_FORUM_CHAIN_BLOCK": "accounting", "SSBOT_FORUM_CHAIN_ORDER": "accounting",
     "SSBOT_FORUM_CHAIN_PROBE": "accounting", "SSBOT_FORUM_CHAIN_SCHEDULE": "accounting",
@@ -215,6 +215,8 @@ def _execution_bindings(policy, runtime_context):
                 profile=getattr(chain,"profile",None)
                 if hasattr(profile,"short_frames"):
                     out["SSBOT_FORUM_CHAIN_SHORT_FRAMES"]={"policy.chain_native.profile.short_frames":profile.short_frames}
+                if hasattr(profile,"fast_hook"):
+                    out["SSBOT_FORUM_CHAIN_FAST_HOOK"]={"policy.chain_native.profile.fast_hook":profile.fast_hook}
                 budget=getattr(chain,"budget",None)
                 if budget is not None:
                     for key,name in (("SSBOT_FORUM_CHAIN_BATCH","batch"),("SSBOT_FORUM_CHAIN_BUDGET","path")):

@@ -778,6 +778,15 @@ def _cs_ctx(x):
                             "every Clawline variant has a strike plan; CsPlan or None -> store (tmp.plan_ms: wall ms)")
 def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
     import time
+    fast=getattr(x.R.anchor,"b2_fast_j",None)
+    calls=getattr(x.R.anchor,"b2_c5_calls",None)
+    prior=x.v.get("cs")
+    if fast is not None and not fast["used"] and prior is not None and p_only is not None and prior.hop:
+        from .knife_chain_hook_fast import plan_key
+        if (plan_key(prior)==fast["key"] and int(p_only)==int(prior.f_press) and
+                hop_until==int(prior.f0)+int(prior.hop)):
+            _cs_ctx(x)  # retain actual observation readiness, even on the deferred step
+            fast["used"]=True;x.tmp["plan_ms"]=0.;CV.store(x,store,prior);return
     cs = _csx(x)
     sim = x.obs.sim
     if cs.params is None:
@@ -809,6 +818,7 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
             kwargs["first_feasible"] = True
     t0 = time.perf_counter()
     res = cs.plan(sim, _cs_ctx(x), ground, accepting, **kwargs)
+    if calls is not None:calls.append({"p_only":p_only,"ok":res is not None})
     x.tmp["plan_ms"] = round(1e3 * (time.perf_counter() - t0), 1)
     CV.store(x, store, res)
 

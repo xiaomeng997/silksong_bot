@@ -27,7 +27,7 @@ def policy(e):
     budget=SimpleNamespace(batch="sample",path=Path("C:/sample/budget.json"),worker="i0",
         state={"attempts":[attempt],"execution":{"conditions":{"crossover":{"sha256":"captured-file-sha",
             "schedule":{"batch":"sample","attempts":[{"order":0,"arm":"B"}]}}}}})
-    chain=SimpleNamespace(b2=True,runner_factory=lambda:None,arm="B",profile=SimpleNamespace(short_frames=12),
+    chain=SimpleNamespace(b2=True,runner_factory=lambda:None,arm="B",profile=SimpleNamespace(short_frames=12,fast_hook=False),
         probe_ref="sample-probe",budget=budget,episode=2,_environment=tuple(sorted(e.items())))
     return SimpleNamespace(chain_native=chain)
 
