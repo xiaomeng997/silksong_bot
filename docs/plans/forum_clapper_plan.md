@@ -1593,6 +1593,18 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **下一步与边界。** 完整P关键tick、总体预算及Opus增量审阅均已核证，按用户夜间授权准备新工程单局（source_review只签源，不签未发生的实机成功）。实际J/CLAW/DownSlash/命中弹起、动作接受、严预算和Launcher清理通过后，才另冻新源8局；旧8aba、停止批、A/A与strict/B1/留出不动。计划只同步main/刀口/TV，SMOKE8冻结期间刀口HEAD不提交。
 
+### 6.50 15e 新工程局：零掉血、迟发守卫生效，钩前起跳仍未验收【10-31 03:44清理】
+
+源码15e26dc3，执行HEAD4f814e69，新批b2-engineering-15e26dc3-20261031-01，目录step3/b2_trial_20261031_15e26dc3。独立源审阅/P预算核证后唯一一次WMI脱shell单局，未混8局。现场端口/PID 1.8s通过、worker High/P0–15/Numba4、预热6.3s。
+
+**实绩和完整性。** CLEAR，fight T=18.2389605194s，fight/tail 0HP；3次承诺，2次jump真实J/DownSlash/目标命中/弹起counter8，预测/真实分别2571/2571、3237/3238。3875测量记录、complete/trace/config/window均true、overflow0、unresolved[]、预算stop=None。第三次是claw，但首J被发前守卫否决，实际CLAW/Harpoon为0；不能记“钩索通过”或“整局控制器无缺陷”。audit_trial输出engineering_audit/verification.json passes=false，缺陷/恢复各1。没有追加同源试车，没有8局gate。
+
+**实际迟发。** f2758提案28.1162ms，剪枝正确（上界.650000031<链6.62460），完整tick36.1506ms；接收→tick start另5.5183ms。首J目标2760在发送前已收到，收到2758→send约41.60ms，而2760在约33.62ms就到达。守卫替成neutral并将此Move禁自动重试，2760恢复；没有再无跳强发钩爪。主要planner29.0388ms、tactics4.9615ms，其余完整保留。先前离线31.1–31.6ms只是无游戏争用的点界，实机此新状态/入队延迟证明不能把它当可靠的33.3ms发键余量。
+
+**真实清理。** 2026-10-31T10:44:11.255539Z（PDT03:44:11）launch/cleanup.json完整通过：worker0，game released/exit1，registry/live空、restore_pending=false、golden SHA fc41b9c5427b4e23ec60af1f16808a6b497507eded5704b90c9224b056ea0469、Prefs diff[]、旧DEMO恢复、errors[]。STATUS随后实际false，Opus可按自己的范围审这一局。
+
+**下一步。** 失败原样保留，8局暂停。现有微优化没有给实机留够首J余量，先离线设计“在完整新候选内把初始起跳计划到f+4（而非f+2）”，等待段也沿完整名义轨迹/外部危险/N=2检查；后续固定/备用重搜保留同一个绝对跳起点、不偷提前，CLAW仍≥J+3、观察真实起跳的门不减。不是发晚了再挪同一招的键，也不回到撤回的分段承诺。尚未实现/验收，若无可行新候选就拒绝，不放松ray/接触/裕量/严停止。同条件未修不重跑。
+
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
 - **机会项**：在终点价值里给"能接上刀口"的终点加分。对每只 Clapper，按 L1 模型、随她的位置去枚举它的下一招（近招还是远招；跳是约 8.4 u 以外才出的远招，见 `forum_planner_plan.md`），再看从终点能不能赶上那一招的刀口格。要按她的位置枚举，不能对所有选择取并集，否则场又会饱和。
