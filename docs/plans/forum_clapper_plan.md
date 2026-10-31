@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（10-31，6.73）：61302d3b首轮8局全CLEAR，A/B各4局、fight/tail均0HP，B2八次承诺均真实命中弹起交还，原批已完整清理且不重开。近锤机制按#72–#80完成原始测量、有限寿命/观察停止联合诊断及工件复核。新源11d04479将最小模型修复以默认关闭开关移植，1419统一回归通过/1不适用skip；off/on事实输入身份对照四项3318tick对各自参考0差，独立源审阅#81和新P点界/关键调度已核收，正在准备单独新工程局，真实动作/清理门未验。后续按新绑定重验预算与工程局，再推进先导；原严停止及AA/strict/B1/留出暂停不变。**
+2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（10-31，6.74）：61302d3b首轮8局全CLEAR，A/B各4局、fight/tail均0HP，B2八次承诺均真实命中弹起交还，原批已完整清理且不重开。近锤机制按#72–#80完成原始测量、有限寿命/观察停止联合诊断及工件复核。新源11d04479将最小模型修复以默认关闭开关移植，1419统一回归通过/1不适用skip；off/on事实输入身份对照四项3318tick对各自参考0差，独立源审阅#81和新P点界已核收，但新工程单局在第二次真实弹起后被Slam Collider2打2HP，已严停并实际清理，完整性/工程验收失败；正在离线定位，不开新局。后续按新绑定重验预算与工程局，再推进先导；原严停止及AA/strict/B1/留出暂停不变。**
 
 > **当前唤醒方式（10-31，6.60）**：Opus交付后运行sol/mailwatch/wake_sol.ps1，30秒后一次性通知当前聊天；同编号去重。旧10分钟轮询已删除，未停止项目任务或放宽实机门。
 
@@ -1881,6 +1881,16 @@ Opus任务17：先量当前8槽及已用过的h2 w7开发16局的Slam冲刺长�
 **这一单局具体做什么。** 新根step3/b2_trial_20261031_11d04479/，独立B工程批、固定seed314159、1局、--measure和协议2/诊断/engineering-probe，旧h2配置只换首族与新源Model=1/FAST_HOOK=1；源/模型/脚本/配置/预算和真实source_review、P/serial/身份重新绑定。执行HEAD在准备合同前最后固定，此后至清理刀口HEAD不提交。actual worker自己的OracleLink先只读input.stats，0delay/jitter、HF2/2、pending0不符/未知即halt清理，不改配置/清队列。预备驱动沿已用单次Launcher/WMI/pythonw脱shell及隐藏辅助，精确PID就绪、原资源/人类标记/活动锁和golden/Prefs/旧DEMO/registry清理门都保留。
 
 **实机验收仍须实际发生。** 单局必须独立核首J真实执行离地、CLAW/Harpoon、DownSlash、目标命中+剩余8步counter、观察弹起/真实交还、全日志/测量和完整清理；没有钩索就明确未验，不能替代。B fight累计2HP结束该批，首次新的链相关受击暂停；死亡/期望键不符/超4帧无后续相符回报/缺关键日志立即停。Opt1晚≤2及前后匹配跳报同/换键分计，不等于动作真执行；失败无弹起责任窗口不变。第一次失败保留，不补局、不自动重跑；同因未修不重试。tail另计。Root实际审核后才通知Opus做独立现场复核，通过才另冻后续8局/先导；当前这些都没有新gate，不复用613/15e/8aba旧审阅或预算。
+
+### 6.74 新工程2HP严停，真实清理通过；弹起后锤伤待定位【11d04479，后续实机暂停】
+
+**本批事实与停止。** 唯一新工程根step3/b2_trial_20261031_11d04479/，runtime11d04479、执行HEAD79a47755、合同sha256 6b2de40449e757354ff21d4c230017d1471c18ab2268457dd11dbbde655fcb08；WMI唯一wrapper启动、游戏34176、实际worker42244。2941由Song Heavy Sentry/Slam Collider2造成2HP，budget同帧记录post/chain_related并按B fight2HP+首次新链伤害停；outcome HARNESS_FAIL，不补局、不重启。本次没有hook，不能证明新源首J/CLAW通过，也不把未出现的钩索叫漏钩。旧613八局0HP仍仅属旧批。
+
+**动作与失血位置。** 两次jump承诺fa2761/2878，实际DownSlash命中/counter8/真实交还2813和2931；第二次nominal预计2929，真实晚2帧。2931交还普通规划器，2932选DASH(R)+runR、S0/退路pass；2934实际Air Dash，随后Sprint Air，2939开伞。2939和2940保护counter1（2940 fs0），2941新物理步counter0并伤害；受击发生在真实交还后10个报告帧，责任预算正确计post。伤害事件/HP先于同帧Slam2→Recover，帧末锤框已关闭，不以帧末无框否认缓冲伤害。第二次根从Slam0到停止前冲3.6u；不能先归因为新观察停止、有限寿命、输入迟到或墙停。原始事实表analysis/observed_slam_port_20261031/FAILURE_RAW_FACTS.json，实际普通行S/键/耗时见measurement与chain日志。
+
+**清理、输入和完整性分开。** 真正cleanup结束2026-10-31T23:08:45.943603Z，自有游戏released且已退出、另查无残留；golden sha fc41b9…、Prefs无差、旧DEMO恢复、registry live/instances空且restore_pending=false、errors空。故障worker_rc1与LearningStop主故障保留；旧通用audit_trial的cleanup_pass还要求worker_rc0/failure=None，其false是成功条件混合，不能误报为配置未恢复，另以原始cleanup核restore_cleanup_pass=true。实际worker自己的bootstrap input.stats通过0delay/jitter、HF2/2、pending0。trace/config完整，但measurement.complete/window.complete=false/episode_harness_fail，未观测HP/时间区间不能填空，不计算该局HP/min或称完整成功局；engineering_audit/verification.json的passes=false原样保留。
+
+**当前分工与后续门。** LIVE_BLOCKED.json已写、STATUS实机门false；组件仍默认关。Root仅在E24–31/Idle对这一个新失败做一次事实输入原生诊断，抓2931–2940选中路径/保护/预测归属并对实际日志；截止无限、事实未来只对照，差异需先标记，不能把后续不同按键当动力学误差。Opus任务21已在清理后明确放行失败的实际部分，E16–23/Idle做原始碰撞体/英雄动作与HERO2单路径对照，不重复政策/P/旧8局。先定位首个判安全却不符的层，再按证据改源、新审阅/预算与新批；不放宽N=2/余量/保护或停止，不改原失败/预算/旧源，不增加长期评分前置。新8局/先导均无gate。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
