@@ -1568,6 +1568,23 @@ Sol按Opus同一真实协议驱动框架重跑16回合：仍18,937调用/4,354�
 
 **已处理 Opus #40（任务接收记录）。** Opus接任务7独立定位compile_path解释器余项，e92/cbd增量OP5仍在途；Sol另验证控制搜索的预打包原数学kernel，双方不碰对方目录/源。当前最近源45af1bf5，旧cbd完整P关键约42.2ms仍大于首J33.3ms；继续提速、整tick复测和独立审阅，达到条件后按用户夜间授权自主新工程局。无REVIEW_GATE/正式8局、无新游戏/新样本；严规则、旧失败保留、冻结A/A/strict/B1/留出暂停均不变。
 
+
+### 6.49 已验链的值支配剪枝与状态归属【10-31夜间；源码15e26dc3，P复测中】
+
+**方法。** 当前tick的链已通过原h2准入、完整外部危险/延迟危险、N=2与first_allowed后，普通候选只有在分数够高时才可能赢。原生ordinary的全部正信用（含特殊/DS时域外命中、eml、CONTINUE）加入后，后面只剩whip扣分；对有限非负权重/命中计数可取所有行J最大值的向上界。BIND独立J=1000必须先排除；NaN/Inf/负号/未知表示或不满足严格支配，一律保留原完整普通流程，不伪造S=0、退路或尾段通过。
+
+**更早的零权重界。** 在真实_forum_targets已经应用hit_kw覆盖、hit_w默认1、blocked/no_hit/目标槽之后，全部有效target/kind权重严格0，且TV=None、无特殊/hop/native/DS/map/knife额外行及无BIND时，可在普通物理前界定非命中正奖励。使用face/ground/CONTINUE正部、风险极值、under每type全部family最大gain、eml正奖励上界及向上数值余量；检查原生scorer/kernel/terminal/forecast/rollout/参数/terrain权威与有限数值域，未知回原。准备的目标tuple在未剪枝时交原评分复用，不重复查询。两个入口还要求无_spec_meta/_map/pv_sm/_kp、jump/macro提示已过期和无harpoon，首轮不覆盖有活跃普通程序或特殊BOARD的范围。ValueDominated没有普通安全字段，日志明确ordinary安全/退路/尾段未检查。
+
+**不是旧B全state纯提速。** 原ordinary即使只作比较、最后没选中，也会先写jump_until/macro_until/kept/DS提示；不能为了省时伪造那个未执行动作。本次明确状态归属：每次B2 commitment安装（全算或剪枝均同）取消未选普通动作的这些提示，真实计数ticks仍每决策一次；剪枝时last_sel/last_safe/last_cs清为未知，下一实际ordinary重新计算。提前恢复也不继承未执行普通动作的保跳/宏；其他计时/审计和旧闭环状态不宣称逐项等价。A/默认路径不传挑战值、不改此控制政策，恢复/接近/已承诺段保持既有归属。
+
+**证据。** 独立只读上界审阅见analysis/b2_value_dominance_20261031/，实现审阅见sol/overnight/{SCORE_BOUND_REVIEW,ZERO_HIT_BOUND_REVIEW}：配置NaN/字符串、scorer/terminal/kernel/rollout适配及carrier接收绑定P2均修。最终62份相关回归1194通过、快照外模块0，含真实普通宏/保跳/kept/BIND回退、未知adapter/stale carrier拒绝、非命中公式对照、真实commit安装两分支的状态归属。真实f2973原508普通行最高−4.59565、链7.33508；早界见证读到完整kind权重四项全0、risk_min0.91048、under/eml正奖0、无BIND/TV/额外信用，保守上界0.650000031。四项输入和链offer（含CsPlan/8轨迹hash）相同；E旧约73.3、后评分剪枝70.0、早界62.5ms仅诊断，不作P预算。清记忆后该开环记录post候选/选择有所改变，未掩成旧B全轨迹等价；没有新游戏。最新独占P核两B一A正在p_15e26dc3/，仍等实际结果。
+
+**已处理 Opus #41（Sol工程取舍）。** e92正确性/1108及18次持有-after_adopt核收。保留首个完整可行的搜索偏好用于当前有界学习；GOOD_OK=4是质量停止偏好，原h2也可返回低于4的完整计划，不把它改叫准入门。8/28初始计划最差变体2条对全搜索5条、出钩早1–2帧，以及第10回合慢起跳可能被保守弃招，均作为真实覆盖/稳健性代价登记，不称“计划都没变”。每个gap×control仍须有实际通过的strike，余量/射线/接触/完整外部路径/N=2不减；不再花不定质量搜索把J算迟。工程局与至多8局学习都保留原2HP/首次新链伤害/死亡失步缺日志严停，逐次记录var_ok、起跳弃招和全部漏计划刀归控制器缺陷，不补坏局，不把本取舍推广为正式比较或普遍必中认证。新增plan_adopt回归已覆盖其值相等前提。
+
+**已处理 Opus #42/#43/#44。** 独立源blob核对与逐case凭证在opus_42_44_recheck/result.json：cbd5源件/1127和45af3源件/1141全部与Git及Sol既有分批凭证相符；接收3934膨胀影子0差、188次出刀/1635计划0差、16回合20079tick非计时一致与A0/5一致的有界结论，不冒称重跑。任务7未找到大块解释器重复，守卫闭包/第三遍跨TL缓存/新物理前缀接口均不晋升。其compile_path内pass2节省原来未在45af调用点打开，本次15e才显式接至B2 strict的原生pl_strike_search；A/h2/adapter照旧。全组_pass2_rows改为独立数组，去掉共享对象P3；dilation kernel旁补全局依赖注释。旧线程/预打包/深指纹原型继续暂停。
+
+**下一步与边界。** 先独占P核完整关键tick和总体预算，再由Opus增量审15e（包括明确状态归属变化），都满足才自主新工程单局。实际J/CLAW/DownSlash/命中弹起、动作接受、严预算和Launcher清理通过后，才另冻新源8局；旧8aba、停止批、A/A与strict/B1/留出不动。计划只同步main/刀口/TV，SMOKE8冻结期间刀口HEAD不提交。
+
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
 - **机会项**：在终点价值里给"能接上刀口"的终点加分。对每只 Clapper，按 L1 模型、随她的位置去枚举它的下一招（近招还是远招；跳是约 8.4 u 以外才出的远招，见 `forum_planner_plan.md`），再看从终点能不能赶上那一招的刀口格。要按她的位置枚举，不能对所有选择取并集，否则场又会饱和。
