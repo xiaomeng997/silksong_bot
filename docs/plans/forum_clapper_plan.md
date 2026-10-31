@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（10-31，6.61）：61302d3b源不变，1360回归/1skip、源审阅、新P总预算及真实工程动作/清理门已过；Opus #66现场复核经Root原始复算接收，续段晚1帧和紧窗口P2在原严预算下明确接受观察、未宣称修复。新8局ABBA/BAAB已写真实REVIEW_GATE并完成8槽干跑，准备按新批冻结和执行；工程局不混入，默认仍关闭，AA/strict/B1暂停。通知改交付后30秒一次性唤醒，旧10分钟轮询已删除。**
+2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（10-31，6.62）：61302d3b首轮8局ABBA/BAAB已全部CLEAR，A/B各4局、fight/tail均0HP，最后17:23:40Z完整清理。B2共8承诺/8真实命中弹起交还、3次Harpoon，441发送含1次Opt1同键覆盖；slot02_B无链的机会原因待独立审。Root数据/动作/配置/677源模型/清理核验通过，Opus任务15已放行待报告；不据8局宣称改善或完美w7，不自动追加实机。原严停止/默认关闭及AA/strict/B1暂停保留，交付后30秒一次性唤醒接续。**
 
 > **当前唤醒方式（10-31，6.60）**：Opus交付后运行sol/mailwatch/wake_sol.ps1，30秒后一次性通知当前聊天；同编号去重。旧10分钟轮询已删除，未停止项目任务或放宽实机门。
 
@@ -1750,6 +1750,18 @@ Sol先完成无依赖的任务11生产移植：显式SSBOT_FORUM_CHAIN_FAST_HOOK
 **本次新批预注册规格。** sol/overnight/smoke61302d3b/已写真实REVIEW_GATE，绑定#64源审阅、#66独立现场报告与Root核收、当前新P总预算、真实工程输入/动作/清理等；接受编号按集合逐项列至66/67，不凭最大编号掩盖旧项。最终driver/排程的真实8槽LearningBudget干跑通过（checks/20261031T171108Z_39260），第9槽拒绝。新的step3/w7_smoke8_20261031_61302d3b/将在当前文档提交后才freeze；A/B/B/A、B/A/A/B，两块，每臂4局，总8，无替换。seed依次314159/271828/314159/271828/161803/141421/161803/141421；工程局不混入。
 
 A是当前源h2+共同模型；B含B2、既有提示归属修正、lead5/守卫/快路径；不能称旧B纯等价。两臂同FAST_HOOK=1/profile，A按arm不用。677源/模型文件与脚本/版本/排程/解释器/配置逐项绑定，实际worker自连接只读input.stats门、--measure/diagnostics、逐局回执/HP/动作覆盖和完整清理都必须过。任何新阻挡、STOP/练习标记、资源争用不绕过；WMI/pythonw隐藏脱shell，STATUS在游戏前true并30秒刷新，Opus暂停计算。冻结到全批真实清理，刀口HEAD不再提交，计划若更新先main、批后同步；最终保留所有局、停止、veto/unknown、尾损与峰，不作8局统计改善/完美w7断言。
+
+
+
+### 6.62 新8局全部完成与真实清理【61302d3b；A/B各4局，均0HP】
+
+**固定合同已完成。** step3/w7_smoke8_20261031_61302d3b/，冻结执行HEAD 8a9e6a94、runtime61302d3b，合同b481a903acfbd66ca319c3f85f915e2e7d3592e9f643f23214afd172cb7761af。按ABBA/BAAB固定8槽/每臂4局完成，工程局未混入、未替换或额外补局。8局CLEAR，A fight总57.988582s、B总53.721708s；两臂fight/tail均0HP，shared budget stop=null。时长仅作本次探索性描述，双方均0HP，不据此证明改善/非劣/“完美w7”。
+
+**Root原始动作核验。** B2共8次承诺、8次原始目标DownSlash命中伴counter>0并真实弹起交还，观察3次Harpoon；没有恢复、控制器缺陷或首J地面否决。8次来自3个B槽，slot02_B没有选中链；原因待Opus按实际机会流区分，不能直接说没机会或补跑该槽。A的B2计数为0只是基线禁用B2，不表示A未出刀。B链发送441次：416 direct、24晚1帧、1同键跳报覆盖。唯一无单独target上报为slot01_B的2525，已独立核前后2524/2526三次均中性键、4帧上界内回报匹配，符合Opt1；覆盖不当目标2525本身已应用的证明。续段换键/late/unknown原值保留，原P2未宣称消失。
+
+**逐局和全批真实清理已通过。** 每槽实际worker input.stats、配置/trace/window/measurement完整、overflow0/unresolved空；各槽原始清理worker返回0、own game真实释放退出、golden哈希正确、Prefs差异空、旧DEMO恢复、registry live/instances空且restore_pending=false。最后一局实际cleanup为2026-10-31T17:23:40.681226Z；全批ACTIVE.lock已移除，Root随后另核无残留Silksong、677源/模型/版本锁原字节同，冻结HEAD直到该核验保持8a9e6a94，之后才恢复文档提交/三份同步。原始COMPLETED、各VERIFIED/合同/预算/录制全保留。证据analysis/b2_lead5_20261031/smoke8_audit_v2/{SUMMARY.json,REPORT.md,Opt1_coverage_2525.json}；初版后验工具误用了进行中逐槽账本长度前提，只修审计工具、未改数据/重跑游戏，原版及更正记录保留。
+
+**任务15现在放行。** STATUS=false、全批真实清理完成，Opus可E16–23/Idle只读审8槽的机会/漏动作/接受/回执/HP及来源/性能/unknown；只写opus自己的目录，不重复旧工程/P预算。重点slot02_B无链的机会原因、3钩5跳的真实动作、续段晚1帧与实际换键、441回执的唯一Opt1覆盖、源/模型共同条件与所有原始分母。Root已通过自己的信箱明确放行并发送一次OPUS_WAKE新任务信号，独立报告尚未交付，不预记通过。接下来先合并独立审计及下一步规格，当前不自动开额外实机或恢复AA/strict/B1/留出；实机严规则与默认关闭继续保留。
 
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
