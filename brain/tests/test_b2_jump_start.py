@@ -63,7 +63,7 @@ def test_send_and_matching_receipt_are_not_observed_takeoff():
 
 def test_actual_airborne_is_credited_once_after_actual_successful_j_target():
     w=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
-    assert not w.observe(state(1001,ground=False))  # not this sent jump yet
+    assert not w.observe(state(1001,ground=False,clip="Airborne"))  # not this sent jump yet
     assert w.observe(state(1003,ground=False,clip="Airborne")) is True
     assert w.seen_frame==1003
     assert not w.observe(state(1004,ground=False))
@@ -85,7 +85,7 @@ def test_missing_ground_observation_is_not_interpreted_as_airborne(bits):
 
 def test_first_airborne_on_four_frame_boundary_is_valid_but_five_is_too_late():
     w=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
-    assert w.observe(state(1006,ground=False)) and w.failure(1006) is None
+    assert w.observe(state(1006,ground=False,clip="Airborne")) and w.failure(1006) is None
     late=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
     assert not late.observe(state(1007,ground=False))
     assert late.failure(1007) is not None and late.seen_frame is None
@@ -101,7 +101,7 @@ def test_queued_prefix_j_can_be_bound_only_by_the_successful_send_map():
     p=path();p.commands[:3]=[B["J"],B["J"],0]
     w=JumpStartWatch.from_path(p,MOVE,1000,{1001:B["J"]})
     assert w.targets==(1001,1002) and w.sent_targets=={1001}
-    assert w.observe(state(1001,ground=False))
+    assert w.observe(state(1001,ground=False,clip="Airborne"))
 
 
 def test_invalid_path_coverage_raises_instead_of_silently_disabling_jump_watch():
@@ -134,3 +134,24 @@ def test_ground_idle_receipts_and_unrelated_attacks_do_not_claim_a_grounded_stri
     elif case=="no_press":press=None
     else:raise AssertionError(case)
     assert not grounded_strike(s,press)
+
+
+@pytest.mark.parametrize("clip",["Harpoon Antic","Harpoon Throw","Harpoon Dash","Harpoon Catch"])
+@pytest.mark.parametrize("vy",[0.,10.])
+def test_harpoon_motion_is_never_evidence_of_the_pre_hook_ground_jump(clip,vy):
+    w=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
+    s=state(1003,ground=False,clip=clip);s["hero"]["vel"]=[0.,vy]
+    assert not w.observe(s) and w.seen_frame is None
+
+
+def test_air_flag_alone_does_not_credit_missing_jump_acceptance():
+    w=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
+    assert not w.observe(state(1003,ground=False,clip="Idle"))
+    assert not w.observe(state(1004,ground=False,clip="Umbrella Float"))
+
+
+@pytest.mark.parametrize("clip,vy",[("Airborne",0.),("Jump",0.),("Jump Start",0.),("Idle",18.6)])
+def test_actual_jump_has_airborne_animation_or_positive_vertical_motion(clip,vy):
+    w=JumpStartWatch.from_path(path(),MOVE,1000,{1002:B["J"]})
+    s=state(1003,ground=False,clip=clip);s["hero"]["vel"]=[0.,vy]
+    assert w.observe(s) and w.seen_frame==1003

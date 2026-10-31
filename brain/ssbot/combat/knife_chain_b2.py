@@ -819,28 +819,49 @@ class NativeChainB2(NativeChainCandidates):
                    ms=offer.proposal_ms,timing_scope="complete proposal only; excludes ordinary planner/install/send")
         return res
 
+    def _abort_hook_dispatch(self,selected,*,frame,target,mask,flags,received_frame,event,reason,**details):
+        self._failed_hook_moves.add(selected.move)
+        self._note(event,frame=frame,target=target,received_frame=received_frame,
+                   proposed_mask=int(mask),replacement_mask=0,reason=reason,**details)
+        if event=="b2_jump_send_veto":
+            self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(selected.move),
+                       no_retry_same_move=True,action="neutral recovery before unsupported hook")
+        self._recover(reason,received_frame);self._b2_selected=None
+        self.final("b2_deadline_abort",0)
+        super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
+        return 0
+
     def before_send(self, *, frame, target, mask, flags, received_frame):
         if type(received_frame) is not int or received_frame>target+4:
             self._stop("send deadline beyond four frames / missing current frame",frame)
-        selected=self._b2_selected;last=None
+        selected=self._b2_selected;last=None;jump=self._jump_start
         if selected is not None and selected.stage=="commitment" and selected.path is not None:
             slots=[selected.path.origin+i+1 for i,m in enumerate(selected.path.commands) if int(m)&B["CLAW"]]
-            if slots:last=max(slots)
+            if slots:
+                last=max(slots)
+                from .knife_chain_jump import JumpStartWatch
+                jump=JumpStartWatch.from_path(selected.path,selected.move,frame,self._receipts)
         watch=self._hook_start
         if last is None and watch is not None and watch["seen_frame"] is None and int(mask)&B["CLAW"]:
             last=max(watch["targets"])
-        if last is not None and selected is not None and int(mask)==selected.mask and received_frame>=last:
-            reason="hook dispatch window expired before actual send"
-            self._failed_hook_moves.add(selected.move)
-            self._note("b2_hook_send_veto",frame=frame,target=target,received_frame=received_frame,
-                last_hook_target=last,proposed_mask=int(mask),replacement_mask=0,reason=reason)
-            self._recover(reason,received_frame);self._b2_selected=None
-            self.final("b2_deadline_abort",0)
-            super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
-            return 0
-        if received_frame>target:
+        matches=selected is not None and int(mask)==selected.mask
+        if matches and last is not None and jump is not None and jump.seen_frame is None:
+            reason=None
+            if int(mask)&B["J"] and target in jump.targets and received_frame>=target:
+                reason="pre-hook ground-jump target already observed before send"
+            elif int(mask)&B["CLAW"]:
+                reason="pre-hook ground jump not observed before CLAW dispatch"
+            if reason is not None:
+                return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
+                    received_frame=received_frame,event="b2_jump_send_veto",reason=reason,
+                    jump_targets=list(jump.targets),jump_seen=jump.seen_frame)
+        if last is not None and matches and received_frame>=last:
+            return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
+                received_frame=received_frame,event="b2_hook_send_veto",
+                reason="hook dispatch window expired before actual send",last_hook_target=last)
+        if received_frame>=target:
             self._note("b2_send_late",frame=frame,target=target,received_frame=received_frame,
-                       application="unchecked until bounded report/coverage")
+                       target_already_observed=True,application="unchecked until bounded report/coverage")
         return super().before_send(frame=frame,target=target,mask=mask,flags=flags,received_frame=received_frame)
 
     def sent(self):

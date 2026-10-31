@@ -72,7 +72,17 @@ class JumpStartWatch:
         if type(f) is not int or f<max(self.origin,min(self.sent_targets)):return False
         if f>max(self.sent_targets)+4:return False  # a first late observation cannot revive an expired jump
         if _observed_flag(state,"dead") or _observed_flag(state,"hazardDeath"):return False
-        if _observed_flag(state,"onGround") is False:
+        hero=(state or {}).get("hero") or {}
+        clip=str((hero.get("anim") or {}).get("clip") or "")
+        # Harpoon itself turns onGround off, even when the preceding J never
+        # executed. That is hook evidence, never evidence of the planned jump.
+        if "harpoon" in clip.lower():return False
+        velocity=hero.get("vel") or ()
+        vy=velocity[1] if len(velocity)>1 else None
+        rising=(isinstance(vy,(int,float,np.integer,np.floating)) and
+                not isinstance(vy,(bool,np.bool_)) and np.isfinite(vy) and vy>0.)
+        jump_clip=clip=="Airborne" or clip=="Jump" or clip.startswith("Jump ")
+        if _observed_flag(state,"onGround") is False and (rising or jump_clip):
             self.seen_frame=f
             return True
         return False
