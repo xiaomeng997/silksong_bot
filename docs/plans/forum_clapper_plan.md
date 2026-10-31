@@ -1890,7 +1890,11 @@ Opus任务17：先量当前8槽及已用过的h2 w7开发16局的Slam冲刺长�
 
 **清理、输入和完整性分开。** 真正cleanup结束2026-10-31T23:08:45.943603Z，自有游戏released且已退出、另查无残留；golden sha fc41b9…、Prefs无差、旧DEMO恢复、registry live/instances空且restore_pending=false、errors空。故障worker_rc1与LearningStop主故障保留；旧通用audit_trial的cleanup_pass还要求worker_rc0/failure=None，其false是成功条件混合，不能误报为配置未恢复，另以原始cleanup核restore_cleanup_pass=true。实际worker自己的bootstrap input.stats通过0delay/jitter、HF2/2、pending0。trace/config完整，但measurement.complete/window.complete=false/episode_harness_fail，未观测HP/时间区间不能填空，不计算该局HP/min或称完整成功局；engineering_audit/verification.json的passes=false原样保留。
 
-**当前分工与后续门。** LIVE_BLOCKED.json已写、STATUS实机门false；组件仍默认关。Root仅在E24–31/Idle对这一个新失败做一次事实输入原生诊断，抓2931–2940选中路径/保护/预测归属并对实际日志；截止无限、事实未来只对照，差异需先标记，不能把后续不同按键当动力学误差。Opus任务21已在清理后明确放行失败的实际部分，E16–23/Idle做原始碰撞体/英雄动作与HERO2单路径对照，不重复政策/P/旧8局。先定位首个判安全却不符的层，再按证据改源、新审阅/预算与新批；不放宽N=2/余量/保护或停止，不改原失败/预算/旧源，不增加长期评分前置。新8局/先导均无gate。
+**原生诊断新增见证。** Root一次622tick事实输入诊断已结束，0错误/外来；2931–2940十个捕获点的plan/S/首键与实机日志全同。2939实际与回放均选JUMP(11)N+dashR_attack/S0：预测身体框在2939/2940/2941与真实逐轴误差最大9.27e-7u，F_INVULN在前两帧有、受击帧无，正好对应counter1/1/0；目标2940/2941的固定计划键与真实发键/应用都是J=1。这一两帧见证不能归为英雄轨迹误差或晚应用，问题收窄到危险预测/查询（锤几何、时序、采样/回扫及伤害缓冲仍待拆），不称已经定位具体根因或证明新模型无回归。较早2932整尾与实际后续换键不同，不把所有末端偏差当运动误差。凭证FAILURE_REPLAY_FINDING.json；回放仍截止无限/裸构造，非闭环或实机私有状态直接记录。
+
+**已处理 Opus #82（任务21接收记录）。** 总审计和单点危险层深挖在途，只记录接收，不把排队/进行中当审阅通过。Root新增见证已给当前分叉，不另开任务/重复政策回放。
+
+**当前分工与后续门。** LIVE_BLOCKED.json已写、STATUS实机门false；组件仍默认关。Root在E24–31/Idle的单次事实输入诊断已完成并交付上述见证，自己的作业已结束；不再重复展开或修改源。Opus任务21已在清理后明确放行失败的实际部分，E16–23/Idle做原始碰撞体/英雄动作与HERO2单路径对照，不重复政策/P/旧8局。先定位首个判安全却不符的层，再按证据改源、新审阅/预算与新批；不放宽N=2/余量/保护或停止，不改原失败/预算/旧源，不增加长期评分前置。新8局/先导均无gate。
 
 ## 7. 长期站位打分与全量手搓规则迁移（与刀口链两处去向对齐）
 
