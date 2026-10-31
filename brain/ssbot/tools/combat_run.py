@@ -573,6 +573,15 @@ def worker(a: argparse.Namespace) -> int:
             measurement_code = code_manifest(Path(__file__).resolve().parents[3])
         link = OracleLink(instance=a.instance, connect_timeout_s=120,
                           **({"measurement": measurement} if measurement is not None else {}))
+        input_path = None
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+            from ssbot.combat.knife_chain_input import capture_input_path
+            input_receipt = run_dir / f"b2_input_path_i{a.instance}.json"
+            stage="input_path_preflight"
+            input_path = capture_input_path(link, input_receipt, instance=a.instance)
+            input_path = {"receipt":str(input_receipt), "verified":input_path["verified"],
+                          "peer":input_path["peer"], "worker_pid":input_path["worker_pid"]}
+            stage="bootstrap"
         tap = make_tap(link, enc)
         if measurement is not None:
             link.subscribe_state(measurement.observe_state)  # tap updates wake before this observer
@@ -618,6 +627,8 @@ def worker(a: argparse.Namespace) -> int:
         worker_runtime_before={**(runtime_start or {}),**worker_actual}
         worker_context={"requested_environment":worker_requested,"boost_result":worker_boost_result,
                         "runtime_before":worker_runtime_before}
+        if input_path is not None:
+            worker_context["b2_input_path"] = input_path
         rev = git_rev()
         env = env_overrides()
         fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,

@@ -93,6 +93,10 @@ def test_two_hp_primary_survives_measurement_incomplete_and_cleanup(tmp_path,mon
     with pytest.raises(LearningStop,match="B fight cumulative 2 HP") as caught:rig.run(**measure_options())
     data=json.loads((tmp_path/"attempts_i0.jsonl").read_text().splitlines()[0])
     assert data["b2_learning_stop"]==REASON and data["b2_learning_stop_origin"]=="chain.learning_stop"
+    worker_input=contexts[0]["worker"]["b2_input_path"]
+    assert worker_input["receipt"]==str(tmp_path/"b2_input_path_i0.json")
+    assert worker_input["verified"]=={"latency_frames":0,"min_press_frames":2,"min_release_frames":2,"pending":0}
+    assert worker_input["peer"]==["127.0.0.1",47017]
     assert data["b2_budget_stop"]["reasons"]==["B fight cumulative 2 HP"]
     assert data["measurement"]["complete"] is False and data["measurement"]["configuration_complete"] is False
     assert data["measurement"]["window"]["T"] is None

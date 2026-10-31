@@ -82,8 +82,17 @@ class Rig:
                 rig.events.append("ipc.open")
                 if rig.fault=="connect":raise RuntimeError("connect failed")
                 self.closed=False;self.frame=1000
+                self.sock=SimpleNamespace(getpeername=lambda:("127.0.0.1",47017))
                 self.state={"f":1000,"game":{"scene":"Menu_Title"},"hero":None}
                 rig.links.append(self)
+            def rpc(self,method,**kwargs):
+                assert method=="input.stats" and kwargs=={"timeout_s":10.}
+                rig.events.append("input.stats")
+                if rig.fault=="input_rpc":raise RuntimeError("input.stats failed")
+                result={"latency":{"delay_frames":0,"jitter_frames":0,"dist":None},
+                        "hold":{"min_press_frames":2,"min_release_frames":2},"pending":0}
+                if rig.fault=="input_pending":result["pending"]=1
+                return result
             def wait_state(self,*a,**k):return self.state
             def close(self):rig.events.append("ipc.close");self.closed=True
         class Recorder:
@@ -227,3 +236,28 @@ def test_cleanup_failure_does_not_replace_original_failure(tmp_path,monkeypatch)
         stage="episodes",primary_error="RuntimeError: original failure")
     assert events==["recorder","attempts","ipc"] and result["complete"] is False
     assert result["primary_error"]=="RuntimeError: original failure"
+
+
+@pytest.mark.parametrize("fault", ["input_rpc", "input_pending"])
+def test_worker_input_preflight_failure_retains_raw_receipt_and_cleans_without_reset(tmp_path,monkeypatch,fault):
+    rig=Rig(tmp_path,monkeypatch,fault=fault)
+    with pytest.raises((RuntimeError,ValueError),match="input.stats"):
+        rig.run(episodes=1)
+    receipt=json.loads((tmp_path/"b2_input_path_i0.json").read_text())
+    assert receipt["passed"] is False and receipt["instance"]==0
+    assert receipt["peer"]==["127.0.0.1",47017] and receipt["error"]
+    assert "batch.prepare" not in rig.events and "back_into_slot" not in rig.events
+    assert rig.attempts==0 and rig.links[0].closed
+    assert (tmp_path/"budget.json.halt").exists()
+    assert rig.receipts()[0]["stage"]=="input_path_preflight"
+
+
+@pytest.mark.parametrize("arm", ["A","B"])
+def test_both_arms_query_actual_worker_before_policy_and_action_preparation(tmp_path,monkeypatch,arm):
+    rig=Rig(tmp_path,monkeypatch,arm=arm)
+    assert rig.run(episodes=1)==0
+    assert rig.events.index("ipc.open")<rig.events.index("input.stats")<rig.events.index("batch.prepare")
+    assert rig.events.index("input.stats")<rig.events.index("back_into_slot")
+    receipt=json.loads((tmp_path/"b2_input_path_i0.json").read_text())
+    assert receipt["passed"] is True and receipt["verified"]["pending"]==0
+    assert rig.events.count("input.stats")==1
