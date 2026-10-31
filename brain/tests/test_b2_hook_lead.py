@@ -80,3 +80,42 @@ def test_no_ground_jump_does_not_add_a_takeoff_floor(monkeypatch,ground,acceptin
 
 def test_legacy_family_adapter_has_no_new_keyword_or_domain(monkeypatch):
     assert adapter(monkeypatch,strict=False,prior=NS(f0=1002,hop=3))=={"hop_until":1005,"p_only":None}
+
+
+def test_first_feasible_still_requires_every_control_variant(monkeypatch):
+    owner,sim,ctx=search(monkeypatch);calls=[]
+    def evaluate(*a,**kw):
+        calls.append(None)
+        # First candidate fails its second control variant; the next has one
+        # actual passing strike per variant and must be recomputed completely.
+        return [] if len(calls)==2 else [NS(row=lambda:["witness"])]
+    monkeypatch.setattr(owner,"eval_strike",evaluate)
+    p=owner.plan(sim,ctx,True,True,p_min=1005,first_feasible=True)
+    assert p.f_press==1006 and p.var_ok==[1,1,1,1] and len(calls)==6
+
+
+def test_first_feasible_changes_quality_preference_not_the_feasibility_gate(monkeypatch):
+    owner,sim,ctx=search(monkeypatch);calls=[]
+    def evaluate(*a,**kw):
+        calls.append(None);count=1 if len(calls)<=4 else 4
+        return [NS(row=lambda:["witness"]) for _ in range(count)]
+    monkeypatch.setattr(owner,"eval_strike",evaluate)
+    first=owner.plan(sim,ctx,True,True,p_min=1005,first_feasible=True)
+    assert first.f_press==1005 and first.var_ok==[1]*4 and len(calls)==4
+    calls.clear()
+    legacy=owner.plan(sim,ctx,True,True,p_min=1005)
+    assert legacy.f_press==1006 and legacy.var_ok==[4]*4 and len(calls)==8
+
+
+@pytest.mark.parametrize("value",[None,1,"yes"])
+def test_invalid_first_feasible_preference_is_rejected(monkeypatch,value):
+    owner,sim,ctx=search(monkeypatch)
+    with pytest.raises(ValueError,match="first-feasible"):
+        owner.plan(sim,ctx,True,True,first_feasible=value)
+
+
+def test_b2_only_sets_first_feasible_for_the_ground_jump_family(monkeypatch):
+    assert adapter(monkeypatch)["first_feasible"] is True
+    assert adapter(monkeypatch,ground=False,prior=NS(f0=1002,hop=3))["first_feasible"] is True
+    assert "first_feasible" not in adapter(monkeypatch,ground=False)
+    assert "first_feasible" not in adapter(monkeypatch,strict=False)

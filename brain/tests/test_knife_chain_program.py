@@ -67,3 +67,83 @@ def test_model_draft_cannot_own_live_input_even_if_an_offer_is_constructed():
     with pytest.raises(NativeChainAuditError,match="model-only"):
         n.install(offer,SimpleNamespace(measurement_enabled=False))
     assert n.runner.run is None and n._b2_selected is None
+
+
+HOOK={"a":"claw_plan","store":"var.tmp.hook","ground":False,"accepting":True,"p_only":23}
+
+
+def hook_fixture():
+    from ssbot.combat.claw_strike import CsPlan,CsCfg
+    r,x,_,calls=fixture();x.run=r.run
+    p=CsPlan(20,3,23,3,4,[1,1,1,1],1.,(45,46,45,46),[["witness"] for _ in range(4)])
+    r.run.v["cs"]=p;r.run.v["cs_toward"]=1;r.anchor.csx=SimpleNamespace(cfg=CsCfg())
+    def plan(x,store,**kwargs):
+        calls.append(("claw_plan",x.obs.f));globals()["store"](x,store,None)
+    r.P.acts["claw_plan"]=plan
+    return r,x,p,calls
+
+
+def test_private_model_holds_current_all_control_hook_program_only():
+    r,x,p,calls=hook_fixture();selected_claw_projection(r)
+    r._act(x,HOOK)
+    assert not calls and x.tmp["hook"]==p and x.tmp["hook"] is not p
+    assert x.tmp["hook"].var_ok is not p.var_ok
+    assert r._selected_strike_info["model_hook_rechecks_omitted"]==1
+    x.tmp["hook"].var_ok[0]=9
+    assert p.var_ok==[1,1,1,1]
+
+
+@pytest.mark.parametrize("change",["press","target","direction","witness","count","fallback"])
+def test_changed_hook_program_or_unfixed_search_keeps_original_check(change):
+    r,x,p,calls=hook_fixture();selected_claw_projection(r);action=dict(HOOK)
+    if change=="press":p.f_press+=1
+    elif change=="target":x.v["iid"]=8
+    elif change=="direction":x.v["cs_toward"]=-1
+    elif change=="witness":p.strike[0][0]="changed"
+    elif change=="count":p.var_ok[0]=2
+    elif change=="fallback":action["p_only"]=None
+    r._act(x,action)
+    assert calls==[("claw_plan",30)] and x.tmp["hook"] is None
+    assert r._selected_strike_info["model_hook_rechecks_omitted"]==0
+
+
+@pytest.mark.parametrize("bad",["zero","missing_control","missing_witness","wrong_sum"])
+def test_hook_without_complete_current_witness_cannot_skip_model_check(bad):
+    r,x,p,calls=hook_fixture()
+    if bad=="zero":p.var_ok[0]=0;p.n_ok=3
+    elif bad=="missing_control":p.var_ok.pop();p.n_ok=3
+    elif bad=="missing_witness":p.strike[0]=None
+    else:p.n_ok=3
+    selected_claw_projection(r);r._act(x,HOOK)
+    assert calls==[("claw_plan",30)] and x.tmp["hook"] is None
+
+
+def test_live_hook_recheck_is_never_replaced_by_model_program():
+    real,x,p,calls=hook_fixture()
+    model=ChainRunner.__new__(ChainRunner);model.__dict__.update(real.__dict__)
+    selected_claw_projection(model);model._act(x,HOOK)
+    real._act(x,HOOK);real._act(x,HOOK)
+    assert calls==[("claw_plan",30),("claw_plan",30)]
+    assert type(real) is ChainRunner and not hasattr(real,"_nominal_projection_only")
+
+
+@pytest.mark.parametrize("bad",["witness","context","cfg"])
+def test_unknown_initial_hook_metadata_uses_original_search(bad):
+    r,x,p,calls=hook_fixture()
+    if bad=="witness":p.strike[0][0]=object()
+    elif bad=="context":x.v["fa"]=object()
+    else:r.anchor.csx.cfg=SimpleNamespace(gaps=object(),ctrl=(25,27))
+    selected_claw_projection(r);r._act(x,HOOK)
+    assert calls==[("claw_plan",30)] and x.tmp["hook"] is None
+    assert r._selected_hook is None
+
+
+@pytest.mark.parametrize("bad",["witness","context","missing_context"])
+def test_unknown_later_hook_metadata_cannot_match_a_known_program(bad):
+    r,x,p,calls=hook_fixture();selected_claw_projection(r)
+    if bad=="witness":p.strike[0][0]=object()
+    elif bad=="context":x.v["fa"]=object()
+    else:x.v.pop("cs_toward")
+    r._act(x,HOOK)
+    assert calls==[("claw_plan",30)] and x.tmp["hook"] is None
+    assert r._selected_strike_info["model_hook_rechecks_omitted"]==0

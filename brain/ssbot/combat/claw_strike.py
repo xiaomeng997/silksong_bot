@@ -261,13 +261,16 @@ class ClawStrike:
     # ---- the plan before the press ----
 
     def plan(self, sim: _ac.ChainSim, ctx: CsCtx, ground: bool, accepting: bool, hop_until: int | None = None,
-             p_only: int | None = None, p_min: int | None = None) -> CsPlan | None:
+             p_only: int | None = None, p_min: int | None = None, first_feasible: bool = False) -> CsPlan | None:
         """The (hop, P) whose every Clawline variant has a strike plan (the most passing plans in the worst variant,
         then the earliest P; the search stops at GOOD_OK or BUDGET_S); None: none.
         hop_until: a hop under way - the jump held to this mask frame (exclusive), no new hop; p_only: this press only.
         p_min is an optional absolute mask-frame floor, applied before every
-        feasibility test. None preserves the legacy h2 search domain."""
+        feasibility test. None preserves the legacy h2 search domain.
+        first_feasible changes candidate preference only; no variant/contact/
+        safety test is skipped. False keeps h2's GOOD_OK quality search."""
         import time
+        if type(first_feasible) is not bool:raise ValueError("invalid first-feasible search preference")
         if p_min is not None and (type(p_min) is not int or p_min < 0):
             raise ValueError("invalid absolute first-Clawline floor")
         t0 = time.perf_counter()
@@ -346,6 +349,10 @@ class ClawStrike:
             if len(var_ok) < len(c.gaps) * len(c.ctrl) or min(var_ok) == 0:
                 continue
             p = CsPlan(F0, h, P, P - a_entry, sum(var_ok), var_ok, bb, tuple(ctrl_k), sample)
+            # Every gap/control variant has a real passing strike witness. B2
+            # may stop at this first feasible candidate rather than spend the
+            # remaining clock budget optimizing the number of future choices.
+            if first_feasible:return p
             if best is None or (-min(p.var_ok), p.f_press) < (-min(best.var_ok), best.f_press):
                 best = p
             if min(best.var_ok) >= GOOD_OK:

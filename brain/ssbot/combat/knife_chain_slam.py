@@ -790,8 +790,10 @@ def pl_claw(x, store, ground, accepting, hop_until=None, p_only=None):
             # Keep the ORIGINAL jump's absolute floor during p_only checks
             # and fallback searches. A later tick cannot pull it earlier.
             kwargs["p_min"] = int(prior.f0) + B2_HOOK_JUMP_LEAD
+            kwargs["first_feasible"] = True
         elif ground and accepting:
             kwargs["p_min"] = int(sim.f) + 2 + B2_HOOK_JUMP_LEAD
+            kwargs["first_feasible"] = True
     t0 = time.perf_counter()
     res = cs.plan(sim, _cs_ctx(x), ground, accepting, **kwargs)
     x.tmp["plan_ms"] = round(1e3 * (time.perf_counter() - t0), 1)
