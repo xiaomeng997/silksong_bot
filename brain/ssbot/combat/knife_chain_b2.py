@@ -94,6 +94,7 @@ class NativeChainB2(NativeChainCandidates):
         self._budget_targets=set();self._budget_dead=set()
         self._application={};self._last_matching_report=None;self._actual_state=None;self.recovery=None
         self._post_seed=None;self._post_kind=None
+        self._committed_future=None
         self._post_keys={};self._post_key_move=None;self._post_prepare_cursor=0
         self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
         self._hook_start=None;self._failed_hook_moves=set()
@@ -362,6 +363,7 @@ class NativeChainB2(NativeChainCandidates):
             self.recovery={"first":f,"reason":reason,"move":old_move}
             self._note("b2_hook_recovery_enter",frame=f,reason=reason,action="release/wait until observed hook end",path="unchecked")
         self.commitment=None;self.post_context=None;self._post_seed=None;self._post_kind=None
+        self._committed_future=None
         self._hook_start=None
         self._post_keys.clear();self._post_key_move=None
         self._abandon(reason)
@@ -571,6 +573,8 @@ class NativeChainB2(NativeChainCandidates):
         if self.commitment is not None:
             if self.commitment["move"]!=move:
                 self._recover("commitment instance mismatch",f);return None
+            if self._committed_future is not None and f<self._committed_future.through:
+                self._prepare_post_keys(self._committed_future,sim,move,f)
             return B2Offer("active",None,preview.draft,int(preview.mask),0.,move,{"commitment":True})
         # Once real bounce was seen, NONE of the old target admission follows it.
         post=bool(self.post_context or preview.draft.run.v.get("bounced"))
@@ -630,9 +634,8 @@ class NativeChainB2(NativeChainCandidates):
                         paths[kind]=self._post_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
                             kind=kind,move=move,frame=f,mask=0,press=future.press_frame)
                     else:
-                        paths[kind]=compile_path(future.runner_end,future.raw_end,bs,float(future.game[-1]),
-                            stage="continuation",first_mask=0,profile=self.profile,branch=kind,
-                            known_press=future.press_frame,stop_after=self.profile.short_frames)
+                        from .knife_chain_post_actions import ordinary_post
+                        paths[kind]=ordinary_post(future,sim.params,sim.terrain,kind=kind,profile=self.profile)
                 except (NominalUnsupported,ChainObservationNotReady) as exc:errors[kind]=str(exc)
             bgeo=B2Geometry(forecast,f,move,observed[2])
             bounce_ref=f"{move}:{future.through}"
@@ -645,8 +648,12 @@ class NativeChainB2(NativeChainCandidates):
             def finish(kind):
                 if kind not in full_paths:
                     from .knife_chain_nominal import finish_post
-                    full_paths[kind]=finish_post(paths[kind],sim.params,sim.terrain,profile=self.profile)
-                    self._remember_post_keys(full_paths[kind],kind,move,f)
+                    if paths[kind].assumptions.get("projection")=="ordinary_post_action_type":
+                        from .knife_chain_post_actions import ordinary_post
+                        full_paths[kind]=ordinary_post(future,sim.params,sim.terrain,kind=kind,profile=self.profile,full=True)
+                    else:
+                        full_paths[kind]=finish_post(paths[kind],sim.params,sim.terrain,profile=self.profile)
+                        self._remember_post_keys(full_paths[kind],kind,move,f)
                 return full_paths[kind]
             def full_scan(option):
                 from dataclasses import replace
@@ -754,6 +761,7 @@ class NativeChainB2(NativeChainCandidates):
         committed=selected is not None and sent.chain_outcome=="sent"
         if committed:
             if selected.stage=="commitment":
+                self._committed_future=selected.path
                 self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
                     "predicted_bounce":selected.path.contact_frame}
                 self._press=self._accepted=self._hit=None
