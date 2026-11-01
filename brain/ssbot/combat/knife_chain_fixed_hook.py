@@ -23,7 +23,18 @@ def register(P):
         gap=F.xrel(x)
         if not all(math.isfinite(z) for z in (gap,o.vx)) or not cfg["FH_GAP_MIN"]<=gap<=cfg["FH_GAP_MAX"]:return False
         if o.facing is None or (1 if o.facing>=0 else -1)!=toward or o.vx*toward<=0:return False
-        if F.g_claw_circle(x) or (o.bombs is not None and len(o.bombs)):return False
+        if F.g_claw_circle(x):return False
+        if o.bombs is not None and len(o.bombs):
+            from .rune_bombs import HB_HX, BOMB_M
+            lo,hi=sorted((o.hx,o.cx+v["face"]*CS.BODY_FRONT))
+            # Cheap initial horizontal approach guard, not a flight certificate.
+            # Keep every owner and the existing bomb/hero margin.
+            for row in o.bombs:
+                if len(row)!=6 or not all(math.isfinite(float(z)) for z in row):return False
+                _,bx,_,radius,_,off=row
+                if radius<0:return False
+                reach=radius+HB_HX+BOMB_M
+                if off>=0 and lo-reach<=bx<=hi+reach:return False
         return True
 
     @P.action("fixed_hook_plan")

@@ -198,3 +198,16 @@ def test_fixed_mode_changes_bound_digest_and_missing_profile_stays_unknown(tmp_p
     b=manifest(root,q,e2);assert b["configuration_complete"] and a["behavior_sha256"]!=b["behavior_sha256"]
     del q.chain_native.profile.fixed_hook
     assert not manifest(root,q,e2)["configuration_complete"]
+
+
+@pytest.mark.parametrize("owner,bx,on,off,want",[
+    (7,43.75,-4,4,True),(999,43.75,0,20,True),
+    (7,35.,0,20,False),(999,35.,0,20,False),
+    (7,35.,-20,-1,True),(7,35.,20,30,False)])
+def test_bomb_gate_only_rejects_unexpired_intersecting_approach_span(owner,bx,on,off,want):
+    from ssbot.combat.knife_chain_eval import Run,X
+    from ssbot.combat.knife_chain_slam import Obs
+    r=load_runner(fixed_hook=True);r.anchor.fixed_hook_enabled=True
+    st=state();o=Obs(1000,st,True,True,0,None,None,np.array([[owner,bx,3.667,2.166,on,off]],float),st["ents"][0],"Slam Antic",0)
+    v=dict(r.anchor.var_defaults);v.update(iid=7,face=1,k=2)
+    assert r.P.guards["fixed_hook_entry"](X(r,Run("fixed_hook","pre",v),o)) is want
