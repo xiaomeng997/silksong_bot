@@ -16,7 +16,8 @@ ForumPlannerPolicy.act after `res = self.planner.tick(...)`, reading only object
 
 Scope (exactly the existing scene_field_events.project scope, nothing wider): two live Clappers, one locked
 CC_JUMP_CAST (RangeTracker Inst.dec set), the other Clapper's Control in Idle / Walk, no pending unlocked aim, no
-observed damager entity.  Anything else returns {'status': 'insufficient_coverage', 'reason', 'detail', 'aux'}: a
+unmodelled active damager entity. Explicitly disabled colliders are inactive; active circles already carried by
+this tick's full small-rune rows are modelled. The complete observed list stays in aux. Anything else returns {'status': 'insufficient_coverage', 'reason', 'detail', 'aux'}: a
 missing room / arena / bomb list / pending list is unknown (never an empty obstacle list), an observed hazard entity
 or a third live enemy is reported and refused (never dropped), a dead or hidden Clapper leaves RangeTracker.now and
 the scene is refused.  The hero, candidates, labels and future frames are never read.
@@ -86,11 +87,43 @@ def _hazard_ents(ents) -> list:
     for e in ents or ():
         if e.get("category") != "hazard":
             continue
-        cs = [{"kind": c.get("kind"), "enabled": bool(c.get("enabled")), "r": c.get("r"),
+        cs = [{"kind": c.get("kind"), "enabled": c.get("enabled"), "r": c.get("r"),
                "verts_world": list(c.get("verts_world") or []) or None} for c in e.get("colliders") or ()]
         out.append({"iid": e.get("iid"), "type_key": e.get("type_key"),
                     "pos": [float(v) for v in (e.get("pos") or [])[:2]], "colliders": cs})
     return out
+
+
+def _hazard_split(hazards, bombs, xy_tol: float = .001, r_tol: float = .001):
+    """Separate inactive/modelled/unknown observations without deleting forecast hazards.
+
+    Match only currently lit full-forecast circles. The millimetre tolerances cover
+    measured float serialization (radius error < .000173u), not a gameplay margin.
+    Missing colliders or enabled flags are unknown, never evidence of inactivity.
+    """
+    inactive, modelled, unmodelled = [], [], []
+    for h in hazards:
+        cs = h.get("colliders") or ()
+        if not cs or any(not isinstance(c.get("enabled"), bool) for c in cs):
+            unmodelled.append(h)
+            continue
+        on = [c for c in cs if c["enabled"]]
+        if not on:
+            inactive.append(h)
+            continue
+        try:
+            x, y = map(float, h["pos"][:2])
+            known = math.isfinite(x) and math.isfinite(y) and all(
+                c.get("kind") == "circle" and c.get("r") is not None
+                and math.isfinite(float(c["r"])) and float(c["r"]) >= 0.
+                and any(abs(float(b[1]) - x) <= xy_tol and abs(float(b[2]) - y) <= xy_tol
+                        and abs(float(b[3]) - float(c["r"])) <= r_tol
+                        and float(b[4]) <= 0. <= float(b[5]) for b in bombs)
+                for c in on)
+        except (KeyError, TypeError, ValueError):
+            known = False
+        (modelled if known else unmodelled).append(h)
+    return inactive, modelled, unmodelled
 
 
 def _live_enemy_ents(ents) -> list:
@@ -135,6 +168,10 @@ def locked_scene(trk, *, frame=None, room=None, arenas=None, bombs=None, bombs_c
         return _insufficient("small_runes_unknown", "nonfinite or malformed small-rune rows", aux)
     hazards = _hazard_ents(trk.ents)
     aux["observed_damager_ents"] = hazards
+    inactive, modelled, unmodelled = _hazard_split(hazards, bombs)
+    aux["hazard_split"] = {"inactive": [h.get("iid") for h in inactive],
+                           "small_rune_rows": [h.get("iid") for h in modelled],
+                           "unmodelled": [h.get("iid") for h in unmodelled]}
     live = _live_enemy_ents(getattr(trk, "ents", ()))
     clappers = []
     for iid, (tk, e, inst) in sorted(trk.now.items()):
@@ -150,8 +187,9 @@ def locked_scene(trk, *, frame=None, room=None, arenas=None, bombs=None, bombs_c
         return _insufficient("not_two_clappers", f"{len(clappers)} live Clappers in RangeTracker.now", aux)
     if others:
         return _insufficient("other_live_enemies", f"{len(others)} other enemy entities in play (not modelled)", aux)
-    if hazards:
-        return _insufficient("observed_damagers", f"{len(hazards)} hazard entities at the origin (existing scope)", aux)
+    if unmodelled:
+        return _insufficient("observed_damagers", f"{len(unmodelled)} active or unknown hazard entities not carried "
+                             "by this tick's full small-rune rows", aux)
     if len(pend):
         aux["pending"] = [{"iid": int(p["iid"]), "move": p.get("name"), "d_lo": p.get("d_lo"), "d_hi": p.get("d_hi")}
                           for p in pend]
@@ -201,7 +239,7 @@ def locked_scene(trk, *, frame=None, room=None, arenas=None, bombs=None, bombs_c
     scene = {"arena": dict(arena, source="static arena of " + room[0]),
              "enemies": {"rows": rows},
              "aim": {"pending_unlocked": [], "locked": lk},
-             "hazards": {"observed_damager_ents": hazards, "small_runes": {"rows": small}}}
+             "hazards": {"observed_damager_ents": unmodelled, "small_runes": {"rows": small}}}
     dec = cinst.dec
     lock = {"room": [room[0], int(room[1])], "caster_iid": ci, "other_iid": oi, "move": SCOPE["move"],
             "inst_t0_s": float(cinst.t0), "inst_t0_bin": _bin(cinst.t0), "lock_t_s": float(dec["t"]),

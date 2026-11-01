@@ -104,3 +104,42 @@ def test_policy_hook_observes_without_changing_result_or_predicting(inputs):
     before=path.copy();p._scene_field_after_plan(res,NS(rs=rs),3,3,fresh=True,state=state)
     assert p._scene_field_current['status']=='sampled' and not p._scene_field_error
     assert (res.mask,res.S,res.J)==(4,0,2.) and np.array_equal(path,before)
+
+
+def test_native_pool_and_full_forecast_are_not_rejected_as_unknown_damagers():
+    trk,state,arenas=native()
+    pool={'iid':-1,'type_key':'damager','category':'hazard','pos':[12.,3.],
+          'colliders':[{'kind':'circle','enabled':False,'r':2.166}]}
+    active=copy.deepcopy(pool);active['iid']=-2;active['pos']=[16.,3.]
+    active['colliders'][0].update(enabled=True,r=2.1661725)
+    trk.ents.extend([pool,active]);bombs=[[2.,16.,3.,2.166,0.,6.]]
+    v=L.locked_scene(trk,room=L.room_of_state(state),arenas=arenas,bombs=bombs,pend=[])
+    assert v['status']=='ok'
+    assert v['aux']['hazard_split']=={'inactive':[-1],'small_rune_rows':[-2],'unmodelled':[]}
+    assert len(v['aux']['observed_damager_ents'])==2
+    assert v['scene']['hazards']['observed_damager_ents']==[]
+    assert v['scene']['hazards']['small_runes']['rows']==[{'owner':2,'x':16.,'y':3.,'r':2.166,'on_k':0,'off_k':6}]
+    q=L.locked_scene(trk,room=L.room_of_state(state),arenas=arenas,bombs=[],pend=[])
+    assert q['reason']=='observed_damagers' and q['aux']['hazard_split']['unmodelled']==[-2]
+
+
+@pytest.mark.parametrize('change', ['missing_colliders','unknown_enabled','box','big_circle','shifted',
+                                    'radius_mismatch','not_lit_yet','already_off','nonfinite'])
+def test_unmodelled_or_unknown_hazards_still_refuse_the_soft_field(change):
+    trk,state,arenas=native()
+    h={'iid':-3,'category':'hazard','type_key':'damager','pos':[16.,3.],
+       'colliders':[{'kind':'circle','enabled':True,'r':2.166}]}
+    bombs=[[2.,16.,3.,2.166,0.,6.]]
+    if change=='missing_colliders':h['colliders']=[]
+    elif change=='unknown_enabled':h['colliders'][0].pop('enabled')
+    elif change=='box':h['colliders'][0]['kind']='box'
+    elif change=='big_circle':h['colliders'][0]['r']=7.187
+    elif change=='shifted':h['pos'][0]+=.01
+    elif change=='radius_mismatch':h['colliders'][0]['r']+=.01
+    elif change=='not_lit_yet':bombs[0][4]=1.
+    elif change=='already_off':bombs[0][5]=-1.
+    elif change=='nonfinite':h['colliders'][0]['r']=float('nan')
+    trk.ents.append(h)
+    v=L.locked_scene(trk,room=L.room_of_state(state),arenas=arenas,bombs=bombs,pend=[])
+    assert v['reason']=='observed_damagers'
+    assert v['aux']['hazard_split']['unmodelled']==[-3]
