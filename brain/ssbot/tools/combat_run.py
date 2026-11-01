@@ -574,9 +574,10 @@ def worker(a: argparse.Namespace) -> int:
         link = OracleLink(instance=a.instance, connect_timeout_s=120,
                           **({"measurement": measurement} if measurement is not None else {}))
         input_path = None
-        if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
+        strict_receipts = os.environ.get("SSBOT_FORUM_CHAIN_STRICT_RECEIPTS","0").strip()=="1"
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1" or strict_receipts:
             from ssbot.combat.knife_chain_input import capture_input_path
-            input_receipt = run_dir / f"b2_input_path_i{a.instance}.json"
+            input_receipt = run_dir / f"{'strict' if strict_receipts else 'b2'}_input_path_i{a.instance}.json"
             stage="input_path_preflight"
             input_path = capture_input_path(link, input_receipt, instance=a.instance)
             input_path = {"receipt":str(input_receipt), "verified":input_path["verified"],
@@ -628,7 +629,7 @@ def worker(a: argparse.Namespace) -> int:
         worker_context={"requested_environment":worker_requested,"boost_result":worker_boost_result,
                         "runtime_before":worker_runtime_before}
         if input_path is not None:
-            worker_context["b2_input_path"] = input_path
+            worker_context["strict_input_path" if strict_receipts else "b2_input_path"] = input_path
         rev = git_rev()
         env = env_overrides()
         fp = config_fp(a.encounter, a.policy, a.mode, a.view, rev,
@@ -711,6 +712,8 @@ def worker(a: argparse.Namespace) -> int:
             d["recording"] = str(rec_obj.path) if rec_obj else None
             d["t"] = datetime.now().isoformat(timespec="seconds")
             chain=getattr(policy,"chain_native",None);b2_stop=None;b2_stop_details=None
+            strict_stop=getattr(chain,"strict_stop",None) if strict_receipts else None
+            if strict_stop is not None:d["strict_receipt_stop"]=strict_stop
             if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
                 from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
                 b2_stop_details=_resolve_b2_stop(chain,outcome=rec.outcome,episode_reason=rec.reason)
@@ -785,6 +788,9 @@ def worker(a: argparse.Namespace) -> int:
             after_episode(link, enc, a.instance, d)
             if b2_stop is not None:
                 print(f"[i{a.instance}] B2 batch stopped; evidence retained: {b2_stop}", flush=True)
+                break
+            if strict_stop is not None:
+                print(f"[i{a.instance}] strict receipt stop; evidence retained: {strict_stop}", flush=True)
                 break
             if measurement is not None and measurement.protocol_version == 2 and d.get("measurement_outcome") == "WATCHDOG":
                 from ssbot.train.recovery import is_paused

@@ -173,6 +173,7 @@ def _known_runtime_bindings(policy, loaded):
 _CHAIN_ROLES = {
     "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
     "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
+    "SSBOT_FORUM_CHAIN_STRICT_RECEIPTS": "control",
     "SSBOT_FORUM_CHAIN_SHORT_FRAMES": "control", "SSBOT_FORUM_CHAIN_FAST_HOOK": "control", "SSBOT_FORUM_CHAIN_FIXED_HOOK": "control",
     "SSBOT_FORUM_CHAIN_BATCH": "accounting", "SSBOT_FORUM_CHAIN_BUDGET": "accounting",
     "SSBOT_FORUM_CHAIN_BLOCK": "accounting", "SSBOT_FORUM_CHAIN_ORDER": "accounting",
@@ -196,12 +197,14 @@ def _execution_bindings(policy, runtime_context):
     if chain is not _MISSING:
         native=chain is not None and hasattr(chain,"runner_factory")
         b2=native and bool(getattr(chain,"b2",False))
-        mode="b2" if b2 else "native" if native else "audit_only" if chain is not None else "off"
+        strict=chain is not None and not native and bool(getattr(chain,"strict_receipts",False))
+        mode="b2" if b2 else "native" if native else "strict_audit" if strict else "audit_only" if chain is not None else "off"
         out["SSBOT_FORUM_CHAIN_B2"]={"policy.chain_native.b2":b2}
         out["SSBOT_FORUM_CHAIN_NATIVE"]={"policy.chain_native.native_constructed":native}
+        out["SSBOT_FORUM_CHAIN_STRICT_RECEIPTS"]={"policy.chain_native.strict_receipts":strict}
         out["SSBOT_FORUM_CHAIN_AUDIT"]={"policy.chain_native.audit_mode":
-            {"mode":mode,"audit_only_constructed":chain is not None and not native,
-             "audit_switch_used":not native}}
+            {"mode":mode,"audit_only_constructed":chain is not None and not native and not strict,
+             "audit_switch_used":not native and not strict}}
         if not native:
             for key in _CHAIN_ROLES:
                 out.setdefault(key,{"policy.chain_native":

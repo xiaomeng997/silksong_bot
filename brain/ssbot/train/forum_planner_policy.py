@@ -95,6 +95,8 @@ MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
 REMAINING_HP_QUIT = int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT", "0"))
 if REMAINING_HP_QUIT < 0:
     raise ValueError("remaining HP quit floor must be nonnegative")
+# Non-candidate strict audit: the shared Opt1 receipt stop without the B2 controller (B2 keeps its own).
+CHAIN_STRICT_RECEIPTS = os.environ.get("SSBOT_FORUM_CHAIN_STRICT_RECEIPTS", "0").strip() == "1"
 SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
 SCENE_FIELD_RANK = os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK", "0").strip() == "1"
 SCENE_FIELD_WEIGHT_HITS = float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS", "1.0"))
@@ -448,6 +450,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         b2 = os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
         if b2 and not native:
             raise ValueError("B2 requires explicit CHAIN_NATIVE=1")
+        if CHAIN_STRICT_RECEIPTS and native:
+            raise ValueError("strict receipts are the non-candidate audit; B2 owns Opt1 itself")
         if native:
             if not kin.hero2_on() or self.crest != "Wanderer":
                 raise ValueError("native chain probe needs HERO2 and the Wanderer crest")
@@ -469,6 +473,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                     raise ValueError("native probe configuration changed; start a new fixed-config controller")
             else:
                 self.chain_native = selected.from_env(journal=journal)
+        elif CHAIN_STRICT_RECEIPTS:
+            from ssbot.combat.knife_chain_receipts import StrictReceiptAudit
+            if type(getattr(self, "chain_native", None)) is not StrictReceiptAudit:
+                self.chain_native = StrictReceiptAudit()
         elif os.environ.get("SSBOT_FORUM_CHAIN_AUDIT", "0").strip() != "1":
             self.chain_native = None
         elif type(getattr(self, "chain_native", None)).__name__ != "NativeChainAudit":

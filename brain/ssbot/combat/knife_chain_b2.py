@@ -22,6 +22,7 @@ from ssbot.knowledge import kinematics as km
 from .knife_chain_admission import AdmissionDecision,ConditionResult
 from .knife_chain_candidates import NativeChainCandidates
 from .knife_chain_native import NativeChainAudit,NativeChainAuditError
+from .knife_chain_receipts import Opt1ReceiptMixin
 from .knife_chain_commitment import MoveInstance,TargetMoveAdmission,Continuation,assess_continuations,check_external_path
 from .knife_chain_nominal import (NominalProfile,NominalUnsupported,compile_path,post_paths,logical_copy,is_committing,flag)
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
@@ -42,7 +43,7 @@ class B2Offer:
     proposal_ms: float | None = None
 
 
-class NativeChainB2(NativeChainCandidates):
+class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
     b2=True
     require_send_clock=False  # direct offline transaction fixtures; from_env requires it
     def __init__(self,*,runner_factory,probe_ref,journal=None,profile=None,arm="B",budget=None,trace_limit=2048):
@@ -223,54 +224,7 @@ class NativeChainB2(NativeChainCandidates):
                 self.learning_stop=str(exc);self._note("b2_learning_stop",frame=f,reason=str(exc));self.flush();raise
 
 
-    def _observe_application(self,state):
-        f=state["f"];act=state.get("act") or {}
-        target=act.get("target");applied=act.get("applied");desired=(act.get("hf") or {}).get("desired")
-        sent=self._receipts.get(target)
-        valid=False
-        if sent is not None and type(desired) is int:
-            if desired!=sent:
-                self._receipt_note("desired_mismatch",f,target=target,wanted=sent,reported_desired=desired)
-                self._stop("key application desync: desired differs from successful send",f)
-            valid=type(applied) is int and target<=applied<=min(f,target+2)
-            if target in self._pending and type(applied) is int and applied>target+2:
-                if applied<=f:self._late_bound_targets.add(target)
-                self._note("b2_application_outside_late_bound",frame=f,target=target,applied=applied,
-                           accepted="unchecked; await later matching report")
-        if valid:
-            previous=self._last_matching_report
-            for t,wanted in sorted(tuple(self._pending.items())):
-                direct=t==target
-                covered=previous is not None and previous["target"]<t<target
-                if (not direct and not covered) or f>t+4:continue
-                if direct and wanted!=desired:self._stop("key application desync",f)
-                self._pending.pop(t)
-                same=covered and wanted==desired  # skipped target vs its covering later report
-                late_beyond=covered and t in self._late_bound_targets
-                proof={"target":t,"observed":f,"desired":wanted,"reported_target":target,
-                       "kind":"direct" if direct else "covered_late_beyond_bound" if late_beyond else "covered_same_key" if same else "covered_changed_key",
-                       "applied":applied if direct else None,
-                       "between":None if direct else [previous["target"],target]}
-                self._application[t]=proof
-                self._receipt_note("late_beyond_bound" if late_beyond else "skip_same_key" if same else "skip_key_change" if covered else "lag" if applied>t else "direct",
-                    f,target=t,reported_target=target,desired=wanted,lag=applied-t if direct else None,
-                    between=proof["between"],hero_action="unchecked",contact="unchecked")
-                self._note("chain_application_observed",frame=f,**proof,hero_action="unchecked",contact="unchecked")
-                if late_beyond:
-                    self._note("b2_application_late_beyond_bound_covered",frame=f,**proof)
-                elif covered:
-                    self._note("b2_application_skipped",frame=f,**proof)
-                    self._note("b2_application_skipped_same_key" if same else "b2_application_skipped_changed_key",frame=f,**proof)
-                elif applied>t:self._note("b2_application_late",frame=f,delay=applied-t,**proof)
-            if previous is None or target>previous["target"]:
-                self._last_matching_report={"target":target,"desired":desired,"observed":f}
-        # User opt1: valid reports bracket skipped targets, even across key
-        # changes. Coverage is not an exact application or accepted-action claim.
-        # Allow through T+4; on T+5 without any proof, stop.
-        overdue=[t for t in self._pending if t<f-4]
-        if overdue:
-            for t in overdue:self._receipt_note("uncovered_timeout",f,target=t,desired=self._pending[t],upper_bound=t+4)
-            self._stop("missing critical application receipt beyond four-frame upper bound",f)
+    # _observe_application: the shared user Opt1 criterion (knife_chain_receipts.Opt1ReceiptMixin).
 
 
     def queued_prefix(self,frame,state):
