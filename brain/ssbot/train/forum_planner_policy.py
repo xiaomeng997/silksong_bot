@@ -588,6 +588,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.v2feed = None
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
+        old_reader = getattr(self, "_scene_field_event_reader", None)
+        if callable(getattr(old_reader, "close", None)):
+            old_reader.close()  # reset only, never an action tick
         if SCENE_FIELD_SHADOW or SCENE_FIELD_RANK:
             from ssbot.combat.scene_field_shadow import SceneFieldShadow
             self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
@@ -596,6 +599,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self._scene_field_current = None
             self._scene_field_error = False
             self._scene_field_rank_current = None
+            self._scene_field_pinned = None
         if SCENE_FIELD_RANK:
             from ssbot.combat.scene_field_values import SceneFieldValues
             self._scene_field_rank_type = SceneFieldValues
@@ -1446,6 +1450,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.combat import scene_field_events as events, scene_field_locked as locked
         from ssbot.combat.scene_field_grid import SceneFieldGrid
         started=time.perf_counter()
+        previous=getattr(self,"_scene_field_pinned",None)
+        self._scene_field_pinned=None
         feed=getattr(self,"v2feed",None);rs=getattr(forecast,"rs",None)
         base={"schema":1,"frame":frame,"component":"egress","applied_to_ranking":False}
         self._scene_field_rank_current=base
@@ -1459,9 +1465,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         reader=self._scene_field_event_reader
         view=locked.locked_scene(trk,frame=frame,room=locked.room_of_state(state),arenas=reader.arenas,
                                  bombs=getattr(rs,"scene_field_bombs",None),pend=rs.pend)
-        previous=reader.cache._field
-        fs,reason=locked.field_for_tick(reader.cache,events,view,reader.inputs,SceneFieldGrid,
-                                       events.Config(),prepared=reader.prepared,select=reader.select)
+        fs,reason=reader.field_for_view(view)
+        self._scene_field_pinned=fs
+        if reader.async_builder is not None:
+            base["builder"]=reader.async_builder.status()
         base.update(status=reason,prepare_ms=(time.perf_counter()-started)*1000.,
                     rebuilt=fs is not None and fs is not previous)
         if fs is None:return
@@ -1487,7 +1494,11 @@ class ForumPlannerPolicy(PlannerPolicy):
                     feed.trk, state, rs.pend, res.path, frame=frame, origin_frame=origin_frame,
                     k_shift=rs.k_shift, fresh=fresh,
                     bombs=getattr(rs, "scene_field_bombs", None),
-                    bombs_T=getattr(rs, "scene_field_bombs_T", None))
+                    bombs_T=getattr(rs, "scene_field_bombs_T", None),
+                    pinned=(getattr(self,"_scene_field_pinned",None),
+                            self._scene_field_rank_current["status"])
+                    if SCENE_FIELD_RANK and (getattr(self,"_scene_field_rank_current",None) or {}).get("frame")==frame
+                    else None)
             else:
                 self._scene_field_current = self._scene_field_reader.inspect(
                     feed.trk, rs.pend, res.path, frame=frame, origin_frame=origin_frame,

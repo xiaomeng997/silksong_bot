@@ -43,17 +43,32 @@ class SceneFieldEventShadow:
         self.select = select
         self.cache = E.SceneFieldSetCache(config.refresh_s)
         self._last = self._key = None
+        self.async_builder = None
 
     @classmethod
     def for_forum(cls, *, egress_only=False):
         from ssbot.core import forum as F
         arena = L.forum_arena(F.WALL_L, F.WALL_R, F.FLOOR_Y, F.DOME)
         inputs = _startup_inputs()
-        E.warmup()  # Startup only; never first compile in inspect().
+        E._static_digest(E.Config(), inputs)  # request-key digest, startup only
         select=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),components=('egress',)) if egress_only else None
-        return cls(inputs, {'Hang_04': arena}, prepared=E.prepare(inputs, arena=arena),select=select)
+        reader = cls(inputs, {'Hang_04': arena}, select=select)
+        from .scene_field_async import AsyncFieldBuilder
+        path = Path(__file__).resolve().parents[3] / 'knowledge/1.0.30000/scene_field/scene_field_inputs43.json'
+        reader.async_builder = AsyncFieldBuilder(inputs, path, arena, select, reader.cfg.refresh_s)
+        return reader
 
-    def inspect(self, trk, state, pending, path, *, frame, origin_frame, k_shift, bombs, bombs_T, fresh=True):
+    def field_for_view(self, view):
+        if self.async_builder is not None:
+            return self.async_builder.get(view)
+        return L.field_for_tick(self.cache, E, view, self.inputs, SceneFieldGrid,
+                                E.Config(), prepared=self.prepared, select=self.select)
+
+    def close(self):
+        if self.async_builder is not None:
+            self.async_builder.close()
+
+    def inspect(self, trk, state, pending, path, *, frame, origin_frame, k_shift, bombs, bombs_T, fresh=True, pinned=None):
         base = {'schema': 2, 'kind': 'locked_event_grid', 'policy_frame': int(frame),
                 'origin_frame': int(origin_frame), 'applied_to_ranking': False,
                 'source': 'selected_planner_path_before_scripts', 'world': self.cfg.world,
@@ -82,8 +97,7 @@ class SceneFieldEventShadow:
             return {**base, 'status': 'beyond_row'}
         key = L.field_key(E.cache_key, view['scene'], view['lock'], E.Config(), self.inputs,select=self.select)
         started = time.perf_counter()
-        fs, reason = L.field_for_tick(self.cache, E, view, self.inputs, SceneFieldGrid,
-                                      E.Config(), prepared=self.prepared,select=self.select)
+        fs, reason = self.field_for_view(view) if pinned is None else pinned
         build_ms = (time.perf_counter()-started)*1000.
         if fs is None:
             return {**base, 'status': reason}
