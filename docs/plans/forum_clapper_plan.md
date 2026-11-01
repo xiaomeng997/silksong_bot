@@ -2400,6 +2400,16 @@ Opt1仍是期望键不符停、相符应用晚≤2、相符前后报告覆盖同
 
 下一步按已授权运行唯一新工程局：w13/h2+场，seed314165、仅1局，B2/NATIVE/vault关、STRICT_RECEIPTS1、rank1/weight1/HP2/real_quit1、measure v2必开。源/695文件/解释器/配置/驱动/审阅/成本凭证新绑定；实际worker自己的input.stats必须现场过门才可准备开局，门未知/不同先停；Opt1失步/缺关键记录按原规则失败，HP≤2走已有Q1。真实外部危险/字段支持率、行动接受、丢计划出刀、HP/归因、时延、原始测量及完整清理按实际局核，不凭总成绩代替。EXCLUSIVE真实菜单回报仍未知，若触发严停保留失败并清理，不放宽界/自动重开。没有正式A/B、八局或扩大范围；原1fa预热候选保留为历史，不充当本源回执。
 
+### 7.21 首w13实机完成与零覆盖事实【单局，不作站位场效果结论】
+
+已授权的新工程根step4/scene_field_trial_20261101，runtime b21d1821、执行HEAD09e4245d，seed314165、h2+rank1/HP2/strict、B2/NATIVE/vault关。WMI/pythonw唯一自有启动，资源门无阻挡；真实worker44672在自己的OracleLink bootstrap过0delay/jitter/HF2/2/pending0门，strict_input_path_i0.json原始凭证保存；policy warm-up6.1s/query22.4ms在战前完成。CLEAR，原始计量fight T=28.63669245224446s、L=0，tail L=0、原始HP恒7；日志ingame_s32.23含不同口径，hits16是事件字段不当作掉血16HP。原始6锤入Slam0/5次劈中；h2记录5次planned press/5bounce，另1在no input(sprint/recoil)提前中止未承诺，不抹掉机会损失、不称漏发已计划出刀。
+
+Root原始审计ROOT_AUDIT.json/RECEIPTS.json在analysis/scene_field_trial_audit_20261101，完整性通过/无issues。policy成功发送1881；全录制独立direct1800/lag78/同键覆盖3，无期望键不符/超4未覆盖，online direct1798差2是最后决策后才到的两条，原始均补齐。覆盖不证明动作，计划劈锤按真实hit/bounce另核。测量/配置/window全部complete、overflow0/unresolved空，源/前置工件hash仍同。真实cleanup2026-11-01T21:55:30.139791Z：ownworker结束、game47464释放、golden/Prefs无差、旧DEMO恢复、registry live/instances空且restore_pending=false，另核无残留游戏；STATUS false。HP2/Q1菜单及strict失败后的harness收拾没有触发，不能写已现场验证。
+
+**站位场本局0次参与排序。** 1882测量tick首拒not_two_clappers785/not_one_locked_jump_cast364/observed_damagers732，末无决策1；不以0HP宣称场有效，也不拿该局当启用建场的实机性能。当前field-only v0只锁定放圈+同伴Idle/Walk的地面出口条件，不是全部四项长期目标；Task49只查真实条件覆盖和已建模危险是否重复拒绝，保留未知，不直接删除hazard或改危险门。
+
+本局完整tick到send p50=14.533ms、p99=21.56528、最大28.3804，1881中470超过一帧16.667ms；起步排队p99=15.58912ms，34次send晚于目标STATE接收（只是一种判据，不等于全部游戏晚应用）。因此持续60Hz的余量不富裕，不能因两帧目标就声称总有33ms可算。规划器搜索8ms计时在建场之后，建场不直接扣其局部8ms，仍占整体wall time；本局无建场实测暴露，旧有限2.2ms只作成本参考。后续先补最低成本的真实覆盖，不扩正式样本或重开旧批。
+
 ## 8. 第 5 步（按需）：递归表量化重建
 
 - **触发条件**，两条都要满足：
