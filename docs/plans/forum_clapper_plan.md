@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（11-01，6.96）：49f5新工程已经0HP通关，测量T15.4047s；实际起跳→CLAW→Harpoon→固定下劈→目标命中/计数8弹起→Recover+2新物理步交还全部验证，完整性和真实清理通过。此前7b两次跳劈也已真实走通，49f5只改首次钩爪队列门，未把旧跳劈计为新源曝光。49f5新CPU各臂2543tick、p50差+.03055ms、p99差−1.52224ms/比.94205；全部B计时与旧较高12.8643ms压力参考均保留，非未来保证。下一步核收独立现场审阅，再冻结8局ABBA/BAAB（各4局）；新草案八槽/拒第九槽和LOW_HP结局正反例已干跑，尚无REVIEW_GATE/未冻结或开8局。#116无损重入仍延期不改源码。逐局HP≤2原Q1受击无敌内真实退出，现场低血未触发；死亡/失步/缺日志/清理失败仍停。基础w7完成后推进独立场景站位场/w13，strict/B1/留出/冻结AA不恢复。**
+2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（11-01，6.97）：49f5钩爪工程0HP通关与真实全链/完整清理已由Sol及Opus独立核实；新源CPU与源审阅通过。已核收#117/#118，修复八局收集器误读health字段，生产源49f5不变；真实REVIEW_GATE已绑定17项证据，准备新冻结ABBA/BAAB总8局、每臂4局，不混工程、不补坏局。保留低血退出的已知限制：Save&Quit若导出health缺失，现生产完整性门会停批，尚不能保证低血退出后继续，也未现场验证Q1。正常HP>2损血按用户99描述保留；死亡/失步/缺日志/清理失败仍停。#116无损重入延期；不为P3继续加码。基础w7完成后推进独立场景站位场/w13，strict/B1/留出/冻结AA不恢复。**
 
 > **当前唤醒方式（10-31，6.60）**：Opus交付后运行sol/mailwatch/wake_sol.ps1，30秒后一次性通知当前聊天；同编号去重。旧10分钟轮询已删除，未停止项目任务或放宽实机门。
 
@@ -2120,9 +2120,19 @@ source_review及OPUS114/OPUS115_116_RECEIPT在analysis/b2_fixed_prefix_20261101/
 
 输入门为实际worker44736自己的只读连接bootstrap，passed；measurement/trace/config/window全complete、overflow0/unresolved空。真实清理2026-11-01T09:45:13.661339Z：worker0退出、game35448释放、golden/Prefs无差、旧DEMO恢复、registry空/restore_pending=false，另核无残留游戏，STATUS false。没有低血，HP2的实际Q1时机仍未验证。当前只一条干净前缀的钩爪正例，不是全部漂移/钟线或外部切入覆盖；当前49f5单局没有自然jump承诺，7b两jump为未改路径的历史证据，不冒充本局曝光。旧批/原工程/原始失败不动。
 
-**后续8局只做新冻结。** sol/overnight/smoke49f5d141/已备smoke8/single_smoke/run_smoke及新schedule_draft；ABBA/BAAB，4新预定配对seed314161–314164，总8/每臂4，不混工程、不补坏局。共同FIXED1 FAST0 OBSERVED1 STOP0 FINITE0，A当前h2+共同模型，B链；同一LOW_HP账本/真实quit1。真实LearningBudget八槽/两臂条件一致/第九拒绝干跑过，2正4负结局分类控制过，缺REVIEW_GATE冻结拒绝且STATUS不变；没有REVIEW_GATE，step3/w7_smoke8_20261101_49f5d141尚不存在，不提前称放行。低血QUIT按用户99保留为该槽结局继续：须trace/config/window完整、无死亡/预算halt、原因/最低HP对应floor2，原录像证明同场景首次暂停仍在这次受击无敌内、之前HP未再降且最终到Menu_Title；未知/错误则完整性停，不把测量失败洗成正常退出。此原始证明函数还未现场触发，不能将分类夹具当真实Q1验证。其他技术/死亡停止和每局真实清理沿用。
+**后续8局只做新冻结。** sol/overnight/smoke49f5d141/已备smoke8/single_smoke/run_smoke及新schedule_draft；ABBA/BAAB，4新预定配对seed314161–314164，总8/每臂4，不混工程、不补坏局。共同FIXED1 FAST0 OBSERVED1 STOP0 FINITE0，A当前h2+共同模型，B链；同一LOW_HP账本/真实quit1。真实LearningBudget八槽/两臂条件一致/第九拒绝干跑过，2正4负结局分类控制过，缺REVIEW_GATE冻结拒绝且STATUS不变；没有REVIEW_GATE，step3/w7_smoke8_20261101_49f5d141尚不存在，不提前称放行。低血QUIT按用户99的期望保留为该槽结局；实际能否继续须满足6.97所述生产完整性限制，不保证继续。其证明须trace/config/window完整、无死亡/预算halt、原因/最低HP对应floor2，原录像证明同场景首次暂停仍在这次受击无敌内、之前HP未再降且最终到Menu_Title；未知/错误则完整性停，不把测量失败洗成正常退出。此原始证明函数还未现场触发，不能将分类夹具当真实Q1验证。其他技术/死亡停止和每局真实清理沿用。
 
 Opus任务31先独立核新现场与完整计时范围，并静态核八局新配置/LOW_HP结束接收/源与脚本绑定。完成且核收后才写真实REVIEW_GATE/冻结；从冻结到全批实际清理期间刀口HEAD不提交，计划先main、批后同步。没有为#116或其他无损P3再改生产源码、没有新模型或搜索，源49f5继续保持。
+
+### 6.97 独立审阅核收，新八局正式冻结准备【已处理 Opus #117、#118】
+
+**已处理 Opus #117。** Opus实际49f5工程与新P报告的82项输入/输出hash全部核同，凭证analysis/b2_fixed_prefix_engineering_20261101/OPUS117_RECEIPT.json。实际J→CLAW→Harpoon→下劈→同目标命中/真实弹起→Recover+2新物理步交还、0HP及09:45:13.661339Z真实清理，与6.96一致；无P0–P2。P原始尖峰保留：whole_A6有6次系统/策略外尖峰，最大1175.7ms而当tick policy9.8ms，不能把原p99差−1.52224ms解释成B因果提速；仅诊断去尖峰约−.31ms/比.988仍过工程点界，不改主分母或原计时工件。当前条件CPU与现场动作分列，不外推网络或未来截止保证。
+
+**已处理 Opus #118（有界接收，生产P2-2延期未修）。** 八局草案62项审阅输入/输出hash核同，凭证OPUS118_RECEIPT.json；没有P0/P1。收集器low_hp_quit_proof误读hero.hp，已仅改为实际hero.health，原错误脚本/红测存before_health_fix与low_hp_proof_red.json；修后真实函数的1正5负证明夹具与2正4负结局分类通过，最终真实LOW_HP LearningBudget八槽、共同条件、第九拒绝干跑通过（checks/20261101T103925Z_44116）。HEALTH_FIX_RECEIPT.json与DRAFT_CHECK.json记录最终脚本hash。这些夹具不证明现场Q1时机。681运行件含用户5个未跟踪aim_zones JSON；仍不提交或改动这些文件，site-packages未纳源码包的局限保留。
+
+生产learning_check仍要求整数health；历史真实Save&Quit最后34–41帧导出health=None，当前oracle是否相同未现场验证。按用户97“能绕就绕、先做能打过去的版本”和118建议，**本轮不改生产或为此重跑P**：正常低血时仍请求原受击无敌内Q1真实退出，但若转场缺health即按原完整性门停批，保留该槽失败/停止和全部原始证据，绝不冒称能接下一局或补局。该项只是接受保守停批风险，并未修好/关闭。HP>2损血和首次链相关损血按用户99描述，不恢复旧累计2HP严预算；死亡/失步/关键日志或清理失败仍停。
+
+sol/overnight/smoke49f5d141/REVIEW_GATE.json已用真实源审阅、新P、现场/清理、117/118及最终收集器检查共17项hash签发，接收集合逐项含全部当前阻挡，不以最大编号代替。source仍49f5d141，A旧h2+共同模型、B链，共同FIXED1 FAST0 OBS1 STOP0 FINITE0、real_quit1。新批step3/w7_smoke8_20261101_49f5d141：ABBA/BAAB、新seed314161–164，总8/各4，独立工程不计入；仅探索性冒烟，不作正式比较或完美w7宣称。冻结前同步三份计划，冻结至全批真实清理期间刀口HEAD不提交，main计划可记录实况、批后再同步。待本次核对后才freeze与唯一WMI启动；资源/STOP/旧DEMO/自有Launcher、逐局测量/输入门及完整清理要求不变。#116已接受的无损重入仍只记录，不追加生产修复。
 
 ## 7. 独立场景站位场与手搓站位规则迁移【用户10-31四项目标】
 
