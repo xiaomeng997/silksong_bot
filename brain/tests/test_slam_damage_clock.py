@@ -47,9 +47,16 @@ def test_previous_bin_is_clamped_independently_without_wrap_or_end_ghost(monkeyp
     assert len(cells(got))==1
 
 
-def test_current_state_gate_cannot_erase_the_previous_closing_hammer(monkeypatch):
+@pytest.mark.parametrize("b_now,b",[(1,2),(2,2),(2,3)])
+def test_known_recover_does_not_resurrect_a_closed_hammer(monkeypatch,b_now,b):
     tab,tp=table(gated=True);monkeypatch.setattr(O,"ENABLED",True)
-    got=tab.place("CC_SLAM","main",2,(8.,5.),1,now=(10.,5.),b_now=2,st_now="Slam Recover")
+    got=tab.place("CC_SLAM","main",b,(8.,5.),1,now=(10.,5.),b_now=b_now,st_now="Slam Recover")
+    assert len(cells(got))==1
+
+
+def test_observed_slam2_keeps_previous_hammer_at_future_closing_bin(monkeypatch):
+    tab,tp=table(gated=True);monkeypatch.setattr(O,"ENABLED",True)
+    got=tab.place("CC_SLAM","main",2,(8.,5.),1,now=(10.,5.),b_now=1,st_now="Slam 2")
     assert len(cells(got))==4
 
 
@@ -98,4 +105,4 @@ def test_raw_owner_and_b2_continuation_use_the_same_clock_layer(monkeypatch):
 
 
 def test_model_revision_changes_for_clock_semantics():
-    assert O.revision_fields()["observed_slam_revision"]==2
+    assert O.revision_fields()["observed_slam_revision"]==3

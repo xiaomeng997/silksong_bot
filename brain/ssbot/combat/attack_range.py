@@ -359,9 +359,11 @@ class RangeTable:
             # shape, not the penultimate hammer kept alive indefinitely.
             pb = min(max(b - 1, 0), tp.nb - 1)
             parts = [Mask(sh, iu0, iv0)] if sh is not None and sh.size else []
-            previous = tp.shape[pb]
+            # State knowledge applies to both layers: a slower template's
+            # already-left hammer must not return after observed Recover.
+            previous, pu0, pv0 = self._shape(tp, pb, b_now is not None and b - 1 <= b_now, st_now)
             if previous is not None and previous.size:
-                parts.append(Mask(previous, int(tp.origin[pb, 0]), int(tp.origin[pb, 1])))
+                parts.append(Mask(previous, pu0, pv0))
             damage = union(parts)
             sh, iu0, iv0 = damage.m, damage.ix0, damage.iy0
         if sh is None or not sh.size:
