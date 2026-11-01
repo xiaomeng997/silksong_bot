@@ -47,6 +47,8 @@ def register(P):
     @P.action("fixed_hook_wait")
     def wait(x):
         v=x.v;o=x.obs
+        if o.st not in x.R.anchor.slam_states:
+            return {"do":"abort","why":"fixed hook wait: left observed slam sequence without verified release"}
         if v["fh_wait_f"]==o.f:return
         v["fh_wait_f"]=o.f
         if v["fh_recover"] is None:

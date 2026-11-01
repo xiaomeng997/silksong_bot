@@ -96,7 +96,8 @@ def test_entry_declines_unsupported_observation_without_search(bad,params,terrai
     assert not r.P.guards["fixed_hook_entry"](x)
 
 
-def test_real_transaction_template_through_bounce_and_physical_wait(monkeypatch,params,terrain):
+@pytest.mark.parametrize("exit_state",[None,"Idle","Stun"])
+def test_real_transaction_template_through_bounce_and_physical_wait(monkeypatch,params,terrain,exit_state):
     from ssbot.combat import knife_chain_b2 as m
     monkeypatch.setattr(m,"compile_path",lambda *a,**k:pytest.fail("nominal hook ran"))
     n=fixed();emitted={};bounced_at=None;release_at=None
@@ -108,6 +109,7 @@ def test_real_transaction_template_through_bounce_and_physical_wait(monkeypatch,
         if age>=29:h.update(pos=[33.8,7.],box=[33.55,5.5,34.05,8.],vel=[0.,17.4])
         if age>=48:
             st="Slam 0" if age<52 else "Slam 1" if age<55 else "Slam 2" if age<61 else "Slam Recover"
+            if age>=61 and exit_state is not None:st=exit_state
             s["ents"][0]["fsms"][0].update(state=st,t=0.)
         if age==48:h["anim"]["clip"]="DownSlash"
         if age==50:
@@ -126,7 +128,9 @@ def test_real_transaction_template_through_bounce_and_physical_wait(monkeypatch,
         send(n,o);emitted[f+2]=o.mask
     assert [emitted[k] for k in (1002,1003,1004,1005)]==[B["J"],B["J"]|B["L"],B["CLAW"]|B["L"],B["CLAW"]|B["L"]]
     assert emitted[1046]==B["D"] and emitted[1047]==B["D"]|B["A"]
-    assert bounced_at==1050 and release_at==1064
+    assert bounced_at==1050 and release_at==(1064 if exit_state is None else 1061)
+    handoff=next(e for e in reversed(n.events) if e["event"]=="b2_fixed_wait_handoff")
+    assert handoff["released"] is (exit_state is None)
     assert n.runner.run is None
 
 
