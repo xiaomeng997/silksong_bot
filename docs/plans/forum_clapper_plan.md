@@ -2350,6 +2350,12 @@ TIMED_FIELD_CHECKS.json通过机制与结构控制：能力集合增加，见证
 **141条件决定已接收，未满足时不冒称已开。** 用户通过Opus转达“加入新刀链会影响速度吗？不影响就开着吧”。已处理 Opus #141：默认开启的条件是完整原生翻越候选/接触搜索/执行接线后，做同场开关对照，p99、超预算tick和首J本机时钟否决在噪声内不变差；现有四标准名义链/本节field-only P窗口都没有运行原生翻越，不能替代此证据。目前翻越仍未进运行路径。近入口不为此打开整个DSLASH族，而应按当前Idle目标/方向只生成所需小候选；w13仍不开旧B2。先用现有8节表与共享后半段接线，再一次计全成本；不为条件尚未实测追加大套离线认证。
 
 
+### 7.15 w13独立HP2退出接法【1fa88736默认关闭；增量独审待核】
+
+这是首轮w13实机所必需的薄接线，不为借健康守卫启用单怪Slam的B2。SSBOT_FORUM_REMAINING_HP_QUIT默认0，显式2接到原Supervisor.remaining_hp_quit，沿已有Q1受击后暂停/退出机器；并不自动把模拟退出变成真实退出，试车合同仍须--real-quit1和实际退出证明。与B2预算同时存在时取较高门槛，不能降原预算，配置进B2 revision；不恢复原停止批。首帧Weighted Anklet重建Supervisor配置现在保留同一HP边界，修正旧B2在此重建时会丢floor的配置问题；普通h2关闭且无B2时仍None。
+
+29项相关检查通过、外来ssbot0：实际w13 policy reset无B2也有floor2、关闭路径无新floor、真实加权重建保留floor，沿用已有raw-health/蓝血/受击Q1和假worker完整性控制。新环境键的源/运行绑定已识别。原policy既有方法只有reset/_first_tick/stats改动，现有逐tick方法AST与9eef同；没有新增状态机或逐帧搜索。analysis/forum_learning_hp_20261101/CHECKS.json、SOURCE_PACKET.json与REPORT.md绑定691运行/模型项。尚无现场Q1、输入接受或新源P证明，不把9eef父版本窗口冒称新源实机门。后续原生翻越开关的完整成本对照把这项共同配置一并纳入，不为本薄配置接线再重跑旧大套/完整field-only窗口。
+
 ## 8. 第 5 步（按需）：递归表量化重建
 
 - **触发条件**，两条都要满足：
