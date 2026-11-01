@@ -1,0 +1,155 @@
+{
+  "vault_idle": {
+    "id": "vault_idle",
+    "start": "choose",
+    "anchor": {
+      "kind": "vault_idle",
+      "opened_by": "Root's native candidate arbitration: VaultAnchor.open(request); default off, never self-starting",
+      "target": "the Idle / Walk non-caster Clapper named by the request (iid)"
+    },
+    "vars": {
+      "iid": null, "face": null, "over_dir": null, "req": null, "F_open": null, "f_open": null, "hp0": null,
+      "row": null, "cs": null, "cs_toward": null, "f_ctrl": null,
+      "down_hit_f": null, "bounced": false, "bounce_f": null, "side_hits": [], "unlocked_hit_f": null,
+      "buddy_locked": null, "air_press_F": null, "g_press_F": null, "n_side": 0, "why": null, "closed_f": null
+    },
+    "cfg": {
+      "lag": 0,
+      "AIR_U": 0.1375,
+      "WALK_U": 0.1375,
+      "CLEAR_U": 1.2,
+      "MARGIN_U": 0.5,
+      "GAP_EXTRA": 0.05,
+      "AIR_Y_OFF": 0.15,
+      "SWING_F": 10,
+      "GROUND_SLASHES": 3
+    },
+    "rulesets": {
+      "watch": [
+        {"do": "done", "when": {"p": "vault_unlocked_hit"},
+         "why": {"lit": "vault: a hit on the target while no other Clapper is in its jump cast; the Idle target picks a move on this frame (forum.md:8454): hand back"}},
+        {"do": "done", "when": {"p": "vault_target_moved"},
+         "why": {"lit": "vault: the target left Idle / Walk / Dmg Attack: hand back"}},
+        {"do": "abort", "when": {"p": "vault_path_bomb"},
+         "why": {"lit": "vault: a small-rune bomb over the path"}}
+      ]
+    },
+    "links": {
+      "choose": {
+        "id": "vault_idle.choose",
+        "phase": "entry",
+        "rules": [
+          {"do": "try", "to": "near", "note": "near first when both entries hold (#136: the near entry strikes earlier and needs no Clawline)"},
+          {"do": "try", "to": "far"},
+          {"do": "abort", "why": {"lit": "vault: neither entry's observed preconditions hold"}}
+        ]
+      },
+      "near": {
+        "id": "vault_idle.near",
+        "phase": "near_strike",
+        "entry": {"p": "vault_near_entry"},
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "goto", "to": "over", "when": {"p": "vault_bounced"}},
+          {"do": "abort", "when": {"p": "vault_no_bounce"},
+           "why": {"lit": "vault near: no observed bounce in the down slash's active frames (miss branch): hand back"}},
+          {"do": "act", "act": {"a": "vault_near_plan"}}
+        ],
+        "keys": [{"gen": "vault_row_mask", "name": "row"}]
+      },
+      "far": {
+        "id": "vault_idle.far",
+        "phase": "cs_pre",
+        "entry": {"p": "vault_far_entry"},
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "act", "act": {"a": "vault_far_plan"}}
+        ],
+        "keys": [{"gen": "claw_plan_mask", "name": "claw"}],
+        "after_keys": [
+          {"do": "goto", "to": "far_lock", "mode": "next",
+           "when": {"p": "cmp", "a": "clk.claw_press", "op": ">=", "b": 1}}
+        ]
+      },
+      "far_lock": {
+        "id": "vault_idle.far_lock",
+        "phase": "cs_lock",
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "goto", "to": "far_strike",
+           "when": {"all": [{"p": "accepting"}, {"not": {"p": "harpoon_clip"}},
+                            {"p": "cmp", "a": "clk.claw_press", "op": ">", "b": 12}]}},
+          {"do": "abort", "when": {"p": "cmp", "a": "clk.claw_press", "op": ">", "b": 45},
+           "why": {"lit": "vault far: no control return"}}
+        ]
+      },
+      "far_strike": {
+        "id": "vault_idle.far_strike",
+        "phase": "cs_strike",
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "goto", "to": "over", "when": {"p": "vault_bounced"}},
+          {"do": "abort", "when": {"p": "vault_no_bounce"},
+           "why": {"lit": "vault far: no observed bounce in the down slash's active frames (miss branch): hand back"}},
+          {"do": "act", "act": {"a": "vault_far_strike"}}
+        ],
+        "keys": [{"gen": "vault_row_mask", "name": "row"}]
+      },
+      "over": {
+        "id": "vault_idle.over",
+        "phase": "after",
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "goto", "to": "fall", "when": {"p": "vault_clear_of_far_edge", "u": "cfg.CLEAR_U"}},
+          {"do": "abort", "when": {"p": "vault_landed_early"},
+           "why": {"lit": "vault: landed before passing the far edge"}}
+        ],
+        "keys": [{"gen": "dir_key", "args": {"d": "var.over_dir"}, "name": "over"}]
+      },
+      "fall": {
+        "id": "vault_idle.fall",
+        "phase": "after",
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "goto", "to": "ground", "when": {"p": "ground"}}
+        ],
+        "keys": [{"gen": "vault_air_slash", "name": "air_slash"}]
+      },
+      "ground": {
+        "id": "vault_idle.ground",
+        "phase": "after",
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "done", "when": {"p": "vault_slashes_done", "n": "cfg.GROUND_SLASHES"},
+           "why": {"lit": "vault: ground slashes done"}}
+        ],
+        "keys": [{"gen": "vault_ground_slash", "name": "ground_slash"}]
+      }
+    },
+    "admission": {
+      "choose": {"link": "vault_idle.choose", "observations": [], "conditions": [], "status": "unfitted",
+                 "notes": "dispatch only; the request comes from Root's arbitration"},
+      "near": {"link": "vault_idle.near",
+               "observations": [{"name": "box_gap_u", "unit": "u", "source": "her box to the observed body box"}],
+               "conditions": [{"obs": "box_gap_u", "kind": "range", "lo": null, "hi": null}],
+               "status": "unfitted", "notes": "#136 nominal band 1.0-6.0 u (2.5-4.0 u without the pogo i-frames); not a hard threshold"},
+      "far": {"link": "vault_idle.far",
+              "observations": [{"name": "centre_to_root_u", "unit": "u", "source": "her centre to the target root"}],
+              "conditions": [{"obs": "centre_to_root_u", "kind": "range", "lo": null, "hi": null}],
+              "status": "unfitted", "notes": "#136 nominal 5.6-9.5 u; 10-11 u unknown (needle hit outside its Slam Range)"},
+      "far_lock": {"link": "vault_idle.far_lock", "observations": [], "conditions": [], "status": "unfitted",
+                   "notes": "the fixed-hook lock rule (accepting, no Harpoon clip, claw_press > 12; abort > 45)"},
+      "far_strike": {"link": "vault_idle.far_strike", "observations": [], "conditions": [], "status": "unfitted",
+                     "notes": "#136 nominal rows CS d<drift>p<press> from control"},
+      "over": {"link": "vault_idle.over", "observations": [], "conditions": [], "status": "unfitted", "notes": ""},
+      "fall": {"link": "vault_idle.fall", "observations": [], "conditions": [], "status": "unfitted", "notes": ""},
+      "ground": {"link": "vault_idle.ground", "observations": [], "conditions": [], "status": "unfitted",
+                 "notes": "real-time hand-back on the first hit while the buddy is free; never a static three-slash table"}
+    },
+    "provenance": {
+      "format": "0.1",
+      "source": "Sol task 46 from the #136 draft (opus/scene_field_vault44/vault_chain_draft44.json); the user via Sol 11-01 (Task 44)",
+      "scope": "nominal prototype; default off; not loaded by Root; no forecast or safety certificate"
+    }
+  }
+}
