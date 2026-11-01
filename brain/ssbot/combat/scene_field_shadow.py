@@ -58,8 +58,10 @@ def query_aim(field,points,consts,cfg=ShadowConfig()):
     gx=field['fields']['grid_hx'];lo,hi=field['time']['remaining_s'];cy=sum(consts.standing_box_y)*.5
     out=[]
     for x,y,t in points:
-        row={'centre':[float(x),float(y)],'after_tracker_s':float(t),'known':False,'bonus':0.}
-        if not np.isfinite([x,y,t]).all() or x<gx[0] or x>gx[-1]:row['reason']='outside_or_unknown'
+        finite=np.isfinite([x,y,t])
+        row={'centre':[float(x) if finite[0] else None,float(y) if finite[1] else None],
+             'after_tracker_s':float(t) if finite[2] else None,'known':False,'bonus':0.}
+        if not finite.all() or x<gx[0] or x>gx[-1]:row['reason']='outside_or_unknown'
         elif abs(y-cy)>cfg.ground_tolerance_u:row['reason']='ground_scope_only'
         elif t<lo-1e-10:row['reason']='before_window_requires_hold'
         elif t>hi+1e-10:row['reason']='after_decision_window'

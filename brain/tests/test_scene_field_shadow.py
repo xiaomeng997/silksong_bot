@@ -126,3 +126,10 @@ def test_shadow_setting_cannot_share_one_b2_budget_revision(tmp_path,monkeypatch
     before=(tmp_path/'budget.json').read_bytes();monkeypatch.setenv('SSBOT_FORUM_SCENE_FIELD_SHADOW','1')
     with pytest.raises(LearningStop,match='revision'):Bare.from_env(journal=str(tmp_path/'second.jsonl'))
     assert (tmp_path/'budget.json').read_bytes()==before
+
+
+def test_nonfinite_query_is_explicit_unknown_and_strict_json_safe():
+    trk,pending=tracker();r=S.SceneFieldShadow.for_forum((14.6,48.4));f=A.build_aim(S.native_view(trk,pending,r.consts.ft),r.grid,r.rules,r.consts)
+    out=S.query_aim(f,[[np.nan,4.0545,.4],[37.5,np.inf,.4],[37.5,4.0545,np.nan]],r.consts)
+    assert not any(p['known'] for p in out)
+    json.dumps(out,allow_nan=False)
