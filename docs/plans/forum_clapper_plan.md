@@ -2356,6 +2356,14 @@ TIMED_FIELD_CHECKS.json通过机制与结构控制：能力集合增加，见证
 
 29项相关检查通过、外来ssbot0：实际w13 policy reset无B2也有floor2、关闭路径无新floor、真实加权重建保留floor，沿用已有raw-health/蓝血/受击Q1和假worker完整性控制。新环境键的源/运行绑定已识别。原policy既有方法只有reset/_first_tick/stats改动，现有逐tick方法AST与9eef同；没有新增状态机或逐帧搜索。analysis/forum_learning_hp_20261101/CHECKS.json、SOURCE_PACKET.json与REPORT.md绑定691运行/模型项。尚无现场Q1、输入接受或新源P证明，不把9eef父版本窗口冒称新源实机门。后续原生翻越开关的完整成本对照把这项共同配置一并纳入，不为本薄配置接线再重跑旧大套/完整field-only窗口。
 
+### 7.16 翻越链组件入原生包及限定近入口生成【56d52aab；生产尚未调用】
+
+已将46的8节v0表和原语族移到knife_chain_vault.py/knife_chain_vault_v01.json，沿用原ChainRunner。10个既有顶层helper/class（含嵌套原语/Anchor方法）AST与交付同，只有默认包内表路径和模块说明改变；绑定摘要仍b525fe59…，load不自动开run。旧691运行/模型文件LF全部同1fa，新694清单仅多3个运行资产，生产政策/规划器尚未导入，无默认行为或实战速度变化。
+
+knife_chain_vault_entry.near_proposals每个入口机会只按目标方向展开84个地面行（2跳高×21压键时刻×前段向前/中性），一次HERO2批量推演，保留当前在途prefix与HoldFilter。只在模型确实空中挥刀且两种DownSlash刀形都碰到观察身体时给名义提案；冷却/太远/不兼容前缀拒绝。命令只读，输入不改；未假注EV_POGO。它明确假定当前Idle身体静止，admission/external_path_checked均false，**不是实际命中保证/安全/执行许可**；远入口原语已入包，远入口原生候选仍未接。
+
+6项相关检查通过/外来ssbot0；当前原生包替换46原语后，用Peer名义driver重跑4路线×2解锁观察共8条，输出与原交付逐项同，无敌外身体+0.5未重叠。这不是独立重造物理或游戏闭环。凭证analysis/vault_native_port_20261101/CHECKS.json、REPORT.md、SOURCE_PACKET.json。未新增P/游戏，#141默认开启条件仍未达：还要接原生仲裁、其它怪/延迟物检查、实际发键/接受/观察弹起交还，再一次量实际整tick开关对照。不为未调用组件再重跑旧大套/字段P；已审稳定的field+HP2首w13版本可另冻，不把本尚未接入翻越拖成它的必需前置，也不假称它已在w13开着。
+
 ## 8. 第 5 步（按需）：递归表量化重建
 
 - **触发条件**，两条都要满足：
