@@ -571,7 +571,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.fc.reset()
         self.weighted = None
         self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
-        self.sc.cfg = forum_supervisor_config(free_until_hit=self.free)
+        self.sc.cfg = forum_supervisor_config(free_until_hit=self.free,
+            remaining_hp_quit=getattr(getattr(self.chain_native,"budget",None),"remaining_hp_quit",None))
         self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
         self.rq: dict = {"armed": self.real_quit, "submits": [], "menus": []}
         self.sc.reset()

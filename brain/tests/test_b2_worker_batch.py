@@ -11,7 +11,7 @@ from ssbot.tools import combat_run as C
 def options(tmp_path,**overrides):
     d=dict(instance=0,run_dir=str(tmp_path),encounter="Forum_W_w7",mode="eval",policy="planner",view="oracle",
       episodes=4,hours=0.,rotate=1,seed=10,same_seeds=True,time_scale=1.,no_record=False,threads=1,
-      real_quit=0.,inject_hits=0.,start_silk=None,start_hp=None,silk_reserve=False,forum_clash="main",
+      real_quit=1.,inject_hits=0.,start_silk=None,start_hp=None,silk_reserve=False,forum_clash="main",
       key_cost=None,timebox=0.,measure=False)
     d.update(overrides);return SimpleNamespace(**d)
 
@@ -61,7 +61,7 @@ def test_four_per_arm_and_duplicate_do_not_become_replacement_games(tmp_path):
 
 
 @pytest.mark.parametrize("change",[{"mode":"data"},{"time_scale":2.},{"inject_hits":1.},
-    {"view":"degraded"},{"real_quit":1.},{"episodes":5},{"instances":"0,1","episodes":4}])
+    {"view":"degraded"},{"real_quit":0.},{"episodes":5},{"instances":"0,1","episodes":4}])
 def test_invalid_smoke_options_rejected_before_parent_allocates_or_spawns(tmp_path,monkeypatch,change):
     env(monkeypatch,tmp_path)
     monkeypatch.setattr(C,"new_run_dir",lambda *a,**k:pytest.fail("allocated invalid run"))

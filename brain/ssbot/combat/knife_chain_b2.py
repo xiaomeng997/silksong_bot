@@ -27,7 +27,7 @@ from .knife_chain_nominal import (NominalProfile,NominalUnsupported,compile_path
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
 from .knife_chain_eval import ChainObservationNotReady
 from .knife_chain_format import MASK_NAMES as B
-from .knife_chain_budget import LearningBudget,LearningStop
+from .knife_chain_budget import LearningBudget,LearningStop,LOW_HP_POLICY
 
 
 @dataclass
@@ -86,7 +86,7 @@ class NativeChainB2(NativeChainCandidates):
         digest.update(json.dumps(revision_fields(),sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")
-        budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()))
+        budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()),policy=LOW_HP_POLICY)
         instance=cls(runner_factory=lambda:runner,probe_ref=os.environ.get("SSBOT_FORUM_CHAIN_PROBE",""),
                      journal=journal,profile=profile,arm=arm,budget=budget)
         instance.require_send_clock=True
@@ -196,8 +196,8 @@ class NativeChainB2(NativeChainCandidates):
                     if source is not None:sources.append(str(source))
             phase=("recovery_after_failure" if exposed else "commitment" if self.commitment is not None else "post" if self.post_context is not None
                    else "recovery" if self.recovery is not None else "approach" if related else "none")
-            # Budget.observe may raise on this very first injury. Preserve the
-            # actual HP event before the immutable stop/cleanup path begins.
+            # Preserve the HP fact before any fatal/legacy stop. Under the new
+            # policy low HP requests Q1 pause/real quit in the normal supervisor.
             self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related,phase=phase,
                        failure_exposure=[x.as_dict() for x in exposed],sources=sorted(set(sources)) or ["unknown"],
                        source_scope="same-frame eligible damage-call candidates; no predicted/near-frame attribution")

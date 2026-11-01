@@ -1,4 +1,4 @@
-"""Persistent strict B2 learning budget shared by serial/parallel collector arms.
+"""Persistent B2 learning accounting shared by serial/parallel collector arms.
 
 This is experiment accounting, never a controller. Atomic updates retain failures
 and latch a stop before the policy can request another combat ACTION. A corrupt /
@@ -15,14 +15,24 @@ class LearningStop(RuntimeError):
     pass
 
 
+STRICT_POLICY = "strict-2hp-v1"
+LOW_HP_POLICY = "episode-remaining-2hp-v1"
+
+
 class LearningBudget:
-    def __init__(self,path,*,batch,revision,worker):
+    def __init__(self,path,*,batch,revision,worker,policy=STRICT_POLICY):
         if not batch or not revision or not worker:raise ValueError("budget needs frozen batch/revision/worker")
-        self.path=Path(path);self.batch=batch;self.revision=revision;self.worker=worker
+        if policy not in {STRICT_POLICY,LOW_HP_POLICY}:raise ValueError("unknown B2 learning policy")
+        self.path=Path(path);self.batch=batch;self.revision=revision;self.worker=worker;self.policy=policy
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.state=None
         self._update(None)
         self.check()
+
+    @property
+    def remaining_hp_quit(self):
+        # The supervisor, not the ledger, owns the post-hit pause and real quit.
+        return 2 if self.policy==LOW_HP_POLICY else None
 
     def _update(self,event):
         lock=self.path.with_name(self.path.name+".lock")
@@ -35,9 +45,10 @@ class LearningBudget:
                 raise LearningStop("B2 budget ledger deleted; preserve batch marker and stop")
             if self.path.exists():
                 data=self._read()
-                if data.get("batch")!=self.batch or data.get("revision")!=self.revision:
+                if (data.get("batch")!=self.batch or data.get("revision")!=self.revision or
+                        data.get("policy")!=self.policy):
                     raise LearningStop("B2 budget belongs to another batch/condition revision; use a NEW batch")
-            else:data={"schema":1,"policy":"strict-2hp-v1","batch":self.batch,"revision":self.revision,
+            else:data={"schema":1,"policy":self.policy,"batch":self.batch,"revision":self.revision,
                        "b_fight_hp":0,"tail_hp":0,"events":[],"attempts":[],"execution":None,"stop":None}
             if event is not None and data["stop"] is None:
                 if event.get("kind")=="execution":self._bind_execution(data,event["conditions"])
@@ -50,12 +61,13 @@ class LearningBudget:
                         if event["tail"]:data["tail_hp"]+=event["hp_loss"]
                         elif event["arm"]=="B":data["b_fight_hp"]+=event["hp_loss"]
                         reasons=[]
-                        if data["b_fight_hp"]>=2:reasons.append("B fight cumulative 2 HP")
-                        if not event["tail"] and event["arm"]=="B" and event["hp_loss"]>0 and event["chain_related"]:
+                        if self.policy==STRICT_POLICY and data["b_fight_hp"]>=2:reasons.append("B fight cumulative 2 HP")
+                        if (self.policy==STRICT_POLICY and not event["tail"] and event["arm"]=="B" and
+                                event["hp_loss"]>0 and event["chain_related"]):
                             reasons.append("new chain-related fight injury; pause for diagnosis")
                         if event.get("fatal"):reasons.append(event["fatal"])
                         if reasons:data["stop"]={"frame":event["frame"],"episode":event["episode"],"worker":self.worker,
-                                                   "reasons":reasons,"mode":"batch_end" if data["b_fight_hp"]>=2 else "pause"}
+                                                   "reasons":reasons,"mode":"batch_end" if self.policy==STRICT_POLICY and data["b_fight_hp"]>=2 else "pause"}
             temp=self.path.with_name(self.path.name+f".tmp.{os.getpid()}")
             with temp.open("w",encoding="utf-8") as f:
                 json.dump(data,f,ensure_ascii=False,indent=1);f.write("\n");f.flush();os.fsync(f.fileno())
@@ -131,7 +143,8 @@ class LearningBudget:
     def check(self):
         if self.path.with_name(self.path.name+".halt").exists():raise LearningStop("B2 integrity halt marker present")
         data=self._read()
-        if data.get("batch")!=self.batch or data.get("revision")!=self.revision:
+        if (data.get("batch")!=self.batch or data.get("revision")!=self.revision or
+                data.get("policy")!=self.policy):
             raise LearningStop("B2 budget identity changed")
         self.state=data
         if data["stop"] is not None:raise LearningStop("B2 stopped: "+"; ".join(data["stop"]["reasons"]))
@@ -194,8 +207,8 @@ def preflight_options(options):
     preflight_environment(options.encounter,no_record=options.no_record)
     if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":return
     if (options.mode!="eval" or options.policy!="planner" or options.view!="oracle" or
-            options.time_scale!=1. or options.real_quit!=0. or options.inject_hits!=0.):
-        raise LearningStop("B2 smoke requires eval/planner/oracle at1x without injected hits or random real quits")
+            options.time_scale!=1. or options.real_quit!=1. or options.inject_hits!=0.):
+        raise LearningStop("B2 requires eval/planner/oracle at1x, deterministic real quit=1, without injected hits")
     episodes=options.episodes
     if type(episodes) is not int or not 1<=episodes<=4:
         raise LearningStop("B2 first smoke allows 1..4 attempts per arm invocation")
@@ -218,6 +231,7 @@ def execution_conditions(options,environ=None):
             "SSBOT_FORUM_CHAIN_BLOCK","SSBOT_FORUM_CHAIN_ORDER"}
     crossover=crossover_schedule(env)
     return {"schema":1,"smoke_limit":{"total":8,"per_arm":4},
+            "learning_policy":{"name":LOW_HP_POLICY,"remaining_hp":2,"scope":"episode","pause_then_real_quit":True},
             **({"crossover":crossover} if crossover is not None else {}),
             "options":{k:getattr(options,k,None) for k in keys},
             "environment":{k:v for k,v in sorted(env.items()) if k.startswith("SSBOT_") and k not in labels}}

@@ -228,6 +228,9 @@ class SupervisorConfig:
     qs_idle_clear_s: float = 0.4               # QS fires only while the no-input path stays clear this long: the
     #                                            pause lands 2-4 frames after the gate, the key guard waits <= 0.25 s
     hooks: tuple[Callable[["SupervisorInput"], Iterable[str]], ...] = ()
+    # Optional experiment exit floor (B2 user 10-31). Reuses Q1's post-hit
+    # pause/quit timing; other controllers retain the hits-to-death rule.
+    remaining_hp_quit: int | None = None
 
 
 @dataclass(slots=True)
@@ -599,9 +602,10 @@ class Supervisor:
                   known: bool, basis: str | None = None) -> list[tuple[str, str]]:
         cfg = self.cfg
         out: list[tuple[str, str]] = []
-        if h is not None and h <= 1:
-            why = f"hits_to_death {h}" + (" against the worst known event (support empty now)" if basis == H_WORST
-                                          else "")
+        low_hp = cfg.remaining_hp_quit is not None and inp.hp is not None and inp.hp <= cfg.remaining_hp_quit
+        if (h is not None and h <= 1) or low_hp:
+            why = (f"remaining HP {inp.hp} <= {cfg.remaining_hp_quit}" if low_hp else
+                   f"hits_to_death {h}" + (" against the worst known event (support empty now)" if basis == H_WORST else ""))
             out.append(("Q1", why + ("; after a hit: pause in the post-hit window"
                                      if self.q1_cause(inp.t) == Q1_HIT else "; no hit: first pausable frame")))
         if inp.i2_violated and (inp.escape_s is None or inp.escape_s > cfg.q2_escape_s):
