@@ -54,6 +54,12 @@ class B2Geometry:
                 raise GeometryUnavailable("invalid exact continuation window")
             key=("frames",first,length)
             if key not in self._fresh:
+                # The exact per-frame clock also holds inside a larger window.
+                # Reuse its rasters, never a path's contacts/protection verdict.
+                for window,support in self._fresh.items():
+                    if (isinstance(window,tuple) and window[0]=="frames" and
+                            window[1]<=first and length<=window[2]):
+                        return support
                 self._fresh[key]=RangeSupport.build(rs.trk,samples=tuple(range(first,length+1)),
                     canvas=rs.cv,margin_mode=rs.margin_mode,focus=getattr(rs,"focus_arg",rs.focus))
             return self._fresh[key]

@@ -91,3 +91,37 @@ def test_current_strike_keeps_original_query_and_does_not_gain_admission(monkeyp
     contacts=geo.scan(path(stage="commitment")).contacts
     assert [c.frame for c in contacts]==[137,138,139,140]
     assert not calls
+
+
+@pytest.mark.parametrize("owner,delayed",[(7,False),(7,True),(8,True)])
+def test_contained_exact_window_reuses_larger_raster_and_keeps_contacts(monkeypatch,owner,delayed):
+    monkeypatch.setattr(O,"ENABLED",True)
+    geo,rs,calls,path=setup_geometry(monkeypatch,pulse=40,owner=owner,delayed=delayed)
+    larger=geo.support(42,first=37)
+    smaller=geo.support(40,first=38)
+    assert smaller is larger and len(calls)==1
+    contacts=geo.scan(path(first=38,length=2)).contacts
+    assert [(c.frame,c.owner_iid,c.kind) for c in contacts]==[(140,owner,"delayed" if delayed else "move")]
+    assert len(calls)==1
+
+
+def test_contained_support_never_caches_position_or_protection_verdict(monkeypatch):
+    from ssbot.knowledge import kinematics as km
+    monkeypatch.setattr(O,"ENABLED",True)
+    geo,rs,calls,path=setup_geometry(monkeypatch,pulse=40)
+    geo.support(42,first=37)
+    p=path(first=38,length=2)
+    assert [c.frame for c in geo.scan(p).contacts]==[140]
+    p.flags[:]=km.F_INVULN
+    assert not geo.scan(p).contacts
+    p.flags[:]=0;p.box[:,[0,2]]+=2.
+    assert not geo.scan(p).contacts
+    assert len(calls)==1
+
+
+def test_sparse_rebuild_entry_is_never_reused_as_a_containing_exact_window(monkeypatch):
+    monkeypatch.setattr(O,"ENABLED",True)
+    geo,rs,calls,path=setup_geometry(monkeypatch,pulse=40)
+    geo._fresh[100]=rs
+    exact=geo.support(40,first=37)
+    assert exact is not rs and exact.samples==tuple(range(37,41)) and len(calls)==1
