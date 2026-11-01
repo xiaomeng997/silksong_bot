@@ -87,10 +87,13 @@ class NativeChainB2(NativeChainCandidates):
         digest.update(json.dumps(profile.__dict__,sort_keys=True).encode())
         from .observed_slam import revision_fields
         digest.update(json.dumps(revision_fields(),sort_keys=True).encode())
-        # Optional observation changes tick cost: never mix its on/off profile
-        # under one batch ledger, even though it cannot rank or send actions.
+        # Optional observation and utility have distinct cost/selection profiles;
+        # never mix their on/off configurations under one batch ledger.
         digest.update(json.dumps({"scene_field_shadow": os.environ.get(
-            "SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1", "scene_field_shadow_schema": 2},
+            "SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1", "scene_field_shadow_schema": 2,
+            "scene_field_rank": os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK","0").strip()=="1",
+            "scene_field_weight_hits": float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS","1.0")),
+            "scene_field_rank_schema": 1},
             sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")
@@ -528,6 +531,8 @@ class NativeChainB2(NativeChainCandidates):
         value=-float(w.get("stance",.6))*abs(c[0]-prefs.stance_x)-float(w.get("risk",3))*risk
         if path.flags[-1]&km.F_GROUND:value+=float(w.get("ground",.2))
         if prefs.boss_x is not None and (prefs.boss_x-c[0])*path.states[km.FACE,-1]>0:value+=float(w.get("face",.3))
+        field=getattr(planner,"scene_field_values",None)
+        if field is not None:value+=field.path_bonus(path,prefs)
         return float(value)
 
     def continuation_value_bound(self,prefs):

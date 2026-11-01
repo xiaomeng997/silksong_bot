@@ -1511,6 +1511,8 @@ class ForumPlanner(Planner):
         return out
 
     def _zero_hit_value_bound(self,ws,f,prefs,ctx,*,start,P,T,N,cont,challenger):
+        if getattr(self,"scene_field_values",None) is not None:
+            return None, None
         # This is a narrow native-score proof. Unknown forecast/score adapters
         # keep the old path; prepared targets are reused on a non-pruning miss.
         if (getattr(self._score_forum,"__func__",None) is not _SCORE_FORUM_AUTHORITY or
@@ -3559,7 +3561,8 @@ class ForumPlanner(Planner):
         # evaluate the ordinary rows: if its safe score strictly exceeds the
         # optimistic score of ANY continuation, expanding three tails cannot
         # affect selection. Ties and unsafe/forced ordinary rows never prune.
-        bound = chain.continuation_value_bound(prefs) if callable(getattr(chain, "continuation_value_bound", None)) else math.inf
+        bound = (chain.continuation_value_bound(prefs) if getattr(self,"scene_field_values",None) is None
+                 and callable(getattr(chain,"continuation_value_bound",None)) else math.inf)
         if math.isfinite(bound):
             ordinary = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
         dominated = ordinary is not None and not ordinary.S and not ordinary.forced_risk and ordinary.J > bound
@@ -3794,7 +3797,7 @@ class ForumPlanner(Planner):
         # First rollout scope: ordinary has no active kept/macro program or
         # special/global-board side effects to reconstruct. Broader families
         # retain the complete ordinary path, even if a raw score could lose.
-        value_prune_eligible=(challenger_value is not None and not (prefs.want_bind and ctx.want_bind) and
+        value_prune_eligible=(getattr(self,"scene_field_values",None) is None and challenger_value is not None and not (prefs.want_bind and ctx.want_bind) and
                 not (n_spec or n_hop or n_chain or n_ds or n_map or knife_on) and
                 self._spec_meta is None and self._map is None and pv_sm is None and
                 getattr(self,"_kp",None) is None and self.jump_until<=self.ticks and self.macro_until<=self.ticks and
@@ -3900,6 +3903,17 @@ class ForumPlanner(Planner):
         sc = (self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx,prepared_targets=prepared_score_targets)
               if prepared_score_targets is not None else self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx))
         J = sc["J"]
+        scene_values=scene_known=None
+        scene_info=None
+        scene_points=scene_layers=None
+        scene_reader=getattr(self,"scene_field_values",None)
+        if scene_reader is not None:
+            scene_values,scene_known=scene_reader.score_rollout(r1)
+            scene_values=scene_values*scene_reader.weight_hits
+            scene_info=dict(scene_reader.last)
+            scene_points,scene_layers=scene_reader.last_points,scene_reader.last_layers
+            # Utility is priced in landed-hit units; neither nh nor safety is fabricated.
+            J += prefs.weights.get("hit",10.)*scene_values
         if sctx is not None:
             # (b) a down slash on an enemy in a move is a certain hit: a special row's strike (its contact with E's
             # move boxes) counts as one landed hit on E where the scorer's target boxes missed it (the hit term at
@@ -4574,6 +4588,9 @@ class ForumPlanner(Planner):
             # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
             # otherwise and on every unsafe row: the order is unchanged)
             v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            if scene_reader is not None and v2:
+                # h2 sorts this ahead of J; J alone would not trade a hit for an exit.
+                v2_nh -= np.where(safe,scene_values,0.)
             dg_pen, dg_corner = None, None          # (diagnostics: last_sel)
             if SPECIAL_MAP and v2 and self._map is not None:
                 # SG4: the readiness penalty (landed-hit units) before a slam can start; rows with no safe
@@ -4620,6 +4637,13 @@ class ForumPlanner(Planner):
                     corner = np.zeros(N, bool)
                     for x0, x1 in zones:
                         corner |= (cxe >= x0) & (cxe <= x1) & (cye < forum_v2.CORNER_TOP_Y)
+                    # The old wall-side stance penalty is a soft heuristic.
+                    # Keep it as fallback where the new field has no positive
+                    # known exit value, rather than vetoing its useful escape.
+                    if scene_info is not None:
+                        field_exit = scene_known & (scene_values > 0)
+                        scene_info["corner_fallback_replaced_rows"] = int((safe & corner & field_exit).sum())
+                        corner = corner & ~field_exit
                     v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
                     self.audit.v2_corner_rows += int((safe & corner).sum())
                     dg_corner = corner
@@ -5066,6 +5090,13 @@ class ForumPlanner(Planner):
                                        "final_mask": res.mask if hasattr(res, "mask") else int(sel_cmd[0]),
                                        "escape_status": "passed" if res.idx in knife_data and not res.S else "not_selected",
                                        "full_checked_tail_frames": 0 if checked_future is None else len(checked_future)}
+        if scene_info is not None:
+            ci=res.idx if 0<=res.idx<N else None
+            self.last_info["scene_field_rank"]={**scene_info,
+                "selected_bonus_hits":None if ci is None else float(scene_values[ci]),
+                "selected_known":None if ci is None else bool(scene_known[ci]),
+                "selected_layer":None if ci is None else scene_layers[ci],
+                "selected_point_xyt":None if ci is None else [float(v) if np.isfinite(v) else None for v in scene_points[ci]]}
         if self.debug:
             self.last_info["dbg"] = {"box": r1.box, "flags": r1.flags, "mode": r1.mode, "latched": latched, "P": P,
                                      "J": J, "ok": ok, "known": known, "t_hit": t_hit, "V": V, "keep": keep,

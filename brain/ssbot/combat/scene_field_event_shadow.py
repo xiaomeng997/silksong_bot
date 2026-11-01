@@ -34,22 +34,24 @@ class EventShadowConfig:
 
 
 class SceneFieldEventShadow:
-    def __init__(self, inputs, arenas, config=EventShadowConfig(), prepared=None):
+    def __init__(self, inputs, arenas, config=EventShadowConfig(), prepared=None, select=None):
         if config.max_samples < 1 or config.layer not in E.LAYERS:
             raise ValueError('invalid event shadow configuration')
         if config.world not in E.WORLDS or config.hypothesis not in E.HYPS:
             raise ValueError('unknown conditional world/hypothesis')
         self.inputs, self.arenas, self.cfg, self.prepared = inputs, arenas, config, prepared
+        self.select = select
         self.cache = E.SceneFieldSetCache(config.refresh_s)
         self._last = self._key = None
 
     @classmethod
-    def for_forum(cls):
+    def for_forum(cls, *, egress_only=False):
         from ssbot.core import forum as F
         arena = L.forum_arena(F.WALL_L, F.WALL_R, F.FLOOR_Y, F.DOME)
         inputs = _startup_inputs()
         E.warmup()  # Startup only; never first compile in inspect().
-        return cls(inputs, {'Hang_04': arena}, prepared=E.prepare(inputs, arena=arena))
+        select=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),components=('egress',)) if egress_only else None
+        return cls(inputs, {'Hang_04': arena}, prepared=E.prepare(inputs, arena=arena),select=select)
 
     def inspect(self, trk, state, pending, path, *, frame, origin_frame, k_shift, bombs, bombs_T, fresh=True):
         base = {'schema': 2, 'kind': 'locked_event_grid', 'policy_frame': int(frame),
@@ -78,10 +80,10 @@ class SceneFieldEventShadow:
             raise ValueError('negative tracker/planner shift')
         if shift >= len(box):
             return {**base, 'status': 'beyond_row'}
-        key = L.field_key(E.cache_key, view['scene'], view['lock'], E.Config(), self.inputs)
+        key = L.field_key(E.cache_key, view['scene'], view['lock'], E.Config(), self.inputs,select=self.select)
         started = time.perf_counter()
         fs, reason = L.field_for_tick(self.cache, E, view, self.inputs, SceneFieldGrid,
-                                      E.Config(), prepared=self.prepared)
+                                      E.Config(), prepared=self.prepared,select=self.select)
         build_ms = (time.perf_counter()-started)*1000.
         if fs is None:
             return {**base, 'status': reason}

@@ -91,6 +91,10 @@ FORCED_STREAK_GAP = 30     # a FORCED_RISK tick after this many ticks without on
 # SSBOT_FORUM_HERO2=1. Off: ssbot.map2 is not imported and nothing below changes.
 MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
 SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
+SCENE_FIELD_RANK = os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK", "0").strip() == "1"
+SCENE_FIELD_WEIGHT_HITS = float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS", "1.0"))
+if SCENE_FIELD_RANK and (not math.isfinite(SCENE_FIELD_WEIGHT_HITS) or SCENE_FIELD_WEIGHT_HITS < 0):
+    raise ValueError("scene field weight must be finite and nonnegative")
 BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
@@ -567,13 +571,18 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.v2feed = None
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
-        if SCENE_FIELD_SHADOW:
+        if SCENE_FIELD_SHADOW or SCENE_FIELD_RANK:
             from ssbot.combat.scene_field_shadow import SceneFieldShadow
             self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
             from ssbot.combat.scene_field_event_shadow import SceneFieldEventShadow
-            self._scene_field_event_reader = SceneFieldEventShadow.for_forum()
+            self._scene_field_event_reader = SceneFieldEventShadow.for_forum(egress_only=SCENE_FIELD_RANK)
             self._scene_field_current = None
             self._scene_field_error = False
+            self._scene_field_rank_current = None
+        if SCENE_FIELD_RANK:
+            from ssbot.combat.scene_field_values import SceneFieldValues
+            self._scene_field_rank_type = SceneFieldValues
+            self.planner.scene_field_values = None
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
@@ -954,6 +963,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             # A policy tick can return before calling the planner. Never attach
             # an older tick's model evaluation to that early return.
             self.planner.observed_slam_audit = None
+        if SCENE_FIELD_RANK:
+            self.planner.scene_field_values = None
+            self._scene_field_rank_current = None
         self._begin_chain_native(s)
         diag = self.measurement.diagnostics if self.measurement is not None else None
         if diag is not None: diag.phase("catch_up")
@@ -1079,6 +1091,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.chain_native.prepare(s, ground=ws.hero.contact.v == "GROUND",
                     accepting=bool((s.get("hero") or {}).get("hero_accepting_input", True)), sim=sim_chain,
                     **({"bombs": b2_bombs} if getattr(self.chain_native, "b2", False) else {}))
+            if SCENE_FIELD_RANK:
+                self._scene_field_before_plan(fplan, s, f)
             res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
         if SCENE_FIELD_SHADOW:
@@ -1409,6 +1423,35 @@ class ForumPlannerPolicy(PlannerPolicy):
                              frame=f, origin_frame=fo)
         return int(mask)
 
+    def _scene_field_before_plan(self, forecast, state, frame):
+        """Pin the low-frequency field before candidate scoring; no prediction call."""
+        from ssbot.combat import scene_field_events as events, scene_field_locked as locked
+        from ssbot.combat.scene_field_grid import SceneFieldGrid
+        started=time.perf_counter()
+        feed=getattr(self,"v2feed",None);rs=getattr(forecast,"rs",None)
+        base={"schema":1,"frame":frame,"component":"egress","applied_to_ranking":False}
+        self._scene_field_rank_current=base
+        if self.crest != "Wanderer" or not kin.hero2_on():
+            base["status"]="reference_hero_model_unsupported";return
+        if feed is None or rs is None:
+            base["status"]="support_unknown";return
+        trk=feed.trk;T=float(trk.T)
+        if getattr(rs,"scene_field_bombs_T",None)!=T:
+            base["status"]="small_runes_stale_or_unknown";return
+        reader=self._scene_field_event_reader
+        view=locked.locked_scene(trk,frame=frame,room=locked.room_of_state(state),arenas=reader.arenas,
+                                 bombs=getattr(rs,"scene_field_bombs",None),pend=rs.pend)
+        previous=reader.cache._field
+        fs,reason=locked.field_for_tick(reader.cache,events,view,reader.inputs,SceneFieldGrid,
+                                       events.Config(),prepared=reader.prepared,select=reader.select)
+        base.update(status=reason,prepare_ms=(time.perf_counter()-started)*1000.,
+                    rebuilt=fs is not None and fs is not previous)
+        if fs is None:return
+        values=self._scene_field_rank_type(fs,now_s=T,k_shift=rs.k_shift,frame_time=self.params.frame_time,
+                                abilities=self.params.abilities,weight_hits=SCENE_FIELD_WEIGHT_HITS,frame=frame)
+        self.planner.scene_field_values=values
+        base.update(applied_to_ranking=True,snapshot_id=fs.meta["identity"][:16],weight_hits=SCENE_FIELD_WEIGHT_HITS)
+
     def _scene_field_after_plan(self, res, forecast, frame, origin_frame, *, fresh, state=None):
         """Optional observation only; one bounded measurement record, no action edits."""
         measurement = getattr(self, "measurement", None)
@@ -1480,6 +1523,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             "inflight_prefix": prefix.tolist() if prefix is not None else None,
             "planner_hold": {k: getattr(hold, k).tolist() for k in ("latched", "desired", "pending", "age")}
                 if hold is not None else None}
+        if SCENE_FIELD_RANK:
+            rank=getattr(self,"_scene_field_rank_current",None)
+            if rank is not None and rank.get("frame")==frame:
+                self.measurement_choice["scene_field_rank"]=dict(rank)
+                detail=self.planner.last_info.get("scene_field_rank")
+                if detail is not None and detail.get("frame")==frame:
+                    self.measurement_choice["scene_field_rank"]["rows"]=dict(detail)
         if SCENE_FIELD_SHADOW:
             shadow = getattr(self, "_scene_field_current", None)
             if shadow is not None and shadow.get("policy_frame") == frame:

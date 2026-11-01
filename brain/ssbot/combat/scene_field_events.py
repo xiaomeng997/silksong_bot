@@ -16,6 +16,15 @@ Call warmup() and prepare() during startup, outside measured decisions. Pin one
 complete FieldSet for all queries of a tick; SceneFieldSetCache builds it once
 per refresh, rather than rebuilding all 72 grids per requested layer. Cache and
 preparation are single-owner APIs and introduce no worker thread.
+
+Output selection (task 45): build(select=Selection(...)) makes only the
+requested soft-field outputs, e.g. NOMINAL_EGRESS (nominal world, egress, all
+four capability layers, both hypotheses). It selects outputs only: every model
+world keeps its clock and knots, and hazards, scope, margins, templates and
+unknown handling are unchanged; the selected grids and raw arrays are bitwise
+those of the full build. Unselected outputs query as NaN / known False /
+'not_selected_in_build'. A partial selection is part of cache_key(), so a full
+and a partial snapshot never share a key. select=None is the full field.
 """
 from __future__ import annotations
 
@@ -41,6 +50,44 @@ LAYERS = ("ground_run_wait", "ground_jump_ready", "ground_dash_ready", "ground_j
 COMPONENTS = ("egress", "room", "total")
 KNOT_NAMES = ("origin", "seal", "landing_buddy_free", "circle_on", "circle_off")
 OTHER_HELD_STATES = ("Idle", "Walk")     # the other's states the bounded hold may stand for (no committed motion)
+SELECTION_KEY_VERSION = "task45-output-selection-v1"
+
+
+@dataclass(frozen=True)
+class Selection:
+    """Soft-field outputs build() makes (task 45): nonempty subsets, kept in the model order."""
+    worlds: tuple = WORLDS
+    hyps: tuple = HYPS
+    layers: tuple = LAYERS
+    components: tuple = COMPONENTS
+
+    def __post_init__(self):
+        for name, allowed in (("worlds", WORLDS), ("hyps", HYPS), ("layers", LAYERS), ("components", COMPONENTS)):
+            v = getattr(self, name)
+            v = (v,) if isinstance(v, str) else tuple(v)
+            if not v or len(set(v)) != len(v) or any(x not in allowed for x in v):
+                raise ValueError(f"selection {name} must be a nonempty subset of {allowed}, got {v!r}")
+            object.__setattr__(self, name, tuple(x for x in allowed if x in v))
+
+    @property
+    def is_full(self) -> bool:
+        return (self.worlds, self.hyps, self.layers, self.components) == (WORLDS, HYPS, LAYERS, COMPONENTS)
+
+    def key(self) -> tuple:
+        """Discrete descriptor (strings only) that cache_key() appends for a partial selection."""
+        return (SELECTION_KEY_VERSION, self.worlds, self.hyps, self.layers, self.components)
+
+
+FULL_SELECTION = Selection()
+NOMINAL_EGRESS = Selection(worlds=("nominal",), components=("egress",))   # all four layers, both hypotheses
+
+
+def _selection(select):
+    if select is None:
+        return FULL_SELECTION
+    if not isinstance(select, Selection):
+        raise TypeError("select must be a scene_field_events.Selection or None")
+    return select
 
 
 @dataclass(frozen=True)
@@ -187,14 +234,17 @@ def _runs(mask):
 
 class FieldSet:
     """Built field: SceneFieldGrid per (world, hypothesis, layer, component) plus raw arrays and coverage.
-    query() is the minimal adapter (verbatim field_knots41.FieldSet.query).  cache_key: discrete identity only (see
-    cache_key()); provenance_id: field_knots41's cache_key value (it holds t_origin_s and the body features)."""
+    query() is the minimal adapter (verbatim field_knots41.FieldSet.query; a task-45 partial selection answers its
+    unselected model outputs with 'not_selected_in_build').  cache_key: discrete identity only (see cache_key());
+    provenance_id: field_knots41's cache_key value (it holds t_origin_s and the body features); selection: the
+    Selection the field was built with (FULL_SELECTION by default)."""
 
-    def __init__(self, grids, meta, raw, y0, tol, cache_key):
+    def __init__(self, grids, meta, raw, y0, tol, cache_key, selection=None):
         self.grids = MappingProxyType(dict(grids))
         self.meta, self.raw, self.y0, self.tol = meta, raw, y0, tol
         self.cache_key = cache_key
         self.provenance_id = ("w13_event_knots41", meta["identity"])
+        self.selection = _selection(selection)
 
     def grid(self, world, layer, hyp, component):
         return self.grids[(world, hyp, layer, component)]
@@ -206,7 +256,9 @@ class FieldSet:
         key = (world, hyp, layer, component)
         n = len(p)
         if key not in self.grids:
-            return np.full(n, np.nan), np.zeros(n, bool), np.full(n, "component_or_layer_unavailable", object)
+            why = ("not_selected_in_build" if not self.selection.is_full and world in WORLDS and hyp in HYPS
+                   and layer in LAYERS and component in COMPONENTS else "component_or_layer_unavailable")
+            return np.full(n, np.nan), np.zeros(n, bool), np.full(n, why, object)
         ground = np.isfinite(p[:, 1]) & (np.abs(p[:, 1] - self.y0) <= self.tol)
         q = p.copy()
         q[ground, 1] = self.y0
@@ -552,7 +604,7 @@ def _static_digest(config, inputs):
     return dg
 
 
-def cache_key(scene: dict, config: Config = Config(), inputs=None, lock_id: Optional[int] = None):
+def cache_key(scene: dict, config: Config = Config(), inputs=None, lock_id: Optional[int] = None, select=None):
     """Discrete cache key of the field build() makes from this origin; None when it is out of scope.  The d62b6e43
     SceneFieldCache holds one SceneFieldGrid, so a cache of one selected grid uses key + (world, hyp, layer, component).
 
@@ -560,7 +612,9 @@ def cache_key(scene: dict, config: Config = Config(), inputs=None, lock_id: Opti
     locked family, the lock's discrete decision fields (s, b), the layer set and an optional integer lock_id from the
     native adapter (e.g. the tracker frame of the lock, to tell two casts of one caster apart).  Never t_origin_s,
     control_t, decided_frames_ago or a continuous position: a field is reused for the cache's refresh time even while
-    the bodies move (low-frequency build), and a new lock, a layer set or a config change gives a new key."""
+    the bodies move (low-frequency build), and a new lock, a layer set or a config change gives a new key.  A
+    partial output selection (task 45) appends its discrete Selection.key(); the full field keeps the old key."""
+    sel = _selection(select)
     feat, bad = project(scene)
     if bad is not None:
         return None
@@ -568,13 +622,18 @@ def cache_key(scene: dict, config: Config = Config(), inputs=None, lock_id: Opti
     other = next(b["iid"] for b in feat["bodies_now"] if b["iid"] != L["iid"])
     dec = next(a for a in scene["aim"]["locked"] if a.get("family") == "CC_JUMP_CAST" and int(a["iid"]) == L["iid"])
     b = dec["decision"].get("b")
-    return ("w13_event_knots42", KEY_VERSION, _static_digest(config, inputs), L["iid"], other, "CC_JUMP_CAST",
-            int(L["s"]), None if b is None else int(b), LAYERS, None if lock_id is None else int(lock_id))
+    key = ("w13_event_knots42", KEY_VERSION, _static_digest(config, inputs), L["iid"], other, "CC_JUMP_CAST",
+           int(L["s"]), None if b is None else int(b), LAYERS, None if lock_id is None else int(lock_id))
+    return key if sel.is_full else key + (sel.key(),)
 
 
 def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_origin_s: float = 0.0,
-          prepared: Optional[Prepared] = None, stats: Optional[dict] = None):
-    """field_knots41.build, same arguments and outputs (plus prepared= and an optional stats dict to fill)."""
+          prepared: Optional[Prepared] = None, stats: Optional[dict] = None, select: Optional[Selection] = None):
+    """field_knots41.build, same arguments and outputs (plus prepared=, an optional stats dict to fill and the task
+    45 output selection; select=None is the full field).  A selection restricts only the outputs: the verdict kernel
+    runs for the selected worlds (each world's verdicts are independent of the others'), and only the selected
+    hypotheses / layers / components are reduced, smoothed and built; knots, scope and descriptors stay complete."""
+    sel = _selection(select)
     if not math.isfinite(t_origin_s):
         raise ValueError("t_origin_s must be finite")
     marks = [("start", time.perf_counter())]
@@ -661,15 +720,16 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
     delays = P.delays
     nd = len(delays)
 
-    # ---- egress verdicts: one kernel for every (world, knot, template, delay, cell), both hypotheses ----
-    nW = len(WORLDS)
-    nks = np.array([len(worlds[w]["knots_rel"]) for w in WORLDS], np.int64)
+    # ---- egress verdicts: one kernel for every selected (world, knot, template, delay, cell), both hypotheses ----
+    kw = sel.worlds                                                # the full field: WORLDS
+    nW = len(kw)
+    nks = np.array([len(worlds[w]["knots_rel"]) for w in kw], np.int64)
     nK = int(nks.max())
     kn_a = np.full((nW, nK), np.nan)
     Lw = np.zeros((nW, nK, nd), np.int64)
     on_a, off_a, cfrom_a, cuntil_a = (np.zeros(nW) for _ in range(4))
     hold_a = np.zeros((nW, nx))
-    for wi, w in enumerate(WORLDS):
+    for wi, w in enumerate(kw):
         W = worlds[w]
         ck = W["clock"]
         for k, a in enumerate(W["knots_rel"]):
@@ -696,18 +756,19 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
               np.asarray(ob, float), np.asarray(land_box, float), hx, hy, float(m), V0, V1)
     marks.append(("verdict_kernel", time.perf_counter()))
     raw = {}
-    for wi, w in enumerate(WORLDS):
+    for wi, w in enumerate(kw):
         nk = int(nks[wi])
-        r0 = np.zeros((nk, len(names), nd, nx), np.int8)
-        r1 = np.zeros((nk, len(names), nd, nx), np.int8)
-        r0[:, P.used_idx] = V0[wi, :nk]
-        r1[:, P.used_idx] = V1[wi, :nk]
-        raw[w] = {"delayed_only": r0, "bounded_hold": r1}
+        raw[w] = {}
+        for hyp, V in (("delayed_only", V0), ("bounded_hold", V1)):
+            if hyp in sel.hyps:
+                r = np.zeros((nk, len(names), nd, nx), np.int8)
+                r[:, P.used_idx] = V[wi, :nk]
+                raw[w][hyp] = r
     marks.append(("verdict_scatter", time.perf_counter()))
 
     # ---- reduce per layer (one kernel; the footprint wait masks once per (world, knot)) ----
     allowed = np.zeros((nW, nK, nd, nx), np.bool_)
-    for wi, w in enumerate(WORLDS):
+    for wi, w in enumerate(kw):
         W = worlds[w]
         for k, a in enumerate(W["knots_rel"]):
             if config.cap_wait_in_footprint:
@@ -726,10 +787,14 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
     _reduce(V0, V1, allowed, delays, nks, P.mem_off, P.mem_pos, P.mem_tid, count, latest, witness, n_unk, lat_by)
     marks.append(("reduce_kernel", time.perf_counter()))
     out = {}
-    for wi, w in enumerate(WORLDS):
+    for wi, w in enumerate(kw):
         nk = int(nks[wi])
         for hi_, hyp in enumerate(HYPS):
+            if hyp not in sel.hyps:
+                continue
             for li, ln in enumerate(LAYERS):
+                if ln not in sel.layers:
+                    continue
                 members = lay[ln]
                 out[(w, hyp, ln)] = {"count": count[wi, hi_, li, :nk].copy(), "latest": latest[wi, hi_, li, :nk].copy(),
                                      "witness": witness[wi, hi_, li, :nk].copy(),
@@ -753,7 +818,9 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
     room_row = _room(xs, lo_x, hi_x, obst)                         # after buddy free: kept only as a raw descriptor
     room_bodies_row = _room(xs, lo_x, hi_x, [(b["body_box"][0] - hx, b["body_box"][2] + hx)
                                              for b in feat["bodies_now"]])
-    for w in WORLDS:
+    need_e = "egress" in sel.components or "total" in sel.components   # the smoothed egress feeds the total
+    need_r = "room" in sel.components or "total" in sel.components
+    for w in kw:
         W = worlds[w]
         ck = W["clock"]
         nk = len(W["knots_rel"])
@@ -773,12 +840,13 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
         room_known = np.broadcast_to((W["knots_rel"] <= ck["land"] + 1e-9)[:, None], (nk, nx)).copy()
         rooms[w] = {"room_u": room_u, "room_bodies_now_only_u": room_bodies_only, "body_cells": body_cells,
                     "room_known": room_known}
-        room_n = np.where(room_known, np.minimum(room_u, config.room_cap_u) / config.room_cap_u, 0.)
-        room_s = np.stack([np.where(body_cells[k] | ~room_known[k], room_n[k],
-                                    smooth(room_n[k], ~body_cells[k] & room_known[k])) for k in range(nk)])
+        if need_r:
+            room_n = np.where(room_known, np.minimum(room_u, config.room_cap_u) / config.room_cap_u, 0.)
+            room_s = np.stack([np.where(body_cells[k] | ~room_known[k], room_n[k],
+                                        smooth(room_n[k], ~body_cells[k] & room_known[k])) for k in range(nk)])
         times = t_origin_s + W["knots_rel"]
-        for hyp in HYPS:
-            for ln in LAYERS:
+        for hyp in sel.hyps:
+            for ln in sel.layers:
                 r = out[(w, hyp, ln)]
                 known = np.ones((nk, nx), bool)
                 known[0] &= ~inside_now                            # Root: time-zero current-body cells uncredited
@@ -787,30 +855,43 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
                 e_raw = (config.count_share * np.minimum(r["count"] / config.count_cap, 1.)
                          + (1 - config.count_share) * np.minimum(np.maximum(r["latest"], 0.) / config.slack_cap_s, 1.))
                 e_raw = np.where(known, e_raw, 0.)
-                e_s = np.stack([np.where(known[k] & ~body_cells[k],
-                                         smooth(e_raw[k], known[k] & ~body_cells[k]), e_raw[k]) for k in range(nk)])
-                e_s = np.where(known, e_s, 0.)
-                total = np.where(known, wts["egress"] * e_s + wts["room"] * room_s, 0.)
+                c = {"egress_raw": e_raw}
+                if need_e:
+                    e_s = np.stack([np.where(known[k] & ~body_cells[k],
+                                             smooth(e_raw[k], known[k] & ~body_cells[k]), e_raw[k]) for k in range(nk)])
+                    e_s = np.where(known, e_s, 0.)
+                    c["egress_smoothed"] = e_s
+                c["known"] = known
+                vals = {}
+                if "egress" in sel.components:
+                    vals["egress"] = (e_s, known)
+                if "room" in sel.components:
+                    vals["room"] = (room_s, room_known)
+                if "total" in sel.components:
+                    total = np.where(known, wts["egress"] * e_s + wts["room"] * room_s, 0.)
+                    c["total"] = total
+                    vals["total"] = (total, known)
                 tg = time.perf_counter()
-                for cname, val, kk in (("egress", e_s, known), ("room", room_s, room_known), ("total", total, known)):
+                for cname, (val, kk) in vals.items():
                     grids[(w, hyp, ln, cname)] = grid_cls(times, xs, [y0], val[:, None, :], kk[:, None, :],
                                                           np.ones((1, nx), dtype=np.int16))
                     n_grid += 1
                 t_grid += time.perf_counter() - tg
-                comp[(w, hyp, ln)] = {"egress_raw": e_raw, "egress_smoothed": e_s, "known": known, "total": total}
-        rooms[w]["room_norm"] = room_n
-        rooms[w]["room_smoothed"] = room_s
+                comp[(w, hyp, ln)] = c
+        if need_r:
+            rooms[w]["room_norm"] = room_n
+            rooms[w]["room_smoothed"] = room_s
     marks.append(("room_smooth_totals_grids", time.perf_counter()))
 
     # ---- coverage (separate layer: unknown future, missing capability, no witness, relies on waiting) ----
     coverage = {}
-    for w in WORLDS:
+    for w in kw:
         W = worlds[w]
         kn = W["knots_rel"][:, None]
         relies = foot_haz[None, :] & (kn >= W["known_horizon_rel"][None, :] - 1e-9) & (kn < W["clock"]["on"])
         buddy_free_now = kn > W["free_rel"][None, :] + 1e-9
-        for hyp in HYPS:
-            for ln in LAYERS:
+        for hyp in sel.hyps:
+            for ln in sel.layers:
                 r = out[(w, hyp, ln)]
                 kk = comp[(w, hyp, ln)]["known"]
                 coverage[(w, hyp, ln)] = {"no_witness_in_library": kk & (r["count"] == 0),
@@ -819,8 +900,11 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
                                           "room_unknown_buddy_free": ~rooms[w]["room_known"]}
     marks.append(("coverage", time.perf_counter()))
 
-    identity = _digest({"version": "task41-event-knots-v1", "features": feat, "config": asdict(config),
-                        "inputs": inputs.source, "t_origin_s": t_origin_s})
+    ident = {"version": "task41-event-knots-v1", "features": feat, "config": asdict(config),
+             "inputs": inputs.source, "t_origin_s": t_origin_s}
+    if not sel.is_full:
+        ident["output_selection"] = [list(v) for v in sel.key()[1:]]
+    identity = _digest(ident)
     meta = {"identity": identity, "features_digest": _digest(feat), "branch": branch, "circle": circle,
             "time_base": "absolute game s = tracker seconds; t_origin_s + clock seconds after the origin",
             "t_origin_s": t_origin_s, "xs": xs, "y0": y0, "y_ground_model": y_ground,
@@ -835,6 +919,10 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
             "smoothing": {"fwhm_u": fwhm, "sigma_u": sigma, "truncate_sigma": config.smooth_truncate_sigma,
                           "scope": "inside connected runs of known, body-free cells of one knot / world / hypothesis / layer"},
             "weights_TEMPORARY": wts, "config": asdict(config)}
+    if not sel.is_full:
+        meta["output_selection"] = {"key_version": SELECTION_KEY_VERSION, "worlds": list(sel.worlds),
+                                    "hyps": list(sel.hyps), "layers": list(sel.layers),
+                                    "components": list(sel.components)}
     descriptors = {"hero_side_of_other": hero_side, "evade_dir": evade_dir, "back_wall_u_for_evade": back_wall,
                    "escape_jump_open": escape_open, "in_other_slam_range_standing": in_slam_range,
                    "in_footprint_m0": foot_geom, "in_footprint_hazard_margin": foot_haz,
@@ -844,17 +932,18 @@ def build(scene: dict, inputs: Inputs, grid_cls, config: Config = Config(), t_or
     rawd = {"verdicts": raw, "reduced": out, "components": comp, "rooms": rooms, "coverage": coverage,
             "descriptors": descriptors, "worlds": worlds}
     marks.append(("meta_identity", time.perf_counter()))
-    key = cache_key(scene, config, inputs)
+    key = cache_key(scene, config, inputs, select=sel)
     marks.append(("cache_key", time.perf_counter()))
     if stats is not None:
-        stats.update({"kernel_calls": 2, "verdict_cells": int(nW * nK * nJ * nd * nx), "grid_keys": len(grids),
+        stats.update({"selection": sel.key(), "kernel_worlds": nW,
+                      "kernel_calls": 2, "verdict_cells": int(nW * nK * nJ * nd * nx), "grid_keys": len(grids),
                       "grids_constructed": n_grid, "grid_construct_ms": t_grid * 1e3, "room_calls": 2,
                       "smooth_calls": smooth.n_calls, "smooth_ms": smooth.t * 1e3,
                       "smooth_runs_built": smooth.n_runs_built, "smooth_weights_built": smooth.n_weights_built,
                       "prepared_samples": P.Lc, "prepared_grows": P.n_grow, "max_samples_used": int(Lw.max()),
                       "sections_ms": {n: (t - marks[i][1]) * 1e3 for i, (n, t) in enumerate(marks[1:])},
                       "total_ms": (marks[-1][1] - marks[0][1]) * 1e3})
-    return FieldSet(grids, meta, rawd, y0, config.ground_tolerance_u, key)
+    return FieldSet(grids, meta, rawd, y0, config.ground_tolerance_u, key, selection=sel)
 
 
 def warmup():
@@ -879,6 +968,9 @@ class SceneFieldSetCache:
     shares the returned snapshot across candidates. A rebuild failure raises;
     it never returns the old event as if it belonged to a new key. No partial
     grid-set is published. Unknown future endpoints remain unknown in query().
+    With a task-45 output selection the published set is the selected grids:
+    until / cover-now apply to them, and the key must carry the selection
+    (cache_key / field_key do). Use one cache per selection.
     """
     def __init__(self, refresh_s):
         if not math.isfinite(refresh_s) or refresh_s <= 0:

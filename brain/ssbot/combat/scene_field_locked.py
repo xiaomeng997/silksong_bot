@@ -211,10 +211,13 @@ def locked_scene(trk, *, frame=None, room=None, arenas=None, bombs=None, bombs_c
     return {"status": "ok", "scene": scene, "t_origin_s": T, "lock": lock, "aux": aux}
 
 
-def field_key(cache_key_fn, scene: dict, lock: dict, config, inputs):
+def field_key(cache_key_fn, scene: dict, lock: dict, config, inputs, select=None):
     """scene_field_events.cache_key with the true lock as lock_id, plus the room and the Move instance: only
-    strings and integers (no time, frame, clock or position)."""
-    base = cache_key_fn(scene, config, inputs, lock_id=int(lock["lock_bin"]))
+    strings and integers (no time, frame, clock or position).  select: a scene_field_events.Selection (task 45) or
+    None for the full field; a partial selection is carried inside the base key as discrete values, so a full and
+    a partial snapshot never share a key."""
+    base = cache_key_fn(scene, config, inputs, lock_id=int(lock["lock_bin"]),
+                        **({} if select is None else {"select": select}))
     if base is None:
         return None
     return base + ((KEY_VERSION, str(lock["room"][0]), int(lock["room"][1]), int(lock["caster_iid"]),
@@ -238,18 +241,22 @@ def field_complete(fs) -> bool:
     return all(any(n == "circle_off" for n, _ in w["events_rel"]) for w in fs.meta["worlds"].values())
 
 
-def field_for_tick(cache, events, view: dict, inputs, grid_cls, config, prepared=None):
-    """One tick: (FieldSet or None, reason).  cache = scene_field_events.SceneFieldSetCache; events = the module."""
+def field_for_tick(cache, events, view: dict, inputs, grid_cls, config, prepared=None, select=None):
+    """One tick: (FieldSet or None, reason).  cache = scene_field_events.SceneFieldSetCache; events = the module.
+    select (task 45) chooses soft-field outputs only; the lock coverage below still uses every world's clock.  Use
+    one cache per selection."""
     if view.get("status") != "ok":
         return None, view.get("reason")
     cov = lock_coverage(view["scene"], inputs)
     if not cov["complete"]:
         return None, "lock_event_over"
-    key = field_key(events.cache_key, view["scene"], view["lock"], config, inputs)
+    key = field_key(events.cache_key, view["scene"], view["lock"], config, inputs, select=select)
     if key is None:
         return None, "out_of_build_scope"
+    sel_kw = {} if select is None else {"select": select}
     fs = cache.get(key, view["t_origin_s"], lambda: events.build(view["scene"], inputs, grid_cls, config,
-                                                                 t_origin_s=view["t_origin_s"], prepared=prepared))
+                                                                 t_origin_s=view["t_origin_s"], prepared=prepared,
+                                                                 **sel_kw))
     if not field_complete(fs):
         raise ValueError("built field is not complete although the lock coverage was")
     return fs, "ok"
