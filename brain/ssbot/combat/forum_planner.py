@@ -3576,7 +3576,7 @@ class ForumPlanner(Planner):
             offer = None
         # The user explicitly keeps h2's approach, and a selected strike is not
         # auctioned against ordinary tails on every subsequent tick.
-        if offer is not None and offer.stage in {"approach", "active", "recovery"}:
+        if offer is not None and offer.stage in {"approach", "active", "recovery", "fixed_commitment"}:
             self.ticks += 1
             self._prev_sm = None
             result = chain.install(offer, self)

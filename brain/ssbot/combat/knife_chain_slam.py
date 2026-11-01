@@ -288,7 +288,7 @@ class SlamAnchor:
         t = f / 60.0 if t_game is None else float(t_game)
         self.t = t
         e = self.pick(R, s, t) if c["TWO_PLAY"] else SP.clapper(s)
-        if (c["TWO_RUNEGATE"] and c["TWO_PLAY"]) or c["CLAWSTRIKE"]:
+        if (c["TWO_RUNEGATE"] and c["TWO_PLAY"]) or c["CLAWSTRIKE"] or c.get("FIXED_HOOK",False):
             self.rg_observe(s, t)
         if skip and e is not None and e.get("iid") in skip:
             if R.run is not None and R.run.v["iid"] in skip:
@@ -1124,20 +1124,38 @@ SlamAnchor.side_decision = _side_decision
 LITERAL_NAMES = frozenset(['<', '<=', '>', '>=', 'A', 'AIRSTRIKE', 'CLAW', 'CLAWSTRIKE', 'D', 'DASH', 'D|A', 'EARLY', 'F', 'J', 'JUMP_BEHIND', 'LATE', 'NEAR', 'SIDE', 'Slam Antic', 'TWO_HANDOFF', 'TWO_PLAY', 'TWO_SIDE', 'band', 'behind', 'clear', 'ctrl', 'f0', 'f_press', 'force', 'ground', 'guard', 'ho_aim', 'hop', 'k_air', 'k_start', 'land', 'late', 'link', 'look', 'n_ok', 'near', 'near_u', 'old', 'room', 's_hit', 'side_why', 'stand', 'struck', 'toward', 'two', 'vy_gt', 'walk', 'wall', 'x_start'])
 
 
-def make_runner(chains, *, cfg=None):
+def make_runner(chains, *, cfg=None, prims=None):
     """Bound family evaluator; C-category searches remain explicit unmigrated modules."""
     cfg = chains["slam_jump"].cfg if cfg is None else cfg
-    return CV.ChainRunner(chains, SlamAnchor(chains, cfg), P, cfg0=cfg,
+    return CV.ChainRunner(chains, SlamAnchor(chains, cfg), P if prims is None else prims, cfg0=cfg,
                           observation_names=OBS_NAMES, literal_names=LITERAL_NAMES, context_names={"sent"})
 
 
-def load_runner():
+def load_runner(*, fixed_hook=False):
     """Load the accepted rule records, using this process's explicit legacy configuration."""
     import json
     from pathlib import Path
     from .knife_chain_format import chains_from_json
-    chains = chains_from_json(json.loads(Path(__file__).with_name("knife_chain_slam_v01.json").read_text("utf-8")))
+    raw = json.loads(Path(__file__).with_name("knife_chain_slam_v01.json").read_text("utf-8"))
     cfg = build_cfg()
+    registry=P
+    if fixed_hook:
+        from .knife_chain_fixed_hook import register
+        from copy import deepcopy
+        registry=deepcopy(P);register(registry)
+        table=json.loads(Path(__file__).with_name("knife_chain_fixed_hook_v1.json").read_text("utf-8"))
+        from copy import deepcopy
+        base=deepcopy(raw["slam_claw"])
+        base.update(id=table["id"],start=table["start"],links=table["links"],rulesets={},admission={},provenance=table["provenance"])
+        base["admission"]={name:{"link":"fixed_hook."+name,"observations":[],"conditions":[],"status":"unfitted","notes":"Explicit empirical learning policy, not a fitted safety certificate"} for name in table["links"]}
+        cfg.update(table["cfg"]);cfg.update(CLAWSTRIKE=False,FIXED_HOOK=True)
+        raw["fixed_hook"]=base
+        wait=deepcopy(table["links"]["wait"]);wait["id"]="slam_jump.wait"
+        raw["slam_jump"]["links"]["wait"]=wait
+        raw["slam_jump"]["admission"]["wait"]={"link":"slam_jump.wait","observations":[],"conditions":[],"status":"unfitted","notes":"User96/101 observed post-bounce wait; original jump admission unchanged"}
+        for chain in raw.values():chain["vars"].update(table["vars"])
+        raw["slam_jump"]["links"]["look"]["rules"].insert(0,{"do":"try","to":"fixed_hook.pre"})
+    chains = chains_from_json(raw)
     for off in ("TWO_TIGHT", "TWO_SIDE", "TWO_RUNEGATE", "STRIKEGUARD", "AIRCHAIN", "AIRSTRIKE"):
         if cfg[off]:
             raise ValueError(f"{off} is not encoded in chain v0.1")
@@ -1148,4 +1166,4 @@ def load_runner():
         {"states": ["Slam Recover"], "max_d": cfg["TWO_BODY_U"], "why": "other Slam Recover"}]
     for chain in chains.values():
         chain.cfg = cfg.copy()
-    return make_runner(chains)
+    return make_runner(chains,prims=registry)

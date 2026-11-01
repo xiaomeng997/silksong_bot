@@ -1,0 +1,175 @@
+{
+  "id": "fixed_hook",
+  "start": "pre",
+  "vars": {
+    "fh_recover": null,
+    "fh_steps": 0,
+    "fh_wait_f": null
+  },
+  "cfg": {
+    "FH_K_MIN": 2,
+    "FH_K_MAX": 6,
+    "FH_GAP_MIN": 5.6,
+    "FH_GAP_MAX": 7.1
+  },
+  "links": {
+    "pre": {
+      "id": "fixed_hook.pre",
+      "phase": "cs_pre",
+      "entry": {
+        "p": "fixed_hook_entry"
+      },
+      "rules": [
+        {
+          "do": "act",
+          "act": {
+            "a": "fixed_hook_plan"
+          }
+        }
+      ],
+      "keys": [
+        {
+          "gen": "claw_plan_mask"
+        }
+      ],
+      "after_keys": [
+        {
+          "do": "goto",
+          "to": "lock",
+          "mode": "next",
+          "when": {
+            "p": "cmp",
+            "a": "clk.claw_press",
+            "op": ">=",
+            "b": 1
+          }
+        }
+      ]
+    },
+    "lock": {
+      "id": "fixed_hook.lock",
+      "phase": "cs_lock",
+      "rules": [
+        {
+          "do": "goto",
+          "to": "strike",
+          "when": {
+            "all": [
+              {
+                "p": "accepting"
+              },
+              {
+                "not": {
+                  "p": "harpoon_clip"
+                }
+              },
+              {
+                "p": "cmp",
+                "a": "clk.claw_press",
+                "op": ">",
+                "b": 12
+              }
+            ]
+          }
+        },
+        {
+          "do": "abort",
+          "when": {
+            "p": "cmp",
+            "a": "clk.claw_press",
+            "op": ">",
+            "b": 45
+          },
+          "why": {
+            "lit": "fixed hook: no control"
+          }
+        }
+      ]
+    },
+    "strike": {
+      "id": "fixed_hook.strike",
+      "phase": "cs_strike",
+      "rules": [
+        {
+          "do": "act",
+          "act": {
+            "a": "fixed_hook_strike"
+          }
+        }
+      ],
+      "keys": [
+        {
+          "gen": "strike_plan_mask"
+        }
+      ],
+      "after_keys": [
+        {
+          "do": "act",
+          "act": {
+            "a": "plan_mark",
+            "store": "var.tmp.mark",
+            "plan": "var.cs_strike"
+          }
+        },
+        {
+          "do": "goto",
+          "to": "bounce",
+          "mode": "next",
+          "when": {
+            "p": "eq",
+            "a": "var.tmp.mark",
+            "b": "struck"
+          },
+          "set": {
+            "k_press": "k"
+          }
+        }
+      ]
+    },
+    "bounce": {
+      "id": "fixed_hook.bounce",
+      "phase": "after",
+      "rules": [
+        {
+          "do": "goto",
+          "to": "wait",
+          "when": {
+            "p": "truthy",
+            "v": "var.bounced"
+          }
+        }
+      ],
+      "keys": [
+        {
+          "gen": "strike_plan_mask"
+        }
+      ]
+    },
+    "wait": {
+      "id": "fixed_hook.wait",
+      "phase": "after",
+      "rules": [
+        {
+          "do": "act",
+          "act": {
+            "a": "fixed_hook_wait"
+          }
+        },
+        {
+          "do": "done",
+          "when": {
+            "p": "fixed_hook_released"
+          },
+          "why": {
+            "lit": "fixed hook: Recover plus two physical steps"
+          }
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "format": "0.1",
+    "source": "user100; Opus104 old h2 hook sequence; Opus101 causal post-hammer wait",
+    "scope": "empirical w7 learning route; no forecast certificate"
+  }
+}

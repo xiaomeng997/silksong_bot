@@ -61,16 +61,19 @@ class NativeChainB2(NativeChainCandidates):
             raise ValueError("B2 needs journal, named batch and explicit A/B arm")
         fast=os.environ.get("SSBOT_FORUM_CHAIN_FAST_HOOK","0").strip()
         if fast not in {"0","1"}:raise ValueError("invalid SSBOT_FORUM_CHAIN_FAST_HOOK")
-        profile=NominalProfile(short_frames=int(os.environ.get("SSBOT_FORUM_CHAIN_SHORT_FRAMES","12")),fast_hook=fast=="1")
+        fixed=os.environ.get("SSBOT_FORUM_CHAIN_FIXED_HOOK","0").strip()
+        if fixed not in {"0","1"}:raise ValueError("invalid SSBOT_FORUM_CHAIN_FIXED_HOOK")
+        profile=NominalProfile(short_frames=int(os.environ.get("SSBOT_FORUM_CHAIN_SHORT_FRAMES","12")),fast_hook=fast=="1",fixed_hook=fixed=="1")
         # Binding/compile once; changing source, program or config cannot silently
         # reset a previous budget under the same batch name/path.
-        runner=load_runner()
+        runner=load_runner(fixed_hook=True) if profile.fixed_hook else load_runner()
         digest=hashlib.sha256()
         source=Path(__file__).resolve().parents[1]
         for f in sorted(source.rglob("*.py")):
             digest.update(str(f.relative_to(source)).encode());digest.update(f.read_bytes())
         table=Path(__file__).with_name("knife_chain_slam_v01.json")
         digest.update(table.read_bytes())
+        digest.update(Path(__file__).with_name("knife_chain_fixed_hook_v1.json").read_bytes())
         knowledge=Path(__file__).resolve().parents[3]/"knowledge/1.0.30000"
         for f in sorted((knowledge/"enemies/forum").glob("*.npz")):
             digest.update(f.name.encode());digest.update(f.read_bytes())
@@ -107,7 +110,10 @@ class NativeChainB2(NativeChainCandidates):
         self._hook_start=None;self._failed_hook_moves=set()
         self._failure_exposures=[];self._jump_start=None;self.policy_gate_reason=None
         self._vetoed_preparation=None
-        self._fast_j_mode=self.arm=="B" and self.profile.fast_hook
+        self._fixed_hook_mode=self.arm=="B" and self.profile.fixed_hook
+        self.runner.anchor.fixed_hook_enabled=self._fixed_hook_mode
+        self._fixed_jump_sent_for=None
+        self._fast_j_mode=self.arm=="B" and self.profile.fast_hook and not self.profile.fixed_hook
         self._fast_j_pending_commit=None;self._fast_j_commit=None;self._fast_j_sent=None;self._last_c5_calls=None
         self.runner.anchor.b2_strict_observations=self.arm=="B"
         if self.budget is not None:self.budget.check()
@@ -282,13 +288,15 @@ class NativeChainB2(NativeChainCandidates):
         # Only the already checked commitment path declares the window. Missing
         # its keys never moves the window or permits a retry of the same slam.
         path=offer.path
-        targets=tuple(path.origin+i+1 for i,m in enumerate(path.commands) if int(m)&B["CLAW"])
+        if offer.stage=="fixed_commitment":
+            cs=offer.draft.run.v["cs"];targets=(cs.f_press,cs.f_press+1)
+        else:targets=tuple(path.origin+i+1 for i,m in enumerate(path.commands) if int(m)&B["CLAW"])
         self._hook_start=None
         if not targets:return
         self._hook_start={"move":offer.move,"origin":send.frame,"targets":targets,
                           "sent_targets":set(),"seen_frame":None}
         self._note("b2_hook_start_expected",frame=send.frame,move=vars(offer.move),targets=list(targets),
-                   source="checked commitment nominal commands; keys only, not accepted hook")
+                   source="empirical fixed table; no model certificate" if offer.stage=="fixed_commitment" else "checked commitment nominal commands; keys only, not accepted hook")
 
     def _observe_hook_start(self,state):
         watch=self._hook_start
@@ -336,7 +344,12 @@ class NativeChainB2(NativeChainCandidates):
         self._pending={}  # opt1 owns this audit; do not inherit the old2-frame abandon
         try:super().observe(state)
         finally:self._pending=unresolved
-        if self.post_context is not None and f>self.post_context["bounce"]+8 and flag(state,"onGround"):
+        if self.post_context is not None and self.post_context.get("simple_wait"):
+            target=next((e for e in state.get("ents") or () if e.get("iid")==self.post_context["move"].target_iid),None)
+            if target is not None and (target.get("is_dead") or target.get("hp",1)<=0):
+                self._note("b2_fixed_wait_handoff",frame=f,released=False,reason="observed target death")
+                self.post_context=None;self._post_seed=None;self._post_kind=None;self._abandon("observed target death")
+        if self.post_context is not None and not self.post_context.get("simple_wait") and f>self.post_context["bounce"]+8 and flag(state,"onGround"):
             self._note("b2_post_landed",frame=f)
             self.post_context=None;self._post_seed=None;self._post_kind=None
         if self.recovery is not None:
@@ -367,12 +380,14 @@ class NativeChainB2(NativeChainCandidates):
         counter=int(ints[1]) if len(ints)>1 else 0
         marker=counter>0 or flag(state,"downSpikeBouncing") or flag(state,"downSpikeBouncingShort")
         if self._hit is not None and marker and f>=self._hit:
-            self.post_context={**c,"bounce":f,"hit":self._hit,"press":self._press}
+            self.post_context={**c,"bounce":f,"hit":self._hit,"press":self._press,"simple_wait":self._fixed_hook_mode}
             self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
             self._fast_j_pending_commit=None;self._fast_j_commit=None;self._fast_j_sent=None
-            if self.runner.run is not None:self.runner.run.v["bounced"]=True
-            self._post_seed=logical_copy(self.runner);self._post_kind=None
-            self._note("b2_real_bounce_handback",frame=f,hit=self._hit,press=self._press,
+            if self.runner.run is not None:
+                self.runner.run.v["bounced"]=True
+                if self._fixed_hook_mode and self.runner.run.chain=="slam_jump":self.runner.run.link="wait"
+            self._post_seed=None if self._fixed_hook_mode else logical_copy(self.runner);self._post_kind=None
+            self._note("b2_simple_bounce_wait" if self._fixed_hook_mode else "b2_real_bounce_handback",frame=f,hit=self._hit,press=self._press,
                        source="target DownSlash hit plus observed bounce/counter",predicted=c["predicted_bounce"])
             return
         e=next((e for e in state.get("ents") or () if e.get("iid")==c["move"].target_iid),None)
@@ -457,6 +472,7 @@ class NativeChainB2(NativeChainCandidates):
         from .air_chain import ChainSim
         from .knife_chain_eval import ChainPreview
         draft=logical_copy(self.runner);draft.observation_cutoff=f
+        draft.anchor.fixed_release=None
         model=ChainSim(sim.start.copy(),sim.prefix.copy(),sim.hold.copy(),sim.params,sim.terrain,sim.fo,sim.f)
         from .knife_chain_cs_cache import exact_cs_step
         calls=[] if self._fast_j_mode else None
@@ -477,6 +493,12 @@ class NativeChainB2(NativeChainCandidates):
             self._note("b2_cs_exact_step_cache",frame=f,**cache.stats())
         preview=ChainPreview(f,mask,draft) # first key f+2: actual information has >=2f lead
         if preview.mask is None or preview.draft.run is None:
+            if self.post_context is not None and self.post_context.get("simple_wait"):
+                release=getattr(draft.anchor,"fixed_release",None)
+                self._note("b2_fixed_wait_handoff",frame=f,move=vars(self.post_context["move"]),
+                           released=release is not None,observed_release=release,
+                           reason="Recover plus two new physics steps" if release else "table ended/interrupted; no release certificate")
+                self.post_context=None;self._post_seed=None;self._post_kind=None;self.runner=draft
             self._no_candidate("family program offered no current action",frame=f,state=state);return None
         v=preview.draft.run.v
         if "_b2_entry_distance" not in v:
@@ -677,6 +699,9 @@ class NativeChainB2(NativeChainCandidates):
         except ChainObservationNotReady as exc:
             self._note("b2_unchecked",frame=self.dispatch.frame,reason=str(exc));return None
         if bundle is None:
+            if self.post_context is not None and self.post_context.get("simple_wait"):
+                self._note("b2_fixed_wait_handoff",frame=self.dispatch.frame,released=False,reason="current wait observation unavailable")
+                self.post_context=None;self._post_seed=None;self._post_kind=None;self._abandon("wait observation unavailable")
             if self.commitment:self._recover("current family program cannot continue",self.dispatch.frame)
             if self.recovery is not None:return B2Offer("recovery",None,None,0,0.,self.recovery["move"],dict(self.recovery))
             return None
@@ -687,6 +712,20 @@ class NativeChainB2(NativeChainCandidates):
         if move in self._failed_hook_moves:
             self._no_candidate("planned hook failed for this Move; no automatic retry",frame=f,state=state)
             return None
+        if preview.draft.run.chain=="fixed_hook" or preview.draft.run.lid=="slam_jump.wait":
+            # User100: direct empirical keys through observed bounce + the simple
+            # hammer wait. No nominal path/C5/N2/exact-support construction here.
+            if self.commitment is not None and self.commitment["move"]!=move:
+                self._recover("fixed hook instance mismatch",f);return self._recovery_offer()
+            if self.post_context is not None and self.post_context["move"]!=move:
+                self._note("b2_fixed_wait_handoff",frame=f,released=False,reason="observed different Move instance")
+                self.post_context=None;self._post_seed=None;self._post_kind=None
+            if self.commitment is None and self.post_context is None:
+                stage="fixed_commitment"
+            else:stage="active"
+            return B2Offer(stage,None,preview.draft,int(preview.mask),0.,move,
+                {"fixed_hook":preview.draft.run.chain=="fixed_hook","simple_wait":preview.draft.run.link=="wait","safety_basis":"empirical table; geometry unchecked",
+                 "phase":preview.draft.run.link,"entry_k":preview.draft.run.v.get("k_start")})
         rs=getattr(forecast,"rs",None)
         observed=None if rs is None else getattr(rs.trk,"now",{}).get(move.target_iid)
         if observed is None:
@@ -870,16 +909,16 @@ class NativeChainB2(NativeChainCandidates):
         p=offer.path
         cmd=np.array([offer.mask],np.int64) if p is None else p.offered.copy()
         res=PlanResult(offer.mask,0,"CHAIN B2 "+offer.stage+" "+offer.draft.run.lid,0,False,J=offer.value,V=True,
-                       n=1,n_allowed=1,n_safe=1,cmd=cmd,path=None if p is None else p.box,
+                       n=1,n_allowed=1,n_safe=0 if (offer.details.get("fixed_hook") or offer.details.get("simple_wait")) else 1,cmd=cmd,path=None if p is None else p.box,
                        tail_ok=None,hits=1. if offer.stage=="commitment" else 0.)
-        if offer.stage=="commitment":
+        if offer.stage in {"commitment","fixed_commitment"}:
             from .knife_chain_score_bound import clear_ordinary_action_memo
             clear_ordinary_action_memo(planner)
         planner.prev_cmd=None if offer.stage!="continuation" else cmd.copy()
         planner.prev_name=res.name;planner.prev_tail_ok=False;planner.prev_esc_unsafe=False
         planner.last_info={"b2":{"stage":offer.stage,"move":vars(offer.move),"details":offer.details,
                                   "ordinary":None if ordinary is None else {"J":ordinary.J,"name":ordinary.name}},
-                           "esc":{"b2":"empirical_lower_bound" if offer.stage=="commitment" else "not_a_commitment",
+                           "esc":{"b2":"unchecked_empirical_table" if (offer.details.get("fixed_hook") or offer.details.get("simple_wait")) else "empirical_lower_bound" if offer.stage=="commitment" else "not_a_commitment",
                                   "unsafe":False},"S":np.zeros(1,np.int64),"N":1}
         if planner.measurement_enabled:planner.measurement_result=res
         if p is not None:
@@ -901,7 +940,7 @@ class NativeChainB2(NativeChainCandidates):
             self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(selected.move),
                        no_retry_same_move=True,action="neutral recovery before unsupported hook")
         preparation=None
-        if selected.stage=="commitment" and self.commitment is None:
+        if selected.stage in {"commitment","fixed_commitment"} and self.commitment is None:
             # A vetoed first key is not a successful chain dispatch. Once its
             # neutral replacement IS sent, it is nevertheless a sent failed
             # preparation and retains the original strict HP responsibility.
@@ -918,6 +957,23 @@ class NativeChainB2(NativeChainCandidates):
         if type(received_frame) is not int or received_frame>target+4:
             self._stop("send deadline beyond four frames / missing current frame",frame)
         selected=self._b2_selected;last=None;jump=self._jump_start
+        if selected is not None and selected.details.get("fixed_hook") and int(mask)==selected.mask:
+            cs=selected.draft.run.v["cs"];reason=None
+            if int(mask)&B["J"] and self._fixed_jump_sent_for!=selected.move:
+                if target!=cs.f0 or received_frame>=target:reason="fixed first-J slot missed"
+                elif self.require_send_clock:
+                    from .knife_chain_deadline import first_jump_clock
+                    try:clock=first_jump_clock(dispatch_clock,target)
+                    except ValueError as exc:self._stop("missing critical first-J receive clock: "+str(exc),frame)
+                    self._note("b2_jump_dispatch_clock",frame=frame,target=target,**clock)
+                    if clock["late"]:reason="fixed first-J calibrated send deadline elapsed"
+            if int(mask)&B["CLAW"] and (self._fixed_jump_sent_for!=selected.move or target not in (cs.f_press,cs.f_press+1) or received_frame>=cs.f_press+1):
+                reason="fixed hook absolute CLAW slot missed / no successful J send"
+            if reason is not None:
+                return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
+                    received_frame=received_frame,event="b2_jump_send_veto",reason=reason)
+            if received_frame>=target:self._note("b2_send_late",frame=frame,target=target,received_frame=received_frame)
+            return super().before_send(frame=frame,target=target,mask=mask,flags=flags,received_frame=received_frame)
         if selected is not None and selected.stage=="commitment" and selected.path is not None:
             slots=[selected.path.origin+i+1 for i,m in enumerate(selected.path.commands) if int(m)&B["CLAW"]]
             if slots:
@@ -985,7 +1041,12 @@ class NativeChainB2(NativeChainCandidates):
             self._vetoed_preparation=None
         committed=selected is not None and sent.chain_outcome=="sent"
         if committed:
-            if selected.stage=="commitment":
+            if selected.stage=="fixed_commitment":
+                self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
+                                 "predicted_bounce":None,"fixed_hook":True}
+                self._press=self._accepted=self._hit=None;self._fixed_jump_sent_for=None
+                self._arm_hook_start(selected,sent)
+            elif selected.stage=="commitment":
                 self._arm_jump_start(selected,sent)
                 self._committed_future=selected.path
                 self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
@@ -1008,10 +1069,11 @@ class NativeChainB2(NativeChainCandidates):
                 self._note("b2_fast_j_sent",frame=sent.frame,target=sent.target_frame,move=vars(selected.move),
                            tick=tick,j_sent=bool(sent.desired_mask&B["J"]),skips=list(fs["skips"]),
                            deferred="full C5 required on a later tick before CLAW")
+            if selected.details.get("fixed_hook") and sent.desired_mask&B["J"]:self._fixed_jump_sent_for=selected.move
             watch=self._hook_start
             if (watch is not None and self.commitment is not None and
                     self.commitment["move"]==watch["move"] and selected.move==watch["move"] and
-                    selected.stage in {"commitment","active"} and sent.frame>=watch["origin"] and
+                    selected.stage in {"commitment","fixed_commitment","active"} and sent.frame>=watch["origin"] and
                     sent.desired_mask&B["CLAW"]):
                 watch["sent_targets"].add(sent.target_frame)
                 self._note("b2_hook_start_sent",frame=sent.frame,target=sent.target_frame,move=vars(watch["move"]),
@@ -1028,6 +1090,9 @@ class NativeChainB2(NativeChainCandidates):
             self._recover("final owner/keys overridden",sent.frame)
         elif self.post_context is not None:
             self._post_kind=None
+            if self.post_context.get("simple_wait"):
+                self._note("b2_fixed_wait_handoff",frame=sent.frame,released=False,reason="higher-priority owner/keys interrupted wait")
+                self.post_context=None;self._post_seed=None
         self._fast_j_pending_commit=None
         self._b2_selected=None
         return sent

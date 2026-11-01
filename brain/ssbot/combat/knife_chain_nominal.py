@@ -38,8 +38,10 @@ class NominalProfile:
     hook_dash_frame: int = 18
     hook_control_after: int = 5
     hook_dash_steps: int = 5
+    fixed_hook: bool = False     # empirical w7 table; no heavy hook admission
 
     def __post_init__(self):
+        if type(self.fixed_hook) is not bool:raise ValueError("fixed_hook must be boolean")
         if type(self.fast_hook) is not bool:raise ValueError("fast_hook must be boolean")
         if not 3 <= self.contact_delay <= 9 or self.max_frames < 24 or self.short_frames <= 9 or self.jump_decision_k<0 or self.close_entry_u<0:
             raise ValueError("invalid nominal profile")
