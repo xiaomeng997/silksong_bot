@@ -51,7 +51,8 @@ class SceneFieldEventShadow:
         arena = L.forum_arena(F.WALL_L, F.WALL_R, F.FLOOR_Y, F.DOME)
         inputs = _startup_inputs()
         E._static_digest(E.Config(), inputs)  # request-key digest, startup only
-        select=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),components=('egress',)) if egress_only else None
+        select=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),
+                           components=('egress',) if egress_only else E.COMPONENTS)
         reader = cls(inputs, {'Hang_04': arena}, select=select)
         from .scene_field_async import AsyncFieldBuilder
         path = Path(__file__).resolve().parents[3] / 'knowledge/1.0.30000/scene_field/scene_field_inputs43.json'

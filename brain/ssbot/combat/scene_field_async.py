@@ -62,7 +62,28 @@ def _pack(field):
 def _unpack(wire):
     from .scene_field_grid import SceneFieldGrid
     from .scene_field_events import FieldSet
-    grids = {tuple(k): SceneFieldGrid(*arrays) for k, arrays in wire['grids']}
+    import numpy as np
+    grids = {}
+    for key, arrays in wire['grids']:
+        if len(arrays) != 6 or not all(isinstance(a, np.ndarray) for a in arrays):
+            raise ValueError('invalid async grid arrays')
+        times, xs, ys, values, known, regions = arrays
+        if any(a.ndim != 1 or not len(a) for a in (times, xs, ys)):
+            raise ValueError('invalid async grid axes')
+        shape = (len(times), len(ys), len(xs))
+        if (values.shape != shape or known.shape != shape or regions.shape != shape[1:]
+                or values.dtype.kind != 'f' or any(a.dtype.kind != 'f' for a in (times,xs,ys))
+                or known.dtype.kind != 'b' or regions.dtype.kind not in 'iu'):
+            raise ValueError('invalid async grid shapes')
+        # This private pipe carries only our validated builder's output. Its
+        # grids already passed SceneFieldGrid's full axis/value checks there.
+        # Pickle produced new process-private arrays: freeze them, without
+        # copying/scanning the grid again while holding the policy's GIL.
+        grid = object.__new__(SceneFieldGrid)
+        for name, array in zip(('times','xs','ys','values','known','regions'), arrays):
+            array.setflags(write=False)
+            object.__setattr__(grid, name, array)
+        grids[tuple(key)] = grid
     if not grids:
         raise ValueError('empty async field')
     field = FieldSet(grids, wire['meta'], {}, wire['y0'], wire['tol'],
@@ -137,6 +158,7 @@ class AsyncFieldBuilder:
         self._failure = None
         self._closed = False
         self._stop = threading.Event()
+        self._wake = threading.Event()
         self._ready = threading.Event()
         self.worker_info = None
         context = mp.get_context('spawn')
@@ -214,7 +236,8 @@ class AsyncFieldBuilder:
                 if request is None or request[1] == last_sequence:
                     if not self._process.is_alive():
                         raise RuntimeError('idle field builder exited')
-                    self._stop.wait(.01)
+                    self._wake.wait(.5)
+                    self._wake.clear()
                     continue
                 self._conn.send(request)
                 message = self._receive()
@@ -268,6 +291,7 @@ class AsyncFieldBuilder:
             scene = deepcopy(view['scene'])
             self._request = (self._epoch, self._sequence, key, now, scene)
             self._requested_at = now
+            self._wake.set()
         pinned = self.buffer.current
         if pinned is None or pinned.epoch != self._epoch or pinned.key != key:
             return None, 'async_pending'
@@ -287,6 +311,7 @@ class AsyncFieldBuilder:
     def close(self):
         if self._closed: return
         self._stop.set()
+        self._wake.set()
         self._thread.join(2.)
         self._process.join(2.)
         if self._process.is_alive():

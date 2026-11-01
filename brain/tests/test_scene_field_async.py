@@ -38,7 +38,7 @@ def local_client():
     x.inputs=_startup_inputs();x.selection=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),components=('egress',))
     x.refresh_s=.25;x.max_age_s=.5;x.buffer=A.DoubleBuffer();x._epoch=x._sequence=0
     x._key=x._last_now=x._requested_at=x._request=x._failure=None
-    x._stop=threading.Event()
+    x._stop=threading.Event();x._wake=threading.Event()
     return x
 
 
@@ -142,10 +142,13 @@ def test_real_slow_process_does_not_hold_policy_and_discards_old_scope(monkeypat
     x.close()
 
 
-def test_real_model_process_matches_reference_queries_and_closes():
+@pytest.mark.parametrize('egress_only',[True,False])
+def test_real_model_process_matches_reference_queries_and_closes(egress_only):
     inputs=_startup_inputs();_,_,arenas=native();arena=arenas['Hang_04']
     path=Path(__file__).resolve().parents[2]/'knowledge/1.0.30000/scene_field/scene_field_inputs43.json'
-    selection=bundle().selection;x=A.AsyncFieldBuilder(inputs,path,arena,selection)
+    selection=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),
+                          components=('egress',) if egress_only else E.COMPONENTS)
+    x=A.AsyncFieldBuilder(inputs,path,arena,selection)
     try:
         v=view();assert x.get(v)[1]=='async_pending'
         field=wait_for(lambda:x.get(v)[0],timeout=15.)
@@ -224,3 +227,27 @@ def test_reader_reset_only_invalidates_epoch_and_keeps_owned_process():
     reader.reset()
     assert x._epoch==old+1 and x._request is None and x.buffer.current is None
     assert x._process is worker
+
+
+def test_private_decoder_does_not_repeat_worker_grid_copy_or_scan(monkeypatch):
+    wire=A._pack(bundle())
+    monkeypatch.setattr(SceneFieldGrid,'__post_init__',lambda self:pytest.fail('parent repeated grid constructor'))
+    field=A._unpack(wire)
+    for key,arrays in wire['grids']:
+        assert field.grids[tuple(key)].values is arrays[3]
+        assert not arrays[3].flags.writeable
+
+
+@pytest.mark.parametrize('egress_only,n_grids',[(True,4),(False,12)])
+def test_runtime_factory_requests_only_the_grids_it_queries(monkeypatch,egress_only,n_grids):
+    from ssbot.combat import scene_field_event_shadow as S
+    selected=[]
+    class Worker:
+        def __init__(self,inputs,path,arena,selection,refresh_s):selected.append(selection)
+        def close(self):pass
+    monkeypatch.setattr(A,'AsyncFieldBuilder',Worker)
+    reader=S.SceneFieldEventShadow.for_forum(egress_only=egress_only)
+    sel=selected[0]
+    assert len(sel.worlds)*len(sel.hyps)*len(E.LAYERS)*len(sel.components)==n_grids
+    assert sel.worlds==('nominal',) and sel.hyps==('bounded_hold',)
+    reader.close()
