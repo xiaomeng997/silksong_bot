@@ -9,18 +9,31 @@ from dataclasses import dataclass
 import math
 import os
 
-def _flag(value: str) -> bool:
+def _flag(value: str, name: str = "observed-slam feature") -> bool:
     if value not in {"0", "1"}:
-        raise ValueError("SSBOT_FORUM_OBSERVED_SLAM must be 0 or 1")
+        raise ValueError(f"{name} must be 0 or 1")
     return value == "1"
 
-ENABLED = _flag(os.environ.get("SSBOT_FORUM_OBSERVED_SLAM", "0").strip())
+ENABLED = _flag(os.environ.get("SSBOT_FORUM_OBSERVED_SLAM", "0").strip(), "SSBOT_FORUM_OBSERVED_SLAM")
+# Optional precision is separate from the corrected damage clock (user 10-31).
+# Both are deliberately off until new evidence justifies enabling them again.
+MOTION_ENABLED = _flag(os.environ.get("SSBOT_FORUM_SLAM_STOP", "0").strip(), "SSBOT_FORUM_SLAM_STOP")
+FINITE_ENABLED = _flag(os.environ.get("SSBOT_FORUM_SLAM_FINITE", "0").strip(), "SSBOT_FORUM_SLAM_FINITE")
 CLAPPER = "Song Heavy Sentry"
 PHASES = frozenset({"Slam Antic", "Slam 0", "Slam 1", "Slam 2", "Slam Recover"})
 PAIRS = {"Slam Collider 1": "Slam 1", "Slam Collider 2": "Slam 2"}
 
+def motion_enabled() -> bool:
+    return ENABLED and MOTION_ENABLED
+
+
+def finite_enabled() -> bool:
+    return ENABLED and FINITE_ENABLED
+
+
 def revision_fields() -> dict:
-    return {"observed_slam": ENABLED, "observed_slam_revision": 4}
+    return {"observed_slam": ENABLED, "observed_slam_revision": 5,
+            "observed_slam_motion": motion_enabled(), "observed_slam_finite": finite_enabled()}
 
 def finite(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -239,6 +252,6 @@ def motion_snapshot(rt):
 
 
 def audit_start(ws, forecast):
-    return {'schema': 1, 'origin_frame': ws.stamp.frame,
+    return {'schema': 1, 'origin_frame': ws.stamp.frame, 'features': revision_fields(),
             'motion_before': motion_snapshot(getattr(getattr(forecast, 'rs', None), 'trk', None)),
             'seen_status': 'not_evaluated', 'seen_evaluations': []}

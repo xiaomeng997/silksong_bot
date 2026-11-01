@@ -66,7 +66,7 @@ def test_other_family_does_not_acquire_a_clock_layer(monkeypatch):
 
 
 def test_reanchored_and_observed_stopped_root_stays_current(monkeypatch):
-    tab,tp=table();monkeypatch.setattr(O,"ENABLED",True)
+    tab,tp=table();monkeypatch.setattr(O,"ENABLED",True);monkeypatch.setattr(O,"MOTION_ENABLED",True)
     inst=A.Inst("CC_SLAM",0.,8.,5.,1,0.,states=["Slam 2"])
     row=O.Motion(inst,100,100,20.,1,True,True,True,99)
     moving=tab.place("CC_SLAM","main",2,(8.,5.),1,now=(20.,5.),b_now=1)
@@ -105,4 +105,4 @@ def test_raw_owner_and_b2_continuation_use_the_same_clock_layer(monkeypatch):
 
 
 def test_model_revision_changes_for_clock_semantics():
-    assert O.revision_fields()["observed_slam_revision"]==4
+    assert O.revision_fields()["observed_slam_revision"]==5

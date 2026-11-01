@@ -1301,7 +1301,7 @@ class ForumPlanner(Planner):
         seen_contacts(*args)
         # "+s" and the aimed pins (the smoke of 2026-10-08 evening: a 1.8 s first call mid-fight)
         seen_contacts_swept(*args, 1.0 / 60.0, SEEN_SWEEP_MIN_U_S)
-        if _observed_slam.ENABLED:
+        if _observed_slam.finite_enabled():
             # Compile the real finite path explicitly before the measured loop.
             from .seen_lifetime import timed_seen
             for sweep in (False, True):
@@ -2940,7 +2940,8 @@ class ForumPlanner(Planner):
                 if tp is None:
                     continue
                 p0 = tab.position(tp, b, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
-                motion = trk.observed_stop(t.iid) if hasattr(trk, "observed_stop") else None
+                motion = (trk.observed_stop(t.iid) if _observed_slam.motion_enabled() and
+                          hasattr(trk, "observed_stop") else None)
                 if motion is not None:
                     d = np.array([_observed_slam.predicted_offset(tab, inst, tp, b, b + k, motion[1], audit_kind="body")
                                   for k in range(n)], np.float64)
@@ -4460,7 +4461,7 @@ class ForumPlanner(Planner):
                             pvel, np.ascontiguousarray(tk, np.float64), np.ascontiguousarray(cand, np.int64), 0.0)
                     audit_context = getattr(self, "observed_slam_audit", None)
                     seen_audit = {} if audit_context is not None else None
-                    if _observed_slam.ENABLED:
+                    if _observed_slam.finite_enabled():
                         expiry = (_observed_slam.seen_expiries(ws, f, audit=seen_audit) if seen_audit is not None
                                   else _observed_slam.seen_expiries(ws, f))
                     else:

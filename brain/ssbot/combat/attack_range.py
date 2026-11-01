@@ -372,7 +372,7 @@ class RangeTable:
         if now is not None and b_now is not None:
             qx, qy = self.position(tp, b_now, anchor, s, hero_du, fam)
             lo, hi = self.walls
-            if observed_motion is not None:
+            if _observed_slam.motion_enabled() and observed_motion is not None:
                 inst, stop = observed_motion
                 dx, dy = _observed_slam.predicted_offset(self, inst, tp, b_now, b, stop, audit_kind="support")
                 px, py = min(max(now[0] + dx, lo), hi), now[1] + dy
@@ -776,7 +776,8 @@ class RangeTracker:
         self.reset()
 
     def reset(self) -> None:
-        self.observed_motion = _observed_slam.Monitor() if _observed_slam.ENABLED else None
+        self.observed_motion = (_observed_slam.Monitor() if
+                                _observed_slam.motion_enabled() or _observed_slam.finite_enabled() else None)
         self.T = 0.0
         self.dt = FT
         self.segs: dict = {}
@@ -848,7 +849,7 @@ class RangeTracker:
             self._feed_rune()
 
     def observed_stop(self, iid):
-        if not _observed_slam.ENABLED:
+        if not _observed_slam.motion_enabled():
             return None
         monitor = getattr(self, "observed_motion", None)
         if monitor is None or iid not in self.now:
@@ -935,7 +936,7 @@ class RangeTracker:
             v2 = (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None
             context = {"T": self.T, "hero": self.hero, "inst": inst, "vel": v2,
                        "body": body_polys(e, tab.spec.body)}
-            if _observed_slam.ENABLED:
+            if _observed_slam.motion_enabled():
                 context["observed_motion"] = self.observed_stop(iid)
             m = tab.place(inst.fam, inst.branch, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, now=now, b_now=b,
                           dec=inst.dec, st_now=inst.states[-1] if inst.states else None, vel=v2, ctx=context)

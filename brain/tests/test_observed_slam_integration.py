@@ -7,6 +7,7 @@ from ssbot.combat import observed_slam as O,attack_range as A,forum_planner as F
 
 def tracker(monkeypatch,enabled):
     monkeypatch.setattr(O,'ENABLED',enabled)
+    monkeypatch.setattr(O,'MOTION_ENABLED',True)
     tab=A.load_table(A.table_path(A.SPECS[O.CLAPPER]),A.SPECS[O.CLAPPER])
     tr=A.RangeTracker({O.CLAPPER:tab});fc=0
     for f in range(300,356):
@@ -66,7 +67,8 @@ def test_model_revision_binds_runtime_flag(monkeypatch):
 
 def test_finite_kernel_is_warmed_before_remaining_fight_kernels(monkeypatch):
     from ssbot.combat import seen_lifetime as L
-    monkeypatch.setattr(O,'ENABLED',True);monkeypatch.setattr(F.Planner,'warm_kernels',lambda _:None)
+    monkeypatch.setattr(O,'ENABLED',True);monkeypatch.setattr(O,'FINITE_ENABLED',True)
+    monkeypatch.setattr(F.Planner,'warm_kernels',lambda _:None)
     monkeypatch.setattr(F,'seen_contacts',lambda *a:None);monkeypatch.setattr(F,'seen_contacts_swept',lambda *a:None)
     class Done(Exception):pass
     calls=[]
