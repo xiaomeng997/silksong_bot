@@ -24,7 +24,9 @@ def tracker(monkeypatch,enabled):
     return tr,tab
 
 def test_support_and_direct_paths_share_explicit_instance_offset(monkeypatch):
-    base,tab=tracker(monkeypatch,False)
+    # Isolate stopped-motion displacement; both sides retain the same opted-in
+    # damage-clock shapes. The baseline has no accepted stop instance.
+    base,tab=tracker(monkeypatch,True);base.observed_motion.by_iid.clear()
     old_masks={k:base.estimate(1,k).raw for k in [0,1,2,12]}
     targets=[NS(iid=1,hazard=False),NS(iid=2,hazard=False),NS(iid=3,hazard=True),NS(iid=1,hazard=False)]
     tb=np.tile(np.array([[27.,3.,31.,7.],[39.,3.,43.,7.],[24.,2.,25.,3.],[27.,3.,31.,7.]])[:,None,:],(1,13,1))

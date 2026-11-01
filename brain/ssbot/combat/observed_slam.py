@@ -1,4 +1,4 @@
-"""Opt-in observed CC_SLAM motion and finite seen-ranking metadata.
+"""Opt-in CC_SLAM motion, local damage clock and finite seen-ranking metadata.
 
 No controller or admission rule. A stop belongs to the exact Segmenter instance;
 unknown observations reset it. The default path retains the old forecast. Bodies,
@@ -20,7 +20,7 @@ PHASES = frozenset({"Slam Antic", "Slam 0", "Slam 1", "Slam 2", "Slam Recover"})
 PAIRS = {"Slam Collider 1": "Slam 1", "Slam Collider 2": "Slam 2"}
 
 def revision_fields() -> dict:
-    return {"observed_slam": ENABLED, "observed_slam_revision": 1}
+    return {"observed_slam": ENABLED, "observed_slam_revision": 2}
 
 def finite(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)

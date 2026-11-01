@@ -351,6 +351,19 @@ class RangeTable:
                 return self._place_dec(tp, b, dec, now, b_now, st_now)
         bb = min(max(b, 0), tp.nb - 1)
         sh, iu0, iv0 = self._shape(tp, bb, k0, st_now)
+        if _observed_slam.ENABLED and self.spec.type_key == _observed_slam.CLAPPER and fam == "CC_SLAM" and b > 0:
+            # Update can close a hammer AFTER this frame's physics contact.
+            # Carry its previous LOCAL shape to the unchanged current root;
+            # delaying the whole world pose would miss moving-body contacts.
+            # Clamp b-1 independently: after the table ends it is the final
+            # shape, not the penultimate hammer kept alive indefinitely.
+            pb = min(max(b - 1, 0), tp.nb - 1)
+            parts = [Mask(sh, iu0, iv0)] if sh is not None and sh.size else []
+            previous = tp.shape[pb]
+            if previous is not None and previous.size:
+                parts.append(Mask(previous, int(tp.origin[pb, 0]), int(tp.origin[pb, 1])))
+            damage = union(parts)
+            sh, iu0, iv0 = damage.m, damage.ix0, damage.iy0
         if sh is None or not sh.size:
             return empty_mask()
         px, py = self.position(tp, b, anchor, s, hero_du, fam)
