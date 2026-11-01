@@ -211,3 +211,22 @@ def test_bomb_gate_only_rejects_unexpired_intersecting_approach_span(owner,bx,on
     st=state();o=Obs(1000,st,True,True,0,None,None,np.array([[owner,bx,3.667,2.166,on,off]],float),st["ents"][0],"Slam Antic",0)
     v=dict(r.anchor.var_defaults);v.update(iid=7,face=1,k=2)
     assert r.P.guards["fixed_hook_entry"](X(r,Run("fixed_hook","pre",v),o)) is want
+
+
+@pytest.mark.parametrize("chain",["fixed_hook","slam_jump"])
+def test_simple_wait_is_asked_before_any_ordinary_search(chain):
+    from ssbot.combat.forum_planner import ForumPlanner
+    from ssbot.combat.planner import PlanResult
+    n=fixed();n.post_context={"bounce":1000,"simple_wait":True,"chain":chain}
+    calls=[]
+    offer=NS(stage="active",mask=0)
+    n.propose=lambda *a:(calls.append("wait"),offer)[1]
+    n.first_allowed=lambda *a:True
+    wanted=PlanResult(0,-1,"fixed_wait",0,False,J=-100.)
+    n.install=lambda *a:wanted
+    def ordinary(*a):pytest.fail("ordinary search bypassed the observed wait")
+    p=NS(chain_native=n,_ordinary_tick=ordinary,ticks=0,measurement_enabled=False)
+    prefs=NS(weights={},risk_x=np.array([]),risk=np.array([]))
+    got=ForumPlanner.tick(p,NS(stamp=NS(frame=1001)),np.zeros(km.K),None,np.zeros(1,np.int64),None,prefs,None)
+    assert got is wanted and calls==["wait"] and p.ticks==1
+    assert not n.counts["b2_value_bound_pruned"]

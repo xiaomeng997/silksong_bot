@@ -531,7 +531,7 @@ class NativeChainB2(NativeChainCandidates):
         # term and taking optimistic risk/boolean terms is a true upper bound.
         # No geometry/admission result or endpoint position is reused.
         import math
-        if self.post_context is None or self.commitment is not None or self.recovery is not None:
+        if self.post_context is None or self.commitment is not None or self.recovery is not None or self.post_context.get("simple_wait"):
             return math.inf
         w=prefs.weights
         stance=float(w.get("stance",.6));rw=float(w.get("risk",3.))
