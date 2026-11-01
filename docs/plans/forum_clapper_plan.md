@@ -2382,6 +2382,16 @@ P3处置保持首版小：分数连续/known地面偏好/unsafe末级J影响先�
 
 本改动只收紧未调用的名义提案，仍非可靠命中、危险路径或实际动作凭证，原生仲裁/发键尚未完成，不能当#141开关性能通过。场+HP2首w13保持与翻越分开准备，候选1fa快照原样保留；Task47在核非B2 Opt1共用入口，未交付/未核收就不宣称严停已接。当前无游戏、P或新试车批。
 
+### 7.19 非B2共用回执严停接线【已处理 Opus #146；未开实机】
+
+146原型有限核收：21文件hash、13当前输入LF同；Root从原B2取_observe_application与新mixin逐节点AST同，五个移植生产文件原始字节与Peer patched相同。b21d1821把原判据共用，B2自身调用/停止/计数不变；新增StrictReceiptAudit只记真实成功send，不生成候选、不持有按键。默认SSBOT_FORUM_CHAIN_STRICT_RECEIPTS=0；首field-only w13显式1，NATIVE/B2=0，与native同开直接拒绝。bootstrap用该worker自己的OracleLink只读input.stats，0delay/jitter、无dist、HF2/2及pending0核对与原始strict_input_path_i0.json独占保存；未知/不符先停，不修配置或清队列。setting进入测量绑定。
+
+Root166项有限回归过、0源外模块，包含Peer原137项id/status逐项同、12保留语义/sender、3真正worker只读bootstrap/失败/无第二局及14 input门。初轮163过3失败来自Root把B2-only清理文件套到非B2的测试假设；生产未改，改查真实ownIPC关闭一次、没有第二次ready，initial工件保留。CHECKS.json、OPUS146_RECEIPT.json和695项SOURCE_PACKET.json在analysis/standalone_receipts_20261101。共享判据的原样迁移AST核验单存分析，不让仓库测试依赖Peer外部快照。
+
+Opt1仍是期望键不符停、相符应用晚≤2、相符前后报告覆盖同键/换键、T+4未覆盖到T+5停；覆盖不等于实际动作。EXCLUSIVE只记成功发送、不新设超时，但有报告期望键不符仍停、可覆盖先前普通键，与既有B2口径同。停止抛harness错误、写逐局strict_receipt_stop并在after_episode后终止worker批次；没有B2账本，不伪造其专属worker资源凭证。首工程根started/失败原地保留且禁止重开，Launcher独立核worker/game/配置清理。菜单回报与失败后的真实收拾尚未实机验，不把假IPC说成已现场；不另加B2独立STATE gap规则或扩大控制器。
+
+当前待小增量静态源审阅和有限成本核对，Task48不重跑137/1360或模型。第一局仍h2+场+HP2，B2/vault关；新flag已更正到w13草稿，没有gate/试车目录。上一field-only P只证明既有排序开销，不冒充新纯审计或翻越P。站位场当前低频同步（.25游戏秒/关键事件），完整新快照建好才替换，未加后台线程；算法独立不等于执行已异步。
+
 ## 8. 第 5 步（按需）：递归表量化重建
 
 - **触发条件**，两条都要满足：
