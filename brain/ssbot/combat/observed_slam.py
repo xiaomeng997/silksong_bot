@@ -20,7 +20,7 @@ PHASES = frozenset({"Slam Antic", "Slam 0", "Slam 1", "Slam 2", "Slam Recover"})
 PAIRS = {"Slam Collider 1": "Slam 1", "Slam Collider 2": "Slam 2"}
 
 def revision_fields() -> dict:
-    return {"observed_slam": ENABLED, "observed_slam_revision": 3}
+    return {"observed_slam": ENABLED, "observed_slam_revision": 4}
 
 def finite(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)

@@ -41,11 +41,22 @@ class B2Geometry:
             self._owners[key]=(rs,rs._stack_of(lambda owner:owner==iid))
         return rs.occ_stack_b(self._owners[key][1],x,y,tk,{iid})
 
-    def support(self, length):
+    def support(self, length, *, first=None):
         from .forum_v2 import RangeSupport, SAMPLE_KS
         rs=getattr(self.forecast,"rs",None)
         if rs is None or not hasattr(rs,"trk"):
             raise GeometryUnavailable("B2 needs the real RangeSupport/tracker")
+        if first is not None:
+            # Continuations query every physical-time template bin in their
+            # actual window. A prior-bin closing shape at the left sparse knot
+            # must not survive across the whole next sampling bracket.
+            if not 0 <= first <= length:
+                raise GeometryUnavailable("invalid exact continuation window")
+            key=("frames",first,length)
+            if key not in self._fresh:
+                self._fresh[key]=RangeSupport.build(rs.trk,samples=tuple(range(first,length+1)),
+                    canvas=rs.cv,margin_mode=rs.margin_mode,focus=getattr(rs,"focus_arg",rs.focus))
+            return self._fresh[key]
         if rs.k_shift!=0 or length>rs.samples[-1]:
             # Admission is bound to THIS observed move, not a cached raster from
             # before its entry. Rebuild from the current tracker on reuse too.
@@ -61,7 +72,9 @@ class B2Geometry:
         length=min(int(limit),len(path.box)-1)
         if length<0:raise GeometryUnavailable("empty path query")
         offset=path.origin-self.origin
-        rs=self.support(offset+length)
+        from . import observed_slam
+        exact=path.stage=="continuation" and observed_slam.ENABLED
+        rs=self.support(offset+length,first=offset) if exact else self.support(offset+length)
         bx=path.box[:length+1];c=.5*(bx[:,:2]+bx[:,2:])
         # Raster is already dilated by the standard hero box. Sweep long hook /
         # dash steps at the existing canvas resolution instead of teleporting.

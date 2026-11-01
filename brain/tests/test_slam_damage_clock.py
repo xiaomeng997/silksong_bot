@@ -105,4 +105,4 @@ def test_raw_owner_and_b2_continuation_use_the_same_clock_layer(monkeypatch):
 
 
 def test_model_revision_changes_for_clock_semantics():
-    assert O.revision_fields()["observed_slam_revision"]==3
+    assert O.revision_fields()["observed_slam_revision"]==4
