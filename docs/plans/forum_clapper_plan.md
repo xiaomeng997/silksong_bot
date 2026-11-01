@@ -2054,7 +2054,7 @@ Sol负责运行接线；Opus Task25等待结果#101及b433/85d6源审阅#102/#10
 
 **修法。** 新源bd998c206f356cd13a5878831c3b445da6936769保留全部owner，只对未过期、横向与“英雄当前框中心到目标当前身体前沿”相交的炸弹拒绝入口，使用各行半径+既有HB_HX和BOMB_M；圆环门不改。空间门不声称验证全段飞行/后续走位，仍是经验路线入口；未知/坏行拒绝，不添 rollout、N2、物理时序或新余量。六个过期/空间/owner边界红测3fail/3pass，修后104相关控制全过、模块源外0；Root以19份必要观测和精确bomb_rows重构生产守卫，5→19可进，各入口自身/其他owner路径危险38个负对照仍拒。它不是新源完整Native事实回放，更不是物理成功率。681运行件相对23cf仅fixed_hook.py变，分析/原红绿与GUARD19_CHECK/OPUS107_RECEIPT在analysis/b2_hook_bomb_gate_20261101/。
 
-**继续推进。** Opus任务28核小增量并沿原19事实原点再看恢复覆盖/首次差异，不重跑整政策/1143或扩大模型。Root已做新源码绑定CPU草案和私有2/2输入适配器短自检；草案让自己的成功发键产生明确合成的报告，避免旧“强制返回h2键”使等待中断、靠断链变快。物理位置/动画/FSM/hit仍是记录事实，只用于条件CPU工作量，不当闭环、实际接受或首J时钟证明。共同配置FIXED1 FAST0、OBSERVED1 STOP0 FINITE0、real_quit1/HPfloor2；全tick包含原policy/supervisor/logging/编码/sink send，解码/合成输入另计，完整分母/stage/差异/GC/峰/来源/签名保留。草案在analysis/b2_fixed_hook_cpu_20261101/p_bound_bd998c20/，只有DRAFT，无RUN_BINDING/coordinator，未跑P；旧23cf草案superseded未运行。独立源/计时草案核验、资源/EcoQoS及实际新成本/调度门仍待，然后才新工程单局，当前无游戏或新gate，旧失败/AA不重开。
+**继续推进。** Opus任务28核小增量并沿原19事实原点再看恢复覆盖/首次差异，不重跑整政策/1143或扩大模型。Root已做新源码绑定CPU草案和私有2/2输入适配器短自检；草案让自己的成功发键产生明确合成的报告，避免旧“强制返回h2键”使等待中断、靠断链变快。物理位置/动画/FSM/hit仍是记录事实，只用于条件CPU工作量，不当闭环、实际接受或首J时钟证明。共同配置FIXED1 FAST0、OBSERVED1 STOP0 FINITE0、real_quit1/HPfloor2；全tick包含原policy/supervisor/logging/编码/sink send，解码/合成输入另计，完整分母/stage/差异/GC/峰/来源/签名保留。草案在analysis/b2_fixed_hook_cpu_20261101/p_bound_bd998c20/，含资源协调器DRAFT；缺RUN_BINDING/P_ALLOWED在STATUS变化前拒绝的自检通过，仍无这两个运行凭证、未跑P。协调器沿原资源/停止门，核实际GetProcessInformation EcoQoS/P核High/真实Numba线程数和完整Native日志的J/C、等待分支覆盖，仅清理核身份的自有CPU子树；旧23cf草案superseded未运行。独立源/计时草案核验、资源/EcoQoS及实际新成本/调度门仍待，然后才新工程单局，当前无游戏或新gate，旧失败/AA不重开。
 
 ## 7. 独立场景站位场与手搓站位规则迁移【用户10-31四项目标】
 
