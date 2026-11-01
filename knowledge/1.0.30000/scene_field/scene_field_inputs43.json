@@ -1,0 +1,319 @@
+{
+ "package": "scene_field_inputs43",
+ "version": 1,
+ "use": "load once at startup with inputs_runtime43.load_inputs(<this json>, scene_field_events.Inputs); arrays come back read-only; nothing here is read per tick",
+ "npz_file": "scene_field_inputs43.npz",
+ "npz_sha256": "11fa3b6a4d3016a9c8b64264a3cee487a117bdb1bea4a4801025fb1ef98ff3c6",
+ "arrays": {
+  "t_centre": {
+   "dtype": "float64",
+   "shape": [
+    16,
+    85,
+    2
+   ]
+  },
+  "t_vel": {
+   "dtype": "float64",
+   "shape": [
+    16,
+    85,
+    2
+   ]
+  },
+  "t_ground": {
+   "dtype": "bool",
+   "shape": [
+    16,
+    85
+   ]
+  }
+ },
+ "fields": {
+  "frame_time": 0.016666,
+  "t_names": [
+   "ground_wait",
+   "ground_run_R",
+   "ground_run_L",
+   "ground_jump_none",
+   "ground_jump_R",
+   "ground_jump_L",
+   "air_rise_none",
+   "air_rise_R",
+   "air_rise_L",
+   "air_fall_none",
+   "air_fall_R",
+   "air_fall_L",
+   "ground_dash_R",
+   "ground_dash_L",
+   "dash_sprint_L",
+   "dash_sprint_R"
+  ],
+  "hurtbox_half": [
+   0.25,
+   1.0394
+  ],
+  "clock": {
+   "open": {
+    "land": {
+     "early": 0.75,
+     "nominal": 0.9166,
+     "late": 0.9333
+    },
+    "lit": {
+     "early": 1.8377,
+     "nominal": 2.0155,
+     "late": 2.0451
+    }
+   },
+   "wall": {
+    "land": {
+     "early": 0.716,
+     "nominal": 0.7833,
+     "late": 0.9167
+    },
+    "lit": {
+     "early": 1.8037,
+     "nominal": 1.8822,
+     "late": 2.0285
+    }
+   },
+   "lit_duration_s": 0.11640000000000006,
+   "ground_centre_y": 3.34
+  },
+  "head_lead_s": {
+   "open": 0.0667,
+   "wall": 0.0666
+  },
+  "rune_r": 7.187,
+  "du_by_face": [
+   6.48,
+   6.75
+  ],
+  "wall_zone": [
+   19.5,
+   45.5
+  ],
+  "slam_range_half_x": 8.05,
+  "slam_range_y": [
+   -4.46,
+   3.37
+  ],
+  "escape_wall_u": 6.0,
+  "standing_box_y": [
+   3.015,
+   5.094
+  ],
+  "source": {
+   "opus/scene_field_motion/templates/templates.npz": "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+   "opus/scene_field_motion/templates/templates.json": "43f32bf725aec9c4a462c84c0b492d952639db7b18fe60573b882d4c2fddae2f",
+   "opus/scene_field_dash_sprint/templates40.json": "548f9707a9b688eea881307dc5a504963fbb5580a6d2c7e8e79c9c542eda2de1",
+   "opus/scene_field_motion/clock/clock.json": "1064229ec4c51cb8f03dac03d724caaf7a2a1e6a458d4e918669ee86207745dc",
+   "opus/scene_field_dash_sprint/descent40.json": "cd5a14b0c11f3dea6b5aa33258fb47618fadc84294ac33cbb2576a43d014eae9"
+  }
+ },
+ "tuple_fields": [
+  "du_by_face",
+  "hurtbox_half",
+  "slam_range_y",
+  "standing_box_y",
+  "t_names",
+  "wall_zone"
+ ],
+ "kinds": {
+  "measured": "a game fact read from colliders / STATE",
+  "rule_constant": "a fixed rule threshold or offset fitted once from development data",
+  "nominal_model": "a nominal HERO2 motion sample (no noise, main floor only)",
+  "conditional_assumption": "a development-data quantile or rule used as a conditional world, not a guarantee",
+  "identity": "provenance only"
+ },
+ "provenance": {
+  "frame_time": {
+   "from": "opus/scene_field_motion/templates/templates.npz",
+   "sha256": "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+   "where": "templates.npz frame_time",
+   "kind": "nominal_model",
+   "note": "the templates' nominal rendered frame (s); templates.json model frame_time_s 0.016666"
+  },
+  "t_names": {
+   "from": "opus/scene_field_motion/templates/templates.npz names + opus/scene_field_dash_sprint/templates40.json templates",
+   "sha256": [
+    "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+    "548f9707a9b688eea881307dc5a504963fbb5580a6d2c7e8e79c9c542eda2de1"
+   ],
+   "where": "the 14 task 34 names, then dash_sprint_L / _R",
+   "kind": "nominal_model",
+   "note": "template identities"
+  },
+  "t_centre": {
+   "from": "opus/scene_field_motion/templates/templates.npz centre + opus/scene_field_dash_sprint/templates40.json centre_x",
+   "sha256": [
+    "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+    "548f9707a9b688eea881307dc5a504963fbb5580a6d2c7e8e79c9c542eda2de1"
+   ],
+   "where": "[16, 85, 2] hurtbox-centre offsets per frame",
+   "kind": "nominal_model",
+   "note": "HERO2 nominal kinematics (templates.json model: params hero_wanderer_forum.json sha 68996db52d2c, hero2_bits 16383); the dash-sprint pair is task 40's keyed nominal template (Dash To Run 0.6-1.6 u deviation not certified)"
+  },
+  "t_vel": {
+   "from": "opus/scene_field_motion/templates/templates.npz vel + opus/scene_field_dash_sprint/templates40.json vx",
+   "sha256": [
+    "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+    "548f9707a9b688eea881307dc5a504963fbb5580a6d2c7e8e79c9c542eda2de1"
+   ],
+   "where": "[16, 85, 2] velocity per frame",
+   "kind": "nominal_model",
+   "note": "as t_centre"
+  },
+  "t_ground": {
+   "from": "opus/scene_field_motion/templates/templates.npz flags & 1 + opus/scene_field_dash_sprint/templates40.json ground_all",
+   "sha256": [
+    "26f54343bad689798f61e9aea23fae4acf48961c0fd673dbeb522f53fddb923a",
+    "548f9707a9b688eea881307dc5a504963fbb5580a6d2c7e8e79c9c542eda2de1"
+   ],
+   "where": "[16, 85] on-the-ground flag",
+   "kind": "nominal_model",
+   "note": "main floor only (platforms unknown)"
+  },
+  "hurtbox_half": {
+   "from": "opus/scene_field_motion/templates/templates.json model.hurtbox_half_u",
+   "sha256": "43f32bf725aec9c4a462c84c0b492d952639db7b18fe60573b882d4c2fddae2f",
+   "where": "= brain/ssbot/knowledge/hitbox_tables.py:86 HERO_HALF_U (sha af6340fe819b)",
+   "kind": "measured",
+   "note": "STATE hero.box half extents (0.5 x 2.0789 u on every logged frame)"
+  },
+  "clock": {
+   "from": "opus/scene_field_motion/clock/clock.json",
+   "sha256": "1064229ec4c51cb8f03dac03d724caaf7a2a1e6a458d4e918669ee86207745dc",
+   "where": "clocks.decided_{open,wall}.landing_after_decision / lit_start_after_decision {early, nominal, late}; lit_duration_s = clocks.landed.lit_end_after_landing_p50 - model.lit_after_landing_s.nominal; ground_centre_y = circle_centre_y.ground_centre_y",
+   "kind": "conditional_assumption",
+   "note": "development-data quantiles (A/A v2 period 0-1, 109 landed casts), three conditional worlds, not a guarantee; clock.json scope: development-data support (A/A v2 period 0-1: 109 landed CC_JUMP_CAST of 118 started; the R0 dev attack-range table for the lighting); not a guarantee; aggregate"
+  },
+  "head_lead_s": {
+   "from": "opus/scene_field_dash_sprint/descent40.json",
+   "sha256": "cd5a14b0c11f3dea6b5aa33258fb47618fadc84294ac33cbb2576a43d014eae9",
+   "where": "descent/{open,wall}/leave_out_cases lead_head_to_L_s p50",
+   "kind": "conditional_assumption",
+   "note": "development-data p50 of landing - head-height time (the seal knot); spread 0.033-0.083 s"
+  },
+  "rune_r": {
+   "from": "brain/ssbot/combat/are_types/clapper.py",
+   "sha256": "74f893c7fff54a7d4e113273c296f7161f2dd3f97f0d536243d185ae31deb09b",
+   "where": "brain/ssbot/combat/are_types/clapper.py:94 HazardSpec 'rune slam' radius",
+   "kind": "measured",
+   "note": "the rune slam CircleCollider r 7.186814 rounded (apothem of the table's octagon)"
+  },
+  "du_by_face": {
+   "from": "brain/ssbot/combat/are_types/clapper.py",
+   "sha256": "74f893c7fff54a7d4e113273c296f7161f2dd3f97f0d536243d185ae31deb09b",
+   "where": "brain/ssbot/combat/are_types/clapper.py:94 HazardSpec 'rune slam' du_by_face",
+   "kind": "rule_constant",
+   "note": "circle centre offset from the landing x by facing (left, right), fitted"
+  },
+  "wall_zone": {
+   "from": "brain/ssbot/combat/are_types/clapper.py",
+   "sha256": "74f893c7fff54a7d4e113273c296f7161f2dd3f97f0d536243d185ae31deb09b",
+   "where": "brain/ssbot/combat/are_types/clapper.py:54 WALL_ZONE",
+   "kind": "rule_constant",
+   "note": "open / wall clock branch threshold, fitted on R0 dev jumps"
+  },
+  "slam_range_half_x": {
+   "from": "docs/facts/1.0.30000/forum.md",
+   "sha256": "fded0c34d007f4c8e9eaf6fd76eb7a6fca51023939a2bd723d329e590cd6c019",
+   "where": "docs/facts/1.0.30000/forum.md:163",
+   "kind": "measured",
+   "note": "AlertRange box pos +- 8.05 (decompiled AlertRange.cs; #128)"
+  },
+  "slam_range_y": {
+   "from": "docs/facts/1.0.30000/forum.md",
+   "sha256": "fded0c34d007f4c8e9eaf6fd76eb7a6fca51023939a2bd723d329e590cd6c019",
+   "where": "docs/facts/1.0.30000/forum.md:163",
+   "kind": "measured",
+   "note": "AlertRange y range pos - 4.46 .. pos + 3.37"
+  },
+  "escape_wall_u": {
+   "from": "docs/facts/1.0.30000/forum.md",
+   "sha256": "fded0c34d007f4c8e9eaf6fd76eb7a6fca51023939a2bd723d329e590cd6c019",
+   "where": "docs/facts/1.0.30000/forum.md:159",
+   "kind": "conditional_assumption",
+   "note": "an Evade Scuttle with a wall within 6 u behind becomes Escape Jump (development data, #130: escapes 1.35-5.88 u, non-escapes >= 6.08 u); used as a per-cell descriptor"
+  },
+  "standing_box_y": {
+   "from": "brain/ssbot/knowledge/forum_products.py",
+   "sha256": "b7d582089fb4957527dd7bf0d48dc1b5a3a655cb04fa74936f118517ecea5b12",
+   "where": "brain/ssbot/knowledge/forum_products.py:59 FLOOR_Y",
+   "kind": "measured",
+   "note": "the hero's physics box standing on the Forum floor (STATE hero.box)"
+  },
+  "source": {
+   "from": "the five files above",
+   "sha256": null,
+   "where": "Inputs.source (identity only, never opened)",
+   "kind": "identity",
+   "note": "kept byte-identical to inputs41/42 so the static digest and cache keys match"
+  }
+ },
+ "literal_cross_check_07acdeec": {
+  "values": {
+   "wall_zone": [
+    [
+     19.5,
+     45.5
+    ],
+    [
+     19.5,
+     45.5
+    ]
+   ],
+   "rune_r": [
+    7.187,
+    7.187
+   ],
+   "du_by_face": [
+    [
+     6.48,
+     6.75
+    ],
+    [
+     6.48,
+     6.75
+    ]
+   ],
+   "hurtbox_half": [
+    [
+     0.25,
+     1.0394
+    ],
+    [
+     0.25,
+     1.0394
+    ]
+   ],
+   "standing_box_y": [
+    [
+     3.015,
+     5.094
+    ],
+    [
+     3.015,
+     5.094
+    ]
+   ]
+  },
+  "equal": {
+   "wall_zone": true,
+   "rune_r": true,
+   "du_by_face": true,
+   "hurtbox_half": true,
+   "standing_box_y": true
+  }
+ },
+ "extra": {
+  "dash_sprint_model": {
+   "dash_speed": 28.0,
+   "sprint_speed": 17.5,
+   "dash_cooldown_s": 0.425
+  }
+ },
+ "built_by": "opus/scene_field_runtime43/make_inputs43.py (Sol task 43; same expressions as inputs41/42)"
+}

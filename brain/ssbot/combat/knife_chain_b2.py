@@ -90,7 +90,7 @@ class NativeChainB2(NativeChainCandidates):
         # Optional observation changes tick cost: never mix its on/off profile
         # under one batch ledger, even though it cannot rank or send actions.
         digest.update(json.dumps({"scene_field_shadow": os.environ.get(
-            "SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1", "scene_field_shadow_schema": 1},
+            "SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1", "scene_field_shadow_schema": 2},
             sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")

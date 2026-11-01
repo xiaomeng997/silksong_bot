@@ -49,6 +49,7 @@ from ssbot.combat import rune_bombs as _rb
 from ssbot.core.forum import FLOOR_Y, WALL_L, WALL_R
 
 V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
+SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
 EVERY = int(os.environ.get("SSBOT_FORUM_V2_EVERY", "1") or 1)   # V2Feed: rebuild the support every this many frames
 MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "focus").strip().lower() or "focus"
 # MARGIN_MODE "focus" (the default; the person, 2026-10-11): the focus unit gets a flat FOCUS_M unless the row dashes
@@ -732,6 +733,11 @@ class RangeSupport(LayerSupport):
         rune = getattr(trk, "rune", None)
         if rune is not None and (_rb.BOMB or _rb.HOP):
             bk = _rb.frames(rune.predict(trk.T), trk.T)
+            if SCENE_FIELD_SHADOW:
+                # Read-only observation of this existing, untruncated forecast.
+                # Its captured origin must match the consuming tracker tick.
+                rs.scene_field_bombs = bk
+                rs.scene_field_bombs_T = trk.T
             rs.bombs_all = bk[(bk[:, 5] >= -1) & (bk[:, 4] <= 130)]    # (the hop rows' timing: SSBOT_FORUM_RUNE_HOP)
             if _rb.BOMB:
                 rs.bombs = rs.bombs_all

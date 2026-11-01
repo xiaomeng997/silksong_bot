@@ -570,6 +570,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         if SCENE_FIELD_SHADOW:
             from ssbot.combat.scene_field_shadow import SceneFieldShadow
             self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
+            from ssbot.combat.scene_field_event_shadow import SceneFieldEventShadow
+            self._scene_field_event_reader = SceneFieldEventShadow.for_forum()
             self._scene_field_current = None
             self._scene_field_error = False
         self._audit0 = self.planner.audit.as_dict()
@@ -1081,7 +1083,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.planner_last = res
         if SCENE_FIELD_SHADOW:
             if diag is not None: diag.phase("scene_field_shadow")
-            self._scene_field_after_plan(res, fplan, f, fo, fresh=not air_tick)
+            self._scene_field_after_plan(res, fplan, f, fo, fresh=not air_tick, state=s)
             if diag is not None: diag.phase("planner")
         if self.chain_native is not None:
             self.chain_native.planner_result(res, fresh=not air_tick)
@@ -1407,7 +1409,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                              frame=f, origin_frame=fo)
         return int(mask)
 
-    def _scene_field_after_plan(self, res, forecast, frame, origin_frame, *, fresh):
+    def _scene_field_after_plan(self, res, forecast, frame, origin_frame, *, fresh, state=None):
         """Optional observation only; one bounded measurement record, no action edits."""
         measurement = getattr(self, "measurement", None)
         if measurement is None or not measurement.detail or getattr(self, "_scene_field_error", False):
@@ -1418,9 +1420,17 @@ class ForumPlannerPolicy(PlannerPolicy):
             return
         started = time.perf_counter()
         try:
-            self._scene_field_current = self._scene_field_reader.inspect(
-                feed.trk, rs.pend, res.path, frame=frame, origin_frame=origin_frame,
-                k_shift=rs.k_shift, fresh=fresh)
+            event_reader = getattr(self, "_scene_field_event_reader", None)
+            if not rs.pend and state is not None and event_reader is not None:
+                self._scene_field_current = event_reader.inspect(
+                    feed.trk, state, rs.pend, res.path, frame=frame, origin_frame=origin_frame,
+                    k_shift=rs.k_shift, fresh=fresh,
+                    bombs=getattr(rs, "scene_field_bombs", None),
+                    bombs_T=getattr(rs, "scene_field_bombs_T", None))
+            else:
+                self._scene_field_current = self._scene_field_reader.inspect(
+                    feed.trk, rs.pend, res.path, frame=frame, origin_frame=origin_frame,
+                    k_shift=rs.k_shift, fresh=fresh)
             if self._scene_field_current is not None:
                 self._scene_field_current["cost_ms"] = (time.perf_counter() - started) * 1000.0
         except Exception as exc:
