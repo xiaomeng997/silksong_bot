@@ -2942,7 +2942,7 @@ class ForumPlanner(Planner):
                 p0 = tab.position(tp, b, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
                 motion = trk.observed_stop(t.iid) if hasattr(trk, "observed_stop") else None
                 if motion is not None:
-                    d = np.array([_observed_slam.predicted_offset(tab, inst, tp, b, b + k, motion[1])
+                    d = np.array([_observed_slam.predicted_offset(tab, inst, tp, b, b + k, motion[1], audit_kind="body")
                                   for k in range(n)], np.float64)
                 else:
                     d = np.array([tab.position(tp, b + k, (inst.x0, inst.y0), inst.s, inst.hero_du, inst.fam)
@@ -3546,6 +3546,8 @@ class ForumPlanner(Planner):
 
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
              ) -> PlanResult:
+        self.observed_slam_audit = (_observed_slam.audit_start(ws, f)
+                                    if _observed_slam.ENABLED and getattr(self, "measurement_enabled", False) else None)
         chain = getattr(self, "chain_native", None)
         if not getattr(chain, "b2", False) or getattr(chain, "arm", "A") != "B":
             return self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
@@ -4456,8 +4458,22 @@ class ForumPlanner(Planner):
                 if len(pbox):
                     args = (np.ascontiguousarray(r1.box, np.float64), np.ascontiguousarray(inv1), verts, starts, pbox,
                             pvel, np.ascontiguousarray(tk, np.float64), np.ascontiguousarray(cand, np.int64), 0.0)
-                    expiry = _observed_slam.seen_expiries(ws, f) if _observed_slam.ENABLED else None
-                    if expiry is not None and len(expiry) == len(pbox) and np.isfinite(expiry).any():
+                    audit_context = getattr(self, "observed_slam_audit", None)
+                    seen_audit = {} if audit_context is not None else None
+                    if _observed_slam.ENABLED:
+                        expiry = (_observed_slam.seen_expiries(ws, f, audit=seen_audit) if seen_audit is not None
+                                  else _observed_slam.seen_expiries(ws, f))
+                    else:
+                        expiry = None
+                    finite_path = expiry is not None and len(expiry) == len(pbox) and np.isfinite(expiry).any()
+                    if seen_audit is not None:
+                        audit_context['seen_status'] = 'evaluated'
+                        seen_audit.update(scope='ordinary_forced_seen_polygons', polygon_count=len(pbox),
+                                          expiry_count=None if expiry is None else len(expiry),
+                                          kernel='timed_seen' if finite_path else
+                                          ('seen_contacts_swept' if fcfg.seen_sweep else 'seen_contacts'))
+                        audit_context['seen_evaluations'].append(seen_audit)
+                    if finite_path:
                         from .seen_lifetime import timed_seen
                         cnt, fst = timed_seen(*args, expiry, self.params.frame_time, SEEN_SWEEP_MIN_U_S,
                                               bool(fcfg.seen_sweep))
@@ -4465,6 +4481,11 @@ class ForumPlanner(Planner):
                         cnt, fst = seen_contacts_swept(*args, self.params.frame_time, SEEN_SWEEP_MIN_U_S) \
                             if fcfg.seen_sweep else seen_contacts(*args)
                     sk_n[cand], sk_f[cand] = cnt[cand], fst[cand]
+                elif getattr(self, 'observed_slam_audit', None) is not None:
+                    self.observed_slam_audit['seen_status'] = 'no_seen_polygons'
+                    self.observed_slam_audit['seen_evaluations'].append(
+                        {'scope': 'ordinary_forced_seen_polygons', 'kernel': 'none', 'polygon_count': 0,
+                         'expiry_status': 'not_evaluated', 'reason': 'no_seen_polygons', 'polygons': []})
                 if fcfg.seen_sweep and pins:
                     # "+s": a row meeting an aimed pin (not thrown yet) is a seen contact too
                     pk = self._pin_contacts(pins, r1, cand, tk, enemy_only)

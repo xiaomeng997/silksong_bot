@@ -359,7 +359,7 @@ class RangeTable:
             lo, hi = self.walls
             if observed_motion is not None:
                 inst, stop = observed_motion
-                dx, dy = _observed_slam.predicted_offset(self, inst, tp, b_now, b, stop)
+                dx, dy = _observed_slam.predicted_offset(self, inst, tp, b_now, b, stop, audit_kind="support")
                 px, py = min(max(now[0] + dx, lo), hi), now[1] + dy
             else:
                 px, py = min(max(now[0] + px - qx, lo), hi), now[1] + py - qy

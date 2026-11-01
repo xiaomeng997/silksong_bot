@@ -36,6 +36,10 @@ class Motion:
     armed: bool = False
     stopped: bool = False
     stop_f: int | None = None
+    support_calls: int = 0
+    support_changes: int = 0
+    body_calls: int = 0
+    body_changes: int = 0
 
 class Monitor:
     def __init__(self):
@@ -88,7 +92,7 @@ class Monitor:
         row = self.by_iid.get(iid)
         return row if (row and row.token is inst and row.saw_antic and row.armed and row.stopped) else None
 
-def predicted_offset(table, inst, template, b_from: int, b_to: int, stop: Motion | None):
+def predicted_offset(table, inst, template, b_from: int, b_to: int, stop: Motion | None, *, audit_kind: str | None = None):
     """Same displacement for attack support and certain-hit bodies, by instance.
 
     This function receives explicit state, never a table/global context. Only a
@@ -100,6 +104,12 @@ def predicted_offset(table, inst, template, b_from: int, b_to: int, stop: Motion
     dx = p1[0] - p0[0]
     if (stop is not None and stop.token is inst and stop.stopped and stop.armed
             and stop.saw_antic and inst.fam == "CC_SLAM" and b_to > b_from):
+        if audit_kind in ('support', 'body'):
+            field = audit_kind + '_calls'
+            setattr(stop, field, getattr(stop, field, 0) + 1)
+            if dx != 0.0:
+                field = audit_kind + '_changes'
+                setattr(stop, field, getattr(stop, field, 0) + 1)
         dx = 0.0
     return dx, p1[1] - p0[1]
 
@@ -115,54 +125,120 @@ def lifetime_owner(now, focus):
         return focus
     return living[0] if len(living) == 1 else None
 
-def expiry_for_entity(e, collider, forecast, raw, slack):
-    """Longest remaining empirical game-time dwell, not a real-time guarantee."""
+def _expiry_result(value, reason, audit):
+    if audit is not None:
+        audit.update(expiry_kind='finite' if math.isfinite(value) else 'infinite',
+                     expiry_s=float(value) if math.isfinite(value) else None, reason=reason)
+    return value
+
+
+def expiry_for_entity(e, collider, forecast, raw, slack, *, audit=None):
+    """Longest remaining empirical game-time dwell; optional read-only evidence."""
     from .multi_forecast import BIN
     if e.type_key.v != CLAPPER or collider.name not in PAIRS:
-        return math.inf
+        return _expiry_result(math.inf, 'not_clapper_hammer', audit)
     state = PAIRS[collider.name]
-    rs = getattr(forecast, "rs", None)
-    rt = getattr(rs, "trk", None)
-    now = getattr(rt, "now", {}) or {}
+    rs = getattr(forecast, 'rs', None)
+    rt = getattr(rs, 'trk', None)
+    now = getattr(rt, 'now', {}) or {}
     item = now.get(e.id)
     inst = item[2] if item and len(item) >= 3 else None
-    if (item is None or item[0] != CLAPPER or inst is None or inst.fam != "CC_SLAM"
-            or not inst.states or inst.states[-1] != state
-            or lifetime_owner(now, getattr(rs, "focus", None)) != e.id):
-        return math.inf
-    fsm = next((x for x in e.fsm or () if x[0] == "Control"), None)
-    fc = getattr(forecast, "fc", None)
-    tr = getattr(fc, "trackers", {}).get(e.id)
-    if (fsm is None or len(fsm) < 3 or fsm[1] != state or tr is None
-            or tr.state != state or tr.t_entry is None):
-        return math.inf
-    dw, tin, origin = tr.table.dwell.get(state), fsm[2], getattr(forecast, "origin_t", None)
+    if item is None or item[0] != CLAPPER:
+        return _expiry_result(math.inf, 'missing_tracked_clapper', audit)
+    if inst is None or inst.fam != 'CC_SLAM' or not inst.states or inst.states[-1] != state:
+        return _expiry_result(math.inf, 'tracked_move_or_phase_mismatch', audit)
+    if lifetime_owner(now, getattr(rs, 'focus', None)) != e.id:
+        return _expiry_result(math.inf, 'not_lifetime_owner', audit)
+    fsm = next((x for x in e.fsm or () if x[0] == 'Control'), None)
+    fc = getattr(forecast, 'fc', None)
+    tr = getattr(fc, 'trackers', {}).get(e.id)
+    if fsm is None or len(fsm) < 3 or fsm[1] != state:
+        return _expiry_result(math.inf, 'world_control_mismatch', audit)
+    if tr is None or tr.state != state or tr.t_entry is None:
+        return _expiry_result(math.inf, 'inner_control_mismatch', audit)
+    dw, tin, origin = tr.table.dwell.get(state), fsm[2], getattr(forecast, 'origin_t', None)
     if not finite(origin) or not finite(tr.t_entry):
-        return math.inf
+        return _expiry_result(math.inf, 'unknown_inner_clock', audit)
     age = origin - tr.t_entry
-    fdt, dt, ts = raw.get("fdt"), raw.get("dt"), raw.get("ts")
+    fdt, dt, ts = raw.get('fdt'), raw.get('dt'), raw.get('ts')
     if not dw or not all(finite(x) for x in (*dw, tin, age, fdt, dt, ts)):
-        return math.inf
-    # tk in the seen ranking is a real-time horizon. Empirical dwells are
-    # game time; scaled/frozen clocks have no validated conversion here.
-    if (dt <= 0 or ts != 1.0 or not 0 < fdt <= .05 or tin < 0 or age < -.00001
-            or abs(age - tin) > 2 * BIN + .00001):
-        return math.inf
+        return _expiry_result(math.inf, 'unknown_dwell_or_clock', audit)
+    if ts != 1.0:
+        return _expiry_result(math.inf, 'scaled_or_frozen_clock', audit)
+    if dt <= 0 or not 0 < fdt <= .05:
+        return _expiry_result(math.inf, 'invalid_step_clock', audit)
+    if tin < 0 or age < -.00001 or abs(age - tin) > 2 * BIN + .00001:
+        return _expiry_result(math.inf, 'inner_world_age_mismatch', audit)
     latest = float(dw[1]) + slack
     if dw[0] < 0 or dw[1] < dw[0] or age > latest + .00001:
-        return math.inf
-    return max(float(fdt), latest - age + float(fdt))
+        return _expiry_result(math.inf, 'outside_empirical_dwell', audit)
+    return _expiry_result(max(float(fdt), latest - age + float(fdt)),
+                          'mapped_latest_with_fixed_guard', audit)
 
-def seen_expiries(ws, forecast):
-    """Match seen_polys' order, using only the actual current tracker clock."""
+
+def seen_expiries(ws, forecast, *, audit=None):
+    """Match seen_polys order; audit records evaluated values, never substitutes."""
     import numpy as np
     from .multi_forecast import DWELL_SLACK_S
-    rt = getattr(getattr(forecast, "rs", None), "trk", None)
-    monitor = getattr(rt, "observed_motion", None)
+    rt = getattr(getattr(forecast, 'rs', None), 'trk', None)
+    monitor = getattr(rt, 'observed_motion', None)
     raw = monitor.clock if monitor is not None else {}
-    frame = raw.get("f")
-    if not isinstance(frame, int) or isinstance(frame, bool) or frame != ws.stamp.frame:
+    frame = raw.get('f')
+    match = isinstance(frame, int) and not isinstance(frame, bool) and frame == ws.stamp.frame
+    if audit is not None:
+        audit.update(origin_frame=ws.stamp.frame, tracker_frame=frame, frame_match=match,
+                     expiry_status='not_evaluated', polygons=None)
+    if not match:
+        if audit is not None:
+            audit['reason'] = 'tracker_frame_mismatch'
         return None
-    return np.asarray([expiry_for_entity(e, b, forecast, raw, DWELL_SLACK_S)
-                       for e in ws.entities or () for b in e.dmg_boxes
-                       if b.active and len(b.poly) >= 3], np.float64)
+    if audit is None:
+        return np.asarray([expiry_for_entity(e, b, forecast, raw, DWELL_SLACK_S)
+                           for e in ws.entities or () for b in e.dmg_boxes
+                           if b.active and len(b.poly) >= 3], np.float64)
+    values, polygons = [], []
+    for e in ws.entities or ():
+        for b in e.dmg_boxes:
+            if b.active and len(b.poly) >= 3:
+                info = {'index': len(values), 'iid': e.id, 'collider': b.name}
+                values.append(expiry_for_entity(e, b, forecast, raw, DWELL_SLACK_S, audit=info))
+                polygons.append(info)
+    audit.update(expiry_status='evaluated', polygons=polygons)
+    return np.asarray(values, np.float64)
+
+
+def motion_snapshot(rt):
+    """Scalars only, no references to live STATE/forecast graphs or extra queries.
+
+    Counts belong to the real tracker row since its last raw feed. Copied nominal
+    worlds have their own rows; function changes do not certify final raster cells.
+    """
+    monitor = getattr(rt, 'observed_motion', None)
+    clock = {} if monitor is None else {k: v if finite(v) else None for k, v in monitor.clock.items()}
+    units = []
+    for iid, item in (getattr(rt, 'now', None) or {}).items():
+        if not item or len(item) < 3 or item[0] != CLAPPER:
+            continue
+        inst = item[2]
+        row = None if monitor is None else monitor.by_iid.get(iid)
+        matching = row is not None and row.token is inst
+        units.append({'iid': iid, 'instance_token': None if inst is None else id(inst),
+                      'family': getattr(inst, 'fam', None),
+                      'instance_t0': getattr(inst, 't0', None) if finite(getattr(inst, 't0', None)) else None,
+                      'phase': (getattr(inst, 'states', None) or [None])[-1],
+                      'motion_frame': None if row is None else row.f,
+                      'same_instance': matching, 'saw_antic': bool(matching and row.saw_antic),
+                      'armed': bool(matching and row.armed), 'stopped': bool(matching and row.stopped),
+                      'stop_f': row.stop_f if matching else None,
+                      'offset_calls': {k: getattr(row, k, 0) if matching else None for k in
+                                       ('support_calls', 'support_changes', 'body_calls', 'body_changes')}})
+    return {'tracker_frame': clock.get('f'), 'clock': clock,
+            'monitor_available': monitor is not None,
+            'stops_total': None if monitor is None else monitor.stops, 'units': units,
+            'count_scope': 'real row since raw feed; clones local; offset function before coast/raster'}
+
+
+def audit_start(ws, forecast):
+    return {'schema': 1, 'origin_frame': ws.stamp.frame,
+            'motion_before': motion_snapshot(getattr(getattr(forecast, 'rs', None), 'trk', None)),
+            'seen_status': 'not_evaluated', 'seen_evaluations': []}

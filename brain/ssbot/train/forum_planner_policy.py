@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
-from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop,
+from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, observed_slam,
                           slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
@@ -939,6 +939,10 @@ class ForumPlannerPolicy(PlannerPolicy):
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        if observed_slam.ENABLED and getattr(self, "measurement", None) is not None:
+            # A policy tick can return before calling the planner. Never attach
+            # an older tick's model evaluation to that early return.
+            self.planner.observed_slam_audit = None
         self._begin_chain_native(s)
         diag = self.measurement.diagnostics if self.measurement is not None else None
         if diag is not None: diag.phase("catch_up")
@@ -946,7 +950,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.measurement_choice = None
         if self.real_quit_active:
             mask = self._real_quit_step(s, f)
-            self._measure_choice("real_quit", mask)
+            self._measure_choice("real_quit", mask, frame=f)
             return mask
         self._catch_up(f, tap)
         self.keylog.observe(f, (s.get("act") or {}).get("mask", 0))
@@ -958,7 +962,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if ws is None:
             self.sent[f + 2] = 0
             self.keylog.tick(f, f + 2, (0,))
-            self._measure_choice("no_world_state", 0)
+            self._measure_choice("no_world_state", 0, frame=f)
             return 0
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
@@ -1386,10 +1390,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if diag is not None: diag.phase("logging")
         self._log(s, f, fo, ws, fcast, prefs, res, r, unpred, wt, kill_hp, ykill, streak)
         if diag is not None: diag.phase("choice_capture")
-        self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs)
+        self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs,
+                             frame=f, origin_frame=fo)
         return int(mask)
 
-    def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None) -> None:
+    def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None,
+                        frame=None, origin_frame=None) -> None:
         if getattr(self, "chain_native", None) is not None:
             # Public policy ownership is chain; the native dispatch still uses
             # its original selected planner-row identity at the send boundary.
@@ -1426,6 +1432,22 @@ class ForumPlannerPolicy(PlannerPolicy):
             "inflight_prefix": prefix.tolist() if prefix is not None else None,
             "planner_hold": {k: getattr(hold, k).tolist() for k in ("latched", "desired", "pending", "age")}
                 if hold is not None else None}
+        if observed_slam.ENABLED:
+            audit = getattr(self.planner, 'observed_slam_audit', None)
+            # self.raw is a frame-indexed history, not the current STATE.
+            # The policy frame and the forecast origin may legitimately differ.
+            if audit is not None and origin_frame is not None and audit['origin_frame'] == origin_frame:
+                evidence = dict(audit)
+                evidence['status'] = 'captured'
+            else:
+                evidence = {'schema': 1, 'origin_frame': origin_frame,
+                            'status': 'no_current_planner_context', 'seen_status': 'unknown_no_current_context',
+                            'seen_evaluations': None,
+                            'previous_context_frame': None if audit is None else audit['origin_frame']}
+            evidence['policy_frame'] = frame
+            evidence['captured_at'] = 'choice_before_send'
+            evidence['motion_after'] = observed_slam.motion_snapshot(getattr(getattr(self, 'v2feed', None), 'trk', None))
+            self.measurement_choice['observed_slam'] = evidence
 
     def _m2_take(self) -> None:
         """M4c: map2 takes the keys - the scripts' runs end (aborted, as when the supervisor takes them), so they start
@@ -1502,7 +1524,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "pq": None if pq is None else pq.state,
                "outcome": r.outcome}
         self._emit(rec, any(ev.get("k") in ("damage", "catastrophe", "would_die") for ev in s.get("ev") or ()))
-        self._measure_choice("sup", mask)
+        self._measure_choice("sup", mask, frame=f, origin_frame=fo)
         return mask
 
     # ---- logs and stats ----
