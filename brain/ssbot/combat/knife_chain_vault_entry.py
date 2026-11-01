@@ -72,7 +72,11 @@ def near_proposals(sim, target_box, direction, *, max_results=2):
             continue
         for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
             if flags[j]&K.F_GROUND:break
-            if all(PM.meets(PM.slash_poly(direction,alt)+ro.pos[q,j],poly) for alt in (False,True)):
+            # Rollout has no per-frame facing. A requested direction is not
+            # proof that the HoldFilter/attack recovery already let her turn.
+            # Require both mirrors until the receiving adapter knows the face.
+            if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[q,j],poly)
+                   for face in (-1,1) for alt in (False,True)):
                 row=cmds[q].copy();row.setflags(write=False)
                 candidates.append(NearVaultProposal(hold,press,before,direction,j,row));break
     candidates.sort(key=lambda x:(x.contact_index,x.press,x.hold,x.before))

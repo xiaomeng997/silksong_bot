@@ -66,3 +66,24 @@ def test_invalid_geometry_and_direction_cannot_be_a_nominal_entry(params):
     s,b=sim(params,1)
     with pytest.raises(ValueError):near_proposals(s,[0.,0.,float("nan"),1.],1)
     with pytest.raises(ValueError):near_proposals(s,b,True)
+
+
+@pytest.mark.parametrize("direction",[-1,1])
+def test_unobserved_facing_cannot_certify_asymmetric_edge_contact(params,direction):
+    from ssbot.combat import pogo_model as PM
+    # At this narrow edge both slash alternations meet only for one facing.
+    box=np.array([-1.57,-.45,-1.55,-.40])
+    if direction<0:box=np.array([-box[2],box[1],-box[0],box[3]])
+    poly=np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]])
+    assert all(PM.meets(PM.slash_poly(direction,a),poly) for a in (False,True))
+    assert not all(PM.meets(PM.slash_poly(-direction,a),poly) for a in (False,True))
+    s,_=sim(params,direction)
+    def rollout(rows):
+        flags=np.zeros((len(rows),len(rows[0])+2),np.int64)
+        # The neutral-before-press candidate alone has a modeled swing. Its
+        # rollout intentionally supplies no per-frame facing, as in production.
+        flags[1,6:8]=K.F_ATTACKING
+        return NS(flags=flags,pos=np.zeros((*flags.shape,2)))
+    s.roll=rollout
+    rows,diag=near_proposals(s,box,direction)
+    assert not rows and diag["contact_rows"]==0
