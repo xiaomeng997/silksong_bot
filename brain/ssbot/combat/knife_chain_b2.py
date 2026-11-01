@@ -721,6 +721,13 @@ class NativeChainB2(NativeChainCandidates):
                 self._note("b2_fixed_wait_handoff",frame=f,released=False,reason="observed different Move instance")
                 self.post_context=None;self._post_seed=None;self._post_kind=None
             if self.commitment is None and self.post_context is None:
+                if preview.draft.run.chain=="fixed_hook":
+                    queued,basis=self.queued_prefix(f,state)
+                    held=((state.get("act") or {}).get("hf") or {}).get("desired")
+                    if queued is None or queued!=held:
+                        self._note("b2_fixed_prefix_rejected",frame=f,queued=queued,held=held,basis=basis)
+                        self._no_candidate("fixed hook needs its admitted direction through the queued frame",frame=f,state=state)
+                        return None
                 stage="fixed_commitment"
             else:stage="active"
             return B2Offer(stage,None,preview.draft,int(preview.mask),0.,move,

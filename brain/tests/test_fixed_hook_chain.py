@@ -230,3 +230,18 @@ def test_simple_wait_is_asked_before_any_ordinary_search(chain):
     got=ForumPlanner.tick(p,NS(stamp=NS(frame=1001)),np.zeros(km.K),None,np.zeros(1,np.int64),None,prefs,None)
     assert got is wanted and calls==["wait"] and p.ticks==1
     assert not n.counts["b2_value_bound_pruned"]
+
+
+@pytest.mark.parametrize("queued",[B["L"],B["L"]|B["A"],B["L"]|B["J"],B["L"]|B["CLAW"],None])
+def test_fixed_entry_never_commits_over_a_conflicting_queued_key(params,terrain,queued):
+    n=fixed();s=state()
+    if queued is not None:n._receipts[s["f"]+1]=queued
+    n.begin(s)
+    sim=simulation(s,params,terrain,B["L"] if queued is None else queued)
+    n.prepare(s,ground=True,accepting=True,sim=sim)
+    o=n.propose(None,None,None,None,None,None,None,None)
+    assert (o is not None) is (queued==B["L"])
+    assert n.commitment is None and n.runner.run is None
+    if queued!=B["L"]:
+        if queued is not None:assert n.counts["b2_fixed_prefix_rejected"]==1
+        assert not n._failed_hook_moves  # a refused proposal is not a sent failure
