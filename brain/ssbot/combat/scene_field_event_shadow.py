@@ -69,6 +69,7 @@ class SceneFieldEventShadow:
         self._last = self._key = None
         self.cache.clear()
         if self.async_builder is not None:
+            self.async_builder.check_health()
             self.async_builder.invalidate()
 
     def close(self):

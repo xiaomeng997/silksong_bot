@@ -715,6 +715,9 @@ def worker(a: argparse.Namespace) -> int:
             chain=getattr(policy,"chain_native",None);b2_stop=None;b2_stop_details=None
             strict_stop=getattr(chain,"strict_stop",None) if strict_receipts else None
             if strict_stop is not None:d["strict_receipt_stop"]=strict_stop
+            field_builder=getattr(getattr(policy,"_scene_field_event_reader",None),"async_builder",None)
+            field_stop=getattr(field_builder,"failure",None)
+            if field_stop is not None:d["scene_field_stop"]=field_stop
             if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
                 from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
                 b2_stop_details=_resolve_b2_stop(chain,outcome=rec.outcome,episode_reason=rec.reason)
@@ -792,6 +795,9 @@ def worker(a: argparse.Namespace) -> int:
                 break
             if strict_stop is not None:
                 print(f"[i{a.instance}] strict receipt stop; evidence retained: {strict_stop}", flush=True)
+                break
+            if field_stop is not None:
+                print(f"[i{a.instance}] scene field stopped; evidence retained: {field_stop}", flush=True)
                 break
             if measurement is not None and measurement.protocol_version == 2 and d.get("measurement_outcome") == "WATCHDOG":
                 from ssbot.train.recovery import is_paused

@@ -38,7 +38,7 @@ def local_client():
     x.inputs=_startup_inputs();x.selection=E.Selection(worlds=('nominal',),hyps=('bounded_hold',),components=('egress',))
     x.refresh_s=.25;x.max_age_s=.5;x.buffer=A.DoubleBuffer();x._epoch=x._sequence=0
     x._key=x._last_now=x._requested_at=x._request=x._failure=None
-    x._stop=threading.Event();x._wake=threading.Event()
+    x._stop=threading.Event();x._wake=threading.Event();x._process=NS(is_alive=lambda:True)
     return x
 
 
@@ -222,7 +222,7 @@ def test_policy_warms_worker_before_existing_forum_warmup_and_reuses_it(monkeypa
 
 
 def test_reader_reset_only_invalidates_epoch_and_keeps_owned_process():
-    x=local_client();x.get(view());old=x._epoch;worker=object();x._process=worker
+    x=local_client();x.get(view());old=x._epoch;worker=x._process
     reader=SceneFieldEventShadow(x.inputs,native()[2]);reader.async_builder=x
     reader.reset()
     assert x._epoch==old+1 and x._request is None and x.buffer.current is None
@@ -251,3 +251,31 @@ def test_runtime_factory_requests_only_the_grids_it_queries(monkeypatch,egress_o
     assert len(sel.worlds)*len(sel.hyps)*len(E.LAYERS)*len(sel.components)==n_grids
     assert sel.worlds==('nominal',) and sel.hyps==('bounded_hold',)
     reader.close()
+
+
+def test_reset_dead_worker_fails_without_waiting_or_rebuilding():
+    x=local_client();x._process=NS(is_alive=lambda:False)
+    reader=SceneFieldEventShadow(x.inputs,native()[2]);reader.async_builder=x
+    with pytest.raises(RuntimeError,match='owned field builder exited'):reader.reset()
+    assert x.failure=='owned field builder exited'
+
+
+def test_failed_field_worker_does_not_start_another_episode(tmp_path,monkeypatch):
+    import json
+    from tests.test_knife_chain_receipts import strict_worker
+    from ssbot.tools import combat_run as C
+    from ssbot.train import episode as Ep
+    rig=strict_worker(tmp_path,monkeypatch)
+    factory=C.make_policy
+    def make(*a,**kw):
+        p=factory(*a,**kw)
+        p._scene_field_event_reader=NS(async_builder=NS(failure='owned builder failed'),close=lambda:rig.events.append('field.close'))
+        return p
+    def run(link,enc,tap,policy,cfg,rec):
+        rig.attempts+=1;rig.events.append('episode');rec.outcome='HARNESS_FAIL';rec.reason='async field builder failed'
+    monkeypatch.setattr(C,'make_policy',make);monkeypatch.setattr(Ep,'run_episode',run)
+    assert rig.run(encounter='Forum_W_w13',episodes=3)==0
+    rows=[json.loads(x) for x in (tmp_path/'attempts_i0.jsonl').read_text().splitlines()]
+    assert len(rows)==rig.attempts==rig.events.count('ready')==1
+    assert rows[0]['scene_field_stop']=='owned builder failed' and 'field.close' in rig.events
+    assert all(p.closed for p in rig.links)

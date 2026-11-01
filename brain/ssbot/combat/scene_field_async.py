@@ -301,6 +301,16 @@ class AsyncFieldBuilder:
             return None, 'async_snapshot_expired'
         return pinned.field, 'ok'
 
+    @property
+    def failure(self):
+        return self._failure
+
+    def check_health(self):
+        """Reset/start boundary only; no waiting or rebuilding."""
+        if self._failure is None and not self._process.is_alive():
+            self._failure = 'owned field builder exited'
+        self._check()
+
     def status(self):
         p = self.buffer.current
         return dict(mode='async_double_buffer', worker=self.worker_info,
