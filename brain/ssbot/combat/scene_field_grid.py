@@ -46,6 +46,8 @@ class SceneFieldGrid:
             object.__setattr__(self, name, _axis(getattr(self, name)))
         shape = (len(self.times), len(self.ys), len(self.xs))
         values = np.array(self.values, dtype=float, copy=True)
+        if np.asarray(self.known).dtype.kind != 'b':
+            raise ValueError('known must be a boolean mask')
         known = np.array(self.known, dtype=bool, copy=True)
         regions = np.array(self.regions, copy=True)
         if values.shape != shape or known.shape != shape:
