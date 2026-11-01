@@ -93,7 +93,8 @@ class NativeChainB2(NativeChainCandidates):
             "SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1", "scene_field_shadow_schema": 2,
             "scene_field_rank": os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK","0").strip()=="1",
             "scene_field_weight_hits": float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS","1.0")),
-            "scene_field_rank_schema": 1},
+            "scene_field_rank_schema": 1,
+            "remaining_hp_quit": int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT","0"))},
             sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")

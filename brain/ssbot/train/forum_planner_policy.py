@@ -90,6 +90,11 @@ FORCED_STREAK_GAP = 30     # a FORCED_RISK tick after this many ticks without on
 # takes the keys, a failed per-frame check or no plan hands them back to this planner (and its scripts). Needs
 # SSBOT_FORUM_HERO2=1. Off: ssbot.map2 is not imported and nothing below changes.
 MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
+# Optional engineering HP boundary reuses the existing Q1 / real-quit machine,
+# independently of B2 and its w7-only rollout profile. Zero retains normal h2.
+REMAINING_HP_QUIT = int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT", "0"))
+if REMAINING_HP_QUIT < 0:
+    raise ValueError("remaining HP quit floor must be nonnegative")
 SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
 SCENE_FIELD_RANK = os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK", "0").strip() == "1"
 SCENE_FIELD_WEIGHT_HITS = float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS", "1.0"))
@@ -514,6 +519,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         if tap.lethal:
             audit._stop("lethal hit", state["f"])
 
+    def _remaining_hp_quit(self):
+        budget_floor = getattr(getattr(self.chain_native, "budget", None), "remaining_hp_quit", None)
+        return max(REMAINING_HP_QUIT, budget_floor or 0) or None
+
     def reset(self, rng: random.Random, enc) -> None:
         self.flush_log()
         self.flush_keys()
@@ -589,7 +598,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.weighted = None
         self.real_quit = self.real_quit_p > 0 and rng.random() < self.real_quit_p
         self.sc.cfg = forum_supervisor_config(free_until_hit=self.free,
-            remaining_hp_quit=getattr(getattr(self.chain_native,"budget",None),"remaining_hp_quit",None))
+            remaining_hp_quit=self._remaining_hp_quit())
         self.sc.pq_cfg = replace(self._pq_emulated, emulate_quit=not self.real_quit)
         self.rq: dict = {"armed": self.real_quit, "submits": [], "menus": []}
         self.sc.reset()
@@ -887,7 +896,8 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.params = self.params0.with_weighted()
             self.planner.params = self.params
             self.trk = StateTracker(self.params, self.terrain)
-            self.sc.cfg = forum_supervisor_config(weighted=True, free_until_hit=self.free)
+            self.sc.cfg = forum_supervisor_config(weighted=True, free_until_hit=self.free,
+                remaining_hp_quit=self.sc.cfg.remaining_hp_quit)
             self.sc.sup.cfg = self.sc.cfg
 
     def _wave_check(self, raw: dict, f: int) -> int | None:
@@ -1713,6 +1723,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "outcome_reason": self.outcome_reason, "alerts": list(self.sc.alerts),
                 "q4_by_instance": {str(k): v for k, v in getattr(self.sc.sup, "unpredicted_by", {}).items()},
                 "real_quit": self.real_quit_stats(), "keys": keys,
+                "remaining_hp_quit": self.sc.cfg.remaining_hp_quit,
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
