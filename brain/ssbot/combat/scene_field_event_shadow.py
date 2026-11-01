@@ -64,6 +64,12 @@ class SceneFieldEventShadow:
         return L.field_for_tick(self.cache, E, view, self.inputs, SceneFieldGrid,
                                 E.Config(), prepared=self.prepared, select=self.select)
 
+    def reset(self):
+        self._last = self._key = None
+        self.cache.clear()
+        if self.async_builder is not None:
+            self.async_builder.invalidate()
+
     def close(self):
         if self.async_builder is not None:
             self.async_builder.close()

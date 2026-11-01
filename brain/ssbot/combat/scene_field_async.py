@@ -95,7 +95,7 @@ def _worker(conn, input_path, arena, selection):
         E.warmup()
         prepared = E.prepare(inputs, arena=arena)
         conn.send(('ready', dict(pid=p.pid, created=p.create_time(), cpus=p.cpu_affinity(),
-                                priority=int(p.nice()), exe=p.exe())))
+                                priority=int(p.nice()), exe=p.exe(), prefix=sys.prefix)))
         while True:
             request = conn.recv()
             epoch, sequence, key, origin, scene = request
@@ -149,14 +149,23 @@ class AsyncFieldBuilder:
             with _SPAWN_LOCK:
                 from multiprocessing import spawn
                 previous = spawn.get_executable()
+                old_launcher = os.environ.get('__PYVENV_LAUNCHER__')
                 try:
                     if os.name == 'nt':
-                        hidden = Path(sys.executable).with_name('pythonw.exe')
+                        # Match CPython's venv bypass, but use the no-console
+                        # base binary. Launching the venv redirector would
+                        # give Process.pid the wrapper PID instead of the worker.
+                        hidden = Path(sys._base_executable).with_name('pythonw.exe')
                         if not hidden.is_file(): raise RuntimeError('pythonw missing for field worker')
+                        os.environ['__PYVENV_LAUNCHER__'] = str(Path(sys.executable).with_name('pythonw.exe'))
                         mp.set_executable(str(hidden))
                     self._process.start()
                 finally:
                     mp.set_executable(previous)
+                    if old_launcher is None:
+                        os.environ.pop('__PYVENV_LAUNCHER__', None)
+                    else:
+                        os.environ['__PYVENV_LAUNCHER__'] = old_launcher
         except BaseException:
             child.close()
             self._conn.close()
@@ -196,6 +205,8 @@ class AsyncFieldBuilder:
             if ready is None: return
             if ready[0] != 'ready': raise RuntimeError('invalid builder startup message')
             self.worker_info = ready[1]
+            if self.worker_info['pid'] != self._process.pid:
+                raise RuntimeError('builder PID differs from the owned process')
             self._ready.set()
             last_sequence = 0
             while not self._stop.is_set():

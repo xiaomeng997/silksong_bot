@@ -156,6 +156,8 @@ def test_real_model_process_matches_reference_queries_and_closes():
                 assert np.array_equal(getattr(g,n),getattr(expected.grids[k],n),equal_nan=True),(k,n)
         assert x.worker_info['cpus']==list(range(24,32)) and x.worker_info['pid']!=__import__('os').getpid()
         assert Path(x.worker_info['exe']).name.lower()=='pythonw.exe'
+        assert x.worker_info['pid']==x._process.pid
+        assert Path(x.worker_info['prefix']).resolve()==Path(__import__('sys').prefix).resolve()
     finally:x.close()
     assert not x._process.is_alive() and not x._thread.is_alive()
 
@@ -196,3 +198,29 @@ def test_policy_ranking_and_shadow_pin_the_same_complete_snapshot(monkeypatch):
     path=np.tile([15.25,3.015,15.75,5.0938],(37,1))
     p._scene_field_after_plan(NS(path=path),NS(rs=rs),100,100,fresh=True,state=state)
     assert not p._scene_field_error and p._scene_field_current['snapshot_id']==field.meta['identity']
+
+
+def test_policy_warms_worker_before_existing_forum_warmup_and_reuses_it(monkeypatch):
+    from ssbot.train import forum_planner_policy as P
+    from ssbot.combat import scene_field_event_shadow as S,scene_field_shadow as Old
+    calls=[]
+    reader=NS(async_builder=NS(_check=lambda:calls.append('healthy')))
+    monkeypatch.setattr(P,'SCENE_FIELD_RANK',True)
+    monkeypatch.setattr(Old.SceneFieldShadow,'for_forum',lambda *a:object())
+    monkeypatch.setattr(S.SceneFieldEventShadow,'for_forum',lambda **kw:calls.append('startup') or reader)
+    p=P.ForumPlannerPolicy.__new__(P.ForumPlannerPolicy);p.pb=NS(arena_x=(0.,70.))
+    class StopHere(Exception):pass
+    def old_warmup():calls.append('existing_fc_warmup');raise StopHere()
+    p.fc=NS(warm=old_warmup)
+    with pytest.raises(StopHere):p.warmup()
+    assert calls==['startup','existing_fc_warmup']
+    p._prepare_scene_field()
+    assert p._scene_field_event_reader is reader and calls==['startup','existing_fc_warmup','healthy']
+
+
+def test_reader_reset_only_invalidates_epoch_and_keeps_owned_process():
+    x=local_client();x.get(view());old=x._epoch;worker=object();x._process=worker
+    reader=SceneFieldEventShadow(x.inputs,native()[2]);reader.async_builder=x
+    reader.reset()
+    assert x._epoch==old+1 and x._request is None and x.buffer.current is None
+    assert x._process is worker

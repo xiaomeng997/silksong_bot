@@ -382,6 +382,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         paths on an empty forecast (ground and hit-stop start states, a Bind wanted, a kill target in reach)."""
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
+        self._prepare_scene_field()
         self.fc.warm()
         fcfg = self._fcfg(self.clash)
         if fcfg.v2:
@@ -527,6 +528,19 @@ class ForumPlannerPolicy(PlannerPolicy):
         if tap.lethal:
             audit._stop("lethal hit", state["f"])
 
+    def _prepare_scene_field(self):
+        """Startup only, before encounter intro; reset must never spawn/wait."""
+        if not (SCENE_FIELD_SHADOW or SCENE_FIELD_RANK):
+            return
+        reader = getattr(self, "_scene_field_event_reader", None)
+        if reader is not None:
+            reader.async_builder._check()
+            return
+        from ssbot.combat.scene_field_shadow import SceneFieldShadow
+        from ssbot.combat.scene_field_event_shadow import SceneFieldEventShadow
+        self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
+        self._scene_field_event_reader = SceneFieldEventShadow.for_forum(egress_only=SCENE_FIELD_RANK)
+
     def _remaining_hp_quit(self):
         budget_floor = getattr(getattr(self.chain_native, "budget", None), "remaining_hp_quit", None)
         return max(REMAINING_HP_QUIT, budget_floor or 0) or None
@@ -588,14 +602,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.v2feed = None
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
-        old_reader = getattr(self, "_scene_field_event_reader", None)
-        if callable(getattr(old_reader, "close", None)):
-            old_reader.close()  # reset only, never an action tick
         if SCENE_FIELD_SHADOW or SCENE_FIELD_RANK:
-            from ssbot.combat.scene_field_shadow import SceneFieldShadow
-            self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
-            from ssbot.combat.scene_field_event_shadow import SceneFieldEventShadow
-            self._scene_field_event_reader = SceneFieldEventShadow.for_forum(egress_only=SCENE_FIELD_RANK)
+            reader = getattr(self, "_scene_field_event_reader", None)
+            if reader is None:
+                raise RuntimeError("prepare scene field with warmup before encounter intro")
+            reader.reset()  # non-waiting epoch invalidation; reuse the warm worker
             self._scene_field_current = None
             self._scene_field_error = False
             self._scene_field_rank_current = None
