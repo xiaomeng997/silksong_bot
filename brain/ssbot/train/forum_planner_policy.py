@@ -90,6 +90,7 @@ FORCED_STREAK_GAP = 30     # a FORCED_RISK tick after this many ticks without on
 # takes the keys, a failed per-frame check or no plan hands them back to this planner (and its scripts). Needs
 # SSBOT_FORUM_HERO2=1. Off: ssbot.map2 is not imported and nothing below changes.
 MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
+SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
 BATTLE = "Battle Scene"
 HOOK_LOOKBACK_F = 70       # a multi-hit chain's hook -> its Final Hit: 0.35 - 1.0 s (forum.md §9.2; tools.multi_recall)
 HOOK_FSMS = ("Control", "Attack")
@@ -566,6 +567,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.v2feed = None
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
+        if SCENE_FIELD_SHADOW:
+            from ssbot.combat.scene_field_shadow import SceneFieldShadow
+            self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
+            self._scene_field_current = None
+            self._scene_field_error = False
         self._audit0 = self.planner.audit.as_dict()
         self.trk = StateTracker(self.params, self.terrain)
         self.fc.reset()
@@ -940,6 +946,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     def act(self, s: dict, tap=None) -> int:
         t0 = time.perf_counter()
         f = s["f"]
+        if SCENE_FIELD_SHADOW:
+            self._scene_field_current = None
         if observed_slam.ENABLED and getattr(self, "measurement", None) is not None:
             # A policy tick can return before calling the planner. Never attach
             # an older tick's model evaluation to that early return.
@@ -1071,6 +1079,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                     **({"bombs": b2_bombs} if getattr(self.chain_native, "b2", False) else {}))
             res = self.planner.tick(ws, S0, hold, prefix, fplan, prefs, ctx)
         self.planner_last = res
+        if SCENE_FIELD_SHADOW:
+            if diag is not None: diag.phase("scene_field_shadow")
+            self._scene_field_after_plan(res, fplan, f, fo, fresh=not air_tick)
+            if diag is not None: diag.phase("planner")
         if self.chain_native is not None:
             self.chain_native.planner_result(res, fresh=not air_tick)
         if two_play.RUNEEXIT and self.two is not None and getattr(prefs, "rune_exit", None):
@@ -1395,6 +1407,31 @@ class ForumPlannerPolicy(PlannerPolicy):
                              frame=f, origin_frame=fo)
         return int(mask)
 
+    def _scene_field_after_plan(self, res, forecast, frame, origin_frame, *, fresh):
+        """Optional observation only; one bounded measurement record, no action edits."""
+        measurement = getattr(self, "measurement", None)
+        if measurement is None or not measurement.detail or getattr(self, "_scene_field_error", False):
+            return
+        rs = getattr(forecast, "rs", None)
+        feed = getattr(self, "v2feed", None)
+        if rs is None or feed is None:
+            return
+        started = time.perf_counter()
+        try:
+            self._scene_field_current = self._scene_field_reader.inspect(
+                feed.trk, rs.pend, res.path, frame=frame, origin_frame=origin_frame,
+                k_shift=rs.k_shift, fresh=fresh)
+            if self._scene_field_current is not None:
+                self._scene_field_current["cost_ms"] = (time.perf_counter() - started) * 1000.0
+        except Exception as exc:
+            # Non-controlling telemetry fails visibly once, then stays disabled
+            # until reset. It must not take the controller's keys or hide a bug.
+            self._scene_field_current = {"schema": 1, "policy_frame": frame,
+                "origin_frame": origin_frame, "status": "error", "error_type": type(exc).__name__,
+                "message": str(exc)[:160], "applied_to_ranking": False,
+                "cost_ms": (time.perf_counter() - started) * 1000.0}
+            self._scene_field_error = True
+
     def _measure_choice(self, owner, mask, res=None, *, prefix=None, hold=None, prefs=None,
                         frame=None, origin_frame=None) -> None:
         if getattr(self, "chain_native", None) is not None:
@@ -1433,6 +1470,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             "inflight_prefix": prefix.tolist() if prefix is not None else None,
             "planner_hold": {k: getattr(hold, k).tolist() for k in ("latched", "desired", "pending", "age")}
                 if hold is not None else None}
+        if SCENE_FIELD_SHADOW:
+            shadow = getattr(self, "_scene_field_current", None)
+            if shadow is not None and shadow.get("policy_frame") == frame:
+                self.measurement_choice["scene_field_shadow"] = dict(shadow)
         if observed_slam.ENABLED:
             audit = getattr(self.planner, 'observed_slam_audit', None)
             # self.raw is a frame-indexed history, not the current STATE.
