@@ -2914,3 +2914,8 @@ f2740被rune bomb small(Clone)/damager伤1HP，HP7→6，phase none/chain_relate
 最小源a5b7c57d：_begin_chain_native与learning_check只把真实real_quit_active确认给B2；没有该证据的旧调用者默认False。共用observe_learning必须先实见Quit_To_Menu且退出已确认，记真实边界帧，此后仅Quit/Menu_Title或场景空且主角确实缺失的收尾帧可记b2_exit_frame_no_hp；只更新_last_budget_f，不补HP、不变_budget_hp、不计损血。仍在Hang_04时即使退出已确认/主角缺失也硬停；未确认、未见明确退出场景、其他战斗场景、重置后均不豁免。reset清边界；缺STATE、动作回执、死亡及其他学习/测量停止保持原样，不修改旧HARNESS_FAIL或measurement不完整。
 
 Root六份相关159项统一过、源外模块0；12项新回归包括双调用路径/重置/各战斗负例。另只直接喂原始25个STATE给共用observer：保留1次实际HP损失、最后HP6，2976–2980五帧记退出缺HP；把2736/2740/2974战斗health删掉三个负例仍严停。该小核验不是整局/模型/STATE缺口回放或实际退出验收；RAW_EXIT_OBSERVER.json与final_related.xml保留。新源交Task66最小独立审阅待核，无新P/实机/gate；下次仍等用户新观看请求。测量层退出窗口不完整尚不因本HP小修补宣称已解决。
+
+
+**已处理 Opus #171（a5b7c57d独立审阅核收，未开新局）。** Root核8工件/7所读快照源码与Git a5b7逐字节同、独立JUnit111项全过，其中12新增case身份与Root逐项一致。原始observer正例保留2740那1HP、边界2975、五退出缺HP帧、尾HP6；2740/2974删health及未确认退出三个负例分别仍在2740/2974/2976硬停。回放以2966首个暂停近似t_confirm，只证明边界逻辑，不作真实策略时钟/整局退出/实机证据。无P0–P2，Task66闭合，源码仍a5b7/默认AIR关闭；OPUS171_RECEIPT.json保留范围。
+
+另静态核原measurement错误来源：run_episode在异常时把原结局标episode_harness_fail，MeasurementWindow.finish_at按合同附加“unobserved HP/time interval”错误。因此原失败的不完整不能当作已独立证明还有第二个controller缺陷，也不能删旧错误或自动把未来planned QUIT计为完整比赛。当前不为未复现的测量问题再加代码/重开局；未来实际退出的时域/HP边界仍须按原协议核验，未经真实证据不称已验收。下一局继续等用户新的观看请求，保留原始失败/停止/清理记录。
