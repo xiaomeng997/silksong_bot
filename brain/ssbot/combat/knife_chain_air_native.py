@@ -63,7 +63,9 @@ class NativeManualAirChain(NativeChainB2):
             return prefs
         target=next((e for e in transfer.clappers(state) if e["iid"]==goal.target),None)
         if target is None:return prefs
-        self._transfer_ready=True
+        # A destination is not keyboard ownership: a newly observed target
+        # attack must still reach the existing ground/air attack adapters.
+        self._transfer_ready=transfer.control(target)[0] in {"Idle","Walk"}
         return replace(prefs,target=goal.target,stance_x=float(target["pos"][0]),boss_x=float(target["pos"][0]),region=None)
 
     def continuation_value_bound(self,prefs):return float("inf")
