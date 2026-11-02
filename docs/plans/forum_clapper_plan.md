@@ -2898,3 +2898,12 @@ Task62按两个原点3178/3190、每点至多18条代表模板，有限检查“
 **最小修补ebb66bd7及已处理 Opus #169。** 只+44行于5文件：该实际manual_air+B2预算配置在全部预热/配置加载后、开战前gc.collect并freeze长寿命对象；GC仍enabled、threshold/发键期限/动作准入不变，b2_gc_ready独占凭证入worker_context。AIR_MANUAL登记control，有效值取真实构造对象manual_air，不重读环境冒充执行。其他h2/w7固定钩索不走此GC分支。Root5份72项过，169工件/源码hash和独立测试核收，无P0–P2；内存留到worker退出、新运行期循环仍会回收两项P3保持，不称零停顿保证。
 
 Root以该真实失败133个决策、同一原始物理STATE重放完整_act+measure+framed null sink，只有audit合成相符回执，不作闭环/实际接受证明。P0–15/High/EcoQoSoff、field rank1，开战前真实collect32874/freeze265071耗47.45ms在计时窗口外；133tick中位8.5293ms、最大24.5395ms，原5496为18.9402ms；战后主动gen2 2.0793ms，窗口内无gen2。GC_P_RECEIPT保持有限真实窗口范围，不因其过而放宽任何停止门。根据用户到场授权，只有新源/新条件新根通过门后才可下一唯一观看局，旧2571失败根不重开；不自动追加留出/正式AB。
+
+
+**修复条件观看局ebb66实际结束（不再加开）。** 新源ebb66、执行HEAD de4c28ad、新seed314170、新根sol/demos/w13_air_gc_20261102T064523Z_ebb66bd7；Windows Defender一度使原资源门拒绝，未绕门，负载降下原门清后才唯一WMI。实际worker的input.stats仍0delay/jitter/HF2/2/pending0；开战前GC真实collected142/frozen163671、27.0904ms、GC enabled，b2_gc_ready已留。实际measurement配置complete=true/unresolved空；652tick中位10.50265ms、最大25.9222ms，战斗/退出窗口没有gen2，旧119ms回收尾没有重现；这些只是本局观测，不保证所有未来尾部。
+
+f2740被rune bomb small(Clone)/damager伤1HP，HP7→6，phase none/chain_related=false。按本轮工程局Q1 HP<=6进入real_quit。零air提案/承诺/实际出刀，因此这局没有实机验证空中链，不能以正常运行或基线出刀充数。Root另只按原始可见状态统计Float/Turn与入口，VISIBLE_ENTRY_COUNTS.json保留分母，不新扫参数或自动补局。
+
+原始f2975为Quit_To_Menu/HP6，2976 scene=None/hero absent；B2全局学习HP检查在已退出战斗的转换帧仍按critical缺HP严停，原结果HARNESS_FAIL与不完整measurement window保持。该错误属于退出收尾，不覆盖已见1HP损失，也不冒充正常CLEAR或全局完整比赛；后续应按真实退出阶段区分HP日志，不得放宽战斗中缺HP守卫。当前不为它再开一局。
+
+真实清理2026-11-02T06:51:39.177325Z：自有launcher/worker/game42124及后台field全部结束、worker各资源pass、golden/Prefs无差/旧DEMO恢复、instances/live空/restore_pending=false；Root再独立PrefsGuard.default重读和field PID身份核过，STATUSfalse。ROOT_AUDIT.json保留退出原始帧、实际GC、完整统计边界与零air事实。当前运行源仍ebb66/默认AIR关闭；下一次实机须用户新的观看请求，不因Opus唤醒或这次到场授权继续追加。
