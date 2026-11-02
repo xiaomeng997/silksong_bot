@@ -183,3 +183,24 @@ def test_w13_preflight_requires_explicit_air_probe_and_recording(tmp_path,monkey
     preflight_environment("Forum_W_w13")
     with pytest.raises(LearningStop,match="allowed encounter"):preflight_environment("Forum_W_w13",no_record=True)
     with pytest.raises(LearningStop,match="allowed encounter"):preflight_environment("Forum_W_w14")
+
+
+def test_gc_prep_is_precombat_collect_then_freeze_without_disabling_gc(monkeypatch):
+    import gc
+    from ssbot.combat.knife_chain_air import prepare_runtime_gc
+    calls=[];counts=iter([1,123])
+    monkeypatch.setattr(gc,"get_freeze_count",lambda:next(counts))
+    monkeypatch.setattr(gc,"collect",lambda:calls.append("collect") or 80)
+    monkeypatch.setattr(gc,"freeze",lambda:calls.append("freeze"))
+    before=gc.isenabled();out=prepare_runtime_gc()
+    assert calls==["collect","freeze"] and out["gc_enabled"]==before
+    assert out["collected"]==80 and out["frozen"]==123
+
+
+def test_manual_air_switch_is_resolved_from_actual_constructed_component(tmp_path):
+    from ssbot.train.forum_measure_manifest import configuration_manifest
+    from tests.test_b2_manifest_bindings import package,env,policy,manifest
+    e=env(SSBOT_FORUM_CHAIN_AIR_MANUAL="1");p=policy(e);p.chain_native.manual_air=True
+    m=manifest(package(tmp_path),p,e)
+    assert m["configuration_complete"] and "SSBOT_FORUM_CHAIN_AIR_MANUAL" not in m["unresolved"]
+    assert m["switches"]["SSBOT_FORUM_CHAIN_AIR_MANUAL"]["effective"]=={"policy.chain_native.manual_air":True}

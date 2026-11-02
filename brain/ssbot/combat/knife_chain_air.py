@@ -242,3 +242,16 @@ def warm(params):
     _contact_mask(np.zeros((1,2)),np.array([[-1.,-3.,1.,0.]]))
     return {"family":"manual_air","ms":(time.perf_counter()-started)*1000.,
             "trace_signatures":len(_trace_events.signatures),"scope":"compile only; no admission or contact evidence"}
+
+
+def prepare_runtime_gc():
+    """Discard warm-up cycles and freeze long-lived tables BEFORE this probe fights.
+
+    The one worker owns this GC state until it exits. Automatic GC remains on;
+    nothing collects/freezes on a decision tick or changes input deadlines.
+    """
+    import gc,time
+    started=time.perf_counter();before=gc.get_freeze_count();collected=gc.collect();gc.freeze()
+    return {"policy":"manual_air_precombat_collect_and_freeze","before":before,
+        "collected":collected,"frozen":gc.get_freeze_count(),"gc_enabled":gc.isenabled(),
+        "ms":(time.perf_counter()-started)*1000.}

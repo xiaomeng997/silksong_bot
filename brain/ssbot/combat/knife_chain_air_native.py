@@ -18,6 +18,7 @@ from .knife_chain_nominal import logical_copy,NominalUnsupported
 
 
 class NativeManualAirChain(NativeChainB2):
+    manual_air=True
     @staticmethod
     def load_program(profile):
         if profile.fixed_hook or profile.fast_hook:

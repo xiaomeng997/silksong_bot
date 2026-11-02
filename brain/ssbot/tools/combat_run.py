@@ -625,10 +625,17 @@ def worker(a: argparse.Namespace) -> int:
             from ssbot.train.measurement import prepare_lazy_configuration
             prepare_lazy_configuration(policy, measurement)
             runtime_start = runtime_manifest()
+        manual_air_gc = None
+        if b2_budget is not None and bool(getattr(getattr(policy,"chain_native",None),"manual_air",False)):
+            from ssbot.combat.knife_chain_air import prepare_runtime_gc
+            manual_air_gc = prepare_runtime_gc()
+            with (run_dir/f"b2_gc_ready_i{a.instance}.json").open("x",encoding="utf-8") as gf:
+                json.dump(manual_air_gc,gf,ensure_ascii=False,indent=1);gf.write("\n")
         worker_actual=_worker_runtime_snapshot()
         worker_runtime_before={**(runtime_start or {}),**worker_actual}
         worker_context={"requested_environment":worker_requested,"boost_result":worker_boost_result,
                         "runtime_before":worker_runtime_before}
+        if manual_air_gc is not None:worker_context["manual_air_gc_prep"] = manual_air_gc
         if input_path is not None:
             worker_context["strict_input_path" if strict_receipts else "b2_input_path"] = input_path
         rev = git_rev()

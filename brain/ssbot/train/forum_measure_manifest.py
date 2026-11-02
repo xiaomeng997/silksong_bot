@@ -171,6 +171,7 @@ def _known_runtime_bindings(policy, loaded):
 
 # These are explicit ownership joins, not an exemption for arbitrary CHAIN keys.
 _CHAIN_ROLES = {
+    "SSBOT_FORUM_CHAIN_AIR_MANUAL": "control",
     "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
     "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
     "SSBOT_FORUM_CHAIN_STRICT_RECEIPTS": "control",
@@ -199,6 +200,7 @@ def _execution_bindings(policy, runtime_context):
         b2=native and bool(getattr(chain,"b2",False))
         strict=chain is not None and not native and bool(getattr(chain,"strict_receipts",False))
         mode="b2" if b2 else "native" if native else "strict_audit" if strict else "audit_only" if chain is not None else "off"
+        out["SSBOT_FORUM_CHAIN_AIR_MANUAL"]={"policy.chain_native.manual_air":bool(getattr(chain,"manual_air",False))}
         out["SSBOT_FORUM_CHAIN_B2"]={"policy.chain_native.b2":b2}
         out["SSBOT_FORUM_CHAIN_NATIVE"]={"policy.chain_native.native_constructed":native}
         out["SSBOT_FORUM_CHAIN_STRICT_RECEIPTS"]={"policy.chain_native.strict_receipts":strict}
