@@ -149,3 +149,15 @@ def test_next_visible_cast_replaces_pending_destination_without_waiting_for_old_
  s["ents"][1]["fsms"][0].update(state="Spell Antic",t=0.)
  next_goal=observe_goal(s,first,cfg,set())
  assert (next_goal.target,next_goal.caster,next_goal.cast_fa)==(7,8,1060)
+
+
+def test_pending_destination_does_not_claim_keys_from_a_new_target_attack():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-attack-boundary");n.reset(0,start_frame=999)
+ s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
+ s["ents"][1]["fsms"][0]["state"]="Slam Antic"
+ old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ assert n.goal_preferences(s,old,handoff=True).target==8
+ assert not n._transfer_ready and not n.candidate_generation
