@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from .knife_chain_b2 import NativeChainB2,B2Offer
 from .knife_chain_eval import Run,X
-from .knife_chain_air import (AirAnchor,load_runner,entry_context,plan_entry,model_path,advance,complete_hf,render)
+from .knife_chain_air import (AirAnchor,load_runner,entry_context,plan_entry,model_path,advance,complete_hf,render,direct_path_problem)
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import logical_copy,NominalUnsupported
@@ -123,6 +123,9 @@ class NativeManualAirChain(NativeChainB2):
             commands=render(self.runner,plan,k,3)
             try:
                 path=model_path(sim,plan,commands,game)
+                problem=direct_path_problem(plan,path,sim.hold)
+                if problem:
+                    self._air_finished.add(plan.move);self._recover(problem,f);return None
                 predicted=(f+plan.contact_k-k if self._hit is None else None)
                 bad=self._query(forecast,plan.move,path,contact_frame=predicted)
             except GeometryUnavailable as exc:
@@ -139,6 +142,9 @@ class NativeManualAirChain(NativeChainB2):
             # The current commitment ends at modeled bounce, not at a guessed
             # landing. Post-bounce commands must be selected from real STATE.
             path=model_path(sim,plan,commands[:contact-1],game,contact=contact)
+            problem=direct_path_problem(plan,path,sim.hold)
+            if problem:
+                self._note("air_entry_rejected",frame=f,program=plan.program,reason=problem);return None
             geo=self._geometry(forecast,plan.move,f,ta=plan.ta)
             bad=self._query(forecast,plan.move,path,contact_frame=plan.contact_frame,geometry=geo)
             exits=None if bad else self._continuations(path,sim,geo,plan.move)

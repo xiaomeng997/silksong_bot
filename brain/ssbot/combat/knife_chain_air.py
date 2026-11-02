@@ -176,8 +176,13 @@ def plan_entry(runner,state,game,sim,context=None):
     expected=K.M_NORMAL if obs.program=="air_direct" else K.M_GLIDE
     if S[K.MODE]!=expected or S[K.GROUND]>0:return None
     if obs.program=="air_direct":
-        # Continue a held jump only; a fresh J here would open the umbrella.
-        release=k+2+(int(cfg["hold_frames"]) if obs.jump_held else 0)
+        # The receipt at f does not include the already queued f+1 key.
+        # A release there must stay released; a new airborne J already in
+        # flight belongs to another action, not to this no-umbrella recipe.
+        queued_jump=bool(int(sim.prefix[0])&B["J"])
+        if queued_jump and not obs.jump_held:return None
+        held=obs.jump_held and queued_jump
+        release=k+2+(int(cfg["hold_frames"]) if held else 0)
     else:
         release=int(cfg["release_high_k"] if obs.height>=cfg["height_split"] else cfg["release_low_k"])
         if release<=k+2:return None
@@ -236,6 +241,21 @@ def model_path(sim,plan,commands,game,*,contact=None):
         plan.contact_frame if contact is not None else None,
         {"basis":"manual air table; nominal contact, not real evidence","target_iid":plan.iid,
          "move":asdict(plan.move),"input_owner":False,"safety":"unchecked"})
+
+
+def direct_path_problem(plan,path,hold):
+    """This recipe continues a jump; it never starts another one or a cloak."""
+    if plan.program!="air_direct":return None
+    states=np.asarray(path.states);latched=np.asarray(path.latched)
+    if states.ndim!=2 or states.shape[0]!=K.K or states.shape[1]!=len(latched)+1:
+        return "direct air path state coverage unknown"
+    modes=states[K.MODE]
+    if not np.isfinite(modes).all() or np.any(modes==K.M_GLIDE):
+        return "direct air path opens umbrella or has unknown mode"
+    jump=(latched&B["J"])!=0
+    previous=np.r_[bool(hold.latched[0,0]),jump[:-1]]
+    if np.any(jump&~previous):return "direct air path represses jump"
+    return None
 
 
 def warm(params):

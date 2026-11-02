@@ -254,3 +254,47 @@ def test_direct_air_uses_same_successful_send_and_real_bounce_transaction():
     s["ev"]=[{"k":"hit","f":1002,"d":{"iid":7,"src":"DownSlash"}}]
     n.observe(s)
     assert n.commitment is None and n.post_context["bounce"]==1002
+
+
+
+def direct_sim(s,prefix):
+    from ssbot.knowledge import kinematics as K
+    from ssbot.combat.air_chain import ChainSim
+    root=Path(__file__).resolve().parents[2]
+    params=K.hero2(K.HeroParams.load(root/"knowledge/1.0.30000/kinematics/hero_wanderer_forum.json"))
+    S=K.initial_state(params,23.9,8.5,vy=13.8,facing=1,ground=False)
+    S[K.JUMPING]=1.;S[K.JSTEPS]=9.;S[K.JHELD]=1.;S[K.PREV]=B["J"]
+    return ChainSim(S,np.array([prefix],np.int64),K.HoldState.from_act(s["act"]),params,K.Terrain2D.empty(),s["f"],s["f"])
+
+
+def test_direct_air_queued_jump_release_is_not_repressed():
+    from ssbot.combat.knife_chain_air import plan_entry,model_path
+    from ssbot.knowledge import kinematics as K
+    s=direct_raw(True);r=load_runner();sim=direct_sim(s,0)
+    result=plan_entry(r,s,0.,sim)
+    assert result is not None
+    p,cmd,contact=result
+    assert not np.any(cmd&B["J"])
+    path=model_path(sim,p,cmd[:contact-1],0.,contact=contact)
+    assert not np.any(path.states[K.MODE]==K.M_GLIDE)
+    jump=(path.latched&B["J"])!=0
+    assert not np.any(jump&~np.r_[True,jump[:-1]])
+
+
+def test_direct_air_new_jump_already_in_flight_is_not_admitted():
+    from ssbot.combat.knife_chain_air import plan_entry
+    s=direct_raw(False);sim=direct_sim(s,B["J"])
+    assert plan_entry(load_runner(),s,0.,sim) is None
+
+
+@pytest.mark.parametrize("bad",["new_jump","umbrella"])
+def test_direct_air_path_invariant_catches_new_edges_and_umbrella(bad):
+    from ssbot.combat.knife_chain_air import direct_path_problem
+    from ssbot.knowledge import kinematics as K
+    p=AirPlan(**{**vars(plan()),"program":"air_direct"})
+    states=np.zeros((K.K,4));latched=np.array([B["J"],0,B["J"]] if bad=="new_jump" else [B["J"],B["J"],B["J"]])
+    if bad=="umbrella":states[K.MODE,2]=K.M_GLIDE
+    hold=K.HoldState.from_act(direct_raw()["act"])
+    path=NS(states=states,latched=latched)
+    assert direct_path_problem(p,path,hold) is not None
+    assert direct_path_problem(plan(),path,hold) is None
