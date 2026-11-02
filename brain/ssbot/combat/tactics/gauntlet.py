@@ -963,8 +963,8 @@ class GauntletTactics:
                    and getattr(x, "state", None) in two_play.LOCK_ANY for x in getattr(fc, "subjects", ()) or ())
 
     def wall_skip(self) -> frozenset:
-        """TWO_SPRINTSW: this tick's old focus left in its wall band (the policy's skip for the slam playbook and the low
-        hop, like the antic switch's F); empty when off or none."""
+        """TWO_SPRINTSW: this tick's wall-side target left to the other focus (the policy's skip for the slam playbook
+        and the low hop, like the antic switch's F); empty when off or none."""
         return self._wall_now
 
     def _two_focus(self, ws, cands: list[Cand], t: float, old: Goal | None) -> Goal:
@@ -991,11 +991,18 @@ class GauntletTactics:
             sl = [c for c in cands if c.s.family == CC_SLAM and getattr(c.s, "state", None) == "Slam Antic"]
             if len(sl) == 1 and abs(a.x - b.x) < 16.0:
                 c = sl[0]
-                if keep is None or keep.s.iid != c.s.iid:
-                    st["slammer"] = st.get("slammer", 0) + 1
-                    self._sw_why = "two slammer" if keep is not None else self._sw_why
-                st["picks"] = st.get("picks", 0) + 1
-                return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
+                o = b if c is a else a
+                if (TWO_SPRINTSW and room[c.s.iid] <= TWO_WALL_BAND_U
+                        and room[o.s.iid] > room[c.s.iid] + TWO_HYST_U):
+                    # The wall preference also owns this legacy priority (live f3499 / f3660). Fall through to the
+                    # existing focus rules; the same no_hit / script skip must follow if another target is picked.
+                    self._wall_sw = c.s.iid
+                else:
+                    if keep is None or keep.s.iid != c.s.iid:
+                        st["slammer"] = st.get("slammer", 0) + 1
+                        self._sw_why = "two slammer" if keep is not None else self._sw_why
+                    st["picks"] = st.get("picks", 0) + 1
+                    return self._goal(ws, c, RUSH, t, 1.0, why=f"two: slammer; room {room[c.s.iid]:.1f}")
         pm = self.two_pm if two_play.PMANY else None
         if pm is not None and pm.get("hold") is not None:
             # SP11b TWO_PUSHMID: F held (its slam's way out to its wall side, then the herd) below the slammer rule
@@ -1476,9 +1483,9 @@ class GauntletTactics:
             else:
                 self._rl_sw = None
         if TWO_SPRINTSW and self._wall_sw is not None:
-            # task 53B: after a switch away from a focus inside its wall band, no hit on it counts and the scripts leave
-            # its moves (wall_skip) while it stays in the band (its root now) and is not the target (seed 314166, after
-            # the f2497 switch: 8 raw hits on it f2514-2863, 4 by the low hop, 4 by the planner); its body, hammer and
+            # task 53B: after leaving a wall-side focus or deferring its slammer priority, no hit on it counts and the
+            # scripts leave its moves (wall_skip) while it stays in the band (its root now) and is not the target (seed
+            # 314166, after the f2497 switch: 8 raw hits on it f2514-2863, 4 by the low hop, 4 by the planner); its body, hammer and
             # runes stay hazards; the new target's hits count
             subs = {x.iid: x for x in getattr(fc, "subjects", ()) or () if x.type_key == CLAPPER and x.alive
                     and x.in_play and x.pos is not None}

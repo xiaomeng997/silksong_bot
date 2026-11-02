@@ -41,3 +41,48 @@ def test_nominal_approach_estimate_includes_key_delay_and_cooldown():
     # A tactical ETA only: the planner still checks the actual selected path.
     assert G.GauntletTactics._two_sprint_s(0.0, .19) == 0.0
     assert G.GauntletTactics._two_sprint_s(13.391, .1916697174) == pytest.approx(.82217, abs=.0001)
+
+
+def focus_probe(monkeypatch, enabled, open_x, wall_x, *, arena=(14.6, 48.4)):
+    """Exercise real focus arbitration; the stance/arrival calculation is outside this priority regression."""
+    monkeypatch.setattr(G, "TWO_SPRINTSW", enabled)
+    monkeypatch.setattr(G.two_play, "SPACE", True)
+    t = G.GauntletTactics.__new__(G.GauntletTactics)
+    t.pb = NS(arena_x=arena)
+    t.stats, t.rune = {}, {}
+    t.two_esc = t.two_pm = t.two_jh = t._jt = None
+    t._wall_sw = t._sw_why = None
+    t._two_run_ok = lambda *args: (False, "other free")
+    t._goal = lambda ws, c, name, now, score, **kw: G.Goal(name, c.s.iid, c.x, now, why=kw["why"])
+    a = G.Cand(NS(iid=1, family=G.CC_IDLE), open_x, 7.0, 1.0, open_x, 0.0)
+    b = G.Cand(NS(iid=2, family=G.CC_SLAM, state="Slam Antic"), wall_x, 7.0, 2.0, wall_x, 0.0)
+    return t, [a, b], G.Goal(G.RUSH, 1, open_x, 0.0)
+
+
+@pytest.mark.parametrize("enabled,open_x,wall_x,arena,target,skipped", [
+    (True, 27.866, 20.096, (14.6, 48.4), 1, 2),  # live f3499: wall room5.50
+    (True, 26.326, 15.432, (14.6, 48.4), 1, 2),  # live f3660: wall room0.83
+    (False, 27.866, 20.096, (14.6, 48.4), 2, None),
+    (False, 26.326, 15.432, (14.6, 48.4), 2, None),
+    (True, 30.786, 31.455, (14.6, 48.4), 2, None),  # live f3027: open slammer
+    (True, 36.674, 47.568, (14.6, 48.4), 1, 2),  # mirrored wall
+    (True, 27.0, 20.50, (14.5, 48.5), 1, 2),  # existing band includes6.0
+    (True, 27.0, 20.501, (14.5, 48.5), 2, None),
+    (True, 13.5, 5.5, (0.0, 20.0), 2, None),  # exactly1u is not more room
+    (True, 13.49, 5.5, (0.0, 20.0), 1, 2),
+])
+def test_wall_preference_precedes_legacy_slammer(monkeypatch, enabled, open_x, wall_x, arena, target, skipped):
+    t, candidates, old = focus_probe(monkeypatch, enabled, open_x, wall_x, arena=arena)
+    goal = t._two_focus(None, candidates, 1.0, old)
+    assert goal.target == target
+    assert t._wall_sw == skipped  # same no_hit / LOW / SLAM skip output, not only target display
+
+
+def test_explicit_escape_hold_stays_above_wall_preference(monkeypatch):
+    t, candidates, old = focus_probe(monkeypatch, True, 27.866, 20.096)
+    monkeypatch.setattr(G.two_play, "ESC", True)
+    t.two_esc = {"after_land": False}
+    escape = G.Goal(G.RUSH, 2, 20.096, 1.0, why="explicit escape hold")
+    t._esc_hold = lambda *args: escape
+    assert t._two_focus(None, candidates, 1.0, old) is escape
+    assert t._wall_sw is None
