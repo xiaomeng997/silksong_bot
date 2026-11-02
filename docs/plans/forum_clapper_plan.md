@@ -2919,3 +2919,12 @@ Root六份相关159项统一过、源外模块0；12项新回归包括双调用�
 **已处理 Opus #171（a5b7c57d独立审阅核收，未开新局）。** Root核8工件/7所读快照源码与Git a5b7逐字节同、独立JUnit111项全过，其中12新增case身份与Root逐项一致。原始observer正例保留2740那1HP、边界2975、五退出缺HP帧、尾HP6；2740/2974删health及未确认退出三个负例分别仍在2740/2974/2976硬停。回放以2966首个暂停近似t_confirm，只证明边界逻辑，不作真实策略时钟/整局退出/实机证据。无P0–P2，Task66闭合，源码仍a5b7/默认AIR关闭；OPUS171_RECEIPT.json保留范围。
 
 另静态核原measurement错误来源：run_episode在异常时把原结局标episode_harness_fail，MeasurementWindow.finish_at按合同附加“unobserved HP/time interval”错误。因此原失败的不完整不能当作已独立证明还有第二个controller缺陷，也不能删旧错误或自动把未来planned QUIT计为完整比赛。当前不为未复现的测量问题再加代码/重开局；未来实际退出的时域/HP边界仍须按原协议核验，未经真实证据不称已验收。下一局继续等用户新的观看请求，保留原始失败/停止/清理记录。
+
+
+**新观看请求的唯一实际局（2026-11-02 14:36 UTC）与用户最新衔接方向。** 用户明确“再开一局我看看，这次重点验证空中接刀链”。新根sol/demos/w13_air_focus_20261102T143618Z_a5b7c57d，已审运行源a5b7c57d、执行HEAD b61c8648；seed314168为重复历史案例，不当独立改善样本，未强制入场状态/按键。实际QUIT，f2845小符文rune bomb small(Clone)/damager扣1HP，HP7→6触发本局收紧Q1，未补局。实际worker43400自己的input.stats为0delay/jitter、HF2/2、pending0；开战前GC已冻163674对象且仍enabled。measurement T7.0782753099s、trace/config/window均complete、无unresolved，worker rc0；真实Quit_To_Menu3081、3082起空场景/hero absent，33次b2_exit_frame_no_hp，原退出HP小修补这次完成实际收尾，未再触发LearningStop。新局无b2_selected/air承诺；首损前381个原始帧中84帧有SlamAntic、Float/Turn0，因此本次没有覆盖手工air入口，不能称空中链验收通过。
+
+真实清理2026-11-02T14:39:02.649798Z：自有launcher49980/worker43400/game45432、wrapper11596与field身份均结束；golden/Prefs无差、旧DEMO恢复，registry instances/live空且restore_pending=false，全部核后STATUSfalse。证据analysis/air_focus_20261102T143618Z_a5b7c57d/ROOT_INITIAL_AUDIT.json及AIR_COVERAGE.json。之后没有追加实机，本次观看授权仅用一局。
+
+用户指出“小符文→换目标→新目标冲锤→背后小符文”，提出不落地直接钩新冲锤者；并明确合适高度带及钩后避符文以前已试过可行，停止重复验证该机制，不能把旧搜索拒绝当作物理不可行。Root只读原始事实：335470在2733进入SpellAntic，规划器同帧把目标切到335476；后者2810开始SlamAntic，此时英雄已在Airborne（2796起跳），到2845受伤前未再落地。造成受伤的炸弹iid−176036在2823出现、2844点亮；本局没有CLAW实际发送。旧slam_runs记2811的钩索搜索none/no plan、2823 late，随后no landing(fall)中止；新manual air入口只认Float/Turn且本表无CLAW，未接管这段普通Airborne。前述仅定位实际链衔接缺口，不把“未找到计划”扩成“钩不了”。
+
+下一步复用已验证的空中钩索动作，聚焦换目标后普通空中状态的切入和时机；用户补充“可能应再跳高一些”，入口需考虑持钩高度，不能只要离地便立即出钩。初始有限几何探针保存于SWITCH_RUNE_HOOK_TIMELINE.json，只是模型几何/时钟，不是全场安全或动作接受证据；用户确认已有机制证据后不继续高度扫参。暂未为此修改运行源、增加旧h2规则或启动新局。
