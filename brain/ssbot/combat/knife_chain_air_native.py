@@ -149,7 +149,7 @@ class NativeManualAirChain(NativeChainB2):
             return None
         if exits.verdict!="pass":
             self._note("air_no_exit",frame=f,continuations=asdict(exits));return None
-        draft=self.runner.fork_empty(AirAnchor());draft.run=Run("air_strike","align",plan.variables())
+        draft=self.runner.fork_empty(AirAnchor());draft.run=Run(plan.program,"align",plan.variables())
         mask=advance(draft,plan,state,game)
         if mask is None:return None
         self._air_plan=plan
@@ -170,6 +170,6 @@ class NativeManualAirChain(NativeChainB2):
                                   received_frame=received_frame,dispatch_clock=dispatch_clock)
 
     def summary(self):
-        return {**super().summary(),"mode":"manual_air_probe","table":"air_strike",
+        return {**super().summary(),"mode":"manual_air_probe","table":"air_strike","tables":list(self.runner.chains),
                 "online_search":False,"geometry_scope":"current/contact path plus existing N=2 continuations",
                 "post_bounce":"ordinary planner from actual hit+bounce; no frozen future tail"}

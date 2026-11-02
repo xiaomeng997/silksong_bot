@@ -55,11 +55,12 @@ class AirPlan:
     hp0:int
     origin:int
     contact_frame:int
+    program:str="air_strike"
 
     @property
     def move(self):return MoveInstance(self.iid,self.fa,"CC_SLAM")
     def variables(self):
-        d=asdict(self);d.pop("origin");d.pop("contact_frame");d["cs"]=None
+        d=asdict(self);d.pop("origin");d.pop("contact_frame");d.pop("program");d["cs"]=None
         return d
 
 
@@ -83,14 +84,19 @@ def load_runner():
     p.guard("air_bounced")(lambda x:bool(x.obs.bounced))
     p.direction("toward")(lambda x:int(x.v["side"]))
     return ChainRunner(chains,AirAnchor(),p,cfg0=chains["air_strike"].cfg,
-        observation_names={"f","F","k","ready","target_valid","bounced","entry_k","gap","height"},
+        observation_names={"f","F","k","ready","target_valid","bounced","entry_k","gap","height","program","jump_held"},
         literal_names={">=","<=",">"})
 
 
 def entry_context(state,game,runner):
     """Observed fields only. No original-script key-history prerequisite."""
     from .slam_play import clappers,control
-    h=state.get("hero") or {};cfg=runner.cfg0
+    h=state.get("hero") or {}
+    clip=str((h.get("anim") or {}).get("clip") or "")
+    if clip in {"Umbrella Float","Umbrella Turn"}:program="air_strike"
+    elif clip in {"Airborne","Shuttlecock"} and h.get("hero_accepting_input") is True:program="air_direct"
+    else:return None
+    cfg=runner.chains[program].cfg
     if not complete_hf(state):return None
     dt=state.get("dt")
     if not isinstance(dt,(int,float)) or not np.isfinite(dt) or dt<=0:return None
@@ -102,24 +108,25 @@ def entry_context(state,game,runner):
     if box is None or not hp or not vel or type(e.get("flipX")) is not bool:return None
     vals=[*hp[:2],*vel[:2],tm.get("atk_cd",float("nan")),game]
     if not np.isfinite(vals).all():return None
-    clip=str((h.get("anim") or {}).get("clip") or "")
-    if clip not in {"Umbrella Float","Umbrella Turn"} or h.get("stunned") or h.get("health",0)<=0:return None
-    if tm["atk_cd"]>0 or hf["latched"]&B["A"] or not hf["latched"]&B["J"]:return None
+    if h.get("stunned") or h.get("health",0)<=0:return None
+    if tm["atk_cd"]>0 or hf["latched"]&B["A"]:return None
+    if program=="air_strike" and not hf["latched"]&B["J"]:return None
     _,tin=control(e);k=int(round(tin*60.));hx=float(hp[0]);cx=float(e["pos"][0]);face=1 if e["flipX"] else -1
     if (hx-cx)*face<=0:return None
     gap=max(float(box[0])-hx,hx-float(box[2]),0.)-.25
     hb=h.get("box")
     if not hb or len(hb)!=4 or not np.isfinite(hb).all():return None
     height=float(hb[1])-float(box[3]);obs=NS(f=state["f"],F=state["f"]+2,k=k+2,
-        entry_k=k,gap=gap,height=height,ready=True,target_valid=True,bounced=False)
-    run=Run("air_strike","align",dict(runner.chains["air_strike"].vars));x=X(runner,run,obs)
-    if not runner.guard(x,runner.chains["air_strike"].links["align"].entry):return None
+        entry_k=k,gap=gap,height=height,ready=True,target_valid=True,bounced=False,
+        program=program,jump_held=bool(hf["latched"]&hf["desired"]&B["J"]))
+    run=Run(program,"align",dict(runner.chains[program].vars));x=X(runner,run,obs)
+    if not runner.guard(x,runner.chains[program].links["align"].entry):return None
     return obs,e,box,1 if cx>hx else -1,float(game)-tin
 
 
 def render(runner,plan,k0,length):
     """Model-only table interpretation. Proposed Run.sent is not a receipt."""
-    draft=runner.fork_empty(AirAnchor());draft.run=Run("air_strike","align",plan.variables())
+    draft=runner.fork_empty(AirAnchor());draft.run=Run(plan.program,"align",plan.variables())
     draft._nominal_projection_only=True;out=np.zeros(length,np.int64)
     for i in range(length):
         if draft.run is None:break
@@ -162,15 +169,20 @@ def plan_entry(runner,state,game,sim,context=None):
     if sim.fo!=sim.f or sim.f!=state["f"] or len(sim.prefix)!=1:return None
     hf=state["act"]["hf"]
     if int(sim.prefix[0])&~(B["J"]|B["L"]|B["R"]) or any(hf["pending"]):return None
-    if not hf["desired"]&B["J"]:return None
+    if context[0].program=="air_strike" and not hf["desired"]&B["J"]:return None
     if np.asarray(sim.start).shape not in ((K.K,),(K.K,1)) or not np.isfinite(sim.start).all():return None
     S=np.asarray(sim.start).reshape(K.K)
-    if S[K.MODE]!=K.M_GLIDE or S[K.GROUND]>0:return None
-    obs,e,box,direction,ta=context;cfg=runner.cfg0;k=obs.entry_k
-    release=int(cfg["release_high_k"] if obs.height>=cfg["height_split"] else cfg["release_low_k"])
-    if release<=k+2:return None
+    obs,e,box,direction,ta=context;cfg=runner.chains[obs.program].cfg;k=obs.entry_k
+    expected=K.M_NORMAL if obs.program=="air_direct" else K.M_GLIDE
+    if S[K.MODE]!=expected or S[K.GROUND]>0:return None
+    if obs.program=="air_direct":
+        # Continue a held jump only; a fresh J here would open the umbrella.
+        release=k+2+(int(cfg["hold_frames"]) if obs.jump_held else 0)
+    else:
+        release=int(cfg["release_high_k"] if obs.height>=cfg["height_split"] else cfg["release_low_k"])
+        if release<=k+2:return None
     empty=AirPlan(e["iid"],state["f"]-k,ta,k,B["R"] if direction>0 else B["L"],release,
-        k+2+int(cfg["drift_frames"]),10000,10000,int(state["hero"]["health"]),state["f"],-1)
+        k+2+int(cfg["drift_frames"]),10000,10000,int(state["hero"]["health"]),state["f"],-1,obs.program)
     T=64;cmd=render(runner,empty,k,T);coast=sim.roll(cmd[None])
     from .pogo_slam import SlamTimeline
     tl=SlamTimeline.load(K=160)

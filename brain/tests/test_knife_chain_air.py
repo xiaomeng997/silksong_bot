@@ -73,10 +73,10 @@ def test_current_move_continues_by_game_clock_not_raw_frame_count():
     assert advance(r,p,s,0.)==B["J"]|B["R"]
 
 
-def committed():
+def committed(program="air_strike"):
     n=NativeManualAirChain(runner_factory=load_runner,probe_ref="manual-air-test");n.reset(0,start_frame=1000)
-    n.begin(raw());p=plan();n._air_plan=p
-    draft=load_runner();draft.run=Run("air_strike","align",p.variables())
+    n.begin(raw());p=AirPlan(**{**vars(plan()),"program":program});n._air_plan=p
+    draft=load_runner();draft.run=Run(p.program,"align",p.variables())
     offer=B2Offer("manual_commitment",None,draft,B["J"]|B["R"],0.,p.move,
         {"manual_air":True,"predicted_bounce":1030,"safety_basis":"test fixture, not checked"})
     res=n.install(offer,NS(measurement_enabled=False))
@@ -158,7 +158,7 @@ def test_production_factory_keeps_explicit_profile_and_binds_manual_table(tmp_pa
         SSBOT_FORUM_CHAIN_FAST_HOOK="0",SSBOT_FORUM_CHAIN_FIXED_HOOK="0").items():monkeypatch.setenv(k,v)
     n=NativeManualAirChain.from_env(journal=str(tmp_path/"chain.jsonl"))
     assert n.require_send_clock and n.budget is not None
-    assert set(n.runner.chains)=={"air_strike"} and n.profile.short_frames>9
+    assert set(n.runner.chains)=={"air_strike","air_direct"} and n.profile.short_frames>9
     n.reset(1);assert n.runner.run is None and not n._air_finished
 
 
@@ -204,3 +204,53 @@ def test_manual_air_switch_is_resolved_from_actual_constructed_component(tmp_pat
     m=manifest(package(tmp_path),p,e)
     assert m["configuration_complete"] and "SSBOT_FORUM_CHAIN_AIR_MANUAL" not in m["unresolved"]
     assert m["switches"]["SSBOT_FORUM_CHAIN_AIR_MANUAL"]["effective"]=={"policy.chain_native.manual_air":True}
+
+
+# The watched second target began its slam while she was in an ordinary jump.
+# Keep this separate from the original umbrella recipe and its entry bounds.
+def direct_raw(held=True):
+    s=raw();h=s["hero"];h.update(pos=[23.9,8.5],box=[23.65,7.,24.15,9.1],
+        vel=[8.25,13.8],hero_accepting_input=True)
+    h["anim"]["clip"]="Airborne";h["can"].update(input=True,attack=True)
+    s["act"]["hf"].update(latched=B["J"] if held else 0,desired=B["J"] if held else 0)
+    return s
+
+
+def test_normal_air_entry_is_a_separate_table_recipe_and_prevents_land_wait():
+    s=direct_raw();r=load_runner();context=entry_context(s,0.,r)
+    assert context is not None and context[0].program=="air_direct"
+    n=NativeManualAirChain(runner_factory=load_runner,probe_ref="direct-air-test")
+    n.begin(s);assert n.candidate_generation
+    p=AirPlan(**{**vars(plan()),"program":"air_direct","release_k":14,"drift_end_k":38})
+    keys=render(r,p,0,28)
+    assert all(m&B["R"] for m in keys[:24])
+    assert not any(m&B["L"] for m in keys)
+
+
+def test_normal_air_entry_does_not_invent_an_umbrella_press_after_jump_release():
+    s=direct_raw(False);context=entry_context(s,0.,load_runner())
+    assert context is not None and not context[0].jump_held
+    p=AirPlan(**{**vars(plan()),"program":"air_direct","release_k":2,"drift_end_k":38})
+    assert not np.any(render(load_runner(),p,0,32)&B["J"])
+
+
+@pytest.mark.parametrize("mutation",["ground","input_lock","before_slam","used_attack","unknown_hf"])
+def test_normal_air_cut_in_uses_observed_move_and_free_control(mutation):
+    s=direct_raw()
+    if mutation=="ground":s["hero"]["anim"]["clip"]="Idle"
+    elif mutation=="input_lock":s["hero"]["hero_accepting_input"]=False
+    elif mutation=="before_slam":s["ents"][0]["fsms"][0]["state"]="Walk"
+    elif mutation=="used_attack":s["act"]["hf"]["latched"]|=B["A"]
+    else:s["act"]["hf"].pop("desired")
+    assert entry_context(s,0.,load_runner()) is None
+
+
+def test_direct_air_uses_same_successful_send_and_real_bounce_transaction():
+    n=committed("air_direct")
+    assert n.runner.run.chain=="air_direct" and n._press is None
+    n._press=1002;n.observe(raw(1001));s=raw(1002)
+    s["hero"]["anim"]["clip"]="DownSlash";s["hero"]["cstate_int"][1]=8
+    s["act"]["hf"]["desired"]=B["J"]|B["R"]
+    s["ev"]=[{"k":"hit","f":1002,"d":{"iid":7,"src":"DownSlash"}}]
+    n.observe(s)
+    assert n.commitment is None and n.post_context["bounce"]==1002
