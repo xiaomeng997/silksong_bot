@@ -102,16 +102,16 @@ def test_antic_goal_is_observed_in_air_and_survives_until_landing_after_entry_wi
  assert observe_goal(s,None,cfg,{(7,1000)}) is None
 
 
-def test_pending_goal_changes_preferences_without_creating_run_or_sent_keys():
+def test_selected_destination_preserves_preferences_without_creating_run_or_sent_keys():
  from ssbot.combat.knife_chain_air_native import NativeManualAirChain
  from ssbot.combat.knife_chain_transfer import observe_goal
  from ssbot.combat.tactics.modes import GoalPrefs
  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-test");n.reset(0,start_frame=999)
  s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
- old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7,region=(24.,26.,3.,5.,"GROUND"))
+ old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8,region=(37.,39.,3.,5.,"GROUND"))
  new=n.goal_preferences(s,old,handoff=True)
- assert new.target==8 and new.stance_x==38. and new.region is None
- assert old.target==7 and old.stance_x==25. and old.region is not None
+ assert new.target==8 and new.stance_x==38. and new.region==old.region
+ assert old.target==8 and old.stance_x==38. and old.region is not None
  assert n._transfer_ready and n.runner.run is None and n.commitment is None
  assert not n._transfer_finished and not n._receipts
  n.commitment={"move":"previous strike"}
@@ -129,7 +129,7 @@ def test_policy_handoff_releases_only_observed_bounced_after_not_incomplete_stri
  from ssbot.combat.tactics.modes import GoalPrefs
  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-owner");n.reset(0,start_frame=999)
  s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
- old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8)
  p=Policy.__new__(Policy);p.chain_native=n;aborted=[]
  p.slam_play=NS(run=NS(phase="air",bounced=False),abort=aborted.append)
  assert p._chain_goal_preferences(s,old) is old and not aborted
@@ -158,7 +158,7 @@ def test_pending_destination_does_not_claim_keys_from_a_new_target_attack():
  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-attack-boundary");n.reset(0,start_frame=999)
  s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
  s["ents"][1]["fsms"][0]["state"]="Slam Antic"
- old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8)
  assert n.goal_preferences(s,old,handoff=True).target==8
  assert not n._transfer_ready and not n.candidate_generation
 
@@ -203,16 +203,6 @@ def test_prejump_failure_uses_one_checked_coast_offer_and_does_not_force_keys(mo
  assert n._transfer_offer(st,0.,sim,fc,NS(target=8),True) is None
 
 
-def test_retarget_intent_moves_all_iid_fields_together_preserving_unrelated_data():
- from ssbot.combat.tactics.modes import GoalPrefs
- fields={"no_hit":frozenset({7,9}),"ground_hit":frozenset({8}),"no_pogo":frozenset({7}),"no_dash":frozenset({8,9}),"ground_first":frozenset({7,8})}
- p=GoalPrefs(mode="RUSH",stance_x=25.,weights={"hit":1.},target=7,hit_w={7:3.,8:1.,9:.5},hit_kw={7:(3.,2.,1.,0.),9:(1.,1.,1.,1.)},rune_exit=("shared",),**fields)
- q=p.retarget_intent(8,stance_x=38.,boss_x=38.)
- assert q.hit_w=={8:3.,7:1.,9:.5} and q.hit_kw[8]==p.hit_kw[7]
- assert q.no_hit==frozenset({8,9}) and q.ground_hit==frozenset({7})
- assert q.no_pogo==frozenset({8}) and q.no_dash==frozenset({7,9}) and q.ground_first==frozenset({7,8})
- assert q.rune_exit==p.rune_exit and q.weights==p.weights and p.hit_w[7]==3.
- assert q.hit_w is not p.hit_w and q.hit_kw is not p.hit_kw
 
 
 def test_spent_transfer_has_no_false_keyboard_availability_but_active_run_can_continue():
@@ -221,7 +211,7 @@ def test_spent_transfer_has_no_false_keyboard_availability_but_active_run_can_co
  from ssbot.combat.tactics.modes import GoalPrefs
  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="spent-cast");n.reset(0,start_frame=999);st=cast_scene()
  goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set());n._transfer_goal=goal;n._transfer_finished.add((7,1000))
- old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8)
  assert n.goal_preferences(st,old,handoff=True) is old and n._transfer_goal is None
  assert not n._transfer_ready and not n.candidate_generation
  n._transfer_goal=goal;n.runner.run=Run("rune_transfer","air",plan().variables())
@@ -236,6 +226,31 @@ def test_caster_new_attack_releases_pending_and_active_uncommitted_transfer():
   n=NativeManualAirChain(runner_factory=load_runner,probe_ref="caster-move");n.reset(0,start_frame=999);st=cast_scene()
   n._transfer_goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set());n.runner.run=Run("rune_transfer","air",plan().variables())
   st["ents"][0]["fsms"][0]["state"]=kind
-  old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+  old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8)
   assert n.goal_preferences(st,old,handoff=True) is old
   assert n.runner.run is None and n._transfer_goal is None and not n.candidate_generation
+
+
+def test_small_rune_does_not_force_abandonment_of_a_good_current_target():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ from ssbot.train.forum_planner_policy import ForumPlannerPolicy as Policy
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="keep-caster");n.reset(0,start_frame=999);st=cast_scene()
+ n._transfer_goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set())
+ old=GoalPrefs(mode="RUSH",stance_x=25.,weights={"hit":1.},target=7,hit_w={7:3.},no_hit=frozenset({9}),no_dash=frozenset({8}))
+ p=Policy.__new__(Policy);p.chain_native=n;aborted=[];p.slam_play=NS(run=NS(phase="after",bounced=True),abort=aborted.append)
+ assert p._chain_goal_preferences(st,old) is old
+ assert old.target==7 and old.hit_w=={7:3.} and old.no_dash==frozenset({8})
+ assert not aborted and not n._transfer_ready and not n.candidate_generation
+
+
+def test_selected_route_keeps_fresh_actor_state_rules_and_weights_exactly():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="selected-fresh-prefs");n.reset(0,start_frame=999);st=cast_scene()
+ n._transfer_goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set())
+ old=GoalPrefs(mode="RUSH",stance_x=36.,weights={"hit":1.},target=8,hit_w={8:3.},hit_kw={8:(3.,2.,1.,0.)},no_hit=frozenset({7}),ground_hit=frozenset({8}),no_pogo=frozenset({8}),no_dash=frozenset({8}),ground_first=frozenset({8}),rune_exit=("shared",))
+ new=n.goal_preferences(st,old,handoff=True)
+ assert new is not old and vars(new)==vars(old) and n._transfer_ready

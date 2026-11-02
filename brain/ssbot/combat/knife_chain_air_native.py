@@ -50,7 +50,7 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_goal=transfer.observe_goal(state,previous,self.runner.chains[transfer.PROGRAM].cfg,self._transfer_finished)
         self._transfer_ready=transfer.visible(state,self.runner.chains[transfer.PROGRAM].cfg)
         if self._transfer_goal is not None and self._transfer_goal!=previous:
-            self._note("rune_transfer_goal",frame=state["f"],**asdict(self._transfer_goal),source="observed Spell Antic; destination only")
+            self._note("rune_transfer_candidate",frame=state["f"],**asdict(self._transfer_goal),source="observed Spell Antic; destination only")
         self._air_context=(entry_context(state,self._clock,self.runner) if self.arm=="B" and
             self.commitment is None and self.post_context is None else None)
 
@@ -70,13 +70,14 @@ class NativeManualAirChain(NativeChainB2):
             self._transfer_goal=None;self._transfer_ready=False
             if active:self._abandon("rune transfer no longer owns this observed cast")
             return prefs
-        retarget=getattr(prefs,"retarget_intent",None)
-        if not callable(retarget):
+        # The action table does not choose an enemy. It can only execute the
+        # destination already selected by tactics, with that enemy's full prefs.
+        if getattr(prefs,"target",None)!=goal.target:
             self._transfer_ready=False;return prefs
         # A destination is not keyboard ownership: a newly observed target
         # attack must still reach the existing ground/air attack adapters.
         self._transfer_ready=transfer.control(target)[0] in {"Idle","Walk"}
-        return retarget(goal.target,stance_x=float(target["pos"][0]),boss_x=float(target["pos"][0]))
+        return replace(prefs)  # acknowledge handoff; preserve every tactical field
 
     def continuation_value_bound(self,prefs):return float("inf")
 
