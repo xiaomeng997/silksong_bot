@@ -2989,3 +2989,12 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 **用户所指最后一段：** 左335476在3493开SpellAntic时英雄已经空中（脚底5.585u）；右335470在3509开JumpAntic，英雄地面x35.521、右根x43.124，中心横距7.603u，未在其头顶，3538实际起跳锤。现入口只认地面且施法前0.2s：3493不接，3509已超过入口，所以该段无rune_transfer运行，不是长期场已引导到头顶。右根距右墙5.866u，注明根距而非身体间隙；不据此争论用户视觉上的“离墙远”。补已有空中状态切入与首次接近短跳是下一修复范围，不再做用户已验证的高度带/钩后避符文扫参。
 
 真实cleanup2026-11-02T17:31:02.458422Z：自有两级launcher52272/7444、worker41048、game46208均退出，worker field/log/IPC资源pass；Root另重读golden/Prefs无差、旧DEMO恢复、registry live/instances空/restore_pending=false、无残留游戏后才STATUSfalse。原始停止和该局不补不重开。分析入口analysis/rune_transfer_watch_20261102T172849Z_65aeb80b/ROOT_INITIAL_AUDIT.json、ROUTE_FACTS.json、CAST_JUMP_TIMELINE.json。当前没有新源码改动或第二局；后续游戏仍等用户新观看请求。
+
+
+### 7.34 前摇目的地与动作入口分开【4a9a8d0e默认关闭；86小回归通过，Task71待审】
+
+更正7.33的最后一段归因：3493本来就是SpellAntic前摇入口，非施放；3493–3536日志目标一直是左335476，前半旧after/低跳发neutral，后半普通行仍向左。Root此前只指出空中/0.2秒入口，漏了更早的目标未交还。用户要求前摇即把另一只头顶设为目标，并要求约10分钟小迭代、防前后矛盾；本轮只修这一统一目标交还，不改站位权重、不加终端抢键。
+
+新TransferGoal在可见前摇产生，允许当前人在空中；仅目的地元数据，不是Run/发键承诺。政策在V2 focus支持和规划前接收同一目标；旧after且bounced为真才释放，未完成打击/恢复/交还状态保持。目的地可保留至落地才进入原动作入口，仍保留完整HF/前缀/几何门。新目标开始出招时待办目的地不凭自己独占键，既有招式适配器正常走；下一可见新施法更新待办，reset清。原目标/危险/发键/严停默认路径不变，AIR_MANUAL仍0。
+
+四文件源f3bacddd+c7a431ed+测试4a9a8d0e，三份相关86项5.44s全过/foreign空；实际3493..3500无缺帧的薄接口原点目标从左变右且保留至3500，旧after交还。prefs代理/旧run数组读取的边界见analysis/rune_transfer_goal_20261102/REPORT.md和RAW_GOAL_CHECK，不称完整act、按键或到头顶验收。Task71只审此增量，Task70继续查原2677 body首拒；无新P/实机，不为P3扩本轮修补。
