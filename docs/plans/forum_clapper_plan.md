@@ -3107,3 +3107,16 @@ Task77另三项只核7产物hash，未独立重跑：3154预测接触仅在0.5�
 最终13份309项29.99s统一通过/foreign空，11个源码/测试LF hash和Git blob逐一同；此前红测、测试夹具导入/尾索引失败、专用MODE错误检查均原样保留。移植合成夹具现在显式HERO2，不靠shell默认。模型反馈/发送/真实观察回调测试中的几何有显式桩，不当场上安全证据。两个实况记录起点的当前源V2源层探针：3193供给vault_idle.near，3194拒绝，原S0/HF/prefix差0、foreign空；无内层预测、prefs为显式代理，未做整政策自然选择/监督器/实际按键接受，不能报实际成功率。所有证据analysis/vault_native_port_20261102，REVIEW_REQUEST供Task80审阅。
 
 当前源仍默认关闭，无新P或游戏，不重开旧局。接下来核新源独立审阅、完整政策选择/优先级与完整tick/首J调度，再把启动源/脚本/条件提前审完才称ready，下一观看仍等用户新“开”。本步只补现成动作供给；7.39的先保中间、否则比两侧墙距、未锁瞄准诱导仍未整体上线，也未把旧TwoPlay.space/目标层替换为完整站位场。交还后的大圈/目标下一招仍由普通规划器负责，不称已证明全程安全。
+
+
+### 7.42 244bdc70源审核收，继续实际选择与预算【186已处理；不是实机ready】
+
+已处理 Opus #186（Task80独立源审核收）：8审阅工件/1002快照树、11源码与Git blob去CR逐字节同，27份所读证据hash同；peer的309个JUnit case与Root逐项同且全过，旧body读法独立红测按预期失败。无P0–P2，185的真实后缀身体名问题已独立确认修复。3条P3本轮不扩：普通CC_JUMP不供给、未承诺旧run被替换缺显式交还日志、晚A记账共用_air_finished。当前源的准入范围只认已锁符文跳，不能宣称所有跳招都已可翻。
+
+用户问“可以开了吗”：当时只过源码/离线，完整政策是否选中、完整tick与首J调度、启动审核尚未过，所以未启动游戏，也未宣布ready。当前新源源审已核收；Root在E24–31/Idle做3193/3194原始输入的整政策开放环选择/最终owner探针。为分清逻辑选择，E上关闭规划截止，Native只在两个原点供给，其他输入来自录制，不能当闭环/实机或P成本。第一次探针将旧measurement的action.mask填成新owner已发送desired，f2296正确触发不匹配；这是回放适配错误，原失败及清理记录保留，不据此改生产回执规则。新探针仅在模型调用里提供已录前缀，并重新prepare同一已录S0/HF；不作任何旧回执通过或动作接受信用。第二次探针已结束且自有父/异步worker均清理：3193在真实prefs/inner预测下自然选CHAIN B2 commitment vault_idle.near，J=-2.13136/S0，最终owner plan及L|J同，后脚本未改键；3194两条候选均被身体接触拒绝，未供给。起点最大差0、foreign空。E逻辑探针关了规划截止，不给首J/动作接受或闭环信用。source保持244bdc70，当前源门不代替预算及启动门。
+
+接收凭证analysis/vault_native_port_20261102/OPUS186_RECEIPT.json；完整选择探针在同目录full_policy_probe.py，每次独立目录。用户最后观看许可仍已消费；这次问询未被当作跳过前置条件的许可。原stopped/demo/AA保持，无新P或实机。
+
+**完整首跳P预算未过，保持不开局。** 原资源门空，STATUS先原子true，独占P0–15/High/Numba4，EcoQoS关闭真实读回；当前244源、rank1异步、8ms普通截止、战前预热/collect-freeze保持。只在3193原始S0/HF/prefix提供一次near，调用完整_act/MeasurementTrace/framed null sink。提案生成84行约19.1716ms，完整候选到选择约43.8437ms，完整一拍67.3751ms；生产首J时钟门正确判迟到并发neutral（最终owner b2_deadline_abort），不是成功发J。compiled_signatures前后同、foreign空，无冷编译解释。这个有限P点已足以否掉本版ready，不能拿E选择通过替代及时执行。无真实socket/游戏，不能推未来迟到率；原实机停止/预留不动。证据p_entry_20261102T234138Z/RESULT.json、measurement_trace.jsonl及policy链日志。
+
+预算父52884/异步worker15168已实际不存在，STATUSfalse、own jobs空；无游戏，无现场清理新事项。Root只派最小重复工作定位/原型，不扩普通跳/远钩/站位顺序，避免因非阻挡P3再扩轮。准备下一局前仍须修掉当前预算阻挡，并核新源/启动配置；不会把“正确拦住超时”说成动作验收通过。
