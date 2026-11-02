@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（11-01，7.25）：仍在w13。提前换目标开发源5a2d62f5已合、默认关，45相关测试与158独立源审阅通过；新种子314167单局显式开，真实2531切开阔侧B，但后来回到F，3817被F的Slam Collider 1打2HP，按首次损血Q1退出。已在2026-11-02T01:50:18.545848Z清理全部自有进程/配置；战斗段1404次发键均有Opt1覆盖。该策略尚未验收通过，不重跑；160已核出旧slammer优先级绕过早换目标；默认关修复8c24fe9f已合、56相关过，161独立审阅已核；另绑seed314168单局，先走资源门，未重跑旧根。伞整段不能按的说法已更正。159第二次钩伤机制已核、共同前缀仍缺，53A不开、53C暂停。**
+2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（11-01，7.27）：仍在w13。墙侧旧slammer优先级修复8c24fe9f已过56相关与161独立审阅；新seed314168单局CLEAR，fight33.57745s/0HP、tail0HP、原始HP7→7。2153包全部Opt1覆盖、0错键/超期/右删失，完整测量与真实清理通过（2026-11-02T03:02:21.249171Z）。墙侧条件自然出现51tick，实际51均选开阔侧、0选墙侧；仅该局描述，非反事实收益证明。长期场本局0用场tick，不能归功于站位场；7锤5次Slam0命中，另2次待分类。Task57独立原始核验待回；53A不开、53C暂停，旧失败根保留，不自动补局。**
 
 > **当前唤醒方式（10-31，6.60）**：Opus交付后运行sol/mailwatch/wake_sol.ps1，30秒后一次性通知当前聊天；同编号去重。旧10分钟轮询已删除，未停止项目任务或放宽实机门。
 
@@ -2793,3 +2793,12 @@ Root补3个真实位置的薄L2接口开/关核验：actual STATE经OracleBacken
 analysis/slammer_wall_trial_20261101_8c24fe9f重新绑696运行/模型文件、解释器、配置、脚本及161源审阅；相对5a2仅gauntlet运行文件变，共享危险/模型/异步场相同。execute/resource_guard与既有自有Launcher清理AST相同。已有场/P证据只作未改组件基线，不称8c新全P；新增是常量次数L2比较，实际整tick仍逐包留测量。单局工程观察不是正式AB或模拟器认证，不据此扩大实机预算。
 
 开始前STATUS原子true、请Opus暂停、核原资源阈值/STOP/练习/活动实例，WMI pythonw脱shell/辅助隐藏；只有唯一新合同和来源全部核后启动。结束核worker/game/field worker、golden/Prefs/旧DEMO/registry全部清理后才false。原5a2 full-window菜单HP/末包unknown保留；新局若同样Q1退菜单，分别报告原full-window完整性与物理战斗边界，不把退出后无HP的未知伪造成战斗动作通过。尚无8局gate，53A/C及长期场扩展不捆入本局。
+
+
+**7.27实际完成（Root核验）。** 唯一新根step4/slammer_wall_trial_20261101_8c24fe9f，source8c24、执行HEAD e22b89be、seed314168，单局CLEAR；原始协议fight窗口2170–4198（targets_dead），T33.5774486456s、L0，tail至4389/L0、HP全程7。测量/窗口/配置全complete、overflow0/unresolved空，实际worker42848自己连接input.stats为0delay/jitter/HF2/2/pending0。Source/脚本/配置/解释器/prerequisites逐hash仍同；没有死亡/strict stop。不是同5a2的配对比较，不能声称这处修复独立降低2HP或已经完美w13。
+
+Launcher监听1.9s、policy预热6.7s；整tick→send实录2153个p50=15.0287ms、p99=21.016868ms、max35.8883ms，这不是成对P或未来deadline保证。Root按原Opt1核2153实际发包全部覆盖（direct2040、晚1–2步108、同键跳报2、换键跳报3），0错键/超4未知/右删失；政策自身统计少2个direct（2038），留给Task57区分末尾未再observe/生命周期口径，不篡改原值。原始匹配覆盖不代替攻击接受审计。
+
+Root只读原始双怪状态/实际目标，现有墙侧slammer条件（唯一SlamAntic、两根距<16、墙侧≤6u、另一侧多>1u）自然出现51个相关tick，全部实际选另一只、0选墙侧；NATURAL_COVERAGE.json保留每帧。这里没有defer分支日志，不能把51当51次独立触发或因果反事实。场状态为not_two_clappers799、not_one_locked_jump_cast1298、aim_unlocked56、缺field日志1，用场0；因此本局0HP不作为长期站位场已接管/有效的证据。7次Slam0中5次命中，剩余2次必须分主动弃砍/晚击/计划漏发，不当随机方差，待独立短审计。
+
+真实cleanup2026-11-02T03:02:21.249171Z；Launcher11068/21556、worker42848、game44624均退出，field原生32128按createTime1793588477.8144133也已退，另核无残留游戏。当前golden SHA fc41b9…0469、Prefs无差、instances空/restore_pending=false、旧DEMO哈希0455dd…cb81实际恢复。独立CLEANUP_RECEIPT passes后STATUS才false。analysis/slammer_wall_trial_audit_20261101保存ROOT_AUDIT（engineering_integrity_pass=true）、RECEIPTS、CLEANUP_RECEIPT和NATURAL_COVERAGE；无需重跑本局。用户所定长期场取代战术硬选择仍未完成，下一步讨论/迁移目标与此单局成绩分开；不继续为本P3加日志重开审阅。
