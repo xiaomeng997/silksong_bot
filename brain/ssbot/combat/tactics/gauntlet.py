@@ -134,6 +134,21 @@ TWO_CLOSE_U = 7.0           # ... and her within this of its centre in time (ins
 TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down near an idle Clapper, NODASH)
 TWO_IDLE_S = 0.6            # ... before this long into its idle after an attack move (0.65 s without a buddy busy)
 TWO_RUNE_S = 0.2            # no switch onto it until this past its rune hold (a jump cast's circle in front of it)
+# SSBOT_FORUM_TWO_SPRINTSWITCH (task 53B v2, opus/focus_early53/v2; offline, not live-tested; default off, =1 on): the
+# room switch also while the focus's slam / cast is in its LOCK phase (two_play.LOCK_ANY: the other one's Close / Far
+# Range cancel, forum.md:42) when her dash + sprint (her real dash state; unknown: no) gets her inside the other one's
+# Slam Range before the lock can end (TWO_LOCK_S, a lower bound) - its first pick after the lock is a close one
+# (forum.md:1036-1037). Such a switch never withholds hits on the new target (TWO_RUNLOCK's no_hit is not latched).
+# After any switch away from a focus inside its wall band: no hit on it counts and the slam playbook / the low hop leave
+# its moves (wall_skip; their critical windows keep the keys) while it stays in the band and is not the target. NODASH
+# is lifted while the other Clapper is in its lock phase (it cannot start a slam then)
+TWO_SPRINTSW = os.environ.get("SSBOT_FORUM_TWO_SPRINTSWITCH", "0").strip() == "1"
+TWO_SW_FAMS = (CC_SLAM, CC_CAST)                       # the antics she leaves (two_play.ASW_ANTIC; the jumps: 53A)
+TWO_SLAM_RANGE_U = 8.05     # the Clapper's Slam Range (AlertRange x +-8.05 about its root, forum.md:163)
+TWO_KEY_S = 2 / 60.0        # HoldFilter 2/2: a key applies 2 frames after the tick (task 52: DASH 2816 -> 2818)
+TWO_DASH_U, TWO_DASH_S = 2.8, 0.1                      # the dash: 28 u/s, 6 frames (two_play.JhCfg dash_u / dash_f)
+TWO_SPRINT_U_S = 17.5       # ... then the sprint with the dash held (cast_stab: 17.5 u/s)
+TWO_WALL_BAND_U = 6.0       # inside 6 u of its wall an evade becomes an escape jump (_outer_room)
 TWO_ATTACK_FAMS = (CC_SLAM, CC_CAST, CC_JUMP, CC_JUMP_CAST)
 # SSBOT_FORUM_TWO_RUNLOCK (task 1v1 SP11b, the lead's NOTE 6a; combat.two_play.RUNLOCK, default off): the "focus
 # committed" run is bounded by the focus's LOCK end - the other one is unlocked from the focus's Slam 2 / Cast 2 entry
@@ -376,6 +391,8 @@ class GauntletTactics:
         self.two_esc: dict | None = None                  # SP9b: the policy's escape run view (two_play.esc_view)
         self.two_pm: dict | None = None                   # SP11b: TWO_PUSHMID's view (two_play.pm_view)
         self._rl_sw: tuple | None = None                  # SP11b TWO_RUNLOCK: (new target, old focus) of the switch
+        self._wall_sw: int | None = None                  # task 53B TWO_SPRINTSW: the old focus left in its wall band
+        self._wall_now: frozenset = frozenset()           # ... this tick's (wall_skip)
         self.two_jh: dict | None = None                   # SP10c: the policy's TWO_JUMPHIT run view (two_play.jh_view)
         self._jh_last: dict | None = None                 # SP10c: the view on the last tick
         self._jt: dict | None = None                      # SP14 TWO_JUMPTRAP: the held jumper's record
@@ -398,6 +415,7 @@ class GauntletTactics:
         self._sp9_fam = {}                                # SP9a TWO_SPACE: Clapper iid -> its family on the last tick
         self.two_jh, self._jh_last = None, None
         self.two_pm, self._rl_sw = None, None
+        self._wall_sw, self._wall_now = None, frozenset()
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
@@ -872,17 +890,25 @@ class GauntletTactics:
         x0, x1 = self.pb.arena_x
         return (c.x - x0) if c.x < o.x else (x1 - c.x)
 
-    def _two_run_ok(self, f: Cand, o: Cand, t: float) -> tuple[bool, str]:
+    def _two_run_ok(self, f: Cand, o: Cand, t: float, ws=None) -> tuple[bool, str]:
         """The person's second switch condition: the other one will not jump while she runs to it - it cannot start a
         move while the focus is committed (Buddy Is Attacking) and she gets within TWO_CLOSE_U of it before the focus's
         move can end, or it has just ended a move (TWO_IDLE_S into its idle family: the idle lasts 0.65-1.15 s before
         it decides, and within 8 u it decides a close move) and she gets there in time. Never into a jump move or onto
-        a rune circle still to burst in front of it (the plan's 10-11 note: ~1.2 s after a jump cast's landing)."""
+        a rune circle still to burst in front of it (the plan's 10-11 note: ~1.2 s after a jump cast's landing).
+        TWO_SPRINTSW (ws: her dash state): also "focus locked" - the focus's slam / cast in its lock phase and her
+        dash + sprint inside the other one's Slam Range before the lock can end."""
         if o.s.family in (CC_JUMP, CC_JUMP_CAST):
             return False, "other jumping"
         rp = self.rune.get(o.s.iid)
         if rp is not None and t <= rp[3] + TWO_RUNE_S:
             return False, "other's rune circle"
+        if (TWO_SPRINTSW and ws is not None and f.s.family in TWO_SW_FAMS
+                and getattr(f.s, "state", None) in two_play.LOCK_ANY):
+            wait = self._two_dash_wait(ws)
+            lock = float(getattr(f.s, "t_free", 0.0) or 0.0) - (TWO_DUR0_S[f.s.family] - TWO_LOCK_S[f.s.family])
+            if wait is not None and self._two_sprint_s(o.d - TWO_SLAM_RANGE_U, wait) <= lock:
+                return True, "focus locked"
         need = max(0.0, o.d - TWO_CLOSE_U) / TWO_RUN_U_S
         t_free = float(getattr(f.s, "t_free", 0.0) or 0.0)
         if two_play.RUNLOCK and f.s.family in TWO_LOCK_S:
@@ -894,6 +920,52 @@ class GauntletTactics:
         if o.s.family in (None, CC_IDLE) and t0 is not None and (t - t0) + need <= TWO_IDLE_S:
             return True, "other just ended a move"
         return False, "other free"
+
+    @staticmethod
+    def _two_dash_wait(ws) -> float | None:
+        """TWO_SPRINTSW: s until her ground dash can start (0: now; its cooldown), None when unknown (no can.dash, no
+        measured dash_cd_left), off the ground or blocked by anything but its cooldown."""
+        h = getattr(ws, "hero", None)
+        can = getattr(h, "can", None)
+        cd = getattr(h, "dash_cd_left", None)
+        contact = getattr(h, "contact", None)
+        if not isinstance(can, dict) or type(can.get("dash")) is not bool or cd is None:
+            return None
+        value = getattr(cd, "v", None)
+        conf = getattr(cd, "conf", None)
+        ground_conf = getattr(contact, "conf", None)
+        if any(type(v) not in (int, float) or not math.isfinite(v) for v in (value, conf, ground_conf)):
+            return None
+        if not (0.8 <= conf <= 1.0 and 0.8 <= ground_conf <= 1.0) or getattr(contact, "v", None) != "GROUND":
+            return None
+        left = max(0.0, value)
+        return left if (can["dash"] or left > 0.0) else None
+
+    @staticmethod
+    def _two_sprint_s(gap: float, wait: float) -> float:
+        """TWO_SPRINTSW: s for her to close gap (u) from this tick: the keys' TWO_KEY_S, the run until the dash is ready
+        (wait), the dash, then the sprint."""
+        if gap <= 0.0:
+            return 0.0
+        t_dash = max(TWO_KEY_S, wait)
+        run = TWO_RUN_U_S * (t_dash - TWO_KEY_S)
+        if gap <= run:
+            return TWO_KEY_S + gap / TWO_RUN_U_S
+        if gap <= run + TWO_DASH_U:
+            return t_dash + (gap - run) * TWO_DASH_S / TWO_DASH_U
+        return t_dash + TWO_DASH_S + (gap - run - TWO_DASH_U) / TWO_SPRINT_U_S
+
+    @staticmethod
+    def _buddy_locked(fc, iid) -> bool:
+        """TWO_SPRINTSW: another Clapper in its attack's lock phase (two_play.LOCK_ANY: this one's Close / Far Range
+        cancel; not its evade, Slam 2 / Slam Recover, Cast 2)."""
+        return any(x.type_key == CLAPPER and x.iid != iid and x.alive and x.in_play
+                   and getattr(x, "state", None) in two_play.LOCK_ANY for x in getattr(fc, "subjects", ()) or ())
+
+    def wall_skip(self) -> frozenset:
+        """TWO_SPRINTSW: this tick's old focus left in its wall band (the policy's skip for the slam playbook and the low
+        hop, like the antic switch's F); empty when off or none."""
+        return self._wall_now
 
     def _two_focus(self, ws, cands: list[Cand], t: float, old: Goal | None) -> Goal:
         """SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7, the person's strategy of 2026-10-16): the goal is RUSH on the focus -
@@ -984,12 +1056,15 @@ class GauntletTactics:
             self._sw_why = None if old is None else "ineligible"
         else:
             o = b if keep is a else a
-            ok2, how = self._two_run_ok(keep, o, t)
+            ok2, how = self._two_run_ok(keep, o, t, ws)
             if room[o.s.iid] > room[keep.s.iid] + TWO_HYST_U and ok2:
                 f, why = o, f"two: switch ({how})"
                 self._sw_why = "two"
-                if two_play.RUNLOCK and how == "focus committed":
-                    self._rl_sw = (o.s.iid, keep.s.iid)       # SP11b: no hit on o while keep's flag is on
+                if TWO_SPRINTSW and room[keep.s.iid] <= TWO_WALL_BAND_U:
+                    self._wall_sw = keep.s.iid                # task 53B: it left in its wall band (no hit, no scripts)
+                if two_play.RUNLOCK and how == "focus committed" and not TWO_SPRINTSW:
+                    # SP11b: no hit on o while keep's flag is on (TWO_SPRINTSW on: never - the hits on o count)
+                    self._rl_sw = (o.s.iid, keep.s.iid)
                 st["switch"] = st.get("switch", 0) + 1
                 st[f"switch_{how}"] = st.get(f"switch_{how}", 0) + 1
             else:
@@ -1136,6 +1211,7 @@ class GauntletTactics:
     # ---- decide ----
 
     def decide(self, ws, fc, d, h) -> GoalPrefs:
+        self._wall_now = frozenset()                      # (TWO_SPRINTSW: set by _decide below)
         prefs = self.local.decide(ws, fc, d, h)
         self.last = dict(self.local.last)
         self.last["goal"] = LOCAL
@@ -1362,8 +1438,10 @@ class GauntletTactics:
         # NODASH / NOPOGO (dodge-side rules, not the slam script) kept with the slam script off (SSBOT_FORUM_SLAM_PLAY=0)
         sp4_on = slam_play.ENABLED or SP4_PREFS
         if (sp4_on and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
-                and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U):
+                and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U
+                and not (TWO_SPRINTSW and self._buddy_locked(fc, s.iid))):
             # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
+            # (TWO_SPRINTSW: not while the other one is in its lock phase - this one cannot start a slam then)
             out = replace(out, no_dash=frozenset({g.target}))
         if (sp4_on and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
                 and s.family in SP4_IDLE_FAMS):
@@ -1397,6 +1475,23 @@ class GauntletTactics:
                 self.stats["rl_no_hit"] = self.stats.get("rl_no_hit", 0) + 1
             else:
                 self._rl_sw = None
+        if TWO_SPRINTSW and self._wall_sw is not None:
+            # task 53B: after a switch away from a focus inside its wall band, no hit on it counts and the scripts leave
+            # its moves (wall_skip) while it stays in the band (its root now) and is not the target (seed 314166, after
+            # the f2497 switch: 8 raw hits on it f2514-2863, 4 by the low hop, 4 by the planner); its body, hammer and
+            # runes stay hazards; the new target's hits count
+            subs = {x.iid: x for x in getattr(fc, "subjects", ()) or () if x.type_key == CLAPPER and x.alive
+                    and x.in_play and x.pos is not None}
+            so, sg = subs.get(self._wall_sw), subs.get(g.target)
+            x0, x1 = self.pb.arena_x
+            if (g.target != self._wall_sw and so is not None and sg is not None and (
+                    (float(so.pos[0]) - x0) if float(so.pos[0]) < float(sg.pos[0]) else (x1 - float(so.pos[0])))
+                    <= TWO_WALL_BAND_U):
+                out = replace(out, no_hit=frozenset(out.no_hit) | frozenset({self._wall_sw}))
+                self._wall_now = frozenset({self._wall_sw})
+                self.stats["wall_no_hit"] = self.stats.get("wall_no_hit", 0) + 1
+            else:
+                self._wall_sw = None
         if self.ta:
             out, ta_why = self._ta_rules(ws, fc, out, g, s, hx)
             if ta_why:

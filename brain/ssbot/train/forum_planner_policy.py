@@ -1202,6 +1202,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             # come from TwoPlay.step below; the supervisor's still win)
             rt_crit = (two_play.RUNETIER or two_play.FLIPB) and self.two is not None and self.two.rt_critical()   # SP14 FLIPB
             asw_crit = asw_crit or rt_crit
+        wsk = self.tac.wall_skip() if isinstance(self.tac, GauntletTactics) else frozenset()
+        if wsk:
+            # task 53B (gauntlet.TWO_SPRINTSW): the old focus left in its wall band - the slam playbook and the low hop
+            # leave its moves like the antic switch's F (their critical windows, low_crit and the hold mask, keep the keys)
+            asw_skip = frozenset(asw_skip or ()) | wsk
         if self.wpress is not None:
             # stage N (SSBOT_FORUM_WINDOWS_PRESS): a committed slam-window press / its bridge owns the keys; the scripts
             # are not stepped (as under map2); a script's critical window (LOWHOP's bomb hop, ASW) defers a new commit
