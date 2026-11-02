@@ -2845,3 +2845,14 @@ Opus Task60只修小原型的四个时钟：观测、实际发布、读图now、
 ### 7.29 用户在场观看w13【仅已审8c24演示，常驻位置场不开】
 
 用户随后问“可以看实机了吗”，本次按到场观看请求开唯一一局已审8c24+h2 w13演示；另建C:/ssbot/data/m2_play/clapper_plan/sol/demos/w13_watch_20261102T041920Z，seed314168沿用刚完成来源供观看，不算新的独立比较样本、不覆盖或重试旧失败根。常驻position原型/164时钟修订未接运行，B2/native/vault0，既有SPRINTSWITCH1和专用async egress rank1；原Q1HP≤6单局收紧、回执/关键日志/配置/清理停止保持。696运行文件与已审/已0HP源逐hash同，无新源/模型/性能支线；新合同绑定本次实际HEAD/脚本/输入门。资源/STOP/练习/实例核过才启动，自有WMI/Launcher流程及清理AST原样。游戏后完整清理，后续实机仍等用户明确请求，不把本次观看授权延长为无人值守。
+
+
+**本次观看演示实际结果与伞中接招核查（2026-11-02 UTC）。** 上述首次草稿根在execute资源复查因pid5432状态不可读而拒绝，started/worker/游戏/预约均未建立；原拒绝凭证保留，没有绕门。随后另建_ready2草稿、正常资源核过才起唯一实际游戏，不覆盖旧根或补坏局。实际数据sol/demos/w13_watch_20261102T041920Z_ready2，运行源8c24fe9f、执行HEAD c5f2b370。首次损血f3232来自335470的Song Heavy Sentry(3)/Slam Collider1、扣2HP，由本局收紧Q1退出，QUIT、无击杀。
+
+真实清理结束2026-11-02T04:23:55.842462Z：自有launcher/worker/game/native-field身份均消失，golden/Prefs无差、旧DEMO恢复、registry instances/live空且restore_pending=false，CLEANUP_RECEIPT passes=true；STATUS false。完整窗口延伸到退出菜单3501，原Root audit保留fight缺health快照、tail无边界、最后3503无回执，engineering_integrity_pass=false，不能把退出演示写成完整比赛验收。Root另核物理片段2217–3232：原始指标complete=true、L2、T16.949965s，首损前发送无Opt1 mismatch/overdue；3503是退出菜单末包，不据此断言战斗发键失步。原记录和失败结果不改。凭证analysis/w13_watch_20261102T041920Z_ready2/audit及analysis/umbrella_cancel_20261102/INITIAL_FINDINGS.json。
+
+用户观察“飘的时候被下边的冲锤打中了，完全有时间收伞下劈的”。Root原始核对：该怪3178进入Slam Antic、3226进入Slam0、3232损血；3178英雄在Umbrella Turn，攻击冷却已过。旧SLAM_PLAY这次run以“no input (sprint, recoil)”放弃，普通规划器接管；3178–3231共54个决策的选中行全S1，到损血未成功发送攻击键。3210已收伞、3215普通Airborne，3225落地后又起跳，受击当帧并非仍在Float；不能把之前can.input=false当成伞无法取消。
+
+普通air候选实际已有ATTACK(down)L/R，CL_NODOWN计数0；DSLASH=0只关闭延迟/串联族，不能再以此断言“完全没有下劈行”。Root有限开环真实预测回放12个原点，伞中普通下劈能在模型中取消并出刀，但即时下劈族都被路径检查判不安全；回放在早先动作和前缀/私有状态上可能与实机分叉，不当本次运行逐行拒绝的直接证据，也不据此否定适时收伞、移位、定时下劈的链。ordinary_probe.py/ORDINARY_PROBE.json保留scope与源外模块0；本次未修改运行源，未开新实机/P/大扫参。
+
+Opus Task61只核本次受击前原始伞阶段、冷却、按键边沿、脚本中止及可取消窗口；Root负责现有候选/衔接来源。先确认可执行的空中接招链及最小入口，不把伞强判锁死、不直接强制下劈或全局开旧DSLASH/AIRSTRIKE，不把“有时间”冒称任意下劈都必安全。Task60四时钟原型已交#165但仍待Root核收，常驻场尚未接生产。后续实机仍等用户明确请求。
