@@ -3039,3 +3039,16 @@ analysis/rune_transfer_selection_20261102保存98相关通过/foreign空、ACTUA
 **已处理 Opus #178（Task73，ac8723af独立小审核收）。** Root核8工件hash、5份所读源码与Git blob/当前规范化工作树同，98 JUnit case与Root逐项相同，foreign空。未选目的地时同对象返回、不释放旧after；已选目的地字段不改且仍可进；目标改变时现有分支清接近Run并交还。177角色交换的SP4问题随助手删除消失，没有为此增加规则。凭证analysis/rune_transfer_selection_20261102/OPUS178_RECEIPT.json。
 
 范围更正：peer的“右怪会一直打下去”只能读作此薄接口不再强制把右改左；2622–2632沿用2621右目标的prefs是代理，不能证明完整目标层后续、最终按键、持续攻击或躲过符文。第一局2675本来已选右的有限入口保持；3493那种上游仍选施法怪的场景，本次不会替上游换人，后续若要改变仍在目标选择层解决，不能往动作链加回覆盖。当前源审阅已完成，实际效果未验，无新P/游戏；不自动追加观看局。
+
+
+### 7.37 ac8723af唯一观看局【首损2HP退出；被逼墙侧与高位迎钩待查】
+
+用户新“开吧”只建sol/demos/w13_rune_transfer_20261102T193145Z_ac8723af；执行HEAD61657d73，旧seed314168仅覆盖案例。当前源有限P346完整_act通过：2675/2676为25.831/13.668ms，p50 14.9842/p99 21.011935/max27.8418，原样模型、签名同/foreign空；记录在该局analysis/p_current，非整局B/AB或网络期限保证。新合同绑定178源审和当前P，WMI唯一启动game41664、worker46044，监听1.8秒/warm6.7秒，worker自身input.stats 0delay/jitter、HF2/2、pending0。
+
+该局f3620原始HP7→5，Q1退出，伤害来源rune slam(Clone)/damager；12个hits为可伤接触记录，非12次损血。measure T23.2447584446s，complete/overflow0/window完整，tail0。2026-11-02T19:35:34.525011Z真实清理，launcher两层/worker/game退，Root另核Prefs/golden无差、registry空/restore_pending=false、旧DEMO恢复及无游戏后STATUSfalse。不重开、不补局。
+
+用户指出双怪把她逼到墙角，其中一只跳大符文。原始转折：335470在3134 CastSlamAntic、3189跳、3244落地；英雄3229进入右墙侧，3244在x46.786；同怪3443又CastSlamAntic、3499跳、3554落地，3620圈点亮受伤。不能未经选择层/动作层复核就再归因为“选错怪”；当前正在核合围前动作，未加新规则。证据该局analysis/ROOT_INITIAL_AUDIT、CORNER_TRANSITIONS、CORNER_TIMELINE、CLEANUP_RECEIPT。
+
+高度统一为脚底/锤顶离地：旧53C有限模型满跳5.50u，钩后弹顶约9.61u（世界y12.62减该场地地面3.015），不是实机保证；本局真多边形普通跳落地锤启用时上沿6.237→6.912u，符文跳6.237→6.878u。高度富余不证明升上去之前没碰锤，移动目标钩索跟随仍未实测；Task74仅用本次轨迹核具体高度/时序/第一射线目标，不重扫旧5520变体。HAMMER_HEIGHTS保存逐帧原始口径。
+
+用户新操作要求：以后源码/启动脚本审核、启动前预算与配置准备完才说“准备好了”，不在用户下令后再做整段准备。本次已消费唯一观看许可，后续实机仍等新指令。
