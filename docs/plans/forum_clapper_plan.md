@@ -2907,3 +2907,10 @@ f2740被rune bomb small(Clone)/damager伤1HP，HP7→6，phase none/chain_relate
 原始f2975为Quit_To_Menu/HP6，2976 scene=None/hero absent；B2全局学习HP检查在已退出战斗的转换帧仍按critical缺HP严停，原结果HARNESS_FAIL与不完整measurement window保持。该错误属于退出收尾，不覆盖已见1HP损失，也不冒充正常CLEAR或全局完整比赛；后续应按真实退出阶段区分HP日志，不得放宽战斗中缺HP守卫。当前不为它再开一局。
 
 真实清理2026-11-02T06:51:39.177325Z：自有launcher/worker/game42124及后台field全部结束、worker各资源pass、golden/Prefs无差/旧DEMO恢复、instances/live空/restore_pending=false；Root再独立PrefsGuard.default重读和field PID身份核过，STATUSfalse。ROOT_AUDIT.json保留退出原始帧、实际GC、完整统计边界与零air事实。当前运行源仍ebb66/默认AIR关闭；下一次实机须用户新的观看请求，不因Opus唤醒或这次到场授权继续追加。
+
+
+**已处理 Opus #170（Task65原始退出边界核收，未开新实机）。** Root核4工件/4原始输入hash、4所读源码与Git ebb66同；2740小符文1HP、2975 Quit_To_Menu/HP6、2976起hero absent、零air事件均与Root原始核验一致。建议的两调用路径共用observe_learning位置采纳，但不直接用“主角缺失 OR 场景不同”放过未知战斗帧。凭证analysis/menu_hp_fix_20261102/OPUS170_RECEIPT.json。
+
+最小源a5b7c57d：_begin_chain_native与learning_check只把真实real_quit_active确认给B2；没有该证据的旧调用者默认False。共用observe_learning必须先实见Quit_To_Menu且退出已确认，记真实边界帧，此后仅Quit/Menu_Title或场景空且主角确实缺失的收尾帧可记b2_exit_frame_no_hp；只更新_last_budget_f，不补HP、不变_budget_hp、不计损血。仍在Hang_04时即使退出已确认/主角缺失也硬停；未确认、未见明确退出场景、其他战斗场景、重置后均不豁免。reset清边界；缺STATE、动作回执、死亡及其他学习/测量停止保持原样，不修改旧HARNESS_FAIL或measurement不完整。
+
+Root六份相关159项统一过、源外模块0；12项新回归包括双调用路径/重置/各战斗负例。另只直接喂原始25个STATE给共用observer：保留1次实际HP损失、最后HP6，2976–2980五帧记退出缺HP；把2736/2740/2974战斗health删掉三个负例仍严停。该小核验不是整局/模型/STATE缺口回放或实际退出验收；RAW_EXIT_OBSERVER.json与final_related.xml保留。新源交Task66最小独立审阅待核，无新P/实机/gate；下次仍等用户新观看请求。测量层退出窗口不完整尚不因本HP小修补宣称已解决。
