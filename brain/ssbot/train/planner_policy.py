@@ -460,6 +460,13 @@ class PlannerPolicy:
         # INV_T 0, the hero invulnerable). Stage C: the hero's hit is seen as late as the rest of the view (the hit
         # frame's screen and HUD, k frames on), so no hit newer than the WorldState counts (task V review, 2026-10-03)
         fo = int(raw.get("f", 0)) if raw else 0
+        # Same-frame oracle CanDash is positive resource evidence. The game's
+        # predicate requires ground, wall slide, or an unused air dash. False
+        # may instead mean cooldown/attack, so it cannot prove a spent dash.
+        can = ((raw or {}).get("hero") or {}).get("can") or {}
+        if (self.view == "oracle" and can.get("dash") is True and type(raw.get("f")) is int
+                and raw["f"] == getattr(getattr(ws, "stamp", None), "frame", None)):
+            S[kin.AIRDASHED] = 0.0
         hit_f = [] if self.view != "oracle" else \
             [f for f in sorted(self.raw) if f > fo for ev in (self.raw[f].get("ev") or ()) if ev.get("k") == "damage"]
         if hit_f:
