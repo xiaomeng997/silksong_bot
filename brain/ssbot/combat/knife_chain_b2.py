@@ -392,8 +392,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         source=self.commitment
         old_move=None if source is None else source["move"]
         if source is not None:
-            from .knife_chain_failure import FailureExposure
-            exposure=FailureExposure(old_move,source.get("responsibility_origin",source["origin"]),f,source.get("ta"))
+            exposure=self._failure_exposure(old_move,source.get("responsibility_origin",source["origin"]),f,source.get("ta"))
             if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
             self._failure_exposures.append(exposure)
             self._failed_hook_moves.add(old_move)
@@ -412,6 +411,10 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         self._fast_j_pending_commit=None;self._fast_j_commit=None;self._fast_j_sent=None
         self._post_keys.clear();self._post_key_move=None
         self._abandon(reason)
+
+    def _failure_exposure(self,move,origin,failed,ta):
+        from .knife_chain_failure import FailureExposure
+        return FailureExposure(move,origin,failed,ta)
 
 
     def _prepare_tick_state(self,state):
@@ -894,8 +897,10 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             self._note("b2_hook_recovery_wait",frame=f,mask=0,path="unchecked")
             return res
         # The named probe remains visible; h2 guard use isn't relabelled fitted.
+        admission_name=("vault_near_entry" if offer.details.get("vault_near") else
+                        "manual_air_entry" if offer.details.get("manual_air") else "legacy_h2_guard")
         adm=AdmissionDecision(offer.draft.run.lid,"unchecked",f,None,
-                             (ConditionResult("manual_air_entry" if offer.details.get("manual_air") else "legacy_h2_guard","unchecked","named B2 learning protocol"),))
+                             (ConditionResult(admission_name,"unchecked","named B2 learning protocol"),))
         wire=self.dispatch.offer(offer.draft.run.lid,offer.mask,table_ref=self.runner.binding["table_digest"],admission=adm)
         self.register_row(0,wire,probe_ref=self.probe_ref)
         self._draft,self._offer,self._b2_selected=offer.draft,wire,offer
@@ -1026,8 +1031,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         if preparation is not None:
             if sent.frame!=preparation["origin"] or sent.target_frame!=preparation["target"] or sent.desired_mask!=0:
                 self._stop("veto neutral replacement does not match successful send",sent.frame)
-            from .knife_chain_failure import FailureExposure
-            exposure=FailureExposure(preparation["move"],preparation["origin"],preparation["failed"],preparation["ta"])
+            exposure=self._failure_exposure(preparation["move"],preparation["origin"],preparation["failed"],preparation["ta"])
             if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
             self._failure_exposures.append(exposure)
             self._note("b2_failure_exposure",frame=preparation["failed"],exposure=exposure.as_dict(),

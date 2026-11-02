@@ -437,6 +437,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             if os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1":
                 from ssbot.combat.knife_chain_air import warm as warm_air
                 self.b2_warmup_report=warm_air(self.params)
+                if os.environ.get("SSBOT_FORUM_CHAIN_VAULT","0").strip()=="1":
+                    from ssbot.combat.knife_chain_vault_native import warm as warm_vault
+                    self.b2_warmup_report["vault_near"]=warm_vault(self.params)
             else:self.b2_warmup_report=warm_nominal(self.params)
             # A B2 smoke may run without the A/A measurement wrapper. It still
             # needs the real nonempty parallel query signatures before combat.
@@ -454,6 +457,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         b2 = os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
         if os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1" and not b2:
             raise ValueError("manual air chain requires explicit CHAIN_B2=1 and named probe")
+        vault=os.environ.get("SSBOT_FORUM_CHAIN_VAULT","0").strip()
+        if vault not in {"0","1"} or (vault=="1" and os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()!="1"):
+            raise ValueError("vault table requires explicit manual-air B2 owner")
         if b2 and not native:
             raise ValueError("B2 requires explicit CHAIN_NATIVE=1")
         if CHAIN_STRICT_RECEIPTS and native:

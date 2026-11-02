@@ -165,6 +165,10 @@ def encounter_allowed(encounter):
 
 def preflight_environment(encounter, *, no_record=False):
     """Read-only preflight, before IPC/reset; stopped batches are never retried."""
+    vault=os.environ.get("SSBOT_FORUM_CHAIN_VAULT","0").strip()
+    if vault not in {"0","1"} or (vault=="1" and any(os.environ.get(k,"0").strip()!="1" for k in
+            ("SSBOT_FORUM_CHAIN_AIR_MANUAL","SSBOT_FORUM_CHAIN_B2","SSBOT_FORUM_CHAIN_NATIVE"))):
+        raise LearningStop("vault table requires explicit manual-air B2 owner")
     if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":return
     if (not encounter_allowed(encounter) or no_record or
             os.environ.get("SSBOT_FORUM_CHAIN_NATIVE","0").strip()!="1"):

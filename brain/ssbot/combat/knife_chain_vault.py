@@ -2,8 +2,8 @@
 
 The existing v0 interpreter runs this family. Callers must supply the selected
 entry request; importing/loading this module never chooses a target or starts a
-run. The production policy does not import it yet. Native candidate arbitration,
-full external-danger checks and actual send/acceptance wiring remain separate.
+run. The manual-air B2 owner can load it with the explicit default-off VAULT
+switch. Candidate arbitration, geometry and send/acceptance stay in that owner.
 
 Primitive implementation and table derive from the reviewed Opus task46
 prototype. Its evidence is nominal HERO2, not actual game action acceptance or
@@ -45,12 +45,8 @@ def _key(d):
 
 def _body(e):
     """The target's body box (x0, y0, x1, y1) from its enabled collider in this STATE; None when absent."""
-    for col in e.get("colliders") or ():
-        if str(col.get("name") or "") == SP.CLAPPER and col.get("enabled") and col.get("verts_world"):
-            v = col["verts_world"]
-            xs, ys = v[0::2], v[1::2]
-            return float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
-    return None
+    from .knife_chain_air import body_box
+    return body_box(e)  # real body names include numbered variants, e.g. (2)/(3)
 
 
 def _rect(b):

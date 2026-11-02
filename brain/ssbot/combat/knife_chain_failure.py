@@ -13,6 +13,10 @@ import math
 from .knife_chain_commitment import MoveInstance
 
 _SLAM_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2","Slam Recover"})
+_JUMP_CAST_STATES=frozenset({"Cast Slam Antic","Cast Slam Antic 2","Cast Jump","Jump Aim","Jump","Air",
+                            "Charged?","Slam Effects?","Slam 2","Slam Recover"})
+_FAMILIES={"CC_SLAM":(_SLAM_STATES,"Slam Antic"),
+           "CC_JUMP_CAST":(_JUMP_CAST_STATES,"Cast Slam Antic")}
 # Same clock-identity uncertainty already used by the h2 B2 observer. This is
 # identity evidence only: it never changes a hazard/protection/attack window.
 _CLOCK_IDENTITY_SLOP=3./60.
@@ -51,8 +55,8 @@ class FailureExposure:
     _clock_uncertain: bool=field(default=False,init=False,repr=False)
 
     def __post_init__(self):
-        if not isinstance(self.move,MoveInstance) or self.move.family!="CC_SLAM":
-            raise ValueError("failure exposure requires one CC_SLAM MoveInstance")
+        if not isinstance(self.move,MoveInstance) or self.move.family not in _FAMILIES:
+            raise ValueError("failure exposure requires one CC_SLAM or CC_JUMP_CAST MoveInstance")
         _frame(self.origin);_frame(self.failed_frame)
         if self.origin<self.move.antic_frame or self.failed_frame<self.origin:
             raise ValueError("failure exposure precedes its sent move/origin")
@@ -116,20 +120,23 @@ class FailureExposure:
         if len(controls)!=1 or not isinstance(controls[0].get("state"),str) or not controls[0]["state"]:
             self.unknown_reason="target Control state unavailable";return self
         st=controls[0]["state"];tin=controls[0].get("t")
-        if st not in _SLAM_STATES:
+        states,primary=_FAMILIES[self.move.family]
+        if st not in states:
             self.last_control=st
-            self._end(f,"same-move end observed","actual Control left slam states");return self
-        if st=="Slam Antic":
+            source="actual Control left slam states" if self.move.family=="CC_SLAM" else "actual Control left jump-cast states"
+            self._end(f,"same-move end observed",source);return self
+        if st==primary:
             if self._clock_uncertain:
                 self.unknown_reason="game clock regressed; antic identity unknown"
             else:
                 entry=current_game-float(tin) if current_game is not None and _number(tin) and tin>=0 else None
                 if entry is not None and self.ta is not None and entry>self.ta+_CLOCK_IDENTITY_SLOP:
                     self.new_antic_entry_time=entry
-                    self._end(f,"new Slam Antic observed","actual game_time minus Control.t");return self
+                    self._end(f,"new "+primary+" observed","actual game_time minus Control.t");return self
                 if self._seen_non_antic:
                     self.new_antic_entry_time=entry
-                    self._end(f,"new Slam Antic observed","observed slam phase returned to Antic");return self
+                    source="observed slam phase returned to Antic" if self.move.family=="CC_SLAM" else "observed jump-cast phase returned to Antic"
+                    self._end(f,"new "+primary+" observed",source);return self
                 self.unknown_reason=("antic clock before bound instance; end unknown" if entry is not None
                     and self.ta is not None and entry<self.ta-_CLOCK_IDENTITY_SLOP else "same-move end not observed")
         else:
