@@ -3016,3 +3016,10 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 177新增P2建议给新待机目标恢复SP4 no_pogo/ground_hit/no_dash。本轮不据此恢复旧偏好：用户已明确“头顶下劈一下翻过去再平砍一下落地接着砍”“疾跑起跳下劈站在第二个怪的头顶”，并要求手工链够用后推进其他波；恢复一律禁止空中打待机怪会反向限制该打法。当前保留已声明的最小角色意图交换，允许头顶交还后普通规划尝试空中命中，属于有意的B策略差异，不是硬安全门豁免，也不宣称所有状态偏好已按新怪重算。普通路径/退路/尾段、所有延迟与其他怪危险、发键/回执与严预算保持。实际待机首刀和其后新招继续作为单局动作观察项。接收凭证analysis/rune_transfer_flight_20261102/OPUS177_RECEIPT.json。
 
 当前源码不再为旧SP4相等性增加补丁，默认关闭。接下来仅对4b新增完整飞行预查做当前源有限P工程计时，原始新观看记录至2676、真实field rank1/8ms planner/measurement/null sink，Native只启2675/2676；不是整局B或闭环。下一局仍等用户新观看请求与当前源实际门，原停止局不重开。
+
+
+**4b8d7bae当前源有限P工程计时完成（无新实机）。** 独占前STOP/练习标记无、源码/knowledge与4b无差、原资源门空；STATUS先置true，唯一exec17098，venv46740/实际48712，后台field38136。真实P0–15/High/Numba4/EcoQoS关闭；rank1异步场、普通planner8ms、战前collect44/freeze315179且GC仍enabled。346完整_act/measurement/framed null包，Native只启实际2675/2676；原始物理STATE保持，原2675新输出右在2676成为在途前缀，尚未喂入2677后分叉轨迹。不是整局B或配对AB预算。
+
+关键两拍2675普通MOVE(R)为27.4269ms/S0、2676 rune_transfer.jump为13.6457ms/S0，有限工程点界33.333ms过；346tick p50 15.08555、p99 20.480405、最大28.2265（2543）。compiled_signatures前后同、foreign空，346发送包。仍有单帧以上普通尾部，不称游戏/network输入期限或实际动作成功保证；预热/49.45ms战前GC和战后1.3798ms gen2单列不算战斗成本。
+
+自有三进程createTime核实已退出后，Root另读Prefs无差/golden一致、registry instances/live空/restore_pending=false且无游戏，才STATUSfalse。证据analysis/rune_transfer_p4b_20261102/P_WINDOW、transfer_p_trace、P_RECEIPT。当前默认关闭，源码审阅177与有限工程成本已核；等待用户新“开”后只建一个新条件观看局，继续首损/回执/日志严停，不重开65aeb已停局。旧SP4评分差异按上文新打法意图保留，实际到头顶/下劈/真实命中弹起仍待新局，不把代码/计时通过当效果通过。
