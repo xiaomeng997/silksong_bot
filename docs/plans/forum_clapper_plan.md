@@ -2887,3 +2887,14 @@ Task62按两个原点3178/3190、每点至多18条代表模板，有限检查“
 47份统一相关回归1062过/1skip、21项新专项含在内，不相加；旧仲裁AST夹具漏已有tac接口，补None并加manual阶段，39项过。初次NUMBA上限1、缺日志目录、时钟epoch误比与旧fixture失败均保留，不通过改危险或放宽回执凑绿。Task63固定源独立审阅在途，P整tick测量准备中，现无实机gate。
 
 **用户最新“准备好了就开”。** 用户已到场并授权技术门成熟后自主启动下一唯一w13观看局，不再重复询问。新草案analysis/manual_air_watch_2571d197绑定新源、新seed314169、当前h2+专用async egress及手工air链，仍L2刀/measurev2/实际worker input.stats/Opt1/Q1 HP<=6本局首损退出、死亡/错键/超4帧无覆盖/关键日志/配置或清理失败停。旧失败根不重开，不补局；先收Task63、完整tick参考、源/脚本/模型/新合同证据后才签gate。P/游戏前独占STATUS、原资源门和STOP/练习/锁保持；仅真实全清理后false。此到场授权不延长为未来无人值守多局。
+
+
+**已处理 Opus #168（2571源审阅核收）。** Root核6工件/9所读快照源码与Git2571逐项同、独立107项过；无P0–P2，3条P3只记账。真实P0–15/High/EcoQoSoff，3178完整_act+measure+framed null sink为28.0222ms，field rank1；只是单工程点，不当p99、网络截止或动作接受保证。用户随后明确“准备好了就开”，按新源/新seed314169另建唯一新条件观看根sol/demos/w13_air_20261102T061318Z_2571d197。原资源首次拒绝在准备合同后、started前，无游戏/预约；待原门清后唯一WMI才启动，未绕资源门。
+
+**该局实际失败，保留停止不重开。** 实际worker18420自己的input.stats通过零delay/jitter、HF2/2/pending0；热身58.3s。原始战斗窗口5357–5496约2.33329s、零掉血、零air提案/承诺；f5496普通行ATTACK(side)N+idle，最终two:open，decision136.0731ms、整tick144.8946ms，接收线程tid10312第二代GC在planner阶段占118.9947ms、回收80820对象，send时最新帧超过原4帧界而严停。不能把这次故障说成空中搜索或下劈失败；单点旧P没有覆盖该GC长尾。次错为新AIR_MANUAL未登记导致configuration_complete=false；原异常期间HP/时间缺口保持未知，不把零已见HP当完整无伤。LIVE_FAILURE_DIAGNOSTIC及原measurement/learning halt保留。
+
+真实清理2026-11-02T06:26:35.992744Z：own launcher50004/worker18420/game47556/field21624全结束，golden fc41b9…0469、Prefs无差、旧DEMO恢复、registry instances/live空/restore_pending=false，worker各资源清理pass，核后STATUSfalse。游戏没有继续，也未在原根补局。
+
+**最小修补ebb66bd7及已处理 Opus #169。** 只+44行于5文件：该实际manual_air+B2预算配置在全部预热/配置加载后、开战前gc.collect并freeze长寿命对象；GC仍enabled、threshold/发键期限/动作准入不变，b2_gc_ready独占凭证入worker_context。AIR_MANUAL登记control，有效值取真实构造对象manual_air，不重读环境冒充执行。其他h2/w7固定钩索不走此GC分支。Root5份72项过，169工件/源码hash和独立测试核收，无P0–P2；内存留到worker退出、新运行期循环仍会回收两项P3保持，不称零停顿保证。
+
+Root以该真实失败133个决策、同一原始物理STATE重放完整_act+measure+framed null sink，只有audit合成相符回执，不作闭环/实际接受证明。P0–15/High/EcoQoSoff、field rank1，开战前真实collect32874/freeze265071耗47.45ms在计时窗口外；133tick中位8.5293ms、最大24.5395ms，原5496为18.9402ms；战后主动gen2 2.0793ms，窗口内无gen2。GC_P_RECEIPT保持有限真实窗口范围，不因其过而放宽任何停止门。根据用户到场授权，只有新源/新条件新根通过门后才可下一唯一观看局，旧2571失败根不重开；不自动追加留出/正式AB。
