@@ -2976,3 +2976,16 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 **65aeb有限完整tick P已完成，无新游戏。** 原资源门空、STATUS先原子置true后唯一启动p_window.py（exec34310；46956为venv redirector，39236为实际进程，非两个任务）。源/P0–15/High/Numba4/EcoQoS关闭真实读回；rank1异步场和8ms普通规划截止、实际预热及战前collect/freeze保持。只重放本次观看录像的原始STATE/HF到2811；2733首次接近、2810和2811各重建native为独立入口，回执审计合成相符，物理状态不替换，故不是自然接续/实机行为。完整_act含measurement和framed null sink共306tick/306包，p50 15.9515ms、p99 21.58411ms、最大25.1223ms（2687）；首2733接近15.4432、2734续接近13.3955，2810/2811空中接刀16.0369/16.1656ms，均S0，旧有限工程点界33.333ms通过。仍有超过单帧的普通尾部，不称网络期限、零迟发或普遍p99保证；未改预留/任何停止门。
 
 预热报告/compiled_signatures前后同、foreign空，冷编译和战前collect/freeze（1416.85ms）均在计时窗外，不能拿成实机启动快或零GC保证；计时结束主动gen2另4.1711ms。自有field53136/createTime与两级python进程均已结束后才STATUSfalse，未接触游戏/Prefs/存档。P_WINDOW、transfer_p_trace、P_RECEIPT和原log保留于analysis/rune_transfer_20261102；首次脚本生成的重复替换断言只阻止文件生成，无P启动，STATUS脉冲Move-Item失败后用os.replace更新，未有重复计时。当前不再为同一点追加测量或加P3代码。下一步为用户到场后的唯一新条件观看局，重点观察主动接近到头顶、疾跑跳动画可输入、看到新Slam后接下劈、实际接受/命中弹起和收尾；仍无自动新局许可、hook备用未加、无自然路径已成功之称。
+
+
+### 7.33 主动头顶接近首局观看【65aeb80b；首次小符文1HP退出，路线未验收】
+
+用户新指令“开吧”后，唯一新条件根sol/demos/w13_rune_transfer_20261102T172849Z_65aeb80b；运行源65aeb、执行HEAD002c0683、seed314168重复历史案例只看覆盖，未强制实体/按键，原Q1/Opt1/日志门不变。WMI/pythonw唯一启动，实际游戏46208/worker41048，监听1.9秒、控制器warm7.1秒；实际worker自身input.stats为0delay/jitter、HF2/2、pending0，战前GC collected133/frozen164275且仍enabled。
+
+实际QUIT：f3584被rune bomb small(Clone)/damager损1HP（7→6），按Q1退出。measure/trace/config/window均complete、unresolved空，windowT22.4282069651s，tail0，worker rc0。12个hits包含无损接触，不能写成12次掉血。B2记录phase none/chain_related=false只是当拍归属，不证明早先链选择与损血没有因果。没有空中接刀/真实命中弹起的验收通过。
+
+**首次接近中断：** 左335476在2666施法，右335470在2675回Idle。2675/2676两拍rune_transfer.jump选中并真实sent R|J，2677/2678原始STATE回执均相符且实际离地。2677本拍全场路径把未来2713与右目标body相交记为首拒；链随之作废、普通规划接手并松J，2679起实际截短跳，2682脚底只到3.932u，没到右怪头顶。这里先保留事实，不能未经模型核查说是物理必然撞怪或已知误报。
+
+**用户所指最后一段：** 左335476在3493开SpellAntic时英雄已经空中（脚底5.585u）；右335470在3509开JumpAntic，英雄地面x35.521、右根x43.124，中心横距7.603u，未在其头顶，3538实际起跳锤。现入口只认地面且施法前0.2s：3493不接，3509已超过入口，所以该段无rune_transfer运行，不是长期场已引导到头顶。右根距右墙5.866u，注明根距而非身体间隙；不据此争论用户视觉上的“离墙远”。补已有空中状态切入与首次接近短跳是下一修复范围，不再做用户已验证的高度带/钩后避符文扫参。
+
+真实cleanup2026-11-02T17:31:02.458422Z：自有两级launcher52272/7444、worker41048、game46208均退出，worker field/log/IPC资源pass；Root另重读golden/Prefs无差、旧DEMO恢复、registry live/instances空/restore_pending=false、无残留游戏后才STATUSfalse。原始停止和该局不补不重开。分析入口analysis/rune_transfer_watch_20261102T172849Z_65aeb80b/ROOT_INITIAL_AUDIT.json、ROUTE_FACTS.json、CAST_JUMP_TIMELINE.json。当前没有新源码改动或第二局；后续游戏仍等用户新观看请求。
