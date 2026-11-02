@@ -3025,7 +3025,7 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 自有三进程createTime核实已退出后，Root另读Prefs无差/golden一致、registry instances/live空/restore_pending=false且无游戏，才STATUSfalse。证据analysis/rune_transfer_p4b_20261102/P_WINDOW、transfer_p_trace、P_RECEIPT。当前默认关闭，源码审阅177与有限工程成本已核；等待用户新“开”后只建一个新条件观看局，继续首损/回执/日志严停，不重开65aeb已停局。旧SP4评分差异按上文新打法意图保留，实际到头顶/下劈/真实命中弹起仍待新局，不把代码/计时通过当效果通过。
 
 
-### 7.36 4b观看局强制换人错误与最小纠正【ac8723af；98相关过，增量审阅待收】
+### 7.36 4b观看局强制换人错误与最小纠正【ac8723af；98相关过，178增量审阅已核；实际效果待验】
 
 用户“开吧，我看一局”只开一个新条件观看：sol/demos/w13_rune_transfer_20261102T190032Z_4b8d7bae，seed314168仍是重复案例。f2714被小符文损1HP（7→6）即Q1退出；measure T8.2950595077s，trace/config/window complete、unresolved空、worker rc0。45个接近选中tick全为水平走/冲刺，没有选中新J，未验收头顶/接刀。2026-11-02T19:02:19.472990Z真实清理：自有launcher/worker/game退出、Prefs/golden无差、旧DEMO恢复、registry空且restore_pending=false，独立复核后STATUSfalse。原停止局不补不重开。
 
@@ -3034,3 +3034,8 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 ac8723af移除GoalPrefs.retarget_intent和链内目标交换；目标层选谁，动作链只执行该目标的路线，全部新鲜权重/限制/站位原样保留。未选另一只时不把候选目的地当已选目标，不释放旧after。7.35角色交换及其SP4差异处置由此接口修正取代；没有增加一律NOPOGO等相反规则。候选元数据事件改名rune_transfer_candidate。全飞行/全部危险、输入回执/严停保持，默认关闭。
 
 analysis/rune_transfer_selection_20261102保存98相关通过/foreign空、ACTUAL2622_INTERFACE与来源清单。2622薄接口使用真实STATE，prefs明确为保留2621右目标/奖励的代理，只证明不再覆盖，不冒称完整L2/按键/闭环或安全验收。Task73仅审三文件修正及此边界，不重做高度/机制/321大审。当前无新P/实机，下一观看仍须用户新指令。
+
+
+**已处理 Opus #178（Task73，ac8723af独立小审核收）。** Root核8工件hash、5份所读源码与Git blob/当前规范化工作树同，98 JUnit case与Root逐项相同，foreign空。未选目的地时同对象返回、不释放旧after；已选目的地字段不改且仍可进；目标改变时现有分支清接近Run并交还。177角色交换的SP4问题随助手删除消失，没有为此增加规则。凭证analysis/rune_transfer_selection_20261102/OPUS178_RECEIPT.json。
+
+范围更正：peer的“右怪会一直打下去”只能读作此薄接口不再强制把右改左；2622–2632沿用2621右目标的prefs是代理，不能证明完整目标层后续、最终按键、持续攻击或躲过符文。第一局2675本来已选右的有限入口保持；3493那种上游仍选施法怪的场景，本次不会替上游换人，后续若要改变仍在目标选择层解决，不能往动作链加回覆盖。当前源审阅已完成，实际效果未验，无新P/游戏；不自动追加观看局。
