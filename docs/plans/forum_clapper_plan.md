@@ -3089,3 +3089,8 @@ analysis/rune_transfer_selection_20261102保存98相关通过/foreign空、ACTUA
 **供给缺口已静态核实：已有vault_idle的近跳下劈/远钩下劈及共用平砍出口目前没有进入生产候选。** 本次观看仍vault=false，NativeManualAirChain只装air_strike/air_direct/rune_transfer。此前满跳+空冲、FLIPB或下劈后一直L，都不能当这条原链的完整测试。Task78改为3193/3194各至多两案，调用原表near→over→fall→ground的名义闭环，停在其真实观察条件交还，不再用180帧盲L尾段；目标受击反应的模型假设单列。Task77先完成cdf资源两文件小审，B施法首拒拆层/3162等旁路诊断后放，避免继续绕过现成动作供给做大校准。
 
 Root已静态列出最小原生接线边界analysis/jump_route_order_20261102/NATIVE_VAULT_PREP.json：复用同一B2发键/回执/严预算owner、同一已选iid和原始表出口；不能直接把runner换成vault后让begin再索引不存在的rune_transfer，也不能给Idle目标套CC_SLAM专属豁免。先近入口，远钩缺路径保持待办；实际下劈命中+弹起才转出口，模型事件不当现场证据。没有为准备工作新增运行代码/开关、P或游戏。完整选路与未锁诱导仍是7.39规格，未称上线；原观看许可已消费，源码/启动准备齐全才再通知可看。
+
+
+**已处理 Opus #183（cdf99ba9两文件源小审核收）。** Root核10审阅工件hash、998快照树、两个增量源码与Git blob去CR逐字节同，5份证据/反编译来源hash同；JUnit116个case与Root逐项同且全过，旧源红测1失败6通过。首次peer线程环境9错原记录保留，不混入最终成功。没有P0–P2；CanDash真时游戏的地面/贴墙/空中三个分支airDashed均已清，现修复与此事实相符。P3的DASH_CD暂不扩修：已查四个矛盾现场点本来CD为0；先把现成翻越动作接进供给，不因这条非阻挡建议扩轮次。
+
+Task77另三项只核7产物hash，未独立重跑：3154预测接触仅在0.5余量带，CC_CAST模板后段姿势偏高且延续至真实Idle后，另有采样并集影响；3162等原点空冲到头顶可清，但停在那里会被重新瞄准的F落地锤覆盖，不是完整见证；3499恢复可用空冲后马上冲左更差，不能把资源修复当掉血已解决。后续不据此缩余量/删除层、不继续该诊断支线。当前源审已核收，Task78原出口有限证据待收；仍无P/游戏/ready声明。凭证analysis/observed_dash_start_20261102/OPUS183_RECEIPT.json。
