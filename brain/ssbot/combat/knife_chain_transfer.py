@@ -42,6 +42,35 @@ class TransferPlan:
         return {k:v for k,v in asdict(self).items() if k not in {"origin","entry_k","press_k","contact_frame"}}|{"cs":None}
 
 
+@dataclass(frozen=True)
+class TransferGoal:
+    target:int
+    caster:int
+    cast_fa:int
+
+
+def observe_goal(state,previous,cfg,finished):
+    """A visible antic selects the destination; it is not a Run or key commitment."""
+    es=clappers(state);h=state.get("hero") or {};f=state.get("f")
+    if len(es)!=2 or type(f) is not int or h.get("health",0)<=0:return None
+    byid={e["iid"]:e for e in es}
+    casting=[e for e in es if control(e)[0]=="Spell Antic" and control(e)[1]<=cfg["entry_cast_s"]]
+    if len(casting)==1:
+        caster=casting[0];target=next(e for e in es if e is not caster)
+        fa=max(0,f-int(round(control(caster)[1]*60.)))
+        fresh=TransferGoal(target["iid"],caster["iid"],fa)
+        if ((caster["iid"],fa) not in finished and control(target)[0] in cfg["target_states"] and
+                (previous is None or fresh!=previous)):return fresh
+    if previous is not None:
+        if (previous.target in byid and previous.caster in byid and
+                0<=f-previous.cast_fa<=cfg["max_frames"]):
+            box=body_box(byid[previous.target]);hb=h.get("box");pos=h.get("pos")
+            if (box is not None and hb and pos and box[0]<=pos[0]<=box[2] and
+                    hb[1]>=box[3]+cfg["head_clearance"]):return None
+            return previous
+    return None
+
+
 def visible(state,cfg=None):
     """Cheap candidate availability; actual focus/ground/HF are checked later."""
     h=state.get("hero") or {};box=h.get("box") or []
@@ -79,7 +108,7 @@ def path_problem(path,hold):
     return None
 
 
-def propose(runner,state,game,sim,target,ground,bombs,finished):
+def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None):
     """One manual recipe, two hero rollouts; no action-tree or height search."""
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     if len(es)!=2 or target is None or not complete_hf(state):return None
@@ -96,9 +125,12 @@ def propose(runner,state,game,sim,target,ground,bombs,finished):
     cd=(h.get("tm") or {}).get("dash_cd")
     if type(cd) not in (int,float) or not math.isfinite(cd):return None
     if active is None:
-        if not ground or h.get("hero_accepting_input") is not True or st!="Spell Antic" or tin>cfg["entry_cast_s"]:return None
+        if not ground or h.get("hero_accepting_input") is not True:return None
+        observed=(goal is not None and goal.target==target and goal.caster==other["iid"] and
+                  0<=state["f"]-goal.cast_fa<=cfg["max_frames"])
+        if not observed and (st!="Spell Antic" or tin>cfg["entry_cast_s"]):return None
         if int(sim.prefix[0])&B["J"] or state["act"]["hf"]["latched"]&B["J"]:return None
-        cast_fa=max(0,state["f"]-int(round(tin*60.)))
+        cast_fa=goal.cast_fa if observed else max(0,state["f"]-int(round(tin*60.)))
         if (other["iid"],cast_fa) in finished:return None
         p=TransferPlan(target,other["iid"],cast_fa,state["f"],game,
             B["R"] if enemy["pos"][0]>h["pos"][0] else B["L"],2+int(math.ceil(max(0.,cd)*60.)),10000,10000,False,state["f"],0)

@@ -83,3 +83,69 @@ def test_transfer_run_is_owned_only_after_successful_send_without_hit_commitment
  assert n.runner.run.chain=="rune_transfer" and n.commitment is None
  assert (7,1000) in n._transfer_finished
  n.reset(1);assert not n._transfer_finished and not n._transfer_ready
+
+
+def cast_scene():
+ e=lambda i,st,x:{"iid":i,"type_key":"Song Heavy Sentry","hp":100,"pos":[x,7.45],"fsms":[{"name":"Control","state":st,"t":0.}]}
+ return {"f":1000,"hero":{"health":7,"pos":[30.,8.],"box":[29.75,6.5,30.25,8.6]},"ents":[e(7,"Spell Antic",25.),e(8,"Idle",38.)]}
+
+
+def test_antic_goal_is_observed_in_air_and_survives_until_landing_after_entry_window():
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ r=load_runner();cfg=r.chains["rune_transfer"].cfg;s=cast_scene()
+ goal=observe_goal(s,None,cfg,set())
+ assert (goal.target,goal.caster,goal.cast_fa)==(8,7,1000)
+ later=deepcopy(s);later["f"]=1030;later["hero"]["box"][1]=3.015
+ later["ents"][0]["fsms"][0].update(state="Cast 1",t=.1)
+ assert observe_goal(later,goal,cfg,set())==goal
+ assert observe_goal(later,None,cfg,set()) is None
+ assert observe_goal(s,None,cfg,{(7,1000)}) is None
+
+
+def test_pending_goal_changes_preferences_without_creating_run_or_sent_keys():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-test");n.reset(0,start_frame=999)
+ s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
+ old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7,region=(24.,26.,3.,5.,"GROUND"))
+ new=n.goal_preferences(s,old,handoff=True)
+ assert new.target==8 and new.stance_x==38. and new.region is None
+ assert old.target==7 and old.stance_x==25. and old.region is not None
+ assert n._transfer_ready and n.runner.run is None and n.commitment is None
+ assert not n._transfer_finished and not n._receipts
+ n.commitment={"move":"previous strike"}
+ assert n.goal_preferences(s,old,handoff=True) is old
+ assert not n._transfer_ready
+ n.commitment=None
+ assert n.goal_preferences(s,old,handoff=False) is old
+ n.reset(1);assert n._transfer_goal is None
+
+
+def test_policy_handoff_releases_only_observed_bounced_after_not_incomplete_strike():
+ from ssbot.train.forum_planner_policy import ForumPlannerPolicy as Policy
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-owner");n.reset(0,start_frame=999)
+ s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
+ old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ p=Policy.__new__(Policy);p.chain_native=n;aborted=[]
+ p.slam_play=NS(run=NS(phase="air",bounced=False),abort=aborted.append)
+ assert p._chain_goal_preferences(s,old) is old and not aborted
+ p.slam_play.run.phase="after"
+ assert p._chain_goal_preferences(s,old) is old and not aborted
+ p.slam_play.run.bounced=True
+ assert p._chain_goal_preferences(s,old).target==8
+ assert aborted==["observed rune antic: transfer goal handoff"]
+ p.chain_native=None
+ assert p._chain_goal_preferences(s,old) is old
+
+
+def test_next_visible_cast_replaces_pending_destination_without_waiting_for_old_expiry():
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ cfg=load_runner().chains["rune_transfer"].cfg;s=cast_scene();first=observe_goal(s,None,cfg,set())
+ s["f"]=1060;s["ents"][0]["fsms"][0].update(state="Idle",t=0.)
+ s["ents"][1]["fsms"][0].update(state="Spell Antic",t=0.)
+ next_goal=observe_goal(s,first,cfg,set())
+ assert (next_goal.target,next_goal.caster,next_goal.cast_fa)==(7,8,1060)

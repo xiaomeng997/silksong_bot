@@ -41,14 +41,30 @@ class NativeManualAirChain(NativeChainB2):
 
     def reset(self,episode,*,start_frame=None):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
-        self._transfer_ready=False;self._transfer_finished=set()
+        self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
         super().reset(episode,start_frame=start_frame)
 
     def begin(self,state,history=()):
         super().begin(state,history)
+        previous=self._transfer_goal
+        self._transfer_goal=transfer.observe_goal(state,previous,self.runner.chains[transfer.PROGRAM].cfg,self._transfer_finished)
         self._transfer_ready=transfer.visible(state,self.runner.chains[transfer.PROGRAM].cfg)
+        if self._transfer_goal is not None and self._transfer_goal!=previous:
+            self._note("rune_transfer_goal",frame=state["f"],**asdict(self._transfer_goal),source="observed Spell Antic; destination only")
         self._air_context=(entry_context(state,self._clock,self.runner) if self.arm=="B" and
             self.commitment is None and self.post_context is None else None)
+
+    def goal_preferences(self,state,prefs,*,handoff):
+        """One destination before forecasting; critical/committed actions retain ownership."""
+        goal=self._transfer_goal
+        if (self.arm!="B" or goal is None or not handoff or self.commitment is not None or
+                self.recovery is not None or self.post_context is not None or getattr(prefs,"want_bind",False)):
+            self._transfer_ready=False
+            return prefs
+        target=next((e for e in transfer.clappers(state) if e["iid"]==goal.target),None)
+        if target is None:return prefs
+        self._transfer_ready=True
+        return replace(prefs,target=goal.target,stance_x=float(target["pos"][0]),boss_x=float(target["pos"][0]),region=None)
 
     def continuation_value_bound(self,prefs):return float("inf")
 
@@ -178,7 +194,7 @@ class NativeManualAirChain(NativeChainB2):
             self._note("rune_transfer_handoff",frame=f,reason="observed tactical focus changed")
             self.runner.run=None;return None
         if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
-        made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished)
+        made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal)
         if made is None:return None
         draft,plan,path,mask=made
         if draft is None:

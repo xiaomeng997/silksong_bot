@@ -960,6 +960,17 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- the tick ----
 
+    def _chain_goal_preferences(self,state,prefs):
+        chain=getattr(self,"chain_native",None);apply=getattr(chain,"goal_preferences",None)
+        if not callable(apply):return prefs
+        script=getattr(self,"slam_play",None);run=getattr(script,"run",None)
+        handoff=(run is None or (run.phase=="after" and run.bounced))
+        out=apply(state,prefs,handoff=handoff)
+        if out is not prefs:
+            if run is not None:script.abort("observed rune antic: transfer goal handoff")
+            self._play_tick=None
+        return out
+
     def _b2_priority_chain(self):
         chain=getattr(self,"chain_native",None)
         return chain if (getattr(chain,"b2",False) and getattr(chain,"arm",None)=="B"
@@ -1078,6 +1089,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 rx = self.two.rune_exit(f, s, ws.stamp.t_game_s)
                 if rx:
                     prefs = replace(prefs, rune_exit=rx)
+        prefs = self._chain_goal_preferences(s,prefs)
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
