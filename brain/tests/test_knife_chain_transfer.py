@@ -161,3 +161,81 @@ def test_pending_destination_does_not_claim_keys_from_a_new_target_attack():
  old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
  assert n.goal_preferences(s,old,handoff=True).target==8
  assert not n._transfer_ready and not n.candidate_generation
+
+
+def test_flight_endpoint_sees_beyond_ordinary_horizon_and_stops_before_landing():
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.knife_chain_transfer import flight_endpoint,head_clearance
+ r=load_runner();cfg=r.chains["rune_transfer"].cfg;clear=head_clearance(cfg)
+ from ssbot.combat.forum_v2 import FOCUS_M,CELL
+ assert clear>=FOCUS_M+2*CELL and cfg["flight_check_frames"]>cfg["lookahead_frames"]
+ states=np.zeros((K.K,73));states[K.GROUND,:3]=1.;states[K.GROUND,65:]=1.
+ pos=np.zeros((73,2));pos[40:,0]=5.
+ box=np.zeros((73,4));box[:,1]=7.+clear+.01
+ path=NS(states=states,pos=pos,box=box)
+ assert flight_endpoint(path,np.array([4.,3.,6.,7.]),clear)==(40,"overhead")
+ box[:,1]=7.+clear-.01
+ assert flight_endpoint(path,np.array([4.,3.,6.,7.]),clear)==(65,"landing")
+ states[K.GROUND,65:]=0.
+ assert flight_endpoint(path,np.array([4.,3.,6.,7.]),clear)==(None,"uncovered")
+
+
+def test_prejump_failure_uses_one_checked_coast_offer_and_does_not_force_keys(monkeypatch):
+ from ssbot.combat import knife_chain_air_native as mod
+ from ssbot.combat.knife_chain_air import AirAnchor
+ n=mod.NativeManualAirChain(runner_factory=load_runner,probe_ref="prejump-coast");n.reset(0,start_frame=1000)
+ n._transfer_ready=True;n._context=(None,None,None,None);p=plan();draft=load_runner().fork_empty(AirAnchor());draft.run=Run("rune_transfer","walk",p.variables())
+ path=NS(through=1036,assumptions={"flight_checked":False,"flight_endpoint":"uncovered"});calls=[];scanned=[]
+ def propose(*args,**kw):
+  calls.append(kw["defer_jump"])
+  return (draft,p,path,B["L"]) if kw["defer_jump"] else None
+ monkeypatch.setattr(mod.transfer,"propose",propose)
+ monkeypatch.setattr(mod.B2Geometry,"scan",lambda self,q:scanned.append(q) or NS(complete=True,contacts=[]))
+ st={"f":1000,"act":{"hf":{"latched":0}}};sim=NS(prefix=np.array([0]));fc=NS(rs=NS(trk=NS(now={8:(None,None,None)})))
+ offer=n._transfer_offer(st,0.,sim,fc,NS(target=8),True)
+ assert calls==[False,True] and scanned==[path]
+ assert offer.mask==B["L"] and offer.details["jump_deferred"]
+ assert n.runner.run is None and n.commitment is None
+ monkeypatch.setattr(mod.B2Geometry,"scan",lambda self,q:NS(complete=True,contacts=[NS(frame=1003,owner_iid=8,kind="body")]))
+ # contacts are real dataclasses in production; use the real contact object here.
+ from ssbot.combat.knife_chain_commitment import PathContact
+ monkeypatch.setattr(mod.B2Geometry,"scan",lambda self,q:NS(complete=True,contacts=[PathContact(1003,8,"body")]))
+ assert n._transfer_offer(st,0.,sim,fc,NS(target=8),True) is None
+
+
+def test_retarget_intent_moves_all_iid_fields_together_preserving_unrelated_data():
+ from ssbot.combat.tactics.modes import GoalPrefs
+ fields={"no_hit":frozenset({7,9}),"ground_hit":frozenset({8}),"no_pogo":frozenset({7}),"no_dash":frozenset({8,9}),"ground_first":frozenset({7,8})}
+ p=GoalPrefs(mode="RUSH",stance_x=25.,weights={"hit":1.},target=7,hit_w={7:3.,8:1.,9:.5},hit_kw={7:(3.,2.,1.,0.),9:(1.,1.,1.,1.)},rune_exit=("shared",),**fields)
+ q=p.retarget_intent(8,stance_x=38.,boss_x=38.)
+ assert q.hit_w=={8:3.,7:1.,9:.5} and q.hit_kw[8]==p.hit_kw[7]
+ assert q.no_hit==frozenset({8,9}) and q.ground_hit==frozenset({7})
+ assert q.no_pogo==frozenset({8}) and q.no_dash==frozenset({7,9}) and q.ground_first==frozenset({7,8})
+ assert q.rune_exit==p.rune_exit and q.weights==p.weights and p.hit_w[7]==3.
+ assert q.hit_w is not p.hit_w and q.hit_kw is not p.hit_kw
+
+
+def test_spent_transfer_has_no_false_keyboard_availability_but_active_run_can_continue():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref="spent-cast");n.reset(0,start_frame=999);st=cast_scene()
+ goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set());n._transfer_goal=goal;n._transfer_finished.add((7,1000))
+ old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+ assert n.goal_preferences(st,old,handoff=True) is old and n._transfer_goal is None
+ assert not n._transfer_ready and not n.candidate_generation
+ n._transfer_goal=goal;n.runner.run=Run("rune_transfer","air",plan().variables())
+ assert n.goal_preferences(st,old,handoff=True).target==8 and n._transfer_ready
+
+
+def test_caster_new_attack_releases_pending_and_active_uncommitted_transfer():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_transfer import observe_goal
+ from ssbot.combat.tactics.modes import GoalPrefs
+ for kind in ("Slam Antic","Jump Antic","Cast Slam Antic"):
+  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="caster-move");n.reset(0,start_frame=999);st=cast_scene()
+  n._transfer_goal=observe_goal(st,None,n.runner.chains["rune_transfer"].cfg,set());n.runner.run=Run("rune_transfer","air",plan().variables())
+  st["ents"][0]["fsms"][0]["state"]=kind
+  old=GoalPrefs(mode="RUSH",stance_x=25.,weights={},target=7)
+  assert n.goal_preferences(st,old,handoff=True) is old
+  assert n.runner.run is None and n._transfer_goal is None and not n.candidate_generation

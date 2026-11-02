@@ -66,9 +66,26 @@ def observe_goal(state,previous,cfg,finished):
                 0<=f-previous.cast_fa<=cfg["max_frames"]):
             box=body_box(byid[previous.target]);hb=h.get("box");pos=h.get("pos")
             if (box is not None and hb and pos and box[0]<=pos[0]<=box[2] and
-                    hb[1]>=box[3]+cfg["head_clearance"]):return None
+                    hb[1]>=box[3]+head_clearance(cfg)):return None
             return previous
     return None
+
+
+def head_clearance(cfg):
+    # Same focus margin as the query, plus the two raster-cell boundary bands.
+    # This strengthens the handoff definition; it never removes a contact.
+    from .forum_v2 import FOCUS_M,CELL
+    return max(float(cfg["head_clearance"]),FOCUS_M+2*CELL)
+
+
+def flight_endpoint(path,body,clearance):
+    ground=path.states[K.GROUND]>0
+    was_air=np.r_[False,np.maximum.accumulate(~ground[:-1])]
+    head=(path.pos[:,0]>=body[0])&(path.pos[:,0]<=body[2])&(path.box[:,1]>=body[3]+clearance)
+    indices=np.arange(len(ground));over=np.flatnonzero(head&(indices>=2));land=np.flatnonzero(ground&was_air&(indices>=2))
+    ends=[(int(over[0]),"overhead")] if len(over) else []
+    if len(land):ends.append((int(land[0]),"landing"))
+    return min(ends) if ends else (None,"uncovered")
 
 
 def visible(state,cfg=None):
@@ -108,7 +125,7 @@ def path_problem(path,hold):
     return None
 
 
-def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None):
+def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False):
     """One manual recipe, two hero rollouts; no action-tree or height search."""
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     if len(es)!=2 or target is None or not complete_hf(state):return None
@@ -140,6 +157,9 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None):
         p=TransferPlan(**{k:active.v[k] for k in TransferPlan.__dataclass_fields__ if k in active.v},origin=state["f"],entry_k=int(round((game-active.v["ta"])*60.)))
         link=active.link
     k=p.entry_k;T=int(cfg["lookahead_frames"])
+    current_mode=int(np.asarray(sim.start).reshape(K.K)[K.MODE])
+    if defer_jump or (ground and abs(enemy["pos"][0]-hp[0])<=cfg["jump_distance"] and current_mode not in (K.M_DASH,K.M_SPRINT)):
+        p=replace(p,dash_k=k+int(cfg["flight_check_frames"])+2)
     if link in {"walk","dash"} and ground:
         coast=render(runner,replace(p,jump_k=10000,jump_until=10000),k,T,link);ro=sim.roll(coast[None])
         idx=np.arange(ro.pos.shape[1]);near=np.flatnonzero(np.abs(ro.pos[0,:,0]-enemy["pos"][0])<=cfg["jump_distance"])
@@ -161,16 +181,25 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None):
         if link in {"walk","dash"}:p=replace(p,jump_until=k)  # an outside jump is not ours to re-press
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
         link="air"
+    if defer_jump:
+        if not ground or (state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"]:return None
+        p=replace(p,jump_k=k+10000,jump_until=k+10000,sprint_jump=False);link="walk"
+    flight=(not defer_jump and (p.jump_k<=k+3 or link in {"jump","air"}))
+    if flight:T=int(cfg["flight_check_frames"])
     draft=runner.fork_empty(AirAnchor());draft.run=Run(PROGRAM,link,p.variables())
-    obs=_observation(p,state,game,body,ground,cfg["head_clearance"])
+    clearance=head_clearance(cfg)
+    obs=_observation(p,state,game,body,ground,clearance)
     mask=draft.eval_link(X(draft,draft.run,obs))
     if mask is None:return (None,p,None,None)
     commands=render(runner,p,k,T,draft.run.link);path=model_path(sim,p,commands[:T-1],game)
     # Handback is an observed overhead state. Stop the nominal check at that
     # decision, rather than checking a made-up fall after the program returns.
-    overhead=(path.pos[:,0]>=body[0])&(path.pos[:,0]<=body[2])&(path.box[:,1]>=body[3]+cfg["head_clearance"])
-    hits=np.flatnonzero(overhead & (np.arange(len(overhead))>=2));end=int(hits[0]) if len(hits) else len(path.commands)
+    endpoint,end_kind=flight_endpoint(path,body,clearance)
+    if flight and endpoint is None:return None
+    fresh_jump=ground and not ((state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"])
+    if flight and fresh_jump and end_kind!="overhead":return None
+    end=len(path.commands) if endpoint is None else endpoint
     if end<len(path.commands):path=model_path(sim,p,commands[:end-1],game)
-    path=replace(path,stage="approach",assumptions={**path.assumptions,"basis":"manual rune transfer; future target position held nominally, actual move continuously observed","next_decision":"observed overhead or observed slam; no target exemption"})
+    path=replace(path,stage="approach",assumptions={**path.assumptions,"basis":"manual rune transfer; future target position held nominally, actual move continuously observed","next_decision":"observed overhead or observed slam; no target exemption","flight_checked":flight,"flight_endpoint":end_kind,"jump_deferred":defer_jump})
     if path_problem(path,sim.hold):return None
     return draft,p,path,int(mask)

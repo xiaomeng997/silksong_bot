@@ -61,12 +61,22 @@ class NativeManualAirChain(NativeChainB2):
                 self.recovery is not None or self.post_context is not None or getattr(prefs,"want_bind",False)):
             self._transfer_ready=False
             return prefs
-        target=next((e for e in transfer.clappers(state) if e["iid"]==goal.target),None)
-        if target is None:return prefs
+        enemies={e["iid"]:e for e in transfer.clappers(state)}
+        target=enemies.get(goal.target);caster=enemies.get(goal.caster)
+        active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
+        valid_caster=caster is not None and transfer.control(caster)[0] in {"Spell Antic","Cast 1","Cast 2","Idle","Walk"}
+        spent=(goal.caster,goal.cast_fa) in self._transfer_finished
+        if target is None or not valid_caster or (spent and not active):
+            self._transfer_goal=None;self._transfer_ready=False
+            if active:self._abandon("rune transfer no longer owns this observed cast")
+            return prefs
+        retarget=getattr(prefs,"retarget_intent",None)
+        if not callable(retarget):
+            self._transfer_ready=False;return prefs
         # A destination is not keyboard ownership: a newly observed target
         # attack must still reach the existing ground/air attack adapters.
         self._transfer_ready=transfer.control(target)[0] in {"Idle","Walk"}
-        return replace(prefs,target=goal.target,stance_x=float(target["pos"][0]),boss_x=float(target["pos"][0]),region=None)
+        return retarget(goal.target,stance_x=float(target["pos"][0]),boss_x=float(target["pos"][0]))
 
     def continuation_value_bound(self,prefs):return float("inf")
 
@@ -196,26 +206,30 @@ class NativeManualAirChain(NativeChainB2):
             self._note("rune_transfer_handoff",frame=f,reason="observed tactical focus changed")
             self.runner.run=None;return None
         if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
-        made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal)
-        if made is None:return None
-        draft,plan,path,mask=made
-        if draft is None:
-            self._note("rune_transfer_handoff",frame=f,reason="observed overhead or route end")
-            self.runner.run=None;return None
         rs=getattr(forecast,"rs",None)
-        current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
-        if current is None:return None
-        try:
-            scan=B2Geometry(forecast,f,plan.move,current[2]).scan(path)
-        except GeometryUnavailable as exc:
-            self._note("rune_transfer_unchecked",frame=f,reason=str(exc));return None
-        if not scan.complete or scan.contacts:
-            first=None if not scan.contacts else asdict(scan.contacts[0])
-            self._note("rune_transfer_rejected",frame=f,first=first);return None
-        return B2Offer("approach",path,draft,int(mask),0.,plan.move,
-            {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
-             "checked_through":path.through,"handoff":"observed overhead or observed slam cut-in",
-             "safety_basis":"fresh modeled approach; ALL target/foreign/delayed contacts retained"})
+        can_defer=ground and not ((state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"])
+        for defer in ((False,True) if can_defer else (False,)):
+            made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,defer_jump=defer)
+            if made is None:continue
+            draft,plan,path,mask=made
+            if draft is None:
+                self._note("rune_transfer_handoff",frame=f,reason="observed overhead or route end")
+                self.runner.run=None;return None
+            current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
+            if current is None:return None
+            try:scan=B2Geometry(forecast,f,plan.move,current[2]).scan(path)
+            except GeometryUnavailable as exc:
+                self._note("rune_transfer_unchecked",frame=f,reason=str(exc));continue
+            if not scan.complete or scan.contacts:
+                first=None if not scan.contacts else asdict(scan.contacts[0])
+                self._note("rune_transfer_rejected",frame=f,first=first,jump_deferred=defer);continue
+            return B2Offer("approach",path,draft,int(mask),0.,plan.move,
+                {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
+                 "checked_through":path.through,"jump_deferred":defer,
+                 "flight_checked":path.assumptions["flight_checked"],"flight_endpoint":path.assumptions["flight_endpoint"],
+                 "handoff":"observed overhead or observed slam cut-in",
+                 "safety_basis":"fresh modeled approach; ALL target/foreign/delayed contacts retained"})
+        return None
 
     def install(self,offer,planner,ordinary=None):
         if offer.details.get("rune_transfer"):

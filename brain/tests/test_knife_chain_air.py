@@ -314,3 +314,11 @@ def test_direct_air_overhead_cut_in_releases_without_extra_held_jump():
     made=plan_entry(r,s,1.,sim,context)
     assert made is not None and made[0].release_k==22
     assert not np.any(made[1]&B["J"])
+
+
+@pytest.mark.parametrize("other_state,allowed",[("Cast 2",True),("Spell Antic",False),("Cast 1",False)])
+@pytest.mark.parametrize("program",["air_strike","air_direct"])
+def test_cast2_cut_in_reaches_geometry_instead_of_assuming_buddy_lock(program,other_state,allowed):
+ s=raw() if program=="air_strike" else direct_raw(True)
+ other=deepcopy(s["ents"][0]);other["iid"]=8;other["fsms"][0]["state"]=other_state;s["ents"].append(other)
+ assert (entry_context(s,0.,load_runner()) is not None)==allowed

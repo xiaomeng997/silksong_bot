@@ -30,7 +30,7 @@ weighted more; it is the planner's terminal value too (where the horizon ends ma
 landing zone is in support from 1.4 s on). YELLOW restricts punishes to one hit (supervisor Restrictions).
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -104,6 +104,22 @@ class GoalPrefs(TacticPrefs):
     rune_exit: tuple = ()                  # SSBOT_FORUM_TWO_RUNEEXIT (task 1v1 SP12a; combat.two_play.rune_exit): the
     #                                      jump casts' circles still to light and the bodies; safe rows ending inside
     #                                      one with no way out left rank after the rest, above the landed hits
+
+
+    def retarget_intent(self,target,*,stance_x,boss_x):
+        """Move the complete target-relative score intent, never safety or keys.
+
+        The two actors exchange roles; all unrelated actor entries and shared
+        state survive. This keeps one target bundle instead of a partial overlay.
+        """
+        old=self.target
+        def iid(k):
+            if k==old:return target
+            return old if old is not None and k==target else k
+        fields={name:{iid(k):v for k,v in getattr(self,name).items()} for name in ("hit_w","hit_kw")}
+        fields.update({name:frozenset(iid(k) for k in getattr(self,name)) for name in
+            ("no_hit","ground_hit","no_pogo","no_dash","ground_first")})
+        return replace(self,target=target,stance_x=stance_x,boss_x=boss_x,region=None,**fields)
 
 
 class Tactics:

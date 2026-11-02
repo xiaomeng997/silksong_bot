@@ -395,7 +395,8 @@
       "max_contact_k": 40,
       "other_states": [
         "Idle",
-        "Walk"
+        "Walk",
+        "Cast 2"
       ],
       "contact_delay": 4
     },
@@ -831,7 +832,8 @@
       "max_contact_k": 52,
       "other_states": [
         "Idle",
-        "Walk"
+        "Walk",
+        "Cast 2"
       ],
       "contact_delay": 4,
       "hold_frames": 12,
@@ -1092,9 +1094,10 @@
       "jump_distance": 9.0,
       "jump_hold_frames": 24,
       "jump_lead_frames": 18,
-      "head_clearance": 0.2,
+      "head_clearance": 0.7,
       "max_frames": 120,
-      "jump_antic_frames": 7
+      "jump_antic_frames": 7,
+      "flight_check_frames": 72
     },
     "admission": {
       "walk": {
