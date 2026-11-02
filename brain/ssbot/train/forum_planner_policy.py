@@ -515,6 +515,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         audit = getattr(self, "chain_native", None)
         if audit is None:
             return
+        if getattr(audit,"b2",False):audit.exit_transition=bool(getattr(self,"real_quit_active",False))
         history = ()
         if self._inbox is not None:
             with self._inbox_lock:
@@ -526,6 +527,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         audit = getattr(self, "chain_native", None)
         if not getattr(audit, "b2", False):
             return
+        audit.exit_transition=bool(getattr(self,"real_quit_active",False))
         history = ()
         if self._inbox is not None:
             with self._inbox_lock:

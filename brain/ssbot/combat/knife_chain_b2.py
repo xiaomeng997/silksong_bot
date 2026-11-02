@@ -119,6 +119,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         self._press=None;self._accepted=None;self._hit=None;self._bounce_marker=False
         self._last_budget_f=None;self._budget_hp=None;self._kill_frame=None;self.learning_stop=None
         self._episode_start=start_frame
+        self.exit_transition=False;self._exit_scene_frame=None
         self._budget_targets=set();self._budget_dead=set()
         self._application={};self._late_bound_targets=set();self._last_matching_report=None;self._actual_state=None;self.recovery=None
         self._post_seed=None;self._post_kind=None
@@ -189,7 +190,20 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         f=state["f"]
         if self._last_budget_f is not None and f<=self._last_budget_f:return
         h=state.get("hero") or {};hp=h.get("health")
-        if type(hp) is not int:self._stop("missing critical hero HP log",f)
+        scene=(state.get("game") or {}).get("scene")
+        # A confirmed pause alone is NOT permission to ignore combat HP. First
+        # observe the actual Quit_To_Menu scene, then admit only menu/unloaded
+        # frames at/after that boundary. Unknown battle frames still hard-stop.
+        if self.exit_transition and scene=="Quit_To_Menu":self._exit_scene_frame=f
+        if type(hp) is not int:
+            left=(scene in {"Quit_To_Menu","Menu_Title"} or (scene in {None,""} and not h))
+            if (self.exit_transition and self._exit_scene_frame is not None and
+                    f>=self._exit_scene_frame and left):
+                self._last_budget_f=f
+                self._note("b2_exit_frame_no_hp",frame=f,scene=scene,exit_scene_frame=self._exit_scene_frame,
+                           scope="confirmed real-quit scene transition; no combat HP/loss inferred")
+                return
+            self._stop("missing critical hero HP log",f)
         loss=0 if self._budget_hp is None else max(0,self._budget_hp-hp)
         self._budget_hp=hp;self._last_budget_f=f
         from .slam_play import CLAPPER
