@@ -3023,3 +3023,14 @@ analysis/rune_transfer_20261102保存有限证据。实际2733完整当前policy
 关键两拍2675普通MOVE(R)为27.4269ms/S0、2676 rune_transfer.jump为13.6457ms/S0，有限工程点界33.333ms过；346tick p50 15.08555、p99 20.480405、最大28.2265（2543）。compiled_signatures前后同、foreign空，346发送包。仍有单帧以上普通尾部，不称游戏/network输入期限或实际动作成功保证；预热/49.45ms战前GC和战后1.3798ms gen2单列不算战斗成本。
 
 自有三进程createTime核实已退出后，Root另读Prefs无差/golden一致、registry instances/live空/restore_pending=false且无游戏，才STATUSfalse。证据analysis/rune_transfer_p4b_20261102/P_WINDOW、transfer_p_trace、P_RECEIPT。当前默认关闭，源码审阅177与有限工程成本已核；等待用户新“开”后只建一个新条件观看局，继续首损/回执/日志严停，不重开65aeb已停局。旧SP4评分差异按上文新打法意图保留，实际到头顶/下劈/真实命中弹起仍待新局，不把代码/计时通过当效果通过。
+
+
+### 7.36 4b观看局强制换人错误与最小纠正【ac8723af；98相关过，增量审阅待收】
+
+用户“开吧，我看一局”只开一个新条件观看：sol/demos/w13_rune_transfer_20261102T190032Z_4b8d7bae，seed314168仍是重复案例。f2714被小符文损1HP（7→6）即Q1退出；measure T8.2950595077s，trace/config/window complete、unresolved空、worker rc0。45个接近选中tick全为水平走/冲刺，没有选中新J，未验收头顶/接刀。2026-11-02T19:02:19.472990Z真实清理：自有launcher/worker/game退出、Prefs/golden无差、旧DEMO恢复、registry空且restore_pending=false，独立复核后STATUSfalse。原停止局不补不重开。
+
+用户指出两怪都近程且离墙远、右更开阔，却放弃右怪跑中间吃符文。实际2622右335470小符文前摇时，L2原因仍“two: keep; rune: face”，动作层TransferGoal强制把目标和命中奖励改左335476；2632接近被左身体路径拒后，2633又回右。此前把“靠墙怪前摇时换开阔侧”错误推广成“见小符文就换另一只”，本轮删除这个覆盖，不能再用相反特例补丁弥补。
+
+ac8723af移除GoalPrefs.retarget_intent和链内目标交换；目标层选谁，动作链只执行该目标的路线，全部新鲜权重/限制/站位原样保留。未选另一只时不把候选目的地当已选目标，不释放旧after。7.35角色交换及其SP4差异处置由此接口修正取代；没有增加一律NOPOGO等相反规则。候选元数据事件改名rune_transfer_candidate。全飞行/全部危险、输入回执/严停保持，默认关闭。
+
+analysis/rune_transfer_selection_20261102保存98相关通过/foreign空、ACTUAL2622_INTERFACE与来源清单。2622薄接口使用真实STATE，prefs明确为保留2621右目标/奖励的代理，只证明不再覆盖，不冒称完整L2/按键/闭环或安全验收。Task73仅审三文件修正及此边界，不重做高度/机制/321大审。当前无新P/实机，下一观看仍须用户新指令。
