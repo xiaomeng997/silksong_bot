@@ -2823,3 +2823,13 @@ Root把七个锤记录与实际measurement owner逐项比：2903/3337/3423/3584/
 
 
 Root静态接口图见analysis/field_takeover_scope_20261101/ROOT_INTERFACE_MAP.md（8c24源）。已确认普通候选J加分入口可复用，但当前egress的ground/capability known与未来常驻位置软分需分开；gauntlet先重写target/stance/hit_w、旧SLAM最后直接改mask，不能靠加大场权重掩盖这两道硬覆盖。等待Task58仅给最小接管单元/退场顺序，当前不加新代码或大验证链。
+
+
+**已处理 Opus #163（Task58静态接口事实核收；草案未原样批准）。** Root核2工件/14源码逐字节同8c24 Git blob，确认专用egress准入、地面终点和旧target/stance/脚本覆盖。analysis/field_takeover_scope_20261101/OPUS163_RECEIPT.json另核调用路径：当前w13 B2=0在ForumPlanner.tick3555–3556直接返回ordinary，challenger_value默认None；三处B2值剪枝本来未启用，常驻位置分不在这配置下新增关闭优化。故不接受“先改三处上界才可推进”为当前阻挡，不为未用路径加源码/预算；未来B2重开再按全部分量的真实上界处理。
+
+163另有几处收窄：用户要求重建异步，即使小闭式图也不得搬回决策进程；现有4591–4593已经让scene值参加safe v2_nh排名，不能只看J断言一定需要发布器输出no_hit；场应独立打位置分而不是换个位置藏目标控制器。6u整块0、两怪同半场即放弃中间带、全局删out-to-wall均只是草案，不按用户决定或已证实因果执行。时间结点必须对应明确值/假设，并处理相邻发布图连续，不以单张线性插值代替。
+
+第一小单元按POSITION_SLICE_V1.md：常驻、可见状态的position软层，与专用egress分开覆盖，输入只有怪/场地/时钟而无英雄/目标/按键；第一层只编码横向偏好但任意空中位置可查，完整瞄准/漏斗/高度战术尚未完成。先离线几个几何场景及连续发布，再默认关闭影子；旧控制保留且明示接管不完整，不开双怪B2、不全局删规则。Opus Task59只做纯位置图小原型及报告，不建新worker/控制器，不跑录像/模型/P；Sol负责以后原生后台接线。用户到场前不开实机。
+
+
+Root组合查询/影子边界见analysis/field_takeover_scope_20261101/SCORING_INTEGRATION_CONTRACT.md：position与egress分开known，不动态按可用层归一，值上界取固定分量权重总和；同一次rollout终点只建一次query，沿用J和safe v2_nh，不重跑物理。先影子完全不改目标/stance/no_hit/脚本mask，后续ordinary让路才另行接；未迁移脚本不冒称被场控制。重建仍在现有后台/完整双缓存，跨实际发布点的时间连续需验证，不加当前B2未使用的剪枝框架。
