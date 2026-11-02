@@ -34,7 +34,7 @@ def selected(stage="approach", mask=2, arm="B"):
     return p,res
 
 
-@pytest.mark.parametrize("stage", ["approach","commitment","active","continuation","recovery"])
+@pytest.mark.parametrize("stage", ["approach","commitment","active","continuation","recovery","manual_commitment"])
 @pytest.mark.parametrize("mask", [0,2])
 def test_selected_chain_all_stages_require_fresh_matching_result(stage, mask):
     p,res=selected(stage,mask)
@@ -80,6 +80,7 @@ def arbitration_code():
 
 
 def run_arbitration(p,res,*,mask_sup=None,low_crit=False,asw_crit=False,m2=None):
+    p.tac=None  # Actual arbitration also reads the optional Gauntlet wall-skip.
     p.sc=NS(pq=None);p.pause_owned=False;p.m2=m2;p.wpress=None;p.air_show=None
     p._play_tick=None;p.v2feed=None;p.counts=Counter();p._cogfly=lambda *a:None;p.cog={"frames":set()}
     p.slam_play=Script(mask=16);p.claw=Script(mask=32);p.cast_stab=Script(mask=64)
@@ -96,7 +97,7 @@ def run_arbitration(p,res,*,mask_sup=None,low_crit=False,asw_crit=False,m2=None)
     return scope
 
 
-@pytest.mark.parametrize("stage",["approach","commitment","active","continuation","recovery"])
+@pytest.mark.parametrize("stage",["approach","commitment","active","continuation","recovery","manual_commitment"])
 @pytest.mark.parametrize("mask",[0,2])
 def test_production_arbitration_restores_slam_slot_and_lower_scripts_yield(stage,mask):
     if stage=="recovery":mask=0

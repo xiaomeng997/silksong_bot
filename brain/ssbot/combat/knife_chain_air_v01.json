@@ -1,0 +1,438 @@
+{
+  "air_strike": {
+    "id": "air_strike",
+    "start": "align",
+    "links": {
+      "align": {
+        "id": "air_strike.align",
+        "phase": "align",
+        "clock": "antic",
+        "entry": {
+          "all": [
+            {
+              "p": "air_ready"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.entry_k",
+              "op": ">=",
+              "b": "cfg.entry_k_min"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.gap",
+              "op": ">=",
+              "b": "cfg.gap_min"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.height",
+              "op": ">=",
+              "b": "cfg.height_min"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.entry_k",
+              "op": "<=",
+              "b": "cfg.entry_k_max"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.gap",
+              "op": "<=",
+              "b": "cfg.gap_max"
+            },
+            {
+              "p": "cmp",
+              "a": "obs.height",
+              "op": "<=",
+              "b": "cfg.height_max"
+            }
+          ]
+        },
+        "inherit": [
+          "stop"
+        ],
+        "keys": [
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.drift_end_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "J",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.release_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "D",
+            "clock": "antic",
+            "lo": {
+              "sub": [
+                "var.press_k",
+                1
+              ]
+            },
+            "hi": {
+              "add": [
+                "var.press_k",
+                2
+              ]
+            }
+          },
+          {
+            "mask": "A",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          },
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "fall",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">=",
+              "b": "var.release_k"
+            }
+          }
+        ]
+      },
+      "fall": {
+        "id": "air_strike.fall",
+        "phase": "fall",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ],
+        "keys": [
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.drift_end_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "J",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.release_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "D",
+            "clock": "antic",
+            "lo": {
+              "sub": [
+                "var.press_k",
+                1
+              ]
+            },
+            "hi": {
+              "add": [
+                "var.press_k",
+                2
+              ]
+            }
+          },
+          {
+            "mask": "A",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          },
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "strike",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">=",
+              "b": "var.press_k"
+            }
+          }
+        ]
+      },
+      "strike": {
+        "id": "air_strike.strike",
+        "phase": "strike",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ],
+        "keys": [
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.drift_end_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "J",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.release_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "D",
+            "clock": "antic",
+            "lo": {
+              "sub": [
+                "var.press_k",
+                1
+              ]
+            },
+            "hi": {
+              "add": [
+                "var.press_k",
+                2
+              ]
+            }
+          },
+          {
+            "mask": "A",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          },
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "observe",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">",
+              "b": {
+                "add": [
+                  "var.press_k",
+                  2
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "observe": {
+        "id": "air_strike.observe",
+        "phase": "observe",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ],
+        "keys": [
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.drift_end_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "J",
+            "clock": "antic",
+            "hi": {
+              "sub": [
+                "var.release_k",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "D",
+            "clock": "antic",
+            "lo": {
+              "sub": [
+                "var.press_k",
+                1
+              ]
+            },
+            "hi": {
+              "add": [
+                "var.press_k",
+                2
+              ]
+            }
+          },
+          {
+            "mask": "A",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          },
+          {
+            "mask": "toward",
+            "clock": "antic",
+            "lo": "var.press_k",
+            "hi": "var.press_k"
+          }
+        ],
+        "rules": []
+      }
+    },
+    "rulesets": {
+      "stop": [
+        {
+          "do": "done",
+          "when": {
+            "p": "air_bounced"
+          },
+          "why": {
+            "lit": "observed target hit and bounce"
+          }
+        },
+        {
+          "do": "abort",
+          "when": {
+            "not": {
+              "p": "air_target_valid"
+            }
+          },
+          "why": {
+            "lit": "target move absent or changed"
+          }
+        },
+        {
+          "do": "abort",
+          "when": {
+            "p": "cmp",
+            "a": "k",
+            "op": ">",
+            "b": {
+              "add": [
+                "var.press_k",
+                "cfg.bounce_by"
+              ]
+            }
+          },
+          "why": {
+            "lit": "no observed bounce after planned strike"
+          }
+        }
+      ]
+    },
+    "vars": {
+      "iid": null,
+      "fa": null,
+      "ta": null,
+      "entry_k": null,
+      "side": null,
+      "release_k": null,
+      "drift_end_k": null,
+      "press_k": null,
+      "contact_k": null,
+      "hp0": null,
+      "cs": null
+    },
+    "cfg": {
+      "lag": 0,
+      "CLAWSTRIKE": false,
+      "drift_frames": 16,
+      "release_high_k": 26,
+      "release_low_k": 30,
+      "height_split": 3.5,
+      "entry_k_min": 0,
+      "entry_k_max": 12,
+      "gap_min": 2.4,
+      "gap_max": 3.7,
+      "height_min": 2.3,
+      "height_max": 5.0,
+      "bounce_by": 14,
+      "max_contact_k": 40,
+      "other_states": [
+        "Idle",
+        "Walk"
+      ],
+      "contact_delay": 4
+    },
+    "admission": {
+      "align": {
+        "link": "air_strike.align",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual development probe; two historical origins, no general admission or safety claim."
+      },
+      "fall": {
+        "link": "air_strike.fall",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual development probe; two historical origins, no general admission or safety claim."
+      },
+      "strike": {
+        "link": "air_strike.strike",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual development probe; two historical origins, no general admission or safety claim."
+      },
+      "observe": {
+        "link": "air_strike.observe",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual development probe; two historical origins, no general admission or safety claim."
+      }
+    },
+    "provenance": {
+      "format": "0.1",
+      "source": "Opus Task62/167 two-origin manual representative; runtime timing and full hazards must be rechecked",
+      "implementation": "manual action chain; no online search; contact timing calculation only"
+    }
+  }
+}

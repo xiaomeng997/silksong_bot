@@ -434,7 +434,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.m2.start()               # the search workers (spawned, warmed; waits until they are ready)
         if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1":
             from ssbot.combat.knife_chain_nominal import warm_nominal
-            self.b2_warmup_report=warm_nominal(self.params)
+            if os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1":
+                from ssbot.combat.knife_chain_air import warm as warm_air
+                self.b2_warmup_report=warm_air(self.params)
+            else:self.b2_warmup_report=warm_nominal(self.params)
             # A B2 smoke may run without the A/A measurement wrapper. It still
             # needs the real nonempty parallel query signatures before combat.
             from ssbot.train.measurement import warm_query_kernels
@@ -449,6 +452,8 @@ class ForumPlannerPolicy(PlannerPolicy):
     def _reset_chain_native(self, *, observe_baseline=True) -> None:
         native = os.environ.get("SSBOT_FORUM_CHAIN_NATIVE", "0").strip() == "1"
         b2 = os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1"
+        if os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1" and not b2:
+            raise ValueError("manual air chain requires explicit CHAIN_B2=1 and named probe")
         if b2 and not native:
             raise ValueError("B2 requires explicit CHAIN_NATIVE=1")
         if CHAIN_STRICT_RECEIPTS and native:
@@ -467,6 +472,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                     raise ValueError("B2 requires the live V2 danger tracker")
                 from ssbot.combat.knife_chain_b2 import NativeChainB2
                 selected = NativeChainB2
+                if os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1":
+                    from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+                    selected = NativeManualAirChain
             journal = None if self.log_path is None else str(self.log_path.with_suffix(".chain.jsonl"))
             existing = getattr(self, "chain_native", None)
             if type(existing) is selected:
@@ -549,8 +557,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.flush_log()
         self.flush_keys()
         self.episode += 1
-        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1" and enc.name != "Forum_W_w7":
-            raise ValueError("first B2 learning profile is restricted to Forum_W_w7")
+        from ssbot.combat.knife_chain_budget import encounter_allowed
+        if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1" and not encounter_allowed(enc.name):
+            raise ValueError("B2 encounter requires w7 or the explicit manual-air w13 probe")
         try:
             self._reset_chain_native()
         except ValueError as exc:

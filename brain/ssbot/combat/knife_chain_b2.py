@@ -67,14 +67,12 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         profile=NominalProfile(short_frames=int(os.environ.get("SSBOT_FORUM_CHAIN_SHORT_FRAMES","12")),fast_hook=fast=="1",fixed_hook=fixed=="1")
         # Binding/compile once; changing source, program or config cannot silently
         # reset a previous budget under the same batch name/path.
-        runner=load_runner(fixed_hook=True) if profile.fixed_hook else load_runner()
+        runner=cls.load_program(profile)
         digest=hashlib.sha256()
         source=Path(__file__).resolve().parents[1]
         for f in sorted(source.rglob("*.py")):
             digest.update(str(f.relative_to(source)).encode());digest.update(f.read_bytes())
-        table=Path(__file__).with_name("knife_chain_slam_v01.json")
-        digest.update(table.read_bytes())
-        digest.update(Path(__file__).with_name("knife_chain_fixed_hook_v1.json").read_bytes())
+        for table in cls.program_tables():digest.update(table.read_bytes())
         knowledge=Path(__file__).resolve().parents[3]/"knowledge/1.0.30000"
         for f in sorted((knowledge/"enemies/forum").glob("*.npz")):
             digest.update(f.name.encode());digest.update(f.read_bytes())
@@ -104,6 +102,16 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
                      journal=journal,profile=profile,arm=arm,budget=budget)
         instance.require_send_clock=True
         return instance
+
+    @staticmethod
+    def load_program(profile):
+        from .knife_chain_slam import load_runner
+        return load_runner(fixed_hook=True) if profile.fixed_hook else load_runner()
+
+    @staticmethod
+    def program_tables():
+        return (Path(__file__).with_name("knife_chain_slam_v01.json"),
+                Path(__file__).with_name("knife_chain_fixed_hook_v1.json"))
 
     def reset(self,episode,*,start_frame=None):
         super().reset(episode,start_frame=start_frame)
@@ -873,7 +881,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             return res
         # The named probe remains visible; h2 guard use isn't relabelled fitted.
         adm=AdmissionDecision(offer.draft.run.lid,"unchecked",f,None,
-                             (ConditionResult("legacy_h2_guard","unchecked","named B2 learning protocol"),))
+                             (ConditionResult("manual_air_entry" if offer.details.get("manual_air") else "legacy_h2_guard","unchecked","named B2 learning protocol"),))
         wire=self.dispatch.offer(offer.draft.run.lid,offer.mask,table_ref=self.runner.binding["table_digest"],admission=adm)
         self.register_row(0,wire,probe_ref=self.probe_ref)
         self._draft,self._offer,self._b2_selected=offer.draft,wire,offer
@@ -881,16 +889,16 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         p=offer.path
         cmd=np.array([offer.mask],np.int64) if p is None else p.offered.copy()
         res=PlanResult(offer.mask,0,"CHAIN B2 "+offer.stage+" "+offer.draft.run.lid,0,False,J=offer.value,V=True,
-                       n=1,n_allowed=1,n_safe=0 if (offer.details.get("fixed_hook") or offer.details.get("simple_wait")) else 1,cmd=cmd,path=None if p is None else p.box,
+                       n=1,n_allowed=1,n_safe=0 if (offer.details.get("fixed_hook") or offer.details.get("simple_wait") or offer.details.get("manual_air")) else 1,cmd=cmd,path=None if p is None else p.box,
                        tail_ok=None,hits=1. if offer.stage=="commitment" else 0.)
-        if offer.stage in {"commitment","fixed_commitment"}:
+        if offer.stage in {"commitment","fixed_commitment","manual_commitment"}:
             from .knife_chain_score_bound import clear_ordinary_action_memo
             clear_ordinary_action_memo(planner)
         planner.prev_cmd=None if offer.stage!="continuation" else cmd.copy()
         planner.prev_name=res.name;planner.prev_tail_ok=False;planner.prev_esc_unsafe=False
         planner.last_info={"b2":{"stage":offer.stage,"move":vars(offer.move),"details":offer.details,
                                   "ordinary":None if ordinary is None else {"J":ordinary.J,"name":ordinary.name}},
-                           "esc":{"b2":"unchecked_empirical_table" if (offer.details.get("fixed_hook") or offer.details.get("simple_wait")) else "empirical_lower_bound" if offer.stage=="commitment" else "not_a_commitment",
+                           "esc":{"b2":"unchecked_manual_air" if offer.details.get("manual_air") else "unchecked_empirical_table" if (offer.details.get("fixed_hook") or offer.details.get("simple_wait")) else "empirical_lower_bound" if offer.stage=="commitment" else "not_a_commitment",
                                   "unsafe":False},"S":np.zeros(1,np.int64),"N":1}
         if planner.measurement_enabled:planner.measurement_result=res
         if p is not None:
@@ -1013,9 +1021,10 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             self._vetoed_preparation=None
         committed=selected is not None and sent.chain_outcome=="sent"
         if committed:
-            if selected.stage=="fixed_commitment":
+            if selected.stage in {"fixed_commitment","manual_commitment"}:
                 self.commitment={"move":selected.move,"origin":sent.frame,"ta":self.runner.run.v["ta"],
-                                 "predicted_bounce":None,"fixed_hook":True}
+                                 "predicted_bounce":selected.details.get("predicted_bounce"),"fixed_hook":selected.stage=="fixed_commitment",
+                                 "manual_air":bool(selected.details.get("manual_air"))}
                 self._press=self._accepted=self._hit=None;self._fixed_jump_sent_for=None
                 self._arm_hook_start(selected,sent)
             elif selected.stage=="commitment":

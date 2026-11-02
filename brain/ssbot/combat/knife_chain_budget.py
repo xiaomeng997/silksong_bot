@@ -157,12 +157,18 @@ class LearningBudget:
         self.check()
 
 
+def encounter_allowed(encounter):
+    """Keep the old w7 scope; only the explicit manual-air probe adds w13."""
+    return encounter=="Forum_W_w7" or (encounter=="Forum_W_w13" and
+        os.environ.get("SSBOT_FORUM_CHAIN_AIR_MANUAL","0").strip()=="1")
+
+
 def preflight_environment(encounter, *, no_record=False):
     """Read-only preflight, before IPC/reset; stopped batches are never retried."""
     if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":return
-    if (encounter!="Forum_W_w7" or no_record or
+    if (not encounter_allowed(encounter) or no_record or
             os.environ.get("SSBOT_FORUM_CHAIN_NATIVE","0").strip()!="1"):
-        raise LearningStop("B2 requires recorded Forum_W_w7 and explicit native mode")
+        raise LearningStop("B2 requires recorded allowed encounter and explicit native mode")
     batch=os.environ.get("SSBOT_FORUM_CHAIN_BATCH","")
     path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
     if not batch or not path or not os.environ.get("SSBOT_FORUM_CHAIN_PROBE","") or os.environ.get("SSBOT_FORUM_CHAIN_ARM") not in {"A","B"}:
