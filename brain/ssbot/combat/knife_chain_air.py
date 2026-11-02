@@ -84,7 +84,7 @@ def load_runner():
     p.guard("air_bounced")(lambda x:bool(x.obs.bounced))
     p.direction("toward")(lambda x:int(x.v["side"]))
     return ChainRunner(chains,AirAnchor(),p,cfg0=chains["air_strike"].cfg,
-        observation_names={"f","F","k","ready","target_valid","bounced","entry_k","gap","height","program","jump_held"},
+        observation_names={"f","F","k","ready","target_valid","bounced","entry_k","gap","height","program","jump_held","ground","overhead"},
         literal_names={">=","<=",">"})
 
 
@@ -182,7 +182,9 @@ def plan_entry(runner,state,game,sim,context=None):
         queued_jump=bool(int(sim.prefix[0])&B["J"])
         if queued_jump and not obs.jump_held:return None
         held=obs.jump_held and queued_jump
-        release=k+2+(int(cfg["hold_frames"]) if held else 0)
+        scope=X(runner,Run(obs.program,"align",dict(runner.chains[obs.program].vars)),obs)
+        hold_frames=int(runner.ev(scope,cfg.get("hold_rule",cfg["hold_frames"]))) if held else 0
+        release=k+2+hold_frames
     else:
         release=int(cfg["release_high_k"] if obs.height>=cfg["height_split"] else cfg["release_low_k"])
         if release<=k+2:return None
@@ -237,7 +239,7 @@ def model_path(sim,plan,commands,game,*,contact=None):
     states,boxes,pos,flags,games=_trace_events(np.asarray(sim.start,float).reshape(K.K),lat[0],events,float(game),
         sim.params.frame_time,sim.params.vector()[None,:],sim.terrain.packed())
     return NominalPath(sim.fo,"air_manual",full,lat[0],states,boxes,pos,flags,flags.copy(),games,hold,
-        None,None,0,"bounce" if contact is not None else "short",plan.origin+plan.press_k-plan.entry_k,
+        None,None,0,"bounce" if contact is not None else "short",None if plan.press_k is None else plan.origin+plan.press_k-plan.entry_k,
         plan.contact_frame if contact is not None else None,
         {"basis":"manual air table; nominal contact, not real evidence","target_iid":plan.iid,
          "move":asdict(plan.move),"input_owner":False,"safety":"unchecked"})

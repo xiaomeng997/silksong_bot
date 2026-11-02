@@ -158,7 +158,7 @@ def test_production_factory_keeps_explicit_profile_and_binds_manual_table(tmp_pa
         SSBOT_FORUM_CHAIN_FAST_HOOK="0",SSBOT_FORUM_CHAIN_FIXED_HOOK="0").items():monkeypatch.setenv(k,v)
     n=NativeManualAirChain.from_env(journal=str(tmp_path/"chain.jsonl"))
     assert n.require_send_clock and n.budget is not None
-    assert set(n.runner.chains)=={"air_strike","air_direct"} and n.profile.short_frames>9
+    assert set(n.runner.chains)=={"air_strike","air_direct","rune_transfer"} and n.profile.short_frames>9
     n.reset(1);assert n.runner.run is None and not n._air_finished
 
 
@@ -298,3 +298,19 @@ def test_direct_air_path_invariant_catches_new_edges_and_umbrella(bad):
     path=NS(states=states,latched=latched)
     assert direct_path_problem(p,path,hold) is not None
     assert direct_path_problem(plan(),path,hold) is None
+
+
+
+def test_direct_air_overhead_cut_in_releases_without_extra_held_jump():
+    from ssbot.combat.knife_chain_air import plan_entry
+    from ssbot.knowledge import kinematics as K
+    s=direct_raw(True);s["hero"].update(pos=[28.,9.55],box=[27.75,8.,28.25,10.1],vel=[0.,-2.])
+    s["ents"][0]["fsms"][0]["t"]=20/60
+    r=load_runner();context=entry_context(s,1.,r)
+    assert context is not None and context[0].gap==-.25
+    sim=direct_sim(s,B["J"])
+    sim.start=K.initial_state(sim.params,28.,9.55,vy=-2.,facing=1,ground=False)
+    sim.start[K.JHELD]=1.;sim.start[K.PREV]=B["J"]
+    made=plan_entry(r,s,1.,sim,context)
+    assert made is not None and made[0].release_k==22
+    assert not np.any(made[1]&B["J"])

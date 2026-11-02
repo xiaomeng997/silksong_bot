@@ -13,6 +13,7 @@ from .knife_chain_b2 import NativeChainB2,B2Offer
 from .knife_chain_eval import Run,X
 from .knife_chain_air import (AirAnchor,load_runner,entry_context,plan_entry,model_path,advance,complete_hf,render,direct_path_problem)
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
+from . import knife_chain_transfer as transfer
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import logical_copy,NominalUnsupported
 
@@ -31,7 +32,8 @@ class NativeManualAirChain(NativeChainB2):
     @property
     def candidate_generation(self):
         return bool(getattr(self,"_candidate_enabled",False) and
-            (getattr(self,"_air_context",None) is not None or getattr(self,"commitment",None) is not None
+            (getattr(self,"_air_context",None) is not None or getattr(self,"_transfer_ready",False)
+             or (self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM) or getattr(self,"commitment",None) is not None
              or getattr(self,"recovery",None) is not None or getattr(self,"post_context",None) is not None))
 
     @candidate_generation.setter
@@ -39,10 +41,12 @@ class NativeManualAirChain(NativeChainB2):
 
     def reset(self,episode,*,start_frame=None):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
+        self._transfer_ready=False;self._transfer_finished=set()
         super().reset(episode,start_frame=start_frame)
 
     def begin(self,state,history=()):
         super().begin(state,history)
+        self._transfer_ready=transfer.visible(state,self.runner.chains[transfer.PROGRAM].cfg)
         self._air_context=(entry_context(state,self._clock,self.runner) if self.arm=="B" and
             self.commitment is None and self.post_context is None else None)
 
@@ -133,10 +137,12 @@ class NativeManualAirChain(NativeChainB2):
             if bad:
                 self._air_finished.add(plan.move);self._recover("manual air current external path blocked",f);return None
             return B2Offer("active",None,draft,int(mask),0.,plan.move,{"manual_air":True,"phase":draft.run.link})
-        if self._air_context is None:return None
+        if self._air_context is None:return self._transfer_offer(state,game,sim,forecast,prefs,ground)
+        if self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM and self._air_context[1]["iid"]!=getattr(prefs,"target",None):
+            return self._transfer_offer(state,game,sim,forecast,prefs,ground)
         try:
             made=plan_entry(self.runner,state,game,sim,self._air_context)
-            if made is None:return None
+            if made is None:return self._transfer_offer(state,game,sim,forecast,prefs,ground)
             plan,commands,contact=made
             if plan.move in self._air_finished or plan.move in self._failed_hook_moves:return None
             # The current commitment ends at modeled bounce, not at a guessed
@@ -164,6 +170,46 @@ class NativeManualAirChain(NativeChainB2):
              "entry_k":plan.entry_k,"safety_basis":"fresh nominal path through modeled contact; unfitted manual table",
              "post_bounce":"N=2 short or one full exit; normal planner after real bounce",
              "continuations":asdict(exits),"plan":vars(plan)})
+
+    def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
+        f=state["f"];target=getattr(prefs,"target",None)
+        run=self.runner.run
+        if run is not None and run.chain==transfer.PROGRAM and target!=run.v["iid"]:
+            self._note("rune_transfer_handoff",frame=f,reason="observed tactical focus changed")
+            self.runner.run=None;return None
+        if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
+        made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished)
+        if made is None:return None
+        draft,plan,path,mask=made
+        if draft is None:
+            self._note("rune_transfer_handoff",frame=f,reason="observed overhead or route end")
+            self.runner.run=None;return None
+        rs=getattr(forecast,"rs",None)
+        current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
+        if current is None:return None
+        try:
+            scan=B2Geometry(forecast,f,plan.move,current[2]).scan(path)
+        except GeometryUnavailable as exc:
+            self._note("rune_transfer_unchecked",frame=f,reason=str(exc));return None
+        if not scan.complete or scan.contacts:
+            first=None if not scan.contacts else asdict(scan.contacts[0])
+            self._note("rune_transfer_rejected",frame=f,first=first);return None
+        return B2Offer("approach",path,draft,int(mask),0.,plan.move,
+            {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
+             "checked_through":path.through,"handoff":"observed overhead or observed slam cut-in",
+             "safety_basis":"fresh modeled approach; ALL target/foreign/delayed contacts retained"})
+
+    def install(self,offer,planner,ordinary=None):
+        if offer.details.get("rune_transfer"):
+            from .knife_chain_score_bound import clear_ordinary_action_memo
+            clear_ordinary_action_memo(planner)
+        return super().install(offer,planner,ordinary)
+
+    def sent(self):
+        selected=self._b2_selected;sent=super().sent()
+        if selected is not None and sent.chain_outcome=="sent" and selected.details.get("rune_transfer"):
+            self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+        return sent
 
     def before_send(self,*,frame,target,mask,flags,received_frame,dispatch_clock=None):
         selected=self._b2_selected

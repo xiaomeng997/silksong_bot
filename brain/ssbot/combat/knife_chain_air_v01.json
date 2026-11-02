@@ -822,8 +822,8 @@
       "release_low_k": 30,
       "height_split": 3.5,
       "entry_k_min": 0,
-      "entry_k_max": 12,
-      "gap_min": 0.0,
+      "entry_k_max": 24,
+      "gap_min": -0.25,
       "gap_max": 6.0,
       "height_min": -0.5,
       "height_max": 5.0,
@@ -834,7 +834,18 @@
         "Walk"
       ],
       "contact_delay": 4,
-      "hold_frames": 12
+      "hold_frames": 12,
+      "hold_rule": {
+        "fn": "if",
+        "c": {
+          "fn": "cmp",
+          "a": "obs.gap",
+          "op": "<=",
+          "b": 0.0
+        },
+        "then": 0,
+        "else": "cfg.hold_frames"
+      }
     },
     "admission": {
       "align": {
@@ -870,6 +881,255 @@
       "format": "0.2",
       "source": "User overhead-switch route: keep forward travel in an ordinary jump; do not wait to land",
       "implementation": "manual continuation recipe; no new jump edge if J has been released; no online action-tree search"
+    }
+  },
+  "rune_transfer": {
+    "id": "rune_transfer",
+    "start": "walk",
+    "links": {
+      "walk": {
+        "keys": [
+          {
+            "mask": "toward"
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "jump",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">=",
+              "b": "var.jump_k"
+            }
+          },
+          {
+            "do": "goto",
+            "to": "dash",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">=",
+              "b": "var.dash_k"
+            }
+          }
+        ],
+        "id": "rune_transfer.walk",
+        "phase": "walk",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ]
+      },
+      "dash": {
+        "keys": [
+          {
+            "mask": "toward"
+          },
+          {
+            "mask": "DASH"
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "jump",
+            "when": {
+              "p": "cmp",
+              "a": "k",
+              "op": ">=",
+              "b": "var.jump_k"
+            }
+          }
+        ],
+        "id": "rune_transfer.dash",
+        "phase": "dash",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ]
+      },
+      "jump": {
+        "keys": [
+          {
+            "mask": "toward"
+          },
+          {
+            "mask": "J",
+            "hi": {
+              "sub": [
+                "var.jump_until",
+                1
+              ]
+            }
+          },
+          {
+            "mask": "DASH",
+            "when": {
+              "p": "cmp",
+              "a": "var.sprint_jump",
+              "op": ">",
+              "b": 0
+            }
+          }
+        ],
+        "rules": [
+          {
+            "do": "goto",
+            "to": "air",
+            "when": {
+              "not": {
+                "p": "cmp",
+                "a": "obs.ground",
+                "op": ">",
+                "b": 0
+              }
+            }
+          }
+        ],
+        "id": "rune_transfer.jump",
+        "phase": "jump",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ]
+      },
+      "air": {
+        "keys": [
+          {
+            "mask": "toward"
+          },
+          {
+            "mask": "J",
+            "hi": {
+              "sub": [
+                "var.jump_until",
+                1
+              ]
+            }
+          }
+        ],
+        "rules": [],
+        "id": "rune_transfer.air",
+        "phase": "air",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ]
+      }
+    },
+    "rulesets": {
+      "stop": [
+        {
+          "do": "abort",
+          "when": {
+            "not": {
+              "p": "cmp",
+              "a": "obs.target_valid",
+              "op": ">",
+              "b": 0
+            }
+          },
+          "why": {
+            "lit": "transfer target changed"
+          }
+        },
+        {
+          "do": "done",
+          "when": {
+            "p": "cmp",
+            "a": "obs.overhead",
+            "op": ">",
+            "b": 0
+          },
+          "why": {
+            "lit": "observed overhead handback"
+          }
+        },
+        {
+          "do": "abort",
+          "when": {
+            "p": "cmp",
+            "a": "k",
+            "op": ">",
+            "b": "cfg.max_frames"
+          },
+          "why": {
+            "lit": "transfer decision horizon ended"
+          }
+        }
+      ]
+    },
+    "vars": {
+      "iid": null,
+      "caster": null,
+      "cast_fa": null,
+      "fa": null,
+      "ta": null,
+      "side": null,
+      "dash_k": null,
+      "jump_k": null,
+      "jump_until": null,
+      "sprint_jump": null,
+      "cs": null
+    },
+    "cfg": {
+      "lag": 0,
+      "bounce_by": 14,
+      "CLAWSTRIKE": false,
+      "entry_cast_s": 0.2,
+      "target_states": [
+        "Idle",
+        "Walk",
+        "Slam Antic"
+      ],
+      "lookahead_frames": 36,
+      "jump_distance": 9.0,
+      "jump_hold_frames": 24,
+      "jump_lead_frames": 18,
+      "head_clearance": 0.2,
+      "max_frames": 120,
+      "jump_antic_frames": 7
+    },
+    "admission": {
+      "walk": {
+        "link": "rune_transfer.walk",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+      },
+      "dash": {
+        "link": "rune_transfer.dash",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+      },
+      "jump": {
+        "link": "rune_transfer.jump",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+      },
+      "air": {
+        "link": "rune_transfer.air",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+      }
+    },
+    "provenance": {
+      "format": "0.3",
+      "source": "User rune-cast focus switch: dash/sprint/jump toward second target overhead; interrupt into observed slam air chain",
+      "implementation": "manual table and two hero rollouts; no automatic action-tree search"
     }
   }
 }
