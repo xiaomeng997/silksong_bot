@@ -406,6 +406,7 @@ def test_fresh_air_transfer_never_inherits_an_outside_held_jump():
  from ssbot.combat.air_chain import ChainSim
  from ssbot.combat.knife_chain_transfer import propose
  r,s,sim0=transfer_motion_scene(K.M_NORMAL)
+ r.run=None
  s['hero']['pos'][1]=8.;s['hero']['vel'][1]=1.
  s['act']['hf'].update(latched=B['R']|B['J'],desired=B['R']|B['J'])
  S=K.initial_state(sim0.params,30.,8.,vy=1.,ground=False)
@@ -414,3 +415,59 @@ def test_fresh_air_transfer_never_inherits_an_outside_held_jump():
  from ssbot.combat.knife_chain_transfer import TransferGoal
  made=propose(r,s,0.,sim,8,False,np.zeros((0,6)),set(),TransferGoal(8,7,990))
  assert made is not None and made[3]==B['R'] and made[0].run.link=='air'
+
+
+@pytest.mark.parametrize('fresh',[False,True])
+def test_external_air_transfer_ends_on_landing_before_walking_into_the_body(fresh):
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.air_chain import ChainSim
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal
+ r,s,sim0=transfer_motion_scene(K.M_NORMAL)
+ if fresh:r.run=None
+ s['hero'].update(pos=[30.,8.],vel=[0.,1.])
+ S=K.initial_state(sim0.params,30.,8.,vy=1.,ground=False)
+ sim=ChainSim(S,np.array([B['R']]),sim0.hold,sim0.params,sim0.terrain,1000,1000)
+ made=propose(r,s,0.,sim,8,False,np.zeros((0,6)),set(),TransferGoal(8,7,990))
+ assert made is not None and made[0].run.link=='air'
+ r=made[0];s['f']=1030;s['hero'].update(pos=[46.2,4.568],vel=[8.25,0.])
+ S=K.initial_state(sim0.params,46.2,4.568,vx=8.25,ground=True)
+ sim=ChainSim(S,np.array([B['R']]),sim0.hold,sim0.params,sim0.terrain,1030,1030)
+ landed=propose(r,s,.5,sim,8,True,np.zeros((0,6)),set(),TransferGoal(8,7,990))
+ assert landed is not None and landed[0] is None
+
+
+def test_vetoed_transfer_first_jump_spends_cast_without_faking_action_execution():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.knife_chain_b2 import B2Offer
+ from ssbot.combat.knife_chain_commitment import MoveInstance
+ from ssbot.combat.knife_chain_transfer import propose
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.air_chain import ChainSim
+ r,s,sim0=transfer_motion_scene(K.M_NORMAL)
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref='rune-veto-no-retry');n.reset(0,start_frame=1000);n.begin(s)
+ p=TransferPlan(8,7,1000,1000,0.,B['R'],2,2,26,False,1000,0)
+ draft=load_runner();draft.run=Run('rune_transfer','jump',{**draft.chains['rune_transfer'].vars,**p.variables()})
+ n._transfer_responsibility[p.move]=(MoveInstance(7,1000,'CC_CAST'),None)
+ mask=B['R']|B['J'];offer=B2Offer('manual_commitment',None,draft,mask,0.,p.move,
+  {'manual_air':True,'rune_transfer':True,'caster':7,'cast_fa':1000})
+ res=n.install(offer,NS(measurement_enabled=False));n.planner_result(res);n.final('plan',mask)
+ assert n.before_send(frame=1000,target=1002,mask=mask,flags=0,received_frame=1002)==0
+ assert n.commitment is None and not n._failure_exposures
+ n.sent()  # only this successful neutral replacement creates preparation exposure
+ assert len(n._failure_exposures)==1 and n._failure_exposures[0].move.family=='CC_CAST'
+ assert n._receipts[1002]==0 and (7,1000) in n._transfer_finished
+ s['f']=1001;s['ents'][0]['fsms'][0].update(state='Spell Antic',t=1/60)
+ sim=ChainSim(sim0.start,np.array([B['R']]),sim0.hold,sim0.params,sim0.terrain,1001,1001)
+ assert propose(load_runner(),s,1/60,sim,8,True,np.zeros((0,6)),n._transfer_finished) is None
+
+
+@pytest.mark.parametrize('sprint,grace',[(False,4),(True,11)])
+def test_transfer_takeoff_deadline_includes_only_actual_jump_antic_and_receipt_grace(sprint,grace):
+ r=load_runner();p=TransferPlan(8,7,990,1000,0.,B['R'],2,10,34,sprint,1000,0)
+ def evaluate(elapsed,ground):
+  r.run=Run('rune_transfer','jump',{**r.chains['rune_transfer'].vars,**p.variables()})
+  obs=NS(f=1010+elapsed,F=1012+elapsed,k=12+elapsed,target_valid=True,ground=ground,overhead=False)
+  return r.eval_link(X(r,r.run,obs))
+ assert evaluate(grace,True) is not None
+ assert evaluate(grace+1,True) is None
+ assert evaluate(grace+1,False) is not None  # real takeoff is never rejected by this ground-only guard

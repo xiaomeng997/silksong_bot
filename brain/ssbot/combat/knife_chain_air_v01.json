@@ -1102,7 +1102,7 @@
       "lookahead_frames": 36,
       "jump_distance": 9.0,
       "jump_hold_frames": 24,
-      "STOMP": {"jump_root":8.0,"jump_hold":24,"miss_after":12},
+      "STOMP": {"jump_root":8.0,"jump_hold":24,"miss_after":12,"takeoff_grace":4},
       "jump_lead_frames": 18,
       "head_clearance": 0.7,
       "max_frames": 120,

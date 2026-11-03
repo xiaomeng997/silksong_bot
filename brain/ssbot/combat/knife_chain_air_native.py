@@ -377,6 +377,14 @@ class NativeManualAirChain(NativeChainB2):
         return super().before_send(frame=frame,target=target,mask=mask,flags=flags,
                                   received_frame=received_frame,dispatch_clock=dispatch_clock)
 
+    def _abort_hook_dispatch(self,selected,**kwargs):
+        if selected is not None and selected.details.get("rune_transfer"):
+            # Per-cast no-retry bookkeeping, not credit for a sent jump. The
+            # existing base still creates preparation exposure only after the
+            # neutral replacement is actually sent.
+            self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+        return super()._abort_hook_dispatch(selected,**kwargs)
+
     def summary(self):
         return {**super().summary(),"mode":"manual_air_probe","table":"manual_air+vault_near" if self.vault_enabled else "air_strike","tables":list(self.runner.chains),
                 "online_search":False,"geometry_scope":("vault: current external step only, empirical skill; other air: contact path and N=2" if self.vault_enabled else "current/contact path plus existing N=2 continuations"),

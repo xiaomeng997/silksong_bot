@@ -164,7 +164,11 @@ def register(prims):
 
     @prims.guard("transfer_jump_failed")
     def jump_failed(x):
-        return bool(x.obs.ground and x.obs.k>x.v["jump_until"]+2)
+        antic=int(x.cfg["jump_antic_frames"]) if x.v["sprint_jump"] else 0
+        # obs.k is the mask clock (two ahead). Do not use the entire J hold
+        # as a takeoff deadline, or apply a four-frame normal-jump deadline to
+        # the sprint jump's seven-frame grounded antic.
+        return bool(x.obs.ground and x.obs.k>x.v["jump_k"]+antic+x.cfg["STOMP"]["takeoff_grace"]+2)
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False):
@@ -216,7 +220,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         elif active is None:
             p=replace(p,dash_k=k+max(2,int(math.ceil(max(0.,cd)*60.))))
     elif not ground:
-        if active is None or link in {"walk","dash"}:p=replace(p,jump_until=k)  # an outside jump is not ours to re-press
+        if active is None or link in {"walk","dash"}:
+            p=replace(p,jump_until=k,jump_k=min(p.jump_k,k))  # outside jump: no J; still end if it lands without a strike
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
         if link!="strike":link="air"
     if defer_jump:
