@@ -77,7 +77,7 @@ class NativeManualAirChain(NativeChainB2):
         self._air_context=(entry_context(state,self._clock,self.runner) if self.arm=="B" and
             self.commitment is None and self.post_context is None else None)
 
-    def observe_bounce_goal(self,state,prefs,legacy_run=None):
+    def observe_bounce_goal(self,state,prefs,legacy_run=None,*,game_time=None):
         """Bind the next tactical target at a real bounce, before old after keys."""
         if self.arm!="B" or self.recovery is not None or self.commitment is not None:return False
         hit=transfer.bounce_target(state);target=getattr(prefs,"target",None)
@@ -92,6 +92,12 @@ class NativeManualAirChain(NativeChainB2):
         source=None;ta=None
         if (legacy_run is not None and legacy_run.phase=="after" and legacy_run.iid==hit):
             source=transfer.MoveInstance(hit,legacy_run.fa,"CC_SLAM");ta=legacy_run.ta
+            if game_time is not None:
+                if not np.isfinite([game_time,ta,self._clock]).all():return False
+                ta=self._clock-(float(game_time)-float(ta))
+            elif self.require_send_clock:
+                self._note("target_transfer_unchecked",frame=state["f"],reason="legacy source clock unavailable")
+                return False
         elif self.post_context is not None and self.post_context["move"].target_iid==hit:
             source=self.post_context["move"];ta=self.post_context.get("ta")
             if source.family=="RUNE_TRANSFER":source,ta=self._transfer_responsibility.get(source,(None,None))

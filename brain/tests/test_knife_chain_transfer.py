@@ -464,6 +464,90 @@ def test_recovering_destination_uses_the_existing_stomp_recipe():
  assert made is not None and made[3]==B['R']|B['J']
 
 
+def test_tail_ending_on_ground_clears_outside_entry_and_does_not_retry_own_miss():
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal,MoveInstance
+ r,s,sim=transfer_at_gap(7.9)
+ goal=TransferGoal(8,7,990,0.,'BOUNCE',MoveInstance(7,940,'CC_SLAM'))
+ r.run.link='bounce_tail';r.run.v.update(jump_k=0,jump_until=0,air_entry=True)
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set(),goal)
+ assert made[0] is not None and made[0].run.link=='jump'
+ assert not made[0].run.v['air_entry']
+ # This is now our own jump. A later landing without a strike must finish it.
+ r=made[0];r.run.link='air';s['f']=1010;sim.f=sim.fo=1010
+ missed=propose(r,s,10/60,sim,8,True,np.zeros((0,6)),set(),goal)
+ assert missed is not None and missed[0] is None
+
+
+def test_tail_ending_on_ground_uses_the_same_queued_body_guard_as_air_landing():
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal,MoveInstance
+ r,s,sim=transfer_at_gap(1.8)
+ goal=TransferGoal(8,7,990,0.,'BOUNCE',MoveInstance(7,940,'CC_SLAM'))
+ r.run.link='bounce_tail';r.run.v.update(jump_k=0,jump_until=0,air_entry=True)
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set(),goal)
+ assert made is not None and made[0] is None
+
+
+@pytest.mark.parametrize('shift',[-3.2,.1,3.2])
+def test_legacy_bounce_origin_is_converted_to_native_clock(shift):
+ from ssbot.train.forum_planner_policy import ForumPlannerPolicy as Policy
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref='bounce-clock');n.reset(0,start_frame=999)
+ n._clock=20.+shift;s=cast_scene();s['hero']['cstate_int']=[0,8]
+ s['ev']=[{'k':'hit','f':1000,'d':{'ent':7,'src':'DownSlash'}}]
+ run=NS(iid=7,fa=946,ta=19.,phase='after')
+ run.bounced=False;p=Policy.__new__(Policy);p.chain_native=n;p.slam_play=NS(run=run,abort=lambda why:None)
+ prefs=GoalPrefs(mode='RUSH',stance_x=38.,weights={},target=8)
+ assert p._chain_goal_preferences(s,prefs,game_time=20.) is not prefs
+ assert n._transfer_goal.cast_ta==pytest.approx(19.+shift)
+
+
+def test_live_bounce_does_not_guess_an_unknown_legacy_clock():
+ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+ from ssbot.combat.tactics.modes import GoalPrefs
+ n=NativeManualAirChain(runner_factory=load_runner,probe_ref='unknown-source-clock');n.reset(0,start_frame=999)
+ n.require_send_clock=True;s=cast_scene();s['hero']['cstate_int']=[0,8]
+ s['ev']=[{'k':'hit','f':1000,'d':{'ent':7,'src':'DownSlash'}}]
+ run=NS(iid=7,fa=946,ta=19.,phase='after')
+ assert not n.observe_bounce_goal(s,GoalPrefs(mode='RUSH',stance_x=38.,weights={},target=8),run)
+ assert n._transfer_goal is None
+
+
+@pytest.mark.parametrize('shift,expected',[(-5.,'L'),(5.,'R')])
+def test_same_target_air_direction_tracks_observed_target_motion(shift,expected):
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.air_chain import ChainSim
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal,MoveInstance
+ r,s,old=transfer_at_gap(0.);r.run.link='air'
+ r.run.v.update(caster=8,side=0,jump_k=0,jump_until=0,air_entry=True)
+ s['hero'].update(pos=[25.,15.],box=[24.75,13.45,25.25,15.53],vel=[0.,0.])
+ s['ents'][1]['pos'][0]+=shift;s['ents'][1]['fsms'][0]['state']='Evade Scuttle'
+ for c in s['ents'][1]['colliders']:c['verts_world'][::2]=[x+shift for x in c['verts_world'][::2]]
+ S=K.initial_state(old.params,25.,15.,ground=False)
+ sim=ChainSim(S,np.array([0]),K.HoldState.idle(1),old.params,old.terrain,1000,1000)
+ goal=TransferGoal(8,8,990,0.,'BOUNCE',MoveInstance(8,940,'CC_SLAM'))
+ made=propose(r,s,0.,sim,8,False,np.zeros((0,6)),set(),goal)
+ assert made is not None and made[0] is not None
+ assert made[1].side==B[expected] and made[3]==B[expected]
+
+
+def test_target_motion_does_not_rewrite_an_already_selected_absolute_strike_row():
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.air_chain import ChainSim
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal,MoveInstance
+ r,s,old=transfer_at_gap(5.);r.run.link='strike'
+ r.run.v.update(caster=8,side=B['L'],jump_k=0,jump_until=0,air_entry=True,
+     row={'F0':1002,'press_F':1003,'contact_frame':1006,'masks':[B['D']|B['L'],B['D']|B['A']|B['L']]})
+ s['hero'].update(pos=[25.,15.],box=[24.75,13.45,25.25,15.53],vel=[0.,0.])
+ s['ents'][1]['fsms'][0]['state']='Evade Scuttle'
+ S=K.initial_state(old.params,25.,15.,ground=False)
+ sim=ChainSim(S,np.array([0]),K.HoldState.idle(1),old.params,old.terrain,1000,1000)
+ goal=TransferGoal(8,8,990,0.,'BOUNCE',MoveInstance(8,940,'CC_SLAM'))
+ made=propose(r,s,0.,sim,8,False,np.zeros((0,6)),set(),goal)
+ assert made[0].run.link=='strike' and made[1].side==B['L']
+ assert made[3]==B['D']|B['L'] and made[0].run.v['row']['press_F']==1003
+
+
 @pytest.mark.parametrize('outside',[True,False])
 def test_only_outside_air_entry_can_continue_after_landing_without_strike(outside):
  from ssbot.combat.knife_chain_transfer import propose

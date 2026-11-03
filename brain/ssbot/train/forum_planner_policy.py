@@ -966,12 +966,12 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- the tick ----
 
-    def _chain_goal_preferences(self,state,prefs):
+    def _chain_goal_preferences(self,state,prefs,*,game_time=None):
         chain=getattr(self,"chain_native",None);apply=getattr(chain,"goal_preferences",None)
         if not callable(apply):return prefs
         script=getattr(self,"slam_play",None);run=getattr(script,"run",None)
         observe=getattr(chain,"observe_bounce_goal",None)
-        real_bounce=bool(callable(observe) and observe(state,prefs,run))
+        real_bounce=bool(callable(observe) and observe(state,prefs,run,game_time=game_time))
         handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce)))
         out=apply(state,prefs,handoff=handoff)
         if out is not prefs:
@@ -1097,7 +1097,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 rx = self.two.rune_exit(f, s, ws.stamp.t_game_s)
                 if rx:
                     prefs = replace(prefs, rune_exit=rx)
-        prefs = self._chain_goal_preferences(s,prefs)
+        prefs = self._chain_goal_preferences(s,prefs,game_time=ws.stamp.t_game_s if slam_play.GAME_CLOCK else f/60.)
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))

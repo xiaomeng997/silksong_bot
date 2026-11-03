@@ -253,13 +253,17 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         if active.v["iid"]!=target:return None
         p=TransferPlan(**{k:active.v[k] for k in TransferPlan.__dataclass_fields__ if k in active.v},origin=state["f"],entry_k=int(round((game-active.v["ta"])*60.)))
         link=active.link
+    if bounce_entry and target==p.caster and link!="strike":
+        side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
+        p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
+    landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
+                      ground and active.v.get("air_entry") and not tail_pending)
     if tail_pending:
         link="bounce_tail";p=replace(p,jump_k=min(p.jump_k,p.entry_k),jump_until=p.entry_k)
     elif link=="bounce_tail":link="walk" if ground else "air"
     k=p.entry_k
     current_mode=int(np.asarray(sim.start).reshape(K.K)[K.MODE])
     air_entry=bool(tail_pending or (active is not None and active.v.get("air_entry")))
-    landed_entry=bool(active is not None and link=="air" and ground and air_entry)
     if landed_entry:
         # An outside bounce/flight is an entry, not our missed jump. Keep the
         # same destination and owner across landing and select the normal jump.
