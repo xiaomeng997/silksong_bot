@@ -3195,3 +3195,16 @@ ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；�
 已处理 Opus #193（Task87）：无P0–P3，8工件/1003快照树/2源码LF及Root输入hash同；peer75为Root343逐项同子集，3项旧缺陷检查全过。03c67c50仅同一近行按实际cd推迟出刀，立即朝目标起跳；实际2963新P点13.7863ms及时L|J已核。receipt与当时review/manifest副本保存在cooldown_fix/received_193和OPUS193_RECEIPT，后续文字更正不改当前证据。文案有一处需限定：负cd是不参与新延后计算，原entry本就按已冷却可放行，并非必拒；Root未把“负值必拒”当接收证据，也不为此新增拦截。边界按实际代码max_cd+1e-6，源码未改。下劈延后会多漂移几帧，可能miss后补钩或交还，仍是用户选的经验策略，不造全程安全通过。
 
 另备独立新源草稿w13_vault_cooldown_watch_20261103T043434Z_03c67c50：同已审脚本execute生命周期AST完全相同，新source/702运行模型文件、配置、脚本、解释器、接收证据、P与旧局清理绑定；只换新source及批次/探针/预算路径，原VAULT/AIR/async场/firstHP Q1及输入/回执/清理不变，旧source76停止局不补不重开。prepare和全合同verify已实际通过，无新human start的launching校验明确拒绝，历史未接阻挡0；started/worker/game未创建。CURRENT_AIR_FOCUS_DRAFT指向新草稿，user_authorized=false；下次须新的观看“开”，开前再核现场资源/STOP/活动锁和worker自己的input.stats。
+
+
+### 7.50 03c67c50观看：小符文换目标整段未实现，不能记作已修【停在1HP；Task88补完整动作】
+
+用户新“开”只开sol/demos/w13_vault_cooldown_watch_20261103T043434Z_03c67c50一局，source03c67c50/执行HEAD4d646243/seed314168。2862 HP7→6，source rune bomb small(Clone)/damager，Q1结束；协议窗口wake2288..3130 T10.3450281883s，tail0，measurement/trace/config/window完整、overflow0/unresolved空。实际worker53832的自己连接input.stats passed，0delay/jitter/HF2/2/pending0。清理2026-11-03T04:37:44.781583Z，game54176、父15656/53520及worker均退，Prefs/golden无差、旧DEMO恢复、registry空/restore_pending=false；独立核后STATUSfalse。ROOT_WATCH_AUDIT/CLEANUP_RECEIPT保存。初版分析把菜单后3660 MaxHealth初始化6→5混进HP列表，已保留unfiltered_v1并从fight单列，原始录制不改。
+
+本局vault供给/选中0，根本未覆盖上一冷却修复，不报其真实通过。B2选中66皆RUNE_TRANSFER，60拍仅方向、6拍方向|DASH，无J/下劈/头顶交还。用户明确：小符文换目标后新怪又小符文，被身后第一颗追上；换目标只冲刺一下无疾跑，到了面前等，上次“直接踩新怪”没修好。小符文damage和两段换目标事实已核，具体是哪颗对象/主人尚未独立绑定，按用户观察与已核数据分开。
+
+Root确认两处原实现缺口：一是defer_jump后备分支把dash_k推到k+74、link改walk，既松正在进行的DASH（取消Sprint），又平移尚待冷却的远距DASH；二是旧transfer表在observed overhead就done、测试还断言无攻击，从未接实际下劈，因此不能把“头顶目标/交还”当“踩新怪”验收。实际2475..2480有R|DASH，2483已松DASH，2485 SlashToRun、2490速度8.25；第二段2743后一直R，冷却好了也不再起Dash，由普通层2767后才补一下，目标2781Evade→2802SpellAntic。不能把这轮当新场景或再加临时站位补丁。
+
+Root保持疾跑的局部WIP（未提交）已修两分支，三项有效红测旧源全失败，新源14份346项过/foreign空；初版夹具SP_PH名错已保存后改成现有PHASE再作有效红测。仅证按键/时钟保持，不报整链修复。真实源层同S0/HF/prefix+RangeTracker探针2475..2480相同，2481 flight和保持Sprint的coast仍都被目标body2517拒；2742R、2743两者都body2778拒。探针在首次动作/所有权分叉立即停，不喂分叉世界的录像未来。SPRINT_SOURCE_ORIGINS/WIP_REPORT保存，证明只修松键还不够，不再开局只验半个起手。
+
+Task88已给Opus做最小完整动作原型：复用既有Hero2/HF/strike_program/真实hit+bounce，针对两实际起点交付冲刺→疾跑→起跳→下劈（目标可Walk/Idle/Evade/再SpellCast，无伤状态不应站面前结束），不要84搜索/新控制器/长期场或全域认证。当前jump_distance9疑似未补SprintJump7帧前摇水平位移，Walk目标静止假设也可能使跳太晚；这是待验证定位，不当已证因果。Root负责生产/输入/同owner/归责接线，Opus只自己目录E/Idle有限模型；先完成整段再准备新观看。严格停止/原失败/预算/冻结AA保持，无第二局或新观看授权。
