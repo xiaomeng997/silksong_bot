@@ -211,13 +211,21 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if link in {"walk","dash"} and ground:
         held_dash=bool(current_mode in (K.M_DASH,K.M_SPRINT) and int(sim.prefix[0])&B["DASH"])
         if held_dash:link="dash"
+        gap=abs(enemy["pos"][0]-hp[0])
         # Observe the distance now. A model's eventual body intersection must
         # not make us release DASH or wait in front of the destination.
-        if not defer_jump and abs(enemy["pos"][0]-hp[0])<=cfg["STOMP"]["jump_root"]:
+        if not defer_jump and gap<=cfg["STOMP"]["jump_root"]:
             p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash)
+        elif (link=="walk" and current_mode not in (K.M_DASH,K.M_SPRINT) and
+                not (int(sim.prefix[0])|state["act"]["hf"]["latched"])&B["DASH"] and
+                gap<=cfg["STOMP"]["dash_min_root"]):
+            # A newly available near dash buffers J until its tail, then slides
+            # through the seven-frame sprint-jump antic (live f2959..2975).
+            # Walk to the ordinary-jump distance; never withdraw in-flight DASH.
+            p=replace(p,dash_k=k+10000)
         # Cooldown is evaluated at the first free mask frame, not slid on each
-        # tick. An existing dash clock and held DASH keep their ownership.
-        elif active is None:
+        # tick. Re-arm only a suppressed clock if the target moves away again.
+        elif active is None or p.dash_k>=10000:
             p=replace(p,dash_k=k+max(2,int(math.ceil(max(0.,cd)*60.))))
     elif not ground:
         if active is None or link in {"walk","dash"}:

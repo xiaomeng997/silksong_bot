@@ -326,6 +326,67 @@ def test_delaying_jump_does_not_postpone_a_pending_far_dash():
  assert made[3]==B['R'] and render(r,made[1],8,1)[0]==B['R']|B['DASH']
 
 
+def transfer_at_gap(gap,mode=None):
+ from ssbot.knowledge import kinematics as K
+ r,s,sim=transfer_motion_scene(K.M_NORMAL if mode is None else mode)
+ e=s['ents'][1];dx=s['hero']['pos'][0]+gap-e['pos'][0];e['pos'][0]+=dx
+ for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+ s['hero']['tm']['dash_cd']=.025
+ r.run.v['dash_k']=2  # the already-planned cooldown expires at this mask frame
+ return r,s,sim
+
+
+@pytest.mark.parametrize('fresh',[False,True])
+@pytest.mark.parametrize('gap,dash',[(8.695,False),(12.,False),(12.01,True),(13.,True)])
+def test_near_fresh_dash_uses_current_distance_when_cooldown_expires(fresh,gap,dash):
+ from ssbot.combat.knife_chain_transfer import propose,TransferGoal
+ r,s,sim=transfer_at_gap(gap)
+ if fresh:r.run=None
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set(),TransferGoal(8,7,990))
+ assert made is not None and made[0] is not None
+ assert made[3]==B['R']|(B['DASH'] if dash else 0)
+
+
+def test_near_ordinary_jump_does_not_wait_for_fresh_dash():
+ from ssbot.combat.knife_chain_transfer import propose
+ r,s,sim=transfer_at_gap(7.9)
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set())
+ assert made is not None and made[3]==B['R']|B['J']
+ assert not made[1].sprint_jump
+
+
+@pytest.mark.parametrize('mode_name',['M_DASH','M_SPRINT'])
+def test_near_dash_limit_preserves_an_existing_dash_or_sprint(mode_name):
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.knife_chain_transfer import propose
+ r,s,sim=transfer_at_gap(8.695,getattr(K,mode_name))
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set())
+ assert made is not None and made[3]==B['R']|B['DASH']
+ assert made[1].dash_k==2
+
+
+@pytest.mark.parametrize('where',['queued','latched'])
+def test_near_dash_limit_does_not_withdraw_queued_or_latched_dash(where):
+ from ssbot.knowledge import kinematics as K
+ from ssbot.combat.knife_chain_transfer import propose
+ r,s,sim=transfer_at_gap(8.695)
+ if where=='queued':sim.prefix[0]|=B['DASH']
+ else:
+  s['act']['hf']['latched']|=B['DASH'];s['act']['hf']['desired']|=B['DASH']
+  sim.hold=K.HoldState.from_act(s['act'])
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set())
+ assert made is not None and made[3]==B['R']|B['DASH']
+ assert made[1].dash_k==2
+
+
+def test_suppressed_dash_can_be_scheduled_again_if_target_recedes():
+ from ssbot.combat.knife_chain_transfer import propose
+ r,s,sim=transfer_at_gap(13.)
+ r.run.v['dash_k']=10000
+ made=propose(r,s,0.,sim,8,True,np.zeros((0,6)),set())
+ assert made is not None and made[3]==B['R']|B['DASH']
+
+
 @pytest.mark.parametrize('target_state',['Idle','Spell Antic'])
 def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(target_state,monkeypatch):
  """User-level completion criterion: reaching the destination must supply the
