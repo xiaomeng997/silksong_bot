@@ -3514,7 +3514,7 @@ Task112只对这份新启动草稿与默认未启用的资源分类作最小独�
 
 ### 7.77 新单局启动草稿静态核收，资源提案仍未批准【218已处理；未开P/实机】
 
-已处理 Opus #218（Task112）：21项审阅/输入hash与当前704运行文件同，11个纯夹具结果同；OPUS218_RECEIPT保存在新试车草稿目录。trial只差新目录路径、helper字节同，175个既有未跟踪资产与旧绑定同，529个跟踪文件归一化换行后等于823提交；eval_fast混合换行不构成源码变更。新gate和trial目录仍不存在，缺gate时verify拒绝。静态启动草稿无缺陷，不因此取得P预算或实机放行。
+已处理 Opus #218（Task112）：22项审阅/输入hash与当前704运行文件同，11个纯夹具结果同；OPUS218_RECEIPT保存在新试车草稿目录。trial只差新目录路径、helper字节同，175个既有未跟踪资产与旧绑定同，529个跟踪文件归一化换行后等于823提交；eval_fast混合换行不构成源码变更。新gate和trial目录仍不存在，缺gate时verify拒绝。静态启动草稿无缺陷，不因此取得P预算或实机放行。
 
 资源提案保留两条提醒：其身份豁免没有CPU上限（3核也会被移走），启用前须保留现成名字/CPU值并明确背景负载上限或测量解释，不能无界忽略；observed身份必须规范成pid/name/created三个键。当前用户答的是询问“为什么以前不影响、今天做了什么”，不是批准；proposal仍approved=false/applied=false，不把问原因当默许。
 
@@ -3523,3 +3523,11 @@ Root另只读复核：早上实机helper、现P入口和新草稿resource_guard�
 218关于停止文案已查清：实际from_env延续LOW_HP_POLICY，原主管取max(环境HP6,账本HP2)=6，单局起始7HP时首次任意损血即Q1；新文字不代表新增strict-2hp账本。此次草稿仍一局、不补、不替换，实机前需核真实起始HP7和有效HP6/Q1，不能把HP不符继续当首损血停止。原学习2HP上界和新链受击定位要求不由文案或账本名替代。
 
 当前STATUS false/ownjobs空，用户已授权不用等观看，资源范围确认仍待；当前没有P/游戏/新源变更，不再重复同一阻挡的测量尝试或源回归。待明确确认或原资源条件改变后再推进，旧停止/失败/AA不改。
+
+### 7.78 已绕过不必要的亲和性读取权限，负载门仍原样【自有脚本元数据修复；无P/游戏】
+
+用户问“没有dwm权限你能绕过去吗”。Root只修自有新试车helper和另建P包装：CPU时间/status本来可读；达到原CPU门时，cpu_affinity若AccessDenied就记affinity=null/affinity_readable=false，不再掩盖已读到的名字/CPU数。若status本身未知，仍阻挡并带出已有名字/CPU。没有取得或申请dwm额外权限，没有设置优先级/亲和性或控制Windows进程；.5核、已知离线任务、游戏、暂停任务的原判断全部保留。7项纯函数夹具核高负载且亲和性拒读仍阻挡、低负载不查询、known/game仍阻挡、暂停自有计算保持及status未知；不重跑控制器回归。
+
+只读现场核：dwm2352约1.2228核、running、affinity未知；报告已明确这是CPU超过旧阈值，不再写成不明权限阻挡。svchost这拍没有触发门。analysis/resource_read_permission_20261103保存before/after、CHECKS、CHANGE_REPORT和READONLY_RESOURCE_REPORT；旧已拒包装/旧数据未改，新P wrapper另绑脚本hash/原823源审。新试车DRAFT_PREP已注明218审核的是原helper，现只有这项元数据差异，不再声称helper逐字节相同。218接收凭证自身不回写。
+
+当前资源排除提案仍未批准或启用；用户问能否绕权限不当作豁免任意高CPU。原负载条件还不满足，本次没起P或实机，STATUSfalse/ownjobs空，源码仍823。7.77接收项总数应为22（含704文件与11fixture两条合计），已更正文案，不影响hash结果。
