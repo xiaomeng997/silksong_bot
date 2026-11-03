@@ -3221,3 +3221,12 @@ Task88已给Opus做最小完整动作原型：复用既有Hero2/HF/strike_progra
 14份353相关回归单次通过/foreign空；旧三项松DASH红测、overhead不done、Idle/新Spell当前下劈供给、成功sent后归属、原目标hit+真实bounce、出口字段、CC_CAST失败责任和外部危险拒绝有持续回归。新增空中输入夹具最初漏给已观察cast目标/模型JHELD，已保存失败记录后补齐真实跳跃状态，不将此当生产故障。四真实起点的生产表私有模型闭环（仅起点录像，之后静止目标或合成后撤）：2475/2481 Dash2477/已有Dash、Sprint2485、离地2511、下劈2514、接触2517；2742/2743 Dash2752、Sprint2761、离地2789/2788、下劈2792/2791、接触2795。四后撤反例均不出刀、无假接触；DASH逐拍保持至真正离地，之后无新空中Dash。PRODUCTION_WHOLE_MODEL_ORIGINS_release明确是模型动作证据，不是真实接受/命中或外部安全证明。
 
 PORT_REPORT与WHOLE_ROUTE_ACCEPTED_CHECKS保存当前源LF/hash；Task89只做一次有限独立接线审阅。当前无新P、无启动草稿或新游戏；旧源13.7863ms不盖新源，原03停止局/失败/预算保持。下一观看仍等完成新源审核、当前整tick及启动代码真实绑定后再告知，用户尚未新开。
+
+
+### 7.52 接线审阅抓到空中落地后仍前走，已最小修复【195已处理；9bd5321b增量审待核】
+
+已处理 Opus #195（Task89审阅事实接收，非ba979直接放行）：13工件/1003快照tree/7源码LF与原PORT_REPORT、4份所读Root输入hash同，peer353与Root353逐项同。R1 P1属真实可达遗漏：空中进入/外部起跳的jump_k仍10000，落地不触发air结束，承诺下只发朝向直到身体重叠；两帧external gate按既定策略不查目标身体，所以不会替代状态结束。没有开新局，旧失败不重跑。
+
+新源 9bd5321bc2ee58d21ecfd75983d387c38928dbac 只修3运行文件+1测试：R1空中进入时jump_k=min(old,k)，与jump_until同时落下，本链正常jump不改；R2被否决rune-transfer派发花掉同(施放者,cast_fa)，不给J执行信用，neutral替代包真sent才产生失败准备暴露，下一帧新fa不能重试原cast；R3起跳失败ground-only界改普通跳+4、疾跑跳+7+4（mask clock另计两拍），J保持24和真实离地放行不变，不套用会误杀疾跑跳的普通4帧监视。三者都走原恢复/CC_CAST责任，不添加动作搜索或目标选择。
+
+4项有效红测旧源全失败；修后加fresh/既有walk两种外部入口共5项绿，14份358相关回归单次通过/foreign空。首轮R2 green误用已有Run夹具作为新入口，已保存后改真正freshload；原有效红测不改。原fresh-air测试也明确清Run，补齐该入口覆盖。四真实起点生产私有模型4静止接触/4后撤不出刀及DASH到离地仍过，不是真实接受/命中/安全证明。review195/OPUS195_RECEIPT、FIX195_REPORT、UNIFIED195_CHECKS和production_model195保存；Task90只核该最小增量，当前无新P/实机/启动合同或新的观看开。源仍默认关闭，原全部严停止、HP预算、日志/输入/清理门保持。
