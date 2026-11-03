@@ -16,7 +16,8 @@ _SLAM_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2",
 _JUMP_CAST_STATES=frozenset({"Cast Slam Antic","Cast Slam Antic 2","Cast Jump","Jump Aim","Jump","Air",
                             "Charged?","Slam Effects?","Slam 2","Slam Recover"})
 _FAMILIES={"CC_SLAM":(_SLAM_STATES,"Slam Antic"),
-           "CC_JUMP_CAST":(_JUMP_CAST_STATES,"Cast Slam Antic")}
+           "CC_JUMP_CAST":(_JUMP_CAST_STATES,"Cast Slam Antic"),
+           "CC_CAST":(frozenset({"Spell Antic","Cast 1","Cast 2"}),"Spell Antic")}
 # Same clock-identity uncertainty already used by the h2 B2 observer. This is
 # identity evidence only: it never changes a hazard/protection/attack window.
 _CLOCK_IDENTITY_SLOP=3./60.
@@ -56,7 +57,7 @@ class FailureExposure:
 
     def __post_init__(self):
         if not isinstance(self.move,MoveInstance) or self.move.family not in _FAMILIES:
-            raise ValueError("failure exposure requires one CC_SLAM or CC_JUMP_CAST MoveInstance")
+            raise ValueError("failure exposure requires a supported observed move family")
         _frame(self.origin);_frame(self.failed_frame)
         if self.origin<self.move.antic_frame or self.failed_frame<self.origin:
             raise ValueError("failure exposure precedes its sent move/origin")
@@ -123,7 +124,8 @@ class FailureExposure:
         states,primary=_FAMILIES[self.move.family]
         if st not in states:
             self.last_control=st
-            source="actual Control left slam states" if self.move.family=="CC_SLAM" else "actual Control left jump-cast states"
+            source={"CC_SLAM":"actual Control left slam states","CC_JUMP_CAST":"actual Control left jump-cast states",
+                    "CC_CAST":"actual Control left small-rune cast states"}[self.move.family]
             self._end(f,"same-move end observed",source);return self
         if st==primary:
             if self._clock_uncertain:

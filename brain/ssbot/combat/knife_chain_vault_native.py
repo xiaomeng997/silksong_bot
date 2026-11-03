@@ -358,7 +358,8 @@ def propose(native, planner, forecast, prefs):
             native._note("vault_external_step_unchecked",frame=f,reason=str(exc))
             if active:native._recover("vault external danger unknown",f)
             return None
-    native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,"CC_JUMP_CAST"),saved["buddy_ta"])
+    if move.family=="VAULT_IDLE":
+        native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,"CC_JUMP_CAST"),saved["buddy_ta"])
     stage="manual_commitment" if not active else "active"
     return B2Offer(stage,None,draft,int(mask),0.,move,
         {"manual_air":True,"distance_vault":True,"vault_near":not hook,"vault_hook":hook,

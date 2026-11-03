@@ -83,6 +83,8 @@ def load_runner():
     p.guard("air_target_valid")(lambda x:bool(x.obs.target_valid))
     p.guard("air_bounced")(lambda x:bool(x.obs.bounced))
     p.direction("toward")(lambda x:int(x.v["side"]))
+    from .knife_chain_transfer import register
+    register(p)
     return ChainRunner(chains,AirAnchor(),p,cfg0=chains["air_strike"].cfg,
         observation_names={"f","F","k","ready","target_valid","bounced","entry_k","gap","height","program","jump_held","ground","overhead"},
         literal_names={">=","<=",">"})

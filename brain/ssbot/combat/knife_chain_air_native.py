@@ -53,6 +53,7 @@ class NativeManualAirChain(NativeChainB2):
     def reset(self,episode,*,start_frame=None):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
+        self._transfer_responsibility={}
         self._vault_ready=False
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
@@ -65,7 +66,9 @@ class NativeManualAirChain(NativeChainB2):
             from .knife_chain_vault_native import visible
             self._vault_ready=visible(state)
         previous=self._transfer_goal
-        self._transfer_goal=transfer.observe_goal(state,previous,self.runner.chains[transfer.PROGRAM].cfg,self._transfer_finished)
+        transfer_active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
+        if not transfer_active:
+            self._transfer_goal=transfer.observe_goal(state,previous,self.runner.chains[transfer.PROGRAM].cfg,self._transfer_finished,self._clock)
         self._transfer_ready=transfer.visible(state,self.runner.chains[transfer.PROGRAM].cfg)
         if self._transfer_goal is not None and self._transfer_goal!=previous:
             self._note("rune_transfer_candidate",frame=state["f"],**asdict(self._transfer_goal),source="observed Spell Antic; destination only")
@@ -94,7 +97,7 @@ class NativeManualAirChain(NativeChainB2):
             self._transfer_ready=False;return prefs
         # A destination is not keyboard ownership: a newly observed target
         # attack must still reach the existing ground/air attack adapters.
-        self._transfer_ready=transfer.control(target)[0] in {"Idle","Walk"}
+        self._transfer_ready=transfer.control(target)[0] in self.runner.chains[transfer.PROGRAM].cfg["target_states"]
         return replace(prefs)  # acknowledge handoff; preserve every tactical field
 
     def continuation_value_bound(self,prefs):return float("inf")
@@ -110,6 +113,10 @@ class NativeManualAirChain(NativeChainB2):
             else:super()._arm_hook_start(offer,send)
 
     def _failure_exposure(self,move,origin,failed,ta):
+        if move.family=="RUNE_TRANSFER":
+            context=self._transfer_responsibility.get(move)
+            if context is None:self._stop("missing critical rune-transfer failure responsibility",failed)
+            move,ta=context
         if move.family=="VAULT_IDLE":
             context=self._vault_responsibility.get(move)
             if context is None:self._stop("missing critical vault failure responsibility",failed)
@@ -168,6 +175,15 @@ class NativeManualAirChain(NativeChainB2):
         if self.recovery is not None:return self._recovery_offer()
         if self._check_hook_start(f):
             return self._recovery_offer() if self.recovery is not None else None
+        transfer_active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
+        if transfer_active and self.post_context is not None:
+            self._transfer_bounce_exit()
+            transfer_active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
+        if transfer_active:
+            if self._context is None:
+                self._recover("rune transfer current context unavailable",f);return None
+            tick,sim,_,_=self._context
+            return self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
         vault_active=self.runner.run is not None and self.runner.run.chain=="vault_idle"
         if self.vault_enabled and (vault_active or (self._vault_ready and self.commitment is None and self.post_context is None)):
             from .knife_chain_vault_native import propose as propose_vault
@@ -246,34 +262,60 @@ class NativeManualAirChain(NativeChainB2):
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
         run=self.runner.run
-        if run is not None and run.chain==transfer.PROGRAM and target!=run.v["iid"]:
-            self._note("rune_transfer_handoff",frame=f,reason="observed tactical focus changed")
-            self.runner.run=None;return None
+        active=run is not None and run.chain==transfer.PROGRAM
+        if active:target=run.v["iid"]  # the already-sent action keeps the same target through its real bounce
         if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
+        queued,_=self.queued_prefix(f,state)
+        if queued is None or int(sim.prefix[0])!=queued:
+            if active:self._recover("rune transfer actual queued prefix mismatch",f)
+            return None
         rs=getattr(forecast,"rs",None)
-        can_defer=ground and not ((state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"])
-        for defer in ((False,True) if can_defer else (False,)):
-            made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,defer_jump=defer)
-            if made is None:continue
-            draft,plan,path,mask=made
-            if draft is None:
-                self._note("rune_transfer_handoff",frame=f,reason="observed overhead or route end")
-                self.runner.run=None;return None
-            current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
-            if current is None:return None
-            try:scan=B2Geometry(forecast,f,plan.move,current[2]).scan(path)
-            except GeometryUnavailable as exc:
-                self._note("rune_transfer_unchecked",frame=f,reason=str(exc));continue
-            if not scan.complete or scan.contacts:
-                first=None if not scan.contacts else asdict(scan.contacts[0])
-                self._note("rune_transfer_rejected",frame=f,first=first,jump_deferred=defer);continue
-            return B2Offer("approach",path,draft,int(mask),0.,plan.move,
-                {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
-                 "checked_through":path.through,"jump_deferred":defer,
-                 "flight_checked":path.assumptions["flight_checked"],"flight_endpoint":path.assumptions["flight_endpoint"],
-                 "handoff":"observed overhead or observed slam cut-in",
-                 "safety_basis":"fresh modeled approach; ALL target/foreign/delayed contacts retained"})
-        return None
+        made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal)
+        if made is None or made[0] is None:
+            if active:self._recover("rune transfer ended or target began a new move before real bounce",f)
+            return None
+        draft,plan,path,mask=made
+        if plan.move in self._failed_hook_moves:return None
+        current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
+        if current is None:
+            if active:self._recover("rune transfer support unavailable",f)
+            return None
+        try:scan=B2Geometry(forecast,f,plan.move,current[2]).preflight(path)
+        except GeometryUnavailable as exc:
+            self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
+            if active:self._recover("rune transfer external step unchecked",f)
+            return None
+        if not scan.complete or scan.contacts:
+            first=None if not scan.contacts else asdict(scan.contacts[0])
+            self._note("rune_transfer_rejected",frame=f,first=first)
+            if active:self._recover("rune transfer external step blocked",f)
+            return None
+        goal=self._transfer_goal
+        self._transfer_responsibility.setdefault(plan.move,(transfer.MoveInstance(plan.caster,plan.cast_fa,"CC_CAST"),
+            None if goal is None else goal.cast_ta))
+        return B2Offer("active" if active else "manual_commitment",path,draft,int(mask),0.,plan.move,
+            {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
+             "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
+             "handoff":"observed target DownSlash hit plus bounce; original vault exit",
+             "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})
+
+    def _transfer_bounce_exit(self):
+        """Reuse the existing over/fall/ground table only after the REAL B2 bounce."""
+        run=self.runner.run;context=self.post_context;move=context["move"]
+        self._note("rune_transfer_real_bounce_exit",frame=self.dispatch.frame,move=vars(move),hit=self._hit,press=self._press)
+        if not self.vault_enabled:
+            self.post_context=self._post_seed=self._post_kind=None
+            self._abandon("rune transfer real hit+bounce handback");return
+        from .knife_chain_vault_native import AirVaultAnchor
+        from .knife_chain_vault import CHAIN
+        direction=1 if run.v["side"]==B["R"] else -1
+        v=dict(self.runner.chains[CHAIN].vars)
+        v.update(iid=move.target_iid,over_dir=direction,ta=run.v["ta"],F_open=move.antic_frame+2,
+            f_open=move.antic_frame,hp0=self._actual_state["hero"]["health"],req={"nogo":[]},
+            bounced=True,bounce_f=context["bounce"],down_hit_f=self._hit,side_hits=[],
+            _native_vault={"move":vars(move),"buddy":run.v["caster"],"entry_kind":"rune_stomp"})
+        self.runner.anchor=AirVaultAnchor(self.runner.chains);self.runner.run=Run(CHAIN,"over",v)
+        self.post_context=self._post_seed=self._post_kind=None
 
     def install(self,offer,planner,ordinary=None):
         if offer.details.get("rune_transfer"):
@@ -302,10 +344,26 @@ class NativeManualAirChain(NativeChainB2):
                            scope="one in-air branch in the same Run; first miss responsibility retained")
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("rune_transfer"):
             self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+            if sent.desired_mask&B["J"]:
+                from .knife_chain_jump import JumpStartWatch
+                if self._jump_start is None:self._jump_start=JumpStartWatch(selected.move,sent.frame,(sent.target_frame,))
+                self._jump_start.record_send(sent.target_frame,sent.desired_mask)
         return sent
 
     def before_send(self,*,frame,target,mask,flags,received_frame,dispatch_clock=None):
         selected=self._b2_selected
+        if (selected is not None and selected.details.get("rune_transfer") and int(mask)&B["J"]
+                and self._jump_start is None):
+            from .knife_chain_deadline import first_jump_clock
+            reason="rune transfer first-J target already received" if type(received_frame) is int and received_frame>=target else None
+            if self.require_send_clock:
+                try:clock=first_jump_clock(dispatch_clock,target)
+                except ValueError as exc:self._stop("missing critical rune-transfer first-J clock: "+str(exc),frame)
+                self._note("b2_jump_dispatch_clock",frame=frame,target=target,**clock)
+                if clock["late"]:reason="rune transfer first-J calibrated deadline elapsed"
+            if reason is not None:
+                return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
+                    received_frame=received_frame,event="b2_jump_send_veto",reason=reason)
         if selected is not None and (selected.details.get("vault_near") or selected.details.get("distance_vault")):
             from .knife_chain_vault_native import before_send as vault_before_send
             veto=vault_before_send(self,selected,frame=frame,target=target,mask=mask,flags=flags,

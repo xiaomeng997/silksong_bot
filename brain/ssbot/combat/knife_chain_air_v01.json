@@ -992,6 +992,7 @@
             }
           }
         ],
+        "post": [{"do":"abort","when":{"p":"transfer_jump_failed"},"why":{"lit":"transfer jump hold ended without observed takeoff"}}],
         "id": "rune_transfer.jump",
         "phase": "jump",
         "clock": "antic",
@@ -1015,7 +1016,10 @@
             }
           }
         ],
-        "rules": [],
+        "rules": [
+          {"do":"abort","when":{"p":"transfer_landed"},"why":{"lit":"transfer landed without a downslash"}},
+          {"do":"act","act":{"a":"transfer_stomp_plan"}}
+        ],
         "id": "rune_transfer.air",
         "phase": "air",
         "clock": "antic",
@@ -1023,6 +1027,17 @@
         "inherit": [
           "stop"
         ]
+      },
+      "strike": {
+        "id":"rune_transfer.strike",
+        "phase":"strike",
+        "clock":"antic",
+        "inherit":["stop"],
+        "rules":[
+          {"do":"done","when":{"p":"air_bounced"},"why":{"lit":"observed target downslash hit plus bounce"}},
+          {"do":"abort","when":{"p":"transfer_missed"},"why":{"lit":"transfer downslash missed; no observed target bounce"}}
+        ],
+        "keys":[{"gen":"transfer_strike_row"}]
       }
     },
     "rulesets": {
@@ -1039,18 +1054,6 @@
           },
           "why": {
             "lit": "transfer target changed"
-          }
-        },
-        {
-          "do": "done",
-          "when": {
-            "p": "cmp",
-            "a": "obs.overhead",
-            "op": ">",
-            "b": 0
-          },
-          "why": {
-            "lit": "observed overhead handback"
           }
         },
         {
@@ -1078,7 +1081,9 @@
       "jump_k": null,
       "jump_until": null,
       "sprint_jump": null,
-      "cs": null
+      "cs": null,
+      "row": null,
+      "bounced": false
     },
     "cfg": {
       "lag": 0,
@@ -1088,11 +1093,16 @@
       "target_states": [
         "Idle",
         "Walk",
-        "Slam Antic"
+        "Dmg Attack",
+        "Evade Scuttle",
+        "Spell Antic",
+        "Cast 1",
+        "Cast 2"
       ],
       "lookahead_frames": 36,
       "jump_distance": 9.0,
       "jump_hold_frames": 24,
+      "STOMP": {"jump_root":8.0,"jump_hold":24,"miss_after":12},
       "jump_lead_frames": 18,
       "head_clearance": 0.7,
       "max_frames": 120,
@@ -1105,34 +1115,38 @@
         "observations": [],
         "conditions": [],
         "status": "unfitted",
-        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+        "notes": "Manual observed-distance dash/sprint/jump/stomp. Only the current external step is checked; reaching overhead alone is not completion."
       },
       "dash": {
         "link": "rune_transfer.dash",
         "observations": [],
         "conditions": [],
         "status": "unfitted",
-        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+        "notes": "Manual observed-distance dash/sprint/jump/stomp. Only the current external step is checked; reaching overhead alone is not completion."
       },
       "jump": {
         "link": "rune_transfer.jump",
         "observations": [],
         "conditions": [],
         "status": "unfitted",
-        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+        "notes": "Manual observed-distance dash/sprint/jump/stomp. Only the current external step is checked; reaching overhead alone is not completion."
       },
       "air": {
         "link": "rune_transfer.air",
         "observations": [],
         "conditions": [],
         "status": "unfitted",
-        "notes": "Manual second-target overhead approach; full current-scene path is checked, no target exemption."
+        "notes": "Manual observed-distance dash/sprint/jump/stomp. Only the current external step is checked; reaching overhead alone is not completion."
+      },
+      "strike": {
+        "link":"rune_transfer.strike","observations":[],"conditions":[],"status":"unfitted",
+        "notes":"One current press-now contact witness; actual hit plus bounce required. Current external-step gate only."
       }
     },
     "provenance": {
       "format": "0.3",
-      "source": "User rune-cast focus switch: dash/sprint/jump toward second target overhead; interrupt into observed slam air chain",
-      "implementation": "manual table and two hero rollouts; no automatic action-tree search"
+      "source": "User rune-cast focus switch; Opus Task88 manual dash/sprint/jump/downslash; real hit+bounce completion",
+      "implementation": "observed distance and one press-now row; current external-step gate; no full-flight admission or action-tree search"
     }
   }
 }
