@@ -3316,3 +3316,13 @@ Root当前生产模型只取本局2959实际S0/HF/在途键，2947以前已计�
 
 已在冲刺内/在途DASH且近距的相同钉住风险仅登记，本修复不撤已发DASH、不冒称该入口已解决；后续真实异常仍原恢复/首次链相关受击暂停。Task94只核这3文件最小增量及428/两个有限生产模型，不扩大验证；当前SOURCE_REVIEW待新凭证，只有2959完整P包装器草案、未运行。无新游戏/观看合同，旧ca受击批保持停，下一局仍须新源审、当前点预算与实际准备、再等用户新开。
 
+### 7.60 19bdc470源审与当前点预算核收，新观看已实际备齐【200已处理；等用户新开】
+
+已处理 Opus #200（Task94）：无P0–P3，9审阅工件、11份Root证据hash同；1003快照文件LF逐文件与当前开发树相同，3已审文件LF与FIX199_REPORT同。peer16份428项全过/foreign空，与Root green.xml逐项同集同结果；独立2959当帧旧新比较（仅一次propose，不喂后续实录）：旧fresh/active均L|DASH，新fresh/active在8.695u均L、13u均保留L|DASH，active远clock14未推后。已登记的近距在途/已Dash、目标移动与走近反应边界不扩称已解决。OPUS200_RECEIPT/SOURCE_REVIEW及received_200保存新源凭证。
+
+新源2959完整P点已实际核：13.0012ms，实际P0–15/High/Numba4、GetProcessInformation EcoQoS关闭，原S0/HF/在途prefix强制绑定且重建差0，选中transfer.walk、目标335476，最终L送目标2961到framed null sink恰1包、策略键与wire同且目标未收到；foreign空、预热签名前后同。父50696与async子34572均真实结束，STATUSfalse/ownjobs空。async场本拍not_one_locked_jump_cast不适用排名。此为隔离的当前first-offer整tick（此前原生提案关闭），不称完整进行中Run性能、实际按键应用/整段下劈、后续动作时延或全局p99；P_RECEIPT明确该边界，未拿旧ca点盖新源。
+
+新的analysis/w13_near_dash_watch_20261103T131323Z_19bdc470实际prepare/verify通过：source19bd/当前702运行模型文件、新表摘要、脚本/配置/解释器、源审/当前P/原失败与清理证据新绑定；全部生命周期函数AST与已清理ca观看脚本同，helper同。新独立sol/demos同名合同已建但started/worker/game无，缺新human start的launching检查明确拒绝；信箱明确v4必接集合加当前200逐项已接，非按最大编号放行。合同execution_head仅随本节文档提交更新并复核，初始合同留存，原已执行ca合同/录制/停止/预算不改。
+
+下一观看仍是一局：近距不新Dash、走到原8u普通跳下劈；远距保持原Dash→Sprint→Jump，实际目标hit+bounce才交还。原AIR/VAULT/async、真实worker自己的input.stats、Opt1/首Jclock/实际接受、Q1首次损血、完整日志与真实清理不变；余留已Dash近距风险不撤键、不假称全域安全，首个链相关受击即停定位。SOURCE默认关闭，新观看gate readytrue仅表示已备齐，gate与合同human均false；CURRENT_AIR_FOCUS_DRAFT切到此新草稿can_executefalse，STATUS为NEAR_DASH200_READY_WAIT_USER。用户尚未新“开”，不自动实机、不补原2HP失败局，也无8局许可。下次新开只做必要现场核对、STATUS暂停与WMI启动，资源门仍原execute内一次，不重新跑源审/428或模型。
+
