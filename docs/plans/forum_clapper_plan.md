@@ -3292,3 +3292,15 @@ analysis/w13_focus_handoff_watch_20261103T120952Z_ca0a4418已补入当前源审�
 
 下一观看重点：小符文前摇当拍确认较远墙侧的新目标，既有换目标链同owner执行冲刺→疾跑→起跳→下劈，只有实际hit+bounce交还。当前回放只证首个接管，整段仍待这局真实观察。保持AIR/VAULT/异步场、当前worker自己的零delay/jitter/HF2/2/pending0门、Opt1、首Jclock、Q1首次损血和全部清理；一局不补不替换、不复用9bd已停预算，无8局/自动开局。CURRENT_AIR_FOCUS_DRAFT更新为新未授权观看，can_execute=false；STATUS为READY_WAIT_USER。用户新“开”时只做必要现场STOP/活动实例/HEAD、STATUS暂停与WMI启动，资源门只由原execute执行一次；不再宣称准备好后重复跑源审/模型/完整回归。
 
+### 7.58 ca0a4418唯一观看：已真接管，但近距新Dash后疾跑跳前摇撞身体【掉2HP停批；Task93查一处时机】
+
+用户新“开”只执行sol/demos/w13_focus_handoff_watch_20261103T120952Z_ca0a4418一局，sourceca0a4418/实际HEAD6fa13038、seed314168，原AIR/VAULT/async与Q1不变。WMI pythonw父52492脱shell，自有game42316/port47017，端口就绪1.9秒、政策预热6.9秒；原execute资源门只跑一次，无第二外层资源采样/完整回归。实际worker10520自己的OracleLink bootstrap input.stats通过：0delay/jitter/HF2/2/pending0。
+
+原窗口wake2294..end3245，协议T12.144904643762857s；2976 HP7→5、tail0、Q1退出，B fight2HP达批上界。measurement/trace/config/window complete、overflow0、unresolved空。cleanup2026-11-03T12:29:07.602904Z（本地04:29），worker rc0、game42316释放、自有父52492/worker10520及game全退；Root又独立核golden实际sha/当前Prefs无差、旧DEMO恢复、registry live/instances空且restore_pending=false、无残留游戏后才STATUSfalse。原试局/失败/预算不重开、不替换；CURRENT_AIR_FOCUS_DRAFT已消费can_execute=false。
+
+本局B2实际入选30拍：walk12/dash4/jump13/air1。2947 caster335470 SpellAntic，目标335476 Walk，hero x35.584/target24.483（根距11.10）先左走等Dash冷却；2959首个L|DASH时hero34.778/target26.083（8.695u）。2963仍Dash，hero33.922/target26.243（7.679u）触jump_root8，开始L|DASH|J，首J目标2965、clock余16.19ms/latefalse。实际2963..2969还在Dash/vx-28，2971..2975在Shuttlecock Antic/vx-26.9、y约4.568，尚未离地；新目标2960起Idle，body右沿28.495/顶6.917。2975英雄根28.493、2976 Stun/HP5，没有DownSlash/目标hit或bounce。
+
+本次b2_hp_loss明确chain_related=true、phase commitment；同帧伤害调用来源Wave14 - Finale/Song Heavy Sentry(2)，对应新目标335476，实际身体发生重叠。受击后监督层改键引起final owner override及recovery，不把这个事后恢复理由当最初致伤原因。失败责任仍原caster335470/CC_CAST，minimum_through3006，本招结束当时未见故unknown，未据此伪造安全或免责。ROOT_INITIAL_SUMMARY、LOSS_WINDOW/LOSS_WINDOW_FULL_CLOCK、CLEANUP_RECEIPT与原始journal保存；第一次纯分析窗口忘转ndarray导致序列化错误，修成list后保存，原录制未改。
+
+焦点修复已经在本局真接管，不能再报“新链没有运行”；也不能仅以选中/计划发J当已完成起跳/下劈。当前首个动作缺口是：等冷却后新Dash启动时距离已近，随后在Dash还没结束时排J，连着Dash尾与疾跑跳前摇撞进Idle目标身体。Task93已发并wake120，只要当前2959或更早一个原点的有限因果/最小接口，优先比较“已近时不再新Dash，走到原8u用普通近跳”这个已有动作；远距Dash→Sprint保持，不全局扩大jump_root、不再84搜索/新动作/全场证书，不喂首次分叉后的录像世界。Root管运行源，Opus只E/Idle自己目录；当前源未改，等待最短接收结果，没有下一局授权。原首次链相关受击停止/同因未修不重跑全部保持。
+
