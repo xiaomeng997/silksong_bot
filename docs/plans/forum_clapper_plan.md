@@ -3173,3 +3173,5 @@ ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；�
 下一局单独新批草稿w13_vault_watch_20261103T033001Z_76e67917，Idle/Walk目标和锁CC_JUMP_CAST搭档的距离near/hop及一次miss→空中钩；不扩小符文目标/普通跳。沿最后观看来源的seed314168作有限案例覆盖，非独立疗效样本。只显式新增VAULT=1和新批次/日志预算路径，原AIR/manual、async场、Q1首次损血收紧（HP<=6）、Opt1/关键日志/当前worker input.stats/清理停止保持，旧工程局/AA/停止预算不重开。
 
 启动草稿与旧自有Launcher生命周期execute AST逐位同，唯一差别为launching=True时必须新的gate和contract双user_authorized；当前均false，用户未说新“开”。准备/校验合同不启动游戏，来源/模型/脚本/解释器/证据重新绑定；实际开之前仍复查资源、STOP/练习、活动实例和本次HEAD，不用旧启动许可。只完成下一观看的具体可审结果再通知，不把收信当放行。
+
+7.47启动准备已实际核完：C:\ssbot\data\m2_play\clapper_plan\analysis\w13_vault_watch_20261103T033001Z_76e67917的prepare成功，702运行/模型文件、解释器、当前脚本/配置/来源证据均重新绑定；合同验证通过，execute缺新human授权的负例明确拒绝，历史未接阻挡0，started/worker/game均未创建。CURRENT_AIR_FOCUS_DRAFT指向这份新条件、user_authorized=false；STATUS=VAULT192_READY_WAIT_USER。待用户新“开”时只更新本次观看授权并重核现场资源/STOP/活动锁/实际worker输入，不提前启动。准备目录与旧ac87停止局完全分开，旧失败/数据/预算不动。
