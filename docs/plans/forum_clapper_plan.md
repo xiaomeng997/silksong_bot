@@ -3175,3 +3175,14 @@ ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；�
 启动草稿与旧自有Launcher生命周期execute AST逐位同，唯一差别为launching=True时必须新的gate和contract双user_authorized；当前均false，用户未说新“开”。准备/校验合同不启动游戏，来源/模型/脚本/解释器/证据重新绑定；实际开之前仍复查资源、STOP/练习、活动实例和本次HEAD，不用旧启动许可。只完成下一观看的具体可审结果再通知，不把收信当放行。
 
 7.47启动准备已实际核完：C:\ssbot\data\m2_play\clapper_plan\analysis\w13_vault_watch_20261103T033001Z_76e67917的prepare成功，702运行/模型文件、解释器、当前脚本/配置/来源证据均重新绑定；合同验证通过，execute缺新human授权的负例明确拒绝，历史未接阻挡0，started/worker/game均未创建。CURRENT_AIR_FOCUS_DRAFT指向这份新条件、user_authorized=false；STATUS=VAULT192_READY_WAIT_USER。待用户新“开”时只更新本次观看授权并重核现场资源/STOP/活动锁/实际worker输入，不提前启动。准备目录与旧ac87停止局完全分开，旧失败/数据/预算不动。
+
+
+### 7.48 76e67917唯一观看：未启动翻越，当前攻击冷却挡住入口【03c67c50小修，343过；不补局】
+
+用户新“开一个”仅消费一次观看授权，新根sol/demos/w13_vault_watch_20261103T033001Z_76e67917；执行HEAD8553a81a，source76e67917，seed314168，VAULT1，其余已绑条件不变。原始窗口wake2450..3352/end episode_quit，T11.3450192814s；3084 HP7→5来自rune slam(Clone)/damager即Q1退出。worker rc0、清理2026-11-03T04:14:00.856680Z：game50960释放、父36548/52288和worker均退，golden/Prefs无差、旧DEMO恢复、registry空/restore_pending=false；Root独立核后STATUSfalse。实际worker自己的input.stats 0delay/jitter、HF2/2/pending0原始回执已存。原局/失败/预算不覆盖重开。
+
+用户指出后怪大符文跳来未翻面前怪。事实已定位：全局B2 selected0，只有2963和2964两次near提案首步拒绝；当时英雄地面/可输入、面前335476 Idle且在左，搭档335470已Jump/Air。距离1.8037/1.9387选择p8，实际攻击剩冷却.216668/.200000秒，而固定入口只容许(p+1)/60=.15秒，所以near_entry_guard直接false。随后普通政策右|J，2967实际离地，vault新入口只认地面因此丢窗。不是CPU超时或首J发键否决，也不把本次伤害冒充已执行翻越链的失败。NEAR_ENTRY_CAUSE/INITIAL_AUDIT/CLEANUP_RECEIPT保存事实。
+
+源03c67c5036abbdac7bbe1168341129d926e0c61d只改同一近行：仍距离选p4/p8，对当前有限已知且不超过已有params.attack_cooldown的cd，p=max(p,ceil(cd*60)-1)，先朝目标起跳、同一行等旧刀冷却再劈；两实际点为p13/p12。无新增动作、时序搜索、完整技能预测、目标/站位规则；未知cd仍由原entry拒绝，原危险、输入、firstJ、真实hit+bounce、一次miss钩和归责不变。拒绝日志补cd/配方/why供快速定位。14份343项过/foreign空；旧cd.3必拒绝不再属新策略，该持续回归改未知cd仍核机会/runner不消耗，另加3实际冷却时序例。Task87只核2文件，实际2963完整P待核；源码默认关，本次授权已消费，无第二局或8局许可。
+
+7.48首个新P尝试仅资源预检延期：Chrome进程24984实测0.526核触原0.5核门，未进入policy/P测量，无游戏/预约/新试局。PRE_RESOURCE记录保留，STATUS已false，不关闭用户进程、不放宽阈值；允许资源恢复后有限复查。实际失败定位和343回归不依赖此P。
