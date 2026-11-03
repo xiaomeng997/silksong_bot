@@ -3188,3 +3188,10 @@ ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；�
 7.48首个新P尝试仅资源预检延期：Chrome进程24984实测0.526核触原0.5核门，未进入policy/P测量，无游戏/预约/新试局。PRE_RESOURCE记录保留，STATUS已false，不关闭用户进程、不放宽阈值；允许资源恢复后有限复查。实际失败定位和343回归不依赖此P。
 
 7.48新源实际2963完整P点已核：03c67c50从该局原S0/HF/prefix（差0）选择near并最终L|J，旧实况为R|J且无链。原首J clock late=false，目标2965到framed null sink；完整_act13.7863ms、提案2.3264ms，P0–15 High/Numba4/EcoQoS关，签名前后同/foreign空。父55588及异步子清理后STATUSfalse。只证该起点现在能供给并及时发正确方向起手，不推未运行后续轨迹/实际命中/安全/迟到率，也没有第二局。第一次Chrome门延期保留，第二次无资源阻挡才测。cooldown_fix/P_RECEIPT保存，Task87源审仍待。
+
+
+### 7.49 冷却起跳小审核收，下一观看已具体备齐【193已处理；等新开，不自动启动】
+
+已处理 Opus #193（Task87）：无P0–P3，8工件/1003快照树/2源码LF及Root输入hash同；peer75为Root343逐项同子集，3项旧缺陷检查全过。03c67c50仅同一近行按实际cd推迟出刀，立即朝目标起跳；实际2963新P点13.7863ms及时L|J已核。receipt与当时review/manifest副本保存在cooldown_fix/received_193和OPUS193_RECEIPT，后续文字更正不改当前证据。文案有一处需限定：负cd是不参与新延后计算，原entry本就按已冷却可放行，并非必拒；Root未把“负值必拒”当接收证据，也不为此新增拦截。边界按实际代码max_cd+1e-6，源码未改。下劈延后会多漂移几帧，可能miss后补钩或交还，仍是用户选的经验策略，不造全程安全通过。
+
+另备独立新源草稿w13_vault_cooldown_watch_20261103T043434Z_03c67c50：同已审脚本execute生命周期AST完全相同，新source/702运行模型文件、配置、脚本、解释器、接收证据、P与旧局清理绑定；只换新source及批次/探针/预算路径，原VAULT/AIR/async场/firstHP Q1及输入/回执/清理不变，旧source76停止局不补不重开。prepare和全合同verify已实际通过，无新human start的launching校验明确拒绝，历史未接阻挡0；started/worker/game未创建。CURRENT_AIR_FOCUS_DRAFT指向新草稿，user_authorized=false；下次须新的观看“开”，开前再核现场资源/STOP/活动锁和worker自己的input.stats。
