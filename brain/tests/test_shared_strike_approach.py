@@ -130,3 +130,35 @@ def test_air_dash_does_not_exempt_destination_body_other_moves_or_delayed_hazard
     fc=NS(rs=NS(trk=NS(now={8:(None,None,None)})))
     assert n._transfer_offer(s,0.,sim,fc,NS(target=8),False) is None
     assert len(scans)==1 and n.runner.run is None and n.commitment is None and not n._receipts
+
+
+@pytest.mark.parametrize('extra,complete,allowed',[(None,True,True),
+    ((8,'delayed'),True,False),((7,'move'),True,False),(None,False,False)])
+def test_air_dash_strike_keeps_original_target_contact_contract_without_false_recovery(monkeypatch,extra,complete,allowed):
+    from ssbot.combat import knife_chain_air_native as N
+    from ssbot.combat.knife_chain_commitment import ContactScan,PathContact
+    from tests.test_target_entry_attack import native
+    r,s,sim=flight(x=35.5,y=9.,target_x=36.5,vy=0.)
+    r.run.v['approach_recipe']='air_dash'
+    n=native();n.runner=r;n._transfer_ready=True;n._context=(None,None,None,np.zeros((0,6)))
+    n._transfer_goal=T.TransferGoal(8,7,990,0.)
+    monkeypatch.setattr(n,'queued_prefix',lambda *a:(0,'known test prefix'))
+    recovered=[];monkeypatch.setattr(n,'_recover',lambda reason,f:recovered.append(reason))
+    calls=[]
+    class Geo:
+        def __init__(self,*a):pass
+        def _result(self,path,include_target):
+            contacts=[PathContact(path.through,8,'body')] if include_target else []
+            if extra is not None:contacts.append(PathContact(path.through,*extra))
+            return ContactScan('fixture',path.origin,path.through,tuple(contacts),'contact-boundary fixture',complete=complete)
+        def scan(self,path):calls.append('scan');return self._result(path,True)
+        def preflight(self,path):calls.append('preflight');return self._result(path,False)
+    monkeypatch.setattr(N,'B2Geometry',Geo)
+    fc=NS(rs=NS(trk=NS(now={8:(None,None,None)})))
+    made=n._transfer_offer(s,0.,sim,fc,NS(target=8),False)
+    assert bool(made)==allowed and calls==['preflight']
+    assert bool(recovered)==(not allowed)
+    if allowed:
+        assert made.draft.run.link=='strike' and made.move.target_iid==8
+        assert made.draft.run.v['row']['contact_frame']>s['f']
+        assert not n._failure_exposures and not n._failed_hook_moves and not n._receipts

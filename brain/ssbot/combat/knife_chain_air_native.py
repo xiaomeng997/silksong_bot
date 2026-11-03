@@ -466,7 +466,11 @@ class NativeManualAirChain(NativeChainB2):
                 bad=self._query(forecast,plan.move,check,contact_frame=plan.contact_frame,geometry=geo)
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
-            elif draft.run.link=="bounce_tail" or draft.run.v.get("approach_recipe")=="air_dash":scan=geo.scan(path)
+            elif draft.run.link=="bounce_tail" or (draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash"):
+                scan=geo.scan(path)
+            # A selected strike keeps the existing target-contact contract:
+            # this short path has no modeled pogo, so its future body overlap
+            # must not cancel an already pressed downslash as a false failure.
             else:scan=geo.preflight(path)
         except GeometryUnavailable as exc:
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
