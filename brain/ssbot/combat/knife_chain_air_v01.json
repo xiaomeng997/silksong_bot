@@ -1084,6 +1084,8 @@
       "cast_fa": null,
       "air_entry": false,
       "source_tail_done": false,
+      "source_tail_admitted": false,
+      "source_tail_checked_through": null,
       "fa": null,
       "ta": null,
       "side": null,

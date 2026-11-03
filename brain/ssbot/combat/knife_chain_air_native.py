@@ -56,12 +56,14 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
         self._transfer_blade=None
         self._entry_attack_seen=None
+        self._entry_attack_goal=None
         self._transfer_responsibility={}
         self._transfer_target_moves={}
         self._vault_ready=False
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
         super().reset(episode,start_frame=start_frame)
+        transfer.slam_tail_frames()  # preload before timed decisions, share immutable counts
         self.vault_enabled="vault_idle" in self.runner.chains
 
     def begin(self,state,history=()):
@@ -155,6 +157,7 @@ class NativeManualAirChain(NativeChainB2):
         if observed is None:return
         move,ta=observed
         self._transfer_goal=transfer.TransferGoal(entry.target,entry.source,state["f"],ta,"SWITCH",move)
+        self._entry_attack_goal=entry
         self._entry_attack_seen=entry
         self._note("target_entry_attack_bound",frame=state["f"],entry_attack=asdict(entry),source_move=asdict(move))
 
@@ -164,6 +167,9 @@ class NativeManualAirChain(NativeChainB2):
                 self.recovery is not None or getattr(prefs,"want_bind",False)):
             self._transfer_ready=False
             return prefs
+        if (self._transfer_goal is not None and self._transfer_goal.source_kind=="SWITCH" and
+                self.runner.run is None and self._entry_attack_goal!=getattr(prefs,"entry_attack",None)):
+            self._transfer_goal=None;self._entry_attack_goal=None
         self._bind_entry_attack(state,prefs)
         goal=self._transfer_goal
         if goal is None:
@@ -209,6 +215,14 @@ class NativeManualAirChain(NativeChainB2):
         return replace(prefs)  # acknowledge handoff; preserve every tactical field
 
     def continuation_value_bound(self,prefs):return float("inf")
+
+    def _transfer_source_matches(self,rs,goal):
+        trk=getattr(rs,"trk",None)
+        source=getattr(trk,"now",{}).get(goal.caster) if goal is not None else None
+        if source is None or getattr(source[2],"fam",None)!=goal.responsibility.family:return False
+        values=(getattr(trk,"T",None),getattr(source[2],"t0",None),self._clock,goal.cast_ta)
+        if any(isinstance(v,bool) or not isinstance(v,(int,float,np.number)) for v in values):return False
+        return bool(np.isfinite(values).all() and abs((values[0]-values[1])-(values[2]-values[3]))<=2/60.)
 
     def _arm_hook_start(self,offer,send):
         if offer.details.get("vault_hook"):
@@ -406,12 +420,32 @@ class NativeManualAirChain(NativeChainB2):
         try:
             goal=self._transfer_goal
             if goal is not None and goal.source_kind=="SWITCH" and not draft.run.v.get("_entry_source_confirmed"):
-                source=getattr(rs.trk,"now",{}).get(goal.caster)
-                if (source is None or getattr(source[2],"fam",None)!=goal.responsibility.family or goal.cast_ta is None or
-                        abs((float(rs.trk.T)-float(source[2].t0))-(self._clock-goal.cast_ta))>2/60.):
+                if not self._transfer_source_matches(rs,goal):
                     raise GeometryUnavailable("tactical switch source instance unavailable or changed")
                 draft.run.v["_entry_source_confirmed"]=True
             geo=B2Geometry(forecast,f,plan.move,current[2])
+            if draft.run.link=="bounce_tail":
+                if goal is None or goal.responsibility.family!="CC_SLAM" or not self._transfer_source_matches(rs,goal):
+                    raise GeometryUnavailable("source hammer tail instance unavailable or changed")
+                admitted=bool(active and run.v.get("source_tail_admitted"))
+                if not admitted:
+                    if f!=goal.cast_fa:raise GeometryUnavailable("source tail admission missed actual bounce decision")
+                    end=transfer.predicted_tail_end(state,goal)
+                    if end is None or not 1<=end-f+1<=self.profile.max_frames:
+                        raise GeometryUnavailable("source hammer tail family clock unavailable")
+                    tail=model_path(sim,plan,np.zeros(end-f,np.int64),game)
+                    whole=geo.scan(tail)  # ALL owners, including the source and destination; no admission exemption
+                    if not whole.complete or whole.contacts:
+                        self._note("source_tail_declined",frame=f,through=tail.through,complete=whole.complete,
+                            first=None if not whole.contacts else asdict(whole.contacts[0]))
+                        self._transfer_finished.add((goal.caster,goal.cast_fa))
+                        if active:self._recover("source hammer tail admission blocked",f)
+                        return None
+                    draft.run.v["source_tail_admitted"]=True
+                    draft.run.v["source_tail_checked_through"]=tail.through
+                    self._note("source_tail_admitted",frame=f,through=tail.through,
+                        basis="current source instance; empirical slam-family end+1; all-owner neutral path",
+                        scope="one go/no-go, current two-frame checks afterwards; no escape guarantee")
             attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
             if attacking:
                 if getattr(current[2],"fam",None)!="CC_SLAM":raise GeometryUnavailable("air continuation attack family unsupported")
@@ -432,9 +466,12 @@ class NativeManualAirChain(NativeChainB2):
                 bad=self._query(forecast,plan.move,check,contact_frame=plan.contact_frame,geometry=geo)
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
+            elif draft.run.link=="bounce_tail":scan=geo.scan(path)
             else:scan=geo.preflight(path)
         except GeometryUnavailable as exc:
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
+            if draft.run.link=="bounce_tail" and goal is not None:
+                self._transfer_finished.add((goal.caster,goal.cast_fa))
             if active:self._recover("rune transfer external step unchecked",f)
             return None
         if not scan.complete or scan.contacts:
@@ -449,6 +486,7 @@ class NativeManualAirChain(NativeChainB2):
             {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
              "target_ta":target_ta,"target_attack_checked":attacking,
              "target_move":None if target_move is None else asdict(target_move),
+             "tail_checked_through":draft.run.v.get("source_tail_checked_through"),
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
              "handoff":"real hit+bounce reopens tactical target knife; observed source hammer tail retained",
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})

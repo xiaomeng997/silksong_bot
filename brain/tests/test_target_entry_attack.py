@@ -50,7 +50,7 @@ def test_entry_style_overrides_old_attack_bias_only(kind, weights):
         ground_first=frozenset({8}), no_hit=frozenset({7}), no_dash=frozenset({8}))
     out = entry_attack_prefs(prefs)
     assert out.hit_kw[8] == weights
-    assert out.ground_hit == out.no_pogo == frozenset({7})
+    assert out.ground_hit == out.no_pogo == (frozenset({7}) if kind=='stomp' else frozenset({7,8}))
     assert out.no_hit == prefs.no_hit and out.no_dash == prefs.no_dash
     assert out.weights == prefs.weights and out.stance_x == prefs.stance_x
     assert entry_attack_prefs(replace(prefs, target=7)).hit_kw == {}
@@ -288,3 +288,23 @@ def test_completed_source_tail_cannot_restart_on_the_sources_next_slam():
     sim2 = ChainSim(S, oldsim.prefix, oldsim.hold, oldsim.params, oldsim.terrain, 1001, 1001)
     again = propose(first[0], s, 1/60., sim2, 8, False, np.zeros((0, 6)), set(), goal)
     assert again is not None and again[0].run.link != 'bounce_tail'
+
+
+@pytest.mark.parametrize('committed', [False, True])
+def test_delayed_switch_binding_cannot_outlive_its_intent_unless_already_committed(committed):
+    n = native()
+    s = cast_scene()
+    s['ents'][0]['fsms'][0].update(state='Slam Antic', t=.25)
+    entry = EntryAttack(8, 'stomp', 7, G.CC_SLAM, 4., 10.)
+    prefs = GoalPrefs(mode='RUSH', stance_x=38., weights={}, target=8, entry_attack=entry)
+    n.goal_preferences(s, prefs, handoff=False)
+    assert n._transfer_goal is None
+    n.goal_preferences(s, prefs, handoff=True)
+    goal = n._transfer_goal
+    assert goal is not None and goal.source_kind == 'SWITCH'
+    if committed: n.commitment = {'existing': True}
+    n.goal_preferences(s, replace(prefs, entry_attack=None), handoff=True)
+    if committed:
+        assert n._transfer_goal == goal and n.commitment == {'existing': True}
+    else:
+        assert n._transfer_goal is None and not n._transfer_ready

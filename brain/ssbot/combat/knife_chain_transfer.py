@@ -7,6 +7,7 @@ current external step, like the manual vault, rather than a made-up full fall.
 from dataclasses import dataclass,asdict,replace
 from types import SimpleNamespace as NS
 import math
+from functools import lru_cache
 import numpy as np
 from ssbot.knowledge import kinematics as K
 from .knife_chain_format import MASK_NAMES as B
@@ -17,6 +18,33 @@ from .slam_play import clappers,control
 
 PROGRAM="rune_transfer"
 AIR_ATTACK_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"})
+
+
+@lru_cache(maxsize=1)
+def slam_tail_frames():
+    """Family-specific empirical frame maxima, not mixed jump/slam dwell."""
+    from .move_data import load_cl_slam
+    limits={s.name:max(int(n) for n in s.frames) for s in load_cl_slam().states}
+    return tuple((name,0 if name=="Slam Effects?" else limits[name])
+                 for name in ("Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"))
+
+
+def predicted_tail_end(state,goal):
+    """Current Control phase through Slam 2, on the existing 60Hz family clock.
+
+    An empirical prediction for one admission, never an observed hammer-off.
+    The caller must bind the current source instance and scan every owner.
+    """
+    source=next((e for e in clappers(state) if e["iid"]==goal.caster),None)
+    if source is None:return None
+    controls=[m for m in source.get("fsms") or () if m.get("name")=="Control"]
+    if len(controls)!=1:return None
+    st=controls[0].get("state");tin=controls[0].get("t");f=state.get("f")
+    if type(f) is not int or type(tin) not in (int,float) or not math.isfinite(tin) or tin<0:return None
+    phases=slam_tail_frames();names=[s for s,_ in phases]
+    if st not in names:return None
+    end=f-int(round(tin*60.))+sum(n for _,n in phases[names.index(st):])
+    return end if f<=end else None
 
 
 @dataclass(frozen=True)

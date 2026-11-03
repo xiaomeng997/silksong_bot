@@ -97,8 +97,9 @@ def entry_attack_prefs(prefs):
     w = float(prefs.hit_w.get(iid, 1.0))
     kw = dict(prefs.hit_kw)
     kw[iid] = (0.0, 0.0, 0.0, w) if entry.kind == "stomp" else (w, 0.0, 0.0, 0.0)
-    return replace(prefs, hit_kw=kw, ground_hit=frozenset(prefs.ground_hit) - {iid},
-                   no_pogo=frozenset(prefs.no_pogo) - {iid},
+    return replace(prefs, hit_kw=kw,
+                   ground_hit=(frozenset(prefs.ground_hit) - {iid} if entry.kind == "stomp" else prefs.ground_hit),
+                   no_pogo=(frozenset(prefs.no_pogo) - {iid} if entry.kind == "stomp" else prefs.no_pogo),
                    ground_first=(frozenset(prefs.ground_first) - {iid} if entry.kind == "stomp"
                                  else prefs.ground_first))
 
