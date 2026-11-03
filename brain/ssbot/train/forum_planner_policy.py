@@ -1727,6 +1727,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                                              "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
                "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
+               "entry_attack": self.tac.last.get("entry_attack"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:

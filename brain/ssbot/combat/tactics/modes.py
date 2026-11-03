@@ -30,7 +30,7 @@ weighted more; it is the planner's terminal value too (where the horizon ends ma
 landing zone is in support from 1.4 s on). YELLOW restricts punishes to one hit (supervisor Restrictions).
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -71,6 +71,38 @@ class TacticPrefs:
         return np.interp(x, self.risk_x, self.risk)
 
 
+@dataclass(frozen=True)
+class EntryAttack:
+    """First attack after a tactical target switch, independent of its route.
+
+    source_distance is the old enemy's horizontal root distance AT THE SWITCH.
+    picked_at is a tactical event time, never an enemy move's antic origin.
+    """
+    target: int
+    kind: str                         # stomp / side
+    source: int
+    source_family: str
+    source_distance: float
+    picked_at: float
+
+
+def entry_attack_prefs(prefs):
+    """Explicit entry style wins over legacy scoring preferences, never safety."""
+    entry = getattr(prefs, "entry_attack", None)
+    if not isinstance(entry, EntryAttack) or entry.target != prefs.target:
+        return prefs
+    if entry.kind not in {"stomp", "side"}:
+        return prefs
+    iid = entry.target
+    w = float(prefs.hit_w.get(iid, 1.0))
+    kw = dict(prefs.hit_kw)
+    kw[iid] = (0.0, 0.0, 0.0, w) if entry.kind == "stomp" else (w, 0.0, 0.0, 0.0)
+    return replace(prefs, hit_kw=kw, ground_hit=frozenset(prefs.ground_hit) - {iid},
+                   no_pogo=frozenset(prefs.no_pogo) - {iid},
+                   ground_first=(frozenset(prefs.ground_first) - {iid} if entry.kind == "stomp"
+                                 else prefs.ground_first))
+
+
 @dataclass
 class GoalPrefs(TacticPrefs):
     """The Forum's L2 goal for the fast layer (forum_planner_plan §4.3; GauntletTactics is R6): the goal's name, the
@@ -104,6 +136,7 @@ class GoalPrefs(TacticPrefs):
     rune_exit: tuple = ()                  # SSBOT_FORUM_TWO_RUNEEXIT (task 1v1 SP12a; combat.two_play.rune_exit): the
     #                                      jump casts' circles still to light and the bodies; safe rows ending inside
     #                                      one with no way out left rank after the rest, above the landed hits
+    entry_attack: EntryAttack | None = None
 
 
 class Tactics:

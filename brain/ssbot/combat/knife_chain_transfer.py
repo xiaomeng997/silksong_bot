@@ -227,7 +227,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     bounce_entry=goal is not None and goal.source_kind=="BOUNCE"
     tail_pending=bounce_tail_pending(state,goal,game)
     if body is None or h.get("health",0)<=0 or h.get("stunned"):return None
-    if target_state not in cfg["target_states"] and not (attacking and bounce_entry and not ground):return None
+    if target_state not in cfg["target_states"] and not (attacking and goal is not None and not ground):return None
     if sim.fo!=sim.f or sim.f!=state["f"] or len(sim.prefix)!=1:return None
     if int(sim.prefix[0])&~(B["L"]|B["R"]|B["J"]|B["DASH"]|B["D"]|B["A"]):return None
     hp=h.get("pos");vel=h.get("vel")

@@ -188,7 +188,7 @@ def test_next_visible_cast_replaces_pending_destination_without_waiting_for_old_
  assert (next_goal.target,next_goal.caster,next_goal.cast_fa)==(7,8,1060)
 
 
-@pytest.mark.parametrize('kind',['Jump Antic','Cast Slam Antic','Jump','Air','Slam 1'])
+@pytest.mark.parametrize('kind',['Jump Antic','Cast Slam Antic','Jump','Air'])
 def test_missing_blade_retains_the_destination_without_exempting_target_attack(kind):
  from ssbot.combat.knife_chain_air_native import NativeManualAirChain
  from ssbot.combat.knife_chain_transfer import observe_goal
@@ -274,13 +274,14 @@ def test_bounce_without_target_switch_releases_old_after_and_reuses_air_slice():
  assert n._transfer_blade[2]=='air_contact' and n.commitment is None
 
 
-def test_pending_destination_does_not_claim_keys_from_a_new_target_attack():
+def test_ground_pending_destination_does_not_claim_keys_from_a_new_target_attack():
  from ssbot.combat.knife_chain_air_native import NativeManualAirChain
  from ssbot.combat.knife_chain_transfer import observe_goal
  from ssbot.combat.tactics.modes import GoalPrefs
  n=NativeManualAirChain(runner_factory=load_runner,probe_ref="goal-attack-boundary");n.reset(0,start_frame=999)
  s=cast_scene();n._transfer_goal=observe_goal(s,None,n.runner.chains["rune_transfer"].cfg,set())
  s["ents"][1]["fsms"][0]["state"]="Slam Antic"
+ s['hero']['box'][1]=3.015
  old=GoalPrefs(mode="RUSH",stance_x=38.,weights={},target=8)
  assert n.goal_preferences(s,old,handoff=True).target==8
  assert not n._transfer_ready and not n.candidate_generation
@@ -628,7 +629,8 @@ def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(targe
 @pytest.mark.parametrize('contact_kind,at_contact,allowed',[
  ('move',True,True),('move',False,False),('delayed',True,False),
 ])
-def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contact_kind,at_contact,allowed,monkeypatch):
+@pytest.mark.parametrize('source_kind',['BOUNCE','CAST'])
+def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contact_kind,at_contact,allowed,monkeypatch,source_kind):
  from ssbot.knowledge import kinematics as K
  from ssbot.combat.air_chain import ChainSim
  from ssbot.combat import knife_chain_air_native as N
@@ -643,8 +645,11 @@ def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contac
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
  n=N.NativeManualAirChain(runner_factory=load_runner,probe_ref='same-target-contact');n.reset(0,start_frame=1040)
- n._transfer_ready=True;n._transfer_goal=TransferGoal(8,7,1040,0.,'BOUNCE',MoveInstance(7,990,'CC_SLAM'))
- n._clock=1.;n._context=(None,None,None,np.zeros((0,6)))
+ parent=MoveInstance(7,990,'CC_SLAM' if source_kind=='BOUNCE' else 'CC_CAST')
+ n._transfer_ready=True;n._transfer_goal=TransferGoal(8,7,1040,0.,source_kind,parent)
+ n._clock=1.;n._clock_known=True;n._context=(None,None,None,np.zeros((0,6)))
+ seen=deepcopy(s);seen['f']=990;seen['ents'][1]['fsms'][0].update(state='Slam Antic',t=0.)
+ n._ticks.append((990,seen,0.,False,True))
  monkeypatch.setattr(n,'queued_prefix',lambda *a:(B['R'],'fixture'))
  scans=[]
  class Geo:
@@ -664,7 +669,8 @@ def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contac
  if allowed:
   assert offer.draft.run.link=='strike' and not offer.mask&(B['J']|B['DASH'])
   assert offer.details['target_attack_checked'] and offer.draft.run.v['caster']==7
-  assert n._transfer_responsibility[offer.move][0]==MoveInstance(7,990,'CC_SLAM')
+  assert n._transfer_responsibility[offer.move][0]==parent
+  assert offer.details['target_move']==vars(MoveInstance(8,990,'CC_SLAM'))
  assert n._hit is None  # model contact never becomes observed hit credit
 
 

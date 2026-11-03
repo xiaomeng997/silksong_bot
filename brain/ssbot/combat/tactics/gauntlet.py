@@ -86,7 +86,7 @@ import numpy as np
 from ssbot.combat import jump_behind, rune_bombs, slam_play, special_board, two_play
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
-from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs
+from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs, EntryAttack, entry_attack_prefs
 from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 
@@ -355,6 +355,7 @@ class Goal:
     why: str = ""
     landed: bool = False                                  # PUNISH: a nail hit on the target inside the window
     t_goal: float = 0.0                                   # since when this rule on this target (t_pick: this target)
+    entry_attack: EntryAttack | None = None
 
 
 def _new_stats() -> dict:
@@ -1324,6 +1325,7 @@ class GauntletTactics:
             if new is not None:
                 if old is not None and new.target == old.target:
                     new.t_pick, new.landed = old.t_pick, old.landed       # still that target
+                    new.entry_attack = old.entry_attack
                     if new.name == old.name:
                         new.t_goal = old.t_goal                         # still that rule
                 new.family = next(s.family for s in fc.subjects if s.iid == new.target)   # an event is handled
@@ -1334,6 +1336,7 @@ class GauntletTactics:
                         k = f"{prev.name}>{new.name}"
                         rc[k] = rc.get(k, 0) + 1
                     if prev is not None and new.target != prev.target:
+                        new.entry_attack = self._switch_attack(fc, hx, t, prev.target, new.target)
                         self.stats["tgt_switches"] += 1
                         self.stats["switches"] += int(old is not None)  # a kept target given up (not one gone)
                         kind = (self._sw_why or "?") if old is not None else "gone"
@@ -1383,7 +1386,7 @@ class GauntletTactics:
             if s is not None and s.type_key == CLAPPER and str(how).startswith("jump: under"):
                 w *= r.up_hit_x                           # up slashes on the way under it
             hw[g.target] = max(hw[g.target], w)
-        out = replace(prefs, mode=g.name, goal=g.name, target=g.target, stance_x=float(g.stance_x),
+        out = replace(prefs, mode=g.name, goal=g.name, target=g.target, entry_attack=g.entry_attack, stance_x=float(g.stance_x),
                       boss_x=g.face_x, hit_w=hw, weights=wts, vocab=frozenset(prefs.vocab) | g.vocab)
         how_s = str(how)
         if jump_behind.ENABLED and how_s.startswith(JB_NO_HIT) and not (
@@ -1510,10 +1513,26 @@ class GauntletTactics:
                 for k in ta_why:
                     k = k.split(":")[0]
                     tw[k] = tw.get(k, 0) + 1
+        out = entry_attack_prefs(out)
+        self.last["entry_attack"] = None if g.entry_attack is None else dict(vars(g.entry_attack))
         self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
         self.last.update(goal=g.name, goal_why=g.why, target_type=getattr(s, "type_key", None),
                          goal_t_end=None if math.isinf(g.t_end) else round(g.t_end, 3))
         return out
+
+    @staticmethod
+    def _switch_attack(fc, hx, t, source, target):
+        """Choose contact style once; routes reuse the current ground/air skills."""
+        subs = {s.iid: s for s in (getattr(fc, "subjects", ()) or ())
+                if s.type_key == CLAPPER and s.alive and s.in_play and s.pos is not None}
+        if len(subs) != 2 or source == target or source not in subs or target not in subs:
+            return None
+        old = subs[source]
+        distance = abs(float(old.pos[0]) - hx)
+        if not math.isfinite(distance) or old.family not in {CC_CAST, CC_SLAM}:
+            return None
+        kind = "stomp" if old.family == CC_CAST or distance <= TWO_SLAM_RANGE_U else "side"
+        return EntryAttack(target, kind, source, old.family, distance, t)
 
     def _count_hits(self, ws, t: float) -> None:
         """Hornet's nail hits on the current goal's target (the view's HIT_DEALT events): per goal, and for PUNISH
@@ -1528,6 +1547,11 @@ class GauntletTactics:
                 continue
             gh = self.stats["goal_hits"]
             gh[g.name] = gh.get(g.name, 0) + 1
+            if g.entry_attack is not None:
+                src = str(ev.data.src or "")
+                if ((g.entry_attack.kind == "stomp" and "DownSlash" in src) or
+                        (g.entry_attack.kind == "side" and src in {"Slash", "SlashAlt"})):
+                    g.entry_attack = None             # actual requested hit, not model contact
             if g.name == PUNISH and t <= g.t_end and not g.landed:
                 g.landed = True
                 self.stats["punish_landed"] += 1
