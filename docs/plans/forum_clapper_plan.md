@@ -3230,3 +3230,14 @@ PORT_REPORT与WHOLE_ROUTE_ACCEPTED_CHECKS保存当前源LF/hash；Task89只做�
 新源 9bd5321bc2ee58d21ecfd75983d387c38928dbac 只修3运行文件+1测试：R1空中进入时jump_k=min(old,k)，与jump_until同时落下，本链正常jump不改；R2被否决rune-transfer派发花掉同(施放者,cast_fa)，不给J执行信用，neutral替代包真sent才产生失败准备暴露，下一帧新fa不能重试原cast；R3起跳失败ground-only界改普通跳+4、疾跑跳+7+4（mask clock另计两拍），J保持24和真实离地放行不变，不套用会误杀疾跑跳的普通4帧监视。三者都走原恢复/CC_CAST责任，不添加动作搜索或目标选择。
 
 4项有效红测旧源全失败；修后加fresh/既有walk两种外部入口共5项绿，14份358相关回归单次通过/foreign空。首轮R2 green误用已有Run夹具作为新入口，已保存后改真正freshload；原有效红测不改。原fresh-air测试也明确清Run，补齐该入口覆盖。四真实起点生产私有模型4静止接触/4后撤不出刀及DASH到离地仍过，不是真实接受/命中/安全证明。review195/OPUS195_RECEIPT、FIX195_REPORT、UNIFIED195_CHECKS和production_model195保存；Task90只核该最小增量，当前无新P/实机/启动合同或新的观看开。源仍默认关闭，原全部严停止、HP预算、日志/输入/清理门保持。
+
+
+### 7.53 9bd5321b独立审核收，四个当前输入整tick已核【196已处理；准备新观看，不自动开局】
+
+已处理 Opus #196（Task90）：无P0–P2，#195三处修复独立成立；15工件/1003快照tree/4源码LF与FIX195_REPORT、6份Root证据hash同，358JUnit逐项同。原air/failure/vault_native/b2与ba979逐字节同，成功sent/neutral替代包归责不变。新P3仅登记不继续加补丁：在冲刺头1–2帧决定J时可能丢跳或压疾跑界，现行会恢复并花掉该次施法；没有损血路径证据，仍执行首次HP停止。所谓普通+4/疾跑+11是仍在地面时允许的末帧，+5/+12仍在地面才结束，真正离地那拍不拒。358单测默认HERO2 off，实机口径on=True的覆盖来自Root四实际起点生产模型与peer probe90/9项，不混说全部358都是实机模型。
+
+新源四个相互独立的完整_act P点（P0–15/High/Numba4/EcoQoS关闭）为2475 11.5865ms、2481 12.4137ms、2742 13.4985ms、2743 12.4860ms；全部原当前S0/HF/prefix强制绑定，链实际入选/最终mask相同、framed null sink各1包，foreign空/预热签名前后同，自有父进程及异步子均清理。2475的未强制前重建状态最大差226，其他3点0；此点使用的是显式原始记录输入，不把其重建称等价。只证明这四个条件输入起手整tick，不是未来J/下劈时延、全局p99或真实应用/命中率。review196/P_RECEIPT保存完整限制。
+
+首个P包装器在policy/P初始化前将路径写成str.read_text，原错误与无自有残留核验保留在P_SETUP_FAILURE_RECEIPT；修正另建p_bound_v2。2742第一次在计时前被Chrome 0.6896核触原0.5门延期，原resource_guard保留，未关闭用户程序；一次有限重查无阻挡才实际计时。不把初始化错误或延期算P样本/实机局，原游戏失败/预算不动。
+
+9bd运行源不再改。下一单独w13观看复用已实际清理的03c67c50 Launcher生命周期，重新绑定当前源/702运行模型文件/源审、P、脚本、配置、解释器与旧局清理；human start仍双false，先实核准备与拒绝无新授权，再通知准备好。继续原VAULT/AIR/异步站位场、HF2/2与实际worker输入门、Opt1、Q1首次HP<=6和日志/清理门，一局不补不替换。尚无新的用户开，不自动启动。
