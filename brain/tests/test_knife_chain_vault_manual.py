@@ -241,15 +241,33 @@ def test_declined_first_step_can_retry_when_cooldown_clears(monkeypatch):
     monkeypatch.setattr(VN,"locked_context",lambda *a:ctx)
     monkeypatch.setattr(VN,"B2Geometry",lambda *a:NS(preflight=lambda p:NS(complete=True,contacts=())))
     original=n.runner;forecast=NS(rs=NS(trk=NS(now={TARGET:(None,None,None)})))
-    for f,cd in [(1000,.3),(1001,0.)]:
+    for f,cd in [(1000,None),(1001,0.)]:
         raw["f"]=f;raw["hero"]["tm"]["atk_cd"]=cd;n._receipts[f+1]=0
         follow=ChainSim(sim.start,sim.prefix,sim.hold,sim.params,sim.terrain,f,f)
         n._context=((f,raw,GAME0,True,True),follow,None,np.zeros((0,6)))
         offer=VN.propose(n,NS(),forecast,NS(target=TARGET))
-        if cd:
+        if cd is None:
             assert offer is None and not n._vault_completed and n.runner is original
             assert not any(e['event']=='vault_observed_handoff' for e in n.events)
         else:assert offer is not None and offer.move.antic_frame==1000
+
+
+@pytest.mark.parametrize('cd,press',[(.21666833758354187,13),(.2000003457069397,12),(.3,17)])
+def test_near_jump_starts_now_and_waits_for_current_attack_cooldown(cd,press,monkeypatch):
+    from tests.test_knife_chain_vault_nominal import GAME0
+    n,raw,sim,ctx=entry_scene(-1,4.2)
+    raw['hero']['tm']['atk_cd']=cd
+    monkeypatch.setattr(VE,'near_proposals',lambda *a,**kw:pytest.fail('cooldown introduced timing search'))
+    (_,req),=manual_entries(n,raw,sim,ctx)
+    assert req['near']=={'h':14,'p':press,'before':'T'}
+    n.runner.anchor.open(req)
+    mask=n.runner.step(1000,raw,True,True,t_game=GAME0,sim=sim,bombs=np.zeros((0,6)))
+    assert mask==B['L']|B['J'] and n.runner.run.link=='near'
+    row=n.runner.run.v['row']
+    assert row['press_F']==1002+press
+    assert not any(m&B['A'] for m in row['masks'][:press])
+    assert all(m&B['L'] for m in row['masks'][:press+1])
+    assert row['masks'][press]&(B['D']|B['A'])==B['D']|B['A']
 
 
 def test_pending_hook_preserves_the_second_planned_claw(monkeypatch):

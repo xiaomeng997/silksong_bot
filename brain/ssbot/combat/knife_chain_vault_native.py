@@ -176,6 +176,11 @@ def manual_entries(native, state, sim, ctx):
     near=cfg["NEAR_RECIPE"];far=cfg["HOP_RECIPE"]
     if root_distance<far["root_distance"][0] and near["box_gap"][0]<=gap<=near["box_gap"][1]:
         press=near["close_press"] if gap<near["close_gap"] else near["press"]
+        cd=(h.get("tm") or {}).get("atk_cd")
+        if type(cd) in (int,float) and math.isfinite(cd) and 0<=cd<=sim.params.attack_cooldown+1e-6:
+            # Start the jump now; wait for the CURRENT swing's cooldown in
+            # this same row, rather than declining the whole escape action.
+            press=max(press,math.ceil(cd*60)-1)
         entries.append(("near",{**base,"near":{"h":near["hold"],"p":press,"before":near["before"]},"far":None}))
     silk=h.get("silk")
     if (not entries and far["root_distance"][0]<=root_distance<=far["root_distance"][1] and
@@ -313,7 +318,9 @@ def propose(native, planner, forecast, prefs):
     mask=draft.step(f,state,ground,accepting,t_game=game,sim=sim,guard=guard,bombs=bombs)
     if mask is None or draft.run is None:
         if not active:
-            native._note("vault_entry_declined",frame=f,move=asdict(move))
+            native._note("vault_entry_declined",frame=f,move=asdict(move),
+                         attack_cd=(state.get("hero",{}).get("tm") or {}).get("atk_cd"),
+                         near=request.get("near"),why=draft.done[-1].v.get("why") if draft.done else None)
             return None  # No successful send/run: retain the opportunity and current owner.
         if native.commitment is not None:native._recover("vault table ended without real target bounce",f)
         else:
