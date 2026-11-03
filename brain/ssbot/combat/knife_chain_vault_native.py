@@ -312,6 +312,9 @@ def propose(native, planner, forecast, prefs):
         draft.anchor.open(request)
     mask=draft.step(f,state,ground,accepting,t_game=game,sim=sim,guard=guard,bombs=bombs)
     if mask is None or draft.run is None:
+        if not active:
+            native._note("vault_entry_declined",frame=f,move=asdict(move))
+            return None  # No successful send/run: retain the opportunity and current owner.
         if native.commitment is not None:native._recover("vault table ended without real target bounce",f)
         else:
             native._vault_completed.add(move);native.runner=draft
@@ -320,9 +323,15 @@ def propose(native, planner, forecast, prefs):
     draft.run.v.update(_native_vault=saved)
     draft.run.v.setdefault("ta",float(game))
     hook=draft.run.v.get("cs") is not None
-    pending=(native._hook_start is not None and bool(native._hook_start["sent_targets"]) and native._hook_start["seen_frame"] is None)
+    watch=native._hook_start
+    pending=(watch is not None and bool(watch["sent_targets"]) and watch["seen_frame"] is None)
     locked=hook and (pending or native._hook_in_flight(state) or (draft.run.link=="far_lock" and not accepting))
-    if locked:mask=0
+    if locked:
+        # Finish the existing two-frame CLAW hold even if its first frame is
+        # still pending. This is not a new hook or a free-flight prediction.
+        planned_claw=(mask&V.B["CLAW"] and watch is not None and f+2 in watch.get("targets",())
+                      and f+2 not in watch["sent_targets"])
+        if not planned_claw:mask=0
     # A cheap current-step gate, never whole-skill/target-hit certification.
     if not locked:
         current=getattr(getattr(forecast,"rs",None),"trk",None)

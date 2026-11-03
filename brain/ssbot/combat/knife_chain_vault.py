@@ -286,7 +286,8 @@ def register(P):
 
     @P.guard("vault_miss_hook_ready",doc="one observed miss may branch to an available in-air hook")
     def miss_hook_ready(x):
-        if x.v.get("fallback_hook") or x.v.get("down_hit_f") is not None or x.obs.ground or not x.obs.accepting:return False
+        if (x.v.get("fallback_hook") or x.v.get("down_hit_f") is not None or x.obs.ground or
+                not x.obs.accepting or not side_ok(x)):return False
         box=_body(x.obs.e)
         return bool(box is not None and x.obs.h.get("can",{}).get("harpoon") is True and
                     x.obs.silk>=1 and x.obs.box_bottom<=3.3 and

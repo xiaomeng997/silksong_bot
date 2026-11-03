@@ -230,3 +230,57 @@ def test_miss_exposure_is_retained_only_after_the_branch_was_sent(transport_ok):
     assert exposure.move.target_iid==ctx["buddy"] and exposure.active(f+29)
     assert n.commitment["move"]==move and n.commitment["origin"]==1000
     assert n._hook_start["targets"]==(f+3,f+4)
+
+
+def test_declined_first_step_can_retry_when_cooldown_clears(monkeypatch):
+    from ssbot.combat import knife_chain_vault_native as VN
+    from ssbot.combat.air_chain import ChainSim
+    from tests.test_knife_chain_vault_nominal import GAME0,TARGET
+    n,raw,sim,ctx=entry_scene(-1,3.4)
+    ctx.update(buddy_t0=3.,buddy_ta=GAME0-.2,buddy_lock_until=GAME0+.8)
+    monkeypatch.setattr(VN,"locked_context",lambda *a:ctx)
+    monkeypatch.setattr(VN,"B2Geometry",lambda *a:NS(preflight=lambda p:NS(complete=True,contacts=())))
+    original=n.runner;forecast=NS(rs=NS(trk=NS(now={TARGET:(None,None,None)})))
+    for f,cd in [(1000,.3),(1001,0.)]:
+        raw["f"]=f;raw["hero"]["tm"]["atk_cd"]=cd;n._receipts[f+1]=0
+        follow=ChainSim(sim.start,sim.prefix,sim.hold,sim.params,sim.terrain,f,f)
+        n._context=((f,raw,GAME0,True,True),follow,None,np.zeros((0,6)))
+        offer=VN.propose(n,NS(),forecast,NS(target=TARGET))
+        if cd:
+            assert offer is None and not n._vault_completed and n.runner is original
+            assert not any(e['event']=='vault_observed_handoff' for e in n.events)
+        else:assert offer is not None and offer.move.antic_frame==1000
+
+
+def test_pending_hook_preserves_the_second_planned_claw(monkeypatch):
+    from ssbot.combat import knife_chain_vault_native as VN
+    from ssbot.combat.air_chain import ChainSim
+    from tests.test_knife_chain_vault_nominal import GAME0,TARGET,BUDDY
+    n,raw,sim,ctx=entry_scene(-1,7.)
+    (_,req),=manual_entries(n,raw,sim,ctx);n.runner.anchor.open(req)
+    n.runner.step(1000,raw,True,True,t_game=GAME0,sim=sim,bombs=np.zeros((0,6)))
+    cs=n.runner.run.v['cs'];move=VN.MoveInstance(TARGET,1000,'VAULT_IDLE')
+    n.runner.run.v['_native_vault']={'move':vars(move),'buddy':BUDDY,'buddy_t0':3.,'buddy_ta':GAME0-.2}
+    n.commitment={'move':move,'origin':1000,'ta':GAME0,'predicted_bounce':None}
+    n._hook_start={'move':move,'origin':1000,'targets':(cs.f_press,cs.f_press+1),
+                   'sent_targets':{cs.f_press},'seen_frame':None}
+    f=cs.f_press-1;raw['f']=f;raw['hero']['anim']['clip']='Airborne'
+    n._receipts[f+1]=B['CLAW']
+    follow=ChainSim(sim.start,np.array([B['CLAW']],np.int64),sim.hold,sim.params,sim.terrain,f,f)
+    n._context=((f,raw,GAME0+.05,False,True),follow,None,np.zeros((0,6)))
+    monkeypatch.setattr(VN,'B2Geometry',lambda *a:pytest.fail('pending hook invented a free-flight proof'))
+    offer=VN.propose(n,NS(),NS(),NS())
+    assert offer is not None and offer.mask&B['CLAW']
+
+
+def test_missed_near_does_not_hook_away_from_a_target_behind():
+    from tests.test_knife_chain_vault_nominal import GAME0
+    n,raw,sim,ctx=entry_scene(-1,3.4)
+    (_,req),=manual_entries(n,raw,sim,ctx);n.runner.anchor.open(req)
+    n.runner.step(1000,raw,True,True,t_game=GAME0,sim=sim,bombs=np.zeros((0,6)))
+    press=n.runner.run.v['row']['press_F'];raw['f']=press+13
+    far=min(raw['ents'][0]['colliders'][0]['verts_world'][::2])
+    raw['hero']['pos'][0]=far-2.;raw['hero']['box']=[far-2.25,4.,far-1.75,6.079]
+    raw['hero']['vel'][1]=-2.
+    mask=n.runner.step(raw['f'],raw,False,True,t_game=GAME0+.4,sim=sim,bombs=np.zeros((0,6)))
+    assert mask is None and n.runner.run is None and not n.runner.done[-1].v['fallback_hook']
