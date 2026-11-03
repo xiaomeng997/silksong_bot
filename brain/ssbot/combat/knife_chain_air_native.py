@@ -466,7 +466,7 @@ class NativeManualAirChain(NativeChainB2):
                 bad=self._query(forecast,plan.move,check,contact_frame=plan.contact_frame,geometry=geo)
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
-            elif draft.run.link=="bounce_tail":scan=geo.scan(path)
+            elif draft.run.link=="bounce_tail" or draft.run.v.get("approach_recipe")=="air_dash":scan=geo.scan(path)
             else:scan=geo.preflight(path)
         except GeometryUnavailable as exc:
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
@@ -487,6 +487,8 @@ class NativeManualAirChain(NativeChainB2):
              "target_ta":target_ta,"target_attack_checked":attacking,
              "target_move":None if target_move is None else asdict(target_move),
              "tail_checked_through":draft.run.v.get("source_tail_checked_through"),
+             "approach_recipe":draft.run.v.get("approach_recipe"),
+             "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
              "handoff":"real hit+bounce reopens tactical target knife; observed source hammer tail retained",
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})

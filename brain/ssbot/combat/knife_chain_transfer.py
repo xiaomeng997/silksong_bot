@@ -1,7 +1,8 @@
 """Manual dash/sprint/jump/stomp table for the existing B2 input owner.
 
-The observed distance selects the jump. One current downslash row is tested in
-the air; its model contact never credits a real hit. Runtime checks only the
+The observed distance selects the jump. A current downslash row, with at most
+two horizontal braking fallbacks, is tested in the air. One optional air dash
+uses the same Run. Model contact never credits a real hit. Runtime checks only the
 current external step, like the manual vault, rather than a made-up full fall.
 """
 from dataclasses import dataclass,asdict,replace
@@ -191,30 +192,86 @@ def path_problem(path,hold):
     return None
 
 
+def press_now_row(sim,body,F,hold,side):
+    """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
+
+    Try the existing toward row first. Only on failure try releasing direction
+    and then countersteering. These are three fixed rows, not a timing search.
+    Each uses the actual S0, in-flight prefix and hold filter. The observed body
+    is held still for this contact witness; external safety remains the caller's.
+    """
+    from .knife_chain_vault import strike_program
+    from . import pogo_model as PM
+    if body is None or not np.isfinite(body).all():return None
+    direction=1 if side==B["R"] else -1 if side==B["L"] else 0
+    poly=np.array([[body[0],body[1]],[body[2],body[1]],[body[2],body[3]],[body[0],body[3]]])
+    pj=len(sim.prefix)+2
+    for d in ((direction,0,-direction) if direction else (0,)):
+        row=strike_program(F,hold,1,d or 1,16)
+        if d==0:row["masks"]=[m&~(B["L"]|B["R"]) for m in row["masks"]]
+        ro=sim.roll(np.asarray(row["masks"],np.int64)[None]);flags=ro.flags[0]
+        if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:continue
+        for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
+            if flags[j]&K.F_GROUND:break
+            if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
+                    for face in (-1,1) for alt in (False,True)):
+                row.update(contact_frame=sim.fo+j,approach_direction=d,
+                           contact_velocity=ro.vel[0,j].tolist())
+                return row
+    return None
+
+
+def air_approach_keys(x):
+    """One optional dash impulse, after a failed current strike exit.
+
+    A once-per-Run coast probe selects the recipe, not safety or future hit.
+    If the nominal directional coast already reaches above the observed body,
+    retain the dash. Otherwise a far entry may spend its available air dash.
+    All emitted keys still use the normal same-owner send and current-step gate.
+    """
+    side=int(x.v["side"]);left=max(0,int(x.v["jump_until"])-int(x.obs.k))
+    mask=side|(B["J"] if left else 0)
+    if not hasattr(x.obs,"sim") or x.obs.ground or x.v.get("air_dash_decided"):return mask
+    sim=x.obs.sim;S=np.asarray(sim.start).reshape(K.K);h=x.obs.hero
+    if (side==0 or x.v["iid"]==x.v["caster"] or h.get("hero_accepting_input") is not True or not np.isfinite(S).all()
+            or S[K.GROUND]>0 or S[K.MODE]!=K.M_NORMAL or S[K.AIRDASHED]>0 or S[K.DASH_CD]>0):return mask
+    dash_index=B["DASH"].bit_length()-1
+    # Finish releasing a previous jump before selecting a new air impulse.
+    # This also keeps the existing same-target bounce and held-jump entries.
+    if int(sim.prefix[0])&B["J"] or sim.hold.latched[0,0] or sim.hold.desired[0,0]:return mask
+    if (int(sim.prefix[0])&B["DASH"] or sim.hold.latched[0,dash_index]
+            or sim.hold.desired[0,dash_index] or sim.hold.pending[0,dash_index]):return mask
+    body=body_box(x.obs.e)
+    if body is None:return mask
+    hx=float(S[K.PX]);gap=max(body[0]-hx,hx-body[2],0.)
+    # A manual distance selector, scaled by the target's width. Near entries
+    # keep their ordinary drift/strike and do not burn a dash to cross the body.
+    if gap<=body[2]-body[0]:return mask
+    commands=np.full(int(x.cfg["flight_check_frames"]),side,np.int64)
+    commands[:min(left,len(commands))]|=B["J"]
+    coast=sim.roll(commands[None]);flags=coast.flags[0]
+    x.v["air_dash_decided"]=True
+    lands=np.flatnonzero(((flags&K.F_GROUND)!=0)&(np.arange(len(flags))>=sim.off))
+    if not len(lands):return mask  # uncovered: keep the dash, do not repeat the long probe
+    end=int(lands[0]);pos=coast.pos[0,sim.off:end];box=coast.box[0,sim.off:end]
+    if not len(pos) or np.any((pos[:,0]>=body[0])&(pos[:,0]<=body[2])&(box[:,1]>=body[3])):return mask
+    x.v["approach_recipe"]="air_dash"
+    return mask|B["DASH"]
+
+
 def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if not hasattr(x.obs,"sim") or x.obs.ground:return None
-        from .knife_chain_vault import strike_program
-        from . import pogo_model as PM
-        sim=x.obs.sim;body=body_box(x.obs.e)
-        if body is None:return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
-        direction=1 if x.v["side"]==B["R"] else -1
-        row=strike_program(x.obs.F,left,1,direction,16)
-        if x.v["side"]==0:row["masks"]=[m&~(B["L"]|B["R"]) for m in row["masks"]]
-        ro=sim.roll(np.asarray(row["masks"],np.int64)[None]);pj=len(sim.prefix)+2
-        flags=ro.flags[0]
-        if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:return None
-        poly=np.array([[body[0],body[1]],[body[2],body[1]],[body[2],body[3]],[body[0],body[3]]])
-        for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
-            if flags[j]&K.F_GROUND:return None
-            if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
-                    for face in (-1,1) for alt in (False,True)):
-                row["contact_frame"]=x.obs.f+j
-                x.v["row"]=row
-                return {"do":"goto","to":"strike"}
+        row=press_now_row(x.obs.sim,body_box(x.obs.e),x.obs.F,left,x.v["side"])
+        if row is not None:
+            x.v["row"]=row
+            return {"do":"goto","to":"strike"}
         return None
+
+    @prims.gen("transfer_air_keys",doc="same-owner optional one-shot air dash; never a new jump or umbrella")
+    def air_keys(x,m):return m|air_approach_keys(x)
 
     @prims.gen("transfer_strike_row",doc="the original absolute downslash row; never re-time an already sent strike")
     def strike_row(x,m):
@@ -335,7 +392,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
     obs=_observation(p,state,game,body,ground,clearance)
-    obs.sim=sim;obs.e=enemy
+    obs.sim=sim;obs.e=enemy;obs.hero=h
     obs.bounced=bool(variables.get("bounced"))
     mask=draft.eval_link(X(draft,draft.run,obs))
     if mask is None:return (None,p,None,None)

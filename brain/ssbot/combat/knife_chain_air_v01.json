@@ -1010,20 +1010,7 @@
         ]
       },
       "air": {
-        "keys": [
-          {
-            "mask": "toward"
-          },
-          {
-            "mask": "J",
-            "hi": {
-              "sub": [
-                "var.jump_until",
-                1
-              ]
-            }
-          }
-        ],
+        "keys": [{"gen":"transfer_air_keys"}],
         "rules": [
           {"do":"abort","when":{"p":"transfer_landed"},"why":{"lit":"transfer landed without a downslash"}},
           {"do":"act","act":{"a":"transfer_stomp_plan"}}
@@ -1086,6 +1073,8 @@
       "source_tail_done": false,
       "source_tail_admitted": false,
       "source_tail_checked_through": null,
+      "air_dash_decided": false,
+      "approach_recipe": null,
       "fa": null,
       "ta": null,
       "side": null,
@@ -1153,7 +1142,7 @@
         "observations": [],
         "conditions": [],
         "status": "unfitted",
-        "notes": "Manual observed-distance dash/sprint/jump/stomp. Only the current external step is checked; reaching overhead alone is not completion."
+        "notes": "Velocity-aware press-now exit with at most three fixed horizontal rows; one optional same-owner air dash. Current-step checks only; overhead or model contact is not completion."
       },
       "strike": {
         "link":"rune_transfer.strike","observations":[],"conditions":[],"status":"unfitted",
@@ -1163,7 +1152,7 @@
     "provenance": {
       "format": "0.3",
       "source": "User rune-cast focus switch; Opus Task88 manual dash/sprint/jump/downslash; real hit+bounce completion",
-      "implementation": "observed distance and one press-now row; current external-step gate; no full-flight admission or action-tree search"
+      "implementation": "observed distance; at most three fixed press-now rows and one air-dash recipe probe; current-step gate, no full-flight admission or action-tree search"
     }
   }
 }
