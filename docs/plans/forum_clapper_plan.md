@@ -3241,3 +3241,20 @@ PORT_REPORT与WHOLE_ROUTE_ACCEPTED_CHECKS保存当前源LF/hash；Task89只做�
 首个P包装器在policy/P初始化前将路径写成str.read_text，原错误与无自有残留核验保留在P_SETUP_FAILURE_RECEIPT；修正另建p_bound_v2。2742第一次在计时前被Chrome 0.6896核触原0.5门延期，原resource_guard保留，未关闭用户程序；一次有限重查无阻挡才实际计时。不把初始化错误或延期算P样本/实机局，原游戏失败/预算不动。
 
 9bd运行源不再改。下一单独w13观看复用已实际清理的03c67c50 Launcher生命周期，重新绑定当前源/702运行模型文件/源审、P、脚本、配置、解释器与旧局清理；human start仍双false，先实核准备与拒绝无新授权，再通知准备好。继续原VAULT/AIR/异步站位场、HF2/2与实际worker输入门、Opt1、Q1首次HP<=6和日志/清理门，一局不补不替换。尚无新的用户开，不自动启动。
+
+### 7.54 9bd5321b唯一观看：换目标链未接管，普通规划器重按J开伞后受击【失败停局已清理；Task91查实际接线】
+
+用户新“开”只消费一次观看授权。sol/demos/w13_rune_stomp_watch_20261103T065119Z_9bd5321b，source9bd5321b、执行HEADc9d0ee55、seed314168，原VAULT/AIR/async场及Q1首次HP<=6条件保持。原始窗口wake2447..end3320、协议T10.811538664391264s；3048 HP7→5，来源335470/Song Heavy Sentry (3)/Slam Collider 1，即Q1退出，tail0。measurement/trace/config/window完整、unresolved空，实际worker55392自己的OracleLink bootstrap input.stats为零delay/jitter、HF2/2/pending0。原预算B fight2HP已达上界，不重开原批，不补局。
+
+真实清理2026-11-03T10:54:25.107372Z（本地02:54）：worker正常结束、game50124释放，自有父54288及worker/game均已不存在，golden/Prefs无差、旧DEMO恢复、registry live/instances空且restore_pending=false，Root独立核后STATUSfalse。ROOT_WATCH_AUDIT、CLEANUP_RECEIPT和flight_audit保存证据；当前观看授权已消费，CURRENT_AIR_FOCUS_DRAFT can_execute=false，下一局等用户新开。
+
+本局b2_selected为0；仅2790产生一次rune_transfer_candidate(target335470,caster335476,cast_fa2790)。2790左怪SpellAntic，旧low脚本仍持键到约2899；2850发J、2853实际离地。2880左怪JumpAntic后战术才记录two:esc switch到右怪335470。2956普通规划器再次起跳，2980松J、2981重新发J，HF2/2实际2982松J、2984重新锁存J并进入Umbrella Inflate Antic；3002Float/3004Turn并向左漂。右怪2993SlamAntic、3041Slam0，3048打中。用户观察“换目标跳起开伞、新目标冲锤、往回飘受击”与原始输入/状态对应。新动作整局未选，不能将此前孤立模型/P起点供给称为实际接线已通过。
+
+当帧竞技场为14.01..48.99，2790旧施法怪x18.210、另一只x44.037，外墙余量约4.20/4.95，增益约0.75u低于旧TWO_HYST_U=1.0；该门槛会阻止当时的普通焦点切换。NativeManualAirChain只接受战术已经选择的新目标，不改焦点；等旧施法者JumpAntic时，transfer的valid_caster又不接这个新跳招。其他旧脚本critical/到达时限各自的当帧数值仍待Task91独立核清，不能仅降门槛就宣布整个接管问题修好，也不能无条件每次小符文都换目标。对实际2993..3040逐帧检查现有air入口全None；前段Inflate不可输入，已读高度低于air_strike最低2.3u，入口具体剩余条件分列保留。NOGLIDE=1目前是安全候选中的软排序偏好，不是禁伞，普通规划器仍可重新按J开伞。
+
+Task91已通过sol/TO_OPUS.md发出并wake seq118：有限核本局焦点/1u门槛、旧low关键窗口与已有transfer的真实交接，再给普通air入口未接原因和最小修法；不继续扩动作模板、84时序搜索、全域模型/P或游戏。Root负责实际运行源码，源当前仍9bd5321b未改；审阅在途不记为通过。下一步先修实际战术/旧脚本到新链的接管，新增真实案例回归，再另核当前源与观看准备。
+
+启动反馈也有实数：游戏端口就绪10.6s、策略预热9.8s，前面还叠加Root宣称准备好之后的串行重复现场核对。准备时机和重复检查是当前流程缺点；下次将准备工作在通知前完成，并以已审execute内资源门为唯一资源检查，原STOP/活动锁/STATUS暂停及真实清理不删，不为缩短启动改持久游戏/worker生命周期。当前未改Launcher源码。
+
+血条显示单列：2447..3048共602帧，实际health/max_health=7/7、blue0、Fractured未装备；HUD第1–5格Idle，第6/7格全为Load Anim且rect约40×55对普通22×33。这是已核显示状态异常，未取得战斗HUD截图，尚未证明初始化根因；不把两个异形图标误称额外血或2级刀原因，也不为显示问题先改oracle/Prefs。真实受击只在3048扣2HP。按最小必要改动先处理接管失效，HUD与启动不混称已修。
+
