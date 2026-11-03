@@ -3326,3 +3326,15 @@ Root当前生产模型只取本局2959实际S0/HF/在途键，2947以前已计�
 
 下一观看仍是一局：近距不新Dash、走到原8u普通跳下劈；远距保持原Dash→Sprint→Jump，实际目标hit+bounce才交还。原AIR/VAULT/async、真实worker自己的input.stats、Opt1/首Jclock/实际接受、Q1首次损血、完整日志与真实清理不变；余留已Dash近距风险不撤键、不假称全域安全，首个链相关受击即停定位。SOURCE默认关闭，新观看gate readytrue仅表示已备齐，gate与合同human均false；CURRENT_AIR_FOCUS_DRAFT切到此新草稿can_executefalse，STATUS为NEAR_DASH200_READY_WAIT_USER。用户尚未新“开”，不自动实机、不补原2HP失败局，也无8局许可。下次新开只做必要现场核对、STATUS暂停与WMI启动，资源门仍原execute内一次，不重新跑源审/428或模型。
 
+### 7.61 19bd观看未实现主动换踩，验收改为真实完整入口接管【用户明确任意状态找刀口；Task95】
+
+用户新“开”只执行sol/demos/w13_near_dash_watch_20261103T131323Z_19bdc470一局，source19bd/实际HEAD4b216b31，seed314168。WMI父42476/game32284/worker43016，端口就绪10.6秒、政策预热9.4秒；实际worker自己的input.stats过（0delay/jitter/HF2/2/pending0）。wake2465..end3716、协议T17.11165560502559s，3446 HP7→5来自右335470/Slam Collider2，B2日志phase none/chain_relatedfalse，tail0，Q1停、B fight2HP达批上界。measurement/trace/config/window完整、overflow0、unresolved空。实际cleanup 2026-11-03T14:44:28.572317+00:00、worker0，Root独立核父/游戏/worker全退、无游戏残留、golden当前Prefs无差、旧DEMO恢复、registry空/restore_pendingfalse后STATUSfalse。原局/停止/2HP预算永久保留，不补局。
+
+本局selected25仅air17/strike8，walk/dash/jump全0，所以没覆盖“近距不新Dash”的地面修复，更没完成用户要求的主动换目标踩新怪。3096从空中接入后3099 DownSlashAlt、3104目标335476命中+真实DownSpikeBounce，之后交还；这只是一次空中段真命中，不能冲抵完整主动换踩未实现。Root此前将局部模板/孤立P点通过当“可以看”的充分条件，导致连续观看未兑现动作；当前明确撤回“整个主动换踩已修”的说法，不继续加局部参数就开下一局。
+
+两个实际接口断点已提取：①2859右335470刚SpellAntic，hero仍地面DashToRun/接受输入，左新目标335476是SlamRecover到2861；observe_goal因target_states不含Recover返回None。普通最终L|J，2861离地，2862左Idle才得到transfer_candidate，已成空中接入；17拍只L后2879落地恢复，远处未踩。Root仅在局部cfg副本加入Recover可读出目标，证明入口函数状态门，未修改源也未以这一步当完整修复。②3330左335476冲锤被下劈后实际弹起，战术tgt已右335470Idle，旧slam after仍握后续键至约3376；当前transfer入口依赖Spell、air入口依赖SlamAntic，此时左Slam1/右Idle均无入口。右3389SlamAntic、3393开伞（第4帧）、3410Float、退飘落地后再跳，3446受击。用户所指最后一段的左招经原始状态核为冲锤，小符文在更早；关键“已换右却没提前接过去踩”确实未实现。FIRST_CAST_TO_SEND_AUDIT、LAST_CAST_TO_HIT_AUDIT和ENTRY_INTERFACE_FACTS保存当前事实。
+
+用户最新明确指令：“小符文换踩的入口要扩大，换成新怪的任何状态都能踩；左怪弹起以后目标直接换新怪，找新怪的刀口。”据此改接口目标：目标意图先统一绑定新的活怪，不由当前Idle/Walk/Recover/Antic白名单挡住，再按它当前实际招式、距离和英雄状态从已有刀口/接近模板选择动作；真实弹起后实际交出旧招控制并转新目标，不能只是tgt字段变了而旧after继续到落地。危险仍按新目标这一次实际招式核，全部延迟和其他怪保持；不得伪造CC_CAST来源/豁免任意攻击去凑“任何状态”。当前确实无可执行刀口时必须保留目标并明确缺口，不能静默丢目标冒充支持；未知不当安全。具体与既有墙边偏好冲突时须明列，而非让旧偏好悄悄取消用户新指令。
+
+Task95已发并两次steer（wake122/123）：只核这两个真实入口并给最小统一接线，沿用近跳/小跳钩/空中下劈等已有动作，不新控制器、不84搜索或大范围模型。父动作身份、目标真实招身份、同一键owner、旧critical与失败责任必须明确。验收以2859/3330真实政策输入→目标→对应刀口提案→最终发键、再现有模板模型到接触为核心；不能强行指定目标/放开状态作为假接线，首次改变后不喂实录未来，模型接触不当实机hit。TASK95_ACCEPTANCE记录新门。Root负责生产，Opus有限E/Idle核查；运行源仍19bd未改，没有新P/试局或观看许可，CURRENT_AIR_FOCUS_DRAFT已消费can_executefalse。源/428与13ms局部证据仍有效但不等于此完整功能完成。
+
