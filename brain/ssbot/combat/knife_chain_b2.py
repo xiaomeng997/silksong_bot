@@ -954,10 +954,60 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         super().before_send(frame=frame,target=target,mask=0,flags=flags,received_frame=received_frame)
         return 0
 
+    def _hook_target_check(self,selected,frame,target,mask):
+        """Veto a different first ray body in a multi-Clapper scene.
+
+        Single-Clapper admission stays with its existing guard. This checks
+        current bodies at the modeled key-frame pose, not the later throw.
+        """
+        from .slam_play import clappers
+        es=clappers(self._actual_state or {})
+        if len(es)<2:return None
+        prev=self._receipts.get(target-1)
+        if prev is None:prev,_=self.queued_prefix(frame,self._actual_state)
+        if prev is not None and prev&B["CLAW"]:return None  # hold, not a new press
+        info={"planned_target":selected.move.target_iid,
+              "scope":"current-body identity veto; later throw/motion and empty needle are not admitted"}
+        try:
+            if prev is None:raise ValueError("unknown pre-hook input prefix")
+            if self._actual_state.get("f")!=frame or target!=frame+2:raise ValueError("stale hook identity observation")
+            if self._context is None:raise ValueError("no current hook-pose model")
+            sim=self._context[1]
+            if sim is None or sim.f!=frame or sim.fo!=frame or len(sim.prefix)!=1 or int(sim.prefix[0])!=prev:
+                raise ValueError("hook-pose model/prefix mismatch")
+            from ssbot.knowledge import kinematics as km
+            from .knife_chain_air import body_box
+            from .knife_chain_hook_target import first_ray_body
+            ro=sim.roll(np.array([[mask]],np.int64))
+            box=ro.box[0,sim.off].tolist();face=float(ro.final[km.FACE,0])
+            if face not in (-1.,1.):raise ValueError("unknown modeled hook facing")
+            bodies=[]
+            for e in es:
+                body=body_box(e)
+                bodies.append((e["iid"],None if body is None else body.tolist()))
+            hit=first_ray_body(box,int(face),bodies)
+            info.update(pose_frame=target,hero_box=box,face=int(face),
+                        first_target=None if hit is None else hit[0],distance=None if hit is None else hit[1])
+            if hit is None:return "hook ray has no observed target body",info
+            if hit[0]!=selected.move.target_iid:return "hook ray first body differs from planned target",info
+            return None,info
+        except (ValueError,KeyError,TypeError,IndexError) as exc:
+            return "hook target identity unchecked: "+str(exc),info
+
     def before_send(self, *, frame, target, mask, flags, received_frame, dispatch_clock=None):
         if type(received_frame) is not int or received_frame>target+4:
             self._stop("send deadline beyond four frames / missing current frame",frame)
         selected=self._b2_selected;last=None;jump=self._jump_start
+        # Before any fixed/manual early return, including already retained CS
+        # plans. A second Clapper can intercept a perfectly timed hook.
+        if selected is not None and int(mask)==selected.mask and int(mask)&B["CLAW"]:
+            check=self._hook_target_check(selected,frame,target,int(mask))
+            if check is not None:
+                reason,info=check
+                if reason is not None:
+                    return self._abort_hook_dispatch(selected,frame=frame,target=target,mask=mask,flags=flags,
+                        received_frame=received_frame,event="b2_hook_target_veto",reason=reason,**info)
+                self._note("b2_hook_target_checked",frame=frame,target=target,**info)
         if selected is not None and selected.details.get("fixed_hook") and int(mask)==selected.mask:
             cs=selected.draft.run.v["cs"];reason=None
             if int(mask)&B["J"] and self._fixed_jump_sent_for!=selected.move:
