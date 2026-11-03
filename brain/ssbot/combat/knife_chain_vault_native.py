@@ -315,6 +315,7 @@ def propose(native, planner, forecast, prefs):
         choices = [({"iid": ctx["target"], "over_dir": ctx["direction"], "near": row.request_entry(),
                      "far": None, "nogo": [], "x_end": float(ctx["box"][2] if ctx["direction"] > 0 else ctx["box"][0])}, saved)
                    for row in rows]
+    geos = {}
     for request, saved in choices:
         move = MoveInstance(**saved["move"])
         seed = native.runner if active else native.runner.fork_empty(AirVaultAnchor(native.runner.chains))
@@ -332,7 +333,11 @@ def propose(native, planner, forecast, prefs):
             current = forecast.rs.trk.now.get(move.target_iid)
             if current is None:
                 raise GeometryUnavailable("vault target absent from tracker")
-            geo = B2Geometry(forecast, f, move, current[2])
+            # One tick, one move, one tracked instance: the candidates share its per-owner
+            # rasters (B2Geometry._owners); each path keeps its own points, clock and contacts.
+            geo = geos.get((move, id(current[2])))
+            if geo is None:
+                geo = geos[(move, id(current[2]))] = B2Geometry(forecast, f, move, current[2])
             bad = _contacts(geo, path)
             if bad:
                 native._note("vault_path_rejected", frame=f, first=asdict(bad[0]), active=active)

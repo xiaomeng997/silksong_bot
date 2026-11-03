@@ -26,6 +26,40 @@ class NearVaultProposal:
         return {"h":self.hold,"p":self.press,"before":self.before}
 
 
+_DOWN_POLYS=tuple((face,alt) for face in (-1,1) for alt in (False,True))
+_SURE=1e-8  # a verdict here must clear PM.meets' 1e-9 threshold by this much; closer calls go to PM.meets itself
+
+
+def _axes(p):
+    e=np.roll(p,-1,axis=0)-p
+    return np.stack([-e[:,1],e[:,0]],axis=1)
+
+
+def _meets_all(pos,poly):
+    """all(PM.meets(PM.slash_poly(face,alt)+pos[i],poly) for both facings and shapes), one array pass per polygon.
+
+    The same separating-axis test: axes from the slash polygon's edges and the box's, projections of the slash
+    polygon shifted by pos[i] (equal to PM.meets' own up to rounding, ~1e-12 at these magnitudes). A verdict counts
+    only _SURE clear of PM.meets' threshold; anything closer is decided by PM.meets on the original arrays."""
+    pos=np.asarray(pos,float).reshape(-1,2)
+    # Keep the rearranged projections in the small numerical domain verified
+    # for this arena. Larger/nonfinite inputs use the original scalar order.
+    if (not np.isfinite(pos).all() or not np.isfinite(poly).all() or
+            np.max(np.abs(pos),initial=0.)>128. or np.max(np.abs(poly),initial=0.)>128.):
+        return np.array([all(PM.meets(PM.slash_poly(face,alt)+v,poly)
+                             for face,alt in _DOWN_POLYS) for v in pos],bool)
+    ok=np.ones(len(pos),bool)
+    for face,alt in _DOWN_POLYS:
+        p=PM.slash_poly(face,alt);ax=np.vstack([_axes(p),_axes(poly)])
+        pp,pq,s=p@ax.T,poly@ax.T,pos@ax.T
+        d1=(pp.max(0)+s)-(pq.min(0)+1e-9);d2=pq.max(0)-((pp.min(0)+s)+1e-9)
+        apart=((d1<=-_SURE)|(d2<=-_SURE)).any(axis=1);overlap=((d1>_SURE)&(d2>_SURE)).all(axis=1)
+        for i in np.flatnonzero(~apart&~overlap&ok):
+            overlap[i]=PM.meets(p+pos[i],poly)
+        ok&=overlap&~apart
+    return ok
+
+
 def near_proposals(sim, target_box, direction, *, max_results=2):
     """One batched HERO2 rollout; no pogo is injected without blade contact.
 
@@ -65,20 +99,28 @@ def near_proposals(sim, target_box, direction, *, max_results=2):
                 dslash.strike(row,press);row[press:]|=key
                 rows.append(row);meta.append((hold,press,before))
     cmds=np.asarray(rows,np.int64);ro=sim.roll(cmds);off=len(prefix);poly=np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]])
-    candidates=[]
+    windows=[]
     for q,(hold,press,before) in enumerate(meta):
         pj=off+press+1;flags=ro.flags[q]
         if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:
             continue
+        js=[]
         for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
             if flags[j]&K.F_GROUND:break
-            # Rollout has no per-frame facing. A requested direction is not
-            # proof that the HoldFilter/attack recovery already let her turn.
-            # Require both mirrors until the receiving adapter knows the face.
-            if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[q,j],poly)
-                   for face in (-1,1) for alt in (False,True)):
-                row=cmds[q].copy();row.setflags(write=False)
-                candidates.append(NearVaultProposal(hold,press,before,direction,j,row));break
+            js.append(j)
+        windows.append((q,js))
+    # Rollout has no per-frame facing. A requested direction is not
+    # proof that the HoldFilter/attack recovery already let her turn.
+    # Require both mirrors until the receiving adapter knows the face.
+    qs=np.array([q for q,js in windows for _ in js],np.int64);fs=np.array([j for _,js in windows for j in js],np.int64)
+    hit=_meets_all(ro.pos[qs,fs],poly) if len(qs) else np.zeros(0,bool)
+    candidates=[];i=0
+    for q,js in windows:
+        first=np.flatnonzero(hit[i:i+len(js)]);i+=len(js)
+        if len(first):
+            hold,press,before=meta[q]
+            row=cmds[q].copy();row.setflags(write=False)
+            candidates.append(NearVaultProposal(hold,press,before,direction,js[int(first[0])],row))
     candidates.sort(key=lambda x:(x.contact_index,x.press,x.hold,x.before))
     return tuple(candidates[:max_results]),{"status":"nominal_proposals" if candidates else "no_nominal_contact",
         "generated":len(rows),"contact_rows":len(candidates),"returned":min(len(candidates),max_results),

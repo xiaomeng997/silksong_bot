@@ -87,3 +87,55 @@ def test_unobserved_facing_cannot_certify_asymmetric_edge_contact(params,directi
     s.roll=rollout
     rows,diag=near_proposals(s,box,direction)
     assert not rows and diag["contact_rows"]==0
+
+
+@pytest.mark.parametrize("direction",[-1,1])
+def test_batched_contact_keeps_the_original_order_and_first_contact(params,direction,monkeypatch):
+    from ssbot.combat import knife_chain_vault_entry as V, pogo_model as PM
+    s,box=sim(params,direction)
+    fast,diag=V.near_proposals(s,box,direction,max_results=8)
+    def scalar(pos,poly):
+        return np.array([all(PM.meets(PM.slash_poly(face,alt)+p,poly)
+                             for face,alt in V._DOWN_POLYS) for p in pos],bool)
+    monkeypatch.setattr(V,"_meets_all",scalar)
+    old,old_diag=V.near_proposals(s,box,direction,max_results=8)
+    assert {k:v for k,v in diag.items() if k!="ms"}=={k:v for k,v in old_diag.items() if k!="ms"}
+    assert len(fast)==len(old)>0
+    for a,b in zip(fast,old):
+        assert (a.hold,a.press,a.before,a.direction,a.contact_index)==(b.hold,b.press,b.before,b.direction,b.contact_index)
+        np.testing.assert_array_equal(a.commands,b.commands)
+
+
+def test_batched_contact_uses_original_predicate_at_the_touch_boundary(monkeypatch):
+    from ssbot.combat import knife_chain_vault_entry as V, pogo_model as PM
+    poly=np.array([[-.1,-.8],[.1,-.8],[.1,-.5],[-.1,-.5]])
+    original=PM.meets
+    def scalar(p):
+        return all(original(PM.slash_poly(face,alt)+p,poly) for face,alt in V._DOWN_POLYS)
+    lo,hi=0.,4.
+    assert scalar(np.array([lo,0.])) and not scalar(np.array([hi,0.]))
+    for _ in range(60):
+        mid=.5*(lo+hi)
+        if scalar(np.array([mid,0.])):lo=mid
+        else:hi=mid
+    points=np.array([[lo+d,0.] for d in (-1e-6,-1e-10,-1e-12,0.,1e-12,1e-10,1e-6)])
+    expected=np.array([scalar(p) for p in points])
+    calls=[]
+    def exact(a,b):calls.append(1);return original(a,b)
+    monkeypatch.setattr(PM,"meets",exact)
+    np.testing.assert_array_equal(V._meets_all(points,poly),expected)
+    assert calls, "the close-call path must execute the original floating-point predicate"
+
+
+@pytest.mark.parametrize("offset",[-100000.,100000.])
+def test_batched_contact_outside_arena_numerical_domain_falls_back(offset,monkeypatch):
+    from ssbot.combat import knife_chain_vault_entry as V, pogo_model as PM
+    poly=np.array([[offset-1.,-2.],[offset+1.,-2.],[offset+1.,0.],[offset-1.,0.]])
+    points=np.array([[offset,0.],[offset+8.,0.],[offset-8.,0.]])
+    original=PM.meets;calls=[]
+    expected=np.array([all(original(PM.slash_poly(face,alt)+p,poly)
+                           for face,alt in V._DOWN_POLYS) for p in points])
+    def exact(a,b):calls.append(1);return original(a,b)
+    monkeypatch.setattr(PM,"meets",exact)
+    np.testing.assert_array_equal(V._meets_all(points,poly),expected)
+    assert len(calls)>=len(points)

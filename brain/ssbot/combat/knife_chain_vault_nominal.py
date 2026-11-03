@@ -46,7 +46,7 @@ from . import pogo_model as PM
 from .air_chain import ChainSim
 from .knife_chain_air import body_box
 from .knife_chain_format import MASK_NAMES as B
-from .knife_chain_nominal import NominalPath, NominalUnsupported, _hero, logical_copy
+from .knife_chain_nominal import NominalPath, NominalUnsupported, _hero, logical_copy, state_names
 from .knife_chain_step import NominalStepper, hold_one
 from .slam_play import control
 
@@ -98,7 +98,7 @@ def _set_body(e, box, dx):
 
 def _clear_short_bounce(s):
     """_hero owns downSpikeBouncing; the observed downSpikeBouncingShort bit is not a model lane: clear it."""
-    names = km.cstate_names()
+    names = state_names()                   # _hero's cached schema names (km.cstate_names() reads the JSON each call)
     if "downSpikeBouncingShort" not in names:
         return
     i = names.index("downSpikeBouncingShort")

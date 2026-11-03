@@ -133,6 +133,19 @@ def test_continuing_needs_an_active_run():
         VN.compile_near(runner, raw, sim, GAME0, request=None, buddy_iid=BUDDY, buddy_lock_until=GAME0 + 0.85)
 
 
+def test_each_model_frame_uses_the_already_loaded_cstate_schema(monkeypatch):
+    from ssbot.combat.knife_chain_nominal import state_names
+    names=state_names()
+    index=names.index("downSpikeBouncingShort")
+    bits=[(1<<64)-1 for _ in range(index//64+1)]
+    s={"hero":{"cstate":bits.copy()}}
+    def unexpected_read():pytest.fail("model frame reread the schema file")
+    monkeypatch.setattr(K,"cstate_names",unexpected_read)
+    VN._clear_short_bounce(s);VN._clear_short_bounce(s)
+    expected=bits.copy();expected[index//64]&=~(1<<(index%64))
+    assert s["hero"]["cstate"]==expected
+
+
 def test_a_lock_that_never_ends_cannot_be_called_a_handback():
     runner, raw, sim, request, _ = scene(-1)
     with pytest.raises(NominalUnsupported):
