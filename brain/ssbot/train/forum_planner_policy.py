@@ -970,10 +970,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         chain=getattr(self,"chain_native",None);apply=getattr(chain,"goal_preferences",None)
         if not callable(apply):return prefs
         script=getattr(self,"slam_play",None);run=getattr(script,"run",None)
-        handoff=(run is None or (run.phase=="after" and run.bounced))
+        observe=getattr(chain,"observe_bounce_goal",None)
+        real_bounce=bool(callable(observe) and observe(state,prefs,run))
+        handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce)))
         out=apply(state,prefs,handoff=handoff)
         if out is not prefs:
-            if run is not None:script.abort("observed rune antic: transfer goal handoff")
+            if run is not None:script.abort("observed target transfer: goal handoff")
             self._play_tick=None
         return out
 

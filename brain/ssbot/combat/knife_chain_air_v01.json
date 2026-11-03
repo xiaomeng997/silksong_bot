@@ -889,6 +889,14 @@
     "id": "rune_transfer",
     "start": "walk",
     "links": {
+      "bounce_tail": {
+        "id": "rune_transfer.bounce_tail",
+        "phase": "after",
+        "clock": "antic",
+        "inherit": ["stop"],
+        "rules": [],
+        "keys": []
+      },
       "walk": {
         "keys": [
           {
@@ -1074,6 +1082,7 @@
       "iid": null,
       "caster": null,
       "cast_fa": null,
+      "air_entry": false,
       "fa": null,
       "ta": null,
       "side": null,
@@ -1097,7 +1106,8 @@
         "Evade Scuttle",
         "Spell Antic",
         "Cast 1",
-        "Cast 2"
+        "Cast 2",
+        "Slam Recover"
       ],
       "lookahead_frames": 36,
       "jump_distance": 9.0,
@@ -1110,6 +1120,10 @@
       "flight_check_frames": 72
     },
     "admission": {
+      "bounce_tail": {
+        "link": "rune_transfer.bounce_tail", "observations": [], "conditions": [], "status": "unfitted",
+        "notes": "Observed DownSlash hit and bounce; keep current-step checks until the source Slam 2 collider is absent."
+      },
       "walk": {
         "link": "rune_transfer.walk",
         "observations": [],

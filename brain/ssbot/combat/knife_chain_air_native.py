@@ -4,7 +4,8 @@ Only this family's candidate availability suppresses the old slam script; ground
 h2 remains available. No second keyboard owner or online action-tree search.
 The table is a named unfitted probe, checked through predicted contact and the
 existing N=2 short continuation policy;
-actual target hit AND observed bounce hand back to ordinary full-scene planning.
+Actual target hit AND observed bounce reopen the tactical target's next knife.
+The old slam's observed hammer tail is retained before that air/strike suffix.
 """
 from dataclasses import asdict,replace
 from pathlib import Path
@@ -53,6 +54,7 @@ class NativeManualAirChain(NativeChainB2):
     def reset(self,episode,*,start_frame=None):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
+        self._transfer_blade=None
         self._transfer_responsibility={}
         self._vault_ready=False
         self._vault_responsibility={}
@@ -75,19 +77,42 @@ class NativeManualAirChain(NativeChainB2):
         self._air_context=(entry_context(state,self._clock,self.runner) if self.arm=="B" and
             self.commitment is None and self.post_context is None else None)
 
+    def observe_bounce_goal(self,state,prefs,legacy_run=None):
+        """Bind the next tactical target at a real bounce, before old after keys."""
+        if self.arm!="B" or self.recovery is not None or self.commitment is not None:return False
+        hit=transfer.bounce_target(state);target=getattr(prefs,"target",None)
+        post=self.post_context
+        if (hit is None and post is not None and post.get("bounce")==state["f"] and
+                self._hit is not None and post.get("hit")==self._hit):
+            # Base B2 has already joined our press-bound earlier hit to THIS
+            # observed bounce; the hit need not be repeated in the same STATE.
+            hit=post["move"].target_iid
+        es={e["iid"]:e for e in transfer.clappers(state)}
+        if len(es)!=2 or hit not in es or target not in es:return False
+        source=None;ta=None
+        if (legacy_run is not None and legacy_run.phase=="after" and legacy_run.iid==hit):
+            source=transfer.MoveInstance(hit,legacy_run.fa,"CC_SLAM");ta=legacy_run.ta
+        elif self.post_context is not None and self.post_context["move"].target_iid==hit:
+            source=self.post_context["move"];ta=self.post_context.get("ta")
+            if source.family=="RUNE_TRANSFER":source,ta=self._transfer_responsibility.get(source,(None,None))
+            elif source.family=="VAULT_IDLE":source,ta=self._vault_responsibility.get(source,(None,None))
+        if source is None:return False  # no invented parent move or CC_CAST label
+        self._transfer_goal=transfer.TransferGoal(target,hit,state["f"],ta,"BOUNCE",source)
+        self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
+        return True
+
     def goal_preferences(self,state,prefs,*,handoff):
         """One destination before forecasting; critical/committed actions retain ownership."""
         goal=self._transfer_goal
         if (self.arm!="B" or goal is None or not handoff or self.commitment is not None or
-                self.recovery is not None or self.post_context is not None or getattr(prefs,"want_bind",False)):
+                self.recovery is not None or getattr(prefs,"want_bind",False)):
             self._transfer_ready=False
             return prefs
         enemies={e["iid"]:e for e in transfer.clappers(state)}
         target=enemies.get(goal.target);caster=enemies.get(goal.caster)
         active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
-        valid_caster=caster is not None and transfer.control(caster)[0] in {"Spell Antic","Cast 1","Cast 2","Idle","Walk"}
         spent=(goal.caster,goal.cast_fa) in self._transfer_finished
-        if target is None or not valid_caster or (spent and not active):
+        if target is None or caster is None:
             self._transfer_goal=None;self._transfer_ready=False
             if active:self._abandon("rune transfer no longer owns this observed cast")
             return prefs
@@ -95,9 +120,28 @@ class NativeManualAirChain(NativeChainB2):
         # destination already selected by tactics, with that enemy's full prefs.
         if getattr(prefs,"target",None)!=goal.target:
             self._transfer_ready=False;return prefs
+        if self.post_context is not None:
+            if goal.source_kind!="BOUNCE" or self.post_context["move"].target_iid!=goal.caster:
+                self._transfer_ready=False;return prefs
+            old=self.post_context["move"]
+            self._air_finished.add(old)
+            self.post_context=self._post_seed=self._post_kind=None;self._air_plan=None
+            self._abandon("real bounce: next target knife handoff")
+            self._air_context=entry_context(state,self._clock,self.runner)
         # A destination is not keyboard ownership: a newly observed target
         # attack must still reach the existing ground/air attack adapters.
-        self._transfer_ready=transfer.control(target)[0] in self.runner.chains[transfer.PROGRAM].cfg["target_states"]
+        st=transfer.control(target)[0]
+        hb=(state.get("hero") or {}).get("box") or ()
+        air_attack=(goal.source_kind=="BOUNCE" and st in transfer.AIR_ATTACK_STATES and len(hb)==4 and
+                    type(hb[1]) in (int,float) and np.isfinite(hb[1]) and hb[1]>3.2)
+        self._transfer_ready=((st in self.runner.chains[transfer.PROGRAM].cfg["target_states"] or air_attack) and (active or not spent))
+        blade="air_contact" if air_attack and self._transfer_ready else "stomp" if self._transfer_ready else "slam" if st=="Slam Antic" else "unavailable"
+        status=(goal,st,blade,spent)
+        if status!=self._transfer_blade:
+            self._note("target_transfer_blade",frame=state["f"],target=goal.target,state=st,blade=blade,
+                       source_kind=goal.source_kind,spent=spent,goal_retained=True)
+            self._transfer_blade=status
+        if spent and not active:return prefs  # retain intent, never re-claim an ended action's after segment
         return replace(prefs)  # acknowledge handoff; preserve every tactical field
 
     def continuation_value_bound(self,prefs):return float("inf")
@@ -226,7 +270,7 @@ class NativeManualAirChain(NativeChainB2):
                 self._air_finished.add(plan.move);self._recover("manual air current external path blocked",f);return None
             return B2Offer("active",None,draft,int(mask),0.,plan.move,{"manual_air":True,"phase":draft.run.link})
         if self._air_context is None:return self._transfer_offer(state,game,sim,forecast,prefs,ground)
-        if self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM and self._air_context[1]["iid"]!=getattr(prefs,"target",None):
+        if self._transfer_ready and self._air_context[1]["iid"]!=getattr(prefs,"target",None):
             return self._transfer_offer(state,game,sim,forecast,prefs,ground)
         try:
             made=plan_entry(self.runner,state,game,sim,self._air_context)
@@ -280,7 +324,25 @@ class NativeManualAirChain(NativeChainB2):
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)
             return None
-        try:scan=B2Geometry(forecast,f,plan.move,current[2]).preflight(path)
+        target_ta=None
+        try:
+            geo=B2Geometry(forecast,f,plan.move,current[2])
+            attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
+            if attacking:
+                if getattr(current[2],"fam",None)!="CC_SLAM":raise GeometryUnavailable("air continuation attack family unsupported")
+                identity=(plan.iid,current[2].fam,float(current[2].t0))
+                prior=None if run is None else run.v.get("_target_attack")
+                if prior is not None and prior!=identity:raise GeometryUnavailable("air continuation target began another attack")
+                draft.run.v["_target_attack"]=identity
+                target_ta=self._clock-(float(rs.trk.T)-float(current[2].t0))
+                check=path;row=draft.run.v.get("row")
+                if row is not None and plan.contact_frame is not None and plan.contact_frame>f+2:
+                    commands=np.array([row["masks"][F-row["F0"]] for F in range(f+2,plan.contact_frame+1)],np.int64)
+                    check=model_path(sim,plan,commands,game)
+                bad=self._query(forecast,plan.move,check,contact_frame=plan.contact_frame,geometry=geo)
+                from .knife_chain_commitment import ContactScan
+                scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
+            else:scan=geo.preflight(path)
         except GeometryUnavailable as exc:
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
             if active:self._recover("rune transfer external step unchecked",f)
@@ -291,12 +353,13 @@ class NativeManualAirChain(NativeChainB2):
             if active:self._recover("rune transfer external step blocked",f)
             return None
         goal=self._transfer_goal
-        self._transfer_responsibility.setdefault(plan.move,(transfer.MoveInstance(plan.caster,plan.cast_fa,"CC_CAST"),
-            None if goal is None else goal.cast_ta))
+        responsibility=(transfer.MoveInstance(plan.caster,plan.cast_fa,"CC_CAST") if goal is None else goal.responsibility)
+        self._transfer_responsibility.setdefault(plan.move,(responsibility,None if goal is None else goal.cast_ta))
         return B2Offer("active" if active else "manual_commitment",path,draft,int(mask),0.,plan.move,
             {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
+             "target_ta":target_ta,"target_attack_checked":attacking,
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
-             "handoff":"observed target DownSlash hit plus bounce; original vault exit",
+             "handoff":"real hit+bounce reopens tactical target knife; observed source hammer tail retained",
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})
 
     def _transfer_bounce_exit(self):
@@ -344,6 +407,8 @@ class NativeManualAirChain(NativeChainB2):
                            scope="one in-air branch in the same Run; first miss responsibility retained")
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("rune_transfer"):
             self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+            if self.commitment is not None and selected.details.get("target_ta") is not None:
+                self.commitment["ta"]=selected.details["target_ta"]
             if sent.desired_mask&B["J"]:
                 from .knife_chain_jump import JumpStartWatch
                 if self._jump_start is None:self._jump_start=JumpStartWatch(selected.move,sent.frame,(sent.target_frame,))
@@ -388,5 +453,4 @@ class NativeManualAirChain(NativeChainB2):
     def summary(self):
         return {**super().summary(),"mode":"manual_air_probe","table":"manual_air+vault_near" if self.vault_enabled else "air_strike","tables":list(self.runner.chains),
                 "online_search":False,"geometry_scope":("vault: current external step only, empirical skill; other air: contact path and N=2" if self.vault_enabled else "current/contact path plus existing N=2 continuations"),
-                "post_bounce":("vault uses its observed original exit; other air hands back to ordinary planner" if self.vault_enabled else
-                               "ordinary planner from actual hit+bounce; no frozen future tail")}
+                "post_bounce":"tactical target to shared air/strike after observed source slam tail; original exit remains a fallback"}

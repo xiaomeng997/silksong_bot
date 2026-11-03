@@ -16,6 +16,7 @@ from .knife_chain_air import body_box,complete_hf,AirAnchor,model_path
 from .slam_play import clappers,control
 
 PROGRAM="rune_transfer"
+AIR_ATTACK_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"})
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,42 @@ class TransferGoal:
     caster:int
     cast_fa:int
     cast_ta:object=None
+    source_kind:str="CAST"
+    source_move:object=None
+
+    @property
+    def responsibility(self):
+        return self.source_move or MoveInstance(self.caster,self.cast_fa,"CC_CAST")
+
+
+def bounce_target(state):
+    """A current, actual DownSlash hit AND bounce marker; never model contact."""
+    from .knife_chain_observations import pogo_marker
+    if not pogo_marker(state):return None
+    f=state.get("f");hits=set()
+    for ev in state.get("ev") or ():
+        d=ev.get("d") or {};src=str(d.get("src") or "");ef=ev.get("f",f)
+        iid=d.get("ent",d.get("iid"))
+        if (ev.get("k")=="hit" and "DownSlash" in src and "Harpoon" not in src
+                and type(ef) is int and ef==f and type(iid) is int):hits.add(iid)
+    return next(iter(hits)) if len(hits)==1 else None
+
+
+def bounce_tail_pending(state,goal,game):
+    """Keep the old hammer tail until its observed Slam 2 collider is gone."""
+    if goal is None or goal.source_kind!="BOUNCE" or goal.responsibility.family!="CC_SLAM":return False
+    if goal.responsibility.target_iid!=goal.caster:return False
+    source=next((e for e in clappers(state) if e["iid"]==goal.caster),None)
+    if source is None:return True
+    st,tin=control(source)
+    if st in AIR_ATTACK_STATES:
+        new=(st=="Slam Antic" and goal.cast_ta is not None and abs(game-tin-goal.cast_ta)>3/60.)
+        if not new:return True
+    if not st:return True
+    cols=source.get("colliders")
+    if not isinstance(cols,list) or not cols:return True
+    if any(str(c.get("name","")).startswith("Slam Collider") and c.get("enabled") is not False for c in cols):return True
+    return not any(str(c.get("name","")).startswith("Song Heavy Sentry") and c.get("enabled") is True for c in cols)
 
 
 def observe_goal(state,previous,cfg,finished,game_time=None):
@@ -62,8 +99,9 @@ def observe_goal(state,previous,cfg,finished,game_time=None):
             None if game_time is None else float(game_time)-control(caster)[1])
         if previous is not None and (fresh.target,fresh.caster,fresh.cast_fa)==(previous.target,previous.caster,previous.cast_fa):
             return previous
-        if ((caster["iid"],fa) not in finished and control(target)[0] in cfg["target_states"] and
-                (previous is None or fresh!=previous)):return fresh
+        # Record the tactical destination for every live target state. The
+        # blade adapter, not goal observation, decides which action can execute.
+        if (caster["iid"],fa) not in finished and (previous is None or fresh!=previous):return fresh
     if previous is not None:
         if (previous.target in byid and previous.caster in byid and
                 0<=f-previous.cast_fa<=cfg["max_frames"]):
@@ -136,6 +174,7 @@ def register(prims):
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
         direction=1 if x.v["side"]==B["R"] else -1
         row=strike_program(x.obs.F,left,1,direction,16)
+        if x.v["side"]==0:row["masks"]=[m&~(B["L"]|B["R"]) for m in row["masks"]]
         ro=sim.roll(np.asarray(row["masks"],np.int64)[None]);pj=len(sim.prefix)+2
         flags=ro.flags[0]
         if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:return None
@@ -144,6 +183,7 @@ def register(prims):
             if flags[j]&K.F_GROUND:return None
             if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
                     for face in (-1,1) for alt in (False,True)):
+                row["contact_frame"]=x.obs.f+j
                 x.v["row"]=row
                 return {"do":"goto","to":"strike"}
         return None
@@ -183,7 +223,11 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if enemy is None:return None
     other=next(e for e in es if e is not enemy);st,tin=control(other);target_state,_=control(enemy)
     cfg=runner.chains[PROGRAM].cfg;body=body_box(enemy)
-    if body is None or target_state not in cfg["target_states"] or h.get("health",0)<=0 or h.get("stunned"):return None
+    attacking=target_state in AIR_ATTACK_STATES
+    bounce_entry=goal is not None and goal.source_kind=="BOUNCE"
+    tail_pending=bounce_tail_pending(state,goal,game)
+    if body is None or h.get("health",0)<=0 or h.get("stunned"):return None
+    if target_state not in cfg["target_states"] and not (attacking and bounce_entry and not ground):return None
     if sim.fo!=sim.f or sim.f!=state["f"] or len(sim.prefix)!=1:return None
     if int(sim.prefix[0])&~(B["L"]|B["R"]|B["J"]|B["DASH"]|B["D"]|B["A"]):return None
     hp=h.get("pos");vel=h.get("vel")
@@ -193,21 +237,33 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if type(cd) not in (int,float) or not math.isfinite(cd):return None
     if active is None:
         if h.get("hero_accepting_input") is not True:return None
-        observed=(goal is not None and goal.target==target and goal.caster==other["iid"] and
+        observed=(goal is not None and goal.target==target and goal.caster in {e["iid"] for e in es} and
                   0<=state["f"]-goal.cast_fa<=cfg["max_frames"])
         if not observed and (st!="Spell Antic" or tin>cfg["entry_cast_s"]):return None
         if ground and (int(sim.prefix[0])&B["J"] or state["act"]["hf"]["latched"]&B["J"]):return None
         cast_fa=goal.cast_fa if observed else max(0,state["f"]-int(round(tin*60.)))
-        if (other["iid"],cast_fa) in finished:return None
-        p=TransferPlan(target,other["iid"],cast_fa,state["f"],game,
-            B["R"] if enemy["pos"][0]>h["pos"][0] else B["L"],2+int(math.ceil(max(0.,cd)*60.)),10000,10000,False,state["f"],0)
+        source=goal.caster if observed else other["iid"]
+        if (source,cast_fa) in finished:return None
+        side=B["R"] if enemy["pos"][0]>h["pos"][0] else B["L"]
+        if bounce_entry and target==source and body[0]<=hp[0]<=body[2]:side=0
+        p=TransferPlan(target,source,cast_fa,state["f"],game,
+            side,2+int(math.ceil(max(0.,cd)*60.)),10000,10000,False,state["f"],0)
         link="walk" if ground else "air"
     else:
         if active.v["iid"]!=target:return None
         p=TransferPlan(**{k:active.v[k] for k in TransferPlan.__dataclass_fields__ if k in active.v},origin=state["f"],entry_k=int(round((game-active.v["ta"])*60.)))
         link=active.link
+    if tail_pending:
+        link="bounce_tail";p=replace(p,jump_k=min(p.jump_k,p.entry_k),jump_until=p.entry_k)
+    elif link=="bounce_tail":link="walk" if ground else "air"
     k=p.entry_k
     current_mode=int(np.asarray(sim.start).reshape(K.K)[K.MODE])
+    air_entry=bool(tail_pending or (active is not None and active.v.get("air_entry")))
+    landed_entry=bool(active is not None and link=="air" and ground and air_entry)
+    if landed_entry:
+        # An outside bounce/flight is an entry, not our missed jump. Keep the
+        # same destination and owner across landing and select the normal jump.
+        link="walk";air_entry=False;p=replace(p,jump_k=10000,jump_until=10000)
     if link in {"walk","dash"} and ground:
         held_dash=bool(current_mode in (K.M_DASH,K.M_SPRINT) and int(sim.prefix[0])&B["DASH"])
         if held_dash:link="dash"
@@ -227,9 +283,9 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # tick. Re-arm only a suppressed clock if the target moves away again.
         elif active is None or p.dash_k>=10000:
             p=replace(p,dash_k=k+max(2,int(math.ceil(max(0.,cd)*60.))))
-    elif not ground:
+    elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
-            p=replace(p,jump_until=k,jump_k=min(p.jump_k,k))  # outside jump: no J; still end if it lands without a strike
+            p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
         if link!="strike":link="air"
     if defer_jump:
@@ -241,7 +297,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     draft=runner.fork_empty(AirAnchor())
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
-    variables.update(p.variables());draft.run=Run(PROGRAM,link,variables)
+    variables.update(p.variables());variables["air_entry"]=air_entry;draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
     obs=_observation(p,state,game,body,ground,clearance)
     obs.sim=sim;obs.e=enemy
@@ -249,8 +305,15 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     mask=draft.eval_link(X(draft,draft.run,obs))
     if mask is None:return (None,p,None,None)
     row=draft.run.v.get("row")
-    if row is not None:p=replace(p,press_k=k+row["press_F"]-state["f"])
+    if row is not None:p=replace(p,press_k=k+row["press_F"]-state["f"],contact_frame=row["contact_frame"])
     path=model_path(sim,p,np.array([mask],np.int64),game)
+    if landed_entry:
+        # Keep R1's close-body backstop: a landing may continue only when the
+        # already queued ground step stays clear before our next jump applies.
+        from .forum_v2 import FOCUS_M
+        b=path.box;grounded=path.states[K.GROUND,:len(b)]>0
+        overlap=(b[:,0]<body[2]+FOCUS_M)&(b[:,2]>body[0]-FOCUS_M)&(b[:,1]<body[3]+FOCUS_M)&(b[:,3]>body[1]-FOCUS_M)
+        if np.any(grounded&overlap):return (None,p,None,None)
     path=replace(path,stage="approach",assumptions={**path.assumptions,
         "basis":"manual observed-distance dash/sprint/jump/stomp; current external step only",
         "next_decision":"actual target DownSlash hit plus bounce, miss, or new target move",
