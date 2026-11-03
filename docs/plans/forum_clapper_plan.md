@@ -3186,3 +3186,5 @@ ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；�
 源03c67c5036abbdac7bbe1168341129d926e0c61d只改同一近行：仍距离选p4/p8，对当前有限已知且不超过已有params.attack_cooldown的cd，p=max(p,ceil(cd*60)-1)，先朝目标起跳、同一行等旧刀冷却再劈；两实际点为p13/p12。无新增动作、时序搜索、完整技能预测、目标/站位规则；未知cd仍由原entry拒绝，原危险、输入、firstJ、真实hit+bounce、一次miss钩和归责不变。拒绝日志补cd/配方/why供快速定位。14份343项过/foreign空；旧cd.3必拒绝不再属新策略，该持续回归改未知cd仍核机会/runner不消耗，另加3实际冷却时序例。Task87只核2文件，实际2963完整P待核；源码默认关，本次授权已消费，无第二局或8局许可。
 
 7.48首个新P尝试仅资源预检延期：Chrome进程24984实测0.526核触原0.5核门，未进入policy/P测量，无游戏/预约/新试局。PRE_RESOURCE记录保留，STATUS已false，不关闭用户进程、不放宽阈值；允许资源恢复后有限复查。实际失败定位和343回归不依赖此P。
+
+7.48新源实际2963完整P点已核：03c67c50从该局原S0/HF/prefix（差0）选择near并最终L|J，旧实况为R|J且无链。原首J clock late=false，目标2965到framed null sink；完整_act13.7863ms、提案2.3264ms，P0–15 High/Numba4/EcoQoS关，签名前后同/foreign空。父55588及异步子清理后STATUSfalse。只证该起点现在能供给并及时发正确方向起手，不推未运行后续轨迹/实际命中/安全/迟到率，也没有第二局。第一次Chrome门延期保留，第二次无资源阻挡才测。cooldown_fix/P_RECEIPT保存，Task87源审仍待。
