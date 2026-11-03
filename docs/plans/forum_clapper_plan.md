@@ -3153,3 +3153,14 @@ Task77另三项只核7产物hash，未独立重跑：3154预测接触仅在0.5�
 14份337项统一相关回归通过/foreign空，69早期专项为子集不相加；摘要夹具旧digest和缺buddy_ta红测原样保留。表digest 1ca240008e4384b574a015e32dbd79f75d7f39139d3c44a4eb3015c864328584；10文件LF hash与Git blob同。Task85最小源审已排，完整首J政策/发键P和启动还待核；没有新游戏，旧67.3751ms失败/旧stopped局不改，不提前称ready。下次观看仍等用户新“开”。
 
 7.45补核完整P同起点：新ff78源在原3193实况S0/HF/prefix（差0）选择manual_commitment near，提案2.2156ms，完整_act 13.7726ms，原首J时钟门late=false，L|J目标3195发到framed null sink；原244整段策略67.3751ms失败保留。两者准入策略不同，不能称纯性能等价。实际P0–15/High/Numba4/EcoQoS关闭读回、原8ms普通截止、预热后签名前后同/foreign空。该点clock余17.019767ms仅本机新接收锚结果，不是未来实机排队/延迟分布保证；send_return距recv13.7407ms，无真实socket/离地/命中证据。父40792退出、异步子join/无残留，STATUSfalse。分析包装器首次缺spawn主入口保护而在战前退出，修的是分析驱动；旧失败原样保留、不计P通过。P_RECEIPT.json保存核对。Task85源审仍待，未放行或启动新局。
+
+
+### 7.46 修复首次入口拒绝与第二帧钩键【191已处理；76e67917，340过；增量源审/P待核】
+
+已处理 Opus #191（Task85）：8审阅工件、1003快照树、10源码LF与ff78绑定、29份Root证据hash同；peer69项与Root337相应JUnit逐项同。无P0–P1；1条P2是新入口第一步因冷却等拒绝后误把整机会记完成并替换runner，2条P3是hook pending截掉计划第二帧CLAW、落空转钩没核目标仍在近侧。三条均用Root持续回归在旧ff78复现红测，不以旧337过就忽略。
+
+源76e679177a76dcf397dc7559fe5bd15b9e0a6649仅3文件：新入口无成功Run/发送时拒绝只记vault_entry_declined并return，原runner/机会不被消耗；进行中真实收尾才完成/交还。hook锁只额外保留既定绝对窗口中尚未发过的第二帧CLAW，其余中性，不重开钩或声称新free-flight验证。miss补原side_ok，目标已在身后不背向出钩，怪后撤仍在前方则可走一次hop0。未变表/参数/原首J时钟/实际起跳与Harpoon看门/命中+弹起/HP责任。14份340项统一回归过/foreign空，3红测证据与新green均在analysis/vault_two_entries_20261102/review191；表digest不变。Task86只增量核3文件，未接在途结果为通过。
+
+ff78的13.7726ms P点仍仅旧源离线历史，新源完整首J点待绑定；不拿小修称当前已测。用户问的一帧：60Hz约16.7ms，13.8ms一个点不能估超帧概率，也不能与普通近跳冲锤不同阶段数字直接比。按键目标为绝对f+2，超过一个CPU帧不必然漏键，首J赶不上原截止则中性取消/恢复，不把旧序列整体平移；已发动作另查Opt1回执覆盖与实际接受，真失步按原规则停。当前仍无新游戏，观看授权未消费。
+
+7.46新源完整P点补核：76e67917在同原3193输入，完整_act 14.0072ms，原生产首J clock late=false，L|J目标3195到framed null sink；起点差0，预热后签名前后同/foreign空，实际P0–15 High/Numba4/EcoQoS关闭。新点不是ff78旧13.7726的重标，同样不证明真实排队/接受/弹起或超16.7ms概率。父43916不存在、异步子join、STATUSfalse。review191/P_RECEIPT.json保存核验，Task86独立增量源审仍待；无实机。
