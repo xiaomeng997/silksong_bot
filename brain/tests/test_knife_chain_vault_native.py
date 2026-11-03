@@ -161,6 +161,7 @@ def test_send_and_observed_bounce_keep_the_original_vault_exit(direction,monkeyp
     class SafeGeometry:
         def __init__(self,*args):self.move=move
         def scan(self,path):return NS(complete=True,contacts=())
+        preflight=scan
     monkeypatch.setattr(VN,"B2Geometry",SafeGeometry)
     forecast=NS(rs=NS(trk=NS(now={TARGET:(None,None,None)})))
     prefs=NS(weights={},risk_x=[],risk=[],stance_x=30.,boss_x=None)
@@ -209,9 +210,9 @@ def test_frozen_game_clock_cannot_turn_a_failed_lock_into_a_new_opportunity(monk
         return {"target":TARGET,"buddy":BUDDY,"buddy_t0":epoch[0],"buddy_ta":GAME0-1.,
                 "buddy_lock_until":GAME0+1.,"direction":-1,"box":np.array(box),
                 "move":MoveInstance(TARGET,state["f"],"VAULT_IDLE")}
-    def proposals(*args,**kw):
-        expanded.append(1);return (),{"generated":0}
-    monkeypatch.setattr(VN,"locked_context",context);monkeypatch.setattr(VE,"near_proposals",proposals)
+    def entries(*args,**kw):
+        expanded.append(1);return []
+    monkeypatch.setattr(VN,"locked_context",context);monkeypatch.setattr(VN,"manual_entries",entries)
     for i in range(3):
         s=deepcopy(raw);s["f"]=1000+i;s["dt"]=0.
         s["act"].update(target=1000,applied=1000,mask=0)

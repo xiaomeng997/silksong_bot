@@ -1,8 +1,9 @@
 """Existing Idle-vault table inside the manual-air B2 transaction owner.
 
 The optional table shares one dispatch/receipt/budget lifecycle with the air and
-transfer tables. It neither chooses a tactical target nor sends keys. Near
-entries use a fresh model path; the far-hook entry remains unavailable.
+transfer tables. It neither chooses a tactical target nor sends keys. Distance
+selects a manual near jump or small-hop hook; only the current external step is
+modeled. Full skill/contact/tail predictions are offline diagnostics.
 """
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -41,7 +42,7 @@ def _family_dispatch(air, vault):
 
 
 def load_runner():
-    """Bind the unchanged four tables together; loading never starts a run."""
+    """Bind four families together; loading never starts a run."""
     air = AIR.load_runner()
     vault, _ = V.load_vault_runner()
     prims = deepcopy(air.P)
@@ -80,11 +81,22 @@ def warm(params):
     stepper.run(start,1,event=K.EV_POGO)
     box=np.array([31.6,F.FLOOR_Y,35.19,F.FLOOR_Y+3.9])
     sim=ChainSim(start,np.zeros(1,np.int64),hold,params,terrain,100,100)
-    _,diag=near_proposals(sim,box,1)
+    recipe=load_runner().chains[V.CHAIN].cfg["NEAR_RECIPE"]
+    _,diag=near_proposals(sim,box,1,recipes=(recipe,))
     V.side_meets(30.,5.,1,box)
     _down_meets(np.array([30.,8.]),1,box)
+    from types import SimpleNamespace
+    from .knife_chain_nominal import _nominal_hook,NominalProfile
+    from ssbot.map2.oldwin_claw import control_state
+    # Exercise the same existing hook-motion/control initializer before combat.
+    air=stepper.run(start,K.B_JUMP).final[:,0].copy()
+    world=SimpleNamespace(iid=7,box=lambda game:box)
+    hook,_=_nominal_hook(air,world,0.,params,terrain,NominalProfile(),1)
+    control=control_state(params,hook,terrain,alpha=.5)
+    stepper.run(control,0)
     return {"family":"vault_near","ms":(time.perf_counter()-started)*1000.,
-            "proposal_rows_warmed":diag["generated"],"scope":"compile only; no safety or action acceptance evidence"}
+            "proposal_rows_warmed":diag["generated"],"hook_control_warmed":True,
+            "scope":"compile only; no safety or action acceptance evidence"}
 
 
 def visible(state):
@@ -147,6 +159,33 @@ def _contacts(geo, path):
             contact - 2 <= c.frame <= contact)]
 
 
+def manual_entries(native, state, sim, ctx):
+    """Two named actions with table-owned ranges; no online timing grid."""
+    cfg=native.runner.chains[V.CHAIN].cfg
+    h=state.get("hero") or {};hb=h.get("box");hp=h.get("pos")
+    target=next((e for e in clappers(state) if e["iid"]==ctx["target"]),None)
+    tp=None if target is None else target.get("pos")
+    if (hb is None or hp is None or tp is None or len(hb)!=4 or len(hp)<2 or len(tp)<2 or
+            not np.isfinite(np.asarray([*hb,*hp[:2],*tp[:2]],float)).all()):
+        return []
+    direction=ctx["direction"];box=ctx["box"]
+    gap=float(box[0]-hb[2] if direction>0 else hb[0]-box[2])
+    root_distance=abs(float(tp[0])-float(hp[0]));entries=[]
+    base={"iid":ctx["target"],"over_dir":direction,"nogo":[],
+          "x_end":float(box[2] if direction>0 else box[0])}
+    near=cfg["NEAR_RECIPE"];far=cfg["HOP_RECIPE"]
+    if root_distance<far["root_distance"][0] and near["box_gap"][0]<=gap<=near["box_gap"][1]:
+        press=near["close_press"] if gap<near["close_gap"] else near["press"]
+        entries.append(("near",{**base,"near":{"h":near["hold"],"p":press,"before":near["before"]},"far":None}))
+    silk=h.get("silk")
+    if (not entries and far["root_distance"][0]<=root_distance<=far["root_distance"][1] and
+            (h.get("can") or {}).get("harpoon") is True and type(silk) in (int,float) and math.isfinite(silk) and silk>=1):
+        entries.append(("hop_hook",{**base,"near":None,"far":{k:far[k] for k in ("hop","claw_after","d","p")}}))
+    native._note("vault_manual_entries",frame=state["f"],box_gap=gap,root_distance=root_distance,
+                 actions=[kind for kind,_ in entries],scope="fixed table recipes; no grid fallback")
+    return entries
+
+
 def _current_contact(path, frame, target_box, accepted):
     """Revalidate the original contact from current physics; never slide it."""
     from ssbot.knowledge import kinematics as K
@@ -183,6 +222,20 @@ def _bounce_path(path, sim):
         check_flags=path.check_flags[:k+1], game=path.game[:k+1], queued_next=int(path.commands[k]), end="bounce")
 
 
+def manual_jump_watch(offer,frame):
+    from .knife_chain_jump import JumpStartWatch
+    from .knife_chain_format import MASK_NAMES as B
+    run=offer.draft.run;cs=run.v.get("cs")
+    if cs is not None:
+        targets=tuple(range(cs.f0,min(cs.f0+cs.hop,cs.f_press)))
+    else:
+        row=run.v["row"];first=next((i for i,m in enumerate(row["masks"]) if m&B["J"]),None)
+        end=first
+        while end is not None and end<len(row["masks"]) and row["masks"][end]&B["J"]:end+=1
+        targets=() if first is None else tuple(row["F0"]+i for i in range(first,end))
+    return JumpStartWatch(offer.move,frame,targets) if targets else None
+
+
 def before_send(native, selected, *, frame, target, mask, flags, received_frame, dispatch_clock):
     """Keep the existing calibrated first-J deadline for this ground entry."""
     from .knife_chain_format import MASK_NAMES as B
@@ -192,7 +245,9 @@ def before_send(native, selected, *, frame, target, mask, flags, received_frame,
     if type(received_frame) is not int:
         native._stop("missing critical vault received frame", frame)
     jump = native._jump_start
-    if selected.stage == "commitment":
+    if selected.details.get("distance_vault") and selected.stage=="manual_commitment":
+        jump=manual_jump_watch(selected,frame)
+    elif selected.stage == "commitment":
         jump = JumpStartWatch.from_path(selected.path, selected.move, frame, native._receipts)
     if jump is None or jump.sent_targets or not int(mask) & B["J"]:
         return None
@@ -215,152 +270,82 @@ def before_send(native, selected, *, frame, target, mask, flags, received_frame,
 
 
 def propose(native, planner, forecast, prefs):
-    """Offer the selected target's near route; commit remains in B2.sent()."""
-    from .knife_chain_vault_entry import near_proposals
-    from .knife_chain_vault_nominal import compile_near
-    tick, sim, guard, bombs = native._context
-    f, state, game, ground, accepting = tick
-    active = native.runner.run is not None and native.runner.run.chain == V.CHAIN
-    if (bombs is None or not AIR.complete_hf(state) or type((state.get("hero") or {}).get("hero_accepting_input")) is not bool
-            or sim.fo != f or sim.f != f or len(sim.prefix) != 1):
-        if active: native._recover("vault current model input unavailable", f)
+    """Distance-selected manual table; no skill/contact/tail search.
+
+    Only the ordinary two-frame external-danger gate is queried. The target's
+    walking body is not a strike-admission problem here. Every delayed hazard,
+    other owner and unknown occupancy stays in that gate. Locked hook motion
+    cannot be changed: keep neutral until the actual input-control edge.
+    """
+    from types import SimpleNamespace
+    tick,sim,guard,bombs=native._context
+    f,state,game,ground,accepting=tick
+    active=native.runner.run is not None and native.runner.run.chain==V.CHAIN
+    if (bombs is None or not AIR.complete_hf(state) or sim.fo!=f or sim.f!=f or len(sim.prefix)!=1):
+        if active:native._recover("vault current input/danger context unavailable",f)
         return None
-    queued, _ = native.queued_prefix(f, state)
-    if queued is None or int(sim.prefix[0]) != queued:
-        if active: native._recover("vault current queued prefix mismatch", f)
+    queued,_=native.queued_prefix(f,state)
+    if queued is None or int(sim.prefix[0])!=queued:
+        if active:native._recover("vault current queued prefix mismatch",f)
         return None
     if active:
-        saved = native.runner.run.v.get("_native_vault")
-        if saved is None:
-            native._recover("vault run identity missing", f)
-            return None
-        move = MoveInstance(**saved["move"])
-        current_buddy=getattr(getattr(forecast,"rs",None),"trk",None)
-        current_buddy=None if current_buddy is None else current_buddy.now.get(saved["buddy"])
-        instance=None if current_buddy is None else current_buddy[2]
-        if instance is not None and (instance.fam!="CC_JUMP_CAST" or instance.t0!=saved["buddy_t0"]):
-            native._recover("vault buddy changed the bound jump-cast instance",f)
-            return None
-        # The real bounce releases B2's strike commitment, then this SAME table
-        # supplies over/fall/ground. There is no model-credited bounce here.
+        saved=native.runner.run.v.get("_native_vault")
+        if saved is None:native._recover("vault run identity missing",f);return None
+        move=MoveInstance(**saved["move"])
         if native.post_context is not None:
-            native._note("vault_real_bounce_exit", frame=f, move=asdict(move))
-            if native._hit is not None:
-                native.runner.run.v["down_hit_f"]=native._hit
-            native.post_context = native._post_seed = native._post_kind = None
-        actual=logical_copy(native.runner)
-        mask=actual.step(f,state,ground,accepting,t_game=game,sim=sim,guard=guard,bombs=bombs)
-        if mask is None or actual.run is None:
-            if native.commitment is not None:
-                native._recover("vault table ended before real target bounce",f)
-            else:
-                native._note("vault_observed_handoff",frame=f,move=asdict(move))
-                native._vault_completed.add(move)
-                native.runner=actual
-            return None
-        if native.commitment is not None:
-            # The committed near row is fixed until REAL bounce. Recheck the
-            # current prefix/next commands without synthesizing a second hit
-            # or demanding another attack edge after the accepted press.
-            from types import SimpleNamespace
-            row=actual.run.v.get("row")
-            if row is None:
-                native._recover("vault committed near row missing",f)
-                return None
-            predicted=native.commitment["predicted_bounce"]
-            last=max(f+4,predicted or f)
-            indices=range(f+2-row["F0"],last+1-row["F0"])
-            if min(indices)<0 or max(indices)>=len(row["masks"]):
-                native._recover("vault near row ended without real bounce",f)
-                return None
-            commands=np.array([row["masks"][i] for i in indices],np.int64)
-            if int(commands[0])!=int(mask):
-                native._recover("vault table/current row mask mismatch",f)
-                return None
-            plan=SimpleNamespace(iid=move.target_iid,move=move,origin=f,entry_k=0,
-                                 press_k=row["press_F"]-f,contact_frame=predicted)
-            try:
-                path=AIR.model_path(sim,plan,commands,game)
-                current=forecast.rs.trk.now.get(move.target_iid)
-                if current is None:raise GeometryUnavailable("vault current target absent")
-                geo=B2Geometry(forecast,f,move,current[2])
-                # Only the initial checked contact remains the conditional
-                # buffer anchor; no new or slid hit time is inferred here.
-                target=next((e for e in clappers(state) if e["iid"]==move.target_iid),None)
-                path.contact_frame=_current_contact(path,plan.contact_frame,None if target is None else AIR.body_box(target),native._accepted)
-                if _contacts(geo,path):
-                    native._recover("vault current path blocked",f)
-                    return None
-            except (NominalUnsupported,GeometryUnavailable) as exc:
-                native._recover("vault current path unknown: "+str(exc),f)
-                return None
-            return B2Offer("active",path,actual,int(mask),0.,move,
-                {"manual_air":True,"vault_near":True,"phase":actual.run.link,"current_only":True,
-                 "safety_basis":"fresh current prefix/row; no model pogo; full original exit checked at entry"})
-        choices = [(None, saved)]
+            native._note("vault_real_bounce_exit",frame=f,move=asdict(move))
+            if native._hit is not None:native.runner.run.v["down_hit_f"]=native._hit
+            native.post_context=native._post_seed=native._post_kind=None
+        draft=logical_copy(native.runner)
     else:
-        ctx = locked_context(state, forecast, getattr(prefs, "target", None), game)
-        if ctx is None or not ground or not accepting:
+        ctx=locked_context(state,forecast,getattr(prefs,"target",None),game)
+        if ctx is None or not ground or not accepting:return None
+        anchor=native._vault_origins.setdefault((ctx["target"],ctx["buddy"],ctx["buddy_t0"]),f)
+        move=MoveInstance(ctx["target"],anchor,"VAULT_IDLE")
+        if move in native._failed_hook_moves or move in native._vault_completed:return None
+        entries=manual_entries(native,state,sim,ctx)
+        if not entries:return None
+        kind,request=entries[0]
+        saved={k:v for k,v in ctx.items() if k not in {"box","move"}}
+        saved.update(move=asdict(move),entry_kind=kind)
+        draft=native.runner.fork_empty(AirVaultAnchor(native.runner.chains))
+        draft.anchor.open(request)
+    mask=draft.step(f,state,ground,accepting,t_game=game,sim=sim,guard=guard,bombs=bombs)
+    if mask is None or draft.run is None:
+        if native.commitment is not None:native._recover("vault table ended without real target bounce",f)
+        else:
+            native._vault_completed.add(move);native.runner=draft
+            native._note("vault_observed_handoff",frame=f,move=asdict(move))
+        return None
+    draft.run.v.update(_native_vault=saved)
+    draft.run.v.setdefault("ta",float(game))
+    hook=draft.run.v.get("cs") is not None
+    pending=(native._hook_start is not None and bool(native._hook_start["sent_targets"]) and native._hook_start["seen_frame"] is None)
+    locked=hook and (pending or native._hook_in_flight(state) or (draft.run.link=="far_lock" and not accepting))
+    if locked:mask=0
+    # A cheap current-step gate, never whole-skill/target-hit certification.
+    if not locked:
+        current=getattr(getattr(forecast,"rs",None),"trk",None)
+        current=None if current is None else current.now.get(move.target_iid)
+        if current is None:
+            if active:native._recover("vault current external support unavailable",f)
             return None
-        key=(ctx["target"],ctx["buddy"],ctx["buddy_t0"])
-        anchor=native._vault_origins.setdefault(key,f)
-        ctx["move"]=MoveInstance(ctx["target"],anchor,"VAULT_IDLE")
-        if ctx["move"] in native._failed_hook_moves or ctx["move"] in native._vault_completed:
-            return None
-        rows, diag = near_proposals(sim, ctx["box"], ctx["direction"], max_results=2)
-        native._note("vault_near_proposals", frame=f, diagnostics=diag)
-        saved = {k:v for k,v in ctx.items() if k not in {"box", "move"}}
-        saved["move"] = asdict(ctx["move"])
-        saved["frame_basis"]="first observed vault opportunity; buddy instance identified by its observed t0"
-        choices = [({"iid": ctx["target"], "over_dir": ctx["direction"], "near": row.request_entry(),
-                     "far": None, "nogo": [], "x_end": float(ctx["box"][2] if ctx["direction"] > 0 else ctx["box"][0])}, saved)
-                   for row in rows]
-    geos = {}
-    for request, saved in choices:
-        move = MoveInstance(**saved["move"])
-        seed = native.runner if active else native.runner.fork_empty(AirVaultAnchor(native.runner.chains))
         try:
-            path = compile_near(seed, state, sim, game, request=request, buddy_iid=saved["buddy"],
-                                buddy_lock_until=saved["buddy_lock_until"], max_frames=native.profile.max_frames,bombs=bombs)
-            draft = path.first_draft
-            if draft.run is None:
-                if native.commitment is not None:
-                    native._recover("vault table ended before real target bounce", f)
-                else:
-                    native._note("vault_observed_handoff", frame=f, move=asdict(move))
-                    native.runner = draft
+            plan=SimpleNamespace(iid=move.target_iid,move=move,origin=f,entry_k=0,press_k=None,contact_frame=None)
+            path=AIR.model_path(sim,plan,np.array([mask],np.int64),game)
+            scan=B2Geometry(forecast,f,move,current[2]).preflight(path)
+            if not scan.complete or scan.contacts:
+                native._note("vault_external_step_rejected",frame=f,first=None if not scan.contacts else asdict(scan.contacts[0]))
+                if active:native._recover("vault current external danger",f)
                 return None
-            current = forecast.rs.trk.now.get(move.target_iid)
-            if current is None:
-                raise GeometryUnavailable("vault target absent from tracker")
-            # One tick, one move, one tracked instance: the candidates share its per-owner
-            # rasters (B2Geometry._owners); each path keeps its own points, clock and contacts.
-            geo = geos.get((move, id(current[2])))
-            if geo is None:
-                geo = geos[(move, id(current[2]))] = B2Geometry(forecast, f, move, current[2])
-            bad = _contacts(geo, path)
-            if bad:
-                native._note("vault_path_rejected", frame=f, first=asdict(bad[0]), active=active)
-                continue
-            exits = None
-            if not active:
-                exits = native._continuations(_bounce_path(path, sim), sim, geo, move)
-                if exits.verdict != "pass":
-                    native._note("vault_no_exit", frame=f, continuations=asdict(exits))
-                    continue
-            draft.run.v["_native_vault"] = saved
-            draft.run.v.setdefault("ta", float(game))
-            # The vault target is Idle. Failure responsibility must instead
-            # remain open through the OTHER actor's real jump-cast ending.
-            native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,"CC_JUMP_CAST"),saved["buddy_ta"])
-            value = float(prefs.weights.get("hit", 10.)) + native._endpoint(planner, path, prefs)
-            return B2Offer("active" if active else "commitment", path, draft, int(path.offered[0]), value, move,
-                {"manual_air": True, "vault_near": True, "phase": draft.run.link,
-                 "safety_basis": "full original near-vault nominal exit; target contact buffered at most two frames",
-                 "predicted_bounce": path.contact_frame, "continuations": None if exits is None else asdict(exits),
-                 "assumptions": path.assumptions})
-        except (NominalUnsupported, GeometryUnavailable) as exc:
-            native._note("vault_path_unchecked", frame=f, reason=str(exc), active=active)
-    if active:
-        native._recover("vault original exit no longer has a checked path", f)
-    return None
+        except (NominalUnsupported,GeometryUnavailable) as exc:
+            native._note("vault_external_step_unchecked",frame=f,reason=str(exc))
+            if active:native._recover("vault external danger unknown",f)
+            return None
+    native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,"CC_JUMP_CAST"),saved["buddy_ta"])
+    stage="manual_commitment" if not active else "active"
+    return B2Offer(stage,None,draft,int(mask),0.,move,
+        {"manual_air":True,"distance_vault":True,"vault_near":not hook,"vault_hook":hook,
+         "entry_kind":"hop_hook" if hook else "near","phase":draft.run.link,
+         "predicted_bounce":None,"miss_hook":bool(draft.run.v.get("fallback_hook")),
+         "safety_basis":"explicit manual distance policy; no skill/contact/tail prediction; external current-step gate only"})

@@ -11,7 +11,8 @@
       "iid": null, "face": null, "over_dir": null, "req": null, "F_open": null, "f_open": null, "hp0": null,
       "row": null, "cs": null, "cs_toward": null, "f_ctrl": null,
       "down_hit_f": null, "bounced": false, "bounce_f": null, "side_hits": [], "unlocked_hit_f": null,
-      "buddy_locked": null, "air_press_F": null, "g_press_F": null, "n_side": 0, "why": null, "closed_f": null
+      "buddy_locked": null, "air_press_F": null, "g_press_F": null, "n_side": 0, "why": null, "closed_f": null,
+      "fallback_hook": false, "near_miss_press": null, "near_miss_recorded": false
     },
     "cfg": {
       "lag": 0,
@@ -22,7 +23,9 @@
       "GAP_EXTRA": 0.05,
       "AIR_Y_OFF": 0.15,
       "SWING_F": 10,
-      "GROUND_SLASHES": 3
+      "GROUND_SLASHES": 3,
+      "NEAR_RECIPE": {"hold": 14, "press": 8, "before": "T", "box_gap": [0.5, 3.5], "close_gap": 1.8, "close_press": 4},
+      "HOP_RECIPE": {"hop": 3, "claw_after": 3, "d": 22, "p": 22, "root_distance": [5.6, 9.5]}
     },
     "rulesets": {
       "watch": [
@@ -39,7 +42,7 @@
         "id": "vault_idle.choose",
         "phase": "entry",
         "rules": [
-          {"do": "try", "to": "near", "note": "near first when both entries hold (#136: the near entry strikes earlier and needs no Clawline)"},
+          {"do": "try", "to": "near", "note": "manual distance-selected row; no skill prevalidation or online timing search"},
           {"do": "try", "to": "far"},
           {"do": "abort", "why": {"lit": "vault: neither entry's observed preconditions hold"}}
         ]
@@ -51,6 +54,9 @@
         "inherit": ["watch"],
         "rules": [
           {"do": "goto", "to": "over", "when": {"p": "vault_bounced"}},
+          {"do": "act", "act": {"a": "vault_miss_hook_plan"},
+           "when": {"all": [{"p": "vault_no_bounce"}, {"p": "vault_miss_hook_ready"}]}},
+          {"do": "goto", "to": "far", "when": {"p": "truthy", "v": "var.fallback_hook"}},
           {"do": "abort", "when": {"p": "vault_no_bounce"},
            "why": {"lit": "vault near: no observed bounce in the down slash's active frames (miss branch): hand back"}},
           {"do": "act", "act": {"a": "vault_near_plan"}}
@@ -132,11 +138,11 @@
       "near": {"link": "vault_idle.near",
                "observations": [{"name": "box_gap_u", "unit": "u", "source": "her box to the observed body box"}],
                "conditions": [{"obs": "box_gap_u", "kind": "range", "lo": null, "hi": null}],
-               "status": "unfitted", "notes": "#136 nominal band 1.0-6.0 u (2.5-4.0 u without the pogo i-frames); not a hard threshold"},
+               "status": "unfitted", "notes": "User-selected manual distance policy; NEAR_RECIPE is an empirical action selector, not a fitted safe domain. Runtime does not predict the skill/contact/tail."},
       "far": {"link": "vault_idle.far",
               "observations": [{"name": "centre_to_root_u", "unit": "u", "source": "her centre to the target root"}],
               "conditions": [{"obs": "centre_to_root_u", "kind": "range", "lo": null, "hi": null}],
-              "status": "unfitted", "notes": "#136 nominal 5.6-9.5 u; 10-11 u unknown (needle hit outside its Slam Range)"},
+              "status": "unfitted", "notes": "Manual small-hop hook. Runtime checks input/takeoff/Harpoon and current external danger; the distance range is not a whole-path safety certificate."},
       "far_lock": {"link": "vault_idle.far_lock", "observations": [], "conditions": [], "status": "unfitted",
                    "notes": "the fixed-hook lock rule (accepting, no Harpoon clip, claw_press > 12; abort > 45)"},
       "far_strike": {"link": "vault_idle.far_strike", "observations": [], "conditions": [], "status": "unfitted",
@@ -149,7 +155,7 @@
     "provenance": {
       "format": "0.1",
       "source": "Sol task 46 from the #136 draft (opus/scene_field_vault44/vault_chain_draft44.json); the user via Sol 11-01 (Task 44)",
-      "scope": "nominal prototype; default off; not loaded by Root; no forecast or safety certificate"
+      "scope": "default-off native manual distance policy; current external-step gate; actual DownSlash hit plus observed bounce only; no full-skill safety certificate"
     }
   }
 }

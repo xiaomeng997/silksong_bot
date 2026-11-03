@@ -29,7 +29,7 @@ def sim(params,direction):
 def test_packaged_table_binds_existing_interpreter_without_opening_a_run():
     old=set(KS.P.guards)
     runner,report=load_vault_runner()
-    assert report["table_digest"]=="b525fe59c6ee430a332aea3c6e3cc0c5e3b94e273b0490e6cc9e1c8b124b19c8"
+    assert report["table_digest"]=="1ca240008e4384b574a015e32dbd79f75d7f39139d3c44a4eb3015c864328584"
     assert runner.run is None and set(KS.P.guards)==old
     assert len(runner.chains["vault_idle"].links)==8
 

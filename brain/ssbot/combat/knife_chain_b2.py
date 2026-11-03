@@ -939,7 +939,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             self._note("b2_controller_defect",frame=frame,reason=reason,move=vars(selected.move),
                        no_retry_same_move=True,action="neutral recovery before unsupported hook")
         preparation=None
-        if selected.stage in {"commitment","fixed_commitment"} and self.commitment is None:
+        if selected.stage in {"commitment","fixed_commitment","manual_commitment"} and self.commitment is None:
             # A vetoed first key is not a successful chain dispatch. Once its
             # neutral replacement IS sent, it is nevertheless a sent failed
             # preparation and retains the original strict HP responsibility.

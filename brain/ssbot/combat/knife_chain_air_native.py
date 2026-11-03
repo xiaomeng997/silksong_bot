@@ -99,7 +99,15 @@ class NativeManualAirChain(NativeChainB2):
 
     def continuation_value_bound(self,prefs):return float("inf")
 
-    def _arm_hook_start(self,offer,send):pass  # this table has no CLAW
+    def _arm_hook_start(self,offer,send):
+        if offer.details.get("vault_hook"):
+            if offer.details.get("distance_vault"):
+                cs=offer.draft.run.v["cs"]
+                self._hook_start={"move":offer.move,"origin":send.frame,"targets":(cs.f_press,cs.f_press+1),
+                                  "sent_targets":set(),"seen_frame":None}
+                self._note("b2_hook_start_expected",frame=send.frame,move=vars(offer.move),
+                           targets=[cs.f_press,cs.f_press+1],source="explicit manual table; no trajectory certificate")
+            else:super()._arm_hook_start(offer,send)
 
     def _failure_exposure(self,move,origin,failed,ta):
         if move.family=="VAULT_IDLE":
@@ -158,6 +166,8 @@ class NativeManualAirChain(NativeChainB2):
             if self.commitment:self._recover("policy priority gate: "+self.policy_gate_reason,f)
             return None
         if self.recovery is not None:return self._recovery_offer()
+        if self._check_hook_start(f):
+            return self._recovery_offer() if self.recovery is not None else None
         vault_active=self.runner.run is not None and self.runner.run.chain=="vault_idle"
         if self.vault_enabled and (vault_active or (self._vault_ready and self.commitment is None and self.post_context is None)):
             from .knife_chain_vault_native import propose as propose_vault
@@ -273,13 +283,30 @@ class NativeManualAirChain(NativeChainB2):
 
     def sent(self):
         selected=self._b2_selected;sent=super().sent()
+        if selected is not None and sent.chain_outcome=="sent" and selected.details.get("distance_vault"):
+            if selected.stage=="manual_commitment":
+                from .knife_chain_vault_native import manual_jump_watch
+                self._jump_start=manual_jump_watch(selected,sent.frame)
+                if self._jump_start is not None:self._jump_start.record_send(sent.target_frame,sent.desired_mask)
+            run=self.runner.run
+            if run is not None and run.v.get("fallback_hook") and not run.v.get("near_miss_recorded"):
+                origin=self.commitment["origin"]
+                exposure=self._failure_exposure(selected.move,origin,sent.frame,self.commitment.get("ta"))
+                if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
+                self._failure_exposures.append(exposure)
+                run.v["near_miss_recorded"]=True
+                self._press=self._accepted=self._hit=None
+                self._arm_hook_start(selected,sent)
+                self._note("vault_miss_to_hook_sent",frame=sent.frame,move=vars(selected.move),
+                           missed_press=run.v.get("near_miss_press"),exposure=exposure.as_dict(),
+                           scope="one in-air branch in the same Run; first miss responsibility retained")
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("rune_transfer"):
             self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
         return sent
 
     def before_send(self,*,frame,target,mask,flags,received_frame,dispatch_clock=None):
         selected=self._b2_selected
-        if selected is not None and selected.details.get("vault_near"):
+        if selected is not None and (selected.details.get("vault_near") or selected.details.get("distance_vault")):
             from .knife_chain_vault_native import before_send as vault_before_send
             veto=vault_before_send(self,selected,frame=frame,target=target,mask=mask,flags=flags,
                                   received_frame=received_frame,dispatch_clock=dispatch_clock)
@@ -294,6 +321,6 @@ class NativeManualAirChain(NativeChainB2):
 
     def summary(self):
         return {**super().summary(),"mode":"manual_air_probe","table":"manual_air+vault_near" if self.vault_enabled else "air_strike","tables":list(self.runner.chains),
-                "online_search":False,"geometry_scope":"current/contact path plus existing N=2 continuations",
+                "online_search":False,"geometry_scope":("vault: current external step only, empirical skill; other air: contact path and N=2" if self.vault_enabled else "current/contact path plus existing N=2 continuations"),
                 "post_bounce":("vault uses its observed original exit; other air hands back to ordinary planner" if self.vault_enabled else
                                "ordinary planner from actual hit+bounce; no frozen future tail")}

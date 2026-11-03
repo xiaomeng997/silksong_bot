@@ -194,6 +194,14 @@ def _row(F0, n, keys):
     return {"F0": F0, "masks": [int(m) for m in keys[:n]]}
 
 
+def strike_program(F0,hold,press,direction,drift):
+    """One shared jump/downslash row, including the hook's no-jump suffix."""
+    m=np.zeros(max(hold,press+dslash.POST_F),np.int64)
+    m[:hold]|=B["J"];m[:drift]|=_key(direction)
+    dslash.strike(m,press);m[press:]|=_key(direction)
+    return _row(F0,len(m),m)|{"press_F":F0+press}
+
+
 def register(P):
     """The missing vault primitives, on a copy of the slam registry (knife_chain_fixed_hook.register's pattern)."""
 
@@ -234,23 +242,21 @@ def register(P):
         if x.v["row"] is not None:
             return
         n = x.v["req"]["near"]
-        h, p, tk = int(n["h"]), int(n["p"]), _key(x.v["over_dir"])
-        m = np.zeros(p + dslash.POST_F, np.int64)
-        m[:h] |= B["J"]
-        if n.get("before", "T") == "T":
-            m[:p] |= tk
-        dslash.strike(m, p)
-        m[p:] |= tk
+        h, p = int(n["h"]), int(n["p"])
         F0 = x.obs.F
-        x.v["row"] = _row(F0, len(m), m) | {"press_F": F0 + p, "name": f"DS j{h}p{p}{n.get('before', 'T')}"}
+        x.v["row"] = strike_program(F0,h,p,x.v["over_dir"],p if n.get("before","T")=="T" else 0)|{"name":f"DS j{h}p{p}{n.get('before','T')}"}
 
-    @P.action("vault_far_plan", doc="the Clawline without a hop: the key toward on the frame before, CLAW + toward 2 "
-                                    "frames (claw_strike.plan_mask)")
+    @P.action("vault_far_plan", doc="the requested fixed hop/Clawline, using claw_strike.plan_mask")
     def far_plan(x):
         if x.v["cs"] is not None:
             return
         F0 = x.obs.F
-        x.v.update(cs=CS.CsPlan(F0, 0, F0 + 1, None), cs_toward=x.v["over_dir"])
+        req=x.v["req"]["far"]
+        hop,after=int(req.get("hop",0)),int(req.get("claw_after",1))
+        if hop<0 or (hop and after<max(3,hop)):
+            return {"do":"abort","why":"vault: CLAW must allow the observed small hop before dispatch"}
+        x.v.update(cs=CS.CsPlan(F0, hop, F0 + after, None),
+                   cs_toward=x.v["over_dir"])
 
     @P.action("vault_far_strike", doc="from the observed control: the drift key toward d frames from the first mask "
                                       "frame, the down slash on control's mask p (dslash.strike), the key toward on")
@@ -258,18 +264,14 @@ def register(P):
         if x.v["row"] is not None:
             return
         n = x.v["req"]["far"]
-        d, p, tk = int(n["d"]), int(n["p"]), _key(x.v["over_dir"])
+        d, p = int(n["d"]), int(n["p"])
         x.v["f_ctrl"] = x.obs.f
         F0 = x.obs.F
         press_F = x.obs.f + 1 + p                  # mask index p after the control STATE frame
         L = press_F - F0 + dslash.POST_F
         if press_F <= F0 or L <= 0:
             return {"do": "abort", "why": "vault far: the planned press is not after the first mask frame"}
-        m = np.zeros(L, np.int64)
-        m[:d] |= tk
-        dslash.strike(m, press_F - F0)
-        m[press_F - F0:] |= tk
-        x.v["row"] = _row(F0, L, m) | {"press_F": press_F, "name": f"CS d{d}p{p}"}
+        x.v["row"] = strike_program(F0,0,press_F-F0,x.v["over_dir"],d)|{"name":f"CS d{d}p{p}"}
 
     @P.gen("vault_row_mask", doc="var.row's keys at the mask frame (none past the row)")
     def row_mask(x, m):
@@ -282,11 +284,28 @@ def register(P):
     def bounced(x):
         return bool(x.v.get("bounced"))
 
+    @P.guard("vault_miss_hook_ready",doc="one observed miss may branch to an available in-air hook")
+    def miss_hook_ready(x):
+        if x.v.get("fallback_hook") or x.v.get("down_hit_f") is not None or x.obs.ground or not x.obs.accepting:return False
+        box=_body(x.obs.e)
+        return bool(box is not None and x.obs.h.get("can",{}).get("harpoon") is True and
+                    x.obs.silk>=1 and x.obs.box_bottom<=3.3 and
+                    abs((box[0] if x.v["over_dir"]>0 else box[2])-x.obs.hx)<=CS.CsCfg().reach)
+
+    @P.action("vault_miss_hook_plan",doc="same Run: preserve failed near press, hook from actual airborne state")
+    def miss_hook_plan(x):
+        v=x.v;r=x.cfg["HOP_RECIPE"]
+        v["near_miss_press"]=v["row"]["press_F"]
+        v.update(fallback_hook=True,row=None,cs=None,f_ctrl=None)
+        v["req"]={**v["req"],"near":None,"far":{"hop":0,"claw_after":1,"d":r["d"],"p":r["p"]}}
+
     @P.guard("vault_no_bounce", doc="the down slash's active frames (pogo_model.ACTIVE) and the observation lead are "
                                     "over without an observed bounce: the miss branch")
     def no_bounce(x):
         r = x.v["row"]
-        return r is not None and not x.v.get("bounced") and x.obs.f > r["press_F"] + PM.ACTIVE[1] + 1
+        # Opt1 permits the real input to apply two frames late. Do not call
+        # that still-active swing a miss before its last possible hit report.
+        return r is not None and not x.v.get("bounced") and x.obs.f > r["press_F"] + PM.ACTIVE[1] + 3
 
     @P.guard("vault_clear_of_far_edge", doc="her centre at the end of frame f + 1 is past the observed body's far "
                                             "edge by u")

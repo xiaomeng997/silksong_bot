@@ -60,7 +60,7 @@ def _meets_all(pos,poly):
     return ok
 
 
-def near_proposals(sim, target_box, direction, *, max_results=2):
+def near_proposals(sim, target_box, direction, *, max_results=2, recipes=None):
     """One batched HERO2 rollout; no pogo is injected without blade contact.
 
     Return proposals + bounded diagnostics. Their commands begin at f+2, after
@@ -89,15 +89,20 @@ def near_proposals(sim, target_box, direction, *, max_results=2):
     key=K.B_RIGHT if direction>0 else K.B_LEFT
     # A small target-directed subset, not 132 ordinary DSLASH rows or a global
     # per-tick family. Request only at this family's observed entry opportunity.
-    holds=(14,20);presses=range(4,25);length=max(presses)+dslash.POST_F
+    # Explicit manual callers supply table rows. The old bounded grid remains
+    # available only to offline calibration callers, never as a runtime retry.
+    entries=([(h,p,b) for h in (14,20) for p in range(4,25) for b in ("T","N")]
+             if recipes is None else [(r["hold"],r["press"],r["before"]) for r in recipes])
+    if not entries or any(type(h) is not int or type(p) is not int or
+                          not 1<=h<=30 or not 1<=p<=30 or b not in {"T","N"} for h,p,b in entries):
+        raise ValueError("invalid manual near-vault recipe")
+    length=max(p for _,p,_ in entries)+dslash.POST_F
     rows=[];meta=[]
-    for hold in holds:
-        for press in presses:
-            for before in ("T","N"):
-                row=np.zeros(length,np.int64);row[:hold]|=K.B_JUMP
-                if before=="T":row[:press]|=key
-                dslash.strike(row,press);row[press:]|=key
-                rows.append(row);meta.append((hold,press,before))
+    for hold,press,before in entries:
+        row=np.zeros(length,np.int64);row[:hold]|=K.B_JUMP
+        if before=="T":row[:press]|=key
+        dslash.strike(row,press);row[press:]|=key
+        rows.append(row);meta.append((hold,press,before))
     cmds=np.asarray(rows,np.int64);ro=sim.roll(cmds);off=len(prefix);poly=np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]])
     windows=[]
     for q,(hold,press,before) in enumerate(meta):

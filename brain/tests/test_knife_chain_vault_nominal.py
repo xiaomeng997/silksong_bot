@@ -29,7 +29,7 @@ def rect(b):
     return [b[0], b[1], b[2], b[1], b[2], b[3], b[0], b[3]]
 
 
-def scene(direction, *, gap=1.6, shift=0.0):
+def scene(direction, *, gap=2.0, shift=0.0):
     """She stands on the ground; the target's near edge `gap` u in front (toward direction); the buddy airborne far
     behind her. shift moves the observed body after the proposal was made (the miss case)."""
     x0 = 32.0 if direction > 0 else 37.0
@@ -39,7 +39,8 @@ def scene(direction, *, gap=1.6, shift=0.0):
     ro = K.rollout(S.reshape(K.K, 1), np.zeros((1, 1), np.int64), P, TER, backend="numba")
     hold = K.HoldState.idle(1)
     sim = ChainSim(S, np.array([0], np.int64), hold, P, TER, F0, F0)
-    props, _ = near_proposals(sim, np.array(tb), direction, max_results=2)
+    recipe=KV.load_vault_runner()[0].chains["vault_idle"].cfg["NEAR_RECIPE"]
+    props, _ = near_proposals(sim, np.array(tb), direction, max_results=1,recipes=(recipe,))
     assert props, "fixture: no nominal near proposal"
     seen = [tb[0] + shift, tb[1], tb[2] + shift, tb[3]]
     raw = {"f": F0, "dt": 1 / 60,
