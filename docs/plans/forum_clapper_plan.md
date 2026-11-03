@@ -3461,3 +3461,11 @@ P2属新air_dash标签作用域过宽：已经按下劈后strike仍走全owner s
 21项专项与21份607相关回归全过/foreign空：已有SP13 fp3914780识别近处22215352而非计划远怪22215358；fp3787054及镜像识别正确目标；空带/背后/距离外、坏身体与并列身份不误放。公共before_send覆盖slam_claw、vault、fixed_hook的合成事务，首次专项发现fixed分支提前return绕过门（initial.xml保留），已将门移到它之前，最终全绿。真实中性sent的本机事务测试证明：未承诺入口只有替代包成功sent才生准备失败责任；已有承诺保留一条失败暴露，不伪造CLAW/press/hit回执。这仍非实机应用或命中认证。
 
 SOURCE_STAGE_REPORT绑定新源/3文件/607，Task108只增量审新门与输入/恢复归属，尤其真实上下文是否覆盖path=None的active/fixed入口；若自动OP5已起就接续同一份，不重复开。Root后续准备最终源的关键整tick与首次多怪CLAW成本包装，当前未起P或游戏；没有新观看合同/用户新开。三份计划同步，原停批/冻结测量/旧失败不改。
+
+### 7.72 ce81源审已核收，收缩到真正需要的空钩事件【214已处理；607基线不重跑】
+
+已处理 Opus #214（Task108）：27项工件/Root来源/快照树/3个LF/607JUnit同；Root另逐文件比较当前1008快照文件，文本LF与二进制原字节均同，无差，无P0–P3。SOURCE_REVIEW/OPUS214_RECEIPT在analysis/hook_identity213_20261103，source明确ce81b62c，不借给未来空钩新增代码。607是功能/源审基线，没有P或实机信用，不因待下一步重跑。
+
+#214纠正可达范围：现w13 AIR_MANUAL的提案不调slam家族，只有vault远段/补钩会在两只场景发CLAW；slam_claw/fixed/KEEP/fastJ家族当前仍单怪域。19bdc470的2222个STATE里两只同在1094帧、vault场景0帧，因此新身份门不会改善该局最后3338后的接近；不再为这批不会触发的旧入口补重复回放。门作为当前可达vault及后续公共入口的防错保留，不能称空钩已接。中心射程10.5u与Opus旧原型从前缘量的差0.25已按参照解释，未混数。
+
+下一步Task109只核最小空针冲物理事件与已有时钟复用：Root已读FSM，Air Needle和Enemy Needle都进Suspend→Throw→Freeze Needle，Antic也在分流前；两末段同播Harpoon Catch但物理与回控路径不同。EMPTY_NEEDLE_PHASE_REUSE_DRAFT保存代码对应，不当射空实测。先判断能否复用已观测的共同前缀，未共用的Dash/Catch与实际回控单列，不把缺直接射空录像直接变成另开大标定/全场认证前置；也不凭共用片名伪造确定回控帧或弹起。Root准备当前已接空冲/速度出口的真实输入整tick包装，剩余新动作不能借其预算盖章；当前无P/游戏，新观看仍等用户新开，原预算/停批/冻结保持。
