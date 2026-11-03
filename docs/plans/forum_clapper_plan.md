@@ -3208,3 +3208,16 @@ Root确认两处原实现缺口：一是defer_jump后备分支把dash_k推到k+7
 Root保持疾跑的局部WIP（未提交）已修两分支，三项有效红测旧源全失败，新源14份346项过/foreign空；初版夹具SP_PH名错已保存后改成现有PHASE再作有效红测。仅证按键/时钟保持，不报整链修复。真实源层同S0/HF/prefix+RangeTracker探针2475..2480相同，2481 flight和保持Sprint的coast仍都被目标body2517拒；2742R、2743两者都body2778拒。探针在首次动作/所有权分叉立即停，不喂分叉世界的录像未来。SPRINT_SOURCE_ORIGINS/WIP_REPORT保存，证明只修松键还不够，不再开局只验半个起手。
 
 Task88已给Opus做最小完整动作原型：复用既有Hero2/HF/strike_program/真实hit+bounce，针对两实际起点交付冲刺→疾跑→起跳→下劈（目标可Walk/Idle/Evade/再SpellCast，无伤状态不应站面前结束），不要84搜索/新控制器/长期场或全域认证。当前jump_distance9疑似未补SprintJump7帧前摇水平位移，Walk目标静止假设也可能使跳太晚；这是待验证定位，不当已证因果。Root负责生产/输入/同owner/归责接线，Opus只自己目录E/Idle有限模型；先完成整段再准备新观看。严格停止/原失败/预算/冻结AA保持，无第二局或新观看授权。
+
+
+### 7.51 小符文换目标补齐疾跑、起跳和真实下劈【194原型已核收；ba979ec3接线源待审】
+
+已处理 Opus #194（Task88原型接收，非生产移植OP5）：14工件、两运行12结果、1003快照tree和Root输入hash同，OPUS194_ARTIFACT_RECEIPT保存。Root在开发树移植 ba979ec379ffa9e544295a1c04c2dd3b671d8bfa：原地面观察距离模板，DASH一直保持至真实离地，当前根距8u选起跳、J保持24；到空中每拍仅一条press-now下劈模型，绝对D/A row不平移。去掉overhead即done，目标Evade/SpellAntic/Cast1/Cast2仍可继续，真新Slam/Jump由原恢复/切入处理。不是再开一局只验证半个Dash。
+
+原B2同owner从首个成功sent的manual_commitment持有整段换目标；新目标自己Spell不会再反选回旧施放者。只有原目标DownSlash命中+实际bounce/counter才接现有vault over/fall/ground，VAULT关闭时普通交还；不是模型注入命中。无接触/落地/整段J保持结束却没起跳进失败，责任绑定真实施放者CC_CAST的SpellAntic/Cast1/Cast2及失败后30帧较晚者，缺实例时间保守保留。首J双锚时钟/收帧、D/A迟到、Opt1、实际worker输入门和Q1均保持。
+
+按用户已选经验动作策略，runtime移除全飞行到头顶及目标身体准入，改现有当前两帧external preflight：他怪、所有延迟危险（包括目标自己小符文/圈/孤儿）、未知不移除。目标当前无伤身体不作为整技能准入。这是明确B策略变化，不能称旧transfer纯性能或闭环等价；更不称已验证全程安全/未来输入接受。没有在线84时序/新控制器。
+
+14份353相关回归单次通过/foreign空；旧三项松DASH红测、overhead不done、Idle/新Spell当前下劈供给、成功sent后归属、原目标hit+真实bounce、出口字段、CC_CAST失败责任和外部危险拒绝有持续回归。新增空中输入夹具最初漏给已观察cast目标/模型JHELD，已保存失败记录后补齐真实跳跃状态，不将此当生产故障。四真实起点的生产表私有模型闭环（仅起点录像，之后静止目标或合成后撤）：2475/2481 Dash2477/已有Dash、Sprint2485、离地2511、下劈2514、接触2517；2742/2743 Dash2752、Sprint2761、离地2789/2788、下劈2792/2791、接触2795。四后撤反例均不出刀、无假接触；DASH逐拍保持至真正离地，之后无新空中Dash。PRODUCTION_WHOLE_MODEL_ORIGINS_release明确是模型动作证据，不是真实接受/命中或外部安全证明。
+
+PORT_REPORT与WHOLE_ROUTE_ACCEPTED_CHECKS保存当前源LF/hash；Task89只做一次有限独立接线审阅。当前无新P、无启动草稿或新游戏；旧源13.7863ms不盖新源，原03停止局/失败/预算保持。下一观看仍等完成新源审核、当前整tick及启动代码真实绑定后再告知，用户尚未新开。
