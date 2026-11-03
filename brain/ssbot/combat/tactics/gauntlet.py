@@ -145,6 +145,7 @@ TWO_RUNE_S = 0.2            # no switch onto it until this past its rune hold (a
 TWO_SPRINTSW = os.environ.get("SSBOT_FORUM_TWO_SPRINTSWITCH", "0").strip() == "1"
 TWO_SW_FAMS = (CC_SLAM, CC_CAST)                       # the antics she leaves (two_play.ASW_ANTIC; the jumps: 53A)
 TWO_SLAM_RANGE_U = 8.05     # the Clapper's Slam Range (AlertRange x +-8.05 about its root, forum.md:163)
+ENTRY_ATTACK_TTL_S = 2.0   # same 120-frame horizon as the manual transfer goal; scoring bias, not key ownership
 TWO_KEY_S = 2 / 60.0        # HoldFilter 2/2: a key applies 2 frames after the tick (task 52: DASH 2816 -> 2818)
 TWO_DASH_U, TWO_DASH_S = 2.8, 0.1                      # the dash: 28 u/s, 6 frames (two_play.JhCfg dash_u / dash_f)
 TWO_SPRINT_U_S = 17.5       # ... then the sprint with the dash held (cast_stab: 17.5 u/s)
@@ -1348,6 +1349,16 @@ class GauntletTactics:
         g = self.goal
         if g is None:
             return prefs
+        entry=g.entry_attack
+        if entry is not None:
+            target=next((s for s in fc.subjects if s.iid==g.target and s.alive and s.in_play),None)
+            age=t-entry.picked_at
+            reason=("expired" if not math.isfinite(age) or not 0<=age<ENTRY_ATTACK_TTL_S else
+                    "target attack" if entry.kind=="side" and target is not None and
+                    target.family in {CC_SLAM,CC_JUMP,CC_JUMP_CAST} else None)
+            if reason is not None:
+                g.entry_attack=None
+                self.last["entry_attack_end"]={"target":entry.target,"kind":entry.kind,"reason":reason}
         if g.name == KITE and prefs.mode == EVADE:
             self.last["goal"] = f"{KITE}(EVADE)"
             self.stats["goals"][self.last["goal"]] = self.stats["goals"].get(self.last["goal"], 0) + 1

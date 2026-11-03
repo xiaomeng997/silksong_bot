@@ -225,7 +225,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     cfg=runner.chains[PROGRAM].cfg;body=body_box(enemy)
     attacking=target_state in AIR_ATTACK_STATES
     bounce_entry=goal is not None and goal.source_kind=="BOUNCE"
-    tail_pending=bounce_tail_pending(state,goal,game)
+    tail_done=bool(active is not None and active.v.get("source_tail_done"))
+    tail_pending=not tail_done and bounce_tail_pending(state,goal,game)
     if body is None or h.get("health",0)<=0 or h.get("stunned"):return None
     if target_state not in cfg["target_states"] and not (attacking and goal is not None and not ground):return None
     if sim.fo!=sim.f or sim.f!=state["f"] or len(sim.prefix)!=1:return None
@@ -301,7 +302,9 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     draft=runner.fork_empty(AirAnchor())
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
-    variables.update(p.variables());variables["air_entry"]=air_entry;draft.run=Run(PROGRAM,link,variables)
+    variables.update(p.variables());variables["air_entry"]=air_entry
+    variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
+    draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
     obs=_observation(p,state,game,body,ground,clearance)
     obs.sim=sim;obs.e=enemy

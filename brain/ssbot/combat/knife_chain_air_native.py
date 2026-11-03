@@ -105,7 +105,7 @@ class NativeManualAirChain(NativeChainB2):
             if source.family=="RUNE_TRANSFER":
                 attacking=transfer.control(es[hit])[0] in transfer.AIR_ATTACK_STATES
                 physical=self._observed_transfer_move(state,hit,"CC_SLAM") if attacking else None
-                physical=physical or self._transfer_target_moves.get(source)
+                if attacking:physical=physical or self._transfer_target_moves.get(source)
                 if attacking and physical is None:
                     self._note("target_transfer_unchecked",frame=state["f"],reason="actual bounced target slam origin unavailable")
                     self.post_context=self._post_seed=self._post_kind=None

@@ -1083,6 +1083,7 @@
       "caster": null,
       "cast_fa": null,
       "air_entry": false,
+      "source_tail_done": false,
       "fa": null,
       "ta": null,
       "side": null,
