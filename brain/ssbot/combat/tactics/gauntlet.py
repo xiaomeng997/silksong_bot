@@ -129,7 +129,7 @@ SP4_PREFS = os.environ.get("SSBOT_FORUM_SLAM_PLAY_PREFS", "0").strip() == "1"
 # SP9a A/B (forum.md 76): follows SSBOT_FORUM_V2 when unset (=0 off), with the SP9a switches
 TWO_FOCUS = os.environ.get("SSBOT_FORUM_TWO_FOCUS", "1" if os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1" else "0"
                            ).strip() == "1"
-TWO_HYST_U = 1.0            # a switch needs the other one this much more room to its outer wall (u)
+TWO_HYST_U = 1.0            # extra outer-wall room (u); a reachable locked small-rune cast only needs more room
 TWO_CLOSE_U = 7.0           # ... and her within this of its centre in time (inside its Slam Range, 8.05 u)
 TWO_RUN_U_S = 8.25          # ... at the run speed (u/s; the dash is ranked down near an idle Clapper, NODASH)
 TWO_IDLE_S = 0.6            # ... before this long into its idle after an attack move (0.65 s without a buddy busy)
@@ -971,8 +971,8 @@ class GauntletTactics:
         """SSBOT_FORUM_TWO_FOCUS (task 1v1 SP7, the person's strategy of 2026-10-16): the goal is RUSH on the focus -
         the Clapper farther from the wall on its side away from the other one (then its face stance, 4 u on the hero's
         side, is between them; close, it decides close moves: slam / small runes / evade, not the jumps of 8 u and
-        beyond); the focus switches to the other one only when it has more room (by TWO_HYST_U) AND it will not jump
-        while she runs to it (_two_run_ok). Never KITE."""
+        beyond); the focus switches to the other one only when it has more room (normally by TWO_HYST_U) AND it will not
+        jump while she runs to it (_two_run_ok). A reachable locked small-rune cast uses zero room hysteresis. Never KITE."""
         a, b = cands
         room = {a.s.iid: self._outer_room(a, b), b.s.iid: self._outer_room(b, a)}
         keep = next((c for c in cands if old is not None and c.s.iid == old.target), None)
@@ -1064,7 +1064,10 @@ class GauntletTactics:
         else:
             o = b if keep is a else a
             ok2, how = self._two_run_ok(keep, o, t, ws)
-            if room[o.s.iid] > room[keep.s.iid] + TWO_HYST_U and ok2:
+            # live f2790: waiting for another .25u of room exhausted the cast's
+            # arrival window. Still require more room and the real lock/ETA gate.
+            hyst = 0.0 if ok2 and how == "focus locked" and keep.s.family == CC_CAST else TWO_HYST_U
+            if room[o.s.iid] > room[keep.s.iid] + hyst and ok2:
                 f, why = o, f"two: switch ({how})"
                 self._sw_why = "two"
                 if TWO_SPRINTSW and room[keep.s.iid] <= TWO_WALL_BAND_U:
@@ -1075,7 +1078,7 @@ class GauntletTactics:
                 st["switch"] = st.get("switch", 0) + 1
                 st[f"switch_{how}"] = st.get(f"switch_{how}", 0) + 1
             else:
-                f, why = keep, "two: keep" + ("" if room[o.s.iid] <= room[keep.s.iid] + TWO_HYST_U else f" ({how})")
+                f, why = keep, "two: keep" + ("" if room[o.s.iid] <= room[keep.s.iid] + hyst else f" ({how})")
         st["picks"] = st.get("picks", 0) + 1
         return self._goal(ws, f, RUSH, t, 1.0, why=f"{why}; room {room[f.s.iid]:.1f}")
 

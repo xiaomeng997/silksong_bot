@@ -86,3 +86,39 @@ def test_explicit_escape_hold_stays_above_wall_preference(monkeypatch):
     t._esc_hold = lambda *args: escape
     assert t._two_focus(None, candidates, 1.0, old) is escape
     assert t._wall_sw is None
+
+
+@pytest.mark.parametrize("family,state,other_state,other_x,lock_left,enabled,rune,mirrored,target", [
+    (G.CC_CAST, "Spell Antic", "Idle", 44.037, .81, True, False, False, 2),  # live f2790
+    (G.CC_CAST, "Spell Antic", "Idle", 44.037, .71, True, False, True, 2),
+    (G.CC_CAST, "Spell Antic", "Idle", 45.0, .81, True, False, False, 1),
+    (G.CC_CAST, "Spell Antic", "Jump Antic", 44.037, .81, True, False, False, 1),
+    (G.CC_CAST, "Spell Antic", "Idle", 44.037, .81, True, True, False, 1),
+    (G.CC_CAST, "Spell Antic", "Idle", 44.037, .61, True, False, False, 1),
+    (G.CC_CAST, "Spell Antic", "Idle", 44.037, .81, False, False, False, 1),
+    (G.CC_CAST, "Cast 2", "Idle", 44.037, .81, True, False, False, 1),
+    (G.CC_SLAM, "Slam Antic", "Idle", 44.037, .81, True, False, False, 1),
+])
+def test_cast_lock_switch_uses_available_room_before_lock_expires(
+        monkeypatch, family, state, other_state, other_x, lock_left, enabled, rune, mirrored, target):
+    # The live focus had room 3.61 versus 4.363: waiting for another .25u
+    # exhausted the actual dash/sprint arrival window. Use the real ETA gate.
+    t, candidates, _ = focus_probe(monkeypatch, enabled, 18.210, other_x)
+    monkeypatch.setattr(G.two_play, "SPACE", False)
+    monkeypatch.setattr(G.two_play, "RUNLOCK", True)
+    t._two_idle = {}
+    t._two_run_ok = G.GauntletTactics._two_run_ok.__get__(t)
+    keep, other = candidates
+    keep.s = NS(iid=1, family=family, state=state, committed=True,
+                t_free=G.TWO_DUR0_S[family] - G.TWO_LOCK_S[family] + lock_left)
+    other.s = NS(iid=2, family=G.CC_JUMP if other_state == "Jump Antic" else G.CC_IDLE,
+                 state=other_state, committed=False, t_free=0.)
+    other.d = 20.091
+    if mirrored:
+        keep.x, other.x = sum(t.pb.arena_x) - keep.x, sum(t.pb.arena_x) - other.x
+    if rune:
+        t.rune[2] = (0., 0., 0., 1.)
+    old = G.Goal(G.RUSH, 1, keep.x, 0.)
+    goal = t._two_focus(world(cd=.10831890255212784), candidates, 1., old)
+    assert goal.target == target
+    assert t._wall_sw == (1 if target == 2 else None)
