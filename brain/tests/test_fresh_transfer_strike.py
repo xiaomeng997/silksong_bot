@@ -26,10 +26,12 @@ def test_actual_new_downslash_start_is_accepted_after_own_press(params,terrain,o
  n.observe(z)
  assert n._accepted==1002 and n._hit is None and n.post_context is None
 
+@pytest.mark.parametrize('column',[False,True])
 @pytest.mark.parametrize('cooldown,fresh,allowed',[(.1833,False,False),(0.,False,False),(0.,True,True)])
-def test_press_now_requires_its_own_model_swing_not_inherited_attacking(params,monkeypatch,cooldown,fresh,allowed):
+def test_press_now_requires_its_own_model_swing_not_inherited_attacking(params,monkeypatch,cooldown,fresh,allowed,column):
  from ssbot.combat import pogo_model as PM
  S=np.zeros(K.K);S[K.ATK_CD]=cooldown;S[K.ATK_T]=.1
+ if column:S=S.reshape(K.K,1)
  flags=np.full((1,42),K.F_ATTACKING,dtype=np.int64)
  if fresh:flags[:,:3]=0
  ro=NS(flags=flags,pos=np.zeros((1,42,2)),vel=np.zeros((1,42,2)))

@@ -270,7 +270,7 @@ def press_now_row(sim,body,F,hold,side):
     pj=len(sim.prefix)+2
     # A previous swing can still be F_ATTACKING after its bounce. It cannot
     # license a new knife before the actual start state's cooldown expires.
-    cd=float(sim.start[K.ATK_CD]);dt=float(sim.params.frame_time)
+    cd=float(np.asarray(sim.start).reshape(K.K,-1)[K.ATK_CD,0]);dt=float(sim.params.frame_time)
     if not math.isfinite(cd) or not math.isfinite(dt) or dt<=0 or cd>pj*dt+1e-9:return None
     for d in ((direction,0,-direction) if direction else (0,)):
         row=strike_program(F,hold,1,d or 1,16)

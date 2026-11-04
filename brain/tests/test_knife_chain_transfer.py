@@ -596,8 +596,9 @@ def test_suppressed_dash_can_be_scheduled_again_if_target_recedes():
  assert made is not None and made[3]==B['R']|B['DASH']
 
 
+@pytest.mark.parametrize('column',[False,True])
 @pytest.mark.parametrize('target_state',['Idle','Spell Antic'])
-def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(target_state,monkeypatch):
+def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(target_state,monkeypatch,column):
  """User-level completion criterion: reaching the destination must supply the
  nail action, including when the new target starts its own small-rune cast.
  Geometry is stubbed; this tests action supply, not a safe/accepted hit.
@@ -612,6 +613,7 @@ def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(targe
  e=s['ents'][1];dx=38.-e['pos'][0];e['pos'][0]=38.;e['fsms'][0]['state']=target_state
  for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
+ if column:S=S.reshape(K.K,1)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
  r.run=Run('rune_transfer','air',TransferPlan(8,7,990,1000,0.,B['R'],2,12,36,True,1040,40).variables())
  n=N.NativeManualAirChain(runner_factory=load_runner,probe_ref='whole-head-action-goal');n.runner=r
