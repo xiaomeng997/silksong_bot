@@ -4136,3 +4136,16 @@ Task163先独立核B1小增量及原临界/配置边界，再给新中间规则�
 三注记按实际口径保留：two_play.body_span要求collider名严格等于CLAPPER，实机两怪带后缀，实际取的是当前根/朝向的Idle模型框，3272/3300 Idle/Walk与真实框同；不是普遍真实Collider提取，也识别不了禁用/缺失。缺flipX原函数默认-1，现场字段都有。身体在路上但不在站位带仍可能启动，属按原fp1边界保留，不能称整路安全；不为本次B1顺手改全局body_span或恢复整路锤/身体检查。
 
 用户中间场景两阶段规则仍是当前待实现规格，不能因272源码通过而启用旧“起跳即换”策略。Opus Task163B正在自己的目录做现有瞄准时钟/锁定落点/站人区间/钻翻实际出口接口映射；Root不重复派任务、不重复政策或P测量，待最小接口输入后接L2。当前源636a未再改，STATUSfalse/无Root任务，无新P、合同、游戏或8局门；全部旧停止局/原始失败/AA与Windows核心进程不动。
+
+### 7.132 #273/274接口更正已核；中间两阶段L2已接ae7f93a7/404回归，声明站位不冒充实际出口，独立源审待核【已处理 Opus #273、#274】
+
+273/lowhop163六工件与29输入、274/middle164三工件与16输入hash全同。#274纠正#273：transfer.flight_endpoint只有定义/单测，无生产调用且返回path索引/kind；SWITCH真实下劈命中弹起即交还，没有已认证的远侧出口；vault x_end只是越过参照，也不是落点。Root接受更正，不把2608已绑定SWITCH当翻越认证。原七见证与墙分支落点仅下界保留，未重跑整政策/时序网格/P或游戏。
+
+当前新源ae7f93a78e575fc69a4b81efbd76a1a900ff90e8（3c2eb0b6主接线加有界交还补充）只五文件：新clapper_middle、clapper_priority接入、policy对当前中间场景的旧CastStab覆盖让位及日志、两个测试文件。以前摇主PhasePost入口记同一Move时钟，CastAntic2不重置；.48/.88经验下界与原.1s reserve，已知地面/input、可用dash或walk估算到达、引导后JT前方地面footprint及当前forecast窗口都有站位才引导。起跳首帧缺锁vx先hold；有jb_land锁定后先看中间站人/攻击窗口，有位side砍站着怪；无位比较声明under/over目标墙余量。墙模型仅下界不能批准站人，但最低前向footprint已封闭时可据此否决中间。一个中间Move不再因焦点身份被旧takeoff/rear改写，新近招仍竞争；默认该场景最大95，原keep50/near110和适用折扣/切换成本照旧。
+
+两条比较是**明确声明的战术目标，不是实际轨迹终点/飞行认证**：under复用behind_spot/walk_fits及另一身体挡路条件；over声明走路怪远侧身体沿外1.2u，请求现有SWITCH踩头，真实bounce后由普通规划继续看同一站位，最多原entry两秒；源怪先落地也不立刻把站位改回近侧face。endpoints certified=false、path_checked=false、native checks pending均记日志，不伪造实际穿过/命中/安全。旧271 spec中“实际已知出口”的严格口径没有被冒称已完成；本次实现与证据的准确边界见analysis/middle_jump273_20261104/SPEC.md。没有新动作池、时序搜索或放宽native/输入/危险守卫；critical/committed owner保留旧优先权，只有非critical旧CastStab不再覆盖新场景站位。
+
+新增初始红7失败5通过；首接线403通过，发现源怪先结束会丢远侧交还后补一项，最终单次完整相关404通过/外来模块0，21新增为子集，不和旧383相加。旧383中12项原来中间takeoff/rear期望已迁到外侧几何保留旧分支覆盖，不能说旧fixture逐项未变。最终源四个原始字段有限条件：2552 hold、2608首Jump锁vx未知hold、2609/2610指335470/over/stomp/声明远侧38.01。WinFc是stub、旧STATE只是条件输入，不是实际预报核验或新源码闭环，不把新键后旧轨迹当自然结果。一次准备脚本reader.close API错误已留档并改为关闭states generator，无游戏/P。
+
+当前源码账本709（新增一个模块）、261模型未改、小快照862文件/五文件增量/SOURCE_BINDING/REVIEW_PACKET和最终JUnit已封存；Task165只审当前增量和最小反例，不重复404/政策矩阵/P/游戏，wake189。在途不算通过。新源独立审阅、真正完整_act功能/关键tick总耗时与新现场绑定仍待，旧636/e390门不给新源盖章；新单局/8局门均未开，不重开任何旧停止批。STATUSfalse/Root无任务，Windows核心进程未操作。
+
