@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.109）：仍在w13。434旧局真实命中后提前退出、后来开伞被锤1打2HP，已首损血停并真实全清，旧局不重开。新0bf1b27f修复接触后误否及Antic站起漏界；588相关回归通过，Opus246独立增量审已核收、无阻挡。还差活跃accepted-hit完整_act事务草稿与实际P预算，再另绑下一次有界实机；没有新合同或游戏运行。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.110）：仍在w13。新0bf1b27f误退/站起身体修复已过588及246源审；247完整事务已核，新活跃分支2539单点完整_act P为13.1212ms，0外来/新签名、trace完整，自有P/场worker真实全清后STATUS=false。下一步新有界工程绑定和连跳入口最小因果调时接线；连跳45–77离线表尚未上线，当前没有新实机gate。旧434/a1d0消费局不重开。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3898,3 +3898,13 @@ Task140只做三文件增量审和13新例/必要相邻，不重复588/大矩阵
 已处理 Opus #246(Task140)：11工件hash/字节核同、154case逐项同588的相邻子集、13例red同6fail/7pass、三个独立蹲伏探针均拒绝；707运行文件/261模型当前字节重核同。0bf1b27f源码审阅没有阻挡，SOURCE_REVIEW与OPUS246_RECEIPT已保存。两真实朝向的Antic横向/顶部都被包住；434的root y约.006u微降令包络底边少.006u是P3记录，当前从上方检查不追加代码，不把本包络称未来全几何保证。
 
 Task141的active_hit141草稿目录已出现，但尚无正式交付编号/报告，不能把目录或进程退出当完成；不重复启动对方任务。原2539活跃sent+accepted分支仍须完整_act（含生产support/forecast/before_send/framed ACTION/sent）的功能与独占P核验，旧side-band P未触发本分支。代码与源审已完成不等于实际动作复验；P及新合同具备后按用户Nov3无人值守授权另开有界新局，原消费局、HP/Q1/Opt1/STOP/资源/关键日志/真实清理门不减。
+
+### 7.110 247完整事务及新活跃P单点已核；连跳在线入口列入下一项最小接线
+
+已处理 Opus #247(Task141)：9工件hash/字节、原2539 S0/HF/成功发送prefix与已sent+accepted Run字段来源核同。只rehydrate截至2538的事务，shadow时钟以同实例重表达，不称2476起自然闭环；生产support/forecast/query返回旧2541目标move，条件命中后过滤边距、实际发原row的R+J+D；_hit/post_context仍None，第一不同wire即停，后续STATE不喂。action_untracked2539是已在现场发送的旧包在本进程无回执，不当新送失步。
+
+Root新p_active_0bf1b27f保留完整事务，只改来源/自有路径、独占P运行环境与报告；逆向替换全文同141原稿，资源三组件/批准字节同。真实资源门blockers[]，P0–15/High/Num4/GetProcessInformation EcoQoS off。2539完整_act13.1212ms；0外来、前后signature同、protocol2 trace complete/overflow0/diagnostics complete。该单点包括policy/B2/install/before_send/framed null ACTION/sent，仍不是整链分布/实际排队/未来deadline保证。原始result、trace、原始资源和输入绑定、PORT_CHANGES/AST及P_SERIAL_RECEIPT在analysis/transfer_pose245_20261104/。
+
+真实WMI54512、实际P18260与实际场worker48772均按PID/create_time独立核亡、children空后才STATUS=false/own_jobs空。全程没用游戏/Prefs/registry，不操作Windows核心进程。Task142只做最小收据/脚本差异复核，不重跑588/P/矩阵；Root下一步另准备新0bf单局绑定，旧434/a1d0合同永不重开，新ENGINEERING_GATE仍未生成。
+
+用户当前明确要求继续在线连跳入口。最小规格：真实同目标hit+bounce锚定实际物理步/S0/HF/输入前缀；未见前摇维持正常连劈，见Slam Antic后只改变未发送后续，按已核小模式选择调时第二刀/开收伞/必要第三刀；统一填公共strike/observe后缀，真实下一hit才再锚。不重写物理/候选池，不硬贴33条futureH或新增多项式大工程。Task143先给共用接口和一个因果正例/未知反例原型，只写Opus目录；Root生产接线，暂未上线。现33名义覆盖不等于所有未辨时序都有2物理步余量，观察能收窄的集合与noBounceCooldown未证前提都单列，不扩大保护或拿预计hit当真实。当前修复验证与该入口增量各有来源/门，不能混成已全部完成。
