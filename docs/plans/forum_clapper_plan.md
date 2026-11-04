@@ -3790,3 +3790,17 @@ Task132只终核新单局绑定/现有授权与有限工程P范围，不重复50
 新草稿路径仍analysis/w13_side_wall_20261104T085734Z_a1d0ed48，对应sol/demos同名新目录，此前尚不存在。只冻当前a1d0/707资产/261模型/全新PROBE+BATCH+BUDGET，ONE_W13_AIR_ENGINEERING标签保持。沿用已成功823的Win32_Process Create pythonw隐藏协调器与原自有Launcher，活动instances先只读为空/restore_pending=false，无STOP/HUMAN_PRACTICE，不重复启动。协调器在任何游戏前原子置STATUS独占并30秒刷新、等peer暂停；资源门/实际worker自己input.stats零delay+jitter/HF2/2/pending0/测量/绝对键回执不减。
 
 用户Nov3“我不在家，你开实机不用等我”仍是这一次有界无人值守授权来源，通知/审阅本身不增加权限。7HP基准、HP<=6 realQ1首次任何损血，死亡/期望键不符/超4帧无相符回报/缺关键日志立即停，不重试/替换/补局；没有新扶墙路线或未接空钩域放行。现场核第一时间平砍/墙缝落地交还/rear每次真实hit+bounce等只按实际发生审，先前P五点不认证这些动作。任何未知清理保持独占，只有自有worker/game/场worker/协调器、golden/Prefs/旧DEMO及registry实际全核后false。
+
+### 7.101 a1d0唯一新单局首损血停止并真实清理；小符文换踩漏刀待定位【不重跑，首刀平砍未获现场认证】
+
+新合同sol/demos/w13_side_wall_20261104T085734Z_a1d0ed48已消费一次：运行源a1d0、真实执行HEAD23a068d6，隐藏Win32_Process Create pythonw仅一次（WMI49840/实际协调器51616），Game42152/实际worker34052。原资源门通过，实际worker自己连接的b2_input_path_i0原件passed：delay/jitter0、HF2/2、pending0；--measure/protocol2/诊断开启，raw trace complete/overflow0、manifest配置complete/unresolved[]。没有放宽日志/回执/HP门或改Windows核心进程。
+
+本局7HP→5HP首次2HP在f2894，原realQ1按HP<=6立即停；source为左335476 Song Heavy Sentry(2)/Slam Collider1，worker正常rc0，结局QUIT。实际链时序：2778右335470小符文前摇后换踩左335476，2837 D+A成功发/应用，2838真实DownSlashAlt接受，但该刀没有目标hit/真实bounce，2850按原失败恢复。接受时hero x29.74577、目标EvadeScuttle x23.61002（根距6.13576u）；这是实际输入与位置，不据此直接断言精确模型错因。恢复后普通规划多拍FORCED_RISK起跳，2893真实Umbrella Inflate，2894被左怪锤1击中。runtime b2_hp_loss的chain_related=false/无当时failure_exposure原样保留，不拿近帧位置改写既有归因，也不由它否定漏刀与后续姿态需要定位。
+
+本局side EntryAttack机会0，stomp意图117个实际决策拍，所以新“平砍意图本拍A”没有现场验证机会。2570曾对右335470真实下劈hit+bounce并进入wall_pressure(side)，但完整落地/rear后手均被原安全检查拒绝，本局没有实际执行新的墙缝或rear后续；不以拒绝/静态503通过称路线成功。首刀与墙侧项目均不因此签现场通过。
+
+计时口径分开：attempt.ingame_s=13.83包含退出等，不当fight T。协议2原窗口T=10.024316444993019、L2、window本身complete；现有离线MEASUREMENT_AUDIT完整性为false，理由missing health snapshot，原件保留不“修绿”。EXIT_HEALTH_DIAGNOSTIC核首缺3130、均在首次real_quit和确认退出3129之后，缺HP段raw dt合计.5921494141221046；此前无缺失combat HP。仅作诊断的已知HP前缀到3129，T9.432167030870914/L2/complete，不能替换原窗口或当有效A/A样本，后续再核退出边界的测量口径。
+
+实际cleanup2026-11-04T09:20:09.909726Z成功，Root随后重核：worker34052、Game42152、WMI49840、协调器51616以及从实际测量builder.worker定位的场worker43520均已退出；golden正确/Prefs无差、旧DEMO hash与mtime原样恢复、registry instances/live空且restore_pending=false、无残留Game。CLEANUP_RECEIPT/ROOT_EVENT_AUDIT/MEASUREMENT_AUDIT/EXIT_HEALTH_DIAGNOSTIC在本analysis目录，只有全清后STATUS=false；未知不提前清独占。原始记录/停止局/预算均保留，不替换、不补局、不重开这个合同。
+
+Task133已派独立最小事件审：只核2778→2837/2838漏刀→2850恢复→2894锤1的原计划/实际输入/目标时钟及后续入口，不重跑大矩阵/P/游戏。Root事实已收，精确模型/准入原因尚未核定，不提前承诺修法；同因未修不再开新局。源a1d0未在此轮改动，旧wf/AA/旧8局及未接空钩域不动。
