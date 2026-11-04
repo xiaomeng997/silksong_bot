@@ -3549,3 +3549,16 @@ Task113只终核这个资源门增量、P原件/9帧包和新启动草稿/协调
 P3中协调器未绑定已通过把run_unattended.py和其fixture证据加入真实门evidence解决，不改执行代码；30秒STATUS整份读写的低概率并发风险以游戏中只允许协调器写、Root只读，待协调器退出再核清理后改状态规避，不新造锁框架。此时真实ENGINEERING_GATE readytrue/user_authorizedtrue；随后prepare必须先建新试局/合同，才能WMI pythonw脱shell启动协调器，避免独占日志路径不存在。旧CURRENT指针另留副本再切新批，旧已停数据不动。
 
 本轮只授权新的源823单局w13工程验证（原seed314168），当前已接空冲/公共速度出口/真实锤2与目标交还；不是空钩已接，也不是8局或全局完美安全认证。已有HP7存档、HP<=6/Q1首次任何损血、Opt1/关键日志/实际input.stats/死亡停止和原真实清理全部保持。自有协调器先STATUStrue等5秒，原其他进程资源检查保留，Windows核心进程不改；开局后源码/配置/合同保持冻结，只有真实清理全核后false。
+
+
+### 7.81 新823实机首损血已停并清理；弹起等整招的断点已定位，固定背后尾段修复待增量审【源d5e2883f；无新局/P】
+
+7.80绑定的新单局已真实完成，runtime823/执行HEADb2a4，seed314168。实际worker25248 bootstrap input.stats为0delay/jitter、HF2/2、pending0；游戏就绪10.8秒、热缓存预热7.1秒。measurement/trace/config/window均完整，overflow0/unresolved空，真实fight窗口T12.075845209881663s（不是attempt.ingame_s15.9）。唯一HP事件2972由7→5、原始TakeHealth同帧归Sentry335470/Slam Collider2；按Q1首损血退出，没有补局。266个B2选择tick共8个Move、5次B2真命中弹起交还，另2602旧脚本真弹起；70个tick带air_dash记忆不能当70次冲刺或70条成功链。2545/2658两次恢复保留，不能凭总体5次真弹起称新交接全过。
+
+真实cleanup00:11:40.290914Z：游戏15524、worker25248、协调器45964/包装56008、异步场55220全退；golden/Prefs无差、旧DEMO恢复、registry live/instances空且restore_pendingfalse。Root另核全部自有PID/实际measurement子进程后STATUSfalse，CLEANUP_RECEIPT保留；CURRENT指针已消费/can_executefalse，旧19bd和本局原始录制/停止不改。
+
+断点：2914目标335470 Idle；2915真实下劈弹起同时它开始Slam Antic，L2暂时仍选同怪。动作层把这整个新招纳入bounce_tail，原先仅neutral预测至2978，2953先撞源，放弃后普通规划DASH(L)，2928再发J(L)，真实开伞而非新跳；2940才自然换335476，2972被追来的锤2命中。此局不把覆盖回执当动作成功。ROOT_INITIAL_AUDIT和TAIL_FIXED_ROUTES保存实际输入与因果预测；同一2915原点中neutral/向左首阻2953/2964，向右过源背后整段全owner扫描完整无碰撞，但这是有限模型结果，不是反事实实机成功。
+
+新源d5e2883f只对源仍Slam Antic的弹起尾段选择一条朝其背后的固定方向，其他阶段保留neutral；同实例/已知朝向、整段全owner扫描和每拍当前检查不减，不加时序搜索。固定键入原动作表/Run，未知朝向拒绝，锤子实际消失后沿原出口接近/下劈；不发J/DASH/A。13个新增专项（其中10项旧码有效red）和相邻7文件共275通过；真实2915初态经原生_transfer_offer输出R/bounce_tail、整段覆盖至2978，无send/命中信用。初次文本替换漏接JSON表、夹具side方向错误均已修并用真实表生成/交还回归补齐，不拿此前166夹具通过当最终接线证明。
+
+Task114只独立复核这一个首损血交接，Task115排队增量核新四文件/275证据及原生入口，特别查L2在尾段中途换目标的归属边界。当前新源未过独立增量审、未量新完整tick、未开新游戏；不复用823的13.8546ms或已消费合同放行d5e。此为B策略变化，不称纯性能等价。下一步先完成这处审阅/归属，再核相应关键完整tick与新源新批；Windows核心进程不改，资源背景分类仍按已批准版本，旧冻结AA/失败/旧wf保持。
