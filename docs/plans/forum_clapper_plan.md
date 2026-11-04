@@ -4026,3 +4026,18 @@ Root复现5个K×1红例，全部同TypeError：fresh3种cd/新刀条件+真实�
 analysis/target_priority_update_20261104/SPEC.md和DECISION_CASES.json存当前解释及12规格场景，明确不是已跑过的测试。Task156只静态给现有gauntlet/two_play/EntryAttack/jump_behind/刀口入口最小映射与避免切回的小状态，未授权新控制框架/模拟器/大搜索，不写生产。当前连续下劈入口还没完整上线，不能把“中间窄就连劈”偏好说成已实现无限连劈或任意冲锤覆盖。262性能壳保留，待最终小战术源绑定后Root独占P；不先按旧早切策略开877草稿。ENGINEERING_GATE_DRAFT追加new_user_tactic_pending=true，ready仍false，真实gate/contract/game都不存在。
 
 用户“将来自动生成打法/统一格式竞争”是架构讨论：统一候选条件/意图/执行入口/效益代价/失效交还接口，手写和自动生成候选未来可共用验证与评分，战术事件/安全交还点再竞争，硬检查先于评分、未知不当通过；不要求先重写所有旧规则，不在本轮实现自动生成器，也不以同一个生成模型给自身认证代替实机。本轮主线仍是上述手写小偏好与已有执行链的实机反馈。wake180仅请求156静态映射，STATUS false/无Root任务、未P/游戏，旧停止局/AA/raw/STOP/Windows核心进程不动，三活动计划同步。
+
+
+### 7.122 手写战术已接候选竞争0e3cf866，旧后处理不再覆盖胜者；321功能通过，待157源审与新完整预算【已处理 Opus #264/#265】
+
+#264静态映射1工件、#265更新K×1功能输入16工件hash/bytes已核同，OPUS264/265_RECEIPT在analysis/target_priority_update_20261104。264的“链侧无需改”仅限选择目标的责任：原native来源绑定只识别CAST/SLAM，焦点真实起跳后给EntryAttack还要补真实Jump/JumpCast antic历史，不补会只停留在偏好。265是f0a快照35个(86,1)决策输入、重建差0、包/归一事件/规划与旧flatK一致；原flatK工件保留，不当新战术源P/自然闭环。
+
+用户本轮确认现有规则正好可用多候选竞争，并问同步耗时。新源0e3cf866c5736a709fd7939b6dff988a6e65d306相对877仅六运行文件+一个新行为测试：小clapper_priority模块、gauntlet入口/持有与参数、GoalPrefs末尾胜者标记、TwoPlay交接、policy标记/真实日志、native四行来源状态扩展。L2仍同步，事件及原period比较最高分×适用度−换目标成本；低频异步站位场未改。显式manual-B两Clapper/TWO_FOCUS+SPRINTSW才用，A/off不启用，不兼容的ASW/JUMPHIT/SP11B/RUNETIER/FLIPB旧脚本配置走原模式。模型/原before_send/sent/精确承诺键/HP/STOP/预算/资源门/清理不改，不称B纯等价。
+
+默认继续当前焦点输出至真实Jump/Air才可换，非焦点后方朝她跳可接成目标，记iid+t_commit至落地余招/圈结束以免同一次起跳切回；近招且hero根距<=8.05才有近怪候选；进入有落脚中间只选一次离墙远者，微差不重选。外侧起跳后撤、近招向内翻意图、窄中间头顶意图也在同一小候选集合比较。默认最高分keep50/intercept130/hold140/near110/takeoff90/middle70/retreat150/flip80/overhead65，换目标扣5；near适用度0.8+0.2*(1-distance/8.05)，其余当前为1。只是可调偏好，不是胜率/安全概率；不适用不生成，不用分数放松物理/未知门。L2Rules.clapper_scores及clapper_switch_cost可供新合同调参，日志实际保存各候选maximum/applicability/cost/score和胜者/scene。胜者换目标后才查已有身体区间和到达后地面输出窗口，side/stomp复用EntryAttack/现有动作，不对每规则另跑规划或新搜索。
+
+完整调用路径补桥：TwoPlay在胜者标记下保留观测、开局和IdleHit/other_danger，旧TWO_SPACE站位重写、ESC早切脚本键与其IdleHit禁打偏好让出；新双怪可选墙压不再后覆盖。新Jump/JumpCast来源必须从已有真实Control历史找到antic，缺历史不造Move，原source-instance核还在；四个真实_transfer_offer端点覆盖两家族/同实例与错误实例。已承诺刀口仍由原native所有权执行，L2只给后继意图。flip/overhead没有新增保证翻越或无限连劈能力，不把尚未上线连跳表说成在线完成。
+
+Root一次bridge.xml共321唯一pass/外来0，含新35行为、旧L2/entry/middle/wall与TwoPlay/SP9/policy相邻。此前212/217/221属于不同阶段集合，不相加；首focused3失败是夹具初选焦点与字段名错误，原件保留，不充有效源码red。SOURCE_BINDING/SOURCE_PACKET绑定708 runtime文件、模型261同父源，用户五个未跟踪aim不改；source_0e3cf866.zip是895源码/小数据文件，未把hash账本内未改的大型旧地图重复打包，所需模型仍从当前路径按hash只读。打包误带大文件已收窄，未动原始数据或他人进程。
+
+Task157请求上述七文件的窄增量源审，沿263，不重复321/全项目/动作网格/P/game；wake181。0e3源审在途不是通过。Root在自身act_0e3cf866准备265当前源完整_act功能入口（E24–31 Idle、真实K×1、当前策略/实际support/field、首不同包即停），登记STATUS进程防重启；新策略若使旧前缀分叉必须保留差异，不能沿用旧键等价/旧P。新增比较<0.1ms仅预算目标，尚无新P实数。旧877未跑草稿无gate/contract，已写OBSOLETED_BY_TACTICS；消费0bf/AA/raw/STOP均不重开或修改。当前无游戏/P，只有非计时E功能输入；新源审和必要完整预算通过后才新绑定一局w13合同与真实gate，用户无人值守授权有效，不再逐局问。
