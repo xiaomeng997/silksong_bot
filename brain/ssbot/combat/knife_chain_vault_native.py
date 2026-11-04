@@ -298,10 +298,15 @@ def propose(native, planner, forecast, prefs):
         if saved is None:native._recover("vault run identity missing",f);return None
         move=MoveInstance(**saved["move"])
         if native.post_context is not None:
-            native._note("vault_real_bounce_exit",frame=f,move=asdict(move))
+            native._note("vault_real_bounce_exit",frame=f,move=asdict(move),kind=native.post_context.get("kind","downslash"))
             if native._hit is not None:native.runner.run.v["down_hit_f"]=native._hit
             native.post_context=native._post_seed=native._post_kind=None
         draft=logical_copy(native.runner)
+        # #150b: only the same Move's SEEN Harpoon (a successful CLAW send, then the actual clip), still in
+        # flight, holds the target-moved watch; a pending, ended or other hook keeps it.
+        hs=native._hook_start
+        draft.run.v["_hook_locked"]=bool(native.commitment is not None and hs is not None and hs["seen_frame"] is not None
+                                         and hs["move"]==move==native.commitment["move"] and native._hook_in_flight(state))
     else:
         ctx=locked_context(state,forecast,getattr(prefs,"target",None),game)
         if ctx is None or not ground or not accepting:return None

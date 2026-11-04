@@ -12,7 +12,8 @@
       "row": null, "cs": null, "cs_toward": null, "f_ctrl": null,
       "down_hit_f": null, "bounced": false, "bounce_f": null, "side_hits": [], "unlocked_hit_f": null,
       "buddy_locked": null, "air_press_F": null, "g_press_F": null, "n_side": 0, "why": null, "closed_f": null,
-      "fallback_hook": false, "near_miss_press": null, "near_miss_recorded": false
+      "fallback_hook": false, "near_miss_press": null, "near_miss_recorded": false,
+      "_hook_locked": false
     },
     "cfg": {
       "lag": 0,
@@ -31,7 +32,7 @@
       "watch": [
         {"do": "done", "when": {"p": "vault_unlocked_hit"},
          "why": {"lit": "vault: a hit on the target while no other Clapper is in its jump cast; the Idle target picks a move on this frame (forum.md:8454): hand back"}},
-        {"do": "done", "when": {"p": "vault_target_moved"},
+        {"do": "done", "when": {"all": [{"p": "vault_target_moved"}, {"not": {"p": "truthy", "v": "var._hook_locked"}}]},
          "why": {"lit": "vault: the target left Idle / Walk / Dmg Attack: hand back"}},
         {"do": "abort", "when": {"p": "vault_path_bomb"},
          "why": {"lit": "vault: a small-rune bomb over the path"}}
@@ -82,6 +83,9 @@
         "phase": "cs_lock",
         "inherit": ["watch"],
         "rules": [
+          {"do": "goto", "to": "over", "when": {"all": [{"p": "vault_bounced"}, {"p": "vault_over_body"}]}},
+          {"do": "done", "when": {"p": "vault_bounced"},
+           "why": {"lit": "vault far: real hook bounce off the body's span; over / fall start only over the body: hand back"}},
           {"do": "goto", "to": "far_strike",
            "when": {"all": [{"p": "accepting"}, {"not": {"p": "harpoon_clip"}},
                             {"p": "cmp", "a": "clk.claw_press", "op": ">", "b": 12}]}},
@@ -144,7 +148,7 @@
               "conditions": [{"obs": "centre_to_root_u", "kind": "range", "lo": null, "hi": null}],
               "status": "unfitted", "notes": "Manual small-hop hook. Runtime checks input/takeoff/Harpoon and current external danger; the distance range is not a whole-path safety certificate."},
       "far_lock": {"link": "vault_idle.far_lock", "observations": [], "conditions": [], "status": "unfitted",
-                   "notes": "the fixed-hook lock rule (accepting, no Harpoon clip, claw_press > 12; abort > 45)"},
+                   "notes": "the fixed-hook lock rule (accepting, no Harpoon clip, claw_press > 12; abort > 45); #150b: the B2 hook bounce (target Harpoon hit + new marker) goes over only from over the body, else hands back"},
       "far_strike": {"link": "vault_idle.far_strike", "observations": [], "conditions": [], "status": "unfitted",
                      "notes": "#136 nominal rows CS d<drift>p<press> from control"},
       "over": {"link": "vault_idle.over", "observations": [], "conditions": [], "status": "unfitted", "notes": ""},

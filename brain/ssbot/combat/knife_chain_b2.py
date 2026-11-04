@@ -312,6 +312,30 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             self._note("b2_hook_start_seen",frame=f,move=vars(watch["move"]),clip=clip,
                        source="actual Harpoon animation only; no strike/bounce credit")
 
+    def _observe_hook_bounce(self,state):
+        # #150b: after the same VAULT_IDLE Move's Harpoon is SEEN, keep the first real Harpoon hit on the target
+        # (a Harpoon hit on any other ent rules the hook bounce out) and the last bounce-marker parts. A NEW marker
+        # at or after that hit (a rising bounce bit or a raised down-spike counter) is the hook bounce. This never
+        # writes the DownSlash _hit/_accepted.
+        watch=self._hook_start;c=self.commitment
+        if (watch is None or c is None or c["move"].family!="VAULT_IDLE" or watch["move"]!=c["move"] or
+                watch["seen_frame"] is None):return None
+        f=state["f"];mem=watch.setdefault("hook_bounce",{"hit":None,"other":None,"bits":None,"counter":None})
+        for ev in state.get("ev") or ():
+            d=ev.get("d") or {}
+            if ev.get("k")!="hit" or str(d.get("src") or "") not in ("Harpoon Damager","Harpoon Dash Damager"):continue
+            ef=ev.get("f",f);ent=d.get("ent") or d.get("iid")
+            if type(ef) is not int or not watch["seen_frame"]<=ef<=f:continue
+            if ent==c["move"].target_iid:
+                if mem["hit"] is None:mem["hit"]=ef
+            elif mem["other"] is None:mem["other"]=[ef,ent]
+        ints=(state.get("hero") or {}).get("cstate_int") or ()
+        counter=int(ints[1]) if len(ints)>1 else 0
+        bits=bool(flag(state,"downSpikeBouncing") or flag(state,"downSpikeBouncingShort"))
+        new=(bits and mem["bits"] is False) or (mem["counter"] is not None and counter>mem["counter"])
+        mem["bits"]=bits;mem["counter"]=counter
+        return f if new and mem["hit"] is not None and mem["other"] is None else None
+
     def _check_hook_start(self,frame):
         # Called BEFORE preview can advance its planned clock into lock/strike.
         watch=self._hook_start
@@ -342,6 +366,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         self._actual_state=state
         self._observe_application(state)
         self._observe_hook_start(state)
+        hook_bounce=self._observe_hook_bounce(state)
         if self._jump_start is not None and self._jump_start.observe(state):
             self._note("b2_jump_start_seen",frame=f,move=vars(self._jump_start.move),
                 sent_targets=sorted(self._jump_start.sent_targets),source="actual observed airborne after own J")
@@ -393,6 +418,20 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             self._post_seed=None if self._fixed_hook_mode else logical_copy(self.runner);self._post_kind=None
             self._note("b2_simple_bounce_wait" if self._fixed_hook_mode else "b2_real_bounce_handback",frame=f,hit=self._hit,press=self._press,
                        source="target DownSlash hit plus observed bounce/counter",predicted=c["predicted_bounce"])
+            return
+        if hook_bounce is not None and self._hook_start is not None:
+            # #150b: the dedicated hook-bounce handover. Same release as the DownSlash one above (commitment, hook /
+            # jump watches, committed future, fast J), but hit stays None: no DownSlash _hit/_accepted is invented.
+            hook_hit=self._hook_start["hook_bounce"]["hit"]
+            self.post_context={**c,"bounce":f,"hit":None,"hook_hit":hook_hit,"press":self._press,"simple_wait":False,
+                               "kind":"hook_bounce"}
+            self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+            self._fast_j_pending_commit=None;self._fast_j_commit=None;self._fast_j_sent=None
+            if self.runner.run is not None:self.runner.run.v.update(bounced=True,bounce_f=f)
+            self._post_seed=logical_copy(self.runner);self._post_kind=None
+            self._note("b2_real_hook_bounce_handback",frame=f,hook_hit=hook_hit,press=self._press,
+                       source="same Move's seen Harpoon: target Harpoon hit plus a new bounce marker; no DownSlash hit or accept",
+                       predicted=c["predicted_bounce"])
             return
         e=next((e for e in state.get("ents") or () if e.get("iid")==c["move"].target_iid),None)
         if e is None or e.get("is_dead") or e.get("hp",1)<=0:
