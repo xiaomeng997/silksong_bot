@@ -1,8 +1,8 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（Opus 5.5，综合 Fable 5.1、Argon 和本人10-26的分析）；10-27晚合并Astra审阅（第11节）。**当前进度（11-01，7.27）：仍在w13。墙侧旧slammer优先级修复8c24fe9f已过56相关与161独立审阅；新seed314168单局CLEAR，fight33.57745s/0HP、tail0HP、原始HP7→7。2153包全部Opt1覆盖、0错键/超期/右删失，完整测量与真实清理通过（2026-11-02T03:02:21.249171Z）。墙侧条件自然出现51tick，实际51均选开阔侧、0选墙侧；仅该局描述，非反事实收益证明。长期场本局0用场tick，不能归功于站位场；162独立原始核验已核：计划的5刀全中，另2锤为主动让出；末两包计数差为tail结束后的回执。只继续离线场接管规格，下一次实机等用户到场；53A不开、53C暂停，旧失败根保留，不自动补局。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.108）：仍在w13。434单局真实命中后提前退出、后来开伞被锤1打2HP，原首损血Q1已停且真实全清；旧局不重开。fc条件命中检查经245发现Antic站起身体漏界，新0bf1b27f已改为观测/既有模型全姿态并集，588唯一相关回归通过；独立增量源审和活跃accepted-hit完整_act P仍待，没有新合同或实机gate。当前STATUS false、无自有离线作业。最新细节和证据见页末7.108，不用历史源SHA启动。**
 
-> **实机等待要求（用户最新决定，11-01）**：用户说“下次开实机等我一下 我想看看”。下一次启动任何实机游戏前，必须等用户明确表示已到场/可以开始；此前的无人值守自主实机授权不再作为下一局直接启动依据。离线审计、源码修复和准备可以继续；不暂停整个项目，不重开旧批。当前无游戏运行，8c24单局已完整清理。
+> **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
 > **当前唤醒方式（10-31，6.60）**：Opus交付后运行sol/mailwatch/wake_sol.ps1，30秒后一次性通知当前聊天；同编号去重。旧10分钟轮询已删除，未停止项目任务或放宽实机门。
 
@@ -3882,3 +3882,13 @@ analysis/transfer_hit244_20261104保存原22例有效red6fail/16pass→green22pa
 原2539真实S0/HF/前缀与原已选行只在当前生产helper复核一次：postcontact只保护2541的目标边距，新两拍盒对真实最大误差约.00000196u，命令/latched相同、无新增global INV，_hit/post_context仍None。原拒绝contact只是fixture，未重建动态RangeSupport或完整策略/完整_act，不能称所有危险或新闭环已认证。Task139增量源审只核三文件/22例及必要相邻，不重复大矩阵；新源707/261与源码包已绑，无SOURCE_REVIEW/P_ENABLE/新合同。旧side-band有限P未触发此分支，E误差/计时也不能顶替活跃分支P；待独立审与必要新预算/工程门后才可新局。
 
 STATUS false/own_jobs空、无游戏/P，旧434实际全清后才提交本源；原HP首损血/Q1/Opt1/资源/STOP/关键日志/真实清理与无人值守有界授权不变。旧AA/8局、原录制/停止局、五个用户aim与Windows核心进程均不动。
+
+### 7.108 245站起身体漏界已修；0bf1b27f全Antic姿态并集待增量审【无新实机/P门】
+
+已处理 Opus #245(Task139)：11工件hash/字节、141相邻case集合和22例有效red核同；接受P2——第3/4帧拿蹲伏body检查下一两拍，遇第5帧站起会漏真实重叠。不能把当前盒冻结为整个窗口。新源0bf1b27f397185e7b539943f4360d223c3948c8d采用(b)，复用load_cl_slam的root全部49个Antic姿态x0/x1/y0/y1包络，以真实pos/明确bool flipX变换并与观测body取并集；未知位置/朝向拒绝。原最短Antic加一个family帧预留不变。没有用t>=5/60硬截，因为实际2539的.0833095908略低于5/60，取整又可能漏真正晚蹲伏；该模型包络仍是经验假设，不称未来保证。
+
+只改transfer.py、旧244夹具显式朝向和13新例。原244的同active Move/已sent+accepted/绑定Slam/下一1..2帧/静止已知碰撞体/实际不碰body边界保留；其他owner、所有delayed/unknown仍走无新增global INV的check_flags。实际offer/绝对row/发键/clock未动，预测不建_hit/post_context，真实hit+bounce/后手N2/miss/责任仍原流程。13新例有效fc基线red6fail/7pass→green13pass；最后同一次588唯一全过/外来0，含旧575不相加。E24–31 Idle已结束且PID独立核亡。
+
+analysis/transfer_pose245_20261104保存SOURCE_BINDING三文件LF、同707运行packet/261模型、source_0bf1b27f.zip839文件、OPUS245_RECEIPT、CHANGE_REPORT及red/green/final.xml。实际2539局部helper仍只保护postcontact2541，原键/latched同、无新global INV、_hit/post_context None，盒对实际最大误差约.00000196u；旧拒绝contact仅fixture，未重建RangeSupport/fullpolicy/full_act，不称闭环或动作认证。
+
+Task140只做三文件增量审和13新例/必要相邻，不重复588/大矩阵。Task141另在Opus自己目录准备原2539已sent+accepted事务的因果rehydration完整_act草稿，保留生产support/forecast/clock、绝对行及null framed ACTION/sent，逐字段给原日志来源，不用future造hit或假危险扫描。只允许E功能核验，不跑P/游戏；Root后续独占新P才核活跃分支完整预算。旧2765..2769 side-band P没走新分支，不能给新源盖章。新源独立审/P/新合同仍待，旧434/a1d0及原STOP/AA/原录制/五个aim文件与Windows核心进程不动。
