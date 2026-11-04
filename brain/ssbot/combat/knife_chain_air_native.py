@@ -433,7 +433,17 @@ class NativeManualAirChain(NativeChainB2):
                     end=transfer.predicted_tail_end(state,goal)
                     if end is None or not 1<=end-f+1<=self.profile.max_frames:
                         raise GeometryUnavailable("source hammer tail family clock unavailable")
-                    tail=model_path(sim,plan,np.zeros(end-f,np.int64),game)
+                    # A head hit can itself start a new Slam Antic. Neutral
+                    # then falls into the coming hammer; cross to the source's
+                    # back instead. Pick one fixed row, not a timing search.
+                    source=next(e for e in transfer.clappers(state) if e["iid"]==goal.caster)
+                    tail_mask=0
+                    if transfer.control(source)[0]=="Slam Antic":
+                        face=getattr(rs.trk.now[goal.caster][2],"s",None)
+                        if isinstance(face,(bool,np.bool_)) or face not in (-1,1):
+                            raise GeometryUnavailable("source hammer tail facing unavailable")
+                        tail_mask=B["L"] if face==1 else B["R"]
+                    tail=model_path(sim,plan,np.full(end-f,tail_mask,np.int64),game)
                     whole=geo.scan(tail)  # ALL owners, including the source and destination; no admission exemption
                     if not whole.complete or whole.contacts:
                         self._note("source_tail_declined",frame=f,through=tail.through,complete=whole.complete,
@@ -443,9 +453,14 @@ class NativeManualAirChain(NativeChainB2):
                         return None
                     draft.run.v["source_tail_admitted"]=True
                     draft.run.v["source_tail_checked_through"]=tail.through
-                    self._note("source_tail_admitted",frame=f,through=tail.through,
-                        basis="current source instance; empirical slam-family end+1; all-owner neutral path",
+                    draft.run.v["source_tail_mask"]=tail_mask
+                    self._note("source_tail_admitted",frame=f,through=tail.through,mask=tail_mask,
+                        basis="current source instance; empirical slam-family end+1; all-owner fixed tail row",
                         scope="one go/no-go, current two-frame checks afterwards; no escape guarantee")
+                tail_mask=int(draft.run.v.get("source_tail_mask",0))
+                if tail_mask!=mask:
+                    mask=tail_mask
+                    path=model_path(sim,plan,np.array([mask],np.int64),game)
             attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
             if attacking:
                 if getattr(current[2],"fam",None)!="CC_SLAM":raise GeometryUnavailable("air continuation attack family unsupported")
@@ -491,6 +506,7 @@ class NativeManualAirChain(NativeChainB2):
              "target_ta":target_ta,"target_attack_checked":attacking,
              "target_move":None if target_move is None else asdict(target_move),
              "tail_checked_through":draft.run.v.get("source_tail_checked_through"),
+             "tail_mask":draft.run.v.get("source_tail_mask"),
              "approach_recipe":draft.run.v.get("approach_recipe"),
              "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,

@@ -895,7 +895,7 @@
         "clock": "antic",
         "inherit": ["stop"],
         "rules": [],
-        "keys": []
+        "keys": [{"gen": "transfer_source_tail_keys", "name": "source_tail"}]
       },
       "walk": {
         "keys": [
@@ -1072,6 +1072,7 @@
       "air_entry": false,
       "source_tail_done": false,
       "source_tail_admitted": false,
+      "source_tail_mask": 0,
       "source_tail_checked_through": null,
       "air_dash_decided": false,
       "approach_recipe": null,

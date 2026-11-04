@@ -127,3 +127,78 @@ def test_admitted_tail_still_checks_current_destination_and_delayed_dangers(monk
     monkeypatch.setattr(N.B2Geometry,'current_contact',PathContact(1002,8,kind),raising=False)
     assert n._transfer_offer(s,n._clock,current,fc,NS(target=8),False) is None
     assert len(scans)==1 and len(short)==2
+
+
+@pytest.mark.parametrize('facing,key', [(-1, 2097152), (1, 1048576)])
+def test_antic_tail_moves_to_sources_back_instead_of_neutral_wait(monkeypatch,facing,key):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
+    fc.rs.trk.now[7][2].s=facing
+    offer=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    assert offer is not None
+    assert offer.mask==key and offer.draft.run.v['source_tail_mask']==key
+    assert np.all(scans[0].commands[1:]==key)
+    assert short[0].commands[1]==key
+    assert offer.details['tail_mask']==key
+    assert not key & (1|4|524288)  # no jump, dash or attack in this tail
+    assert not n._receipts
+
+
+@pytest.mark.parametrize('facing',[None,0,float('nan'),True])
+def test_antic_tail_with_unknown_facing_cannot_choose_a_side(monkeypatch,facing):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
+    fc.rs.trk.now[7][2].s=facing
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is None
+    assert not scans and not short and not n._receipts
+
+
+@pytest.mark.parametrize('owner,kind', [(7,'move'),(8,'body'),(99,'delayed')])
+def test_moving_antic_tail_still_requires_all_owner_whole_path_scan(monkeypatch,owner,kind):
+    n,s,sim,fc,scans,short=fixture(monkeypatch,contact=PathContact(1005,owner,kind))
+    s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
+    fc.rs.trk.now[7][2].s=-1
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is None
+    assert len(scans)==1 and not short and not n._receipts
+    assert np.all(scans[0].commands[1:]==2097152)
+
+
+def test_admitted_moving_tail_holds_original_key_without_another_long_scan(monkeypatch):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
+    fc.rs.trk.now[7][2].s=-1
+    first=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    assert first is not None and first.mask==2097152
+    n.runner=first.draft
+    s=deepcopy(s);s['f']=1001
+    current=ChainSim(sim.start,sim.prefix,sim.hold,sim.params,sim.terrain,1001,1001)
+    fc.rs.trk.T=n._clock=1.+1/60.
+    # A later facing value cannot silently change the already admitted recipe.
+    fc.rs.trk.now[7][2].s=1
+    second=n._transfer_offer(s,n._clock,current,fc,NS(target=8),False)
+    assert second is not None and second.mask==2097152
+    assert len(scans)==1 and len(short)==2
+    assert second.draft.run.v['source_tail_mask']==2097152
+
+
+@pytest.mark.parametrize('tail_mask',[0,1048576,2097152])
+def test_real_tail_table_reproduces_admitted_mask(tail_mask):
+    from ssbot.combat.knife_chain_transfer import propose
+    r,s,old=transfer_motion_scene(K.M_NORMAL)
+    s['hero'].update(pos=[25.,14.],box=[24.75,12.45,25.25,14.53],vel=[8.25,0.])
+    s['ents'][0]['fsms'][0].update(state='Slam 1',t=0.)
+    S=K.initial_state(old.params,25.,14.,vx=8.25,ground=False)
+    sim=ChainSim(S,old.prefix,old.hold,old.params,old.terrain,1000,1000)
+    variables=plan().variables();variables.update(side=2097152,source_tail_mask=tail_mask,source_tail_admitted=True,air_entry=True)
+    r.run=Run('rune_transfer','bounce_tail',variables)
+    goal=TransferGoal(8,7,1000,.1,'BOUNCE',MoveInstance(7,946,'CC_SLAM'))
+    made=propose(r,s,1.,sim,8,False,np.zeros((0,6)),set(),goal)
+    assert made is not None and made[0].run.link=='bounce_tail'
+    assert made[3]==tail_mask and made[2].commands[1]==tail_mask
+    # Once the actual source hammer is gone, its old movement key must not leak
+    # into the destination's existing approach/strike generator.
+    s['ents'][0]['fsms'][0].update(state='Idle',t=0.)
+    s['ents'][0]['colliders']=[{'name':'Song Heavy Sentry (2)','enabled':True}]
+    made=propose(made[0],s,1.,sim,8,False,np.zeros((0,6)),set(),goal)
+    assert made is not None and made[0].run.link!='bounce_tail'
+    assert not made[3]&1048576  # destination is to our right

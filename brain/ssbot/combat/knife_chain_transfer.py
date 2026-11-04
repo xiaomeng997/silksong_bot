@@ -260,6 +260,9 @@ def air_approach_keys(x):
 
 
 def register(prims):
+    @prims.gen("transfer_source_tail_keys",doc="the single admitted source-tail direction; no new jump, dash or attack")
+    def source_tail_keys(x,m):return m|int(x.v.get("source_tail_mask",0))
+
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if not hasattr(x.obs,"sim") or x.obs.ground:return None
