@@ -434,6 +434,9 @@ class RuneLowHop:
         # SP9a S3 (SSBOT_FORUM_TWO_CAST, combat.two_play): with two live Clappers the caster in Spell Antic nearest to
         # her in front; no start / hand back (outside the critical window) while the other one can reach her
         self.two = two
+        if two:
+            from ssbot.combat import two_play as _tp
+            self._stance_body_pad = (_tp._guard_cfg() if _tp.GUARD else _tp.GuardCfg()).body_pad
         self.run: Hop | None = None
         self.done: list[Hop] = []
         self._seen: set = set()
@@ -619,6 +622,9 @@ class RuneLowHop:
                 if why is not None:
                     self._close("abort", "other")
                     return None
+                if self._stance_in_other_body(s, e, r.face):
+                    self._close("abort", "other body")
+                    return None
                 if guard is not None and e is not None and self._guarded(s, e, r.face, guard):
                     self._close("abort", "guard")
                     return None
@@ -649,6 +655,8 @@ class RuneLowHop:
                 from ssbot.combat import two_play as _tp
                 if _tp.other_danger(s, e.get("iid"), self._hx(s), cast_ok=self.b2) is not None:
                     why = "other"
+                elif self._stance_in_other_body(s, e, face):
+                    why = "other body"
                 elif guard is not None and self._guarded(s, e, face, guard):
                     why = "guard"
                     self.guard_f.append(f)          # SSBOT_FORUM_TWO_GUARD: the no-start frames (stats)
@@ -698,6 +706,27 @@ class RuneLowHop:
                 if c12:
                     return min(c12, key=lambda e: abs(float(e["pos"][0]) - hx))
         return _sp.clapper(s)
+
+    def _stance_in_other_body(self, s: dict, e: dict, face: int) -> bool:
+        """Destination band only; independent of guard.low, never a path check."""
+        from ssbot.combat import two_play as _tp
+        try:
+            cx = float(e["pos"][0]) + float((e.get("vel") or [0., 0.])[0]) * SEND_AHEAD / 60.
+            a, b = sorted((cx + face * self.cfg.stand_lo, cx + face * self.cfg.stand_hi))
+            pad = self._stance_body_pad
+            if not all(math.isfinite(v) for v in (a, b, pad)) or pad < 0:
+                return True
+            for other in _sp.clappers(s):
+                if other.get("iid") == e.get("iid"):
+                    continue
+                lo, hi = _tp.body_span(other)
+                if not all(math.isfinite(v) for v in (lo, hi)) or lo >= hi:
+                    return True
+                if lo - pad < b and hi + pad > a:
+                    return True
+            return False
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return True
 
     def _guarded(self, s: dict, e: dict, face: int, guard: list) -> str | None:
         """SSBOT_FORUM_TWO_GUARD: the other Clapper's danger span kind over her way to the stance or the stance."""
