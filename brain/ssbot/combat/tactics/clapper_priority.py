@@ -12,12 +12,14 @@ from ssbot.combat import two_play
 
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X, clapper_facing
 from .modes import EVADE, EntryAttack, entry_attack_prefs
+from . import clapper_middle
 
 JUMPS = {"CC_JUMP", "CC_JUMP_CAST"}
 NEAR = {"Slam Antic", "Spell Antic"}
 AIR = {"Jump", "Air"}
 DEFAULT_SCORES = {"keep": 50., "intercept": 130., "hold": 140., "near": 110.,
-                  "takeoff": 90., "middle": 70., "retreat": 150., "flip": 80., "overhead": 65.}
+                  "takeoff": 90., "middle": 70., "retreat": 150., "flip": 80., "overhead": 65.,
+                  "middle_jump": 95.}
 
 
 def enabled(fc):
@@ -104,6 +106,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     if mem is None: mem = tac._clapper_priority = {"seen": {}, "intercept": None, "departed": None, "region": None}
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
+    middle = clapper_middle.observe(tac, ws, subjects, geo, t, mem)
     seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
                     tac.t_commit.get(s.iid)) for s in subjects}
     old = tac.goal
@@ -120,6 +123,12 @@ def decide(tac, ws, fc, prefs, hx, t):
         if leaving is None or leaving.family not in JUMPS or tac.t_commit.get(leaving.iid) != departed[1]:
             mem["departed"] = departed = None
     changed = seen != mem["seen"] or region != mem["region"]
+    if middle is not None and (middle.get("decision") or {}).get("route") == "guide":
+        prior = middle["decision"]
+        elapsed = t - middle["antic_at"]
+        source = next(s for s in subjects if s.iid == middle["move"][0])
+        deadline = .48 if source.family == "CC_JUMP" else .88
+        changed |= deadline-elapsed < prior["guide_arrival"]+tac.rules.margin_s
     if keep is None or changed or tac.n % tac.rules.period == 0:
         cands = tac.candidates(ws, fc, hx, None if keep is None else keep.iid)
         by_id = {c.s.iid: c for c in cands}
@@ -135,6 +144,10 @@ def decide(tac, ws, fc, prefs, hx, t):
             choices.append(dict(rule=rule, target=target.iid, maximum=caps[rule], applicability=applicability,
                                 switch_cost=cost, score=caps[rule] * applicability - cost))
         offer("keep", default)
+        if middle is not None:
+            mid = middle["decision"] = clapper_middle.choose(tac, ws, fc, geo, hx, t, middle)
+            if mid["route"] == "hold": mid["target"] = default.iid
+            offer("middle_jump", next(s for s in subjects if s.iid == mid["target"]))
         rear = False
         if keep is not None and other.family in JUMPS and other.state in AIR:
             rec = tac.jb_land.get(other.iid)
@@ -143,22 +156,22 @@ def decide(tac, ws, fc, prefs, hx, t):
             origin, front = (rec[0], rec[1]) if rec is not None else (other.pos[0], face)
             rear = (front in (-1, 1) and (origin - hx) * (default.pos[0] - hx) < 0
                     and (hx - origin) * front > 0)
-        if hold is not None:
+        if hold is not None and middle is None:
             offer("hold", next(s for s in subjects if s.iid == hold[0]))
-        elif rear and departed != (other.iid, tac.t_commit.get(other.iid)):
+        elif middle is None and rear and departed != (other.iid, tac.t_commit.get(other.iid)):
             offer("intercept", other)
         if keep is not None:
             previous = mem["seen"].get(other.iid)
             if other.state in NEAR and seen[other.iid][2] and (previous is None or previous[:3] != seen[other.iid][:3]):
                 offer("near", other, .8 + .2 * max(0., 1. - abs(other.pos[0] - hx) / TWO_SLAM_RANGE_U))
-            if (hold is None and keep.family in JUMPS and keep.state in AIR
+            if (middle is None and hold is None and keep.family in JUMPS and keep.state in AIR
                   and mem["seen"].get(keep.iid, (None, None))[1] not in AIR
                   and other.family not in JUMPS
                   and not (other.iid in tac.rune and t <= tac.rune[other.iid][3])):
                 offer("takeoff", other)
-        if region == "middle" and mem["region"] != "middle":
+        if middle is None and region == "middle" and mem["region"] != "middle":
             offer("middle", max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx))))
-        if region in {"left", "right"}:
+        if middle is None and region in {"left", "right"}:
             far = geo["high"] if region == "left" else geo["low"]
             far_room = geo["xb"] - far.pos[0] if region == "left" else far.pos[0] - geo["xa"]
             back_room = (hx - geo["xa"] - tac.rules.wall_room_u if region == "left" else
@@ -168,7 +181,7 @@ def decide(tac, ws, fc, prefs, hx, t):
                     for s in subjects)):
                 offer("retreat", default)
             if default.state in NEAR: offer("flip", default)
-        if region == "tight": offer("overhead", default)
+        if middle is None and region == "tight": offer("overhead", default)
         winner = max(choices, key=lambda c: (c["score"], keep is not None and c["target"] == keep.iid))
         target = next(s for s in subjects if s.iid == winner["target"])
         reason = winner["rule"]
@@ -186,6 +199,16 @@ def decide(tac, ws, fc, prefs, hx, t):
             goal.t_pick, goal.t_goal, goal.landed, goal.entry_attack = old.t_pick, old.t_goal, old.landed, old.entry_attack
         elif keep is not None and reason not in {"intercept", "hold"}:
             goal.entry_attack, _ = entry(tac, ws, fc, keep, target, t, geo)
+        if reason == "middle_jump":
+            mid = middle["decision"]
+            previous = goal.entry_attack
+            source = next(s for s in subjects if s.iid == mid["source"])
+            if mid["kind"] is None:
+                goal.entry_attack = None
+            elif not (previous is not None and (previous.target, previous.source, previous.kind) ==
+                      (target.iid, source.iid, mid["kind"])):
+                goal.entry_attack = EntryAttack(target.iid, mid["kind"], source.iid, source.family,
+                                               abs(float(source.pos[0])-hx), t)
         if old is None or old.target != target.iid or old.name != RUSH:
             tac.stats["changes"] += 1
             if old is not None and old.target != target.iid:
@@ -241,9 +264,16 @@ def decide(tac, ws, fc, prefs, hx, t):
             out = replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - {g.target},
                           no_pogo=frozenset(out.no_pogo) - {g.target}, ground_first=frozenset(out.ground_first) - {g.target})
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
+    mid = middle["decision"] if middle is not None else None
+    if mem["winner"] == "middle_jump" and mid is not None:
+        # Apply after legacy face/antic stance helpers, which must not turn a
+        # refused guide or a middle interval into target +/- face_u again.
+        g.stance_x = float(mid["stance"])
+        out = replace(out, stance_x=g.stance_x)
+        scene = "middle jump: " + mid["route"]
     g.why = g.why.split("; ")[0] + "; " + scene + "; " + str(how)
     tac.last.update(goal=RUSH, goal_why=g.why, target_type=CLAPPER, goal_t_end=None,
                     entry_attack=None if out.entry_attack is None else vars(out.entry_attack),
-                    clapper_scene=scene, clapper_region=region)
+                    clapper_scene=scene, clapper_region=region, clapper_middle=mid)
     tac.stats["goals"][RUSH] = tac.stats["goals"].get(RUSH, 0) + 1
     return out

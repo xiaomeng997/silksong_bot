@@ -47,17 +47,18 @@ def change(fc, iid, **kw):
 @pytest.mark.parametrize("family,state", [(G.CC_CAST, "Spell Antic"), (G.CC_SLAM, "Slam Antic"),
     (G.CC_JUMP, "Jump Antic"), (G.CC_JUMP_CAST, "Cast Slam Antic 2")])
 def test_focus_outputs_through_its_antic_instead_of_early_long_switch(family, state):
-    tac, ws, fc = scene(); step(tac, ws, fc)
+    # The middle scene now has its own causal guide/landing decision.
+    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=family, state=state, committed=True)
     tac.two_esc = {"hold": 8, "mode": "wall", "stance": 50., "no_hit": [7, 8]}
     out = step(tac, ws, fc)
     assert out.target == 7 and 7 not in out.no_hit and out.entry_attack is None
-    if family in P.JUMPS: assert out.stance_x == pytest.approx(24.)
+    if family in P.JUMPS: assert out.stance_x == pytest.approx(16.)
 
 
 @pytest.mark.parametrize("covered,kind", [(False, "side"), (True, "stomp")])
 def test_actual_takeoff_chooses_destination_contact_from_ground_window(covered, kind):
-    tac, ws, fc = scene(); step(tac, ws, fc)
+    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
     assert step(tac, ws, fc).target == 7
     if covered: fc.default = 0.
@@ -72,13 +73,14 @@ def test_actual_takeoff_chooses_destination_contact_from_ground_window(covered, 
 @pytest.mark.parametrize("covered", [False, True])
 def test_takeoff_does_not_reintercept_the_same_departed_focus(family, covered):
     # Live 68f: takeoff switched away at2608, rear-intercept undid it at2609.
-    tac, ws, fc = scene(); step(tac, ws, fc)
+    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=family, state="Jump Antic", committed=True)
     step(tac, ws, fc); tac.t_commit[7] = 1.
     if covered: fc.default = 0.
     change(fc, 7, state="Jump")
     assert step(tac, ws, fc).target == 8
     change(fc, 7, state="Air")
+    tac.jb_land[7] = (10., 1., 20., True)  # it took off behind us; current geometry is outside
     for _ in range(tac.rules.period * 2):
         assert step(tac, ws, fc).target == 8
         assert not any(c["rule"] == "intercept" for c in tac.last.get("clapper_choices") or ())
@@ -86,12 +88,13 @@ def test_takeoff_does_not_reintercept_the_same_departed_focus(family, covered):
 
 @pytest.mark.parametrize("next_event", ["new_jump", "near_attack"])
 def test_departed_focus_suppression_ends_at_a_new_move(next_event):
-    tac, ws, fc = scene(); step(tac, ws, fc)
+    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
     step(tac, ws, fc); tac.t_commit[7] = 1.
     change(fc, 7, state="Jump")
     assert step(tac, ws, fc).target == 8
     change(fc, 7, state="Air")
+    tac.jb_land[7] = (10., 1., 20., True)
     assert step(tac, ws, fc).target == 8
     if next_event == "new_jump":
         tac.t_commit[7] = 2.
@@ -126,8 +129,9 @@ def test_far_nonfocus_antic_does_not_steal_focus():
 
 
 def test_rear_jumper_is_intercepted_then_kept_after_landing():
-    tac, ws, fc = scene((30., 18.), 26.); step(tac, ws, fc)
+    tac, ws, fc = scene((30., 28.), 26.); step(tac, ws, fc)
     change(fc, 8, family=G.CC_JUMP, state="Air", committed=True)
+    tac.jb_land[8] = (18., 1., 28., True)
     out = step(tac, ws, fc)
     assert out.target == 8 and 8 in out.no_hit and out.entry_attack is None
     change(fc, 7, family=G.CC_SLAM, state="Slam Antic", committed=True)
@@ -312,7 +316,7 @@ def test_explicit_stomp_still_overrides_sp4_ground_only_bias(monkeypatch,entry_s
     if entry_style=='tight':
         tac,ws,fc=scene((20.,22.),21.);out=step(tac,ws,fc)
     else:
-        tac,ws,fc=scene();step(tac,ws,fc)
+        tac,ws,fc=scene(hx=15.);step(tac,ws,fc)
         change(fc,7,family=G.CC_JUMP,state='Air',committed=True);fc.default=0.;out=step(tac,ws,fc)
         assert out.entry_attack.kind=='stomp'
     assert out.hit_kw[out.target][3]>0

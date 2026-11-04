@@ -1331,7 +1331,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play = cm
                 own = "claw"
                 self.counts["claw_chase"] += 1
-        if self.cast_stab is not None and play is None and not low_crit and not asw_crit:
+        middle_jump = (getattr(prefs, "clapper_choice", None) == "middle_jump")
+        if self.cast_stab is not None and middle_jump and play is None and not low_crit and not asw_crit:
+            # This one scene owns its guide/standing/escape stance. The old
+            # antic dash-to-slash script would otherwise overwrite that choice.
+            # Existing committed native and critical low-hop owners are above.
+            self.cast_stab.abort("middle jump tactical stance")
+        if self.cast_stab is not None and play is None and not low_crit and not asw_crit and not middle_jump:
             # SP6: the dash slash in the jump cast's antic while its script runs (the supervisor's keys win)
             def latch(m: int, _h=hold, _p=prefix) -> int:
                 # the key mask the oracle's hold filter latches at f + 2 when m is sent for it
@@ -1746,6 +1752,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "clapper_choices": self.tac.last.get("clapper_choices"),
                "clapper_winner": self.tac.last.get("clapper_winner"),
                "clapper_scene": self.tac.last.get("clapper_scene"),
+               "clapper_middle": self.tac.last.get("clapper_middle"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:
