@@ -3854,3 +3854,17 @@ readonly PRE_FREEZE_CHECK核registry instances/live空且restore_pending=false�
 只运行sol/demos/w13_transfer_motion_20261104T105316Z_434a21b3一次，旧a1d0消费停止合同不重开、不替换/补局/8局；7HP基准、HP<=6 realQ1首次任何损血、death/Opt1/关键日志/资源/STOP严门不变。沿已审隐藏Win32_Process Create pythonw和自有Launcher，启动PENDING独占记录防双起；协调器在任何游戏前原子STATUS=true并30秒刷新、等待peer，真实worker自己的input.stats仍须现场存零delay/jitter/HF2/2/pending0。
 
 本次要按实际动作审移动目标等待后出刀、真实接受/命中/bounce及共享S0观测；新平砍与墙侧后续仅在实际发生时评，不把有限P或静态审当命中/全场成功保证。未接空钩/扶墙/MAP2域与模型局限不扩；measurement原窗口失败不修绿，若退出后缺HP仍另列诊断，不称AA样本。只有golden/Prefs/旧DEMO/registry、自有worker/game/场worker/协调器真实全清并Root独立核后STATUS=false，未知保留独占。
+
+### 7.106 434新单局首2HP停止并实际清理；刀已真命中，前一拍预测退出丢失弹起交接【消费局不重跑】
+
+新合同sol/demos/w13_transfer_motion_20261104T105316Z_434a21b3只消费一次：源434、执行HEAD9af696335c190f2e8e8cae95fe7b880735a6c886，隐藏WMI38724/实际协调器27984、Game42924/worker38516。第一次PowerShell状态解析因旧JSON有current_P_receipt/current_p_receipt大小写双键在预留/PID/CIM之前失败，未创建游戏/锁/预算；原错误另存WMI_PREPARSE_ERROR。改-AsHashtable解析后才唯一Win32_Process Create成功，不是游戏重跑，不改生命周期或源码。真实资源门通过，端口1.8秒就绪，worker38516自己的input.stats passed（0delay/jitter、HF2/2、pending0）；--measure/protocol2、配置complete/unresolved[]与trace完整原件均保存。
+
+2476左335476小符文换踩右335470。实际2533目标Walk未选出刀行，2534目标进入Slam Antic且vx0才选toward strike，体现本轮移动目标不冻身发刀的入口；2537已成功发/应用并真实DownSlashAlt接受。本次不再是上一局的打空：2539守卫预测2541有目标335470 kind move，_recover("rune transfer external step blocked")提前退出；2540实际DownSlash命中该目标、dealt9/HP230→220且真实pogo marker/Recoil Twirl，2541仍弹起，链却已在前拍丢掉，没有接上真实弹起后的下一段。精确contact时刻与否决几何原因仍待独立核，不先把某个模型分支当根因。
+
+之后普通规划开伞，2588 Umbrella Turn，2589同一右怪Slam Collider1首次2HP，7→5；原realQ1按HP<=6停局，worker正常rc0、协调器error null，没有重试/替换/补局。当前新目标Slam失败暴露在failed+50仍正确保持，本局HP记chain_related=true；只认证责任账生效，不当动作成功。本局planner_input的XVX全为0，没有触发共享S0恢复的现场活跃域；其有限31起点证据仍只是离线。平砍首刀/新墙侧后续同样不能凭静态或未发生机会签现场通过。
+
+attempt.ingame_s9.82含退出，不当fight时长；协议2原窗口T5.982753124088049/L2、window自身complete，原CLI全窗audit仍false/missing health snapshot，首缺2826在real_quit2607之后，原件不改不修绿。EXIT_HEALTH_DIAGNOSTIC保实际room/game/hero转换和缺HP范围，仅作诊断，不替换主窗或当AA样本。ROOT_EVENT_AUDIT与ACTUAL_TIMELINE在本analysis目录，真实STATE f/fc/fs分列，不把STATE编号直接当物理步。
+
+实际cleanup2026-11-04T11:07:21.169664Z成功，Root随后另核：Game42924、worker38516、WMI38724、实际协调器27984以及测量builder定位的场worker34648均已退出，golden正确/Prefs无差、旧DEMO hash和mtime恢复原值、registry instances/live空且restore_pending=false、无残留Game。worker_cleanup各资源pass，CLEANUP_RECEIPT存原数据，只有全核后STATUS=false；源码/HEAD在启动到真实全清期间未改，现才解除本单局冻结。所有原日志/失败/预算保留，434这份合同永不重开。
+
+Task138只独立核2534原三固定row→2539预计body/move否决→2540真hit/bounce→2589锤1；若日志缺contact，允许在2534当时S0/HF/已发prefix上复现一次原row，不新搜索/新闭环/全局模型。不得无条件豁免目标/锤子或把预计hit当真实回执；任何新修复仍要新源审/绑定/严格工程门。Root同期只核日志，不重复局部模型计算；同因未修不再开，旧AA/8局/原始录制/Windows核心进程不动。
