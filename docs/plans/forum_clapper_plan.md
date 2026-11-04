@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.116）：仍在w13。#256新刀门与#257头顶/外侧边界增量源审均有限核收，当前3880组合源码逐文件绑定已核、无新源阻挡；196/221为各次相关回归，不相加。3276实际受理在途钩提前watch结束及真实钩hit+bounce后继尚待Task150b原型，仍挡新实机。#254真实起点连跳仅工件/限制核收，未上线/P认证。旧0bf停止局全清且不重开；STATUS false/own_jobs空，无新P/game/gate。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.117）：仍在w13。#258在途钩最小原型已核收并干净移植为abf09500，四运行文件LF与原型相同，Root201相关通过/1不适用skip，待152增量源审。原3276误退短序列现锁至3303、3304真实钩弹起交还且无误恢复；目标已移开时交回规划，不再盲发旧d22p22尾刀，不造下劈hit/accepted或无敌。旧偏好/新刀源审256/257已收；当前新源仍无P/game/gate。旧0bf停止局全清且不重跑，STATUS false/own_jobs空；连跳仍未上线。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3976,3 +3976,15 @@ analysis/middle_return_intent_20261104/head_guard保存SPEC、OPUS255_RECEIPT、
 当前3880ed9a的B2/transfer与fresh测试LF逐文件等于已审d49绑定，gauntlet/middle测试等于已审3880绑定，SOURCE_REVIEW_3880.json保存逐项接受253/255/256/257与组合边界，source_review_passed=true但P/game gate仍false。早于当前源的基础审阅按原绑定继承，不能用一个最大编号掩盖未处理旧阻挡。256保守P3（上一clip未知可漏认、便宜cd门model frame_time）、全局air_chain._contacts旧风险，以及257的peer危险/实际穿越待测均单列，不为非当前阻挡夹带扩代码。
 
 Task150b仍正在opus/hook150/，Root不重复原型或提前移植在途工件。下一步只合已审最小同Move真实CLAW受理后在途保护、真实目标iid的Harpoon/HarpoonDash hit加pogo marker后继、当前真实body/hero核对与commitment/press/watch交接，原绝对在途键/错目标/无bounce失败责任不放宽。此项未闭合前无新实机；连跳新物理起点表也不拿来绕过该阻挡。已在Sol信箱回执当前核收/E允许，无多余排队请求。STATUS false、Root无运行任务，无新P/游戏/预算/合同；旧AA/raw/STOP/停止0bf与Windows核心进程未动。三活动计划依序同步。
+
+### 7.117 真实钩弹起专用交接已移植abf09500，原3276误退短序列通过；固定旧尾刀不盲追【已处理 Opus #258，待152新源审】
+
+#258/Task150b十七manifest工件hash/bytes全核同。原型只在自身目录；Root已读补丁和实际事务并决定最小技术边界：目标实际Harpoon/HarpoonDash hit之后的新真实bounce marker是独立hook_bounce交接，在目标实际身体横向范围上方才接既有over/fall，否则交还现有普通规划。不在已移动目标上盲发#136固定CS d22p22；没观察到bounce而控制回来时，原far_strike仍保留。明确是B策略/交权边界变化，非纯性能等价；这不新增从范围外追怪接刀的另一套路由，也不把钩弹起当下劈保护。
+
+生产abf095004642e683fd62403a94e2576c58fcf404对比3880仅四运行文件（B2、vault、vault_native、vault表）、原表摘要测试变更与18个功能事务新例，四运行文件git LF与opus/hook150/patched副本逐字节一致，PORT_IDENTITY保存，无分析注入/影子开关。新SPEC/OPUS258_RECEIPT、SOURCE_BINDING/SOURCE_PACKET/source包（含docs/facts）、有效red7fail11pass→同一次201pass/1不适用skip、外来0都在analysis/hook_bounce_port_20261104。201是这次B2/B2rune/vault四文件/fresh7/middle32/新18事务/原局短序列相关集合，不与Opus342/旧221相加。生产测试保留实际状态转换与所有负例，不复制原型源码位置/JSON结构镜像断言；硬编码原局录制路径的短序列只在数据目录分析测试。
+
+机制：仅同Move成功sent后实际已见Harpoon且仍在途才抑制target_moved，pending/已结束/其他Move不锁。独立记录目标实际Harpoon Damager/Harpoon Dash Damager hit，错目标/混合对象作废，之后新bounce位上升或counter增大才交接。释放commitment/hook/jump/committed future/fast-J，post_context.kind=hook_bounce、hit=None另记hook_hit，不写DownSlash的_hit/_accepted；原HP/45帧超时/path bomb/unlocked hit/死亡/实例变化/未知失败责任不减。交接后根据最新hero/body横向复核是否over，不称高度/全程安全，原current-step外部危险门仍在。
+
+原0bf3274..3310短序列在Root当前树复核：3275实际见钩，至3303每拍锁住/neutral；3284/3298实际目标335476命中，3304bounce位新上升而counter0（旧3305视觉/速度描述不是这一marker首帧）。此刻hero中心28.815、目标身体32.218..35.811，已不在身体范围，普通handback且无新recovery/exposure/failedmove，_hit/_accepted仍空。queued0、无bomb/forecast是回放发送环境桩，相关帧没走外部步门，不能当闭环/真实输入/P或完整危险验收。新body上方over仅功能事务证据，仍待现场。
+
+Task152增量审该干净端口，沿256/257父源，重点钩种类不被其他adapter当下劈、原在途绝对键不改、post_context/旧press/watch交接及实际外部一步门/失败责任，少量事务与原短序列，不重跑588/矩阵/P/game。源审收齐后才按新源/模型/profile/脚本/预算重新绑定必要P与新工程，不复用旧0bf停止合同/旧现场输入回执。wake176，只写Sol信箱；STATUS false、RootE已结束，无新P/游戏/gate。旧AA/raw/STOP与Windows核心进程未改。
