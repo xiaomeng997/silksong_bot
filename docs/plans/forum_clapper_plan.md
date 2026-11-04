@@ -3830,3 +3830,17 @@ analysis/xvx_observation240_20261104：有效red用明确HERO2 on/air sprint夹�
 Root实际当前生产StateTracker读原STATE，514个规划拍只2838–2851十四拍XVX一行不同，逐值同原型；31个有限起点各从当拍实际S0/HF/已发prefix/原命令两拍预测，参数逐键同、HF四项同、原误差逐项同PROTO134（比较容差.00011），原始数值在ACTUAL_ORIGINS与CHANGE_REPORT。十四拍box横向误差已降至数值舍入量，不能外推其它行为或“零模型错误”。2566的Shuttlecock/SHUT少保持一物理步、约.195u横向残差未改，按方向时XVX隐藏也不凭空恢复。
 
 新source707packet/261模型/源码zip已绑；Task136只审434相对已核402的两文件、27新例及必要相邻，不重跑大矩阵。当前新源SOURCE_REVIEW/P_ENABLE/新合同均未放行，旧a1d0已消费停止，所有原日志/测量失败/预算保留，不补跑。源审核妥后才做新绑定有限计时与有界单局；用户无人值守授权仍有效但不取代源/输入/HP首损血/Q1/Opt1/资源/STOP/真实清理门，Windows核心进程不操作。
+
+### 7.104 242新源审已核收；434新完整_act有限P结束并独立清理，全新单局草稿待终核【未建实机gate】
+
+已处理 Opus #242(Task136)：11工件hash/字节、31用例与553中相应子集、27有效red9败18过、3独立probe均核同；生产Tracker514拍/31起点两拍误差证据同，707实际资产/261模型当前再次核同。SOURCE_REVIEW才接受434a21b3，未将排队/通知当许可。只有upAttacking的取消不恢复、方向按住时隐藏XVX、2566的SHUT残差等仍是记录限制；本局MAP2关闭，今后MAP2若启会读到新S0，不能外推此次认证。
+
+重绑原41个序列化S0(86,1)/HF(1,22)/f+1前缀与实际成功wire、四个源文件hash；不是沿用旧源P许可。新P_ENABLE与脚本只换源/阶段/明确接收集合，反向归一AST同已审a1d0；资源助手和批准字节同。原子STATUS=true/等待peer暂停后资源blockers[]，P0–15/High/Numba4、GetProcessInformation核EcoQoS execution speed off均实核；不操作Windows核心进程或用户/Opus任务。
+
+本次完整_act点2765=15.5873、2766=13.8444、2767=14.8188、2768=12.5818、2769=12.6218ms；首四实际wire的target/mask/hold/flags全同，2769目标2771去DASH首次不同即停，不消费下一STATE，未到2805。0新签名/外来，trace complete/overflow0/diagnostics complete，原GC记录保留。仅是原录制S0的有限全事务工程点，band前shadow预热不是自然零分叉回放；此band没有新XVX活跃域，31实际起点的E误差验证不冒充其P时间或全链/分布/现场截止保证。未拿旧823或a1d0数字给新源盖章。
+
+analysis/xvx_observation240_20261104/P_SERIAL_RECEIPT及p_serial_434a21b3/p_entry_2805_20261104T104915Z保存原RESULT/trace与实际运行配置。原脚本PROBE_CLEAN true后，Root另核P PID32692、实际builder worker44100均不在；own_jobs空、STATUS false，没有游戏/Prefs/registry修改。允许Opus恢复E非计时工作，先前P暂停提示不再适用。
+
+全新草稿C:\ssbot\data\m2_play\clapper_plan\analysis\w13_transfer_motion_20261104T105316Z_434a21b3只含当前绑定：trial/run_unattended相对已清a1d0仅新批路径/源/phase，逆向元数据归一AST同；模型261/运行707与版本锁同源，原100前置hash全同，新增当前源审/553/真实起点/P/239–242及旧局失败清理证据共125。accepted集合显式补55与238–242，new_blockers实核空，不用已接受最大编号掩盖旧项。TRANSPORT_BINDING按实际清理a1d0重新核六组件/B2整文件与air发送相关方法继承；准入/恢复责任/共享S0的策略变化由241/242独立审，不称完整B策略纯等价。
+
+对应sol/demos新目录尚不存在，无ENGINEERING_GATE.json/contract/PID/预算，旧a1d0消费局不重跑。Task137只终核新源/配置/脚本/资源/授权/有限P范围，不重复553/模型/P。仍仅一次W13、seed314168、同7HP基准、HP<=6 realQ1首次任何损血，death/Opt1/关键日志/STOP/资源/完整清理原门不变，无新空钩/扶墙/map2/8局或AA域。实际worker自己的input.stats/--measure现场回执必须真实核，静态/其它连接不能替代。旧measurement全窗missing-health false保留，确认退出后的缺HP诊断不修绿、不冒充有效AA。用户Nov3无人值守授权仍有效，待终核与真实前置齐后才另建新合同。
