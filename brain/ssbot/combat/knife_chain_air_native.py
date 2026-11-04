@@ -47,7 +47,7 @@ class NativeManualAirChain(NativeChainB2):
              or (self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM) or getattr(self,"commitment",None) is not None
              or (self.runner.run is not None and self.runner.run.chain=="vault_idle")
              or getattr(self,"recovery",None) is not None or getattr(self,"post_context",None) is not None
-              or (getattr(self,"_wall_pressure",None) is not None and not self._wall_pressure.get("yielded",False))))
+              or (getattr(self,"_wall_pressure",None) is not None and not (self._wall_pressure.get("yielded",False) or self._wall_pressure.get("landing",False)))))
 
     @candidate_generation.setter
     def candidate_generation(self,value):self._candidate_enabled=bool(value)
@@ -315,7 +315,7 @@ class NativeManualAirChain(NativeChainB2):
             if self.commitment:self._recover("policy priority gate: "+self.policy_gate_reason,f)
             return None
         if self.recovery is not None:return self._recovery_offer()
-        if (getattr(self,"_wall_pressure",None) is not None and not self._wall_pressure.get("yielded",False)):
+        if (getattr(self,"_wall_pressure",None) is not None and not (self._wall_pressure.get("yielded",False) or self._wall_pressure.get("landing",False))):
             from .knife_chain_wall_native import propose as wall_propose
             if self._context is None:
                 self._recover("wall-side current context unavailable",f);return None

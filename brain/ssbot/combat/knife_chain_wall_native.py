@@ -86,7 +86,7 @@ def prepare_goal(n, state, prefs, *, handoff):
         n._note('wall_pressure_enter', frame=state['f'], target=pressure.target,
                 kind=pressure.kind, wall_side=pressure.wall_side, bounce=bounce,
                 source_move=asdict(g.responsibility), geometry_candidate=True)
-    elif ctx.get('yielded'):
+    elif ctx.get('yielded') or ctx.get('landing'):
         # This is source-hazard bookkeeping, not a keyboard owner. It must not
         # clear a different new target's commitment when the old hammer ends.
         if _source_finished(n, state, ctx):
@@ -157,6 +157,8 @@ def _plan(ctx, state, game):
 
 def propose(n, state, game, sim, forecast, prefs, ground):
     ctx = n._wall_pressure
+    if ctx is None or ctx.get('yielded') or ctx.get('landing'):
+        return None  # ordinary owns the keys; residual cleanup is prepare_goal's job
     iid = ctx['intent'].target
     queued, _ = n.queued_prefix(state['f'], state)
     if (queued is None or sim.fo != sim.f or sim.f != state['f']
@@ -266,7 +268,11 @@ def propose(n, state, game, sim, forecast, prefs, ground):
                 return _reject(n, state, 'observed wall-gap ground handoff blocked')
             if not ctx['landing']:
                 _clear_transaction(n)
-                ctx['landing'] = True
+                n._abandon('actual wall-gap landing: ordinary owns the keys')
+                ctx.update(landing=True, yielded=True)
+                n._transfer_ready = False
+                # Landing is an actual ownership boundary. Later ordinary
+                # jumps/steps/source phases cannot restart this old stroke.
                 n._note('wall_pressure_ground_handoff', frame=state['f'], target=iid,
                         floor_span=span, actual_ground=True, next='ordinary side-slash rows')
             if _source_finished(n, state, ctx):

@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace as NS
 import numpy as np
 import pytest
+from ssbot.knowledge import kinematics as K
 from ssbot.combat import knife_chain_wall_native as WN
 from ssbot.combat import knife_chain_wall_pressure as W
 from ssbot.combat.knife_chain_air import model_path
@@ -139,6 +140,7 @@ def test_ground_handoff_waits_for_observed_ground_and_keeps_old_tail(monkeypatch
     assert n._wall_pressure['landing'] and n.commitment is None
     assert n._wall_pressure is not None  # retains old hammer responsibility
     monkeypatch.setattr(WN.T,'bounce_tail_pending',lambda *a:False)
+    assert WN.prepare_goal(n,s,p,handoff=True) is False
     assert WN.propose(n,s,1.,sim,fc,p,True) is None
     assert n._wall_pressure is None and n.runner.run is None
 
@@ -384,3 +386,52 @@ def test_checked_wall_successor_table_reproduces_absolute_row(monkeypatch,kind):
            target_valid=True,ground=False,bounced=False)
     with pytest.raises(NominalUnsupported):
         offer.draft.eval_link(X(offer.draft,offer.draft.run,obs))
+
+
+def _landed_residual(monkeypatch):
+    n,s,sim,fc,p,_=offer_fixture(monkeypatch,'side')
+    s.update(dt=1/60);s['act'].update(target=1000,applied=1000,mask=int(sim.prefix[0]))
+    n.begin(s);n._clock=1.;n._clock_known=True
+    n._context=((1000,s,1.,False,True),sim,None,None)
+    first=WN.propose(n,s,1.,sim,fc,p,False)
+    assert first is not None
+    planner=NS(measurement_enabled=False,jump_until=-1,macro_until=-1)
+    result=n.install(first,planner);n.planner_result(result);n.final('plan',first.mask)
+    n.before_send(frame=1000,target=1002,mask=first.mask,flags=0,received_frame=1000)
+    assert n.sent().chain_outcome=='sent' and n.runner.run is not None
+    receipts=(dict(n._receipts),dict(n._pending))
+    sim.start.reshape(K.K)[K.GROUND]=1.
+    monkeypatch.setattr(WN.T,'bounce_tail_pending',lambda *a:True)
+    assert WN.propose(n,s,1.,sim,fc,p,True) is None
+    assert n._wall_pressure['landing'] and n.commitment is None
+    assert n.runner.run is None and (dict(n._receipts),dict(n._pending))==receipts
+    return n,s,sim,fc,p
+
+
+@pytest.mark.parametrize('move',['jump','phase_jump','step_out'])
+def test_landed_residual_never_replans_or_fails_ordinary_moves(monkeypatch,move):
+    from copy import deepcopy
+    from ssbot.combat.air_chain import ChainSim
+    n,s,sim,fc,p=_landed_residual(monkeypatch)
+    s=deepcopy(s);s['f']=1020
+    if move=='phase_jump':s['ents'][0]['fsms'][0].update(state='Slam 2',t=0.)
+    z=sim.start.copy().reshape(K.K);z[K.GROUND]=float(move=='step_out')
+    if move=='step_out':z[K.PX]=24.8
+    sim=ChainSim(z,sim.prefix,sim.hold,sim.params,sim.terrain,1020,1020)
+    before=list(n._failure_exposures)
+    monkeypatch.setattr(W,'propose',lambda *a,**kw:pytest.fail('residual tried a new route/knife'))
+    assert WN.propose(n,s,1.2,sim,fc,p,move=='step_out') is None
+    assert n._failure_exposures==before
+    assert n.residual_context() is not None and n._wall_pressure['stroke']==0
+    assert not n.candidate_generation
+
+
+@pytest.mark.parametrize('finished',[False,True])
+def test_landed_residual_cleanup_never_clears_new_target_commit(monkeypatch,finished):
+    n,s,sim,fc,p=_landed_residual(monkeypatch)
+    monkeypatch.setattr(WN,'_source_finished',lambda *a:finished)
+    new={'move':MoveInstance(8,1010,'CC_SLAM'),'origin':1011,'ta':1.}
+    n.commitment=new
+    assert WN.prepare_goal(n,s,p,handoff=True) is False
+    assert n.commitment is new
+    assert (n._wall_pressure is None)==finished

@@ -79,6 +79,7 @@ import numpy as np
 
 from ssbot.combat import observed_slam as _observed_slam
 from ssbot.combat import candidates as cmod
+from ssbot.combat import entry_side
 from ssbot.combat import dslash, forum_v2, rune_bombs, special_mode, specials, stance_block
 from ssbot.combat.holdfilter import hold_filter_jit
 from ssbot.combat.planner import (KillPlan, MACRO_MARGIN, NO_CONTROL_MODES, PlannerConfig, PlanResult, Planner,
@@ -1248,6 +1249,7 @@ class ForumPlanner(Planner):
                       for p in cmod.POSTURES}
         # without control (hit-stop, recoil, a lock) the keys only queue: the core rows only (Planner's cands_nc)
         self.fsets_nc = {p: (cs.subset(core), core[core]) for p, (cs, core) in self.fsets.items()}
+        self.fsets_entry_side = {p: (entry_side.immediate_set(cs), core) for p, (cs, core) in self.fsets.items()}
         self.crest = crest
         self._map = None                  # SSBOT_FORUM_SPECIAL_MAP: combat.forum_map.MapHelper
         self._chase_jc: dict = {}         # SSBOT_FORUM_CHASE: iid -> the tracker's last time in a jump cast
@@ -3628,6 +3630,11 @@ class ForumPlanner(Planner):
         posture = posture_of(start)
         mode0 = int(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0])
         cs, core0 = (self.fsets_nc if mode0 in NO_CONTROL_MODES else self.fsets)[posture]
+        native = getattr(self, "chain_native", None)
+        entry_target = (entry_side.target_of(prefs) if v2 and getattr(native, "b2", False)
+                        and getattr(native, "arm", None) == "B" and mode0 not in NO_CONTROL_MODES else None)
+        if entry_target is not None:
+            cs, core0 = self.fsets_entry_side[posture]
         N0, T = len(cs.cmd), cs.T
         cont = self.prev_cmd is not None
         knife_on = bool(getattr(getattr(self, "win", None), "knife", False))
@@ -4082,6 +4089,11 @@ class ForumPlanner(Planner):
                 prio.insert(0, N - 1)
                 n_core += 1
         rest = [int(i) for i in pre if not core[i] and not (cont and i == N - 1) and not win_rows_[i]]
+        entry_times = None
+        if entry_target is not None:
+            entry_times = entry_side.hit_times(sc, entry_target, pass1, T1,
+                ground_only=entry_target in (getattr(prefs, "ground_hit", ()) or ()), flags=r1.flags)
+            rest.sort(key=lambda i: int(entry_times[i]))  # same bounded envelope quota, never a safety verdict
         top = rest[:fcfg.K_b]
         # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
         # IndexError; with a CONTINUE the map row read the CONTINUE's slot)
@@ -4747,17 +4759,19 @@ class ForumPlanner(Planner):
                 if wr_.any():
                     wk_ = ((~wr_).astype(np.int64),)
                     self.audit.win_rank_ticks += 1
+            entry_rank = ((np.where(safe, entry_times, T1 + 1),)
+                          if entry_times is not None and not forced else ())
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V,
-                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + wk_ + nd_ + kk_ +
+                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + wk_ + entry_rank + nd_ + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
                 order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V, v2_ff
-                                    ) + gf_ + (v2_nh, offl) + wk_ + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
+                                    ) + gf_ + (v2_nh, offl) + wk_ + entry_rank + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
                                                                               hz))
             order = order[sel[order]]
             i = int(order[0])
@@ -5076,6 +5090,10 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if entry_times is not None:
+            self.last_info["entry_side"] = {"target": entry_target,
+                "model_contact_offset": int(entry_times[res.idx]) if 0 <= res.idx < N and entry_times[res.idx] <= T1 else None,
+                "press_now": bool(res.mask & B_ATTACK), "actual_hit": False}
         if rxl_ is not None:
             # SP12a: [safe rows late for a circle's exit, safe rows, the chosen row late]
             self.last_info["rx"] = [int(rxl_.sum()), int(safe.sum()),
