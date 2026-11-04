@@ -394,7 +394,7 @@ def transfer_motion_scene(mode):
     'anim':{'clip':'Dash' if mode==K.M_DASH else 'Sprint' if mode==K.M_SPRINT else 'Run'}},
     'ents':[], 'act':{'hf':{'latched':key,'desired':key,'pending':[0]*22,'age':[100]*22}}}
  for iid,x,st in [(7,12.,'Cast 2'),(8,48.,'Idle')]:
-  s['ents'].append({'iid':iid,'type_key':'Song Heavy Sentry','hp':100,'pos':[x,7.45],
+  s['ents'].append({'iid':iid,'type_key':'Song Heavy Sentry','hp':100,'pos':[x,7.45],'vel':[0.,0.],
     'fsms':[{'name':'Control','state':st,'t':.1}],
     'colliders':[{'name':'Song Heavy Sentry','enabled':True,'verts_world':[x-1.4,3.,x+1.9,3.,x+1.9,6.9,x-1.4,6.9]}]})
  S=K.initial_state(params,25.,4.568,vx=vel,mode=mode,ground=True)

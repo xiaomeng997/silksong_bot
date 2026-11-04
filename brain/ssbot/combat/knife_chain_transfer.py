@@ -64,11 +64,12 @@ class TransferPlan:
     entry_k:int
     press_k:object=None
     contact_frame:object=None
+    ended_reason:str|None=None
 
     @property
     def move(self):return MoveInstance(self.iid,self.fa,"RUNE_TRANSFER")
     def variables(self):
-        return {k:v for k,v in asdict(self).items() if k not in {"origin","entry_k","press_k","contact_frame"}}|{"cs":None}
+        return {k:v for k,v in asdict(self).items() if k not in {"origin","entry_k","press_k","contact_frame","ended_reason"}}|{"cs":None}
 
 
 @dataclass(frozen=True)
@@ -276,6 +277,16 @@ def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+        # This witness holds the observed body still. A moving/unknown body
+        # cannot license a fresh row; keep the existing approach instead. This
+        # is not a motion prediction or permission to rewrite an absolute row.
+        enemy=x.obs.e;velocity=enemy.get("vel")
+        controls=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
+        if (not isinstance(velocity,(list,tuple)) or len(velocity)!=2
+                or not all(type(v) in (int,float) and math.isfinite(v) for v in velocity)
+                or velocity[0]!=0. or len(controls)!=1
+                or not isinstance(controls[0].get("state"),str)
+                or not controls[0]["state"] or controls[0]["state"] in {"Walk","Evade Scuttle"}):return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
         row=press_now_row(x.obs.sim,body_box(x.obs.e),x.obs.F,left,x.v["side"])
         if row is not None:
@@ -411,7 +422,9 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     obs.sim=sim;obs.e=enemy;obs.hero=h
     obs.bounced=bool(variables.get("bounced"))
     mask=draft.eval_link(X(draft,draft.run,obs))
-    if mask is None:return (None,p,None,None)
+    if mask is None:
+        why=draft.done[-1].v.get("why") if draft.done else None
+        return (None,replace(p,ended_reason=why),None,None)
     row=draft.run.v.get("row")
     if row is not None:p=replace(p,press_k=k+row["press_F"]-state["f"],contact_frame=row["contact_frame"])
     path=model_path(sim,p,np.array([mask],np.int64),game)

@@ -499,7 +499,8 @@ class NativeManualAirChain(NativeChainB2):
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
                               **({"approach_only":True} if approach_only else {}))
         if made is None or made[0] is None:
-            if active:self._recover("rune transfer ended or target began a new move before real bounce",f)
+            if active:self._recover((made[1].ended_reason if made is not None else None)
+                                    or "rune transfer ended or target began a new move before real bounce",f)
             return None
         draft,plan,path,mask=made
         if plan.move in self._failed_hook_moves:return None
@@ -692,6 +693,20 @@ class NativeManualAirChain(NativeChainB2):
         return super()._abort_hook_dispatch(selected,**kwargs)
 
     def _recover(self,reason,frame):
+        source=self.commitment
+        if source is not None and source["move"].family=="RUNE_TRANSFER" and self._press is not None:
+            bound=self._transfer_target_moves.get(source["move"])
+            if bound is not None:
+                # A successful sent strike explicitly continued against this
+                # observed destination attack. Keep its liability alongside
+                # the original source, but do not ban a fresh counter to it.
+                target,ta=bound
+                origin=max(source.get("responsibility_origin",source["origin"]),target.antic_frame)
+                exposure=super()._failure_exposure(target,origin,frame,ta)
+                if self._actual_state is not None:exposure.observe(self._actual_state,game_time=self._clock)
+                self._failure_exposures.append(exposure)
+                self._note("b2_failure_exposure",frame=frame,exposure=exposure.as_dict(),
+                           source="sent rune-transfer strike against bound destination attack")
         ctx=getattr(self,"_wall_pressure",None)
         # A different action's recovery cannot end the old hammer's liability.
         # Retain only bookkeeping, never revive its Run or candidate permission.
