@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.118）：仍在w13。#259源审阻挡已接：abf钩后同拍交还漏失败暴露，原3326掉2HP不能算链无关；新f0a94ecc已最小补原责任暴露与身体高度门，两运行文件LF同259已测副本，Root209相关过/1skip。原局3304交还无恢复但保留责任，3326仍chain_related；待153仅生产绑定/条件闭合确认，不重复大审。原停止0bf不重跑，STATUS false/own_jobs空，无新P/game/gate；连跳未上线。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.119）：仍在w13。#260已核当前f0a94ecc三文件生产绑定/259责任与高度闭合（32端点过/1skip），源门已通过。正在补新hook3304完整_act有限性能输入（Task154仅E功能稿，P归Root独占），并已备新w13_hook_handoff_20261104T164109Z_f0a94ecc单局草稿：旧生命周期/六transport文件及发送方法未变，仅源/隔离路径/记账新绑定；175旧前置hash同。尚无真实gate/合同/新游戏，旧0bf不重开。STATUS false/own_jobs空；连跳仍未上线。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3998,3 +3998,13 @@ Task152增量审该干净端口，沿256/257父源，重点钩种类不被其他
 analysis/hook_bounce_port_20261104/liability_height保存SPEC、OPUS259_RECEIPT、SOURCE_BINDING/SOURCE_PACKET/source包和PORT_IDENTITY：两个运行文件git LF逐字节等于review152/patched_fix。有效red3fail10pass1skip（原3304暴露/3326归属/身体旁错误over三项）→同次209pass1skip/外来0。209是本轮相关集合，含新身体旁交回与实际消费者/归属探针，源码位置和源码字符串镜像断言未搬进验收，不与Opus211或原201累加。LIABILITY_REPLAY_RECEIPT及JUnit确认：3304普通交还且无b2_recovery，但新failed_frame3304暴露；原3326同一2HP为recovery_after_failure/chain_related=true，不ban本Move。只是原录制同世界的标签核对，不说新策略现场会掉血/无伤，发送前缀等回放桩边界保留。
 
 259其他项：在途绝对键/同Move/错目标/pending/真实hook不被其他adapter当DownSlash/旧press清理均审过；晚marker已到far_strike的理论缺口、near-miss责任重复但HP不双计仍单列，未称修过。Root未为非当前阻挡扩代码或新动作池。Task153只核已移植生产三文件对259固定副本的绑定与阻挡闭合，不重跑211/588/矩阵/P/game，最小回执；源审闭合后才重绑必要性能点与新工程。wake177，只写Sol信箱；三活动计划同步，STATUS false、RootE已结束，无新P/game/gate，旧0bf/AA/raw/STOP/Windows核心进程未动。
+
+### 7.119 260生产绑定已核收，源门闭合；只补新hook完整_act性能点，新单局草稿已准备【已处理 Opus #260】
+
+#260/review153五工件hash/bytes核同，32pass/1skip端点收据与BIND153一致。当前f0a三改动文件在git/sourcezip/SOURCE_BINDING/PORT_IDENTITY/259已测副本LF相同，其余brain同abf；Root当前707raw逐文件再核同。SOURCE_REVIEW260.json accepted=true，当前middle/fresh/hook/liability/height源门已闭合，不把未上线连跳或理论P3说成已实现/认证。259的P2归责遗漏关闭，高度已接，晚marker/far_strike与near-miss重复责任但HP不双计仍登记。
+
+Task154仅在opus/hook_act154备一个最小原0bf3304完整production policy→episode._act→before_send→framed null ACTION→sent功能/可测入口，E16–23 Idle不boost/P/game。新钩分支包括真实marker交权/外侧普通规划/失败责任记账，不能只计observe或propose；复用141壳。以真实3304 S0/HF/queued和已知原3275..3303 neutral前缀重建实际已发/受理/目标hit的同Move上下文，逐字段记来源，旧控制器3276已误退因此明确是有限条件起点，不冒充旧代码天然保Run或自然闭环。无未来STATE/预测hit，第一包后即止；真实support/forecast保留，不把短回放无forecast/queued0桩用作完整预算。Root以后才拿独占P，原13.1212ms仅历史已不同分支，不给新hook盖章，不扩大矩阵/重写测量协议。
+
+新草稿analysis/w13_hook_handoff_20261104T164109Z_f0a94ecc已备trial.py/run_unattended与原资源三组件、TRIAL_CONFIG_DRAFT/SOURCE_PACKET/TRANSPORT_BINDING/SCRIPT_PORT_RECEIPT/ENGINEERING_GATE_DRAFT/DRAFT_BINDING；对应sol/demos同名目录、真实gate与合同均不存在。脚本逆向替换本批名/source/phase后全文等实际全清0bf脚本，Launcher/worker/旧DEMO/Prefs/golden/registry清理路径未改；环境仅PROBE/BATCH/BUDGET三个隔离记账键变化，其余逐项旧配置，seed314168/7HP/HP<=6 realQ1首任何损血、death/Opt1/measure协议2/STOP/资源门原样。worker真正自己的input.stats仍须新局原件，不用旧输入回执。新source707packet当前同，旧175 evidence hash全核，当前六完整transport文件与0bf相同、B2 before_send/sent/from_env/abort和air对应发送方法AST同；observe/tactics改动依256/257/259/260源审，不称整B纯等价。
+
+DRAFT ready=false，P待154功能稿及Root独占实测，旧性能点只历史引用；accepted集合逐项列251..260的具体处置，254仅工件/不在线，259按260精确修闭合，不拿最大号掩盖阻挡。源/模型/配置/预算/脚本最终hash与只读实际清理/STOP/资源前置全过才写真实gate，计划先main后knife/TV再冻结执行HEAD至真清。用户Nov3无人值守授权有效、不再逐局问。wake178只请求154功能输入；STATUS false/Root无任务，无新P/game/合同，旧0bf/AA/raw/STOP/Windows核心进程不动。
