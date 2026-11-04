@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.117）：仍在w13。#258在途钩最小原型已核收并干净移植为abf09500，四运行文件LF与原型相同，Root201相关通过/1不适用skip，待152增量源审。原3276误退短序列现锁至3303、3304真实钩弹起交还且无误恢复；目标已移开时交回规划，不再盲发旧d22p22尾刀，不造下劈hit/accepted或无敌。旧偏好/新刀源审256/257已收；当前新源仍无P/game/gate。旧0bf停止局全清且不重跑，STATUS false/own_jobs空；连跳仍未上线。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.118）：仍在w13。#259源审阻挡已接：abf钩后同拍交还漏失败暴露，原3326掉2HP不能算链无关；新f0a94ecc已最小补原责任暴露与身体高度门，两运行文件LF同259已测副本，Root209相关过/1skip。原局3304交还无恢复但保留责任，3326仍chain_related；待153仅生产绑定/条件闭合确认，不重复大审。原停止0bf不重跑，STATUS false/own_jobs空，无新P/game/gate；连跳未上线。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3988,3 +3988,13 @@ Task150b仍正在opus/hook150/，Root不重复原型或提前移植在途工件�
 原0bf3274..3310短序列在Root当前树复核：3275实际见钩，至3303每拍锁住/neutral；3284/3298实际目标335476命中，3304bounce位新上升而counter0（旧3305视觉/速度描述不是这一marker首帧）。此刻hero中心28.815、目标身体32.218..35.811，已不在身体范围，普通handback且无新recovery/exposure/failedmove，_hit/_accepted仍空。queued0、无bomb/forecast是回放发送环境桩，相关帧没走外部步门，不能当闭环/真实输入/P或完整危险验收。新body上方over仅功能事务证据，仍待现场。
 
 Task152增量审该干净端口，沿256/257父源，重点钩种类不被其他adapter当下劈、原在途绝对键不改、post_context/旧press/watch交接及实际外部一步门/失败责任，少量事务与原短序列，不重跑588/矩阵/P/game。源审收齐后才按新源/模型/profile/脚本/预算重新绑定必要P与新工程，不复用旧0bf停止合同/旧现场输入回执。wake176，只写Sol信箱；STATUS false、RootE已结束，无新P/游戏/gate。旧AA/raw/STOP与Windows核心进程未改。
+
+### 7.118 #259钩后交还责任遗漏已最小修，原3326仍链相关；钩无无敌故加身体顶高度门【已处理 Opus #259，待153绑定确认】
+
+#259/review152十六工件hash/bytes全核同，独立审阅明确abf原样不通过。根因不是钩hit/marker伪造，而是把“控制交还”误当“跳越完成免责”：原3276恢复开暴露，原3326的335470 Slam2掉2HP记chain_related；abf3304off-body直接交回未开暴露，重放同一后续世界会变none/false，预算/统计归属偏向B。Root承认这项源审阻挡，不能用201通过或无恢复当完整验收通过；原abf和失败证据保留，无新游戏。
+
+新源f0a94ecc8b47a28b8197def2671cfd17c85053ee对abf仅vault_native、vault、既有hook功能事务测试。按259最小修原样移植：清post_context前暂存kind hook_bounce；同拍Run若结束，沿near-miss补钩相同原接口创建责任暴露并observe当前真STATE，映射搭档CC_JUMP_CAST、origin/ta不改，不加_failed_hook_moves/不进恢复。原责任持续到本招结束与失败后30帧较晚者，HP计数不减。钩弹起无pogo保护且external-only门略过目标自身，所以over额外需下一帧hero盒底>=当前身体顶，x原界不变；原下劈over不使用此guard。
+
+analysis/hook_bounce_port_20261104/liability_height保存SPEC、OPUS259_RECEIPT、SOURCE_BINDING/SOURCE_PACKET/source包和PORT_IDENTITY：两个运行文件git LF逐字节等于review152/patched_fix。有效red3fail10pass1skip（原3304暴露/3326归属/身体旁错误over三项）→同次209pass1skip/外来0。209是本轮相关集合，含新身体旁交回与实际消费者/归属探针，源码位置和源码字符串镜像断言未搬进验收，不与Opus211或原201累加。LIABILITY_REPLAY_RECEIPT及JUnit确认：3304普通交还且无b2_recovery，但新failed_frame3304暴露；原3326同一2HP为recovery_after_failure/chain_related=true，不ban本Move。只是原录制同世界的标签核对，不说新策略现场会掉血/无伤，发送前缀等回放桩边界保留。
+
+259其他项：在途绝对键/同Move/错目标/pending/真实hook不被其他adapter当DownSlash/旧press清理均审过；晚marker已到far_strike的理论缺口、near-miss责任重复但HP不双计仍单列，未称修过。Root未为非当前阻挡扩代码或新动作池。Task153只核已移植生产三文件对259固定副本的绑定与阻挡闭合，不重跑211/588/矩阵/P/game，最小回执；源审闭合后才重绑必要性能点与新工程。wake177，只写Sol信箱；三活动计划同步，STATUS false、RootE已结束，无新P/game/gate，旧0bf/AA/raw/STOP/Windows核心进程未动。
