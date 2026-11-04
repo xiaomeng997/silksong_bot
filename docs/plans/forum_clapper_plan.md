@@ -3868,3 +3868,17 @@ attempt.ingame_s9.82含退出，不当fight时长；协议2原窗口T5.982753124
 实际cleanup2026-11-04T11:07:21.169664Z成功，Root随后另核：Game42924、worker38516、WMI38724、实际协调器27984以及测量builder定位的场worker34648均已退出，golden正确/Prefs无差、旧DEMO hash和mtime恢复原值、registry instances/live空且restore_pending=false、无残留Game。worker_cleanup各资源pass，CLEANUP_RECEIPT存原数据，只有全核后STATUS=false；源码/HEAD在启动到真实全清期间未改，现才解除本单局冻结。所有原日志/失败/预算保留，434这份合同永不重开。
 
 Task138只独立核2534原三固定row→2539预计body/move否决→2540真hit/bounce→2589锤1；若日志缺contact，允许在2534当时S0/HF/已发prefix上复现一次原row，不新搜索/新闭环/全局模型。不得无条件豁免目标/锤子或把预计hit当真实回执；任何新修复仍要新源审/绑定/严格工程门。Root同期只核日志，不重复局部模型计算；同因未修不再开，旧AA/8局/原始录制/Windows核心进程不动。
+
+### 7.107 244确认接触后焦点边距误否；fc4161e2窄域条件命中检查待源审【无新实机/P门】
+
+已处理 Opus #244(Task138)：11工件hash/字节核同，2534原三固定行只有toward有四变体共同接触2540，按键与真实一致；2539预计contact仍2540，实际2540也真实命中弹起。否决的2541在旧[2538,2540]窗外，未带模型pogo保护、身体横向真实间隙.334u处于FOCUS_M .5栅格内，所以是接触后模型分支不一致造成的误判，不是刀打空、contact时序错或另一个owner。恢复先清父承诺，次拍真实bounce没有父上下文，继而普通规划开伞悬在正前方，2589被同一Slam锤1打2HP。旧434日志/失败/预算保持原样，不追改归因或补局。
+
+新源fc4161e25de8f38234076995ea0ed5315d314454采用A，仅修attacking检查，不增加recover后复活或新交接入口。要求同Move active承诺、成功sent原_press与真实_accepted、sent绑定目标Slam、contact在下一1..2帧；目标为已知静止Slam Antic，短窗加一个既有family采样帧仍在模型最短Antic结束前，当前只有标准body和无伤Slam/Wake传感器，没有已启或未知武器。未知/近转阶段/运动/真body重叠都走原严格路径。该family FRAME_S不是物理步编号，界限来自既有经验模型，不包装成游戏未来保证。
+
+只给check建EV_POGO条件命中分支，实际offer.path、绝对row、发键及clock不改；新flags可表示条件保护，但check_flags剥掉新预测INV、只保原实际已有保护，使其他owner/所有delayed/unknown在新物理轨迹上仍完整检查。_query原contact−2..contact前窗不动，仅在这个静止目标的postcontact预测保护帧、且英雄盒实际不碰body时，去掉其body/move栅格边距误否；不豁免真身体碰撞、不放过锤、不依赖未知noBounceCooldown去删危险。预计hit不建_hit/post_context，真实下一STATE的DownSlash+marker才按原begin交还，后续N2/miss/责任暴露不变。三文件为两运行加新测试，没有新动作搜索或共享物理模型修改。
+
+analysis/transfer_hit244_20261104保存原22例有效red6fail/16pass→green22pass；最终同一次575唯一过/外来0，含旧553不相加。接线例覆盖other owner、延迟/未知、锤、真实body重叠、未知伤害/clock、边界/缺绑定、无sent/accepted；并核原键、无预测receipt、真实下一hit+bounce才建post_context。中间夹具字段与提前拒绝计数问题只诊断，不当源码修复证据，初次结果保留。
+
+原2539真实S0/HF/前缀与原已选行只在当前生产helper复核一次：postcontact只保护2541的目标边距，新两拍盒对真实最大误差约.00000196u，命令/latched相同、无新增global INV，_hit/post_context仍None。原拒绝contact只是fixture，未重建动态RangeSupport或完整策略/完整_act，不能称所有危险或新闭环已认证。Task139增量源审只核三文件/22例及必要相邻，不重复大矩阵；新源707/261与源码包已绑，无SOURCE_REVIEW/P_ENABLE/新合同。旧side-band有限P未触发此分支，E误差/计时也不能顶替活跃分支P；待独立审与必要新预算/工程门后才可新局。
+
+STATUS false/own_jobs空、无游戏/P，旧434实际全清后才提交本源；原HP首损血/Q1/Opt1/资源/STOP/关键日志/真实清理与无人值守有界授权不变。旧AA/8局、原录制/停止局、五个用户aim与Windows核心进程均不动。
