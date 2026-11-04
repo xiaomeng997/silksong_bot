@@ -3531,3 +3531,13 @@ Root另只读复核：早上实机helper、现P入口和新草稿resource_guard�
 只读现场核：dwm2352约1.2228核、running、affinity未知；报告已明确这是CPU超过旧阈值，不再写成不明权限阻挡。svchost这拍没有触发门。analysis/resource_read_permission_20261103保存before/after、CHECKS、CHANGE_REPORT和READONLY_RESOURCE_REPORT；旧已拒包装/旧数据未改，新P wrapper另绑脚本hash/原823源审。新试车DRAFT_PREP已注明218审核的是原helper，现只有这项元数据差异，不再声称helper逐字节相同。218接收凭证自身不回写。
 
 当前资源排除提案仍未批准或启用；用户问能否绕权限不当作豁免任意高CPU。原负载条件还不满足，本次没起P或实机，STATUSfalse/ownjobs空，源码仍823。7.77接收项总数应为22（含704文件与11fixture两条合计），已更正文案，不影响hash结果。
+
+### 7.79 用户已确认修订资源门，当前空冲完整P点通过【源823不变；新单局启动终核中】
+
+用户在“取消仅凭dwm>.5核拒测、实际测bot完整tick/发键余量、通过自主单局w13”的三步计划后明确“那就接着弄吧”。Root已启用自有脚本的verified-core-background-v1：仅已核PID/名字/创建时间三者相同的dwm2352/svchost5432实例可记background，必须保留有限CPU数/同名字，known离线任务/游戏/未知或身份改变的原阻挡保持。Windows进程没有任何设置/结束操作；原负载门历史记录保留，bot耗时/输入停止/HP规则未放宽。10个纯夹具通过；这不是清空系统噪声的测量，记录正常Windows背景且不冒充idle-host。具体实现/授权在analysis/resource_background_approved_20261103，新helper/包装另绑hash，旧件不改。
+
+本次原子STATUS独占/等待5秒后资源门通过，dwm当拍约1.178核完整保留。新包装先E24–31/Idle预热，实际计时P0–15/High/Numba4/GetProcessInformation核EcoQoS关闭。3338完整_act13.8546ms，初态重建差0；3330..3337同Run串行各发0，3338当前实际S0/HF/prefix0发R+DASH到3340。9个framed ACTION逐个解包与目标/键/flags同；无脚本覆盖、目标未收到、foreign空、前后签名同。前8拍只是串行预备，不合并成p99分布。异步子33340/父44552全退，真实无残留，STATUSfalse。P_RECEIPT绑定结果/trace/原资源快照；这只过当前关键点，不保证未来排队/全部时域或实际命中。
+
+新单局仍源823/新批次、w13同原seed314168、不重开19bd旧局；700余运行资产逐字节绑定，启动/清理主体沿已核脚本。Root已把实际预热缓存路径交给新worker，避免游戏启动再冷编；除缓存路径和资源读取/分类元数据外，原控制参数、实际worker自己的input.stats门、HP6/Q1从7首损血、Opt1、真实开始/命中/弹起/责任与清理保持。run_unattended.py只控制自有协调器，30秒刷新STATUS，执行后保持exclusive等Root独立核清理；无Windows核心进程控制。ENGINEERING_GATE仍草稿readyfalse，trial尚未创建。
+
+Task113只终核这个资源门增量、P原件/9帧包和新启动草稿/协调器，禁止重复801/629/重新P。源审217与静态启动218已收，当前无新源码需要重开源审；终核后就建新合同并自主启动，不再等观看。原空钩模块未接运行入口，不称这局验证空钩或全套接近动作。无8局/正式样本或旧批替换。
