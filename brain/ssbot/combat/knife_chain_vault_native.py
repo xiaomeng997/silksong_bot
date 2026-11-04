@@ -293,6 +293,7 @@ def propose(native, planner, forecast, prefs):
     if queued is None or int(sim.prefix[0])!=queued:
         if active:native._recover("vault current queued prefix mismatch",f)
         return None
+    hook_end=None
     if active:
         saved=native.runner.run.v.get("_native_vault")
         if saved is None:native._recover("vault run identity missing",f);return None
@@ -300,6 +301,7 @@ def propose(native, planner, forecast, prefs):
         if native.post_context is not None:
             native._note("vault_real_bounce_exit",frame=f,move=asdict(move),kind=native.post_context.get("kind","downslash"))
             if native._hit is not None:native.runner.run.v["down_hit_f"]=native._hit
+            if native.post_context.get("kind")=="hook_bounce":hook_end=native.post_context
             native.post_context=native._post_seed=native._post_kind=None
         draft=logical_copy(native.runner)
         # #150b: only the same Move's SEEN Harpoon (a successful CLAW send, then the actual clip), still in
@@ -329,6 +331,14 @@ def propose(native, planner, forecast, prefs):
             return None  # No successful send/run: retain the opportunity and current owner.
         if native.commitment is not None:native._recover("vault table ended without real target bounce",f)
         else:
+            if hook_end is not None:
+                # #152: a hook bounce that ends the vault on its own tick (off the body, or any other same-tick end)
+                # never reached over: keep the vault failure HP responsibility, as the near-miss hook send does.
+                exposure=native._failure_exposure(move,hook_end.get("responsibility_origin",hook_end["origin"]),f,hook_end.get("ta"))
+                if native._actual_state is not None:exposure.observe(native._actual_state,game_time=native._clock)
+                native._failure_exposures.append(exposure)
+                native._note("b2_failure_exposure",frame=f,exposure=exposure.as_dict(),
+                             source="hook bounce ended the vault without over; failure responsibility kept")
             native._vault_completed.add(move);native.runner=draft
             native._note("vault_observed_handoff",frame=f,move=asdict(move))
         return None

@@ -325,14 +325,15 @@ def register(P):
         return x.obs.ground and b is not None and x.obs.f > b + 2
 
     @P.guard("vault_over_body", doc="her centre at the end of frame f + 1 within the observed body's x span widened by "
-                                    "her half width: where the down-slash bounce leaves her; a hook bounce starts over "
-                                    "only from here, re-checked from the actual body and hero (#150b)")
+                                    "her half width, with her box bottom at or above the body top: where the down-slash "
+                                    "bounce leaves her; a hook bounce (no pogo invulnerability) starts over only from "
+                                    "here, re-checked from the actual body and hero (#150b, #152)")
     def over_body(x):
         box = _body(x.obs.e)
         if box is None:
             return False
-        cx, _ = _centre_next(x)
-        return bool(box[0] - HX <= cx <= box[2] + HX)
+        cx, cy = _centre_next(x)
+        return bool(box[0] - HX <= cx <= box[2] + HX and cy - HY >= box[3])
 
     @P.gen("vault_air_slash", doc="once in the fall: the key toward the body + A for 2 frames (a press edge) when the "
                                   "attack is ready and both side polygons meet the observed body from her next state")

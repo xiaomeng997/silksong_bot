@@ -91,8 +91,16 @@ def test_lock_does_not_widen_other_watch_rules():
 
 def test_hook_bounce_over_the_body_starts_over():
     r = far_lock_runner(False, bounced=True)
-    step(r, scene(1004, target="Walk", clip="Harpoon Catch", accepting=True, bits=True, hx=30.0), accepting=True)
+    s = scene(1004, target="Walk", clip="Harpoon Catch", accepting=True, bits=True, hx=30.0)
+    s["hero"]["pos"], s["hero"]["box"] = [30.0, 11.5], [29.75, 10.5, 30.25, 12.58]   # above the body top (10)
+    step(r, s, accepting=True)
     assert r.run is not None and r.run.link == "over"
+
+
+def test_hook_bounce_beside_the_body_hands_back():
+    r = far_lock_runner(False, bounced=True)
+    step(r, scene(1004, target="Walk", clip="Harpoon Catch", accepting=True, bits=True, hx=30.0), accepting=True)
+    assert r.run is None and "real hook bounce off the body" in r.done[-1].v["why"]
 
 
 @pytest.mark.parametrize("hx", [35.0, 25.0])
