@@ -3844,3 +3844,13 @@ analysis/xvx_observation240_20261104/P_SERIAL_RECEIPT及p_serial_434a21b3/p_entr
 全新草稿C:\ssbot\data\m2_play\clapper_plan\analysis\w13_transfer_motion_20261104T105316Z_434a21b3只含当前绑定：trial/run_unattended相对已清a1d0仅新批路径/源/phase，逆向元数据归一AST同；模型261/运行707与版本锁同源，原100前置hash全同，新增当前源审/553/真实起点/P/239–242及旧局失败清理证据共125。accepted集合显式补55与238–242，new_blockers实核空，不用已接受最大编号掩盖旧项。TRANSPORT_BINDING按实际清理a1d0重新核六组件/B2整文件与air发送相关方法继承；准入/恢复责任/共享S0的策略变化由241/242独立审，不称完整B策略纯等价。
 
 对应sol/demos新目录尚不存在，无ENGINEERING_GATE.json/contract/PID/预算，旧a1d0消费局不重跑。Task137只终核新源/配置/脚本/资源/授权/有限P范围，不重复553/模型/P。仍仅一次W13、seed314168、同7HP基准、HP<=6 realQ1首次任何损血，death/Opt1/关键日志/STOP/资源/完整清理原门不变，无新空钩/扶墙/map2/8局或AA域。实际worker自己的input.stats/--measure现场回执必须真实核，静态/其它连接不能替代。旧measurement全窗missing-health false保留，确认退出后的缺HP诊断不修绿、不冒充有效AA。用户Nov3无人值守授权仍有效，待终核与真实前置齐后才另建新合同。
+
+### 7.105 243新434单局终核已收，脚本纯行尾已正；本节后冻结一个全新工程合同【未执行前不称实机成功】
+
+已处理 Opus #243(Task137)：5工件hash/字节及125前置、707运行资产当前再次核同，全部门控编号含239及55/238–242显式已接，终核无阻挡。243建议两数据脚本CRCRLF规范化；Root在真实门绑定前按字节替换成CRLF，保留前后hash/EOL243_RECEIPT；去模块文档字符串后的可执行AST完全不变，逆向路径/源/phase归一后含文档字符串的完整AST也与已审a1d0一致。没有修改控制器或生命周期逻辑，不需再为纯行尾重跑矩阵。正式门将绑定规范化后的脚本/协调器/资源组件与DRAFT_BINDING，不能沿用旧脚本hash。
+
+readonly PRE_FREEZE_CHECK核registry instances/live空且restore_pending=false、无游戏进程、golden正确/Prefs无差、旧DEMO hash和mtime原值、STOP/练习标记不存在；不做reconcile或操作Windows核心进程。当前434源/模型/553/242源审/新有限P及243绑定门均具备，用户Nov3“我不在家，你开实机不用等我”在有界范围继续有效，不再逐局求看场。计划本节先main→knife→tv提交，随后才生成真实ENGINEERING_GATE、prepare新合同；execution_head取那时真实HEAD，冻结直到本批真实清理完成，不再提交刀口HEAD。
+
+只运行sol/demos/w13_transfer_motion_20261104T105316Z_434a21b3一次，旧a1d0消费停止合同不重开、不替换/补局/8局；7HP基准、HP<=6 realQ1首次任何损血、death/Opt1/关键日志/资源/STOP严门不变。沿已审隐藏Win32_Process Create pythonw和自有Launcher，启动PENDING独占记录防双起；协调器在任何游戏前原子STATUS=true并30秒刷新、等待peer，真实worker自己的input.stats仍须现场存零delay/jitter/HF2/2/pending0。
+
+本次要按实际动作审移动目标等待后出刀、真实接受/命中/bounce及共享S0观测；新平砍与墙侧后续仅在实际发生时评，不把有限P或静态审当命中/全场成功保证。未接空钩/扶墙/MAP2域与模型局限不扩；measurement原窗口失败不修绿，若退出后缺HP仍另列诊断，不称AA样本。只有golden/Prefs/旧DEMO/registry、自有worker/game/场worker/协调器真实全清并Root独立核后STATUS=false，未知保留独占。
