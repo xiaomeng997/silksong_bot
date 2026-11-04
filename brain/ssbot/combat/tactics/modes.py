@@ -185,6 +185,7 @@ class GoalPrefs(TacticPrefs):
     #                                      one with no way out left rank after the rest, above the landed hits
     entry_attack: EntryAttack | None = None
     wall_pressure: WallPressure | None = None
+    clapper_choice: str | None = None   # explicit manual-B L2 winner; legacy target preferences yield to it
 
 
 class Tactics:

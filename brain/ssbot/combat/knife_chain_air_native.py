@@ -132,7 +132,9 @@ class NativeManualAirChain(NativeChainB2):
     def _observed_transfer_move(self,state,iid,family):
         """Use the existing causal antic history for a real move's identity."""
         phases={"CC_CAST":("Spell Antic",{"Spell Antic","Cast 1","Cast 2"}),
-                "CC_SLAM":("Slam Antic",set(transfer.AIR_ATTACK_STATES)|{"Slam Recover"})}
+                "CC_SLAM":("Slam Antic",set(transfer.AIR_ATTACK_STATES)|{"Slam Recover"}),
+                "CC_JUMP":("Jump Antic",{"Jump Antic","Jump Aim","Jump","Air","Charged?","Slam Effects?","Slam 2","Slam Recover"}),
+                "CC_JUMP_CAST":("Cast Slam Antic",{"Cast Slam Antic","Cast Slam Antic 2","Cast Jump","Jump Aim","Jump","Air","Charged?","Slam Effects?","Slam 2","Slam Recover"})}
         if family not in phases or not self._clock_known:return None
         primary,states=phases[family]
         source=next((e for e in transfer.clappers(state) if e["iid"]==iid),None)

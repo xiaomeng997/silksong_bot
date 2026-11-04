@@ -275,6 +275,8 @@ class L2Rules:
     #                                                       2.8 u below it) reaches a standing hero: mid, one up slash
     #                                                       and the clash; higher: two up slashes
     guard_reach_y: float = 8.2                            # ... higher than this a small jump's up slash does not reach it
+    clapper_scores: dict = field(default_factory=dict)    # explicit manual-B tactical maximum-score overrides
+    clapper_switch_cost: float = 5.0                     # compare preferences; never bypass action ownership
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "L2Rules":
@@ -295,6 +297,11 @@ class L2Rules:
             else:
                 v = float(v)
             setattr(out, k, v)
+        from .clapper_priority import DEFAULT_SCORES
+        if (set(out.clapper_scores) - DEFAULT_SCORES.keys()
+                or any(not math.isfinite(v) or v < 0 for v in out.clapper_scores.values())
+                or not math.isfinite(out.clapper_switch_cost) or out.clapper_switch_cost < 0):
+            raise ValueError("forum.l2: invalid manual Clapper tactical scores")
         return out
 
 
@@ -401,6 +408,7 @@ class GauntletTactics:
         self._jt: dict | None = None                      # SP14 TWO_JUMPTRAP: the held jumper's record
         self._jt_done: dict[int, float] = {}              # SP14: Clapper iid -> t_commit of the jump move it fired on
         self.jt_runs: list[dict] = []                     # SP14: the episode's records (stats)
+        self._clapper_priority = None                    # explicit manual-B event/region hold
 
     @property
     def xs(self):
@@ -419,6 +427,7 @@ class GauntletTactics:
         self.two_jh, self._jh_last = None, None
         self.two_pm, self._rl_sw = None, None
         self._wall_sw, self._wall_now = None, frozenset()
+        self._clapper_priority = None
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
@@ -437,6 +446,8 @@ class GauntletTactics:
         require the current WS hit+pogo pair or an already wall-side position.
         TerrainRef has no floor mesh: even a nonempty span needs native checks.
         """
+        if getattr(self, "_clapper_priority", None) is not None:
+            return None                                # the selected two-target scene owns this optional preference
         if (any(os.environ.get(k, "0").strip() != "1" for k in
                 ("SSBOT_FORUM_CHAIN_NATIVE", "SSBOT_FORUM_CHAIN_B2", "SSBOT_FORUM_CHAIN_AIR_MANUAL"))
                 or os.environ.get("SSBOT_FORUM_CHAIN_ARM", "") != "B"):
@@ -1428,6 +1439,12 @@ class GauntletTactics:
             self.t_commit.setdefault(s.iid, t)
         self._count_hits(ws, t)
         self.n += 1
+        # The manual-B preference has one target/stance decision. Legacy SP9b,
+        # room switches and later optional replacements do not re-write it.
+        from . import clapper_priority
+        if TWO_FOCUS and TWO_SPRINTSW and clapper_priority.enabled(fc):
+            return clapper_priority.decide(self, ws, fc, prefs, hx, t)
+        self._clapper_priority = None
         status = self._status(fc, t)
         if two_play.SPACE and TWO_FOCUS and status == "ok" and self.goal is not None:
             # SP9a S5: the other one entering its slam is an event (the slammer rule picks at once)

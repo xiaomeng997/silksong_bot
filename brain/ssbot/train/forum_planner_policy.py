@@ -1101,6 +1101,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                     self.tac.two_pm = self.two.pm_view()      # SP11b: L2 holds F in the herd
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
+            self.two.manual_focus = getattr(prefs, "clapper_choice", None) is not None
             # SP9a: the per-tick bookkeeping (Idle entries, jump take-offs, rune circles) and TWO_SPACE's stance
             if not pre_obs:
                 self.two.observe(f, s, ws.stamp.t_game_s)
@@ -1742,6 +1743,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
                "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
                "entry_attack": self.tac.last.get("entry_attack"),
+               "clapper_choices": self.tac.last.get("clapper_choices"),
+               "clapper_winner": self.tac.last.get("clapper_winner"),
+               "clapper_scene": self.tac.last.get("clapper_scene"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:

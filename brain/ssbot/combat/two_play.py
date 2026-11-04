@@ -917,6 +917,7 @@ class TwoPlay:
         self.reset()
 
     def reset(self) -> None:
+        self.manual_focus = False                       # explicit manual-B L2 scene owns target/stance preferences
         self.prev: dict = {}             # iid -> (Control state, state time) on the last tick
         self.entry: dict = {}            # iid -> re-entry (bool) for the Clappers entering Idle this tick
         self.idle: IdleRun | None = None
@@ -1080,7 +1081,7 @@ class TwoPlay:
                 self.last_part = "asw"
                 return am
             self._asw_prev = 0
-        if ESC and self.esc is not None:
+        if ESC and not self.manual_focus and self.esc is not None:
             em = self._esc_step(f, s, ground, accepting, sim, bombs)
             if em is not None:
                 self.last_part = "rt" if self.esc is not None and self.esc.mode == "pogo" else "esc"
@@ -1161,7 +1162,7 @@ class TwoPlay:
                                     d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
         if r is None or r.k_press is not None:
             return None
-        if ESC or ASW:
+        if (ESC or ASW) and not self.manual_focus:
             v = self.esc_view()
             if v is not None and iid in v["no_hit"]:
                 r.why = r.why or "esc"             # SP9b / SP9c: no hit on it now (the corner's wait / F's lock)
@@ -3414,6 +3415,8 @@ class TwoPlay:
 
     def space(self, prefs, s: dict, t: float, focus):
         """TWO_SPACE (module docstring b-d): the stance moved out of the forbidden spans."""
+        if self.manual_focus:
+            return prefs                                # physical hazards remain in the planner/native checks
         if SP11B:
             prefs = self.sp11b_prefs(prefs, s)
         if not SPACE:
