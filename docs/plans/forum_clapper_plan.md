@@ -3766,3 +3766,17 @@ a1d0ed48把entry_rank移到v2_nh（含场景值/角落/地图处境）、offl、
 analysis/entry_priority236_20261104为当前入口。七项有限回归直接核实际最终lexsort元组的field/SG8/V/硬危险高于早刀（同档仍早刀优先）、实际K_b=3安全成员/兄弟在有无首刀场景相同，以及真实install/sent→landing→新target recover的旧残余。旧6bb只把~V结果命名为exit_rank作无行为标识后5fail/2pass，修后7pass；最终同一次16文件503唯一通过/源外模块0，含旧496不相加。排序probe是实际键层级的两行测试，不冒充坏角落自然整局；无新P/游戏/实际接受/命中认证。
 
 本增量2运行+2测试LF与Git同；SOURCE_PACKET仍707实际资产含versions.lock，261模型与6bb raw全同、用户五aim只读不暂存。当前新source zip/236收据/FINAL_CHECKS与P_REPLAY_DRAFT已绑定，草稿ready=false/execute=false、没有SOURCE_REVIEW/P_ENABLE或实机gate。Task131只增量核四文件/七边界和必要503，待核后才新源完整_act计时与新单局合同，不复用6bb/eff/823旧凭证。Windows核心进程、资源门、输入配置/HP首损血/Q1/Opt1/真实清理均保持；计划仍main→knife→tv三份同步。
+
+### 7.99 237新源审已核收；a1d0完整_act有限串行P完成，新单局草稿待终核【无新实机gate】
+
+已处理 Opus #237(Task131)：MANIFEST文件hash/字节、503唯一用例逐项结果与Root final.xml全同，独立235四例仍过，4文件增量无P0–P3；707实际运行资产当前raw再次核同。SOURCE_REVIEW.json才是当前源审接受凭证，SOURCE_BINDING成文时pending字段不冒充当前状态。早刀只在原v2_nh完全相同等更高处境同档时决胜，效果主要来自A0..2变体和同quota成员内早查；不为增强先砍而自行分档场景分或降低后路优先级。
+
+按新源重绑41个原始输入：S0实际shape(86,1)、HF各(1,22)、前缀f+1等于原成功wire账本，参数/261模型同源；初绑定错误地假定扁平数组，在生成P_ENABLE/启动前被断言拦下，按原序列化嵌套结构修正，没有改控制输入。p_serial_a1d0ed48脚本只替换旧已审eff脚本的源/阶段/明确接收集合，反向元数据归一后AST相同；resource_background/approval/engineering_helpers字节同，原资源门通过，未操作dwm/svchost或其他用户/Opus进程。
+
+P_ENABLE为新的有限P许可，不能当实机许可。STATUS原子独占/等待peer后才跑，长预热核自有PID并刷新；实际P0–15/High/Numba4和GetProcessInformation EcoQoS关闭核同。新一次5个完整_act点：2765=16.5070、2766=15.8956、2767=15.7336、2768=13.3949、2769=13.9271ms；首四包target/mask/hold/flags同原，2769目标2771去掉DASH（2097156→2097152）首次不同即停，未消费其后STATE。记录原S0/HF/prefix与当前因果forecast，band前是shadow政策预热，不是从开局零分叉回放。不是2805已测、不是整条动作/整局p99/现场排队截止保证，也没有在这段实际踩到墙侧后续或首刀命中。旧eff16.8106点不替新源数字。
+
+analysis/entry_priority236_20261104/P_SERIAL_RECEIPT及p_serial_a1d0ed48原RESULT/trace为入口：0外来模块、0新签名、trace complete/overflow0/诊断complete，GC准备原样保留。PROBE_CLEAN true，自有P/场worker均结束，STATUS false、own_jobs空；未起游戏/改Prefs/registry。
+
+全新单局草稿analysis/w13_side_wall_20261104T085734Z_a1d0ed48：新trial.py/run_unattended/config/707packet/ENGINEERING_GATE_DRAFT/TRANSPORT_BINDING已备，实际sol/demos对应目录尚不存在，无ENGINEERING_GATE.json。Launcher/worker/cleanup生命周期与旧已审草稿反向元数据归一AST一致，只换批路径/源/phase；旧85前置hash仍核同并另加当前源审/503/P证据。transport继承精确分列：六模块raw同已清理823，B2整文件不同，before_send/sent/observe等方法AST同；air.sent有已审墙侧成功发送记账增量，不谎报整文件全同。新worker自己连接的input.stats零delay/jitter/HF2/2/pending0和--measure仍必须现场核。
+
+Task132只终核新单局绑定/现有授权与有限工程P范围，不重复503/模型大矩阵/P。准备严格单局HP7起、HP<=6 realQ1首次任何损血、死亡/Opt1/关键日志/STOP/资源/真实清理门不变，不重试/补局/开8局。新源已接墙缝落地普通平砍及每次真hit+bounce才一刀的rear分支，不放回旧扒墙；空钩未接域/P3不因本轮通过而放行。实际新动作与真实交还另按逐帧证据审，不用当前静态/P冒充现场成功。源a1d0不改，待终核才建全新合同；旧823/eff/6bb草稿和旧预算不重开。
