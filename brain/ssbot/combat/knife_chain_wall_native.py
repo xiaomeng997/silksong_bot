@@ -27,6 +27,22 @@ def _real_bounce(n, state, iid):
     return None
 
 
+def _source_finished(n, state, ctx):
+    """Confirmed source death or observed hammer-off; absence stays unknown."""
+    iid = ctx['intent'].target
+    for e in state.get('ents') or ():
+        hp = e.get('hp')
+        if e.get('iid') == iid and (e.get('is_dead') is True or
+                (type(hp) in (int, float) and np.isfinite(hp) and hp <= 0)):
+            return True
+    for ev in state.get('ev') or ():
+        d = ev.get('d') or {}
+        if (ev.get('k') == 'hit' and ev.get('f', state['f']) == state['f']
+                and d.get('dead') is True and d.get('ent', d.get('iid')) == iid):
+            return True
+    return not T.bounce_tail_pending(state, ctx['goal'], n._clock)
+
+
 def _clear_transaction(n):
     # Preserve actual receipts, HoldFilter and queued commands for the next owner.
     n.commitment = n.post_context = n._post_seed = n._post_kind = None
@@ -73,7 +89,7 @@ def prepare_goal(n, state, prefs, *, handoff):
     elif ctx.get('yielded'):
         # This is source-hazard bookkeeping, not a keyboard owner. It must not
         # clear a different new target's commitment when the old hammer ends.
-        if not T.bounce_tail_pending(state, ctx['goal'], n._clock):
+        if _source_finished(n, state, ctx):
             n._transfer_finished.add((ctx['goal'].caster, ctx['goal'].cast_fa))
             n._wall_pressure = None
             n._note('wall_pressure_residual_off', frame=state['f'], target=ctx['intent'].target)
@@ -108,7 +124,7 @@ def prepare_goal(n, state, prefs, *, handoff):
     # A new L2 target wins at the actual old hammer-off boundary, never by
     # dropping the old source's residual hazard while a strike is in flight.
     if (n.commitment is None and getattr(prefs, 'target', None) != ctx['intent'].target
-            and not T.bounce_tail_pending(state, ctx['goal'], n._clock)):
+            and _source_finished(n, state, ctx)):
         _finish(n, 'wall-side residual hammer off: tactical target handoff')
         return True
     if (pressure is not None and pressure.target == ctx['intent'].target
@@ -253,7 +269,7 @@ def propose(n, state, game, sim, forecast, prefs, ground):
                 ctx['landing'] = True
                 n._note('wall_pressure_ground_handoff', frame=state['f'], target=iid,
                         floor_span=span, actual_ground=True, next='ordinary side-slash rows')
-            if not T.bounce_tail_pending(state, ctx['goal'], game):
+            if _source_finished(n, state, ctx):
                 _finish(n, 'wall-side ground slash handoff after residual hammer off')
             return None
         if proposal.press_frame is not None and n._press is None and state['f']+2 > proposal.press_frame:

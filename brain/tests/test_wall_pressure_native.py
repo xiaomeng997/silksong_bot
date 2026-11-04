@@ -343,3 +343,27 @@ def test_known_raw_slam_cannot_use_another_trackers_clock(monkeypatch):
     fc.rs.trk.now[7][2].t0=10.
     assert WN.propose(n,s,1.,sim,fc,p,False) is None
     assert n._wall_pressure is None and n._failure_exposures
+
+
+@pytest.mark.parametrize('proof',['entity','hit'])
+def test_confirmed_source_death_releases_residual_but_not_new_target_commitment(monkeypatch,proof):
+    n,s,sim,fc,p,_=offer_fixture(monkeypatch)
+    p.target=8
+    assert not WN.prepare_goal(n,s,p,handoff=True)
+    new={'move':MoveInstance(8,1001,'CC_SLAM'),'origin':1001}
+    n.commitment=new
+    monkeypatch.setattr(WN.T,'bounce_tail_pending',lambda *a:True)
+    if proof=='entity':s['ents'][0]['is_dead']=True
+    else:s['ev']=[{'k':'hit','f':1000,'d':{'ent':7,'src':'DownSlash','dead':True}}]
+    assert not WN.prepare_goal(n,s,p,handoff=True)
+    assert n._wall_pressure is None and n.commitment is new
+
+
+def test_missing_source_is_not_a_fabricated_death_boundary(monkeypatch):
+    n,s,sim,fc,p,_=offer_fixture(monkeypatch)
+    p.target=8
+    assert not WN.prepare_goal(n,s,p,handoff=True)
+    s['ents']=[e for e in s['ents'] if e['iid']!=7];s['ev']=[]
+    monkeypatch.setattr(WN.T,'bounce_tail_pending',lambda *a:True)
+    assert not WN.prepare_goal(n,s,p,handoff=True)
+    assert n._wall_pressure is not None and n.residual_context() is not None
