@@ -4108,3 +4108,13 @@ analysis/target_priority_fix266_20261104/p_switch269/保留两份输入/脚本/r
 Root没有拿68f旧P直接签新源：以新68f停止局原点2609输入和原Task160壳，在当前e390做唯一新点P，原点前影子policy/真实STATE与已发prefix保留、首新包即停。实际保留335470/keep和既有SWITCH stomp目标，出包2611/MOVE R（旧包neutral），不喂新包后STATE；完整trace tick16.5231ms、_act16.4944ms、L2_decide0.666700ms，含只读分析记录，绑定提前返回；签名148前后同、外来0。这个点不测新source历史扫描，也不是分布/全场预算/真实输入接受，16.52贴近一帧不能说有富余。原独占/暂停/资源门未减。自有P与场进程逐PID/create真消失，golden/Prefs/DEMO/registry/无游戏全部独立核后false，证据analysis/takeoff_retarget269_20261104/p_e390818a/2609/。
 
 准备新的analysis/w13_departed_focus_20261104T211924Z_e390818a/单局，停止的68f合同/原始失败/NO_RETRY都不动。源e390/模型708/脚本/配置/当前有限P和270审阅新绑定，实际生命周期反向替换source/namespace与已清理68f脚本全文同，原资源三组件原字节。仍只新工程一局w13/seed314168/7HP/首任意损失真实Q1(HP≤6)，无重试/补局/8局；--measure及实际worker本连接零delay/jitter/HF2/2/pending0、原死亡/期望键/Opt1/缺日志/STOP/真实清理保持。计划先main、knife/TV同步后才写真实gate/contract、冻结当前knifeHEAD并无人值守运行。新局要采集自有完整PID/create树，避免上次场子PID未单留的证据限制。没有宣称已修掉2761或已证明新空中链。
+
+### 7.129 e390新单局已首损停止/真实清理，外侧返中间意图未落成接刀动作；仅诊断既有路径，不继续开局
+
+实际单局w13_departed_focus_20261104T211924Z_e390818a，源e390/冻HEAD613890d4；worker57168本连接input.stats真零delay/jitter、HF2/2、pending0，--measure开启。3321首次本体接触335476/Control Idle，7→5/2HP，3338首真实Q1退出；无死亡。attempt21.88s与正式window T18.069573s分开。配置/trace/window complete、unresolved空，但完整audit仍false：3556起缺hero HP，均在3338退出之后；原失败保留、NO_RETRY，不补局。新局自然轨迹不同，不把生存时长差或2907换目标保持当旧2608修复的配对因果证明。
+
+原生链实际有2907 vault_idle.far承诺，2921 Harpoon命中335476、2940真实hook bounce回执，但没有DownSlash press/hit/越头；按原守卫交还且保留失败责任，2956新换踩因335470外部危险阻挡恢复。不能把钩命中弹起当下劈成功。随后3070 near切到335470；3272该焦点SpellAntic，另一335476从左走近。3280段英雄在两怪右侧上空，L2 flip仍指远侧焦点335470、stance在另一怪后方，entry_attack一直None，普通行在3318已forced/无安全行，3321落地贴到近处待机335476本体掉血。是否是flip选择对象/动作层接线/模型预报问题待有限定位，先不擅自扩规则或时序网格。
+
+Launcher21:23:04Z清理；Root21:23:44Z以运行时已留的七PID/create_time（含场worker50844）逐项核真退出、bootstrap32328已无、无残留owned子进程/游戏，registry空restore_pendingfalse、golden/Prefs/DEMO hash+mtime不变，才STATUSfalse。预备阶段dict变量遮蔽builtin next且Shell未按Python失败阻止后续启动，造成一次无gate/合同目录的协调器错误；当时无游戏/预算，原错误及无游戏清理收据保留，修正变量并分开依赖步骤后才建立这局唯一真实合同/游戏，不称重跑。
+
+Task162仅现有原始STATE/目标日志/两处接口诊断：为何外侧flip把站位放到被近怪挡住的远焦点后、为何stomp意图没有EntryAttack/刀口接管，以及3310–3321原始安全/身体支持。源e390未再改，270独立源审仍有效，原P窄口径不变；新实机门关，无下一批/补局/8局。
