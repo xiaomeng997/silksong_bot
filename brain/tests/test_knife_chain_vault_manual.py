@@ -59,8 +59,7 @@ def test_hook_without_its_observed_requirements_is_not_offered(change):
     assert manual_entries(n,raw,sim,ctx)==[]
 
 
-@pytest.mark.parametrize("case", ["left", "right", "policy_gate", "side", "not_ready", "other_source", "other_target"])
-def test_known_empty_vault_does_not_mask_a_matching_explicit_switch_stomp(case,monkeypatch):
+def _switch_routing_scene(case,monkeypatch):
     from ssbot.combat import knife_chain_vault_native as VN
     from ssbot.combat.knife_chain_transfer import TransferGoal
     from ssbot.combat.knife_chain_commitment import MoveInstance
@@ -85,10 +84,32 @@ def test_known_empty_vault_does_not_mask_a_matching_explicit_switch_stomp(case,m
     if case=="policy_gate":n.policy_gate_reason="critical owner"
     delegated=[];marker=object()
     monkeypatch.setattr(n,"_transfer_offer",lambda *args:delegated.append(args) or marker)
+    return n,raw,sim,prefs,delegated,marker
+
+
+@pytest.mark.parametrize("case", ["left", "right", "policy_gate", "side", "not_ready", "other_source", "other_target"])
+def test_known_empty_vault_does_not_mask_a_matching_explicit_switch_stomp(case,monkeypatch):
+    n,raw,sim,prefs,delegated,marker=_switch_routing_scene(case,monkeypatch)
     out=n._propose(NS(),None,sim.start,sim.hold,sim.prefix,NS(),prefs,None)
     expected=case in {"left","right","side"}  # existing side approach already routes before vault
     assert (out is marker)==expected and bool(delegated)==expected
     assert n.runner.run is None and n.commitment is None  # no send or fake execution
+
+
+@pytest.mark.parametrize("kind", ["side","stomp"])
+@pytest.mark.parametrize("phase", ["over","fall","ground"])
+def test_active_vault_tail_keeps_keys_after_bounce_released_commitment(kind,phase,monkeypatch):
+    from ssbot.combat import knife_chain_vault_native as VN
+    from ssbot.combat.knife_chain_eval import Run
+    n,raw,sim,prefs,delegated,marker=_switch_routing_scene("right",monkeypatch)
+    prefs.entry_attack=replace(prefs.entry_attack,kind=kind)
+    active=Run("vault_idle",phase,{"iid":prefs.target,"ta":9.7,"bounced":True,"over_dir":1})
+    n.runner.run=active
+    assert n.commitment is None and n.post_context is None
+    vault_marker=object();monkeypatch.setattr(VN,"propose",lambda *args:vault_marker)
+    out=n._propose(NS(),None,sim.start,sim.hold,sim.prefix,NS(),prefs,None)
+    assert out is vault_marker and not delegated
+    assert n.runner.run is active  # route only: no new Run, send, hit or handoff invented
 
 
 def hook_transaction():

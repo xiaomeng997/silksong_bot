@@ -339,7 +339,7 @@ class NativeManualAirChain(NativeChainB2):
                 and pressure.target==getattr(prefs,"target",None) and pressure.kind=="side"):
             return None  # L2's wall-gap ground slash must not become a fresh jump/vault
         entry=getattr(prefs,"entry_attack",None)
-        if (self.commitment is None and self.post_context is None and entry is not None
+        if (self.runner.run is None and self.commitment is None and self.post_context is None and entry is not None
                 and entry.target==getattr(prefs,"target",None) and entry.kind in {"side","stomp"}):
             if (self._transfer_ready and self._context is not None and self._transfer_goal is not None
                     and self._transfer_goal.source_kind=="SWITCH"):
