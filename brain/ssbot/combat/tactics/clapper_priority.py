@@ -101,7 +101,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     from .gauntlet import RUSH, TWO_SLAM_RANGE_U, TWO_WALL_BAND_U
     subjects = [s for s in fc.subjects if s.alive and s.in_play and s.pos is not None]
     mem = tac._clapper_priority
-    if mem is None: mem = tac._clapper_priority = {"seen": {}, "intercept": None, "region": None}
+    if mem is None: mem = tac._clapper_priority = {"seen": {}, "intercept": None, "departed": None, "region": None}
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
     seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
@@ -114,6 +114,11 @@ def decide(tac, ws, fc, prefs, hx, t):
         if (held is None or (held.family in JUMPS and tac.t_commit.get(held.iid) != hold[1])
                 or (held.family not in JUMPS and not (held.iid in tac.rune and t <= tac.rune[held.iid][3]))):
             mem["intercept"] = hold = None
+    departed = mem["departed"]
+    if departed is not None:
+        leaving = next((s for s in subjects if s.iid == departed[0]), None)
+        if leaving is None or leaving.family not in JUMPS or tac.t_commit.get(leaving.iid) != departed[1]:
+            mem["departed"] = departed = None
     changed = seen != mem["seen"] or region != mem["region"]
     if keep is None or changed or tac.n % tac.rules.period == 0:
         cands = tac.candidates(ws, fc, hx, None if keep is None else keep.iid)
@@ -140,7 +145,7 @@ def decide(tac, ws, fc, prefs, hx, t):
                     and (hx - origin) * front > 0)
         if hold is not None:
             offer("hold", next(s for s in subjects if s.iid == hold[0]))
-        elif rear:
+        elif rear and departed != (other.iid, tac.t_commit.get(other.iid)):
             offer("intercept", other)
         if keep is not None:
             previous = mem["seen"].get(other.iid)
@@ -168,6 +173,10 @@ def decide(tac, ws, fc, prefs, hx, t):
         target = next(s for s in subjects if s.iid == winner["target"])
         reason = winner["rule"]
         mem["winner"] = reason
+        if reason == "takeoff":
+            # The focus we intentionally left is still the same jump, even
+            # when it becomes the nonfocus behind us on the following tick.
+            mem["departed"] = (keep.iid, tac.t_commit.get(keep.iid))
         if reason == "intercept": mem["intercept"] = (target.iid, tac.t_commit.get(target.iid))
         elif hold is not None and target.iid != hold[0]: mem["intercept"] = None
         tac.last["clapper_choices"] = choices

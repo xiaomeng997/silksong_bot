@@ -68,6 +68,43 @@ def test_actual_takeoff_chooses_destination_contact_from_ground_window(covered, 
     assert out.hit_kw[8][0 if kind == "side" else 3] > 0
 
 
+@pytest.mark.parametrize("family", [G.CC_JUMP, G.CC_JUMP_CAST])
+@pytest.mark.parametrize("covered", [False, True])
+def test_takeoff_does_not_reintercept_the_same_departed_focus(family, covered):
+    # Live 68f: takeoff switched away at2608, rear-intercept undid it at2609.
+    tac, ws, fc = scene(); step(tac, ws, fc)
+    change(fc, 7, family=family, state="Jump Antic", committed=True)
+    step(tac, ws, fc); tac.t_commit[7] = 1.
+    if covered: fc.default = 0.
+    change(fc, 7, state="Jump")
+    assert step(tac, ws, fc).target == 8
+    change(fc, 7, state="Air")
+    for _ in range(tac.rules.period * 2):
+        assert step(tac, ws, fc).target == 8
+        assert not any(c["rule"] == "intercept" for c in tac.last.get("clapper_choices") or ())
+
+
+@pytest.mark.parametrize("next_event", ["new_jump", "near_attack"])
+def test_departed_focus_suppression_ends_at_a_new_move(next_event):
+    tac, ws, fc = scene(); step(tac, ws, fc)
+    change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
+    step(tac, ws, fc); tac.t_commit[7] = 1.
+    change(fc, 7, state="Jump")
+    assert step(tac, ws, fc).target == 8
+    change(fc, 7, state="Air")
+    assert step(tac, ws, fc).target == 8
+    if next_event == "new_jump":
+        tac.t_commit[7] = 2.
+        assert step(tac, ws, fc).target == 7
+        assert tac.last["clapper_winner"]["rule"] == "intercept"
+    else:
+        change(fc, 7, family=G.CC_IDLE, state="Idle", committed=False)
+        step(tac, ws, fc)
+        change(fc, 7, family=G.CC_SLAM, state="Slam Antic", committed=True)
+        assert step(tac, ws, fc).target == 7
+        assert tac.last["clapper_winner"]["rule"] == "near"
+
+
 def test_no_micro_room_switch_without_a_new_event():
     tac, ws, fc = scene(); assert step(tac, ws, fc).target == 7
     change(fc, 8, pos=(36., 5.))
