@@ -59,6 +59,38 @@ def test_hook_without_its_observed_requirements_is_not_offered(change):
     assert manual_entries(n,raw,sim,ctx)==[]
 
 
+@pytest.mark.parametrize("case", ["left", "right", "policy_gate", "side", "not_ready", "other_source", "other_target"])
+def test_known_empty_vault_does_not_mask_a_matching_explicit_switch_stomp(case,monkeypatch):
+    from ssbot.combat import knife_chain_vault_native as VN
+    from ssbot.combat.knife_chain_transfer import TransferGoal
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    from ssbot.combat.tactics.modes import EntryAttack,GoalPrefs
+    from tests.test_knife_chain_vault_nominal import GAME0,BUDDY,TARGET
+    direction=-1 if case=="left" else 1
+    n,raw,sim,ctx=entry_scene(direction,12.)
+    n.reset(0,start_frame=sim.f)
+    raw["act"].update(target=sim.f,applied=sim.f,mask=0)
+    n._receipts[sim.f+1]=int(sim.prefix[0]);n.begin(raw)
+    n.prepare(raw,ground=True,accepting=True,sim=sim,bombs=np.zeros((0,6)))
+    ctx.update(buddy_t0=3.,buddy_ta=GAME0-.2,buddy_lock_until=GAME0+.6)
+    monkeypatch.setattr(VN,"locked_context",lambda *a:ctx)
+    # These are the ready/bound fields captured at the real 2609 failure.
+    # This unit checks routing only; the full _act probe checks their creation.
+    n._transfer_ready=case!="not_ready"
+    n._transfer_goal=TransferGoal(TARGET,BUDDY,sim.f,GAME0-.2,
+        "CAST" if case=="other_source" else "SWITCH",MoveInstance(BUDDY,sim.f-12,"CC_JUMP_CAST"))
+    entry=EntryAttack(TARGET+1 if case=="other_target" else TARGET,
+                      "side" if case=="side" else "stomp",BUDDY,"CC_JUMP_CAST",9.,GAME0)
+    prefs=GoalPrefs(mode="RUSH",stance_x=40.,weights={},target=TARGET,entry_attack=entry)
+    if case=="policy_gate":n.policy_gate_reason="critical owner"
+    delegated=[];marker=object()
+    monkeypatch.setattr(n,"_transfer_offer",lambda *args:delegated.append(args) or marker)
+    out=n._propose(NS(),None,sim.start,sim.hold,sim.prefix,NS(),prefs,None)
+    expected=case in {"left","right","side"}  # existing side approach already routes before vault
+    assert (out is marker)==expected and bool(delegated)==expected
+    assert n.runner.run is None and n.commitment is None  # no send or fake execution
+
+
 def hook_transaction():
     from tests.test_knife_chain_vault_native import vault_transaction
     n,o=vault_transaction()

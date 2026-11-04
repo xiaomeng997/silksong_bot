@@ -340,12 +340,16 @@ class NativeManualAirChain(NativeChainB2):
             return None  # L2's wall-gap ground slash must not become a fresh jump/vault
         entry=getattr(prefs,"entry_attack",None)
         if (self.commitment is None and self.post_context is None and entry is not None
-                and entry.target==getattr(prefs,"target",None) and entry.kind=="side"):
+                and entry.target==getattr(prefs,"target",None) and entry.kind in {"side","stomp"}):
             if (self._transfer_ready and self._context is not None and self._transfer_goal is not None
                     and self._transfer_goal.source_kind=="SWITCH"):
+                # The explicit, observed SWITCH entry owns its first contact.
+                # Optional Idle-vault detection must not swallow it by returning
+                # no recipe. Active owners and every transfer check still apply.
                 tick,sim,_,_=self._context
                 return self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
-            return None  # ordinary side-slash rows after approach, never a fresh stomp/vault
+            if entry.kind=="side":
+                return None  # ordinary side-slash rows after approach, never a fresh stomp/vault
         vault_active=self.runner.run is not None and self.runner.run.chain=="vault_idle"
         if self.vault_enabled and (vault_active or (self._vault_ready and self.commitment is None and self.post_context is None)):
             from .knife_chain_vault_native import propose as propose_vault
