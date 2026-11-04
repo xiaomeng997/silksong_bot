@@ -3804,3 +3804,15 @@ Task132只终核新单局绑定/现有授权与有限工程P范围，不重复50
 实际cleanup2026-11-04T09:20:09.909726Z成功，Root随后重核：worker34052、Game42152、WMI49840、协调器51616以及从实际测量builder.worker定位的场worker43520均已退出；golden正确/Prefs无差、旧DEMO hash与mtime原样恢复、registry instances/live空且restore_pending=false、无残留Game。CLEANUP_RECEIPT/ROOT_EVENT_AUDIT/MEASUREMENT_AUDIT/EXIT_HEALTH_DIAGNOSTIC在本analysis目录，只有全清后STATUS=false；未知不提前清独占。原始记录/停止局/预算均保留，不替换、不补局、不重开这个合同。
 
 Task133已派独立最小事件审：只核2778→2837/2838漏刀→2850恢复→2894锤1的原计划/实际输入/目标时钟及后续入口，不重跑大矩阵/P/游戏。Root事实已收，精确模型/准入原因尚未核定，不提前承诺修法；同因未修不再开新局。源a1d0未在此轮改动，旧wf/AA/旧8局及未接空钩域不动。
+
+### 7.102 239已核因果：移动目标被静止身体见证误准入；402d96a0最小修复待独立审【旧局不重跑，无新实机门】
+
+已处理 Opus #239(Task133)：trial_a1d0/MANIFEST的9文件hash/字节核同，只读原STATE/日志与a1d0快照几何，不是新roll/回放。2834选择release方向出刀行，D@2836、D+A@2837–2839与实际applied/HF一致，2838真实DownSlashAlt接受；从Sprint Air滚入的名义英雄盒与实际至2837差<.001u。准入却把Evade Scuttle目标(-15u/s)冻住，仅press+9末帧四变体擦边相交、最差重叠.022u。实际目标后撤且2839转Slam Antic缩身，最后有效窗横向已差1.334–1.897u，没有hit。不是发键时序错，也不是旧CAST阻止新Slam入口：2850旧Run实际transfer_missed结束后，英雄自己的下劈/冷却、过低高度和后来过晚前摇使entry_context持续不成立；普通规划42/44拍forced，后来向目标冲刺、持J开伞，在2894受锤1。原runtime归因和测量全窗失败保留，不改原件。
+
+运行源402d96a0d17eb7d3c1a8718c5874afa3c482f285只2运行+2测试：fresh transfer_stomp_plan在roll前核实际vel完整有限且vx=0、唯一已知Control非Walk/Evade。移动/未知继续原接近或滑行，不发基于静止身体的新刀；缺vel不补0。已选绝对strike不改，原三row/名义时序/现步危险/N2/dispatch门不减，无新增动作搜索或全局模型变更。静止目标的未来姿态仍是有限经验假设，不把这个门当运动/命中保证。旧toy目标只显式补已知静止vel，未知/NaN/bool/字符串/非零及Walk/Evade负例分别核。
+
+propose将实际结束的done.why放在非执行ended_reason，_transfer_offer据此记miss/landed等真实原因，不再用通用串掩盖。本次失败责任口径明确：已成功发刀、在同一transfer承诺中实际sent并绑定的目标Slam，恢复时与CAST源并列保留责任，直到目标本招实际结束和失败后30帧较晚；不会给新Slam添加禁重试、不会挡新的有效counter入口。无sent刀/无实际绑定不造第二份，已无承诺重复恢复不双计；原局chain_related=false只作历史原始事实保留，新规则不伪称当时已执行。
+
+analysis/transfer_motion239_20261104保存239收据、新源707packet/261模型绑定/源码zip、red12fail+7pass→green19pass；最终同一次17文件522唯一通过、外来模块0，包含原503不相加，E24–31 Idle已结束。旧503/1360等不重跑大矩阵，无P/游戏/新合同。Task135增量独立审待核；Task134另核从已在DownSlash的观测起算两拍横移少算.38/.68u，原型只在Opus自己目录，不碰生产或共享HERO2/AA。402修复没有解决这个独立当前观察问题，待其最小证据再合，不因本次回归开新局。
+
+STATUS false与own_jobs空是旧局实际全清、此轮只有E非计时检查的事实；原HP首损血/Q1/Opt1/输入配置/资源/STOP/真实清理均保持。消费a1d0合同、原始记录、窗口missing-health失败、冻结AA/8局及五个用户aim文件不改。下一次仍要新源独立审和必要绑定/工程门，不拿旧a1d0或此通知放行。
