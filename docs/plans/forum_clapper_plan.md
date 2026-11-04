@@ -3816,3 +3816,17 @@ propose将实际结束的done.why放在非执行ended_reason，_transfer_offer�
 analysis/transfer_motion239_20261104保存239收据、新源707packet/261模型绑定/源码zip、red12fail+7pass→green19pass；最终同一次17文件522唯一通过、外来模块0，包含原503不相加，E24–31 Idle已结束。旧503/1360等不重跑大矩阵，无P/游戏/新合同。Task135增量独立审待核；Task134另核从已在DownSlash的观测起算两拍横移少算.38/.68u，原型只在Opus自己目录，不碰生产或共享HERO2/AA。402修复没有解决这个独立当前观察问题，待其最小证据再合，不因本次回归开新局。
 
 STATUS false与own_jobs空是旧局实际全清、此轮只有E非计时检查的事实；原HP首损血/Q1/Opt1/输入配置/资源/STOP/真实清理均保持。消费a1d0合同、原始记录、窗口missing-health失败、冻结AA/8局及五个用户aim文件不改。下一次仍要新源独立审和必要绑定/工程门，不拿旧a1d0或此通知放行。
+
+### 7.103 240观测横移漏项已局部移植434a21b3；241已接402源审【当前新源审待核，无P/实机gate】
+
+已处理 Opus #240(Task134)：9个原型文件hash/字节核同，确认已在DownSlash的S0缺XVX，使无方向两拍x被冻住；从Sprint Air滚入的拍会自行生成XVX，所以此前几拍准。其14个下劈起点与17反例仅同一实际局、原参数/地形/真实S0/HF/prefix上的有限比较，后续STATE只算误差，不当改路后预测，也不是闭环命中或全模型认证。普通空中冲刺自然结束不是Attack Cancel，不能看到旧Sprint就补速度。
+
+已处理 Opus #241(Task135)：11文件hash/字节核同，402源码包/707实际资产/261模型、119新例加相邻用例的集合与结果、19例有效red12败7过、14独立probe均核同；SOURCE_REVIEW在transfer_motion239_20261104接受402。三局5116个Clapper帧上静止状态vx精确0、Walk/Evade/Slam前冲非零，只能支持当前零速度门没有该数据浮点误拦。Slam2的vy可能非零而当前门只核vx，保留为低优先静止身体见证限制；没有用其记录悄悄扩大本轮功能。241不覆盖后面的434观测增量。
+
+运行源434a21b31953300daf32c508a0026b4c52c93248仅在ForumRows恢复已有物理行：H2_SPR_ATK开启、连续有效STATE f（非物理步编号）、上一拍空中Sprint phase0/1后出现NORMAL新攻击，随后保持同朝向/离地/不贴墙/无其他横向源，才记录来源。gap/duplicate/未知/load/转身/墙/落地/其他mode/速度归零清资格；只有f−1无方向且当前真实vx可见时写XVX=current vx、XVXD=0沿既有衰减，按方向不猜隐藏值，不从旧冲刺速度外推。fs0无物理步时仍按实际观测值，避免再衰减一次。batch补f/valid/load和recoilFrozen输入，同StateTracker规则；参数、积分器、链表和候选搜索均未动。S0同时给普通规划和B2，不能称只影响链的私有优化，两臂共用新观测修复，冻结AA不改。
+
+analysis/xvx_observation240_20261104：有效red用明确HERO2 on/air sprint夹具，对402原ForumRows是9fail/18pass，green27pass；初次未启HERO2/默认ground的夹具错误输出只诊断保留，不作修复证据。最终同一次553唯一通过/外来0，含旧522、27新例及live/batch四例，不把独立119/14再相加。新例直接核来源失效、不潜伏复活、持方向不可见、fs0与实际StateTracker/batch等价。E24–31/Idle工作已结束，无P/游戏。
+
+Root实际当前生产StateTracker读原STATE，514个规划拍只2838–2851十四拍XVX一行不同，逐值同原型；31个有限起点各从当拍实际S0/HF/已发prefix/原命令两拍预测，参数逐键同、HF四项同、原误差逐项同PROTO134（比较容差.00011），原始数值在ACTUAL_ORIGINS与CHANGE_REPORT。十四拍box横向误差已降至数值舍入量，不能外推其它行为或“零模型错误”。2566的Shuttlecock/SHUT少保持一物理步、约.195u横向残差未改，按方向时XVX隐藏也不凭空恢复。
+
+新source707packet/261模型/源码zip已绑；Task136只审434相对已核402的两文件、27新例及必要相邻，不重跑大矩阵。当前新源SOURCE_REVIEW/P_ENABLE/新合同均未放行，旧a1d0已消费停止，所有原日志/测量失败/预算保留，不补跑。源审核妥后才做新绑定有限计时与有界单局；用户无人值守授权仍有效但不取代源/输入/HP首损血/Q1/Opt1/资源/STOP/真实清理门，Windows核心进程不操作。
