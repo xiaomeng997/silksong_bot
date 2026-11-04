@@ -491,9 +491,9 @@ class GauntletTactics:
                 if p0 >= p1:
                     return None
                 middle = max(p0 - b1, b0 - p1)
-                # This only declines an optional outside stance. The planner
-                # still checks all threats and may leave the middle to escape.
-                if middle >= left + right and min(b0, p0) <= hx <= max(b1, p1):
+                # Outside is temporary when the middle has room. Decline this
+                # preference; returning/crossing still needs the normal checks.
+                if middle >= left + right:
                     return None
         except (TypeError, ValueError, OverflowError):
             return None

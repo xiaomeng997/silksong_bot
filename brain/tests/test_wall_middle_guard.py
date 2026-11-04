@@ -27,9 +27,9 @@ def test_real_bounce_does_not_pull_a_usable_middle_to_the_outer_wall(side,hero):
  assert M.wall_pressure_prefs(p,intent) is p
 
 @pytest.mark.parametrize('side',[-1,1])
-def test_an_already_outer_hero_keeps_the_existing_wall_gap_option(side):
+def test_an_already_outer_hero_drops_wall_pressure_when_middle_is_available(side):
  tac,ws,fc=pair(side,1.5)
- assert candidate(tac,ws,fc,observed_bounce=True).wall_side==side
+ assert candidate(tac,ws,fc,observed_bounce=True) is None
 
 def test_single_target_bounce_keeps_the_existing_head_start():
  tac,ws,fc=scene(hero=4.)
@@ -42,3 +42,8 @@ def test_no_hero_width_middle_does_not_claim_a_middle_refuge():
 def test_unknown_peer_body_never_invents_a_wall_side_permission():
  tac,ws,fc=pair();ws.entities[1].dmg_boxes=[]
  assert candidate(tac,ws,fc,observed_bounce=True) is None
+
+@pytest.mark.parametrize('side',[-1,1])
+def test_outer_hero_without_middle_room_still_has_the_temporary_wall_option(side):
+ tac,ws,fc=pair(side,1.5,peer=(5.3,7.3))
+ assert candidate(tac,ws,fc,observed_bounce=True).wall_side==side
