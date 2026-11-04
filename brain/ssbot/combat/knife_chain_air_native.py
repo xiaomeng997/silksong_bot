@@ -310,7 +310,8 @@ class NativeManualAirChain(NativeChainB2):
         entry=getattr(prefs,"entry_attack",None)
         if (self.commitment is None and self.post_context is None and entry is not None
                 and entry.target==getattr(prefs,"target",None) and entry.kind=="side"):
-            if self._transfer_ready and self._context is not None:
+            if (self._transfer_ready and self._context is not None and self._transfer_goal is not None
+                    and self._transfer_goal.source_kind=="SWITCH"):
                 tick,sim,_,_=self._context
                 return self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
             return None  # ordinary side-slash rows after approach, never a fresh stomp/vault
@@ -429,7 +430,7 @@ class NativeManualAirChain(NativeChainB2):
             enemy=next((e for e in transfer.clappers(state) if e["iid"]==target),None)
             hp=(state.get("hero") or {}).get("pos") or ()
             ep=() if enemy is None else enemy.get("pos") or ()
-            near=(ground and len(hp)>=1 and len(ep)>=1 and type(hp[0]) in (int,float)
+            near=(len(hp)>=1 and len(ep)>=1 and type(hp[0]) in (int,float)
                   and type(ep[0]) in (int,float) and np.isfinite([hp[0],ep[0]]).all()
                   and abs(ep[0]-hp[0])<=self.runner.chains[transfer.PROGRAM].cfg["STOMP"]["jump_root"])
             target_attack=enemy is not None and transfer.control(enemy)[0] in (transfer.AIR_ATTACK_STATES |
@@ -439,7 +440,7 @@ class NativeManualAirChain(NativeChainB2):
                     self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
                     self._press=self._accepted=self._hit=None
                     self._transfer_ready=False
-                    self._abandon("side approach reached tactical/ground boundary")
+                    self._abandon("side approach reached observed range/tactical boundary")
                     self._note("target_entry_side_handoff",frame=f,old_target=target,target=wanted,
                                arrived=bool(near),target_attack=bool(target_attack),intent_ended=not side)
                 return None  # current queued keys remain actual prefix for the next owner
@@ -554,7 +555,8 @@ class NativeManualAirChain(NativeChainB2):
              "approach_recipe":draft.run.v.get("approach_recipe"),"approach_only":approach_only,
              "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
-             "handoff":"real hit+bounce reopens tactical target knife; observed source hammer tail retained",
+             "handoff":("observed range or tactical boundary; ordinary side rows" if approach_only else
+                        "real hit+bounce reopens tactical target knife; observed source hammer tail retained"),
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})
 
     def _transfer_bounce_exit(self):

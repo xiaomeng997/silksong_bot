@@ -231,7 +231,9 @@ def air_approach_keys(x):
     """
     side=int(x.v["side"]);left=max(0,int(x.v["jump_until"])-int(x.obs.k))
     mask=side|(B["J"] if left else 0)
-    if not hasattr(x.obs,"sim") or x.obs.ground or x.v.get("air_dash_decided"):return mask
+    # A side approach has no strike/bounce to finish an irreversible air dash.
+    # Keep the actual prefix/hold untouched; only decline a NEW dash impulse.
+    if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground or x.v.get("air_dash_decided"):return mask
     sim=x.obs.sim;S=np.asarray(sim.start).reshape(K.K);h=x.obs.hero
     if (side==0 or x.v["iid"]==x.v["caster"] or h.get("hero_accepting_input") is not True or not np.isfinite(S).all()
             or S[K.GROUND]>0 or S[K.MODE]!=K.M_NORMAL or S[K.AIRDASHED]>0 or S[K.DASH_CD]>0):return mask
