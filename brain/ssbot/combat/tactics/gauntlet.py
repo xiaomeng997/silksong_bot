@@ -557,10 +557,10 @@ class GauntletTactics:
                 return None
             if b <= c:
                 lo, hi, side = b + left, c - right, 1
-                outside = hx < lo
+                outside = hx + right <= a
             elif d <= a:
                 lo, hi, side = d + left, a - right, -1
-                outside = hx > hi
+                outside = hx - left >= b
             else:
                 return None
             lo, hi = max(lo, xa + left), min(hi, xb - right)
@@ -1669,7 +1669,8 @@ class GauntletTactics:
                     tw[k] = tw.get(k, 0) + 1
         out = entry_attack_prefs(out)
         if (previous_target == g.target and g.name == RUSH and g.entry_attack is None
-                and g.target not in out.no_hit and str(how).startswith(("face", "chase"))):
+                and g.target not in out.no_hit and out.stance_x == float(g.stance_x)
+                and str(how).startswith(("face", "chase"))):
             middle_x = self._middle_return_x(ws, fc, g.target)
             if middle_x is not None:
                 # Do not farm outside hits while a usable middle is the goal.

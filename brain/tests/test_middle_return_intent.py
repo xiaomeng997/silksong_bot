@@ -67,3 +67,27 @@ def test_midfield_outer_side_also_returns_and_never_selects_another_target(monke
  hx=ws.hero.pos.v[0]+shift;ws.hero.pos=E((hx,5.6));ws.hero.hurtbox=[(x+shift,y) for x,y in ws.hero.hurtbox]
  out=tac._decide(ws,fc,p)
  assert out.target==7 and 7 in out.no_hit and (out.stance_x-hx)*side<0
+
+
+@pytest.mark.parametrize('side',[-1,1])
+@pytest.mark.parametrize('hero',[3.,4.,5.2499])
+def test_hero_over_target_keeps_same_target_followup_reward(monkeypatch,side,hero):
+ tac,ws,fc,p=decide(monkeypatch,side,hero)
+ out=tac._decide(ws,fc,p)
+ assert 7 not in out.no_hit and 'return middle' not in tac.goal.why
+
+@pytest.mark.parametrize('side',[-1,1])
+@pytest.mark.parametrize('hero,returning',[(2.75,True),(2.7501,False)])
+def test_outer_requires_the_whole_hero_box_to_clear_the_outer_body_edge(monkeypatch,side,hero,returning):
+ tac,ws,fc,p=decide(monkeypatch,side,hero)
+ out=tac._decide(ws,fc,p)
+ assert (7 in out.no_hit)==returning
+
+@pytest.mark.parametrize('side',[-1,1])
+def test_an_earlier_tactical_danger_stance_keeps_priority(monkeypatch,side):
+ tac,ws,fc,p=decide(monkeypatch,side)
+ tac.ta=frozenset({"guard"})
+ wanted=1. if side<0 else 59.
+ monkeypatch.setattr(tac,'_ta_rules',lambda ws,fc,out,*a:(replace(out,stance_x=wanted),['guard']))
+ out=tac._decide(ws,fc,p)
+ assert out.stance_x==wanted and 7 not in out.no_hit
