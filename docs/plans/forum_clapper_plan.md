@@ -3677,3 +3677,14 @@ Task123现只审该三文件/19新增及必要相邻206，不重跑旧306/629/80
 pogo_centering_20261103/REPORT、CAUSAL_MARGIN2_VERIFIED与MANIFEST为当前入口。名义H45..77全部33/33找到前后各2步（2/3或3/2），所选27用第二刀/6用第三刀，逐刀空中与ATK_PDIR2、原正常前缀均复核。H77前摇在32步，正常刀因新身体较低在35步实际接触，第三刀74步，保护74..81盖77..79，前3后2。采用真实旧局2915/16/17计数8/7/6与FixedUpdate递减，C..C+7；反编译字段默认2不是现场配置8，旧INV_T按Update秒数对照原件不作本验收。同一按键流对全部九变体均保2只12/33已见，不称已保证未知未来时序或闭环调时；另一怪/完整B2余量/真实接受仍另审，未接生产/开新局。
 
 用户追问早晚变体：现SlamTimeline把录像48/49前摇、4/5个Update的Slam0及前冲物理相位0.2/0.8做组合，是粗经验包络，不等于九种随机快慢招；导出FSM前摇为固定Wait0.8，Slam0动画完成转Slam1。见Slam0后前摇分歧已揭晓，现包络距首个可能锤1伤害4..6物理步；Slam0剩余分歧完全消掉要到Slam1。实际fc/fs/fdt可锚定物理相位，不应永久当未知两分支；本轮未实现按动画/计时观测收窄。Task124只排在123之后核45/66/77与这些时钟边界，不重跑整搜索、不阻塞ground源审/P。当前源/游戏/资源门无变化。
+
+
+### 7.92 229阻挡已核收并最小修复；空中side不再借下劈配方空冲【新源0829423f；125增量源审待核，无P/实机】
+
+已处理 Opus #229(Task123)：16产物hash/字节、206唯一用例同集同结果、三源LF在快照/Root包/Git一致；只收据核验不冒充物理或性能通过。P1为side air借了原stomp空冲却不再出刀，只在地面8u交还，当前两帧门发现碰撞时不可逆空冲已发；P2为fresh side前门不限SWITCH，意外准入BOUNCE源锤尾段并新记decline；P3为未完成路线超120记严格失败，需明确与计划边界顺序。d521从未因此获新P或实机许可，原件保留。
+
+0829423f只在两模块最小修：approach_only不发新airDASH，实际在途prefix/HF/receipts保持；near按表配置jump_root=8.0在空地都交还（此前计划8.05是L2阈值，不能混写）。fresh side仅SWITCH复用接近段，恢复18c的fresh BOUNCE side不接管，不额外造源尾失败；已有active尾段仍原先优先。保留既有计划边界优先于时限，air near age134正常交还同旧ground，far未完成age134仍recover/暴露/禁重试；没有全局降低严格性或扩大120。side handoff日志/metadata同步准确。新11回归中9项初red真实失败，1初夹具TypeError不计；纠正第二拍真实receipt前缀/同帧模型后事务red确因旧active继续出价失败。最终五相邻文件217全过、源外模块0；包含真实install/before_send/sent造commit和spent、下一拍air near交还/ordinary发送、实际旧前缀仍可读及退远不重接管。217不是额外再加206。Root独立只读同事查最终delta/事务，无必须扩修项。
+
+approach229_fix_20261103保存BASELINE、OPUS229_RECEIPT、CHANGE_REPORT、source_0829423f.zip及red/green/final229。Task125只增量核新3文件/11边界及必要217，优先未开始的124；当前新源source_review_pending，无新预算permit/新合同/游戏，旧823仍消费且停，原墙侧依赖扶墙路线未获许可不偷开。下一步仍新源完整政策串行实际输入首不同包前的有界P，先核源/配置/资源并与Opus独占协调。用户五aim文件、旧wf/AA/原始失败保持，Windows核心进程不动。
+
+用户讨论开伞对刀表和连续下劈表的复用：现air_strike/air_direct已有共享plan_entry、pogo_model、trace与原B2发送/真实命中弹起；连续下劈目前仍是独立离线因果时序分析，适合增加弹起入口/开伞调时后复用统一strike/observe后缀，不应复制伤害/命中/计数判定或把两套搜索池在线并跑。本轮未据“能否合并”的讨论扩做架构重写、未把33行硬编码进运行链。
