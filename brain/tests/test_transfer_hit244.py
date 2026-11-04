@@ -19,7 +19,7 @@ def setup(monkeypatch,case):
  s['f']=1040;s['hero'].update(pos=[38.,9.253],box=[37.75,7.7,38.25,9.779],vel=[0.,-2.],
    silk=9,anim={'clip':'DownSlashAlt'},can={'attack':True,'input':True})
  s['hero']['tm']['atk_cd']=.1
- e=s['ents'][1];dx=38.-e['pos'][0];e['pos'][0]=38.;e['vel']=[0.,0.];e['fsms'][0].update(state='Slam Antic',t=5/60)
+ e=s['ents'][1];e['flipX']=True;dx=38.-e['pos'][0];e['pos'][0]=38.;e['vel']=[0.,0.];e['fsms'][0].update(state='Slam Antic',t=5/60)
  for c in e['colliders']:
   c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
   c.update(layer=11,damage={'hazard_type':1,'flags':0,'eff':2,'can_cause_damage':True})

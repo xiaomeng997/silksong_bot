@@ -32,13 +32,17 @@ def slam_tail_frames():
 
 
 @lru_cache(maxsize=1)
-def _shortest_slam_antic():
+def _slam_antic_bounds():
     from .move_data import load_cl_slam,FRAME_S
-    return min(int(n) for s in load_cl_slam().states if s.name=="Slam Antic" for n in s.frames)*FRAME_S
+    spec=load_cl_slam()
+    poses=np.asarray(next(t for t in spec.tracks if t.name=="root").by_state["Slam Antic"],float)
+    if poses.ndim!=2 or poses.shape[1]!=4 or not np.isfinite(poses).all():raise ValueError("unknown Slam Antic body poses")
+    extent=(float(poses[:,0].min()),float(poses[:,1].max()),float(poses[:,2].min()),float(poses[:,3].max()))
+    return min(int(n) for s in spec.states if s.name=="Slam Antic" for n in s.frames)*FRAME_S,extent
 
 
 def stationary_antic_body_for_hit_check(state,iid,through):
-    """Known stationary body, with the whole short check before the earliest lunge.
+    """Observed/model Antic pose union, with the short check before the earliest lunge.
 
     This is not a damage-invulnerability certificate. Unknown/armed colliders
     reject this narrow conditional check; other owners/hazards stay unprotected.
@@ -50,11 +54,14 @@ def stationary_antic_body_for_hit_check(state,iid,through):
     if len(enemies)!=1:return None
     e=enemies[0];cs=[c for c in e.get("fsms") or () if c.get("name")=="Control"]
     if len(cs)!=1 or cs[0].get("state")!="Slam Antic":return None
-    tin=cs[0].get("t");vel=e.get("vel")
+    tin=cs[0].get("t");vel=e.get("vel");pos=e.get("pos");flip=e.get("flipX")
     if (type(tin) not in (int,float) or not math.isfinite(tin) or tin<0
-            or tin+(through-f+1)*FRAME_S>=_shortest_slam_antic()
             or not isinstance(vel,(list,tuple)) or len(vel)!=2
-            or any(type(v) not in (int,float) or not math.isfinite(v) or v!=0 for v in vel)):return None
+            or any(type(v) not in (int,float) or not math.isfinite(v) or v!=0 for v in vel)
+            or type(flip) is not bool or not isinstance(pos,(list,tuple)) or len(pos)<2
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in pos[:2])):return None
+    earliest,extent=_slam_antic_bounds()
+    if tin+(through-f+1)*FRAME_S>=earliest:return None
     cols=e.get("colliders");bodies=0
     if not isinstance(cols,(list,tuple)) or not cols:return None
     for col in cols:
@@ -72,7 +79,15 @@ def stationary_antic_body_for_hit_check(state,iid,through):
                 or type(damage.get("hazard_type")) is not int or damage["hazard_type"]!=1):return None # ENEMY only
         bodies+=1
     if bodies!=1:return None
-    try:return body_box(e)
+    try:
+        observed=body_box(e)
+        if observed is None:return None
+        # Antic stands up before it lunges. Bound every model pose, rather
+        # than freezing an early crouched snapshot through the contact window.
+        x0,x1,y0,y1=extent
+        if not flip:x0,x1=-x1,-x0
+        model=np.array([pos[0]+x0,pos[1]+y0,pos[0]+x1,pos[1]+y1])
+        return np.r_[np.minimum(observed[:2],model[:2]),np.maximum(observed[2:],model[2:])]
     except (ValueError,TypeError,OverflowError):return None
 
 
