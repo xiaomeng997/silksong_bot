@@ -262,8 +262,16 @@ def air_approach_keys(x):
 
 
 def register(prims):
-    @prims.gen("transfer_source_tail_keys",doc="the single admitted source-tail direction; no new jump, dash or attack")
-    def source_tail_keys(x,m):return m|int(x.v.get("source_tail_mask",0))
+    @prims.gen("transfer_source_tail_keys",doc="legacy neutral tail or the checked absolute wall-successor row")
+    def source_tail_keys(x,m):
+        if x.v.get("_wall_pressure"):
+            from .knife_chain_nominal import NominalUnsupported
+            row=x.v.get("row");i=x.obs.F-row["F0"] if isinstance(row,dict) else -1
+            masks=() if not isinstance(row,dict) else row.get("masks",())
+            if type(i) is not int or not 0<=i<len(masks):
+                raise NominalUnsupported("absolute wall-pressure row unavailable or expired")
+            return m|int(masks[i])
+        return m|int(x.v.get("source_tail_mask",0))
 
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):

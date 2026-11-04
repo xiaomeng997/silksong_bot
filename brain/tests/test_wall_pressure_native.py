@@ -367,3 +367,20 @@ def test_missing_source_is_not_a_fabricated_death_boundary(monkeypatch):
     monkeypatch.setattr(WN.T,'bounce_tail_pending',lambda *a:True)
     assert not WN.prepare_goal(n,s,p,handoff=True)
     assert n._wall_pressure is not None and n.residual_context() is not None
+
+
+@pytest.mark.parametrize('kind',['side','stomp'])
+def test_checked_wall_successor_table_reproduces_absolute_row(monkeypatch,kind):
+    n,s,sim,fc,p,_=offer_fixture(monkeypatch,kind)
+    offer=WN.propose(n,s,1.,sim,fc,p,False);assert offer is not None
+    from ssbot.combat.knife_chain_eval import X
+    from ssbot.combat.knife_chain_nominal import NominalUnsupported
+    row=offer.draft.run.v['row']
+    for i,expected in enumerate(row['masks']):
+        obs=NS(f=row['F0']+i-2,F=row['F0']+i,k=i+2,target_valid=True,ground=False,bounced=False)
+        actual=offer.draft.eval_link(X(offer.draft,offer.draft.run,obs))
+        assert actual==expected
+    obs=NS(f=row['F0']+len(row['masks'])-2,F=row['F0']+len(row['masks']),k=100,
+           target_valid=True,ground=False,bounced=False)
+    with pytest.raises(NominalUnsupported):
+        offer.draft.eval_link(X(offer.draft,offer.draft.run,obs))

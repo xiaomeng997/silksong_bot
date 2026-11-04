@@ -306,7 +306,20 @@ def propose(n, state, game, sim, forecast, prefs, ground):
     variables['_wall_pressure'] = {'target':iid,'stroke':ctx['stroke'],
         'kind':proposal.kind, 'F0':proposal.F0, 'press':proposal.press_frame,
         'contact':proposal.contact_frame, 'landing':proposal.landing_frame}
+    # The source table can replay every admitted key from its own Run snapshot;
+    # the private proposal is not a second hidden keyboard controller.
+    variables['row'] = {'F0':proposal.F0,'masks':proposal.commands.tolist(),
+                        'press_F':proposal.press_frame,'contact_frame':proposal.contact_frame}
     draft.run = Run(T.PROGRAM, 'bounce_tail', variables)
+    from .knife_chain_eval import X
+    obs = T._observation(p,state,game,T.body_box(source),ground,
+                         T.head_clearance(n.runner.chains[T.PROGRAM].cfg))
+    try:
+        table_mask = draft.eval_link(X(draft,draft.run,obs))
+    except (NominalUnsupported,TypeError,ValueError,KeyError) as exc:
+        return _reject(n,state,'wall-successor table row unavailable: '+str(exc))
+    if table_mask != mask:
+        return _reject(n,state,'wall-successor table and proposed key disagree')
     n._transfer_responsibility[p.move] = (ctx['goal'].responsibility, ctx['source_ta'])
     return B2Offer('manual_commitment' if not ctx['sent'] else 'active',
         path if replan else short, draft, mask, 0., p.move,
