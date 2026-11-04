@@ -31,6 +31,23 @@ from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_budget import LearningBudget,LearningStop,LOW_HP_POLICY
 
 
+def _fresh_downslash_start(state, previous):
+    """A new observed downward swing, never the old clip persisting after a key."""
+    if previous is None or previous.get("f") != state["f"]-1:return False
+    def down(s):
+        h=s.get("hero") or {};clip=(h.get("anim") or {}).get("clip")
+        return (isinstance(clip,str) and "DownSlash" in clip) or flag(s,"downSpikeAntic") or flag(s,"downSpiking")
+    if not down(state):return False
+    old=previous.get("hero") or {};new=state.get("hero") or {}
+    old_clip=(old.get("anim") or {}).get("clip")
+    if not down(previous) and isinstance(old_clip,str) and old_clip:return True
+    a=old.get("tm") or {};b=new.get("tm") or {}
+    values=(a.get("atk_cd"),b.get("atk_cd"),a.get("atk_t"),b.get("atk_t"))
+    if not all(type(v) in (int,float) and np.isfinite(v) for v in values):return False
+    cd0,cd1,t0,t1=values
+    return cd1>cd0+1e-6 and t1<t0-1e-6
+
+
 @dataclass
 class B2Offer:
     stage: str
@@ -321,6 +338,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         if previous is not None and f>previous+1:self._stop("missing critical STATE frames",f)
         # Budget is also fed by the harness before its lethal/clear early exits.
         self.observe_learning(state,kill_frame=self._kill_frame)
+        previous_state=self._actual_state
         self._actual_state=state
         self._observe_application(state)
         self._observe_hook_start(state)
@@ -353,8 +371,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         if self._press is not None and grounded_strike(state,self._press):
             self._note("b2_controller_defect",frame=f,reason="planned downslash became grounded Slash",move=vars(c["move"]))
             self._recover("planned downslash became grounded Slash",f);return
-        clip=str((state.get("hero",{}).get("anim") or {}).get("clip", ""))
-        accepted=("DownSlash" in clip or flag(state,"downSpikeAntic") or flag(state,"downSpiking"))
+        accepted=_fresh_downslash_start(state,previous_state)
         if self._press is not None and f>=self._press and accepted and self._accepted is None:
             self._accepted=f;self._note("b2_strike_accepted",frame=f,press=self._press)
         for ev in state.get("ev") or ():

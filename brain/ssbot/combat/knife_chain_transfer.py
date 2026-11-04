@@ -268,11 +268,17 @@ def press_now_row(sim,body,F,hold,side):
     direction=1 if side==B["R"] else -1 if side==B["L"] else 0
     poly=np.array([[body[0],body[1]],[body[2],body[1]],[body[2],body[3]],[body[0],body[3]]])
     pj=len(sim.prefix)+2
+    # A previous swing can still be F_ATTACKING after its bounce. It cannot
+    # license a new knife before the actual start state's cooldown expires.
+    cd=float(sim.start[K.ATK_CD]);dt=float(sim.params.frame_time)
+    if not math.isfinite(cd) or not math.isfinite(dt) or dt<=0 or cd>pj*dt+1e-9:return None
     for d in ((direction,0,-direction) if direction else (0,)):
         row=strike_program(F,hold,1,d or 1,16)
         if d==0:row["masks"]=[m&~(B["L"]|B["R"]) for m in row["masks"]]
         ro=sim.roll(np.asarray(row["masks"],np.int64)[None]);flags=ro.flags[0]
-        if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:continue
+        attacking=(flags&K.F_ATTACKING)!=0
+        fresh=(attacking[pj] and not attacking[pj-1]) or (attacking[pj+1] and not attacking[pj])
+        if not fresh or flags[pj-1]&K.F_GROUND:continue
         for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
             if flags[j]&K.F_GROUND:break
             if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
