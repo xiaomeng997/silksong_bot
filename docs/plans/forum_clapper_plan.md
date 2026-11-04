@@ -4100,3 +4100,11 @@ analysis/target_priority_fix266_20261104/p_switch269/保留两份输入/脚本/r
 完整measurement抓到优先级矛盾：2608 takeoff从335476换335470，**2609下一帧intercept又抢回同一仍在空中的335476**（来源CC_JUMP_CAST/antic2552），不是2613稀疏普通日志才首次回切。后来原焦点向右后撤，英雄在两怪左侧跳/开伞，被335470落地锤打中；前述回切是否唯一导致后续受击尚未证明。TACTICAL_EVENT_FACTS与NO_RETRY原样保留局部因果边界。
 
 新源e390818ae63b177202b2dd5e7e1d2b18b77283d7只改clapper_priority和已有语义测试：takeoff真胜出时记已主动离开的Move，同一跳不能下一帧被解释成新背后来怪；新Move/离开跳跃族/消失/reset清除，真正新背后跳和新近招仍按原候选竞争。不改分值/持有时长/按键/输入/危险/模型，也不扩动作池或连续下劈。有效红6失败331通过→同次绿337通过、外来0（六项为新增，旧331为子集）。analysis/takeoff_retarget269_20261104保存补丁、源绑定/708清单/小快照/红绿JUnit。当前新源审阅与新运行绑定待核，68f旧P不自动盖新源。原工程已消费且严禁同条件重试；Task161请Opus只核这个小增量和新现场事实，不再扩政策矩阵/时序网格。
+
+### 7.128 #270当前e390源审已核；真实2609新源完整P已测并清理，新单局仅重绑既有生命周期【已处理 Opus #270】
+
+270/review161的17工件与18输入hash核同，337JUnit逐项Root绿集同、额外13探针通过不相加。接受e390最小源增量：68f的2604–2610条件L2重建逐目标/why/stance复现原局；e390在2608同takeoff、2609保留335470/keep，2610仍同。2610仍在2609新键目标2611之前，之后原局STATE未续用。原JUMPS的t_commit由生产路径建成浮点，reset/掉线、新跳/新近招、压制takeoff不假建departed等核过。near→intercept同类回切、family连续Move近似、下游无闭环证据三项非阻挡明确保留，不为了未见案例又扩偏好。
+
+Root没有拿68f旧P直接签新源：以新68f停止局原点2609输入和原Task160壳，在当前e390做唯一新点P，原点前影子policy/真实STATE与已发prefix保留、首新包即停。实际保留335470/keep和既有SWITCH stomp目标，出包2611/MOVE R（旧包neutral），不喂新包后STATE；完整trace tick16.5231ms、_act16.4944ms、L2_decide0.666700ms，含只读分析记录，绑定提前返回；签名148前后同、外来0。这个点不测新source历史扫描，也不是分布/全场预算/真实输入接受，16.52贴近一帧不能说有富余。原独占/暂停/资源门未减。自有P与场进程逐PID/create真消失，golden/Prefs/DEMO/registry/无游戏全部独立核后false，证据analysis/takeoff_retarget269_20261104/p_e390818a/2609/。
+
+准备新的analysis/w13_departed_focus_20261104T211924Z_e390818a/单局，停止的68f合同/原始失败/NO_RETRY都不动。源e390/模型708/脚本/配置/当前有限P和270审阅新绑定，实际生命周期反向替换source/namespace与已清理68f脚本全文同，原资源三组件原字节。仍只新工程一局w13/seed314168/7HP/首任意损失真实Q1(HP≤6)，无重试/补局/8局；--measure及实际worker本连接零delay/jitter/HF2/2/pending0、原死亡/期望键/Opt1/缺日志/STOP/真实清理保持。计划先main、knife/TV同步后才写真实gate/contract、冻结当前knifeHEAD并无人值守运行。新局要采集自有完整PID/create树，避免上次场子PID未单留的证据限制。没有宣称已修掉2761或已证明新空中链。
