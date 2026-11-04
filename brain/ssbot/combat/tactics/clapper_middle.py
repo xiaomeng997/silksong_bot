@@ -22,22 +22,29 @@ def observe(tac, ws, subjects, geo, t, mem):
     by_id = {s.iid: s for s in subjects}
     if ctx is not None:
         s = by_id.get(ctx["move"][0])
-        if (s is None or s.family not in JUMPS or
-                tac.t_commit.get(s.iid) != ctx["move"][1]):
+        prior = ctx.get("decision") or {}
+        finishing = (s is not None and s.family not in JUMPS and prior.get("route") == "over"
+                     and t < ctx.get("exit_until", -math.inf))
+        if (s is None or (not finishing and (s.family not in JUMPS or
+                tac.t_commit.get(s.iid) != ctx["move"][1]))):
             ctx = None
+        else:
+            ctx["finishing"] = finishing
     jumping = [s for s in subjects if s.family in JUMPS]
-    if len(jumping) != 1:
+    if len(jumping) != 1 and not (not jumping and ctx is not None and ctx.get("finishing")):
         ctx = None
+    elif jumping and ctx is not None and jumping[0].iid != ctx["move"][0]:
+        ctx = None  # a new monster's jump is a new tactical event
     elif ctx is None and geo is not None and geo["region"] == "middle":
         s = jumping[0]
         if s.state in ANTIC | AIR:
-            ctx = {"move": (s.iid, tac.t_commit.get(s.iid)), "antic_at": None,
+            ctx = {"move": (s.iid, tac.t_commit.get(s.iid)), "family": s.family, "antic_at": None,
                    "air_at": None, "decision": None}
     if ctx is not None:
         s = by_id[ctx["move"][0]]
         phase = getattr(tac._ent(ws, s.iid), "phase", None)
         elapsed = getattr(phase, "t_in_phase", None)
-        if (s.state == PRIMARY[s.family] and getattr(phase, "top", None) == s.state
+        if (s.family in JUMPS and s.state == PRIMARY[s.family] and getattr(phase, "top", None) == s.state
                 and type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed >= 0):
             # Do not replace this with t_commit (a first-seen tick) or the
             # second Cast Antic timer, which restarts during the same move.
@@ -91,6 +98,13 @@ def choose(tac, ws, fc, geo, hx, t, ctx):
     o = next(o for o in fc.subjects if o.alive and o.in_play and o.iid != s.iid)
     info = dict(source=s.iid, move=ctx["move"], target=s.iid, route="hold", stance=hx,
                 kind=None, reason="geometry unknown", endpoints=[], path_checked=False)
+    if ctx.get("finishing"):
+        # Preserve the already chosen far-side goal through a real stomp
+        # handoff, even if the source jumper has landed first. This is bounded
+        # by the original entry window; it cannot license a new source move.
+        info = dict(ctx["decision"])
+        info["reason"] = "declared far-side handoff; execution unverified"
+        return info
     if geo is None:
         return info
     ent = tac._ent(ws, s.iid)

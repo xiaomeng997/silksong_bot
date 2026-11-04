@@ -180,3 +180,21 @@ def test_a_new_close_attack_can_still_outscore_this_jump_scene():
     change(fc, 8, family=G.CC_SLAM, state="Slam Antic", committed=True)
     out = step(tac, ws, fc)
     assert out.target == 8 and tac.last["clapper_winner"]["rule"] == "near"
+
+
+def test_declared_far_side_survives_source_landing_for_the_bounded_handoff():
+    tac, ws, fc = middle((22., 37.), 28., family=G.CC_JUMP_CAST)
+    tac.pb.arena_x = (14.01, 48.99)
+    step(tac, ws, fc)
+    airborne(tac, ws, fc)
+    first = step(tac, ws, fc)
+    assert first.target == 8 and tac.last["clapper_middle"]["route"] == "over"
+    stance = first.stance_x
+    change(fc, 7, family=G.CC_IDLE, state="Idle", committed=False)
+    out = step(tac, ws, fc)
+    assert out.target == 8 and out.stance_x == stance
+    assert out.entry_attack.source_family == G.CC_JUMP_CAST
+    assert tac._clapper_priority["middle_jump"]["finishing"]
+    ws.stamp.t_game_s += 2.1
+    step(tac, ws, fc)
+    assert tac._clapper_priority["middle_jump"] is None

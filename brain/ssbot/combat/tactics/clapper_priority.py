@@ -201,13 +201,14 @@ def decide(tac, ws, fc, prefs, hx, t):
             goal.entry_attack, _ = entry(tac, ws, fc, keep, target, t, geo)
         if reason == "middle_jump":
             mid = middle["decision"]
+            if mid["route"] == "over": middle.setdefault("exit_until", t+2.)
             previous = goal.entry_attack
             source = next(s for s in subjects if s.iid == mid["source"])
             if mid["kind"] is None:
                 goal.entry_attack = None
             elif not (previous is not None and (previous.target, previous.source, previous.kind) ==
                       (target.iid, source.iid, mid["kind"])):
-                goal.entry_attack = EntryAttack(target.iid, mid["kind"], source.iid, source.family,
+                goal.entry_attack = EntryAttack(target.iid, mid["kind"], source.iid, middle["family"],
                                                abs(float(source.pos[0])-hx), t)
         if old is None or old.target != target.iid or old.name != RUSH:
             tac.stats["changes"] += 1
