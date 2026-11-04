@@ -86,7 +86,8 @@ import numpy as np
 from ssbot.combat import jump_behind, rune_bombs, slam_play, special_board, two_play
 from ssbot.combat.tactics.forum_local import (CLAPPER, EVADE_HIT_X, EVADE_RISK_X, LEAVE, ForumTactics,
                                                clapper_facing)
-from ssbot.combat.tactics.modes import EVADE, HEAL, GoalPrefs, EntryAttack, entry_attack_prefs
+from ssbot.combat.tactics.modes import (EVADE, HEAL, GoalPrefs, EntryAttack, WallPressure, entry_attack_prefs,
+                                       wall_pressure_prefs)
 from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 
@@ -427,6 +428,74 @@ class GauntletTactics:
         x0, x1 = self.pb.arena_x
         r = self.rules.wall_room_u
         return min(max(x, x0 + r), x1 - r)
+
+    def wall_pressure_candidate(self, ws, fc, target, *, observed_bounce=False):
+        """Geometry-only intent for this focus; never choose another target.
+
+        A native owner with a verified target hit+bounce context may pass
+        observed_bounce=True while the hero is still over the body. Otherwise
+        require the current WS hit+pogo pair or an already wall-side position.
+        TerrainRef has no floor mesh: even a nonempty span needs native checks.
+        """
+        if (any(os.environ.get(k, "0").strip() != "1" for k in
+                ("SSBOT_FORUM_CHAIN_NATIVE", "SSBOT_FORUM_CHAIN_B2", "SSBOT_FORUM_CHAIN_AIR_MANUAL"))
+                or os.environ.get("SSBOT_FORUM_CHAIN_ARM", "") != "B"):
+            return None
+        g = self.goal
+        if g is None or g.target != target or g.entry_attack is not None or g.name != RUSH:
+            return None
+        s = next((s for s in getattr(fc, "subjects", ()) or () if s.iid == target
+                  and s.type_key == CLAPPER and s.alive and s.in_play), None)
+        if s is None or s.family not in (None, CC_IDLE, CC_SLAM, "CC_EVADE"):
+            return None
+        hero = getattr(ws, "hero", None)
+        pos = getattr(hero, "pos", None)
+        if pos is None or not 0.8 <= pos.conf <= 1.0:
+            return None
+        if (getattr(getattr(hero, "contact", None), "v", None) in {"WALL_L", "WALL_R"}
+                or getattr(getattr(hero, "mode", None), "v", None) == "wall"):
+            return None
+        e = self._ent(ws, target)
+        roots = [b for b in getattr(e, "dmg_boxes", ()) or ()
+                 if b.active is True and isinstance(b.name, str) and b.name.startswith(CLAPPER)]
+        if len(roots) != 1:
+            return None
+        try:
+            body = np.asarray(roots[0].poly, float)
+            hurt = np.asarray(hero.hurtbox, float)
+            xa, xb = map(float, self.pb.arena_x)
+            hx = float(pos.v[0])
+            if (body.ndim != 2 or body.shape[0] < 3 or body.shape[1] != 2
+                    or hurt.ndim != 2 or hurt.shape[0] < 3 or hurt.shape[1] != 2
+                    or not np.isfinite(body).all() or not np.isfinite(hurt).all()
+                    or not all(math.isfinite(v) for v in (xa, xb, hx)) or not xa < xb or not xa <= hx <= xb):
+                return None
+            b0, b1 = float(body[:, 0].min()), float(body[:, 0].max())
+            left, right = hx - float(hurt[:, 0].min()), float(hurt[:, 0].max()) - hx
+            if b0 >= b1 or left <= 0 or right <= 0:
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+        side = -1 if b0 - xa <= xb - b1 else 1
+        gap = b0 - xa if side < 0 else xb - b1
+        if not 0 <= gap <= TWO_WALL_BAND_U:
+            return None
+        mode = getattr(hero, "mode", None)
+        frame = getattr(getattr(ws, "stamp", None), "frame", None)
+        hit_bounce = (getattr(mode, "v", None) == "pogo" and 0.8 <= mode.conf <= 1.0
+                      and type(frame) is int and any(
+                          ev.kind == Ev.HIT_DEALT and ev.frame == frame
+                          and getattr(ev.data, "target_id", None) == target
+                          and "DownSlash" in str(getattr(ev.data, "src", "") or "")
+                          and "Harpoon" not in str(getattr(ev.data, "src", "") or "")
+                          for ev in getattr(ws, "events", ()) or ()))
+        already_outside = hx <= b0 if side < 0 else hx >= b1
+        if not (already_outside or hit_bounce or observed_bounce is True):
+            return None
+        span = (xa + left, b0 - right) if side < 0 else (b1 + left, xb - right)
+        if span[0] > span[1]:
+            return WallPressure(target, "stomp", side)
+        return WallPressure(target, "side", side, span)
 
     def _ent(self, ws, iid):
         for e in getattr(ws, "entities", ()) or ():
@@ -1247,6 +1316,7 @@ class GauntletTactics:
     def _decide(self, ws, fc, prefs: GoalPrefs) -> GoalPrefs:
         r = self.rules
         hx = float(ws.hero.pos.v[0])
+        previous_target = None if self.goal is None else self.goal.target
         t = float(ws.stamp.t_game_s) if getattr(ws, "stamp", None) is not None else 0.0
         self._t = t
         self._n_clappers = sum(1 for x in (getattr(fc, "subjects", ()) or ())
@@ -1525,6 +1595,11 @@ class GauntletTactics:
                     k = k.split(":")[0]
                     tw[k] = tw.get(k, 0) + 1
         out = entry_attack_prefs(out)
+        if previous_target == g.target and g.target not in out.no_hit:
+            pressure = self.wall_pressure_candidate(ws, fc, g.target)
+            if pressure is not None:
+                out = wall_pressure_prefs(out, pressure, reach_u=r.reach_u)
+                self.last["wall_pressure"] = dict(vars(pressure))
         self.last["entry_attack"] = None if g.entry_attack is None else dict(vars(g.entry_attack))
         self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
         self.last.update(goal=g.name, goal_why=g.why, target_type=getattr(s, "type_key", None),

@@ -86,6 +86,21 @@ class EntryAttack:
     picked_at: float
 
 
+@dataclass(frozen=True)
+class WallPressure:
+    """Current-focus contact preference on its nearby wall side.
+
+    floor_span contains candidate hero-centre x positions from observed horizontal
+    geometry only. It does not prove floor support, reachability, future clearance
+    or permission to cling; the native action owner must check all of those.
+    """
+    target: int
+    kind: str                         # side / stomp
+    wall_side: int                    # -1 left wall / +1 right wall
+    floor_span: tuple[float, float] | None = None
+    geometry_candidate: bool = True
+
+
 def entry_attack_prefs(prefs):
     """Explicit entry style wins over legacy scoring preferences, never safety."""
     entry = getattr(prefs, "entry_attack", None)
@@ -102,6 +117,37 @@ def entry_attack_prefs(prefs):
                    no_pogo=(frozenset(prefs.no_pogo) - {iid} if entry.kind == "stomp" else prefs.no_pogo),
                    ground_first=(frozenset(prefs.ground_first) - {iid} if entry.kind == "stomp"
                                  else frozenset(prefs.ground_first) | {iid}))
+
+
+def wall_pressure_prefs(prefs, pressure, *, reach_u=1.8):
+    """Apply one matching L2 candidate's contact scores and local stance only."""
+    target = getattr(prefs, "target", None)
+    if (not isinstance(pressure, WallPressure) or pressure.target != target or target is None
+            or pressure.kind not in {"side", "stomp"} or type(pressure.wall_side) is not int
+            or pressure.wall_side not in (-1, 1) or pressure.geometry_candidate is not True
+            or getattr(prefs, "entry_attack", None) is not None or target in prefs.no_hit):
+        return prefs
+    stance = prefs.stance_x
+    if pressure.kind == "side":
+        try:
+            lo, hi = map(float, pressure.floor_span)
+            reach = float(reach_u)
+        except (TypeError, ValueError, OverflowError):
+            return prefs
+        if not all(math.isfinite(v) for v in (lo, hi, reach)) or lo > hi or reach < 0:
+            return prefs
+        inset = min(reach, 0.5 * (hi - lo))
+        stance = hi - inset if pressure.wall_side < 0 else lo + inset
+    kw = dict(prefs.hit_kw)
+    w = float(prefs.hit_w.get(target, 1.0))
+    side = pressure.kind == "side"
+    kw[target] = (w, 0.0, 0.0, 0.0) if side else (0.0, 0.0, 0.0, w)
+    return replace(prefs, wall_pressure=pressure, hit_kw=kw, stance_x=stance,
+                   ground_hit=(frozenset(prefs.ground_hit) | {target} if side
+                               else frozenset(prefs.ground_hit) - {target}),
+                   no_pogo=(frozenset(prefs.no_pogo) | {target} if side else frozenset(prefs.no_pogo) - {target}),
+                   ground_first=(frozenset(prefs.ground_first) | {target} if side
+                                 else frozenset(prefs.ground_first) - {target}))
 
 
 @dataclass
@@ -138,6 +184,7 @@ class GoalPrefs(TacticPrefs):
     #                                      jump casts' circles still to light and the bodies; safe rows ending inside
     #                                      one with no way out left rank after the rest, above the landed hits
     entry_attack: EntryAttack | None = None
+    wall_pressure: WallPressure | None = None
 
 
 class Tactics:

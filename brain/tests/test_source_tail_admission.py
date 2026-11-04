@@ -129,8 +129,8 @@ def test_admitted_tail_still_checks_current_destination_and_delayed_dangers(monk
     assert len(scans)==1 and len(short)==2
 
 
-@pytest.mark.parametrize('facing,key', [(-1, 2097152), (1, 1048576)])
-def test_antic_tail_moves_to_sources_back_instead_of_neutral_wait(monkeypatch,facing,key):
+@pytest.mark.parametrize('facing,key', [(-1, 0), (1, 0)])
+def test_antic_tail_without_wall_intent_stays_neutral(monkeypatch,facing,key):
     n,s,sim,fc,scans,short=fixture(monkeypatch)
     s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
     fc.rs.trk.now[7][2].s=facing
@@ -145,12 +145,13 @@ def test_antic_tail_moves_to_sources_back_instead_of_neutral_wait(monkeypatch,fa
 
 
 @pytest.mark.parametrize('facing',[None,0,float('nan'),True])
-def test_antic_tail_with_unknown_facing_cannot_choose_a_side(monkeypatch,facing):
+def test_neutral_tail_never_infers_wallward_keys_from_unknown_facing(monkeypatch,facing):
     n,s,sim,fc,scans,short=fixture(monkeypatch)
     s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
     fc.rs.trk.now[7][2].s=facing
-    assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is None
-    assert not scans and not short and not n._receipts
+    offer=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    assert offer is not None and offer.mask==0
+    assert scans and short and not n._receipts
 
 
 @pytest.mark.parametrize('owner,kind', [(7,'move'),(8,'body'),(99,'delayed')])
@@ -160,15 +161,15 @@ def test_moving_antic_tail_still_requires_all_owner_whole_path_scan(monkeypatch,
     fc.rs.trk.now[7][2].s=-1
     assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is None
     assert len(scans)==1 and not short and not n._receipts
-    assert np.all(scans[0].commands[1:]==2097152)
+    assert np.all(scans[0].commands[1:]==0)
 
 
-def test_admitted_moving_tail_holds_original_key_without_another_long_scan(monkeypatch):
+def test_admitted_neutral_tail_never_turns_wallward_on_a_facing_change(monkeypatch):
     n,s,sim,fc,scans,short=fixture(monkeypatch)
     s['ents'][0]['fsms'][0].update(state='Slam Antic',t=0.)
     fc.rs.trk.now[7][2].s=-1
     first=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
-    assert first is not None and first.mask==2097152
+    assert first is not None and first.mask==0
     n.runner=first.draft
     s=deepcopy(s);s['f']=1001
     current=ChainSim(sim.start,sim.prefix,sim.hold,sim.params,sim.terrain,1001,1001)
@@ -176,9 +177,9 @@ def test_admitted_moving_tail_holds_original_key_without_another_long_scan(monke
     # A later facing value cannot silently change the already admitted recipe.
     fc.rs.trk.now[7][2].s=1
     second=n._transfer_offer(s,n._clock,current,fc,NS(target=8),False)
-    assert second is not None and second.mask==2097152
+    assert second is not None and second.mask==0
     assert len(scans)==1 and len(short)==2
-    assert second.draft.run.v['source_tail_mask']==2097152
+    assert second.draft.run.v['source_tail_mask']==0
 
 
 @pytest.mark.parametrize('tail_mask',[0,1048576,2097152])

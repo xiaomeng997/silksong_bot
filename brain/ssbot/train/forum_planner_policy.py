@@ -50,6 +50,7 @@ from ssbot.combat.projectiles import bells_mode
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
 from ssbot.combat.tactics.gauntlet import GauntletTactics, load_l2_rules
+from ssbot.combat.tactics.modes import wall_pressure_prefs
 from ssbot.core.forum import FLOOR_Y
 from ssbot.core.worldstate import Ev
 from ssbot.ipc.framing import ACTION_EXCLUSIVE
@@ -966,13 +967,25 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     # ---- the tick ----
 
-    def _chain_goal_preferences(self,state,prefs,*,game_time=None):
+    def _chain_goal_preferences(self,state,prefs,*,game_time=None,ws=None,forecast=None):
         chain=getattr(self,"chain_native",None);apply=getattr(chain,"goal_preferences",None)
         if not callable(apply):return prefs
         script=getattr(self,"slam_play",None);run=getattr(script,"run",None)
         observe=getattr(chain,"observe_bounce_goal",None)
         real_bounce=bool(callable(observe) and observe(state,prefs,run,game_time=game_time))
         handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce)))
+        goal=getattr(chain,"_transfer_goal",None);target=getattr(prefs,"target",None)
+        candidate=getattr(getattr(self,"tac",None),"wall_pressure_candidate",None)
+        if (real_bounce and ws is not None and forecast is not None and callable(candidate)
+                and target is not None and getattr(prefs,"wall_pressure",None) is None
+                and getattr(prefs,"entry_attack",None) is None and target not in getattr(prefs,"no_hit",())
+                and getattr(goal,"source_kind",None)=="BOUNCE"
+                and getattr(goal,"caster",None)==target==getattr(goal,"target",None)):
+            # Only this focus's verified bounce permits an overhead start. A
+            # bounce on A must not lend that exception to a newly selected B.
+            pressure=candidate(ws,forecast,target,observed_bounce=True)
+            reach=getattr(getattr(self.tac,"rules",None),"reach_u",1.8)
+            prefs=wall_pressure_prefs(prefs,pressure,reach_u=reach)
         out=apply(state,prefs,handoff=handoff)
         if out is not prefs:
             if run is not None:script.abort("observed target transfer: goal handoff")
@@ -1097,7 +1110,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 rx = self.two.rune_exit(f, s, ws.stamp.t_game_s)
                 if rx:
                     prefs = replace(prefs, rune_exit=rx)
-        prefs = self._chain_goal_preferences(s,prefs,game_time=ws.stamp.t_game_s if slam_play.GAME_CLOCK else f/60.)
+        prefs = self._chain_goal_preferences(s,prefs,game_time=ws.stamp.t_game_s if slam_play.GAME_CLOCK else f/60.,
+                                            ws=ws,forecast=fcast)
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))

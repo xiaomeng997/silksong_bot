@@ -223,7 +223,8 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         tail=self._kill_frame is not None and f>self._kill_frame
         for exposure in self._failure_exposures:exposure.observe(state,game_time=self._clock)
         exposed=[x for x in self._failure_exposures if x.active(f)]
-        related=bool(exposed or self.commitment or self.post_context or self.recovery or (self.runner.run is not None and self.arm=="B"))
+        residual=getattr(self,"residual_context",lambda:None)()
+        related=bool(exposed or self.commitment or self.post_context or self.recovery or residual or (self.runner.run is not None and self.arm=="B"))
         if loss:
             sources=[]
             for ev in state.get("ev") or ():
@@ -233,11 +234,12 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
                     source=d.get("source") or d.get("src")
                     if source is not None:sources.append(str(source))
             phase=("recovery_after_failure" if exposed else "commitment" if self.commitment is not None else "post" if self.post_context is not None
-                   else "recovery" if self.recovery is not None else "approach" if related else "none")
+                   else "recovery" if self.recovery is not None else "residual" if residual else "approach" if related else "none")
             # Preserve the HP fact before any fatal/legacy stop. Under the new
             # policy low HP requests Q1 pause/real quit in the normal supervisor.
             self._note("b2_hp_loss",frame=f,hp=hp,loss=loss,tail=tail,chain_related=related,phase=phase,
                        failure_exposure=[x.as_dict() for x in exposed],sources=sorted(set(sources)) or ["unknown"],
+                       residual_context=residual,
                        source_scope="same-frame eligible damage-call candidates; no predicted/near-frame attribution")
         if self.budget is not None:
             try:self.budget.observe(episode=self.episode,frame=f,arm=self.arm,hp_loss=loss,chain_related=related,

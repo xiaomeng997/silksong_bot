@@ -46,15 +46,24 @@ class NativeManualAirChain(NativeChainB2):
             (getattr(self,"_air_context",None) is not None or getattr(self,"_transfer_ready",False) or getattr(self,"_vault_ready",False)
              or (self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM) or getattr(self,"commitment",None) is not None
              or (self.runner.run is not None and self.runner.run.chain=="vault_idle")
-             or getattr(self,"recovery",None) is not None or getattr(self,"post_context",None) is not None))
+             or getattr(self,"recovery",None) is not None or getattr(self,"post_context",None) is not None
+              or (getattr(self,"_wall_pressure",None) is not None and not self._wall_pressure.get("yielded",False))))
 
     @candidate_generation.setter
     def candidate_generation(self,value):self._candidate_enabled=bool(value)
+
+    def residual_context(self):
+        ctx=getattr(self,"_wall_pressure",None)
+        if ctx is not None and (ctx.get("landing") or ctx.get("yielded")):
+            return {"source_move":asdict(ctx["goal"].responsibility),
+                    "kind":"wall_pressure_residual","input_owner":False}
+        return None
 
     def reset(self,episode,*,start_frame=None):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
         self._transfer_blade=None
+        self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
         self._transfer_responsibility={}
@@ -163,6 +172,10 @@ class NativeManualAirChain(NativeChainB2):
 
     def goal_preferences(self,state,prefs,*,handoff):
         """One destination before forecasting; critical/committed actions retain ownership."""
+        from .knife_chain_wall_native import prepare_goal
+        if prepare_goal(self,state,prefs,handoff=handoff):
+            from .knife_chain_wall_native import preferences as wall_preferences
+            return wall_preferences(self,prefs)
         if (self.arm!="B" or not handoff or self.commitment is not None or
                 self.recovery is not None or getattr(prefs,"want_bind",False)):
             self._transfer_ready=False
@@ -269,7 +282,7 @@ class NativeManualAirChain(NativeChainB2):
             retained.append(c)
         return retained
 
-    def _continuations(self,path,sim,geo,move):
+    def _continuations(self,path,sim,geo,move,*,wall_validator=None):
         """Reuse the B2 lower bound; no pre-contact target exemption after bounce."""
         from .knife_chain_post_actions import ordinary_post
         from .knife_chain_commitment import Continuation,FullContinuationScan,assess_continuations
@@ -278,12 +291,18 @@ class NativeManualAirChain(NativeChainB2):
         for kind in ("left_landing","right_landing"):
             p=ordinary_post(parent,sim.params,sim.terrain,kind=kind,profile=self.profile)
             paths[kind]=p
+            executable=self.continuation_executable(kind,p)
+            if wall_validator is not None:
+                executable=bool(executable and wall_validator(p))
             options.append(Continuation(kind,kind,ref,geo.ref(p),
                 p.through if p.end=="handback" else None,
-                self.continuation_executable(kind,p),"pass",geo.scan(p)))
+                executable,"pass",geo.scan(p)))
         def full(option):
             p=ordinary_post(parent,sim.params,sim.terrain,kind=option.kind,profile=self.profile,full=True)
-            return FullContinuationScan(replace(geo.scan(p),path_ref=option.path_ref),p.through)
+            scan=replace(geo.scan(p),path_ref=option.path_ref)
+            if wall_validator is not None and not wall_validator(p):
+                scan=replace(scan,complete=False,source=scan.source+"; wall-free validator rejected continuation")
+            return FullContinuationScan(scan,p.through)
         return assess_continuations(tuple(options),target_move=move,bounce_state_ref=ref,
             bounce_frame=path.through,short_frames=self.profile.short_frames,minimum_kinds=2,
             full_scan=full,unavailable_errors=(NominalUnsupported,GeometryUnavailable))
@@ -296,6 +315,12 @@ class NativeManualAirChain(NativeChainB2):
             if self.commitment:self._recover("policy priority gate: "+self.policy_gate_reason,f)
             return None
         if self.recovery is not None:return self._recovery_offer()
+        if (getattr(self,"_wall_pressure",None) is not None and not self._wall_pressure.get("yielded",False)):
+            from .knife_chain_wall_native import propose as wall_propose
+            if self._context is None:
+                self._recover("wall-side current context unavailable",f);return None
+            tick,sim,_,_=self._context
+            return wall_propose(self,tick[1],tick[2],sim,forecast,prefs,tick[3])
         if self._check_hook_start(f):
             return self._recovery_offer() if self.recovery is not None else None
         transfer_active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
@@ -307,6 +332,10 @@ class NativeManualAirChain(NativeChainB2):
                 self._recover("rune transfer current context unavailable",f);return None
             tick,sim,_,_=self._context
             return self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
+        pressure=getattr(prefs,"wall_pressure",None)
+        if (self.commitment is None and self.post_context is None and pressure is not None
+                and pressure.target==getattr(prefs,"target",None) and pressure.kind=="side"):
+            return None  # L2's wall-gap ground slash must not become a fresh jump/vault
         entry=getattr(prefs,"entry_attack",None)
         if (self.commitment is None and self.post_context is None and entry is not None
                 and entry.target==getattr(prefs,"target",None) and entry.kind=="side"):
@@ -495,16 +524,10 @@ class NativeManualAirChain(NativeChainB2):
                     end=transfer.predicted_tail_end(state,goal)
                     if end is None or not 1<=end-f+1<=self.profile.max_frames:
                         raise GeometryUnavailable("source hammer tail family clock unavailable")
-                    # A head hit can itself start a new Slam Antic. Neutral
-                    # then falls into the coming hammer; cross to the source's
-                    # back instead. Pick one fixed row, not a timing search.
-                    source=next(e for e in transfer.clappers(state) if e["iid"]==goal.caster)
+                    # Wallward travel now requires a separate L2 wall-pressure
+                    # successor with a checked landing/next knife. Never hold a
+                    # direction for an entire hammer tail as a wall-cling route.
                     tail_mask=0
-                    if transfer.control(source)[0]=="Slam Antic":
-                        face=getattr(rs.trk.now[goal.caster][2],"s",None)
-                        if isinstance(face,(bool,np.bool_)) or face not in (-1,1):
-                            raise GeometryUnavailable("source hammer tail facing unavailable")
-                        tail_mask=B["L"] if face==1 else B["R"]
                     tail=model_path(sim,plan,np.full(end-f,tail_mask,np.int64),game)
                     whole=geo.scan(tail)  # ALL owners, including the source and destination; no admission exemption
                     if not whole.complete or whole.contacts:
@@ -602,6 +625,8 @@ class NativeManualAirChain(NativeChainB2):
 
     def sent(self):
         selected=self._b2_selected;sent=super().sent()
+        from .knife_chain_wall_native import sent as wall_sent
+        wall_sent(self,selected,sent)
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("distance_vault"):
             if selected.stage=="manual_commitment":
                 from .knife_chain_vault_native import manual_jump_watch
@@ -665,6 +690,10 @@ class NativeManualAirChain(NativeChainB2):
             # neutral replacement is actually sent.
             self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
         return super()._abort_hook_dispatch(selected,**kwargs)
+
+    def _recover(self,reason,frame):
+        self._wall_pressure=None
+        return super()._recover(reason,frame)
 
     def summary(self):
         return {**super().summary(),"mode":"manual_air_probe","table":"manual_air+vault_near" if self.vault_enabled else "air_strike","tables":list(self.runner.chains),
