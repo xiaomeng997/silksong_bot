@@ -42,9 +42,12 @@ def observe(tac, ws, subjects, geo, t, mem):
                    "air_at": None, "decision": None}
     if ctx is not None:
         s = by_id[ctx["move"][0]]
-        phase = getattr(tac._ent(ws, s.iid), "phase", None)
-        elapsed = getattr(phase, "t_in_phase", None)
-        if (s.family in JUMPS and s.state == PRIMARY[s.family] and getattr(phase, "top", None) == s.state
+        # Forum uses OracleBackend() without boss specs: phase is None.
+        # The observed Control clock is exported for every entity in fsm.
+        controls = [row for row in getattr(tac._ent(ws, s.iid), "fsm", None) or ()
+                    if isinstance(row, (tuple, list)) and len(row) == 3 and row[0] == "Control"]
+        state, elapsed = (controls[0][1], controls[0][2]) if len(controls) == 1 else (None, None)
+        if (s.family in JUMPS and s.state == PRIMARY[s.family] and state == s.state
                 and type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed >= 0):
             # Do not replace this with t_commit (a first-seen tick) or the
             # second Cast Antic timer, which restarts during the same move.

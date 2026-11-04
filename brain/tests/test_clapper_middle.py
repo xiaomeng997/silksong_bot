@@ -2,7 +2,7 @@
 import pytest
 
 from ssbot.combat.tactics import gauntlet as G
-from ssbot.core.worldstate import E, PhasePost
+from ssbot.core.worldstate import E
 from tests.test_clapper_priority import manual, scene, step, change
 
 
@@ -15,7 +15,8 @@ def middle(xs=(22., 44.), hx=31., family=G.CC_JUMP):
     ws.res.silk = E(3)
     step(tac, ws, fc)
     change(fc, 7, family=family, state="Jump Antic" if family == G.CC_JUMP else "Cast Slam Antic", committed=True)
-    ws.entities[0].phase = PhasePost([(fc.subjects[0].state, 1.)], .02)
+    ws.entities[0].phase = None  # Forum's OracleBackend() has no boss specs.
+    ws.entities[0].fsm = [("Control", fc.subjects[0].state, .02)]
     return tac, ws, fc
 
 
@@ -24,7 +25,7 @@ def airborne(tac, ws, fc, land=25., face=1):
     tac.jb_land[7] = (22., face, land, True)
     # A velocity-backed landing, with the current root still before it.
     ws.entities[0].vel = E(((land - 22.) / .916, 12.))
-    ws.entities[0].phase = PhasePost([("Air", 1.)], .02)
+    ws.entities[0].fsm = [("Control", "Air", .02)]
 
 
 def test_only_guide_when_arrival_and_future_middle_room_both_fit():
@@ -34,7 +35,7 @@ def test_only_guide_when_arrival_and_future_middle_room_both_fit():
     assert tac.last["clapper_middle"]["route"] == "guide"
     assert out.stance_x == pytest.approx(G.jump_behind.aim_spot(22., 1))
     # Same primary clock near its deadline: it must stop claiming it can guide.
-    ws.entities[0].phase.t_in_phase = .47
+    ws.entities[0].fsm = [("Control", "Jump Antic", .47)]
     out = step(tac, ws, fc)
     assert tac.last["clapper_middle"]["route"] == "hold"
     assert out.stance_x == pytest.approx(ws.hero.pos.v[0])
@@ -45,7 +46,7 @@ def test_cast_second_antic_does_not_restart_the_aim_clock():
     step(tac, ws, fc)
     origin = tac._clapper_priority["middle_jump"]["antic_at"]
     change(fc, 7, state="Cast Slam Antic 2")
-    ws.entities[0].phase = PhasePost([("Cast Slam Antic 2", 1.)], .01)
+    ws.entities[0].fsm = [("Control", "Cast Slam Antic 2", .01)]
     step(tac, ws, fc)
     assert tac._clapper_priority["middle_jump"]["antic_at"] == origin
 
@@ -53,7 +54,7 @@ def test_cast_second_antic_does_not_restart_the_aim_clock():
 def test_late_first_seen_secondary_antic_is_unknown_not_a_fresh_clock():
     tac, ws, fc = middle(family=G.CC_JUMP_CAST)
     change(fc, 7, state="Cast Slam Antic 2")
-    ws.entities[0].phase = PhasePost([("Cast Slam Antic 2", 1.)], .01)
+    ws.entities[0].fsm = [("Control", "Cast Slam Antic 2", .01)]
     step(tac, ws, fc)
     assert tac.last["clapper_middle"]["route"] == "hold"
     assert tac.last["clapper_middle"]["reason"] == "aim clock unknown"
@@ -98,7 +99,7 @@ def test_first_jump_without_locked_velocity_waits_instead_of_guessing_landing():
 @pytest.mark.parametrize("what", ["clock", "body", "horizon", "occupied"])
 def test_unknown_or_covered_future_room_never_authorizes_guidance(what):
     tac, ws, fc = middle()
-    if what == "clock": ws.entities[0].phase = PhasePost()
+    if what == "clock": ws.entities[0].fsm = None
     elif what == "body": ws.entities[1].dmg_boxes = []
     elif what == "horizon": fc.horizon = .05
     else: fc.default = 0.
@@ -198,3 +199,33 @@ def test_declared_far_side_survives_source_landing_for_the_bounded_handoff():
     ws.stamp.t_game_s += 2.1
     step(tac, ws, fc)
     assert tac._clapper_priority["middle_jump"] is None
+
+
+def test_default_oracle_backend_control_clock_reaches_real_l2_without_phase():
+    from ssbot.backends.oracle_backend import OracleBackend
+    from tests import worldstate_fixture as fx
+    tac, ws, fc = middle()
+    raw = fx.window(0)[0]  # Portable STATE envelope; the two-Clapper scene is synthetic.
+    raw["ents"] = [{"iid": 7, "type_key": G.CLAPPER, "name": G.CLAPPER, "category": "enemy",
+                    "pos": [22., 5.], "vel": [0., 0.], "flipX": True, "hp": 50,
+                    "fsms": [{"name": "Control", "state": "Jump Antic", "t": .02}],
+                    "colliders": [{"name": G.CLAPPER, "enabled": True, "layer": 11,
+                                   "verts_world": [21., 3., 23., 3., 23., 7., 21., 7.],
+                                   "damage": {"can_cause_damage": True, "eff": 2, "hazard_type": 1, "flags": 0}}]}]
+    produced = OracleBackend().feed(raw)
+    ent = next(e for e in produced.entities if e.id == 7)
+    assert ent.phase is None
+    assert ent.fsm == [("Control", "Jump Antic", .02)]
+    ws.entities[0] = ent
+    out = step(tac, ws, fc)
+    assert out.target == 7 and tac.last["clapper_middle"]["route"] == "guide"
+
+
+@pytest.mark.parametrize("clock", [None, [], [("Control", "Air", .02)],
+    [("Control", "Jump Antic", float("nan"))], [("Control", "Jump Antic", -.1)],
+    [("Control", "Jump Antic", .01), ("Control", "Jump Antic", .02)]])
+def test_missing_invalid_or_ambiguous_control_clock_is_unknown(clock):
+    tac, ws, fc = middle()
+    ws.entities[0].fsm = clock
+    step(tac, ws, fc)
+    assert tac.last["clapper_middle"]["reason"] == "aim clock unknown"
