@@ -265,7 +265,7 @@ def register(prims):
 
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
-        if not hasattr(x.obs,"sim") or x.obs.ground:return None
+        if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
         row=press_now_row(x.obs.sim,body_box(x.obs.e),x.obs.F,left,x.v["side"])
         if row is not None:
@@ -299,13 +299,15 @@ def register(prims):
         return bool(x.obs.ground and x.obs.k>x.v["jump_k"]+antic+x.cfg["STOMP"]["takeoff_grace"]+2)
 
 
-def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False):
+def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False):
     """One observed-distance recipe and a two-frame external path.
 
-    defer_jump is retained for old offline callers; runtime has no full-flight
-    rejection/coast retry. Deferring J never cancels an existing sprint.
+    approach_only uses the same walk/dash/air keys without choosing a strike.
+    Its sent Run keeps that intent until the native adapter's planned handoff.
+    defer_jump remains for offline callers; neither cancels an existing sprint.
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
+    approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
     if len(es)!=2 or target is None or not complete_hf(state):return None
     enemy=next((e for e in es if e["iid"]==target),None)
     if enemy is None:return None
@@ -363,7 +365,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         gap=abs(enemy["pos"][0]-hp[0])
         # Observe the distance now. A model's eventual body intersection must
         # not make us release DASH or wait in front of the destination.
-        if not defer_jump and gap<=cfg["STOMP"]["jump_root"]:
+        if not (defer_jump or approach_only) and gap<=cfg["STOMP"]["jump_root"]:
             p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash)
         elif (link=="walk" and current_mode not in (K.M_DASH,K.M_SPRINT) and
                 not (int(sim.prefix[0])|state["act"]["hf"]["latched"])&B["DASH"] and
@@ -381,8 +383,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
         if link!="strike":link="air"
-    if defer_jump:
-        if not ground or (state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"]:return None
+    if defer_jump and (not ground or (state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"]):return None
+    if defer_jump or (approach_only and ground):
         p=replace(p,jump_k=k+10000,jump_until=k+10000,sprint_jump=False)
         # Deferring J must not release a dash already in progress (which
         # cancels its sprint transition), or slide a pending far dash clock.
@@ -391,6 +393,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
+    variables["_approach_only"]=approach_only
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
     draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
@@ -412,6 +415,6 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     path=replace(path,stage="approach",assumptions={**path.assumptions,
         "basis":"manual observed-distance dash/sprint/jump/stomp; current external step only",
         "next_decision":"actual target DownSlash hit plus bounce, miss, or new target move",
-        "flight_checked":False,"flight_endpoint":"not certified","jump_deferred":defer_jump})
+        "flight_checked":False,"flight_endpoint":"not certified","jump_deferred":bool(defer_jump or approach_only),"approach_only":approach_only})
     if path_problem(path,sim.hold):return None
     return draft,p,path,int(mask)
