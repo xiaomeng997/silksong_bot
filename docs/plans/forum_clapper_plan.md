@@ -4071,3 +4071,14 @@ P_RECEIPT及p_68f5c573/RESULT/P_RESOURCE_GUARD/ROOT_CLEANUP保留。Root独立�
 新analysis/w13_scored_focus_20261104T200240Z_68f5c573已备trial.py/run_unattended/三个原资源组件、SOURCE_PACKET/TRIAL_CONFIG/ENGINEERING_GATE_DRAFT/SCRIPT_PORT_RECEIPT/DRAFT_BINDING。两脚本逆向替换本批名/source/phase后全文等旧已核生命周期，帮助组件原字节同；原175 evidence逐项核同，另加当前267/source/功能/P/真实清理6项。环境只PROBE/BATCH/BUDGET三个隔离记账键变，其余seed314168/7HP/HP<=6首任何损血realQ1/death/Opt1/measure/关键日志/STOP/资源/真实清理不减。新目的为用户的手写候选竞争与执行接触，不称旧3326所有情况已安全。仍须真正自己worker的bootstrap input.stats原件，不用回放或旧连接替代。
 
 当前DRAFT ready=false/p_receipt_review_pending=Task159；对应sol/demos目录、真实ENGINEERING_GATE和contract均未创建，没freeze或启动。源/模型/profile/脚本/预算/执行HEAD与159收据齐后才实际写门并冻到真清，不复用0bf/877/0e预算，不开八局，不改AA/raw/STOP。用户无人值守授权有效，常规待审静默。
+
+
+### 7.125 #268有限P收据已核收，新增换目标入场未测需补两个现成点；单局仍无gate【已处理 Opus #268】
+
+268/review159三工件hash/bytes核同，接受当前有限P的source/script/input/runtime/清理口径：12输入哈希同、5脚本同P_ENABLE、148函数签名前后同、无外来模块，actual P0–15/High/Numba4/EcoQoS false，Opus结束与Root P窗口无重叠。这里只能签“有限点已测”，不能签全新策略预算/时限或所有场景；source267仍闭合，未修改运行源码。
+
+实际缺项明确接受：3304的_act16.3633ms离一帧仅0.30ms且有已批准记录的Windows背景，不能宣称时限富余；3303只有keep、3304无重选，没覆盖新的非keep胜者entry窗口查询/来源历史绑定；计时只有_act、未含完整trace tick。L2目标层0.4015/0.0683不是新增乘法比较开销，<0.1ms目标未单独证明，旧不同分支13.1212不能直接作差。
+
+Root决定只补当前功能前缀已有的2913 near和3085 middle两个具体换目标点。Task160在Opus自己的目录备同协议的单次完整_act功能输入，原点前shadow/真实已知前缀保留，到点出一包即停，不把2913新包后的旧STATE续到3085冒充闭环；S0/HF/prefix用生产86x1，必须证明实际非keep+EntryAttack/来源绑定/入场评估，没覆盖就明确未知。只E16–23 Idle、不P、不生产修改/新网格/录像future；Root后续自己独占补P，并同时记录完整trace tick/_act/L2/绑定范围。原3303/3304不重跑凑分布，也不另开通用优化项目。wake184。
+
+当前source68/331功能不变；新单局analysis/w13_scored_focus_20261104T200240Z_68f5c573草稿仍ready=false，无真实ENGINEERING_GATE/contract/sol试验根目录，无新游戏或掉血，旧0bf/AA/raw/STOP与Windows核心进程不动。STATUSfalse、Root无运行任务，待两个必要功能输入，保留用户无人值守授权与全部严格停止/真实清理门。
