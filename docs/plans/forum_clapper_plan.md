@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.112）：仍在w13。0bf误退修复已过588/246源审、247完整事务、248活跃P13.1212ms及250单局草稿终核；只读现场前置已通过。本节同步后冻结唯一新w13_transfer_hit_20261104T130555Z_0bf1b27f合同，未执行前不称实机成功。249连跳接口原型已有限核收，但旧表真实dt会漂一物理步、exact-base域不可直接上线；145继续实际起点单行端口及交叉重锤/可选避锤2冲刺参数接口。旧434/a1d0消费局不重开。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.113）：仍在w13。0bf唯一新局两次真hit/handback，但本次没触发窄条件命中检查；后段钩链提前结束后受锤2首2HP，已停并真实全清，旧合同不重跑。用户纠正中间可用时不要赶怪、外侧有机会尽早翻回；新d9c0e4fc先取消这类可选墙侧偏好，164相关回归过，待147源审，实际返回路线仍待146核。251单流端口已交，但旧合成起点与真实弹起错一拍，148按真实起点重锚有限行；连跳/交叉入口仍未上线。STATUS false/own_jobs空，无新实机gate。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3930,3 +3930,19 @@ Task145只做实际起点、唯一已选流的有限复核端口，先避免每�
 只读PRE_FREEZE_CHECK：registry instances/live空、restore_pending=false，无游戏，golden正确/Prefs无差，旧DEMO hash及mtime原样，STOP/练习标记不存在，707源当前同。没有reconcile/取活动锁/进程操作。用户Nov3无人值守授权仍有效，不逐局再问。计划先main→knife→tv提交后才写实际ENGINEERING_GATE/prepare全新合同；执行HEAD冻结至本单局真实全清，期间刀口树不提交。只跑w13_transfer_hit_20261104T130555Z_0bf1b27f一次；7HP、HP<=6 realQ1首损血，death/Opt1/日志/STOP/资源/worker自身input.stats/真实清理原门不减。旧434/a1d0、AA/8局/raw/停止原件不动。
 
 接下来的实机只验0bf原已sent+accepted刀、实际hit/bounce和交还/后续动作，不称新连跳入口已上线或完整对刀表已合并。STATUS在游戏前原子true并30秒刷新、等待peer/原资源门后才唯一WMI pythonw/自有Launcher；只在golden/Prefs/旧DEMO、registry、自有Game/worker/场worker/协调器真实独立全核后false，未知保留独占，不操作Windows核心进程。
+
+### 7.113 0bf新局首2HP停并全清；用户纠正站位优先，新d9c只取消不当墙侧偏好【未称已自动翻回】
+
+唯一新sol/demos/w13_transfer_hit_20261104T130555Z_0bf1b27f消费一次，runtime0bf、execution HEAD f0d27f44；WMI38376/实际协调30676、Game52764、worker50088/实际55632、场34216及自己的conhost34488/CrashHandler52848均已Root独立按PID/create_time核亡。实际worker55632自己的input.stats passed（0delay/jitter、HF2/2、pending0），--measure/protocol2 trace complete/overflow0/config complete/unresolved空。实际cleanup13:58:24.862108Z、golden正确/Prefs无差/旧DEMO hash+mtime恢复/registry instances/live空且restore_pending=false、worker资源全pass，之后才STATUS=false，完整收据保存。冻结期间未改HEAD/源码，清理后才新提交。
+
+2910/3061真实接受，下劈2913/3064实际命中弹起并原生handback；3153另一次旧slam真命中。新transfer_conditional_hit_check计数0，不能拿本局一般交还当2539窄修已现场认证。3067下一刀press未接受，3080miss恢复；3270对左335476新hop_hook，3276仍HarpoonAntic却table ended without realbounce，recovery等待到3304Catch；3326右335470的SlamCollider2打2HP，7→5，Q1首损血退出首包3344。未重跑/替换。原协议窗T14.6781973671/L2，attempt18.38含退出，CLI完整审计仍false/missing-health首3561在real_quit后；原件保留，退出诊断不修绿，非AA样本。
+
+用户现场纠正：两怪仍在约1/3位置时，应优先留两怪之间，不要为了赶怪主动绕外侧；若为躲跳锤已翻到外侧，有安全可执行机会就翻回，外侧续砍/赶怪不能一直拖延返回。Root日志3153墙侧side intent把stance拉到16.72，native墙侧路线拒绝后普通plan包含dashL，3154仍DASH(L)+runR。仅这些是事实，不把一次偏好变化直接当全后续因果已证。Task146独立核3153..3270返回机会/最小接口、3067真实新刀接受门和3276结束/Catch目标，不做大搜索。
+
+新源d9c0e4fc73f53156947e4bbe65904165c1d0b819（中间6c4d69b1）仅gauntlet.wall_pressure_candidate与11新测试：两只已知活Clapper的body之间有至少hero实际宽度时，拒绝optional墙侧赶怪意图，无论hero在中间或已经外侧；unknown peer拒绝可选意图。单怪/无中间空间保留临时墙侧出口，原entry/no_hit/安全/发键/target/clamp不改。只是优先级偏好，不强制待中间、不认证中间安全、不假称实际返回路线已完成。真实3153同几何/同目标调用旧源给left floor_span14.26..18.5194，当前拒绝该意图；仍只是候选调用，不是完整policy/新wire反事实。
+
+父analysis/wall_middle_guard_20261104保存0bf基线9例red5fail4pass→162pass；用户补外侧返回要求后outside_return/保存6c基线11例red2fail9pass→最终同一次164唯一pass/外来0，不相加、旧证据不覆盖。最终SOURCE_BINDING两文件LF、同707packet/261模型、source_d9c0e4fc.zip与CHANGE_REPORT已绑，五个aim未动。Task147只增量审两文件/11例和必要相邻，不重跑588/P/矩阵；新源reviewpending，无新P/合同/gate，不沿用已消费0bf门。
+
+Opus #251(Task145)13工件hash/字节收齐，单流接口和实际起点问题已接收，数值Root未独立重算不冒充全面核收。报告真实命中STATE的弹起比旧合成基准早一Update，旧33流实际起点只有H68过；发送后复核仍占下一tick。Task148限定真实命中S0/HF/实际dt/前缀，先正常基线与45/48/68/73少量代表点，沿既有搜索重锚，最多5分钟E计算窗口，不新建大矩阵。先核8物理步保护/未知锤窗/双2步的必要条件，有限模式不足就报uncovered，不搜到绿、不删世界；H45因果可知性与原型准备限制要分清。#231无证前提继续保留。连跳、交叉、额外冲刺仅接口/原型，不能称都已上线；同一安全接近/减速/可选冲刺后复用出刀，旧怪锤2责任持续。
+
+用户最新估时只是最小连跳1–2小时的粗估，取决实际起点端口，不是完成承诺；当前没有再开局的门。所有原停止/HP首损血Q1/Opt1/关键日志/资源/真实清理规则保留，单写三活动计划，旧AA/raw/消费失败局和Windows核心进程不动。
