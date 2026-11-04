@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.120）：仍在w13。#261发现d49新增标量读取在实机K×1状态上抛TypeError，旧K向量测试漏测；新8770341d已单行按canonical列取值修复，5实机形状红例→226相关通过，待155仅一行绑定闭合。f0a未运行草稿已保留作废，新877单局草稿重绑、仍无gate/合同。154完整_act功能稿继续，要求保留实机K×1输入，P仍归Root独占，未启动P/game；STATUS false/own_jobs空，连跳未上线。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.121）：仍在w13。262完整_act功能输入/263的877形状修复绑定已核收，源门闭合；尚未P或实机。用户新战术改为按默认/近怪插入/外侧挤墙/中间窄与可站分状态，旧早换/外侧一律no_hit返回不能直接带入新局。规格与12决策例已记，Task156仅静态给最小现有接口映射，未改运行源码；连续下劈入口仍未完整上线。未来自动生成打法仅讨论，不在本轮加框架。STATUS false/own_jobs空，草稿仍无真实gate/合同。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4016,3 +4016,13 @@ Opus在154生产policy影子2899遇到新错误：d49的cd=float(sim.start[K.ATK
 Root复现5个K×1红例，全部同TypeError：fresh3种cd/新刀条件+真实生产_transfer_offer Idle/SpellAntic两种目标，K向量9例正常。新源8770341deb04d59f49a24e490c120a49feaa1b45运行只一行cd=float(np.asarray(sim.start).reshape(K.K,-1)[K.ATK_CD,0])，正是261建议和_start_state canonical形状；不改冷却门/新刀语义/模型/动作。原两测试组参数化K与K×1，真实K×1模型roll和出刀行断言保留。有效red5fail9pass→同次226相关pass（原221+5）/外来0；SPEC/261三个原始工件hash/源绑定707packet/sourcezip/checks在analysis/transfer_shape261_20261104。Task155只核一行与两形状端点/绑定，不重跑226或大审；154旧f0a功能稿可继续原hook点，但测量输入保留实机K×1，不用扁平log reshape(K)冒充同形状完整入口。
 
 原analysis/w13_hook_handoff_20261104T164109Z_f0a94ecc从未有真实gate/contract/game，原样保留并写OBSOLETED_BY261。全新analysis/w13_hook_handoff_20261104T170112Z_8770341d草稿仅重绑source/隔离路径，脚本逆向替换全文与实际全清0bf相同、资源组件/transport未动，SCRIPT_PORT_RECEIPT新sha已重算，不沿用旧脚本hash。对应sol/demos新目录不存在，ready=false/source_review_pass=false，旧260是父源审阅，须155当前绑定闭合和154当前源P后再准入。不重开消费0bf局，原seed/HP首损血Q1/Opt1/关键日志/STOP/资源/真实清理不减。wake179，STATUS false/RootE已结束，无新P/game；三活动计划同步，旧AA/raw/STOP/Windows核心进程不动。
+
+### 7.121 262/263已核收；用户新战术先按状态统一优先级，不把未来自动生成讨论变本轮重构【已处理 Opus #262/#263】
+
+262/hook_act154十四工件、263/review155七工件hash/bytes核同。263确认877相对f0a仅canonical标量读取一行、两种形状端点过，SOURCE_REVIEW263 accepted，当前707runtime核同。262在f0a有限条件起点从3270到3303跑34次完整production_act，键逐拍同原局；3304真实hook-bounce→offbody交还→failure exposure→ordinary DASH+L出包即停，与原包相同，真实support/forecast/field/炸弹均接，非短回放桩。源码包补175数据文件后Root核数据当前，26文本CRLF差异属规范化，transfer文件git-f0a LF一致；SNAPSHOT初始mismatch清单不是最终当前字节验证。此功能稿仍E不计时，串行15–24ms/单拍30.4ms不当P；日志S0被reshape成K向量，Root当前源P移植须K×1。263修法不在3304分支调用，仍须当前源绑定，不用旧源功能代替新性能或现场。
+
+用户最新调整（覆盖此前早换偏好，运行源码尚未改）：默认打当前焦点直到逃跳瞄准完真正起跳才换；非焦点走近出近招就就近换打它；非焦点从背后跳来先钻，钻过后以这只更近怪为新焦点，不能刚接住又按“焦点起跳”切回。换到新怪有预期地面输出窗口就平砍，没有则头顶下劈/翻越。钻后常是hero在外侧、两怪同向挤墙：有怪跳就向开阔处退，有近招就翻回中间；中间无落脚空间先给头顶下劈/滞空意图等分开，不能硬落地；中间可站时优先离外侧墙更远的怪，并避免微差逐帧改目标。已承诺刀口段不被L2抢键。默认持焦点不是凌驾近怪插入/当前站位的绝对规则。
+
+analysis/target_priority_update_20261104/SPEC.md和DECISION_CASES.json存当前解释及12规格场景，明确不是已跑过的测试。Task156只静态给现有gauntlet/two_play/EntryAttack/jump_behind/刀口入口最小映射与避免切回的小状态，未授权新控制框架/模拟器/大搜索，不写生产。当前连续下劈入口还没完整上线，不能把“中间窄就连劈”偏好说成已实现无限连劈或任意冲锤覆盖。262性能壳保留，待最终小战术源绑定后Root独占P；不先按旧早切策略开877草稿。ENGINEERING_GATE_DRAFT追加new_user_tactic_pending=true，ready仍false，真实gate/contract/game都不存在。
+
+用户“将来自动生成打法/统一格式竞争”是架构讨论：统一候选条件/意图/执行入口/效益代价/失效交还接口，手写和自动生成候选未来可共用验证与评分，战术事件/安全交还点再竞争，硬检查先于评分、未知不当通过；不要求先重写所有旧规则，不在本轮实现自动生成器，也不以同一个生成模型给自身认证代替实机。本轮主线仍是上述手写小偏好与已有执行链的实机反馈。wake180仅请求156静态映射，STATUS false/无Root任务、未P/游戏，旧停止局/AA/raw/STOP/Windows核心进程不动，三活动计划同步。
