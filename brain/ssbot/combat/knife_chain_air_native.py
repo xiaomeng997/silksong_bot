@@ -692,7 +692,11 @@ class NativeManualAirChain(NativeChainB2):
         return super()._abort_hook_dispatch(selected,**kwargs)
 
     def _recover(self,reason,frame):
-        self._wall_pressure=None
+        ctx=getattr(self,"_wall_pressure",None)
+        # A different action's recovery cannot end the old hammer's liability.
+        # Retain only bookkeeping, never revive its Run or candidate permission.
+        if ctx is None or not (ctx.get("landing") or ctx.get("yielded")):
+            self._wall_pressure=None
         return super()._recover(reason,frame)
 
     def summary(self):

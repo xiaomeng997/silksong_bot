@@ -435,3 +435,18 @@ def test_landed_residual_cleanup_never_clears_new_target_commit(monkeypatch,fini
     assert WN.prepare_goal(n,s,p,handoff=True) is False
     assert n.commitment is new
     assert (n._wall_pressure is None)==finished
+
+
+def test_unrelated_commit_recovery_keeps_old_landed_residual(monkeypatch):
+    n,s,sim,fc,p=_landed_residual(monkeypatch)
+    old=n._wall_pressure
+    move=MoveInstance(8,1010,'CC_SLAM')
+    n.commitment={'move':move,'origin':1011,'ta':1.}
+    n._recover('new target current-step mismatch',1020)
+    assert n.commitment is None and n.runner.run is None
+    assert n._failure_exposures[-1].move==move
+    assert n._wall_pressure is old and n.residual_context()['source_move']['target_iid']==7
+    assert old['landing'] and old['yielded']
+    monkeypatch.setattr(WN,'_source_finished',lambda *a:True)
+    assert WN.prepare_goal(n,s,p,handoff=True) is False
+    assert n._wall_pressure is None

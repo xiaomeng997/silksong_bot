@@ -4093,7 +4093,6 @@ class ForumPlanner(Planner):
         if entry_target is not None:
             entry_times = entry_side.hit_times(sc, entry_target, pass1, T1,
                 ground_only=entry_target in (getattr(prefs, "ground_hit", ()) or ()), flags=r1.flags)
-            rest.sort(key=lambda i: int(entry_times[i]))  # same bounded envelope quota, never a safety verdict
         top = rest[:fcfg.K_b]
         # review (SG4): the map row counted too (without it a tick with no CONTINUE whose map row passed stage 1 raised
         # IndexError; with a CONTINUE the map row read the CONTINUE's slot)
@@ -4107,6 +4106,10 @@ class ForumPlanner(Planner):
             if first[i] < 0:
                 continue
             sib += [j for j in by_first[int(first[i])] if j != i and j not in top_set][:fcfg.sibs]
+        if entry_times is not None:
+            # Preserve the original safety quota and its V siblings. Only
+            # visit those SAME top members earlier for the requested first hit.
+            top.sort(key=lambda i: int(entry_times[i]))
         seen = set(prio)
         for i in top + sib:
             if i not in seen:
@@ -4759,19 +4762,20 @@ class ForumPlanner(Planner):
                 if wr_.any():
                     wk_ = ((~wr_).astype(np.int64),)
                     self.audit.win_rank_ticks += 1
-            entry_rank = ((np.where(safe, entry_times, T1 + 1),)
+            exit_rank = ~V
+            entry_rank = ((np.where(safe, entry_times, T1 + 1), exit_rank)
                           if entry_times is not None and not forced else ())
             if v2 and rune_bombs.NOGLIDE:
                 # SSBOT_FORUM_NOGLIDE (task 1v1 G2): of the safe rows with the same landed hits, one without a glide
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V,
-                                    v2_ff, gl.astype(np.int64)) + gf_ + (v2_nh, offl) + wk_ + entry_rank + nd_ + kk_ +
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank,
+                                    v2_ff, gl.astype(np.int64)) + gf_ + entry_rank + (v2_nh, offl) + wk_ + nd_ + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, ~V, v2_ff
-                                    ) + gf_ + (v2_nh, offl) + wk_ + entry_rank + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
+                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank, v2_ff
+                                    ) + gf_ + entry_rank + (v2_nh, offl) + wk_ + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
                                                                               hz))
             order = order[sel[order]]
             i = int(order[0])
