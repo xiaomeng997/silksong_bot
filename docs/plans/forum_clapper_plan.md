@@ -4149,3 +4149,15 @@ Task163先独立核B1小增量及原临界/配置边界，再给新中间规则�
 
 当前源码账本709（新增一个模块）、261模型未改、小快照862文件/五文件增量/SOURCE_BINDING/REVIEW_PACKET和最终JUnit已封存；Task165只审当前增量和最小反例，不重复404/政策矩阵/P/游戏，wake189。在途不算通过。新源独立审阅、真正完整_act功能/关键tick总耗时与新现场绑定仍待，旧636/e390门不给新源盖章；新单局/8局门均未开，不重开任何旧停止批。STATUSfalse/Root无任务，Windows核心进程未操作。
 
+### 7.133 #275生产时钟P2已修46e/经276核收；完整_act另查出入口抢占并最小接4e34900d，真正chain接近段已到null出包，尚无新P/实机【已处理 Opus #275、#276】
+
+275/review165的13工件/18输入hash同，明确ae7不接受：Forum实际OracleBackend()没有boss specs，Clapper.phase恒None；原新测试与条件脚本人为注入PhasePost，不能证明生产映射。Root同期独立E完整_act2609也落在335476/under/owner plan/neutral，和275相符；原错误、注入条件工件保留，CONDITIONAL_CASE_CORRECTION更正，不改绿。自己57148/field18012按PID/create独立真退出，无P/game。当前source clock改为唯一Entity.fsm里的Control三元组，主前摇state相符且elapsed有限>=0才记入口，Antic2不重启，未知/坏值/多Control不造时钟；没有扩大后端boss注册或改策略/守卫。全部中间fixture改phase=None/fsm，新增默认OracleBackend.feed合成Clapper实体的可移植真实映射用例及坏时钟边界。两次新增fixture缺category/eff的准备错误保留，不算有效红；修齐后旧observe有效6fail22pass→新源46eae3a1单次完整相关411pass/外来0，28专项是子集。
+
+276/review166八工件/17输入hash同，接受46两文件时钟源增量，关闭275字段P2。生产后端真实帧2552–2610重建不再注入phase，2609/2610恢复over335470/38.01/stomp；丢2552转换事件的该见证低估剩余时间，保守不引导，不外推所有丢帧都保证如此。晚在Antic2/飞行才建立中间ctx仍因未知原点不声明over，保留为保守边界，不额外扩修。165曾有一次约1分钟普通优先级字段核验、期间无P，本次166已改E16–23 Idle，口径分列。
+
+Root46当前完整_act虽已真选over/绑定源2552且transfer_ready=true，却仍返回ordinary neutral：可选generic vault看到起跳怪就先入，当前root12.78无表项便返回None，吞掉明确SWITCH踩头，_transfer_offer从未调用。它只是L2/绑定通过，不是动作通过。新源4e34900d9035f3e5e998e51df0b13f6164f05426只knife_chain_air_native与已有vault_manual测试：把已就绪、同target的明确SWITCH stomp按原side方式先接旧transfer，活动commit/recovery/policy/hook/wall等仍在前，transfer内部当前步/来源/输入/危险/发键查不改；不ready的stomp保留旧路径，side旧行为不变，没有entry的vault仍旧表。未合并池、改表、添序列或调L2分数；双方都可用时明确踩头现在优先transfer，属有意B策略选择，不能称纯性能等价。最初考虑的selector unknown/empty API方案未实施，相关初始红件标为被最终方案替代；最终有效red2fail143pass→单次受影响集145pass/外来0，7新增路由是子集，不和411相加。
+
+当前4e源E24–31 Idle完整_act2609已结束：真实生产后端/预报/政策→L2 over335470、EntryAttack stomp→原生观察源Move2552绑定SWITCH→_transfer_offer与_propose返回manual_commitment/rune_transfer/dash→最终owner chain，经OracleLink framing向null sink成功发2611/2097156（R+SPRINT）并建立本地Run。相同模板下父46只有ordinary neutral；现在接近段入口确已接上，但没喂新包后STATE，不证明实际游戏应用/起跳/命中/弹起/翻越。K形状86x1，原S0/HF/prefix在planner边界注入，影子重建差225明确保留，不称四项自然重建同；外来0/无新签名。数据在middle_dispatch276_20261104/FUNCTIONAL_ACT_RECEIPT、act_4e34900d/2609/，自己52876/field53652逐原PID/create独立核真退出、无子残留。父46的3004/field47072亦已独立核真消失，所有未通过、neutral和局限原件保留。
+
+当前709 runtime/261模型不变、小源码包/两文件binding/patch/JUnit已封存，Task167只核路由小增量与活动owner/旧适配器门保留，wake191；在途不当通过。三分支的选择与动作入口已接，实际三个分支和整链仍待新源独立审阅、真正P整tick与新绑定的有界w13实机验收；没有新P/合同/游戏/8局门，不拿E耗时或Null包冒充现场。旧停止批、冻结AA、raw与Windows核心进程保持。当前STATUSfalse/无Root计算，计划先main后同步knife/TV。
+
