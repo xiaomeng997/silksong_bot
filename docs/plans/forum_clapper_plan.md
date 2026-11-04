@@ -4041,3 +4041,18 @@ analysis/target_priority_update_20261104/SPEC.md和DECISION_CASES.json存当前�
 Root一次bridge.xml共321唯一pass/外来0，含新35行为、旧L2/entry/middle/wall与TwoPlay/SP9/policy相邻。此前212/217/221属于不同阶段集合，不相加；首focused3失败是夹具初选焦点与字段名错误，原件保留，不充有效源码red。SOURCE_BINDING/SOURCE_PACKET绑定708 runtime文件、模型261同父源，用户五个未跟踪aim不改；source_0e3cf866.zip是895源码/小数据文件，未把hash账本内未改的大型旧地图重复打包，所需模型仍从当前路径按hash只读。打包误带大文件已收窄，未动原始数据或他人进程。
 
 Task157请求上述七文件的窄增量源审，沿263，不重复321/全项目/动作网格/P/game；wake181。0e3源审在途不是通过。Root在自身act_0e3cf866准备265当前源完整_act功能入口（E24–31 Idle、真实K×1、当前策略/实际support/field、首不同包即停），登记STATUS进程防重启；新策略若使旧前缀分叉必须保留差异，不能沿用旧键等价/旧P。新增比较<0.1ms仅预算目标，尚无新P实数。旧877未跑草稿无gate/contract，已写OBSOLETED_BY_TACTICS；消费0bf/AA/raw/STOP均不重开或修改。当前无游戏/P，只有非计时E功能输入；新源审和必要完整预算通过后才新绑定一局w13合同与真实gate，用户无人值守授权有效，不再逐局问。
+
+
+### 7.123 #266两项偏好回归接受并最小修68f5c573，331功能通过；当前源门待158，不沿用0e3草稿【已处理 Opus #266，待158绑定闭合】
+
+266/review157七工件hash/bytes全核同，0e3按原样不通过。其事件/持有、不抢键、TwoPlay/墙压交接、真实Jump来源与A/off边界四项成立；两项P2接受：manual早返遗漏旧SP3/SP4的NODASH/NOPOGO/ground_hit，默认Idle焦点7u会把三项全部丢掉；retreat仅以同侧为条件，墙与两怪之间的hero也会站位卡墙且两只no_hit。不能把原321或35拍键相同说成这些场合已正确。
+
+Root新源68f5c573e9f0ff4e39d24d7b6065b5d2e42c51ed对0e3仅两个运行模块和已有行为测试。把原JB ground_hit/ground_first及SP4 NODASH/NOPOGO块提为_contact_preferences，两条路径共用原条件，保持buddy-locked的NODASH例外；不把用户已否决的瞄准期no_hit搬回manual。manual非retreat/非目标Air时先加共用接触偏好，再由明确EntryAttack stomp、flip/overhead stomp去除ground/no_pogo/ground_first，默认站地输出恢复旧偏好，明确踩头仍可用。
+
+retreat现在需已知几何、远侧怪根到外侧墙<=旧6u墙带、hero身后到_clamp边界至少完整cast_out_u距离，再满足Jump/Air或延迟圈才提供候选。不满足没有retreat候选，不再给两只no_hit。左右墙缝/非挤墙反例与真正挤远墙、hero站开阔侧的正例都有。未把同一后退空间条件加给flip：墙缝受困时向内翻正可能需要它；flip仍只是偏好，由原动作/身体/危险门核验。几何未知stomp意图、rear起跳点等其他P3登记未扩代码。
+
+analysis/target_priority_fix266_20261104保存SPEC/OPUS266_RECEIPT/有效red8fail226pass→同次green331pass/外来0、新SOURCE_BINDING/SOURCE_PACKET/source_68f5c573.zip。331是原321+10行为的同一次相关集合，不和父源结果相加；新45行为为子集。708 runtime账本及261模型不变，只有两运行文件hash变化，三文件git/LF/包核同；源包沿父895小文件集合，未重复拷大地图。Task158仅核三文件提取/顺序/明确stomp覆盖与开阔退让闭合，不重跑331/矩阵/P/game，wake182；在途不是通过。
+
+父0e3当前树完整_act功能已结束：35拍(86,1)输入重建差0、包全同、外来0、3304有失败责任交还；真实manual决策日志388tick、候选103tick，证明此功能壳真的走新选择，不称自然闭环/P。Root另独立核功能进程56036及场子进程29648的原PID/create_time均已消失。此证据仅父源；0e3的P草稿从未有P_ENABLE/没运行，266后已写OBSOLETED_BY266。当前68f源正在自己的act_68f5c573以E24–31 Idle重核同有限完整入口，复用未变模型的原缓存，首不同前缀包即停、最终3304一出包即停，不喂未来STATE；PID/阶段写STATUS，不重复启动。
+
+尚无新P数值、新游戏、合同或真实gate。源审待158闭合，之后才重绑当前源输入/完整_act性能与新单局；新增<0.1ms仍只预算目标。原消费0bf/AA/raw/STOP及Windows核心进程不改；用户无人值守授权有效，常规待审静默，不再逐局问。
