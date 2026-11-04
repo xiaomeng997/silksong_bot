@@ -1566,18 +1566,6 @@ class GauntletTactics:
             # leaves its rune circle - the landed-hits rank sits above the stance (trial 2: rows slashing it in the air
             # kept the hero airborne in front of it: the umbrella, the landing slam, the rune circle)
             out = replace(out, no_hit=frozenset({g.target}))
-        elif (jump_behind.ENABLED or (slam_play.AFTER and how_s == "slam: after")) and s is not None and (
-                s.type_key == CLAPPER) and (
-                s.family in (None, "CC_EVADE") or how_s.startswith(JB_GROUND_HIT)):
-            # SSBOT_FORUM_JUMP_BEHIND (SP3 trial 3): near it after a jump the planner's pogo / jump slashes on the idle
-            # Clapper sent it into its attack choice with the hero bouncing in the air (9 of 56 slams: no landing for
-            # the playbook, 3 hammer hits): its hits count only from the ground (the person slashes it standing). SP4:
-            # also in the flight (JB_PASS), its fall (JB_LAND), the jump cast's antic (JB_CAST_ANTIC) and after the
-            # hammer (SLAM_AFTER)
-            out = replace(out, ground_hit=frozenset({g.target}))
-            if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
-                # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
-                out = replace(out, ground_first=frozenset({g.target}))
         jt = self._jt if TWO_JUMPTRAP else None
         if (jt is not None and JT["ground"] and g.target == jt["iid"]
                 and how_s.startswith(("jump: under and behind (flight)", "jump: aim stance"))):
@@ -1620,19 +1608,7 @@ class GauntletTactics:
                 self.stats["esc_corner_walk"] = self.stats.get("esc_corner_walk", 0) + 1
         # task oldwin stage F2 (SSBOT_FORUM_SLAM_PLAY_PREFS=1, default off: as before): SP4's two planner preferences
         # NODASH / NOPOGO (dodge-side rules, not the slam script) kept with the slam script off (SSBOT_FORUM_SLAM_PLAY=0)
-        sp4_on = slam_play.ENABLED or SP4_PREFS
-        if (sp4_on and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
-                and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U
-                and not (TWO_SPRINTSW and self._buddy_locked(fc, s.iid))):
-            # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
-            # (TWO_SPRINTSW: not while the other one is in its lock phase - this one cannot start a slam then)
-            out = replace(out, no_dash=frozenset({g.target}))
-        if (sp4_on and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
-                and s.family in SP4_IDLE_FAMS):
-            # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air, and (its idle family
-            # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only
-            out = replace(out, no_pogo=frozenset({g.target}),
-                          ground_hit=frozenset(out.ground_hit) | frozenset({g.target}))
+        out = self._contact_preferences(fc, out, g, s, hx, how_s)
         if esc is not None and esc.get("stance") is not None and g.target == esc.get("hold"):
             # SP9b arm B (t1): short of B before the focus's Jump Aim, outside its landing hammer / circle after it
             out = replace(out, stance_x=float(esc["stance"]))
@@ -1705,6 +1681,42 @@ class GauntletTactics:
         self.stats["goals"][g.name] = self.stats["goals"].get(g.name, 0) + 1
         self.last.update(goal=g.name, goal_why=g.why, target_type=getattr(s, "type_key", None),
                          goal_t_end=None if math.isinf(g.t_end) else round(g.t_end, 3))
+        return out
+
+    def _contact_preferences(self, fc, out, g, s, hx, how):
+        """Shared SP3/SP4 row preferences; no target, stance, or safety changes.
+
+        Explicit tactical stomp preferences run afterwards. Aim-period no_hit
+        remains the legacy caller's decision, not part of this shared helper.
+        """
+        how_s = str(how)
+        no_hit_branch = (jump_behind.ENABLED and how_s.startswith(JB_NO_HIT) and not (
+            jump_behind.PASS_HIT and how_s == "jump: under and behind (flight)"))
+        if not no_hit_branch and (jump_behind.ENABLED or (slam_play.AFTER and how_s == "slam: after")) and s is not None and (
+                s.type_key == CLAPPER) and (
+                s.family in (None, "CC_EVADE") or how_s.startswith(JB_GROUND_HIT)):
+            # SSBOT_FORUM_JUMP_BEHIND (SP3 trial 3): near it after a jump the planner's pogo / jump slashes on the idle
+            # Clapper sent it into its attack choice with the hero bouncing in the air (9 of 56 slams: no landing for
+            # the playbook, 3 hammer hits): its hits count only from the ground (the person slashes it standing). SP4:
+            # also in the flight (JB_PASS), its fall (JB_LAND), the jump cast's antic (JB_CAST_ANTIC) and after the
+            # hammer (SLAM_AFTER)
+            out = replace(out, ground_hit=frozenset({g.target}))
+            if jump_behind.NO_JUMP and how_s.startswith(JB_GROUND_FIRST):
+                # SSBOT_FORUM_JB_NOJUMP (SP4): behind it, rows without a jump key first among equal landed hits
+                out = replace(out, ground_first=frozenset({g.target}))
+        sp4_on = slam_play.ENABLED or SP4_PREFS
+        if (sp4_on and slam_play.NODASH and s is not None and s.type_key == CLAPPER and s.pos is not None
+                and s.family in SP4_IDLE_FAMS and abs(hx - float(s.pos[0])) <= slam_play.NODASH_U
+                and not (TWO_SPRINTSW and self._buddy_locked(fc, s.iid))):
+            # SSBOT_FORUM_SLAM_PLAY_NODASH (SP4): a slam can start any frame: no dash + run (no input) near it
+            # (TWO_SPRINTSW: not while the other one is in its lock phase - this one cannot start a slam then)
+            out = replace(out, no_dash=frozenset({g.target}))
+        if (sp4_on and slam_play.NOPOGO and s is not None and s.type_key == CLAPPER
+                and s.family in SP4_IDLE_FAMS):
+            # SSBOT_FORUM_SLAM_PLAY_NOPOGO (SP4): a hit starts its attack choice: not from the air, and (its idle family
+            # CC_IDLE, which SP3's ground_hit missed) its hits count from the ground only
+            out = replace(out, no_pogo=frozenset({g.target}),
+                          ground_hit=frozenset(out.ground_hit) | frozenset({g.target}))
         return out
 
     @staticmethod

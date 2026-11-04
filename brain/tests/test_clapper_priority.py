@@ -102,7 +102,7 @@ def test_rear_jumper_is_intercepted_then_kept_after_landing():
 
 @pytest.mark.parametrize("side", [-1, 1])
 def test_outside_jump_retreat_is_not_overwritten_by_escape_or_wall_pressure(side):
-    xs, hx = ((20., 24.), 16.) if side < 0 else ((40., 36.), 44.)
+    xs, hx = ((52., 56.), 48.) if side < 0 else ((8., 4.), 12.)
     tac, ws, fc = scene(xs, hx); step(tac, ws, fc)
     change(fc, 8, family=G.CC_JUMP_CAST, state="Air", committed=True)
     tac.two_esc = {"hold": 8, "stance": 30., "no_hit": []}
@@ -254,3 +254,46 @@ def test_jump_source_reaches_the_existing_action_offer_and_checks_its_instance(m
     if available:
         assert offer.draft.run.chain == 'rune_transfer' and offer.draft.run.v['_entry_source_confirmed']
         assert offer.mask == int(sim.prefix[0]) and not n._receipts and n.commitment is None
+
+
+@pytest.mark.parametrize('family,state,distance', [(G.CC_IDLE,'Idle',7.),(None,'Idle',7.),('CC_EVADE','Evade Scuttle',7.),(G.CC_IDLE,'Idle',12.)])
+def test_manual_keep_retains_the_same_sp4_contact_preferences_as_legacy(monkeypatch, family, state, distance):
+    for name in ('ENABLED','NODASH','NOPOGO'): monkeypatch.setattr(G.slam_play,name,True)
+    tac,ws,fc=scene((20.,50.),20.+distance);change(fc,7,family=family,state=state)
+    out=step(tac,ws,fc)
+    assert out.target==7 and 7 in out.no_pogo and 7 in out.ground_hit
+    assert (7 in out.no_dash)==(distance<=G.slam_play.NODASH_U)
+    monkeypatch.setattr(P,'enabled',lambda fc:False)
+    old,ws2,fc2=scene((20.,50.),20.+distance);change(fc2,7,family=family,state=state)
+    prior=step(old,ws2,fc2)
+    assert (out.no_dash,out.no_pogo,out.ground_hit)==(prior.no_dash,prior.no_pogo,prior.ground_hit)
+
+
+@pytest.mark.parametrize('entry_style',['entry','tight'])
+def test_explicit_stomp_still_overrides_sp4_ground_only_bias(monkeypatch,entry_style):
+    for name in ('ENABLED','NODASH','NOPOGO'): monkeypatch.setattr(G.slam_play,name,True)
+    if entry_style=='tight':
+        tac,ws,fc=scene((20.,22.),21.);out=step(tac,ws,fc)
+    else:
+        tac,ws,fc=scene();step(tac,ws,fc)
+        change(fc,7,family=G.CC_JUMP,state='Air',committed=True);fc.default=0.;out=step(tac,ws,fc)
+        assert out.entry_attack.kind=='stomp'
+    assert out.hit_kw[out.target][3]>0
+    assert out.target not in out.no_pogo|out.ground_hit|out.ground_first
+
+
+@pytest.mark.parametrize('side',[-1,1])
+def test_wall_trap_never_offers_retreat_into_the_wall_or_silences_both_targets(side):
+    xs,hx=((4.,8.),1.8) if side<0 else ((56.,52.),58.2)
+    tac,ws,fc=scene(xs,hx);step(tac,ws,fc)
+    change(fc,8,family=G.CC_JUMP,state='Air',committed=True);out=step(tac,ws,fc)
+    assert all(c['rule']!='retreat' for c in tac.last['clapper_choices'])
+    assert not {7,8}.issubset(out.no_hit)
+
+
+@pytest.mark.parametrize('side',[-1,1])
+def test_no_wall_squeeze_does_not_offer_the_wall_cluster_retreat(side):
+    xs,hx=((20.,24.),16.) if side<0 else ((40.,36.),44.)
+    tac,ws,fc=scene(xs,hx);step(tac,ws,fc)
+    change(fc,8,family=G.CC_JUMP,state='Air',committed=True);step(tac,ws,fc)
+    assert all(c['rule']!='retreat' for c in tac.last['clapper_choices'])

@@ -98,7 +98,7 @@ def entry(tac, ws, fc, source, target, t, geo):
 
 def decide(tac, ws, fc, prefs, hx, t):
     """Choose once, then apply only that scene's scores and stance."""
-    from .gauntlet import RUSH, TWO_SLAM_RANGE_U
+    from .gauntlet import RUSH, TWO_SLAM_RANGE_U, TWO_WALL_BAND_U
     subjects = [s for s in fc.subjects if s.alive and s.in_play and s.pos is not None]
     mem = tac._clapper_priority
     if mem is None: mem = tac._clapper_priority = {"seen": {}, "intercept": None, "region": None}
@@ -154,7 +154,13 @@ def decide(tac, ws, fc, prefs, hx, t):
         if region == "middle" and mem["region"] != "middle":
             offer("middle", max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx))))
         if region in {"left", "right"}:
-            if any(s.family in JUMPS and s.state in AIR or (s.iid in tac.rune and t <= tac.rune[s.iid][3]) for s in subjects):
+            far = geo["high"] if region == "left" else geo["low"]
+            far_room = geo["xb"] - far.pos[0] if region == "left" else far.pos[0] - geo["xa"]
+            back_room = (hx - geo["xa"] - tac.rules.wall_room_u if region == "left" else
+                         geo["xb"] - tac.rules.wall_room_u - hx)
+            if (far_room <= TWO_WALL_BAND_U and back_room >= tac.rules.cast_out_u and any(
+                    s.family in JUMPS and s.state in AIR or (s.iid in tac.rune and t <= tac.rune[s.iid][3])
+                    for s in subjects)):
                 offer("retreat", default)
             if default.state in NEAR: offer("flip", default)
         if region == "tight": offer("overhead", default)
@@ -219,6 +225,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     if retreat or (target.family in JUMPS and target.state in AIR):
         out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if retreat else {g.target}), entry_attack=None)
     else:
+        out = tac._contact_preferences(fc, out, g, target, hx, how)
         out = entry_attack_prefs(out)
         if style == "stomp":
             kw = dict(out.hit_kw); kw[g.target] = (0., 0., 0., hw[g.target])
