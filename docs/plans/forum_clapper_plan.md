@@ -4092,3 +4092,11 @@ Root在当前68f源机械移植，不改生产，在原独占/5秒暂停/原资�
 analysis/target_priority_fix266_20261104/p_switch269/保留两份输入/脚本/runtime/完整trace与P_RECEIPT。两组自有worker/场进程逐PID+create_time独立核真消失；golden/Prefs/旧DEMO hash+mtime不变、registry实例/live空restore_pending=false、无游戏，ROOT_CLEANUP后才false。资源门未改、Windows核心进程无操作。
 
 当前source68/331回归与267独立源审不变。新单局w13_scored_focus_20261104T200240Z_68f5c573按当前源/模型/脚本/配置/有限预算重新绑定，269及全部相关旧编号逐项accepted，不复用旧停止局合同；计划先main批、同步knife/TV后才写真实ENGINEERING_GATE/新contract并冻结刀口HEAD。仅新工程一局w13、seed314168、7HP起点、HP≤6真实Q1首任意掉血即停，无补局/重跑/8局；--measure、实际worker本连接input.stats零delay/jitter/HF2/2/pending0、原死亡/期望键/Opt1/缺关键日志/资源/STOP/真实清理全部保留。新战术意图和实际动作逐项审计，不把连续下劈离线表说已上线。用户11月3日已授权无人值守，不再等用户到家。运行源码未改，冻结期间不提交knife，真实全部清理后才同步后续计划。
+
+### 7.127 当前68f新w13已首损停止/真实清理；一帧回切冲突已最小修e390818a，337回归过，待独立增量审阅
+
+已按7.126实际冻HEAD14cc2aa3启动新单局w13_scored_focus_20261104T200240Z_68f5c573，非旧批重跑。游戏52864；自有worker22840本连接input.stats原始零delay/jitter、HF2/2、pending0，--measure开启。首受击2761，335470/Slam Collider 2，7→5/2HP，Q1触发后2779首真实退出包，无死亡/恢复；本局无原生刀口commit/hit/bounce。attempt12.58s和正式window T8.752629s分列。配置/trace/window complete、unknown/unresolved空，但完整测量audit仍false：2997开始缺hero HP，全在首退出2779之后；原始失败不改绿、不重跑。worker所有资源清理pass；Launcher20:37:19Z完成game/Prefs/DEMO清理，Root20:39:07Z独立核四个已知自有PID全无、无残留owned子进程/游戏、registry空restore_pendingfalse、golden/Prefs/DEMO hash+mtime不变后才false；场worker精确PID未单独留存，worker.close检查和独立无残留结果据实分列。
+
+完整measurement抓到优先级矛盾：2608 takeoff从335476换335470，**2609下一帧intercept又抢回同一仍在空中的335476**（来源CC_JUMP_CAST/antic2552），不是2613稀疏普通日志才首次回切。后来原焦点向右后撤，英雄在两怪左侧跳/开伞，被335470落地锤打中；前述回切是否唯一导致后续受击尚未证明。TACTICAL_EVENT_FACTS与NO_RETRY原样保留局部因果边界。
+
+新源e390818ae63b177202b2dd5e7e1d2b18b77283d7只改clapper_priority和已有语义测试：takeoff真胜出时记已主动离开的Move，同一跳不能下一帧被解释成新背后来怪；新Move/离开跳跃族/消失/reset清除，真正新背后跳和新近招仍按原候选竞争。不改分值/持有时长/按键/输入/危险/模型，也不扩动作池或连续下劈。有效红6失败331通过→同次绿337通过、外来0（六项为新增，旧331为子集）。analysis/takeoff_retarget269_20261104保存补丁、源绑定/708清单/小快照/红绿JUnit。当前新源审阅与新运行绑定待核，68f旧P不自动盖新源。原工程已消费且严禁同条件重试；Task161请Opus只核这个小增量和新现场事实，不再扩政策矩阵/时序网格。
