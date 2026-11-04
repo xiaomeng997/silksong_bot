@@ -1,8 +1,9 @@
-"""HP responsibility after a SENT preparation/commitment fails.
+"""HP responsibility after a sent action or its observed own bounce tail fails.
 
 This is observation bookkeeping, never an action selector, a damage predictor or
-an enemy timer. The caller must have a successful-send record before creating an
-exposure. Unknown target/end observations keep it open; frame count alone cannot
+an enemy timer. The caller must have a successful-send record, or an actual own
+DownSlash hit+bounce joined to that action before a tail admission is declined.
+A declined tail is not a new send, accepted attack or predicted-hit receipt. Unknown target/end observations keep it open; frame count alone cannot
 end a slam. Actual FSM/game-time evidence, not frame - state_time*60, identifies a
 later slam so hit-stop/frozen game time cannot relabel this instance.
 """
@@ -33,7 +34,7 @@ def _number(value):
 
 @dataclass
 class FailureExposure:
-    """One failed, already-sent move's inclusive responsibility interval.
+    """Observed source responsibility after an executed action or own bounce-tail failure.
 
     With an observed end E, active through max(E, failed_frame+30), inclusive.
     Without E, stays active indefinitely. Death supplies observed end evidence;

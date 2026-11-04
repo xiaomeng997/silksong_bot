@@ -385,20 +385,39 @@ class NativeManualAirChain(NativeChainB2):
              "post_bounce":"N=2 short or one full exit; normal planner after real bounce",
              "continuations":asdict(exits),"plan":vars(plan)})
 
+    def _decline_source_tail(self,goal,state):
+        """Account for the observed own bounce's failed tail, not a new send."""
+        key=(goal.caster,goal.cast_fa)
+        first=key not in self._transfer_finished
+        self._transfer_finished.add(key)
+        if (not first or self.commitment is not None or goal.source_kind!="BOUNCE"
+                or goal.responsibility.family!="CC_SLAM"):return  # active failure is recorded by _recover
+        exposure=self._failure_exposure(goal.responsibility,goal.cast_fa,state["f"],goal.cast_ta)
+        exposure.observe(state,game_time=self._clock)
+        self._failure_exposures.append(exposure)
+        self._note("b2_failure_exposure",frame=state["f"],exposure=exposure.as_dict(),
+                   source="observed own DownSlash hit+bounce; tail admission declined; no new tail send")
+
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
         run=self.runner.run
         active=run is not None and run.chain==transfer.PROGRAM
         if active:target=run.v["iid"]  # the already-sent action keeps the same target through its real bounce
         entry=getattr(prefs,"entry_attack",None)
-        if (active and run.link=="bounce_tail" and entry is not None and entry.target==target and entry.kind=="side"
+        wanted=getattr(prefs,"target",None)
+        changed=wanted is not None and wanted!=target
+        side=entry is not None and entry.target==target and entry.kind=="side"
+        if (active and run.link=="bounce_tail" and (changed or side)
                 and not transfer.bounce_tail_pending(state,self._transfer_goal,game)):
-            # This is a planned post-bounce handback, not a failed new strike.
+            # The real hammer-off is a planned boundary. A long source tail
+            # must not carry its old target into another approach commitment.
             self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
             self._press=self._accepted=self._hit=None
             self._transfer_ready=False
-            self._abandon("observed source hammer tail ended: tactical side attack")
-            self._note("target_entry_side_handoff",frame=f,target=target)
+            self._abandon("observed source hammer tail ended: tactical target changed" if changed else
+                          "observed source hammer tail ended: tactical side attack")
+            self._note("target_entry_target_handoff" if changed else "target_entry_side_handoff",
+                       frame=f,old_target=target,target=wanted if changed else target)
             return None
         if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
         queued,_=self.queued_prefix(f,state)
@@ -448,7 +467,7 @@ class NativeManualAirChain(NativeChainB2):
                     if not whole.complete or whole.contacts:
                         self._note("source_tail_declined",frame=f,through=tail.through,complete=whole.complete,
                             first=None if not whole.contacts else asdict(whole.contacts[0]))
-                        self._transfer_finished.add((goal.caster,goal.cast_fa))
+                        self._decline_source_tail(goal,state)
                         if active:self._recover("source hammer tail admission blocked",f)
                         return None
                     draft.run.v["source_tail_admitted"]=True
@@ -490,7 +509,7 @@ class NativeManualAirChain(NativeChainB2):
         except GeometryUnavailable as exc:
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
             if draft.run.link=="bounce_tail" and goal is not None:
-                self._transfer_finished.add((goal.caster,goal.cast_fa))
+                self._decline_source_tail(goal,state)
             if active:self._recover("rune transfer external step unchecked",f)
             return None
         if not scan.complete or scan.contacts:
@@ -606,4 +625,4 @@ class NativeManualAirChain(NativeChainB2):
     def summary(self):
         return {**super().summary(),"mode":"manual_air_probe","table":"manual_air+vault_near" if self.vault_enabled else "air_strike","tables":list(self.runner.chains),
                 "online_search":False,"geometry_scope":("vault: current external step only, empirical skill; other air: contact path and N=2" if self.vault_enabled else "current/contact path plus existing N=2 continuations"),
-                "post_bounce":"tactical target to shared air/strike after observed source slam tail; original exit remains a fallback"}
+                "post_bounce":"observed hammer-off hands to current tactical target; declined bounce-tail admission hands to ordinary planner"}

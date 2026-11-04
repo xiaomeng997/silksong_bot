@@ -202,3 +202,77 @@ def test_real_tail_table_reproduces_admitted_mask(tail_mask):
     made=propose(made[0],s,1.,sim,8,False,np.zeros((0,6)),set(),goal)
     assert made is not None and made[0].run.link!='bounce_tail'
     assert not made[3]&1048576  # destination is to our right
+
+
+@pytest.mark.parametrize('kind',[None,'stomp','side'])
+def test_tail_end_releases_old_target_before_any_new_approach(monkeypatch,kind):
+    from ssbot.combat.tactics.modes import EntryAttack
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    first=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    n.runner=first.draft;n.commitment={'move':first.move,'origin':1000,'ta':1.}
+    n._hook_start=n._jump_start=n._committed_future=object()
+    n._press=n._accepted=n._hit=999
+    s['ents'][0]['fsms'][0].update(state='Slam Recover',t=.1)
+    s['ents'][0]['colliders']=[{'name':'Song Heavy Sentry','enabled':True}]
+    entry=None if kind is None else EntryAttack(7,kind,8,'CC_SLAM',6.,1.)
+    monkeypatch.setattr(N.transfer,'propose',lambda *a,**kw:pytest.fail('old target must not be proposed after handoff'))
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=7,entry_attack=entry),False) is None
+    assert n.runner.run is None and n.commitment is None and not n._transfer_ready
+    assert n._hook_start is n._jump_start is n._committed_future is None
+    assert n._press is n._accepted is n._hit is None
+    assert not n._failure_exposures and not n._receipts
+    assert any(x['event']=='target_entry_target_handoff' and x['target']==7 for x in n.events)
+
+
+@pytest.mark.parametrize('wanted',[None,8])
+def test_tail_end_with_same_or_no_target_preserves_existing_continuation(monkeypatch,wanted):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    first=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    n.runner=first.draft;n.commitment={'move':first.move,'origin':1000,'ta':1.}
+    s['ents'][0]['fsms'][0].update(state='Slam Recover',t=.1)
+    s['ents'][0]['colliders']=[{'name':'Song Heavy Sentry','enabled':True}]
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=wanted,entry_attack=None),False) is not None
+    assert n.runner.run is not None and n.commitment is not None
+    assert not n._failure_exposures
+
+
+def test_target_change_during_tail_keeps_goal_and_committed_keys(monkeypatch):
+    from ssbot.combat.tactics.modes import GoalPrefs,EntryAttack
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    first=n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    n.runner=first.draft;n.commitment={'move':first.move,'origin':1000,'ta':1.}
+    goal=n._transfer_goal
+    prefs=GoalPrefs(mode='RUSH',stance_x=20.,weights={},target=7,
+                    entry_attack=EntryAttack(7,'stomp',8,'CC_SLAM',6.,1.))
+    assert n.goal_preferences(s,prefs,handoff=True) is prefs
+    assert n._transfer_goal==goal and n.commitment is not None
+    offer=n._transfer_offer(s,1.,sim,fc,prefs,False)
+    assert offer is not None and offer.move.target_iid==8
+    assert n.commitment is not None and not n._failure_exposures
+
+
+def test_declined_real_bounce_tail_records_source_responsibility_without_send(monkeypatch):
+    n,s,sim,fc,scans,short=fixture(monkeypatch,contact=PathContact(1005,7,'move'))
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is None
+    assert len(n._failure_exposures)==1 and not n._receipts and n.commitment is None
+    exposure=n._failure_exposures[0]
+    assert exposure.move==n._transfer_goal.responsibility
+    assert exposure.origin==exposure.failed_frame==1000 and exposure.minimum_through==1030
+    assert exposure.active(1060)  # no observed move end: not a 30-frame timeout
+    # The same declined bounce cannot double count or manufacture a tail send.
+    n._transfer_offer(s,1.,sim,fc,NS(target=8),False)
+    assert len(n._failure_exposures)==1 and not n._receipts
+
+
+def test_successful_tail_does_not_create_failed_exposure(monkeypatch):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    assert n._transfer_offer(s,1.,sim,fc,NS(target=8),False) is not None
+    assert not n._failure_exposures
+
+
+@pytest.mark.parametrize('kind,family',[('SWITCH','CC_SLAM'),('CAST','CC_SLAM'),('BOUNCE','CC_CAST')])
+def test_destination_intent_is_not_evidence_for_a_failed_slam_tail(monkeypatch,kind,family):
+    n,s,sim,fc,scans,short=fixture(monkeypatch)
+    goal=replace(n._transfer_goal,source_kind=kind,source_move=MoveInstance(7,946,family))
+    n._decline_source_tail(goal,s)
+    assert not n._failure_exposures and not n._receipts and n.commitment is None
