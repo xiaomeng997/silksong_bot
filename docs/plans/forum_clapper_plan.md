@@ -3754,3 +3754,15 @@ Native把实际源hit+bounce与L2候选相交后才进入。有限动作helper�
 analysis/target_side_followthrough_20261103为当前入口：同一次15文件496唯一通过、源外模块0（FINAL_CHECKS/final3.xml），包含原ForumPlanner/V2安全回归、transfer/接近/墙侧与新Wanderer地面/空中本拍A、真实install→before_send→sent→ground交还/回执保持。首轮Reed格挡夹具、K/回执字段和NUMBA线程上限夹具错误、中间失败保留，不冒充有效red。最终未再改源后重跑，6文件LF与Git6bb同。SOURCE_PACKET707运行资产含versions.lock与新entry_side；261模型（knowledge另3辅助文件不算模型）与7884逐项raw同，用户5aim仍未跟踪只读。新source zip和235收据均已绑；旧2915组件不重复跑，也不推当前自然闭环/实际接刀。
 
 新源130增量审仍待，仅核6文件和必要相邻用例，不复跑1360/801/629矩阵。随后另作当前新源完整_act计时与新单局绑定；当前无新P/游戏/真实gate，旧eff草稿、823停止局及旧预算不复用。Windows核心进程不动、原输入/资源/HP首损血/Q1/Opt1/真实清理门保持。本轮源提交6bb1452c，文档仅按main→knife→tv三份同步。
+
+### 7.98 236优先级与剪枝成员修正；旧残余跨新目标恢复仍记账【新源a1d0ed48；503唯一相邻回归通过，131增量审待核】
+
+已处理 Opus #236(Task130)：MANIFEST文件hash/字节与独立496用例集合/结果核同，235的R4/R5独立四例通过；其余旧6bb已核内容不重复扩审。Root接受P2剪枝成员问题，明确首刀不应越过长期站位/场景出口/角落、SG8处境和两条后路的V质量偏好；先前7.97所称“只在命中数/站位前”没有准确列出实际层级，现以本节修正，不将236通知本身当许可。
+
+a1d0ed48把entry_rank移到v2_nh（含场景值/角落/地图处境）、offl、原window/nd/kept及安全/承诺之后；entry局部先比较~V再比较最早接触，仅在这些更高处境同档时推动首刀。非entry/A/forced的原排序语义不变，0..2即时A/原side集合/HF/实际接受/危险与退路检查不改。V仍是既有普通规划器的后路排序，不把它当本轮新全路径证书，原刀口N2下界不减。
+
+不再重排rest整体；K_b成员与rest[:8]的兄弟行仍按原(Hz,Hz_soft,U,−J)安全顺序选取，只在已经选定的相同top成员中按首刀时间先查。候选数、K_b/sibs额度和剩余队列成员不扩大；没有可核首刀时稳定维持原次序。P3也收：新target承诺失败恢复时，已landing/yielded的旧锤残余只记账继续留到真实hammer-off/确认死亡，父类仍给新失败建严格暴露/禁重试和清其交易；不恢复旧Run或发键权。active wall失败与reset保持原清理。
+
+analysis/entry_priority236_20261104为当前入口。七项有限回归直接核实际最终lexsort元组的field/SG8/V/硬危险高于早刀（同档仍早刀优先）、实际K_b=3安全成员/兄弟在有无首刀场景相同，以及真实install/sent→landing→新target recover的旧残余。旧6bb只把~V结果命名为exit_rank作无行为标识后5fail/2pass，修后7pass；最终同一次16文件503唯一通过/源外模块0，含旧496不相加。排序probe是实际键层级的两行测试，不冒充坏角落自然整局；无新P/游戏/实际接受/命中认证。
+
+本增量2运行+2测试LF与Git同；SOURCE_PACKET仍707实际资产含versions.lock，261模型与6bb raw全同、用户五aim只读不暂存。当前新source zip/236收据/FINAL_CHECKS与P_REPLAY_DRAFT已绑定，草稿ready=false/execute=false、没有SOURCE_REVIEW/P_ENABLE或实机gate。Task131只增量核四文件/七边界和必要503，待核后才新源完整_act计时与新单局合同，不复用6bb/eff/823旧凭证。Windows核心进程、资源门、输入配置/HP首损血/Q1/Opt1/真实清理均保持；计划仍main→knife→tv三份同步。
