@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.108）：仍在w13。434单局真实命中后提前退出、后来开伞被锤1打2HP，原首损血Q1已停且真实全清；旧局不重开。fc条件命中检查经245发现Antic站起身体漏界，新0bf1b27f已改为观测/既有模型全姿态并集，588唯一相关回归通过；独立增量源审和活跃accepted-hit完整_act P仍待，没有新合同或实机gate。当前STATUS false、无自有离线作业。最新细节和证据见页末7.108，不用历史源SHA启动。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.109）：仍在w13。434旧局真实命中后提前退出、后来开伞被锤1打2HP，已首损血停并真实全清，旧局不重开。新0bf1b27f修复接触后误否及Antic站起漏界；588相关回归通过，Opus246独立增量审已核收、无阻挡。还差活跃accepted-hit完整_act事务草稿与实际P预算，再另绑下一次有界实机；没有新合同或游戏运行。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -3892,3 +3892,9 @@ STATUS false/own_jobs空、无游戏/P，旧434实际全清后才提交本源；
 analysis/transfer_pose245_20261104保存SOURCE_BINDING三文件LF、同707运行packet/261模型、source_0bf1b27f.zip839文件、OPUS245_RECEIPT、CHANGE_REPORT及red/green/final.xml。实际2539局部helper仍只保护postcontact2541，原键/latched同、无新global INV、_hit/post_context None，盒对实际最大误差约.00000196u；旧拒绝contact仅fixture，未重建RangeSupport/fullpolicy/full_act，不称闭环或动作认证。
 
 Task140只做三文件增量审和13新例/必要相邻，不重复588/大矩阵。Task141另在Opus自己目录准备原2539已sent+accepted事务的因果rehydration完整_act草稿，保留生产support/forecast/clock、绝对行及null framed ACTION/sent，逐字段给原日志来源，不用future造hit或假危险扫描。只允许E功能核验，不跑P/游戏；Root后续独占新P才核活跃分支完整预算。旧2765..2769 side-band P没走新分支，不能给新源盖章。新源独立审/P/新合同仍待，旧434/a1d0及原STOP/AA/原录制/五个aim文件与Windows核心进程不动。
+
+### 7.109 246独立增量源审已核收；下一步只补活跃分支完整事务预算
+
+已处理 Opus #246(Task140)：11工件hash/字节核同、154case逐项同588的相邻子集、13例red同6fail/7pass、三个独立蹲伏探针均拒绝；707运行文件/261模型当前字节重核同。0bf1b27f源码审阅没有阻挡，SOURCE_REVIEW与OPUS246_RECEIPT已保存。两真实朝向的Antic横向/顶部都被包住；434的root y约.006u微降令包络底边少.006u是P3记录，当前从上方检查不追加代码，不把本包络称未来全几何保证。
+
+Task141的active_hit141草稿目录已出现，但尚无正式交付编号/报告，不能把目录或进程退出当完成；不重复启动对方任务。原2539活跃sent+accepted分支仍须完整_act（含生产support/forecast/before_send/framed ACTION/sent）的功能与独占P核验，旧side-band P未触发本分支。代码与源审已完成不等于实际动作复验；P及新合同具备后按用户Nov3无人值守授权另开有界新局，原消费局、HP/Q1/Opt1/STOP/资源/关键日志/真实清理门不减。
