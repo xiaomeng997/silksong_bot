@@ -432,6 +432,28 @@ class NativeManualAirChain(NativeChainB2):
         self._note("b2_failure_exposure",frame=state["f"],exposure=exposure.as_dict(),
                    source="observed own DownSlash hit+bounce; tail admission declined; no new tail send")
 
+    def _transfer_hit_check(self,state,sim,plan,path,game):
+        """An accepted strike's conditional hit path, not a hit/handback receipt."""
+        f=state["f"];cf=plan.contact_frame;source=self.commitment
+        if (source is None or source["move"]!=plan.move or type(self._press) is not int
+                or type(self._accepted) is not int or not self._press<=self._accepted<=f
+                or type(cf) is not int or not 1<=cf-f<=2
+                or plan.move not in self._transfer_target_moves):return path,frozenset()
+        body=transfer.stationary_antic_body_for_hit_check(state,plan.iid,path.through)
+        if body is None:return path,frozenset()
+        hit=model_path(sim,plan,path.offered,game,contact=cf-f)
+        # Do not waive a real body overlap or infer protection from unknown
+        # noBounceCooldown settings. Only a clear post-hit body margin can pass.
+        boxes=hit.box[cf-f:]
+        overlap=(boxes[:,0]<=body[2])&(boxes[:,2]>=body[0])&(boxes[:,1]<=body[3])&(boxes[:,3]>=body[1])
+        if np.any(overlap):return path,frozenset()
+        from ssbot.knowledge import kinematics as K
+        protected=frozenset(hit.origin+j for j in range(cf-f+1,len(hit.flags)) if hit.flags[j]&K.F_INVULN)
+        # Keep the physical hit branch, but NEW predicted protection must not
+        # erase another owner, any delayed hazard, or an armed target collider.
+        flags=(hit.check_flags&~K.F_INVULN)|(path.check_flags&K.F_INVULN)
+        return replace(hit,check_flags=flags),protected
+
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
         run=self.runner.run
@@ -508,7 +530,7 @@ class NativeManualAirChain(NativeChainB2):
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)
             return None
-        target_ta=None;target_move=None
+        target_ta=None;target_move=None;conditional_contact=None
         try:
             goal=self._transfer_goal
             if goal is not None and goal.source_kind=="SWITCH" and not draft.run.v.get("_entry_source_confirmed"):
@@ -564,7 +586,16 @@ class NativeManualAirChain(NativeChainB2):
                 if row is not None and plan.contact_frame is not None and plan.contact_frame>f+2:
                     commands=np.array([row["masks"][F-row["F0"]] for F in range(f+2,plan.contact_frame+1)],np.int64)
                     check=model_path(sim,plan,commands,game)
+                protected=frozenset()
+                if check is path:
+                    check,protected=self._transfer_hit_check(state,sim,plan,path,game)
+                    if check is not path:
+                        conditional_contact=plan.contact_frame
+                        self._note("transfer_conditional_hit_check",frame=f,contact_frame=conditional_contact,
+                            target_iid=plan.iid,postcontact_body_frames=sorted(protected),actual_hit_receipt=False,
+                            scope="accepted strike; clear stationary antic body only; other owners/all delayed unprotected")
                 bad=self._query(forecast,plan.move,check,contact_frame=plan.contact_frame,geometry=geo)
+                bad=[c for c in bad if not (c.frame in protected and c.owner_iid==plan.iid and c.kind in {"body","move"})]
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
             elif approach_only or draft.run.link=="bounce_tail" or (draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash"):
@@ -595,6 +626,7 @@ class NativeManualAirChain(NativeChainB2):
              "tail_mask":draft.run.v.get("source_tail_mask"),
              "approach_recipe":draft.run.v.get("approach_recipe"),"approach_only":approach_only,
              "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
+             "conditional_hit_check":conditional_contact is not None,"conditional_contact":conditional_contact,
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
              "handoff":("observed range or tactical boundary; ordinary side rows" if approach_only else
                         "real hit+bounce reopens tactical target knife; observed source hammer tail retained"),

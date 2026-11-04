@@ -30,6 +30,52 @@ def slam_tail_frames():
                  for name in ("Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"))
 
 
+
+@lru_cache(maxsize=1)
+def _shortest_slam_antic():
+    from .move_data import load_cl_slam,FRAME_S
+    return min(int(n) for s in load_cl_slam().states if s.name=="Slam Antic" for n in s.frames)*FRAME_S
+
+
+def stationary_antic_body_for_hit_check(state,iid,through):
+    """Known stationary body, with the whole short check before the earliest lunge.
+
+    This is not a damage-invulnerability certificate. Unknown/armed colliders
+    reject this narrow conditional check; other owners/hazards stay unprotected.
+    """
+    from .move_data import FRAME_S
+    f=state.get("f")
+    if type(f) is not int or type(through) is not int or not 0<through-f<=2:return None
+    enemies=[e for e in clappers(state) if e.get("iid")==iid]
+    if len(enemies)!=1:return None
+    e=enemies[0];cs=[c for c in e.get("fsms") or () if c.get("name")=="Control"]
+    if len(cs)!=1 or cs[0].get("state")!="Slam Antic":return None
+    tin=cs[0].get("t");vel=e.get("vel")
+    if (type(tin) not in (int,float) or not math.isfinite(tin) or tin<0
+            or tin+(through-f+1)*FRAME_S>=_shortest_slam_antic()
+            or not isinstance(vel,(list,tuple)) or len(vel)!=2
+            or any(type(v) not in (int,float) or not math.isfinite(v) or v!=0 for v in vel)):return None
+    cols=e.get("colliders");bodies=0
+    if not isinstance(cols,(list,tuple)) or not cols:return None
+    for col in cols:
+        if not isinstance(col,dict) or type(col.get("enabled")) is not bool:return None
+        if not col["enabled"]:continue
+        name=str(col.get("name") or "")
+        if name.startswith("Slam Collider"):return None
+        damage=col.get("damage")
+        if damage is None:
+            if col.get("layer")!=13 or name not in {"Slam Range","Wake Range"}:return None
+            continue
+        if (not isinstance(damage,dict) or col.get("layer")!=11
+                or not str(col.get("name") or "").startswith("Song Heavy Sentry")
+                or type(damage.get("flags")) is not int or damage["flags"]!=0
+                or type(damage.get("hazard_type")) is not int or damage["hazard_type"]!=1):return None # ENEMY only
+        bodies+=1
+    if bodies!=1:return None
+    try:return body_box(e)
+    except (ValueError,TypeError,OverflowError):return None
+
+
 def predicted_tail_end(state,goal):
     """Current Control phase through Slam 2, on the existing 60Hz family clock.
 
