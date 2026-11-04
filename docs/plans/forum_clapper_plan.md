@@ -4056,3 +4056,18 @@ analysis/target_priority_fix266_20261104保存SPEC/OPUS266_RECEIPT/有效red8fai
 父0e3当前树完整_act功能已结束：35拍(86,1)输入重建差0、包全同、外来0、3304有失败责任交还；真实manual决策日志388tick、候选103tick，证明此功能壳真的走新选择，不称自然闭环/P。Root另独立核功能进程56036及场子进程29648的原PID/create_time均已消失。此证据仅父源；0e3的P草稿从未有P_ENABLE/没运行，266后已写OBSOLETED_BY266。当前68f源正在自己的act_68f5c573以E24–31 Idle重核同有限完整入口，复用未变模型的原缓存，首不同前缀包即停、最终3304一出包即停，不喂未来STATE；PID/阶段写STATUS，不重复启动。
 
 尚无新P数值、新游戏、合同或真实gate。源审待158闭合，之后才重绑当前源输入/完整_act性能与新单局；新增<0.1ms仍只预算目标。原消费0bf/AA/raw/STOP及Windows核心进程不改；用户无人值守授权有效，常规待审静默，不再逐局问。
+
+
+### 7.124 #267当前源审已闭合，68f两个有限P点已真测/清理；新单局草稿准备好，待159收据口径核收【已处理 Opus #267】
+
+267/review158七工件hash/bytes核同，45JUnit逐项Root331子集、8独立探针通过，不把它们相加成Root384。三文件git/包/SOURCE_BINDING LF核同；266其余四项沿固定父绑定，当前_contact_preferences与open-retreat两项P2闭合，flip不加身后开阔限制的理由被接受。SOURCE_REVIEW267.json接受当前68f/source708，0e3原样仍不接受，P3及连跳/翻越意图能力边界不变。
+
+当前68f E完整_act35拍已结束：全同原包、86x1/重建差0、外来0、manual日志388tick/候选103tick，功能进程46688已独立核原PID/create_time不在，reader.close完成且无子残留。只有有限条件输入，不称自然闭环；父0e3证据保留。源/输入/脚本重绑后Root独占P，原资源三组件原字节不变，true/pulse/先等5s、原0.5核阈值与已批准同实例Windows背景归类均保持，raw背景开销留档，blockers为空，不操作dwm/svchost等系统进程。
+
+P同一次前缀3270..3302仍E24–31 Idle；选择实际有重选的3303及真实hook-bounce交还3304两点P0–15/High128/Numba4/GetProcessInformation EcoQoS false。3303完整_act8.1458ms，L2目标_decide0.401500ms，有重选但仅keep一个适用候选；3304完整_act16.3633ms，L2目标_decide0.068300ms，无重选，真实hook_bounce→offbody交还/失败暴露/ordinary出包。35包仍同原、无新签名/外来模块。3304不重选，故不能拿它冒充竞争成本。L2统计含目标层几何/既有候选窗口、排除LOCAL，非孤立乘法/比较；新增<0.1ms仍未单独证明，不能拿0.4015硬说通过0.1。两有限点不是分布/全场景上界/整链或完整A-B预算/未来deadline保证，也不能和旧不同分支13.1212ms直接相减。
+
+P_RECEIPT及p_68f5c573/RESULT/P_RESOURCE_GUARD/ROOT_CLEANUP保留。Root独立核53704@1793821970.6361632与场子进程48284@1793822021.69539均消失；golden pin同、Prefs差空、旧DEMO hash与mtime原样、registry instances/live空且restore_pending=false、无游戏，实际全部检查后才false。无新游戏/掉血/真实worker输入回执。Task159只审本次绑定/runtime/口径与是否可作新单局工程前置，不重跑P/35/331/矩阵，wake183。
+
+新analysis/w13_scored_focus_20261104T200240Z_68f5c573已备trial.py/run_unattended/三个原资源组件、SOURCE_PACKET/TRIAL_CONFIG/ENGINEERING_GATE_DRAFT/SCRIPT_PORT_RECEIPT/DRAFT_BINDING。两脚本逆向替换本批名/source/phase后全文等旧已核生命周期，帮助组件原字节同；原175 evidence逐项核同，另加当前267/source/功能/P/真实清理6项。环境只PROBE/BATCH/BUDGET三个隔离记账键变，其余seed314168/7HP/HP<=6首任何损血realQ1/death/Opt1/measure/关键日志/STOP/资源/真实清理不减。新目的为用户的手写候选竞争与执行接触，不称旧3326所有情况已安全。仍须真正自己worker的bootstrap input.stats原件，不用回放或旧连接替代。
+
+当前DRAFT ready=false/p_receipt_review_pending=Task159；对应sol/demos目录、真实ENGINEERING_GATE和contract均未创建，没freeze或启动。源/模型/profile/脚本/预算/执行HEAD与159收据齐后才实际写门并冻到真清，不复用0bf/877/0e预算，不开八局，不改AA/raw/STOP。用户无人值守授权有效，常规待审静默。
