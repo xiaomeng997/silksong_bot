@@ -3742,3 +3742,15 @@ Native把实际源hit+bounce与L2候选相交后才进入。有限动作helper�
 已处理 Opus #234(Task128)：5产物hash/字节核同，只属旧eff草稿的静态收据；没有新源许可。新SOURCE_PACKET_FINAL已绑706运行资产（含versions.lock及261只读模型/用户5aim），旧B2 inherited=false记账问题后续按实际前次合同字节重算，不沿旧标记推断当前B2不变。本次B2确有残余记账增量。旧eff草稿不创建真实gate/合同，也不开旧823或旧8局。Task129只核新14文件delta/必要296与当前2915组件，源审后才另绑新源P/配置/脚本/预算和新单局；目前没有新P或游戏。
 
 补充表可复现性：新分支的绝对F0/masks完整存在原rune_transfer Run.row，现有source-tail生成器按wall标记读该行，每拍核table输出与拟发键一致，越界即NominalUnsupported；不是由隐藏私有控制器另发键。新两例逐键复现及过期反例并入同一次296，原计数294仅为前一检查点不相加。ORIGIN_BINDING_7884a97b核同全部14文件执行前后LF；没有新P/游戏。
+
+### 7.97 用户要求换目标首刀即时平砍；235墙侧交权修复【新源6bb1452c；496唯一相邻回归通过，130增量审待核】
+
+用户明确“换目标后第一时间接平砍也给安排上”。L2仍指定target及side/stomp，当前只给B2+B+v2的匹配EntryAttack.side补首刀，stomp、A、no_hit、无entry、Bind和无控制阶段不改。旧普通side第一piece为第0拍转向、第1..3拍A，重规划可反复推后这次攻击；新变体只把这3拍挪为0..2，一次构造、同样行数/核心行/移动键/后续段/allowlist，原集合保留。不在规划后硬加A、不另加动作池或控制器。真实HF/转向/CD/输入接受与完整miss/hit危险/逃生检查仍走ordinary，近距可命中才用即时刀，远距继续接近，已持A不伪造新edge。
+
+先按原命中数据把首先平砍新target的行提前送进同一K_b/sibs包络额度，再在原安全、承诺、kept、no_dash/no_pogo及rune_exit之后、命中总数/站位/window软偏好之前，按该target最早接触选行。不同首怪、格挡、无分、ground-only空中挥刀不升级，forced不加此rank。日志entry_side只记模型接触与press_now、actual_hit=false；实际完成首刀仍等原L2真实Slash/SlashAlt事件，不拿sent作命中。这是明确B策略改动，不称旧B纯等价或A/B预算已过。
+
+已处理 Opus #235(Task129)：MANIFEST所列文件hash/字节同，独立296与Root wall_final_table逐项结果同；119相邻检查只收其工件不相加。P1/P2成立：先前真实落地交还后landing残余仍每拍被当墙侧动作，普通起跳+源换相可重新接管甚至新下劈，无新弹起；正常起跳/走出span又会被记旧招失败并丢残余。原独立R4/R5在本地未修wall代码4fail，修后4pass。现在真实落地时沿原_clear_transaction+_abandon清自有Run/投影，但不清receipts/HF/queued；landing/yielded只留旧锤HP责任，candidate/propose不算它，直接wall_propose也不规划它。prepare_goal仅在实际hammer-off/确认死亡清旧残余，不动另一target的commit；普通起跳、走动、换相不再假失败/重接管。
+
+analysis/target_side_followthrough_20261103为当前入口：同一次15文件496唯一通过、源外模块0（FINAL_CHECKS/final3.xml），包含原ForumPlanner/V2安全回归、transfer/接近/墙侧与新Wanderer地面/空中本拍A、真实install→before_send→sent→ground交还/回执保持。首轮Reed格挡夹具、K/回执字段和NUMBA线程上限夹具错误、中间失败保留，不冒充有效red。最终未再改源后重跑，6文件LF与Git6bb同。SOURCE_PACKET707运行资产含versions.lock与新entry_side；261模型（knowledge另3辅助文件不算模型）与7884逐项raw同，用户5aim仍未跟踪只读。新source zip和235收据均已绑；旧2915组件不重复跑，也不推当前自然闭环/实际接刀。
+
+新源130增量审仍待，仅核6文件和必要相邻用例，不复跑1360/801/629矩阵。随后另作当前新源完整_act计时与新单局绑定；当前无新P/游戏/真实gate，旧eff草稿、823停止局及旧预算不复用。Windows核心进程不动、原输入/资源/HP首损血/Q1/Opt1/真实清理门保持。本轮源提交6bb1452c，文档仅按main→knife→tv三份同步。
