@@ -3688,3 +3688,14 @@ pogo_centering_20261103/REPORT、CAUSAL_MARGIN2_VERIFIED与MANIFEST为当前入�
 approach229_fix_20261103保存BASELINE、OPUS229_RECEIPT、CHANGE_REPORT、source_0829423f.zip及red/green/final229。Task125只增量核新3文件/11边界及必要217，优先未开始的124；当前新源source_review_pending，无新预算permit/新合同/游戏，旧823仍消费且停，原墙侧依赖扶墙路线未获许可不偷开。下一步仍新源完整政策串行实际输入首不同包前的有界P，先核源/配置/资源并与Opus独占协调。用户五aim文件、旧wf/AA/原始失败保持，Windows核心进程不动。
 
 用户讨论开伞对刀表和连续下劈表的复用：现air_strike/air_direct已有共享plan_entry、pogo_model、trace与原B2发送/真实命中弹起；连续下劈目前仍是独立离线因果时序分析，适合增加弹起入口/开伞调时后复用统一strike/observe后缀，不应复制伤害/命中/计数判定或把两套搜索池在线并跑。本轮未据“能否合并”的讨论扩做架构重写、未把33行硬编码进运行链。
+
+
+### 7.93 230指出直线接近不能穿源身体；新源eff7718f收紧适用域【230已核收；126在途，无P/游戏】
+
+已处理 Opus #230(Task125)：17项产物hash/字节、217唯一用例同集同结果及三改源LF Git/快照/Root包一致；“四文件”文字另含未改旧测试，时间元数据不同不当性能比较。229修法在本范围已核，但新R3仍P1：源挡在hero与远目标之间时，approach-only仍向源直走/冲，当前两帧门不足以中止已发冲刺。082/d521两例均失败，故082从未得到新P/实机许可；Root接受该阻挡，不扩大成新的自动跨怪规划。
+
+eff7718f只在native现有approach_only适用域加当前观测源body与hero->target横向闭区间的相交判断，含身体边沿/自身在body内、左右对称。挡路fresh不接管，active清原owner作计划性交还；active源严格取Run.caster，fresh取绑定goal。源pos/body缺失、非有限、disabled、畸形顶点局部转unknown，fresh拒绝、active原严格恢复；原near/目标改变等真实计划边界仍先处理。没有新安全余量、路径搜索、跨怪招式或全飞行认证，prefix/HF/receipts一字不清；已在途DASH不会因此被取消，日志不称已避免碰撞。原stomp/尾段和时钟/超时/失败暴露保持。
+
+approach230_crossing_20261103保存BASELINE、OPUS230_RECEIPT、CHANGE_REPORT、source_eff7718f.zip、red230/green230b及ACTUAL2766_COMPONENT。31新增覆盖左右fresh/active、边沿、body内、身后放行、六种未知与near优先；red24fail7pass，中间helper引用NameError修正且原件保留，最终六相邻248过/源外0，31为增量不把248加217。Root另一个只读同事查guard通过，不替代Opus126。真实记录2766仍自然绑定源335476/2753/CC_SLAM，原S0/HF/prefix与因果RS在本源得到air R2097152，全owner到2768complete无contact；未send/commit，不是全政策/P或真实接受。新源独立审仍待126，随后新绑定完整政策串行首不同包前的P，没新合同/游戏。用户五aim文件、旧wf/AA/原始STOP失败保持，Windows核心进程不动，资源门无新变化。
+
+用户讨论时序参数离线化：当前空中入口仍有在线短轨迹求时刻，连续表仍离线。拟先共用两入口的strike/observe后缀和参数接口，再离线解少数模式时序、在线小表查询或已验证同模式域内插值，插值后整数取时仍需满足可行区间/因果前缀和余量。当前单基准33见证不能当多维插值域；必要的现场输入/最终路径危险/派发截止复核保留。此为方案边界，本轮没有因问答扩做架构或多项式拟合，不把两池并跑或插值外推当新能力。124三点时序审排在源码主线之后，不阻塞126/P。
