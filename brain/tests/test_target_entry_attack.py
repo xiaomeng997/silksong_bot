@@ -18,7 +18,7 @@ from tests.test_knife_chain_transfer import cast_scene, plan
 
 @pytest.mark.parametrize("family,distance,kind", [
     (G.CC_CAST, 2., "stomp"), (G.CC_CAST, 24., "stomp"),
-    (G.CC_SLAM, 3., "stomp"), (G.CC_SLAM, 8.05, "stomp"),
+    (G.CC_SLAM, 3., "side"), (G.CC_SLAM, 8.05, "side"),
     (G.CC_SLAM, 8.06, "side"), (G.CC_SLAM, 20., "side"),
 ])
 def test_natural_focus_switch_outputs_pinned_style(monkeypatch, family, distance, kind):
@@ -308,3 +308,40 @@ def test_delayed_switch_binding_cannot_outlive_its_intent_unless_already_committ
         assert n._transfer_goal == goal and n.commitment == {'existing': True}
     else:
         assert n._transfer_goal is None and not n._transfer_ready
+
+
+@pytest.mark.parametrize("family,target_x,kind", [
+    (G.CC_SLAM, 41.0212, "side"),
+    (G.CC_SLAM, 27., "stomp"),
+    (G.CC_CAST, 41.0212, "stomp"),
+])
+def test_cross_arena_slam_switch_uses_ground_entry(family, target_x, kind):
+    # The2765 switch shape: old source still close, new target across the arena.
+    fc = WinFc([subj(1, CC, 16.9100, family=family, committed=True),
+                subj(2, CC, target_x, family=G.CC_IDLE)])
+    entry = G.GauntletTactics._switch_attack(fc, 21.8150, 7.50915, 1, 2)
+    assert entry.kind == kind
+    assert entry.source_distance == pytest.approx(4.905)
+
+
+@pytest.mark.parametrize("target_x,kind", [(28.05, "stomp"), (28.050001, "side")])
+def test_slam_switch_destination_range_boundary(target_x, kind):
+    fc = WinFc([subj(1, CC, 16., family=G.CC_SLAM, committed=True),
+                subj(2, CC, target_x, family=G.CC_IDLE)])
+    assert G.GauntletTactics._switch_attack(fc, 20., 10., 1, 2).kind == kind
+
+
+def test_unknown_destination_distance_does_not_pin_an_entry():
+    fc = WinFc([subj(1, CC, 16., family=G.CC_SLAM, committed=True),
+                subj(2, CC, float("nan"), family=G.CC_IDLE)])
+    assert G.GauntletTactics._switch_attack(fc, 20., 10., 1, 2) is None
+
+
+def test_side_entry_prefers_ground_without_removing_safety_fields():
+    entry = EntryAttack(8, "side", 7, G.CC_SLAM, 4.905, 10.)
+    prefs = GoalPrefs(mode="RUSH", stance_x=40., weights={}, target=8,
+                      entry_attack=entry, ground_first=frozenset({7}),
+                      no_hit=frozenset({7}), no_dash=frozenset({8}))
+    out = entry_attack_prefs(prefs)
+    assert out.ground_first == frozenset({7, 8})
+    assert out.no_hit == prefs.no_hit and out.no_dash == prefs.no_dash

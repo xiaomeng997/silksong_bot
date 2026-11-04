@@ -1540,9 +1540,14 @@ class GauntletTactics:
             return None
         old = subs[source]
         distance = abs(float(old.pos[0]) - hx)
-        if not math.isfinite(distance) or old.family not in {CC_CAST, CC_SLAM}:
+        destination_distance = abs(float(subs[target].pos[0]) - hx)
+        if (not math.isfinite(distance) or not math.isfinite(destination_distance) or
+                old.family not in {CC_CAST, CC_SLAM}):
             return None
-        kind = "stomp" if old.family == CC_CAST or distance <= TWO_SLAM_RANGE_U else "side"
+        # A close source slam does not require a stomp after crossing the arena.
+        # Reuse the existing near range; approach safety still belongs to the planner.
+        near_transfer = distance <= TWO_SLAM_RANGE_U and destination_distance <= TWO_SLAM_RANGE_U
+        kind = "stomp" if old.family == CC_CAST or near_transfer else "side"
         return EntryAttack(target, kind, source, old.family, distance, t)
 
     def _count_hits(self, ws, t: float) -> None:

@@ -101,7 +101,7 @@ def entry_attack_prefs(prefs):
                    ground_hit=(frozenset(prefs.ground_hit) - {iid} if entry.kind == "stomp" else prefs.ground_hit),
                    no_pogo=(frozenset(prefs.no_pogo) - {iid} if entry.kind == "stomp" else prefs.no_pogo),
                    ground_first=(frozenset(prefs.ground_first) - {iid} if entry.kind == "stomp"
-                                 else prefs.ground_first))
+                                 else frozenset(prefs.ground_first) | {iid}))
 
 
 @dataclass
