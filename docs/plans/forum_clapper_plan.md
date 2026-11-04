@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.119）：仍在w13。#260已核当前f0a94ecc三文件生产绑定/259责任与高度闭合（32端点过/1skip），源门已通过。正在补新hook3304完整_act有限性能输入（Task154仅E功能稿，P归Root独占），并已备新w13_hook_handoff_20261104T164109Z_f0a94ecc单局草稿：旧生命周期/六transport文件及发送方法未变，仅源/隔离路径/记账新绑定；175旧前置hash同。尚无真实gate/合同/新游戏，旧0bf不重开。STATUS false/own_jobs空；连跳仍未上线。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.120）：仍在w13。#261发现d49新增标量读取在实机K×1状态上抛TypeError，旧K向量测试漏测；新8770341d已单行按canonical列取值修复，5实机形状红例→226相关通过，待155仅一行绑定闭合。f0a未运行草稿已保留作废，新877单局草稿重绑、仍无gate/合同。154完整_act功能稿继续，要求保留实机K×1输入，P仍归Root独占，未启动P/game；STATUS false/own_jobs空，连跳未上线。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4008,3 +4008,11 @@ Task154仅在opus/hook_act154备一个最小原0bf3304完整production policy→
 新草稿analysis/w13_hook_handoff_20261104T164109Z_f0a94ecc已备trial.py/run_unattended与原资源三组件、TRIAL_CONFIG_DRAFT/SOURCE_PACKET/TRANSPORT_BINDING/SCRIPT_PORT_RECEIPT/ENGINEERING_GATE_DRAFT/DRAFT_BINDING；对应sol/demos同名目录、真实gate与合同均不存在。脚本逆向替换本批名/source/phase后全文等实际全清0bf脚本，Launcher/worker/旧DEMO/Prefs/golden/registry清理路径未改；环境仅PROBE/BATCH/BUDGET三个隔离记账键变化，其余逐项旧配置，seed314168/7HP/HP<=6 realQ1首任何损血、death/Opt1/measure协议2/STOP/资源门原样。worker真正自己的input.stats仍须新局原件，不用旧输入回执。新source707packet当前同，旧175 evidence hash全核，当前六完整transport文件与0bf相同、B2 before_send/sent/from_env/abort和air对应发送方法AST同；observe/tactics改动依256/257/259/260源审，不称整B纯等价。
 
 DRAFT ready=false，P待154功能稿及Root独占实测，旧性能点只历史引用；accepted集合逐项列251..260的具体处置，254仅工件/不在线，259按260精确修闭合，不拿最大号掩盖阻挡。源/模型/配置/预算/脚本最终hash与只读实际清理/STOP/资源前置全过才写真实gate，计划先main后knife/TV再冻结执行HEAD至真清。用户Nov3无人值守授权有效、不再逐局问。wake178只请求154功能输入；STATUS false/Root无任务，无新P/game/合同，旧0bf/AA/raw/STOP/Windows核心进程不动。
+
+### 7.120 #261生产K×1形状崩溃已一行修8770341d；完整换踩入口补列向量，不让离线形状掩盖实机【已处理 Opus #261，待155绑定闭合】
+
+Opus在154生产policy影子2899遇到新错误：d49的cd=float(sim.start[K.ATK_CD])只适用K向量，StateTracker.state实际返回K×1，NumPy2.5.3对一维单元素array转float抛TypeError。崩溃沿生产_transfer_offer→stomp_plan→press_now_row，无层接住，不能因影子propose提前打开而把生产缺陷当无关。旧fresh7、256探针只K向量而漏测；NumPy版本早已固定，非近期升级。源门立即重关，f0a不能依据260再开游戏。
+
+Root复现5个K×1红例，全部同TypeError：fresh3种cd/新刀条件+真实生产_transfer_offer Idle/SpellAntic两种目标，K向量9例正常。新源8770341deb04d59f49a24e490c120a49feaa1b45运行只一行cd=float(np.asarray(sim.start).reshape(K.K,-1)[K.ATK_CD,0])，正是261建议和_start_state canonical形状；不改冷却门/新刀语义/模型/动作。原两测试组参数化K与K×1，真实K×1模型roll和出刀行断言保留。有效red5fail9pass→同次226相关pass（原221+5）/外来0；SPEC/261三个原始工件hash/源绑定707packet/sourcezip/checks在analysis/transfer_shape261_20261104。Task155只核一行与两形状端点/绑定，不重跑226或大审；154旧f0a功能稿可继续原hook点，但测量输入保留实机K×1，不用扁平log reshape(K)冒充同形状完整入口。
+
+原analysis/w13_hook_handoff_20261104T164109Z_f0a94ecc从未有真实gate/contract/game，原样保留并写OBSOLETED_BY261。全新analysis/w13_hook_handoff_20261104T170112Z_8770341d草稿仅重绑source/隔离路径，脚本逆向替换全文与实际全清0bf相同、资源组件/transport未动，SCRIPT_PORT_RECEIPT新sha已重算，不沿用旧脚本hash。对应sol/demos新目录不存在，ready=false/source_review_pass=false，旧260是父源审阅，须155当前绑定闭合和154当前源P后再准入。不重开消费0bf局，原seed/HP首损血Q1/Opt1/关键日志/STOP/资源/真实清理不减。wake179，STATUS false/RootE已结束，无新P/game；三活动计划同步，旧AA/raw/STOP/Windows核心进程不动。
