@@ -474,6 +474,27 @@ class GauntletTactics:
             left, right = hx - float(hurt[:, 0].min()), float(hurt[:, 0].max()) - hx
             if b0 >= b1 or left <= 0 or right <= 0:
                 return None
+            peers = [q for q in getattr(fc, "subjects", ()) or () if q.iid != target
+                     and q.type_key == CLAPPER and q.alive and q.in_play]
+            if peers:
+                if len(peers) != 1:
+                    return None
+                other = self._ent(ws, peers[0].iid)
+                boxes = [b for b in getattr(other, "dmg_boxes", ()) or ()
+                         if b.active is True and isinstance(b.name, str) and b.name.startswith(CLAPPER)]
+                if len(boxes) != 1:
+                    return None
+                poly = np.asarray(boxes[0].poly, float)
+                if poly.ndim != 2 or poly.shape[0] < 3 or poly.shape[1] != 2 or not np.isfinite(poly).all():
+                    return None
+                p0, p1 = float(poly[:, 0].min()), float(poly[:, 0].max())
+                if p0 >= p1:
+                    return None
+                middle = max(p0 - b1, b0 - p1)
+                # This only declines an optional outside stance. The planner
+                # still checks all threats and may leave the middle to escape.
+                if middle >= left + right and min(b0, p0) <= hx <= max(b1, p1):
+                    return None
         except (TypeError, ValueError, OverflowError):
             return None
         side = -1 if b0 - xa <= xb - b1 else 1
