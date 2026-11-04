@@ -435,14 +435,31 @@ class NativeManualAirChain(NativeChainB2):
                   and abs(ep[0]-hp[0])<=self.runner.chains[transfer.PROGRAM].cfg["STOMP"]["jump_root"])
             target_attack=enemy is not None and transfer.control(enemy)[0] in (transfer.AIR_ATTACK_STATES |
                 {"Jump Antic","Cast Slam Antic","Jump","Air"})
-            if changed or not side or target_attack or near:
+            source_blocked=False
+            if not (changed or not side or target_attack or near):
+                # This recipe is a straight approach, never a crossing skill.
+                # Keep the active Run's source, rather than a new tactical hint.
+                caster=run.v["caster"] if active else self._transfer_goal.caster
+                source=next((e for e in transfer.clappers(state) if e["iid"]==caster),None)
+                sp=None if source is None else source.get("pos")
+                known=(len(hp)>=1 and len(ep)>=1 and isinstance(sp,(list,tuple)) and len(sp)>=1
+                       and all(type(v) in (int,float) and np.isfinite(v) for v in (hp[0],ep[0],sp[0])))
+                try:obstacle=transfer.body_box(source) if known else None
+                except (TypeError,ValueError,OverflowError):obstacle=None
+                if obstacle is None:
+                    self._note("rune_transfer_unchecked",frame=f,reason="side approach source geometry unavailable")
+                    if active:self._recover("side approach source geometry unavailable",f)
+                    return None
+                source_blocked=(min(hp[0],ep[0])<=obstacle[2] and max(hp[0],ep[0])>=obstacle[0])
+                if source_blocked:self._note("target_entry_side_source_blocked",frame=f,source=caster,active=active)
+            if changed or not side or target_attack or near or source_blocked:
                 if active:
                     self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
                     self._press=self._accepted=self._hit=None
                     self._transfer_ready=False
                     self._abandon("side approach reached observed range/tactical boundary")
                     self._note("target_entry_side_handoff",frame=f,old_target=target,target=wanted,
-                               arrived=bool(near),target_attack=bool(target_attack),intent_ended=not side)
+                               arrived=bool(near),target_attack=bool(target_attack),intent_ended=not side,source_blocked=bool(source_blocked))
                 return None  # current queued keys remain actual prefix for the next owner
         if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
         queued,_=self.queued_prefix(f,state)
