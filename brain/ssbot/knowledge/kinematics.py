@@ -2508,6 +2508,7 @@ class ForumRows:
         self.atk_pdir = -1.0
         self.wj_chain = 0.0
         self.unstick = 0.0
+        self.xvx_live = False
 
     def push(self, S: np.ndarray, r: dict, md: int, flag) -> None:
         """Fill S (one [K] state, the frame's other rows already set) for row r (Trace.row form) in mode md."""
@@ -2607,14 +2608,34 @@ class ForumRows:
         elif self.jbuf > 0:
             self.jbuf = np.float32(self.jbuf - np.float32(r.get("udt", r["dt"])))
         S[JBUF] = float(max(self.jbuf, 0.0))
-        # ... and its attack queue (M4a, only with HERO2's H2_SPR_ATK: the rows stay 0 otherwise; the extra air
-        # velocity XVX is not observable: left 0)
+        # ... and its attack queue (M4a, only with HERO2's H2_SPR_ATK: the rows stay 0 otherwise)
         if int(p.hero2) & H2_SPR_ATK:
             if m_now & B_ATTACK and not (pr and pr["mask"] & B_ATTACK):
                 self.abuf = np.float32(0.1)
             elif self.abuf > 0:
                 self.abuf = np.float32(self.abuf - np.float32(r.get("udt", r["dt"])))
             S[ABUF] = float(max(self.abuf, 0.0))
+            # Attack Cancel retains an airborne sprint's x velocity. It is
+            # observable only when the previous Update held no move key (the
+            # current FixedUpdate precedes Update). Never infer it across an
+            # unknown transition, turn, wall, landing or another motion source.
+            f = r.get("f")
+            vx = float(r["vel"][0]) if r.get("vel") is not None else 0.0
+            known = (pr is not None and type(f) is int and type(pr.get("f")) is int and f == pr["f"] + 1
+                     and r.get("valid", False) and pr.get("valid", False) and not r.get("load", False))
+            clear = (md == M_NORMAL and not ground and not sliding and not cling and not wall
+                     and pr is not None and pr.get("face") == face and np.isfinite(vx) and abs(vx) >= 0.01
+                     and not flag("recoilingLeft") and not flag("recoilingRight") and not flag("recoilFrozen")
+                     and S[RDIR] == 0 and S[HVX] == 0 and S[SHOVE] == 0 and self.wlock < 0 and S[SHUT] == 0)
+            if not known or not clear:
+                self.xvx_live = False
+            elif pr["md"] == M_SPRINT:
+                self.xvx_live = bool(attacking and not pr["attacking"] and not pr["ground"] and not pr["wall"] and pr["ph"] <= 1)
+            elif pr["md"] != M_NORMAL:
+                self.xvx_live = False
+            if self.xvx_live and not pr["mask"] & (B_LEFT | B_RIGHT) and abs(vx) >= 0.01 and S[XVX] == 0:
+                S[XVX] = vx
+                S[XVXD] = 0.0             # the existing h2_xv_decay; no new extrapolation
         S[WJ_V] = p.wj_speed - max(self.wlock, 0.0) * (p.wj_speed - p.run_speed) / p.wj_lock_long
         S[PREV_GS] = 1.0
         S[DQ] = -1.0
@@ -2735,7 +2756,8 @@ class ForumRows:
                      "recoiling": bool(flag("recoilingLeft") or flag("recoilingRight")),
                      "wall": bool(wall) if wall is not None else sliding, "md": md, "ph": ph,
                      "vy": float(r["vel"][1]) if r.get("vel") is not None else 0.0, "mask": int(r.get("mask", 0)),
-                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0, "bnc": bnc}
+                     "vx": float(r["vel"][0]) if r.get("vel") is not None else 0.0, "bnc": bnc, "face": face,
+                     "f": r.get("f"), "valid": bool(r.get("valid", False) and not r.get("load", False))}
 
 
 def _neutral_forum_rows(S: np.ndarray) -> None:
@@ -2936,9 +2958,10 @@ def state_table(tr: Trace, params: HeroParams, modes: np.ndarray | None = None,
         fr = ForumRows(params)
         fls = {k: tr.flag(k) for k in ("wallSliding", "wallClinging", "jumping", "onGround", "willHardLand",
                                        "attacking", "upAttacking", "altAttack", "recoilingLeft", "recoilingRight",
-                                       "downSpikeBouncing")}
+                                       "downSpikeBouncing", "recoilFrozen")}
         for i in range(n):
-            r = {"dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
+            r = {"f": int(tr.f[i]), "valid": bool(tr.valid[i]), "load": bool(tr.marks[i] & MK_SLIDE),
+                 "dt": float(tr.dt[i]), "fs": int(tr.fs[i]), "facing": int(tr.facing[i]),
                  "wall": int(tr.wall[i]) if tr.wall is not None else None, "clip": tr.clips[tr.clip[i]],
                  "tm": tr.tm[i] if tr.tm is not None else None, "mask": int(tr.mask[i]), "vel": tr.vel[i],
                  "udt": float(tr.udt[i])}
