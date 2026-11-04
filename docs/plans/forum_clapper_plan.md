@@ -3780,3 +3780,13 @@ analysis/entry_priority236_20261104/P_SERIAL_RECEIPT及p_serial_a1d0ed48原RESUL
 全新单局草稿analysis/w13_side_wall_20261104T085734Z_a1d0ed48：新trial.py/run_unattended/config/707packet/ENGINEERING_GATE_DRAFT/TRANSPORT_BINDING已备，实际sol/demos对应目录尚不存在，无ENGINEERING_GATE.json。Launcher/worker/cleanup生命周期与旧已审草稿反向元数据归一AST一致，只换批路径/源/phase；旧85前置hash仍核同并另加当前源审/503/P证据。transport继承精确分列：六模块raw同已清理823，B2整文件不同，before_send/sent/observe等方法AST同；air.sent有已审墙侧成功发送记账增量，不谎报整文件全同。新worker自己连接的input.stats零delay/jitter/HF2/2/pending0和--measure仍必须现场核。
 
 Task132只终核新单局绑定/现有授权与有限工程P范围，不重复503/模型大矩阵/P。准备严格单局HP7起、HP<=6 realQ1首次任何损血、死亡/Opt1/关键日志/STOP/资源/真实清理门不变，不重试/补局/开8局。新源已接墙缝落地普通平砍及每次真hit+bounce才一刀的rear分支，不放回旧扒墙；空钩未接域/P3不因本轮通过而放行。实际新动作与真实交还另按逐帧证据审，不用当前静态/P冒充现场成功。源a1d0不改，待终核才建全新合同；旧823/eff/6bb草稿和旧预算不重开。
+
+### 7.100 238新单局终核已收；本节提交后冻结一次a1d0单局【未启动前不记实机成功】
+
+已处理 Opus #238(Task132)：MANIFEST文件hash/字节、100前置及707当前运行文件Root重新核同，当前a1d0源审237/503/有限P与脚本配置绑定无新P0–P3；两个辅助启动脚本相对旧已审eff仅批路径/源/phase，资源助手/批准字节同。主计划本节先按main→knife→tv提交，之后才写新ENGINEERING_GATE与prepare合同，execution_head取届时真实GitHEAD；冻结到此次真实清理不改源码/HEAD。旧823停止局及eff/6bb旧草稿不重开，8局与A/A均不动。
+
+终核的机器VERIFY132实际含gating_not_accepted=[55]，与REPORT称55非门控的文字不同；Root首次前置断言因此正确停在freeze之前，未建gate/合同/PID/预算。55优先级本就是“建议（不影响当前工作，做完再看）”，contains(影响当前工作)误匹配否定句。Root已实际读55及原summary、保存只读接收副本/OPUS55_RECORD_RECEIPT，明确接收旧双实例多怪迟发风险记录而非当前源已通过分布保证，不独立复算/外推其迟发率或HP因果、不改资源或时钟阈值。最终accepted集合显式加55的记录性接收与238，再逐项复核机械门控集合全覆盖；没有按最大编号掩盖未处理旧条目。
+
+新草稿路径仍analysis/w13_side_wall_20261104T085734Z_a1d0ed48，对应sol/demos同名新目录，此前尚不存在。只冻当前a1d0/707资产/261模型/全新PROBE+BATCH+BUDGET，ONE_W13_AIR_ENGINEERING标签保持。沿用已成功823的Win32_Process Create pythonw隐藏协调器与原自有Launcher，活动instances先只读为空/restore_pending=false，无STOP/HUMAN_PRACTICE，不重复启动。协调器在任何游戏前原子置STATUS独占并30秒刷新、等peer暂停；资源门/实际worker自己input.stats零delay+jitter/HF2/2/pending0/测量/绝对键回执不减。
+
+用户Nov3“我不在家，你开实机不用等我”仍是这一次有界无人值守授权来源，通知/审阅本身不增加权限。7HP基准、HP<=6 realQ1首次任何损血，死亡/期望键不符/超4帧无相符回报/缺关键日志立即停，不重试/替换/补局；没有新扶墙路线或未接空钩域放行。现场核第一时间平砍/墙缝落地交还/rear每次真实hit+bounce等只按实际发生审，先前P五点不认证这些动作。任何未知清理保持独占，只有自有worker/game/场worker/协调器、golden/Prefs/旧DEMO及registry实际全核后false。
