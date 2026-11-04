@@ -518,6 +518,58 @@ class GauntletTactics:
             return WallPressure(target, "stomp", side)
         return WallPressure(target, "side", side, span)
 
+    def _middle_return_x(self, ws, fc, target):
+        """A horizontal preference for leaving the outer side, never a safe route."""
+        if (any(os.environ.get(k, "0").strip() != "1" for k in
+                ("SSBOT_FORUM_CHAIN_NATIVE", "SSBOT_FORUM_CHAIN_B2", "SSBOT_FORUM_CHAIN_AIR_MANUAL"))
+                or os.environ.get("SSBOT_FORUM_CHAIN_ARM", "") != "B"):
+            return None
+        subjects = [s for s in getattr(fc, "subjects", ()) or ()
+                    if s.type_key == CLAPPER and s.alive and s.in_play]
+        focus = next((s for s in subjects if s.iid == target), None)
+        if len(subjects) != 2 or focus is None or focus.family not in (None, CC_IDLE, "CC_EVADE"):
+            return None
+        hero = getattr(ws, "hero", None)
+        pos = getattr(hero, "pos", None)
+        if pos is None or not 0.8 <= pos.conf <= 1.0 or focus.pos is None:
+            return None
+        try:
+            bounds = []
+            for subject in (focus, next(s for s in subjects if s.iid != target)):
+                boxes = [b for b in getattr(self._ent(ws, subject.iid), "dmg_boxes", ()) or ()
+                         if b.active is True and isinstance(b.name, str) and b.name.startswith(CLAPPER)]
+                if len(boxes) != 1:
+                    return None
+                poly = np.asarray(boxes[0].poly, float)
+                if poly.ndim != 2 or poly.shape[0] < 3 or poly.shape[1] != 2 or not np.isfinite(poly).all():
+                    return None
+                bounds.append((float(poly[:, 0].min()), float(poly[:, 0].max())))
+            hurt = np.asarray(hero.hurtbox, float)
+            if hurt.ndim != 2 or hurt.shape[0] < 3 or hurt.shape[1] != 2 or not np.isfinite(hurt).all():
+                return None
+            hx, x = float(pos.v[0]), float(focus.pos[0])
+            xa, xb = map(float, self.pb.arena_x)
+            left, right = hx - float(hurt[:, 0].min()), float(hurt[:, 0].max()) - hx
+            if not all(math.isfinite(v) for v in (hx, x, xa, xb)) or not xa <= hx <= xb or min(left, right) <= 0:
+                return None
+            (a, b), (c, d) = bounds
+            if a >= b or c >= d:
+                return None
+            if b <= c:
+                lo, hi, side = b + left, c - right, 1
+                outside = hx < lo
+            elif d <= a:
+                lo, hi, side = d + left, a - right, -1
+                outside = hx > hi
+            else:
+                return None
+            lo, hi = max(lo, xa + left), min(hi, xb - right)
+            if not outside or lo > hi:
+                return None
+            return min(hi, max(lo, x + side * self.rules.face_u))
+        except (TypeError, ValueError, OverflowError, StopIteration):
+            return None
+
     def _ent(self, ws, iid):
         for e in getattr(ws, "entities", ()) or ():
             if getattr(e, "id", None) == iid:
@@ -1616,6 +1668,16 @@ class GauntletTactics:
                     k = k.split(":")[0]
                     tw[k] = tw.get(k, 0) + 1
         out = entry_attack_prefs(out)
+        if (previous_target == g.target and g.name == RUSH and g.entry_attack is None
+                and g.target not in out.no_hit and str(how).startswith(("face", "chase"))):
+            middle_x = self._middle_return_x(ws, fc, g.target)
+            if middle_x is not None:
+                # Do not farm outside hits while a usable middle is the goal.
+                # Existing movement/body/hazard checks still decide whether to cross.
+                out = replace(out, stance_x=middle_x, no_hit=frozenset(out.no_hit) | frozenset({g.target}))
+                g.stance_x = middle_x
+                g.why = f"{g.why.split('; ')[0]}; face: return middle"
+                self.last["middle_return"] = {"target": g.target, "stance_x": middle_x}
         if previous_target == g.target and g.target not in out.no_hit:
             pressure = self.wall_pressure_candidate(ws, fc, g.target)
             if pressure is not None:
