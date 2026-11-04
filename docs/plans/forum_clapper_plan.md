@@ -3699,3 +3699,16 @@ eff7718f只在native现有approach_only适用域加当前观测源body与hero->t
 approach230_crossing_20261103保存BASELINE、OPUS230_RECEIPT、CHANGE_REPORT、source_eff7718f.zip、red230/green230b及ACTUAL2766_COMPONENT。31新增覆盖左右fresh/active、边沿、body内、身后放行、六种未知与near优先；red24fail7pass，中间helper引用NameError修正且原件保留，最终六相邻248过/源外0，31为增量不把248加217。Root另一个只读同事查guard通过，不替代Opus126。真实记录2766仍自然绑定源335476/2753/CC_SLAM，原S0/HF/prefix与因果RS在本源得到air R2097152，全owner到2768complete无contact；未send/commit，不是全政策/P或真实接受。新源独立审仍待126，随后新绑定完整政策串行首不同包前的P，没新合同/游戏。用户五aim文件、旧wf/AA/原始STOP失败保持，Windows核心进程不动，资源门无新变化。
 
 用户讨论时序参数离线化：当前空中入口仍有在线短轨迹求时刻，连续表仍离线。拟先共用两入口的strike/observe后缀和参数接口，再离线解少数模式时序、在线小表查询或已验证同模式域内插值，插值后整数取时仍需满足可行区间/因果前缀和余量。当前单基准33见证不能当多维插值域；必要的现场输入/最终路径危险/派发截止复核保留。此为方案边界，本轮没有因问答扩做架构或多项式拟合，不把两池并跑或插值外推当新能力。124三点时序审排在源码主线之后，不阻塞126/P。
+
+
+### 7.94 eff源审已核收；有限完整政策P到首个改包即停，未当全帧内/闭环通过【232已处理；运行源eff不改】
+
+已处理 Opus #232(Task126)：11产物hash/字节、eff两改文件LF在Git/快照/Root包、248唯一用例同集同结果及31项red的24fail7pass逐项核同；R3两例通过，没有P0–P3。SOURCE_REVIEW与OPUS232_RECEIPT已保存，source_review_pending=false；源身体挡路/229边界修复在本范围核收，不替代后续路线、实际输入接受或运行许可。
+
+Root新绑定eff、7源码LF、261只读模型文件与5脚本的独占P，原资源门通过，实际P0–15/High/Numba4、GetProcessInformation核EcoQoS关闭。原ACTION账本影子预热后，在2765..2805预定带使用各拍原始S0/HF/prefix和因果预测，比较实际framed null-sink ACTION的target/mask/hold/flags；这不是开局到原点零分叉回放。2765..2768四包同，2769目标2771第一次由旧R+DASH2097156变R2097152，当轮立即停止，trace无2770及以后STATE，未喂分叉生效后录像。五拍重建差0、源外模块0、新签名0、tick错误0，15条trace记录完整/overflow0。另一个Root只读同事独立核同这些包与终止边界。
+
+五拍完整_act为16.8106、14.8938、15.7986、13.6879、14.4871ms；2765超过16.6667ms约0.144，MeasurementTrace完整tick另为16.8389ms，不能写全部帧内或把两种计时混用。它仍原普通CONTINUE；2766起接近段承诺/active才接管。五个有限点不当p99、完整新链预算、现场截止或换目标后的首刀成功证明，不重复测到绿、不拿旧18c两点盖章。P_RECEIPT和原始p_serial_eff7718f/p_entry_2805_20261104T053938Z保存。自有51328及async44192均真实结束、STATUS false；本阶段未起游戏或改Prefs/DEMO/registry，Windows核心进程不动。
+
+用户问躲锤2是否要超过屁股：按当前Slam2 body后沿local x=-1.272、大黄蜂半宽0.25、锤2最后沿+0.674，英雄中心对齐屁股后沿时横向空档1.696u；锤2本身不需无敌即可分离，不需要为了该锤继续向墙漂。Slam1切Slam2首样本可能仍结算锤1（后沿-1.91），且下降碰怪本体仍独立有害，不能把该几何结论当整段退出已通过。REAR_EDGE_GEOMETRY保存，运行固定尾漂尚未据问答盲目截断，也未批准贴墙路线。
+
+下一步只对新有限P来源/实包停止边界作最小收据审，不重跑大回归/P或扩时序矩阵；完整新路线预算与新合同尚未放行。连续下劈33名义因果见证仍离线，旧823合同/停止原件不复用，五个用户aim文件保持原样。
