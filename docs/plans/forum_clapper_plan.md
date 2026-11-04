@@ -4082,3 +4082,13 @@ P_RECEIPT及p_68f5c573/RESULT/P_RESOURCE_GUARD/ROOT_CLEANUP保留。Root独立�
 Root决定只补当前功能前缀已有的2913 near和3085 middle两个具体换目标点。Task160在Opus自己的目录备同协议的单次完整_act功能输入，原点前shadow/真实已知前缀保留，到点出一包即停，不把2913新包后的旧STATE续到3085冒充闭环；S0/HF/prefix用生产86x1，必须证明实际非keep+EntryAttack/来源绑定/入场评估，没覆盖就明确未知。只E16–23 Idle、不P、不生产修改/新网格/录像future；Root后续自己独占补P，并同时记录完整trace tick/_act/L2/绑定范围。原3303/3304不重跑凑分布，也不另开通用优化项目。wake184。
 
 当前source68/331功能不变；新单局analysis/w13_scored_focus_20261104T200240Z_68f5c573草稿仍ready=false，无真实ENGINEERING_GATE/contract/sol试验根目录，无新游戏或掉血，旧0bf/AA/raw/STOP与Windows核心进程不动。STATUSfalse、Root无运行任务，待两个必要功能输入，保留用户无人值守授权与全部严格停止/真实清理门。
+
+### 7.126 #269换目标入场功能输入已核，两个现成点完整tick实测/清理；当前源新单局工程门准备冻结【已处理 Opus #269】
+
+269/switch_act160十工件hash/bytes核同。2913 near→335470、3085 middle→335476均真经过非keep胜者、EntryAttack、地面到达/占用查询后stomp、goal_preferences与现有换踩offer、完整episode._act→before_send→framed null ACTION→sent。均为旧0bf原始S0/HF/prefix86x1、原点前影子B2候选关闭、到点一包即停的条件输入，不是自然闭环；两点已有同一CAST目标，绑定提前返回，**未覆盖SWITCH来源历史扫描/新跳跃来源成本**，2913仅查目标SLAM不冒充来源。
+
+Root在当前68f源机械移植，不改生产，在原独占/5秒暂停/原资源门下分两个进程各测一次P0–15 High/Numba4/GPI EcoQoS false：2913完整trace tick13.4595ms、_act13.4272ms、L2目标_decide0.885800ms（entry观察器内0.3848ms）；3085分别13.8801/13.8504/0.947500ms（entry内0.3972ms）。包含分析只读记录开销，绑定保留提前返回；无外来模块/编译签名变化，重建差0，包与269功能稿同，3085不同旧局包且之后未喂STATE。旧3303/3304未重跑，不把这四有限点称分布/全场上界/时限富余/新增乘法<0.1ms。未测SWITCH专用成本明确保留未知，不为此另扩离线场景搜索。
+
+analysis/target_priority_fix266_20261104/p_switch269/保留两份输入/脚本/runtime/完整trace与P_RECEIPT。两组自有worker/场进程逐PID+create_time独立核真消失；golden/Prefs/旧DEMO hash+mtime不变、registry实例/live空restore_pending=false、无游戏，ROOT_CLEANUP后才false。资源门未改、Windows核心进程无操作。
+
+当前source68/331回归与267独立源审不变。新单局w13_scored_focus_20261104T200240Z_68f5c573按当前源/模型/脚本/配置/有限预算重新绑定，269及全部相关旧编号逐项accepted，不复用旧停止局合同；计划先main批、同步knife/TV后才写真实ENGINEERING_GATE/新contract并冻结刀口HEAD。仅新工程一局w13、seed314168、7HP起点、HP≤6真实Q1首任意掉血即停，无补局/重跑/8局；--measure、实际worker本连接input.stats零delay/jitter/HF2/2/pending0、原死亡/期望键/Opt1/缺关键日志/资源/STOP/真实清理全部保留。新战术意图和实际动作逐项审计，不把连续下劈离线表说已上线。用户11月3日已授权无人值守，不再等用户到家。运行源码未改，冻结期间不提交knife，真实全部清理后才同步后续计划。
