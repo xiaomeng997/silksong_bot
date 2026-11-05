@@ -303,9 +303,11 @@ def register(P):
         if o.f - v["f_open"] > int(a["absolute_f"]):
             return {"do": "abort", "why": "vault approach: no table range within its absolute frames"}
         if v.get("run_f") is None:
-            if running_confirmed(o.s, getattr(o.sim, "prefix", None), v["over_dir"]):
+            # a first confirmation older than startup_f is no start, also when the tick at startup_f was skipped
+            age = o.f - v["f_open"]
+            if age <= int(a["startup_f"]) and running_confirmed(o.s, getattr(o.sim, "prefix", None), v["over_dir"]):
                 v["run_f"] = o.f
-            elif o.f - v["f_open"] >= int(a["startup_f"]):
+            elif age >= int(a["startup_f"]):
                 return {"do": "abort", "why": "vault approach: running not confirmed within its start-up frames"}
         if v.get("run_f") is not None and o.f - v["run_f"] > int(a["max_f"]):
             return {"do": "abort", "why": "vault approach: no table range within its frames"}

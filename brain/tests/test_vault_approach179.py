@@ -233,3 +233,12 @@ def test_a_bound_start_is_never_restarted_and_counts_the_running_frames():
  assert r.run.v['run_f']==sim.f+2 and r.run.link=='approach'
  assert tick(r,raw,sim,2+24,key=L)==L and r.run is not None
  assert tick(r,raw,sim,2+25,key=L) is None and 'no table range within its frames' in r.done[-1].v['why']
+
+
+def test_a_first_confirmation_past_the_start_up_frames_is_refused_when_that_tick_was_skipped():
+ # Sol #301 R1: the actual runner ticks 0, 3, 5 (no tick at admission + 4); a first confirmation at age 5 is no start
+ r,raw,sim=approach_run()
+ tick(r,raw,sim,0);tick(r,raw,sim,3)
+ assert r.run.v['run_f'] is None
+ assert tick(r,raw,sim,5,key=L) is None and r.run is None
+ assert 'start-up' in r.done[-1].v['why'] and r.done[-1].v['closed_f']==sim.f+5
