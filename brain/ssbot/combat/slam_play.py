@@ -466,6 +466,7 @@ class SlamPlay:
         self.done: list[Run] = []            # finished runs of this episode (the stats)
         self._closed_iid = None              # the Clapper whose slam was handled: no second look until it leaves it
         self._closed: set = set()            # TWO_PLAY: every Clapper whose slam was handled (until it leaves it)
+        self._closed_ta: dict = {}           # Clapper iid -> the handled slam's antic entry (clock): its identity
         self._jfam: dict = {}                # TWO_PLAY: Clapper iid -> "j" / "jc" (its jump move) / "jc_landed"
         self._rune: dict = {}                # TWO_PLAY: Clapper iid -> (landing x, facing, game time) of a jump cast
         self._t = 0.0                        # SP10b: this tick's clock (s)
@@ -486,6 +487,7 @@ class SlamPlay:
         self.done = []
         self._closed_iid = None
         self._closed, self._jfam, self._rune = set(), {}, {}
+        self._closed_ta = {}
         self._ho = self._hold = None
         self.holds = []
         self._rg_circ = {}
@@ -503,6 +505,8 @@ class SlamPlay:
             st = control(o)[0]
             iid = o.get("iid")
             if st not in SLAM_STATES and (self.run is None or self.run.iid != iid):
+                self._closed.discard(iid)
+            elif st == "Slam Antic" and iid in self._closed and self._new_slam(iid, t - control(o)[1]):
                 self._closed.discard(iid)
             if st in ("Cast Slam Antic", "Cast Slam Antic 2"):
                 self._jfam[iid] = "jc"
@@ -685,9 +689,18 @@ class SlamPlay:
             r.why = r.why or why
             self.done.append(r)
             self._closed_iid = r.iid
+            self._closed_ta[r.iid] = r.ta
             if TWO_PLAY:
                 self._closed.add(r.iid)
         self.run = None
+
+    def _new_slam(self, iid, ta: float) -> bool:
+        """Task 179 #303 (live 179-L1 w13_walk179 8f9e9629, 2683): the handled mark names a slam, not a Clapper. The
+        script is not stepped while the B2 chain owns the keys, so it never saw 335476 leave the slam handed over at
+        2526 and took its new Slam Antic (2675) for the handled one. An antic entry more than 30 frames from the handled
+        one (step's new_antic rule) is a new slam; the handled slam itself still gets no second look."""
+        done = self._closed_ta.get(iid)
+        return done is not None and abs(ta - done) * 60.0 > 30
 
     def step(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
              skip: frozenset | None = None, sim=None, guard: list | None = None, bombs=None) -> int | None:
@@ -728,7 +741,8 @@ class SlamPlay:
             r = None
             if new_antic:
                 self._closed_iid = None
-        if st not in SLAM_STATES or (e is not None and e.get("iid") != self._closed_iid):
+        if (st not in SLAM_STATES or (e is not None and e.get("iid") != self._closed_iid)
+                or (st == "Slam Antic" and self._new_slam(self._closed_iid, ta))):
             self._closed_iid = None
         if r is None:
             if st != "Slam Antic" or (e is not None and e.get("iid") == self._closed_iid):

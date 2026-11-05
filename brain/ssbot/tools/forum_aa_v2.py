@@ -11,11 +11,35 @@ from ssbot.record.recorder import RecordingReader
 from ssbot.train.measurement import validate_trace
 from ssbot.train.stall_diagnostics import tail_summary
 from ssbot.train.aa_v2 import validate_production_cli, runtime_errors
+from ssbot.train.forum_measure_metrics import QUIT_SCENES
 
 
 def write_new(path, value):
     with Path(path).open("x", encoding="utf-8") as out:
         json.dump(value, out, indent=1, allow_nan=False, default=str)
+
+
+def cheat_scan(states, metrics):
+    """(error or None, frames) of the raw window's cheat check.
+
+    Only a frame inside the raw HP audit's proven real-quit unload (metrics.real_quit_unload of a complete audit:
+    Quit_To_Menu seen with the hero loaded and HP read, then the hero None with no game or a quit scene, nothing after
+    it) may lack the cheat status, because the game has no hero to report it (Task 179 #303, live 179-L1 2967..3001).
+    Those frames are returned, not waived: a status present there is still checked, and a missing status before the
+    quit, outside that boundary or without a proven quit is still the error."""
+    unload = metrics.get("real_quit_unload") if metrics.get("complete") else None
+    unloaded = []
+    for state in states:
+        raw_game, f = state.get("game"), state.get("f")
+        game, hero = raw_game or {}, state.get("hero") or {}
+        if (unload is not None and type(f) is int and unload["first_f"] <= f <= unload["last_f"]
+                and "hero" in state and state["hero"] is None and not isinstance(game.get("cheat"), int)
+                and (raw_game is None or (isinstance(raw_game, dict) and raw_game.get("scene") in QUIT_SCENES))):
+            unloaded.append(f)
+            continue
+        if not isinstance(game.get("cheat"),int) or game["cheat"]&3 or hero.get("is_invincible") or hero.get("invincibility_source"):
+            return "cheat or missing cheat status", unloaded
+    return None, unloaded
 
 
 def audit_environment():
@@ -58,10 +82,9 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
     online = m["window"]
     for key in ("wake_f","end_f","T","target_ids","watchdog_f","tail_end_f","tail_end_reason"):
         if online.get(key) != window.get(key):errors.append("online/offline window mismatch: "+key)
-    for state in (RecordingReader(attempt["recording"]).states(window["wake_f"],window["tail_end_f"]) if have_boundaries else []):
-        game,hero = state.get("game") or {},state.get("hero") or {}
-        if not isinstance(game.get("cheat"),int) or game["cheat"]&3 or hero.get("is_invincible") or hero.get("invincibility_source"):
-            errors.append("cheat or missing cheat status");break
+    cheat, unloaded = cheat_scan(RecordingReader(attempt["recording"]).states(window["wake_f"],window["tail_end_f"])
+                                 if have_boundaries else [], audit.get("metrics") or {})
+    if cheat:errors.append(cheat)
     recovered = True
     if window.get("watchdog_f") is not None:
         recovery = run/f"recovery_i{instance}_e{episode}.json"
@@ -74,7 +97,11 @@ def verify_episode(run, instance, episode=0, *, production=False, context=None):
               "main_ticks":{"n":tail["total"]["n"],"p50":tail["total"]["p50_ms"],"p99":tail["total"]["p99_ms"],
                             "gap_ge3":sum((x.get("processed_frame_gap") or 0)>=3 for x in rows
                                           if have_boundaries and x.get("kind")=="tick" and window["wake_f"]<=x["f"]<=window["end_f"])/max(1,tail["total"]["n"])},
-              "diagnostics":rows[-1].get("diagnostics"),"production_eligible":production and not errors}
+              "diagnostics":rows[-1].get("diagnostics"),"production_eligible":production and not errors,
+              "real_quit_unload_no_cheat_status":None if not unloaded else
+                  {"first_f":unloaded[0],"last_f":unloaded[-1],"frames":len(unloaded),
+                   "boundary":(audit.get("metrics") or {}).get("real_quit_unload"),
+                   "scope":"hero unloaded after the proven real quit; no game/hero to report a cheat status"}}
     result.update(context or {})
     write_new(run/f"verified_i{instance}_e{episode}.json",result)
     return result
