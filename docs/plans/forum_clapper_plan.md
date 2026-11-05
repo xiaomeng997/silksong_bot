@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：修改中（057有限源审通过，受影响3拍P时序点算不足；同包处理，未再开游戏）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待性能验收（786等价成本优化由Sol独审核收；Astra两次容量不可用，无其审阅结论；新P/实机门分别核）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4400,6 +4400,17 @@ analysis/task178_057c702a_20261105一次P完成：原独占/5s暂停/资源block
 
 整拍2679冷选择/松方向D14.9568ms、2680首A+D13.2854、2681保持14.5505（act14.9296/13.2613/14.5292）。沿原历史lag15.782995+reserve1/名义30.3333点算，余量−1.40646/+0.26494/−1.00016ms；不是实际错帧报告或未来上界，但当前记录点算未过，不能取暖拍/降预留当通过。首D同时释放先前R方向，可能影响中性行的横向间距，不能仅因还没A而默认晚一帧无害；保持A+D与首次换键分列，后续由Opus用原始真实S0/HF/队列核最小必要时序/成本修法。probe21.623/1.5189/1.216ms在act外，不叠进真实worker固定开销，也不把这个重放循环当截止证书。
 
-新总manifest还false：前三项离线accounting未设之外，多了CLA WSTRIKE_SET懒加载配置未预备（实际键名SSBOT_FORUM_CLAWSTRIKE_SET）。这是Sol新增测量接线没有调用生产prepare_lazy_configuration，非控制器源码新故障；不能沿用旧三accounting豁免或事后绿化。Sol已另存replay178_057_p_prepared.py/P_DRIVER_CORRECTION：预热前真实工厂快照，后挂trace，语法已核、尚未执行；原bound脚本/false不改，不只为字段再跑一次P。下一次有实质修正条件的受影响测量用修正入口。
+新总manifest还false：前三项离线accounting未设之外，多了CLAWSTRIKE_SET懒加载配置未预备（实际键名SSBOT_FORUM_CLAWSTRIKE_SET）。这是Sol新增测量接线没有调用生产prepare_lazy_configuration，非控制器源码新故障；不能沿用旧三accounting豁免或事后绿化。Sol已另存replay178_057_p_prepared.py/P_DRIVER_CORRECTION：预热前真实工厂快照，后挂trace，语法已核、尚未执行；原bound脚本/false不改，不只为字段再跑一次P。下一次有实质修正条件的受影响测量用修正入口。
 
 ROOT_P_AUDIT.core_measurement_integrity_pass=true，但configuration及点算未闭合，integrity_pass/finite_affected_budget_pass均false，无新工程gamegate。P worker56540/create和field4684/create核已退出、无残留game/children、golden/Prefs无差、旧DEMO hash/mtime与registry146空全过后才STATUSfalse。未改Windows核心或他人进程。继续同178反馈：先定位这条选行/完整_act成本，必要最小优化或有依据的更早松方向排程，保持未发送才重选/真实HF/队列/全危险/原余量及源脚本配置绑定；不能平移旧键、放宽停止或改新动作池。与旧Cast2的17P分开，不重跑旧矩阵或原单局，不为刷绿重复同条件P。
+
+
+#### Task178/#294精确成本优化普通独审核收，绑定新源3连续拍正式P（11-05，进度7.155）
+
+实际786766c3三运行文件：forum_v2粗化改同格跨步OR/危险掩码只粗化一次，B2按本次_sample_of真正读取的lo/hi补齐owner/hazard栈，既有3行一次批量HF/kin roll、单次见证内缓存固定state/j姿态。Sol逐源核coarse负原点/空形状的分块恒等、纯haz别名不被写、samples与_occ_stack相同round/shift/clip/broadcast、bomb/同owner/保护/扫掠/余量不变；旧快照不可变和每proposal新Geometry合同保持，rs强引用防id回收，适配器覆写occupied_only仍回原逻辑，不宣称跨tick复用。批量每行HF/kin独立、候选顺序/早退/结果不变。未改reserve/lag/时序/动作域。
+
+2140相关通过/1skip/3旧warning原日志已核，新增7项对旧参考的有限正反例；不再跑这些或小时级全套。376条件生产拍EXACT两侧字节同、sha2565258fe6870bd653e9f46d73eaf9b08b6e819d84fb26470cf526cfd965d1b60b4；124query/248owner+haz/16row与支撑格输出身份。新侧SUMMARY为提交前439fe26d+三个dirty运行文件，旧侧为自有057快照；有限候选身份不冒称完整已提交快照hash或普遍证明，当前786另做710/261清单/源码独审，正式P再绑实际加载模块。E交替降20.7–22.6%只作参考，不折算P。2679晚一帧额外R会被B2拦，确为关键松方向拍；2680也按关键，2681保持锁存不变；不申请豁免。
+
+曾复用指定gpt-6-astra/xhigh尝试一次集中缓存审和一次重试，均Selected model is at capacity，没有审阅输出、未换模型或扩队。没有Astra通过结论。Sol按现有普通独审职责完成上述纯等价替换的独立源码/证据审，未发现本轮新增P0–P2；没有引入新模型或行为定义。ASTRA294_UNAVAILABLE/SOURCE_REVIEW/OPUS294_RECEIPT明确区分。若后续证据改变安全/模型假设仍按workflow触发关键审，不伪借旧Astra结论。
+
+analysis/task178_786766c3_20261105新绑受影响2679..2681完整P。使用上一轮Sol已修正的真实prepare_lazy_configuration预热前快照入口，仅再补两处实际修改模块与全部已加载ssbot来源的测后hash；wrapper仅换入口名，其余资源/独占true/5s暂停/30s pulse/P0–15High/Numba4/EcoQoSoff/清理不变。新源不是同057重跑刷绿；旧false不改。P未运行、无gamegate，先核真实P，再按原有限manual工程/首损退出域决定是否新单局。Opus保持交付静止，不在P后自动恢复小时级全套；有具体未覆盖失败再做必要补充，普通全量进度不驱动新任务。
