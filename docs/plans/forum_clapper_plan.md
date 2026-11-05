@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待实机验收（v2源/有限P通过，先补既有退出日志完整性条件，同包178）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：修改中（当前#292关键审见P2，Idle见证/钩后接续同包回修；旧源有限P保留，新源未放行）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4370,3 +4370,14 @@ trace整拍冷2726=12.5868ms、峰2738=13.1062；2740新行12.8222、2741首A+D1
 与旧e4不同，本次worker rc0，实际完整配置configuration_complete=true/unresolved空、trace/window/独立raw全窗audit均complete、0overflow、GC原事件保留。新退出分类Quit_To_Menu2945→hero卸载2946..2980共35帧，T/end_f/L未缩改；不是绿化旧记录。Root输入/配置/日志/原合同710源和脚本全过程冻结/首损停止/清理11项全过，只表示完整性通过，ROOT_EVENT_AUDIT.passes仍false。
 
 真实cleanup12:53:24.457918Z后Root独立核actualworker42860、field53944及其create、game33576、coordinator43240/WMIshim56196全PID消失，golden/Prefs无差、旧DEMO hash/mtime恢复、registry146/空且restore_pendingfalse、无game，ROOT_CLEANUP verified后才STATUSfalse；无Windows核心/他人进程操作。游戏至实际清理期间刀口HEAD未提交。Sol只做基本现场验收与停止事实，不代替Opus重复物理调试。失败完整工件交回原178：先定位Idle下劈为何接受后没hit及钩后外部阻挡/锤1受击的时序，区分模型/输入/目标移动/真正危险，不先硬编码或扩动作；如需改共用接触见证就在原范围完成必要修复及有限生产正反例，新的受影响P入口交Sol。没有新Task179、全矩阵或无修重跑；Cast2原修法不因未覆盖撤销，也不能称实机通过。
+
+
+#### Task178/#292诊断核收、关键审P2与最小接续方向已定；继续同包回修（11-05，进度7.152）
+
+Opus直接交cf38cbb7/49776801，跟踪干净、710/261仅transfer与air_native两运行文件改变。Sol核真实timeline：2610 Idle k10决定、2613按/2614接受，2617 k17 EvadeScuttle速度15；模型/实际英雄位置近0.003u、按键对齐，打空是静止Idle见证跨过未知闪避决定，不是原Cast2或发送晚。2654针命中Idle同时转SlamAntic，2672控制返回，2679行未发送便被2682焦点0.5u margin挡，2708锤1/2709受击；实录事实与diag核同。完整生产2679仍拦，增加实际CC_SLAM2654责任、未知结束至少2709，不再只靠旧来源责任覆盖。原失败/NO_RETRY、Cast2现场未覆盖不改。
+
+#292报告681过，当前v3b日志为684 passed in21.48s，两数分记不拼加/不重跑；组件2603..2616无记忆时见证止Idle14，2610生产不出D/不登记strike，旧P不能盖新源。2679生产回放63链包同、前史三个普通rank异步tie键强制原wire/首J生产clock关闭，均显式条件化；不称闭环或现场新成功，fallback责任兜底尚未实际走到。当前源码未接受，未开P/game。
+
+依用户workflow复用既有gpt-6-astra/xhigh一次集中关键增量审，不扩队/不跑测试P实机。独立P2：当前idle_in_range一次k>=16交集+elapsed2即永久no_evade，区间离开/缺拍/未知亦能错误推出WillEvadeFalse。需区分证明收集/完成：同Idle实例连续有效入范围并覆盖CanEvade与有依据的传播假设；收集中离开/缺拍/未知重收集，完成才保留到本Idle结束；新Idle/命中重新进入失效。依据不足则未知，不能将经验2帧当未来上界。ASTRA_292_REVIEW与OPUS292_RECEIPT保存。
+
+Sol决定保留用户Idle踩头/钩脸下劈意图，不采用泛禁Idle或降低B2 margin。先让Opus沿现有Run从2673真实S0/HF/在途做极小方向/释放/制动条件化生产验证：未发送的新下劈候选被挡可拒绝候选，若当拍air短步真实检查安全则继续接近、下一拍重评既有Slam row；不复活已恢复Move，不推迟已发送绝对键，不假设同向等待安全。局部成功后把可支持的针命中反击接续条件纳入首钩准入，复用现有钩/下劈/锤尾检查到真实交接或锤2，无支持分支明说未知/拒候选；不造全反击模型/动作池/新L2。针命中不保证只选Slam，伙伴锁/其他近招须分域；31f只是时间，n_safe0只是有限搜索没找到，不代替安全/无解证书。实现仍Opus唯一，整包验证后Sol增量审/受影响P/有界实机；尚未再消费一局。
