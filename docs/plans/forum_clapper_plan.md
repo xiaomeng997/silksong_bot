@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.148）：Task178 v2已由Opus直接提交刀口树a3ef476f（v1为e7bd3f91）。Sol已增量核收#290，R1时钟域/站地、R2正向policy→D/ATK包、R3共用假组件均关闭，671相关检查全过；源码/有限离线通过，真实命中仍未验。新绑710源/261模型、21输入/5脚本的一次受影响完整2726..2742 P待执行；不重跑671或旧矩阵。正式P/实机仍Sol统一，旧NO_RETRY不变。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.149）：Task178 a3ef源/有限离线及17拍完整P已通过：冷12.5868ms、峰13.1062，选新行12.8222、首A+D12.0679；来源/签名/线程/真实清理核过。P原总manifest仅3个未请求的离线accounting标签未解，控制/执行配置全解，原false保留不作真实worker完整性证明。实机暂未开：先在同包核清Task177已登记的Q1退出后HP空快照，避免带已知完整性疑点再花一局。Opus负责该验收条件分析/必要最小修复，既有P不重跑，原NO_RETRY/窗口/停止门不放宽。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与唯一工作包见7.146；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待性能验证（v2源/有限离线通过，同包178）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待实机验收（v2源/有限P通过，先补既有退出日志完整性条件，同包178）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4342,3 +4342,13 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 R2新增正向：新逻辑2735先等，2736起模型hero按自己的成功发送、真实HF/在途prefix推进，仍经过policy/planner/B2/当前几何/before_send/sent；2740发D到2742并登记press2743/contact2751，2741发A+D到2743，2742再发A+D。无恢复/外来/残留子进程；S0在planner与chain.prepare注入，差20.24保留，合成有额外一次prepare。实体/地形/时钟仍录制条件标签，旧前史强制旧逻辑；不是自然闭环、实际接受/命中或反弹证书。R3修旧假B2的实际face_mode公式，生产缺字段unresolved不变。源码及这条有限功能通过，不冒称实机。
 
 Sol新analysis/task178_a3ef476f_20261105/准备一次受影响P：完整2726..2742（17拍），含冷见证、热等待、真实新row/D/ATK发包；不拿旧19帧或组件相加盖章。绑定710源/261模型、21输入、5脚本/源审290/显式已处理集合。Opus入口复制到Sol目录，另加测量/出处记录（编译签名、实际boost/外层probe、结束后实际configuration manifest），不改任何控制逻辑；缓存沿真实合同的Sol-owned Numba缓存，不写Opus目录。静态初次插桩匹配两处同文而断言在执行前停，只修分析定位，无P/源码事件。P开启前STATUStrue、等5s/原资源门/30s pulse；预热和条件旧前史在E24–31/Idle，新拍P0–15High/Numba4/EcoQoSoff，完整清理后才false。当前P未运行、无新实机gate。正式结果并回178，不另派收据任务。
+
+#### Task178正式P核收与实机前既有完整性条件（11-05，进度7.149）
+
+analysis/task178_a3ef476f_20261105/run_P一次完成17完整tick2726..2742。原资源门blockers0、独占/5s暂停/30s pulse执行，E预热后每拍P0–15High/GetProcessInformation EcoQoSoff、Numba get4断言真；710源含261模型/21输入/5脚本与加载模块hash同，无外来/新签名，Trace17receive/17tick/17action/footer完整0overflow、GC原事件保留。2735等、2740选新strike并D、2741/2742 A+D，自己的前缀/HF，无恢复。旧强制前史/录制条件实体、模型hero和额外prepare仍显式，不把它当自然闭环或实际命中。
+
+trace整拍冷2726=12.5868ms、峰2738=13.1062；2740新行12.8222、2741首A+D12.0679、2742保持12.1746（_act分别12.8001/12.0470/12.1520）。历史lag15.782995+reserve1的名义30.333窗口算术余量0.7281/1.4824/1.3757ms，只是有限点算、不保证网络/未来。驱动额外boost/运行态/签名查询1.0825..21.1613ms在_act/trace外，只是重放探针，不当真实worker每帧开销；也不拿重放循环节奏作截止证书。
+
+本轮新增局后总manifest为false：BLOCK/ORDER/SCHEDULE三项未设置、role均accounting；离线model_budget实际attempts=[]、execution=None，其他控制/执行项全解、unknown0。这些标签本已被现行behavior hash排除；ROOT_P_AUDIT/CONFIGURATION_SCOPE据完整source/script/input+实际控制值接受有限P，不改原false、不称真实worker/AA完整。下次实机仍需真实worker完整配置/预算/输入回执通过，不豁免任何控制字段。P worker34312和field12220按PID/create核真退出，golden/Prefs无差、旧DEMO hash/mtime同、registry空且无game，ROOT_CLEANUP过后才false。
+
+尚未开新实机。Task177原始全窗audit的missing health snapshot仍未在共用验收接口闭合：forum_measure_metrics.audit_states对wake..end逐帧要health+blue，Q1真正卸载hero后会缺，但不能仅凭“已发暂停键”就当退出。先由Opus同包使用原e4/e390录制、真实Q1菜单/场景/hero生命周期，区分战斗关键HP漏记与已经明确退出后的不适用；可复用既有字段时不加控制代码。若确属共用审计分类缺陷，最小修复/独立补充审计+必要正反例；战斗/未确认退出缺HP必须失败。不得补零/猜HP，不缩end_f/T、改HP损失/样本窗口/停止门，也不改旧raw/失败输出为绿；若修法需改变指标定义先给证据，不默改。仅离线审计改变时核适用性即可，不为它重跑17P/671/旧矩阵；不以修无关字段重开旧局。反馈与修复仍178，不另拆微任务，目标行为现场仍待验。
