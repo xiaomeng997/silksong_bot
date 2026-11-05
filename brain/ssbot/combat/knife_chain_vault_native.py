@@ -175,16 +175,20 @@ def manual_entries(native, state, sim, ctx):
     direction=ctx["direction"];box=ctx["box"]
     base={"iid":ctx["target"],"over_dir":direction,"nogo":[],
           "x_end":float(box[2] if direction>0 else box[0])}
-    kind,part,gap,root_distance=V.distance_entry(cfg,h,tp,box,direction,sim.params.attack_cooldown)
+    # #298 decision 1: an incoming walker is approached to the existing near jump, never hooked at 9.5 u; Idle and
+    # walkers that are not closing keep the whole table (the hook range included)
+    incoming=V.incoming_walk(target,float(hp[0]))
+    kind,part,gap,root_distance=V.distance_entry(cfg,h,tp,box,direction,sim.params.attack_cooldown,not incoming)
     entries=[]
+    far_from=0. if incoming else cfg["HOP_RECIPE"]["root_distance"][1]
     if kind=="near":entries.append(("near",{**base,"near":part,"far":None}))
     elif kind=="hop_hook":entries.append(("hop_hook",{**base,"near":None,"far":part}))
-    elif (gap>cfg["NEAR_RECIPE"]["box_gap"][1] and cfg["HOP_RECIPE"]["root_distance"][1]<root_distance
-          <=cfg["APPROACH"]["root_distance_max"]):
+    elif gap>cfg["NEAR_RECIPE"]["box_gap"][1] and far_from<root_distance<=cfg["APPROACH"]["root_distance_max"]:
         # Task 179: farther than both entries but within the approach bound: run in on the ground (table link
-        # vault_idle.approach) instead of leaving the planner to its corner (live 786 2580: 11.7 u, hop range 9.5 u).
+        # vault_idle.approach) instead of leaving the planner to its corner (live 786 2580: 11.7 u, hop range 9.5 u);
+        # an incoming walker also inside the hook range.
         entries.append(("approach",{**base,"near":None,"far":None,"approach":{"max_f":cfg["APPROACH"]["max_f"]}}))
-    native._note("vault_manual_entries",frame=state["f"],box_gap=gap,root_distance=root_distance,
+    native._note("vault_manual_entries",frame=state["f"],box_gap=gap,root_distance=root_distance,incoming=incoming,
                  actions=[kind for kind,_ in entries],scope="fixed table recipes; no grid fallback")
     return entries
 

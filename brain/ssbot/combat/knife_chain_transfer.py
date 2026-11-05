@@ -405,8 +405,9 @@ class WalkSupport:
 
     One future body set serves both uses. Her root moves at the observed DistanceWalk velocity (map2.clapper
     WALK_SPEED; one 0.02 s physics step per game frame or none, so every step count a frame either way), in the
-    fitted Walk pose at her clock (three frames before to one after, as contact_body_witness), on the arena floor
-    and cut at its walls, each frame together with the previous one (damage reads the previous frame's colliders).
+    fitted Walk pose at her clock (three frames before to one after, as contact_body_witness), on the arena floor,
+    each frame together with the previous one (damage reads the previous frame's colliders). It ends before the
+    first frame any of those bodies could touch a wall (map2.clapper clamps the whole body there and her root stops).
     The hit core is the INTERSECTION of that set, the safety hull its UNION; a frame outside the domain is nan in
     both (no witness and no safety claim), never a union posing as a hit.
 
@@ -475,12 +476,16 @@ def walk_body_support(enemy,frames,hero):
     for d in range(frames):
         if k+d>=exit_k:break
         n=(0,0) if d==0 else (max(0,math.floor((d-1)*ratio)),math.ceil((d+1)*ratio))
-        steps.append(n)
         boxes=[]
         for q in range(k+d-3,k+d+2):
             for m in n:
                 b=raw(q,x+step*m)
-                boxes.append((max(b[0],wall_l),floor,min(b[2],wall_r),floor+b[3]-b[1]))
+                boxes.append((b[0],floor,b[2],floor+b[3]-b[1]))
+        # #298 R1 (Astra): at a wall map2.clapper._clamp_x holds the whole body and its root stops, so the constant
+        # velocity is no longer her motion. The domain ends before the first frame any supported body could touch a
+        # wall; no cut box stands in for the clamped one (a cut box missed the clamped front by 0.32 u).
+        if any(b[0]<=wall_l or b[2]>=wall_r for b in boxes):break
+        steps.append(n)
         core[d]=(max(b[0] for b in boxes),max(b[1] for b in boxes),min(b[2] for b in boxes),min(b[3] for b in boxes))
         hull[d]=(min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes))
     if not steps:return None

@@ -6,6 +6,7 @@ DistanceWalk band left). A walker facing away, a stopped / other-speed / unknown
 no domain. Live w13_pose178 786766c3 rows (walker 335470, 2519-2533) check the witness inside the actual colliders.
 """
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace as NS
 import numpy as np
@@ -204,3 +205,37 @@ def test_fresh_walking_stomp_goes_through_the_native_offer_install_before_send_a
  n.before_send(frame=sim.f,target=sim.f+2,mask=offer.mask,flags=0,received_frame=sim.f)
  assert n.sent().chain_outcome=='sent'
  assert n.runner.run.link=='strike' and n.runner.run.v['row']['support']=='walk' and n.commitment is not None
+
+
+def clamped(root,flip,j):
+ """map2.clapper._clamp_x: the whole fitted body is held inside the walls (her root pushed back)."""
+ b=KNOW.box('Walk',max(j,0));face=1 if flip else -1
+ a,c=root+face*b[0],root+face*b[1];lo,hi=min(a,c),max(a,c)
+ root+=cm.WALL_L-lo if lo<cm.WALL_L else -(hi-cm.WALL_R) if hi>cm.WALL_R else 0.
+ a,c=root+face*b[0],root+face*b[1]
+ return root,min(a,c),max(a,c)
+
+
+def test_astra_wall_example_has_no_claim_once_a_supported_body_could_touch_the_wall():
+ # #298 R1: Walk k0, flipX False, vel [8,0], root 47.489, hero x 45.989; body 45.444..48.830, right wall 48.99
+ s=T.walk_body_support(walker(t=0.,x=47.489,flip=False,vx=8.),20,{'pos':[45.989,8.]})
+ assert s is not None and s.info['domain_frames']==1
+ core,hull=s(np.full(20,45.989))
+ assert np.isfinite(hull[0]).all() and np.isnan(hull[1:]).all() and np.isnan(core[1:]).all()
+ root,lo,hi=clamped(47.489+.16*5,False,6)  # d6: her root held at 47.649, the body front at 45.397
+ assert abs(root-47.649)<1e-9 and abs(lo-45.397)<1e-9 and np.isnan(hull[6]).all()
+
+
+def test_the_wall_cut_keeps_every_in_domain_hull_around_the_clamped_body_and_spares_a_walk_off_the_wall():
+ # walking toward the right wall from 47.0: cut at the first frame a supported body could reach 48.99
+ s=T.walk_body_support(walker(t=0.,x=47.,flip=False,vx=8.),20,{'pos':[45.5,8.]})
+ n=s.info['domain_frames'];_,hull=s(np.full(20,45.5))
+ assert 0<n<EXIT_K and np.isnan(hull[n:]).all()
+ for d in range(n):
+  r=(1/60.)/cm.DT  # her true step count at frame d lies within floor(d r) .. ceil(d r)
+  for m in ([0] if d==0 else range(math.floor(d*r),math.ceil(d*r)+1)):
+   _,lo,hi=clamped(47.+.16*m,False,d)
+   assert hull[d][0]<=lo+1e-9 and hull[d][2]>=hi-1e-9
+ # backing away from her toward the arena centre near the right wall: no wall cut, the whole pre-exit domain
+ s=T.walk_body_support(walker(t=0.,x=46.5,flip=True,vx=-8.),20,{'pos':[48.3,8.]})
+ assert s is not None and s.info['domain_frames']==EXIT_K

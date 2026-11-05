@@ -106,3 +106,39 @@ def test_vault_domain_takes_the_switch_stomp_when_its_table_has_an_action(monkey
  assert out.stage=='manual_commitment' and out.details['vault_approach'] and out.details['entry_kind']=='approach'
  assert out.mask==B['L'] and out.move.family=='VAULT_IDLE'
  assert n._vault_responsibility[out.move][0].family=='CC_JUMP_CAST'  # the buddy's own jump family keeps the HP
+
+
+def walking(raw,direction,way):
+ """The scene's target walking at 8 u/s: way +1 toward her (incoming), -1 away from her."""
+ t=raw['ents'][0];t['fsms'][0]['state']='Walk';t['vel']=[-direction*way*8.,0.]
+ return raw
+
+
+@pytest.mark.parametrize('state,way,kind',[('Walk',1,'approach'),('Walk',-1,'hop_hook'),('Idle',0,'hop_hook')])
+def test_only_an_incoming_walker_is_approached_inside_the_hook_range(state,way,kind):
+ # #298 decision 1: an incoming walker is approached to the near jump; Idle / receding walkers keep the hook range
+ n,raw,sim,ctx=M.entry_scene(-1,7.)
+ if state=='Walk':walking(raw,-1,way)
+ assert V.incoming_walk(raw['ents'][0],raw['hero']['pos'][0])==(way==1)
+ (got,req),=manual_entries(n,raw,sim,ctx)
+ assert got==kind and (req['far'] is None)==(kind=='approach')
+
+
+def test_incoming_walker_approach_skips_the_hook_range_and_takes_the_near_jump():
+ n,raw,sim,ctx=M.entry_scene(-1,12.);walking(raw,-1,1)
+ (kind,req),=manual_entries(n,raw,sim,ctx)
+ r=n.runner;r.anchor.open(req);r.step(sim.f,raw,True,True,t_game=10.,sim=sim,bombs=BOMBS)
+ assert kind=='approach' and r.run.link=='approach'
+ _,mid,_,_=M.entry_scene(-1,7.);walking(mid,-1,1);mid['f']=raw['f']+1
+ m=r.step(sim.f+1,mid,True,True,t_game=10.+1/60,sim=sim,bombs=BOMBS)
+ assert r.run.link=='approach' and m==B['L'] and r.run.v['req']['far'] is None  # 7 u: no hook, still running in
+ _,close,_,_=M.entry_scene(-1,4.2);walking(close,-1,1);close['f']=raw['f']+2
+ m=r.step(sim.f+2,close,True,True,t_game=10.+2/60,sim=sim,bombs=BOMBS)
+ assert r.run.link=='near' and m&B['J'] and r.run.v['row']['F0']==close['f']+2
+
+
+def test_no_hook_flag_keeps_the_near_entry_and_drops_only_the_hook():
+ hb=[19.75,3.015,20.25,5.094];hero={'box':hb,'pos':[20.,4.5],'can':{'harpoon':True},'silk':9,'tm':{'atk_cd':0.}}
+ for root,kind in ((5.,'near'),(7.,None)):
+  x=20.+root;box=[x-2.252,3.015,x+1.341,6.917]
+  assert V.distance_entry(CFG,hero,[x,7.449],box,1,.25,hook=False)[0]==kind

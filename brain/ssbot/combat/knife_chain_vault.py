@@ -194,11 +194,27 @@ def _row(F0, n, keys):
     return {"F0": F0, "masks": [int(m) for m in keys[:n]]}
 
 
-def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown):
+def incoming_walk(enemy, hero_x):
+    """The target walks toward her (Control Walk, its velocity pointing at her x): #298 decision 1, keep approaching
+    to the near jump instead of the small-hop hook at 9.5 u. Any unknown field: not incoming (the table as before)."""
+    from ssbot.combat import slam_play as SP
+    if not enemy:
+        return False
+    vel, pos = enemy.get("vel"), enemy.get("pos")
+    if SP.control(enemy)[0] != "Walk" or not isinstance(vel, (list, tuple)) or not isinstance(pos, (list, tuple)):
+        return False
+    if len(vel) < 1 or len(pos) < 1 or type(hero_x) not in (int, float) or any(
+            type(v) not in (int, float) or not math.isfinite(v) for v in (vel[0], pos[0], hero_x)):
+        return False
+    return float(vel[0]) * (float(hero_x) - float(pos[0])) > 0
+
+
+def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown, hook=True):
     """The manual distance table (the person 11-02: by distance, no whole-skill pre-validation): a near jump when her
     box gap is inside NEAR_RECIPE box_gap and the roots are closer than HOP_RECIPE's range, else a small-hop hook
-    inside HOP_RECIPE root_distance with the harpoon and silk. (kind, request part, gap, root distance); kind None
-    outside both. Shared by the native entry and the ground approach so both read one table."""
+    inside HOP_RECIPE root_distance with the harpoon and silk (hook=False: never the hook, #298 decision 1 for an
+    incoming walker). (kind, request part, gap, root distance); kind None outside both. Shared by the native entry
+    and the ground approach so both read one table."""
     hb, hp = hero.get("box"), hero.get("pos")
     gap = float(box[0] - hb[2] if direction > 0 else hb[0] - box[2])
     root_distance = abs(float(target_pos[0]) - float(hp[0]))
@@ -212,7 +228,7 @@ def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown):
             press = max(press, math.ceil(cd * 60) - 1)
         return "near", {"h": near["hold"], "p": press, "before": near["before"]}, gap, root_distance
     silk = hero.get("silk")
-    if (far["root_distance"][0] <= root_distance <= far["root_distance"][1]
+    if (hook and far["root_distance"][0] <= root_distance <= far["root_distance"][1]
             and (hero.get("can") or {}).get("harpoon") is True and type(silk) in (int, float)
             and math.isfinite(silk) and silk >= 1):
         return "hop_hook", {k: far[k] for k in ("hop", "claw_after", "d", "p")}, gap, root_distance
@@ -246,8 +262,9 @@ def register(P):
               doc="Task 179 ground approach toward the far side (the person 11-05: over the walking one, never the "
                   "corner): ends when the other Clapper is out of its jump, she leaves the ground or input, the target "
                   "is no longer ahead / Idle / Walk or the approach outlives its frames; inside the manual distance "
-                  "table it names that entry (near / hop hook) for the following try. Running keys only; no jump, "
-                  "dash or hit claim, and every tick still passes the native current-step gate")
+                  "table it names that entry (near / hop hook; an incoming walker only the near jump, #298 decision "
+                  "1) for the following try. Running keys only; no jump, dash or hit claim, and every tick still "
+                  "passes the native current-step gate")
     def approach_recipe(x):
         v, o = x.v, x.obs
         a = v["req"].get("approach")
@@ -265,7 +282,9 @@ def register(P):
         pos = o.e.get("pos")
         if box is None or not pos:
             return {"do": "abort", "why": "vault approach: target body unknown"}
-        kind, part, _, _ = distance_entry(x.cfg, o.h, pos, box, v["over_dir"], o.sim.params.attack_cooldown)
+        # #298 decision 1: an incoming walker keeps the approach to the near jump (no small-hop hook at 9.5 u)
+        hook = not incoming_walk(o.e, (o.h.get("pos") or [None])[0])
+        kind, part, _, _ = distance_entry(x.cfg, o.h, pos, box, v["over_dir"], o.sim.params.attack_cooldown, hook)
         if kind == "near":
             v["req"] = {**v["req"], "near": part, "far": None}
         elif kind == "hop_hook":
