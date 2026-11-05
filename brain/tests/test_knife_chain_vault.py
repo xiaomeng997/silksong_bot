@@ -29,8 +29,9 @@ def sim(params,direction):
 def test_packaged_table_binds_existing_interpreter_without_opening_a_run():
     old=set(KS.P.guards)
     runner,report=load_vault_runner()
-    # Task 179: the ground approach link vault_idle.approach and its APPROACH bounds
-    assert report["table_digest"]=="92debc0bd6bb8831d1098f77c4ae7cc2d6c6de11713091e121386500d8dccb1c"
+    # Task 179: the ground approach link vault_idle.approach and its APPROACH bounds; #300 D1 adds the start-up /
+    # absolute frames and the Run's confirmed-running frame run_f
+    assert report["table_digest"]=="bbc4a955f76ebc05ff31726a9b28f8e952a70485733861032742da6faa3a4f54"
     assert runner.run is None and set(KS.P.guards)==old
     assert len(runner.chains["vault_idle"].links)==9
 

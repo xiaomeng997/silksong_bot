@@ -209,6 +209,25 @@ def incoming_walk(enemy, hero_x):
     return float(vel[0]) * (float(hero_x) - float(pos[0])) > 0
 
 
+def running_confirmed(state, prefix, direction):
+    """#300 D1 (plan 7.164): her running key toward `direction` is actually latched in this STATE's HoldFilter
+    (act.hf), with no toggle of it queued, and the queued desired of the next frame (the in-flight prefix) keeps it,
+    so from here on the approach's own keys hold it. A latch that a queued release or the previous owner's in-flight
+    key drops again is no start; sent / desired never stand in for the latch, and any missing or malformed field is
+    no confirmation."""
+    key = _key(direction)
+    bit = key.bit_length() - 1
+    hf = ((state or {}).get("act") or {}).get("hf")
+    if not isinstance(hf, dict):
+        return False
+    lat, des, pen = hf.get("latched"), hf.get("desired"), hf.get("pending")
+    if type(lat) is not int or type(des) is not int or not isinstance(pen, (list, tuple)) or len(pen) <= bit:
+        return False
+    if type(pen[bit]) is not int or prefix is None or len(prefix) < 1:
+        return False
+    return bool(lat & key) and bool(des & key) and pen[bit] == 0 and bool(int(prefix[0]) & key)
+
+
 def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown, hook=True):
     """The manual distance table (the person 11-02: by distance, no whole-skill pre-validation): a near jump when her
     box gap is inside NEAR_RECIPE box_gap and the roots are closer than HOP_RECIPE's range, else a small-hop hook
@@ -261,7 +280,8 @@ def register(P):
     @P.action("vault_approach_recipe",
               doc="Task 179 ground approach toward the far side (the person 11-05: over the walking one, never the "
                   "corner): ends when the other Clapper is out of its jump, she leaves the ground or input, the target "
-                  "is no longer ahead / Idle / Walk or the approach outlives its frames; inside the manual distance "
+                  "is no longer ahead / Idle / Walk, the running is not confirmed within its start-up frames, or the "
+                  "approach outlives its running frames or its absolute frames (#300 D1); inside the manual distance "
                   "table it names that entry (near / hop hook; an incoming walker only the near jump, #298 decision "
                   "1) for the following try. Running keys only; no jump, dash or hit claim, and every tick still "
                   "passes the native current-step gate")
@@ -276,7 +296,18 @@ def register(P):
             return {"do": "abort", "why": "vault approach: off the ground or input not accepted"}
         if not target_ok(x) or not side_ok(x):
             return {"do": "abort", "why": "vault approach: the target is no longer ahead and Idle / Walk"}
-        if o.f - v["f_open"] > int(a["max_f"]):
+        # #300 D1 (plan 7.164): max_f counts frames of CONFIRMED running toward the target. The start is bound once,
+        # on the first tick whose STATE has the running key actually latched and kept (running_confirmed), at most
+        # startup_f frames after the admission (SEND 2 + HF 2); an admission that already holds it starts there, and a
+        # later release / re-press never restarts it. absolute_f frames after the admission end it in any case.
+        if o.f - v["f_open"] > int(a["absolute_f"]):
+            return {"do": "abort", "why": "vault approach: no table range within its absolute frames"}
+        if v.get("run_f") is None:
+            if running_confirmed(o.s, getattr(o.sim, "prefix", None), v["over_dir"]):
+                v["run_f"] = o.f
+            elif o.f - v["f_open"] >= int(a["startup_f"]):
+                return {"do": "abort", "why": "vault approach: running not confirmed within its start-up frames"}
+        if v.get("run_f") is not None and o.f - v["run_f"] > int(a["max_f"]):
             return {"do": "abort", "why": "vault approach: no table range within its frames"}
         box = _body(o.e)
         pos = o.e.get("pos")

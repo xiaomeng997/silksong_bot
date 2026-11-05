@@ -187,7 +187,9 @@ def manual_entries(native, state, sim, ctx):
         # Task 179: farther than both entries but within the approach bound: run in on the ground (table link
         # vault_idle.approach) instead of leaving the planner to its corner (live 786 2580: 11.7 u, hop range 9.5 u);
         # an incoming walker also inside the hook range.
-        entries.append(("approach",{**base,"near":None,"far":None,"approach":{"max_f":cfg["APPROACH"]["max_f"]}}))
+        # #300 D1: max_f frames of confirmed running, startup_f to confirm it, absolute_f from the admission
+        entries.append(("approach",{**base,"near":None,"far":None,
+                                    "approach":{k:cfg["APPROACH"][k] for k in ("max_f","startup_f","absolute_f")}}))
     native._note("vault_manual_entries",frame=state["f"],box_gap=gap,root_distance=root_distance,incoming=incoming,
                  actions=[kind for kind,_ in entries],scope="fixed table recipes; no grid fallback")
     return entries
@@ -335,7 +337,12 @@ def propose(native, planner, forecast, prefs):
                          attack_cd=(state.get("hero",{}).get("tm") or {}).get("atk_cd"),
                          near=request.get("near"),why=draft.done[-1].v.get("why") if draft.done else None)
             return None  # No successful send/run: retain the opportunity and current owner.
-        if native.commitment is not None:native._recover("vault table ended without real target bounce",f)
+        if native.commitment is not None:
+            # #300: the table's own end reason (an approach start-up / running / absolute limit, no bounce, ...)
+            native._note("vault_run_closed",frame=f,move=asdict(move),
+                         link=draft.done[-1].link if draft.done else None,
+                         why=draft.done[-1].v.get("why") if draft.done else None)
+            native._recover("vault table ended without real target bounce",f)
         else:
             if hook_end is not None:
                 # #152: a hook bounce that ends the vault on its own tick (off the body, or any other same-tick end)
@@ -390,6 +397,8 @@ def propose(native, planner, forecast, prefs):
     return B2Offer(stage,None,draft,int(mask),0.,move,
         {"manual_air":True,"distance_vault":True,"vault_near":not hook and not approach,"vault_hook":hook,
          "vault_approach":approach,"approach_entry":approach_entry,
+         "approach_open_f":draft.run.v.get("f_open") if approach or approach_entry else None,
+         "approach_run_f":draft.run.v.get("run_f") if approach or approach_entry else None,
          "entry_kind":"hop_hook" if hook else "approach" if approach else "near","phase":draft.run.link,
          "predicted_bounce":None,"miss_hook":bool(draft.run.v.get("fallback_hook")),
          "safety_basis":"explicit manual distance policy; no skill/contact/tail prediction; external current-step gate only"})

@@ -8,7 +8,7 @@
       "target": "the Idle / Walk non-caster Clapper named by the request (iid)"
     },
     "vars": {
-      "iid": null, "face": null, "over_dir": null, "req": null, "F_open": null, "f_open": null, "hp0": null,
+      "iid": null, "face": null, "over_dir": null, "req": null, "F_open": null, "f_open": null, "run_f": null, "hp0": null,
       "row": null, "cs": null, "cs_toward": null, "f_ctrl": null,
       "down_hit_f": null, "bounced": false, "bounce_f": null, "side_hits": [], "unlocked_hit_f": null,
       "buddy_locked": null, "air_press_F": null, "g_press_F": null, "n_side": 0, "why": null, "closed_f": null,
@@ -27,7 +27,7 @@
       "GROUND_SLASHES": 3,
       "NEAR_RECIPE": {"hold": 14, "press": 8, "before": "T", "box_gap": [0.5, 3.5], "close_gap": 1.8, "close_press": 4},
       "HOP_RECIPE": {"hop": 3, "claw_after": 3, "d": 22, "p": 22, "root_distance": [5.6, 9.5]},
-      "APPROACH": {"root_distance_max": 14.0, "max_f": 24}
+      "APPROACH": {"root_distance_max": 14.0, "max_f": 24, "startup_f": 4, "absolute_f": 28}
     },
     "rulesets": {
       "watch": [
@@ -156,7 +156,7 @@
       "approach": {"link": "vault_idle.approach",
                    "observations": [{"name": "centre_to_root_u", "unit": "u", "source": "her centre to the target root"}],
                    "conditions": [{"obs": "centre_to_root_u", "kind": "range", "lo": null, "hi": null}],
-                   "status": "unfitted", "notes": "Task 179 (the person 11-05: when the corner one jumps, go over the walking one, never the corner): a ground run toward the target while the other Clapper is in its jump, into the same manual distance table (near jump / small-hop hook). APPROACH root_distance_max / max_f are manual bounds, not a fitted domain; running keys only, every tick behind the native current-step gate; not a path or hit certificate."},
+                   "status": "unfitted", "notes": "Task 179 (the person 11-05: when the corner one jumps, go over the walking one, never the corner): a ground run toward the target while the other Clapper is in its jump, into the same manual distance table (near jump / small-hop hook). APPROACH root_distance_max / max_f are manual bounds, not a fitted domain; #300 D1: max_f counts frames of confirmed running (the running key actually latched and kept, bound once), startup_f frames after the admission at most to confirm it (SEND 2 + HF 2), absolute_f frames after the admission in any case; running keys only, every tick behind the native current-step gate; not a path or hit certificate."},
       "near": {"link": "vault_idle.near",
                "observations": [{"name": "box_gap_u", "unit": "u", "source": "her box to the observed body box"}],
                "conditions": [{"obs": "box_gap_u", "kind": "range", "lo": null, "hi": null}],
