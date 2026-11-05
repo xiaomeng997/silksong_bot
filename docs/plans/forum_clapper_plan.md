@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待性能验收（057有限源审已过；仅原manual有界工程域，钩前全反击/完整出口未认证；不改签旧P）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：修改中（057有限源审通过，受影响3拍P时序点算不足；同包处理，未再开游戏）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4392,3 +4392,14 @@ Sol决定保留用户Idle踩头/钩脸下劈意图，不采用泛禁Idle或降�
 Sol决定本178不新造通用钩前反击预测模块。此前要求的完整首钩接续认证据现有模型确实做不到（未知近招/伙伴锁及钩后返回状态）；本项明确后续域，不伪装已完成。本次仅沿已有manual工程契约的当前短步/contact/N2与运行时逐拍核验，修复已观测的未发候选误选/整Run放弃原因后，待新完整受影响P与其余门过，才考虑一局新源有界工程，用真实hit/bounce及既有弹起出口验收。保留Idle踩头/钩脸意图、原margin/停止/失败责任/未知计数，不泛禁Idle、不宣称完整飞行/反击出口安全，不放行AA/8局，不重跑旧失败局。原7HP/首损HP<=6真实Q1、死亡/失步/缺关键日志及资源/清理均不变；目标未知或真实守卫拒绝仍算拒绝/失败，不能强行继续。
 
 analysis/task178_057c702a_20261105绑定710/261、原实际录制/合同/验证工件及脚本，新P仅2679..2681三完整连续tick，冷新选择器/首D/首与保持A+D；旧17P不重跑。Sol复制Opus已跑通s18生产入口，仅加MeasurementTrace/实际boost/签名/来源、改Sol输出缓存/E24预热，未改控制原型；额外合成prepare和act外探针分列。原独占true/5s暂停/资源/30s pulse/P0–15High/Numba4/EcoQoSoff/实际清理保持；P尚未运行/无新游戏门。
+
+
+#### Task178新3拍P已完成并真实清理；首松方向拍时序点算不足，保持实机关闭（11-05，进度7.154）
+
+analysis/task178_057c702a_20261105一次P完成：原独占/5s暂停/资源blockers0/30s pulse、E24预热后P0–15High/Numba4/GetProcessInformation EcoQoSoff，3receive/3tick/3action/footer完整0overflow，原GC事件保留，无外来/新签名，710源/脚本/原输入绑定同。2679原地行D、2680首A+D、2681保持A+D，自己的前缀/合成hero，无恢复；只证生产选择与发包，不证真实命中/弹起。
+
+整拍2679冷选择/松方向D14.9568ms、2680首A+D13.2854、2681保持14.5505（act14.9296/13.2613/14.5292）。沿原历史lag15.782995+reserve1/名义30.3333点算，余量−1.40646/+0.26494/−1.00016ms；不是实际错帧报告或未来上界，但当前记录点算未过，不能取暖拍/降预留当通过。首D同时释放先前R方向，可能影响中性行的横向间距，不能仅因还没A而默认晚一帧无害；保持A+D与首次换键分列，后续由Opus用原始真实S0/HF/队列核最小必要时序/成本修法。probe21.623/1.5189/1.216ms在act外，不叠进真实worker固定开销，也不把这个重放循环当截止证书。
+
+新总manifest还false：前三项离线accounting未设之外，多了CLA WSTRIKE_SET懒加载配置未预备（实际键名SSBOT_FORUM_CLAWSTRIKE_SET）。这是Sol新增测量接线没有调用生产prepare_lazy_configuration，非控制器源码新故障；不能沿用旧三accounting豁免或事后绿化。Sol已另存replay178_057_p_prepared.py/P_DRIVER_CORRECTION：预热前真实工厂快照，后挂trace，语法已核、尚未执行；原bound脚本/false不改，不只为字段再跑一次P。下一次有实质修正条件的受影响测量用修正入口。
+
+ROOT_P_AUDIT.core_measurement_integrity_pass=true，但configuration及点算未闭合，integrity_pass/finite_affected_budget_pass均false，无新工程gamegate。P worker56540/create和field4684/create核已退出、无残留game/children、golden/Prefs无差、旧DEMO hash/mtime与registry146空全过后才STATUSfalse。未改Windows核心或他人进程。继续同178反馈：先定位这条选行/完整_act成本，必要最小优化或有依据的更早松方向排程，保持未发送才重选/真实HF/队列/全危险/原余量及源脚本配置绑定；不能平移旧键、放宽停止或改新动作池。与旧Cast2的17P分开，不重跑旧矩阵或原单局，不为刷绿重复同条件P。
