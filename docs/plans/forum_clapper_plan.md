@@ -4162,7 +4162,7 @@ Root46当前完整_act虽已真选over/绑定源2552且transfer_ready=true，却
 当前709 runtime/261模型不变、小源码包/两文件binding/patch/JUnit已封存，Task167只核路由小增量与活动owner/旧适配器门保留，wake191；在途不当通过。三分支的选择与动作入口已接，实际三个分支和整链仍待新源独立审阅、真正P整tick与新绑定的有界w13实机验收；没有新P/合同/游戏/8局门，不拿E耗时或Null包冒充现场。旧停止批、冻结AA、raw与Windows核心进程保持。当前STATUSfalse/无Root计算，计划先main后同步knife/TV。
 
 
-### 7.134 #277活动尾段抢占已最小修742c9f7b；默认早起跳接近及目标钩脸增量待接【已处理 Opus #277，Task168新源审在途】
+### 7.134 #277活动尾段抢占已修742c9f7b并核收278；默认早起跳接近及目标钩脸增量待接【已处理 Opus #277、#278】
 
 #277八工件/14输入hash核同，明确4e34900d未接受：vault真实弹起会释放commitment并消费post_context，但Run仍在over/fall/ground；原fresh SWITCH入场误把它当空闲。742c9f7b只在fresh side/stomp外层加runner.run is None，保留更早的transfer active接管，旧安全/发键门不变。六个side/stomp×over/fall/ground有效红case6fail35pass，改后单次五文件151pass/foreign0；六新增是子集，不和旧411/145相加。当前709 runtime/261模型、两文件patch与862小源码快照绑定在analysis/middle_owner277_20261104/REVIEW_PACKET.json。Task168A只核这条predicate与active生命周期，不重复大矩阵；在途不当新源通过。Parent4e完整_act2609 fresh runner.run=None，只证新predicate静态准入，不冒充742的新完整_act/P。
 
@@ -4170,4 +4170,6 @@ Root46当前完整_act虽已真选over/绑定源2552且transfer_ready=true，却
 
 用户问远钩待机怪初伤时人还远，是否会触发普通远程跳（不是Escape Jump）。Root只读原始Control FSM和Harpoon FSM/HealthManager：Enemy Needle L/R先DoDamage、之后Suspend/Dash To Enemy；Idle受TOOK DAMAGE→Dmg Attack按当时Slam Range选Close/Far，Far先受Buddy Is Attacking互锁取消，否则可选Jump/Spell/JumpCast。可开始普通跳跃前摇；不能假定钩中就已贴住压跳，或事后靠近会取消已启动Antic。REMOTE_HOOK_IDLE_REACTION.json保存三文件hash/原行号；没有新游戏、频率或实际到达时间保证。
 
-当前新源独审及目标钩脸接近仍待，不开旧批/旧门。没有新P/游戏/合同；STATUSfalse、Root own jobs空。旧停止/AA/raw保留，不操作Windows核心进程。计划先main提交再同字节同步knife/TV。
+已核收#278（Task168A）：七交付文件/14输入hash同、当前709源码和两文件zip raw绑定相同；无P0–P2，277关闭。十条marker记录路由保持vault尾段/准入fresh stomp，不能另加为十个行为或实机通过；Root151受影响检查已通过不重跑。SOURCE_REVIEW278只接受742活动Run源增量，目标钩脸B/C仍待、新P及实机仍未放行。没有新P/游戏/合同；STATUSfalse、Root own jobs空。旧停止/AA/raw保留，不操作Windows核心进程。计划先main提交再同字节同步knife/TV。
+
+用户进一步明确普通远距离跳可骑上去，不因此全禁待机钩。主要防出钩瞬间后闪、空钩后落地踩符文：默认出钩需留后撤射程余量，不够继续接近。以当前发键排队→生效→Harpoon Antic→射线判定期间的可能后撤位置，与该时刻hero射线原点比较；不盲减完整后撤或未经核定写固定7/8u。原FSM Evade Scuttle15u/s、0.35s及Harpoon横速clamp/decelerate为静态来源，尚未声称该余量已接生产。原安全/真实回执仍保留，不将预测命中当真实命中。
