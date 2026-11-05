@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.140）：仍在w13。285的有限流水已核，Root以b900为父提交e4a2318b两文件早跳等待包一致性/在途DASH保护小修，默认0/B-only；独审175待，不得拿旧P盖新源。最终受影响361pass/foreign0（默认模型0库回归），新十项另在生产HERO2=1/16383全过。Root发现174清环境后用旧模型0，修正“sprint jump仍不离地”的结论：显式生产模型会离地；标准14u无新DASH早跳仍射程不足，不称远路线已通。仅一条按16383重建的walk上下文已走J→CLAW两槽→lock，仍是模型/合成事务，未跑关键P/新实机。STATUSfalse、无Root进程，Task175只审小增量及必要性。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.141）：仍在w13。286/Task175新源e4a2318b小审通过、无P2；模型配置已按生产HERO2=1/16383更正，旧174低钩/修A无效/dash_c970结论撤回，14u路线未修好。Root显式模型walk上下文已获独立22拍核同，并以真实Native+RangeTracker/RangeSupport复现18关键片段，输出逐项同；这仍是预载Run/模型事务的离线片段。已新绑P草稿：当前源两个完整_act点加18 Native片段，脚本/模型/输入/原资源门全绑；P尚未启动，source review不能当预算/实机门。STATUSfalse/无Root进程，后续P按原独占/暂停/清理执行。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4242,3 +4242,14 @@ Task174只用既有模型/fixture生成一条可复现的早跳→首钩/第二�
 Root在准备关键P时发现174脚本及早期库回归清空SSBOT_*后未恢复HERO2=1，TF.PARAMS调用K.hero2默认得到模型0，而生产合同明确1。这个输入配置差异已先写信175，不能沿用174的sprint jump结论。Root显式HERO2=1/params16383、abilities1007重新小算：新DASH后下一拍仅J仍0离地；DASH持续+J的sprint jump第16帧离地/22帧空中；无新DASH第3帧离地/35空中。因此“修A同样0离地”仅旧模型成立。原361仍只记默认模型0库回归；新十项单独显式生产16383全部过，foreign0，不加成371或完整生产回归。
 
 production_context/只重建一条同源e4/16383的walk流水，按自己的K/HF/在途包推进：缓存J决策1005发给1007，CLAW1015/1016分别给1017/1018，lock1017；P时box底2.969/held3.248（相对地板）、距脸7.39，关键位置与旧walk同。依然静止目标/标定中值7帧符文/钩后名义pose及合成事务，不是Native watch观察或真实命中/骑乘/P；不能据它出实机gate。首次复制脚本旧快照断言在导入阶段失败，日志保留，路径修正后完成。新E测试14112和上下文56968按PID/create真退出，旧E各进程亦核清，STATUSfalse/ownjobs空，无新P/游戏。当前先等175新源独审，再用这个正确模型上下文新绑关键tick与整拍预算；旧b900地面P不盖e4，旧停止局/AA/raw/Windows核心进程约束不变。
+
+
+### 7.141 #286源审核收，生产上下文/真实Native十八片段功能同；新源完整_act与关键片段P已绑定待运行【已处理 Opus #286】
+
+286/175五十六工件hash同，三改动源zip/binding/git一致，Root接受e4a2318b增量源门，SOURCE_REVIEW/OPUS286_RECEIPT已写，无P2。既有DASH任一mode/prefix/HF待应用时都不撤也不展开；仅可行早跳配方成功才暂缓新DASH，本拍等待与下拍缓存J顺序一致，关闭与父源一致。生产模型Evade Scuttle有限静止目标夹具12.5确实覆盖此条件：旧b900无钩，新e4等待→J→钩锁；不把其静止后撤体当真实运动证据。独审确认HERO2=1/params16383、模型hash d5e96aff82c9，Root生产walk上下文22拍link/keys与独立运行全同。
+
+174的三条生产不适用结论撤回：修法A并非0离地；14u生产走sprint jump+下劈行、不是P1022低钩；基于该低钩的dash_c970推迟结论撤回。模型流水没合成pogo反弹，因此14u结尾downslash missed既不证明中也不证明空；路线仍未修好。169–174的hero轨迹数值若用于生产需重新打开HERO2核算，敌FSM47–49等不受该模型开关影响。e4冲刺期不展开比b900更保守；独审本样例反事实未发现丢掉可通过钩，将来扩展sprint jump的实测Clawline入口再重评，不当前放行未知。
+
+Root用当前生产14项环境/模型1、自己的walk与独审Evade fixture，先做非计时E功能：十八个真实Native _transfer_offer片段，使用真实RangeTracker/RangeSupport/几何，不再只测transfer.propose。包含五次等待展开、缓存J、钩脸决策、首CLAW、第二槽、lock，link/keys逐项同。Run/前缀/先前sent/seen为显式预载模型上下文，不是实际B2连续交易/收包/命中；无Native控制回报认证。E参考毫秒不能作P。证据在p_e4a2318b/full_and_critical/functional_E/。
+
+新P_ENABLE/BINDING/SPEC已准备：e4/286、710源含261模型、十七输入文件/七脚本、FACE_HOOK1/HERO2生产配置与显式已接收集合，原engineering/resource三组件原字节。先跑当前源2609/2610两个完整_act条件点（原S0/HF注入、自己的第二prefix、最早差异2611前停），再跑上述十八Native关键片段；真实RangeSupport建场位于片段外、首次钩轨迹cache冷启动保留，记录early_jump/step_scan、实际P0–15 High/Numba get4/EcoQoSoff及新编译/来源。不能把两个不同场景时长相加当关键整拍保证，也不签全AB/真实deadline/live_gate。P尚未启动；按原STATUStrue/五秒Opus暂停/资源门/30秒刷新/真实清理后false执行。旧停止批、原始失败及Windows核心进程限制不动。
