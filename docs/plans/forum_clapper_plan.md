@@ -4359,3 +4359,14 @@ trace整拍冷2726=12.5868ms、峰2738=13.1062；2740新行12.8222、2741首A+D1
 #291直接提交3b93be7e，仅离线forum_measure_metrics与7项新正反例；Sol核源/调用范围及原e4实际2772仍Hang04有HP、2987 Quit_To_Menu有HP5、2988..3024明确heroNone、终点Menu_Title。只把真实退出后的卸载判不适用，原战斗缺HP/只暂停/意外场景/缺hero/卸载后HP事件或英雄再现仍失败；dt/T/end_f/L和原失败记录不改。Opus两局原始重审仅少missingHP，旧审计逐项复现、其他指标全同，报告30项通过；Sol复核七例与原始事实，不重复671/17P。3b93与a3ef的710/261清单除离线audit完全同，运行actor与模型/P输入不变；后续REPORT追加与测量时hash分别保留，原P总manifest accounting false不绿化，新worker仍须完整配置。
 
 按用户11-03不在家无需等待授权，Sol准备一次新3b93源/新namespace/合同/预算w13工程，相关行为条件已由a3ef姿态见证修复改变；不重开e4/e390或补坏局。复用已完整审阅生命周期，仅source/namespace机械移植，资源三组件原字节；原7HP/首损HP<=6真实Q1、死亡/键/缺关键日志STOP/资源/锁/清理、--measure/worker自己的input.stats不变。现完整actor有限17拍P已通过，保留峰13.1062ms/窄余量和历史lag非上界；不声称网络或所有未来可行。源码执行HEAD在本计划同步后绑定，游戏到真实清理期间不提交刀口HEAD；独占前实际核无游戏/活动锁，STATUStrue/5s暂停/30s pulse。登记实际姿态接续/接受/目标hit+bounce+交还，0次写未覆盖，不拿静态或模型证据代替；受击/失败停后把完整结果回同178给Opus。
+
+
+#### Task178新源单局已停、完整性与真实清理通过；Idle下劈及钩后中止待同包回修（11-05，进度7.151）
+
+新analysis/sol demos同名w13_pose178_20261105T125108Z_3b93be7e，runtime3b93/actor a3ef、执行HEAD0f9bb727，单独新合同/预算/seed314168/7HP。独占true/等5s/原资源门/隐藏WMI唯一game33576，worker42860自身OracleLink的0delay/jitter/HF2/2/pending0门通过。启动port10.9s、policy预热6.8s；不是战斗时间。准备脚本首次把录制目录当文件求hash，启动任何游戏/合同/改计划前报错，部分资料保留PREPARATION_FAILURE并核53220已退；修类型后正常准备。此为分析准备错误，不是额外游戏或重跑。
+
+实际fight正式T7.9806628674s（attempt ingame11.82分口径）、fight2HP/tail0，2709真实HP7→5后Q1按原门退出。2603 SWITCH踩入口目标335470 Idle，press2613、2614实际DownSlash接受，却未命中/弹起，2626真实miss恢复。2639再以Idle目标进RUNE_TRANSFER，2643/2644发CLAW、2645原始动画Harpoon Antic证真实出钩；2679外部step blocked中止，2709受该怪Slam Collider1伤。后一失败责任minimum_through2709，受击恰在末帧仍记chain_related/recovery_after_failure；责任登记不替代碰撞因果。目标Cast2姿态变化接续实际0次，明确未覆盖；钩动画不当钩脸→下劈→hit/bounce完成。新行为现场验收false，NO_RETRY保留，不补跑。
+
+与旧e4不同，本次worker rc0，实际完整配置configuration_complete=true/unresolved空、trace/window/独立raw全窗audit均complete、0overflow、GC原事件保留。新退出分类Quit_To_Menu2945→hero卸载2946..2980共35帧，T/end_f/L未缩改；不是绿化旧记录。Root输入/配置/日志/原合同710源和脚本全过程冻结/首损停止/清理11项全过，只表示完整性通过，ROOT_EVENT_AUDIT.passes仍false。
+
+真实cleanup12:53:24.457918Z后Root独立核actualworker42860、field53944及其create、game33576、coordinator43240/WMIshim56196全PID消失，golden/Prefs无差、旧DEMO hash/mtime恢复、registry146/空且restore_pendingfalse、无game，ROOT_CLEANUP verified后才STATUSfalse；无Windows核心/他人进程操作。游戏至实际清理期间刀口HEAD未提交。Sol只做基本现场验收与停止事实，不代替Opus重复物理调试。失败完整工件交回原178：先定位Idle下劈为何接受后没hit及钩后外部阻挡/锤1受击的时序，区分模型/输入/目标移动/真正危险，不先硬编码或扩动作；如需改共用接触见证就在原范围完成必要修复及有限生产正反例，新的受影响P入口交Sol。没有新Task179、全矩阵或无修重跑；Cast2原修法不因未覆盖撤销，也不能称实机通过。
