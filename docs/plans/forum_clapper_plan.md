@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待实机验收（786新3拍P有限通过，正绑一局新工程；Astra容量不可用无其结论，不能拿P代实际hit/bounce）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：修改中（786新实机2625恢复异常，关键测量缺失/翻走路怪未完成；同包修失败交还与留证，旧局不重开）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4423,3 +4423,16 @@ analysis/task178_786766c3_20261105一次新源P rc0。原资源blockers0/独占/
 真实prepare_lazy_configuration在预热前已采，CLAWSTRIKE_SET解决；raw总manifest仍false仅BLOCK/ORDER/SCHEDULE三个未设accounting标签，CONFIGURATION_SCOPE单列不绿化。控制/执行值全解unknown0，下次实际worker完整manifest仍硬门。P worker57236及field真实PID/create全退出，golden/Prefs/旧DEMO hash+mtime/registry146空/无game全部核清，ROOT_CLEANUP verified后才false。Astra两次capacity未得结论如前，普通独审主体Sol，2140/1skip及有限376身份不重做，不自动补小时级全套。
 
 据原11-03无人值守实机授权，下一步绑定一个全新786工程目录/合同/预算（不重开3b/e4/e390/057失败）。生命周期只source/namespace机械移植，资源组件原字节，--measure/原7HP首损HP<=6真实Q1/Opt1/日志/死亡停止/失败责任不变；先独占true/5s暂停/原资源/活动锁检查、自有隐藏WMI唯一游戏，worker自身OracleLink bootstrap input.stats与实际完整manifest必核。源码HEAD在本计划同步后冻结到实际清理，实际命中/弹起/既有交还或锤尾逐项记录；Cast2未出现记未覆盖，钩前所有反击/出口未认证保持原有限manual工程边界，不声称安全/稳定或8局放行。一个新局消费后不补坏局，同因未修不重跑。
+
+
+#### Task178/786实机因恢复家族契约异常停止，用户确认未翻过走路怪；原失败与缺失证据保留（11-05，进度7.157）
+
+analysis/sol demos同名w13_pose178_20261105T160355Z_786766c3，runtime786、执行HEADbf7d0903，新合同/预算/seed314168，启动前真实无game/registry空、独占true/5s暂停/原资源门/30s pulse。唯一game24828/actualworker55436，自身OracleLink input.stats0delay/jitter、HF2/2、pending0真；port就绪10.5s/policy预热6.9s。不是重开3b/057失败，运行期至实际清理刀口HEAD冻结。
+
+用户观察“墙角逃跳时没有翻过走路怪”，确实没有完成：2607目标335470 Walk，源335476的普通CC_JUMP@2549、SWITCH踩入口绑定。2607hero x18.3915/y5.9795、目标x30.1900，源在Air；18个链步只有接近，没有下劈接受/真实钩/下劈弹起交还。2625外部步first2627/owner335476 kindmove挡住，恢复抛ValueError:failure exposure requires a supported observed move family。调用栈air_native._recover→base._recover→air_native._failure_exposure→FailureExposure.__post_init__；当前_FAMILIES无CC_JUMP，而实际入口 source_move为CC_JUMP，需由Opus用真实责任context最小复现确认并修契约，不伪造为跳符文/删校验/吞异常。Root源审未覆盖这一跨入口失败契约，现以实际例补，不能用2140通过说已测到。
+
+worker rc1/协调器SystemExit1，关键产物缺失：attempts文件0字节、policy decisions/measurement trace/measurement manifest均未落盘；worker_cleanup complete只证资源关闭，不是本局测量完整。Root不造summary、完整window/T或用P配置补现场。原始STATE关闭并保留2272..2634观察前缀363帧、dt总5.9773502108s仅前缀；2630实际hp7→5/delta−2，来源Wave14 Finale/Song Heavy Sentry(2)，在异常后5帧。journal/learning_budget没有这笔loss且账本Bfight为0，不能报0HP或漏掉损失；单列OBSERVED_HP_ADDENDUM，正式fight/tail总量未知，责任窗口未落盘不能据此判非链相关。ROOT_EVENT_AUDIT.integrity/pass/动作验收均false、NO_RETRY保存。
+
+Launcher真实cleanup16:06:18.489575Z，game24828、worker55436、coordinator59240/WMIshim50304全PID独立核不在；golden/Prefs无差、旧DEMO hash/mtime恢复、registry147空/restore_pendingfalse、无game。field PID因测量未落盘不可恢复，未编造身份：实际scene_field_async强制pythonw（缺则抛），close严格核process/thread死亡，worker_cleanup场worker pass，并独立全机pythonw进程为空，故能证明无残留field；原身份日志缺口仍登记。ROOT_CLEANUP只核环境true后才STATUSfalse，不改本局运行/测量失败。未操作他人或Windows核心进程。
+
+用户问“翻过走路怪以前成功过吗”：当前可核主计划/现场资料未找到该路线“完整翻过+真实安全交还”的实机成功验收；旧名义/离线闭环翻越、实机下劈命中弹起、翻冲锤怪不混算成走路怪成功。将此未验收状态与用户观察交回原178，历史大范围重审不是修复前置。下一步Opus先修已确定的普通跳跃责任家族/失败交还及异常时真实测量保全，再有限核本次走路入口接近为什么不能完成；不堆通用反击/L2/新池。若要改变战术或移动目标模型域，先报最小证据由Sol定新范围，不悄悄扩178。只动失败归责/异常落盘且已测3tick路径不变时交兼容证明，不自动重跑P/2140；真正改接近/出刀路径才交受影响完整P入口。旧局不补测、不补跑。
