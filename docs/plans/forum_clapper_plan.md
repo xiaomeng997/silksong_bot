@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.121）：仍在w13。262完整_act功能输入/263的877形状修复绑定已核收，源门闭合；尚未P或实机。用户新战术改为按默认/近怪插入/外侧挤墙/中间窄与可站分状态，旧早换/外侧一律no_hit返回不能直接带入新局。规格与12决策例已记，Task156仅静态给最小现有接口映射，未改运行源码；连续下劈入口仍未完整上线。未来自动生成打法仅讨论，不在本轮加框架。STATUS false/own_jobs空，草稿仍无真实gate/合同。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.138）：仍在w13。b90087db钩脸/后撤余量与有界身体无害窗已获283独立源审，282两P2关闭，默认0/B-only。新shell2有限两拍完整_act P已核：trace15.2231/12.1718ms，148签名前后同、foreign0；两拍都只是地面接近，不把它当首J/CLAW/钩锁预算或闭环。首壳断言错误保留，另绑脚本/预算重测，生产源未改；自有worker/场与golden/Prefs/旧DEMO/registry真清理后STATUSfalse。Task173仅独立核新P证据；当前无新实机gate，不重开e390停止局。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4205,3 +4205,16 @@ b90087db只改三运行文件及一新增测试。Root没有无界照贴建议�
 有效宽红valid_red14fail337pass：4项是近钩漂移行为反例，10项是新state参数尚未实现的API失败，不能称14个物理缺陷。首次red为新测试包导入夹具错误，修后原件保留、不当有效红。最终单次12文件351pass/foreign0，72 face/step/window为子集，不和旧337或Opus160相加；新反例覆盖无hit、无实际state、无界滑窗、ctrl到期、武装锤、异常过早Antic及实际身体栅格通行。41636按PID/create独立核真退出，没有P/游戏。
 
 当前710 runtime/261模型、866小源码快照与四文件binding/patch保存在analysis/face_hook282_guard_20261104/REVIEW_PACKET。Task172只复核两个P2和Root收紧窗，不重跑351矩阵，其余171已通过项保留。默认仍0/B-only，源审在途不当通过；动态空中接触/骑乘/完整出口和未来输入时序仍未认证。新P草稿改绑p_b90087db/2609_2610，P_ENABLE不存在、未运行；旧a14源失败和旧P草稿保留但不得执行，不重开停止游戏批次。当前STATUSfalse/ownjobs空，待真正源审后再走新P与原资源/独占/清理门。
+
+
+### 7.138 #283源门闭合；新shell2两连续地面P通过有限核收，首壳断言失败保留，实际钩关键tick仍待【已处理 Opus #283】
+
+283/Task172十工件、四改动源及十份Root审阅工件hash同，b90087db两个P2关闭：真实hit/本拍rawstate/同Move且硬cap的hooked-body窗与前摇漂移间隙均核收；自然Antic最早origin+1时，min47Antic+min4Slam0相对cap origin+49保留余量。两P3为瞬时Close/Far/AfterScuttle保守交还及绑定静态Slam字段缺失的异常类型，登记不翻炒新源。源门不替代P或实机。
+
+Root实际先跑p_b90087db/2609_2610，完整两tick及两包都已发生，但分析壳误要求已承诺的第二拍仍有fresh L2 winner而失败。raw trace14.9773/12.1632ms与P_ERROR/SHELL_FAILURE_AUDIT保留；无最终RESULT/签名来源汇总，不签通过。控制器无需为该壳错误加代码。原worker54988/场53360按PID/create真退出，golden/Prefs/DEMO/registry及无游戏核后才false。
+
+另建p_b90087db/2609_2610_shell2，重新绑定五脚本/十二原始输入文件/710源含261模型、源审283、FACE_HOOK1及显式接收集合；修的是入口检查middle_jump、下一拍检查同Move与目标stomp/链/自己的prefix，不复用旧Ppermit或旧budget。原独占true/五秒暂停/原资源门不减，E预热与影子前史、实际测量P0–15 High/GetProcessInformation EcoQoSoff；线程配置4且policy构造调numba.set_num_threads，未额外保存get_num_threads回执，按实际证据表述。
+
+新完整trace为15.2231/12.1718ms，外层壳计15.2243/12.1730ms，_act为15.1951/12.1452ms；两拍签名148前后同，外来模块0，trace/footer完整且overflow0。2609选middle_jump/335470踩头，承诺RUNE_TRANSFER；2610保持同Move且没有fresh winner，包2611/2612均R+SPRINT、hold/flags0。第二拍排队prefix取第一拍自己的成功包，不沿用旧neutral。原真实STATE只到2609/2610，首次差异最早2611生效前停；S0/HF仍注入原录制、重建差225，条件前史不是自然身份对照。收帧钟为本机合成馈入，不能当真实网络截止/分布或有一帧余量。两拍均无J/CLAW/lock，不能拿此签新钩关键tick或全AB预算。证据含原始trace、RESULT/POINT_*、ROOT_AUDIT/ROOT_CLEANUP。worker56628与自有场进程按create独立核真退出，golden/Prefs/旧DEMO/registry全同、无游戏后false。Task173仅核有限P与因果边界，不重跑351或开游戏；Root后续需补实际钩链节有限预算/路径证据，再新绑有界工程局，旧失败/AA/raw不动。
+
+用户问覆盖可能闪身的出钩距离：HOOK_DISTANCE_EXAMPLE.json按当前b900与既有有限夹具复算，身体半宽1.8、向前接近时，观察时中心距9.25（到身体近缘7.45）过，9.75（近缘7.95）拒；9.5仅余约0.064u，不拿它当实用阈值。后撤15u/s按排队/晚应用/射线实际时钟最坏约0.233s预留3.5u，不扣完整闪身、也不硬编码7/8u。给用户的约7u近缘/典型中心8.8u只是此类接近的保守参考；真实门仍逐当前速度/身体/高度/各相位计算，不宣称所有场景通用命中保证。这个数值问答未改运行逻辑。
