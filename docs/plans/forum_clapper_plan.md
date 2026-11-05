@@ -4312,7 +4312,7 @@ Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/
 
 #288四工件、原17包和710源hash同，接受2c元数据独审、完整19帧P的有限口径、现场失败/清理；这些不重做。第三刀的静止身体见证确实跨过Cast2变矮：原始世界顶2736=7.775936→2741=6.211874，实际降1.564062u；报告约1.58是姿态尺度，含约0.017根Y差，坐标不混。根因方向不变，但推迟后能中及安全恢复仍是待验证方案。OPUS288_RECEIPT与SOURCE_REVIEW288已存原分析目录；原失败/NO_RETRY、实机钩脸未覆盖均不改。
 
-**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待性能验收（786等价成本优化由Sol独审核收；Astra两次容量不可用，无其审阅结论；新P/实机门分别核）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
+**Task178：姿态变化下可靠接续下劈，并保持真实命中判断与失败交还。状态：待实机验收（786新3拍P有限通过，正绑一局新工程；Astra容量不可用无其结论，不能拿P代实际hit/bounce）。** 以下为该包唯一简短任务说明；补充与回修都沿用178。
 
 - **负责人/改码权**：Opus为唯一实现者，直接在`C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`、`codex/forum-knife-rows`设计/写源码/必要测试并提交；运行基线2c，实际交接HEAD见`sol/work_packages/task178/HANDOFF.json`。Sol普通独审、集成、正式P及实机，不并行实现或重写原型。Opus实现期间Sol只写main计划与sol资料，不碰刀口运行文件或Git索引；等交付静止窗口再同步该树计划。Opus不改主计划/Sol资料/五个用户未跟踪文件，不操作正式P/实机；改负责人须先显式交接。
 - **目标与证据**：原局2736按Cast2高身体决定2738下劈，2741身体降低，有效窗内无hit/bounce，2751恢复、2755身体受击。修复相关共用接触见证，使当前真实状态/已发输入下选择可接续的因果行或等待；真实接受/同目标hit+bounce才交还，没命中不得伪造成功、无限重试或丢责任。入口为本局ACTUAL_TIMELINE/ACTUAL_EVENT_FACTS/ROOT_EVENT_AUDIT、opus/review177/REPORT177与原录制；优先查knife_chain_transfer.press_now_row/stomp_plan和邻接调用/身体姿态/恢复。Opus可自行设计必要修法，不限定几行。
@@ -4414,3 +4414,12 @@ ROOT_P_AUDIT.core_measurement_integrity_pass=true，但configuration及点算未
 曾复用指定gpt-6-astra/xhigh尝试一次集中缓存审和一次重试，均Selected model is at capacity，没有审阅输出、未换模型或扩队。没有Astra通过结论。Sol按现有普通独审职责完成上述纯等价替换的独立源码/证据审，未发现本轮新增P0–P2；没有引入新模型或行为定义。ASTRA294_UNAVAILABLE/SOURCE_REVIEW/OPUS294_RECEIPT明确区分。若后续证据改变安全/模型假设仍按workflow触发关键审，不伪借旧Astra结论。
 
 analysis/task178_786766c3_20261105新绑受影响2679..2681完整P。使用上一轮Sol已修正的真实prepare_lazy_configuration预热前快照入口，仅再补两处实际修改模块与全部已加载ssbot来源的测后hash；wrapper仅换入口名，其余资源/独占true/5s暂停/30s pulse/P0–15High/Numba4/EcoQoSoff/清理不变。新源不是同057重跑刷绿；旧false不改。P未运行、无gamegate，先核真实P，再按原有限manual工程/首损退出域决定是否新单局。Opus保持交付静止，不在P后自动恢复小时级全套；有具体未覆盖失败再做必要补充，普通全量进度不驱动新任务。
+
+
+#### Task178新源3拍P有限通过、真实清理已核；绑定单局工程看实际接续（11-05，进度7.156）
+
+analysis/task178_786766c3_20261105一次新源P rc0。原资源blockers0/独占/5s暂停/30s pulse，E预热后P0–15High/GetProcessInformation EcoQoSoff/Numba4均真；710源/261模型、输入/脚本及全部实际loaded ssbot hash同，3完整receive/tick/action/footer、0overflow、GC保留、无编译/外来/恢复。冷2679选择/松R+D、2680首A+D、2681保持A+D整拍分别 11.5813/10.2247/9.9512ms；act11.5546/10.2013/9.9295。原历史lag15.782995+reserve1、名义30.3333点算余量分别 1.96904/3.32564/3.59914ms，有限点过，不是未来延迟上界/实机接受/完整AB预算。首松方向关键性保持，未豁免或降预留；旧057失败不改。
+
+真实prepare_lazy_configuration在预热前已采，CLAWSTRIKE_SET解决；raw总manifest仍false仅BLOCK/ORDER/SCHEDULE三个未设accounting标签，CONFIGURATION_SCOPE单列不绿化。控制/执行值全解unknown0，下次实际worker完整manifest仍硬门。P worker57236及field真实PID/create全退出，golden/Prefs/旧DEMO hash+mtime/registry146空/无game全部核清，ROOT_CLEANUP verified后才false。Astra两次capacity未得结论如前，普通独审主体Sol，2140/1skip及有限376身份不重做，不自动补小时级全套。
+
+据原11-03无人值守实机授权，下一步绑定一个全新786工程目录/合同/预算（不重开3b/e4/e390/057失败）。生命周期只source/namespace机械移植，资源组件原字节，--measure/原7HP首损HP<=6真实Q1/Opt1/日志/死亡停止/失败责任不变；先独占true/5s暂停/原资源/活动锁检查、自有隐藏WMI唯一游戏，worker自身OracleLink bootstrap input.stats与实际完整manifest必核。源码HEAD在本计划同步后冻结到实际清理，实际命中/弹起/既有交还或锤尾逐项记录；Cast2未出现记未覆盖，钩前所有反击/出口未认证保持原有限manual工程边界，不声称安全/稳定或8局放行。一个新局消费后不补坏局，同因未修不重跑。
