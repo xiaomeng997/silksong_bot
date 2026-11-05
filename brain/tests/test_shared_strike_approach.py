@@ -9,7 +9,7 @@ from ssbot.combat.air_chain import ChainSim
 from ssbot.combat.knife_chain_air import body_box
 from ssbot.combat.knife_chain_format import MASK_NAMES as B
 from ssbot.knowledge import kinematics as K
-from tests.test_knife_chain_transfer import transfer_motion_scene
+from tests.test_knife_chain_transfer import fit_pose,transfer_motion_scene
 
 
 def flight(*, x=27., y=10.12, vx=0., vy=10.2, target_x=36.5):
@@ -18,8 +18,7 @@ def flight(*, x=27., y=10.12, vx=0., vy=10.2, target_x=36.5):
     s['hero'].update(pos=[x,y],box=[x-.25,y-1.553,x+.25,y+.532],vel=[vx,vy])
     s['hero']['tm']['dash_cd']=0.
     s['act']['hf'].update(latched=0,desired=0)
-    e=s['ents'][1];dx=target_x-e['pos'][0];e['pos'][0]=target_x
-    for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+    fit_pose(s['ents'][1],x=target_x)
     start=K.initial_state(params,x,y,vx=vx,vy=vy,ground=False)
     sim=ChainSim(start,np.array([0],np.int64),K.HoldState.from_act(s['act']),params,old.terrain,1000,1000)
     r.run.link='air';r.run.v.update(jump_k=0,jump_until=0,air_entry=True)

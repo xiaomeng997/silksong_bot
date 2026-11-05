@@ -267,19 +267,105 @@ def path_problem(path,hold):
     return None
 
 
+# Control states whose root stays put (map2.clapper Sim: vx 0 at the Idle / antic / cast entries; the slam lunge
+# runs from the Slam 0 entry to the Slam 2 entry). Any other state can carry the body away from its observed root.
+STILL_ROOT_STATES=frozenset({"Idle","Spell Antic","Cast 1","Cast 2","Slam Antic","Slam 2","Slam Recover"})
+POSE_MATCH_U=.005           # clapper_m2.json body rows are rounded to 0.001 u; a larger miss is another pose / clock
+# A witnessed contact leaves one active frame after it: a press whose only contact is the window's last frame waits a
+# tick (the falling hero meets the body at the same frame, earlier in the next window). The person's 10-31 rule:
+# prefer waiting over a precise boundary; live 2701 hit on its last frame with no margin.
+CONTACT_END_MARGIN_F=1
+
+
+@lru_cache(maxsize=1)
+def _body_knowledge():
+    from ssbot.map2 import clapper as cm
+    return cm.Know.load(),cm.NEXT,(cm.WALL_L,cm.WALL_R),cm.FLOOR
+
+
+def contact_body_witness(enemy,frames):
+    """[frames,4] body boxes (x0,y0,x1,y1) a downslash must touch at f+d; nan rows have no witness.
+
+    A hit witness needs the box EVERY supported pose shares, never the safety
+    union. It reuses the fitted body runs and duration tables of the current
+    Control state and its fixed successors (map2.clapper Know/NEXT, as
+    forum_knife.slam_body_paths), sampled from three frames before to one after
+    each frame (a run's change point falls a frame either way; a taller pose's
+    root takes up to two more frames to rise), and intersects each frame with
+    the previous one (damage reads the previous frame's colliders). Idle keeps
+    the stable Idle pose: no enemy decision is predicted. The root x stays
+    where it is observed; every pose stands on the arena floor and is cut at
+    its walls (map2.clapper FLOOR / WALL_L / WALL_R: its grounded root and
+    wall push). A state that can move the root, or one without fitted runs,
+    leaves that frame and every later one without a witness. Hit recoil is not
+    modelled (the transform slides about 4 frames with vel 0). None when the
+    observed collider does not match the fitted pose at its clock, facing and
+    root, or a field is unknown.
+    """
+    know,successor,(wall_l,wall_r),floor=_body_knowledge()
+    cs=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
+    if len(cs)!=1:return None
+    st=cs[0].get("state");tin=cs[0].get("t");pos=enemy.get("pos");vel=enemy.get("vel");flip=enemy.get("flipX")
+    if (st not in STILL_ROOT_STATES or st not in know.body or type(tin) not in (int,float) or not math.isfinite(tin)
+            or tin<0 or type(flip) is not bool or not isinstance(pos,(list,tuple)) or len(pos)<2
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in pos[:2])
+            or not isinstance(vel,(list,tuple)) or len(vel)!=2 or any(type(v) not in (int,float) or v!=0 for v in vel)):
+        return None
+    try:observed=body_box(enemy)
+    except (TypeError,ValueError,OverflowError):return None
+    if observed is None or len(observed)!=4 or not np.isfinite(observed).all():return None
+    face=1. if flip else -1.;x,y=float(pos[0]),float(pos[1])
+
+    def world(state,j):
+        b=know.box(state,max(j,0));xa,xb=x+face*float(b[0]),x+face*float(b[1])
+        return (min(xa,xb),y+float(b[2]),max(xa,xb),y+float(b[3]))
+
+    k=int(round(tin*60.))
+    if not any(max(abs(a-o) for a,o in zip(world(st,j),observed))<=POSE_MATCH_U for j in (k-1,k,k+1)):return None
+
+    def standing(state,j):
+        x0,_,x1,_=world(state,j);b=know.box(state,max(j,0))
+        return (max(x0,wall_l),floor,min(x1,wall_r),floor+float(b[3])-float(b[2]))
+
+    core=np.full((frames,4),np.nan);active={(st,k)}
+    for d in range(frames):
+        if any(s not in STILL_ROOT_STATES or s not in know.body for s,_ in active):break
+        boxes=[standing(s,q) for s,j in active for q in range(j-3,j+2)]
+        c=(max(b[0] for b in boxes),max(b[1] for b in boxes),min(b[2] for b in boxes),min(b[3] for b in boxes))
+        if not (c[0]<c[2] and c[1]<c[3]):break
+        core[d]=c;following=set()
+        for s,j in active:
+            if s=="Idle":following.add((s,j+1));continue
+            dur=know.durations(s)
+            if dur is None:following=None;break
+            lo,_,hi=dur
+            if j+1<hi:following.add((s,j+1))
+            if j+1>=lo:following.add((successor.get(s),0))
+        if following is None:break
+        active=following
+    out=core.copy()
+    out[1:,:2]=np.maximum(core[1:,:2],core[:-1,:2]);out[1:,2:]=np.minimum(core[1:,2:],core[:-1,2:])
+    with np.errstate(invalid="ignore"):out[~((out[:,0]<out[:,2])&(out[:,1]<out[:,3]))]=np.nan
+    return out
+
+
 def press_now_row(sim,body,F,hold,side):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
 
     Try the existing toward row first. Only on failure try releasing direction
     and then countersteering. These are three fixed rows, not a timing search.
-    Each uses the actual S0, in-flight prefix and hold filter. The observed body
-    is held still for this contact witness; external safety remains the caller's.
+    Each uses the actual S0, in-flight prefix and hold filter. body is one box
+    held still, or one box per roll step (contact_body_witness; a nan row has
+    no witness); external safety remains the caller's.
     """
     from .knife_chain_vault import strike_program
     from . import pogo_model as PM
-    if body is None or not np.isfinite(body).all():return None
+    if body is None:return None
+    body=np.asarray(body,float)
+    if body.shape==(4,):
+        if not np.isfinite(body).all():return None
+    elif body.ndim!=2 or body.shape[1]!=4:return None
     direction=1 if side==B["R"] else -1 if side==B["L"] else 0
-    poly=np.array([[body[0],body[1]],[body[2],body[1]],[body[2],body[3]],[body[0],body[3]]])
     pj=len(sim.prefix)+2
     # A previous swing can still be F_ATTACKING after its bounce. It cannot
     # license a new knife before the actual start state's cooldown expires.
@@ -292,8 +378,11 @@ def press_now_row(sim,body,F,hold,side):
         attacking=(flags&K.F_ATTACKING)!=0
         fresh=(attacking[pj] and not attacking[pj-1]) or (attacking[pj+1] and not attacking[pj])
         if not fresh or flags[pj-1]&K.F_GROUND:continue
-        for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))):
+        for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1-CONTACT_END_MARGIN_F,len(flags))):
             if flags[j]&K.F_GROUND:break
+            b=body if body.ndim==1 else body[j] if j<len(body) else None
+            if b is None or not np.isfinite(b).all():continue
+            poly=np.array([[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]])
             if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
                     for face in (-1,1) for alt in (False,True)):
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
@@ -464,9 +553,10 @@ def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
-        # This witness holds the observed body still. A moving/unknown body
-        # cannot license a fresh row; keep the existing approach instead. This
-        # is not a motion prediction or permission to rewrite an absolute row.
+        # The witness keeps the observed root and follows the fitted pose of
+        # the current Control state. A moving/unknown body cannot license a
+        # fresh row; keep the existing approach instead. This is not a motion
+        # prediction or permission to rewrite an absolute row.
         enemy=x.obs.e;velocity=enemy.get("vel")
         controls=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
         if (not isinstance(velocity,(list,tuple)) or len(velocity)!=2
@@ -475,7 +565,10 @@ def register(prims):
                 or not isinstance(controls[0].get("state"),str)
                 or not controls[0]["state"] or controls[0]["state"] in {"Walk","Evade Scuttle"}):return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
-        row=press_now_row(x.obs.sim,body_box(x.obs.e),x.obs.F,left,x.v["side"])
+        from . import pogo_model as PM
+        body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1])
+        if body is None:return None
+        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"])
         if row is not None:
             x.v["row"]=row
             return {"do":"goto","to":"strike"}

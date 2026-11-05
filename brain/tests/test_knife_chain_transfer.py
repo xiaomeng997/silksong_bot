@@ -381,6 +381,22 @@ def test_selected_route_keeps_fresh_actor_state_rules_and_weights_exactly():
  assert new is not old and vars(new)==vars(old) and n._transfer_ready
 
 
+def fit_pose(e,state=None,t=None,x=None):
+ """Production-shaped Clapper body: the fitted root box of its Control state and clock (map2.clapper Know),
+ standing on the floor at its facing (the STATE colliders the transfer witness checks)."""
+ from ssbot.map2 import clapper as cm
+ c=e['fsms'][0]
+ if state is not None:c['state']=state
+ if t is not None:c['t']=t
+ if x is not None:e['pos'][0]=x
+ b=cm.Know.load().box(c['state'],int(round(c['t']*60)));face=1 if e['flipX'] else -1
+ e['pos'][1]=cm.FLOOR-float(b[2]);px,py=e['pos'][:2];xa,xb=px+face*b[0],px+face*b[1]
+ x0,x1,y0,y1=min(xa,xb),max(xa,xb),py+b[2],py+b[3]
+ for col in e['colliders']:
+  if str(col.get('name','')).startswith('Song Heavy Sentry'):col['verts_world']=[x0,y0,x1,y0,x1,y1,x0,y1]
+ return e
+
+
 def transfer_motion_scene(mode):
  from pathlib import Path
  from ssbot.knowledge import kinematics as K
@@ -397,6 +413,8 @@ def transfer_motion_scene(mode):
   s['ents'].append({'iid':iid,'type_key':'Song Heavy Sentry','hp':100,'pos':[x,7.45],'vel':[0.,0.],
     'fsms':[{'name':'Control','state':st,'t':.1}],
     'colliders':[{'name':'Song Heavy Sentry','enabled':True,'verts_world':[x-1.4,3.,x+1.9,3.,x+1.9,6.9,x-1.4,6.9]}]})
+ # The destination's body is production-shaped (Task 178 pose witness); the source keeps its obstacle box.
+ s['ents'][1]['flipX']=False;fit_pose(s['ents'][1])
  S=K.initial_state(params,25.,4.568,vx=vel,mode=mode,ground=True)
  if mode==K.M_DASH:S[K.DASH_T]=.05
  if mode==K.M_SPRINT:S[K.PHASE]=2.;S[K.SP_X]=vel
@@ -431,8 +449,7 @@ def test_delaying_jump_does_not_postpone_a_pending_far_dash():
 def transfer_at_gap(gap,mode=None):
  from ssbot.knowledge import kinematics as K
  r,s,sim=transfer_motion_scene(K.M_NORMAL if mode is None else mode)
- e=s['ents'][1];dx=s['hero']['pos'][0]+gap-e['pos'][0];e['pos'][0]+=dx
- for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+ fit_pose(s['ents'][1],x=s['hero']['pos'][0]+gap)
  s['hero']['tm']['dash_cd']=.025
  r.run.v['dash_k']=2  # the already-planned cooldown expires at this mask frame
  return r,s,sim
@@ -610,8 +627,7 @@ def test_observed_head_goal_requires_actual_downslash_not_an_empty_handoff(targe
  s['f']=1040;s['hero'].update(pos=[38.,9.253],box=[37.75,7.7,38.25,9.779],vel=[0.,-2.],
                              silk=9,anim={'clip':'Airborne'},can={'attack':True,'input':True})
  s['hero']['tm']['atk_cd']=0.
- e=s['ents'][1];dx=38.-e['pos'][0];e['pos'][0]=38.;e['fsms'][0]['state']=target_state
- for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+ e=fit_pose(s['ents'][1],state=target_state,x=38.)
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
  if column:S=S.reshape(K.K,1)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
@@ -642,8 +658,8 @@ def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contac
  s['f']=1040;s['hero'].update(pos=[38.,9.253],box=[37.75,7.7,38.25,9.779],vel=[0.,-2.],
      silk=9,anim={'clip':'Airborne'},can={'attack':True,'input':True})
  s['hero']['tm']['atk_cd']=0.
- e=s['ents'][1];dx=38.-e['pos'][0];e['pos'][0]=38.;e['fsms'][0]['state']='Slam 1'
- for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+ # Task 178: an attacking destination whose root stands (Slam 2); a lunging Slam 1 has no pose witness.
+ e=fit_pose(s['ents'][1],state='Slam 2',x=38.)
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
  n=N.NativeManualAirChain(runner_factory=load_runner,probe_ref='same-target-contact');n.reset(0,start_frame=1040)
@@ -700,15 +716,14 @@ def test_same_target_bounce_holds_tail_then_reuses_existing_downslash_without_gr
  s['f']=1040;s['hero'].update(pos=[38.,9.253],box=[37.75,7.7,38.25,9.779],vel=[0.,-2.],
      silk=9,anim={'clip':'Airborne'},can={'attack':True,'input':True})
  s['hero']['tm']['atk_cd']=0.
- e=s['ents'][1];dx=38.-e['pos'][0];e['pos'][0]=38.;e['fsms'][0]['state']='Slam 2'
- for c in e['colliders']:c['verts_world'][::2]=[v+dx for v in c['verts_world'][::2]]
+ e=fit_pose(s['ents'][1],state='Slam 2',x=38.)
  e['colliders'].append({'name':'Slam Collider 2','enabled':True})
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
  goal=TransferGoal(8,8,1040,0.,'BOUNCE',MoveInstance(8,990,'CC_SLAM'))
  first=propose(r,s,0.,sim,8,False,np.zeros((0,6)),set(),goal)
  assert first[0].run.link=='bounce_tail' and first[3]==0
- e['fsms'][0]['state']='Slam Recover';e['colliders'].pop()
+ fit_pose(e,state='Slam Recover');e['colliders'].pop()
  # The next observation clears the actual hammer; the same runner enters the
  # existing press-now downslash row without a J/DASH or a new ground approach.
  made=propose(first[0],s,0.,sim,8,False,np.zeros((0,6)),set(),goal)
