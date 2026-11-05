@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.141）：仍在w13。286/Task175新源e4a2318b小审通过、无P2；模型配置已按生产HERO2=1/16383更正，旧174低钩/修A无效/dash_c970结论撤回，14u路线未修好。Root显式模型walk上下文已获独立22拍核同，并以真实Native+RangeTracker/RangeSupport复现18关键片段，输出逐项同；这仍是预载Run/模型事务的离线片段。已新绑P草稿：当前源两个完整_act点加18 Native片段，脚本/模型/输入/原资源门全绑；P尚未启动，source review不能当预算/实机门。STATUSfalse/无Root进程，后续P按原独占/暂停/清理执行。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.142）：仍在w13。e4a2318b源已获286审阅；当前源新P已完成真实清理，完整性核过但整拍关键预算未验。两个条件完整_act点trace18.9394/12.3794ms；另18真实Native关键片段输出全同，最大6.5717ms，J片段不重建、第二CLAW槽首次钩scan约4.6ms。Native片段不含L2/完整预测/发键，不能与别场景相加冒充关键整拍；首完整点超过16.67ms也保留。Task176只核P证据并给最小完整_act上下文接法；没有新实机gate、不改源码堆优化。STATUSfalse、自有worker/场与golden/Prefs/旧DEMO/registry已独立核清。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4253,3 +4253,14 @@ production_context/只重建一条同源e4/16383的walk流水，按自己的K/HF
 Root用当前生产14项环境/模型1、自己的walk与独审Evade fixture，先做非计时E功能：十八个真实Native _transfer_offer片段，使用真实RangeTracker/RangeSupport/几何，不再只测transfer.propose。包含五次等待展开、缓存J、钩脸决策、首CLAW、第二槽、lock，link/keys逐项同。Run/前缀/先前sent/seen为显式预载模型上下文，不是实际B2连续交易/收包/命中；无Native控制回报认证。E参考毫秒不能作P。证据在p_e4a2318b/full_and_critical/functional_E/。
 
 新P_ENABLE/BINDING/SPEC已准备：e4/286、710源含261模型、十七输入文件/七脚本、FACE_HOOK1/HERO2生产配置与显式已接收集合，原engineering/resource三组件原字节。先跑当前源2609/2610两个完整_act条件点（原S0/HF注入、自己的第二prefix、最早差异2611前停），再跑上述十八Native关键片段；真实RangeSupport建场位于片段外、首次钩轨迹cache冷启动保留，记录early_jump/step_scan、实际P0–15 High/Numba get4/EcoQoSoff及新编译/来源。不能把两个不同场景时长相加当关键整拍保证，也不签全AB/真实deadline/live_gate。P尚未启动；按原STATUStrue/五秒Opus暂停/资源门/30秒刷新/真实清理后false执行。旧停止批、原始失败及Windows核心进程限制不动。
+
+
+### 7.142 当前源新P已实际完成并核清理；完整性通过，Native关键片段不冒充完整关键tick，Task176核证据/最小接法
+
+p_e4a2318b/full_and_critical按新e4/286、710源含261模型、十七输入/七脚本/当前生产配置绑定实际运行，原STATUStrue、五秒Opus暂停、原资源门、30秒pulse及真实清理不减。两个条件完整_act点原始trace18.9394/12.3794ms（外层壳18.9406/12.3807、_act18.9115/12.3493），来源0/线程get4/P0–15High/GetProcessInformation EcoQoSoff，签名前后同、无新编译、trace/footer完整0overflow。包2611/2612均R+DASH，第二用自己首包prefix；原S0/HF注入差225，最早差异2611前停，仍不是自然闭环。首点超过16.67ms如实保留；目标为f+2，所以超一帧本身不证明实际迟发。
+
+十八实际Native _transfer_offer片段输出与正确模型上下文逐项同，RangeTracker/RangeSupport真实建几何，target/sent/seen/Run是明确预载模型上下文，非现场证据。展开Native6.2499..6.5717ms，其中early_jump3.5372..3.8169；成功展开Native4.6842（early1.9409），defer夹具成功Native4.9922（early2.0614）。缓存J片段2.9138/2.8418，无新展开；钩决策3.6603/3.4454，首CLAW2.7845/2.7793；第二槽4.7865/4.9205（step_scan4.4767/4.6249），lock3.4254..3.8267（step_scan3.0866..3.4905）。真正hook当前步检查六次，_tracks两冷miss/四hit保留；所有片段无新签名。RangeSupport建场在片段外、E24–31准备，其毫秒不是P；不能把这些片段或不同场景加起来当完整关键tick/普遍截止/AB预算。ROOT_P_AUDIT.integrity_pass=true，但whole_critical_tick_budget_accepted=false、live_gate=false。
+
+P worker45168与自有场进程按PID/create独立核真退出；golden/Prefs无差、旧DEMO hash/mtime同、registry instances空/restore_pending=false、无游戏，全过后才false。ROOT_CLEANUP/ROOT_P_AUDIT/BUNDLE_RESULT/原trace保留；没有新游戏或旧停止批重开，没有因此改运行源码。
+
+Task176只读核新P证据与边界，并给最小把正确生产模型的等待/J/首CLAW/第二槽/lock接到现有完整_act→before_send/sent空sink壳的字段/接口位置，不新P/game/351/网格。原TF state缺cstate/game、OracleBackend时间由dt累计，必须补真实协议schema/场景并显式标离线预载时钟/前奏与S0/HF/模型事务，不能拿裸Native当整拍或把未来录像喂分叉。Root据此测完整关键政策/预测/发键耗时，再决定新有界工程。当前源e4不改，旧失败/AA/raw、源审/输入/STOP/资源/真实清理和Windows核心进程约束继续保留。
