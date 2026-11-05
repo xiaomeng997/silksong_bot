@@ -518,6 +518,8 @@ def register(prims):
         F0=int(x.obs.F)
         v["cs"]=CsPlan(F0,0,F0+HOOK_PRESS_AFTER_F,0,bb_press=info["bb_press"])
         v["air_dash_decided"]=True  # no air dash after an aimed hook in this Run
+        from .knife_chain_face_hook import press_anchor
+        v["hook_press"]=press_anchor(x.obs.sim,toward,F0,x.obs.e)
         return {"do":"goto","to":"claw"}
 
     @prims.gen("transfer_claw_keys",doc="the absolute CsPlan keys: turn key, CLAW for two frames; no J; never re-timed")
@@ -614,13 +616,19 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # An outside bounce/flight is an entry, not our missed jump. Keep the
         # same destination and owner across landing and select the normal jump.
         link="walk";air_entry=False;p=replace(p,jump_k=10000,jump_until=10000)
+    early=None
     if link in {"walk","dash"} and ground:
         held_dash=bool(current_mode in (K.M_DASH,K.M_SPRINT) and int(sim.prefix[0])&B["DASH"])
         if held_dash:link="dash"
         gap=abs(enemy["pos"][0]-hp[0])
         # Observe the distance now. A model's eventual body intersection must
         # not make us release DASH or wait in front of the destination.
-        if not (defer_jump or approach_only) and gap<=cfg["STOMP"]["jump_root"]:
+        cache=None if active is None else active.v.get("early_hook")
+        early_due=False
+        if cfg.get("FACE_HOOK",False):
+            from .knife_chain_face_hook import early_jump_due
+            early_due=early_jump_due(cache,k,target_state)
+        if not (defer_jump or approach_only) and (gap<=cfg["STOMP"]["jump_root"] or early_due):
             p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash)
         elif (link=="walk" and current_mode not in (K.M_DASH,K.M_SPRINT) and
                 not (int(sim.prefix[0])|state["act"]["hf"]["latched"])&B["DASH"] and
@@ -633,6 +641,12 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # tick. Re-arm only a suppressed clock if the target moves away again.
         elif active is None or p.dash_k>=10000:
             p=replace(p,dash_k=k+max(2,int(math.ceil(max(0.,cd)*60.))))
+        if (cfg.get("FACE_HOOK",False) and not (defer_jump or approach_only) and p.jump_k>k+2
+                and p.iid!=p.caster and target_state in HOOK_TARGET_STATES
+                and (active is None or active.v.get("cs") is None)):
+            from .knife_chain_face_hook import early_jump_stale,early_jump
+            if early_jump_stale(cache,state["f"],target_state):
+                early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash)
     elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
@@ -648,6 +662,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
+    if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
     draft.run=Run(PROGRAM,link,variables)

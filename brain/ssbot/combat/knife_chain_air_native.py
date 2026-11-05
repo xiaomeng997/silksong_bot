@@ -535,13 +535,6 @@ class NativeManualAirChain(NativeChainB2):
                                     or "rune transfer ended or target began a new move before real bounce",f)
             return None
         draft,plan,path,mask=made
-        if draft.run.link in transfer.HOOK_LINKS:
-            # The free-flight K path is not a hooked Clawline projection. Until
-            # that current-step adapter is bound, even explicit opt-in declines;
-            # never certify the wrong path or silently skip external danger.
-            self._note("transfer_face_hook_unchecked",frame=f,reason="hooked current-step geometry not integrated")
-            if active:self._recover("transfer face-hook current step unsupported",f)
-            return None
         if plan.move in self._failed_hook_moves:return None
         current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
         if current is None:
@@ -555,6 +548,8 @@ class NativeManualAirChain(NativeChainB2):
                     raise GeometryUnavailable("tactical switch source instance unavailable or changed")
                 draft.run.v["_entry_source_confirmed"]=True
             geo=B2Geometry(forecast,f,plan.move,current[2])
+            if draft.run.link in transfer.HOOK_LINKS and not isinstance(draft.run.v.get("hook_press"),dict):
+                raise GeometryUnavailable("transfer hook press anchor unavailable")
             if draft.run.link=="bounce_tail":
                 if goal is None or goal.responsibility.family!="CC_SLAM" or not self._transfer_source_matches(rs,goal):
                     raise GeometryUnavailable("source hammer tail instance unavailable or changed")
@@ -587,7 +582,15 @@ class NativeManualAirChain(NativeChainB2):
                     mask=tail_mask
                     path=model_path(sim,plan,np.array([mask],np.int64),game)
             attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
-            if attacking:
+            w=self._hook_start
+            hook_sent=bool(draft.run.link in transfer.HOOK_LINKS and w is not None and w["move"]==plan.move
+                           and (w["sent_targets"] or w["seen_frame"] is not None))
+            if hook_sent:
+                from .knife_chain_face_hook import step_scan
+                scan=step_scan(geo,path,draft.run.v,w,f)
+                self._note("transfer_hook_step_checked",frame=f,contacts=len(scan.contacts),complete=scan.complete,
+                           source=scan.source,scope="all owners and delayed hazards; current step only; no protection")
+            elif attacking:
                 if getattr(current[2],"fam",None)!="CC_SLAM":raise GeometryUnavailable("air continuation attack family unsupported")
                 identity=(plan.iid,current[2].fam,float(current[2].t0))
                 prior=None if run is None else run.v.get("_target_attack")
