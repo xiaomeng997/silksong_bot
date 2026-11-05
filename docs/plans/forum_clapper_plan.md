@@ -4161,3 +4161,13 @@ Root46当前完整_act虽已真选over/绑定源2552且transfer_ready=true，却
 
 当前709 runtime/261模型不变、小源码包/两文件binding/patch/JUnit已封存，Task167只核路由小增量与活动owner/旧适配器门保留，wake191；在途不当通过。三分支的选择与动作入口已接，实际三个分支和整链仍待新源独立审阅、真正P整tick与新绑定的有界w13实机验收；没有新P/合同/游戏/8局门，不拿E耗时或Null包冒充现场。旧停止批、冻结AA、raw与Windows核心进程保持。当前STATUSfalse/无Root计算，计划先main后同步knife/TV。
 
+
+### 7.134 #277活动尾段抢占已最小修742c9f7b；默认早起跳接近及目标钩脸增量待接【已处理 Opus #277，Task168新源审在途】
+
+#277八工件/14输入hash核同，明确4e34900d未接受：vault真实弹起会释放commitment并消费post_context，但Run仍在over/fall/ground；原fresh SWITCH入场误把它当空闲。742c9f7b只在fresh side/stomp外层加runner.run is None，保留更早的transfer active接管，旧安全/发键门不变。六个side/stomp×over/fall/ground有效红case6fail35pass，改后单次五文件151pass/foreign0；六新增是子集，不和旧411/145相加。当前709 runtime/261模型、两文件patch与862小源码快照绑定在analysis/middle_owner277_20261104/REVIEW_PACKET.json。Task168A只核这条predicate与active生命周期，不重复大矩阵；在途不当新源通过。Parent4e完整_act2609 fresh runner.run=None，只证新predicate静态准入，不冒充742的新完整_act/P。
+
+用户补充：翻走路怪和踩头共用一个接近→下劈入口；翻越属弹起后出口。后方小符文可能迫使疾跑中提前起跳；这里的钩是高于小符文并命中目标怪脸的钩，不是空钩延长距离。进一步希望按距离作默认：远疾跑起跳+冲刺+钩脸，中冲刺+钩脸，近直接钩脸；优先早起跳、少落地，不专等符文逼近才决定。距离仍结合当前高度/速度/能力可用性，保留现成可接下劈；这是新接近偏好，不等于所有距离高度都物理可用。现transfer只有可选一次airdash，目标绑定CLAW/Harpoon恢复尚未接入，不能拿空钩运动模型或旧vault地面起点冒充已完成。Task168B只做已有目标钩索接口/最小复用映射，Root负责生产；不新建在线时序搜索、DSL或合并动作池。
+
+用户问远钩待机怪初伤时人还远，是否会触发普通远程跳（不是Escape Jump）。Root只读原始Control FSM和Harpoon FSM/HealthManager：Enemy Needle L/R先DoDamage、之后Suspend/Dash To Enemy；Idle受TOOK DAMAGE→Dmg Attack按当时Slam Range选Close/Far，Far先受Buddy Is Attacking互锁取消，否则可选Jump/Spell/JumpCast。可开始普通跳跃前摇；不能假定钩中就已贴住压跳，或事后靠近会取消已启动Antic。REMOTE_HOOK_IDLE_REACTION.json保存三文件hash/原行号；没有新游戏、频率或实际到达时间保证。
+
+当前新源独审及目标钩脸接近仍待，不开旧批/旧门。没有新P/游戏/合同；STATUSfalse、Root own jobs空。旧停止/AA/raw保留，不操作Windows核心进程。计划先main提交再同字节同步knife/TV。
