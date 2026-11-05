@@ -14,8 +14,8 @@ def geo(rs):
 def test_same_owner_raster_queries_keep_points_time_and_filter(owner,monkeypatch):
     rs=_support_with([(24.,4.,26.,6.),(34.,4.,36.,6.)],samples=(0,4,8))
     original=rs._stack_of;calls=[]
-    def counted(keep):
-        calls.append(1);return original(keep)
+    def counted(keep,**kw):
+        calls.append(1);return original(keep,**kw)
     monkeypatch.setattr(rs,"_stack_of",counted)
     g=geo(rs)
     for shift in [0.,1.,-1.]:

@@ -38,8 +38,15 @@ class B2Geometry:
         key=(id(rs),int(iid))
         if key not in self._owners:
             # Retain rs too: an id cannot be recycled within this query group.
-            self._owners[key]=(rs,rs._stack_of(lambda owner:owner==iid))
-        return rs.occ_stack_b(self._owners[key][1],x,y,tk,{iid})
+            self._owners[key]=(rs,np.zeros(rs.stack.shape,bool),set())
+        _,stack,filled=self._owners[key]
+        # Dilate only the samples this query reads (LayerSupport.samples_read); a later query of this group fills
+        # its own. The cells read are the whole owner stack's (Task 178 tick cost).
+        need=rs.samples_read(tk)-filled
+        if need:
+            rs._stack_of(lambda owner:owner==iid,into=stack,samples=need)
+            filled|=need
+        return rs.occ_stack_b(stack,x,y,tk,{iid})
 
     def support(self, length, *, first=None):
         from .forum_v2 import RangeSupport, SAMPLE_KS

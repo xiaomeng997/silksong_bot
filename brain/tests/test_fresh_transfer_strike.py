@@ -34,8 +34,9 @@ def test_press_now_requires_its_own_model_swing_not_inherited_attacking(params,m
  if column:S=S.reshape(K.K,1)
  flags=np.full((1,42),K.F_ATTACKING,dtype=np.int64)
  if fresh:flags[:,:3]=0
- ro=NS(flags=flags,pos=np.zeros((1,42,2)),vel=np.zeros((1,42,2)))
- sim=NS(start=S,prefix=np.zeros(1,dtype=np.int64),params=params,fo=3064,roll=lambda *a:ro)
+ # one rollout row per command row, as ChainSim.roll (press_now_row rolls its fixed rows as one batch)
+ roll=lambda cmds,*a:NS(flags=np.repeat(flags,len(cmds),0),pos=np.zeros((len(cmds),42,2)),vel=np.zeros((len(cmds),42,2)))
+ sim=NS(start=S,prefix=np.zeros(1,dtype=np.int64),params=params,fo=3064,roll=roll)
  monkeypatch.setattr(PM,'meets',lambda *a:True)
  row=press_now_row(sim,np.array([0.,0.,2.,4.]),3066,0,B['R'])
  assert (row is not None)==allowed

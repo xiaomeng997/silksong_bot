@@ -221,11 +221,23 @@ def coarse(m: Mask, from_cell: float, cell: float = CELL) -> tuple[np.ndarray, i
     ix0 = m.ix0 // r
     iy0 = m.iy0 // r
     px, py = m.ix0 - ix0 * r, m.iy0 - iy0 * r
-    ny = -(-(m.m.shape[0] + py) // r)
-    nx = -(-(m.m.shape[1] + px) // r)
-    big = np.zeros((ny * r, nx * r), bool)
-    big[py:py + m.m.shape[0], px:px + m.m.shape[1]] = m.m
-    return big.reshape(ny, r, nx, r).any(axis=(1, 3)), ix0, iy0
+    h, w = m.m.shape
+    out = np.zeros((-(-(h + py) // r), -(-(w + px) // r)), bool)
+    # The OR of the r x r strided views: the same cells as any() over the zero-padded r x r blocks, without the
+    # padded copy (Task 178 tick cost).
+    for a in range(r):
+        i0 = 1 if a < py else 0
+        s0 = a - py + i0 * r
+        if s0 >= h:
+            continue
+        for b in range(r):
+            j0 = 1 if b < px else 0
+            t0 = b - px + j0 * r
+            if t0 >= w:
+                continue
+            src = m.m[s0::r, t0::r]
+            out[i0:i0 + src.shape[0], j0:j0 + src.shape[1]] |= src
+    return out, ix0, iy0
 
 
 class Canvas:
@@ -443,24 +455,40 @@ class LayerSupport:
         return self.occ_stack_b(self._stack_of(lambda iid: iid not in ids), x, y, tk, own)
 
     def occupied_hazards(self, x, y, tk, iids) -> np.ndarray:
-        """Already spawned hazards at their real clock, independently of body changes."""
+        """Already spawned hazards at their real clock, independently of body changes. The cached stack is filled
+        only on the samples a query reads (_occ_stack: lo / hi of each tk); those cells are parts_stacks' ones."""
         ids = frozenset(int(i) for i in iids)
         if ids not in self._hazard_cache:
-            parts = [p for iid in ids for p in self.haz_raw.get(iid, ())]
-            self._hazard_cache[ids] = self.parts_stacks(parts)[0]
-        return self.occ_stack_b(self._hazard_cache[ids], x, y, tk, ids)
+            self._hazard_cache[ids] = (np.zeros(self.stack.shape, bool), set())
+        stack, filled = self._hazard_cache[ids]
+        need = self.samples_read(tk) - filled
+        if need:
+            self._paste_parts(stack, [p for iid in ids for p in self.haz_raw.get(iid, ()) if p[0] in need], 4)
+            filled |= need
+        return self.occ_stack_b(stack, x, y, tk, ids)
+
+    def samples_read(self, tk) -> set:
+        """The sample indices _occ_stack reads for planner times tk."""
+        lo, hi = self._sample_of(tk)
+        return {int(s) for s in np.unique(np.concatenate((np.ravel(lo), np.ravel(hi))))}
 
     def occupied_only(self, x, y, tk, iids) -> np.ndarray:
         ids = {int(i) for i in iids}
         return self.occ_stack_b(self._stack_of(lambda iid: iid in ids), x, y, tk, ids)
 
-    def _stack_of(self, keep) -> np.ndarray:
-        st = np.zeros(self.stack.shape, bool)
+    def _stack_of(self, keep, into: np.ndarray | None = None, samples=None) -> np.ndarray:
+        """The stack of the owners `keep` accepts; samples: only those sample indices, pasted into `into` (the
+        other samples are left as they are)."""
+        st = np.zeros(self.stack.shape, bool) if into is None else into
         for si, ls in self.layers.items():
+            if samples is not None and si not in samples:
+                continue
             for iid, m, ix0, iy0 in ls:
                 if keep(iid):
                     self.cv.paste(st[si], m, ix0, iy0)
         for si, parts in self.raw.items():
+            if samples is not None and si not in samples:
+                continue
             by_m: dict = {}
             for iid, c, ix0, iy0, m, _ in parts:
                 if m is not None and keep(iid):
@@ -504,16 +532,21 @@ class LayerSupport:
         st = np.zeros(self.stack.shape, bool)
         es = np.zeros(self.stack.shape, bool)
         for idx, dst in ((4, st), (5, es)):
-            by_m: dict = {}
-            for p in parts:
-                if p[idx] is not None:
-                    by_m.setdefault((p[0], round(float(p[idx]), 4)), []).append(p[1:4])
-            for (si, m), g in by_m.items():
-                d, x0, y0 = dilate_group(g, m, self.cv.cell)
-                self.cv.paste(dst[si], d, x0, y0)
+            self._paste_parts(dst, parts, idx)
         if self.stack_esc is None:
             es = st.copy()
         return st, es
+
+    def _paste_parts(self, dst: np.ndarray, parts: list, idx: int) -> None:
+        """Raw parts [(si, coarse, ix0, iy0, m, esc_m)] dilated by their margin p[idx] (4: m, 5: esc_m) into dst[si]:
+        one dilation per (sample, margin)."""
+        by_m: dict = {}
+        for p in parts:
+            if p[idx] is not None:
+                by_m.setdefault((p[0], round(float(p[idx]), 4)), []).append(p[1:4])
+        for (si, m), g in by_m.items():
+            d, x0, y0 = dilate_group(g, m, self.cv.cell)
+            self.cv.paste(dst[si], d, x0, y0)
 
     def reaction(self, iid: int, to_states, j_hit: int, hero_x: float | None) -> "LayerSupport | None":
         """The counters of a hit (RangeSupport: from the estimate's templates); a plain layer support has none."""
@@ -655,22 +688,25 @@ class RangeSupport(LayerSupport):
                 n_est += 1
                 m = rs.m_of(iid, tk_name, k)
                 c, ix0, iy0 = coarse(e.raw, tab.cell, cv.cell)
+                # this estimate's hazards coarsened once for every use below (coarse is pure; Task 178 tick cost)
+                haz = (coarse(e.haz, tab.cell, cv.cell) if e.haz is not None and e.haz.m.size and e.haz.m.any()
+                       else None)
                 if iid == rs.dash_focus:
                     md = round(margin(tk_name, k, "rule"), 4)
                     if md > m + 1e-6:
                         dash_parts.setdefault((si, md), []).append((c, ix0, iy0))
-                        if e.haz is not None and e.haz.m.size and e.haz.m.any():
-                            dash_parts[(si, md)].append(coarse(e.haz, tab.cell, cv.cell))
+                        if haz is not None:
+                            dash_parts[(si, md)].append(haz)
                 esc = k + k_shift >= ESC_FROM_K
                 # the escape check's danger: an idle body with ESC_IDLE_M only (idle enemies have no inescapable zone:
                 # the margin's growth is the replanning's business), moves and hazards with their margin
                 idle = e.fam is None
-                if e.haz is not None and e.haz.m.size and e.haz.m.any():
+                if haz is not None:
                     # Preserve hazards separately even when a later branch skips
                     # or freezes the owner (parry/knockback must not stop a rune).
                     hm = (COMMIT_M if COMMIT and tk_name == CLAPPER and iid != rs.focus and m > COMMIT_M
                           and (committed(trk.now[iid][2]) or e.core is not None) else m)
-                    ch_, hx_, hy_ = coarse(e.haz, tab.cell, cv.cell)
+                    ch_, hx_, hy_ = haz
                     rs.haz_raw.setdefault(iid, []).append((si, ch_, hx_, hy_, hm, hm if esc else None))
                 if COMMIT and tk_name == CLAPPER and iid != rs.focus and m > COMMIT_M:
                     # SSBOT_FORUM_TWO_COMMIT: a committed move (whole estimate) / its hazards with COMMIT_M
@@ -678,16 +714,16 @@ class RangeSupport(LayerSupport):
                         rs.add_raw(si, iid, c, ix0, iy0, COMMIT_M, COMMIT_M if esc else None)
                         rs.n_commit = getattr(rs, "n_commit", 0) + 1
                         continue
-                    if e.haz is not None and e.haz.m.size and e.haz.m.any() and e.core is not None:
+                    if haz is not None and e.core is not None:
                         cc, cx0, cy0 = coarse(e.core, tab.cell, cv.cell)
                         rs.add_raw(si, iid, cc, cx0, cy0, m, (ESC_IDLE_M if idle else m) if esc else None)
-                        ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
+                        ch, hx0, hy0 = haz
                         rs.add_raw(si, iid, ch, hx0, hy0, COMMIT_M, COMMIT_M if esc else None)
                         rs.n_commit = getattr(rs, "n_commit", 0) + 1
                         continue
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
-                if esc and idle and e.haz is not None and e.haz.m.size and e.haz.m.any():
-                    ch, hx0, hy0 = coarse(e.haz, tab.cell, cv.cell)
+                if esc and idle and haz is not None:
+                    ch, hx0, hy0 = haz
                     rs.add_raw(si, iid, ch, hx0, hy0, None, m)
         # Seen delayed hazards outlive the owner's presence/death. They keep
         # their original position/facing/clock and never acquire a new body.

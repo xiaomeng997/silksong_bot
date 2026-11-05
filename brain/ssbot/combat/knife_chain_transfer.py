@@ -360,9 +360,14 @@ def contact_body_witness(enemy,frames,idle_no_evade=False):
     bottoms=[float(know.box(st,max(j,0))[2]) for j in range(k-3,k+2)]
     if abs(float(observed[1])-floor)>max(bottoms)-min(bottoms)+POSE_MATCH_U:return None
 
+    poses={}
+
     def standing(state,j):
-        x0,_,x1,_=world(state,j);b=know.box(state,max(j,0))
-        return (max(x0,wall_l),floor,min(x1,wall_r),floor+float(b[3])-float(b[2]))
+        # pure in (state, j) within this call; each one is sampled by up to five frames (Task 178 tick cost)
+        if (state,j) not in poses:
+            x0,_,x1,_=world(state,j);b=know.box(state,max(j,0))
+            poses[state,j]=(max(x0,wall_l),floor,min(x1,wall_r),floor+float(b[3])-float(b[2]))
+        return poses[state,j]
 
     can_evade,_,idle_time,_=_idle_exits()
     # A successor Idle has not reached Can Evade yet: its decision is still open.
@@ -412,10 +417,15 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
     # license a new knife before the actual start state's cooldown expires.
     cd=float(np.asarray(sim.start).reshape(K.K,-1)[K.ATK_CD,0]);dt=float(sim.params.frame_time)
     if not math.isfinite(cd) or not math.isfinite(dt) or dt<=0 or cd>pj*dt+1e-9:return None
-    for d in ((direction,0,-direction) if direction else (0,)):
-        row=strike_program(F,hold,1,d or 1,16)
+    directions=(direction,0,-direction) if direction else (0,)
+    rows=[strike_program(F,hold,1,d or 1,16) for d in directions]
+    for d,row in zip(directions,rows):
         if d==0:row["masks"]=[m&~(B["L"]|B["R"]) for m in row["masks"]]
-        ro=sim.roll(np.asarray(row["masks"],np.int64)[None]);flags=ro.flags[0]
+    # One batched roll of the fixed rows (every rollout row is independent of the others; Task 178 tick cost).
+    ro=sim.roll(np.asarray([row["masks"] for row in rows],np.int64))
+    slashes=[PM.slash_poly(face,alt) for face in (-1,1) for alt in (False,True)]
+    for i,(d,row) in enumerate(zip(directions,rows)):
+        flags=ro.flags[i]
         attacking=(flags&K.F_ATTACKING)!=0
         fresh=(attacking[pj] and not attacking[pj-1]) or (attacking[pj+1] and not attacking[pj])
         if not fresh or flags[pj-1]&K.F_GROUND:continue
@@ -424,11 +434,10 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
             b=body if body.ndim==1 else body[j] if j<len(body) else None
             if b is None or not np.isfinite(b).all():continue
             poly=np.array([[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]])
-            if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
-                    for face in (-1,1) for alt in (False,True)):
-                if attacking_target and grazes_body(ro.box[0],body,j-2):break  # rejected there: try the next row
+            if all(PM.meets(slash+ro.pos[i,j],poly) for slash in slashes):
+                if attacking_target and grazes_body(ro.box[i],body,j-2):break  # rejected there: try the next row
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
-                           contact_velocity=ro.vel[0,j].tolist())
+                           contact_velocity=ro.vel[i,j].tolist())
                 return row
     return None
 
