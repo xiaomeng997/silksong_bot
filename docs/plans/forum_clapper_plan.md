@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.144）：w13源e4a2318b/286独审不变，287已处理。真实地形完整19帧Policy→发键P已完成并核收，首J11.1853/首CLAW9.7350/第二槽11.9109ms，首次等待28.1765ms保留；其余18帧均低于16.67ms。仅合成Idle/无IPC的有限工程预算，不认证物理动作或未来截止。当前准备新的一局FACE_HOOK工程，7HP/首次掉血真实Q1、输入/时钟/资源/清理门不减，旧停止局不重开；一整包工程结果后再独审，不为中间夹具/材料再拆轮次。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-04，7.145）：e4新w13工程已实际结束：fight测量T8.52835s、2HP后Q1退出，2677/2710两次真实命中弹起，第三刀2738接受但未命中、2751恢复/2755身体受击。新钩脸路线未选到，不能称已实机验证。FACE_HOOK实际值未被测量关联、退出后HP缺项，原完整性失败保留；game/worker/field/golden/Prefs/旧DEMO/registry独立清理全核后false。已只补测量关联3行至2c3d6fc4、12检查过，其余709源/模型字节同e4；Task177整包现场/P/最小修复独审待核，不开旧局或补局，不称新源已通过。**
 
 > **实机授权（用户最新决定，11-03，覆盖11-01到场等待）**：用户说“接着做吗？我不在家，你开实机不用等我”。允许条件成熟后自主开展另行绑定的有界工程单局；源审、预算、真实输入、STOP/严格退出/完整日志和真实清理门仍保留。授权不重开旧停止批次、不替换失败局；在途审阅和唤醒通知都不是启动许可。
 
@@ -4289,3 +4289,17 @@ P worker45340和自有场56696按PID/create独立核真退出，golden/Prefs无�
 下一步按用户11-03“不在家，开实机不用等我”已有授权，新建当前e4/显式FACE_HOOK1/B臂单局工程；相对旧e390已改变源/条件，另立目录/合同/预算，不重开或补旧停止局。单局仍--measure/原7HP/HP<=6真实Q1、死亡/失步/缺关键日志STOP及原资源/清理；FAST_HOOK=0保持当前w13配置。生命周期只作新namespace/source机械移植，资源三组件原字节，启动前Root核完整脚本/源/模型/配置/证据/执行HEAD，实际worker自己的input.stats门仍在tap/热身/ACTION前运行。预先记录未知：14u远路线仍射程不足，动态空中目标/骑乘未证；不为开局放宽几何或当新入口全距离已解。仅一局，不是8局或AB放行；结束后全量审计并实际清理，再把完整行为/失败一起交Opus。
 
 用户问最近每次写多少行送审：六次运行代码增删总量分别9、8、2、523、78、15，平均105.83；排除523迁移其余平均22.4，最小1增1删。仅运行代码、非测试或资料。承认先前拆分过碎，今后按可验证完整行为包送独审，不把脚本/夹具每个小修拆为新轮次；真正源审/严格输入时序和清理仍保留。
+
+### 7.145 e4单局已消费并真实清理；两次弹起后第三刀打空受击，测量遗漏最小修复2c待整包177独审
+
+analysis/sol demos同名w13_face_hook_20261105T045218Z_e4a2318b，runtime e4、执行HEAD38378753，新合同/预算/同seed314168/显式FACE_HOOK1、FAST_HOOK0、HERO2生产模型；独占true/等5秒/原资源门/自己的WMI隐藏辅助和唯一game43420/30s pulse执行。worker49160在自己OracleLink bootstrap的input.stats只读核0delay/jitter、HF2/2、pending0，原件保存；7.2s预热和10.8s端口就绪各自记录，不是战斗耗时。没有改变Windows核心进程。
+
+实际fight窗口T8.5283534715s（与attempt12.2s分口径）、fight2HP/tail0，首次HP7→5在2755后触发Q1并真实退出。2677/press2669、2710/press2701两次目标DownSlash命中/真实pogo交还；第三次2738接受但未见目标命中/弹起，2751 transfer missed恢复，2755受335476身体伤害。责任记录处于recovery_after_failure、至少到2781，不能因2751已交还而抹掉责任；来源为同帧候选/状态事实，不把责任阶段自动当碰撞因果。2710后目标SpellAntic→Cast2，hero起点逐刀更高；第三刀打空原因需用ACTUAL_TIMELINE/原始攻击框进一步核，不先扩动作或放宽保护。新face_hook/claw链节实际0次，不能用两次pogo给新钩脸盖章。
+
+worker按完整性失败返回1：SSBOT_FORUM_CHAIN_FACE_HOOK在runtime解析/生效，但forum_measure_manifest没有实际_face_hook_mode所有权关联，configuration_complete=false/unresolved该键；不是可忽略的未知标记。原始trace_complete=true/0overflow，正式window完整，Root全窗审仍false（退出后missing health snapshot）；37条exit_frame_no_hp及原不完整footer/manifest不改、不事后绿化。ROOT_EVENT_AUDIT.passes=false，NO_RETRY保留，本局不补跑。Root启动前漏了新开关实际测量关联检查，已明确承认。
+
+实际cleanup04:56:07Z后Root独立核game43420、actualworker49160、场42460、coordinator51948/WMIshim55304全部PID消失；golden/Prefs无差、旧DEMO hash/mtime恢复、registry空/restore_pending=false、无残留game，全过后才STATUSfalse。未终止用户/Opus/Windows核心进程。ROOT_CLEANUP和所有失败/原录制保存。
+
+2c3d6fc4e16f2a3efbc9cb1de4cffddae913b222只在forum_measure_manifest增加FACE_HOOK control角色与实际chain._face_hook_mode读取，共3行；不再从raw env猜B/A实际值，缺字段仍unresolved，构造后env变化仍拒。新增四项实际Btrue/Afalse/缺字段/漂移，red3fail9pass→green单次12pass/foreign0；不与旧361/10相加。第一次自动补丁未匹配原CRLF在写源前断言停止，随后保留原CRLF完成；不是额外控制器故障。其余709 runtime/model raw字节与e4完全同，710/261新清单、两文件zip/patch/checks在metadata_fix/REVIEW_PACKET。只是待审最小测量修复，不把e4 P改签为2c通过，也不为它重跑旧矩阵。
+
+Task177一次整包：核当前19帧完整P的有限边界、新现场动作/HP/真实清理与失败口径、3行测量关联修复，另只诊断第三刀打空的最小物理/时序原因。只用本局已开的窗口和既有源码，E16–23 Idle，不新P/game/政策矩阵/大网格，不单为材料再开审阅轮次。Root暂不新增动作代码或重开任何旧批，源门待核，之后按最小实际阻点推进。
