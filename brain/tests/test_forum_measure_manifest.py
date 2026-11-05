@@ -115,3 +115,42 @@ def test_v2_real_factory_snapshot_handles_early_exit_and_rejects_runtime_mismatc
     changed=fm.configuration_manifest(root,policy,modules=modules,environ={})
     assert not changed['configuration_complete']
     assert any('mismatch' in x for x in changed['unresolved'])
+
+
+def _face_hook_manifest(tmp_path, raw, effective, *, captured=None, present=True):
+    root = package(tmp_path, 'def face():\n    return os.environ.get("SSBOT_FORUM_CHAIN_FACE_HOOK", "0")\n')
+    env = {"SSBOT_FORUM_CHAIN_FACE_HOOK": raw}
+    chain = SimpleNamespace(runner_factory=object(), b2=True,
+                            _environment=tuple((env if captured is None else captured).items()))
+    if present:
+        chain._face_hook_mode = effective
+    return configuration_manifest(root, SimpleNamespace(chain_native=chain),
+                                  modules={"ssbot.combat.example": SimpleNamespace()}, environ=env)
+
+
+def test_face_hook_manifest_reads_actual_b_arm_mode(tmp_path):
+    result = _face_hook_manifest(tmp_path, "1", True)
+    assert result["configuration_complete"]
+    entry = result["switches"]["SSBOT_FORUM_CHAIN_FACE_HOOK"]
+    assert entry["role"] == "control"
+    assert entry["effective"] == {"policy.chain_native._face_hook_mode": True}
+
+
+def test_face_hook_manifest_records_a_arm_disabled_even_when_requested(tmp_path):
+    result = _face_hook_manifest(tmp_path, "1", False)
+    assert result["configuration_complete"]
+    assert result["switches"]["SSBOT_FORUM_CHAIN_FACE_HOOK"]["effective"] == {
+        "policy.chain_native._face_hook_mode": False}
+
+
+def test_face_hook_manifest_missing_actual_mode_stays_unresolved(tmp_path):
+    result = _face_hook_manifest(tmp_path, "1", None, present=False)
+    assert not result["configuration_complete"]
+    assert "SSBOT_FORUM_CHAIN_FACE_HOOK" in result["unresolved"]
+
+
+def test_face_hook_manifest_catches_environment_drift_after_reset(tmp_path):
+    result = _face_hook_manifest(tmp_path, "0", True,
+                                 captured={"SSBOT_FORUM_CHAIN_FACE_HOOK": "1"})
+    assert not result["configuration_complete"]
+    assert "SSBOT_FORUM_CHAIN_FACE_HOOK: environment changed after construction" in result["unresolved"]

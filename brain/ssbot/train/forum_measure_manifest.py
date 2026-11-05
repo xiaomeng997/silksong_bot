@@ -172,6 +172,7 @@ def _known_runtime_bindings(policy, loaded):
 # These are explicit ownership joins, not an exemption for arbitrary CHAIN keys.
 _CHAIN_ROLES = {
     "SSBOT_FORUM_CHAIN_AIR_MANUAL": "control",
+    "SSBOT_FORUM_CHAIN_FACE_HOOK": "control",
     "SSBOT_FORUM_CHAIN_VAULT": "control",
     "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
     "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
@@ -227,6 +228,8 @@ def _execution_bindings(policy, runtime_context):
                     out["SSBOT_FORUM_CHAIN_FAST_HOOK"]={"policy.chain_native.profile.fast_hook":profile.fast_hook}
                 if hasattr(profile,"fixed_hook"):
                     out["SSBOT_FORUM_CHAIN_FIXED_HOOK"]={"policy.chain_native.profile.fixed_hook":profile.fixed_hook}
+                if hasattr(chain,"_face_hook_mode"):
+                    out["SSBOT_FORUM_CHAIN_FACE_HOOK"]={"policy.chain_native._face_hook_mode":chain._face_hook_mode}
                 budget=getattr(chain,"budget",None)
                 if budget is not None:
                     for key,name in (("SSBOT_FORUM_CHAIN_BATCH","batch"),("SSBOT_FORUM_CHAIN_BUDGET","path")):
