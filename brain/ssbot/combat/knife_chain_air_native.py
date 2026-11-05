@@ -782,6 +782,12 @@ class NativeManualAirChain(NativeChainB2):
                     and type(run.v.get("hook_hit_f")) is int)
         if source is not None and source["move"].family=="RUNE_TRANSFER" and (self._press is not None or hooked):
             bound=self._transfer_target_moves.get(source["move"])
+            if bound is None and hooked and self._actual_state is not None:
+                # The hook ticks bind nothing (their step branch runs first); the attack the needle provoked is the
+                # target's observed current move (live: Slam Antic from 2654 when the release aborts at 2673).
+                bound=next((m for fam in ("CC_SLAM","CC_JUMP_CAST","CC_JUMP")
+                            for m in (self._observed_transfer_move(self._actual_state,run.v.get("iid"),fam),)
+                            if m is not None),None)
             if bound is not None:
                 # A successful sent strike, or this Run's own Harpoon hit that
                 # provoked it (live 2654 -> Slam 1 at 2709), explicitly continued

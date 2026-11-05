@@ -31,10 +31,6 @@ HOOK_TIMEOUT_F=45           # vault far_lock: abort without control return by cl
 EVADE_U_S=15.               # Control FSM Evade Scuttle: 15 u/s straight back from her for 0.35 s
 EVADE_MAX_S=44/60.          # are_type clapper: entered again at once in 7 % (40-44 frames in all)
 HOOK_TARGET_STATES=frozenset({"Idle","Walk","Dmg Attack","Evade Scuttle"})  # target_states standing or scuttling
-# A hook released while the target is in one of these attacks ends its Run instead of approaching it: its own needle
-# hit can provoke the counter (live 2654 TOOK DAMAGE -> Slam Antic; R toward her 2673-2678, Slam 1 hit at 2709).
-HOOK_RELEASE_ATTACKS=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2","Jump Antic",
-                                "Cast Slam Antic","Cast Slam Antic 2"})
 
 
 @lru_cache(maxsize=1)
@@ -287,15 +283,28 @@ def _body_knowledge():
     return cm.Know.load(),cm.NEXT,(cm.WALL_L,cm.WALL_R),cm.FLOOR
 
 
+RANGE_LAG_F=2  # her Slam Range trigger may report the hero up to two frames late
+
+
 @lru_cache(maxsize=1)
 def _idle_exits():
-    """map2.clapper's Idle exits: Will Evade starts at Can Evade (EV_K) while the hero is in Slam Range; shown False
-    once she is in range at EV_K[2] with no evade (its Tracker idle_no_ev); Idle Time (IDLE_K, the shorter no-buddy)."""
+    """map2.clapper's Idle exits: Will Evade starts from Can Evade (EV_K) at her first in-range frame from EV_K[1]
+    (shown False when none starts there); Idle Time (IDLE_K, the shorter no-buddy); her Slam Range trigger."""
     from ssbot.map2 import clapper as cm
-    return cm.EV_K[0],cm.EV_K[2],cm.IDLE_K[False][0],cm.SLAM_RANGE
+    return cm.EV_K[0],cm.EV_K[1],cm.IDLE_K[False][0],cm.SLAM_RANGE
 
 
-def contact_body_witness(enemy,frames,hero_box=None):
+def in_slam_range(enemy,hero_box):
+    """The hero box overlaps her Slam Range trigger (map2.clapper SLAM_RANGE about her root)."""
+    _,_,_,(rx,ry0,ry1)=_idle_exits()
+    pos=enemy.get("pos")
+    hb=np.asarray(hero_box,float) if hero_box is not None else np.full(1,np.nan)
+    if hb.shape!=(4,) or not np.isfinite(hb).all() or not isinstance(pos,(list,tuple)) or len(pos)<2:return False
+    x,y=float(pos[0]),float(pos[1])
+    return bool(hb[0]<x+rx and hb[2]>x-rx and hb[1]<y+ry1 and hb[3]>y+ry0)
+
+
+def contact_body_witness(enemy,frames,idle_no_evade=False):
     """[frames,4] body boxes (x0,y0,x1,y1) a downslash must touch at f+d; nan rows have no witness.
 
     A hit witness needs the box EVERY supported pose shares, never the safety
@@ -307,8 +316,8 @@ def contact_body_witness(enemy,frames,hero_box=None):
     the previous one (damage reads the previous frame's colliders). Idle keeps
     its pose only up to its first modelled exit (_idle_exits): from Can Evade
     while Will Evade is unknown (live 2617: Idle k17 -> Evade Scuttle 15 u/s
-    out of a k19 contact), else, once hero_box was in her Slam Range at
-    EV_K[2] still Idle, up to Idle Time. The root x stays
+    out of a k19 contact), else (idle_no_evade: the caller saw Will Evade
+    shown False) up to Idle Time. The root x stays
     where it is observed; every pose stands on the arena floor and is cut at
     its walls (map2.clapper FLOOR / WALL_L / WALL_R: its grounded root and
     wall push). A state that can move the root, or one without fitted runs,
@@ -352,13 +361,9 @@ def contact_body_witness(enemy,frames,hero_box=None):
         x0,_,x1,_=world(state,j);b=know.box(state,max(j,0))
         return (max(x0,wall_l),floor,min(x1,wall_r),floor+float(b[3])-float(b[2]))
 
-    can_evade,shown_at,idle_time,(rx,ry0,ry1)=_idle_exits()
-    idle_until=can_evade  # a successor Idle has not reached Can Evade yet: its decision is still open
-    if st=="Idle":
-        hb=np.asarray(hero_box,float) if hero_box is not None else None
-        in_range=(hb is not None and hb.shape==(4,) and np.isfinite(hb).all() and hb[0]<x+rx and hb[2]>x-rx
-                  and hb[1]<y+ry1 and hb[3]>y+ry0)
-        idle_until=idle_time if k>=shown_at and in_range else can_evade
+    can_evade,_,idle_time,_=_idle_exits()
+    # A successor Idle has not reached Can Evade yet: its decision is still open.
+    idle_until=idle_time if st=="Idle" and idle_no_evade else can_evade
     core=np.full((frames,4),np.nan);active={(st,k)}
     for d in range(frames):
         if any(s not in STILL_ROOT_STATES or s not in know.body or (s=="Idle" and j>=idle_until)
@@ -599,8 +604,17 @@ def register(prims):
                 or not controls[0]["state"] or controls[0]["state"] in {"Walk","Evade Scuttle"}):return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
         from . import pogo_model as PM
-        body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],
-                                  hero_box=(getattr(x.obs,"hero",None) or {}).get("box"))
+        # Will Evade shows at her first in-range Idle frame from EV_K[1]; the
+        # trigger may lag RANGE_LAG_F. This Run's own observations only.
+        st0,t0=control(enemy);no_evade=False;f0=getattr(x.obs,"f",None)
+        if st0=="Idle" and type(t0) in (int,float) and math.isfinite(t0) and type(f0) is int:
+            k0=int(round(t0*60.));key=[enemy.get("iid"),f0-k0]
+            seen=x.v.get("idle_in_range")
+            if not (isinstance(seen,list) and seen[:2]==key):seen=[*key,None]
+            if seen[2] is None and k0>=_idle_exits()[1] and in_slam_range(enemy,(getattr(x.obs,"hero",None) or {}).get("box")):
+                seen[2]=k0
+            x.v["idle_in_range"]=seen;no_evade=seen[2] is not None and k0>=seen[2]+RANGE_LAG_F
+        body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade)
         if body is None:return None
         row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"])
         if row is not None:
@@ -681,10 +695,6 @@ def register(prims):
         if type(x.v.get("hook_seen_f")) is not int:return None
         if type(x.v.get("hook_hit_f")) is not int:
             return {"do":"abort","why":"transfer face hook ended without actual target Harpoon hit"}
-        enemy=getattr(x.obs,"e",None)
-        if not isinstance(enemy,dict) or control(enemy)[0] in HOOK_RELEASE_ATTACKS:
-            # The hit can provoke her attack; never keep approaching it on step-only checks (live 2673-2678 R).
-            return {"do":"abort","why":"transfer face hook released into the target's attack or unknown state"}
         x.v["hook_done"]=True
         return {"do":"goto","to":"air"}
 

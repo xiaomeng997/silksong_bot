@@ -91,29 +91,29 @@ def in_range(e):
 
 @pytest.mark.parametrize('state,t',[('Spell Antic',22/60),('Idle',20/60),('Cast 1',2/60)])
 def test_stable_poses_keep_the_held_observed_body(state,t):
- e=clapper(state,t);w=T.contact_body_witness(e,ROWS,hero_box=in_range(e));b=body_box(e)
+ e=clapper(state,t);w=T.contact_body_witness(e,ROWS,idle_no_evade=True);b=body_box(e)
  assert np.allclose(w[:,[0,2,3]],[b[0],b[2],b[3]],atol=T.POSE_MATCH_U)
 
 
 def test_idle_witness_ends_at_her_modelled_exits():
  # Live w13_pose178 2610: Idle k10, contact planned at k19; she evaded at k17 (15 u/s) and the slash missed.
- e=clapper('Idle',10/60);w=T.contact_body_witness(e,ROWS,hero_box=in_range(e))
+ w=T.contact_body_witness(clapper('Idle',10/60),ROWS)
  assert np.isfinite(w[:5]).all() and np.isnan(w[5:]).all()  # Can Evade (k15) on: Will Evade unknown
- late=clapper('Idle',18/60);x,y=late['pos'][:2]
- assert np.isfinite(T.contact_body_witness(late,ROWS,hero_box=in_range(late))).all()  # in range at k>=17: no evade
- assert np.isnan(T.contact_body_witness(late,ROWS)).all()  # hero range unknown: still open
- assert np.isnan(T.contact_body_witness(late,ROWS,hero_box=[x+20,y,x+20.5,y+2])).all()  # out of range: still open
- w=T.contact_body_witness(clapper('Idle',35/60),ROWS,hero_box=in_range(late))
+ assert np.isnan(T.contact_body_witness(clapper('Idle',18/60),ROWS)).all()  # past Can Evade, still open
+ assert np.isfinite(T.contact_body_witness(clapper('Idle',18/60),ROWS,idle_no_evade=True)).all()
+ w=T.contact_body_witness(clapper('Idle',35/60),ROWS,idle_no_evade=True)
  assert np.isfinite(w[:4]).all() and np.isnan(w[4:]).all()  # Idle Time (k39) on: she walks
+ e=clapper('Idle',18/60);x,y=e['pos'][:2]
+ assert T.in_slam_range(e,in_range(e)) and not T.in_slam_range(e,[x+20,y,x+20.5,y+2]) and not T.in_slam_range(e,None)
 
 
-@pytest.mark.parametrize('state,end',[('Slam Antic','abort'),('Cast Slam Antic','abort'),('Walk','goto')])
-def test_a_hook_released_into_her_attack_ends_the_run(state,end):
- from ssbot.combat.claw_strike import CsPlan
- r=load_runner();r.run=Run(T.PROGRAM,'claw_lock',{'cs':CsPlan(1000,0,1001,0,bb_press=None),'hook_seen_f':1010,
-  'hook_hit_f':1012,'side':B['R']})
- x=X(r,r.run,NS(F=1030,hero={'hero_accepting_input':True,'anim':{'clip':'Recoil Twirl'}},e=clapper(state,.1)))
- assert r.P.acts['transfer_hook_release'](x)['do']==end
+def test_stomp_plan_shows_will_evade_false_only_after_an_in_range_frame_plus_lag(monkeypatch):
+ r=load_runner();r.run=Run(T.PROGRAM,'air',{'jump_until':0,'side':B['R']});seen=[]
+ monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:seen.append(kw['idle_no_evade']))
+ for f,k,box in ((1000,15,True),(1001,16,True),(1002,17,True),(1003,18,True),(1004,19,False)):
+  e=clapper('Idle',k/60);hero={'box':in_range(e) if box else None}
+  r.P.acts['transfer_stomp_plan'](X(r,r.run,NS(sim=NS(prefix=[0]),e=e,f=f,F=f+2,k=2,ground=False,hero=hero)))
+ assert seen==[False,False,False,True,True]  # first in range at k16 (k15 is before EV_K[1]); +2 frames: k18
 
 
 def test_a_hooked_run_keeps_the_provoked_attack_liability_without_a_downslash():
