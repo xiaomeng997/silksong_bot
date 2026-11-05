@@ -160,22 +160,23 @@ def choose(tac, ws, fc, geo, hx, t, ctx):
     if (float(o.pos[0])-land)*face <= 0:
         info["reason"] = "landing crossed standing monster"
         return info
-    stand, why = _standing(tac, fc, geo, s, o, land, face, hx, 0.)
-    info["reason"] = why
     if wall_bound:
+        # A wall push lands this jump at least `land` out: a lower bound, not the landing. No middle ground stance
+        # beyond it is claimed, and the corner behind it is no destination (the person 11-05, Task 179: never the
+        # corner, go over the standing / walking one; live 786 held 2580..2606 while the planner dashed into the
+        # corner under the landing). The declared far-side route is compared at once; a route stays an L2 preference.
         info["landing_basis"] += "; wall lower bound only"
-        if why != "middle ground footprint closed":
-            info["reason"] = "wall landing is only a bound"
-            return info
-        # A forward wall push can only close this forward gap further. It
-        # cannot turn an already closed lower-bound footprint into standing room.
+        stand, why = None, "wall landing is only a bound"
+    else:
+        stand, why = _standing(tac, fc, geo, s, o, land, face, hx, 0.)
+    info["reason"] = why
     if stand is not None:
         info.update(route="stand", target=o.iid, stance=stand, kind="side")
         return info
     # An unknown future window is not the same claim as a closed middle.
     if why.endswith("unknown"):
         return info
-    spot = JB.behind_spot(land, face)
+    spot = None if wall_bound else JB.behind_spot(land, face)
     age = 0. if ctx["air_at"] is None else max(0., (t-ctx["air_at"])*60+2)
     a, b = geo["bodies"][o.iid]
     way_lo, way_hi = sorted((hx, spot)) if spot is not None else (hx, hx)
@@ -194,13 +195,19 @@ def choose(tac, ws, fc, geo, hx, t, ctx):
     contact = getattr(getattr(ws.hero, "contact", None), "v", None)
     far = (b + max(1.2, geo["left"]) if face > 0 else a - max(1.2, geo["right"]))
     room = geo["xb"]-far if face > 0 else far-geo["xa"]
-    if (o.state in {"Idle", "Walk", "Spell Antic", "Cast 1", "Cast 2", "Slam Recover"}
-            and can.get("input") is True and contact in {"GROUND", "AIR"}
-            and ctx["antic_at"] is not None and room >= .5
-            and tac.rules.start_s + abs(far-hx)/tac.rules.run_u_s < 2.):
+    standing = (o.state in {"Idle", "Walk", "Spell Antic", "Cast 1", "Cast 2", "Slam Recover"}
+                and ctx["antic_at"] is not None and room >= .5)
+    ready = (can.get("input") is True and contact in {"GROUND", "AIR"}
+             and tac.rules.start_s + abs(far-hx)/tac.rules.run_u_s < 2.)
+    # The same jump's declared far side stays declared through a dash / landing-lag tick without input or a longer
+    # run (live 786 flipped over -> under -> over 2607..2625); the other monster leaving these states ends it.
+    prior = ctx.get("decision") or {}
+    kept = prior.get("route") == "over" and prior.get("target") == o.iid
+    if standing and (ready or kept):
         info["endpoints"].append(dict(route="over", x=far, wall_room=room, target=o.iid,
                                       kind="stomp", certified=False,
-                                      basis="declared far-side stance; SWITCH stomp then ordinary; native checks pending"))
+                                      basis="declared far-side stance; existing vault / SWITCH stomp then ordinary; "
+                                            "native checks pending" + ("" if ready else "; kept from this jump's declaration")))
     else:
         info["over_unknown"] = "current transfer entry prerequisites or far-side room unknown"
     if info["endpoints"]:

@@ -26,7 +26,8 @@
       "SWING_F": 10,
       "GROUND_SLASHES": 3,
       "NEAR_RECIPE": {"hold": 14, "press": 8, "before": "T", "box_gap": [0.5, 3.5], "close_gap": 1.8, "close_press": 4},
-      "HOP_RECIPE": {"hop": 3, "claw_after": 3, "d": 22, "p": 22, "root_distance": [5.6, 9.5]}
+      "HOP_RECIPE": {"hop": 3, "claw_after": 3, "d": 22, "p": 22, "root_distance": [5.6, 9.5]},
+      "APPROACH": {"root_distance_max": 14.0, "max_f": 24}
     },
     "rulesets": {
       "watch": [
@@ -45,8 +46,21 @@
         "rules": [
           {"do": "try", "to": "near", "note": "manual distance-selected row; no skill prevalidation or online timing search"},
           {"do": "try", "to": "far"},
+          {"do": "try", "to": "approach", "note": "Task 179: ground approach into the same distance table"},
           {"do": "abort", "why": {"lit": "vault: neither entry's observed preconditions hold"}}
         ]
+      },
+      "approach": {
+        "id": "vault_idle.approach",
+        "phase": "approach",
+        "entry": {"p": "vault_approach_entry"},
+        "inherit": ["watch"],
+        "rules": [
+          {"do": "act", "act": {"a": "vault_approach_recipe"}},
+          {"do": "try", "to": "near", "note": "the distance table now names the near jump"},
+          {"do": "try", "to": "far", "note": "the distance table now names the small-hop hook"}
+        ],
+        "keys": [{"gen": "dir_key", "args": {"d": "var.over_dir"}, "name": "approach"}]
       },
       "near": {
         "id": "vault_idle.near",
@@ -139,6 +153,10 @@
     "admission": {
       "choose": {"link": "vault_idle.choose", "observations": [], "conditions": [], "status": "unfitted",
                  "notes": "dispatch only; the request comes from Root's arbitration"},
+      "approach": {"link": "vault_idle.approach",
+                   "observations": [{"name": "centre_to_root_u", "unit": "u", "source": "her centre to the target root"}],
+                   "conditions": [{"obs": "centre_to_root_u", "kind": "range", "lo": null, "hi": null}],
+                   "status": "unfitted", "notes": "Task 179 (the person 11-05: when the corner one jumps, go over the walking one, never the corner): a ground run toward the target while the other Clapper is in its jump, into the same manual distance table (near jump / small-hop hook). APPROACH root_distance_max / max_f are manual bounds, not a fitted domain; running keys only, every tick behind the native current-step gate; not a path or hit certificate."},
       "near": {"link": "vault_idle.near",
                "observations": [{"name": "box_gap_u", "unit": "u", "source": "her box to the observed body box"}],
                "conditions": [{"obs": "box_gap_u", "kind": "range", "lo": null, "hi": null}],

@@ -146,7 +146,11 @@ def decide(tac, ws, fc, prefs, hx, t):
         offer("keep", default)
         if middle is not None:
             mid = middle["decision"] = clapper_middle.choose(tac, ws, fc, geo, hx, t, middle)
-            if mid["route"] == "hold": mid["target"] = default.iid
+            if mid["route"] == "hold":
+                # A jumper in flight is no hold target: kept as the focus it drew the planner under its landing
+                # (live 786 2580..2606; Task 179, the person 11-05: never the corner). Before take-off: unchanged.
+                jumper = next(s for s in subjects if s.iid == mid["source"])
+                mid["target"] = other.iid if jumper.iid == default.iid and jumper.state in AIR else default.iid
             offer("middle_jump", next(s for s in subjects if s.iid == mid["target"]))
         rear = False
         if keep is not None and other.family in JUMPS and other.state in AIR:

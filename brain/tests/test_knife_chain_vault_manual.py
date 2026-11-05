@@ -51,12 +51,13 @@ def test_far_walker_supplies_small_hop_hook_without_near_expansion(direction,mon
     assert plan_mask(cs,cs.f_press,direction)&B["CLAW"]
 
 
-@pytest.mark.parametrize("change",["unavailable","no_silk","too_far"])
+@pytest.mark.parametrize("change",["unavailable","no_silk","too_far","past_approach"])
 def test_hook_without_its_observed_requirements_is_not_offered(change):
-    n,raw,sim,ctx=entry_scene(-1,12. if change=="too_far" else 7.)
+    n,raw,sim,ctx=entry_scene(-1,{"too_far":12.,"past_approach":14.5}.get(change,7.))
     if change=="unavailable":raw["hero"]["can"]["harpoon"]=False
     if change=="no_silk":raw["hero"]["silk"]=0
-    assert manual_entries(n,raw,sim,ctx)==[]
+    # Task 179: past the hook's range but inside APPROACH's bound only the ground approach is offered (no hook)
+    assert [kind for kind,_ in manual_entries(n,raw,sim,ctx)]==(["approach"] if change=="too_far" else [])
 
 
 def _switch_routing_scene(case,monkeypatch):
@@ -66,7 +67,8 @@ def _switch_routing_scene(case,monkeypatch):
     from ssbot.combat.tactics.modes import EntryAttack,GoalPrefs
     from tests.test_knife_chain_vault_nominal import GAME0,BUDDY,TARGET
     direction=-1 if case=="left" else 1
-    n,raw,sim,ctx=entry_scene(direction,12.)
+    # Task 179: 12 u is now a ground-approach vault; past APPROACH's 14 u bound the vault is known empty
+    n,raw,sim,ctx=entry_scene(direction,15.)
     n.reset(0,start_frame=sim.f)
     raw["act"].update(target=sim.f,applied=sim.f,mask=0)
     n._receipts[sim.f+1]=int(sim.prefix[0]);n.begin(raw)

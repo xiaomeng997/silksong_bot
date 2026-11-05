@@ -119,7 +119,11 @@ def locked_context(state, forecast, target_iid, game):
     rs = getattr(forecast, "rs", None)
     now = None if rs is None else getattr(rs.trk, "now", {}).get(buddy["iid"])
     inst = None if now is None else now[2]
-    if (inst is None or inst.fam != "CC_JUMP_CAST" or inst.dec is None or
+    # The plain jump (CC_JUMP) flies the same decided jump as the jump cast (are_types.clapper: Jump > Air > Slam 2
+    # with the shared Jump Aim decision), so the measured land clock below holds for both; Task 179 (#296, the
+    # person 11-05: go over the walking one when the corner one jumps; live 786: CC_JUMP decided 2579, Slam 2 2628,
+    # 49 frames inside the wall branch's 0.716 .. 0.917 s). Its responsibility keeps the buddy's own family.
+    if (inst is None or inst.fam not in ("CC_JUMP_CAST", "CC_JUMP") or inst.dec is None or
             control(buddy)[0] not in {"Jump", "Air"}):
         return None
     from .scene_field_event_shadow import _startup_inputs
@@ -141,7 +145,7 @@ def locked_context(state, forecast, target_iid, game):
     if box is None or not hx:
         return None
     direction = 1 if .5 * (box[0] + box[2]) > float(hx[0]) else -1
-    return {"target": target_iid, "buddy": buddy["iid"], "buddy_t0": float(inst.t0),
+    return {"target": target_iid, "buddy": buddy["iid"], "buddy_family": inst.fam, "buddy_t0": float(inst.t0),
             "buddy_ta":float(game)-(float(rs.trk.T)-float(inst.t0)),
             "buddy_lock_until": float(game) + remaining, "direction": direction, "box": box,
             "move": MoveInstance(target_iid, f, "VAULT_IDLE")}
@@ -169,23 +173,17 @@ def manual_entries(native, state, sim, ctx):
             not np.isfinite(np.asarray([*hb,*hp[:2],*tp[:2]],float)).all()):
         return []
     direction=ctx["direction"];box=ctx["box"]
-    gap=float(box[0]-hb[2] if direction>0 else hb[0]-box[2])
-    root_distance=abs(float(tp[0])-float(hp[0]));entries=[]
     base={"iid":ctx["target"],"over_dir":direction,"nogo":[],
           "x_end":float(box[2] if direction>0 else box[0])}
-    near=cfg["NEAR_RECIPE"];far=cfg["HOP_RECIPE"]
-    if root_distance<far["root_distance"][0] and near["box_gap"][0]<=gap<=near["box_gap"][1]:
-        press=near["close_press"] if gap<near["close_gap"] else near["press"]
-        cd=(h.get("tm") or {}).get("atk_cd")
-        if type(cd) in (int,float) and math.isfinite(cd) and 0<=cd<=sim.params.attack_cooldown+1e-6:
-            # Start the jump now; wait for the CURRENT swing's cooldown in
-            # this same row, rather than declining the whole escape action.
-            press=max(press,math.ceil(cd*60)-1)
-        entries.append(("near",{**base,"near":{"h":near["hold"],"p":press,"before":near["before"]},"far":None}))
-    silk=h.get("silk")
-    if (not entries and far["root_distance"][0]<=root_distance<=far["root_distance"][1] and
-            (h.get("can") or {}).get("harpoon") is True and type(silk) in (int,float) and math.isfinite(silk) and silk>=1):
-        entries.append(("hop_hook",{**base,"near":None,"far":{k:far[k] for k in ("hop","claw_after","d","p")}}))
+    kind,part,gap,root_distance=V.distance_entry(cfg,h,tp,box,direction,sim.params.attack_cooldown)
+    entries=[]
+    if kind=="near":entries.append(("near",{**base,"near":part,"far":None}))
+    elif kind=="hop_hook":entries.append(("hop_hook",{**base,"near":None,"far":part}))
+    elif (gap>cfg["NEAR_RECIPE"]["box_gap"][1] and cfg["HOP_RECIPE"]["root_distance"][1]<root_distance
+          <=cfg["APPROACH"]["root_distance_max"]):
+        # Task 179: farther than both entries but within the approach bound: run in on the ground (table link
+        # vault_idle.approach) instead of leaving the planner to its corner (live 786 2580: 11.7 u, hop range 9.5 u).
+        entries.append(("approach",{**base,"near":None,"far":None,"approach":{"max_f":cfg["APPROACH"]["max_f"]}}))
     native._note("vault_manual_entries",frame=state["f"],box_gap=gap,root_distance=root_distance,
                  actions=[kind for kind,_ in entries],scope="fixed table recipes; no grid fallback")
     return entries
@@ -233,6 +231,8 @@ def manual_jump_watch(offer,frame):
     run=offer.draft.run;cs=run.v.get("cs")
     if cs is not None:
         targets=tuple(range(cs.f0,min(cs.f0+cs.hop,cs.f_press)))
+    elif run.v.get("row") is None:
+        return None  # the ground approach link sends running keys only: no ground jump to watch yet
     else:
         row=run.v["row"];first=next((i for i,m in enumerate(row["masks"]) if m&B["J"]),None)
         end=first
@@ -250,7 +250,8 @@ def before_send(native, selected, *, frame, target, mask, flags, received_frame,
     if type(received_frame) is not int:
         native._stop("missing critical vault received frame", frame)
     jump = native._jump_start
-    if selected.details.get("distance_vault") and selected.stage=="manual_commitment":
+    if selected.details.get("distance_vault") and (selected.stage=="manual_commitment" or
+                                                   selected.details.get("approach_entry")):
         jump=manual_jump_watch(selected,frame)
     elif selected.stage == "commitment":
         jump = JumpStartWatch.from_path(selected.path, selected.move, frame, native._receipts)
@@ -294,6 +295,7 @@ def propose(native, planner, forecast, prefs):
         if active:native._recover("vault current queued prefix mismatch",f)
         return None
     hook_end=None
+    prev_link=native.runner.run.link if active else None
     if active:
         saved=native.runner.run.v.get("_native_vault")
         if saved is None:native._recover("vault run identity missing",f);return None
@@ -374,10 +376,16 @@ def propose(native, planner, forecast, prefs):
             if active:native._recover("vault external danger unknown",f)
             return None
     if move.family=="VAULT_IDLE":
-        native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,"CC_JUMP_CAST"),saved["buddy_ta"])
+        native._vault_responsibility[move]=(MoveInstance(saved["buddy"],move.antic_frame,saved.get("buddy_family","CC_JUMP_CAST")),
+                                            saved["buddy_ta"])
     stage="manual_commitment" if not active else "active"
+    approach=draft.run.link=="approach"
+    # Task 179: the approach just named its table entry. That entry's first ground jump / hook window starts on
+    # THIS send, so sent() arms the same watches a fresh manual entry arms, and before_send keeps the first-J slot.
+    approach_entry=prev_link=="approach" and draft.run.link in ("near","far")
     return B2Offer(stage,None,draft,int(mask),0.,move,
-        {"manual_air":True,"distance_vault":True,"vault_near":not hook,"vault_hook":hook,
-         "entry_kind":"hop_hook" if hook else "near","phase":draft.run.link,
+        {"manual_air":True,"distance_vault":True,"vault_near":not hook and not approach,"vault_hook":hook,
+         "vault_approach":approach,"approach_entry":approach_entry,
+         "entry_kind":"hop_hook" if hook else "approach" if approach else "near","phase":draft.run.link,
          "predicted_bounce":None,"miss_hook":bool(draft.run.v.get("fallback_hook")),
          "safety_basis":"explicit manual distance policy; no skill/contact/tail prediction; external current-step gate only"})

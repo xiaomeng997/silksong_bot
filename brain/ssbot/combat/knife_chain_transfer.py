@@ -395,6 +395,106 @@ def contact_body_witness(enemy,frames,idle_no_evade=False):
     return out
 
 
+WALK_SPEED_TOL=1e-3   # the oracle's body velocity: DistanceWalk sets exactly +-WALK_SPEED (786 2519-2611: -8.0)
+WALK_SIDE_U=.25       # her transform vs the box centre the roll keeps (0.09 u in 786) plus margin
+WALK_BAND_U=.25       # DistanceWalk's hysteresis read one frame either way
+
+
+class WalkSupport:
+    """Task 179 Walk support domain for one observed walking Clapper (the person 11-05: stomp the walking one; #296).
+
+    One future body set serves both uses. Her root moves at the observed DistanceWalk velocity (map2.clapper
+    WALK_SPEED; one 0.02 s physics step per game frame or none, so every step count a frame either way), in the
+    fitted Walk pose at her clock (three frames before to one after, as contact_body_witness), on the arena floor
+    and cut at its walls, each frame together with the previous one (damage reads the previous frame's colliders).
+    The hit core is the INTERSECTION of that set, the safety hull its UNION; a frame outside the domain is nan in
+    both (no witness and no safety claim), never a union posing as a hit.
+
+    The domain is constant-velocity walking only, facing the hero (else FaceObjectV2 may turn her at any frame). It
+    ends one frame before her earliest Walk exit (WaitRandom from WALK_FAR_MIN, Attack Ready from CLOSE_K lo: she
+    may then stop, attack or evade), and, for a given hero path, at the first frame that could turn her: her root
+    crossed (FaceObjectV2 and DistanceWalk's side) or the distance band that keeps her direction left (DistanceWalk:
+    forward while >= 5.5 u, back while <= 8.5 u). After a row is chosen, a stop, turn or other velocity before its
+    contact re-selects (transfer_walk_support_lost). Sol's 21 demo bouts hold only 16 frames of a walker within 4 u
+    of an airborne hero (14 inside this domain, her 3+ u above the body, none with an L2 stomp request): a narrow
+    explicit domain, rarely used."""
+    kind="walk"
+
+    def __init__(self,core,hull,x,step,toward,walk_dir,info):
+        self.core,self.hull,self.x,self.step=core,hull,x,step
+        self.toward,self.walk_dir,self.info=toward,walk_dir,info
+
+    def __call__(self,hero_x):
+        """(core, hull) [frames,4] for one hero x path indexed like the roll (nan past the domain)."""
+        from ssbot.map2 import clapper as cm
+        hx=np.asarray(hero_x,float).reshape(-1);core=self.core.copy();hull=self.hull.copy()
+        lo,hi=cm.WALK_DIST-cm.WALK_RANGE+WALK_BAND_U,cm.WALK_DIST+cm.WALK_RANGE-WALK_BAND_U
+        for d in range(len(core)):
+            if not np.isfinite(hull[d]).all():break
+            seen=hx[max(d-1,0):d+2]
+            roots=self.x+self.step*np.asarray(self.info["steps"][d],float)
+            gap=(seen[:,None]-roots[None,:])*self.toward
+            if (len(seen)<min(3,d+2) or not np.isfinite(seen).all() or gap.min()<=WALK_SIDE_U
+                    or (self.walk_dir>0 and gap.min()<lo) or (self.walk_dir<0 and gap.max()>hi)):
+                core[d:]=np.nan;hull[d:]=np.nan;break
+        return core,hull
+
+
+def walk_body_support(enemy,frames,hero):
+    """WalkSupport for frames roll steps of a walking Clapper, or None (not Walk, unknown or off-fit observation,
+    or the current hero position already outside the domain)."""
+    from ssbot.map2 import clapper as cm
+    know,_,(wall_l,wall_r),floor=_body_knowledge()
+    cs=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
+    if len(cs)!=1 or cs[0].get("state")!="Walk" or "Walk" not in know.body:return None
+    tin=cs[0].get("t");pos=enemy.get("pos");vel=enemy.get("vel");flip=enemy.get("flipX")
+    hp=(hero or {}).get("pos")
+    if (type(tin) not in (int,float) or not math.isfinite(tin) or tin<0 or type(flip) is not bool
+            or not isinstance(pos,(list,tuple)) or len(pos)<2 or not isinstance(vel,(list,tuple)) or len(vel)!=2
+            or not isinstance(hp,(list,tuple)) or len(hp)<1
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in (*pos[:2],*vel,hp[0]))):
+        return None
+    vx=float(vel[0])
+    if abs(abs(vx)-cm.WALK_SPEED)>WALK_SPEED_TOL or vel[1]!=0:return None
+    try:observed=body_box(enemy)
+    except (TypeError,ValueError,OverflowError):return None
+    if observed is None or len(observed)!=4 or not np.isfinite(observed).all():return None
+    x,y=float(pos[0]),float(pos[1]);face=1. if flip else -1.;k=int(round(tin*60.))
+
+    def raw(j,root):
+        b=know.box("Walk",max(j,0));xa,xb=root+face*float(b[0]),root+face*float(b[1])
+        return (min(xa,xb),y+float(b[2]),max(xa,xb),y+float(b[3]))
+
+    if not any(max(abs(a-o) for a,o in zip(raw(j,x),observed))<=POSE_MATCH_U for j in (k-1,k,k+1)):return None
+    if abs(float(observed[1])-floor)>POSE_MATCH_U:return None
+    exit_k=min(cm.WALK_FAR_MIN,cm.CLOSE_K[0])-1   # a frame before her earliest Walk exit (the fit's 16-frame minimum)
+    toward=1 if float(hp[0])>x else -1;walk_dir=1 if vx*toward>0 else -1
+    if face!=toward:return None  # FaceObjectV2 turns her toward the hero at an unknown pause: not constant
+    ratio=(1/60.)/cm.DT;step=vx*cm.DT
+    core=np.full((frames,4),np.nan);hull=np.full((frames,4),np.nan);steps=[]
+    for d in range(frames):
+        if k+d>=exit_k:break
+        n=(0,0) if d==0 else (max(0,math.floor((d-1)*ratio)),math.ceil((d+1)*ratio))
+        steps.append(n)
+        boxes=[]
+        for q in range(k+d-3,k+d+2):
+            for m in n:
+                b=raw(q,x+step*m)
+                boxes.append((max(b[0],wall_l),floor,min(b[2],wall_r),floor+b[3]-b[1]))
+        core[d]=(max(b[0] for b in boxes),max(b[1] for b in boxes),min(b[2] for b in boxes),min(b[3] for b in boxes))
+        hull[d]=(min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes))
+    if not steps:return None
+    out=core.copy();out[1:,:2]=np.maximum(core[1:,:2],core[:-1,:2]);out[1:,2:]=np.minimum(core[1:,2:],core[:-1,2:])
+    with np.errstate(invalid="ignore"):out[~((out[:,0]<out[:,2])&(out[:,1]<out[:,3]))]=np.nan
+    hu=hull.copy();hu[1:,:2]=np.minimum(hull[1:,:2],hull[:-1,:2]);hu[1:,2:]=np.maximum(hull[1:,2:],hull[:-1,2:])
+    support=WalkSupport(out,hu,x,step,toward,walk_dir,
+                        {"iid":enemy.get("iid"),"vx":vx,"flip":flip,"clock_k":k,"exit_k":exit_k,"toward":toward,
+                         "walk_dir":walk_dir,"domain_frames":len(steps),"steps":steps})
+    # the current frame must already be inside the domain (no witness that starts from a turn)
+    first,_=support(np.full(min(frames,3),float(hp[0])))
+    return support if np.isfinite(first[0]).all() else None
+
+
 def press_now_row(sim,body,F,hold,side,attacking_target=False):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
 
@@ -402,15 +502,19 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
     and then countersteering. These are three fixed rows, not a timing search.
     Each uses the actual S0, in-flight prefix and hold filter. body is one box
     held still, or one box per roll step (contact_body_witness; a nan row has
-    no witness); external safety remains the caller's.
+    no witness), or a WalkSupport: then each row's own path selects the domain,
+    the hit uses its core and the target-body margin its hull (same body set);
+    other external safety remains the caller's.
     """
     from .knife_chain_vault import strike_program
     from . import pogo_model as PM
     if body is None:return None
-    body=np.asarray(body,float)
-    if body.shape==(4,):
-        if not np.isfinite(body).all():return None
-    elif body.ndim!=2 or body.shape[1]!=4:return None
+    support=body if isinstance(body,WalkSupport) else None
+    if support is None:
+        body=np.asarray(body,float)
+        if body.shape==(4,):
+            if not np.isfinite(body).all():return None
+        elif body.ndim!=2 or body.shape[1]!=4:return None
     direction=1 if side==B["R"] else -1 if side==B["L"] else 0
     pj=len(sim.prefix)+2
     # A previous swing can still be F_ATTACKING after its bounce. It cannot
@@ -429,15 +533,20 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
         attacking=(flags&K.F_ATTACKING)!=0
         fresh=(attacking[pj] and not attacking[pj-1]) or (attacking[pj+1] and not attacking[pj])
         if not fresh or flags[pj-1]&K.F_GROUND:continue
+        core,hull=(body,body) if support is None else support(ro.pos[i,:,0])
         for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1-CONTACT_END_MARGIN_F,len(flags))):
             if flags[j]&K.F_GROUND:break
-            b=body if body.ndim==1 else body[j] if j<len(body) else None
+            b=core if core.ndim==1 else core[j] if j<len(core) else None
             if b is None or not np.isfinite(b).all():continue
             poly=np.array([[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]])
             if all(PM.meets(slash+ro.pos[i,j],poly) for slash in slashes):
-                if attacking_target and grazes_body(ro.box[i],body,j-2):break  # rejected there: try the next row
+                # a moving body is always margin-checked on its hull up to the target-contact exemption
+                if (attacking_target or support is not None) and grazes_body(ro.box[i],hull,j-2):break
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
                            contact_velocity=ro.vel[i,j].tolist())
+                if support is not None:
+                    row.update(support=support.kind,
+                               walk={k:v for k,v in support.info.items() if k!="steps"})
                 return row
     return None
 
@@ -623,6 +732,18 @@ def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+        from . import pogo_model as PM
+        if control(x.obs.e)[0]=="Walk":
+            # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
+            # existing approach continues and the next tick re-selects. Never the still-body witness below.
+            prefix=getattr(x.obs.sim,"prefix",None)
+            support=(None if prefix is None else
+                     walk_body_support(x.obs.e,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
+            if support is None:return None
+            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"])
+            if row is None:return None
+            x.v["row"]=row
+            return {"do":"goto","to":"strike"}
         # The witness keeps the observed root and follows the fitted pose of
         # the current Control state. A moving/unknown body cannot license a
         # fresh row; keep the existing approach instead. This is not a motion
@@ -635,7 +756,6 @@ def register(prims):
                 or not isinstance(controls[0].get("state"),str)
                 or not controls[0]["state"] or controls[0]["state"] in {"Walk","Evade Scuttle"}):return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
-        from . import pogo_model as PM
         # Will Evade shown False needs this Run's own CONTINUOUS in-range observations of this Idle instance from
         # the gate (EV_K[1]) through RANGE_LAG_F; leaving her range, a missing tick or an unknown box restarts the
         # collection, a new Idle (or a hit, which leaves Idle) starts over; once shown it holds to this Idle's end.
@@ -667,6 +787,15 @@ def register(prims):
     def strike_row(x,m):
         row=x.v["row"];i=x.obs.F-row["F0"]
         return m|int(row["masks"][i] if 0<=i<len(row["masks"]) else x.v["side"])
+
+    @prims.guard("transfer_walk_support_lost",doc="Task 179: a Walk-supported row before its contact while the target "
+                                                  "left the constant-velocity Walk (stop, turn, other velocity): re-select")
+    def walk_support_lost(x):
+        row=x.v.get("row")
+        if not isinstance(row,dict) or row.get("support")!="walk" or x.obs.f>=row["contact_frame"]:return False
+        w=row["walk"];e=x.obs.e;vel=e.get("vel")
+        return not (control(e)[0]=="Walk" and isinstance(vel,(list,tuple)) and len(vel)==2
+                    and vel[0]==w["vx"] and vel[1]==0 and e.get("flipX")==w["flip"])
 
     @prims.guard("transfer_missed")
     def missed(x):

@@ -194,6 +194,31 @@ def _row(F0, n, keys):
     return {"F0": F0, "masks": [int(m) for m in keys[:n]]}
 
 
+def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown):
+    """The manual distance table (the person 11-02: by distance, no whole-skill pre-validation): a near jump when her
+    box gap is inside NEAR_RECIPE box_gap and the roots are closer than HOP_RECIPE's range, else a small-hop hook
+    inside HOP_RECIPE root_distance with the harpoon and silk. (kind, request part, gap, root distance); kind None
+    outside both. Shared by the native entry and the ground approach so both read one table."""
+    hb, hp = hero.get("box"), hero.get("pos")
+    gap = float(box[0] - hb[2] if direction > 0 else hb[0] - box[2])
+    root_distance = abs(float(target_pos[0]) - float(hp[0]))
+    near, far = cfg["NEAR_RECIPE"], cfg["HOP_RECIPE"]
+    if root_distance < far["root_distance"][0] and near["box_gap"][0] <= gap <= near["box_gap"][1]:
+        press = near["close_press"] if gap < near["close_gap"] else near["press"]
+        cd = (hero.get("tm") or {}).get("atk_cd")
+        if type(cd) in (int, float) and math.isfinite(cd) and 0 <= cd <= attack_cooldown + 1e-6:
+            # Start the jump now; wait for the CURRENT swing's cooldown in
+            # this same row, rather than declining the whole escape action.
+            press = max(press, math.ceil(cd * 60) - 1)
+        return "near", {"h": near["hold"], "p": press, "before": near["before"]}, gap, root_distance
+    silk = hero.get("silk")
+    if (far["root_distance"][0] <= root_distance <= far["root_distance"][1]
+            and (hero.get("can") or {}).get("harpoon") is True and type(silk) in (int, float)
+            and math.isfinite(silk) and silk >= 1):
+        return "hop_hook", {k: far[k] for k in ("hop", "claw_after", "d", "p")}, gap, root_distance
+    return None, None, gap, root_distance
+
+
 def strike_program(F0,hold,press,direction,drift):
     """One shared jump/downslash row, including the hook's no-jump suffix."""
     m=np.zeros(max(hold,press+dslash.POST_F),np.int64)
@@ -211,6 +236,41 @@ def register(P):
     def side_ok(x):
         # she starts on the near side and ends on over_dir's side of the target
         return (x.obs.cx - x.obs.hx) * x.v["over_dir"] > 0
+
+    @P.guard("vault_approach_entry", doc="Task 179: the request asks for a ground approach; ground, accepting, target "
+                                         "Idle / Walk, she is on the near side")
+    def approach_entry(x):
+        return bool(x.v["req"].get("approach") and x.obs.ground and x.obs.accepting and target_ok(x) and side_ok(x))
+
+    @P.action("vault_approach_recipe",
+              doc="Task 179 ground approach toward the far side (the person 11-05: over the walking one, never the "
+                  "corner): ends when the other Clapper is out of its jump, she leaves the ground or input, the target "
+                  "is no longer ahead / Idle / Walk or the approach outlives its frames; inside the manual distance "
+                  "table it names that entry (near / hop hook) for the following try. Running keys only; no jump, "
+                  "dash or hit claim, and every tick still passes the native current-step gate")
+    def approach_recipe(x):
+        v, o = x.v, x.obs
+        a = v["req"].get("approach")
+        if not a:
+            return {"do": "abort", "why": "vault approach: no approach request"}
+        if not v.get("buddy_locked"):
+            return {"do": "abort", "why": "vault approach: the other Clapper's jump is over"}
+        if not o.ground or not o.accepting:
+            return {"do": "abort", "why": "vault approach: off the ground or input not accepted"}
+        if not target_ok(x) or not side_ok(x):
+            return {"do": "abort", "why": "vault approach: the target is no longer ahead and Idle / Walk"}
+        if o.f - v["f_open"] > int(a["max_f"]):
+            return {"do": "abort", "why": "vault approach: no table range within its frames"}
+        box = _body(o.e)
+        pos = o.e.get("pos")
+        if box is None or not pos:
+            return {"do": "abort", "why": "vault approach: target body unknown"}
+        kind, part, _, _ = distance_entry(x.cfg, o.h, pos, box, v["over_dir"], o.sim.params.attack_cooldown)
+        if kind == "near":
+            v["req"] = {**v["req"], "near": part, "far": None}
+        elif kind == "hop_hook":
+            v["req"] = {**v["req"], "near": None, "far": part}
+        return None
 
     @P.guard("vault_near_entry", doc="the request has a near row; ground, accepting, target Idle / Walk, she is on the "
                                      "near side, the attack is ready by the row's press")

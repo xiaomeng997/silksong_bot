@@ -1044,6 +1044,7 @@
         "inherit":["stop"],
         "rules":[
           {"do":"done","when":{"p":"air_bounced"},"why":{"lit":"observed target downslash hit plus bounce"}},
+          {"do":"abort","when":{"p":"transfer_walk_support_lost"},"why":{"lit":"walk support lost before contact (stop, turn or other velocity): re-select"}},
           {"do":"abort","when":{"p":"transfer_missed"},"why":{"lit":"transfer downslash missed; no observed target bounce"}}
         ],
         "keys":[{"gen":"transfer_strike_row"}]
@@ -1170,7 +1171,7 @@
       },
       "strike": {
         "link":"rune_transfer.strike","observations":[],"conditions":[],"status":"unfitted",
-        "notes":"One current press-now contact witness; actual hit plus bounce required. Current external-step gate only."
+        "notes":"One current press-now contact witness; actual hit plus bounce required. Current external-step gate only. Task 179: a walking target only inside the explicit constant-velocity Walk domain (knife_chain_transfer.WalkSupport: hit on the intersection, target-body margin on the union of the same body set); a stop, turn or other velocity before contact aborts for re-selection."
       }
     },
     "provenance": {

@@ -93,7 +93,8 @@ def test_first_jump_without_locked_velocity_waits_instead_of_guessing_landing():
     out = step(tac, ws, fc)
     assert tac.last["clapper_middle"]["route"] == "hold"
     assert tac.last["clapper_middle"]["reason"] == "locked landing unknown"
-    assert out.target == 7
+    # Task 179 (#296): a jumper in flight is never the hold target (live 786 2580..2606 drew her under its landing).
+    assert out.target == 8
 
 
 @pytest.mark.parametrize("what", ["clock", "body", "horizon", "occupied"])
@@ -172,7 +173,32 @@ def test_wall_lower_bound_cannot_authorize_standing_or_guidance():
     tac.jb_land[7] = (16., 1., 18., True)
     ws.entities[0].vel = E((2./.916, 12.))
     step(tac, ws, fc)
-    assert tac.last["clapper_middle"]["reason"] == "wall landing is only a bound"
+    info = tac.last["clapper_middle"]
+    assert info["route"] not in {"stand", "guide", "under"} and "wall lower bound only" in info["landing_basis"]
+    # Task 179 (#296, live 786 held 27 frames on this bound): the declared far side over the standing monster is
+    # compared at once; the corner behind a bounded landing is never a destination.
+    assert info["route"] == "over" and info["target"] == 8 and info["kind"] == "stomp"
+
+
+def test_declared_far_side_is_kept_through_ticks_without_input_until_the_walker_changes():
+    tac, ws, fc = middle((16., 44.), 23.)
+    tac.pb.arena_x = (14.01, 48.99)
+    step(tac, ws, fc)
+    change(fc, 7, state="Air")
+    tac.jb_land[7] = (16., 1., 18., True)
+    ws.entities[0].vel = E((2./.916, 12.))
+    step(tac, ws, fc)
+    assert tac.last["clapper_middle"]["route"] == "over"
+    # live 786 2607..2616: inside a dash and its landing lag she takes no input; the same jump's declaration stays
+    ws.hero.can["input"] = False
+    for _ in range(tac.rules.period):
+        step(tac, ws, fc)
+    info = tac.last["clapper_middle"]
+    assert info["route"] == "over" and info["target"] == 8
+    assert info["endpoints"][0]["basis"].endswith("kept from this jump's declaration")
+    change(fc, 8, family=G.CC_SLAM, state="Slam Antic", committed=True)  # the walker begins its own move
+    step(tac, ws, fc)
+    assert (tac.last.get("clapper_middle") or {}).get("route") != "over"
 
 
 def test_a_new_close_attack_can_still_outscore_this_jump_scene():

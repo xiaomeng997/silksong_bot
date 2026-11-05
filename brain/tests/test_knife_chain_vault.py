@@ -29,9 +29,10 @@ def sim(params,direction):
 def test_packaged_table_binds_existing_interpreter_without_opening_a_run():
     old=set(KS.P.guards)
     runner,report=load_vault_runner()
-    assert report["table_digest"]=="d27ab099aaf97f0d0aa3ea37f889ce3ad86168d520325c6b1226da69d29e3590"
+    # Task 179: the ground approach link vault_idle.approach and its APPROACH bounds
+    assert report["table_digest"]=="92debc0bd6bb8831d1098f77c4ae7cc2d6c6de11713091e121386500d8dccb1c"
     assert runner.run is None and set(KS.P.guards)==old
-    assert len(runner.chains["vault_idle"].links)==8
+    assert len(runner.chains["vault_idle"].links)==9
 
 
 @pytest.mark.parametrize("direction",[-1,1])

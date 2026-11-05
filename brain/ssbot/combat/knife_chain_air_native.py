@@ -236,6 +236,72 @@ class NativeManualAirChain(NativeChainB2):
 
     def continuation_value_bound(self,prefs):return float("inf")
 
+    def _vault_domain(self,forecast,prefs):
+        """The existing vault's own domain for this tactical target: the other Clapper in a decided jump, this one
+        Idle / Walk (knife_chain_vault_native.locked_context). Only the domain; never a recipe, contact or path claim."""
+        if not (self.vault_enabled and getattr(self,"_vault_ready",False) and self._context is not None):return False
+        from .knife_chain_vault_native import locked_context
+        tick=self._context[0]
+        return locked_context(tick[1],forecast,getattr(prefs,"target",None),tick[2]) is not None
+
+    DASH_LOCK_MAX=45  # frames from the dash send to the modeled input return; none by then: the lock is unknown
+
+    @staticmethod
+    def _locked_mode(sim):
+        """The current modeled mode when it is a dash, relinquished or no-input motion (keys cannot steer it)."""
+        from ssbot.knowledge import kinematics as K
+        S=np.asarray(getattr(sim,"start",np.nan),float).reshape(-1)
+        if S.shape[0]!=K.K or not np.isfinite(S[K.MODE]):return None
+        mode=int(S[K.MODE])
+        return mode if mode in (K.M_DASH,*K.RELINQUISHED,*K.NO_INPUT) else None
+
+    def _dash_lock_scan(self,sim,plan,mask,game,geo,link):
+        """Task 179 (#296, live 786 2617): scan a NEW dash impulse through the motion it locks.
+
+        The dash and the input-less inertia after it (Sprint Air Short or the skid, control relinquished) carry her
+        where new keys cannot change the route; the scan runs from the send through the first modeled input frame
+        plus the two-frame send delay, on the actual prefix, hold and abilities (model_path from the current
+        ChainSim), with the Run's own planned keys behind the impulse (transfer.render of its link). The ground
+        sprint (phase 2) takes the dash release and the sprint jump (Sprint FSM), so it is steerable, not locked.
+        (scan, info); scan None when the dash start or the input return is not modeled inside DASH_LOCK_MAX frames
+        (unknown, never a pass)."""
+        from ssbot.knowledge import kinematics as K
+        if link=="air":
+            # transfer.render of the air link, in closed form: its own coast keys (air_approach_keys without the
+            # one-shot dash) are the side key plus J while jump_until is ahead of the mask clock
+            k=plan.entry_k+2+np.arange(self.DASH_LOCK_MAX)
+            commands=np.where(int(plan.jump_until)-k>0,int(plan.side)|B["J"],int(plan.side)).astype(np.int64)
+        else:
+            commands=np.zeros(self.DASH_LOCK_MAX,np.int64)
+            planned=np.asarray(transfer.render(self.runner,plan,plan.entry_k,self.DASH_LOCK_MAX,link),np.int64)
+            commands[:len(planned)]=planned
+        commands[0]=int(mask)
+        path=model_path(sim,plan,commands,game)
+        modes=np.asarray(path.states[K.MODE]);flags=np.asarray(path.flags)
+        steer=(modes==K.M_SPRINT)&(np.asarray(path.states[K.PHASE])==2)&(np.asarray(path.states[K.GROUND])>0)
+        locked=(np.isin(modes,(K.M_DASH,*K.RELINQUISHED,*K.NO_INPUT))|((flags&(K.F_RELINQ|K.F_NO_INPUT))!=0))&~steer
+        lead=len(path.commands)-len(commands)  # path index j is frame origin+j; commands[0] is index lead+1
+        start=np.flatnonzero(modes[lead+1:]==K.M_DASH)
+        info={"dash_mask":int(mask),"lock_max":self.DASH_LOCK_MAX}
+        if not len(start):return None,{**info,"reason":"modeled dash never starts"}
+        j0=lead+1+int(start[0])
+        free=np.flatnonzero(~locked[j0:])
+        if not len(free):
+            return None,{**info,"dash_frame":path.origin+j0,"reason":"input return not modeled inside lock_max"}
+        j1=j0+int(free[0]);through=j1+2
+        if through>len(path.commands) or through>self.profile.max_frames:
+            return None,{**info,"dash_frame":path.origin+j0,"input_frame":path.origin+j1,
+                         "reason":"lock end past the checked horizon"}
+        # the roll is causal: its first `through` frames are the roll of the cut commands (the scan reads only box,
+        # flags, check_flags, commands, origin and stage; hold_end is not re-derived)
+        n=through
+        check=replace(path,commands=path.commands[:n],latched=path.latched[:n],states=path.states[:,:n+1],
+                      box=path.box[:n+1],pos=path.pos[:n+1],flags=path.flags[:n+1],check_flags=path.check_flags[:n+1],
+                      game=path.game[:n+1])
+        return geo.scan(check),{**info,"dash_frame":path.origin+j0,"input_frame":path.origin+j1,
+                                "checked_through":check.through,
+                                "scope":"dash + input-less inertia + send delay; all owners and delayed hazards"}
+
     def _transfer_source_matches(self,rs,goal):
         trk=getattr(rs,"trk",None)
         source=getattr(trk,"now",{}).get(goal.caster) if goal is not None else None
@@ -347,6 +413,14 @@ class NativeManualAirChain(NativeChainB2):
                 and entry.target==getattr(prefs,"target",None) and entry.kind in {"side","stomp"}):
             if (self._transfer_ready and self._context is not None and self._transfer_goal is not None
                     and self._transfer_goal.source_kind=="SWITCH"):
+                if entry.kind=="stomp" and self._vault_domain(forecast,prefs):
+                    # Task 179 (#296, the person 11-05: when the other one jumps, go OVER the standing / walking
+                    # target; reuse the existing Idle / Walk vault): inside the vault's own domain its distance
+                    # table (near jump, small-hop hook, ground approach) goes first. With no vault action now the
+                    # SWITCH stomp below keeps its first contact, as before.
+                    from .knife_chain_vault_native import propose as propose_vault
+                    vault=propose_vault(self,planner,forecast,prefs)
+                    if vault is not None or self.recovery is not None or self.runner.run is not None:return vault
                 # The explicit, observed SWITCH entry owns its first contact.
                 # Optional Idle-vault detection must not swallow it by returning
                 # no recipe. Active owners and every transfer check still apply.
@@ -527,6 +601,15 @@ class NativeManualAirChain(NativeChainB2):
         if queued is None or int(sim.prefix[0])!=queued:
             if active:self._recover("rune transfer actual queued prefix mismatch",f)
             return None
+        if not active:
+            mode=self._locked_mode(sim)
+            if mode is not None:
+                # Task 179 (live 786 2607: the SWITCH entry bound inside her own leftward air dash, 2610-2616 took
+                # no input): a fresh transfer never starts inside a dash or a relinquished motion; its keys could
+                # not change the route. The current owner keeps the keys; the start is retried once she is free.
+                self._note("rune_transfer_start_deferred",frame=f,target=target,mode=mode,
+                           owner="current owner keeps the keys",reason="hero in a dash or relinquished motion")
+                return None
         rs=getattr(forecast,"rs",None)
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
                               **({"approach_only":True} if approach_only else {}))
@@ -581,6 +664,34 @@ class NativeManualAirChain(NativeChainB2):
                 if tail_mask!=mask:
                     mask=tail_mask
                     path=model_path(sim,plan,np.array([mask],np.int64),game)
+            dash_bit=B["DASH"].bit_length()-1
+            if (int(mask)&B["DASH"] and not int(sim.prefix[0])&B["DASH"] and not sim.hold.latched[0,dash_bit]
+                    and not sim.hold.desired[0,dash_bit]):
+                # Task 179: a dash impulse pressed on THIS tick (the air recipe or the walk / dash link's clock) is
+                # checked through the motion it locks, never the two-frame step only (live 786 2617: DASH+R from
+                # the wall into the 2628 Slam 2; fork 786 closed loop 2633: a ground DASH+R into Slam 2).
+                lock,info=self._dash_lock_scan(sim,plan,mask,game,geo,draft.run.link)
+                if lock is None or not lock.complete or lock.contacts:
+                    first=None if lock is None or not lock.contacts else asdict(lock.contacts[0])
+                    if draft.run.link in {"walk","dash"} and ground:
+                        # On the ground the same Run keeps running without the impulse (its owner and move); the
+                        # next tick re-checks the due dash, the current step stays behind the ordinary gate.
+                        self._note("rune_transfer_dash_refused",frame=f,first=first,active=active,
+                                   complete=None if lock is None else lock.complete,**info,
+                                   owner="same transfer Run runs without the dash this tick")
+                        mask=int(mask)&~B["DASH"]
+                        path=replace(model_path(sim,plan,np.array([mask],np.int64),game),stage=path.stage,
+                                     assumptions={**path.assumptions,"dash_refused":True})
+                    else:
+                        # The air recipe chose this dash because the coast alone does not reach her: without it
+                        # the Run has no route. A fresh start never starts (the current owner keeps the keys); an
+                        # active Run hands back through B2 recovery, which keeps its failure responsibility.
+                        self._note("rune_transfer_dash_refused",frame=f,first=first,active=active,
+                                   complete=None if lock is None else lock.complete,**info,
+                                   owner=("B2 recovery hands back" if active else "current owner keeps the keys"))
+                        if active:self._recover("rune transfer air dash refused: locked motion blocked or unknown",f)
+                        return None
+                else:self._note("rune_transfer_dash_checked",frame=f,**info)
             attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
             w=self._hook_start
             hook_sent=bool(draft.run.link in transfer.HOOK_LINKS and w is not None and w["move"]==plan.move
@@ -646,6 +757,8 @@ class NativeManualAirChain(NativeChainB2):
              "tail_mask":draft.run.v.get("source_tail_mask"),
              "approach_recipe":draft.run.v.get("approach_recipe"),"approach_only":approach_only,
              "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
+             "strike_support":None if draft.run.v.get("row") is None else draft.run.v["row"].get("support","still"),
+             "strike_walk":None if draft.run.v.get("row") is None else draft.run.v["row"].get("walk"),
              "conditional_hit_check":conditional_contact is not None,"conditional_contact":conditional_contact,
              "checked_through":path.through,"phase":draft.run.link,"predicted_bounce":None,
              "handoff":("observed range or tactical boundary; ordinary side rows" if approach_only else
@@ -681,10 +794,12 @@ class NativeManualAirChain(NativeChainB2):
         from .knife_chain_wall_native import sent as wall_sent
         wall_sent(self,selected,sent)
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("distance_vault"):
-            if selected.stage=="manual_commitment":
+            if selected.stage=="manual_commitment" or selected.details.get("approach_entry"):
                 from .knife_chain_vault_native import manual_jump_watch
                 self._jump_start=manual_jump_watch(selected,sent.frame)
                 if self._jump_start is not None:self._jump_start.record_send(sent.target_frame,sent.desired_mask)
+                # Task 179: the approach's own commitment send armed nothing; its near / hop-hook entry arms here.
+                if selected.details.get("approach_entry"):self._arm_hook_start(selected,sent)
             run=self.runner.run
             if run is not None and run.v.get("fallback_hook") and not run.v.get("near_miss_recorded"):
                 origin=self.commitment["origin"]
