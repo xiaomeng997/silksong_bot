@@ -4352,3 +4352,10 @@ trace整拍冷2726=12.5868ms、峰2738=13.1062；2740新行12.8222、2741首A+D1
 本轮新增局后总manifest为false：BLOCK/ORDER/SCHEDULE三项未设置、role均accounting；离线model_budget实际attempts=[]、execution=None，其他控制/执行项全解、unknown0。这些标签本已被现行behavior hash排除；ROOT_P_AUDIT/CONFIGURATION_SCOPE据完整source/script/input+实际控制值接受有限P，不改原false、不称真实worker/AA完整。下次实机仍需真实worker完整配置/预算/输入回执通过，不豁免任何控制字段。P worker34312和field12220按PID/create核真退出，golden/Prefs无差、旧DEMO hash/mtime同、registry空且无game，ROOT_CLEANUP过后才false。
 
 尚未开新实机。Task177原始全窗audit的missing health snapshot仍未在共用验收接口闭合：forum_measure_metrics.audit_states对wake..end逐帧要health+blue，Q1真正卸载hero后会缺，但不能仅凭“已发暂停键”就当退出。先由Opus同包使用原e4/e390录制、真实Q1菜单/场景/hero生命周期，区分战斗关键HP漏记与已经明确退出后的不适用；可复用既有字段时不加控制代码。若确属共用审计分类缺陷，最小修复/独立补充审计+必要正反例；战斗/未确认退出缺HP必须失败。不得补零/猜HP，不缩end_f/T、改HP损失/样本窗口/停止门，也不改旧raw/失败输出为绿；若修法需改变指标定义先给证据，不默改。仅离线审计改变时核适用性即可，不为它重跑17P/671/旧矩阵；不以修无关字段重开旧局。反馈与修复仍178，不另拆微任务，目标行为现场仍待验。
+
+
+#### Task178退出完整性增量核收并绑定新单局（11-05，进度7.150；同包178）
+
+#291直接提交3b93be7e，仅离线forum_measure_metrics与7项新正反例；Sol核源/调用范围及原e4实际2772仍Hang04有HP、2987 Quit_To_Menu有HP5、2988..3024明确heroNone、终点Menu_Title。只把真实退出后的卸载判不适用，原战斗缺HP/只暂停/意外场景/缺hero/卸载后HP事件或英雄再现仍失败；dt/T/end_f/L和原失败记录不改。Opus两局原始重审仅少missingHP，旧审计逐项复现、其他指标全同，报告30项通过；Sol复核七例与原始事实，不重复671/17P。3b93与a3ef的710/261清单除离线audit完全同，运行actor与模型/P输入不变；后续REPORT追加与测量时hash分别保留，原P总manifest accounting false不绿化，新worker仍须完整配置。
+
+按用户11-03不在家无需等待授权，Sol准备一次新3b93源/新namespace/合同/预算w13工程，相关行为条件已由a3ef姿态见证修复改变；不重开e4/e390或补坏局。复用已完整审阅生命周期，仅source/namespace机械移植，资源三组件原字节；原7HP/首损HP<=6真实Q1、死亡/键/缺关键日志STOP/资源/锁/清理、--measure/worker自己的input.stats不变。现完整actor有限17拍P已通过，保留峰13.1062ms/窄余量和历史lag非上界；不声称网络或所有未来可行。源码执行HEAD在本计划同步后绑定，游戏到真实清理期间不提交刀口HEAD；独占前实际核无游戏/活动锁，STATUStrue/5s暂停/30s pulse。登记实际姿态接续/接受/目标hit+bounce+交还，0次写未覆盖，不拿静态或模型证据代替；受击/失败停后把完整结果回同178给Opus。
