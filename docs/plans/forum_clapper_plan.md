@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.166）：压缩后的Opus按交接继续，8f9代码保持静止。固定执行器新源startup与实际退出核通过；两受影响窗口113完整拍P核清，峰11.4882ms，源/签名/时钟/配置/trace完整性及真实清理已核。Sol准备新179-L1单局工程，首损Q1；主验走路怪翻越/真实交还，moving stomp与178各自独立记账。尚无新实机结果，模型命中/名义间隔不当现场通过。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.167）：新179-L1已按首损Q1结束，实际2HP，真实清理全核后STATUSfalse。主179走路怪翻越和moving stomp均0机会/未覆盖；178出现跨Cast2变矮后真实下劈命中/弹起/交还正例，最终核收待退出审计问题闭合。数据/trace/配置/HP审计完整，通用逐局verify因真实Quit后的35帧缺cheat字段保留false；不涂绿。受击在后续普通规划开伞阶段、无活动B2/失败责任，Opus同179定位已有冲锤接刀断接与退出审计，不新打法/不重开本局。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4448,7 +4448,7 @@ Sol独审2055cd0514019ea7457c068dd82e693bd51e1cb2四个运行文件增量及实�
 
 #295走路失败不靠恢复补丁解决：2580来源墙侧普通跳锤锁点仅是下界，L2 hold到2606共27帧、目标仍跳怪，实际2585/2597/2604三次向左冲；2607才给over且hero已反向空中冲刺，2617新接近dash加惯性不可打断，2628落点挡路，2625的N2拒绝已晚。去掉wall_bound提前返回的反事实只说明2580可给over偏好，不是新的英雄轨迹或安全证明。用户要求翻右侧走路怪及踩头支持移动目标（#296/#297补录；与本聊天既有翻走路怪/任意状态踩新怪要求一致），已实质扩大原178姿态包，另立完整179，不继续拆微任务；178原姿态实机目标保持未覆盖，旧局/缺测量/2HP/NO_RETRY原样。
 
-**Task179：墙侧怪起跳时，及时选并执行远离其落点的走路怪翻越；走动目标在有可证见证时能接下劈。状态：#302代码收尾及相关源审有限核收（8f9e9629）；Sol接新源受影响P，真实179翻越/交还与178姿态各自待验，无实机gate。** 以下为该包唯一任务说明，修订与回修沿用179。
+**Task179：墙侧怪起跳时，及时选并执行远离其落点的走路怪翻越；走动目标在有可证见证时能接下劈。状态：8f9源/P有限核过；179-L1首损2HP结束，主翻越/移动踩头均未覆盖，已有冲锤接刀阻挡待修；178有自然姿态变化正例待退出审计闭合。当前无新实机gate。** 以下为该包唯一任务说明，修订与回修沿用179。
 
 - **职责/入口**：Opus唯一实现者，直接写当前forum-knife-rows开发树并提交；基线2055，Sol独审/集成及正式P/实机，Astra按workflow作关键假设集中审，不扩队。源码入口clapper_middle、transfer、vault/native及现有身体预测/B2；证据opus/review178/walk786、786原实录与ACTUAL_TIMELINE，原178见证/工具复用，不重新搭系统。
 - **行为与范围**：依据已知墙侧落点边界及时比较现有over/under路线；不因中间站位未知就把目标留在跳怪并吸回墙角。墙边下界保持下界，未知站位不当闭合或安全，路线是L2偏好而非路径证书。优先接现成支持Idle/Walk的近跳/小跳钩翻越入口；迎面Walk继续安全接近到近跳优先，保留逐拍危险门/超时与其他原钩域；moving stomp必须支持一个明确、生产可识别的Walk域，按相同未来位置/身体姿态供命中交集与安全检查，停止/转身/出招/时钟越域未知时保守重选，不只删velocity==0或让安全并集冒充必命中。由Opus选最小接口，不要求8种情况重写，不为本包扩一般钩后反击/站位场/动作池或全游戏模型。
@@ -4556,3 +4556,18 @@ analysis/task179_8f9e9629_20261105/p_v1实际worker35488串行route56、route_ea
 仅另建一局新源/新合同/新namespace179-L1，复用已核单局Launcher生命周期与原工程profile、7HP/HP<=6真实Q1/1episode/measure协议2；源8f9/当前执行HEAD/脚本/模型/配置/预算和实际worker input.stats bootstrap必须绑定。主验走路怪翻越及实际hit/pogo/交还，moving stomp与178姿态分账；178无自然机会时按7.146/7.162已有至多一次178-R1后备，不以179替代。旧786/3b停止/失败原件不重开，新条件包括179及时L2路线、移动支撑及计时修正，不能用旧局再命名。真实敌人停/退、钩后高度/保护和名义小间隔留给本次有界观察，第一新链损血即停定位，不续打凑成功。
 
 无人值守沿用用户“我不在家，你开实机不用等我”的明确授权，STATUS中早期watched-start布尔已按该后续指令纠正并留原值，不再要求用户重复点开。Windows核心进程不操作；精确身份背景分类、其它0.5核/并行实验/STOP/练习标记门不变。Launcher/WMI自有隐藏辅助、活动锁先核不双起，游戏/测量期间只读收信，不并行重算或终止用户进程。W本节文档同步后至本局真实清理完成冻结HEAD，只有实际golden/Prefs/旧DEMO/worker/game/registry全核后false。
+
+
+#### 179-L1实机首损停止/清理完成；178取得自然姿态正例，主179仍未覆盖（11-05，进度7.167）
+
+新局sol/demos/w13_walk179_20261105T222716Z_8f9e9629，runtime8f9e9629、执行HEAD e84c2126；单独工程批1局、原7HP/HP<=6真实Q1。唯一WMI请求41604、实际协调器47360、实际worker57924、场worker60880、game39760。实际worker自有OracleLink input.stats在启动时只读通过：零delay/jitter、HF2/2、pending0，原件独占保存并进完整清单。原资源/STOP/无双起/5s静止/30s pulse执行，未操作Windows核心进程；policy warmup6.8s，reset850.9ms，非控制决策成本。源码/运行/模型hash与新合同同。
+
+2731实际HP7→5，来源Song Heavy Sentry(2)/Slam Collider1，Q1首损停止，worker rc0；fight测量T=8.0300589725s/L2，worker按帧报告11.85s另列，不混为同一时钟。无死亡/尾损。协调器22:30:16.714Z结束，自有Launcher恢复golden；Root22:31独立核上述所有实际PID退出、旧DEMO SHA/mtime原样、golden/Prefs无差、registry148/instances空/restore_pendingfalse/无game和pythonw后才STATUSfalse。ROOT_CLEANUP及所有raw/失败/停止原件保留，NO_RETRY禁止同namespace/同因再开。
+
+原始attempt/measurement/config/window/recording均存在，真实configuration_complete=true/unresolved[]，trace完整/0overflow、raw连续、HP守恒；685完整tick p50=8.9496/p99=18.81502ms，数据审计未把无链ordinary慢拍隐藏。现有verify_episode原结论complete=false，唯一errors是cheat or missing cheat status。Root逐原始STATE核：2966已真实Quit，2967..3001共35帧game/hero卸载无cheat，战斗至Quit边界的非法/未知作弊标记0。HP共同审计已有real_quit_unload2967..3002并complete，通用cheat循环尚未应用同一真实退出边界；这是待修的审核误报，不把当前false改绿，也不豁免退出前未知/作弊或无真实Quit的缺字段。修后只在新分析输出目录用原raw/trace复核，不重开游戏、不覆盖现有失败验收。
+
+本局没有另一怪跳跃FSM，vault入口0；Walk-supported stomp行0。主179“翻走路怪/真实交还”与moving stomp均未覆盖，不写动作失败也不写通过。178却取得唯一预先指定自然机会：335476在2625仍Cast2/t=.2331，身体顶7.775936；2626姿态收低到6.211874、随后6.19469。实际still支持行经当前contact_body_witness→press_now_row，2625发D到2627、2626发A+D到2628，2628真实DownSlash接受，2634同目标真实hit/DownSlash9伤及pogo_marker/counter，真实交还并重新选后继；直到原Move结束及后30帧HP仍7。全链原件在ROOT_EVENT_AUDIT/ROOT_ACTUAL_TIMELINE/ROOT_SELECTED_CONTACTS，合成/模型不参与现场状态。记录“178自然正例已覆盖、最终核收待退出审计”，非普遍可靠率；0机会的178-R1后备暂不触发，避免无谓加局。
+
+后续失败是另一段：2634后仍同目标RuneTransfer，目标2653后撤，2675开始新SlamAntic；2683英雄落地、Run恢复，此后无B2出刀，后续普通规划再起跳，2724起Umbrella Inflate，2731被锤1打。b2_hp_loss明确chain_related=false/phase none/failure_exposure[]，原2683失败责任已到2713，不把2731硬挂旧Move或“翻走路怪失败”。这些只是实际时间线；为何已有Slam/空中对刀入口未接、空中动作是否抢占/冷却/接近域导致，交Opus在有限2673..2731实际决策/键/CF/当前能力上定因，不能先编结论。
+
+仍同179处理当前阻挡：最小修退出审核的真实Quit卸载域，并追出已有冲锤接刀断接原因后只复用现有入口/交还修正；若需新动作/模型或改大方案，先报告范围由Sol裁决，不自行扩打法池/全场搜索。保留178正例做本包直接回归，普通证据核收不重新叫Astra全面审，不重跑旧大矩阵；交付前实际生产分支/真实几何/最终发包小表继续。源码owner只有Opus，新局/新条件必须再源审/受影响P/全gate，当前无新game gate。Root在已清理后同步本节并把源码写权交回Opus，旧停止/预算/AA/raw/用户5文件全部不动。
