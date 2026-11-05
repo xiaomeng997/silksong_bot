@@ -243,6 +243,12 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
     if toward == 0:
         entry["why"] = "no approach side"
         return entry
+    dash_i = B["DASH"].bit_length() - 1
+    current = np.asarray(sim.start).reshape(K.K)
+    if (held_dash or int(current[K.MODE]) in (K.M_DASH, K.M_SPRINT) or int(sim.prefix[0]) & B["DASH"]
+            or sim.hold.latched[0, dash_i] or sim.hold.desired[0, dash_i] or sim.hold.pending[0, dash_i]):
+        entry.update(why="in-flight dash must finish before early jump", next_f=f + 1)
+        return entry
     try:
         bodies = [(e.get("iid"), body_box(e)) for e in clappers(state)]
         body = body_box(enemy)
@@ -252,7 +258,10 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
     if body is None:
         entry["why"] = "observed body unknown"
         return entry
-    pj = replace(p, jump_k=jump_k, jump_until=jump_k + int(cfg["STOMP"]["jump_hold"]), sprint_jump=bool(held_dash))
+    # A new dash before next tick's cached J would swallow that J. Model the
+    # same no-new-dash wait packet that the caller adopts only if this passes.
+    pj = replace(p, dash_k=k + 10000, jump_k=jump_k,
+                 jump_until=jump_k + int(cfg["STOMP"]["jump_hold"]), sprint_jump=False)
     masks = render(runner, pj, k, n, link)
     path = model_path(sim, pj, masks, game)
     full = np.asarray(path.commands, np.int64)
@@ -282,7 +291,7 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
             bd[:, 4:6] -= d
         ok, why, info = face_hook_check(sd, hd, e, f + d + 2, toward, bd, bs)
         if ok and shift == 0.:
-            entry.update(ok=True, why="ok", next_f=f + 1, decide_f=f + d, press_F=f + d + 3,
+            entry.update(ok=True, why="ok", defer_new_dash=True, next_f=f + 1, decide_f=f + d, press_F=f + d + 3,
                          **{key: float(val) for key, val in info.items()
                             if key in ("ray_margin", "retreat_reserve", "bb_press", "x_press", "held_bb")})
             return entry

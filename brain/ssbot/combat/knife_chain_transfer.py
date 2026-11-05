@@ -652,6 +652,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
             from .knife_chain_face_hook import early_jump_stale,early_jump
             if early_jump_stale(cache,state["f"],target_state):
                 early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash)
+                if early.get("ok") and early.get("defer_new_dash"):
+                    p=replace(p,dash_k=k+10000)
     elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
