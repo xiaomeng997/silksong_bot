@@ -283,7 +283,10 @@ def _body_knowledge():
     return cm.Know.load(),cm.NEXT,(cm.WALL_L,cm.WALL_R),cm.FLOOR
 
 
-RANGE_LAG_F=2  # her Slam Range trigger may report the hero up to two frames late
+# Will Evade is checked at her first in-range Idle frame from EV_K[1]; an evade starts within this many frames of
+# it. EMPIRICAL, not a physical guarantee: the fit's evade frames 15/16/17 (map2.clapper EV_K, 210/1200/1552) lie
+# within one frame of the nominal gate; one more frame of margin.
+RANGE_LAG_F=2
 
 
 @lru_cache(maxsize=1)
@@ -624,16 +627,21 @@ def register(prims):
                 or not controls[0]["state"] or controls[0]["state"] in {"Walk","Evade Scuttle"}):return None
         left=max(0,int(x.v["jump_until"])-int(x.obs.k))
         from . import pogo_model as PM
-        # Will Evade shows at her first in-range Idle frame from EV_K[1]; the
-        # trigger may lag RANGE_LAG_F. This Run's own observations only.
+        # Will Evade shown False needs this Run's own CONTINUOUS in-range observations of this Idle instance from
+        # the gate (EV_K[1]) through RANGE_LAG_F; leaving her range, a missing tick or an unknown box restarts the
+        # collection, a new Idle (or a hit, which leaves Idle) starts over; once shown it holds to this Idle's end.
         st0,t0=control(enemy);no_evade=False;f0=getattr(x.obs,"f",None)
         if st0=="Idle" and type(t0) in (int,float) and math.isfinite(t0) and type(f0) is int:
             k0=int(round(t0*60.));key=[enemy.get("iid"),f0-k0]
-            seen=x.v.get("idle_in_range")
-            if not (isinstance(seen,list) and seen[:2]==key):seen=[*key,None]
-            if seen[2] is None and k0>=_idle_exits()[1] and in_slam_range(enemy,(getattr(x.obs,"hero",None) or {}).get("box")):
-                seen[2]=k0
-            x.v["idle_in_range"]=seen;no_evade=seen[2] is not None and k0>=seen[2]+RANGE_LAG_F
+            w=x.v.get("idle_in_range")
+            if not (isinstance(w,dict) and w.get("key")==key):w={"key":key,"start":None,"last_f":None,"done":False}
+            if not w["done"]:
+                inside=in_slam_range(enemy,(getattr(x.obs,"hero",None) or {}).get("box"))
+                if not inside:w["start"]=None
+                elif w["start"] is None or w["last_f"]!=f0-1:w["start"]=k0
+                w["last_f"]=f0 if inside else None
+                w["done"]=w["start"] is not None and k0>=max(w["start"],_idle_exits()[1])+RANGE_LAG_F
+            x.v["idle_in_range"]=w;no_evade=w["done"]
         body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade)
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.

@@ -107,13 +107,30 @@ def test_idle_witness_ends_at_her_modelled_exits():
  assert T.in_slam_range(e,in_range(e)) and not T.in_slam_range(e,[x+20,y,x+20.5,y+2]) and not T.in_slam_range(e,None)
 
 
-def test_stomp_plan_shows_will_evade_false_only_after_an_in_range_frame_plus_lag(monkeypatch):
+def _no_evade_seen(monkeypatch,ticks):
+ """stomp_plan on one Run over (f, Idle k, hero in range); the idle_no_evade each tick passed to the witness."""
  r=load_runner();r.run=Run(T.PROGRAM,'air',{'jump_until':0,'side':B['R']});seen=[]
  monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:seen.append(kw['idle_no_evade']))
- for f,k,box in ((1000,15,True),(1001,16,True),(1002,17,True),(1003,18,True),(1004,19,False)):
-  e=clapper('Idle',k/60);hero={'box':in_range(e) if box else None}
+ for f,k,inside in ticks:
+  e=clapper('Idle',k/60);hero={'box':in_range(e) if inside else None}
   r.P.acts['transfer_stomp_plan'](X(r,r.run,NS(sim=NS(prefix=[0]),e=e,f=f,F=f+2,k=2,ground=False,hero=hero)))
- assert seen==[False,False,False,True,True]  # first in range at k16 (k15 is before EV_K[1]); +2 frames: k18
+ return seen
+
+
+def test_will_evade_shown_false_needs_continuous_in_range_ticks_through_gate_and_lag(monkeypatch):
+ # in range from k15 (before the gate k16) through k18 = gate + 2; then it holds to this Idle's end, out of range too
+ ok=[(1000,15,True),(1001,16,True),(1002,17,True),(1003,18,True),(1004,19,False)]
+ assert _no_evade_seen(monkeypatch,ok)==[False,False,False,True,True]
+
+
+@pytest.mark.parametrize('ticks,last',[
+ ([(1000,16,True),(1001,17,False),(1002,18,True),(1003,19,True)],False),  # left her range while collecting
+ ([(1000,16,True),(1001,17,True),(1003,19,True)],False),  # a missing tick restarts the collection at k19
+ ([(1000,16,True),(1001,17,True),(1002,0,True)],False),  # a new Idle instance (new entry frame) starts over
+ ([(1000,18,True),(1001,19,True),(1002,20,True)],True),  # first seen in range at k18: done at k18 + 2
+])
+def test_leaving_range_a_missing_tick_or_a_new_idle_restarts_the_proof(monkeypatch,ticks,last):
+ assert _no_evade_seen(monkeypatch,ticks)[-1] is last
 
 
 def test_a_hooked_run_keeps_the_provoked_attack_liability_without_a_downslash():
