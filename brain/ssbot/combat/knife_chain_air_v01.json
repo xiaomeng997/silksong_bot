@@ -1013,7 +1013,8 @@
         "keys": [{"gen":"transfer_air_keys"}],
         "rules": [
           {"do":"abort","when":{"p":"transfer_landed"},"why":{"lit":"transfer landed without a downslash"}},
-          {"do":"act","act":{"a":"transfer_stomp_plan"}}
+          {"do":"act","act":{"a":"transfer_stomp_plan"}},
+          {"do":"act","act":{"a":"transfer_face_hook"}}
         ],
         "id": "rune_transfer.air",
         "phase": "air",
@@ -1021,6 +1022,19 @@
         "entry": null,
         "inherit": [
           "stop"
+        ]
+      },
+      "claw": {
+        "id":"rune_transfer.claw","phase":"cs_pre","clock":"antic","entry":null,"inherit":["stop"],
+        "rules":[{"do":"goto","to":"claw_lock","when":{"p":"transfer_claw_slots_past"}}],
+        "keys":[{"gen":"transfer_claw_keys"}]
+      },
+      "claw_lock": {
+        "id":"rune_transfer.claw_lock","phase":"cs_lock","clock":"antic","entry":null,"inherit":["stop"],
+        "rules":[
+          {"do":"abort","when":{"p":"transfer_hook_other"},"why":{"lit":"transfer face hook: Harpoon hit another body"}},
+          {"do":"abort","when":{"p":"transfer_hook_timeout"},"why":{"lit":"transfer face hook: no control return"}},
+          {"do":"act","act":{"a":"transfer_hook_release"}}
         ]
       },
       "strike": {
@@ -1091,6 +1105,7 @@
       "lag": 0,
       "bounce_by": 14,
       "CLAWSTRIKE": false,
+      "FACE_HOOK": false,
       "entry_cast_s": 0.2,
       "target_states": [
         "Idle",
@@ -1144,6 +1159,14 @@
         "conditions": [],
         "status": "unfitted",
         "notes": "Velocity-aware press-now exit with at most three fixed horizontal rows; one optional same-owner air dash. Current-step checks only; overhead or model contact is not completion."
+      },
+      "claw": {
+        "link":"rune_transfer.claw","observations":[],"conditions":[],"status":"unfitted",
+        "notes":"Manual face-hook segment: one aimed Clawline at the observed face after a cheap check; Harpoon identity / seen / control stay the existing B2 guards."
+      },
+      "claw_lock": {
+        "link":"rune_transfer.claw_lock","observations":[],"conditions":[],"status":"unfitted",
+        "notes":"Manual face-hook segment: no keys until actual control; a hook hit or bounce is evidence only, never the downslash completion."
       },
       "strike": {
         "link":"rune_transfer.strike","observations":[],"conditions":[],"status":"unfitted",

@@ -19,6 +19,18 @@ from .slam_play import clappers,control
 
 PROGRAM="rune_transfer"
 AIR_ATTACK_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"})
+# Target-bound face hook: one aimed face hook inside the SAME rune_transfer Run. Every number is an existing one
+# (map2.strike / hero2 hooked Clawline, knife_chain_hook_target, knife_chain_empty_needle, vault far_lock, the
+# Clapper Control FSM / are_type); none is a new calibration, and nothing here certifies a hook, a hit or a flight.
+HOOK_LINKS=frozenset({"claw","claw_lock"})
+HOOK_PRESS_AFTER_F=1        # turn key on the first mask frame F0, then CLAW for two frames at P=F0+1
+HOOK_LATE_F=2               # knife_chain_empty_needle: a press may apply 0 .. 2 frames late (never a retiming)
+HOOK_CTRL_LAST_F=34         # map2.strike.claw_hook: control P+23 .. 34 (the small-rune path's last frame)
+HOOK_CTRL_MIN_F=12          # vault far_lock: no strike before claw_press > 12
+HOOK_TIMEOUT_F=45           # vault far_lock: abort without control return by claw_press > 45
+EVADE_U_S=15.               # Control FSM Evade Scuttle: 15 u/s straight back from her for 0.35 s
+EVADE_MAX_S=44/60.          # are_type clapper: entered again at once in 7 % (40-44 frames in all)
+HOOK_TARGET_STATES=frozenset({"Idle","Walk","Dmg Attack","Evade Scuttle"})  # target_states standing or scuttling
 
 
 @lru_cache(maxsize=1)
@@ -130,7 +142,8 @@ class TransferPlan:
     @property
     def move(self):return MoveInstance(self.iid,self.fa,"RUNE_TRANSFER")
     def variables(self):
-        return {k:v for k,v in asdict(self).items() if k not in {"origin","entry_k","press_k","contact_frame","ended_reason"}}|{"cs":None}
+        # cs is the active Run's absolute CsPlan (the chain default is None for a fresh Run): never re-time a hook.
+        return {k:v for k,v in asdict(self).items() if k not in {"origin","entry_k","press_k","contact_frame","ended_reason"}}
 
 
 @dataclass(frozen=True)
@@ -329,6 +342,108 @@ def air_approach_keys(x):
     return mask|B["DASH"]
 
 
+def retreat_reserve(enemy,t_s,away):
+    """Worst-case distance the target can move AWAY by t_s seconds after this observation (a bound, not a prediction).
+
+    Evade Scuttle runs 15 u/s straight back from her (the owning Control FSM); a running one keeps only its remaining
+    (double) time, any other state may start one at once; an observed walk away is the floor. Only the time to the
+    ray counts: no whole-backstep deduction, no fixed 7 / 8 u."""
+    st,tin=control(enemy)
+    if type(t_s) not in (int,float) or not math.isfinite(t_s) or t_s<0 or away not in (-1,1):
+        raise ValueError("unknown retreat input")
+    rem=EVADE_MAX_S
+    if st=="Evade Scuttle" and type(tin) in (int,float) and math.isfinite(tin):rem=max(0.,EVADE_MAX_S-float(tin))
+    vel=enemy.get("vel") or [0.,0.]
+    vx=float(vel[0]) if type(vel[0]) in (int,float) and math.isfinite(vel[0]) else 0.
+    return max(EVADE_U_S*min(float(t_s),rem),max(0.,vx*away)*float(t_s))
+
+
+def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
+    """A cheap gate for one aimed Clawline at P=F0+1 against the OBSERVED target face; never a hit certificate.
+
+    Her pose comes from the actual S0 / in-flight prefix rolled with the turn key and must stay in the measured
+    Clawline entry (knife_chain_empty_needle). Two existing rays must take the target: the B2 CLAW identity veto's at
+    P's key-frame pose (first_ray_body over every observed Clapper body), and the hooked-Clawline model's (map2.strike:
+    her box centre after hero2's antic drift, her held box bottom, RAY_U) at the needle's hit P+8 / 9 of a press
+    applied 0 .. 2 frames late, in every physics-step phase class, against the observed body moved AWAY by the
+    target's worst-case retreat from this observation to that frame. With bombs, no lit small rune may meet her
+    HeroBox (rune_bombs.occupied) between the press and the farthest stop until the latest control. (ok, why, info)."""
+    from ssbot.knowledge import hero2 as H2
+    from ssbot.map2 import strike as SK
+    from . import claw_strike as CS
+    from .knife_chain_hook_target import first_ray_body
+    info={}
+    hero=hero or {};can=hero.get("can") or {};silk=hero.get("silk")
+    if can.get("harpoon") is not True:return False,"harpoon unavailable",info
+    if type(silk) not in (int,float) or not math.isfinite(silk) or silk<1:return False,"silk unavailable",info
+    if hero.get("hero_accepting_input") is not True:return False,"input not accepted",info
+    clocks=[c for c in enemy.get("fsms") or () if isinstance(c,dict) and c.get("name")=="Control"]
+    if len(clocks)!=1:return False,"target motion/clock unknown",info
+    st=clocks[0].get("state");tin=clocks[0].get("t")
+    velocity=enemy.get("vel")
+    if (not isinstance(velocity,(list,tuple)) or len(velocity)!=2
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in velocity)
+            or type(tin) not in (int,float) or not math.isfinite(tin) or tin<0):
+        return False,"target motion/clock unknown",info
+    if st not in HOOK_TARGET_STATES:return False,"target state outside the face-hook scope",info
+    body=body_box(enemy);iid=enemy.get("iid")
+    seen=[(iid,body)] if bodies is None else list(bodies)
+    if (iid not in [i for i,_ in seen] or
+            any(type(i) is not int or b is None or not np.isfinite(b).all() for i,b in seen)):
+        return False,"observed body unknown",info
+    if toward not in (-1,1):return False,"unknown hook direction",info
+    tk=B["R"] if toward>0 else B["L"];P=int(F0)+HOOK_PRESS_AFTER_F;j0=sim.off+HOOK_PRESS_AFTER_F
+    ro=sim.roll(np.full((1,HOOK_PRESS_AFTER_F+1+HOOK_LATE_F),tk,np.int64))
+    if ro.box.shape[1]!=j0+HOOK_LATE_F+1:return False,"press pose index mismatch",info
+    S=np.asarray(ro.final[:,0],float);mode=int(S[K.MODE])
+    if ((ro.flags[0,j0:]&K.F_GROUND).any() or mode not in (K.M_NORMAL,K.M_SPRINT) or (mode==K.M_SPRINT and S[K.PHASE]>1.)
+            or S[K.SHUT]!=0 or S[K.XVX]!=0 or int(S[K.FACE])!=toward):
+        return False,"press state outside the measured Clawline entry",info
+    box=[float(v) for v in ro.box[0,j0]];xp=.5*(box[0]+box[2])
+    front,back=(float(body[0]),float(body[2])) if toward>0 else (float(body[2]),float(body[0]))
+    info.update(press_F=P,x_press=xp,bb_press=box[1]-CS.FLOOR,body_top=float(body[3])-CS.FLOOR)
+    if (back-xp)*toward<=0:return False,"target body behind the ray origin",info
+    if (front-xp)*toward<.5:return False,"face inside claw_strike's 0.5 u press minimum",info
+    try:first=first_ray_body(box,toward,[(i,[float(v) for v in b]) for i,b in seen])
+    except ValueError as exc:return False,"B2 identity ray unchecked: "+str(exc),info
+    if first is None or first[0]!=iid:return False,"B2 identity ray does not take the target first",info
+    names=("ray_margin","late_f","hit_after_press_f","phase","x_ray","held_bb","retreat_reserve","t_ray")
+    worst=None;ext=0.;centres=[]
+    for d in range(HOOK_LATE_F+1):
+        b=ro.box[0,j0+d];x0=.5*float(b[0]+b[2]);bb0=float(b[1]);half=.5*float(b[3]-b[1])
+        vx0,vy0=(float(v) for v in ro.vel[0,j0+d])
+        if not -19.6<=vy0<=17.4:return False,"press state outside the measured Clawline entry",info
+        held=float(SK.hold_bb(bb0,vy0));centres+=[bb0+half,held+half]
+        if held-CS.FLOOR<CS.CsCfg().ray_lo:return False,"held height below claw_strike's floor hover",info
+        for h in (SK.HOOK_HIT_F,SK.HOOK_THROW_F):
+            t=(P+d+h-int(sim.f))*float(sim.params.frame_time)
+            r=retreat_reserve(enemy,t,toward);moved=np.asarray(body,float)+toward*np.array([r,0.,r,0.])
+            for ac in range(6):
+                vx=min(max(vx0,-20.),20.)*H2.CLAW_ANTIC_DECEL[0];x=x0
+                for k in range(1,h+1):
+                    for _ in range(SK.steps_of(k,ac)):vx*=H2.CLAW_ANTIC_DECEL[0];x+=vx*H2.FDT
+                ext=max(ext,(x-xp)*toward)
+                row=((x+toward*SK.RAY_U-front-toward*r)*toward,d,h,ac,x,held-CS.FLOOR,r,t)
+                if worst is None or row[0]<worst[0]:worst=row
+                if not SK.ray_meets(x,held,toward,moved):
+                    info.update(zip(names,row))
+                    band=moved[1]<held+SK.RAY_BAND[1] and moved[3]>held+SK.RAY_BAND[0]
+                    return False,("face out of the modeled ray after the retreat reserve" if band
+                                  else "held height outside the observed face band"),info
+    info.update(zip(names,worst))
+    if bombs is not None and len(bombs):
+        from . import rune_bombs as RB
+        t_end=(P+HOOK_LATE_F+HOOK_CTRL_LAST_F-int(sim.f))*float(sim.params.frame_time)
+        stop=((front-xp)*toward+retreat_reserve(enemy,t_end,toward)-min(v.gap for v in SK.HOOK_VARIANTS)-SK.HALF_W)
+        far=max(ext,min(stop,ext+SK.DASH_MAX_STEPS*SK.DASH_STEP_U))
+        xs=np.linspace(xp,xp+toward*far,int(np.ceil(far/.25))+2)[:,None]   # samples finer than the HeroBox width
+        ks=np.arange(P,P+HOOK_LATE_F+HOOK_CTRL_LAST_F+1)-int(sim.f)
+        rows=np.asarray(bombs,float).reshape(-1,6);info.update(rune_far=far)
+        if any(RB.occupied(rows,xs,y,ks,RB.BOMB_M).any() for y in centres):
+            return False,"hook path meets a lit small rune",info
+    return True,"ok",info
+
+
 def register(prims):
     @prims.gen("transfer_source_tail_keys",doc="legacy neutral tail or the checked absolute wall-successor row")
     def source_tail_keys(x,m):
@@ -386,6 +501,55 @@ def register(prims):
         # the sprint jump's seven-frame grounded antic.
         return bool(x.obs.ground and x.obs.k>x.v["jump_k"]+antic+x.cfg["STOMP"]["takeoff_grace"]+2)
 
+    @prims.action("transfer_face_hook",doc="once per Run: an aimed Clawline at the next mask frame after the cheap face check; not a hit receipt")
+    def face_hook(x):
+        v=x.v
+        if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
+                or x.obs.ground or v.get("iid")==v.get("caster")):return None
+        toward=1 if v.get("side")==B["R"] else -1 if v.get("side")==B["L"] else 0
+        ents=getattr(x.obs,"ents",None)
+        try:bodies=None if ents is None else [(e.get("iid"),body_box(e)) for e in ents]
+        except (TypeError,ValueError,OverflowError):bodies=[(None,None)]
+        ok,why,info=face_hook_check(x.obs.sim,getattr(x.obs,"hero",None),x.obs.e,int(x.obs.F),toward,
+                                    getattr(x.obs,"bombs",None),bodies)
+        v["face_hook_check"]={"ok":ok,"why":why,**{k:float(w) for k,w in info.items()}}
+        if not ok:return None
+        from .claw_strike import CsPlan
+        F0=int(x.obs.F)
+        v["cs"]=CsPlan(F0,0,F0+HOOK_PRESS_AFTER_F,0,bb_press=info["bb_press"])
+        v["air_dash_decided"]=True  # no air dash after an aimed hook in this Run
+        return {"do":"goto","to":"claw"}
+
+    @prims.gen("transfer_claw_keys",doc="the absolute CsPlan keys: turn key, CLAW for two frames; no J; never re-timed")
+    def claw_keys(x,m):
+        from .claw_strike import plan_mask
+        cs=x.v.get("cs")
+        if cs is None:return m
+        return m|plan_mask(cs,int(x.obs.F),1 if x.v.get("side")==B["R"] else -1)
+
+    @prims.guard("transfer_claw_slots_past")
+    def claw_slots_past(x):
+        cs=x.v.get("cs");return cs is not None and int(x.obs.F)>cs.f_press+1
+
+    @prims.guard("transfer_hook_timeout")
+    def hook_timeout(x):
+        cs=x.v.get("cs");return cs is not None and int(x.obs.F)-cs.f_press>HOOK_TIMEOUT_F
+
+    @prims.guard("transfer_hook_other")
+    def hook_other(x):return x.v.get("hook_other_f") is not None
+
+    @prims.action("transfer_hook_release",doc="actual control after the hook: back to the existing air / stomp rules; a hook hit or bounce is evidence only")
+    def hook_release(x):
+        cs=x.v.get("cs");h=getattr(x.obs,"hero",None) or {}
+        clip=str((h.get("anim") or {}).get("clip",""))
+        if cs is None or int(x.obs.F)-cs.f_press<=HOOK_CTRL_MIN_F:return None
+        if h.get("hero_accepting_input") is not True or "harpoon" in clip.lower():return None
+        if type(x.v.get("hook_seen_f")) is not int:return None
+        if type(x.v.get("hook_hit_f")) is not int:
+            return {"do":"abort","why":"transfer face hook ended without actual target Harpoon hit"}
+        x.v["hook_done"]=True
+        return {"do":"goto","to":"air"}
+
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False):
     """One observed-distance recipe and a two-frame external path.
@@ -406,9 +570,12 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     tail_done=bool(active is not None and active.v.get("source_tail_done"))
     tail_pending=not tail_done and bounce_tail_pending(state,goal,game)
     if body is None or h.get("health",0)<=0 or h.get("stunned"):return None
-    if target_state not in cfg["target_states"] and not (attacking and goal is not None and not ground):return None
+    # An accepted hook finishes in its own lock even if the target starts an ordinary move. The strike after actual
+    # control re-reads the current body (stomp_plan); it is never admitted from a static Idle assumption.
+    hook_locked=active is not None and active.link in HOOK_LINKS
+    if target_state not in cfg["target_states"] and not (attacking and goal is not None and not ground) and not hook_locked:return None
     if sim.fo!=sim.f or sim.f!=state["f"] or len(sim.prefix)!=1:return None
-    if int(sim.prefix[0])&~(B["L"]|B["R"]|B["J"]|B["DASH"]|B["D"]|B["A"]):return None
+    if int(sim.prefix[0])&~(B["L"]|B["R"]|B["J"]|B["DASH"]|B["D"]|B["A"]|(B["CLAW"] if hook_locked else 0)):return None
     hp=h.get("pos");vel=h.get("vel")
     if not isinstance(hp,(list,tuple)) or not isinstance(vel,(list,tuple)) or min(len(hp),len(vel))<2:return None
     if np.asarray(sim.start).shape not in ((K.K,),(K.K,1)) or not np.isfinite(sim.start).all() or not np.isfinite([game,*hp[:2],*vel[:2]]).all():return None
@@ -470,7 +637,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
-        if link!="strike":link="air"
+        if link!="strike" and link not in HOOK_LINKS:link="air"
     if defer_jump and (not ground or (state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"]):return None
     if defer_jump or (approach_only and ground):
         p=replace(p,jump_k=k+10000,jump_until=k+10000,sprint_jump=False)
@@ -486,7 +653,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
     obs=_observation(p,state,game,body,ground,clearance)
-    obs.sim=sim;obs.e=enemy;obs.hero=h
+    obs.sim=sim;obs.e=enemy;obs.hero=h;obs.bombs=bombs;obs.ents=clappers(state)
     obs.bounced=bool(variables.get("bounced"))
     mask=draft.eval_link(X(draft,draft.run,obs))
     if mask is None:

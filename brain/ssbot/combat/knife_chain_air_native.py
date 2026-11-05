@@ -74,6 +74,10 @@ class NativeManualAirChain(NativeChainB2):
         super().reset(episode,start_frame=start_frame)
         transfer.slam_tail_frames()  # preload before timed decisions, share immutable counts
         self.vault_enabled="vault_idle" in self.runner.chains
+        face_hook=os.environ.get("SSBOT_FORUM_CHAIN_FACE_HOOK","0").strip()
+        if face_hook not in {"0","1"}:raise ValueError("invalid SSBOT_FORUM_CHAIN_FACE_HOOK")
+        self._face_hook_mode=face_hook=="1" and self.arm=="B"
+        self.runner.chains[transfer.PROGRAM].cfg["FACE_HOOK"]=self._face_hook_mode
 
     def begin(self,state,history=()):
         super().begin(state,history)
@@ -531,6 +535,13 @@ class NativeManualAirChain(NativeChainB2):
                                     or "rune transfer ended or target began a new move before real bounce",f)
             return None
         draft,plan,path,mask=made
+        if draft.run.link in transfer.HOOK_LINKS:
+            # The free-flight K path is not a hooked Clawline projection. Until
+            # that current-step adapter is bound, even explicit opt-in declines;
+            # never certify the wrong path or silently skip external danger.
+            self._note("transfer_face_hook_unchecked",frame=f,reason="hooked current-step geometry not integrated")
+            if active:self._recover("transfer face-hook current step unsupported",f)
+            return None
         if plan.move in self._failed_hook_moves:return None
         current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
         if current is None:
@@ -693,7 +704,38 @@ class NativeManualAirChain(NativeChainB2):
                 from .knife_chain_jump import JumpStartWatch
                 if self._jump_start is None:self._jump_start=JumpStartWatch(selected.move,sent.frame,(sent.target_frame,))
                 self._jump_start.record_send(sent.target_frame,sent.desired_mask)
+            run=self.runner.run;cs=None if run is None else run.v.get("cs");watch=self._hook_start
+            if (cs is not None and run.chain==transfer.PROGRAM and run.link in transfer.HOOK_LINKS
+                    and self.commitment is not None and self.commitment["move"]==selected.move
+                    and (watch is None or watch["move"]!=selected.move)):
+                # Face hook: arm the existing same-Move hook watch on the first SUCCESSFUL send of the absolute plan;
+                # never from a draft, never re-armed per tick. B2's own sent() then records the CLAW sends ("active")
+                # and keeps the late-slot veto, the missed-window / no-Harpoon recovery and _failed_hook_moves.
+                self._hook_start={"move":selected.move,"origin":sent.frame,"targets":(cs.f_press,cs.f_press+1),
+                                  "sent_targets":set(),"seen_frame":None}
+                self._note("b2_hook_start_expected",frame=sent.frame,move=vars(selected.move),
+                           targets=[cs.f_press,cs.f_press+1],source="transfer aimed face hook; absolute CsPlan; no certificate")
         return sent
+
+    def observe(self,state):
+        super().observe(state)
+        # Face hook: a transfer hook's Harpoon hit / control are EVIDENCE in the same Run only. The B2 hook-bounce
+        # handover stays VAULT_IDLE-only, so no _hit / _accepted / post_context / bounced comes from a hook.
+        run=self.runner.run;watch=self._hook_start;c=self.commitment
+        if (run is None or run.chain!=transfer.PROGRAM or run.link not in transfer.HOOK_LINKS or watch is None
+                or watch["seen_frame"] is None or c is None or watch["move"]!=c["move"]):return
+        f=state["f"];v=run.v
+        v.setdefault("hook_seen_f",watch["seen_frame"])
+        for ev in state.get("ev") or ():
+            d=ev.get("d") or {}
+            if ev.get("k")!="hit" or str(d.get("src") or "") not in ("Harpoon Damager","Harpoon Dash Damager"):continue
+            ent=d.get("ent") if d.get("ent") is not None else d.get("iid");ef=ev.get("f",f)
+            if type(ef) is not int or not watch["seen_frame"]<=ef<=f:continue
+            if ent==c["move"].target_iid:v.setdefault("hook_hit_f",ef)
+            else:v.setdefault("hook_other_f",[ef,ent])
+        h=state.get("hero") or {}
+        if ("hook_ctrl_f" not in v and h.get("hero_accepting_input") is True
+                and "harpoon" not in str((h.get("anim") or {}).get("clip","")).lower()):v["hook_ctrl_f"]=f
 
     def before_send(self,*,frame,target,mask,flags,received_frame,dispatch_clock=None):
         selected=self._b2_selected
