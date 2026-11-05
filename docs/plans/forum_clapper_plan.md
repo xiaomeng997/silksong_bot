@@ -4195,3 +4195,13 @@ Root单次10文件受影响回归314pass/foreign0，其中35个新face-hook有�
 Root单次11文件337pass/foreign0，58个face/step项为子集，不和旧314或Opus19/26/203相加；新增全目标危险、sameMove/槽/seen晚界与关闭不建场反例。E12.52s只是缓存编译后的回归墙钟，不当P。15188按PID/create独立核退出，STATUSfalse/ownjobs空。710 runtime/261模型、865小快照、六文件combined_delta（独审基线为已核742）在analysis/face_hook281_port_20261104/REVIEW_PACKET；Task171只做当前完整增量源审与关键反例，不重跑矩阵。默认仍关闭，独审在途不当通过；旧742/278不能给a14cc盖章。
 
 Root另已准备p_a14cc421/2609_2610两连续完整_act P草稿，脚本静态compile通过、原真实input文件hash核同，FACE_HOOK=1绑定；S0/HF在planner边界仍注入原录制（重建差需据实保留），第二拍prefix来自第一拍自己的成功包。只允许消费首次差异包可能生效前的原始STATE，不能喂分叉生效后的录像未来。P_ENABLE不存在/未执行；需当前源审通过、重新实绑脚本/配置/预算与原资源门/独占/cleanup后才跑。此草稿不当P通过、全AB预算或实机许可，旧失败停止批/AA/raw不改。
+
+### 7.137 #282两P2已修b90087db/351回归；实际命中证据与硬截止约束钩中身体无害窗，近钩前摇间隙提前拒，独审172仍待【已处理 Opus #282】
+
+#282/Task171核18工件、2patched、2源输入及Root9审阅工件hash同；a14源明确未接受，不用其P草稿。P2-1：零保护全owner扫描会把冲向已被钩目标的身体当伤害，钩中途全部recover；应按既有M4a实测SK.HOOK_BODY_OFF=(17,12)建被钩身体无害窗。P2-2：近钩只查按键时距脸0.5u，前摇向前漂移会在身体仍伤人的阶段侵入；Root逐晚到/相位的Throw原点要求HB_HX+FOCUS_M间隙，近距仍先用原stomp。
+
+b90087db只改三运行文件及一新增测试。Root没有无界照贴建议的last=(f+2)+12：仅有实际目标Harpoon hit、本拍实际rawstate与同Move watch才允许body/move豁免；起点seen+17，终点同时钳admissionOrigin+minAntic47+minSlam0 4−2=origin+49、seen+34+12、已观测ctrl+12。自然新招可能在needle命中前已开始，不能只从假定命中触发的Antic起算。控制未知时还须实际仍不可输入且Harpoon clip；已观测晚SlamAntic再缩短，已武装/未知SlamCollider或未知/异常状态不豁免。其他owner、target delayed、未知、窗前/窗后一概保留，flags仍0，不设置无敌。这仍是有限实测模型假设，不外推游戏未来保证。
+
+有效宽红valid_red14fail337pass：4项是近钩漂移行为反例，10项是新state参数尚未实现的API失败，不能称14个物理缺陷。首次red为新测试包导入夹具错误，修后原件保留、不当有效红。最终单次12文件351pass/foreign0，72 face/step/window为子集，不和旧337或Opus160相加；新反例覆盖无hit、无实际state、无界滑窗、ctrl到期、武装锤、异常过早Antic及实际身体栅格通行。41636按PID/create独立核真退出，没有P/游戏。
+
+当前710 runtime/261模型、866小源码快照与四文件binding/patch保存在analysis/face_hook282_guard_20261104/REVIEW_PACKET。Task172只复核两个P2和Root收紧窗，不重跑351矩阵，其余171已通过项保留。默认仍0/B-only，源审在途不当通过；动态空中接触/骑乘/完整出口和未来输入时序仍未认证。新P草稿改绑p_b90087db/2609_2610，P_ENABLE不存在、未运行；旧a14源失败和旧P草稿保留但不得执行，不重开停止游戏批次。当前STATUSfalse/ownjobs空，待真正源审后再走新P与原资源/独占/清理门。
