@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.160）：Task179回修64428fda源码及有限生产功能已核收，墙侧Walk P2闭合，Sol7项独立小回归过；合成Walk已走完整policy/planner/真实B2几何/发键。现准备固定3个完整tick窗口正式P（路线、冲刺拒绝、合成Walk），未开新实机。近跳24帧边界、录制条件敌人与模型擦碰的限制保留，178实机目标未覆盖，旧失败/NO_RETRY保持。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.161）：Task179/644三场景109完整tick正式P已完成、实际清理全核。63个链属主tick最高11.6845ms，近跳首J8.7409、移动踩头首行10.0071；新冲刺被拒后中性交还2604整拍18.4636ms，普通行也有慢拍，不能宣布完整调度过门。先同179有限核这一中性交还0..2帧晚应用影响，再决定是否必须改代码；不扩优化所有普通规划。当前无新实机gate，旧失败/NO_RETRY保持。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4446,7 +4446,7 @@ Sol独审2055cd0514019ea7457c068dd82e693bd51e1cb2四个运行文件增量及实�
 
 #295走路失败不靠恢复补丁解决：2580来源墙侧普通跳锤锁点仅是下界，L2 hold到2606共27帧、目标仍跳怪，实际2585/2597/2604三次向左冲；2607才给over且hero已反向空中冲刺，2617新接近dash加惯性不可打断，2628落点挡路，2625的N2拒绝已晚。去掉wall_bound提前返回的反事实只说明2580可给over偏好，不是新的英雄轨迹或安全证明。用户要求翻右侧走路怪及踩头支持移动目标（#296/#297补录；与本聊天既有翻走路怪/任意状态踩新怪要求一致），已实质扩大原178姿态包，另立完整179，不继续拆微任务；178原姿态实机目标保持未覆盖，旧局/缺测量/2HP/NO_RETRY原样。
 
-**Task179：墙侧怪起跳时，及时选并执行远离其落点的走路怪翻越；走动目标在有可证见证时能接下劈。状态：待性能验证（299回修源/有限生产功能已核，三窗口正式P准备）。** 以下为该包唯一任务说明，修订与回修沿用179。
+**Task179：墙侧怪起跳时，及时选并执行远离其落点的走路怪翻越；走动目标在有可证见证时能接下劈。状态：待性能验证（109拍正式P完成，链关键拍过有限点界；中性交还晚发调度待核）。** 以下为该包唯一任务说明，修订与回修沿用179。
 
 - **职责/入口**：Opus唯一实现者，直接写当前forum-knife-rows开发树并提交；基线2055，Sol独审/集成及正式P/实机，Astra按workflow作关键假设集中审，不扩队。源码入口clapper_middle、transfer、vault/native及现有身体预测/B2；证据opus/review178/walk786、786原实录与ACTUAL_TIMELINE，原178见证/工具复用，不重新搭系统。
 - **行为与范围**：依据已知墙侧落点边界及时比较现有over/under路线；不因中间站位未知就把目标留在跳怪并吸回墙角。墙边下界保持下界，未知站位不当闭合或安全，路线是L2偏好而非路径证书。优先接现成支持Idle/Walk的近跳/小跳钩翻越入口；迎面Walk继续安全接近到近跳优先，保留逐拍危险门/超时与其他原钩域；moving stomp必须支持一个明确、生产可识别的Walk域，按相同未来位置/身体姿态供命中交集与安全检查，停止/转身/出招/时钟越域未知时保守重选，不只删velocity==0或让安全并集冒充必命中。由Opus选最小接口，不要求8种情况重写，不为本包扩一般钩后反击/站位场/动作池或全游戏模型。
@@ -4479,3 +4479,18 @@ R2完整功能已补：当前干净644的合成C前史2578后明确摆位，2580
 Sol已移植独立P编排，固定route2579..2634（56拍）、dash_reject2600..2630（31拍）、walk_synthetic2579..2600（22拍，明确摆位）三个场景，全为同B工程profile，字母窗口不是A/B处理臂。710源含261模型/20原始输入/脚本与实际加载模块hash绑定。原Opus入口只在Sol目录补测量窗生产send-clock开启、错误tick/trace留证与实际场worker身份/编译签名前后核验，旧前史仍条件时钟/英雄shim；串行synthetic STATE到达不能证明真实接收/排队/应用截止。所有控制代码原样，P实际P0–15High/Numba4/GetProcessInformation EcoQoSoff、0外来/0新签名、真实清理与原资源/STOP门仍需执行。保留原历史lag15.782995/reserve1/13.550338ms有限关键发键点比较及所有慢普通/回退/GC，不拿E比例或片段拼预算；缺关键分支/时钟否决按实际记，旧178三拍不给新源盖章。
 
 开始前原子STATUStrue/标真实PID/create/等5s静止与资源核、长窗口30s pulse，Opus保持只读；三预定窗口串行，原dwm/svchost仅精确身份背景分类不操作，其他并行工作/负载门不变。记录真实场worker退出、golden/Prefs/旧DEMO hash和mtime/registry无game，Root实际清理全核后才false。当前未执行P，未建新游戏gate；功能/性能/现场分别报告，旧停止局不重开。P结果并回179，只补受影响失败，不为收据另派任务。
+
+
+#### Task179/644正式P三场景109拍已完成并全清理；关键链点过，中性交还调度先有限核（11-05，进度7.161）
+
+analysis/task179_64428fda_20261105/p_inprocess固定route56、dash_reject31、walk_synthetic22整tick完成，统一实际worker53300、各实际field61172/60252/57368。原独占/5s静止/原资源门各窗blockers[]、30s pulse执行，T前E24–31Idle、T起P0–15High/Numba4/GetProcessInformation EcoQoSoff真。710源/261模型/20输入和所有加载ssbot源逐项同、无外来/新签名；三个真实protocol2 trace均complete/overflow0，测量窗生产send-clock强制开启，无dispatch veto。串行synthetic接收/HF/modelhero及条件敌人仍明确，不作真实网络/输入接受或自然闭环。所有109拍及GC原事件保留，不拼组件总预算。
+
+全tick与_act分列：route全峰11.6845ms（_act11.6586），首J2603全8.7409/act8.725，首下劈2611全8.1745/act8.159；Walk首行2580全10.0071/act9.991，2581首A+D全8.3156/act8.300。63链属主tick全≤原历史lag15.782995/reserve1的13.550338ms有限点界，最高余量1.86584ms，不是未来时延保证。dash_reject2604拒绝新不可撤回冲刺并恢复后，ordinary实际发0，全18.4636/act18.4465，tactics6.3293、planner10.0680、send.0971；比点界多4.91326ms。B窗口已有ordinary2600=15.6556、2601=17.3296，C模型交还后ordinary2599=16.6483；这些不能被链快点藏掉，也不能仅凭点界超出就断言固定承诺槽已丢。完整调度gate仍false，未建新实机gate。
+
+下一步仍179：Opus先只核2604“新dash被拒、旧Run已恢复、最终0键”的实际S0/HF/已发prefix和后继。沿用原Opt1相符应用晚≤2帧，有限比较0/1/2帧晚时未生效期间实际延续键及其当前危险/后继；不得把中性当立刻刹车、顺延旧J/CLAW绝对计划，覆盖回执不当动作证明。明确它是否需要精确槽、是否已有可接受的迟发域以及未知边界。若现成容忍/后继足够，只补证据，不为此大改代码；若不安全/未知，再建议最小当拍工作缩减或已有已检查交还，不能泛扫优化所有普通planner、跳过全owner/N2/边距或默认0安全。先不预设必须新增模块，不重复A/C关键P/55/471/21局扫描，形式P仍Sol负责。
+
+原三manifest均false：BLOCK/ORDER/SCHEDULE三未请求accounting项及WORKER_BOOST/CPUS两项。后两项是分析生产清单context少顶层boost_result（值实际在runtime_before中）；真实请求1/0–15和实际pid/CPU/High/EcoQoS/Numba4已有执行断言与快照，Root CONFIGURATION_SCOPE据此接受有限P执行条件，原false不改、不称真实worker或AA配置complete；未来驱动只补元数据context，不为补字段重测，现场完整manifest仍硬门。ROOT_P_AUDIT.integrity_pass=true、chain_point_budget_pass=true、complete_scheduling_gate_pass=false，原范围保持。
+
+Sol分析包装器前有两次0测量启动失败，均不是控制器失败或额外游戏：首次将venv launcher PID当实际Python PID，握手超时、actor未导入；第二次分析p_worker缺main guard，field的multiprocessing子进程重入包装器，warmup退出。原P_ERROR/所有输出保留，分别实际核进程/无pythonw/Prefs/DEMO/registry全净才false。Sol改回已审单实际worker/main-guard编排；两个合同控制环境除三accounting路径全同，__mp_main__导入不执行主程序已检查后另建p_inprocess，才获得本次109拍，未改运行源/绕资源。实际后续53300及三field全PID/create已退、无game、golden/Prefs无差、旧DEMO SHA/mtime同、registry147空/restore_pendingfalse，ROOT_CLEANUP核true后才STATUSfalse，不能用协调器收据代替。
+
+结果回原包给Opus，Sol不与其并行实现。原失败局/停止数据不重开，178姿态现场仍未覆盖。源默认开关、真实input.stats、原7HP首损Q1、键/死亡/日志/资源/真正清理门均不变。
