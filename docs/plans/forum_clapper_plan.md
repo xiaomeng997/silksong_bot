@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.165）：Opus本窗口代码收尾已核，运行源8f9e9629；最后“跳过截止决策拍后误确认起跑”守卫已修，Sol16项相邻小回归通过。交接HANDOFF已更新，源码保持静止，用户通知Opus换窗口后按最新Git/STATUS接续。Sol接手新源受影响P；179真实翻越/交还及178姿态仍未实机验收，无新game gate，不把代码收尾当项目完成。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.166）：压缩后的Opus按交接继续，8f9代码保持静止。固定执行器新源startup与实际退出核通过；两受影响窗口113完整拍P核清，峰11.4882ms，源/签名/时钟/配置/trace完整性及真实清理已核。Sol准备新179-L1单局工程，首损Q1；主验走路怪翻越/真实交还，moving stomp与178各自独立记账。尚无新实机结果，模型命中/名义间隔不当现场通过。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4543,3 +4543,16 @@ R1已真实复现并关闭：旧5573在Run拍序0、3、5、+4未决策、+5首�
 用户要求Opus上下文将满先收尾再换窗口：当前无新工作包/新打法，Opus已在自己的opus/review179/HANDOFF.md列实际源/dirty、检查产物、已知风险、Sol待测P和178独立待验，源码静止；由用户通知开新窗口，Sol不新建或代迁聊天。新窗口先读HANDOFF、最新主计划/workflow/TO_OPUS/STATUS和实际Git，再按最新收据接续；HANDOFF里的代码SHA不当后续文档HEAD或新启动许可。Sol本节在静止窗口只同步main/刀口/TV文档，代码未改。
 
 接下来Sol用冻结executor_v1为当前8f9绑定新case与原p301入口（文件名含5573但业务实际加载8f9），先匹配startup-only和真实退出核验，再只测route与route_early关键连续tick/完整拍；B/C旧109场景无vault事件且调用域未变，不重测无关窗口。新源P尚未运行，game gate仍false；179-L1主验走路翻越/真实交还、moving stomp与178各自机会/覆盖/成功账及至多178-R1后备保持。原停止批/AA/raw/默认开关/7HP首损Q1/input.stats/measurement/资源与真实清理门不变。
+
+
+#### Task179/8f9新源113完整拍P已核，压缩后按交接继续，准备新179-L1（11-05，进度7.166）
+
+用户确认Opus换窗口失败但压缩后视作新窗口继续；seq217已给HANDOFF/最新Git/STATUS/计划入口，源码不重做、不新增打法，测量/游戏期间只读等待。冻结executor_v1本体未改；新adapter只加已核的另一怪实体字段和Control转移事件同步提前一帧的条件场景。新源case、710运行/模型绑定及20输入hash匹配，__mp_main__导入不执行；独立startup实际worker55524及场worker完成ready/close后由finalize核退出、Prefs/golden/旧DEMO/registry无game全净，才允许正式P。准备参数脚本一次解析括号错误发生于全部语句执行前，0worker/0tick/0状态变化，改正后进入固定执行器；不当控制性能失败，执行器未重写。
+
+analysis/task179_8f9e9629_20261105/p_v1实际worker35488串行route56、route_early57，场worker52980/21512，全部实际已退出。原独占/5s静止/原资源门、30s pulse执行，两resource blockers为空；测量实际P0–15/High/Numba4/GetProcessInformation EcoQoSoff、生产send-clock真。两个protocol2完整trace共113拍、动作/收帧完整0overflow/诊断回调错误，全部加载ssbot源hash同、0外来/0新签名；模型/串行synthetic receive/HF/条件敌人限制保留，非现场输入或安全认证。两个raw manifest仍false但只余3个未请求分析accounting路径，worker BOOST/CPUS字段已正确提供并核实；原false不改，真实worker全清单仍必须完整。
+
+整tick峰route11.4882ms/route_early11.3436；原历史lag15.782995/reserve1对应13.550338ms有限点界下113拍均过，最小余量2.06214ms，不是未来时延保证。正常入口2579、提前入口2578都在2582确认实际跑动，2603发J+R（整8.5024/9.4154ms），2611发下劈（7.8174/8.3501），未出现dispatch veto。提前一帧是另一怪的出招时间线条件偏移，既有按键不整体平移。B/C不走本次vault改动，旧644的109P与2604中性Opt1有限核收各保留原源出处，不称重新认证所有ordinary慢拍/forced n_safe0。ROOT_P_AUDIT和FINALIZED核上述执行及真实清理，STATUSfalse/无活动锁后准备下一步。
+
+仅另建一局新源/新合同/新namespace179-L1，复用已核单局Launcher生命周期与原工程profile、7HP/HP<=6真实Q1/1episode/measure协议2；源8f9/当前执行HEAD/脚本/模型/配置/预算和实际worker input.stats bootstrap必须绑定。主验走路怪翻越及实际hit/pogo/交还，moving stomp与178姿态分账；178无自然机会时按7.146/7.162已有至多一次178-R1后备，不以179替代。旧786/3b停止/失败原件不重开，新条件包括179及时L2路线、移动支撑及计时修正，不能用旧局再命名。真实敌人停/退、钩后高度/保护和名义小间隔留给本次有界观察，第一新链损血即停定位，不续打凑成功。
+
+无人值守沿用用户“我不在家，你开实机不用等我”的明确授权，STATUS中早期watched-start布尔已按该后续指令纠正并留原值，不再要求用户重复点开。Windows核心进程不操作；精确身份背景分类、其它0.5核/并行实验/STOP/练习标记门不变。Launcher/WMI自有隐藏辅助、活动锁先核不双起，游戏/测量期间只读收信，不并行重算或终止用户进程。W本节文档同步后至本局真实清理完成冻结HEAD，只有实际golden/Prefs/旧DEMO/worker/game/registry全核后false。
