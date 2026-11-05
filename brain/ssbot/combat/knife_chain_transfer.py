@@ -300,7 +300,10 @@ def contact_body_witness(enemy,frames):
     leaves that frame and every later one without a witness. Hit recoil is not
     modelled (the transform slides about 4 frames with vel 0). None when the
     observed collider does not match the fitted pose at its clock, facing and
-    root, or a field is unknown.
+    root, when it does not stand on the floor (beyond the bottom change its
+    root may still be settling from), when the clock of a timed state is past
+    its longest supported duration (outside the fit, never its successor), or
+    when a field is unknown. Usable domain: grounded still Clappers in w13.
     """
     know,successor,(wall_l,wall_r),floor=_body_knowledge()
     cs=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
@@ -321,7 +324,14 @@ def contact_body_witness(enemy,frames):
         return (min(xa,xb),y+float(b[2]),max(xa,xb),y+float(b[3]))
 
     k=int(round(tin*60.))
+    if st!="Idle":
+        # Idle's one fitted pose holds at any clock; a timed pose seen past its
+        # longest supported duration is outside the fit (178-R1).
+        dur=know.durations(st)
+        if dur is None or k>=dur[2]:return None
     if not any(max(abs(a-o) for a,o in zip(world(st,j),observed))<=POSE_MATCH_U for j in (k-1,k,k+1)):return None
+    bottoms=[float(know.box(st,max(j,0))[2]) for j in range(k-3,k+2)]
+    if abs(float(observed[1])-floor)>max(bottoms)-min(bottoms)+POSE_MATCH_U:return None
 
     def standing(state,j):
         x0,_,x1,_=world(state,j);b=know.box(state,max(j,0))

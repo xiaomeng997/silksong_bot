@@ -29,6 +29,8 @@ def policy(e):
             "schedule":{"batch":"sample","attempts":[{"order":0,"arm":"B"}]}}}}})
     chain=SimpleNamespace(b2=True,runner_factory=lambda:None,arm="B",profile=SimpleNamespace(short_frames=12,fast_hook=False,fixed_hook=False),
         probe_ref="sample-probe",budget=budget,episode=2,_environment=tuple(sorted(e.items())))
+    # The real NativeManualAirChain.reset() field, built from the same environment (2c binds FACE_HOOK to it).
+    chain._face_hook_mode=e.get("SSBOT_FORUM_CHAIN_FACE_HOOK","0").strip()=="1" and chain.arm=="B"
     return SimpleNamespace(chain_native=chain)
 
 

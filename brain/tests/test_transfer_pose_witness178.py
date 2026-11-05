@@ -112,6 +112,20 @@ def test_slam_antic_witness_stops_where_the_lunge_can_start():
  assert np.isfinite(w[:2]).all() and np.isnan(w[2:]).all()
 
 
+@pytest.mark.parametrize('t,known',[(1.,False),(26/60,False),(25/60,True)])
+def test_a_timed_clock_past_its_supported_duration_is_unknown_not_its_successor(t,known):
+ # Astra 178-R1: the live 2744 Cast 2 (supported 24..26 frames) with only its clock moved.
+ e=target(2744);e['fsms'][0]['t']=t
+ assert (T.contact_body_witness(e,ROWS) is not None)==known
+ assert T.contact_body_witness(clapper('Idle',30.),ROWS) is not None  # Idle's one pose holds at any clock
+
+
+def test_a_body_that_does_not_stand_on_the_floor_is_unknown():
+ lifted=clapper('Cast 2',9/60);lifted['pos'][1]+=2.
+ v=lifted['colliders'][0]['verts_world'];v[1::2]=[y+2. for y in v[1::2]]
+ assert T.contact_body_witness(lifted,ROWS) is None and T.contact_body_witness(clapper('Cast 2',9/60),ROWS) is not None
+
+
 def test_stomp_plan_rolls_the_rows_against_the_pose_witness_and_waits_without_one(monkeypatch):
  r=load_runner();r.run=Run(T.PROGRAM,'air',{'jump_until':0,'side':B['R']})
  e={'vel':[0.,0.],'fsms':[{'name':'Control','state':'Cast 2','t':.15}]}

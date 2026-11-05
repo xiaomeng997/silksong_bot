@@ -658,8 +658,9 @@ def test_air_slice_checks_attacking_destination_and_keeps_delayed_hazards(contac
  s['f']=1040;s['hero'].update(pos=[38.,9.253],box=[37.75,7.7,38.25,9.779],vel=[0.,-2.],
      silk=9,anim={'clip':'Airborne'},can={'attack':True,'input':True})
  s['hero']['tm']['atk_cd']=0.
- # Task 178: an attacking destination whose root stands (Slam 2); a lunging Slam 1 has no pose witness.
- e=fit_pose(s['ents'][1],state='Slam 2',x=38.)
+ # Task 178: an attacking destination whose root stands (Slam 2) inside its supported 4..6 frames; a lunging
+ # Slam 1 has no pose witness.
+ e=fit_pose(s['ents'][1],state='Slam 2',t=2/60,x=38.)
  S=K.initial_state(oldsim.params,38.,9.253,vy=-2.,ground=False)
  sim=ChainSim(S,np.array([B['R']],np.int64),oldsim.hold,oldsim.params,oldsim.terrain,1040,1040)
  n=N.NativeManualAirChain(runner_factory=load_runner,probe_ref='same-target-contact');n.reset(0,start_frame=1040)
