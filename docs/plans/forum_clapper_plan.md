@@ -4185,3 +4185,13 @@ SSBOT_FORUM_CHAIN_FACE_HOOK默认0，reset严格解析0/1，显式1也只B候选
 射线入口以实际S0/HF/prefix、允许应用晚0..2帧、物理相位和观测身体计算；后撤只扣到射线判定时刻的可退距离，含队列/前摇，不盲扣整段或硬写7/8u。体顶和hold共同决定高度带，约6.4u不当通用高度证书。#280更正了#279的针时间钟：按实际锁存P是P+8/9，旧claw_strike注释P为决策钟所以是P+10/11；原件保留，不能混时钟。
 
 Root单次10文件受影响回归314pass/foreign0，其中35个新face-hook有限case为子集，不和Opus27/143或旧151/411相加；E24–31 Idle、初次编译100.93s仅回归墙钟不当P预算。自有pytest45760按PID/create独立核真退出，ownjobs空；没有新P、游戏或合同。Task170只在Opus目录补真正hook接下来两帧的外部几何与最小早跳接口，Root写生产；未支持不得静默跳过其他owner/符文或假称安全。9aadd新源独审待合模型一并做，不把父742的278盖章给新源；默认旧行为、既有严格停止/原批次失败、AA/raw及Windows核心进程不改。
+
+### 7.136 #281已核，真钩当前步与缓存早跳已手合a14cc421/337回归；全owner检查保留目标危险，新源独审171与新P仍待【已处理 Opus #281】
+
+#281/Task170的15工件、4patched、3个169输入及11基线输入hash同；原型19、旧原型26、既有203三个范围分别通过，不当闭环/新生产回归。Root以9aadd为父手合a14cc421：增加knife_chain_face_hook.py，把同Move已发CLAW/已见Harpoon的当前两帧改用既有claw_hook模型变体的增量、锚在实际观测上；包含原有冲刺时序、六物理相位、晚0..2/第二槽、静止/后撤身体，不用空针或自由飞行替代。flags/check_flags全零，不借保护。未知anchor/watch/计划槽或实际sent/seen晚界不合即GeometryUnavailable、原unchecked/recover，不重试同Move。Root没有照用原型的preflight目标豁免：每个变体走geo.scan全owner，包含目标body/move和所有delayed，不能漏目标锤后声称已检。先前9aadd临时unsupported全拒已由真模型替换。
+
+早跳绑同FACE_HOOK默认0/B-only，没有独立prototype开关。只在ground接近拍对现成单recipe展开一次，找到钩脸带后把结果存Run，下一拍从缓存起跳，发J拍不重建；失败按射程缺口/接近速度等待（最多36帧）或目标状态变化再试。关闭时不构建。实际可选空中冲刺仍旧入口，早跳展开不含空中冲刺，尚不能称三个距离组合全覆盖。缓存只是偏好，不代替实际第一Jdeadline、逐拍几何或真实命中；动态空中接触/骑乘模型仍未证，不把目标普通跳一律放行当命中。
+
+Root单次11文件337pass/foreign0，58个face/step项为子集，不和旧314或Opus19/26/203相加；新增全目标危险、sameMove/槽/seen晚界与关闭不建场反例。E12.52s只是缓存编译后的回归墙钟，不当P。15188按PID/create独立核退出，STATUSfalse/ownjobs空。710 runtime/261模型、865小快照、六文件combined_delta（独审基线为已核742）在analysis/face_hook281_port_20261104/REVIEW_PACKET；Task171只做当前完整增量源审与关键反例，不重跑矩阵。默认仍关闭，独审在途不当通过；旧742/278不能给a14cc盖章。
+
+Root另已准备p_a14cc421/2609_2610两连续完整_act P草稿，脚本静态compile通过、原真实input文件hash核同，FACE_HOOK=1绑定；S0/HF在planner边界仍注入原录制（重建差需据实保留），第二拍prefix来自第一拍自己的成功包。只允许消费首次差异包可能生效前的原始STATE，不能喂分叉生效后的录像未来。P_ENABLE不存在/未执行；需当前源审通过、重新实绑脚本/配置/预算与原资源门/独占/cleanup后才跑。此草稿不当P通过、全AB预算或实机许可，旧失败停止批/AA/raw不改。
