@@ -120,4 +120,5 @@ def test_invalid_identity_or_frame_is_not_silently_normalized(origin,failed,ta):
 
 
 def test_wrong_family_is_rejected():
-    with pytest.raises(ValueError):FailureExposure(MoveInstance(7,100,"CC_JUMP"),105,110,1.)
+    # CC_JUMP became a supported source family with Task 178 (live 786766c3 SWITCH entry); an evade is no attack
+    with pytest.raises(ValueError):FailureExposure(MoveInstance(7,100,"CC_EVADE"),105,110,1.)

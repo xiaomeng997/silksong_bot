@@ -16,8 +16,12 @@ from .knife_chain_commitment import MoveInstance
 _SLAM_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2","Slam Recover"})
 _JUMP_CAST_STATES=frozenset({"Cast Slam Antic","Cast Slam Antic 2","Cast Jump","Jump Aim","Jump","Air",
                             "Charged?","Slam Effects?","Slam 2","Slam Recover"})
+# The plain jump (are_types.clapper CC_JUMP: Jump Antic + the flight). A SWITCH entry binds it as the source move
+# (live w13_pose178 786766c3: Jump Antic 2549, Air 2580, Slam 2 2628); it is never relabelled as a jump cast.
+_JUMP_STATES=frozenset({"Jump Antic","Jump Aim","Jump","Air","Charged?","Slam Effects?","Slam 2","Slam Recover"})
 _FAMILIES={"CC_SLAM":(_SLAM_STATES,"Slam Antic"),
            "CC_JUMP_CAST":(_JUMP_CAST_STATES,"Cast Slam Antic"),
+           "CC_JUMP":(_JUMP_STATES,"Jump Antic"),
            "CC_CAST":(frozenset({"Spell Antic","Cast 1","Cast 2"}),"Spell Antic")}
 # Same clock-identity uncertainty already used by the h2 B2 observer. This is
 # identity evidence only: it never changes a hazard/protection/attack window.
@@ -126,6 +130,7 @@ class FailureExposure:
         if st not in states:
             self.last_control=st
             source={"CC_SLAM":"actual Control left slam states","CC_JUMP_CAST":"actual Control left jump-cast states",
+                    "CC_JUMP":"actual Control left jump states",
                     "CC_CAST":"actual Control left small-rune cast states"}[self.move.family]
             self._end(f,"same-move end observed",source);return self
         if st==primary:
@@ -138,7 +143,9 @@ class FailureExposure:
                     self._end(f,"new "+primary+" observed","actual game_time minus Control.t");return self
                 if self._seen_non_antic:
                     self.new_antic_entry_time=entry
-                    source="observed slam phase returned to Antic" if self.move.family=="CC_SLAM" else "observed jump-cast phase returned to Antic"
+                    source={"CC_SLAM":"observed slam phase returned to Antic",
+                            "CC_JUMP":"observed jump phase returned to Antic"}.get(self.move.family,
+                                                                                "observed jump-cast phase returned to Antic")
                     self._end(f,"new "+primary+" observed",source);return self
                 self.unknown_reason=("antic clock before bound instance; end unknown" if entry is not None
                     and self.ta is not None and entry<self.ta-_CLOCK_IDENTITY_SLOP else "same-move end not observed")

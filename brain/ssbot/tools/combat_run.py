@@ -495,6 +495,84 @@ def _measurement_incomplete_detail(data):
             "unresolved":measured.get("unresolved"),"window":measured.get("window")}
 
 
+def _persist_aborted_episode(a, exc, *, run_dir, k, rec, out, policy, link, measurement, reservation, env, game_scale,
+                             recorder, worker_context, code, warmup, runtime_start, secondary_errors):
+    """An episode that raised (live w13_pose178 786766c3: ValueError in policy.act, no attempt, trace or manifest).
+
+    Best effort, in order: the decision ticks before the error, the measurement records collected up to it, the
+    actual configuration, the attempt record. Each is marked aborted with the original error and never complete; a
+    step that fails is a secondary error (origin abort_persist.<step>) and never replaces the episode's exception,
+    which the caller re-raises. Nothing is reconstructed: no formal window, HP total or passing footer is filled in."""
+    import traceback
+    error = {"type": type(exc).__name__, "message": str(exc), "origin": "run_episode",
+             "traceback": traceback.format_exception(exc)[-12:]}
+    text = error["type"] + ": " + error["message"]
+    persisted = {}
+
+    def step(name, fn):
+        try:
+            persisted[name] = fn()
+        except Exception as problem:
+            reason = type(problem).__name__ + ": " + str(problem)
+            persisted[name] = {"failed": reason}
+            secondary_errors.append({"origin": "abort_persist." + name, "reason": reason})
+
+    ring = getattr(policy, "log_abort_ring", None)
+    step("decision_ring", (lambda: {"rows": ring()}) if callable(ring) else (lambda: "not_supported"))
+    trace = None
+    if measurement is not None:
+        trace_path = run_dir / f"measurement_i{a.instance}_e{k}.jsonl"
+
+        def write_trace():
+            nonlocal trace
+            trace = measurement.write(trace_path, aborted=text)
+            return {"path": str(trace_path), "records": trace["records"], "complete": trace["complete"]}
+
+        def write_manifest():
+            from ssbot.train.forum_measure_manifest import configuration_manifest, runtime_manifest
+            manifest = configuration_manifest(Path(__file__).resolve().parents[1], policy,
+                runtime_context={"worker": worker_context, "attempt": rec.b2_context})
+            manifest.update(code=code, instance=a.instance, episode=k, seed=rec.seed, cli=vars(a),
+                            oracle_hello=getattr(link, "hello", None), trace=trace, certified_for_aa=False,
+                            measurement_warmup=warmup, runtime_before=runtime_start, runtime_after=runtime_manifest(),
+                            aborted=error)
+            path = run_dir / f"measurement_manifest_i{a.instance}_e{k}.json"
+            with path.open("x", encoding="utf-8") as mf:
+                json.dump(manifest, mf, sort_keys=True, indent=1, allow_nan=False, default=str)
+                mf.write("\n")
+            return {"path": str(path), "configuration_complete": manifest["configuration_complete"]}
+
+        step("measurement_trace", write_trace)
+        step("measurement_manifest", write_manifest)
+
+    def write_attempt():
+        from ssbot.train.episode import HARNESS_FAIL
+        d = asdict(rec)
+        # run_episode's own convention for an episode an exception ended (its caught OracleError / RuntimeError ...):
+        # HARNESS_FAIL with the error as the reason; whatever the record said before stays beside it
+        d.update(outcome_before_abort=d.get("outcome"), reason_before_abort=d.get("reason"), outcome=HARNESS_FAIL,
+                 reason=text)
+        if reservation is not None:
+            d["b2_reservation"] = reservation
+        d.update(instance=a.instance, episode=k, env=env, time_scale=a.time_scale, time_scale_game=game_scale,
+                 recording=str(recorder.path) if recorder is not None else None,
+                 t=datetime.now().isoformat(timespec="seconds"), worker_execution=worker_context,
+                 aborted=error, complete=False)
+        if measurement is not None:
+            d["measurement"] = {**{key: value for key, value in (trace or {}).items() if key != "diagnostics"},
+                                "complete": False, "aborted": text,
+                                "window": measurement.window.snapshot() if measurement.window else None}
+        d["abort_persisted"] = dict(persisted)
+        if secondary_errors:
+            d["secondary_errors"] = list(secondary_errors)
+        out.write(json.dumps(d, default=str) + "\n")
+        out.flush()
+        return "written"
+
+    step("attempt", write_attempt)
+    return persisted
+
+
 def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error, primary_error_origin=None, secondary_errors=()):
     """Try every owned resource even if one close fails; never manage game PIDs here."""
     b2=os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1"
@@ -705,9 +783,18 @@ def worker(a: argparse.Namespace) -> int:
             # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
             timebox = (a.timebox or enc.timebox_s) / a.time_scale
             if why is None:
-                run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
-                                                                tuple(a.start_silk) if a.start_silk else None,
-                                                                tuple(a.start_hp) if a.start_hp else None), rec)
+                try:
+                    run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
+                                                                    tuple(a.start_silk) if a.start_silk else None,
+                                                                    tuple(a.start_hp) if a.start_hp else None), rec)
+                except BaseException as exc:
+                    # keep what the episode actually collected, marked aborted; the original error goes on
+                    _persist_aborted_episode(a, exc, run_dir=run_dir, k=k, rec=rec, out=out, policy=policy, link=link,
+                                             measurement=measurement, reservation=reservation, env=env,
+                                             game_scale=game_scale, recorder=rec_obj, worker_context=worker_context,
+                                             code=measurement_code, warmup=measurement_warmup,
+                                             runtime_start=runtime_start, secondary_errors=worker_secondary_errors)
+                    raise
             else:
                 rec.reason = why          # the record's default outcome, HARNESS_FAIL; no episode ran
             d = asdict(rec)

@@ -878,6 +878,16 @@ class PlannerPolicy:
                     fh.write(json.dumps(x) + "\n")
         self._log_buf.clear()
 
+    def log_abort_ring(self) -> int:
+        """An episode that raised: the ticks before it go to the decision log as a hit event's would (the rows as
+        they were recorded; the attempt record names the error). Returns the number of rows written."""
+        n = len(self.ring) if self.log_path is not None else 0
+        if n:
+            self._log_buf.extend(self.ring)
+            self.ring.clear()
+        self.flush_log()
+        return n
+
     def _log(self, s, f, fo, ws, fcast, prefs, res, r, unpred) -> None:
         tr = self.fc.tracker
         rec = {"ep": self.episode, "f": f, "fo": fo, "t": round(ws.stamp.t_game_s, 4),

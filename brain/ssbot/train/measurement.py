@@ -253,8 +253,9 @@ class MeasurementTrace:
                 raise MeasurementError("cannot snapshot measurement during a tick")
             return [dict(row) for row in self._rows]
 
-    def write(self, path: Path) -> dict:
-        """Only between episodes. Failed/truncated writes retain the buffer and raise."""
+    def write(self, path: Path, aborted: str | None = None) -> dict:
+        """Only between episodes. Failed/truncated writes retain the buffer and raise. aborted: the error that ended
+        the episode; the records collected up to it are written and the footer is never complete."""
         with self._lock:
             if self._contexts:
                 raise MeasurementError("cannot write measurement during a tick")
@@ -268,6 +269,8 @@ class MeasurementTrace:
         if self.diagnostics is not None:
             summary["diagnostics"] = self.diagnostics.finish_episode()
             summary["complete"] &= summary["diagnostics"]["complete"]
+        if aborted is not None:
+            summary.update(complete=False, aborted=str(aborted))
         started = self.clock()
         try:
             path = Path(path)
@@ -305,7 +308,9 @@ def validate_trace(path: Path) -> dict:
         problems.append("unsupported schema")
     if footer.get("records") != len(rows) - 2:
         problems.append("record count mismatch")
-    if not footer.get("complete") or footer.get("overflow") != 0:
+    if footer.get("aborted"):
+        problems.append(f"episode aborted: {footer['aborted']}")
+    if footer.get("overflow") != 0 or not (footer.get("complete") or footer.get("aborted")):
         problems.append("incomplete buffer")
     ticks, actions, receive_keys = {}, [], set()
     for row in rows[1:-1]:
