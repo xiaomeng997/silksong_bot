@@ -18,7 +18,7 @@ def flight(*, x=27., y=10.12, vx=0., vy=10.2, target_x=36.5):
     s['hero'].update(pos=[x,y],box=[x-.25,y-1.553,x+.25,y+.532],vel=[vx,vy])
     s['hero']['tm']['dash_cd']=0.
     s['act']['hf'].update(latched=0,desired=0)
-    fit_pose(s['ents'][1],x=target_x)
+    fit_pose(s['ents'][1],t=20/60,x=target_x)  # Idle past Can Evade with her in range: Will Evade shown False
     start=K.initial_state(params,x,y,vx=vx,vy=vy,ground=False)
     sim=ChainSim(start,np.array([0],np.int64),K.HoldState.from_act(s['act']),params,old.terrain,1000,1000)
     r.run.link='air';r.run.v.update(jump_k=0,jump_until=0,air_entry=True)

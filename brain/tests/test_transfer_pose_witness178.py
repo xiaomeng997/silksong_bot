@@ -85,10 +85,44 @@ def test_press_now_row_takes_one_box_per_step_and_skips_unwitnessed_steps(params
  assert T.press_now_row(sim,blind,2742,0,0) is None
 
 
-@pytest.mark.parametrize('state,t',[('Spell Antic',22/60),('Idle',1.),('Cast 1',2/60)])
+def in_range(e):
+ x,y=e['pos'][:2];return [x-.25,y+.5,x+.25,y+2.5]  # a hero box inside her Slam Range
+
+
+@pytest.mark.parametrize('state,t',[('Spell Antic',22/60),('Idle',20/60),('Cast 1',2/60)])
 def test_stable_poses_keep_the_held_observed_body(state,t):
- e=clapper(state,t);w=T.contact_body_witness(e,ROWS);b=body_box(e)
+ e=clapper(state,t);w=T.contact_body_witness(e,ROWS,hero_box=in_range(e));b=body_box(e)
  assert np.allclose(w[:,[0,2,3]],[b[0],b[2],b[3]],atol=T.POSE_MATCH_U)
+
+
+def test_idle_witness_ends_at_her_modelled_exits():
+ # Live w13_pose178 2610: Idle k10, contact planned at k19; she evaded at k17 (15 u/s) and the slash missed.
+ e=clapper('Idle',10/60);w=T.contact_body_witness(e,ROWS,hero_box=in_range(e))
+ assert np.isfinite(w[:5]).all() and np.isnan(w[5:]).all()  # Can Evade (k15) on: Will Evade unknown
+ late=clapper('Idle',18/60);x,y=late['pos'][:2]
+ assert np.isfinite(T.contact_body_witness(late,ROWS,hero_box=in_range(late))).all()  # in range at k>=17: no evade
+ assert np.isnan(T.contact_body_witness(late,ROWS)).all()  # hero range unknown: still open
+ assert np.isnan(T.contact_body_witness(late,ROWS,hero_box=[x+20,y,x+20.5,y+2])).all()  # out of range: still open
+ w=T.contact_body_witness(clapper('Idle',35/60),ROWS,hero_box=in_range(late))
+ assert np.isfinite(w[:4]).all() and np.isnan(w[4:]).all()  # Idle Time (k39) on: she walks
+
+
+@pytest.mark.parametrize('state,end',[('Slam Antic','abort'),('Cast Slam Antic','abort'),('Walk','goto')])
+def test_a_hook_released_into_her_attack_ends_the_run(state,end):
+ from ssbot.combat.claw_strike import CsPlan
+ r=load_runner();r.run=Run(T.PROGRAM,'claw_lock',{'cs':CsPlan(1000,0,1001,0,bb_press=None),'hook_seen_f':1010,
+  'hook_hit_f':1012,'side':B['R']})
+ x=X(r,r.run,NS(F=1030,hero={'hero_accepting_input':True,'anim':{'clip':'Recoil Twirl'}},e=clapper(state,.1)))
+ assert r.P.acts['transfer_hook_release'](x)['do']==end
+
+
+def test_a_hooked_run_keeps_the_provoked_attack_liability_without_a_downslash():
+ from ssbot.combat.claw_strike import CsPlan
+ from tests.test_transfer_motion239 import exposure_fixture
+ n,m,cast,slam=exposure_fixture(sent=False)
+ n.runner.run=Run(T.PROGRAM,'air',{'cs':CsPlan(1000,0,1001,0,bb_press=None),'hook_hit_f':1012})
+ n._recover('transfer face hook released into the target\'s attack or unknown state',1050)
+ assert {e.move for e in n._failure_exposures}=={cast,slam}
 
 
 @pytest.mark.parametrize('field,value',[
@@ -117,7 +151,7 @@ def test_a_timed_clock_past_its_supported_duration_is_unknown_not_its_successor(
  # Astra 178-R1: the live 2744 Cast 2 (supported 24..26 frames) with only its clock moved.
  e=target(2744);e['fsms'][0]['t']=t
  assert (T.contact_body_witness(e,ROWS) is not None)==known
- assert T.contact_body_witness(clapper('Idle',30.),ROWS) is not None  # Idle's one pose holds at any clock
+ assert T.contact_body_witness(clapper("Idle",30.),ROWS) is not None  # Idle has no clock bound; its exits do (rows)
 
 
 def test_a_body_that_does_not_stand_on_the_floor_is_unknown():
@@ -131,11 +165,11 @@ def test_stomp_plan_rolls_the_rows_against_the_pose_witness_and_waits_without_on
  e={'vel':[0.,0.],'fsms':[{'name':'Control','state':'Cast 2','t':.15}]}
  x=X(r,r.run,NS(sim=NS(prefix=np.zeros(1,np.int64)),e=e,F=1002,k=2,ground=False))
  witness=np.zeros((ROWS,4));seen=[];row={'press_F':1003}
- monkeypatch.setattr(T,'contact_body_witness',lambda e,n:seen.append(n) or witness)
+ monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:seen.append(n) or witness)
  monkeypatch.setattr(T,'press_now_row',lambda sim,body,*a:seen.append(body) or row)
  assert r.P.acts['transfer_stomp_plan'](x)=={'do':'goto','to':'strike'}
  assert seen[0]==ROWS and seen[1] is witness and r.run.v['row'] is row
  r.run=Run(T.PROGRAM,'air',{'jump_until':0,'side':B['R']});x=X(r,r.run,x.obs);seen.clear()
- monkeypatch.setattr(T,'contact_body_witness',lambda e,n:None)
+ monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:None)
  assert r.P.acts['transfer_stomp_plan'](x) is None
  assert not seen and 'row' not in r.run.v and r.run.link=='air'  # keep the existing drift/approach, not a recovery

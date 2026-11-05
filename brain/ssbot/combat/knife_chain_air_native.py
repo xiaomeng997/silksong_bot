@@ -777,12 +777,16 @@ class NativeManualAirChain(NativeChainB2):
 
     def _recover(self,reason,frame):
         source=self.commitment
-        if source is not None and source["move"].family=="RUNE_TRANSFER" and self._press is not None:
+        run=self.runner.run
+        hooked=bool(run is not None and run.chain==transfer.PROGRAM and run.v.get("cs") is not None
+                    and type(run.v.get("hook_hit_f")) is int)
+        if source is not None and source["move"].family=="RUNE_TRANSFER" and (self._press is not None or hooked):
             bound=self._transfer_target_moves.get(source["move"])
             if bound is not None:
-                # A successful sent strike explicitly continued against this
-                # observed destination attack. Keep its liability alongside
-                # the original source, but do not ban a fresh counter to it.
+                # A successful sent strike, or this Run's own Harpoon hit that
+                # provoked it (live 2654 -> Slam 1 at 2709), explicitly continued
+                # against this observed destination attack. Keep its liability
+                # alongside the source, but do not ban a fresh counter to it.
                 target,ta=bound
                 origin=max(source.get("responsibility_origin",source["origin"]),target.antic_frame)
                 exposure=super()._failure_exposure(target,origin,frame,ta)
