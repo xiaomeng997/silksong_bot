@@ -4175,3 +4175,13 @@ Root46当前完整_act虽已真选over/绑定源2552且transfer_ready=true，却
 用户进一步明确普通远距离跳可骑上去，不因此全禁待机钩。主要防出钩瞬间后闪、空钩后落地踩符文：默认出钩需留后撤射程余量，不够继续接近。以当前发键排队→生效→Harpoon Antic→射线判定期间的可能后撤位置，与该时刻hero射线原点比较；不盲减完整后撤或未经核定写固定7/8u。原FSM Evade Scuttle15u/s、0.35s及Harpoon横速clamp/decelerate为静态来源，尚未声称该余量已接生产。原安全/真实回执仍保留，不将预测命中当真实命中。
 
 已核#279（Task168B/C）一报告/九源码输入hash同，仅是静态接口映射，没有运行或新预算。最小接线方向为transfer钩前/钩锁链节、绝对CsPlan与CLAW前缀、实际Harpoon/控制/目标命中看守；体顶推出的约6.4u不当认证高度。但不能照建议简单把RUNE_TRANSFER加进B2既有hook-bounce交还：该分支释放commitment并标bounced，transfer会误走下劈完成出口。必须只保存实际hook-only证据，保留同Run到真正DownSlash hit+bounce。另每拍variables会清cs、非ground会改link回air、Native arm只看vault_hook等真实接线边界已登记。Task169在Opus自己的目录给最小原型与有限正反例，Root手合生产；不新建搜索/DSL/池、不重复151/411/高度网格。当前742源及已核278不变，目标钩脸/后撤余量还未上线，未开新P/实机。
+
+### 7.135 #280原型已核，瞄准钩脸运行模块预接9aadd2a1/314回归；默认关闭且缺实际钩步时明确拒绝，早跳/距离选择仍待【已处理 Opus #280】
+
+#280/Task169的12工件、3patched和14基线源码输入hash同，原型27项与旧transfer/vault143项分别通过，仅作有限事务/几何，不合成闭环认证。Root复核后手合三运行文件与一测试文件到9aadd2a1；709 runtime/261模型、863小源码快照/四文件binding/patch在analysis/face_hook280_port_20261104/。CsPlan绝对slot保留，CLAW前缀只放钩链节，实际成功send才arm原watch，同Move不重试；Harpoon hit/控制只记同Run证据，不写DownSlash _hit/_accepted/post_context/bounced。Root另外补实际已见Harpoon和目标hit才允许释放、future-dated hit不入账、未知vel/原始Control时钟拒绝。
+
+SSBOT_FORUM_CHAIN_FACE_HOOK默认0，reset严格解析0/1，显式1也只B候选使用；当前Native对claw/claw_lock仍明确unsupported返回，绝不能拿K两帧自由飞行当已检查的钩锁轨迹。这个守卫是缺口未闭合的实际拒绝，不是仅写注记后照跑。原钩当前步接线前，不能把该预接模块当可上机的钩脸路线。近/中/远默认选择器、早跳一次现成recipe展开/Run缓存、动态空中接触/骑乘仍未完成。
+
+射线入口以实际S0/HF/prefix、允许应用晚0..2帧、物理相位和观测身体计算；后撤只扣到射线判定时刻的可退距离，含队列/前摇，不盲扣整段或硬写7/8u。体顶和hold共同决定高度带，约6.4u不当通用高度证书。#280更正了#279的针时间钟：按实际锁存P是P+8/9，旧claw_strike注释P为决策钟所以是P+10/11；原件保留，不能混时钟。
+
+Root单次10文件受影响回归314pass/foreign0，其中35个新face-hook有限case为子集，不和Opus27/143或旧151/411相加；E24–31 Idle、初次编译100.93s仅回归墙钟不当P预算。自有pytest45760按PID/create独立核真退出，ownjobs空；没有新P、游戏或合同。Task170只在Opus目录补真正hook接下来两帧的外部几何与最小早跳接口，Root写生产；未支持不得静默跳过其他owner/符文或假称安全。9aadd新源独审待合模型一并做，不把父742的278盖章给新源；默认旧行为、既有严格停止/原批次失败、AA/raw及Windows核心进程不改。
