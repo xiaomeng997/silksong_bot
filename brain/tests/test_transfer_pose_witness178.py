@@ -166,10 +166,22 @@ def test_stomp_plan_rolls_the_rows_against_the_pose_witness_and_waits_without_on
  x=X(r,r.run,NS(sim=NS(prefix=np.zeros(1,np.int64)),e=e,F=1002,k=2,ground=False))
  witness=np.zeros((ROWS,4));seen=[];row={'press_F':1003}
  monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:seen.append(n) or witness)
- monkeypatch.setattr(T,'press_now_row',lambda sim,body,*a:seen.append(body) or row)
+ monkeypatch.setattr(T,'press_now_row',lambda sim,body,*a,**kw:seen.append(body) or row)
  assert r.P.acts['transfer_stomp_plan'](x)=={'do':'goto','to':'strike'}
  assert seen[0]==ROWS and seen[1] is witness and r.run.v['row'] is row
  r.run=Run(T.PROGRAM,'air',{'jump_until':0,'side':B['R']});x=X(r,r.run,x.obs);seen.clear()
  monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:None)
  assert r.P.acts['transfer_stomp_plan'](x) is None
  assert not seen and 'row' not in r.run.v and r.run.link=='air'  # keep the existing drift/approach, not a recovery
+
+
+def test_a_row_that_grazes_her_body_margin_before_contact_is_skipped():
+ # Live w13_pose178 2679 (hook follow-up): the toward row's hero box came 0.444 u from her front at 2682, inside the
+ # external step's 0.5 u margin before contact-2, and the Run recovered; the release row stayed 0.61 u away.
+ body=np.array([34.517,3.015,37.731,6.916])
+ near=np.array([[33.573+.05*i,6.773,34.073+.05*i,8.852] for i in range(8)])  # 0.444 u off her front at step 3
+ far=np.array([[33.408,6.773,33.908,8.852]]*8)  # 0.609 u off
+ assert T.grazes_body(near,body,5) and not T.grazes_body(far,body,5)
+ assert not T.grazes_body(near,body,1)  # contact-2..contact is the external step's target exemption
+ rows=np.full((8,4),np.nan);rows[2:]=body
+ assert not T.grazes_body(near,rows,2) and T.grazes_body(near,rows,5)  # unknown rows are left to the external step

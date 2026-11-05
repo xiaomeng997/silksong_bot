@@ -31,7 +31,7 @@ def test_known_stationary_target_keeps_existing_three_row_witness(monkeypatch,st
  e={'vel':[0.,0.],'fsms':[{'name':'Control','state':state,'t':0.}]}
  x=X(r,r.run,NS(sim=NS(prefix=[0]),e=e,F=1002,k=2,ground=False));row={'press_F':1003}
  monkeypatch.setattr(T,'contact_body_witness',lambda e,n,**kw:[[0.,0.,1.,1.]]*n)  # Task 178: the pose witness
- monkeypatch.setattr(T,'press_now_row',lambda *a:row)
+ monkeypatch.setattr(T,'press_now_row',lambda *a,**kw:row)
  assert r.P.acts['transfer_stomp_plan'](x)=={'do':'goto','to':'strike'}
  assert r.run.v['row'] is row
 

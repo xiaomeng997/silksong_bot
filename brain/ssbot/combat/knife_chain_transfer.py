@@ -387,7 +387,7 @@ def contact_body_witness(enemy,frames,idle_no_evade=False):
     return out
 
 
-def press_now_row(sim,body,F,hold,side):
+def press_now_row(sim,body,F,hold,side,attacking_target=False):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
 
     Try the existing toward row first. Only on failure try releasing direction
@@ -423,10 +423,30 @@ def press_now_row(sim,body,F,hold,side):
             poly=np.array([[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]])
             if all(PM.meets(PM.slash_poly(face,alt)+ro.pos[0,j],poly)
                     for face in (-1,1) for alt in (False,True)):
+                if attacking_target and grazes_body(ro.box[0],body,j-2):break  # rejected there: try the next row
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
                            contact_velocity=ro.vel[0,j].tolist())
                 return row
     return None
+
+
+def grazes_body(boxes,body,until):
+    """The hero box enters her body grown by FOCUS_M on a step before `until` (contact-2).
+
+    The external step scans the target body with that margin up to its
+    target-contact exemption (contact-2..contact), so such a row is rejected
+    there and the Run would recover (live w13_pose178 2679: the toward row came
+    0.444 u from her front; the release row struck from 0.61 u). One box held
+    still or one per step (nan: not checked here; the external step still is).
+    """
+    from .forum_v2 import FOCUS_M
+    body=np.asarray(body,float)
+    for i in range(1,min(until,len(boxes))):
+        b=body if body.ndim==1 else body[i] if i<len(body) else None
+        if b is None or not np.isfinite(b).all():continue
+        h=boxes[i]
+        if h[0]<b[2]+FOCUS_M and h[2]>b[0]-FOCUS_M and h[1]<b[3]+FOCUS_M and h[3]>b[1]-FOCUS_M:return True
+    return False
 
 
 def air_approach_keys(x):
@@ -616,7 +636,8 @@ def register(prims):
             x.v["idle_in_range"]=seen;no_evade=seen[2] is not None and k0>=seen[2]+RANGE_LAG_F
         body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade)
         if body is None:return None
-        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"])
+        # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
+        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES)
         if row is not None:
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
