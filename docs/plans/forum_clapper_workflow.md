@@ -184,6 +184,7 @@ Opus负责准备并跑通功能场景；Sol统一执行正式性能测量。
 正式性能结果并入原工作包，不为每份收据另开一次任务。
 
 用户11-05补充：Sol维护固定测量执行器，后续主要传场景、已核源码/配置和输出路径，复用实际worker PID/main-guard/独占/暂停/资源/关闭流程。执行器或场景入口有变化时，先做非计时最小启动与退出检查，再进入正式窗口：实际Python PID/create来自进程内部，区别venv启动器；multiprocessing导入主模块不重复执行主程序；真实policy/辅助worker能就绪、关闭并核真退出。预检只验证外壳生命周期，不替代功能/性能/现场门。预检与正式运行都保留失败原件，0测量启动失败不记控制性能失败；入口不变且证据仍适用时不重复无关检查。
+当前固定实现：`C:/ssbot/data/m2_play/clapper_plan/sol/performance/executor_v1.py`；场景入口协议为同目录`ENTRY_PROTOCOL.json`，发布指纹与最小真实启动/退出收据见`RELEASE_v1.json`。正式入口用case/source/output参数，执行器/入口变化后先check再finalize，measure拒绝过期凭据。
 
 
 8. 实机验收
