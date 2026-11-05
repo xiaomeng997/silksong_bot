@@ -4,6 +4,9 @@ from __future__ import annotations
 import math
 
 DOWN = {"DownSlash", "DownSlash New", "DownSlashAlt"}
+# The game's own quit-to-menu path after a real quit: Quit_To_Menu, then hero/game None, then Menu_Title (live
+# e390 3555..3592, e4 2987..3024). Sending the quit keys is not this; a paused gameplay scene is not this.
+QUIT_SCENES = frozenset({"Quit_To_Menu", "Menu_Title"})
 
 
 def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_exposure=False) -> dict:
@@ -54,6 +57,7 @@ def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_e
         if isinstance(hero.get("health"), (int, float)) and isinstance(hero.get("health_blue"), (int, float)):
             previous = hero["health"] + hero["health_blue"]
     game_s = 0.0
+    quit_f, unloaded = None, []
     for f in window:
         state = frames[f]
         dt = state.get("dt")
@@ -61,6 +65,18 @@ def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_e
             problems.append("invalid/missing raw dt")
         else:
             game_s += dt
+        game = state.get("game") if isinstance(state.get("game"), dict) else None
+        scene = None if game is None else game.get("scene")
+        if (quit_f is not None and "hero" in state and state["hero"] is None
+                and (game is None or scene in QUIT_SCENES)):
+            # The game itself showed Quit_To_Menu with the hero loaded and HP read; the character is now unloaded on
+            # that path, so this frame has no HP to read. An HP change here still cannot be checked.
+            if f in hp_delta:
+                problems.append("hp event after real-quit unload")
+            unloaded.append(f)
+            continue
+        if unloaded:
+            problems.append("hero or gameplay scene after real-quit unload")
         hero = state.get("hero") or {}
         h, b = hero.get("health"), hero.get("health_blue")
         if not isinstance(h, (int, float)) or not isinstance(b, (int, float)):
@@ -70,6 +86,8 @@ def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_e
         if previous is not None and previous + change != total:
             problems.append(f"HP conservation mismatch at {f}")
         previous = total
+        if quit_f is None and scene == "Quit_To_Menu":
+            quit_f = f
     if game_s < 0 or (game_s == 0 and not allow_zero_exposure):
         problems.append("zero game exposure")
 
@@ -118,6 +136,8 @@ def audit_states(states, *, wake_f: int, end_f: int, target_ids=(), allow_zero_e
     unknown = sum(not r["down_hits"] and (r["exit_f"] is None or bool(r["boundary_hits"])) for r in denominator)
     L = sum(loss["amount"] for loss in losses)
     return {"complete": not problems, "problems": sorted(set(problems)), "L": L, "T": game_s,
+            "real_quit_unload": None if not unloaded else {"quit_scene_f": quit_f, "first_f": unloaded[0],
+                                                           "last_f": unloaded[-1], "frames": len(unloaded)},
             "HP_per_min": 60 * L / game_s if game_s > 0 else None, "losses": losses,
             "hp_conservation": not problems,
             "hammers": hammers, "hammer_counts": {"entered_slam0": len(denominator), "hit": hit,
