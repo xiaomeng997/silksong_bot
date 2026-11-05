@@ -587,7 +587,7 @@ class NativeManualAirChain(NativeChainB2):
                            and (w["sent_targets"] or w["seen_frame"] is not None))
             if hook_sent:
                 from .knife_chain_face_hook import step_scan
-                scan=step_scan(geo,path,draft.run.v,w,f)
+                scan=step_scan(geo,path,draft.run.v,w,f,state)
                 self._note("transfer_hook_step_checked",frame=f,contacts=len(scan.contacts),complete=scan.complete,
                            source=scan.source,scope="all owners and delayed hazards; current step only; no protection")
             elif attacking:

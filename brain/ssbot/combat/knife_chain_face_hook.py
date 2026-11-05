@@ -49,7 +49,7 @@ def press_anchor(sim, toward, F0, enemy):
     """Decision-time inputs of the hook model, kept in the Run: the free-flight press rows (box centre x, box bottom,
     vx, vy) of a press on either CLAW slot applied 0 .. HOOK_LATE_F frames late (P .. P+1+HOOK_LATE_F), the observed
     target body and its retreat bound."""
-    from .knife_chain_transfer import HOOK_PRESS_AFTER_F, HOOK_LATE_F, retreat_reserve, body_box
+    from .knife_chain_transfer import HOOK_PRESS_AFTER_F, HOOK_LATE_F, retreat_reserve, body_box, control
     tk = B["R"] if toward > 0 else B["L"]
     P = int(F0) + HOOK_PRESS_AFTER_F
     slots = HOOK_LATE_F + 2
@@ -61,7 +61,8 @@ def press_anchor(sim, toward, F0, enemy):
         return None              # no anchor: every later hook step is "unchecked", never a guess
     ft = float(sim.params.frame_time)
     reserve = [float(retreat_reserve(enemy, (P + j - int(sim.f)) * ft, toward)) for j in range(TRACK_F + slots)]
-    return {"P": P, "toward": int(toward), "rows": rows, "body": [float(v) for v in body_box(enemy)],
+    return {"P": P, "origin":int(sim.f), "target_state":control(enemy)[0],
+            "toward": int(toward), "rows": rows, "body": [float(v) for v in body_box(enemy)],
             "iid": int(enemy["iid"]), "reserve": reserve}
 
 
@@ -156,13 +157,65 @@ def step_paths(path, v, watch, f):
     return out
 
 
-def step_scan(geo, path, v, watch, f):
-    """One ContactScan over every variant path through the same B2 all-owner scan (rejection only)."""
-    scans = [geo.scan(q) for q in step_paths(path, v, watch, f)]
-    return ContactScan(scans[0].path_ref, min(s.first_frame for s in scans), max(s.last_frame for s in scans),
-                       tuple(c for s in scans for c in s.contacts),
-                       f"transfer hook step: {len(scans)} variant path(s) of the hooked-Clawline model; "
-                       "B2 all-owner scan; no protection", all(s.complete for s in scans))
+def _hook_body_window(v,watch,f,state):
+    """Measured target-body-off only, with real hit evidence and an absolute attack bound.
+
+    The current raster calls an attacking owner's body `move`, so only inside
+    this bounded window may that label stand for the harmless hooked body.
+    Armed colliders/late Antic, delayed hazards and unknown data never qualify.
+    """
+    from ssbot.map2 import strike as SK
+    from .knife_chain_transfer import HOOK_TARGET_STATES,HOOK_CTRL_LAST_F
+    from .move_data import load_cl_slam
+    a=v.get("hook_press");hit=v.get("hook_hit_f");seen=watch.get("seen_frame")
+    if (not isinstance(a,dict) or type(a.get("origin")) is not int
+            or a.get("target_state") not in HOOK_TARGET_STATES
+            or type(seen) is not int or type(hit) is not int or not seen<=hit<=f
+            or not isinstance(state,dict) or state.get("f")!=f):return None
+    target=getattr(watch.get("move"),"target_iid",None)
+    es=[e for e in state.get("ents") or () if e.get("iid")==target]
+    if len(es)!=1:return None
+    e=es[0];cols=e.get("colliders")
+    if not isinstance(cols,list) or not cols:return None
+    if any(str(c.get("name","")).startswith("Slam Collider") and c.get("enabled") is not False for c in cols):return None
+    clocks=[c for c in e.get("fsms") or () if isinstance(c,dict) and c.get("name")=="Control"]
+    if len(clocks)!=1:return None
+    st=clocks[0].get("state");tin=clocks[0].get("t")
+    known=HOOK_TARGET_STATES|{"Slam Antic","Spell Antic","Cast 1","Cast 2","Jump Antic","Cast Slam Antic","Cast Slam Antic 2"}
+    if (st not in known or type(tin) not in (int,float) or not math.isfinite(tin) or tin<0):return None
+    mins={s.name:min(int(n) for n in s.frames) for s in load_cl_slam().states}
+    first_hammer=mins["Slam Antic"]+mins["Slam 0"]
+    # A natural next move may start before the needle hits: bound from the
+    # admission observation, NOT from an assumed hit-triggered Antic.
+    last=min(a["origin"]+first_hammer-2,seen+HOOK_CTRL_LAST_F+SK.HOOK_BODY_OFF[1])
+    ctrl=v.get("hook_ctrl_f")
+    if type(ctrl) is int:
+        if not hit<=ctrl<=f:return None
+        last=min(last,ctrl+SK.HOOK_BODY_OFF[1])
+    else:
+        h=state.get("hero") or {}
+        if (h.get("hero_accepting_input") is not False
+                or "harpoon" not in str((h.get("anim") or {}).get("clip","")).lower()):return None
+        last=min(last,f+2+SK.HOOK_BODY_OFF[1])
+    if st=="Slam Antic":last=min(last,f+first_hammer-int(math.ceil(tin*60.))-2)
+    first=seen+SK.HOOK_BODY_OFF[0]
+    return (target,first,last) if first<=last else None
+
+
+def step_scan(geo,path,v,watch,f,state=None):
+    """Scan every owner; exempt only the evidence-bound harmless hooked body.
+
+    This never sets an invulnerability flag. Target delayed/armed/unknown and
+    every other owner stay in the scan, including before/after the body window.
+    """
+    scans=[geo.scan(q) for q in step_paths(path,v,watch,f)]
+    window=_hook_body_window(v,watch,f,state)
+    contacts=tuple(c for scan in scans for c in scan.contacts
+        if not (window is not None and c.owner_iid==window[0]
+                and c.kind in {"body","move"} and window[1]<=c.frame<=window[2]))
+    return ContactScan(scans[0].path_ref,min(s.first_frame for s in scans),max(s.last_frame for s in scans),
+        contacts,f"transfer hook step: {len(scans)} variant path(s); all-owner scan; "
+        f"measured hooked-body window {window}; no protection",all(s.complete for s in scans))
 
 
 def early_jump_due(cache, k, target_state):

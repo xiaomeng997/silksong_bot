@@ -372,6 +372,8 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
     from ssbot.map2 import strike as SK
     from . import claw_strike as CS
     from .knife_chain_hook_target import first_ray_body
+    from .rune_bombs import HB_HX
+    from .forum_v2 import FOCUS_M
     info={}
     hero=hero or {};can=hero.get("can") or {};silk=hero.get("silk")
     if can.get("harpoon") is not True:return False,"harpoon unavailable",info
@@ -425,6 +427,9 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
                 ext=max(ext,(x-xp)*toward)
                 row=((x+toward*SK.RAY_U-front-toward*r)*toward,d,h,ac,x,held-CS.FLOOR,r,t)
                 if worst is None or row[0]<worst[0]:worst=row
+                if h==SK.HOOK_THROW_F and (front-x)*toward<HB_HX+FOCUS_M:
+                    info.update(zip(names,row))
+                    return False,"antic drift inside the target body margin",info
                 if not SK.ray_meets(x,held,toward,moved):
                     info.update(zip(names,row))
                     band=moved[1]<held+SK.RAY_BAND[1] and moved[3]>held+SK.RAY_BAND[0]
