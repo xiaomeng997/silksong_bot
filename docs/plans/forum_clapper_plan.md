@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.172）：305运行源5df8711e的接近时限/提前交还已有限源审，Sol9项直接事故回归通过；L2模型改为真实扫描拒绝冲刺后撤离，不能称已接刀成功；L1提前交还旧Slam脚本，modelhurt仍保留。Sol接两个受影响连续窗口P，旧P不重绑；暂不扩大air_direct弹起动画入口，当前无新game gate。179翻越/moving stomp与同iid第二锤现场仍未覆盖，178原有限验收保留。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.173）：305新源5df的两个连续窗口正式P共135完整拍已核，实际运行/功能断言/源/trace/签名及真实清理通过，首J12.4689ms/出刀12.4286ms在原有限点内。撤离/ordinary有超点，按完整串行接收时间线，L2尾段有3包晚1与1跳帧；单拍历史lag压力使2679换向、2761撤离及2765冲刺晚1。只补这些有限迟应用/后继边界，不为超点盲加优化、不放行新游戏。原Defender资源拒测0tick已核销保留，未操作系统进程。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4626,3 +4626,15 @@ Sol直接检查sched304/make_replay_late304及实际late1/late2工件，独立�
 air_direct当前动画门不含DownSpikeBounce且活动转移持键期间不再询问，是既有能力边界。本次不扩大它：实际攻击冷却到2770才解除、旧入口k<=24只剩2770/71窄窗，且现有dash路径已被扫描否决；直接放开动画不是当前撤离修正的必要项，也不能据此宣称可接。后续如证据要求扩大，须另按现有入口语义/全危险/时序支持核，不偷偷改开关或加新动作池。
 
 analysis/task179_5df8711e_20261105保存SOURCE_REVIEW、SOURCE_PACKET（710项/仅两运行与表文件变化、261模型不变）、ACTIVE_INPUT_BINDING、CHECKS及ADAPTER_REVIEW。固定executor不改，新adapter只加两上下文最终路由断言，act强制范围AST与已核v2相同；L1必须2679slam/R、2699J、2720A+D，L2必须2761真实dash拒绝且最终plan向左，防止P测回旧路径。case只测L12673..2735（含2675首次目标Slam守卫）和L22759..2830（含2761准入/否决/后继），同profile串行；不重测旧212/113/109或无关场景。新源入口先startup/finalize再独占P/finalize，原资源/5s静止/30s pulse/实际High4线程EcoQoS/真实清理门保持。当前没有新game gate，原L1/L2停止原件/NO_RETRY不动；Opus源码静止等SolP，不新增实现任务或ACK。
+
+#### #305正式P135完整拍/真实清理已核；只补撤离发键与串行尾段有限迟应用（11-05，进度7.173）
+
+固定executor_v1本体hash58ddebd9...未改。当前源5df/入口1b839e8b...匹配startup-only，真实worker61952及场worker均ready/close、0测量tick，finalize核清。第一次正式尝试p_v1在Defender/MsMpEng5688占1.2128核被原资源门拒绝，0场景/0测量tick；原EXECUTION/RESOURCE/FINALIZED保留，属于资源条件，不是控制性能失败。未操作/豁免系统进程。等待后只读重采无blockers，才在全新p_v2用同一case/预检测量；原独占/5s静止/30s pulse/资源门照旧。
+
+实际Pworker58240，场worker62116/60972，同profile串行L12673..2735共63、L22759..2830共72，合计135实际完整调用，全部协议2 trace完整/0overflow、0异常/外来/新签名，当前710hash与实际加载源同，send_clock_required真；实际P0–15/High/Numba4/GetProcessInformation EcoQoSoff。路由断言L1的2679slam/R、2699slam/J、2720slam/A+D和L2的2761真实dash扫描拒绝→最终plan/L均通过，未强制回旧脚本。原manifest false只三项未请求analysis accounting字段，原false保持，不能代替现场完整清单。FINALIZED核实际worker/两场及所有环境恢复后STATUSfalse/无活动锁。
+
+L1整tick峰16.8177ms，首J2699=12.4689、出刀2720=12.4286，在原13.550338ms有限点内；首次提前交还2679=16.4176。L2峰21.7069ms（ordinary2804），首次撤离2761=18.7633、真实左dash2765=16.4695，多处ordinary超过有限点照录，不只选链拍报预算。额外计算仍需同完整后继排队核，不以关键两拍通过宣布整预算通过。原source/P严格无hit/modelhurt以及录制敌人/合成英雄/HF/receive限制保留，实际伤后NPC可能停表的尾段也不作新路线安全证明。
+
+Root按当前P全部中间tick_start/send_done/tick_end、旧实机真实接收双锚、reserve1ms和忙时latestSTATE独立算串行：L1 idle_p99情景0晚/0跳；L2同情景2822/23/24三个J包晚1、跳过2825，不能仅因J相同就豁免（2821是R+J，2822还含松R边沿）。单独让开工承受历史lag15.782995ms，L12679 R及下一R2680晚1；L22761 L晚1并跳2762；L22765 DASH+L及下一J2766晚1并跳2767。它们是导航/撤离真实边沿，与304三个纯重复保持包不同；所有原J/D/ta绝对clock不顺延。ROOT_P_AUDIT保存这些完整实际cost/serial/stress，complete_scheduling_gate仍false，未把待核涂绿。
+
+同179只给Opus一次有限迟应用核：重用既有FIFO/实际HF与前缀及原点，2679 R、2761 L、2765 DASH分别迟1/2（准时基线复用当前P结果），并核L2尾段实际三晚1+2825跳过的合并输入效果/必要后继。保持原2699/2720等绝对时钟，不把neutral当刹车、不把动作回执当命中，不扩全局普通planner优化/新动作/大矩阵。先判功能和必要域，确实不安全或未知给最小取舍，只有证据要求才改源码；无新P/游戏任务，不重复135。主179走路翻越/moving stomp/同iid第二Slam现场仍未覆盖，178原有限验收不变；当前无新game gate，原L1/L2失败/STOP/NO_RETRY保留。
