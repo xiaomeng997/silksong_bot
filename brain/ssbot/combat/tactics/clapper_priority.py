@@ -2,151 +2,24 @@
 
 One scene chooses a target and contact preference. This does not certify a
 crossing, an escape, repeated pogos, or any future input acceptance.
+
+Task 180: every complete tactic (its applicability, maximum scores, event phases and whole L2 output) is one unit in
+clapper_tactics; the scene facts are clapper_scene's. decide() runs only the shared parts: the observation in the
+declared order, the pick triggers, one comparison of the offers, the winner's commitments, the shared constraints of
+the application, and the logs (clapper_eval: per tactic offered / not applicable and why / excluded by which event /
+filtered by the scene owner).
 """
-import math
 import os
 from dataclasses import replace
 
-import numpy as np
-from ssbot.combat import forum_v2, two_play
+from ssbot.combat import two_play
 
-from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X, clapper_facing
-from .modes import EVADE, EntryAttack, ReturnRequest, entry_attack_prefs
-from . import clapper_middle
-
-JUMPS = {"CC_JUMP", "CC_JUMP_CAST"}
-NEAR = {"Slam Antic", "Spell Antic"}
-AIR = {"Jump", "Air"}
-DEFAULT_SCORES = {"keep": 50., "intercept": 130., "hold": 140., "near": 110.,
-                  "takeoff": 90., "middle": 70., "retreat": 150., "flip": 80., "overhead": 65.,
-                  "middle_jump": 95., "bait": 145., "return": 145., "back": 70.}
-ANTIC = {"Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2"}
-BAIT_WIDTHS = 2.5          # the person (seq 230): back off about 2.5 visible body widths, return on the take-off
-RETURN_LANDED_S = 0.5      # SSBOT_FORUM_TWO_RETURN_BODY: after the landing in the gap the narrowing stays this long
-
-
-def cluster_route(tac, subjects, geo, hx, t, mem, middle):
-    """Task 179 #310 (the person, seq 230): both Clappers beyond her and one of them in a jump antic.
-
-    bait: back off outward BAIT_WIDTHS visible body widths (the cluster member nearer to her; the damage-box body
-    span, not the hammer or render bounds) from where she stood when the antic was first seen, capped by the
-    existing wall clearance (tac._clamp). return: on the OBSERVED take-off (Jump / Air, never a guessed one) the
-    grounded one is the target with an ordinary side entry (existing ground approach and ground_stance). The route
-    ends with that jump; the grounded one starting its own attack or jump ends it (existing rules then). Between the
-    two (clapper_middle) it never starts. An intent only: every key still goes through the existing action checks."""
-    ctx = mem.get("cluster")
-    by_id = {s.iid: s for s in subjects}
-    if ctx is not None:
-        j, g = by_id.get(ctx["jumper"]), by_id.get(ctx["grounded"])
-        why = ("actor gone" if j is None or g is None else
-               "jump ended" if j.family not in JUMPS or tac.t_commit.get(j.iid) != ctx["move"][1] else
-               "grounded one started " + str(g.state) if g.family in JUMPS or g.state in NEAR | AIR else None)
-        if why is not None:
-            mem["cluster_end"] = dict(ctx, end=why, end_t=t, end_hx=hx)
-            ctx = None
-        elif ctx["phase"] == "bait" and j.state in AIR:
-            ctx.update(phase="return", return_t=t, return_hx=hx, return_state=j.state)
-    if ctx is None and middle is None and geo is not None and geo["region"] in ("left", "right"):
-        jumping = [s for s in subjects if s.family in JUMPS]
-        if len(jumping) == 1 and jumping[0].state in ANTIC:
-            j = jumping[0]
-            g = next(s for s in subjects if s.iid != j.iid)
-            if g.state not in NEAR | AIR:
-                out = -1 if geo["region"] == "left" else 1
-                near = geo["low"] if out < 0 else geo["high"]
-                a, b = geo["bodies"][near.iid]
-                want = hx + out * BAIT_WIDTHS * (b - a)
-                bait = tac._clamp(want)
-                ctx = {"move": [j.iid, tac.t_commit.get(j.iid)], "jumper": j.iid, "grounded": g.iid,
-                       "phase": "bait", "out": out, "width_u": b - a, "width_of": near.iid, "widths": BAIT_WIDTHS,
-                       "hx0": hx, "want_x": want, "bait_x": bait, "wall_capped": abs(bait - want) > 1e-9,
-                       "started_t": t, "reference": "hero x at the first antic tick + out * widths * body span"}
-    mem["cluster"] = ctx
-    return ctx
-
-
-def standing_gap(geo):
-    """Whether the bodies' gap holds the existing middle standing footprint (JT gap_u plus a pad each side, as
-    clapper_middle._standing); None when the bodies are unknown."""
-    if geo is None:
-        return None
-    from .gauntlet import JT
-    (_, b1), (a2, _) = geo["bodies"][geo["low"].iid], geo["bodies"][geo["high"].iid]
-    return a2 - b1 - 2 * JT["pad"] >= max(JT["gap_u"], geo["left"] + geo["right"])
-
-
-def return_pose(tac, target, geo, hx):
-    """Task 179 #313: where 'back' puts her for one target, from the CURRENT bodies (not the roots' midpoint).
-
-    ground: a standing gap (standing_gap): the existing ground_stance on the target's gap side. air: above the target's
-    body at the seam between the two (inside its body span, so a down-slash from there meets it), the existing stomp
-    style. crossed: the body between her and the seam (she passes it, a non-target is not hit on the way)."""
-    low, high = geo["low"], geo["high"]
-    (_, b1), (a2, _) = geo["bodies"][low.iid], geo["bodies"][high.iid]
-    seam = .5 * (b1 + a2)
-    crossed = low if hx < seam else high
-    stand = ground_stance(tac, target, seam, geo) if standing_gap(geo) else None
-    if stand is not None:
-        return dict(posture="ground", stance=float(stand), crossed=crossed.iid, seam=float(seam), gap=float(a2 - b1))
-    a, b = geo["bodies"][target.iid]
-    return dict(posture="air", stance=float(min(b, max(a, seam))), crossed=crossed.iid, seam=float(seam),
-                gap=float(a2 - b1))
-
-
-def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, frame=None):
-    """Task 179 #313 / #314 (the person via Sol seq 233-237): after a near attack, back between the two.
-
-    A Clapper move (TWO_ATTACK_FAMS) is near when she was within TWO_SLAM_RANGE_U of its root on any tick of it; its
-    end (the family leaves the attack families) makes the return due, whatever came before (she jumped out of the
-    middle, or the two overlapped from the start), on the ground or in the air - unless she is between the roots
-    with a standing gap then (on the ground there, or over a body's inner half as live 2626's pogo: the ordinary
-    scene goes on). Between the roots without one she still needs the seam (Root's #313 probe: H 20.75 / y 9, roots
-    20 / 21.5). While due it is offered when nothing else holds the scene (quiet_from: no middle-jump event,
-    cluster route or intercept hold), neither Clapper is in an attack family, and no jump cast's circle still to
-    burst lies over the destination (the circle is in front of the cast's facing, tac.rune). The pose follows the
-    current bodies (return_pose): ground in a standing gap, else air at the seam until they part. Done only once she
-    has landed (grounded: the hero's ground contact) in the standing gap; in the air over an open gap it goes on
-    (a gap that closes again before she lands gives the air pose back), and a new near move makes it due again. An
-    intent only: every key, crossing and landing still goes through the existing checks and owners."""
-    from .gauntlet import TWO_ATTACK_FAMS, TWO_SLAM_RANGE_U
-    moves = mem.setdefault("moves", {})
-    roots = [float(s.pos[0]) for s in subjects]
-    for s in subjects:
-        m = moves.get(s.iid)
-        if s.family in TWO_ATTACK_FAMS:
-            if m is None or m["family"] != s.family:          # a direct follow-up keeps the earlier nearness
-                moves[s.iid] = m = {"family": s.family, "start_t": t, "near": bool(m and m["near"])}
-                if frame is not None:
-                    m["start_f"] = frame                       # SSBOT_FORUM_TWO_RETURN_AIR only
-            m["near"] = m["near"] or abs(float(s.pos[0]) - hx) <= TWO_SLAM_RANGE_U
-        elif m is not None:
-            del moves[s.iid]
-            if m["near"] and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
-                mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False,
-                                   **({} if frame is None else {"end_f": frame}))
-    due = mem.get("back")
-    if due is None or geo is None or quiet_from is not None:
-        return None
-    if any(s.family in TWO_ATTACK_FAMS for s in subjects):
-        return None
-    room = {s.iid: (float(s.pos[0]) - geo["xa"] if s.iid == geo["low"].iid else geo["xb"] - float(s.pos[0]))
-            for s in subjects}
-    target = max(subjects, key=lambda s: (room[s.iid], -abs(float(s.pos[0]) - hx)))   # as the "middle" rule
-    pose = return_pose(tac, target, geo, hx)
-    if pose["posture"] == "ground" and geo["region"] == "middle" and grounded:
-        # landed in the standing gap itself (crossing a root in the air over a body, or hanging over an open gap, is
-        # not yet back: live 2812 closed the gap right after; Root's #313 probe re-closed it before the landing)
-        if due["offered"]:
-            mem["back_end"] = dict(due, end="landed in the standing gap", end_t=t, end_hx=hx)
-        mem["back"] = None
-        return None
-    circle = [s.iid for s in subjects if s.iid in tac.rune and t <= tac.rune[s.iid][3]
-              and (pose["stance"] - tac.rune[s.iid][0]) * tac.rune[s.iid][1] > 0]
-    if circle:
-        return None
-    due["offered"] = True
-    return dict(pose, target=target.iid, move=[due["iid"], due["family"]], near_end_t=due["end_t"],
-                outer_room={str(k): float(v) for k, v in room.items()})
+from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, ground_stance,  # noqa: F401
+                            standing_gap)
+from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
+                              TACTICS, Applied, cluster_route, middle_return, return_pose)
+from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X
+from .modes import EVADE, entry_attack_prefs
 
 
 def enabled(fc):
@@ -158,215 +31,91 @@ def enabled(fc):
                     ("SSBOT_FORUM_CHAIN_NATIVE", "SSBOT_FORUM_CHAIN_B2", "SSBOT_FORUM_CHAIN_AIR_MANUAL")))
 
 
-def geometry(tac, ws, subjects):
-    """Observed horizontal standing spans only; unknown boxes stay unknown."""
-    try:
-        hx = float(ws.hero.pos.v[0])
-        if not .8 <= ws.hero.pos.conf <= 1.: return None
-        hurt = np.asarray(ws.hero.hurtbox, float)
-        if hurt.ndim != 2 or hurt.shape[0] < 3 or hurt.shape[1] != 2 or not np.isfinite(hurt).all(): return None
-        left, right = hx - hurt[:, 0].min(), hurt[:, 0].max() - hx
-        xa, xb = map(float, tac.pb.arena_x)
-        if min(left, right) <= 0 or not np.isfinite([hx, xa, xb]).all() or not xa <= hx <= xb: return None
-        bodies = {}
-        for s in subjects:
-            boxes = [b for b in getattr(tac._ent(ws, s.iid), "dmg_boxes", ()) or ()
-                     if b.active is True and isinstance(b.name, str) and b.name.startswith(CLAPPER)]
-            if len(boxes) != 1: return None
-            p = np.asarray(boxes[0].poly, float)
-            if p.ndim != 2 or p.shape[0] < 3 or p.shape[1] != 2 or not np.isfinite(p).all(): return None
-            a, b = float(p[:, 0].min()), float(p[:, 0].max())
-            if a >= b: return None
-            bodies[s.iid] = (a, b)
-        low, high = sorted(subjects, key=lambda s: float(s.pos[0]))
-        lo, hi = bodies[low.iid][1] + left, bodies[high.iid][0] - right
-        region = ("left" if hx + right <= bodies[low.iid][0] else
-                  "right" if hx - left >= bodies[high.iid][1] else
-                  "middle" if lo <= hx <= hi else
-                  "tight" if lo > hi and low.pos[0] <= hx <= high.pos[0] else "over")
-        return dict(bodies=bodies, left=float(left), right=float(right), xa=xa, xb=xb,
-                    low=low, high=high, lo=float(lo), hi=float(hi), region=region)
-    except (AttributeError, TypeError, ValueError, OverflowError):
-        return None
+def _pick(sc, caps):
+    """One comparison of every applicable offer; returns (choices, winner, evaluation log)."""
+    tac, keep = sc.tac, sc.keep
+    choices, evals = [], []
 
+    def offer(rule, target, applicability):
+        cost = tac.rules.clapper_switch_cost if keep is not None and target.iid != keep.iid else 0.
+        choices.append(dict(rule=rule, target=target.iid, maximum=caps[rule], applicability=applicability,
+                            switch_cost=cost, score=caps[rule] * applicability - cost))
 
-def ground_stance(tac, target, hx, geo):
-    if geo is None: return None
-    a, b = geo["bodies"][target.iid]
-    other = geo["high"] if target.iid == geo["low"].iid else geo["low"]
-    c, d = geo["bodies"][other.iid]
-    if hx < target.pos[0]:
-        lo = max(geo["xa"], d if c < a else geo["xa"]) + geo["left"]
-        hi = a - geo["right"]
-    else:
-        lo = b + geo["left"]
-        hi = min(geo["xb"], c if d > b else geo["xb"]) - geo["right"]
-    return (min(hi, max(lo, target.pos[0] + (-1 if hx < target.pos[0] else 1) * tac.rules.face_u))
-            if lo < hi else None)
-
-
-def entry(tac, ws, fc, source, target, t, geo):
-    """Ground room plus the existing forecast window chooses side versus stomp."""
-    if source is None or source.iid == target.iid or source.family not in JUMPS | {"CC_CAST", "CC_SLAM"}:
-        return None, None
-    hx = float(ws.hero.pos.v[0]); stance = ground_stance(tac, target, hx, geo)
-    if stance is not None:
-        arrival = tac.rules.start_s + abs(stance - hx) / tac.rules.run_u_s
-        end = arrival + tac.rules.swing_s + tac.rules.margin_s
-        if end > tac.rules.window_max_s:
-            stance = None
+    for tactic in TACTICS:
+        rec = {"tactic": tactic.name}
+        blocked = [ev for ev in tactic.excluded_by if sc.events.get(ev) is not None]
+        if blocked:
+            rec["excluded_by"] = blocked
         else:
-            times = np.linspace(arrival, end, max(2, int(math.ceil((end - arrival) * 30)) + 1))
-            X = np.full((1, len(times)), stance)
-            occ = np.asarray(fc.occupied(X, np.full_like(X, tac.floor_y), times))
-            if occ.shape != X.shape or occ.dtype.kind != "b" or occ.any(): stance = None
-    kind = "stomp" if stance is None else "side"
-    return EntryAttack(target.iid, kind, source.iid, source.family,
-                       abs(float(source.pos[0]) - hx), t), stance
+            offers, why = tactic.propose(sc)
+            for rule, target, applicability in offers:
+                offer(rule, target, applicability)
+            if offers:
+                rec["offers"] = [rule for rule, _, _ in offers]
+            else:
+                rec["not_applicable"] = why
+        evals.append(rec)
+    for owner in TACTICS:
+        if owner.owns_scene is not None and sc.events.get(owner.event) is not None:
+            # an active scene owner: only its own rules and the ones it allows stay in the pool
+            keep_rules = owner.owns_scene | owner.scores.keys()
+            for rec in evals:
+                if any(c["rule"] not in keep_rules and RULES[c["rule"]].name == rec["tactic"] for c in choices):
+                    rec["filtered_by"] = owner.name
+            choices[:] = [c for c in choices if c["rule"] in keep_rules]
+    winner = max(choices, key=lambda c: (c["score"], keep is not None and c["target"] == keep.iid))
+    return choices, winner, evals
 
 
 def decide(tac, ws, fc, prefs, hx, t):
-    """Choose once, then apply only that scene's scores and stance."""
-    from .gauntlet import RUSH, TWO_SLAM_RANGE_U, TWO_WALL_BAND_U
+    """Observe every event, pick when due (one comparison of all offers), then apply the winner's outputs."""
+    from .gauntlet import RUSH, TWO_SLAM_RANGE_U
     subjects = [s for s in fc.subjects if s.alive and s.in_play and s.pos is not None]
     mem = tac._clapper_priority
-    if mem is None: mem = tac._clapper_priority = {"seen": {}, "intercept": None, "departed": None, "region": None}
+    if mem is None:
+        mem = tac._clapper_priority = {"seen": {}, "region": None}
+        for tactic in TACTICS:
+            mem.update(tactic.memory)
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
-    middle = clapper_middle.observe(tac, ws, subjects, geo, t, mem)
-    route = cluster_route(tac, subjects, geo, hx, t, mem, middle)
-    seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
-                    tac.t_commit.get(s.iid)) for s in subjects}
+    sc = Scene(tac, ws, fc, prefs, hx, t, subjects, mem, geo, region)
+    for tactic in OBSERVE:
+        sc.events[tactic.event] = tactic.observe(sc)
+    sc.seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
+                       tac.t_commit.get(s.iid)) for s in subjects}
     old = tac.goal
-    keep = next((s for s in subjects if old is not None and s.iid == old.target), None)
-    hold = mem["intercept"]
-    if hold is not None:
-        held = next((s for s in subjects if s.iid == hold[0]), None)
-        if (held is None or (held.family in JUMPS and tac.t_commit.get(held.iid) != hold[1])
-                or (held.family not in JUMPS and not (held.iid in tac.rune and t <= tac.rune[held.iid][3]))):
-            mem["intercept"] = hold = None
-    departed = mem["departed"]
-    if departed is not None:
-        leaving = next((s for s in subjects if s.iid == departed[0]), None)
-        if leaving is None or leaving.family not in JUMPS or tac.t_commit.get(leaving.iid) != departed[1]:
-            mem["departed"] = departed = None
-    home = middle_return(tac, subjects, geo, hx, t, mem, "middle jump" if middle is not None else
-                         "cluster route" if route is not None else "intercept hold" if hold is not None else None,
-                         getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND",
-                         getattr(getattr(ws, "stamp", None), "frame", None) if forum_v2.RETURN_AIR else None)
-    changed = seen != mem["seen"] or region != mem["region"] or (home is not None) != mem.get("back_live", False)
-    if middle is not None and (middle.get("decision") or {}).get("route") == "guide":
-        prior = middle["decision"]
-        elapsed = t - middle["antic_at"]
-        source = next(s for s in subjects if s.iid == middle["move"][0])
-        deadline = .48 if source.family == "CC_JUMP" else .88
-        changed |= deadline-elapsed < prior["guide_arrival"]+tac.rules.margin_s
+    sc.keep = keep = next((s for s in subjects if old is not None and s.iid == old.target), None)
+    asked = [tactic.repick(sc) for tactic in TACTICS]
+    changed = sc.seen != mem["seen"] or region != mem["region"] or any(asked)
     if keep is None or changed or tac.n % tac.rules.period == 0:
-        cands = tac.candidates(ws, fc, hx, None if keep is None else keep.iid)
-        by_id = {c.s.iid: c for c in cands}
+        triggers = ((["no focus"] if keep is None else []) + (["subjects changed"] if sc.seen != mem["seen"] else [])
+                    + (["region changed"] if region != mem["region"] else [])
+                    + [tactic.name + " asked" for tactic, ask in zip(TACTICS, asked) if ask]
+                    + (["period"] if tac.n % tac.rules.period == 0 else []))
+        sc.cands = cands = tac.candidates(ws, fc, hx, None if keep is None else keep.iid)
+        sc.by_id = {c.s.iid: c for c in cands}
         a, b = cands
-        room = {a.s.iid: tac._outer_room(a, b), b.s.iid: tac._outer_room(b, a)}
-        default = keep or (min(subjects, key=lambda s: abs(s.pos[0] - hx)) if region in {"left", "right", "over"}
-                           else max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx))))
-        other = next(s for s in subjects if s.iid != default.iid)
-        caps = DEFAULT_SCORES | tac.rules.clapper_scores
-        choices = []
-        def offer(rule, target, applicability=1.):
-            cost = tac.rules.clapper_switch_cost if keep is not None and target.iid != keep.iid else 0.
-            choices.append(dict(rule=rule, target=target.iid, maximum=caps[rule], applicability=applicability,
-                                switch_cost=cost, score=caps[rule] * applicability - cost))
-        offer("keep", default)
-        if middle is not None:
-            mid = middle["decision"] = clapper_middle.choose(tac, ws, fc, geo, hx, t, middle)
-            if mid["route"] == "hold":
-                # A jumper in flight is no hold target: kept as the focus it drew the planner under its landing
-                # (live 786 2580..2606; Task 179, the person 11-05: never the corner). Before take-off: unchanged.
-                jumper = next(s for s in subjects if s.iid == mid["source"])
-                mid["target"] = other.iid if jumper.iid == default.iid and jumper.state in AIR else default.iid
-            offer("middle_jump", next(s for s in subjects if s.iid == mid["target"]))
-        rear = False
-        if keep is not None and other.family in JUMPS and other.state in AIR:
-            rec = tac.jb_land.get(other.iid)
-            ent = tac._ent(ws, other.iid)
-            face = clapper_facing(ent) if ent is not None else None
-            origin, front = (rec[0], rec[1]) if rec is not None else (other.pos[0], face)
-            rear = (front in (-1, 1) and (origin - hx) * (default.pos[0] - hx) < 0
-                    and (hx - origin) * front > 0)
-        if hold is not None and middle is None:
-            offer("hold", next(s for s in subjects if s.iid == hold[0]))
-        elif middle is None and rear and departed != (other.iid, tac.t_commit.get(other.iid)):
-            offer("intercept", other)
-        if keep is not None:
-            previous = mem["seen"].get(other.iid)
-            if other.state in NEAR and seen[other.iid][2] and (previous is None or previous[:3] != seen[other.iid][:3]):
-                offer("near", other, .8 + .2 * max(0., 1. - abs(other.pos[0] - hx) / TWO_SLAM_RANGE_U))
-            # Task 179 #309 (the person 11-05/06, seq 229): leaving the jumper for the other Clapper (a vault / stomp
-            # over it) is a dodge only while she is BETWEEN the two (actual body spans; root positions when a body is
-            # unknown). Both beyond her (wall -> both -> hero -> open) is no switch into the cluster: the existing
-            # retreat / keep stand, her room behind measured from the walls.
-            between = (region in {"middle", "tight"} if geo is not None else
-                       min(float(s.pos[0]) for s in subjects) < hx < max(float(s.pos[0]) for s in subjects))
-            if (middle is None and hold is None and keep.family in JUMPS and keep.state in AIR
-                  and mem["seen"].get(keep.iid, (None, None))[1] not in AIR
-                  and other.family not in JUMPS
-                  and not (other.iid in tac.rune and t <= tac.rune[other.iid][3]) and between):
-                offer("takeoff", other)
-        if middle is None and home is None and region == "middle" and mem["region"] != "middle":
-            offer("middle", max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx))))
-        if middle is None and region in {"left", "right"}:
-            far = geo["high"] if region == "left" else geo["low"]
-            far_room = geo["xb"] - far.pos[0] if region == "left" else far.pos[0] - geo["xa"]
-            back_room = (hx - geo["xa"] - tac.rules.wall_room_u if region == "left" else
-                         geo["xb"] - tac.rules.wall_room_u - hx)
-            if (far_room <= TWO_WALL_BAND_U and back_room >= tac.rules.cast_out_u and any(
-                    s.family in JUMPS and s.state in AIR or (s.iid in tac.rune and t <= tac.rune[s.iid][3])
-                    for s in subjects)):
-                offer("retreat", default)
-            if default.state in NEAR: offer("flip", default)
-        if middle is None and home is None and region == "tight": offer("overhead", default)
-        if home is not None:
-            # Task 179 #313: the near attack is over; back between the two (ground gap: stand and side slash; no gap:
-            # the existing stomp style at the seam until they part). The middle score: the same place it values. It
-            # holds the tight scene too (#314, Root's probe: the overhead root 20 tied it after the switch cost).
-            offer("back", next(s for s in subjects if s.iid == home["target"]))
-        if route is not None:
-            # The route owns this jump event: no outer retreat, intercept, flip or takeoff over it (#310).
-            choices[:] = [c for c in choices if c["rule"] == "keep"]
-            offer(route["phase"], next(s for s in subjects if s.iid == route["jumper" if route["phase"] == "bait" else "grounded"]))
-        winner = max(choices, key=lambda c: (c["score"], keep is not None and c["target"] == keep.iid))
-        target = next(s for s in subjects if s.iid == winner["target"])
+        sc.room = room = {a.s.iid: tac._outer_room(a, b), b.s.iid: tac._outer_room(b, a)}
+        sc.default = (keep or (min(subjects, key=lambda s: abs(s.pos[0] - hx)) if region in {"left", "right", "over"}
+                               else max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx)))))
+        sc.other = next(s for s in subjects if s.iid != sc.default.iid)
+        choices, winner, evals = _pick(sc, DEFAULT_SCORES | tac.rules.clapper_scores)
+        target = sc.subject(winner["target"])
         reason = winner["rule"]
+        won = RULES[reason]
         mem["winner"] = reason
-        if reason == "takeoff":
-            # The focus we intentionally left is still the same jump, even
-            # when it becomes the nonfocus behind us on the following tick.
-            mem["departed"] = (keep.iid, tac.t_commit.get(keep.iid))
-        if reason == "intercept": mem["intercept"] = (target.iid, tac.t_commit.get(target.iid))
-        elif hold is not None and target.iid != hold[0]: mem["intercept"] = None
+        won.commit(sc, reason, target)
+        for tactic in TACTICS:
+            tactic.release(sc, reason, target)
         tac.last["clapper_choices"] = choices
         tac.last["clapper_winner"] = dict(winner)
-        goal = tac._goal(ws, by_id[target.iid], RUSH, t, winner["score"], why="two manual: " + reason)
+        tac.last["clapper_eval"] = {"triggers": triggers, "tactics": evals, "winner": dict(winner, tactic=won.name)}
+        goal = tac._goal(ws, sc.by_id[target.iid], RUSH, t, winner["score"], why="two manual: " + reason)
         if old is not None and old.target == target.iid:
             goal.t_pick, goal.t_goal, goal.landed, goal.entry_attack = old.t_pick, old.t_goal, old.landed, old.entry_attack
-        elif keep is not None and reason not in {"intercept", "hold"}:
+        elif keep is not None and won.switch_entry:
             goal.entry_attack, _ = entry(tac, ws, fc, keep, target, t, geo)
-        if reason == "return":
-            # an ordinary side slash on the grounded one, never a stomp / vault into the cluster
-            src = next(s for s in subjects if s.iid == route["jumper"])
-            goal.entry_attack = EntryAttack(target.iid, "side", src.iid, src.family, abs(float(src.pos[0]) - hx), t)
-        elif reason in ("bait", "back"):
-            goal.entry_attack = None
-        if reason == "middle_jump":
-            mid = middle["decision"]
-            if mid["route"] == "over": middle.setdefault("exit_until", t+2.)
-            previous = goal.entry_attack
-            source = next(s for s in subjects if s.iid == mid["source"])
-            if mid["kind"] is None:
-                goal.entry_attack = None
-            elif not (previous is not None and (previous.target, previous.source, previous.kind) ==
-                      (target.iid, source.iid, mid["kind"])):
-                goal.entry_attack = EntryAttack(target.iid, mid["kind"], source.iid, middle["family"],
-                                               abs(float(source.pos[0])-hx), t)
+        goal.entry_attack = won.pick_entry(sc, reason, target, goal.entry_attack)
         if old is None or old.target != target.iid or old.name != RUSH:
             tac.stats["changes"] += 1
             if old is not None and old.target != target.iid:
@@ -375,43 +124,38 @@ def decide(tac, ws, fc, prefs, hx, t):
                 sk = tac.stats["switch_kinds"]; sk[reason] = sk.get(reason, 0) + 1
         tac.stats["picks"] += 1
         tac.goal = goal
-    mem["seen"], mem["region"], mem["back_live"] = seen, region, home is not None
+    mem["seen"], mem["region"] = sc.seen, region
+    return _apply(sc, RULES[mem["winner"]], mem["winner"])
+
+
+def _apply(sc, won, rule):
+    """Every tick: the shared stance / contact constraints, then the winner's own outputs (Applied, finish) and every
+    event's aftermath (finish)."""
+    from .gauntlet import RUSH
+    tac, ws, fc, prefs, hx, t, geo, subjects = sc.tac, sc.ws, sc.fc, sc.prefs, sc.hx, sc.t, sc.geo, sc.subjects
     g = tac.goal
-    target = next(s for s in subjects if s.iid == g.target)
+    target = sc.subject(g.target)
     g.stance_x, g.vocab, how = tac._spot(ws, target, hx)
     g.face_x = float(target.pos[0])
-    style = None; scene = "attack focus"
+    style = None
     if g.entry_attack is not None:
         age = t - g.entry_attack.picked_at
         if not 0 <= age < 2. or (g.entry_attack.kind == "side" and target.family in JUMPS | {"CC_SLAM"}):
             g.entry_attack = None
         else: style = g.entry_attack.kind
-    if target.family in JUMPS and target.state not in AIR and target.state in {"Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2"}:
+    if target.family in JUMPS and target.state not in AIR and target.state in ANTIC:
         g.stance_x = tac._clamp(target.pos[0] + (-1 if hx < target.pos[0] else 1) * tac.rules.face_u)
         how = "face: hold until takeoff"
-    retreat = mem["winner"] == "retreat"
-    bait = mem["winner"] == "bait" and route is not None
-    back = mem["winner"] == "return" and route is not None
-    pose = return_pose(tac, target, geo, hx) if mem["winner"] == "back" and home is not None else None
-    if retreat:
-        direction = -1 if region == "left" else 1
-        g.stance_x = tac._clamp(hx + direction * tac.rules.cast_out_u)
-        style, scene = None, "outer jump retreat"
-    elif bait:
-        g.stance_x = float(route["bait_x"])
-        style, scene = None, "cluster bait retreat"
-    elif mem["winner"] == "flip":
-        direction = 1 if region == "left" else -1
-        g.stance_x = tac._clamp(target.pos[0] + direction * tac.rules.face_u)
-        style, scene = "stomp", "flip inward intent"
-    elif mem["winner"] == "overhead":
-        g.stance_x = float(target.pos[0]); style, scene = "stomp", "tight middle overhead intent"
-    elif pose is not None:
-        g.stance_x = pose["stance"]
-        style, scene = ("stomp" if pose["posture"] == "air" else None), "middle return " + pose["posture"]
+    ap = won.apply(sc, rule, g, target) or Applied()
+    if ap.stance is not None:
+        g.stance_x = ap.stance
     elif g.entry_attack is not None and style == "side":
         stand = ground_stance(tac, target, hx, geo)
         if stand is not None: g.stance_x = stand
+    if ap.style is not KEEP:
+        style = ap.style
+    if ap.scene is not None:
+        sc.scene = ap.scene
     weights = dict(prefs.weights)
     if prefs.mode == EVADE:
         weights["hit"] /= EVADE_HIT_X; weights["risk"] /= EVADE_RISK_X
@@ -419,62 +163,30 @@ def decide(tac, ws, fc, prefs, hx, t):
     hw = {iid: min(w, tac.local.rules.other_hit_w) if w > 0 and iid != g.target else w for iid, w in prefs.hit_w.items()}
     hw[g.target] = max(hw.get(g.target, 0.), tac.rules.target_hit_w * tac.rules.priority.get(CLAPPER, 1.))
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
-                  weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=mem["winner"],
+                  weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=rule,
                   vocab=frozenset(prefs.vocab) | g.vocab)
-    if back:
-        scene = "cluster return side slash"
-    if retreat or bait or (target.family in JUMPS and target.state in AIR):
-        out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if retreat or bait else {g.target}),
+    if ap.suppress_hits or (target.family in JUMPS and target.state in AIR):
+        # no hit while backing off (the winner's suppression), and never on a target in its jump's flight
+        out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if ap.suppress_hits else {g.target}),
                       entry_attack=None)
     else:
         out = tac._contact_preferences(fc, out, g, target, hx, how)
         out = entry_attack_prefs(out)
-        if back:
-            out = replace(out, no_hit=frozenset(out.no_hit) | {route["jumper"]})
         if style == "stomp":
             kw = dict(out.hit_kw); kw[g.target] = (0., 0., 0., hw[g.target])
             out = replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - {g.target},
                           no_pogo=frozenset(out.no_pogo) - {g.target}, ground_first=frozenset(out.ground_first) - {g.target})
-        if pose is not None and pose["crossed"] != g.target:
-            out = replace(out, no_hit=frozenset(out.no_hit) | {pose["crossed"]})   # passed over, not provoked
+        if ap.no_hit:
+            out = replace(out, no_hit=frozenset(out.no_hit) | ap.no_hit)
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
-    landed = mem.get("back_end")
-    landed = (landed is not None and landed.get("end") == "landed in the standing gap"
-              and 0. <= t - landed["end_t"] <= RETURN_LANDED_S and geo is not None and geo["region"] == "middle"
-              and getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND")
-    if (pose is not None or landed) and forum_v2.RETURN_BODY and all(s.state in forum_v2.RETURN_STATES for s in subjects):
-        # SSBOT_FORUM_TWO_RETURN_BODY (#315, Sol seq 238 G1-a): the return in force (or just landed in the gap, still
-        # standing there: its side slash, w3on 2869) with both seen in Idle / Walk: the other one's idle body may take
-        # the focus margin on the ordinary rows' revocable frames (forum_v2 checks the tracker's own state again on the
-        # frame it builds; every other check keeps the original margins)
-        out = replace(out, return_body=next(s.iid for s in subjects if s.iid != g.target))
-    due = mem.get("back")
-    if (pose is not None and pose["posture"] == "air" and forum_v2.RETURN_AIR and due is not None
-            and all(s.state in forum_v2.RETURN_STATES for s in subjects)
-            and type(due.get("start_f")) is int and type(due.get("end_f")) is int
-            and type(getattr(getattr(ws, "stamp", None), "frame", None)) is int):
-        # SSBOT_FORUM_TWO_RETURN_AIR (#316, Sol seq 239 a): this tick's air return (the actual winner, both seen in
-        # Idle / Walk) after the observed near move that ended: a request for the native B2 owner's existing SWITCH
-        # execution; it is not made on any other tick (pose, target or state changed: the request is gone)
-        if due.get("request_f") is None:
-            due["request_f"] = int(ws.stamp.frame)
-        out = replace(out, return_request=ReturnRequest(int(g.target), int(due["iid"]), str(due["family"]),
-                                                        int(due["start_f"]), int(due["end_f"]), int(due["request_f"])))
-    mid = middle["decision"] if middle is not None else None
-    if mem["winner"] == "middle_jump" and mid is not None:
-        # Apply after legacy face/antic stance helpers, which must not turn a
-        # refused guide or a middle interval into target +/- face_u again.
-        g.stance_x = float(mid["stance"])
-        out = replace(out, stance_x=g.stance_x)
-        scene = "middle jump: " + mid["route"]
-    g.why = g.why.split("; ")[0] + "; " + scene + "; " + str(how)
+    for tactic in TACTICS:
+        out = tactic.finish(sc, rule, tactic is won, g, out)
+    g.why = g.why.split("; ")[0] + "; " + sc.scene + "; " + str(how)
+    logs = {}
+    for tactic in TACTICS:
+        logs.update(tactic.log(sc, out))
     tac.last.update(goal=RUSH, goal_why=g.why, target_type=CLAPPER, goal_t_end=None,
                     entry_attack=None if out.entry_attack is None else vars(out.entry_attack),
-                    clapper_scene=scene, clapper_region=region, clapper_middle=mid,
-                    clapper_cluster=None if route is None else dict(route), clapper_cluster_end=mem.get("cluster_end"),
-                    clapper_back=None if home is None else dict(home, applied=pose, **(
-                        {} if out.return_body is None else {"return_body": out.return_body}), **(
-                        {} if out.return_request is None else {"return_request": vars(out.return_request)})),
-                    clapper_back_end=mem.get("back_end"), clapper_return_body=out.return_body)
+                    clapper_scene=sc.scene, clapper_region=sc.region, **logs, clapper_return_body=out.return_body)
     tac.stats["goals"][RUSH] = tac.stats["goals"].get(RUSH, 0) + 1
     return out

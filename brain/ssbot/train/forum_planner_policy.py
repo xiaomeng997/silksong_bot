@@ -1771,6 +1771,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if self.tac.last.get("clapper_return_body") is not None:
             rec["clapper_return_body"] = self.tac.last["clapper_return_body"]   # SSBOT_FORUM_TWO_RETURN_BODY only
+        for k in ("clapper_eval", "clapper_releases"):
+            if self.tac.last.get(k) is not None:
+                rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases
         if li.get("map") is not None:
             rec["map"] = li["map"]               # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row / readiness this tick
         if self._play_tick is not None:
