@@ -737,6 +737,33 @@ def test_the_way_back_goes_to_the_body_standing_nearer_by_the_observed_landing(m
         assert out.target == want
 
 
+def test_a_body_of_the_plan_gone_ends_it_with_no_error_in_the_tick(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    assert ex.plan is not None
+    ex.name = "over_back"
+    gone = fc.subjects[1]
+    sc = NS(tac=tac, ws=ws, t=ws.stamp.t_game_s, subjects=[fc.subjects[0]], hx=30., geo=None, frame=1, grounded=False, region=None)
+    r.tick(sc)
+    assert gone.iid == 8 and ex.plan is None and ex.status == "invalid" and "gone" in ex.reason
+
+
+def test_a_new_move_of_the_other_one_ends_the_late_followups(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    ex = tac.plan_runner.exec
+    ex.name = "over_back"
+    change(fc, 8, family=G.CC_SLAM, state="Slam Antic", committed=True)
+    go_(tac, ws, fc)
+    assert ex.plan is None and ex.status == "invalid"
+
+
 def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
     # The walker walks up to the jump's hammer between the plan and the take-off: stay is gone, the prepared over runs, by the same
     # plan and with no request.

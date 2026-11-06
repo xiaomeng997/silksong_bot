@@ -535,7 +535,7 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
     # Back to the middle from the air. Landed anywhere, the plan is over: on the walker's far side the rows cannot cross its body
     # (replay m_close stood still there for the rest of the hazard's tail); the ordinary rules go on from where she is.
     phases.append(Phase("over_back", target=W, stance=("middle", W), no_hit=(J,), replaceable=False,
-                        on=(("landed", DONE),)))
+                        on=(("other_gone", INVALID), ("landed", DONE),)))
     return tuple(phases)
 
 
@@ -740,7 +740,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         Phase("lure_behind", target=jid, stance=("behind",), ground=True, replaceable=False,
               on=(("hazard_over", "lure_slash"),)),
         Phase("lure_slash", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
-              on=(("in_reach", DONE),)),
+              on=(other_move, ("in_reach", DONE),)),
         Phase("attack_aim", target=(f_a or {}).get("target", gid), attack="side", stance=("front", (f_a or {}).get("target", gid)),
               no_hit=(() if (f_a or {}).get("target", gid) == jid else (jid,)),
               on=(("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)),
@@ -749,7 +749,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
               on=(("back_jumper", "attack_back_jumper"), ("back_other", "attack_back_other"))),
         Phase("attack_back_jumper", target=jid, attack="side", stance=("front", jid), replaceable=False, on=(("in_reach", DONE),)),
         Phase("attack_back_other", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
-              on=(("in_reach", DONE),)),
+              on=(other_move, ("in_reach", DONE),)),
     ]
     if f_l is not None and f_l.get("guide") is not None:
         take = (("takeoff_return", "lure_return"), ("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)
@@ -951,6 +951,9 @@ class PlanRunner:
             self.send_s = roller.off * roller.dt
         self._take_result(sc)
         plan = ex.plan
+        if plan is not None and plan.get("other") is not None and all(v.iid != plan.get("other") for v in sc.subjects):
+            ex.end("invalid", "the plan's other body is gone", t)   # (a phase may target it: no output names a body that left)
+            plan = None
         inst = None if plan is None else self._instance_of(sc, plan.instance[0])
         ex.step(t, lambda ph: self._events(sc, ph), self._values(sc), inst)
         self._resolved = None
