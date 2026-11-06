@@ -972,10 +972,10 @@ class RangeTracker:
         """SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #321, Sol seq 245): an idle Clapper's known standing poses in both
         facings at look-ahead k - _jb_turn_mask (turn_u each side of the root, the floor to BODY_TOP_U) at its root
         carried as estimate() carries its body now (IDLE_CARRY: the velocity now for k frames, carry_shift's wall
-        clip). The recorded Idle / Walk bodies of either facing lie inside that box (Idle front 2.25 u, Walk back 2.05-
-        2.25 u, tops 6.19-6.92: a turn or the walk cycle moves an edge up to 0.9 u and the top 0.72 u). None outside
-        that domain: not a tracked Clapper, in a move instance, or a body now not inside the box (the caller keeps the
-        original layer). A shape bound, not a forecast of its walk or of a reversal."""
+        clip). The recorded Idle / Walk bodies of either facing lie inside that box (fronts 2.05-2.25 u, backs 1.34 u
+        from the root, tops 6.19-6.92: a turn or the walk cycle moves an edge up to 0.91 u and the top 0.72 u). None
+        outside that domain: not a tracked Clapper, in a move instance, or a body now not inside the box (the caller
+        keeps the original layer). A shape bound, not a forecast of its walk or of a reversal."""
         from ssbot.core.forum import FLOOR_Y
         x = self.now.get(iid)
         if x is None or x[0] != _jb.CLAPPER or x[2] is not None:

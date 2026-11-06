@@ -1,9 +1,10 @@
 """Task 179 #321 (Sol seq 245): SSBOT_FORUM_TWO_RETURN_BODY's narrowed body in stack_ret is the body joined with its
 known standing poses in both facings - RangeTracker.standing_body, attack_range._jb_turn_mask at the root carried as
 estimate() carries the body (IDLE_CARRY, carry_shift's wall clip). Recorded case (w13_observe_bait, Clapper 335476):
-standing Idle facing left at 2835, at 2836 it turned to walk right and its body changed with the turn - the near (left)
-edge 0.705 u closer, the top 6.92 -> 6.19 and back to 6.92 at 2841 - so the #315 narrowed body (that body + FOCUS_M)
-admitted a hero landing beside its back side, which the turned body met. Outside the shape's domain nothing is
+standing Idle facing right (flipX: its longer front half at +x) at 2835 with a hero descending beside its back, at
+2836 it turned to face her (Walk, backing off to the right) and its body changed with the turn, not a pure mirror -
+the near (left) edge 0.705 u closer, the top 6.92 -> 6.19 and back to 6.92 at 2841 - so the #315 narrowed body (that
+body + FOCUS_M) admitted her landing beside its back side, which the turned body met. Outside the shape's domain nothing is
 narrowed (the original layer). A shape bound only: not a forecast of its walk or a reversal."""
 from types import SimpleNamespace as NS
 
@@ -17,10 +18,10 @@ from ssbot.core.forum import WALL_L
 
 CL = jb.CLAPPER
 ROOT, ROOT_Y = 20.412172317504883, 7.449374198913574
-IDLE_L = (19.07154655456543, 3.0149991512298584, 22.663734436035156, 6.916561603546143)   # 2835 Idle, facing left
-WALK_R = (18.366859436035156, 3.0149991512298584, 21.752798080444336, 6.1946868896484375)  # 2836 Walk, facing right
-# 2841 Walk facing right (its root 21.0522 then; the same shape placed at ROOT): back 2.2516, front 1.3406, top 6.9166
-WALK_R_TALL = (ROOT - 2.2516, 3.0149991512298584, ROOT + 1.3406, 6.916561603546143)
+IDLE_R = (19.07154655456543, 3.0149991512298584, 22.663734436035156, 6.916561603546143)   # 2835 Idle, facing right
+WALK_L = (18.366859436035156, 3.0149991512298584, 21.752798080444336, 6.1946868896484375)  # 2836 Walk, facing left
+# 2841 Walk facing left (its root 21.0522 then; the same shape placed at ROOT): front 2.2516, back 1.3406, top 6.9166
+WALK_L_TALL = (ROOT - 2.2516, 3.0149991512298584, ROOT + 1.3406, 6.916561603546143)
 FOCUS_BOX = (25.6, 3.015, 29.2, 6.917)                                                     # the other Clapper (focus)
 
 
@@ -39,7 +40,7 @@ def _entity(box, x, vel=(0.0, 0.0), state="Idle"):
                            "verts_world": _box(box).reshape(-1).tolist()}]}
 
 
-def _tracker(monkeypatch, box=IDLE_L, vel=(0.0, 0.0), inst=None, state="Idle", focus=False):
+def _tracker(monkeypatch, box=IDLE_R, vel=(0.0, 0.0), inst=None, state="Idle", focus=False):
     monkeypatch.setattr(ar, "hazards_at", lambda *a, **k: ar.empty_mask())
     monkeypatch.setattr(ar, "type_extra", lambda spec: None)
     monkeypatch.setattr(ar, "COMMIT_CORE", True)
@@ -60,26 +61,26 @@ def _covers(mask, box):
 def test_standing_body_covers_the_recorded_turn_and_walk_cycle_in_both_facings(monkeypatch, k):
     sb = _tracker(monkeypatch).standing_body(476, k)
     assert sb is not None and ar.same_mask(sb, ar._jb_turn_mask(ROOT))      # at rest: no carry
-    for b in (IDLE_L, _mirror(IDLE_L), WALK_R, _mirror(WALK_R), WALK_R_TALL, _mirror(WALK_R_TALL)):
+    for b in (IDLE_R, _mirror(IDLE_R), WALK_L, _mirror(WALK_L), WALK_L_TALL, _mirror(WALK_L_TALL)):
         assert _covers(sb, b)
     # the #315 narrowed body was the Idle box alone: it misses the turned body's near edge
-    assert not _covers(ar.poly_mask([_box(IDLE_L)]), WALK_R)
+    assert not _covers(ar.poly_mask([_box(IDLE_R)]), WALK_L)
 
 
 def test_standing_body_follows_the_carried_root_and_its_wall_clip(monkeypatch):
     for vx, k in ((8.0, 30), (-8.0, 60), (-8.0, 200)):
-        trk = _tracker(monkeypatch, WALK_R, vel=(vx, 0.0), state="Walk")
-        dx = ar.carry_shift([_box(WALK_R)], (vx, 0.0), k * ar.FT)[0]
+        trk = _tracker(monkeypatch, WALK_L, vel=(vx, 0.0), state="Walk")
+        dx = ar.carry_shift([_box(WALK_L)], (vx, 0.0), k * ar.FT)[0]
         assert ar.same_mask(trk.standing_body(476, k), ar._jb_turn_mask(ROOT + dx))
     # walking left for 200 frames would cross the wall: the root stops where the body meets it (estimate's own clip)
-    assert ar.carry_shift([_box(WALK_R)], (-8.0, 0.0), 200 * ar.FT)[0] == pytest.approx(WALL_L - WALK_R[0])
+    assert ar.carry_shift([_box(WALK_L)], (-8.0, 0.0), 200 * ar.FT)[0] == pytest.approx(WALL_L - WALK_L[0])
 
 
 @pytest.mark.parametrize("box, inst", [
     ((ROOT - 2.4, 3.015, ROOT + 1.34, 6.9), None),           # wider than the standing box
     ((ROOT - 1.34, 3.015, ROOT + 2.25, 7.5), None),           # taller: not a standing pose
     ((ROOT - 1.34, 2.5, ROOT + 2.25, 6.9), None),             # below the floor
-    (IDLE_L, NS(fam="CC_SLAM", states=["Slam Antic"])),       # in a move instance
+    (IDLE_R, NS(fam="CC_SLAM", states=["Slam Antic"])),       # in a move instance
 ])
 def test_outside_the_shape_domain_there_is_no_standing_body(monkeypatch, box, inst):
     assert _tracker(monkeypatch, box, inst=inst).standing_body(476, 36) is None
