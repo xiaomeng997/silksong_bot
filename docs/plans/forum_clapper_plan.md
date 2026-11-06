@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.175）：307修正的逐包入队迟到模型已核，Root独立5组逐帧与实际DLL/现有Filter一致；运行源5df及135拍P不变。迟到DASH与J同时锁存的游戏优先级尚未实测、ordinary迟L路线敏感保留；按Astra聚焦裁决另冻179-L3一局已知风险工程，验提前拒绝/真实交还和撤离，不等同安全或179完成。原首损Q1/输入/日志/资源/真实清理门全部保留，无人为延迟注入。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.176）：179-L3新源5df单局已首损退出/真实清理；完整性、配置、trace与HP审核通过，680拍、2次真下劈弹起交还。2675另一怪起跳后出现一次Walk目标换踩机会，2685真钩脸/2694针中/2706钩冲伤害，但目标2699后撤，未到头顶出刀；2717外部步否决、2721受起跳怪2HP伤害。此失败不重开，同179仅定位既有移动钩后接近/接刀与交还。新增Slam接近时限和旧marker修正均未因此签实机通过；178原有限验收保持。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4660,3 +4660,19 @@ Root沿ASTRA306_REVIEW作明确工程取舍：采用完整实际成本/旧接收
 只准备一个新namespace的179-L3，runtime5df针对旧L2的滑行不看前冲时限/太晚交还作新条件改变，不重开旧1263/L1/L2或补坏局。此局主要观察新守卫是否及时拒绝或交还、实际锁存与动作是否一致以及撤离结果；整包179的走路翻越/真实交还、移动踩头、同iid第二Slam各自记机会/覆盖/成功，零机会仍未完成，178原有限验收不替代。J+DASH若自然同帧可登记动作，没机会保持未核，不人为延迟、改input配置或注入场景来凑结果。相同工程profile/seed，源/模型/脚本/新预算与合同重新绑定，真实worker必须自己的OracleLink input.stats零delay/jitter/HF2/2/pending0回执通过，measure协议2/完整配置与日志硬门保持。
 
 原7HP、HP<=6首次受击真实Q1停止，死亡/期望键不符/>4无有效匹配/关键STATE/HP/日志/资源/真实清理失败均按原规则停；Opt1相符晚<=2仍分同键/换键、覆盖不证明动作，不新增“晚1即停”。同因未修不重跑，新的失败要定位后另定条件，tail另账。Sol新数据脚本仅从已核L2生命周期替换namespace/source/阶段并作逆向等价，先同步main/刀口/TV后冻结刀口HEAD到真实全清理。游戏前原子STATUStrue带实际PID、5s静止、30s刷新和原资源/STOP/活动锁/无双起门；途中只读收信，核心Windows进程不操作。唯有实际worker/场/game/golden/Prefs/旧DEMO/registry全核后false；用户无人值守授权不变。
+
+#### 179-L3首损/全清理/完整性核过；实际Walk目标钩中后未到位，同179局部定位（11-05，进度7.176）
+
+新工程sol/demos/w13_guard179L3_20261106T012400Z_5df8711e，runtime5df、冻结执行HEAD03770d79。唯一WMI请求42896、实际协调器33092/create1793928464.5704913、worker60468、game51072。当前worker自己OracleLink input.stats原始回执passed：0delay/jitter、HF2/2、pending0；709源文件+独立versions.lock与合同710项相同，实际Oracle DLL仍ca7673db...。无人工延迟/新配置注入，旧L1/L2/失败STOP/NO_RETRY未动。
+
+本局实际2721 HP7→5，damage/hp同帧来源Song Heavy Sentry(3)/335470，Control仍Air；原始伤害只给该对象，没有具体collider，不冒称Slam1/落地锤。原7HP/首损Q1/1episode按约退出，无死亡/尾损/补局；协议2 fight T8.01284346357s/L2。Root新analysis/verification用当前生产审核complete=true/errors空，配置complete/unresolved空、trace680tick/822action/914receive完整0overflow，raw1676连续无drop、HP守恒；真实Quit2957后2958..2991共34空hero帧按原边界审核。原trial所有文件hash前后同。
+
+680完整决策拍p50=8.893/p99=20.83992ms、0gap>=3；115链回执均direct/lag0，677已观察包657当帧/20晚1，8条late日志照录，回执不是动作认证。两次真正DownSlash接受2543/2579→同335476真实hit+pogo/交还2550/2586。物理SlamAntic2464与2571确为同iid两次，但第二次由活动B2接手，不能据此证明303的旧脚本closed-marker重新准入修正已触发。新源2619向另一怪接近、2621既有locked-motion扫描拒绝dash、交还普通planner，2623实际向左，直到2720无损；这证明该交还路径实际执行，不是新增Slam最早前冲时限guard的隔离验证。
+
+主179这次有真实机会，不能再写0：335470在2645 JumpAntic、2675起跳，L2同帧换向335476/Walk，entry_attack=stomp。实际rune_transfer.air→jump→claw→claw_lock→air；2680送J目标2682、原STATE2682起跳，2683/84送CLAW目标2685/86，2685真实Harpoon Antic；2694 Harpoon Damager命中335476（160→155），2699目标转Evade Scuttle，2706 Harpoon Dash Damager再中（155→150）。实际钩后英雄停在x22.52/y5.69，目标继续向右到x31.33，未翻过/未有新的DownSlash。2717外部检查发现2718 owner335470危险而恢复，最终chase仍向右，2721实际受到空中335470伤害。退避发生在针中之后是时序事实，尚不证明针击导致退避；不把Harpoon反弹动画充下劈pogo。失败责任CC_JUMP最低至2747，实际碰撞来源与责任账分开。
+
+因此walking-vault一真实尝试/成功0/真实下劈交还0；旧命名vault事件0仅说明该dispatcher未用，不是没有翻越机会。Walk-supported下劈行0、moving stomp未验收。先前178自然姿态有限验收独立保留，不再立R1，不拿本局成功或失败替换它。同帧DASH/J自然锁存2602/03的实际动画是Air Dash，但2601已有J，2602只有DASH新上升，不能冒充307压力排程两键同时新上升的优先级证明。原模型hurt、scheduling false和已知风险取舍照旧保留。
+
+实际Launcher清理01:29:08.604Z、worker资源全pass；Root独立核42896/33092/60468/51072全部退出、无game/pythonw/自有命令残留，registry150/instances与live空/restore_pendingfalse、golden/Prefs无差、旧DEMO原hash/mtime全同，才解除STATUS独占。辅助场实际PID未取得，保守用所有pythonw已退出及worker场close pass核清，不假造PID。ROOT_CLEANUP/NO_RETRY、ROOT_EVENT_AUDIT、ROOT_COVERAGE、ROOT_CAUSAL_PREFIX和原始记录均保存。
+
+同179交Opus唯一实现owner沿实际2675..2721定位：钩中走路怪但未到头顶，实际锁点/运动/后撤及既有CsPlan预测哪里失配；为什么接近仍继续、为何2717交还后chase继续向危险走，先给具体因果再最小复用已有接近/接刀/恢复。保留两次真实成功前缀。不是另加打法/动作池/扩全场NPC模型，也不重测无关135拍或820套件；确实需要新能力先给最小缺口由Sol裁范围。交付前必须真实policy/planner/B2/最终发包完整路径及有真实几何的正反例，自查不可再由Sol逐轮补。只给受影响连续窗口P入口，仍由固定executor先startup再正式；源变/门齐/新条件才考虑新有界局，本L3同因未修不重跑，当前无新game gate。清理完成后才同步main/刀口/TV与释放源码写权，核心Windows进程和原严门不变。
