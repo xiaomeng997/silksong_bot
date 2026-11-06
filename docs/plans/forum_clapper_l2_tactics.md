@@ -1,6 +1,6 @@
 # Forum Clapper 双怪 L2 战术现状
 
-更新：2026-11-06。源码基线：`ecc6332b0b977dacd86dfd3d4d3f57d71e0cdd61`。范围为当前 w13 双 Clapper 的 B 臂开发路径。
+更新：2026-11-06。源码基线：`9f6da15674da8c396d729a680f6868d47d9e233f`。范围为当前 w13 双 Clapper 的 B 臂开发路径。
 
 **L2 已实现候选竞争，但战术意图、动作链和实机验收不是同一种完成状态。** 当前明确未实现的是：成团时“瞄准阶段贴砍，起跳后后撤，落地再回来砍”的完整第二分支，以及在它与后撤引导之间按空间选择的逻辑。返回中间已有代码和有条件的执行正例，持续空中下劈和双怪墙角突围仍未完成验收。
 
@@ -133,15 +133,13 @@ L2 指定目标、站位意图，以及接近后偏向平砍还是踩头。换�
 
 #321 的范围与退化边界：原N侧落行被新身体层拒绝，A顶上首刀/模型弹起/合法交还前缀保留。W3已在缝上方时仍可落缝并出侧劈，但全程新层会拒绝原来贴背下降的接近路线，未完成整局返回；这项能力缺口单列，当前不为保住旧路线放宽身体包络或新增接近策略。已核的2935模型“受伤”只碰到六边形的外接矩形，原多边形并不相交，原输出保留并附更正；不是实机HP记录。
 
-## 已授权的有限整理（Task180，已派发）
+## 有限整理（Task180，源码及有限回归已核，性能待核）
 
-用户要求先收尾当前 Task179，再由 Opus 做有限整理。179本次身体支持域修复的源码、有限离线证据、50拍性能记录及实际清理已核，现已派发Task180；基准runtime为`ecc6332b`。唯一任务说明在 `C:/ssbot/data/m2_play/clapper_plan/sol/work_packages/task180/TASK.json`。派发不等于整理已完成，178/179原实机未覆盖、W3整局接近缺口及慢帧风险继续保留。
+Task180已在开发树实现：11个完整战术单元承载13个规则标识，`intercept/hold`与`bait/return`分别保留同一事件的阶段。各单元同时拥有适用条件、最高分/适用度、胜出承诺、目标和站位/攻击输出、退出及日志；公共选择器只作声明互斥、分数/切换成本/同分保持和统一应用，不再按赢家名字拼装第二份输出。场景几何每次共享一次；公共接触/EntryAttack有效期/TA等限制保留。
 
-整理须把每条完整战术的适用条件、评分和完整 L2 输出归拢，公共选择器统一竞争；同时明确事件阶段、互斥、保持与退出关系。`bait → return` 可以是同一完整战术的两个阶段，无需硬拆成多个独立竞争者。战术内部可复用现有逻辑，但公共代码不能继续按赢家名字再拼装一遍目标、站位和攻击意图，不能只加包装类或搬函数。
+Root核过源与716项运行文件，16项新增及未被回放覆盖的邻接测试通过；8个既有场景3670次L2调用的旧输出/完整记忆与相关计数逐位一致，只排除新增诊断与测时字段。相关生产行、发键及模型接触对照一致。集中Astra关键语义审阅未定位新增P0–P2。证据限这些路径，不证明所有未来状态或实机等价；Opus广套件6失败/2错误报告为基线已存在，Root未重跑该旧失败组。
 
-场景事实共享，观察记忆更新、候选评估及赢家提交职责分清；保留已有分数、换目标成本、触发频率、阶段条件及动作所有权。本包不顺带新增成团第二战术或修改打法，也不改刀口链、几何和默认开关。
-
-核对固定输入下的目标、站位、攻击意图、相关 L2 字段及必要最终按键，用来发现所覆盖路径的意外改动；这不等于证明全场行为不变，也不以100盘无伤为整理前提。只补受影响检查及必要性能对照，既有178/179实机未覆盖项单列保留，不用整理完成替代。
+现只准备与321同一N窗口的23拍完整tick性能，源与文档冻结到实际全清理。并行E场景内局部L2配对中位差约+0.03385ms，峰16.8605ms保留；它不是隔离P，不能将所有差值归因于噪声，也不当完整决策预算。当前没有新实机许可；178/179原未覆盖、W3接近与串行慢帧缺口继续单列。本包不改评分/打法/刀口/几何/默认开关，不新增成团第二战术。
 
 ## 适用配置与源码入口
 
@@ -149,7 +147,9 @@ L2 指定目标、站位意图，以及接近后偏向平砍还是踩头。换�
 
 当前开发源码在 `C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot`。main 的源码不能代替该开发树解释行为。
 
-- [外层竞争与成团路线](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/clapper_priority.py)：`DEFAULT_SCORES`、`cluster_route`、`middle_return`、`decide`。
+- [公共选择与应用](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/clapper_priority.py)：`_pick`、`decide`、`_apply`。
+- [完整战术单元](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/clapper_tactics.py)：条件、评分、输出与阶段/保持/退出；`TACTICS`、`OBSERVE`及生成的`DEFAULT_SCORES`。
+- [共享场景事实](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/clapper_scene.py)：`Scene`及几何/可站/攻击入口。
 - [两怪中间的跳跃事件](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/clapper_middle.py)：`observe`、`choose`。
 - [参数及调用入口](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/gauntlet.py)：`L2Rules`、`period`、`clapper_scores`、`clapper_switch_cost`。
 - [L2 输出接口](C:/Users/Meng/.codex/worktrees/forum-knife-rows/silksong_bot/brain/ssbot/combat/tactics/modes.py)：`GoalPrefs`、`EntryAttack`、`ReturnRequest`。
