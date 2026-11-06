@@ -4798,3 +4798,20 @@ A4新增有效反应拼接的有限正例：2816模型hit470+pogo后接它自己
 甲仍有确定P2：_observe_idle_evidence1113以f-round(Control.t*60)回推某个Update帧，只要alive_hist有该编号就当观察到了本次Idle ENTRY，1112仅用t下降判新实例。Oracle EntityExporter25明确t是scaled FsmState.StateTime且可停，不是Update帧年龄；Root真实3147/3183/3339均当帧Control Idle→Dmg Attack→Close Range→Idle且t约1/60，回推却锚到前一帧旧Idle，A4因此把2816新Idle记成2815。当前伙伴均活时未证明改变该样本结果，但不能把它当入口条件已满足；若伙伴在实际入口前死去、或缺帧中同iid转出再入且新t不小于旧t，可能借用旧伙伴/旧撤销状态延长证人。实际Astra/xhigh窄审同意该证据契约缺口，不拿九个现有单测冒充覆盖。
 
 同179只做最小事件绑定：使用现有已观察的Control→Idle事件与真实事件帧/本次实例、当帧伙伴存活；同帧伙伴生死顺序无法确定、无确切入口事件或观测断档不能证明同实例时，延长证据未知回39，不由scaled t另造时钟模型，也不从当前两只推入口。显式同帧受击后新Idle须重绑而非撤新实例，旧实例受击仍撤证据。保留乙、分组提速、正反例与成功前缀；只补缺帧/入口伙伴变化的局部反例和受影响生产窗，不重跑1111/旧1667。四窗P入口已交但未准入，修好上述后才由固定executor最小startup→真实P；BODY/AIR on与默认off必须不同实际进程，防模块常量缓存串配置。当前不再扩打法/模拟器、不开新局，FACE_HOOK/BOUNCE_TABLE/DSLASH仍关，源码owner仍Opus，原资源/输入/停止/全清理门不变。
+
+
+#### #318入口P2已关，四窗219拍真实P完成全清理；保留串行起跑跳拍这个有限未知（11-06，进度7.186）
+
+已处理Opus #318，runtime 0b148177（父f57d009d文档，上个runtime c000）。Root审一源完整增量和现有Oracle事件契约，FSM Control→Idle绑定真实本帧入口，不再用scaled StateTime推Update编号；缺入口/断档撤68延长，同帧伙伴生死顺序未知回39，明确新Idle按事件重绑，旧实例受击撤证据。317的P2有限关闭。仅独跑11个直接变化检查1.57s/foreign0/714源全同，实际E24764退出；Opus129记录保留不重复。五组已有生产工件各682个最终tuple与317逐位同，14选源SHA同当前；生产者原f57d+dirty native/test的标记保留。源审核只签本次四窗P范围，不签连续下劈或下一实机。
+
+analysis/task179_return318_20261106保存SOURCE_REVIEW、SOURCE_PACKET、检查/工件收据，P_CASE_ON/OFF/ON_NW、输入12文件hash、ADAPTER_REVIEW、ROOT_P_AUDIT和SERIAL_SCHEDULE/PHASE_SUMMARY。固定executor_v1原字节58ddebd9不变，Sol副本仅接已核startup/close、预史确定时钟/测量真实send clock、实际worker/签名收据；逆替换逐字节回Opus原replay308，不改控制/几何/条件模型。ON与OFF是不同实际进程，避免模块常量缓存串配置。三个真实最小启动检查均0测量tick、无reset/_act/ACTION，匹配前置退出清理核过。
+
+真实P按原门进行：首次A完成116拍后，N启动前被FanControl0.5013核/Defender1.7000核/tar0.9272核拦，N当时0拍，W未起；原失败与p_on/FINALIZED execution_ok=false保留。只读新资源核查在实际清理后为空、tar已退出，未操作系统/用户/Opus进程。仅为剩余N/W建立匹配新startup，然后N21/W41及独立OFF D41完成；A没有重跑。不是为了挑较快数字替换A，A及所有峰/GC保留。
+
+合计219个完整_act/trace tick（A116/N21/W41/D41），全窗连续、trace完整/overflow0、无外来ssbot/新签名/错误，自有实际P0–15/High/Numba4/GetProcessInformation EcoQoS关闭核实，send_clock_required=true。完整tick中位/峰分别：A14.6372/21.2804ms，N18.7902/20.9477ms，W18.4414/26.9328ms，D9.4877/16.4549ms；act计时和完整trace微小差别原样分别保存。四窗最终发送与相应已有工程工件逐位同；A仍2812下劈、2816一次模型hit+pogo、2831合法交还、2870模型落缝、2884侧劈；A末帧2900不冒充覆盖2903。N/W/D无新增模型hurt，均只对应各自已标合成/录像条件，不能当实机动作或全局无伤证明。配置原始false仅剩BLOCK/ORDER/SCHEDULE三账本项，实际BODY/AIR和worker运行绑定已解析；下一实机仍须真实worker完整配置，不复用这些账本不全的工程清单签game gate。
+
+真实cleanup分别核p_on父58012/场61936、p_nw父58216/场46532与58404、p_off父44012/场56136退出；六份startup/P FINALIZED均已核，无子进程/游戏、golden/Prefs/旧DEMO hash与mtime原样、registry空/restore_pendingfalse，自有audit真实退出、714源再核全同、executor ACTIVE不存在。只有这些全核后STATUSfalse并释放刀口源码/docs冻结；不动旧观察/STOP/原始录制，Windows核心进程不改。
+
+串行门未签全通过：复用本次完整成本、原真实receive流、所有等待/最新STATE以及双锚13ms/外推/1ms预留；历史wake0.270/1.292/7.132ms只是有限经验条件，不是未来p99保证。历史1.292情景A11晚包/4跳拍（2789、2793、2864、2886），其中首次起跑2793被跳过；2795 DASH和2812首刀各在原槽，2884侧劈晚1。N7晚/3跳、W16晚/7跳，多为普通候选/侧劈；不能因为总tick>13.55一刀切判失败，也不能以邻拍固定序列仍准时证明跳过起跑后能按原序列执行。D该情景0晚0跳，既有首刀关键发送保留。旧receive后不同发键会改英雄/后续决策，当前纯算术没有重新闭环；full_scheduling_gate_pass=false、新game gate仍无。
+
+下一步同179只核这一有限时序缺口，不先扩优化工程：Opus用现有丢决策/晚应用工具，在A有效反应场景保留真实HF/在途键，跳过2793（先明确原键和本应起跑/松J的变化），确认下一真实观察能否重新准入并完成下劈或合法交还；必要时按已交串行表注入这一段的实际晚1/跳拍组合，不能固定保留后续2795/2812动作冒充因果。只给最早具体分歧、恢复/原输入门与最终键；不改时钟/保护/预留、不同Move重试规则，不新全场模拟器/动作池/缓存，也不重跑219P/旧大套件。普通N/W晚拍先判是否影响行为，非必要不改代码；若没有真实功能缺口就直接说明支持域，不以所有普通tick硬压到一帧新增闸门。新的源码确有必要才改，随后仅复测受影响窗口。连续下劈全覆盖/墙角突围仍未验收，FACE_HOOK/BOUNCE_TABLE/DSLASH和BODY/AIR默认均关，当前没有下一盘许可。
