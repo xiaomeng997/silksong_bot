@@ -11,7 +11,7 @@ import numpy as np
 from ssbot.combat import forum_v2, two_play
 
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X, clapper_facing
-from .modes import EVADE, EntryAttack, entry_attack_prefs
+from .modes import EVADE, EntryAttack, ReturnRequest, entry_attack_prefs
 from . import clapper_middle
 
 JUMPS = {"CC_JUMP", "CC_JUMP_CAST"}
@@ -93,7 +93,7 @@ def return_pose(tac, target, geo, hx):
                 gap=float(a2 - b1))
 
 
-def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False):
+def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, frame=None):
     """Task 179 #313 / #314 (the person via Sol seq 233-237): after a near attack, back between the two.
 
     A Clapper move (TWO_ATTACK_FAMS) is near when she was within TWO_SLAM_RANGE_U of its root on any tick of it; its
@@ -116,11 +116,14 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False):
         if s.family in TWO_ATTACK_FAMS:
             if m is None or m["family"] != s.family:          # a direct follow-up keeps the earlier nearness
                 moves[s.iid] = m = {"family": s.family, "start_t": t, "near": bool(m and m["near"])}
+                if frame is not None:
+                    m["start_f"] = frame                       # SSBOT_FORUM_TWO_RETURN_AIR only
             m["near"] = m["near"] or abs(float(s.pos[0]) - hx) <= TWO_SLAM_RANGE_U
         elif m is not None:
             del moves[s.iid]
             if m["near"] and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
-                mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False)
+                mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False,
+                                   **({} if frame is None else {"end_f": frame}))
     due = mem.get("back")
     if due is None or geo is None or quiet_from is not None:
         return None
@@ -249,7 +252,8 @@ def decide(tac, ws, fc, prefs, hx, t):
             mem["departed"] = departed = None
     home = middle_return(tac, subjects, geo, hx, t, mem, "middle jump" if middle is not None else
                          "cluster route" if route is not None else "intercept hold" if hold is not None else None,
-                         getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND")
+                         getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND",
+                         getattr(getattr(ws, "stamp", None), "frame", None) if forum_v2.RETURN_AIR else None)
     changed = seen != mem["seen"] or region != mem["region"] or (home is not None) != mem.get("back_live", False)
     if middle is not None and (middle.get("decision") or {}).get("route") == "guide":
         prior = middle["decision"]
@@ -444,6 +448,18 @@ def decide(tac, ws, fc, prefs, hx, t):
         # the focus margin on the ordinary rows' revocable frames (forum_v2 checks the tracker's own state again on the
         # frame it builds; every other check keeps the original margins)
         out = replace(out, return_body=next(s.iid for s in subjects if s.iid != g.target))
+    due = mem.get("back")
+    if (pose is not None and pose["posture"] == "air" and forum_v2.RETURN_AIR and due is not None
+            and all(s.state in forum_v2.RETURN_STATES for s in subjects)
+            and type(due.get("start_f")) is int and type(due.get("end_f")) is int
+            and type(getattr(getattr(ws, "stamp", None), "frame", None)) is int):
+        # SSBOT_FORUM_TWO_RETURN_AIR (#316, Sol seq 239 a): this tick's air return (the actual winner, both seen in
+        # Idle / Walk) after the observed near move that ended: a request for the native B2 owner's existing SWITCH
+        # execution; it is not made on any other tick (pose, target or state changed: the request is gone)
+        if due.get("request_f") is None:
+            due["request_f"] = int(ws.stamp.frame)
+        out = replace(out, return_request=ReturnRequest(int(g.target), int(due["iid"]), str(due["family"]),
+                                                        int(due["start_f"]), int(due["end_f"]), int(due["request_f"])))
     mid = middle["decision"] if middle is not None else None
     if mem["winner"] == "middle_jump" and mid is not None:
         # Apply after legacy face/antic stance helpers, which must not turn a
@@ -457,7 +473,8 @@ def decide(tac, ws, fc, prefs, hx, t):
                     clapper_scene=scene, clapper_region=region, clapper_middle=mid,
                     clapper_cluster=None if route is None else dict(route), clapper_cluster_end=mem.get("cluster_end"),
                     clapper_back=None if home is None else dict(home, applied=pose, **(
-                        {} if out.return_body is None else {"return_body": out.return_body})),
+                        {} if out.return_body is None else {"return_body": out.return_body}), **(
+                        {} if out.return_request is None else {"return_request": vars(out.return_request)})),
                     clapper_back_end=mem.get("back_end"), clapper_return_body=out.return_body)
     tac.stats["goals"][RUSH] = tac.stats["goals"].get(RUSH, 0) + 1
     return out

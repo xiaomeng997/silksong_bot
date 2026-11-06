@@ -68,6 +68,7 @@ class NativeManualAirChain(NativeChainB2):
         self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
+        self._return_admission_noted=None
         self._transfer_responsibility={}
         self._transfer_target_moves={}
         self._vault_ready=False
@@ -142,12 +143,17 @@ class NativeManualAirChain(NativeChainB2):
         self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
         return True
 
-    def _observed_transfer_move(self,state,iid,family):
-        """Use the existing causal antic history for a real move's identity."""
-        phases={"CC_CAST":("Spell Antic",{"Spell Antic","Cast 1","Cast 2"}),
+    @staticmethod
+    def _move_phases():
+        """Each Clapper attack family's primary antic state and the states its move holds."""
+        return {"CC_CAST":("Spell Antic",{"Spell Antic","Cast 1","Cast 2"}),
                 "CC_SLAM":("Slam Antic",set(transfer.AIR_ATTACK_STATES)|{"Slam Recover"}),
                 "CC_JUMP":("Jump Antic",{"Jump Antic","Jump Aim","Jump","Air","Charged?","Slam Effects?","Slam 2","Slam Recover"}),
                 "CC_JUMP_CAST":("Cast Slam Antic",{"Cast Slam Antic","Cast Slam Antic 2","Cast Jump","Jump Aim","Jump","Air","Charged?","Slam Effects?","Slam 2","Slam Recover"})}
+
+    def _observed_transfer_move(self,state,iid,family):
+        """Use the existing causal antic history for a real move's identity."""
+        phases=self._move_phases()
         if family not in phases or not self._clock_known:return None
         primary,states=phases[family]
         source=next((e for e in transfer.clappers(state) if e["iid"]==iid),None)
@@ -168,6 +174,128 @@ class NativeManualAirChain(NativeChainB2):
         an=hist.antic(iid,primary,())
         if an is None or not np.isfinite([an["ta"],self._clock]).all():return
         return transfer.MoveInstance(iid,an["fa"],family),an["ta"]
+
+    def _return_source_ended(self,state,goal):
+        """A ReturnGoal's source has left the move that made the return due: none of its family's move states holds
+        (an unknown family or an absent source is not ended)."""
+        phases=self._move_phases()
+        fam=getattr(goal.source_move,"family",None)
+        source=next((e for e in transfer.clappers(state) if e["iid"]==goal.caster),None)
+        return fam in phases and source is not None and transfer.control(source)[0] not in phases[fam][1]
+
+    def _return_admission(self,state,sim,plan,game,geo):
+        """A fresh ReturnGoal start (Task 179 #316) runs the transfer recipe's own straight approach (side held, J over
+        the plan's jump hold; the actual S0, hold state and keys in flight: ChainSim.roll, flight_check_frames long) with
+        the one air dash air_approach_keys would add: in the air, normal mode, dash unspent, a target other than the
+        source, farther than its body width, and this plain coast landing without getting above that body; pressed on
+        the first step after her J and DASH are no longer pressed or latched (air_approach_keys waits for both; A3 2798:
+        the planner's held jump, the Run's dash at 2802) and the dash cooldown is over. That dash must pass the existing
+        locked-motion scan on this tick's B2 geometry (_dash_lock_scan with the whole row; A3 2790-2792: refused at its
+        own step, the started Run recovered and the return was spent). It starts only if that approach
+        - passes the other Clapper's observed body, when it lies between her and the target's root, without entering
+          it grown by FOCUS_M (grazes_body, the recipe's close-body backstop; a landing short of it walks into it): the
+          recipe is a straight approach, never a crossing skill (the side approach's source_blocked rule; A2 2770-2796
+          drifted into the crossed body and landed short of it), and
+        - gets above the target's body (its centre over the body, the box bottom above its top: air_approach_keys'
+          overhead test) at a frame where the recipe's existing strike witness still holds: contact_body_witness with
+          the no-evade proof the Run collects in range assumed (Idle up to Idle Time), WalkSupport for a walker along
+          this approach (A2 2798-2823: over an Idle past its modelled exits no press-now row can exist, the Run only
+          descends onto her).
+        Returns None, or why the start waits: the current owner keeps the keys, nothing is sent or spent. Admission
+        only; every step keeps its full check."""
+        from ssbot.knowledge import kinematics as K
+        from .holdfilter import hold_filter_jit
+        es=transfer.clappers(state)
+        enemy=next((e for e in es if e["iid"]==plan.iid),None)
+        other=next((e for e in es if e["iid"]!=plan.iid),None)
+        hp=(state.get("hero") or {}).get("pos")
+        try:body,tbody=(None if other is None else transfer.body_box(other)),(None if enemy is None else transfer.body_box(enemy))
+        except (TypeError,ValueError,OverflowError):body=tbody=None
+        if (body is None or tbody is None or not isinstance(hp,(list,tuple)) or not hp
+                or not np.isfinite([hp[0],enemy["pos"][0],*body,*tbody]).all()):
+            return "Clapper bodies unknown"
+        side=int(plan.side)
+        if side not in (B["L"],B["R"]):return "no approach side"
+        cfg=self.runner.chains[transfer.PROGRAM].cfg
+        n=int(cfg["flight_check_frames"])
+        commands=np.full(n,side,np.int64)
+        k=int(plan.entry_k)
+        commands[max(0,min(n,int(plan.jump_k)-k)):max(0,min(n,int(plan.jump_until)-k))]|=B["J"]
+        S=np.asarray(sim.start,float).reshape(-1)
+        coast=sim.roll(commands[None])
+        box=np.asarray(coast.box[0],float);pos=np.asarray(coast.pos[0],float)
+        after=np.arange(len(box))>=sim.off
+        lands=np.flatnonzero(((np.asarray(coast.flags[0])&K.F_GROUND)!=0)&after)
+        gap=max(tbody[0]-float(S[K.PX]),float(S[K.PX])-tbody[2],0.)
+        if (S[K.GROUND]<=0 and S[K.MODE]==K.M_NORMAL and S[K.AIRDASHED]<=0 and plan.iid!=plan.caster
+                and (state.get("hero") or {}).get("hero_accepting_input") is True and gap>tbody[2]-tbody[0]
+                and len(lands)):
+            reach=after[:int(lands[0])]&(pos[:int(lands[0]),0]>=tbody[0])&(pos[:int(lands[0]),0]<=tbody[2])&(
+                box[:int(lands[0]),1]>=tbody[3])
+            if not reach.any():
+                full=np.concatenate([np.asarray(sim.prefix,np.int64),commands])
+                lat,_=hold_filter_jit(np.ascontiguousarray(full[None]),sim.hold)
+                P,dt=len(sim.prefix),float(sim.params.frame_time)
+                busy=(full|np.asarray(lat[0],np.int64))&(B["J"]|B["DASH"])
+                free=[i for i in range(n) if not busy[P+i-1] and float(S[K.DASH_CD])-(i+1)*dt<=0]
+                if free:
+                    commands[free[0]]|=B["DASH"]
+                    lock,_=self._dash_lock_scan(sim,plan,commands[free[0]],game,geo,"air",commands=commands)
+                    if lock is None or not lock.complete or lock.contacts:
+                        return "the approach's air dash is refused through its locked motion (step %d)"%free[0]
+                    coast=sim.roll(commands[None])
+                    box=np.asarray(coast.box[0],float);pos=np.asarray(coast.pos[0],float)
+        hx,tx=float(hp[0]),float(enemy["pos"][0])
+        if min(hx,tx)<=body[2] and max(hx,tx)>=body[0]:
+            past=(box[:,0]>body[2]) if side==B["R"] else (box[:,2]<body[0])
+            idx=np.flatnonzero(past&after)
+            if not len(idx):return "the straight approach does not pass the other body within flight_check_frames"
+            if transfer.grazes_body(box[:int(idx[0])+1],body,int(idx[0])+1):
+                return "the straight approach enters the other body grown by FOCUS_M before passing it"
+        over=np.flatnonzero((pos[:,0]>=tbody[0])&(pos[:,0]<=tbody[2])&(box[:,1]>=tbody[3])&after)
+        if not len(over):return "the straight approach never gets above the target within flight_check_frames"
+        j=int(over[0])
+        if transfer.control(enemy)[0]=="Walk":
+            support=transfer.walk_body_support(enemy,j+1,state.get("hero"))
+            witness=None if support is None else support(pos[:j+1,0])[0]
+        else:
+            witness=transfer.contact_body_witness(enemy,j+1,idle_no_evade=True)
+        if witness is None or not np.isfinite(witness[j]).all():
+            return "no strike witness for the target when the approach gets above it (frame +%d)"%j
+        return None
+
+    @staticmethod
+    def _return_request_holds(prefs,goal):
+        """L2 makes this ReturnGoal's request on this tick, for its current target (the request's own identity)."""
+        req=getattr(prefs,"return_request",None)
+        return (req is not None and req.target==getattr(prefs,"target",None) and
+                (req.target,req.source,req.source_start_f,req.made_f)==(goal.target,goal.caster,goal.cast_fa,goal.return_f))
+
+    def _bind_return_request(self,state,prefs):
+        """SSBOT_FORUM_TWO_RETURN_AIR (Task 179 #316, Sol seq 239 a): L2's current air ReturnRequest becomes a ReturnGoal
+        run with the existing SWITCH approach / down-slash execution. Bound only on a tick L2 makes the request (its
+        actual winner) for the current target, inside its finite window (max_frames from its first issue), while no Run
+        of this program is out and no other goal holds the destination; one return per source instance (the finished
+        key). A pending ReturnGoal whose request L2 no longer makes (target, pose or state changed) is withdrawn before
+        it starts; a sent one is released at its next approach step (_transfer_offer), a committed strike row finishes
+        under its own ownership. The ended source is attribution only: no phase or instance gate, no clock rewrite, no
+        exemption."""
+        from .forum_v2 import RETURN_AIR
+        if not RETURN_AIR:return
+        req=getattr(prefs,"return_request",None)
+        goal=self._transfer_goal
+        active=self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM
+        if isinstance(goal,transfer.ReturnGoal) and not active and not self._return_request_holds(prefs,goal):
+            self._transfer_goal=goal=None
+            self._note("return_request_withdrawn",frame=state["f"],request=None if req is None else asdict(req),
+                       reason="L2 no longer makes this air return request")
+        if req is None or active or goal is not None or req.target!=getattr(prefs,"target",None):return
+        if not 0<=state["f"]-req.made_f<=self.runner.chains[transfer.PROGRAM].cfg["max_frames"]:return
+        if (req.source,req.source_start_f) in self._transfer_finished:return
+        src=transfer.MoveInstance(req.source,req.source_start_f,req.source_family)
+        self._transfer_goal=transfer.ReturnGoal(req.target,req.source,req.source_start_f,None,"SWITCH",src,req.made_f)
+        self._note("return_request_bound",frame=state["f"],request=asdict(req),
+                   source="observed near move ended: attribution and the one-return key only, no exemption")
 
     def _bind_entry_attack(self,state,prefs):
         """Bind a tactical entry to observed source history, not a guessed move."""
@@ -196,8 +324,10 @@ class NativeManualAirChain(NativeChainB2):
             self._transfer_ready=False
             return prefs
         if (self._transfer_goal is not None and self._transfer_goal.source_kind=="SWITCH" and
+                not isinstance(self._transfer_goal,transfer.ReturnGoal) and
                 self.runner.run is None and self._entry_attack_goal!=getattr(prefs,"entry_attack",None)):
             self._transfer_goal=None;self._entry_attack_goal=None
+        self._bind_return_request(state,prefs)
         self._bind_entry_attack(state,prefs)
         goal=self._transfer_goal
         if goal is None:
@@ -264,7 +394,7 @@ class NativeManualAirChain(NativeChainB2):
         mode=int(S[K.MODE])
         return mode if mode in (K.M_DASH,*K.RELINQUISHED,*K.NO_INPUT) else None
 
-    def _dash_lock_scan(self,sim,plan,mask,game,geo,link):
+    def _dash_lock_scan(self,sim,plan,mask,game,geo,link,commands=None):
         """Task 179 (#296, live 786 2617): scan a NEW dash impulse through the motion it locks.
 
         The dash and the input-less inertia after it (Sprint Air Short or the skid, control relinquished) carry her
@@ -273,9 +403,13 @@ class NativeManualAirChain(NativeChainB2):
         ChainSim), with the Run's own planned keys behind the impulse (transfer.render of its link). The ground
         sprint (phase 2) takes the dash release and the sprint jump (Sprint FSM), so it is steerable, not locked.
         (scan, info); scan None when the dash start or the input return is not modeled inside DASH_LOCK_MAX frames
-        (unknown, never a pass)."""
+        (unknown, never a pass). commands (Task 179 #316, _return_admission): the whole planned key row with the
+        impulse pressed on a later step, in place of mask on the first one and the link's own keys behind it."""
         from ssbot.knowledge import kinematics as K
-        if link=="air":
+        given=commands is not None
+        if given:
+            commands=np.asarray(commands,np.int64)[:self.DASH_LOCK_MAX].copy()
+        elif link=="air":
             # transfer.render of the air link, in closed form: its own coast keys (air_approach_keys without the
             # one-shot dash) are the side key plus J while jump_until is ahead of the mask clock
             k=plan.entry_k+2+np.arange(self.DASH_LOCK_MAX)
@@ -284,7 +418,7 @@ class NativeManualAirChain(NativeChainB2):
             commands=np.zeros(self.DASH_LOCK_MAX,np.int64)
             planned=np.asarray(transfer.render(self.runner,plan,plan.entry_k,self.DASH_LOCK_MAX,link),np.int64)
             commands[:len(planned)]=planned
-        commands[0]=int(mask)
+        if not given:commands[0]=int(mask)
         path=model_path(sim,plan,commands,game)
         modes=np.asarray(path.states[K.MODE]);flags=np.asarray(path.flags)
         steer=(modes==K.M_SPRINT)&(np.asarray(path.states[K.PHASE])==2)&(np.asarray(path.states[K.GROUND])>0)
@@ -572,6 +706,21 @@ class NativeManualAirChain(NativeChainB2):
             self._note("target_entry_target_handoff" if changed else "target_entry_side_handoff",
                        frame=f,old_target=target,target=wanted if changed else target)
             return None
+        goal=self._transfer_goal
+        if (active and isinstance(goal,transfer.ReturnGoal) and run.link in ("walk","dash","jump","air")
+                and not self._return_request_holds(prefs,goal)):
+            # SSBOT_FORUM_TWO_RETURN_AIR (#316, Sol seq 239 a): L2 no longer makes this air return (target, pose or
+            # state changed; a standing gap opened: the ground return takes over). Its approach is handed back at
+            # this step, the keys already sent stay the next owner's actual prefix; a strike row already chosen
+            # (link strike) finishes under its own ownership (real hit + bounce, or its miss).
+            link=run.link;req=getattr(prefs,"return_request",None)
+            self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+            self._press=self._accepted=self._hit=None
+            self._transfer_ready=False;self._transfer_goal=None
+            self._abandon("air return request withdrawn: approach handed back")
+            self._note("return_request_released",frame=f,target=target,link=link,
+                       request=None if req is None else asdict(req))
+            return None
         approach_only=bool(run.v.get("_approach_only")) if active else bool(side and self._transfer_goal is not None
             and self._transfer_goal.source_kind=="SWITCH")
         if approach_only:
@@ -640,10 +789,22 @@ class NativeManualAirChain(NativeChainB2):
         try:
             goal=self._transfer_goal
             if goal is not None and goal.source_kind=="SWITCH" and not draft.run.v.get("_entry_source_confirmed"):
-                if not self._transfer_source_matches(rs,goal):
+                if isinstance(goal,transfer.ReturnGoal):
+                    if not self._return_source_ended(state,goal):
+                        raise GeometryUnavailable("return request source move not ended")
+                elif not self._transfer_source_matches(rs,goal):
                     raise GeometryUnavailable("tactical switch source instance unavailable or changed")
                 draft.run.v["_entry_source_confirmed"]=True
             geo=B2Geometry(forecast,f,plan.move,current[2])
+            if not active and isinstance(goal,transfer.ReturnGoal):
+                why=self._return_admission(state,sim,plan,game,geo)
+                if why is not None:
+                    key=(goal.caster,goal.cast_fa,why)
+                    if self._return_admission_noted!=key:
+                        self._return_admission_noted=key
+                        self._note("return_request_start_deferred",frame=f,target=plan.iid,reason=why,
+                                   owner="current owner keeps the keys")
+                    return None
             if draft.run.link in transfer.HOOK_LINKS and not isinstance(draft.run.v.get("hook_press"),dict):
                 raise GeometryUnavailable("transfer hook press anchor unavailable")
             if draft.run.link=="bounce_tail":

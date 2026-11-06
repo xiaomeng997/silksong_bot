@@ -111,6 +111,10 @@ COMMIT_M = float(os.environ.get("SSBOT_FORUM_TWO_COMMIT_M", "") or FOCUS_M)
 # keep the original margins.
 RETURN_BODY = os.environ.get("SSBOT_FORUM_TWO_RETURN_BODY", "0").strip() == "1"
 RETURN_STATES = ("Idle", "Walk")
+# SSBOT_FORUM_TWO_RETURN_AIR (Task 179 #316, default off; Sol seq 239 a): L2's air-pose middle return after an observed
+# near move that has ended goes to the native B2 owner as a ReturnRequest (tactics.modes); B2 runs it with its existing
+# SWITCH approach and down-slash execution (knife_chain_air_native._bind_return_request), every geometry check unchanged
+RETURN_AIR = os.environ.get("SSBOT_FORUM_TWO_RETURN_AIR", "0").strip() == "1"
 
 
 def corner_zones(fc) -> list[tuple[float, float]]:

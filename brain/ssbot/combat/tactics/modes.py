@@ -87,6 +87,20 @@ class EntryAttack:
 
 
 @dataclass(frozen=True)
+class ReturnRequest:
+    """SSBOT_FORUM_TWO_RETURN_AIR (Task 179 #316, Sol seq 239 a): L2's current middle return in the air pose after an
+    OBSERVED near move that has ended. The source is attribution only (which move made the return due, one return per
+    instance): never a current move, phase, clock or damage exemption. Frames are the decisions' own (ws.stamp.frame):
+    the source's first family frame and end as L2 saw them, made_f the request's first issue (its admission window)."""
+    target: int
+    source: int
+    source_family: str
+    source_start_f: int
+    source_end_f: int
+    made_f: int
+
+
+@dataclass(frozen=True)
 class WallPressure:
     """Current-focus contact preference on its nearby wall side.
 
@@ -189,6 +203,8 @@ class GoalPrefs(TacticPrefs):
     return_body: int | None = None      # SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, default off): the other Clapper
     #                                     during L2's middle return; the policy hands it to forum_v2.V2Feed.support
     #                                     (stack_ret), the one field that reaches a support - the planner never reads it
+    return_request: ReturnRequest | None = None   # SSBOT_FORUM_TWO_RETURN_AIR (#316, default off): the air return for
+    #                                               the native B2 owner's existing SWITCH execution (knife_chain_air_native)
 
 
 class Tactics:

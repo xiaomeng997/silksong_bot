@@ -1689,7 +1689,7 @@ class ForumPlanner(Planner):
                                                                                                     d_))
                 occ[ns] = o if o is not None else self._contacts(f, rh.bound[ns], tk, skip[ns])
         if getattr(self, "v2_ret", None) is not None:
-            occ = self._v2_return_hit(occ, f, rh, bnd, rows, tk, skip, kbs, moved, bell)
+            occ = self._v2_return_hit(occ, f, rh, bnd, rows, tk, skip, kbs, moved, bell, sc=sc)
         s = occ.any(axis=1)
         # a first hit on a guard stance (stance_block: the Reed's Defend) is a tink that starts its counter, 1.25 s
         # long past the tink: beyond the horizon, so the branch cannot be shown safe (the person: a locked move only
@@ -3558,8 +3558,10 @@ class ForumPlanner(Planner):
         other Clapper's idle body with FOCUS_M) on its revocable frames only. The sent prefix and the current locked
         segment (from P + 1 while _v2_locked holds: a dash, a swing, a lock) keep the stack - the next tick's
         replanning does not reach a frame already committed - and a row with a dash at that Clapper keeps it on every
-        frame (its rule check, as the focus unit's dash rule). Returns o (a new array when a row changes); the rows'
-        lock ends (-1: the stack throughout) stay in self.v2_ret for the envelope."""
+        frame (its rule check, as the focus unit's dash rule). Stage 1 reads the nominal lane only, so its lock end is
+        the nominal one; the envelope and the hit branch read every timing lane and take theirs from _v2_lane_lock_end.
+        Returns o (a new array when a row changes); the rows' nominal lock ends (-1: the stack throughout) stay in
+        self.v2_ret, the tick's own context (its score dict sc is bound to it once scored: _v2_bound)."""
         rs = f.rs
         N = o.shape[0]
         el = np.zeros(N, bool)
@@ -3573,7 +3575,7 @@ class ForumPlanner(Planner):
         rows = rows[~dr]
         lock_end = np.full(N, -1, np.int64)
         info = {"body2": int(rs.body2), "rows": int(len(rows)), "dash_kept": int(dr.sum()), "freed": 0}
-        self.v2_ret = {"lock_end": lock_end, "info": info}
+        self.v2_ret = {"lock_end": lock_end, "info": info, "P": int(P), "sc": None}
         if not len(rows):
             return o
         seg = self._v2_locked(r1, rows)[:, P + 1:]
@@ -3586,17 +3588,46 @@ class ForumPlanner(Planner):
         out[rows] = new
         return out
 
+    def _v2_bound(self, sc) -> dict | None:
+        """This tick's narrowing context when sc is the score dict this tick bound to it (the tick's own candidate
+        rows and their numbering); None for any other caller (tools.forum_human_score renumbers a row 0 with its own
+        score dict): the stack, as without the switch."""
+        ctx = getattr(self, "v2_ret", None)
+        return ctx if ctx is not None and sc is not None and ctx.get("sc") is sc else None
+
+    def _v2_lane_lock_end(self, r, P: int, le_nom: np.ndarray) -> np.ndarray:
+        """The lock ends of rollout r's rows over every timing lane r holds (the envelope's / hit branch's hull): a
+        swing from P + 1 ends where F_ATTACKING ends in every lane (flags_any); a mode lock (dash, sprint, a no-control
+        mode) touching the sent prefix's end or inside that current segment has no per-lane end in r (its mode is the
+        nominal lane's: bounds_lo moves such a timer a frame either way), so that row keeps the stack throughout (T1),
+        never the nominal end + 1 as a proof for every lane. le_nom: the rows' stage-1 ends (-1 stays -1); the result
+        is never before them."""
+        T1 = r.mode.shape[1]
+        lm = np.isin(r.mode, ESC_LOCK_MODES + (kin.M_DASH, kin.M_SPRINT))
+        lanes = len(getattr(r, "variants", ()) or ()) > 1
+        fa = r.flags_any if (lanes and getattr(r, "flags_any", None) is not None) else r.flags
+        lk = lm | ((fa & F_ATTACKING) != 0)
+        seg = lk[:, P + 1:]
+        run = np.where(seg.all(axis=1), seg.shape[1], np.argmin(seg, axis=1))
+        le = P + run
+        if lanes:
+            k = np.arange(T1)[None, :]
+            in_run = (lm & (k > P) & (k <= le[:, None])).any(axis=1)
+            edge = lm[:, max(P - 1, 0):P + 1].any(axis=1)
+            le = np.where(in_run | edge, T1, le)
+        return np.where(le_nom < 0, -1, np.maximum(le, le_nom))
+
     def _v2_return_hit(self, occ: np.ndarray, f, rh, bnd: np.ndarray, rows: np.ndarray, tk: np.ndarray,
-                       skip: np.ndarray, kbs: dict, moved: np.ndarray, bell: np.ndarray) -> np.ndarray:
-        """_v2_return in the hit branch: a row's lanes after its lock end read stack_ret (a knocked-back hit enemy's
-        own pushed contact as before); bell rows, the frames up to the lock end and the reactions (added after) as
-        they were."""
+                       skip: np.ndarray, kbs: dict, moved: np.ndarray, bell: np.ndarray, sc=None) -> np.ndarray:
+        """_v2_return in the hit branch (this tick's own call only: _v2_bound): a row's lanes after its lane-wise lock
+        end (_v2_lane_lock_end on rh) read stack_ret (a knocked-back hit enemy's own pushed contact as before); bell
+        rows, the frames up to the lock end and the reactions (added after) as they were."""
+        ctx = self._v2_bound(sc)
         rows = np.asarray(rows, np.int64)
-        lock_end = self.v2_ret["lock_end"]
-        if not len(rows) or rows.max() >= len(lock_end):
+        if ctx is None or not len(rows) or rows.max() >= len(ctx["lock_end"]):
             return occ                  # not this tick's rows: as they were
-        le = lock_end[rows]
-        sel = np.flatnonzero((le >= 0) & ~bell)
+        le = self._v2_lane_lock_end(rh, ctx["P"], ctx["lock_end"][rows])
+        sel = np.flatnonzero((le >= 0) & (le < occ.shape[1]) & ~bell)
         if not len(sel):
             return occ
         rs = f.rs
@@ -3609,18 +3640,20 @@ class ForumPlanner(Planner):
         late = np.arange(occ.shape[1])[None, :] > le[sel][:, None]
         out = occ.copy()
         out[sel] = np.where(late, o_r, occ[sel])
-        info = self.v2_ret["info"]
+        info = ctx["info"]
         info["hit_rows"] = info.get("hit_rows", 0) + int(len(sel))
         return out
 
-    def _v2_return_env(self, occ: np.ndarray, f, r2, ch: np.ndarray, tk: np.ndarray, skip: np.ndarray) -> np.ndarray:
-        """_v2_return on the envelope: the rows of chunk ch with a lock end read stack_ret after it (their hull, as
-        _contacts does), every other row and frame as occ."""
-        lock_end = self.v2_ret["lock_end"]
-        if not len(ch) or int(np.max(ch)) >= len(lock_end):
+    def _v2_return_env(self, occ: np.ndarray, f, r2, ch: np.ndarray, tk: np.ndarray, skip: np.ndarray,
+                       sc=None) -> np.ndarray:
+        """_v2_return on the envelope (this tick's own call only: _v2_bound): the rows of chunk ch read stack_ret
+        after their lane-wise lock end (_v2_lane_lock_end on r2: the envelope's lanes), every other row and frame as
+        occ."""
+        ctx = self._v2_bound(sc)
+        if ctx is None or not len(ch) or int(np.max(ch)) >= len(ctx["lock_end"]):
             return occ                  # not this tick's rows: as they were
-        le = lock_end[ch]
-        sel = np.flatnonzero(le >= 0)
+        le = self._v2_lane_lock_end(r2, ctx["P"], ctx["lock_end"][ch])
+        sel = np.flatnonzero((le >= 0) & (le < occ.shape[1]))
         if not len(sel):
             return occ
         rs = f.rs
@@ -3630,7 +3663,7 @@ class ForumPlanner(Planner):
         late = np.arange(occ.shape[1])[None, :] > le[sel][:, None]
         out = occ.copy()
         out[sel] = np.where(late, occ_r, occ[sel])
-        self.v2_ret["info"]["env_rows"] = self.v2_ret["info"].get("env_rows", 0) + int(len(sel))
+        ctx["info"]["env_rows"] = ctx["info"].get("env_rows", 0) + int(len(sel))
         return out
 
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
@@ -4001,6 +4034,8 @@ class ForumPlanner(Planner):
         t2 = time.perf_counter()
         sc = (self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx,prepared_targets=prepared_score_targets)
               if prepared_score_targets is not None else self._score_forum(ws,r1,latched,start,f,prefs,tk,ctx))
+        if getattr(self, "v2_ret", None) is not None:
+            self.v2_ret["sc"] = sc      # SSBOT_FORUM_TWO_RETURN_BODY: binds the narrowing to this tick's rows (_v2_bound)
         J = sc["J"]
         scene_values=scene_known=None
         scene_info=None
@@ -4283,7 +4318,7 @@ class ForumPlanner(Planner):
             skip = ((r2.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(r2.flags_all.shape, bool)
             occ = self._contacts(f, r2.bound, tk, skip)
             if getattr(self, "v2_ret", None) is not None:
-                occ = self._v2_return_env(occ, f, r2, ch, tk, skip)
+                occ = self._v2_return_env(occ, f, r2, ch, tk, skip, sc=sc)
             if m_sp is not None:
                 # (a, b) the special rows' envelope: the bounce lanes against the special support (the full support
                 # from a row's full_from on)

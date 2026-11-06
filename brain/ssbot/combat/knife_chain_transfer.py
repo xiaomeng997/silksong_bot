@@ -156,8 +156,26 @@ class TransferGoal:
     source_move:object=None
 
     @property
+    def window_from(self):
+        """The frame the max_frames admission window counts from (ReturnGoal: the request's first issue)."""
+        return self.cast_fa
+
+    @property
     def responsibility(self):
         return self.source_move or MoveInstance(self.caster,self.cast_fa,"CC_CAST")
+
+
+@dataclass(frozen=True)
+class ReturnGoal(TransferGoal):
+    """SSBOT_FORUM_TWO_RETURN_AIR (Task 179 #316, Sol seq 239 a): an L2 air ReturnRequest run with the SWITCH
+    execution (source_kind SWITCH). Its source move has ENDED: source_move / cast_fa are attribution and the
+    one-return-per-instance key only (cast_fa the source's real first frame, never rewritten), no source phase or
+    instance gate and no exemption anywhere. return_f: the request's first issue frame, the admission window's start."""
+    return_f:int=0
+
+    @property
+    def window_from(self):
+        return self.return_f
 
 
 def bounce_target(state):
@@ -208,7 +226,7 @@ def observe_goal(state,previous,cfg,finished,game_time=None):
         if (caster["iid"],fa) not in finished and (previous is None or fresh!=previous):return fresh
     if previous is not None:
         if (previous.target in byid and previous.caster in byid and
-                0<=f-previous.cast_fa<=cfg["max_frames"]):
+                0<=f-previous.window_from<=cfg["max_frames"]):
             return previous
     return None
 
@@ -998,7 +1016,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if active is None:
         if h.get("hero_accepting_input") is not True:return None
         observed=(goal is not None and goal.target==target and goal.caster in {e["iid"] for e in es} and
-                  0<=state["f"]-goal.cast_fa<=cfg["max_frames"])
+                  0<=state["f"]-goal.window_from<=cfg["max_frames"])
         if not observed and (st!="Spell Antic" or tin>cfg["entry_cast_s"]):return None
         if ground and (int(sim.prefix[0])&B["J"] or state["act"]["hf"]["latched"]&B["J"]):return None
         cast_fa=goal.cast_fa if observed else max(0,state["f"]-int(round(tin*60.)))

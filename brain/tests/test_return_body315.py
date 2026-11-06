@@ -10,7 +10,7 @@ import pytest
 
 from ssbot.combat import forum_v2 as v2
 from ssbot.combat.attack_range import union
-from ssbot.combat.forum_planner import ForumConfig, ForumPlanner
+from ssbot.combat.forum_planner import F_ATTACKING, ForumConfig, ForumPlanner
 from ssbot.combat.planner import PlannerConfig
 from ssbot.combat.tactics import gauntlet as G
 from ssbot.knowledge import kinematics as kin
@@ -207,21 +207,66 @@ def test_the_switch_resolves_to_the_module_constant_in_the_measurement_manifest(
     assert s["effective"] == {"ssbot.combat.forum_v2.RETURN_BODY": v2.RETURN_BODY}
 
 
+def _lanes(n, T1, lanes=True):
+    """A hit-branch / envelope rollout stand-in: every row free (NORMAL, no flags) over T1 frames, two lanes."""
+    return NS(mode=np.full((n, T1), kin.M_NORMAL, np.int64), flags=np.zeros((n, T1), np.int64),
+              flags_any=np.zeros((n, T1), np.int64), bound=np.zeros((n, T1, 4)),
+              variants=("nominal", "slow") if lanes else ("nominal",))
+
+
 def test_hit_branch_lanes_read_the_narrowed_stack_after_the_lock_end_only(params, arena, monkeypatch):
     pl = ForumPlanner(params, arena, PlannerConfig(T=8, threads=1), ForumConfig())
     T1 = 10
     rows = np.array([0, 1, 2, 4])                      # row indices of the full tick (4: CONTINUE)
-    pl.v2_ret = {"lock_end": np.array([2, 5, -1, -1, 3]), "info": {}}
+    sc = {"tick": "own"}
+    pl.v2_ret = {"lock_end": np.array([2, 5, -1, -1, 3]), "info": {}, "P": 2, "sc": sc}
     monkeypatch.setattr(pl, "_contacts_fn", lambda f, b, tk, sk, fn: np.ones((len(b), T1), bool))
     occ = np.zeros((4, T1), bool)
-    rh = NS(bound=np.zeros((4, T1, 4)))
+    rh = _lanes(4, T1)
     bell = np.array([False, False, False, True])
-    out = pl._v2_return_hit(occ, NS(rs=NS()), rh, rh.bound, rows, np.arange(T1) * v2.FT, np.zeros((4, T1), bool),
-                            {}, np.zeros(4, bool), bell)
+    args = (occ, NS(rs=NS()), rh, rh.bound, rows, np.arange(T1) * v2.FT, np.zeros((4, T1), bool), {},
+            np.zeros(4, bool), bell)
+    out = pl._v2_return_hit(*args, sc=sc)
     assert not out[0, :3].any() and out[0, 3:].all()          # past its lock end (2)
-    assert not out[1, :6].any() and out[1, 6:].all()          # past its lock end (5)
+    assert not out[1, :6].any() and out[1, 6:].all()          # past its stage-1 lock end (5): never earlier
     assert not out[2].any() and not out[3].any()              # no lock end (a chain row) / a bell row: as they were
     assert pl.v2_ret["info"]["hit_rows"] == 2
+    # tools.forum_human_score.verdict renumbers a row 0 with its own score dict: not this tick's rows, the stack
+    assert not pl._v2_return_hit(*args, sc={"tick": "other"}).any()
+    assert not pl._v2_return_hit(*args).any()
+
+
+def test_a_slower_lane_still_swinging_keeps_the_stack_until_its_own_end(params, arena):
+    # Sol seq 239 P2 (Astra): bounds_lo lets a swing / control end a frame later in a lane; the nominal lane free at
+    # P + 2 while a supported slower lane still swings must not read stack_ret on that frame
+    pl = ForumPlanner(params, arena, PlannerConfig(T=8, threads=1), ForumConfig())
+    T1, P = 12, 2
+    r = _lanes(3, T1)
+    r.flags[0, P + 1:P + 3] = F_ATTACKING                     # nominal: the swing ends at P + 2
+    r.flags_any[0, P + 1:P + 4] = F_ATTACKING                 # a slower lane: still swinging at P + 3
+    r.mode[1, P + 1:P + 4] = kin.M_DASH                       # a dash from P + 1: no per-lane end in r
+    r.mode[2, P] = kin.M_DASH                                 # a dash ending on the sent prefix's last frame
+    le = pl._v2_lane_lock_end(r, P, np.array([P + 2, P + 3, P]))
+    assert le.tolist() == [P + 3, T1, T1]
+    one = _lanes(3, T1, lanes=False)                          # a single (nominal) lane: its own ends are exact
+    one.mode[1, P + 1:P + 4] = kin.M_DASH
+    assert pl._v2_lane_lock_end(one, P, np.array([P, P + 3, -1])).tolist() == [P, P + 3, -1]
+
+
+def test_envelope_reads_the_narrowed_stack_after_the_lane_wise_end_and_only_for_this_tick(params, arena, monkeypatch):
+    pl = ForumPlanner(params, arena, PlannerConfig(T=8, threads=1), ForumConfig())
+    T1, P = 12, 2
+    sc = {"tick": "own"}
+    pl.v2_ret = {"lock_end": np.array([P + 2, -1, P]), "info": {}, "P": P, "sc": sc}
+    monkeypatch.setattr(pl, "_contacts_fn", lambda f, b, tk, sk, fn: np.ones((len(b), T1), bool))
+    r2 = _lanes(3, T1)
+    r2.flags_any[0, P + 1:P + 4] = F_ATTACKING                # nominal ended at P + 2, a lane at P + 3
+    occ = np.zeros((3, T1), bool)
+    ch = np.array([0, 1, 2])
+    out = pl._v2_return_env(occ, NS(rs=NS()), r2, ch, np.arange(T1) * v2.FT, np.zeros((3, T1), bool), sc=sc)
+    assert not out[0, :P + 4].any() and out[0, P + 4:].all()
+    assert not out[1].any() and not out[2, :P + 1].any() and out[2, P + 1:].all()
+    assert not pl._v2_return_env(occ, NS(rs=NS()), r2, ch, np.arange(T1) * v2.FT, np.zeros((3, T1), bool)).any()
 
 
 def test_l2_keeps_the_other_one_named_for_the_side_slash_just_after_landing_in_the_gap(monkeypatch):
