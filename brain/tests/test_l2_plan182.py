@@ -712,6 +712,10 @@ def test_landed_anywhere_the_over_followup_is_over(monkeypatch):
     ex = r.exec
     ex.name = "over_back"
     assert "landed" in dict(ex.phase.on)
+    far = 43.
+    ws.hero.pos = E((far, float(ws.hero.pos.v[1])))
+    ws.hero.hurtbox = [(far - .25, 4.), (far + .25, 4.), (far + .25, 6.), (far - .25, 6.)]
+    set_hero(tac, far)
     ws.hero.contact = E("GROUND")
     go_(tac, ws, fc)
     assert ex.status == "complete" and ex.plan is None
@@ -745,7 +749,7 @@ def test_a_body_of_the_plan_gone_ends_it_with_no_error_in_the_tick(monkeypatch):
     r = tac.plan_runner
     ex = r.exec
     assert ex.plan is not None
-    ex.name = "over_back"
+    ex.name = "under"                            # no event of its own about the other body
     gone = fc.subjects[1]
     sc = NS(tac=tac, ws=ws, t=ws.stamp.t_game_s, subjects=[fc.subjects[0]], hx=30., geo=None, frame=1, grounded=False, region=None)
     r.tick(sc)
@@ -800,11 +804,14 @@ def test_the_route_with_the_farther_wall_is_the_one_chosen():
 
 
 def test_a_walker_step_inside_the_soft_range_asks_nothing_and_past_it_asks_once(monkeypatch):
-    tac, ws, fc = planned(monkeypatch)
+    tac, ws, fc = planned(monkeypatch, delay=4)  # the update takes a while: the old plan keeps running past its soft range
     go_(tac, ws, fc)
     antic(tac, ws, fc, family=G.CC_JUMP_CAST, state="Cast Slam Antic")
-    go_(tac, ws, fc); go_(tac, ws, fc)
     r = tac.plan_runner
+    for _ in range(8):
+        go_(tac, ws, fc)
+        if r.exec.plan is not None:
+            break
     n = r.requests
     assert r.exec.plan is not None and r.exec.plan.get("walker_v") in (0., None)
     # a real step (past the repeat step) still inside the plan's soft range: no change for the plan
@@ -816,9 +823,10 @@ def test_a_walker_step_inside_the_soft_range_asks_nothing_and_past_it_asks_once(
     change(fc, 8, pos=(39. - (CP.SOFT_WALKER_U + .1), fc.subjects[1].pos[1]))
     go_(tac, ws, fc)
     assert r.requests == n + 1
-    change(fc, 8, pos=(39. - (CP.SOFT_WALKER_U + .15), fc.subjects[1].pos[1]))
-    go_(tac, ws, fc)
-    assert r.requests == n + 1
+    for k in range(2):
+        change(fc, 8, pos=(39. - (CP.SOFT_WALKER_U + .15 + .05 * k), fc.subjects[1].pos[1]))
+        go_(tac, ws, fc)
+        assert r.requests == n + 1
 
 
 def test_a_flight_plan_with_no_route_is_an_explicit_no_plan_in_the_tick(monkeypatch):
