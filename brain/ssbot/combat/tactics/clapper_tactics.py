@@ -26,7 +26,9 @@ from dataclasses import dataclass, replace
 
 from ssbot.combat import forum_v2
 
-from . import clapper_middle
+# (clapper_plans reads only its own switch and the shared geometry; flag off its units below are never built into a call)
+
+from . import clapper_middle, clapper_plans
 from .clapper_scene import AIR, ANTIC, JUMPS, NEAR, ground_stance, standing_gap
 from .forum_local import clapper_facing
 from .modes import EntryAttack, ReturnRequest
@@ -604,6 +606,188 @@ class ClusterRoute(Tactic):
                 "clapper_cluster_end": sc.mem.get("cluster_end")}
 
 
+# ---- Task 182 (SSBOT_FORUM_TWO_PLAN=1): the jump scenes as plans (clapper_plans) run by the generic executor (l2_plan) ----
+
+
+class PlanRun(Tactic):
+    """Offers nothing: advances the plan runner first in every call (results, the executor's events, the requests)."""
+    name = "plan runner"
+    event = "plan"
+
+    def observe(self, sc):
+        sc.plans.tick(sc)
+        return sc.plans.exec.plan
+
+
+class _Planned(Tactic):
+    """A parent scene's output is the running phase's: target, entry style, stance, no-hit, hit suppression. The unit holds
+    no event memory: the plan is the worker's, the progress is the executor's."""
+    scene = ""
+    switch_entry = False      # the phase names its own entry (pick_entry)
+
+    def observe(self, sc):
+        return sc.plans.context(self.scene, sc.t)
+
+    def repick(self, sc):
+        return sc.plans.changed
+
+    def pick_entry(self, sc, rule, target, previous):
+        return sc.plans.entry(sc, target, previous)
+
+    def apply(self, sc, rule, g, target):
+        ex = sc.plans.exec
+        ph = ex.phase
+        if ph is None or ex.plan is None or ex.plan.scene != self.scene:
+            return None
+        style = KEEP if ph.attack else ph.contact
+        no_hit = frozenset(ph.no_hit)
+        if ph.stance is not None and ph.stance[0] == "middle" and sc.geo is not None:
+            # back to the middle: a standing gap is a landing, no hit on the way (no new Run onto its body); no gap: the
+            # existing air pose at the seam, its stomp style
+            if return_pose(sc.tac, target, sc.geo, sc.hx)["posture"] == "air":
+                style = "stomp"
+            else:
+                no_hit = no_hit | {target.iid}
+        return Applied(stance=sc.plans.stance(sc, ph), style=style, scene=f"{self.scene} plan: {ph.name}",
+                       suppress_hits=ph.suppress_hits, no_hit=no_hit)
+
+    def finish(self, sc, rule, won, g, out):
+        ph = sc.plans.exec.phase
+        if won and ph is not None and ph.ground:
+            # a way on the floor: rows without a jump key first among the safe ones (JT ground, fp1: she jumped on the way
+            # under and met its landing); the existing preference, every safety rank above it stays
+            out = replace(out, ground_first=frozenset(out.ground_first) | {g.target})
+        return out
+
+    def log(self, sc, out):
+        return {"clapper_plan": sc.plans.log_row(sc)}
+
+
+class PlannedMiddle(_Planned):
+    """She is between the two bodies, one in a jump: the plan's selected route runs (stay / under / over with the prepared
+    fallback). No plan yet, blocked or invalid: no offer (never a 95-point empty route); the generic rules go on."""
+    name = "middle jump"
+    event = "middle_jump"
+    scene = "middle"
+    scores = {"middle_jump": 95.}
+
+    def propose(self, sc):
+        ex = sc.plans.exec
+        ph = ex.phase if (ex.plan is not None and ex.plan.scene == self.scene) else None
+        if ph is None:
+            return [], sc.plans.why_not(self.scene)
+        return [("middle_jump", sc.subject(ph.target) if ph.target is not None else sc.default, 1.)], None
+
+
+class _PlannedCluster(_Planned):
+    """She is outside the two, one in a jump's antic: one complete plan of the two; the public comparison chooses."""
+    event = "cluster"
+    scene = "cluster"
+    owns_scene = frozenset({"keep", "cluster_lure", "cluster_attack"})
+    branch = ""
+    rule = ""
+
+    def propose(self, sc):
+        ex = sc.plans.exec
+        plan = ex.plan
+        if plan is None or plan.scene != self.scene:
+            return [], sc.plans.why_not(self.scene)
+        cand = plan.candidate(self.branch)
+        if cand is None or not cand.feasible:
+            return [], "not feasible: " + str(None if cand is None else cand.reason)
+        if ex.selected not in (None, self.branch):
+            return [], "the other plan runs"
+        ph = ex.phase if ex.selected == self.branch else plan.phase(cand.start)
+        return [(self.rule, sc.subject(ph.target) if ph.target is not None else sc.default, cand.applicability)], None
+
+    def commit(self, sc, rule, target):
+        sc.plans.exec.select(self.branch, sc.t)
+
+
+class ClusterLure(_PlannedCluster):
+    """Back off to a sufficient interval (attacks legal until its departure), return under on the observed take-off."""
+    name = "cluster lure and return"
+    branch = "lure"
+    rule = "cluster_lure"
+    scores = {"cluster_lure": 145.}
+
+
+class ClusterAttack(_PlannedCluster):
+    """Slash the reachable one through the aim, retreat past the coverage on the take-off, come back after the hazards."""
+    name = "cluster attack and retreat"
+    branch = "attack"
+    rule = "cluster_attack"
+    scores = {"cluster_attack": 130.}    # below lure even after lure's target switch cost: lure first when its space holds
+
+
+class PlannedKeep(FocusKeep):
+    """As FocusKeep; with no running plan a jumper in flight above her is no focus (live 786; the legacy hold's rule)."""
+
+    def propose(self, sc):
+        d = sc.default
+        if (d.family in JUMPS and d.state in AIR and sc.region not in {"left", "right"} and sc.plans.blocked_for(d)):
+            return [("keep", sc.other, 1.)], None
+        return super().propose(sc)
+
+
+class PlannedIntercept(JumpIntercept):
+    """The trigger is JumpIntercept's. The hold is a running one-phase plan in the executor (bound to the jump's instance,
+    ended by its jump and rune circle): no separate 140-point rule, no private memory."""
+    scores = {"intercept": 130.}
+    memory = {}
+
+    def observe(self, sc):
+        ex = sc.plans.exec
+        hold = ex.plan.instance if (ex.plan is not None and ex.plan.scene == "intercept") else None
+        if hold is None and sc.mem.get("plan_intercept"):
+            released(sc, self, ex.reason or "its jump and rune circle are over")
+        sc.mem["plan_intercept"] = hold is not None
+        return hold
+
+    def propose(self, sc):
+        hold = sc.events.get(self.event)
+        if hold is not None:
+            return [("intercept", sc.subject(hold[0]), 1.)], None
+        return super().propose(sc)
+
+    def commit(self, sc, rule, target):
+        if rule == "intercept" and sc.events.get(self.event) is None:
+            sc.plans.respond(sc, target)
+
+    def release(self, sc, rule, target):
+        hold = sc.events.get(self.event)
+        if rule != "intercept" and hold is not None and target.iid != hold[0]:
+            sc.plans.exec.end("complete", "another target won: " + rule, sc.t)
+            sc.mem["plan_intercept"] = False
+            released(sc, self, "another target won: " + rule)
+
+
+class PlannedTakeoff(FocusTakeoff):
+    """The trigger stays for a take-off no plan covers; 'she left this jump' is the executor's event history."""
+    memory = {}
+
+    def observe(self, sc):
+        return sc.plans.departed(sc)
+
+    def commit(self, sc, rule, target):
+        sc.plans.exec.record((sc.keep.iid, sc.tac.t_commit.get(sc.keep.iid)), "departed", sc.t)
+
+
+@dataclass(frozen=True)
+class Table:
+    tactics: tuple
+    observe: tuple
+    rules: dict
+    scores: dict
+
+
+def _table(tactics, observe_first=()):
+    order = (PlannedMiddle, MiddleJump, ClusterLure, ClusterAttack, ClusterRoute, PlannedIntercept, JumpIntercept, PlannedTakeoff,
+             FocusTakeoff, MiddleReturn)
+    return Table(tactics, tuple(observe_first) + tuple(t for k in order for t in tactics if type(t) is k),
+                 {rule: t for t in tactics for rule in t.scores}, {rule: t.scores[rule] for t in tactics for rule in t.scores})
+
+
 # The pool order (an equal score and keep flag goes to the earlier offer) and the observation order (an event that
 # holds the scene is observed before the ones that wait for it).
 TACTICS = (FocusKeep(), MiddleJump(), JumpIntercept(), NearThreat(), FocusTakeoff(), EnterMiddle(), OuterRetreat(),
@@ -612,3 +796,12 @@ OBSERVE = tuple(t for k in (MiddleJump, ClusterRoute, JumpIntercept, FocusTakeof
                 for t in TACTICS if type(t) is k)
 RULES = {rule: t for t in TACTICS for rule in t.scores}
 DEFAULT_SCORES = {rule: t.scores[rule] for t in TACTICS for rule in t.scores}
+LEGACY_TABLE = Table(TACTICS, OBSERVE, RULES, DEFAULT_SCORES)
+PLAN_TABLE = _table((PlannedKeep(), PlannedMiddle(), PlannedIntercept(), NearThreat(), PlannedTakeoff(), EnterMiddle(),
+                     OuterRetreat(), FlipInward(), TightOverhead(), MiddleReturn(), ClusterLure(), ClusterAttack()),
+                    observe_first=(PlanRun(),))
+
+
+def table():
+    """The tactic set of this call: the plan units only with SSBOT_FORUM_TWO_PLAN=1."""
+    return PLAN_TABLE if clapper_plans.ENABLED else LEGACY_TABLE

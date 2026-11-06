@@ -16,10 +16,18 @@ from ssbot.combat import two_play
 
 from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, ground_stance,  # noqa: F401
                             standing_gap)
-from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
-                              TACTICS, Applied, cluster_route, middle_return, return_pose)
+from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, LEGACY_TABLE, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
+                              TACTICS, Applied, cluster_route, middle_return, return_pose, table)
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X
 from .modes import EVADE, entry_attack_prefs
+
+
+def plan_runner(tac):
+    """SSBOT_FORUM_TWO_PLAN: this tactics object's runner (made once; the policy gives it its channel at startup)."""
+    if tac.plan_runner is None:
+        from .clapper_plans import PlanRunner
+        tac.plan_runner = PlanRunner(tac)
+    return tac.plan_runner
 
 
 def enabled(fc):
@@ -41,7 +49,8 @@ def _pick(sc, caps):
         choices.append(dict(rule=rule, target=target.iid, maximum=caps[rule], applicability=applicability,
                             switch_cost=cost, score=caps[rule] * applicability - cost))
 
-    for tactic in TACTICS:
+    tb = sc.table
+    for tactic in tb.tactics:
         rec = {"tactic": tactic.name}
         blocked = [ev for ev in tactic.excluded_by if sc.events.get(ev) is not None]
         if blocked:
@@ -55,12 +64,12 @@ def _pick(sc, caps):
             else:
                 rec["not_applicable"] = why
         evals.append(rec)
-    for owner in TACTICS:
+    for owner in tb.tactics:
         if owner.owns_scene is not None and sc.events.get(owner.event) is not None:
             # an active scene owner: only its own rules and the ones it allows stay in the pool
             keep_rules = owner.owns_scene | owner.scores.keys()
             for rec in evals:
-                if any(c["rule"] not in keep_rules and RULES[c["rule"]].name == rec["tactic"] for c in choices):
+                if any(c["rule"] not in keep_rules and tb.rules[c["rule"]].name == rec["tactic"] for c in choices):
                     rec["filtered_by"] = owner.name
             choices[:] = [c for c in choices if c["rule"] in keep_rules]
     winner = max(choices, key=lambda c: (c["score"], keep is not None and c["target"] == keep.iid))
@@ -72,25 +81,29 @@ def decide(tac, ws, fc, prefs, hx, t):
     from .gauntlet import RUSH, TWO_SLAM_RANGE_U
     subjects = [s for s in fc.subjects if s.alive and s.in_play and s.pos is not None]
     mem = tac._clapper_priority
+    tb = table()
     if mem is None:
         mem = tac._clapper_priority = {"seen": {}, "region": None}
-        for tactic in TACTICS:
+        for tactic in tb.tactics:
             mem.update(tactic.memory)
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
     sc = Scene(tac, ws, fc, prefs, hx, t, subjects, mem, geo, region)
-    for tactic in OBSERVE:
+    sc.table = tb
+    if tb is not LEGACY_TABLE:
+        sc.plans = plan_runner(tac)
+    for tactic in tb.observe:
         sc.events[tactic.event] = tactic.observe(sc)
     sc.seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
                        tac.t_commit.get(s.iid)) for s in subjects}
     old = tac.goal
     sc.keep = keep = next((s for s in subjects if old is not None and s.iid == old.target), None)
-    asked = [tactic.repick(sc) for tactic in TACTICS]
+    asked = [tactic.repick(sc) for tactic in tb.tactics]
     changed = sc.seen != mem["seen"] or region != mem["region"] or any(asked)
     if keep is None or changed or tac.n % tac.rules.period == 0:
         triggers = ((["no focus"] if keep is None else []) + (["subjects changed"] if sc.seen != mem["seen"] else [])
                     + (["region changed"] if region != mem["region"] else [])
-                    + [tactic.name + " asked" for tactic, ask in zip(TACTICS, asked) if ask]
+                    + [tactic.name + " asked" for tactic, ask in zip(tb.tactics, asked) if ask]
                     + (["period"] if tac.n % tac.rules.period == 0 else []))
         sc.cands = cands = tac.candidates(ws, fc, hx, None if keep is None else keep.iid)
         sc.by_id = {c.s.iid: c for c in cands}
@@ -99,13 +112,13 @@ def decide(tac, ws, fc, prefs, hx, t):
         sc.default = (keep or (min(subjects, key=lambda s: abs(s.pos[0] - hx)) if region in {"left", "right", "over"}
                                else max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx)))))
         sc.other = next(s for s in subjects if s.iid != sc.default.iid)
-        choices, winner, evals = _pick(sc, DEFAULT_SCORES | tac.rules.clapper_scores)
+        choices, winner, evals = _pick(sc, tb.scores | tac.rules.clapper_scores)
         target = sc.subject(winner["target"])
         reason = winner["rule"]
-        won = RULES[reason]
+        won = tb.rules[reason]
         mem["winner"] = reason
         won.commit(sc, reason, target)
-        for tactic in TACTICS:
+        for tactic in tb.tactics:
             tactic.release(sc, reason, target)
         tac.last["clapper_choices"] = choices
         tac.last["clapper_winner"] = dict(winner)
@@ -125,7 +138,7 @@ def decide(tac, ws, fc, prefs, hx, t):
         tac.stats["picks"] += 1
         tac.goal = goal
     mem["seen"], mem["region"] = sc.seen, region
-    return _apply(sc, RULES[mem["winner"]], mem["winner"])
+    return _apply(sc, tb.rules[mem["winner"]], mem["winner"])
 
 
 def _apply(sc, won, rule):
@@ -179,11 +192,11 @@ def _apply(sc, won, rule):
         if ap.no_hit:
             out = replace(out, no_hit=frozenset(out.no_hit) | ap.no_hit)
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
-    for tactic in TACTICS:
+    for tactic in sc.table.tactics:
         out = tactic.finish(sc, rule, tactic is won, g, out)
     g.why = g.why.split("; ")[0] + "; " + sc.scene + "; " + str(how)
     logs = {}
-    for tactic in TACTICS:
+    for tactic in sc.table.tactics:
         logs.update(tactic.log(sc, out))
     tac.last.update(goal=RUSH, goal_why=g.why, target_type=CLAPPER, goal_t_end=None,
                     entry_attack=None if out.entry_attack is None else vars(out.entry_attack),

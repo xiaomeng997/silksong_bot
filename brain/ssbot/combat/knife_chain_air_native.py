@@ -20,6 +20,25 @@ from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import logical_copy,NominalUnsupported
 
 
+PLAN_SIDE_NEAR_U=5.5   # SSBOT_FORUM_TWO_PLAN: a side approach under a source in the air stops at the slash's range (its sprint's
+#                        skid takes her to the stance), not at the jump's distance: there she would stand under its landing
+
+
+def _plan_source_in_air(state,caster):
+    from .tactics import clapper_plans
+    if not clapper_plans.ENABLED:return False
+    source=next((e for e in transfer.clappers(state) if e["iid"]==caster),None)
+    return source is not None and transfer.control(source)[0] in ("Jump","Air")
+
+
+def _passes_under(source,obstacle,state):
+    """SSBOT_FORUM_TWO_PLAN only: the side approach's source is in its jump's flight with its body's bottom above her head."""
+    from .tactics import clapper_plans
+    if not clapper_plans.ENABLED or transfer.control(source)[0] not in ("Jump","Air"):return False
+    box=(state.get("hero") or {}).get("box") or ()
+    return bool(len(box)==4 and type(box[3]) in (int,float) and np.isfinite(box[3]) and obstacle[1]>box[3])
+
+
 class NativeManualAirChain(NativeChainB2):
     manual_air=True
     @staticmethod
@@ -787,9 +806,12 @@ class NativeManualAirChain(NativeChainB2):
             enemy=next((e for e in transfer.clappers(state) if e["iid"]==target),None)
             hp=(state.get("hero") or {}).get("pos") or ()
             ep=() if enemy is None else enemy.get("pos") or ()
+            near_u=self.runner.chains[transfer.PROGRAM].cfg["STOMP"]["jump_root"]
+            if side and _plan_source_in_air(state,run.v["caster"] if active else self._transfer_goal.caster):
+                near_u=min(near_u,PLAN_SIDE_NEAR_U)
             near=(len(hp)>=1 and len(ep)>=1 and type(hp[0]) in (int,float)
                   and type(ep[0]) in (int,float) and np.isfinite([hp[0],ep[0]]).all()
-                  and abs(ep[0]-hp[0])<=self.runner.chains[transfer.PROGRAM].cfg["STOMP"]["jump_root"])
+                  and abs(ep[0]-hp[0])<=near_u)
             target_attack=enemy is not None and transfer.control(enemy)[0] in (transfer.AIR_ATTACK_STATES |
                 {"Jump Antic","Cast Slam Antic","Jump","Air"})
             source_blocked=False
@@ -808,6 +830,12 @@ class NativeManualAirChain(NativeChainB2):
                     if active:self._recover("side approach source geometry unavailable",f)
                     return None
                 source_blocked=(min(hp[0],ep[0])<=obstacle[2] and max(hp[0],ep[0])>=obstacle[0])
+                if source_blocked and _passes_under(source,obstacle,state):
+                    # Task 182 (SSBOT_FORUM_TWO_PLAN; design: the lure's return goes back under the jumper on its observed
+                    # take-off): a source in the air whose body is above her head is no obstacle now. The Run's own
+                    # per-step scan and the dash-lock scan still read its body and hammer on the way; once it comes down
+                    # to her head this is blocked again and the Run hands back as before.
+                    source_blocked=False
                 if source_blocked:self._note("target_entry_side_source_blocked",frame=f,source=caster,active=active)
             if changed or not side or target_attack or near or source_blocked:
                 if active:

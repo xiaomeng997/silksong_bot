@@ -42,6 +42,8 @@ class Scene:
     other: object = None
     scene: str = "attack focus"         # the applied scene name (log and goal why)
     back_pose: dict | None = None       # the middle return's applied pose this tick (its winner only)
+    table: object = None                # clapper_tactics.table(): the tactic set of this call
+    plans: object = None                # SSBOT_FORUM_TWO_PLAN only: clapper_plans.PlanRunner
 
     def subject(self, iid):
         return next(s for s in self.subjects if s.iid == iid)

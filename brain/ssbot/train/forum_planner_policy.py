@@ -48,6 +48,7 @@ from ssbot.combat.multi_forecast import MultiForecaster, ReactConfig
 from ssbot.combat.planner import PlannerConfig
 from ssbot.combat.projectiles import bells_mode
 from ssbot.combat.safety_filter import FilterContext, KillKnowledge
+from ssbot.combat.tactics import clapper_plans
 from ssbot.combat.tactics.forum_local import ForumTactics, load_forum_playbook
 from ssbot.combat.tactics.gauntlet import GauntletTactics, load_l2_rules
 from ssbot.combat.tactics.modes import wall_pressure_prefs
@@ -388,6 +389,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.core.worldstate import E, WorldState
         t0 = time.perf_counter()
         self._prepare_scene_field()
+        self._prepare_plans()
         self.fc.warm()
         fcfg = self._fcfg(self.clash)
         if fcfg.v2:
@@ -566,6 +568,19 @@ class ForumPlannerPolicy(PlannerPolicy):
         from ssbot.combat.scene_field_event_shadow import SceneFieldEventShadow
         self._scene_field_reader = SceneFieldShadow.for_forum(self.pb.arena_x)
         self._scene_field_event_reader = SceneFieldEventShadow.for_forum(egress_only=SCENE_FIELD_RANK)
+
+    def _prepare_plans(self):
+        """Startup only (Task 182): the resident plan worker; reset checks its health and never spawns or waits."""
+        if not clapper_plans.ENABLED or not isinstance(self.tac, GauntletTactics) or self.tac.plan_runner is not None:
+            return
+        clapper_plans.warm(self.params)      # the foreground's hand-back roll: never compiled inside a tick
+        runner = self.tac.plan_runner = clapper_plans.PlanRunner(self.tac)
+        if clapper_plans.INLINE:
+            from ssbot.combat.tactics.l2_plan_worker import InlineChannel
+            runner.channel = InlineChannel(self.params, int(clapper_plans.INLINE))
+        else:
+            from ssbot.combat.tactics.l2_plan_worker import PlanChannel
+            runner.channel = PlanChannel(self.params)
 
     def _remaining_hp_quit(self):
         budget_floor = getattr(getattr(self.chain_native, "budget", None), "remaining_hp_quit", None)
@@ -1112,6 +1127,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                     self.tac.two_jh = self.two.jh_view()
                 if two_play.PMANY:
                     self.tac.two_pm = self.two.pm_view()      # SP11b: L2 holds F in the herd
+        if clapper_plans.ENABLED and isinstance(self.tac, GauntletTactics):
+            # Task 182: her committed keys and model state for the plans' hand-back; no key of this tick is in it
+            cogf_ = self.cog["frames"]
+            self.tac.plan_input = clapper_plans.HeroInput(
+                self._start_state(ws, raw),
+                np.array([self.sent.get(fr, 0) & ~(COG if fr in cogf_ else 0) for fr in range(fo + 1, f + 2)], np.int64),
+                HoldState.from_act(raw.get("act")), self.params, self.terrain)
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
             self.two.manual_focus = getattr(prefs, "clapper_choice", None) is not None
@@ -1345,7 +1367,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play = cm
                 own = "claw"
                 self.counts["claw_chase"] += 1
-        middle_jump = (getattr(prefs, "clapper_choice", None) == "middle_jump")
+        middle_jump = (getattr(prefs, "clapper_choice", None) in ("middle_jump", "cluster_lure", "cluster_attack"))
         if self.cast_stab is not None and middle_jump and play is None and not low_crit and not asw_crit:
             # This one scene owns its guide/standing/escape stance. The old
             # antic dash-to-slash script would otherwise overwrite that choice.
@@ -1775,7 +1797,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if self.tac.last.get("clapper_return_body") is not None:
             rec["clapper_return_body"] = self.tac.last["clapper_return_body"]   # SSBOT_FORUM_TWO_RETURN_BODY only
-        for k in ("clapper_eval", "clapper_releases"):
+        for k in ("clapper_eval", "clapper_releases", "clapper_plan"):
             if self.tac.last.get(k) is not None:
                 rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases
         if li.get("map") is not None:
@@ -1840,6 +1862,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 "real_quit": self.real_quit_stats(), "keys": keys,
                 "remaining_hp_quit": self.sc.cfg.remaining_hp_quit,
                 "l2": self.tac.stats_dict() if isinstance(self.tac, GauntletTactics) else None,
+                # Task 182: requests, adoptions, event -> adoptable latency of this episode (SSBOT_FORUM_TWO_PLAN only)
+                **({"l2_plan": self.tac.plan_runner.stats()} if getattr(self.tac, "plan_runner", None) is not None else {}),
                 **({"slam_play": self.slam_play.stats()} if self.slam_play is not None else {}),
                 **({"cast_stab": self.cast_stab.stats()} if self.cast_stab is not None else {}),
                 **({"claw_chase": self.claw.stats()} if self.claw is not None else {}),

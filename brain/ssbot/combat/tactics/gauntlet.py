@@ -297,8 +297,8 @@ class L2Rules:
             else:
                 v = float(v)
             setattr(out, k, v)
-        from .clapper_priority import DEFAULT_SCORES
-        if (set(out.clapper_scores) - DEFAULT_SCORES.keys()
+        from .clapper_priority import table
+        if (set(out.clapper_scores) - table().scores.keys()
                 or any(not math.isfinite(v) or v < 0 for v in out.clapper_scores.values())
                 or not math.isfinite(out.clapper_switch_cost) or out.clapper_switch_cost < 0):
             raise ValueError("forum.l2: invalid manual Clapper tactical scores")
@@ -409,6 +409,8 @@ class GauntletTactics:
         self._jt_done: dict[int, float] = {}              # SP14: Clapper iid -> t_commit of the jump move it fired on
         self.jt_runs: list[dict] = []                     # SP14: the episode's records (stats)
         self._clapper_priority = None                    # explicit manual-B event/region hold
+        self.plan_runner = None                          # SSBOT_FORUM_TWO_PLAN: clapper_plans.PlanRunner (executor, channel)
+        self.plan_input = None                           # ... the policy's hero model input of this tick
 
     @property
     def xs(self):
@@ -428,6 +430,8 @@ class GauntletTactics:
         self.two_pm, self._rl_sw = None, None
         self._wall_sw, self._wall_now = None, frozenset()
         self._clapper_priority = None
+        if self.plan_runner is not None:
+            self.plan_runner.reset()
         self._n_clappers = 0                              # SP8b JB_CORNER: live Clappers in play this tick
         self.stats = _new_stats()
 
