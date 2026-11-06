@@ -69,6 +69,7 @@ class NativeManualAirChain(NativeChainB2):
         self._entry_attack_seen=None
         self._entry_attack_goal=None
         self._return_admission_noted=None
+        self._idle_ev={};self._alive_hist={}
         self._transfer_responsibility={}
         self._transfer_target_moves={}
         self._vault_ready=False
@@ -255,13 +256,53 @@ class NativeManualAirChain(NativeChainB2):
         over=np.flatnonzero((pos[:,0]>=tbody[0])&(pos[:,0]<=tbody[2])&(box[:,1]>=tbody[3])&after)
         if not len(over):return "the straight approach never gets above the target within flight_check_frames"
         j=int(over[0])
-        if transfer.control(enemy)[0]=="Walk":
+        st=transfer.control(enemy)[0];ev=self._idle_ev.get(plan.iid) if st=="Idle" else None
+        if st=="Walk":
             support=transfer.walk_body_support(enemy,j+1,state.get("hero"))
             witness=None if support is None else support(pos[:j+1,0])[0]
+        elif ev is not None and ev.get("hit") is not None:
+            witness=None             # #317: an Idle hit since its entry: no witness until a new instance
         else:
-            witness=transfer.contact_body_witness(enemy,j+1,idle_no_evade=True)
+            witness=transfer.contact_body_witness(enemy,j+1,idle_no_evade=True,idle_time=transfer.idle_time_of(ev))
         if witness is None or not np.isfinite(witness[j]).all():
             return "no strike witness for the target when the approach gets above it (frame +%d)"%j
+        return None
+
+    def _no_strike_overhead(self,state,sim,target):
+        """Task 179 #317 (Sol seq 240 乙): why an air Run over its target can no longer strike her, or None. Over: the
+        hero centre inside her observed body span and the hero box bottom above its top. Only DEFINITE ends count,
+        never one tick without a press-now row or a witness that is momentarily absent:
+        - an Idle whose clock is past its modelled Idle Time with the no-evade proof assumed (the no-buddy 39, or 68
+          with the Idle-entry buddy evidence) and so has no witness on any frame of the press horizon
+          (len(prefix) + 3 + ACTIVE[1], as transfer_stomp_plan), or an Idle hit since its entry (evidence revoked);
+        - a walker outside WalkSupport;
+        - a state with no fitted still pose at all (not Walk, not transfer.STILL_ROOT_STATES: Dmg Attack, Evade
+          Scuttle, Slam 0 / 1, the jump antics ...).
+        A still state whose witness is absent now (its pose still settling, past its longest fitted duration with
+        the successor to come: live prefix 2612 Slam Recover, struck at 2632 on the Idle after it) keeps the Run;
+        unknown inputs do too."""
+        from . import pogo_model as PM
+        enemy=next((e for e in transfer.clappers(state) if e["iid"]==target),None)
+        h=state.get("hero") or {};hb=h.get("box");hp=h.get("pos")
+        try:body=None if enemy is None else transfer.body_box(enemy)
+        except (TypeError,ValueError,OverflowError):body=None
+        if (body is None or not isinstance(hb,(list,tuple)) or len(hb)<4 or not isinstance(hp,(list,tuple)) or not hp
+                or not np.isfinite([hp[0],hb[1],*body]).all()):return None
+        if not (body[0]<=hp[0]<=body[2] and hb[1]>=body[3]):return None
+        frames=len(sim.prefix)+3+PM.ACTIVE[1]
+        st=transfer.control(enemy)[0]
+        if st=="Walk":
+            return None if transfer.walk_body_support(enemy,frames,h) is not None else "walker outside WalkSupport"
+        if st not in transfer.STILL_ROOT_STATES:return "no fitted still pose in %s"%st
+        if st!="Idle":return None
+        ev=self._idle_ev.get(target)
+        if ev is not None and ev.get("hit") is not None:
+            return "Idle hit at %d since its entry: evidence revoked"%ev["hit"]
+        idle_time=transfer.idle_time_of(ev);tin=transfer.control(enemy)[1]
+        if type(tin) not in (int,float) or not np.isfinite(tin) or int(round(tin*60.))<idle_time:return None
+        w=transfer.contact_body_witness(enemy,frames,idle_no_evade=True,idle_time=idle_time)
+        if w is None or not np.isfinite(w).all(axis=1).any():
+            return "no strike witness: Idle k %d past its Idle Time %d"%(int(round(tin*60.)),idle_time)
         return None
 
     @staticmethod
@@ -721,6 +762,17 @@ class NativeManualAirChain(NativeChainB2):
             self._note("return_request_released",frame=f,target=target,link=link,
                        request=None if req is None else asdict(req))
             return None
+        if active and run.link=="air":
+            why=self._no_strike_overhead(state,sim,target)
+            if why is not None:
+                # Task 179 #317 (Sol seq 240 乙): an air transfer / continuation Run already over its target with no
+                # strike witness possible for her current state hands back at this step through B2 recovery: the
+                # keys already sent and latched stay the next owner's actual prefix, the failure exposure and the
+                # same-move no-retry stay; a chosen strike row (link strike), a source tail or a hook is not here.
+                self._note("transfer_no_witness_handback",frame=f,target=target,reason=why,
+                           owner="B2 recovery hands back; failure responsibility kept")
+                self._recover("transfer air run over its target with no strike witness: "+why,f)
+                return None
         approach_only=bool(run.v.get("_approach_only")) if active else bool(side and self._transfer_goal is not None
             and self._transfer_goal.source_kind=="SWITCH")
         if approach_only:
@@ -774,6 +826,7 @@ class NativeManualAirChain(NativeChainB2):
                 return None
         rs=getattr(forecast,"rs",None)
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
+                              **({"idle_evidence":self._idle_ev} if self._idle_ev else {}),
                               **({"approach_only":True} if approach_only else {}))
         if made is None or made[0] is None:
             if active:self._recover((made[1].ended_reason if made is not None else None)
@@ -1034,11 +1087,44 @@ class NativeManualAirChain(NativeChainB2):
                            targets=[cs.f_press,cs.f_press+1],source="transfer aimed face hook; absolute CsPlan; no certificate")
         return sent
 
+    IDLE_EV_FRAMES=256   # observed alive sets kept for the Idle-entry buddy evidence
+
+    def _observe_idle_evidence(self,state):
+        """Task 179 #317 (Sol seq 240 甲): causal evidence per Clapper Idle instance, from observed STATEs only.
+        map2.clapper reads Idle Time at the Idle ENTRY (idle_buddy: the buddy alive then -> IDLE_K[True]). A record holds
+        the instance's entry frame (f minus its Control clock at its first observation), buddy (whether another Clapper
+        was alive on that entry frame, only when that frame itself was observed; else None: unknown, the no-buddy
+        default) and hit (the frame of a hit event on her seen while this instance was ALREADY shown on an earlier
+        frame: a real hit on an Idle provokes Dmg Attack in the hit frame, so an Idle still shown after it has no valid
+        witness; a hit whose reaction ends in a new Idle restarts the clock and starts a new record). A Control clock
+        that goes back starts a new instance; any other state drops the record."""
+        import math
+        f=state["f"];es=transfer.clappers(state)
+        self._alive_hist[f]=frozenset(e["iid"] for e in es if (e.get("hp") or 0)>0 and not e.get("is_dead"))
+        for old in [k for k in self._alive_hist if k<f-self.IDLE_EV_FRAMES]:del self._alive_hist[old]
+        hits={(ev.get("d") or {}).get("ent") for ev in state.get("ev") or () if ev.get("k")=="hit"}
+        shown=set()
+        for e in es:
+            iid=e["iid"];st,tin=transfer.control(e)
+            if st!="Idle" or type(tin) not in (int,float) or not math.isfinite(tin):continue
+            shown.add(iid)
+            rec=self._idle_ev.get(iid)
+            if rec is None or tin<rec["t"]-1e-6:
+                entry=f-int(round(tin*60.))
+                at=self._alive_hist.get(entry)
+                self._idle_ev[iid]={"entry":entry,"buddy":None if at is None else any(o!=iid for o in at),
+                                    "hit":None,"t":tin,"first":f}
+                continue
+            rec["t"]=tin
+            if iid in hits and rec["hit"] is None and rec["first"]<f:rec["hit"]=f
+        for iid in [k for k in self._idle_ev if k not in shown]:del self._idle_ev[iid]
+
     def observe(self,state):
         if getattr(self,"_bounce_mode",False):
             from . import knife_chain_bounce_table as bounce_table
             bounce_table.observe_frame(self,state)
         super().observe(state)
+        self._observe_idle_evidence(state)
         if getattr(self,"_bounce",None) is not None:
             from . import knife_chain_bounce_table as bounce_table
             bounce_table.observe_identity(self,state)

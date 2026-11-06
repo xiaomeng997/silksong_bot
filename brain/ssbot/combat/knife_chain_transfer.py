@@ -315,6 +315,17 @@ def _idle_exits():
     return cm.EV_K[0],cm.EV_K[1],cm.IDLE_K[False][0],cm.SLAM_RANGE
 
 
+def idle_time_of(evidence):
+    """Task 179 #317 (Sol seq 240 甲): the Idle Time a witness may use for one Idle instance. map2.clapper reads Idle
+    Time at the Idle ENTRY (idle_buddy): IDLE_K[True] (68 earliest) only with causal evidence that the buddy was alive
+    at that entry (the native B2 owner's per-instance record, NativeManualAirChain._observe_idle_evidence); unknown,
+    absent or revoked evidence keeps the shorter no-buddy IDLE_K[False] (39)."""
+    if isinstance(evidence,dict) and evidence.get("buddy") is True and evidence.get("hit") is None:
+        from ssbot.map2 import clapper as cm
+        return cm.IDLE_K[True][0]
+    return _idle_exits()[2]
+
+
 def in_slam_range(enemy,hero_box):
     """The hero box overlaps her Slam Range trigger (map2.clapper SLAM_RANGE about her root)."""
     _,_,_,(rx,ry0,ry1)=_idle_exits()
@@ -325,7 +336,7 @@ def in_slam_range(enemy,hero_box):
     return bool(hb[0]<x+rx and hb[2]>x-rx and hb[1]<y+ry1 and hb[3]>y+ry0)
 
 
-def contact_body_witness(enemy,frames,idle_no_evade=False):
+def contact_body_witness(enemy,frames,idle_no_evade=False,idle_time=None):
     """[frames,4] body boxes (x0,y0,x1,y1) a downslash must touch at f+d; nan rows have no witness.
 
     A hit witness needs the box EVERY supported pose shares, never the safety
@@ -338,7 +349,7 @@ def contact_body_witness(enemy,frames,idle_no_evade=False):
     its pose only up to its first modelled exit (_idle_exits): from Can Evade
     while Will Evade is unknown (live 2617: Idle k17 -> Evade Scuttle 15 u/s
     out of a k19 contact), else (idle_no_evade: the caller saw Will Evade
-    shown False) up to Idle Time. The root x stays
+    shown False) up to Idle Time (idle_time: idle_time_of the instance's evidence; default the no-buddy 39). The root x stays
     where it is observed; every pose stands on the arena floor and is cut at
     its walls (map2.clapper FLOOR / WALL_L / WALL_R: its grounded root and
     wall push). A state that can move the root, or one without fitted runs,
@@ -387,7 +398,8 @@ def contact_body_witness(enemy,frames,idle_no_evade=False):
             poses[state,j]=(max(x0,wall_l),floor,min(x1,wall_r),floor+float(b[3])-float(b[2]))
         return poses[state,j]
 
-    can_evade,_,idle_time,_=_idle_exits()
+    can_evade,_,no_buddy,_=_idle_exits()
+    idle_time=no_buddy if idle_time is None else int(idle_time)
     # A successor Idle has not reached Can Evade yet: its decision is still open.
     idle_until=idle_time if st=="Idle" and idle_no_evade else can_evade
     core=np.full((frames,4),np.nan);active={(st,k)}
@@ -870,7 +882,12 @@ def register(prims):
                 w["last_f"]=f0 if inside else None
                 w["done"]=w["start"] is not None and k0>=max(w["start"],_idle_exits()[1])+RANGE_LAG_F
             x.v["idle_in_range"]=w;no_evade=w["done"]
-        body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade)
+        # Task 179 #317: the Idle instance's evidence (the native owner's record): a hit on this Idle since its entry
+        # revokes it (a real hit on an Idle provokes Dmg Attack in the hit frame); the buddy at its entry sets Idle Time
+        ev=getattr(x.obs,"idle_ev",None) if st0=="Idle" else None
+        if isinstance(ev,dict) and ev.get("hit") is not None:return None
+        body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade,
+                                  idle_time=idle_time_of(ev))
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
         row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES)
@@ -979,12 +996,15 @@ def register(prims):
         return {"do":"goto","to":"air"}
 
 
-def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False):
+def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
+            idle_evidence=None):
     """One observed-distance recipe and a two-frame external path.
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
     Its sent Run keeps that intent until the native adapter's planned handoff.
     defer_jump remains for offline callers; neither cancels an existing sprint.
+    idle_evidence (Task 179 #317): the native owner's per-Clapper Idle instance records; the strike witness reads the
+    target's (idle_time_of; a hit since the instance's entry: no witness).
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
@@ -1102,6 +1122,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     clearance=head_clearance(cfg)
     obs=_observation(p,state,game,body,ground,clearance)
     obs.sim=sim;obs.e=enemy;obs.hero=h;obs.bombs=bombs;obs.ents=clappers(state)
+    obs.idle_ev=None if idle_evidence is None else idle_evidence.get(target)   # Task 179 #317: the Idle instance record
     obs.bounced=bool(variables.get("bounced"))
     mask=draft.eval_link(X(draft,draft.run,obs))
     if mask is None:
