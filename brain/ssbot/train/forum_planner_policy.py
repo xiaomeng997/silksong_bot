@@ -1764,6 +1764,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                "clapper_middle": self.tac.last.get("clapper_middle"),
                "clapper_cluster": self.tac.last.get("clapper_cluster"),
                "clapper_cluster_end": self.tac.last.get("clapper_cluster_end"),
+               "clapper_back": self.tac.last.get("clapper_back"), "clapper_back_end": self.tac.last.get("clapper_back_end"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:
