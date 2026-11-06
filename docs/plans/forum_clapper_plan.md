@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.169）：178有限自然姿态现场验收已闭合；179主翻越/moving stomp仍未覆盖。1263e9e3修正后完整212拍P实际走到新Slam实例，首J11.5565ms/下劈12.2482ms在原有限点界内；4个较慢的中性/保持键拍仍待按真实HF/前缀及完整串行时序作有限分类，不签新game gate。Sol测量适配器首版错把新脚本发包强制为旧ordinary键，原结果完整保留并作废；已改适配器并重新匹配启动核验，执行器与控制源未改。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.170）：Opus304四慢拍已由Sol独立有限核收，无须改控制源。实测212拍成本配旧局接收时间线，在空闲开工p50/p99情景下0迟包/0跳帧，保持键迟1/2帧等价，松L迟1/2帧仍保留原J/下劈时钟；高负载压力的30迟包/10跳帧和严格modelhurt照旧保留，不签未来保证。另准备新源1263的179-L2有界单局，主验走路翻越/真实交还，辅助新锤实例接续和移动踩头；178已有限验收，不加专项局。原7HP首损Q1/输入/日志/资源/真实清理门不变。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4594,3 +4594,13 @@ analysis/task179_1263e9e3_20261105/p_v2/ROOT_P_AUDIT.json：真实worker50844、
 本次P首版p_v1因Sol通用adapter只排除B2链而未排除legacy slam，2683后把新脚本键强制成旧ordinary键，首次差异为空；其211拍不能证明修正路线性能，ROOT_INVALIDATED及原件完整保留。只修Sol适配器：复用Opus已核act里own_now==plan的强制范围，新增实际路径断言；v2入口hash abab517b3ee77b6bbe5369c0eefc78ac95b39c38ca73efa5ab7a2a30355819a9，新case/check+finalize匹配后才正式P。冻结executor_v1与控制源不改。首版finalize参数曾用含..的不同词法路径被owner匹配拒绝，后用原绝对路径正常核销，未为此重测。两个外层问题归Sol，不给Opus新增修测量器任务。
 
 p_v2实际worker/field退出、golden/Prefs/旧DEMO SHA和mtime、registry148/instances空/restore_pendingfalse/无game均已核，FINALIZED cleanup_verified，STATUSfalse/无活动锁。原manifest false仅三项未请求分析accounting路径，原false保留；真实现场worker完整manifest门不变。178有限现场验收不重开；179主走路翻越/moving stomp仍0机会，下一新条件工程要等同包有限调度项核收及全部现有门，旧L1/失败/STOP不重试，当前无新game gate。seq220一次合包请求Opus最小分类，源码静止，Sol不并行重算同项；只有完成或实质阻挡才唤醒。
+
+#### #304四慢拍有限调度核收，准备179-L2新条件单局（11-05，进度7.170）
+
+Sol直接检查sched304/make_replay_late304及实际late1/late2工件，独立用原P212个tick_start/send_done/tick_end和实机STATE接收锚复算串行latest-STATE；再用生产NumPy hold_filter独立核游戏锁存。接收后空闲开工延迟p50=.270ms/p99=1.292ms两情景均212调用/0迟包/0跳帧，锁存与全准时相同；最小余量在2683为12.190/11.168ms，p99首J2699余15.501、2720出刀余15.1883ms。包离开和worker空闲分开，2564/2696慢段主要在send_done之后，仍计入后继开工占用；没有只凭整tick超点制造必需优化。
+
+2564/2696/2704的当前latch/desired/前缀等于发包、22键pending全0，单迟1/2帧由生产HF核锁存全同。2683仍持L、发0释放不是同类保持；原FIFO迟应用1/2的完整policy/旧Slam分支均在2699发J、2715D、2720A+D，原ta/目标时钟不变；0foreign/异常/强制planner拍，11源hash当前同。模型位置改变、严格未命中及2727/2728受伤照旧，有限功能容忍不签命中/安全。全段每拍加极端idle_max7.132ms时实际202调用/30迟包/10跳帧/7锁存差，报告“9跳帧”文字按JSON和独立复算更正为10，不为文字重跑。接收来自旧代码路径，替代路径/GIL可改接收时刻，p99不是联合概率，更非未来保证；迟分支E成本未另测正式P，只接受当有限非精确拍容忍。收据analysis/task179_1263e9e3_20261105/OPUS304_RECEIPT.json；原ROOT_P_AUDIT的complete_scheduling_gate=false不涂绿，工程组合预算在新单局门独立列出处与限制。
+
+当前源码仍1263e9e3，仅原Slam已处理标记按实例和离线Quit审计修正。此次新单局179-L2要验证修后的完整接续，非旧179-L1重试/补坏局，不混正式样本。主要目标仍走路怪翻越到真实交还；另账移动Walk支持踩头、新同怪Slam实例可接、实际DownSlash hit/pogo/交还和责任HP。178已按自然姿态个例有限完成，仅保留回归观察不再立R1后备。0机会不算成功，首损后原停止/原因定位/清理照旧，不为凑翻越继续打。仍使用已核Launcher/WMI单实际worker、相同工程profile/seed/7HP/HP<=6真实Q1/1episode/measure2，runtime/profile/模型/脚本/新budget/新namespace重新绑定；新worker自有OracleLink的input.stats bootstrap现场回执必须重新通过并保存，旧回执只作组件来源。
+
+先把本节同步main/刀口/TV，之后刀口HEAD从新合同冻结至实际全清理。Sol自己新数据目录仅替换原单局脚本的namespace/source/阶段字面量，生命周期AST逆向逐字节核原版；旧原件/NO_RETRY/AA不动。源码和正式P不重做、Opus当前无新实现任务；游戏前STATUS原子true/5s静止/30s pulse，原资源/精确身份背景分类/STOP/无双起门不绕过。运行中只读收信，不并行重计算、不操作Windows核心进程；只有自有worker/场worker/game/registry/golden/Prefs/旧DEMO实际全部核清后false。用户已有无人值守授权持续有效，不另等到场。
