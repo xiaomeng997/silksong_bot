@@ -161,6 +161,15 @@ def _known_runtime_bindings(policy, loaded):
     out["SSBOT_FORUM_KNIFE_ROWS"] = {"policy.win.knife": bool(getattr(getattr(policy, "win", None), "knife", False))}
     if getattr(getattr(policy, "win", None), "knife", False):
         out["SSBOT_FORUM_REFLEX"] = {"policy.win.uses_reflex_controller": False}
+    # Task 179 #310/#311 observation bout (ssbot.train.observe_bout): the supervisor config actually in force (its
+    # record-only triggers) and the B2 ledger policy actually bound; the switch off binds the empty set / LOW_HP.
+    sc_cfg = getattr(getattr(policy, "sc", None), "cfg", None)
+    if sc_cfg is not None and hasattr(sc_cfg, "observe_only"):
+        binding = {"policy.sc.cfg.observe_only": sorted(sc_cfg.observe_only)}
+        budget = getattr(getattr(policy, "chain_native", None), "budget", None)
+        if budget is not None and hasattr(budget, "policy"):
+            binding["policy.chain_native.budget.policy"] = budget.policy
+        out["SSBOT_FORUM_OBSERVE_BOUT"] = binding
     tables = getattr(getattr(policy, "fc", None), "tables", None)
     if tables is not None:
         out["SSBOT_FORUM_MARGIN"] = {"policy.fc.tables.source": tables.source,
@@ -173,6 +182,7 @@ def _known_runtime_bindings(policy, loaded):
 _CHAIN_ROLES = {
     "SSBOT_FORUM_CHAIN_AIR_MANUAL": "control",
     "SSBOT_FORUM_CHAIN_FACE_HOOK": "control",
+    "SSBOT_FORUM_CHAIN_BOUNCE_TABLE": "control",
     "SSBOT_FORUM_CHAIN_VAULT": "control",
     "SSBOT_FORUM_CHAIN_B2": "control", "SSBOT_FORUM_CHAIN_NATIVE": "control",
     "SSBOT_FORUM_CHAIN_AUDIT": "control", "SSBOT_FORUM_CHAIN_ARM": "control",
@@ -230,6 +240,12 @@ def _execution_bindings(policy, runtime_context):
                     out["SSBOT_FORUM_CHAIN_FIXED_HOOK"]={"policy.chain_native.profile.fixed_hook":profile.fixed_hook}
                 if hasattr(chain,"_face_hook_mode"):
                     out["SSBOT_FORUM_CHAIN_FACE_HOOK"]={"policy.chain_native._face_hook_mode":chain._face_hook_mode}
+                if hasattr(chain,"_bounce_mode"):
+                    # Task 179 #309: the same-target bounce table's mode and whether its program is in the bound runner
+                    table={"policy.chain_native._bounce_mode":chain._bounce_mode}
+                    chains=getattr(getattr(chain,"runner",None),"chains",None)
+                    if isinstance(chains,dict):table["policy.chain_native.runner.air_bounce_loaded"]="air_bounce" in chains
+                    out["SSBOT_FORUM_CHAIN_BOUNCE_TABLE"]=table
                 budget=getattr(chain,"budget",None)
                 if budget is not None:
                     for key,name in (("SSBOT_FORUM_CHAIN_BATCH","batch"),("SSBOT_FORUM_CHAIN_BUDGET","path")):

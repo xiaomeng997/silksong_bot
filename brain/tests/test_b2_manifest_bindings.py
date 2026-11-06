@@ -31,6 +31,9 @@ def policy(e):
         probe_ref="sample-probe",budget=budget,episode=2,_environment=tuple(sorted(e.items())))
     # The real NativeManualAirChain.reset() field, built from the same environment (2c binds FACE_HOOK to it).
     chain._face_hook_mode=e.get("SSBOT_FORUM_CHAIN_FACE_HOOK","0").strip()=="1" and chain.arm=="B"
+    # Task 179 #311b: the bounce table's real reset field (NativeManualAirChain.reset) and its bound runner
+    chain._bounce_mode=e.get("SSBOT_FORUM_CHAIN_BOUNCE_TABLE","0").strip()=="1" and chain.arm=="B"
+    chain.runner=SimpleNamespace(chains={"air_strike":None,**({"air_bounce":None} if chain._bounce_mode else {})})
     return SimpleNamespace(chain_native=chain)
 
 
