@@ -78,12 +78,14 @@ def _tracks(row, toward, body, reserve, iid):
     b = np.asarray(body, float)
     r = np.asarray(reserve, float)
     worlds = (np.tile(b, (len(r), 1)), b + toward * np.outer(r, [1., 0., 1., 0.]))
+    phases = []
+    for ac in range(6):         # per physics-step phase only (Task 179 #308: the entry tick builds every slot cold)
+        steps = [SK.steps_of(j, ac) for j in range(1, len(r) + 1)]
+        phases.append((ac, steps, H2.claw_unhooked(x, bb, vx, vy, toward, steps)))  # its antic heights only, as _nominal_hook
     out = {}
     for dash_f, ctrl_after in _variants():
         var = SK.HookVariant("task170", dash_f, 0., ctrl_after)     # the dash damager stops it, not the gap
-        for ac in range(6):
-            steps = [SK.steps_of(j, ac) for j in range(1, len(r) + 1)]
-            antic = H2.claw_unhooked(x, bb, vx, vy, toward, steps)    # its antic heights only, as _nominal_hook
+        for ac, steps, antic in phases:
             for boxes in worlds:
                 h = SK.claw_hook(S, 0, toward, iid, boxes, var, ac, discrete_stop=True,
                                  hold_steps=sum(steps[:SK.HOOK_THROW_F]), dash_max_steps=SK.DASH_MAX_STEPS,
@@ -216,6 +218,145 @@ def step_scan(geo,path,v,watch,f,state=None):
     return ContactScan(scans[0].path_ref,min(s.first_frame for s in scans),max(s.last_frame for s in scans),
         contacts,f"transfer hook step: {len(scans)} variant path(s); all-owner scan; "
         f"measured hooked-body window {window}; no protection",all(s.complete for s in scans))
+
+
+def _entry(path, v, f):
+    """entry_paths' variant paths, each with its hooked-body window (P + HOOK_BODY_OFF[0] .. control +
+    HOOK_BODY_OFF[1]) and its control point (frame, x, y: the model's stop and hold height)."""
+    from ssbot.map2 import strike as SK
+    from .knife_chain_transfer import HOOK_LATE_F
+    a = v.get("hook_press")
+    if not isinstance(a, dict):
+        raise GeometryUnavailable("transfer hook entry unchecked: no press anchor")
+    box = np.asarray(path.box, float)
+    P = int(a["P"])
+    if path.origin != f or box.shape != (3, 4) or not np.isfinite(box).all() or not 1 <= P - f <= 3:
+        raise GeometryUnavailable("transfer hook entry unchecked: external step rows or press slot")
+    w, h = float(box[0, 2] - box[0, 0]), float(box[0, 3] - box[0, 1])
+    box_of = lambda x, bottom: [x - .5 * w, bottom, x + .5 * w, bottom + h]
+    head = [list(box[i]) for i in range(P - f)]
+    out = {}
+    for d in range(HOOK_LATE_F + 1):
+        if d >= len(a["rows"]):
+            raise GeometryUnavailable("transfer hook entry unchecked: press slot outside the anchor")
+        pre = [box_of(r[0], r[1]) for r in a["rows"][:d]]
+        for tr in _tracks(tuple(a["rows"][d]), int(a["toward"]), tuple(a["body"]),
+                          tuple(a["reserve"][d:d + TRACK_F]), int(a["iid"])):
+            rows = np.asarray(head + pre + [box_of(p[0], p[1] - SK.FOOT) for p in tr], float)
+            ctrl = P + d + len(tr) - 1
+            out.setdefault(rows.round(9).tobytes(),
+                           (rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
+                            (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6))))
+    paths = []
+    for rows, window, control in out.values():
+        n = len(rows) - 1
+        paths.append((replace(path, box=rows, commands=np.zeros(n, np.int64), latched=np.zeros(n, np.int64),
+                              flags=np.zeros(n + 1, np.int64), check_flags=np.zeros(n + 1, np.int64),
+                              stage="transfer_hook_entry",
+                              assumptions={**path.assumptions, "basis": "hooked-Clawline model through the locked hook",
+                                           "protection": "none", "safety": "whole locked hook, all owners"}),
+                      window, control))
+    return paths
+
+
+def entry_paths(path, v, f):
+    """Task 179 #308 (live 179-L3 w13_guard179L3 5df8711e: the 2682 face hook on the walking 335476 locked her
+    2685-2712, ended short of the retreating target, and its forced bounce rose into the other Clapper's jump, Sentry
+    (3) at 2721; only single steps had been scanned). The WHOLE locked hook before its CLAW is sent: the current step's
+    K rows up to the planned press P, then for each CLAW slot applied 0 .. HOOK_LATE_F late the free-flight press rows
+    and every hooked-model variant track (the same _tracks as step_paths: dash timings, physics-step phases, the
+    observed body still or retreating at the bound) up to the model's control. Unknown raises."""
+    return [p for p, _, _ in _entry(path, v, f)]
+
+
+def entry_scan(geo, path, v, f):
+    """All owners and delayed hazards over entry_paths (one B2Geometry.scan_batch pass); only the target's own BODY
+    inside each variant's hooked-body window (strike.HOOK_BODY_OFF: the hooked dash stops on it by design) is exempt;
+    its attack (move), its body outside the window, other owners, small runes and unknown occupancy all count. Also
+    returns the distinct control points (frame, x, y) for entry_outs."""
+    items = _entry(path, v, f)
+    iid = int(v["hook_press"]["iid"])
+    scans = list(zip(geo.scan_batch([q for q, _, _ in items]), (window for _, window, _ in items)))
+    contacts = tuple(c for s, (lo, hi) in scans for c in s.contacts
+                     if not (c.owner_iid == iid and c.kind == "body" and lo <= c.frame <= hi))
+    return (ContactScan(scans[0][0].path_ref, min(s.first_frame for s, _ in scans),
+                        max(s.last_frame for s, _ in scans), contacts,
+                        f"transfer hook entry: {len(scans)} variant path(s) through the locked hook; all-owner scan; "
+                        "target body exempt only in the hooked-body window; no protection",
+                        all(s.complete for s, _ in scans)),
+            tuple(sorted({c for _, _, c in items})))
+
+
+def _control_starts(sim, v, f, controls):
+    """oldwin_claw.control_states at every control point: the hooked Clawline's forced bounce (EV_POGO at control, no
+    invulnerability, downspike recovery), facing the hook, the physics phase advanced from the actual one."""
+    from types import SimpleNamespace
+    from ssbot.map2.oldwin_claw import control_states
+    S0 = np.asarray(sim.start, float).reshape(K.K)
+    step = float(sim.params.frame_time) / float(sim.params.fdt)
+    toward = int(v["hook_press"]["toward"])
+    return control_states(sim.params, [SimpleNamespace(x_stop=x, y_hold=y, d=toward) for _, x, y in controls],
+                          sim.terrain, alphas=[(float(S0[K.ALPHA]) + (F - f) * step) % 1. for F, _, _ in controls])
+
+
+def entry_outs(geo, sim, v, f, controls, short_frames):
+    """The forced bounce at every control point of entry_scan against the existing N=2 continuation lower bound's
+    short pass (NativeManualAirChain._continuations): both ordinary post types, left and right landing
+    (knife_chain_post_actions.ordinary_post's keys from an idle hold and a neutral queued key, as claw_lock sends),
+    executable (continuation_executable's rule) and clear of every owner, delayed hazard and unknown occupancy over
+    short_frames or up to their ground handback. One rollout per type (bit-identical to ordinary_post's trace) and one
+    geometry pass. A control below the bound rejects the hook at its entry: the full-exit fallback of _continuations
+    is not run here (entry_bounces gives its exact parents). Returns (None or the first failure, paths checked)."""
+    from types import SimpleNamespace
+    from .holdfilter import hold_filter_jit
+    if not controls:
+        raise GeometryUnavailable("transfer hook entry unchecked: no control point")
+    starts = _control_starts(sim, v, f, controls)
+    paths, meta = [], []
+    for kind, bit, direction in (("left_landing", B["L"], -1), ("right_landing", B["R"], 1)):
+        commands = np.full(short_frames, bit, np.int64)
+        commands[0] = 0
+        latched = hold_filter_jit(commands[None, :], K.HoldState.idle(1))[0][0]
+        ro = K.rollout(starts, np.repeat(latched[None, :], len(controls), axis=0), sim.params, sim.terrain)
+        for j, control in enumerate(controls):
+            fl = np.asarray(ro.flags[j], np.int64)
+            ground = np.flatnonzero(((fl & K.F_GROUND) != 0) & ((fl & K.F_NO_INPUT) == 0) & (np.arange(len(fl)) >= 2))
+            n = int(ground[0]) if len(ground) else short_frames
+            vx = ro.vel[j, :n + 1, 0]
+            i = next((i for i in range(1, n) if int(latched[i]) & bit), None)
+            executable = n >= 2 and i is not None and any(direction * (vx[k] - vx[i]) > 0 or direction * vx[k] > 0
+                                                          for k in range(i + 1, min(i + 5, n + 1)))
+            paths.append(SimpleNamespace(origin=control[0], stage="continuation", box=ro.box[j, :n + 1],
+                                         flags=fl[:n + 1], check_flags=fl[:n + 1], commands=commands[:n],
+                                         through=control[0] + n))
+            meta.append((control, kind, executable))
+    for (control, kind, executable), scan in zip(meta, geo.scan_batch(paths)):
+        if not executable or scan.contacts or not scan.complete:
+            return ({"control": control, "kind": kind, "executable": bool(executable), "complete": scan.complete,
+                     "first": None if not scan.contacts else scan.contacts[0]}, len(paths))
+    return None, len(paths)
+
+
+def entry_bounces(sim, v, f, game, controls):
+    """entry_outs' control points as B2 conditional-bounce parents for NativeManualAirChain._continuations (the exact
+    N=2 lower bound with its full-exit fallback): the reference entry_outs' short pass is checked against."""
+    from .knife_chain_nominal import NominalPath
+    from .knife_chain_step import NominalStepper
+    starts = _control_starts(sim, v, f, controls)
+    dt = float(sim.params.frame_time)
+    stepper = NominalStepper(sim.params, sim.terrain)
+    out = []
+    for j, (F, x, y) in enumerate(controls):
+        S = starts[:, j].copy()
+        ro = stepper.run(S, frames=0)
+        g = float(game) + (F - f) * dt
+        fl = np.full(2, int(ro.flags[0, 0]), np.int64)
+        out.append(NominalPath(F - 1, "commitment", np.zeros(1, np.int64), np.zeros(1, np.int64),
+                               np.stack([S, S], axis=1), np.stack([ro.box[0, 0]] * 2), np.stack([ro.pos[0, 0]] * 2),
+                               fl, fl.copy(), np.array([g - dt, g]), K.HoldState.idle(1), None, None, 0, "bounce",
+                               None, None, {"basis": "hooked Clawline forced bounce at the model's control",
+                                            "control": (F, x, y), "protection": "none"}))
+    return out
 
 
 def early_jump_due(cache, k, target_state):

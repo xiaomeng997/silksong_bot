@@ -136,6 +136,92 @@ class B2Geometry:
     def scan(self,path,limit=None):
         return self._query(path,len(path.commands) if limit is None else limit)
 
+    def scan_batch(self,paths):
+        """[scan(p) for p in paths] with one raster pass per owner (Task 179 #308: a whole locked hook's ~100 variant
+        rows and the continuations of its forced bounce, in one tick). Each path keeps its own origin, clock, sweep
+        points (scan's rows; a column that did not move contributes its centre once, its other rows being exact copies
+        of it), protection flags and the support scan(p) reads; continuations first build one exact per-frame window
+        over all of them, which scan(p) reuses the same way. Contacts per path in scan's order; the first path scan(p)
+        would refuse raises that refusal."""
+        if not paths:return []
+        from . import observed_slam
+        spans=[(p.origin-self.origin,min(len(p.commands),len(p.box)-1)) for p in paths]
+        exact=[p.stage=="continuation" and observed_slam.ENABLED for p in paths]
+        windows=[(o,n) for (o,n),e in zip(spans,exact) if e and o>=0 and n>=0]
+        if windows:self.support(max(o+n for o,n in windows),first=min(o for o,_ in windows))
+        groups,failed={},None
+        for i,(p,(offset,length),e) in enumerate(zip(paths,spans,exact)):
+            try:
+                if p.origin<self.origin:raise GeometryUnavailable("path predates forecast origin")
+                if length<0:raise GeometryUnavailable("empty path query")
+                rs=self.support(offset+length,first=offset) if e else self.support(offset+length)
+            except GeometryUnavailable as exc:
+                failed=(i,exc);break       # scan(p) never reaches the later paths
+            groups.setdefault(id(rs),(rs,[]))[1].append(i)
+        built,refused=[],[]
+        for rs,ids in groups.values():
+            N=len(ids);L=np.array([spans[i][1]+1 for i in ids]);W=int(L.max())
+            valid=np.arange(W)[None,:]<L[:,None]
+            box=np.zeros((N,W,4));inv=np.zeros((N,W),bool)
+            for g,i in enumerate(ids):
+                rows=np.asarray(paths[i].box[:L[g]])
+                if rows.dtype!=np.float64:raise ValueError("scan_batch takes float64 rows (scan's arithmetic)")
+                box[g,:L[g]]=rows
+                flags=paths[i].check_flags if paths[i].stage!="continuation" else paths[i].flags
+                inv[g,:L[g]]=(np.asarray(flags[:L[g]])&km.F_INVULN)!=0
+            c=.5*(box[...,:2]+box[...,2:]);prev=np.concatenate([c[:,:1],c[:,:-1]],axis=1)
+            step=np.where(valid,np.linalg.norm(c-prev,axis=-1),0.)
+            m=np.ones(N,np.int64)
+            for g,i in enumerate(ids):
+                n=int(np.ceil(step[g].max(initial=0.)/rs.cv.cell))
+                if n>32:refused.append((i,0,"nominal displacement exceeds bounded sweep"));continue
+                m[g]=max(n,1)
+            # scan's sweep rows: the centre, then prev+(c-prev)*(j/m) for j=1..m-1 (equal to the centre where unmoved)
+            moving=valid&(c!=prev).any(axis=-1)
+            gi,ki=np.nonzero(valid);X=[c[gi,ki]];C=[gi*W+ki]
+            for j in range(1,int(m.max())):
+                gj,kj=np.nonzero(moving&(j<m)[:,None])
+                X.append(prev[gj,kj]+(c[gj,kj]-prev[gj,kj])*(j/m[gj])[:,None]);C.append(gj*W+kj)
+            X=np.concatenate(X);C=np.concatenate(C)
+            _,_,inside=rs.cv.index(X[:,0],X[:,1])
+            refused+=[(ids[int(g)],1,"path leaves modeled canvas") for g in np.unique(C[~np.asarray(inside)]//W)]
+            current=getattr(rs.trk,"now",{}).get(self.move.target_iid)
+            same=(current is not None and current[2] is self.instance and getattr(current[2],"fam",None)=="CC_SLAM")
+            if not same:
+                refused+=[(i,2,"h2 guard target no longer maps to the tracked slam instance")
+                          for i in ids if paths[i].stage=="commitment"]
+            tk=((np.arange(W)[None,:]+np.array([spans[i][0] for i in ids])[:,None])*self._frame_time(rs)).ravel()
+            built.append((rs,X,C,tk[C],(inv|~valid).ravel(),ids,W,same))
+        if refused:raise GeometryUnavailable(min(refused)[2])
+        if failed is not None:raise failed[1]
+        out=[None]*len(paths)
+        for rs,X,C,T,off,ids,W,same in built:
+            x,y=X[:,0],X[:,1]
+            def columns(hit):
+                col=np.zeros(len(ids)*W,bool);col[C[np.asarray(hit)]]=True;return col&~off
+            owners=set(getattr(rs.trk,"now",{}))|set(getattr(rs.trk,"orphan_hazards",{}))|set(rs.haz_raw)
+            owners|={int(p[0]) for parts in rs.raw.values() for p in parts}
+            owners|={int(p[0]) for parts in rs.layers.values() for p in parts}
+            if rs.bombs is not None:owners|={int(i) for i in rs.bombs[:,0]}
+            contacts=[[] for _ in ids];covered=np.zeros(len(ids)*W,bool)
+            for iid in sorted(owners):
+                haz=columns(rs.occupied_hazards(x,y,T,{iid}))
+                total=columns(self._owner_occupancy(rs,x,y,T,iid))
+                covered|=total|haz
+                kind="move" if getattr(getattr(rs.trk,"now",{}).get(iid,(None,None,None))[2],"fam",None) else "body"
+                label=self.move if same and iid==self.move.target_iid else None
+                for g,k in zip(*np.divmod(np.flatnonzero(haz),W)):
+                    contacts[g].append(PathContact(paths[ids[g]].origin+int(k),iid,"delayed"))
+                for g,k in zip(*np.divmod(np.flatnonzero(total&~haz),W)):
+                    contacts[g].append(PathContact(paths[ids[g]].origin+int(k),iid,kind,label))
+            for g,k in zip(*np.divmod(np.flatnonzero(columns(rs.occupied(x,y,T))&~covered),W)):
+                contacts[g].append(PathContact(paths[ids[g]].origin+int(k),None,"other"))
+            for g,i in enumerate(ids):
+                o=paths[i].origin
+                out[i]=ContactScan(self.ref(paths[i]),o,o+spans[i][1],tuple(contacts[g]),
+                                   "RangeSupport owner/hazard layers; current tracker instance; bounded sweep")
+        return out
+
     def preflight(self,path):
         """Only rejects OTHER enemies / all delayed hazards on a modeled future.
 

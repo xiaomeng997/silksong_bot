@@ -933,6 +933,11 @@ def register(prims):
         if type(x.v.get("hook_hit_f")) is not int:
             return {"do":"abort","why":"transfer face hook ended without actual target Harpoon hit"}
         x.v["hook_done"]=True
+        # Task 179 #308 (live 179-L3 2713: the target in Evade Scuttle, actual can.dash and the tracker's AIRDASHED 0 /
+        # DASH_CD 0 agree): the hooked bounce restores the air dash, so face_hook's pre-hook "no air dash after an aimed
+        # hook" is not carried across the lock; the air link's once-per-Run probe decides again from the actual state
+        # after the hook (its dash-lock scan still gates the dash)
+        x.v["air_dash_decided"]=False;x.v["approach_recipe"]=None
         return {"do":"goto","to":"air"}
 
 

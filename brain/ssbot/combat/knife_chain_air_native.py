@@ -701,6 +701,28 @@ class NativeManualAirChain(NativeChainB2):
                 scan=step_scan(geo,path,draft.run.v,w,f,state)
                 self._note("transfer_hook_step_checked",frame=f,contacts=len(scan.contacts),complete=scan.complete,
                            source=scan.source,scope="all owners and delayed hazards; current step only; no protection")
+            elif draft.run.link in transfer.HOOK_LINKS:
+                # Task 179 #308 (live L3 2682): the CLAW is not sent yet, so this tick commits the whole locked hook
+                # and its forced bounce: all of the hook (knife_chain_face_hook.entry_scan), not one step, then at
+                # every model control point the existing N=2 continuation lower bound's short pass (entry_outs)
+                from .knife_chain_face_hook import entry_scan,entry_outs
+                import time
+                t0=time.perf_counter_ns()
+                scan,controls=entry_scan(geo,path,draft.run.v,f)
+                failed,outs=None,0
+                if scan.complete and not scan.contacts:
+                    failed,outs=entry_outs(geo,sim,draft.run.v,f,controls,self.profile.short_frames)
+                    if failed is not None:
+                        # a blocked type rejects with its first contact; an unknown or non-executable one as unchecked
+                        first=failed["first"]
+                        scan=replace(scan,contacts=() if first is None else (first,),complete=first is not None,
+                                     source=scan.source+f"; forced bounce at control {failed['control']}: {failed['kind']} "
+                                            +("not executable" if not failed["executable"] else "blocked or unknown")
+                                            +"; below the N=2 short lower bound, no full-exit fallback at entry")
+                self._note("transfer_hook_entry_checked",frame=f,contacts=len(scan.contacts),complete=scan.complete,
+                           first=None if not scan.contacts else asdict(scan.contacts[0]),source=scan.source,
+                           controls=len(controls),bounce_paths=outs,elapsed_ms=(time.perf_counter_ns()-t0)/1e6,
+                           timing_scope="entry scan and bounce outs only")
             elif attacking:
                 if getattr(current[2],"fam",None)!="CC_SLAM":raise GeometryUnavailable("air continuation attack family unsupported")
                 identity=(plan.iid,current[2].fam,float(current[2].t0))
