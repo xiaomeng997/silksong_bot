@@ -186,6 +186,9 @@ class GoalPrefs(TacticPrefs):
     entry_attack: EntryAttack | None = None
     wall_pressure: WallPressure | None = None
     clapper_choice: str | None = None   # explicit manual-B L2 winner; legacy target preferences yield to it
+    return_body: int | None = None      # SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, default off): the other Clapper
+    #                                     during L2's middle return; the policy hands it to forum_v2.V2Feed.support
+    #                                     (stack_ret), the one field that reaches a support - the planner never reads it
 
 
 class Tactics:

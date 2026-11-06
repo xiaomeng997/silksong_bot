@@ -102,6 +102,15 @@ VSLAM_FAMS = (None, "CC_EVADE", "CC_CAST")
 # SSBOT_FORUM_V2 when unset (=0 off; arm rnsp11_0).
 COMMIT = os.environ.get("SSBOT_FORUM_TWO_COMMIT", "1" if V2_ON else "0").strip() == "1"
 COMMIT_M = float(os.environ.get("SSBOT_FORUM_TWO_COMMIT_M", "") or FOCUS_M)
+# SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, default off; Sol seq 238 G1-a, a bounded development candidate, not a claim
+# that the second Clapper's place is better known): while L2's middle-return intent is in force (GoalPrefs.return_body)
+# and both Clappers are tracked with no move instance in Idle / Walk (RETURN_STATES), the OTHER one's separable idle
+# body (Estimate.core, the body without its hazards) gets FOCUS_M in a second stack (stack_ret). Only the ordinary
+# planner rows' revocable frames read it (forum_planner._v2_return: the sent prefix, the current locked segment and a
+# dash at that Clapper keep the stack); the stack, m_of, hazards, reactions, the escape check, B2 and every other reader
+# keep the original margins.
+RETURN_BODY = os.environ.get("SSBOT_FORUM_TWO_RETURN_BODY", "0").strip() == "1"
+RETURN_STATES = ("Idle", "Walk")
 
 
 def corner_zones(fc) -> list[tuple[float, float]]:
@@ -354,6 +363,11 @@ class LayerSupport:
         self.stack_dash: np.ndarray | None = None   # the focus unit with its "rule" margin (rows dashing at it)
         self.focus: int | None = None               # the unit with FOCUS_M (MARGIN_MODE "focus")
         self.dash_focus: int | None = None          # the unit stack_dash holds (FOCUS_DASH)
+        # SSBOT_FORUM_TWO_RETURN_BODY: the narrowed Clapper, its raw parts (si, index in raw[si]) dilated by FOCUS_M in
+        # stack_ret (None: no such stack; the ordinary rows' revocable frames only, forum_planner._v2_return)
+        self.body2: int | None = None
+        self.ret_tags: set = set()
+        self.stack_ret: np.ndarray | None = None
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
         # SSBOT_FORUM_RUNE_BOMB (task 1v1 G2): the small-rune bombs one by one (rune_bombs.frames: owner, x, y, r,
         # on_k, off_k in tracker look-ahead frames), checked on every frame with bomb_m; None: not in this support
@@ -396,6 +410,33 @@ class LayerSupport:
                         if self.stack_esc is None:
                             self.stack_esc = np.zeros(self.stack.shape, bool)
                         self.cv.paste(self.stack_esc[si], d, x0, y0)
+
+    def ret_tag(self, si: int, c: np.ndarray) -> None:
+        """SSBOT_FORUM_TWO_RETURN_BODY: the raw part add_raw appends next at sample si (c) is the narrowed body."""
+        if c.size and c.any():
+            self.ret_tags.add((si, len(self.raw[si])))
+
+    def ret_stack(self) -> np.ndarray:
+        """The stack as finish() and add() build it, with the tagged raw parts (ret_tag) dilated by FOCUS_M instead of
+        their own margin (with no tag it equals the stack)."""
+        st = np.zeros(self.stack.shape, bool)
+        for si, ls in self.layers.items():
+            for _iid, mk, ix0, iy0 in ls:
+                self.cv.paste(st[si], mk, ix0, iy0)
+        for si, parts in self.raw.items():
+            by_m: dict = {}
+            for j, p in enumerate(parts):
+                if p[4] is not None:
+                    m = FOCUS_M if (si, j) in self.ret_tags else p[4]
+                    by_m.setdefault(round(float(m), 4), []).append((p[1], p[2], p[3]))
+            for m, ps in by_m.items():
+                d, x0, y0 = dilate_group(ps, m, self.cv.cell)
+                self.cv.paste(st[si], d, x0, y0)
+        return st
+
+    def occupied_ret(self, x, y, tk) -> np.ndarray:
+        """occupied() on stack_ret (the stack itself when there is none)."""
+        return self.occ_stack_b(self.stack if self.stack_ret is None else self.stack_ret, x, y, tk)
 
     def add_esc(self, si: int, mask: np.ndarray, ix0: int, iy0: int) -> None:
         """A raster of the escape check's danger (occupied_esc; without any, the escape reads the full support)."""
@@ -644,6 +685,19 @@ def committed(inst) -> bool:
     return inst.fam in _jb.JUMP_FAMS and inst.states[-1] in _jb.AIR_STATES + _jb.LANDED_STATES
 
 
+def return_body_ok(trk: RangeTracker, focus: int | None, iid: int | None) -> bool:
+    """SSBOT_FORUM_TWO_RETURN_BODY: the focus and iid are two tracked Clappers, neither in a move instance, each with
+    its first FSM state in RETURN_STATES (the narrowed body's support domain)."""
+    now = getattr(trk, "now", None) or {}
+    if focus is None or iid is None or int(iid) == int(focus):
+        return False
+    for u in (int(focus), int(iid)):
+        x = now.get(u)
+        if x is None or x[0] != CLAPPER or x[2] is not None or _first_state(x[1])[0] not in RETURN_STATES:
+            return False
+    return True
+
+
 def focus_iid(trk: RangeTracker, target: int | None) -> int | None:
     """The focus unit (MARGIN_MODE "focus"): the controller's target (GoalPrefs.target) when the tracker has it, else
     the only enemy in play, else None (every unit then gets its "rule" margin)."""
@@ -661,10 +715,12 @@ class RangeSupport(LayerSupport):
 
     @classmethod
     def build(cls, trk: RangeTracker, samples: tuple = SAMPLE_KS, k_shift: int = 0, inner_fc=None,
-              margin_mode: str | None = None, canvas: Canvas | None = None, focus: int | None = None) -> "RangeSupport":
+              margin_mode: str | None = None, canvas: Canvas | None = None, focus: int | None = None,
+              body2: int | None = None) -> "RangeSupport":
         """focus: the controller's target iid under MARGIN_MODE "focus" (focus_iid: else the only enemy in play); the
         focus unit's layers get FOCUS_M and a copy with its "rule" margin goes into stack_dash (occupied_dash: the
-        rows that dash at it)."""
+        rows that dash at it). body2 (SSBOT_FORUM_TWO_RETURN_BODY, GoalPrefs.return_body): the other Clapper whose
+        separable idle body goes into stack_ret with FOCUS_M when return_body_ok holds now; the stack is unchanged."""
         t0 = time.perf_counter()
         cv = canvas or Canvas()
         rs = cls(cv, samples, k_shift, inner_fc)
@@ -673,6 +729,8 @@ class RangeSupport(LayerSupport):
         mode_ = margin_mode or MARGIN_MODE
         rs.focus = focus_iid(trk, focus) if mode_ == "focus" else None
         rs.dash_focus = focus_iid(trk, focus) if (FOCUS_DASH == "audit" or (mode_ == "focus" and FOCUS_DASH == "1"))             else None
+        if RETURN_BODY and body2 is not None and return_body_ok(trk, rs.focus, body2):
+            rs.body2 = int(body2)
         rs.n_vslam = 0
         n_est = 0
         dash_parts: dict = {}
@@ -716,11 +774,15 @@ class RangeSupport(LayerSupport):
                         continue
                     if haz is not None and e.core is not None:
                         cc, cx0, cy0 = coarse(e.core, tab.cell, cv.cell)
+                        if iid == rs.body2 and idle and m > FOCUS_M:
+                            rs.ret_tag(si, cc)      # the body alone (its hazards follow with COMMIT_M, unchanged)
                         rs.add_raw(si, iid, cc, cx0, cy0, m, (ESC_IDLE_M if idle else m) if esc else None)
                         ch, hx0, hy0 = haz
                         rs.add_raw(si, iid, ch, hx0, hy0, COMMIT_M, COMMIT_M if esc else None)
                         rs.n_commit = getattr(rs, "n_commit", 0) + 1
                         continue
+                if iid == rs.body2 and idle and m > FOCUS_M and haz is None and e.raw is e.core:
+                    rs.ret_tag(si, c)               # the raw estimate is the body alone (no hazards, no extra part)
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
                 if esc and idle and haz is not None:
                     ch, hx0, hy0 = haz
@@ -766,6 +828,8 @@ class RangeSupport(LayerSupport):
             for (si, md), ps in dash_parts.items():
                 d, x0, y0 = dilate_group(ps, md, cv.cell)
                 cv.paste(rs.stack_dash[si], d, x0, y0)
+        if rs.ret_tags:
+            rs.stack_ret = rs.ret_stack()
         rs.n_est = n_est
         rune = getattr(trk, "rune", None)
         if rune is not None and (_rb.BOMB or _rb.HOP):
@@ -971,10 +1035,13 @@ class V2Feed:
                 self.trk.feed(s)
         self.f_fed = f
 
-    def support(self, fcast, origin_frame: int | None, focus: int | None = None) -> V2Forecast:
-        """focus: the controller's target iid (RangeSupport.build); a changed one rebuilds."""
+    def support(self, fcast, origin_frame: int | None, focus: int | None = None, body2: int | None = None) -> V2Forecast:
+        """focus: the controller's target iid (RangeSupport.build); a changed one rebuilds. body2
+        (SSBOT_FORUM_TWO_RETURN_BODY, GoalPrefs.return_body): never served from an older build (its Idle / Walk
+        state is checked on the frame it is used)."""
         if (self.every > 1 and self.last is not None and self.f_fed is not None and origin_frame is not None
-                and 0 <= self.f_fed - self.last_f < self.every and getattr(self.last, "focus_arg", None) == focus):
+                and 0 <= self.f_fed - self.last_f < self.every and getattr(self.last, "focus_arg", None) == focus
+                and body2 is None and getattr(self.last, "body2_arg", None) is None):
             rs = copy.copy(self.last)             # the stacks shared; its look-ahead k = j - (build frame - origin)
             rs.k_shift = int(self.last_f) - int(origin_frame)
             rs.ms = 0.0
@@ -982,8 +1049,10 @@ class V2Feed:
             self.reused += 1
         else:
             rs = RangeSupport.build(self.trk, k_shift=tracker_k_shift(self.f_fed, origin_frame),
-                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode, focus=focus)
+                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode, focus=focus,
+                                    body2=body2)
             rs.focus_arg = focus
+            rs.body2_arg = body2
             self.last, self.last_f = rs, self.f_fed
         self.ms.append(rs.ms)
         return V2Forecast(fcast, rs)

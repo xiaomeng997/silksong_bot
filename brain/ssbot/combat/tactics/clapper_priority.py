@@ -8,7 +8,7 @@ import os
 from dataclasses import replace
 
 import numpy as np
-from ssbot.combat import two_play
+from ssbot.combat import forum_v2, two_play
 
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X, clapper_facing
 from .modes import EVADE, EntryAttack, entry_attack_prefs
@@ -22,6 +22,7 @@ DEFAULT_SCORES = {"keep": 50., "intercept": 130., "hold": 140., "near": 110.,
                   "middle_jump": 95., "bait": 145., "return": 145., "back": 70.}
 ANTIC = {"Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2"}
 BAIT_WIDTHS = 2.5          # the person (seq 230): back off about 2.5 visible body widths, return on the take-off
+RETURN_LANDED_S = 0.5      # SSBOT_FORUM_TWO_RETURN_BODY: after the landing in the gap the narrowing stays this long
 
 
 def cluster_route(tac, subjects, geo, hx, t, mem, middle):
@@ -433,6 +434,16 @@ def decide(tac, ws, fc, prefs, hx, t):
         if pose is not None and pose["crossed"] != g.target:
             out = replace(out, no_hit=frozenset(out.no_hit) | {pose["crossed"]})   # passed over, not provoked
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
+    landed = mem.get("back_end")
+    landed = (landed is not None and landed.get("end") == "landed in the standing gap"
+              and 0. <= t - landed["end_t"] <= RETURN_LANDED_S and geo is not None and geo["region"] == "middle"
+              and getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND")
+    if (pose is not None or landed) and forum_v2.RETURN_BODY and all(s.state in forum_v2.RETURN_STATES for s in subjects):
+        # SSBOT_FORUM_TWO_RETURN_BODY (#315, Sol seq 238 G1-a): the return in force (or just landed in the gap, still
+        # standing there: its side slash, w3on 2869) with both seen in Idle / Walk: the other one's idle body may take
+        # the focus margin on the ordinary rows' revocable frames (forum_v2 checks the tracker's own state again on the
+        # frame it builds; every other check keeps the original margins)
+        out = replace(out, return_body=next(s.iid for s in subjects if s.iid != g.target))
     mid = middle["decision"] if middle is not None else None
     if mem["winner"] == "middle_jump" and mid is not None:
         # Apply after legacy face/antic stance helpers, which must not turn a
@@ -445,7 +456,8 @@ def decide(tac, ws, fc, prefs, hx, t):
                     entry_attack=None if out.entry_attack is None else vars(out.entry_attack),
                     clapper_scene=scene, clapper_region=region, clapper_middle=mid,
                     clapper_cluster=None if route is None else dict(route), clapper_cluster_end=mem.get("cluster_end"),
-                    clapper_back=None if home is None else dict(home, applied=pose),
-                    clapper_back_end=mem.get("back_end"))
+                    clapper_back=None if home is None else dict(home, applied=pose, **(
+                        {} if out.return_body is None else {"return_body": out.return_body})),
+                    clapper_back_end=mem.get("back_end"), clapper_return_body=out.return_body)
     tac.stats["goals"][RUSH] = tac.stats["goals"].get(RUSH, 0) + 1
     return out

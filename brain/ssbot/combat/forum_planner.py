@@ -1688,6 +1688,8 @@ class ForumPlanner(Planner):
                                       lambda X, Y, iid=iid, t_hit=t_hit, d_=d_: f.bell_redirected(X, Y, tk, iid, t_hit,
                                                                                                     d_))
                 occ[ns] = o if o is not None else self._contacts(f, rh.bound[ns], tk, skip[ns])
+        if getattr(self, "v2_ret", None) is not None:
+            occ = self._v2_return_hit(occ, f, rh, bnd, rows, tk, skip, kbs, moved, bell)
         s = occ.any(axis=1)
         # a first hit on a guard stance (stance_block: the Reed's Defend) is a tink that starts its counter, 1.25 s
         # long past the tink: beyond the horizon, so the branch cannot be shown safe (the person: a locked move only
@@ -3549,8 +3551,91 @@ class ForumPlanner(Planner):
         self.v2_dash_only = np.flatnonzero(dr)[only]
         return o           # applied at the selection (tick: S of these rows = 1 after the branches and their caps)
 
+    def _v2_return(self, o: np.ndarray, f, r1, cx: np.ndarray, cy: np.ndarray, tq: np.ndarray, fr, P: int, N0: int,
+                   cont: bool) -> np.ndarray:
+        """SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, Sol seq 238 G1-a): stage 1 of the ordinary rows (the candidate
+        set and CONTINUE; chain, family, special, hop and map rows keep the stack) reads forum_v2's stack_ret (the
+        other Clapper's idle body with FOCUS_M) on its revocable frames only. The sent prefix and the current locked
+        segment (from P + 1 while _v2_locked holds: a dash, a swing, a lock) keep the stack - the next tick's
+        replanning does not reach a frame already committed - and a row with a dash at that Clapper keeps it on every
+        frame (its rule check, as the focus unit's dash rule). Returns o (a new array when a row changes); the rows'
+        lock ends (-1: the stack throughout) stay in self.v2_ret for the envelope."""
+        rs = f.rs
+        N = o.shape[0]
+        el = np.zeros(N, bool)
+        el[:N0] = True
+        if cont:
+            el[N - 1] = True
+        rows = np.flatnonzero(el)
+        p = rs.trk.now[rs.body2][1].get("pos")
+        dr = (forum_v2.dash_at(r1.mode[rows], r1.vel[rows], r1.centre[rows], float(p[0])) if p
+              else np.ones(len(rows), bool))
+        rows = rows[~dr]
+        lock_end = np.full(N, -1, np.int64)
+        info = {"body2": int(rs.body2), "rows": int(len(rows)), "dash_kept": int(dr.sum()), "freed": 0}
+        self.v2_ret = {"lock_end": lock_end, "info": info}
+        if not len(rows):
+            return o
+        seg = self._v2_locked(r1, rows)[:, P + 1:]
+        lock_end[rows] = P + np.where(seg.all(axis=1), seg.shape[1], np.argmin(seg, axis=1))
+        o_r = rs.occupied_ret(cx[rows], cy[rows], tq)
+        new = np.where(np.asarray(fr)[None, :] <= lock_end[rows][:, None], o[rows], o_r)
+        info["freed"] = int((o[rows].any(axis=1) & ~new.any(axis=1)).sum())
+        info["locked_rows"] = int((lock_end[rows] > P).sum())
+        out = o.copy()
+        out[rows] = new
+        return out
+
+    def _v2_return_hit(self, occ: np.ndarray, f, rh, bnd: np.ndarray, rows: np.ndarray, tk: np.ndarray,
+                       skip: np.ndarray, kbs: dict, moved: np.ndarray, bell: np.ndarray) -> np.ndarray:
+        """_v2_return in the hit branch: a row's lanes after its lock end read stack_ret (a knocked-back hit enemy's
+        own pushed contact as before); bell rows, the frames up to the lock end and the reactions (added after) as
+        they were."""
+        rows = np.asarray(rows, np.int64)
+        lock_end = self.v2_ret["lock_end"]
+        if not len(rows) or rows.max() >= len(lock_end):
+            return occ                  # not this tick's rows: as they were
+        le = lock_end[rows]
+        sel = np.flatnonzero((le >= 0) & ~bell)
+        if not len(sel):
+            return occ
+        rs = f.rs
+        o_r = self._contacts_fn(f, rh.bound[sel], tk, skip[sel], lambda X, Y: rs.occupied_ret(X, Y, tk))
+        if o_r is None:
+            return occ
+        for j, n in enumerate(sel):
+            if moved[n]:
+                o_r[j] |= self._contacts_only(f, bnd[n:n + 1], tk, skip[n:n + 1], [int(kbs[n][0])])[0]
+        late = np.arange(occ.shape[1])[None, :] > le[sel][:, None]
+        out = occ.copy()
+        out[sel] = np.where(late, o_r, occ[sel])
+        info = self.v2_ret["info"]
+        info["hit_rows"] = info.get("hit_rows", 0) + int(len(sel))
+        return out
+
+    def _v2_return_env(self, occ: np.ndarray, f, r2, ch: np.ndarray, tk: np.ndarray, skip: np.ndarray) -> np.ndarray:
+        """_v2_return on the envelope: the rows of chunk ch with a lock end read stack_ret after it (their hull, as
+        _contacts does), every other row and frame as occ."""
+        lock_end = self.v2_ret["lock_end"]
+        if not len(ch) or int(np.max(ch)) >= len(lock_end):
+            return occ                  # not this tick's rows: as they were
+        le = lock_end[ch]
+        sel = np.flatnonzero(le >= 0)
+        if not len(sel):
+            return occ
+        rs = f.rs
+        occ_r = self._contacts_fn(f, r2.bound[sel], tk, skip[sel], lambda X, Y: rs.occupied_ret(X, Y, tk))
+        if occ_r is None:
+            return occ
+        late = np.arange(occ.shape[1])[None, :] > le[sel][:, None]
+        out = occ.copy()
+        out[sel] = np.where(late, occ_r, occ[sel])
+        self.v2_ret["info"]["env_rows"] = self.v2_ret["info"].get("env_rows", 0) + int(len(sel))
+        return out
+
     def tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext
              ) -> PlanResult:
+        self.v2_ret = None              # SSBOT_FORUM_TWO_RETURN_BODY: never a lock end of an earlier tick
         self.observed_slam_audit = (_observed_slam.audit_start(ws, f)
                                     if _observed_slam.ENABLED and getattr(self, "measurement_enabled", False) else None)
         chain = getattr(self, "chain_native", None)
@@ -3893,6 +3978,13 @@ class ForumPlanner(Planner):
             o, o_cm, o_f = f.occupied_split(cx, cy, tk[fr])
         else:
             o = f.occupied(cx, cy, tk[fr])
+        self.v2_ret = None
+        if getattr(getattr(f, "rs", None), "stack_ret", None) is not None:
+            # SSBOT_FORUM_TWO_RETURN_BODY: the ordinary rows' revocable frames read the narrowed stack (_v2_return)
+            o_n = self._v2_return(o, f, r1, cx, cy, tk[fr], fr, P, N0, cont)
+            if o_cm is o:
+                o_cm = o_n
+            o = o_n
         o = self._v2_dash(o, f, r1, cx, cy, tk[fr], fr)
         map_x = bool(o[M0].any()) if n_map else None   # SG4's cross-check: the full support on the map row (not a veto)
         if sctx is not None:
@@ -4190,6 +4282,8 @@ class ForumPlanner(Planner):
                     r2.flags_all[q_] = data["flags_all"]
             skip = ((r2.flags_all & F_INVULN) != 0) if enemy_only else np.zeros(r2.flags_all.shape, bool)
             occ = self._contacts(f, r2.bound, tk, skip)
+            if getattr(self, "v2_ret", None) is not None:
+                occ = self._v2_return_env(occ, f, r2, ch, tk, skip)
             if m_sp is not None:
                 # (a, b) the special rows' envelope: the bounce lanes against the special support (the full support
                 # from a row's full_from on)
@@ -5094,6 +5188,11 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if getattr(self, "v2_ret", None) is not None:
+            # SSBOT_FORUM_TWO_RETURN_BODY: this tick's narrowed rows (the chosen row's lock end with them)
+            self.last_info["v2_return"] = dict(self.v2_ret["info"],
+                                               chosen_lock_end=int(self.v2_ret["lock_end"][res.idx])
+                                               if 0 <= res.idx < N else None)
         if entry_times is not None:
             self.last_info["entry_side"] = {"target": entry_target,
                 "model_contact_offset": int(entry_times[res.idx]) if 0 <= res.idx < N and entry_times[res.idx] <= T1 else None,

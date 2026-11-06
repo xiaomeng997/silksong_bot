@@ -1124,7 +1124,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                                             ws=ws,forecast=fcast)
         self._mode_last = prefs.mode
         if self.v2feed is not None:
-            fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None))
+            fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None),
+                                        body2=getattr(prefs, "return_body", None))
         dmg, _ = self.sc.kill_inputs(s, obs=raw, ws=ws)
         kill_hp = None if KILL_FREE else forum_kill_hp(self.fc)
         ykill = None if KILL_FREE else forum_yellow_kill_hp(self.fc, self.freeze)
@@ -1754,7 +1755,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                "triggers": list(r.decision.triggers), "unpred": unpred, "ms": round(res.t_ms.get("total", 0.0), 3),
                "kill_hp": kill_hp, "ykill": ykill, "kill_prims": sorted(p.name for p in r.decision.kill_prims),
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
-                                             "cut", "overrun", "tv", "seen", "seen_cf", "esc")},
+                                             "cut", "overrun", "tv", "seen", "seen_cf", "esc")}
+               | ({"v2_return": li["v2_return"]} if li.get("v2_return") is not None else {}),
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
                "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
                "entry_attack": self.tac.last.get("entry_attack"),
@@ -1767,6 +1769,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                "clapper_back": self.tac.last.get("clapper_back"), "clapper_back_end": self.tac.last.get("clapper_back_end"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
+        if self.tac.last.get("clapper_return_body") is not None:
+            rec["clapper_return_body"] = self.tac.last["clapper_return_body"]   # SSBOT_FORUM_TWO_RETURN_BODY only
         if li.get("map") is not None:
             rec["map"] = li["map"]               # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row / readiness this tick
         if self._play_tick is not None:
