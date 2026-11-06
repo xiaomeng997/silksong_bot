@@ -247,17 +247,16 @@ def test_cluster_lure_when_its_whole_space_holds():
     assert plan.phase("lure_return").after("past_landing") == "lure_behind"
     assert plan.phase("lure_behind").target == 1 and plan.phase("lure_behind").after("hazard_over") == "lure_slash"
     assert plan.phase("lure_slash").target == 2 and plan.phase("lure_slash").attack == "side"
-    assert plan.phase("attack_retreat").suppress_hits is True and plan.phase("attack_back").attack == "side"
+    assert plan.phase("attack_retreat").suppress_hits is True and plan.phase("attack_back_other").attack == "side"
 
 
-def test_coming_back_from_the_retreat_the_body_in_front_is_the_target():
-    plan = plan_of(cluster_request())                # it lands between her and the other one: it is the reachable one
-    attack = cand(plan, "attack")
-    assert attack.get("back_target") == 1 and plan.phase("attack_back").target == 1 and plan.phase("attack_back").no_hit == ()
-    # (it lands past the other one: the other one)
-    far = plan_of(request("cluster", J=body(1, 36., "Jump Antic", "CC_JUMP"), W=body(2, 30.), hx=25., side=-1))
-    if cand(far, "attack").feasible:
-        assert cand(far, "attack").get("back_target") == 2 and far.phase("attack_back").no_hit == (1,)
+def test_coming_back_from_the_retreat_the_plan_has_both_bodies_and_the_landing_decides():
+    plan = plan_of(cluster_request())
+    assert cand(plan, "attack").feasible
+    retreat = plan.phase("attack_retreat")
+    assert dict(retreat.on) == {"back_jumper": "attack_back_jumper", "back_other": "attack_back_other"}
+    assert plan.phase("attack_back_jumper").target == 1 and plan.phase("attack_back_jumper").no_hit == ()
+    assert plan.phase("attack_back_other").target == 2 and plan.phase("attack_back_other").no_hit == (1,)
 
 
 def test_cluster_without_room_for_the_lure_falls_to_attack_and_a_closing_walker_counts():
@@ -703,6 +702,98 @@ def test_the_walker_closed_the_gap_prepared_route_runs_by_wall_room(monkeypatch)
         assert out.target == 7 and 7 in out.no_hit
 
 
+def test_landed_anywhere_the_over_followup_is_over(monkeypatch):
+    # hazard over, she came down on the walker's far side: the rows cannot cross its body, the plan must not hold her there
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    ex.name = "over_back"
+    assert "landed" in dict(ex.phase.on)
+    ws.hero.contact = E("GROUND")
+    go_(tac, ws, fc)
+    assert ex.status == "complete" and ex.plan is None
+
+
+def test_the_way_back_goes_to_the_body_standing_nearer_by_the_observed_landing(monkeypatch):
+    # left of both, the retreat done and the hazard over: the landing decides who is in front of her
+    for land_past, want in ((False, 7), (True, 8)):
+        tac, ws, fc = planned(monkeypatch, xs=(36., 37.), hx=28.)
+        go_(tac, ws, fc)
+        antic(tac, ws, fc)
+        go_(tac, ws, fc); go_(tac, ws, fc)
+        r = tac.plan_runner
+        ex = r.exec
+        assert ex.plan is not None and ex.plan.scene == "cluster"
+        ex.select("attack", ws.stamp.t_game_s)
+        ex.name = "attack_retreat"
+        r.moves[7] = dict(r.moves.get(7) or {}, land=39. if land_past else 30., air_at=ws.stamp.t_game_s - 2., face=-1, vx=-5.)
+        r._resolved = "retreat"
+        monkeypatch.setattr(r, "_hazard_over", lambda *a, **k: True)
+        out = go_(tac, ws, fc)
+        assert ex.name == ("attack_back_other" if land_past else "attack_back_jumper")
+        assert out.target == want
+
+
+def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
+    # The walker walks up to the jump's hammer between the plan and the take-off: stay is gone, the prepared over runs, by the same
+    # plan and with no request.
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    plan = r.exec.plan
+    assert plan.selected == "stay" and "over" in plan.get("prepared")
+    land = plan.get("landings")[0]
+    change(fc, 8, pos=(land + 6.5, fc.subjects[1].pos[1]))
+    ws.entities[1].dmg_boxes[0].poly = [(land + 4.25, 3.), (land + 7.84, 3.), (land + 7.84, 7.), (land + 4.25, 7.)]
+    set_hero(tac, land + 7.)
+    take_off(tac, ws, fc)
+    n = r.requests
+    out = go_(tac, ws, fc)
+    note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
+    assert note["route"] == "over" and "closed" in note["reason"]
+    assert r.exec.plan is plan and r.exec.name == "over_head" and r.requests == n
+    assert out.target == 8 and out.entry_attack.kind == "stomp"
+
+
+def test_the_route_with_the_farther_wall_is_the_one_chosen():
+    # both feasible in flight: under ends behind the landing, over on the walker's far side; the wall decides, in both directions
+    J = body(1, 40., "Air", "CC_JUMP", facing=-1)
+    plan = plan_of(request(J=J, W=body(2, 30.), hx=35., stage="flight", antic_at=None, land=37., land_vx=-5.45, air_at=0.))
+    under, over = cand(plan, "under"), cand(plan, "over")
+    assert under.feasible and over.feasible and under.get("wall_room") < over.get("wall_room") and plan.selected == "over"
+    J = body(1, 30., "Air", "CC_JUMP", facing=-1)
+    plan = plan_of(request(J=J, W=body(2, 20.), hx=25., stage="flight", antic_at=None, land=27., land_vx=-5.45, air_at=0.))
+    under, over = cand(plan, "under"), cand(plan, "over")
+    assert under.feasible and over.feasible and under.get("wall_room") > over.get("wall_room") and plan.selected == "under"
+
+
+def test_a_walker_step_inside_the_soft_range_asks_nothing_and_past_it_asks_once(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc, family=G.CC_JUMP_CAST, state="Cast Slam Antic")
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    n = r.requests
+    assert r.exec.plan is not None and r.exec.plan.get("walker_v") in (0., None)
+    # a real step (past the repeat step) still inside the plan's soft range: no change for the plan
+    change(fc, 8, pos=(39. - (CP.REQUEST_STEP_U + .1), fc.subjects[1].pos[1]))
+    for _ in range(3):
+        go_(tac, ws, fc)
+    assert r.requests == n
+    # past the soft range: one request; a further small motion there asks nothing new
+    change(fc, 8, pos=(39. - (CP.SOFT_WALKER_U + .1), fc.subjects[1].pos[1]))
+    go_(tac, ws, fc)
+    assert r.requests == n + 1
+    change(fc, 8, pos=(39. - (CP.SOFT_WALKER_U + .15), fc.subjects[1].pos[1]))
+    go_(tac, ws, fc)
+    assert r.requests == n + 1
+
+
 def test_a_flight_plan_with_no_route_is_an_explicit_no_plan_in_the_tick(monkeypatch):
     # seen in flight, the jump landing past the walker: none of this scene's routes; no exception in the tick, the generic rules
     tac, ws, fc = planned(monkeypatch, xs=(19., 29.), hx=25.)
@@ -721,6 +812,24 @@ def test_a_flight_plan_with_no_route_is_an_explicit_no_plan_in_the_tick(monkeypa
     # no 95-point empty route: the generic rules answer (here the kept intercept trigger, a jump coming from behind her)
     assert tac.last["clapper_winner"]["rule"] != "middle_jump"
     assert r.exec.plan is None or r.exec.plan.scene == "intercept"
+
+
+def test_an_observed_landing_outside_the_plans_support_asks_for_a_new_plan_from_it(monkeypatch):
+    tac, ws, fc = planned(monkeypatch, xs=(19., 44.), hx=30.)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc)
+    go_(tac, ws, fc)                             # the plan, published one tick after its request
+    r = tac.plan_runner
+    planned_x = r.exec.plan.get("landings")
+    assert planned_x
+    take_off(tac, ws, fc, vx=-2.)                # lands behind where any of the plan's aims would have sent it
+    go_(tac, ws, fc)
+    note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
+    assert note["route"] == "blocked" and "support" in note["reason"]
+    assert any(x["what"] == "request" and x["stage"] == "flight" for x in plan_notes(tac))
+    go_(tac, ws, fc)                             # the new plan from the observed landing, one tick on
+    assert r.exec.plan is not None and r.exec.plan.get("stage") == "flight"
 
 
 def test_the_stand_at_the_takeoff_reads_the_written_geometry_not_the_forecast_union(monkeypatch):

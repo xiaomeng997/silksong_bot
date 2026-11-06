@@ -532,8 +532,10 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
     phases.append(Phase("over_out", target=W, stance=("far", W), no_hit=(J, W), replaceable=False,
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
+    # Back to the middle from the air. Landed anywhere, the plan is over: on the walker's far side the rows cannot cross its body
+    # (replay m_close stood still there for the rest of the hazard's tail); the ordinary rules go on from where she is.
     phases.append(Phase("over_back", target=W, stance=("middle", W), no_hit=(J,), replaceable=False,
-                        on=(("landed_gap", DONE),)))
+                        on=(("landed", DONE),)))
     return tuple(phases)
 
 
@@ -705,9 +707,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         i_land = min(len(x) - 1, int(round(FLIGHT_S / r.dt)))
         if (x[i_land] - hammer_x) * out < 0:
             return no("still under the landing hammer on the retreat")
-        back = J.iid if (land - G.x) * out > 0 else G.iid     # coming back: the one standing nearer to her then
-        det.update(back_target=back)
-        return Candidate("attack", True, None, "attack_aim", 1., tuple(det.items())), dict(target=near.iid, back=back)
+        return Candidate("attack", True, None, "attack_aim", 1., tuple(det.items())), dict(target=near.iid)
 
     cand_l, f_l = lure()
     cand_a, f_a = attack()
@@ -744,10 +744,12 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         Phase("attack_aim", target=(f_a or {}).get("target", gid), attack="side", stance=("front", (f_a or {}).get("target", gid)),
               no_hit=(() if (f_a or {}).get("target", gid) == jid else (jid,)),
               on=(("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)),
+        # Coming back: the body standing nearer to her then, by the observed landing (written here, read when the hazard ends).
         Phase("attack_retreat", target=jid, stance=("retreat",), suppress_hits=True, ground=True, replaceable=False,
-              on=(("hazard_over", "attack_back"),)),
-        Phase("attack_back", target=(f_a or {}).get("back", gid), attack="side", stance=("front", (f_a or {}).get("back", gid)),
-              no_hit=(() if (f_a or {}).get("back", gid) == jid else (jid,)), replaceable=False, on=(("in_reach", DONE),)),
+              on=(("back_jumper", "attack_back_jumper"), ("back_other", "attack_back_other"))),
+        Phase("attack_back_jumper", target=jid, attack="side", stance=("front", jid), replaceable=False, on=(("in_reach", DONE),)),
+        Phase("attack_back_other", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
+              on=(("in_reach", DONE),)),
     ]
     if f_l is not None and f_l.get("guide") is not None:
         take = (("takeoff_return", "lure_return"), ("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)
@@ -1035,6 +1037,9 @@ class PlanRunner:
             out.append("arrived")
         if "bounced" in names and o is not None and self._bounced(sc, o):
             out.append("bounced")
+        if "back_jumper" in names and self._hazard_over(sc, plan, s, m):
+            nearer = m.get("land") is not None and o is not None and (m["land"] - float(o.pos[0])) * plan.get("out") > 0
+            out.append("back_jumper" if nearer else "back_other")
         if names & {"hazard_over", "move_over"}:
             over = self._hazard_over(sc, plan, s, m)
             if "hazard_over" in names and over:
@@ -1048,8 +1053,8 @@ class PlanRunner:
         if "past_landing" in names and m.get("land") is not None and (
                 sc.hx - m["land"]) * plan.get("out") <= -(plan.get("need_back") or JB.CFG["min_back_u"]) + ARRIVE_U:
             out.append("past_landing")
-        if "landed_gap" in names and sc.grounded and sc.region == "middle":
-            out.append("landed_gap")               # a completion confirmation only, no admission
+        if "landed" in names and sc.grounded:
+            out.append("landed")                   # a completion confirmation only, no admission
         if "response_over" in names and s.family not in JUMPS and not (
                 s.iid in sc.tac.rune and sc.t <= sc.tac.rune[s.iid][3]):
             out.append("response_over")
