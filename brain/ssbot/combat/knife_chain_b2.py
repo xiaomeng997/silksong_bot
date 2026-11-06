@@ -28,7 +28,7 @@ from .knife_chain_nominal import (NominalProfile,NominalUnsupported,compile_path
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
 from .knife_chain_eval import ChainObservationNotReady
 from .knife_chain_format import MASK_NAMES as B
-from .knife_chain_budget import LearningBudget,LearningStop,LOW_HP_POLICY
+from .knife_chain_budget import LearningBudget,LearningStop,LOW_HP_POLICY,OBSERVE_POLICY
 
 
 def _fresh_downslash_start(state, previous):
@@ -110,11 +110,14 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             "scene_field_rank": os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK","0").strip()=="1",
             "scene_field_weight_hits": float(os.environ.get("SSBOT_FORUM_SCENE_FIELD_WEIGHT_HITS","1.0")),
             "scene_field_rank_schema": 1,
-            "remaining_hp_quit": int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT","0"))},
+            "remaining_hp_quit": int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT","0")),
+            "observe_bout": os.environ.get("SSBOT_FORUM_OBSERVE_BOUT","0").strip()=="1"},
             sort_keys=True).encode())
         path=os.environ.get("SSBOT_FORUM_CHAIN_BUDGET","")
         if not path:raise ValueError("B2 needs explicit shared SSBOT_FORUM_CHAIN_BUDGET path")
-        budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()),policy=LOW_HP_POLICY)
+        from ssbot.train.observe_bout import enabled as observing
+        budget=LearningBudget(path,batch=batch,revision=digest.hexdigest(),worker=str(Path(journal).resolve()),
+                              policy=OBSERVE_POLICY if observing() else LOW_HP_POLICY)
         instance=cls(runner_factory=lambda:runner,probe_ref=os.environ.get("SSBOT_FORUM_CHAIN_PROBE",""),
                      journal=journal,profile=profile,arm=arm,budget=budget)
         instance.require_send_clock=True
@@ -258,9 +261,19 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
                        failure_exposure=[x.as_dict() for x in exposed],sources=sorted(set(sources)) or ["unknown"],
                        residual_context=residual,
                        source_scope="same-frame eligible damage-call candidates; no predicted/near-frame attribution")
+        fatal="death" if hp<=0 or flag(state,"dead") else None
+        if fatal and self.budget is not None and self.budget.policy==OBSERVE_POLICY and not flag(state,"dead"):
+            # Task 179 #310 observation bout: a 0 HP STATE whose lethal hit the guard vetoed in this same STATE is
+            # the healthy LethalBlock, not a death; an unvetoed 0 HP or a dead hero still stops.
+            from ssbot.train.observe_bout import LETHAL_KINDS,vetoed
+            veto=[ev for ev in state.get("ev") or () if ev.get("k") in LETHAL_KINDS and vetoed(ev.get("d"))]
+            if veto:
+                fatal=None
+                self._note("b2_observe_lethal_veto",frame=f,hp=hp,events=[ev.get("k") for ev in veto],
+                           scope="observation bout: guard vetoed a lethal hit; recorded, play goes on")
         if self.budget is not None:
             try:self.budget.observe(episode=self.episode,frame=f,arm=self.arm,hp_loss=loss,chain_related=related,
-                                   tail=tail,fatal="death" if hp<=0 or flag(state,"dead") else None)
+                                   tail=tail,fatal=fatal)
             except LearningStop as exc:
                 self.learning_stop=str(exc);self._note("b2_learning_stop",frame=f,reason=str(exc));self.flush();raise
 

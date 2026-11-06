@@ -14,10 +14,14 @@ CLAPPER = "Song Heavy Sentry"
 class MeasurementWindow:
     def __init__(self, tap, *, wave: int, expected_targets: int, game_limit: float,
                  wall_limit: float = 180.0, tail_seconds: float = 2.0, max_frames: int = 100_000,
-                 defer_wake: bool = False, protocol_version: int = 1):
+                 defer_wake: bool = False, protocol_version: int = 1, observe_lethal: bool = False):
         if protocol_version not in (1, 2):
             raise ValueError("unsupported measurement protocol")
         self.protocol_version = protocol_version
+        # Task 179 #310 observation bout: a guard-vetoed lethal hit (blocked catastrophe / would_die) is recorded in
+        # lethal_vetoes and the window goes on; an unblocked one or a death event still ends it as "lethal".
+        self.observe_lethal = observe_lethal
+        self.lethal_vetoes = []
         self.watchdog_f = None
         self.tap = tap
         self.wave = wave
@@ -113,7 +117,12 @@ class MeasurementWindow:
                 continue
             data = event.get("d") or {}
             if event.get("k") in {"catastrophe", "would_die", "die", "hero_dead", "player_dead"}:
-                candidates.append((ef, 0, "lethal"))
+                if (self.observe_lethal and event.get("k") in ("catastrophe", "would_die")
+                        and data.get("blocked") is True):
+                    if ef not in self.lethal_vetoes:
+                        self.lethal_vetoes.append(ef)
+                else:
+                    candidates.append((ef, 0, "lethal"))
             if (event.get("k") == "hit" and data.get("type_key") == CLAPPER
                     and data.get("dead") and (data.get("hp_before") is None or data["hp_before"] > 0)):
                 iid = data.get("ent")
@@ -164,6 +173,8 @@ class MeasurementWindow:
                     "errors": sorted(self.errors), "complete": self.end_f is not None and not self.errors
                         and self.end_game_s is not None and self.end_game_s > 0,
                     "time_convention": "sum raw dt for wake_f <= f <= end_f; frame-end boundary"}
+            if self.observe_lethal:
+                result.update(observe_lethal=True, lethal_vetoes=list(self.lethal_vetoes))
             if self.protocol_version == 2:
                 result.update(protocol_version=2, watchdog_f=self.watchdog_f,
                               operational_failure=self.watchdog_f is not None,

@@ -19,7 +19,49 @@ NEAR = {"Slam Antic", "Spell Antic"}
 AIR = {"Jump", "Air"}
 DEFAULT_SCORES = {"keep": 50., "intercept": 130., "hold": 140., "near": 110.,
                   "takeoff": 90., "middle": 70., "retreat": 150., "flip": 80., "overhead": 65.,
-                  "middle_jump": 95.}
+                  "middle_jump": 95., "bait": 145., "return": 145.}
+ANTIC = {"Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2"}
+BAIT_WIDTHS = 2.5          # the person (seq 230): back off about 2.5 visible body widths, return on the take-off
+
+
+def cluster_route(tac, subjects, geo, hx, t, mem, middle):
+    """Task 179 #310 (the person, seq 230): both Clappers beyond her and one of them in a jump antic.
+
+    bait: back off outward BAIT_WIDTHS visible body widths (the cluster member nearer to her; the damage-box body
+    span, not the hammer or render bounds) from where she stood when the antic was first seen, capped by the
+    existing wall clearance (tac._clamp). return: on the OBSERVED take-off (Jump / Air, never a guessed one) the
+    grounded one is the target with an ordinary side entry (existing ground approach and ground_stance). The route
+    ends with that jump; the grounded one starting its own attack or jump ends it (existing rules then). Between the
+    two (clapper_middle) it never starts. An intent only: every key still goes through the existing action checks."""
+    ctx = mem.get("cluster")
+    by_id = {s.iid: s for s in subjects}
+    if ctx is not None:
+        j, g = by_id.get(ctx["jumper"]), by_id.get(ctx["grounded"])
+        why = ("actor gone" if j is None or g is None else
+               "jump ended" if j.family not in JUMPS or tac.t_commit.get(j.iid) != ctx["move"][1] else
+               "grounded one started " + str(g.state) if g.family in JUMPS or g.state in NEAR | AIR else None)
+        if why is not None:
+            mem["cluster_end"] = dict(ctx, end=why, end_t=t, end_hx=hx)
+            ctx = None
+        elif ctx["phase"] == "bait" and j.state in AIR:
+            ctx.update(phase="return", return_t=t, return_hx=hx, return_state=j.state)
+    if ctx is None and middle is None and geo is not None and geo["region"] in ("left", "right"):
+        jumping = [s for s in subjects if s.family in JUMPS]
+        if len(jumping) == 1 and jumping[0].state in ANTIC:
+            j = jumping[0]
+            g = next(s for s in subjects if s.iid != j.iid)
+            if g.state not in NEAR | AIR:
+                out = -1 if geo["region"] == "left" else 1
+                near = geo["low"] if out < 0 else geo["high"]
+                a, b = geo["bodies"][near.iid]
+                want = hx + out * BAIT_WIDTHS * (b - a)
+                bait = tac._clamp(want)
+                ctx = {"move": [j.iid, tac.t_commit.get(j.iid)], "jumper": j.iid, "grounded": g.iid,
+                       "phase": "bait", "out": out, "width_u": b - a, "width_of": near.iid, "widths": BAIT_WIDTHS,
+                       "hx0": hx, "want_x": want, "bait_x": bait, "wall_capped": abs(bait - want) > 1e-9,
+                       "started_t": t, "reference": "hero x at the first antic tick + out * widths * body span"}
+    mem["cluster"] = ctx
+    return ctx
 
 
 def enabled(fc):
@@ -107,6 +149,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
     middle = clapper_middle.observe(tac, ws, subjects, geo, t, mem)
+    route = cluster_route(tac, subjects, geo, hx, t, mem, middle)
     seen = {s.iid: (s.family, s.state, abs(s.pos[0] - hx) <= TWO_SLAM_RANGE_U,
                     tac.t_commit.get(s.iid)) for s in subjects}
     old = tac.goal
@@ -192,6 +235,10 @@ def decide(tac, ws, fc, prefs, hx, t):
                 offer("retreat", default)
             if default.state in NEAR: offer("flip", default)
         if middle is None and region == "tight": offer("overhead", default)
+        if route is not None:
+            # The route owns this jump event: no outer retreat, intercept, flip or takeoff over it (#310).
+            choices[:] = [c for c in choices if c["rule"] == "keep"]
+            offer(route["phase"], next(s for s in subjects if s.iid == route["jumper" if route["phase"] == "bait" else "grounded"]))
         winner = max(choices, key=lambda c: (c["score"], keep is not None and c["target"] == keep.iid))
         target = next(s for s in subjects if s.iid == winner["target"])
         reason = winner["rule"]
@@ -209,6 +256,12 @@ def decide(tac, ws, fc, prefs, hx, t):
             goal.t_pick, goal.t_goal, goal.landed, goal.entry_attack = old.t_pick, old.t_goal, old.landed, old.entry_attack
         elif keep is not None and reason not in {"intercept", "hold"}:
             goal.entry_attack, _ = entry(tac, ws, fc, keep, target, t, geo)
+        if reason == "return":
+            # an ordinary side slash on the grounded one, never a stomp / vault into the cluster
+            src = next(s for s in subjects if s.iid == route["jumper"])
+            goal.entry_attack = EntryAttack(target.iid, "side", src.iid, src.family, abs(float(src.pos[0]) - hx), t)
+        elif reason == "bait":
+            goal.entry_attack = None
         if reason == "middle_jump":
             mid = middle["decision"]
             if mid["route"] == "over": middle.setdefault("exit_until", t+2.)
@@ -243,10 +296,15 @@ def decide(tac, ws, fc, prefs, hx, t):
         g.stance_x = tac._clamp(target.pos[0] + (-1 if hx < target.pos[0] else 1) * tac.rules.face_u)
         how = "face: hold until takeoff"
     retreat = mem["winner"] == "retreat"
+    bait = mem["winner"] == "bait" and route is not None
+    back = mem["winner"] == "return" and route is not None
     if retreat:
         direction = -1 if region == "left" else 1
         g.stance_x = tac._clamp(hx + direction * tac.rules.cast_out_u)
         style, scene = None, "outer jump retreat"
+    elif bait:
+        g.stance_x = float(route["bait_x"])
+        style, scene = None, "cluster bait retreat"
     elif mem["winner"] == "flip":
         direction = 1 if region == "left" else -1
         g.stance_x = tac._clamp(target.pos[0] + direction * tac.rules.face_u)
@@ -265,11 +323,16 @@ def decide(tac, ws, fc, prefs, hx, t):
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
                   weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=mem["winner"],
                   vocab=frozenset(prefs.vocab) | g.vocab)
-    if retreat or (target.family in JUMPS and target.state in AIR):
-        out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if retreat else {g.target}), entry_attack=None)
+    if back:
+        scene = "cluster return side slash"
+    if retreat or bait or (target.family in JUMPS and target.state in AIR):
+        out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if retreat or bait else {g.target}),
+                      entry_attack=None)
     else:
         out = tac._contact_preferences(fc, out, g, target, hx, how)
         out = entry_attack_prefs(out)
+        if back:
+            out = replace(out, no_hit=frozenset(out.no_hit) | {route["jumper"]})
         if style == "stomp":
             kw = dict(out.hit_kw); kw[g.target] = (0., 0., 0., hw[g.target])
             out = replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - {g.target},
@@ -285,6 +348,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     g.why = g.why.split("; ")[0] + "; " + scene + "; " + str(how)
     tac.last.update(goal=RUSH, goal_why=g.why, target_type=CLAPPER, goal_t_end=None,
                     entry_attack=None if out.entry_attack is None else vars(out.entry_attack),
-                    clapper_scene=scene, clapper_region=region, clapper_middle=mid)
+                    clapper_scene=scene, clapper_region=region, clapper_middle=mid,
+                    clapper_cluster=None if route is None else dict(route), clapper_cluster_end=mem.get("cluster_end"))
     tac.stats["goals"][RUSH] = tac.stats["goals"].get(RUSH, 0) + 1
     return out

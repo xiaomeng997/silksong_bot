@@ -52,25 +52,68 @@ def test_focus_outputs_through_its_antic_instead_of_early_long_switch(family, st
     change(fc, 7, family=family, state=state, committed=True)
     tac.two_esc = {"hold": 8, "mode": "wall", "stance": 50., "no_hit": [7, 8]}
     out = step(tac, ws, fc)
-    assert out.target == 7 and 7 not in out.no_hit and out.entry_attack is None
-    if family in P.JUMPS: assert out.stance_x == pytest.approx(16.)
+    assert out.target == 7 and out.entry_attack is None
+    if family in P.JUMPS:     # #310: both beyond her, a jump antic: the bait retreat, not the jumper's face
+        assert tac.last["clapper_scene"] == "cluster bait retreat" and {7, 8} <= out.no_hit
+        assert out.stance_x == pytest.approx(15. - P.BAIT_WIDTHS * 2.)
+    else:
+        assert 7 not in out.no_hit
 
 
 TIGHT = dict(xs=(20., 22.4), hx=21.2)    # between the two with no standing room: bodies 19..21 and 21.4..23.4
 
 
 @pytest.mark.parametrize("covered", [False, True])
-def test_outside_takeoff_is_no_switch_into_the_cluster(covered):
-    # Task 179 #309 (the person, seq 229): both Clappers beyond her - leaving the jumper for the other one is no dodge.
+def test_outside_cluster_baits_then_returns_to_the_grounded_front_on_the_observed_takeoff(covered):
+    # Task 179 #310 (the person, seq 230): both beyond her. Antic: back off 2.5 body widths; observed Jump: the grounded
+    # one with an ordinary side entry (never a stomp / vault into the cluster), the jumper not hit.
     tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
-    assert step(tac, ws, fc).target == 7
+    out = step(tac, ws, fc)
+    route = tac.last["clapper_cluster"]
+    assert tac.last["clapper_winner"]["rule"] == "bait" and tac.last["clapper_scene"] == "cluster bait retreat"
+    assert (route["phase"], route["width_of"], route["width_u"], route["out"]) == ("bait", 7, 2., -1)
+    assert out.stance_x == pytest.approx(15. - P.BAIT_WIDTHS * 2.) and not route["wall_capped"]
+    assert {7, 8} <= out.no_hit and out.entry_attack is None
     if covered: fc.default = 0.
     change(fc, 7, state="Jump")
     out = step(tac, ws, fc)
-    assert out.target == 7 and out.entry_attack is None and 7 in out.no_hit
-    assert all(c["rule"] != "takeoff" for c in tac.last["clapper_choices"])
-    assert tac.last["clapper_region"] == "left"
+    assert tac.last["clapper_cluster"]["phase"] == "return" and tac.last["clapper_winner"]["rule"] == "return"
+    assert out.target == 8 and out.entry_attack.kind == "side" and out.entry_attack.source == 7
+    assert 7 in out.no_hit and 8 not in out.no_hit and out.hit_kw[8][0] > 0
+    assert out.stance_x == pytest.approx(P.ground_stance(tac, next(s for s in fc.subjects if s.iid == 8), 15.,
+                                                         P.geometry(tac, ws, fc.subjects)))
+    assert all(c["rule"] not in ("takeoff", "retreat", "intercept") for c in tac.last["clapper_choices"])
+    change(fc, 7, family=G.CC_IDLE, state="Idle", committed=False)
+    step(tac, ws, fc)
+    assert tac.last["clapper_cluster"] is None and tac.last["clapper_cluster_end"]["end"] == "jump ended"
+
+
+def test_cluster_bait_is_capped_by_the_wall_clearance():
+    tac, ws, fc = scene(xs=(10., 14.), hx=6.); step(tac, ws, fc)
+    change(fc, 8, family=G.CC_JUMP_CAST, state="Cast Slam Antic", committed=True)
+    out = step(tac, ws, fc)
+    route = tac.last["clapper_cluster"]
+    assert route["wall_capped"] and out.stance_x == pytest.approx(tac.rules.wall_room_u) == route["bait_x"]
+    assert route["want_x"] == pytest.approx(6. - P.BAIT_WIDTHS * 2.)
+
+
+def test_between_the_two_the_cluster_route_never_starts():
+    tac, ws, fc = scene(xs=(20., 32.), hx=26.); step(tac, ws, fc)
+    change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
+    step(tac, ws, fc)
+    assert tac.last["clapper_region"] == "middle" and tac.last["clapper_cluster"] is None
+
+
+def test_the_grounded_one_attacking_ends_the_route():
+    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
+    change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
+    step(tac, ws, fc)
+    change(fc, 8, family=G.CC_SLAM, state="Slam Antic", committed=True)
+    step(tac, ws, fc)
+    assert tac.last["clapper_cluster"] is None
+    assert tac.last["clapper_cluster_end"]["end"] == "grounded one started Slam Antic"
+    assert tac.last["clapper_winner"]["rule"] not in ("bait", "return")
 
 
 @pytest.mark.parametrize("covered", [False, True])

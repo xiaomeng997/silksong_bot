@@ -96,6 +96,10 @@ MAP2 = os.environ.get("SSBOT_FORUM_MAP2", "0").strip() == "1"
 REMAINING_HP_QUIT = int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT", "0"))
 if REMAINING_HP_QUIT < 0:
     raise ValueError("remaining HP quit floor must be nonnegative")
+from ssbot.train import observe_bout as _observe_bout
+if _observe_bout.enabled() and REMAINING_HP_QUIT != 0:
+    # Task 179 #310: the observation bout has no HP stop; a configured HP quit contradicts it
+    raise ValueError("SSBOT_FORUM_OBSERVE_BOUT=1 requires SSBOT_FORUM_REMAINING_HP_QUIT=0")
 # Non-candidate strict audit: the shared Opt1 receipt stop without the B2 controller (B2 keeps its own).
 CHAIN_STRICT_RECEIPTS = os.environ.get("SSBOT_FORUM_CHAIN_STRICT_RECEIPTS", "0").strip() == "1"
 SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
@@ -543,7 +547,12 @@ class ForumPlannerPolicy(PlannerPolicy):
             if (audit._episode_start is None or item["f"] >= audit._episode_start) and item["f"] <= state["f"]:
                 audit.observe_learning(item, kill_frame=tap.death_frame)
         if tap.lethal:
-            audit._stop("lethal hit", state["f"])
+            from ssbot.train import observe_bout
+            if not observe_bout.enabled():
+                audit._stop("lethal hit", state["f"])
+            elif any(not observe_bout.vetoed(d) for _, _, d in tap.lethal):
+                # Task 179 #310: under the observation bout only an UNBLOCKED lethal hit (guard failure) stops
+                audit._stop("unblocked lethal hit (guard failure)", state["f"])
 
     def _prepare_scene_field(self):
         """Startup only, before encounter intro; reset must never spawn/wait."""
@@ -1753,6 +1762,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                "clapper_winner": self.tac.last.get("clapper_winner"),
                "clapper_scene": self.tac.last.get("clapper_scene"),
                "clapper_middle": self.tac.last.get("clapper_middle"),
+               "clapper_cluster": self.tac.last.get("clapper_cluster"),
+               "clapper_cluster_end": self.tac.last.get("clapper_cluster_end"),
                "l2_cands": self.tac.last.get("l2_cands"), "ta": self.tac.last.get("ta"),
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if li.get("map") is not None:

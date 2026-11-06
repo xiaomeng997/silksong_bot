@@ -231,6 +231,7 @@ class AttemptRecord:
     late_states: int = 0                         # STATEs that arrived after the next one was already due (gaps)
     gauntlet: dict | None = None                 # GauntletTap.summary(): waves [{wave, f, t}], kills, allies
     lethal_after_clear: int = 0                  # lethal-hit frames at or after the kill (in the post-clear window)
+    observation: dict | None = None              # Task 179 #310 observation bout only (ssbot.train.observe_bout)
     kill_s: float | None = None                  # wake -> the kill (the death state), frames / 60: time to kill
     f_kill: int | None = None
     tail_s: float | None = None                  # the post-kill tail (Encounter.tail_quiet_s): game s kill -> end
@@ -433,10 +434,14 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
         if enc.name not in ("Forum_W_w7", "Forum_W_w13"):
             raise RuntimeError("measurement window requires Forum_W_w7 or Forum_W_w13")
         is_two = enc.name.endswith("w13")
+        from ssbot.train import observe_bout
+        observing = observe_bout.enabled()
         measurement.window = MeasurementWindow(tap, wave=13 if is_two else 7,
                                                 expected_targets=2 if is_two else 1,
-                                                game_limit=120.0 if is_two else 60.0, defer_wake=True,
-                                                protocol_version=measurement.protocol_version)
+                                                game_limit=observe_bout.GAME_LIMIT_S if observing else
+                                                (120.0 if is_two else 60.0), defer_wake=True,
+                                                protocol_version=measurement.protocol_version,
+                                                observe_lethal=observing)
     s = wait_settled(link, enc.scene)
     rec.f_reset = s["f"]
     _rand(link, seed=cfg.seed, wait_frames=[0, 10])
@@ -526,7 +531,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                 # a supervisor pause raised around the kill (the boss-death slow motion keeps the pause gate shut for
                 # 1.35 s, m0:N13): its pause machine keeps the keys until its quit is done, as in a real run, instead of
                 # being cut off by the post-kill zeros (the pause stress test injects hits within 3 frames of kills)
-                if tap.lethal and cfg.mode == "eval":
+                if _stopping_lethal(tap, cfg):
                     rec.outcome, rec.reason = WOULD_DIE, "lethal hit after the kill"
                     break
                 # the boss is dead: CLEAR (any other outcome ends the loop). Was `rec.outcome or CLEAR`, which kept the
@@ -541,7 +546,7 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                         rec.outcome = QUIT      # the encounter had not ended: the tail's quiet never came (DESIGN §3.5.7)
                     end_after = last
                 continue
-            if tap.lethal and cfg.mode == "eval":
+            if _stopping_lethal(tap, cfg):
                 # before the kill check: a lethal hit in the same STATE as the kill, or in the post-clear window, is a
                 # death all the same
                 rec.outcome = WOULD_DIE
@@ -624,11 +629,20 @@ def _run(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: EpisodeCo
                 measurement.end_tick(error=tick_error)
                 measurement.check()
     rec.f_end = last
-    if cfg.mode == "eval" and rec.outcome == CLEAR and tap.lethal_frames():
+    if rec.outcome == CLEAR and _stopping_lethal(tap, cfg):
         # a lethal hit the reader thread delivered after the loop's last look (the STATE that closed the window)
         rec.outcome, rec.reason = WOULD_DIE, "lethal hit at/after the kill"
     if rec.outcome == QUIT and not getattr(policy, "real_quit_active", False):
         unpause(link)      # an emulated quit left the game paused (a real one ends on the main menu: no Continue)
+
+
+def _stopping_lethal(tap, cfg) -> bool:
+    """eval: a lethal hit ends the episode. The observation bout (ssbot.train.observe_bout, Task 179 #310): only an
+    unblocked one does; a guard-vetoed lethal hit is recorded (AttemptRecord.observation) and play goes on."""
+    if not (tap.lethal and cfg.mode == "eval"):
+        return False
+    from ssbot.train import observe_bout
+    return not observe_bout.enabled() or any(not observe_bout.vetoed(d) for _, _, d in tap.lethal)
 
 
 def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> None:
@@ -643,6 +657,13 @@ def _summarise(tap: FightTap, rec: AttemptRecord, s: dict, enc: Encounter) -> No
     rec.min_hp = min(hs) if hs else None
     lf = tap.lethal_frames()
     rec.would_die = len(lf)
+    from ssbot.train import observe_bout
+    if observe_bout.enabled():
+        vetoes = sorted({f for f, _, d in tap.lethal if observe_bout.vetoed(d)})
+        first = vetoes[0] if vetoes else None
+        rec.observation = {**observe_bout.label(), "lethal_vetoes": vetoes, "first_lethal_veto_f": first,
+                           "unblocked_lethal": sorted({f for f, _, d in tap.lethal if not observe_bout.vetoed(d)}),
+                           "hits_after_first_veto": sum(1 for f, _ in tap.damage if first is not None and f > first)}
     rec.first_lethal_f = lf[0] if lf else None
     rec.lethal_sources = [d.get("src") or d.get("source") for _, k, d in tap.lethal if k == "catastrophe"][:10]
     if tap.death_frame is not None:

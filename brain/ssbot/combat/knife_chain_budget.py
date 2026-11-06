@@ -17,12 +17,14 @@ class LearningStop(RuntimeError):
 
 STRICT_POLICY = "strict-2hp-v1"
 LOW_HP_POLICY = "episode-remaining-2hp-v1"
+# Task 179 #310: one watched observational bout (ssbot.train.observe_bout): no HP stop, fatal faults still stop.
+OBSERVE_POLICY = "observe-one-bout-v1"
 
 
 class LearningBudget:
     def __init__(self,path,*,batch,revision,worker,policy=STRICT_POLICY):
         if not batch or not revision or not worker:raise ValueError("budget needs frozen batch/revision/worker")
-        if policy not in {STRICT_POLICY,LOW_HP_POLICY}:raise ValueError("unknown B2 learning policy")
+        if policy not in {STRICT_POLICY,LOW_HP_POLICY,OBSERVE_POLICY}:raise ValueError("unknown B2 learning policy")
         self.path=Path(path);self.batch=batch;self.revision=revision;self.worker=worker;self.policy=policy
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.state=None
@@ -222,6 +224,12 @@ def preflight_options(options):
     episodes=options.episodes
     if type(episodes) is not int or not 1<=episodes<=4:
         raise LearningStop("B2 first smoke allows 1..4 attempts per arm invocation")
+    from ssbot.train import observe_bout
+    if observe_bout.enabled():
+        if episodes!=1 or len(str(getattr(options,"instances",None) or "0").split(","))!=1:
+            raise LearningStop("observation bout: exactly one bout on one instance, no automatic next bout")
+        if int(os.environ.get("SSBOT_FORUM_REMAINING_HP_QUIT","0"))!=0:
+            raise LearningStop("observation bout: an HP quit (SSBOT_FORUM_REMAINING_HP_QUIT) contradicts no HP stop")
     instances=getattr(options,"instances",None)
     if instances is not None:
         try:ids=[int(v) for v in instances.split(",")]
@@ -232,6 +240,7 @@ def preflight_options(options):
 
 def execution_conditions(options,environ=None):
     """Condition identity shared by both arms; seeds are recorded per attempt."""
+    from ssbot.train.observe_bout import enabled as observing,label as observe_label
     env=os.environ if environ is None else environ
     keys=("encounter","mode","policy","view","threads","time_scale","timebox","real_quit","inject_hits",
           "start_hp","start_silk","silk_reserve","key_cost","forum_clash","no_record","rotate","same_seeds",
@@ -241,7 +250,8 @@ def execution_conditions(options,environ=None):
             "SSBOT_FORUM_CHAIN_BLOCK","SSBOT_FORUM_CHAIN_ORDER"}
     crossover=crossover_schedule(env)
     return {"schema":1,"smoke_limit":{"total":8,"per_arm":4},
-            "learning_policy":{"name":LOW_HP_POLICY,"remaining_hp":2,"scope":"episode","pause_then_real_quit":True},
+            "learning_policy":(observe_label() if observing(env) else
+                               {"name":LOW_HP_POLICY,"remaining_hp":2,"scope":"episode","pause_then_real_quit":True}),
             **({"crossover":crossover} if crossover is not None else {}),
             "options":{k:getattr(options,k,None) for k in keys},
             "environment":{k:v for k,v in sorted(env.items()) if k.startswith("SSBOT_") and k not in labels}}
