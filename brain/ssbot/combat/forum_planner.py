@@ -3634,9 +3634,14 @@ class ForumPlanner(Planner):
         o_r = self._contacts_fn(f, rh.bound[sel], tk, skip[sel], lambda X, Y: rs.occupied_ret(X, Y, tk))
         if o_r is None:
             return occ
+        by_kb: dict = {}
         for j, n in enumerate(sel):
             if moved[n]:
-                o_r[j] |= self._contacts_only(f, bnd[n:n + 1], tk, skip[n:n + 1], [int(kbs[n][0])])[0]
+                by_kb.setdefault(int(kbs[n][0]), []).append(j)
+        for iid, js in by_kb.items():
+            # one query per pushed enemy, as _hit_branch groups its kb rows (#317: per-row queries cost W3 ~60 ms/tick)
+            js = np.asarray(js, np.int64)
+            o_r[js] |= self._contacts_only(f, bnd[sel[js]], tk, skip[sel[js]], [iid])
         late = np.arange(occ.shape[1])[None, :] > le[sel][:, None]
         out = occ.copy()
         out[sel] = np.where(late, o_r, occ[sel])
