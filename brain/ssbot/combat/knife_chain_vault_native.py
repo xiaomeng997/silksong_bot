@@ -181,7 +181,13 @@ def manual_entries(native, state, sim, ctx):
     kind,part,gap,root_distance=V.distance_entry(cfg,h,tp,box,direction,sim.params.attack_cooldown,not incoming)
     entries=[]
     far_from=0. if incoming else cfg["HOP_RECIPE"]["root_distance"][1]
-    if kind=="near":entries.append(("near",{**base,"near":part,"far":None}))
+    if kind=="near":
+        part=V.plan_near_part(part,sim,target,box,direction,h)
+        if part is None:
+            native._note("vault_near_no_clean_row",frame=state["f"],box_gap=gap,root_distance=root_distance,
+                         scope="this start has no row reaching the body without her box meeting it first")
+            kind=None
+        else:entries.append(("near",{**base,"near":part,"far":None}))
     elif kind=="hop_hook":entries.append(("hop_hook",{**base,"near":None,"far":part}))
     elif gap>cfg["NEAR_RECIPE"]["box_gap"][1] and far_from<root_distance<=cfg["APPROACH"]["root_distance_max"]:
         # Task 179: farther than both entries but within the approach bound: run in on the ground (table link

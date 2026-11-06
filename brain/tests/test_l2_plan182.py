@@ -18,7 +18,7 @@ from ssbot.knowledge.kinematics import HeroParams, Terrain2D
 from ssbot.train.forum_planner_policy import CREST_PARAMS
 from tests.test_clapper_priority import change, manual, scene   # noqa: F401  (autouse manual-B fixture)
 
-PARAMS = kin.hero2(HeroParams.load(next(iter(CREST_PARAMS.values()))))
+PARAMS = kin.hero2(HeroParams.load(CREST_PARAMS["Wanderer"]))     # the crest of the w13 fights
 TERRAIN = Terrain2D(np.array([[FLOOR_Y, 0., 80.]]), np.zeros((0, 3)), np.zeros((0, 4)))
 DT = float(PARAMS.frame_time)
 BODY_IN = 2.2515621185302734
@@ -54,6 +54,11 @@ def request(scene_="middle", J=None, W=None, hx=33., t=0., antic_at=0., stage="a
 
 def plan_of(q):
     return CP.generate(q, PARAMS, TERRAIN)
+
+
+def step_(ex, t, events, values, inst):
+    """The executor with the same facts for whichever plan it asks about."""
+    return PlanExecutor.step(ex, t, events, lambda plan: values, lambda plan: inst)
 
 
 def cand(plan, name):
@@ -99,8 +104,8 @@ def test_the_departure_waits_until_its_absolute_deadline_and_does_not_drift():
     stay = cand(a, "stay")
     travel = stay.get("travel_s")
     assert stay.get("depart_t") == pytest.approx(.48 - CP.RESERVE_S - travel, abs=3 * DT)
-    # the stage starts half a travel time earlier than the written latest departure, its keys applying two frames on
-    assert depart == pytest.approx(stay.get("depart_t") - (CP.GUIDE_START_X - 1.) * travel - 2 * DT, abs=1e-9)
+    # the stage starts at the latest departure, its keys applying two frames on: the bounded approach sends what this counted on
+    assert depart == pytest.approx(stay.get("depart_t") - 2 * DT, abs=1e-9)
     assert a.get("latest_depart") == stay.get("depart_t")
     assert depart > stay.get("hand_t") - 2 * DT and depart > .05                # time to attack before it
     # the same geometry asked again later: the same absolute deadline, whatever the snapshot's time
@@ -167,19 +172,19 @@ def test_under_counts_the_slanted_descent_not_only_the_landing():
     assert (under.get("landing") - under.get("end_x")) >= under.get("need_back")
 
 
-def test_a_long_way_under_is_not_offered_the_rows_could_not_start_it():
-    # one planner row's reach: past it she would only wait at the hammer's edge
-    far = plan_of(request(W=body(2, 44.), hx=40.))
-    assert not cand(far, "under").feasible and "one planner row" in cand(far, "under").reason
-    # the usual aim: about 5 u in front of its landing, 3.5 u behind it: not offered, the reason says so
+def test_the_way_under_is_the_bounded_approach_against_its_descent():
+    # the usual aim: its landing 5 u short of her, the place 3.5 u behind that: the dash gets there before its body comes down
     usual = plan_of(request(J=body(1, 30., "Jump Antic", "CC_JUMP", facing=1), W=body(2, 38.), hx=34.))
-    assert "one planner row" in cand(usual, "under").reason
-    # an observed landing right in front of her (a flight seen late): the way behind it is short
+    u = cand(usual, "under")
+    assert u.feasible and abs(u.get("end_x") - u.get("aim_x")) >= 8. and u.get("arrive_t") <= u.get("by_t") - .05
+    # too far for the time: not offered, the reason says why
     J = body(1, 25., "Air", "CC_JUMP", facing=1)
-    short = plan_of(request(J=J, W=body(2, 38.), hx=33., stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=0.))
+    far = plan_of(request(J=J, W=body(2, 47.), hx=44., stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=0.))
+    assert not cand(far, "under").feasible and "comes down" in cand(far, "under").reason
+    # an observed landing right in front of her (a flight seen late): the way behind it is short, the run does
+    short = plan_of(request(J=J, W=body(2, 38.), hx=31., stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=0.))
     u = cand(short, "under")
-    assert u.feasible and abs(u.get("end_x") - 33.) <= CP.UNDER_ROW_U and u.get("route_s") <= CP.DESCENT_S
-
+    assert u.feasible and u.get("route_s") <= CP.DESCENT_S
 
 def test_the_side_approach_passes_under_only_a_source_in_the_air_above_her_head(monkeypatch):
     from ssbot.combat.knife_chain_air_native import _passes_under
@@ -295,9 +300,14 @@ def test_only_a_clear_middle_with_one_jumper_is_the_three_branch_scene():
     J, W = subj_(1, 20., "Jump Antic", "CC_JUMP"), subj_(2, 34.)
     geo = geo_of((20., 34.), 27.)
     assert CP.parent_scene([J, W], geo, 27.)[0] == "middle"
-    # the hero outside: cluster, never middle
-    assert CP.parent_scene([J, W], geo, 15.)[0] == "cluster"
-    assert CP.parent_scene([J, W], geo, 40.)[0] == "cluster"
+    # outside two apart: neither (Root: 19 / 39, a 15.5 u gap, the hero at 45: no cluster)
+    assert CP.parent_scene([J, W], geo, 15.) is None and CP.parent_scene([J, W], geo, 40.) is None
+    apart = geo_of((19., 39.), 45.)
+    assert CP.parent_scene([subj_(1, 19., "Jump Antic", "CC_JUMP"), subj_(2, 39.)], apart, 45.) is None
+    # outside two with no standing gap between them: the cluster, never middle
+    together = geo_of((28., 30.), 15., {1: (26., 30.), 2: (27., 32.)})
+    pair = [subj_(1, 28., "Jump Antic", "CC_JUMP"), subj_(2, 30.)]
+    assert CP.parent_scene(pair, together, 15.)[0] == "cluster" and CP.parent_scene(pair, together, 40.)[0] == "cluster"
     # stacked bodies with the roots bracketing her: neither
     stacked = geo_of((26., 28.), 27., {1: (24., 30.), 2: (25., 31.)})
     assert CP.parent_scene([subj_(1, 26., "Jump Antic", "CC_JUMP"), subj_(2, 28.)], stacked, 27.) is None
@@ -310,6 +320,112 @@ def test_only_a_clear_middle_with_one_jumper_is_the_three_branch_scene():
     assert CP.parent_scene([subj_(1, 20.), W], geo, 27.) is None
     # the jump seen only after its landing is no new plan
     assert CP.parent_scene([subj_(1, 20., "Slam 2", "CC_JUMP"), W], geo, 27.) is None
+
+
+# ---- her hand-back and her state: the key owner, no free start ----
+
+def owned_request(hx=33., keys=(0,) * 10, known=True, **kw):
+    """The same request with a key owner past the in-flight prefix (the policy adds its known keys to the committed prefix)."""
+    S0, _ = hand_of(hx, 0.)
+    prefix = np.array((0,) + tuple(keys), np.int64)
+    m = CP.Roller(S0, prefix, kin.HoldState.idle(1), PARAMS, TERRAIN)
+    hand = CP.hand_back(m, 0., hx, known)
+    return replace(request(hx=hx, S0=S0, hand=hand, **kw), prefix=prefix), hand
+
+
+def test_a_key_owner_past_the_physical_hand_back_moves_it_and_its_deadline_reads_that():
+    # physically free at f + 2 (M_NORMAL), but the source tail owner keeps the keys for 12 more frames: Sol seq 255 A's counterexample
+    free_q, free = owned_request(keys=())
+    owned_q, owned = owned_request(keys=(0,) * 12)
+    assert owned.known and owned.t == pytest.approx(free.t + 12 * DT, abs=1e-9) and owned.index == free.index + 12
+    # a guide she reaches from the free hand-back and no longer from the owner's release: the free roll would have called it feasible
+    for hx in np.arange(30., 37., .25):
+        fq, _ = owned_request(hx=float(hx), keys=())
+        oq, _ = owned_request(hx=float(hx), keys=(0,) * 12)
+        a, b = cand(plan_of(fq), "stay"), cand(plan_of(oq), "stay")
+        if a.feasible and a.get("guide") is not None and not b.feasible:
+            assert "reserve" in b.reason, b.reason
+            return
+    pytest.fail("no layout where only the owner's release misses the guide")
+
+def test_the_native_owner_says_what_it_holds_of_her_keys(monkeypatch):
+    from ssbot.combat.knife_chain_air_native import NativeManualAirChain as N, transfer, waypoint
+    state = dict(f=100)
+    def owner(run=None, commitment=None, recovery=None, wall=None, goal=None):
+        return NS(runner=NS(run=run), commitment=commitment, recovery=recovery, _wall_pressure=wall, _transfer_goal=goal)
+    assert N.key_commitment(owner(), state) is None
+    assert N.key_commitment(owner(commitment={}), state) == ("b2 commitment", False, ())
+    assert N.key_commitment(owner(recovery={}), state) == ("b2 recovery", False, ())
+    # an approach, and the plans' own Run: handed back at their next step when L2 moves on
+    approach = NS(chain=transfer.PROGRAM, link="walk", v={"_approach_only": True}, lid="rune_transfer.walk")
+    assert N.key_commitment(owner(run=approach), state) is None
+    assert N.key_commitment(owner(run=NS(chain=waypoint.PROGRAM, link="go", v={}, lid="waypoint.go")), state) is None
+    # a strike: its release cannot be told
+    strike = NS(chain=transfer.PROGRAM, link="strike", v={}, lid="rune_transfer.strike")
+    assert N.key_commitment(owner(run=strike), state) == ("rune_transfer.strike", False, ())
+    # the source tail: its own admission's keys through its predicted end; no prediction: unknown
+    tail = NS(chain=transfer.PROGRAM, link="bounce_tail", v={"source_tail_mask": 0}, lid="rune_transfer.bounce_tail")
+    monkeypatch.setattr(transfer, "predicted_tail_end", lambda s, g: 111)
+    assert N.key_commitment(owner(run=tail, goal=object()), state) == ("rune_transfer.bounce_tail", True, (0,) * 10)
+    monkeypatch.setattr(transfer, "predicted_tail_end", lambda s, g: None)
+    assert N.key_commitment(owner(run=tail, goal=object()), state) == ("rune_transfer.bounce_tail", False, ())
+
+
+def test_an_owner_whose_release_cannot_be_told_makes_no_route_and_no_free_hero():
+    q, hand = owned_request(keys=(), known=False)
+    assert not hand.known
+    plan = plan_of(q)
+    assert plan.status == "none"
+    for name in ("stay", "under", "over"):
+        assert not cand(plan, name).feasible and "hand-back unknown" in cand(plan, name).reason
+    c = plan_of(replace(cluster_request(), hand=hand))
+    assert c.status == "none" and all("hand-back unknown" in x.reason for x in c.candidates)
+
+
+def test_the_request_comes_again_when_her_hand_back_becomes_known(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    r = tac.plan_runner
+    S = hero_state(35.)
+    tac.plan_input = CP.HeroInput(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, commit=("slam", False, ()))
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    assert r.hand is not None and not r.hand.known
+    assert r.exec.plan is None and r.exec.status == "blocked" and "unknown" in r.exec.reason
+    n = r.requests
+    set_hero(tac, 35.)
+    go_(tac, ws, fc)
+    assert r.requests == n + 1 and any(x.get("why", "").startswith("her hand-back is known") for x in plan_notes(tac))
+    go_(tac, ws, fc)
+    assert r.exec.plan is not None
+
+
+def test_the_routes_roll_on_from_her_state_with_no_free_landing_or_dash():
+    # a dash on a long cooldown: the way under at a run does not make it, where the ready dash does
+    S0 = hero_state(34.)
+    m = CP.Roller(S0, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    J = body(1, 30., "Jump Antic", "CC_JUMP", facing=1)
+    ready = request(J=J, W=body(2, 38.), hx=34., S0=S0, hand=CP.hand_back(m, 0., 34.))
+    assert cand(plan_of(ready), "under").feasible
+    S1 = S0.copy()
+    S1[kin.DASH_CD] = 3.
+    m = CP.Roller(S1, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    tired = request(J=J, W=body(2, 38.), hx=34., S0=S1, hand=CP.hand_back(m, 0., 34.))
+    u = cand(plan_of(tired), "under")
+    assert not u.feasible and "comes down" in u.reason
+    # seen in flight, she high in the air with her air moves spent: she does not start from the floor with a ready dash
+    y = FLOOR_Y + PARAMS.foot + 6.
+    flight = dict(J=body(1, 30., "Air", "CC_JUMP", facing=1), W=body(2, 38.), hx=34., stage="flight", antic_at=None, land=29.,
+                  land_vx=5.45, air_at=0.)
+    S0 = hero_state(34.)
+    m = CP.Roller(S0, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    floor = cand(plan_of(request(S0=S0, hand=CP.hand_back(m, 0., 34.), **flight)), "under")
+    S2 = np.asarray(kin.initial_state(PARAMS, 34., y, ground=False), np.float64)
+    S2[kin.AIRDASHED] = 1.
+    S2[kin.DASH_CD] = 3.
+    m = CP.Roller(S2, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    high = cand(plan_of(request(S0=S2, hand=CP.hand_back(m, 0., 34.), **flight)), "under")
+    assert floor.feasible and (not high.feasible or high.get("route_s") > floor.get("route_s"))
 
 
 # ---- the executor: generic and small ----
@@ -325,10 +441,10 @@ def test_the_executor_adopts_advances_and_completes_once():
     ex = PlanExecutor()
     assert ex.offer(mini_plan(), 1., (1, 0.), {})[0] == "adopted"
     assert ex.phase.name == "first" and ex.status == "waiting"
-    assert ex.step(1.1, lambda p: [], {}, (1, 0.)).name == "first"
-    assert ex.step(1.2, lambda p: ["go"], {}, (1, 0.)).name == "second"
+    assert step_(ex, 1.1, lambda p: [], {}, (1, 0.)).name == "first"
+    assert step_(ex, 1.2, lambda p: ["go"], {}, (1, 0.)).name == "second"
     assert ex.handled((1, 0.), "go")
-    assert ex.step(1.3, lambda p: ["end"], {}, (1, 0.)) is None
+    assert step_(ex, 1.3, lambda p: ["end"], {}, (1, 0.)) is None
     assert ex.status == "complete" and ex.plan is None
 
 
@@ -350,20 +466,20 @@ def test_a_result_is_checked_before_it_can_be_used():
 def test_past_the_boundary_a_new_plan_waits_and_invalid_ends_at_once():
     ex = PlanExecutor()
     ex.offer(mini_plan(support=(Range("w", 0., 1.),)), 1., (1, 0.), {"w": .5})
-    ex.step(1.1, lambda p: ["go"], {"w": .5}, (1, 0.))
+    step_(ex, 1.1, lambda p: ["go"], {"w": .5}, (1, 0.))
     assert ex.phase.name == "second"
     # a route past the boundary is not replaced: support is no longer read, the newer plan waits
     newer = mini_plan(gen=2)
     assert ex.offer(newer, 1.2, (1, 0.), {"w": 5.})[0] == "pending"
-    assert ex.step(1.3, lambda p: [], {"w": 5.}, (1, 0.)).name == "second"
+    assert step_(ex, 1.3, lambda p: [], {"w": 5.}, (1, 0.)).name == "second"
     assert ex.pending is newer
-    assert ex.step(1.4, lambda p: ["stuck"], {"w": 5.}, (1, 0.)) is None and ex.status == "blocked"
+    assert step_(ex, 1.4, lambda p: ["stuck"], {"w": 5.}, (1, 0.)) is None and ex.status == "blocked"
     # the waiting plan is taken at the boundary, in the next step, after its checks again
-    assert ex.step(1.5, lambda p: [], {"w": 5.}, (1, 0.)).name == "first" and ex.plan.generation == 2
+    assert step_(ex, 1.5, lambda p: [], {"w": 5.}, (1, 0.)).name == "first" and ex.plan.generation == 2
     # support gone in a replaceable stage: invalid at once, no waiting for a worker
     ex2 = PlanExecutor()
     ex2.offer(mini_plan(support=(Range("w", 0., 1.),)), 1., (1, 0.), {"w": .5})
-    assert ex2.step(1.1, lambda p: [], {"w": 3.}, (1, 0.)) is None and ex2.status == "invalid"
+    assert step_(ex2, 1.1, lambda p: [], {"w": 3.}, (1, 0.)) is None and ex2.status == "invalid"
 
 
 def test_fixed_times_and_instance_end():
@@ -371,11 +487,11 @@ def test_fixed_times_and_instance_end():
     timed = Plan("s", (1, 0.), 1, 0., None, 10., phases=(Phase("wait", at=(2., "go")), Phase("go", on=())),
                  candidates=(Candidate("a", True, None, "wait"),), selected="a")
     ex.offer(timed, 1., (1, 0.), {})
-    assert ex.step(1.9, lambda p: [], {}, (1, 0.)).name == "wait"
-    assert ex.step(2., lambda p: [], {}, (1, 0.)).name == "go"
-    assert ex.step(2.1, lambda p: [], {}, (1, 9.)) is None and ex.status == "invalid"     # a new instance
+    assert step_(ex, 1.9, lambda p: [], {}, (1, 0.)).name == "wait"
+    assert step_(ex, 2., lambda p: [], {}, (1, 0.)).name == "go"
+    assert step_(ex, 2.1, lambda p: [], {}, (1, 9.)) is None and ex.status == "invalid"     # a new instance
     ex.offer(mini_plan(gen=9, until=3.), 2.2, (1, 0.), {})
-    assert ex.step(3.1, lambda p: [], {}, (1, 0.)) is None and ex.status == "expired"
+    assert step_(ex, 3.1, lambda p: [], {}, (1, 0.)) is None and ex.status == "expired"
     ex.reset()
     assert ex.plan is None and ex.status == "idle" and not ex.history
 
@@ -409,6 +525,98 @@ def test_inline_channel_keeps_only_the_latest_and_a_new_epoch_drops_old_results(
     ch.invalidate()
     ch.tick(); ch.tick()
     assert ch.latest() is None and d == 4
+
+
+class _FakeConn:
+    """The broker's pipe: records what goes out, answers the plan message at once; during_send: an interleaving at that moment."""
+
+    def __init__(self):
+        self.out, self.during_send, self.reply = [], None, None
+
+    def send(self, message):
+        self.out.append(message)
+        if message[0] == "plan":
+            self.reply = ("plan", (message[1], message[2], message[3], message[4]), "PLAN", 1., self.model_id)
+        if self.during_send is not None:
+            hook, self.during_send = self.during_send, None
+            hook()
+
+    def poll(self, _):
+        return True
+
+    def recv(self):
+        return self.reply
+
+
+def _channel_without_process():
+    ch = PlanChannel.__new__(PlanChannel)
+    from ssbot.combat.scene_field_async import DoubleBuffer
+    import threading
+    ch.buffer = DoubleBuffer()
+    ch._epoch = ch._sequence = 0
+    ch._request = ch._model = None
+    ch._model_version = 0
+    ch._held_version = None
+    ch._last_sent = 0
+    ch._failure = None
+    ch._stop = threading.Event()
+    ch._wake = threading.Event()
+    ch.sent = ch.published = 0
+    ch._process = NS(is_alive=lambda: True)
+    ch._conn = _FakeConn()
+    return ch
+
+
+def test_a_request_goes_with_its_own_model_whatever_the_threads_do():
+    # the broker reads the latest request once: a new model and request arriving at any moment of its pass cannot cross
+    ch = _channel_without_process()
+    terrain_a, terrain_b = TERRAIN, Terrain2D(np.array([[FLOOR_Y + 1., 0., 80.]]), np.zeros((0, 3)), np.zeros((0, 4)))
+    assert terrain_a.packed().tobytes() != terrain_b.packed().tobytes()
+    ch.set_model(PARAMS, terrain_a)
+    a = ch._model
+    ch.request("k", "SNAP_A")
+    ch._conn.model_id = a.id
+
+    def newer():
+        ch.set_model(PARAMS, terrain_b)
+        ch.request("k", "SNAP_B")
+
+    ch._conn.during_send = newer                      # exactly the old race: after the model went out, before the request
+    assert ch._broker_step()
+    sent = ch._conn.out
+    assert [m[0] for m in sent] == ["model", "plan"] and sent[0][1] == a.version and sent[1][4] == a.version and sent[1][5] == "SNAP_A"
+    assert sent[0][3] is terrain_a
+    assert ch.buffer.current.key == ("k", a.version) and ch.buffer.current.sequence == 1
+    # the next pass: the newer request with ITS model first
+    b = ch._model
+    ch._conn.model_id = b.id
+    ch._conn.out = []
+    assert ch._broker_step()
+    assert [m[0] for m in ch._conn.out] == ["model", "plan"] and ch._conn.out[0][1] == b.version and ch._conn.out[1][5] == "SNAP_B"
+    assert ch._conn.out[0][3] is terrain_b and ch.buffer.current.key == ("k", b.version)
+    # an answer for another model is a failure, not a plan
+    ch.request("k", "SNAP_C")
+    ch._conn.model_id = "somebody else's"
+    with pytest.raises(RuntimeError):
+        ch._broker_step()
+
+
+def test_a_missing_model_or_terrain_is_refused_never_an_empty_terrain(monkeypatch):
+    for ch in (_channel_without_process(), InlineChannel(PARAMS, 1)):
+        with pytest.raises(ValueError):
+            ch.request("k", "SNAP")
+        with pytest.raises(ValueError):
+            ch.set_model(PARAMS, None)
+    tac, ws, fc = planned(monkeypatch)
+    tac.plan_input = CP.HeroInput(hero_state(35.), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, None)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    tac.plan_input = CP.HeroInput(hero_state(35.), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, None)
+    r = tac.plan_runner
+    r.channel = InlineChannel(PARAMS, 1)
+    r._model_set = (None, None)
+    go_(tac, ws, fc)
+    assert r.hand is None and r.requests == 0
 
 
 def test_the_resident_worker_publishes_complete_plans_and_fails_loudly():
@@ -551,29 +759,19 @@ def test_the_three_routes_are_there_before_the_lock_and_stay_runs_by_its_plan(mo
 
 
 def test_a_hand_back_past_the_departure_gives_up_the_guide_at_once_and_asks_again(monkeypatch):
-    from ssbot.combat.knife_chain_format import MASK_NAMES as B
     tac, ws, fc = planned(monkeypatch, hx=34.2)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
     go_(tac, ws, fc); go_(tac, ws, fc)
     r = tac.plan_runner
     assert r.exec.name == "aim_wait"
-    # a lock of her own: the same place, the keys in flight now a long dash; it has to be read from the hand-back alone
-    S = hero_state(34.2)
-    dash = np.full(1, B["R"] | B["DASH"], np.int64)
-    n = r.requests
-    tac.plan_input = CP.HeroInput(np.asarray(kin.rollout(S, np.full((1, 30), B["R"] | B["DASH"], np.int64), PARAMS, TERRAIN).final, float),
-                                  dash, kin.HoldState.idle(1), PARAMS, TERRAIN)
-    seen = []
-    for _ in range(12):
-        go_(tac, ws, fc)
-        seen += plan_notes(tac)
-        if r.exec.name != "aim_wait":
-            break
-    assert r.hand.known
-    assert r.exec.name == "aim_attack" or any(n_["what"] == "request" for n_ in seen) or r.exec.name == "aim_guide"
-    assert r.requests >= n
-
+    # the source tail owner took the keys: the same place, her hand-back past the written latest departure
+    keys = (0,) * 40
+    tac.plan_input = CP.HeroInput(hero_state(34.2), np.zeros(1 + len(keys), np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN,
+                                  commit=("b2 bounce_tail", True, keys))
+    go_(tac, ws, fc)
+    assert r.hand.known and r.hand.t > r.exec.plan.get("latest_depart")
+    assert r.exec.name == "aim_attack"             # at once: the guide is given up on this tick
 
 def test_a_late_result_is_used_only_if_its_instance_holds(monkeypatch):
     tac, ws, fc = planned(monkeypatch, delay=5)
@@ -702,8 +900,7 @@ def test_the_walker_closed_the_gap_prepared_route_runs_by_wall_room(monkeypatch)
         assert out.target == 7 and 7 in out.no_hit
 
 
-def test_landed_anywhere_the_over_followup_is_over(monkeypatch):
-    # hazard over, she came down on the walker's far side: the rows cannot cross its body, the plan must not hold her there
+def test_landed_in_the_gap_the_over_followup_is_done_and_elsewhere_the_return_is_handed_on(monkeypatch):
     tac, ws, fc = planned(monkeypatch)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
@@ -711,15 +908,26 @@ def test_landed_anywhere_the_over_followup_is_over(monkeypatch):
     r = tac.plan_runner
     ex = r.exec
     ex.name = "over_back"
-    assert "landed" in dict(ex.phase.on)
+    # the walker's far side: the rows cannot cross its body: not a success; the public middle return keeps the goal
     far = 43.
     ws.hero.pos = E((far, float(ws.hero.pos.v[1])))
     ws.hero.hurtbox = [(far - .25, 4.), (far + .25, 4.), (far + .25, 6.), (far - .25, 6.)]
     set_hero(tac, far)
     ws.hero.contact = E("GROUND")
     go_(tac, ws, fc)
-    assert ex.status == "complete" and ex.plan is None
-
+    assert ex.status == "handed_back" and ex.plan is None
+    assert tac._clapper_priority.get("back") is not None and tac._clapper_priority["back"]["iid"] == 7
+    assert any(x["what"] == "return kept" for x in plan_notes(tac))
+    # in the gap: done, nothing kept
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    ex = tac.plan_runner.exec
+    ex.name = "over_back"
+    ws.hero.contact = E("GROUND")
+    go_(tac, ws, fc)
+    assert ex.status == "complete" and ex.plan is None and tac._clapper_priority.get("back") is None
 
 def test_the_way_back_goes_to_the_body_standing_nearer_by_the_observed_landing(monkeypatch):
     # left of both, the retreat done and the hazard over: the landing decides who is in front of her
@@ -768,6 +976,148 @@ def test_a_new_move_of_the_other_one_ends_the_late_followups(monkeypatch):
     assert ex.plan is None and ex.status == "invalid"
 
 
+# ---- the bounded approach: what the plan counts on is what the Run sends ----
+
+def _closed_loop(goal_x, by_f, x0=34., steps=120):
+    """next_mask frame by frame through the model, as the Run: her arrival frame and the keys."""
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.knife_chain_waypoint import WaypointGoal, next_mask
+    from ssbot.combat.holdfilter import hold_filter_jit
+    S = hero_state(x0)
+    hold = kin.HoldState.idle(1)
+    sent = [0]
+    keys = []
+    for f in range(steps):
+        prefix = np.array([sent[-1]], np.int64)
+        sim = ChainSim(S, prefix, hold, PARAMS, TERRAIN, f, f)
+        mask, what = next_mask(sim, WaypointGoal(goal_x, by_f, "under", 1, ((1, 0.), 1, "under")), f)
+        if what == "arrived":
+            xs = sim.roll(np.zeros((1, 60), np.int64)).centre[0, :, 0]
+            d = 1 if goal_x > x0 else -1
+            crossing = int(np.argmax((xs - goal_x) * d >= -.2)) if ((xs - goal_x) * d >= -.2).any() else 0
+            return f + crossing - sim.off, keys, what, float(xs[-1])
+        if what == "late":
+            return f, keys, what, None
+        keys.append(int(mask))
+        sent.append(int(mask))
+        # one frame on: the mask in flight lands, the new one is next
+        lat, hold2 = hold_filter_jit(prefix[None], hold)
+        r = kin.rollout(S, lat, PARAMS, TERRAIN)
+        S = np.asarray(r.final[:, 0], np.float64)
+        hold = hold2
+    return None, keys, "no end", None
+
+
+def test_the_run_sends_what_the_route_counted_on():
+    from ssbot.combat import knife_chain_waypoint as WP
+    S = hero_state(34.)
+    m = CP.Roller(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    for goal, by in ((24.8, 40), (22., 45), (31., 80), (40., 60)):
+        row, k, how = WP.route(m, np.zeros(CP.ROLL_T, np.int64), 0, goal, by_k=by)
+        assert k is not None and k <= by, (goal, how)
+        f, keys, what, x = _closed_loop(goal, by + 2)
+        assert what == "arrived", (goal, what)
+        assert abs(f - k) <= 6, (goal, how, f, k)                  # the frame she is there
+        assert abs(x - m.xs(row[None])[0][-1]) <= 1.9, (goal, how, x)     # where she stops
+        assert bool(np.any(row & kin.B_DASH)) == any(v & kin.B_DASH for v in keys), (goal, how)
+
+
+def test_the_route_runs_when_it_can_and_dashes_only_when_it_must():
+    from ssbot.combat import knife_chain_waypoint as WP
+    S = hero_state(34.)
+    m = CP.Roller(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    row, k, how = WP.route(m, np.zeros(CP.ROLL_T, np.int64), 0, 31., by_k=60)
+    assert how == "run" and not np.any(row & kin.B_DASH)
+    row, k, how = WP.route(m, np.zeros(CP.ROLL_T, np.int64), 0, 25., by_k=30)
+    assert how == "dash" and np.any(row & kin.B_DASH) and k <= 30
+    # released before the goal: the sprint's skid stops her at it, not 1.9 u past it
+    x = m.xs(row[None])[0]
+    assert abs(x[-1] - 25.) <= 1.9                 # (a sprint's stop is not continuous: 8.2 u, then 10.1 u: the first that gets there)
+    # a dash on cooldown is pressed when it can start: an edge held through the cooldown would never start one
+    S1 = S.copy()
+    S1[kin.DASH_CD] = .3
+    m1 = CP.Roller(S1, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN)
+    row, k, how = WP.route(m1, np.zeros(CP.ROLL_T, np.int64), 0, 22.)
+    assert how == "dash" and np.any(m1.rollout(row[None]).mode[0] == kin.M_DASH)
+
+
+# ---- the over route's near row: from the start she is really at ----
+
+def _sim_at(x):
+    from ssbot.combat.air_chain import ChainSim
+    return ChainSim(hero_state(x), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, 0, 0)
+
+
+def _overlap(sim, entry, box, direction, upto=None):
+    """Her box meets the body before the contact frame (upto: its rollout index; the row's own press + 5 by default)."""
+    from ssbot.combat import dslash
+    key = kin.B_RIGHT if direction > 0 else kin.B_LEFT
+    h, p, b = entry["h"], entry["p"], entry["before"]
+    row = np.zeros(p + dslash.POST_F, np.int64)
+    row[:h] |= kin.B_JUMP
+    if b == "T":
+        row[:p] |= key
+    dslash.strike(row, p)
+    row[p:] |= key
+    ro = sim.roll(row[None])
+    bx = ro.box[0, :(p + 6 if upto is None else upto + 1)]
+    return bool(np.any((bx[:, 0] <= box[2]) & (bx[:, 2] >= box[0]) & (bx[:, 1] <= box[3]) & (bx[:, 3] >= box[1])))
+
+
+@pytest.mark.parametrize("gap", [.4, .8, 1.2, 1.7, 2.25, 2.3, 2.44, 3., 3.5])
+def test_a_clean_near_row_exists_from_these_gaps_where_the_table_row_clips_the_corner(gap):
+    from ssbot.combat.knife_chain_vault_entry import clean_near_row
+    x = 40.
+    edge = x - .25 - gap
+    box = (edge - 3.59, FLOOR_Y, edge, CP.BODY_TOP)
+    sim = _sim_at(x)
+    entry, diag = clean_near_row(sim, box, -1)
+    assert entry is not None and diag["clean"] >= 1, diag
+    assert not _overlap(sim, entry, box, -1, diag["contact_index"])
+
+
+def test_the_table_row_itself_clips_where_the_clean_row_does_not():
+    from ssbot.combat.knife_chain_vault_entry import clean_near_row
+    x = 40.
+    for gap in (.8, 1.2):                          # the replays' clipped entries (m_over 0.79 with press 4; press 8 at 1.2)
+        edge = x - .25 - gap
+        box = (edge - 3.59, FLOOR_Y, edge, CP.BODY_TOP)
+        press = 4 if gap < 1. else 8
+        assert _overlap(_sim_at(x), dict(h=14, p=press, before="T"), box, -1), gap
+        entry, diag = clean_near_row(_sim_at(x), box, -1)
+        assert entry is not None and not _overlap(_sim_at(x), entry, box, -1, diag["contact_index"]), gap
+
+
+def test_a_start_with_no_clean_row_is_excluded_not_guessed():
+    from ssbot.combat.knife_chain_vault_entry import clean_near_row
+    x = 40.
+    # her box already in the body: nothing clean
+    box = (36., FLOOR_Y, 40.1, CP.BODY_TOP)
+    entry, diag = clean_near_row(_sim_at(x), box, -1)
+    assert entry is None and diag["status"] == "no_clean_row"
+    # off the ground or in a dash: this entry does not claim them
+    from ssbot.combat.air_chain import ChainSim
+    air = np.asarray(kin.initial_state(PARAMS, x, FLOOR_Y + PARAMS.foot + 3., ground=False), np.float64)
+    entry, diag = clean_near_row(ChainSim(air, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, 0, 0), (30., FLOOR_Y, 37., CP.BODY_TOP), -1)
+    assert entry is None and diag["status"] == "unsupported_hero_state"
+    # a walker closing on her: its motion counts, the row that was clean against the still body may not be
+    edge = x - .25 - 1.2
+    still, _ = clean_near_row(_sim_at(x), (edge - 3.59, FLOOR_Y, edge, CP.BODY_TOP), -1)
+    walking, _ = clean_near_row(_sim_at(x), (edge - 3.59, FLOOR_Y, edge, CP.BODY_TOP), -1, walker_v=8.)
+    assert still is not None and (walking is None or walking != still or walking["p"] <= still["p"])
+
+
+def test_stats_keep_the_denominators_of_the_latency(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    st = tac.plan_runner.stats()
+    assert st["counts"]["results"] == 1 and st["counts"]["adopted"] == 1 and st["adopted"] == 1
+    assert st["event_to_validated_ms"]["p50"] is not None and st["event_to_adopted_ms"]["max"] >= st["event_to_validated_ms"]["p50"]
+    assert st["pending_wait_ms"]["n"] == 0
+
+
 def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
     # The walker walks up to the jump's hammer between the plan and the take-off: stay is gone, the prepared over runs, by the same
     # plan and with no request.
@@ -791,11 +1141,8 @@ def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
     assert out.target == 8 and out.entry_attack.kind == "stomp"
 
 
-def test_with_the_row_limit_lifted_the_prepared_under_runs_by_wall_room(monkeypatch):
-    # The natural aim leaves at least 8.5 u (5 u short of her + 3.5 u behind the landing), past UNDER_ROW_U: no production path offers
-    # the prepared under today (report section 12). The branch itself, with the limit lifted: the walker closes the gap at the take-off,
-    # under ends farther from the wall than over: the same plan runs it, no request.
-    monkeypatch.setattr(CP, "UNDER_ROW_U", 30.)
+def test_the_walker_closes_the_gap_and_the_prepared_under_runs_by_wall_room(monkeypatch):
+    # the walker closes the gap at the take-off, under ends farther from the wall than over: the same plan runs it, no request
     tac, ws, fc = planned(monkeypatch, xs=(30., 45.), hx=37.)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
@@ -812,7 +1159,8 @@ def test_with_the_row_limit_lifted_the_prepared_under_runs_by_wall_room(monkeypa
     assert note["route"] == "under" and "closed" in note["reason"]
     assert r.exec.plan is plan and r.exec.name == "under" and r.requests == n
     assert out.target == 7 and out.stance_x < note["landing"]
-
+    # the action layer is told where and by when
+    assert out.waypoint is not None and out.waypoint.kind == "under" and out.waypoint.x == pytest.approx(out.stance_x)
 
 def test_the_route_with_the_farther_wall_is_the_one_chosen():
     # both feasible in flight: under ends behind the landing, over on the walker's far side; the wall decides, in both directions
@@ -888,6 +1236,138 @@ def test_an_observed_landing_outside_the_plans_support_asks_for_a_new_plan_from_
     assert any(x["what"] == "request" and x["stage"] == "flight" for x in plan_notes(tac))
     go_(tac, ws, fc)                             # the new plan from the observed landing, one tick on
     assert r.exec.plan is not None and r.exec.plan.get("stage") == "flight"
+
+
+def test_a_pending_plan_is_checked_by_its_own_instance_when_the_active_one_is_gone(monkeypatch):
+    # Root's probe: through the adapter, with no plan active the pending one must not be dropped as stale
+    tac, ws, fc = planned(monkeypatch, delay=3)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    for _ in range(8):
+        go_(tac, ws, fc)
+        if ex.plan is not None:
+            break
+    first = ex.plan
+    assert first is not None
+    # a newer plan is on its way (the walker started walking); the take-off comes first: past the boundary it must wait
+    change(fc, 8, state="Walk")
+    go_(tac, ws, fc)
+    take_off(tac, ws, fc, vx=9.)
+    go_(tac, ws, fc)
+    assert ex.plan is first and not ex.phase.replaceable
+    for _ in range(4):
+        go_(tac, ws, fc)
+        if ex.pending is not None:
+            break
+    assert ex.pending is not None and ex.pending.generation > first.generation
+    newer = ex.pending
+    # the running route ends (no plan active): the waiting plan is checked on its own instance and its own prediction, and taken
+    ex.end("invalid", "the route ended", ws.stamp.t_game_s)
+    go_(tac, ws, fc)
+    assert ex.plan is newer and not any(x["what"] == "rejected" for x in plan_notes(tac))
+    st = r.stats()
+    assert st["counts"]["pending"] == 1 and st["counts"]["pending_adopted"] == 1 and st["pending_wait_ms"]["n"] == 1
+
+
+def test_a_cluster_result_arriving_on_the_take_off_tick_takes_the_take_off_on_that_tick(monkeypatch):
+    # Root's probe: the public selector chooses at the very tick the first result comes with the jump already off
+    for off, want in ((True, "attack_retreat"), (False, "attack_aim")):
+        tac, ws, fc = planned(monkeypatch, xs=(36., 37.), hx=29., delay=2)
+        go_(tac, ws, fc)
+        antic(tac, ws, fc)
+        go_(tac, ws, fc)
+        r = tac.plan_runner
+        ex = r.exec
+        if off:
+            take_off(tac, ws, fc, face=-1, vx=-3.)
+        for _ in range(4):                         # the first result comes on a tick with the jump already off
+            out = go_(tac, ws, fc)
+            if ex.plan is not None:
+                break
+        assert ex.plan is not None and ex.selected in ("attack", "lure")
+        if off:
+            assert ex.name in ("attack_retreat", "lure_return"), ex.name
+            assert any(x["what"] == "takeoff" for x in plan_notes(tac))
+            assert out.target == ex.phase.target
+        else:
+            assert ex.name in ("attack_aim", "lure_hold", "lure_wait", "lure_go"), ex.name
+
+
+def test_a_real_bounce_advances_the_over_route_and_a_hit_alone_does_not(monkeypatch):
+    tac, ws, fc = planned(monkeypatch)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    ex.name = "over_head"
+    S = hero_state(35.)
+    # a DownSlash hit in this STATE's events and no pogo evidence (plan_input.bounce None): no bounce
+    from ssbot.core.worldstate import Ev
+    assert not r._bounced(NS(tac=tac, ws=NS(events=(NS(kind=Ev.HIT_DEALT, data=NS(target_id=8, src="DownSlash")),))), NS(iid=8))
+    go_(tac, ws, fc)
+    assert ex.name == "over_head"
+    # the real bounce on the OTHER Clapper is no bounce of this route
+    tac.plan_input = CP.HeroInput(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, bounce=7)
+    go_(tac, ws, fc)
+    assert ex.name == "over_head"
+    # the bounce on the walker, in its ordinary reaction to the hit: the route goes on, the reaction is no invalidation
+    for reaction in ("Dmg Attack", "Evade Scuttle"):
+        ex.name = "over_head"
+        change(fc, 8, state=reaction)
+        tac.plan_input = CP.HeroInput(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, bounce=8)
+        go_(tac, ws, fc)
+        assert ex.plan is not None and ex.name == "over_wait", reaction
+        set_hero(tac, 35.)
+        go_(tac, ws, fc)
+        assert ex.plan is not None and ex.name == "over_wait", reaction
+    # its new attack ends it
+    change(fc, 8, family=G.CC_SLAM, state="Slam Antic", committed=True)
+    go_(tac, ws, fc)
+    assert ex.plan is None and ex.status == "invalid"
+
+
+def test_the_cluster_retreat_needs_its_candidate_and_the_time_not_only_the_wall(monkeypatch):
+    # Root's probe: a retreat of 23 u in a 0.916 s flight is no prepared route
+    tac, ws, fc = planned(monkeypatch, xs=(40., 41.), hx=35.)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    assert ex.plan is not None and ex.plan.scene == "cluster"
+    assert cand(ex.plan, "attack").feasible
+    ex.selected, ex.name = "attack", "attack_aim"
+    plan = ex.plan
+    take_off(tac, ws, fc, face=-1, vx=-12.)         # lands 11 u out: the coverage's far end is out of her reach in the flight
+    ws.hero.pos = E((39., float(ws.hero.pos.v[1])))
+    ws.hero.hurtbox = [(38.75, 4.), (39.25, 4.), (39.25, 6.), (38.75, 6.)]
+    set_hero(tac, 39.)
+    go_(tac, ws, fc)
+    note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
+    assert note["route"] == "blocked" and ("does not arrive" in note["reason"] or "in time" in note["reason"]), note
+    assert ex.plan is None and ex.status == "blocked"
+    # the lure's way back failed and the attack was never feasible: blocked, whatever fits inside the wall
+    tac, ws, fc = planned(monkeypatch, xs=(40., 41.), hx=35.)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    ex = r.exec
+    lure, attack = cand(ex.plan, "lure"), cand(ex.plan, "attack")
+    ex.plan = replace(ex.plan, candidates=(lure, replace(attack, feasible=False, reason="not in this plan")))
+    take_off(tac, ws, fc, face=-1, vx=-.1)
+    ws.hero.pos = E((39., float(ws.hero.pos.v[1])))
+    ws.hero.hurtbox = [(38.75, 4.), (39.25, 4.), (39.25, 6.), (38.75, 6.)]
+    set_hero(tac, 39.)
+    if ex.selected is None:
+        ex.select("lure", ws.stamp.t_game_s)
+    ex.name = "lure_hold"
+    go_(tac, ws, fc)
+    note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
+    assert note["route"] == "blocked" and "no prepared retreat" in note["reason"], note
 
 
 def test_the_stand_at_the_takeoff_reads_the_written_geometry_not_the_forecast_union(monkeypatch):

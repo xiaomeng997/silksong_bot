@@ -254,6 +254,34 @@ def distance_entry(cfg, hero, target_pos, box, direction, attack_cooldown, hook=
     return None, None, gap, root_distance
 
 
+def plan_near_part(part, sim, enemy, box, direction, hero):
+    """The near row of a vault under the jump plans (SSBOT_FORUM_TWO_PLAN, Sol seq 255 F2): the table's row is replaced by the model's
+    clean one for this start, or None when no row reaches the body without her box meeting it first. Off: the table's row."""
+    from .tactics import clapper_plans
+    if not clapper_plans.ENABLED:
+        return part
+    from .knife_chain_vault_entry import clean_near_row
+    vel = enemy.get("vel") if isinstance(enemy, dict) else None
+    from ssbot.combat import slam_play as SP
+    state = SP.control(enemy)[0]
+    v = float(vel[0]) if state == "Walk" and isinstance(vel, (list, tuple)) and len(vel) >= 1 and type(vel[0]) in (int, float) else 0.
+    turned = None
+    pos = enemy.get("pos")
+    if state == "Idle" and pos:
+        # she at its back: the same pose mirrored about its root is where its body goes when it turns to her (#321)
+        root = float(pos[0])
+        mirrored = (2 * root - float(box[2]), float(box[1]), 2 * root - float(box[0]), float(box[3]))
+        near_edge = box[2] if direction < 0 else box[0]
+        if (mirrored[2] if direction < 0 else mirrored[0]) * -direction > near_edge * -direction:
+            turned = mirrored
+    cd = (hero.get("tm") or {}).get("atk_cd")
+    min_press = (math.ceil(cd * 60) - 1) if type(cd) in (int, float) and math.isfinite(cd) and cd > 0 else 0
+    row, _ = clean_near_row(sim, box, direction, walker_v=v, turned_box=turned, min_press=min_press, hold=int(part["h"]))
+    if row is None and turned is not None:
+        row, _ = clean_near_row(sim, box, direction, walker_v=v, min_press=min_press, hold=int(part["h"]))
+    return row
+
+
 def strike_program(F0,hold,press,direction,drift):
     """One shared jump/downslash row, including the hook's no-jump suffix."""
     m=np.zeros(max(hold,press+dslash.POST_F),np.int64)
@@ -319,6 +347,9 @@ def register(P):
         hook = not incoming_walk(o.e, (o.h.get("pos") or [None])[0])
         kind, part, _, _ = distance_entry(x.cfg, o.h, pos, box, v["over_dir"], o.sim.params.attack_cooldown, hook)
         if kind == "near":
+            part = plan_near_part(part, o.sim, o.e, box, v["over_dir"], o.h)
+            if part is None:
+                return None                  # this start has no clean row: the approach goes on (its own limits end it)
             v["req"] = {**v["req"], "near": part, "far": None}
         elif kind == "hop_hook":
             v["req"] = {**v["req"], "near": None, "far": part}

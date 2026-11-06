@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DONE, INVALID, BLOCKED = "done", "invalid", "blocked"
-TERMINAL = {DONE: "complete", INVALID: "invalid", BLOCKED: "blocked"}
+DONE, INVALID, BLOCKED, HANDBACK = "done", "invalid", "blocked", "handback"
+# handback: the plan cannot finish its goal from here and gives the rest to the public rules (not a success: the adapter keeps
+# what is left of the goal for them)
+TERMINAL = {DONE: "complete", INVALID: "invalid", BLOCKED: "blocked", HANDBACK: "handed_back"}
 MAX_MOVES = 6                  # transitions in one tick: a guard against a phase cycle in a plan, never reached by design
 
 
@@ -36,6 +38,7 @@ class Phase:
     on: tuple = ()                   # ((event name, next phase), ...), the first listed true event wins
     at: tuple | None = None          # (absolute game time, next phase): fixed in the plan, never moved by the executor
     replaceable: bool = True         # a newer generation may be adopted while this stage runs; its support is checked
+    go: str | None = None            # the stance is reached by the action layer's bounded approach (guide / under / retreat)
 
     def after(self, event: str) -> str | None:
         return next((to for ev, to in self.on if ev == event), None)
@@ -120,7 +123,7 @@ class PlanExecutor:
         self.selected: str | None = None
         self.since: float | None = None   # the game time the current phase was entered
         self.pending: Plan | None = None  # the newest plan waiting for a legal boundary
-        self.status = "idle"              # idle / waiting / blocked / expired / invalid / complete
+        self.status = "idle"              # idle / waiting / blocked / expired / invalid / complete / handed_back
         self.reason: str | None = None
         self.history: dict = {}           # instance -> [(event, t)], the handled events of a move instance
         self.generations: dict = {}       # instance -> the highest generation ever offered (no out-of-order result)
@@ -225,19 +228,22 @@ class PlanExecutor:
 
     # ---- the tick ----
 
-    def step(self, now: float, events_of, values: dict, instance_now) -> Phase | None:
+    def step(self, now: float, events_of, values_of, instance_of) -> Phase | None:
         """One non-blocking advance: instance, validity and support first, then the fixed times and the observed events
-        of the current phase (events_of(phase) -> names; a handled event of the instance is recorded once)."""
+        of the current phase (events_of(phase) -> names; a handled event of the instance is recorded once).
+        values_of(plan) / instance_of(plan): the adapter's facts for THAT plan, read from its own snapshot (a pending plan is
+        checked against its own instance and prediction, whatever happened to the active one)."""
         if self.pending is not None and (self.plan is None or self.plan.instance != self.pending.instance
                                          or (self.phase is not None and self.phase.replaceable)):
             pending, self.pending = self.pending, None
-            if pending.instance == instance_now and now <= pending.valid_until and self._violated(pending, values) is None:
+            if (pending.instance == instance_of(pending) and now <= pending.valid_until
+                    and self._violated(pending, values_of(pending)) is None):
                 self._adopt(pending, now)
             else:
                 self._note("rejected", scene=pending.scene, generation=pending.generation, reason="pending plan stale")
         if self.plan is None:
             return None
-        if self.plan.instance != instance_now:
+        if self.plan.instance != instance_of(self.plan):
             self.end("invalid", "instance changed", now)
             return None
         if now > self.plan.valid_until:
@@ -248,7 +254,7 @@ class PlanExecutor:
             if phase is None:
                 break                      # waiting for the selector's choice
             if phase.replaceable:
-                bad = self._violated(self.plan, values)
+                bad = self._violated(self.plan, values_of(self.plan))
                 if bad is not None:
                     self.end("invalid", "out of support: " + bad, now)
                     return None

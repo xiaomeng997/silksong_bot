@@ -594,6 +594,7 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
             result["resources"][name]={"failed":message};errors.append(name+": "+message)
             result["secondary_errors"].append({"origin":"cleanup."+name,"reason":message})
     close("scene_field_worker",getattr(getattr(policy,"_scene_field_event_reader",None),"close",None))
+    close("plan_worker",getattr(getattr(getattr(policy,"tac",None),"plan_runner",None),"close",None))
     close("policy_log",getattr(policy,"flush_log",None))
     close("policy_keys",getattr(policy,"flush_keys",None))
     close("chain_journal",getattr(getattr(policy,"chain_native",None),"flush",None))

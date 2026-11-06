@@ -582,6 +582,26 @@ class ForumPlannerPolicy(PlannerPolicy):
             from ssbot.combat.tactics.l2_plan_worker import PlanChannel
             runner.channel = PlanChannel(self.params)
 
+    def _plan_commitment(self, f, s):
+        """Who else holds her keys past the in-flight prefix at this L2 decision (Task 182, Sol seq 255 A): None: nobody; else (owner,
+        release known, keys). A script's or a committed Run's release cannot be told here: unknown, never a free hero."""
+        for name, script in (("slam", self.slam_play), ("claw", self.claw), ("cast", self.cast_stab), ("low", self.rune_lowhop),
+                             ("chase", self.evade_chase)):
+            if script is not None and script.active():
+                return name, False, ()
+        commitment = getattr(self.chain_native, "key_commitment", None)
+        return None if commitment is None else commitment(s)
+
+    def _plan_bounce(self, s):
+        """The Clapper of this frame's real strike bounce: a DownSlash hit with the pogo evidence in this STATE, or the action layer's
+        own strike's hit and bounce on this frame (hit and evidence may be a frame apart). A hit alone is none."""
+        from ssbot.combat.knife_chain_transfer import bounce_target
+        hit = bounce_target(s)
+        own = getattr(self.chain_native, "own_bounce_now", None)
+        if hit is None and callable(own) and own(s):
+            hit = self.chain_native.post_context["move"].target_iid
+        return hit
+
     def _remaining_hp_quit(self):
         budget_floor = getattr(getattr(self.chain_native, "budget", None), "remaining_hp_quit", None)
         return max(REMAINING_HP_QUIT, budget_floor or 0) or None
@@ -1058,7 +1078,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         # current B2 result. It must not be replaced by a lower-priority script.
         return info.get("stage")=="recovery" and int(res.mask)==0
 
+    _act_t0_ns = None
+
     def act(self, s: dict, tap=None) -> int:
+        self._act_t0_ns = time.perf_counter_ns() if clapper_plans.ENABLED else None
         t0 = time.perf_counter()
         f = s["f"]
         if SCENE_FIELD_SHADOW:
@@ -1130,10 +1153,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         if clapper_plans.ENABLED and isinstance(self.tac, GauntletTactics):
             # Task 182: her committed keys and model state for the plans' hand-back; no key of this tick is in it
             cogf_ = self.cog["frames"]
+            commit_ = self._plan_commitment(f, s)
+            sent_ = [self.sent.get(fr, 0) & ~(COG if fr in cogf_ else 0) for fr in range(fo + 1, f + 2)]
             self.tac.plan_input = clapper_plans.HeroInput(
-                self._start_state(ws, raw),
-                np.array([self.sent.get(fr, 0) & ~(COG if fr in cogf_ else 0) for fr in range(fo + 1, f + 2)], np.int64),
-                HoldState.from_act(raw.get("act")), self.params, self.terrain)
+                self._start_state(ws, raw), np.array(sent_ + (list(commit_[2]) if commit_ is not None and commit_[1] else []), np.int64),
+                HoldState.from_act(raw.get("act")), self.params, self.terrain, commit=commit_, bounce=self._plan_bounce(s),
+                t0_ns=self._act_t0_ns)
         prefs = self.tac.decide(ws, fcast, d, h)
         if self.two is not None:
             self.two.manual_focus = getattr(prefs, "clapper_choice", None) is not None

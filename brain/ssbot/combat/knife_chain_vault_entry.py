@@ -60,6 +60,60 @@ def _meets_all(pos,poly):
     return ok
 
 
+def clean_near_row(sim, target_box, direction, *, walker_v=0., turned_box=None, min_press=0, hold=14, presses=range(3,21)):
+    """Task 182 (SSBOT_FORUM_TWO_PLAN only, Sol seq 255 F2): the near vault row for THIS start, from the model: her actual height,
+    speed and resources against the body, moved at the walker's speed. A row counts when its slash meets the body in its active
+    frames (all four shapes, as near_proposals) and her box never overlaps the body before that contact; the earliest such
+    contact wins. turned_box: the same body turned toward her (an Idle Clapper with her at its back turns, #321), which her box
+    must clear too. (request entry dict or None, diagnostics). None: no such row: this start is not supported, not guessed."""
+    from . import dslash as _d
+    box=np.asarray(target_box,float)
+    start=np.asarray(sim.start,float).reshape(-1)
+    prefix=np.asarray(sim.prefix)
+    if box.shape!=(4,) or not np.isfinite(box).all() or start.shape!=(K.K,) or not np.isfinite(start).all() or prefix.shape!=(1,):
+        return None,{"status":"unknown_state","rows":0}
+    if start[K.GROUND]<=0 or int(start[K.MODE])!=K.M_NORMAL or start[K.JHELD]>0 or int(prefix[0])&~(K.B_LEFT|K.B_RIGHT):
+        return None,{"status":"unsupported_hero_state","rows":0}
+    key=K.B_RIGHT if direction>0 else K.B_LEFT
+    entries=[(hold,p,b) for p in presses if p>=min_press for b in ("T","N")]
+    if not entries:return None,{"status":"attack_not_ready","rows":0}
+    length=max(p for _,p,_ in entries)+_d.POST_F
+    rows=[]
+    for h,p,b in entries:
+        row=np.zeros(length,np.int64);row[:h]|=K.B_JUMP
+        if b=="T":row[:p]|=key
+        _d.strike(row,p);row[p:]|=key
+        rows.append(row)
+    ro=sim.roll(np.asarray(rows,np.int64));off=len(prefix)
+    dt=float(sim.params.frame_time)
+    poly=np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]])
+    bodies=[box] if turned_box is None else [box,np.asarray(turned_box,float)]
+    best=None;contacts=clean=0
+    for q,(h,p,b) in enumerate(entries):
+        pj=off+p+1;flags=ro.flags[q]
+        if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:continue
+        js=[j for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))) if not flags[j]&K.F_GROUND]
+        if not js:continue
+        shift=walker_v*dt*np.arange(len(flags))
+        rel=ro.pos[q,js]-np.stack([shift[js],np.zeros(len(js))],axis=1)
+        hit=_meets_all(rel,poly)
+        if not hit.any():continue
+        contacts+=1
+        c=js[int(np.argmax(hit))]
+        bx=ro.box[q,:c+1]
+        clear=True
+        for body in bodies:
+            s=shift[:c+1]
+            if np.any((bx[:,0]<=body[2]+s)&(bx[:,2]>=body[0]+s)&(bx[:,1]<=body[3])&(bx[:,3]>=body[1])):
+                clear=False;break
+        if not clear:continue
+        clean+=1
+        if best is None or c<best[0]:best=(c,h,p,b)
+    diag={"status":"clean_row" if best else "no_clean_row","rows":len(entries),"contacts":contacts,"clean":clean}
+    if best is None:return None,diag
+    return {"h":best[1],"p":best[2],"before":best[3]},dict(diag,contact_index=best[0])
+
+
 def near_proposals(sim, target_box, direction, *, max_results=2, recipes=None):
     """One batched HERO2 rollout; no pogo is injected without blade contact.
 

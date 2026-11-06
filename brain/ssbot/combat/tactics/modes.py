@@ -203,6 +203,7 @@ class GoalPrefs(TacticPrefs):
     return_body: int | None = None      # SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, default off): the other Clapper
     #                                     during L2's middle return; the policy hands it to forum_v2.V2Feed.support
     #                                     (stack_ret), the one field that reaches a support - the planner never reads it
+    waypoint: object | None = None        # SSBOT_FORUM_TWO_PLAN: knife_chain_waypoint.WaypointGoal of the running plan phase
     return_request: ReturnRequest | None = None   # SSBOT_FORUM_TWO_RETURN_AIR (#316, default off): the air return for
     #                                               the native B2 owner's existing SWITCH execution (knife_chain_air_native)
 

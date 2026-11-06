@@ -16,6 +16,8 @@ from .knife_chain_eval import Run,X
 from .knife_chain_air import (AirAnchor,load_runner,entry_context,plan_entry,model_path,advance,complete_hf,render,direct_path_problem)
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
 from . import knife_chain_transfer as transfer
+from . import knife_chain_waypoint as waypoint
+from .knife_chain_commitment import MoveInstance
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import logical_copy,NominalUnsupported
 
@@ -67,6 +69,7 @@ class NativeManualAirChain(NativeChainB2):
             (getattr(self,"_air_context",None) is not None or getattr(self,"_transfer_ready",False) or getattr(self,"_vault_ready",False)
              or (self.runner.run is not None and self.runner.run.chain==transfer.PROGRAM) or getattr(self,"commitment",None) is not None
              or (self.runner.run is not None and self.runner.run.chain=="vault_idle")
+             or getattr(self,"_waypoint_wanted",False)
              or getattr(self,"recovery",None) is not None or getattr(self,"post_context",None) is not None
               or (getattr(self,"_wall_pressure",None) is not None and not (self._wall_pressure.get("yielded",False) or self._wall_pressure.get("landing",False)))))
 
@@ -95,6 +98,7 @@ class NativeManualAirChain(NativeChainB2):
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
         self._bounce=None;self._bounce_frames={}
+        self._waypoint_wanted=False;self._waypoint_failed=set();self._waypoint_declined=None
         super().reset(episode,start_frame=start_frame)
         from . import knife_chain_bounce_table as bounce_table
         # Task 179 (#309, Sol seq 229): the finite same-target bounce table (Tasks 143 / 145 / 148), opt-in.
@@ -162,6 +166,24 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_goal=transfer.TransferGoal(target,hit,state["f"],ta,"BOUNCE",source)
         self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
         return True
+
+    def key_commitment(self,state):
+        """Task 182 (Sol seq 255 A): what this owner holds of her keys past the in-flight prefix. None: nothing a plan must wait for
+        (no Run; an approach-only or waypoint Run hands back at its next step when L2 moves on). Else (owner, release known, keys
+        from the first free mask frame on); the source tail's release and keys are its own admission's; any other committed Run,
+        recovery or hook: unknown."""
+        run=self.runner.run;f=state.get("f")
+        if self.recovery is not None:return "b2 recovery",False,()
+        wall=getattr(self,"_wall_pressure",None)
+        if wall is not None and not (wall.get("yielded") or wall.get("landing")):return "b2 wall pressure",False,()
+        if run is None:
+            return None if self.commitment is None else ("b2 commitment",False,())
+        if run.chain==waypoint.PROGRAM or (run.chain==transfer.PROGRAM and run.v.get("_approach_only")):return None
+        if run.chain==transfer.PROGRAM and run.link=="bounce_tail" and self._transfer_goal is not None and type(f) is int:
+            end=transfer.predicted_tail_end(state,self._transfer_goal)
+            if end is None:return run.lid,False,()
+            return run.lid,True,(int(run.v.get("source_tail_mask",0)),)*max(0,end-(f+1))
+        return run.lid,False,()
 
     def own_bounce_now(self,state):
         """Task 181 (Sol seq 253 R2): this STATE's real bounce released this chain's own strike: its post_context was made
@@ -383,6 +405,7 @@ class NativeManualAirChain(NativeChainB2):
 
     def goal_preferences(self,state,prefs,*,handoff):
         """One destination before forecasting; critical/committed actions retain ownership."""
+        self._waypoint_wanted=getattr(prefs,"waypoint",None) is not None
         from .knife_chain_wall_native import prepare_goal
         if prepare_goal(self,state,prefs,handoff=handoff):
             from .knife_chain_wall_native import preferences as wall_preferences
@@ -618,7 +641,17 @@ class NativeManualAirChain(NativeChainB2):
             if self._context is None:
                 self._recover("rune transfer current context unavailable",f);return None
             tick,sim,_,_=self._context
-            return self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
+            offer=self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
+            if offer is not None or getattr(prefs,"waypoint",None) is None or self.runner.run is not None:return offer
+            # its approach was handed back at this step: the plan's next stage starts on the same tick
+        if self.runner.run is not None and self.runner.run.chain==waypoint.PROGRAM or (
+                getattr(prefs,"waypoint",None) is not None and self.runner.run is None
+                and self.commitment is None and self.post_context is None):
+            if self._context is None:
+                if self.runner.run is not None:self._recover("waypoint current context unavailable",f)
+                return None
+            tick,sim,_,_=self._context
+            return self._waypoint_offer(tick[1],tick[2],sim,forecast,prefs)
         pressure=getattr(prefs,"wall_pressure",None)
         if (self.commitment is None and self.post_context is None and pressure is not None
                 and pressure.target==getattr(prefs,"target",None) and pressure.kind=="side"):
@@ -752,6 +785,84 @@ class NativeManualAirChain(NativeChainB2):
         # erase another owner, any delayed hazard, or an armed target collider.
         flags=(hit.check_flags&~K.F_INVULN)|(path.check_flags&K.F_INVULN)
         return replace(hit,check_flags=flags),protected
+
+    def _waypoint_offer(self,state,game,sim,forecast,prefs):
+        """Task 182 (SSBOT_FORUM_TWO_PLAN; knife_chain_waypoint): one bounded floor approach of the running plan phase. L2 names
+        the place and the frame each tick; withdrawing them or reaching the place hands back at this step, the keys already
+        sent staying the next owner's actual prefix. A step blocked or a place no longer reachable in time hands back through
+        recovery, which keeps its failure responsibility; a fresh start only ever declines."""
+        from types import SimpleNamespace
+        f=state["f"];run=self.runner.run
+        active=run is not None and run.chain==waypoint.PROGRAM
+        goal=getattr(prefs,"waypoint",None)
+        def back(why,event):
+            if active:
+                self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+                self._press=self._accepted=self._hit=None
+                self._note(event,frame=f,reason=why,x=run.v.get("x"),by_f=run.v.get("by_f"),kind=run.v.get("kind"))
+                self._abandon(why)
+            return None
+        if goal is None or (active and tuple(run.v["plan"][:1])+tuple(run.v["plan"][2:])!=tuple(goal.plan[:1])+tuple(goal.plan[2:])):
+            return back("L2 withdrew the place","waypoint_withdrawn")
+        key=(tuple(goal.plan[0]),goal.plan[2])
+        if key in self._waypoint_failed:return None
+        if sim.fo!=f or sim.f!=f or len(sim.prefix)!=1 or not complete_hf(state):
+            if active:self._recover("waypoint input context unavailable",f)
+            return None
+        queued,_=self.queued_prefix(f,state)
+        if queued is None or int(sim.prefix[0])!=queued:
+            if active:self._recover("waypoint actual queued prefix mismatch",f)
+            return None
+        if not active:
+            mode=self._locked_mode(sim)
+            if mode is not None or (state.get("hero") or {}).get("hero_accepting_input") is not True:
+                self._note("waypoint_start_deferred",frame=f,mode=mode,owner="current owner keeps the keys")
+                return None
+        mask,what=waypoint.next_mask(sim,goal,f)
+        if what=="arrived":
+            return back("waypoint reached","waypoint_arrived")
+        def failed(reason,**data):
+            if active or self._waypoint_declined!=(key,reason):
+                self._note("waypoint_rejected",frame=f,reason=reason,active=active,x=goal.x,by_f=goal.by_f,kind=goal.kind,**data)
+            self._waypoint_declined=(key,reason)
+            if active:
+                self._waypoint_failed.add(key)
+                self._recover("waypoint "+reason,f)
+            return None
+        if what=="late":return failed("cannot arrive by its frame from here")
+        move=MoveInstance(**run.v["move"]) if active else MoveInstance(goal.source,f,"WAYPOINT")
+        current=getattr(getattr(getattr(forecast,"rs",None),"trk",None),"now",{}).get(goal.source)
+        if current is None:return failed("support unavailable")
+        plan=SimpleNamespace(iid=goal.source,move=move,origin=f,entry_k=0,press_k=None,contact_frame=None)
+        try:
+            path=model_path(sim,plan,np.array([mask],np.int64),game)
+            geo=B2Geometry(forecast,f,move,current[2])
+            dash_bit=B["DASH"].bit_length()-1
+            if (int(mask)&B["DASH"] and not int(sim.prefix[0])&B["DASH"] and not sim.hold.latched[0,dash_bit]
+                    and not sim.hold.desired[0,dash_bit]):
+                # a new dash impulse: through the motion it locks, as every other owner's
+                lock,info=self._dash_lock_scan(sim,plan,mask,game,geo,waypoint.PROGRAM,commands=np.full(self.DASH_LOCK_MAX,int(mask),np.int64))
+                if lock is None or not lock.complete or lock.contacts:
+                    first=None if lock is None or not lock.contacts else asdict(lock.contacts[0])
+                    self._note("waypoint_dash_refused",frame=f,first=first,active=active,**info)
+                    mask=int(mask)&~B["DASH"]
+                    path=model_path(sim,plan,np.array([mask],np.int64),game)
+                else:self._note("waypoint_dash_checked",frame=f,**info)
+            scan=geo.scan(path)
+        except GeometryUnavailable as exc:
+            return failed("geometry unavailable: "+str(exc))
+        if not scan.complete or scan.contacts:
+            return failed("external step blocked",first=None if not scan.contacts else asdict(scan.contacts[0]))
+        if active:
+            draft=logical_copy(self.runner);draft.run.v.update(x=float(goal.x),by_f=int(goal.by_f),what=what)
+        else:
+            draft=self.runner.fork_empty(AirAnchor())
+            draft.run=Run(waypoint.PROGRAM,"go",{"iid":goal.source,"ta":float(game),"plan":list(goal.plan),"x":float(goal.x),
+                                                 "by_f":int(goal.by_f),"kind":goal.kind,"f_open":f,"move":asdict(move),"what":what})
+        return B2Offer("active" if active else "manual_commitment",path,draft,int(mask),0.,move,
+            {"manual_air":True,"waypoint":True,"kind":goal.kind,"x":float(goal.x),"by_f":int(goal.by_f),"what":what,
+             "phase":"go","predicted_bounce":None,"checked_through":path.through,
+             "safety_basis":"bounded approach: the dash through its lock, every step through all owners; no route certificate"})
 
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)

@@ -657,6 +657,9 @@ class _Planned(Tactic):
             # a way on the floor: rows without a jump key first among the safe ones (JT ground, fp1: she jumped on the way
             # under and met its landing); the existing preference, every safety rank above it stays
             out = replace(out, ground_first=frozenset(out.ground_first) | {g.target})
+        if won and ph is not None and ph.go is not None:
+            # where the phase must be by a time: the action layer's bounded approach (the ordinary rows stay its fallback)
+            out = replace(out, waypoint=sc.plans.waypoint(sc, ph))
         return out
 
     def log(self, sc, out):
@@ -697,11 +700,17 @@ class _PlannedCluster(_Planned):
             return [], "not feasible: " + str(None if cand is None else cand.reason)
         if ex.selected not in (None, self.branch):
             return [], "the other plan runs"
-        ph = ex.phase if ex.selected == self.branch else plan.phase(cand.start)
+        if ex.selected == self.branch:
+            ph = ex.phase
+        else:
+            # as it would stand on this tick: a take-off already observed is taken with the choice, not a tick later
+            ph, why = sc.plans.start_phase(sc, self.branch)
+            if ph is None:
+                return [], why
         return [(self.rule, sc.subject(ph.target) if ph.target is not None else sc.default, cand.applicability)], None
 
     def commit(self, sc, rule, target):
-        sc.plans.exec.select(self.branch, sc.t)
+        sc.plans.commit_choice(sc, self.branch)
 
 
 class ClusterLure(_PlannedCluster):
