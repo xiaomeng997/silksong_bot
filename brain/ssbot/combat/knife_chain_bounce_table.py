@@ -225,6 +225,7 @@ class BounceTable:
     def __init__(self, n=160):
         self.rows = rows()
         self.normal = normal_keys(n)
+        self.press = int(np.flatnonzero(self.normal & B["A"])[0])     # the normal knife's press, desired index from the hit
         self.n = n
         self.chain = None
 
@@ -437,15 +438,19 @@ TABLE_FROM = frozenset({"Idle", "Slam Recover"})
 
 def _outside(chain, state, prefs, hit, hit_f, source, ta):
     """Why this real bounce is outside the table's domain (None: inside). The table takes a same-target bounce only
-    where its baseline fits: the Clapper L2 still names, no L2 wall-side / side-entry / no-hit intent on it, the bounced
-    source's own hammer tail over (knife_chain_transfer.bounce_tail_pending: that tail stays the existing BOUNCE goal's
-    bounce_tail successor) and the target Idle / Slam Recover at the hit (TABLE_FROM)."""
+    where its baseline fits: the Clapper L2 still names, the responsibility on that same Clapper, no L2 wall-side / side-entry
+    / no-hit intent on it, the bounced source's own hammer tail over (knife_chain_transfer.bounce_tail_pending: that tail
+    stays the existing BOUNCE goal's bounce_tail successor) and the target Idle / Slam Recover at the hit (TABLE_FROM)."""
     from . import knife_chain_transfer as transfer
     entry = getattr(prefs, "entry_attack", None)
     if hit_f is None:
         return "no DownSlash hit STATE for this bounce"
     if hit != getattr(prefs, "target", None):
         return "cross target"
+    if source.target_iid != hit:
+        # Task 181 (o8 3267-3314): B2 reads the strike's hits and its target's life from commitment["move"]; a responsibility
+        # still on the other Clapper (an earlier cross-target hand-off, a vault's buddy) would count hits on the wrong one
+        return "the responsibility is the other Clapper's move"
     if (getattr(prefs, "wall_pressure", None) is not None or getattr(chain, "_wall_pressure", None) is not None
             or (entry is not None and (entry.target != hit or entry.kind != "stomp")) or hit in getattr(prefs, "no_hit", ())):
         return "L2 intent on this target"
@@ -541,8 +546,9 @@ def observe_identity(chain, state):
 def offer(chain, forecast, prefs):
     """One tick of the anchored table (B2 _propose): the state machine decides desired f + 2; the current external step
     (in-flight key + the table's next 3 keys) is scanned for every owner with protection only from the observed state;
-    after the switch the target's own contacts inside the verified horizon are the verified row's domain. The key goes
-    out through the ordinary B2 send path."""
+    after the switch the target's own contacts inside the verified horizon are the verified row's domain, before it the
+    ones of the normal knife from its press on (own_strike). L2's tactical target is not read here: it takes effect at
+    the table's hand-back (try_anchor's cross target, or a recovery). The key goes out through the ordinary B2 send path."""
     from .knife_chain_b2 import B2Offer
     from .knife_chain_geometry import B2Geometry, GeometryUnavailable
     from .knife_chain_air import model_path, AirAnchor
@@ -580,7 +586,8 @@ def offer(chain, forecast, prefs):
                         "prev_seen": prev is not None and prev[1].get(c.iid) not in (None, "Slam Antic"),
                         "pose": {"x": float(e["pos"][0]), "y": float(e["pos"][1]), "face": 1 if e.get("flipX") else -1},
                         "start": start})
-    chain._note("bounce_table_tick", frame=f, state_index=f - c.hit_frame + 1, control=ctl, table_state=c.state, **d)
+    chain._note("bounce_table_tick", frame=f, state_index=f - c.hit_frame + 1, control=ctl, table_state=c.state,
+                l2_target=getattr(prefs, "target", None), **d)
     if d["decision"] == "uncovered":
         return release(chain, "uncovered", d["why"])
     if d["decision"] == "noop":
@@ -596,8 +603,19 @@ def offer(chain, forecast, prefs):
     if not scan.complete:
         return release(chain, "uncovered", "current external step coverage incomplete")
     horizon = table.verified_through()
-    kept = [x for x in scan.contacts if not (horizon is not None and x.owner_iid == c.iid and x.kind in ("move", "body")
-                                             and x.frame - c.hit_frame + 1 <= horizon)]
+    press = c.hit_frame + table.press
+
+    def own_strike(x):
+        # Task 181: the row's verified domain, or the normal knife's: it is B2's ordinary strike, so from its press through
+        # B2's missed-strike window the target's own body / move on the way down is that strike's contact (ob_on 3183:
+        # uncovered at the press, 3 frames before the hit), never a blocked step; its miss is B2's missed-strike recovery
+        if x.owner_iid != c.iid or x.kind not in ("move", "body"):
+            return False
+        if horizon is not None:
+            return x.frame - c.hit_frame + 1 <= horizon
+        return c.state in ("baseline", "pending") and press <= x.frame <= press + int(chain.runner.cfg0.get("bounce_by", 14))
+
+    kept = [x for x in scan.contacts if not own_strike(x)]
     if kept:
         return release(chain, "uncovered", f"current external step blocked: {kept[0].kind} of {kept[0].owner_iid} at "
                                            f"{kept[0].frame}")

@@ -982,7 +982,10 @@ class ForumPlannerPolicy(PlannerPolicy):
         script=getattr(self,"slam_play",None);run=getattr(script,"run",None)
         observe=getattr(chain,"observe_bounce_goal",None)
         real_bounce=bool(callable(observe) and observe(state,prefs,run,game_time=game_time))
-        handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce)))
+        # Task 181: the chain's own real bounce (its strike's post_context) hands off from any script phase: a script run
+        # left over from before the chain took the keys is not stepped while they are the chain's (wtb3 2725-2760 phase wait)
+        handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce))
+                 or (real_bounce and getattr(chain,"post_context",None) is not None))
         goal=getattr(chain,"_transfer_goal",None);target=getattr(prefs,"target",None)
         candidate=getattr(getattr(self,"tac",None),"wall_pressure_candidate",None)
         if (real_bounce and ws is not None and forecast is not None and callable(candidate)
