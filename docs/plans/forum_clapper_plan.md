@@ -4785,3 +4785,16 @@ Sol同179一次裁定：乙必修，甲条件化可同时做，不是二选一�
 Root只读实际2632..2640：2632 A+Down开始DownSlash，2637/38锁存0仍DownSlash，2639/fc2238锁存0且真实DownSlashAlt命中335476、伤10并DownSpikeBounce1；同帧Idle→Dmg Attack→CloseRange后进入新招。故本地replay308的--down-release-ok默认关修正方向接受，保留同次已接受下劈、未取消有效攻击段、ACTIVE窗口/非地面/身体接触与一次命中限制，不能仅凭旧动画clip注入hit。旧输出/raw不回改、注明模型版本。新增命中后的状态须用已有反应接口或明确兼容的已录状态组合，至少给真实反应使旧证据撤回/重新准入反例；冻结旧Idle不算持续正例。
 
 Opus仍唯一源码owner，同包完成必要恢复/条件时钟与有效生产形状的首刀→实际模型hit+pogo→下一刀或合法交还→开缝地面接续；交付前自查真实policy/planner/B2几何/before_send/sent分支，不再重复大回归或微ACK。功能闭合后才给受影响连续P；FACE_HOOK/BOUNCE_TABLE/DSLASH保持关，无新game gate、旧观察不重开，墙角新打法延后，输入/资源/全清理门不变。
+
+
+#### #317合法恢复与条件地面接续正例保留；Idle入口证据错锚须最小修复，正式P未启动（11-06，进度7.185）
+
+已处理Opus #317，runtime 2f43a7e9+c00074cc（父8cda5ef8文档，上个runtime ac0d）。三运行文件/九新增测试；Root审全部增量与相邻observe/recover/锁段，714绑定仅三源变；实际E24–31/Idle45000/create1793967893.864541仅跑九新项1.52s通过，foreign0/源全同，进程真实退出。Opus1111专项记录保留不重复、不相加。analysis/task179_return317_20261106保存SOURCE_PACKET、CHECK_RECEIPT、ROOT_CHECK_CLEANUP、ROOT_ARTIFACT_RECEIPT、32个原始Idle转换的RAW_IDLE_ENTRY_CENSUS和实际Astra/xhigh窄审。SOURCE_REVIEW accepted=false，317不进实机accepted集合；0P/0game，原观察不重开。
+
+乙的有限实现核收：仅活动transfer的air link且已在目标上方，对过期Idle/撤证据、域外Walk或无拟合静止姿态才经_recover交还；不是任意一拍无press_now_row即放弃，原strike/bounce_tail/钩段不入新门，已发键与失败责任/同招不重试保留。前版在2612过早丢续接的问题已收回，既有成功前缀保留。c000将RETURN_BODY命中重查按被击退iid分组，与原_contacts_only输入逐行语义一致；Root独立比A4与N1新旧各682个最终frame/target/mask/owner tuple全同，W3按共同2260..2900的622条全同。首次核对误拿不同末帧的682与622整段比较失败，原ARTIFACT_HARNESS_BOUNDARY保留；修正仅比较明确共同窗，非控制失败。
+
+A4新增有效反应拼接的有限正例：2816模型hit470+pogo后接它自己3339真实受击反应片段，绕根镜像并明示NPC仍不响应后续英雄；2831目标Evade时合法交还，2836 L2转地面，2870模型落进缝，2884/2903现有rune_lowhop发朝470侧劈，之前evade_chase接近，非普通规划器地面行完成。仅一次模型hit、到2960条件模型hurt0；该样本新Idle仅15帧即闪避，不能第二刀，合法恢复正例不等于连续下劈/实机生存证明。Root14项源码SHA同当前c000，生产者原HEAD2f43/dirty planner差分从Git重构14c0b051fd5ecf22匹配，工具hashf385dd2f3097匹配；不改写成当时已提交。五个旧配置账本/worker字段unresolved仍保留，不能直接当正式P清单全过。
+
+甲仍有确定P2：_observe_idle_evidence1113以f-round(Control.t*60)回推某个Update帧，只要alive_hist有该编号就当观察到了本次Idle ENTRY，1112仅用t下降判新实例。Oracle EntityExporter25明确t是scaled FsmState.StateTime且可停，不是Update帧年龄；Root真实3147/3183/3339均当帧Control Idle→Dmg Attack→Close Range→Idle且t约1/60，回推却锚到前一帧旧Idle，A4因此把2816新Idle记成2815。当前伙伴均活时未证明改变该样本结果，但不能把它当入口条件已满足；若伙伴在实际入口前死去、或缺帧中同iid转出再入且新t不小于旧t，可能借用旧伙伴/旧撤销状态延长证人。实际Astra/xhigh窄审同意该证据契约缺口，不拿九个现有单测冒充覆盖。
+
+同179只做最小事件绑定：使用现有已观察的Control→Idle事件与真实事件帧/本次实例、当帧伙伴存活；同帧伙伴生死顺序无法确定、无确切入口事件或观测断档不能证明同实例时，延长证据未知回39，不由scaled t另造时钟模型，也不从当前两只推入口。显式同帧受击后新Idle须重绑而非撤新实例，旧实例受击仍撤证据。保留乙、分组提速、正反例与成功前缀；只补缺帧/入口伙伴变化的局部反例和受影响生产窗，不重跑1111/旧1667。四窗P入口已交但未准入，修好上述后才由固定executor最小startup→真实P；BODY/AIR on与默认off必须不同实际进程，防模块常量缓存串配置。当前不再扩打法/模拟器、不开新局，FACE_HOOK/BOUNCE_TABLE/DSLASH仍关，源码owner仍Opus，原资源/输入/停止/全清理门不变。
