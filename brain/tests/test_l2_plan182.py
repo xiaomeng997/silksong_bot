@@ -701,6 +701,24 @@ def test_the_walker_closed_the_gap_prepared_route_runs_by_wall_room(monkeypatch)
         assert out.target == 7 and 7 in out.no_hit
 
 
+def test_a_flight_plan_with_no_route_is_an_explicit_no_plan_in_the_tick(monkeypatch):
+    # seen in flight, the jump landing past the walker: none of this scene's routes; no exception in the tick, the generic rules
+    tac, ws, fc = planned(monkeypatch, xs=(19., 29.), hx=25.)
+    go_(tac, ws, fc)
+    change(fc, 7, family=G.CC_JUMP, state="Air", committed=True)
+    tac.t_commit[7] = ws.stamp.t_game_s
+    ws.entities[0].fsm = [("Control", "Air", .02)]
+    ws.entities[0].flip_x = True
+    ws.entities[0].vel = E((12., 30.))         # it lands at 29.99, past the walker's root
+    seen = []
+    for _ in range(3):
+        go_(tac, ws, fc)
+        seen += plan_notes(tac)
+    r = tac.plan_runner
+    assert any(n["what"] == "result" and n["state"] == "none" for n in seen)
+    assert r.exec.plan is None and r.exec.status == "blocked" and tac.last["clapper_winner"]["rule"] != "middle_jump"
+
+
 def test_the_stand_at_the_takeoff_reads_the_written_geometry_not_the_forecast_union(monkeypatch):
     tac, ws, fc = planned(monkeypatch, xs=(19., 44.), hx=30.)
     go_(tac, ws, fc)

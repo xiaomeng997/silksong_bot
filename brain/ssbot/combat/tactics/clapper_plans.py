@@ -512,9 +512,8 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
         fall = (("gap_closed", "aim_attack"), ("too_late", "aim_attack"))
         phases.append(Phase("aim_wait", target=W, stance=("x", q.hand.x), no_hit=(J,), on=take + fall,
                             at=(stay_facts["depart"] - c.m.off * c.m.dt, "aim_guide")))
-        phases.append(Phase("aim_guide", target=J, stance=("x", H), suppress_hits=True, ground=True,
-                            on=take + fall + (("arrived", "aim_hold"),)))
-        phases.append(Phase("aim_hold", target=J, stance=("x", H), ground=True, on=take + (("gap_closed", "aim_attack"),)))
+        phases.append(Phase("aim_guide", target=J, stance=("x", H), suppress_hits=True, on=take + fall + (("arrived", "aim_hold"),)))
+        phases.append(Phase("aim_hold", target=J, stance=("x", H), on=take + (("gap_closed", "aim_attack"),)))
     # Past the take-off: no replacement boundary inside a route; a new move of the walker ends the routes that need it.
     phases.append(Phase("return", target=W, attack="side", stance=("stand",), no_hit=(J,), replaceable=False,
                         on=(("other_move", INVALID), ("move_over", DONE))))
@@ -749,7 +748,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         take = (("takeoff_return", "lure_return"), ("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)
         phases.append(Phase("lure_wait", target=gid, stance=("x", q.hand.x), no_hit=(jid,), on=take + (("too_late", "lure_late"),),
                             at=(f_l["depart"] - m.off * m.dt, "lure_go")))
-        phases.append(Phase("lure_go", target=jid, stance=("x", f_l["guide"]), suppress_hits=True, ground=True,
+        phases.append(Phase("lure_go", target=jid, stance=("x", f_l["guide"]), suppress_hits=True,
                             on=take + (("arrived", "lure_hold"), ("too_late", "lure_late"))))
         # too late for the guide: lure is not forced, and attack was prepared with it when feasible
         phases.append(Phase("lure_late", target=(f_a or {}).get("target", gid), attack="side",
@@ -965,7 +964,7 @@ class PlanRunner:
     @staticmethod
     def _walker_err(sc, plan) -> dict:
         """The walker against the plan's own prediction for it: a walk it already counted is no change."""
-        if plan.get("other") is None:
+        if plan.get("other") is None or plan.get("walker_x0") is None:
             return {}
         o = next((v for v in sc.subjects if v.iid == plan.get("other")), None)
         return {"walker_err": None if o is None else
