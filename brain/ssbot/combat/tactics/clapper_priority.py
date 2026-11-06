@@ -168,10 +168,16 @@ def decide(tac, ws, fc, prefs, hx, t):
             previous = mem["seen"].get(other.iid)
             if other.state in NEAR and seen[other.iid][2] and (previous is None or previous[:3] != seen[other.iid][:3]):
                 offer("near", other, .8 + .2 * max(0., 1. - abs(other.pos[0] - hx) / TWO_SLAM_RANGE_U))
+            # Task 179 #309 (the person 11-05/06, seq 229): leaving the jumper for the other Clapper (a vault / stomp
+            # over it) is a dodge only while she is BETWEEN the two (actual body spans; root positions when a body is
+            # unknown). Both beyond her (wall -> both -> hero -> open) is no switch into the cluster: the existing
+            # retreat / keep stand, her room behind measured from the walls.
+            between = (region in {"middle", "tight"} if geo is not None else
+                       min(float(s.pos[0]) for s in subjects) < hx < max(float(s.pos[0]) for s in subjects))
             if (middle is None and hold is None and keep.family in JUMPS and keep.state in AIR
                   and mem["seen"].get(keep.iid, (None, None))[1] not in AIR
                   and other.family not in JUMPS
-                  and not (other.iid in tac.rune and t <= tac.rune[other.iid][3])):
+                  and not (other.iid in tac.rune and t <= tac.rune[other.iid][3]) and between):
                 offer("takeoff", other)
         if middle is None and region == "middle" and mem["region"] != "middle":
             offer("middle", max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx))))

@@ -38,6 +38,8 @@ class NativeManualAirChain(NativeChainB2):
         tables=(Path(__file__).with_name("knife_chain_air_v01.json"),)
         if os.environ.get("SSBOT_FORUM_CHAIN_VAULT","0").strip()=="1":
             tables+=(Path(__file__).with_name("knife_chain_vault_v01.json"),)
+        from .knife_chain_bounce_table import enabled as bounce_table_enabled,TABLE as BOUNCE_TABLE
+        if bounce_table_enabled():tables+=(BOUNCE_TABLE,)
         return tables
 
     @property
@@ -71,7 +73,11 @@ class NativeManualAirChain(NativeChainB2):
         self._vault_ready=False
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
+        self._bounce=None;self._bounce_frames={}
         super().reset(episode,start_frame=start_frame)
+        from . import knife_chain_bounce_table as bounce_table
+        # Task 179 (#309, Sol seq 229): the finite same-target bounce table (Tasks 143 / 145 / 148), opt-in.
+        self._bounce_mode=bounce_table.enabled() and self.arm=="B"
         transfer.slam_tail_frames()  # preload before timed decisions, share immutable counts
         self.vault_enabled="vault_idle" in self.runner.chains
         face_hook=os.environ.get("SSBOT_FORUM_CHAIN_FACE_HOOK","0").strip()
@@ -129,6 +135,9 @@ class NativeManualAirChain(NativeChainB2):
                 source,ta=physical or self._transfer_responsibility.get(source,(None,None))
             elif source.family=="VAULT_IDLE":source,ta=self._vault_responsibility.get(source,(None,None))
         if source is None:return False  # no invented parent move or CC_CAST label
+        if getattr(self,"_bounce_mode",False):
+            from . import knife_chain_bounce_table as bounce_table
+            if bounce_table.try_anchor(self,state,prefs,hit,source,ta):return True
         self._transfer_goal=transfer.TransferGoal(target,hit,state["f"],ta,"BOUNCE",source)
         self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
         return True
@@ -387,6 +396,10 @@ class NativeManualAirChain(NativeChainB2):
             if self.commitment:self._recover("policy priority gate: "+self.policy_gate_reason,f)
             return None
         if self.recovery is not None:return self._recovery_offer()
+        if getattr(self,"_bounce",None) is not None:
+            from . import knife_chain_bounce_table as bounce_table
+            if self.post_context is None:return bounce_table.offer(self,forecast,prefs)
+            bounce_table.end(self,"handback","real bounce not taken by the table")
         if (getattr(self,"_wall_pressure",None) is not None and not (self._wall_pressure.get("yielded",False) or self._wall_pressure.get("landing",False))):
             from .knife_chain_wall_native import propose as wall_propose
             if self._context is None:
@@ -815,6 +828,9 @@ class NativeManualAirChain(NativeChainB2):
         selected=self._b2_selected;sent=super().sent()
         from .knife_chain_wall_native import sent as wall_sent
         wall_sent(self,selected,sent)
+        if getattr(self,"_bounce",None) is not None:
+            from . import knife_chain_bounce_table as bounce_table
+            bounce_table.after_send(self,selected,sent)
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("distance_vault"):
             if selected.stage=="manual_commitment" or selected.details.get("approach_entry"):
                 from .knife_chain_vault_native import manual_jump_watch
@@ -858,7 +874,13 @@ class NativeManualAirChain(NativeChainB2):
         return sent
 
     def observe(self,state):
+        if getattr(self,"_bounce_mode",False):
+            from . import knife_chain_bounce_table as bounce_table
+            bounce_table.observe_frame(self,state)
         super().observe(state)
+        if getattr(self,"_bounce",None) is not None:
+            from . import knife_chain_bounce_table as bounce_table
+            bounce_table.observe_identity(self,state)
         # Face hook: a transfer hook's Harpoon hit / control are EVIDENCE in the same Run only. The B2 hook-bounce
         # handover stays VAULT_IDLE-only, so no _hit / _accepted / post_context / bounced comes from a hook.
         run=self.runner.run;watch=self._hook_start;c=self.commitment
@@ -879,6 +901,11 @@ class NativeManualAirChain(NativeChainB2):
 
     def before_send(self,*,frame,target,mask,flags,received_frame,dispatch_clock=None):
         selected=self._b2_selected
+        if selected is not None and selected.details.get("bounce_table") and int(mask)==selected.mask:
+            from . import knife_chain_bounce_table as bounce_table
+            veto=bounce_table.before_send(self,selected,frame=frame,target=target,mask=mask,flags=flags,
+                                          received_frame=received_frame)
+            if veto is not None:return veto
         if (selected is not None and selected.details.get("rune_transfer") and int(mask)&B["J"]
                 and self._jump_start is None):
             from .knife_chain_deadline import first_jump_clock
@@ -913,6 +940,9 @@ class NativeManualAirChain(NativeChainB2):
         return super()._abort_hook_dispatch(selected,**kwargs)
 
     def _recover(self,reason,frame):
+        if getattr(self,"_bounce",None) is not None:
+            from . import knife_chain_bounce_table as bounce_table
+            bounce_table.end(self,"recovered",reason)
         source=self.commitment
         run=self.runner.run
         hooked=bool(run is not None and run.chain==transfer.PROGRAM and run.v.get("cs") is not None

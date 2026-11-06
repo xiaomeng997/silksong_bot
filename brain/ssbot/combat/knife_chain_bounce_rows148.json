@@ -1,0 +1,608 @@
+{
+ "schema": 1,
+ "source": "opus/bounce_rows148/ROWS148.json (Task 148, real 823 hit STATE 2915, s 1)",
+ "source_sha256_16": "c947f20f48d8bfaa",
+ "normal_press": 33,
+ "start": {
+  "frame": 2915,
+  "s": 1,
+  "dt": 0.01665000058710575,
+  "alpha": 0.3678569197654724,
+  "pogo_obs": 8.0,
+  "bounce": 0.0,
+  "in_flight_prefix": [
+   0
+  ],
+  "pose": {
+   "x": 46.421199798583984,
+   "y": 7.449374198913574,
+   "face": -1
+  }
+ },
+ "total": 160,
+ "rule": "per ua the all-9 witness with the largest positive send slack; zero-slack-only ua left out",
+ "rows": [
+  {
+   "ua": 4,
+   "H": 47,
+   "cut": 5,
+   "keep_normal_second": false,
+   "press": 44,
+   "open": 8,
+   "release": 39,
+   "contacts": [
+    [
+     54,
+     44
+    ]
+   ],
+   "first_difference": 8,
+   "slack": 3,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 5,
+   "H": 48,
+   "cut": 6,
+   "keep_normal_second": false,
+   "press": 45,
+   "open": 9,
+   "release": 40,
+   "contacts": [
+    [
+     55,
+     45
+    ]
+   ],
+   "first_difference": 9,
+   "slack": 3,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 10,
+   "H": 52,
+   "cut": 11,
+   "keep_normal_second": false,
+   "press": 50,
+   "open": 13,
+   "release": 45,
+   "contacts": [
+    [
+     60,
+     49
+    ]
+   ],
+   "first_difference": 13,
+   "slack": 2,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 11,
+   "H": 53,
+   "cut": 12,
+   "keep_normal_second": false,
+   "press": 51,
+   "open": 14,
+   "release": 46,
+   "contacts": [
+    [
+     61,
+     50
+    ]
+   ],
+   "first_difference": 14,
+   "slack": 2,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 16,
+   "H": 57,
+   "cut": 17,
+   "keep_normal_second": false,
+   "press": 56,
+   "open": 21,
+   "release": 53,
+   "contacts": [
+    [
+     66,
+     54
+    ]
+   ],
+   "first_difference": 21,
+   "slack": 4,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 17,
+   "H": 58,
+   "cut": 18,
+   "keep_normal_second": false,
+   "press": 57,
+   "open": 22,
+   "release": 56,
+   "contacts": [
+    [
+     67,
+     55
+    ]
+   ],
+   "first_difference": 22,
+   "slack": 4,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 22,
+   "H": 62,
+   "cut": 23,
+   "keep_normal_second": false,
+   "press": 64,
+   "open": 24,
+   "release": 66,
+   "contacts": [
+    [
+     72,
+     59
+    ]
+   ],
+   "first_difference": 24,
+   "slack": 1,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  },
+  {
+   "ua": 35,
+   "H": 73,
+   "cut": 36,
+   "keep_normal_second": false,
+   "press": 75,
+   "open": 45,
+   "release": 72,
+   "contacts": [
+    [
+     40,
+     32
+    ],
+    [
+     85,
+     70
+    ]
+   ],
+   "first_difference": 45,
+   "slack": 9,
+   "nominal_margins": [
+    3,
+    2
+   ],
+   "variant_margins": [
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     2,
+     3,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ],
+    [
+     3,
+     2,
+     null
+    ]
+   ]
+  }
+ ],
+ "left_out_zero_slack": {
+  "23": {
+   "H": 63,
+   "slacks": [
+    0,
+    0,
+    0
+   ]
+  },
+  "28": {
+   "H": 67,
+   "slacks": [
+    0,
+    0,
+    0
+   ]
+  },
+  "29": {
+   "H": 68,
+   "slacks": [
+    0,
+    0,
+    0
+   ]
+  },
+  "34": {
+   "H": 72,
+   "slacks": [
+    0,
+    0,
+    0
+   ]
+  }
+ }
+}

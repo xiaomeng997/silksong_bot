@@ -56,24 +56,42 @@ def test_focus_outputs_through_its_antic_instead_of_early_long_switch(family, st
     if family in P.JUMPS: assert out.stance_x == pytest.approx(16.)
 
 
-@pytest.mark.parametrize("covered,kind", [(False, "side"), (True, "stomp")])
-def test_actual_takeoff_chooses_destination_contact_from_ground_window(covered, kind):
+TIGHT = dict(xs=(20., 22.4), hx=21.2)    # between the two with no standing room: bodies 19..21 and 21.4..23.4
+
+
+@pytest.mark.parametrize("covered", [False, True])
+def test_outside_takeoff_is_no_switch_into_the_cluster(covered):
+    # Task 179 #309 (the person, seq 229): both Clappers beyond her - leaving the jumper for the other one is no dodge.
     tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
     change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
     assert step(tac, ws, fc).target == 7
     if covered: fc.default = 0.
     change(fc, 7, state="Jump")
     out = step(tac, ws, fc)
-    assert out.target == 8 and out.entry_attack.kind == kind
+    assert out.target == 7 and out.entry_attack is None and 7 in out.no_hit
+    assert all(c["rule"] != "takeoff" for c in tac.last["clapper_choices"])
+    assert tac.last["clapper_region"] == "left"
+
+
+@pytest.mark.parametrize("covered", [False, True])
+def test_takeoff_between_the_two_switches_with_a_stomp_entry(covered):
+    tac, ws, fc = scene(**TIGHT); step(tac, ws, fc)
+    change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
+    assert step(tac, ws, fc).target == 7
+    if covered: fc.default = 0.
+    change(fc, 7, state="Jump")
+    out = step(tac, ws, fc)
+    assert tac.last["clapper_region"] == "tight"
+    assert out.target == 8 and out.entry_attack.kind == "stomp"     # no ground room between: never a side slash
     assert out.entry_attack.source_family == G.CC_JUMP and out.entry_attack.source == 7
-    assert out.hit_kw[8][0 if kind == "side" else 3] > 0
+    assert out.hit_kw[8][3] > 0
 
 
 @pytest.mark.parametrize("family", [G.CC_JUMP, G.CC_JUMP_CAST])
 @pytest.mark.parametrize("covered", [False, True])
 def test_takeoff_does_not_reintercept_the_same_departed_focus(family, covered):
-    # Live 68f: takeoff switched away at2608, rear-intercept undid it at2609.
-    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
+    # Live 68f: takeoff switched away at2608, rear-intercept undid it at2609 (here between the two: #309).
+    tac, ws, fc = scene(**TIGHT); step(tac, ws, fc)
     change(fc, 7, family=family, state="Jump Antic", committed=True)
     step(tac, ws, fc); tac.t_commit[7] = 1.
     if covered: fc.default = 0.
@@ -88,7 +106,7 @@ def test_takeoff_does_not_reintercept_the_same_departed_focus(family, covered):
 
 @pytest.mark.parametrize("next_event", ["new_jump", "near_attack"])
 def test_departed_focus_suppression_ends_at_a_new_move(next_event):
-    tac, ws, fc = scene(hx=15.); step(tac, ws, fc)
+    tac, ws, fc = scene(**TIGHT); step(tac, ws, fc)
     change(fc, 7, family=G.CC_JUMP, state="Jump Antic", committed=True)
     step(tac, ws, fc); tac.t_commit[7] = 1.
     change(fc, 7, state="Jump")
@@ -316,7 +334,7 @@ def test_explicit_stomp_still_overrides_sp4_ground_only_bias(monkeypatch,entry_s
     if entry_style=='tight':
         tac,ws,fc=scene((20.,22.),21.);out=step(tac,ws,fc)
     else:
-        tac,ws,fc=scene(hx=15.);step(tac,ws,fc)
+        tac,ws,fc=scene(**TIGHT);step(tac,ws,fc)
         change(fc,7,family=G.CC_JUMP,state='Air',committed=True);fc.default=0.;out=step(tac,ws,fc)
         assert out.entry_attack.kind=='stomp'
     assert out.hit_kw[out.target][3]>0

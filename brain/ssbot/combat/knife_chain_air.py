@@ -75,7 +75,10 @@ class AirAnchor:
 
 
 def load_runner():
+    from .knife_chain_bounce_table import enabled as bounce_table_enabled,TABLE as BOUNCE_TABLE
     chains=load_chains(TABLE);p=Prims();register_core(p)
+    bounce=bounce_table_enabled()
+    if bounce:chains=dict(chains,**load_chains(BOUNCE_TABLE))
     import operator
     ops={">=":operator.ge,"<=":operator.le,">":operator.gt}
     p.guard("cmp")(lambda x,a,op,b:ops[op](a,b))
@@ -83,6 +86,10 @@ def load_runner():
     p.guard("air_target_valid")(lambda x:bool(x.obs.target_valid))
     p.guard("air_bounced")(lambda x:bool(x.obs.bounced))
     p.direction("toward")(lambda x:int(x.v["side"]))
+    if bounce:
+        # Task 179 #309: the same-target pogo-chain table's keys, set per frame by its B2 adapter
+        # (knife_chain_bounce_table); its program loads only with SSBOT_FORUM_CHAIN_BOUNCE_TABLE=1
+        p.gen("bounce_table_keys")(lambda x,m:m|int((x.v.get("keys") or {}).get(int(x.obs.F),0)))
     from .knife_chain_transfer import register
     register(p)
     return ChainRunner(chains,AirAnchor(),p,cfg0=chains["air_strike"].cfg,
@@ -276,7 +283,9 @@ def warm(params):
     from .knife_chain_post_actions import ordinary_post
     ordinary_post(replace(parent,stage="commitment"),params,sim.terrain,kind="left_landing")
     _contact_mask(np.zeros((1,2)),np.array([[-1.,-3.,1.,0.]]))
-    return {"family":"manual_air","ms":(time.perf_counter()-started)*1000.,
+    from .knife_chain_bounce_table import enabled as bounce_table_enabled,warm as warm_bounce_table
+    table=warm_bounce_table(params) if bounce_table_enabled() else None
+    return {"family":"manual_air","ms":(time.perf_counter()-started)*1000.,"bounce_table":table,
             "trace_signatures":len(_trace_events.signatures),"scope":"compile only; no admission or contact evidence"}
 
 

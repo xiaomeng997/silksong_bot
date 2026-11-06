@@ -66,10 +66,9 @@ def press_anchor(sim, toward, F0, enemy):
             "iid": int(enemy["iid"]), "reserve": reserve}
 
 
-@lru_cache(maxsize=32)
-def _tracks(row, toward, body, reserve, iid):
-    """The model's transform positions per frame from the press (index 0 = P, the free-flight state at P) for every
-    variant, deduplicated. A variant the model cannot place raises GeometryUnavailable."""
+def _hooks(row, toward, body, reserve, iid):
+    """(dash_f, ctrl_after, ac, world, positions) of every _tracks variant: world 0 the observed body still, 1 moved
+    away by the retreat bound; positions from the press (index 0 = P) with the antic heights, as _nominal_hook."""
     from ssbot.knowledge import hero2 as H2
     from ssbot.map2 import strike as SK
     x, bb, vx, vy = row
@@ -82,11 +81,10 @@ def _tracks(row, toward, body, reserve, iid):
     for ac in range(6):         # per physics-step phase only (Task 179 #308: the entry tick builds every slot cold)
         steps = [SK.steps_of(j, ac) for j in range(1, len(r) + 1)]
         phases.append((ac, steps, H2.claw_unhooked(x, bb, vx, vy, toward, steps)))  # its antic heights only, as _nominal_hook
-    out = {}
     for dash_f, ctrl_after in _variants():
         var = SK.HookVariant("task170", dash_f, 0., ctrl_after)     # the dash damager stops it, not the gap
         for ac, steps, antic in phases:
-            for boxes in worlds:
+            for w, boxes in enumerate(worlds):
                 h = SK.claw_hook(S, 0, toward, iid, boxes, var, ac, discrete_stop=True,
                                  hold_steps=sum(steps[:SK.HOOK_THROW_F]), dash_max_steps=SK.DASH_MAX_STEPS,
                                  dash_damager=True, dash_motion_lag=1)
@@ -96,7 +94,47 @@ def _tracks(row, toward, body, reserve, iid):
                 t = SK.HOOK_THROW_F
                 pos[:t + 1, 1] = antic.bb[:t + 1] + SK.FOOT
                 pos[t + 1:, 1] = antic.bb[t] + SK.FOOT
-                out.setdefault(pos.round(9).tobytes(), pos)
+                yield dash_f, ctrl_after, ac, w, pos
+
+
+@lru_cache(maxsize=32)
+def _tracks(row, toward, body, reserve, iid):
+    """The model's transform positions per frame from the press (index 0 = P, the free-flight state at P) for every
+    variant, deduplicated. A variant the model cannot place raises GeometryUnavailable."""
+    out = {}
+    for *_, pos in _hooks(row, toward, body, reserve, iid):
+        out.setdefault(pos.round(9).tobytes(), pos)
+    return tuple(out.values())
+
+
+@lru_cache(maxsize=32)
+def _stop_tracks(row, toward, body, reserve, iid):
+    """_tracks plus every stop BETWEEN its two worlds (Task 179 #308 P2: the body may be anywhere from still to the
+    retreat bound, and live L3 stopped at x 22.52 between the bounds' 21.0 and 25.2). The hooked dash moves 1.4 u per
+    physics step and the damager check comes before each step, so the reachable stops are exactly "k steps" for every
+    k from the still world's count to the bound's: such a track is the bound's dash cut at its k-th step (that step's
+    frame is the stop frame) and held there to the variant's control (stop + ctrl_after, clamped 23 .. 34, as
+    map2.strike.claw_hook). No third body world and no other change: heights, timings and phases are the variant's.
+    Returns (i0, positions from index i0): i0 0 for _tracks' own tracks; an intermediate one equals its bound's track
+    before its stop frame j, so it starts at j - 1 (its own sweep into the stop stays whole)."""
+    from ssbot.map2 import strike as SK
+    out, pairs = {}, {}
+    for dash_f, ctrl_after, ac, w, pos in _hooks(row, toward, body, reserve, iid):
+        out.setdefault((0, pos.round(9).tobytes()), (0, pos))
+        pairs.setdefault((dash_f, ctrl_after, ac), {})[w] = pos
+    for (dash_f, ctrl_after, ac), w in pairs.items():
+        still, far = w[0], w[1]
+        hold = float(far[SK.HOOK_THROW_F, 0])
+        steps = np.rint((far[:, 0] - hold) * toward / SK.DASH_STEP_U).astype(int)     # dash steps done by each frame
+        k0 = int(round((float(still[-1, 0]) - hold) * toward / SK.DASH_STEP_U))
+        for k in range(k0 + 1, int(steps[-1])):
+            j = int(np.flatnonzero(steps >= k)[0])
+            ctrl = min(max(j + ctrl_after, 23), 34)
+            if ctrl >= len(far):
+                raise GeometryUnavailable("transfer hook entry unchecked: intermediate stop beyond the bound's control")
+            track = far[j - 1:ctrl + 1].copy()
+            track[1:, 0] = hold + toward * SK.DASH_STEP_U * k
+            out.setdefault((j - 1, track.round(9).tobytes()), (j - 1, track))
     return tuple(out.values())
 
 
@@ -221,8 +259,9 @@ def step_scan(geo,path,v,watch,f,state=None):
 
 
 def _entry(path, v, f):
-    """entry_paths' variant paths, each with its hooked-body window (P + HOOK_BODY_OFF[0] .. control +
-    HOOK_BODY_OFF[1]) and its control point (frame, x, y: the model's stop and hold height)."""
+    """entry_paths' variant paths (_stop_tracks: every stop from the still body to the retreat bound), each with its
+    hooked-body window (P + HOOK_BODY_OFF[0] .. control + HOOK_BODY_OFF[1]) and its control point (frame, x, y: the
+    model's stop and hold height)."""
     from ssbot.map2 import strike as SK
     from .knife_chain_transfer import HOOK_LATE_F
     a = v.get("hook_press")
@@ -233,29 +272,34 @@ def _entry(path, v, f):
     if path.origin != f or box.shape != (3, 4) or not np.isfinite(box).all() or not 1 <= P - f <= 3:
         raise GeometryUnavailable("transfer hook entry unchecked: external step rows or press slot")
     w, h = float(box[0, 2] - box[0, 0]), float(box[0, 3] - box[0, 1])
-    box_of = lambda x, bottom: [x - .5 * w, bottom, x + .5 * w, bottom + h]
-    head = [list(box[i]) for i in range(P - f)]
+
+    def boxes(tr):                      # transform positions -> boxes of the current step's size (bottom = y - FOOT)
+        x, bottom = tr[:, 0], tr[:, 1] - SK.FOOT
+        return np.column_stack([x - .5 * w, bottom, x + .5 * w, bottom + h])
+    head = box[:P - f]
     out = {}
     for d in range(HOOK_LATE_F + 1):
         if d >= len(a["rows"]):
             raise GeometryUnavailable("transfer hook entry unchecked: press slot outside the anchor")
-        pre = [box_of(r[0], r[1]) for r in a["rows"][:d]]
-        for tr in _tracks(tuple(a["rows"][d]), int(a["toward"]), tuple(a["body"]),
-                          tuple(a["reserve"][d:d + TRACK_F]), int(a["iid"])):
-            rows = np.asarray(head + pre + [box_of(p[0], p[1] - SK.FOOT) for p in tr], float)
-            ctrl = P + d + len(tr) - 1
-            out.setdefault(rows.round(9).tobytes(),
-                           (rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
+        pre = np.asarray([[r[0] - .5 * w, r[1], r[0] + .5 * w, r[1] + h] for r in a["rows"][:d]], float).reshape(-1, 4)
+        for i0, tr in _stop_tracks(tuple(a["rows"][d]), int(a["toward"]), tuple(a["body"]),
+                                   tuple(a["reserve"][d:d + TRACK_F]), int(a["iid"])):
+            # an intermediate stop's track is its bound's before i0 + 1: its rows from P + d + i0 only
+            origin, rows = (f, np.vstack([head, pre, boxes(tr)])) if i0 == 0 else (P + d + i0, boxes(tr))
+            ctrl = P + d + i0 + len(tr) - 1
+            out.setdefault((origin, rows.round(9).tobytes()),
+                           (origin, rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
                             (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6))))
+    from types import SimpleNamespace
+    basis = {**path.assumptions, "basis": "hooked-Clawline model through the locked hook", "protection": "none",
+             "safety": "whole locked hook, all owners"}
     paths = []
-    for rows, window, control in out.values():
+    for origin, rows, window, control in out.values():   # the fields B2Geometry reads; no protection flag
         n = len(rows) - 1
-        paths.append((replace(path, box=rows, commands=np.zeros(n, np.int64), latched=np.zeros(n, np.int64),
-                              flags=np.zeros(n + 1, np.int64), check_flags=np.zeros(n + 1, np.int64),
-                              stage="transfer_hook_entry",
-                              assumptions={**path.assumptions, "basis": "hooked-Clawline model through the locked hook",
-                                           "protection": "none", "safety": "whole locked hook, all owners"}),
-                      window, control))
+        zero = np.zeros(n + 1, np.int64)
+        paths.append((SimpleNamespace(origin=origin, stage="transfer_hook_entry", box=rows, commands=zero[:n],
+                                      latched=zero[:n], flags=zero, check_flags=zero, through=origin + n,
+                                      assumptions=basis), window, control))
     return paths
 
 
@@ -264,8 +308,9 @@ def entry_paths(path, v, f):
     2685-2712, ended short of the retreating target, and its forced bounce rose into the other Clapper's jump, Sentry
     (3) at 2721; only single steps had been scanned). The WHOLE locked hook before its CLAW is sent: the current step's
     K rows up to the planned press P, then for each CLAW slot applied 0 .. HOOK_LATE_F late the free-flight press rows
-    and every hooked-model variant track (the same _tracks as step_paths: dash timings, physics-step phases, the
-    observed body still or retreating at the bound) up to the model's control. Unknown raises."""
+    and every hooked-model variant track (_tracks as step_paths: dash timings, physics-step phases, the observed body
+    still or retreating at the bound; plus every stop between those two, _stop_tracks) up to the model's control.
+    Unknown raises."""
     return [p for p, _, _ in _entry(path, v, f)]
 
 
@@ -287,6 +332,25 @@ def entry_scan(geo, path, v, f):
             tuple(sorted({c for _, _, c in items})))
 
 
+def _control_holds(sim, v, f, frames):
+    """The key filter state after each control frame F and the key queued for F + 1, DERIVED from the keys the hook
+    commits (Task 179 #308, Sol seq 229): the actual in-flight prefix for f + 1, the CsPlan's turn and CLAW keys
+    (claw_strike.plan_mask), then the lock's zero keys (claw_lock sends none) through the existing hold_filter_jit
+    from the actual HF. Unknown committed keys raise; whatever the filter then holds is used as it is, never replaced
+    by an idle default."""
+    from .claw_strike import plan_mask
+    from .holdfilter import hold_filter_jit
+    cs, a = v.get("cs"), v.get("hook_press")
+    if cs is None or not isinstance(a, dict) or len(sim.prefix) != 1 or not frames or min(frames) <= f:
+        raise GeometryUnavailable("transfer hook entry unchecked: committed keys before the control unknown")
+    toward = int(a["toward"])
+    keys = np.array([int(sim.prefix[0])] + [plan_mask(cs, F, toward) for F in range(f + 2, max(frames) + 2)], np.int64)
+    out = {}
+    for F in frames:                                   # keys[i] is the key for frame f + 1 + i
+        out[F] = (hold_filter_jit(keys[None, :F - f], sim.hold)[1], int(keys[F - f]))
+    return out
+
+
 def _control_starts(sim, v, f, controls):
     """oldwin_claw.control_states at every control point: the hooked Clawline's forced bounce (EV_POGO at control, no
     invulnerability, downspike recovery), facing the hook, the physics phase advanced from the actual one."""
@@ -302,46 +366,67 @@ def _control_starts(sim, v, f, controls):
 def entry_outs(geo, sim, v, f, controls, short_frames):
     """The forced bounce at every control point of entry_scan against the existing N=2 continuation lower bound's
     short pass (NativeManualAirChain._continuations): both ordinary post types, left and right landing
-    (knife_chain_post_actions.ordinary_post's keys from an idle hold and a neutral queued key, as claw_lock sends),
-    executable (continuation_executable's rule) and clear of every owner, delayed hazard and unknown occupancy over
-    short_frames or up to their ground handback. One rollout per type (bit-identical to ordinary_post's trace) and one
-    geometry pass. A control below the bound rejects the hook at its entry: the full-exit fallback of _continuations
-    is not run here (entry_bounces gives its exact parents). Returns (None or the first failure, paths checked)."""
+    (knife_chain_post_actions.ordinary_post's keys after the queued key, from the filter state, both derived from the
+    committed keys by _control_holds), executable (continuation_executable's rule) and clear of every owner, delayed
+    hazard and unknown occupancy over short_frames or up to their ground handback. One rollout per type and control
+    frame (bit-identical to ordinary_post's trace) and one geometry pass. A control below the bound rejects the hook
+    at its entry: the full-exit fallback of _continuations is not run here (entry_bounces gives its exact parents), so
+    this is a conservative short lower bound, not an exit guarantee. The hooked target's BODY stays exempt up to
+    control + HOOK_BODY_OFF[1] (measured: harmless from P + 17 to control + 12, as in entry_scan); its attack (move) and
+    every other owner count. Returns (None or the first failure, paths)."""
     from types import SimpleNamespace
     from .holdfilter import hold_filter_jit
     if not controls:
         raise GeometryUnavailable("transfer hook entry unchecked: no control point")
+    holds = _control_holds(sim, v, f, sorted({F for F, _, _ in controls}))
     starts = _control_starts(sim, v, f, controls)
     paths, meta = [], []
     for kind, bit, direction in (("left_landing", B["L"], -1), ("right_landing", B["R"], 1)):
-        commands = np.full(short_frames, bit, np.int64)
-        commands[0] = 0
-        latched = hold_filter_jit(commands[None, :], K.HoldState.idle(1))[0][0]
-        ro = K.rollout(starts, np.repeat(latched[None, :], len(controls), axis=0), sim.params, sim.terrain)
-        for j, control in enumerate(controls):
-            fl = np.asarray(ro.flags[j], np.int64)
-            ground = np.flatnonzero(((fl & K.F_GROUND) != 0) & ((fl & K.F_NO_INPUT) == 0) & (np.arange(len(fl)) >= 2))
-            n = int(ground[0]) if len(ground) else short_frames
-            vx = ro.vel[j, :n + 1, 0]
-            i = next((i for i in range(1, n) if int(latched[i]) & bit), None)
-            executable = n >= 2 and i is not None and any(direction * (vx[k] - vx[i]) > 0 or direction * vx[k] > 0
-                                                          for k in range(i + 1, min(i + 5, n + 1)))
-            paths.append(SimpleNamespace(origin=control[0], stage="continuation", box=ro.box[j, :n + 1],
-                                         flags=fl[:n + 1], check_flags=fl[:n + 1], commands=commands[:n],
-                                         through=control[0] + n))
-            meta.append((control, kind, executable))
+        groups = {}                     # control frames whose keys latch alike share one rollout
+        for F, (hold, queued) in holds.items():
+            commands = np.full(short_frames, bit, np.int64)
+            commands[0] = queued
+            latched = hold_filter_jit(commands[None, :], hold)[0][0]
+            groups.setdefault((commands.tobytes(), latched.tobytes()), (commands, latched, set()))[2].add(F)
+        for commands, latched, frames in groups.values():
+            idx = [j for j, c in enumerate(controls) if c[0] in frames]
+            ro = K.rollout(starts[:, idx], np.repeat(latched[None, :], len(idx), axis=0), sim.params, sim.terrain)
+            fl = np.asarray(ro.flags, np.int64)
+            at = np.arange(fl.shape[1])
+            land = ((fl & K.F_GROUND) != 0) & ((fl & K.F_NO_INPUT) == 0) & (at >= 2)
+            ns = np.where(land.any(axis=1), land.argmax(axis=1), short_frames)        # ground handback or the horizon
+            on = [i for i in range(1, short_frames) if int(latched[i]) & bit]
+            if on:              # continuation_executable: the key latched before the handback moves her within 4 frames
+                i, vx = on[0], ro.vel[:, :, 0]
+                near = (at >= i + 1) & (at < i + 5) & (at[None, :] < ns[:, None] + 1)
+                moved = (direction * (vx - vx[:, i:i + 1]) > 0) | (direction * vx > 0)
+                executable = (ns >= 2) & (i < ns) & (moved & near).any(axis=1)
+            else:
+                executable = np.zeros(len(idx), bool)
+            for r, j in enumerate(idx):
+                n, F = int(ns[r]), controls[j][0]
+                paths.append(SimpleNamespace(origin=F, stage="continuation", box=ro.box[r, :n + 1],
+                                             flags=fl[r, :n + 1], check_flags=fl[r, :n + 1], commands=commands[:n],
+                                             through=F + n))
+                meta.append((controls[j], kind, bool(executable[r])))
+    from ssbot.map2 import strike as SK
+    iid = int(v["hook_press"]["iid"])
     for (control, kind, executable), scan in zip(meta, geo.scan_batch(paths)):
-        if not executable or scan.contacts or not scan.complete:
+        bad = [c for c in scan.contacts
+               if not (c.owner_iid == iid and c.kind == "body" and c.frame <= control[0] + SK.HOOK_BODY_OFF[1])]
+        if not executable or bad or not scan.complete:
             return ({"control": control, "kind": kind, "executable": bool(executable), "complete": scan.complete,
-                     "first": None if not scan.contacts else scan.contacts[0]}, len(paths))
+                     "first": bad[0] if bad else None}, len(paths))
     return None, len(paths)
 
 
 def entry_bounces(sim, v, f, game, controls):
     """entry_outs' control points as B2 conditional-bounce parents for NativeManualAirChain._continuations (the exact
-    N=2 lower bound with its full-exit fallback): the reference entry_outs' short pass is checked against."""
+    N=2 lower bound with its full-exit fallback): the reference entry_outs' short pass is checked against. The parent
+    hold and queued key are _control_holds' derived ones."""
     from .knife_chain_nominal import NominalPath
     from .knife_chain_step import NominalStepper
+    holds = _control_holds(sim, v, f, sorted({F for F, _, _ in controls}))
     starts = _control_starts(sim, v, f, controls)
     dt = float(sim.params.frame_time)
     stepper = NominalStepper(sim.params, sim.terrain)
@@ -351,9 +436,10 @@ def entry_bounces(sim, v, f, game, controls):
         ro = stepper.run(S, frames=0)
         g = float(game) + (F - f) * dt
         fl = np.full(2, int(ro.flags[0, 0]), np.int64)
+        hold, queued = holds[F]
         out.append(NominalPath(F - 1, "commitment", np.zeros(1, np.int64), np.zeros(1, np.int64),
                                np.stack([S, S], axis=1), np.stack([ro.box[0, 0]] * 2), np.stack([ro.pos[0, 0]] * 2),
-                               fl, fl.copy(), np.array([g - dt, g]), K.HoldState.idle(1), None, None, 0, "bounce",
+                               fl, fl.copy(), np.array([g - dt, g]), hold, None, None, queued, "bounce",
                                None, None, {"basis": "hooked Clawline forced bounce at the model's control",
                                             "control": (F, x, y), "protection": "none"}))
     return out
@@ -369,8 +455,10 @@ def early_jump_stale(cache, f, target_state):
     return (not isinstance(cache, dict) or f >= int(cache.get("next_f", f)) or cache.get("state") != target_state)
 
 
-def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
-    """The Run's cache entry for one expansion of the existing jump recipe from the next tick (see the module doc)."""
+def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, high_band=False):
+    """The Run's cache entry for one expansion of the existing jump recipe from the next tick (see the module doc).
+    high_band: the entry_attack=stomp switch's high held band (face_hook_check), so the first passing decision is the
+    earliest one at its middle (Task 179 #308)."""
     from .knife_chain_transfer import (render, face_hook_check, clappers, body_box, control, PROGRAM,
                                        HOOK_PRESS_AFTER_F, HOOK_LATE_F)
     from .knife_chain_air import model_path
@@ -380,7 +468,7 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
     n, f, (st, _) = int(cfg["lookahead_frames"]), int(sim.f), control(enemy)
     toward = 1 if p.side == B["R"] else -1 if p.side == B["L"] else 0
     jump_k = k + 3
-    entry = {"f": f, "state": st, "jump_k": jump_k, "ok": False, "why": "", "next_f": f + n}
+    entry = {"f": f, "state": st, "jump_k": jump_k, "ok": False, "why": "", "next_f": f + n, "high_band": bool(high_band)}
     if toward == 0:
         entry["why"] = "no approach side"
         return entry
@@ -430,11 +518,12 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash):
         if rows is not None:
             bd = rows.copy()
             bd[:, 4:6] -= d
-        ok, why, info = face_hook_check(sd, hd, e, f + d + 2, toward, bd, bs)
+        ok, why, info = face_hook_check(sd, hd, e, f + d + 2, toward, bd, bs, high_band=high_band)
         if ok and shift == 0.:
             entry.update(ok=True, why="ok", defer_new_dash=True, next_f=f + 1, decide_f=f + d, press_F=f + d + 3,
                          **{key: float(val) for key, val in info.items()
-                            if key in ("ray_margin", "retreat_reserve", "bb_press", "x_press", "held_bb")})
+                            if key in ("ray_margin", "retreat_reserve", "bb_press", "x_press", "held_bb", "band_lo",
+                                       "band_hi", "band_mid", "held_low", "held_high")})
             return entry
         if ok:
             deficits.append(shift)

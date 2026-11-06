@@ -1,0 +1,61 @@
+{
+  "air_bounce": {
+    "id": "air_bounce",
+    "start": "run",
+    "links": {
+      "run": {
+        "id": "air_bounce.run",
+        "phase": "table",
+        "clock": "antic",
+        "entry": null,
+        "inherit": [
+          "stop"
+        ],
+        "rules": [],
+        "keys": [
+          {
+            "gen": "bounce_table_keys"
+          }
+        ]
+      }
+    },
+    "rulesets": {
+      "stop": [
+        {
+          "do": "abort",
+          "when": {
+            "not": {
+              "p": "air_target_valid"
+            }
+          },
+          "why": {
+            "lit": "bounce table target absent or changed"
+          }
+        }
+      ]
+    },
+    "vars": {
+      "iid": null,
+      "hit_f": null,
+      "keys": null,
+      "cs": null
+    },
+    "cfg": {
+      "lag": 0
+    },
+    "admission": {
+      "run": {
+        "link": "air_bounce.run",
+        "observations": [],
+        "conditions": [],
+        "status": "unfitted",
+        "notes": "Task 148 finite rows (real 823 hit STATE 2915), one row re-verified once online from the actual sighting STATE (knife_chain_bounce_table); same target only."
+      }
+    },
+    "provenance": {
+      "format": "0.2",
+      "source": "Tasks 143/145/148 same-target pogo-chain entry; Sol seq 229 minimal online entry",
+      "implementation": "keys from knife_chain_bounce_table's state machine (baseline normal knife, then the verified row's suffix); B2 adapter owns anchor, verification and handback; loaded only with SSBOT_FORUM_CHAIN_BOUNCE_TABLE=1"
+    }
+  }
+}

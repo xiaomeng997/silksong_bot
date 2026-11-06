@@ -687,7 +687,7 @@ def retreat_reserve(enemy,t_s,away):
     return max(EVADE_U_S*min(float(t_s),rem),max(0.,vx*away)*float(t_s))
 
 
-def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
+def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=False):
     """A cheap gate for one aimed Clawline at P=F0+1 against the OBSERVED target face; never a hit certificate.
 
     Her pose comes from the actual S0 / in-flight prefix rolled with the turn key and must stay in the measured
@@ -696,7 +696,12 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
     her box centre after hero2's antic drift, her held box bottom, RAY_U) at the needle's hit P+8 / 9 of a press
     applied 0 .. 2 frames late, in every physics-step phase class, against the observed body moved AWAY by the
     target's worst-case retreat from this observation to that frame. With bombs, no lit small rune may meet her
-    HeroBox (rune_bombs.occupied) between the press and the farthest stop until the latest control. (ok, why, info)."""
+    HeroBox (rune_bombs.occupied) between the press and the farthest stop until the latest control.
+    high_band (Task 179 #308, Sol seq 229 with Root's parameters; entry_attack=stomp target switches only): the held
+    foot height of every late-application branch must also lie in their common band, from the existing floor hover and
+    the small runes' danger top + BOMB_M up to the target ray band (the ray's low edge under the body top), at its
+    middle or higher: on a rising jump the earliest tick that reaches the middle and passes all the above; a jump that
+    never reaches it, or no band at all, is unsupported (no lower hook instead). (ok, why, info)."""
     from ssbot.knowledge import hero2 as H2
     from ssbot.map2 import strike as SK
     from . import claw_strike as CS
@@ -739,12 +744,12 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
     except ValueError as exc:return False,"B2 identity ray unchecked: "+str(exc),info
     if first is None or first[0]!=iid:return False,"B2 identity ray does not take the target first",info
     names=("ray_margin","late_f","hit_after_press_f","phase","x_ray","held_bb","retreat_reserve","t_ray")
-    worst=None;ext=0.;centres=[]
+    worst=None;ext=0.;centres=[];helds=[]
     for d in range(HOOK_LATE_F+1):
         b=ro.box[0,j0+d];x0=.5*float(b[0]+b[2]);bb0=float(b[1]);half=.5*float(b[3]-b[1])
         vx0,vy0=(float(v) for v in ro.vel[0,j0+d])
         if not -19.6<=vy0<=17.4:return False,"press state outside the measured Clawline entry",info
-        held=float(SK.hold_bb(bb0,vy0));centres+=[bb0+half,held+half]
+        held=float(SK.hold_bb(bb0,vy0));centres+=[bb0+half,held+half];helds.append(held)
         if held-CS.FLOOR<CS.CsCfg().ray_lo:return False,"held height below claw_strike's floor hover",info
         for h in (SK.HOOK_HIT_F,SK.HOOK_THROW_F):
             t=(P+d+h-int(sim.f))*float(sim.params.frame_time)
@@ -765,6 +770,8 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
                     return False,("face out of the modeled ray after the retreat reserve" if band
                                   else "held height outside the observed face band"),info
     info.update(zip(names,worst))
+    lo=CS.FLOOR+CS.CsCfg().ray_lo                      # the high band's floor hover (raised by the runes below)
+    hi=float(body[3])-SK.RAY_BAND[0]                   # its top: the ray's low edge still under the body top
     if bombs is not None and len(bombs):
         from . import rune_bombs as RB
         t_end=(P+HOOK_LATE_F+HOOK_CTRL_LAST_F-int(sim.f))*float(sim.params.frame_time)
@@ -775,6 +782,19 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None):
         rows=np.asarray(bombs,float).reshape(-1,6);info.update(rune_far=far)
         if any(RB.occupied(rows,xs,y,ks,RB.BOMB_M).any() for y in centres):
             return False,"hook path meets a lit small rune",info
+        # runes under the hook corridor (centre below its top), lit during the hook window, whose grown circle reaches
+        # its horizontal path: the feet stay above their top + BOMB_M (runes above the corridor: the check above)
+        a,z=min(xp,xp+toward*far),max(xp,xp+toward*far);reach=rows[:,3]+HB_HX+RB.BOMB_M
+        under=((rows[:,4]<=ks[-1])&(rows[:,5]>=ks[0])&(rows[:,1]+reach>=a)&(rows[:,1]-reach<=z)
+               &(rows[:,2]<hi))
+        if under.any():lo=max(lo,float((rows[under,2]+rows[under,3]).max())+RB.BOMB_M)
+    if high_band:
+        mid=.5*(lo+hi)
+        info.update(band_lo=lo-CS.FLOOR,band_hi=hi-CS.FLOOR,band_mid=mid-CS.FLOOR,
+                    held_low=min(helds)-CS.FLOOR,held_high=max(helds)-CS.FLOOR)
+        if not lo<hi:return False,"high hook unsupported: no common held band",info
+        if max(helds)>=hi:return False,"high hook: held above the band",info
+        if min(helds)<mid:return False,"high hook: held below the band middle",info
     return True,"ok",info
 
 
@@ -894,7 +914,7 @@ def register(prims):
         try:bodies=None if ents is None else [(e.get("iid"),body_box(e)) for e in ents]
         except (TypeError,ValueError,OverflowError):bodies=[(None,None)]
         ok,why,info=face_hook_check(x.obs.sim,getattr(x.obs,"hero",None),x.obs.e,int(x.obs.F),toward,
-                                    getattr(x.obs,"bombs",None),bodies)
+                                    getattr(x.obs,"bombs",None),bodies,high_band=bool(v.get("switch_stomp")))
         v["face_hook_check"]={"ok":ok,"why":why,**{k:float(w) for k,w in info.items()}}
         if not ok:return None
         from .claw_strike import CsPlan
@@ -950,6 +970,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
+    # Task 179 #308 (Sol seq 229): the entry_attack=stomp target switch (a SWITCH goal that is not the side approach)
+    # aims its face hook in the high held band (face_hook_check high_band); other transfers keep their hook unchanged
+    switch_stomp=(bool(active.v.get("switch_stomp")) if active is not None
+                  else bool(goal is not None and goal.source_kind=="SWITCH" and not approach_only))
     if len(es)!=2 or target is None or not complete_hf(state):return None
     enemy=next((e for e in es if e["iid"]==target),None)
     if enemy is None:return None
@@ -1034,7 +1058,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
                 and (active is None or active.v.get("cs") is None)):
             from .knife_chain_face_hook import early_jump_stale,early_jump
             if early_jump_stale(cache,state["f"],target_state):
-                early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash)
+                early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash,high_band=switch_stomp)
                 if early.get("ok") and early.get("defer_new_dash"):
                     p=replace(p,dash_k=k+10000)
     elif not ground and not tail_pending:
@@ -1054,6 +1078,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables.update(p.variables());variables["air_entry"]=air_entry
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
+    variables["switch_stomp"]=switch_stomp
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
     draft.run=Run(PROGRAM,link,variables)
     clearance=head_clearance(cfg)
