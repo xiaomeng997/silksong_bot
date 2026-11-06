@@ -1,10 +1,11 @@
-"""Task 179 #313 (the person via Sol seq 233-236): after a near attack, back between the two, through the real L2 entry.
+"""Task 179 #313/#314 (the person via Sol seq 233-237): after a near attack, back between the two, via the real L2 entry.
 
 A Clapper move that came within the slam range of her makes the return due when it ends, whatever her path before (out
-of the middle, or the two overlapped from the start; on the ground or in the air). Quiet scene: a ground pose in a
-standing gap (the existing ground stance on the target's gap side, the passed one not hit), else an air pose at the
-seam above the target's body (the existing stomp style) until they part; done once she stands between. Not while the
-attack, a new attack, a circle over the destination, a middle-jump event or a cluster route holds the scene."""
+of the middle, or the two overlapped from the start; on the ground or in the air), unless she is between the roots
+with a standing gap then. Quiet scene: a ground pose in a standing gap (the existing ground stance on the target's gap
+side, the passed one not hit), else an air pose at the seam above the target's body (the existing stomp style) until
+they part; done only once she has landed in the gap. Not while the attack, a new attack, a circle over the
+destination, a middle-jump event or a cluster route holds the scene."""
 import pytest
 
 from ssbot.combat.tactics import clapper_priority as P, gauntlet as G
@@ -14,6 +15,7 @@ from tests.test_clapper_priority import change, manual, scene, step   # noqa: F4
 
 def hero_at(ws, x, y=5.6):
     ws.hero.pos = E((x, y))
+    ws.hero.contact = E("GROUND" if y <= 5.6 else "AIR")
     ws.hero.hurtbox = [(x-.25, y-1.6), (x+.25, y-1.6), (x+.25, y+.4), (x-.25, y+.4)]
 
 
@@ -41,9 +43,12 @@ def test_after_a_near_attack_she_goes_back_between_on_the_ground():
     assert out.stance_x == pytest.approx(30.)          # 8's face spot inside the standing gap 21.25 .. 32.75
     assert 7 in out.no_hit and 8 not in out.no_hit and out.entry_attack is None
     assert tac.last["clapper_scene"] == "middle return ground"
-    hero_at(ws, 29.)                                     # standing between: done, the ordinary scene again
+    hero_at(ws, 29., y=9.)                               # over the gap in the air: not back yet
     step(tac, ws, fc)
-    assert tac.last["clapper_back"] is None and tac.last["clapper_back_end"]["end"] == "in the standing gap"
+    assert tac.last["clapper_scene"] == "middle return ground" and tac.last["clapper_back_end"] is None
+    hero_at(ws, 29.)                                     # landed between: done, the ordinary scene again
+    step(tac, ws, fc)
+    assert tac.last["clapper_back"] is None and tac.last["clapper_back_end"]["end"] == "landed in the standing gap"
     assert tac.last["clapper_winner"]["rule"] != "back"
 
 
@@ -73,11 +78,20 @@ def test_no_ground_gap_holds_the_seam_in_the_air_then_lands_when_they_part():
     hero_at(ws, 21.5, y=9.)                              # over the gap: a middle region, yet no standing room
     step(tac, ws, fc)
     assert tac.last["clapper_region"] == "middle" and tac.last["clapper_scene"] == "middle return air"
-    move(ws, fc, 8, 28.)                                 # they part: the gap 21 .. 27 with her between the roots
+    move(ws, fc, 8, 28.)                                 # they part while she is still in the air (Root's probe)
     out = step(tac, ws, fc)
-    assert tac.last["clapper_back"] is None and tac.last["clapper_back_end"]["end"] == "in the standing gap"
+    assert tac.last["clapper_back"]["posture"] == "ground" and tac.last["clapper_back_end"] is None
+    assert tac.last["clapper_scene"] == "middle return ground" and out.stance_x == pytest.approx(24.)
+    move(ws, fc, 8, 23.)                                 # ... and close again before she lands: the air pose again
+    out = step(tac, ws, fc)
+    assert tac.last["clapper_scene"] == "middle return air" and out.stance_x == pytest.approx(22.)
+    assert out.hit_kw[8][:3] == (0., 0., 0.)
+    move(ws, fc, 8, 28.)
+    hero_at(ws, 24.)                                     # parted, and she lands in the gap: done
+    out = step(tac, ws, fc)
+    assert tac.last["clapper_back"] is None and tac.last["clapper_back_end"]["end"] == "landed in the standing gap"
     assert tac.last["clapper_winner"]["rule"] == "keep" and tac.last["clapper_scene"] == "attack focus"
-    assert out.target == 8 and out.stance_x == pytest.approx(24.)   # land at its face in the gap: the side slash
+    assert out.target == 8 and out.stance_x == pytest.approx(24.)   # at its face in the gap: the side slash
     assert 8 not in out.hit_kw and 7 not in out.no_hit               # no stomp-only weights, nothing held back
 
 
@@ -112,7 +126,20 @@ def test_tight_overlap_after_the_attack_is_the_air_pose_not_the_overhead_root():
     out = step(tac, ws, fc)
     assert tac.last["clapper_region"] == "tight" and tac.last["clapper_scene"] == "middle return air"
     assert out.stance_x == pytest.approx(20.75)          # the seam inside the overlap, not a root
-    assert {c["rule"] for c in tac.last["clapper_choices"]} >= {"overhead", "back"}
+    rules = {c["rule"] for c in tac.last["clapper_choices"]}
+    assert "back" in rules and "overhead" not in rules   # the return holds the tight scene
+
+
+def test_between_the_roots_without_a_standing_gap_when_the_attack_ends_still_gets_the_seam():
+    # Root's #313 probe: H 20.75 / y 9, roots 20 / 21.5 (overlapped bodies) when the near attack ends: the seam
+    # (20.75) with the stomp style, not the old overhead at root 20
+    tac, ws, fc = scene(xs=(20., 21.5), hx=20.75)
+    hero_at(ws, 20.75, y=9.)
+    step(tac, ws, fc)
+    out = near_attack(tac, ws, fc)
+    assert tac.last["clapper_region"] == "tight" and tac.last["clapper_winner"]["rule"] == "back"
+    assert tac.last["clapper_scene"] == "middle return air" and out.stance_x == pytest.approx(20.75)
+    assert out.target == 8 and out.hit_kw[8][:3] == (0., 0., 0.) and out.hit_kw[8][3] > 0
 
 
 def test_over_the_inner_half_when_the_attack_ends_the_attack_there_is_kept():

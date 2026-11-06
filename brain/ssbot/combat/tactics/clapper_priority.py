@@ -64,20 +64,27 @@ def cluster_route(tac, subjects, geo, hx, t, mem, middle):
     return ctx
 
 
+def standing_gap(geo):
+    """Whether the bodies' gap holds the existing middle standing footprint (JT gap_u plus a pad each side, as
+    clapper_middle._standing); None when the bodies are unknown."""
+    if geo is None:
+        return None
+    from .gauntlet import JT
+    (_, b1), (a2, _) = geo["bodies"][geo["low"].iid], geo["bodies"][geo["high"].iid]
+    return a2 - b1 - 2 * JT["pad"] >= max(JT["gap_u"], geo["left"] + geo["right"])
+
+
 def return_pose(tac, target, geo, hx):
     """Task 179 #313: where 'back' puts her for one target, from the CURRENT bodies (not the roots' midpoint).
 
-    ground: the bodies' gap holds the existing middle standing footprint (JT gap_u plus a pad each side, as
-    clapper_middle._standing): the existing ground_stance on the target's gap side. air: above the target's body at
-    the seam between the two (inside its body span, so a down-slash from there meets it), the existing stomp style.
-    crossed: the body between her and the seam (she passes it, a non-target is not hit on the way)."""
-    from .gauntlet import JT
+    ground: a standing gap (standing_gap): the existing ground_stance on the target's gap side. air: above the target's
+    body at the seam between the two (inside its body span, so a down-slash from there meets it), the existing stomp
+    style. crossed: the body between her and the seam (she passes it, a non-target is not hit on the way)."""
     low, high = geo["low"], geo["high"]
     (_, b1), (a2, _) = geo["bodies"][low.iid], geo["bodies"][high.iid]
     seam = .5 * (b1 + a2)
     crossed = low if hx < seam else high
-    stand = (ground_stance(tac, target, seam, geo)
-             if a2 - b1 - 2 * JT["pad"] >= max(JT["gap_u"], geo["left"] + geo["right"]) else None)
+    stand = ground_stance(tac, target, seam, geo) if standing_gap(geo) else None
     if stand is not None:
         return dict(posture="ground", stance=float(stand), crossed=crossed.iid, seam=float(seam), gap=float(a2 - b1))
     a, b = geo["bodies"][target.iid]
@@ -85,19 +92,21 @@ def return_pose(tac, target, geo, hx):
                 gap=float(a2 - b1))
 
 
-def middle_return(tac, subjects, geo, hx, t, mem, quiet_from):
-    """Task 179 #313 (the person via Sol seq 233-236): after a near attack, back between the two.
+def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False):
+    """Task 179 #313 / #314 (the person via Sol seq 233-237): after a near attack, back between the two.
 
     A Clapper move (TWO_ATTACK_FAMS) is near when she was within TWO_SLAM_RANGE_U of its root on any tick of it; its
-    end (the family leaves the attack families) with her beyond a root makes the return due, whatever came before
-    (she jumped out of the middle, or the two overlapped from the start), on the ground or in the air; between the
-    roots then, she never left (the ordinary scene, e.g. a pogo on a body's inner half). While due it is offered
-    when nothing else holds the scene (quiet_from: no middle-jump event, cluster route or intercept hold), neither
-    Clapper is in an attack family, and no jump cast's circle still to burst lies over the destination (the circle
-    is in front of the cast's facing, tac.rune). The pose follows the current bodies (return_pose): ground in a
-    standing gap, else air at the seam until they part (over the bodies too: no standing room there either). Done
-    once she is in the standing gap (region middle with a ground pose); a new near move makes it due again. An
-    intent only: every key, crossing and landing still goes through the existing checks."""
+    end (the family leaves the attack families) makes the return due, whatever came before (she jumped out of the
+    middle, or the two overlapped from the start), on the ground or in the air - unless she is between the roots
+    with a standing gap then (on the ground there, or over a body's inner half as live 2626's pogo: the ordinary
+    scene goes on). Between the roots without one she still needs the seam (Root's #313 probe: H 20.75 / y 9, roots
+    20 / 21.5). While due it is offered when nothing else holds the scene (quiet_from: no middle-jump event,
+    cluster route or intercept hold), neither Clapper is in an attack family, and no jump cast's circle still to
+    burst lies over the destination (the circle is in front of the cast's facing, tac.rune). The pose follows the
+    current bodies (return_pose): ground in a standing gap, else air at the seam until they part. Done only once she
+    has landed (grounded: the hero's ground contact) in the standing gap; in the air over an open gap it goes on
+    (a gap that closes again before she lands gives the air pose back), and a new near move makes it due again. An
+    intent only: every key, crossing and landing still goes through the existing checks and owners."""
     from .gauntlet import TWO_ATTACK_FAMS, TWO_SLAM_RANGE_U
     moves = mem.setdefault("moves", {})
     roots = [float(s.pos[0]) for s in subjects]
@@ -109,9 +118,7 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from):
             m["near"] = m["near"] or abs(float(s.pos[0]) - hx) <= TWO_SLAM_RANGE_U
         elif m is not None:
             del moves[s.iid]
-            # still between the roots when it ends (on the ground or over a body's inner half, as live 2626's
-            # pogo): she never left, nothing to return to; the ordinary scene goes on
-            if m["near"] and not min(roots) <= hx <= max(roots):
+            if m["near"] and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
                 mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False)
     due = mem.get("back")
     if due is None or geo is None or quiet_from is not None:
@@ -122,11 +129,11 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from):
             for s in subjects}
     target = max(subjects, key=lambda s: (room[s.iid], -abs(float(s.pos[0]) - hx)))   # as the "middle" rule
     pose = return_pose(tac, target, geo, hx)
-    if pose["posture"] == "ground" and geo["region"] == "middle":
-        # in the standing gap itself (crossing a root in the air over a body is not yet back: live 2812 closed the
-        # gap right after)
+    if pose["posture"] == "ground" and geo["region"] == "middle" and grounded:
+        # landed in the standing gap itself (crossing a root in the air over a body, or hanging over an open gap, is
+        # not yet back: live 2812 closed the gap right after; Root's #313 probe re-closed it before the landing)
         if due["offered"]:
-            mem["back_end"] = dict(due, end="in the standing gap", end_t=t, end_hx=hx)
+            mem["back_end"] = dict(due, end="landed in the standing gap", end_t=t, end_hx=hx)
         mem["back"] = None
         return None
     circle = [s.iid for s in subjects if s.iid in tac.rune and t <= tac.rune[s.iid][3]
@@ -240,7 +247,8 @@ def decide(tac, ws, fc, prefs, hx, t):
         if leaving is None or leaving.family not in JUMPS or tac.t_commit.get(leaving.iid) != departed[1]:
             mem["departed"] = departed = None
     home = middle_return(tac, subjects, geo, hx, t, mem, "middle jump" if middle is not None else
-                         "cluster route" if route is not None else "intercept hold" if hold is not None else None)
+                         "cluster route" if route is not None else "intercept hold" if hold is not None else None,
+                         getattr(getattr(ws.hero, "contact", None), "v", None) == "GROUND")
     changed = seen != mem["seen"] or region != mem["region"] or (home is not None) != mem.get("back_live", False)
     if middle is not None and (middle.get("decision") or {}).get("route") == "guide":
         prior = middle["decision"]
@@ -310,10 +318,11 @@ def decide(tac, ws, fc, prefs, hx, t):
                     for s in subjects)):
                 offer("retreat", default)
             if default.state in NEAR: offer("flip", default)
-        if middle is None and region == "tight": offer("overhead", default)
+        if middle is None and home is None and region == "tight": offer("overhead", default)
         if home is not None:
             # Task 179 #313: the near attack is over; back between the two (ground gap: stand and side slash; no gap:
-            # the existing stomp style at the seam until they part). The middle score: the same place it values.
+            # the existing stomp style at the seam until they part). The middle score: the same place it values. It
+            # holds the tight scene too (#314, Root's probe: the overhead root 20 tied it after the switch cost).
             offer("back", next(s for s in subjects if s.iid == home["target"]))
         if route is not None:
             # The route owns this jump event: no outer retreat, intercept, flip or takeoff over it (#310).
