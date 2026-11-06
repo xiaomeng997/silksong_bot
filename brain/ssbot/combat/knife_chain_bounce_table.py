@@ -543,12 +543,106 @@ def observe_identity(chain, state):
                 source="first new Slam Antic STATE after the anchor")
 
 
+def knife_witness(chain, table, sim, plan, game, state, enemy):
+    """Task 181 (Sol seq 253 R1): the frame this table's normal knife meets its target on the model, or None (no witness).
+    The knife: its press actually sent (B2's _press), its swing observed accepted (else modeled on the press frame or the
+    next, while that lies ahead), the frames ACTIVE after it less CONTACT_END_MARGIN_F, as press_now_row, after this STATE
+    (which showed no hit). The path: the actual S0, in-flight key and hold filter with the table's keys through that window.
+    The body: the target's current pose witness (contact_body_witness, WalkSupport for a walker; a state with neither, or
+    an Idle hit since its entry, #317, has none; the Idle no-evade proof is assumed, an evade only takes the body away).
+    Every slash variant must meet it, in the air and swinging. A model contact, never a hit receipt."""
+    from . import knife_chain_transfer as transfer, pogo_model as PM
+    from .knife_chain_air import model_path
+    c, f = table.chain, sim.f
+    press = c.hit_frame + table.press
+    seen = chain._accepted
+    if chain._press != press or (seen is None and f > press):
+        return None
+    last = (press if seen is None else seen) + PM.ACTIVE[1] - transfer.CONTACT_END_MARGIN_F
+    if last <= f:
+        return None
+    keys = np.array([table.key(F) for F in range(f + 2, max(last, f + 2) + 1)], np.int64)
+    path = model_path(sim, plan, keys, game)
+    flags, pos = np.asarray(path.flags), np.asarray(path.pos)
+    if seen is None:
+        swing = (flags & K.F_ATTACKING) != 0
+        if not any(swing[j] and not swing[j - 1] for j in (press - f, press - f + 1) if 1 <= j < len(swing)):
+            return None
+        seen = press
+    st = transfer.control(enemy)[0]
+    ev = chain._idle_ev.get(c.iid) if st == "Idle" else None
+    if isinstance(ev, dict) and ev.get("hit") is not None:
+        return None
+    if st == "Walk":
+        support = transfer.walk_body_support(enemy, len(flags), state.get("hero"))
+        core = None if support is None else support(pos[:, 0])[0]
+    else:
+        core = transfer.contact_body_witness(enemy, len(flags), idle_no_evade=True, idle_time=transfer.idle_time_of(ev))
+    if core is None:
+        return None
+    slashes = [PM.slash_poly(face, alt) for face in (-1, 1) for alt in (False, True)]
+    for j in range(max(seen + PM.ACTIVE[0] - f, 1), min(last - f + 1, len(flags))):
+        if flags[j] & K.F_GROUND:
+            return None
+        if not flags[j] & K.F_ATTACKING or not np.isfinite(core[j]).all():
+            continue
+        b = core[j]
+        body = np.array([[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]])
+        if all(PM.meets(slash + pos[j], body) for slash in slashes):
+            return f + j
+    return None
+
+
+def _knife_kept(chain, table, geo, sim, plan, path, keys, game, state, enemy, kept):
+    """What still blocks the normal knife's external step. The target's own body / move on the way down is explained only by
+    this knife's contact witness: at the existing buffered target contact (witness - 2 .. witness, B2 _query) and, on the
+    hit branch of this step, where that branch keeps her protected. Her box really overlapping the observed body, before
+    the contact (a side collision) or on the hit branch, is never waived (_transfer_hit_check's rule). Another owner or a
+    delayed hazard blocks as before; no witness: the original block."""
+    from dataclasses import replace
+    from . import knife_chain_transfer as transfer
+    from .knife_chain_air import model_path
+    c, f = table.chain, sim.f
+
+    def own(x):
+        return x.owner_iid == c.iid and x.kind in ("move", "body")
+
+    if not any(own(x) for x in kept):
+        return kept
+    contact = knife_witness(chain, table, sim, plan, game, state, enemy)
+    chain._note("bounce_table_knife_witness", frame=f, contact=contact, press=chain._press, accepted=chain._accepted,
+                scope="model contact from the actual start; no hit receipt")
+    if contact is None or not all(own(x) for x in kept):
+        return kept
+    body = transfer.body_box(enemy)
+    if body is None:
+        return kept
+
+    def overlap(boxes):
+        return np.any((boxes[:, 0] <= body[2]) & (boxes[:, 2] >= body[0]) & (boxes[:, 1] <= body[3]) & (boxes[:, 3] >= body[1]))
+
+    contacts, protected, d = kept, frozenset(), contact - f
+    if overlap(np.asarray(path.box)[:d]):
+        return kept
+    if d <= len(keys) + len(sim.prefix):
+        hit = model_path(sim, plan, keys, game, contact=d)
+        if overlap(np.asarray(hit.box)[d:]):
+            return kept
+        protected = frozenset(hit.origin + j for j in range(d + 1, len(hit.flags)) if hit.flags[j] & K.F_INVULN)
+        # the hit's NEW protection never erases another owner, a delayed hazard or the target before it
+        branch = geo.scan(replace(hit, check_flags=(hit.check_flags & ~K.F_INVULN) | (path.check_flags & K.F_INVULN)))
+        if not branch.complete:
+            return kept
+        contacts = branch.contacts
+    return [x for x in contacts if not (own(x) and (contact - 2 <= x.frame <= contact or x.frame in protected))]
+
+
 def offer(chain, forecast, prefs):
     """One tick of the anchored table (B2 _propose): the state machine decides desired f + 2; the current external step
     (in-flight key + the table's next 3 keys) is scanned for every owner with protection only from the observed state;
-    after the switch the target's own contacts inside the verified horizon are the verified row's domain, before it the
-    ones of the normal knife from its press on (own_strike). L2's tactical target is not read here: it takes effect at
-    the table's hand-back (try_anchor's cross target, or a recovery). The key goes out through the ordinary B2 send path."""
+    after the switch the target's own contacts inside the verified horizon are the verified row's domain, before it only
+    the ones this knife's contact witness explains (_knife_kept). L2's tactical target is not read here: it takes effect
+    at the table's hand-back (try_anchor's cross target, or a recovery). The key goes out through the ordinary B2 send path."""
     from .knife_chain_b2 import B2Offer
     from .knife_chain_geometry import B2Geometry, GeometryUnavailable
     from .knife_chain_air import model_path, AirAnchor
@@ -597,25 +691,17 @@ def offer(chain, forecast, prefs):
     try:
         plan = NS(origin=f, press_k=None, entry_k=0, contact_frame=None, iid=c.iid, move=move)
         path = model_path(sim, plan, keys, game)
-        scan = B2Geometry(forecast, f, move, None if cur is None else cur[2]).scan(path)
+        geo = B2Geometry(forecast, f, move, None if cur is None else cur[2])
+        scan = geo.scan(path)
+        if not scan.complete:
+            return release(chain, "uncovered", "current external step coverage incomplete")
+        horizon = table.verified_through()
+        kept = [x for x in scan.contacts if not (horizon is not None and x.owner_iid == c.iid
+                                                 and x.kind in ("move", "body") and x.frame - c.hit_frame + 1 <= horizon)]
+        if kept and c.state in ("baseline", "pending"):
+            kept = _knife_kept(chain, table, geo, sim, plan, path, keys, game, state, e, kept)
     except GeometryUnavailable as exc:
         return release(chain, "uncovered", "current external step unchecked: " + str(exc))
-    if not scan.complete:
-        return release(chain, "uncovered", "current external step coverage incomplete")
-    horizon = table.verified_through()
-    press = c.hit_frame + table.press
-
-    def own_strike(x):
-        # Task 181: the row's verified domain, or the normal knife's: it is B2's ordinary strike, so from its press through
-        # B2's missed-strike window the target's own body / move on the way down is that strike's contact (ob_on 3183:
-        # uncovered at the press, 3 frames before the hit), never a blocked step; its miss is B2's missed-strike recovery
-        if x.owner_iid != c.iid or x.kind not in ("move", "body"):
-            return False
-        if horizon is not None:
-            return x.frame - c.hit_frame + 1 <= horizon
-        return c.state in ("baseline", "pending") and press <= x.frame <= press + int(chain.runner.cfg0.get("bounce_by", 14))
-
-    kept = [x for x in scan.contacts if not own_strike(x)]
     if kept:
         return release(chain, "uncovered", f"current external step blocked: {kept[0].kind} of {kept[0].owner_iid} at "
                                            f"{kept[0].frame}")

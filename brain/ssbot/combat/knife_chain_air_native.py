@@ -144,6 +144,14 @@ class NativeManualAirChain(NativeChainB2):
         self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
         return True
 
+    def own_bounce_now(self,state):
+        """Task 181 (Sol seq 253 R2): this STATE's real bounce released this chain's own strike: its post_context was made
+        on this very frame (B2 observe) with that strike's own hit (after its sent press, on its move's target). An older
+        post of the same Clapper or a hook bounce is not it, whatever hit this STATE shows."""
+        post=self.post_context
+        return bool(post is not None and post.get("bounce")==state["f"] and type(post.get("hit")) is int
+                    and post["hit"]==self._hit and type(post.get("press")) is int and post["press"]<=post["hit"]<=state["f"])
+
     @staticmethod
     def _move_phases():
         """Each Clapper attack family's primary antic state and the states its move holds."""
