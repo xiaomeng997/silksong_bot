@@ -24,7 +24,9 @@ CL = v2.CLAPPER
 
 def _tracker(units, haz=None):
     """units: {iid: ((x, y), state, inst)}; an idle unit's estimate is its 1-cell body (core is raw, fam None) and, for
-    iids in haz, that body plus a hazard cell 8 u to its left (raw = core + haz, as attack_range.estimate builds it)."""
+    iids in haz, that body plus a hazard cell 8 u to its left (raw = core + haz, as attack_range.estimate builds it).
+    Its standing poses (#321 RangeTracker.standing_body) are that same cell, so stack_ret here differs from the stack
+    by the margin alone (test_return_body321 covers the standing poses)."""
     haz = haz or {}
     now = {iid: (CL, {"pos": p, "fsms": [{"state": st, "t": 0.0}]}, inst) for iid, (p, st, inst) in units.items()}
 
@@ -36,7 +38,11 @@ def _tracker(units, haz=None):
             h = _cell_mask(x - 8.0, y)
             return NS(raw=union([core, h]), core=core, haz=h, fam=fam)
         return NS(raw=core, core=core, haz=None, fam=fam)
-    return NS(now=now, tables={CL: NS(cell=0.05)}, hero=None, T=0.0, estimate=est)
+
+    def standing(iid, k):
+        (x, y), _, inst = units[iid]
+        return None if inst is not None else _cell_mask(x, y)
+    return NS(now=now, tables={CL: NS(cell=0.05)}, hero=None, T=0.0, estimate=est, standing_body=standing)
 
 
 IDLE2 = {7: ((24.0, 6.0), "Idle", None), 9: ((30.0, 6.0), "Walk", None)}

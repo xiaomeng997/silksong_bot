@@ -105,10 +105,11 @@ COMMIT_M = float(os.environ.get("SSBOT_FORUM_TWO_COMMIT_M", "") or FOCUS_M)
 # SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #315, default off; Sol seq 238 G1-a, a bounded development candidate, not a claim
 # that the second Clapper's place is better known): while L2's middle-return intent is in force (GoalPrefs.return_body)
 # and both Clappers are tracked with no move instance in Idle / Walk (RETURN_STATES), the OTHER one's separable idle
-# body (Estimate.core, the body without its hazards) gets FOCUS_M in a second stack (stack_ret). Only the ordinary
-# planner rows' revocable frames read it (forum_planner._v2_return: the sent prefix, the current locked segment and a
-# dash at that Clapper keep the stack); the stack, m_of, hazards, reactions, the escape check, B2 and every other reader
-# keep the original margins.
+# body (Estimate.core, the body without its hazards) joined with its known standing poses in both facings
+# (RangeTracker.standing_body, #321: a turn or the walk cycle moves its edge up to 0.9 u; a body outside that shape's
+# domain is not narrowed) gets FOCUS_M in a second stack (stack_ret). Only the ordinary planner rows' revocable frames
+# read it (forum_planner._v2_return: the sent prefix, the current locked segment and a dash at that Clapper keep the
+# stack); the stack, m_of, hazards, reactions, the escape check, B2 and every other reader keep the original margins.
 RETURN_BODY = os.environ.get("SSBOT_FORUM_TWO_RETURN_BODY", "0").strip() == "1"
 RETURN_STATES = ("Idle", "Walk")
 # SSBOT_FORUM_TWO_RETURN_AIR (Task 179 #316, default off; Sol seq 239 a): L2's air-pose middle return after an observed
@@ -368,9 +369,11 @@ class LayerSupport:
         self.focus: int | None = None               # the unit with FOCUS_M (MARGIN_MODE "focus")
         self.dash_focus: int | None = None          # the unit stack_dash holds (FOCUS_DASH)
         # SSBOT_FORUM_TWO_RETURN_BODY: the narrowed Clapper, its raw parts (si, index in raw[si]) dilated by FOCUS_M in
-        # stack_ret (None: no such stack; the ordinary rows' revocable frames only, forum_planner._v2_return)
+        # stack_ret (None: no such stack; the ordinary rows' revocable frames only, forum_planner._v2_return); ret_parts:
+        # what stack_ret draws for each tagged part (the body joined with its standing poses, coarse (c, ix0, iy0))
         self.body2: int | None = None
         self.ret_tags: set = set()
+        self.ret_parts: dict = {}
         self.stack_ret: np.ndarray | None = None
         self.stack = np.zeros((len(self.samples), canvas.ny, canvas.nx), bool)
         # SSBOT_FORUM_RUNE_BOMB (task 1v1 G2): the small-rune bombs one by one (rune_bombs.frames: owner, x, y, r,
@@ -415,14 +418,18 @@ class LayerSupport:
                             self.stack_esc = np.zeros(self.stack.shape, bool)
                         self.cv.paste(self.stack_esc[si], d, x0, y0)
 
-    def ret_tag(self, si: int, c: np.ndarray) -> None:
-        """SSBOT_FORUM_TWO_RETURN_BODY: the raw part add_raw appends next at sample si (c) is the narrowed body."""
-        if c.size and c.any():
+    def ret_tag(self, si: int, c: np.ndarray, part: tuple | None) -> None:
+        """SSBOT_FORUM_TWO_RETURN_BODY: the raw part add_raw appends next at sample si (c) is the narrowed body; part
+        is what stack_ret draws for it with FOCUS_M (#321: that body joined with its standing poses, _ret_body). None:
+        outside that shape's domain, not narrowed (the part keeps its own margin in stack_ret too)."""
+        if part is not None and c.size and c.any():
             self.ret_tags.add((si, len(self.raw[si])))
+            self.ret_parts[(si, len(self.raw[si]))] = part
 
     def ret_stack(self) -> np.ndarray:
-        """The stack as finish() and add() build it, with the tagged raw parts (ret_tag) dilated by FOCUS_M instead of
-        their own margin (with no tag it equals the stack)."""
+        """The stack as finish() and add() build it, with each tagged raw part (ret_tag) drawn as its ret_parts entry
+        (the body and its standing poses) dilated by FOCUS_M instead of the part with its own margin (with no tag it
+        equals the stack)."""
         st = np.zeros(self.stack.shape, bool)
         for si, ls in self.layers.items():
             for _iid, mk, ix0, iy0 in ls:
@@ -430,9 +437,10 @@ class LayerSupport:
         for si, parts in self.raw.items():
             by_m: dict = {}
             for j, p in enumerate(parts):
-                if p[4] is not None:
-                    m = FOCUS_M if (si, j) in self.ret_tags else p[4]
-                    by_m.setdefault(round(float(m), 4), []).append((p[1], p[2], p[3]))
+                if (si, j) in self.ret_tags:
+                    by_m.setdefault(round(float(FOCUS_M), 4), []).append(self.ret_parts[(si, j)])
+                elif p[4] is not None:
+                    by_m.setdefault(round(float(p[4]), 4), []).append((p[1], p[2], p[3]))
             for m, ps in by_m.items():
                 d, x0, y0 = dilate_group(ps, m, self.cv.cell)
                 self.cv.paste(st[si], d, x0, y0)
@@ -702,6 +710,17 @@ def return_body_ok(trk: RangeTracker, focus: int | None, iid: int | None) -> boo
     return True
 
 
+def _ret_body(trk: RangeTracker, iid: int, k: int, body: Mask, tab, cv: Canvas) -> tuple | None:
+    """SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #321, Sol seq 245): the narrowed body's part in stack_ret, coarse (c, ix0,
+    iy0) - the body itself joined with its known standing poses in both facings at the same carried root
+    (RangeTracker.standing_body); None outside that shape's domain (no narrowing: the original layer)."""
+    sb = getattr(trk, "standing_body", None)
+    env = sb(iid, k) if sb is not None else None
+    if env is None:
+        return None
+    return coarse(union([body, env]), tab.cell, cv.cell)
+
+
 def focus_iid(trk: RangeTracker, target: int | None) -> int | None:
     """The focus unit (MARGIN_MODE "focus"): the controller's target (GoalPrefs.target) when the tracker has it, else
     the only enemy in play, else None (every unit then gets its "rule" margin)."""
@@ -779,14 +798,16 @@ class RangeSupport(LayerSupport):
                     if haz is not None and e.core is not None:
                         cc, cx0, cy0 = coarse(e.core, tab.cell, cv.cell)
                         if iid == rs.body2 and idle and m > FOCUS_M:
-                            rs.ret_tag(si, cc)      # the body alone (its hazards follow with COMMIT_M, unchanged)
+                            # the body alone (its hazards follow with COMMIT_M, unchanged)
+                            rs.ret_tag(si, cc, _ret_body(trk, iid, k, e.core, tab, cv))
                         rs.add_raw(si, iid, cc, cx0, cy0, m, (ESC_IDLE_M if idle else m) if esc else None)
                         ch, hx0, hy0 = haz
                         rs.add_raw(si, iid, ch, hx0, hy0, COMMIT_M, COMMIT_M if esc else None)
                         rs.n_commit = getattr(rs, "n_commit", 0) + 1
                         continue
                 if iid == rs.body2 and idle and m > FOCUS_M and haz is None and e.raw is e.core:
-                    rs.ret_tag(si, c)               # the raw estimate is the body alone (no hazards, no extra part)
+                    # the raw estimate is the body alone (no hazards, no extra part)
+                    rs.ret_tag(si, c, _ret_body(trk, iid, k, e.raw, tab, cv))
                 rs.add_raw(si, iid, c, ix0, iy0, m, (ESC_IDLE_M if idle else m) if esc else None)
                 if esc and idle and haz is not None:
                     ch, hx0, hy0 = haz

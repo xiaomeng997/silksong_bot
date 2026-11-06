@@ -968,6 +968,34 @@ class RangeTracker:
             apply_custom(est, tab.spec.custom(self._view(iid, k)))
         return est
 
+    def standing_body(self, iid: int, k: int) -> Mask | None:
+        """SSBOT_FORUM_TWO_RETURN_BODY (Task 179 #321, Sol seq 245): an idle Clapper's known standing poses in both
+        facings at look-ahead k - _jb_turn_mask (turn_u each side of the root, the floor to BODY_TOP_U) at its root
+        carried as estimate() carries its body now (IDLE_CARRY: the velocity now for k frames, carry_shift's wall
+        clip). The recorded Idle / Walk bodies of either facing lie inside that box (Idle front 2.25 u, Walk back 2.05-
+        2.25 u, tops 6.19-6.92: a turn or the walk cycle moves an edge up to 0.9 u and the top 0.72 u). None outside
+        that domain: not a tracked Clapper, in a move instance, or a body now not inside the box (the caller keeps the
+        original layer). A shape bound, not a forecast of its walk or of a reversal."""
+        from ssbot.core.forum import FLOOR_Y
+        x = self.now.get(iid)
+        if x is None or x[0] != _jb.CLAPPER or x[2] is not None:
+            return None
+        e = x[1]
+        tab = self.tables[x[0]]
+        polys = body_polys(e, tab.spec.body)
+        p = e.get("pos")
+        if not polys or not p:
+            return None
+        a = np.vstack(polys)
+        px, h = float(p[0]), float(_jb.CFG["turn_u"])
+        if (a[:, 0].min() < px - h - 1e-6 or a[:, 0].max() > px + h + 1e-6 or a[:, 1].min() < FLOOR_Y - 1e-6
+                or a[:, 1].max() > FLOOR_Y + _jb.BODY_TOP_U + 1e-6):
+            return None
+        vel = e.get("vel")
+        v2 = (float(vel[0]), float(vel[1])) if vel and len(vel) > 1 else None
+        dx = carry_shift(polys, v2, k * FT)[0] if IDLE_CARRY else 0.0
+        return _jb_turn_mask(px + dx, tab.cell)
+
     def _view(self, iid: int, k: int) -> CustomView:
         """What a type's own hooks (EnemySpec.custom, the module's path) see of a tracked enemy at look-ahead k."""
         tk, e, inst = self.now[iid]
