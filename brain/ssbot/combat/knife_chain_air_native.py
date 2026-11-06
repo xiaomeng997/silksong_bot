@@ -69,7 +69,7 @@ class NativeManualAirChain(NativeChainB2):
         self._entry_attack_seen=None
         self._entry_attack_goal=None
         self._return_admission_noted=None
-        self._idle_ev={};self._alive_hist={}
+        self._idle_ev={};self._alive_prev=None;self._alive_prev_f=None
         self._transfer_responsibility={}
         self._transfer_target_moves={}
         self._vault_ready=False
@@ -1087,37 +1087,44 @@ class NativeManualAirChain(NativeChainB2):
                            targets=[cs.f_press,cs.f_press+1],source="transfer aimed face hook; absolute CsPlan; no certificate")
         return sent
 
-    IDLE_EV_FRAMES=256   # observed alive sets kept for the Idle-entry buddy evidence
-
     def _observe_idle_evidence(self,state):
-        """Task 179 #317 (Sol seq 240 甲): causal evidence per Clapper Idle instance, from observed STATEs only.
-        map2.clapper reads Idle Time at the Idle ENTRY (idle_buddy: the buddy alive then -> IDLE_K[True]). A record holds
-        the instance's entry frame (f minus its Control clock at its first observation), buddy (whether another Clapper
-        was alive on that entry frame, only when that frame itself was observed; else None: unknown, the no-buddy
-        default) and hit (the frame of a hit event on her seen while this instance was ALREADY shown on an earlier
-        frame: a real hit on an Idle provokes Dmg Attack in the hit frame, so an Idle still shown after it has no valid
-        witness; a hit whose reaction ends in a new Idle restarts the clock and starts a new record). A Control clock
-        that goes back starts a new instance; any other state drops the record."""
-        import math
+        """Task 179 #317/#318 (Sol seq 240 甲, seq 241 P2): causal evidence per Clapper Idle instance. map2.clapper
+        reads Idle Time at the Idle ENTRY (idle_buddy: the buddy alive then -> IDLE_K[True]). An instance is bound only
+        by an explicit Control -> Idle FSM event of this frame (its real entry frame; every such event rebinds, whatever
+        the clocks: the oracle's Control time is scaled and may stop, so no entry is rebuilt from it). buddy, from this
+        frame's STATE: another Clapper alive at the end of the entry frame was alive at the entry (True); none alive now
+        and none alive on the previous observed frame: False; one alive on the previous frame and not now (it died on
+        this frame, order unknown) or no previous observed frame: None. An Idle shown without its entry event and every
+        record across an observation gap (the same instance cannot be confirmed) are unknown (None: the no-buddy 39).
+        hit: a hit event on her in a frame after the instance's entry frame revokes it (a real hit on an Idle provokes
+        Dmg Attack in the hit frame, so an Idle still shown after it has no valid witness); a hit in the frame whose
+        events end in a new Idle belongs to the old instance (the new one is not revoked). Leaving Idle drops it."""
         f=state["f"];es=transfer.clappers(state)
-        self._alive_hist[f]=frozenset(e["iid"] for e in es if (e.get("hp") or 0)>0 and not e.get("is_dead"))
-        for old in [k for k in self._alive_hist if k<f-self.IDLE_EV_FRAMES]:del self._alive_hist[old]
-        hits={(ev.get("d") or {}).get("ent") for ev in state.get("ev") or () if ev.get("k")=="hit"}
-        shown=set()
-        for e in es:
-            iid=e["iid"];st,tin=transfer.control(e)
-            if st!="Idle" or type(tin) not in (int,float) or not math.isfinite(tin):continue
-            shown.add(iid)
-            rec=self._idle_ev.get(iid)
-            if rec is None or tin<rec["t"]-1e-6:
-                entry=f-int(round(tin*60.))
-                at=self._alive_hist.get(entry)
-                self._idle_ev[iid]={"entry":entry,"buddy":None if at is None else any(o!=iid for o in at),
-                                    "hit":None,"t":tin,"first":f}
-                continue
-            rec["t"]=tin
-            if iid in hits and rec["hit"] is None and rec["first"]<f:rec["hit"]=f
+        alive={e["iid"] for e in es if (e.get("hp") or 0)>0 and not e.get("is_dead")}
+        gap=self._alive_prev_f is not None and self._alive_prev_f!=f-1
+        prev=None if gap or self._alive_prev_f is None else self._alive_prev
+        if gap:
+            for rec in self._idle_ev.values():rec["buddy"]=None
+
+        def buddy(iid):
+            if any(o!=iid for o in alive):return True
+            if prev is None or any(o!=iid for o in prev):return None
+            return False
+
+        evs=state.get("ev") or ()
+        for ev in evs:
+            d=ev.get("d") or {};iid=d.get("iid") if d.get("iid") is not None else d.get("ent")
+            if ev.get("k")!="fsm" or d.get("fsm")!="Control" or d.get("to")!="Idle" or type(iid) is not int:continue
+            same=ev.get("f",f)==f
+            self._idle_ev[iid]={"entry":f if same else None,"buddy":buddy(iid) if same else None,"hit":None}
+        for ev in evs:
+            if ev.get("k")!="hit":continue
+            rec=self._idle_ev.get((ev.get("d") or {}).get("ent"))
+            if rec is not None and rec["hit"] is None and (rec["entry"] is None or rec["entry"]<f):rec["hit"]=f
+        shown={e["iid"] for e in es if transfer.control(e)[0]=="Idle"}
+        for iid in shown:self._idle_ev.setdefault(iid,{"entry":None,"buddy":None,"hit":None})
         for iid in [k for k in self._idle_ev if k not in shown]:del self._idle_ev[iid]
+        self._alive_prev,self._alive_prev_f=alive,f
 
     def observe(self,state):
         if getattr(self,"_bounce_mode",False):
