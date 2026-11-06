@@ -4770,3 +4770,18 @@ G1-a只另建可分离身体stack_ret，主层/m_of/危险/反击/其他owner不
 实际Astra/xhigh按workflow仅重点审315锁段/变体保护，Root审普通接口/证据。发现安全P2：forum_planner3579仅从名义r1算lock_end，3609/3630直接用于命中和S2全变体包络；既有bounds_lo允许控制/攻击计时慢一帧，名义已解锁而慢lane仍锁时会提前读stack_ret，不能声称锁段全保原层。未证明在本正例发生，仍须同包按参与lane可靠锁止边界修；未知边界行原层，局部真实慢lane回归。另诊断隔离：仅行号未越界不能证明本拍，forum_human_score378会把任意行重编号0后_hit_branch而误用旧候选0；在线全局行号暂未见误用，但后续证据需显式当前收窄上下文，外部默认原层。新16测试没覆盖慢lane/外部重编号，不当已证明无此问题。
 
 Sol裁空中入口选a方向，同179复用现有B2接近/下劈执行，不全局打开DSLASH/FACE_HOOK/BOUNCE_TABLE，也不新动作池。不能只给EntryAttack(stomp)：_observed_transfer_move要求source仍在相应招式，返回来源已经结束会被拒。明确有限“已观察近程招结束后的返回意图”入口、真实结束/实例/目标与当前S0/HF/在途键；来源历史只作归属，不伪造active/新前摇/免疫或放宽旧SWITCH。请求需当前air返回赢家、失效即停止新准入、已发段按原所有权；实际hit+pogo后用既有真实弹起交还重评接续，不能失败重试同Move或假造连续表。须给真实几何完整生产空中正例，包含真实模型下劈命中/弹起/下一次接续、开缝后地面意图交还；只能一次出刀时明确有限覆盖，不叫连续完成。原窄缝复用水平接近先越身体边缘再降，保留身体硬否及原全owner/后继/clock/预算。两项边界修复与入口同包完整交后才给受影响连续P，不重跑631/旧85P，不开新局；墙角打法延后、旧观察不重开、输入资源及真实清理门不变。
+
+
+#### #316慢lane及诊断隔离修复核过；空中首刀模型接通，续接与命中后反应仍须同179闭合（11-06，进度7.184）
+
+已处理Opus #316，runtime ac0d87f3（父ee9b735b文档，上个runtime dfab）。六运行文件/两测试；Root714绑定仅六源变，完整增量及相邻入口已审；实际E24–31/Idle48056/create1793965205.6763313独跑34受影响检查18.11s全过，foreign0/714全同、实际身份退出后清任务。未重复1667/两个旧失败，0P/0game。analysis/task179_return316_20261106保存SOURCE_PACKET、CHECK_RECEIPT、ROOT_CHECK_CLEANUP、ASTRA316_REVIEW、原始松Down/受击反应摘录与SOURCE_REVIEW：source_delta_review_pass=true，完整行为accepted=false，316不进实机accepted集合。
+
+实际Astra/xhigh复用原代理窄审：315两项已闭合。_v2_lane_lock_end以flags_any覆盖慢出刀lane，模式锁边界不可逐lane确证时整行原层，S2/hit各取自身rollout；_v2_bound绑定实际sc对象，外部重编号默认原层。默认关RETURN_AIR只将L2当前air返回赢家的已观察结束近程招绑成ReturnRequest/ReturnGoal；来源历史不复活原招，不改cast_fa/时钟或豁免。准入还查实际S0/HF/在途键的既有冲刺锁段、越身及到达下劈证人，失效在接近合法边界交还，已承诺strike保留。准入idle_no_evade=True只是乐观起跑筛选，不能替代本Run实际出刀证明。
+
+A3是明确合成输入：470左移2.5u，2790起拼其原始2733的新鲜Idle，476另拼原始Idle。最终2793起跑、2795既有冲刺扫描通过并越476、2812发下劈、2816模型hit470+pogo并既有BOUNCE交还；第二刀未发，续接中性下落2863模型碰伤、2870才恢复，2903开缝时已到外侧。该结果只证明首刀及接续接线，不是空中连续完成或自然闭环。特别是2816模型hit后NPC仍按原录像Idle到2859，不能以此证明第二刀的真实状态支持。W3条件地面2869落地与2874等plan侧劈按键保留；A2停钟/原窄缝Walk未起跑且发送同BODY-only，默认全关364拍与旧路径同；原成功2601..2638前缀不变，均只按其工件范围核收。
+
+Sol同179一次裁定：乙必修，甲条件化可同时做，不是二选一。已到目标上方而证人过期/支持域明确不可能时应在真实合法交还点释放接近所有权，不能中性持有到坠落；不能因某拍暂无press_now_row就宣称永久无解，亦不能撤销已承诺strike/真实forcedbounce/未完锤尾或丢弃在途键。甲只取现有IDLE_K的有伙伴最早68帧，前提是该次Idle入口时伙伴存活有因果证据（map2.clapper的idle_buddy明确按ENTRY读取），未知仍39；新Idle重新绑定、hit反应/姿态变化使旧证据失效，不以当前len2延长。没有要求新拟合或全场NPC模型。
+
+Root只读实际2632..2640：2632 A+Down开始DownSlash，2637/38锁存0仍DownSlash，2639/fc2238锁存0且真实DownSlashAlt命中335476、伤10并DownSpikeBounce1；同帧Idle→Dmg Attack→CloseRange后进入新招。故本地replay308的--down-release-ok默认关修正方向接受，保留同次已接受下劈、未取消有效攻击段、ACTIVE窗口/非地面/身体接触与一次命中限制，不能仅凭旧动画clip注入hit。旧输出/raw不回改、注明模型版本。新增命中后的状态须用已有反应接口或明确兼容的已录状态组合，至少给真实反应使旧证据撤回/重新准入反例；冻结旧Idle不算持续正例。
+
+Opus仍唯一源码owner，同包完成必要恢复/条件时钟与有效生产形状的首刀→实际模型hit+pogo→下一刀或合法交还→开缝地面接续；交付前自查真实policy/planner/B2几何/before_send/sent分支，不再重复大回归或微ACK。功能闭合后才给受影响连续P；FACE_HOOK/BOUNCE_TABLE/DSLASH保持关，无新game gate、旧观察不重开，墙角新打法延后，输入/资源/全清理门不变。
