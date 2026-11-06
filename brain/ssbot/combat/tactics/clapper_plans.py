@@ -48,6 +48,8 @@ DESCENT_S = 50 / 60.        # take-off -> its body's bottom comes down to a stan
 SWEEP_S = 5 / 60.           # ... and from there to the landing: the slanted descent behind the landing is vx x this
 BODY_BACK_U = 1.34          # its back edge behind its centre in the air (recordings: root + 1.34 facing left)
 RESERVE_S = .10             # the guide's arrival before the earliest lock (the design's reserve)
+GUIDE_START_X = 1.5         # the stance is given this many travel times before the lock reserve: the ordinary rows go to a
+#                             stance by a row's end, not at once (replay k_stay); the latest departure itself is unchanged
 GUIDE_MARGIN_U = .25        # the guide point inside the sufficient interval's end
 ARRIVE_U = .35              # at a stance (no ground claim)
 WALK_LOOK_S = .25           # a walker's closing counted past the observation (a bounded allowance, no displacement bound)
@@ -417,8 +419,9 @@ def _stay(c: _Middle):
         i_rune = min(len(x) - 1, int(round((c.land_t + RUNE_ON_S - q.t) / m.dt)))
         if (x[i_rune] - (land + f * (c.reach + c.half_j))) * f < 0:
             return no("still inside the big rune on the way back")
+    start = None if depart is None else depart - (GUIDE_START_X - 1.) * det["travel_s"]
     return Candidate("stay", True, None, "aim_wait" if guide is not None else "aim_attack", 1.,
-                     tuple(det.items())), dict(aim_x=aim_x, guide=guide, depart=depart)
+                     tuple(det.items())), dict(aim_x=aim_x, guide=guide, depart=depart, start=start)
 
 
 def _under(c: _Middle, aim_x, name="under"):
@@ -511,7 +514,7 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
         H = stay_facts["guide"]
         fall = (("gap_closed", "aim_attack"), ("too_late", "aim_attack"))
         phases.append(Phase("aim_wait", target=W, stance=("x", q.hand.x), no_hit=(J,), on=take + fall,
-                            at=(stay_facts["depart"] - c.m.off * c.m.dt, "aim_guide")))
+                            at=(stay_facts["start"] - c.m.off * c.m.dt, "aim_guide")))
         phases.append(Phase("aim_guide", target=J, stance=("x", H), suppress_hits=True, on=take + fall + (("arrived", "aim_hold"),)))
         phases.append(Phase("aim_hold", target=J, stance=("x", H), on=take + (("gap_closed", "aim_attack"),)))
     # Past the take-off: no replacement boundary inside a route; a new move of the walker ends the routes that need it.
@@ -563,7 +566,8 @@ def _middle_plan(q: Request, m: Roller) -> Plan:
                 prepared=tuple(prepared), lock_t=c.lock, take_t=c.t_to, land_t=c.land_t, w_in=(q.other.a if f > 0 else q.other.b),
                 need=c.need, h_lo=c.h_lo, h_cap_margin=GUIDE_MARGIN_U, stage=q.stage, walker_x0=q.other.x, walker_v=c.closing,
                 landings=tuple(x.get("landing") for x in (stay, under, over) if x.get("landing") is not None),
-                speed=max(_avg_speed(x) for x in cands), guide_speed=_guide_speed(stay, q.hand.x))
+                speed=max(_avg_speed(x) for x in cands), guide_speed=_guide_speed(stay, q.hand.x),
+                latest_depart=None if facts is None else facts.get("depart"))
     until = c.hazard_end + HIT_TAIL_S
     soft = [Range("walker_err", -SOFT_WALKER_U, SOFT_WALKER_U)]
     if facts is not None and facts.get("guide") is not None:
@@ -663,8 +667,9 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         det.update(return_arrive_t=t_of(k_back), by_t=by, end_x=S, route_s=t_of(k_back) - t_to)
         if t_of(k_back) > by - .05:
             return no("the way back arrives after its body comes down")
+        start = None if depart is None else depart - (GUIDE_START_X - 1.) * det["travel_s"]
         return Candidate("lure", True, None, "lure_wait" if guide is not None else "lure_hold", 1., tuple(det.items())), \
-            dict(guide=guide, depart=depart, need=need, aim_x=aim_x)
+            dict(guide=guide, depart=depart, need=need, aim_x=aim_x, start=start)
 
     def attack():
         det = dict(out=out, hand_x=q.hand.x)
@@ -710,7 +715,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
     made = dict(out=out, f=out, reach=reach, family=J.family, jumper=J.iid, other=G.iid, other_family=G.family, lock_t=lock, take_t=t_to,
                 land_t=land_t, stage=q.stage, need_back=(f_l or {}).get("need"), half_in=half_in, pad=q.pad, wall_x=wall,
                 walker_x0=G.x, walker_v=closing, speed=max(_avg_speed(cand_l), _avg_speed(cand_a)),
-                guide_speed=_guide_speed(cand_l, q.hand.x))
+                guide_speed=_guide_speed(cand_l, q.hand.x), latest_depart=(f_l or {}).get("depart"))
     soft = [Range("walker_err", -SOFT_WALKER_U, SOFT_WALKER_U)]
     if f_l is not None and f_l.get("guide") is not None:
         soft.append(Range("hand_x", q.hand.x - SOFT_HAND_U, q.hand.x + SOFT_HAND_U))
@@ -747,7 +752,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
     if f_l is not None and f_l.get("guide") is not None:
         take = (("takeoff_return", "lure_return"), ("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)
         phases.append(Phase("lure_wait", target=gid, stance=("x", q.hand.x), no_hit=(jid,), on=take + (("too_late", "lure_late"),),
-                            at=(f_l["depart"] - m.off * m.dt, "lure_go")))
+                            at=(f_l["start"] - m.off * m.dt, "lure_go")))
         phases.append(Phase("lure_go", target=jid, stance=("x", f_l["guide"]), suppress_hits=True,
                             on=take + (("arrived", "lure_hold"), ("too_late", "lure_late"))))
         # too late for the guide: lure is not forced, and attack was prepared with it when feasible
@@ -1066,8 +1071,9 @@ class PlanRunner:
     def _too_late(self, sc, plan, phase) -> bool:
         lock = plan.get("lock_t")
         if phase.at is not None:
-            # (phase.at is the decision time; the departure itself comes the send delay later)
-            return self.hand is not None and self.hand.known and self.hand.t > phase.at[0] + self.send_s + 1e-6
+            # her lock ends past the written latest departure
+            latest = plan.get("latest_depart")
+            return latest is not None and self.hand is not None and self.hand.known and self.hand.t > latest + 1e-6
         if lock is None or not phase.stance or phase.stance[0] != "x":
             return False
         start = max(sc.t, self.hand.t) if (self.hand is not None and self.hand.known) else sc.t
@@ -1233,6 +1239,8 @@ class PlanRunner:
         name, s, o, side = scene
         inst = (s.iid, tac.t_commit.get(s.iid))
         key = (name, inst)
+        if ex.plan is None and ex.status == "complete" and ex.last_plan is not None and ex.last_plan.instance == inst:
+            return                                # this jump's plan has run to its end: the ordinary rules from here
         why = None
         last = self.last_request
         running = plan is not None and plan.instance == inst and plan.scene == name
@@ -1267,9 +1275,7 @@ class PlanRunner:
                 return
             why = "support left: " + out
         else:
-            # no running plan of this scene (pending, invalid, blocked, or complete): only a real change asks again
-            if ex.handled(inst, "move_over") or ex.status == "complete" and ex.last_plan is not None and ex.last_plan.instance == inst:
-                return
+            # no running plan of this scene (pending, invalid or blocked): only a real change asks again
             if abs(o_x - last["walker_x"]) >= SOFT_WALKER_U or abs(x - last["hand_x"]) >= SOFT_HAND_U:
                 why = "no plan, the scene changed"
             elif s.state in AIR and last["stage"] == "aim" and not self.waiting:

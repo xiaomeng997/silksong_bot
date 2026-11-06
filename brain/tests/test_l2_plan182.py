@@ -99,7 +99,9 @@ def test_the_departure_waits_until_its_absolute_deadline_and_does_not_drift():
     stay = cand(a, "stay")
     travel = stay.get("travel_s")
     assert stay.get("depart_t") == pytest.approx(.48 - CP.RESERVE_S - travel, abs=3 * DT)
-    assert depart == pytest.approx(stay.get("depart_t") - 2 * DT, abs=1e-9)     # the decision: its keys apply two frames on
+    # the stage starts half a travel time earlier than the written latest departure, its keys applying two frames on
+    assert depart == pytest.approx(stay.get("depart_t") - (CP.GUIDE_START_X - 1.) * travel - 2 * DT, abs=1e-9)
+    assert a.get("latest_depart") == stay.get("depart_t")
     assert depart > stay.get("hand_t") - 2 * DT and depart > .05                # time to attack before it
     # the same geometry asked again later: the same absolute deadline, whatever the snapshot's time
     for t in (.02, .05, .1):
@@ -512,7 +514,7 @@ def test_flag_off_is_the_legacy_table(monkeypatch):
 
 
 def test_the_three_routes_are_there_before_the_lock_and_stay_runs_by_its_plan(monkeypatch):
-    tac, ws, fc = planned(monkeypatch)
+    tac, ws, fc = planned(monkeypatch, hx=34.2)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
     out = go_(tac, ws, fc)                       # the event: a request, the plan not yet here
@@ -551,14 +553,14 @@ def test_the_three_routes_are_there_before_the_lock_and_stay_runs_by_its_plan(mo
 
 def test_a_hand_back_past_the_departure_gives_up_the_guide_at_once_and_asks_again(monkeypatch):
     from ssbot.combat.knife_chain_format import MASK_NAMES as B
-    tac, ws, fc = planned(monkeypatch)
+    tac, ws, fc = planned(monkeypatch, hx=34.2)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
     go_(tac, ws, fc); go_(tac, ws, fc)
     r = tac.plan_runner
     assert r.exec.name == "aim_wait"
     # a lock of her own: the same place, the keys in flight now a long dash; it has to be read from the hand-back alone
-    S = hero_state(35.)
+    S = hero_state(34.2)
     dash = np.full(1, B["R"] | B["DASH"], np.int64)
     n = r.requests
     tac.plan_input = CP.HeroInput(np.asarray(kin.rollout(S, np.full((1, 30), B["R"] | B["DASH"], np.int64), PARAMS, TERRAIN).final, float),
@@ -716,7 +718,9 @@ def test_a_flight_plan_with_no_route_is_an_explicit_no_plan_in_the_tick(monkeypa
         seen += plan_notes(tac)
     r = tac.plan_runner
     assert any(n["what"] == "result" and n["state"] == "none" for n in seen)
-    assert r.exec.plan is None and r.exec.status == "blocked" and tac.last["clapper_winner"]["rule"] != "middle_jump"
+    # no 95-point empty route: the generic rules answer (here the kept intercept trigger, a jump coming from behind her)
+    assert tac.last["clapper_winner"]["rule"] != "middle_jump"
+    assert r.exec.plan is None or r.exec.plan.scene == "intercept"
 
 
 def test_the_stand_at_the_takeoff_reads_the_written_geometry_not_the_forecast_union(monkeypatch):
