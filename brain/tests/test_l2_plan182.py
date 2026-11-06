@@ -791,6 +791,29 @@ def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
     assert out.target == 8 and out.entry_attack.kind == "stomp"
 
 
+def test_with_the_row_limit_lifted_the_prepared_under_runs_by_wall_room(monkeypatch):
+    # The natural aim leaves at least 8.5 u (5 u short of her + 3.5 u behind the landing), past UNDER_ROW_U: no production path offers
+    # the prepared under today (report section 12). The branch itself, with the limit lifted: the walker closes the gap at the take-off,
+    # under ends farther from the wall than over: the same plan runs it, no request.
+    monkeypatch.setattr(CP, "UNDER_ROW_U", 30.)
+    tac, ws, fc = planned(monkeypatch, xs=(30., 45.), hx=37.)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    plan = r.exec.plan
+    assert plan.selected == "stay" and set(plan.get("prepared")) == {"under", "over"}
+    change(fc, 8, pos=(43., fc.subjects[1].pos[1]), state="Walk")
+    ws.entities[1].dmg_boxes[0].poly = [(42., 3.), (44., 3.), (44., 7.), (42., 7.)]
+    take_off(tac, ws, fc, vx=3.)
+    n = r.requests
+    out = go_(tac, ws, fc)
+    note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
+    assert note["route"] == "under" and "closed" in note["reason"]
+    assert r.exec.plan is plan and r.exec.name == "under" and r.requests == n
+    assert out.target == 7 and out.stance_x < note["landing"]
+
+
 def test_the_route_with_the_farther_wall_is_the_one_chosen():
     # both feasible in flight: under ends behind the landing, over on the walker's far side; the wall decides, in both directions
     J = body(1, 40., "Air", "CC_JUMP", facing=-1)
