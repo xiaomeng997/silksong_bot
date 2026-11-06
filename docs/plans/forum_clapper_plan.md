@@ -4716,3 +4716,16 @@ Root查明必须闭合的现成接口接缝：B2的LOW_HP_POLICY即使环境退�
 Opus #309固定源码21b1d9846ec72d775059d209df29f36ed973c2b4已轻扫并读新交付，Root已审此次可能执行的共用增量和新入口关闭隔离，记录sol/work_packages/task179/ROOT_309_SINGLE_BOUT_PREVIEW.json，尚未完整接受源/P/游戏gate。309只补夹中才takeoff换怪，报告明确尚未做前摇后撤→起跳回冲闭环；不能冒称本次已经就绪。连续表虽接线但真实几何闭环接触落空、随后模型受伤，保持BOUNCE_TABLE=0；脸钩正例只有钩中/交还，未完成翻越。本次FACE_HOOK=0，Slam0逐帧body与扩翻越动作表两项延后，不拖住当前不使用它们的观察局，也不全球关闭既有普通冲锤防御。
 
 同Task179以seq230一次合并用户新范围/源审反馈，OBSERVATION_ONE_BOUT_DRAFT.json及Sol信箱已落盘；Opus仍唯一运行源码实现owner，先交稳定最小候选和必要生产正例/受影响测试，不重跑无关大套件或新网格。Sol负责增量源审、必要受影响成本/生命周期检查及唯一游戏，门齐后直接开，不再问用户例行许可。当前在途/排队不算通过：STATUS live_or_budget_running=false，无自有E/P/游戏；来源仍pending，未写新ENGINEERING_GATE、未启动任何新局。用户明确的本次伤害继续/保命要求优先于旧heartbeat中的首损/死亡口径，但不放宽其它实际动作、源审、记录、资源和清理门。
+
+
+#### 单局观察已实跑并全清理；首要缺口是外出避险后的返回接续（11-05，进度7.180）
+
+已处理 Opus #310/#311/#312，仅本次明确配置范围：runtime/execution HEAD b4615f25，OBSERVE_BOUT1/HPfloor0/FACE_HOOK0/BOUNCE_TABLE0、原7HP、seed314169、仅一盘；308/309未启用部分与原有限边界不据此全面接受。310观察/L2独核82过、311实际监督器增量18过；固定执行器唯一85拍P已清理，p50 12.6473/max18.7066ms。312仅元数据登记变化，其余714项中713运行文件与P逐字节同，真实policy配置正例complete，故复用原成本，不重复P。source_review312及本局ENGINEERING_GATE保存全部范围/证据。
+
+新sol/demos/w13_observe_bait_20261106T055356Z实际WMI请求24992、协调器54148、worker包装25724/实际59336、场50544、game33340。只一次WMI成功调用；先前准备未创建game或启动claim，不算一局重跑。worker自己的OracleLink input.stats为0delay/jitter、HF2/2、pending0，实际TRAIN LethalBlock=block/健康，不改DLL或全程无敌。实际两目标死亡4790/4856，协议2 fight T42.503829451s，实际损6HP（3397/3612/4063各2），尾2.01213212s损0；4517一次blocked catastrophe，1HP继续到结束，无未拦致死。因此CLEAR仅保命观察结果，不能签正常生存/无伤胜利，12条damage调用也不能充12次实际扣血。
+
+Root观察模式独立重建窗口与online逐项同、HP守恒，配置/trace/原始连续性complete、overflow0/unresolved空，trace2678tick/2824action/3006receive，raw3304连续无drop。未改原始文件；正常死亡审核原样保存在normal_mortality_audit，因4517拦致死会提前封窗而产生4项在线窗口差异，不能删除这个结果或拿它代替带observe_lethal=True的新核验。ROOT_OBSERVATION_VERIFICATION/ROOT_BEHAVIOR_AUDIT/ROOT_RAW_EVENTS保存具体分母和事实，不把覆盖/预测hit当真实动作。
+
+用户观看后指出第一次离开中间避险后没回来。Root逐帧核：2599左怪Slam0时H20.2496仍在左15.363/右29.390之间；随后左怪跳大符文前摇Cast Slam Antic2，2661规划DASH(L)，2671/physical_fc2264横越左怪中心到外侧（H18.738/左18.963/右28.110）。2692实际起跳时H14.735，2752跳怪SlamRecover时H14.273/y13.332；2813..2826只是上空短暂横越两中心，不能称恢复中间落地站位。同期clapper_middle持续hold/readiness unknown，具体责任在L2状态或普通动作延续还待定，不能仅凭缓存日志断言。ROOT_FIRST_EXIT保存可复核帧/实际fc/目标/stance/plan/怪状态。第一优先是这段外出后的真实返回，不继续以调后撤2.5宽或堆新刀表代替它；其他三次扣血和成团回冲不稳定也保留，不先签新路线成功。
+
+实际Launcher清理06:37:36.796Z，Root独立核24992/54148/25724/59336/50544/33340原身份全部退出，无残留game/自有helper，场worker等worker资源complete无error；registry151/instances与live空/restore_pendingfalse、golden/Prefs无差、旧DEMO原hash+mtime原样、714源全同，才解除STATUS独占。ROOT_CLEANUP与全原始hash保存。用户仅授权这一盘，本目录不重开、不自动第二盘。当前源写权清理后归Opus，同Task179只围绕首次外出→避险结束→返回可站中间的完整接续查因/最小修复；保留中间无空间和新危险时既有应对，不扩全场模型/新动作池，新的完整源再按受影响窗口核验；本观察不替代178原独立有限验收。
