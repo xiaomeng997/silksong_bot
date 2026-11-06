@@ -160,6 +160,10 @@ _ON_PAUSED_RANK = {None: 0, SELF_CHECK: 1, DIAGNOSE: 2, QUIT: 3}
 RESUME_SELF_CHECK, RESUME_EVADE_EXIT = "self_check", "evade_exit"   # notify_resumed reasons
 
 QUIT_TRIGGERS = ("Q1", "Q2", "Q3", "Q6", "QF", "QS")   # QF: an injected fault (inject); QS: stalemate
+# Task 179 #310/#311 (the person, Sol seq 230/231): in the ONE watched observation bout (ssbot.train.observe_bout)
+# with the healthy TRAIN LethalBlock these HP / predicted-death / hit-count / risk triggers are recorded and never
+# pause or quit (SupervisorConfig.observe_only). Q2, Q5, Q7-Q9, QF and QS keep their pause / quit / stop.
+OBSERVE_ONLY_TRIGGERS = frozenset({"Q1", "Q3", "Q4", "Q6"})
 UNKNOWN_SOURCE = "unknown support"
 WORST_SOURCE = "worst known event"
 H_SUPPORT, H_WORST = "support", "worst known"       # SupervisorDecision.h_basis
@@ -231,6 +235,9 @@ class SupervisorConfig:
     # Optional experiment exit floor (B2 user 10-31). Reuses Q1's post-hit
     # pause/quit timing; other controllers retain the hits-to-death rule.
     remaining_hp_quit: int | None = None
+    # Triggers that fire, keep their reasons in the decision (SupervisorDecision.observed) and never arm a pause or
+    # quit: OBSERVE_ONLY_TRIGGERS under the observation bout (forum_supervisor_config), empty everywhere else.
+    observe_only: frozenset = frozenset()
 
 
 @dataclass(slots=True)
@@ -329,6 +336,7 @@ class SupervisorDecision:
     stall_s: float = 0.0                       # how long the rule has held back with no hit and no heal (QS)
     free: bool = False                         # SupervisorConfig.free_until_hit in force this frame (h >= 2, no
     #                                            pause pending): the tier keeps its label, its restrictions are off
+    observed: tuple[str, ...] = ()             # fired this frame but only recorded (SupervisorConfig.observe_only)
 
     def allows(self, primitive: "Prim | int | str") -> bool:
         """A primitive (code, int or text name such as "ATTACK(down)") is allowed; unknown names never are."""
@@ -738,8 +746,9 @@ class Supervisor:
                 unpredicted_hits=self.unpredicted, support_known=known, hero_known=inp.hp is not None,
                 evade_exit=self.evade is not None)
 
+        observed = ids & cfg.observe_only
         if not self.paused:
-            if ids & set(QUIT_TRIGGERS) and self.evade is None:
+            if (ids - cfg.observe_only) & set(QUIT_TRIGGERS) and self.evade is None:
                 self._arm(QUIT)
             if "Q7" in ids:
                 self.release_needed = True
@@ -749,7 +758,7 @@ class Supervisor:
             if "Q8" in ids:
                 self.alerted = True
                 self._arm(DIAGNOSE)
-            if "Q4" in ids and self.q4 is None:
+            if "Q4" in ids and self.q4 is None and "Q4" not in cfg.observe_only:
                 self.q4 = next(why for tid, why in fired if tid == "Q4")
             if self.q4 is not None and not self.pending and tier0 == GREEN and inp.pausable is True:
                 self._arm(QUIT)
@@ -817,7 +826,7 @@ class Supervisor:
             risk_integral=self.risk_integral, unpredicted_hits=self.unpredicted, support_known=known,
             hero_known=inp.hp is not None, evade_exit=self.evade is not None, h_basis=basis,
             q1_cause=self.q1_cause(inp.t) if "Q1" in ids else None, t_hit=self.t_hit, kill_rule=kill_rule,
-            kill_prims=kill_prims, stall_s=stall, free=free)
+            kill_prims=kill_prims, stall_s=stall, free=free, observed=tuple(sorted(observed)))
 
 
 # ---- §3.5.6 gates ------------------------------------------------------------------------------------------------
@@ -834,6 +843,9 @@ def forum_supervisor_config(weighted: bool = False, **kw) -> SupervisorConfig:
     docstring)."""
     d = dict(worst_known_damage=2, q4_per_instance=True, q4_total_hits=3, kills_certifiable=False, q3_chain_max_damage=2,
              post_hit_window_s=WEIGHTED_POST_HIT_WINDOW_S if weighted else POST_HIT_WINDOW_S)
+    from ssbot.train.observe_bout import enabled as observing
+    if observing():
+        d["observe_only"] = OBSERVE_ONLY_TRIGGERS      # the watched observation bout: HP / risk triggers recorded
     d.update(kw)
     return SupervisorConfig(**d)
 

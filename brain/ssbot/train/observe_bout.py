@@ -30,6 +30,14 @@ def vetoed(data) -> bool:
     return isinstance(data, dict) and data.get("blocked") is True
 
 
+def guard_ok(guards) -> bool:
+    """The oracle's guards.get: LethalBlock on (block), every guard healthy, TRAIN profile, nothing refused. The
+    observation's no-HP-stop rests on it; without it the bout must not start."""
+    return (isinstance(guards, dict) and guards.get("lethal_block") == "block" and guards.get("profile") == "TRAIN"
+            and isinstance(guards.get("healthy"), dict) and bool(guards["healthy"])
+            and all(v is True for v in guards["healthy"].values()) and not guards.get("refused"))
+
+
 def label() -> dict:
     return {"policy": POLICY, "game_limit_s": GAME_LIMIT_S, "bouts": 1, "start": "eval start, 7 HP",
             "hp_stop": None, "lethal": "blocked veto recorded, play goes on; unblocked lethal / dead hero stops",

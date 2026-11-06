@@ -259,6 +259,12 @@ def back_into_slot(link, enc, instance: int, tries: int = SLOT_TRIES, slot_timeo
             stand_up(link)
             if not link.rpc("guards.set", timeout_s=30, save_suppression=True)["save_suppression"]:
                 raise SystemExit("save suppression could not be turned on")
+            from ssbot.train import observe_bout
+            if observe_bout.enabled():
+                guards = link.rpc("guards.get", timeout_s=30)
+                if not observe_bout.guard_ok(guards):
+                    raise SystemExit("observation bout needs the healthy TRAIN LethalBlock: " + str(
+                        {k: guards.get(k) for k in ("lethal_block", "healthy", "profile", "refused")}))
             if attempt > 1:
                 log(f"back in the sandbox slot on try {attempt}")
             return
