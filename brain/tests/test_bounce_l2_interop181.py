@@ -84,6 +84,7 @@ def blocked(n):
 @pytest.mark.parametrize("contact,kind", [(PRESS + 4, "body"), (PRESS + 2, "move")])
 def test_without_this_knifes_witness_its_own_target_blocks_as_before(monkeypatch, contact, kind):
     n, _ = anchored(monkeypatch)
+    monkeypatch.setattr(transfer, "body_box", lambda e: np.array([29., 3., 32., 7.]))
     offer, _ = tick(monkeypatch, n, PRESS, [c(contact, kind=kind)], witness=None)
     assert offer is None and blocked(n)                                        # uncovered: B2 recovery keeps the exposure
 
