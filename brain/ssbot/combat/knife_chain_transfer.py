@@ -556,6 +556,54 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
     return None
 
 
+def antic_strike_out_of_time(sim,enemy,hold_left,side,dash_free):
+    """Task 179 #305 (live 179-L2 w13_walk179L2 1263e9e3: after the 2761 bounce the air Run flew toward 335470's Slam
+    Antic for 32 ticks with current-step checks only and handed back at 2793, two frames before its lunge).
+
+    True when the target stands in Slam Antic and, along this Run's own approach rows (toward, released and, with the
+    air dash still free, toward with that one dash; J kept for the remaining hold), no frame from the earliest
+    down-slash contact (press_now_row's index) until the earliest lunge (CL_SLAM minimum antic) lets ANY slash polygon
+    touch its standing antic body (observed box union the fitted antic poses). That is the existing transfer strike's
+    own domain (stationary_antic_body_for_hit_check), here tested generously, so True means no strike is left before
+    the hammer. In Slam 0 / Slam 1 the lunge and hammer are already on and the body moves (stomp_plan licenses no row
+    on a moving body), so it is True as well. Unknown inputs return False: the approach and its current-step gate
+    continue as before."""
+    from . import pogo_model as PM
+    from .move_data import FRAME_S
+    st,tin=control(enemy)
+    if st in ("Slam 0","Slam 1"):return True
+    if st!="Slam Antic" or type(tin) not in (int,float) or not math.isfinite(tin) or tin<0:return False
+    S=np.asarray(sim.start,float).reshape(K.K,-1)
+    if S.shape[1]!=1 or not np.isfinite(S).all():return False
+    pos=enemy.get("pos");flip=enemy.get("flipX")
+    if (type(flip) is not bool or not isinstance(pos,(list,tuple)) or len(pos)<2
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in pos[:2])):return False
+    try:
+        observed=body_box(enemy)
+        earliest,(x0,x1,y0,y1)=_slam_antic_bounds()
+    except (ValueError,TypeError,OverflowError):return False
+    if observed is None:return False
+    if not flip:x0,x1=-x1,-x0
+    b=np.r_[np.minimum(observed[:2],[pos[0]+x0,pos[1]+y0]),np.maximum(observed[2:],[pos[0]+x1,pos[1]+y1])]
+    poly=np.array([[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]])
+    pj=len(sim.prefix)+2
+    last=int(math.ceil((earliest-float(tin))/FRAME_S))-1   # the last rollout index still inside the standing antic
+    if last<pj+PM.ACTIVE[0]:return True
+    n=last-sim.off+1
+    rows=[np.full(n,side,np.int64),np.zeros(n,np.int64)]
+    if dash_free and side:
+        dash=np.full(n,side,np.int64);dash[:2]|=B["DASH"];rows.append(dash)
+    rows=np.asarray(rows,np.int64)
+    rows[:,:max(0,min(int(hold_left),n))]|=B["J"]
+    ro=sim.roll(rows)
+    slashes=[PM.slash_poly(face,alt) for face in (-1,1) for alt in (False,True)]
+    for i in range(len(rows)):
+        for j in range(pj+PM.ACTIVE[0],min(last+1,ro.flags.shape[1])):
+            if ro.flags[i,j]&K.F_GROUND:break
+            if any(PM.meets(s+ro.pos[i,j],poly) for s in slashes):return False
+    return True
+
+
 def grazes_body(boxes,body,until):
     """The hero box enters her body grown by FOCUS_M on a step before `until` (contact-2).
 
@@ -603,6 +651,14 @@ def air_approach_keys(x):
     # A manual distance selector, scaled by the target's width. Near entries
     # keep their ordinary drift/strike and do not burn a dash to cross the body.
     if gap<=body[2]-body[0]:return mask
+    if control(x.obs.e)[0]=="Slam Antic":
+        # Task 179 #305 (live 179-L2 2761): an attacking target is struck on its standing antic or not at all. The coast
+        # reaching above its body some time (the probe below) is not enough there: unless the coast rows can make a
+        # down-slash contact before the earliest lunge, this Run spends its one air dash (the dash-lock scan decides).
+        x.v["air_dash_decided"]=True
+        if not antic_strike_out_of_time(sim,x.obs.e,left,side,False):return mask
+        x.v["approach_recipe"]="air_dash"
+        return mask|B["DASH"]
     commands=np.full(int(x.cfg["flight_check_frames"]),side,np.int64)
     commands[:min(left,len(commands))]|=B["J"]
     coast=sim.roll(commands[None]);flags=coast.flags[0]
@@ -787,6 +843,15 @@ def register(prims):
 
     @prims.gen("transfer_air_keys",doc="same-owner optional one-shot air dash; never a new jump or umbrella")
     def air_keys(x,m):return m|air_approach_keys(x)
+
+    @prims.guard("transfer_antic_strike_late",doc="Task 179 #305: a Slam Antic target can no longer be struck on its "
+                                                  "standing antic before its earliest lunge along this Run's approach")
+    def antic_strike_late(x):
+        if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return False
+        S=np.asarray(x.obs.sim.start,float).reshape(-1)
+        dash_free=bool(S.shape[0]==K.K and np.isfinite(S).all() and S[K.AIRDASHED]<=0 and S[K.DASH_CD]<=0
+                       and (not x.v.get("air_dash_decided") or x.v.get("approach_recipe")=="air_dash"))
+        return antic_strike_out_of_time(x.obs.sim,x.obs.e,max(0,int(x.v["jump_until"])-int(x.obs.k)),int(x.v["side"]),dash_free)
 
     @prims.gen("transfer_strike_row",doc="the original absolute downslash row; never re-time an already sent strike")
     def strike_row(x,m):
