@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.170）：Opus304四慢拍已由Sol独立有限核收，无须改控制源。实测212拍成本配旧局接收时间线，在空闲开工p50/p99情景下0迟包/0跳帧，保持键迟1/2帧等价，松L迟1/2帧仍保留原J/下劈时钟；高负载压力的30迟包/10跳帧和严格modelhurt照旧保留，不签未来保证。另准备新源1263的179-L2有界单局，主验走路翻越/真实交还，辅助新锤实例接续和移动踩头；178已有限验收，不加专项局。原7HP首损Q1/输入/日志/资源/真实清理门不变。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-05，7.171）：179-L2新源1263有界单局已首损Q1退出并真实清理。完整性/配置/trace/HP/真实退出审计全过；624决策拍、3次B2真命中弹起交还，2801另怪锤1使HP7→5。失败前2761弹起换向已SlamAntic的新怪，rune_transfer.air接近至2793外部步否决，普通交还后受击；同179交Opus沿实数据定位既有接续缺口。走路翻越及moving stomp仍0机会，同iid第二锤实例修正尚未现场触发；178原有限验收保留，不虚报179通过、不重开本局。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4604,3 +4604,15 @@ Sol直接检查sched304/make_replay_late304及实际late1/late2工件，独立�
 当前源码仍1263e9e3，仅原Slam已处理标记按实例和离线Quit审计修正。此次新单局179-L2要验证修后的完整接续，非旧179-L1重试/补坏局，不混正式样本。主要目标仍走路怪翻越到真实交还；另账移动Walk支持踩头、新同怪Slam实例可接、实际DownSlash hit/pogo/交还和责任HP。178已按自然姿态个例有限完成，仅保留回归观察不再立R1后备。0机会不算成功，首损后原停止/原因定位/清理照旧，不为凑翻越继续打。仍使用已核Launcher/WMI单实际worker、相同工程profile/seed/7HP/HP<=6真实Q1/1episode/measure2，runtime/profile/模型/脚本/新budget/新namespace重新绑定；新worker自有OracleLink的input.stats bootstrap现场回执必须重新通过并保存，旧回执只作组件来源。
 
 先把本节同步main/刀口/TV，之后刀口HEAD从新合同冻结至实际全清理。Sol自己新数据目录仅替换原单局脚本的namespace/source/阶段字面量，生命周期AST逆向逐字节核原版；旧原件/NO_RETRY/AA不动。源码和正式P不重做、Opus当前无新实现任务；游戏前STATUS原子true/5s静止/30s pulse，原资源/精确身份背景分类/STOP/无双起门不绕过。运行中只读收信，不并行重计算、不操作Windows核心进程；只有自有worker/场worker/game/registry/golden/Prefs/旧DEMO实际全部核清后false。用户已有无人值守授权持续有效，不另等到场。
+
+#### 179-L2首损退出/实际清理与完整性通过；弹起换怪接刀失败仍同179处理（11-05，进度7.171）
+
+新局sol/demos/w13_walk179L2_20261106T000950Z_1263e9e3，runtime1263e9e3、执行HEAD f126f416；对应analysis同名。唯一WMI/pythonw启动请求58028、实际协调器50616/create1793923857.021308、实际worker40828、game30256，源码冻结期间无提交。原7HP/HP<=6首损Q1/1episode/measure2、同profile/seed，worker自己OracleLink bootstrap input.stats passed，0delay/jitter、HF2/2、pending0原始回执已保存；709源文件+versions.lock独立runtime_identity对应合同710项全同。辅助场worker实际ID未从记录识别，不假造PID；独立核所有pythonw均已退出并结合worker资源close pass，保守核无场进程残留。
+
+2801实际HP7→5，原始damage与hp同帧来源Song Heavy Sentry(3)/Slam Collider1；首损Q1退出，无死亡/尾损/补局。测量fight T7.1322898725s/L2，worker帧时钟10.9s另列。624完整决策拍p50=8.36805/p99=20.601949ms，0gap>=3，不把ordinary慢拍隐藏。真实manifest configuration_complete/unresolved空、trace完整/0overflow、raw连续、HP守恒；Root在新analysis/verification调用当前生产审计complete=true/errors空、3034真实Quit后3035..3068共34帧空hero缺cheat按已核边界分类。原trial全部文件hash前后同。144链回执全direct/lag0；622已观察包609当帧/13晚1帧，日志6处late不等同动作失败，回执仍不当命中证明，实际3次另有hit+pogo/交还。
+
+真实Launcher清理00:12:31.649Z恢复registry149/instances空/restore_pendingfalse/golden与Prefs无差、旧DEMO原SHA/mtime；Root随后独立核58028/50616/40828/30256全部退出、无game/pythonw/自有命令残留后才STATUSfalse。首次只读清理探针误把自身pwsh命令中的tag当残留，未改状态；排除该探针祖先、实际自有PID仍逐一核后通过，原局无因此重跑。ROOT_CLEANUP/NO_RETRY保留，不终止用户/Opus/核心进程。实际全清理后本节才同步main/刀口/TV，源码写权交还Opus。
+
+现场成功是3次当前B2链：2680接受→2687同怪真命中弹起交还，2712→2720、2753→2761亦同335476；均原始DownSlash hit/counter而非模型。2761后L2换到335470，目标已在2747进入SlamAntic；当时英雄在空中。随后rune_transfer.air持续接近，2792仍送R、下一步检查到2794；2793记录外部step blocked并恢复，普通规划DASH(L)+jump接管，2801被335470锤1打。b2_hp_loss正确chain_related=true/recovery_after_failure，旧335476/CC_SLAM来源责任窗到2823；该责任窗不等于碰撞归因，实际损血源是335470，二者分开保留。确切为何既有air_contact未及时出刀/检查何时知道不可接，待Opus沿完整实际2761..2801定因，不先归结性能或加新救场。
+
+本局无另一怪Jump FSM、vault事件0，Walk-supported出刀0（selected strike_support仍为still），因此179走路翻越及moving stomp未覆盖；同iid第二Slam新实例也未自然出现，303修正的现场验收仍未触发。不能把本局3次弹起充这些缺口。178先前自然Cast2有限验收独立保留，本局不替代或重开178。接下来同179单包：先定位已有空中换怪接刀断接，优先最小复用现有入口/接近/交还，必要修改由Opus唯一实现；若要新动作/新模型则先给具体缺口和最小方案由Sol定范围。沿本实际窗口给真实policy/planner/B2/最终发包分支凭据及直接事故回归，不补全NPC模拟器/大矩阵，不为展示成功关掉真实危险或削余量。下一新源/实际P/全部门及新namespace齐后才另行考虑有限实机，当前没有新game gate，本局不重开。
