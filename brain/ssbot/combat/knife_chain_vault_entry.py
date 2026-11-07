@@ -89,17 +89,23 @@ def clean_near_row(sim, target_box, direction, *, walker_v=0., turned_box=None, 
     poly=np.array([[box[0],box[1]],[box[2],box[1]],[box[2],box[3]],[box[0],box[3]]])
     bodies=[box] if turned_box is None else [box,np.asarray(turned_box,float)]
     best=None;contacts=clean=0
+    windows=[]
     for q,(h,p,b) in enumerate(entries):
         pj=off+p+1;flags=ro.flags[q]
         if not np.any(flags[pj:pj+2]&K.F_ATTACKING) or flags[pj-1]&K.F_GROUND:continue
         js=[j for j in range(pj+PM.ACTIVE[0],min(pj+PM.ACTIVE[1]+1,len(flags))) if not flags[j]&K.F_GROUND]
-        if not js:continue
-        shift=walker_v*dt*np.arange(len(flags))
-        rel=ro.pos[q,js]-np.stack([shift[js],np.zeros(len(js))],axis=1)
-        hit=_meets_all(rel,poly)
-        if not hit.any():continue
+        if js:windows.append((q,js))
+    shift=walker_v*dt*np.arange(ro.flags.shape[1])
+    qs=np.array([q for q,js in windows for _ in js],np.int64);fs=np.array([j for _,js in windows for j in js],np.int64)
+    # one array pass over every row's active frames (a row at a time costs ~19 ms: the entry's tick)
+    hit=_meets_all(ro.pos[qs,fs]-np.stack([shift[fs],np.zeros(len(fs))],axis=1),poly) if len(qs) else np.zeros(0,bool)
+    i=0
+    for q,js in windows:
+        h,p,b=entries[q]
+        first=np.flatnonzero(hit[i:i+len(js)]);i+=len(js)
+        if not len(first):continue
         contacts+=1
-        c=js[int(np.argmax(hit))]
+        c=js[int(first[0])]
         bx=ro.box[q,:c+1]
         clear=True
         for body in bodies:
