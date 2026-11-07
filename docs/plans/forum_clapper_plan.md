@@ -1,6 +1,6 @@
 # Forum Clapper 波：下一阶段计划
 
-2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-06，7.203）：Task182/#327（68adfad0）完成增量源码核查，按受测Wanderer、普通BOUNCE表关及明确旧持键脚本关闭配置进入正式P准备。外翻更新、残留符文交还、本拍弹起交还的指定离线证据已核。候选默认关，正式P入口尚待双worker生命周期适配和零tick预检，无新实机许可。**
+2026-10-27 起草（历史审阅与阶段规格保留）。**当前进度（11-06，7.204）：Task182/#327（68adfad0）完成正式离线P，8窗826整拍，双后台真实启动与退出、发键轨迹及原资源条件均核。历史到帧串行复算仍有迟发/跳拍，完整调度门未过；seq257继续核对改变键的少量边界。候选默认关，无新实机放行。**
 
 > **当前协作workflow（用户11-04指定）**：见[完整工作包协作workflow](forum_clapper_workflow.md)。Opus设计/实现/离线调试/生产场景及回修，Sol负责方向、普通独审/集成和正式P/实机；关键方案/假设或重大分歧才调用指定`gpt-6-astra/xhigh`子代理，不默认扩队。当前改码权与活动工作包见7.158；旧“Opus只读、Sol全部实现”限制对交接后的包失效，实验和资源限制保留。
 
@@ -4988,3 +4988,11 @@ Root有限复现从#326现有外翻几何提取真实_resolve_middle和_far_now�
 核收域仅限报告受测Wanderer及完整配置指纹，SSBOT_FORUM_CHAIN_BOUNCE_TABLE=0、TWO_PLAN默认0，正式P显式启用TWO_PLAN且不用INLINE。启动拒绝已有的旧脚本并开项；另以正式配置绑定WINDOWS_PRESS=0，现启动拒绝列表未覆盖它，不据此放行其他旧持键方并开。新目标的可达性和模型外真实变化仍由实际执行检查；已到位后的普通行持位及墙侧回中间不作普遍保证。181表开R1仍原阻挡。
 
 Opus 37场为有限闭环功能回放，54请求中48采用、6明确无方案，挂起样本仅单元。工程暖态事件到可采用p50 16.718ms、p99 33.712ms、1至2拍；首次冷起316.742ms单列，不作正式P预算结论。下一步由Sol在固定executor接入Task182场景适配，使用报告第11节受影响窗口、原始输入/有效配置哈希及实际源码包；check须同一入口构造实际policy，收scene-field和plan两个子进程的PID与创建时刻、模型/源码身份、关闭回执并在退出后核实；零tick启动收据核收后才能进完整tick P。P独占、资源、STOP、真实清理条件保留；当前未开P、未占用资源、未更换可运行基线。#327已处理，Opus暂无新源码任务，普通核收不唤醒。
+
+#### #327正式P与双进程清理核完，串行调度仍有边界待核（11-06，进度7.204）
+
+Sol沿原固定executor新增通用的双worker收据支持（executor_v2，v1字节保留），以小适配器运行已哈希绑定的Opus replay308。控制源68adfad0、720项运行文件、原录像输入和资源helper前后相同；Wanderer/B2、TWO_PLAN=1且非INLINE、BOUNCE_TABLE=0、WINDOWS_PRESS=0为受测域。三套case分别先完成零tick预检与最终清理，再串行进正式窗口。正式父进程P0–15/High/Numba4/EcoQoS关闭，场和L2进程均E24–31/Idle；原资源门各窗无阻挡，日志绑定实际pid/create和plan model/source。全部执行器及子进程退出，实例表为空且restore_pending=false、无game、Prefs对golden无差、golden及旧DEMO SHA/mtime原样；STATUS false、无ACTIVE。原manifest仍有三个历史账本字段与两个worker展示字段未决，后两个来自回放adapter未将已有boost_result传入对应显示键，真实运行配置由RESULT runtime独核，原文件不改。
+
+正式P在analysis/task182_p327_20261106。六个受影响的合成条件窗717拍，加自然录像窗31拍。p_under虽采用了方案，实际走over_head和翻越，不能算钻行；按既有u_prep补唯一窗78拍，确实23个waypoint.go，历史wake条件下该窗0迟0跳。八窗826完整tick/826真实代码经离线framed sink发包，target=f+2逐拍对应，trace完整/overflow0、外来模块/新增编译签名/运行错误0。整拍p50 16.30265ms、p99 21.83282ms、峰23.59250ms（p_guide 2854，tactics 10.4242ms、planner 11.4383ms；tactics是整阶段）。363拍超过16.667ms，均未超33.333ms；不能用单点界替代排队。合成摆位和分歧后的英雄模型只说明有限路径，保留录像敌人不响应的边界。
+
+ROOT_P_AUDIT_FINAL和SERIAL_SCHEDULE_FINAL使用本次全部中间tick的开工/send/结束成本、两份旧实机receive和latest STATE、既有13ms与外推双锚、1ms余量，历史空闲wake 1.292ms情景下112发越过诊断余量、23拍跳过；其中28次越界和2次跳过确实改变原按键，刀口链属主本样本0越界0跳过。该判定用生产首跳时钟做各包压力诊断，既非游戏实收迟包也非重新决策的闭环。k_stay 2888加R越界、2890松R跳过；k_over_out 3009首J跳过而下一拍仍发J；o_wall 2875–77普通前序改键越界、2879刀口首J本身未越界，须看前序是否改了入链状态。完整调度门未通过。seq257让Opus在原Task182内仅核这三个边界的锁存/位置/危险，能证实影响才提最小修法，不作旧窗重跑、无新game许可。
