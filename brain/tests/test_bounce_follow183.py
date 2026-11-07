@@ -665,6 +665,7 @@ def test_owned_middle_released_to_the_seam_reads_the_same_rule(monkeypatch):
         seam = bout.notes('transfer_follow_seam')
         assert seam and seam[-1]['released'] == 'middle' and seam[-1]['new_strike_ok'] == cross
         assert offer is not None and offer.draft.run.v['no_strike'] == (not cross) and offer.draft.run.v.get('follow') is None
+        assert offer.draft.run.v['seam_only'] == cross                     # seq 268: the give-way is for a seam row only
         assert offer.draft.run.link in (('air', 'strike') if cross else ('air',)) and not bout.notes('b2_recovery')
         if not cross:
             assert not offer.mask & (B['D'] | B['A'])
@@ -701,6 +702,122 @@ def test_runs_outside_the_follow_up_keep_the_original_no_hit_semantics(monkeypat
         offers.append(bout.tick())
     assert all(o is not None and not o.draft.run.v['no_strike'] for o in offers)
     assert offers[0].mask == offers[1].mask and offers[0].draft.run.link == offers[1].draft.run.link
+
+
+def _back_prefs(mirror):
+    """The real L2 manual-B output after a near attack (Sol seq 268's probe: test_middle_return313's scene, the hero at
+    y 9.25, a step, then near_attack): the middle return's target is the other one, its crossed body (the attacker) in
+    no_hit and in return_cross. Mirrored: x -> 60 - x, the iids and facings swapped."""
+    from ssbot.combat.tactics import gauntlet as G
+    from tests.test_clapper_priority import scene, step
+    from tests.test_middle_return313 import hero_at, near_attack
+    with pytest.MonkeyPatch.context() as mp:            # test_clapper_priority's manual-B settings, for this call only
+        for k in ('SSBOT_FORUM_CHAIN_NATIVE', 'SSBOT_FORUM_CHAIN_B2', 'SSBOT_FORUM_CHAIN_AIR_MANUAL'):
+            mp.setenv(k, '1')
+        mp.setenv('SSBOT_FORUM_CHAIN_ARM', 'B')
+        mp.setattr(G, 'TWO_FOCUS', True)
+        mp.setattr(G, 'TWO_SPRINTSW', True)
+        mp.setattr(G.jump_behind, 'ENABLED', True)
+        xs, hx, attacker = ((23.14, 40.), 41.79, 8) if mirror else ((20., 36.86), 18.21, 7)
+        tac, ws, fc = scene(xs=xs, hx=hx)
+        hero_at(ws, hx, y=9.25)
+        step(tac, ws, fc)
+        return near_attack(tac, ws, fc, iid=attacker)
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_back_give_way_takes_no_strike_without_a_seam_row(monkeypatch, mirror):
+    # Sol seq 268's counterexample (fixture and model, not claimed live): the real L2 back output into B2's follow-up on the
+    # bounced attacker; the two 13.267 u apart (wider than CLOSE_PAIR_GAP_U: no seam geometry now), danger on the whole
+    # floor. #338 still chose the ordinary down-slash at 2983 there, its 2989 contact outside the attacker's root. The
+    # give-way is for a seam row only: no row on any side now, positioning only. Controls: without any no_hit that
+    # ordinary strike stands (the original contract); another source on the same iid takes none either.
+    prefs = _back_prefs(mirror)
+    a, o, out = (8, 7, 1) if mirror else (7, 8, -1)
+    assert prefs.target == o and prefs.no_hit == prefs.return_cross == frozenset({a})
+    m = (lambda x: 60. - x) if mirror else (lambda x: x)
+
+    def bout(p):
+        b = Bout(monkeypatch, bounced=(a, m(20.), out), other=(o, m(36.86), out), hero=(m(18.21), 9.25, -7.),
+                 danger=[(-80., 3., 80., 5.2)], link='air', tail_done=True)
+        b.ents[1]['fsms'][0]['t'] = 0.
+        b.prefs = p
+        return b
+
+    free = bout(replace(prefs, no_hit=frozenset(), return_cross=frozenset()))
+    s = free.state(free.sim())
+    assert abs(T.two_gap(s, a).width - 13.267) < 1e-3 and T.seam_geometry(s, free.goal, a) is None
+    first = free.tick()
+    assert first is not None and first.draft.run.link == 'strike' and first.mask & B['D']
+    row = first.draft.run.v['row']
+    assert first.draft.run.v['seam_inner'] is None and row['contact_frame'] == F0 + 6
+    # a straight fall (no side key in the row): its contact at her x 18.21 (41.79), outside the attacker's root 20 (40)
+    assert row['approach_direction'] == 0 and not any(int(k) & LR for k in row['masks'])
+    assert (m(18.21) - m(20.)) * out > 0
+    for p, kw in ((prefs, 'seam_only'), (replace(prefs, return_cross=frozenset()), 'no_strike')):
+        b = bout(p)
+        log = b.run(12)
+        sent = [r for r in log if r['offer'] is not None]
+        assert sent and all(r['link'] == 'air' and not r['mask'] & (B['D'] | B['A']) for r in sent)
+        assert all(r['offer'].draft.run.v[kw] and r['offer'].draft.run.v['seam_inner'] is None for r in sent)
+        assert not b.notes('transfer_follow_seam') and b.notes('transfer_follow_seam_unavailable')
+
+
+def test_face_hook_takes_no_start_from_the_back_give_way(monkeypatch):
+    # Sol seq 268: with FACE_HOOK explicitly on, the middle return's give-way starts no face hook (a seam down-slash row
+    # only). A cross-target follow-up Run (L2 switched to 7 after the bounce off 8, a close pair, so 7 is not the caster and
+    # the hook is in reach) with the face check forced to pass, danger on the whole floor: with no limit the hook starts
+    # (claw link, its plan in the Run) and reaches the send gate (the fixture has no hooked model ray, so the hook's own
+    # step gate hands back there); under the back-only give-way no hook and no face check, the seam air link instead.
+    monkeypatch.setattr(T, 'face_hook_check', lambda *a, **k: (True, 'fixture: forced pass', {'bb_press': 0.}))
+    real, drafts = T.propose, []
+
+    def propose(*a, **k):
+        out = real(*a, **k)
+        drafts.append((k, out))
+        return out
+
+    monkeypatch.setattr(T, 'propose', propose)
+    offers, hook_gate = [], []
+    seven = frozenset({7})
+    for no_hit, cross, kw in ((frozenset(), frozenset(), {}), (seven, seven, {'seam_only': True}),
+                              (seven, frozenset(), {'no_strike': True})):
+        bout = Bout(monkeypatch, danger=[(0., 3.0, 60., 5.2)], link='air', tail_done=True)
+        bout.goal = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
+        bout.n._transfer_goal = bout.goal
+        bout.n.runner.run.v.update(iid=7, follow_close=True)
+        bout.n.runner.chains['rune_transfer'].cfg['FACE_HOOK'] = True
+        bout.prefs = GoalPrefs(mode='RUSH', stance_x=31., weights={}, target=8, no_hit=no_hit, return_cross=cross)
+        drafts.clear()
+        offers.append(bout.tick())
+        hook_gate.append([e['reason'] for e in bout.notes('rune_transfer_unchecked') if 'hook' in e['reason']])
+        k, made = drafts[0]
+        run = made[0].run
+        assert k == kw
+        if not kw:
+            assert run.link == 'claw' and run.v['cs'] is not None and run.v['face_hook_check']['ok']
+        else:
+            assert run.link == 'air' and run.v['seam_inner'][1] != 0 and not int(made[3]) & (B['CLAW'] | B['D'])
+            assert run.v['cs'] is None and 'face_hook_check' not in run.v
+    assert hook_gate[0] == ['transfer hook step unchecked: hooked model ray'] and offers[0] is None
+    assert not hook_gate[1] and not hook_gate[2]
+    assert all(o is None or o.draft.run.link in ('air', 'strike') for o in offers[1:])
+
+
+def test_the_give_way_is_read_every_tick(monkeypatch):
+    # seam_only is this tick's only: in Sol's wide-gap shape (no seam row) the back-only tick takes no strike, the next tick
+    # with nothing in no_hit takes the ordinary down-slash again (the original contract)
+    prefs = _back_prefs(False)
+    bout = Bout(monkeypatch, bounced=(7, 20., -1), other=(8, 36.86, -1), hero=(18.21, 9.25, -7.),
+                danger=[(-80., 3., 80., 5.2)], link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    bout.prefs = prefs
+    first = bout.tick()
+    assert first is not None and first.draft.run.link == 'air' and first.draft.run.v['seam_only']
+    bout.prefs = replace(prefs, no_hit=frozenset(), return_cross=frozenset())
+    second = bout.tick()
+    assert second is not None and second.draft.run.link == 'strike' and not second.draft.run.v['seam_only']
+    assert second.mask & B['D']
 
 
 @pytest.mark.parametrize('mirror', [False, True])

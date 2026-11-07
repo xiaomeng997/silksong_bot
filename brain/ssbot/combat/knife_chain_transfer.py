@@ -1123,6 +1123,9 @@ def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or x.v.get("no_strike") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+        # Task 183 seq 268: the middle return's give-way (seam_only) is for a seam row only: no seam_inner this tick (not a
+        # close pair now), no row on any side; a seam row is held to the target's inner side below (seam_contact)
+        if x.v.get("seam_only") and not x.v.get("seam_inner"):return None
         from . import pogo_model as PM
         inner,rejects=seam_contact(x)
         if control(x.obs.e)[0]=="Walk":
@@ -1233,6 +1236,7 @@ def register(prims):
     @prims.action("transfer_face_hook",doc="once per Run: an aimed Clawline at the next mask frame after the cheap face check; not a hit receipt")
     def face_hook(x):
         v=x.v
+        if v.get("seam_only"):return None   # Task 183 seq 268: the middle return's give-way is a seam down-slash row only
         if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("no_strike") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
                 or x.obs.ground or v.get("iid")==v.get("caster")):return None
         toward=1 if v.get("side")==B["R"] else -1 if v.get("side")==B["L"] else 0
@@ -1288,7 +1292,7 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None,follow_release=False,no_strike=False):
+            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False):
     """One observed-distance recipe and a two-frame external path.
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
@@ -1300,6 +1304,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     this tick: the seam approach and its witnessed inner down-slash, the route itself dropped.
     no_strike (Task 183 seq 267): no NEW strike this tick (no down-slash row, no face hook): the approach / positioning
     keys only; a strike row already chosen goes on (its absolute keys).
+    seam_only (Task 183 seq 268): a new strike this tick only as a seam down-slash row (this tick's seam_inner, its first
+    contact on the inner side: seam_contact); without seam_inner no row, and no face hook either way.
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
@@ -1418,6 +1424,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables.update(p.variables());variables["air_entry"]=air_entry
     if follow_release:variables["follow"]=None
     variables["no_strike"]=bool(no_strike)   # Task 183 seq 267: this tick's only (read by the stomp plan and the face hook)
+    variables["seam_only"]=bool(seam_only)   # Task 183 seq 268: this tick's only (the same two readers)
     variables["follow_close"]=close   # Task 183 seq 262: the two were close when this Run started (a BOUNCE Run)
     # Task 183 seq 263/264: this tick's inner-side condition for a new seam strike row (None: not a seam tick): the
     # target's observed root, the inner direction from the roots' order (0 unknown: every row turned down), the aim;

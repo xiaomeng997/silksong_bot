@@ -1028,11 +1028,11 @@ class NativeManualAirChain(NativeChainB2):
                            owner="current owner keeps the keys",reason="hero in a dash or relinquished motion")
                 return None
         rs=getattr(forecast,"rs",None)
-        seam_ban=active and self._seam_strike_banned(prefs,target,run)
+        strike_kw=self._seam_strike_kw(prefs,target,run) if active else {}
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
                               **({"idle_evidence":self._idle_ev} if self._idle_ev else {}),
                               **({"approach_only":True} if approach_only else {}),
-                              **({"no_strike":True} if seam_ban else {}))
+                              **strike_kw)
         if made is None or made[0] is None:
             if active:self._recover((made[1].ended_reason if made is not None else None)
                                     or "rune transfer ended or target began a new move before real bounce",f)
@@ -1250,14 +1250,18 @@ class NativeManualAirChain(NativeChainB2):
                         "real hit+bounce reopens tactical target knife; observed source hammer tail retained"),
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})
 
-    def _seam_strike_banned(self,prefs,target,run):
-        """Task 183 seq 267 (Sol; the person's middle rule): an active bounce follow-up Run (follow_scope) takes no NEW strike
-        on a target in L2's no_hit, but for the one source that may give way to its witnessed inner continuation: the
-        manual-B middle return crossing that body and nothing else banning it (GoalPrefs.return_cross). Any other no_hit
-        source on the same iid keeps it (positioning only, or the existing gates hand back); other Runs, the first
-        transfer admission and a strike row already chosen are as before."""
-        return bool(target in getattr(prefs,"no_hit",()) and target not in getattr(prefs,"return_cross",())
-                    and transfer.follow_scope(self._transfer_goal,target,bool(run.v.get("follow_close"))))
+    def _seam_strike_kw(self,prefs,target,run):
+        """Task 183 seq 267/268 (Sol; the person's middle rule): propose's new-strike limit for an active bounce follow-up
+        Run (follow_scope) on a target in L2's no_hit. Only the manual-B middle return crossing that body with nothing else
+        banning it (GoalPrefs.return_cross) gives way, and only to a seam down-slash row (seam_only: propose's seam_inner
+        from the current close-pair geometry with a known inner side, the row's first contact checked on that side at its
+        own contact index against the strike witness, seam_contact); no other row, no face hook. Any other no_hit source on
+        the same iid: no new strike at all (no_strike: positioning only, or the existing gates hand back). Not in no_hit, or
+        not a follow-up Run: no limit (the original semantics). The first transfer admission and a strike row already
+        chosen are as before."""
+        if (target not in getattr(prefs,"no_hit",())
+                or not transfer.follow_scope(self._transfer_goal,target,bool(run.v.get("follow_close")))):return {}
+        return {"seam_only":True} if target in getattr(prefs,"return_cross",()) else {"no_strike":True}
 
     def _follow_due(self,goal,draft,run,active,ground,approach_only):
         """Task 183 (Sol seq 261): this tick decides the bounce follow-up: a real bounce off the target's own slam (two
@@ -1461,7 +1465,8 @@ class NativeManualAirChain(NativeChainB2):
         iid=made[1].iid
         self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(v.get("side") or 0),
                    link=link,mask=int(made[3]),target_frame=f+2,inner=v.get("seam_inner"),
-                   new_strike_ok=not v.get("no_strike"),l2_no_hit=iid in getattr(prefs,"no_hit",()),
+                   new_strike_ok=not v.get("no_strike"),seam_rows_only=bool(v.get("seam_only")),
+                   l2_no_hit=iid in getattr(prefs,"no_hit",()),
                    return_cross_only=iid in getattr(prefs,"return_cross",()),
                    strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","inner_bound","approach_direction")},
                    outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),gap_standable=bool(stand),released=released,
@@ -1486,7 +1491,7 @@ class NativeManualAirChain(NativeChainB2):
         if keep in transfer.FOLLOW_LINKS:   # an owned middle (seq 265) or outer landing (seq 266) route, released
             made=transfer.propose(self.runner,state,game,sim,plan.iid,False,self._context[3],self._transfer_finished,
                                   self._transfer_goal,follow_release=True,
-                                  no_strike=run is not None and self._seam_strike_banned(prefs,plan.iid,run),
+                                  **(self._seam_strike_kw(prefs,plan.iid,run) if run is not None else {}),
                                   **({"idle_evidence":self._idle_ev} if self._idle_ev else {}))
             if made is None or made[0] is None:
                 self._note("transfer_follow_seam_unavailable",frame=f,link=keep,

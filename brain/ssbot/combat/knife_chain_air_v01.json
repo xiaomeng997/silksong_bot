@@ -1116,6 +1116,7 @@
       "seam_inner": null,
       "seam_rejects": null,
       "no_strike": false,
+      "seam_only": false,
       "bounced": false
     },
     "cfg": {
