@@ -51,6 +51,9 @@ class Applied:
     scene: str | None = None
     suppress_hits: bool = False             # no hit on either Clapper and no entry attack this tick
     no_hit: frozenset = frozenset()         # more no-hit targets (a body passed over, the jumper)
+    cross_no_hit: frozenset = frozenset()   # Task 183 seq 267: the part of no_hit that is the ordinary middle return's
+    #                                         crossed body (MiddleReturn: no attack credit while crossing it); the
+    #                                         application records it apart (GoalPrefs.return_cross) when no other rule bans it
 
 
 class Tactic:
@@ -481,9 +484,9 @@ class MiddleReturn(Tactic):
         if sc.events.get(self.event) is None:
             return None
         pose = sc.back_pose = return_pose(sc.tac, target, sc.geo, sc.hx)
+        crossed = frozenset() if pose["crossed"] == g.target else frozenset({pose["crossed"]})
         return Applied(stance=pose["stance"], style="stomp" if pose["posture"] == "air" else None,
-                       scene="middle return " + pose["posture"],
-                       no_hit=frozenset() if pose["crossed"] == g.target else frozenset({pose["crossed"]}))
+                       scene="middle return " + pose["posture"], no_hit=crossed, cross_no_hit=crossed)
 
     def finish(self, sc, rule, won, g, out):
         pose = sc.back_pose if won else None

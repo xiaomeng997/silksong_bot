@@ -206,6 +206,9 @@ class GoalPrefs(TacticPrefs):
     waypoint: object | None = None        # SSBOT_FORUM_TWO_PLAN: knife_chain_waypoint.WaypointGoal of the running plan phase
     return_request: ReturnRequest | None = None   # SSBOT_FORUM_TWO_RETURN_AIR (#316, default off): the air return for
     #                                               the native B2 owner's existing SWITCH execution (knife_chain_air_native)
+    return_cross: frozenset = frozenset()  # Task 183 seq 267: iids in no_hit ONLY because the manual-B middle return
+    #                                        crosses them (clapper_priority, Applied.cross_no_hit); no_hit itself is unchanged.
+    #                                        Read only by the B2 bounce follow-up's seam strike (knife_chain_air_native)
 
 
 class Tactics:

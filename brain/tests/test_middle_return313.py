@@ -52,6 +52,22 @@ def test_after_a_near_attack_she_goes_back_between_on_the_ground():
     assert tac.last["clapper_winner"]["rule"] != "back"
 
 
+def test_the_crossed_body_is_recorded_apart_only_while_no_other_source_bans_it():
+    # Task 183 seq 267 (Sol): the ordinary return's crossed body stays in no_hit (the planner's output as before);
+    # GoalPrefs.return_cross names it only while no other source bans the same iid (here an upstream one)
+    from ssbot.combat.tactics.modes import GoalPrefs
+    tac, ws, fc = scene(xs=(20., 34.), hx=15.); step(tac, ws, fc)
+    out = near_attack(tac, ws, fc)
+    assert tac.last["clapper_winner"]["rule"] == "back" and tac.last["clapper_back"]["crossed"] == 7
+    assert 7 in out.no_hit and out.return_cross == frozenset({7})
+    ws.stamp.t_game_s += 1/60.
+    both = tac._decide(ws, fc, GoalPrefs(mode="ENGAGE", stance_x=27., weights={}, hit_w={7: 1., 8: 1.},
+                                         no_hit=frozenset({7})))
+    assert tac.last["clapper_winner"]["rule"] == "back" and 7 in both.no_hit and both.return_cross == frozenset()
+    ws.stamp.t_game_s += 1/60.
+    assert step(tac, ws, fc).return_cross == frozenset({7})                 # every tick on its own
+
+
 def test_crossing_a_root_in_the_air_is_not_yet_back_and_a_closing_gap_turns_it_to_the_air_pose():
     # live 2812: over the passed body's inner half in the air the gap was still open, then it closed (the other one
     # walked in): the return goes on, now at the seam above the target

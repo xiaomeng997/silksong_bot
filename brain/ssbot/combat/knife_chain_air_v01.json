@@ -1115,6 +1115,7 @@
       "follow_close": false,
       "seam_inner": null,
       "seam_rejects": null,
+      "no_strike": false,
       "bounced": false
     },
     "cfg": {

@@ -177,7 +177,7 @@ def _apply(sc, won, rule):
     hw[g.target] = max(hw.get(g.target, 0.), tac.rules.target_hit_w * tac.rules.priority.get(CLAPPER, 1.))
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
                   weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=rule,
-                  vocab=frozenset(prefs.vocab) | g.vocab)
+                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset())
     if ap.suppress_hits or (target.family in JUMPS and target.state in AIR):
         # no hit while backing off (the winner's suppression), and never on a target in its jump's flight
         out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if ap.suppress_hits else {g.target}),
@@ -190,7 +190,11 @@ def _apply(sc, won, rule):
             out = replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - {g.target},
                           no_pogo=frozenset(out.no_pogo) - {g.target}, ground_first=frozenset(out.ground_first) - {g.target})
         if ap.no_hit:
-            out = replace(out, no_hit=frozenset(out.no_hit) | ap.no_hit)
+            # Task 183 seq 267: the middle return's crossed body (Applied.cross_no_hit) is recorded apart when no other
+            # source bans it (every earlier one is in out.no_hit, the winner's own others in ap.no_hit; nothing after
+            # this adds to no_hit); the merged no_hit is as before
+            others = frozenset(out.no_hit) | (frozenset(ap.no_hit) - frozenset(ap.cross_no_hit))
+            out = replace(out, no_hit=frozenset(out.no_hit) | ap.no_hit, return_cross=frozenset(ap.cross_no_hit) - others)
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
     for tactic in sc.table.tactics:
         out = tactic.finish(sc, rule, tactic is won, g, out)

@@ -12,6 +12,7 @@ current bodies and the named dangers, every frame, all owners (the production Ra
 runs NativeManualAirChain._transfer_offer -> knife_chain_transfer.propose on the real chain table; the offered key is
 applied by the hero model (the in-flight prefix one frame later), so the Run's own route meets the actual landing."""
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -566,6 +567,140 @@ def test_seam_strike_on_the_inner_side_still_goes(monkeypatch, mirror):
     assert offer is not None and offer.draft.run.link == 'strike' and note['link'] == 'strike'
     assert strike['contact_frame'] == F0 + 6 and strike['inner_bound'] == root and (strike['contact_x'] - root) * sign >= 0
     assert note['mask'] == offer.mask and note['target_frame'] == F0 + 2 and not note['outer_rejected']
+
+
+def _no_hit(bout, return_cross):
+    # Task 183 seq 267: L2's no_hit on the bounced one; GoalPrefs.return_cross names it when the ordinary middle return's
+    # crossed body is its only source, empty when another source bans the same iid
+    iid = frozenset({bout.bounced})
+    return replace(bout.prefs, no_hit=iid, return_cross=iid if return_cross else frozenset())
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_back_only_no_hit_keeps_the_witnessed_inner_seam_strike(monkeypatch, mirror):
+    # Task 183 seq 267 (Sol; the person's middle rule): the ordinary middle return crossing the bounced body puts it in L2's
+    # no_hit; that source alone gives way to the witnessed inner continuation of the follow-up Run B2 already owns: the
+    # same strike row as with no no_hit at all (its model contact kept)
+    free = _seam_bout(monkeypatch, mirror, 24.21 if mirror else 36.75)
+    want = free.tick()
+    bout = _seam_bout(monkeypatch, mirror, 24.21 if mirror else 36.75)
+    bout.prefs = _no_hit(bout, return_cross=True)
+    offer = bout.tick()
+    note = bout.notes('transfer_follow_seam')[0]
+    assert want.draft.run.link == 'strike' and offer is not None and offer.draft.run.link == 'strike'
+    assert offer.mask == want.mask and offer.draft.run.v['row']['contact_frame'] == F0 + 6
+    assert offer.draft.run.v['row']['masks'] == want.draft.run.v['row']['masks']
+    assert note['new_strike_ok'] and note['l2_no_hit'] and note['return_cross_only']
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_another_no_hit_source_on_the_same_iid_takes_no_new_strike(monkeypatch, mirror):
+    # the same shape with another no_hit source on the same iid (return_cross empty): no new strike row is chosen or sent;
+    # the seam approach keeps positioning only (no down-slash, no attack key) and once her step meets the target body the
+    # existing step gate hands back, failure responsibility kept
+    bout = _seam_bout(monkeypatch, mirror, 24.21 if mirror else 36.75)
+    bout.prefs = _no_hit(bout, return_cross=False)
+    log = bout.run(12)
+    seam = bout.notes('transfer_follow_seam')
+    assert seam and all(not e['new_strike_ok'] and e['l2_no_hit'] and not e['return_cross_only'] for e in seam)
+    assert all(e['strike'] is None and e['link'] == 'air' for e in seam)
+    sent = [r for r in log if r['offer'] is not None]
+    assert sent and all(r['link'] == 'air' and not r['mask'] & (B['D'] | B['A']) for r in sent)
+    assert all(r['offer'].draft.run.v['no_strike'] for r in sent)
+    assert bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+    assert bout.n._failure_exposures[0].move == bout.goal.responsibility
+
+
+def test_the_new_strike_ban_is_read_every_tick(monkeypatch):
+    # no_strike is this tick's only (L2's no_hit and return_cross are fresh every tick): the other source gone on the next
+    # tick, the witnessed inner strike row goes again
+    bout = _seam_bout(monkeypatch, False, 36.75)
+    bout.prefs = _no_hit(bout, return_cross=False)
+    first = bout.tick()
+    assert first is not None and first.draft.run.link == 'air' and first.draft.run.v['no_strike']
+    bout.prefs = _no_hit(bout, return_cross=True)
+    second = bout.tick()
+    assert second is not None and second.draft.run.link == 'strike' and not second.draft.run.v['no_strike']
+    assert second.mask & B['D']
+
+
+def test_a_sent_seam_strike_goes_on_when_another_source_bans_its_target(monkeypatch):
+    # neighbour: a strike row already chosen and sent (back-only no_hit) finishes under its own ownership when another
+    # no_hit source on the same iid appears after it: the same absolute keys (the strike link never re-plans)
+    free = _seam_bout(monkeypatch, False, 36.75)
+    free.prefs = _no_hit(free, return_cross=True)
+    want = free.run(6)
+    bout = _seam_bout(monkeypatch, False, 36.75)
+    bout.prefs = _no_hit(bout, return_cross=True)
+    assert bout.tick().draft.run.link == 'strike'
+    bout.prefs = _no_hit(bout, return_cross=False)
+    log = bout.run(5)
+    assert [r['link'] for r in log] == ['strike'] * 6 and [r['mask'] for r in log] == [r['mask'] for r in want]
+    assert any(r['mask'] & B['D'] for r in log)
+
+
+def test_first_transfer_admission_still_reads_every_no_hit_source():
+    # neighbour: before B2 takes the keys (no Run yet) the first transfer admission is as before: a target in L2's no_hit
+    # is not admitted, the ordinary return's crossed body included (the seq 267 exemption is only the owned follow-up's)
+    from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+    from tests.test_knife_chain_transfer import cast_scene, load_runner
+    for no_hit, cross in ((frozenset(), frozenset()), (frozenset({8}), frozenset({8})), (frozenset({8}), frozenset())):
+        n = NativeManualAirChain(runner_factory=load_runner, probe_ref='seq267-admission'); n.reset(0, start_frame=999)
+        s = cast_scene()
+        n._transfer_goal = T.observe_goal(s, None, n.runner.chains['rune_transfer'].cfg, set())
+        prefs = GoalPrefs(mode='RUSH', stance_x=38., weights={}, target=8, no_hit=no_hit, return_cross=cross)
+        assert n.goal_preferences(s, prefs, handoff=True).target == 8
+        assert n._transfer_ready == (not no_hit) and n.runner.run is None
+
+
+def test_owned_middle_released_to_the_seam_reads_the_same_rule(monkeypatch):
+    # the released route (an owned middle whose gap closes, seq 265): another no_hit source on the same iid gives the seam
+    # approach without a new strike; the ordinary return's crossed body alone does not ban it
+    for cross in (True, False):
+        bout = Bout(monkeypatch)
+        assert bout.tick().draft.run.link == 'middle'
+        fit_pose(bout.ents[0], x=33.5)
+        bout.prefs = _no_hit(bout, return_cross=cross)
+        offer = bout.tick()
+        seam = bout.notes('transfer_follow_seam')
+        assert seam and seam[-1]['released'] == 'middle' and seam[-1]['new_strike_ok'] == cross
+        assert offer is not None and offer.draft.run.v['no_strike'] == (not cross) and offer.draft.run.v.get('follow') is None
+        assert offer.draft.run.link in (('air', 'strike') if cross else ('air',)) and not bout.notes('b2_recovery')
+        if not cross:
+            assert not offer.mask & (B['D'] | B['A'])
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_legal_outer_fallback_is_unchanged_whatever_source_bans_the_target(monkeypatch, mirror):
+    # neighbour: a standable gap whose middle routes are blocked, the seam step turned down by its own gate: the legal
+    # outer landing goes as before (no strike in it), whichever source bans the bounced one
+    for cross in (True, False):
+        bout, _ = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True)
+        bout.ents[1]['fsms'][0]['t'] = 0.
+        bout.block_steps = True
+        bout.prefs = _no_hit(bout, return_cross=cross)
+        offer = bout.tick()
+        assert bout.notes('transfer_follow_seam')[0]['new_strike_ok'] == cross
+        blocked = bout.notes('transfer_follow_seam_blocked')
+        assert len(blocked) == 1 and blocked[0]['fallback'] == ('left_landing' if mirror else 'right_landing')
+        out = B['L'] if mirror else B['R']
+        assert offer is not None and offer.draft.run.link == 'land' and offer.mask & LR == out
+        assert not bout.notes('b2_recovery')
+
+
+def test_runs_outside_the_follow_up_keep_the_original_no_hit_semantics(monkeypatch):
+    # seq 267 authorises this seam continuation only: an active Run outside the bounce follow-up scope (the distant cross
+    # continuation) reads L2's no_hit as before (it keeps its target; no new-strike ban)
+    offers = []
+    for no_hit in (frozenset(), frozenset({7})):
+        bout = Bout(monkeypatch, other=(7, 20., 1))
+        bout.goal = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
+        bout.n._transfer_goal = bout.goal
+        bout.n.runner.run.v.update(iid=7)
+        bout.prefs = GoalPrefs(mode='RUSH', stance_x=31., weights={}, target=7, no_hit=no_hit)
+        offers.append(bout.tick())
+    assert all(o is not None and not o.draft.run.v['no_strike'] for o in offers)
+    assert offers[0].mask == offers[1].mask and offers[0].draft.run.link == offers[1].draft.run.link
 
 
 @pytest.mark.parametrize('mirror', [False, True])

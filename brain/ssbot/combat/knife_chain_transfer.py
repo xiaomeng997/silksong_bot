@@ -1122,7 +1122,7 @@ def register(prims):
 
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
-        if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+        if x.v.get("_approach_only") or x.v.get("no_strike") or not hasattr(x.obs,"sim") or x.obs.ground:return None
         from . import pogo_model as PM
         inner,rejects=seam_contact(x)
         if control(x.obs.e)[0]=="Walk":
@@ -1233,7 +1233,7 @@ def register(prims):
     @prims.action("transfer_face_hook",doc="once per Run: an aimed Clawline at the next mask frame after the cheap face check; not a hit receipt")
     def face_hook(x):
         v=x.v
-        if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
+        if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("no_strike") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
                 or x.obs.ground or v.get("iid")==v.get("caster")):return None
         toward=1 if v.get("side")==B["R"] else -1 if v.get("side")==B["L"] else 0
         ents=getattr(x.obs,"ents",None)
@@ -1288,7 +1288,7 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None,follow_release=False):
+            idle_evidence=None,follow_release=False,no_strike=False):
     """One observed-distance recipe and a two-frame external path.
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
@@ -1298,6 +1298,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     target's (idle_time_of; a hit since the instance's entry: no witness).
     follow_release (Task 183 seq 265): an owned bounce follow-up route (a FOLLOW_LINKS link) is released to the air link
     this tick: the seam approach and its witnessed inner down-slash, the route itself dropped.
+    no_strike (Task 183 seq 267): no NEW strike this tick (no down-slash row, no face hook): the approach / positioning
+    keys only; a strike row already chosen goes on (its absolute keys).
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
@@ -1415,6 +1417,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
     if follow_release:variables["follow"]=None
+    variables["no_strike"]=bool(no_strike)   # Task 183 seq 267: this tick's only (read by the stomp plan and the face hook)
     variables["follow_close"]=close   # Task 183 seq 262: the two were close when this Run started (a BOUNCE Run)
     # Task 183 seq 263/264: this tick's inner-side condition for a new seam strike row (None: not a seam tick): the
     # target's observed root, the inner direction from the roots' order (0 unknown: every row turned down), the aim;
