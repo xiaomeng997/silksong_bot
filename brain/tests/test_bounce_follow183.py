@@ -81,17 +81,19 @@ class Bout:
         scans = self.scans
 
         class Geo:
-            def __init__(self, *a):
-                pass
+            def __init__(self, forecast, f, move, instance):
+                self.target = move.target_iid
 
             @staticmethod
             def ref(path):
                 return f'{path.origin}:{path.through}'
 
-            def _scan(self, path, limit):
+            def _scan(self, path, limit, external_only=False):
                 hits = []
                 for i, b in enumerate(np.asarray(path.box)[:limit + 1]):
                     for x0, y0, x1, y1, iid, kind in boxes:
+                        if external_only and iid == self.target and kind != 'delayed':
+                            continue
                         if b[0] < x1 and b[2] > x0 and b[1] < y1 and b[3] > y0:
                             hits.append(PathContact(path.origin + i, iid, kind))
                 return ContactScan(self.ref(path), path.origin, path.origin + limit, tuple(hits), 'fixture: bodies + dangers')
@@ -104,7 +106,8 @@ class Bout:
                 return [self.scan(p) for p in paths]
 
             def preflight(self, path):
-                return self._scan(path, len(path.commands))
+                # as B2Geometry.preflight: other owners and every delayed hazard, not the target's own body
+                return self._scan(path, len(path.commands), external_only=True)
 
         monkeypatch.setattr(N, 'B2Geometry', Geo)
         monkeypatch.setattr(n, 'queued_prefix', lambda *a: (int(self.prefix), 'fixture: the sent prefix'))
@@ -311,6 +314,49 @@ def test_an_air_run_without_a_witness_still_takes_an_open_gap(monkeypatch):
     bout.ents[1]['fsms'][0]['t'] = 1.2
     assert bout.tick() is None
     assert bout.notes('transfer_no_witness_handback') and bout.notes('b2_recovery')
+
+
+def _seam_bout(monkeypatch, mirror, hero_x):
+    # bodies overlap (gap -0.233), the bounced one in Idle from t 0; she is falling (vy -7) from 9.25
+    if mirror:
+        bout = Bout(monkeypatch, bounced=(8, 24.1, -1), other=(7, 27.46, -1), hero=(hero_x, 9.25, -7.0), link='air', tail_done=True)
+    else:
+        bout = Bout(monkeypatch, other=(7, 33.5, 1), hero=(hero_x, 9.25, -7.0), link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    return bout
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_seam_strike_turns_down_a_row_that_first_meets_the_outer_side(monkeypatch, mirror):
+    # Sol seq 263: she is over the bounced one's outer (front) side; steering the key inward alone left the same row's
+    # early outer contact (2989, x 38.155 with the root at 36.86). Now no row whose first contact is outside the target's
+    # root / body centre: she keeps positioning inward, and once her step meets the target body the chain hands back
+    bout = _seam_bout(monkeypatch, mirror, 22.31 if mirror else 38.65)
+    log = bout.run(12)
+    seam = [e for e in bout.notes('transfer_follow_seam')]
+    first = seam[0]
+    bound, sign, aim = first['inner']
+    assert (bound, sign) == ((24.1, 1) if mirror else (36.86, -1))
+    assert first['strike'] is None and first['outer_rejected']
+    assert all((r['contact_x'] - bound) * sign < 0 for e in seam for r in e['outer_rejected'] or ())
+    if not mirror:
+        assert any(r['contact_frame'] == 2989 and abs(r['contact_x'] - 38.155) < 1e-3 for r in first['outer_rejected'])
+    inward = B['R'] if mirror else B['L']
+    sent = [r for r in log if r['offer'] is not None]
+    assert sent and all(r['offer'].draft.run.link == 'air' and r['mask'] & LR == inward and not r['mask'] & B['A'] for r in sent)
+    assert bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1   # hand-back, responsibility kept
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_seam_strike_on_the_inner_side_still_goes(monkeypatch, mirror):
+    # she is over the bounced one's back (inner side) next to the seam: its witnessed strike row goes, first contact inside
+    bout = _seam_bout(monkeypatch, mirror, 24.21 if mirror else 36.75)
+    offer = bout.tick()
+    note = bout.notes('transfer_follow_seam')[0]
+    bound, sign, aim = note['inner']
+    assert offer is not None and offer.draft.run.link == 'strike' and note['link'] == 'strike'
+    assert note['strike']['contact_frame'] == F0 + 6 and (note['strike']['contact_x'] - bound) * sign >= 0
+    assert note['mask'] == offer.mask and note['target_frame'] == F0 + 2 and not note['outer_rejected']
 
 
 def test_tail_and_sent_strike_keep_their_ownership(monkeypatch):

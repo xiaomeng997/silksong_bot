@@ -1113,6 +1113,8 @@
       "row": null,
       "follow": null,
       "follow_close": false,
+      "seam_inner": null,
+      "seam_rejects": null,
       "bounced": false
     },
     "cfg": {

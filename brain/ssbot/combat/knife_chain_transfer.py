@@ -530,10 +530,12 @@ def walk_body_support(enemy,frames,hero):
     return support if np.isfinite(first[0]).all() else None
 
 
-def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False):
+def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False,contact_ok=None,rejects=None):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
     clean (Task 182, the plans' over route, Sol seq 255 F2): a row whose hero box meets the body at all before its contact is no
     row (51 real DownSlash hits in the bots' recordings: none had her box in the body before the hit).
+    contact_ok (Task 183 seq 263, the seam strike): a predicate on her x at the row's first contact frame; a row whose first
+    contact fails it is no row in that direction (listed in rejects: direction, contact frame, her x).
 
     Try the existing toward row first. Only on failure try releasing direction
     and then countersteering. These are three fixed rows, not a timing search.
@@ -580,8 +582,13 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False):
                 # a moving body is always margin-checked on its hull up to the target-contact exemption
                 if (attacking_target or support is not None) and grazes_body(ro.box[i],hull,j-2):break
                 if clean and enters_body(ro.box[i],hull,j):break
+                cx=float(ro.pos[i,j,0])
+                if contact_ok is not None and not contact_ok(cx):
+                    if rejects is not None:rejects.append({"direction":int(d),"contact_frame":int(sim.fo+j),"contact_x":cx})
+                    break
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
                            contact_velocity=ro.vel[i,j].tolist())
+                if contact_ok is not None:row["contact_x"]=cx   # the seam strike's predicted contact (the record)
                 if support is not None:
                     row.update(support=support.kind,
                                walk={k:v for k,v in support.info.items() if k!="steps"})
@@ -784,24 +791,38 @@ def standable(gap,hero_box):
     return bool(gap is not None and hero_box is not None and gap.width>=hero_box[2]-hero_box[0]+2*MIDDLE_PAD_U)
 
 
-def seam_aim(state,goal,target,close=False):
-    """Task 183: no standable gap: the x the existing witnessed down-slash is aimed from, on the TARGET's inner side (the
-    side facing the other Clapper) next to the seam: her centre her half width plus MIDDLE_PAD_U clear of the other
-    body's near edge, kept SEAM_INSET_U inside the target body (seq 262: aimed at the seam itself she came down on the
-    other body; SEAM_TOL_U more, so stopping short of the aim still keeps MIDDLE_PAD_U). The person: a hit from the inner
-    side turns it to face inward, so its evade goes outward. The target is
-    L2's (the bounced one, or the other one in its cross-Clapper continuation); no search for another side. None outside
-    the follow-up scope or with a standable gap (the middle decides)."""
+def seam_geometry(state,goal,target,close=False):
+    """Task 183: no standable gap: where the existing witnessed down-slash goes, on the TARGET's inner side (the side facing
+    the other Clapper). aim: the x it is aimed from, next to the seam: her centre her half width plus MIDDLE_PAD_U clear of
+    the other body's near edge, kept SEAM_INSET_U inside the target body (seq 262: aimed at the seam itself she came down
+    on the other body; SEAM_TOL_U more, so stopping short of the aim still keeps MIDDLE_PAD_U). bound, sign (seq 263): her
+    x at a strike row's first contact must lie on the inner side of both the target's real root and its body centre,
+    (x - bound) * sign >= 0; a row that would strike it from the outer side first is no seam strike (steering the key
+    inward alone did not stop an early outer contact). The person: a hit from the inner side turns it to face inward, so
+    its evade may go outward (observed, never assumed). The target is L2's (the bounced one, or the other one in its
+    cross-Clapper continuation); no search for another side. None outside the follow-up scope or with a standable gap
+    (the middle decides)."""
     if not follow_scope(goal,target,close):return None
     gap=two_gap(state,goal.caster);hb=_hero_box(state.get("hero"))
     if gap is None or hb is None or standable(gap,hb) or target not in (gap.caster,gap.other):return None
     tb,nb=(gap.bounced,gap.other_body) if target==gap.caster else (gap.other_body,gap.bounced)
-    x0,_,x1,_=tb;nx0,_,nx1,_=nb;half=.5*(hb[2]-hb[0])
-    if x1-x0<=2*SEAM_INSET_U:return .5*(x0+x1)
-    clear=half+MIDDLE_PAD_U+SEAM_TOL_U                     # stopping anywhere within SEAM_TOL_U still keeps MIDDLE_PAD_U
-    if x0+x1>nx0+nx1:aim=max(x0,nx1)+clear                 # the target on the right: its left (inner) side
-    else:aim=min(x1,nx0)-clear                             # on the left: its right (inner) side
-    return min(max(aim,x0+SEAM_INSET_U),x1-SEAM_INSET_U)
+    enemy=next((e for e in clappers(state) if e["iid"]==target),None)
+    pos=None if enemy is None else enemy.get("pos")
+    if not isinstance(pos,(list,tuple)) or not pos or type(pos[0]) not in (int,float) or not math.isfinite(pos[0]):return None
+    x0,_,x1,_=tb;nx0,_,nx1,_=nb;half=.5*(hb[2]-hb[0]);root=float(pos[0]);centre=.5*(x0+x1)
+    right=x0+x1>nx0+nx1                                     # the target on the right: its left side is the inner one
+    if x1-x0<=2*SEAM_INSET_U:aim=.5*(x0+x1)
+    else:
+        clear=half+MIDDLE_PAD_U+SEAM_TOL_U                 # stopping anywhere within SEAM_TOL_U still keeps MIDDLE_PAD_U
+        aim=max(x0,nx1)+clear if right else min(x1,nx0)-clear
+        aim=min(max(aim,x0+SEAM_INSET_U),x1-SEAM_INSET_U)
+    return NS(aim=aim,bound=min(root,centre) if right else max(root,centre),sign=-1 if right else 1,root=root,centre=centre)
+
+
+def seam_aim(state,goal,target,close=False):
+    """Task 183: seam_geometry's aim, or None."""
+    seam=seam_geometry(state,goal,target,close)
+    return None if seam is None else seam.aim
 
 
 def aim_side(x,aim):
@@ -1029,10 +1050,20 @@ def register(prims):
             return m|int(masks[i])
         return m|int(x.v.get("source_tail_mask",0))
 
+    def seam_contact(x):
+        """Task 183 seq 263: on a seam tick the row's first contact must be on the target's inner side (seam_geometry);
+        the turned-down rows go to x.v["seam_rejects"] for the record. (predicate or None, rejects list or None)"""
+        seam=x.v.get("seam_inner")
+        if not seam:return None,None
+        bound,sign=float(seam[0]),int(seam[1]);rejects=[]
+        x.v["seam_rejects"]=rejects
+        return (lambda cx:(cx-bound)*sign>=0.),rejects
+
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
         from . import pogo_model as PM
+        inner,rejects=seam_contact(x)
         if control(x.obs.e)[0]=="Walk":
             # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
             # existing approach continues and the next tick re-selects. Never the still-body witness below.
@@ -1040,7 +1071,8 @@ def register(prims):
             support=(None if prefix is None else
                      walk_body_support(x.obs.e,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
             if support is None:return None
-            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"],clean=plan_over_call(x.v))
+            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"],clean=plan_over_call(x.v),
+                              contact_ok=inner,rejects=rejects)
             if row is None:return None
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
@@ -1079,7 +1111,8 @@ def register(prims):
                                   idle_time=idle_time_of(ev))
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
-        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v))
+        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
+                          contact_ok=inner,rejects=rejects)
         if row is not None:
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
@@ -1252,9 +1285,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
     close=bool(active.v.get("follow_close")) if active is not None else bounce_close(state,goal,h)
+    seam=None
     if bounce_entry and link!="strike" and not ground:
-        aim=seam_aim(state,goal,target,close)    # Task 183: no standable gap: the target's inner side by the seam
-        if aim is not None:p=replace(p,side=aim_side(float(hp[0]),aim))
+        seam=seam_geometry(state,goal,target,close)    # Task 183: no standable gap: the target's inner side by the seam
+        if seam is not None:p=replace(p,side=aim_side(float(hp[0]),seam.aim))
     landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
                       ground and active.v.get("air_entry") and not tail_pending)
     if tail_pending:
@@ -1316,6 +1350,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
     variables["follow_close"]=close   # Task 183 seq 262: the two were close when this Run started (a BOUNCE Run)
+    # Task 183 seq 263: this tick's inner-side condition for a new seam strike row (None: not a seam tick); the stomp plan
+    # lists the rows it turned down for an outer first contact
+    variables["seam_inner"]=None if seam is None else [float(seam.bound),int(seam.sign),float(seam.aim)]
+    variables["seam_rejects"]=None
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp

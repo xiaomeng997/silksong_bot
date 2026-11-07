@@ -1190,7 +1190,10 @@ class NativeManualAirChain(NativeChainB2):
                 bad=[c for c in bad if not (c.frame in protected and c.owner_iid==plan.iid and c.kind in {"body","move"})]
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
-            elif approach_only or draft.run.link=="bounce_tail" or (draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash"):
+            elif (approach_only or draft.run.link=="bounce_tail" or (draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash")
+                    or (draft.run.link=="air" and draft.run.v.get("seam_inner"))):
+                # (Task 183 seq 263: a seam tick with no inner-side strike row is positioning, not a strike: its step is
+                # checked against the target body too, so coming down on it hands back instead of an outer strike)
                 scan=geo.scan(path)
             # A selected strike keeps the existing target-contact contract:
             # this short path has no modeled pogo, so its future body overlap
@@ -1391,8 +1394,12 @@ class NativeManualAirChain(NativeChainB2):
                            hi=None if gap is None else gap.hi)
                 self._recover("bounce follow-up: no standable gap under the route",f);return True,None
             if gap is not None and hb is not None:
-                self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(draft.run.v.get("side") or 0),
-                           link=draft.run.link,basis="no standable gap: the existing witnessed down-slash aimed over the seam")
+                v=draft.run.v;row=v.get("row") if draft.run.link=="strike" else None
+                self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(v.get("side") or 0),
+                           link=draft.run.link,mask=int(made[3]),target_frame=f+2,inner=v.get("seam_inner"),
+                           strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","approach_direction")},
+                           outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),
+                           basis="no standable gap: the existing witnessed down-slash, its first contact on the target's inner side")
             return False,None
         try:
             geo=B2Geometry(forecast,f,plan.move,current[2])
