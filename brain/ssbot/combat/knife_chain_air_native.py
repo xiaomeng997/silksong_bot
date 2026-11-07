@@ -168,12 +168,12 @@ class NativeManualAirChain(NativeChainB2):
         self._note("target_transfer_bounce_goal",frame=state["f"],**asdict(self._transfer_goal))
         return True
 
-    def key_commitment(self,state):
+    def key_commitment(self,state,ground=None):
         """Task 182 (Sol seq 255 A): what this owner holds of her keys past the in-flight prefix. None: nothing a plan must wait for
         (no Run; an approach-only or waypoint Run hands back at its next step when L2 moves on). Else (owner, release known, keys
         from the first free mask frame on); the source tail's release and keys are its own admission's; an owned bounce
-        follow-up route's (seq 269) are the keys transfer_follow_keys sends through its modelled landing; any other committed
-        Run, recovery or hook: unknown."""
+        follow-up route's (seq 269 / 270) are its own (_follow_commitment; ground: the policy's ground flag of this STATE, the
+        one the chain's tick gets); any other committed Run, recovery or hook: unknown."""
         run=self.runner.run;f=state.get("f")
         if self.recovery is not None:return "b2 recovery",False,()
         wall=getattr(self,"_wall_pressure",None)
@@ -188,11 +188,29 @@ class NativeManualAirChain(NativeChainB2):
             return run.lid,True,(int(run.v.get("source_tail_mask",0)),)*max(0,end-(f+1))
         fo=run.v.get("follow") if run.chain==transfer.PROGRAM and run.link in transfer.FOLLOW_LINKS else None
         if isinstance(fo,dict) and type(f) is int and isinstance(fo.get("F0"),(int,np.integer)) and isinstance(fo.get("land_f"),(int,np.integer)):
-            # Task 182 seq 269: an owned middle / landing route (Task 183) releases at its modelled landing; its keys are the
-            # checked absolute row that transfer_follow_keys sends (none past it), re-anchored every tick (_owned_route)
-            masks=fo.get("masks") or ();F0=int(fo["F0"])
-            return run.lid,True,tuple(int(masks[F-F0]) if 0<=F-F0<len(masks) else 0 for F in range(f+2,int(fo["land_f"])+1))
+            return self._follow_commitment(state,run,fo,f,ground)
         return run.lid,False,()
+
+    def _follow_commitment(self,state,run,fo,f,ground):
+        """Task 182 seq 269 / 270: an owned middle / landing route (Task 183) is released on the tick the chain observes her actual
+        landing (_follow_landed), so it sends keys through the frame after it. On the ground now with a landing that route
+        accepts: released this tick, nothing past the in-flight prefix. In the air with its modelled landing past that prefix:
+        the checked row transfer_follow_keys sends (masks[F - F0]) through land_f, then the key the last re-anchor
+        (_owned_route) sends for land_f + 1 (the landing's own: none for the middle, its direction for a landing). A landing
+        already due inside the prefix or past while she is still in the air, or a landing it does not accept (recovery
+        follows): not confirmed, unknown (Sol seq 270: never a free hero on a stale prediction)."""
+        if ground:return (run.lid,True,()) if self._follow_landing_inside(state,run)[0] else (run.lid,False,())
+        land=int(fo["land_f"])
+        if land<f+2:return run.lid,False,()
+        masks=fo.get("masks") or ();F0=int(fo["F0"]);tail=0 if run.link=="middle" else int(fo.get("dir") or 0)
+        return run.lid,True,tuple(int(masks[F-F0]) if 0<=F-F0<len(masks) else tail for F in range(f+2,land+2))
+
+    @staticmethod
+    def _follow_landing_inside(state,run):
+        """Task 183: a follow-up landing the Run accepts (_follow_landed): any ground for a left / right landing, the middle only
+        with her box between the two near body edges. (accepted, her box, the gap)."""
+        hb=transfer._hero_box(state.get("hero"));gap=transfer.two_gap(state,run.v.get("caster"))
+        return bool(run.link=="land" or (gap is not None and hb is not None and gap.lo<hb[0] and hb[2]<gap.hi)),hb,gap
 
     def own_bounce_released(self,state):
         """Task 182 (Sol seq 256): this STATE's real bounce of this chain's own strike: observe has already released its commitment and
@@ -1285,8 +1303,7 @@ class NativeManualAirChain(NativeChainB2):
         body edges; a landing elsewhere is a failure (B2 recovery: failure responsibility kept); a left / right landing is
         done on the ground."""
         f=state["f"];fo=run.v.get("follow") or {}
-        hb=transfer._hero_box(state.get("hero"));gap=transfer.two_gap(state,run.v.get("caster"))
-        inside=bool(run.link=="land" or (gap is not None and hb is not None and gap.lo<hb[0] and hb[2]<gap.hi))
+        inside,hb,gap=self._follow_landing_inside(state,run)
         self._note("transfer_follow_landed" if inside else "transfer_follow_missed",frame=f,link=run.link,kind=fo.get("kind"),
                    box=None if hb is None else list(hb),lo=None if gap is None else gap.lo,hi=None if gap is None else gap.hi,
                    planned_land_f=fo.get("land_f"),planned_box=fo.get("landing_box"))

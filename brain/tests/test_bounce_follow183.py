@@ -460,6 +460,107 @@ def test_owned_routes_follow_a_landing_later_than_planned(monkeypatch):
         assert not bout.n._failure_exposures
 
 
+def _l2_hand(bout):
+    """Task 182 seq 270: this tick's L2 read, before the chain's own tick (as the policy reads it): key_commitment with this
+    STATE's ground flag and the plans' hand-back roll from it (clapper_plans.hand_back on this sim). (commitment, the first
+    frame new keys can take, or None when unknown)."""
+    from ssbot.combat.tactics import clapper_plans as CP
+    commit = bout.n.key_commitment(bout.state(bout.sim()), ground=bool(bout.S[K.GROUND] > 0))
+    keys = () if commit is None or not commit[1] else tuple(commit[2])
+    m = CP.Roller(bout.S.copy(), np.array((int(bout.prefix),) + keys, np.int64), bout.hold.copy(), PARAMS, TERRAIN)
+    hand = CP.hand_back(m, 0., float(bout.S[K.PX]), commit is None or bool(commit[1]))
+    return commit, (bout.f + int(hand.index) if hand.known else None)
+
+
+def _walk_l2(bout, delay_at=None, lift=0.):
+    """The owned route ticked to its landing with L2's read before each tick. delay_at (Sol seq 270): that frame observes
+    again the airborne state saved on the tick before (the sent one-frame prefix kept), lift u higher (PY / QY / SY)."""
+    rows, saved = [], None
+    while bout.n.runner.run is not None and len(rows) < 90:
+        if delay_at is not None and bout.f == delay_at - 1:
+            saved = bout.S.copy()
+        if delay_at is not None and bout.f == delay_at:
+            bout.S = saved.copy()
+            bout.S[[K.PY, K.QY, K.SY]] += lift
+        land_f = (bout.n.runner.run.v.get('follow') or {}).get('land_f')
+        commit, hand = _l2_hand(bout)
+        f, ground = bout.f, bool(bout.S[K.GROUND] > 0)
+        offer = bout.tick()
+        rows.append(dict(f=f, ground=ground, land_f=land_f, commit=commit, hand=hand, mask=0 if offer is None else int(offer.mask)))
+    return rows
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+@pytest.mark.parametrize('link', ['land', 'middle'])
+def test_the_follow_up_hand_back_is_the_planners_first_key_frame(monkeypatch, mirror, link):
+    # Task 182 seq 270: the chain releases an owned route on the tick it observes the landing, after one more key of its own
+    # (live 3521 -> 3523 by rune_transfer.middle, 3522 -> 3524 by the planner): every hand-back the plans read is that frame;
+    # the tick whose modelled landing is already inside the in-flight prefix while she is in the air reads unknown
+    if link == 'land':
+        bout = _landing_bout(monkeypatch, mirror)
+    else:
+        bout = (Bout(monkeypatch, bounced=(8, 24.1, -1), other=(7, 36.86, -1), hero=(23.2, 10.774, 11.4), stance_x=30.)
+                if mirror else Bout(monkeypatch))
+    assert bout.tick().draft.run.link == link
+    rows = _walk_l2(bout)
+    landed = bout.notes('transfer_follow_landed')
+    assert len(landed) == 1 and landed[0]['link'] == link and not bout.n._failure_exposures
+    first_key = landed[0]['frame'] + 2
+    known = [r for r in rows if r['hand'] is not None]
+    assert len(known) >= 5 and all(r['hand'] == first_key for r in known)
+    last = rows[-1]
+    assert last['ground'] and last['commit'] == ('rune_transfer.' + link, True, ()) and last['hand'] == last['f'] + 2
+    due = [r for r in rows if not r['ground'] and r['land_f'] is not None and r['land_f'] <= r['f'] + 1]
+    assert due and all(r['commit'] == ('rune_transfer.' + link, False, ()) and r['hand'] is None for r in due)
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+@pytest.mark.parametrize('lift', [0., 1.5])
+def test_a_landing_due_in_the_in_flight_prefix_while_she_is_airborne_is_no_hand_back(monkeypatch, mirror, lift):
+    # Sol seq 270's counterexample: the legal outer landing at the frame before its landing (old land_f 3015 at f 3014); that
+    # frame observes again the airborne state of the tick before (the sent prefix kept; lift: 1.5 u higher). f901010d read
+    # ('rune_transfer.land', True, ()), a hand-back at 3016, while the chain sent the outer key for 3016 and landed later
+    bout = _landing_bout(monkeypatch, mirror)
+    land0 = bout.tick().draft.run.v['follow']['land_f']
+    rows = _walk_l2(bout, delay_at=land0, lift=lift)
+    stale = next(r for r in rows if r['f'] == land0)
+    assert not stale['ground'] and stale['land_f'] == land0 + 1
+    assert stale['commit'] == ('rune_transfer.land', False, ()) and stale['hand'] is None
+    out = B['L'] if mirror else B['R']
+    assert all(r['mask'] & LR == out for r in rows[:-1])                 # the chain's own keys to the ground, unchanged
+    landed = bout.notes('transfer_follow_landed')
+    assert len(landed) == 1 and landed[0]['frame'] > land0 and not bout.n._failure_exposures
+    first_key = landed[0]['frame'] + 2
+    after = [r for r in rows if r['f'] >= land0 and r['hand'] is not None]
+    assert after and all(r['hand'] == first_key for r in after)        # from the delay on, never ahead of the planner's first key
+    assert rows[-1]['ground'] and rows[-1]['commit'] == ('rune_transfer.land', True, ()) and rows[-1]['hand'] == rows[-1]['f'] + 2
+
+
+def test_the_hand_back_follows_a_re_chosen_route_and_stops_at_a_recovery(monkeypatch):
+    # Sol seq 270's adjacent boundaries. An owned landing re-chosen to a clean middle mid-way (as
+    # test_owned_landing_rechooses_a_clean_middle): the next reads take the middle route's own keys and landing
+    bout = _landing_bout(monkeypatch, hero=(37.2, 10.774, 11.4))
+    bout.tick()
+    assert bout.n.runner.run.link == 'land' and _l2_hand(bout)[0][:2] == ('rune_transfer.land', True)
+    del bout.boxes[2:]
+    assert bout.tick().draft.run.link == 'middle' and bout.notes('transfer_follow_rechosen')
+    rows = _walk_l2(bout)
+    landed = bout.notes('transfer_follow_landed')
+    assert len(landed) == 1 and landed[0]['link'] == 'middle'
+    known = [r for r in rows if r['hand'] is not None]
+    assert known and known[0]['commit'][0] == 'rune_transfer.middle' and all(r['hand'] == landed[0]['frame'] + 2 for r in known)
+    # an owned landing no longer legal (as test_owned_landing_no_longer_legal_hands_back): the B2 recovery hands the keys back
+    # on that tick (failure responsibility kept, no key of the chain's past it): the next read has no holder, she is free
+    # right after the in-flight prefix
+    bout, _ = _blocked_bout(monkeypatch, False, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 1.2
+    assert bout.tick().draft.run.link == 'land' and _l2_hand(bout)[0][1] is True
+    bout.block_steps = True
+    bout.boxes.append((38.25, 8.0, 38.6, 13.0, 99, 'delayed'))
+    assert bout.tick() is None and bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+    assert bout.n.runner.run is None and _l2_hand(bout) == (None, bout.f + 2)
+
+
 @pytest.mark.parametrize('mirror', [False, True])
 def test_middle_dials_back_when_she_is_past_the_goal(monkeypatch, mirror):
     # Sol seq 262 item 2: she is already over the gap next to the other one's near edge; the right (left) one bounced her.

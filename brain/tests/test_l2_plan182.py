@@ -372,41 +372,58 @@ def test_the_native_owner_says_what_it_holds_of_her_keys(monkeypatch):
     assert N.key_commitment(owner(run=tail, goal=object()), state) == ("rune_transfer.bounce_tail", False, ())
 
 
-def test_an_owned_follow_up_route_holds_her_keys_through_its_modelled_landing():
+def test_an_owned_follow_up_route_holds_her_keys_through_its_modelled_landing(monkeypatch):
     # Task 182 seq 269 (#339 live 3475-3522): the bounce follow-up's owned middle route, chosen at 3474 to land at 3522, landed
-    # there; its release is that landing and its keys the checked row transfer_follow_keys sends (none past it), not an owner
-    # whose release cannot be told (all three branches were 'hand-back unknown' through the jump cast's aim)
+    # there; its release is that landing, not an owner whose release cannot be told (all three branches were 'hand-back unknown'
+    # through the jump cast's aim). Seq 270: the chain sees the landing on its own tick and sends one key past it (live 3521 ->
+    # 3523 by rune_transfer.middle, 3522 -> 3524 by the planner), so the keys run through land_f + 1 with the route's own tail
+    # key; a landing already due inside the in-flight prefix while she is in the air is no release yet (unknown)
     from ssbot.combat.knife_chain_air_native import NativeManualAirChain as N, transfer
     from ssbot.combat.knife_chain_format import MASK_NAMES as B
     R, L = B["R"], B["L"]
     state = dict(f=100)
 
     def owner(run, **kw):
-        return NS(**{**dict(runner=NS(run=run), commitment=None, recovery=None, _wall_pressure=None, _transfer_goal=object(),
-                            own_bounce_released=lambda st: False), **kw})
+        o = N.__new__(N)
+        o.__dict__.update(dict(runner=NS(run=run), commitment=None, recovery=None, _wall_pressure=None, _transfer_goal=object(),
+                               own_bounce_released=lambda st: False), **kw)
+        return o
 
     route = {"kind": "middle", "recipe": "hold", "dir": R, "F0": 101, "masks": [R] * 6 + [0] * 4, "release_F": 107, "land_f": 113}
     middle = NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": route})
-    # frames f + 2 .. land_f = 102 .. 113: the row from its own index 1 (R x 5, none x 4), then none past it
-    assert N.key_commitment(owner(middle), state) == ("rune_transfer.middle", True, (R,) * 5 + (0,) * 7)
-    side = {"kind": "left_landing", "dir": L, "F0": np.int64(100), "masks": [L] * 15, "land_f": np.int64(112)}
+    # in the air, frames f + 2 .. land_f + 1 = 102 .. 114: the row from its own index 1 (R x 5, none x 4), then the middle's
+    # tail (none); without the ground flag the same (a landing past the prefix)
+    assert N.key_commitment(owner(middle), state, ground=False) == ("rune_transfer.middle", True, (R,) * 5 + (0,) * 8)
+    assert N.key_commitment(owner(middle), state) == N.key_commitment(owner(middle), state, ground=False)
+    # a landing route whose row ends at its landing: land_f + 1 is its direction key (what the last re-anchor sends)
+    side = {"kind": "left_landing", "dir": L, "F0": np.int64(100), "masks": [L] * 13, "land_f": np.int64(112)}
     land = NS(chain=transfer.PROGRAM, link="land", lid="rune_transfer.land", v={"follow": side})
-    assert N.key_commitment(owner(land), state) == ("rune_transfer.land", True, (L,) * 11)
-    # landing inside the in-flight prefix: nothing more held, and known
-    soon = NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": {**route, "land_f": 101}})
-    assert N.key_commitment(owner(soon), state) == ("rune_transfer.middle", True, ())
+    assert N.key_commitment(owner(land), state, ground=False) == ("rune_transfer.land", True, (L,) * 12)
+    # a modelled landing already inside the in-flight prefix, or past, while she is still in the air: not a release
+    for due in (101, 99):
+        soon = NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": {**route, "land_f": due}})
+        assert N.key_commitment(owner(soon), state, ground=False) == ("rune_transfer.middle", False, ())
+        assert N.key_commitment(owner(soon), state) == ("rune_transfer.middle", False, ())
+    # on the ground: the chain's own tick releases a landing it accepts (any ground for a left / right landing; the middle
+    # only between the two bodies, else its recovery holds her), whatever land_f says
+    assert N.key_commitment(owner(land), state, ground=True) == ("rune_transfer.land", True, ())
+    for inside in (True, False):
+        monkeypatch.setattr(N, "_follow_landing_inside", staticmethod(lambda st, run, ok=inside: (ok, None, None)))
+        assert N.key_commitment(owner(middle), state, ground=True) == ("rune_transfer.middle", inside, ())
+    monkeypatch.undo()
     # no owned route: a seam positioning / strike tick, a follow-up link without its route or without its modelled landing
     for run in (NS(chain=transfer.PROGRAM, link="air", lid="rune_transfer.air", v={"follow": route}),
                 NS(chain=transfer.PROGRAM, link="strike", lid="rune_transfer.strike", v={"follow": route}),
                 NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={}),
                 NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": {**route, "land_f": None}})):
-        assert N.key_commitment(owner(run), state) == (run.lid, False, ())
+        for ground in (False, True):
+            assert N.key_commitment(owner(run), state, ground=ground) == (run.lid, False, ())
     # the owner's own holds come first, route or not
-    assert N.key_commitment(owner(middle, recovery={}), state) == ("b2 recovery", False, ())
-    assert N.key_commitment(owner(middle, _wall_pressure={}), state) == ("b2 wall pressure", False, ())
-    assert N.key_commitment(owner(middle, own_bounce_released=lambda st: True), state) is None
+    assert N.key_commitment(owner(middle, recovery={}), state, ground=True) == ("b2 recovery", False, ())
+    assert N.key_commitment(owner(middle, _wall_pressure={}), state, ground=True) == ("b2 wall pressure", False, ())
+    assert N.key_commitment(owner(middle, own_bounce_released=lambda st: True), state, ground=False) is None
     # what the plans read from it: a known hand-back after those keys (unknown made every branch 'hand-back unknown')
-    keys = N.key_commitment(owner(middle), state)[2]
+    keys = N.key_commitment(owner(middle), state, ground=False)[2]
     _, free = owned_request(keys=())
     q, held = owned_request(keys=keys)
     assert held.known and held.index == free.index + len(keys)
@@ -1592,16 +1609,22 @@ def test_this_ticks_real_bounce_releases_the_strike_along_the_path_that_takes_it
 def test_the_plan_commitment_takes_the_release_and_keeps_every_other_holder():
     from ssbot.train import forum_planner_policy as P
     active, idle = NS(active=lambda: True), NS(active=lambda: False)
-    def commit(released, slam=None, low=None, two=None, chain=None):
-        native = NS(own_bounce_released=lambda s: released, key_commitment=lambda s: chain)
+    seen = []
+    def commit(released, slam=None, low=None, two=None, chain=None, ground=None):
+        native = NS(own_bounce_released=lambda s: released, key_commitment=lambda s, ground=None: seen.append(ground) or chain)
         return P.ForumPlannerPolicy._plan_commitment(NS(slam_play=slam, claw=None, cast_stab=None, rune_lowhop=low, evade_chase=None, two=two,
-                                                        chain_native=native), 120, {})
+                                                        chain_native=native), 120, {}, ground)
     assert commit(True, slam=active) is None                        # a slam run left over before the chain took the keys: released with it
     assert commit(False, slam=active) == ("slam", False, ())
     assert commit(True, low=active) == ("low", False, ())           # another script holding keys is another holder
     assert commit(False, two=NS(last_part="esc")) == ("two esc", False, ())  # the wall switch's running hop: on in the tested configuration
     assert commit(False, two=NS(last_part="idle"), slam=idle) is None        # its watch, an idle hit: no hold
     assert commit(False, chain=("x", True, (1, 2))) == ("x", True, (1, 2))
+    # seq 270: the chain reads this STATE's ground flag, the one its own tick gets (an owned follow-up landing is released on it)
+    seen.clear()
+    commit(False, ground=True)
+    commit(False, ground=False)
+    assert seen == [True, False]
 
 
 @pytest.mark.parametrize("flag", ["ANTICSWITCH", "EARLY", "JUMPHIT", "RUNETIER", "FLIPB", "SP11B", "RUNEEXIT"])

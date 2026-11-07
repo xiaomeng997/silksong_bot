@@ -592,11 +592,12 @@ class ForumPlannerPolicy(PlannerPolicy):
             from ssbot.combat.tactics.l2_plan_worker import PlanChannel
             runner.channel = PlanChannel(self.params)
 
-    def _plan_commitment(self, f, s):
+    def _plan_commitment(self, f, s, ground=None):
         """Who else holds her keys past the in-flight prefix at this L2 decision (Task 182, Sol seq 255 A): None: nobody; else (owner,
         release known, keys). A script's or a committed Run's release cannot be told here: unknown, never a free hero. The chain's own
         real bounce of this STATE (Sol seq 256) releases its strike and a slam script's run left over from before it took the keys
-        on this tick's goal step (_chain_goal_preferences). Scripts outside the tested set are refused at startup (_prepare_plans)."""
+        on this tick's goal step (_chain_goal_preferences). Scripts outside the tested set are refused at startup (_prepare_plans).
+        ground: this STATE's ground flag as the chain's tick gets it (Sol seq 270: an owned follow-up landing is released on it)."""
         released = getattr(self.chain_native, "own_bounce_released", None)
         released = bool(callable(released) and released(s))
         for name, script in (("slam", self.slam_play), ("claw", self.claw), ("cast", self.cast_stab), ("low", self.rune_lowhop),
@@ -606,7 +607,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if getattr(self.two, "last_part", None) in ("esc", "rt"):
             return "two esc", False, ()           # the wall switch's running hop (on in the tested configuration); its idle watch holds nothing
         commitment = getattr(self.chain_native, "key_commitment", None)
-        return None if commitment is None else commitment(s)
+        return None if commitment is None else commitment(s, ground=ground)
 
     def _plan_bounce(self, s):
         """The Clapper of this frame's real strike bounce: a DownSlash hit with the pogo evidence in this STATE, or the action layer's
@@ -1169,7 +1170,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if clapper_plans.ENABLED and isinstance(self.tac, GauntletTactics):
             # Task 182: her committed keys and model state for the plans' hand-back; no key of this tick is in it
             cogf_ = self.cog["frames"]
-            commit_ = self._plan_commitment(f, s)
+            commit_ = self._plan_commitment(f, s, ws.hero.contact.v == "GROUND")
             sent_ = [self.sent.get(fr, 0) & ~(COG if fr in cogf_ else 0) for fr in range(fo + 1, f + 2)]
             self.tac.plan_input = clapper_plans.HeroInput(
                 self._start_state(ws, raw), np.array(sent_ + (list(commit_[2]) if commit_ is not None and commit_[1] else []), np.int64),
