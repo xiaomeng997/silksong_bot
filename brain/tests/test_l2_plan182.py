@@ -1401,9 +1401,17 @@ def test_a_landing_tracked_nearer_takes_the_stance_it_is_not_kept_as_safe():
     assert not r._stance_lost(sc, stay, stay.phase("over_stay"), o, r.moves[1])
     r.moves[1]["land"] = 27.
     assert r._stance_lost(sc, stay, stay.phase("over_stay"), o, r.moves[1])
+    # its ordinary reaction to the hit moves its head for a moment: judged once it stands again
+    o.state = "Evade Scuttle"
+    assert not r._stance_lost(sc, stay, stay.phase("over_stay"), o, r.moves[1])
+    o.state = "Idle"
     # the stand and the place behind: the same
     assert plan.phase("return").after("stance_lost") == BLOCKED and plan.phase("under").after("stance_lost") == BLOCKED
-    r.moves[1]["land"] = 25.                         # no standing footprint between the walker and this landing
+    # a place she fits in is still a place, past the margin the route was chosen with (replay k_stay: 1.97 u against 2)
+    r.moves[1]["land"] = 37.24
+    assert r._stand_now(sc, plan, o, r.moves[1]) is None and r._stand_now(sc, plan, o, r.moves[1], gap=0.) is not None
+    assert not r._stance_lost(sc, plan, plan.phase("return"), o, r.moves[1])
+    r.moves[1]["land"] = 35.2                        # no room between the walker and the coverage at all
     assert r._stance_lost(sc, plan, plan.phase("return"), o, r.moves[1])
     r.moves[1]["land"] = 47.                         # no room behind it at the wall
     assert r._stance_lost(sc, plan, plan.phase("under"), o, r.moves[1])
@@ -1549,8 +1557,8 @@ def test_the_plan_commitment_takes_the_release_and_keeps_every_other_holder():
     assert commit(True, slam=active) is None                        # a slam run left over before the chain took the keys: released with it
     assert commit(False, slam=active) == ("slam", False, ())
     assert commit(True, low=active) == ("low", False, ())           # another script holding keys is another holder
-    assert commit(False, two=NS(esc=object())) == ("two esc", False, ())     # the wall switch's hop: on in the tested configuration
-    assert commit(False, two=NS(esc=None), slam=idle) is None
+    assert commit(False, two=NS(last_part="esc")) == ("two esc", False, ())  # the wall switch's running hop: on in the tested configuration
+    assert commit(False, two=NS(last_part="idle"), slam=idle) is None        # its watch, an idle hit: no hold
     assert commit(False, chain=("x", True, (1, 2))) == ("x", True, (1, 2))
 
 

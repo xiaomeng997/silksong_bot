@@ -1347,7 +1347,9 @@ class PlanRunner:
         if route in ("return", "over"):
             self.exec.record(plan.instance, "departed", sc.t)   # the jump she left: not to be intercepted back
 
-    def _stand_now(self, sc, plan, o, m) -> float | None:
+    def _stand_now(self, sc, plan, o, m, gap=None) -> float | None:
+        """gap: the room asked between the body and the coverage (None: the plan's own margin, for choosing the route; a running stage asks
+        only for a place she fits)."""
         geo = sc.geo
         land = m.get("land")
         if geo is None or land is None or o is None or o.iid not in geo["bodies"]:
@@ -1357,7 +1359,7 @@ class PlanRunner:
         vx = self._vx(sc, o)
         f = plan.get("f")
         shift = vx * WALK_LOOK_S if (o.state == "Walk" and vx * f < 0) else 0.
-        return stand_x(land, f, plan.get("reach"), a, b, float(o.pos[0]), geo["left"], geo["right"], JT["pad"], JT["gap_u"],
+        return stand_x(land, f, plan.get("reach"), a, b, float(o.pos[0]), geo["left"], geo["right"], JT["pad"], JT["gap_u"] if gap is None else gap,
                        sc.tac.rules.face_u, shift)
 
     def _spot_now(self, sc, plan, m) -> float | None:
@@ -1411,11 +1413,12 @@ class PlanRunner:
         if land is None or sc.geo is None:
             return False
         if kind == "stand":
-            return o is not None and self._stand_now(sc, plan, o, m) is None
+            return o is not None and self._stand_now(sc, plan, o, m, gap=0.) is None
         if kind == "behind":
             return self._spot_now(sc, plan, m) is None
         if kind in ("head", "far"):
-            return o is not None and not self._wait_holds(sc, plan, o, land)
+            # (its ordinary reaction to the hit moves its body for a moment; the place is judged once it stands again)
+            return o is not None and o.state not in REACTION and not self._wait_holds(sc, plan, o, land)
         if kind == "retreat":
             out = plan.get("out")
             return (land + out * (plan.get("reach") + plan.get("half_in") + plan.get("pad")) - plan.get("wall_x")) * out > 0
@@ -1727,7 +1730,7 @@ class PlanRunner:
                 if out is None:
                     out = sc.tac._clamp(float(target.pos[0]) + (-1 if sc.hx < float(target.pos[0]) else 1) * sc.tac.rules.face_u)
         elif kind == "stand":
-            out = self._stand_now(sc, plan, o, m)
+            out = self._stand_now(sc, plan, o, m, gap=0.)
         elif kind == "behind":
             out = self._spot_now(sc, plan, m)
         elif kind == "head":

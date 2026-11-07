@@ -603,8 +603,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                              ("chase", self.evade_chase)):
             if script is not None and script.active() and not (name == "slam" and released):
                 return name, False, ()
-        if self.two is not None and getattr(self.two, "esc", None) is not None:
-            return "two esc", False, ()
+        if getattr(self.two, "last_part", None) in ("esc", "rt"):
+            return "two esc", False, ()           # the wall switch's running hop (on in the tested configuration); its idle watch holds nothing
         commitment = getattr(self.chain_native, "key_commitment", None)
         return None if commitment is None else commitment(s)
 
