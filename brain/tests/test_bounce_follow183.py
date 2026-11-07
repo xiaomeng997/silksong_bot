@@ -329,6 +329,71 @@ def test_owned_landing_rechooses_a_clean_middle(monkeypatch):
     assert not bout.n._failure_exposures
 
 
+@pytest.mark.parametrize('mirror', [False, True])
+def test_owned_landing_goes_back_to_the_seam_when_it_opens_first(monkeypatch, mirror):
+    # Sol seq 266: the gap floor dangerous (no clean middle landing), a strike witness possible (Idle from t 0). On 2983 the
+    # seam's two-frame step is turned down (block_steps): the legal outer landing goes (R; mirrored L). On 2984 the step
+    # gate passes again, everything else as sent: the owned outer landing no longer locks the seam out; it is released to
+    # the air link and the inward key goes (L; mirrored R) through 2986, then the witnessed inner strike row
+    bout, m = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    bout.block_steps = True
+    out, inward = (B['L'], B['R']) if mirror else (B['R'], B['L'])
+    first = bout.tick()
+    assert first.draft.run.link == 'land' and first.mask & LR == out
+    bout.block_steps = False
+    sent = [bout.tick() for _ in range(3)]                                  # 2984 .. 2986
+    assert all(o is not None and o.draft.run.link == 'air' and o.mask & LR == inward and not o.mask & B['A'] for o in sent)
+    assert sent[0].draft.run.v.get('follow') is None
+    seam = [e for e in bout.notes('transfer_follow_seam') if e['frame'] == F0 + 1]
+    assert seam and seam[0]['released'] == 'land' and not bout.notes('transfer_follow_seam_blocked')[1:]
+    log = bout.run(6)
+    assert any(r['link'] == 'strike' and r['mask'] & B['D'] for r in log)  # its witnessed inner down-slash
+    assert not bout.notes('b2_recovery') and not bout.n._failure_exposures
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_owned_landing_goes_on_while_the_seam_stays_blocked(monkeypatch, mirror):
+    # Sol seq 266's counterexample: the seam step stays turned down. The seam is tried first every tick; the owned outer
+    # landing, still legal, goes on with its own checked keys (its route kept, never re-chosen), no hand-back
+    bout, m = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    bout.block_steps = True
+    out = B['L'] if mirror else B['R']
+    log = bout.run()
+    assert {r['link'] for r in log[:-1]} == {'land'} and all(r['mask'] & LR == out for r in log[:-1])
+    tried = [e for e in bout.notes('transfer_follow_seam') if e['released'] == 'land']
+    blocked = bout.notes('transfer_follow_seam_blocked')
+    assert len(tried) >= 3 and len(blocked) == len(tried) + 1                # + the first tick's fresh choice
+    assert all(b['fallback'] == ('left_landing' if mirror else 'right_landing') for b in blocked)
+    assert not bout.notes('transfer_follow_route_blocked') and len(bout.notes('transfer_follow_side')) == 1
+    landed = bout.notes('transfer_follow_landed')
+    assert len(landed) == 1 and landed[0]['link'] == 'land' and not bout.n._failure_exposures
+
+
+def test_owned_landing_no_longer_legal_hands_back(monkeypatch):
+    # the owned outer landing invalidated (a danger appears in its way right after it was sent): with the seam step turned
+    # down, the gate's own hand-back; with no seam action at all (no strike witness possible), the follow-up's hand-back;
+    # failure responsibility kept either way and the reason recorded
+    for no_witness in (False, True):
+        bout, _ = _blocked_bout(monkeypatch, False, link='air', tail_done=True)
+        bout.ents[1]['fsms'][0]['t'] = 1.2 if no_witness else 0.
+        bout.block_steps = not no_witness
+        assert bout.tick().draft.run.link == 'land'
+        bout.block_steps = True
+        bout.boxes.append((38.25, 8.0, 38.6, 13.0, 99, 'delayed'))          # in the outer route's next frames
+        assert bout.tick() is None
+        assert bout.notes('transfer_follow_route_blocked') and bout.notes('b2_recovery')
+        assert len(bout.n._failure_exposures) == 1
+        reason = bout.notes('b2_recovery')[-1]['reason']
+        if no_witness:
+            assert reason == 'bounce follow-up: no seam action and the owned outer landing no longer legal'
+            assert bout.notes('transfer_follow_seam_unavailable')
+        else:
+            assert reason == 'rune transfer external step blocked'
+            assert bout.notes('transfer_follow_seam_blocked')[-1]['fallback'] is None
+
+
 def test_owned_middle_whose_gap_closes_goes_on_by_the_seam_approach(monkeypatch):
     # Sol seq 265 (no room: down-slash and wait for room): the other one walks up to the bounced body mid-route; the owned
     # middle route is released to the seam approach on the same Run instead of the old hand-back

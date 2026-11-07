@@ -1407,7 +1407,8 @@ class NativeManualAirChain(NativeChainB2):
         is standable (an owned left / right landing re-chooses it, its whole route scanned as on a first choice). Otherwise,
         no standable gap or a standable one whose landing routes are blocked now, the seam action (_seam_follow) every tick
         until a middle landing is clean. The existing ordinary left / right landing (a standable gap) only when there is no
-        seam action or its own gate turns it down, the reason recorded; an owned landing goes on as it was."""
+        seam action or its own gate turns it down, the reason recorded. seq 266: an owned outer landing tries the seam too
+        (released from it) and goes on only while the seam action is not legal and the landing itself still is."""
         f=state["f"];draft,plan,_,_=made
         keep=None if run is None or run.link not in transfer.FOLLOW_LINKS else run.link
         old=None if keep is None else run.v.get("follow")
@@ -1426,11 +1427,10 @@ class NativeManualAirChain(NativeChainB2):
             if choice is not None and keep=="land":
                 self._note("transfer_follow_rechosen",frame=f,old_kind=(old or {}).get("kind"),new=choice[0],
                            basis="a clean middle landing from her current state; the whole route scanned as on a first choice")
-            if choice is None and keep=="land":
-                choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old)   # the owned landing goes on
-            if choice is None and keep!="land":
-                if self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand):return False,None
-                if stand:choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,None)
+            if choice is None:
+                if self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand,old):return False,None
+                if keep=="land":choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old)   # goes on while legal
+                elif stand:choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,None)
         except (GeometryUnavailable,NominalUnsupported) as exc:
             self._note("transfer_follow_unchecked",frame=f,link=keep,reason=str(exc))
             if keep:
@@ -1439,6 +1439,7 @@ class NativeManualAirChain(NativeChainB2):
         if choice is None:
             if keep:
                 self._recover("bounce follow-up: no standable gap under the route" if keep=="middle" and not stand else
+                              "bounce follow-up: no seam action and the owned outer landing no longer legal" if keep=="land" else
                               "bounce follow-up: no safe middle and no legal left / right landing",f);return True,None
             self._note("transfer_follow_none",frame=f,link=draft.run.link,owner="the existing air / strike link continues")
             return False,None
@@ -1451,21 +1452,24 @@ class NativeManualAirChain(NativeChainB2):
                    strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","inner_bound","approach_direction")},
                    outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),gap_standable=bool(stand),released=released,
                    middle="no clean middle landing route now" if stand else "no standable gap",
-                   fallback=("the legal ordinary left / right landing if this action's own gate turns it down" if stand else
+                   fallback=("the owned outer landing while it is still legal, else the gate's own hand-back" if released=="land" else
+                             "the legal ordinary left / right landing if this action's own gate turns it down" if stand else
                              "the gate's own hand-back"),
                    basis="the middle is the follow-up's goal: the existing witnessed down-slash, its first contact on the target's "
                          "inner side (roots' order; bound read at the row's own contact index), every tick until a middle landing is clean")
 
-    def _seam_follow(self,state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand):
+    def _seam_follow(self,state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand,old=None):
         """Task 183 seq 265: no clean middle landing now (a standable gap's landing routes blocked, or an owned middle route
         blocked / its gap closed): the follow-up stays on the middle by the existing seam approach or hold over the target's
         inner side and its witnessed inner down-slash (propose's seam rows; an owned middle route released to the air link).
         This tick's air / strike link gates it as before (current step for all owners, dash lock, strike witness). True: that
-        action goes on (handled False); a standable gap then keeps the legal ordinary landing as the fallback when the gate
-        turns it down (_seam_fallback). False: no seam action (no released link, not a close pair, the side unknown, or no
-        strike witness possible on the target at all: _no_strike_witness)."""
+        action goes on (handled False); when the gate turns it down the fallback (_seam_fallback) is a standable gap's legal
+        ordinary landing, or (seq 266) an owned outer landing released here: that landing goes on while it is still legal
+        (its own route check: kept, or a fresh row the same way), else the gate's own hand-back. False: no seam action (no
+        released link, not a close pair, the side unknown, or no strike witness possible on the target at all:
+        _no_strike_witness)."""
         f=state["f"]
-        if keep=="middle":
+        if keep in transfer.FOLLOW_LINKS:   # an owned middle (seq 265) or outer landing (seq 266) route, released
             made=transfer.propose(self.runner,state,game,sim,plan.iid,False,self._context[3],self._transfer_finished,
                                   self._transfer_goal,follow_release=True,
                                   **({"idle_evidence":self._idle_ev} if self._idle_ev else {}))
@@ -1490,18 +1494,23 @@ class NativeManualAirChain(NativeChainB2):
         if why is not None:
             self._note("transfer_follow_seam_unavailable",frame=f,link=keep,draft_link=made[0].run.link,inner=seam,reason=why)
             return False
-        if stand:
-            self._follow_fallback={"f":f,"state":state,"game":game,"sim":sim,"made":made,"run":run,
-                                   "side":lambda:self._side_landing_choice(state,game,sim,geo,plan,prefs,None)}
-        if keep=="middle":self._follow_made=made
+        if keep=="land":   # seq 266: the owned outer landing goes on while legal if the seam's gate turns it down
+            side=lambda:self._side_landing_choice(state,game,sim,geo,plan,prefs,old)
+        elif stand:
+            side=lambda:self._side_landing_choice(state,game,sim,geo,plan,prefs,None)
+        else:side=None
+        if side is not None:
+            self._follow_fallback={"f":f,"state":state,"game":game,"sim":sim,"made":made,"run":run,"side":side}
+        if keep in transfer.FOLLOW_LINKS:self._follow_made=made
         self._note_seam(f,gap,hb,made,stand,keep)
         return True
 
     def _seam_fallback(self,f,why):
         """Task 183 seq 265: this tick's seam action turned down by its own gate (why: the external step blocked or
         unchecked, its air dash refused). With a standable gap the existing legal ordinary left / right landing goes instead
-        (scanned whole now), the reason recorded; None: the gate's own hand-back stands (no standable gap, or no legal
-        landing)."""
+        (scanned whole now); seq 266: released from an owned outer landing, that landing goes on while it is still legal
+        (_side_landing_choice with the owned route). The reason recorded; None: the gate's own hand-back stands (no
+        standable gap, or no legal landing)."""
         fb=self._follow_fallback;self._follow_fallback=None
         if fb is None or fb["f"]!=f:return None
         try:choice=fb["side"]()
