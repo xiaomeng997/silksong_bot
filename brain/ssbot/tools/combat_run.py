@@ -594,7 +594,12 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
             result["resources"][name]={"failed":message};errors.append(name+": "+message)
             result["secondary_errors"].append({"origin":"cleanup."+name,"reason":message})
     close("scene_field_worker",getattr(getattr(policy,"_scene_field_event_reader",None),"close",None))
-    close("plan_worker",getattr(getattr(getattr(policy,"tac",None),"plan_runner",None),"close",None))
+    plan_runner=getattr(getattr(policy,"tac",None),"plan_runner",None)
+    close("plan_worker",getattr(plan_runner,"close",None))
+    if plan_runner is not None:
+        # the worker's own evidence in this receipt: PID, model, source, exit, and the plan counts (Task 182, Sol seq 255 F)
+        def plan_worker_receipt():result["plan_worker"]=plan_runner.stats()
+        close("plan_worker_receipt",plan_worker_receipt)
     close("policy_log",getattr(policy,"flush_log",None))
     close("policy_keys",getattr(policy,"flush_keys",None))
     close("chain_journal",getattr(getattr(policy,"chain_native",None),"flush",None))

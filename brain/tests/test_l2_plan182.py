@@ -1103,6 +1103,23 @@ def test_the_over_out_phase_is_a_bounded_passage_with_its_body():
     assert CP.PlanRunner.waypoint(runner, NS(frame=100, t=.2, hx=36., geo={"bodies": {}}, subjects=subjects), plan.phase("over_out")) is None
 
 
+def test_the_cleanup_receipt_keeps_the_plan_workers_evidence(tmp_path, monkeypatch):
+    from ssbot.tools import combat_run as C
+    from tests.test_b2_worker_batch import options
+    monkeypatch.setenv("SSBOT_FORUM_CHAIN_B2", "0")
+    calls = []
+    runner = NS(close=lambda: calls.append("close"),
+                stats=lambda: (calls.append("stats"), dict(channel=dict(exit=dict(pid=7, exitcode=0))))[1])
+    def closed(policy):
+        return C._close_worker(options(tmp_path), link=None, recorder=None, out=None, diagnostics=None, policy=policy, stage="episodes",
+                               primary_error=None)
+    result = closed(NS(tac=NS(plan_runner=runner)))
+    assert calls == ["close", "stats"] and result["complete"]             # closed first, so the exit is in it
+    assert result["plan_worker"]["channel"]["exit"]["exitcode"] == 0 and result["resources"]["plan_worker"] == "pass"
+    plain = closed(NS(tac=NS(plan_runner=None)))
+    assert "plan_worker" not in plain and plain["resources"]["plan_worker"] == "not_created"
+
+
 def test_the_two_play_idle_hit_keeps_to_the_phase_that_asks_no_hit():
     from ssbot.combat import two_play as TP
     cls = next(c for c in vars(TP).values() if isinstance(c, type) and "_idle_step" in vars(c))
