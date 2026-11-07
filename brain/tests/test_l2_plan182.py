@@ -259,7 +259,7 @@ def test_coming_back_from_the_retreat_the_plan_has_both_bodies_and_the_landing_d
     plan = plan_of(cluster_request())
     assert cand(plan, "attack").feasible
     retreat = plan.phase("attack_retreat")
-    assert dict(retreat.on) == {"back_jumper": "attack_back_jumper", "back_other": "attack_back_other"}
+    assert dict(retreat.on) == {"back_jumper": "attack_back_jumper", "back_other": "attack_back_other", "stance_lost": BLOCKED}
     assert plan.phase("attack_back_jumper").target == 1 and plan.phase("attack_back_jumper").no_hit == ()
     assert plan.phase("attack_back_other").target == 2 and plan.phase("attack_back_other").no_hit == (1,)
 
@@ -352,7 +352,8 @@ def test_the_native_owner_says_what_it_holds_of_her_keys(monkeypatch):
     from ssbot.combat.knife_chain_air_native import NativeManualAirChain as N, transfer, waypoint
     state = dict(f=100)
     def owner(run=None, commitment=None, recovery=None, wall=None, goal=None):
-        return NS(runner=NS(run=run), commitment=commitment, recovery=recovery, _wall_pressure=wall, _transfer_goal=goal)
+        return NS(runner=NS(run=run), commitment=commitment, recovery=recovery, _wall_pressure=wall, _transfer_goal=goal,
+                  own_bounce_released=lambda st: False)
     assert N.key_commitment(owner(), state) is None
     assert N.key_commitment(owner(commitment={}), state) == ("b2 commitment", False, ())
     assert N.key_commitment(owner(recovery={}), state) == ("b2 recovery", False, ())
@@ -1312,6 +1313,271 @@ def test_the_over_call_takes_no_air_strike_row_whose_box_enters_the_body_first(m
     assert not T.plan_over_call({"switch_stomp": True})
     monkeypatch.setattr(CP, "ENABLED", True)
     assert T.plan_over_call({"switch_stomp": True}) and not T.plan_over_call({"switch_stomp": False})
+
+
+# ---- Sol seq 256: the way out and the waits at the landing as it stands; the jumper's new move; the same-tick bounce release ----
+
+def _walker_geo():
+    return dict(xa=14.01, xb=48.99, left=.25, right=.25, bodies={2: (17.25, 20.84)})
+
+
+def _resolver(hx=22., arrives=True):
+    r = object.__new__(CP.PlanRunner)
+    r.hand = NS(known=True)
+    r.last_stance = {}
+    r._arrives = lambda sc, x, by: arrives
+    tac = NS(rune={}, rules=NS(face_u=4.), _ent=lambda ws, i: None)
+    sc = NS(tac=tac, ws=None, t=0., hx=hx, geo=_walker_geo())
+    o = NS(iid=2, pos=(19.5, 3.), state="Idle", family=None)
+    return r, sc, o
+
+
+def _plain(plan):
+    # the same route written for a plain jump: its hammer's reach
+    return replace(plan, detail=tuple((k, {"family": "CC_JUMP", "reach": 7.76}.get(k, v)) for k, v in plan.detail))
+
+
+def _out_plan(prepared=("over",), land=32.4844):
+    # the replay k_over_out's geometry: the walker at 19.5 (body 17.25-20.84), far stance 16.05
+    J = body(1, 39.44, "Air", "CC_JUMP_CAST", facing=-1)
+    plan = plan_of(request(J=J, W=body(2, 19.5), hx=22., stage="flight", antic_at=None, land=land, land_vx=-5.45, air_at=0.))
+    assert cand(plan, "over").feasible and cand(plan, "over").get("follow") == "out" and plan.phase("over_head").after("bounced") == "over_out"
+    return replace(plan, detail=tuple((k, prepared if k == "prepared" else v) for k, v in plan.detail))
+
+
+def test_the_way_out_is_judged_at_the_observed_landing_and_body():
+    plan = _out_plan()
+    r, sc, o = _resolver()
+    assert plan.get("reach") == pytest.approx(CP.RUNE_REACH_U) and r._far_now(sc, plan, o) == pytest.approx(16.05)
+    m = dict(face=-1, x0=39.44, air_at=0., vx=-8.)
+    def route(land, runner=r):
+        return runner._resolve_middle(sc, plan, None, o, dict(m, land=land))[0]
+    # as predicted: its far side is past the whole rune: there
+    assert r._out_x(sc, plan, o, 32.4844) == pytest.approx(16.05)
+    assert route(32.4844) == "over"
+    # Sol's counterexample: 2.75 u nearer, still inside the 3 u support: 16.05 is 0.50 u inside the rune plus her half width (15.5474):
+    # the stance is the place past it, not the aim's
+    x = r._out_x(sc, plan, o, 29.7344)
+    assert 14.01 <= x <= 29.7344 - CP.RUNE_REACH_U - .25
+    assert route(29.7344) == "over"
+    # no such place inside the wall: not the route; the prepared and supported successor, else explicitly blocked
+    nearer = _out_plan(land=31.)
+    assert r._out_x(sc, nearer, o, 28.3) is None
+    res = r._resolve_middle(sc, nearer, None, o, dict(m, land=28.3))
+    assert res[0] == "blocked" and "no prepared route" in res[1]
+    both = replace(nearer, detail=tuple((k, ("under", "over") if k == "prepared" else v) for k, v in nearer.detail))
+    assert r._resolve_middle(sc, both, None, o, dict(m, land=28.3))[0] == "under"
+    # it cannot get there in time: not the route either
+    late, _, _ = _resolver(arrives=False)
+    assert late._resolve_middle(sc, plan, None, o, dict(m, land=29.7344))[0] == "blocked"
+    # a plain jump: the hammer is what its way out must clear
+    plain = _plain(plan)
+    assert r._out_x(sc, plain, o, 27.) == pytest.approx(16.05)
+    assert r._out_x(sc, plain, o, 23.5) == pytest.approx(23.5 - 7.76 - .25)
+
+
+def test_a_landing_tracked_nearer_takes_the_stance_it_is_not_kept_as_safe():
+    plan = _out_plan()
+    r, sc, o = _resolver()
+    s = NS(iid=1, family="CC_JUMP_CAST", state="Air", pos=(35., 9.))
+    sc.subjects = [s, o]
+    sc.grounded = False
+    r.exec = PlanExecutor()
+    r.exec.plan, r.exec.name, r.exec.status = plan, "over_out", "waiting"
+    r.last_stance, r.notes = {}, []
+    r.moves = {1: dict(air_at=0., land=32.4844, land_seen=None, vx=-8.)}
+    phase = plan.phase("over_out")
+    assert "stance_lost" not in r._events(sc, phase)
+    assert r.stance(sc, phase) == pytest.approx(16.05)
+    r.moves[1]["land"] = 29.7344                     # sharper: a place farther out still exists: the stance moves there
+    assert "stance_lost" not in r._events(sc, phase)
+    assert r.stance(sc, phase) <= 29.7344 - CP.RUNE_REACH_U - .25
+    r.moves[1]["land"] = 28.3                        # none left: the stage ends, explicitly
+    assert "stance_lost" in r._events(sc, phase) and phase.after("stance_lost") == BLOCKED
+    assert r.notes[-1]["what"] == "stance lost" and r.notes[-1]["landing"] == 28.3
+    # the head: with the hammer now over it
+    stay = replace(plan, detail=tuple((k, "stay" if k == "follow" else v) for k, v in plan.detail))
+    r.moves[1]["land"] = 32.4844
+    assert not r._stance_lost(sc, stay, stay.phase("over_stay"), o, r.moves[1])
+    r.moves[1]["land"] = 27.
+    assert r._stance_lost(sc, stay, stay.phase("over_stay"), o, r.moves[1])
+    # the stand and the place behind: the same
+    assert plan.phase("return").after("stance_lost") == BLOCKED and plan.phase("under").after("stance_lost") == BLOCKED
+    r.moves[1]["land"] = 25.                         # no standing footprint between the walker and this landing
+    assert r._stance_lost(sc, plan, plan.phase("return"), o, r.moves[1])
+    r.moves[1]["land"] = 47.                         # no room behind it at the wall
+    assert r._stance_lost(sc, plan, plan.phase("under"), o, r.moves[1])
+    # the phases keep their order: the hazard over first
+    assert [e for e, _ in phase.on].index("hazard_over") < [e for e, _ in phase.on].index("stance_lost")
+
+
+def test_after_the_over_routes_strike_no_new_plan_asks_a_second_one(monkeypatch):
+    def run(bounced):
+        tac, ws, fc = planned(monkeypatch)
+        go_(tac, ws, fc)
+        antic(tac, ws, fc)
+        go_(tac, ws, fc); go_(tac, ws, fc)
+        r = tac.plan_runner
+        ex = r.exec
+        inst = ex.plan.instance
+        if bounced:
+            ex.record(inst, "bounced", ws.stamp.t_game_s)
+        ex.end("blocked", "stance_lost", ws.stamp.t_game_s)
+        n = r.requests
+        take_off(tac, ws, fc)
+        go_(tac, ws, fc)
+        return r.requests - n
+    assert run(False) == 1
+    assert run(True) == 0
+
+
+def _moved(plan, name, t, land_seen=1.):
+    r = object.__new__(CP.PlanRunner)
+    r.exec, r.notes = PlanExecutor(), []
+    r.moves = {plan.instance[0]: dict(antic_at=None, land_seen=land_seen)}
+    r.exec.plan, r.exec.name, r.exec.status = plan, name, "waiting"
+    sc = NS(t=t, hx=16., mem={}, subjects=[], frame=100)
+    CP.PlanRunner._jumper_moved(r, sc, plan, NS(iid=plan.instance[0], family="CC_SLAM", state="Slam Antic"))
+    return r, sc
+
+
+def test_the_jumpers_new_move_finishes_only_what_is_finished():
+    cast = _out_plan()
+    due, over = 1. + CP.RUNE_OVER_S - .3, 1. + CP.RUNE_OVER_S + .1
+    # its rune still due: the stages that keep her off it go on, the new threat takes its turn by the public rule scores
+    for name in ("over_head", "over_stay", "over_out", "return"):
+        r, sc = _moved(cast, name, due)
+        assert r.exec.plan is cast and r.exec.name == name and r.exec.status == "waiting", name
+        assert "back" not in sc.mem
+    # any other stage stops, not as a success; nothing to return from
+    r, sc = _moved(cast, "under", due)
+    assert r.exec.plan is None and r.exec.status == "interrupted" and "back" not in sc.mem
+    # the rune over: the way back not made is handed on
+    r, sc = _moved(cast, "over_back", over)
+    assert r.exec.status == "handed_back" and sc.mem["back"]["iid"] == 1 and any(x["what"] == "return kept" for x in r.notes)
+    r, sc = _moved(cast, "under", over)
+    assert r.exec.status == "complete" and "back" not in sc.mem
+    # a plain jump: its hazard is over with the new move
+    plain = _plain(cast)
+    r, sc = _moved(plain, "over_wait", 1.2)
+    assert r.exec.status == "handed_back" and sc.mem["back"]["family"] == "CC_JUMP"
+    r, sc = _moved(plain, "return", 1.2)
+    assert r.exec.status == "complete" and "back" not in sc.mem
+
+
+def test_a_plan_expiring_on_its_way_back_keeps_the_return():
+    plan = _out_plan()
+    r = object.__new__(CP.PlanRunner)
+    r.exec, r.notes, r.pending_info = PlanExecutor(), [], None
+    r.moves = {1: dict(antic_at=None)}
+    r.exec.plan, r.exec.name, r.exec.status = plan, "over_back", "waiting"
+    r.exec.end("expired", "past the plan's validity", 5.)
+    sc = NS(t=5., hx=16., mem={}, subjects=[], frame=100)
+    r._after_step(sc, plan, "over_back")
+    assert sc.mem["back"]["iid"] == 1
+    sc = NS(t=5., hx=16., mem={}, subjects=[], frame=100)
+    r._after_step(sc, plan, "under")
+    assert "back" not in sc.mem
+
+
+def _bounce_chain(family="VAULT_IDLE", f=120, target_state="Idle"):
+    from ssbot.combat import knife_chain_air_native as AN
+    from ssbot.combat import knife_chain_transfer as T, two_play as TP
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_offer" in vars(c))
+    chain = object.__new__(cls)
+    move = MoveInstance(7, 100, family)
+    chain.arm, chain.recovery, chain.commitment, chain._wall_pressure = "B", None, None, None
+    chain.post_context = dict(move=move, bounce=120, hit=120, press=118)
+    chain._hit = 120
+    chain._clock, chain._clock_known = 2., False
+    chain.runner = NS(run=NS(chain="vault_idle", link="near", lid="vault_idle.near", v={}))
+    chain._vault_responsibility = {move: (MoveInstance(8, 100, "CC_JUMP"), 1.)} if family == "VAULT_IDLE" else {}
+    chain._transfer_responsibility, chain._transfer_target_moves = {}, {}
+    def clapper(iid, x, st):
+        return dict(iid=iid, type_key=TP._sp.CLAPPER, pos=[x, 3.], hp=100,
+                    fsms=[dict(name="Control", state=st, t=.2)],
+                    colliders=[dict(name="Song Heavy Sentry (2)", enabled=True)])
+    state = dict(f=f, hero=dict(health=5), ev=[], ents=[clapper(7, 20., target_state), clapper(8, 40., "Air")])
+    return chain, state, move, T
+
+
+def test_this_ticks_real_bounce_releases_the_strike_along_the_path_that_takes_it():
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    chain, state, move, T = _bounce_chain()
+    assert len(T.clappers(state)) == 2
+    # the same tick: observe has released the commitment, the Run is still there until this tick's goal step
+    assert chain.runner.run is not None and chain.commitment is None
+    assert chain.own_bounce_released(state) and chain.key_commitment(state) is None
+    # a later tick with the Run still on: nothing says it is free
+    chain, state, move, T = _bounce_chain(f=121)
+    assert not chain.own_bounce_released(state) and chain.key_commitment(state) == ("vault_idle.near", False, ())
+    # an older post of the same Clapper, not this strike's hit
+    chain, state, move, T = _bounce_chain()
+    chain._hit = 119
+    assert chain.key_commitment(state) == ("vault_idle.near", False, ())
+    # a commitment still held, a recovery: not this path
+    chain, state, move, T = _bounce_chain()
+    chain.commitment = dict(move=move)
+    assert chain.key_commitment(state)[1] is False
+    chain, state, move, T = _bounce_chain()
+    chain.recovery = dict(first=120)
+    assert chain.key_commitment(state) == ("b2 recovery", False, ())
+    # no parent move to bind: that path binds no goal and the Run stays
+    chain, state, move, T = _bounce_chain()
+    chain._vault_responsibility = {}
+    assert chain.key_commitment(state) == ("vault_idle.near", False, ())
+    # the struck one slamming: the old hammer tail goes on: still a holder
+    chain, state, move, T = _bounce_chain(family="RUNE_TRANSFER", target_state="Slam 1")
+    chain._transfer_target_moves = {move: (MoveInstance(7, 95, "CC_SLAM"), 1.)}
+    chain._transfer_responsibility = {move: (MoveInstance(8, 100, "CC_CAST"), 1.)}
+    assert not chain.own_bounce_released(state)
+    assert chain.key_commitment(state) == ("vault_idle.near", False, ())
+    # the same strike on an Idle one (its responsibility another move): released
+    chain, state, move, T = _bounce_chain(family="RUNE_TRANSFER")
+    chain._transfer_responsibility = {move: (MoveInstance(8, 100, "CC_JUMP"), 1.)}
+    assert chain.own_bounce_released(state)
+
+
+def test_the_plan_commitment_takes_the_release_and_keeps_every_other_holder():
+    from ssbot.train import forum_planner_policy as P
+    active, idle = NS(active=lambda: True), NS(active=lambda: False)
+    def commit(released, slam=None, low=None, two=None, chain=None):
+        native = NS(own_bounce_released=lambda s: released, key_commitment=lambda s: chain)
+        return P.ForumPlannerPolicy._plan_commitment(NS(slam_play=slam, claw=None, cast_stab=None, rune_lowhop=low, evade_chase=None, two=two,
+                                                        chain_native=native), 120, {})
+    assert commit(True, slam=active) is None                        # a slam run left over before the chain took the keys: released with it
+    assert commit(False, slam=active) == ("slam", False, ())
+    assert commit(True, low=active) == ("low", False, ())           # another script holding keys is another holder
+    assert commit(False, two=NS(esc=object())) == ("two esc", False, ())     # the wall switch's hop: on in the tested configuration
+    assert commit(False, two=NS(esc=None), slam=idle) is None
+    assert commit(False, chain=("x", True, (1, 2))) == ("x", True, (1, 2))
+
+
+@pytest.mark.parametrize("flag", ["ANTICSWITCH", "EARLY", "JUMPHIT", "RUNETIER", "FLIPB", "SP11B", "RUNEEXIT"])
+def test_a_key_script_outside_the_tested_set_is_refused_at_startup(monkeypatch, flag):
+    from ssbot.train import forum_planner_policy as P
+    monkeypatch.setattr(P.clapper_plans, "ENABLED", True)
+    plain = NS(tac=object())
+    assert P.ForumPlannerPolicy._prepare_plans(plain) is None        # the tested configuration: on to the worker (no tactics here: stops there)
+    monkeypatch.setattr(P.two_play, flag, True)
+    with pytest.raises(ValueError, match="not tested"):
+        P.ForumPlannerPolicy._prepare_plans(plain)
+    monkeypatch.setattr(P.clapper_plans, "ENABLED", False)
+    assert P.ForumPlannerPolicy._prepare_plans(plain) is None        # flag off: nothing changes
+
+
+def test_map2_and_the_air_show_are_outside_the_tested_set_too(monkeypatch):
+    from ssbot.train import forum_planner_policy as P
+    monkeypatch.setattr(P.clapper_plans, "ENABLED", True)
+    plain = NS(tac=object())
+    monkeypatch.setattr(P, "MAP2", True)
+    with pytest.raises(ValueError, match="MAP2"):
+        P.ForumPlannerPolicy._prepare_plans(plain)
+    monkeypatch.setattr(P, "MAP2", False)
+    monkeypatch.setattr(P.air_show, "AIRSHOW", True)
+    with pytest.raises(ValueError, match="AIRSHOW"):
+        P.ForumPlannerPolicy._prepare_plans(plain)
 
 
 def test_stats_keep_the_denominators_of_the_latency(monkeypatch):

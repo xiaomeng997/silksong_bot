@@ -123,7 +123,7 @@ class PlanExecutor:
         self.selected: str | None = None
         self.since: float | None = None   # the game time the current phase was entered
         self.pending: Plan | None = None  # the newest plan waiting for a legal boundary
-        self.status = "idle"              # idle / waiting / blocked / expired / invalid / complete / handed_back
+        self.status = "idle"              # idle / waiting / blocked / expired / invalid / interrupted / complete / handed_back
         self.reason: str | None = None
         self.history: dict = {}           # instance -> [(event, t)], the handled events of a move instance
         self.generations: dict = {}       # instance -> the highest generation ever offered (no out-of-order result)

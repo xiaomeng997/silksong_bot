@@ -178,12 +178,32 @@ class NativeManualAirChain(NativeChainB2):
         if wall is not None and not (wall.get("yielded") or wall.get("landing")):return "b2 wall pressure",False,()
         if run is None:
             return None if self.commitment is None else ("b2 commitment",False,())
+        if self.own_bounce_released(state):return None
         if run.chain==waypoint.PROGRAM or (run.chain==transfer.PROGRAM and run.v.get("_approach_only")):return None
         if run.chain==transfer.PROGRAM and run.link=="bounce_tail" and self._transfer_goal is not None and type(f) is int:
             end=transfer.predicted_tail_end(state,self._transfer_goal)
             if end is None:return run.lid,False,()
             return run.lid,True,(int(run.v.get("source_tail_mask",0)),)*max(0,end-(f+1))
         return run.lid,False,()
+
+    def own_bounce_released(self,state):
+        """Task 182 (Sol seq 256): this STATE's real bounce of this chain's own strike: observe has already released its commitment and
+        this tick's goal step takes the Run (observe_bounce_goal, goal_preferences): nothing past the in-flight prefix holds her keys.
+        Read only, along that same path; not when the old hammer tail goes on (bounce_tail_pending: still a holder), nor when
+        that path has no parent move to bind (no goal, the Run stays)."""
+        if not self.own_bounce_now(state) or self.arm!="B" or self.recovery is not None or self.commitment is not None:return False
+        post=self.post_context;source=post["move"];hit=source.target_iid;ta=post.get("ta")
+        es={e["iid"]:e for e in transfer.clappers(state)}
+        if len(es)!=2 or hit not in es:return False
+        if source.family=="RUNE_TRANSFER":
+            attacking=transfer.control(es[hit])[0] in transfer.AIR_ATTACK_STATES
+            physical=self._observed_transfer_move(state,hit,"CC_SLAM") if attacking else None
+            if attacking:physical=physical or self._transfer_target_moves.get(source)
+            if attacking and physical is None:return True   # that path's ordinary hand-back
+            source,ta=physical or self._transfer_responsibility.get(source,(None,None))
+        elif source.family=="VAULT_IDLE":source,ta=self._vault_responsibility.get(source,(None,None))
+        if source is None:return False
+        return not transfer.bounce_tail_pending(state,transfer.TransferGoal(hit,hit,state["f"],ta,"BOUNCE",source),self._clock)
 
     def own_bounce_now(self,state):
         """Task 181 (Sol seq 253 R2): this STATE's real bounce released this chain's own strike: its post_context was made

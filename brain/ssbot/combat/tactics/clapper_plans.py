@@ -75,6 +75,10 @@ BODY_TOP = 6.92             # a standing Clapper's body top (recordings: its col
 BODY_HALF = 2.25            # ... and its reach from the root in either pose (Idle / Walk bodies, recordings)
 RUNE_ON_S, RUNE_OVER_S = 65 / 60., (65 + 17) / 60.    # the landing -> the big rune hurts (are_types: on0, its long window)
 HIT_TAIL_S = 1.0            # a plan's validity past the last hazard, for its return phases
+# The jumper attacks again while its rune is still due: these phases keep her off it and go on (the new threat takes its turn by the
+# public priorities); a way back to the middle not yet made is handed on, never counted as done.
+RUNE_WAITS = frozenset({"over_head", "over_wait", "over_stay", "over_out", "return", "attack_retreat"})
+RETURN_OWED = frozenset({"over_head", "over_wait", "over_stay", "over_out", "over_back"})
 
 
 def _rune_reach() -> float:
@@ -586,20 +590,22 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
                             on=take + fall + (("arrived", "aim_hold"),)))
         phases.append(Phase("aim_hold", target=J, stance=("x", H), on=take + (("gap_closed", "aim_attack"),)))
     # Past the take-off: no replacement boundary inside a route; a new move of the walker ends the routes that need it.
+    # stance_lost: the landing as tracked since has taken the place this stage stands on; it is not kept as safe (a flight plan may follow).
     phases.append(Phase("return", target=W, attack="side", stance=("stand",), no_hit=(J,), replaceable=False,
-                        on=(("other_move", INVALID), ("move_over", DONE))))
-    phases.append(Phase("under", target=J, stance=("behind",), ground=True, replaceable=False, go="under", on=(("move_over", DONE),)))
+                        on=(("other_move", INVALID), ("move_over", DONE), ("stance_lost", BLOCKED))))
+    phases.append(Phase("under", target=J, stance=("behind",), ground=True, replaceable=False, go="under",
+                        on=(("move_over", DONE), ("stance_lost", BLOCKED))))
     after = {"back": "over_wait", "stay": "over_stay", "out": "over_out"}[follow]
     phases.append(Phase("over_head", target=W, attack="stomp", stance=("head", W), no_hit=(J,), replaceable=False,
-                        on=(("other_gone", INVALID), ("bounced", after), ("hazard_over", "over_back"))))
+                        on=(("other_gone", INVALID), ("bounced", after), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
     # After the first real bounce: over its head or out past it, no second strike is asked of the action owners (B2's Idle
     # witness is revoked by that hit: its next Run would descend onto the body, #316 / #317); float there, no hit on either.
     phases.append(Phase("over_wait", target=W, stance=("head", W), no_hit=(J, W), replaceable=False,
-                        on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
+                        on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
     phases.append(Phase("over_stay", target=W, stance=("head", W), no_hit=(J, W), replaceable=False,
-                        on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
+                        on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
     phases.append(Phase("over_out", target=W, stance=("far", W), no_hit=(J, W), replaceable=False, go="out",
-                        on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
+                        on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
     # Back to the middle from the air. Landed in the gap: done. Landed elsewhere the rows cannot cross its body (replay m_close stood
     # still there): not a success: the plan hands the return it did not finish to the public middle return.
     phases.append(Phase("over_back", target=W, stance=("middle", W), no_hit=(J,), replaceable=False,
@@ -786,7 +792,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         Phase("lure_return", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
               on=(("past_landing", "lure_behind"), other_move, ("in_reach", DONE),)),
         Phase("lure_behind", target=jid, stance=("behind",), ground=True, replaceable=False,
-              on=(("hazard_over", "lure_slash"),)),
+              on=(("hazard_over", "lure_slash"), ("stance_lost", BLOCKED))),
         Phase("lure_slash", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
               on=(other_move, ("in_reach", DONE),)),
         Phase("attack_aim", target=(f_a or {}).get("target", gid), attack="side", stance=("front", (f_a or {}).get("target", gid)),
@@ -794,7 +800,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
               on=(("takeoff_retreat", "attack_retreat"), ("takeoff_blocked", BLOCKED), other_move)),
         # Coming back: the body standing nearer to her then, by the observed landing (written here, read when the hazard ends).
         Phase("attack_retreat", target=jid, stance=("retreat",), suppress_hits=True, ground=True, replaceable=False, go="retreat",
-              on=(("back_jumper", "attack_back_jumper"), ("back_other", "attack_back_other"))),
+              on=(("back_jumper", "attack_back_jumper"), ("back_other", "attack_back_other"), ("stance_lost", BLOCKED))),
         Phase("attack_back_jumper", target=jid, attack="side", stance=("front", jid), replaceable=False, on=(("in_reach", DONE),)),
         Phase("attack_back_other", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
               on=(other_move, ("in_reach", DONE),)),
@@ -1037,14 +1043,32 @@ class PlanRunner:
         if plan is not None and plan.scene in ("middle", "cluster"):
             s = next((v for v in sc.subjects if v.iid == plan.instance[0]), None)
             if s is not None and s.family in ATTACK_FAMS and s.family not in JUMPS:
-                # its jump is over and it attacks again: this plan's scene is over; the rune it left stays in the public rules
-                ex.end("complete", "the jumper began a new move", sc.t)
-        before = ex.plan
+                self._jumper_moved(sc, plan, s)
+        before, name = ex.plan, ex.name
         ex.step(sc.t, lambda ph: self._events(sc, ph), lambda pl: self._values(sc, pl),
                 lambda pl: self._instance_of(sc, pl.instance[0]))
-        self._after_step(sc, before)
+        self._after_step(sc, before, name)
 
-    def _after_step(self, sc, before) -> None:
+    def _jumper_moved(self, sc, plan, s) -> None:
+        """Its jump is over and it attacks again. The new threat takes its turn by the public priorities; that finishes only what is
+        finished. Its rune still due: the stages that keep her off it go on at their own score (the rule comparison above them decides
+        each tick); any other stage stops as an interruption, the rune staying in the public rules. A way back to the middle not
+        made: the public middle return keeps it (its own conditions decide when). Only with neither is the plan complete."""
+        ex = self.exec
+        m = self.moves.get(plan.instance[0]) or {}
+        rune_due = plan.get("family") == "CC_JUMP_CAST" and not self._hazard_over(sc, plan, s, m)
+        if rune_due and ex.name in RUNE_WAITS:
+            return
+        why = "the jumper began a new move"
+        if ex.name in RETURN_OWED:
+            ex.end("handed_back", why, sc.t)
+            self._keep_return(sc, plan)
+        elif rune_due:
+            ex.end("interrupted", why + " with its rune still due", sc.t)
+        else:
+            ex.end("complete", why, sc.t)
+
+    def _after_step(self, sc, before, name=None) -> None:
         ex = self.exec
         info = self.pending_info
         if info is not None and ex.pending is None:
@@ -1059,7 +1083,7 @@ class PlanRunner:
                                        event_to_adopted_ms=round((now - info["observed_ns"]) / 1e6, 3)))
             else:
                 self.counts["pending_dropped"] += 1
-        if before is not None and ex.plan is None and ex.status == "handed_back":
+        if before is not None and ex.plan is None and (ex.status == "handed_back" or (ex.status == "expired" and name in RETURN_OWED)):
             self._keep_return(sc, before)
 
     def _keep_return(self, sc, plan) -> None:
@@ -1222,6 +1246,12 @@ class PlanRunner:
         if "past_landing" in names and m.get("land") is not None and (
                 sc.hx - m["land"]) * plan.get("out") <= -(plan.get("need_back") or JB.CFG["min_back_u"]) + ARRIVE_U:
             out.append("past_landing")
+        if "stance_lost" in names and self._stance_lost(sc, plan, phase, o, m):
+            out.append("stance_lost")
+            if not dry:
+                self.notes.append(dict(what="stance lost", phase=phase.name, landing=m.get("land"), hx=sc.hx,
+                                       walker_x=None if o is None else float(o.pos[0]),
+                                       body=None if (o is None or sc.geo is None) else list(sc.geo["bodies"].get(o.iid, ()))))
         if names & {"landed_gap", "landed_away"} and sc.grounded:
             # completion facts only, no admission: in the gap the return is done; elsewhere it is not
             out.append("landed_gap" if sc.region == "middle" else "landed_away")
@@ -1350,6 +1380,47 @@ class PlanRunner:
         a, b = sc.geo["bodies"][o.iid]
         return b + max(1.2, sc.geo["left"]) if f > 0 else a - max(1.2, sc.geo["right"])
 
+    def _out_x(self, sc, plan, o, land) -> float | None:
+        """The way out's stance at this landing (the tracked one, not the aim's): past its body and past all this landing covers (a jump
+        cast: its whole rune; a plain jump: the hammer), inside the wall. None: no such place: no way out here."""
+        far = self._far_now(sc, plan, o)
+        if far is None or land is None:
+            return None
+        from .gauntlet import JT
+        f = plan.get("f")
+        half_j = sc.geo["left"] if f > 0 else sc.geo["right"]
+        cast = plan.get("family") == "CC_JUMP_CAST"
+        edge = land + f * (plan.get("reach") + half_j + (JT["pad"] if cast else 0.))
+        x = max(far * f, edge * f) * f
+        wall = sc.geo["xb"] if f > 0 else sc.geo["xa"]       # (the arena's limits for her centre)
+        return x if (wall - x) * f >= 0 else None
+
+    def _wait_holds(self, sc, plan, o, land) -> bool:
+        """Where the over route waits (its written follow) is out of what this landing covers."""
+        if plan.get("follow") == "out":
+            return self._out_x(sc, plan, o, land) is not None
+        from .gauntlet import JT
+        f = plan.get("f")
+        half_j = sc.geo["left"] if f > 0 else sc.geo["right"]
+        return (float(o.pos[0]) - (land + f * (JT["reach_j"] + half_j))) * f >= 0
+
+    def _stance_lost(self, sc, plan, phase, o, m) -> bool:
+        """The landing as tracked now leaves no safe place for this running stage's stance (the place chosen earlier stays no safer)."""
+        kind = (phase.stance or (None,))[0]
+        land = m.get("land")
+        if land is None or sc.geo is None:
+            return False
+        if kind == "stand":
+            return o is not None and self._stand_now(sc, plan, o, m) is None
+        if kind == "behind":
+            return self._spot_now(sc, plan, m) is None
+        if kind in ("head", "far"):
+            return o is not None and not self._wait_holds(sc, plan, o, land)
+        if kind == "retreat":
+            out = plan.get("out")
+            return (land + out * (plan.get("reach") + plan.get("half_in") + plan.get("pad")) - plan.get("wall_x")) * out > 0
+        return False
+
     def _resolve_middle(self, sc, plan, s, o, m):
         tac, t, f = sc.tac, sc.t, plan.get("f")
         if m.get("face") in (-1, 1) and m["face"] != f:
@@ -1396,14 +1467,15 @@ class PlanRunner:
             if spot is not None and self._arrives(sc, spot, take_t + DESCENT_S - .05):
                 options.append(("under", (spot - sc.geo["xa"]) if f > 0 else (sc.geo["xb"] - spot)))
         if "over" in prepared and o is not None and o.state in STANDING:
-            far = self._far_now(sc, plan, o)
-            room = None if far is None else (sc.geo["xb"] - far if f > 0 else far - sc.geo["xa"])
-            past_hammer = (sc.hx - (land + f * plan.get("reach"))) * f >= 0
-            # where this plan waits (written): out of the landing hammer at the observed landing, or the route is not there
-            wait_x = far if plan.get("follow") == "out" else float(o.pos[0])
-            clear = far is not None and (wait_x - (land + f * (JT["reach_j"] + half_j))) * f >= 0
-            passage = CROSS_S if plan.get("follow") == "out" else 0.
-            if room is not None and room >= .5 and clear and (past_hammer or self._arrives(sc, float(o.pos[0]), land_t - .05 - passage)):
+            # where this plan waits (written), at the observed landing and the observed body: out of all it covers, or the route is not there
+            out = plan.get("follow") == "out"
+            end = self._out_x(sc, plan, o, land) if out else self._far_now(sc, plan, o)
+            room = None if end is None else (sc.geo["xb"] - end if f > 0 else end - sc.geo["xa"])
+            past = (sc.hx - (land + f * plan.get("reach"))) * f >= 0
+            by = land_t - .05
+            if out:                                # (the passage above its body before the hazard, as the plan counted it)
+                by = min(by, land_t + (RUNE_ON_S if plan.get("family") == "CC_JUMP_CAST" else 0.) - .05 - CROSS_S)
+            if room is not None and room >= .5 and self._wait_holds(sc, plan, o, land) and (past or self._arrives(sc, float(o.pos[0]), by)):
                 options.append(("over", room))
         if not options:
             return "blocked", why + "; no prepared route supported"
@@ -1467,6 +1539,8 @@ class PlanRunner:
         key = (name, inst)
         if ex.plan is None and ex.status == "complete" and ex.last_plan is not None and ex.last_plan.instance == inst:
             return                                # this jump's plan has run to its end: the ordinary rules from here
+        if plan is None and ex.handled(inst, "bounced"):
+            return                                # the over route's strike is done: no new route (and second strike) for this jump
         why = None
         last = self.last_request
         running = plan is not None and plan.instance == inst and plan.scene == name
@@ -1660,7 +1734,8 @@ class PlanRunner:
             target = next((v for v in sc.subjects if v.iid == ref[1]), None)
             out = None if target is None else float(target.pos[0])
         elif kind == "far":
-            out = self._far_now(sc, plan, o)
+            land = m.get("land")
+            out = self._far_now(sc, plan, o) if land is None else self._out_x(sc, plan, o, land)
         elif kind == "middle":
             from .clapper_tactics import return_pose
             target = next((v for v in sc.subjects if v.iid == ref[1]), None)

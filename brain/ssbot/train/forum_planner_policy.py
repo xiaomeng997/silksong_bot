@@ -571,7 +571,17 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     def _prepare_plans(self):
         """Startup only (Task 182): the resident plan worker; reset checks its health and never spawns or waits."""
-        if not clapper_plans.ENABLED or not isinstance(self.tac, GauntletTactics) or self.tac.plan_runner is not None:
+        if not clapper_plans.ENABLED:
+            return
+        # The plans' hand-back knows the key owners of the tested configuration only (_plan_commitment): none of these is covered, and
+        # with them on it would predict a free hero (Sol seq 256). A refusal here, not one more layer for old scripts.
+        untested = [name for name, on in (("TWO_ANTICSWITCH", two_play.ANTICSWITCH), ("TWO_EARLYSWITCH", two_play.EARLY),
+                                          ("TWO_JUMPHIT", two_play.JUMPHIT), ("TWO_RUNETIER", two_play.RUNETIER), ("TWO_FLIPB", two_play.FLIPB),
+                                          ("TWO_WALKOUT/OPENPUSH/RUNLOCK/PUSHMID", two_play.SP11B), ("TWO_RUNEEXIT", two_play.RUNEEXIT),
+                                          ("MAP2", MAP2), ("AIRSHOW", air_show.AIRSHOW)) if on]
+        if untested:
+            raise ValueError("SSBOT_FORUM_TWO_PLAN: not tested with SSBOT_FORUM_" + ", ".join(untested))
+        if not isinstance(self.tac, GauntletTactics) or self.tac.plan_runner is not None:
             return
         clapper_plans.warm(self.params)      # the foreground's hand-back roll: never compiled inside a tick
         runner = self.tac.plan_runner = clapper_plans.PlanRunner(self.tac)
@@ -584,11 +594,17 @@ class ForumPlannerPolicy(PlannerPolicy):
 
     def _plan_commitment(self, f, s):
         """Who else holds her keys past the in-flight prefix at this L2 decision (Task 182, Sol seq 255 A): None: nobody; else (owner,
-        release known, keys). A script's or a committed Run's release cannot be told here: unknown, never a free hero."""
+        release known, keys). A script's or a committed Run's release cannot be told here: unknown, never a free hero. The chain's own
+        real bounce of this STATE (Sol seq 256) releases its strike and a slam script's run left over from before it took the keys
+        on this tick's goal step (_chain_goal_preferences). Scripts outside the tested set are refused at startup (_prepare_plans)."""
+        released = getattr(self.chain_native, "own_bounce_released", None)
+        released = bool(callable(released) and released(s))
         for name, script in (("slam", self.slam_play), ("claw", self.claw), ("cast", self.cast_stab), ("low", self.rune_lowhop),
                              ("chase", self.evade_chase)):
-            if script is not None and script.active():
+            if script is not None and script.active() and not (name == "slam" and released):
                 return name, False, ()
+        if self.two is not None and getattr(self.two, "esc", None) is not None:
+            return "two esc", False, ()
         commitment = getattr(self.chain_native, "key_commitment", None)
         return None if commitment is None else commitment(s)
 
