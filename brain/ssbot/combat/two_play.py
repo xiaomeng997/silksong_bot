@@ -1005,6 +1005,7 @@ class TwoPlay:
         self._rune_threats(f, s)
         hx = _sp.hero_x(s) if (s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos") else None
         self.entry = {}
+        self.plan_no_hit = frozenset()
         antics = []
         asw_antics = []
         pm_antics = []
@@ -1161,6 +1162,9 @@ class TwoPlay:
             r = self.idle = IdleRun(iid=iid, f0=f, re=bool(self.entry[iid]),
                                     d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
         if r is None or r.k_press is not None:
+            return None
+        if iid in self.plan_no_hit:
+            r.why = r.why or "plan"                # Task 182: the running plan phase asks no hit on it (SSBOT_FORUM_TWO_PLAN only)
             return None
         if (ESC or ASW) and not self.manual_focus:
             v = self.esc_view()

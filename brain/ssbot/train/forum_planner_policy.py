@@ -1492,6 +1492,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 if getattr(trk_, "rune", None) is not None:
                     from ssbot.combat import rune_bombs as _rbm
                     rt_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
+            if getattr(self.tac, "plan_runner", None) is not None:
+                self.two.plan_no_hit = frozenset(getattr(prefs, "no_hit", ()))
             tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,

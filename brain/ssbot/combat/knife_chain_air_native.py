@@ -648,6 +648,14 @@ class NativeManualAirChain(NativeChainB2):
             offer=self._transfer_offer(tick[1],tick[2],sim,forecast,prefs,tick[3])
             if offer is not None or getattr(prefs,"waypoint",None) is None or self.runner.run is not None:return offer
             # its approach was handed back at this step: the plan's next stage starts on the same tick
+        if self._plan_takes_vault_approach(prefs):
+            # Task 182: running keys only (no jump, no strike claim) and the plan's next stage names its place: it takes the keys at this
+            # step, as a side approach hands back at a tactical boundary; the keys already sent stay the next owner's prefix.
+            self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+            self._press=self._accepted=self._hit=None
+            self._vault_ready=False
+            self._note("vault_approach_handoff",frame=f,target=self.runner.run.v.get("iid"),kind=prefs.waypoint.kind)
+            self._abandon("the plan's stage took over from the vault approach")
         if self.runner.run is not None and self.runner.run.chain==waypoint.PROGRAM or (
                 getattr(prefs,"waypoint",None) is not None and self.runner.run is None
                 and self.commitment is None and self.post_context is None):
@@ -789,6 +797,11 @@ class NativeManualAirChain(NativeChainB2):
         # erase another owner, any delayed hazard, or an armed target collider.
         flags=(hit.check_flags&~K.F_INVULN)|(path.check_flags&K.F_INVULN)
         return replace(hit,check_flags=flags),protected
+
+    def _plan_takes_vault_approach(self,prefs):
+        run=self.runner.run
+        return (getattr(prefs,"waypoint",None) is not None and run is not None and run.chain=="vault_idle" and run.link=="approach"
+                and self.post_context is None and self.recovery is None)
 
     def _waypoint_offer(self,state,game,sim,forecast,prefs):
         """Task 182 (SSBOT_FORUM_TWO_PLAN; knife_chain_waypoint): one bounded floor approach of the running plan phase. L2 names

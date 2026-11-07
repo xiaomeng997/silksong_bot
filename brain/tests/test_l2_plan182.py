@@ -1103,6 +1103,42 @@ def test_the_over_out_phase_is_a_bounded_passage_with_its_body():
     assert CP.PlanRunner.waypoint(runner, NS(frame=100, t=.2, hx=36., geo={"bodies": {}}, subjects=subjects), plan.phase("over_out")) is None
 
 
+def test_the_two_play_idle_hit_keeps_to_the_phase_that_asks_no_hit():
+    from ssbot.combat import two_play as TP
+    cls = next(c for c in vars(TP).values() if isinstance(c, type) and "_idle_step" in vars(c))
+    two = object.__new__(cls)
+    two.idle = TP.IdleRun(iid=7, f0=90, re=False, d0=2., hp0=5)
+    two.entry = {}
+    two.plan_no_hit = frozenset({7})
+    two._second = lambda f: None
+    clapper = lambda iid, x: dict(iid=iid, type_key=TP._sp.CLAPPER, pos=[x, 3.], hp=100, fsms=[dict(name="Control", state="Idle", t=.5)])
+    s = dict(f=100, hero=dict(health=5, pos=[25., 4.5], vel=[0., 0.]), ents=[clapper(7, 20.), clapper(8, 40.)])
+    assert two._idle_step(100, s, True, True, 7) is None
+    assert two.idle.why == "plan"
+
+
+def test_the_plan_takes_the_keys_from_a_vault_approach_only():
+    from ssbot.combat import knife_chain_air_native as AN
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_offer" in vars(c))
+    chain = object.__new__(cls)
+    chain.post_context = chain.recovery = None
+    goal = NS(waypoint=NS(kind="under"))
+    def takes(chain_name, link, prefs=goal):
+        chain.runner = NS(run=NS(chain=chain_name, link=link))
+        return chain._plan_takes_vault_approach(prefs)
+    assert takes("vault_idle", "approach")
+    assert not takes("vault_idle", "near")                 # a strike under way keeps its keys
+    assert not takes("vault_idle", "over")
+    assert not takes("rune_transfer", "approach")
+    assert not takes("vault_idle", "approach", NS(waypoint=None))    # no stage asking: the approach goes on as before
+    chain.post_context = {"move": 1}
+    assert not takes("vault_idle", "approach")
+    chain.post_context, chain.recovery = None, {"first": 1}
+    assert not takes("vault_idle", "approach")
+    chain.recovery, chain.runner = None, NS(run=None)
+    assert not chain._plan_takes_vault_approach(goal)
+
+
 def test_a_failed_waypoint_answers_for_the_jump_it_is_about():
     from ssbot.combat import knife_chain_air_native as AN
     from ssbot.combat.knife_chain_commitment import MoveInstance
@@ -1316,11 +1352,11 @@ def test_the_walker_closes_the_gap_and_the_prepared_under_runs_by_wall_room(monk
 def test_the_route_with_the_farther_wall_is_the_one_chosen():
     # both feasible in flight: under ends behind the landing, over on the walker's far side; the wall decides, in both directions
     J = body(1, 40., "Air", "CC_JUMP", facing=-1)
-    plan = plan_of(request(J=J, W=body(2, 30.), hx=35., stage="flight", antic_at=None, land=37., land_vx=-5.45, air_at=0.))
+    plan = plan_of(request(J=J, W=body(2, 30.), hx=35., stage="flight", antic_at=None, land=39., land_vx=-5.45, air_at=0.))
     under, over = cand(plan, "under"), cand(plan, "over")
     assert under.feasible and over.feasible and under.get("wall_room") < over.get("wall_room") and plan.selected == "over"
     J = body(1, 30., "Air", "CC_JUMP", facing=-1)
-    plan = plan_of(request(J=J, W=body(2, 20.), hx=25., stage="flight", antic_at=None, land=27., land_vx=-5.45, air_at=0.))
+    plan = plan_of(request(J=J, W=body(2, 20.), hx=25., stage="flight", antic_at=None, land=29., land_vx=-5.45, air_at=0.))
     under, over = cand(plan, "under"), cand(plan, "over")
     assert under.feasible and over.feasible and under.get("wall_room") > over.get("wall_room") and plan.selected == "under"
 
