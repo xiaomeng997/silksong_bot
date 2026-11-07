@@ -1155,29 +1155,25 @@ def test_over_waits_out_of_the_landing_hammer_or_is_no_route():
     assert not over(33.5, 31.5).feasible and "coverage" in over(33.5, 31.5).reason
 
 
-def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
-    # The walker walks up to the jump's hammer between the plan and the take-off: stay is gone, the prepared over runs, by the same
-    # plan and with no request.
-    tac, ws, fc = planned(monkeypatch)
+def test_no_standing_gap_at_the_take_off_runs_the_prepared_route_farther_from_the_wall(monkeypatch):
+    # a short jump: behind its landing is near the wall, over the walker is far from the other one: the same plan runs over, no request
+    tac, ws, fc = planned(monkeypatch, xs=(19., 31.5), hx=27.)
     go_(tac, ws, fc)
     antic(tac, ws, fc)
     go_(tac, ws, fc); go_(tac, ws, fc)
     r = tac.plan_runner
     plan = r.exec.plan
-    assert plan.selected == "stay" and "over" in plan.get("prepared")
-    land = JB.landing(19., 35., 1)                 # the landing the take-off will observe from where she stands
-    change(fc, 8, pos=(land + 9., fc.subjects[1].pos[1]))
-    ws.entities[1].dmg_boxes[0].poly = [(land + 6.75, 3.), (land + 10.34, 3.), (land + 10.34, 7.), (land + 6.75, 7.)]
-    set_hero(tac, land + 7.)
-    take_off(tac, ws, fc)
+    assert plan is not None and "over" in plan.get("prepared")
+    land = plan.get("landings")[0]
+    change(fc, 8, pos=(30., fc.subjects[1].pos[1]))     # the walker a step closer at the take-off: no standing gap
+    ws.entities[1].dmg_boxes[0].poly = [(29., 3.), (31., 3.), (31., 7.), (29., 7.)]
+    take_off(tac, ws, fc, vx=(land - 19.) / CP.GAIN)
     n = r.requests
     out = go_(tac, ws, fc)
     note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
-    assert note["route"] == "over" and "closed" in note["reason"]
+    assert note["route"] == "over" and "closed" in note["reason"], note
     assert r.exec.plan is plan and r.exec.name == "over_head" and r.requests == n
     assert out.target == 8 and out.entry_attack.kind == "stomp"
-
-
 def test_the_walker_closes_the_gap_and_the_prepared_under_runs_by_wall_room(monkeypatch):
     # the walker closes the gap at the take-off, under ends farther from the wall than over: the same plan runs it, no request
     tac, ws, fc = planned(monkeypatch, xs=(30., 45.), hx=37.)
