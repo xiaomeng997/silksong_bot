@@ -511,14 +511,15 @@ class EvadeChase:
 
     @staticmethod
     def _falling_on_it(d: float, h: dict, ground: bool, accepting: bool) -> bool:
-        """She is in the air, her box over its body on the mask's frame (d: her x in front of its centre there), and comes
-        down to its standing top before its slide has taken its front edge past her box."""
+        """She is in the air, her box over its body in front of its centre on the mask's frame (d: her x in front of its
+        centre there), and comes down to its standing top before its slide has taken its front edge past her box. Past its
+        centre (d <= 0) no: the run's away key comes from the side it started on and would point at the body."""
         box, vel = h.get("box"), h.get("vel") or ()
         if ground or not accepting or not box or len(box) != 4 or len(vel) < 2 or float(vel[1]) >= 0.0:
             return False
         half = (float(box[2]) - float(box[0])) / 2.0
         reach = BODY_FRONT + half
-        if not -(BODY_BACK + half) < d < reach:
+        if not 0.0 < d < reach:
             return False
         frames = SEND_AHEAD + (reach - d) / EV_V
         return float(box[1]) + float(vel[1]) * frames / 60.0 < BODY_TOP

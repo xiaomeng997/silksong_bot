@@ -74,6 +74,25 @@ def test_she_is_rising_or_high_above_or_on_the_ground_or_without_input_the_brake
     assert m == 0 and not ch.yields_brake_to(DASH_R)
 
 
+def test_past_its_centre_the_run_has_no_away_key_and_the_brake_stays():
+    # Sol seq 260: a run started in front of it (2583), the next tick she is 1 u past its centre: the run's away key (from its
+    # starting side) points at the body. d on the mask's frame = -0.5; no key is given way to, in either direction.
+    f, k, cx, foot, vy = LIVE[0]
+    ch, m = stepped(live(f, k, cx, foot, vy))
+    assert m == 0 and ch.active() and ch.yields_brake_to(DASH_R)
+    f, k, cx, foot, vy = LIVE[1]
+    s = live(f, k, cx, foot, vy, x=cx - 1.0)
+    m = ch.step(f, s, False, True)
+    assert m == 0 and ch.active() and ch.run.face == 1
+    assert (s["hero"]["box"][0] + s["hero"]["box"][2]) / 2.0 - (cx - 0.5) == pytest.approx(-0.5)
+    assert not ch.yields_brake_to(sp.M_R) and not ch.yields_brake_to(DASH_R) and not ch.yields_brake_to(sp.M_L)
+    # at the centre itself on the mask's frame too (d = 0): the proven side only
+    f0, k0, cx0, foot0, vy0 = LIVE[0]
+    ch, m = stepped(live(f0, k0, cx0, foot0, vy0))
+    m = ch.step(f, live(f, k, cx, foot, vy, x=cx - 0.5), False, True)
+    assert m == 0 and ch.active() and not ch.yields_brake_to(DASH_R)
+
+
 def test_in_front_of_the_body_the_brake_stays():
     # recorded observe_bait 4104: d = 3.599, 1.1 u off its front, landing: a real brake
     s = live(4104, 0, 22.71, 3.495, -12.0, x=22.71 + 3.099)
