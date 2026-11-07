@@ -942,8 +942,13 @@ class NativeManualAirChain(NativeChainB2):
         if active and run.link in transfer.FOLLOW_LINKS and ground:
             self._follow_landed(state,run)   # Task 183: the actual landing ends the follow-up Run
             return None
+        no_witness=None
         if active and run.link=="air":
             why=self._no_strike_overhead(state,sim,target)
+            if (why is not None and not ground
+                    and transfer.follow_scope(self._transfer_goal,target,bool(run.v.get("follow_close")))):
+                # Task 183 seq 262: the bounce follow-up reads the gap first; this hand-back stands if it takes nothing
+                no_witness=why;why=None
             if why is not None:
                 # Task 179 #317 (Sol seq 240 乙): an air transfer / continuation Run already over its target with no
                 # strike witness possible for her current state hands back at this step through B2 recovery: the
@@ -1039,6 +1044,12 @@ class NativeManualAirChain(NativeChainB2):
         if self._follow_due(self._transfer_goal,draft,run,active,ground,approach_only):
             handled,offer=self._follow_offer(state,game,sim,forecast,prefs,made,run if active else None,current)
             if handled:return offer
+        if no_witness is not None:
+            # (the deferred Task 179 #317 hand-back: the follow-up took nothing this tick)
+            self._note("transfer_no_witness_handback",frame=f,target=target,reason=no_witness,
+                       owner="B2 recovery hands back; failure responsibility kept")
+            self._recover("transfer air run over its target with no strike witness: "+no_witness,f)
+            return None
         target_ta=None;target_move=None;conditional_contact=None
         try:
             goal=self._transfer_goal
@@ -1219,7 +1230,8 @@ class NativeManualAirChain(NativeChainB2):
         """Task 183 (Sol seq 261): this tick decides the bounce follow-up: a real bounce off the target's own slam (two
         Clappers), airborne, its hammer tail over, not an approach; a sent strike row or hook finishes under its own
         ownership."""
-        if approach_only or ground or not transfer.follow_scope(goal,draft.run.v.get("iid")):return False
+        if (approach_only or ground
+                or not transfer.follow_scope(goal,draft.run.v.get("iid"),bool(draft.run.v.get("follow_close")))):return False
         if draft.run.link=="bounce_tail" or not draft.run.v.get("source_tail_done"):return False
         if active and run.link not in transfer.FOLLOW_LINKS|{"air","bounce_tail"}:return False
         return draft.run.link in transfer.FOLLOW_LINKS|{"air","strike"}
@@ -1242,11 +1254,13 @@ class NativeManualAirChain(NativeChainB2):
         self._abandon("bounce follow-up done: "+("landed between the two bodies" if run.link=="middle" else "landed"))
 
     def _owned_route(self,state,game,sim,geo,plan,gap,old,link):
-        """Task 183: an owned follow-up route goes on unchanged (its absolute row; past it no key for the middle, the same
-        key for a landing) while the model still reaches the ground (the middle: inside the gap by MIDDLE_PAD_U) and the
-        route's next transfer.FOLLOW_SCAN_F frames (through the landing once it is that near) scan clean for all owners: the
-        whole route was scanned when it was chosen (as the source tail's one admission, then the current steps). None:
-        blocked (noted), the caller searches again with whole routes."""
+        """Task 183: an owned follow-up route goes on (its absolute row; past it no key for the middle, the same key for a
+        landing) while the model still reaches the ground (the middle: inside the gap by MIDDLE_PAD_U) and the route's next
+        transfer.FOLLOW_SCAN_F frames (through the landing once it is that near) scan clean for all owners: the whole route
+        was scanned when it was chosen (as the source tail's one admission, then the current steps). seq 262: the row it
+        returns is the checked key stream itself, re-anchored at this tick's first free mask frame through the modelled
+        landing, so the keys sent are the keys checked even when she lands later than first planned. None: blocked (noted),
+        the caller searches again with whole routes."""
         f=state["f"];i=f+2-int(old["F0"]);rest=np.asarray(old.get("masks") or (),np.int64)[max(0,i):]
         tail=0 if link=="middle" else int(old["dir"])
         commands=np.r_[rest,np.full(transfer.MIDDLE_HORIZON_F,tail,np.int64)]
@@ -1260,7 +1274,11 @@ class NativeManualAirChain(NativeChainB2):
                 why="modelled landing no longer inside the gap"
             else:
                 sc=geo.scan(p,limit=min(j,transfer.FOLLOW_SCAN_F))
-                if sc.complete and not sc.contacts:return link,old,p,sc
+                if sc.complete and not sc.contacts:
+                    row=[int(m) for m in commands[:j-len(sim.prefix)]]
+                    return link,{**old,"F0":f+2,"masks":row,"land_f":int(p.origin+j),
+                                 "release_F":int(old["release_F"]) if link=="middle" else f+2+len(row),
+                                 "landing_box":[float(v) for v in b]},p,sc
                 hit=None if not sc.contacts else sc.contacts[0]
                 why="route blocked"
                 self._note("transfer_follow_route_blocked",frame=f,link=link,complete=sc.complete,
@@ -1300,7 +1318,8 @@ class NativeManualAirChain(NativeChainB2):
                                    "first_box":None if hit is None else [float(v) for v in p.box[hit.frame-p.origin]]})
                     continue
                 recipe,r,commands,j,box,_,_=c
-                follow={"kind":"middle","recipe":recipe,"dir":int(gap.direction),"F0":f+2,"masks":[int(m) for m in commands],
+                follow={"kind":"middle","recipe":recipe,"dir":int(transfer.middle_direction(hb,goal_x)),"F0":f+2,
+                        "masks":[int(m) for m in commands],
                         "release_F":f+2+int(r),"land_f":int(p.through),"goal_x":float(goal_x),"lo":gap.lo,"hi":gap.hi,
                         "other":int(gap.other),"landing_box":[float(v) for v in b],"rank":rank,"candidates":len(cands)}
                 self._note("transfer_follow_middle",frame=f,owned=old is not None,dash_free=dash,
@@ -1402,7 +1421,7 @@ class NativeManualAirChain(NativeChainB2):
         return True,B2Offer("active" if run is not None else "manual_commitment",path2,draft2,int(mask2),0.,plan2.move,
             {"manual_air":True,"rune_transfer":True,"caster":plan2.caster,"cast_fa":plan2.cast_fa,
              "follow":{k:v for k,v in follow.items() if k!="masks"},"follow_masks":follow.get("masks"),
-             "follow_route_through":route.through,"follow_route_contacts":len(scan.contacts),
+             "follow_route_through":follow.get("land_f"),"follow_route_contacts":len(scan.contacts),
              "tail_checked_through":draft2.run.v.get("source_tail_checked_through"),
              "tail_mask":draft2.run.v.get("source_tail_mask"),"approach_only":False,
              "checked_through":scan.last_frame,"phase":link,"predicted_bounce":None,

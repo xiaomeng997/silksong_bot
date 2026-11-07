@@ -215,6 +215,63 @@ def test_owned_side_landing_goes_on_when_the_gap_closes(monkeypatch):
     assert len(landed) == 1 and landed[0]['link'] == 'land' and not bout.n._failure_exposures
 
 
+def test_owned_landing_sends_the_keys_it_checked_after_its_row_ran_out(monkeypatch):
+    # Sol seq 262 item 1: the right landing's absolute row ends before this tick's first free frame (f 2984: row F0 2985
+    # only, f+2 = 2986) while she is still in the air: the recheck holds R to the ground, so R is what goes out
+    bout = Bout(monkeypatch, danger=[(26.4, 3.0, 35.5, 5.2)])
+    bout.tick()
+    run = bout.n.runner.run
+    assert run.link == 'land'
+    run.v['follow'] = {**run.v['follow'], 'masks': run.v['follow']['masks'][:1], 'land_f': F0 + 1}
+    offer = bout.tick()
+    assert offer is not None and offer.draft.run.link == 'land' and offer.mask & LR == B['R']
+    row = offer.draft.run.v['follow']
+    assert row['F0'] == F0 + 3 and row['masks'] and all(m & LR == B['R'] for m in row['masks'])
+    log = bout.run()
+    assert all(r['mask'] & LR == B['R'] for r in log[:-1])                    # every key sent is the checked one
+    assert len(bout.notes('transfer_follow_landed')) == 1 and not bout.n._failure_exposures
+
+
+def test_owned_routes_follow_a_landing_later_than_planned(monkeypatch):
+    # the control: after the first tick she is 1.5 u higher than the planned row assumed (a later real landing); the owned
+    # middle / landing keeps re-anchoring the checked row, the keys sent stay the checked ones and she still lands
+    for danger, link, key in (((), 'middle', B['L']), ([(26.4, 3.0, 35.5, 5.2)], 'land', B['R'])):
+        bout = Bout(monkeypatch, danger=danger)
+        first = bout.tick()
+        planned = first.details['follow']['land_f']
+        bout.S[[K.PY, K.QY, K.SY]] += 1.5
+        log = bout.run()
+        assert {r['link'] for r in log[:-1]} == {link}
+        landed = bout.notes('transfer_follow_landed')
+        assert len(landed) == 1 and landed[0]['frame'] > planned                # really later than first planned
+        for r in log[:-1]:
+            fo = r['offer'].draft.run.v['follow']
+            i = r['f'] + 2 - fo['F0']
+            assert r['mask'] == (fo['masks'][i] if 0 <= i < len(fo['masks']) else 0)   # sent = the row's key
+        assert any(r['mask'] & LR == key for r in log[:-1])
+        assert not bout.n._failure_exposures
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_middle_dials_back_when_she_is_past_the_goal(monkeypatch, mirror):
+    # Sol seq 262 item 2: she is already over the gap next to the other one's near edge; the right (left) one bounced her.
+    # The key toward the bounced-to-other direction finds no landing inside; toward the goal it does.
+    if mirror:
+        bout = Bout(monkeypatch, bounced=(8, 24.1, -1), other=(7, 36.86, -1), hero=(34.21, 10.774, 11.4), stance_x=30.)
+        back = B['L']
+    else:
+        bout = Bout(monkeypatch, hero=(26.75, 10.774, 11.4))
+        back = B['R']
+    gap = T.two_gap(bout.state(bout.sim()), 8)
+    assert gap.direction != back                                               # the old direction would go away
+    offer = bout.tick()
+    assert offer is not None and offer.draft.run.link == 'middle' and offer.mask & LR == back
+    log = bout.run()
+    landed = bout.notes('transfer_follow_landed')
+    assert len(landed) == 1 and gap.lo < landed[0]['box'][0] and landed[0]['box'][2] < gap.hi
+    assert not bout.n._failure_exposures
+
+
 def test_no_safe_middle_and_no_legal_landing_keeps_the_existing_air_link(monkeypatch):
     bout = Bout(monkeypatch, danger=[(0., 3.0, 60., 5.2)])
     offer = bout.tick()
@@ -231,12 +288,29 @@ def test_no_gap_aims_the_witnessed_downslash_over_the_seam_then_a_real_bounce_wi
     seam = bout.notes('transfer_follow_seam')
     assert seam and offer is not None and offer.draft.run.link in ('air', 'strike')
     aim = T.seam_aim(bout.state(bout.sim()), bout.goal, 8)
-    assert abs(aim - (T.body_box(bout.ents[1])[0] + T.SEAM_INSET_U)) < 1e-9   # over the bounced body by its seam edge
+    other_edge = T.body_box(bout.ents[0])[2]
+    assert abs(aim - (other_edge + .25 + T.MIDDLE_PAD_U + T.SEAM_TOL_U)) < 1e-9   # its inner side, clear of the other body
+    assert T.body_box(bout.ents[1])[0] + T.SEAM_INSET_U <= aim               # and over the bounced body
     assert offer.draft.run.v['side'] == B['L']                                # toward that seam
     assert not bout.notes('transfer_follow_middle') and not bout.notes('transfer_follow_side')
     # the next real bounce reads the gap again: the other one has walked back to 24.1, so the follow-up goes middle
     again = Bout(monkeypatch)
     assert again.tick().draft.run.link == 'middle'
+
+
+def test_an_air_run_without_a_witness_still_takes_an_open_gap(monkeypatch):
+    # seq 262: an air Run over its target whose Idle is past its Idle Time has no strike witness (the #317 hand-back);
+    # the gap is standable, so the follow-up takes the middle this tick instead of handing back
+    bout = Bout(monkeypatch, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 1.2
+    offer = bout.tick()
+    assert offer is not None and offer.draft.run.link == 'middle'
+    assert not bout.notes('transfer_no_witness_handback') and not bout.notes('b2_recovery')
+    # no standable gap: the hand-back stands as before
+    bout = Bout(monkeypatch, other=(7, 33.5, 1), link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 1.2
+    assert bout.tick() is None
+    assert bout.notes('transfer_no_witness_handback') and bout.notes('b2_recovery')
 
 
 def test_tail_and_sent_strike_keep_their_ownership(monkeypatch):
@@ -256,14 +330,48 @@ def test_tail_and_sent_strike_keep_their_ownership(monkeypatch):
     assert not n._follow_due(goal, draft, n.runner.run, True, False, True)               # approach only
 
 
-def test_scope_is_a_bounce_off_the_target_own_slam():
+def test_scope_is_a_bounce_in_a_chain_a_clapper_slam_started():
     slam = MoveInstance(8, 2922, 'CC_SLAM')
     assert T.follow_scope(TransferGoal(8, 8, 2974, 0., 'BOUNCE', slam), 8)
-    assert not T.follow_scope(TransferGoal(7, 8, 2974, 0., 'BOUNCE', slam), 7)          # L2 switched to the other one
+    assert T.follow_scope(TransferGoal(8, 8, 2974, 0., 'BOUNCE', slam), 8, close=False)  # its own target: any distance
+    # seq 262: L2's cross-Clapper continuation to the other one, and a later bounce of the same chain off the other one
+    # (the slam's responsibility kept), are in scope only when the two were close at the bounce (no standable gap)
+    assert T.follow_scope(TransferGoal(7, 8, 2974, 0., 'BOUNCE', slam), 7, close=True)
+    assert not T.follow_scope(TransferGoal(7, 8, 2974, 0., 'BOUNCE', slam), 7, close=False)
+    assert T.follow_scope(TransferGoal(7, 7, 3012, 0., 'BOUNCE', slam), 7)              # the chain's later bounce
+    assert not T.follow_scope(TransferGoal(7, 8, 2974, 0., 'BOUNCE', slam), 8, close=True)   # not this Run's target
     assert not T.follow_scope(TransferGoal(8, 8, 2974, 0., 'BOUNCE', MoveInstance(8, 2922, 'CC_CAST')), 8)
     assert not T.follow_scope(TransferGoal(8, 8, 2974, 0., 'SWITCH', slam), 8)
-    assert not T.follow_scope(TransferGoal(8, 8, 2974, 0., 'BOUNCE', MoveInstance(7, 2922, 'CC_SLAM')), 8)
     assert not T.follow_scope(None, 8)
+
+
+def test_cross_clapper_continuation_to_a_distant_one_is_unchanged(monkeypatch):
+    # L2 switched to the other one after the bounce and the two stand apart (standable gap): the existing transfer to it
+    bout = Bout(monkeypatch)
+    bout.goal = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
+    bout.n._transfer_goal = bout.goal
+    run = bout.n.runner.run
+    run.v.update(iid=7)
+    bout.prefs = GoalPrefs(mode='RUSH', stance_x=31., weights={}, target=7)
+    s = bout.state(bout.sim())
+    assert not T.bounce_close(s, bout.goal, s['hero'])
+    offer = bout.tick()
+    assert offer is not None and offer.draft.run.link not in T.FOLLOW_LINKS
+    assert not bout.notes('transfer_follow_decision') and not offer.draft.run.v.get('follow_close')
+
+
+def test_seam_aim_is_the_target_inner_side_clear_of_the_other_body(monkeypatch):
+    # bodies overlap: the bounced right one [35.52, 39.11], the other [32.16, 35.75]; her half width 0.25
+    bout = Bout(monkeypatch, other=(7, 33.5, 1))
+    s = bout.state(bout.sim())
+    assert T.bounce_close(s, bout.goal, s['hero'])
+    right, left = T.body_box(bout.ents[1]), T.body_box(bout.ents[0])
+    aim = T.seam_aim(s, bout.goal, 8)                                          # target the bounced (right) one
+    assert abs(aim - (left[2] + .25 + T.MIDDLE_PAD_U + T.SEAM_TOL_U)) < 1e-9 and right[0] < aim < right[2]
+    cross = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
+    assert T.seam_aim(s, cross, 7) is None                                     # cross target: only when close at start
+    aim = T.seam_aim(s, cross, 7, close=True)                                  # L2 switched to the left one
+    assert abs(aim - (right[0] - .25 - T.MIDDLE_PAD_U - T.SEAM_TOL_U)) < 1e-9 and left[0] < aim < left[2]
 
 
 def test_owned_middle_landing_outside_the_gap_recovers_with_its_responsibility(monkeypatch):

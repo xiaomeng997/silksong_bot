@@ -737,11 +737,21 @@ MIDDLE_SCAN_N=8          # middle rows scanned per batched raster pass, nearest 
 FOLLOW_SCAN_F=12         # an owned route's per-tick scan: its next 12 frames (the whole route was scanned when chosen)
 
 
-def follow_scope(goal,target):
-    """Task 183: a real bounce off one Clapper's own slam whose next tactical target is that same Clapper."""
+def follow_scope(goal,target,close=False):
+    """Task 183: a real bounce in a chain that a Clapper's own slam (CC_SLAM, the hammer whose responsibility the chain
+    keeps) started, this Run's target being the goal's tactical target: the bounced one itself, or (seq 262) the other
+    one when the two were close at the bounce (close: no standable gap between them when this Run started, the person's
+    overlapping or close Clappers; L2's cross-Clapper continuation to a distant one stays as it was). A later bounce of
+    the chain (a seam strike on either) stays in scope, so every real bounce reads the gap again."""
     return bool(goal is not None and not isinstance(goal,ReturnGoal) and goal.source_kind=="BOUNCE"
-                and goal.responsibility.family=="CC_SLAM" and goal.responsibility.target_iid==goal.caster
-                and goal.target==goal.caster and target==goal.caster)
+                and goal.responsibility.family=="CC_SLAM" and goal.target==target and (target==goal.caster or close))
+
+
+def bounce_close(state,goal,h):
+    """Task 183 seq 262: at a BOUNCE Run's start, the two Clappers are close: no standable gap between their bodies."""
+    if goal is None or goal.source_kind!="BOUNCE":return False
+    gap=two_gap(state,goal.caster)
+    return bool(gap is not None and not standable(gap,_hero_box(h)))
 
 
 def two_gap(state,caster):
@@ -774,15 +784,24 @@ def standable(gap,hero_box):
     return bool(gap is not None and hero_box is not None and gap.width>=hero_box[2]-hero_box[0]+2*MIDDLE_PAD_U)
 
 
-def seam_aim(state,goal,target):
-    """Task 183: no standable gap: the x over the target body nearest the seam (SEAM_INSET_U inside its near edge) the
-    witnessed down-slash is aimed from; None outside the follow-up scope or with a standable gap (the middle decides)."""
-    if not follow_scope(goal,target):return None
+def seam_aim(state,goal,target,close=False):
+    """Task 183: no standable gap: the x the existing witnessed down-slash is aimed from, on the TARGET's inner side (the
+    side facing the other Clapper) next to the seam: her centre her half width plus MIDDLE_PAD_U clear of the other
+    body's near edge, kept SEAM_INSET_U inside the target body (seq 262: aimed at the seam itself she came down on the
+    other body; SEAM_TOL_U more, so stopping short of the aim still keeps MIDDLE_PAD_U). The person: a hit from the inner
+    side turns it to face inward, so its evade goes outward. The target is
+    L2's (the bounced one, or the other one in its cross-Clapper continuation); no search for another side. None outside
+    the follow-up scope or with a standable gap (the middle decides)."""
+    if not follow_scope(goal,target,close):return None
     gap=two_gap(state,goal.caster);hb=_hero_box(state.get("hero"))
-    if gap is None or hb is None or standable(gap,hb):return None
-    x0,_,x1,_=gap.bounced
+    if gap is None or hb is None or standable(gap,hb) or target not in (gap.caster,gap.other):return None
+    tb,nb=(gap.bounced,gap.other_body) if target==gap.caster else (gap.other_body,gap.bounced)
+    x0,_,x1,_=tb;nx0,_,nx1,_=nb;half=.5*(hb[2]-hb[0])
     if x1-x0<=2*SEAM_INSET_U:return .5*(x0+x1)
-    return min(max(gap.seam,x0+SEAM_INSET_U),x1-SEAM_INSET_U)
+    clear=half+MIDDLE_PAD_U+SEAM_TOL_U                     # stopping anywhere within SEAM_TOL_U still keeps MIDDLE_PAD_U
+    if x0+x1>nx0+nx1:aim=max(x0,nx1)+clear                 # the target on the right: its left (inner) side
+    else:aim=min(x1,nx0)-clear                             # on the left: its right (inner) side
+    return min(max(aim,x0+SEAM_INSET_U),x1-SEAM_INSET_U)
 
 
 def aim_side(x,aim):
@@ -810,15 +829,21 @@ def _meets(boxes,body):
     return bool(np.any((boxes[:,0]<=b[2])&(boxes[:,2]>=b[0])&(boxes[:,1]<=b[3])&(boxes[:,3]>=b[1])))
 
 
+def middle_direction(hero_box,goal_x):
+    """Task 183 seq 262: the key toward the middle's goal from where she is now: from above the bounced body it points at
+    the other one; past the goal (or near the other one's edge) it dials back."""
+    return B["L"] if .5*(hero_box[0]+hero_box[2])>goal_x else B["R"]
+
+
 def middle_candidates(sim,gap,hero_box,goal_x,dash=False):
-    """Task 183: from the first free mask frame hold the key toward the middle for r frames (r on a MIDDLE_STEP_F grid up
-    to the held row's landing), then no key to the modelled ground; with dash (her air dash free) also the same rows
-    opening with that one air dash (DASH on the first two frames, the key held at least that long). The rows whose
-    modelled landing box lies inside the gap (MIDDLE_PAD_U from each near edge, both current bodies never entered on the
-    way), nearest goal_x first, a plain hold before a dash: [(recipe, r, commands through the landing, landing rollout
-    index, landing box, the row's boxes and flags from frame fo through the landing)]. The batched rollout is the model
-    (knife_chain_air.model_path traces the same rows bit for bit: review183/eq183.py)."""
-    d=int(gap.direction);n=MIDDLE_HORIZON_F
+    """Task 183: from the first free mask frame hold the key toward the middle's goal (middle_direction) for r frames (r on
+    a MIDDLE_STEP_F grid up to the held row's landing), then no key to the modelled ground; with dash (her air dash free)
+    also the same rows opening with that one air dash (DASH on the first two frames, the key held at least that long). The
+    rows whose modelled landing box lies inside the gap (MIDDLE_PAD_U from each near edge, both current bodies never
+    entered on the way), nearest goal_x first, a plain hold before a dash: [(recipe, r, commands through the landing,
+    landing rollout index, landing box, the row's boxes and flags from frame fo through the landing)]. The batched rollout
+    is the model (knife_chain_air.model_path traces the same rows bit for bit: review183/eq183.py)."""
+    d=int(middle_direction(hero_box,goal_x));n=MIDDLE_HORIZON_F
     kinds=["hold"]+(["dash"] if dash else [])
     full=np.full((len(kinds),n),d,np.int64)
     if dash:full[1,:2]|=B["DASH"]
@@ -1226,8 +1251,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if bounce_entry and target==p.caster and link!="strike":
         side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
-        aim=None if ground else seam_aim(state,goal,target)
-        if aim is not None:p=replace(p,side=aim_side(float(hp[0]),aim))   # Task 183: no standable gap: over the seam
+    close=bool(active.v.get("follow_close")) if active is not None else bounce_close(state,goal,h)
+    if bounce_entry and link!="strike" and not ground:
+        aim=seam_aim(state,goal,target,close)    # Task 183: no standable gap: the target's inner side by the seam
+        if aim is not None:p=replace(p,side=aim_side(float(hp[0]),aim))
     landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
                       ground and active.v.get("air_entry") and not tail_pending)
     if tail_pending:
@@ -1288,6 +1315,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
+    variables["follow_close"]=close   # Task 183 seq 262: the two were close when this Run started (a BOUNCE Run)
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp

@@ -1112,6 +1112,7 @@
       "cs": null,
       "row": null,
       "follow": null,
+      "follow_close": false,
       "bounced": false
     },
     "cfg": {
