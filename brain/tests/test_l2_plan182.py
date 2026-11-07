@@ -372,6 +372,48 @@ def test_the_native_owner_says_what_it_holds_of_her_keys(monkeypatch):
     assert N.key_commitment(owner(run=tail, goal=object()), state) == ("rune_transfer.bounce_tail", False, ())
 
 
+def test_an_owned_follow_up_route_holds_her_keys_through_its_modelled_landing():
+    # Task 182 seq 269 (#339 live 3475-3522): the bounce follow-up's owned middle route, chosen at 3474 to land at 3522, landed
+    # there; its release is that landing and its keys the checked row transfer_follow_keys sends (none past it), not an owner
+    # whose release cannot be told (all three branches were 'hand-back unknown' through the jump cast's aim)
+    from ssbot.combat.knife_chain_air_native import NativeManualAirChain as N, transfer
+    from ssbot.combat.knife_chain_format import MASK_NAMES as B
+    R, L = B["R"], B["L"]
+    state = dict(f=100)
+
+    def owner(run, **kw):
+        return NS(**{**dict(runner=NS(run=run), commitment=None, recovery=None, _wall_pressure=None, _transfer_goal=object(),
+                            own_bounce_released=lambda st: False), **kw})
+
+    route = {"kind": "middle", "recipe": "hold", "dir": R, "F0": 101, "masks": [R] * 6 + [0] * 4, "release_F": 107, "land_f": 113}
+    middle = NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": route})
+    # frames f + 2 .. land_f = 102 .. 113: the row from its own index 1 (R x 5, none x 4), then none past it
+    assert N.key_commitment(owner(middle), state) == ("rune_transfer.middle", True, (R,) * 5 + (0,) * 7)
+    side = {"kind": "left_landing", "dir": L, "F0": np.int64(100), "masks": [L] * 15, "land_f": np.int64(112)}
+    land = NS(chain=transfer.PROGRAM, link="land", lid="rune_transfer.land", v={"follow": side})
+    assert N.key_commitment(owner(land), state) == ("rune_transfer.land", True, (L,) * 11)
+    # landing inside the in-flight prefix: nothing more held, and known
+    soon = NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": {**route, "land_f": 101}})
+    assert N.key_commitment(owner(soon), state) == ("rune_transfer.middle", True, ())
+    # no owned route: a seam positioning / strike tick, a follow-up link without its route or without its modelled landing
+    for run in (NS(chain=transfer.PROGRAM, link="air", lid="rune_transfer.air", v={"follow": route}),
+                NS(chain=transfer.PROGRAM, link="strike", lid="rune_transfer.strike", v={"follow": route}),
+                NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={}),
+                NS(chain=transfer.PROGRAM, link="middle", lid="rune_transfer.middle", v={"follow": {**route, "land_f": None}})):
+        assert N.key_commitment(owner(run), state) == (run.lid, False, ())
+    # the owner's own holds come first, route or not
+    assert N.key_commitment(owner(middle, recovery={}), state) == ("b2 recovery", False, ())
+    assert N.key_commitment(owner(middle, _wall_pressure={}), state) == ("b2 wall pressure", False, ())
+    assert N.key_commitment(owner(middle, own_bounce_released=lambda st: True), state) is None
+    # what the plans read from it: a known hand-back after those keys (unknown made every branch 'hand-back unknown')
+    keys = N.key_commitment(owner(middle), state)[2]
+    _, free = owned_request(keys=())
+    q, held = owned_request(keys=keys)
+    assert held.known and held.index == free.index + len(keys)
+    _, unknown = owned_request(keys=(), known=False)
+    assert not unknown.known and plan_of(replace(q, hand=unknown)).status == "none"
+
+
 def test_an_owner_whose_release_cannot_be_told_makes_no_route_and_no_free_hero():
     q, hand = owned_request(keys=(), known=False)
     assert not hand.known

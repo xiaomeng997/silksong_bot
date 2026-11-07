@@ -171,8 +171,9 @@ class NativeManualAirChain(NativeChainB2):
     def key_commitment(self,state):
         """Task 182 (Sol seq 255 A): what this owner holds of her keys past the in-flight prefix. None: nothing a plan must wait for
         (no Run; an approach-only or waypoint Run hands back at its next step when L2 moves on). Else (owner, release known, keys
-        from the first free mask frame on); the source tail's release and keys are its own admission's; any other committed Run,
-        recovery or hook: unknown."""
+        from the first free mask frame on); the source tail's release and keys are its own admission's; an owned bounce
+        follow-up route's (seq 269) are the keys transfer_follow_keys sends through its modelled landing; any other committed
+        Run, recovery or hook: unknown."""
         run=self.runner.run;f=state.get("f")
         if self.recovery is not None:return "b2 recovery",False,()
         wall=getattr(self,"_wall_pressure",None)
@@ -185,6 +186,12 @@ class NativeManualAirChain(NativeChainB2):
             end=transfer.predicted_tail_end(state,self._transfer_goal)
             if end is None:return run.lid,False,()
             return run.lid,True,(int(run.v.get("source_tail_mask",0)),)*max(0,end-(f+1))
+        fo=run.v.get("follow") if run.chain==transfer.PROGRAM and run.link in transfer.FOLLOW_LINKS else None
+        if isinstance(fo,dict) and type(f) is int and isinstance(fo.get("F0"),(int,np.integer)) and isinstance(fo.get("land_f"),(int,np.integer)):
+            # Task 182 seq 269: an owned middle / landing route (Task 183) releases at its modelled landing; its keys are the
+            # checked absolute row that transfer_follow_keys sends (none past it), re-anchored every tick (_owned_route)
+            masks=fo.get("masks") or ();F0=int(fo["F0"])
+            return run.lid,True,tuple(int(masks[F-F0]) if 0<=F-F0<len(masks) else 0 for F in range(f+2,int(fo["land_f"])+1))
         return run.lid,False,()
 
     def own_bounce_released(self,state):
