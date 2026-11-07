@@ -516,9 +516,20 @@ def _over(c: _Middle, aim_x, name="over"):
     if why is not None:
         return no(why)
     follow = "back"
-    if c.cast and land is not None:
-        # out only when the far stance is past the rune's whole coverage; otherwise over the head until it has burst
-        follow = "out" if (far - (land + f * (c.reach + c.half_j + q.pad))) * f >= 0 else "stay"
+    if land is not None:
+        # Where she waits must be out of the landing hammer: the walker's head when that is past its reach, else the far side (replay
+        # m_over: the walker beside the landing, its head inside the hammer's polygon). A jump cast: out only when the far stance is past
+        # the rune's whole coverage, otherwise over the head until it has burst.
+        hammer = land + f * (q.reach_j + c.half_j)
+        head_clear, far_clear = (c.w_x - hammer) * f >= 0, (far - hammer) * f >= 0
+        if c.cast and (far - (land + f * (c.reach + c.half_j + q.pad))) * f >= 0:
+            follow = "out"
+        elif head_clear:
+            follow = "stay" if c.cast else "back"
+        elif far_clear and not c.cast:
+            follow = "out"
+        else:
+            return no("its head and far side are under the landing's coverage")
     det.update(follow=follow)
     return Candidate(name, True, None, "aim_attack" if c.aim else "over_head", 1., tuple(det.items()))
 
@@ -617,7 +628,7 @@ def _middle_plan(q: Request, m: Roller) -> Plan:
         selected = max(ok, key=lambda x: x.get("wall_room", -math.inf)).name if ok else None
         prepared = [x.name for x in ok]
     follow = next((x.get("follow") for x in cands if x.name == "over" and x.feasible), None) or "back"
-    made = dict(f=f, reach=c.reach, family=q.jumper.family, jumper=q.jumper.iid, other=q.other.iid, other_family=q.other.family,
+    made = dict(f=f, reach=c.reach, family=q.jumper.family, jumper=q.jumper.iid, other=q.other.iid, other_family=q.other.family, follow=follow,
                 prepared=tuple(prepared), lock_t=c.lock, take_t=c.t_to, land_t=c.land_t, w_in=(q.other.a if f > 0 else q.other.b),
                 arrive_dir=-f, arrive_t=None if facts is None else facts.get("arrive"),
                 need=c.need, h_lo=c.h_lo, h_cap_margin=GUIDE_MARGIN_U, stage=q.stage, walker_x0=q.other.x, walker_v=c.closing,
@@ -1382,7 +1393,10 @@ class PlanRunner:
             far = self._far_now(sc, plan, o)
             room = None if far is None else (sc.geo["xb"] - far if f > 0 else far - sc.geo["xa"])
             past_hammer = (sc.hx - (land + f * plan.get("reach"))) * f >= 0
-            if room is not None and room >= .5 and (past_hammer or self._arrives(sc, float(o.pos[0]), land_t - .05)):
+            # where this plan waits (written): out of the landing hammer at the observed landing, or the route is not there
+            wait_x = far if plan.get("follow") == "out" else float(o.pos[0])
+            clear = far is not None and (wait_x - (land + f * (JT["reach_j"] + half_j))) * f >= 0
+            if room is not None and room >= .5 and clear and (past_hammer or self._arrives(sc, float(o.pos[0]), land_t - .05)):
                 options.append(("over", room))
         if not options:
             return "blocked", why + "; no prepared route supported"

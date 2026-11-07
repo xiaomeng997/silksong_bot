@@ -981,6 +981,15 @@ class NativeManualAirChain(NativeChainB2):
             return None
         draft,plan,path,mask=made
         if plan.move in self._failed_hook_moves:return None
+        if transfer.plan_over_call(draft.run.v) and draft.run.link in ("jump","air") and int(mask)&(B["L"]|B["R"]):
+            # Task 182 (Sol seq 255 F2): rising to go over a body: no side key while holding it would carry her box into that body; she
+            # rises first and the clean strike row (press_now_row clean) takes over from there. The hold and the J stay the link's.
+            body=transfer.body_box(next((e for e in transfer.clappers(state) if e["iid"]==plan.iid),None) or {})
+            held=model_path(sim,plan,np.full(14,int(mask),np.int64),game)
+            if body is not None and transfer.enters_body(held.box,body,len(held.box)):
+                mask=int(mask)&~(B["L"]|B["R"])
+                path=replace(model_path(sim,plan,np.array([mask],np.int64),game),stage=path.stage,assumptions=path.assumptions)
+                self._note("transfer_side_held_back",frame=f,target=plan.iid,link=draft.run.link)
         current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)

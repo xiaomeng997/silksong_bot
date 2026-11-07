@@ -1107,6 +1107,32 @@ def test_a_start_with_no_clean_row_is_excluded_not_guessed():
     assert still is not None and (walking is None or walking != still or walking["p"] <= still["p"])
 
 
+def test_the_over_call_takes_no_air_strike_row_whose_box_enters_the_body_first(monkeypatch):
+    from ssbot.combat import knife_chain_transfer as T
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.knife_chain_format import MASK_NAMES as B
+    # in the air beside the body, low, moving toward it: the toward row strikes from beside it
+    y = FLOOR_Y + PARAMS.foot + 1.
+    S = np.asarray(kin.initial_state(PARAMS, 40., y, vx=-6., ground=False), np.float64)
+    sim = ChainSim(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, 0, 0)
+    body = np.array([35.9, FLOOR_Y, 39.3, CP.BODY_TOP])
+    plain = T.press_now_row(sim, body, 2, 0, B["L"])
+    assert plain is not None
+    masks = np.asarray(plain["masks"], np.int64)
+    ro = sim.roll(masks[None])
+    j = plain["contact_frame"]
+    assert T.enters_body(ro.box[0], body, j)         # the row the table takes meets the body before its contact
+    clean = T.press_now_row(sim, body, 2, 0, B["L"], clean=True)
+    if clean is not None:
+        ro = sim.roll(np.asarray(clean["masks"], np.int64)[None])
+        assert not T.enters_body(ro.box[0], body, clean["contact_frame"])
+    # the over call of a plan, and only that
+    monkeypatch.setattr(CP, "ENABLED", False)
+    assert not T.plan_over_call({"switch_stomp": True})
+    monkeypatch.setattr(CP, "ENABLED", True)
+    assert T.plan_over_call({"switch_stomp": True}) and not T.plan_over_call({"switch_stomp": False})
+
+
 def test_stats_keep_the_denominators_of_the_latency(monkeypatch):
     tac, ws, fc = planned(monkeypatch)
     go_(tac, ws, fc)
@@ -1116,6 +1142,17 @@ def test_stats_keep_the_denominators_of_the_latency(monkeypatch):
     assert st["counts"]["results"] == 1 and st["counts"]["adopted"] == 1 and st["adopted"] == 1
     assert st["event_to_validated_ms"]["p50"] is not None and st["event_to_adopted_ms"]["max"] >= st["event_to_validated_ms"]["p50"]
     assert st["pending_wait_ms"]["n"] == 0
+
+
+def test_over_waits_out_of_the_landing_hammer_or_is_no_route():
+    # the walker past the hammer's reach: its head; inside it with the far side out: the far side; both inside: not offered
+    J = body(1, 25., "Air", "CC_JUMP", facing=1)
+    def over(wx, hx):
+        return cand(plan_of(request(J=J, W=body(2, wx), hx=hx, stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=0.)), "over")
+    assert over(40., 36.).get("follow") == "back"
+    near = over(36.5, 33.)                         # head at 36.5 inside 38.01; far side 36.5 + 1.34 + 1.2 = 39.04 outside
+    assert near.feasible and near.get("follow") == "out"
+    assert not over(33.5, 31.5).feasible and "coverage" in over(33.5, 31.5).reason
 
 
 def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
@@ -1128,9 +1165,9 @@ def test_a_real_gap_closure_runs_the_prepared_route_not_a_block(monkeypatch):
     r = tac.plan_runner
     plan = r.exec.plan
     assert plan.selected == "stay" and "over" in plan.get("prepared")
-    land = plan.get("landings")[0]
-    change(fc, 8, pos=(land + 6.5, fc.subjects[1].pos[1]))
-    ws.entities[1].dmg_boxes[0].poly = [(land + 4.25, 3.), (land + 7.84, 3.), (land + 7.84, 7.), (land + 4.25, 7.)]
+    land = JB.landing(19., 35., 1)                 # the landing the take-off will observe from where she stands
+    change(fc, 8, pos=(land + 9., fc.subjects[1].pos[1]))
+    ws.entities[1].dmg_boxes[0].poly = [(land + 6.75, 3.), (land + 10.34, 3.), (land + 10.34, 7.), (land + 6.75, 7.)]
     set_hero(tac, land + 7.)
     take_off(tac, ws, fc)
     n = r.requests

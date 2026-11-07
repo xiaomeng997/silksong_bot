@@ -530,8 +530,10 @@ def walk_body_support(enemy,frames,hero):
     return support if np.isfinite(first[0]).all() else None
 
 
-def press_now_row(sim,body,F,hold,side,attacking_target=False):
+def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
+    clean (Task 182, the plans' over route, Sol seq 255 F2): a row whose hero box meets the body at all before its contact is no
+    row (51 real DownSlash hits in the bots' recordings: none had her box in the body before the hit).
 
     Try the existing toward row first. Only on failure try releasing direction
     and then countersteering. These are three fixed rows, not a timing search.
@@ -577,6 +579,7 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False):
             if all(PM.meets(slash+ro.pos[i,j],poly) for slash in slashes):
                 # a moving body is always margin-checked on its hull up to the target-contact exemption
                 if (attacking_target or support is not None) and grazes_body(ro.box[i],hull,j-2):break
+                if clean and enters_body(ro.box[i],hull,j):break
                 row.update(contact_frame=sim.fo+j,approach_direction=d,
                            contact_velocity=ro.vel[i,j].tolist())
                 if support is not None:
@@ -632,6 +635,23 @@ def antic_strike_out_of_time(sim,enemy,hold_left,side,dash_free):
             if ro.flags[i,j]&K.F_GROUND:break
             if any(PM.meets(s+ro.pos[i,j],poly) for s in slashes):return False
     return True
+
+
+def enters_body(boxes,body,until):
+    """Her box meets the body itself (no margin) on a step before `until`. One box held still or one per step; nan: unknown, as met."""
+    body=np.asarray(body,float)
+    for i in range(1,min(until,len(boxes))):
+        b=body if body.ndim==1 else body[i] if i<len(body) else None
+        if b is None or not np.isfinite(b).all():return True
+        h=boxes[i]
+        if h[0]<=b[2] and h[2]>=b[0] and h[1]<=b[3] and h[3]>=b[1]:return True
+    return False
+
+
+def plan_over_call(run_vars):
+    """The stomp entry of a jump plan's over route (SSBOT_FORUM_TWO_PLAN only): the near table's rule for this strike."""
+    from .tactics import clapper_plans
+    return bool(clapper_plans.ENABLED and run_vars.get("switch_stomp"))
 
 
 def grazes_body(boxes,body,until):
@@ -851,7 +871,7 @@ def register(prims):
             support=(None if prefix is None else
                      walk_body_support(x.obs.e,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
             if support is None:return None
-            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"])
+            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"],clean=plan_over_call(x.v))
             if row is None:return None
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
@@ -890,7 +910,7 @@ def register(prims):
                                   idle_time=idle_time_of(ev))
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
-        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES)
+        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v))
         if row is not None:
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
