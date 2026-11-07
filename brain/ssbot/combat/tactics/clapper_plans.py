@@ -53,6 +53,7 @@ LOCK_S = {"CC_JUMP": .48, "CC_JUMP_CAST": .88}   # the antic's start -> the earl
 GAIN = .916                 # the flight: x_land - x = 0.916 vx (are_types.clapper.JUMP_GAIN)
 FLIGHT_S = GAIN
 DESCENT_S = 50 / 60.        # take-off -> its body's bottom comes down to a standing head (jump_behind walk_end_f)
+CROSS_S = .75               # a real bounce at its near edge -> the far stance above its body, at a run (exp_cross: 40-45 frames)
 SWEEP_S = 5 / 60.           # ... and from there to the landing: the slanted descent behind the landing is vx x this
 BODY_BACK_U = 1.34          # its back edge behind its centre in the air (recordings: root + 1.34 facing left)
 RESERVE_S = .10             # the guide's arrival before the earliest lock (the design's reserve)
@@ -71,6 +72,7 @@ MAX_START_MOVES = 6         # as l2_plan.MAX_MOVES
 LAND_SUPPORT_U = 3.0        # an observed landing this far from every landing the plan was made for is outside its support
 RUN_ROW_U = 36 * JB.CFG["walk_v"]   # the planner's rows (36 frames) reach a stance this near at a run: no dash is chosen for it
 BODY_TOP = 6.92             # a standing Clapper's body top (recordings: its collider's top; the x span is observed)
+BODY_HALF = 2.25            # ... and its reach from the root in either pose (Idle / Walk bodies, recordings)
 RUNE_ON_S, RUNE_OVER_S = 65 / 60., (65 + 17) / 60.    # the landing -> the big rune hurts (are_types: on0, its long window)
 HIT_TAIL_S = 1.0            # a plan's validity past the last hazard, for its return phases
 
@@ -520,13 +522,15 @@ def _over(c: _Middle, aim_x, name="over"):
         # Where she waits must be out of the landing hammer: the walker's head when that is past its reach, else the far side (replay
         # m_over: the walker beside the landing, its head inside the hammer's polygon). A jump cast: out only when the far stance is past
         # the rune's whole coverage, otherwise over the head until it has burst.
+        # Out is a real passage above its body from the strike's bounce: there must be time for it before the hazard.
         hammer = land + f * (q.reach_j + c.half_j)
         head_clear, far_clear = (c.w_x - hammer) * f >= 0, (far - hammer) * f >= 0
-        if c.cast and (far - (land + f * (c.reach + c.half_j + q.pad))) * f >= 0:
+        crossed = c.t_to + leg[2] + CROSS_S
+        if c.cast and (far - (land + f * (c.reach + c.half_j + q.pad))) * f >= 0 and crossed <= c.land_t + RUNE_ON_S - .05:
             follow = "out"
         elif head_clear:
             follow = "stay" if c.cast else "back"
-        elif far_clear and not c.cast:
+        elif far_clear and not c.cast and crossed <= c.land_t - .05:
             follow = "out"
         else:
             return no("its head and far side are under the landing's coverage")
@@ -594,7 +598,7 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
     phases.append(Phase("over_stay", target=W, stance=("head", W), no_hit=(J, W), replaceable=False,
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
-    phases.append(Phase("over_out", target=W, stance=("far", W), no_hit=(J, W), replaceable=False,
+    phases.append(Phase("over_out", target=W, stance=("far", W), no_hit=(J, W), replaceable=False, go="out",
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"))))
     # Back to the middle from the air. Landed in the gap: done. Landed elsewhere the rows cannot cross its body (replay m_close stood
     # still there): not a success: the plan hands the return it did not finish to the public middle return.
@@ -1396,7 +1400,8 @@ class PlanRunner:
             # where this plan waits (written): out of the landing hammer at the observed landing, or the route is not there
             wait_x = far if plan.get("follow") == "out" else float(o.pos[0])
             clear = far is not None and (wait_x - (land + f * (JT["reach_j"] + half_j))) * f >= 0
-            if room is not None and room >= .5 and clear and (past_hammer or self._arrives(sc, float(o.pos[0]), land_t - .05)):
+            passage = CROSS_S if plan.get("follow") == "out" else 0.
+            if room is not None and room >= .5 and clear and (past_hammer or self._arrives(sc, float(o.pos[0]), land_t - .05 - passage)):
                 options.append(("over", room))
         if not options:
             return "blocked", why + "; no prepared route supported"
@@ -1561,8 +1566,16 @@ class PlanRunner:
             by = air + FLIGHT_S + (RUNE_ON_S if plan.get("family") == "CC_JUMP_CAST" else 0.) - .05
         if x is None or by is None or sc.t > by:
             return None
+        over = None
+        if ph.go == "out":
+            span = (sc.geo or {}).get("bodies", {}).get(ph.target)
+            root = next((s.pos[0] for s in sc.subjects if s.iid == ph.target), None)
+            if span is None or root is None:
+                return None
+            # its body in either pose (an Idle one turns to a hero at its back), the span the action layer's support holds it to
+            over = (min(float(span[0]), float(root) - BODY_HALF), 0., max(float(span[1]), float(root) + BODY_HALF), BODY_TOP)
         return WP.WaypointGoal(float(x), sc.frame + int(math.ceil((by - sc.t) * 60.)), ph.go, plan.instance[0],
-                               (plan.instance, plan.generation, ph.name))
+                               (plan.instance, plan.generation, ph.name), over=over, family=plan.get("family"))
 
     def respond(self, sc, target) -> None:
         """A generic immediate response (no worker, no scene): one phase bound to this jump's instance."""

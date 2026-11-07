@@ -428,6 +428,19 @@ def test_the_routes_roll_on_from_her_state_with_no_free_landing_or_dash():
     assert floor.feasible and (not high.feasible or high.get("route_s") > floor.get("route_s"))
 
 
+def test_a_leg_rolls_on_from_where_the_aim_keys_left_her():
+    # not from a free start: the guide's keys are in the leg, so the way on from a guide is the way from the guide
+    S0, hand = hand_of(33., 0.)
+    q = request(hx=33., S0=S0, hand=hand)
+    c = CP._Middle(q, CP.Roller(S0, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN))
+    assert c.start_x(25.) < 32.                     # the aim's keys moved her
+    here = c.leg(None, 33.)
+    there = c.leg(25., 33.)
+    assert here is not None and there is not None
+    assert here[2] < .1
+    assert there[2] > .2
+
+
 # ---- the executor: generic and small ----
 
 def mini_plan(inst=(1, 0.), gen=1, until=10., selected="a", support=(), scene_="s", replaceable=True):
@@ -1008,6 +1021,108 @@ def _closed_loop(goal_x, by_f, x0=34., steps=120):
     return None, keys, "no end", None
 
 
+# A real bounce STATE (replay k_over_out frame 2915, her planner input: DownSlash hit on the body at 19.5, 0.26 u from its back edge)
+BOUNCE_S = np.array([
+    21.350001, 6.327699, 21.515001, 5.979699, 21.350001, 6.327699, -8.25, -10.0, 0.164326, 1.0, -1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 4.0, -20.0, -1.0, -1.0, 0.0, 1.0, 0.049998, 0.233336, 0.0, 0.0, 0.0, 0.016666,
+    0.0, 0.0, 0.0, -1.0, 1.0, 1572865.0, 9.0, 0.143334, 0.0, 0.0, 0.0, 1.0, -1.0, 0.0,
+    0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -0.016664, 0.0, -1.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 21.625381, 5.746896, 0.0, 0.0, 0.0, 0.399984, 2.0, 0.050002, 0.0, 0.0,
+    0.0, 8.0,
+], np.float64)
+BOUNCE_PREFIX = 1572865
+BOUNCE_HOLD = kin.HoldState(np.array([[True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, True, True, False]], bool), np.array([[True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, True, True, False]], bool), np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], np.int64), np.array([[7, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 5, 4, 11]], np.int64))
+
+
+def _closed_loop_over(S, prefix, hold, goal, steps=90):
+    """next_mask frame by frame through the model for a place past a body: the keys, how it ended, her boxes along the way."""
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.knife_chain_waypoint import next_mask
+    from ssbot.combat.holdfilter import hold_filter_jit
+    sent = [prefix]
+    keys, boxes, whats = [], [], []
+    for f in range(steps):
+        pre = np.array([sent[-1]], np.int64)
+        sim = ChainSim(S, pre, hold, PARAMS, TERRAIN, f, f)
+        mask, what = next_mask(sim, goal, f)
+        whats.append(what)
+        boxes.append(sim.roll(np.zeros((1, 3), np.int64)).box[0, sim.off])
+        if what in ("arrived", "late"):
+            return keys, what, boxes, whats
+        keys.append(int(mask))
+        sent.append(int(mask))
+        lat, hold2 = hold_filter_jit(pre[None], hold)
+        r = kin.rollout(S, lat, PARAMS, TERRAIN)
+        S = np.asarray(r.final[:, 0], np.float64)
+        hold = hold2
+    return keys, "no end", boxes, whats
+
+
+def test_the_way_out_waits_for_the_bounce_and_passes_above_the_body():
+    from ssbot.combat.knife_chain_waypoint import WaypointGoal
+    body = (17.25, 0., 20.84, CP.BODY_TOP)
+    far = 16.05
+    plan = ((1, 0.), 1, "over_out")
+    def meets(boxes):
+        return [i for i, h in enumerate(boxes) if h[0] <= body[2] and h[2] >= body[0] and h[1] <= body[3] and h[3] >= body[1]]
+    # the real bounce beside its near edge: the run from the bounce on passes above it, and past her invulnerability she is never in it
+    keys, what, boxes, whats = _closed_loop_over(BOUNCE_S, BOUNCE_PREFIX, BOUNCE_HOLD, WaypointGoal(far, 60, "out", 1, plan, over=body))
+    assert what == "arrived", (what, whats)
+    assert whats[0] == "go" and keys[0] == kin.B_LEFT, whats
+    assert [i for i in meets(boxes) if i > 9] == [], meets(boxes)
+    # the deadline short of the run's arrival: she waits for height, then the dash, also above it
+    keys, what, boxes, whats = _closed_loop_over(BOUNCE_S, BOUNCE_PREFIX, BOUNCE_HOLD, WaypointGoal(far, 34, "out", 1, plan, over=body))
+    assert what == "arrived", (what, whats)
+    assert whats[0] == "wait" and any(k & kin.B_DASH for k in keys), whats
+    assert [i for i in meets(boxes) if i > 9] == [], (whats, meets(boxes))
+    # falling beside it: no key takes her over, and that is said: it is no route
+    S = np.asarray(kin.initial_state(PARAMS, 21.35, 5., ground=False), np.float64)
+    keys, what, boxes, whats = _closed_loop_over(S, 0, kin.HoldState.idle(1), WaypointGoal(far, 60, "out", 1, plan, over=body))
+    assert what == "late" and not keys, (what, whats)
+    # no time left either way
+    keys, what, boxes, whats = _closed_loop_over(BOUNCE_S, BOUNCE_PREFIX, BOUNCE_HOLD, WaypointGoal(far, 2, "out", 1, plan, over=body))
+    assert what == "late", (what, whats)
+    # the same place with no body named: the ordinary approach starts into it at once (what over= is for)
+    keys, what, boxes, whats = _closed_loop_over(BOUNCE_S, BOUNCE_PREFIX, BOUNCE_HOLD, WaypointGoal(far, 60, "out", 1, plan))
+    assert whats[0] == "go"
+
+
+def test_the_over_out_phase_is_a_bounded_passage_with_its_body():
+    plan = plan_of(request(J=body(1, 25., "Air", "CC_JUMP", facing=1), W=body(2, 36.5), hx=36., stage="flight", antic_at=None, land=30.,
+                           land_vx=5.45, air_at=0.))
+    assert plan.phase("over_out").go == "out"
+    runner = NS(exec=NS(plan=plan), _go_done=set(), moves={plan.instance[0]: dict(air_at=0.)}, stance=lambda sc, ph: 39.04)
+    subjects = [NS(iid=2, pos=(36.5, 3.))]
+    sc = NS(frame=100, t=.2, hx=36., geo={"bodies": {2: (35.16, 37.84)}}, subjects=subjects)
+    goal = CP.PlanRunner.waypoint(runner, sc, plan.phase("over_out"))
+    assert goal.x == pytest.approx(39.04) and goal.kind == "out" and goal.family == "CC_JUMP"
+    assert goal.over == (36.5 - CP.BODY_HALF, 0., 36.5 + CP.BODY_HALF, CP.BODY_TOP)      # either pose, its back reaching past the observed one
+    assert goal.by_f == 100 + math.ceil((CP.FLIGHT_S - .05 - .2) * 60.)
+    # no observed body, no place to pass above
+    assert CP.PlanRunner.waypoint(runner, NS(frame=100, t=.2, hx=36., geo={"bodies": {}}, subjects=subjects), plan.phase("over_out")) is None
+
+
+def test_a_failed_waypoint_answers_for_the_jump_it_is_about():
+    from ssbot.combat import knife_chain_air_native as AN
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    from ssbot.combat.knife_chain_failure import FailureExposure
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_offer" in vars(c))
+    with pytest.raises(ValueError):
+        FailureExposure(MoveInstance(7, 100, "WAYPOINT"), 100, 120, None)     # the Run's own label answers for nothing
+    chain = object.__new__(cls)
+    move = MoveInstance(7, 100, "WAYPOINT")
+    chain._waypoint_responsibility = {move: (MoveInstance(7, 100, "CC_JUMP"), None)}
+    exposure = chain._failure_exposure(move, 100, 120, None)
+    assert exposure.move.family == "CC_JUMP" and exposure.move.target_iid == 7 and exposure.active(125)
+    stop = []
+    chain._waypoint_responsibility = {}
+    chain._stop = lambda why, f: (stop.append(why), (_ for _ in ()).throw(RuntimeError(why)))
+    with pytest.raises(RuntimeError):
+        chain._failure_exposure(move, 100, 120, None)
+    assert stop == ["missing critical waypoint failure responsibility"]
+
+
 def test_the_run_sends_what_the_route_counted_on():
     from ssbot.combat import knife_chain_waypoint as WP
     S = hero_state(34.)
@@ -1147,12 +1262,15 @@ def test_stats_keep_the_denominators_of_the_latency(monkeypatch):
 def test_over_waits_out_of_the_landing_hammer_or_is_no_route():
     # the walker past the hammer's reach: its head; inside it with the far side out: the far side; both inside: not offered
     J = body(1, 25., "Air", "CC_JUMP", facing=1)
-    def over(wx, hx):
-        return cand(plan_of(request(J=J, W=body(2, wx), hx=hx, stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=0.)), "over")
+    def over(wx, hx, air_at=0.):
+        return cand(plan_of(request(J=J, W=body(2, wx), hx=hx, stage="flight", antic_at=None, land=30., land_vx=5.45, air_at=air_at)), "over")
     assert over(40., 36.).get("follow") == "back"
-    near = over(36.5, 33.)                         # head at 36.5 inside 38.01; far side 36.5 + 1.34 + 1.2 = 39.04 outside
+    near = over(36.5, 36.)                         # head at 36.5 inside 38.01; far side 36.5 + 1.34 + 1.2 = 39.04 outside
     assert near.feasible and near.get("follow") == "out"
     assert not over(33.5, 31.5).feasible and "coverage" in over(33.5, 31.5).reason
+    # out is a passage above its body after the strike: no time for it before the hammer, no such route
+    late = over(36.5, 29.)
+    assert not late.feasible and "coverage" in late.reason
 
 
 def test_no_standing_gap_at_the_take_off_runs_the_prepared_route_farther_from_the_wall(monkeypatch):
@@ -1401,6 +1519,28 @@ def test_the_cluster_retreat_needs_its_candidate_and_the_time_not_only_the_wall(
     go_(tac, ws, fc)
     note = next(x for x in plan_notes(tac) if x["what"] == "takeoff")
     assert note["route"] == "blocked" and "no prepared retreat" in note["reason"], note
+
+
+def test_the_retreat_counts_the_whole_coverage_not_only_the_hammer(monkeypatch):
+    # past the hammer, inside the rune's coverage, and her owner keeps her until after it lights: no retreat
+    tac, ws, fc = planned(monkeypatch, xs=(40., 41.), hx=35.)
+    go_(tac, ws, fc)
+    antic(tac, ws, fc)
+    go_(tac, ws, fc); go_(tac, ws, fc)
+    r = tac.plan_runner
+    plan = r.exec.plan
+    assert plan.scene == "cluster" and cand(plan, "attack").feasible
+    cast = replace(plan, detail=tuple((k, {"family": "CC_JUMP_CAST", "reach": 13.937}.get(k, v)) for k, v in plan.detail))
+    out, land = plan.get("out"), 33.
+    assert out == -1
+    x = land + out * (plan.get("reach_j") + plan.get("half_in") + .5)
+    sc = NS(t=ws.stamp.t_game_s, hx=x, geo={"bodies": {}}, tac=tac)
+    m = dict(face=out, land=land, air_at=sc.t)
+    o = ws.entities[1]
+    monkeypatch.setattr(r, "_arrives", lambda *a: False)
+    assert r._resolve_cluster(sc, cast, None, o, m, "attack") == ("blocked", "the retreat does not arrive before the hazard")
+    monkeypatch.setattr(r, "_arrives", lambda *a: True)
+    assert r._resolve_cluster(sc, cast, None, o, m, "attack")[0] == "retreat"
 
 
 def test_the_stand_at_the_takeoff_reads_the_written_geometry_not_the_forecast_union(monkeypatch):

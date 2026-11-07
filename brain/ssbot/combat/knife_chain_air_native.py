@@ -98,7 +98,7 @@ class NativeManualAirChain(NativeChainB2):
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
         self._bounce=None;self._bounce_frames={}
-        self._waypoint_wanted=False;self._waypoint_failed=set();self._waypoint_declined=None
+        self._waypoint_wanted=False;self._waypoint_failed=set();self._waypoint_declined=None;self._waypoint_responsibility={}
         super().reset(episode,start_frame=start_frame)
         from . import knife_chain_bounce_table as bounce_table
         # Task 179 (#309, Sol seq 229): the finite same-target bounce table (Tasks 143 / 145 / 148), opt-in.
@@ -555,6 +555,10 @@ class NativeManualAirChain(NativeChainB2):
             else:super()._arm_hook_start(offer,send)
 
     def _failure_exposure(self,move,origin,failed,ta):
+        if move.family==waypoint.FAMILY:
+            context=self._waypoint_responsibility.get(move)
+            if context is None:self._stop("missing critical waypoint failure responsibility",failed)
+            move,ta=context
         if move.family=="RUNE_TRANSFER":
             context=self._transfer_responsibility.get(move)
             if context is None:self._stop("missing critical rune-transfer failure responsibility",failed)
@@ -830,7 +834,9 @@ class NativeManualAirChain(NativeChainB2):
                 self._recover("waypoint "+reason,f)
             return None
         if what=="late":return failed("cannot arrive by its frame from here")
-        move=MoveInstance(**run.v["move"]) if active else MoveInstance(goal.source,f,"WAYPOINT")
+        move=MoveInstance(**run.v["move"]) if active else MoveInstance(goal.source,f,waypoint.FAMILY)
+        # a failure answers for the jump this Run is about, from the Run's first frame (no backdated antic, no invented clock)
+        self._waypoint_responsibility.setdefault(move,(MoveInstance(goal.source,f,goal.family),None))
         current=getattr(getattr(getattr(forecast,"rs",None),"trk",None),"now",{}).get(goal.source)
         if current is None:return failed("support unavailable")
         plan=SimpleNamespace(iid=goal.source,move=move,origin=f,entry_k=0,press_k=None,contact_frame=None)
@@ -845,7 +851,7 @@ class NativeManualAirChain(NativeChainB2):
                 if lock is None or not lock.complete or lock.contacts:
                     first=None if lock is None or not lock.contacts else asdict(lock.contacts[0])
                     self._note("waypoint_dash_refused",frame=f,first=first,active=active,**info)
-                    mask=int(mask)&~B["DASH"]
+                    mask=0 if goal.over is not None else int(mask)&~B["DASH"]   # past a body the key alone is no way
                     path=model_path(sim,plan,np.array([mask],np.int64),game)
                 else:self._note("waypoint_dash_checked",frame=f,**info)
             scan=geo.scan(path)

@@ -8,6 +8,11 @@ withdrawing it hands the Run back at once, the keys already sent staying the nex
 route() is what a plan counts on, next_mask() what the Run sends: the same choice from the same model. The run when it arrives
 by the deadline, else the dash at the first frame it can start (an edge: a key held through a cooldown never starts one), held into
 the sprint, released where she stops at the place. Held dash keys are not re-decided: releasing them ends the sprint.
+
+A place past a body (kind "out", the over route's far side after a real bounce): no key that takes her box into that body once her
+modelled invulnerability is over (the action layer's own rule; of 51 real DownSlash hits the only one whose box met the struck body later
+than that, at hit + 9, lost health: SCANAFTER182). Rows stop at a body, so this Run takes her over it: the run that passes above it from
+the bounce, else the dash, else she waits while the bounce lifts her, off its x span while under its top.
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ import numpy as np
 from ssbot.knowledge import kinematics as K
 
 PROGRAM = "waypoint"
+FAMILY = "WAYPOINT"         # the Run's own move label; its failure responsibility is the jump it is about (knife_chain_air_native)
 TOL_U = .2
 REST_F = 46                 # frames rolled past a release to see where she stops
 MAX_F = 150                 # a route longer than this is not one of these
@@ -33,6 +39,8 @@ class WaypointGoal:
     source: int             # the Clapper whose jump this is about
     plan: tuple             # (instance, generation, phase): which running phase asks; another one hands the Run back
     tol: float = TOL_U
+    over: tuple | None = None   # (x0, y0, x1, y1) a body between her and the place she must pass above
+    family: str | None = None   # the jump's family: who answers for a failure of this Run
 
 
 def _key(direction: int) -> int:
@@ -134,9 +142,18 @@ class SimRoller:
         return self.rollout(rows).centre[:, :, 0]
 
 
+def _meets(m, rows, body) -> bool:
+    """Her box meets the body, out of her invulnerability, on a step this tick's keys can still change (key index 0 acts from m.off on)."""
+    r = m.rollout(rows)
+    b, fl = r.box[0, m.off + 1:], np.asarray(r.flags[0, m.off + 1:])
+    hit = (b[:, 0] <= body[2]) & (b[:, 2] >= body[0]) & (b[:, 1] <= body[3]) & (b[:, 3] >= body[1])
+    return bool(np.any(hit & ((fl & K.F_INVULN) == 0)))
+
+
 def next_mask(sim, goal: WaypointGoal, f: int):
-    """This tick's keys for a WaypointGoal from the actual model state. (mask, what): what "go" / "dash": keys to send, "arrived":
-    she is there or stops there with no more keys, "late": it cannot arrive by its frame from here."""
+    """This tick's keys for a WaypointGoal from the actual model state. (mask, what): what "go" / "dash": keys to send, "wait": a body
+    to pass above and the bounce still lifting her (keys off its x span, or none), "arrived": she is there or stops there with no more
+    keys, "late": it cannot arrive by its frame from here."""
     m = SimRoller(sim)
     by_k = int(goal.by_f) - (int(f) + 2)
     rest = m.xs(np.zeros((1, REST_F), np.int64))[0]
@@ -149,14 +166,25 @@ def next_mask(sim, goal: WaypointGoal, f: int):
     if held and np.any(np.isin(m.rollout(np.full((1, 4), key | K.B_DASH, np.int64)).mode[0], (K.M_DASH, K.M_SPRINT))):
         return key | K.B_DASH, "dash"       # in flight or running: releasing it ends the sprint: held until she stops at the place
     T = int(min(MAX_F, max(8, by_k + 8)))
-    a_run = _arrival(m.xs(np.full((1, T), key, np.int64))[0][m.off:], goal.x, d, goal.tol)
-    if a_run is not None and a_run <= by_k:
+    body = goal.over
+    if body is not None and (x0 - (body[2] if d > 0 else body[0])) * d >= 0:
+        body = None                         # past its far edge
+    run = np.full((1, T), key, np.int64)
+    a_run = _arrival(m.xs(run)[0][m.off:], goal.x, d, goal.tol)
+    if a_run is not None and a_run <= by_k and (body is None or not _meets(m, run, body)):
         return key, "go"
     k_dash = 0 if not held else 1           # an edge needs the key released first
     k_dash = max(k_dash, dash_ready_k(m.start, m.off, m.dt))
     row = np.full((1, T), key, np.int64)
     row[0, k_dash:] |= K.B_DASH
     a_dash = _arrival(m.xs(row)[0][m.off:], goal.x, d, goal.tol)
+    if body is not None:
+        if a_dash is not None and a_dash <= by_k and k_dash == 0 and not _meets(m, row, body):
+            return key | K.B_DASH, "dash"
+        still = np.zeros((1, REST_F), np.int64)
+        if by_k <= 0 or not np.any(m.rollout(still).box[0, m.off + 1:, 1] >= body[3]):
+            return None, "late"
+        return (_key(-d) if _meets(m, still, body) else 0), "wait"
     if a_dash is None or a_dash > by_k:
         return None, "late"
     return (key | K.B_DASH, "dash") if k_dash == 0 else (key, "go")
