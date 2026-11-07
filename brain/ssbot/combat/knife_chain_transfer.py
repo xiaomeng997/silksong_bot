@@ -721,6 +721,150 @@ def air_approach_keys(x):
     return mask|B["DASH"]
 
 
+# Task 183 (Sol seq 261; the person, relayed): two Clappers close or overlapping, a real DownSlash bounce off one's own slam
+# (CC_SLAM, the bounced one its source) and that same Clapper still the tactical target: the chain's follow-up prefers the
+# MIDDLE. A reachable, safe standing place between the two real bodies: go and land there from the first legal key after
+# the hammer tail; done only when she really lands between the two near body edges. No standable gap: the existing
+# witnessed down-slash, aimed over the two bodies' seam; each real bounce reads the gap again. The middle not safe: the
+# existing ordinary left / right landing post types (knife_chain_post_actions) from the current state, if one is legal.
+FOLLOW_LINKS=frozenset({"middle","land"})
+MIDDLE_PAD_U=.5          # forum_v2.FOCUS_M: the chosen landing box stays this far inside each near body edge
+MIDDLE_HORIZON_F=96      # hold-and-release rows rolled (the live flights land within 60 frames of the tail end)
+SEAM_TOL_U=.25           # the seam aim: no side key within this of the aim point
+SEAM_INSET_U=.5          # the seam aim stays over the target body this far inside its near edge
+MIDDLE_STEP_F=2          # release grid of the middle rows (0.275 u of landing at the 8.25 u/s air walk)
+MIDDLE_SCAN_N=8          # middle rows scanned per batched raster pass, nearest the goal first, until one is clean
+FOLLOW_SCAN_F=12         # an owned route's per-tick scan: its next 12 frames (the whole route was scanned when chosen)
+
+
+def follow_scope(goal,target):
+    """Task 183: a real bounce off one Clapper's own slam whose next tactical target is that same Clapper."""
+    return bool(goal is not None and not isinstance(goal,ReturnGoal) and goal.source_kind=="BOUNCE"
+                and goal.responsibility.family=="CC_SLAM" and goal.responsibility.target_iid==goal.caster
+                and goal.target==goal.caster and target==goal.caster)
+
+
+def two_gap(state,caster):
+    """Task 183: the gap between the two Clappers' observed bodies seen from the bounced one. None: not two Clappers or
+    a body unknown. direction: the key from the bounced one toward the other; lo / hi: the gap's world x edges (the left
+    body's right edge, the right body's left edge; hi < lo when they overlap); seam: their midpoint."""
+    es=clappers(state)
+    if len(es)!=2:return None
+    b=next((e for e in es if e["iid"]==caster),None)
+    if b is None:return None
+    o=next(e for e in es if e is not b)
+    try:bb,ob=body_box(b),body_box(o)
+    except (TypeError,ValueError,OverflowError):return None
+    if bb is None or ob is None or not np.isfinite([*bb,*ob]).all():return None
+    right=float(bb[0])+float(bb[2])>float(ob[0])+float(ob[2])
+    lo,hi=(float(ob[2]),float(bb[0])) if right else (float(bb[2]),float(ob[0]))
+    return NS(caster=b["iid"],other=o["iid"],direction=B["L"] if right else B["R"],lo=lo,hi=hi,width=hi-lo,
+              seam=.5*(lo+hi),bounced=tuple(float(v) for v in bb),other_body=tuple(float(v) for v in ob))
+
+
+def _hero_box(h):
+    box=(h or {}).get("box")
+    if not isinstance(box,(list,tuple)) or len(box)!=4:return None
+    box=tuple(float(v) for v in box) if all(type(v) in (int,float) for v in box) else None
+    return box if box is not None and np.isfinite(box).all() and box[2]>box[0] else None
+
+
+def standable(gap,hero_box):
+    """Task 183: her box fits between the two near body edges with MIDDLE_PAD_U on each side."""
+    return bool(gap is not None and hero_box is not None and gap.width>=hero_box[2]-hero_box[0]+2*MIDDLE_PAD_U)
+
+
+def seam_aim(state,goal,target):
+    """Task 183: no standable gap: the x over the target body nearest the seam (SEAM_INSET_U inside its near edge) the
+    witnessed down-slash is aimed from; None outside the follow-up scope or with a standable gap (the middle decides)."""
+    if not follow_scope(goal,target):return None
+    gap=two_gap(state,goal.caster);hb=_hero_box(state.get("hero"))
+    if gap is None or hb is None or standable(gap,hb):return None
+    x0,_,x1,_=gap.bounced
+    if x1-x0<=2*SEAM_INSET_U:return .5*(x0+x1)
+    return min(max(gap.seam,x0+SEAM_INSET_U),x1-SEAM_INSET_U)
+
+
+def aim_side(x,aim):
+    return 0 if abs(aim-x)<=SEAM_TOL_U else B["R"] if aim>x else B["L"]
+
+
+def _landing_index(flags,off):
+    ground=np.flatnonzero(((np.asarray(flags)&K.F_GROUND)!=0)&(np.arange(len(flags))>=off))
+    return int(ground[0]) if len(ground) else None
+
+
+def air_dash_free(sim):
+    """Task 183: her one air dash is free now and nothing of a DASH press is in flight or held (air_approach_keys' test:
+    after a real DownSlash bounce ResetAirMoves gives it back)."""
+    S=np.asarray(sim.start,float).reshape(-1)
+    if S.shape[0]!=K.K or not np.isfinite(S).all() or S[K.GROUND]>0 or S[K.MODE]!=K.M_NORMAL or S[K.AIRDASHED]>0 or S[K.DASH_CD]>0:
+        return False
+    i=B["DASH"].bit_length()-1
+    return not (int(sim.prefix[0])&B["DASH"] or sim.hold.latched[0,i] or sim.hold.desired[0,i] or sim.hold.pending[0,i])
+
+
+def _meets(boxes,body):
+    """Her boxes meet the body itself (no margin) on any row; one vectorized enters_body."""
+    b=np.asarray(body,float)
+    return bool(np.any((boxes[:,0]<=b[2])&(boxes[:,2]>=b[0])&(boxes[:,1]<=b[3])&(boxes[:,3]>=b[1])))
+
+
+def middle_candidates(sim,gap,hero_box,goal_x,dash=False):
+    """Task 183: from the first free mask frame hold the key toward the middle for r frames (r on a MIDDLE_STEP_F grid up
+    to the held row's landing), then no key to the modelled ground; with dash (her air dash free) also the same rows
+    opening with that one air dash (DASH on the first two frames, the key held at least that long). The rows whose
+    modelled landing box lies inside the gap (MIDDLE_PAD_U from each near edge, both current bodies never entered on the
+    way), nearest goal_x first, a plain hold before a dash: [(recipe, r, commands through the landing, landing rollout
+    index, landing box, the row's boxes and flags from frame fo through the landing)]. The batched rollout is the model
+    (knife_chain_air.model_path traces the same rows bit for bit: review183/eq183.py)."""
+    d=int(gap.direction);n=MIDDLE_HORIZON_F
+    kinds=["hold"]+(["dash"] if dash else [])
+    full=np.full((len(kinds),n),d,np.int64)
+    if dash:full[1,:2]|=B["DASH"]
+    ends={}
+    for i,(kind,f) in enumerate(zip(kinds,sim.roll(full).flags)):
+        j=_landing_index(f,sim.off)
+        if j is not None:ends[kind]=j-sim.off+1   # held through the landing: every longer hold is this row
+    recipes=[(kind,r) for kind in kinds if kind in ends
+             for r in sorted(set(range(2 if kind=="dash" else 0,ends[kind]+1,MIDDLE_STEP_F))|{ends[kind]})]
+    if not recipes:return []
+    n=min(n,max(ends.values())+8)   # an earlier release lands no later than the held row (her fall does not change)
+    rows=np.zeros((len(recipes),n),np.int64)
+    for i,(kind,r) in enumerate(recipes):
+        rows[i,:r]=d
+        if kind=="dash":rows[i,:2]|=B["DASH"]
+    ro=sim.roll(rows);out=[]
+    for i,(kind,r) in enumerate(recipes):
+        j=_landing_index(ro.flags[i],sim.off)
+        if j is None:continue
+        b=ro.box[i,j]
+        if not (np.isfinite(b).all() and b[0]>=gap.lo+MIDDLE_PAD_U and b[2]<=gap.hi-MIDDLE_PAD_U):continue
+        way=ro.box[i,1:j+1]
+        if not np.isfinite(way).all() or _meets(way,gap.bounced) or _meets(way,gap.other_body):continue
+        out.append((kind,r,rows[i,:j-sim.off+1].copy(),j,tuple(float(v) for v in b),
+                    np.asarray(ro.box[i,:j+1],float).copy(),np.asarray(ro.flags[i,:j+1]).copy()))
+    out.sort(key=lambda c:(abs(.5*(c[4][0]+c[4][2])-goal_x),c[0]!="hold",c[1]))
+    return out
+
+
+def route_path(sim,commands,box,flags):
+    """Task 183: a candidate row as the B2 geometry scans it (origin fo, the in-flight prefix plus the row, its rolled
+    boxes and flags; no event, no protection beyond the model's own flags)."""
+    full=np.r_[np.asarray(sim.prefix,np.int64),np.asarray(commands,np.int64)]
+    return NS(origin=int(sim.fo),stage="air_manual",commands=full,box=box,flags=flags,check_flags=flags,
+              through=int(sim.fo)+len(full))
+
+
+def landing_row(sim,direction):
+    """Task 183: the ordinary left / right landing post type (knife_chain_post_actions.ordinary_post) from the current
+    state: the key held to the modelled ground. (commands through the landing, landing rollout index) or None."""
+    row=np.full((1,MIDDLE_HORIZON_F),int(direction),np.int64)
+    ro=sim.roll(row);j=_landing_index(ro.flags[0],sim.off)
+    if j is None:return None
+    return row[0,:j-sim.off+1].copy(),j
+
+
 def retreat_reserve(enemy,t_s,away):
     """Worst-case distance the target can move AWAY by t_s seconds after this observation (a bound, not a prediction).
 
@@ -919,6 +1063,14 @@ def register(prims):
     @prims.gen("transfer_air_keys",doc="same-owner optional one-shot air dash; never a new jump or umbrella")
     def air_keys(x,m):return m|air_approach_keys(x)
 
+    @prims.gen("transfer_follow_keys",doc="Task 183: the bounce follow-up's checked absolute row (middle: the key toward "
+                                          "the middle, an optional opening air dash, then none; land: the key to the ground); no strike")
+    def follow_keys(x,m):
+        fo=x.v.get("follow")
+        if not isinstance(fo,dict):return m
+        i=int(x.obs.F)-int(fo["F0"]);masks=fo.get("masks") or ()
+        return m|(int(masks[i]) if 0<=i<len(masks) else 0)
+
     @prims.guard("transfer_antic_strike_late",doc="Task 179 #305: a Slam Antic target can no longer be struck on its "
                                                   "standing antic before its earliest lunge along this Run's approach")
     def antic_strike_late(x):
@@ -1074,6 +1226,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if bounce_entry and target==p.caster and link!="strike":
         side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
+        aim=None if ground else seam_aim(state,goal,target)
+        if aim is not None:p=replace(p,side=aim_side(float(hp[0]),aim))   # Task 183: no standable gap: over the seam
     landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
                       ground and active.v.get("air_entry") and not tail_pending)
     if tail_pending:
@@ -1123,7 +1277,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
         elif not (state["act"]["hf"]["latched"]&B["J"] and int(sim.prefix[0])&B["J"]):p=replace(p,jump_until=k)
-        if link!="strike" and link not in HOOK_LINKS:link="air"
+        if link!="strike" and link not in HOOK_LINKS and link not in FOLLOW_LINKS:link="air"
     if defer_jump and (not ground or (state["act"]["hf"]["latched"]|int(sim.prefix[0]))&B["J"]):return None
     if defer_jump or (approach_only and ground):
         p=replace(p,jump_k=k+10000,jump_until=k+10000,sprint_jump=False)
@@ -1162,5 +1316,33 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         "basis":"manual observed-distance dash/sprint/jump/stomp; current external step only",
         "next_decision":"actual target DownSlash hit plus bounce, miss, or new target move",
         "flight_checked":False,"flight_endpoint":"not certified","jump_deferred":bool(defer_jump or approach_only),"approach_only":approach_only})
+    if path_problem(path,sim.hold):return None
+    return draft,p,path,int(mask)
+
+
+def follow_draft(runner,made,state,game,sim,link,follow,idle_evidence=None):
+    """Task 183: the same transfer proposal on a bounce follow-up link (middle / land) with its checked row: the Run, its
+    owner and its variables stay this Run's; only the link and its keys change. (draft, plan, current-step path, mask) or
+    None when the link ends (the Run's stop rules)."""
+    old,p,_,_=made
+    es=clappers(state);enemy=next((e for e in es if e["iid"]==p.iid),None)
+    body=None if enemy is None else body_box(enemy)
+    if body is None:return None
+    draft=runner.fork_empty(AirAnchor())
+    variables=dict(old.run.v);variables["follow"]=dict(follow)
+    draft.run=Run(PROGRAM,link,variables)
+    h=state.get("hero") or {}
+    obs=_observation(p,state,game,body,False,head_clearance(runner.chains[PROGRAM].cfg))
+    obs.sim=sim;obs.e=enemy;obs.hero=h;obs.bombs=None;obs.ents=es
+    obs.idle_ev=None if idle_evidence is None else idle_evidence.get(p.iid)
+    obs.bounced=bool(variables.get("bounced"))
+    mask=draft.eval_link(X(draft,draft.run,obs))
+    if mask is None:return None
+    path=model_path(sim,p,np.array([mask],np.int64),game)
+    path=replace(path,stage="approach",assumptions={**path.assumptions,
+        "basis":("Task 183 bounce follow-up: %s; its whole route to the modelled ground scanned when chosen, then its next "
+                 "%d frames every tick; all owners")%(follow.get("kind"),FOLLOW_SCAN_F),
+        "next_decision":"actual landing between the two bodies (middle) or on the ground (left / right landing)",
+        "flight_checked":True,"flight_endpoint":"modelled ground","jump_deferred":False,"approach_only":False})
     if path_problem(path,sim.hold):return None
     return draft,p,path,int(mask)

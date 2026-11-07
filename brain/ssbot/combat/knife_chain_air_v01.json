@@ -1038,6 +1038,16 @@
           {"do":"act","act":{"a":"transfer_hook_release"}}
         ]
       },
+      "middle": {
+        "id":"rune_transfer.middle","phase":"middle","clock":"antic","entry":null,"inherit":["stop"],
+        "rules":[],
+        "keys":[{"gen":"transfer_follow_keys"}]
+      },
+      "land": {
+        "id":"rune_transfer.land","phase":"land","clock":"antic","entry":null,"inherit":["stop"],
+        "rules":[],
+        "keys":[{"gen":"transfer_follow_keys"}]
+      },
       "strike": {
         "id":"rune_transfer.strike",
         "phase":"strike",
@@ -1101,6 +1111,7 @@
       "sprint_jump": null,
       "cs": null,
       "row": null,
+      "follow": null,
       "bounced": false
     },
     "cfg": {
@@ -1169,6 +1180,14 @@
       "claw_lock": {
         "link":"rune_transfer.claw_lock","observations":[],"conditions":[],"status":"unfitted",
         "notes":"Manual face-hook segment: no keys until actual control; a hook hit or bounce is evidence only, never the downslash completion."
+      },
+      "middle": {
+        "link":"rune_transfer.middle","observations":[],"conditions":[],"status":"unfitted",
+        "notes":"Task 183 bounce follow-up (a real bounce off the target's own slam, two Clappers): from the first legal key after the hammer tail hold toward the gap between the two real bodies and release over it; the whole route to the modelled ground is scanned for all owners on every tick; done only on an actual landing between the two near body edges (else B2 recovery, failure responsibility kept)."
+      },
+      "land": {
+        "link":"rune_transfer.land","observations":[],"conditions":[],"status":"unfitted",
+        "notes":"Task 183: the existing ordinary left / right landing post type, owned only when the middle is not safe and the landing route to the modelled ground scans clean for all owners; done on the actual landing."
       },
       "strike": {
         "link":"rune_transfer.strike","observations":[],"conditions":[],"status":"unfitted",

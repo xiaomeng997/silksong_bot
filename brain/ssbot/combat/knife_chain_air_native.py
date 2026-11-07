@@ -939,6 +939,9 @@ class NativeManualAirChain(NativeChainB2):
             self._note("return_request_released",frame=f,target=target,link=link,
                        request=None if req is None else asdict(req))
             return None
+        if active and run.link in transfer.FOLLOW_LINKS and ground:
+            self._follow_landed(state,run)   # Task 183: the actual landing ends the follow-up Run
+            return None
         if active and run.link=="air":
             why=self._no_strike_overhead(state,sim,target)
             if why is not None:
@@ -1033,6 +1036,9 @@ class NativeManualAirChain(NativeChainB2):
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)
             return None
+        if self._follow_due(self._transfer_goal,draft,run,active,ground,approach_only):
+            handled,offer=self._follow_offer(state,game,sim,forecast,prefs,made,run if active else None,current)
+            if handled:return offer
         target_ta=None;target_move=None;conditional_contact=None
         try:
             goal=self._transfer_goal
@@ -1208,6 +1214,201 @@ class NativeManualAirChain(NativeChainB2):
              "handoff":("observed range or tactical boundary; ordinary side rows" if approach_only else
                         "real hit+bounce reopens tactical target knife; observed source hammer tail retained"),
              "safety_basis":"manual distance recipe; current external step only; no full-flight safety certificate"})
+
+    def _follow_due(self,goal,draft,run,active,ground,approach_only):
+        """Task 183 (Sol seq 261): this tick decides the bounce follow-up: a real bounce off the target's own slam (two
+        Clappers), airborne, its hammer tail over, not an approach; a sent strike row or hook finishes under its own
+        ownership."""
+        if approach_only or ground or not transfer.follow_scope(goal,draft.run.v.get("iid")):return False
+        if draft.run.link=="bounce_tail" or not draft.run.v.get("source_tail_done"):return False
+        if active and run.link not in transfer.FOLLOW_LINKS|{"air","bounce_tail"}:return False
+        return draft.run.link in transfer.FOLLOW_LINKS|{"air","strike"}
+
+    def _follow_landed(self,state,run):
+        """Task 183: an owned follow-up Run on the actual ground. The middle is done only with her box between the two near
+        body edges; a landing elsewhere is a failure (B2 recovery: failure responsibility kept); a left / right landing is
+        done on the ground."""
+        f=state["f"];fo=run.v.get("follow") or {}
+        hb=transfer._hero_box(state.get("hero"));gap=transfer.two_gap(state,run.v.get("caster"))
+        inside=bool(run.link=="land" or (gap is not None and hb is not None and gap.lo<hb[0] and hb[2]<gap.hi))
+        self._note("transfer_follow_landed" if inside else "transfer_follow_missed",frame=f,link=run.link,kind=fo.get("kind"),
+                   box=None if hb is None else list(hb),lo=None if gap is None else gap.lo,hi=None if gap is None else gap.hi,
+                   planned_land_f=fo.get("land_f"),planned_box=fo.get("landing_box"))
+        if not inside:
+            self._recover("bounce follow-up landed outside the gap between the two bodies",f);return
+        self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+        self._press=self._accepted=self._hit=None
+        self._transfer_ready=False
+        self._abandon("bounce follow-up done: "+("landed between the two bodies" if run.link=="middle" else "landed"))
+
+    def _owned_route(self,state,game,sim,geo,plan,gap,old,link):
+        """Task 183: an owned follow-up route goes on unchanged (its absolute row; past it no key for the middle, the same
+        key for a landing) while the model still reaches the ground (the middle: inside the gap by MIDDLE_PAD_U) and the
+        route's next transfer.FOLLOW_SCAN_F frames (through the landing once it is that near) scan clean for all owners: the
+        whole route was scanned when it was chosen (as the source tail's one admission, then the current steps). None:
+        blocked (noted), the caller searches again with whole routes."""
+        f=state["f"];i=f+2-int(old["F0"]);rest=np.asarray(old.get("masks") or (),np.int64)[max(0,i):]
+        tail=0 if link=="middle" else int(old["dir"])
+        commands=np.r_[rest,np.full(transfer.MIDDLE_HORIZON_F,tail,np.int64)]
+        p=model_path(sim,plan,commands,game)
+        j=transfer._landing_index(p.flags,len(sim.prefix)+1)
+        why=None
+        if j is None:why="no modelled ground within the horizon"
+        else:
+            b=p.box[j]
+            if link=="middle" and not (b[0]>=gap.lo+transfer.MIDDLE_PAD_U and b[2]<=gap.hi-transfer.MIDDLE_PAD_U):
+                why="modelled landing no longer inside the gap"
+            else:
+                sc=geo.scan(p,limit=min(j,transfer.FOLLOW_SCAN_F))
+                if sc.complete and not sc.contacts:return link,old,p,sc
+                hit=None if not sc.contacts else sc.contacts[0]
+                why="route blocked"
+                self._note("transfer_follow_route_blocked",frame=f,link=link,complete=sc.complete,
+                           first=None if hit is None else asdict(hit),
+                           first_box=None if hit is None else [float(v) for v in p.box[hit.frame-p.origin]])
+        if why!="route blocked":self._note("transfer_follow_route_blocked",frame=f,link=link,reason=why)
+        return None
+
+    def _middle_choice(self,state,game,sim,geo,plan,gap,hb,old):
+        """Task 183: the middle rows (transfer.middle_candidates: hold and release, or opening with her free air dash on a
+        first decision) nearest the goal (the gap's centre; an owned route keeps its goal), scanned whole to the modelled
+        ground for all owners with no exemption, MIDDLE_SCAN_N per batched pass in that order; the first clean one, or None."""
+        from ssbot.knowledge import kinematics as K
+        f=state["f"]
+        if old is not None:
+            kept=self._owned_route(state,game,sim,geo,plan,gap,old,"middle")
+            if kept is not None:return kept
+        goal_x=gap.seam if old is None else min(max(float(old["goal_x"]),gap.lo),gap.hi)
+        dash=old is None and transfer.air_dash_free(sim)
+        cands=transfer.middle_candidates(sim,gap,hb,goal_x,dash=dash)
+        if not cands:
+            self._note("transfer_follow_middle_unreachable",frame=f,lo=gap.lo,hi=gap.hi,goal_x=goal_x,owned=old is not None,
+                       dash=dash,basis="no hold-and-release row lands inside the gap clear of both current bodies")
+            return None
+        firsts=[]
+        for at in range(0,len(cands),transfer.MIDDLE_SCAN_N):
+            top=cands[at:at+transfer.MIDDLE_SCAN_N]
+            paths=[transfer.route_path(sim,c[2],c[5],c[6]) for c in top]
+            scans=geo.scan_batch(paths)
+            for rank,(c,p,sc) in enumerate(zip(top,paths,scans),start=at):
+                b=p.box[-1]
+                inside=bool(p.flags[-1]&K.F_GROUND and b[0]>=gap.lo+transfer.MIDDLE_PAD_U and b[2]<=gap.hi-transfer.MIDDLE_PAD_U)
+                if not inside or not sc.complete or sc.contacts:
+                    hit=None if not sc.contacts else sc.contacts[0]
+                    firsts.append({"recipe":c[0],"release":int(c[1]),"inside":inside,"complete":sc.complete,
+                                   "land_x":float(.5*(b[0]+b[2])),"first":None if hit is None else asdict(hit),
+                                   "first_box":None if hit is None else [float(v) for v in p.box[hit.frame-p.origin]]})
+                    continue
+                recipe,r,commands,j,box,_,_=c
+                follow={"kind":"middle","recipe":recipe,"dir":int(gap.direction),"F0":f+2,"masks":[int(m) for m in commands],
+                        "release_F":f+2+int(r),"land_f":int(p.through),"goal_x":float(goal_x),"lo":gap.lo,"hi":gap.hi,
+                        "other":int(gap.other),"landing_box":[float(v) for v in b],"rank":rank,"candidates":len(cands)}
+                self._note("transfer_follow_middle",frame=f,owned=old is not None,dash_free=dash,
+                           **{k:v for k,v in follow.items() if k!="masks"},rejected_before=firsts,
+                           scope="whole route to the modelled ground, all owners, no exemption; landing inside the gap by MIDDLE_PAD_U")
+                return "middle",follow,p,sc
+        self._note("transfer_follow_middle_blocked",frame=f,lo=gap.lo,hi=gap.hi,goal_x=goal_x,owned=old is not None,
+                   dash_free=dash,candidates=len(cands),scanned=firsts)
+        return None
+
+    def _side_landing_choice(self,state,game,sim,geo,plan,prefs,old):
+        """Task 183: the existing ordinary left / right landing post types from the current state (the key held to the
+        modelled ground), each scanned whole for all owners; the legal ones by the B2 endpoint value (an owned landing keeps
+        its key), or None."""
+        from ssbot.knowledge import kinematics as K
+        f=state["f"];opts=[]
+        if old is not None:
+            kept=self._owned_route(state,game,sim,geo,plan,None,old,"land")
+            if kept is not None:return kept
+        kinds=(("left_landing",B["L"]),("right_landing",B["R"]))
+        if old is not None:kinds=tuple(k for k in kinds if k[1]==int(old["dir"]))
+        for kind,bit in kinds:
+            row=transfer.landing_row(sim,bit)
+            if row is not None:opts.append((kind,bit,row[0],model_path(sim,plan,row[0],game)))
+        if not opts:
+            self._note("transfer_follow_side_none",frame=f,owned=old is not None,reason="no modelled ground within the horizon")
+            return None
+        scans=geo.scan_batch([o[3] for o in opts])
+        verdicts=[];legal=[]
+        for (kind,bit,commands,p),sc in zip(opts,scans):
+            ok=bool(sc.complete and not sc.contacts and p.flags[-1]&K.F_GROUND)
+            value=self._endpoint(None,p,prefs) if ok else None
+            hit=None if not sc.contacts else sc.contacts[0]
+            verdicts.append({"kind":kind,"legal":ok,"complete":sc.complete,"value":value,"land_box":[float(v) for v in p.box[-1]],
+                             "first":None if hit is None else asdict(hit),
+                             "first_box":None if hit is None else [float(v) for v in p.box[hit.frame-p.origin]]})
+            if ok:legal.append((value,kind,bit,commands,p,sc))
+        self._note("transfer_follow_side",frame=f,owned=old is not None,verdicts=verdicts,
+                   scope="ordinary left / right landing post types from the current state; whole route, all owners")
+        if not legal:return None
+        _,kind,bit,commands,p,sc=max(legal,key=lambda t:t[0])
+        follow={"kind":kind,"dir":int(bit),"F0":f+2,"masks":[int(m) for m in commands],"release_F":f+2+len(commands),
+                "land_f":int(p.through),"landing_box":[float(v) for v in p.box[-1]]}
+        return "land",follow,p,sc
+
+    def _follow_offer(self,state,game,sim,forecast,prefs,made,run,current):
+        """Task 183 (Sol seq 261; the person: the chain's follow-up after a real bounce off one Clapper's slam prefers the
+        middle). (handled, offer): handled False leaves the existing air / strike link (no standable gap: the seam strike
+        propose aims; nothing safe on a first decision); an owned follow-up Run that cannot go on hands back through B2
+        recovery (failure responsibility kept)."""
+        import time
+        t0=time.perf_counter_ns()
+        handled,offer=self._follow_decide(state,game,sim,forecast,prefs,made,run,current)
+        self._note("transfer_follow_decision",frame=state["f"],handled=handled,
+                   link=None if offer is None else offer.draft.run.link,mask=None if offer is None else int(offer.mask),
+                   owned=None if run is None else run.link,elapsed_ms=(time.perf_counter_ns()-t0)/1e6,
+                   timing_scope="follow-up decision only (rows, paths, scans)")
+        return handled,offer
+
+    def _follow_decide(self,state,game,sim,forecast,prefs,made,run,current):
+        f=state["f"];draft,plan,_,_=made
+        keep=None if run is None or run.link not in transfer.FOLLOW_LINKS else run.link
+        old=None if keep is None else run.v.get("follow")
+        gap=transfer.two_gap(state,plan.caster);hb=transfer._hero_box(state.get("hero"))
+        if keep!="land" and (gap is None or hb is None or not transfer.standable(gap,hb)):
+            # (an owned left / right landing needs no gap: its own route decides below)
+            if keep:
+                self._note("transfer_follow_gap_closed",frame=f,link=keep,lo=None if gap is None else gap.lo,
+                           hi=None if gap is None else gap.hi)
+                self._recover("bounce follow-up: no standable gap under the route",f);return True,None
+            if gap is not None and hb is not None:
+                self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(draft.run.v.get("side") or 0),
+                           link=draft.run.link,basis="no standable gap: the existing witnessed down-slash aimed over the seam")
+            return False,None
+        try:
+            geo=B2Geometry(forecast,f,plan.move,current[2])
+            choice=None if keep=="land" else self._middle_choice(state,game,sim,geo,plan,gap,hb,old if keep=="middle" else None)
+            if choice is None:
+                choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old if keep=="land" else None)
+        except (GeometryUnavailable,NominalUnsupported) as exc:
+            self._note("transfer_follow_unchecked",frame=f,link=keep,reason=str(exc))
+            if keep:
+                self._recover("bounce follow-up route unchecked: "+str(exc),f);return True,None
+            return False,None
+        if choice is None:
+            if keep:
+                self._recover("bounce follow-up: no safe middle and no legal left / right landing",f);return True,None
+            self._note("transfer_follow_none",frame=f,link=draft.run.link,owner="the existing air / strike link continues")
+            return False,None
+        link,follow,route,scan=choice
+        made2=transfer.follow_draft(self.runner,made,state,game,sim,link,follow,self._idle_ev or None)
+        if made2 is None:
+            if keep:
+                self._recover("bounce follow-up link ended",f);return True,None
+            return False,None
+        draft2,plan2,path2,mask2=made2
+        goal=self._transfer_goal
+        self._transfer_responsibility.setdefault(plan2.move,(goal.responsibility,goal.cast_ta))
+        return True,B2Offer("active" if run is not None else "manual_commitment",path2,draft2,int(mask2),0.,plan2.move,
+            {"manual_air":True,"rune_transfer":True,"caster":plan2.caster,"cast_fa":plan2.cast_fa,
+             "follow":{k:v for k,v in follow.items() if k!="masks"},"follow_masks":follow.get("masks"),
+             "follow_route_through":route.through,"follow_route_contacts":len(scan.contacts),
+             "tail_checked_through":draft2.run.v.get("source_tail_checked_through"),
+             "tail_mask":draft2.run.v.get("source_tail_mask"),"approach_only":False,
+             "checked_through":scan.last_frame,"phase":link,"predicted_bounce":None,
+             "handoff":("actual landing between the two near body edges" if link=="middle" else "actual landing"),
+             "safety_basis":("whole route to the modelled ground when chosen, then its next %d frames every tick; all owners, "
+                             "no exemption")%transfer.FOLLOW_SCAN_F})
 
     def _transfer_bounce_exit(self):
         """Reuse the existing over/fall/ground table only after the REAL B2 bounce."""
