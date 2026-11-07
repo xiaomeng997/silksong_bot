@@ -1,6 +1,9 @@
 """Task 183 (Sol seq 261): after a real DownSlash bounce off one Clapper's own slam, with the two close, the chain's
 follow-up prefers the middle (land between the two real bodies), aims the existing witnessed down-slash over the seam when
-no standable gap exists, and takes a legal ordinary left / right landing when the middle is not safe.
+no standable gap exists, and takes a legal ordinary left / right landing when the middle is not safe. Sol seq 265 (the
+person: go to the middle whether or not there is room): with no clean middle landing now the seam strike keeps to the
+middle every tick; the ordinary landing only when that action's own gate turns it down; an owned landing re-chooses a
+clean middle; an owned middle whose gap closes goes on by the seam approach.
 
 Production-shaped fixture: the forum hero model (hero_wanderer_forum, HERO2 kinematics, the oracle hold filter), fitted
 Clapper poses (map2.clapper Know) at the w13_331 2983 roots (bounced 335476 at 36.86, the other at 24.1, both facing
@@ -76,9 +79,13 @@ class Bout:
         self.prefix = 0
         self.prefs = GoalPrefs(mode='RUSH', stance_x=stance_x, weights={}, target=bounced[0])
         self.scans = []
+        # seq 265: block_steps puts a fixture contact on every two-frame current step (the air link's own gate) while
+        # whole routes scan as before; boxes stays mutable (a danger can go or come mid-run)
+        self.block_steps = False
         bodies = [(*T.body_box(e), e['iid'], 'body') for e in self.ents]
-        boxes = bodies + [(*d, 99, 'delayed') for d in danger]
+        boxes = self.boxes = bodies + [(*d, 99, 'delayed') for d in danger]
         scans = self.scans
+        bout = self
 
         class Geo:
             def __init__(self, forecast, f, move, instance):
@@ -100,6 +107,9 @@ class Bout:
 
             def scan(self, path, limit=None):
                 scans.append(len(path.commands))
+                if bout.block_steps and limit is None and len(path.commands) == 2:
+                    return ContactScan(self.ref(path), path.origin, path.origin + 2,
+                                       (PathContact(path.origin + 2, 99, 'delayed'),), 'fixture: blocked current step')
                 return self._scan(path, len(path.commands) if limit is None else limit)
 
             def scan_batch(self, paths):
@@ -190,24 +200,153 @@ def test_mirror_left_bounced_goes_right_into_the_middle(monkeypatch):
     assert not bout.n._failure_exposures
 
 
-def test_dangerous_middle_takes_the_legal_ordinary_landing(monkeypatch):
-    # a delayed hazard on the floor of the whole gap (a rune's area): no middle row and no left landing is legal
-    bout = Bout(monkeypatch, danger=[(26.4, 3.0, 35.5, 5.2)])
-    log = bout.run()
-    assert bout.notes('transfer_follow_middle_blocked')
-    side = bout.notes('transfer_follow_side')[0]['verdicts']
-    assert [v['kind'] for v in side] == ['left_landing', 'right_landing']
-    assert [v['legal'] for v in side] == [False, True]
-    assert log[0]['link'] == 'land' and log[0]['mask'] & LR == B['R']
-    assert log[0]['offer'].details['follow']['kind'] == 'right_landing'
+MIRROR_X = 60.96   # the fixtures' mirror: x -> 60.96 - x (36.86 <-> 24.1, 33.5 <-> 27.46)
+
+
+def _blocked_bout(monkeypatch, mirror, **kw):
+    # a delayed hazard on the floor of the whole gap (a rune's area): no middle landing row is clean, no landing on the
+    # middle side; the outer landing (right of the right bounced one; mirrored: left of the left one) is legal
+    m = (lambda x: MIRROR_X - x) if mirror else (lambda x: x)
+    if mirror:
+        bout = Bout(monkeypatch, bounced=(8, m(36.86), -1), other=(7, m(24.1), -1), hero=(m(37.821), 10.774, 11.4),
+                    stance_x=30., danger=[(m(35.5), 3.0, m(26.4), 5.2)], **kw)
+    else:
+        bout = Bout(monkeypatch, danger=[(26.4, 3.0, 35.5, 5.2)], **kw)
+    return bout, m
+
+
+def _landing_bout(monkeypatch, mirror=False, **kw):
+    # the blocked middle, and no seam action: the Idle target past its Idle Time has no strike witness possible (Task 179
+    # #317's definite end): the legal outer landing goes on the first tick
+    bout, _ = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True, **kw)
+    bout.ents[1]['fsms'][0]['t'] = 1.2
+    return bout
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_blocked_middle_stays_on_the_middle_by_the_inner_seam_strike(monkeypatch, mirror):
+    # Sol seq 265 (the person: go to the middle whether or not there is room; without it down-slash and wait): the gap is
+    # standable but no middle landing row is clean now. The legal outer landing the old code took at once is not the
+    # default any more: the follow-up keeps to the middle by the seam approach over the bounced one's inner side and its
+    # witnessed inner down-slash; she never lands in the unsafe gap
+    bout, m = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.                                       # Idle from t 0: a strike witness
+    sim = bout.sim()
+    out = B['L'] if mirror else B['R']
+    row = T.landing_row(sim, out)                                           # the outer landing is legal from here
+    assert row is not None and not N.B2Geometry(None, F0, bout.plan.move, None).scan(
+        model_path(sim, bout.plan, row[0], bout.game)).contacts
+    log = bout.run(12)
+    assert bout.notes('transfer_follow_middle_blocked') and not bout.notes('transfer_follow_side')
+    seam = bout.notes('transfer_follow_seam')
+    assert seam[0]['gap_standable'] and seam[0]['middle'] == 'no clean middle landing route now'
+    root, sign, aim = seam[0]['inner']
+    assert (root, sign) == (m(36.86), 1 if mirror else -1)
+    sent = [r for r in log if r['offer'] is not None]
+    assert sent and all(r['link'] in ('air', 'strike') for r in sent)      # no landing, middle or outer
+    inward = B['R'] if mirror else B['L']
+    assert sent[0]['mask'] & LR == inward and not sent[0]['mask'] & B['A']
+    strike = next(e['strike'] for e in seam if e['strike'])                 # the witnessed down-slash, first contact inner
+    assert (strike['contact_x'] - strike['inner_bound']) * sign >= 0
+    assert all((r['contact_x'] - r['bound']) * sign < 0 for e in seam for r in e['outer_rejected'] or ())
+    assert not bout.notes('transfer_follow_landed') and not bout.notes('b2_recovery')
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_no_strike_witness_on_the_target_takes_the_legal_ordinary_landing(monkeypatch, mirror):
+    # the same blocked middle, but no strike witness is possible on the bounced one (its Idle past its Idle Time: Task 179
+    # #317's definite end): no seam action to keep to the middle with, the existing legal outer landing, the reason recorded
+    bout = _landing_bout(monkeypatch, mirror)
+    offer = bout.tick()
+    gone = bout.notes('transfer_follow_seam_unavailable')
+    assert len(gone) == 1 and gone[0]['reason'].startswith('no strike witness possible')
+    assert not bout.notes('transfer_follow_seam')
+    out = B['L'] if mirror else B['R']
+    assert offer is not None and offer.draft.run.link == 'land' and offer.mask & LR == out
+    assert not bout.notes('transfer_no_witness_handback') and not bout.notes('b2_recovery')
+    bout.run()
     landed = bout.notes('transfer_follow_landed')
-    assert len(landed) == 1 and landed[0]['link'] == 'land' and landed[0]['box'][0] > 39.
+    assert len(landed) == 1 and landed[0]['link'] == 'land' and not bout.n._failure_exposures
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_seam_step_blocked_takes_the_legal_ordinary_landing(monkeypatch, mirror):
+    # the seam action (a strike witness possible) whose current step the external step gate turns down (a fixture contact
+    # on every two-frame step) while the whole outer-landing route is clear: only then the landing goes, the reason recorded
+    bout, _ = _blocked_bout(monkeypatch, mirror, link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    bout.block_steps = True
+    offer = bout.tick()
+    assert bout.notes('transfer_follow_seam')                               # the middle was tried first
+    blocked = bout.notes('transfer_follow_seam_blocked')
+    assert len(blocked) == 1 and blocked[0]['reason'].startswith('external step blocked')
+    assert blocked[0]['fallback'] == ('left_landing' if mirror else 'right_landing') and bout.notes('rune_transfer_rejected')
+    out = B['L'] if mirror else B['R']
+    assert offer is not None and offer.draft.run.link == 'land' and offer.mask & LR == out
+    assert not bout.notes('b2_recovery')
+
+
+def test_blocked_seam_with_no_legal_landing_keeps_the_gates_hand_back(monkeypatch):
+    # danger on the whole floor: no middle and no left / right landing; the seam action's step turned down by the gate:
+    # the gate's own hand-back stands, failure responsibility kept, the reason recorded
+    bout = Bout(monkeypatch, danger=[(0., 3.0, 60., 5.2)], link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    bout.block_steps = True
+    assert bout.tick() is None
+    blocked = bout.notes('transfer_follow_seam_blocked')
+    assert len(blocked) == 1 and blocked[0]['fallback'] is None and blocked[0]['reason'].startswith('external step blocked')
+    assert bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+
+
+def test_seam_does_not_approach_a_target_no_strike_is_possible_on(monkeypatch):
+    # an owned middle route whose gap closes while the target scuttles (Evade Scuttle: no fitted still pose, the 0ed5c779
+    # w13_331 3725 shape): no seam action toward it; the closed gap's original hand-back stands
+    bout = Bout(monkeypatch)
+    assert bout.tick().draft.run.link == 'middle'
+    fit_pose(bout.ents[0], x=33.5)
+    bout.ents[1]['fsms'][0]['state'] = 'Evade Scuttle'
+    assert bout.tick() is None
+    gone = bout.notes('transfer_follow_seam_unavailable')
+    assert gone and gone[-1]['reason'] == 'no strike witness possible: no fitted still pose in Evade Scuttle'
+    assert bout.notes('transfer_follow_gap_closed') and bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+
+
+def test_owned_landing_rechooses_a_clean_middle(monkeypatch):
+    # Sol seq 265: an outer landing in progress goes back to the middle once a whole middle landing route is clean (she is
+    # over the bounced body's middle: after one tick of the outer key the reversal still clears its near edge)
+    bout = _landing_bout(monkeypatch, hero=(37.2, 10.774, 11.4))
+    bout.tick()
+    assert bout.n.runner.run.link == 'land'
+    del bout.boxes[2:]                                                       # the danger on the gap floor is gone
+    offer = bout.tick()
+    assert offer is not None and offer.draft.run.link == 'middle'
+    again = bout.notes('transfer_follow_rechosen')
+    assert len(again) == 1 and again[0]['old_kind'] == 'right_landing' and again[0]['new'] == 'middle'
+    bout.run()
+    landed = bout.notes('transfer_follow_landed')
+    lo, hi = T.body_box(bout.ents[0])[2], T.body_box(bout.ents[1])[0]
+    assert len(landed) == 1 and landed[0]['link'] == 'middle' and lo < landed[0]['box'][0] and landed[0]['box'][2] < hi
     assert not bout.n._failure_exposures
+
+
+def test_owned_middle_whose_gap_closes_goes_on_by_the_seam_approach(monkeypatch):
+    # Sol seq 265 (no room: down-slash and wait for room): the other one walks up to the bounced body mid-route; the owned
+    # middle route is released to the seam approach on the same Run instead of the old hand-back
+    bout = Bout(monkeypatch)
+    assert bout.tick().draft.run.link == 'middle'
+    fit_pose(bout.ents[0], x=33.5)
+    assert not T.standable(T.two_gap(bout.state(bout.sim()), 8), (0., 0., .5, 2.))
+    offer = bout.tick()
+    assert bout.notes('transfer_follow_gap_closed')
+    seam = bout.notes('transfer_follow_seam')
+    assert seam and seam[-1]['released'] == 'middle' and not seam[-1]['gap_standable']
+    assert offer is not None and offer.draft.run.link in ('air', 'strike') and offer.draft.run.v.get('follow') is None
+    assert not bout.notes('b2_recovery') and not bout.n._failure_exposures
 
 
 def test_owned_side_landing_goes_on_when_the_gap_closes(monkeypatch):
     # a left / right landing needs no gap: the other one walking up to the bounced body mid-route changes nothing
-    bout = Bout(monkeypatch, danger=[(26.4, 3.0, 35.5, 5.2)])
+    bout = _landing_bout(monkeypatch)
     bout.tick()
     assert bout.n.runner.run.link == 'land'
     fit_pose(bout.ents[0], x=33.5)                            # bodies now overlap: no standable gap
@@ -221,7 +360,7 @@ def test_owned_side_landing_goes_on_when_the_gap_closes(monkeypatch):
 def test_owned_landing_sends_the_keys_it_checked_after_its_row_ran_out(monkeypatch):
     # Sol seq 262 item 1: the right landing's absolute row ends before this tick's first free frame (f 2984: row F0 2985
     # only, f+2 = 2986) while she is still in the air: the recheck holds R to the ground, so R is what goes out
-    bout = Bout(monkeypatch, danger=[(26.4, 3.0, 35.5, 5.2)])
+    bout = _landing_bout(monkeypatch)
     bout.tick()
     run = bout.n.runner.run
     assert run.link == 'land'
@@ -238,8 +377,8 @@ def test_owned_landing_sends_the_keys_it_checked_after_its_row_ran_out(monkeypat
 def test_owned_routes_follow_a_landing_later_than_planned(monkeypatch):
     # the control: after the first tick she is 1.5 u higher than the planned row assumed (a later real landing); the owned
     # middle / landing keeps re-anchoring the checked row, the keys sent stay the checked ones and she still lands
-    for danger, link, key in (((), 'middle', B['L']), ([(26.4, 3.0, 35.5, 5.2)], 'land', B['R'])):
-        bout = Bout(monkeypatch, danger=danger)
+    for make, link, key in ((lambda: Bout(monkeypatch), 'middle', B['L']), (lambda: _landing_bout(monkeypatch), 'land', B['R'])):
+        bout = make()
         first = bout.tick()
         planned = first.details['follow']['land_f']
         bout.S[[K.PY, K.QY, K.SY]] += 1.5
@@ -275,11 +414,14 @@ def test_middle_dials_back_when_she_is_past_the_goal(monkeypatch, mirror):
     assert not bout.n._failure_exposures
 
 
-def test_no_safe_middle_and_no_legal_landing_keeps_the_existing_air_link(monkeypatch):
+def test_no_safe_middle_and_no_legal_landing_keeps_the_seam_approach(monkeypatch):
+    # seq 265: the existing air link goes on as before, now aimed at the bounced one's inner side (the middle stays the goal)
     bout = Bout(monkeypatch, danger=[(0., 3.0, 60., 5.2)])
     offer = bout.tick()
-    assert bout.notes('transfer_follow_middle_blocked') and bout.notes('transfer_follow_none')
-    assert offer is not None and offer.draft.run.link in ('air', 'strike')   # the existing follow-up, unchanged
+    assert bout.notes('transfer_follow_middle_blocked') and bout.notes('transfer_follow_seam')
+    assert not bout.notes('transfer_follow_none') and not bout.notes('transfer_follow_side')
+    assert offer is not None and offer.draft.run.link in ('air', 'strike')
+    assert offer.draft.run.v['side'] == B['L']
 
 
 def test_no_gap_aims_the_witnessed_downslash_over_the_seam_then_a_real_bounce_with_a_gap_goes_middle(monkeypatch):
@@ -359,9 +501,6 @@ def test_seam_strike_on_the_inner_side_still_goes(monkeypatch, mirror):
     assert offer is not None and offer.draft.run.link == 'strike' and note['link'] == 'strike'
     assert strike['contact_frame'] == F0 + 6 and strike['inner_bound'] == root and (strike['contact_x'] - root) * sign >= 0
     assert note['mask'] == offer.mask and note['target_frame'] == F0 + 2 and not note['outer_rejected']
-
-
-MIRROR_X = 60.96   # the seam fixtures' mirror: x -> 60.96 - x (36.86 <-> 24.1, 33.5 <-> 27.46)
 
 
 @pytest.mark.parametrize('mirror', [False, True])
@@ -476,8 +615,10 @@ def test_scope_is_a_bounce_in_a_chain_a_clapper_slam_started():
 
 
 def test_cross_clapper_continuation_to_a_distant_one_is_unchanged(monkeypatch):
-    # L2 switched to the other one after the bounce and the two stand apart (standable gap): the existing transfer to it
-    bout = Bout(monkeypatch)
+    # L2 switched to the other one after the bounce and the two stand apart (seq 265: a gap wider than CLOSE_PAIR_GAP_U):
+    # the existing transfer to it
+    bout = Bout(monkeypatch, other=(7, 20., 1))
+    assert T.two_gap(bout.state(bout.sim()), 8).width > T.CLOSE_PAIR_GAP_U
     bout.goal = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
     bout.n._transfer_goal = bout.goal
     run = bout.n.runner.run
@@ -488,6 +629,37 @@ def test_cross_clapper_continuation_to_a_distant_one_is_unchanged(monkeypatch):
     offer = bout.tick()
     assert offer is not None and offer.draft.run.link not in T.FOLLOW_LINKS
     assert not bout.notes('transfer_follow_decision') and not offer.draft.run.v.get('follow_close')
+
+
+def test_cross_target_after_a_bounce_in_a_close_pair_reads_the_middle(monkeypatch):
+    # seq 265 (the 0ed5c779 4156 window replayed: after the chain's own model bounce at 4184 L2 switched to the other one,
+    # the two 4.11 u apart, and the old scope sent it to the distant cross continuation): a close pair with a standable
+    # gap; a fresh Run for the cross target reads the middle first
+    bout = Bout(monkeypatch)
+    bout.goal = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)
+    bout.n._transfer_goal = bout.goal
+    bout.n.runner.run = None                                   # the Run starts on this tick (its close flag read now)
+    bout.prefs = GoalPrefs(mode='RUSH', stance_x=31., weights={}, target=7)
+    s = bout.state(bout.sim())
+    gap = T.two_gap(s, 8)
+    assert T.standable(gap, tuple(s['hero']['box'])) and gap.width <= T.CLOSE_PAIR_GAP_U
+    assert T.bounce_close(s, bout.goal, s['hero'])
+    offer = bout.tick()
+    assert bout.notes('transfer_follow_decision') and offer is not None and offer.draft.run.link == 'middle'
+    assert offer.draft.run.v['follow_close'] and offer.draft.run.v['iid'] == 7
+
+
+def test_distant_pair_keeps_the_old_follow_up(monkeypatch):
+    # a gap wider than CLOSE_PAIR_GAP_U (the other one at 20.0): not the person's close pair. The middle blocked, no seam
+    # strike on an inner side; the legal ordinary landing as before seq 265
+    bout = Bout(monkeypatch, other=(7, 20., 1), danger=[(22.3, 3.0, 35.5, 5.2)])
+    s = bout.state(bout.sim())
+    assert T.two_gap(s, 8).width > T.CLOSE_PAIR_GAP_U and T.seam_geometry(s, bout.goal, 8) is None
+    offer = bout.tick()
+    gone = bout.notes('transfer_follow_seam_unavailable')
+    assert bout.notes('transfer_follow_middle_blocked') and gone and gone[0]['reason'].startswith('not a close pair')
+    assert offer is not None and offer.draft.run.link == 'land' and offer.mask & LR == B['R']
+    assert offer.draft.run.v['seam_inner'] is None
 
 
 def test_seam_aim_is_the_target_inner_side_clear_of_the_other_body(monkeypatch):

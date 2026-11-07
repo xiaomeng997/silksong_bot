@@ -87,6 +87,7 @@ class NativeManualAirChain(NativeChainB2):
         self._air_context=None;self._air_plan=None;self._air_finished=set()
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
         self._transfer_blade=None
+        self._follow_fallback=None;self._follow_made=None   # Task 183 seq 265: one tick's seam fallback / released draft
         self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
@@ -350,7 +351,6 @@ class NativeManualAirChain(NativeChainB2):
         A still state whose witness is absent now (its pose still settling, past its longest fitted duration with
         the successor to come: live prefix 2612 Slam Recover, struck at 2632 on the Idle after it) keeps the Run;
         unknown inputs do too."""
-        from . import pogo_model as PM
         enemy=next((e for e in transfer.clappers(state) if e["iid"]==target),None)
         h=state.get("hero") or {};hb=h.get("box");hp=h.get("pos")
         try:body=None if enemy is None else transfer.body_box(enemy)
@@ -358,6 +358,14 @@ class NativeManualAirChain(NativeChainB2):
         if (body is None or not isinstance(hb,(list,tuple)) or len(hb)<4 or not isinstance(hp,(list,tuple)) or not hp
                 or not np.isfinite([hp[0],hb[1],*body]).all()):return None
         if not (body[0]<=hp[0]<=body[2] and hb[1]>=body[3]):return None
+        return self._no_strike_witness(state,sim,target,enemy)
+
+    def _no_strike_witness(self,state,sim,target,enemy):
+        """The definite ends of _no_strike_overhead (Task 179 #317) wherever she is: why no strike witness is possible on
+        this target now, or None. Task 183 seq 265: the seam action reads it before it approaches."""
+        from . import pogo_model as PM
+        if enemy is None:return None
+        h=state.get("hero") or {}
         frames=len(sim.prefix)+3+PM.ACTIVE[1]
         st=transfer.control(enemy)[0]
         if st=="Walk":
@@ -905,6 +913,7 @@ class NativeManualAirChain(NativeChainB2):
 
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
+        self._follow_fallback=None;self._follow_made=None
         run=self.runner.run
         active=run is not None and run.chain==transfer.PROGRAM
         if active:target=run.v["iid"]  # the already-sent action keeps the same target through its real bounce
@@ -1044,6 +1053,9 @@ class NativeManualAirChain(NativeChainB2):
         if self._follow_due(self._transfer_goal,draft,run,active,ground,approach_only):
             handled,offer=self._follow_offer(state,game,sim,forecast,prefs,made,run if active else None,current)
             if handled:return offer
+            if self._follow_made is not None:
+                # Task 183 seq 265: an owned middle route released to the seam approach: its air / strike draft goes on below
+                made=self._follow_made;self._follow_made=None;draft,plan,path,mask=made
         if no_witness is not None:
             # (the deferred Task 179 #317 hand-back: the follow-up took nothing this tick)
             self._note("transfer_no_witness_handback",frame=f,target=target,reason=no_witness,
@@ -1128,6 +1140,8 @@ class NativeManualAirChain(NativeChainB2):
                         self._note("rune_transfer_dash_refused",frame=f,first=first,active=active,
                                    complete=None if lock is None else lock.complete,**info,
                                    owner=("B2 recovery hands back" if active else "current owner keeps the keys"))
+                        fb=self._seam_fallback(f,"air dash refused: locked motion blocked or unknown")
+                        if fb is not None:return fb
                         if active:self._recover("rune transfer air dash refused: locked motion blocked or unknown",f)
                         return None
                 else:self._note("rune_transfer_dash_checked",frame=f,**info)
@@ -1203,11 +1217,16 @@ class NativeManualAirChain(NativeChainB2):
             self._note("rune_transfer_unchecked",frame=f,reason=str(exc))
             if draft.run.link=="bounce_tail" and goal is not None:
                 self._decline_source_tail(goal,state)
+            fb=self._seam_fallback(f,"external step unchecked: "+str(exc))
+            if fb is not None:return fb
             if active:self._recover("rune transfer external step unchecked",f)
             return None
         if not scan.complete or scan.contacts:
             first=None if not scan.contacts else asdict(scan.contacts[0])
             self._note("rune_transfer_rejected",frame=f,first=first)
+            fb=self._seam_fallback(f,"external step blocked"+("" if first is None else
+                                   " (first contact frame %s, owner %s, %s)"%(first.get("frame"),first.get("owner_iid"),first.get("kind"))))
+            if fb is not None:return fb
             if active:self._recover("rune transfer external step blocked",f)
             return None
         goal=self._transfer_goal
@@ -1370,9 +1389,9 @@ class NativeManualAirChain(NativeChainB2):
 
     def _follow_offer(self,state,game,sim,forecast,prefs,made,run,current):
         """Task 183 (Sol seq 261; the person: the chain's follow-up after a real bounce off one Clapper's slam prefers the
-        middle). (handled, offer): handled False leaves the existing air / strike link (no standable gap: the seam strike
-        propose aims; nothing safe on a first decision); an owned follow-up Run that cannot go on hands back through B2
-        recovery (failure responsibility kept)."""
+        middle). (handled, offer): handled False leaves the existing air / strike link (no clean middle landing now: the
+        seam strike propose aims, seq 265; nothing safe on a first decision); an owned follow-up Run that cannot go on
+        hands back through B2 recovery (failure responsibility kept)."""
         import time
         t0=time.perf_counter_ns()
         handled,offer=self._follow_decide(state,game,sim,forecast,prefs,made,run,current)
@@ -1383,30 +1402,35 @@ class NativeManualAirChain(NativeChainB2):
         return handled,offer
 
     def _follow_decide(self,state,game,sim,forecast,prefs,made,run,current):
+        """Task 183. seq 265 (the person, via Sol: go to the middle whether or not there is room; with room stand there,
+        without it down-slash and wait for room): the middle is the follow-up's goal. A clean middle landing whenever the gap
+        is standable (an owned left / right landing re-chooses it, its whole route scanned as on a first choice). Otherwise,
+        no standable gap or a standable one whose landing routes are blocked now, the seam action (_seam_follow) every tick
+        until a middle landing is clean. The existing ordinary left / right landing (a standable gap) only when there is no
+        seam action or its own gate turns it down, the reason recorded; an owned landing goes on as it was."""
         f=state["f"];draft,plan,_,_=made
         keep=None if run is None or run.link not in transfer.FOLLOW_LINKS else run.link
         old=None if keep is None else run.v.get("follow")
         gap=transfer.two_gap(state,plan.caster);hb=transfer._hero_box(state.get("hero"))
-        if keep!="land" and (gap is None or hb is None or not transfer.standable(gap,hb)):
-            # (an owned left / right landing needs no gap: its own route decides below)
-            if keep:
-                self._note("transfer_follow_gap_closed",frame=f,link=keep,lo=None if gap is None else gap.lo,
-                           hi=None if gap is None else gap.hi)
-                self._recover("bounce follow-up: no standable gap under the route",f);return True,None
-            if gap is not None and hb is not None:
-                v=draft.run.v;row=v.get("row") if draft.run.link=="strike" else None
-                self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(v.get("side") or 0),
-                           link=draft.run.link,mask=int(made[3]),target_frame=f+2,inner=v.get("seam_inner"),
-                           strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","inner_bound","approach_direction")},
-                           outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),
-                           basis="no standable gap: the existing witnessed down-slash, its first contact on the target's inner side "
-                                 "(roots' order; bound read at the row's own contact index)")
+        stand=bool(gap is not None and hb is not None and transfer.standable(gap,hb))
+        if keep is None and not stand:
+            # no standable gap: the existing witnessed down-slash on the target's inner side; its own gates decide
+            if gap is not None and hb is not None:self._note_seam(f,gap,hb,made,False,None)
             return False,None
+        if keep=="middle" and not stand:
+            self._note("transfer_follow_gap_closed",frame=f,link=keep,lo=None if gap is None else gap.lo,
+                       hi=None if gap is None else gap.hi)
         try:
             geo=B2Geometry(forecast,f,plan.move,current[2])
-            choice=None if keep=="land" else self._middle_choice(state,game,sim,geo,plan,gap,hb,old if keep=="middle" else None)
-            if choice is None:
-                choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old if keep=="land" else None)
+            choice=None if not stand else self._middle_choice(state,game,sim,geo,plan,gap,hb,old if keep=="middle" else None)
+            if choice is not None and keep=="land":
+                self._note("transfer_follow_rechosen",frame=f,old_kind=(old or {}).get("kind"),new=choice[0],
+                           basis="a clean middle landing from her current state; the whole route scanned as on a first choice")
+            if choice is None and keep=="land":
+                choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old)   # the owned landing goes on
+            if choice is None and keep!="land":
+                if self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand):return False,None
+                if stand:choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,None)
         except (GeometryUnavailable,NominalUnsupported) as exc:
             self._note("transfer_follow_unchecked",frame=f,link=keep,reason=str(exc))
             if keep:
@@ -1414,10 +1438,83 @@ class NativeManualAirChain(NativeChainB2):
             return False,None
         if choice is None:
             if keep:
-                self._recover("bounce follow-up: no safe middle and no legal left / right landing",f);return True,None
+                self._recover("bounce follow-up: no standable gap under the route" if keep=="middle" and not stand else
+                              "bounce follow-up: no safe middle and no legal left / right landing",f);return True,None
             self._note("transfer_follow_none",frame=f,link=draft.run.link,owner="the existing air / strike link continues")
             return False,None
-        link,follow,route,scan=choice
+        return self._follow_install(state,game,sim,made,run,keep,choice)
+
+    def _note_seam(self,f,gap,hb,made,stand,released):
+        v=made[0].run.v;link=made[0].run.link;row=v.get("row") if link=="strike" else None
+        self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(v.get("side") or 0),
+                   link=link,mask=int(made[3]),target_frame=f+2,inner=v.get("seam_inner"),
+                   strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","inner_bound","approach_direction")},
+                   outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),gap_standable=bool(stand),released=released,
+                   middle="no clean middle landing route now" if stand else "no standable gap",
+                   fallback=("the legal ordinary left / right landing if this action's own gate turns it down" if stand else
+                             "the gate's own hand-back"),
+                   basis="the middle is the follow-up's goal: the existing witnessed down-slash, its first contact on the target's "
+                         "inner side (roots' order; bound read at the row's own contact index), every tick until a middle landing is clean")
+
+    def _seam_follow(self,state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand):
+        """Task 183 seq 265: no clean middle landing now (a standable gap's landing routes blocked, or an owned middle route
+        blocked / its gap closed): the follow-up stays on the middle by the existing seam approach or hold over the target's
+        inner side and its witnessed inner down-slash (propose's seam rows; an owned middle route released to the air link).
+        This tick's air / strike link gates it as before (current step for all owners, dash lock, strike witness). True: that
+        action goes on (handled False); a standable gap then keeps the legal ordinary landing as the fallback when the gate
+        turns it down (_seam_fallback). False: no seam action (no released link, not a close pair, the side unknown, or no
+        strike witness possible on the target at all: _no_strike_witness)."""
+        f=state["f"]
+        if keep=="middle":
+            made=transfer.propose(self.runner,state,game,sim,plan.iid,False,self._context[3],self._transfer_finished,
+                                  self._transfer_goal,follow_release=True,
+                                  **({"idle_evidence":self._idle_ev} if self._idle_ev else {}))
+            if made is None or made[0] is None:
+                self._note("transfer_follow_seam_unavailable",frame=f,link=keep,
+                           reason=(made[1].ended_reason if made is not None else None) or "released seam approach has no link")
+                return False
+        seam=made[0].run.v.get("seam_inner")
+        why=None
+        if made[0].run.link not in ("air","strike") or not seam or int(seam[1])==0:
+            wide=gap is not None and hb is not None and not transfer.close_pair(gap,hb)
+            why=("the draft is not an air / strike link" if made[0].run.link not in ("air","strike") else
+                 "not a close pair: the gap is %.2f u wide"%gap.width if wide else
+                 "the target's inner side unknown" if seam else "no seam geometry")
+        else:
+            # a witnessed inner down-slash is the point: a target no strike witness is possible on (Task 179 #317's
+            # definite ends: no fitted still pose, a walker outside WalkSupport, an Idle past its Idle Time or hit since
+            # its entry) is not approached (0ed5c779 w13_331 3725: the recorded 476 in Evade Scuttle toward her)
+            target=next((e for e in transfer.clappers(state) if e["iid"]==plan.iid),None)
+            gone=self._no_strike_witness(state,sim,plan.iid,target)
+            if gone is not None:why="no strike witness possible: "+gone
+        if why is not None:
+            self._note("transfer_follow_seam_unavailable",frame=f,link=keep,draft_link=made[0].run.link,inner=seam,reason=why)
+            return False
+        if stand:
+            self._follow_fallback={"f":f,"state":state,"game":game,"sim":sim,"made":made,"run":run,
+                                   "side":lambda:self._side_landing_choice(state,game,sim,geo,plan,prefs,None)}
+        if keep=="middle":self._follow_made=made
+        self._note_seam(f,gap,hb,made,stand,keep)
+        return True
+
+    def _seam_fallback(self,f,why):
+        """Task 183 seq 265: this tick's seam action turned down by its own gate (why: the external step blocked or
+        unchecked, its air dash refused). With a standable gap the existing legal ordinary left / right landing goes instead
+        (scanned whole now), the reason recorded; None: the gate's own hand-back stands (no standable gap, or no legal
+        landing)."""
+        fb=self._follow_fallback;self._follow_fallback=None
+        if fb is None or fb["f"]!=f:return None
+        try:choice=fb["side"]()
+        except (GeometryUnavailable,NominalUnsupported) as exc:
+            self._note("transfer_follow_unchecked",frame=f,link=None,reason=str(exc));choice=None
+        self._note("transfer_follow_seam_blocked",frame=f,reason=why,fallback=None if choice is None else choice[1].get("kind"),
+                   owner="the legal ordinary landing" if choice is not None else "the gate's own hand-back")
+        if choice is None:return None
+        return self._follow_install(fb["state"],fb["game"],fb["sim"],fb["made"],fb["run"],None,choice)[1]
+
+    def _follow_install(self,state,game,sim,made,run,keep,choice):
+        """Task 183: the chosen follow-up link (middle / land) with its checked row as this tick's offer. (handled, offer)."""
+        f=state["f"];link,follow,route,scan=choice
         made2=transfer.follow_draft(self.runner,made,state,game,sim,link,follow,self._idle_ev or None)
         if made2 is None:
             if keep:

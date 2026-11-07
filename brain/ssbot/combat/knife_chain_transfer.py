@@ -735,9 +735,12 @@ def air_approach_keys(x):
 # Task 183 (Sol seq 261; the person, relayed): two Clappers close or overlapping, a real DownSlash bounce off one's own slam
 # (CC_SLAM, the bounced one its source) and that same Clapper still the tactical target: the chain's follow-up prefers the
 # MIDDLE. A reachable, safe standing place between the two real bodies: go and land there from the first legal key after
-# the hammer tail; done only when she really lands between the two near body edges. No standable gap: the existing
-# witnessed down-slash, aimed over the two bodies' seam; each real bounce reads the gap again. The middle not safe: the
-# existing ordinary left / right landing post types (knife_chain_post_actions) from the current state, if one is legal.
+# the hammer tail; done only when she really lands between the two near body edges. No clean landing there now (no
+# standable gap, or seq 265: a standable one whose landing routes are all blocked): the existing witnessed down-slash on
+# the target's inner side by the seam, every tick until a middle landing is clean, each real bounce reading the gap again
+# (the person, seq 265: go to the middle whether or not there is room; with room stand, without it down-slash and wait).
+# Only when that action's own gate turns it down does a standable gap take the existing ordinary left / right landing post
+# types (knife_chain_post_actions) from the current state, if one is legal; an owned landing re-chooses a clean middle.
 FOLLOW_LINKS=frozenset({"middle","land"})
 MIDDLE_PAD_U=.5          # forum_v2.FOCUS_M: the chosen landing box stays this far inside each near body edge
 MIDDLE_HORIZON_F=96      # hold-and-release rows rolled (the live flights land within 60 frames of the tail end)
@@ -751,18 +754,18 @@ FOLLOW_SCAN_F=12         # an owned route's per-tick scan: its next 12 frames (t
 def follow_scope(goal,target,close=False):
     """Task 183: a real bounce in a chain that a Clapper's own slam (CC_SLAM, the hammer whose responsibility the chain
     keeps) started, this Run's target being the goal's tactical target: the bounced one itself, or (seq 262) the other
-    one when the two were close at the bounce (close: no standable gap between them when this Run started, the person's
-    overlapping or close Clappers; L2's cross-Clapper continuation to a distant one stays as it was). A later bounce of
-    the chain (a seam strike on either) stays in scope, so every real bounce reads the gap again."""
+    one when the two were close at the bounce (close: bounce_close when this Run started, the person's overlapping or
+    close Clappers; seq 265 a narrow standable gap too; L2's cross-Clapper continuation to a distant one stays as it was).
+    A later bounce of the chain (a seam strike on either) stays in scope, so every real bounce reads the gap again."""
     return bool(goal is not None and not isinstance(goal,ReturnGoal) and goal.source_kind=="BOUNCE"
                 and goal.responsibility.family=="CC_SLAM" and goal.target==target and (target==goal.caster or close))
 
 
 def bounce_close(state,goal,h):
-    """Task 183 seq 262: at a BOUNCE Run's start, the two Clappers are close: no standable gap between their bodies."""
+    """Task 183 seq 262: at a BOUNCE Run's start, the two Clappers are close (close_pair; seq 265: a narrow standable gap
+    too, so L2's cross target after a bounce in such a pair still gets the follow-up and its re-read of the gap)."""
     if goal is None or goal.source_kind!="BOUNCE":return False
-    gap=two_gap(state,goal.caster)
-    return bool(gap is not None and not standable(gap,_hero_box(h)))
+    return close_pair(two_gap(state,goal.caster),_hero_box(h))
 
 
 def two_gap(state,caster):
@@ -795,6 +798,19 @@ def standable(gap,hero_box):
     return bool(gap is not None and hero_box is not None and gap.width>=hero_box[2]-hero_box[0]+2*MIDDLE_PAD_U)
 
 
+# seq 265: the person's close pair. Live 0ed5c779 3495 / 4156 / 4431 gaps 5.58 / 4.27 / 7.79 u and Sol seq 261's w13_331
+# windows 9.16 / 6.91 u are close; the cross-Clapper continuation's tested pairs (17 u and more) are not. The transfer's
+# own near / far split (rune_transfer STOMP dash_min_root 12.0: beyond it the approach dashes in).
+CLOSE_PAIR_GAP_U=12.
+
+
+def close_pair(gap,hero_box):
+    """Task 183 seq 265: the two Clappers are close: no standable gap between them (seq 262), or a standable one at most
+    CLOSE_PAIR_GAP_U wide. Only a close pair takes the seam strike on the target's inner side; a wider pair keeps the
+    follow-up as it was (its middle landing first, the strike anywhere witnessed, the ordinary landing)."""
+    return bool(gap is not None and (not standable(gap,hero_box) or gap.width<=CLOSE_PAIR_GAP_U))
+
+
 ROOT_ORDER_EPS_U=.01     # the two Clappers' roots closer than this: which one is on the left is unknown
 
 
@@ -817,21 +833,23 @@ def seam_bound(sign,roots,witness):
 
 
 def seam_geometry(state,goal,target,close=False):
-    """Task 183: no standable gap: where the existing witnessed down-slash goes, on the TARGET's inner side (the side facing
-    the other Clapper). sign (seq 264): from the two real ROOTS' order (bodies overlapping deeply can swap their centres'
-    order); roots within ROOT_ORDER_EPS_U: unknown (0), no seam strike row at all. aim: the x it is aimed from, next to the
-    seam: her centre her half width plus MIDDLE_PAD_U clear of the other body's near edge, kept SEAM_INSET_U inside the
-    target body (seq 262: aimed at the seam itself she came down on the other body; SEAM_TOL_U more, so stopping short of
-    the aim still keeps MIDDLE_PAD_U); body edges, never the order. The inner bound itself (seq 263/264) is read per strike
-    row at its own first contact index (seam_bound): her x there must lie on the inner side of the target's supported
-    root(s) and of the hit witness's centre; a row that would strike it from the outer side first is no seam strike
-    (bound here: the current frame's, for the record). The person: a hit from the inner side turns it to face inward, so
-    its evade may go outward (observed, never assumed). The target is L2's (the bounced one, or the other one in its
-    cross-Clapper continuation); no search for another side. None outside the follow-up scope or with a standable gap (the
-    middle decides)."""
+    """Task 183: where the existing witnessed down-slash goes when she cannot land between the two now, on the TARGET's inner
+    side (the side facing the other Clapper). sign (seq 264): from the two real ROOTS' order (bodies overlapping deeply can
+    swap their centres' order); roots within ROOT_ORDER_EPS_U: unknown (0), no seam strike row at all. aim: the x it is
+    aimed from, next to the seam: her centre her half width plus MIDDLE_PAD_U clear of the other body's near edge, kept
+    SEAM_INSET_U inside the target body (seq 262: aimed at the seam itself she came down on the other body; SEAM_TOL_U more,
+    so stopping short of the aim still keeps MIDDLE_PAD_U); body edges, never the order. The inner bound itself (seq
+    263/264) is read per strike row at its own first contact index (seam_bound): her x there must lie on the inner side of
+    the target's supported root(s) and of the hit witness's centre; a row that would strike it from the outer side first is
+    no seam strike (bound here: the current frame's, for the record). The person: a hit from the inner side turns it to face
+    inward, so its evade may go outward (observed, never assumed). The target is L2's (the bounced one, or the other one in
+    its cross-Clapper continuation); no search for another side. seq 265 (the person: go to the middle whether or not there
+    is room): a close pair's standable gap too (close_pair), its aim then next to the target's near edge; the follow-up
+    takes a clean middle landing first whenever one exists (NativeManualAirChain._follow_decide), this is for the ticks it
+    does not. None outside the follow-up scope or for a wider pair."""
     if not follow_scope(goal,target,close):return None
     gap=two_gap(state,goal.caster);hb=_hero_box(state.get("hero"))
-    if gap is None or hb is None or standable(gap,hb) or target not in (gap.caster,gap.other):return None
+    if gap is None or hb is None or not close_pair(gap,hb) or target not in (gap.caster,gap.other):return None
     tb,nb=(gap.bounced,gap.other_body) if target==gap.caster else (gap.other_body,gap.bounced)
     other=gap.other if target==gap.caster else gap.caster
     root,oroot=_root(state,target),_root(state,other)
@@ -1270,7 +1288,7 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None):
+            idle_evidence=None,follow_release=False):
     """One observed-distance recipe and a two-frame external path.
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
@@ -1278,6 +1296,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     defer_jump remains for offline callers; neither cancels an existing sprint.
     idle_evidence (Task 179 #317): the native owner's per-Clapper Idle instance records; the strike witness reads the
     target's (idle_time_of; a hit since the instance's entry: no witness).
+    follow_release (Task 183 seq 265): an owned bounce follow-up route (a FOLLOW_LINKS link) is released to the air link
+    this tick: the seam approach and its witnessed inner down-slash, the route itself dropped.
     """
     h=state.get("hero") or {};es=clappers(state);active=runner.run if runner.run is not None and runner.run.chain==PROGRAM else None
     approach_only=bool(active.v.get("_approach_only")) if active is not None else approach_only
@@ -1324,13 +1344,14 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         if active.v["iid"]!=target:return None
         p=TransferPlan(**{k:active.v[k] for k in TransferPlan.__dataclass_fields__ if k in active.v},origin=state["f"],entry_k=int(round((game-active.v["ta"])*60.)))
         link=active.link
+        if follow_release and link in FOLLOW_LINKS:link="air"   # Task 183 seq 265: the seam approach takes over the route
     if bounce_entry and target==p.caster and link!="strike":
         side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
     close=bool(active.v.get("follow_close")) if active is not None else bounce_close(state,goal,h)
     seam=None
     if bounce_entry and link!="strike" and not ground:
-        seam=seam_geometry(state,goal,target,close)    # Task 183: no standable gap: the target's inner side by the seam
+        seam=seam_geometry(state,goal,target,close)    # Task 183: the target's inner side by the seam (seq 265: a close pair)
         # seq 264: roots in the same place (side unknown): no aim, the original approach side stays and no seam row
         if seam is not None and seam.aim is not None:p=replace(p,side=aim_side(float(hp[0]),seam.aim))
     landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
@@ -1393,6 +1414,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
     variables.update(p.variables());variables["air_entry"]=air_entry
+    if follow_release:variables["follow"]=None
     variables["follow_close"]=close   # Task 183 seq 262: the two were close when this Run started (a BOUNCE Run)
     # Task 183 seq 263/264: this tick's inner-side condition for a new seam strike row (None: not a seam tick): the
     # target's observed root, the inner direction from the roots' order (0 unknown: every row turned down), the aim;
