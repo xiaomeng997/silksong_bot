@@ -1397,9 +1397,10 @@ class NativeManualAirChain(NativeChainB2):
                 v=draft.run.v;row=v.get("row") if draft.run.link=="strike" else None
                 self._note("transfer_follow_seam",frame=f,lo=gap.lo,hi=gap.hi,seam=gap.seam,side=int(v.get("side") or 0),
                            link=draft.run.link,mask=int(made[3]),target_frame=f+2,inner=v.get("seam_inner"),
-                           strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","approach_direction")},
+                           strike=None if not isinstance(row,dict) else {k:row.get(k) for k in ("contact_frame","contact_x","inner_bound","approach_direction")},
                            outer_rejected=v.get("seam_rejects"),hero_x=.5*(hb[0]+hb[2]),
-                           basis="no standable gap: the existing witnessed down-slash, its first contact on the target's inner side")
+                           basis="no standable gap: the existing witnessed down-slash, its first contact on the target's inner side "
+                                 "(roots' order; bound read at the row's own contact index)")
             return False,None
         try:
             geo=B2Geometry(forecast,f,plan.move,current[2])

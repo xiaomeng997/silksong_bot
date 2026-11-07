@@ -335,10 +335,11 @@ def test_seam_strike_turns_down_a_row_that_first_meets_the_outer_side(monkeypatc
     log = bout.run(12)
     seam = [e for e in bout.notes('transfer_follow_seam')]
     first = seam[0]
-    bound, sign, aim = first['inner']
-    assert (bound, sign) == ((24.1, 1) if mirror else (36.86, -1))
+    root, sign, aim = first['inner']
+    assert (root, sign) == ((24.1, 1) if mirror else (36.86, -1))
     assert first['strike'] is None and first['outer_rejected']
-    assert all((r['contact_x'] - bound) * sign < 0 for e in seam for r in e['outer_rejected'] or ())
+    assert all(r['bound'] == root for r in first['outer_rejected'])           # a still body: its root (centre outside)
+    assert all((r['contact_x'] - r['bound']) * sign < 0 for e in seam for r in e['outer_rejected'] or ())
     if not mirror:
         assert any(r['contact_frame'] == 2989 and abs(r['contact_x'] - 38.155) < 1e-3 for r in first['outer_rejected'])
     inward = B['R'] if mirror else B['L']
@@ -353,10 +354,93 @@ def test_seam_strike_on_the_inner_side_still_goes(monkeypatch, mirror):
     bout = _seam_bout(monkeypatch, mirror, 24.21 if mirror else 36.75)
     offer = bout.tick()
     note = bout.notes('transfer_follow_seam')[0]
-    bound, sign, aim = note['inner']
+    root, sign, aim = note['inner']
+    strike = note['strike']
     assert offer is not None and offer.draft.run.link == 'strike' and note['link'] == 'strike'
-    assert note['strike']['contact_frame'] == F0 + 6 and (note['strike']['contact_x'] - bound) * sign >= 0
+    assert strike['contact_frame'] == F0 + 6 and strike['inner_bound'] == root and (strike['contact_x'] - root) * sign >= 0
     assert note['mask'] == offer.mask and note['target_frame'] == F0 + 2 and not note['outer_rejected']
+
+
+MIRROR_X = 60.96   # the seam fixtures' mirror: x -> 60.96 - x (36.86 <-> 24.1, 33.5 <-> 27.46)
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_seam_bound_of_a_walking_target_is_read_at_the_rows_contact_index(monkeypatch, mirror):
+    # Sol seq 264 item 1: the right (bounced) one walks at -8 u/s backing off from her (fitted Walk pose from t 0). The old
+    # bound took its current root 36.86, and the D+L row's first contact (2989, x 36.815) passed it. The same row's own
+    # WalkSupport roots at that contact index are 35.90..36.22: she is outside every one of them, so the row is turned down,
+    # she keeps the original approach and the original step gate hands back (responsibility kept).
+    from ssbot.combat import pogo_model as PM
+    m = (lambda x: MIRROR_X - x) if mirror else (lambda x: x)
+    if mirror:
+        bout = Bout(monkeypatch, bounced=(8, m(36.86), -1), other=(7, m(33.5), -1), hero=(m(37.31), 9.25, -7.0),
+                    link='air', tail_done=True)
+    else:
+        bout = Bout(monkeypatch, other=(7, 33.5, 1), hero=(37.31, 9.25, -7.0), link='air', tail_done=True)
+    fit_pose(bout.ents[1], state='Walk', t=0.)
+    bout.ents[1]['vel'] = [8. if mirror else -8., 0.]
+    s = bout.state(bout.sim())
+    support = T.walk_body_support(bout.ents[1], 1 + 3 + PM.ACTIVE[1], s['hero'])
+    roots = support.x + support.step * np.asarray(support.info['steps'][6], float)       # roll index 6 = frame 2989
+    assert np.allclose(sorted(roots), sorted([m(35.90), m(36.22)]))
+    log = bout.run(12)
+    seam = bout.notes('transfer_follow_seam')
+    first = seam[0]
+    root, sign, aim = first['inner']
+    assert (root, sign) == (m(36.86), 1 if mirror else -1) and first['strike'] is None
+    row = next(r for r in first['outer_rejected'] if r['contact_frame'] == F0 + 6 and r['direction'] == sign)
+    assert abs(row['contact_x'] - m(36.815)) < 1e-3 and abs(row['bound'] - m(35.90)) < 1e-9
+    assert (row['contact_x'] - root) * sign >= 0                     # the old current-root bound let this row through
+    assert all((r['contact_x'] - r['bound']) * sign < 0 for e in seam for r in e['outer_rejected'] or ())
+    sent = [r for r in log if r['offer'] is not None]
+    assert sent and all(r['offer'].draft.run.link == 'air' and not r['mask'] & B['A'] for r in sent)   # no seam strike
+    assert bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_seam_side_follows_the_real_roots_when_facing_bodies_overlap_deeply(monkeypatch, mirror):
+    # Sol seq 264 item 2: facing each other and overlapping by 3.042 u, the right one's (root 36.86, facing left) body centre
+    # 36.4045 lies LEFT of the left one's (root 36.50, facing right) 36.9555: the centres' order made its outer side the
+    # inner one. The roots decide the side; body edges still give the gap and the contact geometry. Only the direction is
+    # checked here: no room is claimed, the original gates stay (the step gate hands back on the other body).
+    m = (lambda x: MIRROR_X - x) if mirror else (lambda x: x)
+    bout = Bout(monkeypatch, bounced=(8, m(36.86), 1 if mirror else -1), other=(7, m(36.50), -1 if mirror else 1),
+                hero=(m(36.0), 9.25, -7.0), link='air', tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    fit_pose(bout.ents[1])
+    tb, ob = T.body_box(bout.ents[1]), T.body_box(bout.ents[0])
+    centre, other_centre = .5 * (tb[0] + tb[2]), .5 * (ob[0] + ob[2])
+    assert abs(centre - m(36.4045)) < 1e-6 and abs(other_centre - m(36.9555)) < 1e-6
+    assert abs(min(tb[2], ob[2]) - max(tb[0], ob[0]) - 3.042) < 1e-6
+    seam = T.seam_geometry(bout.state(bout.sim()), bout.goal, 8)
+    sign = 1 if mirror else -1                                        # the right one by its root: inner = its left
+    assert seam.sign == sign and (centre - other_centre) * sign > 0   # the centres' order says the opposite
+    assert abs(seam.bound - m(36.4045)) < 1e-6                        # inner of its root and its body centre
+    bout.run(12)
+    note = bout.notes('transfer_follow_seam')[0]
+    assert note['inner'][:2] == [m(36.86), sign]
+    out = [r for r in note['outer_rejected'] if r['direction'] == -sign]
+    assert out and all((r['contact_x'] - r['bound']) * sign < 0 and abs(r['bound'] - m(36.4045)) < 1e-6 for r in out)
+    assert note['strike'] is None or (note['strike']['contact_x'] - note['strike']['inner_bound']) * sign >= 0
+    assert bout.notes('b2_recovery') and len(bout.n._failure_exposures) == 1
+
+
+def test_seam_side_unknown_when_the_roots_coincide_turns_every_row_down(monkeypatch):
+    # roots 0.005 u apart (within ROOT_ORDER_EPS_U): which one is on the left is unknown. No aim, no seam strike row: she is
+    # over the target right of both roots (a guessed order would have let a row strike here); the original approach stays
+    bout = Bout(monkeypatch, bounced=(8, 36.86, -1), other=(7, 36.865, 1), hero=(37.5, 9.25, -7.0), link='air',
+                tail_done=True)
+    bout.ents[1]['fsms'][0]['t'] = 0.
+    fit_pose(bout.ents[1])
+    seam = T.seam_geometry(bout.state(bout.sim()), bout.goal, 8)
+    assert seam.sign == 0 and seam.aim is None and seam.bound is None
+    log = bout.run(12)
+    notes = bout.notes('transfer_follow_seam')
+    assert notes[0]['inner'] == [36.86, 0, None] and notes[0]['outer_rejected']
+    assert all(r['bound'] is None for e in notes for r in e['outer_rejected'] or ())
+    assert all(e['strike'] is None for e in notes)
+    sent = [r for r in log if r['offer'] is not None]
+    assert sent and all(r['offer'].draft.run.link == 'air' and not r['mask'] & B['A'] for r in sent)
 
 
 def test_tail_and_sent_strike_keep_their_ownership(monkeypatch):
