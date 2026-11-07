@@ -45,6 +45,10 @@ Two Clappers (task 1v1 SP9a S1, SSBOT_FORUM_TWO_CHASE, combat.two_play; EvadeCha
 L2 target the policy passes, else the nearer one) is chased the same way, the slash never pressed when it would meet
 the other one's body (the switch answer 2a: B is free during F's slide and decides at once when hit, 19 / 19); one
 live Clapper chases only with one=True (SSBOT_FORUM_EVADE_CHASE).
+The distance brake over its body (Task 179 seq 259, live w13_task182 2583-2588, 2 HP): "no key" stops her approach, but
+falling in the air over its body it only holds her there: she stays over a body that slides at 0.25 u a frame and stands
+up again during the slide. On such a tick the policy's move away from it, when its key latches, goes out and the run
+ends (yields_brake_to). Rising, in front of the body, on the ground or with any other mask the brake stays.
 
     ec = EvadeChase()                                   # per episode: ec.reset()
     m = ec.step(f, s, ground, accepting, latch)         # the mask for frame f + 2, or None (the planner decides)
@@ -75,6 +79,7 @@ WALK_U = _sp.WALK_U          # u per frame: her run (and her air speed with a ke
 EV_F = 21                    # Evade Scuttle's frames (0.35 s; SP6 A/B 20-22)
 EV_V = 0.25                  # its slide per frame (15 u/s; 5.28 u in 21 frames)
 BODY_FRONT, BODY_BACK = _sp.BODY_FRONT, _sp.BODY_BACK
+BODY_TOP = 6.92              # its standing body top (the collider's; the slide crouches to 6.2 for 3 frames, then stands)
 SLASH_X = _sp.SLASH_X
 DASH_V, DASH_F = 28.0, 7     # the ground dash: u/s, the frames it moves (cast_stab: 3.27 u; live 3.36)
 NO_ATK_CLIPS = ("Dash", "Sprint", "Skid")
@@ -202,6 +207,7 @@ class EvadeChase:
         self.why_not: dict = {}
         self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
         self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the chases not started for it
+        self._over_away: int | None = None # this tick's 0 is the brake with her falling on its body: the key away from it
 
     def reset(self) -> None:
         self.run = None
@@ -211,6 +217,7 @@ class EvadeChase:
         self.why_not = {}
         self._runes = {}
         self.guard_f = []
+        self._over_away = None
 
     def observe(self, f: int, s: dict) -> None:
         """Every tick (the policy calls it whichever script runs): the rune circles' first frame and lit state."""
@@ -325,6 +332,7 @@ class EvadeChase:
         """The mask for frame f + 2 while the chase runs, else None. latch: m -> the key mask the oracle's hold filter
         latches at f + 2 when m is sent for it (None: m itself); focus: L2's target (two Clappers); block: why no chase
         may run now (SP10c TWO_JUMPHIT: the other one's landing), None: no block."""
+        self._over_away = None
         if block is not None:
             if self.run is not None:
                 self._close("abort", block)
@@ -493,11 +501,34 @@ class EvadeChase:
                                    "n": n, "air": True}
                     return toward | M_DASH
         if d - WALK_U < c.stop_u:
+            if self._falling_on_it(d, h, ground, accepting):
+                self._over_away = away
             return 0
         if room < WALK_U * (SEND_AHEAD + 1):
             r.guard_stops += 1
             return 0                                  # SSBOT_FORUM_TWO_GUARD: the next step meets the other's span
         return toward
+
+    @staticmethod
+    def _falling_on_it(d: float, h: dict, ground: bool, accepting: bool) -> bool:
+        """She is in the air, her box over its body on the mask's frame (d: her x in front of its centre there), and comes
+        down to its standing top before its slide has taken its front edge past her box."""
+        box, vel = h.get("box"), h.get("vel") or ()
+        if ground or not accepting or not box or len(box) != 4 or len(vel) < 2 or float(vel[1]) >= 0.0:
+            return False
+        half = (float(box[2]) - float(box[0])) / 2.0
+        reach = BODY_FRONT + half
+        if not -(BODY_BACK + half) < d < reach:
+            return False
+        frames = SEND_AHEAD + (reach - d) / EV_V
+        return float(box[1]) + float(vel[1]) * frames / 60.0 < BODY_TOP
+
+    def yields_brake_to(self, mask: int, latch=None) -> bool:
+        """This tick's 0 is the distance brake with her falling on its body, and mask moves her away from it with the key
+        latching on the mask's frame: the policy sends mask and ends the run. Any other 0 or mask: False, the brake holds."""
+        away = self._over_away
+        return (away is not None and int(mask) & (M_L | M_R) == away
+                and (latch is None or bool(int(latch(int(mask))) & away)))
 
     def _slash_ok(self, r: Chase, k: int, s: dict, e: dict, d: float, cx: float, tm: dict, clip: str, prev: int,
                   away: int) -> bool:

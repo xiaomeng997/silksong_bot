@@ -351,6 +351,17 @@ def after_episode(link, enc, instance: int, d: dict) -> None:
                   f"{_describe(link.state)}", flush=True)
 
 
+def only_episode_really_quit(a, k: int, d: dict, link) -> bool:
+    """A --engineering-probe worker of one episode, that episode done (k counts it), with a real quit seen on the main menu:
+    nothing follows, so after_episode's way back into the slot (a bench load the window is closed on) has no use and the
+    worker goes straight to its cleanup. Every other worker and ending (more episodes, a formal run, a harness failure, a
+    quit not seen on the title) keeps after_episode. It saves no cold start: the next worker starts from its own game."""
+    from ssbot.train import recovery
+    rq = (d.get("policy") or {}).get("real_quit") or {}
+    return (bool(getattr(a, "engineering_probe", False)) and a.episodes == 1 and k >= a.episodes
+            and d.get("outcome") == "QUIT" and rq.get("main_menu") is True and recovery.where(link.state) == "title")
+
+
 def set_time_scale(link, scale: float, instance: int, wait_s: float = 5.0, quiet: bool = False) -> float | None:
     """Oracle time.scale (training copy only). Above 1 it needs the oracle of 06a7c2b (through DebugMod's TimeScale):
     the deployed one before it clamps to 1, so the run stops rather than collect at the wrong speed. Time.timeScale
@@ -895,7 +906,11 @@ def worker(a: argparse.Namespace) -> int:
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
-            after_episode(link, enc, a.instance, d)
+            if only_episode_really_quit(a, k, d, link):
+                print(f"[i{a.instance}] the only engineering episode really quit to the main menu: no way back into the "
+                      f"slot, straight to the cleanup", flush=True)
+            else:
+                after_episode(link, enc, a.instance, d)
             if b2_stop is not None:
                 print(f"[i{a.instance}] B2 batch stopped; evidence retained: {b2_stop}", flush=True)
                 break

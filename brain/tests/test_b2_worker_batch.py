@@ -252,6 +252,90 @@ def test_worker_input_preflight_failure_retains_raw_receipt_and_cleans_without_r
     assert rig.receipts()[0]["stage"]=="input_path_preflight"
 
 
+REAL_AFTER_EPISODE=C.after_episode
+
+
+def quit_rig(tmp_path,monkeypatch,where="title",main_menu=True,outcome="QUIT"):
+    """Rig with the real after_episode and an episode that ends as a real quit, the link on `where`."""
+    import ssbot.train.episode as episode
+    import ssbot.train.recovery as recovery
+    rig=Rig(tmp_path,monkeypatch)
+    monkeypatch.setattr(C,"after_episode",REAL_AFTER_EPISODE)
+    states={"title":{"game":{"gs":recovery.GS_MAIN_MENU,"menu":recovery.MENU_MAIN,"scene":"Menu_Title"}},
+            "no_game":{"game":None},"quitting":{"game":{"gs":5,"menu":10,"scene":"Quit_To_Menu"}}}
+    def run_episode(link,enc,tap,pol,cfg,rec):
+        rig.attempts+=1;rig.events.append("episode");pol.episode+=1
+        rec.outcome=outcome;rec.ingame_s=1.
+        rec.policy={"real_quit":{"armed":True,"main_menu":main_menu,"steps":[[0.1,"done",""]]}}
+        link.state={"f":2855,**states[where],"hero":None}
+    monkeypatch.setattr(episode,"run_episode",run_episode)
+    return rig
+
+
+def after_start(rig):
+    """back_into_slot calls after the worker's own one at its start."""
+    return rig.events.count("back_into_slot")-1
+
+
+def test_the_only_engineering_episode_really_quit_goes_straight_to_the_real_cleanup(tmp_path,monkeypatch,capsys):
+    rig=quit_rig(tmp_path,monkeypatch)
+    assert rig.run(episodes=1,engineering_probe=True)==0
+    assert after_start(rig)==0
+    assert "straight to the cleanup" in capsys.readouterr().out
+    # the cleanup itself is untouched: every owned resource closed, after the attempt was written
+    assert rig.events.index("episode")<rig.events.index("policy.flush")<rig.events.index("recorder.close")<rig.events.index("ipc.close")
+    receipt=rig.receipts()[0];assert receipt["complete"] and receipt["resources"]["ipc"]=="pass" and receipt["resources"]["recorder"]=="pass"
+    row=json.loads((tmp_path/"attempts_i0.jsonl").read_text().splitlines()[-1])
+    assert row["outcome"]=="QUIT" and row["episode"]==0
+
+
+def test_a_real_quit_with_a_next_episode_still_returns_to_the_slot(tmp_path,monkeypatch):
+    rig=quit_rig(tmp_path,monkeypatch)
+    assert rig.run(episodes=2,engineering_probe=True)==0
+    assert rig.attempts==2 and after_start(rig)==2     # also after the last of many: its reset is not this change's
+    assert rig.events.index("back_into_slot",1)<rig.events.index("ready",rig.events.index("ready")+1)
+    assert rig.receipts()[0]["complete"]
+
+
+@pytest.mark.parametrize("kw,why",[({"episodes":1},"a formal run")])
+def test_a_formal_single_episode_keeps_the_return(tmp_path,monkeypatch,kw,why):
+    rig=quit_rig(tmp_path,monkeypatch)
+    assert rig.run(**kw)==0
+    assert after_start(rig)==1,why
+
+
+@pytest.mark.parametrize("where",["no_game","quitting"])
+def test_a_quit_not_seen_on_the_title_keeps_the_return(tmp_path,monkeypatch,where):
+    rig=quit_rig(tmp_path,monkeypatch,where=where)
+    assert rig.run(episodes=1,engineering_probe=True)==0
+    assert after_start(rig)==1
+
+
+def test_an_unconfirmed_quit_or_a_harness_failure_keeps_after_episode(tmp_path,monkeypatch):
+    calls=[]
+    rig=quit_rig(tmp_path,monkeypatch,main_menu=False)
+    monkeypatch.setattr(C,"after_harness_fail",lambda *a:calls.append("harness") or None)
+    assert rig.run(episodes=1,engineering_probe=True)==0
+    assert after_start(rig)==1          # the old rule: the quit's steps were seen, back into the slot
+    assert not calls
+    assert not C.only_episode_really_quit(rig.args,1,{"outcome":"HARNESS_FAIL","policy":{"real_quit":{"main_menu":True}}},rig.links[0])
+    assert not C.only_episode_really_quit(rig.args,0,{"outcome":"QUIT","policy":{"real_quit":{"main_menu":True}}},rig.links[0])
+
+
+def test_a_stop_in_the_only_episode_keeps_its_record_without_the_return(tmp_path,monkeypatch):
+    rig=quit_rig(tmp_path,monkeypatch)
+    import ssbot.train.episode as episode
+    quit_episode=episode.run_episode
+    def run_episode(link,enc,tap,pol,cfg,rec):
+        quit_episode(link,enc,tap,pol,cfg,rec)
+        with pytest.raises(LearningStop):pol.chain_native.budget.observe(episode=pol.episode,frame=1001,arm="B",hp_loss=2)
+    monkeypatch.setattr(episode,"run_episode",run_episode)
+    assert rig.run(episodes=1,engineering_probe=True)==0
+    row=json.loads((tmp_path/"attempts_i0.jsonl").read_text().splitlines()[-1])
+    assert row["b2_learning_stop"] and rig.budget.state["stop"] is not None
+    assert after_start(rig)==0 and rig.receipts()[0]["complete"] and rig.links[0].closed
+
+
 @pytest.mark.parametrize("arm", ["A","B"])
 def test_both_arms_query_actual_worker_before_policy_and_action_preparation(tmp_path,monkeypatch,arm):
     rig=Rig(tmp_path,monkeypatch,arm=arm)

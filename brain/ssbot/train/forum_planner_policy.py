@@ -1485,6 +1485,12 @@ class ForumPlannerPolicy(PlannerPolicy):
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None
+            if ch == 0 and self.evade_chase.yields_brake_to(mask, latch_c):
+                # Task 179 seq 259: the distance brake holds her over the body she falls on; the planner's move away goes
+                # out and the chase ends (it would pull her back toward it the moment she is far enough)
+                self.evade_chase.abort("air escape")
+                ch = None
+                self.counts["evade_air_escape"] += 1
             if ch is not None:
                 mask = play = ch
                 own = "chase"
