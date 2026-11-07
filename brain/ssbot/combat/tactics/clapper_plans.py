@@ -1067,10 +1067,12 @@ class PlanRunner:
         attack (its own conditions still decide when it is offered)."""
         m = self.moves.get(plan.instance[0]) or {}
         s = next((v for v in sc.subjects if v.iid == plan.instance[0]), None)
-        due = dict(family=plan.get("family"), start_t=m.get("antic_at", plan.made_t), near=True, iid=plan.instance[0], end_t=sc.t, end_hx=sc.hx,
+        start = m.get("antic_at")
+        if start is None:
+            start = plan.made_t                   # first seen in its flight: no antic clock
+        due = dict(family=plan.get("family"), start_t=start, near=True, iid=plan.instance[0], end_t=sc.t, end_hx=sc.hx,
                    end_state=None if s is None else s.state, offered=False)
         if type(sc.frame) is int:
-            start = m.get("antic_at", plan.made_t)
             due.update(start_f=sc.frame - int(round((sc.t - start) * 60.)), end_f=sc.frame)
         sc.mem["back"] = due
         self.notes.append(dict(what="return kept", family=due["family"], reason=self.exec.reason))
@@ -1361,7 +1363,7 @@ class PlanRunner:
             return "blocked", "her hand-back is unknown at the take-off"
         from .gauntlet import JT
         land = m["land"]
-        take_t = m.get("air_at", t)
+        take_t = t if m.get("air_at") is None else m["air_at"]
         land_t = take_t + FLIGHT_S
         back = (m["x0"] - sc.geo["xa"] if f > 0 else sc.geo["xb"] - m["x0"]) if (sc.geo is not None and m.get("x0") is not None) else math.inf
         wall_bound = back < JB.CFG["push_from_u"]
@@ -1417,7 +1419,7 @@ class PlanRunner:
             return "blocked", "landing or bodies unknown at the take-off"
         if self.hand is None or not self.hand.known:
             return "blocked", "her hand-back is unknown at the take-off"
-        take_t = m.get("air_at", t)
+        take_t = t if m.get("air_at") is None else m["air_at"]
         land_t = take_t + FLIGHT_S
         if selected == "lure":
             S = float(o.pos[0]) + out * sc.tac.rules.face_u

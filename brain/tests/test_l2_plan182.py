@@ -942,6 +942,19 @@ def test_landed_in_the_gap_the_over_followup_is_done_and_elsewhere_the_return_is
     go_(tac, ws, fc)
     assert ex.status == "complete" and ex.plan is None and tac._clapper_priority.get("back") is None
 
+def test_a_plan_first_seen_in_flight_keeps_its_return_too():
+    # no antic clock (first seen in its flight, the replay's k_out_back: this raised and decide swallowed it, the goal was lost)
+    plan = plan_of(request(J=body(1, 25., "Air", "CC_JUMP", facing=1), W=body(2, 28.), hx=26., stage="flight", antic_at=None, land=30., land_vx=5.45,
+                           air_at=0.))
+    runner = NS(moves={plan.instance[0]: dict(antic_at=None)}, notes=[], exec=NS(reason="landed_away"))
+    sc = NS(subjects=[], t=2., hx=40., frame=500, mem={})
+    CP.PlanRunner._keep_return(runner, sc, plan)
+    due = sc.mem["back"]
+    assert due["start_t"] == plan.made_t and due["iid"] == 1 and due["family"] == "CC_JUMP" and due["end_f"] == 500
+    assert due["start_f"] == 500 - round((2. - plan.made_t) * 60.)
+    assert runner.notes[-1]["what"] == "return kept"
+
+
 def test_the_way_back_goes_to_the_body_standing_nearer_by_the_observed_landing(monkeypatch):
     # left of both, the retreat done and the hazard over: the landing decides who is in front of her
     for land_past, want in ((False, 7), (True, 8)):
