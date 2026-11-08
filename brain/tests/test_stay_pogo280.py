@@ -210,22 +210,26 @@ def _scan(pl, seen):
 REAL = dict(deadline_ms=ForumConfig().deadline_ms, esc_deadline_ms=ForumConfig().esc_deadline_ms)   # production: 8 / 8 + 2 ms
 
 
-def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0, tail_extra=None, esc_extra=None, scan_ms=0.0):
+def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0, tail_extra=None, esc_extra=None, scan_ms=0.0,
+                real_gc=False):
     """A deterministic clock for the production deadlines (REAL): every perf_counter reads it and it moves only in the
     planner's costed calls - an escape batch (_escape_fail_v2), a hit branch, a tail check - by their ms; score_ms at
     _score_forum's entry, robust_ms in each _down_robust (the over_stay scan's contact kernel), tail_extra / esc_extra
     {n: ms} more in the tick's n-th tail check / escape batch (counted from 1 per tick); scan_ms per over_stay scan
     (_stay_scan), clk.scan_extra {n: ms} more in the tick's n-th. Garbage collections (forum_planner._gc_runs) are the clock's
     own count, clk.gc: one is counted inside each call (kind, n) of clk.gc_calls - kinds esc, hb, hbu (the uncapped hit
-    branches only), tail, scan, n counted from 1 per tick - so none happens unless a test puts it there. Returns its state:
-    log, the calls [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing recheck); ranked, the escape
-    check's order per tick (its first 16 rows); at, per tick the ms from the tick's start to the escape check's entry and to
-    the tick's end; passing, None (the real check) or the only rows that pass it (the others fail it once). clk's fields may
-    be changed between ticks."""
+    branches only), tail, scan, n counted from 1 per tick - so none happens unless a test puts it there; clk.sample_cost
+    {n: (ms, collected)}: the tick's n-th _gc_runs call itself takes ms (a collection inside the sample, counted if
+    collected - a stress: the real read allocates nothing). real_gc: _gc_runs left as it is (the test controls the real
+    collector). Returns its state: log, the calls [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing
+    recheck); ranked, the escape check's order per tick (its first 16 rows); at, per tick the ms from the tick's start to the
+    escape check's entry and to the tick's end; passing, None (the real check) or the only rows that pass it (the others
+    fail it once). clk's fields may be changed between ticks."""
     import time
     from ssbot.combat import forum_planner as fp
     now, clk = [1000.0], NS(log=[], ranked=[], at=[], passing=None, n_tail=0, n_esc=0, n_hb=0, n_hbu=0, n_scan=0, t0=0.0,
-                            scan_ms=scan_ms, scan_extra={}, gc_calls=set(), gc=0)
+                            scan_ms=scan_ms, scan_extra={}, gc_calls=set(), gc=0, sample_cost={}, n_sample=0, scan_at=[],
+                            gc_after_scan=False, read_gc=False)
     esc0, hb0, tail0 = fp.ForumPlanner._escape_fail_v2, fp.ForumPlanner._hit_branch, fp.ForumPlanner._tail_pick
     pick0, score0, tick0, rob0 = (fp.ForumPlanner._escape_pick, fp.ForumPlanner._score_forum, fp.ForumPlanner._ordinary_tick,
                                   fp._down_robust)
@@ -266,11 +270,28 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
         return out
 
     def scan(self, *a, **k):
+        clk.scan_at.append(ms())                      # (when each scan starts, from the tick's start)
         out = scan0(self, *a, **k)
         clk.n_scan += 1
         now[0] += (clk.scan_ms + clk.scan_extra.get(clk.n_scan, 0.0)) * 1e-3
         gc_in("scan", clk.n_scan)
+        clk.read_gc = clk.gc_after_scan               # gc_after_scan: a collection at the next clock read (after the call)
         return out
+
+    def perf_counter():
+        if clk.read_gc:
+            clk.read_gc = False
+            clk.gc += 1
+        return now[0]
+
+    def gc_runs():
+        clk.n_sample += 1
+        c = clk.sample_cost.get(clk.n_sample)
+        if c is not None:
+            now[0] += c[0] * 1e-3
+            if c[1]:
+                clk.gc += 1
+        return clk.gc
 
     def pick(self, *a, **k):
         clk.ranked.append([int(r) for r in a[6][:16]])
@@ -286,8 +307,9 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
         return rob0(*a)
 
     def tick(self, *a, **k):
-        clk.t0, clk.n_tail, clk.n_esc, clk.n_hb, clk.n_hbu, clk.n_scan = now[0], 0, 0, 0, 0, 0
+        clk.t0, clk.n_tail, clk.n_esc, clk.n_hb, clk.n_hbu, clk.n_scan, clk.n_sample = now[0], 0, 0, 0, 0, 0, 0
         clk.at.append({})
+        clk.scan_at = []
         out = tick0(self, *a, **k)
         clk.at[-1]["end"] = ms()
         return out
@@ -300,8 +322,9 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
     monkeypatch.setattr(fp.ForumPlanner, "_ordinary_tick", tick)
     monkeypatch.setattr(fp.ForumPlanner, "_stay_scan", scan)
     monkeypatch.setattr(fp, "_down_robust", robust)
-    monkeypatch.setattr(fp, "_gc_runs", lambda: clk.gc)
-    monkeypatch.setattr(time, "perf_counter", lambda: now[0])
+    if not real_gc:
+        monkeypatch.setattr(fp, "_gc_runs", gc_runs)
+    monkeypatch.setattr(time, "perf_counter", perf_counter)
     return clk
 
 
@@ -803,6 +826,145 @@ def test_a_collection_inside_a_promotion_step_raises_nothing(wparams, warena, mo
     before = {"escape": 0.0, "tail": 0.000425, "swing": 0.0001}[step]          # (tail: after the tick's own 0.4 ms check)
     took = {"escape": 0.0005, "tail": 0.0006, "swing": 0.0005}[step]
     assert est_c == pytest.approx(before) and est_n == pytest.approx(took)
+
+
+def test_the_collection_count_reads_without_allocating():
+    # Task 182 seq 285 (Sol: gc.get_stats() allocates a list and dicts, so the read itself could collect and hand back the count
+    # from before it): the count is read without allocating anything - ten reads leave tracemalloc's peak where it was
+    # (gc.get_stats builds a list and three dicts per read)
+    import tracemalloc
+    from ssbot.combat import forum_planner as fp
+    read = fp._gc_runs
+    read()
+    tracemalloc.start()
+    try:
+        base = tracemalloc.get_traced_memory()[0]
+        tracemalloc.reset_peak()
+        read(); read(); read(); read(); read(); read(); read(); read(); read(); read()   # noqa: E702
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak - base < 32, peak - base
+
+
+def test_the_collection_count_never_collects_near_the_threshold():
+    # Sol's check (CPython 3.13, threshold 700): with the young generation's count at 697-699 a read must not start a collection,
+    # so two reads agree and the count is not reset (the gc.get_stats read collected there and returned the count from before)
+    import gc
+    from ssbot.combat import forum_planner as fp
+    th, was = gc.get_threshold(), gc.isenabled()
+    gc.enable()
+    try:
+        gc.set_threshold(700, *th[1:])
+        for target in (690, 697, 698, 699):
+            gc.collect(0)
+            keep = []
+            while gc.get_count()[0] < target:
+                keep.append([])
+            a = fp._gc_runs()
+            b = fp._gc_runs()
+            c = gc.get_count()[0]
+            assert a == b and c >= target, (target, a, b, c)
+    finally:
+        gc.set_threshold(*th)
+        if not was:
+            gc.disable()
+
+
+@pytest.mark.parametrize("step", ["scan", "escape", "tail", "swing"])
+def test_sols_sample_takes_the_time_left_and_no_step_starts(wparams, warena, monkeypatch, step):
+    # Task 182 seq 285 (Sol): the formal budget (escape check in at 7.7 ms, 1.6 ms left; batch 0.3, hit branch 0.5, tail 0.4,
+    # scan 0.05 ms; estimates batch 0.3, tail 0.45). The collection count taken before a step (a stress: the real read
+    # allocates nothing, so it never collects) takes 2.45 ms - the scan's (the tick's 3rd count, Sol's case), the escape batch's
+    # (5th) or the tail check's (7th) - and so uses the time left: that step does not start (Sol: the scan started at 10.85
+    # ms), the tick sends its own row 21, mask 1048576, S = 0. The swing's hit branch (the swing fixture, its count the 5th)
+    # likewise with a 10 ms count. Each count is taken before the step's deadline check, and the final check still stands
+    if step == "swing":
+        clk = _cost_clock(monkeypatch, 2.0, 0.5, 1.0)
+        args = dict(x0=RX - 1.2, prefs_kw=dict(stance=RX - 7.0), swing_age=1, pre=lambda pl, a: setattr(pl, "stay_hb_s", 0.0001))
+        clk.sample_cost = {5: (10.0, True)}
+    else:
+        clk = _cost_clock(monkeypatch, 0.3, 0.5, 0.4, score_ms=6.7, scan_ms=0.05)
+        args = dict(x0=RX - 0.9, prefs_kw={}, swing_age=None, pre=lambda pl, a: [setattr(pl, k, v) for k, v in MEAS.items()])
+        clk.sample_cost = {{"scan": 3, "escape": 5, "tail": 7}[step]: (2.45, True)}
+    tick = lambda on: _tick(wparams, warena, monkeypatch, args["x0"], 1.5, -6.0, _prefs(on, **args["prefs_kw"]),
+                            swing_age=args["swing_age"], pre=args["pre"], **REAL)
+    sample_cost, clk.sample_cost = clk.sample_cost, {}
+    pl0, r0 = tick(False)
+    log0 = list(clk.log)
+    clk.log.clear()
+    clk.sample_cost = sample_cost
+    pl1, r1 = tick(True)
+    sp, more = pl1.last_info["stay_pogo"], clk.log[len(log0):]
+    assert not sp["promoted"]
+    _same_send(pl0, r0, pl1, r1)
+    if step != "swing":
+        assert (r1.idx, r1.mask, r1.S) == (21, 1048576, 0)
+    if step == "scan":
+        assert clk.scan_at == [] and sp["cut"] == "scan" and more == []
+    elif step == "escape":
+        assert clk.scan_at and sp["cut"] == "escape" and more == []
+    elif step == "tail":
+        assert sp["cut"] == "tail" and more == [("esc", sp["cands"])]
+    else:
+        assert sp["inflight_cut"] and not any(k_ == "hb" for k_, _ in more) and "inflight_unsafe" not in sp
+
+
+@pytest.mark.parametrize("case", ["plain", "collected_after", "collected_at_sample_entry", "collected_by_the_sample",
+                                  "collected_in_scan"])
+def test_a_collection_counts_only_inside_the_measured_call(wparams, warena, monkeypatch, case):
+    # Task 182 seq 285 (Sol: the count and the time must cover the same interval, so a collection outside the call cannot hide
+    # its measured slow work). The scan itself takes 2.45 ms, on the formal budget. plain: its estimate rises to 2.45 ms.
+    # collected_after: a collection right after the clock read that ends the measurement (where the c2aa40fa order - clock
+    # first, count second - met one still pending from the scan; the count now comes first, and one still pending runs at its
+    # entry, in the count and in the time) - outside the timed call, so not counted: still 2.45 ms. The real collector (off
+    # through the tick) at the count taken before the scan (the tick's 3rd): collected_at_sample_entry - one gen-0 collection
+    # runs before that count is read (as one due runs at the call's entry): in the start count, not counted, 2.45 ms;
+    # collected_by_the_sample - Sol's case: the collector on with gen 0 at 699 of a 700 threshold when that count is read, so a
+    # read that allocates collects inside itself (the c2aa40fa gc.get_stats() read did, and returned the count from before it:
+    # gc = [scan], 0.5 ms); the seq 285 read allocates nothing: no collection, 2.45 ms. collected_in_scan: inside the call -
+    # counted, the estimate stays 0.5 ms and the record names the scan
+    import gc
+    from ssbot.combat import forum_planner as fp
+    real = case in ("collected_at_sample_entry", "collected_by_the_sample")
+    clk = _cost_clock(monkeypatch, 0.3, 0.5, 0.4, score_ms=6.7, scan_ms=2.45, real_gc=real)
+    clk.gc_after_scan = case == "collected_after"
+    clk.gc_calls = {("scan", 1)} if case == "collected_in_scan" else set()
+    was, th = gc.isenabled(), gc.get_threshold()
+    if real:
+        read0, n, keep = fp._gc_runs, [0], []
+
+        def sample():
+            n[0] += 1
+            if n[0] != 3:                                   # the count before the scan (the tick's 3rd)
+                return read0()
+            gc.collect(0)
+            if case == "collected_at_sample_entry":
+                return read0()
+            gc.set_threshold(700, *th[1:])
+            gc.enable()
+            try:
+                while gc.get_count()[0] < 699:
+                    keep.append([])
+                return read0()
+            finally:
+                gc.disable()
+
+        monkeypatch.setattr(fp, "_gc_runs", sample)
+        gc.disable()
+    try:
+        pl, r = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True),
+                      pre=lambda pl, a: [setattr(pl, k, v) for k, v in dict(MEAS, stay_scan_s=0.0005).items()], **REAL)
+    finally:
+        gc.set_threshold(*th)
+        if real and was:
+            gc.enable()
+    sp = pl.last_info["stay_pogo"]
+    assert clk.scan_at and sp["cut"] == "escape" and r.idx == 21 and not sp["promoted"]
+    if case == "collected_in_scan":
+        assert pl.stay_scan_s == pytest.approx(0.0005) and sp["gc"] == ["scan"]
+    else:
+        assert pl.stay_scan_s == pytest.approx(0.00245) and "gc" not in sp
 
 
 def test_a_promoted_send_carries_its_own_escape_record(wparams, warena, monkeypatch):

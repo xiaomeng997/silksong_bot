@@ -735,10 +735,32 @@ def stay_cost(est: float, took: float, gc_ran: bool = False) -> float:
     return max(float(took), 0.5 * float(est) + 0.5 * float(took))
 
 
+def _gc_tally():
+    """Task 182 seq 285: the process's one count of finished garbage collections - a gc.callbacks hook adds 1 at each
+    collection's "stop" - installed once per process (a module run again, e.g. a test's copy, finds it by its mark)."""
+    for cb in gc.callbacks:
+        if getattr(cb, "ssbot_gc_tally", False):
+            return cb
+
+    def tally(phase, info):
+        if phase == "stop":
+            tally.n += 1
+
+    tally.n, tally.ssbot_gc_tally = 0, True
+    gc.callbacks.append(tally)
+    return tally
+
+
+_GC_TALLY = _gc_tally()
+
+
 def _gc_runs() -> int:
-    """Task 182 seq 284: the garbage collections this process has run (gc.get_stats: no clock, no callback); a change across
-    a measured call means one ran in it (stay_cost's gc_ran)."""
-    return sum(int(s["collections"]) for s in gc.get_stats())
+    """Task 182 seq 284 / 285: the garbage collections this process has run. Read without allocating (Sol seq 285:
+    gc.get_stats() built a list and dicts, so the read itself could collect and hand back the count from before it), so a
+    read never collects; a collection already due runs as the call starts, before the read. A measured call takes the count
+    first and the clock second at both ends (and its deadline check after both at its start): the counts and the time then
+    span the same interval, and a change means a collection ran inside it (stay_cost's gc_ran)."""
+    return _GC_TALLY.n
 
 
 @numba.njit(cache=True, parallel=True)
@@ -1484,7 +1506,8 @@ class ForumPlanner(Planner):
         # check is measured on the tick's own tail checks too (_ordinary_tick, after its check); the scan, never run before,
         # starts at 0.5 ms (every scan measured offline: 0.06-0.14 ms on E16-23, 0.5 on a process's first call; Sol's formal
         # P <= 0.06); a swing's hit branch keeps 3 ms (the tick measures no uncapped branch of its own). Seq 284: a call a
-        # garbage collection ran in never raises its estimate (stay_cost's gc_ran, _gc_runs); repeated slow calls still do
+        # garbage collection ran in never raises its estimate (stay_cost's gc_ran, _gc_runs); repeated slow calls still do.
+        # Seq 285: the collection count is read without allocating, and each step checks its deadline after taking it
         self.stay_scan_s = 0.0005
         self.stay_hb_s = 0.003
         self.stay_esc_s = 0.0
@@ -5281,16 +5304,19 @@ class ForumPlanner(Planner):
                 a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
-                gcs_, tt_ = _gc_runs(), time.perf_counter()
+                gcs_ = _gc_runs()
+                tt_ = time.perf_counter()
                 if knife_tails:
                     from ssbot.combat.forum_knife_plan import pick_tail
                     i, tail_ok = pick_tail(self, f, r1, hold_end, ranked, P + T, i, knife_tails)
                 else:
                     i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
-                # Task 182 seq 283 / 284: the over_stay promotion's tail estimate, measured on this check too (after it: the
-                # check, its result and its time are the tick's own as before; a collection inside it raises nothing)
+                # Task 182 seq 283 - 285: the over_stay promotion's tail estimate, measured on this check too (after it: the
+                # check, its result and its time are the tick's own as before; a collection inside it raises nothing; the
+                # count before the clock at both ends, _gc_runs)
+                gce_ = _gc_runs()
                 took_s = time.perf_counter() - tt_
-                self.stay_tail_s = stay_cost(self.stay_tail_s, took_s, _gc_runs() != gcs_)
+                self.stay_tail_s = stay_cost(self.stay_tail_s, took_s, gce_ != gcs_)
             elif carried:
                 tail_ok = True
             if n_chain and C0 <= i < C0 + n_chain and (esc_unsafe or (cfg.tail_k > 0 and tail_ok is not True)):
@@ -5342,15 +5368,21 @@ class ForumPlanner(Planner):
                                     round(tail_s * 1e3, 3)]           # ms: scan, escape batch, tail check
                 if forced or not v2 or native_no_fallback or "native_late_reject" in (esc_info or {}):
                     stay_info["skip"] = "forced" if forced else ("v2_off" if not v2 else "chain_reject")
-                elif not in_time(self.stay_scan_s + tail_s):
-                    stay_info["cut"] = "scan"
                 else:
-                    gcs_, tc_ = _gc_runs(), time.perf_counter()
-                    stay_scan = self._stay_scan(sc, r1, start, prefs, sp_t)
-                    took_s, gcr_ = time.perf_counter() - tc_, _gc_runs() != gcs_
-                    self.stay_scan_s = stay_cost(self.stay_scan_s, took_s, gcr_)
-                    if gcr_:
-                        stay_info.setdefault("gc", []).append("scan")
+                    # seq 285 (Sol): each step takes the collection count, then the clock, then checks its deadline, so a
+                    # step never starts on time the taking used; the count before the clock at its end too (_gc_runs)
+                    gcs_ = _gc_runs()
+                    tc_ = time.perf_counter()
+                    if not in_time(self.stay_scan_s + tail_s):
+                        stay_info["cut"] = "scan"
+                    else:
+                        stay_scan = self._stay_scan(sc, r1, start, prefs, sp_t)
+                        gce_ = _gc_runs()
+                        took_s = time.perf_counter() - tc_
+                        gcr_ = gce_ != gcs_
+                        self.stay_scan_s = stay_cost(self.stay_scan_s, took_s, gcr_)
+                        if gcr_:
+                            stay_info.setdefault("gc", []).append("scan")
                 if stay_scan is not None:
                     stay_m, J_stay = stay_scan["stay_pogo"], stay_scan["J_stay"]
                     plain = np.zeros(N, bool)
@@ -5372,14 +5404,18 @@ class ForumPlanner(Planner):
                         infl = stay_scan["inflight_down"]
                         if len(cands) and infl[cands].any():
                             ri = cands[infl[cands]]
+                            sc_p = dict(sc, first_f=stay_scan["stay_ff"], first_t=stay_scan["stay_ft"],
+                                        first_k=stay_scan["stay_fk"], first_face=stay_scan["stay_face"])
+                            bud_p = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": budget["react_cache"]}
+                            evb_p = self._ds_evb(ri, D0, ds)
+                            gcs_ = _gc_runs()
+                            tc_ = time.perf_counter()
                             if in_time(self.stay_hb_s + tail_s):
-                                gcs_, tc_ = _gc_runs(), time.perf_counter()
-                                sc_p = dict(sc, first_f=stay_scan["stay_ff"], first_t=stay_scan["stay_ft"],
-                                            first_k=stay_scan["stay_fk"], first_face=stay_scan["stay_face"])
-                                bud_p = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": budget["react_cache"]}
                                 sh_p, _, _ = self._hit_branch(f, start, latched, sc_p, ri, tk, enemy_only, bud_p,
-                                                              cap=False, ev_base=self._ds_evb(ri, D0, ds))
-                                took_s, gcr_ = time.perf_counter() - tc_, _gc_runs() != gcs_
+                                                              cap=False, ev_base=evb_p)
+                                gce_ = _gc_runs()
+                                took_s = time.perf_counter() - tc_
+                                gcr_ = gce_ != gcs_
                                 self.stay_hb_s = stay_cost(self.stay_hb_s, took_s, gcr_)
                                 if gcr_:
                                     stay_info.setdefault("gc", []).append("hb")
@@ -5401,12 +5437,16 @@ class ForumPlanner(Planner):
                         def esc_fn(rows_):
                             todo_ = [int(r_) for r_ in rows_ if int(r_) not in esc_have]
                             if todo_:
+                                rows_a = np.asarray(todo_, np.int64)
+                                g0_ = _gc_runs()
+                                tc_ = time.perf_counter()
                                 if not in_time(max(self.esc_batch_s, self.stay_esc_s) + tail_s):
                                     stay_info["cut"] = "escape"
                                     return None
-                                g0_, tc_ = _gc_runs(), time.perf_counter()
-                                nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(todo_, np.int64))
-                                t_, gr_ = time.perf_counter() - tc_, _gc_runs() != g0_
+                                nf_, _ = self._escape_fail_v2(f, r1, hold_end, rows_a)
+                                g1_ = _gc_runs()
+                                t_ = time.perf_counter() - tc_
+                                gr_ = g1_ != g0_
                                 self.stay_esc_s = stay_cost(self.stay_esc_s, t_, gr_)
                                 if gr_:
                                     stay_info.setdefault("gc", []).append("escape")
@@ -5417,17 +5457,20 @@ class ForumPlanner(Planner):
                         def tail_fn(r_):
                             if cfg.tail_k <= 0:
                                 return None
+                            rows_t = np.asarray([r_], np.int64)
+                            g0_ = _gc_runs()
+                            tc_ = time.perf_counter()
                             if not in_time(self.stay_tail_s):
                                 stay_info["cut"] = "tail"
                                 return False
-                            g0_, tc_ = _gc_runs(), time.perf_counter()
                             if knife_tails:
                                 from ssbot.combat.forum_knife_plan import pick_tail
-                                _, ok_ = pick_tail(self, f, r1, hold_end, np.asarray([r_], np.int64), P + T, i,
-                                                   knife_tails)
+                                _, ok_ = pick_tail(self, f, r1, hold_end, rows_t, P + T, i, knife_tails)
                             else:
-                                _, ok_ = self._tail_pick(f, r1, hold_end, np.asarray([r_], np.int64), P + T, i)
-                            t_, gr_ = time.perf_counter() - tc_, _gc_runs() != g0_
+                                _, ok_ = self._tail_pick(f, r1, hold_end, rows_t, P + T, i)
+                            g1_ = _gc_runs()
+                            t_ = time.perf_counter() - tc_
+                            gr_ = g1_ != g0_
                             self.stay_tail_s = stay_cost(self.stay_tail_s, t_, gr_)
                             if gr_:
                                 stay_info.setdefault("gc", []).append("tail")
