@@ -97,18 +97,30 @@ class LearningBudget:
         if any(a["id"]==identity for a in attempts):
             raise LearningStop("B2 attempt already reserved; no automatic replacement/retry")
         arm=event["arm"]
-        if len(attempts)>=8 or sum(a["arm"]==arm for a in attempts)>=4:
-            data["stop"]={"mode":"batch_end","reasons":["B2 smoke upper limit: 8 total / 4 per arm"],
-                          "worker":self.worker,"episode":event["episode"],"frame":None}
-            return
-        if data.get("execution") is None:raise LearningStop("B2 execution conditions must be bound before reservation")
-        crossover=data["execution"]["conditions"].get("crossover")
-        if crossover is not None:
-            planned=crossover["schedule"]["attempts"]
-            order=event.get("order")
-            if (type(order) is not int or order!=len(attempts) or order>=len(planned) or
-                    any(event.get(k)!=planned[order][k] for k in ("order","block","arm","seed"))):
-                raise LearningStop("B2 attempt differs from frozen crossover order/arm/block/seed")
+        execution=data.get("execution")
+        continuous=None if execution is None else execution["conditions"].get("continuous")
+        if continuous is not None:
+            # an explicit continuous plan (continuous_plan): its own strict count, order, arm and seeds replace the smoke limit
+            plan,order=continuous["plan"],len(attempts)
+            if order>=plan["attempts"]:
+                data["stop"]={"mode":"batch_end","reasons":[f"B2 continuous plan complete: {plan['attempts']} attempts"],
+                              "worker":self.worker,"episode":event["episode"],"frame":None}
+                return
+            if arm!=plan["arm"] or event["seed"]!=plan["seeds"][order] or event["episode"]!=order:
+                raise LearningStop("B2 attempt differs from the frozen continuous plan order/arm/seed")
+        else:
+            if len(attempts)>=8 or sum(a["arm"]==arm for a in attempts)>=4:
+                data["stop"]={"mode":"batch_end","reasons":["B2 smoke upper limit: 8 total / 4 per arm"],
+                              "worker":self.worker,"episode":event["episode"],"frame":None}
+                return
+            if execution is None:raise LearningStop("B2 execution conditions must be bound before reservation")
+            crossover=execution["conditions"].get("crossover")
+            if crossover is not None:
+                planned=crossover["schedule"]["attempts"]
+                order=event.get("order")
+                if (type(order) is not int or order!=len(attempts) or order>=len(planned) or
+                        any(event.get(k)!=planned[order][k] for k in ("order","block","arm","seed"))):
+                    raise LearningStop("B2 attempt differs from frozen crossover order/arm/block/seed")
         attempts.append({"id":identity,"worker":self.worker,"episode":event["episode"],"arm":arm,
                          "seed":event["seed"],"policy_episode":event.get("policy_episode"),
                          "block":event.get("block"),"order":event.get("order"),
@@ -215,14 +227,21 @@ def mark_integrity_halt(reason, *, primary=None, primary_origin=None, secondary_
 
 
 def preflight_options(options):
-    """First-smoke invocation constraints; no IPC, file creation or process start."""
+    """First-smoke invocation constraints; no IPC, file creation or process start. An explicit continuous plan
+    (continuous_plan) replaces the 1..4 limit by its own count: --episodes must be exactly that, on one instance."""
     preflight_environment(options.encounter,no_record=options.no_record)
-    if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":return
+    plan=continuous_plan(options)
+    if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()!="1":
+        if plan is not None:raise LearningStop("a continuous plan runs on the B2 ledger only")
+        return
     if (options.mode!="eval" or options.policy!="planner" or options.view!="oracle" or
             options.time_scale!=1. or options.real_quit!=1. or options.inject_hits!=0.):
         raise LearningStop("B2 requires eval/planner/oracle at1x, deterministic real quit=1, without injected hits")
     episodes=options.episodes
-    if type(episodes) is not int or not 1<=episodes<=4:
+    if plan is not None:
+        if type(episodes) is not int or episodes!=plan["plan"]["attempts"]:
+            raise LearningStop("continuous plan: --episodes must equal the plan's attempts")
+    elif type(episodes) is not int or not 1<=episodes<=4:
         raise LearningStop("B2 first smoke allows 1..4 attempts per arm invocation")
     from ssbot.train import observe_bout
     if observe_bout.enabled():
@@ -234,7 +253,7 @@ def preflight_options(options):
     if instances is not None:
         try:ids=[int(v) for v in instances.split(",")]
         except (TypeError,ValueError) as exc:raise LearningStop("invalid B2 instance list") from exc
-        if not ids or len(ids)!=len(set(ids)) or min(ids)<0 or len(ids)*episodes>4:
+        if not ids or len(ids)!=len(set(ids)) or min(ids)<0 or (len(ids)!=1 if plan is not None else len(ids)*episodes>4):
             raise LearningStop("B2 invocation exceeds four attempts for one arm / invalid instances")
 
 
@@ -249,10 +268,13 @@ def execution_conditions(options,environ=None):
     labels={"SSBOT_FORUM_CHAIN_ARM","SSBOT_FORUM_CHAIN_BATCH","SSBOT_FORUM_CHAIN_BUDGET",
             "SSBOT_FORUM_CHAIN_BLOCK","SSBOT_FORUM_CHAIN_ORDER"}
     crossover=crossover_schedule(env)
-    return {"schema":1,"smoke_limit":{"total":8,"per_arm":4},
+    continuous=continuous_plan(options,env)
+    return {"schema":1,"smoke_limit":({"total":8,"per_arm":4} if continuous is None
+                                      else {"continuous_attempts":continuous["plan"]["attempts"]}),
             "learning_policy":(observe_label() if observing(env) else
                                {"name":LOW_HP_POLICY,"remaining_hp":2,"scope":"episode","pause_then_real_quit":True}),
             **({"crossover":crossover} if crossover is not None else {}),
+            **({"continuous":continuous} if continuous is not None else {}),
             "options":{k:getattr(options,k,None) for k in keys},
             "environment":{k:v for k,v in sorted(env.items()) if k.startswith("SSBOT_") and k not in labels}}
 
@@ -299,3 +321,54 @@ def crossover_schedule(environ=None):
     except (OSError,ValueError,TypeError,KeyError,AttributeError) as exc:
         raise LearningStop("B2 frozen crossover schedule invalid: "+str(exc)) from exc
     return {"sha256":hashlib.sha256(raw).hexdigest(),"schedule":schedule}
+
+
+CONTINUOUS_PLAN_KIND="b2-continuous-plan-v1"
+CONTINUOUS_MAX_ATTEMPTS=64  # no plan file may ask for more, whatever it says
+
+
+def continuous_plan(options,environ=None):
+    """The explicit plan of one long same-game worker (combat_run --continuous-plan FILE), None without one.
+
+    File: {schema:1, kind, batch, arm, attempts, seeds:[...], authorization, ...}: batch and arm must be this run's
+    SSBOT_FORUM_CHAIN_BATCH and _ARM, attempts the exact number of bouts (at most CONTINUOUS_MAX_ATTEMPTS), seeds that
+    many distinct ints in playing order; other fields (source, notes) are kept in the record, not read. The whole content
+    and its hash are part of the ledger's execution identity, so an edited plan is another batch. No plan: the
+    first-smoke limits stand. Not together with a crossover schedule."""
+    path=getattr(options,"continuous_plan",None)
+    if path is None:return None
+    env=os.environ if environ is None else environ
+    try:
+        raw=Path(path).read_bytes();plan=json.loads(raw)
+        n,seeds=plan["attempts"],plan["seeds"]
+        if (plan.get("schema")!=1 or plan.get("kind")!=CONTINUOUS_PLAN_KIND or plan.get("batch")!=env.get("SSBOT_FORUM_CHAIN_BATCH")
+                or plan.get("arm") not in {"A","B"} or plan["arm"]!=env.get("SSBOT_FORUM_CHAIN_ARM")):
+            raise ValueError("schema/kind/batch/arm")
+        if (type(n) is not int or not 1<=n<=CONTINUOUS_MAX_ATTEMPTS or not isinstance(seeds,list) or len(seeds)!=n
+                or any(type(s) is not int or s<0 for s in seeds) or len(set(seeds))!=n):
+            raise ValueError("attempts/seeds")
+        if not isinstance(plan.get("authorization"),str) or not plan["authorization"].strip():
+            raise ValueError("authorization")
+        if env.get("SSBOT_FORUM_CHAIN_SCHEDULE","").strip():raise ValueError("not together with a crossover schedule")
+    except (OSError,ValueError,TypeError,KeyError,AttributeError) as exc:
+        raise LearningStop("B2 continuous plan invalid: "+str(exc)) from exc
+    return {"sha256":hashlib.sha256(raw).hexdigest(),"plan":plan}
+
+
+def continuous_stop_reason(row):
+    """Why a continuous plan must not go on after this finished bout (combat_run's attempts row), None when it may: a
+    CLEAR, or a real Q1 exit - outcome QUIT, the reason names Q1, HP reached the remaining-HP floor, and the real quit
+    was armed and reached the main menu. Any other end (death, stuck, harness failure, another or unfinished quit) is
+    not a bout to pass over: the plan stops there."""
+    outcome=row.get("outcome")
+    if outcome=="CLEAR":return None
+    reason=str(row.get("reason"))
+    if outcome=="QUIT":
+        policy=row.get("policy") or {}
+        quit_=policy.get("real_quit") or {}
+        floor,low=policy.get("remaining_hp_quit"),row.get("min_hp")
+        if ("Q1:" in reason and type(floor) is int and floor>0 and type(low) is int and low<=floor
+                and quit_.get("armed") is True and quit_.get("main_menu") is True and quit_.get("outcome")=="QUIT"):
+            return None
+        return "QUIT is not a completed real Q1 exit at the remaining-HP floor: "+reason
+    return str(outcome)+": "+reason

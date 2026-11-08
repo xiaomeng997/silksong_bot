@@ -28,6 +28,10 @@ Stopping: a worker ends after its current episode when <run>/STOP or the agents'
 recorder on the way out (meta.json status "closed"). A process killed outright (TerminateProcess, taskkill /F)
 cannot: `seal` marks such recordings "aborted" (their chunks are intact; the reader rebuilds a missing index from
 the data).
+
+Continuous plan (Task 182 seq 288): `--continuous-plan FILE` (B2 only; knife_chain_budget.continuous_plan) runs one worker
+through an explicit bounded list of bouts in one game: the ledger holds the plan and reserves each attempt against its count,
+order, arm and seed, a clear or a completed real Q1 exit lets the next bout start, any other end stops with a failing exit.
 """
 import argparse
 import hashlib
@@ -638,8 +642,10 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
 
 
 def worker(a: argparse.Namespace) -> int:
-    from ssbot.combat.knife_chain_budget import preflight_environment,preflight_options
+    from ssbot.combat.knife_chain_budget import continuous_plan,continuous_stop_reason,preflight_environment,preflight_options
     preflight_options(a)
+    plan_ = continuous_plan(a)                 # --continuous-plan: this worker's seeds, in order; None: the usual ones
+    plan_seeds = None if plan_ is None else plan_["plan"]["seeds"]
     worker_requested={key:os.environ.get(key) for key in ("SSBOT_WORKER_BOOST","SSBOT_WORKER_CPUS")}
     worker_boost_result=boost_worker()
     print(f"[i{a.instance}] worker boost: {worker_boost_result}", flush=True)
@@ -776,7 +782,8 @@ def worker(a: argparse.Namespace) -> int:
             if stop_requested(run_dir):
                 print(f"[i{a.instance}] stop requested, ending after {k} episodes", flush=True)
                 break
-            seed = a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k
+            seed = (plan_seeds[k] if plan_seeds is not None else
+                    a.seed + k if a.same_seeds else a.seed + a.instance * 1_000_000 + k)
             enc = encs[k % len(encs)]
             reservation=None
             if b2_budget is not None:
@@ -906,7 +913,21 @@ def worker(a: argparse.Namespace) -> int:
             print(f"[i{a.instance} ep{k}] {rec.outcome:12s} {rec.ingame_s or 0:6.1f}s hits {rec.hits} wd {rec.would_die} "
                   f"boss_hp {rec.boss_hp_end} {atk} {rec.reason or ''}", flush=True)
             k += 1
-            if only_episode_really_quit(a, k, d, link):
+            if plan_seeds is not None:
+                # a continuous plan goes on only after a clear or a completed real Q1 exit; anything else ends the run
+                # here with a failing exit, the row already written, and the owner's cleanup below (the game stays
+                # the launcher's)
+                plan_stop = (b2_stop or (None if strict_stop is None else f"strict receipt stop: {strict_stop}")
+                             or (None if field_stop is None else f"scene field stopped: {field_stop}")
+                             or continuous_stop_reason(d) or ("game link closed" if link.closed else None))
+                if plan_stop is not None:
+                    from ssbot.combat.knife_chain_budget import LearningStop
+                    print(f"[i{a.instance} ep{k - 1}] continuous plan stopped: {plan_stop}", flush=True)
+                    raise LearningStop(plan_stop if plan_stop == b2_stop else "continuous plan: " + plan_stop)
+            if plan_seeds is not None and k >= a.episodes:
+                print(f"[i{a.instance}] the plan's last bout ended: no way back into the slot, straight to the cleanup",
+                      flush=True)
+            elif only_episode_really_quit(a, k, d, link):
                 print(f"[i{a.instance}] the only engineering episode really quit to the main menu: no way back into the "
                       f"slot, straight to the cleanup", flush=True)
             else:
@@ -1023,6 +1044,8 @@ def run(a: argparse.Namespace) -> int:
             cmd += ["--start-hp", str(a.start_hp[0]), str(a.start_hp[1])]
         if a.no_record:
             cmd.append("--no-record")
+        if getattr(a, "continuous_plan", None):
+            cmd += ["--continuous-plan", a.continuous_plan]
         if getattr(a, "measure", False):
             cmd += ["--measure", "--measure-max-records", str(a.measure_max_records)]
             if a.measure_timing_only:
@@ -1182,6 +1205,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--hours", type=float, default=0.0)
         p.add_argument("--rotate", type=int, default=25)
         p.add_argument("--seed", type=int, default=0)
+        p.add_argument("--continuous-plan", default=None, metavar="FILE",
+                       help="B2 only: an explicit bounded plan (knife_chain_budget.continuous_plan) of one worker's bouts: "
+                            "--episodes must equal its attempts, the seeds are its seeds in order (--seed unused), and "
+                            "only a clear or a completed real Q1 exit lets the next bout start. Without it the "
+                            "first-smoke limits stand")
         p.add_argument("--no-record", action="store_true")
         p.add_argument("--measurement-protocol", type=int, choices=(1, 2), default=1)
         p.add_argument("--measure-diagnostics", action="store_true")
