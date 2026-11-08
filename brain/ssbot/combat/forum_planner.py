@@ -1136,6 +1136,57 @@ def _stage_withdrawn(prefs, chain, offer, ws):
     return out
 
 
+# ---- Task 182 seq 278: the ordinary hand-back clock in frames ----------------------------------------------------------
+# The live loop skips a decision now and then (no STATE processed for that frame: ~3.7% of the frames in the #339 / #341
+# recordings). The carried plan (CONTINUE) and the committed jump hold / macro used to advance one frame per TICK, so
+# after a skip the carried plan ran one frame behind real time (#348: #341 3362 re-planned left after the 3358 skip,
+# #339 split from 3767 after the 3754 skip). Only these two clocks move to frames; ForumPlanner.ticks stays a tick count
+# (special_mode's FULL_EVERY / BOARD and the map read it as such). hold_row is already aligned by frames.
+
+def _plan_frame(ws, prefix) -> int:
+    """The frame of this tick's first planned mask: the observation frame + the in-flight prefix + 1 (Planner.tick's
+    d_frame, the frame Planner.prev_d records for prev_cmd's first mask)."""
+    return int(getattr(getattr(ws, "stamp", None), "frame", 0) or 0) + len(np.asarray(prefix).reshape(-1)) + 1
+
+
+def _plan_age(planner, ws, prefix) -> int:
+    """How far the carried plan has run: this tick's first planned frame minus prev_d (the frame of prev_cmd's first
+    mask); 1 (the old one-frame-per-tick step) when prev_d is unknown or the frame did not advance (repeated / backward)."""
+    p = getattr(planner, "prev_d", None)
+    d = _plan_frame(ws, prefix)
+    return d - p if p is not None and d > p else 1
+
+
+def _age_commitments(planner, d: int) -> None:
+    """At the start of a tick: each frame since the last tick that had no tick of its own comes off the remaining amount
+    of the committed jump hold (jump_until) and macro (macro_until), which are kept as tick counts against
+    planner.ticks: their remaining frames then equal what a frame clock would give. Expired or released ones
+    (<= ticks, -1) are not touched. The reference is the latest frame seen, so a skipped frame is taken off once and a
+    repeated or backward frame takes off nothing."""
+    last = getattr(planner, "_clock_d", None)
+    if last is not None and d > last + 1:
+        gap = d - last - 1
+        t = getattr(planner, "ticks", 0)
+        if getattr(planner, "jump_until", -1) > t:
+            planner.jump_until -= gap
+        if getattr(planner, "macro_until", -1) > t:
+            planner.macro_until -= gap
+    if last is None or d > last:
+        planner._clock_d = d
+
+
+def _note_plan_frame(planner, before, d: int) -> None:
+    """At the end of a tick: prev_d follows prev_cmd. A plan this tick left (the ordinary result or its special /
+    escape / knife tail, a B2 continuation) starts at this tick's frame; none (a native chain row, a B2 recovery or
+    commitment cleared it) has no frame; the same object carried over keeps its own frame. So a CONTINUE never ages
+    another owner's plan by this owner's clock."""
+    cur = getattr(planner, "prev_cmd", None)
+    if cur is None:
+        planner.prev_d = None
+    elif cur is not before:
+        planner.prev_d = d
+
+
 @dataclass
 class ClashTable:
     """The EV_CLASH branch's rates per (type, attack family, slot) (knowledge/<build>/enemies/forum/clash.json,
@@ -1308,6 +1359,10 @@ class ForumPlanner(Planner):
         self.last_sel: dict | None = None
         self.tv = TerminalValue(params) if self.fcfg.terminal else None
         self._two: dict = {}
+
+    def reset(self) -> None:
+        super().reset()
+        self._clock_d: int | None = None      # Task 182 seq 278: the latest first-planned frame a tick saw (_age_commitments)
 
     def warm_kernels(self) -> None:
         """Planner.warm_kernels and the "seen" key's kernel (it runs only on FORCED_RISK ticks: a first call mid-fight
@@ -3694,9 +3749,14 @@ class ForumPlanner(Planner):
         self.v2_ret = None              # SSBOT_FORUM_TWO_RETURN_BODY: never a lock end of an earlier tick
         self.observed_slam_audit = (_observed_slam.audit_start(ws, f)
                                     if _observed_slam.ENABLED and getattr(self, "measurement_enabled", False) else None)
+        d_frame = _plan_frame(ws, prefix)         # Task 182 seq 278: frames skipped since the last tick age the
+        _age_commitments(self, d_frame)           # committed jump hold / macro; prev_d follows prev_cmd below
+        prev0 = getattr(self, "prev_cmd", None)
         chain = getattr(self, "chain_native", None)
         if not getattr(chain, "b2", False) or getattr(chain, "arm", "A") != "B":
-            return self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+            result = self._ordinary_tick(ws, start, hold, prefix, f, prefs, ctx)
+            _note_plan_frame(self, prev0, d_frame)
+            return result
         t0 = time.perf_counter()
         ordinary = None
         native_bound=False
@@ -3757,6 +3817,7 @@ class ForumPlanner(Planner):
                     chain._note("b2_value_not_selected", frame=int(ws.stamp.frame), chain_value=offer.value, ordinary_value=ordinary.J)
         total_ms = (time.perf_counter() - t0) * 1e3
         result.t_ms = {**result.t_ms, "total": total_ms, "b2_total": total_ms}
+        _note_plan_frame(self, prev0, d_frame)
         return result
 
     def _ordinary_tick(self, ws, start: np.ndarray, hold: HoldState, prefix: np.ndarray, f, prefs, ctx: FilterContext,
@@ -3880,7 +3941,8 @@ class ForumPlanner(Planner):
         hold_row = getattr(self, "hold_row", None)
         hold_on = hold_row is not None and cont
         if cont:
-            rows_.append((cmod.continue_plan(self.prev_cmd, 1, T) if not hold_on else
+            # Task 182 seq 278: the carried plan moved on by the frames it has run (_plan_age), not one per tick
+            rows_.append((cmod.continue_plan(self.prev_cmd, _plan_age(self, ws, prefix), T) if not hold_on else
                           _hold_pad(hold_row, T))[None])
         cmd = np.concatenate(rows_)
         rem0 = self.jump_until - self.ticks
