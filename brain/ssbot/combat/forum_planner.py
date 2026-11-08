@@ -5358,15 +5358,15 @@ class ForumPlanner(Planner):
                             cands = np.asarray([c_ for c_ in cands if int(c_) not in bad_], np.int64)
                         # the escape results the tick already has, read with no record kept inside its check: HITS_FIRST's
                         # tiers (hf_ok_) and the rows its own check failed (esc_known; -1: the count is not kept)
-                        known = {int(r_): int(v_[0]) for r_, v_ in hf_ok_.items()}
+                        esc_have = {int(r_): int(v_[0]) for r_, v_ in hf_ok_.items()}
                         if esc_info and "checked" in esc_info:
                             for r_ in esc_known(order[safe[order]], esc_row, esc_info.get("fail"), esc_info["checked"],
                                                 fcfg.v2_esc_k):
-                                known.setdefault(r_, -1)
+                                esc_have.setdefault(r_, -1)
                         n_new = [0]
 
                         def esc_fn(rows_):
-                            todo_ = [int(r_) for r_ in rows_ if int(r_) not in known]
+                            todo_ = [int(r_) for r_ in rows_ if int(r_) not in esc_have]
                             if todo_:
                                 if not in_time(max(self.esc_batch_s, self.stay_esc_s) + tail_s):
                                     stay_info["cut"] = "escape"
@@ -5374,9 +5374,9 @@ class ForumPlanner(Planner):
                                 tc_ = time.perf_counter()
                                 nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(todo_, np.int64))
                                 self.stay_esc_s = stay_cost(self.stay_esc_s, time.perf_counter() - tc_)
-                                known.update({r_: int(n_) for r_, n_ in zip(todo_, nf_)})
+                                esc_have.update({r_: int(n_) for r_, n_ in zip(todo_, nf_)})
                                 n_new[0] += len(todo_)
-                            return np.asarray([known[int(r_)] for r_ in rows_], np.int64)
+                            return np.asarray([esc_have[int(r_)] for r_ in rows_], np.int64)
 
                         def tail_fn(r_):
                             if cfg.tail_k <= 0:

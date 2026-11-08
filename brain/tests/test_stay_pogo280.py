@@ -316,6 +316,9 @@ def test_a_safe_down_slash_on_the_stay_target_is_taken_on_either_side(wparams, w
     # the same rows are checked either way: the evasion core keeps its S / Hz / U (prefs never reach them)
     for key in ("S", "Hz", "U"):
         assert np.array_equal(pl0.last_info[key][pl0.last_info["core_mask"]], pl1.last_info[key][pl1.last_info["core_mask"]])
+    # the promotion's own names never shadow the tick's (its debug record keeps the rows' known mask)
+    for key in ("known", "ok", "J", "t_hit"):
+        assert np.array_equal(np.asarray(pl0.last_info["dbg"][key]), np.asarray(pl1.last_info["dbg"][key])), key
 
 
 def test_the_landed_hit_ranks_it_whatever_its_weight(wparams, warena, monkeypatch):
