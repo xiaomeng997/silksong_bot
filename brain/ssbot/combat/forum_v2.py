@@ -52,6 +52,10 @@ V2_ON = os.environ.get("SSBOT_FORUM_V2", "0").strip() == "1"
 SCENE_FIELD_SHADOW = os.environ.get("SSBOT_FORUM_SCENE_FIELD_SHADOW", "0").strip() == "1"
 SCENE_FIELD_RANK = os.environ.get("SSBOT_FORUM_SCENE_FIELD_RANK", "0").strip() == "1"
 EVERY = int(os.environ.get("SSBOT_FORUM_V2_EVERY", "1") or 1)   # V2Feed: rebuild the support every this many frames
+# Task 182 seq 287: V2Feed.support's build reuses its own pure dilations (dilate_group through a SupportDilationCache: the
+# complete input content as the key, results copied, this tick's and the previous tick's only). Nothing but the time it
+# takes changes; "0": every dilation computed (the comparison arm).
+SUPPORT_DILATE_REUSE = os.environ.get("SSBOT_FORUM_SUPPORT_DILATE_REUSE", "1").strip() != "0"
 MARGIN_MODE = os.environ.get("SSBOT_FORUM_V2_MARGIN", "focus").strip().lower() or "focus"
 # MARGIN_MODE "focus" (the default; the person, 2026-10-11): the focus unit gets a flat FOCUS_M unless the row dashes
 # at it (then its "rule" margin), every other unit its "rule" margin. The focus unit is the L2 controller's target
@@ -1039,6 +1043,10 @@ class V2Feed:
         self.last: RangeSupport | None = None
         self.last_f: int | None = None
         self.reused = 0
+        self.dil = None                     # SSBOT_FORUM_SUPPORT_DILATE_REUSE: this feed's own dilation results
+        if SUPPORT_DILATE_REUSE:
+            from ssbot.combat.knife_chain_raster_cache import SupportDilationCache
+            self.dil = SupportDilationCache()
 
     def reset(self) -> None:
         self.trk.reset()
@@ -1047,6 +1055,8 @@ class V2Feed:
         self.last = None
         self.last_f = None
         self.reused = 0
+        if self.dil is not None:
+            self.dil.reset()
 
     def feed(self, frames: dict, f: int) -> None:
         """Feeds the frames after the last fed one up to f from `frames` ({frame: STATE}); a gap restarts nothing (the
@@ -1073,9 +1083,14 @@ class V2Feed:
             rs.fc = _Half(getattr(fcast, "fc", None), BOUNDS_HALF)
             self.reused += 1
         else:
-            rs = RangeSupport.build(self.trk, k_shift=tracker_k_shift(self.f_fed, origin_frame),
-                                    inner_fc=getattr(fcast, "fc", None), margin_mode=self.margin_mode, focus=focus,
-                                    body2=body2)
+            kw = dict(k_shift=tracker_k_shift(self.f_fed, origin_frame), inner_fc=getattr(fcast, "fc", None),
+                      margin_mode=self.margin_mode, focus=focus, body2=body2)
+            if self.dil is None or self.f_fed is None:      # (nothing fed yet: no tick to hold results for)
+                rs = RangeSupport.build(self.trk, **kw)
+            else:
+                from ssbot.combat.knife_chain_raster_cache import support_dilation_scope
+                with support_dilation_scope(self.dil, self.f_fed):
+                    rs = RangeSupport.build(self.trk, **kw)
             rs.focus_arg = focus
             rs.body2_arg = body2
             self.last, self.last_f = rs, self.f_fed
