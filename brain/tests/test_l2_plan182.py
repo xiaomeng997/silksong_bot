@@ -2390,3 +2390,160 @@ def test_reset_clears_everything_and_a_dead_worker_is_loud_at_reset(monkeypatch)
     antic(tac2, ws2, fc2)
     out = go_(tac2, ws2, fc2); go_(tac2, ws2, fc2)
     assert tac2.plan_runner.worker_failed and tac2.plan_runner.requests == 0 and tac2.last["clapper_winner"]["rule"] == "keep"
+
+
+# ---- Sol seq 272 B: the action layer's refusal of the over strike takes back what the over_head stage put in, same tick ----
+
+
+def test_a_withdrawn_stage_gives_back_l2s_own_stance_and_the_targets_weights_before_the_strike():
+    from ssbot.combat.tactics.modes import EntryAttack, GoalPrefs, StageWithdraw, entry_attack_prefs, withdrawn_prefs
+    entry = EntryAttack(8, "stomp", 7, G.CC_JUMP_CAST, 10.8, 22.1)
+    pre = GoalPrefs(mode="RUSH", stance_x=44.2, weights={"hit": 1.}, target=8, hit_w={8: 3., 7: 1.},
+                    hit_kw={7: (1., 0., 0., 0.)}, ground_hit=frozenset({7, 8}), no_pogo=frozenset({8}),
+                    ground_first=frozenset({7}), no_hit=frozenset({7}), entry_attack=entry)
+    struck = replace(entry_attack_prefs(pre), stance_x=29.7)          # the stage's stance: the walker's head
+    assert struck.hit_kw[8] == (0., 0., 0., 3.) and 8 not in struck.ground_hit | struck.no_pogo
+    w = StageWithdraw(44.2, (8, "stomp", 7), 3701, pre.hit_kw.get(8),
+                      (8 in pre.ground_hit, 8 in pre.no_pogo, 8 in pre.ground_first))
+    staged = replace(struck, withdraw=w)
+    back = withdrawn_prefs(staged)
+    assert back.stance_x == 44.2 and back.entry_attack is None and back.withdraw is None
+    assert 8 not in back.hit_kw and back.hit_kw[7] == (1., 0., 0., 0.)
+    assert back.ground_hit == frozenset({7, 8}) and back.no_pogo == frozenset({8}) and back.ground_first == frozenset({7})
+    assert ((back.no_hit, back.hit_w, back.weights, back.target, back.mode)
+            == (staged.no_hit, staged.hit_w, staged.weights, staged.target, staged.mode))
+    # a weight the target had before the strike comes back as it was
+    assert withdrawn_prefs(replace(staged, withdraw=replace(w, kw=(2., 0., 0., 0.)))).hit_kw[8] == (2., 0., 0., 0.)
+    assert withdrawn_prefs(struck) is struck                          # nothing to take back
+
+
+def test_the_stage_frame_is_where_its_generation_and_phase_were_first_read():
+    r = object.__new__(CP.PlanRunner)
+    r._stage_key = r._stage_f = None
+    r.exec = NS(plan=NS(generation=1), name="over_head")
+    assert r.stage_frame(NS(frame=100)) == 100 and r.stage_frame(NS(frame=104)) == 100
+    r.exec.plan = NS(generation=2)                        # a new plan of the scene: a new stage
+    assert r.stage_frame(NS(frame=105)) == 105
+    r.exec.name = "over_wait"
+    assert r.stage_frame(NS(frame=106)) == 106
+    r.exec.name = "over_head"                             # the same name again is a new stage too
+    assert r.stage_frame(NS(frame=107)) == 107 and r.stage_frame(NS(frame=None)) == 107
+    r.exec.plan = NS(generation=3)
+    assert r.stage_frame(NS(frame=None)) is None          # no frame read: nothing to withdraw by
+
+
+def test_only_the_over_head_stage_names_the_frame_it_began():
+    plan = plan_of(request(W=body(2, 28.), hx=24.))
+    names = [p.name for p in plan.phases]
+    assert "over_head" in names and len(names) > 3
+    unit = CT.PlannedMiddle()
+    plans = NS(stance=lambda sc, ph: 30., stage_frame=lambda sc: 77)
+    for name in names:
+        plans.exec = NS(plan=plan, phase=plan.phase(name), name=name)
+        ap = unit.apply(NS(plans=plans, geo=None, hx=24., tac=None), "middle_jump", None, NS(iid=2))
+        assert ap.withdraw_f == (77 if name == "over_head" else None), name
+
+
+def test_only_the_over_head_stage_offers_its_stance_and_stomp_for_withdrawal(monkeypatch):
+    # the over take-off of test_no_standing_gap_at_the_take_off_runs_the_prepared_route_farther_from_the_wall
+    from ssbot.combat.tactics.modes import withdrawn_prefs
+    tac, ws, fc = planned(monkeypatch, xs=(19., 31.5), hx=27.)
+    ws.stamp.frame = 500
+    def step():
+        ws.stamp.frame += 1
+        return go_(tac, ws, fc)
+    assert step().withdraw is None
+    antic(tac, ws, fc)
+    assert step().withdraw is None and step().withdraw is None        # before the take-off: no strike stage
+    r = tac.plan_runner
+    land = r.exec.plan.get("landings")[0]
+    change(fc, 8, pos=(30., fc.subjects[1].pos[1]))
+    ws.entities[1].dmg_boxes[0].poly = [(29., 3.), (31., 3.), (31., 7.), (29., 7.)]
+    take_off(tac, ws, fc, vx=(land - 19.) / CP.GAIN)
+    out = step()
+    assert r.exec.name == "over_head" and out.target == 8 and out.entry_attack.kind == "stomp"
+    w, f0 = out.withdraw, ws.stamp.frame
+    assert w.entry == (8, "stomp", out.entry_attack.source) and w.stage_f == f0
+    assert w.stance_x != pytest.approx(out.stance_x)      # the stage stands on the walker's head, L2's own stance elsewhere
+    back = withdrawn_prefs(out)
+    assert back.stance_x == w.stance_x and back.entry_attack is None and back.hit_kw.get(8) == w.kw
+    assert out.hit_kw[8][:3] == (0., 0., 0.) and back.hit_kw.get(8) != out.hit_kw[8]   # the stomp's weights are the strike's
+    assert tuple(8 in s for s in (back.ground_hit, back.no_pogo, back.ground_first)) == w.sets
+    assert back.no_hit == out.no_hit and 7 in back.no_hit                  # the jumper's ban is no part of the strike
+    out = step()
+    assert r.exec.name == "over_head" and out.withdraw.stage_f == f0      # the stage goes on from where it began
+    # its real bounce: no second strike asked, nothing to take back
+    change(fc, 8, state="Dmg Attack")
+    tac.plan_input = CP.HeroInput(hero_state(30.), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, bounce=8)
+    out = step()
+    assert r.exec.plan is not None and r.exec.name != "over_head" and out.withdraw is None
+
+
+@pytest.mark.parametrize("case", ["refused", "bounced", "return_goal", "other_goal", "other_chain", "no_entry"])
+def test_only_a_refusal_of_the_entrys_own_strike_before_its_bounce_is_recorded(case):
+    from ssbot.combat import knife_chain_transfer as T
+    from ssbot.combat.knife_chain_eval import Run
+    from ssbot.combat.tactics.modes import EntryAttack, GoalPrefs
+    from tests.test_knife_chain_transfer import cast_scene
+    from tests.test_target_entry_attack import native
+    n = native()
+    s = cast_scene()
+    s["ents"][0]["fsms"][0].update(state="Slam Antic", t=.25)
+    entry = EntryAttack(8, "stomp", 7, G.CC_SLAM, 4., 10.)
+    n.goal_preferences(s, GoalPrefs(mode="RUSH", stance_x=38., weights={}, target=8, entry_attack=entry), handoff=True)
+    assert n._entry_attack_goal == entry and (n._transfer_goal.target, n._transfer_goal.caster) == (8, 7)
+    n.runner.run = Run("vault_idle" if case == "other_chain" else T.PROGRAM, "air", {"bounced": True} if case == "bounced" else {})
+    if case == "return_goal":
+        n._transfer_goal = T.ReturnGoal(8, 7, 985, None, "SWITCH", None, 990)
+    if case == "other_goal":
+        n._transfer_goal = replace(n._transfer_goal, caster=9)
+    if case == "no_entry":
+        n._entry_attack_goal = None
+    n._recover("rune transfer air dash refused: locked motion blocked or unknown", 1000)
+    notes = [e for e in n.events if e["event"] == "transfer_strike_refused"]
+    if case == "refused":
+        assert n.refused_strike == (1000, 8, "stomp", 7) and len(notes) == 1 and notes[0]["frame"] == 1000
+    else:
+        assert n.refused_strike is None and not notes
+    n.reset(1, start_frame=2000)
+    assert n.refused_strike is None
+
+
+def _withdraw_tick(prefs, refusal=None, offer=None, bound=math.inf):
+    from ssbot.combat.forum_planner import ForumPlanner
+    seen, notes = [], []
+    def propose(*a):
+        if refusal is not None:
+            chain.refused_strike = refusal           # B2's recovery inside its own propose, after L2 decided (#341 3703)
+        return offer
+    chain = NS(b2=True, arm="B", refused_strike=None, propose=propose, first_allowed=lambda *a: True,
+               install=lambda *a: NS(t_ms={}, installed=True), continuation_value_bound=lambda p: bound,
+               _note=lambda ev, **k: notes.append((ev, k)))
+    res = NS(J=0., S=0, forced_risk=False, t_ms={})
+    p = NS(chain_native=chain, ticks=0, scene_field_values=None, _ordinary_tick=lambda *a, **k: (seen.append(a[5]), res)[1])
+    out = ForumPlanner.tick(p, NS(stamp=NS(frame=1000)), np.zeros(1), None, None, None, prefs, None)
+    return out, seen, notes
+
+
+def test_the_ordinary_rows_of_the_refusal_tick_read_the_withdrawn_stage():
+    from ssbot.combat.tactics.modes import EntryAttack, GoalPrefs, StageWithdraw, withdrawn_prefs
+    entry = EntryAttack(8, "stomp", 7, G.CC_JUMP_CAST, 10.8, 22.1)
+    w = StageWithdraw(44.2, (8, "stomp", 7), 990, None, (False, False, False))
+    staged = GoalPrefs(mode="RUSH", stance_x=29.7, weights={}, target=8, hit_kw={8: (0., 0., 0., 3.)}, entry_attack=entry,
+                       withdraw=w)
+    out, seen, notes = _withdraw_tick(staged, refusal=(1000, 8, "stomp", 7))
+    back = withdrawn_prefs(staged)
+    assert len(seen) == 1 and seen[0] is not staged and seen[0].stance_x == back.stance_x == 44.2
+    assert seen[0].entry_attack is None and seen[0].withdraw is None and seen[0].hit_kw == back.hit_kw == {}
+    assert notes == [("plan_stage_withdrawn", dict(frame=1000, refused_f=1000, stage_f=990, stance_x=44.2, stage_stance_x=29.7))]
+    # a later tick of the same stage: the refusal recorded earlier still takes it back
+    assert _withdraw_tick(staged, refusal=(995, 8, "stomp", 7))[1][0].stance_x == 44.2
+    # nothing taken back: no refusal; one before this stage began; another strike's; B2 offers keys this tick
+    for kw in (dict(), dict(refusal=(985, 8, "stomp", 7)), dict(refusal=(1000, 8, "stomp", 9)),
+               dict(refusal=(1000, 7, "stomp", 7)), dict(refusal=(1000, 8, "side", 7)),
+               dict(refusal=(1000, 8, "stomp", 7), offer=NS(stage="continuation", value=-1.))):
+        out, seen, notes = _withdraw_tick(staged, **kw)
+        assert len(seen) == 1 and seen[0] is staged and not [n for n in notes if n[0] == "plan_stage_withdrawn"], kw
+    # rows already read before B2's propose (a chain with a finite value bound) are not re-read on its refusal
+    out, seen, notes = _withdraw_tick(staged, refusal=(1000, 8, "stomp", 7), bound=1e9)
+    assert len(seen) == 1 and seen[0] is staged and not [n for n in notes if n[0] == "plan_stage_withdrawn"]

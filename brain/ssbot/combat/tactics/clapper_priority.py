@@ -19,7 +19,7 @@ from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, gro
 from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, LEGACY_TABLE, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
                               TACTICS, Applied, cluster_route, middle_return, return_pose, table)
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X
-from .modes import EVADE, entry_attack_prefs
+from .modes import EVADE, EntryAttack, StageWithdraw, entry_attack_prefs
 
 
 def plan_runner(tac):
@@ -159,6 +159,7 @@ def _apply(sc, won, rule):
     if target.family in JUMPS and target.state not in AIR and target.state in ANTIC:
         g.stance_x = tac._clamp(target.pos[0] + (-1 if hx < target.pos[0] else 1) * tac.rules.face_u)
         how = "face: hold until takeoff"
+    own_x = float(g.stance_x)                   # L2's own stance, before the winner's stage overrides it (Sol seq 272 B)
     ap = won.apply(sc, rule, g, target) or Applied()
     if ap.stance is not None:
         g.stance_x = ap.stance
@@ -177,13 +178,15 @@ def _apply(sc, won, rule):
     hw[g.target] = max(hw.get(g.target, 0.), tac.rules.target_hit_w * tac.rules.priority.get(CLAPPER, 1.))
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
                   weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=rule,
-                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset())
+                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset(), withdraw=None)
+    pre = None                                  # the preferences before the strike's own weights (Sol seq 272 B)
     if ap.suppress_hits or (target.family in JUMPS and target.state in AIR):
         # no hit while backing off (the winner's suppression), and never on a target in its jump's flight
         out = replace(out, no_hit=frozenset(out.no_hit) | ({s.iid for s in subjects} if ap.suppress_hits else {g.target}),
                       entry_attack=None)
     else:
         out = tac._contact_preferences(fc, out, g, target, hx, how)
+        pre = out
         out = entry_attack_prefs(out)
         if style == "stomp":
             kw = dict(out.hit_kw); kw[g.target] = (0., 0., 0., hw[g.target])
@@ -198,6 +201,14 @@ def _apply(sc, won, rule):
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
     for tactic in sc.table.tactics:
         out = tactic.finish(sc, rule, tactic is won, g, out)
+    e = out.entry_attack
+    if (getattr(ap, "withdraw_f", None) is not None and pre is not None and isinstance(e, EntryAttack) and e.kind == "stomp"
+            and e.target == g.target):
+        # Sol seq 272 B: the over_head stage's stance and stomp stand for the action layer's strike; the planner takes them back
+        # for its ordinary rows on the tick that strike is refused, and on the later ticks of this stage
+        tg = g.target
+        out = replace(out, withdraw=StageWithdraw(own_x, (tg, e.kind, e.source), int(ap.withdraw_f), pre.hit_kw.get(tg),
+                                                  (tg in pre.ground_hit, tg in pre.no_pogo, tg in pre.ground_first)))
     g.why = g.why.split("; ")[0] + "; " + sc.scene + "; " + str(how)
     logs = {}
     for tactic in sc.table.tactics:

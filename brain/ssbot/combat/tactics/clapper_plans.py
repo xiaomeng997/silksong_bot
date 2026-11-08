@@ -923,6 +923,8 @@ class PlanRunner:
         self._routes: dict = {}            # this tick's take-off conditions, per plan generation and selection
         self._takeoff_noted: set = set()   # plan generations whose take-off was recorded
         self._go_done: set = set()         # (generation, phase): its bounded approach has arrived
+        self._stage_key = None             # (generation, phase) stage_frame last saw, and the frame it was first read
+        self._stage_f = None
 
     # ---- the channel ----
 
@@ -1312,6 +1314,15 @@ class PlanRunner:
         """This frame's real strike bounce on this body (a hit and the pogo evidence, the action layer's facts); a hit alone is none."""
         inp = getattr(sc.tac, "plan_input", None)
         return inp is not None and inp.bounce == o.iid
+
+    def stage_frame(self, sc) -> int | None:
+        """The frame the running stage began (Sol seq 272 B): this read's frame when its (generation, phase) is new to it. The stage's
+        unit reads it each tick it applies the stage, from the tick it enters it (a later first read only makes it later)."""
+        ex = self.exec
+        key = (None if ex.plan is None else ex.plan.generation, ex.name)
+        if key != self._stage_key:
+            self._stage_key, self._stage_f = key, sc.frame if type(sc.frame) is int else None
+        return self._stage_f
 
     def _hazard_over(self, sc, plan, s, m) -> bool:
         seen = m.get("land_seen")

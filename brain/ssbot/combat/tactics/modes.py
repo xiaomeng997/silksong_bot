@@ -115,6 +115,38 @@ class WallPressure:
     geometry_candidate: bool = True
 
 
+@dataclass(frozen=True)
+class StageWithdraw:
+    """Task 182 (Sol seq 272 B): what the running plan stage over_head puts into the ordinary rows' preferences for the strike
+    it stands for, taken back when the action layer refuses that strike (the planner's tick, same tick): L2's own stance before
+    the stage overrode it, the strike (target, kind, source), the frame the stage began (a refusal before it is another
+    stage's), and the target's hit_kw (None: absent) and its ground_hit / no_pogo / ground_first memberships before the strike
+    changed them."""
+    stance_x: float
+    entry: tuple
+    stage_f: int
+    kw: tuple | None
+    sets: tuple
+
+
+def withdrawn_prefs(prefs):
+    """prefs with its stage's stance and strike taken back (prefs.withdraw): L2's own stance, no entry attack, the target's hit
+    weights and set memberships as before the strike; every other field as it is. No withdraw: prefs."""
+    w = getattr(prefs, "withdraw", None)
+    if not isinstance(w, StageWithdraw):
+        return prefs
+    t = w.entry[0]
+    kw = dict(prefs.hit_kw)
+    if w.kw is None:
+        kw.pop(t, None)
+    else:
+        kw[t] = w.kw
+    gh, npg, gf = (frozenset(s) | ({t} if was else frozenset())
+                   for s, was in zip((prefs.ground_hit, prefs.no_pogo, prefs.ground_first), w.sets))
+    return replace(prefs, stance_x=float(w.stance_x), entry_attack=None, hit_kw=kw, ground_hit=gh, no_pogo=npg,
+                   ground_first=gf, withdraw=None)
+
+
 def entry_attack_prefs(prefs):
     """Explicit entry style wins over legacy scoring preferences, never safety."""
     entry = getattr(prefs, "entry_attack", None)
@@ -209,6 +241,8 @@ class GoalPrefs(TacticPrefs):
     return_cross: frozenset = frozenset()  # Task 183 seq 267: iids in no_hit ONLY because the manual-B middle return
     #                                        crosses them (clapper_priority, Applied.cross_no_hit); no_hit itself is unchanged.
     #                                        Read only by the B2 bounce follow-up's seam strike (knife_chain_air_native)
+    withdraw: StageWithdraw | None = None  # Task 182 seq 272 B: the running over_head stage's stance and strike, taken back
+    #                                        for the ordinary rows on the action layer's refusal of that strike (ForumPlanner.tick)
 
 
 class Tactics:

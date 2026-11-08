@@ -54,6 +54,8 @@ class Applied:
     cross_no_hit: frozenset = frozenset()   # Task 183 seq 267: the part of no_hit that is the ordinary middle return's
     #                                         crossed body (MiddleReturn: no attack credit while crossing it); the
     #                                         application records it apart (GoalPrefs.return_cross) when no other rule bans it
+    withdraw_f: int | None = None           # Task 182 seq 272 B: the frame the running over_head stage began; its stance and
+    #                                         strike are withdrawable on the action layer's refusal (GoalPrefs.withdraw)
 
 
 class Tactic:
@@ -651,8 +653,10 @@ class _Planned(Tactic):
                 style = "stomp"
             else:
                 no_hit = no_hit | {target.iid}
+        # Sol seq 272 B: over_head's stance and stomp stand for the action layer's strike over the walker; its refusal takes them back
+        withdraw_f = sc.plans.stage_frame(sc) if ph.name == "over_head" else None
         return Applied(stance=sc.plans.stance(sc, ph), style=style, scene=f"{self.scene} plan: {ph.name}",
-                       suppress_hits=ph.suppress_hits, no_hit=no_hit)
+                       suppress_hits=ph.suppress_hits, no_hit=no_hit, withdraw_f=withdraw_f)
 
     def finish(self, sc, rule, won, g, out):
         ph = sc.plans.exec.phase

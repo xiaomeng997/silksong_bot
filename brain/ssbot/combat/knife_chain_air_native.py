@@ -91,6 +91,7 @@ class NativeManualAirChain(NativeChainB2):
         self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
+        self.refused_strike=None   # Sol seq 272 B: (frame, target, kind, source) of the latest transfer strike refused (recovered)
         self._return_admission_noted=None
         self._idle_ev={};self._alive_prev=None;self._alive_prev_f=None
         self._transfer_responsibility={}
@@ -1807,6 +1808,16 @@ class NativeManualAirChain(NativeChainB2):
             bounce_table.end(self,"recovered",reason)
         source=self.commitment
         run=self.runner.run
+        entry=getattr(self,"_entry_attack_goal",None);goal=getattr(self,"_transfer_goal",None)
+        if (run is not None and run.chain==transfer.PROGRAM and entry is not None and not run.v.get("bounced")
+                and goal is not None and not isinstance(goal,transfer.ReturnGoal)
+                and (goal.target,goal.caster)==(entry.target,entry.source)):
+            # Sol seq 272 B: the strike a tactical entry asked for is given up here, before any real bounce, by the Run of that
+            # entry's own goal; the planner's ordinary rows of this tick and of the rest of the stage that asked for it stop
+            # reading that stage's stance (forum_planner._stage_withdrawn)
+            self.refused_strike=(int(frame),int(entry.target),str(entry.kind),int(entry.source))
+            self._note("transfer_strike_refused",frame=int(frame),reason=reason,target=int(entry.target),kind=str(entry.kind),
+                       source=int(entry.source))
         hooked=bool(run is not None and run.chain==transfer.PROGRAM and run.v.get("cs") is not None
                     and type(run.v.get("hook_hit_f")) is int)
         if source is not None and source["move"].family=="RUNE_TRANSFER" and (self._press is not None or hooked):

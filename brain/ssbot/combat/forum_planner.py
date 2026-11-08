@@ -1118,6 +1118,23 @@ def _wilson_lb(k: float, n: float, z: float = 1.96) -> float:
     return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n))
 
 
+def _stage_withdrawn(prefs, chain, offer, ws):
+    """Task 182 (Sol seq 272 B): the action layer refused the strike the running over_head stage stands for (its recovery in this
+    stage, before a real bounce, the same target / kind / source: NativeManualAirChain.refused_strike) and takes no keys this tick:
+    the ordinary rows read L2's own stance and no entry (tactics.modes.withdrawn_prefs). Same tick: B2's refusal comes inside its
+    propose, after L2 decided (#341 3703: the RUNE_TRANSFER air dash refused on the walker's body; the forced rows followed the
+    walker's head into its rune). No second send, no new L2 decision; the stage itself goes on until its own events end it."""
+    w = getattr(prefs, "withdraw", None)
+    r = getattr(chain, "refused_strike", None)
+    if offer is not None or w is None or r is None or r[0] < w.stage_f or tuple(r[1:]) != tuple(w.entry):
+        return prefs
+    from .tactics.modes import withdrawn_prefs
+    out = withdrawn_prefs(prefs)
+    chain._note("plan_stage_withdrawn", frame=int(ws.stamp.frame), refused_f=int(r[0]), stage_f=int(w.stage_f),
+                stance_x=float(out.stance_x), stage_stance_x=float(prefs.stance_x))
+    return out
+
+
 @dataclass
 class ClashTable:
     """The EV_CLASH branch's rates per (type, attack family, slot) (knowledge/<build>/enemies/forum/clash.json,
@@ -3702,6 +3719,8 @@ class ForumPlanner(Planner):
             if offer.stage == "active":
                 chain._recover("supervisor primitive disallowed", int(ws.stamp.frame))
             offer = None
+        if ordinary is None:                       # (rows already read under a value bound are not re-read here)
+            prefs = _stage_withdrawn(prefs, chain, offer, ws)
         # The user explicitly keeps h2's approach, and a selected strike is not
         # auctioned against ordinary tails on every subsequent tick.
         if offer is not None and offer.stage in {"approach", "active", "recovery", "fixed_commitment", "manual_commitment"}:
