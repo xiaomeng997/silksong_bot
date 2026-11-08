@@ -81,6 +81,37 @@ class B2Geometry:
         return rs
 
     def _query(self,path,limit,*,external_only=False):
+        rs,length,x,y,tk,inv,owners,same=self._sweep(path,limit)
+        contacts=[];covered=np.zeros(length+1,bool)
+        for iid in sorted(owners):
+            haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
+            total=np.asarray(self._owner_occupancy(rs,x,y,tk,iid)).any(axis=0)&~inv
+            covered|=total|haz
+            for k in np.flatnonzero(haz):contacts.append(PathContact(path.origin+int(k),iid,"delayed"))
+            if external_only and iid==self.move.target_iid:continue
+            kind="move" if getattr(getattr(rs.trk,"now",{}).get(iid,(None,None,None))[2],"fam",None) else "body"
+            label=self.move if same and iid==self.move.target_iid else None
+            for k in np.flatnonzero(total&~haz):contacts.append(PathContact(path.origin+int(k),iid,kind,label))
+        unknown=np.asarray(rs.occupied(x,y,tk)).any(axis=0)&~inv&~covered
+        for k in np.flatnonzero(unknown):contacts.append(PathContact(path.origin+int(k),None,"other"))
+        return ContactScan(self.ref(path),path.origin,path.origin+length,tuple(contacts),
+                           "RangeSupport owner/hazard layers; current tracker instance; bounded sweep")
+
+    def scan_delayed(self,path,limit=None):
+        """The "delayed" contacts of scan(path, limit) alone, in its order (Task 182 seq 272: a waypoint Run's whole-route check):
+        the same sweep, clock, protection, owners and support, each owner's delayed hazard layers only (its spawned hazards and
+        its per-bomb small-rune forecast), none of the body / move / unknown occupancy rasters the step gate's full scan builds."""
+        rs,length,x,y,tk,inv,owners,_=self._sweep(path,len(path.commands) if limit is None else limit)
+        contacts=[]
+        for iid in sorted(owners):
+            haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
+            for k in np.flatnonzero(haz):contacts.append(PathContact(path.origin+int(k),iid,"delayed"))
+        return ContactScan(self.ref(path),path.origin,path.origin+length,tuple(contacts),
+                           "RangeSupport delayed hazard layers only; bounded sweep")
+
+    def _sweep(self,path,limit):
+        """_query's points: the support for the path's window, the bounded sweep of its box centres, their clock and protection,
+        the owners to ask and whether the target maps to the tracked slam instance."""
         if path.origin<self.origin:raise GeometryUnavailable("path predates forecast origin")
         length=min(int(limit),len(path.box)-1)
         if length<0:raise GeometryUnavailable("empty path query")
@@ -112,20 +143,7 @@ class B2Geometry:
         same=(current is not None and current[2] is self.instance and getattr(current[2],"fam",None)=="CC_SLAM")
         if path.stage=="commitment" and not same:
             raise GeometryUnavailable("h2 guard target no longer maps to the tracked slam instance")
-        contacts=[];covered=np.zeros(length+1,bool)
-        for iid in sorted(owners):
-            haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
-            total=np.asarray(self._owner_occupancy(rs,x,y,tk,iid)).any(axis=0)&~inv
-            covered|=total|haz
-            for k in np.flatnonzero(haz):contacts.append(PathContact(path.origin+int(k),iid,"delayed"))
-            if external_only and iid==self.move.target_iid:continue
-            kind="move" if getattr(getattr(rs.trk,"now",{}).get(iid,(None,None,None))[2],"fam",None) else "body"
-            label=self.move if same and iid==self.move.target_iid else None
-            for k in np.flatnonzero(total&~haz):contacts.append(PathContact(path.origin+int(k),iid,kind,label))
-        unknown=np.asarray(rs.occupied(x,y,tk)).any(axis=0)&~inv&~covered
-        for k in np.flatnonzero(unknown):contacts.append(PathContact(path.origin+int(k),None,"other"))
-        return ContactScan(self.ref(path),path.origin,path.origin+length,tuple(contacts),
-                           "RangeSupport owner/hazard layers; current tracker instance; bounded sweep")
+        return rs,length,x,y,tk,inv,owners,same
 
     @staticmethod
     def _frame_time(rs):

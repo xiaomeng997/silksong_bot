@@ -906,6 +906,7 @@ class NativeManualAirChain(NativeChainB2):
         current=getattr(getattr(getattr(forecast,"rs",None),"trk",None),"now",{}).get(goal.source)
         if current is None:return failed("support unavailable")
         plan=SimpleNamespace(iid=goal.source,move=move,origin=f,entry_k=0,press_k=None,contact_frame=None)
+        refused=False
         try:
             path=model_path(sim,plan,np.array([mask],np.int64),game)
             geo=B2Geometry(forecast,f,move,current[2])
@@ -919,13 +920,14 @@ class NativeManualAirChain(NativeChainB2):
                     self._note("waypoint_dash_refused",frame=f,first=first,active=active,**info)
                     mask=0 if goal.over is not None else int(mask)&~B["DASH"]   # past a body the key alone is no way
                     path=model_path(sim,plan,np.array([mask],np.int64),game)
+                    refused=True
                 else:self._note("waypoint_dash_checked",frame=f,**info)
             scan=geo.scan(path)
         except GeometryUnavailable as exc:
             return failed("geometry unavailable: "+str(exc))
         if not scan.complete or scan.contacts:
             return failed("external step blocked",first=None if not scan.contacts else asdict(scan.contacts[0]))
-        ahead=self._waypoint_delayed_ahead(sim,plan,goal,f,game,geo,mask,active)
+        ahead=self._waypoint_delayed_ahead(sim,plan,goal,f,game,geo,mask,active,refused)
         if ahead is not None:
             return failed("route meets a delayed hazard",first=asdict(ahead))
         if active:
@@ -939,26 +941,35 @@ class NativeManualAirChain(NativeChainB2):
              "phase":"go","predicted_bounce":None,"checked_through":path.through,
              "safety_basis":("bounded approach: the dash through its lock, every step through all owners"
                              +("; no route certificate" if goal.over is not None else
-                               ", the route through the spawned delayed hazards; no route certificate for bodies or moves"))})
+                               ", the route from the key sent through the delayed hazard layers; no route certificate for bodies "
+                               "or moves"))})
 
-    def _waypoint_delayed_ahead(self,sim,plan,goal,f,game,geo,mask,active):
-        """Task 182 (Sol seq 271): the first already spawned delayed hazard on this Run's whole route, or None.
-        The step gate scans one tick's key, so it meets a delayed hazard (a spawned rune circle, a small-rune bomb, at its real
-        clock) one frame before it lights; the Run has no jump and no search, and by then the ordinary owners cannot leave it
-        either (#341: 3380 hand-back, owner 335470's bomb lit 3383; the same geometry showed it on the route from the Run's first
-        tick 3354; open-loop replays: a hand-back by 3372 cleared it, none from 3376 on). The same B2Geometry, the keys the Run
-        counts on (waypoint.route_keys) through the next owner's first key, within the support's own look-ahead (its last sample,
-        62 frames: no raster rebuilt for a long route; a hazard farther on is met on a later tick, still a second before it
-        lights); "delayed" contacts only (bodies and moves stay the step gate's). A place past a body is not checked (route() has
-        no passage above it). A route the geometry cannot scan is noted and left to the step gate, as before."""
+    def _waypoint_delayed_ahead(self,sim,plan,goal,f,game,geo,mask,active,refused=False):
+        """Task 182 (Sol seq 271 / 272): the first delayed-hazard contact on this Run's whole route, or None.
+        The step gate scans one tick's key, so it meets a delayed hazard one frame before it lights; the Run has no jump and no
+        search, and by then the ordinary owners cannot leave it either (#341: 3380 hand-back, owner 335470's bomb lit 3383; the
+        same geometry showed it on the route from the Run's first tick 3354; open-loop replays: a hand-back by 3372 cleared it,
+        none from 3376 on).
+        The delayed layers are the support's own: spawned hazards at their real clock, and the per-bomb small-rune forecast, which
+        times a ring from its Cast 2 before the bomb entity appears (#341: the 30.18 bomb forecast from the 3344 Cast 2, its entity
+        first seen 3363, lit 3383).
+        The route starts from the key this tick actually sends, the one its gates passed (waypoint.route_keys; a dash its lock
+        refused leaves the run of the key sent, never the refused dash), runs through the next owner's first key and stays within
+        the support's own look-ahead (its last sample, 62 frames: no raster rebuilt for a long route; a hazard farther on is met on
+        a later tick, still a second before it lights). scan_delayed asks the delayed layers alone: bodies, moves and the unknown
+        layer stay the step gate's full scan. A place past a body is not checked (route() has no passage above it). No route from
+        the key sent, or one the geometry cannot scan: noted, left to the step gate, as before."""
         if goal.over is not None:return None
+        keys=waypoint.route_keys(sim,goal,f,mask,dash_refused=refused)
+        if keys is None:
+            self._note("waypoint_route_unchecked",frame=f,reason="no route from the key sent",active=active);return None
         try:
-            path=model_path(sim,plan,waypoint.route_keys(sim,goal,f,mask),game)
+            path=model_path(sim,plan,keys,game)
             samples=getattr(getattr(getattr(geo,"forecast",None),"rs",None),"samples",None)
-            scan=geo.scan(path,limit=min(len(path.commands),int(samples[-1])) if samples else None)
+            scan=geo.scan_delayed(path,limit=min(len(path.commands),int(samples[-1])) if samples else None)
         except GeometryUnavailable as exc:
             self._note("waypoint_route_unchecked",frame=f,reason=str(exc),active=active);return None
-        return next((c for c in scan.contacts if c.kind=="delayed"),None)
+        return scan.contacts[0] if scan.contacts else None
 
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)

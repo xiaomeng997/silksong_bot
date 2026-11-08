@@ -1296,11 +1296,34 @@ def test_the_route_keys_are_the_keys_the_run_counts_on():
         row, k, how = WP.route(WP.SimRoller(sim), np.zeros(78 + 8, np.int64), 0, goal_x, by_k=78, tol=goal.tol)
         assert what == "go" and how == "run" and keys[0] == mask
         assert np.array_equal(keys, row[:k + 3]), (x0, k, len(keys))     # through her arrival and the next owner's first key
-    # a dash she holds stays held, as next_mask keeps it: releasing it would end the sprint
+    # a dash she holds stays held, as next_mask keeps it (releasing it would end the sprint), until the release that stops her there
     sim = ChainSim(hero_state(30.), np.array([kin.B_RIGHT | kin.B_DASH], np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
     goal = WP.WaypointGoal(40., f + 60, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
     keys = WP.route_keys(sim, goal, f, kin.B_RIGHT | kin.B_DASH)
-    assert len(keys) and np.all(keys == (kin.B_RIGHT | kin.B_DASH)) and len(keys) <= WP.MAX_F
+    held = int(np.argmin(keys == (kin.B_RIGHT | kin.B_DASH)))
+    assert 0 < held < len(keys) <= WP.MAX_F and np.all(keys[:held] == (kin.B_RIGHT | kin.B_DASH)) and np.all(keys[held:] == 0)
+    # nowhere to arrive from the key sent: no route to check
+    assert WP.route_keys(sim, WP.WaypointGoal(200., f + 60, "retreat", 1, ((1, 0.), 1, "attack_retreat")), f,
+                         kin.B_RIGHT | kin.B_DASH) is None
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_the_route_keys_start_from_the_key_sent_never_a_refused_dash(mirror):
+    # Sol seq 272 on #342: f100, 30 -> 39 u, by_f 132, prefix 0: next_mask asks R+DASH; its lock refused, the key sent is R, but the
+    # route checked started from R+DASH again (route() re-chose the refused dash), 27 keys; mirrored L+DASH -> L -> L+DASH
+    from ssbot.combat import knife_chain_waypoint as WP
+    from ssbot.combat.air_chain import ChainSim
+    f = 100
+    x0, gx, key = (39., 30., kin.B_LEFT) if mirror else (30., 39., kin.B_RIGHT)
+    sim = ChainSim(hero_state(x0), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
+    goal = WP.WaypointGoal(gx, 132, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
+    assert WP.next_mask(sim, goal, f) == (key | kin.B_DASH, "dash")
+    # refused: the run of the key sent, the window through (no arrival in it), never a dash
+    keys = WP.route_keys(sim, goal, f, key, dash_refused=True)
+    assert keys[0] == key and not np.any(keys & kin.B_DASH) and len(keys) == 38 and np.all(keys == key)
+    # not refused: the dash it sends, held to its release
+    keys = WP.route_keys(sim, goal, f, key | kin.B_DASH)
+    assert keys[0] == key | kin.B_DASH and int(np.sum(keys & kin.B_DASH != 0)) == 23 and len(keys) == 27
 
 
 def _bomb_support(*bombs, owner=1, body=None):
@@ -1320,16 +1343,20 @@ def _bomb_support(*bombs, owner=1, body=None):
     return rs
 
 
-def _offer(monkeypatch, x0, goal_x, bombs=(), active=False, by=80, f=100, body=None):
-    """The production waypoint offer on a real model and support: (offer, chain). Its context checks pass; notes and recoveries kept."""
+def _offer(monkeypatch, x0, goal_x, bombs=(), active=False, by=80, f=100, body=None, lock=None, sim=None):
+    """The production waypoint offer on a real model and support: (offer, chain). Its context checks pass; notes and recoveries kept.
+    lock: "refuse" / "pass" stands in for the new dash's lock scan (a body met on its locked motion / none); sim: a given model
+    state (her actual prefix is the queued one)."""
     from dataclasses import asdict
     from ssbot.combat import knife_chain_air_native as AN, knife_chain_waypoint as WP
     from ssbot.combat.air_chain import ChainSim
-    from ssbot.combat.knife_chain_commitment import MoveInstance
+    from ssbot.combat.knife_chain_commitment import MoveInstance, PathContact
     from ssbot.combat.knife_chain_eval import Run
     cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_offer" in vars(c))
     monkeypatch.setattr(AN, "complete_hf", lambda state: True)
-    sim = ChainSim(hero_state(x0), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
+    monkeypatch.setattr(AN, "logical_copy", lambda r: NS(run=Run(r.run.chain, r.run.link, dict(r.run.v))))
+    if sim is None:
+        sim = ChainSim(hero_state(x0), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
     plan = ((1, 0.), 3, "attack_retreat")
     goal = WP.WaypointGoal(goal_x, f + by, "retreat", 1, plan, family="CC_JUMP_CAST")
     chain = object.__new__(cls)
@@ -1340,7 +1367,10 @@ def _offer(monkeypatch, x0, goal_x, bombs=(), active=False, by=80, f=100, body=N
     run = Run(WP.PROGRAM, "go", {"iid": 1, "plan": list(plan), "x": goal_x, "by_f": f + by, "kind": "retreat", "move": asdict(move)})
     chain.runner = NS(run=run if active else None, fork_empty=lambda anchor: NS(run=None))
     chain._waypoint_failed, chain._waypoint_declined, chain._waypoint_responsibility = set(), None, {}
-    chain.queued_prefix = lambda frame, state: (0, None)
+    chain.queued_prefix = lambda frame, state: (int(sim.prefix[0]), None)
+    if lock is not None:
+        met = (PathContact(f + 9, 7, "body"),) if lock == "refuse" else ()
+        chain._dash_lock_scan = lambda *a, **k: (NS(complete=True, contacts=met), {"lock": lock})
     state = {"f": f, "hero": {"hero_accepting_input": True}}
     centre_y = float(sim.roll(np.zeros((1, 1), np.int64)).centre[0, 0, 1])
     rs = _bomb_support(*[(2, bx, centre_y - .9, 2.166, on, off) for bx, on, off in bombs], body=body)
@@ -1386,7 +1416,7 @@ def test_the_route_check_leaves_a_body_passage_and_an_unscannable_route_to_the_s
     over = WP.WaypointGoal(40., 160, "out", 1, plan, over=(35., 3., 37., 7.))
     def unscannable(path, limit=None):
         raise GeometryUnavailable("path leaves modeled canvas")
-    geo = NS(scan=unscannable)
+    geo = NS(scan_delayed=unscannable)
     assert chain._waypoint_delayed_ahead(_sim_at(30.), None, over, 100, 1.6, geo, kin.B_RIGHT, True) is None and not notes
     plain = WP.WaypointGoal(40., 160, "retreat", 1, plan)
     sim = _sim_at(30.)
@@ -1400,9 +1430,108 @@ def test_the_route_check_leaves_a_body_passage_and_an_unscannable_route_to_the_s
         seen.append((len(path.commands), limit))
         return NS(contacts=())
     far = WP.WaypointGoal(45., 160, "retreat", 1, plan)
-    assert chain._waypoint_delayed_ahead(sim, p, far, 0, 0., NS(forecast=NS(rs=NS(samples=(0, 31, 62))), scan=scan),
+    assert chain._waypoint_delayed_ahead(sim, p, far, 0, 0., NS(forecast=NS(rs=NS(samples=(0, 31, 62))), scan_delayed=scan),
                                          kin.B_RIGHT, True) is None
     assert seen and seen[0][0] > 62 and seen[0][1] == 62
+    # no route from the key sent (nowhere to arrive): noted, nothing concluded
+    notes.clear()
+    nowhere = WP.WaypointGoal(200., 160, "retreat", 1, plan)
+    assert chain._waypoint_delayed_ahead(sim, p, nowhere, 0, 0., geo, kin.B_RIGHT | kin.B_DASH, True) is None
+    assert notes == [dict(event="waypoint_route_unchecked", frame=0, reason="no route from the key sent", active=True)]
+
+
+# Sol seq 272: bombs only one of the two routes from 30 -> 39 (f100, by_f 132) meets, look-ahead frames from the origin f: the dash
+# is at 36.0-39.2 over keys 14-26 and the run never past 34.95 in its 38 keys; the run is at 32.5-33.3 over keys 18-24 while the dash
+# is at 37.2-38.8 (key k acts at origin frame k + 2). Mirrored about 34.5.
+DASH_ONLY, RUN_ONLY = (38., 16, 30), (31., 20, 26)
+
+
+def _mirrored(bomb, mirror):
+    return (69. - bomb[0], bomb[1], bomb[2]) if mirror else bomb
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_a_refused_dash_is_no_part_of_the_route_the_run_is_checked_on(monkeypatch, mirror):
+    x0, gx, key = (39., 30., kin.B_LEFT) if mirror else (30., 39., kin.B_RIGHT)
+    dash_only, run_only = _mirrored(DASH_ONLY, mirror), _mirrored(RUN_ONLY, mirror)
+    def offer(lock, bomb):
+        return _offer(monkeypatch, x0, gx, bombs=[bomb], by=32, lock=lock)
+    # its lock refused the dash: the key sent is the direction alone and the route checked is its run
+    out, chain = offer("refuse", dash_only)                      # a bomb only the refused dash would meet: no conclusion from it
+    assert out is not None and out.mask == key and any(n["event"] == "waypoint_dash_refused" for n in chain.notes)
+    assert not any(n["event"] == "waypoint_rejected" for n in chain.notes)
+    out, chain = offer("refuse", run_only)                       # a bomb on the run it sends instead: no start into it
+    note = next(n for n in chain.notes if n["event"] == "waypoint_rejected")
+    assert out is None and note["reason"] == "route meets a delayed hazard" and 120 <= note["first"]["frame"] <= 126
+    # the dash passes its lock: the route checked is the dash it sends
+    out, chain = offer("pass", dash_only)
+    note = next(n for n in chain.notes if n["event"] == "waypoint_rejected")
+    assert out is None and note["reason"] == "route meets a delayed hazard" and 116 <= note["first"]["frame"] <= 130
+    out, chain = offer("pass", run_only)
+    assert out is not None and out.mask == key | kin.B_DASH and not any(n["event"] == "waypoint_rejected" for n in chain.notes)
+
+
+def _held_dash(x0, gx, by_f, ticks=3, f0=100):
+    """A dash under way: next_mask frame by frame through the model from rest (as the Run, its lock passing), `ticks` ticks on.
+    (sim at f0 + ticks: her state, the in-flight held DASH key, the hold state)."""
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.holdfilter import hold_filter_jit
+    from ssbot.combat.knife_chain_waypoint import WaypointGoal, next_mask
+    S, hold, sent = hero_state(x0), kin.HoldState.idle(1), [0]
+    goal = WaypointGoal(gx, by_f, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
+    for f in range(f0, f0 + ticks):
+        prefix = np.array([sent[-1]], np.int64)
+        mask, _ = next_mask(ChainSim(S, prefix, hold, PARAMS, TERRAIN, f, f), goal, f)
+        sent.append(int(mask))
+        lat, hold = hold_filter_jit(prefix[None], hold)
+        S = np.asarray(kin.rollout(S, lat, PARAMS, TERRAIN).final[:, 0], np.float64)
+    f = f0 + ticks
+    return ChainSim(S, np.array([sent[-1]], np.int64), hold, PARAMS, TERRAIN, f, f)
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_an_active_held_dash_is_checked_from_its_held_key_through_its_release(monkeypatch, mirror):
+    x0, gx, key = (39., 30., kin.B_LEFT) if mirror else (30., 39., kin.B_RIGHT)
+    sim = _held_dash(x0, gx, 132)
+    assert int(sim.prefix[0]) == key | kin.B_DASH                 # the dash is under way, its key in flight
+    dash_only = _mirrored(DASH_ONLY, mirror)
+    # still under the held dash when that bomb lights: the Run is handed back (no lock scan for a held dash)
+    out, chain = _offer(monkeypatch, x0, gx, bombs=[(dash_only[0], dash_only[1] - 3, dash_only[2] - 3)], by=29, f=103,
+                        active=True, sim=sim)
+    assert out is None and chain.recovered == [("waypoint route meets a delayed hazard", 103)]
+    assert not any(n["event"] in ("waypoint_dash_refused", "waypoint_dash_checked") for n in chain.notes)
+    # lit only after her release, arrival and the next owner's first key: this Run goes on holding its dash
+    out, chain = _offer(monkeypatch, x0, gx, bombs=[(gx, 40, 50)], by=29, f=103, active=True, sim=sim)
+    assert out is not None and out.mask == key | kin.B_DASH and not chain.recovered
+
+
+def test_the_delayed_scan_is_the_delayed_part_of_the_full_scan():
+    # scan_delayed (the Run's whole-route check) = scan's delayed contacts, same frames and order, on paths through a support with
+    # bombs of two owners and another enemy's body
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.knife_chain_air import model_path
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    from ssbot.combat.knife_chain_geometry import B2Geometry
+    sim = ChainSim(hero_state(30.), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, 100, 100)
+    cy = float(sim.roll(np.zeros((1, 1), np.int64)).centre[0, 0, 1])
+    rs = _bomb_support((2, 33., cy - .9, 2.166, 8, 20), (3, 36., cy - .9, 2.166, 14, 30), (2, 31., cy + 1.5, 2.166, 4, 9),
+                       body=(34.5, 0., 35.5, 9.))
+    move = MoveInstance(1, 95, "WAYPOINT")
+    geo = B2Geometry(NS(rs=rs), 100, move, None)
+    plan = NS(iid=1, move=move, origin=100, entry_k=0, press_k=None, contact_frame=None)
+    rows = (np.full(40, kin.B_RIGHT), np.full(40, kin.B_RIGHT | kin.B_DASH), np.r_[np.full(12, kin.B_RIGHT | kin.B_JUMP), np.zeros(28)],
+            np.r_[np.full(6, kin.B_RIGHT), np.full(34, kin.B_LEFT)])
+    seen = 0
+    for keys in rows:
+        path = model_path(sim, plan, np.asarray(keys, np.int64), 100 / 60.)
+        for limit in (None, 20, 41):
+            full = geo.scan(path, limit=limit)
+            want = tuple(c for c in full.contacts if c.kind == "delayed")
+            got = geo.scan_delayed(path, limit=limit)
+            assert got.contacts == want and got.last_frame == full.last_frame
+            seen += len(want)
+    assert seen > 0 and any(c.kind == "body" for keys in rows
+                            for c in geo.scan(model_path(sim, plan, np.asarray(keys, np.int64), 100 / 60.)).contacts)
 
 
 # ---- the over route's near row: from the start she is really at ----

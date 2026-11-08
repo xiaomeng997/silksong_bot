@@ -113,9 +113,15 @@ def route(m, row, k0, goal, by_k=None, tol=TOL_U, release=True):
         return run, k0 + a_run, "run"
     if not release:
         return dash, k0 + a_dash, "dash"
-    # released where she stops at the goal
     last = k0 + a_dash
-    first = max(k_dash + 1, last - 14)
+    row, k = _released(m, dash, k0, max(k_dash + 1, last - 14), last, goal, d, tol)
+    return row, k, "dash"
+
+
+def _released(m, dash, k0, first, last, goal, d, tol):
+    """The dash row released at the first key index of first..last whose rest stop (REST_F frames on) reaches the goal, and her
+    arrival key index: route()'s dash release, as next_mask's "arrived" releases a held dash."""
+    i0 = m.off + k0
     rows = np.tile(dash, (last - first + 1, 1))
     for i, r in enumerate(range(first, last + 1)):
         rows[i, r:] = 0
@@ -124,8 +130,8 @@ def route(m, row, k0, goal, by_k=None, tol=TOL_U, release=True):
         stop = min(xs.shape[1] - 1, r - k0 + REST_F)
         if (xs[i, stop] - goal) * d >= -tol:
             a = _arrival(xs[i], goal, d, tol)
-            return rows[i].copy(), k0 + (a if a is not None else stop), "dash"
-    return rows[-1].copy(), last, "dash"
+            return rows[i].copy(), k0 + (a if a is not None else stop)
+    return rows[-1].copy(), last
 
 
 class SimRoller:
@@ -190,19 +196,43 @@ def next_mask(sim, goal: WaypointGoal, f: int):
     return (key | K.B_DASH, "dash") if k_dash == 0 else (key, "go")
 
 
-def route_keys(sim, goal: WaypointGoal, f: int, mask: int):
-    """The keys this Run counts on from this tick (Task 182, Sol seq 271), for a check of its whole route: a dash it holds stays held
-    (next_mask: releasing it ends the sprint), else route()'s run or dash; through her arrival and the two frames before the next
-    owner's first key acts, MAX_F at most. A place past a body (goal.over) is not one of these: route() has no passage above it."""
+def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = False):
+    """The keys this Run counts on from this tick (Task 182, Sol seq 271 / 272), for a check of its whole route, from the key it
+    actually sends now (the one its gates passed):
+      - a dash it starts or holds (DASH in mask): held until the release that stops her at the place (next_mask's "arrived",
+        route()'s dash release);
+      - a dash refused this tick (dash_refused, mask the key it sends instead): the run of that key, the keys it sends while the
+        lock keeps refusing (with no arrival in the window, the whole window: she runs on until the Run is late); the refused
+        dash is no part of the route;
+      - otherwise route() on from the next key (a run, or the dash at its cooldown edge, as next_mask plans it).
+    Through her arrival and the two frames before the next owner's first key acts, MAX_F at most. None: from the key sent the
+    model gives no route (a dash or route() with no arrival): nothing to check. A place past a body (goal.over) is not one of
+    these: route() has no passage above it. The check made of it only ever hands back; a route with no contact is no
+    certificate."""
     m = SimRoller(sim)
     by_k = int(goal.by_f) - (int(f) + 2)
     T = int(min(MAX_F, max(8, by_k + 8)))
+    mask = int(mask)
     x0 = float(m.xs(np.zeros((1, 1), np.int64))[0][m.off])
     d = 1 if goal.x > x0 else -1
-    held = bool(int(np.asarray(sim.prefix).reshape(-1)[-1]) & K.B_DASH)
-    if held and int(mask) & K.B_DASH:
-        row = np.full(T, int(mask), np.int64)
-        k = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
+    if mask & K.B_DASH:
+        held = np.full(T, mask, np.int64)
+        a = _arrival(m.xs(held[None])[0][m.off:], goal.x, d, goal.tol)
+        if a is None:
+            return None
+        last = max(int(a), 1)
+        row, k = _released(m, held, 0, max(1, last - 14), last, goal.x, d, goal.tol)
+    elif dash_refused:
+        row = np.full(T, mask, np.int64)
+        a = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
+        if a is None:
+            return row
+        k = int(a)
+        row[k:] = 0
     else:
-        row, k, _ = route(m, np.zeros(T, np.int64), 0, float(goal.x), by_k=by_k, tol=goal.tol)
-    return np.asarray(row if k is None else row[:min(T, int(k) + 3)], np.int64)
+        row = np.zeros(T, np.int64)
+        row[0] = mask
+        row, k, _ = route(m, row, 1, float(goal.x), by_k=by_k, tol=goal.tol)
+        if k is None:
+            return None
+    return np.asarray(row[:min(T, int(k) + 3)], np.int64)
