@@ -210,21 +210,31 @@ def _scan(pl, seen):
 REAL = dict(deadline_ms=ForumConfig().deadline_ms, esc_deadline_ms=ForumConfig().esc_deadline_ms)   # production: 8 / 8 + 2 ms
 
 
-def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0, tail_extra=None, esc_extra=None):
+def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0, tail_extra=None, esc_extra=None, scan_ms=0.0):
     """A deterministic clock for the production deadlines (REAL): every perf_counter reads it and it moves only in the
     planner's costed calls - an escape batch (_escape_fail_v2), a hit branch, a tail check - by their ms; score_ms at
     _score_forum's entry, robust_ms in each _down_robust (the over_stay scan's contact kernel), tail_extra / esc_extra
-    {n: ms} more in the tick's n-th tail check / escape batch (counted from 1 per tick). Returns its state: log, the calls
-    [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing recheck); ranked, the escape check's order
-    per tick (its first 16 rows); at, per tick the ms from the tick's start to the escape check's entry and to the tick's
-    end; passing, None (the real check) or the only rows that pass it (the others fail it once)."""
+    {n: ms} more in the tick's n-th tail check / escape batch (counted from 1 per tick); scan_ms per over_stay scan
+    (_stay_scan), clk.scan_extra {n: ms} more in the tick's n-th. Garbage collections (forum_planner._gc_runs) are the clock's
+    own count, clk.gc: one is counted inside each call (kind, n) of clk.gc_calls - kinds esc, hb, hbu (the uncapped hit
+    branches only), tail, scan, n counted from 1 per tick - so none happens unless a test puts it there. Returns its state:
+    log, the calls [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing recheck); ranked, the escape
+    check's order per tick (its first 16 rows); at, per tick the ms from the tick's start to the escape check's entry and to
+    the tick's end; passing, None (the real check) or the only rows that pass it (the others fail it once). clk's fields may
+    be changed between ticks."""
     import time
     from ssbot.combat import forum_planner as fp
-    now, clk = [1000.0], NS(log=[], ranked=[], at=[], passing=None, n_tail=0, n_esc=0, t0=0.0)
+    now, clk = [1000.0], NS(log=[], ranked=[], at=[], passing=None, n_tail=0, n_esc=0, n_hb=0, n_hbu=0, n_scan=0, t0=0.0,
+                            scan_ms=scan_ms, scan_extra={}, gc_calls=set(), gc=0)
     esc0, hb0, tail0 = fp.ForumPlanner._escape_fail_v2, fp.ForumPlanner._hit_branch, fp.ForumPlanner._tail_pick
     pick0, score0, tick0, rob0 = (fp.ForumPlanner._escape_pick, fp.ForumPlanner._score_forum, fp.ForumPlanner._ordinary_tick,
                                   fp._down_robust)
+    scan0 = fp.ForumPlanner._stay_scan
     ms = lambda: round((now[0] - clk.t0) * 1e3, 3)
+
+    def gc_in(kind, n):
+        if (kind, n) in clk.gc_calls:
+            clk.gc += 1
 
     def esc(self, f, r1, hold_end, rows):
         nf, lab = esc0(self, f, r1, hold_end, rows)
@@ -232,13 +242,18 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
             nf = np.asarray([0 if int(r) in clk.passing else max(int(n), 1) for r, n in zip(rows, nf)], np.int64)
         clk.n_esc += 1
         now[0] += (esc_ms + (esc_extra or {}).get(clk.n_esc, 0.0)) * 1e-3
+        gc_in("esc", clk.n_esc)
         clk.log.append(("esc", [int(r) for r in rows]))
         return nf, lab
 
     def hb(self, *a, **k):
         out = hb0(self, *a, **k)
         now[0] += hb_ms * 1e-3
+        clk.n_hb += 1
+        gc_in("hb", clk.n_hb)
         if k.get("cap") is False:
+            clk.n_hbu += 1
+            gc_in("hbu", clk.n_hbu)
             clk.log.append(("hb", [int(r) for r in a[4]]))
         return out
 
@@ -246,7 +261,15 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
         out = tail0(self, *a, **k)
         clk.n_tail += 1
         now[0] += (tail_ms + (tail_extra or {}).get(clk.n_tail, 0.0)) * 1e-3
+        gc_in("tail", clk.n_tail)
         clk.log.append(("tail", [int(r) for r in a[3]]))
+        return out
+
+    def scan(self, *a, **k):
+        out = scan0(self, *a, **k)
+        clk.n_scan += 1
+        now[0] += (clk.scan_ms + clk.scan_extra.get(clk.n_scan, 0.0)) * 1e-3
+        gc_in("scan", clk.n_scan)
         return out
 
     def pick(self, *a, **k):
@@ -263,7 +286,7 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
         return rob0(*a)
 
     def tick(self, *a, **k):
-        clk.t0, clk.n_tail, clk.n_esc = now[0], 0, 0
+        clk.t0, clk.n_tail, clk.n_esc, clk.n_hb, clk.n_hbu, clk.n_scan = now[0], 0, 0, 0, 0, 0
         clk.at.append({})
         out = tick0(self, *a, **k)
         clk.at[-1]["end"] = ms()
@@ -275,7 +298,9 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0
     monkeypatch.setattr(fp.ForumPlanner, "_escape_pick", pick)
     monkeypatch.setattr(fp.ForumPlanner, "_score_forum", score)
     monkeypatch.setattr(fp.ForumPlanner, "_ordinary_tick", tick)
+    monkeypatch.setattr(fp.ForumPlanner, "_stay_scan", scan)
     monkeypatch.setattr(fp, "_down_robust", robust)
+    monkeypatch.setattr(fp, "_gc_runs", lambda: clk.gc)
     monkeypatch.setattr(time, "perf_counter", lambda: now[0])
     return clk
 
@@ -634,15 +659,17 @@ def test_sols_late_check_counterexample_changes_nothing(wparams, warena, monkeyp
     assert "promoted_from" not in pl1.last_info["esc"]
 
 
-@pytest.mark.parametrize("tail_ms", [1.0, 4.0])
-def test_the_tail_estimate_is_measured_on_the_ticks_own_tail_check(wparams, warena, monkeypatch, tail_ms):
+@pytest.mark.parametrize("tail_ms, collected", [(1.0, False), (4.0, False), (4.0, True), (1.0, True)])
+def test_the_tail_estimate_is_measured_on_the_ticks_own_tail_check(wparams, warena, monkeypatch, tail_ms, collected):
     # Task 182 seq 283: the promotion's tail-check estimate is measured on the tick's own tail check too (two clock reads round
-    # it, after its result), the stage on or not: a 1 ms check takes the 2.5 ms seed half way down, a 4 ms one up at once
+    # it, after its result), the stage on or not: a 1 ms check takes the 2.5 ms seed half way down, a 4 ms one up at once.
+    # Seq 284: with a garbage collection inside the check the 4 ms one raises nothing (the 1 ms one still lowers it)
     from ssbot.combat.forum_planner import stay_cost
-    _cost_clock(monkeypatch, 2.0, 0.5, tail_ms)
+    clk = _cost_clock(monkeypatch, 2.0, 0.5, tail_ms)
+    clk.gc_calls = {("tail", 1)} if collected else set()
     pl, r = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
-    assert (r.idx, r.tail_ok) == (21, True) and pl.last_info.get("stay_pogo") is None
-    assert pl.stay_tail_s == pytest.approx(stay_cost(0.0025, tail_ms * 1e-3))
+    assert (r.idx, r.tail_ok) == (21, True) and pl.last_info.get("stay_pogo") is None and clk.gc == int(collected)
+    assert pl.stay_tail_s == pytest.approx(0.0025 if (collected and tail_ms > 2.5) else stay_cost(0.0025, tail_ms * 1e-3))
 
 
 SEEDS_353 = dict(stay_scan_s=0.002, stay_esc_s=0.003, stay_tail_s=0.0025)        # 48351df9's fixed estimates
@@ -683,6 +710,99 @@ def test_sols_formal_budget_the_promotion_runs_in_the_time_the_tick_leaves(wpara
     assert not sp["promoted"] and clk.log[len(log0):] == []
     cut = {"seeds_353": "scan", "tail_unmeasured": "scan", "esc_floor_353": "escape", "own_batch_slower": "escape"}[case]
     assert sp["cut"] == cut and (("rows" in sp) == (cut == "escape"))
+
+
+def test_the_collection_count_is_the_process_own():
+    # Task 182 seq 284: forum_planner._gc_runs counts every garbage collection this process runs (gc.get_stats; no clock read,
+    # no callback), so a change across a measured call means one ran in it
+    import gc
+    from ssbot.combat import forum_planner as fp
+    n0 = fp._gc_runs()
+    gc.collect(0)
+    assert fp._gc_runs() >= n0 + 1
+
+
+def test_a_collection_inside_a_call_never_raises_its_estimate():
+    # Task 182 seq 284 (Sol: a 2.45 ms gen-0 collection inside the f4827 scan raised the next tick's scan estimate past its
+    # time): a call a garbage collection ran in can only lower an estimate; without one a slower call raises it at once
+    from ssbot.combat.forum_planner import stay_cost
+    assert stay_cost(0.00005, 0.0025, gc_ran=True) == pytest.approx(0.00005)
+    assert stay_cost(0.003, 0.001, gc_ran=True) == pytest.approx(0.002)
+    assert stay_cost(0.00005, 0.0025) == pytest.approx(0.0025)
+
+
+MEAS = dict(esc_batch_s=0.0003, stay_tail_s=0.00045, stay_scan_s=0.00005)      # as measured on earlier ticks (formal P sized)
+
+
+@pytest.mark.parametrize("case", ["gc_once", "pause_once", "slow_twice", "gc_twice"])
+def test_sols_q2_pause_the_next_tick_recovers_repeated_slowness_is_refused(wparams, warena, monkeypatch, case):
+    # Task 182 seq 284 (Sol: the formal Q2 f4827 / f4828): two consecutive ticks of one planner on the formal budget of the test
+    # above (the escape check in at 7.7 ms, 1.6 ms left; the estimates as measured: batch 0.3, tail 0.45, scan 0.05 ms). The
+    # first tick's scan takes 2.45 ms more: it starts in time, then no time is left for the escape batch - cut, the choice (row
+    # 21) sent as made, as with the preference off. With a garbage collection counted in that scan (Sol's event) the scan's
+    # estimate stays 0.05 ms and the second tick, with no pause, scans and promotes. The same pause without a collection (a
+    # pause of another cause or real slowness) raises it at once to 2.5 ms: the second tick does not even scan - and repeated
+    # (slow again), it is refused before it starts. A collection at both ticks: each falls back in turn, nothing taken late
+    clk = _cost_clock(monkeypatch, 0.3, 0.5, 0.4, score_ms=6.7, scan_ms=0.05)
+    first = {}
+
+    def two(pl, args):
+        for k, v in MEAS.items():
+            setattr(pl, k, v)
+        clk.scan_extra = {1: 2.45}
+        clk.gc_calls = {("scan", 1)} if case.startswith("gc") else set()
+        r_a = pl.tick(*args)
+        first.update(r=r_a, sp=dict(pl.last_info["stay_pogo"]), scan_est=pl.stay_scan_s, end=clk.at[-1]["end"],
+                     esc=dict(pl.last_info["esc"]))
+        clk.scan_extra = {1: 2.45} if case in ("slow_twice", "gc_twice") else {}
+        clk.gc_calls = {("scan", 1)} if case == "gc_twice" else set()
+
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False),
+                    pre=lambda pl, a: [setattr(pl, k, v) for k, v in MEAS.items()], **REAL)
+    pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), pre=two, **REAL)
+    sp_a, sp_b = first["sp"], pl1.last_info["stay_pogo"]
+    # the paused tick: scanned in time, cut before the batch, the tick's own send and escape record
+    assert sp_a["left"] == pytest.approx(1.6) and sp_a["cut"] == "escape" and not sp_a["promoted"]
+    assert (first["r"].idx, first["r"].mask, first["r"].S) == (r0.idx, r0.mask, r0.S) == (21, 1048576, 0)
+    assert {k: v for k, v in first["esc"].items() if k != "ms"} == {k: v for k, v in pl0.last_info["esc"].items() if k != "ms"}
+    assert first["end"] == pytest.approx(8.4 + 0.05 + 2.45) and sp_a.get("gc") == (["scan"] if case.startswith("gc") else None)
+    assert first["scan_est"] == pytest.approx(0.00005 if case.startswith("gc") else 0.0025)
+    if case == "gc_once":
+        assert sp_b["promoted"] and r1.name.startswith("ATTACK(down)") and not r1.S and sp_b["est"][0] == pytest.approx(0.05)
+        assert clk.at[-1]["end"] <= 10.0
+    elif case == "gc_twice":
+        assert not sp_b["promoted"] and sp_b["cut"] == "escape" and sp_b["gc"] == ["scan"] and r1.idx == sp_b["orig"]
+    else:
+        assert not sp_b["promoted"] and sp_b["cut"] == "scan" and sp_b["est"][0] == pytest.approx(2.5) and "rows" not in sp_b
+
+
+@pytest.mark.parametrize("step", ["escape", "tail", "swing"])
+def test_a_collection_inside_a_promotion_step_raises_nothing(wparams, warena, monkeypatch, step):
+    # Task 182 seq 284: the promotion's escape batch and tail check (the formal budget, both 0.2 ms slower than their
+    # estimates) and a swing's hit branch (test_under_the_real_deadlines' swing case, its estimate 0.1 ms, the call 0.5 ms):
+    # each measured with a garbage collection inside keeps its estimate (and the record names the step); without one, the
+    # slower call raises it at once. The promotion itself is taken either way (its deadline checks unchanged)
+    def run(collect):
+        if step == "swing":
+            clk = _cost_clock(monkeypatch, 2.0, 0.5, 1.0)
+            clk.gc_calls = {("hbu", 1)} if collect else set()
+            pre = lambda pl, a: setattr(pl, "stay_hb_s", 0.0001)
+            pl, r = _tick(wparams, warena, monkeypatch, RX - 1.2, 1.5, -6.0, _prefs(True, stance=RX - 7.0), swing_age=1,
+                          pre=pre, **REAL)
+            return pl, r, pl.stay_hb_s
+        clk = _cost_clock(monkeypatch, 0.3, 0.5, 0.4, score_ms=6.7, esc_extra={2: 0.2}, tail_extra={2: 0.2})
+        clk.gc_calls = {("esc" if step == "escape" else "tail", 2)} if collect else set()
+        pl, r = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True),
+                      pre=lambda pl, a: [setattr(pl, k, v) for k, v in MEAS.items()], **REAL)
+        return pl, r, (pl.stay_esc_s if step == "escape" else pl.stay_tail_s)
+
+    pl_c, r_c, est_c = run(True)
+    pl_n, r_n, est_n = run(False)
+    assert pl_c.last_info["stay_pogo"]["promoted"] and pl_n.last_info["stay_pogo"]["promoted"] and r_c.idx == r_n.idx
+    assert pl_c.last_info["stay_pogo"]["gc"] == [{"swing": "hb"}.get(step, step)] and "gc" not in pl_n.last_info["stay_pogo"]
+    before = {"escape": 0.0, "tail": 0.000425, "swing": 0.0001}[step]          # (tail: after the tick's own 0.4 ms check)
+    took = {"escape": 0.0005, "tail": 0.0006, "swing": 0.0005}[step]
+    assert est_c == pytest.approx(before) and est_n == pytest.approx(took)
 
 
 def test_a_promoted_send_carries_its_own_escape_record(wparams, warena, monkeypatch):

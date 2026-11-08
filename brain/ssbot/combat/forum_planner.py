@@ -67,6 +67,7 @@ and puts the effective mask loss (masks x P - hits landed / 4) after FORCED_RISK
 enemy's support (and its reaction) by its measured knockback in the hit branch; "free" is the supervisor's (the clash
 gate and I3 follow FilterContext.free).
 """
+import gc
 import math
 import os
 import time
@@ -724,10 +725,20 @@ def esc_known(ranked: np.ndarray, row, fail, checked: int, k: int) -> list[int]:
     return [int(r) for r in head[:min(int(checked), len(head))]]
 
 
-def stay_cost(est: float, took: float) -> float:
-    """Task 182 seq 282: the over_stay promotion's estimate of a check's cost (s) after one that took `took`: up at once to a
-    slower one, down by halves (a conservative start for the next one; the result is still checked against the deadline)."""
+def stay_cost(est: float, took: float, gc_ran: bool = False) -> float:
+    """Task 182 seq 282 / 284: the over_stay promotion's estimate of a check's cost (s) after one that took `took`: up at once
+    to a slower one, down by halves (a conservative start for the next one; the result is still checked against the deadline).
+    A call a garbage collection ran in (gc_ran) only lowers it: that time is the collection's, not the call's (Sol seq 284: a
+    2.45 ms gen-0 collection inside the f4827 scan raised the next tick's estimate past the time it had)."""
+    if gc_ran and float(took) > float(est):
+        return float(est)
     return max(float(took), 0.5 * float(est) + 0.5 * float(took))
+
+
+def _gc_runs() -> int:
+    """Task 182 seq 284: the garbage collections this process has run (gc.get_stats: no clock, no callback); a change across
+    a measured call means one ran in it (stay_cost's gc_ran)."""
+    return sum(int(s["collections"]) for s in gc.get_stats())
 
 
 @numba.njit(cache=True, parallel=True)
@@ -1472,7 +1483,8 @@ class ForumPlanner(Planner):
         # call (esc_batch_s, measured on its every batch) until a batch of its own is measured (stay_esc_s from 0); a tail
         # check is measured on the tick's own tail checks too (_ordinary_tick, after its check); the scan, never run before,
         # starts at 0.5 ms (every scan measured offline: 0.06-0.14 ms on E16-23, 0.5 on a process's first call; Sol's formal
-        # P <= 0.06); a swing's hit branch keeps 3 ms (the tick measures no uncapped branch of its own)
+        # P <= 0.06); a swing's hit branch keeps 3 ms (the tick measures no uncapped branch of its own). Seq 284: a call a
+        # garbage collection ran in never raises its estimate (stay_cost's gc_ran, _gc_runs); repeated slow calls still do
         self.stay_scan_s = 0.0005
         self.stay_hb_s = 0.003
         self.stay_esc_s = 0.0
@@ -5269,15 +5281,16 @@ class ForumPlanner(Planner):
                 a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
-                tt_ = time.perf_counter()
+                gcs_, tt_ = _gc_runs(), time.perf_counter()
                 if knife_tails:
                     from ssbot.combat.forum_knife_plan import pick_tail
                     i, tail_ok = pick_tail(self, f, r1, hold_end, ranked, P + T, i, knife_tails)
                 else:
                     i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
-                # Task 182 seq 283: the over_stay promotion's tail estimate, measured on this check too (after it: the check,
-                # its result and its time are the tick's own as before)
-                self.stay_tail_s = stay_cost(self.stay_tail_s, time.perf_counter() - tt_)
+                # Task 182 seq 283 / 284: the over_stay promotion's tail estimate, measured on this check too (after it: the
+                # check, its result and its time are the tick's own as before; a collection inside it raises nothing)
+                took_s = time.perf_counter() - tt_
+                self.stay_tail_s = stay_cost(self.stay_tail_s, took_s, _gc_runs() != gcs_)
             elif carried:
                 tail_ok = True
             if n_chain and C0 <= i < C0 + n_chain and (esc_unsafe or (cfg.tail_k > 0 and tail_ok is not True)):
@@ -5332,9 +5345,12 @@ class ForumPlanner(Planner):
                 elif not in_time(self.stay_scan_s + tail_s):
                     stay_info["cut"] = "scan"
                 else:
-                    tc_ = time.perf_counter()
+                    gcs_, tc_ = _gc_runs(), time.perf_counter()
                     stay_scan = self._stay_scan(sc, r1, start, prefs, sp_t)
-                    self.stay_scan_s = stay_cost(self.stay_scan_s, time.perf_counter() - tc_)
+                    took_s, gcr_ = time.perf_counter() - tc_, _gc_runs() != gcs_
+                    self.stay_scan_s = stay_cost(self.stay_scan_s, took_s, gcr_)
+                    if gcr_:
+                        stay_info.setdefault("gc", []).append("scan")
                 if stay_scan is not None:
                     stay_m, J_stay = stay_scan["stay_pogo"], stay_scan["J_stay"]
                     plain = np.zeros(N, bool)
@@ -5357,13 +5373,16 @@ class ForumPlanner(Planner):
                         if len(cands) and infl[cands].any():
                             ri = cands[infl[cands]]
                             if in_time(self.stay_hb_s + tail_s):
-                                tc_ = time.perf_counter()
+                                gcs_, tc_ = _gc_runs(), time.perf_counter()
                                 sc_p = dict(sc, first_f=stay_scan["stay_ff"], first_t=stay_scan["stay_ft"],
                                             first_k=stay_scan["stay_fk"], first_face=stay_scan["stay_face"])
                                 bud_p = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": budget["react_cache"]}
                                 sh_p, _, _ = self._hit_branch(f, start, latched, sc_p, ri, tk, enemy_only, bud_p,
                                                               cap=False, ev_base=self._ds_evb(ri, D0, ds))
-                                self.stay_hb_s = stay_cost(self.stay_hb_s, time.perf_counter() - tc_)
+                                took_s, gcr_ = time.perf_counter() - tc_, _gc_runs() != gcs_
+                                self.stay_hb_s = stay_cost(self.stay_hb_s, took_s, gcr_)
+                                if gcr_:
+                                    stay_info.setdefault("gc", []).append("hb")
                                 bad_ = {int(r_) for r_, s_ in zip(ri, sh_p) if s_}
                                 stay_info["inflight_unsafe"] = sorted(bad_)
                             else:
@@ -5385,9 +5404,12 @@ class ForumPlanner(Planner):
                                 if not in_time(max(self.esc_batch_s, self.stay_esc_s) + tail_s):
                                     stay_info["cut"] = "escape"
                                     return None
-                                tc_ = time.perf_counter()
+                                g0_, tc_ = _gc_runs(), time.perf_counter()
                                 nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(todo_, np.int64))
-                                self.stay_esc_s = stay_cost(self.stay_esc_s, time.perf_counter() - tc_)
+                                t_, gr_ = time.perf_counter() - tc_, _gc_runs() != g0_
+                                self.stay_esc_s = stay_cost(self.stay_esc_s, t_, gr_)
+                                if gr_:
+                                    stay_info.setdefault("gc", []).append("escape")
                                 esc_have.update({r_: int(n_) for r_, n_ in zip(todo_, nf_)})
                                 n_new[0] += len(todo_)
                             return np.asarray([esc_have[int(r_)] for r_ in rows_], np.int64)
@@ -5398,14 +5420,17 @@ class ForumPlanner(Planner):
                             if not in_time(self.stay_tail_s):
                                 stay_info["cut"] = "tail"
                                 return False
-                            tc_ = time.perf_counter()
+                            g0_, tc_ = _gc_runs(), time.perf_counter()
                             if knife_tails:
                                 from ssbot.combat.forum_knife_plan import pick_tail
                                 _, ok_ = pick_tail(self, f, r1, hold_end, np.asarray([r_], np.int64), P + T, i,
                                                    knife_tails)
                             else:
                                 _, ok_ = self._tail_pick(f, r1, hold_end, np.asarray([r_], np.int64), P + T, i)
-                            self.stay_tail_s = stay_cost(self.stay_tail_s, time.perf_counter() - tc_)
+                            t_, gr_ = time.perf_counter() - tc_, _gc_runs() != g0_
+                            self.stay_tail_s = stay_cost(self.stay_tail_s, t_, gr_)
+                            if gr_:
+                                stay_info.setdefault("gc", []).append("tail")
                             return bool(ok_)
 
                         promo, checked_ = stay_promote(cands, esc_fn, tail_fn)
@@ -5658,7 +5683,8 @@ class ForumPlanner(Planner):
             # of the choice, their escape failures (-1: failed in the tick's own check) and tails; esc_new: rows it checked
             # anew; inflight_unsafe: those a swing's hit branch failed; cut / inflight_cut: the step the deadline stopped,
             # "final": a result in after it; ms: its own time; seq 283 - left: the ms its start had before the escape
-            # deadline, est: the ms its scan, escape batch and tail check were estimated at then)
+            # deadline, est: the ms its scan, escape batch and tail check were estimated at then; seq 284 - gc: its steps a
+            # garbage collection ran in, whose time raised no estimate)
             si_ = dict(stay_info)
             sp_r = None if stay_scan is None else stay_scan["stay_pogo"]
             ch_ = bool(sp_r is not None and 0 <= res.idx < N and sp_r[res.idx] and safe[res.idx])
