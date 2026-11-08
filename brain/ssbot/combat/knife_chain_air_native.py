@@ -507,7 +507,13 @@ class NativeManualAirChain(NativeChainB2):
         entry=getattr(prefs,"entry_attack",None)
         side=entry is not None and entry.target==goal.target and entry.kind=="side"
         side_approach=side and goal.source_kind=="SWITCH"
-        if (side and not side_approach and not transfer.bounce_tail_pending(state,goal,self._clock)) or goal.target in getattr(prefs,"no_hit",()):
+        # Task 182 seq 289 (the person: the blade after a dodge must connect; live #40 123959): L2's over_stay keeps its own target's down
+        # slash (stay_pogo): the chain's stomp on it is that down slash, for a BOUNCE goal while its Idle is fresh (entered on the bounce
+        # itself, the buddy attacking, no hit since: the evidence its strike witness needs)
+        stay=frozenset(getattr(prefs,"stay_pogo",()))
+        ev=self._idle_ev.get(goal.target)
+        if goal.source_kind!="BOUNCE" or not (isinstance(ev,dict) and ev.get("hit") is None and ev.get("buddy") is True):stay=frozenset()
+        if (side and not side_approach and not transfer.bounce_tail_pending(state,goal,self._clock)) or goal.target in frozenset(getattr(prefs,"no_hit",()))-stay:
             self._transfer_ready=False
         blade="side" if side else "air_contact" if air_attack and self._transfer_ready else "stomp" if self._transfer_ready else "slam" if st=="Slam Antic" else "unavailable"
         status=(goal,st,blade,spent)
@@ -1390,14 +1396,14 @@ class NativeManualAirChain(NativeChainB2):
 
     def _middle_choice(self,state,game,sim,geo,plan,gap,hb,old):
         """Task 183: the middle rows (transfer.middle_candidates: hold and release, or opening with her free air dash on a
-        first decision) nearest the goal (the gap's centre; an owned route keeps its goal), scanned whole to the modelled
+        first decision) nearest the goal (a fresh route: transfer.near_landing_goal; an owned route keeps its goal), scanned whole to the modelled
         ground for all owners with no exemption, MIDDLE_SCAN_N per batched pass in that order; the first clean one, or None."""
         from ssbot.knowledge import kinematics as K
         f=state["f"]
         if old is not None:
             kept=self._owned_route(state,game,sim,geo,plan,gap,old,"middle")
             if kept is not None:return kept
-        goal_x=gap.seam if old is None else min(max(float(old["goal_x"]),gap.lo),gap.hi)
+        goal_x=transfer.near_landing_goal(gap,hb) if old is None else min(max(float(old["goal_x"]),gap.lo),gap.hi)
         dash=old is None and transfer.air_dash_free(sim)
         cands=transfer.middle_candidates(sim,gap,hb,goal_x,dash=dash)
         if not cands:
@@ -1419,10 +1425,14 @@ class NativeManualAirChain(NativeChainB2):
                                    "first_box":None if hit is None else [float(v) for v in p.box[hit.frame-p.origin]]})
                     continue
                 recipe,r,commands,j,box,_,_=c
+                fall=self._fall_slash(state,sim,geo,gap,c)
+                if fall is not None:commands,p,sc,slash_at=fall;b=p.box[-1]
+                else:slash_at=None
                 follow={"kind":"middle","recipe":recipe,"dir":int(transfer.middle_direction(hb,goal_x)),"F0":f+2,
                         "masks":[int(m) for m in commands],
                         "release_F":f+2+int(r),"land_f":int(p.through),"goal_x":float(goal_x),"lo":gap.lo,"hi":gap.hi,
-                        "other":int(gap.other),"landing_box":[float(v) for v in b],"rank":rank,"candidates":len(cands)}
+                        "other":int(gap.other),"landing_box":[float(v) for v in b],"rank":rank,"candidates":len(cands),
+                        "fall_slash":slash_at}
                 self._note("transfer_follow_middle",frame=f,owned=old is not None,dash_free=dash,
                            **{k:v for k,v in follow.items() if k!="masks"},rejected_before=firsts,
                            scope="whole route to the modelled ground, all owners, no exemption; landing inside the gap by MIDDLE_PAD_U")
@@ -1430,6 +1440,25 @@ class NativeManualAirChain(NativeChainB2):
         self._note("transfer_follow_middle_blocked",frame=f,lo=gap.lo,hi=gap.hi,goal_x=goal_x,owned=old is not None,
                    dash_free=dash,candidates=len(cands),scanned=firsts)
         return None
+
+    def _fall_slash(self,state,sim,geo,gap,c):
+        """Task 182 seq 289 (the person: falling to the Clapper's head height, one slash before the landing): the chosen clean row (a first
+        middle route) with its pre-landing side slash (transfer.fall_slash_commands), rolled again and its whole route scanned for all owners
+        with the same gates as the row itself. (commands, route, scan, press index) or None: the row stays as it was."""
+        from ssbot.knowledge import kinematics as K
+        made=transfer.fall_slash_commands(sim,c[2],c[5],gap,((state.get("hero") or {}).get("tm") or {}).get("atk_cd"))
+        if made is None:return None
+        commands,at=made
+        ro=sim.roll(np.asarray([commands],np.int64));j=transfer._landing_index(ro.flags[0],sim.off)
+        if j is None:return None
+        b=ro.box[0,j];way=ro.box[0,1:j+1]
+        if (not np.isfinite(b).all() or b[0]<gap.lo+transfer.MIDDLE_PAD_U or b[2]>gap.hi-transfer.MIDDLE_PAD_U
+                or transfer._meets(way,gap.bounced) or transfer._meets(way,gap.other_body)):return None
+        keys=commands[:j-sim.off+1]
+        p=transfer.route_path(sim,keys,np.asarray(ro.box[0,:j+1],float).copy(),np.asarray(ro.flags[0,:j+1]).copy())
+        sc=geo.scan_batch([p])[0]
+        if not sc.complete or sc.contacts or not p.flags[-1]&K.F_GROUND:return None
+        return keys,p,sc,at
 
     def _side_landing_choice(self,state,game,sim,geo,plan,prefs,old):
         """Task 183: the existing ordinary left / right landing post types from the current state (the key held to the

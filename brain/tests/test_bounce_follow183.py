@@ -184,7 +184,7 @@ def test_gap_first_legal_key_goes_to_the_middle_and_lands_between_the_bodies(mon
     assert log[-1]['ground'] and bout.n.runner.run is None and bout.n.commitment is None
     assert not bout.n._failure_exposures                      # the move completed: no failure exposure
     masks = first['offer'].details['follow_masks']
-    assert any(m & B['L'] for m in masks) and masks[-1] & LR == 0                       # released over the gap
+    assert any(m & B['L'] for m in masks)                                               # toward the gap (seq 289: the near goal may hold to the landing)
     assert first['offer'].details['checked_through'] == follow['land_f']                 # chosen: the whole route scanned
     owned = log[1]['offer'].details
     assert owned['checked_through'] == F0 + 1 + T.FOLLOW_SCAN_F                           # owned: its next frames

@@ -1199,6 +1199,7 @@ def test_the_two_play_idle_hit_keeps_to_the_phase_that_asks_no_hit():
     two = object.__new__(cls)
     two.idle = TP.IdleRun(iid=7, f0=90, re=False, d0=2., hp0=5)
     two.entry = {}
+    two.rec_entry, two.landed_now = {}, False
     two.plan_no_hit = frozenset({7})
     two._second = lambda f: None
     clapper = lambda iid, x: dict(iid=iid, type_key=TP._sp.CLAPPER, pos=[x, 3.], hp=100, fsms=[dict(name="Control", state="Idle", t=.5)])

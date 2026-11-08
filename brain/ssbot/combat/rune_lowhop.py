@@ -993,10 +993,10 @@ class RuneLowHop:
                     if plan["P"] <= k:
                         ok = latch is None or bool(int(latch(M_J)) & M_J)
                         if ok:
-                            r.P, r.H = k, plan["H"]
+                            r.P, r.H = k, (self._lowest_hold(plan, thr, k, c.h_min) if self.b2 else plan["H"])
                             r.phase = "hop"
                             if self.b2:
-                                r.big += plan["H"] > 16
+                                r.big += r.H > 16
                                 r.split += plan.get("n", 0) < plan.get("of", 0)
                             m = M_J | cont
                             if not cont and self._slash_ok(r, s, e, st, tin, k, d, tm, air=False, j=0):
@@ -1150,6 +1150,20 @@ class RuneLowHop:
                 r.owners.add(int(o))
         r.fcw = out
         return out
+
+    @staticmethod
+    def _lowest_hold(plan: dict, thr: list, k: int, h_min: int) -> int:
+        """Task 182 seq 289 (the person: the low hop, slashing through it): a plan made early holds high for the windows the
+        forecast showed then (the rows still to come, 4 windows, H 20-26), and is kept while it still clears them; at the
+        press, this tick's windows decide: the lowest hold whose lowest lane clears every window of this hop (those starting
+        after the press, up to the plan's own w_end; a split plan's later ones are its second hop's) from the press frame k,
+        none landing before its last window; else the planned hold."""
+        rel = [w for w in thr if k < w[0] <= plan.get("w_end", 1 << 30)]
+        for H in range(h_min, plan["H"]):
+            lo_t = HOP_LO[H]
+            if all(w1 - k < len(lo_t) and all(lo_t[j] >= th for j in range(w0 - k, w1 - k + 1)) for w0, w1, th in rel):
+                return H
+        return plan["H"]
 
     @staticmethod
     def _plan_holds(plan: dict, thr: list, k: int) -> bool:

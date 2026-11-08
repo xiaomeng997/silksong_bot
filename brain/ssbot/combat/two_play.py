@@ -272,6 +272,9 @@ OPEN_X = 25.0                # her x from the wake (c2 + 3.97 u: in the side sla
 OPEN_INTRO_X = 26.5          # the intro's walk stops here (the policy walks the rest)
 OPEN_END_S = 4.0             # the opening script ends this long after the wake at the latest
 WIN_F = 30                   # IdleHit: frames after the Idle entry it may still start (the coin fires at 15)
+FALL_SLASH_BOTTOM = 6.2      # Task 182 seq 289 (the person: falling to its head height, one slash before the landing): IdleHit in the air: her box bottom at most this, falling (knife_chain_transfer.FALL_SLASH_BOTTOM)
+AIR_BODY_U = 1.0             # ... and her centre at least this from its body edge, a wide margin: her half width .25 + the turn and press frames' keys toward it (3 x slam_play.NEAR_V .165 u) + spare; no route scan here, the keys may not carry her box into it
+IDLEHIT_RECOVER = "Slam Recover"   # Task 182 seq 289: IdleHit starts here too (the hammer off, its Control takes no hit: FSM facts, TOOK DAMAGE only from Idle)
 
 # ---- SP9b: the escape jump ----
 ESC_ANTIC = ("Jump Antic", "Cast Slam Antic")
@@ -920,6 +923,9 @@ class TwoPlay:
         self.manual_focus = False                       # explicit manual-B L2 scene owns target/stance preferences
         self.prev: dict = {}             # iid -> (Control state, state time) on the last tick
         self.entry: dict = {}            # iid -> re-entry (bool) for the Clappers entering Idle this tick
+        self.rec_entry: dict = {}        # Task 182 seq 289: iid -> False for the Clappers entering Slam Recover this tick (IdleHit only)
+        self.landed_now = False          # Task 182 seq 289: this tick is her first on the ground
+        self._airborne = False
         self.idle: IdleRun | None = None
         self.idle_done: list[IdleRun] = []
         self.no: Counter = Counter()
@@ -1005,7 +1011,11 @@ class TwoPlay:
         self._rune_threats(f, s)
         hx = _sp.hero_x(s) if (s.get("hero") or {}).get("box") or (s.get("hero") or {}).get("pos") else None
         self.entry = {}
+        self.rec_entry = {}
         self.plan_no_hit = frozenset()
+        ground_now = bool(_sp.on_ground(s))
+        self.landed_now = ground_now and self._airborne                # Task 182 seq 289: this tick is her first on the ground
+        self._airborne = not ground_now
         antics = []
         asw_antics = []
         pm_antics = []
@@ -1017,6 +1027,8 @@ class TwoPlay:
             pst = self.prev.get(iid)
             if st == "Idle" and (pst is None or pst[0] != "Idle" or tin + 0.5 / 60.0 < pst[1]):
                 self.entry[iid] = pst is not None and pst[0] == "Idle"
+            elif st == IDLEHIT_RECOVER and pst is not None and pst[0] != IDLEHIT_RECOVER:
+                self.rec_entry[iid] = False       # Task 182 seq 289: the hammer is off; a hit before its Idle draws no reaction
             if ESC and st in ESC_ANTIC and (pst is None or pst[0] not in ESC_PRE):
                 antics.append(e)
             if ASW and st in ASW_ANTIC and (pst is None or pst[0] != st):
@@ -1063,7 +1075,7 @@ class TwoPlay:
             hp = int((s.get("hero") or {}).get("health") or 0)
             if e is None or len(_sp.clappers(s)) != 2:
                 self._idle_close("gone" if e is None else "one")
-            elif _sp.control(e)[0] != "Idle" or r.iid in self.entry or f - r.f0 > WIN_F or hp < r.hp0:
+            elif _sp.control(e)[0] not in ("Idle", IDLEHIT_RECOVER) or r.iid in self.entry or f - r.f0 > WIN_F or hp < r.hp0:
                 self._idle_close("hit" if r.k_hit is not None else (
                     "hurt" if hp < r.hp0 else "re-entry" if r.iid in self.entry else
                     "left idle" if _sp.control(e)[0] != "Idle" else "window"))
@@ -1153,14 +1165,20 @@ class TwoPlay:
             F = min(cs, key=lambda e: abs(float(e["pos"][0]) - hx))
         iid = F.get("iid")
         st, tin = _sp.control(F)
-        entry = iid in self.entry
+        entry = iid in self.entry or iid in self.rec_entry
         if r is not None and (r.iid != iid or entry):
             self._idle_close("focus" if r.iid != iid else "re-entry")      # (observe closes the other ends)
             r = None
         if r is None and entry:
             hx = _sp.hero_x(s)
-            r = self.idle = IdleRun(iid=iid, f0=f, re=bool(self.entry[iid]),
+            r = self.idle = IdleRun(iid=iid, f0=f, re=bool(self.entry.get(iid)),
                                     d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
+        elif r is None and self.landed_now and st in ("Idle", IDLEHIT_RECOVER):
+            # Task 182 seq 289 (the person: the landing slash): she has just landed with it in the side slash's reach: the same run and
+            # press as its Idle entry (every guard below), nothing else starts here (out of reach: the planner as before)
+            hx = _sp.hero_x(s)
+            if slash_meets(self._xw(s), 1 if float(F["pos"][0]) > hx else -1, body_span(F)):
+                r = self.idle = IdleRun(iid=iid, f0=f, re=False, d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
         if r is None or r.k_press is not None:
             return None
         if iid in self.plan_no_hit:
@@ -1195,8 +1213,8 @@ class TwoPlay:
         jh = self.jh if (JUMPHIT and self.jh is not None and self.jh.I == iid) else None
         if not accepting:
             why = "no input"
-        elif not ground:
-            why = "air"
+        elif not ground and not (float((h.get("vel") or (0.0, 0.0))[1]) < 0.0 and (h.get("box") or (0.0, 99.0))[1] <= FALL_SLASH_BOTTOM):
+            why = "air"                          # (seq 289: on the way down at its head height the same slash goes, before the landing)
         elif jh is not None and jh.phase != "hit":
             why = "jh leave"                         # SP10c: she leaves J's landing now
         elif jh is not None and jh.f_leave is not None and f + SEND_AHEAD + self.jcfg.slash_f > jh.f_leave:
@@ -1207,12 +1225,15 @@ class TwoPlay:
             r.why = r.why or why
             return None
         span = body_span(F)
+        if not ground and ((span[0] - hx) if look > 0 else (hx - span[1])) < AIR_BODY_U:
+            r.why = r.why or "air body"              # (seq 289: the row keeps the keys)
+            return None
         if slash_meets(hx, look, span):
             if not self._atk_ready(s):
                 # in reach, the attack not ready: stand still when it is ready inside the window, else the planner
                 cd = float(((h.get("tm") or {}).get("atk_cd")) or 0.0) * 60.0 - (SEND_AHEAD - 1)
                 r.why = r.why or "cooldown"
-                if k + cd <= WIN_F:
+                if ground and k + cd <= WIN_F:           # (seq 289: in the air the row keeps its keys, no standing still)
                     r.sent.append((f, 0))
                     return 0
                 return None
@@ -1223,6 +1244,9 @@ class TwoPlay:
             m = self._press(f, toward)
             r.sent.append((f, m))
             return m
+        if not ground:
+            r.why = r.why or "air far"               # (seq 289: the air branch is the press only; no walk toward it in the air)
+            return None
         gap = (span[0] - hx) if look > 0 else (hx - span[1])
         need = max(0.0, gap - (_sp.SLASH_X[1] - 0.15)) / WALK_U
         if k + need > WIN_F:

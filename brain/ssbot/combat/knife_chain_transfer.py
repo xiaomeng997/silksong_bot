@@ -743,6 +743,10 @@ def air_approach_keys(x):
 # types (knife_chain_post_actions) from the current state, if one is legal; an owned landing re-chooses a clean middle.
 FOLLOW_LINKS=frozenset({"middle","land"})
 MIDDLE_PAD_U=.5          # forum_v2.FOCUS_M: the chosen landing box stays this far inside each near body edge
+LAND_GAP_U=2.0           # Task 182 seq 289: a first middle landing aims this far, box to box, from the just-hit body's Idle pose facing her: inside the side slash's reach (3.12 u from her centre, 2.87 box to box; real hits 2.36 median)
+LAND_BODY_U=2.2516       # its Idle body from the root toward her (map2.clapper Idle / Walk fit: every pose within root +- 2.2516; Task 179 #321)
+FALL_SLASH_BOTTOM=6.2    # Task 182 seq 289 (the person: falling to its head height, one slash before the landing): her box bottom at the press no higher than this (its Idle top 6.92; slam_play's near slash_y 3.2 u over the standing y)
+FALL_SLASH_X=3.02        # the side slash's reach from her centre (slam_play.SLASH_X 3.12), the last .1 spare
 MIDDLE_HORIZON_F=96      # hold-and-release rows rolled (the live flights land within 60 frames of the tail end)
 SEAM_TOL_U=.25           # the seam aim: no side key within this of the aim point
 SEAM_INSET_U=.5          # the seam aim stays over the target body this far inside its near edge
@@ -783,7 +787,7 @@ def two_gap(state,caster):
     right=float(bb[0])+float(bb[2])>float(ob[0])+float(ob[2])
     lo,hi=(float(ob[2]),float(bb[0])) if right else (float(bb[2]),float(ob[0]))
     return NS(caster=b["iid"],other=o["iid"],direction=B["L"] if right else B["R"],lo=lo,hi=hi,width=hi-lo,
-              seam=.5*(lo+hi),bounced=tuple(float(v) for v in bb),other_body=tuple(float(v) for v in ob))
+              seam=.5*(lo+hi),bounced=tuple(float(v) for v in bb),other_body=tuple(float(v) for v in ob),root=float(b["pos"][0]))
 
 
 def _hero_box(h):
@@ -796,6 +800,38 @@ def _hero_box(h):
 def standable(gap,hero_box):
     """Task 183: her box fits between the two near body edges with MIDDLE_PAD_U on each side."""
     return bool(gap is not None and hero_box is not None and gap.width>=hero_box[2]-hero_box[0]+2*MIDDLE_PAD_U)
+
+
+def fall_slash_commands(sim,row,boxes,gap,atk_cd_s):
+    """Task 182 seq 289 (the person: falling to the Clapper's head height, one side slash before the landing): the row's keys with a
+    pre-landing side slash at the just-hit body, or None: the first command frame m of the fall (box bottom <= FALL_SLASH_BOTTOM, before the
+    landing, the attack cooldown over by then) from which its Idle body lies inside the slash's reach: one turn frame (the key toward it, m - 1), then
+    the press (two frames, attack and the key toward it, as slam_play's near slash). row: the keys through the landing; boxes: the row's rollout
+    (index sim.off + m). (commands, m). The caller rolls and scans the changed row again before it is used."""
+    toward=B["L"] if gap.direction==B["R"] else B["R"]
+    edge=gap.root+(LAND_BODY_U if gap.direction==B["R"] else -LAND_BODY_U)
+    ready=max(1,int(math.ceil(max(float(atk_cd_s or 0.),0.)*60.))-2)
+    row=np.asarray(row,np.int64)
+    for m in range(ready,len(row)-1):
+        b=boxes[sim.off+m]
+        if not np.isfinite(b).all() or b[1]>FALL_SLASH_BOTTOM:continue
+        centre=.5*(b[0]+b[2])
+        if abs(centre-edge)>FALL_SLASH_X:continue
+        out=row.copy();out[m-1]=toward;out[m:m+2]=B["A"]|toward
+        return out,m
+    return None
+
+
+def near_landing_goal(gap,hero_box):
+    """Task 182 seq 289 (the person: the blade after a dodge must connect): where a first middle landing aims. Still the
+    gap between the two bodies, but the point LAND_GAP_U (box to box: her half width added) from the just-hit body's near
+    edge as it will stand when she lands (Idle, turned to face her: root + LAND_BODY_U, so its slam pose now does not move the
+    aim), the existing landing attack's reach, when that point lies on that body's side of the centre; a narrower gap keeps
+    its centre, never squeezed toward the other body. Only the candidates' order: the rows, the whole-route scan for all
+    owners, MIDDLE_PAD_U and an owned route's goal stay as they are."""
+    off=LAND_BODY_U+LAND_GAP_U+.5*(hero_box[2]-hero_box[0])
+    goal=gap.root+off if gap.direction==B["R"] else gap.root-off
+    return gap.seam if (goal-gap.seam)*(1. if gap.direction==B["R"] else -1.)>=0. else goal
 
 
 # seq 265: the person's close pair. Live 0ed5c779 3495 / 4156 / 4431 gaps 5.58 / 4.27 / 7.79 u and Sol seq 261's w13_331
