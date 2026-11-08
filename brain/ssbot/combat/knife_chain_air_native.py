@@ -91,7 +91,7 @@ class NativeManualAirChain(NativeChainB2):
         self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
-        self.refused_strike=None   # Sol seq 272 B: (frame, target, kind, source) of the latest transfer strike refused (recovered)
+        self.refused_strike=None   # Sol seq 272 B / 274: (frame, target, kind, source): the entry's strike a gate's contact refused
         self._return_admission_noted=None
         self._idle_ev={};self._alive_prev=None;self._alive_prev_f=None
         self._transfer_responsibility={}
@@ -1205,7 +1205,9 @@ class NativeManualAirChain(NativeChainB2):
                                    owner=("B2 recovery hands back" if active else "current owner keeps the keys"))
                         fb=self._seam_fallback(f,"air dash refused: locked motion blocked or unknown")
                         if fb is not None:return fb
-                        if active:self._recover("rune transfer air dash refused: locked motion blocked or unknown",f)
+                        if active:
+                            if lock is not None and lock.complete and lock.contacts:self._strike_refused(f,plan,run,first)
+                            self._recover("rune transfer air dash refused: locked motion blocked or unknown",f)
                         return None
                 else:self._note("rune_transfer_dash_checked",frame=f,**info)
             attacking=transfer.control(next(e for e in transfer.clappers(state) if e["iid"]==plan.iid))[0] in transfer.AIR_ATTACK_STATES
@@ -1290,7 +1292,9 @@ class NativeManualAirChain(NativeChainB2):
             fb=self._seam_fallback(f,"external step blocked"+("" if first is None else
                                    " (first contact frame %s, owner %s, %s)"%(first.get("frame"),first.get("owner_iid"),first.get("kind"))))
             if fb is not None:return fb
-            if active:self._recover("rune transfer external step blocked",f)
+            if active:
+                if scan.complete and scan.contacts:self._strike_refused(f,plan,run,first)
+                self._recover("rune transfer external step blocked",f)
             return None
         goal=self._transfer_goal
         responsibility=(transfer.MoveInstance(plan.caster,plan.cast_fa,"CC_CAST") if goal is None else goal.responsibility)
@@ -1802,22 +1806,28 @@ class NativeManualAirChain(NativeChainB2):
             self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
         return super()._abort_hook_dispatch(selected,**kwargs)
 
+    def _strike_refused(self,f,plan,run,first):
+        """Sol seq 272 B / seq 274: the evidence the over_head stage's withdrawal reads (forum_planner._stage_withdrawn). Called only
+        where the active transfer Run is about to be recovered because one of two action gates met a real contact in its COMPLETE
+        scan (the new dash's lock scan, the external step scan) and no seam fallback took the tick; first: that PathContact. It
+        counts only for the tactical entry's own strike: the Run's target and the plan's target and caster are the entry's target
+        and source, the goal is that entry's (not a return), no real bounce yet. A prefix, support or context failure, an unknown or
+        incomplete scan, a supervisor refusal and any other recovery record nothing."""
+        entry=getattr(self,"_entry_attack_goal",None);goal=getattr(self,"_transfer_goal",None)
+        if (entry is None or run is None or run.chain!=transfer.PROGRAM or run.v.get("bounced") or goal is None
+                or isinstance(goal,transfer.ReturnGoal) or (goal.target,goal.caster)!=(entry.target,entry.source)
+                or run.v.get("iid")!=entry.target or (plan.iid,plan.caster)!=(entry.target,entry.source)):
+            return
+        self.refused_strike=(int(f),int(entry.target),str(entry.kind),int(entry.source))
+        self._note("transfer_strike_refused",frame=int(f),target=int(entry.target),kind=str(entry.kind),source=int(entry.source),
+                   link=run.link,first=first)
+
     def _recover(self,reason,frame):
         if getattr(self,"_bounce",None) is not None:
             from . import knife_chain_bounce_table as bounce_table
             bounce_table.end(self,"recovered",reason)
         source=self.commitment
         run=self.runner.run
-        entry=getattr(self,"_entry_attack_goal",None);goal=getattr(self,"_transfer_goal",None)
-        if (run is not None and run.chain==transfer.PROGRAM and entry is not None and not run.v.get("bounced")
-                and goal is not None and not isinstance(goal,transfer.ReturnGoal)
-                and (goal.target,goal.caster)==(entry.target,entry.source)):
-            # Sol seq 272 B: the strike a tactical entry asked for is given up here, before any real bounce, by the Run of that
-            # entry's own goal; the planner's ordinary rows of this tick and of the rest of the stage that asked for it stop
-            # reading that stage's stance (forum_planner._stage_withdrawn)
-            self.refused_strike=(int(frame),int(entry.target),str(entry.kind),int(entry.source))
-            self._note("transfer_strike_refused",frame=int(frame),reason=reason,target=int(entry.target),kind=str(entry.kind),
-                       source=int(entry.source))
         hooked=bool(run is not None and run.chain==transfer.PROGRAM and run.v.get("cs") is not None
                     and type(run.v.get("hook_hit_f")) is int)
         if source is not None and source["move"].family=="RUNE_TRANSFER" and (self._press is not None or hooked):

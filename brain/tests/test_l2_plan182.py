@@ -2479,32 +2479,102 @@ def test_only_the_over_head_stage_offers_its_stance_and_stomp_for_withdrawal(mon
     assert r.exec.plan is not None and r.exec.name != "over_head" and out.withdraw is None
 
 
-@pytest.mark.parametrize("case", ["refused", "bounced", "return_goal", "other_goal", "other_chain", "no_entry"])
-def test_only_a_refusal_of_the_entrys_own_strike_before_its_bounce_is_recorded(case):
-    from ssbot.combat import knife_chain_transfer as T
-    from ssbot.combat.knife_chain_eval import Run
-    from ssbot.combat.tactics.modes import EntryAttack, GoalPrefs
-    from tests.test_knife_chain_transfer import cast_scene
-    from tests.test_target_entry_attack import native
-    n = native()
-    s = cast_scene()
-    s["ents"][0]["fsms"][0].update(state="Slam Antic", t=.25)
-    entry = EntryAttack(8, "stomp", 7, G.CC_SLAM, 4., 10.)
-    n.goal_preferences(s, GoalPrefs(mode="RUSH", stance_x=38., weights={}, target=8, entry_attack=entry), handoff=True)
-    assert n._entry_attack_goal == entry and (n._transfer_goal.target, n._transfer_goal.caster) == (8, 7)
-    n.runner.run = Run("vault_idle" if case == "other_chain" else T.PROGRAM, "air", {"bounced": True} if case == "bounced" else {})
-    if case == "return_goal":
-        n._transfer_goal = T.ReturnGoal(8, 7, 985, None, "SWITCH", None, 990)
-    if case == "other_goal":
-        n._transfer_goal = replace(n._transfer_goal, caster=9)
-    if case == "no_entry":
-        n._entry_attack_goal = None
-    n._recover("rune transfer air dash refused: locked motion blocked or unknown", 1000)
+def _gate(monkeypatch, entry=(8, "stomp", 7)):
+    """The production air transfer Run of test_dash_lock179 (target 8, caster 7, active air link, its air dash due now) bound to a
+    tactical stomp entry: (chain, state, sim, the recoveries it makes, by reason; the real recovery still runs)."""
+    from ssbot.combat.tactics.modes import EntryAttack
+    from tests.test_dash_lock179 import chain, flight
+    r, s, sim = flight()
+    n = chain(monkeypatch, r)
+    n._entry_attack_goal = EntryAttack(entry[0], entry[1], entry[2], G.CC_JUMP_CAST, 10., 0.)
+    recovered = []
+    real = n._recover
+    monkeypatch.setattr(n, "_recover", lambda why, f: (recovered.append(why), real(why, f))[1])
+    return n, s, sim, recovered
+
+
+def _step_geometry(monkeypatch, step):
+    """The B2 geometry: every dash lock scan (through past origin + 2) clear; the current step: "contact" a complete scan with a real
+    contact, "incomplete" an incomplete one with none, "unchecked" no geometry."""
+    from ssbot.combat import knife_chain_air_native as AN
+    from ssbot.combat.knife_chain_commitment import ContactScan, PathContact
+    from ssbot.combat.knife_chain_geometry import GeometryUnavailable
+    class Geo:
+        def __init__(self, *a):
+            pass
+        def scan(self, path):
+            if path.through > path.origin + 2:
+                return ContactScan("fixture", path.origin, path.through, (), "all-owner")
+            if step == "unchecked":
+                raise GeometryUnavailable("fixture: step unchecked")
+            hit = (PathContact(path.through, 9, "body"),) if step in ("contact", "partial") else ()
+            return ContactScan("fixture", path.origin, path.through, hit, "all-owner", complete=step == "contact")
+        preflight = scan
+    monkeypatch.setattr(AN, "B2Geometry", Geo)
+
+
+LOCK_WHY, STEP_WHY = "rune transfer air dash refused: locked motion blocked or unknown", "rune transfer external step blocked"
+
+
+@pytest.mark.parametrize("case,why,refused", [
+    ("lock_contact", LOCK_WHY, True), ("lock_unknown", LOCK_WHY, False),            # one reason string, blocked or unknown
+    ("lock_partial", LOCK_WHY, False),                                               # a contact in an incomplete scan
+    ("step_contact", STEP_WHY, True), ("step_incomplete", STEP_WHY, False),          # the same
+    ("step_partial", STEP_WHY, False), ("step_unchecked", "rune transfer external step unchecked", False),
+    ("prefix_unknown", "rune transfer actual queued prefix mismatch", False), ("seam_fallback", None, False),
+    ("step_fallback", None, False)])                                                # the seam takes the tick: no recovery
+def test_only_a_gates_real_contact_in_its_complete_scan_records_the_refused_strike(monkeypatch, case, why, refused):
+    # Sol seq 274 on #344: a recovery for an unknown prefix, scan or context, or one its reason string calls "blocked or unknown",
+    # is no evidence that the over route was refused by geometry
+    from ssbot.combat.knife_chain_commitment import ContactScan, PathContact
+    from tests.test_dash_lock179 import FC, geometry
+    n, s, sim, recovered = _gate(monkeypatch)
+    fb = NS(stage="active", mask=0)
+    if case.startswith("lock") or case in ("prefix_unknown", "seam_fallback"):
+        geometry(monkeypatch, None if case == "lock_unknown" else sim.f + 3)    # a contact inside the dash's locked motion
+        if case == "lock_unknown":
+            n.DASH_LOCK_MAX = 3                                                  # its input return not modelled: no scan
+        if case == "lock_partial":
+            part = ContactScan("fixture", sim.f, sim.f + 6, (PathContact(sim.f + 3, 7, "move"),), "all-owner", complete=False)
+            monkeypatch.setattr(n, "_dash_lock_scan", lambda *a, **k: (part, {"lock": "partial"}))
+        if case == "prefix_unknown":
+            monkeypatch.setattr(n, "queued_prefix", lambda *a: (None, None))
+        if case == "seam_fallback":
+            monkeypatch.setattr(n, "_seam_fallback", lambda f, why: fb)
+    else:
+        _step_geometry(monkeypatch, "contact" if case == "step_fallback" else case.split("_")[1])
+        if case == "step_fallback":
+            monkeypatch.setattr(n, "_seam_fallback", lambda f, why: fb)
+    out = n._transfer_offer(s, 0., sim, FC, NS(target=8), False)
+    assert out is (fb if why is None else None) and recovered == ([] if why is None else [why]), recovered
     notes = [e for e in n.events if e["event"] == "transfer_strike_refused"]
-    if case == "refused":
-        assert n.refused_strike == (1000, 8, "stomp", 7) and len(notes) == 1 and notes[0]["frame"] == 1000
+    if refused:
+        assert n.refused_strike == (sim.f, 8, "stomp", 7) and len(notes) == 1 and notes[0]["first"]["frame"] > sim.f
     else:
         assert n.refused_strike is None and not notes
+
+
+@pytest.mark.parametrize("case", ["own", "bounced", "return_goal", "other_goal", "other_chain", "run_other", "plan_other",
+                                  "no_entry"])
+def test_the_refused_strike_is_the_tactical_entrys_own_before_any_bounce(monkeypatch, case):
+    from ssbot.combat import knife_chain_transfer as T
+    from ssbot.combat.knife_chain_eval import Run
+    n, s, sim, _ = _gate(monkeypatch)
+    run = Run("vault_idle" if case == "other_chain" else T.PROGRAM, "air",
+              {"iid": 9 if case == "run_other" else 8, **({"bounced": True} if case == "bounced" else {})})
+    if case == "return_goal":
+        n._transfer_goal = T.ReturnGoal(8, 7, 990, None, "SWITCH", None, 990)
+    if case == "other_goal":
+        n._transfer_goal = T.TransferGoal(8, 6, 990, 0.)
+    if case == "no_entry":
+        n._entry_attack_goal = None
+    n._strike_refused(1000, NS(iid=9 if case == "plan_other" else 8, caster=7), run, {"frame": 1003})
+    assert n.refused_strike == ((1000, 8, "stomp", 7) if case == "own" else None)
+    # a recovery itself never records one: the supervisor's refusal of a B2 primitive, or any other
+    n.refused_strike = None
+    n._recover("supervisor primitive disallowed", 1001)
+    assert n.refused_strike is None
+    n.refused_strike = (1000, 8, "stomp", 7)
     n.reset(1, start_frame=2000)
     assert n.refused_strike is None
 

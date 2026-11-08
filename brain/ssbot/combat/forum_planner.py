@@ -1119,8 +1119,9 @@ def _wilson_lb(k: float, n: float, z: float = 1.96) -> float:
 
 
 def _stage_withdrawn(prefs, chain, offer, ws):
-    """Task 182 (Sol seq 272 B): the action layer refused the strike the running over_head stage stands for (its recovery in this
-    stage, before a real bounce, the same target / kind / source: NativeManualAirChain.refused_strike) and takes no keys this tick:
+    """Task 182 (Sol seq 272 B / 274): the action layer refused the strike the running over_head stage stands for (in this stage,
+    the same target / kind / source: NativeManualAirChain.refused_strike, written only where its dash lock scan or external step
+    scan met a real contact in a complete scan and the entry's own Run is recovered for it) and takes no keys this tick:
     the ordinary rows read L2's own stance and no entry (tactics.modes.withdrawn_prefs). Same tick: B2's refusal comes inside its
     propose, after L2 decided (#341 3703: the RUNE_TRANSFER air dash refused on the walker's body; the forced rows followed the
     walker's head into its rune). No second send, no new L2 decision; the stage itself goes on until its own events end it."""
