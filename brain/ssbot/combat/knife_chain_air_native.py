@@ -925,6 +925,9 @@ class NativeManualAirChain(NativeChainB2):
             return failed("geometry unavailable: "+str(exc))
         if not scan.complete or scan.contacts:
             return failed("external step blocked",first=None if not scan.contacts else asdict(scan.contacts[0]))
+        ahead=self._waypoint_delayed_ahead(sim,plan,goal,f,game,geo,mask,active)
+        if ahead is not None:
+            return failed("route meets a delayed hazard",first=asdict(ahead))
         if active:
             draft=logical_copy(self.runner);draft.run.v.update(x=float(goal.x),by_f=int(goal.by_f),what=what)
         else:
@@ -934,7 +937,28 @@ class NativeManualAirChain(NativeChainB2):
         return B2Offer("active" if active else "manual_commitment",path,draft,int(mask),0.,move,
             {"manual_air":True,"waypoint":True,"kind":goal.kind,"x":float(goal.x),"by_f":int(goal.by_f),"what":what,
              "phase":"go","predicted_bounce":None,"checked_through":path.through,
-             "safety_basis":"bounded approach: the dash through its lock, every step through all owners; no route certificate"})
+             "safety_basis":("bounded approach: the dash through its lock, every step through all owners"
+                             +("; no route certificate" if goal.over is not None else
+                               ", the route through the spawned delayed hazards; no route certificate for bodies or moves"))})
+
+    def _waypoint_delayed_ahead(self,sim,plan,goal,f,game,geo,mask,active):
+        """Task 182 (Sol seq 271): the first already spawned delayed hazard on this Run's whole route, or None.
+        The step gate scans one tick's key, so it meets a delayed hazard (a spawned rune circle, a small-rune bomb, at its real
+        clock) one frame before it lights; the Run has no jump and no search, and by then the ordinary owners cannot leave it
+        either (#341: 3380 hand-back, owner 335470's bomb lit 3383; the same geometry showed it on the route from the Run's first
+        tick 3354; open-loop replays: a hand-back by 3372 cleared it, none from 3376 on). The same B2Geometry, the keys the Run
+        counts on (waypoint.route_keys) through the next owner's first key, within the support's own look-ahead (its last sample,
+        62 frames: no raster rebuilt for a long route; a hazard farther on is met on a later tick, still a second before it
+        lights); "delayed" contacts only (bodies and moves stay the step gate's). A place past a body is not checked (route() has
+        no passage above it). A route the geometry cannot scan is noted and left to the step gate, as before."""
+        if goal.over is not None:return None
+        try:
+            path=model_path(sim,plan,waypoint.route_keys(sim,goal,f,mask),game)
+            samples=getattr(getattr(getattr(geo,"forecast",None),"rs",None),"samples",None)
+            scan=geo.scan(path,limit=min(len(path.commands),int(samples[-1])) if samples else None)
+        except GeometryUnavailable as exc:
+            self._note("waypoint_route_unchecked",frame=f,reason=str(exc),active=active);return None
+        return next((c for c in scan.contacts if c.kind=="delayed"),None)
 
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)

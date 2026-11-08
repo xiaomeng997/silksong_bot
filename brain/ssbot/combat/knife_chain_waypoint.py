@@ -188,3 +188,21 @@ def next_mask(sim, goal: WaypointGoal, f: int):
     if a_dash is None or a_dash > by_k:
         return None, "late"
     return (key | K.B_DASH, "dash") if k_dash == 0 else (key, "go")
+
+
+def route_keys(sim, goal: WaypointGoal, f: int, mask: int):
+    """The keys this Run counts on from this tick (Task 182, Sol seq 271), for a check of its whole route: a dash it holds stays held
+    (next_mask: releasing it ends the sprint), else route()'s run or dash; through her arrival and the two frames before the next
+    owner's first key acts, MAX_F at most. A place past a body (goal.over) is not one of these: route() has no passage above it."""
+    m = SimRoller(sim)
+    by_k = int(goal.by_f) - (int(f) + 2)
+    T = int(min(MAX_F, max(8, by_k + 8)))
+    x0 = float(m.xs(np.zeros((1, 1), np.int64))[0][m.off])
+    d = 1 if goal.x > x0 else -1
+    held = bool(int(np.asarray(sim.prefix).reshape(-1)[-1]) & K.B_DASH)
+    if held and int(mask) & K.B_DASH:
+        row = np.full(T, int(mask), np.int64)
+        k = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
+    else:
+        row, k, _ = route(m, np.zeros(T, np.int64), 0, float(goal.x), by_k=by_k, tol=goal.tol)
+    return np.asarray(row if k is None else row[:min(T, int(k) + 3)], np.int64)

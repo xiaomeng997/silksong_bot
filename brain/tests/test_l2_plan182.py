@@ -1282,6 +1282,129 @@ def test_the_route_runs_when_it_can_and_dashes_only_when_it_must():
     assert how == "dash" and np.any(m1.rollout(row[None]).mode[0] == kin.M_DASH)
 
 
+# ---- Sol seq 271: the Run's whole route against the delayed hazards; the stage whose strike was given up ----
+
+def test_the_route_keys_are_the_keys_the_run_counts_on():
+    from ssbot.combat import knife_chain_waypoint as WP
+    from ssbot.combat.air_chain import ChainSim
+    f = 100
+    for x0, goal_x in ((30., 38.), (38., 30.)):                       # either side
+        sim = ChainSim(hero_state(x0), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
+        goal = WP.WaypointGoal(goal_x, f + 80, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
+        mask, what = WP.next_mask(sim, goal, f)
+        keys = WP.route_keys(sim, goal, f, mask)
+        row, k, how = WP.route(WP.SimRoller(sim), np.zeros(78 + 8, np.int64), 0, goal_x, by_k=78, tol=goal.tol)
+        assert what == "go" and how == "run" and keys[0] == mask
+        assert np.array_equal(keys, row[:k + 3]), (x0, k, len(keys))     # through her arrival and the next owner's first key
+    # a dash she holds stays held, as next_mask keeps it: releasing it would end the sprint
+    sim = ChainSim(hero_state(30.), np.array([kin.B_RIGHT | kin.B_DASH], np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
+    goal = WP.WaypointGoal(40., f + 60, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
+    keys = WP.route_keys(sim, goal, f, kin.B_RIGHT | kin.B_DASH)
+    assert len(keys) and np.all(keys == (kin.B_RIGHT | kin.B_DASH)) and len(keys) <= WP.MAX_F
+
+
+def _bomb_support(*bombs, owner=1, body=None):
+    """A RangeSupport holding small-rune bombs (owner, x, y, r, first, last lit look-ahead frame from its origin), its samples past any
+    route; the plan's jumper (owner) in the tracker; body: a world box (x0, y0, x1, y1) of another enemy's raw damage on every sample."""
+    from ssbot.combat import forum_v2 as v2
+    from ssbot.combat.attack_range import Mask
+    rs = v2.RangeSupport(v2.Canvas(), (0, 160))
+    rs.trk = NS(now={owner: (0, 0, NS(fam="CC_JUMP_CAST"))}, orphan_hazards={})
+    rs.bombs = np.asarray(bombs, np.float64).reshape(-1, 6)
+    if body is not None:
+        x0, y0, x1, y1 = body
+        raw = Mask(np.ones((int(round((y1 - y0) / .05)), int(round((x1 - x0) / .05))), bool), int(round(x0 / .05)), int(round(y0 / .05)))
+        d, ix0, iy0 = v2.dilate(raw, .05, 0.)
+        for si in range(len(rs.samples)):
+            rs.add(si, 100, d, ix0, iy0)
+    return rs
+
+
+def _offer(monkeypatch, x0, goal_x, bombs=(), active=False, by=80, f=100, body=None):
+    """The production waypoint offer on a real model and support: (offer, chain). Its context checks pass; notes and recoveries kept."""
+    from dataclasses import asdict
+    from ssbot.combat import knife_chain_air_native as AN, knife_chain_waypoint as WP
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    from ssbot.combat.knife_chain_eval import Run
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_offer" in vars(c))
+    monkeypatch.setattr(AN, "complete_hf", lambda state: True)
+    sim = ChainSim(hero_state(x0), np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
+    plan = ((1, 0.), 3, "attack_retreat")
+    goal = WP.WaypointGoal(goal_x, f + by, "retreat", 1, plan, family="CC_JUMP_CAST")
+    chain = object.__new__(cls)
+    chain.notes, chain.recovered = [], []
+    chain._note = lambda ev, **kw: chain.notes.append(dict(event=ev, **kw))
+    chain._recover = lambda why, frame: chain.recovered.append((why, frame))
+    move = MoveInstance(1, f - 5, WP.FAMILY)
+    run = Run(WP.PROGRAM, "go", {"iid": 1, "plan": list(plan), "x": goal_x, "by_f": f + by, "kind": "retreat", "move": asdict(move)})
+    chain.runner = NS(run=run if active else None, fork_empty=lambda anchor: NS(run=None))
+    chain._waypoint_failed, chain._waypoint_declined, chain._waypoint_responsibility = set(), None, {}
+    chain.queued_prefix = lambda frame, state: (0, None)
+    state = {"f": f, "hero": {"hero_accepting_input": True}}
+    centre_y = float(sim.roll(np.zeros((1, 1), np.int64)).centre[0, 0, 1])
+    rs = _bomb_support(*[(2, bx, centre_y - .9, 2.166, on, off) for bx, on, off in bombs], body=body)
+    return chain._waypoint_offer(state, f / 60., sim, NS(rs=rs), NS(waypoint=goal)), chain
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_a_run_whose_route_meets_a_delayed_hazard_is_handed_back_while_others_can_leave_it(monkeypatch, mirror):
+    # #341 3354-3380: the retreat Run held R toward 36.42 while owner 335470's bomb at 30.18 was forecast lit 3381-3392 on its route;
+    # the one-step gate met it at 3380 (first blocked 3381), after the last tick the ordinary owners could still leave (open-loop
+    # replays: a hand-back by 3372 clears it, none from 3376 on)
+    x0, goal_x, bomb_x = (38., 30., 34.) if mirror else (30., 38., 34.)
+    # the bomb lights while she runs through it, far past this tick's step: no new Run starts into it
+    out, chain = _offer(monkeypatch, x0, goal_x, bombs=[(bomb_x, 25, 35)])
+    assert out is None and not chain.recovered
+    note = next(n for n in chain.notes if n["event"] == "waypoint_rejected")
+    assert note["reason"] == "route meets a delayed hazard" and note["first"]["owner_iid"] == 2 and note["first"]["kind"] == "delayed"
+    assert 125 <= note["first"]["frame"] <= 135 and note["active"] is False
+    # a Run already going is handed back through recovery (its failure kept) and not restarted for this stage
+    out, chain = _offer(monkeypatch, x0, goal_x, bombs=[(bomb_x, 25, 35)], active=True)
+    assert out is None and chain.recovered == [("waypoint route meets a delayed hazard", 100)] and len(chain._waypoint_failed) == 1
+    # the same bomb lit after she has run past it, or one off her route: the Run goes as before
+    for bombs in ([(bomb_x, 80, 90)], [(bomb_x + (6. if mirror else -6.), 25, 35)], []):
+        out, chain = _offer(monkeypatch, x0, goal_x, bombs=bombs)
+        assert out is not None and out.details["waypoint"] and out.mask == (kin.B_LEFT if mirror else kin.B_RIGHT), bombs
+        assert not any(n["event"] == "waypoint_rejected" for n in chain.notes)
+    # lit at the place well after she gets there: the stance's own owners answer for it, not this Run
+    out, chain = _offer(monkeypatch, x0, goal_x, bombs=[(goal_x, 110, 120)])
+    assert out is not None
+    # another enemy's body far along the route is not a delayed hazard: the step gate meets it as before
+    out, chain = _offer(monkeypatch, x0, goal_x, body=(bomb_x - .5, 0., bomb_x + .5, 9.))
+    assert out is not None and not any(n["event"] == "waypoint_rejected" for n in chain.notes)
+
+
+def test_the_route_check_leaves_a_body_passage_and_an_unscannable_route_to_the_step_gate():
+    from ssbot.combat import knife_chain_air_native as AN, knife_chain_waypoint as WP
+    from ssbot.combat.knife_chain_geometry import GeometryUnavailable
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_waypoint_delayed_ahead" in vars(c))
+    chain = object.__new__(cls)
+    notes = []
+    chain._note = lambda ev, **kw: notes.append(dict(event=ev, **kw))
+    plan = ((1, 0.), 3, "over_out")
+    over = WP.WaypointGoal(40., 160, "out", 1, plan, over=(35., 3., 37., 7.))
+    def unscannable(path, limit=None):
+        raise GeometryUnavailable("path leaves modeled canvas")
+    geo = NS(scan=unscannable)
+    assert chain._waypoint_delayed_ahead(_sim_at(30.), None, over, 100, 1.6, geo, kin.B_RIGHT, True) is None and not notes
+    plain = WP.WaypointGoal(40., 160, "retreat", 1, plan)
+    sim = _sim_at(30.)
+    from ssbot.combat.knife_chain_commitment import MoveInstance
+    p = NS(iid=1, move=MoveInstance(1, 0, WP.FAMILY), origin=0, entry_k=0, press_k=None, contact_frame=None)
+    assert chain._waypoint_delayed_ahead(sim, p, plain, 0, 0., geo, kin.B_RIGHT, True) is None
+    assert notes == [dict(event="waypoint_route_unchecked", frame=0, reason="path leaves modeled canvas", active=True)]
+    # a long route is scanned within the support's own look-ahead (its last sample): no raster rebuilt for it each tick
+    seen = []
+    def scan(path, limit=None):
+        seen.append((len(path.commands), limit))
+        return NS(contacts=())
+    far = WP.WaypointGoal(45., 160, "retreat", 1, plan)
+    assert chain._waypoint_delayed_ahead(sim, p, far, 0, 0., NS(forecast=NS(rs=NS(samples=(0, 31, 62))), scan=scan),
+                                         kin.B_RIGHT, True) is None
+    assert seen and seen[0][0] > 62 and seen[0][1] == 62
+
+
 # ---- the over route's near row: from the start she is really at ----
 
 def _sim_at(x):
