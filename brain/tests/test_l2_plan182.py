@@ -1295,13 +1295,14 @@ def test_the_route_keys_are_the_keys_the_run_counts_on():
         keys = WP.route_keys(sim, goal, f, mask)
         row, k, how = WP.route(WP.SimRoller(sim), np.zeros(78 + 8, np.int64), 0, goal_x, by_k=78, tol=goal.tol)
         assert what == "go" and how == "run" and keys[0] == mask
-        assert np.array_equal(keys, row[:k + 3]), (x0, k, len(keys))     # through her arrival and the next owner's first key
-    # a dash she holds stays held, as next_mask keeps it (releasing it would end the sprint), until the release that stops her there
+        # the run up to the tick it hands back (Sol seq 273: next_mask's "arrived"; a run's glide is short, so at its arrival)
+        assert np.array_equal(keys, row[:len(keys)]) and np.all(keys == mask) and len(keys) == k, (x0, k, len(keys))
+    # a dash she holds stays held, as next_mask keeps it (releasing it would end the sprint), up to the tick it hands back: the
+    # release that stops her there is that tick's, the next owner's first key
     sim = ChainSim(hero_state(30.), np.array([kin.B_RIGHT | kin.B_DASH], np.int64), kin.HoldState.idle(1), PARAMS, TERRAIN, f, f)
     goal = WP.WaypointGoal(40., f + 60, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
     keys = WP.route_keys(sim, goal, f, kin.B_RIGHT | kin.B_DASH)
-    held = int(np.argmin(keys == (kin.B_RIGHT | kin.B_DASH)))
-    assert 0 < held < len(keys) <= WP.MAX_F and np.all(keys[:held] == (kin.B_RIGHT | kin.B_DASH)) and np.all(keys[held:] == 0)
+    assert 0 < len(keys) <= WP.MAX_F and np.all(keys == (kin.B_RIGHT | kin.B_DASH))
     # nowhere to arrive from the key sent: no route to check
     assert WP.route_keys(sim, WP.WaypointGoal(200., f + 60, "retreat", 1, ((1, 0.), 1, "attack_retreat")), f,
                          kin.B_RIGHT | kin.B_DASH) is None
@@ -1321,9 +1322,9 @@ def test_the_route_keys_start_from_the_key_sent_never_a_refused_dash(mirror):
     # refused: the run of the key sent, the window through (no arrival in it), never a dash
     keys = WP.route_keys(sim, goal, f, key, dash_refused=True)
     assert keys[0] == key and not np.any(keys & kin.B_DASH) and len(keys) == 38 and np.all(keys == key)
-    # not refused: the dash it sends, held to its release
+    # not refused: the dash it sends, held up to the tick the Run hands back (Sol seq 273: 23 keys, #343 checked 27)
     keys = WP.route_keys(sim, goal, f, key | kin.B_DASH)
-    assert keys[0] == key | kin.B_DASH and int(np.sum(keys & kin.B_DASH != 0)) == 23 and len(keys) == 27
+    assert keys[0] == key | kin.B_DASH and np.all(keys == key | kin.B_DASH) and len(keys) == 23
 
 
 def _bomb_support(*bombs, owner=1, body=None):
@@ -2617,3 +2618,86 @@ def test_the_ordinary_rows_of_the_refusal_tick_read_the_withdrawn_stage():
     # rows already read before B2's propose (a chain with a finite value bound) are not re-read on its refusal
     out, seen, notes = _withdraw_tick(staged, refusal=(1000, 8, "stomp", 7), bound=1e9)
     assert len(seen) == 1 and seen[0] is staged and not [n for n in notes if n[0] == "plan_stage_withdrawn"]
+
+
+# ---- Sol seq 273: the route checked is the keys the Run sends before it hands back (next_mask's own "arrived") ----
+
+
+def _run_loop(x0, gx, by_f, f0=100, steps=150, dash_cd=0.):
+    """next_mask tick by tick through the model from rest, as the Run: (sim at f0, the mask it sends there, the goal, the keys it
+    sends, the tick it ends on, how)."""
+    from ssbot.combat import knife_chain_waypoint as WP
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.holdfilter import hold_filter_jit
+    goal = WP.WaypointGoal(gx, by_f, "retreat", 1, ((1, 0.), 1, "attack_retreat"))
+    S, hold, sent, keys, first = hero_state(x0), kin.HoldState.idle(1), [0], [], None
+    S[kin.DASH_CD] = dash_cd
+    for f in range(f0, f0 + steps):
+        prefix = np.array([sent[-1]], np.int64)
+        sim = ChainSim(S, prefix, hold, PARAMS, TERRAIN, f, f)
+        mask, what = WP.next_mask(sim, goal, f)
+        if what in ("arrived", "late"):
+            return first, goal, keys, f, what
+        if first is None:
+            first = (sim, int(mask))
+        keys.append(int(mask))
+        sent.append(int(mask))
+        lat, hold = hold_filter_jit(prefix[None], hold)
+        S = np.asarray(kin.rollout(S, lat, PARAMS, TERRAIN).final[:, 0], np.float64)
+    return first, goal, keys, None, "no end"
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+@pytest.mark.parametrize("dx,by_f,cd,n_keys,dash_from", [(13., 140, 0., 32, 0), (9., 132, 0., 23, 0), (9., 132, .12, 29, 7),
+                                                         (8., 180, 0., 57, None), (6., 160, 0., 43, None), (1.5, 130, 0., 9, None)])
+def test_the_route_checked_is_the_keys_the_run_sends_before_it_hands_back(mirror, dx, by_f, cd, n_keys, dash_from):
+    # long glides (a dash held into the sprint; 30 -> 43 is Sol's seq 273 case: next_mask's first "arrived" at 132, #343 held its
+    # dash to k32, released it at k33 and checked to f146), a dash at its cooldown edge (route()'s branch) and short ones (a run),
+    # both ways: route_keys at f100 = the Run's own keys, tick by tick, before the tick it reports "arrived"
+    from ssbot.combat import knife_chain_waypoint as WP
+    from ssbot.combat.air_chain import ChainSim
+    from ssbot.combat.holdfilter import hold_filter_jit
+    x0, gx = (30. + dx, 30.) if mirror else (30., 30. + dx)
+    (sim, mask), goal, keys, f_end, how = _run_loop(x0, gx, by_f, dash_cd=cd)
+    dashes = [k for k, m in enumerate(keys) if m & kin.B_DASH]
+    assert how == "arrived" and f_end == 100 + n_keys and (dashes[0] if dashes else None) == dash_from
+    assert list(WP.route_keys(sim, goal, 100, mask)) == keys
+    # from a later tick of the same Run (its dash held, its run going on): the rest of the same keys
+    S, hold, sent = np.asarray(sim.start, np.float64).reshape(-1).copy(), kin.HoldState.idle(1), [0]
+    for k in range(n_keys // 2):
+        prefix = np.array([sent[-1]], np.int64)
+        sent.append(keys[k])
+        lat, hold = hold_filter_jit(prefix[None], hold)
+        S = np.asarray(kin.rollout(S, lat, PARAMS, TERRAIN).final[:, 0], np.float64)
+    f = 100 + n_keys // 2
+    later = ChainSim(S, np.array([sent[-1]], np.int64), hold, PARAMS, TERRAIN, f, f)
+    m2, what = WP.next_mask(later, goal, f)
+    assert what in ("go", "dash") and list(WP.route_keys(later, goal, f, m2)) == keys[n_keys // 2:]
+
+
+def test_the_hand_back_search_is_the_first_tick_that_arrives():
+    from ssbot.combat import knife_chain_waypoint as WP
+    for x0, gx, by_f in ((30., 43., 140), (43., 30., 140), (30., 38., 180), (30., 47.5, 160)):
+        (sim, mask), goal, keys, f_end, how = _run_loop(x0, gx, by_f)
+        m = WP.SimRoller(sim)
+        row = np.full(60, mask, np.int64)
+        a = WP._arrival(m.xs(row[None])[0][m.off:], gx, 1 if gx > x0 else -1, goal.tol)
+        full = WP._arrived_at(m, row, 1, a, gx, goal.tol)
+        assert full == f_end - 100 and full <= a
+        assert all(WP._handback(m, row, a, gx, goal.tol, span=s) == full for s in (1, 2, 3, 16)), (x0, gx)
+        assert WP._arrived_at(m, row, 1, full - 1, gx, goal.tol) is None
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+def test_a_delayed_hazard_after_the_hand_back_is_not_the_runs_and_one_before_it_is(monkeypatch, mirror):
+    # Sol seq 273: f100, 30 -> 43, by_f 140, its new dash's lock passing; the Run hands back at 132 (its keys to 133). A small rune at
+    # 45.4 (mirrored 27.6), her box centre - 0.9, r 2.166, lit look-ahead 41..46, is met first at f144 only on the glide after that:
+    # #343 refused the start for it; bombs met before the hand-back (f115 early in the dash, f127 near its end) still refuse it
+    x0, gx = (43., 30.) if mirror else (30., 43.)
+    out, chain = _offer(monkeypatch, x0, gx, bombs=[(27.6 if mirror else 45.4, 41, 46)], by=40, lock="pass")
+    assert out is not None and out.mask == (kin.B_LEFT if mirror else kin.B_RIGHT) | kin.B_DASH
+    assert not any(n["event"] == "waypoint_rejected" for n in chain.notes)
+    for bx, on, off, first in ((38., 14, 20, 115), (41.5, 26, 31, 127)):
+        out, chain = _offer(monkeypatch, x0, gx, bombs=[(73. - bx if mirror else bx, on, off)], by=40, lock="pass")
+        note = next(n for n in chain.notes if n["event"] == "waypoint_rejected")
+        assert out is None and note["reason"] == "route meets a delayed hazard" and note["first"]["frame"] == first

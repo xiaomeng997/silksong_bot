@@ -119,8 +119,9 @@ def route(m, row, k0, goal, by_k=None, tol=TOL_U, release=True):
 
 
 def _released(m, dash, k0, first, last, goal, d, tol):
-    """The dash row released at the first key index of first..last whose rest stop (REST_F frames on) reaches the goal, and her
-    arrival key index: route()'s dash release, as next_mask's "arrived" releases a held dash."""
+    """The dash row released at the first key index of first..last whose rest stop (REST_F frames on, within the row) reaches the
+    goal, and her arrival key index: route()'s dash release, what a plan counts on. The Run's own release on the route it checks is
+    next_mask's "arrived" by its own glide (_handback, route_keys; Sol seq 273)."""
     i0 = m.off + k0
     rows = np.tile(dash, (last - first + 1, 1))
     for i, r in enumerate(range(first, last + 1)):
@@ -132,6 +133,44 @@ def _released(m, dash, k0, first, last, goal, d, tol):
             a = _arrival(xs[i], goal, d, tol)
             return rows[i].copy(), k0 + (a if a is not None else stop)
     return rows[-1].copy(), last
+
+
+def _arrived_at(m, row, lo, hi, goal, tol):
+    """next_mask's "arrived" on the Run's later ticks (Sol seq 273): the first key index j in lo..hi at which, with row's keys before
+    j sent and none from j, she is there (x at j) or her rest stop (REST_F frames of no keys from j) reaches the goal, as next_mask
+    reads it on its tick f + j. Rolled REST_F frames past hi, never cut at the row's own length. None: none in lo..hi."""
+    lo, hi = max(int(lo), 1), int(hi)
+    if hi < lo:
+        return None
+    js = range(lo, hi + 1)
+    rows = np.zeros((hi - lo + 1, hi + REST_F), np.int64)
+    w = min(row.shape[0], hi + REST_F)
+    rows[:, :w] = row[:w]
+    for i, j in enumerate(js):
+        rows[i, j:] = 0
+    xs = m.xs(rows)
+    for i, j in enumerate(js):
+        x0 = float(xs[i, m.off + j])
+        d = 1 if goal > x0 else -1
+        if abs(goal - x0) <= tol or (float(xs[i, m.off + j + REST_F - 1]) - goal) * d >= -tol:
+            return int(j)
+    return None
+
+
+def _handback(m, row, hi, goal, tol, span=4):
+    """The tick the Run hands back on (_arrived_at over 1..hi), searched down from hi in windows of span, doubled each step down:
+    her keys go toward the goal, so once her rest stop reaches it, it does on every later tick; the window whose first index has
+    not arrived holds the first tick that has. None: not even at hi."""
+    found, top, span = None, int(hi), int(span)
+    while top >= 1:
+        a = max(1, top - span + 1)
+        j = _arrived_at(m, row, a, top, goal, tol)
+        if j is None:
+            return found
+        if j > a or a == 1:
+            return j
+        found, top, span = j, a - 1, span * 2
+    return found
 
 
 class SimRoller:
@@ -197,42 +236,39 @@ def next_mask(sim, goal: WaypointGoal, f: int):
 
 
 def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = False):
-    """The keys this Run counts on from this tick (Task 182, Sol seq 271 / 272), for a check of its whole route, from the key it
-    actually sends now (the one its gates passed):
-      - a dash it starts or holds (DASH in mask): held until the release that stops her at the place (next_mask's "arrived",
-        route()'s dash release);
+    """The keys this Run counts on from this tick (Task 182, Sol seq 271 / 272 / 273), for a check of its whole route: the keys it
+    sends itself, from the key it actually sends now (the one its gates passed) up to the tick it hands back, next_mask's "arrived"
+    by its own glide (_handback: REST_F frames of no keys past that tick, never cut at the row's length). The keys in flight at the
+    hand-back are among them; the next owner's first key is the next one, and her glide after it is no part of this Run:
+      - a dash it starts or holds (DASH in mask): held, as next_mask holds it (releasing it would end the sprint);
       - a dash refused this tick (dash_refused, mask the key it sends instead): the run of that key, the keys it sends while the
         lock keeps refusing (with no arrival in the window, the whole window: she runs on until the Run is late); the refused
         dash is no part of the route;
-      - otherwise route() on from the next key (a run, or the dash at its cooldown edge, as next_mask plans it).
-    Through her arrival and the two frames before the next owner's first key acts, MAX_F at most. None: from the key sent the
-    model gives no route (a dash or route() with no arrival): nothing to check. A place past a body (goal.over) is not one of
-    these: route() has no passage above it. The check made of it only ever hands back; a route with no contact is no
-    certificate."""
+      - otherwise route() on from the next key (a run, or the dash at its cooldown edge, then held as next_mask holds it).
+    MAX_F at most. None: from the key sent the model gives no route (a dash or route() with no arrival): nothing to check. A place
+    past a body (goal.over) is not one of these: route() has no passage above it. The check made of it only ever hands back; a
+    route with no contact is no certificate."""
     m = SimRoller(sim)
     by_k = int(goal.by_f) - (int(f) + 2)
     T = int(min(MAX_F, max(8, by_k + 8)))
     mask = int(mask)
     x0 = float(m.xs(np.zeros((1, 1), np.int64))[0][m.off])
     d = 1 if goal.x > x0 else -1
-    if mask & K.B_DASH:
-        held = np.full(T, mask, np.int64)
-        a = _arrival(m.xs(held[None])[0][m.off:], goal.x, d, goal.tol)
-        if a is None:
-            return None
-        last = max(int(a), 1)
-        row, k = _released(m, held, 0, max(1, last - 14), last, goal.x, d, goal.tol)
-    elif dash_refused:
+    if mask & K.B_DASH or dash_refused:
         row = np.full(T, mask, np.int64)
-        a = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
-        if a is None:
-            return row
-        k = int(a)
-        row[k:] = 0
     else:
         row = np.zeros(T, np.int64)
         row[0] = mask
-        row, k, _ = route(m, row, 1, float(goal.x), by_k=by_k, tol=goal.tol)
+        row, k, how = route(m, row, 1, float(goal.x), by_k=by_k, tol=goal.tol)
         if k is None:
             return None
-    return np.asarray(row[:min(T, int(k) + 3)], np.int64)
+        if how == "dash":
+            kd = int(np.argmax((row & K.B_DASH) != 0))
+            row = row.copy()
+            row[kd:] = row[kd]                  # held from its edge, as next_mask holds it (route()'s own release is a plan's)
+    a = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
+    if a is None:
+        return row if (dash_refused and not mask & K.B_DASH) else None
+    r = _handback(m, row, max(int(a), 1), float(goal.x), goal.tol)
+    r = max(int(a), 1) if r is None else r
+    return np.asarray(row[:r], np.int64)
