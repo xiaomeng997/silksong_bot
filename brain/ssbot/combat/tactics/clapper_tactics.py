@@ -34,6 +34,8 @@ from .forum_local import clapper_facing
 from .modes import EntryAttack, ReturnRequest
 
 BAIT_WIDTHS = 2.5          # the person (seq 230): back off about 2.5 visible body widths, return on the take-off
+DOWN_OK_FAMS = (None, "CC_IDLE")   # Task 182 seq 280: Phase.down_ok only while its target is idle or walking (the subject reads
+#                                    CC_IDLE for the whole Idle / Walk, gauntlet.SP4_IDLE_FAMS without the evade)
 RETURN_LANDED_S = 0.5      # SSBOT_FORUM_TWO_RETURN_BODY: after the landing in the gap the narrowing stays this long
 KEEP = object()            # Applied.style: keep the entry attack's style
 
@@ -56,6 +58,9 @@ class Applied:
     #                                         application records it apart (GoalPrefs.return_cross) when no other rule bans it
     withdraw_f: int | None = None           # Task 182 seq 272 B: the frame the running over_head stage began; its stance and
     #                                         strike are withdrawable on the action layer's refusal (GoalPrefs.withdraw)
+    down_ok: frozenset = frozenset()        # Task 182 seq 280: the stage's own target whose down slash from the air still counts
+    #                                         (Phase.down_ok, idle / walking only); the application keeps it (GoalPrefs.stay_pogo)
+    #                                         only when no other source bans that target
 
 
 class Tactic:
@@ -655,8 +660,12 @@ class _Planned(Tactic):
                 no_hit = no_hit | {target.iid}
         # Sol seq 272 B: over_head's stance and stomp stand for the action layer's strike over the walker; its refusal takes them back
         withdraw_f = sc.plans.stage_frame(sc) if ph.name == "over_head" else None
+        # Task 182 seq 280: over_stay's target, idle or walking (a new move - its slam's antic, an evade - ends it: re-judged on
+        # the actual state), keeps its down slash for the ordinary rows; never another Clapper, never past this stage
+        down_ok = (frozenset({target.iid}) if (ph.down_ok and target is not None and target.iid == ph.target
+                                               and getattr(target, "family", None) in DOWN_OK_FAMS) else frozenset())
         return Applied(stance=sc.plans.stance(sc, ph), style=style, scene=f"{self.scene} plan: {ph.name}",
-                       suppress_hits=ph.suppress_hits, no_hit=no_hit, withdraw_f=withdraw_f)
+                       suppress_hits=ph.suppress_hits, no_hit=no_hit, withdraw_f=withdraw_f, down_ok=down_ok)
 
     def finish(self, sc, rule, won, g, out):
         ph = sc.plans.exec.phase

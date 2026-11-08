@@ -638,6 +638,92 @@ def _meets(tb0, tb1, tb2, tb3, verts, a, b, cx, cy):
     return _rect_meets_polys(tb0, tb1, tb2, tb3, verts, starts, cx, cy)
 
 
+def _down_variants(crest: str) -> tuple[np.ndarray, np.ndarray]:
+    """Task 182 seq 280: every modeled variant of the down slash (the kernel's frame: polys about the box centre) as one
+    polygon set - DownSlash and DownSlashAlt (the game alternates them; which one comes next is not modeled) in both
+    facings: the replay's model hit rule (pogo_model.slash_poly over both alternations, both facings). Without an alt slot
+    the down slot alone, both facings."""
+    tab = AttackTable.load(crest)
+    ps = []
+    for s in ("down", "alt_down"):
+        sh = tab.shapes.get(s)
+        if sh is None:
+            continue
+        p = np.concatenate(sh.polys)
+        q = p.copy()
+        q[:, 0] = -q[:, 0]
+        ps += [p, q]
+    st = [0]
+    for p in ps:
+        st.append(st[-1] + len(p))
+    return np.ascontiguousarray(np.concatenate(ps)), np.array(st, np.int64)
+
+
+@numba.njit(cache=True, parallel=True)
+def _down_robust(box, flags, tbox, ff, ft, sel, verts, starts, out):
+    """Task 182 seq 280: per row with sel, the hero off the ground at its first predicted hit (frame ff, target ft) and every
+    polygon of the set (starts: one per variant, _down_variants) meeting that target's box there: the contact holds whichever
+    variant swings (the predicted bounce frame is the replay model's own)."""
+    N = box.shape[0]
+    for c in numba.prange(N):
+        out[c] = False
+        if not sel[c]:
+            continue
+        j = ff[c]
+        t = ft[c]
+        if j < 0 or t < 0 or j >= box.shape[1] or t >= tbox.shape[0] or (flags[c, j] & F_GROUND) != 0:
+            continue
+        cx = 0.5 * (box[c, j, 0] + box[c, j, 2])
+        cy = 0.5 * (box[c, j, 1] + box[c, j, 3])
+        ok = True
+        for p in range(len(starts) - 1):
+            if not _meets(tbox[t, j, 0], tbox[t, j, 1], tbox[t, j, 2], tbox[t, j, 3], verts, starts[p], starts[p + 1],
+                          cx, cy):
+                ok = False
+                break
+        out[c] = ok
+
+
+def _esc_ranked(order: np.ndarray, safe: np.ndarray, sp_safe: np.ndarray | None, front: int = ESC_CHUNK
+                ) -> tuple[np.ndarray, int]:
+    """Task 182 seq 280: the escape check's rows for the order, the check before the preference. Without credited rows (sp_safe:
+    L2 over_stay's safe down slashes, moved up by the credit) the safe rows of the order. With them: every other safe row and
+    the first `front` credited ones where the order put them, then the other credited rows - so the window the check read
+    without the credit (its first K other rows, whose order the credit does not change) stays whole once the caller adds the
+    kept credited count to its K. Returns (rows, kept credited count)."""
+    ranked = order[safe[order]]
+    if sp_safe is None or not sp_safe[ranked].any():
+        return ranked, 0
+    c = sp_safe[ranked]
+    keep = ~c | (np.cumsum(c) <= int(front))
+    return np.concatenate([ranked[keep], ranked[~keep]]), int((c & keep).sum())
+
+
+@numba.njit(cache=True, parallel=True)
+def _inflight_down_contact(box, mode, tbox, tok, verts, a, b, j0, j1, out_j, out_t):
+    """Task 182 seq 280: the down slash already swinging at the tick's start (its start is before the rows, so the scorer
+    sees no swing in them): per row, the first frame j in [j0, j1) of its remaining active window - the window the scorer
+    reads for a swing it sees, whatever keys follow; a dash or a sprint ends it (mode) - whose blade (verts: the down slot,
+    facing fixed in the swing) meets a target box (tbox [K, T1, 4] where tok); out_j / out_t (-1: none)."""
+    N, T1 = box.shape[0], box.shape[1]
+    K = tbox.shape[0]
+    for c in numba.prange(N):
+        out_j[c] = -1
+        out_t[c] = -1
+        for j in range(max(j0, 1), min(j1, T1)):
+            if mode[c, j] == M_DASH or mode[c, j] == M_SPRINT:
+                break
+            cx = 0.5 * (box[c, j, 0] + box[c, j, 2])
+            cy = 0.5 * (box[c, j, 1] + box[c, j, 3])
+            for t in range(K):
+                if tok[t, j] and _meets(tbox[t, j, 0], tbox[t, j, 1], tbox[t, j, 2], tbox[t, j, 3], verts, a, b, cx, cy):
+                    out_j[c] = j
+                    out_t[c] = t
+                    break
+            if out_j[c] >= 0:
+                break
+
+
 @numba.njit(cache=True, parallel=True)
 def seen_contacts(box, inv, verts, starts, pbox, vel, tk, rows, grow):
     """FORCED_RISK's "seen" key (ForumConfig.forced_rank): per row of `rows`, the frames 1 .. T1 - 1 its nominal box
@@ -1384,6 +1470,13 @@ class ForumPlanner(Planner):
         z = np.zeros((2, 5))
         pin_contacts_kernel(z, z, np.zeros((2, 5), np.bool_), 0.5, 0.5, np.array([1], np.int64), np.zeros(1),
                             np.zeros(1), PIN_AIM_F, np.ones(1), np.zeros(1), PIN_SPAWN_U, 0.5, np.zeros(5))
+        # Task 182 seq 280: the swinging down slash's contact (over_stay's ticks only: a first call mid-fight compiles)
+        vr_, vl_, st_, _ = self.shapes
+        _inflight_down_contact(box, np.zeros((2, 5), np.int32), box[:1].copy(), np.ones((1, 5), np.bool_),
+                               vr_, int(st_[3]), int(st_[4]), 1, 5, np.full(2, -1, np.int64), np.full(2, -1, np.int64))
+        d4 = self._down4 = _down_variants(self.crest)
+        _down_robust(box, np.zeros((2, 5), np.int32), box[:1].copy(), np.full(2, 2, np.int64), np.zeros(2, np.int64),
+                     np.ones(2, np.bool_), d4[0], d4[1], np.zeros(2, np.bool_))
         # SG8 (stalls; forum.md 64): the knockback hull (kin_jit.kb_hull_par / kb_hull / kb_hull_one / near) runs only
         # on ticks with hazards or soft gates; live its first call (an airborne hit) compiled 1.9 s mid-fight
         b2 = np.zeros((2, 5, 4))
@@ -1569,6 +1662,52 @@ class ForumPlanner(Planner):
                             out["risk"], out["unmod"], self.down_slash, self.combo_f, out["sw_f"], out["sw_k"],
                             out["sw_face"], real, out["nh"], gonly)
         out["targets"] = keep
+        sp_ = frozenset(getattr(prefs, "stay_pogo", None) or ()) & frozenset(nohit)
+        if sp_ and len(keep):
+            # Task 182 seq 280 (L2 over_stay, GoalPrefs.stay_pogo): the rows whose FIRST predicted hit is that target's down
+            # slash (K_DOWN: pressed in the air) with its contact in every modeled variant (below), and the hit's value at
+            # its weight (one hit: the next strike is re-judged on the actual bounce). J, nh and the weights stay as they
+            # were (no_hit): _ordinary_tick credits a row only once its checks pass (its exit: S = 0 on both branches)
+            st0 = np.asarray(start, np.float64).reshape(kin.K, -1)[:, 0]
+            if (self.down_slash and st0[kin.ATTACKING] > 0 and int(st0[kin.ATK_PDIR]) == 2 and st0[kin.GROUND] <= 0):
+                # a down slash already swinging (pressed on an earlier tick): its remaining active frames are every row's
+                # (until a row ends it), so its contact is each row's first hit there - the hit branch then judges the
+                # bounce with the target's reaction, the miss branch stays as it was
+                age = int(round(float(st0[kin.ATK_T]) / self.params.frame_time))
+                j0, j1 = int(win[3, 0]) - age, int(win[3, 1]) - age
+                if j1 > 1:
+                    oj = np.full(N, -1, np.int64)
+                    ot = np.full(N, -1, np.int64)
+                    _inflight_down_contact(np.ascontiguousarray(roll.box, np.float64),
+                                           np.ascontiguousarray(roll.mode, np.int32), np.ascontiguousarray(tbox, np.float64),
+                                           np.ascontiguousarray(tok, np.bool_), vr if face0 > 0 else vl, int(st[3]),
+                                           int(st[4]), j0, j1, oj, ot)
+                    new = (oj >= 0) & ((out["first_f"] < 0) | (oj < out["first_f"]))
+                    if new.any():
+                        out["first_f"][new], out["first_t"][new] = oj[new], ot[new]
+                        out["first_k"][new], out["first_face"][new] = K_DOWN, face0
+                    out["inflight_down"] = new
+            pk = np.array([t.iid in sp_ and not t.hazard for t in keep], np.bool_)
+            ft = out["first_t"]
+            pogo = (out["first_f"] >= 0) & (out["first_k"] == K_DOWN) & (ft >= 0) & pk[np.clip(ft, 0, len(keep) - 1)]
+            if pogo.any():
+                # contact evidence: the scorer's blade is DownSlash in the row's facing; the swing may be DownSlashAlt and
+                # the replay's model hit takes every variant - a contact only some variants make (the body's edge) is not
+                # this stage's strike
+                d4 = getattr(self, "_down4", None)
+                if d4 is None:
+                    d4 = self._down4 = _down_variants(self.crest)
+                rob = np.zeros(N, np.bool_)
+                _down_robust(np.ascontiguousarray(roll.box, np.float64), np.ascontiguousarray(roll.flags, np.int32),
+                             np.ascontiguousarray(tbox, np.float64), np.ascontiguousarray(out["first_f"], np.int64),
+                             np.ascontiguousarray(ft, np.int64), pogo, d4[0], d4[1], rob)
+                out["stay_edge"] = pogo & ~rob
+                pogo = rob
+            kw = getattr(prefs, "hit_kw", None) or {}
+            hw = getattr(prefs, "hit_w", None) or {}
+            wd = np.array([float(kw[t.iid][K_DOWN - 1]) if t.iid in kw else float(hw.get(t.iid, 1.0)) for t in keep])
+            out["stay_pogo"] = pogo
+            out["J_stay"] = np.where(pogo, wv[0] * wd[np.clip(ft, 0, len(keep) - 1)], 0.0)
         if "under" in self.fcfg.tac and len(keep):
             out["J_under"] = self._under_bonus(f, roll.box, keep)
             out["J"] += out["J_under"]
@@ -4124,6 +4263,10 @@ class ForumPlanner(Planner):
         if getattr(self, "v2_ret", None) is not None:
             self.v2_ret["sc"] = sc      # SSBOT_FORUM_TWO_RETURN_BODY: binds the narrowing to this tick's rows (_v2_bound)
         J = sc["J"]
+        # Task 182 seq 280: L2 over_stay's down-slash rows (_score_forum) and their hit value; zeros otherwise. The queue
+        # takes them early (their checks: the envelope, the hit branch's budget); a row is credited only when safe
+        stay_m = sc.get("stay_pogo")
+        J_stay = sc["J_stay"] if stay_m is not None else None
         scene_values=scene_known=None
         scene_info=None
         scene_points=scene_layers=None
@@ -4174,6 +4317,8 @@ class ForumPlanner(Planner):
                 bind_possible=bool(prefs.want_bind and ctx.want_bind))
             # From this point the only later J write is the nonnegative whip
             # deduction. Any future positive score term must precede this gate.
+            # (Task 182 seq 280's over_stay down-slash credit ranks the ordinary rows only - never PlanResult.J, so never
+            # the value B2 compares or this proof bounds.)
             if proof is not None:return proof
         unm = sc["unmod"] & ok
         why[unm] = R_UNMOD
@@ -4201,7 +4346,7 @@ class ForumPlanner(Planner):
         bell_first = np.array([0 <= int(t) < len(tg_) and bool(tg_[int(t)].hazard) for t in sc["first_t"]], bool) \
             if self.fcfg.bell_hits and any(t.hazard for t in tg_) else np.zeros(N, bool)
         pass1 = ok & (~S1 | (bell_first & (sc["first_f"] <= t_hit)))
-        pre = np.lexsort((-J, U, hz_soft, hz))
+        pre = np.lexsort((-(J if J_stay is None else J + J_stay), U, hz_soft, hz))
         pre = pre[pass1[pre]]
         kr = None
         if special_mode.KEEP and getattr(self, "_kp", None) is not None:
@@ -4819,6 +4964,17 @@ class ForumPlanner(Planner):
             # v2: of the safe rows, the most landed hits on real enemies, then the earliest first hit (0 on every row
             # otherwise and on every unsafe row: the order is unchanged)
             v2_nh = np.where(safe, -sc["nh"], 0.0) if v2 else np.zeros(N)
+            J_sel = J
+            sp_safe = None
+            if stay_m is not None:
+                # Task 182 seq 280: an L2 over_stay down slash with its contact and its exit (S = 0 on both branches: the
+                # miss and the bounce with the target's reaction) lands one hit in this ranking (the landed-hit rank, the
+                # hit value in the J key); unsafe rows and FORCED_RISK rank as before. PlanResult.J stays the plain J: B2's
+                # value comparisons (install, continuation bound, value proofs) never see the credit
+                sp_safe = safe & stay_m
+                J_sel = J + np.where(sp_safe, J_stay, 0.0)
+                if v2:
+                    v2_nh = v2_nh - sp_safe
             if scene_reader is not None and v2:
                 # h2 sorts this ahead of J; J alone would not trade a hit for an exit.
                 v2_nh -= np.where(safe,scene_values,0.)
@@ -4955,6 +5111,10 @@ class ForumPlanner(Planner):
                 fc_ = np.clip(ff_, 0, r1.flags.shape[1] - 1)
                 air_ = (r1.flags[np.arange(N), fc_] & F_GROUND) == 0
                 pr_ = safe & (ff_ >= 0) & on_ & air_
+                if sc.get("stay_pogo") is not None:
+                    # Task 182 seq 280: over_stay's own down slash on its target is that stage's preference, not a pogo SP4
+                    # ranks last (any other first hit on it from the air still does)
+                    pr_ = pr_ & ~sc["stay_pogo"]
                 self.audit.nopogo_ticks += int(pr_.any() and (safe & ~pr_).any())
                 nd_ = nd_ + (pr_.astype(np.int64),)
             rxl_ = None
@@ -4986,11 +5146,11 @@ class ForumPlanner(Planner):
                 # (the umbrella) first
                 gl = safe & (r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
                 self.audit.noglide_ticks += int(gl.any() and (safe & ~gl).any())
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank,
+                order = np.lexsort((-J_sel, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank,
                                     v2_ff, gl.astype(np.int64)) + gf_ + entry_rank + (v2_nh, offl) + wk_ + nd_ + kk_ +
                                    (~mkeep, ~keep, clash_p, S, U, hz_soft, hz))
             else:
-                order = np.lexsort((-J, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank, v2_ff
+                order = np.lexsort((-J_sel, eml_k, -t_hit, -t_c, Pf, Pcm, fs_face, Pc, sk_c, -sk_f, sk_n, fs_bad, exit_rank, v2_ff
                                     ) + gf_ + entry_rank + (v2_nh, offl) + wk_ + nd_ + kk_ + (~mkeep, ~keep, clash_p, S, U, hz_soft,
                                                                               hz))
             order = order[sel[order]]
@@ -4998,7 +5158,7 @@ class ForumPlanner(Planner):
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
-            self.last_sel = {"J": J, "J_tv": sc.get("J_tv"), "eml": eml_k, "nh": sc["nh"], "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
+            self.last_sel = {"J": J, "J_sel": J_sel, "J_tv": sc.get("J_tv"), "eml": eml_k, "nh": sc["nh"], "t_hit": t_hit, "t_c": t_c, "Pc": Pc, "Pcm": Pcm, "Pf": Pf,
                              "sk_n": sk_n, "sk_f": sk_f, "sk_c": sk_c, "clash_p": clash_p, "tk": tk, "V": V,
                              "mkeep": mkeep, "keep": keep, "S": S, "U": U, "hz": hz, "hz_soft": hz_soft, "sel": sel,
                              "allowed": ok & known, "safe": safe, "forced": forced, "first": i, "box": r1.box,
@@ -5012,8 +5172,11 @@ class ForumPlanner(Planner):
                 # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
                 # FORCED_RISK: of the first esc_k rows of the order those tied with the first on every key above the
                 # share (the share saturates in wave 0 and ties, forum.md §19), the first with an escape
+                n_front = 0
                 if not forced:
-                    ranked = order[safe[order]]
+                    # Task 182 seq 280: the credited rows (over_stay) never push the safe rows it read before out of its
+                    # window (_esc_ranked)
+                    ranked, n_front = _esc_ranked(order, safe, sp_safe)
                 else:
                     top = order[:fcfg.esc_k_forced]
                     kk = np.stack([hz, hz_soft, U, S, clash_p, keep, mkeep, V, sk_n, sk_f, sk_c, fs_bad]
@@ -5033,7 +5196,7 @@ class ForumPlanner(Planner):
                                            for r, d in knife_data.items() if ok[r]}}
                     esc_row, nf, nchk, nth, lab = self._escape_pick(
                         f, start, hold, full, hold_end, r1, ranked, hero,
-                        fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k),
+                        (fcfg.esc_k_forced if forced else (fcfg.v2_esc_k if v2 else fcfg.esc_k)) + n_front,
                         None if math.isinf(dl) else t0 + (dl + (map_ms if MAP_DL_SHIFT else 0.0)) * 1e-3, v2=v2)
                     self._hf_esc = None
                     a.esc_cut += int(self.esc_cut)
@@ -5310,6 +5473,12 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if sc.get("stay_pogo") is not None:
+            # Task 182 seq 280: over_stay's down-slash rows this tick (its first predicted hit on the stage's target)
+            sp_r = sc["stay_pogo"]
+            ch_ = bool(0 <= res.idx < N and sp_r[res.idx] and safe[res.idx])
+            self.last_info["stay_pogo"] = {"rows": int(sp_r.sum()), "safe": int((sp_r & safe).sum()), "chosen": ch_,
+                                           "credit": round(float(J_stay[res.idx]), 3) if ch_ else 0.0}
         if getattr(self, "v2_ret", None) is not None:
             # SSBOT_FORUM_TWO_RETURN_BODY: this tick's narrowed rows (the chosen row's lock end with them)
             self.last_info["v2_return"] = dict(self.v2_ret["info"],

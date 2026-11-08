@@ -178,7 +178,7 @@ def _apply(sc, won, rule):
     hw[g.target] = max(hw.get(g.target, 0.), tac.rules.target_hit_w * tac.rules.priority.get(CLAPPER, 1.))
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
                   weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=rule,
-                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset(), withdraw=None)
+                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset(), withdraw=None, stay_pogo=frozenset())
     pre = None                                  # the preferences before the strike's own weights (Sol seq 272 B)
     if ap.suppress_hits or (target.family in JUMPS and target.state in AIR):
         # no hit while backing off (the winner's suppression), and never on a target in its jump's flight
@@ -192,6 +192,10 @@ def _apply(sc, won, rule):
             kw = dict(out.hit_kw); kw[g.target] = (0., 0., 0., hw[g.target])
             out = replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - {g.target},
                           no_pogo=frozenset(out.no_pogo) - {g.target}, ground_first=frozenset(out.ground_first) - {g.target})
+        if ap.down_ok:
+            # Task 182 seq 280: the stage's own no_hit on its target gives way to that target's down slash only; a ban from
+            # any other source (every earlier one is in out.no_hit, before the stage's own is merged) keeps it
+            out = replace(out, stay_pogo=frozenset(ap.down_ok) - frozenset(out.no_hit))
         if ap.no_hit:
             # Task 183 seq 267: the middle return's crossed body (Applied.cross_no_hit) is recorded apart when no other
             # source bans it (every earlier one is in out.no_hit, the winner's own others in ap.no_hit; nothing after

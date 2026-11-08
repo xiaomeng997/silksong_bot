@@ -602,7 +602,10 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str) -> tupl
     # witness is revoked by that hit: its next Run would descend onto the body, #316 / #317); float there, no hit on either.
     phases.append(Phase("over_wait", target=W, stance=("head", W), no_hit=(J, W), replaceable=False,
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
-    phases.append(Phase("over_stay", target=W, stance=("head", W), no_hit=(J, W), replaceable=False,
+    # Task 182 seq 280 (the person: "give the ordinary planner the slow-shift preference"): over its head, the ordinary rows' own
+    # down slash on it still counts (down_ok), checked like any row on both branches, re-judged on each real bounce; no strike
+    # is asked of the action owners
+    phases.append(Phase("over_stay", target=W, stance=("head", W), no_hit=(J, W), replaceable=False, down_ok=True,
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))
     phases.append(Phase("over_out", target=W, stance=("far", W), no_hit=(J, W), replaceable=False, go="out",
                         on=(("other_gone", INVALID), ("hazard_over", "over_back"), ("stance_lost", BLOCKED))))

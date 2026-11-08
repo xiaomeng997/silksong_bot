@@ -243,6 +243,14 @@ class GoalPrefs(TacticPrefs):
     #                                        Read only by the B2 bounce follow-up's seam strike (knife_chain_air_native)
     withdraw: StageWithdraw | None = None  # Task 182 seq 272 B: the running over_head stage's stance and strike, taken back
     #                                        for the ordinary rows on the action layer's refusal of that strike (ForumPlanner.tick)
+    stay_pogo: frozenset = frozenset()     # Task 182 seq 280 (the person): iids in no_hit ONLY by L2's over_stay stage (the vaulted
+    #                                        Clapper after its real bounce, idle or walking; clapper_priority, Applied.down_ok). A row
+    #                                        whose first predicted hit is the ordinary rows' down slash from the air on it (a swing
+    #                                        already pressed included) in every modeled variant (DownSlash / DownSlashAlt, both
+    #                                        facings), once safe (S = 0 on both branches), ranks as one landed hit
+    #                                        at its down-slot weight (ForumPlanner._score_forum / _ordinary_tick: its checks queued
+    #                                        first, SP4's no_pogo rank waived for that hit). J, nh, weights, safety, FORCED_RISK,
+    #                                        PlanResult.J (B2's comparisons) and every other no_hit / rank stay
 
 
 class Tactics:

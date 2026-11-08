@@ -39,6 +39,8 @@ class Phase:
     at: tuple | None = None          # (absolute game time, next phase): fixed in the plan, never moved by the executor
     replaceable: bool = True         # a newer generation may be adopted while this stage runs; its support is checked
     go: str | None = None            # the stance is reached by the action layer's bounded approach (guide / under / retreat)
+    down_ok: bool = False            # Task 182 seq 280: its target's down slash from the air still counts for the ordinary rows
+    #                                  although the stage lists it in no_hit (GoalPrefs.stay_pogo; over_stay)
 
     def after(self, event: str) -> str | None:
         return next((to for ev, to in self.on if ev == event), None)
