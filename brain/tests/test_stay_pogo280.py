@@ -1,10 +1,12 @@
-"""Task 182 seq 280 - 282 (the person via Sol: "give the ordinary planner the slow-shift preference"): over the vaulted
+"""Task 182 seq 280 - 283 (the person via Sol: "give the ordinary planner the slow-shift preference"): over the vaulted
 Clapper's head after its real bounce (L2's over_stay), the ordinary rows' own down slash on it - GoalPrefs.stay_pogo - may
 change the tick's send only after the tick has made its own choice exactly as without it, and only through a candidate that
 passes every gate that choice passed (contact evidence, both branches safe, the escape check, the tail check). Under the
 production deadlines (a cost clock) the tick's own checks keep their whole budget - the candidate scan, the order and every
 check of the promotion run after them - and each of the promotion's steps starts only if its estimate ends before the escape
-deadline, its result taken only if that deadline has not passed (Sol seq 282). A failure, a cut or nothing checked leaves the
+deadline, its result taken only if that deadline has not passed (Sol seq 282); the estimates are the measured costs of the
+same calls - the tick's own escape batch and tail checks, the promotion's own steps - not fixed seeds (Sol seq 283: the formal
+run cut every scan with 1.5-2 ms left, its seeds never measured). A failure, a cut or nothing checked leaves the
 tick's own choice, verdict, tail, escape record and hand-back. The stage's no_hit for every other slash, the other Clapper's
 ban, every other source's ban, FORCED_RISK, the dash kept for an escape, the envelope's queue and caps, every other stage (the
 middle landing included) and every value B2 compares stay."""
@@ -557,10 +559,12 @@ def test_under_the_real_deadlines_the_promotion_takes_only_the_time_left(wparams
     # production deadlines on the cost clock: the tick's own checks run first, exactly as without the preference; the
     # promotion's scan, swing recheck, escape batch and tail check each start only if their estimates end before the escape
     # deadline (the scan: with a tail check; a recheck or batch: with a tail check), and one that would not leaves the
-    # choice, its verdict, tail and hand-back as made. Original tail 3 ms: no time to scan; 2 ms: no time for the batch; the
-    # promotion's batch 3 ms slower than its estimate: no time for its tail; original tail 2.2 ms: no time for the recheck
-    esc_ms, tail_ms, extra = {"time_left": (2.0, 1.0, None), "no_time_for_its_scan": (2.0, 3.0, None),
-                              "no_time_for_its_escape_batch": (2.0, 2.0, None), "no_time_for_its_tail_check": (2.0, 1.0, {2: 3.0}),
+    # choice, its verdict, tail and hand-back as made. The tail estimate is measured on the tick's own tail check (seq 283),
+    # the batch is the tick's own 2.5 ms estimate: original tail 3.5 ms (ends at 6.5 ms) no time to scan (0.5 + 3.5);
+    # 3 ms: scanned, then no time for the batch (2.5 + 3); the promotion's batch 3 ms slower than its estimate: no time for
+    # its tail; original tail 2.2 ms: no time for the recheck (3 + 2.35)
+    esc_ms, tail_ms, extra = {"time_left": (2.0, 1.0, None), "no_time_for_its_scan": (2.0, 3.5, None),
+                              "no_time_for_its_escape_batch": (2.0, 3.0, None), "no_time_for_its_tail_check": (2.0, 1.0, {2: 3.0}),
                               "swing_in_time": (2.0, 1.0, None), "no_time_for_the_swing_branch": (2.0, 2.2, None)}[case]
     clk = _cost_clock(monkeypatch, esc_ms, 0.5, tail_ms, esc_extra=extra)
     swing = "swing" in case
@@ -587,7 +591,7 @@ def test_under_the_real_deadlines_the_promotion_takes_only_the_time_left(wparams
     if case == "no_time_for_its_scan":
         assert sp["cut"] == "scan" and more == [] and "rows" not in sp
     elif case == "no_time_for_its_escape_batch":
-        assert sp["cut"] == "escape" and more == [] and all(n is None for _, n, _ in sp["checked"])
+        assert sp["cut"] == "escape" and more == [] and all(n is None for _, n, _ in sp["checked"]) and sp["safe"] > 0
     elif case == "no_time_for_its_tail_check":
         assert sp["cut"] == "tail" and more == [("esc", sp["cands"])]
         assert all(n == 0 and t is False for _, n, t in sp["checked"])
@@ -628,6 +632,57 @@ def test_sols_late_check_counterexample_changes_nothing(wparams, warena, monkeyp
     assert sp["cut"] == "final" and sp["checked"] == [(399, 0, True)] and not sp["promoted"]
     _same_send(pl0, r0, pl1, r1)
     assert "promoted_from" not in pl1.last_info["esc"]
+
+
+@pytest.mark.parametrize("tail_ms", [1.0, 4.0])
+def test_the_tail_estimate_is_measured_on_the_ticks_own_tail_check(wparams, warena, monkeypatch, tail_ms):
+    # Task 182 seq 283: the promotion's tail-check estimate is measured on the tick's own tail check too (two clock reads round
+    # it, after its result), the stage on or not: a 1 ms check takes the 2.5 ms seed half way down, a 4 ms one up at once
+    from ssbot.combat.forum_planner import stay_cost
+    _cost_clock(monkeypatch, 2.0, 0.5, tail_ms)
+    pl, r = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
+    assert (r.idx, r.tail_ok) == (21, True) and pl.last_info.get("stay_pogo") is None
+    assert pl.stay_tail_s == pytest.approx(stay_cost(0.0025, tail_ms * 1e-3))
+
+
+SEEDS_353 = dict(stay_scan_s=0.002, stay_esc_s=0.003, stay_tail_s=0.0025)        # 48351df9's fixed estimates
+
+
+@pytest.mark.parametrize("case", ["measured", "seeds_353", "tail_unmeasured", "esc_floor_353", "own_batch_slower"])
+def test_sols_formal_budget_the_promotion_runs_in_the_time_the_tick_leaves(wparams, warena, monkeypatch, case):
+    # Task 182 seq 283 (Sol, the formal #353 run: Q2 f4827 / f4828 and Q5 f4860 cut at the scan, 1.5-2 ms left there): the
+    # tick's own checks end late - the escape check entered at 7.7 ms, a 0.3 ms batch, a 0.4 ms tail check: 1.6 ms left - and
+    # the promotion's steps are short (offline on E16-23: scan 0.06-0.14 ms, an escape batch 0.46-0.67, a tail check
+    # 0.66-0.83; Sol's formal P about half). Estimates as measured on earlier ticks (the tick's own batches 0.3 ms, its tail
+    # checks 0.45 ms, then this tick's 0.4: 0.425; the scan never run: its 0.5 ms seed): the scan, a batch and a tail check
+    # fit - promoted by 9.1 ms, the record keeping the time left and the estimates. 48351df9's fixed estimates (scan 2,
+    # escape 3, tail 2.5 ms): cut at the scan (the formal result). The tail measured only on this tick's check (1.45 ms): cut
+    # at the scan; the old 3 ms escape floor, or the promotion's own earlier batch at 5 ms: scanned, cut at the batch
+    clk = _cost_clock(monkeypatch, 0.3, 0.5, 0.4, score_ms=6.7)
+    meas = dict(esc_batch_s=0.0003, stay_tail_s=0.00045)
+    est = {"measured": meas, "seeds_353": dict(esc_batch_s=0.0003, **SEEDS_353), "tail_unmeasured": dict(esc_batch_s=0.0003),
+           "esc_floor_353": dict(meas, stay_esc_s=0.003), "own_batch_slower": dict(meas, stay_esc_s=0.005)}[case]
+    warm = lambda pl, args: [setattr(pl, k, v) for k, v in est.items()]
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), pre=warm, **REAL)
+    log0, at0 = list(clk.log), clk.at[-1]
+    clk.log.clear()
+    pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), pre=warm, **REAL)
+    assert at0["pick"] == clk.at[-1]["pick"] == pytest.approx(7.7) and at0["end"] == pytest.approx(8.4)
+    assert clk.log[:len(log0)] == log0 == [("esc", [21, 34, 84, 93]), ("tail", [21])] and r0.idx == 21
+    sp = pl1.last_info["stay_pogo"]
+    assert sp["left"] == pytest.approx(1.6)
+    assert sp["est"] == pytest.approx({"measured": [0.5, 0.3, 0.425], "seeds_353": [2.0, 3.0, 1.45],
+                                       "tail_unmeasured": [0.5, 0.3, 1.45], "esc_floor_353": [0.5, 3.0, 0.425],
+                                       "own_batch_slower": [0.5, 5.0, 0.425]}[case])
+    if case == "measured":
+        assert sp["promoted"] and r1.idx == 399 and not r1.S and r1.tail_ok is True and r1.J == pytest.approx(r0.J)
+        assert clk.log[len(log0):] == [("esc", sp["cands"]), ("tail", [399])] and clk.at[-1]["end"] == pytest.approx(9.1)
+        assert sp["checked"] == [(399, 0, True)] and pl1.stay_esc_s == pytest.approx(0.0003)
+        return
+    _same_send(pl0, r0, pl1, r1)
+    assert not sp["promoted"] and clk.log[len(log0):] == []
+    cut = {"seeds_353": "scan", "tail_unmeasured": "scan", "esc_floor_353": "escape", "own_batch_slower": "escape"}[case]
+    assert sp["cut"] == cut and (("rows" in sp) == (cut == "escape"))
 
 
 def test_a_promoted_send_carries_its_own_escape_record(wparams, warena, monkeypatch):

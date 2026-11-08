@@ -1465,12 +1465,17 @@ class ForumPlanner(Planner):
                                     float(p[:, 1].max()))
         self._clash_lvl_ms = 0.0          # the clash pass's first level, running mean (its deadline check)
         self.esc_batch_s = 0.003          # the escape check's batch, running mean (its deadline check)
-        # Task 182 seq 281 / 282: the over_stay promotion's own costs (its candidate scan, a swing's hit branch, an escape
+        # Task 182 seq 281 - 283: the over_stay promotion's own costs (its candidate scan, a swing's hit branch, an escape
         # batch, a tail check), each up at once to a slower call and down by halves (stay_cost): its deadline checks only,
-        # never read by the tick's own checks (esc_batch_s stays theirs)
-        self.stay_scan_s = 0.002
+        # never read by the tick's own checks (esc_batch_s stays theirs). Seq 283 (Sol, the formal #353 run: every scan cut,
+        # so no estimate was ever measured): its escape batch is estimated as the tick's own escape check estimates the same
+        # call (esc_batch_s, measured on its every batch) until a batch of its own is measured (stay_esc_s from 0); a tail
+        # check is measured on the tick's own tail checks too (_ordinary_tick, after its check); the scan, never run before,
+        # starts at 0.5 ms (every scan measured offline: 0.06-0.14 ms on E16-23, 0.5 on a process's first call; Sol's formal
+        # P <= 0.06); a swing's hit branch keeps 3 ms (the tick measures no uncapped branch of its own)
+        self.stay_scan_s = 0.0005
         self.stay_hb_s = 0.003
-        self.stay_esc_s = 0.003
+        self.stay_esc_s = 0.0
         self.stay_tail_s = 0.0025
         self.esc_cut = False
         self.prev_esc_unsafe = False      # the last chosen row was S = 1 by the escape check (a carried CONTINUE keeps it)
@@ -5264,11 +5269,15 @@ class ForumPlanner(Planner):
                 a.esc_carried += 1
             if not forced and cfg.tail_k > 0 and not carried:
                 ranked = order[safe[order]] if esc_row is None else np.array([esc_row], np.int64)
+                tt_ = time.perf_counter()
                 if knife_tails:
                     from ssbot.combat.forum_knife_plan import pick_tail
                     i, tail_ok = pick_tail(self, f, r1, hold_end, ranked, P + T, i, knife_tails)
                 else:
                     i, tail_ok = self._tail_pick(f, r1, hold_end, ranked, P + T, i)
+                # Task 182 seq 283: the over_stay promotion's tail estimate, measured on this check too (after it: the check,
+                # its result and its time are the tick's own as before)
+                self.stay_tail_s = stay_cost(self.stay_tail_s, time.perf_counter() - tt_)
             elif carried:
                 tail_ok = True
             if n_chain and C0 <= i < C0 + n_chain and (esc_unsafe or (cfg.tail_k > 0 and tail_ok is not True)):
@@ -5303,7 +5312,8 @@ class ForumPlanner(Planner):
                 # result is taken only if the deadline has not passed when it is in: a failure, a cut or nothing checked
                 # leaves the choice, its safety verdict, tail and hand-back exactly as made. Never on FORCED_RISK, a
                 # chain's late reject or a candidate the order ranks behind the choice (a higher key, e.g. NODASH, keep,
-                # the map)
+                # the map). Seq 283: the estimates are measured costs of the same calls (__init__), the record keeps the
+                # time left at its start and the estimates its steps start on
                 stay_info = {"orig": int(i), "promoted": False}
                 tp_ = time.perf_counter()
                 dl_e = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
@@ -5313,6 +5323,10 @@ class ForumPlanner(Planner):
                     return t_end_e is None or time.perf_counter() + cost_s <= t_end_e
 
                 tail_s = self.stay_tail_s if cfg.tail_k > 0 else 0.0
+                if t_end_e is not None:
+                    stay_info["left"] = round((t_end_e - tp_) * 1e3, 3)
+                stay_info["est"] = [round(self.stay_scan_s * 1e3, 3), round(max(self.esc_batch_s, self.stay_esc_s) * 1e3, 3),
+                                    round(tail_s * 1e3, 3)]           # ms: scan, escape batch, tail check
                 if forced or not v2 or native_no_fallback or "native_late_reject" in (esc_info or {}):
                     stay_info["skip"] = "forced" if forced else ("v2_off" if not v2 else "chain_reject")
                 elif not in_time(self.stay_scan_s + tail_s):
@@ -5643,7 +5657,8 @@ class ForumPlanner(Planner):
             # run; rows / safe: the scan's candidates and those safe on both branches; cands / checked: the candidates ahead
             # of the choice, their escape failures (-1: failed in the tick's own check) and tails; esc_new: rows it checked
             # anew; inflight_unsafe: those a swing's hit branch failed; cut / inflight_cut: the step the deadline stopped,
-            # "final": a result in after it; ms: its own time)
+            # "final": a result in after it; ms: its own time; seq 283 - left: the ms its start had before the escape
+            # deadline, est: the ms its scan, escape batch and tail check were estimated at then)
             si_ = dict(stay_info)
             sp_r = None if stay_scan is None else stay_scan["stay_pogo"]
             ch_ = bool(sp_r is not None and 0 <= res.idx < N and sp_r[res.idx] and safe[res.idx])
