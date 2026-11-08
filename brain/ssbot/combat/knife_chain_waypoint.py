@@ -173,6 +173,53 @@ def _handback(m, row, hi, goal, tol, span=4):
     return found
 
 
+def _late_at(m, key, by_k, goal, tol, d, near=8, probes=8):
+    """next_mask's "late" on the later ticks of a Run whose new dash its lock refuses every time (Sol seq 276): that dash was asked for
+    at once (its cooldown spent, none held), so on each later tick j it is asked for from j again, after the direction key sent
+    before it; her run alone is late from the start (the same keys on). The first j >= 1 whose dash from j no longer arrives by
+    by_k (late at by_k + 1 whatever she does), each check one row of by_k + 2 keys (d: her direction to the goal). A later dash
+    arrives later except within a frame or so of the deadline (the frame phase; a dash pressed on some frames does not start), so:
+    a search for that boundary with `probes` ticks checked in one batch each round, then the near ticks below it not yet checked in
+    one batch, further down while the earliest late found is the batch's first."""
+    hi = max(int(by_k) + 1, 1)
+    known = {hi: True}
+
+    def lates(js):
+        todo = [j for j in js if j not in known]
+        if todo:
+            rows = np.full((len(todo), hi + 1), key, np.int64)
+            for i, j in enumerate(todo):
+                rows[i, j:] |= K.B_DASH
+            xs = m.xs(rows)
+            for i, j in enumerate(todo):
+                a = _arrival(xs[i, m.off:], goal, d, tol)
+                known[j] = a is None or a > by_k
+        return [known[j] for j in js]
+
+    lo, top = 1, hi                             # late at top
+    while lo < top:
+        js = sorted({int(round(v)) for v in np.linspace(lo, top - 1, min(int(probes), top - lo))})
+        res = lates(js)
+        i = next((n for n, late in enumerate(res) if late), None)
+        if i is None:
+            lo = js[-1] + 1
+        else:
+            top = js[i]
+            lo = js[i - 1] + 1 if i > 0 else lo
+            if i == 0 and js[0] == lo:
+                break
+    j = top
+    while j > 1:
+        js = list(range(max(1, j - int(near)), j))
+        first = next((jj for jj, late in zip(js, lates(js)) if late), None)
+        if first is None:
+            break
+        j = first
+        if first > js[0]:
+            break
+    return int(j)
+
+
 class SimRoller:
     """route()'s model on the B2 tick's ChainSim."""
 
@@ -236,14 +283,15 @@ def next_mask(sim, goal: WaypointGoal, f: int):
 
 
 def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = False):
-    """The keys this Run counts on from this tick (Task 182, Sol seq 271 / 272 / 273), for a check of its whole route: the keys it
-    sends itself, from the key it actually sends now (the one its gates passed) up to the tick it hands back, next_mask's "arrived"
-    by its own glide (_handback: REST_F frames of no keys past that tick, never cut at the row's length). The keys in flight at the
-    hand-back are among them; the next owner's first key is the next one, and her glide after it is no part of this Run:
+    """The keys this Run counts on from this tick (Task 182, Sol seq 271 / 272 / 273 / 276), for a check of its whole route: the
+    keys it sends itself, from the key it actually sends now (the one its gates passed) up to the tick it hands back, next_mask's
+    "arrived" by its own glide (_handback: REST_F frames of no keys past that tick, never cut at the row's length) or its "late".
+    The keys in flight at the hand-back are among them; the next owner's first key is the next one, and her glide after it is no
+    part of this Run:
       - a dash it starts or holds (DASH in mask): held, as next_mask holds it (releasing it would end the sprint);
       - a dash refused this tick (dash_refused, mask the key it sends instead): the run of that key, the keys it sends while the
-        lock keeps refusing (with no arrival in the window, the whole window: she runs on until the Run is late); the refused
-        dash is no part of the route;
+        lock keeps refusing every later new dash too, up to next_mask's "late" there (_late_at) or its "arrived", whichever comes
+        first; the refused dash is no part of the route (a later tick whose dash passes its lock is checked on that tick's own);
       - otherwise route() on from the next key (a run, or the dash at its cooldown edge, then held as next_mask holds it).
     MAX_F at most. None: from the key sent the model gives no route (a dash or route() with no arrival): nothing to check. A place
     past a body (goal.over) is not one of these: route() has no passage above it. The check made of it only ever hands back; a
@@ -254,7 +302,12 @@ def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = 
     mask = int(mask)
     x0 = float(m.xs(np.zeros((1, 1), np.int64))[0][m.off])
     d = 1 if goal.x > x0 else -1
-    if mask & K.B_DASH or dash_refused:
+    if dash_refused and not mask & K.B_DASH:
+        row = np.full(T, mask, np.int64)
+        late = _late_at(m, mask, by_k, float(goal.x), goal.tol, d)
+        r = _handback(m, row, late, float(goal.x), goal.tol)
+        return np.asarray(row[:late if r is None else r], np.int64)
+    if mask & K.B_DASH:
         row = np.full(T, mask, np.int64)
     else:
         row = np.zeros(T, np.int64)
@@ -268,7 +321,7 @@ def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = 
             row[kd:] = row[kd]                  # held from its edge, as next_mask holds it (route()'s own release is a plan's)
     a = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
     if a is None:
-        return row if (dash_refused and not mask & K.B_DASH) else None
+        return None
     r = _handback(m, row, max(int(a), 1), float(goal.x), goal.tol)
     r = max(int(a), 1) if r is None else r
     return np.asarray(row[:r], np.int64)
