@@ -8,6 +8,7 @@ Four small changes, each on an existing path:
   no longer keeps its high hold);
 - big rune / over_stay: the stage's own down-slash allowance (GoalPrefs.stay_pogo) also lets the chain's stomp strike that target.
 """
+from dataclasses import replace
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -18,6 +19,7 @@ from ssbot.combat import knife_chain_transfer as T
 from ssbot.combat import rune_lowhop as lh
 from ssbot.combat import slam_play as sp
 from ssbot.combat.knife_chain_commitment import ContactScan, MoveInstance, PathContact
+from ssbot.combat.knife_chain_eval import Run
 from ssbot.combat.knife_chain_format import MASK_NAMES as B
 from ssbot.combat.knife_chain_transfer import TransferGoal
 from ssbot.combat import two_play as tp
@@ -487,3 +489,56 @@ def test_no_ban_is_unchanged():
     n, state = _goal_scene()
     out = n.goal_preferences(state, _prefs(), handoff=True)
     assert n._transfer_ready and out is not None
+
+
+# ---- big rune: with the other Clapper in the air the vault branch no longer swallows a BOUNCE goal's own strike ----
+
+def _bounce_routing(monkeypatch, kind="BOUNCE", ready=True, vault=None):
+    from ssbot.combat import knife_chain_vault_native as VN
+    from tests.test_knife_chain_vault_manual import _switch_routing_scene
+    n, raw, sim, prefs, delegated, marker = _switch_routing_scene("right", monkeypatch)
+    prefs.entry_attack = None
+    n._transfer_goal = replace(n._transfer_goal, source_kind=kind)
+    n._transfer_ready, n._vault_ready, n._air_context = ready, True, None
+    monkeypatch.setattr(VN, "propose", vault if callable(vault) else (lambda *a: vault))
+    out = n._propose(NS(), None, sim.start, sim.hold, sim.prefix, NS(), prefs, None)
+    return out, delegated, marker
+
+
+def test_no_vault_action_leaves_a_bounce_goal_its_own_strike(monkeypatch):
+    out, delegated, marker = _bounce_routing(monkeypatch)
+    assert out is marker and len(delegated) == 1
+
+
+@pytest.mark.parametrize("kw", [{"ready": False}, {"kind": "CAST"}, {"kind": "SWITCH"}])
+def test_only_a_ready_bounce_goal_falls_through_the_vault(monkeypatch, kw):
+    out, delegated, _ = _bounce_routing(monkeypatch, **kw)
+    assert out is None and not delegated
+
+
+def test_a_vault_offer_keeps_the_keys(monkeypatch):
+    offer = object()
+    out, delegated, _ = _bounce_routing(monkeypatch, vault=offer)
+    assert out is offer and not delegated
+
+
+@pytest.mark.parametrize("what", ["run", "recovery"])
+def test_a_vault_that_started_or_failed_keeps_its_owner(monkeypatch, what):
+    from tests.test_knife_chain_vault_manual import _switch_routing_scene
+    from ssbot.combat import knife_chain_vault_native as VN
+    n, raw, sim, prefs, delegated, marker = _switch_routing_scene("right", monkeypatch)
+    prefs.entry_attack = None
+    n._transfer_goal = replace(n._transfer_goal, source_kind="BOUNCE")
+    n._transfer_ready, n._vault_ready, n._air_context = True, True, None
+
+    def vault(*a):
+        if what == "run":
+            n.runner.run = Run("vault_idle", "near", {"iid": prefs.target})
+        else:
+            n.recovery = {"reason": "x"}
+
+    monkeypatch.setattr(VN, "propose", vault)
+    monkeypatch.setattr(n, "_recovery_offer", lambda: None, raising=False)
+    monkeypatch.setattr(n, "queued_prefix", lambda *a: (int(sim.prefix[0]), "test"))      # (the owner check itself, not a prefix refusal)
+    assert n._propose(NS(), None, sim.start, sim.hold, sim.prefix, NS(), prefs, None) is None
+    assert not delegated

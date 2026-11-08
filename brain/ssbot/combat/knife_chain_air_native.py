@@ -751,9 +751,13 @@ class NativeManualAirChain(NativeChainB2):
         vault_active=self.runner.run is not None and self.runner.run.chain=="vault_idle"
         if self.vault_enabled and (vault_active or (self._vault_ready and self.commitment is None and self.post_context is None)):
             from .knife_chain_vault_native import propose as propose_vault
-            if self._context is not None:
-                return propose_vault(self,planner,forecast,prefs)
-            return None
+            if self._context is None:return None
+            vault=propose_vault(self,planner,forecast,prefs)
+            # Task 182 seq 289 (the person: after a real bounce the next down slash, not the umbrella; live #40 123959 - 124000): the vault starts
+            # only on the ground, so with the other Clapper in the air it took every airborne tick: with no vault action now a BOUNCE goal's own
+            # strike goes on below, as the SWITCH stomp does above
+            if (vault is not None or self.recovery is not None or self.runner.run is not None or not self._transfer_ready
+                    or getattr(self._transfer_goal,"source_kind",None)!="BOUNCE"):return vault
         if self.post_context is not None:
             move=self.post_context["move"];self._air_finished.add(move)
             self._note("air_real_bounce_handoff",frame=f,move=vars(move),source="observed target DownSlash hit plus bounce")
