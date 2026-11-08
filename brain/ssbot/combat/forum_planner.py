@@ -687,9 +687,10 @@ def _down_robust(box, flags, tbox, ff, ft, sel, verts, starts, out):
 def stay_promote(ranked: np.ndarray, esc, tail, k: int = ESC_CHUNK) -> tuple[int | None, list]:
     """Task 182 seq 281: the over_stay preference's promotion, after the tick's own choice. ranked: the candidates (its down
     slashes, safe on both branches, in the credited order, only those ahead of the choice); esc(rows) -> failures per row,
-    or None when no escape check could be made (no time: nothing promoted); tail(row) -> True, False, or None (no tail
-    check this tick). The first of at most k candidates with no escape failure and a tail that holds, else None: the choice
-    stands as made. Returns (row or None, [(row, failures or None, tail)] as checked)."""
+    or None when no escape check could be made (no time: nothing promoted; -1: failed in the tick's own check, count not
+    kept); tail(row) -> True, False, or None (no tail check this tick). The first of at most k candidates with no escape
+    failure and a tail that holds, else None: the choice stands as made. Returns (row or None, [(row, failures or None,
+    tail)] as checked)."""
     seen = []
     rows = np.asarray(ranked, np.int64)[:max(int(k), 0)]
     if not len(rows):
@@ -706,6 +707,27 @@ def stay_promote(ranked: np.ndarray, esc, tail, k: int = ESC_CHUNK) -> tuple[int
         if t is not False:
             return int(r), seen
     return None, seen
+
+
+def esc_known(ranked: np.ndarray, row, fail, checked: int, k: int) -> list[int]:
+    """Task 182 seq 282: the rows the tick's own escape check (_escape_pick on `ranked`, its first k) found failing, read
+    from its result alone, so the check keeps no record of its own (its time is the original's): every row before the one
+    it took in its first k (that pass stops at the first row without a failure), or, when it took the fewest failures, every
+    row of its first k it checked. Rows of its later pass (ESC_MORE) are left out; no row taken or none checked: none."""
+    if row is None or int(checked) <= 0:
+        return []
+    head = np.asarray(ranked, np.int64)[:max(int(k), 0)]
+    if fail == 0:
+        at = np.flatnonzero(head == int(row))
+        if len(at):
+            return [int(r) for r in head[:int(at[0])]]
+    return [int(r) for r in head[:min(int(checked), len(head))]]
+
+
+def stay_cost(est: float, took: float) -> float:
+    """Task 182 seq 282: the over_stay promotion's estimate of a check's cost (s) after one that took `took`: up at once to a
+    slower one, down by halves (a conservative start for the next one; the result is still checked against the deadline)."""
+    return max(float(took), 0.5 * float(est) + 0.5 * float(took))
 
 
 @numba.njit(cache=True, parallel=True)
@@ -1443,8 +1465,13 @@ class ForumPlanner(Planner):
                                     float(p[:, 1].max()))
         self._clash_lvl_ms = 0.0          # the clash pass's first level, running mean (its deadline check)
         self.esc_batch_s = 0.003          # the escape check's batch, running mean (its deadline check)
-        self.stay_hb_s = 0.003            # Task 182 seq 281: the over_stay promotion's in-flight hit branch and tail check,
-        self.stay_tail_s = 0.003          # running means (its deadline checks; never read by the tick's own checks)
+        # Task 182 seq 281 / 282: the over_stay promotion's own costs (its candidate scan, a swing's hit branch, an escape
+        # batch, a tail check), each up at once to a slower call and down by halves (stay_cost): its deadline checks only,
+        # never read by the tick's own checks (esc_batch_s stays theirs)
+        self.stay_scan_s = 0.002
+        self.stay_hb_s = 0.003
+        self.stay_esc_s = 0.003
+        self.stay_tail_s = 0.0025
         self.esc_cut = False
         self.prev_esc_unsafe = False      # the last chosen row was S = 1 by the escape check (a carried CONTINUE keeps it)
         self.audit = EnvelopeAudit()
@@ -1673,53 +1700,7 @@ class ForumPlanner(Planner):
                             out["risk"], out["unmod"], self.down_slash, self.combo_f, out["sw_f"], out["sw_k"],
                             out["sw_face"], real, out["nh"], gonly)
         out["targets"] = keep
-        sp_ = frozenset(getattr(prefs, "stay_pogo", None) or ()) & frozenset(nohit)
-        if sp_ and len(keep):
-            # Task 182 seq 280 / 281 (L2 over_stay, GoalPrefs.stay_pogo): the CANDIDATES of the stage's preference - the rows
-            # whose first predicted hit is that target's down slash from the air (K_DOWN) with its contact in every modeled
-            # variant (below) - and the hit's value at its weight. Read only by _ordinary_tick's promotion after its own
-            # choice: nothing here changes what the tick reads before it (first_f / first_t / first_k / first_face, J, nh,
-            # the weights stay the scorer's own; the swing seen in flight is kept apart in stay_ff / stay_ft / stay_fk)
-            ff_c, ft_c = out["first_f"].copy(), out["first_t"].copy()
-            fk_c, fface_c = out["first_k"].copy(), out["first_face"].copy()
-            new = np.zeros(N, np.bool_)
-            st0 = np.asarray(start, np.float64).reshape(kin.K, -1)[:, 0]
-            if (self.down_slash and st0[kin.ATTACKING] > 0 and int(st0[kin.ATK_PDIR]) == 2 and st0[kin.GROUND] <= 0):
-                # a down slash already swinging (pressed on an earlier tick; the scorer sees no swing start in the rows): its
-                # remaining active frames are every row's until a row ends it, so its contact is that row's first hit
-                age = int(round(float(st0[kin.ATK_T]) / self.params.frame_time))
-                j0, j1 = int(win[3, 0]) - age, int(win[3, 1]) - age
-                if j1 > 1:
-                    oj = np.full(N, -1, np.int64)
-                    ot = np.full(N, -1, np.int64)
-                    _inflight_down_contact(np.ascontiguousarray(roll.box, np.float64),
-                                           np.ascontiguousarray(roll.mode, np.int32), np.ascontiguousarray(tbox, np.float64),
-                                           np.ascontiguousarray(tok, np.bool_), vr if face0 > 0 else vl, int(st[3]),
-                                           int(st[4]), j0, j1, oj, ot)
-                    new = (oj >= 0) & ((ff_c < 0) | (oj < ff_c))
-                    ff_c[new], ft_c[new], fk_c[new], fface_c[new] = oj[new], ot[new], K_DOWN, face0
-            pk = np.array([t.iid in sp_ and not t.hazard for t in keep], np.bool_)
-            pogo = (ff_c >= 0) & (fk_c == K_DOWN) & (ft_c >= 0) & pk[np.clip(ft_c, 0, len(keep) - 1)]
-            if pogo.any():
-                # contact evidence: the scorer's blade is DownSlash in the row's facing; the swing may be DownSlashAlt and
-                # the replay's model hit takes every variant - a contact only some variants make (the body's edge) is not
-                # this stage's strike
-                d4 = getattr(self, "_down4", None)
-                if d4 is None:
-                    d4 = self._down4 = _down_variants(self.crest)
-                rob = np.zeros(N, np.bool_)
-                _down_robust(np.ascontiguousarray(roll.box, np.float64), np.ascontiguousarray(roll.flags, np.int32),
-                             np.ascontiguousarray(tbox, np.float64), np.ascontiguousarray(ff_c, np.int64),
-                             np.ascontiguousarray(ft_c, np.int64), pogo, d4[0], d4[1], rob)
-                out["stay_edge"] = pogo & ~rob
-                pogo = rob
-            kw = getattr(prefs, "hit_kw", None) or {}
-            hw = getattr(prefs, "hit_w", None) or {}
-            wd = np.array([float(kw[t.iid][K_DOWN - 1]) if t.iid in kw else float(hw.get(t.iid, 1.0)) for t in keep])
-            out["stay_pogo"] = pogo
-            out["inflight_down"] = new
-            out["stay_ff"], out["stay_ft"], out["stay_fk"], out["stay_face"] = ff_c, ft_c, fk_c, fface_c
-            out["J_stay"] = np.where(pogo, wv[0] * wd[np.clip(ft_c, 0, len(keep) - 1)], 0.0)
+        out["tbox"], out["tok"] = tbox, tok      # (by reference: Task 182 seq 282's _stay_scan reads them after the choice)
         if "under" in self.fcfg.tac and len(keep):
             out["J_under"] = self._under_bonus(f, roll.box, keep)
             out["J"] += out["J_under"]
@@ -1734,6 +1715,64 @@ class ForumPlanner(Planner):
             out["J"] += j_tv
             out.update(E=E, trapped=trapped, overlap=ov, hexp=he, kv=kv, J_tv=j_tv,
                        tv_ms=(time.perf_counter() - t_tv) * 1e3, field_ms=fields.ms)
+        return out
+
+    def _stay_scan(self, sc, roll, start, prefs, sp_: frozenset) -> dict:
+        """Task 182 seq 280 / 282 (L2 over_stay, GoalPrefs.stay_pogo): the stage's CANDIDATES - the rows whose first predicted
+        hit is the down slash from the air (K_DOWN) on a target of sp_ (the stay targets that are also in no_hit), with its
+        contact in every modeled variant - and the hit's value at its weight. Run by _ordinary_tick's promotion only, after
+        the tick's own choice, its escape and tail checks and every fallback are final (Sol seq 282: the scan never takes the
+        time of the checks before it). sc: the tick's _score_forum result, read only (its first hits, targets and their
+        boxes); roll: the rows' rollout. Returns stay_pogo, stay_edge (contact by some variants only: no candidate),
+        inflight_down (the rows whose first hit is a swing pressed before this tick), stay_ff / stay_ft / stay_fk / stay_face
+        (the first hits with that swing) and J_stay."""
+        keep = sc["targets"]
+        tbox, tok = sc["tbox"], sc["tok"]
+        N = roll.flags.shape[0]
+        vr, vl, st, win = self.shapes
+        face0 = 1 if np.asarray(start).reshape(kin.K, -1)[kin.FACE, 0] >= 0 else -1
+        ff_c, ft_c = sc["first_f"].copy(), sc["first_t"].copy()
+        fk_c, fface_c = sc["first_k"].copy(), sc["first_face"].copy()
+        new = np.zeros(N, np.bool_)
+        st0 = np.asarray(start, np.float64).reshape(kin.K, -1)[:, 0]
+        if (self.down_slash and st0[kin.ATTACKING] > 0 and int(st0[kin.ATK_PDIR]) == 2 and st0[kin.GROUND] <= 0):
+            # a down slash already swinging (pressed on an earlier tick; the scorer sees no swing start in the rows): its
+            # remaining active frames are every row's until a row ends it, so its contact is that row's first hit
+            age = int(round(float(st0[kin.ATK_T]) / self.params.frame_time))
+            j0, j1 = int(win[3, 0]) - age, int(win[3, 1]) - age
+            if j1 > 1:
+                oj = np.full(N, -1, np.int64)
+                ot = np.full(N, -1, np.int64)
+                _inflight_down_contact(np.ascontiguousarray(roll.box, np.float64),
+                                       np.ascontiguousarray(roll.mode, np.int32), np.ascontiguousarray(tbox, np.float64),
+                                       np.ascontiguousarray(tok, np.bool_), vr if face0 > 0 else vl, int(st[3]),
+                                       int(st[4]), j0, j1, oj, ot)
+                new = (oj >= 0) & ((ff_c < 0) | (oj < ff_c))
+                ff_c[new], ft_c[new], fk_c[new], fface_c[new] = oj[new], ot[new], K_DOWN, face0
+        out = {}
+        pk = np.array([t.iid in sp_ and not t.hazard for t in keep], np.bool_)
+        pogo = (ff_c >= 0) & (fk_c == K_DOWN) & (ft_c >= 0) & pk[np.clip(ft_c, 0, len(keep) - 1)]
+        if pogo.any():
+            # contact evidence: the scorer's blade is DownSlash in the row's facing; the swing may be DownSlashAlt and the
+            # replay's model hit takes every variant - a contact only some variants make (the body's edge) is not this
+            # stage's strike
+            d4 = getattr(self, "_down4", None)
+            if d4 is None:
+                d4 = self._down4 = _down_variants(self.crest)
+            rob = np.zeros(N, np.bool_)
+            _down_robust(np.ascontiguousarray(roll.box, np.float64), np.ascontiguousarray(roll.flags, np.int32),
+                         np.ascontiguousarray(tbox, np.float64), np.ascontiguousarray(ff_c, np.int64),
+                         np.ascontiguousarray(ft_c, np.int64), pogo, d4[0], d4[1], rob)
+            out["stay_edge"] = pogo & ~rob
+            pogo = rob
+        kw = getattr(prefs, "hit_kw", None) or {}
+        hw = getattr(prefs, "hit_w", None) or {}
+        wd = np.array([float(kw[t.iid][K_DOWN - 1]) if t.iid in kw else float(hw.get(t.iid, 1.0)) for t in keep])
+        w_hit = float(prefs.weights.get("hit", 10.0))
+        out["stay_pogo"] = pogo
+        out["inflight_down"] = new
+        out["stay_ff"], out["stay_ft"], out["stay_fk"], out["stay_face"] = ff_c, ft_c, fk_c, fface_c
+        out["J_stay"] = np.where(pogo, w_hit * wd[np.clip(ft_c, 0, len(keep) - 1)], 0.0)
         return out
 
     def _zero_hit_value_bound(self,ws,f,prefs,ctx,*,start,P,T,N,cont,challenger):
@@ -2428,7 +2467,6 @@ class ForumPlanner(Planner):
                 c_start += 1
                 checked += 1
                 self.audit.hf_esc_reused += 1
-                self._note_esc([r], [n])
                 if n == 0:
                     if e1 is not None:
                         self._v2_esc_first[int(r)] = e1       # (forum_v2.ESC_TAIL's escape for the row)
@@ -2444,7 +2482,6 @@ class ForumPlanner(Planner):
             if v2:
                 nf, lab = self._escape_fail_v2(f, r1, hold_end, rows)
                 self.audit.v2_esc_rows += len(rows)
-                self._note_esc(rows, nf)
             else:
                 nf, lab = self._escape_fail(f, start, hold, full, hold_end, r1, rows, threats)
             self.esc_batch_s = 0.5 * self.esc_batch_s + 0.5 * (time.perf_counter() - tc)
@@ -2475,20 +2512,12 @@ class ForumPlanner(Planner):
                 nf, lab = self._escape_fail_v2(f, r1, hold_end, rows)
                 self.audit.v2_esc_rows += len(rows)
                 self.audit.v2_esc_more += len(rows)
-                self._note_esc(rows, nf)
                 self.esc_batch_s = 0.5 * self.esc_batch_s + 0.5 * (time.perf_counter() - tc)
                 checked += len(rows)
                 for r, n in zip(rows, nf):
                     if n == 0:
                         return int(r), 0, checked, len(threats), []
         return best, best_fail, checked, len(threats), best_lab
-
-    def _note_esc(self, rows, nf) -> None:
-        """Task 182 seq 281: this tick's v2 escape results per row (self._esc_nf, reset by _ordinary_tick before its escape
-        check; None outside it): the over_stay promotion reads them instead of checking a row twice. No effect on the check."""
-        d = getattr(self, "_esc_nf", None)
-        if d is not None:
-            d.update({int(r): int(n) for r, n in zip(rows, nf)})
 
     def _contacts_fn(self, f, bound: np.ndarray, tk: np.ndarray, skip: np.ndarray, occ_fn) -> np.ndarray | None:
         """Planner._contacts against occ_fn(X, Y) (an occupancy of the hull points [n, T1]; None: not applicable)."""
@@ -4285,11 +4314,6 @@ class ForumPlanner(Planner):
         if getattr(self, "v2_ret", None) is not None:
             self.v2_ret["sc"] = sc      # SSBOT_FORUM_TWO_RETURN_BODY: binds the narrowing to this tick's rows (_v2_bound)
         J = sc["J"]
-        # Task 182 seq 280 / 281: L2 over_stay's down-slash candidates (_score_forum) and their hit value; None otherwise.
-        # Read only by the promotion after this tick's own choice (the envelope, its queue and caps, the order, the escape
-        # and tail checks run as without them)
-        stay_m = sc.get("stay_pogo")
-        J_stay = sc["J_stay"] if stay_m is not None else None
         scene_values=scene_known=None
         scene_info=None
         scene_points=scene_layers=None
@@ -4340,8 +4364,8 @@ class ForumPlanner(Planner):
                 bind_possible=bool(prefs.want_bind and ctx.want_bind))
             # From this point the only later J write is the nonnegative whip
             # deduction. Any future positive score term must precede this gate.
-            # (Task 182 seq 280's over_stay down-slash credit ranks the ordinary rows only - never PlanResult.J, so never
-            # the value B2 compares or this proof bounds.)
+            # (Task 182 seq 281 / 282's over_stay promotion runs after the ordinary choice and never changes PlanResult.J,
+            # so never the value B2 compares or this proof bounds.)
             if proof is not None:return proof
         unm = sc["unmod"] & ok
         why[unm] = R_UNMOD
@@ -4973,7 +4997,7 @@ class ForumPlanner(Planner):
         a.overrun += int(overrun)
         a.deadline_cut += int(cut)
         a.core_not_enveloped += int((core & pass1 & ~env).sum())
-        stay_info = None                          # (Task 182 seq 281: the over_stay promotion's record, last_info)
+        stay_info = stay_scan = None              # (Task 182 seq 281 / 282: the over_stay promotion's record and scan)
         if bind_res is not None and bind_res[0]:
             sel_cmd = self.bind.cmd[0]
             res = PlanResult(int(sel_cmd[0]), -2, "BIND", 0, False, 0.0, 1e3, True, n=N + 1,
@@ -5180,7 +5204,6 @@ class ForumPlanner(Planner):
                              "v2_nh": v2_nh, "ready_pen": dg_pen, "corner": dg_corner, "kk": kk_}
             esc_row = None
             esc_unsafe = False
-            self._esc_nf = {}                     # (this tick's escape results per row, _escape_pick: the promotion reuses them)
             if (fcfg.escape or v2) and (not carried or (v2 and forum_v2.ESC_CARRIED)):
                 # reactive support: of the safe rows in the order, the first that leaves the hero an escape from
                 # every attack an enemy may start at its end or late lock-in (the tail check then looks at it alone);
@@ -5269,99 +5292,135 @@ class ForumPlanner(Planner):
                             "fallback_escape": "unchecked"}
             i_orig = i                            # the choice above: PlanResult.J stays its J (B2 compares what it compared)
             stay_info = None
-            if stay_m is not None:
-                # Task 182 seq 281 (Sol): the over_stay preference changes the send only through a candidate that passes
-                # every gate the choice above passed - both branches safe (a swing already in flight: its hit branch, which
-                # the envelope could not see, rechecked here), the escape check, the tail check. A failure, the escape
-                # deadline or nothing checked leaves the choice above exactly as made. Never on FORCED_RISK, a chain's
-                # late reject or a candidate the order ranks behind the choice (a higher key, e.g. NODASH, keep, the map)
-                plain = np.zeros(N, bool)
-                plain[:N0] = True
-                if cont:
-                    plain[N - 1] = True
-                for r_ in knife_data:
-                    plain[r_] = False
-                cand_m = stay_m & safe & plain
-                stay_info = {"rows": int(stay_m.sum()), "safe": int(cand_m.sum()), "orig": int(i), "promoted": False}
-                if (cand_m.any() and not cand_m[i] and v2 and not forced and not native_no_fallback
-                        and "native_late_reject" not in (esc_info or {})):
-                    tp_ = time.perf_counter()
-                    nd_c = nd_ if pr_at is None else (nd_[:pr_at] + ((nd_[pr_at] * ~stay_m).astype(np.int64),) +
-                                                      nd_[pr_at + 1:])
-                    oc = np.lexsort(order_keys(J + np.where(cand_m, J_stay, 0.0), v2_nh - cand_m, nd_c))
-                    oc = oc[sel[oc]]
-                    at_ = np.flatnonzero(oc == i)
-                    ahead = oc[:int(at_[0])] if len(at_) else oc[:0]
-                    cands = ahead[cand_m[ahead]][:ESC_CHUNK]
-                    # every check below starts only if it would end before the escape check's own deadline (it costs
-                    # about what the last one did); one that would not leaves its rows unproven, never promoted
-                    dl_e = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
-                    t_end_e = None if math.isinf(dl_e) else t0 + (dl_e + (map_ms if MAP_DL_SHIFT else 0.0)) * 1e-3
+            sp_t = frozenset(getattr(prefs, "stay_pogo", None) or ()) & frozenset(getattr(prefs, "no_hit", None) or ())
+            if sp_t and len(sc["targets"]):
+                # Task 182 seq 281 / 282 (Sol): the over_stay preference changes the send only through a candidate that
+                # passes every gate the choice above passed - both branches safe (a swing already in flight: its hit
+                # branch, which the envelope could not see, rechecked here), the escape check, the tail check - and only in
+                # the time the tick's own checks left before the escape deadline. Its candidate scan, order and checks all
+                # run from here, after that choice, its escape and tail checks and every fallback are final, so they never
+                # take those checks' time. Each starts only if its estimate (stay_cost) ends before the deadline, and a
+                # result is taken only if the deadline has not passed when it is in: a failure, a cut or nothing checked
+                # leaves the choice, its safety verdict, tail and hand-back exactly as made. Never on FORCED_RISK, a
+                # chain's late reject or a candidate the order ranks behind the choice (a higher key, e.g. NODASH, keep,
+                # the map)
+                stay_info = {"orig": int(i), "promoted": False}
+                tp_ = time.perf_counter()
+                dl_e = fcfg.esc_deadline_ms if fcfg.esc_deadline_ms is not None else fcfg.deadline_ms + 2.0
+                t_end_e = None if math.isinf(dl_e) else t0 + (dl_e + (map_ms if MAP_DL_SHIFT else 0.0)) * 1e-3
 
-                    def in_time(cost_s):
-                        return t_end_e is None or time.perf_counter() + cost_s <= t_end_e
+                def in_time(cost_s):
+                    return t_end_e is None or time.perf_counter() + cost_s <= t_end_e
 
-                    infl = sc.get("inflight_down")
-                    if len(cands) and infl is not None and infl[cands].any():
-                        ri = cands[infl[cands]]
-                        if in_time(self.stay_hb_s):
-                            tc_ = time.perf_counter()
-                            sc_p = dict(sc, first_f=sc["stay_ff"], first_t=sc["stay_ft"], first_k=sc["stay_fk"],
-                                        first_face=sc["stay_face"])
-                            bud_p = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": budget["react_cache"]}
-                            sh_p, _, _ = self._hit_branch(f, start, latched, sc_p, ri, tk, enemy_only, bud_p, cap=False,
-                                                          ev_base=self._ds_evb(ri, D0, ds))
-                            self.stay_hb_s = 0.5 * self.stay_hb_s + 0.5 * (time.perf_counter() - tc_)
-                            bad_ = {int(r_) for r_, s_ in zip(ri, sh_p) if s_}
-                            stay_info["inflight_unsafe"] = sorted(bad_)
-                        else:
-                            bad_ = {int(r_) for r_ in ri}
-                            stay_info["inflight_cut"] = sorted(bad_)
-                        cands = np.asarray([c_ for c_ in cands if int(c_) not in bad_], np.int64)
-                    esc_seen = getattr(self, "_esc_nf", None) or {}
+                tail_s = self.stay_tail_s if cfg.tail_k > 0 else 0.0
+                if forced or not v2 or native_no_fallback or "native_late_reject" in (esc_info or {}):
+                    stay_info["skip"] = "forced" if forced else ("v2_off" if not v2 else "chain_reject")
+                elif not in_time(self.stay_scan_s + tail_s):
+                    stay_info["cut"] = "scan"
+                else:
+                    tc_ = time.perf_counter()
+                    stay_scan = self._stay_scan(sc, r1, start, prefs, sp_t)
+                    self.stay_scan_s = stay_cost(self.stay_scan_s, time.perf_counter() - tc_)
+                if stay_scan is not None:
+                    stay_m, J_stay = stay_scan["stay_pogo"], stay_scan["J_stay"]
+                    plain = np.zeros(N, bool)
+                    plain[:N0] = True
+                    if cont:
+                        plain[N - 1] = True
+                    for r_ in knife_data:
+                        plain[r_] = False
+                    cand_m = stay_m & safe & plain
+                    stay_info.update(rows=int(stay_m.sum()), safe=int(cand_m.sum()))
+                    if cand_m.any() and not cand_m[i]:
+                        nd_c = nd_ if pr_at is None else (nd_[:pr_at] + ((nd_[pr_at] * ~stay_m).astype(np.int64),) +
+                                                          nd_[pr_at + 1:])
+                        oc = np.lexsort(order_keys(J + np.where(cand_m, J_stay, 0.0), v2_nh - cand_m, nd_c))
+                        oc = oc[sel[oc]]
+                        at_ = np.flatnonzero(oc == i)
+                        ahead = oc[:int(at_[0])] if len(at_) else oc[:0]
+                        cands = ahead[cand_m[ahead]][:ESC_CHUNK]
+                        infl = stay_scan["inflight_down"]
+                        if len(cands) and infl[cands].any():
+                            ri = cands[infl[cands]]
+                            if in_time(self.stay_hb_s + tail_s):
+                                tc_ = time.perf_counter()
+                                sc_p = dict(sc, first_f=stay_scan["stay_ff"], first_t=stay_scan["stay_ft"],
+                                            first_k=stay_scan["stay_fk"], first_face=stay_scan["stay_face"])
+                                bud_p = {"hitfx": 0, "react": 0, "capped": 0, "react_cache": budget["react_cache"]}
+                                sh_p, _, _ = self._hit_branch(f, start, latched, sc_p, ri, tk, enemy_only, bud_p,
+                                                              cap=False, ev_base=self._ds_evb(ri, D0, ds))
+                                self.stay_hb_s = stay_cost(self.stay_hb_s, time.perf_counter() - tc_)
+                                bad_ = {int(r_) for r_, s_ in zip(ri, sh_p) if s_}
+                                stay_info["inflight_unsafe"] = sorted(bad_)
+                            else:
+                                bad_ = {int(r_) for r_ in ri}
+                                stay_info["inflight_cut"] = sorted(bad_)
+                            cands = np.asarray([c_ for c_ in cands if int(c_) not in bad_], np.int64)
+                        # the escape results the tick already has, read with no record kept inside its check: HITS_FIRST's
+                        # tiers (hf_ok_) and the rows its own check failed (esc_known; -1: the count is not kept)
+                        known = {int(r_): int(v_[0]) for r_, v_ in hf_ok_.items()}
+                        if esc_info and "checked" in esc_info:
+                            for r_ in esc_known(order[safe[order]], esc_row, esc_info.get("fail"), esc_info["checked"],
+                                                fcfg.v2_esc_k):
+                                known.setdefault(r_, -1)
+                        n_new = [0]
 
-                    def esc_fn(rows_):
-                        # the escape check of the choice above on the candidates (its results reused); no batch past its
-                        # deadline: None, nothing promoted
-                        if not (fcfg.escape or v2):
-                            return np.zeros(len(rows_), np.int64)
-                        todo_ = [int(r_) for r_ in rows_ if int(r_) not in esc_seen]
-                        if todo_:
-                            if not in_time(self.esc_batch_s):
-                                stay_info["cut"] = "escape"
+                        def esc_fn(rows_):
+                            todo_ = [int(r_) for r_ in rows_ if int(r_) not in known]
+                            if todo_:
+                                if not in_time(max(self.esc_batch_s, self.stay_esc_s) + tail_s):
+                                    stay_info["cut"] = "escape"
+                                    return None
+                                tc_ = time.perf_counter()
+                                nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(todo_, np.int64))
+                                self.stay_esc_s = stay_cost(self.stay_esc_s, time.perf_counter() - tc_)
+                                known.update({r_: int(n_) for r_, n_ in zip(todo_, nf_)})
+                                n_new[0] += len(todo_)
+                            return np.asarray([known[int(r_)] for r_ in rows_], np.int64)
+
+                        def tail_fn(r_):
+                            if cfg.tail_k <= 0:
                                 return None
-                            nf_, _ = self._escape_fail_v2(f, r1, hold_end, np.asarray(todo_, np.int64))
-                            esc_seen.update({r_: int(n_) for r_, n_ in zip(todo_, nf_)})
-                        return np.asarray([esc_seen[int(r_)] for r_ in rows_], np.int64)
+                            if not in_time(self.stay_tail_s):
+                                stay_info["cut"] = "tail"
+                                return False
+                            tc_ = time.perf_counter()
+                            if knife_tails:
+                                from ssbot.combat.forum_knife_plan import pick_tail
+                                _, ok_ = pick_tail(self, f, r1, hold_end, np.asarray([r_], np.int64), P + T, i,
+                                                   knife_tails)
+                            else:
+                                _, ok_ = self._tail_pick(f, r1, hold_end, np.asarray([r_], np.int64), P + T, i)
+                            self.stay_tail_s = stay_cost(self.stay_tail_s, time.perf_counter() - tc_)
+                            return bool(ok_)
 
-                    def tail_fn(r_):
-                        if cfg.tail_k <= 0:
-                            return None
-                        if not in_time(self.stay_tail_s):
-                            stay_info["cut"] = "tail"
-                            return False
-                        tc_ = time.perf_counter()
-                        if knife_tails:
-                            from ssbot.combat.forum_knife_plan import pick_tail
-                            _, ok_ = pick_tail(self, f, r1, hold_end, np.asarray([r_], np.int64), P + T, i, knife_tails)
-                        else:
-                            _, ok_ = self._tail_pick(f, r1, hold_end, np.asarray([r_], np.int64), P + T, i)
-                        self.stay_tail_s = 0.5 * self.stay_tail_s + 0.5 * (time.perf_counter() - tc_)
-                        return bool(ok_)
-
-                    promo, checked_ = stay_promote(cands, esc_fn, tail_fn)
-                    stay_info.update(cands=[int(c_) for c_ in cands], checked=checked_)
-                    if promo is not None:
-                        i = promo
-                        esc_row, esc_unsafe = promo, False
-                        if cfg.tail_k > 0:
-                            tail_ok = True
-                        esc_tail = None
-                        if (forum_v2.ESC_TAIL and promo in (getattr(self, "_v2_esc_first", None) or {})
-                                and promo not in knife_tails):
-                            esc_tail = (int(promo), self._esc_cmds(forum_v2.ESC_F)[self._v2_esc_first[promo]])
-                        stay_info["promoted"] = True
-                    stay_info["ms"] = round((time.perf_counter() - tp_) * 1e3, 3)    # (the promotion's own time, in select)
+                        promo, checked_ = stay_promote(cands, esc_fn, tail_fn)
+                        stay_info.update(cands=[int(c_) for c_ in cands], checked=checked_, esc_new=n_new[0])
+                        if promo is not None and not in_time(0.0):
+                            stay_info["cut"] = "final"    # Sol seq 282: a result in after the deadline changes nothing
+                            promo = None
+                        if promo is not None:
+                            # the send's own escape record from here (the measurement reads the final row's there:
+                            # train.measurement.escape_evidence); the choice's in promoted_from
+                            orig_ = dict(esc_info or {})
+                            orig_.update(row=int(i_orig), unsafe=bool(esc_unsafe),
+                                         tail_ok=None if tail_ok is None else bool(tail_ok))
+                            esc_info = {**(esc_info or {}), "fail": 0, "unsafe": False, "cut": False, "why": [],
+                                        "checked": sum(1 for _, n_, _ in checked_ if n_ is not None),
+                                        "promoted_from": orig_}
+                            if self.measurement_enabled:
+                                esc_info["row"] = int(promo)
+                            i = promo
+                            esc_row, esc_unsafe = promo, False
+                            if cfg.tail_k > 0:
+                                tail_ok = True
+                            esc_tail = None
+                            if (forum_v2.ESC_TAIL and promo in (getattr(self, "_v2_esc_first", None) or {})
+                                    and promo not in knife_tails):
+                                esc_tail = (int(promo), self._esc_cmds(forum_v2.ESC_F)[self._v2_esc_first[promo]])
+                            stay_info["promoted"] = True
+                stay_info["ms"] = round((time.perf_counter() - tp_) * 1e3, 3)    # (the promotion's own time, in select)
+            self.last_sel["stay"] = stay_scan
             self.last_sel["chosen"] = -1 if native_no_fallback else i
             if kr is not None and len(kk_) and not kk_[0][kr]:
                 self.audit.kp_kept += int(i == kr)
@@ -5579,14 +5638,16 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
-        if sc.get("stay_pogo") is not None:
-            # Task 182 seq 280 / 281: over_stay's candidates this tick and the promotion (orig: the choice it started from;
-            # cands / checked: the candidates ahead of it and their escape failures and tails; inflight_unsafe: those a
-            # swing's hit branch failed; cut / inflight_cut: the check the deadline stopped; ms: the promotion's own time)
-            sp_r = sc["stay_pogo"]
-            si_ = dict(stay_info) if stay_info is not None else {"rows": int(sp_r.sum()), "safe": 0, "promoted": False}
-            ch_ = bool(0 <= res.idx < N and sp_r[res.idx] and safe[res.idx])
-            si_.update(chosen=ch_, credit=round(float(J_stay[res.idx]), 3) if ch_ else 0.0)
+        if stay_info is not None:
+            # Task 182 seq 280 - 282: over_stay's promotion this tick (orig: the choice it started from; skip: why it did not
+            # run; rows / safe: the scan's candidates and those safe on both branches; cands / checked: the candidates ahead
+            # of the choice, their escape failures (-1: failed in the tick's own check) and tails; esc_new: rows it checked
+            # anew; inflight_unsafe: those a swing's hit branch failed; cut / inflight_cut: the step the deadline stopped,
+            # "final": a result in after it; ms: its own time)
+            si_ = dict(stay_info)
+            sp_r = None if stay_scan is None else stay_scan["stay_pogo"]
+            ch_ = bool(sp_r is not None and 0 <= res.idx < N and sp_r[res.idx] and safe[res.idx])
+            si_.update(chosen=ch_, credit=round(float(stay_scan["J_stay"][res.idx]), 3) if ch_ else 0.0)
             self.last_info["stay_pogo"] = si_
         if getattr(self, "v2_ret", None) is not None:
             # SSBOT_FORUM_TWO_RETURN_BODY: this tick's narrowed rows (the chosen row's lock end with them)

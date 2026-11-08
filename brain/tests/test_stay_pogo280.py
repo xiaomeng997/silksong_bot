@@ -1,11 +1,12 @@
-"""Task 182 seq 280 / 281 (the person via Sol: "give the ordinary planner the slow-shift preference"): over the vaulted Clapper's
-head after its real bounce (L2's over_stay), the ordinary rows' own down slash on it - GoalPrefs.stay_pogo - may change the
-tick's send only after the tick has made its own choice exactly as without it, and only through a candidate that passes every
-gate that choice passed (contact evidence, both branches safe, the escape check, the tail check). A failure, the escape
-deadline or nothing checked leaves the tick's own choice: under the production deadlines the tick's own checks run first,
-unchanged, and each of the promotion's own (a swing's hit branch, an escape batch, a tail check) starts only if it ends before
-the escape check's deadline. The stage's no_hit for every other slash, the other Clapper's ban,
-every other source's ban, FORCED_RISK, the dash kept for an escape, the envelope's queue and caps, every other stage (the
+"""Task 182 seq 280 - 282 (the person via Sol: "give the ordinary planner the slow-shift preference"): over the vaulted
+Clapper's head after its real bounce (L2's over_stay), the ordinary rows' own down slash on it - GoalPrefs.stay_pogo - may
+change the tick's send only after the tick has made its own choice exactly as without it, and only through a candidate that
+passes every gate that choice passed (contact evidence, both branches safe, the escape check, the tail check). Under the
+production deadlines (a cost clock) the tick's own checks keep their whole budget - the candidate scan, the order and every
+check of the promotion run after them - and each of the promotion's steps starts only if its estimate ends before the escape
+deadline, its result taken only if that deadline has not passed (Sol seq 282). A failure, a cut or nothing checked leaves the
+tick's own choice, verdict, tail, escape record and hand-back. The stage's no_hit for every other slash, the other Clapper's
+ban, every other source's ban, FORCED_RISK, the dash kept for an escape, the envelope's queue and caps, every other stage (the
 middle landing included) and every value B2 compares stay."""
 import math
 from types import SimpleNamespace as NS
@@ -165,6 +166,7 @@ def _tick(params, arena, monkeypatch, x0, h, vy, prefs, challenger=None, swing_a
     ws = _world(x0)
     ws.hero.pos = E((x0, y))
     args = (ws, start, kin.HoldState.idle(1), np.zeros(1, np.int64), f, prefs, _ctx())
+    pl.test_args = args
     if pre is not None:
         pre(pl, args)
     if challenger is not None:
@@ -192,26 +194,42 @@ def _rows_of(seen, pl):
     return names, next(s for s in reversed(seen) if len(s["J"]) == len(names))
 
 
+def _scan(pl, seen):
+    """The over_stay scan of the tick just run: the promotion's own (last_sel["stay"]), or, where the promotion did not run
+    it, _stay_scan on that tick's scorer result and rollout (diagnostics only)."""
+    if pl.last_sel.get("stay") is not None:
+        return pl.last_sel["stay"]
+    _, sc = _rows_of(seen, pl)
+    dbg, prefs = pl.last_info["dbg"], pl.test_args[5]
+    return pl._stay_scan(sc, NS(box=dbg["box"], mode=dbg["mode"], flags=dbg["flags"]), pl.test_args[1], prefs,
+                         frozenset(prefs.stay_pogo) & frozenset(prefs.no_hit))
+
+
 REAL = dict(deadline_ms=ForumConfig().deadline_ms, esc_deadline_ms=ForumConfig().esc_deadline_ms)   # production: 8 / 8 + 2 ms
 
 
-def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms):
+def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms, score_ms=0.0, robust_ms=0.0, tail_extra=None, esc_extra=None):
     """A deterministic clock for the production deadlines (REAL): every perf_counter reads it and it moves only in the
-    planner's costed calls - an escape batch (_escape_fail_v2), a hit branch, a tail check - by their ms. Returns its state:
-    log, the calls [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing recheck); ranked, the escape
-    check's order per tick (its first 16 rows); passing, None (the real check) or the only rows that pass it (the others fail
-    it once)."""
+    planner's costed calls - an escape batch (_escape_fail_v2), a hit branch, a tail check - by their ms; score_ms at
+    _score_forum's entry, robust_ms in each _down_robust (the over_stay scan's contact kernel), tail_extra / esc_extra
+    {n: ms} more in the tick's n-th tail check / escape batch (counted from 1 per tick). Returns its state: log, the calls
+    [(kind, rows)] (hit branches: the uncapped ones only, the promotion's swing recheck); ranked, the escape check's order
+    per tick (its first 16 rows); at, per tick the ms from the tick's start to the escape check's entry and to the tick's
+    end; passing, None (the real check) or the only rows that pass it (the others fail it once)."""
     import time
     from ssbot.combat import forum_planner as fp
-    now, clk = [1000.0], NS(log=[], ranked=[], passing=None)
+    now, clk = [1000.0], NS(log=[], ranked=[], at=[], passing=None, n_tail=0, n_esc=0, t0=0.0)
     esc0, hb0, tail0 = fp.ForumPlanner._escape_fail_v2, fp.ForumPlanner._hit_branch, fp.ForumPlanner._tail_pick
-    pick0 = fp.ForumPlanner._escape_pick
+    pick0, score0, tick0, rob0 = (fp.ForumPlanner._escape_pick, fp.ForumPlanner._score_forum, fp.ForumPlanner._ordinary_tick,
+                                  fp._down_robust)
+    ms = lambda: round((now[0] - clk.t0) * 1e3, 3)
 
     def esc(self, f, r1, hold_end, rows):
         nf, lab = esc0(self, f, r1, hold_end, rows)
         if clk.passing is not None:
             nf = np.asarray([0 if int(r) in clk.passing else max(int(n), 1) for r, n in zip(rows, nf)], np.int64)
-        now[0] += esc_ms * 1e-3
+        clk.n_esc += 1
+        now[0] += (esc_ms + (esc_extra or {}).get(clk.n_esc, 0.0)) * 1e-3
         clk.log.append(("esc", [int(r) for r in rows]))
         return nf, lab
 
@@ -224,37 +242,58 @@ def _cost_clock(monkeypatch, esc_ms, hb_ms, tail_ms):
 
     def tail(self, *a, **k):
         out = tail0(self, *a, **k)
-        now[0] += tail_ms * 1e-3
+        clk.n_tail += 1
+        now[0] += (tail_ms + (tail_extra or {}).get(clk.n_tail, 0.0)) * 1e-3
         clk.log.append(("tail", [int(r) for r in a[3]]))
         return out
 
     def pick(self, *a, **k):
         clk.ranked.append([int(r) for r in a[6][:16]])
+        clk.at[-1]["pick"] = ms()
         return pick0(self, *a, **k)
+
+    def score(self, *a, **k):
+        now[0] += score_ms * 1e-3
+        return score0(self, *a, **k)
+
+    def robust(*a):
+        now[0] += robust_ms * 1e-3
+        return rob0(*a)
+
+    def tick(self, *a, **k):
+        clk.t0, clk.n_tail, clk.n_esc = now[0], 0, 0
+        clk.at.append({})
+        out = tick0(self, *a, **k)
+        clk.at[-1]["end"] = ms()
+        return out
 
     monkeypatch.setattr(fp.ForumPlanner, "_escape_fail_v2", esc)
     monkeypatch.setattr(fp.ForumPlanner, "_hit_branch", hb)
     monkeypatch.setattr(fp.ForumPlanner, "_tail_pick", tail)
     monkeypatch.setattr(fp.ForumPlanner, "_escape_pick", pick)
+    monkeypatch.setattr(fp.ForumPlanner, "_score_forum", score)
+    monkeypatch.setattr(fp.ForumPlanner, "_ordinary_tick", tick)
+    monkeypatch.setattr(fp, "_down_robust", robust)
     monkeypatch.setattr(time, "perf_counter", lambda: now[0])
     return clk
 
 
 def _credit(monkeypatch):
-    """Sol's counterexample (seq 281): the scorer's over_stay candidates of the tick's full row set (n rows) replaced by rows,
-    each credited 30 (state.n / state.rows set by the test; None: the scorer's own)."""
+    """Sol's counterexample (seq 281): the over_stay scan's candidates replaced by rows, each credited 30 (state.rows set by
+    the test; None: the scan's own)."""
     from ssbot.combat import forum_planner as fp
-    st, orig = NS(n=None, rows=None), fp.ForumPlanner._score_forum
+    st, orig = NS(rows=None), fp.ForumPlanner._stay_scan
 
-    def score(self, *a, **k):
-        out = orig(self, *a, **k)
-        if st.rows is not None and "stay_pogo" in out and len(out["J"]) == st.n:
-            m = np.zeros(st.n, bool)
+    def scan(self, sc, roll, start, prefs, sp_):
+        out = orig(self, sc, roll, start, prefs, sp_)
+        if st.rows is not None:
+            n = len(sc["J"])
+            m = np.zeros(n, bool)
             m[list(st.rows)] = True
-            out["stay_pogo"], out["J_stay"] = m, np.where(m, 30.0, 0.0)
+            out = dict(out, stay_pogo=m, J_stay=np.where(m, 30.0, 0.0), inflight_down=np.zeros(n, bool))
         return out
 
-    monkeypatch.setattr(fp.ForumPlanner, "_score_forum", score)
+    monkeypatch.setattr(fp.ForumPlanner, "_stay_scan", scan)
     return st
 
 
@@ -302,26 +341,27 @@ def test_the_preference_buys_no_checks(wparams, warena, monkeypatch, side):
 @pytest.mark.parametrize("side", [-1, 1])
 def test_the_swinging_down_slash_stays_on_the_rows_that_keep_it(wparams, warena, monkeypatch, side):
     # a down slash pressed 3 frames before this tick (the scorer sees no swing start in the rows): its remaining active frames
-    # meet the body at frame 5 on every row that keeps the swing - kept apart (stay_ff ...), the scorer's own first hits and
-    # the tick's checks as without the preference; a dash ends it. The old live failure (#280: the swing pressed at 4838
-    # dropped at 4841 for a dash) is this case
+    # meet the body at frame 5 on every row that keeps the swing - kept apart in the scan (stay_ff ...), which runs after the
+    # tick's choice and never touches the scorer's result; a dash ends it. The old live failure (#280: the swing pressed at
+    # 4838 dropped at 4841 for a dash) is this case
     seen = _scores(monkeypatch)
     x0 = RX + side * 0.9
     pl1, r1 = _tick(wparams, warena, monkeypatch, x0, 1.5, -6.0, _prefs(True), swing_age=3)
     names, sc = _rows_of(seen, pl1)
+    scn = pl1.last_sel["stay"]                         # the promotion's own scan
     k = "L" if side < 0 else "R"
     move, wait = names.index(f"MOVE({k})+idle"), names.index("WAIT+idle")
     dash = next(i for i, n in enumerate(names) if str(n).startswith(f"DASH({k})"))
-    assert sc["inflight_down"][move] and sc["stay_fk"][move] == 4 and sc["stay_ff"][move] == 5
-    assert not sc["inflight_down"][dash] and sc["stay_ff"][dash] != 5
+    assert scn["inflight_down"][move] and scn["stay_fk"][move] == 4 and scn["stay_ff"][move] == 5
+    assert not scn["inflight_down"][dash] and scn["stay_ff"][dash] != 5
     safe = pl1.last_sel["safe"]
     assert safe[move] and not safe[wait]               # straight down onto the body: unsafe on its miss branch
-    assert sc["stay_pogo"][wait] and pl1.last_info["stay_pogo"]["safe"] < pl1.last_info["stay_pogo"]["rows"]
+    assert scn["stay_pogo"][wait] and pl1.last_info["stay_pogo"]["safe"] < pl1.last_info["stay_pogo"]["rows"]
     seen.clear()
     pl0, r0 = _tick(wparams, warena, monkeypatch, x0, 1.5, -6.0, _prefs(False), swing_age=3)
     _, sc0 = _rows_of(seen, pl0)
-    assert "inflight_down" not in sc0                  # stay_pogo only
-    for key in ("first_f", "first_t", "first_k", "J", "nh"):
+    assert not {k_ for k_ in sc if k_.startswith(("stay", "inflight", "J_stay"))}    # the scorer has no stay outputs
+    for key in ("first_f", "first_t", "first_k", "first_face", "J", "nh"):
         assert np.array_equal(sc[key], sc0[key]), key  # the scorer's own outputs as without the preference
     # the choice itself keeps the swing (a credited row): nothing to promote, the same send
     assert r1.name == r0.name == f"MOVE({k})+idle" and r1.J == pytest.approx(r0.J) and not r1.S
@@ -330,19 +370,18 @@ def test_the_swinging_down_slash_stays_on_the_rows_that_keep_it(wparams, warena,
     # finished swing would have made later
     seen.clear()
     pl8, _ = _tick(wparams, warena, monkeypatch, x0, 1.5, -6.0, _prefs(True), swing_age=8)
-    _, sc8 = _rows_of(seen, pl8)
-    assert not sc8["inflight_down"].any()
+    assert not _scan(pl8, seen)["inflight_down"].any()
     # a dash inside the swing's window ends it: 1.6 u off its edge, 0.6 u above its top, the swing 4 frames old (frames 1-5
     # left), the dash toward it starts on frame 3 and passes over it at the blade's height - no contact is credited to it
     seen.clear()
     to = "R" if side < 0 else "L"
     pld, _ = _tick(wparams, warena, monkeypatch, RX + side * (0.5 + 1.6), 0.6, -2.0, _prefs(True), swing_age=4)
-    nd, scd = _rows_of(seen, pld)
+    nd = pld.last_info["dbg"]["names"]
     md = np.asarray(pld.last_info["dbg"]["mode"])
     dashes = [i for i, n in enumerate(nd) if str(n).startswith(f"DASH({to})")]
     from ssbot.combat import forum_planner as fp
     assert dashes and (md[dashes, 3] == fp.M_DASH).all()
-    assert not scd["inflight_down"][dashes].any()
+    assert not _scan(pld, seen)["inflight_down"][dashes].any()
 
 
 def test_contact_evidence_is_every_blade_in_the_air():
@@ -384,14 +423,15 @@ def test_a_contact_only_some_blades_make_earns_nothing(wparams, warena, monkeypa
     x0 = RX + side * (0.5 + 1.55)
     pl1, r1 = _tick(wparams, warena, monkeypatch, x0, 0.8, -6.0, _prefs(True), facing=side)
     names, sc = _rows_of(seen, pl1)
+    scn = pl1.last_sel["stay"]
     from ssbot.combat import forum_planner as fp
     away, to = ("R", "L") if side > 0 else ("L", "R")
     edge = names.index(f"ATTACK(down){away}+run{to}8_stop")
     assert sc["first_k"][edge] == fp.K_DOWN and sc["first_f"][edge] >= 0
-    assert sc["stay_edge"][edge] and not sc["stay_pogo"][edge]
+    assert scn["stay_edge"][edge] and not scn["stay_pogo"][edge]
     assert edge not in pl1.last_info["stay_pogo"].get("cands", [])
     turn = names.index(f"ATTACK(down){to}+idle")
-    assert sc["stay_pogo"][turn] and not sc["stay_edge"][turn]
+    assert scn["stay_pogo"][turn] and not scn["stay_edge"][turn]
     assert r1.name == f"ATTACK(down){to}+idle" and pl1.last_info["stay_pogo"]["promoted"] and not r1.S
 
 
@@ -414,74 +454,112 @@ def test_the_promotion_takes_a_candidate_only_through_every_gate():
 def test_the_original_escape_result_stands_sols_counterexample(wparams, warena):
     # Sol (seq 281): order 0..24, every row past stage 1, rows 0-4 credited, limit 16, no ESC_MORE, no deadline, the escape
     # check passing only row 4. The tick's own escape pick returns row 4 (0 failures, 8 checked); the promotion only reads
-    # the credited rows ahead of it (0-3), which that pick already failed, and changes nothing
+    # the credited rows ahead of it (0-3), which that pick failed - read from its result alone (esc_known: the check keeps no
+    # record of its own, Sol seq 282) - and changes nothing
     from ssbot.combat import forum_planner as fp
     pl = ForumPlanner(wparams, warena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
                       ForumConfig(deadline_ms=math.inf, esc_deadline_ms=math.inf, v2=True), crest="Wanderer")
     calls = []
+    passing = [{4}]
 
     def fail_v2(f, r1, hold_end, rows):
         calls.append([int(r) for r in rows])
-        return np.asarray([0 if int(r) == 4 else 1 for r in rows]), [[] for _ in rows]
+        return np.asarray([0 if int(r) in passing[0] else 1 for r in rows]), [[] for _ in rows]
 
     pl._escape_fail_v2 = fail_v2
-    pl._esc_nf = {}
     got = pl._escape_pick(None, None, None, None, None, None, np.arange(25), (0.0, 0.0), 16, None, v2=True)
     assert got[:3] == (4, 0, 8) and calls == [[0, 1, 2, 3], [4, 5, 6, 7]]
-    seen_ = dict(pl._esc_nf)
-    esc = lambda rows: np.asarray([seen_[int(r)] for r in rows])          # the tick's results reused, as _ordinary_tick
-    assert fp.stay_promote(np.arange(4), esc, lambda r: True)[0] is None  # rows ahead of 4: all failed, row 4 stands
+    known = fp.esc_known(np.arange(25), got[0], got[1], got[2], 16)
+    assert known == [0, 1, 2, 3]                                          # 5-7 were checked too, but not taken: unknown
+    esc = lambda rows: np.asarray([-1 if int(r) in known else 0 for r in rows])
+    assert fp.stay_promote(np.arange(4), esc, lambda r: True) == (None, [(0, -1, None), (1, -1, None), (2, -1, None),
+                                                                        (3, -1, None)])   # row 4 stands
+    # nothing passes: the fewest failures, the first (row 0); every row of the window checked failed
+    passing[0] = set()
+    got = pl._escape_pick(None, None, None, None, None, None, np.arange(25), (0.0, 0.0), 16, None, v2=True)
+    assert got[:3] == (0, 1, 16) and fp.esc_known(np.arange(25), *got[:3], 16) == list(range(16))
+    # the deadline stopped it after one batch, or it took a row of a later pass (ESC_MORE): only what it read; none taken
+    assert fp.esc_known(np.arange(25), 0, 1, 4, 16) == [0, 1, 2, 3]
+    assert fp.esc_known(np.arange(25), 20, 0, 20, 16) == list(range(16))
+    assert fp.esc_known(np.arange(25), None, 0, 0, 16) == [] and fp.esc_known(np.arange(25), 3, 0, 0, 16) == []
 
 
-@pytest.mark.parametrize("case", ["fifth_reached", "fifth_cut", "higher_fail", "higher_pass"])
+def test_the_promotions_cost_estimate_rises_at_once_and_falls_by_halves():
+    from ssbot.combat.forum_planner import stay_cost
+    assert stay_cost(0.003, 0.010) == pytest.approx(0.010)               # a slower check: its own cost at once
+    assert stay_cost(0.010, 0.002) == pytest.approx(0.006)               # a faster one: half way down
+    assert stay_cost(0.003, 0.003) == pytest.approx(0.003)
+
+
+def _same_send(pl0, r0, pl1, r1):
+    """The two arms send the same row with the same safety verdict, tail, escape record (its ms aside: the real clock unless a
+    cost clock runs) and hand-back to the next tick."""
+    assert (r1.name, r1.idx, r1.mask, r1.S, r1.J, r1.tail_ok) == (r0.name, r0.idx, r0.mask, r0.S, r0.J, r0.tail_ok)
+    no_ms = lambda e: {k: v for k, v in (e or {}).items() if k != "ms"}
+    assert np.array_equal(r1.cmd, r0.cmd) and no_ms(pl1.last_info["esc"]) == no_ms(pl0.last_info["esc"])
+    assert np.array_equal(pl1.prev_cmd, pl0.prev_cmd)
+    assert (pl1.prev_tail_ok, pl1.prev_esc_unsafe, pl1.macro_until) == (pl0.prev_tail_ok, pl0.prev_esc_unsafe, pl0.macro_until)
+
+
+@pytest.mark.parametrize("case", ["fifth_reached", "fifth_cut", "higher_fail", "higher_pass", "known_reuse"])
 def test_sols_counterexample_in_a_whole_tick_under_the_real_deadlines(wparams, warena, monkeypatch, case):
-    # (Sol seq 281) the scorer's candidates put where the case needs them in the tick's own escape order (ranked), the escape
+    # (Sol seq 281) the scan's candidates put where the case needs them in the tick's own escape order (ranked), the escape
     # check passing only the given rows, the production deadlines on the cost clock:
-    #   fifth_reached  ranked[0:5] credited, only the fifth passes, two batches in time: the tick's own pick is it
+    #   fifth_reached  ranked[0:5] credited, only the fifth passes, two 1.4 ms batches in time: the tick's own pick is it,
+    #                  credited itself, so nothing is promoted
     #   fifth_cut      the same with 6 ms batches - the deadline stops the check after the first: the tick's own fallback (the
-    #                  fewest failures, first in its order, S = 1), never one the credit would pick
+    #                  fewest failures, first in its order, S = 1); no time is left for the promotion's scan
     #   higher_fail    ranked[8:12] credited, ahead of the choice (ranked[1]) in the credited order: all fail, the choice stands
     #   higher_pass    one of them passes: taken, by the promotion's own batch and tail check after the tick's own checks
+    #   known_reuse    ranked[0] and [2] credited, ranked[1] and [2] pass: the tick's check failed ranked[0] (read from its
+    #                  result, -1), so only ranked[2] is checked anew, and taken
     # every case: the same envelope, order and window, and the tick's own checks the same calls in the same order
-    clk = _cost_clock(monkeypatch, 6.0 if case == "fifth_cut" else 2.0, 0.5, 1.0)
+    clk = _cost_clock(monkeypatch, {"fifth_reached": 1.4, "fifth_cut": 6.0}.get(case, 2.0), 0.5, 1.0)
     cred = _credit(monkeypatch)
     pl, _ = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
     rk = clk.ranked[-1]
-    cred.n, cred.rows = len(pl.last_info["dbg"]["names"]), (rk[0:5] if case.startswith("fifth") else rk[8:12])
-    clk.passing = {rk[4]} if case.startswith("fifth") else ({rk[1]} if case == "higher_fail" else {rk[1], rk[9]})
+    cred.rows, clk.passing = {"higher_fail": (rk[8:12], {rk[1]}), "higher_pass": (rk[8:12], {rk[1], rk[9]}),
+                              "known_reuse": ([rk[0], rk[2]], {rk[1], rk[2]})}.get(case, (rk[0:5], {rk[4]}))
     clk.log.clear()
-    _, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
     log0 = list(clk.log)
     clk.log.clear()
     pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), **REAL)
     assert clk.ranked[-1] == clk.ranked[-2] == rk and clk.log[:len(log0)] == log0
     more, sp = clk.log[len(log0):], pl1.last_info["stay_pogo"]
-    if case == "higher_pass":
-        assert sp["promoted"] and r1.idx == rk[9] and not r1.S and r1.J == pytest.approx(r0.J)
-        assert more == [("esc", rk[8:12]), ("tail", [rk[9]])]
+    if case in ("higher_pass", "known_reuse"):
+        new = rk[9] if case == "higher_pass" else rk[2]
+        assert sp["promoted"] and r1.idx == new and not r1.S and r1.J == pytest.approx(r0.J) and r0.idx == rk[1]
+        if case == "higher_pass":
+            assert more == [("esc", rk[8:12]), ("tail", [rk[9]])]
+        else:
+            assert more == [("esc", [rk[2]]), ("tail", [rk[2]])] and sp["checked"] == [(rk[0], -1, None), (rk[2], 0, True)]
         return
-    assert not sp["promoted"] and (r1.name, r1.S, r1.J, r1.mask, r1.idx) == (r0.name, r0.S, r0.J, r0.mask, r0.idx)
+    _same_send(pl0, r0, pl1, r1)
+    assert not sp["promoted"]
     if case == "fifth_reached":
         assert r0.idx == rk[4] and not r0.S and log0 == [("esc", rk[0:4]), ("esc", rk[4:8]), ("tail", [rk[4]])]
+        assert sp["orig"] == r0.idx and sp["safe"] == 5 and "cands" not in sp and more == []   # the choice is credited
     elif case == "fifth_cut":
         assert r0.idx == rk[0] and r0.S and log0 == [("esc", rk[0:4]), ("tail", [rk[0]])]
+        assert sp["cut"] == "scan" and "rows" not in sp and more == []
     else:
         assert r0.idx == rk[1] and more == [("esc", rk[8:12])] and all(n == 1 for _, n, _ in sp["checked"])
-    if case.startswith("fifth"):
-        assert sp["orig"] == r0.idx and sp["safe"] == 5 and "cands" not in sp and more == []   # the choice is credited
 
 
-@pytest.mark.parametrize("case", ["time_left", "no_time_for_its_escape_batch", "no_time_for_its_tail_check", "swing_in_time",
-                                  "no_time_for_the_swing_branch"])
+@pytest.mark.parametrize("case", ["time_left", "no_time_for_its_scan", "no_time_for_its_escape_batch",
+                                  "no_time_for_its_tail_check", "swing_in_time", "no_time_for_the_swing_branch"])
 def test_under_the_real_deadlines_the_promotion_takes_only_the_time_left(wparams, warena, monkeypatch, case):
     # the real candidates (the plain fixture; the swing cases: pressed a frame before, the stance 7 u away) under the
     # production deadlines on the cost clock: the tick's own checks run first, exactly as without the preference; the
-    # promotion's swing recheck, escape batch and tail check each start only if they end before the escape deadline, and
-    # one that would not leaves the choice as made (the original tail check 6 ms: no time for the next batch or recheck;
-    # 4 ms batches: the promotion's batch ends at the deadline, no time for its tail check)
-    esc_ms, tail_ms = {"time_left": (2.0, 1.0), "no_time_for_its_escape_batch": (2.0, 6.0), "no_time_for_its_tail_check":
-                       (4.0, 1.0), "swing_in_time": (2.0, 1.0), "no_time_for_the_swing_branch": (2.0, 6.0)}[case]
-    clk = _cost_clock(monkeypatch, esc_ms, 0.5, tail_ms)
+    # promotion's scan, swing recheck, escape batch and tail check each start only if their estimates end before the escape
+    # deadline (the scan: with a tail check; a recheck or batch: with a tail check), and one that would not leaves the
+    # choice, its verdict, tail and hand-back as made. Original tail 3 ms: no time to scan; 2 ms: no time for the batch; the
+    # promotion's batch 3 ms slower than its estimate: no time for its tail; original tail 2.2 ms: no time for the recheck
+    esc_ms, tail_ms, extra = {"time_left": (2.0, 1.0, None), "no_time_for_its_scan": (2.0, 3.0, None),
+                              "no_time_for_its_escape_batch": (2.0, 2.0, None), "no_time_for_its_tail_check": (2.0, 1.0, {2: 3.0}),
+                              "swing_in_time": (2.0, 1.0, None), "no_time_for_the_swing_branch": (2.0, 2.2, None)}[case]
+    clk = _cost_clock(monkeypatch, esc_ms, 0.5, tail_ms, esc_extra=extra)
     swing = "swing" in case
     x0, st, age = (RX - 1.2, RX - 7.0, 1) if swing else (RX - 0.9, RX, None)
     pl0, r0 = _tick(wparams, warena, monkeypatch, x0, 1.5, -6.0, _prefs(False, stance=st), swing_age=age, **REAL)
@@ -492,8 +570,8 @@ def test_under_the_real_deadlines_the_promotion_takes_only_the_time_left(wparams
     for key in ("env", "S"):
         assert np.array_equal(pl0.last_info[key], pl1.last_info[key]), key
     more, sp = clk.log[len(log0):], pl1.last_info["stay_pogo"]
-    cands = sp["cands"]
     if case in ("time_left", "swing_in_time"):
+        cands = sp["cands"]
         assert sp["promoted"] and not r1.S and r1.J == pytest.approx(r0.J)
         assert r1.name == ("MOVE(L)+upatk2L" if swing else "ATTACK(down)L+idle")
         head = [("hb", more[0][1])] if swing else []
@@ -501,13 +579,69 @@ def test_under_the_real_deadlines_the_promotion_takes_only_the_time_left(wparams
         if swing:
             assert sp["inflight_unsafe"] == [] and set(more[0][1]) <= set(cands)
         return
-    assert not sp["promoted"] and (r1.name, r1.S, r1.J, r1.mask, r1.idx) == (r0.name, r0.S, r0.J, r0.mask, r0.idx)
-    if case == "no_time_for_its_escape_batch":
+    assert not sp["promoted"]
+    _same_send(pl0, r0, pl1, r1)
+    if case == "no_time_for_its_scan":
+        assert sp["cut"] == "scan" and more == [] and "rows" not in sp
+    elif case == "no_time_for_its_escape_batch":
         assert sp["cut"] == "escape" and more == [] and all(n is None for _, n, _ in sp["checked"])
     elif case == "no_time_for_its_tail_check":
-        assert sp["cut"] == "tail" and more == [("esc", cands)] and all(n == 0 and t is False for _, n, t in sp["checked"])
+        assert sp["cut"] == "tail" and more == [("esc", sp["cands"])]
+        assert all(n == 0 and t is False for _, n, t in sp["checked"])
     else:
-        assert sp["inflight_cut"] and cands == [] and more == [] and "inflight_unsafe" not in sp
+        assert sp["inflight_cut"] and sp["cands"] == [] and more == [] and "inflight_unsafe" not in sp
+
+
+def test_sols_scan_counterexample_the_tick_keeps_its_own_escape_budget(wparams, warena, monkeypatch):
+    # Sol seq 282 item 1: the scorer 5.9 ms, hit branches 0.5, escape batches 2, tail checks 1, and the over_stay contact
+    # kernel (_down_robust) 0.2 ms more with the preference on. The scan runs only after the tick's own checks, so both arms
+    # enter the escape check at 6.9 ms, check the same four rows and pass row 21 (S = 0); the promotion then has no time left
+    clk = _cost_clock(monkeypatch, 2.0, 0.5, 1.0, score_ms=5.9, robust_ms=0.2)
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
+    log0, at0 = list(clk.log), clk.at[-1]
+    clk.log.clear()
+    pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), **REAL)
+    assert at0["pick"] == clk.at[-1]["pick"] == pytest.approx(6.9) and clk.log == log0 == [("esc", [21, 34, 84, 93]),
+                                                                                          ("tail", [21])]
+    assert r0.name == "MOVE(L)+idle" and r0.idx == 21 and not r0.S
+    esc0 = pl0.last_info["esc"]
+    assert (esc0["checked"], esc0["fail"], esc0["cut"], esc0["unsafe"]) == (4, 0, False, False)
+    _same_send(pl0, r0, pl1, r1)
+    assert pl1.last_info["stay_pogo"]["cut"] == "scan" and not pl1.last_info["stay_pogo"]["promoted"]
+
+
+def test_sols_late_check_counterexample_changes_nothing(wparams, warena, monkeypatch):
+    # Sol seq 282 item 2: the same costs, the promotion's tail check (the tick's second) 12 ms slower and passing. Off: the
+    # tick ends at 4 ms with row 21 (mask 1048576). On: the check started in time, ended at 19 ms, past the 10 ms deadline -
+    # its pass is not taken: row 21, its verdict, tail, escape record and hand-back exactly as off
+    clk = _cost_clock(monkeypatch, 2.0, 0.5, 1.0, tail_extra={2: 12.0})
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **REAL)
+    log0, at0 = list(clk.log), clk.at[-1]
+    clk.log.clear()
+    pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), **REAL)
+    assert at0["end"] == pytest.approx(4.0) and (r0.idx, r0.name, r0.mask) == (21, "MOVE(L)+idle", 1048576)
+    sp = pl1.last_info["stay_pogo"]
+    assert clk.at[-1]["end"] == pytest.approx(19.0) and clk.log[len(log0):] == [("esc", sp["cands"]), ("tail", [399])]
+    assert sp["cut"] == "final" and sp["checked"] == [(399, 0, True)] and not sp["promoted"]
+    _same_send(pl0, r0, pl1, r1)
+    assert "promoted_from" not in pl1.last_info["esc"]
+
+
+def test_a_promoted_send_carries_its_own_escape_record(wparams, warena, monkeypatch):
+    # the formal measurement reads the final row's escape from last_info["esc"] (train.measurement.escape_evidence): after a
+    # promotion it is the promoted row's (its row, no failure, the candidates checked), the choice's in promoted_from
+    from ssbot.train.measurement import escape_evidence
+    _cost_clock(monkeypatch, 2.0, 0.5, 1.0)
+    on = lambda pl, args: setattr(pl, "measurement_enabled", True)
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), pre=on, **REAL)
+    pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), pre=on, **REAL)
+    assert pl1.last_info["stay_pogo"]["promoted"] and r1.idx == 399 and r0.idx == 21
+    ev0, ev1 = escape_evidence(pl0.last_info, r0.idx), escape_evidence(pl1.last_info, r1.idx)
+    assert (ev0["status"], ev0["checked_row"]) == ("pass", 21) and (ev1["status"], ev1["checked_row"]) == ("pass", 399)
+    pf = pl1.last_info["esc"]["promoted_from"]
+    assert (pf["row"], pf["fail"], pf["checked"], pf["unsafe"], pf["tail_ok"]) == (21, 0, 4, False, True)
+    assert {k: v for k, v in pf.items() if k not in ("tail_ok",)} == {**pl0.last_info["esc"], "unsafe": False}
+    assert r1.tail_ok is True and escape_evidence(pl1.last_info, r0.idx)["status"] == "unchecked"
 
 
 @pytest.mark.parametrize("side", [-1, 1])
@@ -535,15 +669,16 @@ def test_an_unsafe_or_unchecked_fallback_is_the_ticks_own(wparams, warena, monke
     # (Sol seq 281, the Q6 case) every row fails the escape check - the fallback is the fewest failures, first in the tick's
     # own order - or the escape deadline leaves nothing checked: the preference changes nothing, not even the tie
     kw = dict(rs=_late_support(20.0)) if case == "escape_fails_everywhere" else dict(esc_deadline_ms=0.0)
-    _, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **kw)
+    pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(False), **kw)
     pl, r = _tick(wparams, warena, monkeypatch, RX - 0.9, 1.5, -6.0, _prefs(True), **kw)
-    assert (r.name, r.S, r.J, r.mask, r.idx) == (r0.name, r0.S, r0.J, r0.mask, r0.idx) and r.S
+    _same_send(pl0, r0, pl, r)
+    assert r.S
     sp = pl.last_info["stay_pogo"]
-    assert not sp["promoted"] and sp["safe"] > 0 and sp["checked"]
+    assert not sp["promoted"]
     if case == "no_time":
-        assert all(n is None for _, n, _ in sp["checked"])
+        assert sp["cut"] == "scan" and "rows" not in sp                 # past the deadline: not even the scan
     else:
-        assert all(n > 0 for _, n, _ in sp["checked"])
+        assert sp["safe"] > 0 and sp["checked"] and all(n > 0 for _, n, _ in sp["checked"])
 
 
 @pytest.mark.parametrize("side", [-1, 1])
@@ -594,13 +729,17 @@ def test_a_swing_in_flight_is_promoted_only_through_its_hit_branch(wparams, ware
 
 
 def test_forced_risk_ranks_as_before(wparams, warena, monkeypatch):
-    # no safe row: the down slash on it (in contact on a branch) has no exit and earns nothing
+    # no safe row: FORCED_RISK as without the preference, and the promotion does not even scan
+    seen = _scores(monkeypatch)
     pl0, r0 = _tick(wparams, warena, monkeypatch, RX - 0.9, 0.6, 0.0, _prefs(False))
     pl1, r1 = _tick(wparams, warena, monkeypatch, RX - 0.9, 0.6, 0.0, _prefs(True))
     assert r0.forced_risk and r1.forced_risk
-    assert r1.name == r0.name and r1.J == pytest.approx(r0.J)
+    _same_send(pl0, r0, pl1, r1)
     sp = pl1.last_info["stay_pogo"]
-    assert sp["rows"] > 0 and sp["safe"] == 0 and not sp["chosen"] and not sp["promoted"]
+    assert sp["skip"] == "forced" and "rows" not in sp and not sp["chosen"] and not sp["promoted"]
+    assert pl1.last_sel["stay"] is None
+    scn = _scan(pl1, seen)                              # (its down slashes, scanned here: in contact on a branch, none safe)
+    assert scn["stay_pogo"].any() and not (scn["stay_pogo"] & pl1.last_sel["safe"]).any()
 
 
 def test_an_unsafe_down_slash_earns_nothing_beside_safe_rows(wparams, warena, monkeypatch):
