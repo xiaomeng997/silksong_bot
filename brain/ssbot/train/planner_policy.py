@@ -86,6 +86,7 @@ UNPRED_LAGS = (3, 4, 2)   # the forecast a hit is judged against: lag 3, else 4,
 CATCH_UP_MAX = 64      # STATEs kept for _catch_up (a tick later than this many frames loses the oldest)
 LOG_BEFORE, LOG_AFTER = 90, 10
 LOG_ALL = os.environ.get("SSBOT_LOG_ALL") == "1"     # debugging: every tick to the decision log
+LOG_HELD_MAX = 32 << 20                              # bytes of decision-log text held in memory (a bout is about 3 MB)
 # Underground cues for the vision view (ObservabilityFilter tells; hypotheses until M3 measures tell_lead_vision in
 # shadow mode). DUST_TELL: the emergence dust the person reported (2026-10-02), seen in screenshots of instance 3
 # (C:/ssbot/sandbox/m2_tells, ssbot.probes.m2_tells: 10 charges, 12 leaps from both anchors, 9 bursts): none at
@@ -198,6 +199,9 @@ class PlannerPolicy:
     # the harness keeps calling act() after the kill (train/episode: the post-kill tail): the planner dodges what
     # outlives the boss (DESIGN §3.5.7, the person's question of 2026-10-04) instead of standing still
     act_after_clear = True
+    LOG_AT_BOUT_END = False     # True: the decision log stays in memory through the fight (_hold_log, flush_log)
+    _log_held = None            # deque of encoded rows not written yet
+    _log_held_bytes = 0
 
     def __init__(self, view: str = "oracle", threads: int = 8, enemy: str = "BellBeast", log_dir: Path | None = None,
                  instance: int = 0, real_quit_p: float = 0.0, key_cost: tuple[float, ...] | None = None):
@@ -836,7 +840,8 @@ class PlannerPolicy:
     def _emit(self, rec: dict, event: bool) -> None:
         """Keep the 90 ticks before an event and LOG_AFTER after it. While the pause loop presses, rows are only
         buffered: the trigger tick's 90-row write (about 150 KB of JSON) used to run before that tick's keys went out;
-        they are written once the loop has stopped (the game paused) or the episode ends (stats)."""
+        they are written once the loop has stopped (the game paused) or the episode ends (stats). With LOG_AT_BOUT_END the
+        file is not touched during the fight at all: see _hold_log and flush_log."""
         self.ring.append(rec)
         if self.log_path is None:
             return
@@ -853,7 +858,12 @@ class PlannerPolicy:
             self.ring.clear()
         pq = self.sc.pq
         if self._log_buf and not (pq is not None and pq.pressing):
-            self.flush_log()
+            if self.LOG_AT_BOUT_END:
+                self._hold_log()
+                if self._log_held_bytes > LOG_HELD_MAX:
+                    self.flush_log()              # the bound: this tick pays the write, nothing is dropped
+            else:
+                self.flush_log()
 
     def flush_keys(self) -> dict | None:
         """The episode's key plan record to keys_i<N>.jsonl (once per episode); returns its summary."""
@@ -871,12 +881,37 @@ class PlannerPolicy:
         sm["lead_frames_p50"] = float(np.percentile(lead, 50)) if lead else None
         return sm
 
+    def _hold_log(self) -> None:
+        """The buffered rows as text, in memory (Task 182 seq 308: opening, writing and closing the file on the combat thread
+        stalled a tick 307 ms and stopped a batch). Text, not the row dicts: nothing here for the collector to walk."""
+        if self._log_held is None:
+            self._log_held = deque()
+        if self._log_buf:
+            text = "".join(json.dumps(x) + os.linesep for x in self._log_buf).encode("utf-8")
+            self._log_buf.clear()
+            self._log_held.append(text)
+            self._log_held_bytes += len(text)
+
     def flush_log(self) -> None:
-        if self._log_buf and self.log_path is not None:
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                for x in self._log_buf:
-                    fh.write(json.dumps(x) + "\n")
-        self._log_buf.clear()
+        """Everything held goes to the file, in order. A failure raises and keeps exactly what was not written, so a later
+        call neither loses nor repeats a line. With LOG_AT_BOUT_END the callers are the fight's boundaries: stats (the end of
+        the bout), reset, an aborted episode (log_abort_ring) and the worker's close. A process that dies in a bout loses that
+        bout's held rows: the recording, the chain journal and the HP journal are separate files."""
+        if self.log_path is None:
+            self._log_buf.clear()
+            return
+        self._hold_log()
+        if not self._log_held:
+            return
+        with self.log_path.open("ab", buffering=0) as fh:
+            while self._log_held:
+                text = self._log_held[0]
+                n = fh.write(text)
+                self._log_held_bytes -= n
+                if n < len(text):
+                    self._log_held[0] = text[n:]
+                else:
+                    self._log_held.popleft()
 
     def log_abort_ring(self) -> int:
         """An episode that raised: the ticks before it go to the decision log as a hit event's would (the rows as

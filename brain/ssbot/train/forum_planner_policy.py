@@ -186,6 +186,7 @@ def _win_rows_on() -> bool:
 
 class ForumPlannerPolicy(PlannerPolicy):
     act_after_clear = True
+    LOG_AT_BOUT_END = True      # Task 182 seq 308: no decision-log file I/O on the combat thread
     win = None                  # task oldwin: ssbot.map2.oldwin.WindowRows with SSBOT_FORUM_WINDOWS=1 (a class default:
     #                             off, no instance attribute is added - see __init__)
     wpress = None               # task oldwin stage N: ssbot.map2.oldwin_press.WinPress with SSBOT_FORUM_WINDOWS_PRESS=1
