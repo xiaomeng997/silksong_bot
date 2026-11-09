@@ -14,7 +14,7 @@ from dataclasses import replace
 
 from ssbot.combat import two_play
 
-from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, ground_stance,  # noqa: F401
+from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, ground_stance, stacked_nearer,  # noqa: F401
                             standing_gap)
 from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, LEGACY_TABLE, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
                               TACTICS, Applied, cluster_route, middle_return, return_pose, table)
@@ -109,8 +109,9 @@ def decide(tac, ws, fc, prefs, hx, t):
         sc.by_id = {c.s.iid: c for c in cands}
         a, b = cands
         sc.room = room = {a.s.iid: tac._outer_room(a, b), b.s.iid: tac._outer_room(b, a)}
-        sc.default = (keep or (min(subjects, key=lambda s: abs(s.pos[0] - hx)) if region in {"left", "right", "over"}
-                               else max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx)))))
+        sc.default = (stacked_nearer(sc) or keep
+                      or (min(subjects, key=lambda s: (abs(s.pos[0] - hx), s.iid)) if region in {"left", "right", "over"}
+                          else max(subjects, key=lambda s: (room[s.iid], -abs(s.pos[0] - hx), -s.iid))))
         sc.other = next(s for s in subjects if s.iid != sc.default.iid)
         choices, winner, evals = _pick(sc, tb.scores | tac.rules.clapper_scores)
         target = sc.subject(winner["target"])

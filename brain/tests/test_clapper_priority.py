@@ -190,8 +190,8 @@ def test_far_nonfocus_antic_does_not_steal_focus():
 
 
 def test_rear_jumper_is_intercepted_then_kept_after_landing():
-    tac, ws, fc = scene((30., 28.), 26.); step(tac, ws, fc)
-    change(fc, 8, family=G.CC_JUMP, state="Air", committed=True)
+    tac, ws, fc = scene((30., 28.), 26.)
+    change(fc, 8, family=G.CC_JUMP, state="Air", committed=True)     # (seq 303: in flight from the first pick; idle, 8 would be the near one of a stack and the focus)
     tac.jb_land[8] = (18., 1., 28., True)
     out = step(tac, ws, fc)
     assert out.target == 8 and 8 in out.no_hit and out.entry_attack is None

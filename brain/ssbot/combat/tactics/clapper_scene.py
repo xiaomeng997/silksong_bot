@@ -16,6 +16,9 @@ JUMPS = {"CC_JUMP", "CC_JUMP_CAST"}
 NEAR = {"Slam Antic", "Spell Antic"}
 AIR = {"Jump", "Air"}
 ANTIC = {"Jump Antic", "Cast Slam Antic", "Cast Slam Antic 2"}
+SLAMMING = {"Slam Antic", "Slam 0", "Slam 1", "Slam 2"}
+STACK_U = 4.5        # Task 182 seq 303: the two roots this close: their bodies (+-2.25 u about each root) touch: stacked, or passing through each other
+NEARER_U = 1.0       # the other root this much nearer to her than the kept focus's (her centre to each root, u) is clearly nearer; within it the focus stays
 
 
 @dataclass
@@ -55,6 +58,21 @@ class Scene:
     @property
     def grounded(self):
         return getattr(getattr(self.ws.hero, "contact", None), "v", None) == "GROUND"
+
+
+def stacked_nearer(sc):
+    """Task 182 seq 303 (the person: two Clappers stacked, passing through each other, the bot cannot tell which is nearer; the focus must follow):
+    the other Clapper when the pair is stacked (roots within STACK_U), it is clearly nearer to her (by more than NEARER_U, so near-equal distances keep
+    the focus and the entity order plays no part), it is not in a jump's flight (no target there), and the kept focus is not in its slam (the strike and
+    the hammer stay with the owners already on them); else None."""
+    keep = sc.keep
+    if keep is None or len(sc.subjects) != 2:
+        return None
+    other = next(s for s in sc.subjects if s.iid != keep.iid)
+    xk, xo = float(keep.pos[0]), float(other.pos[0])
+    if abs(xk - xo) >= STACK_U or other.state in AIR or keep.state in SLAMMING:
+        return None
+    return other if abs(xk - sc.hx) - abs(xo - sc.hx) > NEARER_U else None
 
 
 def geometry(tac, ws, subjects):

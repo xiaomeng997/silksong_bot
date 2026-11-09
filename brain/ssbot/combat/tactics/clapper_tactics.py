@@ -29,7 +29,7 @@ from ssbot.combat import forum_v2
 # (clapper_plans reads only its own switch and the shared geometry; flag off its units below are never built into a call)
 
 from . import clapper_middle, clapper_plans
-from .clapper_scene import AIR, ANTIC, JUMPS, NEAR, ground_stance, standing_gap
+from .clapper_scene import AIR, ANTIC, JUMPS, NEAR, NEARER_U, STACK_U, ground_stance, stacked_nearer, standing_gap
 from .forum_local import clapper_facing
 from .modes import EntryAttack, ReturnRequest
 
@@ -105,6 +105,10 @@ class FocusKeep(Tactic):
     room in it. Always applies; the plain approach and the shared entry."""
     name = "keep focus"
     scores = {"keep": 50.}
+
+    def repick(self, sc):
+        # Task 182 seq 303: the pair stacked with the other one clearly nearer: this tick, not at the next period
+        return sc.mem.get("winner") == "keep" and stacked_nearer(sc) is not None
 
     def propose(self, sc):
         return [("keep", sc.default, 1.)], None
@@ -248,6 +252,9 @@ class NearThreat(Tactic):
             return [], "the other one not in a near antic within slam range"
         if previous is not None and previous[:3] == sc.seen[other.iid][:3]:
             return [], "already seen in this antic"
+        if (other.state == "Spell Antic" and abs(float(other.pos[0]) - float(sc.default.pos[0])) < STACK_U
+                and abs(float(other.pos[0]) - sc.hx) - abs(float(sc.default.pos[0]) - sc.hx) > NEARER_U):
+            return [], "a cast behind the near one of a stacked pair"       # Task 182 seq 303: stacked_nearer would hand it straight back
         return [("near", other, .8 + .2 * max(0., 1. - abs(other.pos[0] - sc.hx) / TWO_SLAM_RANGE_U))], None
 
 
@@ -304,7 +311,7 @@ class EnterMiddle(Tactic):
     def propose(self, sc):
         if not (sc.region == "middle" and sc.mem["region"] != "middle"):
             return [], "not entering the middle"
-        return [("middle", max(sc.subjects, key=lambda s: (sc.room[s.iid], -abs(s.pos[0] - sc.hx))), 1.)], None
+        return [("middle", max(sc.subjects, key=lambda s: (sc.room[s.iid], -abs(s.pos[0] - sc.hx), -s.iid)), 1.)], None
 
 
 class OuterRetreat(Tactic):
@@ -427,7 +434,7 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, fr
         return None
     room = {s.iid: (float(s.pos[0]) - geo["xa"] if s.iid == geo["low"].iid else geo["xb"] - float(s.pos[0]))
             for s in subjects}
-    target = max(subjects, key=lambda s: (room[s.iid], -abs(float(s.pos[0]) - hx)))   # as the "middle" rule
+    target = max(subjects, key=lambda s: (room[s.iid], -abs(float(s.pos[0]) - hx), -s.iid))   # as the "middle" rule
     pose = return_pose(tac, target, geo, hx)
     if pose["posture"] == "ground" and geo["region"] == "middle" and grounded:
         # landed in the standing gap itself (crossing a root in the air over a body, or hanging over an open gap, is
