@@ -1339,17 +1339,15 @@ class SlamPlay:
         return self._cs_step(r, k, f, s, e, ground, accepting, sim, t)
 
     def _cs_bomb(self, r: Run, plan, cx: float, hx: float) -> bool:
-        """SP13: a lit / forecast small-rune bomb of another Clapper (rune_bombs.frames from this STATE) meets her box on
-        the Clawline's path: in place to the press + 10 (the hop's box bottom), the dash to the stop (S's front - 2.1 u),
-        held there to control, the bounce over the stop to the press + 50."""
+        """SP13: a lit / forecast small-rune bomb of any Clapper (rune_bombs.frames from this STATE; Task 182 seq 310: S's own count too: a placed rune is
+        no less a rune for belonging to the target; the decline's name stays "other bomb") meets her box on the Clawline's path: in place to the press + 10
+        (the hop's box bottom), the dash to the stop (S's front - 2.1 u), held there to control, the bounce over the stop to the press + 50."""
         bk = self._bombs
         if bk is None or not len(bk):
             return False
         import numpy as np
         from ssbot.combat import rune_bombs as _rb
-        own = {int(o) for o in bk[:, 0] if int(o) != r.iid}
-        if not own:
-            return False
+        own = {int(o) for o in bk[:, 0]}
         k0 = self._sg_k0(r)
         kp = int(plan.k_press)
         ks = np.arange(k0, kp + 51)

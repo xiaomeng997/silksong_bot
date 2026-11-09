@@ -24,7 +24,6 @@ import math
 
 import numpy as np
 
-from ssbot.core.forum import WALL_L, WALL_R
 from ssbot.knowledge import kinematics as K
 
 RUNE_R = 7.187               # the circle's apothem (an octagon: |dx|, |dy| <= r, |dx| + |dy| <= r sqrt 2)
@@ -42,8 +41,7 @@ MARGIN_BIG, MARGIN_BOMB = 6, 2
 HOP_F = 16                   # a held jump's frames among the escape rows
 RUN_V, DASH_V, MAX_V = 8.25, 28.0, 30.0   # u/s: her run, her dash, nothing of hers is faster without the hook
 NEAR_F, NEAR_U = 12, 0.3     # a rune farther than speed x NEAR_F / 60 + NEAR_U from her box is out of this key's reach (no hero model rolled)
-CLAW_BIT = 1 << 4            # (the wire mask's Clawline key; the hook's lock has its own whole-path checks)
-SEND_F = 2                   # frames from a STATE to the frame its key lands on
+CLAW_BIT = 1 << 4            # (the wire mask's Clawline key)
 
 
 class Circle:
@@ -217,54 +215,45 @@ def _escape_row(esc, n: int) -> np.ndarray:
     return row
 
 
-def _safe(ro, rows, i0, big_f, bomb_f, rows_mask=None) -> np.ndarray:
+def _safe(ro, rows, i0, big_f, bomb_f) -> np.ndarray:
     """[N] the rollout rows that stay clear of every rune (rollout index i0 + k; big_f / bomb_f frames of margin before a rune's on_k)."""
     hit = _box_hits(ro.box, rows, i0, big_f, bomb_f) & ~((ro.flags & K.F_INVULN) != 0)
     return ~hit[:, i0:].any(axis=1)
 
 
-def _walk_clear(x: float, vx: float, mask: int, rows: np.ndarray, m_big: int, m_bomb: int) -> bool:
-    """Arithmetic, no hero model (a sufficient condition: anything it passes, the hero model would pass too with her dash): after this key, walking left, standing or
-    walking right from the next frame on keeps her out of every rune's x span on the rune's own lit frames, with the margins (frames from this STATE; her key lands at
-    frame 2; the arena's walls stop her). Height is left out: the x span is the whole of a circle at her standing height, and the jump only helps."""
-    v = RUN_V / 60.0
-    k = np.arange(3, int(min(rows[:, 5].max(), HORIZON)) + 2)
-    x_key = x + vx * SEND_F / 60.0 + (v if mask & K.B_RIGHT else -v if mask & K.B_LEFT else 0.0)   # at frame 3, with this key's first step
-    lo_w, hi_w = WALL_L + HERO_HW, WALL_R - HERO_HW
-    for d in (-1.0, 0.0, 1.0):
-        xs = np.clip(x_key + d * v * (k - 3.0), lo_w, hi_w)
-        ok = True
-        for _o, cx, _cy, r, on, off in rows:
-            f = (k >= on - (m_big if r > 5.0 else m_bomb)) & (k <= off)
-            if f.any() and (np.abs(xs[f] - cx) < r + HERO_HW).any():
-                ok = False
-                break
-        if ok:
-            return True
-    return False
+def _held_bits(hold) -> int:
+    """What the hold filter still holds, wants or has queued (one lane) as a key mask: a key the prefix and this tick's key do not show can still land."""
+    if hold is None:
+        return 0
+    on = hold.latched[0] | hold.desired[0] | (hold.pending[0] > 0)
+    return int((on.astype(np.int64) << np.arange(on.size, dtype=np.int64)).sum())
 
 
-def exit_veto(sim, mask: int, rows: np.ndarray, m_big: int = MARGIN_BIG, m_bomb: int = MARGIN_BOMB) -> tuple[bool, dict | None]:
+def exit_veto(sim, mask: int, rows: np.ndarray, m_big: int = MARGIN_BIG, m_bomb: int = MARGIN_BOMB, strike_exempt: bool = False) -> tuple[bool, dict | None]:
     """(veto, info). rows: rune rows (rows() / rune_bombs.frames, frames from this STATE's frame). True: the key `mask` (for frame f + 2) leaves her no way clear of the
     lit-or-to-come runes on the escape rows of the next tick on, with the margin, while she has one now. No way now either: False (nothing the key takes away).
-    Three stages, cheapest first: her distance alone (no hero model): she cannot get onto any rune with this key; two rows (this key, then run left / right); only when
-    both fail, the full rows. info None: nothing was rolled. Rollout index = i0 + k (ChainSim: index off = frame f + 2)."""
+    Stages, cheapest first: her distance alone (no hero model): out of reach of every rune with this key, the keys in flight and what the hold filter still holds; two rows
+    (this key, then run left / right); only when both fail, the full rows. info None: nothing was rolled. Rollout index = i0 + k (ChainSim: index off = frame f + 2). strike_exempt (the owners that check their own
+    strikes along the whole path: the slam script, the chain): a down slash press or a Clawline key is not looked at (the rows have no contact, bounce or hook). A side slash
+    is an ordinary key, for every owner."""
     rows = np.asarray(rows, np.float64).reshape(-1, 6)
     rows = rows[rows[:, 5] >= 0.0] if len(rows) else rows
     mask = int(mask)
-    if not len(rows) or mask & (CLAW_BIT | K.B_ATTACK):
-        return False, None                   # (an attack press or a Clawline: the rows have no contact, bounce or hook; the owner's own checks cover the strike)
+    strike = bool(mask & CLAW_BIT) or bool(mask & K.B_ATTACK and mask & K.B_DOWN)
+    if not len(rows) or (strike_exempt and strike):
+        return False, None                   # (the owner's own whole-path checks cover the strike)
     state = np.asarray(sim.start, np.float64).reshape(-1)
     x, vx = float(state[K.PX]), float(state[K.VX])
-    speed = max(abs(vx), DASH_V if mask & K.B_DASH else RUN_V if mask & (K.B_LEFT | K.B_RIGHT) else 0.0)
+    prefix = np.asarray(sim.prefix, np.int64).reshape(-1)
+    inflight = int(np.bitwise_or.reduce(prefix)) if prefix.size else 0
+    keys = mask | inflight | _held_bits(sim.hold)
+    speed = max(abs(vx), DASH_V if keys & K.B_DASH else RUN_V if keys & (K.B_LEFT | K.B_RIGHT) else 0.0)
     gap = np.abs(x - rows[:, 1]) - rows[:, 3] - HERO_HW
-    if (gap > speed * NEAR_F / 60.0 + NEAR_U).all():
+    if (gap > speed * (NEAR_F + prefix.size - 1) / 60.0 + NEAR_U).all():
         return False, None                   # she is too far from every rune for this key to matter
     rows = rows[gap <= (np.maximum(rows[:, 5], 0.0) + 4.0) * MAX_V / 60.0]     # (the ones she can reach at all before they end)
     if not len(rows):
         return False, None
-    if not mask & K.B_DASH and abs(vx) <= RUN_V + 1.0 and _walk_clear(x, vx, mask, rows, m_big, m_bomb):     # (running or standing: a dash or sprint is locked for a while, the model's to judge)
-        return False, None                   # she can still walk clear after this key: no hero model needed
     i0 = sim.off - 2
     T = max(int(min(np.ceil(rows[:, 5].max()) + 2, HORIZON)), 4)
     info = {"after": True, "now": True, "n_big": int((rows[:, 3] > 5.0).sum()), "n_bomb": int((rows[:, 3] <= 5.0).sum()), "first_on": float(rows[:, 4].min()), "rolls": 2}

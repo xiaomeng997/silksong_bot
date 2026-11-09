@@ -754,7 +754,8 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         tick,sim,_,_=self._context
         f=tick[0]
         from .rune_life import exit_veto
-        veto,info=exit_veto(sim,int(offer.mask),rows)
+        # (the chain's down slash rows and its hook have their own whole-path checks over every owner's delayed hazards: scan, entry_scan)
+        veto,info=exit_veto(sim,int(offer.mask),rows,strike_exempt=True)
         if not veto:return offer
         self._note("b2_rune_exit_gate",frame=f,stage=offer.stage,mask=int(offer.mask),run=None if self.runner.run is None else self.runner.run.chain,**(info or {}))
         if self.commitment is not None or self.runner.run is not None:

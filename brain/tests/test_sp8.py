@@ -336,8 +336,10 @@ def test_no_start_through_a_rune_circle():
                                                          hx + 3.0, 10.5]}]}
     s["ents"].append(rune)
     assert c.step(1000, s, True, t_game=1000 / 60) is None and c.run is None
-    s2 = hero(antic_state(1001, 3, 10.6))                     # gone: the start goes
-    assert c.step(1001, s2, True, t_game=1001 / 60) is not None
+    s2 = hero(antic_state(1001, 3, 10.6))                     # one frame without it: the same object (Task 182 seq 310: a missing frame is no disappearance)
+    assert c.step(1001, s2, True, t_game=1001 / 60) is None
+    s3 = hero(antic_state(1007, 3, 10.6))                     # gone for rune_life.ABSENT_F frames: the start goes
+    assert c.step(1007, s3, True, t_game=1007 / 60) is not None
     # a circle seen lit before (burst) and still there unlit is no threat (192006 ep 1: it stays after the burst)
     c = cs.CastStab(dash_slash=True, combo=True, stop=True)
     lit = dict(rune, iid=5, colliders=[dict(rune["colliders"][0], enabled=True)])

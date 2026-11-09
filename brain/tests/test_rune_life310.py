@@ -214,7 +214,7 @@ def sim_for(hx, f=1000, ground=True, vy=0.0, vx=0.0, prefix=(0,)):
     S = kin.initial_state(PARAMS, hx, FLOOR + cs_.POS_DY, vy=vy, facing=1, ground=ground)
     S = np.asarray(S, float).copy()
     S[kin.VX] = vx
-    return ac.ChainSim(S, np.array(prefix, np.int64), kin.HoldState.idle(1), PARAMS, TERR, f, f)
+    return ac.ChainSim(S, np.array(prefix, np.int64), kin.HoldState.idle(1), PARAMS, TERR, f - len(prefix) + 1, f)
 
 
 L, R_, DASH = kin.B_LEFT, kin.B_RIGHT, kin.B_DASH
@@ -261,17 +261,81 @@ def test_a_circle_that_has_burnt_out_blocks_nothing():
     assert not veto and info is None
 
 
-def test_an_attack_press_is_not_looked_at():
-    """A down slash / side slash: the check's rows have no contact, no bounce: not its question."""
+def test_a_side_slash_is_an_ordinary_key():
+    """Sol's review of #372: the side slash has no owner-level path check: it is judged like a walk key, for every owner."""
     veto, info = RL.exit_veto(sim_for(edge() - 0.9), L | kin.B_ATTACK, big(30., 10., 18.))
+    assert veto and info is not None
+    veto, info = RL.exit_veto(sim_for(edge() - 0.9), L | kin.B_ATTACK, big(30., 10., 18.), strike_exempt=True)
+    assert veto and info is not None          # (exempt owners are exempt for a down slash or a hook only)
+
+
+def test_a_down_slash_press_is_not_looked_at_for_the_exempt_owners():
+    veto, info = RL.exit_veto(sim_for(edge() - 0.9), kin.B_DOWN | kin.B_ATTACK, big(30., 10., 18.), strike_exempt=True)
     assert not veto and info is None
     veto, info = RL.exit_veto(sim_for(edge() - 0.9), kin.B_DOWN | kin.B_ATTACK, big(30., 10., 18.))
+    assert info is not None                   # any other owner: the question is asked
+
+
+def test_the_clawline_key_is_not_looked_at_for_the_exempt_owners():
+    veto, info = RL.exit_veto(sim_for(edge() - 0.9), L | RL.CLAW_BIT, big(30., 10., 18.), strike_exempt=True)
     assert not veto and info is None
 
 
-def test_the_clawline_key_is_not_looked_at():
-    veto, info = RL.exit_veto(sim_for(edge() - 0.9), L | RL.CLAW_BIT, big(30., 10., 18.))
-    assert not veto and info is None
+def full_verdict(monkeypatch, sim, mask, rows):
+    """The hero model alone, without the distance stage (its reference)."""
+    with monkeypatch.context() as m:
+        m.setattr(RL, "NEAR_F", 10 ** 6)
+        return RL.exit_veto(sim, mask, rows)[0]
+
+
+@pytest.mark.parametrize("prefix", [(0,), (kin.B_LEFT,), (kin.B_RIGHT,), (kin.B_LEFT, kin.B_LEFT), (kin.B_LEFT,) * 6, (kin.B_LEFT | kin.B_DASH,), (kin.B_RIGHT | kin.B_DASH,)],
+                         ids=["none", "L", "R", "L2", "L6", "LD", "RD"])
+def test_the_distance_check_never_passes_what_the_hero_model_refuses(monkeypatch, prefix):
+    """Sol's PREFIX_CHECK372 cases and the grid around them: whatever the distance waves through, the hero model agrees with."""
+    bad = []
+    for inside in (-3.0, -2.0, -1.0, -0.5, -0.3, 0.3, 0.9, 1.5):
+        for on in (4, 6, 10, 14, 20):
+            for mask in (0, L, R_, kin.B_JUMP, L | kin.B_ATTACK, L | DASH):
+                for vx in (0.0, -8.25, 8.25):
+                    sim = sim_for(edge() - inside, prefix=prefix, vx=vx)
+                    rows = big(30., on, on + 8)
+                    fast = RL.exit_veto(sim, mask, rows)
+                    if not fast[0] and full_verdict(monkeypatch, sim, mask, rows):
+                        bad.append((inside, on, mask, vx, fast))
+    assert not bad, bad
+
+
+def hold_with(key_bit, age=50, latched=True, pending=0):
+    h = kin.HoldState.idle(1)
+    h.latched[0, key_bit] = latched
+    h.desired[0, key_bit] = latched or pending > 0
+    h.pending[0, key_bit] = pending
+    h.age[0, key_bit] = age
+    return h
+
+
+def test_a_queued_dash_counts_for_the_distance_check():
+    """Too far to walk onto the circle in time but the filter has a dash queued: the distance check cannot wave it through."""
+    S = kin.initial_state(PARAMS, edge() + 2.5, FLOOR + cs_.POS_DY, vy=0.0, facing=1, ground=True)
+    idle = ac.ChainSim(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERR, 1000, 1000)
+    assert RL.exit_veto(idle, 0, big(30., 8., 16.)) == (False, None)
+    queued = ac.ChainSim(S, np.zeros(1, np.int64), hold_with(2, latched=False, pending=1), PARAMS, TERR, 1000, 1000)
+    assert RL.exit_veto(queued, 0, big(30., 8., 16.))[1] is not None
+
+
+def test_the_delayed_state_case_six_left_keys_in_flight():
+    """Sol's PREFIX_CHECK372: fo 5 frames behind f (never in the 58 616 live decisions: all fo = f), x 37.437, six LEFT keys in flight, lit in 4 frames, RIGHT now: the hero model answers: refused."""
+    veto, info = RL.exit_veto(sim_for(37.437, prefix=(L,) * 6), R_, big(30., 4., 12.))
+    assert veto and info["after"] is False and info["now"] is True
+
+
+@pytest.mark.parametrize("mask", [0, L, kin.B_JUMP], ids=["none", "left", "jump"])
+def test_the_recorded_review_case_one_left_key_in_flight(mask):
+    """Sol's PREFIX_CHECK372: x 37.737 (0.3 u outside its edge), LEFT in flight (fo = f), lit in 6 frames: the hero model answers it with the key in flight: no way out with the margin."""
+    sim = sim_for(edge() + 0.3, prefix=(L,))
+    assert sim.fo == sim.f
+    veto, info = RL.exit_veto(sim, mask, big(30., 6., 14.))
+    assert veto and info["after"] is False and info["now"] is True
 
 
 def test_far_from_every_rune_nothing_is_rolled():
@@ -279,10 +343,12 @@ def test_far_from_every_rune_nothing_is_rolled():
     class NoRoll:
         off = 2
         start = kin.initial_state(PARAMS, 44.0, FLOOR + cs_.POS_DY, vy=0.0, facing=1, ground=True)
+        prefix = np.zeros(1, np.int64)
+        hold = kin.HoldState.idle(1)
+        fo = f = 1000
         def roll(self, *a):
             raise AssertionError("rolled")
     assert RL.exit_veto(NoRoll(), L, big(20., 30., 38.)) == (False, None)
-    # (a dash key is out of the walking arithmetic, so only the distance can answer here)
     assert RL.exit_veto(NoRoll(), L | DASH, big(20., 30., 38.)) == (False, None)
 
 
@@ -426,6 +492,67 @@ def test_slam_walking_run_aborts_when_a_circle_comes_up():
 
 # ---- the two integration points of the last check ----
 
+def idle_hit_mask(monkeypatch):
+    """The real TwoPlay IdleHit: the near one just went Slam Recover -> Idle in reach of the side slash (Sol's ROUTE_CHECK372 scene)."""
+    monkeypatch.setattr(tp, "IDLEHIT", True)
+    two = tp.TwoPlay()
+    hx = 31.516
+    m = None
+    for f, st, age in ((1000, "Slam Recover", .3), (1001, "Idle", 0.)):
+        s = two_state(f, st, age, hx=hx, cx=hx - 4, flip=True, facing=-1, b_x=46.)
+        two.observe(f, s, f / 60.)
+        m = two.step(f, s, True, True, 7, f / 60., two_enc=False)
+    return two, m
+
+
+def test_the_idlehit_side_slash_is_refused_when_it_takes_the_way_out(monkeypatch):
+    from collections import Counter
+    from ssbot.train import forum_planner_policy as FP
+    two, m = idle_hit_mask(monkeypatch)
+    assert m == kin.B_LEFT | kin.B_ATTACK and two.last_part == "idle"
+    hx = 31.516
+    S = kin.initial_state(PARAMS, hx, FLOOR + cs_.POS_DY, vy=0.0, facing=1, ground=True)
+    pol = object.__new__(FP.ForumPlannerPolicy)
+    pol._rune_tick = {"rows": bomb(30., 6., 14.), "sim": None, "ctx": (S, np.zeros(1, np.int64), kin.HoldState.idle(1), 1001, 1001)}
+    pol.params, pol.terrain = PARAMS, TERR
+    pol.counts = Counter()
+    assert FP.ForumPlannerPolicy._rune_veto(pol, "two:idle", m) is True
+    assert pol._rune_tick["last"]["who"] == "two:idle"
+
+
+def test_the_slam_scripts_down_slash_is_exempt_only_for_its_owner():
+    from collections import Counter
+    from ssbot.train import forum_planner_policy as FP
+    S = kin.initial_state(PARAMS, edge() - 0.9, FLOOR + cs_.POS_DY, vy=0.0, facing=1, ground=True)
+    def veto(who, m):
+        pol = object.__new__(FP.ForumPlannerPolicy)
+        pol._rune_tick = {"rows": big(30., 10., 18.), "sim": None, "ctx": (S, np.zeros(1, np.int64), kin.HoldState.idle(1), 1000, 1000)}
+        pol.params, pol.terrain = PARAMS, TERR
+        pol.counts = Counter()
+        return FP.ForumPlannerPolicy._rune_veto(pol, who, m)
+    press = kin.B_DOWN | kin.B_ATTACK
+    assert veto("slam", press) is False and veto("chase", L) is True
+    assert veto("slam", L | kin.B_ATTACK) is True                 # (its side slash is an ordinary key)
+
+
+def test_the_hook_path_check_counts_the_targets_own_small_runes():
+    """The down slash and the hook are exempt from the last check only because their own path checks cover them: a placed small rune over the Clawline's way counts whoever cast it."""
+    p = sp.SlamPlay()
+    p.reset()
+    r = NS(iid=7, ta=100.0)
+    p._t = 100.0
+    plan = NS(k_press=5, bb_press=1.0)
+    hx, cx = 30.0, 38.0
+    p._bombs = np.array([[7., hx, 4.6, 2.166, 0., 20.]])            # the target's own, over her now, on its frames
+    assert p._cs_bomb(r, plan, cx, hx) is True
+    p._bombs = np.array([[99., hx, 4.6, 2.166, 0., 20.]])           # the other one's
+    assert p._cs_bomb(r, plan, cx, hx) is True
+    p._bombs = np.array([[7., hx - 20., 4.6, 2.166, 0., 20.]])      # off her way
+    assert p._cs_bomb(r, plan, cx, hx) is False
+    p._bombs = np.array([[7., hx, 4.6, 2.166, 200., 220.]])         # long after the Clawline's window
+    assert p._cs_bomb(r, plan, cx, hx) is False
+
+
 def test_policy_veto_ends_the_script_and_counts():
     from collections import Counter
     from ssbot.train import forum_planner_policy as FP
@@ -475,24 +602,6 @@ def test_the_margin_counts_in_after_only():
     # no margin asked: nothing to refuse
     veto, info = RL.exit_veto(sim_for(edge() - 0.9), L, big(30., 16., 24.), m_big=0, m_bomb=0)
     assert not veto
-
-
-def test_she_could_walk_clear_is_no_rollout():
-    """Inside it with plenty of time: arithmetic alone, the hero model is not asked."""
-    class NoRoll:
-        off = 2
-        start = kin.initial_state(PARAMS, edge() - 0.9, FLOOR + cs_.POS_DY, vy=0.0, facing=1, ground=True)
-        def roll(self, *a):
-            raise AssertionError("rolled")
-    assert RL.exit_veto(NoRoll(), R_, big(30., 60., 68.)) == (False, None)
-
-
-def test_the_arena_wall_stops_the_walk():
-    """Inside a circle whose far side is behind the wall: walking that way is not a way out."""
-    rows = np.array([[1., 45.0, 3.34, RL.RUNE_R, 60., 68.]])
-    assert RL._walk_clear(47.0, 0.0, 0, rows, 0, 0) is False
-    rows = np.array([[1., 45.0, 3.34, RL.RUNE_R, 120., 128.]])
-    assert RL._walk_clear(47.0, 0.0, 0, rows, 0, 0) is True     # (with time to walk out left)
 
 
 def test_invulnerable_frames_do_not_count():
@@ -613,6 +722,14 @@ def test_chain_offer_passes_when_she_can_get_clear():
     from ssbot.combat import knife_chain_b2 as B2
     ch, offer, calls = chain_stub(big(30., 10., 18.), R_, run=NS(chain="rune_transfer"))
     assert B2.NativeChainB2._rune_gate(ch, offer) is offer and calls == []
+
+
+def test_chain_down_slash_is_not_looked_at_side_slash_is():
+    from ssbot.combat import knife_chain_b2 as B2
+    ch, offer, calls = chain_stub(big(30., 10., 18.), kin.B_DOWN | kin.B_ATTACK, run=NS(chain="rune_transfer"))
+    assert B2.NativeChainB2._rune_gate(ch, offer) is offer and calls == []
+    ch, offer, calls = chain_stub(big(30., 10., 18.), L | kin.B_ATTACK, run=NS(chain="rune_transfer"))
+    assert B2.NativeChainB2._rune_gate(ch, offer) is None and calls
 
 
 def test_chain_recovery_release_is_not_looked_at():

@@ -1661,7 +1661,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         if who == "low":
             rows = rows[rows[:, 3] > 5.0]        # (its own plan reads every small rune, per bomb: the big circles are what it does not)
         t0 = time.perf_counter_ns()
-        veto, info = rune_life.exit_veto(ctx["sim"], int(m), rows)
+        # (the slam script checks its own strike along its path at its start and walk; its down slash press and its Clawline are not this check's question. Everyone else's
+        # keys are, the side slash included)
+        veto, info = rune_life.exit_veto(ctx["sim"], int(m), rows, strike_exempt=who == "slam")
         if info is not None:
             ctx["last"] = {"who": who, "mask": int(m), "veto": bool(veto), "ms": round((time.perf_counter_ns() - t0) / 1e6, 2), **info}
         if veto:

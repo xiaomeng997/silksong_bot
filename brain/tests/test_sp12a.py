@@ -116,7 +116,8 @@ def test_strikeguard_bomb_on_path_declines(monkeypatch):
     assert not play.sg
 
 
-def test_strikeguard_off_ignores_bombs(monkeypatch):
+def test_strikeguard_off_its_bomb_gate_does_not_run_the_rune_path_check_does(monkeypatch):
+    """STRIKEGUARD off: nothing of the guard runs (no play.sg). The slam's own path check (Task 182 seq 310: every placed rune on its lit frames, whoever cast it) still declines this bomb over the stand point."""
     monkeypatch.setattr(sp, "STRIKEGUARD", False)
     monkeypatch.setattr(sp, "TWO_PLAY", True)
     play = sp.SlamPlay()
@@ -126,7 +127,8 @@ def test_strikeguard_off_ignores_bombs(monkeypatch):
     play2 = sp.SlamPlay()
     play2.reset()
     b = play2.step(1000, s, True, True, t_game=1000 / 60.0)
-    assert a == b and not play.sg
+    assert a is None and play.run.why == "bomb" and not play.sg
+    assert b is not None
 
 
 def test_strikeguard_body_and_walk_abort(monkeypatch):
