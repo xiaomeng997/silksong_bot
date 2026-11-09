@@ -38,6 +38,7 @@ from pathlib import Path
 import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
+from ssbot.combat import rune_life
 from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, observed_slam,
                           slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
@@ -283,6 +284,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._play_tick: dict | None = None
         self.own_trace: list = []                 # SP10a: see reset()
         self._own_last: tuple | None = None
+        self.rune_life = rune_life.RuneCircles()  # Task 182 seq 310: the big rune circles' lives, one instance for every script (reset())
+        self._rune_tick = None                    # ... this tick's rune rows and hero model for the last check on a key
         # M4c (SSBOT_FORUM_MAP2): the map2 controller (its workers start in warmup); None: off
         self.m2 = None
         if MAP2:
@@ -774,6 +777,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.air_show is not None:
             self.air_show.reset()
             self._air_k = 0
+        self.rune_life = rune_life.RuneCircles()      # Task 182 seq 310: one record of the circles per episode, every script reads it
+        for sc_ in (self.slam_play, self.cast_stab, self.evade_chase, self.rune_lowhop, self.two):
+            if sc_ is not None:
+                sc_._life = self.rune_life
+        self._rune_tick = None
         self._wake_f = None
         self._play_tick = None
         self._wave_v = -1
@@ -1135,6 +1143,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         fo = ws.stamp.frame
         raw = self.raw.get(fo, s)
         raw["_t"] = ws.stamp.t_game_s
+        self.rune_life.update(f, s, ws.stamp.t_game_s)  # Task 182 seq 310: before any script reads it
         self._first_tick(ws, raw)
         self.trk.push(raw)
         self._wake(ws, s, tap)
@@ -1234,6 +1243,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             b2_critical=self._b2_script_critical(f,s)
             b2_priority.policy_gate_reason=self._b2_policy_gate(low_crit=b2_critical[0],asw_crit=b2_critical[2],
                 m2_on=m2_mask is not None,supervisor=self.pause_owned or self.sc.pq is not None)
+        self._rune_tick = {"rows": None, "sim": None, "ctx": (S0, prefix, hold, fo, f)}
+        if self.chain_native is not None:
+            self.chain_native.rune_rows = self._rune_rows      # Task 182 seq 310: the chain's own last check (knife_chain_b2._rune_gate), built when asked
         if air_tick:
             res = self.planner_last
         else:
@@ -1391,6 +1403,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
                 play = None
+            if play is not None and self._rune_veto("slam", play):
+                self.slam_play.abort("rune exit")
+                play = None
             rp = self.slam_play.run
             self._play_tick = None if rp is None else {"phase": rp.phase, "k": rp.k, "mask": play,
                                                         "why": rp.why}
@@ -1429,6 +1444,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             if stab is not None and (r.mask is not None or self.pause_owned):
                 self.cast_stab.abort("supervisor")
                 stab = None
+            if stab is not None and self._rune_veto("stab", stab):
+                self.cast_stab.abort("rune exit")
+                stab = None
             if stab is not None:
                 mask = play = stab
                 own = "stab"
@@ -1466,6 +1484,9 @@ class ForumPlannerPolicy(PlannerPolicy):
             if lh is not None and (r.mask is not None or self.pause_owned):
                 self.rune_lowhop.abort("supervisor")
                 lh = None
+            if lh is not None and self._rune_veto("low", lh):
+                self.rune_lowhop.abort("rune exit")
+                lh = None
             if lh is not None:
                 mask = play = lh
                 own = "low"
@@ -1486,6 +1507,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                                                   else None)), guard=gsp)
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
+                ch = None
+            if ch is not None and self._rune_veto("chase", ch):
+                self.evade_chase.abort("rune exit")
                 ch = None
             if ch == 0 and self.evade_chase.yields_brake_to(mask, latch_c):
                 # Task 179 seq 259: the distance brake holds her over the body she falls on; the planner's move away goes
@@ -1522,6 +1546,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
                                 two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t, **rt_kw)
+            if tm_ is not None and not (r.mask is not None or self.pause_owned) and self._rune_veto(
+                    "two:" + str(getattr(self.two, "last_part", None)), tm_):
+                self.two.rune_yield(f)
+                tm_ = None
             if tm_ is not None and not (r.mask is not None or self.pause_owned):
                 mask = play = tm_
                 own = "two:" + str(getattr(self.two, "last_part", None))
@@ -1599,6 +1627,47 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs,
                              frame=f, origin_frame=fo)
         return int(mask)
+
+    def _rune_rows(self) -> np.ndarray:
+        """Task 182 seq 310: every placed rune as rows (rune_bombs.frames' layout, frames from this STATE): the big circles (rune_life) and the
+        small runes' per-bomb forecast (the planner's own), read once per tick when something asks."""
+        ctx = getattr(self, "_rune_tick", None)
+        if ctx is not None and ctx["rows"] is not None:
+            return ctx["rows"]
+        big = self.rune_life.rows()
+        trk_ = self.v2feed.trk if self.v2feed is not None else None
+        if trk_ is None or getattr(trk_, "rune", None) is None:
+            rows = big
+        else:
+            from ssbot.combat import rune_bombs as _rbm
+            bk = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
+            rows = np.concatenate([big, bk]) if len(big) and len(bk) else (big if len(big) else bk)
+        if ctx is not None:
+            ctx["rows"] = rows
+        return rows
+
+    def _rune_veto(self, who: str, m: int) -> bool:
+        """Task 182 seq 310: the last check on a script's final key for f + 2 (rune_life.exit_veto over this tick's model: the real prefix,
+        hold filter, dash cooldown): True: this key leaves her no way clear of a placed rune while she has one now: the script's run ends and
+        the planner's own row goes out (as the supervisor's keys end a script). The ledger and the forecast are read here; no script has to
+        remember a rune of its own for this."""
+        ctx = getattr(self, "_rune_tick", None)
+        if ctx is None or not len(self._rune_rows()):
+            return False
+        if ctx["sim"] is None:
+            S0_, prefix_, hold_, fo_, f_ = ctx["ctx"]
+            ctx["sim"] = air_chain.ChainSim(S0_, prefix_, hold_, self.params, self.terrain, fo_, f_)
+        rows = ctx["rows"]
+        if who == "low":
+            rows = rows[rows[:, 3] > 5.0]        # (its own plan reads every small rune, per bomb: the big circles are what it does not)
+        t0 = time.perf_counter_ns()
+        veto, info = rune_life.exit_veto(ctx["sim"], int(m), rows)
+        if info is not None:
+            ctx["last"] = {"who": who, "mask": int(m), "veto": bool(veto), "ms": round((time.perf_counter_ns() - t0) / 1e6, 2), **info}
+        if veto:
+            self.counts["rune_veto"] += 1
+            self.counts[f"rune_veto_{who}"] += 1
+        return veto
 
     def _scene_field_before_plan(self, forecast, state, frame):
         """Pin the low-frequency field before candidate scoring; no prediction call."""
@@ -1853,6 +1922,9 @@ class ForumPlannerPolicy(PlannerPolicy):
                 rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases
         if li.get("map") is not None:
             rec["map"] = li["map"]               # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row / readiness this tick
+        rune_ = (self._rune_tick or {}).get("last")
+        if rune_ is not None:
+            rec["rune"] = rune_                  # Task 182 seq 310: the last check on a script's key this tick (rune_life.exit_veto)
         if self._play_tick is not None:
             rec["play"] = self._play_tick        # SSBOT_FORUM_SLAM_PLAY (SP1): the playbook's phase / frame / keys
             if self._play_tick["mask"] is not None:

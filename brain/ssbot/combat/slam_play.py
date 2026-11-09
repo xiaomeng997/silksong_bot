@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from ssbot.combat import air_chain as _ac
 from ssbot.combat import claw_strike as _cs
 from ssbot.combat import jump_behind as _jb
+from ssbot.combat import rune_life as _rl
 from ssbot.knowledge import kinematics as kin
 
 CLAPPER = "Song Heavy Sentry"
@@ -481,6 +482,7 @@ class SlamPlay:
         self.sg: list = []                   # ... [iid, antic entry, k, why, decline / abort, ticks] per guard event
         self._csx = None                     # SP13 SSBOT_FORUM_CLAWSTRIKE: claw_strike.ClawStrike (made on first use)
         self.cs_declines: dict = {}          # ... why a slam the playbook could not reach got no Clawline
+        self._life = _rl.RuneCircles()       # the rune circles' lives (shared with the other scripts by the policy)
 
     def reset(self) -> None:
         self.run = None
@@ -495,6 +497,7 @@ class SlamPlay:
         self._bombs = None
         self.sg = []
         self.cs_declines = {}
+        self._life = _rl.RuneCircles()
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -717,6 +720,7 @@ class SlamPlay:
         self._guard = guard                  # SP11-0 SSBOT_FORUM_TWO_GUARD: the other one's danger spans (or None)
         self._bombs = bombs                  # SP12a SSBOT_FORUM_TWO_STRIKEGUARD: rune_bombs.frames from this STATE (or None)
         self._f = f
+        self._life.update(f, s, t)
         e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
         if (TWO_RUNEGATE and TWO_PLAY) or _cs.CLAWSTRIKE:
             self._rg_observe(s, t)                    # (SP13: the circles' burst for the Clawline's gate)
@@ -808,6 +812,12 @@ class SlamPlay:
                 if why is not None:
                     r.why = why
                     return None
+            # Task 182 seq 310: any rune placed by anyone, its own Clapper's too (with one Clapper as well)
+            cx0_ = float(e["pos"][0])
+            why = self._rune_path(s, cx0_ + r.face * min(max((hero_x(s) - cx0_) * r.face, c.stand[0]), c.stand[1]), k)
+            if why is not None:
+                r.why = why
+                return None
             if _cs.CLAWSTRIKE and sim is not None and self._cs_cfg().trigger == "force":
                 # SP13 fixed-point trials: the Clawline approach on every slam it can reach from force_min_u
                 if (hero_x(s) - float(e["pos"][0])) * r.face >= self._cs_cfg().force_min_u:
@@ -838,6 +848,14 @@ class SlamPlay:
             # a late landing inside the jump band: the jump this tick (below)
         cx = float(e["pos"][0])
         x = (hero_x(s) - cx) * r.face                     # in front: > 0
+        if r.phase == "walk" and k < c.k_jump:
+            # Task 182 seq 310: the walk goes on only while its way and the strike's stand are clear of the placed runes (a run started
+            # before the circle was there, or before a bomb was forecast). Nothing here looks at the owner of a rune.
+            tx_ = cx + r.face * min(max(x, (r.stand or c.stand)[0]), (r.stand or c.stand)[1])
+            why = self._rune_path(s, tx_, k)
+            if why is not None:
+                self._close("abort", "rune " + why)
+                return None
         if r.phase == "walk" and STRIKEGUARD and k < c.k_jump and TWO_PLAY:
             # SP12a: the other one's danger reaches the strike's path during the walk: the planner decides
             tx_ = cx + r.face * min(max(x, (r.stand or c.stand)[0]), (r.stand or c.stand)[1])
@@ -1020,6 +1038,32 @@ class SlamPlay:
                 if _rb.occupied(bk, xs, ys, ks - k0, SG_BOMB_M, own).any():
                     return "other bomb"
         return None
+
+    def _rune_path(self, s: dict, tx: float, k: int) -> str | None:
+        """Task 182 seq 310: why the strike's way (from her x to the stand point tx at the walk, then the jump of RG_H10 from K_JUMP) meets a placed
+        rune on the rune's own lit frames, or None: every big circle (rune_life.RuneCircles, its Clapper's own last jump cast included) and
+        every small rune of the forecast (self._bombs). k: the antic frame of this tick's mask. Its time matters: a circle that burns out before she
+        gets there blocks nothing."""
+        import numpy as np
+        rows = self._life.rows()
+        bk = self._bombs
+        if bk is not None and len(bk):
+            rows = np.concatenate([rows, np.asarray(bk, np.float64).reshape(-1, 6)]) if len(rows) else np.asarray(bk, np.float64).reshape(-1, 6)
+        if not len(rows):
+            return None
+        c = self.cfg
+        h = s.get("hero") or {}
+        hx0 = hero_x(s)
+        vx = float((h.get("vel") or [0.0, 0.0])[0])
+        n = int(min(float(rows[:, 5].max()), _rl.HORIZON)) + 2
+        j = np.arange(n + 1)
+        x_mask = hx0 + vx * SEND_AHEAD / 60.0
+        d = tx - x_mask
+        xs = np.where(j < SEND_AHEAD, hx0 + vx * j / 60.0, x_mask + np.sign(d) * np.minimum(abs(d), WALK_U * (j - SEND_AHEAD)))
+        kk = k - SEND_AHEAD + j
+        tab = np.asarray(RG_H10, np.float64)
+        bottom = np.where(kk < c.k_jump, 0.0, tab[np.minimum(kk // 2, len(tab) - 1).astype(np.int64)])
+        return _rl.path_exposed(xs, bottom, rows)
 
     def _sg_log(self, r: Run, k: int, why: str, what: str) -> None:
         if what == "decline" and self.sg and self.sg[-1][0] == r.iid and self.sg[-1][1] == r.fa and                 self.sg[-1][4] == "decline":
@@ -1322,16 +1366,11 @@ class SlamPlay:
         """fp4 (162ca26): a big rune circle (lit, or its object still to burst: not seen lit then unlit, younger than
         1.6 s) over the Clawline's x span (her x to the stop 2.1 u short of S's front) - the other one Idle at the
         start, its circle burst in her lock (k 21)."""
-        from ssbot.combat import cast_stab as _cst
         d = 1.0 if cx > hx else -1.0
         x_stop = cx - d * (_cs.BODY_FRONT + 2.1 + _cs.HALF_W)
         lo, hi = min(hx, x_stop) - 0.5, max(hx, x_stop) + 0.5
-        for a, b, ciid, lit in _cst.rune_spans(s):
-            c = self._rg_circ.get(ciid)
-            pending = lit or (c is not None and not c["burst"] and t - c["t0"] < 1.6)
-            if pending and a < hi and b > lo:
-                return True
-        return False
+        self._life.update(self._f, s, t)
+        return any(a < hi and b > lo for a, b in self._life.spans())
 
     @staticmethod
     def _cs_s_hit(s: dict, r: Run) -> bool:

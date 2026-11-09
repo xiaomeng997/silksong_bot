@@ -2,7 +2,7 @@
 time after its burst and comes back unlit for the next cast: that circle is a new one, at a new place or the same."""
 import pytest
 
-from ssbot.combat import cast_stab as CS, push_cast as PC, rune_lowhop as LH
+from ssbot.combat import cast_stab as CS, push_cast as PC, rune_life as RL, rune_lowhop as LH
 from tests.test_sp9 import two_state
 
 R = 7.186814308166504
@@ -74,8 +74,8 @@ def test_the_new_life_has_its_own_clock():
     h = low()
     f = burn(h, 30.) + 40
     h.observe(f, st(f, rune(30.)))
-    assert centres(h._rune_threats(f + CS.RUNE_LIVE_F - 1, st(f + CS.RUNE_LIVE_F - 1, rune(30.)))) == [30.]
-    assert h._rune_threats(f + CS.RUNE_LIVE_F, st(f + CS.RUNE_LIVE_F, rune(30.))) == []
+    assert centres(h._rune_threats(f + RL.PENDING_F - 1, st(f + RL.PENDING_F - 1, rune(30.)))) == [30.]
+    assert h._rune_threats(f + RL.PENDING_F, st(f + RL.PENDING_F, rune(30.))) == []
 
 
 def test_the_new_life_burns_and_is_spent_again():
@@ -127,10 +127,12 @@ def test_lit_in_place_after_its_burst_is_a_threat_while_lit():
 def test_never_lit_and_timed_out_stays_out_until_it_leaves():
     h = low()
     h.observe(100, st(100, rune(30.)))
-    assert h._rune_threats(100 + CS.RUNE_LIVE_F, st(100 + CS.RUNE_LIVE_F, rune(30.))) == []
-    f = 101 + CS.RUNE_LIVE_F
+    assert h._rune_threats(100 + RL.PENDING_F, st(100 + RL.PENDING_F, rune(30.))) == []
+    f = 101 + RL.PENDING_F
     h.observe(f, st(f))
-    assert centres(h._rune_threats(f + 1, st(f + 1, rune(30.)))) == [30.]
+    h.observe(f + 5, st(f + 5))
+    assert h._rune_threats(f + 5, st(f + 5, rune(30.))) == []                # (no new look at the same frame)
+    assert centres(h._rune_threats(f + 6, st(f + 6, rune(30.)))) == [30.]    # listed again after ABSENT_F frames: a new circle
 
 
 def test_two_looks_in_one_frame_agree():
@@ -244,14 +246,15 @@ def test_a_new_circle_does_not_cut_a_committed_hop(monkeypatch):
     assert h.run is not None
 
 
-def test_a_new_circle_does_not_end_a_running_stance():
+def test_a_new_circle_over_her_stance_ends_a_running_stance():
+    # (Task 182 seq 310 turned this round: the run's own check every tick, its critical window excepted: test_a_new_circle_does_not_cut_a_committed_hop)
     h = low()
     assert h.step(1000, scene(1000, 1), True, t_game=1000 / 60.) == LH.M_L
     x = 35.1
     f = 1001
     s = scene(f, 1, [rune(x)], tin=1 / 60.)
     h.observe(f, s)
-    assert h.step(f, s, True, t_game=f / 60.) is not None and h.run is not None and h.run.phase == "stance"
+    assert h.step(f, s, True, t_game=f / 60.) is None and h.run is None and h.done[-1].why == "rune"
 
 
 # ---- the five recorded starts of the 50 bouts of 7418c1c5 (numbers from the recordings; the positions of the earlier lives) ----

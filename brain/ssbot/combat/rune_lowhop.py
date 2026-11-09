@@ -65,6 +65,7 @@ import numpy as np
 
 from ssbot.combat import cast_stab as _cs
 from ssbot.combat import rune_bombs as _rb
+from ssbot.combat import rune_life as _rl
 from ssbot.combat import slam_play as _sp
 
 
@@ -104,7 +105,6 @@ FLOOR = 3.0
 HALF_W = 0.25              # her box's half width
 HALF_H = 1.0395            # her box's half height (2.079 u)
 R = _rb.R
-RUNE_MOVED_U = 0.5         # u: a big rune circle object this far from where it was has been placed anew
 SLASH_X = _sp.SLASH_X      # the side slash's x reach in front of her box centre (0.19 .. 3.12)
 # the Wanderer side slash's lower edge (knowledge/1.0.30000/attacks/wanderer.json "normal", the higher of the two
 # slashes), x in front of her box centre -> y from her box centre
@@ -443,7 +443,7 @@ class RuneLowHop:
         self._seen: set = set()
         self.n_cast = 0
         self.why_not: dict = {}
-        self._runes: dict = {}
+        self._life = _rl.RuneCircles()     # the rune circles' lives (shared with the other scripts by the policy)
         self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the casts not started for it
         self.b2 = BOMBS2 and two           # SP13b: both casters' bombs (forecast) in the plan
         from ssbot.combat import push_cast as _pc
@@ -460,7 +460,7 @@ class RuneLowHop:
         self._seen = set()
         self.n_cast = 0
         self.why_not = {}
-        self._runes = {}
+        self._life = _rl.RuneCircles()
         self.guard_f = []
 
     # ---- bookkeeping ----
@@ -470,27 +470,10 @@ class RuneLowHop:
         self._rune_threats(f, s)
 
     def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
-        """The x spans of the jump cast's rune circles lit now or still to come. A pooled circle object is one circle
-        while it stays in the entity list at one place: some time after its burst it leaves the list and comes back
-        unlit for the next cast, at the same place or not (Task 182 seq 304; 50 bouts of 7418c1c5: 53 reuses, each
-        absent 36 frames or more, none moved in place), so its memory goes with it. Still there, unlit, after its
-        burst: spent. Before this, one burst hid every later circle of the object from _rune_over."""
-        spans = _cs.rune_spans(s)
-        if s.get("ents"):                                 # (a STATE without entities says nothing about them)
-            here = {iid for _, _, iid, _ in spans}
-            self._runes = {iid: r for iid, r in self._runes.items() if iid in here}
-        out = []
-        for lo, hi, iid, lit in spans:
-            cx = 0.5 * (lo + hi)
-            r = self._runes.get(iid)
-            if r is None or abs(r["cx"] - cx) > RUNE_MOVED_U:
-                r = self._runes[iid] = {"first": f, "lit": False, "cx": cx}
-            if lit:
-                r["lit"] = True
-                out.append((lo, hi))
-            elif not r["lit"] and f - r["first"] < _cs.RUNE_LIVE_F:
-                out.append((lo, hi))
-        return out
+        """The x spans of the jump cast's rune circles lit now or still to come (rune_life.RuneCircles: one record per generation
+        of an object, Task 182 seq 310)."""
+        self._life.update(f, s)
+        return self._life.spans()
 
     def active(self) -> bool:
         return self.run is not None and self.run.phase in ("stance", "hop", "over")
@@ -641,6 +624,10 @@ class RuneLowHop:
                 if guard is not None and e is not None and self._guarded(s, e, r.face, guard):
                     self._close("abort", "guard")
                     return None
+        if r is not None and e is not None and not self.critical() and self._rune_over(f, s, float(e["pos"][0]), r.face):
+            # Task 182 seq 310: the circle that came after the start (her start's own gate reads the same record)
+            self._close("abort", "rune")
+            return None
         if r is None:
             if e is None or st not in (CAST_ST if self.b2 else ("Spell Antic",)):
                 return None

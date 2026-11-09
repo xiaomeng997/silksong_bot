@@ -104,6 +104,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 
 from ssbot.combat import cast_stab as _cs
+from ssbot.combat import rune_life as _rl
 from ssbot.combat import rune_pogo as _rp
 from ssbot.combat import slam_play as _sp
 
@@ -935,7 +936,7 @@ class TwoPlay:
         self._toward = 0
         self.jumps: dict = {}            # TWO_SPACE: iid -> {"x0", "face", "fam", "aim_hx", "land"}
         self.space_n: Counter = Counter()
-        self._runes: dict = {}
+        self._life = _rl.RuneCircles()   # the rune circles' lives (shared with the other scripts by the policy)
         # SP9b: the escape run (F's jump at the wall) and the finished ones
         self.ecfg = _esc_cfg() if ESC else EscCfg()
         self.rt = _rp.RunePogo() if RUNETIER else None    # SP11a: the pogo tier's controller
@@ -996,15 +997,8 @@ class TwoPlay:
     # ---- helpers ----
 
     def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
-        out = []
-        for lo, hi, iid, lit in _cs.rune_spans(s):
-            r = self._runes.setdefault(iid, {"first": f, "lit": False})
-            if lit:
-                r["lit"] = True
-                out.append((lo, hi))
-            elif not r["lit"] and f - r["first"] < _cs.RUNE_LIVE_F:
-                out.append((lo, hi))
-        return out
+        self._life.update(f, s)
+        return self._life.spans()
 
     def observe(self, f: int, s: dict, t: float) -> None:
         """Every tick: the Idle entries' bookkeeping (prev), the jump moves' take-off (TWO_SPACE), the rune circles."""
@@ -1261,6 +1255,14 @@ class TwoPlay:
         r.walk += 1
         r.sent.append((f, toward))
         return toward
+
+    def rune_yield(self, f: int) -> None:
+        """Task 182 seq 310: the policy's last check refused this tick's key: a running IdleHit or escape part ends (the opening's
+        walk has nothing to end: the check sees every tick of it)."""
+        if self.last_part == "idle" and self.idle is not None:
+            self._idle_close("rune exit")
+        elif self.last_part in ("esc", "rt") and self.esc is not None:
+            self._esc_close(f, "rune exit")
 
     def _idle_close(self, why: str) -> None:
         r = self.idle

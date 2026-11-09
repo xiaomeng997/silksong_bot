@@ -148,6 +148,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         self._proposal_started=None;self._receipt_counts=Counter();self._last_no_candidate=None
         self._hook_start=None;self._failed_hook_moves=set()
         self._failure_exposures=[];self._jump_start=None;self.policy_gate_reason=None
+        self.rune_rows=None    # Task 182 seq 310: this tick's rune rows from the policy (rune_life)
         self._vetoed_preparation=None
         self._fixed_hook_mode=self.arm=="B" and self.profile.fixed_hook
         self.runner.anchor.fixed_hook_enabled=self._fixed_hook_mode
@@ -736,9 +737,29 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
                 offer=self._propose(planner,ws,start,hold,prefix,forecast,prefs,ctx)
             if cache.hits or cache.misses or cache.uncacheable:
                 self._note("b2_dilation_cache",frame=self.dispatch.frame,**cache.stats())
+            offer=self._rune_gate(offer)
             if offer is not None:offer.proposal_ms=(time.perf_counter()-self._proposal_started)*1000.
             return offer
         finally:self._proposal_started=None
+
+    def _rune_gate(self,offer):
+        """Task 182 seq 310: the last check on this tick's chain key: after it she still has a way clear of every lit-or-to-come rune, or
+        had none anyway (rune_life.exit_veto over the tick's own model). Refused: an active Run ends through B2 recovery (its failure
+        responsibility stays), the planner's own row goes out this tick; a fresh offer is dropped. A hook's locked press has its own
+        whole-path checks (entry_scan) and is not looked at here."""
+        rows=getattr(self,"rune_rows",None)
+        if offer is None or offer.stage=="recovery" or rows is None or self._context is None:return offer
+        rows=rows() if callable(rows) else rows                 # (the policy builds them once per tick when asked)
+        if not len(rows):return offer
+        tick,sim,_,_=self._context
+        f=tick[0]
+        from .rune_life import exit_veto
+        veto,info=exit_veto(sim,int(offer.mask),rows)
+        if not veto:return offer
+        self._note("b2_rune_exit_gate",frame=f,stage=offer.stage,mask=int(offer.mask),run=None if self.runner.run is None else self.runner.run.chain,**(info or {}))
+        if self.commitment is not None or self.runner.run is not None:
+            self._recover("rune exit gate: no way clear after this key",f)
+        return self._recovery_offer()
 
     def _propose(self,planner,ws,start,hold,prefix,forecast,prefs,ctx):
         """One actual tick; active commitment bypasses ordinary-tail competition."""

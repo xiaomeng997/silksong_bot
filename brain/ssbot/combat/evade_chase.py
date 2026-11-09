@@ -59,6 +59,7 @@ import os
 from dataclasses import dataclass, field
 
 from ssbot.combat import cast_stab as _cs
+from ssbot.combat import rune_life as _rl
 from ssbot.combat import slam_play as _sp
 
 
@@ -205,7 +206,7 @@ class EvadeChase:
         self._seen: set = set()
         self.n_evade = 0
         self.why_not: dict = {}
-        self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
+        self._life = _rl.RuneCircles()     # the rune circles' lives (shared with the other scripts by the policy)
         self.guard_f: list = []            # SSBOT_FORUM_TWO_GUARD: frames of the chases not started for it
         self._over_away: int | None = None # this tick's 0 is the brake with her falling on its body: the key away from it
 
@@ -215,7 +216,7 @@ class EvadeChase:
         self._seen = set()
         self.n_evade = 0
         self.why_not = {}
-        self._runes = {}
+        self._life = _rl.RuneCircles()
         self.guard_f = []
         self._over_away = None
 
@@ -224,17 +225,9 @@ class EvadeChase:
         self._rune_threats(f, s)
 
     def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
-        """The x spans of the jump cast rune circles lit now or still to come (cast_stab's rule: present, not yet
-        seen lit, first seen less than RUNE_LIVE_F frames ago)."""
-        out = []
-        for lo, hi, iid, lit in _cs.rune_spans(s):
-            r = self._runes.setdefault(iid, {"first": f, "lit": False})
-            if lit:
-                r["lit"] = True
-                out.append((lo, hi))
-            elif not r["lit"] and f - r["first"] < _cs.RUNE_LIVE_F:
-                out.append((lo, hi))
-        return out
+        """The x spans of the jump cast rune circles lit now or still to come (rune_life.RuneCircles)."""
+        self._life.update(f, s)
+        return self._life.spans()
 
     def _rune_in_way(self, f: int, s: dict, e: dict, face: int) -> bool:
         """A threat span over her way to it: from her x to min_u in front of its centre."""

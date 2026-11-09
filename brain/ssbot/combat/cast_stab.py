@@ -71,6 +71,7 @@ import os
 from dataclasses import dataclass, field
 
 from ssbot.combat import jump_behind as _jb
+from ssbot.combat import rune_life as _rl
 from ssbot.combat import slam_play as _sp
 
 
@@ -144,7 +145,6 @@ def rune_spans(s: dict) -> list[tuple[float, float, object, bool]]:
 
 
 FLOOR_BOX = 3.015            # the floor's y under the boxes (her box bottom standing; its body box's)
-RUNE_LIVE_F = 100            # a circle not seen lit yet is still to come for this many frames after it is first seen
 STOP_WAIT_CLIPS = ("Sprint", "Skid", "Wanderer", "Land to Sprint")   # T2 waits these out (and "Dash" itself)
 
 
@@ -383,7 +383,7 @@ class CastStab:
         self._jump_kind: dict = {}         # SP8b JB_CORNER: Clapper iid -> the antic kind seen, until its take-off
         self.why_not: dict = {}
         self._pred: dict = {}
-        self._runes: dict = {}             # rune circle iid -> {"first": frame first seen, "lit": seen lit}
+        self._life = _rl.RuneCircles()     # the rune circles' lives (shared with the other scripts by the policy)
 
     def reset(self) -> None:
         self.run = None
@@ -393,7 +393,7 @@ class CastStab:
         self.n_jantic = 0
         self._jump_kind = {}
         self.why_not = {}
-        self._runes = {}
+        self._life = _rl.RuneCircles()
 
     def observe(self, f: int, s: dict) -> None:
         """Every tick (the policy calls it while the slam playbook runs too): the rune circles' first frame and lit
@@ -401,17 +401,10 @@ class CastStab:
         self._rune_threats(f, s)
 
     def _rune_threats(self, f: int, s: dict) -> list[tuple[float, float]]:
-        """The x spans of the rune circles that are lit now or still to come (present, not yet seen lit, and first
-        seen less than RUNE_LIVE_F frames ago); a burst one stays as an unlit object and is no threat."""
-        out = []
-        for lo, hi, iid, lit in rune_spans(s):
-            r = self._runes.setdefault(iid, {"first": f, "lit": False})
-            if lit:
-                r["lit"] = True
-                out.append((lo, hi))
-            elif not r["lit"] and f - r["first"] < RUNE_LIVE_F:
-                out.append((lo, hi))
-        return out
+        """The x spans of the rune circles that are lit now or still to come (rune_life.RuneCircles: one record per generation of
+        an object); a burst one stays as an unlit object and is no threat."""
+        self._life.update(f, s)
+        return self._life.spans()
 
     def stats(self) -> dict:
         from collections import Counter
