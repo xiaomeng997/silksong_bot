@@ -911,6 +911,28 @@ def committed_fine_share(f, box: np.ndarray, inv: np.ndarray, rows: np.ndarray, 
     return occ.mean(axis=1)
 
 
+def visible_slam_units(f) -> list:
+    """Task 182 seq 309: the tracked Clappers with a CC_SLAM move instance in this tick's v2 forecast (Slam Antic ..
+    Slam Recover: the hammer is visible from its wind-up); empty without a v2 RangeSupport with its tracker."""
+    rs = getattr(f, "rs", None)
+    now = getattr(getattr(rs, "trk", None), "now", None) or {}
+    return [iid for iid, x in sorted(now.items()) if x[0] == forum_v2.CLAPPER
+            and getattr(x[2], "fam", None) == "CC_SLAM"]
+
+
+def slam_range_share(f, units, box: np.ndarray, inv: np.ndarray, rows: np.ndarray, fr: np.ndarray,
+                     tk: np.ndarray) -> np.ndarray:
+    """[len(rows)] FORCED_RISK's committed share while a Clapper's CC_SLAM is visible (Task 182 seq 309): the share of
+    the frames fr each row's nominal box centre spends in those units' v2 range support (f.occupied_only: the raster
+    the safe test reads, the strike included), invulnerable frames clear. committed_fine_share reads the old
+    forecast's fine placements there: the hammer's own template ends before the strike (~0.85 s after the Slam Antic
+    entry), while an idle Clapper's next attack and a cast already over count as committed; it sent the hero up and
+    towards the hammer."""
+    b = box[rows][:, fr]
+    return (f.occupied_only(0.5 * (b[..., 0] + b[..., 2]), 0.5 * (b[..., 1] + b[..., 3]), tk[fr], units)
+            & ~inv[rows][:, fr]).mean(axis=1)
+
+
 def seen_polys(ws) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The damage polygons the hero could meet now: every entity's active damage boxes (oracle: enabled colliders
     able to deal damage; vision: the detected boxes), with the entity's velocity. Returns (verts [m, 2], starts
@@ -4895,6 +4917,7 @@ class ForumPlanner(Planner):
         if prefs.want_bind and ctx.want_bind:
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
+        forced_slam = None                    # Task 182 seq 309: FORCED_RISK under a visible hammer (last_info, the decision log)
         Pc = np.zeros(N)
         t_c = np.full(N, T1, np.int64)
         sk_n = np.zeros(N, np.int64)          # the "seen" keys (0 on every row otherwise: the order is unchanged)
@@ -4923,6 +4946,17 @@ class ForumPlanner(Planner):
         Pf = np.zeros(N)
         eml_k = np.zeros(N)                   # track A "eml": FORCED_RISK's tie-break after the first contacts
         if forced and sel.any():
+            slam_units = visible_slam_units(f)
+            if slam_units:
+                forced_slam = {"units": len(slam_units), "dropped": 0}
+                if float(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0]) != M_GLIDE:
+                    # Task 182 seq 309 (the person's priority via Sol seq 309): no new umbrella in front of a visible hammer while
+                    # a row without one is allowed: live 18 of 42 hammer hits came in the umbrella, 16 of those opened by a forced
+                    # row (its antic and inflate lock the hero while the slam comes). No such row: the forced rows stay as they are
+                    no_new_glide = sel & ~(r1.mode[:, P + 1:] == M_GLIDE).any(axis=1)
+                    if no_new_glide.any():
+                        forced_slam["dropped"] = int(sel.sum() - no_new_glide.sum())
+                        sel = no_new_glide
             cand = np.flatnonzero(sel)
             if fcfg.forced_rank in ("seen", "seen_cf"):
                 inv1 = (r1.flags & F_INVULN) != 0
@@ -4972,7 +5006,8 @@ class ForumPlanner(Planner):
                     sk_f[cand[hitp]] = np.minimum(sk_f[cand[hitp]], pk[hitp])
                     self.audit.pin_rows += int(hitp.sum())
                 if fcfg.forced_rank == "seen_cf":
-                    sk_c[cand] = committed_fine_share(f, r1.box, inv1, cand, fr, tk)
+                    sk_c[cand] = (slam_range_share(f, slam_units, r1.box, inv1, cand, fr, tk) if slam_units
+                                  else committed_fine_share(f, r1.box, inv1, cand, fr, tk))
             if o_cm is not None:
                 # the nominal box centre on stage 1's frames (its invulnerable ones skipped) against the committed
                 # support (P_cm) and the current attacks' fine placements (states with a known entry: P_f): stage
@@ -5720,6 +5755,8 @@ class ForumPlanner(Planner):
                           "seen": int(sk_n[res.idx]) if res.idx >= 0 else None,
                           "seen_cf": round(float(sk_c[res.idx]), 3) if res.idx >= 0 else None,
                           "esc": esc_info or None}
+        if forced_slam is not None:
+            self.last_info["forced_slam"] = forced_slam
         if stay_info is not None:
             # Task 182 seq 280 - 282: over_stay's promotion this tick (orig: the choice it started from; skip: why it did not
             # run; rows / safe: the scan's candidates and those safe on both branches; cands / checked: the candidates ahead
