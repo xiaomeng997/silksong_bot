@@ -618,6 +618,7 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
     close("policy_log",getattr(policy,"flush_log",None))
     close("policy_keys",getattr(policy,"flush_keys",None))
     close("chain_journal",getattr(getattr(policy,"chain_native",None),"flush",None))
+    close("b2_event_journal",getattr(getattr(getattr(policy,"chain_native",None),"budget",None),"close_journal",None))
     close("recorder",None if recorder is None else recorder.close)
     close("attempts",None if out is None else out.close)
     if link is not None and a.time_scale!=1. and not link.closed:
@@ -844,6 +845,9 @@ def worker(a: argparse.Namespace) -> int:
             if field_stop is not None:d["scene_field_stop"]=field_stop
             if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
                 from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
+                if b2_budget is not None:
+                    # the bout's last action is past: its journalled HP records into the ledger, and a failure latches a stop
+                    b2_budget.finish_bout(episode=k,arm=os.environ["SSBOT_FORUM_CHAIN_ARM"])
                 b2_stop_details=_resolve_b2_stop(chain,outcome=rec.outcome,episode_reason=rec.reason)
                 d["worker_execution"]=worker_context
                 if b2_stop_details is not None:

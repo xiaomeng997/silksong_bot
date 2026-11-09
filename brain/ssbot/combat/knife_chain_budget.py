@@ -3,6 +3,14 @@
 This is experiment accounting, never a controller. Atomic updates retain failures
 and latch a stop before the policy can request another combat ACTION. A corrupt /
 busy ledger is an integrity failure, not permission to reset the experiment.
+
+Task 182 seq 305/306. Under episode-remaining-2hp-v1 a non-fatal HP loss cannot latch a stop, and the atomic write
+with its fsync stopped a batch from inside a combat tick (1.46 s; offline, small-file traffic on the volume puts
+fsync at 1.2 s p50, and creating or renaming a file can stall too). That one kind of record goes to a per-worker
+append-only journal, one line through a file opened before the fight: it reaches the OS before the next action
+and the ledger, by the usual atomic write and fsync, once the fighting has stopped (end of the bout, before the
+next one, every stop path, the worker's close). A power loss or OS crash can lose the running bout's records; a
+process crash cannot. Every other record, every stop and every attempt reservation stays synchronous.
 """
 from __future__ import annotations
 import json
@@ -19,6 +27,38 @@ STRICT_POLICY = "strict-2hp-v1"
 LOW_HP_POLICY = "episode-remaining-2hp-v1"
 # Task 179 #310: one watched observational bout (ssbot.train.observe_bout): no HP stop, fatal faults still stop.
 OBSERVE_POLICY = "observe-one-bout-v1"
+JOURNAL_FIELDS = {"episode","frame","arm","hp_loss","chain_related","tail","fatal","worker","id"}
+
+
+def event_id(worker,event):
+    return f"{worker}:{event['episode']}:{event['frame']}:{event['arm']}:{event.get('fatal')}"
+
+
+def journal_tag(worker):
+    return hashlib.sha256(worker.encode("utf-8")).hexdigest()[:16]
+
+
+def journal_header(batch,revision,worker,policy):
+    return {"schema":1,"kind":"event_journal","batch":batch,"revision":revision,"worker":worker,"policy":policy}
+
+
+def _valid_journal_event(e,worker):
+    return (isinstance(e,dict) and set(e)==JOURNAL_FIELDS and e["worker"]==worker and e["fatal"] is None
+            and type(e["episode"]) is int and type(e["frame"]) is int and e["arm"] in ("A","B")
+            and type(e["hp_loss"]) is int and e["hp_loss"]>0 and type(e["chain_related"]) is bool
+            and type(e["tail"]) is bool and e["id"]==event_id(worker,e))
+
+
+def parse_journal(raw,header):
+    """(the complete records, is the last line torn). A foreign header or a damaged complete line raises: a guess at which
+    records count would be silent loss. The merge and the audit read a journal through this one check."""
+    end=raw.rfind(b"\n")+1
+    try:rows=[json.loads(x) for x in raw[:end].decode("utf-8").split("\n")[:-1]]
+    except ValueError as exc:raise LearningStop("B2 event journal corrupt; preserve evidence") from exc
+    if not rows or rows[0]!=header:raise LearningStop("B2 event journal header differs; preserve evidence")
+    for e in rows[1:]:
+        if not _valid_journal_event(e,header["worker"]):raise LearningStop("B2 event journal record invalid; preserve evidence")
+    return rows[1:],end!=len(raw)
 
 
 class LearningBudget:
@@ -28,8 +68,10 @@ class LearningBudget:
         self.path=Path(path);self.batch=batch;self.revision=revision;self.worker=worker;self.policy=policy
         self.path.parent.mkdir(parents=True,exist_ok=True)
         self.state=None
+        self._journal_fd=None;self._journal_path=None;self._journal_pending=[]
         self._update(None)
         self.check()
+        if policy==LOW_HP_POLICY:self._open_journal()
 
     @property
     def remaining_hp_quit(self):
@@ -52,12 +94,14 @@ class LearningBudget:
                     raise LearningStop("B2 budget belongs to another batch/condition revision; use a NEW batch")
             else:data={"schema":1,"policy":self.policy,"batch":self.batch,"revision":self.revision,
                        "b_fight_hp":0,"tail_hp":0,"events":[],"attempts":[],"execution":None,"stop":None}
-            if event is not None and data["stop"] is None:
+            if event is not None and event.get("kind")=="journal_merge":
+                self._merge_events(data,event["events"])  # facts from before any stop: they count even once one is latched
+            elif event is not None and data["stop"] is None:
                 if event.get("kind")=="execution":self._bind_execution(data,event["conditions"])
                 elif event.get("kind")=="attempt":self._reserve_attempt(data,event)
                 else:
                     event={**event,"worker":self.worker}
-                    event["id"]=f"{self.worker}:{event['episode']}:{event['frame']}:{event['arm']}:{event.get('fatal')}"
+                    event["id"]=self._event_id(event)
                     if not any(x["id"]==event["id"] for x in data["events"]):
                         data["events"].append(event)
                         if event["tail"]:data["tail_hp"]+=event["hp_loss"]
@@ -78,10 +122,107 @@ class LearningBudget:
                 with marker.open("x",encoding="utf-8") as mf:
                     json.dump({"batch":self.batch,"revision":self.revision},mf)
                     mf.flush();os.fsync(mf.fileno())
-            self.state=data
+            self.state=self._with_journal(data)
             return data
         finally:
             os.close(fd);lock.unlink()
+
+    def _event_id(self,event):
+        return event_id(self.worker,event)
+
+    @staticmethod
+    def _merge_events(data,events):
+        """The stable ids make this idempotent: a ledger already written is not counted twice."""
+        seen={x["id"] for x in data["events"]}
+        for e in events:
+            if e["id"] in seen:continue
+            seen.add(e["id"]);data["events"].append(e)
+            if e["tail"]:data["tail_hp"]+=e["hp_loss"]
+            elif e["arm"]=="B":data["b_fight_hp"]+=e["hp_loss"]
+
+    def _with_journal(self,data):
+        """The ledger as the run knows it: the running bout's journalled records are in the state, not yet in the file."""
+        if not self._journal_pending:return data
+        view={**data,"events":list(data["events"])}
+        self._merge_events(view,self._journal_pending)
+        return view
+
+    def _journal_header(self):
+        return journal_header(self.batch,self.revision,self.worker,self.policy)
+
+    def _open_journal(self):
+        """Before the fight, one file per worker (one appender each; concurrent appends are not assumed atomic). Only an
+        account with no attempt of this worker may create it: a missing or damaged journal is never made anew."""
+        self._journal_path=self.path.with_name(f"{self.path.name}.events.{journal_tag(self.worker)}")
+        flags=os.O_WRONLY|os.O_APPEND|getattr(os,"O_BINARY",0)
+        if self._journal_path.exists():
+            rows,torn=self._read_journal()
+            if torn:raise LearningStop("B2 event journal has a torn last line; preserve evidence and stop")
+            known={x["id"] for x in self.state["events"]}
+            self._journal_pending=[e for e in rows if e["id"] not in known]
+            self.state=self._with_journal(self.state)
+            self._journal_fd=os.open(self._journal_path,flags)
+            return
+        if any(a.get("worker")==self.worker for a in self.state.get("attempts",[])):
+            raise LearningStop("B2 event journal missing for an opened account; preserve evidence and stop")
+        line=(json.dumps(self._journal_header(),ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n").encode("utf-8")
+        fd=os.open(self._journal_path,flags|os.O_CREAT|os.O_EXCL)
+        try:
+            if os.write(fd,line)!=len(line):raise LearningStop("B2 event journal header short write; preserve evidence")
+            os.fsync(fd)
+        except BaseException:
+            os.close(fd);raise
+        self._journal_fd=fd
+
+    def _read_journal(self):
+        try:raw=self._journal_path.read_bytes()
+        except OSError as exc:raise LearningStop("B2 event journal missing/unreadable; preserve evidence") from exc
+        return parse_journal(raw,self._journal_header())
+
+    def _append(self,event):
+        """One non-fatal HP record, on the combat tick. It counts only once the whole line is written."""
+        record={**event,"worker":self.worker}
+        record["id"]=self._event_id(record)
+        line=(json.dumps(record,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n").encode("utf-8")
+        try:written=os.write(self._journal_fd,line)
+        except OSError as exc:raise LearningStop("B2 event journal write failed; preserve evidence") from exc
+        if written!=len(line):raise LearningStop(f"B2 event journal short write ({written} of {len(line)} bytes); preserve evidence")
+        self._journal_pending.append(record)
+
+    def merge_journal(self):
+        """The fighting has stopped: the journal into the ledger (atomic, fsync). The journal is never rewritten, so a crash
+        anywhere here leaves records the ids make safe to merge again. A torn last line was never counted: the complete
+        records still go in, then the batch stops."""
+        if self._journal_path is None or not self._journal_pending:return 0
+        rows,torn=self._read_journal()
+        held={e["id"] for e in rows}
+        if any(e["id"] not in held for e in self._journal_pending):raise LearningStop("B2 event journal lost a record; preserve evidence")
+        self._update({"kind":"journal_merge","events":rows})
+        merged=len(self._journal_pending);self._journal_pending=[]
+        if torn:raise LearningStop("B2 event journal has a torn last line; preserve evidence and stop")
+        return merged
+
+    def finish_bout(self,*,episode,arm):
+        """After a bout's last action. A journal that cannot be merged stops the batch here: the stop latches in the
+        ledger and the file stays as evidence."""
+        try:return self.merge_journal()
+        except LearningStop as exc:
+            self._update(dict(episode=int(episode),frame=0,arm=arm,hp_loss=0,chain_related=False,tail=False,fatal=str(exc)))
+            return None
+
+    def close_journal(self):
+        """The worker's end, on every exit path: what is still journalled goes in; the file stays for the audit."""
+        if self._journal_fd is None:return
+        try:self.merge_journal()
+        finally:
+            os.close(self._journal_fd);self._journal_fd=None
+
+    def _before_stop(self,event):
+        """A stop is about to latch and the ledger takes no event after one: the journalled records go first. A journal
+        that cannot be read does not hold the stop up: the reason joins it, the file stays as evidence."""
+        try:self.merge_journal()
+        except LearningStop as exc:event={**event,"fatal":f"{event['fatal']}; {exc}"}
+        return event
 
     def _bind_execution(self,data,conditions):
         canonical=json.loads(json.dumps(conditions,sort_keys=True,allow_nan=False))
@@ -137,6 +278,7 @@ class LearningBudget:
             raise ValueError("invalid B2 attempt reservation")
         if any(v is not None and (type(v) is not int or v<0) for v in (block,order)):
             raise ValueError("invalid B2 crossover labels")
+        self.merge_journal()
         self._update({"kind":"attempt","episode":episode,"arm":arm,"seed":seed,"policy_episode":policy_episode,
                       "block":block,"order":order})
         self.check()
@@ -160,15 +302,50 @@ class LearningBudget:
         if (data.get("batch")!=self.batch or data.get("revision")!=self.revision or
                 data.get("policy")!=self.policy):
             raise LearningStop("B2 budget identity changed")
-        self.state=data
+        self.state=self._with_journal(data)
         if data["stop"] is not None:raise LearningStop("B2 stopped: "+"; ".join(data["stop"]["reasons"]))
 
     def observe(self,*,episode,frame,arm,hp_loss=0,chain_related=False,tail=False,fatal=None):
         if arm not in {"A","B"} or type(hp_loss) is not int or hp_loss<0:raise ValueError("invalid budget event")
         if hp_loss or fatal:
-            self._update(dict(episode=int(episode),frame=int(frame),arm=arm,hp_loss=hp_loss,
-                              chain_related=bool(chain_related),tail=bool(tail),fatal=fatal))
+            event=dict(episode=int(episode),frame=int(frame),arm=arm,hp_loss=hp_loss,
+                       chain_related=bool(chain_related),tail=bool(tail),fatal=fatal)
+            journal=self._journal_fd is not None
+            if journal and not fatal:
+                try:
+                    self._append(event)
+                    event=None
+                except LearningStop as exc:
+                    event["fatal"]=str(exc)  # the record could not be kept: it goes in with the stop, before another action
+            if event is not None:
+                self._update(self._before_stop(event) if journal else event)
         self.check()
+
+
+def audit_events(path):
+    """Read only, for audits, after any exit: the ledger's account plus every record of its journals it does not have yet,
+    counted like the merge (stable ids; `events` / `b_fight_hp` / `tail_hp`). After a normal exit `unmerged` is empty.
+    Each journal goes through parse_journal against this ledger's batch / revision / policy and its own file name: one
+    that fails is listed under `corrupt` with the reason and none of its records count. `torn` names journals with a torn
+    last line (the complete records count, that line never did). `clean` is false when any journal is torn or corrupt:
+    the totals are then a lower bound, not a closed account. This never touches the ledger, a stop or a slot."""
+    p=Path(path)
+    data=json.loads(p.read_text(encoding="utf-8"))
+    view={"events":list(data["events"]),"b_fight_hp":data["b_fight_hp"],"tail_hp":data["tail_hp"]}
+    known=len(view["events"])
+    torn,corrupt=[],[]
+    for j in sorted(p.parent.glob(p.name+".events.*")):
+        try:
+            raw=j.read_bytes()
+            worker=json.loads(raw.split(b"\n",1)[0])["worker"]
+            if j.name.rsplit(".",1)[1]!=journal_tag(worker):raise LearningStop("B2 event journal file name differs from its worker")
+            rows,is_torn=parse_journal(raw,journal_header(data["batch"],data["revision"],worker,data["policy"]))
+        except (LearningStop,OSError,ValueError,KeyError,TypeError,AttributeError) as exc:
+            corrupt.append({"file":j.name,"reason":str(exc)})
+            continue
+        if is_torn:torn.append(j.name)
+        LearningBudget._merge_events(view,rows)
+    return {**view,"unmerged":view["events"][known:],"torn":torn,"corrupt":corrupt,"clean":not torn and not corrupt,"stop":data["stop"]}
 
 
 def encounter_allowed(encounter):
