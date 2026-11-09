@@ -683,6 +683,9 @@ class _Planned(Tactic):
         if won and ph is not None and ph.go is not None:
             # where the phase must be by a time: the action layer's bounded approach (the ordinary rows stay its fallback)
             out = replace(out, waypoint=sc.plans.waypoint(sc, ph))
+        if won and ph is not None and ph.no_chase:
+            # seq 311: every real key owner keeps to this stage, not only the rows (the chase, the slam script, a new strike of the chain)
+            out = replace(out, press_walker=sc.plans.exec.plan.get("other"))
         return out
 
     def log(self, sc, out):

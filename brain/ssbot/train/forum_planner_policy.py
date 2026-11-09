@@ -1398,7 +1398,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                     bks = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             play = self.slam_play.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)),
-                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=asw_skip,
+                                       t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None,
+                                       skip=self._press_skip(asw_skip, prefs),
                                        sim=sim, guard=gsp, bombs=bks)
             if play is not None and (r.mask is not None or self.pause_owned):
                 self.slam_play.abort("supervisor")
@@ -1500,11 +1501,7 @@ class ForumPlannerPolicy(PlannerPolicy):
                 return int(lat[-1])
             ch = self.evade_chase.step(f, s, ws.hero.contact.v == "GROUND",
                                        bool((s.get("hero") or {}).get("hero_accepting_input", True)), latch=latch_c,
-                                       focus=getattr(prefs, "target", None),
-                                       block=((self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT)
-                                               else None)
-                                              or (self.two.rt_hold_block(f) if (self.two is not None and two_play.RT2)
-                                                  else None)), guard=gsp)
+                                       focus=getattr(prefs, "target", None), block=self._chase_block(f, prefs), guard=gsp)
             if ch is not None and (r.mask is not None or self.pause_owned):
                 self.evade_chase.abort("supervisor")
                 ch = None
@@ -1627,6 +1624,18 @@ class ForumPlannerPolicy(PlannerPolicy):
         self._measure_choice(own, mask, res, prefix=prefix, hold=hold, prefs=prefs,
                              frame=f, origin_frame=fo)
         return int(mask)
+
+    def _chase_block(self, f: int, prefs):
+        """Why no chase of an evade may run this tick (None: it may): the two scripts' own blocks, and L2's press stage (Task 182 seq 311: she goes at the first one, not after the walker)."""
+        return ((self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT) else None)
+                or (self.two.rt_hold_block(f) if (self.two is not None and two_play.RT2) else None)
+                or ("plan press" if getattr(prefs, "press_walker", None) is not None else None))
+
+    @staticmethod
+    def _press_skip(skip, prefs):
+        """The slam script's skip set, with the walker L2's press stage leaves alone (Task 182 seq 311; None: no change)."""
+        walker = getattr(prefs, "press_walker", None)
+        return skip if walker is None else frozenset(skip or ()) | {walker}
 
     def _rune_rows(self) -> np.ndarray:
         """Task 182 seq 310: every placed rune as rows (rune_bombs.frames' layout, frames from this STATE): the big circles (rune_life) and the

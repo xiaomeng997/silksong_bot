@@ -724,6 +724,8 @@ class NativeManualAirChain(NativeChainB2):
                 return None
             tick,sim,_,_=self._context
             return self._waypoint_offer(tick[1],tick[2],sim,forecast,prefs)
+        if getattr(prefs,"press_walker",None) is not None and self.runner.run is None and self.commitment is None and self.post_context is None:
+            return None  # Task 182 seq 311: the press stage asks no new strike or approach of the chain (keys already committed run on above)
         pressure=getattr(prefs,"wall_pressure",None)
         if (self.commitment is None and self.post_context is None and pressure is not None
                 and pressure.target==getattr(prefs,"target",None) and pressure.kind=="side"):

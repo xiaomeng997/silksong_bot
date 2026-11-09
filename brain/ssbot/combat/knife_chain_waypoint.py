@@ -34,8 +34,8 @@ EDGE_TRY = tuple(range(0, 40, 3))    # the key indices tried for a dash edge whe
 @dataclass(frozen=True)
 class WaypointGoal:
     x: float
-    by_f: int               # the frame she should be there by
-    kind: str               # guide / under / retreat
+    by_f: int               # the frame she should be there by (kind press: the frame the press still counts until; no arrival is owed)
+    kind: str               # guide / under / retreat / press
     source: int             # the Clapper whose jump this is about
     plan: tuple             # (instance, generation, phase): which running phase asks; another one hands the Run back
     tol: float = TOL_U
@@ -278,7 +278,13 @@ def next_mask(sim, goal: WaypointGoal, f: int):
             return None, "late"
         return (_key(-d) if _meets(m, still, body) else 0), "wait"
     if a_dash is None or a_dash > by_k:
-        return None, "late"
+        if goal.kind != "press":
+            return None, "late"
+        # Task 182 seq 311: a press owes no arrival, only as far toward the first one as she gets by its aim: the dash when it takes her farther by then
+        i = m.off + max(by_k, 0)
+        if k_dash == 0 and (float(m.xs(row)[0][i]) - float(m.xs(run)[0][i])) * d > 0:
+            return key | K.B_DASH, "dash"
+        return key, "go"
     return (key | K.B_DASH, "dash") if k_dash == 0 else (key, "go")
 
 
@@ -302,7 +308,10 @@ def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = 
     mask = int(mask)
     x0 = float(m.xs(np.zeros((1, 1), np.int64))[0][m.off])
     d = 1 if goal.x > x0 else -1
+    until = np.full(max(1, min(MAX_F, by_k + 1)), mask, np.int64)   # (kind press: the keys it counts on when it does not arrive: this key up to its frame)
     if dash_refused and not mask & K.B_DASH:
+        if goal.kind == "press":
+            return until
         row = np.full(T, mask, np.int64)
         late = _late_at(m, mask, by_k, float(goal.x), goal.tol, d)
         r = _handback(m, row, late, float(goal.x), goal.tol)
@@ -314,14 +323,14 @@ def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = 
         row[0] = mask
         row, k, how = route(m, row, 1, float(goal.x), by_k=by_k, tol=goal.tol)
         if k is None:
-            return None
+            return until if goal.kind == "press" else None
         if how == "dash":
             kd = int(np.argmax((row & K.B_DASH) != 0))
             row = row.copy()
             row[kd:] = row[kd]                  # held from its edge, as next_mask holds it (route()'s own release is a plan's)
     a = _arrival(m.xs(row[None])[0][m.off:], goal.x, d, goal.tol)
     if a is None:
-        return None
+        return until if goal.kind == "press" else None
     r = _handback(m, row, max(int(a), 1), float(goal.x), goal.tol)
     r = max(int(a), 1) if r is None else r
     return np.asarray(row[:r], np.int64)

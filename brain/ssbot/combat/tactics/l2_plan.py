@@ -41,6 +41,9 @@ class Phase:
     go: str | None = None            # the stance is reached by the action layer's bounded approach (guide / under / retreat)
     down_ok: bool = False            # Task 182 seq 280: its target's down slash from the air still counts for the ordinary rows
     #                                  although the stage lists it in no_hit (GoalPrefs.stay_pogo; over_stay)
+    no_chase: bool = False           # Task 182 seq 311: the plan's other body is left alone in this stage: no chase of its evade, no new strike on it
+    #                                  (GoalPrefs.press_walker)
+    adopts_next: bool = False        # Task 182 seq 311: past its replacement boundary, but the plan made as this stage's follow-up (detail followup) takes over at once
 
     def after(self, event: str) -> str | None:
         return next((to for ev, to in self.on if ev == event), None)
@@ -236,7 +239,8 @@ class PlanExecutor:
         values_of(plan) / instance_of(plan): the adapter's facts for THAT plan, read from its own snapshot (a pending plan is
         checked against its own instance and prediction, whatever happened to the active one)."""
         if self.pending is not None and (self.plan is None or self.plan.instance != self.pending.instance
-                                         or (self.phase is not None and self.phase.replaceable)):
+                                         or (self.phase is not None and (self.phase.replaceable
+                                                                         or (self.phase.adopts_next and self.pending.get("followup"))))):
             pending, self.pending = self.pending, None
             if (pending.instance == instance_of(pending) and now <= pending.valid_until
                     and self._violated(pending, values_of(pending)) is None):

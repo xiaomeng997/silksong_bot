@@ -251,6 +251,8 @@ class GoalPrefs(TacticPrefs):
     #                                        as without them, then takes a candidate the credited order ranks ahead of it only when
     #                                        that candidate passes every gate the choice passed (both branches, the escape check,
     #                                        the tail check); else the choice stands. PlanResult.J stays the choice's own J
+    press_walker: int | None = None        # Task 182 seq 311 (the person 11-09): the walker the running press stage leaves alone: the evade chase neither starts nor goes
+    #                                        on, the slam script does not start on it and the chain starts no new strike; L2's own stance and waypoint say where she goes
 
 
 
