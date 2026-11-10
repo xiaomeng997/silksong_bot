@@ -156,6 +156,7 @@ class Request:
     prefix: object
     hold: object
     routes: tuple | None = None   # Task 182 seq 311: the only candidates this request may choose (a press's follow-up); None: all of the scene's
+    other_antic_at: float | None = None   # ... the other one's own aim clock (its antic's start) when it is aiming a jump of its own at such a follow-up
 
 
 class Roller:
@@ -366,7 +367,7 @@ def _stay(c: _Middle):
     def no(reason):
         return Candidate("stay", False, reason, None, 1., tuple(det.items())), None
 
-    if W.family in ATTACK_FAMS:
+    if W.family in ATTACK_FAMS and not _second_aiming(q):
         return no("walker in an attack move")
     if not q.hand.known:
         return no("hand-back unknown")
@@ -389,6 +390,8 @@ def _stay(c: _Middle):
                 return no("the return to the walker not reached in the model")
             det.update(return_s=c.t_of(k_goal) - c.t_to)
             why = _way_back_late(c, row, land)
+            if why is None and _second_aiming(q):
+                why = _second_way_out(c, stand, land, c.t_of(k_goal), det)
             if why is not None:
                 return no(why)
         return Candidate("stay", True, None, "return", 1., tuple(det.items())), dict(aim_x=None, guide=None, depart=None)
@@ -427,6 +430,44 @@ def _stay(c: _Middle):
         return no(why)
     return Candidate("stay", True, None, "aim_wait" if guide is not None else "aim_attack", 1.,
                      tuple(det.items())), dict(aim_x=aim_x, guide=guide, depart=depart, arrive=arrive)
+
+
+def _second_aiming(q: Request) -> bool:
+    """A press's follow-up with the second one already aiming a jump of its own (still on the ground)."""
+    return q.routes is not None and q.other.family in JUMPS and q.other.state in ANTIC
+
+
+def _second_way_out(c: _Middle, stand: float, land1: float, at_stand_t: float, det: dict) -> str | None:
+    """The middle with the second one aiming its own jump (seq 311, Sol's review of #374): its own clock and its own landing, never a waiting walker. Where she stands when its aim
+    locks decides where it lands, so the stance counts only if a way out of what that landing covers is still open afterwards, at a run: toward the first one's side (past all its
+    coverage; the first one's rune, while it is still to burst there, is crossed only after that) or behind its landing before its body comes down. None: there is one; else why not."""
+    q, f = c.q, c.f
+    W = q.other
+    if q.other_antic_at is None:
+        return "the second one's aim clock is unknown"
+    fw, v = -f, JB.CFG["walk_v"] * 60.
+    half = max(q.left, q.right)
+    lock2 = q.other_antic_at + LOCK_S[W.family]
+    land2 = lock2 + FLIGHT_S
+    cast2 = W.family == "CC_JUMP_CAST"
+    bite2 = land2 + RUNE_ON_S if cast2 else land2      # when what it covers bites
+    reach2 = RUNE_REACH_U if cast2 else q.reach_j
+    land_second = _land(W.x, stand, fw)
+    depart = max(at_stand_t, lock2)                    # she holds the stance until its aim has read her: leaving earlier moves its landing with her
+    det.update(second_lock_t=lock2, second_land_t=land2, second_bite_t=bite2, second_landing=land_second)
+    x_out = land_second + fw * (reach2 + half + q.pad)
+    x_ham = land_second + fw * (q.reach_j + half + q.pad)
+    t_out = depart + abs(x_out - stand) / v
+    # that place may lie inside the first one's coverage: closed only if the second one bites while the first one's rune is lit there
+    first_rune_there = c.cast and (x_out - (land1 + f * c.reach)) * f < 0 and c.land_t + RUNE_ON_S - .05 <= bite2 <= c.land_t + RUNE_OVER_S
+    side_open = (q.xa <= x_out <= q.xb and t_out <= bite2 - .05 and depart + abs(x_ham - stand) / v <= land2 - .05 and not first_rune_there)
+    vx2 = abs(_vx_of(W.x, stand, fw))
+    need = max(JB.CFG["min_back_u"], BODY_BACK_U + vx2 * SWEEP_S + c.half_w + q.pad)
+    spot = land_second - fw * max(JB.CFG["back_u"], need)
+    spot = min(max(spot, q.xa + JB.CFG["wall_pad_u"]), q.xb - JB.CFG["wall_pad_u"])
+    behind_open = abs(land_second - spot) >= need and depart + abs(spot - stand) / v <= lock2 + DESCENT_S - .05
+    det.update(second_out_x=x_out, second_out_t=t_out, second_behind_x=spot, second_ways=("side" if side_open else "") + ("/behind" if behind_open else ""))
+    return None if side_open or behind_open else "the second one's own jump leaves no way out of the middle in time"
 
 
 def _way_back_late(c: _Middle, row, land) -> str | None:
@@ -528,7 +569,7 @@ def _over(c: _Middle, aim_x, name="over"):
     if not q.hand.known:
         return no("hand-back unknown")
     if W.state not in STANDING:
-        return no("walker not in a standing state")
+        return no("the second one is aiming its own jump: no strike is supported on it" if _second_aiming(q) else "walker not in a standing state")
     if room < .5:
         return no("no far-side room")
     leg = c.leg(aim_x, c.w_x)
@@ -625,7 +666,7 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str, selecte
     # Past the take-off: no replacement boundary inside a route; a new move of the walker ends the routes that need it.
     # stance_lost: the landing as tracked since has taken the place this stage stands on; it is not kept as safe (a flight plan may follow).
     phases.append(Phase("return", target=W, attack="side", stance=("stand",), no_hit=(J,), replaceable=False,
-                        on=(("other_move", INVALID), ("move_over", DONE), ("stance_lost", BLOCKED))))
+                        on=(("other_off", DONE),) * _second_aiming(q) + (("other_move", INVALID), ("move_over", DONE), ("stance_lost", BLOCKED))))
     phases.append(Phase("under", target=J, stance=("behind",), ground=True, replaceable=False, go="under",
                         on=(("move_over", DONE), ("stance_lost", BLOCKED))))
     after = {"back": "over_wait", "stay": "over_stay", "out": "over_out"}[follow]
@@ -1277,6 +1318,8 @@ class PlanRunner:
             out.append("pressed")
         if "next_late" in names and sc.t - ex.since > PRESS_WAIT_S:
             out.append("next_late")
+        if "other_off" in names and o is not None and o.state in AIR:
+            out.append("other_off")                # the second one is off the ground: its jump takes its turn by the public priorities
         if "other_move" in names and _new_hostile(o, plan.get("other_family")):
             out.append("other_move")
         if "other_gone" in names and _other_gone(o):
@@ -1319,6 +1362,17 @@ class PlanRunner:
                 s.iid in sc.tac.rune and sc.t <= sc.tac.rune[s.iid][3]):
             out.append("response_over")
         return out
+
+    def _second_aiming_scene(self, sc, plan, x):
+        """The press's follow-up with the second one already aiming a jump of its own, where the generic scene sees two jumps and gives up: the first one off the ground, the second still on it,
+        she between them. (Two in the air are nobody's follow-up.)"""
+        if sc.geo is None or len(sc.subjects) != 2:
+            return None
+        s = next((v for v in sc.subjects if v.iid == plan.instance[0]), None)
+        o = next((v for v in sc.subjects if v.iid != plan.instance[0]), None)
+        if s is None or o is None or s.family not in JUMPS or s.state not in AIR or o.family not in JUMPS or o.state not in ANTIC:
+            return None
+        return ("middle", s, o, 0) if "middle" in (region_at(sc.geo, x), region_at(sc.geo, sc.hx)) else None
 
     def _walker_evades(self, sc, plan, s, o, m) -> bool:
         """The press's entry: the walker has gone into its evade while she is still between the two and the first one is still aiming, not locked and not off the ground."""
@@ -1608,6 +1662,7 @@ class PlanRunner:
             scene = scene or parent_scene(sc.subjects, sc.geo, sc.hx)    # (a key in flight may carry the predicted hand-back past a body's edge for a moment: she herself is still between them)
             if sc.geo is None:
                 return                            # (no body geometry on this tick says nothing about the scene: the wait goes on, bounded by next_late)
+            scene = scene or self._second_aiming_scene(sc, plan, x)
             if scene is None or scene[0] != plan.scene or scene[1].iid != plan.instance[0]:
                 ex.end("blocked", "no scene left for the press's follow-up", t)
             elif self.press_asked != plan.generation and scene[2].state != EVADE:     # (an evading body is no place to choose from: asked once it stands)
@@ -1693,7 +1748,8 @@ class PlanRunner:
         W = Body(o.iid, float(o.pos[0]), self._vx(sc, o), *geo["bodies"][o.iid], o.state, o.family)
         q = Request(name, stage, inst, self.generation, t, J, W, side, m.get("antic_at"), m.get("air_at"), m.get("land"), m.get("vx"),
                     m.get("face"), hand, geo["left"], geo["right"], geo["xa"], geo["xb"], JT["gap_u"], JT["pad"], tac.rules.face_u,
-                    JT["reach_j"], S0, prefix, _copy_hold(hold), FOLLOW_UP if inst == self.pressed else None)
+                    JT["reach_j"], S0, prefix, _copy_hold(hold), FOLLOW_UP if inst == self.pressed else None,
+                    (self.moves.get(o.iid) or {}).get("antic_at") if o.family in JUMPS else None)
         seq = self.channel.request(key, q)
         now = time.perf_counter_ns()
         self.sent[seq] = dict(ns=now, observed_ns=inp.t0_ns if inp.t0_ns is not None else (self.tick_ns or now), f=sc.frame, t=t, why=why,

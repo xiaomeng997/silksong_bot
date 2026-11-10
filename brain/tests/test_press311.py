@@ -318,7 +318,9 @@ def test_no_scene_left_ends_the_stage_at_once(monkeypatch):
     tac, ws, fc, r, _ = _force_press(monkeypatch)
     n = r.requests
     take_off(tac, ws, fc, vx=2.)
-    change(fc, 8, family=G.CC_JUMP, state="Jump Antic")          # the second one jumps too: no one-jumper scene to ask about
+    ws.hero.pos = ws.hero.pos.__class__((36., ws.hero.pos.v[1]), conf=1.)        # she herself and her hand-back are past the walker's body: no middle to ask about
+    ws.hero.hurtbox = [(35.75, 4.), (36.25, 4.), (36.25, 6.), (35.75, 6.)]
+    set_hero(tac, 36.)
     go_(tac, ws, fc)
     ended = next(x for x in plan_notes(tac) if x["what"] == "ended")
     assert ended["status"] == "blocked" and r.requests == n and "no scene left" in ended["reason"]
@@ -374,6 +376,118 @@ def test_a_new_jump_is_a_new_scene_with_every_route(monkeypatch):
     r.channel.request = lambda key, q: (seen.append(q), orig(key, q))[1]
     go_(tac, ws, fc)
     assert seen and seen[-1].routes is None
+
+
+# ---- the second one already aiming its own jump (Sol's review of #374) ----
+
+def _second_aims(tac, ws, fc, family=G.CC_JUMP_CAST, state="Cast Slam Antic", elapsed=.05):
+    antic(tac, ws, fc, iid=8, family=family, state=state, elapsed=elapsed)
+
+
+def test_the_follow_up_is_judged_with_the_second_one_aiming(monkeypatch):
+    tac, ws, fc, r, _ = _force_press(monkeypatch)
+    n = r.requests
+    take_off(tac, ws, fc, vx=2.)
+    _second_aims(tac, ws, fc)
+    seen = []
+    orig = r.channel.request
+    r.channel.request = lambda key, q: (seen.append(q), orig(key, q))[1]
+    go_(tac, ws, fc)
+    assert r.exec.name == "press_next" and r.requests == n + 1 and seen[-1].routes == CP.FOLLOW_UP
+    assert seen[-1].other.state == "Cast Slam Antic" and seen[-1].other_antic_at is not None and seen[-1].jumper.state == "Air"
+
+
+def test_two_in_the_air_is_no_follow_up(monkeypatch):
+    tac, ws, fc, r, _ = _force_press(monkeypatch)
+    take_off(tac, ws, fc, vx=2.)
+    take_off(tac, ws, fc, iid=8, vx=-3.)
+    change(fc, 8, family=G.CC_JUMP_CAST)
+    go_(tac, ws, fc)
+    ended = next(x for x in plan_notes(tac) if x["what"] == "ended")
+    assert ended["status"] == "blocked" and "no scene left" in ended["reason"]
+
+
+def aiming_q(W_x=41., antic=-.1, family="CC_JUMP_CAST", state="Cast Slam Antic", **kw):
+    from dataclasses import replace
+    return replace(flight_q(W=body(2, W_x, state, family), **kw), routes=CP.FOLLOW_UP, other_antic_at=antic)
+
+
+def test_with_the_second_one_aiming_no_strike_on_it_and_the_middle_counts_its_clock():
+    plan = plan_of(aiming_q())
+    stay, over = cand(plan, "stay"), cand(plan, "over")
+    assert not over.feasible and "aiming its own jump" in over.reason
+    assert stay.feasible and plan.selected == "stay" and stay.start == "return"
+    assert stay.get("second_lock_t") == pytest.approx(-.1 + .88) and stay.get("second_land_t") == pytest.approx(-.1 + .88 + CP.FLIGHT_S)
+    assert stay.get("second_bite_t") == pytest.approx(stay.get("second_land_t") + CP.RUNE_ON_S)
+    assert stay.get("second_ways") in ("side", "side/behind", "/behind")
+    assert plan.phase("return").on[0] == ("other_off", "done")
+
+
+def test_a_second_one_not_aiming_changes_nothing():
+    from dataclasses import replace
+    plan = plan_of(replace(flight_q(), routes=CP.FOLLOW_UP))
+    assert plan.selected == "stay" and not cand(plan, "stay").get("second_lock_t")
+    assert all(ev != "other_off" for ev, _ in plan.phase("return").on)
+
+
+def test_a_second_one_near_its_hammer_only_uses_the_plain_jump_clock():
+    plan = plan_of(aiming_q(family="CC_JUMP", state="Jump Antic", hx=35.))
+    stay = cand(plan, "stay")
+    assert stay.feasible and stay.get("second_lock_t") == pytest.approx(-.1 + .48)
+    assert stay.get("second_bite_t") == pytest.approx(stay.get("second_land_t"))         # its hammer: no rune to wait for
+
+
+def test_a_way_out_through_the_first_ones_rune_is_closed_only_while_it_is_lit():
+    # (its rune here lights at land_t + 1.083 and is over by land_t + 1.367; the second one's bite falls in those frames: this side is not open then)
+    q = aiming_q(antic=-.88, hx=35.5)                   # reachable in time: only its rune being lit there closes this side
+    stay = cand(plan_of(q), "stay")
+    assert stay.get("second_bite_t") == pytest.approx(0. + CP.FLIGHT_S + CP.RUNE_ON_S, abs=.01)
+    assert q.air_at + CP.FLIGHT_S + CP.RUNE_ON_S - .05 <= stay.get("second_bite_t") <= q.air_at + CP.FLIGHT_S + CP.RUNE_OVER_S
+    assert "side" not in str(stay.get("second_ways"))
+    other = cand(plan_of(aiming_q(antic=-.1, hx=35.5)), "stay")
+    assert "side" in str(other.get("second_ways"))              # its bite after that rune is over: this side is open
+
+
+def test_the_second_ones_clock_unknown_is_no_middle():
+    plan = plan_of(aiming_q(antic=None))
+    assert not cand(plan, "stay").feasible and "aim clock is unknown" in cand(plan, "stay").reason
+
+
+def test_no_way_out_of_the_second_ones_coverage_is_no_middle():
+    plan = plan_of(aiming_q(antic=-1.55))              # its aim is long done, its rune bites at once: neither way is open
+    assert not cand(plan, "stay").feasible and "no way out of the middle" in cand(plan, "stay").reason
+    assert plan.status == "none" and plan.selected is None
+    assert "no way out of the middle" in plan.reason and "aiming its own jump" in plan.reason
+
+
+def test_the_middle_ends_when_the_second_one_is_off_the_ground(monkeypatch):
+    tac, ws, fc, r, _ = _force_press(monkeypatch)
+    take_off(tac, ws, fc, vx=2.)
+    _second_aims(tac, ws, fc)
+    go_(tac, ws, fc)
+    plan = plan_of(aiming_q())
+    inst = r.exec.plan.instance
+    from dataclasses import replace
+    now = ws.stamp.t_game_s
+    plan = replace(plan, instance=inst, generation=r.exec.plan.generation + 5, made_t=now, valid_until=now + 5., support=(), detail=tuple(dict(plan.detail, other=8, followup=True).items()))
+    assert r.exec.offer(plan, now, inst, {})[0] == "pending"
+    take_off(tac, ws, fc, iid=8, vx=-3.)
+    go_(tac, ws, fc)
+    assert r.exec.plan is None and r.exec.status == "complete" and r.exec.reason == "other_off"
+
+
+def test_the_second_ones_new_move_between_request_and_adoption_is_read(monkeypatch):
+    tac, ws, fc, r, _ = _force_press(monkeypatch, )
+    take_off(tac, ws, fc, vx=2.)
+    n = r.requests
+    go_(tac, ws, fc)                                    # asked with the second one standing
+    assert r.requests == n + 1
+    _second_aims(tac, ws, fc)                           # it starts its own jump before the answer is adopted
+    seen = []
+    for _ in range(3):
+        go_(tac, ws, fc)
+        seen += plan_notes(tac)
+    assert any(x["what"] == "ended" for x in seen)      # the follow-up made for a standing one does not run: other_move / the second one's real state ends it
 
 
 # ---- the run ----
