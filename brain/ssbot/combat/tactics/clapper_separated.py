@@ -53,7 +53,25 @@ OUT_U = .25              # a stance just outside an edge
 ROOM_U = .25             # 1.2.1: the spare centre room inside N, outside the range
 POGO_IN_U = .3           # 1.2.2: her centre at least this far over N's body from its outer edge
 REACH_U = 3.02           # the side slash from her centre to a body edge (knife_chain_transfer.FALL_SLASH_X)
-POST_S = 1.2             # an after-step (1.2.2's way into the middle, 2.3's one strike): given up this long after it began
+POST_S = 1.2             # an after-step (2.3's one strike): given up this long after it began
+POST_VAULT_S = 2.0       # 1.2.2's way into the middle (#385): the bounce's hold landing plus a floor vault (~0.8 s); at POST_S a vault after
+#                          the slammer walked or evaded off the middle no longer fit (C16 sy16_122 131535)
+# 1.2.2 (#385, the person 11-10): while F winds up its slam N is locked: a hit on Idle N only cancels it back to Idle (s312/Q_LOCK385.json: 12
+# of 14 hits on N during F's antic, Dmg Attack -> Close Range -> Idle in the hit frame, 2 by Avoid Type -> Walk; N unlocks at F's Slam 2
+# entry, Is Attacking cleared). So: side slashes on N first, then a short jump and the down slash on N's outer part, outside the range, before N
+# unlocks; the bounce waits out the hammers outside the range (the chain's hold) and then goes over N into the middle. N evading: outside the
+# range until the slam is over, no chase, no strike, no way into the middle (the person: "肯定是站在射程外等冲锤结束").
+SIDE_LAST_F = 10         # side slashes on N up to this many frames after F's antic entry: one hit there leaves N's new Idle its Will Evade gate
+#                          (15-17 frames after the hit) and the strike witness's proof before the strike window
+STRIKE_OPEN_F = 28       # the strike window: its short jump from here (contact ~18-22 frames after the takeoff) ...
+LOCK_LAST_F = SLAM_FIRST_F + 2   # ... its contact by this frame (the earliest Slam 2 entry, N's unlock, is ~3 frames after the earliest hammer)
+STRIKE_JUMP_HOLD = 16    # the strike's short jump: J held 16 frames (its apex box bottom 7.46 over a floor Idle top 6.92: s312/jump385.py)
+STRIKE_DEPTH_U = .8      # the strike's aim: her centre this far over N's body from its outer edge
+STRIKE_MARGIN_U = .5     # ... and her centre at the contact at least this far outside the range edge (N's outer part shallower: 1.2.3)
+SIDE_GAP_U = .5          # 1.2.2's stance: her box this far off N's outer edge (the side slash reaches; the floor vault over N clears from
+#                          there, at .25 her straight rise touches its side pad: s312/vault385pad.py)
+HOLD_OUT_U = 1.0         # the bounce's hold over the hammers: her box drifts to this far off N's outer edge (knife_chain_transfer.HOLD_OUT_U)
+EVADE_STATE = "Evade Scuttle"
 
 # ---- the big rune (are_types.clapper "rune slam"; rune_life) ----
 RUNE_HALF_U = 7.187      # the octagon's apothem: its x half span
@@ -186,8 +204,9 @@ def hammer_over(sc, s, rec) -> bool:
 
 def slam_place(sc, sep, rec):
     """Where she stands for F's slam (plan 1.1 / 1.2.1-1.2.3), from its range edge on her side. dict(branch, stance, target, style, no_hit,
-    edge, inside, escape_x) or None: no place outside the range on her side inside the walls (the existing rules keep it: design 3.2, the
-    8 wall cases)."""
+    edge, inside, escape_x; 1.2.2 also mode / mode_why / strike: strike_mode's stage and, in its strike window, GoalPrefs.strike_bound's
+    (iid, aim_x, bound_x, sign, by_f, jump_hold, "outside")) or None: no place outside the range on her side inside the walls (the existing rules keep
+    it: design 3.2, the 8 wall cases)."""
     geo, hx = sc.geo, sc.hx
     face = rec["face"]                                  # the hammer comes toward her: +1 she is to its right
     edge = rec["x0"] + face * SLAM_EDGE_U
@@ -208,6 +227,11 @@ def slam_place(sc, sep, rec):
             stance = max(stance * face, x * face) * face
         res.update(branch="1.1", stance=stance, target=near, style=None, no_hit=frozenset({far.iid}), escape_x=stance)
         return res
+    if rec.get("near_evaded") is not None and rec.get("branch") == "1.2.2":
+        # #385 (the person 11-10): N evading in 1.2.2 has most likely gone through F: outside the range until the slam is over
+        res.update(branch="1.2.2", stance=out_x, target=near, style=None, no_hit=frozenset({far.iid, near.iid}), mode="wait",
+                   mode_why="N evaded in this slam", strike=None)
+        return res
     na, nb = _span(geo, near.iid)
     n_in, n_out = (na, nb) if face > 0 else (nb, na)     # N's edge toward F, toward her
     x_in = n_in - face * (half_in + pad)
@@ -216,15 +240,48 @@ def slam_place(sc, sep, rec):
         style = None if (hx - n_in) * face < 0 else "stomp"
         res.update(branch="1.2.1", stance=x_in, target=near, style=style, no_hit=frozenset({far.iid}))
         return res
-    if (out_x - n_in) * face > 0 and (n_out - out_x) * face >= POGO_IN_U:
-        # 1.2.2: N's body reaches out past the range edge: down slashes on it from just outside
-        res.update(branch="1.2.2", stance=out_x, target=near, style="stomp", no_hit=frozenset({far.iid}))
+    bound = edge + face * STRIKE_MARGIN_U
+    if (out_x - n_in) * face > 0 and (n_out - out_x) * face >= POGO_IN_U and (n_out - bound) * face >= STRIKE_DEPTH_U:
+        # 1.2.2 (#385, the person 11-10): N's body reaches out past the range edge with room for a down slash outside it: side slashes, then
+        # the down slash on N's outer part while N is locked (strike_mode), from the stance just off N's outer edge
+        mode, why = strike_mode(sc, rec, near)
+        strike = None
+        if mode == "strike":
+            strike = (near.iid, n_out - face * STRIKE_DEPTH_U, bound, face, int(rec["f0"]) + LOCK_LAST_F, STRIKE_JUMP_HOLD, "outside")
+        res.update(branch="1.2.2", stance=n_out + face * (half_in + SIDE_GAP_U), target=near, style="stomp" if mode == "strike" else None,
+                   no_hit=frozenset({far.iid}) if mode in ("side", "strike") else frozenset({far.iid, near.iid}), mode=mode,
+                   mode_why=why, strike=strike)
         return res
-    # 1.2.3: outside the range; N only while it is within the side slash's reach of the stance
+    # 1.2.3: outside the range; N only while it is within the side slash's reach of the stance (also 1.2.2's geometry whose outer part leaves
+    # no down slash outside the range with its margin: Sol REVIEW384 3, said so in the record)
     reach = (out_x - n_out) * face <= REACH_U
     res.update(branch="1.2.3", stance=out_x, target=near, style=None,
                no_hit=frozenset({far.iid}) if reach else frozenset({far.iid, near.iid}))
+    if (out_x - n_in) * face > 0 and (n_out - out_x) * face >= POGO_IN_U:
+        res["shallow_122"] = round(float((n_out - bound) * face), 3)
     return res
+
+
+def strike_mode(sc, rec, near):
+    """1.2.2's stage at this frame (#385; k: frames since F's antic entry): (mode, why). side: k <= SIDE_LAST_F, side slashes on N; settle: no
+    hit on N up to the strike window; strike: STRIKE_OPEN_F <= k <= LOCK_LAST_F with N Idle / Walk, its down slash; wait: N struck by it, past
+    LOCK_LAST_F, or F's antic clock unknown (first seen past its entry): no hit on N, outside the range."""
+    if rec.get("strike_hit") is not None:
+        return "wait", "N struck by the down slash"
+    if near.state == EVADE_STATE:
+        return "wait", "N evading"
+    if rec.get("f0") is None or type(sc.frame) is not int:
+        return "wait", "F's antic clock unknown"
+    k = sc.frame - int(rec["f0"])
+    if k > LOCK_LAST_F:
+        return "wait", "past N's lock"
+    if k <= SIDE_LAST_F:
+        return "side", "N locked: side slashes first"
+    if k < STRIKE_OPEN_F:
+        return "settle", "no hit before the strike window"
+    if near.state not in ("Idle", "Walk"):
+        return "settle", "N in " + str(near.state)
+    return "strike", "the down slash before N unlocks"
 
 
 def middle_room(geo, near, far, face):
@@ -340,6 +397,19 @@ def double_intent(geo):
 def gap_of(geo):
     low, high = geo["low"], geo["high"]
     return _span(geo, high.iid)[0] - _span(geo, low.iid)[1]
+
+
+def seam_return(geo):
+    """The shared small-gap after-move of every chosen return into the middle (the person 11-10, Sol seq 326; L2 plan "所有翻入/返回中间的
+    共享小间隙后手": 1.2.2 over N after both hammers, 2.3's return, the unseparated slam's and small rune's follow-ups: Task 183's bounce
+    follow-up, back, flip, overhead): the two facing body edges at most TIER_U apart (overlapping always; exactly TIER_U on this side) is one
+    down slash aligned with the seam, whatever it meets: no double-hit proof (no tops gate), no standing-gap proof. (ok, seam x, gap). Past
+    TIER_U each entry keeps its own place and side slash. The chain's follow-up reads the same TIER_U (knife_chain_transfer.small_gap)."""
+    low, high = geo["low"], geo["high"]
+    (a1, b1), (a2, b2) = _span(geo, low.iid), _span(geo, high.iid)
+    gap = a2 - b1
+    seam = .5 * (b1 + a2) if gap >= 0 else .5 * (max(a1, a2) + min(b1, b2))
+    return bool(gap <= TIER_U), float(seam), float(gap)
 
 
 def wall_room(geo, s):

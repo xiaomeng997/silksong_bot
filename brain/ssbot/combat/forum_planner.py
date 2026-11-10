@@ -164,6 +164,9 @@ H_W_FAR, H_W_NONE = 0.3, 0.5
 M_GLIDE = kin.MODE_NAMES.index("GLIDE")
 TV_ON = os.environ.get("SSBOT_FORUM_TV", "0") == "1"        # 1: the terminal value (off by default: forum.md 20.11)
 PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK without the committed support's shares
+# Task 182 seq 309's filter (FORCED_RISK under a visible hammer: no new umbrella while a row without one is allowed) is off since seq 312
+# #385 (the person 11-10, Sol seq 328: "那就给关上吧"); the slam's danger, its occupancy and risk scores stay. 1: back on (offline comparisons)
+SLAM_NO_NEW_GLIDE = os.environ.get("SSBOT_FORUM_SLAM_NO_NEW_GLIDE", "0").strip() == "1"
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 # Track A of the Forum push 2 (2026-10-08, the person's decisions and tactics; forum.md §26): each behind a token of
 # SSBOT_FORUM_TA ("+" or "," separated; "all": every one; empty, the default: none, everything as before):
@@ -4949,7 +4952,9 @@ class ForumPlanner(Planner):
             slam_units = visible_slam_units(f)
             if slam_units:
                 forced_slam = {"units": len(slam_units), "dropped": 0}
-                if float(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0]) != M_GLIDE:
+                if not SLAM_NO_NEW_GLIDE:
+                    forced_slam["no_new_glide"] = "off"     # seq 312 #385 (the person): the rows keep their umbrella candidates
+                elif float(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0]) != M_GLIDE:
                     # Task 182 seq 309 (the person's priority via Sol seq 309): no new umbrella in front of a visible hammer while
                     # a row without one is allowed: live 18 of 42 hammer hits came in the umbrella, 16 of those opened by a forced
                     # row (its antic and inflate lock the hero while the slam comes). No such row: the forced rows stay as they are

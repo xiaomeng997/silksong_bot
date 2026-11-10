@@ -103,11 +103,13 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_responsibility={}
         self._transfer_target_moves={}
         self._hold_seen=False   # Task 182 seq 312 #384: the last _hold_over reading (its notes only)
+        self._held_goal=None    # Task 182 seq 312 #385: the BOUNCE goal L2's 1.2.2 hold named (its follow-up air-only, no new strike)
         self._vault_ready=False
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
         self._bounce=None;self._bounce_frames={}
         self._waypoint_wanted=False;self._waypoint_failed=set();self._waypoint_declined=None;self._waypoint_responsibility={}
+        self._vault_tried={}   # Task 182 seq 312 #385: per waypoint key, the start states ("air" / "ground") a vault row was searched from
         super().reset(episode,start_frame=start_frame)
         from . import knife_chain_bounce_table as bounce_table
         # Task 179 (#309, Sol seq 229): the finite same-target bounce table (Tasks 143 / 145 / 148), opt-in.
@@ -454,7 +456,13 @@ class NativeManualAirChain(NativeChainB2):
         entry=getattr(prefs,"entry_attack",None)
         if not isinstance(entry,EntryAttack) or entry.target!=getattr(prefs,"target",None) or entry.kind not in {"stomp","side"}:return
         goal=self._transfer_goal
-        if goal is not None and (goal.target,goal.caster)==(entry.target,entry.source):return
+        if goal is not None and (goal.target,goal.caster)==(entry.target,entry.source):
+            # Task 182 seq 312 #385 (C18 sy18_23x 136227): a rune_end entry is bound only to its own rune end: another goal on the same pair
+            # (a spent bounce on the target that cast the rune) is no binding of it
+            rm=getattr(goal,"responsibility",None)
+            if (getattr(entry,"scope",None)!="rune_end"
+                    or (goal.source_kind=="SWITCH" and getattr(rm,"family",None)=="RUNE_END"
+                        and getattr(rm,"antic_frame",None)==getattr(entry,"event_f",None))):return
         if entry==self._entry_attack_seen:return
         if getattr(entry,"scope",None)=="rune_end":
             # Task 182 seq 312 (#384, Sol REVIEW383): 2.3's one closing strike after the small rune: no source move goes on, so the rune's end
@@ -528,7 +536,20 @@ class NativeManualAirChain(NativeChainB2):
         stay=frozenset(getattr(prefs,"stay_pogo",()))
         ev=self._idle_ev.get(goal.target)
         if goal.source_kind!="BOUNCE" or not (isinstance(ev,dict) and ev.get("hit") is None and ev.get("buddy") is True):stay=frozenset()
-        if (side and not side_approach and not transfer.bounce_tail_pending(state,goal,self._clock)) or goal.target in frozenset(getattr(prefs,"no_hit",()))-stay:
+        # Task 182 seq 312 #385 (the person's 1.2.2): after its down slash N is no target (L2's no_hit) but the bounce's own follow-up still
+        # holds her off the middle in the air (GoalPrefs.hold_over): it runs with no new strike (_transfer_offer's no_strike), ends on her
+        # landing; a held goal never starts from the ground
+        held=frozenset()
+        if goal.source_kind=="BOUNCE" and _sep312(state.get("f")) and goal.target in frozenset(getattr(prefs,"hold_over",()) or ()):
+            self._held_goal=goal
+        if goal is self._held_goal and goal.source_kind=="BOUNCE":
+            up=len(hb)==4 and type(hb[1]) in (int,float) and np.isfinite(hb[1]) and hb[1]>3.2
+            if not up and not active:
+                self._note("transfer_hold_goal_dropped",frame=state["f"],target=goal.target,reason="on the ground with no follow-up running")
+                self._transfer_goal=None;self._held_goal=None;self._transfer_ready=False
+                return prefs
+            if up:held=frozenset({goal.target})
+        if (side and not side_approach and not transfer.bounce_tail_pending(state,goal,self._clock)) or goal.target in frozenset(getattr(prefs,"no_hit",()))-stay-held:
             self._transfer_ready=False
         blade="side" if side else "air_contact" if air_attack and self._transfer_ready else "stomp" if self._transfer_ready else "slam" if st=="Slam Antic" else "unavailable"
         status=(goal,st,blade,spent)
@@ -742,7 +763,7 @@ class NativeManualAirChain(NativeChainB2):
                 if self.runner.run is not None:self._recover("waypoint current context unavailable",f)
                 return None
             tick,sim,_,_=self._context
-            return self._waypoint_offer(tick[1],tick[2],sim,forecast,prefs)
+            return self._waypoint_offer(tick[1],tick[2],sim,forecast,prefs,ground=bool(tick[3]))
         if getattr(prefs,"press_walker",None) is not None and self.runner.run is None and self.commitment is None and self.post_context is None:
             return None  # Task 182 seq 311: the press stage asks no new strike or approach of the chain (keys already committed run on above)
         pressure=getattr(prefs,"wall_pressure",None)
@@ -888,11 +909,15 @@ class NativeManualAirChain(NativeChainB2):
         return (getattr(prefs,"waypoint",None) is not None and run is not None and run.chain=="vault_idle" and run.link=="approach"
                 and self.post_context is None and self.recovery is None)
 
-    def _waypoint_offer(self,state,game,sim,forecast,prefs):
+    def _waypoint_offer(self,state,game,sim,forecast,prefs,ground=None):
         """Task 182 (SSBOT_FORUM_TWO_PLAN; knife_chain_waypoint): one bounded floor approach of the running plan phase. L2 names
         the place and the frame each tick; withdrawing them or reaching the place hands back at this step, the keys already
         sent staying the next owner's actual prefix. A step blocked or a place no longer reachable in time hands back through
-        recovery, which keeps its failure responsibility; a fresh start only ever declines."""
+        recovery, which keeps its failure responsibility; a fresh start only ever declines.
+        Task 182 seq 312 #385 (kind "vault", Sol REVIEW384 1-2): over one body to one place: its row chosen once
+        (knife_chain_waypoint.vault_row) with the whole route scanned for all owners, then followed as an absolute row with its next
+        transfer.FOLLOW_SCAN_F frames scanned every tick; the actual landing past its takeoff hands back. A start declined in the air is
+        tried again once on the ground (no per-tick search)."""
         from types import SimpleNamespace
         f=state["f"];run=self.runner.run
         active=run is not None and run.chain==waypoint.PROGRAM
@@ -920,6 +945,8 @@ class NativeManualAirChain(NativeChainB2):
             if mode is not None or (state.get("hero") or {}).get("hero_accepting_input") is not True:
                 self._note("waypoint_start_deferred",frame=f,mode=mode,owner="current owner keeps the keys")
                 return None
+        if goal.kind=="vault" or (active and run.v.get("kind")=="vault"):
+            return self._vault_offer(state,game,sim,forecast,goal,active,key,back,ground)
         mask,what=waypoint.next_mask(sim,goal,f)
         if what=="arrived":
             return back("waypoint reached","waypoint_arrived")
@@ -975,6 +1002,137 @@ class NativeManualAirChain(NativeChainB2):
                              +("; no route certificate" if goal.over is not None else
                                ", the route from the key sent through the delayed hazard layers; no route certificate for bodies "
                                "or moves"))})
+
+    VAULT_TAIL_F=16   # Task 182 seq 312 #385: no-key frames past a vault row's keys, so a landing later than first modelled is still read
+    VAULT_SCENE_U=2.  # ... a vault search's scene: the Clappers' roots to this many u
+    VAULT_SEARCHES=6  # ... at most this many searches for one place (its waypoint key)
+
+    def _vault_offer(self,state,game,sim,forecast,goal,active,key,back,ground):
+        """Task 182 seq 312 #385 (Sol REVIEW384 1-2; the person's 1.2.2: over N into the middle once both hammer stages of F's slam are
+        over): a waypoint of kind "vault", over goal.over to goal.land. Its rows (knife_chain_waypoint.vault_row: one jump from the floor,
+        the key toward the place, the free air dash at a few fixed frames, the key released on a grid past the body; finite; the best and
+        up to VAULT_ALTS next ones, one per landing place) are searched once per start state and scene (in the air / on the floor, the two
+        Clappers' states: a later search only on such an event, no per-tick search); the first in their order with the model's landing
+        inside the band and the whole route to it scanned clean for all owners is taken. Owned, it is followed as an absolute row re-anchored at each
+        tick's first free mask frame through the modelled landing (the keys sent are the keys checked): the landing still inside the band
+        and the next transfer.FOLLOW_SCAN_F frames clean (through the landing on a tick that presses a new dash: its whole motion), else
+        recovery with its failure responsibility. Her box past the body in the air hands back (the ordinary owners take the fall: L2's air
+        side slash or the shared seam strike), as does the actual landing past its takeoff (outside the band: through recovery); either is
+        the key's last vault (no restart)."""
+        from types import SimpleNamespace
+        f=state["f"];run=self.runner.run
+        lo,hi=goal.land if goal.land is not None else (float(goal.x)-goal.tol,float(goal.x)+goal.tol)
+        lo,hi=float(lo),float(hi)
+        def declined(reason,**data):
+            # (every vault decline noted: its searches are event-limited, so no dedupe hides a later search's reasons)
+            self._note("waypoint_rejected",frame=f,reason=reason,active=active,x=goal.x,by_f=goal.by_f,kind="vault",**data)
+            self._waypoint_declined=(key,reason)
+            if active:
+                self._waypoint_failed.add(key)
+                self._recover("waypoint vault "+reason,f)
+            return None
+        if goal.over is None:return declined("no body to pass")
+        if active:
+            v=dict(run.v.get("vault") or {})
+            if not v:return declined("vault row missing")
+            hb=(state.get("hero") or {}).get("box") or ()
+            if not ground and len(hb)==4 and all(type(z) in (int,float) for z in hb):
+                # past the body in the air: the way over it is done; the ordinary owners take her fall (L2's place: the air side slash, the
+                # shared seam strike), the keys already sent their prefix
+                d=int(v.get("dir") or 0)
+                if ((d>0 and float(hb[0])>=float(goal.over[2])+waypoint.VAULT_PAD)
+                        or (d<0 and float(hb[2])<=float(goal.over[0])-waypoint.VAULT_PAD)):
+                    self._note("waypoint_vault_past",frame=f,box=[float(z) for z in hb],over=[float(z) for z in goal.over],
+                               planned_land_f=v.get("land_f"))
+                    self._vault_tried.setdefault(key,set()).add("done")
+                    return back("waypoint vault past the body","waypoint_arrived")
+            if not ground:v["air_seen"]=True
+            elif v.get("air_seen"):
+                hp=(state.get("hero") or {}).get("pos") or ()
+                cx=float(hp[0]) if len(hp)>=1 and type(hp[0]) in (int,float) else None
+                inside=cx is not None and lo<=cx<=hi
+                self._note("waypoint_vault_landed",frame=f,x=cx,lo=lo,hi=hi,inside=inside,planned_land_f=v.get("land_f"))
+                if not inside:
+                    self._waypoint_failed.add(key)
+                    self._recover("waypoint vault landed outside its band",f);return None
+                self._vault_tried.setdefault(key,set()).add("done")
+                return back("waypoint vault landed past the body","waypoint_arrived")
+            rows=[np.asarray(v.get("masks") or (),np.int64)[max(0,f+2-int(v["F0"])):]]
+        else:
+            start="ground" if ground else "air"
+            # searched once per start state and scene (the two Clappers' states and roots to VAULT_SCENE_U): a later search only on such an
+            # event, at most VAULT_SEARCHES per place, never per tick (C17 sy17_122: the slammer Idle again after an evade that took it 5 u
+            # off the middle was the same scene by states; C19 tm19_122: 9 searches at 1 u in 40 frames of its evade)
+            tag=(start,tuple(sorted((int(e["iid"]),str(transfer.control(e)[0]),
+                                     int(round(float((e.get("pos") or (0.,))[0])/self.VAULT_SCENE_U))) for e in transfer.clappers(state))))
+            tried=self._vault_tried.setdefault(key,set())
+            if tag in tried or "done" in tried or len(tried)>=self.VAULT_SEARCHES:return None
+            tried.add(tag)
+            vr=waypoint.vault_row(sim,goal,f)
+            if vr is None:return declined("no vault row from here",start=start,scene=list(tag[1]))
+            cands=[vr]+list(vr.get("alts") or ())
+            rows=[np.asarray(c["masks"],np.int64) for c in cands]
+            hp=(state.get("hero") or {}).get("pos") or ()
+            x0=float(hp[0]) if len(hp)>=1 and type(hp[0]) in (int,float) else .5*(float(vr["box"][0][0])+float(vr["box"][0][2]))
+            v=dict(air_seen=not ground,start=start,dir=1 if float(goal.x)>x0 else -1)
+        move=MoveInstance(**run.v["move"]) if active else MoveInstance(goal.source,f,waypoint.FAMILY)
+        # a failure answers for the move this Run is about, from the Run's first frame (as the floor waypoint's)
+        self._waypoint_responsibility.setdefault(move,(MoveInstance(goal.source,f,goal.family),None))
+        current=getattr(getattr(getattr(forecast,"rs",None),"trk",None),"now",{}).get(goal.source)
+        if current is None:return declined("support unavailable")
+        plan=SimpleNamespace(iid=goal.source,move=move,origin=f,entry_k=0,press_k=None,contact_frame=None)
+        why=[]
+        try:
+            geo=B2Geometry(forecast,f,move,current[2])
+            # a fresh start: its rows in vault_row's order, the first whose landing and whole route are clean; every row scanned through
+            # the latest of their landings (one support for the search: the per-length supports cost ~60 ms on E16-23, C19 tm19_122;
+            # a row's frames past its own landing are her standing there: scanned too); an owned Run: its own row only
+            built=[]
+            for rank,rest in enumerate(rows):
+                commands=np.r_[rest,np.zeros(self.VAULT_TAIL_F,np.int64)]
+                path=model_path(sim,plan,commands,game)
+                j=transfer._landing_index(path.flags,len(sim.prefix)+1)
+                if j is None:
+                    why.append(dict(rank=rank,reason="no modelled landing on the row"));continue
+                b=path.box[j];cx=.5*(float(b[0])+float(b[2]))
+                if not lo<=cx<=hi:
+                    why.append(dict(rank=rank,reason="modelled landing outside its band",land_x=cx));continue
+                built.append((rank,commands,path,int(j),b,cx))
+            jmax=max((c[3] for c in built),default=0)
+            for rank,commands,path,j,b,cx in built:
+                new_dash=bool(int(commands[0])&B["DASH"]) and not int(sim.prefix[0])&B["DASH"]
+                limit=(min(jmax,len(path.box)-1) if not active else int(j) if new_dash else min(int(j),transfer.FOLLOW_SCAN_F))
+                scan=geo.scan(path,limit=limit)
+                if not scan.complete or scan.contacts:
+                    why.append(dict(rank=rank,reason="route blocked",land_x=cx,
+                                    first=None if not scan.contacts else asdict(scan.contacts[0])));continue
+                break
+            else:
+                return declined("no clean row" if len(rows)>1 else why[0]["reason"] if why else "no row",rows=why,limit=None)
+        except GeometryUnavailable as exc:
+            return declined("geometry unavailable: "+str(exc))
+        if not active:
+            c=cands[rank]
+            v.update(recipe=c["recipe"],rank=rank,blocked_before=why)
+        mask=int(commands[0])
+        v.update(F0=f+2,masks=[int(m) for m in commands[:j-len(sim.prefix)]],land_f=int(path.origin+j),
+                 landing_box=[float(x) for x in b])
+        if active:
+            draft=logical_copy(self.runner);draft.run.v.update(vault=v,what="vault")
+        else:
+            draft=self.runner.fork_empty(AirAnchor())
+            draft.run=Run(waypoint.PROGRAM,"go",{"iid":goal.source,"ta":float(game),"plan":list(goal.plan),"x":float(goal.x),
+                                                 "by_f":int(goal.by_f),"kind":"vault","f_open":f,"move":asdict(move),"what":"vault",
+                                                 "vault":v})
+            self._note("waypoint_vault_chosen",frame=f,recipe=v["recipe"],start=v["start"],land_f=v["land_f"],land_x=cx,lo=lo,hi=hi,
+                       over=[float(x) for x in goal.over],over_iid=goal.over_iid,keys=len(v["masks"]),rank=v.get("rank"),
+                       blocked_before=v.get("blocked_before"))
+        return B2Offer("active" if active else "manual_commitment",path,draft,mask,0.,move,
+            {"manual_air":True,"waypoint":True,"kind":"vault","x":float(goal.x),"by_f":int(goal.by_f),"what":"vault",
+             "phase":"go","predicted_bounce":None,"checked_through":int(path.origin+limit),"land_f":v["land_f"],
+             "safety_basis":("bounded vault over one body: the whole route to its modelled landing scanned for all owners when chosen, "
+                             "its next %d frames every tick (through the landing on a new dash), the landing inside its band; "
+                             "no route certificate")%transfer.FOLLOW_SCAN_F})
 
     def _waypoint_delayed_ahead(self,sim,plan,goal,f,game,geo,mask,active,refused=False):
         """Task 182 (Sol seq 271 / 272): the first delayed-hazard contact on this Run's whole route, or None.
@@ -1101,6 +1259,20 @@ class NativeManualAirChain(NativeChainB2):
             self._note("transfer_scene_entry_handoff",frame=f,target=target,link=run.link,scope=bound.scope)
             self._recover("seq 312: the scene's stomp entry ended before its press",f)
             return None
+        sb=self._strike_bound(f,prefs,target)
+        if active and sb is not None and run.link in ("jump","air") and self._press is None:
+            from . import pogo_model as PM
+            hp=(state.get("hero") or {}).get("pos") or ()
+            late=f+2+PM.ACTIVE[0]>sb[3]          # the earliest contact from the next free key is past the frame
+            # (kind "outside", 1.2.2: she never crosses the bound; kind "seam": she comes from the other side, only the contact is bound)
+            past=sb[5]=="outside" and len(hp)>=1 and type(hp[0]) in (int,float) and (float(hp[0])-sb[1])*sb[2]<0.
+            if late or past:
+                # Task 182 seq 312 #385 (the person's 1.2.2): no row can meet its limits any more (its contact before N unlocks, her
+                # centre outside the range): handed back while she is still above it (B2 recovery; the keys sent stay the next owner's
+                # prefix, the failure responsibility is kept), never a fall onto N
+                self._note("transfer_bound_handoff",frame=f,target=target,link=run.link,late=bool(late),past=bool(past),bound=list(sb))
+                self._recover("seq 312: the bound down slash can no longer meet its limits (%s)"%sb[5],f)
+                return None
         goal=self._transfer_goal
         if (active and isinstance(goal,transfer.ReturnGoal) and run.link in ("walk","dash","jump","air")
                 and not self._return_request_holds(prefs,goal)):
@@ -1119,8 +1291,18 @@ class NativeManualAirChain(NativeChainB2):
         if active and run.link in transfer.FOLLOW_LINKS and ground:
             self._follow_landed(state,run)   # Task 183: the actual landing ends the follow-up Run
             return None
+        if active and ground and self._held_goal is not None and self._transfer_goal is self._held_goal:
+            # Task 182 seq 312 #385 (the person's 1.2.2): the hold's flight over the hammers landed (off N's outer edge): its follow-up ends
+            # here (no stomp approach on N from the ground); L2's place outside the range, then its way over N once both hammers are over
+            self._note("transfer_hold_landed",frame=f,target=target,link=run.link)
+            self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
+            self._press=self._accepted=self._hit=None
+            self._transfer_ready=False;self._transfer_goal=None;self._held_goal=None
+            self._abandon("1.2.2 hold landed: L2's place outside the range")
+            return None
         no_witness=None
-        hold=active and not ground and self._hold_over(state,game,prefs,target)
+        held_run=self._held_goal is not None and self._transfer_goal is self._held_goal
+        hold=((active or held_run) and not ground and self._hold_over(state,game,prefs,target))   # #385: from a held follow-up's first tick
         if hold!=self._hold_seen:
             self._note("transfer_hold_over",frame=f,target=target,hold=bool(hold),link=None if run is None else run.link,
                        basis="L2's 1.2.2 near one after its real bounce; the slam that started this chain still has a hammer stage"
@@ -1206,11 +1388,14 @@ class NativeManualAirChain(NativeChainB2):
                            owner="current owner keeps the keys",reason="hero in a dash or relinquished motion")
                 return None
         rs=getattr(forecast,"rs",None)
-        strike_kw=self._seam_strike_kw(prefs,target,run) if active else {}
+        # #385 (the person's 1.2.2): a held follow-up never strikes N again (N unlocks at F's Slam 2 entry) and keeps drifting off N's outer
+        # edge until its landing or a clean middle landing route (_follow_decide), also after both hammers
+        strike_kw={"no_strike":True} if held_run else self._seam_strike_kw(prefs,target,run) if active else {}
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
                               **({"idle_evidence":self._idle_ev} if self._idle_ev else {}),
                               **({"approach_only":True} if approach_only else {}),
-                              **({"hold_over":True} if hold else {}),
+                              **({"hold_over":True} if hold or (held_run and not ground) else {}),
+                              **({"bound":sb} if sb is not None else {}),
                               **strike_kw)
         if made is None or made[0] is None:
             if active:self._recover((made[1].ended_reason if made is not None else None)
@@ -1473,6 +1658,16 @@ class NativeManualAirChain(NativeChainB2):
         if not _sep312(state.get("f")) or target not in frozenset(getattr(prefs,"hold_over",()) or ()):return False
         return transfer.cross_hammer_pending(state,self._transfer_goal,game)
 
+    def _strike_bound(self,f,prefs,target):
+        """Task 182 seq 312 (#385; the person's 1.2.2: while F slams, N locked, down slash N outside the range before it unlocks; Sol seq 326:
+        the shared seam strike of 2.3): L2's GoalPrefs.strike_bound for this target, on its SWITCH stomp (never its bounce): (aim_x, bound_x,
+        sign, by_f, jump_hold or None, kind), or None."""
+        sb=getattr(prefs,"strike_bound",None);goal=self._transfer_goal
+        if (sb is None or not _sep312(f) or sb[0]!=target or goal is None or goal.source_kind!="SWITCH"
+                or isinstance(goal,transfer.ReturnGoal)):return None
+        return (float(sb[1]),float(sb[2]),int(sb[3]),int(sb[4]),None if sb[5] is None else int(sb[5]),
+                str(sb[6]) if len(sb)>6 else "outside")
+
     def _follow_due(self,goal,draft,run,active,ground,approach_only):
         """Task 183 (Sol seq 261): this tick decides the bounce follow-up: a real bounce off the target's own slam (two
         Clappers), airborne, its hammer tail over, not an approach; a sent strike row or hook finishes under its own
@@ -1661,6 +1856,33 @@ class NativeManualAirChain(NativeChainB2):
         old=None if keep is None else run.v.get("follow")
         gap=transfer.two_gap(state,plan.caster);hb=transfer._hero_box(state.get("hero"))
         stand=bool(gap is not None and hb is not None and transfer.standable(gap,hb))
+        if keep is None and self._held_goal is not None and self._transfer_goal is self._held_goal:
+            # Task 182 seq 312 #385 (the person's 1.2.2): the held bounce once both hammers are over: a clean middle landing from her state
+            # when one exists (Task 183's middle rows, the whole route scanned); otherwise the drift off N's outer edge goes on and her
+            # landing ends it (L2's vault over N from there): no seam approach or outer landing across N from its outer side (C12 sy12_122
+            # 131502: the seam approach's key toward N passed its two-frame step, the next step met N with that key in flight)
+            choice=None
+            if stand:
+                try:
+                    choice=self._middle_choice(state,game,sim,B2Geometry(forecast,f,plan.move,current[2]),plan,gap,hb,None)
+                except (GeometryUnavailable,NominalUnsupported) as exc:
+                    self._note("transfer_follow_unchecked",frame=f,link=keep,reason=str(exc));return False,None
+            if choice is not None:return self._follow_install(state,game,sim,made,run,keep,choice)
+            self._note("transfer_follow_held",frame=f,standable=stand,width=None if gap is None else gap.width,
+                       choice="no clean middle landing: the drift off the bounced body goes on, her landing ends it")
+            return False,None
+        if keep is None and hb is not None and _sep312(f) and transfer.small_gap(gap):
+            # Task 182 seq 312 #385 (the person 11-10, Sol seq 326): the shared small-gap after-move of a return into the middle: one down
+            # slash aligned with the seam before any middle landing (no double-hit proof, no standing-gap proof): the existing witnessed
+            # seam strike (propose's seam rows, its aim the seam itself), its own gates deciding; without it the entry's rules below
+            try:
+                geo=B2Geometry(forecast,f,plan.move,current[2])
+                taken=self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand,old)
+            except (GeometryUnavailable,NominalUnsupported) as exc:
+                self._note("transfer_follow_unchecked",frame=f,link=keep,reason=str(exc));return False,None
+            self._note("transfer_follow_small_gap",frame=f,width=gap.width,seam=gap.seam,
+                       choice="seam strike" if taken else "no seam strike now: the follow-up's own rules")
+            if taken:return False,None
         if keep is None and not stand:
             if gap is not None and hb is not None and _sep312(f):
                 handled,offer=self._follow_stacked(state,game,sim,forecast,prefs,made,run,current,gap)
@@ -1707,7 +1929,8 @@ class NativeManualAirChain(NativeChainB2):
         from .tactics import clapper_separated as SEP
         f=state["f"]
         level=abs(float(gap.bounced[3])-float(gap.other_body[3]))<=SEP.DOUBLE_TOP_U
-        if gap.width<=SEP.DOUBLE_GAP_U and level:
+        if gap.width<=SEP.DOUBLE_GAP_U and (level or transfer.small_gap(gap)):
+            # (#385, Sol seq 326: at most TIER_U no tops gate either: the rows' seam strike, never the outer landing for want of a double)
             # handed back through B2 recovery: the keys sent stay the next owner's prefix and the failure responsibility is kept
             self._note("transfer_follow_stacked",frame=f,choice="seam double intent: the ordinary rows",width=gap.width,
                        tops=[float(gap.bounced[3]),float(gap.other_body[3])])

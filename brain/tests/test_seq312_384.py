@@ -158,11 +158,22 @@ def test_small_rune_targets_skip_a_covered_strike_and_hand_on_when_none_is_left(
 
 # ---- the executors: stomp entries ----
 
+def _strike_window(tac, ws, fc):
+    """#385: tick to 1.2.2's strike window (STRIKE_OPEN_F frames after F's antic entry, the slam's tick being k 0)."""
+    f0 = tac.last["clapper_sep_slam"]["antic_f"]
+    out = None
+    while ws.stamp.frame < f0 + SEP.STRIKE_OPEN_F:
+        out = tick(tac, ws, fc)
+    return out
+
+
 def test_n_reaching_past_the_edge_gets_the_stomp_entry_on_n_with_fs_slam_its_source():
-    tac, ws, fc = start((20., 33.), 40.)                  # 1.2.2 (tests/test_separated312's layout)
-    out = slam(tac, ws, fc)
+    tac, ws, fc = start((20., 33.5), 40.)                 # 1.2.2 (8's body 32.5..34.5, the edge 32.76)
+    out = slam(tac, ws, fc, elapsed=0.)
+    assert tac.last["clapper_sep_slam"]["branch"] == "1.2.2" and out.entry_attack is None   # #385: side slashes first
+    out = _strike_window(tac, ws, fc)
     e = out.entry_attack
-    assert tac.last["clapper_sep_slam"]["branch"] == "1.2.2"
+    assert tac.last["clapper_sep_slam"]["mode"] == "strike"
     assert isinstance(e, EntryAttack) and (e.target, e.kind, e.source, e.source_family) == (8, "stomp", 7, "CC_SLAM")
     again = tick(tac, ws, fc)
     assert again.entry_attack is e                        # one entry for the whole slam: the chain never re-binds it
@@ -174,7 +185,7 @@ def _down_hit(ws, iid):
 
 
 def test_the_1_2_2_down_slash_holds_its_bounce_off_the_middle_and_1_2_1_does_not():
-    tac, ws, fc = start((20., 33.), 40.)                  # 1.2.2
+    tac, ws, fc = start((20., 33.5), 40.)                 # 1.2.2
     assert slam(tac, ws, fc).hold_over == frozenset({8})
     tac, ws, fc = start((20., 36.), 45.)                  # 1.2.1: the room past N is itself out of the range
     assert slam(tac, ws, fc).hold_over == frozenset()
@@ -183,29 +194,34 @@ def test_the_1_2_2_down_slash_holds_its_bounce_off_the_middle_and_1_2_1_does_not
 
 
 def test_n_struck_in_the_slam_takes_no_second_entry_and_down_after_both_hammers_no_way_over_it():
+    # #385 (Sol REVIEW384 2): the hit only ends the strike's eligibility; after both hammers the way over N still opens (the vault)
     from ssbot.core.worldstate import E
-    tac, ws, fc = start((20., 33.), 40.)                  # 1.2.2
+    tac, ws, fc = start((20., 33.5), 40.)                 # 1.2.2
     ws.hero.contact = E("GROUND")
-    out = slam(tac, ws, fc)
+    slam(tac, ws, fc, elapsed=0.)
+    out = _strike_window(tac, ws, fc)
     assert out.entry_attack is not None
     _down_hit(ws, 8)
     out = tick(tac, ws, fc)                               # the down slash's real contact on 8 completes its entry
     ws.events = []
-    assert out.entry_attack is None
+    assert out.entry_attack is None and tac.last["clapper_sep_slam"]["strike_hit"] is not None
     change(fc, 7, state="Slam 0")
     out = tick(tac, ws, fc)                               # a pick (the slammer's state changed): no second entry on the struck one
     assert tac.last["clapper_winner"]["rule"] == "sep_slam" and out.entry_attack is None and out.hold_over == frozenset({8})
     change(fc, 7, state="Slam 2"); tick(tac, ws, fc)
     change(fc, 7, state="Slam Recover"); tick(tac, ws, fc)
-    tick(tac, ws, fc)                                     # both hammer stages over, she is down: no way over the struck one, said so
-    assert tac.last["clapper_sep_slam"] is None
-    assert any("struck in this slam" in n["what"] for n in tac.last.get("clapper_sep_notes") or [])
+    out = tick(tac, ws, fc)                               # both hammer stages over, she is down: over the struck one by the vault
+    post = tac.last["clapper_sep_slam"]
+    assert post["phase"] == "post" and post["strike_hit"] is not None and out.entry_attack is None
+    assert out.waypoint is not None and out.waypoint.kind == "vault" and out.waypoint.over_iid == 8
 
 
 def test_n_struck_while_she_is_still_up_after_both_hammers_leaves_the_middle_to_the_chains_own_follow_up():
+    # #385: in the air the way over N opens too (the chain's own follow-up, when it still runs, keeps the keys first)
     from ssbot.core.worldstate import E
-    tac, ws, fc = start((20., 33.), 40.)
-    slam(tac, ws, fc)
+    tac, ws, fc = start((20., 33.5), 40.)
+    slam(tac, ws, fc, elapsed=0.)
+    _strike_window(tac, ws, fc)
     _down_hit(ws, 8)
     tick(tac, ws, fc)
     ws.events = []
@@ -213,9 +229,8 @@ def test_n_struck_while_she_is_still_up_after_both_hammers_leaves_the_middle_to_
     change(fc, 7, state="Slam 2"); tick(tac, ws, fc)
     change(fc, 7, state="Slam Recover"); tick(tac, ws, fc)
     out = tick(tac, ws, fc)
-    assert tac.last["clapper_sep_slam"] is None and out.entry_attack is None and out.hold_over == frozenset()
-    note = next(n for n in tac.last.get("clapper_sep_notes") or [] if "struck in this slam" in n["what"])
-    assert note["grounded"] is False                      # no stage of this unit: the bounce's follow-up, if it still runs, is the chain's
+    assert tac.last["clapper_sep_slam"]["phase"] == "post" and out.entry_attack is None and out.hold_over == frozenset()
+    assert out.waypoint is not None and out.waypoint.kind == "vault"
 
 
 def test_the_slam_edge_side_slash_and_the_way_out_take_no_stomp_entry():
@@ -258,18 +273,19 @@ def test_the_closing_strikes_entry_ends_with_its_scene():
 
 def test_the_separated_slams_entry_ends_with_its_scene():
     from ssbot.core.worldstate import E
-    tac, ws, fc = start((20., 33.), 40.)                  # 1.2.2
+    tac, ws, fc = start((20., 33.5), 40.)                 # 1.2.2
     ws.hero.contact = E("GROUND")
-    out = slam(tac, ws, fc)
+    slam(tac, ws, fc, elapsed=0.)
+    out = _strike_window(tac, ws, fc)
     assert getattr(out.entry_attack, "scope", None) == "sep_slam"
     change(fc, 7, state="Slam 2"); tick(tac, ws, fc)
     change(fc, 7, state="Slam Recover"); tick(tac, ws, fc)
-    out = tick(tac, ws, fc)                               # both hammer stages over: the way into the middle keeps the entry
-    assert tac.last["clapper_sep_slam"]["phase"] == "post" and getattr(out.entry_attack, "scope", None) == "sep_slam"
+    out = tick(tac, ws, fc)                               # both hammer stages over: #385 the way into the middle is no entry (the vault)
+    assert tac.last["clapper_sep_slam"]["phase"] == "post" and getattr(out.entry_attack, "scope", None) != "sep_slam"
+    assert getattr(tac.goal.entry_attack, "scope", None) != "sep_slam"
     change(fc, 8, family=G.CC_JUMP, state="Jump Antic", committed=True)   # a new antic ends it
     out = tick(tac, ws, fc)
     assert tac.last["clapper_sep_slam"] is None and getattr(out.entry_attack, "scope", None) != "sep_slam"
-    assert getattr(tac.goal.entry_attack, "scope", None) != "sep_slam"
 
 
 def test_a_package_stomp_entry_is_only_for_a_target_a_strike_witness_reads():
@@ -282,11 +298,13 @@ def test_a_package_stomp_entry_is_only_for_a_target_a_strike_witness_reads():
     change(fc, tgt, state="Evade Scuttle")
     out = tick(tac, ws, fc)
     assert getattr(out.entry_attack, "scope", None) != "rune_end" and getattr(tac.goal.entry_attack, "scope", None) != "rune_end"
-    # 1.2.2: N evading at the slam's start: no stomp entry on it
-    tac, ws, fc = start((20., 33.), 40.)
+    # 1.2.2: N evading at the slam's start: no stomp entry on it (#385: and none in the strike window either)
+    tac, ws, fc = start((20., 33.5), 40.)
     change(fc, 8, state="Evade Scuttle")
-    out = slam(tac, ws, fc)
+    out = slam(tac, ws, fc, elapsed=0.)
     assert tac.last["clapper_sep_slam"]["branch"] == "1.2.2" and getattr(out.entry_attack, "scope", None) != "sep_slam"
+    out = _strike_window(tac, ws, fc)
+    assert tac.last["clapper_sep_slam"]["mode"] == "wait" and getattr(out.entry_attack, "scope", None) != "sep_slam"
 
 
 def test_an_unpressed_scene_stomp_hands_back_when_its_scene_entry_ends(monkeypatch):

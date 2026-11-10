@@ -860,6 +860,9 @@ SEAM_INSET_U=.5          # the seam aim stays over the target body this far insi
 MIDDLE_STEP_F=2          # release grid of the middle rows (0.275 u of landing at the 8.25 u/s air walk)
 MIDDLE_SCAN_N=8          # middle rows scanned per batched raster pass, nearest the goal first, until one is clean
 FOLLOW_SCAN_F=12         # an owned route's per-tick scan: its next 12 frames (the whole route was scanned when chosen)
+HOLD_OUT_U=1.25          # Task 182 seq 312 #385: a held bounce follow-up (hold_over) drifts to her centre this far off the bounced body's outer
+#                          edge, away from the slammer: her box 1.0 u off it, at least .75 u within SEAM_TOL_U of the aim (C12 sy12_122: at .75 she
+#                          hung 0.28 u off N and a stray step met it; the floor vault over N clears from 1.0 u: s312/vault385pad.py)
 
 
 def follow_scope(goal,target,close=False):
@@ -947,6 +950,15 @@ def near_landing_goal(gap,hero_box):
 CLOSE_PAIR_GAP_U=12.
 
 
+def small_gap(gap):
+    """Task 182 seq 312 #385 (the person 11-10, Sol seq 326; L2 plan "所有翻入/返回中间的共享小间隙后手"): the two facing body edges at most
+    clapper_separated.TIER_U apart (overlapping always): a return into the middle takes one down slash aligned with the seam (gap.seam),
+    whatever it meets, before any middle landing (no double-hit proof, no standing-gap proof). The L2 side reads the same value
+    (clapper_separated.seam_return)."""
+    from .tactics import clapper_separated as SEP
+    return bool(gap is not None and SEP.active() and gap.width<=SEP.TIER_U)
+
+
 def close_pair(gap,hero_box):
     """Task 183 seq 265: the two Clappers are close: no standable gap between them (seq 262), or a standable one at most
     CLOSE_PAIR_GAP_U wide. Only a close pair takes the seam strike on the target's inner side; a wider pair keeps the
@@ -1003,7 +1015,8 @@ def seam_geometry(state,goal,target,close=False):
     right=root>oroot                                       # the target on the right: its left side is the inner one
     sign=-1 if right else 1
     bound=seam_bound(sign,[root],tb)
-    if x1-x0<=2*SEAM_INSET_U:aim=.5*(x0+x1)
+    if small_gap(gap):aim=gap.seam                         # #385 (Sol seq 326): the shared small-gap strike, aligned with the seam itself
+    elif x1-x0<=2*SEAM_INSET_U:aim=.5*(x0+x1)
     else:
         clear=half+MIDDLE_PAD_U+SEAM_TOL_U                 # stopping anywhere within SEAM_TOL_U still keeps MIDDLE_PAD_U
         aim=max(x0,nx1)+clear if right else min(x1,nx0)-clear
@@ -1263,6 +1276,22 @@ def register(prims):
             return bound is not None and (cx-bound)*sign>=0.,bound
         return inner,rejects
 
+    def bound_contact(x,inner,rejects):
+        """Task 182 seq 312 #385 (the person's 1.2.2: down slash N outside the range, before it unlocks): a row counts only with her
+        centre at its first contact on her side of bound_x ((x - bound_x) * sign >= 0) and that contact by frame by_f (x.v["strike_bound"]),
+        together with the seam predicate when there is one; the turned-down rows go to the same record. (predicate, rejects)"""
+        sb=x.v.get("strike_bound")
+        if not sb:return inner,rejects
+        bx,sg,by_f=float(sb[0]),int(sb[1]),int(sb[2])
+        fo=int(x.obs.sim.fo)
+        if rejects is None:
+            rejects=[];x.v["seam_rejects"]=rejects
+
+        def bounded(cx,j,witness,support):
+            if (cx-bx)*sg<0. or fo+j>by_f:return False,bx
+            return (True,None) if inner is None else inner(cx,j,witness,support)
+        return bounded,rejects
+
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or x.v.get("no_strike") or not hasattr(x.obs,"sim") or x.obs.ground:return None
@@ -1270,7 +1299,8 @@ def register(prims):
         # close pair now), no row on any side; a seam row is held to the target's inner side below (seam_contact)
         if x.v.get("seam_only") and not x.v.get("seam_inner"):return None
         from . import pogo_model as PM
-        inner,rejects=seam_contact(x)
+        inner,rejects=bound_contact(x,*seam_contact(x))
+        side=x.v.get("strike_dir") or x.v["side"]   # #385: 1.2.2's rows toward the target from the aim (the air key may be none there)
         if control(x.obs.e)[0]=="Walk":
             # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
             # existing approach continues and the next tick re-selects. Never the still-body witness below.
@@ -1278,7 +1308,7 @@ def register(prims):
             support=(None if prefix is None else
                      walk_body_support(x.obs.e,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
             if support is None:return None
-            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),x.v["side"],clean=plan_over_call(x.v),
+            row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),side,clean=plan_over_call(x.v),
                               contact_ok=inner,rejects=rejects)
             if row is None:return None
             x.v["row"]=row
@@ -1318,7 +1348,7 @@ def register(prims):
                                   idle_time=idle_time_of(ev))
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
-        row=press_now_row(x.obs.sim,body,x.obs.F,left,x.v["side"],attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
+        row=press_now_row(x.obs.sim,body,x.obs.F,left,side,attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
                           contact_ok=inner,rejects=rejects)
         if row is not None:
             x.v["row"]=row
@@ -1380,6 +1410,7 @@ def register(prims):
     def face_hook(x):
         v=x.v
         if v.get("seam_only"):return None   # Task 183 seq 268: the middle return's give-way is a seam down-slash row only
+        if v.get("strike_bound"):return None   # Task 182 seq 312 #385: 1.2.2's down slash outside the range (a hook pulls her to the face)
         if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("no_strike") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
                 or x.obs.ground or v.get("iid")==v.get("caster")):return None
         toward=1 if v.get("side")==B["R"] else -1 if v.get("side")==B["L"] else 0
@@ -1435,12 +1466,17 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False,hold_over=False):
+            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False,hold_over=False,bound=None):
     """One observed-distance recipe and a two-frame external path.
 
     hold_over (Task 182 seq 312 #384, plan 1.2.2): a bounce follow-up held off the middle this tick (the other Clapper's slam
-    still has a hammer stage: knife_chain_air_native._hold_over): no seam aim and no seam row, the bounced one's own side
-    rule as before (over its body: no side key).
+    still has a hammer stage: knife_chain_air_native._hold_over): no seam aim and no seam row; #385: the side key toward
+    HOLD_OUT_U off the bounced body's outer edge (away from the slammer), none within SEAM_TOL_U of it.
+    bound (Task 182 seq 312 #385, the person's 1.2.2 and Sol seq 326's seam strike; GoalPrefs.strike_bound): (aim_x, bound_x, sign,
+    by_f, jump_hold, kind) for a stomp that is no bounce: the jump held jump_hold (1.2.2: a short one, its apex box just over the top,
+    the strike near it; None: the stomp's own), in the air the
+    side key only up to aim_x (no key within SEAM_TOL_U), the strike rows still tried toward the target (strike_dir), each kept only
+    with her centre at its first contact on her side of bound_x and that contact by by_f (stomp_plan's bound_contact); no face hook.
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
     Its sent Run keeps that intent until the native adapter's planned handoff.
@@ -1503,12 +1539,20 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if bounce_entry and target==p.caster and link!="strike":
         side=B["R"] if enemy["pos"][0]>hp[0] else B["L"]
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
+        if hold_over:
+            # Task 182 seq 312 #385 (the person's 1.2.2): the hold waits out the slammer's hammers off the bounced body's outer edge (straight
+            # down over it the fall meets it; outward is away from the slammer): the side key toward HOLD_OUT_U off that edge, none near it
+            out=1 if float(enemy["pos"][0])>float(other["pos"][0]) else -1
+            p=replace(p,side=aim_side(float(hp[0]),(float(body[2]) if out>0 else float(body[0]))+out*HOLD_OUT_U))
     close=bool(active.v.get("follow_close")) if active is not None else bounce_close(state,goal,h)
     seam=None
     if bounce_entry and link!="strike" and not ground and not hold_over:
         seam=seam_geometry(state,goal,target,close)    # Task 183: the target's inner side by the seam (seq 265: a close pair)
         # seq 264: roots in the same place (side unknown): no aim, the original approach side stays and no seam row
         if seam is not None and seam.aim is not None:p=replace(p,side=aim_side(float(hp[0]),seam.aim))
+    if bound is not None and not bounce_entry and link in {"jump","air"}:
+        # Task 182 seq 312 #385 (the person's 1.2.2): the jump and the air no farther than the aim over the target's outer part
+        p=replace(p,side=aim_side(float(hp[0]),float(bound[0])))
     landed_entry=bool(active is not None and active.link in {"air","bounce_tail"} and
                       ground and active.v.get("air_entry") and not tail_pending)
     if tail_pending:
@@ -1534,7 +1578,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
             from .knife_chain_face_hook import early_jump_due
             early_due=early_jump_due(cache,k,target_state)
         if not (defer_jump or approach_only) and (gap<=cfg["STOMP"]["jump_root"] or early_due):
-            p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash)
+            hold=int(cfg["STOMP"]["jump_hold"]) if bound is None or bound[4] is None else int(bound[4])   # #385: 1.2.2's short jump
+            p=replace(p,jump_k=k+2,jump_until=k+2+hold,sprint_jump=held_dash)
         elif (link=="walk" and current_mode not in (K.M_DASH,K.M_SPRINT) and
                 not (int(sim.prefix[0])|state["act"]["hf"]["latched"])&B["DASH"] and
                 gap<=cfg["STOMP"]["dash_min_root"]):
@@ -1580,6 +1625,9 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
                                                        None if seam.aim is None else float(seam.aim)]
     variables["seam_rejects"]=None
     variables["hold_over"]=bool(hold_over)   # Task 182 seq 312 #384: this tick's only (the record of the held follow-up)
+    # Task 182 seq 312 #385: this tick's only: 1.2.2's contact limits (stomp_plan's bound_contact) and the strike rows' direction
+    variables["strike_bound"]=None if bound is None or bounce_entry else [float(bound[1]),int(bound[2]),int(bound[3])]
+    variables["strike_dir"]=None if bound is None or bounce_entry else (B["R"] if enemy["pos"][0]>hp[0] else B["L"])
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp

@@ -262,6 +262,10 @@ class GoalPrefs(TacticPrefs):
     hold_over: frozenset = frozenset()     # Task 182 seq 312 (#384; the person, plan 1.2.2): the near one L2's 1.2.2 down slashes at the range edge while the
     #                                        far one's slam goes on. After a real bounce on it the chain's follow-up stays off the middle (no middle landing, no
     #                                        seam aim) while that slam still has a hammer stage, then goes into the middle as before (knife_chain_air_native)
+    strike_bound: tuple | None = None      # Task 182 seq 312 #385 (the person 11-10, plan 1.2.2: while F slams, N locked, down slash N outside the range before
+    #                                        it unlocks): (iid, aim_x, bound_x, sign, by_f, jump_hold) for the chain's stomp on that one: a short jump (J held
+    #                                        jump_hold), in the air the side key only up to aim_x, strike rows tried toward it as usual but kept only with her
+    #                                        centre at the first contact on her side of bound_x ((x - bound_x) * sign >= 0) and that contact by frame by_f
 
 
 

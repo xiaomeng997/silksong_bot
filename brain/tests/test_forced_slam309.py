@@ -79,7 +79,13 @@ def _new_glide(pl, rows):
     return (np.asarray(d["mode"])[rows, int(d["P"]) + 1:] == kin.M_GLIDE).any(axis=1)
 
 
-def test_forced_with_a_visible_slam_opens_no_new_umbrella_while_a_row_without_one_is_allowed(params, arena):  # noqa: F811
+@pytest.fixture
+def filter_on(monkeypatch):
+    """seq 312 #385: the seq 309 filter is off by default (the person, Sol seq 328); SSBOT_FORUM_SLAM_NO_NEW_GLIDE=1 puts it back."""
+    monkeypatch.setattr(fp, "SLAM_NO_NEW_GLIDE", True)
+
+
+def test_forced_with_a_visible_slam_opens_no_new_umbrella_while_a_row_without_one_is_allowed(params, arena, filter_on):  # noqa: F811
     pl, r, _ = _forced_tick(params, arena)
     assert r.forced_risk
     ls = pl.last_sel
@@ -87,6 +93,21 @@ def test_forced_with_a_visible_slam_opens_no_new_umbrella_while_a_row_without_on
     assert not _new_glide(pl, np.flatnonzero(ls["sel"])).any()
     assert not _new_glide(pl, np.array([r.idx]))[0]
     assert pl.last_info["forced_slam"] == {"units": 1, "dropped": int(_new_glide(pl, np.flatnonzero(ls["allowed"])).sum())}
+
+
+def test_by_default_the_forced_rows_under_a_visible_slam_keep_their_new_umbrella_candidates(params, arena, monkeypatch):  # noqa: F811
+    # seq 312 #385 (the person 11-10: "那就给关上吧"): the same forced tick under the same visible hammer with the filter off (the default)
+    # and on: off keeps exactly the new-umbrella rows that on drops (nothing else changes in the candidate set); the slam is still recorded
+    assert fp.SLAM_NO_NEW_GLIDE is False
+    pl, r, _ = _forced_tick(params, arena)
+    assert r.forced_risk and pl.last_info["forced_slam"] == {"units": 1, "dropped": 0, "no_new_glide": "off"}
+    off = set(np.flatnonzero(pl.last_sel["sel"]))
+    assert _new_glide(pl, np.array(sorted(off))).any()                     # new-umbrella rows still selectable
+    monkeypatch.setattr(fp, "SLAM_NO_NEW_GLIDE", True)                     # the old filter, the same tick: they are dropped
+    pl_on, r_on, _ = _forced_tick(params, arena)
+    on = np.flatnonzero(pl_on.last_sel["sel"])
+    assert not _new_glide(pl_on, on).any() and pl_on.last_info["forced_slam"]["dropped"] > 0
+    assert "no_new_glide" not in pl_on.last_info["forced_slam"]
 
 
 def test_without_a_visible_slam_the_forced_rows_keep_the_umbrella(params, arena):  # noqa: F811
@@ -105,7 +126,7 @@ def test_a_float_already_open_is_not_excluded(params, arena):  # noqa: F811
     assert _new_glide(pl, np.flatnonzero(pl.last_sel["sel"])).all()
 
 
-def test_the_rule_holds_only_while_a_row_without_a_new_umbrella_is_allowed(params, arena, monkeypatch):  # noqa: F811
+def test_the_rule_holds_only_while_a_row_without_a_new_umbrella_is_allowed(params, arena, monkeypatch, filter_on):  # noqa: F811
     """Every allowed row opening an umbrella: nothing to prefer, the rows stay (forced-risk semantics unchanged)."""
     real = kin.rollout
 

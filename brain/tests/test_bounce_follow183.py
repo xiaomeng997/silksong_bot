@@ -1106,10 +1106,15 @@ def test_distant_pair_keeps_the_old_follow_up(monkeypatch):
 
 def test_seam_aim_is_the_target_inner_side_clear_of_the_other_body(monkeypatch):
     # bodies overlap: the bounced right one [35.52, 39.11], the other [32.16, 35.75]; her half width 0.25
+    from ssbot.combat.tactics import clapper_separated as SEP
     bout = Bout(monkeypatch, other=(7, 33.5, 1))
     s = bout.state(bout.sim())
     assert T.bounce_close(s, bout.goal, s['hero'])
     right, left = T.body_box(bout.ents[1]), T.body_box(bout.ents[0])
+    # seq 312 #385 (the person 11-10, Sol seq 326): overlapping (a gap of at most 2.5 u) is the shared seam strike, aimed at the seam itself
+    aim = T.seam_aim(s, bout.goal, 8)
+    assert abs(aim - .5 * (left[2] + right[0])) < 1e-9
+    monkeypatch.setattr(SEP, "ENABLED", False)                                  # the package off: the Task 183 aim as before
     aim = T.seam_aim(s, bout.goal, 8)                                          # target the bounced (right) one
     assert abs(aim - (left[2] + .25 + T.MIDDLE_PAD_U + T.SEAM_TOL_U)) < 1e-9 and right[0] < aim < right[2]
     cross = TransferGoal(7, 8, BOUNCE_F, bout.goal.cast_ta, 'BOUNCE', bout.goal.responsibility)

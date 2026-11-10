@@ -64,10 +64,13 @@ def test_separated_slam_stays_outside_its_range_and_slashes_the_near_one_only_wi
 
 
 def test_n_reaching_out_past_the_edge_gets_down_slashes_then_the_way_into_the_middle_after_both_hammers():
-    tac, ws, fc = start((20., 33.), 40.)                  # 8's body 32..34 crosses the edge 32.76
-    out = slam(tac, ws, fc)
-    assert tac.last["clapper_sep_slam"]["branch"] == "1.2.2" and out.target == 8
-    assert out.stance_x == pytest.approx(33.01) and out.hit_kw[8][3] > 0 and out.hit_kw[8][:3] == (0., 0., 0.)
+    # #385 (the person 11-10): 8's body 32.5..34.5 crosses the edge 32.76 with a down slash's room outside it (1.2.2): side slashes first
+    # (F's antic clock from its Control row), then over 8 into the middle once both hammer stages are over (the vault waypoint)
+    tac, ws, fc = start((20., 33.5), 40.)
+    out = slam(tac, ws, fc, elapsed=0.)
+    sep = tac.last["clapper_sep_slam"]
+    assert sep["branch"] == "1.2.2" and sep["mode"] == "side" and out.target == 8
+    assert out.stance_x == pytest.approx(34.5 + .25 + SEP.SIDE_GAP_U) and out.hit_kw[8][0] > 0 and out.hit_kw[8][1:] == (0., 0., 0.)
     assert 7 in out.no_hit
     change(fc, 7, state="Slam 2"); tick(tac, ws, fc)
     change(fc, 7, state="Slam Recover"); out = tick(tac, ws, fc)   # its first Recover frame: the colliders of Slam 2's end still count
@@ -75,9 +78,14 @@ def test_n_reaching_out_past_the_edge_gets_down_slashes_then_the_way_into_the_mi
     out = tick(tac, ws, fc)                                          # both hammer stages over: over 8 into the middle
     post = tac.last["clapper_sep_slam"]
     assert post["phase"] == "post" and tac.last["clapper_winner"]["rule"] == "sep_slam" and out.target == 8
-    assert out.stance_x == pytest.approx(32. - SEP.FALL_U - .25)      # her box 1 u inside 8's inner edge
-    assert 8 not in out.ground_hit | out.no_pogo | out.ground_first     # its side slash counts from the air
-    assert 7 in out.no_hit and tac.last["clapper_scene"] == "separated slam 1.2.2 after: into the middle"
+    assert out.stance_x == pytest.approx(32.5 - SEP.FALL_U - .25)    # her box 1 u inside 8's inner edge
+    assert out.waypoint is not None and out.waypoint.kind == "vault" and out.waypoint.over_iid == 8 and out.entry_attack is None
+    assert {7, 8} <= out.no_hit                                        # #385: no hit on the unlocked 8 before she is past it
+    assert tac.last["clapper_scene"] == "separated slam 1.2.2 after: into the middle"
+    hero_at(ws, 31.); ws.hero.contact = E("AIR")                       # over it, past its inner edge
+    out = tick(tac, ws, fc)
+    assert 8 not in out.no_hit and 8 not in out.ground_hit | out.no_pogo | out.ground_first   # its side slash counts from the air
+    assert 7 in out.no_hit
     hit_on(ws, 8); tick(tac, ws, fc)                                   # the hit ends it
     assert tac.last["clapper_sep_slam"] is None
 
@@ -239,26 +247,29 @@ def test_the_rune_across_plan_keeps_its_places_out_of_the_circle():
 # ---- #379: the stacked pair ----
 
 def test_no_gap_return_takes_the_seam_double_when_level_else_the_ground_in_front_of_the_near_one():
-    tac, ws, fc = start((20., 23.), 15.)                  # near edges 1 u apart: no standing gap
-    out = near_attack(tac, ws, fc)
-    assert tac.last["clapper_scene"] == "middle return: seam double" and out.stance_x == pytest.approx(21.5)
-    assert out.hit_kw[out.target][3] > 0 and not ({7, 8} & out.no_hit)
-    tac, ws, fc = start((20., 23.), 15.)
-    top(ws, 8, 8.2)                                       # the far one's top 1.2 u higher: no double
-    out = near_attack(tac, ws, fc)
-    assert tac.last["clapper_scene"] == "middle return: no gap, ground in front of the near one"
-    assert out.target == 7 and out.stance_x < 19. and 7 not in out.hit_kw
+    # #385 (the person 11-10, Sol seq 326): a gap of at most 2.5 u is the shared seam strike whatever the tops; past it #379 as before
+    for higher in (None, 8.2):                            # level tops, then the far one's top 1.2 u higher (no #379 double)
+        tac, ws, fc = start((20., 23.), 15.)              # near edges 1 u apart: no standing gap
+        if higher is not None:
+            top(ws, 8, higher)
+        out = near_attack(tac, ws, fc)
+        assert tac.last["clapper_scene"] == "middle return: seam strike" and out.stance_x == pytest.approx(21.5)
+        assert out.hit_kw[out.target][3] > 0 and not ({7, 8} & out.no_hit)
+    tac, ws, fc = start((20., 24.6), 15.)                 # near edges 2.6 u apart: past 2.5 u, a standing gap (JT 2.0 + 2 x 0.25)
+    top(ws, 8, 8.2)
+    near_attack(tac, ws, fc)
+    assert tac.last["clapper_scene"] == "middle return ground"   # the entry's own place (no air pose is left past 2.5 u under seq 312)
 
 
 def test_tight_middle_takes_the_seam_double_or_the_ground_never_the_overhead_root():
-    tac, ws, fc = start((20., 21.5), 20.75)
-    out = tick(tac, ws, fc)
-    assert tac.last["clapper_region"] == "tight" and tac.last["clapper_scene"] == "tight middle: seam double"
-    assert out.stance_x == pytest.approx(20.75)
-    tac, ws, fc = start((20., 21.5), 20.75)
-    top(ws, 8, 8.2)
-    out = tick(tac, ws, fc)
-    assert tac.last["clapper_scene"] == "tight middle: ground in front of the near one" and out.target == 7 and out.stance_x < 19.
+    # #385: overlapping (a gap of at most 2.5 u) is the shared seam strike whatever the tops
+    for higher in (None, 8.2):
+        tac, ws, fc = start((20., 21.5), 20.75)
+        if higher is not None:
+            top(ws, 8, higher)
+        out = tick(tac, ws, fc)
+        assert tac.last["clapper_region"] == "tight" and tac.last["clapper_scene"] == "tight middle: seam strike"
+        assert out.stance_x == pytest.approx(20.75)
 
 
 def test_the_chase_does_not_follow_a_focus_behind_the_other_one():
@@ -464,15 +475,21 @@ def test_small_rune_target_change_hands_an_unpressed_approach_back(monkeypatch):
 
 
 def test_stacked_follow_up_hands_the_seam_double_to_the_rows_or_takes_the_ordinary_landing(monkeypatch):
+    # #385 (the person 11-10, Sol seq 326): overlapping bodies (a gap of at most 2.5 u) are the shared seam strike first: the existing
+    # witnessed seam strike, aimed at the seam itself; without it the rows' seam strike (no tops gate), never the outer landing
+    from ssbot.combat import knife_chain_air_native as AN
     from tests.test_bounce_follow183 import Bout
     bout = Bout(monkeypatch, other=(7, 33.5, 1), link='air', tail_done=True)      # the bodies overlap: no standable gap
-    assert bout.tick() is None
-    st = bout.notes('transfer_follow_stacked')
-    assert st and st[0]['choice'] == "seam double intent: the ordinary rows" and bout.notes('b2_recovery')
-    monkeypatch.setattr(SEP, "DOUBLE_TOP_U", -1.)                               # never level: no double
-    bout = Bout(monkeypatch, other=(7, 33.5, 1), link='air', tail_done=True)
     offer = bout.tick()
-    st = bout.notes('transfer_follow_stacked')
-    assert st and st[-1]['choice'] in ("left_landing", "right_landing", "no legal outer landing: the existing seam strike")
-    if st[-1]['choice'] != "no legal outer landing: the existing seam strike":
-        assert offer is not None and offer.draft.run.link == 'land'
+    small = bout.notes('transfer_follow_small_gap')
+    assert small and small[0]['choice'] == "seam strike" and small[0]['width'] < 0 and not bout.notes('transfer_follow_stacked')
+    assert offer is not None and offer.draft.run.v["seam_inner"][2] == pytest.approx(small[0]['seam'])
+    cls = next(c for c in vars(AN).values() if isinstance(c, type) and "_no_strike_witness" in vars(c))
+    monkeypatch.setattr(cls, "_no_strike_witness", lambda self, *a: "test: no witness")   # no seam strike of the chain's own
+    for level in (True, False):
+        if not level:
+            monkeypatch.setattr(SEP, "DOUBLE_TOP_U", -1.)                       # never level: still the rows' seam strike
+        bout = Bout(monkeypatch, other=(7, 33.5, 1), link='air', tail_done=True)
+        assert bout.tick() is None
+        st = bout.notes('transfer_follow_stacked')
+        assert st and st[0]['choice'] == "seam double intent: the ordinary rows" and bout.notes('b2_recovery')

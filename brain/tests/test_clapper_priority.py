@@ -215,14 +215,19 @@ def test_outside_jump_retreat_is_not_overwritten_by_escape_or_wall_pressure(side
 
 
 @pytest.mark.parametrize("side", [-1, 1])
-def test_outside_near_attack_requests_inward_contact_without_fake_crossing(side):
-    xs, hx = ((20., 24.), 16.) if side < 0 else ((40., 36.), 44.)
+@pytest.mark.parametrize("apart", [4., 6.])
+def test_outside_near_attack_requests_inward_contact_without_fake_crossing(side, apart):
+    xs, hx = ((20., 20. + apart), 16.) if side < 0 else ((40., 40. - apart), 44.)
     tac, ws, fc = scene(xs, hx); step(tac, ws, fc)
     change(fc, 7, family=G.CC_SLAM, state="Slam Antic", committed=True)
     out = step(tac, ws, fc)
     assert out.target == 7 and (out.stance_x-xs[0]) * side < 0
     assert 7 not in out.no_hit and out.hit_kw[7][3] > 0
-    assert tac.last["clapper_scene"] == "flip inward intent"
+    # seq 312 #385 (the person 11-10, Sol seq 326): the bodies 2 u apart (at most 2.5 u): the shared seam strike at the seam itself
+    if apart == 4.:
+        assert tac.last["clapper_scene"] == "flip inward: seam strike" and out.stance_x == pytest.approx(.5 * (xs[0] + xs[1]))
+    else:
+        assert tac.last["clapper_scene"] == "flip inward intent"
 
 
 @pytest.fixture

@@ -41,6 +41,8 @@ class WaypointGoal:
     tol: float = TOL_U
     over: tuple | None = None   # (x0, y0, x1, y1) a body between her and the place she must pass above
     family: str | None = None   # the jump's family: who answers for a failure of this Run
+    over_iid: int | None = None   # kind "vault" (Task 182 seq 312 #385): the Clapper whose body `over` is (her fall slash's target)
+    land: tuple | None = None     # kind "vault": (lo, hi) the band her centre lands in past the body (else within tol of x)
 
 
 def _key(direction: int) -> int:
@@ -286,6 +288,139 @@ def next_mask(sim, goal: WaypointGoal, f: int):
             return key | K.B_DASH, "dash"
         return key, "go"
     return (key | K.B_DASH, "dash") if k_dash == 0 else (key, "go")
+
+
+# ---- Task 182 seq 312 #385 (Sol REVIEW384 1-2; the person's 1.2.2: over N into the middle once both hammer stages of F's slam are over) ----
+# kind "vault": a bounded way over one body to one place from her actual model state, on the ground or in the air. No route above a body
+# exists from the floor without a jump: a full jump keeps her box over an Idle top for 28 frames, 3.8 u of run, short of its 4.5 u span and her
+# own width; its free air dash near the apex keeps her over it for 4.9 - 6.2 u (design probe s312/jump385.py). So: one jump (J held a few fixed
+# lengths, on the ground only), the key toward the place from the first frame, the free air dash at a few fixed frames, then the key released
+# on a grid once she is past the body. Chosen once on an event and then followed as an absolute row (the caller scans it).
+VAULT_JH = (16, 20, 30)           # J held this many key indices from the first free mask frame (30: the full jump; 12 never cleared a top)
+VAULT_KEY = (0, 6, 10, 14)        # ... the key toward the place from this key index (next to the body she rises first; in the air: 0)
+VAULT_DASH = (None, 0, 4, 14, 18, 22)   # the free air dash's first key index (two frames of DASH), None: no dash
+VAULT_DASH_GROUND = (None, 14, 18, 22)  # ... from the floor: only once the jump has lifted her (an earlier one is a floor dash into the body)
+VAULT_REL_STEP = 2                # the release grid of the side key past the body (key indices)
+VAULT_REL_N = 12                  # ... at most this many releases tried per kept recipe
+VAULT_PAD = .25                   # her box kept this far off the body's sides on the way over (out of her invulnerability)
+VAULT_PAD_TOP = .1                # ... and this far over its top (BODY_TOP is the recorded collider's top; at .25 no floor start 1-2 u
+#                                   from an Idle body cleared it: the full jump's box crosses the near edge 0.16 u over the top, s312/vault385pad.py)
+VAULT_H = 64                      # key indices rolled (a full jump lands within 55, a late dash within 49 from the floor)
+VAULT_ALTS = 5                    # the next-best rows returned with the best (one per landing place, by the same order): the caller scans them
+#                                   in that order when a better one's whole route is blocked (C14 sy14_122: the nearest landing met the slammer's
+#                                   move forecast)
+
+
+def _air_index(flags, off):
+    """(takeoff, landing) rollout indices: the first airborne index from off on and the first ground index after it, or None each."""
+    g = (np.asarray(flags) & K.F_GROUND) != 0
+    idx = np.arange(len(g))
+    air = np.flatnonzero(~g & (idx >= off))
+    if not len(air):
+        return None, None
+    land = np.flatnonzero(g & (idx > air[0]))
+    return int(air[0]), (int(land[0]) if len(land) else None)
+
+
+def vault_row(sim, goal: WaypointGoal, f: int):
+    """kind "vault": over goal.over to goal.x by goal.by_f from her actual model state (the in-flight prefix and hold included). The finite
+    rows above in two batched rolls: the recipes with the key held throughout, then for each recipe that clears the body the side key released
+    on a grid past it. A row counts when her box never meets the body grown by VAULT_PAD (sides) / VAULT_PAD_TOP (top) out of her
+    invulnerability, she is past its far edge
+    before she lands, and she lands with her centre inside goal.land (else within goal.tol of goal.x) by the frame. The one landing nearest
+    goal.x (then no dash before a dash, then the shorter hold, then the earlier landing): dict(masks: from key index 0 through the landing,
+    land_k: the landing's key index, land_box, takeoff_k, recipe, alts: up to VAULT_ALTS next rows in that order, one per landing place),
+    or None (no row; past the body already)."""
+    m = SimRoller(sim)
+    body = goal.over
+    if body is None:
+        return None
+    zero = m.rollout(np.zeros((1, 2), np.int64))
+    x0 = float(zero.centre[0, m.off, 0])
+    d = 1 if goal.x > x0 else -1
+    key = _key(d)
+    far = float(body[2] if d > 0 else body[0])
+    grown = (float(body[0]) - VAULT_PAD, float(body[1]), float(body[2]) + VAULT_PAD, float(body[3]) + VAULT_PAD_TOP)
+    b0 = zero.box[0, m.off]
+    if (float(b0[0]) >= grown[2]) if d > 0 else (float(b0[2]) <= grown[0]):
+        return None                     # past the body already: no vault (the caller's place is no vault any more)
+    ground = bool(int(zero.flags[0, m.off]) & K.F_GROUND)
+    held_j = bool(int(np.asarray(sim.prefix).reshape(-1)[-1]) & K.B_JUMP)
+    jh = VAULT_JH if ground or held_j else (0,)
+    keys = VAULT_KEY if ground else (0,)
+    k_dash = dash_ready_k(m.start, m.off, m.dt)
+    air_free = float(m.start[K.AIRDASHED]) <= 0
+    dashes = [dk for dk in (VAULT_DASH_GROUND if ground else VAULT_DASH) if dk is None or (dk >= k_dash and air_free)]
+    by_k = int(goal.by_f) - (int(f) + 2)
+    recipes = [(h, s, dk) for h in jh for s in keys for dk in dashes if dk is None or dk >= s]
+    rows = np.zeros((len(recipes), VAULT_H), np.int64)
+    for i, (h, s, dk) in enumerate(recipes):
+        rows[i, :h] |= K.B_JUMP
+        rows[i, s:] |= key
+        if dk is not None:
+            rows[i, dk:dk + 2] |= K.B_DASH
+    lo, hi = (goal.land if goal.land is not None else (float(goal.x) - goal.tol, float(goal.x) + goal.tol))
+
+    def judge(ro, i):
+        box, fl = ro.box[i], np.asarray(ro.flags[i])
+        t, j = _air_index(fl, m.off)
+        if j is None or (t is None and not ground):
+            return None
+        way = box[m.off + 1:j + 1]
+        inv = (fl[m.off + 1:j + 1] & K.F_INVULN) != 0
+        hit = ((way[:, 0] <= grown[2]) & (way[:, 2] >= grown[0]) & (way[:, 1] <= grown[3]) & (way[:, 3] >= grown[1])) & ~inv
+        if np.any(hit):
+            return None
+        past = way[:, 0] >= grown[2] if d > 0 else way[:, 2] <= grown[0]
+        if not np.any(past):
+            return None
+        return t, j, int(np.argmax(past)) + m.off + 1
+
+    ro = m.rollout(rows)
+    kept = [(i, r) for i in range(len(recipes)) for r in (judge(ro, i),) if r is not None]
+    if not kept:
+        return None
+    rel_rows, meta = [], []
+    for i, (t, j, p) in kept:
+        k_p = p - m.off
+        for r in list(range(k_p, j - m.off, VAULT_REL_STEP))[:VAULT_REL_N] + [None]:
+            row = rows[i].copy()
+            if r is not None:
+                row[r:] &= ~np.int64(K.B_LEFT | K.B_RIGHT)
+            rel_rows.append(row)
+            meta.append((i, r))
+    ro2 = m.rollout(np.stack(rel_rows))
+    found = []
+    for n, (i, r) in enumerate(meta):
+        res = judge(ro2, n)
+        if res is None:
+            continue
+        t, j, p = res
+        lb = ro2.box[n, j]
+        cx = .5 * (float(lb[0]) + float(lb[2]))
+        if not lo <= cx <= hi or j - m.off > max(by_k, 0) + 2:
+            continue
+        h, s, dk = recipes[i]
+        found.append(((abs(cx - float(goal.x)), dk is not None, h, j), n, i, r, t, j, lb))
+    if not found:
+        return None
+    found.sort(key=lambda c: c[0])
+    out, seen = [], set()
+    for _, n, i, r, t, j, lb in found:
+        land = round(.5 * (float(lb[0]) + float(lb[2])), 1)
+        if land in seen:
+            continue                     # (one row per landing place: the alternatives differ where she comes down)
+        seen.add(land)
+        h, s, dk = recipes[i]
+        out.append(dict(masks=[int(v) for v in rel_rows[n][:j - m.off + 1]], land_k=int(j - m.off),
+                        takeoff_k=None if t is None else int(t - m.off), land_box=[float(v) for v in lb],
+                        recipe=dict(jump=int(h), key=int(s), dash=dk, release=r), far_edge=far,
+                        box=np.asarray(ro2.box[n, :j + 1], float).copy(), flags=np.asarray(ro2.flags[n, :j + 1]).copy()))
+        if len(out) >= VAULT_ALTS + 1:
+            break
+    best = out[0]
+    best["alts"] = out[1:]
+    return best
 
 
 def route_keys(sim, goal: WaypointGoal, f: int, mask: int, dash_refused: bool = False):
