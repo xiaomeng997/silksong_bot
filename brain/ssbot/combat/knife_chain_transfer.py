@@ -1299,7 +1299,20 @@ def register(prims):
         # close pair now), no row on any side; a seam row is held to the target's inner side below (seam_contact)
         if x.v.get("seam_only") and not x.v.get("seam_inner"):return None
         from . import pogo_model as PM
-        inner,rejects=bound_contact(x,*seam_contact(x))
+        inner0,rejects0=seam_contact(x)
+        inner,rejects=bound_contact(x,inner0,rejects0)
+        # Task 182 seq 312 #386: a seam-kind bound (the shared seam strike) is the preferred contact, never a ban on the stomp over the body:
+        # with no row meeting it (the seam side out of reach before the contact) the target's ordinary rows whose contact has her centre over
+        # its body (sy23_seam 131555-131570: every row turned down over N's outer half, the side key held back, she fell onto N unstruck);
+        # never a contact on its side from beside it (sy24_seam 131524: a side contact low beside N, the bounce's approach then met N).
+        # 1.2.2's "outside" bound stays a hard limit.
+        sb=x.v.get("strike_bound")
+        soft=bool(sb) and len(sb)>3 and sb[3]=="seam"
+        x.v["seam_bound_fallback"]=False
+
+        def over_body(cx,j,witness,support):
+            if not float(witness[0])<=cx<=float(witness[2]):return False,None
+            return (True,None) if inner0 is None else inner0(cx,j,witness,support)
         side=x.v.get("strike_dir") or x.v["side"]   # #385: 1.2.2's rows toward the target from the aim (the air key may be none there)
         if control(x.obs.e)[0]=="Walk":
             # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
@@ -1310,6 +1323,10 @@ def register(prims):
             if support is None:return None
             row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),side,clean=plan_over_call(x.v),
                               contact_ok=inner,rejects=rejects)
+            if row is None and soft:
+                row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),side,clean=plan_over_call(x.v),
+                                  contact_ok=over_body,rejects=rejects0)
+                x.v["seam_bound_fallback"]=row is not None
             if row is None:return None
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
@@ -1350,6 +1367,10 @@ def register(prims):
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
         row=press_now_row(x.obs.sim,body,x.obs.F,left,side,attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
                           contact_ok=inner,rejects=rejects)
+        if row is None and soft:
+            row=press_now_row(x.obs.sim,body,x.obs.F,left,side,attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
+                              contact_ok=over_body,rejects=rejects0)
+            x.v["seam_bound_fallback"]=row is not None
         if row is not None:
             x.v["row"]=row
             return {"do":"goto","to":"strike"}
@@ -1626,7 +1647,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables["seam_rejects"]=None
     variables["hold_over"]=bool(hold_over)   # Task 182 seq 312 #384: this tick's only (the record of the held follow-up)
     # Task 182 seq 312 #385: this tick's only: 1.2.2's contact limits (stomp_plan's bound_contact) and the strike rows' direction
-    variables["strike_bound"]=None if bound is None or bounce_entry else [float(bound[1]),int(bound[2]),int(bound[3])]
+    variables["strike_bound"]=None if bound is None or bounce_entry else [float(bound[1]),int(bound[2]),int(bound[3]),
+                                                                          str(bound[5]) if len(bound)>5 else "outside"]
     variables["strike_dir"]=None if bound is None or bounce_entry else (B["R"] if enemy["pos"][0]>hp[0] else B["L"])
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only

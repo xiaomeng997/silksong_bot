@@ -56,6 +56,15 @@ REACH_U = 3.02           # the side slash from her centre to a body edge (knife_
 POST_S = 1.2             # an after-step (2.3's one strike): given up this long after it began
 POST_VAULT_S = 2.0       # 1.2.2's way into the middle (#385): the bounce's hold landing plus a floor vault (~0.8 s); at POST_S a vault after
 #                          the slammer walked or evaded off the middle no longer fit (C16 sy16_122 131535)
+POST_ACT_F = int(round(POST_VAULT_S * 60))   # #386: one action of the way back into the middle after a slam (the vault, the seam strike's
+#                          entry): its deadline. Past it, a landing outside or a tier change, a new action; the intent itself has no deadline
+SEAM_DONE_U = 1.5        # #386: the way back's seam strike is done with a hit on either body while her centre is this near the seam (the
+#                          chain's seam rows: her centre at the contact on the seam side of the target's root, a body half width ~1.1 u from it)
+MIDDLE_HOLD_F = 20       # #386: the way back is done this many frames after she first dropped below both tops between the facing edges (or
+#                          at once on the floor there): her fall slash's frames, and no intent kept open over the middle by hops
+# #386: an action of the way back already in the air keeps its tier (seam / fall) until she lands; the next action takes TIER_U's tier
+# (sy21_seam 131537 / sy22_seam 131542: the slammer's evade took the gap past TIER_U mid-approach and dropped the action before its press;
+# its strike still meets the body between her and the middle)
 # 1.2.2 (#385, the person 11-10): while F winds up its slam N is locked: a hit on Idle N only cancels it back to Idle (s312/Q_LOCK385.json: 12
 # of 14 hits on N during F's antic, Dmg Attack -> Close Range -> Idle in the hit frame, 2 by Avoid Type -> Walk; N unlocks at F's Slam 2
 # entry, Is Attacking cleared). So: side slashes on N first, then a short jump and the down slash on N's outer part, outside the range, before N
@@ -119,15 +128,17 @@ def circles_across(tac, t, hx, x_to):
     return [sp for sp in live_circles(tac, t) if not sp[0] <= hx <= sp[1] and sp[0] < hi and sp[1] > lo]
 
 
+def in_circle(sc, x) -> bool:
+    """Her centre at x inside a live big rune circle (lit now or still to come, the shared ledger), grown by her half widths and the pad."""
+    from .gauntlet import JT
+    geo = sc.geo
+    return any(lo - geo["right"] - JT["pad"] < x < hi + geo["left"] + JT["pad"] for lo, hi in live_circles(sc.tac, sc.t))
+
+
 def place_clear(sc, x) -> bool:
     """Sol #382 R1: her centre at x is outside every live big rune circle (grown by her half widths and the pad) and no live circle lies
     across her way there from where she stands (the shared ledger, as circles_across reads it)."""
-    from .gauntlet import JT
-    geo = sc.geo
-    for lo, hi in live_circles(sc.tac, sc.t):
-        if lo - geo["right"] - JT["pad"] < x < hi + geo["left"] + JT["pad"]:
-            return False
-    return not circles_across(sc.tac, sc.t, sc.hx, x)
+    return not in_circle(sc, x) and not circles_across(sc.tac, sc.t, sc.hx, x)
 
 
 def behind(hx, near, far) -> bool:

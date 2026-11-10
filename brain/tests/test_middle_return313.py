@@ -185,10 +185,20 @@ def test_a_new_attack_suspends_the_return_until_it_is_over():
     assert tac.last["clapper_back"]["move"] == [7, G.CC_SLAM] and tac.last["clapper_winner"]["rule"] == "back"
 
 
-def test_a_far_attack_makes_no_return():
+def test_a_far_attack_makes_no_return(seq312_off):
     tac, ws, fc = scene(xs=(20., 34.), hx=5.); step(tac, ws, fc)          # 15 u from it all along
     near_attack(tac, ws, fc)
     assert tac.last["clapper_back"] is None and tac.last["clapper_winner"]["rule"] != "back"
+
+
+def test_with_seq312_a_far_slam_makes_the_return_due_a_far_cast_none():
+    # #386 (the person 11-10, Sol seq 330: "锤后一律回中间"): a slam's end, both Clappers here, wherever she was; other far moves as before
+    tac, ws, fc = scene(xs=(20., 34.), hx=5.); step(tac, ws, fc)
+    near_attack(tac, ws, fc)
+    assert tac.last["clapper_back"] is not None and tac.last["clapper_back"]["move"] == [7, G.CC_SLAM]
+    tac, ws, fc = scene(xs=(20., 34.), hx=5.); step(tac, ws, fc)
+    near_attack(tac, ws, fc, family=G.CC_CAST, states=("Spell Antic", "Cast 1"))
+    assert tac.last["clapper_back"] is None
 
 
 @pytest.mark.parametrize("facing,offered", [(1., False), (-1., True)])

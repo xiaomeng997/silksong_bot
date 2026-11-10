@@ -43,6 +43,8 @@ class WaypointGoal:
     family: str | None = None   # the jump's family: who answers for a failure of this Run
     over_iid: int | None = None   # kind "vault" (Task 182 seq 312 #385): the Clapper whose body `over` is (her fall slash's target)
     land: tuple | None = None     # kind "vault": (lo, hi) the band her centre lands in past the body (else within tol of x)
+    end: str | None = None        # kind "vault" (#386, Sol REVIEW385): "past": the route ends at its real air hand-back point, her box past
+    #                               the body (grown by VAULT_PAD) in the air; no landing is chosen or checked (the next owner's)
 
 
 def _key(direction: int) -> int:
@@ -377,6 +379,8 @@ def vault_row(sim, goal: WaypointGoal, f: int):
         return t, j, int(np.argmax(past)) + m.off + 1
 
     ro = m.rollout(rows)
+    if goal.end == "past":
+        return _vault_end_rows(m, ro, rows, recipes, grown, d, ground, by_k, far)
     kept = [(i, r) for i in range(len(recipes)) for r in (judge(ro, i),) if r is not None]
     if not kept:
         return None
@@ -416,6 +420,65 @@ def vault_row(sim, goal: WaypointGoal, f: int):
                         takeoff_k=None if t is None else int(t - m.off), land_box=[float(v) for v in lb],
                         recipe=dict(jump=int(h), key=int(s), dash=dk, release=r), far_edge=far,
                         box=np.asarray(ro2.box[n, :j + 1], float).copy(), flags=np.asarray(ro2.flags[n, :j + 1]).copy()))
+        if len(out) >= VAULT_ALTS + 1:
+            break
+    best = out[0]
+    best["alts"] = out[1:]
+    return best
+
+
+def dash_lock_end(modes, i) -> int:
+    """The last index of the air dash going on at index i (its locked motion), else i."""
+    modes = np.asarray(modes)
+    while i + 1 < len(modes) and int(modes[i]) == K.M_DASH:
+        i += 1
+    return int(i)
+
+
+def _vault_end_rows(m, ro, rows, recipes, grown, d, ground, by_k, far):
+    """vault_row for goal.end "past" (#386, Sol REVIEW385: the route's revocable part ends at its real air hand-back point): per recipe the
+    first index past the body (her box past its far edge grown by VAULT_PAD) while she is in the air, her box never meeting the body (grown,
+    VAULT_PAD_TOP over its top) out of her invulnerability before it, by the frame. The keys run through that index, through the end of an
+    air dash still locked then. No landing is chosen or required (the next owner's, with its own checks). Earliest hand-back first (then no
+    dash, then the shorter hold); one row per hand-back place, up to VAULT_ALTS alternatives."""
+    found = []
+    for i in range(len(recipes)):
+        box, fl = ro.box[i], np.asarray(ro.flags[i])
+        t, j = _air_index(fl, m.off)
+        if t is None:
+            continue
+        stop = len(fl) if j is None else j
+        way = box[m.off + 1:stop]
+        if not len(way):
+            continue
+        past = way[:, 0] >= grown[2] if d > 0 else way[:, 2] <= grown[0]
+        past &= ((fl[m.off + 1:stop] & K.F_GROUND) == 0)
+        if not np.any(past):
+            continue
+        p = int(np.argmax(past)) + m.off + 1
+        seg = box[m.off + 1:p + 1]
+        inv = (fl[m.off + 1:p + 1] & K.F_INVULN) != 0
+        hit = ((seg[:, 0] <= grown[2]) & (seg[:, 2] >= grown[0]) & (seg[:, 1] <= grown[3]) & (seg[:, 3] >= grown[1])) & ~inv
+        if np.any(hit) or p - m.off > max(by_k, 0) + 2:
+            continue
+        e = dash_lock_end(ro.mode[i], p)
+        h, s, dk = recipes[i]
+        found.append(((p, dk is not None, h), i, t, p, e))
+    if not found:
+        return None
+    found.sort(key=lambda c: c[0])
+    out, seen = [], set()
+    for _, i, t, p, e in found:
+        eb = ro.box[i, p]
+        place = round(.5 * (float(eb[0]) + float(eb[2])), 1)
+        if place in seen:
+            continue
+        seen.add(place)
+        h, s, dk = recipes[i]
+        out.append(dict(masks=[int(v) for v in rows[i][:e - m.off + 1]], end_k=int(p - m.off), lock_k=int(e - m.off),
+                        takeoff_k=int(t - m.off), end_box=[float(v) for v in eb], land_k=None, land_box=None,
+                        recipe=dict(jump=int(h), key=int(s), dash=dk, release=None), far_edge=far,
+                        box=np.asarray(ro.box[i, :e + 1], float).copy(), flags=np.asarray(ro.flags[i, :e + 1]).copy()))
         if len(out) >= VAULT_ALTS + 1:
             break
     best = out[0]

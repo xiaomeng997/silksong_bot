@@ -461,7 +461,9 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, fr
             m["near"] = m["near"] or abs(float(s.pos[0]) - hx) <= TWO_SLAM_RANGE_U
         elif m is not None:
             del moves[s.iid]
-            if m["near"] and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
+            # #386 (the person 11-10, Sol seq 330: "锤后一律回中间"): a slam's end with both Clappers here makes the return due wherever she was
+            slam = SEP.active() and m["family"] == SEP.CC_SLAM and len(subjects) == 2
+            if (m["near"] or slam) and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
                 mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False,
                                    **({} if frame is None else {"end_f": frame}))
     due = mem.get("back")
@@ -482,6 +484,12 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, fr
         return None
     circle = [s.iid for s in subjects if s.iid in tac.rune and t <= tac.rune[s.iid][3]
               and (pose["stance"] - tac.rune[s.iid][0]) * tac.rune[s.iid][1] > 0]
+    if not circle and SEP.active():
+        # #386 (Sol seq 330: only a live big rune in the middle holds the return; the shared per-generation ledger, one burst not the end of
+        # all): her place or the seam inside a live circle (grown by her half widths and the pad)
+        from .gauntlet import JT
+        circle = [(lo, hi) for lo, hi in SEP.live_circles(tac, t)
+                  if any(lo - geo["right"] - JT["pad"] < x < hi + geo["left"] + JT["pad"] for x in (pose["stance"], pose["seam"]))]
     if circle:
         return None
     due["offered"] = True
@@ -506,14 +514,25 @@ class MiddleReturn(Tactic):
                              sc.frame if forum_v2.RETURN_AIR else None)
         if before is not None and sc.mem.get("back") is None:
             released(sc, self, "landed in the standing gap" + ("" if before.get("offered") else " before any offer"))
+        due = sc.mem.get("back")
+        if home is not None and due is not None and SEP.active() and sc.geo is not None and type(sc.frame) is int:
+            # #386 (Sol REVIEW385 2): the seam tier's action (the shared seam strike's entry, its deadline): one from the tick the two
+            # facing edges come within TIER_U, a new one past its deadline; none past TIER_U (a gap that opens turns the return to its
+            # ground pose at once, as before: the chain hands an approach not yet pressed back)
+            if _seam_after(sc) is None:
+                due["seam_f"] = None
+            elif type(due.get("seam_f")) is not int or sc.frame > due["seam_f"] + SEP.POST_ACT_F:
+                due["seam_f"] = sc.frame
         return home
 
     def repick(self, sc):
-        # a pick when the return becomes live or stops being live (back_live: whether it was at the last call)
+        # a pick when the return becomes live or stops being live (back_live: whether it was at the last call); #386: on its seam action's
+        # first tick (its entry)
         live = sc.events.get(self.event) is not None
         ask = live != sc.mem.get("back_live", False)
         sc.mem["back_live"] = live
-        return ask
+        due = sc.mem.get("back")
+        return ask or bool(live and due is not None and SEP.active() and due.get("seam_f") == sc.frame)
 
     def propose(self, sc):
         home = sc.events.get(self.event)
@@ -535,7 +554,20 @@ class MiddleReturn(Tactic):
         return [("back", target, 1.)], None
 
     def pick_entry(self, sc, rule, target, previous):
-        return None
+        # #386 (Sol REVIEW385 2: the entries still on the ordinary rows bind to the shared executor): the seam tier's strike as the chain's
+        # stomp entry on the target (scope "seam_back", event_f its action's first frame; the move that ended its source and responsibility)
+        due = sc.mem.get("back")
+        if (not SEP.active() or sc.events.get(self.event) is None or due is None or type(due.get("seam_f")) is not int
+                or _seam_after(sc) is None or not _stompable(sc, target.iid)):
+            return None
+        src = next((s for s in sc.subjects if s.iid == due.get("iid")), None)
+        if src is None:
+            return None
+        if (previous is not None and getattr(previous, "scope", None) == "seam_back"
+                and (previous.target, previous.source, previous.event_f) == (target.iid, src.iid, due["seam_f"])):
+            return previous
+        return EntryAttack(target.iid, "stomp", src.iid, str(due["family"]), abs(float(src.pos[0]) - sc.hx), sc.t, scope="seam_back",
+                           event_f=int(due["seam_f"]))
 
     def apply(self, sc, rule, g, target):
         if sc.events.get(self.event) is None:
@@ -565,6 +597,21 @@ class MiddleReturn(Tactic):
     def finish(self, sc, rule, won, g, out):
         pose = sc.back_pose if won else None
         mem, t, geo = sc.mem, sc.t, sc.geo
+        e, due = out.entry_attack, mem.get("back")
+        if getattr(e, "scope", None) == "seam_back":
+            t_ = next((s for s in sc.subjects if s.iid == e.target), None)
+            if (pose is None or pose.get("posture") != "seam" or due is None or e.event_f != due.get("seam_f") or e.target != g.target
+                    or t_ is None or not _stompable(sc, e.target)):
+                # #386: the seam strike entry is this return's seam action's, one that can be executed now; the chain hands an approach not
+                # yet pressed back (knife_chain_air_native)
+                g.entry_attack = None
+                out = replace(out, entry_attack=None)
+            else:
+                # (the shared executor: the air key only up to the seam, rows kept with her centre at the contact on the seam side of the
+                # target's root, by the action's deadline)
+                sign = 1 if float(pose["stance"]) > float(t_.pos[0]) else -1
+                out = replace(out, strike_bound=(t_.iid, float(pose["stance"]), float(t_.pos[0]), sign,
+                                                 int(due["seam_f"]) + SEP.POST_ACT_F, None, "seam"))
         landed = mem.get("back_end")
         landed = (landed is not None and landed.get("end") == "landed in the standing gap"
                   and 0. <= t - landed["end_t"] <= RETURN_LANDED_S and geo is not None and geo["region"] == "middle"
@@ -920,9 +967,11 @@ class SeparatedSlam(Tactic):
     past N on its inner side when that room is itself outside the range (1.2.1: down slashes take her over it, then side slashes from the
     inside); at the outer one of the circle's and the range's edges, whatever she reaches slashed (1.1). Inside the range: the action layer's
     bounded way out to the edge before the earliest first hammer frame (waypoint Run; its own step checks, dash lock and late hand-back).
-    1.2.2 once both hammer stages are over: over N into the middle, its side slash in the air (no landing first), only with standing room
-    there; otherwise, and after a hit, her landing, a new antic or POST_VAULT_S, the ordinary rules. No place outside the range on her side inside
-    the walls: not offered (the existing rules: design 3.2's wall cases)."""
+    #386 (the person 11-10, Sol seq 330): once both hammer stages are over, every branch back into the middle, unless a live big rune lies
+    over it (postponed): the two facing edges at most TIER_U apart, the shared seam strike (the chain's seam executor); wider, over the body
+    between her and the middle (the vault to its air hand-back point) and her air side slash on it as she falls (no landing first). A hit, an
+    evade, no standing room or a tier change never ends it; in the middle, its seam strike's hit, a new antic or a body gone does. No place
+    outside the range on her side inside the walls: not offered (the existing rules: design 3.2's wall cases)."""
     name = "separated slam"
     event = "sep_slam"
     scores = {"sep_slam": 125.}
@@ -961,20 +1010,25 @@ class SeparatedSlam(Tactic):
                         rec["mode"], rec["mode_f"] = place.get("mode"), sc.frame
                     return dict(phase="slam", far=sep["far"].iid, near=sep["near"].iid, kind=sep["kind"], place=place,
                                 rec=rec)
-            elif rec is not None and rec.get("pogo") and post is None and not rec.get("post_done"):
+            elif rec is not None and rec.get("branch") is not None and post is None and not rec.get("post_done"):
+                # #386 (the person 11-10, Sol seq 330): after both hammer stages, with both Clappers here, always back into the middle, every
+                # branch (1.1 / 1.2.1 / 1.2.2 / 1.2.3)
                 post = self._post_start(sc, sep, rec)
         if post is not None:
-            return dict(phase="post", far=post["far"], near=post["near"], post=post)
+            tier = self._post_tier(sc, post)
+            self._post_act(sc, post, tier)
+            return dict(phase="post", far=post["far"], near=post["near"], post=post, tier=tier)
         return None
 
     def repick(self, sc):
-        # the way into the middle starts on this tick (the hammer's end is no new state of its own); #385: so does 1.2.2's strike window
-        # (its stomp entry is picked as it opens)
+        # the way into the middle is picked on each of its actions' first tick (its start: the hammer's end is no new state of its own; #386:
+        # a tier change, a landing outside, a deadline: the seam strike's entry is that action's); #385: 1.2.2's strike window too (its stomp
+        # entry is picked as it opens)
         ctx = sc.events.get(self.event)
         if not SEP.active() or ctx is None:
             return False
         if ctx["phase"] == "post":
-            return ctx["post"]["f0"] == sc.frame
+            return ctx["post"].get("act_f") == sc.frame
         return ctx["place"].get("mode") == "strike" and ctx["rec"].get("mode_f") == sc.frame
 
     def _latched(self, sc):
@@ -995,99 +1049,128 @@ class SeparatedSlam(Tactic):
         return None
 
     def _post_start(self, sc, sep, rec):
-        """1.2.2 once both hammer stages are over (#385, Sol REVIEW384 2: the move apart from the strike's eligibility): standing room in the
-        middle and N not evaded in this slam opens the way into it, whether N was struck or not; the move over N is the action layer's
-        bounded vault (finish: WaypointGoal kind "vault"), her air side slash on N the ordinary owners' (only where they can make it).
-        N evaded (the person: outside the range until the slam is over) or no room: none, said so."""
+        """#386 (the person 11-10, Sol seq 330: "锤后一律回中间，除非中间有大符文"): once both hammer stages of F's slam are over, with both
+        Clappers here, every branch (1.1 / 1.2.1 / 1.2.2 / 1.2.3) goes back into the middle: an intent kept until she is in the middle (on the
+        floor between the two facing edges) or its seam strike met a body, a new antic (its own rules first) or a body gone. N evaded or struck
+        in the slam, no standing room, no double hit: none of them prevents or ends it (each kept for the record); a live big rune in the
+        middle postpones it (the ordinary rules meanwhile). Its action is chosen every tick from the current bodies (_post_tier), each action
+        one of its own (_post_act: its deadline, waypoint key and entry)."""
         rec["post_done"] = True
         far, near = sep["far"], sep["near"]
-        notes = sc.tac.last.setdefault("clapper_sep_notes", [])
-        if rec.get("near_evaded") is not None:
-            notes.append(dict(what="after the slam: N evaded in it: no way into the middle", far=far.iid, near=near.iid,
-                              evaded=rec["near_evaded"], f=sc.frame))
-            return None
-        small, seam, gap = SEP.seam_return(sc.geo)
-        room = SEP.middle_room(sc.geo, near, far, rec["face"])
-        if room is None and not small:
-            notes.append(dict(what="after the slam: no standing room in the middle", far=far.iid, near=near.iid, f=sc.frame))
-            return None
-        # Sol seq 326 (the person 11-10): the two at most TIER_U apart: the shared seam strike (over N, then one down slash at the seam, both
-        # bodies credited); otherwise her fall FALL_U inside N's inner edge with the air side slash on N
-        x = seam if small else SEP.fall_x(sc.geo, near.iid, -rec["face"], *room)
-        post = sc.mem["sep_post"] = dict(far=far.iid, near=near.iid, x=float(x), face=rec["face"], t0=sc.t, f0=sc.frame,
-                                         air_seen=not sc.grounded, room=None if room is None else [float(v) for v in room],
-                                         seam=float(seam) if small else None, gap=float(gap), near_hit=rec.get("near_hit"),
-                                         strike_hit=rec.get("strike_hit"))
+        post = sc.mem["sep_post"] = dict(far=far.iid, near=near.iid, face=rec["face"], t0=sc.t, f0=sc.frame, branch=rec.get("branch"),
+                                         slam_f=rec.get("f0"), near_hit=rec.get("near_hit"), strike_hit=rec.get("strike_hit"),
+                                         near_evaded=rec.get("near_evaded"), air_seen=not sc.grounded, tier=None, act_f=None, acts=0)
         return post
 
     @staticmethod
-    def _short_of_near(sc, post):
-        """#385: her centre not yet past N's inner edge (still over N or on its outer side), or no facts to tell."""
-        if sc.geo is None or post["near"] not in sc.geo["bodies"]:
-            return True
-        a, b = SEP._span(sc.geo, post["near"])
-        return (sc.hx - (a if post["face"] > 0 else b)) * post["face"] >= 0
+    def _post_tier(sc, post=None):
+        """#386 (Sol seq 330: geometry and action follow the current bodies; a hit or a tier change never drops the intent): the way back's
+        action this tick. dict(tier: "seam" (the two facing edges at most TIER_U apart: the shared seam strike, the chain's executor), "fall"
+        (wider: over the body between her and the middle, then her air side slash on it as she falls FALL_U inside its edge: 1.2.2's own
+        target), "rune" (her place in the middle inside a live big rune circle: postponed); between: the body between her and the middle (on
+        her side of the seam), other, x: her place, seam, gap). An action already in the air keeps its seam / fall tier until she lands."""
+        geo = sc.geo
+        low, high = geo["low"], geo["high"]
+        small, seam, gap = SEP.seam_return(geo)
+        if post is not None and post.get("tier") in ("seam", "fall") and not sc.grounded:
+            small = post["tier"] == "seam"
+        between, other = (low, high) if sc.hx <= seam else (high, low)
+        toward = 1 if between is low else -1                    # from the between body toward the middle
+        if small:
+            x = seam
+        else:
+            room = SEP.middle_room(geo, between, other, -toward)
+            x = seam if room is None else SEP.fall_x(geo, between.iid, toward, *room)
+        tier = "rune" if SEP.in_circle(sc, x) else "seam" if small else "fall"
+        return dict(tier=tier, between=between.iid, other=other.iid, toward=toward, x=float(x), seam=float(seam), gap=float(gap))
 
-    def _post_vault(self, sc, post):
-        """#385 (Sol REVIEW384 1-2): the way into the middle over N as the action layer's bounded vault (knife_chain_waypoint kind "vault":
-        over N's current body to the current standing room, from her actual floor or air state, with its own route scans, landing check and
-        hand-back) while N's body still lies between her and the room; None once her box is past N's inner edge (the ordinary owners: the
-        stance, her air side slash on N) or without the facts."""
-        if sc.geo is None or type(post.get("f0")) is not int:
+    @staticmethod
+    def _post_act(sc, post, tier):
+        """#386 (Sol seq 330: the intent apart from its action; an action's own timeout and hand-back stay): a new action of the way back on
+        a tier change, a landing outside the middle (one inside it ended the intent) or its deadline (POST_ACT_F): its own waypoint key, entry
+        and contact deadline."""
+        why = None
+        if tier["tier"] != post.get("tier"):
+            why = "tier " + tier["tier"]
+        elif sc.grounded and post.get("air_seen"):
+            why = "landed outside the middle"
+        elif type(sc.frame) is int and type(post.get("act_f")) is int and sc.frame > post["act_f"] + SEP.POST_ACT_F:
+            why = "deadline"
+        if why is None:
+            post["air_seen"] = bool(post.get("air_seen") or not sc.grounded)
+            return
+        post.update(tier=tier["tier"], act_f=sc.frame, acts=post.get("acts", 0) + 1, air_seen=not sc.grounded)
+        hist = post.setdefault("act_log", [])
+        if len(hist) < 12:
+            hist.append([sc.frame, tier["tier"], why])
+
+    @staticmethod
+    def _below_tops(sc, low, high):
+        """Her box bottom under the lower of the two bodies' tops (the scene's tops); unknown: False."""
+        tops = (sc.geo or {}).get("tops") or {}
+        ta, tb = tops.get(low.iid), tops.get(high.iid)
+        try:
+            bottom = min(float(p[1]) for p in sc.ws.hero.hurtbox)
+        except (AttributeError, TypeError, ValueError, IndexError):
+            return False
+        return ta is not None and tb is not None and bottom < min(float(ta), float(tb))
+
+    @staticmethod
+    def _short_of(sc, iid, toward):
+        """Her centre not yet past that body's edge toward the middle, or no facts to tell."""
+        if sc.geo is None or iid not in sc.geo["bodies"]:
+            return True
+        a, b = SEP._span(sc.geo, iid)
+        return (sc.hx - (b if toward > 0 else a)) * toward <= 0
+
+    def _post_vault(self, sc, post, tier):
+        """The fall tier's way over the body between her and the middle as the action layer's bounded vault (#385; #386, Sol REVIEW385 1:
+        no landing band: the route ends at its real air hand-back point past that body, knife_chain_waypoint end "past", its en-route
+        checks for all owners, sent prefix and dash lock kept), while that body still lies between her and the middle; None once her box is
+        past its inner edge (the ordinary owners: the stance, her air side slash on it) or without the facts."""
+        if sc.geo is None or type(post.get("act_f")) is not int:
             return None
-        n = next((s for s in sc.subjects if s.iid == post["near"]), None)
-        far = next((s for s in sc.subjects if s.iid == post["far"]), None)
-        if n is None or far is None:
+        n = next((s for s in sc.subjects if s.iid == tier["between"]), None)
+        if n is None:
             return None
         a, b = SEP._span(sc.geo, n.iid)
-        face = post["face"]
-        if post.get("seam") is not None:
-            # the seam strike's way over N: a landing band in the gap itself (her box and VAULT_PAD_TOP clear of both bodies; the vault hands
-            # back once past N, the rows strike the seam); a gap she cannot land in has no vault (the ordinary owners from her side)
-            fa, fb = SEP._span(sc.geo, far.iid)
-            lo_e, hi_e = (fb, a) if face > 0 else (b, fa)
-            lo = lo_e + sc.geo["left"] + WP.VAULT_PAD_TOP
-            hi = hi_e - sc.geo["right"] - WP.VAULT_PAD_TOP
-            room = (lo, hi) if hi > lo else None
-        else:
-            room = SEP.middle_room(sc.geo, n, far, face)
-        if room is None:
-            return None
-        n_in = a if face > 0 else b                                # N's edge toward F
-        trail = sc.geo["right"] if face > 0 else sc.geo["left"]    # her half width toward N on her way to F
-        if (sc.hx - n_in) * face < -(trail + WP.VAULT_PAD):
-            return None
+        toward = tier["toward"]
         root = float(n.pos[0])
         over = (min(a, root - clapper_plans.BODY_HALF), 0., max(b, root + clapper_plans.BODY_HALF), clapper_plans.BODY_TOP)
-        return WP.WaypointGoal(float(post["x"]), int(post["f0"]) + int(round(SEP.POST_VAULT_S * 60)), "vault", int(post["far"]),
-                               (("sep_post", int(post["far"]), round(float(post["t0"]), 4)), 0, "vault"), over=over,
-                               family=SEP.CC_SLAM, over_iid=int(n.iid), land=(float(room[0]), float(room[1])))
+        far = over[2] if toward > 0 else over[0]                    # the passed box's edge toward the middle (the chain's own test)
+        trail = sc.geo["left"] if toward > 0 else sc.geo["right"]    # her half width toward it on her way
+        if (sc.hx - far) * toward > trail + WP.VAULT_PAD:
+            return None
+        # its place: the hand-back point itself, beyond that edge toward the middle (vault_row takes the direction from the place: a place
+        # at the fall's x, inside that box edge, pointed back over the body once she was past it: sy25_vault3 131562)
+        x = far + toward * (trail + WP.VAULT_PAD + .25)
+        return WP.WaypointGoal(float(x), int(post["act_f"]) + SEP.POST_ACT_F, "vault", int(post["far"]),
+                               (("sep_post", int(post["far"]), round(float(post["t0"]), 4), int(post["act_f"])), 0, "vault"),
+                               over=over, family=SEP.CC_SLAM, over_iid=int(n.iid), end="past")
 
     def _post_end(self, sc, post):
         by = {s.iid: s for s in sc.subjects}
-        far, near = by.get(post["far"]), by.get(post["near"])
-        if far is None or near is None or sc.geo is None:
+        if by.get(post["far"]) is None or by.get(post["near"]) is None or sc.geo is None or len(sc.subjects) != 2:
             return "a body gone or no geometry"
-        if sc.t > post["t0"] and _hit_on(sc, {near.iid}):
-            return "a hit on the near one"
-        if not sc.grounded:
-            post["air_seen"] = True
-        elif post["air_seen"]:
-            a, b = SEP._span(sc.geo, near.iid)
-            if (sc.hx - (a if post["face"] > 0 else b)) * post["face"] < 0:
-                return "landed"
-            # #385 (C13 sy13_122 131517): a landing still on her side of N (the bounce's hold, a vault not begun) is no end: the way over N
-            # starts from the floor (the waypoint's own second start state)
-            post["air_seen"] = False
-            post.setdefault("landed_outside", []).append(sc.frame)
         if any(s.state in NEW_ANTICS for s in sc.subjects):
-            return "a new antic"
-        if sc.t - post["t0"] > SEP.POST_VAULT_S:
-            return "timed out"
-        if post.get("seam") is None and SEP.middle_room(sc.geo, near, far, post["face"]) is None:
-            return "the middle closed"
-        if post.get("seam") is not None and not SEP.seam_return(sc.geo)[0]:
-            return "the seam opened past TIER_U"
+            return "a new antic (its own rules first)"
+        low, high = sc.geo["low"], sc.geo["high"]
+        b1, a2 = SEP._span(sc.geo, low.iid)[1], SEP._span(sc.geo, high.iid)[0]
+        if b1 < sc.hx < a2:
+            if sc.grounded:
+                return "in the middle"
+            # dropped below both tops there: her fall slash's frames, then done (sy25_vault3 131534: the planner hopped on its landing
+            # frame and the intent stayed open over the middle; sy26_vault: ended at once, it took the fall slash's frames too)
+            if type(sc.frame) is int and self._below_tops(sc, low, high) and type(post.get("mid_f")) is not int:
+                post["mid_f"] = sc.frame
+            if type(sc.frame) is int and type(post.get("mid_f")) is int and sc.frame - post["mid_f"] >= SEP.MIDDLE_HOLD_F:
+                return "in the middle (in the air)"
+        else:
+            post["mid_f"] = None
+        small, seam, _ = SEP.seam_return(sc.geo)
+        small = small or post.get("tier") == "seam"
+        if small and sc.t > post["t0"] and _hit_on(sc, {low.iid, high.iid}) and abs(sc.hx - seam) <= SEP.SEAM_DONE_U:
+            return "its seam strike met a body"
         return None
 
     def propose(self, sc):
@@ -1096,8 +1179,14 @@ class SeparatedSlam(Tactic):
         ctx = sc.events.get(self.event)
         if ctx is None:
             return [], "no separated slam"
-        target = ctx["place"]["target"] if ctx["phase"] == "slam" else sc.subject(ctx["near"])
-        return [("sep_slam", target, 1.)], None
+        if ctx["phase"] == "post":
+            tier = ctx["tier"]
+            if tier["tier"] == "rune":
+                # (Sol seq 330: the only condition that holds the way back; the intent stays and its action is chosen again once it is over)
+                return [], "after the slam: a live big rune over the middle: the way back postponed"
+            target = next((s for s in sc.subjects if s.iid == tier["between"]), None)
+            return ([("sep_slam", target, 1.)], None) if target is not None else ([], "after the slam: no body to pass")
+        return [("sep_slam", ctx["place"]["target"], 1.)], None
 
     def pick_entry(self, sc, rule, target, previous):
         # Sol REVIEW383 (#384): 1.2.1 / 1.2.2 are the action owners' down slash on N: the existing EntryAttack stomp, bound by the chain to
@@ -1105,21 +1194,28 @@ class SeparatedSlam(Tactic):
         # the Task 183 follow-up: the middle landing with its fall slash, held off the middle while F's slam still has a hammer stage in 1.2.2:
         # GoalPrefs.hold_over). One entry for the whole slam (kept across picks: the chain never re-binds it) and none once N is struck by it
         # (its real contact completes the entry); 1.2.3, 1.1 and inside the range: none (the edge, the way out). #385: 1.2.2's entry only in
-        # its strike window; the way into the middle after both hammers is no entry (the vault waypoint).
+        # its strike window. #386 (Sol REVIEW385 2): the way back's seam tier is the shared seam strike's entry (scope "seam_slam", one per
+        # action: event_f its first frame), bound by the chain to its seam executor; the fall tier has none (the vault waypoint).
         ctx = sc.events.get(self.event)
         if not SEP.active() or ctx is None:
             return None
-        if ctx["phase"] == "slam":
-            p, rec = ctx["place"], ctx["rec"]
-            # (the floor way out: inside the range on the ground; an approach in the air keeps its entry and its place bound; #385: 1.2.2's
-            # only in its strike window, until its down slash meets N, side slashes before it not counting)
-            if ((p["inside"] and sc.grounded) or p["branch"] not in ("1.2.1", "1.2.2") or p["target"].iid != target.iid
-                    or (p["branch"] == "1.2.1" and rec.get("near_hit") is not None)
-                    or (p["branch"] == "1.2.2" and (p.get("mode") != "strike" or rec.get("strike_hit") is not None))):
+        if ctx["phase"] == "post":
+            tier, post = ctx["tier"], ctx["post"]
+            far = next((s for s in sc.subjects if s.iid == ctx["far"]), None)
+            if (tier["tier"] != "seam" or target.iid != tier["between"] or type(post.get("act_f")) is not int or far is None
+                    or not _stompable(sc, target.iid)):
                 return None
-        else:
-            # #385 (Sol REVIEW384 2): the way into the middle after both hammers is the bounded vault over N (finish's waypoint) and the
-            # ordinary owners' air side slash / the shared seam strike: no stomp entry on N then
+            if (previous is not None and getattr(previous, "scope", None) == "seam_slam"
+                    and (previous.target, previous.source, previous.event_f) == (target.iid, far.iid, post["act_f"])):
+                return previous
+            return EntryAttack(target.iid, "stomp", far.iid, SEP.CC_SLAM, abs(float(far.pos[0]) - sc.hx), sc.t, scope="seam_slam",
+                               event_f=int(post["act_f"]))
+        p, rec = ctx["place"], ctx["rec"]
+        # (the floor way out: inside the range on the ground; an approach in the air keeps its entry and its place bound; #385: 1.2.2's
+        # only in its strike window, until its down slash meets N, side slashes before it not counting)
+        if ((p["inside"] and sc.grounded) or p["branch"] not in ("1.2.1", "1.2.2") or p["target"].iid != target.iid
+                or (p["branch"] == "1.2.1" and rec.get("near_hit") is not None)
+                or (p["branch"] == "1.2.2" and (p.get("mode") != "strike" or rec.get("strike_hit") is not None))):
             return None
         far = next((s for s in sc.subjects if s.iid == ctx["far"]), None)
         if far is None or not _stompable(sc, target.iid):
@@ -1134,11 +1230,12 @@ class SeparatedSlam(Tactic):
         if ctx is None:
             return None
         if ctx["phase"] == "post":
-            if ctx["post"].get("seam") is not None:
-                # Sol seq 326: the shared seam strike (both bodies credited, no double-hit proof)
-                return Applied(stance=ctx["post"]["x"], style="stomp", scene="separated slam 1.2.2 after: seam strike")
-            return Applied(stance=ctx["post"]["x"], style=None, scene="separated slam 1.2.2 after: into the middle",
-                           no_hit=frozenset({ctx["far"]}))
+            tier = ctx["tier"]
+            head = "separated slam " + str(ctx["post"].get("branch")) + " after: "
+            if tier["tier"] == "seam":
+                # Sol seq 326 / 330: the shared seam strike (both bodies credited, no double-hit proof, no standing-gap proof)
+                return Applied(stance=tier["x"], style="stomp", scene=head + "seam strike")
+            return Applied(stance=tier["x"], style=None, scene=head + "into the middle", no_hit=frozenset({tier["other"]}))
         p = ctx["place"]
         return Applied(stance=float(p["stance"]), style=p["style"], scene="separated slam " + p["branch"] + (
             " " + p["mode"] if p.get("mode") else "") + (" (way out)" if p["inside"] else ""), no_hit=p["no_hit"])
@@ -1152,22 +1249,20 @@ class SeparatedSlam(Tactic):
             # (knife_chain_air_native)
             g.entry_attack = None
             out = replace(out, entry_attack=None)
+        e = out.entry_attack
+        if getattr(e, "scope", None) == "seam_slam" and (
+                not won or ctx is None or ctx["phase"] != "post" or ctx["tier"]["tier"] != "seam"
+                or (e.target, e.event_f) != (ctx["tier"]["between"], ctx["post"].get("act_f")) or not _stompable(sc, e.target)):
+            # #386: the way back's seam strike entry is its action's (its tier, its body, its first frame) and one that can be executed now;
+            # the chain hands an approach not yet pressed back (knife_chain_air_native)
+            g.entry_attack = None
+            out = replace(out, entry_attack=None)
         if not won or ctx is None:
             return out
         near = ctx["near"]
         w = float(out.hit_w.get(near, 1.))
         if ctx["phase"] == "post":
-            # the fall slash is the chain's own (its middle landing); for the rows, her side slash on N from the air counts, and its down slash;
-            # #385: the move over N is the action layer's bounded vault while N's body is between her and the room, and until she is past it
-            # no hit on N (unlocked since F's Slam 2 entry: a hit on its Idle provokes a counter; C14 sy14_122 slashed it from the floor)
-            wp = self._post_vault(sc, ctx["post"])
-            if self._short_of_near(sc, ctx["post"]):
-                return replace(out, no_hit=frozenset(out.no_hit) | {near}, waypoint=wp)
-            kw = dict(out.hit_kw)
-            if near not in out.no_hit and ctx["post"].get("seam") is None:
-                kw[near] = (w, 0., 0., w)
-            out = _air_ok(replace(out, hit_kw=kw), near)
-            return out if wp is None else replace(out, waypoint=wp)
+            return self._post_finish(sc, ctx, out)
         p, rec = ctx["place"], ctx["rec"]
         e = out.entry_attack
         way_out = p["inside"] and sc.grounded       # the floor way out (the waypoint); in the air an approach keeps its entry and place bound
@@ -1202,13 +1297,54 @@ class SeparatedSlam(Tactic):
                                                             family=SEP.CC_SLAM))
         return out
 
+    def _post_finish(self, sc, ctx, out):
+        """#386: the way back's outputs. Seam tier (Sol seq 326 / REVIEW385 2): the shared seam strike's chain stomp (its entry from
+        pick_entry; GoalPrefs.strike_bound kind "seam": the air key only up to the seam, its rows preferred with her centre at the contact on
+        the seam side of the target's root, by the action's deadline; out of reach, the target's ordinary stomp: knife_chain_transfer); for
+        the rows down slashes only on either body (no floor slash on the unlocked N: C14 sy14_122; no ban on the down slash either, which
+        left her falling onto N unstruck: sy23_seam 131570). Fall tier: the vault over the body between her and the middle while she is short
+        of its inner edge (no hit on it then), then her air side slash on it (and its down slash)."""
+        post, tier = ctx["post"], ctx["tier"]
+        between, other = tier["between"], tier["other"]
+        b = next((s for s in sc.subjects if s.iid == between), None)
+        if b is None:
+            return out
+        if tier["tier"] == "seam":
+            toward = 1 if tier["seam"] > float(b.pos[0]) else -1
+            kw = dict(out.hit_kw)
+            for i in (between, other):
+                if i not in out.no_hit:
+                    kw[i] = (0., 0., 0., float(out.hit_w.get(i, 1.)))
+                    out = _air_ok(out, i)
+            out = replace(out, hit_kw=kw)
+            e = out.entry_attack
+            if getattr(e, "scope", None) == "seam_slam" and e.target == between and type(post.get("act_f")) is int:
+                out = replace(out, strike_bound=(between, float(tier["seam"]), float(b.pos[0]), toward,
+                                                 int(post["act_f"]) + SEP.POST_ACT_F, None, "seam"))
+            return out
+        wp = self._post_vault(sc, post, tier)
+        if self._short_of(sc, between, tier["toward"]):
+            return replace(out, no_hit=frozenset(out.no_hit) | {between}, waypoint=wp)
+        kw = dict(out.hit_kw)
+        if between not in out.no_hit:
+            w = float(out.hit_w.get(between, 1.))
+            kw[between] = (w, 0., 0., w)
+        out = _air_ok(replace(out, hit_kw=kw), between)
+        return out if wp is None else replace(out, waypoint=wp)
+
     def log(self, sc, out):
         ctx = sc.events.get(self.event)
         if ctx is None:
             return {"clapper_sep_slam": None}
-        wp = None if out.waypoint is None else [out.waypoint.x, out.waypoint.by_f, out.waypoint.kind]
+        wp = None if out.waypoint is None else [out.waypoint.x, out.waypoint.by_f, out.waypoint.kind, out.waypoint.end]
         if ctx["phase"] == "post":
-            return {"clapper_sep_slam": dict(phase="post", waypoint=wp, **{k: v for k, v in ctx["post"].items()})}
+            e = out.entry_attack
+            return {"clapper_sep_slam": dict(
+                phase="post", waypoint=wp, now=ctx["tier"],
+                entry=None if getattr(e, "scope", None) != "seam_slam" else [e.target, e.source, e.event_f],
+                strike_bound=None if out.strike_bound is None else [
+                    round(float(v), 3) if type(v) in (int, float) else v for v in out.strike_bound],
+                **{k: v for k, v in ctx["post"].items()})}
         p, rec = ctx["place"], ctx["rec"]
         return {"clapper_sep_slam": dict(phase="slam", kind=ctx["kind"], far=ctx["far"], near=ctx["near"], branch=p["branch"],
                                          edge=round(float(p["edge"]), 3), stance=round(float(p["stance"]), 3), inside=p["inside"],

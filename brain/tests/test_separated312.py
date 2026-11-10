@@ -82,11 +82,13 @@ def test_n_reaching_out_past_the_edge_gets_down_slashes_then_the_way_into_the_mi
     assert out.waypoint is not None and out.waypoint.kind == "vault" and out.waypoint.over_iid == 8 and out.entry_attack is None
     assert {7, 8} <= out.no_hit                                        # #385: no hit on the unlocked 8 before she is past it
     assert tac.last["clapper_scene"] == "separated slam 1.2.2 after: into the middle"
-    hero_at(ws, 31.); ws.hero.contact = E("AIR")                       # over it, past its inner edge
+    hero_at(ws, 31., y=9.)                                             # over it, past its inner edge, above the tops
     out = tick(tac, ws, fc)
     assert 8 not in out.no_hit and 8 not in out.ground_hit | out.no_pogo | out.ground_first   # its side slash counts from the air
     assert 7 in out.no_hit
-    hit_on(ws, 8); tick(tac, ws, fc)                                   # the hit ends it
+    hit_on(ws, 8); tick(tac, ws, fc); ws.events = []                   # #386 (Sol seq 330): the hit does not end it ...
+    assert tac.last["clapper_sep_slam"]["phase"] == "post"
+    hero_at(ws, 31.); tick(tac, ws, fc)                                # ... her landing in the middle does
     assert tac.last["clapper_sep_slam"] is None
 
 

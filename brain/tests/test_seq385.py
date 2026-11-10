@@ -93,7 +93,7 @@ def test_n_too_shallow_outside_the_range_for_a_strike_with_its_margin_is_1_2_3()
     assert out.stance_x == pytest.approx(20. + SEP.SLAM_EDGE_U + SEP.OUT_U)
 
 
-def test_n_evading_in_1_2_2_waits_outside_the_range_and_opens_no_way_into_the_middle():
+def test_n_evading_in_1_2_2_waits_outside_the_range_then_still_goes_back_into_the_middle():
     tac, ws, fc, _ = _antic()
     change(fc, 8, state="Evade Scuttle")
     out = tick(tac, ws, fc)
@@ -103,9 +103,11 @@ def test_n_evading_in_1_2_2_waits_outside_the_range_and_opens_no_way_into_the_mi
     change(fc, 8, state="Idle")
     out = _until(tac, ws, fc, SEP.STRIKE_OPEN_F)
     assert tac.last["clapper_sep_slam"]["mode"] == "wait" and out.entry_attack is None and out.strike_bound is None
-    _hammers_over(tac, ws, fc)
-    assert tac.last["clapper_sep_slam"] is None
-    assert any("evaded" in n["what"] for n in tac.last.get("clapper_sep_notes") or [])
+    out = _hammers_over(tac, ws, fc)
+    # #386 (the person 11-10, Sol seq 330): the evade is kept for the record, the way back goes on (over N, the fall tier)
+    post = tac.last["clapper_sep_slam"]
+    assert post["phase"] == "post" and post["near_evaded"] is not None and post["now"]["tier"] == "fall"
+    assert out.waypoint is not None and out.waypoint.kind == "vault" and out.waypoint.end == "past"
 
 
 # ---- 1.2.2 after both hammers: the move over N apart from the strike's eligibility ----
@@ -120,12 +122,16 @@ def test_after_both_hammers_n_struck_still_takes_the_vault_over_it_into_the_midd
     wp = out.waypoint
     assert wp is not None and (wp.kind, wp.source, wp.family, wp.over_iid) == ("vault", 7, "CC_SLAM", 8)
     assert wp.over == pytest.approx((min(32.5, 33.5 - CP.BODY_HALF), 0., max(34.5, 33.5 + CP.BODY_HALF), CP.BODY_TOP))
-    lo, hi = wp.land
-    assert 21. < lo < wp.x < hi < 32.5                                           # in the middle between F (19..21) and N
+    # #386 (Sol REVIEW385 1): no landing band: the route ends at its air hand-back point past N
+    assert wp.land is None and wp.end == "past" and 21. < wp.x < 32.5             # her place in the middle between F (19..21) and N
+    assert wp.by_f == post["act_f"] + SEP.POST_ACT_F and wp.plan[0][-1] == post["act_f"]
     assert out.stance_x == pytest.approx(32.5 - SEP.FALL_U - .25) and 7 in out.no_hit
     again = tick(tac, ws, fc)
     assert again.waypoint.plan == wp.plan                                       # one stable place: the Run is not withdrawn
-    hero_at(ws, 31.); ws.hero.contact = E("AIR")                                # past N's inner edge: the ordinary owners
+    hero_at(ws, 31., y=9.)                                                      # past N's inner edge, not its passed box (#386), above the tops
+    out = tick(tac, ws, fc)
+    assert out.waypoint is not None and 8 not in out.no_hit                     # the vault's own hand-back test; her slash on N counts
+    hero_at(ws, 30.5, y=9.)                                                     # past the box (root - 2.25) by her half width + pad
     out = tick(tac, ws, fc)
     assert tac.last["clapper_sep_slam"]["phase"] == "post" and out.waypoint is None
 
@@ -135,35 +141,42 @@ def test_a_landing_on_her_side_of_n_keeps_the_way_over_it_and_one_in_the_middle_
     _until(tac, ws, fc, SEP.STRIKE_OPEN_F)
     _down_hit(ws, 8); tick(tac, ws, fc); ws.events = []
     ws.hero.contact = E("AIR")                                                   # up from the bounce, held off N over the hammers
-    _hammers_over(tac, ws, fc)
+    first = _hammers_over(tac, ws, fc).waypoint
     assert tac.last["clapper_sep_slam"]["phase"] == "post"
     ws.hero.contact = E("GROUND")                                                # the hold lands on her side (40): the post goes on
     out = tick(tac, ws, fc)
     post = tac.last["clapper_sep_slam"]
-    assert post["phase"] == "post" and post["landed_outside"] and out.waypoint is not None and out.waypoint.kind == "vault"
+    assert post["phase"] == "post" and post["act_log"][-1][2] == "landed outside the middle"
+    assert out.waypoint is not None and out.waypoint.kind == "vault" and out.waypoint.plan != first.plan   # a new action: its own key
     ws.hero.contact = E("AIR"); tick(tac, ws, fc)                                # the vault's jump ...
     hero_at(ws, 31.); ws.hero.contact = E("GROUND")                              # ... lands in the middle: done
     tick(tac, ws, fc)
     assert tac.last["clapper_sep_slam"] is None
 
 
-def test_the_post_with_the_two_at_most_2_5_u_apart_is_the_seam_strike():
+@pytest.mark.parametrize("froot,gap,seam", [(30.5, 1., 32.), (31., .5, 32.25), (31.5, 0., 32.5), (32., -.5, 32.75)])
+def test_the_post_with_the_two_at_most_2_5_u_apart_is_the_seam_strike_with_no_landing_gate(froot, gap, seam):
+    # Sol REVIEW385 (ROOT_PROBES385: gaps .5 / 0 / -.5 had no action, the vault's landing band in the seam gating it): #386: the seam tier
+    # is the shared seam strike's chain stomp on N (its entry, the strike bounded to the seam), no vault and no landing anywhere
     tac, ws, fc, _ = _antic()
     _until(tac, ws, fc, 2)
-    change(fc, 7, pos=(30.5, 4.))                                                # F lunged to 30.5: its body 29.5..31.5, N 32.5..
+    change(fc, 7, pos=(froot, 4.))                                               # F lunged: its body froot -+ 1, N 32.5..34.5
     for e in ws.entities:
         if e.id == 7:
-            e.dmg_boxes[0].poly = [(x - 20. + 30.5, y) for x, y in e.dmg_boxes[0].poly]
+            e.dmg_boxes[0].poly = [(x - 20. + froot, y) for x, y in e.dmg_boxes[0].poly]
     out = _hammers_over(tac, ws, fc)
     post = tac.last["clapper_sep_slam"]
-    assert post["phase"] == "post" and post["seam"] == pytest.approx(32.) and post["gap"] == pytest.approx(1.)
-    assert tac.last["clapper_scene"] == "separated slam 1.2.2 after: seam strike" and out.stance_x == pytest.approx(32.)
-    assert 8 in out.no_hit                                                      # short of N: no hit on it yet
-    wp = out.waypoint
-    assert wp is not None and wp.kind == "vault" and wp.land[0] >= 31.5 and wp.land[1] <= 32.5
-    hero_at(ws, 32.); ws.hero.contact = E("AIR")                                # over the seam, past N's inner edge
+    now = post["now"]
+    assert post["phase"] == "post" and now["tier"] == "seam" and now["seam"] == pytest.approx(seam) and now["gap"] == pytest.approx(gap)
+    assert tac.last["clapper_scene"] == "separated slam 1.2.2 after: seam strike" and out.stance_x == pytest.approx(seam)
+    assert out.waypoint is None                                                  # no vault, no landing band
+    e, sb = out.entry_attack, out.strike_bound
+    assert isinstance(e, EntryAttack) and (e.target, e.kind, e.source, e.scope, e.event_f) == (8, "stomp", 7, "seam_slam", post["act_f"])
+    assert sb == (8, pytest.approx(seam), pytest.approx(33.5), -1, post["act_f"] + SEP.POST_ACT_F, None, "seam")
+    assert not ({7, 8} & out.no_hit) and out.hit_kw[8][:3] == (0., 0., 0.) and out.hit_kw[8][3] > 0   # the rows: down slashes only
+    hero_at(ws, seam, y=9.)                                                      # over the seam (above the tops), past N's root
     out = tick(tac, ws, fc)
-    assert not ({7, 8} & out.no_hit) and out.hit_kw[8][3] > 0                    # both credited, a down slash
+    assert not ({7, 8} & out.no_hit) and out.hit_kw[8][3] > 0 and out.hit_kw[8][0] == 0.   # both credited, down slashes only
 
 
 # ---- the shared small-gap rule (Sol seq 326) ----
