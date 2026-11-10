@@ -24,11 +24,12 @@ checks; an L2 win is never an action's success.
 """
 from dataclasses import dataclass, replace
 
-from ssbot.combat import forum_v2
+from ssbot.combat import forum_v2, knife_chain_waypoint as WP
+from ssbot.core.worldstate import Ev
 
 # (clapper_plans reads only its own switch and the shared geometry; flag off its units below are never built into a call)
 
-from . import clapper_middle, clapper_plans
+from . import clapper_middle, clapper_plans, clapper_separated as SEP
 from .clapper_scene import AIR, ANTIC, JUMPS, NEAR, NEARER_U, STACK_U, ground_stance, stacked_nearer, standing_gap
 from .forum_local import clapper_facing
 from .modes import EntryAttack, ReturnRequest
@@ -372,9 +373,18 @@ class TightOverhead(Tactic):
     def propose(self, sc):
         if sc.region != "tight":
             return [], "not in a tight middle"
+        if SEP.active() and sc.geo is not None and not SEP.double_intent(sc.geo)[0]:
+            # seq 312 #379 (the person: stacked without a seam double, stand on the ground): the near one on her side
+            return [("overhead", SEP.outer_ground(sc.tac, sc.geo, sc.hx)[0], 1.)], None
         return [("overhead", sc.default, 1.)], None
 
     def apply(self, sc, rule, g, target):
+        if SEP.active() and sc.geo is not None:
+            ok, seam = SEP.double_intent(sc.geo)
+            if ok:
+                return Applied(stance=seam, style="stomp", scene="tight middle: seam double")
+            return Applied(stance=SEP.outer_ground(sc.tac, sc.geo, sc.hx)[1], style=None,
+                           scene="tight middle: ground in front of the near one")
         return Applied(stance=float(target.pos[0]), style="stomp", scene="tight middle overhead intent")
 
 
@@ -489,7 +499,11 @@ class MiddleReturn(Tactic):
         # Task 179 #313: the near attack is over; back between the two (ground gap: stand and side slash; no gap:
         # the existing stomp style at the seam until they part). The middle score: the same place it values. It
         # holds the tight scene too (#314, Root's probe: the overhead root 20 tied it after the switch cost).
-        return [("back", sc.subject(home["target"]), 1.)], None
+        target = sc.subject(home["target"])
+        if (SEP.active() and sc.geo is not None and home["posture"] == "air" and not SEP.double_intent(sc.geo)[0]):
+            # seq 312 #379 (the person: stacked without a seam double, stand on the ground): the near one on her side
+            target = SEP.outer_ground(sc.tac, sc.geo, sc.hx)[0]
+        return [("back", target, 1.)], None
 
     def pick_entry(self, sc, rule, target, previous):
         return None
@@ -498,6 +512,16 @@ class MiddleReturn(Tactic):
         if sc.events.get(self.event) is None:
             return None
         pose = sc.back_pose = return_pose(sc.tac, target, sc.geo, sc.hx)
+        if SEP.active() and pose["posture"] == "air":
+            # seq 312 #379: no standing gap. A seam double's intent: down slashes at the seam, both bodies credited (each contact is the
+            # rows' own); without it the ground in front of the near one on her side, side slashes (no air pose, no crossing)
+            ok, seam = SEP.double_intent(sc.geo)
+            if ok:
+                sc.back_pose = dict(pose, posture="seam", stance=seam)
+                return Applied(stance=seam, style="stomp", scene="middle return: seam double")
+            x = SEP.outer_ground(sc.tac, sc.geo, sc.hx)[1]
+            sc.back_pose = dict(pose, posture="ground outside", stance=x)
+            return Applied(stance=x, style=None, scene="middle return: no gap, ground in front of the near one")
         crossed = frozenset() if pose["crossed"] == g.target else frozenset({pose["crossed"]})
         return Applied(stance=pose["stance"], style="stomp" if pose["posture"] == "air" else None,
                        scene="middle return " + pose["posture"], no_hit=crossed, cross_no_hit=crossed)
@@ -658,11 +682,20 @@ class _Planned(Tactic):
             return None
         style = KEEP if ph.attack else ph.contact
         no_hit = frozenset(ph.no_hit)
+        stance = None
         if ph.stance is not None and ph.stance[0] == "middle" and sc.geo is not None:
             # back to the middle: a standing gap is a landing, no hit on the way (no new Run onto its body); no gap: the
             # existing air pose at the seam, its stomp style
             if return_pose(sc.tac, target, sc.geo, sc.hx)["posture"] == "air":
                 style = "stomp"
+                if SEP.active():
+                    # seq 312 #379: the seam double's intent, else the ground in front of the near one on her side when that is this target
+                    ok, seam = SEP.double_intent(sc.geo)
+                    near, x = SEP.outer_ground(sc.tac, sc.geo, sc.hx)
+                    if ok:
+                        stance = seam
+                    elif near.iid == target.iid:
+                        stance, style = x, None
             else:
                 no_hit = no_hit | {target.iid}
         # Sol seq 272 B: over_head's stance and stomp stand for the action layer's strike over the walker; its refusal takes them back
@@ -671,7 +704,7 @@ class _Planned(Tactic):
         # the actual state), keeps its down slash for the ordinary rows; never another Clapper, never past this stage
         down_ok = (frozenset({target.iid}) if (ph.down_ok and target is not None and target.iid == ph.target
                                                and getattr(target, "family", None) in DOWN_OK_FAMS) else frozenset())
-        return Applied(stance=sc.plans.stance(sc, ph), style=style, scene=f"{self.scene} plan: {ph.name}",
+        return Applied(stance=sc.plans.stance(sc, ph) if stance is None else stance, style=style, scene=f"{self.scene} plan: {ph.name}",
                        suppress_hits=ph.suppress_hits, no_hit=no_hit, withdraw_f=withdraw_f, down_ok=down_ok)
 
     def finish(self, sc, rule, won, g, out):
@@ -712,7 +745,7 @@ class _PlannedCluster(_Planned):
     """She is outside the two, one in a jump's antic: one complete plan of the two; the public comparison chooses."""
     event = "cluster"
     scene = "cluster"
-    owns_scene = frozenset({"keep", "cluster_lure", "cluster_attack"})
+    owns_scene = frozenset({"keep", "cluster_lure", "cluster_attack", "cluster_vault"})
     branch = ""
     rule = ""
 
@@ -753,6 +786,15 @@ class ClusterAttack(_PlannedCluster):
     branch = "attack"
     rule = "cluster_attack"
     scores = {"cluster_attack": 130.}    # below lure even after lure's target switch cost: lure first when its space holds
+
+
+class ClusterVault(_PlannedCluster):
+    """Task 182 seq 312 (plan 3.3, the outer variant only): over the near one into the middle in the aim, under the jumper on its observed
+    take-off. Chosen by the plan itself: the lure whenever it can run, else the attack or this by the final place's wall room."""
+    name = "cluster vault and under"
+    branch = "vault"
+    rule = "cluster_vault"
+    scores = {"cluster_vault": 130.}
 
 
 class PlannedKeep(FocusKeep):
@@ -808,6 +850,373 @@ class PlannedTakeoff(FocusTakeoff):
         sc.plans.exec.record((sc.keep.iid, sc.tac.t_commit.get(sc.keep.iid)), "departed", sc.t)
 
 
+# ---- Task 182 seq 312 (the person 11-09 / 11-10; facts: clapper_separated): the far one's slam with the near one or a big rune between
+# them, the small rune's down slashes and its end. Intents only: every key, crossing, landing and hit stays with the action owners. ----
+
+NEW_ANTICS = frozenset({"Slam Antic", "Spell Antic", "Jump Antic", "Cast Slam Antic"})
+
+
+def _hit_on(sc, iids) -> bool:
+    """A nail hit of hers on one of these bodies among this call's events (the view's HIT_DEALT)."""
+    for ev in getattr(sc.ws, "events", ()) or ():
+        if ev.kind == Ev.HIT_DEALT and getattr(ev.data, "target_id", None) in iids:
+            return True
+    return False
+
+
+def _air_ok(out, iid):
+    """Her side slash on this body from the air counts (the stage's fall slash): it leaves the ground-only sets."""
+    return replace(out, ground_hit=frozenset(out.ground_hit) - {iid}, no_pogo=frozenset(out.no_pogo) - {iid},
+                   ground_first=frozenset(out.ground_first) - {iid})
+
+
+class SeparatedSlam(Tactic):
+    """Plan 1.x: F's slam with N (or a live big rune) between her and it. She stays outside its range on her side and F is not hit: at the
+    range edge, N slashed only within reach (1.2.3); over N's outer part with down slashes when its body reaches out past the edge (1.2.2);
+    past N on its inner side when that room is itself outside the range (1.2.1: down slashes take her over it, then side slashes from the
+    inside); at the outer one of the circle's and the range's edges, whatever she reaches slashed (1.1). Inside the range: the action layer's
+    bounded way out to the edge before the earliest first hammer frame (waypoint Run; its own step checks, dash lock and late hand-back).
+    1.2.2 once both hammer stages are over: over N into the middle, its side slash in the air (no landing first), only with standing room
+    there; otherwise, and after a hit, her landing, a new antic or POST_S, the ordinary rules. No place outside the range on her side inside
+    the walls: not offered (the existing rules: design 3.2's wall cases)."""
+    name = "separated slam"
+    event = "sep_slam"
+    scores = {"sep_slam": 125.}
+    excluded_by = ("middle_jump", "cluster", "intercept_hold")   # a running jump plan keeps its own stages
+
+    def observe(self, sc):
+        mem = sc.mem
+        for s in sc.subjects:
+            SEP.slam_record(sc, mem, s)
+        post = mem.get("sep_post")
+        if post is not None:
+            why = self._post_end(sc, post)
+            if why is not None:
+                mem["sep_post"] = post = None
+                released(sc, self, "after the slam: " + why)
+        sep = SEP.separated(sc, {SEP.CC_SLAM}) or self._latched(sc)
+        if sep is not None:
+            rec = mem["sep_slam"].get(sep["far"].iid)
+            if rec is not None and not SEP.hammer_over(sc, sep["far"], rec):
+                place = SEP.slam_place(sc, sep, rec)
+                if place is not None:
+                    rec["branch"] = place["branch"]
+                    rec["pogo"] = rec["pogo"] or place["branch"] == "1.2.2"
+                    rec.setdefault("near", sep["near"].iid)
+                    rec.setdefault("kind", sep["kind"])
+                    return dict(phase="slam", far=sep["far"].iid, near=sep["near"].iid, kind=sep["kind"], place=place,
+                                rec=rec)
+            elif rec is not None and rec.get("pogo") and post is None and not rec.get("post_done"):
+                post = self._post_start(sc, sep, rec)
+        if post is not None:
+            return dict(phase="post", far=post["far"], near=post["near"], post=post)
+        return None
+
+    def repick(self, sc):
+        # the way into the middle starts on this tick (the hammer's end is no new state of its own)
+        ctx = sc.events.get(self.event)
+        return SEP.active() and ctx is not None and ctx["phase"] == "post" and ctx["post"]["f0"] == sc.frame
+
+    def _latched(self, sc):
+        """The slam she was separated from at its start, held with its near one until both hammer stages are over: past the near one's root
+        (1.2.1's crossing, 1.2.2's pogo drifting in) she still keeps outside its range and slashes the near one, never goes at the slammer."""
+        if sc.geo is None:
+            return None
+        for s in sc.subjects:
+            rec = sc.mem.get("sep_slam", {}).get(s.iid)
+            if rec is None or rec.get("near") is None or s.family != SEP.CC_SLAM:
+                continue
+            near = next((v for v in sc.subjects if v.iid == rec["near"]), None)
+            if near is None:
+                continue
+            a, b = SEP._span(sc.geo, s.iid)
+            return dict(far=s, near=near, kind=rec.get("kind", "body"), toward=1 if float(s.pos[0]) > sc.hx else -1,
+                        circles=SEP.circles_across(sc.tac, sc.t, sc.hx, a if float(s.pos[0]) > sc.hx else b))
+        return None
+
+    def _post_start(self, sc, sep, rec):
+        rec["post_done"] = True
+        far, near = sep["far"], sep["near"]
+        room = SEP.middle_room(sc.geo, near, far, rec["face"])
+        if room is None:
+            sc.tac.last.setdefault("clapper_sep_notes", []).append(dict(what="after the slam: no standing room in the middle",
+                                                                         far=far.iid, near=near.iid, f=sc.frame))
+            return None
+        x = SEP.fall_x(sc.geo, near.iid, -rec["face"], *room)
+        post = sc.mem["sep_post"] = dict(far=far.iid, near=near.iid, x=float(x), face=rec["face"], t0=sc.t, f0=sc.frame,
+                                         air_seen=not sc.grounded, room=[float(v) for v in room])
+        return post
+
+    def _post_end(self, sc, post):
+        by = {s.iid: s for s in sc.subjects}
+        far, near = by.get(post["far"]), by.get(post["near"])
+        if far is None or near is None or sc.geo is None:
+            return "a body gone or no geometry"
+        if sc.t > post["t0"] and _hit_on(sc, {near.iid}):
+            return "a hit on the near one"
+        if not sc.grounded:
+            post["air_seen"] = True
+        elif post["air_seen"]:
+            return "landed"
+        if any(s.state in NEW_ANTICS for s in sc.subjects):
+            return "a new antic"
+        if sc.t - post["t0"] > SEP.POST_S:
+            return "timed out"
+        if SEP.middle_room(sc.geo, near, far, post["face"]) is None:
+            return "the middle closed"
+        return None
+
+    def propose(self, sc):
+        if not SEP.active():
+            return [], "seq 312 off"
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return [], "no separated slam"
+        target = ctx["place"]["target"] if ctx["phase"] == "slam" else sc.subject(ctx["near"])
+        return [("sep_slam", target, 1.)], None
+
+    def pick_entry(self, sc, rule, target, previous):
+        return None
+
+    def apply(self, sc, rule, g, target):
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return None
+        if ctx["phase"] == "post":
+            return Applied(stance=ctx["post"]["x"], style=None, scene="separated slam 1.2.2 after: into the middle",
+                           no_hit=frozenset({ctx["far"]}))
+        p = ctx["place"]
+        return Applied(stance=float(p["stance"]), style=p["style"], scene="separated slam " + p["branch"] + (
+            " (way out)" if p["inside"] else ""), no_hit=p["no_hit"])
+
+    def finish(self, sc, rule, won, g, out):
+        ctx = sc.events.get(self.event)
+        if not won or ctx is None:
+            return out
+        if ctx["phase"] == "post":
+            return _air_ok(out, ctx["near"])
+        p, rec = ctx["place"], ctx["rec"]
+        far = sc.subject(ctx["far"])
+        if p["inside"] and rec.get("f0") is not None and type(sc.frame) is int and far.state in ("Slam Antic", "Slam 0"):
+            by_f = int(rec["f0"]) + SEP.SLAM_FIRST_F - SEP.ESCAPE_LEAD_F
+            if sc.frame < by_f:
+                out = replace(out, waypoint=WP.WaypointGoal(float(p["escape_x"]), by_f, "retreat", far.iid,
+                                                            (("sep_slam", far.iid, round(float(rec["t0"]), 4)), 0, "escape"),
+                                                            family=SEP.CC_SLAM))
+        return out
+
+    def log(self, sc, out):
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return {"clapper_sep_slam": None}
+        if ctx["phase"] == "post":
+            return {"clapper_sep_slam": dict(phase="post", **{k: v for k, v in ctx["post"].items()})}
+        p, rec = ctx["place"], ctx["rec"]
+        return {"clapper_sep_slam": dict(phase="slam", kind=ctx["kind"], far=ctx["far"], near=ctx["near"], branch=p["branch"],
+                                         edge=round(float(p["edge"]), 3), stance=round(float(p["stance"]), 3), inside=p["inside"],
+                                         style=p["style"], no_hit=sorted(p["no_hit"]), antic_f=rec.get("f0"), seen=rec.get("seen"),
+                                         face=rec["face"], waypoint=None if out.waypoint is None else [out.waypoint.x, out.waypoint.by_f])}
+
+
+class RuneDownSlash(Tactic):
+    """Plan 2.1 / 2.2: while a small rune is on (a cast, or a bomb not yet over near her and the bodies: the shared per-bomb forecast).
+    Separated from the caster by a live big rune: at that circle's outer edge on her side (the existing low hop takes the bombs), the caster
+    not hit (2.1). Otherwise down slashes, the target in the order both > F > N: the seam when both near body edges lie within one blade at
+    level tops (the planner's rows score each body's own predicted contact: one body met is a single hit), else the caster when nothing stands
+    between her and it, else the other one; no gap is required and the end of the rune is not waited for. Re-chosen on every call: the target
+    she follows when it evades is the current one (the evade chase reads it); a strike already sent keeps its own target (its owner's)."""
+    name = "small rune down slash"
+    event = "rune_down"
+    scores = {"rune_down": 120.}
+    excluded_by = ("middle_jump", "cluster", "intercept_hold")   # a running jump plan keeps its own stages
+
+    def observe(self, sc):
+        mem = sc.mem
+        was = bool(mem.get("rune_on"))
+        need = was or any(s.family == SEP.CC_CAST for s in sc.subjects)
+        bombs = SEP.bombs_now(sc.tac) if need else None
+        on, casters = SEP.rune_on(sc, bombs) if need else (False, set())
+        mem["rune_on"] = on
+        if was and not on:
+            mem["rune_end"] = dict(t=sc.t, f=sc.frame)
+        if not on or sc.geo is None:
+            return None
+        return dict(casters=sorted(casters), bombs=None if bombs is None else int(len(bombs)), new=not was)
+
+    def repick(self, sc):
+        # a pick when the rune turns on by its bombs alone, or when the down slash's target changes (the evader crossing the other one)
+        ctx = sc.events.get(self.event)
+        if ctx is None or not SEP.active():
+            return False
+        if ctx["new"]:
+            return True
+        g = sc.tac.goal
+        return sc.mem.get("winner") == "rune_down" and g is not None and g.target != self._decide(sc, ctx)["target"]
+
+    def _decide(self, sc, ctx):
+        geo, hx = sc.geo, sc.hx
+        subs = sorted(sc.subjects, key=lambda s: (abs(float(s.pos[0]) - hx), s.iid))
+        casters = [s for s in subs if s.iid in ctx["casters"]] or subs
+        F = next((s for s in casters if SEP.reachable(sc, s, next(v for v in subs if v.iid != s.iid))), casters[0])
+        N = next(v for v in subs if v.iid != F.iid)
+        a, b = SEP._span(geo, F.iid)
+        circles = SEP.circles_across(sc.tac, sc.t, hx, a if float(F.pos[0]) > hx else b)
+        if circles:
+            # 2.1: at the outer circle's edge on her side; what she reaches outside it may be hit, never the caster across it
+            side = -1 if float(F.pos[0]) > hx else 1
+            half = geo["right"] if side < 0 else geo["left"]
+            edge = (min(lo for lo, _ in circles) - half - .25) if side < 0 else (max(hi for _, hi in circles) + half + .25)
+            n_ok = SEP.reachable(sc, N, F)
+            return dict(case="2.1 rune between", target=(N if n_ok else F).iid, stance=float(edge), style=None,
+                        no_hit=frozenset({F.iid}) if n_ok else frozenset({F.iid, N.iid}), circles=[list(c) for c in circles])
+        ok, seam = SEP.double_intent(geo)
+        f_ok, n_ok = SEP.reachable(sc, F, N), SEP.reachable(sc, N, F)
+        if ok:
+            return dict(case="2.2 both", target=F.iid, stance=seam, style="stomp", no_hit=frozenset())
+        if f_ok:
+            return dict(case="2.2 caster", target=F.iid, stance=float(F.pos[0]), style="stomp", no_hit=frozenset())
+        t = N if n_ok else F
+        return dict(case="2.2 other" if n_ok else "2.2 none reachable", target=t.iid, stance=float(t.pos[0]), style="stomp",
+                    no_hit=frozenset())
+
+    def propose(self, sc):
+        if not SEP.active():
+            return [], "seq 312 off"
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return [], "no small rune on"
+        ctx["decision"] = d = self._decide(sc, ctx)
+        return [("rune_down", sc.subject(d["target"]), 1.)], None
+
+    def pick_entry(self, sc, rule, target, previous):
+        return None
+
+    def apply(self, sc, rule, g, target):
+        ctx = sc.events.get(self.event)
+        d = None if ctx is None else (ctx.get("decision") or self._decide(sc, ctx))
+        if d is None:
+            return None
+        ctx["decision"] = d
+        return Applied(stance=d["stance"], style=d["style"], scene="small rune: " + d["case"], no_hit=d["no_hit"])
+
+    def finish(self, sc, rule, won, g, out):
+        # 2.2 is down slashes only (the person: until the rune is over, down slash what she reaches): the other body's credit is its down slash
+        # too, from the air (a side slash on the ground among the rings is no part of it); a double then scores both bodies' own contacts
+        ctx = sc.events.get(self.event)
+        d = None if ctx is None else ctx.get("decision")
+        if not won or d is None or d["style"] != "stomp":
+            return out
+        kw = dict(out.hit_kw)
+        down = {s.iid for s in sc.subjects if s.iid != g.target and s.iid not in out.no_hit}
+        for iid in down:
+            kw[iid] = (0., 0., 0., float(out.hit_w.get(iid, 1.)))
+        return replace(out, hit_kw=kw, ground_hit=frozenset(out.ground_hit) - down, no_pogo=frozenset(out.no_pogo) - down,
+                       ground_first=frozenset(out.ground_first) - down)
+
+    def log(self, sc, out):
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return {"clapper_rune_down": None}
+        d = ctx.get("decision")
+        return {"clapper_rune_down": dict(casters=ctx["casters"], bombs=ctx["bombs"], **({} if d is None else dict(
+            case=d["case"], target=d["target"], stance=round(float(d["stance"]), 3), style=d["style"], no_hit=sorted(d["no_hit"]))))}
+
+
+class RuneAfter(Tactic):
+    """Plan 2.3: once the small rune has passed by the shared per-bomb state, one strike chosen by the gap between the two near body edges:
+    at most TIER_U (exactly at it too) a down slash aimed at the middle of the two, whatever it meets (no double-hit proof first); past it
+    the hittable one (on the ground, in no attack) farther from its nearest wall, her fall FALL_U from its edge inside the gap with a side
+    slash on the way down (no landing first, not the gap's centre). It ends with a real hit on either, her landing after it began, a new
+    antic, the small rune on again or POST_S; then the ordinary rules (#379's stacked follow-up among them)."""
+    name = "small rune end"
+    event = "rune_after"
+    scores = {"rune_after": 118.}
+    excluded_by = ("middle_jump", "cluster", "intercept_hold")   # a running jump plan keeps its own stages
+
+    def observe(self, sc):
+        mem = sc.mem
+        ctx = mem.get("rune_after")
+        end = mem.pop("rune_end", None)
+        if end is not None and sc.geo is not None and len(sc.subjects) == 2:
+            ctx = mem["rune_after"] = self._start(sc)
+        if ctx is not None:
+            why = self._end(sc, ctx)
+            if why is not None:
+                mem["rune_after"] = ctx = None
+                released(sc, self, why)
+        return ctx
+
+    def repick(self, sc):
+        # the rune's end is no state change of either body: the one strike is picked on its first tick
+        ctx = sc.events.get(self.event)
+        return SEP.active() and ctx is not None and ctx["f0"] == sc.frame
+
+    def _start(self, sc):
+        from .gauntlet import JT
+        geo = sc.geo
+        low, high = geo["low"], geo["high"]
+        gap = SEP.gap_of(geo)
+        base = dict(gap=float(gap), t0=sc.t, f0=sc.frame, air_seen=not sc.grounded)
+        if gap <= SEP.TIER_U:
+            _, seam = SEP.double_intent(geo)
+            target = min((low, high), key=lambda s: (abs(float(s.pos[0]) - sc.hx), s.iid))
+            return dict(base, tier="seam", target=target.iid, stance=float(seam), style="stomp")
+        cands = [s for s in (low, high) if s.state not in AIR and s.family not in SEP.ATTACKS]
+        if not cands:
+            sc.tac.last.setdefault("clapper_sep_notes", []).append(dict(what="small rune end: nothing hittable", gap=gap, f=sc.frame))
+            return None
+        chosen = max(cands, key=lambda s: (SEP.wall_room(geo, s), -s.iid))
+        lo = SEP._span(geo, low.iid)[1] + JT["pad"] + geo["left"]
+        hi = SEP._span(geo, high.iid)[0] - JT["pad"] - geo["right"]
+        x = SEP.fall_x(geo, chosen.iid, 1 if chosen.iid == low.iid else -1, lo, hi)
+        return dict(base, tier="fall", target=chosen.iid, stance=float(x), style=None,
+                    wall_room={str(s.iid): round(SEP.wall_room(geo, s), 3) for s in (low, high)})
+
+    def _end(self, sc, ctx):
+        if all(s.iid != ctx["target"] for s in sc.subjects):
+            return "its target is gone"
+        if sc.t > ctx["t0"] and _hit_on(sc, {s.iid for s in sc.subjects}):
+            return "a hit landed"
+        if not sc.grounded:
+            ctx["air_seen"] = True
+        elif ctx["air_seen"] and sc.t > ctx["t0"]:
+            return "landed"
+        if any(s.state in NEW_ANTICS for s in sc.subjects):
+            return "a new antic"
+        if sc.mem.get("rune_on"):
+            return "the small rune is on again"
+        if sc.t - ctx["t0"] > SEP.POST_S:
+            return "timed out"
+        return None
+
+    def propose(self, sc):
+        if not SEP.active():
+            return [], "seq 312 off"
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return [], "no small rune just over"
+        return [("rune_after", sc.subject(ctx["target"]), 1.)], None
+
+    def pick_entry(self, sc, rule, target, previous):
+        return None
+
+    def apply(self, sc, rule, g, target):
+        ctx = sc.events.get(self.event)
+        if ctx is None:
+            return None
+        return Applied(stance=ctx["stance"], style=ctx["style"], scene="small rune end: " + ctx["tier"])
+
+    def finish(self, sc, rule, won, g, out):
+        ctx = sc.events.get(self.event)
+        if won and ctx is not None and ctx["tier"] == "fall":
+            out = _air_ok(out, ctx["target"])
+        return out
+
+    def log(self, sc, out):
+        ctx = sc.events.get(self.event)
+        return {"clapper_rune_after": None if ctx is None else {k: v for k, v in ctx.items()}}
+
+
 @dataclass(frozen=True)
 class Table:
     tactics: tuple
@@ -817,8 +1226,9 @@ class Table:
 
 
 def _table(tactics, observe_first=()):
-    order = (PlannedMiddle, MiddleJump, ClusterLure, ClusterAttack, ClusterRoute, PlannedIntercept, JumpIntercept, PlannedTakeoff,
-             FocusTakeoff, MiddleReturn)
+    order = (SeparatedSlam, RuneDownSlash, RuneAfter,       # (seq 312: the small rune's end is read after its own observation)
+             PlannedMiddle, MiddleJump, ClusterLure, ClusterAttack, ClusterVault, ClusterRoute, PlannedIntercept, JumpIntercept,
+             PlannedTakeoff, FocusTakeoff, MiddleReturn)
     return Table(tactics, tuple(observe_first) + tuple(t for k in order for t in tactics if type(t) is k),
                  {rule: t for t in tactics for rule in t.scores}, {rule: t.scores[rule] for t in tactics for rule in t.scores})
 
@@ -833,7 +1243,8 @@ RULES = {rule: t for t in TACTICS for rule in t.scores}
 DEFAULT_SCORES = {rule: t.scores[rule] for t in TACTICS for rule in t.scores}
 LEGACY_TABLE = Table(TACTICS, OBSERVE, RULES, DEFAULT_SCORES)
 PLAN_TABLE = _table((PlannedKeep(), PlannedMiddle(), PlannedIntercept(), NearThreat(), PlannedTakeoff(), EnterMiddle(),
-                     OuterRetreat(), FlipInward(), TightOverhead(), MiddleReturn(), ClusterLure(), ClusterAttack()),
+                     OuterRetreat(), FlipInward(), TightOverhead(), MiddleReturn(), ClusterLure(), ClusterAttack())
+                    + ((SeparatedSlam(), RuneDownSlash(), RuneAfter(), ClusterVault()) if SEP.ENABLED else ()),
                     observe_first=(PlanRun(),))
 
 

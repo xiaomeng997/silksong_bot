@@ -85,7 +85,7 @@ def geometry(tac, ws, subjects):
         left, right = hx - hurt[:, 0].min(), hurt[:, 0].max() - hx
         xa, xb = map(float, tac.pb.arena_x)
         if min(left, right) <= 0 or not np.isfinite([hx, xa, xb]).all() or not xa <= hx <= xb: return None
-        bodies = {}
+        bodies, tops = {}, {}
         for s in subjects:
             boxes = [b for b in getattr(tac._ent(ws, s.iid), "dmg_boxes", ()) or ()
                      if b.active is True and isinstance(b.name, str) and b.name.startswith(CLAPPER)]
@@ -95,6 +95,7 @@ def geometry(tac, ws, subjects):
             a, b = float(p[:, 0].min()), float(p[:, 0].max())
             if a >= b: return None
             bodies[s.iid] = (a, b)
+            tops[s.iid] = float(p[:, 1].max())     # Task 182 seq 312: the body's top (the seam double's level test)
         low, high = sorted(subjects, key=lambda s: float(s.pos[0]))
         lo, hi = bodies[low.iid][1] + left, bodies[high.iid][0] - right
         region = ("left" if hx + right <= bodies[low.iid][0] else
@@ -102,7 +103,7 @@ def geometry(tac, ws, subjects):
                   "middle" if lo <= hx <= hi else
                   "tight" if lo > hi and low.pos[0] <= hx <= high.pos[0] else "over")
         return dict(bodies=bodies, left=float(left), right=float(right), xa=xa, xb=xb,
-                    low=low, high=high, lo=float(lo), hi=float(hi), region=region)
+                    low=low, high=high, lo=float(lo), hi=float(hi), region=region, tops=tops)
     except (AttributeError, TypeError, ValueError, OverflowError):
         return None
 

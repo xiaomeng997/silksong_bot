@@ -411,6 +411,8 @@ class GauntletTactics:
         self._clapper_priority = None                    # explicit manual-B event/region hold
         self.plan_runner = None                          # SSBOT_FORUM_TWO_PLAN: clapper_plans.PlanRunner (executor, channel)
         self.plan_input = None                           # ... the policy's hero model input of this tick
+        self.rune_life = None                            # Task 182 seq 312: the policy's shared big rune ledger (rune_life.RuneCircles)
+        self.v2trk = None                                # ... and its attack-range tracker (its small runes' per-bomb forecast)
 
     @property
     def xs(self):

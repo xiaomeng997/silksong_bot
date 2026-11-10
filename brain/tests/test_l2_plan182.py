@@ -300,10 +300,13 @@ def test_only_a_clear_middle_with_one_jumper_is_the_three_branch_scene():
     J, W = subj_(1, 20., "Jump Antic", "CC_JUMP"), subj_(2, 34.)
     geo = geo_of((20., 34.), 27.)
     assert CP.parent_scene([J, W], geo, 27.)[0] == "middle"
-    # outside two apart: neither (Root: 19 / 39, a 15.5 u gap, the hero at 45: no cluster)
-    assert CP.parent_scene([J, W], geo, 15.) is None and CP.parent_scene([J, W], geo, 40.) is None
+    # outside two apart: the jumper in front of her is neither (Root: 19 / 39, a 15.5 u gap)
+    assert CP.parent_scene([J, W], geo, 15.) is None
+    # seq 312 (plan 3.1-3.3): the jumper the far one with a standing gap between them: the cluster's outer variant
+    assert CP.parent_scene([J, W], geo, 40.)[0] == "cluster"
     apart = geo_of((19., 39.), 45.)
-    assert CP.parent_scene([subj_(1, 19., "Jump Antic", "CC_JUMP"), subj_(2, 39.)], apart, 45.) is None
+    assert CP.parent_scene([subj_(1, 19., "Jump Antic", "CC_JUMP"), subj_(2, 39.)], apart, 45.)[0] == "cluster"   # (Root's 19 / 39 at 45)
+    assert CP.parent_scene([subj_(1, 39., "Jump Antic", "CC_JUMP"), subj_(2, 19.)], apart, 45.) is None   # the jumper in front of her
     # outside two with no standing gap between them: the cluster, never middle
     together = geo_of((28., 30.), 15., {1: (26., 30.), 2: (27., 32.)})
     pair = [subj_(1, 28., "Jump Antic", "CC_JUMP"), subj_(2, 30.)]

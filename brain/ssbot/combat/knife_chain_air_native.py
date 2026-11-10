@@ -33,6 +33,12 @@ def _plan_source_in_air(state,caster):
     return source is not None and transfer.control(source)[0] in ("Jump","Air")
 
 
+def _sep312(frame):
+    """Task 182 seq 312's chain changes act on this frame (clapper_separated.active: SSBOT_FORUM_SEP312 and its offline A/B start)."""
+    from .tactics import clapper_separated as SEP
+    return SEP.active(frame)
+
+
 def _passes_under(source,obstacle,state):
     """SSBOT_FORUM_TWO_PLAN only: the side approach's source is in its jump's flight with its body's bottom above her head."""
     from .tactics import clapper_plans
@@ -984,6 +990,54 @@ class NativeManualAirChain(NativeChainB2):
             self._note("waypoint_route_unchecked",frame=f,reason=str(exc),active=active);return None
         return scan.contacts[0] if scan.contacts else None
 
+    def _route_keys(self,plan,draft,mask,link,f):
+        """Task 182 seq 312: this approach Run's keys from this tick's key on: a chosen row up to its contact, else the link's own keys (the air
+        recipe's held side and jump, or the walk / dash / jump link rendered), at most ROUTE_H; the first is the key sent now."""
+        H=transfer.ROUTE_H
+        row=draft.run.v.get("row")
+        if row is not None and plan.contact_frame is not None and plan.contact_frame>f+2:
+            masks=row["masks"];F0=int(row["F0"])
+            frames=[F for F in range(f+2,min(int(plan.contact_frame),f+1+H)+1) if 0<=F-F0<len(masks)]
+            if frames:return np.array([masks[F-F0] for F in frames],np.int64)
+        if link=="air":
+            k=plan.entry_k+2+np.arange(H)
+            cmds=np.where(int(plan.jump_until)-k>0,int(plan.side)|B["J"],int(plan.side)).astype(np.int64)
+        else:
+            cmds=np.asarray(transfer.render(self.runner,plan,plan.entry_k,H,link),np.int64)
+        cmds=cmds.copy()
+        if len(cmds):cmds[0]=int(mask)
+        return cmds
+
+    def _route_ahead(self,state,game,sim,plan,draft,mask,f):
+        """Task 182 seq 312 (design 3.1; the person: two Clappers crossing, she came down on the other one): where this approach Run's route,
+        its remaining planned keys rolled from the actual prefix (_route_keys), first meets the OTHER Clapper's body, carried at its STATE
+        motion (a jumper ballistic), before her box reaches the target's body (the strike cut) and within ROUTE_LAND_F frames past her own
+        landing (a body coming down where she lands): dict, or None. The per-step
+        gate reads only this tick's key; this reads what the Run commits to, on its boxes alone (the other's moves stay the step gate's)."""
+        from ssbot.knowledge import kinematics as K
+        es=transfer.clappers(state)
+        target=next((e for e in es if e["iid"]==plan.iid),None)
+        others=[e for e in es if e["iid"]!=plan.iid]
+        if target is None or len(others)!=1:return None
+        cmds=self._route_keys(plan,draft,mask,draft.run.link,f)
+        if not len(cmds):return None
+        if draft.run.v.get("row") is None and not np.any(cmds&(B["L"]|B["R"])):
+            return None   # no side key planned yet (an air recipe still holding): the route is not committed to a direction
+        p=model_path(sim,plan,cmds,game)
+        boxes=np.asarray(p.box,float)
+        limit=len(boxes)-1
+        if not (int(p.flags[0])&K.F_GROUND):
+            j=transfer._landing_index(p.flags,1)
+            if j is not None:limit=min(limit,j+transfer.ROUTE_LAND_F)   # and a little past her landing: a body coming down where she lands
+        if plan.contact_frame is not None and plan.contact_frame>f:limit=min(limit,int(plan.contact_frame)-int(p.origin))
+        tp=transfer.body_path(target,limit);op=transfer.body_path(others[0],limit)
+        if tp is None or op is None:return None
+        k,cut=transfer.route_meets_other(boxes,limit,tp,op)
+        if k is None:return None
+        return {"other":int(others[0]["iid"]),"meet_frame":int(p.origin)+int(k),"horizon":int(limit),"link":draft.run.link,
+                "keys":"row" if draft.run.v.get("row") is not None else "link","other_state":transfer.control(others[0])[0],
+                "her_box":[float(v) for v in boxes[k]],"other_box":[float(v) for v in op[k]]}
+
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
         self._follow_fallback=None;self._follow_made=None
@@ -1005,6 +1059,15 @@ class NativeManualAirChain(NativeChainB2):
                           "observed source hammer tail ended: tactical side attack")
             self._note("target_entry_target_handoff" if changed else "target_entry_side_handoff",
                        frame=f,old_target=target,target=wanted if changed else target)
+            return None
+        if (active and changed and run.link in transfer.ROUTE_LINKS and self._press is None
+                and getattr(prefs,"clapper_choice",None)=="rune_down" and _sep312(f)):
+            # Task 182 seq 312 (plan 2.2 / design 3.3, the person: the down slash goes to what she reaches, in the order both > the caster >
+            # the other, re-chosen on every call; bout 47: the walker crossed the caster and the Run kept descending after it): L2's target
+            # changed while this approach has no pressed strike: it hands back at this step through B2 recovery (the keys already sent stay
+            # the next owner's prefix, the failure responsibility is kept). A pressed strike keeps its own target.
+            self._note("transfer_rune_target_handoff",frame=f,old_target=target,target=wanted,link=run.link)
+            self._recover("small rune: the down-slash target changed",f)
             return None
         goal=self._transfer_goal
         if (active and isinstance(goal,transfer.ReturnGoal) and run.link in ("walk","dash","jump","air")
@@ -1308,6 +1371,20 @@ class NativeManualAirChain(NativeChainB2):
                 if scan.complete and scan.contacts:self._strike_refused(f,plan,run,first)
                 self._recover("rune transfer external step blocked",f)
             return None
+        if (draft.run.link in transfer.ROUTE_LINKS and not draft.run.v.get("seam_inner")
+                and _sep312(f)):
+            # Task 182 seq 312: the route ahead meets the other body before the target: a revocable approach hands back now (the keys already
+            # sent stay the next owner's prefix; a strike row already chosen, a hook and a source tail are not approach links); a fresh one
+            # does not start while it does
+            try:blocked=self._route_ahead(state,game,sim,plan,draft,mask,f)
+            except (GeometryUnavailable,NominalUnsupported,AttributeError,TypeError,ValueError,IndexError,KeyError) as exc:
+                # the route's own read failing never blocks or crashes the Run: noted, the step gate as before
+                blocked=None;self._note("transfer_route_unchecked",frame=f,reason=repr(exc)[:200])
+            if blocked is not None:
+                self._note("transfer_route_blocked",frame=f,active=active,target=plan.iid,**blocked,
+                           owner=("B2 recovery hands back; failure responsibility kept" if active else "current owner keeps the keys"))
+                if active:self._recover("rune transfer route meets the other Clapper's body before its target",f)
+                return None
         goal=self._transfer_goal
         responsibility=(transfer.MoveInstance(plan.caster,plan.cast_fa,"CC_CAST") if goal is None else goal.responsibility)
         self._transfer_responsibility.setdefault(plan.move,(responsibility,None if goal is None else goal.cast_ta))
@@ -1529,6 +1606,9 @@ class NativeManualAirChain(NativeChainB2):
         gap=transfer.two_gap(state,plan.caster);hb=transfer._hero_box(state.get("hero"))
         stand=bool(gap is not None and hb is not None and transfer.standable(gap,hb))
         if keep is None and not stand:
+            if gap is not None and hb is not None and _sep312(f):
+                handled,offer=self._follow_stacked(state,game,sim,forecast,prefs,made,run,current,gap)
+                if handled:return handled,offer
             # no standable gap: the existing witnessed down-slash on the target's inner side; its own gates decide
             if gap is not None and hb is not None:self._note_seam(f,gap,hb,made,False,None,prefs)
             return False,None
@@ -1542,7 +1622,9 @@ class NativeManualAirChain(NativeChainB2):
                 self._note("transfer_follow_rechosen",frame=f,old_kind=(old or {}).get("kind"),new=choice[0],
                            basis="a clean middle landing from her current state; the whole route scanned as on a first choice")
             if choice is None:
-                if self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand,old):return False,None
+                # seq 312 #379: an owned outer landing with no standable gap goes on while legal (no single seam strike retakes it)
+                stacked_land=keep=="land" and not stand and _sep312(f)
+                if not stacked_land and self._seam_follow(state,game,sim,geo,plan,prefs,made,run,keep,gap,hb,stand,old):return False,None
                 if keep=="land":choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,old)   # goes on while legal
                 elif stand:choice=self._side_landing_choice(state,game,sim,geo,plan,prefs,None)
         except (GeometryUnavailable,NominalUnsupported) as exc:
@@ -1558,6 +1640,34 @@ class NativeManualAirChain(NativeChainB2):
             self._note("transfer_follow_none",frame=f,link=draft.run.link,owner="the existing air / strike link continues")
             return False,None
         return self._follow_install(state,game,sim,made,run,keep,choice)
+
+    def _follow_stacked(self,state,game,sim,forecast,prefs,made,run,current,gap):
+        """Task 182 seq 312 #379 (the person 11-09: two stacked with no seam down-slash on both, stand on the ground; "many times she sat on
+        top of two close ones"): a bounce follow-up's first decision with no standable gap. The seam double's intent (the two near body
+        edges within clapper_separated.DOUBLE_GAP_U, their tops within DOUBLE_TOP_U): the follow-up ends here and the ordinary rows take the
+        seam (L2's seam stance and stomp; each body's contact is the rows' own model contact). Otherwise the existing ordinary left / right
+        landing (each route scanned whole for all owners, the legal one by the B2 endpoint value), the side slashes after it from the ground
+        (L2's ground stance in front of the near one). No legal landing: the existing seam strike goes on, as before. (handled, offer)."""
+        from .tactics import clapper_separated as SEP
+        f=state["f"]
+        level=abs(float(gap.bounced[3])-float(gap.other_body[3]))<=SEP.DOUBLE_TOP_U
+        if gap.width<=SEP.DOUBLE_GAP_U and level:
+            # handed back through B2 recovery: the keys sent stay the next owner's prefix and the failure responsibility is kept
+            self._note("transfer_follow_stacked",frame=f,choice="seam double intent: the ordinary rows",width=gap.width,
+                       tops=[float(gap.bounced[3]),float(gap.other_body[3])])
+            self._recover("bounce follow-up: stacked with the seam double's intent; the ordinary rows' seam down slashes",f)
+            return True,None
+        try:
+            geo=B2Geometry(forecast,f,made[1].move,current[2])
+            choice=self._side_landing_choice(state,game,sim,geo,made[1],prefs,None)
+        except (GeometryUnavailable,NominalUnsupported) as exc:
+            self._note("transfer_follow_unchecked",frame=f,link=None,reason=str(exc));return False,None
+        if choice is None:
+            self._note("transfer_follow_stacked",frame=f,choice="no legal outer landing: the existing seam strike",width=gap.width)
+            return False,None
+        self._note("transfer_follow_stacked",frame=f,choice=choice[1].get("kind"),width=gap.width,
+                   basis="no seam double: the ordinary landing, then side slashes from the ground")
+        return self._follow_install(state,game,sim,made,run,None,choice)
 
     def _note_seam(self,f,gap,hb,made,stand,released,prefs=None):
         v=made[0].run.v;link=made[0].run.link;row=v.get("row") if link=="strike" else None

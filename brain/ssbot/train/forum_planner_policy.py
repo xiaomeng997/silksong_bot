@@ -683,6 +683,11 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.v2feed.reset()
         else:
             self.v2feed = None
+        if isinstance(self.tac, GauntletTactics):
+            # Task 182 seq 312: L2 reads the same rune facts every key owner reads (the big circles' ledger, the small runes' per-bomb
+            # forecast of the tracker fed before its decision)
+            self.tac.rune_life = self.rune_life
+            self.tac.v2trk = None if self.v2feed is None else self.v2feed.trk
         self._set_react(self.planner.fcfg)
         self._set_ta(self.planner.fcfg)
         if SCENE_FIELD_SHADOW or SCENE_FIELD_RANK:
@@ -1426,7 +1431,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play = cm
                 own = "claw"
                 self.counts["claw_chase"] += 1
-        middle_jump = (getattr(prefs, "clapper_choice", None) in ("middle_jump", "cluster_lure", "cluster_attack"))
+        middle_jump = (getattr(prefs, "clapper_choice", None) in ("middle_jump", "cluster_lure", "cluster_attack", "cluster_vault")
+                       # Task 182 seq 312: a jump antic of a Clapper behind the other one or across a big rune: no dash slash at it
+                       or any(e.get("iid") in getattr(prefs, "blocked", ()) and slam_play.control(e)[0] in cast_stab.ANTIC + cast_stab.JUMP_ANTIC
+                              for e in slam_play.clappers(s)))
         if self.cast_stab is not None and middle_jump and play is None and not low_crit and not asw_crit:
             # This one scene owns its guide/standing/escape stance. The old
             # antic dash-to-slash script would otherwise overwrite that choice.
@@ -1629,7 +1637,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         """Why no chase of an evade may run this tick (None: it may): the two scripts' own blocks, and L2's press stage (Task 182 seq 311: she goes at the first one, not after the walker)."""
         return ((self.two.jh_block(f) if (self.two is not None and two_play.JUMPHIT) else None)
                 or (self.two.rt_hold_block(f) if (self.two is not None and two_play.RT2) else None)
-                or ("plan press" if getattr(prefs, "press_walker", None) is not None else None))
+                or ("plan press" if getattr(prefs, "press_walker", None) is not None else None)
+                # Task 182 seq 312: the focus she would follow is behind the other one or across a live big rune (L2's shared fact)
+                or ("separated" if getattr(prefs, "target", None) in getattr(prefs, "blocked", ()) else None))
 
     @staticmethod
     def _press_skip(skip, prefs):

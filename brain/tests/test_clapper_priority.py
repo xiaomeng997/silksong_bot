@@ -225,6 +225,15 @@ def test_outside_near_attack_requests_inward_contact_without_fake_crossing(side)
     assert tac.last["clapper_scene"] == "flip inward intent"
 
 
+@pytest.fixture
+def seq312_off(monkeypatch):
+    """Task 182 seq 312 off (clapper_separated.ENABLED): the legacy stacked poses (the air pose at the seam, the overhead root) that #379 now
+    replaces with the seam double's intent or the ground in front of the near one; their own mechanics stay tested with it off."""
+    from ssbot.combat.tactics import clapper_separated as SEP
+    monkeypatch.setattr(SEP, "ENABLED", False)
+
+
+@pytest.mark.usefixtures("seq312_off")
 def test_tight_middle_requests_overhead_without_claiming_continuous_pogo():
     tac, ws, fc = scene((20., 22.), 21.)
     out = step(tac, ws, fc)

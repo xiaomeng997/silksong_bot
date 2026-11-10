@@ -18,6 +18,7 @@ from .clapper_scene import (AIR, ANTIC, JUMPS, NEAR, Scene, entry, geometry, gro
                             standing_gap)
 from .clapper_tactics import (BAIT_WIDTHS, DEFAULT_SCORES, KEEP, LEGACY_TABLE, OBSERVE, RETURN_LANDED_S, RULES,  # noqa: F401
                               TACTICS, Applied, cluster_route, middle_return, return_pose, table)
+from . import clapper_separated as SEP
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X
 from .modes import EVADE, EntryAttack, StageWithdraw, entry_attack_prefs
 
@@ -89,6 +90,7 @@ def decide(tac, ws, fc, prefs, hx, t):
     geo = geometry(tac, ws, subjects)
     region = None if geo is None else geo["region"]
     sc = Scene(tac, ws, fc, prefs, hx, t, subjects, mem, geo, region)
+    SEP.NOW_F = sc.frame                    # Task 182 seq 312: the frame its offline A/B start (SSBOT_FORUM_SEP312_FROM) is read against
     sc.table = tb
     if tb is not LEGACY_TABLE:
         sc.plans = plan_runner(tac)
@@ -204,6 +206,8 @@ def _apply(sc, won, rule):
             others = frozenset(out.no_hit) | (frozenset(ap.no_hit) - frozenset(ap.cross_no_hit))
             out = replace(out, no_hit=frozenset(out.no_hit) | ap.no_hit, return_cross=frozenset(ap.cross_no_hit) - others)
     if tac.ta: out, _ = tac._ta_rules(ws, fc, out, g, target, hx)
+    if SEP.active():
+        out = replace(out, blocked=SEP.blocked_iids(sc))      # Task 182 seq 312: the shared fact every key owner reads
     for tactic in sc.table.tactics:
         out = tactic.finish(sc, rule, tactic is won, g, out)
     e = out.entry_attack

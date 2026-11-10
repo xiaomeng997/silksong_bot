@@ -157,6 +157,8 @@ class Request:
     hold: object
     routes: tuple | None = None   # Task 182 seq 311: the only candidates this request may choose (a press's follow-up); None: all of the scene's
     other_antic_at: float | None = None   # ... the other one's own aim clock (its antic's start) when it is aiming a jump of its own at such a follow-up
+    outer: bool = False           # Task 182 seq 312: the cluster's outer variant (a standing gap between them, the jumper the far one): 3.1 / 3.2 / 3.3
+    rune_across: bool = False     # ... a live big rune across her way to the jumper (plan 3.4: 3.1 / 3.2 only)
 
 
 class Roller:
@@ -825,7 +827,11 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         stance = near.x + out * q.face_u
         land = _land(J.x, stance, out)
         X = land + out * (reach + half_in + q.pad)
-        det.update(reachable=near.iid, aim_x=stance, landing=land, retreat_x=X, reach=reach, wall_x=wall)
+        # seq 312 (plan 3.2): her final place for the outer variant's comparison: beside the jump's landing on her side (a plain jump), the
+        # rune's far edge (a jump cast: the retreat past its coverage)
+        final = X if cast else land + out * (BODY_HALF + half_in + q.pad)
+        det.update(reachable=near.iid, aim_x=stance, landing=land, retreat_x=X, reach=reach, wall_x=wall, final_x=final,
+                   final_room=min(final - q.xa, q.xb - final))
         if (X - wall) * out > 0:
             return no("no room to retreat past the coverage")
         # rolled on from the state she is predicted to leave from (speed, air, cooldown; a late hand-back starts it later)
@@ -847,22 +853,61 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
             return no("still under the landing hammer on the retreat")
         return Candidate("attack", True, None, "attack_aim", 1., tuple(det.items())), dict(target=near.iid)
 
+    def vault():
+        """seq 312 (plan 3.3): over the near one into the middle in the aim, under the jumper on its observed take-off; her final place
+        behind its landing (the middle scene's own way under, _under, read from the middle point she is to stand on by the lock)."""
+        from dataclasses import replace as _replace
+        det = dict(out=out)
+
+        def no(reason):
+            return Candidate("vault", False, reason, None, 1., tuple(det.items())), None
+
+        if q.rune_across:
+            return no("a live big rune across her way (plan 3.4: lure or attack only)")
+        if not q.hand.known:
+            return no("hand-back unknown")
+        if lock is None:
+            return no("aim clock unknown")
+        g_in, j_near = (G.a, J.b) if out > 0 else (G.b, J.a)
+        lo, hi = min(g_in, j_near) + q.pad + q.left, max(g_in, j_near) - q.pad - q.right
+        if lo > hi:
+            return no("no standing room between them")
+        mid = .5 * (lo + hi)
+        det.update(mid=mid, gap_lo=lo, gap_hi=hi)
+        _, k_mid = go(m, np.zeros(ROLL_T, np.int64), k_hand, mid)
+        if k_mid is None:
+            return no("the middle not reached in the model")
+        det.update(mid_t=t_of(k_mid), by_t=lock - RESERVE_S)
+        if t_of(k_mid) > lock - RESERVE_S:
+            return no("the middle not reached before the aim reserve")
+        c = _Middle(_replace(q, scene="middle", side=0), m)
+        u = _under(c, mid, "vault")
+        det.update({k: v for k, v in u.detail})
+        if not u.feasible:
+            return no(u.reason)
+        spot = u.get("end_x")
+        det.update(final_x=spot, final_room=min(spot - q.xa, q.xb - spot))
+        return Candidate("vault", True, None, "vault_over", 1., tuple(det.items())), dict(mid=mid)
+
     cand_l, f_l = lure()
     cand_a, f_a = attack()
+    cand_v, f_v = vault() if q.outer else (None, None)
     hazard_end = land_t + (RUNE_OVER_S if cast else 5 / 60.)
     made = dict(out=out, f=out, reach=reach, family=J.family, jumper=J.iid, other=G.iid, other_family=G.family, lock_t=lock, take_t=t_to,
                 land_t=land_t, stage=q.stage, need_back=(f_l or {}).get("need"), half_in=half_in, pad=q.pad, wall_x=wall,
                 walker_x0=G.x, walker_v=closing, latest_depart=(f_l or {}).get("depart"), reach_j=q.reach_j,
-                arrive_dir=out, arrive_t=(f_l or {}).get("arrive"))
+                arrive_dir=out, arrive_t=(f_l or {}).get("arrive"), outer=q.outer, rune_across=q.rune_across)
     soft = [Range("walker_err", -SOFT_WALKER_U, SOFT_WALKER_U)]
     if f_l is not None and f_l.get("guide") is not None:
         soft.append(Range("hand_x", q.hand.x - SOFT_HAND_U, q.hand.x + SOFT_HAND_U))
         soft.append(Range("hand_t", -math.inf, f_l["depart"]))
+    cands = (cand_l, cand_a) + (() if cand_v is None else (cand_v,))
     base = dict(scene="cluster", instance=q.instance, generation=q.generation, made_t=q.t, aim_deadline=lock,
-                valid_until=hazard_end + HIT_TAIL_S, candidates=(cand_l, cand_a), detail=tuple(made.items()),
+                valid_until=hazard_end + HIT_TAIL_S, candidates=cands, detail=tuple(made.items()),
                 support=(Range("walker_err", -HARD_WALKER_U, HARD_WALKER_U),), soft=tuple(soft))
-    if not cand_l.feasible and not cand_a.feasible:
-        return Plan(status="none", reason=f"lure: {cand_l.reason}; attack: {cand_a.reason}", **base)
+    if not any(c.feasible for c in cands):
+        return Plan(status="none", reason="; ".join(f"{c.name}: {c.reason}" for c in cands), **base)
+    selected = outer_choice(cand_l, cand_a, cand_v) if q.outer else None
     jid, gid = J.iid, G.iid
     other_move = ("other_move", INVALID)
     phases = [
@@ -898,7 +943,24 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         # too late for the guide: lure is not forced, and attack was prepared with it when feasible
         phases.append(Phase("lure_late", target=(f_a or {}).get("target", gid), attack="side",
                             stance=("front", (f_a or {}).get("target", gid)), no_hit=(jid,), on=take))
-    return Plan(phases=tuple(phases), selected=None, **base)
+    if cand_v is not None and cand_v.feasible:
+        # seq 312 (plan 3.3): over the near one by its down slashes into the middle (the action owners' crossing), the jumper not hit; on
+        # the observed take-off the middle scene's own way under (the written take-off condition, _resolve_cluster); no replacement inside
+        phases.append(Phase("vault_over", target=gid, attack="stomp", stance=("x", f_v["mid"]), no_hit=(jid,), replaceable=False,
+                            on=(("takeoff_under", "under"), ("takeoff_blocked", BLOCKED), other_move)))
+        phases.append(Phase("under", target=jid, stance=("behind",), ground=True, replaceable=False, go="under",
+                            on=(("move_over", DONE), ("stance_lost", BLOCKED))))
+    return Plan(phases=tuple(phases), selected=selected, **base)
+
+
+def outer_choice(lure: Candidate, attack: Candidate, vault: Candidate | None) -> str | None:
+    """seq 312 (plan 3.1-3.3, the person): the outer variant's choice. The lure whenever it can run; else of the attack and the vault the one
+    whose final place is farther from its nearer wall (final_room: the place after the whole follow-up, never the current or a passing one);
+    one feasible: that one; none: None."""
+    if lure.feasible:
+        return "lure"
+    ok = [c for c in (attack, vault) if c is not None and c.feasible]
+    return max(ok, key=lambda c: c.get("final_room", -math.inf)).name if ok else None
 
 
 def generate(q: Request, params, terrain) -> Plan:
@@ -964,7 +1026,18 @@ def parent_scene(subjects, geo, x: float):
         return "middle", s, o, 0
     if region in ("left", "right") and s.state in ANTIC and o.state not in NEAR | AIR and standing_gap(geo) is False:
         return "cluster", s, o, -1 if region == "left" else 1
+    if (region in ("left", "right") and s.state in ANTIC and o.state not in NEAR | AIR and standing_gap(geo) is True
+            and outer_jumper(s, o, x)):
+        # Task 182 seq 312 (plan 3.1-3.3): the outer variant, the far one aiming with a standing gap between them (only this layout, the
+        # parent scene stays as narrow as it was otherwise)
+        return "cluster", s, o, -1 if region == "left" else 1
     return None
+
+
+def outer_jumper(s, o, x) -> bool:
+    """Task 182 seq 312: the jumper is the far one (the other one's root strictly between her and the jumper's root)."""
+    from .clapper_separated import active, behind
+    return active() and behind(x, o, s)
 
 
 class PlanRunner:
@@ -1625,6 +1698,16 @@ class PlanRunner:
             return "blocked", "her hand-back is unknown at the take-off"
         take_t = t if m.get("air_at") is None else m["air_at"]
         land_t = take_t + FLIGHT_S
+        if selected == "vault":
+            # seq 312 (plan 3.3): only from the middle (she got over the near one), and behind the observed landing before its body comes down
+            if region_at(sc.geo, sc.hx) != "middle":
+                return "blocked", "she is not in the middle at the take-off"
+            spot = self._spot_now(sc, plan, m)
+            if spot is None:
+                return "blocked", "no room behind the observed landing"
+            if not self._arrives(sc, spot, take_t + DESCENT_S - .05):
+                return "blocked", "the way under does not arrive before its body comes down"
+            return "under", "under the jumper from the middle"
         if selected == "lure":
             S = float(o.pos[0]) + out * sc.tac.rules.face_u
             need = plan.get("need_back")
@@ -1746,10 +1829,16 @@ class PlanRunner:
         prefix.setflags(write=False)
         J = Body(s.iid, float(s.pos[0]), self._vx(sc, s), *geo["bodies"][s.iid], s.state, s.family)
         W = Body(o.iid, float(o.pos[0]), self._vx(sc, o), *geo["bodies"][o.iid], o.state, o.family)
+        outer = name == "cluster" and standing_gap(geo) is True
+        if outer:
+            from .clapper_separated import circles_across
+            rune_across = bool(circles_across(tac, t, x, J.a if J.x > x else J.b))
+        else:
+            rune_across = False
         q = Request(name, stage, inst, self.generation, t, J, W, side, m.get("antic_at"), m.get("air_at"), m.get("land"), m.get("vx"),
                     m.get("face"), hand, geo["left"], geo["right"], geo["xa"], geo["xb"], JT["gap_u"], JT["pad"], tac.rules.face_u,
                     JT["reach_j"], S0, prefix, _copy_hold(hold), FOLLOW_UP if inst == self.pressed else None,
-                    (self.moves.get(o.iid) or {}).get("antic_at") if o.family in JUMPS else None)
+                    (self.moves.get(o.iid) or {}).get("antic_at") if o.family in JUMPS else None, outer=outer, rune_across=rune_across)
         seq = self.channel.request(key, q)
         now = time.perf_counter_ns()
         self.sent[seq] = dict(ns=now, observed_ns=inp.t0_ns if inp.t0_ns is not None else (self.tick_ns or now), f=sc.frame, t=t, why=why,

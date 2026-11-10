@@ -53,6 +53,30 @@ def hf(hold):
             'pending': [int(v) for v in hold.pending[0]], 'age': [int(v) for v in hold.age[0]]}
 
 
+# Task 182 seq 312 #379: with no standable gap the follow-up's first decision is now the seam double's intent (handed to the ordinary rows
+# through B2 recovery) or the ordinary outer landing; the inner seam strike below stays its fallback (no legal landing) and the switch-off
+# path. These tests read that strike, so they run with the package off (tests/test_separated312.py covers the new decision).
+SEQ312_OFF = frozenset({
+    "test_no_gap_aims_the_witnessed_downslash_over_the_seam_then_a_real_bounce_with_a_gap_goes_middle",
+    "test_an_air_run_without_a_witness_still_takes_an_open_gap",
+    "test_seam_strike_turns_down_a_row_that_first_meets_the_outer_side",
+    "test_seam_strike_on_the_inner_side_still_goes",
+    "test_back_only_no_hit_keeps_the_witnessed_inner_seam_strike",
+    "test_another_no_hit_source_on_the_same_iid_takes_no_new_strike",
+    "test_the_new_strike_ban_is_read_every_tick",
+    "test_a_sent_seam_strike_goes_on_when_another_source_bans_its_target",
+    "test_seam_side_follows_the_real_roots_when_facing_bodies_overlap_deeply",
+    "test_seam_side_unknown_when_the_roots_coincide_turns_every_row_down",
+})
+
+
+@pytest.fixture(autouse=True)
+def _seq312_off(request, monkeypatch):
+    if request.node.originalname in SEQ312_OFF:
+        from ssbot.combat.tactics import clapper_separated
+        monkeypatch.setattr(clapper_separated, "ENABLED", False)
+
+
 class Bout:
     """One bounce follow-up, closed loop: the chain's offered key reaches the hero model two frames later."""
 

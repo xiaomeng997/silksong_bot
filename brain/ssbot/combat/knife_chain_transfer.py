@@ -659,6 +659,52 @@ def enters_body(boxes,body,until):
     return False
 
 
+# Task 182 seq 312 (design 3.1; the person: after the two crossed she came down on the other one, bouts 18 / 19 / 41 / 47): the route an
+# approach Run commits to, read against the OTHER Clapper's body before her box reaches the target. The step gate reads one tick's key.
+ROUTE_LINKS=frozenset({"air","walk","dash","jump"})
+ROUTE_H=40               # frames of the Run's remaining planned keys rolled (the shadow probe's H40)
+ROUTE_REACH_U=.5         # the strike cut: her box this near the target's body (carried at its STATE vx) has reached its target first
+ROUTE_LAND_F=12          # frames past her own landing still read (bout 38: she landed at 122103 and the jumper came down on her at 122106-122108)
+CLAPPER_G=84.            # u/s^2: a Clapper body in Jump / Air falls at this until its bottom meets the floor
+ROUTE_FLOOR_Y=3.0        # the w13 floor (a body bottom at or below it is down)
+
+
+def body_path(enemy,n):
+    """[n+1, 4] the enemy's body box (x0, y0, x1, y1) from this STATE's frame (row 0) on: carried at its STATE vx (none in a still-root
+    state); in Jump / Air ballistic at CLAPPER_G from its STATE vy until its bottom meets the floor, still from there. None: unknown."""
+    try:box=body_box(enemy)
+    except (TypeError,ValueError,OverflowError):return None
+    if box is None or not np.isfinite(box).all():return None
+    st=control(enemy)[0];vel=enemy.get("vel") or (0.,0.)
+    try:vx,vy=float(vel[0]),float(vel[1]) if len(vel)>1 else 0.
+    except (TypeError,ValueError,IndexError):return None
+    if not (math.isfinite(vx) and math.isfinite(vy)):return None
+    flying=st in ("Jump","Air")
+    if st in STILL_ROOT_STATES:vx=0.
+    if not flying:vy=0.
+    out=np.empty((n+1,4));dx=dy=0.
+    out[0]=box
+    for k in range(1,n+1):
+        dx+=vx/60.
+        if flying:
+            vy-=CLAPPER_G/60.;dy+=vy/60.
+            if box[1]+dy<=ROUTE_FLOOR_Y and vy<0:dy=ROUTE_FLOOR_Y-box[1];flying=False;vx=0.
+        out[k]=(box[0]+dx,box[1]+dy,box[2]+dx,box[3]+dy)
+    return out
+
+
+def route_meets_other(boxes,limit,target_path,other_path):
+    """Along her boxes 1..limit (row k: frame +k): the first k where her box meets the other body before it comes within ROUTE_REACH_U of the
+    target body (x only: the cut), and that cut. (k or None, cut or None)."""
+    n=min(int(limit),len(boxes)-1,len(target_path)-1,len(other_path)-1)
+    for k in range(1,n+1):
+        h=boxes[k];t=target_path[k];o=other_path[k]
+        if not np.isfinite(h).all():return None,None
+        if h[2]>=t[0]-ROUTE_REACH_U and h[0]<=t[2]+ROUTE_REACH_U:return None,k
+        if h[0]<=o[2] and h[2]>=o[0] and h[1]<o[3] and h[3]>o[1]:return k,None
+    return None,None
+
+
 def plan_over_call(run_vars):
     """The stomp entry of a jump plan's over route (SSBOT_FORUM_TWO_PLAN only): the near table's rule for this strike."""
     from .tactics import clapper_plans

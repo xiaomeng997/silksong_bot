@@ -19,7 +19,7 @@ from ssbot.combat.knife_chain_air_native import NativeManualAirChain
 from ssbot.combat.knife_chain_format import MASK_NAMES as B
 from ssbot.combat.tactics import gauntlet as G
 from ssbot.combat.tactics.modes import GoalPrefs, ReturnRequest
-from tests.test_clapper_priority import change, manual, scene, step   # noqa: F401  (autouse manual-B fixture)
+from tests.test_clapper_priority import change, manual, scene, seq312_off, step   # noqa: F401  (autouse manual-B fixture)
 from tests.test_middle_return313 import hero_at, move
 
 
@@ -36,6 +36,7 @@ def _near_cast(tac, ws, fc):
     return _step(tac, ws, fc)
 
 
+@pytest.mark.usefixtures("seq312_off")   # the air pose the request is for (seq 312 #379 replaces it when on)
 def test_l2_makes_the_request_only_on_its_winning_air_ticks(monkeypatch):
     monkeypatch.setattr(v2, "RETURN_AIR", True)
     tac, ws, fc = scene(xs=(20., 23.), hx=15.)             # bodies 19..21 and 22..24: no standing gap
@@ -61,6 +62,7 @@ def test_l2_makes_the_request_only_on_its_winning_air_ticks(monkeypatch):
     assert tac.last["clapper_back"] is None and out.return_request is None
 
 
+@pytest.mark.usefixtures("seq312_off")   # the air pose the request is for (seq 312 #379 replaces it when on)
 def test_l2_makes_no_request_with_the_switch_off():
     tac, ws, fc = scene(xs=(20., 23.), hx=15.)
     ws.stamp.frame = 1000

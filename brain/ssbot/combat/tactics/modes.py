@@ -253,6 +253,9 @@ class GoalPrefs(TacticPrefs):
     #                                        the tail check); else the choice stands. PlanResult.J stays the choice's own J
     press_walker: int | None = None        # Task 182 seq 311 (the person 11-09): the walker the running press stage leaves alone: the evade chase neither starts nor goes
     #                                        on, the slam script does not start on it and the chain starts no new strike; L2's own stance and waypoint say where she goes
+    blocked: frozenset = frozenset()       # Task 182 seq 312: the Clappers she cannot go straight at this tick: the other one's root between her and its root, or a
+    #                                        live big rune across her way to its body (clapper_separated.blocked_iids). The evade chase does not follow one of them
+    #                                        and the jump cast's dash slash does not start on one; the chain's own approach reads its route (knife_chain_air_native)
 
 
 

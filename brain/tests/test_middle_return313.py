@@ -10,7 +10,7 @@ import pytest
 
 from ssbot.combat.tactics import clapper_priority as P, gauntlet as G
 from ssbot.core.worldstate import E
-from tests.test_clapper_priority import change, manual, scene, step   # noqa: F401  (autouse manual-B fixture)
+from tests.test_clapper_priority import change, manual, scene, seq312_off, step   # noqa: F401  (autouse manual-B fixture)
 
 
 def hero_at(ws, x, y=5.6):
@@ -68,6 +68,7 @@ def test_the_crossed_body_is_recorded_apart_only_while_no_other_source_bans_it()
     assert step(tac, ws, fc).return_cross == frozenset({7})                 # every tick on its own
 
 
+@pytest.mark.usefixtures("seq312_off")   # the legacy air pose (seq 312 #379: tests/test_separated312.py)
 def test_crossing_a_root_in_the_air_is_not_yet_back_and_a_closing_gap_turns_it_to_the_air_pose():
     # live 2812: over the passed body's inner half in the air the gap was still open, then it closed (the other one
     # walked in): the return goes on, now at the seam above the target
@@ -82,6 +83,7 @@ def test_crossing_a_root_in_the_air_is_not_yet_back_and_a_closing_gap_turns_it_t
     assert out.target == 8 and out.stance_x == pytest.approx(22.) and 7 in out.no_hit
 
 
+@pytest.mark.usefixtures("seq312_off")   # the legacy air pose (seq 312 #379: tests/test_separated312.py)
 def test_no_ground_gap_holds_the_seam_in_the_air_then_lands_when_they_part():
     tac, ws, fc = scene(xs=(20., 23.), hx=15.); step(tac, ws, fc)         # bodies 19..21 and 22..24: 1 u apart
     out = near_attack(tac, ws, fc, family=G.CC_CAST, states=("Spell Antic", "Cast 2"))
@@ -135,6 +137,7 @@ def test_overlapped_from_the_start_then_a_near_cast_cuts_into_the_middle_from_th
     assert out.target == 8 and out.stance_x == pytest.approx(23.) and 7 in out.no_hit
 
 
+@pytest.mark.usefixtures("seq312_off")   # the legacy air pose (seq 312 #379: tests/test_separated312.py)
 def test_tight_overlap_after_the_attack_is_the_air_pose_not_the_overhead_root():
     tac, ws, fc = scene(xs=(20., 21.5), hx=15.); step(tac, ws, fc)
     near_attack(tac, ws, fc)
@@ -146,6 +149,7 @@ def test_tight_overlap_after_the_attack_is_the_air_pose_not_the_overhead_root():
     assert "back" in rules and "overhead" not in rules   # the return holds the tight scene
 
 
+@pytest.mark.usefixtures("seq312_off")   # the legacy air pose (seq 312 #379: tests/test_separated312.py)
 def test_between_the_roots_without_a_standing_gap_when_the_attack_ends_still_gets_the_seam():
     # Root's #313 probe: H 20.75 / y 9, roots 20 / 21.5 (overlapped bodies) when the near attack ends: the seam
     # (20.75) with the stomp style, not the old overhead at root 20
