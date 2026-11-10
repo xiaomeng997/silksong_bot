@@ -183,6 +183,59 @@ def test_after_the_small_rune_two_tiers_by_the_gap(xs, tier):
     assert tac.last["clapper_rune_after"] is None
 
 
+def test_after_the_small_rune_a_far_one_behind_a_live_big_rune_is_no_target():
+    # Sol #382 R1 (PROBES382 rune_after_blocked_far_target): she at 22, 7 (19..21) beside her, 8 (29..31) farther from its wall but its
+    # fall place 27.75 inside the live circle 24..28: the one she can strike now is 7
+    tac, ws, fc = start((20., 30.), 22.)
+    tac.rune_life = NS(live=lambda t: [NS(lo=24., hi=28.)])
+    cast(tac, ws, fc, 7)
+    out = end_rune(tac, ws, fc, 7)
+    a = tac.last["clapper_rune_after"]
+    assert a["tier"] == "fall" and a["target"] == 7 and a["strikable"] == [7]
+    assert out.target == 7 and out.stance_x == pytest.approx(21. + SEP.FALL_U + .25) and 8 in out.blocked
+    tac, ws, fc = start((20., 30.), 22.)                  # the same without the circle: the farther-from-the-wall rule as before
+    cast(tac, ws, fc, 7)
+    end_rune(tac, ws, fc, 7)
+    assert tac.last["clapper_rune_after"]["target"] == 8 and tac.last["clapper_rune_after"]["strikable"] == [7, 8]
+    tac, ws, fc = start((20., 23.), 15.)                  # the middle of a tight pair inside a live circle: no strike from this unit
+    tac.rune_life = NS(live=lambda t: [NS(lo=17., hi=30.)])
+    cast(tac, ws, fc, 7)
+    end_rune(tac, ws, fc, 7)
+    assert tac.last["clapper_rune_after"] is None and tac.last["clapper_winner"]["rule"] != "rune_after"
+
+
+def test_a_jumper_behind_a_live_big_rune_alone_takes_the_cluster_with_3_1_or_3_2_only():
+    # Sol #382 R2 (PROBES382 rune_only_jump): she at 15, the jumper 7 at 20 behind the live circle 16..18, the other one 8 at 40 beyond it
+    from ssbot.combat.tactics.clapper_scene import geometry
+    tac, ws, fc = start((20., 40.), 15.)
+    tac.rune_life = NS(live=lambda t: [NS(lo=16., hi=18.)])
+    change(fc, 7, family=G.CC_JUMP, state='Jump Antic', committed=True)
+    tick(tac, ws, fc)
+    geo = geometry(tac, ws, list(fc.subjects))
+    scene_ = CP.parent_scene(list(fc.subjects), geo, 15., ((16., 18.),))
+    assert scene_ is not None and scene_[0] == "cluster" and scene_[1].iid == 7 and scene_[3] == -1
+    assert CP.parent_scene(list(fc.subjects), geo, 15.) is None          # no circle: this layout stays outside the jump scenes as before
+    assert CP.parent_scene(list(fc.subjects), geo, 15., ((22., 30.),)) is None   # a circle past the jumper is not across her way
+
+
+def test_the_rune_across_plan_keeps_its_places_out_of_the_circle():
+    # plan 3.4: the near one behind the circle is no attack, no vault, the lure's way back ends at the circle
+    from dataclasses import replace
+    from tests.test_l2_plan182 import body, plan_of, request
+    J = body(1, 30., "Jump Antic", "CC_JUMP", facing=1)
+    W = body(2, 20.)
+    q = replace(request("cluster", J, W, hx=44., side=1), outer=True, rune_across=True, circles=((35., 41.),))
+    plan = plan_of(q)
+    a, v, lure = plan.candidate("attack"), plan.candidate("vault"), plan.candidate("lure")
+    assert not a.feasible and "3.4" in a.reason and not v.feasible and "3.4" in v.reason
+    assert lure.get("return_cut_from") is not None and lure.get("return_x") == pytest.approx(41. + .25 + .25)
+    if lure.feasible:
+        phase = next(p for p in plan.phases if p.name == "lure_return")
+        assert phase.stance == ("x", pytest.approx(41.5)) and plan.selected == "lure"
+    q0 = replace(q, rune_across=False, circles=())       # the same layout without the circle: the attack is the old one
+    assert plan_of(q0).candidate("attack").reason is None or "3.4" not in plan_of(q0).candidate("attack").reason
+
+
 # ---- #379: the stacked pair ----
 
 def test_no_gap_return_takes_the_seam_double_when_level_else_the_ground_in_front_of_the_near_one():

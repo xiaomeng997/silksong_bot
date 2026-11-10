@@ -786,6 +786,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         for sc_ in (self.slam_play, self.cast_stab, self.evade_chase, self.rune_lowhop, self.two):
             if sc_ is not None:
                 sc_._life = self.rune_life
+        if isinstance(self.tac, GauntletTactics):
+            # Task 182 seq 312 (#383): L2 reads this episode's ledger too (it was wired above to the instance replaced here: an empty one)
+            self.tac.rune_life = self.rune_life
         self._rune_tick = None
         self._wake_f = None
         self._play_tick = None
@@ -1551,6 +1554,14 @@ class ForumPlannerPolicy(PlannerPolicy):
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
                                 two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t, **rt_kw)
+            if (tm_ is not None and getattr(self.two, "last_part", None) == "idle"
+                    and getattr(prefs, "clapper_choice", None) in ("sep_slam", "rune_down", "rune_after")):
+                from ssbot.combat.tactics import clapper_separated as _SEP
+                if _SEP.active(f):
+                    # Task 182 seq 312 (#383): the far one's slam place, the small rune's down slashes only and its one closing strike are
+                    # the planner's for this tick (L2's stance and strike); IdleHit's side slash yields (its other parts are unchanged)
+                    tm_ = None
+                    self.counts["two_idle_yield_312"] += 1
             if tm_ is not None and not (r.mask is not None or self.pause_owned) and self._rune_veto(
                     "two:" + str(getattr(self.two, "last_part", None)), tm_):
                 self.two.rune_yield(f)

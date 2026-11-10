@@ -1159,18 +1159,31 @@ class RuneAfter(Tactic):
         base = dict(gap=float(gap), t0=sc.t, f0=sc.frame, air_seen=not sc.grounded)
         if gap <= SEP.TIER_U:
             _, seam = SEP.double_intent(geo)
+            if not SEP.place_clear(sc, seam):
+                # Sol #382 R1: the middle in or across a live big rune circle is no strike she can take now: the existing rules
+                sc.tac.last.setdefault("clapper_sep_notes", []).append(dict(what="small rune end: the middle in or across a live big rune",
+                                                                            gap=gap, f=sc.frame))
+                return None
             target = min((low, high), key=lambda s: (abs(float(s.pos[0]) - sc.hx), s.iid))
             return dict(base, tier="seam", target=target.iid, stance=float(seam), style="stomp")
-        cands = [s for s in (low, high) if s.state not in AIR and s.family not in SEP.ATTACKS]
+        lo = SEP._span(geo, low.iid)[1] + JT["pad"] + geo["left"]
+        hi = SEP._span(geo, high.iid)[0] - JT["pad"] - geo["right"]
+        # Sol #382 R1: first the ones she can strike now (on the ground, in no attack, its fall place clear of every live big rune circle and
+        # her way there crossing none), then of those the one farther from its nearest wall; none: the existing rules
+        cands = []
+        for s in (low, high):
+            if s.state in AIR or s.family in SEP.ATTACKS:
+                continue
+            x = SEP.fall_x(geo, s.iid, 1 if s.iid == low.iid else -1, lo, hi)
+            if SEP.place_clear(sc, x):
+                cands.append((s, x))
         if not cands:
             sc.tac.last.setdefault("clapper_sep_notes", []).append(dict(what="small rune end: nothing hittable", gap=gap, f=sc.frame))
             return None
-        chosen = max(cands, key=lambda s: (SEP.wall_room(geo, s), -s.iid))
-        lo = SEP._span(geo, low.iid)[1] + JT["pad"] + geo["left"]
-        hi = SEP._span(geo, high.iid)[0] - JT["pad"] - geo["right"]
-        x = SEP.fall_x(geo, chosen.iid, 1 if chosen.iid == low.iid else -1, lo, hi)
+        chosen, x = max(cands, key=lambda c: (SEP.wall_room(geo, c[0]), -c[0].iid))
         return dict(base, tier="fall", target=chosen.iid, stance=float(x), style=None,
-                    wall_room={str(s.iid): round(SEP.wall_room(geo, s), 3) for s in (low, high)})
+                    wall_room={str(s.iid): round(SEP.wall_room(geo, s), 3) for s in (low, high)},
+                    strikable=sorted(int(s.iid) for s, _ in cands))
 
     def _end(self, sc, ctx):
         if all(s.iid != ctx["target"] for s in sc.subjects):

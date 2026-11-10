@@ -98,6 +98,17 @@ def circles_across(tac, t, hx, x_to):
     return [sp for sp in live_circles(tac, t) if not sp[0] <= hx <= sp[1] and sp[0] < hi and sp[1] > lo]
 
 
+def place_clear(sc, x) -> bool:
+    """Sol #382 R1: her centre at x is outside every live big rune circle (grown by her half widths and the pad) and no live circle lies
+    across her way there from where she stands (the shared ledger, as circles_across reads it)."""
+    from .gauntlet import JT
+    geo = sc.geo
+    for lo, hi in live_circles(sc.tac, sc.t):
+        if lo - geo["right"] - JT["pad"] < x < hi + geo["left"] + JT["pad"]:
+            return False
+    return not circles_across(sc.tac, sc.t, sc.hx, x)
+
+
 def behind(hx, near, far) -> bool:
     """The near one's root lies strictly between her centre and the far one's root (both on one side of her; over the near one's outer half
     she is still in front of it)."""

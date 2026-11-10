@@ -159,6 +159,7 @@ class Request:
     other_antic_at: float | None = None   # ... the other one's own aim clock (its antic's start) when it is aiming a jump of its own at such a follow-up
     outer: bool = False           # Task 182 seq 312: the cluster's outer variant (a standing gap between them, the jumper the far one): 3.1 / 3.2 / 3.3
     rune_across: bool = False     # ... a live big rune across her way to the jumper (plan 3.4: 3.1 / 3.2 only)
+    circles: tuple = ()           # ... with it, the live circles' x spans: every place and route of the plan stays out of them (Sol #382 R2)
 
 
 class Roller:
@@ -774,6 +775,13 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
             return no("aim clock unknown")
         S = G.x + shift + out * q.face_u
         S = min(S * out, (wall * out)) * out
+        cut = None
+        if q.circles:
+            # plan 3.1 / 3.4 (Sol #382 R2): the way back goes no further than a live big rune circle on it
+            s_cut = rune_cut(q.circles, q.hand.x, S, q.left, q.right, q.pad)
+            if s_cut != S:
+                cut, S = S, s_cut
+                det.update(return_cut_from=cut)
         need = max(JB.CFG["min_back_u"], BODY_BACK_U + 12. * SWEEP_S + half_in + q.pad)
         v = ((S + out * need) - J.x) * out / GAIN
         det.update(return_x=S, need_back=need, v_need=v)
@@ -790,6 +798,8 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         guide = None if q.hand.x * out >= h_need * out else h_need
         aim_x = q.hand.x if guide is None else guide
         det.update(h_need=h_need, guide=guide, aim_x=aim_x, widths_observed=widths, wall_x=wall)
+        if q.circles and rune_cut(q.circles, q.hand.x, aim_x, q.left, q.right, q.pad) != aim_x:
+            return no("the lure's place across a live big rune (plan 3.4)")
         depart = None
         arrive = lock - RESERVE_S
         if guide is not None:
@@ -813,7 +823,7 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         if t_of(k_back) > by - .05:
             return no("the way back arrives after its body comes down")
         return Candidate("lure", True, None, "lure_wait" if guide is not None else "lure_hold", 1., tuple(det.items())), \
-            dict(guide=guide, depart=depart, need=need, aim_x=aim_x, arrive=arrive)
+            dict(guide=guide, depart=depart, need=need, aim_x=aim_x, arrive=arrive, return_x=S, cut=cut)
 
     def attack():
         det = dict(out=out, hand_x=q.hand.x)
@@ -834,6 +844,10 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
                    final_room=min(final - q.xa, q.xb - final))
         if (X - wall) * out > 0:
             return no("no room to retreat past the coverage")
+        if q.circles and (rune_cut(q.circles, q.hand.x, stance, q.left, q.right, q.pad) != stance
+                          or rune_cut(q.circles, stance, X, q.left, q.right, q.pad) != X):
+            # plan 3.2 / 3.4 (Sol #382 R2): the near one or the retreat behind a live big rune circle is no attack she can take now
+            return no("a live big rune across the way to the near one or its retreat (plan 3.4)")
         # rolled on from the state she is predicted to leave from (speed, air, cooldown; a late hand-back starts it later)
         row0, _ = go(m, np.zeros(ROLL_T, np.int64), k_hand, stance)
         row0 = row0.copy()
@@ -896,7 +910,8 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
     made = dict(out=out, f=out, reach=reach, family=J.family, jumper=J.iid, other=G.iid, other_family=G.family, lock_t=lock, take_t=t_to,
                 land_t=land_t, stage=q.stage, need_back=(f_l or {}).get("need"), half_in=half_in, pad=q.pad, wall_x=wall,
                 walker_x0=G.x, walker_v=closing, latest_depart=(f_l or {}).get("depart"), reach_j=q.reach_j,
-                arrive_dir=out, arrive_t=(f_l or {}).get("arrive"), outer=q.outer, rune_across=q.rune_across)
+                arrive_dir=out, arrive_t=(f_l or {}).get("arrive"), outer=q.outer, rune_across=q.rune_across, circles=q.circles,
+                return_cut_from=(f_l or {}).get("cut"))
     soft = [Range("walker_err", -SOFT_WALKER_U, SOFT_WALKER_U)]
     if f_l is not None and f_l.get("guide") is not None:
         soft.append(Range("hand_x", q.hand.x - SOFT_HAND_U, q.hand.x + SOFT_HAND_U))
@@ -918,7 +933,9 @@ def _cluster_plan(q: Request, m: Roller) -> Plan:
         # The way back is the existing side approach (B2 owns its keys and scans; it may pass under a source in the air). Past
         # the landing the jumper is the focus until it is down: as a non-focus its rule margin keeps her off the very place
         # the return is for (the standing gap behind its landing; #314 G1, replay c_lure: pushed back into the hammer).
-        Phase("lure_return", target=gid, attack="side", stance=("front", gid), no_hit=(jid,), replaceable=False,
+        Phase("lure_return", target=gid, attack="side",
+              stance=("front", gid) if (f_l or {}).get("cut") is None else ("x", f_l["return_x"]),   # 3.4: up to the circle on the way back
+              no_hit=(jid,), replaceable=False,
               on=(("past_landing", "lure_behind"), other_move, ("in_reach", DONE),)),
         Phase("lure_behind", target=jid, stance=("behind",), ground=True, replaceable=False,
               on=(("hazard_over", "lure_slash"), ("stance_lost", BLOCKED))),
@@ -1009,11 +1026,11 @@ def region_at(geo, x: float) -> str | None:
             "tight" if lo > hi and low.pos[0] <= x <= high.pos[0] else "over")
 
 
-def parent_scene(subjects, geo, x: float):
+def parent_scene(subjects, geo, x: float, circles=()):
     """(scene, jumper, other, side) of the planned jump scenes, or None. Exactly one in a jump. Middle: between the bodies by
     their spans (bracketing roots is not enough; stacked bodies are not middle); no ground or input term. Cluster: outside
     both, with no standing gap between them (the design's bodies together: two apart with her beyond one are not one), antic
-    only, the other one neither in a near antic nor in the air."""
+    only, the other one neither in a near antic nor in the air. circles: the live big rune circles' x spans (seq 312 plan 3.4)."""
     if geo is None or len(subjects) != 2:
         return None
     jumping = [s for s in subjects if s.family in JUMPS]
@@ -1027,9 +1044,9 @@ def parent_scene(subjects, geo, x: float):
     if region in ("left", "right") and s.state in ANTIC and o.state not in NEAR | AIR and standing_gap(geo) is False:
         return "cluster", s, o, -1 if region == "left" else 1
     if (region in ("left", "right") and s.state in ANTIC and o.state not in NEAR | AIR and standing_gap(geo) is True
-            and outer_jumper(s, o, x)):
-        # Task 182 seq 312 (plan 3.1-3.3): the outer variant, the far one aiming with a standing gap between them (only this layout, the
-        # parent scene stays as narrow as it was otherwise)
+            and (outer_jumper(s, o, x) or rune_jumper(s, geo, x, circles))):
+        # Task 182 seq 312 (plan 3.1-3.4): the outer variant, the far one aiming with a standing gap between them, or a live big rune circle
+        # across her way to the jumper (3.4, Sol #382 R2); only these layouts, the parent scene stays as narrow as it was otherwise
         return "cluster", s, o, -1 if region == "left" else 1
     return None
 
@@ -1038,6 +1055,33 @@ def outer_jumper(s, o, x) -> bool:
     """Task 182 seq 312: the jumper is the far one (the other one's root strictly between her and the jumper's root)."""
     from .clapper_separated import active, behind
     return active() and behind(x, o, s)
+
+
+def rune_jumper(s, geo, x, circles) -> bool:
+    """Task 182 seq 312 (plan 3.4, Sol #382 R2): a live big rune circle lies across her way to the jumper's near body edge (she not inside
+    it: clapper_separated.circles_across's reading)."""
+    from .clapper_separated import active
+    if not circles or not active():
+        return False
+    a, b = geo["bodies"][s.iid]
+    edge = a if float(s.pos[0]) > x else b
+    lo, hi = min(x, edge), max(x, edge)
+    return any(not c0 <= x <= c1 and c0 < hi and c1 > lo for c0, c1 in circles)
+
+
+def rune_cut(circles, x0, x1, left, right, pad):
+    """Plan 3.4 (Sol #382 R2): where her way from x0 toward x1 first meets a live circle grown by her half widths and the pad (her centre
+    stops there), x1 when none does. A circle she starts inside is the action owners' hazard, not this cut."""
+    stop = x1
+    for lo, hi in circles:
+        glo, ghi = lo - right - pad, hi + left + pad
+        if glo < x0 < ghi:
+            continue
+        if x1 > x0 and x0 <= glo < stop:
+            stop = glo
+        elif x1 < x0 and stop < ghi <= x0:
+            stop = ghi
+    return stop
 
 
 class PlanRunner:
@@ -1737,12 +1781,14 @@ class PlanRunner:
         if self.channel is None or inp is None or inp.terrain is None or self.worker_failed is not None:
             return                                # (no terrain yet: refused, never an implicit empty one)
         x = self.hand.x if (self.hand is not None and self.hand.known) else sc.hx
-        scene = parent_scene(sc.subjects, sc.geo, x)
+        from .clapper_separated import active, live_circles
+        circles = tuple(live_circles(tac, t)) if active() else ()     # seq 312 plan 3.4: the jumper behind a live big rune circle
+        scene = parent_scene(sc.subjects, sc.geo, x, circles)
         plan = ex.plan
         if ex.name == "aim_press":
             return                                # the press decides nothing: no new plan until the first one is off the ground
         if ex.name == "press_next":
-            scene = scene or parent_scene(sc.subjects, sc.geo, sc.hx)    # (a key in flight may carry the predicted hand-back past a body's edge for a moment: she herself is still between them)
+            scene = scene or parent_scene(sc.subjects, sc.geo, sc.hx, circles)    # (a key in flight may carry the predicted hand-back past a body's edge for a moment: she herself is still between them)
             if sc.geo is None:
                 return                            # (no body geometry on this tick says nothing about the scene: the wait goes on, bounded by next_late)
             scene = scene or self._second_aiming_scene(sc, plan, x)
@@ -1830,15 +1876,18 @@ class PlanRunner:
         J = Body(s.iid, float(s.pos[0]), self._vx(sc, s), *geo["bodies"][s.iid], s.state, s.family)
         W = Body(o.iid, float(o.pos[0]), self._vx(sc, o), *geo["bodies"][o.iid], o.state, o.family)
         outer = name == "cluster" and standing_gap(geo) is True
-        if outer:
-            from .clapper_separated import circles_across
+        from .clapper_separated import active, circles_across, live_circles
+        rune_across, circles = False, ()
+        if name == "cluster" and (outer or active()):
+            # plan 3.4: a live big rune across her way to the jumper; its circles go with the request, every place and route of the plan
+            # stays out of them (Sol #382 R2: the stacked cluster's attack and lure too, never only the outer variant's vault)
             rune_across = bool(circles_across(tac, t, x, J.a if J.x > x else J.b))
-        else:
-            rune_across = False
+            circles = tuple(live_circles(tac, t)) if rune_across else ()
         q = Request(name, stage, inst, self.generation, t, J, W, side, m.get("antic_at"), m.get("air_at"), m.get("land"), m.get("vx"),
                     m.get("face"), hand, geo["left"], geo["right"], geo["xa"], geo["xb"], JT["gap_u"], JT["pad"], tac.rules.face_u,
                     JT["reach_j"], S0, prefix, _copy_hold(hold), FOLLOW_UP if inst == self.pressed else None,
-                    (self.moves.get(o.iid) or {}).get("antic_at") if o.family in JUMPS else None, outer=outer, rune_across=rune_across)
+                    (self.moves.get(o.iid) or {}).get("antic_at") if o.family in JUMPS else None, outer=outer, rune_across=rune_across,
+                    circles=circles)
         seq = self.channel.request(key, q)
         now = time.perf_counter_ns()
         self.sent[seq] = dict(ns=now, observed_ns=inp.t0_ns if inp.t0_ns is not None else (self.tick_ns or now), f=sc.frame, t=t, why=why,
