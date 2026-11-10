@@ -135,31 +135,33 @@ def cast(tac, ws, fc, iid, state="Spell Antic"):
     return tick(tac, ws, fc)
 
 
-def test_small_rune_down_slashes_the_caster_when_nothing_stands_between():
+def test_small_rune_targets_the_caster_with_the_high_hook_opening():
+    # #387 (the person 11-10, Sol seq 333): the caster is the target throughout; the chain's opening hook (GoalPrefs.hook_open) may take
+    # either body; down slashes only on both
     tac, ws, fc = start((20., 30.), 15.)
     out = cast(tac, ws, fc, 7)
     d = tac.last["clapper_rune_down"]
-    assert tac.last["clapper_winner"]["rule"] == "rune_down" and d["case"] == "2.2 caster" and out.target == 7
+    assert tac.last["clapper_winner"]["rule"] == "rune_down" and d["case"] == "2.2 hook" and out.target == 7
     assert out.stance_x == pytest.approx(20.) and out.hit_kw[7][3] > 0 and out.hit_kw[7][:3] == (0., 0., 0.)
+    assert out.hook_open is not None and out.hook_open[0] == 7
 
 
-def test_small_rune_caster_behind_the_other_one_down_slashes_the_reachable_one_and_follows_a_crossing():
+def test_small_rune_caster_behind_the_other_one_is_still_the_target_no_chase_after_the_near_one():
+    # #387: the old "the reachable one first, follow a crossing" is gone: the hook's ray may take the near one first, the caster stays
     tac, ws, fc = start((20., 30.), 15.)
     out = cast(tac, ws, fc, 8)                            # the caster is the far one
-    assert tac.last["clapper_rune_down"]["case"] == "2.2 other" and out.target == 7 and 8 in out.blocked
-    move(ws, fc, 7, 35.)                                  # the near one walks off through the caster: no state change, a pick now
+    assert tac.last["clapper_rune_down"]["case"] == "2.2 hook" and out.target == 8 and out.hook_open[0] == 8
+    move(ws, fc, 7, 35.)                                  # the near one walks off through the caster
     out = tick(tac, ws, fc)
-    assert tac.last["clapper_rune_down"]["case"] == "2.2 caster" and out.target == 8 and out.stance_x == pytest.approx(30.)
+    assert tac.last["clapper_rune_down"]["case"] == "2.2 hook" and out.target == 8 and out.stance_x == pytest.approx(30.)
 
 
-def test_small_rune_double_with_a_standing_gap_still_aims_the_seam():
-    # Sol seq 320: no gap condition on the double: 2.7 u between the near edges (a standing gap) is still within one blade
-    from ssbot.combat.tactics.clapper_scene import geometry, standing_gap
+def test_small_rune_close_pair_is_no_seam_double_any_more():
+    # #387: the double at the seam during the rune is replaced by the opening; the seam strike comes after the rune (2.3)
     tac, ws, fc = start((20., 24.7), 15.)
     out = cast(tac, ws, fc, 8)
     d = tac.last["clapper_rune_down"]
-    assert standing_gap(geometry(tac, ws, list(fc.subjects))) is True
-    assert d["case"] == "2.2 both" and d["stance"] == pytest.approx(.5 * (21. + 23.7))
+    assert d["case"] == "2.2 hook" and d["target"] == 8 and d["stance"] == pytest.approx(24.7)
     assert out.hit_kw[out.target][3] > 0 and not ({7, 8} & out.no_hit)
 
 

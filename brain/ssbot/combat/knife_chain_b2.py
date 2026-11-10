@@ -296,6 +296,11 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             return desired,"held_observed_desired_no_queued_send"
         return None,"unknown_queued_or_held_desired"
 
+    def _strike_iid(self,c):
+        """The body the committed DownSlash is credited on (its hit attribution): the Move's target; a chain whose chosen strike is on
+        another body overrides this (#387: the small rune opening's rising side down slash)."""
+        return c["move"].target_iid
+
     @staticmethod
     def _hook_in_flight(state):
         h=(state or {}).get("hero") or {}
@@ -413,9 +418,10 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         accepted=_fresh_downslash_start(state,previous_state)
         if self._press is not None and f>=self._press and accepted and self._accepted is None:
             self._accepted=f;self._note("b2_strike_accepted",frame=f,press=self._press)
+        struck=self._strike_iid(c)   # (#387: a chain's strike on another body than the Move's target names it)
         for ev in state.get("ev") or ():
             d=ev.get("d") or {};src=str(d.get("src") or "")
-            if (self._press is not None and ev.get("k")=="hit" and (d.get("ent") or d.get("iid"))==c["move"].target_iid
+            if (self._press is not None and ev.get("k")=="hit" and (d.get("ent") or d.get("iid"))==struck
                     and "DownSlash" in src and "Harpoon" not in src):
                 ef=int(ev.get("f",f))
                 if self._press<=ef<=f:self._hit=ef
@@ -1061,8 +1067,14 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         prev=self._receipts.get(target-1)
         if prev is None:prev,_=self.queued_prefix(frame,self._actual_state)
         if prev is not None and prev&B["CLAW"]:return None  # hold, not a new press
-        info={"planned_target":selected.move.target_iid,
+        # Task 182 seq 312 #387 (Sol seq 335): the body the hook was planned on (the small rune's opening may take the other one: the
+        # draft Run's hooked identity); the Move's target (the caster struck after the bounce) is reported beside it
+        from .knife_chain_transfer import hook_iid
+        run=getattr(getattr(selected,"draft",None),"run",None)
+        planned=hook_iid(getattr(run,"v",None),selected.move.target_iid)
+        info={"planned_target":planned,
               "scope":"current-body identity veto; later throw/motion and empty needle are not admitted"}
+        if planned!=selected.move.target_iid:info["move_target"]=selected.move.target_iid
         try:
             if prev is None:raise ValueError("unknown pre-hook input prefix")
             if self._actual_state.get("f")!=frame or target!=frame+2:raise ValueError("stale hook identity observation")
@@ -1084,7 +1096,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             info.update(pose_frame=target,hero_box=box,face=int(face),
                         first_target=None if hit is None else hit[0],distance=None if hit is None else hit[1])
             if hit is None:return "hook ray has no observed target body",info
-            if hit[0]!=selected.move.target_iid:return "hook ray first body differs from planned target",info
+            if hit[0]!=planned:return "hook ray first body differs from planned target",info
             return None,info
         except (ValueError,KeyError,TypeError,IndexError) as exc:
             return "hook target identity unchecked: "+str(exc),info

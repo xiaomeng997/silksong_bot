@@ -266,6 +266,10 @@ class GoalPrefs(TacticPrefs):
     #                                        it unlocks): (iid, aim_x, bound_x, sign, by_f, jump_hold) for the chain's stomp on that one: a short jump (J held
     #                                        jump_hold), in the air the side key only up to aim_x, strike rows tried toward it as usual but kept only with her
     #                                        centre at the first contact on her side of bound_x ((x - bound_x) * sign >= 0) and that contact by frame by_f
+    hook_open: tuple | None = None         # Task 182 seq 312 #387 (the person 11-10, Sol seq 333: the small rune's opening): (caster iid, its cast's first
+    #                                        frame) while the small rune is on: the chain's Run on that caster may open with one high Clawline toward it (the
+    #                                        hooked body the ray's first one of the two, F or N, kept apart from the caster), then the existing dash down slash
+    #                                        on the caster after the real bounce
 
 
 

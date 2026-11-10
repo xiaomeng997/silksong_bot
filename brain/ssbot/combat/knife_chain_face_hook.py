@@ -45,10 +45,12 @@ def _variants():
                         | {(nominal.hook_dash_frame, nominal.hook_control_after)}))
 
 
-def press_anchor(sim, toward, F0, enemy):
+def press_anchor(sim, toward, F0, enemy, still=False):
     """Decision-time inputs of the hook model, kept in the Run: the free-flight press rows (box centre x, box bottom,
     vx, vy) of a press on either CLAW slot applied 0 .. HOOK_LATE_F frames late (P .. P+1+HOOK_LATE_F), the observed
-    target body and its retreat bound."""
+    target body and its retreat bound (#387 still: a caster in its small-rune cast, no retreat: face_hook_check cast_still).
+    The bound is not cut at another body behind it (Sol seq 341: before the needle's hit her rows do not depend on it, and
+    a hooked body may go on retreating after it, carrying her dash toward that body)."""
     from .knife_chain_transfer import HOOK_PRESS_AFTER_F, HOOK_LATE_F, retreat_reserve, body_box, control
     tk = B["R"] if toward > 0 else B["L"]
     P = int(F0) + HOOK_PRESS_AFTER_F
@@ -60,7 +62,7 @@ def press_anchor(sim, toward, F0, enemy):
     if len(rows) != slots:
         return None              # no anchor: every later hook step is "unchecked", never a guess
     ft = float(sim.params.frame_time)
-    reserve = [float(retreat_reserve(enemy, (P + j - int(sim.f)) * ft, toward)) for j in range(TRACK_F + slots)]
+    reserve = [0. if still else float(retreat_reserve(enemy, (P + j - int(sim.f)) * ft, toward)) for j in range(TRACK_F + slots)]
     return {"P": P, "origin":int(sim.f), "target_state":control(enemy)[0],
             "toward": int(toward), "rows": rows, "body": [float(v) for v in body_box(enemy)],
             "iid": int(enemy["iid"]), "reserve": reserve}
@@ -154,10 +156,10 @@ def step_paths(path, v, watch, f):
         presses = tuple(min(watch["sent_targets"]) + d for d in range(HOOK_LATE_F + 1))
     else:
         raise GeometryUnavailable("transfer hook step unchecked: no sent CLAW")
-    from .knife_chain_transfer import HOOK_LATE_F
+    from .knife_chain_transfer import HOOK_LATE_F, hook_iid
     move=watch.get("move");sent=watch.get("sent_targets") or set()
     expected=(int(a["P"]),int(a["P"])+1)
-    if (getattr(move,"target_iid",None)!=a.get("iid") or tuple(watch.get("targets",()))!=expected
+    if (hook_iid(v,getattr(move,"target_iid",None),watch)!=a.get("iid") or tuple(watch.get("targets",()))!=expected
             or any(type(t) is not int or t not in expected for t in sent)):
         raise GeometryUnavailable("transfer hook step unchecked: same-Move planned slots mismatch")
     if (watch["seen_frame"] is not None and
@@ -167,6 +169,14 @@ def step_paths(path, v, watch, f):
     if path.origin != f or box.shape != (3, 4) or not np.isfinite(box).all():
         raise GeometryUnavailable("transfer hook step unchecked: external step rows")
     rows_out, free = {}, False
+    # #387 (Sol seq 340): once the needle took the anchor's other body (the opening's still caster behind the planned one), that branch's
+    # tracks (its body, still) model the hook from here
+    alt = a.get("alt")
+    hit = watch.get("hook_hit_iid")
+    if isinstance(alt, dict) and type(hit) is int and hit == alt.get("iid"):
+        body_b, reserve_b, iid_b = tuple(alt["body"]), tuple(0. for _ in a["reserve"]), int(alt["iid"])
+    else:
+        body_b, reserve_b, iid_b = tuple(a["body"]), tuple(a["reserve"]), int(a["iid"])
     for P in presses:
         d = P - int(a["P"])
         if not 0 <= d < len(a["rows"]):
@@ -175,8 +185,7 @@ def step_paths(path, v, watch, f):
         if r0 >= 2:
             free = True          # the press is the step's last frame: K's rows are her motion
             continue
-        for tr in _tracks(tuple(a["rows"][d]), int(a["toward"]), tuple(a["body"]),
-                          tuple(a["reserve"][d:d + TRACK_F]), int(a["iid"])):
+        for tr in _tracks(tuple(a["rows"][d]), int(a["toward"]), body_b, reserve_b[d:d + TRACK_F], iid_b):
             if t0 >= len(tr) - 1:
                 free = True      # the model's control is behind: K's free flight
                 continue
@@ -205,14 +214,15 @@ def _hook_body_window(v,watch,f,state):
     Armed colliders/late Antic, delayed hazards and unknown data never qualify.
     """
     from ssbot.map2 import strike as SK
-    from .knife_chain_transfer import HOOK_TARGET_STATES,HOOK_CTRL_LAST_F
+    from .knife_chain_transfer import HOOK_TARGET_STATES,HOOK_CAST_STATES,HOOK_CTRL_LAST_F,hooked_body
     from .move_data import load_cl_slam
     a=v.get("hook_press");hit=v.get("hook_hit_f");seen=watch.get("seen_frame")
+    # (#387: the opening's hook may take a caster in its cast: the face-hook scope it was admitted in)
     if (not isinstance(a,dict) or type(a.get("origin")) is not int
-            or a.get("target_state") not in HOOK_TARGET_STATES
+            or a.get("target_state") not in HOOK_TARGET_STATES|HOOK_CAST_STATES
             or type(seen) is not int or type(hit) is not int or not seen<=hit<=f
             or not isinstance(state,dict) or state.get("f")!=f):return None
-    target=getattr(watch.get("move"),"target_iid",None)
+    target=hooked_body(v,getattr(watch.get("move"),"target_iid",None),watch)   # #387: the body the needle took (the opening's: F or N)
     es=[e for e in state.get("ents") or () if e.get("iid")==target]
     if len(es)!=1:return None
     e=es[0];cols=e.get("colliders")
@@ -238,8 +248,29 @@ def _hook_body_window(v,watch,f,state):
                 or "harpoon" not in str((h.get("anim") or {}).get("clip","")).lower()):return None
         last=min(last,f+2+SK.HOOK_BODY_OFF[1])
     if st=="Slam Antic":last=min(last,f+first_hammer-int(math.ceil(tin*60.))-2)
+    alt=a.get("alt")
+    if isinstance(alt,dict) and target==alt.get("iid"):last=min(last,int(alt["move_until"]))   # (#387: the taken caster's cast end)
     first=seen+SK.HOOK_BODY_OFF[0]
     return (target,first,last) if first<=last else None
+
+
+def opening_counts(c, v):
+    """#387 (the person 11-10: "小符文天上什么都没有，只要高度够，晚一秒都没有危险。你就跳到高度出钩，一定钩的到，弹到最高点交给踩头代码
+    接管就好"): the small rune's opening hook (v["hook_open"]) is refused only by what can be up there with her: the delayed hazards
+    (small runes, big runes) and a Clapper's actual attack. Neither Clapper's body counts (the needle takes whichever it meets first),
+    nor the caster's "move"-labelled body through its cast's end (HOOK_CAST_SPAN_F from its first frame; an attack after it counts).
+    Outside the opening every contact counts."""
+    from .knife_chain_transfer import HOOK_CAST_SPAN_F
+    if not v.get("hook_open"):
+        return True
+    if c.kind == "body":
+        return False
+    if c.kind == "move" and c.owner_iid == v.get("caster"):
+        try:
+            return c.frame > int(v["cast_fa"]) + HOOK_CAST_SPAN_F
+        except (KeyError, TypeError, ValueError):
+            return True
+    return True
 
 
 def step_scan(geo,path,v,watch,f,state=None):
@@ -247,12 +278,13 @@ def step_scan(geo,path,v,watch,f,state=None):
 
     This never sets an invulnerability flag. Target delayed/armed/unknown and
     every other owner stay in the scan, including before/after the body window.
+    The small rune's opening counts only opening_counts' contacts (the person 11-10).
     """
     scans=[geo.scan(q) for q in step_paths(path,v,watch,f)]
     window=_hook_body_window(v,watch,f,state)
     contacts=tuple(c for scan in scans for c in scan.contacts
         if not (window is not None and c.owner_iid==window[0]
-                and c.kind in {"body","move"} and window[1]<=c.frame<=window[2]))
+                and c.kind in {"body","move"} and window[1]<=c.frame<=window[2]) and opening_counts(c,v))
     return ContactScan(scans[0].path_ref,min(s.first_frame for s in scans),max(s.last_frame for s in scans),
         contacts,f"transfer hook step: {len(scans)} variant path(s); all-owner scan; "
         f"measured hooked-body window {window}; no protection",all(s.complete for s in scans))
@@ -278,29 +310,44 @@ def _entry(path, v, f):
         return np.column_stack([x - .5 * w, bottom, x + .5 * w, bottom + h])
     head = box[:P - f]
     out = {}
-    for d in range(HOOK_LATE_F + 1):
-        if d >= len(a["rows"]):
-            raise GeometryUnavailable("transfer hook entry unchecked: press slot outside the anchor")
-        pre = np.asarray([[r[0] - .5 * w, r[1], r[0] + .5 * w, r[1] + h] for r in a["rows"][:d]], float).reshape(-1, 4)
-        for i0, tr in _stop_tracks(tuple(a["rows"][d]), int(a["toward"]), tuple(a["body"]),
-                                   tuple(a["reserve"][d:d + TRACK_F]), int(a["iid"])):
-            # an intermediate stop's track is its bound's before i0 + 1: its rows from P + d + i0 only
-            origin, rows = (f, np.vstack([head, pre, boxes(tr)])) if i0 == 0 else (P + d + i0, boxes(tr))
-            ctrl = P + d + i0 + len(tr) - 1
-            out.setdefault((origin, rows.round(9).tobytes()),
-                           (origin, rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
-                            (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6))))
+    # #387 (Sol seq 340 / 341): one branch per body the needle can take: the hooked one and, with an "alt" in the anchor (only when
+    # the hooked one can leave the ray before the needle's hit: transfer.needle_passes), that still caster itself. Each track exempts
+    # its own branch's hooked body only: (iid, move_until: its "move"-labelled contacts its body only up to that frame, the cast's end)
+    branches = [(int(a["iid"]), tuple(a["body"]), tuple(a["reserve"]), None)]
+    alt = a.get("alt")
+    if isinstance(alt, dict):
+        branches.append((int(alt["iid"]), tuple(alt["body"]), tuple(0. for _ in a["reserve"]), int(alt["move_until"])))
+    for iid_b, body_b, reserve_b, move_until in branches:
+        for d in range(HOOK_LATE_F + 1):
+            if d >= len(a["rows"]):
+                raise GeometryUnavailable("transfer hook entry unchecked: press slot outside the anchor")
+            pre = np.asarray([[r[0] - .5 * w, r[1], r[0] + .5 * w, r[1] + h] for r in a["rows"][:d]], float).reshape(-1, 4)
+            for i0, tr in _stop_tracks(tuple(a["rows"][d]), int(a["toward"]), body_b, reserve_b[d:d + TRACK_F], iid_b):
+                # an intermediate stop's track is its bound's before i0 + 1: its rows from P + d + i0 only
+                origin, rows = (f, np.vstack([head, pre, boxes(tr)])) if i0 == 0 else (P + d + i0, boxes(tr))
+                ctrl = P + d + i0 + len(tr) - 1
+                out.setdefault((origin, rows.round(9).tobytes(), iid_b),
+                               (origin, rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
+                                (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6)), (iid_b, move_until)))
     from types import SimpleNamespace
     basis = {**path.assumptions, "basis": "hooked-Clawline model through the locked hook", "protection": "none",
              "safety": "whole locked hook, all owners"}
     paths = []
-    for origin, rows, window, control in out.values():   # the fields B2Geometry reads; no protection flag
+    for origin, rows, window, control, exempt in out.values():   # the fields B2Geometry reads; no protection flag
         n = len(rows) - 1
         zero = np.zeros(n + 1, np.int64)
         paths.append((SimpleNamespace(origin=origin, stage="transfer_hook_entry", box=rows, commands=zero[:n],
                                       latched=zero[:n], flags=zero, check_flags=zero, through=origin + n,
-                                      assumptions=basis), window, control))
+                                      assumptions=basis), window, control, exempt))
     return paths
+
+
+def _exempt(c, exempt, lo, hi):
+    """#387: contact c is the branch's own hooked body inside its window: kind body; "move" only up to the branch's cast end (a caster in
+    its cast is labelled by its move, its body then being all it occupies; a later attack is never exempt)."""
+    iid, move_until = exempt
+    return (c.owner_iid == iid and lo <= c.frame <= hi
+            and (c.kind == "body" or (c.kind == "move" and move_until is not None and c.frame <= move_until)))
 
 
 def entry_paths(path, v, f):
@@ -311,25 +358,48 @@ def entry_paths(path, v, f):
     and every hooked-model variant track (_tracks as step_paths: dash timings, physics-step phases, the observed body
     still or retreating at the bound; plus every stop between those two, _stop_tracks) up to the model's control.
     Unknown raises."""
-    return [p for p, _, _ in _entry(path, v, f)]
+    return [p for p, _, _, _ in _entry(path, v, f)]
+
+
+def hook_alt(v):
+    """#387 (the person 11-10: "不管走路那只是否闪身肯定能钩到一只"): the opening's other body behind the hooked one on the ray, in its
+    cast (a still face; its "move" label is its body): the needle meets it when the hooked one leaves the ray before the hit (its
+    worst-case retreat reaches that body's near face: transfer.needle_passes), so it is the hooked body in that branch: its body
+    exempt in the same hooked-body window. None otherwise (the hooked one is then the needle's body in every case)."""
+    a = v.get("hook_alt")
+    return a if type(a) is int else None
 
 
 def entry_scan(geo, path, v, f):
     """All owners and delayed hazards over entry_paths (one B2Geometry.scan_batch pass); only the target's own BODY
     inside each variant's hooked-body window (strike.HOOK_BODY_OFF: the hooked dash stops on it by design) is exempt;
-    its attack (move), its body outside the window, other owners, small runes and unknown occupancy all count. Also
-    returns the distinct control points (frame, x, y) for entry_outs."""
+    its attack (move), its body outside the window, other owners, small runes and unknown occupancy all count. The small
+    rune's opening counts only opening_counts' contacts (the person 11-10). Also returns the distinct control points
+    (frame, x, y) for entry_outs."""
     items = _entry(path, v, f)
-    iid = int(v["hook_press"]["iid"])
-    scans = list(zip(geo.scan_batch([q for q, _, _ in items]), (window for _, window, _ in items)))
-    contacts = tuple(c for s, (lo, hi) in scans for c in s.contacts
-                     if not (c.owner_iid == iid and c.kind == "body" and lo <= c.frame <= hi))
+    scans = list(zip(geo.scan_batch([q for q, _, _, _ in items]), ((window, ex) for _, window, _, ex in items)))
+    contacts = tuple(c for s, ((lo, hi), ex) in scans for c in s.contacts
+                     if not _exempt(c, ex, lo, hi) and opening_counts(c, v))
+    # (#387: each branch's first counted contact, for the entry note: which body the needle took in the branch that refused)
+    first = {}
+    for s, ((lo, hi), ex) in scans:
+        for c in s.contacts:
+            if (not _exempt(c, ex, lo, hi) and opening_counts(c, v)
+                    and (ex[0] not in first or c.frame < first[ex[0]][0])):
+                first[ex[0]] = (int(c.frame), int(c.owner_iid), str(c.kind))
+    v["_hook_branch_first"] = {str(k): list(w) for k, w in first.items()}
+    # (#387: each control point with its own branch's exemption, read by entry_outs; a point two branches share takes the stricter)
+    branch = {}
+    for _, _, control, ex in items:
+        branch[control] = ex if control not in branch or ex[1] is None else branch[control]
+    v["_hook_branch"] = branch
     return (ContactScan(scans[0][0].path_ref, min(s.first_frame for s, _ in scans),
                         max(s.last_frame for s, _ in scans), contacts,
                         f"transfer hook entry: {len(scans)} variant path(s) through the locked hook; all-owner scan; "
-                        "target body exempt only in the hooked-body window; no protection",
+                        + ("the opening: delayed hazards and actual attacks only (the person 11-10); " if v.get("hook_open") else
+                           "each branch's hooked body exempt only in its window; ") + "no protection",
                         all(s.complete for s, _ in scans)),
-            tuple(sorted({c for _, _, c in items})))
+            tuple(sorted({c for _, _, c, _ in items})))
 
 
 def _control_holds(sim, v, f, frames):
@@ -411,9 +481,10 @@ def entry_outs(geo, sim, v, f, controls, short_frames):
                 meta.append((controls[j], kind, bool(executable[r])))
     from ssbot.map2 import strike as SK
     iid = int(v["hook_press"]["iid"])
+    branch = v.get("_hook_branch") or {}   # (#387: entry_scan's per-control exemption: the hooked body of that control's branch)
     for (control, kind, executable), scan in zip(meta, geo.scan_batch(paths)):
-        bad = [c for c in scan.contacts
-               if not (c.owner_iid == iid and c.kind == "body" and c.frame <= control[0] + SK.HOOK_BODY_OFF[1])]
+        ex = branch.get(control, (iid, None))
+        bad = [c for c in scan.contacts if not _exempt(c, ex, -10 ** 9, control[0] + SK.HOOK_BODY_OFF[1])]
         if not executable or bad or not scan.complete:
             return ({"control": control, "kind": kind, "executable": bool(executable), "complete": scan.complete,
                      "first": bad[0] if bad else None}, len(paths))
@@ -455,11 +526,12 @@ def early_jump_stale(cache, f, target_state):
     return (not isinstance(cache, dict) or f >= int(cache.get("next_f", f)) or cache.get("state") != target_state)
 
 
-def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, high_band=False):
+def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, high_band=False, any_body=False):
     """The Run's cache entry for one expansion of the existing jump recipe from the next tick (see the module doc).
     high_band: the entry_attack=stomp switch's high held band (face_hook_check), so the first passing decision is the
-    earliest one at its middle (Task 179 #308)."""
-    from .knife_chain_transfer import (render, face_hook_check, clappers, body_box, control, PROGRAM,
+    earliest one at its middle (Task 179 #308). any_body (#387, the small rune's opening): face_hook_check_any, the ray's
+    first body of the two in the "top" band (the caster held still), the target only the direction and the deficit's body."""
+    from .knife_chain_transfer import (render, face_hook_check, face_hook_check_any, clappers, body_box, control, PROGRAM,
                                        HOOK_PRESS_AFTER_F, HOOK_LATE_F)
     from .knife_chain_air import model_path
     from .holdfilter import hold_filter_jit
@@ -468,7 +540,8 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, hi
     n, f, (st, _) = int(cfg["lookahead_frames"]), int(sim.f), control(enemy)
     toward = 1 if p.side == B["R"] else -1 if p.side == B["L"] else 0
     jump_k = k + 3
-    entry = {"f": f, "state": st, "jump_k": jump_k, "ok": False, "why": "", "next_f": f + n, "high_band": bool(high_band)}
+    entry = {"f": f, "state": st, "jump_k": jump_k, "ok": False, "why": "", "next_f": f + n, "high_band": bool(high_band),
+             **({"any_body": True} if any_body else {})}
     if toward == 0:
         entry["why"] = "no approach side"
         return entry
@@ -518,12 +591,18 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, hi
         if rows is not None:
             bd = rows.copy()
             bd[:, 4:6] -= d
-        ok, why, info = face_hook_check(sd, hd, e, f + d + 2, toward, bd, bs, high_band=high_band)
+        if any_body:
+            ents = [e if x.get("iid") == enemy["iid"] else x for x in clappers(state)]
+            ok, why, info = face_hook_check_any(sd, hd, ents, f + d + 2, toward, bd,
+                                                next_key=int(full[d + 1]) if d + 1 < len(full) else None)
+        else:
+            ok, why, info = face_hook_check(sd, hd, e, f + d + 2, toward, bd, bs, high_band=high_band)
         if ok and shift == 0.:
             entry.update(ok=True, why="ok", defer_new_dash=True, next_f=f + 1, decide_f=f + d, press_F=f + d + 3,
                          **{key: float(val) for key, val in info.items()
                             if key in ("ray_margin", "retreat_reserve", "bb_press", "x_press", "held_bb", "band_lo",
-                                       "band_hi", "band_mid", "held_low", "held_high")})
+                                       "band_hi", "band_mid", "held_low", "held_high")},
+                         **({"hooked_iid": int(info["hooked_iid"])} if "hooked_iid" in info else {}))
             return entry
         if ok:
             deficits.append(shift)
@@ -532,6 +611,11 @@ def early_jump(runner, p, sim, game, state, enemy, bombs, k, link, held_dash, hi
             deficits.append(shift - float(info["ray_margin"]))
         reasons[why] = reasons.get(why, 0) + 1
     entry["why"] = "; ".join(f"{w} x{c}" for w, c in reasons.items()) or "no airborne decision in range"
+    if any_body:
+        # #387 (the person 11-10: "如果太近就改成起跳"): no press of this jump hooks, some are too near, none is short of reach (closing
+        # in cannot help: probe387_hookN, x 43-45 in front of N)
+        from .knife_chain_transfer import OPENING_LOST
+        entry["near"] = bool(any(w in OPENING_LOST for w in reasons) and not deficits)
     vel = hero.get("vel") or [0., 0.]
     speed = toward * float(vel[0]) if type(vel[0]) in (int, float) and math.isfinite(vel[0]) else 0.
     if deficits and speed > 0:

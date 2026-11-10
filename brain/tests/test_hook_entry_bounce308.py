@@ -184,7 +184,7 @@ def test_a_body_falling_onto_the_bounce_rejects_both_landings():
 
 def test_entry_exempts_the_target_body_only_inside_its_hooked_window():
     a, s, sim, g, path = hook_case(moving_rs())
-    windows = [w for _, w, _ in FH._entry(path, V(a), 1001)]
+    windows = [w for _, w, _, _ in FH._entry(path, V(a), 1001)]   # (#387: + each track's branch exemption)
     assert min(lo for lo, _ in windows) == a["P"] + 17                       # strike.HOOK_BODY_OFF from the press
     inside = (max(lo for lo, _ in windows), min(hi for _, hi in windows))  # every variant's window
     class Geo:      # the target (8) body on every frame of every variant

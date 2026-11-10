@@ -482,14 +482,18 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, fr
             mem["back_end"] = dict(due, end="landed in the standing gap", end_t=t, end_hx=hx)
         mem["back"] = None
         return None
-    circle = [s.iid for s in subjects if s.iid in tac.rune and t <= tac.rune[s.iid][3]
-              and (pose["stance"] - tac.rune[s.iid][0]) * tac.rune[s.iid][1] > 0]
-    if not circle and SEP.active():
+    if SEP.active() and getattr(tac, "rune_life", None) is not None:
         # #386 (Sol seq 330: only a live big rune in the middle holds the return; the shared per-generation ledger, one burst not the end of
-        # all): her place or the seam inside a live circle (grown by her half widths and the pad)
+        # all): her place or the seam inside a live circle (grown by her half widths and the pad). #387 (Sol seq 331): with the ledger the
+        # old unbounded half-plane in front of a jump cast's facing no longer cancels a return the ledger shows clear
+        # (analysis/separated312_20261109/PRE_REVIEW386_CIRCLE.json); the route itself stays the action's own all-hazard checks
         from .gauntlet import JT
         circle = [(lo, hi) for lo, hi in SEP.live_circles(tac, t)
                   if any(lo - geo["right"] - JT["pad"] < x < hi + geo["left"] + JT["pad"] for x in (pose["stance"], pose["seam"]))]
+    else:
+        # (no ledger, or seq 312 off: the earlier conservative half-plane)
+        circle = [s.iid for s in subjects if s.iid in tac.rune and t <= tac.rune[s.iid][3]
+                  and (pose["stance"] - tac.rune[s.iid][0]) * tac.rune[s.iid][1] > 0]
     if circle:
         return None
     due["offered"] = True
@@ -1359,10 +1363,10 @@ class SeparatedSlam(Tactic):
 class RuneDownSlash(Tactic):
     """Plan 2.1 / 2.2: while a small rune is on (a cast, or a bomb not yet over near her and the bodies: the shared per-bomb forecast).
     Separated from the caster by a live big rune: at that circle's outer edge on her side (the existing low hop takes the bombs), the caster
-    not hit (2.1). Otherwise down slashes, the target in the order both > F > N: the seam when both near body edges lie within one blade at
-    level tops (the planner's rows score each body's own predicted contact: one body met is a single hit), else the caster when nothing stands
-    between her and it, else the other one; no gap is required and the end of the rune is not waited for. Re-chosen on every call: the target
-    she follows when it evades is the current one (the evade chase reads it); a strike already sent keeps its own target (its owner's)."""
+    not hit (2.1). Otherwise (2.2, #387, the person 11-10): the caster is the target throughout. The chain opens with one high Clawline above
+    the bombs toward it (GoalPrefs.hook_open: the hook's ray takes its first body, the caster or the other one), then after the real bounce its
+    dash down slash on the caster; down slashes only, on both bodies. No F+N / F / N choice and no chase after an evade (a caster cannot
+    evade while it casts); a strike already sent keeps its own target (its owner's)."""
     name = "small rune down slash"
     event = "rune_down"
     scores = {"rune_down": 120.}
@@ -1375,7 +1379,12 @@ class RuneDownSlash(Tactic):
         bombs = SEP.bombs_now(sc.tac) if need else None
         on, casters = SEP.rune_on(sc, bombs) if need else (False, set())
         mem["rune_on"] = on
-        mem["rune_bombs_now"] = bombs         # #384: this call's forecast for the strike's own coverage (_decide)
+        if on and not was:
+            mem["rune_on_f"] = sc.frame       # #387: the rune's first frame
+        # #387 (Sol seq 338, ep46 147874 / 147884: the first caster already Idle with its bombs still out while the next one begins): the
+        # casts under way, each by its own first frame (GoalPrefs.hook_open's instance); a bomb's owner is no caster once its cast is over
+        prev = mem.get("cast_start") or {}
+        mem["cast_start"] = {s.iid: prev.get(s.iid, sc.frame) for s in sc.subjects if s.family == SEP.CC_CAST and s.state in SEP.CASTING}
         if on and casters:
             mem["rune_casters"] = sorted(casters)
         if was and not on:
@@ -1402,8 +1411,13 @@ class RuneDownSlash(Tactic):
     def _decide(self, sc, ctx):
         geo, hx = sc.geo, sc.hx
         subs = sorted(sc.subjects, key=lambda s: (abs(float(s.pos[0]) - hx), s.iid))
-        casters = [s for s in subs if s.iid in ctx["casters"]] or subs
-        F = next((s for s in casters if SEP.reachable(sc, s, next(v for v in subs if v.iid != s.iid))), casters[0])
+        # #387 (Sol seq 338 / 339): the opening's caster is one actually casting (its cast the opening's instance); an earlier rune's bomb
+        # owner, its cast over, is no caster (g387_C46 147884-147896 flipped between the two). The rune stage itself lasts while its
+        # bombs do: with no cast under way (bombs only) the scene stays 2.2 on the bombs' owner, its down slashes, no new opening (2.3 only
+        # once the rune is over: i387_X24 84692, i387_23s 136200-136216 went to the middle return before it)
+        casting = [s for s in subs if s.iid in (sc.mem.get("cast_start") or {})]
+        pool = casting or [s for s in subs if s.iid in ctx["casters"]] or subs
+        F = next((s for s in pool if SEP.reachable(sc, s, next(v for v in subs if v.iid != s.iid))), pool[0])
         N = next(v for v in subs if v.iid != F.iid)
         a, b = SEP._span(geo, F.iid)
         circles = SEP.circles_across(sc.tac, sc.t, hx, a if float(F.pos[0]) > hx else b)
@@ -1415,28 +1429,12 @@ class RuneDownSlash(Tactic):
             n_ok = SEP.reachable(sc, N, F)
             return dict(case="2.1 rune between", target=(N if n_ok else F).iid, stance=float(edge), style=None,
                         no_hit=frozenset({F.iid}) if n_ok else frozenset({F.iid, N.iid}), circles=[list(c) for c in circles])
-        ok, seam = SEP.double_intent(geo)
-        # Sol REVIEW383 (X14, #384): a strike whose own place is covered by the small rune's bombs over its whole window is not one she can
-        # take now (rune_bombs.occupied at her contact height and time), whatever stands between
-        bombs = sc.mem.get("rune_bombs_now")
-        cov = []                                  # (the record: the strike places read covered)
-
-        def covered(s, x, key):
-            c = SEP.strike_covered(sc, s, x, bombs)
-            if c:
-                cov.append(key)
-            return c
-
-        f_ok = SEP.reachable(sc, F, N) and not covered(F, float(F.pos[0]), F.iid)
-        n_ok = SEP.reachable(sc, N, F) and not covered(N, float(N.pos[0]), N.iid)
-        if ok and not covered(F, seam, "seam"):
-            return dict(case="2.2 both", target=F.iid, stance=seam, style="stomp", no_hit=frozenset(), covered=cov)
-        if f_ok:
-            return dict(case="2.2 caster", target=F.iid, stance=float(F.pos[0]), style="stomp", no_hit=frozenset(), covered=cov)
-        if n_ok:
-            return dict(case="2.2 other", target=N.iid, stance=float(N.pos[0]), style="stomp", no_hit=frozenset(), covered=cov)
-        # nothing she can strike now: no intent is held over the bombs (the existing rules: avoidance, the low hop)
-        return dict(case="2.2 none strikable", target=None, stance=None, style=None, no_hit=frozenset(), covered=cov)
+        # #387 (the person 11-10, Sol seq 333): the opening is one high Clawline toward the caster (its ray's first body, F or N, whichever
+        # it is), then after the real bounce the existing dash down slash on the caster; the caster is the target throughout (no F+N / F /
+        # N choice, no chase after an evade: the person, "施法的不能闪身，必中"). The hook, its height and its path are the chain's
+        # (GoalPrefs.hook_open: knife_chain_transfer.face_hook_check's "top" band, bombs on the hook path; the down slash's own checks)
+        return dict(case="2.2 hook" if F.iid in (sc.mem.get("cast_start") or {}) else "2.2 bombs", target=F.iid, stance=float(F.pos[0]),
+                    style="stomp", no_hit=frozenset(), other=N.iid)
 
     def propose(self, sc):
         if not SEP.active():
@@ -1446,7 +1444,7 @@ class RuneDownSlash(Tactic):
             return [], "no small rune on"
         ctx["decision"] = d = ctx.get("decision") or self._decide(sc, ctx)
         if d["target"] is None:
-            return [], "small rune: no strike she can take now (bombs over every strike place)"
+            return [], "small rune: no target"
         return [("rune_down", sc.subject(d["target"]), 1.)], None
 
     def pick_entry(self, sc, rule, target, previous):
@@ -1469,6 +1467,11 @@ class RuneDownSlash(Tactic):
         d = None if ctx is None else ctx.get("decision")
         if not won or d is None or d["style"] != "stomp":
             return out
+        start = (sc.mem.get("cast_start") or {}).get(d["target"])
+        if d["case"] == "2.2 hook" and type(start) is int and g.target == d["target"]:
+            # #387: the chain's high hook opening on this caster's cast (its Run's hook may take either body; the down slash stays the
+            # caster's)
+            out = replace(out, hook_open=(int(d["target"]), int(start)))
         kw = dict(out.hit_kw)
         down = {s.iid for s in sc.subjects if s.iid != g.target and s.iid not in out.no_hit}
         for iid in down:
@@ -1483,7 +1486,8 @@ class RuneDownSlash(Tactic):
         d = ctx.get("decision")
         return {"clapper_rune_down": dict(casters=ctx["casters"], bombs=ctx["bombs"], **({} if d is None else dict(
             case=d["case"], target=d["target"], stance=None if d["stance"] is None else round(float(d["stance"]), 3), style=d["style"],
-            no_hit=sorted(d["no_hit"]), covered=d.get("covered"))))}
+            no_hit=sorted(d["no_hit"]),
+            hook_open=None if getattr(out, "hook_open", None) is None else [int(v) for v in out.hook_open])))}
 
 
 class RuneAfter(Tactic):

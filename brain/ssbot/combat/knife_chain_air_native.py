@@ -99,6 +99,7 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_ready=False;self._transfer_finished=set();self._transfer_goal=None
         self._transfer_blade=None
         self._follow_fallback=None;self._follow_made=None   # Task 183 seq 265: one tick's seam fallback / released draft
+        self._opening_noted=None   # #387: the last recorded opening hook check (transfer_opening_check on change only)
         self._wall_pressure=None
         self._entry_attack_seen=None
         self._entry_attack_goal=None
@@ -814,8 +815,10 @@ class NativeManualAirChain(NativeChainB2):
             # Task 182 seq 289 (the person: after a real bounce the next down slash, not the umbrella; live #40 123959 - 124000): the vault starts
             # only on the ground, so with the other Clapper in the air it took every airborne tick: with no vault action now a BOUNCE goal's own
             # strike goes on below, as the SWITCH stomp does above
-            if (vault is not None or self.recovery is not None or self.runner.run is not None or not self._transfer_ready
-                    or getattr(self._transfer_goal,"source_kind",None)!="BOUNCE"):return vault
+            # (#387: with no vault action the small rune's opening goes on below too)
+            opening=self._opening(prefs,f)
+            if (vault is not None or self.recovery is not None or self.runner.run is not None or not (self._transfer_ready or opening)
+                    or (getattr(self._transfer_goal,"source_kind",None)!="BOUNCE" and not opening)):return vault
         if self.post_context is not None:
             move=self.post_context["move"];self._air_finished.add(move)
             self._note("air_real_bounce_handoff",frame=f,move=vars(move),source="observed target DownSlash hit plus bounce")
@@ -851,7 +854,8 @@ class NativeManualAirChain(NativeChainB2):
             if bad:
                 self._air_finished.add(plan.move);self._recover("manual air current external path blocked",f);return None
             return B2Offer("active",None,draft,int(mask),0.,plan.move,{"manual_air":True,"phase":draft.run.link})
-        if self._air_context is None:return self._transfer_offer(state,game,sim,forecast,prefs,ground)
+        # #387 (Sol seq 335): the small rune's opening is the transfer Run's high hook: no manual air down slash before it
+        if self._air_context is None or self._opening(prefs,f):return self._transfer_offer(state,game,sim,forecast,prefs,ground)
         if self._transfer_ready and self._air_context[1]["iid"]!=getattr(prefs,"target",None):
             return self._transfer_offer(state,game,sim,forecast,prefs,ground)
         try:
@@ -1257,6 +1261,18 @@ class NativeManualAirChain(NativeChainB2):
                 "keys":"row" if draft.run.v.get("row") is not None else "link","other_state":transfer.control(others[0])[0],
                 "her_box":[float(v) for v in boxes[k]],"other_box":[float(v) for v in op[k]]}
 
+    def _opening(self,prefs,f,target=None):
+        """Task 182 seq 312 #387 (the person 11-10, Sol seq 333): L2 asks the small rune's high hook opening on its target (the caster):
+        GoalPrefs.hook_open names it (target: the Run's own target when one is active). The opening is the rune's start: a Run begun for
+        it from the observed cast (opening_run), or a fresh one from that cast's goal; a bounce / switch Run already under way on the caster
+        goes on with its own strikes (above the caster after a bounce there is no face to hook: its down slash is the follow-up)."""
+        ho=getattr(prefs,"hook_open",None)
+        run=self.runner.run
+        active=run is not None and run.chain==transfer.PROGRAM
+        if target is None:target=run.v.get("iid") if active else getattr(prefs,"target",None)
+        if not (_sep312(f) and ho is not None and len(ho)>=1 and target is not None and ho[0]==target):return False
+        return bool(run.v.get("opening_run")) if active else getattr(self._transfer_goal,"source_kind",None)=="CAST"
+
     def _transfer_offer(self,state,game,sim,forecast,prefs,ground):
         f=state["f"];target=getattr(prefs,"target",None)
         self._follow_fallback=None;self._follow_made=None
@@ -1281,10 +1297,9 @@ class NativeManualAirChain(NativeChainB2):
             return None
         if (active and changed and run.link in transfer.ROUTE_LINKS and self._press is None
                 and getattr(prefs,"clapper_choice",None)=="rune_down" and _sep312(f)):
-            # Task 182 seq 312 (plan 2.2 / design 3.3, the person: the down slash goes to what she reaches, in the order both > the caster >
-            # the other, re-chosen on every call; bout 47: the walker crossed the caster and the Run kept descending after it): L2's target
-            # changed while this approach has no pressed strike: it hands back at this step through B2 recovery (the keys already sent stay
-            # the next owner's prefix, the failure responsibility is kept). A pressed strike keeps its own target.
+            # Task 182 seq 312 (plan 2.2; #387: the target is the caster throughout, the opening hook may take either body): L2's target
+            # changed while this approach has no pressed strike (another caster): it hands back at this step through B2 recovery (the keys
+            # already sent stay the next owner's prefix, the failure responsibility is kept). A pressed strike keeps its own target.
             self._note("transfer_rune_target_handoff",frame=f,old_target=target,target=wanted,link=run.link)
             self._recover("small rune: the down-slash target changed",f)
             return None
@@ -1412,13 +1427,26 @@ class NativeManualAirChain(NativeChainB2):
                     self._note("target_entry_side_handoff",frame=f,old_target=target,target=wanted,
                                arrived=bool(near),target_attack=bool(target_attack),intent_ended=not side,source_blocked=bool(source_blocked))
                 return None  # current queued keys remain actual prefix for the next owner
-        if not self._transfer_ready and (run is None or run.chain!=transfer.PROGRAM):return None
+        # Task 182 seq 312 #387 (the person 11-10, Sol seq 333): L2's small-rune opening on this Run's caster target (its high hook): a
+        # fresh Run may start for it while the observed cast's goal holds (on the ground or already in the air: the first 0.2 s of the
+        # Spell Antic on the ground is the plain transfer's own admission)
+        opening=self._opening(prefs,f,target)
+        if not (self._transfer_ready or opening) and (run is None or run.chain!=transfer.PROGRAM):return None
         queued,_=self.queued_prefix(f,state)
         if queued is None or int(sim.prefix[0])!=queued:
             if active:self._recover("rune transfer actual queued prefix mismatch",f)
             return None
+        glide=False
         if not active:
             mode=self._locked_mode(sim)
+            from ssbot.knowledge import kinematics as K
+            if (mode==K.M_GLIDE and _sep312(f)
+                    and (opening or getattr(getattr(prefs,"entry_attack",None),"scope",None) in {"rune_end"}|SEAM_SCOPES)):
+                # Task 182 seq 312 #387 (Sol seq 334: 2.3 waited out the planner's own umbrella, #386 sy27_23s; a local release is
+                # authorized): the umbrella is steerable (the jump key's release deflates it, an attack / dash cancels it): the package's
+                # own seam / rune-end entries and the small rune's opening start from it; the Run's keys hold no J, the model rolls the
+                # deflate, every step is scanned as before (rune_transfer_glide_release: the Run made from it, its first key)
+                glide=True;mode=None
             if mode is not None:
                 # Task 179 (live 786 2607: the SWITCH entry bound inside her own leftward air dash, 2610-2616 took
                 # no input): a fresh transfer never starts inside a dash or a relinquished motion; its keys could
@@ -1435,25 +1463,56 @@ class NativeManualAirChain(NativeChainB2):
                               **({"approach_only":True} if approach_only else {}),
                               **({"hold_over":True} if hold or (held_run and not ground) else {}),
                               **({"bound":sb} if sb is not None else {}),
+                              **({"hook_open":True} if opening else {}),
                               **strike_kw)
+        if opening and made is not None and made[0] is not None:
+            # #387: the opening's own hook check, recorded when its outcome changes (the hooked body, the reason, a lost opening)
+            fc=made[0].run.v.get("face_hook_check");eh=made[0].run.v.get("early_hook")
+            early=None if not isinstance(eh,dict) else {k:eh[k] for k in ("ok","why","decide_f","hooked_iid","lost","f") if k in eh}
+            if early is not None and isinstance(early.get("why"),str):early["why"]=early["why"][:160]
+            key=(made[0].run.link,None if not isinstance(fc,dict) else fc.get("why"),made[0].run.v.get("opening_lost"),
+                 made[0].run.v.get("slash_iid"),None if early is None else (early.get("ok"),early.get("why")))
+            if key!=getattr(self,"_opening_noted",None):
+                self._opening_noted=key
+                self._note("transfer_opening_check",frame=f,target=target,link=made[0].run.link,
+                           check=None if not isinstance(fc,dict) else {k:fc[k] for k in ("ok","why","hooked_iid","held_low","held_high",
+                                                                                          "band_lo","band_hi","vy_press") if k in fc},
+                           hooked=made[0].run.v.get("hooked_iid"),lost=made[0].run.v.get("opening_lost"),early=early,
+                           slash=made[0].run.v.get("slash_iid"))
         if made is None or made[0] is None:
             if active:self._recover((made[1].ended_reason if made is not None else None)
                                     or "rune transfer ended or target began a new move before real bounce",f)
             return None
+        if active and type(run.v.get("slash_iid")) is int and made[0].run.v.get("slash_iid") is None and made[0].run.v.get("opening_slash_done"):
+            # #387: the opening's rising side down slash missed (the body evaded) and the Run is back in the air, rising on to the hook: its
+            # press / accept / hit records are spent (a later strike is its own); the commitment and its responsibility stay
+            self._press=self._accepted=self._hit=None
+            self._note("transfer_opening_slash_missed",frame=f,target=target,slash=run.v.get("slash_iid"),link=made[0].run.link)
+        if glide:
+            self._note("rune_transfer_glide_release",frame=f,target=target,opening=bool(opening),link=made[0].run.link,mask=int(made[3]),
+                       scope=getattr(getattr(prefs,"entry_attack",None),"scope",None),
+                       basis="a Run made in the planner's own umbrella; its keys hold no J (the release is the sent key, not this note)")
         draft,plan,path,mask=made
         if draft.run.link=="strike" and draft.run.v.get("seam_bound_fallback") and (run is None or run.link!="strike"):
             # Task 182 seq 312 #386: the seam bound's rows out of reach: the target's ordinary stomp row (knife_chain_transfer.stomp_plan)
             self._note("transfer_seam_bound_fallback",frame=f,target=plan.iid,row=draft.run.v.get("row",{}).get("contact_frame"))
         if plan.move in self._failed_hook_moves:return None
-        if transfer.plan_over_call(draft.run.v) and draft.run.link in ("jump","air") and int(mask)&(B["L"]|B["R"]):
+        tgt_e=next((e for e in transfer.clappers(state) if e["iid"]==plan.iid),None)
+        # (#387: after the opening's hook, or with no opening: the opening's own approach goes on toward the caster, its hook first)
+        casting=bool(_sep312(f) and tgt_e is not None and transfer.control(tgt_e)[0] in transfer.HOOK_CAST_STATES
+                     and not transfer.opening_pending(draft.run.v))
+        if ((transfer.plan_over_call(draft.run.v) or casting) and draft.run.link in ("jump","air")
+                and int(mask)&(B["L"]|B["R"])):
             # Task 182 (Sol seq 255 F2): rising to go over a body: no side key while holding it would carry her box into that body; she
             # rises first and the clean strike row (press_now_row clean) takes over from there. The hold and the J stay the link's.
-            body=transfer.body_box(next((e for e in transfer.clappers(state) if e["iid"]==plan.iid),None) or {})
+            # #387 (g387_X14 54855: a body-corner contact after a real bounce off the caster): a caster's body in its cast stands taller
+            # (top ~7.78 against 6.92) and the approach's step check leaves the target's own body to the strike: the same hold-back
+            body=transfer.body_box(tgt_e or {})
             held=model_path(sim,plan,np.full(14,int(mask),np.int64),game)
             if body is not None and transfer.enters_body(held.box,body,len(held.box)):
                 mask=int(mask)&~(B["L"]|B["R"])
                 path=replace(model_path(sim,plan,np.array([mask],np.int64),game),stage=path.stage,assumptions=path.assumptions)
-                self._note("transfer_side_held_back",frame=f,target=plan.iid,link=draft.run.link)
+                self._note("transfer_side_held_back",frame=f,target=plan.iid,link=draft.run.link,casting=casting)
         current=None if rs is None else getattr(rs.trk,"now",{}).get(plan.iid)
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)
@@ -1578,7 +1637,9 @@ class NativeManualAirChain(NativeChainB2):
                 t0=time.perf_counter_ns()
                 scan,controls=entry_scan(geo,path,draft.run.v,f)
                 failed,outs=None,0
-                if scan.complete and not scan.contacts:
+                # #387 (the person 11-10: "弹到最高点交给踩头代码接管就好"): the small rune's opening hands its bounce to this Run's own
+                # stomp rules (the air link after the hook's release), not to the N=2 landing outs at its entry
+                if scan.complete and not scan.contacts and not draft.run.v.get("hook_open"):
                     failed,outs=entry_outs(geo,sim,draft.run.v,f,controls,self.profile.short_frames)
                     if failed is not None:
                         # a blocked type rejects with its first contact; an unknown or non-executable one as unchecked
@@ -1589,6 +1650,7 @@ class NativeManualAirChain(NativeChainB2):
                                             +"; below the N=2 short lower bound, no full-exit fallback at entry")
                 self._note("transfer_hook_entry_checked",frame=f,contacts=len(scan.contacts),complete=scan.complete,
                            first=None if not scan.contacts else asdict(scan.contacts[0]),source=scan.source,
+                           branch_first=draft.run.v.get("_hook_branch_first"),opening=bool(draft.run.v.get("hook_open")),
                            controls=len(controls),bounce_paths=outs,elapsed_ms=(time.perf_counter_ns()-t0)/1e6,
                            timing_scope="entry scan and bounce outs only")
             elif attacking:
@@ -1647,7 +1709,13 @@ class NativeManualAirChain(NativeChainB2):
                 self._recover("rune transfer external step blocked",f)
             return None
         if (draft.run.link in transfer.ROUTE_LINKS and not draft.run.v.get("seam_inner")
-                and _sep312(f)):
+                and _sep312(f) and not (transfer.opening_pending(draft.run.v)
+                                        and (draft.run.link in ("jump","air")
+                                             or any((draft.run.v.get("early_hook") or {}).get(k) for k in ("ok","near"))))):
+            # (#387: the small rune's opening up in the air, or on the ground with its early jump's hook passing: its hook's ray takes the
+            # first body, the other one included (the person: either one is hooked); the route's keys know neither the next tick's jump
+            # nor the hook (h387_hookN 102672: a fresh Run turned back 13 times, its early jump never stored); the per-step gate still
+            # scans every owner)
             # Task 182 seq 312: the route ahead meets the other body before the target: a revocable approach hands back now (the keys already
             # sent stay the next owner's prefix; a strike row already chosen, a hook and a source tail are not approach links); a fresh one
             # does not start while it does
@@ -1665,6 +1733,7 @@ class NativeManualAirChain(NativeChainB2):
         self._transfer_responsibility.setdefault(plan.move,(responsibility,None if goal is None else goal.cast_ta))
         return B2Offer("active" if active else "manual_commitment",path,draft,int(mask),0.,plan.move,
             {"manual_air":True,"rune_transfer":True,"caster":plan.caster,"cast_fa":plan.cast_fa,
+             "opening":bool(draft.run.v.get("opening_run")),
              "target_ta":target_ta,"target_attack_checked":attacking,
              "target_move":None if target_move is None else asdict(target_move),
              "tail_checked_through":draft.run.v.get("source_tail_checked_through"),
@@ -2158,7 +2227,7 @@ class NativeManualAirChain(NativeChainB2):
                            missed_press=run.v.get("near_miss_press"),exposure=exposure.as_dict(),
                            scope="one in-air branch in the same Run; first miss responsibility retained")
         if selected is not None and sent.chain_outcome=="sent" and selected.details.get("rune_transfer"):
-            self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+            self._transfer_finished.add(self._finished_key(selected.details))
             if self.commitment is not None and selected.details.get("target_ta") is not None:
                 self.commitment["ta"]=selected.details["target_ta"]
             if selected.details.get("target_move") is not None:
@@ -2174,9 +2243,12 @@ class NativeManualAirChain(NativeChainB2):
                 # Face hook: arm the existing same-Move hook watch on the first SUCCESSFUL send of the absolute plan;
                 # never from a draft, never re-armed per tick. B2's own sent() then records the CLAW sends ("active")
                 # and keeps the late-slot veto, the missed-window / no-Harpoon recovery and _failed_hook_moves.
+                # #387 (Sol seq 335): the hooked body's identity rides with the watch from this send (the small rune's opening may hook
+                # the other one); the Move, its target (the caster) and its responsibility instance stay the Run's
+                hook=transfer.hook_iid(run.v,selected.move.target_iid)
                 self._hook_start={"move":selected.move,"origin":sent.frame,"targets":(cs.f_press,cs.f_press+1),
-                                  "sent_targets":set(),"seen_frame":None}
-                self._note("b2_hook_start_expected",frame=sent.frame,move=vars(selected.move),
+                                  "sent_targets":set(),"seen_frame":None,"hook_iid":hook}
+                self._note("b2_hook_start_expected",frame=sent.frame,move=vars(selected.move),hook_iid=hook,
                            targets=[cs.f_press,cs.f_press+1],source="transfer aimed face hook; absolute CsPlan; no certificate")
         return sent
 
@@ -2235,12 +2307,16 @@ class NativeManualAirChain(NativeChainB2):
                 or watch["seen_frame"] is None or c is None or watch["move"]!=c["move"]):return
         f=state["f"];v=run.v
         v.setdefault("hook_seen_f",watch["seen_frame"])
+        hooked=transfer.hook_iid(v,c["move"].target_iid,watch)   # #387: the opening's hooked body (F or N), else the Move's target
+        from .knife_chain_face_hook import hook_alt
+        alt=hook_alt(v)   # #387: the opening's other body behind it on the ray (the needle meets it if the first one left)
         for ev in state.get("ev") or ():
             d=ev.get("d") or {}
             if ev.get("k")!="hit" or str(d.get("src") or "") not in ("Harpoon Damager","Harpoon Dash Damager"):continue
             ent=d.get("ent") if d.get("ent") is not None else d.get("iid");ef=ev.get("f",f)
             if type(ef) is not int or not watch["seen_frame"]<=ef<=f:continue
-            if ent==c["move"].target_iid:v.setdefault("hook_hit_f",ef)
+            if ent==hooked or (alt is not None and ent==alt):
+                v.setdefault("hook_hit_f",ef);watch.setdefault("hook_hit_iid",int(ent))
             else:v.setdefault("hook_other_f",[ef,ent])
         h=state.get("hero") or {}
         if ("hook_ctrl_f" not in v and h.get("hero_accepting_input") is True
@@ -2283,8 +2359,23 @@ class NativeManualAirChain(NativeChainB2):
             # Per-cast no-retry bookkeeping, not credit for a sent jump. The
             # existing base still creates preparation exposure only after the
             # neutral replacement is actually sent.
-            self._transfer_finished.add((selected.details["caster"],selected.details["cast_fa"]))
+            self._transfer_finished.add(self._finished_key(selected.details))
         return super()._abort_hook_dispatch(selected,**kwargs)
+
+    def _strike_iid(self,c):
+        """#387: while the transfer Run's chosen row is the opening's rising side down slash, its DownSlash is credited on that body (the
+        one too near to hook, N or F); the Move, its target and its responsibility stay the caster's."""
+        run=self.runner.run
+        if run is not None and run.chain==transfer.PROGRAM and c is not None and run.v.get("iid")==c["move"].target_iid:
+            return transfer.slash_iid(run.v,c["move"].target_iid)
+        return super()._strike_iid(c)
+
+    @staticmethod
+    def _finished_key(details):
+        """The per-cast no-retry key of a sent transfer Run: (caster, cast frame); #387: the small rune's opening its own (+ "opening"),
+        so a plain transfer begun on the cast before L2's 2.2 took the scene does not spend it (transfer.propose reads the same keys)."""
+        key=(details["caster"],details["cast_fa"])
+        return key+("opening",) if details.get("opening") else key
 
     def _strike_refused(self,f,plan,run,first):
         """Sol seq 272 B / seq 274: the evidence the over_head stage's withdrawal reads (forum_planner._stage_withdrawn). Called only
@@ -2312,11 +2403,14 @@ class NativeManualAirChain(NativeChainB2):
                     and type(run.v.get("hook_hit_f")) is int)
         if source is not None and source["move"].family=="RUNE_TRANSFER" and (self._press is not None or hooked):
             bound=self._transfer_target_moves.get(source["move"])
+            watch=self._hook_start if self._hook_start is not None and self._hook_start["move"]==source["move"] else None
             if bound is None and hooked and self._actual_state is not None:
                 # The hook ticks bind nothing (their step branch runs first); the attack the needle provoked is the
-                # target's observed current move (live: Slam Antic from 2654 when the release aborts at 2673).
+                # target's observed current move (live: Slam Antic from 2654 when the release aborts at 2673); #387: the
+                # hooked body's (the small rune's opening may hook the other one)
                 bound=next((m for fam in ("CC_SLAM","CC_JUMP_CAST","CC_JUMP")
-                            for m in (self._observed_transfer_move(self._actual_state,run.v.get("iid"),fam),)
+                            for m in (self._observed_transfer_move(self._actual_state,
+                                                                   transfer.hooked_body(run.v,run.v.get("iid"),watch),fam),)
                             if m is not None),None)
             if bound is not None:
                 # A successful sent strike, or this Run's own Harpoon hit that

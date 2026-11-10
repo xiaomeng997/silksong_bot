@@ -803,9 +803,12 @@ def air_approach_keys(x):
     mask=side|(B["J"] if left else 0)
     # A side approach has no strike/bounce to finish an irreversible air dash.
     # Keep the actual prefix/hold untouched; only decline a NEW dash impulse.
-    if x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground or x.v.get("air_dash_decided"):return mask
+    if (x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground or x.v.get("air_dash_decided")
+            or opening_pending(x.v)):return mask   # #387: no dash before the small rune's opening hook
     sim=x.obs.sim;S=np.asarray(sim.start).reshape(K.K);h=x.obs.hero
-    if (side==0 or x.v["iid"]==x.v["caster"] or h.get("hero_accepting_input") is not True or not np.isfinite(S).all()
+    # #387 (the person 11-10: "弹起以后冲刺下劈施法那只"): after the opening's real hook and bounce the caster target may take the dash
+    after_opening=bool(x.v.get("hook_done") and type(x.v.get("hooked_iid")) is int)
+    if (side==0 or (x.v["iid"]==x.v["caster"] and not after_opening) or h.get("hero_accepting_input") is not True or not np.isfinite(S).all()
             or S[K.GROUND]>0 or S[K.MODE]!=K.M_NORMAL or S[K.AIRDASHED]>0 or S[K.DASH_CD]>0):return mask
     dash_index=B["DASH"].bit_length()-1
     # Finish releasing a previous jump before selecting a new air impulse.
@@ -1132,7 +1135,103 @@ def retreat_reserve(enemy,t_s,away):
     return max(EVADE_U_S*min(float(t_s),rem),max(0.,vx*away)*float(t_s))
 
 
-def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=False):
+HOOK_CAST_STATES=frozenset({"Spell Antic","Cast 1","Cast 2"})   # Task 182 seq 312 #387: a caster in its small-rune cast (the person: it cannot evade)
+HOOK_CAST_SPAN_F=72      # #387: a small-rune cast's earliest end from its first frame (Spell Antic 43-44 + Cast 1 5-6 + Cast 2 25 frames: ep46
+#                          132 147799-147873, J30 474 101845-101917): the caster's "move" label stands for its body no later than this
+
+
+def needle_passes(sim,hooked,F0,toward,gap):
+    """#387 (Sol seq 341, k387_hookN: the caster's branch assumed N off the ray while its scan still met N standing): the needle can pass
+    the hooked one to the caster behind it only if the hooked one can leave the ray by the needle's latest hit (P + HOOK_LATE_F + the
+    throw frame, map2.strike): its worst-case retreat from this observation (retreat_reserve, the face check's own bound: Evade Scuttle
+    15 u/s straight back) reaches the caster's near face (gap). Jump Antic leaves the ground 29+ frames after it starts, past the hit.
+    As in face_hook_check, a pose change (a crouch at a new state's entry, 6.194 against the Idle 6.916) is outside this bound."""
+    from ssbot.map2 import strike as SK
+    t=(int(F0)+HOOK_PRESS_AFTER_F+HOOK_LATE_F+SK.HOOK_THROW_F-int(sim.f))*float(sim.params.frame_time)
+    return retreat_reserve(hooked,max(t,0.),toward)>=gap
+
+
+def hook_iid(v,move_target,watch=None):
+    """#387 (Sol seq 335): the body this Run's aimed hook takes, apart from the Move's target (the caster the Run strikes after the
+    bounce, its responsibility instance unchanged): the hook watch's identity recorded at the hook's send, else the Run's (the
+    opening's hooked one once face_hook_check_any set it: the B2 identity ray before the send), else the Move's own target (every other
+    face hook). Read by the B2 identity veto, the hook watch's hit evidence, the hook step / entry model anchor and the recovery."""
+    w=(watch or {}).get("hook_iid")
+    if type(w) is int:return w
+    h=(v or {}).get("hooked_iid")
+    return h if type(h) is int else move_target
+
+
+# #387: the opening's hook checks that only get worse as she closes in (she is past the face or too near it to press): the opening is
+# lost for this Run and its ordinary down slash takes over (a caster right beside her is struck, not jumped past)
+OPENING_LOST=frozenset({"target body behind the ray origin","face inside claw_strike's 0.5 u press minimum",
+                        "antic drift inside the target body margin"})
+
+
+def hooked_body(v,move_target,watch=None):
+    """#387: the body the sent hook actually took (the watch's Harpoon hit: the planned one or the opening's other body behind it on
+    the ray, knife_chain_face_hook.hook_alt), else the planned one (hook_iid). The hooked-body window and the recovery read it."""
+    h=(watch or {}).get("hook_hit_iid")
+    return h if type(h) is int else hook_iid(v,move_target,watch)
+
+
+def opening_pending(v):
+    """#387: the small rune's opening (GoalPrefs.hook_open this tick) whose hook is not done yet and still possible: no down-slash row
+    and no air dash before it (Sol seq 335: the opening goes first; after the real hook and bounce, or once it is lost, the Run's
+    ordinary rules: its dash down slash). The rising side down slash (opening_slash) is the opening's own row."""
+    return bool(v.get("hook_open")) and not v.get("hook_done") and not v.get("opening_lost")
+
+
+def _walk_support_lost(x,e):
+    """Task 179: a Walk-supported row before its contact while that body left the constant-velocity Walk (stop, turn, other velocity)."""
+    row=x.v.get("row")
+    if not isinstance(row,dict) or row.get("support")!="walk" or x.obs.f>=row["contact_frame"]:return False
+    w=row["walk"];vel=e.get("vel")
+    return not (control(e)[0]=="Walk" and isinstance(vel,(list,tuple)) and len(vel)==2
+                and vel[0]==w["vx"] and vel[1]==0 and e.get("flipX")==w["flip"])
+
+
+def _rising(x):
+    """#387 ("上升段"): her jump is still held (the Run's hold, J at the next key) or she still moves up."""
+    S=np.asarray(x.obs.sim.start,float).reshape(-1)
+    held=int(x.v.get("jump_until",0))-int(x.obs.k)>0
+    return bool(held or (S.shape[0]==K.K and np.isfinite(S[K.VY]) and S[K.VY]>0))
+
+
+def slash_iid(v,move_target):
+    """#387 (the person 11-10: "如果太近就改成起跳，上升段在怪的侧面下劈不松开跳"): the body this Run's chosen down slash strikes: the
+    opening's rising side down slash on the body too near to hook (N or F) while that row runs, else the Move's own target. Read by
+    the B2 DownSlash hit attribution (the Move, its target and its responsibility stay the caster's)."""
+    s=(v or {}).get("slash_iid")
+    return s if type(s) is int else move_target
+
+
+def face_hook_check_any(sim,hero,ents,F0,toward,bombs=None,next_key=None):
+    """Task 182 seq 312 #387 (the person 11-10, Sol seq 333: the small rune's opening): one high Clawline toward the caster that takes the
+    ray's first body of the observed Clappers, F or N, whichever it is (B2's identity ray at the press pose), then face_hook_check on that
+    body in the "top" band with a caster in its cast held still. (ok, why, info) with info["hooked_iid"] (the hooked one, kept apart from
+    the caster the Run strikes after the bounce). next_key: the key the Run sends at F0 if it does not hook now (the "top" band's next
+    press)."""
+    from .knife_chain_hook_target import first_ray_body
+    info={}
+    if toward not in (-1,1):return False,"unknown hook direction",info
+    try:bodies=[(e.get("iid"),body_box(e)) for e in ents or ()]
+    except (TypeError,ValueError,OverflowError):return False,"observed bodies unknown",info
+    if not bodies or any(type(i) is not int or b is None or not np.isfinite(b).all() for i,b in bodies):
+        return False,"observed bodies unknown",info
+    tk=B["R"] if toward>0 else B["L"];j0=sim.off+HOOK_PRESS_AFTER_F
+    ro=sim.roll(np.full((1,HOOK_PRESS_AFTER_F+1+HOOK_LATE_F),tk,np.int64))
+    if ro.box.shape[1]!=j0+HOOK_LATE_F+1:return False,"press pose index mismatch",info
+    try:first=first_ray_body([float(v) for v in ro.box[0,j0]],toward,[(i,[float(v) for v in b]) for i,b in bodies])
+    except ValueError as exc:return False,"B2 identity ray unchecked: "+str(exc),info
+    if first is None:return False,"no body on the hook ray",info
+    hooked=next(e for e in ents if e.get("iid")==first[0])
+    ok,why,info=face_hook_check(sim,hero,hooked,F0,toward,bombs,bodies,high_band="top",cast_still=True,next_key=next_key)
+    info["hooked_iid"]=int(first[0])
+    return ok,why,info
+
+
+def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=False,cast_still=False,next_key=None):
     """A cheap gate for one aimed Clawline at P=F0+1 against the OBSERVED target face; never a hit certificate.
 
     Her pose comes from the actual S0 / in-flight prefix rolled with the turn key and must stay in the measured
@@ -1146,7 +1245,9 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=
     foot height of every late-application branch must also lie in their common band, from the existing floor hover and
     the small runes' danger top + BOMB_M up to the target ray band (the ray's low edge under the body top), at its
     middle or higher: on a rising jump the earliest tick that reaches the middle and passes all the above; a jump that
-    never reaches it, or no band at all, is unsupported (no lower hook instead). (ok, why, info)."""
+    never reaches it, or no band at all, is unsupported (no lower hook instead). high_band "top" (#387, the small rune's
+    opening): the whole band, its upper edge: on a rising jump the last press still wholly in it (next_key: the key sent at
+    F0 when not hooking), falling at once. cast_still (#387): a caster in its cast is a still face. (ok, why, info)."""
     from ssbot.knowledge import hero2 as H2
     from ssbot.map2 import strike as SK
     from . import claw_strike as CS
@@ -1166,7 +1267,9 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=
             or any(type(v) not in (int,float) or not math.isfinite(v) for v in velocity)
             or type(tin) not in (int,float) or not math.isfinite(tin) or tin<0):
         return False,"target motion/clock unknown",info
-    if st not in HOOK_TARGET_STATES:return False,"target state outside the face-hook scope",info
+    still=bool(cast_still and st in HOOK_CAST_STATES)   # #387: a caster in its cast stands (no retreat reserve), a hookable face
+    if st not in HOOK_TARGET_STATES and not still:return False,"target state outside the face-hook scope",info
+    reserve_of=(lambda t,away:0.) if still else (lambda t,away:retreat_reserve(enemy,t,away))
     body=body_box(enemy);iid=enemy.get("iid")
     seen=[(iid,body)] if bodies is None else list(bodies)
     if (iid not in [i for i,_ in seen] or
@@ -1198,7 +1301,7 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=
         if held-CS.FLOOR<CS.CsCfg().ray_lo:return False,"held height below claw_strike's floor hover",info
         for h in (SK.HOOK_HIT_F,SK.HOOK_THROW_F):
             t=(P+d+h-int(sim.f))*float(sim.params.frame_time)
-            r=retreat_reserve(enemy,t,toward);moved=np.asarray(body,float)+toward*np.array([r,0.,r,0.])
+            r=reserve_of(t,toward);moved=np.asarray(body,float)+toward*np.array([r,0.,r,0.])
             for ac in range(6):
                 vx=min(max(vx0,-20.),20.)*H2.CLAW_ANTIC_DECEL[0];x=x0
                 for k in range(1,h+1):
@@ -1220,7 +1323,7 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=
     if bombs is not None and len(bombs):
         from . import rune_bombs as RB
         t_end=(P+HOOK_LATE_F+HOOK_CTRL_LAST_F-int(sim.f))*float(sim.params.frame_time)
-        stop=((front-xp)*toward+retreat_reserve(enemy,t_end,toward)-min(v.gap for v in SK.HOOK_VARIANTS)-SK.HALF_W)
+        stop=((front-xp)*toward+reserve_of(t_end,toward)-min(v.gap for v in SK.HOOK_VARIANTS)-SK.HALF_W)
         far=max(ext,min(stop,ext+SK.DASH_MAX_STEPS*SK.DASH_STEP_U))
         xs=np.linspace(xp,xp+toward*far,int(np.ceil(far/.25))+2)[:,None]   # samples finer than the HeroBox width
         ks=np.arange(P,P+HOOK_LATE_F+HOOK_CTRL_LAST_F+1)-int(sim.f)
@@ -1239,7 +1342,20 @@ def face_hook_check(sim,hero,enemy,F0,toward,bombs=None,bodies=None,*,high_band=
                     held_low=min(helds)-CS.FLOOR,held_high=max(helds)-CS.FLOOR)
         if not lo<hi:return False,"high hook unsupported: no common held band",info
         if max(helds)>=hi:return False,"high hook: held above the band",info
-        if min(helds)<mid:return False,"high hook: held below the band middle",info
+        if high_band=="top":
+            # #387 (the person 11-10: "跳到能钩到怪的尽量高出钩吧"; Sol seq 333: the usable band's upper edge, its existing margins): every
+            # held height in the band (its floor: the hover over the small runes); on a rising jump the last such press: it waits while
+            # the next tick's press (next_key at F0, then the turn key; without one the turn key) lies wholly in the band and higher
+            vy_p=float(ro.vel[0,j0,1]);info.update(band_mode=1.,vy_press=vy_p)
+            if min(helds)<lo:return False,"high hook: held below the band floor",info
+            if vy_p>0:
+                rn=sim.roll(np.array([[tk if next_key is None else int(next_key)]+[tk]*(HOOK_PRESS_AFTER_F+1+HOOK_LATE_F)],np.int64))
+                if rn.box.shape[1]!=j0+HOOK_LATE_F+2:return False,"press pose index mismatch",info
+                nxt=[float(SK.hold_bb(float(rn.box[0,j0+1+d][1]),float(rn.vel[0,j0+1+d][1]))) for d in range(HOOK_LATE_F+1)]
+                info.update(next_held_low=min(nxt)-CS.FLOOR,next_held_high=max(nxt)-CS.FLOOR)
+                if min(nxt)>=lo and max(nxt)<hi:
+                    return False,"high hook: a higher press in the band follows",info
+        elif min(helds)<mid:return False,"high hook: held below the band middle",info
     return True,"ok",info
 
 
@@ -1295,6 +1411,18 @@ def register(prims):
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
         if x.v.get("_approach_only") or x.v.get("no_strike") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+        # #387 (Sol seq 335): the small rune's high hook opening first (face_hook); its own row only: the rising side down slash on the
+        # body too near to hook (the person 11-10, opening_slash), from the earliest press, the jump held (press_now_row's left)
+        slash=x.v.get("opening_slash") if opening_pending(x.v) else None
+        if opening_pending(x.v) and slash is None:return None
+        tgt=x.obs.e
+        if slash is not None:
+            tgt=next((e for e in getattr(x.obs,"ents",None) or () if e.get("iid")==slash),None)
+            if tgt is None or not _rising(x):
+                # (falling with no rising side slash found, or that body gone: the opening is lost, the Run's own down slash next tick)
+                x.v["opening_lost"]="no rising side down slash";x.v["opening_slash"]=None
+                return None
+        x.v["slash_iid"]=None
         # Task 183 seq 268: the middle return's give-way (seam_only) is for a seam row only: no seam_inner this tick (not a
         # close pair now), no row on any side; a seam row is held to the target's inner side below (seam_contact)
         if x.v.get("seam_only") and not x.v.get("seam_inner"):return None
@@ -1314,12 +1442,12 @@ def register(prims):
             if not float(witness[0])<=cx<=float(witness[2]):return False,None
             return (True,None) if inner0 is None else inner0(cx,j,witness,support)
         side=x.v.get("strike_dir") or x.v["side"]   # #385: 1.2.2's rows toward the target from the aim (the air key may be none there)
-        if control(x.obs.e)[0]=="Walk":
+        if control(tgt)[0]=="Walk":
             # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
             # existing approach continues and the next tick re-selects. Never the still-body witness below.
             prefix=getattr(x.obs.sim,"prefix",None)
             support=(None if prefix is None else
-                     walk_body_support(x.obs.e,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
+                     walk_body_support(tgt,len(prefix)+3+PM.ACTIVE[1],getattr(x.obs,"hero",None)))
             if support is None:return None
             row=press_now_row(x.obs.sim,support,x.obs.F,max(0,int(x.v["jump_until"])-int(x.obs.k)),side,clean=plan_over_call(x.v),
                               contact_ok=inner,rejects=rejects)
@@ -1328,13 +1456,13 @@ def register(prims):
                                   contact_ok=over_body,rejects=rejects0)
                 x.v["seam_bound_fallback"]=row is not None
             if row is None:return None
-            x.v["row"]=row
+            x.v["row"]=row;x.v["slash_iid"]=slash
             return {"do":"goto","to":"strike"}
         # The witness keeps the observed root and follows the fitted pose of
         # the current Control state. A moving/unknown body cannot license a
         # fresh row; keep the existing approach instead. This is not a motion
         # prediction or permission to rewrite an absolute row.
-        enemy=x.obs.e;velocity=enemy.get("vel")
+        enemy=tgt;velocity=enemy.get("vel")
         controls=[c for c in enemy.get("fsms") or () if c.get("name")=="Control"]
         if (not isinstance(velocity,(list,tuple)) or len(velocity)!=2
                 or not all(type(v) in (int,float) and math.isfinite(v) for v in velocity)
@@ -1359,7 +1487,7 @@ def register(prims):
             x.v["idle_in_range"]=w;no_evade=w["done"]
         # Task 179 #317: the Idle instance's evidence (the native owner's record): a hit on this Idle since its entry
         # revokes it (a real hit on an Idle provokes Dmg Attack in the hit frame); the buddy at its entry sets Idle Time
-        ev=getattr(x.obs,"idle_ev",None) if st0=="Idle" else None
+        ev=getattr(x.obs,"idle_ev",None) if st0=="Idle" and tgt is x.obs.e else None   # (#387: the Run target's record only)
         if isinstance(ev,dict) and ev.get("hit") is not None:return None
         body=contact_body_witness(enemy,len(x.obs.sim.prefix)+3+PM.ACTIVE[1],idle_no_evade=no_evade,
                                   idle_time=idle_time_of(ev))
@@ -1372,9 +1500,20 @@ def register(prims):
                               contact_ok=over_body,rejects=rejects0)
             x.v["seam_bound_fallback"]=row is not None
         if row is not None:
-            x.v["row"]=row
+            x.v["row"]=row;x.v["slash_iid"]=slash
             return {"do":"goto","to":"strike"}
         return None
+
+    @prims.action("transfer_opening_slash_missed",doc="#387: the opening's rising side down slash missed (the body evaded): back to the "
+                                                      "air link, rising on, the hook after its attack recovery; not a hit receipt")
+    def opening_slash_missed(x):
+        row=x.v.get("row");s=x.v.get("slash_iid")
+        if type(s) is not int or not isinstance(row,dict):return None
+        e=next((b for b in getattr(x.obs,"ents",None) or () if b.get("iid")==s),None)
+        # it evaded: its walk support gone before the contact, the body gone, or no hit by the miss deadline
+        if not (e is None or _walk_support_lost(x,e) or x.obs.f>row["press_F"]+int(x.cfg["STOMP"]["miss_after"])):return None
+        x.v.update(row=None,slash_iid=None,opening_slash=None,opening_slash_done=True,opening_slash_missed_f=int(x.obs.f))
+        return {"do":"goto","to":"air"}
 
     @prims.gen("transfer_air_keys",doc="same-owner optional one-shot air dash; never a new jump or umbrella")
     def air_keys(x,m):return m|air_approach_keys(x)
@@ -1404,11 +1543,8 @@ def register(prims):
     @prims.guard("transfer_walk_support_lost",doc="Task 179: a Walk-supported row before its contact while the target "
                                                   "left the constant-velocity Walk (stop, turn, other velocity): re-select")
     def walk_support_lost(x):
-        row=x.v.get("row")
-        if not isinstance(row,dict) or row.get("support")!="walk" or x.obs.f>=row["contact_frame"]:return False
-        w=row["walk"];e=x.obs.e;vel=e.get("vel")
-        return not (control(e)[0]=="Walk" and isinstance(vel,(list,tuple)) and len(vel)==2
-                    and vel[0]==w["vx"] and vel[1]==0 and e.get("flipX")==w["flip"])
+        if type(x.v.get("slash_iid")) is int:return False   # #387: the opening's rising side slash: transfer_opening_slash_missed
+        return _walk_support_lost(x,x.obs.e)
 
     @prims.guard("transfer_missed")
     def missed(x):
@@ -1432,22 +1568,60 @@ def register(prims):
         v=x.v
         if v.get("seam_only"):return None   # Task 183 seq 268: the middle return's give-way is a seam down-slash row only
         if v.get("strike_bound"):return None   # Task 182 seq 312 #385: 1.2.2's down slash outside the range (a hook pulls her to the face)
-        if (not x.cfg.get("FACE_HOOK",False) or v.get("_approach_only") or v.get("no_strike") or v.get("cs") is not None or v.get("hook_done") or not hasattr(x.obs,"sim")
-                or x.obs.ground or v.get("iid")==v.get("caster")):return None
+        # Task 182 seq 312 #387 (the person 11-10, Sol seq 333): the small rune's opening (L2's GoalPrefs.hook_open on this Run's caster target):
+        # the high hook is the scene's own, whatever FACE_HOOK says, and may be aimed at the caster itself
+        opening=bool(v.get("hook_open"))
+        if (not (x.cfg.get("FACE_HOOK",False) or opening) or v.get("_approach_only") or v.get("no_strike") or v.get("cs") is not None
+                or v.get("hook_done") or not hasattr(x.obs,"sim") or x.obs.ground or (v.get("iid")==v.get("caster") and not opening)):return None
         toward=1 if v.get("side")==B["R"] else -1 if v.get("side")==B["L"] else 0
         ents=getattr(x.obs,"ents",None)
-        try:bodies=None if ents is None else [(e.get("iid"),body_box(e)) for e in ents]
-        except (TypeError,ValueError,OverflowError):bodies=[(None,None)]
-        ok,why,info=face_hook_check(x.obs.sim,getattr(x.obs,"hero",None),x.obs.e,int(x.obs.F),toward,
-                                    getattr(x.obs,"bombs",None),bodies,high_band=bool(v.get("switch_stomp")))
-        v["face_hook_check"]={"ok":ok,"why":why,**{k:float(w) for k,w in info.items()}}
-        if not ok:return None
+        if opening:
+            # the ray's first body (F or N) is the hooked one; the Run's target stays the caster (its dash down slash after the bounce).
+            # The "top" band's next press: this link's own key at F0 when it does not hook (the side key, J while the jump is held)
+            nk=int(v.get("side") or 0)|(B["J"] if int(v["jump_until"])-int(x.obs.k)>0 else 0)
+            ok,why,info=face_hook_check_any(x.obs.sim,getattr(x.obs,"hero",None),ents,int(x.obs.F),toward,getattr(x.obs,"bombs",None),
+                                            next_key=nk)
+        else:
+            try:bodies=None if ents is None else [(e.get("iid"),body_box(e)) for e in ents]
+            except (TypeError,ValueError,OverflowError):bodies=[(None,None)]
+            ok,why,info=face_hook_check(x.obs.sim,getattr(x.obs,"hero",None),x.obs.e,int(x.obs.F),toward,
+                                        getattr(x.obs,"bombs",None),bodies,high_band=bool(v.get("switch_stomp")))
+        v["face_hook_check"]={"ok":ok,"why":why,"opening":opening,**{k:float(w) for k,w in info.items()}}
+        if not ok:
+            if opening and why in OPENING_LOST and not v.get("opening_slash"):
+                # #387 (the person 11-10: "如果太近就改成起跳，上升段在怪的侧面下劈不松开跳如果怪闪身还能继续上升，给出钩留出足够的冷却时间"):
+                # too near to hook while she rises: one down slash on that body's side with the jump held (the next tick's stomp_plan, its
+                # earliest row: the hook's attack recovery runs from there); a miss (it evaded) goes on rising to the hook. Falling, or
+                # once that slash is spent: the opening is lost and the Run's own down slash takes over
+                if _rising(x) and not v.get("opening_slash_done") and type(info.get("hooked_iid")) is int:v["opening_slash"]=int(info["hooked_iid"])
+                else:v["opening_lost"]=why   # (the next tick's stomp_plan takes over)
+            return None
+        if opening:v["hooked_iid"]=int(info["hooked_iid"])
         from .claw_strike import CsPlan
         F0=int(x.obs.F)
         v["cs"]=CsPlan(F0,0,F0+HOOK_PRESS_AFTER_F,0,bb_press=info["bb_press"])
         v["air_dash_decided"]=True  # no air dash after an aimed hook in this Run
         from .knife_chain_face_hook import press_anchor
-        v["hook_press"]=press_anchor(x.obs.sim,toward,F0,x.obs.e)
+        hooked=x.obs.e if not opening else next((e for e in ents or () if e.get("iid")==v["hooked_iid"]),None)
+        if hooked is None:return None
+        # #387 (the person 11-10: "不管走路那只是否闪身肯定能钩到一只"): the opening's other body behind the hooked one on the ray, in its
+        # cast (still), is the needle's body instead when the hooked one can leave the ray before the needle's hit (needle_passes); the
+        # hook's checks then take it as the hooked body in that branch (knife_chain_face_hook.hook_alt). Otherwise the ray's first body is
+        # the hooked one in every case: one branch (Sol seq 341, k387_hookN)
+        alt=None
+        if opening:
+            other=next((e for e in ents or () if e.get("iid")!=v["hooked_iid"]),None)
+            hb=body_box(hooked);ob=None if other is None else body_box(other)
+            if hb is not None and ob is not None and control(other)[0] in HOOK_CAST_STATES:
+                gap=(float(ob[0] if toward>0 else ob[2])-float(hb[0] if toward>0 else hb[2]))*toward
+                if gap>=0. and needle_passes(x.obs.sim,hooked,F0,toward,gap):alt=int(other["iid"])
+        v["hook_alt"]=alt
+        # (#387: the hooked body's, F or N; a caster in its cast stands still: no retreat bound, as face_hook_check_any)
+        v["hook_press"]=press_anchor(x.obs.sim,toward,F0,hooked,still=bool(opening and control(hooked)[0] in HOOK_CAST_STATES))
+        if alt is not None and isinstance(v["hook_press"],dict):
+            # the other branch (Sol seq 340): that caster itself, still; its "move"-labelled body exempt only through its cast's end
+            v["hook_press"]["alt"]={"iid":alt,"body":[float(b) for b in body_box(other)],
+                                    "move_until":int(v["cast_fa"])+HOOK_CAST_SPAN_F}
         return {"do":"goto","to":"claw"}
 
     @prims.gen("transfer_claw_keys",doc="the absolute CsPlan keys: turn key, CLAW for two frames; no J; never re-timed")
@@ -1487,8 +1661,12 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False,hold_over=False,bound=None):
+            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False,hold_over=False,bound=None,hook_open=False):
     """One observed-distance recipe and a two-frame external path.
+
+    hook_open (Task 182 seq 312 #387, the person 11-10 / Sol seq 333): this tick's small-rune opening on the caster (L2's
+    GoalPrefs.hook_open): the Run's face hook may fire whatever cfg FACE_HOOK says, on the ray's first body of the two (F or N) in the
+    "top" band (face_hook_check_any); the Run keeps the caster as its target.
 
     hold_over (Task 182 seq 312 #384, plan 1.2.2): a bounce follow-up held off the middle this tick (the other Clapper's slam
     still has a hammer stage: knife_chain_air_native._hold_over): no seam aim and no seam row; #385: the side key toward
@@ -1540,13 +1718,17 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if type(cd) not in (int,float) or not math.isfinite(cd):return None
     if active is None:
         if h.get("hero_accepting_input") is not True:return None
-        observed=(goal is not None and goal.target==target and goal.caster in {e["iid"] for e in es} and
-                  0<=state["f"]-goal.window_from<=cfg["max_frames"])
+        # #387 (the person 11-10, Sol seq 333): the small rune's opening runs on the caster itself, from the observed cast (its goal)
+        observed=(goal is not None and (goal.target==target or (hook_open and goal.source_kind=="CAST" and goal.caster==target))
+                  and goal.caster in {e["iid"] for e in es} and 0<=state["f"]-goal.window_from<=cfg["max_frames"])
         if not observed and (st!="Spell Antic" or tin>cfg["entry_cast_s"]):return None
         if ground and (int(sim.prefix[0])&B["J"] or state["act"]["hf"]["latched"]&B["J"]):return None
         cast_fa=goal.cast_fa if observed else max(0,state["f"]-int(round(tin*60.)))
         source=goal.caster if observed else other["iid"]
-        if (source,cast_fa) in finished:return None
+        # #387 (g387_C40 130618-130623: a plain transfer to the other one began on the cast before L2's 2.2 took the scene and spent
+        # the cast): the opening has its own once-per-cast key
+        opening_key=bool(hook_open and goal is not None and goal.source_kind=="CAST" and goal.caster==target)
+        if ((source,cast_fa,"opening") if opening_key else (source,cast_fa)) in finished:return None
         side=B["R"] if enemy["pos"][0]>h["pos"][0] else B["L"]
         if bounce_entry and target==source and body[0]<=hp[0]<=body[2]:side=0
         p=TransferPlan(target,source,cast_fa,state["f"],game,
@@ -1595,7 +1777,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # not make us release DASH or wait in front of the destination.
         cache=None if active is None else active.v.get("early_hook")
         early_due=False
-        if cfg.get("FACE_HOOK",False):
+        if cfg.get("FACE_HOOK",False) or hook_open:
             from .knife_chain_face_hook import early_jump_due
             early_due=early_jump_due(cache,k,target_state)
         if not (defer_jump or approach_only) and (gap<=cfg["STOMP"]["jump_root"] or early_due):
@@ -1612,14 +1794,21 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # tick. Re-arm only a suppressed clock if the target moves away again.
         elif active is None or p.dash_k>=10000:
             p=replace(p,dash_k=k+max(2,int(math.ceil(max(0.,cd)*60.))))
-        if (cfg.get("FACE_HOOK",False) and not (defer_jump or approach_only) and p.jump_k>k+2
-                and p.iid!=p.caster and target_state in HOOK_TARGET_STATES
+        # #387: the small rune's opening takes the same jump expansion (its first decision whose high hook passes: the "top" band, the
+        # ray's first body of the two, the caster held still), whatever FACE_HOOK says ("起手就应该直接跳到高于小符文的高度然后钩怪的脸")
+        if (((cfg.get("FACE_HOOK",False) and p.iid!=p.caster and target_state in HOOK_TARGET_STATES) or hook_open)
+                and not (defer_jump or approach_only) and p.jump_k>k+2
                 and (active is None or active.v.get("cs") is None)):
             from .knife_chain_face_hook import early_jump_stale,early_jump
             if early_jump_stale(cache,state["f"],target_state):
-                early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash,high_band=switch_stomp)
+                early=early_jump(runner,p,sim,game,state,enemy,bombs,k,link,held_dash,
+                                 high_band="top" if hook_open else switch_stomp,any_body=bool(hook_open))
                 if early.get("ok") and early.get("defer_new_dash"):
                     p=replace(p,dash_k=k+10000)
+                elif hook_open and early.get("near") and p.jump_k>k+2:
+                    # #387 (the person 11-10: "如果太近就改成起跳"): too near to hook from any press of the jump: jump now, the whole hold
+                    # (the rising side down slash in the air, the jump held; the hook after it if the body evades), no new dash
+                    p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash,dash_k=k+10000)
     elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
@@ -1650,6 +1839,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables["strike_bound"]=None if bound is None or bounce_entry else [float(bound[1]),int(bound[2]),int(bound[3]),
                                                                           str(bound[5]) if len(bound)>5 else "outside"]
     variables["strike_dir"]=None if bound is None or bounce_entry else (B["R"] if enemy["pos"][0]>hp[0] else B["L"])
+    variables["hook_open"]=bool(hook_open)   # #387: this tick's only (read by the face hook)
+    if active is None:variables["opening_run"]=bool(hook_open)   # #387: a Run begun as the small rune's opening (the native's _opening)
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp

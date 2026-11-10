@@ -1,6 +1,6 @@
 """Task 182 seq 312 #384 (Sol REVIEW383): IdleHit yields before it prepares (A), plan 3.4 in the middle scene (B), 2.2's strike place covered by
-the small rune's bombs (X14), and the package's executors: the stomp entry of 1.2.1 / 1.2.2 / the way into the middle (F's slam its source)
-and 2.3's one closing stomp entry bound to the rune's end."""
+the small rune's bombs (X14; retired by #387's high hook opening), and the package's executors: the stomp entry of 1.2.1 / 1.2.2 / the way
+into the middle (F's slam its source) and 2.3's one closing stomp entry bound to the rune's end."""
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -115,45 +115,15 @@ def test_the_middle_request_through_l2_carries_the_live_circle_and_its_plan_gate
     assert all(not q.rune_across and q.circles == () for q in seen if q.scene == "middle")
 
 
-# ---- X14: 2.2's strike place covered by the small rune's bombs ----
+# ---- X14 (2.2's strike place covered by the bombs) is retired by #387: the opening's hook goes above them ----
 
-def _bombs(*rows):
-    return np.asarray(rows, float)
-
-
-def test_a_strike_place_covered_on_a_frame_of_its_window_is_no_strike(monkeypatch):
-    tac, ws, fc = start((20., 30.), 15.)
-    cast(tac, ws, fc, 7)
-    sc = NS(geo=None, tac=tac, hx=15.)
-    from ssbot.combat.tactics.clapper_scene import geometry
-    sc.geo = geometry(tac, ws, list(fc.subjects))
-    s7 = next(s for s in fc.subjects if s.iid == 7)
-    top = sc.geo["tops"][7]
-    y = top + SEP.STRIKE_DY + .133                                # the bomb centred on her box at the contact height
-    r = tac.rules
-    k0 = int(np.ceil((r.start_s + 5. / r.run_u_s) * 60.))       # she can be there (5 u from 15) from this frame
-    assert SEP.strike_covered(sc, s7, 20., _bombs((7, 20., y, 2., 0, 400)))                  # lit through the window
-    assert SEP.strike_covered(sc, s7, 20., _bombs((7, 20., y, 2., k0 + 3, k0 + 5)))          # lit on three of its frames
-    assert not SEP.strike_covered(sc, s7, 20., _bombs((7, 20., y, 2., 0, k0 - 1)))           # out before she gets there
-    assert not SEP.strike_covered(sc, s7, 20., _bombs((7, 20., y, 2., k0 + SEP.STRIKE_F + 1, 400)))   # lit after the window
-    assert not SEP.strike_covered(sc, s7, 20., _bombs((7, 20., 2.0, 1.5, 0, 400)))           # a ground bomb below the strike
-    assert not SEP.strike_covered(sc, s7, 20., None)
-
-
-def test_small_rune_targets_skip_a_covered_strike_and_hand_on_when_none_is_left(monkeypatch):
-    tac, ws, fc = start((20., 30.), 25.)                    # she between the two: both reachable, the caster 7
-    cast(tac, ws, fc, 7)
-    assert tac.last["clapper_rune_down"]["case"] == "2.2 caster"
-    covered = {7}
-    monkeypatch.setattr(SEP, "strike_covered", lambda sc, s, x, bombs: s.iid in covered)
-    out = tick(tac, ws, fc)
-    assert tac.last["clapper_rune_down"]["case"] == "2.2 other" and out.target == 8
-    covered.add(8)
-    tick(tac, ws, fc)                                       # the pick this asks: no intent over the bombs, another rule takes it
-    assert tac.last["clapper_rune_down"]["case"] == "2.2 none strikable"
-    assert (tac.last.get("clapper_winner") or {}).get("rule") != "rune_down"
-    tick(tac, ws, fc)
-    assert (tac.last.get("clapper_winner") or {}).get("rule") != "rune_down"
+def test_small_rune_from_between_the_two_keeps_the_caster_with_the_opening():
+    tac, ws, fc = start((20., 30.), 25.)                    # she between the two, the caster 7
+    out = cast(tac, ws, fc, 7)
+    d = tac.last["clapper_rune_down"]
+    assert d["case"] == "2.2 hook" and out.target == 7 and d["hook_open"] == list(out.hook_open) and out.hook_open[0] == 7
+    out = tick(tac, ws, fc)                                 # the same rune: the same opening instance
+    assert out.target == 7 and tac.last["clapper_rune_down"]["hook_open"] == d["hook_open"]
 
 
 # ---- the executors: stomp entries ----

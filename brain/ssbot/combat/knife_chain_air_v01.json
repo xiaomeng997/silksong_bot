@@ -1056,6 +1056,7 @@
         "rules":[
           {"do":"done","when":{"p":"air_bounced"},"why":{"lit":"observed target downslash hit plus bounce"}},
           {"do":"abort","when":{"p":"transfer_walk_support_lost"},"why":{"lit":"walk support lost before contact (stop, turn or other velocity): re-select"}},
+          {"do":"act","act":{"a":"transfer_opening_slash_missed"}},
           {"do":"abort","when":{"p":"transfer_missed"},"why":{"lit":"transfer downslash missed; no observed target bounce"}}
         ],
         "keys":[{"gen":"transfer_strike_row"}]
