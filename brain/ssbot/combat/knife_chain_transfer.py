@@ -195,17 +195,34 @@ def bounce_tail_pending(state,goal,game):
     """Keep the old hammer tail until its observed Slam 2 collider is gone."""
     if goal is None or goal.source_kind!="BOUNCE" or goal.responsibility.family!="CC_SLAM":return False
     if goal.responsibility.target_iid!=goal.caster:return False
-    source=next((e for e in clappers(state) if e["iid"]==goal.caster),None)
+    return hammer_on(state,goal.caster,goal.cast_ta,game)
+
+
+def hammer_on(state,iid,cast_ta,game):
+    """bounce_tail_pending's reading of one Clapper's slam (the instance whose antic began at cast_ta): a hammer stage still live or
+    to come until its observed Slam 2 collider is gone. A missing Clapper or an unknown observation keeps it on."""
+    source=next((e for e in clappers(state) if e["iid"]==iid),None)
     if source is None:return True
     st,tin=control(source)
     if st in AIR_ATTACK_STATES:
-        new=(st=="Slam Antic" and goal.cast_ta is not None and abs(game-tin-goal.cast_ta)>3/60.)
+        new=(st=="Slam Antic" and cast_ta is not None and abs(game-tin-cast_ta)>3/60.)
         if not new:return True
     if not st:return True
     cols=source.get("colliders")
     if not isinstance(cols,list) or not cols:return True
     if any(str(c.get("name","")).startswith("Slam Collider") and c.get("enabled") is not False for c in cols):return True
     return not any(str(c.get("name","")).startswith("Song Heavy Sentry") and c.get("enabled") is True for c in cols)
+
+
+def cross_hammer_pending(state,goal,game):
+    """Task 182 seq 312 (#384; the person, plan 1.2.2): a real bounce on one Clapper (the goal's caster) in a chain the other
+    Clapper's slam started (the responsibility that one's CC_SLAM): that slam still has a hammer stage live or to come
+    (hammer_on on that Clapper and instance). That Clapper gone: no."""
+    if (goal is None or isinstance(goal,ReturnGoal) or goal.source_kind!="BOUNCE" or goal.responsibility.family!="CC_SLAM"
+            or goal.responsibility.target_iid==goal.caster):return False
+    src=goal.responsibility.target_iid
+    if not any(e["iid"]==src for e in clappers(state)):return False
+    return hammer_on(state,src,goal.cast_ta,game)
 
 
 def observe_goal(state,previous,cfg,finished,game_time=None):
@@ -1418,8 +1435,12 @@ def register(prims):
 
 
 def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer_jump=False,approach_only=False,
-            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False):
+            idle_evidence=None,follow_release=False,no_strike=False,seam_only=False,hold_over=False):
     """One observed-distance recipe and a two-frame external path.
+
+    hold_over (Task 182 seq 312 #384, plan 1.2.2): a bounce follow-up held off the middle this tick (the other Clapper's slam
+    still has a hammer stage: knife_chain_air_native._hold_over): no seam aim and no seam row, the bounced one's own side
+    rule as before (over its body: no side key).
 
     approach_only uses the same walk/dash/air keys without choosing a strike.
     Its sent Run keeps that intent until the native adapter's planned handoff.
@@ -1484,7 +1505,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         p=replace(p,side=0 if body[0]<=hp[0]<=body[2] else side)
     close=bool(active.v.get("follow_close")) if active is not None else bounce_close(state,goal,h)
     seam=None
-    if bounce_entry and link!="strike" and not ground:
+    if bounce_entry and link!="strike" and not ground and not hold_over:
         seam=seam_geometry(state,goal,target,close)    # Task 183: the target's inner side by the seam (seq 265: a close pair)
         # seq 264: roots in the same place (side unknown): no aim, the original approach side stays and no seam row
         if seam is not None and seam.aim is not None:p=replace(p,side=aim_side(float(hp[0]),seam.aim))
@@ -1558,6 +1579,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables["seam_inner"]=None if seam is None else [float(seam.root),int(seam.sign),
                                                        None if seam.aim is None else float(seam.aim)]
     variables["seam_rejects"]=None
+    variables["hold_over"]=bool(hold_over)   # Task 182 seq 312 #384: this tick's only (the record of the held follow-up)
     if early is not None:variables["early_hook"]=early
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp

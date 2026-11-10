@@ -922,6 +922,7 @@ class TwoPlay:
 
     def reset(self) -> None:
         self.manual_focus = False                       # explicit manual-B L2 scene owns target/stance preferences
+        self.idle_yield = False                         # Task 182 seq 312 (#384): set by the policy before step(): IdleHit prepares nothing
         self.prev: dict = {}             # iid -> (Control state, state time) on the last tick
         self.entry: dict = {}            # iid -> re-entry (bool) for the Clappers entering Idle this tick
         self.rec_entry: dict = {}        # Task 182 seq 289: iid -> False for the Clappers entering Slam Recover this tick (IdleHit only)
@@ -1007,6 +1008,7 @@ class TwoPlay:
         self.entry = {}
         self.rec_entry = {}
         self.plan_no_hit = frozenset()
+        self.idle_yield = False
         ground_now = bool(_sp.on_ground(s))
         self.landed_now = ground_now and self._airborne                # Task 182 seq 289: this tick is her first on the ground
         self._airborne = not ground_now
@@ -1109,7 +1111,11 @@ class TwoPlay:
         m = None
         if OPEN and two_enc:
             m = self._open_step(f, s, ground, accepting, t, wake_f)
-        idle_m = self._idle_step(f, s, ground, accepting, focus) if IDLEHIT else None
+        idle_m = None
+        if IDLEHIT:
+            # Sol REVIEW383 A: under L2's separated unit IdleHit prepares nothing (its run's bookkeeping and a press already sent go on)
+            idle_m = (self._idle_step(f, s, ground, accepting, focus, prepare=False) if self.idle_yield
+                      else self._idle_step(f, s, ground, accepting, focus))
         self.last_part = "open" if m is not None else "idle" if idle_m is not None else None
         return m if m is not None else idle_m
 
@@ -1142,7 +1148,10 @@ class TwoPlay:
         vx = float((h.get("vel") or [0.0, 0.0])[0])
         return _sp.hero_x(s) + vx * n / 60.0
 
-    def _idle_step(self, f: int, s: dict, ground: bool, accepting: bool, focus) -> int | None:
+    def _idle_step(self, f: int, s: dict, ground: bool, accepting: bool, focus, prepare: bool = True) -> int | None:
+        """prepare False (Task 182 seq 312 #384, Sol REVIEW383 A: L2's own stance and strike hold this tick, set by the policy before
+        step): the run's bookkeeping (its entry / landing start, a focus change ending it) and the second frame of a press already sent
+        go on; no press, walk, turn or stand is prepared or written, so once L2 lets go the run carries on by its own rules."""
         cs = _sp.clappers(s)
         sec = self._second(f)
         if sec is not None and self.idle is not None and self.idle.k_press is not None:
@@ -1174,6 +1183,8 @@ class TwoPlay:
             if slash_meets(self._xw(s), 1 if float(F["pos"][0]) > hx else -1, body_span(F)):
                 r = self.idle = IdleRun(iid=iid, f0=f, re=False, d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)
         if r is None or r.k_press is not None:
+            return None
+        if not prepare:
             return None
         if iid in self.plan_no_hit:
             r.why = r.why or "plan"                # Task 182: the running plan phase asks no hit on it (SSBOT_FORUM_TWO_PLAN only)

@@ -84,6 +84,9 @@ class EntryAttack:
     source_family: str
     source_distance: float
     picked_at: float
+    scope: str | None = None          # Task 182 seq 312 (#384): None as before; "rune_end": 2.3's one closing strike after the small rune,
+    #                                   bound to that event (event_f, the rune's end frame) since no source move goes on any more
+    event_f: int | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +259,9 @@ class GoalPrefs(TacticPrefs):
     blocked: frozenset = frozenset()       # Task 182 seq 312: the Clappers she cannot go straight at this tick: the other one's root between her and its root, or a
     #                                        live big rune across her way to its body (clapper_separated.blocked_iids). The evade chase does not follow one of them
     #                                        and the jump cast's dash slash does not start on one; the chain's own approach reads its route (knife_chain_air_native)
+    hold_over: frozenset = frozenset()     # Task 182 seq 312 (#384; the person, plan 1.2.2): the near one L2's 1.2.2 down slashes at the range edge while the
+    #                                        far one's slam goes on. After a real bounce on it the chain's follow-up stays off the middle (no middle landing, no
+    #                                        seam aim) while that slam still has a hammer stage, then goes into the middle as before (knife_chain_air_native)
 
 
 

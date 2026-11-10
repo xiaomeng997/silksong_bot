@@ -102,6 +102,7 @@ class NativeManualAirChain(NativeChainB2):
         self._idle_ev={};self._alive_prev=None;self._alive_prev_f=None
         self._transfer_responsibility={}
         self._transfer_target_moves={}
+        self._hold_seen=False   # Task 182 seq 312 #384: the last _hold_over reading (its notes only)
         self._vault_ready=False
         self._vault_responsibility={}
         self._vault_origins={};self._vault_completed=set()
@@ -455,7 +456,15 @@ class NativeManualAirChain(NativeChainB2):
         goal=self._transfer_goal
         if goal is not None and (goal.target,goal.caster)==(entry.target,entry.source):return
         if entry==self._entry_attack_seen:return
-        observed=self._observed_transfer_move(state,entry.source,entry.source_family)
+        if getattr(entry,"scope",None)=="rune_end":
+            # Task 182 seq 312 (#384, Sol REVIEW383): 2.3's one closing strike after the small rune: no source move goes on, so the rune's end
+            # is the instance (its frame), the failure responsibility that event's; one goal per rune end (its own (caster, frame) key)
+            fa=getattr(entry,"event_f",None)
+            if type(fa) is not int or not self._clock_known or not np.isfinite(self._clock):return
+            if entry.source not in {e["iid"] for e in transfer.clappers(state)}:return
+            observed=(transfer.MoveInstance(entry.source,int(fa),"RUNE_END"),float(self._clock))
+        else:
+            observed=self._observed_transfer_move(state,entry.source,entry.source_family)
         if observed is None:return
         move,ta=observed
         self._transfer_goal=transfer.TransferGoal(entry.target,entry.source,state["f"],ta,"SWITCH",move)
@@ -629,6 +638,10 @@ class NativeManualAirChain(NativeChainB2):
             context=self._transfer_responsibility.get(move)
             if context is None:self._stop("missing critical rune-transfer failure responsibility",failed)
             move,ta=context
+        if move.family=="RUNE_END":
+            # Task 182 seq 312 (#384): 2.3's closing strike answers the small rune cast whose end it follows: that cast (the same caster,
+            # the rune end's frame) is its HP responsibility; observed outside its cast states, it keeps the 30-frame minimum
+            move=transfer.MoveInstance(move.target_iid,move.antic_frame,"CC_CAST")
         if move.family=="VAULT_IDLE":
             context=self._vault_responsibility.get(move)
             if context is None:self._stop("missing critical vault failure responsibility",failed)
@@ -1078,6 +1091,16 @@ class NativeManualAirChain(NativeChainB2):
             self._note("transfer_rune_target_handoff",frame=f,old_target=target,target=wanted,link=run.link)
             self._recover("small rune: the down-slash target changed",f)
             return None
+        bound=self._entry_attack_goal
+        if (active and run.link in transfer.ROUTE_LINKS and self._press is None and _sep312(f)
+                and getattr(bound,"scope",None) in ("rune_end","sep_slam") and self._transfer_goal is not None
+                and self._transfer_goal.source_kind=="SWITCH" and getattr(prefs,"entry_attack",None)!=bound):
+            # Task 182 seq 312 #384 (Sol REVIEW383: the action is bound to this move / phase / target; invalid: hand back): the package
+            # scene that asked for this stomp (2.3's rune end, the separated slam) ended or lost before its press: B2 recovery at this
+            # step (the keys already sent stay the next owner's prefix, the failure responsibility is kept)
+            self._note("transfer_scene_entry_handoff",frame=f,target=target,link=run.link,scope=bound.scope)
+            self._recover("seq 312: the scene's stomp entry ended before its press",f)
+            return None
         goal=self._transfer_goal
         if (active and isinstance(goal,transfer.ReturnGoal) and run.link in ("walk","dash","jump","air")
                 and not self._return_request_holds(prefs,goal)):
@@ -1097,12 +1120,22 @@ class NativeManualAirChain(NativeChainB2):
             self._follow_landed(state,run)   # Task 183: the actual landing ends the follow-up Run
             return None
         no_witness=None
+        hold=active and not ground and self._hold_over(state,game,prefs,target)
+        if hold!=self._hold_seen:
+            self._note("transfer_hold_over",frame=f,target=target,hold=bool(hold),link=None if run is None else run.link,
+                       basis="L2's 1.2.2 near one after its real bounce; the slam that started this chain still has a hammer stage"
+                             if hold else "held off the middle no more: the follow-up as before")
+            self._hold_seen=bool(hold)
         if active and run.link=="air":
             why=self._no_strike_overhead(state,sim,target)
             if (why is not None and not ground
                     and transfer.follow_scope(self._transfer_goal,target,bool(run.v.get("follow_close")))):
                 # Task 183 seq 262: the bounce follow-up reads the gap first; this hand-back stands if it takes nothing
                 no_witness=why;why=None
+            if hold and no_witness is not None:
+                # Task 182 seq 312 #384 (plan 1.2.2): over N waiting for the hammer's end is the follow-up's own wait, not a Run that
+                # lost its strike: no hand-back for the witness alone (every step is still scanned for all owners; a blocked one hands back)
+                no_witness=None
             if why is not None:
                 # Task 179 #317 (Sol seq 240 乙): an air transfer / continuation Run already over its target with no
                 # strike witness possible for her current state hands back at this step through B2 recovery: the
@@ -1177,6 +1210,7 @@ class NativeManualAirChain(NativeChainB2):
         made=transfer.propose(self.runner,state,game,sim,target,ground,self._context[3],self._transfer_finished,self._transfer_goal,
                               **({"idle_evidence":self._idle_ev} if self._idle_ev else {}),
                               **({"approach_only":True} if approach_only else {}),
+                              **({"hold_over":True} if hold else {}),
                               **strike_kw)
         if made is None or made[0] is None:
             if active:self._recover((made[1].ended_reason if made is not None else None)
@@ -1197,7 +1231,7 @@ class NativeManualAirChain(NativeChainB2):
         if current is None:
             if active:self._recover("rune transfer support unavailable",f)
             return None
-        if self._follow_due(self._transfer_goal,draft,run,active,ground,approach_only):
+        if not hold and self._follow_due(self._transfer_goal,draft,run,active,ground,approach_only):
             handled,offer=self._follow_offer(state,game,sim,forecast,prefs,made,run if active else None,current)
             if handled:return offer
             if self._follow_made is not None:
@@ -1216,6 +1250,10 @@ class NativeManualAirChain(NativeChainB2):
                 if isinstance(goal,transfer.ReturnGoal):
                     if not self._return_source_ended(state,goal):
                         raise GeometryUnavailable("return request source move not ended")
+                elif goal.responsibility.family=="RUNE_END":
+                    # Task 182 seq 312 (#384): 2.3's rune end is no move the tracker holds; its instance is the (caster, rune-end frame)
+                    # L2 binds once (_bind_entry_attack), the caster still present (goal_preferences); L2's entry is its lifetime
+                    pass
                 elif not self._transfer_source_matches(rs,goal):
                     raise GeometryUnavailable("tactical switch source instance unavailable or changed")
                 draft.run.v["_entry_source_confirmed"]=True
@@ -1425,6 +1463,15 @@ class NativeManualAirChain(NativeChainB2):
         if (target not in getattr(prefs,"no_hit",())
                 or not transfer.follow_scope(self._transfer_goal,target,bool(run.v.get("follow_close")))):return {}
         return {"seam_only":True} if target in getattr(prefs,"return_cross",()) else {"no_strike":True}
+
+    def _hold_over(self,state,game,prefs,target):
+        """Task 182 seq 312 (#384; the person, plan 1.2.2: over N into the middle once both hammer stages of F's slam are over): L2's
+        1.2.2 near one (GoalPrefs.hold_over) after a real bounce on it, the slam that started this chain (the other Clapper's: the bounce
+        goal's responsibility) still with a hammer stage live or to come (transfer.cross_hammer_pending). While it holds the follow-up
+        stays off the middle (no middle landing, no seam aim or row) and the air Run over N is not handed back for its missing witness
+        alone; every step is still scanned for all owners. Once over: the Task 183 follow-up as it was (the middle, its fall slash)."""
+        if not _sep312(state.get("f")) or target not in frozenset(getattr(prefs,"hold_over",()) or ()):return False
+        return transfer.cross_hammer_pending(state,self._transfer_goal,game)
 
     def _follow_due(self,goal,draft,run,active,ground,approach_only):
         """Task 183 (Sol seq 261): this tick decides the bounce follow-up: a real bounce off the target's own slam (two

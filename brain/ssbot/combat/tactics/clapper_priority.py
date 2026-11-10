@@ -181,7 +181,8 @@ def _apply(sc, won, rule):
     hw[g.target] = max(hw.get(g.target, 0.), tac.rules.target_hit_w * tac.rules.priority.get(CLAPPER, 1.))
     out = replace(prefs, mode=RUSH, goal=RUSH, target=g.target, stance_x=float(g.stance_x), boss_x=g.face_x,
                   weights=weights, hit_w=hw, entry_attack=g.entry_attack, clapper_choice=rule,
-                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset(), withdraw=None, stay_pogo=frozenset())
+                  vocab=frozenset(prefs.vocab) | g.vocab, return_cross=frozenset(), withdraw=None, stay_pogo=frozenset(),
+                  hold_over=frozenset())
     pre = None                                  # the preferences before the strike's own weights (Sol seq 272 B)
     if ap.suppress_hits or (target.family in JUMPS and target.state in AIR):
         # no hit while backing off (the winner's suppression), and never on a target in its jump's flight

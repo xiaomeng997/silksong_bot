@@ -1550,18 +1550,18 @@ class ForumPlannerPolicy(PlannerPolicy):
                     rt_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             if getattr(self.tac, "plan_runner", None) is not None:
                 self.two.plan_no_hit = frozenset(getattr(prefs, "no_hit", ()))
+            if getattr(prefs, "clapper_choice", None) in ("sep_slam", "rune_down", "rune_after"):
+                from ssbot.combat.tactics import clapper_separated as _SEP
+                if _SEP.active(f):
+                    # Task 182 seq 312 (#384, Sol REVIEW383 A): the far one's slam place, the small rune's down slashes only and its one
+                    # closing strike are L2's for this tick: IdleHit prepares nothing (before step: no press state is written for keys
+                    # never sent); its other parts are unchanged
+                    self.two.idle_yield = True
+                    self.counts["two_idle_yield_312"] += 1
             tm_ = self.two.step(f, s, ws.hero.contact.v == "GROUND",
                                 bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                                 getattr(prefs, "target", None), ws.stamp.t_game_s, wake_f=self._wake_f,
                                 two_enc="_w13" in str(getattr(self.enc, "name", "")), latch=latch_t, **rt_kw)
-            if (tm_ is not None and getattr(self.two, "last_part", None) == "idle"
-                    and getattr(prefs, "clapper_choice", None) in ("sep_slam", "rune_down", "rune_after")):
-                from ssbot.combat.tactics import clapper_separated as _SEP
-                if _SEP.active(f):
-                    # Task 182 seq 312 (#383): the far one's slam place, the small rune's down slashes only and its one closing strike are
-                    # the planner's for this tick (L2's stance and strike); IdleHit's side slash yields (its other parts are unchanged)
-                    tm_ = None
-                    self.counts["two_idle_yield_312"] += 1
             if tm_ is not None and not (r.mask is not None or self.pause_owned) and self._rune_veto(
                     "two:" + str(getattr(self.two, "last_part", None)), tm_):
                 self.two.rune_yield(f)
@@ -1949,9 +1949,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                "free": bool(getattr(r.decision, "free", False)), "subj": subj}
         if self.tac.last.get("clapper_return_body") is not None:
             rec["clapper_return_body"] = self.tac.last["clapper_return_body"]   # SSBOT_FORUM_TWO_RETURN_BODY only
-        for k in ("clapper_eval", "clapper_releases", "clapper_plan"):
+        for k in ("clapper_eval", "clapper_releases", "clapper_plan", "clapper_sep_slam", "clapper_rune_down", "clapper_rune_after",
+                  "clapper_sep_notes"):
             if self.tac.last.get(k) is not None:
-                rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases
+                rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases; seq 312 #384: its units' records
         if li.get("map") is not None:
             rec["map"] = li["map"]               # SSBOT_FORUM_SPECIAL_MAP (SG4): the map row / readiness this tick
         rune_ = (self._rune_tick or {}).get("last")

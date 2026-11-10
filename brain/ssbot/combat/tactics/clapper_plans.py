@@ -693,6 +693,21 @@ def _middle_phases(c: _Middle, stay: Candidate, stay_facts, follow: str, selecte
     return tuple(phases)
 
 
+def _rune_gate(q: Request, cand: Candidate, keys) -> Candidate:
+    """Plan 3.4 in the middle scene (Sol REVIEW383 B, #384): with a live big rune circle across her way to the jumper (Request.circles), an
+    option whose places (these detail keys) lie in or behind a circle from her hand-back is not one she can take: every route stays out of the
+    circle (rune_cut). Without circles, or an option already closed: unchanged."""
+    if not q.circles or not cand.feasible:
+        return cand
+    for k in keys:
+        x = cand.get(k)
+        if x is None:
+            continue
+        if rune_cut(q.circles, q.hand.x, float(x), q.left, q.right, q.pad) != float(x):
+            return Candidate(cand.name, False, "a live big rune across its place (plan 3.4)", None, 1., cand.detail)
+    return cand
+
+
 def _only_routes(q: Request, cand: Candidate) -> Candidate:
     """A request that names its routes (a press's follow-up): any other candidate is closed, with the reason."""
     if q.routes is None or cand.name in q.routes:
@@ -708,14 +723,18 @@ def _middle_plan(q: Request, m: Roller) -> Plan:
         return Plan("middle", q.instance, q.generation, q.t, None, c.hazard_end + HIT_TAIL_S, status="none",
                     reason="the jump does not land toward the walker", detail=(("family", q.jumper.family), ("other", q.other.iid)))
     stay, facts = _stay(c)
+    stay = _rune_gate(q, stay, ("aim_x", "end_x"))
+    if not stay.feasible:
+        facts = None
     # Each option as it would be chosen: under / over attack the walker in the aim, so their landing follows from there.
     attack_x = c.front if c.aim else None
-    under, over = _only_routes(q, _under(c, attack_x)), _only_routes(q, _over(c, attack_x))
+    under, over = _rune_gate(q, _only_routes(q, _under(c, attack_x)), ("end_x",)), _rune_gate(q, _only_routes(q, _over(c, attack_x)), ("end_x",))
     prepared = []
     if stay.feasible:
         # Stay chosen: the walker can still close the gap, so the fallback is prepared from where stay's aim leaves her.
         from_x = facts["aim_x"] if facts["aim_x"] is not None else attack_x
-        fb_under, fb_over = _only_routes(q, _under(c, from_x, "under")), _only_routes(q, _over(c, from_x, "over"))
+        fb_under = _rune_gate(q, _only_routes(q, _under(c, from_x, "under")), ("end_x",))
+        fb_over = _rune_gate(q, _only_routes(q, _over(c, from_x, "over")), ("end_x",))
         cands = (stay, fb_under, fb_over)
         selected = "stay"
         prepared = [x.name for x in (fb_under, fb_over) if x.feasible]
@@ -730,7 +749,8 @@ def _middle_plan(q: Request, m: Roller) -> Plan:
                 arrive_dir=-f, arrive_t=None if facts is None else facts.get("arrive"),
                 need=c.need, h_lo=c.h_lo, h_cap_margin=GUIDE_MARGIN_U, stage=q.stage, walker_x0=q.other.x, walker_v=c.closing,
                 landings=tuple(x.get("landing") for x in (stay, under, over) if x.get("landing") is not None),
-                latest_depart=None if facts is None else facts.get("depart"), followup=q.routes is not None)
+                latest_depart=None if facts is None else facts.get("depart"), followup=q.routes is not None,
+                rune_across=q.rune_across, circles=q.circles)
     until = c.hazard_end + HIT_TAIL_S
     soft = [Range("walker_err", -SOFT_WALKER_U, SOFT_WALKER_U)]
     if facts is not None and facts.get("guide") is not None:
@@ -1878,9 +1898,10 @@ class PlanRunner:
         outer = name == "cluster" and standing_gap(geo) is True
         from .clapper_separated import active, circles_across, live_circles
         rune_across, circles = False, ()
-        if name == "cluster" and (outer or active()):
+        if name in ("cluster", "middle") and (outer or active()):
             # plan 3.4: a live big rune across her way to the jumper; its circles go with the request, every place and route of the plan
-            # stays out of them (Sol #382 R2: the stacked cluster's attack and lure too, never only the outer variant's vault)
+            # stays out of them (Sol #382 R2: the stacked cluster's attack and lure too, never only the outer variant's vault; Sol REVIEW383 B:
+            # the middle scene too, she between them with the circle between her and the jumper)
             rune_across = bool(circles_across(tac, t, x, J.a if J.x > x else J.b))
             circles = tuple(live_circles(tac, t)) if rune_across else ()
         q = Request(name, stage, inst, self.generation, t, J, W, side, m.get("antic_at"), m.get("air_at"), m.get("land"), m.get("vx"),

@@ -60,6 +60,9 @@ RUNE_HALF_U = 7.187      # the octagon's apothem: its x half span
 
 # ---- the small rune (rune_bombs) and its end (plan 2.x; design 3.3) ----
 BOMB_NEAR_U = 1.0        # a bomb's circle this near the span of her and both bodies keeps the small rune on
+STRIKE_DY = 1.49         # 2.2's strike (Sol REVIEW383 X14): her Bounds centre over the struck top at a down slash's contact (box bottom
+#                          0.5 u over it: rune_bombs' HeroBox, HB_HY 1.1249 and HB_DY 0.133)
+STRIKE_F = 8             # ... the frames of the strike window read from the frame she can be there (the press and the blade's frames)
 TIER_U = 2.5             # 2.3: the two near body edges at most this far apart (the standing gap's own value): the seam strike; past it the fall slash
 FALL_U = 1.0             # 2.3: her box this far from the chosen body's edge, inside the gap, as she falls
 
@@ -274,6 +277,34 @@ def rune_on(sc, bombs):
             on = True
             casters |= {int(v) for v in b[live, 0] if v >= 0}
     return on, casters
+
+
+def strike_covered(sc, s, x, bombs) -> bool:
+    """Sol REVIEW383 (X14, #384): 2.2's down slash on s from x is covered by the small rune's bombs: her box at the contact height over s's
+    current top (STRIKE_DY), on a frame of its strike window (from the frame she can be there, by the shared entry's start and run constants
+    from where she is, through STRIKE_F frames on), meets a lit bomb of the shared per-bomb forecast (rune_bombs.occupied). True: that target
+    is not one she can strike now; False: every frame free, or nothing is known (no bombs, no top). (A bomb is lit about 6 frames and one
+    place sees one ring: a whole-window reading would never hold.)"""
+    if bombs is None or not len(bombs) or sc.geo is None:
+        return False
+    top = (sc.geo.get("tops") or {}).get(s.iid)
+    if top is None:
+        return False
+    from ssbot.combat import rune_bombs as RB
+    r = sc.tac.rules
+    k0 = int(math.ceil((float(r.start_s) + abs(float(x) - sc.hx) / float(r.run_u_s)) * 60.))
+    k1 = k0 + STRIKE_F
+    b, x, y = np.asarray(bombs, float), float(x), float(top) + STRIKE_DY
+    # (cost: occupied walks its rows one by one, ~8 us each) only a row lit inside the window whose circle meets her box at this one place
+    # covers a frame of it: occupied's own contact rule at m = 0, one vectorised pass decides a free window; a covered one is confirmed by
+    # occupied itself on the first such row (the same answer as occupied over every row)
+    dx = np.maximum(np.abs(x - b[:, 1]) - RB.HB_HX, 0.)
+    dy = np.maximum(np.abs(y + RB.HB_DY - b[:, 2]) - RB.HB_HY, 0.)
+    near = b[(dx * dx + dy * dy < b[:, 3] * b[:, 3]) & (b[:, 4] <= k1) & (b[:, 5] >= k0)]
+    if not len(near):
+        return False
+    ks = np.arange(k0, k1 + 1)
+    return bool(np.any(RB.occupied(near[:1], np.full(len(ks), x), np.full(len(ks), y), ks, 0.)))
 
 
 def blocked_iids(sc) -> frozenset:
