@@ -684,6 +684,12 @@ def body_path(enemy,n):
     if not flying:vy=0.
     out=np.empty((n+1,4));dx=dy=0.
     out[0]=box
+    if not flying:
+        # the common case without the Python loop: add.accumulate sums the same steps in the same order from the first one
+        if n>0:
+            dxs=np.add.accumulate(np.full(n,vx/60.))
+            out[1:,0]=box[0]+dxs;out[1:,1]=box[1]+dy;out[1:,2]=box[2]+dxs;out[1:,3]=box[3]+dy
+        return out
     for k in range(1,n+1):
         dx+=vx/60.
         if flying:
@@ -697,12 +703,50 @@ def route_meets_other(boxes,limit,target_path,other_path):
     """Along her boxes 1..limit (row k: frame +k): the first k where her box meets the other body before it comes within ROUTE_REACH_U of the
     target body (x only: the cut), and that cut. (k or None, cut or None)."""
     n=min(int(limit),len(boxes)-1,len(target_path)-1,len(other_path)-1)
-    for k in range(1,n+1):
-        h=boxes[k];t=target_path[k];o=other_path[k]
-        if not np.isfinite(h).all():return None,None
-        if h[2]>=t[0]-ROUTE_REACH_U and h[0]<=t[2]+ROUTE_REACH_U:return None,k
-        if h[0]<=o[2] and h[2]>=o[0] and h[1]<o[3] and h[3]>o[1]:return k,None
-    return None,None
+    if n<1:return None,None
+    # all rows at once, the first row that stops the old row-by-row reading wins in its order (unknown box, the cut, the meeting)
+    h=np.asarray(boxes,float)[1:n+1];t=np.asarray(target_path,float)[1:n+1];o=np.asarray(other_path,float)[1:n+1]
+    bad=~np.isfinite(h).all(axis=1)
+    cut=(h[:,2]>=t[:,0]-ROUTE_REACH_U)&(h[:,0]<=t[:,2]+ROUTE_REACH_U)
+    meet=(h[:,0]<=o[:,2])&(h[:,2]>=o[:,0])&(h[:,1]<o[:,3])&(h[:,3]>o[:,1])
+    stop=bad|cut|meet
+    if not stop.any():return None,None
+    i=int(np.argmax(stop))
+    if bad[i]:return None,None
+    return (None,i+1) if cut[i] else (i+1,None)
+
+
+ROUTE_CLEAR_PAD_U=2.5    # route_cannot_meet: her start box this far short of the cut (the model's start box vs the STATE's, her travel)
+
+
+def _carried_vx(enemy):
+    """body_path's x speed for this enemy (none in a still-root state); None: unknown."""
+    vel=enemy.get("vel") or (0.,0.)
+    try:vx=float(vel[0])
+    except (TypeError,ValueError,IndexError):return None
+    if not math.isfinite(vx):return None
+    return 0. if control(enemy)[0] in STILL_ROOT_STATES else vx
+
+
+def route_cannot_meet(hero_box,target,other,n):
+    """Task 182 seq 312, arithmetic before the roll (a per-tick check is made cheap first): True when route_meets_other can find no meeting
+    over rows 1..n whatever route she takes. Her box starts clear on one side of the target's cut (its body grown by ROUTE_REACH_U, with
+    ROUTE_CLEAR_PAD_U to spare), and over all n rows the other body's edge on her side stays at or beyond the target's edge on her side
+    less ROUTE_REACH_U (both carried as body_path carries them: x moves at most vx * n frames, toward one side). Her box moves under a unit
+    a frame and the cut is wider, so it cannot pass the cut without a row inside it, and the cut is read before the meeting in each row:
+    every row before the cut is short of the other body. False: unknown or possible (the roll decides)."""
+    if hero_box is None:return False
+    try:tb=body_box(target);ob=body_box(other)
+    except (TypeError,ValueError,OverflowError):return False
+    if tb is None or ob is None or not (np.isfinite(tb).all() and np.isfinite(ob).all()):return False
+    vt=_carried_vx(target);vo=_carried_vx(other)
+    if vt is None or vo is None:return False
+    span=float(n)/60.
+    if hero_box[2]<tb[0]-ROUTE_REACH_U-ROUTE_CLEAR_PAD_U:
+        return bool(ob[0]+min(0.,vo*span)>=tb[0]+max(0.,vt*span)-ROUTE_REACH_U)
+    if hero_box[0]>tb[2]+ROUTE_REACH_U+ROUTE_CLEAR_PAD_U:
+        return bool(ob[2]+max(0.,vo*span)<=tb[2]+min(0.,vt*span)+ROUTE_REACH_U)
+    return False
 
 
 def plan_over_call(run_vars):

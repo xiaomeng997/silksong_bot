@@ -1019,10 +1019,19 @@ class NativeManualAirChain(NativeChainB2):
         target=next((e for e in es if e["iid"]==plan.iid),None)
         others=[e for e in es if e["iid"]!=plan.iid]
         if target is None or len(others)!=1:return None
-        cmds=self._route_keys(plan,draft,mask,draft.run.link,f)
-        if not len(cmds):return None
-        if draft.run.v.get("row") is None and not np.any(cmds&(B["L"]|B["R"])):
-            return None   # no side key planned yet (an air recipe still holding): the route is not committed to a direction
+        row=draft.run.v.get("row");cmds=None
+        if row is None and draft.run.link=="air":
+            # the air recipe's keys are arithmetic: its no-side-key exit (the commonest) is read before the pre-check
+            cmds=self._route_keys(plan,draft,mask,draft.run.link,f)
+            if not len(cmds) or not np.any(cmds&(B["L"]|B["R"])):return None
+        if transfer.route_cannot_meet(transfer._hero_box(state.get("hero")),target,others[0],
+                                      len(np.asarray(getattr(sim,"prefix",())))+transfer.ROUTE_H):
+            return None   # arithmetic first: the other body stays at or beyond the target's edge on her side for the whole roll
+        if cmds is None:
+            cmds=self._route_keys(plan,draft,mask,draft.run.link,f)
+            if not len(cmds):return None
+            if row is None and not np.any(cmds&(B["L"]|B["R"])):
+                return None   # no side key planned yet (an air recipe still holding): the route is not committed to a direction
         p=model_path(sim,plan,cmds,game)
         boxes=np.asarray(p.box,float)
         limit=len(boxes)-1

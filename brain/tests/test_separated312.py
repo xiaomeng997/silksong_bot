@@ -272,6 +272,130 @@ def test_a_jumping_body_falls_ballistically_to_the_floor_and_a_still_root_stays(
     assert np.allclose(q[-1], q[0])                                                     # a still-root state does not move
 
 
+def _body_path_loop(enemy, n):
+    """body_path as first written (row by row), the reference for the vector form."""
+    import math
+    try:
+        box = T.body_box(enemy)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if box is None or not np.isfinite(box).all():
+        return None
+    st = T.control(enemy)[0]
+    vel = enemy.get("vel") or (0., 0.)
+    try:
+        vx, vy = float(vel[0]), float(vel[1]) if len(vel) > 1 else 0.
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not (math.isfinite(vx) and math.isfinite(vy)):
+        return None
+    flying = st in ("Jump", "Air")
+    if st in T.STILL_ROOT_STATES:
+        vx = 0.
+    if not flying:
+        vy = 0.
+    out = np.empty((n + 1, 4))
+    dx = dy = 0.
+    out[0] = box
+    for k in range(1, n + 1):
+        dx += vx / 60.
+        if flying:
+            vy -= T.CLAPPER_G / 60.
+            dy += vy / 60.
+            if box[1] + dy <= T.ROUTE_FLOOR_Y and vy < 0:
+                dy = T.ROUTE_FLOOR_Y - box[1]
+                flying = False
+                vx = 0.
+        out[k] = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+    return out
+
+
+def _meets_loop(boxes, limit, target_path, other_path):
+    """route_meets_other as first written (row by row), the reference for the vector form."""
+    n = min(int(limit), len(boxes) - 1, len(target_path) - 1, len(other_path) - 1)
+    for k in range(1, n + 1):
+        h, t, o = boxes[k], target_path[k], other_path[k]
+        if not np.isfinite(h).all():
+            return None, None
+        if h[2] >= t[0] - T.ROUTE_REACH_U and h[0] <= t[2] + T.ROUTE_REACH_U:
+            return None, k
+        if h[0] <= o[2] and h[2] >= o[0] and h[1] < o[3] and h[3] > o[1]:
+            return k, None
+    return None, None
+
+
+def test_route_vector_forms_equal_the_row_by_row_reading_bit_for_bit():
+    from tests.test_bounce_follow183 import clapper
+    rng = np.random.default_rng(3121)
+    states = ("Idle", "Walk", "Jump", "Air", "Slam Antic", "Cast 1")
+    paths = []
+    for _ in range(400):
+        st = states[rng.integers(len(states))]
+        e = dict(clapper(int(rng.integers(1, 9)), float(rng.uniform(15., 48.)), int(rng.choice((-1, 1))), state=st),
+                 vel=[float(rng.uniform(-14., 14.)), float(rng.uniform(-20., 25.))])
+        if st in ("Jump", "Air"):
+            up = float(rng.uniform(0., 7.))
+            e = dict(e, colliders=[dict(c, verts_world=[v + (up if i % 2 else 0.) for i, v in enumerate(c.get('verts_world') or ())])
+                                   for c in e.get('colliders') or ()])
+        n = int(rng.choice((0, 1, 7, 40, 52)))
+        a, b = T.body_path(e, n), _body_path_loop(e, n)
+        assert (a is None) == (b is None) and (a is None or (a.shape == b.shape and np.array_equal(a, b)))
+        if a is not None and n >= 40:
+            paths.append(a)
+    assert len(paths) > 100
+    hits = set()
+    for _ in range(3000):
+        tp, op = paths[rng.integers(len(paths))], paths[rng.integers(len(paths))]
+        x0, y0 = float(rng.uniform(12., 50.)), float(rng.uniform(3., 10.))
+        steps = np.cumsum(rng.uniform(-.7, .7, (53, 2)) * (1., .5), axis=0)
+        boxes = np.c_[x0 + steps[:, 0] - .23, y0 + steps[:, 1], x0 + steps[:, 0] + .23, y0 + steps[:, 1] + 1.4]
+        if rng.random() < .1:
+            boxes[rng.integers(1, 53)] = np.nan
+        limit = int(rng.integers(-1, 60))
+        got, ref = T.route_meets_other(boxes, limit, tp, op), _meets_loop(boxes, limit, tp, op)
+        assert got == ref
+        hits.add(("meet" if got[0] is not None else "cut" if got[1] is not None else "none"))
+    assert hits == {"meet", "cut", "none"}
+
+
+def test_route_cannot_meet_is_arithmetic_and_never_hides_a_meeting():
+    """The pre-check before the roll: True only when no route of hers (under a unit a frame) meets the other body before the target's cut."""
+    from tests.test_bounce_follow183 import clapper
+    rng = np.random.default_rng(312)
+    n = 42
+
+    def her(x):
+        return (x - .23, 3.2, x + .23, 4.6)
+
+    def meets(hb, tgt, oth):
+        tp, op = T.body_path(tgt, n), T.body_path(oth, n)
+        for _ in range(300):
+            v, dy = rng.uniform(-.7, .7), rng.uniform(-.1, .1)
+            route = np.array([[hb[0] + v * k, hb[1] + dy * k, hb[2] + v * k, hb[3] + dy * k] for k in range(n + 1)])
+            if T.route_meets_other(route, n, tp, op)[0] is not None:
+                return True
+        return False
+
+    tgt = clapper(1, 30.)
+    tb = T.body_box(tgt)
+    w = tb[2] - tb[0]
+    clear_l = tb[0] - T.ROUTE_REACH_U - T.ROUTE_CLEAR_PAD_U - 1.
+    beyond = clapper(2, 30. + w + 1.)
+    assert T.route_cannot_meet(her(clear_l), tgt, beyond, n) and not meets(her(clear_l), tgt, beyond)
+    clear_r = tb[2] + T.ROUTE_REACH_U + T.ROUTE_CLEAR_PAD_U + 1.
+    assert T.route_cannot_meet(her(clear_r), tgt, clapper(2, 30. - w - 1.), n)                  # mirrored
+    between = clapper(2, 30. - w - 3.)
+    assert not T.route_cannot_meet(her(clear_l - w - 4.), tgt, between, n)                      # the other one between: the roll decides
+    assert meets(her(clear_l - w - 4.), tgt, between)
+    lo = T.body_box(clapper(2, 0., -1, state='Walk'))[0]
+    walker = dict(clapper(2, tb[0] + 1. - lo, -1, state='Walk'), vel=[-8., 0.])                 # its edge 1 u past the target's: walks past it
+    assert T.body_box(walker)[0] == pytest.approx(tb[0] + 1., abs=1e-6)
+    assert not T.route_cannot_meet(her(clear_l), tgt, walker, n)
+    assert T.route_cannot_meet(her(clear_l), tgt, dict(walker, vel=[8., 0.]), n)                 # walking away stays beyond
+    assert not T.route_cannot_meet(her(tb[0] - T.ROUTE_REACH_U - 1.), tgt, beyond, n)           # too near the cut: the roll decides
+    assert not T.route_cannot_meet(None, tgt, beyond, n)
+
+
 def test_small_rune_target_change_hands_an_unpressed_approach_back(monkeypatch):
     # plan 2.2 / design 3.3 (bout 47): the down slash's target is re-chosen every call; an approach with no pressed strike follows it
     from dataclasses import replace
