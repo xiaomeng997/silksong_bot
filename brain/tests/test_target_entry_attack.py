@@ -11,6 +11,7 @@ from ssbot.combat.knife_chain_air import load_runner
 from ssbot.combat.knife_chain_commitment import MoveInstance
 from ssbot.combat.knife_chain_eval import Run
 from ssbot.combat.knife_chain_transfer import TransferGoal
+from ssbot.combat import knife_chain_waypoint as WP
 from ssbot.core.worldstate import Event, Ev, HitDealt
 from tests.test_forum_l2 import l2, world, subj, WinFc, CC
 from tests.test_knife_chain_transfer import cast_scene, plan
@@ -170,7 +171,9 @@ def test_cast_transfer_air_entry_uses_attack_adapter_when_destination_starts_sla
     assert not n._transfer_ready  # ground slam still belongs to its own adapter
 
 
-@pytest.mark.parametrize('family,recovers', [('RUNE_TRANSFER', False), ('CC_SLAM', True)])
+@pytest.mark.parametrize('family,recovers', [('RUNE_TRANSFER', False), ('CC_SLAM', True),
+                                             # the escape waypoint's Move starts at its own frame, not at the slam antic
+                                             (WP.FAMILY, False)])
 def test_approach_clock_is_not_compared_to_new_target_slam_origin(monkeypatch, family, recovers):
     n = native()
     s = cast_scene()

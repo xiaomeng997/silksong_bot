@@ -457,11 +457,15 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
         if e is None or e.get("is_dead") or e.get("hp",1)<=0:
             self._recover("target dead/absent",f);return
         from .slam_play import control
+        from .knife_chain_waypoint import FAMILY as WAYPOINT_FAMILY
         st,tin=control(e)
         # A transfer's origin is an approach, not this enemy's slam origin.
         # Its adapter binds/checks the actual target attack instance separately.
         # The bounce table (Task 179 #309) follows the sighted instance itself (knife_chain_bounce_table.observe_identity).
-        if (c["move"].family!="RUNE_TRANSFER" and not c.get("bounce_table") and st=="Slam Antic"
+        # A waypoint Run's origin is its own start too (MoveInstance(goal.source, f, WAYPOINT)), and L2's running phase ends it
+        # (knife_chain_waypoint: withdrawing the place hands the Run back). In the new 50 (c86b290b) this check cut 87 escape
+        # waypoints on their first tick, on the slam they were escaping (antic age p50 32 f; 1 of 88 cuts was a real new antic).
+        if (c["move"].family not in ("RUNE_TRANSFER",WAYPOINT_FAMILY) and not c.get("bounce_table") and st=="Slam Antic"
                 and abs((self._clock-tin)-c["ta"])>3/60):
             self._recover("target started a new slam instance",f);return
         if self._press is not None and f>self._press+int(self.runner.cfg0.get("bounce_by",14)):
