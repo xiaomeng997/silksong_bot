@@ -188,13 +188,18 @@ def test_w13_preflight_requires_explicit_air_probe_and_recording(tmp_path,monkey
 def test_gc_prep_is_precombat_collect_then_freeze_without_disabling_gc(monkeypatch):
     import gc
     from ssbot.combat.knife_chain_air import prepare_runtime_gc
-    calls=[];counts=iter([1,123])
+    calls=[];counts=iter([1,123]);threshold=[(700,10,10)]
     monkeypatch.setattr(gc,"get_freeze_count",lambda:next(counts))
     monkeypatch.setattr(gc,"collect",lambda:calls.append("collect") or 80)
     monkeypatch.setattr(gc,"freeze",lambda:calls.append("freeze"))
+    # Sol seq354 (#409): the same collect then freeze, then automatic gen2 moves out of fights (this process's own GC untouched)
+    monkeypatch.setattr(gc,"get_threshold",lambda:threshold[-1])
+    monkeypatch.setattr(gc,"set_threshold",lambda *t:calls.append(("threshold",t)) or threshold.append(t))
     before=gc.isenabled();out=prepare_runtime_gc()
-    assert calls==["collect","freeze"] and out["gc_enabled"]==before
+    from ssbot.combat.runtime_gc import GEN2_THRESHOLD
+    assert calls==["collect","freeze",("threshold",(700,10,GEN2_THRESHOLD))] and out["gc_enabled"]==before
     assert out["collected"]==80 and out["frozen"]==123
+    assert out["threshold_before"]==[700,10,10] and out["threshold"]==[700,10,GEN2_THRESHOLD]
 
 
 def test_manual_air_switch_is_resolved_from_actual_constructed_component(tmp_path):

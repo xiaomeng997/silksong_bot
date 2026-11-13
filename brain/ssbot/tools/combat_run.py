@@ -509,6 +509,32 @@ def _resolve_b2_stop(chain, *, outcome, episode_reason):
                            outcome=outcome,episode_reason=episode_reason)
 
 
+def _b2_safe_stop_now(link, rec, *, reason, origin, where, run_dir, instance, secondary):
+    """Sol seq354 (#407): freeze a stopped B2 bout's game before anything else is written or closed (train.episode.b2_safe_stop:
+    inputs released, the game clock set to its SAFE_STOP_SCALE, once per bout; run_episode's own exception paths call it first),
+    then keep its receipt once: a small file of its own and, when the instance was not verified frozen, one secondary error
+    (never the primary). Returns the receipt, or None outside a B2 bout."""
+    try:
+        from ssbot.train.episode import b2_safe_stop
+        receipt=b2_safe_stop(link,rec,reason=reason,origin=origin,where=where)
+    except Exception as exc:   # it never raises; if it ever did, the worker's own error stays the primary
+        secondary.append({"origin":"safe_stop","reason":"freeze raised: "+type(exc).__name__+": "+str(exc)})
+        return None
+    if receipt is None or receipt.get("recorded"):return receipt
+    receipt["recorded"]=True
+    try:
+        path=Path(run_dir)/f"b2_safe_stop_i{instance}_{receipt['started_ns']}.json"
+        with path.open("x",encoding="utf-8") as f:
+            json.dump(receipt,f,ensure_ascii=False,indent=1,default=str);f.write("\n");f.flush();os.fsync(f.fileno())
+        receipt["path"]=str(path)
+    except Exception as exc:
+        secondary.append({"origin":"safe_stop.receipt","reason":type(exc).__name__+": "+str(exc)})
+    if not receipt.get("frozen"):
+        secondary.append({"origin":"safe_stop","reason":"B2 stop: the game was not verified frozen: "+json.dumps(
+            {key:receipt.get(key) for key in ("where","release","time_scale")},default=str)})
+    return receipt
+
+
 def _measurement_incomplete_detail(data):
     measured=data.get("measurement") or {}
     return {"origin":"measurement","reason":"measurement incomplete; stop before another episode",
@@ -594,8 +620,10 @@ def _persist_aborted_episode(a, exc, *, run_dir, k, rec, out, policy, link, meas
     return persisted
 
 
-def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error, primary_error_origin=None, secondary_errors=()):
-    """Try every owned resource even if one close fails; never manage game PIDs here."""
+def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary_error, primary_error_origin=None, secondary_errors=(),
+                  frozen=False):
+    """Try every owned resource even if one close fails; never manage game PIDs here. frozen (Sol seq354, #407): a stopped B2
+    bout's game was frozen; its time scale is left so for the Launcher's cleanup, never set back to 1 here."""
     b2=os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1"
     result={"instance":a.instance,"stage":stage,"primary_error":primary_error,"primary_error_origin":primary_error_origin,
             "secondary_errors":list(secondary_errors),"resources":{},
@@ -622,8 +650,9 @@ def _close_worker(a, *, link, recorder, out, diagnostics, policy, stage, primary
     close("recorder",None if recorder is None else recorder.close)
     close("attempts",None if out is None else out.close)
     if link is not None and a.time_scale!=1. and not link.closed:
-        close("time_scale",lambda:set_time_scale(link,1.,a.instance))
-    else:result["resources"]["time_scale"]="not_required"
+        if frozen:result["resources"]["time_scale"]="kept_frozen"
+        else:close("time_scale",lambda:set_time_scale(link,1.,a.instance))
+    else:result["resources"]["time_scale"]="kept_frozen" if frozen else "not_required"
     close("ipc",None if link is None else link.close)
     close("diagnostics",None if diagnostics is None else diagnostics.close)
     result["complete"]=not errors
@@ -665,6 +694,7 @@ def worker(a: argparse.Namespace) -> int:
     stage="bootstrap"
     worker_primary_error=worker_primary_origin=None
     worker_secondary_errors=[];b2_stop_details=None
+    b2_on=os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1";safe_stop=None   # Sol seq354 (#407): the freeze's receipt
     try:
         measurement = None
         measurement_code = None
@@ -814,11 +844,24 @@ def worker(a: argparse.Namespace) -> int:
             # much game time, so it is divided by s (a 2x wave start covers the same 180 s of game time as at 1x)
             timebox = (a.timebox or enc.timebox_s) / a.time_scale
             if why is None:
+                if manual_air_gc is not None:
+                    # Sol seq354 (#409): every bout starts on a full collection and a fresh freeze, outside any tick; automatic
+                    # gen2 stays out of the fight (runtime_gc.prepare's threshold)
+                    from ssbot.combat import runtime_gc
+                    gc_bout = runtime_gc.bout(episode=k)
+                    if isinstance(rec.b2_context, dict):
+                        rec.b2_context["gc_bout"] = gc_bout
                 try:
                     run_episode(link, enc, tap, policy, mode_config(a.mode, seed, timebox,
                                                                     tuple(a.start_silk) if a.start_silk else None,
                                                                     tuple(a.start_hp) if a.start_hp else None), rec)
                 except BaseException as exc:
+                    # Sol seq354 (#407): run_episode froze a B2 bout's game before it re-raised; this keeps the receipt (or
+                    # freezes now) before anything is written
+                    if b2_on:
+                        safe_stop = _b2_safe_stop_now(link, rec, reason=type(exc).__name__ + ": " + str(exc),
+                            origin="run_episode", where="worker_episode_exception", run_dir=run_dir, instance=a.instance,
+                            secondary=worker_secondary_errors) or safe_stop
                     # keep what the episode actually collected, marked aborted; the original error goes on
                     _persist_aborted_episode(a, exc, run_dir=run_dir, k=k, rec=rec, out=out, policy=policy, link=link,
                                              measurement=measurement, reservation=reservation, env=env,
@@ -828,6 +871,16 @@ def worker(a: argparse.Namespace) -> int:
                     raise
             else:
                 rec.reason = why          # the record's default outcome, HARNESS_FAIL; no episode ran
+            if b2_on and why is None:
+                # Sol seq354 (#407): a stop run_episode returned is frozen before the ledger, the trace, the manifest and the
+                # attempt row are written (run_episode's own exception paths froze it already: the receipt is kept once)
+                early = getattr(getattr(policy, "chain_native", None), "learning_stop", None)
+                if (isinstance(early, str) and early) or rec.outcome == "HARNESS_FAIL":
+                    safe_stop = _b2_safe_stop_now(link, rec,
+                        reason=early if isinstance(early, str) and early else "harness/integrity failure: " + str(rec.reason),
+                        origin="chain.learning_stop" if isinstance(early, str) and early else "harness",
+                        where="episode_return", run_dir=run_dir, instance=a.instance,
+                        secondary=worker_secondary_errors) or safe_stop
             d = asdict(rec)
             if reservation is not None:d["b2_reservation"]=reservation
             d["instance"] = a.instance
@@ -843,6 +896,11 @@ def worker(a: argparse.Namespace) -> int:
             field_builder=getattr(getattr(policy,"_scene_field_event_reader",None),"async_builder",None)
             field_stop=getattr(field_builder,"failure",None)
             if field_stop is not None:d["scene_field_stop"]=field_stop
+            if b2_on and (strict_stop is not None or field_stop is not None):
+                # Sol seq354 (#407): these stops end the worker too; frozen before the ledger and the trace are written
+                safe_stop=_b2_safe_stop_now(link,rec,reason=str(strict_stop if strict_stop is not None else field_stop),
+                    origin="strict_receipts" if strict_stop is not None else "scene_field",where="worker_stop",
+                    run_dir=run_dir,instance=a.instance,secondary=worker_secondary_errors) or safe_stop
             if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
                 from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
                 if b2_budget is not None:
@@ -858,6 +916,9 @@ def worker(a: argparse.Namespace) -> int:
                     worker_primary_error="LearningStop: "+b2_stop
                     worker_primary_origin=b2_stop_details["origin"]
                     worker_secondary_errors.extend(b2_stop_details["secondary_errors"])
+                    # Sol seq354 (#407): a stop only the ledger latched (finish_bout) is frozen here, still before the trace
+                    safe_stop=_b2_safe_stop_now(link,rec,reason=b2_stop,origin=b2_stop_details["origin"],where="b2_stop",
+                        run_dir=run_dir,instance=a.instance,secondary=worker_secondary_errors) or safe_stop
                     if b2_stop_details["origin"]=="harness":mark_integrity_halt(b2_stop)
                     for problem in b2_stop_details["secondary_errors"]:
                         mark_integrity_halt(problem["reason"],primary=b2_stop,
@@ -898,6 +959,8 @@ def worker(a: argparse.Namespace) -> int:
                 mark_integrity_halt(detail["reason"],primary=b2_stop,
                     primary_origin=None if b2_stop_details is None else b2_stop_details["origin"],secondary_origin="measurement")
             if worker_secondary_errors:d["secondary_errors"]=list(worker_secondary_errors)
+            if isinstance(rec.b2_context,dict) and rec.b2_context.get("safe_stop") is not None:
+                d["b2_safe_stop"]=rec.b2_context["safe_stop"]
             out.write(json.dumps(d) + "\n")
             out.flush()
             if measurement_failed:
@@ -927,6 +990,12 @@ def worker(a: argparse.Namespace) -> int:
                 if plan_stop is not None:
                     from ssbot.combat.knife_chain_budget import LearningStop
                     print(f"[i{a.instance} ep{k - 1}] continuous plan stopped: {plan_stop}", flush=True)
+                    if b2_on:
+                        # Sol seq354 (#407): a plan stop ends the worker with the bout's game as it is (a timebox or a lethal
+                        # end leaves the fight on): frozen first, once
+                        safe_stop = _b2_safe_stop_now(link, rec, reason="continuous plan: " + plan_stop,
+                            origin="continuous_plan", where="continuous_plan_stop", run_dir=run_dir, instance=a.instance,
+                            secondary=worker_secondary_errors) or safe_stop
                     raise LearningStop(plan_stop if plan_stop == b2_stop else "continuous plan: " + plan_stop)
             if plan_seeds is not None and k >= a.episodes:
                 print(f"[i{a.instance}] the plan's last bout ended: no way back into the slot, straight to the cleanup",
@@ -934,6 +1003,10 @@ def worker(a: argparse.Namespace) -> int:
             elif only_episode_really_quit(a, k, d, link):
                 print(f"[i{a.instance}] the only engineering episode really quit to the main menu: no way back into the "
                       f"slot, straight to the cleanup", flush=True)
+            elif isinstance(rec.b2_context, dict) and (rec.b2_context.get("safe_stop") or {}).get("frozen"):
+                # Sol seq354 (#407): a stopped bout's frozen game stays as it is for the Launcher's cleanup: no pause resume
+                # (which could run the fight again) and no menu return here; an unverified freeze keeps the old way
+                print(f"[i{a.instance}] the stopped bout's game stays frozen: no way back into the slot", flush=True)
             else:
                 after_episode(link, enc, a.instance, d)
             if b2_stop is not None:
@@ -962,6 +1035,11 @@ def worker(a: argparse.Namespace) -> int:
             if link.closed:
                 break
     except BaseException as exc:
+        if b2_on and link is not None:
+            # Sol seq354 (#407): a fault outside the paths above (a trace or manifest write, the way back between bouts):
+            # the last bout's game is frozen first, once, before the halt marker and the worker's cleanup
+            safe_stop=_b2_safe_stop_now(link,rec,reason=type(exc).__name__+": "+str(exc),origin="worker.exception",
+                where="worker_exception",run_dir=run_dir,instance=a.instance,secondary=worker_secondary_errors) or safe_stop
         if os.environ.get("SSBOT_FORUM_CHAIN_B2","0").strip()=="1":
             from ssbot.combat.knife_chain_budget import LearningStop,mark_integrity_halt
             if b2_stop_details is None:
@@ -990,7 +1068,8 @@ def worker(a: argparse.Namespace) -> int:
         pending=sys.exc_info()[1]
         _close_worker(a,link=link,recorder=rec_obj,out=out,diagnostics=diagnostics,policy=policy,
                       stage=stage,primary_error=worker_primary_error or (None if pending is None else type(pending).__name__+": "+str(pending)),
-                      primary_error_origin=worker_primary_origin,secondary_errors=worker_secondary_errors)
+                      primary_error_origin=worker_primary_origin,secondary_errors=worker_secondary_errors,
+                      frozen=bool(safe_stop and safe_stop.get("frozen")))
     print(f"[i{a.instance}] done: {dict(counts)}", flush=True)
     return 0
 

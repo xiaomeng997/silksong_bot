@@ -292,11 +292,10 @@ def warm(params):
 def prepare_runtime_gc():
     """Discard warm-up cycles and freeze long-lived tables BEFORE this probe fights.
 
-    The one worker owns this GC state until it exits. Automatic GC remains on;
-    nothing collects/freezes on a decision tick or changes input deadlines.
+    The one worker owns this GC state until it exits. Automatic gen0/gen1 GC
+    remains on; Sol seq354 (#409): automatic gen2 moves out of fights and the
+    worker collects before every bout (combat.runtime_gc). Nothing collects or
+    freezes on a decision tick or changes input deadlines.
     """
-    import gc,time
-    started=time.perf_counter();before=gc.get_freeze_count();collected=gc.collect();gc.freeze()
-    return {"policy":"manual_air_precombat_collect_and_freeze","before":before,
-        "collected":collected,"frozen":gc.get_freeze_count(),"gc_enabled":gc.isenabled(),
-        "ms":(time.perf_counter()-started)*1000.}
+    from .runtime_gc import prepare
+    return prepare()

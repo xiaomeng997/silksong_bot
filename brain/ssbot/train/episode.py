@@ -348,6 +348,13 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
     except (OracleError, TimeoutError, RuntimeError, KeyError, TypeError, ConnectionError) as e:
         rec.outcome, rec.reason = HARNESS_FAIL, f"{type(e).__name__}: {e}"
         _b2_failure_end(link,rec)
+        # Sol seq354 (#407): a B2 bout's stop (LearningStop is a RuntimeError) freezes the game here, before the finally's
+        # summaries and the policy's log flushes (stats) run
+        b2_safe_stop(link, rec, reason=rec.reason, origin="run_episode", where="episode_exception")
+    except BaseException as e:
+        # any other exception of a B2 bout leaves the fight the same way; it propagates as before
+        b2_safe_stop(link, rec, reason=f"{type(e).__name__}: {e}", origin="run_episode", where="episode_exception_raised")
+        raise
     finally:
         measurement = getattr(link, "measurement", None)
         if measurement is not None and measurement.window is not None and measurement._last_frame is not None:
@@ -362,6 +369,50 @@ def run_episode(link: OracleLink, enc: Encounter, tap: FightTap, policy, cfg: Ep
         stats = getattr(policy, "stats", None)
         rec.policy = stats() if stats else {}
     return rec
+
+
+SAFE_STOP_SCALE = 1e-4      # Sol seq354 (#407): a stopped B2 bout's game clock (C:/ssbot/sandbox/freeze_instance.py's scale)
+SAFE_STOP_RPC_S = 2.0       # ... each of its two RPCs bounded
+
+
+def b2_safe_stop(link, rec: AttemptRecord, *, reason, origin, where) -> dict | None:
+    """Sol seq354 (#407; b13b404 bout 40: the worker stopped on a LearningStop, nothing pressed keys any more and Hornet stood in
+    the fight until she died). At the earliest confirmed stop or integrity fault of a B2 bout (rec.b2_context set; any other bout:
+    None, nothing done): release the inputs, then set the game clock to SAFE_STOP_SCALE (the TRAIN oracle's time.scale; a paused
+    game reads 0), before anything is written or closed. Two RPCs of SAFE_STOP_RPC_S each, once per bout; the receipt (read-back
+    included) goes into rec.b2_context["safe_stop"]. It never raises and never changes the record's outcome or reason: a freeze
+    that fails or reads back unfrozen is the caller's secondary error, never the primary. No menu, no quit."""
+    ctx = getattr(rec, "b2_context", None)
+    if not isinstance(ctx, dict):
+        return None
+    if ctx.get("safe_stop") is not None:
+        return ctx["safe_stop"]
+    receipt = {"reason": str(reason), "origin": origin, "where": where, "scale": SAFE_STOP_SCALE,
+               "started_ns": time.time_ns(), "frame": None}
+    t0 = time.perf_counter()
+    if link is None or getattr(link, "closed", False):
+        receipt.update(release="link closed", time_scale="link closed", frozen=False)
+    else:
+        try:
+            receipt["frame"] = link.frame
+        except Exception as exc:  # noqa: BLE001 - recorded
+            receipt["frame"] = {"failed": type(exc).__name__ + ": " + str(exc)}
+        try:
+            link.rpc("input.release", timeout_s=SAFE_STOP_RPC_S)
+            receipt["release"] = "pass"
+        except Exception as exc:  # noqa: BLE001 - recorded; the freeze is still tried
+            receipt["release"] = {"failed": type(exc).__name__ + ": " + str(exc)}
+        try:
+            r = link.rpc("time.scale", timeout_s=SAFE_STOP_RPC_S, scale=SAFE_STOP_SCALE)
+            got = float((r or {}).get("time_scale"))
+            receipt["time_scale"] = {"requested": SAFE_STOP_SCALE, "read_back": got}
+            receipt["frozen"] = got <= 1e-3
+        except Exception as exc:  # noqa: BLE001 - recorded, frozen False
+            receipt["time_scale"] = {"failed": type(exc).__name__ + ": " + str(exc)}
+            receipt["frozen"] = False
+    receipt["ms"] = round((time.perf_counter() - t0) * 1000.0, 3)
+    ctx["safe_stop"] = receipt
+    return receipt
 
 
 def _b2_failure_end(link, rec: AttemptRecord) -> None:

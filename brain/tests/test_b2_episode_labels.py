@@ -106,8 +106,10 @@ def test_stopped_episode_retains_actual_endpoint_before_release(monkeypatch):
     monkeypatch.setattr(E,"_run",fail);monkeypatch.setattr(E,"_summarise",lambda *a:None)
     r=rec();E.run_episode(link,None,None,SimpleNamespace(),None,r)
     assert r.outcome==E.HARNESS_FAIL and r.reason=="LearningStop: B2 stopped: new chain-related fight injury"
-    assert r.f_end==425 and calls==["release","rpc"]
+    # Sol seq354 (#407): the B2 bout's safe stop (input.release, time.scale) comes first, after the endpoint was kept
+    assert r.f_end==425 and calls==["rpc","rpc","release","rpc"]
     assert r.b2_context["failure_frame"]=={"status":"observed","source":"link.frame before release","frame":425}
+    assert r.b2_context["safe_stop"]["where"]=="episode_exception" and r.b2_context["safe_stop"]["frame"]==425
 
 
 def test_unavailable_stop_frame_keeps_primary_failure_and_unknown(monkeypatch):

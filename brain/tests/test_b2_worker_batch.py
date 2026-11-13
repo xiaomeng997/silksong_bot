@@ -75,6 +75,7 @@ class Rig:
         import ssbot.train.episode as episode
         import ssbot.train.recovery as recovery
         self.root=tmp_path;self.events=[];self.links=[];self.fault=fault;self.attempts=0
+        self.freeze_fault=None     # Sol seq354 (#407): "raise" or "unfrozen" makes the stopped bout's freeze fail
         env(monkeypatch,tmp_path,arm)
         rig=self
         class Link:
@@ -86,6 +87,12 @@ class Rig:
                 self.state={"f":1000,"game":{"scene":"Menu_Title"},"hero":None}
                 rig.links.append(self)
             def rpc(self,method,**kwargs):
+                if method in ("input.release","time.scale"):
+                    # the stopped B2 bout's freeze (train.episode.b2_safe_stop): component evidence only, no game here
+                    rig.events.append(method+(" "+repr(kwargs.get("scale")) if method=="time.scale" else ""))
+                    if method=="time.scale" and rig.freeze_fault=="raise":raise TimeoutError("time.scale timed out")
+                    if method=="time.scale":return {"time_scale":1. if rig.freeze_fault=="unfrozen" else kwargs.get("scale")}
+                    return {}
                 assert method=="input.stats" and kwargs=={"timeout_s":10.}
                 rig.events.append("input.stats")
                 if rig.fault=="input_rpc":raise RuntimeError("input.stats failed")
@@ -169,7 +176,9 @@ def test_two_hp_stop_writes_attempt_then_cleanup_without_another_ready(tmp_path,
     rig=Rig(tmp_path,monkeypatch,fault="injury")
     assert rig.run()==0
     assert rig.attempts==1 and rig.events.count("ready")==1
-    assert rig.events.index("episode")<rig.events.index("after_episode")<rig.events.index("ipc.close")
+    # Sol seq354 (#407): the stopped bout's game is frozen first and stays so: no after_episode (pause resume, menu return)
+    assert rig.events.index("episode")<rig.events.index("time.scale 0.0001")<rig.events.index("ipc.close")
+    assert "after_episode" not in rig.events
     assert rig.budget.state["b_fight_hp"]==2 and len(rig.budget.state["attempts"])==1
     assert len((tmp_path/"attempts_i0.jsonl").read_text().splitlines())==1
     assert rig.receipts()[0]["complete"]
