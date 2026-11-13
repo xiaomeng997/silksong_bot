@@ -1654,7 +1654,14 @@ class NativeManualAirChain(NativeChainB2):
                         # The person 11-13 (rx411 5590): a running Run whose dash meets a side key in flight waits one tick with its
                         # own keys minus the impulse (no hand-back: the next tick's in-flight key is its own, and the due dash is
                         # checked again through its lock)
+                        # Sol seq356: the air link's DASH is this tick's once-per-Run decision (transfer.air_approach_keys, reached only
+                        # with air_dash_decided unset, where approach_recipe is None too). The impulse is not sent, so that decision is
+                        # not spent: it stays pending and the next tick decides again from her actual prefix, hold, dash and time (a
+                        # dash through its full lock scan, or none when the real state no longer needs it)
+                        undo=draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash"
+                        if undo:draft.run.v.update(air_dash_decided=False,approach_recipe=None)
                         self._note("rune_transfer_dash_refused",frame=f,first=None,active=active,complete=None,**info,
+                                   decision_pending=bool(undo),
                                    owner="same transfer Run waits a tick: an opposite side key in flight")
                         mask=int(mask)&~B["DASH"]
                         path=replace(model_path(sim,plan,np.array([mask],np.int64),game),stage=path.stage,

@@ -9,6 +9,7 @@ from dataclasses import replace
 from types import SimpleNamespace as NS
 
 import numpy as np
+import pytest
 
 from ssbot.combat import knife_chain_transfer as T
 from ssbot.combat.knife_chain_air_native import NativeManualAirChain
@@ -116,6 +117,36 @@ def test_an_active_air_run_waits_a_tick_instead_of_handing_back(monkeypatch):
     assert not offer.mask & B["DASH"] and offer.mask & B["R"]
     refused = next(e for e in n.events if e["event"] == "rune_transfer_dash_refused")
     assert refused["owner"] == "same transfer Run waits a tick: an opposite side key in flight"
+
+
+@pytest.mark.parametrize("then", ["dash", "near", "spent"])
+def test_the_refused_dash_decision_stays_pending_for_the_next_tick(monkeypatch, then):
+    # Sol seq356 (#413 rt_ep5 20929): the impulse is not sent, so the air recipe's once-per-Run decision is not spent. The draft that
+    # goes out carries it unset; the next tick (her own R in flight now) decides again from the actual state: the dash through its
+    # lock scan, or none once she is near enough or her dash is gone, the same Run going on either way
+    r, s, sim = flight()
+    n = chain(monkeypatch, r)
+    geometry(monkeypatch)
+    monkeypatch.setattr(n, "_recover", lambda reason, f: pytest.fail(reason))
+    offer = n._transfer_offer(s, 0., _opposite_prefix(monkeypatch, n, sim, B["L"]), FC, NS(target=8), False)
+    assert offer is not None and offer.stage == "active" and not offer.mask & B["DASH"]
+    assert not offer.draft.run.v["air_dash_decided"] and offer.draft.run.v["approach_recipe"] is None
+    assert offer.details["approach_recipe"] is None
+    assert next(e for e in n.events if e["event"] == "rune_transfer_dash_refused")["decision_pending"]
+    n.runner = offer.draft                                                  # it was sent: the Run now
+    if then == "near":
+        _, s, sim = flight(x=31.5)
+    elif then == "spent":
+        sim.start[K.AIRDASHED] = 1.
+    seen = len(n.events)
+    again = n._transfer_offer(s, 0., _opposite_prefix(monkeypatch, n, sim, B["R"]), FC, NS(target=8), False)
+    assert again is not None and again.stage == "active" and again.mask & B["R"]
+    new = [e["event"] for e in list(n.events)[seen:]]
+    if then == "dash":
+        assert again.mask & B["DASH"] and "rune_transfer_dash_checked" in new and "rune_transfer_dash_refused" not in new
+        assert again.draft.run.v["air_dash_decided"] and again.draft.run.v["approach_recipe"] == "air_dash"
+    else:
+        assert not again.mask & B["DASH"] and "rune_transfer_dash_checked" not in new and "rune_transfer_dash_refused" not in new
 
 
 def test_a_fresh_air_start_leaves_the_keys_with_their_current_owner(monkeypatch):
