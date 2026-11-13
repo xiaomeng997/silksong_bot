@@ -418,25 +418,34 @@ def test_sprint_jump_kinds(monkeypatch):
     # entering 8 frames after its takeoff: the air guard's (B13B_GUARD_F 6)
     assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=14, rel_meets=(None, None))["kind"] == "guard"
     # within 6 of the takeoff, or on the ground (never off it): the dash let go when a release row takes off clear
-    assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=11, rel_meets=(15, None))["kind"] == "release"
-    assert _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(None, 12))["kind"] == "release"
+    # the approved row is the first clear one (Sol REVIEW402): row 1 keeps the plan's side key, row 2 lets it go too
+    rec = _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=11, rel_meets=(15, None))
+    assert rec["kind"] == "release" and rec["row"] == 2 and rec["side"] == 0
+    rec = _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(None, 12))
+    assert rec["kind"] == "release" and rec["row"] == 1 and rec["side"] == B["R"]
+    rec = _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(None, None))
+    assert rec["kind"] == "release" and rec["row"] == 1 and rec["side"] == B["R"]
     rec = _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(9, 10))
     assert rec["kind"] == "forced" and rec["meet_F"] == 1009 and rec["release_meets_F"] == [1009, 1010]
     # a release row that never leaves the ground is no way (the jump link would end in its own failed jump)
     assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=11, rel_meets=(None, None), rel_takeoff=None)["kind"] == "forced"
 
 
-@pytest.mark.parametrize("kind,dash", [("release", False), ("guard", True), ("forced", True), ("clear", True)])
-def test_propose_lets_the_dash_go_only_on_release(onb, monkeypatch, kind, dash):
+@pytest.mark.parametrize("kind,row,dash,side", [("release", 1, False, True), ("release", 2, False, False), ("guard", None, True, True),
+                                               ("forced", None, True, True), ("clear", None, True, True)])
+def test_propose_sends_the_approved_row_only_on_release(onb, monkeypatch, kind, row, dash, side):
     from tests.test_knife_chain_transfer import transfer_at_gap
     seen = []
-    monkeypatch.setattr(T, "b13b_sprint_jump", lambda *a: seen.append(a) or {"kind": kind, "f": 1000})
+    rec = {"kind": kind, "f": 1000, **({"row": row, "side": B["R"] if row == 1 else 0} if row else {})}
+    monkeypatch.setattr(T, "b13b_sprint_jump", lambda *a: seen.append(a) or rec)
     r, s, sim = transfer_at_gap(2., K.M_SPRINT)
     made = T.propose(r, s, 0., sim, 8, True, np.zeros((0, 6)), set())
     assert made is not None and made[0] is not None and seen
     draft, p, _, mask = made
     assert p.sprint_jump is dash and bool(mask & B["DASH"]) is dash and mask & B["J"]
+    assert bool(mask & B["R"]) is side and p.side == (B["R"] if side else 0)
     assert draft.run.v["b13b"]["kind"] == kind
+    assert draft.run.v["b13b_side"] == (rec["side"] if kind == "release" else None)
 
 
 def test_propose_checks_no_sprint_jump_when_off(monkeypatch):
@@ -467,3 +476,71 @@ def test_inside_the_body_at_the_protections_end_steers_out(monkeypatch, steps):
 def test_inside_the_body_is_no_meeting_without_b13b(monkeypatch):
     draft, _, _, mask = _inside(monkeypatch, False)
     assert "b13" not in draft.run.v or draft.run.v["b13"] is None or draft.run.v["b13"].get("kind") != "steer"
+
+
+def _probe_scene(gap, mode):
+    """Sol REVIEW402's production-shaped fixture (analysis/b13b_402_20261113/b13b_review_probe.py): the ground sprint / dash scene
+    with the hero2 model, its previous keys in flight, the move held, the sprint 0.1 s old and an Idle target."""
+    from tests.test_knife_chain_transfer import transfer_at_gap, fit_pose
+    r, s, sim = transfer_at_gap(gap, mode)
+    sim.params = K.hero2(sim.params, on=True)
+    sim.start[K.PREV] = int(sim.prefix[0])
+    sim.start[K.MOVE] = 1.
+    if mode == K.M_SPRINT:
+        sim.start[K.MODE_T] = .1
+    fit_pose(s["ents"][1], state="Idle", t=.05)
+    return r, s, sim
+
+
+def test_row2_only_sends_the_jump_alone_and_holds_it(onb):
+    # REVIEW402's counterexample, no stubs: the sprint jump would enter on the ground (1003, takeoff 1009); the dash let go with the side
+    # key held takes off at 1002 and enters at 1003; with the side key let go too it takes off at 1002 clear. Its keys are J alone.
+    r, s, sim = _probe_scene(3., K.M_SPRINT)
+    draft, p, path, mask = T.propose(r, s, 0., sim, 8, True, np.zeros((0, 6)), set())
+    rec = draft.run.v["b13b"]
+    assert rec["kind"] == "release" and rec["row"] == 2 and rec["release_meets_F"] == [1003, None]
+    assert mask == B["J"] and p.side == 0 and not p.sprint_jump and draft.run.v["b13b_side"] == 0
+    keys = T.render(r, p, 0, T.B13_ROLL_F, "dash")
+    assert not np.any(keys & (B["L"] | B["R"] | B["DASH"]))                  # the rendered row is the approved row 2
+    ro = sim.roll(np.asarray([keys], np.int64))
+    danger = T.b13_danger(s["ents"][1], len(sim.prefix) + 1 + T.B13_ROLL_F)
+    t, land = T.b13b_flight(ro.flags[0], sim.off)
+    assert t is not None and T.b13b_side_meet(ro.box[0], danger, 1, land + 1) is None
+
+
+def test_row2_side_holds_in_the_air_and_ends_with_the_flight(monkeypatch):
+    monkeypatch.setattr(T, "B13", True)
+    monkeypatch.setattr(T, "B13B", True)
+    r, s, sim = flight(x=30., y=8., vx=0., vy=5., target_x=TX)                # an air link Run of side R, a later tick of the flight
+    r.run.v["b13b_side"] = 0
+    draft, p, _, mask = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
+    assert p.side == 0 and not mask & (B["L"] | B["R"]) and draft.run.v["b13b_side"] == 0
+    monkeypatch.setattr(T, "B13B", False)                                      # off: the parent's side, no hold kept
+    r, s, sim = flight(x=30., y=8., vx=0., vy=5., target_x=TX)
+    r.run.v["b13b_side"] = 0
+    draft, p, _, mask = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
+    assert p.side == B["R"] and mask & B["R"] and draft.run.v["b13b_side"] is None
+
+
+def test_row1_clear_keeps_the_side_key(onb, monkeypatch):
+    # a release whose row 1 is clear keeps the plan's side key (the dash alone let go); the real model gives no such row in this
+    # fixture, so the record is given over the counterexample's scene
+    r, s, sim = _probe_scene(3., K.M_SPRINT)
+    real = T.b13b_sprint_jump
+    monkeypatch.setattr(T, "b13b_sprint_jump", lambda *a: {**real(*a), "row": 1, "side": B["R"]})
+    draft, p, _, mask = T.propose(r, s, 0., sim, 8, True, np.zeros((0, 6)), set())
+    assert mask == B["R"] | B["J"] and p.side == B["R"] and not p.sprint_jump and draft.run.v["b13b_side"] == B["R"]
+
+
+def test_inside_at_reads_the_frame_before_the_meeting():
+    body = np.array([2., 0., 4., 1.])
+    # a protected touch she left before an unprotected entry from outside: no inside meeting (REVIEW402's doubt)
+    boxes = np.array([[0., 0., 1., 1.], [1.5, 0., 2.5, 1.], [1.6, 0., 2.6, 1.], [.5, 0., 1.5, 1.], [.8, 0., 1.8, 1.], [1.8, 0., 2.8, 1.]])
+    prot = [True, True, True, False, False, False]
+    i = T.b13_first_meet(boxes, body, 1, 6, prot=prot)
+    assert i == 5 and not T.b13_inside_at(boxes, body, i)
+    assert T.b13_first_meet(boxes, body, 1, 6) == 1                         # the old whole-roll comparison called it inside
+    # in the body when the protection ends: inside
+    boxes = np.array([[2.5, 0., 3., 1.]] * 5)
+    i = T.b13_first_meet(boxes, body, 1, 5, prot=[True, True, True, False, False])
+    assert i == 3 and T.b13_inside_at(boxes, body, i)

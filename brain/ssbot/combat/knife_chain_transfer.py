@@ -839,7 +839,7 @@ def b13_guard(x,strike_rows):
         stop=b13_landing(ro.flags[i],off)+1
         prot=(np.asarray(ro.flags[i])&K.F_INVULN)!=0 if B13B else None
         meets.append(b13_first_meet(ro.box[i],danger,1,stop,prot=prot))
-        if B13B and i==0 and meets[0] is not None:inside=b13_first_meet(ro.box[i],danger,1,stop)!=meets[0]
+        if B13B and i==0 and meets[0] is not None:inside=b13_inside_at(ro.box[i],danger,meets[0])
     if meets[0] is None:return None
     info={"f":int(x.obs.f),"meet_F":int(sim.fo+meets[0]),"lead":int(meets[0]-off),"planned":int(planned),"state":st,
           "opening":bool(opening_pending(x.v)),**({"inside":inside} if B13B else {})}
@@ -890,8 +890,10 @@ def b13b_sprint_jump(runner,p,sim,enemy,k,link):
     Each is read against the still target's body (b13_danger) for an entry from the side (b13b_side_meet) up to her landing after the
     takeoff. Returns None (not checked: the target not still, an unknown start) or a record: kind "clear" (the plan does not enter),
     "guard" (it enters more than B13B_GUARD_F frames after its takeoff: the air link's B13 guard has its strike / steer ticks; the
-    plan kept), "release" (it enters on the ground or within B13B_GUARD_F of the takeoff; row 1 or 2 takes off and does not:
-    sprint_jump off), "forced" (no row does: the plan kept, a chain defect in the record)."""
+    plan kept), "release" (it enters on the ground or within B13B_GUARD_F of the takeoff; the first of rows 1 and 2 that takes off
+    and does not is the approved one: "row" 1 or 2 and its "side" key, the plan's or none; the caller sends that very row:
+    sprint_jump off and that side key held through this flight, Sol REVIEW402), "forced" (no row does: the plan kept, a chain defect
+    in the record)."""
     danger=b13_danger(enemy,len(sim.prefix)+1+B13_ROLL_F)
     if danger is None:return None
     S=np.asarray(sim.start,float)
@@ -910,8 +912,20 @@ def b13b_sprint_jump(runner,p,sim,enemy,k,link):
          "takeoffs_F":[F(t) for t in takeoffs],"state":control(enemy)[0]}
     if meets[0] is None:return {**rec,"kind":"clear"}
     if takeoffs[0] is not None and meets[0]-takeoffs[0]>B13B_GUARD_F:return {**rec,"kind":"guard"}
-    if any(meets[i] is None and takeoffs[i] is not None for i in (1,2)):return {**rec,"kind":"release"}
+    for i in (1,2):
+        if meets[i] is None and takeoffs[i] is not None:
+            return {**rec,"kind":"release","row":i,"side":int(p.side) if i==1 else 0}
     return {**rec,"kind":"forced"}
+
+
+def b13_inside_at(boxes,body,i):
+    """B13B: her box already in the body at rollout index i - 1, so the meeting at i (b13_first_meet with prot) is the protection ending
+    around her, not an entry from outside (Sol REVIEW402: comparing the first meetings with and without the protection over the whole
+    roll misnames a protected touch that she left before entering again from outside)."""
+    if i is None or i<1:return False
+    b=np.asarray(boxes,float)[i-1];d=np.asarray(body,float)
+    d=d[min(i-1,len(d)-1)] if d.ndim==2 else d
+    return bool(b[0]<=d[2] and b[2]>=d[0] and b[1]<=d[3] and b[3]>=d[1])
 
 
 # Task 182 seq 312 (design 3.1; the person: after the two crossed she came down on the other one, bouts 18 / 19 / 41 / 47): the route an
@@ -2073,7 +2087,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         if B13B and held_dash and p.sprint_jump and p.jump_k<=k+2:
             # package 1 after B13 (design 7.1): no shuttlecock jump into her own still target's side (b13b_sprint_jump)
             b13b=b13b_sprint_jump(runner,p,sim,enemy,k,link)
-            if b13b is not None and b13b["kind"]=="release":p=replace(p,sprint_jump=False)
+            if b13b is not None and b13b["kind"]=="release":p=replace(p,sprint_jump=False,side=int(b13b["side"]))   # its approved row
     elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
@@ -2085,6 +2099,15 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # Deferring J must not release a dash already in progress (which
         # cancels its sprint transition), or slide a pending far dash clock.
         link="dash" if current_mode in (K.M_DASH,K.M_SPRINT) else "walk"
+    held=None
+    if B13B:
+        # Sol REVIEW402: the approved row's side key (b13b_sprint_jump's release) holds through this flight: the jump link on the ground
+        # to its takeoff and the air link to her landing, whatever a later tick's side says (a 1.2.2 bound, a seam aim); on the ground
+        # past the jump link or on any other link (a strike row, a hook, a follow-up) its flight is over
+        if b13b is not None and b13b.get("kind")=="release":held=int(b13b["side"])
+        elif (active is not None and active.v.get("b13b_side") is not None and link in ("jump","air")
+              and not (ground and link=="air")):
+            held=int(active.v["b13b_side"]);p=replace(p,side=held)
     draft=runner.fork_empty(AirAnchor())
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
@@ -2108,6 +2131,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if active is None:variables["opening_run"]=bool(hook_open)   # #387: a Run begun as the small rune's opening (the native's _opening)
     if early is not None:variables["early_hook"]=early
     variables["b13b"]=b13b   # B13B: this tick's sprint-jump check record (None: not checked)
+    variables["b13b_side"]=held   # B13B: the approved row's side key held through this flight (None: none held)
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
