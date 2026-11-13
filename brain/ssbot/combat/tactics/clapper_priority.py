@@ -22,6 +22,66 @@ from . import clapper_separated as SEP
 from .forum_local import CLAPPER, EVADE_HIT_X, EVADE_RISK_X
 from .modes import EVADE, EntryAttack, StageWithdraw, entry_attack_prefs
 
+# Task 182 (the person 11-13 "那就先修出圈吧"; Sol analysis/w13_50_b13b404_20261113/video_0250/REVIEW.md): a big rune circle's way out
+# holds on the FINAL stance. The base spot's exit (gauntlet._clapper_spot, only the target's own rune) was overwritten by the winner's
+# stage stance (b13b404 ep2: cluster attack_aim 29.0, then attack_retreat 33.8, both inside the circle 24.7..39.1; 2 HP at its lighting,
+# 12361). runtime354's 21 big rune hits: L2's stance came from a rune branch in 5 only. "0": off (offline A/B only).
+RUNE_EXIT_FINAL = os.environ.get("SSBOT_FORUM_RUNE_EXIT_FINAL", "1").strip() != "0"
+RUNE_EXIT_HALF_U = .25      # her half width when the scene's boxes are unknown (geometry None)
+
+
+def rune_exit_x(x, hx, circles, bodies, roots, walls, left, right, pad):
+    """The stance x moved out of the live big rune circles (pure; _rune_exit reads the inputs).
+
+    circles: [(lo, hi)] the x spans lit now or still to come; bodies: [(a, b)] the observed body spans; roots: the Clappers' root x;
+    walls: (xa, xb); left / right: her half widths; pad: JT's pad. Her centre at x is in a circle when her box grown by the pad meets it
+    (clapper_separated.in_circle's test). Every circle and every body is grown the same way (the centres where her box would meet it)
+    and the overlapping or touching ones are merged: when x lies in a merged span that holds a circle, the candidates are that span's
+    two ends inside the walls (her box and the pad inside them). The pick: an end whose way from her (hx) passes no Clapper's root
+    first, then the one nearer to her. Returns (x, None) when x is in no circle; (x, rec) with rec["exit"] None when neither end lies
+    inside the walls (the stance kept), else (the end, rec)."""
+    grown = [(lo - right - pad, hi + left + pad) for lo, hi in circles]
+    hits = [i for i, (a, b) in enumerate(grown) if a < x < b]
+    if not hits:
+        return x, None
+    spans = sorted([(a, b, True) for a, b in grown] + [(a - right - pad, b + left + pad, False) for a, b in bodies])
+    merged = []
+    for a, b, circ in spans:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+            merged[-1][2] = merged[-1][2] or circ
+        else:
+            merged.append([a, b, circ])
+    lo, hi, _ = next(m for m in merged if m[2] and m[0] < x < m[1])
+    xa, xb = walls
+    ends = []
+    for e in (lo, hi):
+        inside = xa + left + pad <= e <= xb - right - pad
+        cross = any(min(hx, e) < r < max(hx, e) for r in roots)
+        ends.append(dict(x=round(float(e), 4), inside=bool(inside), crosses=bool(cross)))
+    ok = [(d["crosses"], abs(d["x"] - hx), d["x"]) for d in ends if d["inside"]]
+    best = min(ok)[2] if ok else None
+    rec = dict(x0=round(float(x), 4), exit=best, hx=round(float(hx), 4), span=(round(float(lo), 4), round(float(hi), 4)),
+               circles=[tuple(round(float(v), 4) for v in circles[i]) for i in hits], ends=ends)
+    return (x if best is None else best), rec
+
+
+def _rune_exit(sc, x):
+    """rune_exit_x on this call's facts: the shared ledger's live circles (clapper_separated.live_circles), the observed bodies and
+    her half widths (clapper_scene.geometry; unknown: no bodies, RUNE_EXIT_HALF_U), the arena walls and the Clappers' roots."""
+    from .gauntlet import JT
+    circles = SEP.live_circles(sc.tac, sc.t)
+    if not circles:
+        return x, None
+    geo = sc.geo
+    if geo is not None:
+        left, right, walls, bodies = geo["left"], geo["right"], (geo["xa"], geo["xb"]), list(geo["bodies"].values())
+    else:
+        left = right = RUNE_EXIT_HALF_U
+        walls, bodies = tuple(map(float, sc.tac.pb.arena_x)), []
+    roots = [float(s.pos[0]) for s in sc.subjects]
+    return rune_exit_x(float(x), float(sc.hx), circles, bodies, roots, walls, float(left), float(right), float(JT["pad"]))
+
 
 def plan_runner(tac):
     """SSBOT_FORUM_TWO_PLAN: this tactics object's runner (made once; the policy gives it its channel at startup)."""
@@ -219,6 +279,19 @@ def _apply(sc, won, rule):
         tg = g.target
         out = replace(out, withdraw=StageWithdraw(own_x, (tg, e.kind, e.source), int(ap.withdraw_f), pre.hit_kw.get(tg),
                                                   (tg in pre.ground_hit, tg in pre.no_pogo, tg in pre.ground_first)))
+    if RUNE_EXIT_FINAL:
+        # the final stance (every stage, finish and withdraw above) out of the live big rune circles (RUNE_EXIT_FINAL's note)
+        x, rec = _rune_exit(sc, float(out.stance_x))
+        w = out.withdraw
+        wx, wrec = _rune_exit(sc, float(w.stance_x)) if isinstance(w, StageWithdraw) else (None, None)
+        if rec is not None and rec["exit"] is not None:
+            out = replace(out, stance_x=float(x))
+            g.stance_x = float(x)
+            how = f"{how}; rune exit {rec['x0']:.2f}->{rec['exit']:.2f}"
+        if wrec is not None and wrec["exit"] is not None:
+            out = replace(out, withdraw=replace(w, stance_x=float(wx)))
+        if rec is not None or wrec is not None:
+            tac.last["clapper_rune_exit"] = dict(stance=rec, withdraw=wrec)
     g.why = g.why.split("; ")[0] + "; " + sc.scene + "; " + str(how)
     logs = {}
     for tactic in sc.table.tactics:

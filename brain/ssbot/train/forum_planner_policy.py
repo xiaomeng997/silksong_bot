@@ -1980,7 +1980,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.tac.last.get("clapper_return_body") is not None:
             rec["clapper_return_body"] = self.tac.last["clapper_return_body"]   # SSBOT_FORUM_TWO_RETURN_BODY only
         for k in ("clapper_eval", "clapper_releases", "clapper_plan", "clapper_sep_slam", "clapper_rune_down", "clapper_rune_after",
-                  "clapper_sep_notes"):
+                  "clapper_sep_notes", "clapper_rune_exit"):
             if self.tac.last.get(k) is not None:
                 rec[k] = self.tac.last[k]        # Task 180: the two-Clapper pick's evaluation / event releases; seq 312 #384: its units' records
         if li.get("map") is not None:
