@@ -40,7 +40,7 @@ import numpy as np
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat import rune_life
 from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, observed_slam,
-                          slam_play, two_play)
+                          slam_notice, slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
 from ssbot.combat.forum_planner import (ForumConfig, ForumPlanner, forum_kill_hp, forum_yellow_kill_hp,
                                         kill_freeze_s, parse_ta)
@@ -258,6 +258,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         # SSBOT_FORUM_SLAM_PLAY=1 (task 1v1 SP1, forum.md 65): the person's slam strike as a fixed playbook; None (the
         # default): nothing changes
         self.slam_play: slam_play.SlamPlay | None = slam_play.SlamPlay() if slam_play.ENABLED else None
+        # Task 182 package 1 shadow (SSBOT_FORUM_SLAM_NOTICE): the predicted bounce apex of a pressed playbook run, logged only
+        self.slam_notice: slam_notice.ApexNotice | None = (slam_notice.ApexNotice()
+                                                           if self.slam_play is not None and slam_notice.ENABLED else None)
         # SP6 (SSBOT_FORUM_JB_DASH_SLASH): the dash slash in the jump cast's antic (combat.cast_stab); SP8: + the
         # RecoilStab (SSBOT_FORUM_JB_DASH_COMBO), or dash, stop, side slashes (SSBOT_FORUM_JB_DASH_STOP)
         self.cast_stab: cast_stab.CastStab | None = cast_stab.CastStab() if cast_stab.ENABLED else None
@@ -769,6 +772,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.cog = {"throws": [], "used": Counter(), "hold": 0, "last_t": -math.inf, "frames": set()}
         if self.slam_play is not None:
             self.slam_play.reset()
+        if getattr(self, "slam_notice", None) is not None:
+            self.slam_notice.reset()
         if self.cast_stab is not None:
             self.cast_stab.reset()
         if self.claw is not None:
@@ -1610,6 +1615,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         if key != self._own_last:
             self._own_last = key
             self.own_trace.append([f, *key])
+        if getattr(self, "slam_notice", None) is not None and self.slam_play is not None:
+            # Task 182 package 1 shadow: the predicted bounce apex of a pressed playbook run and this tick's key owner, logged only
+            self.slam_notice.observe(f, s, self.slam_play.run, own)
         if r.outcome is not None and r.outcome in TERMINAL and self.episode_outcome is None:
             self.episode_outcome = "QUIT"
             self.outcome_reason = f"{r.outcome}: {'; '.join(r.decision.reasons) or 'supervisor'}"
@@ -2056,5 +2064,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),
+                # Task 182 package 1 shadow: per pressed playbook run the predicted bounce apex, the B-3 notice, the observed apex
+                **({"slam_notices": self.slam_notice.rows}
+                   if getattr(self, "slam_notice", None) is not None and self.slam_notice.rows else {}),
                 **({"chain_native": self.chain_native.summary()} if self.chain_native is not None else {}),
                 "own_trace": self.own_trace}
