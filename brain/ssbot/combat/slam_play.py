@@ -275,6 +275,16 @@ REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME", _V2)
 # today's yield rules and a walk the chain froze still re-checks the ground and the band at the jump.
 COMMIT = _on("SSBOT_FORUM_SLAM_COMMIT", _V2)
 COMMIT_PHASES = ("jump", "air", "after", "cs_lock", "cs_strike")
+# SSBOT_FORUM_SLAM_START25 (Task 182 package 2; the person 11-12 "继续包1和包2吧" and quote 99 "为什么不能弄一个走位刀节规定在26帧之前
+# 到地方，然后安那套固定按键？"; design 7.1 / 7.11 C; follows SSBOT_FORUM_V2, =0 the old window): a start on the ground is no longer
+# bounded by K_START_MAX 14 (the demo's latest walk start) but only by the walk itself - in STAND and stopped by K_JUMP - 1 (the
+# "no time to walk" check of _try_start). A look that comes late because another owner held the keys through the antic's start
+# (package 0's escape waypoint, the chain) can still take the slam, and so can a run whose earlier looks were declined once the
+# reason clears. Package 0's 100 live bouts: 24 first looks at antic 15-24 ended "late", 7 of them on the ground in reach with the
+# walk in time (s312/b_items/pkg2_candidates.txt; the other start gates not modelled). No dash approach: on the ground a dash
+# leaves no input for 10-30 frames, and the far looks (~13 u, the escape's end) are out of reach anyway. The air entry (K_AIR_MAX)
+# and the late starts (Run.late: no input, the hand-off; K_JUMP_LATE2) keep their own limits.
+START25 = _on("SSBOT_FORUM_SLAM_START25", _V2)
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -1810,6 +1820,8 @@ class SlamPlay:
         lim = c.k_start_max
         if r.k_air is not None or r.late:
             lim = c.k_jump_late2 if LATE else c.k_jump_late - 1
+        elif START25:
+            lim = c.k_jump - 1                            # package 2: the walk check below ("no time to walk") decides
         if k > lim:
             if not r.why:
                 r.why = "late"
