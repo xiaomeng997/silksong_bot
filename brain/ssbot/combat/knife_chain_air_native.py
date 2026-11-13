@@ -593,6 +593,40 @@ class NativeManualAirChain(NativeChainB2):
         mode=int(S[K.MODE])
         return mode if mode in (K.M_DASH,*K.RELINQUISHED,*K.NO_INPUT) else None
 
+    @staticmethod
+    def _opposite_in_flight(sim,mask,commands=None):
+        """The person 11-13 (rx411 bout 1 f5590, "跑到墙边躲着"): a NEW dash impulse whose side key (L / R) is opposite to a side key
+        still in flight (the actual prefix, and in a given row the keys before its first dash press) or to a press queued in the hold
+        filter (desired, not latched), while she faces the impulse's side: that key turns her away just before it and the dash goes
+        the way she then faces (5589 the planner's MOVE(L) for 5591, 5590 the transfer's DASH+R for 5592: she turned at 5592 and
+        dashed left into the wall). Facing away already, no turn comes and the impulse's own side key turns her (dash_side_table.txt:
+        87 of 108 such dashes went the key's way). Live c86 / 398 / b13b404 / rt354 / rx411, 571 new chain dash impulses
+        (s312/b_items/dash_rule_eval.txt): 17 went the other way; this rule holds back 15, 11 of them the other way, 4 the key's way;
+        without the facing condition it would hold back 123 (13 the other way, 89 the key's way). The chain's model does not tell
+        the side reliably here (dash_dir_check.txt: model and real disagree on a third of the starts). So the impulse waits:
+        dict(reason, opposite_in_flight=True, ...), or None."""
+        side=int(mask)&(B["L"]|B["R"])
+        if side not in (B["L"],B["R"]):return None
+        other=(B["L"]|B["R"])&~side
+        keys=[int(k) for k in np.asarray(sim.prefix,np.int64).reshape(-1)]
+        if commands is not None:
+            c=np.asarray(commands,np.int64).reshape(-1)
+            first=np.flatnonzero((c&B["DASH"])!=0)
+            if len(first):keys+=[int(k) for k in c[:int(first[0])]]
+        # the side key applied last before the impulse turns her (a key with both or neither side key turns nothing); with none in
+        # flight, a press queued in the hold filter (desired, not latched) is the last one
+        last=next((k&(B["L"]|B["R"]) for k in reversed(keys) if k&(B["L"]|B["R"]) in (B["L"],B["R"])),None)
+        bit=other.bit_length()-1
+        hold=getattr(sim,"hold",None)
+        queued=bool(last is None and hold is not None and np.asarray(hold.desired)[0,bit] and not np.asarray(hold.latched)[0,bit])
+        if last!=other and not queued:return None
+        from ssbot.knowledge import kinematics as K
+        S=np.asarray(getattr(sim,"start",np.nan),float).reshape(-1)
+        face=float(S[K.FACE]) if S.shape[0]==K.K and np.isfinite(S[K.FACE]) else None
+        if face is not None and face*(1. if side==B["R"] else -1.)<=0:return None    # facing away already: no turn comes
+        return {"reason":"an opposite side key in flight turns her away first: the dash goes the way she then faces",
+                "opposite_in_flight":True,"in_flight":keys,"queued_press":queued,"face":face}
+
     def _dash_lock_scan(self,sim,plan,mask,game,geo,link,commands=None):
         """Task 179 (#296, live 786 2617): scan a NEW dash impulse through the motion it locks.
 
@@ -603,8 +637,12 @@ class NativeManualAirChain(NativeChainB2):
         sprint (phase 2) takes the dash release and the sprint jump (Sprint FSM), so it is steerable, not locked.
         (scan, info); scan None when the dash start or the input return is not modeled inside DASH_LOCK_MAX frames
         (unknown, never a pass). commands (Task 179 #316, _return_admission): the whole planned key row with the
-        impulse pressed on a later step, in place of mask on the first one and the link's own keys behind it."""
+        impulse pressed on a later step, in place of mask on the first one and the link's own keys behind it.
+        An impulse against a side key still in flight (_opposite_in_flight) is refused before any roll: (None, its info)."""
         from ssbot.knowledge import kinematics as K
+        turn=self._opposite_in_flight(sim,mask,commands)
+        if turn is not None:
+            return None,{"dash_mask":int(mask),"lock_max":self.DASH_LOCK_MAX,**turn}
         given=commands is not None
         if given:
             commands=np.asarray(commands,np.int64)[:self.DASH_LOCK_MAX].copy()
@@ -1612,7 +1650,16 @@ class NativeManualAirChain(NativeChainB2):
                 lock,info=self._dash_lock_scan(sim,plan,mask,game,geo,draft.run.link)
                 if lock is None or not lock.complete or lock.contacts:
                     first=None if lock is None or not lock.contacts else asdict(lock.contacts[0])
-                    if draft.run.link in {"walk","dash"} and ground:
+                    if active and info.get("opposite_in_flight"):
+                        # The person 11-13 (rx411 5590): a running Run whose dash meets a side key in flight waits one tick with its
+                        # own keys minus the impulse (no hand-back: the next tick's in-flight key is its own, and the due dash is
+                        # checked again through its lock)
+                        self._note("rune_transfer_dash_refused",frame=f,first=None,active=active,complete=None,**info,
+                                   owner="same transfer Run waits a tick: an opposite side key in flight")
+                        mask=int(mask)&~B["DASH"]
+                        path=replace(model_path(sim,plan,np.array([mask],np.int64),game),stage=path.stage,
+                                     assumptions={**path.assumptions,"dash_refused":True})
+                    elif draft.run.link in {"walk","dash"} and ground:
                         # On the ground the same Run keeps running without the impulse (its owner and move); the
                         # next tick re-checks the due dash, the current step stays behind the ordinary gate.
                         self._note("rune_transfer_dash_refused",frame=f,first=first,active=active,
