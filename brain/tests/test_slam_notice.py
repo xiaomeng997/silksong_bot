@@ -106,6 +106,71 @@ def test_a_new_run_closes_the_old_row():
     assert [r["end"] for r in n.rows] == ["next run"] and n._cur["iid"] == 8
 
 
+# ---- Sol REVIEW397: the summary keeps a row still open at the episode end, marked incomplete, never given an apex ----
+
+def feed_until(last, run=None):
+    n = sn.ApexNotice()
+    run = run or NS(iid=7, fa=14990, k_press=None)
+    for f in sorted(REAL):
+        if f > last:
+            break
+        if f == 15036:
+            run.k_press = 47
+        n.observe(f, state(f), run if f < 15042 else None, "slam" if f < 15042 else "chain")
+    return n
+
+
+def counts_add_up(s):
+    return s["opened"] == s["completed"] + s["incomplete"] == len(s["rows"])
+
+
+def test_an_episode_ending_right_after_the_press_keeps_the_row_incomplete():
+    n = feed_until(15036)
+    s = n.summary()
+    assert (s["opened"], s["completed"], s["incomplete"]) == (1, 0, 1) and counts_add_up(s)
+    r = s["rows"][0]
+    assert r["complete"] is False and r["end"].startswith("incomplete") and r["apex"] is None and r["notice"] is None
+    assert r["press_f"] == 15036 and [p[4] for p in r["preds"]] == ["press"] and "key" not in r
+    # read only: a second read is the same, the open row itself is unchanged and nothing moved into rows
+    assert n.summary() == s and n.rows == [] and n._cur["end"] is None and "complete" not in n._cur
+
+
+def test_an_episode_ending_after_the_notice_before_the_apex_keeps_the_notice():
+    n = feed_until(15062)                          # the notice is out (apex predicted within 3 frames), the apex (15064) not yet
+    s = n.summary()
+    assert (s["opened"], s["completed"], s["incomplete"]) == (1, 0, 1) and counts_add_up(s)
+    r = s["rows"][0]
+    assert r["notice"] is not None and r["notice"][-1] == "chain" and r["apex"] is None and r["complete"] is False
+    assert r["end"].startswith("incomplete")
+
+
+def test_completed_rows_stay_with_an_open_one():
+    n = run_catch()                                # one catch to its apex
+    n.observe(16000, {"f": 16000, "hero": {"pos": [30.0, 9.0], "vel": [0.0, -1.0], "anim": {"clip": "Airborne"}}},
+              NS(iid=8, fa=15955, k_press=47), "slam")
+    s = n.summary()
+    assert (s["opened"], s["completed"], s["incomplete"]) == (2, 1, 1) and counts_add_up(s)
+    assert [r["complete"] for r in s["rows"]] == [True, False] and s["rows"][0]["end"] == "apex"
+    assert s["rows"][0]["apex"][0] == 15064 and s["rows"][1]["apex"] is None
+
+
+def test_reset_isolates_the_next_episode():
+    n = feed_until(15040)
+    assert n.summary()["incomplete"] == 1
+    n.reset()
+    assert n.summary() == {"opened": 0, "completed": 0, "incomplete": 0, "rows": []}
+
+
+def test_the_policy_summary_reads_summary_whenever_the_switch_is_on():
+    import ast
+    import inspect
+    import textwrap
+    from ssbot.train import forum_planner_policy as mod
+    src = textwrap.dedent(inspect.getsource(mod.ForumPlannerPolicy.stats))
+    calls = {ast.unparse(n.func) for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)}
+    assert "self.slam_notice.summary" in calls and "slam_notice.rows" not in src
+
+
 def test_switch_follows_v2(monkeypatch):
     import importlib
     monkeypatch.setenv("SSBOT_FORUM_V2", "1")

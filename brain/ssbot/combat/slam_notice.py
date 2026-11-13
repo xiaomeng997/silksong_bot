@@ -20,6 +20,7 @@ DownSpikeBounce frame). The bounce first holds vy 17.4 for a few frames (the STA
 """
 from __future__ import annotations
 
+import copy
 import math
 import os
 
@@ -71,9 +72,24 @@ class ApexNotice:
     def _close(self, why: str) -> None:
         if self._cur is not None:
             self._cur["end"] = why
+            self._cur["complete"] = True
             self._cur.pop("key", None)
             self.rows.append(self._cur)
         self._cur = None
+
+    def summary(self) -> dict:
+        """The episode's rows for the summary, read only (Sol REVIEW397: a row still open when the episode ends - just pressed, or
+        noticed and not yet at its apex - is kept, marked incomplete, never given an apex it did not reach). Calling it again
+        neither duplicates nor changes anything; reset() starts the next episode empty. opened = completed + incomplete."""
+        rows = [dict(r) for r in self.rows]
+        if self._cur is not None:
+            open_ = copy.deepcopy(self._cur)
+            open_.pop("key", None)
+            open_["end"] = "incomplete: open when the summary was read (episode end)"
+            open_["complete"] = False
+            rows.append(open_)
+        return {"opened": len(self._seen), "completed": len(self.rows), "incomplete": int(self._cur is not None),
+                "rows": rows}
 
     def _predict(self, cur: dict, f: int, apex_f: int, x: float, y: float, vx: float, tag: str) -> None:
         steps = max(0.0, (apex_f - f) / STEP_RATIO)

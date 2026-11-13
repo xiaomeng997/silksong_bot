@@ -2064,8 +2064,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                 **({"slam_runs": self.slam_play.runs_rec()} if self.slam_play is not None else {}),
                 **({"slam_holds": self.slam_play.holds} if self.slam_play is not None and self.slam_play.holds
                    else {}),
-                # Task 182 package 1 shadow: per pressed playbook run the predicted bounce apex, the B-3 notice, the observed apex
-                **({"slam_notices": self.slam_notice.rows}
-                   if getattr(self, "slam_notice", None) is not None and self.slam_notice.rows else {}),
+                # Task 182 package 1 shadow: per pressed playbook run the predicted bounce apex, the B-3 notice, the observed apex;
+                # always present with the switch on (opened 0: no press), a row still open at the episode end kept as incomplete
+                # (Sol REVIEW397)
+                **({"slam_notices": self.slam_notice.summary()}
+                   if getattr(self, "slam_notice", None) is not None else {}),
                 **({"chain_native": self.chain_native.summary()} if self.chain_native is not None else {}),
                 "own_trace": self.own_trace}
