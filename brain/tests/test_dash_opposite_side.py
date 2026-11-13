@@ -149,6 +149,46 @@ def test_the_refused_dash_decision_stays_pending_for_the_next_tick(monkeypatch, 
         assert not again.mask & B["DASH"] and "rune_transfer_dash_checked" not in new and "rune_transfer_dash_refused" not in new
 
 
+@pytest.mark.parametrize("step", ["clear", "target_body"])
+def test_the_waiting_tick_keeps_the_recipes_all_owner_step_scan(monkeypatch, step):
+    # Sol seq357: only the Run's record goes back to pending. The waiting tick was the air-dash recipe's, so its step is checked as that
+    # recipe's always was: geo.scan, every owner with the target body, never the external-only preflight (e7783f26 fell back to it).
+    # target_body: a contact with the target's own body that only the all-owner scan sees stops the tick (B2 recovery, as before)
+    from ssbot.combat import knife_chain_air_native as N
+    from ssbot.combat.knife_chain_commitment import ContactScan, PathContact
+    calls = []
+
+    class Geo:
+        def __init__(self, *a):
+            pass
+
+        def scan(self, path):
+            wait = bool((getattr(path, "assumptions", None) or {}).get("dash_refused"))
+            calls.append(("scan", wait))
+            hit = (PathContact(path.through, 8, "body"),) if wait and step == "target_body" else ()
+            return ContactScan("fixture", path.origin, path.through, hit, "all-owner")
+
+        def preflight(self, path):
+            calls.append(("preflight", bool((getattr(path, "assumptions", None) or {}).get("dash_refused"))))
+            return ContactScan("fixture", path.origin, path.through, (), "external-only: the target body skipped")
+
+    monkeypatch.setattr(N, "B2Geometry", Geo)
+    r, s, sim = flight()
+    n = chain(monkeypatch, r)
+    recovered = []
+    monkeypatch.setattr(n, "_recover", lambda reason, f: recovered.append(reason))
+    monkeypatch.setattr(n, "_strike_refused", lambda *a: None)
+    offer = n._transfer_offer(s, 0., _opposite_prefix(monkeypatch, n, sim, B["L"]), FC, NS(target=8), False)
+    assert next(e for e in n.events if e["event"] == "rune_transfer_dash_refused")["decision_pending"]
+    assert ("scan", True) in calls and ("preflight", True) not in calls
+    if step == "clear":
+        assert offer is not None and offer.stage == "active" and not offer.mask & B["DASH"] and not recovered
+        assert offer.draft.run.v["approach_recipe"] is None and not offer.draft.run.v["air_dash_decided"]
+    else:
+        assert offer is None and recovered == ["rune transfer external step blocked"]
+        assert next(e for e in n.events if e["event"] == "rune_transfer_rejected")["first"]["owner_iid"] == 8
+
+
 def test_a_fresh_air_start_leaves_the_keys_with_their_current_owner(monkeypatch):
     r, s, sim = flight()
     r.run = None

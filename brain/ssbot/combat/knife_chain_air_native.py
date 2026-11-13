@@ -1584,6 +1584,7 @@ class NativeManualAirChain(NativeChainB2):
             self._recover("transfer air run over its target with no strike witness: "+no_witness,f)
             return None
         target_ta=None;target_move=None;conditional_contact=None
+        dash_wait=False   # Sol seq357: this tick's refused air-recipe dash (below): its step keeps the recipe's all-owner scan
         try:
             goal=self._transfer_goal
             if goal is not None and goal.source_kind=="SWITCH" and not draft.run.v.get("_entry_source_confirmed"):
@@ -1657,9 +1658,12 @@ class NativeManualAirChain(NativeChainB2):
                         # Sol seq356: the air link's DASH is this tick's once-per-Run decision (transfer.air_approach_keys, reached only
                         # with air_dash_decided unset, where approach_recipe is None too). The impulse is not sent, so that decision is
                         # not spent: it stays pending and the next tick decides again from her actual prefix, hold, dash and time (a
-                        # dash through its full lock scan, or none when the real state no longer needs it)
+                        # dash through its full lock scan, or none when the real state no longer needs it). Sol seq357: only the Run's
+                        # record goes back; this tick was the air-dash recipe's, so its step keeps that recipe's all-owner scan
+                        # (geo.scan with the target body, never the external-only preflight)
                         undo=draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash"
                         if undo:draft.run.v.update(air_dash_decided=False,approach_recipe=None)
+                        dash_wait=bool(undo)
                         self._note("rune_transfer_dash_refused",frame=f,first=None,active=active,complete=None,**info,
                                    decision_pending=bool(undo),
                                    owner="same transfer Run waits a tick: an opposite side key in flight")
@@ -1751,7 +1755,8 @@ class NativeManualAirChain(NativeChainB2):
                 bad=[c for c in bad if not (c.frame in protected and c.owner_iid==plan.iid and c.kind in {"body","move"})]
                 from .knife_chain_commitment import ContactScan
                 scan=ContactScan(geo.ref(check),check.origin,check.through,tuple(bad),"same attack instance; actual contact-path query")
-            elif (approach_only or draft.run.link=="bounce_tail" or (draft.run.link=="air" and draft.run.v.get("approach_recipe")=="air_dash")
+            elif (approach_only or draft.run.link=="bounce_tail"
+                    or (draft.run.link=="air" and (draft.run.v.get("approach_recipe")=="air_dash" or dash_wait))
                     or (draft.run.link=="air" and draft.run.v.get("seam_inner"))):
                 # (Task 183 seq 263: a seam tick with no inner-side strike row is positioning, not a strike: its step is
                 # checked against the target body too, so coming down on it hands back instead of an outer strike)
