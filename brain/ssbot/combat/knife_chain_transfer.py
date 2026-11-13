@@ -30,6 +30,14 @@ B13_LEAD_F=8      # steering is chosen only when the planned keys meet the body 
 B13_STRIKE_F=14   # the guard's own (relaxed) strike only within this many: farther, the Run's own rows still have time (a press needs
                   # its two in-flight frames, the slash's 3 to its first active frame and her box out of the body to contact-2)
 B13_ROLL_F=48     # frames of the planned keys rolled ahead (past her landing from a held jump's apex)
+# Task 182 committed chain, package 1 after B13 (the person 11-13 "你决定顺序", design 7.1): the ground route's jump out of a held
+# ground dash / sprint is the shuttlecock jump (kinematics H2_SHUTTLE: her x speed locked along her facing while it runs, no turn), so
+# the air guard has no way off a body it carries her into. When that flight enters her own still target's body from the side, the jump
+# lets the dash go (an ordinary jump at the sprint's regain, steerable in the air). Switch SSBOT_FORUM_CHAIN_B13B (follows v2).
+B13B=_env_on("SSBOT_FORUM_CHAIN_B13B",_ENV_V2)
+B13B_GUARD_F=6    # an entry this many frames or fewer after the sprint jump's takeoff (or on the ground) is let go: the air guard's
+                  # first tick is the takeoff, its strike's contact at least press (+2) + the slash's 3 to its first active frame, with
+                  # her box out of the body to contact - 2 (closed loop 11-13: entries 8-10 frames after takeoff were the guard's strikes)
 AIR_ATTACK_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"})
 # Target-bound face hook: one aimed face hook inside the SAME rune_transfer Run. Every number is an existing one
 # (map2.strike / hero2 hooked Clawline, knife_chain_hook_target, knife_chain_empty_needle, vault far_lock, the
@@ -727,11 +735,15 @@ def b13_danger(enemy,frames=None):
     return out
 
 
-def b13_first_meet(boxes,body,start,stop):
+def b13_first_meet(boxes,body,start,stop,prot=None):
     """The first rollout index i in [start, stop) (start >= 1) where her box ENTERS the body: it meets it (exact overlap,
     enters_body's test) and did not at i - 1 (index 0: her box now). body: one box, or one per rollout index (b13_danger; past
     its end the last held). Already inside is no new meeting until she has left it: the pogo protection after a real bounce off
-    it (not in the STATE or the start state), or a hit already taken. None when none."""
+    it (not in the STATE or the start state), or a hit already taken. None when none.
+    prot (B13B, package 2 after B13): one flag per rollout index, True while she cannot be hurt (the roll's F_INVULN: a real
+    bounce's observed pogo protection POGO_OBS, a hit's i-frames, no input). The meeting is then her box in the body while
+    unprotected after an index where it was out of it or protected: inside the body when the protection ends is a meeting there
+    (c86 B01: in its body from 7098 after the bounce at 7097, the protection count 8 at 7097 down to 0 and the hit at 7107)."""
     a=max(start,1);n=min(stop,len(boxes))
     if n<=a:return None
     b=np.asarray(boxes,float)[a-1:n];body=np.asarray(body,float)
@@ -739,6 +751,8 @@ def b13_first_meet(boxes,body,start,stop):
         idx=np.minimum(np.arange(a-1,n),len(body)-1);body=body[idx]
         m=(b[:,0]<=body[:,2])&(b[:,2]>=body[:,0])&(b[:,1]<=body[:,3])&(b[:,3]>=body[:,1])
     else:m=(b[:,0]<=body[2])&(b[:,2]>=body[0])&(b[:,1]<=body[3])&(b[:,3]>=body[1])
+    if prot is not None:
+        p=np.asarray(prot,bool);m=m&~p[np.minimum(np.arange(a-1,n),len(p)-1)]
     hit=np.flatnonzero(m[1:]&~m[:-1])
     return a+int(hit[0]) if len(hit) else None
 
@@ -793,7 +807,11 @@ def b13_guard(x,strike_rows):
          out of the body to her landing (the jump hold unchanged); later ticks keep that steer to the landing;
       3. within B13_LEAD_F with neither: the latest first meeting of the three (forced risk; a chain defect in the record).
     Farther than B13_LEAD_F with no strike: the Run's keys as they are (a strike row may come as she nears). The record goes
-    to x.v["b13"] (the native adapter notes it); the guard never ends the Run. Returns a goto to the strike link or None."""
+    to x.v["b13"] (the native adapter notes it); the guard never ends the Run. Returns a goto to the strike link or None.
+    B13B (package 2 after B13, design 7.1): the meetings read her protection (b13_first_meet prot, the roll's F_INVULN). A meeting
+    that is no entry from outside unprotected ("inside": in the body when the protection ends, or entered while protected) takes
+    no strike (a down slash from inside the body) and no wait: the first of releasing and countersteering that keeps her out of it,
+    else the latest (forced)."""
     if not B13 or x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
     e=getattr(x.obs,"e",None)
     if e is None or control(e)[0] not in STILL_ROOT_STATES or control(e)[0] in AIR_ATTACK_STATES:return None
@@ -816,18 +834,21 @@ def b13_guard(x,strike_rows):
     rows[:,:min(left,B13_ROLL_F)]|=B["J"]
     ro=sim.roll(rows)
     off=int(sim.off)
-    meets=[]
+    meets=[];inside=False
     for i in range(len(dirs)):
-        meets.append(b13_first_meet(ro.box[i],danger,1,b13_landing(ro.flags[i],off)+1))
+        stop=b13_landing(ro.flags[i],off)+1
+        prot=(np.asarray(ro.flags[i])&K.F_INVULN)!=0 if B13B else None
+        meets.append(b13_first_meet(ro.box[i],danger,1,stop,prot=prot))
+        if B13B and i==0 and meets[0] is not None:inside=b13_first_meet(ro.box[i],danger,1,stop)!=meets[0]
     if meets[0] is None:return None
     info={"f":int(x.obs.f),"meet_F":int(sim.fo+meets[0]),"lead":int(meets[0]-off),"planned":int(planned),"state":st,
-          "opening":bool(opening_pending(x.v))}
-    out=strike_rows(x) if meets[0]-off<=B13_STRIKE_F else None
+          "opening":bool(opening_pending(x.v)),**({"inside":inside} if B13B else {})}
+    out=strike_rows(x) if meets[0]-off<=B13_STRIKE_F and not inside else None
     if out is not None:
         row=x.v["row"]
         x.v.update(b13_steer=None,b13={**info,"kind":"strike","contact_F":int(row["contact_frame"]),"press_F":int(row["press_F"])})
         return out
-    if meets[0]-off>B13_LEAD_F:
+    if meets[0]-off>B13_LEAD_F and not inside:
         x.v["b13"]={**info,"kind":"wait"}
         return None
     for i in range(1,len(dirs)):
@@ -839,6 +860,58 @@ def b13_guard(x,strike_rows):
     if best:x.v["b13_steer"]=int(dirs[best])
     x.v["b13"]={**info,"kind":"forced","steer":int(dirs[best]),"meets_F":[int(sim.fo+m) for m in meets]}
     return None
+
+
+def b13b_flight(flags,start):
+    """(takeoff, landing): her first airborne rollout index from start on and the first ground index after it; (None, len) when she
+    never leaves the ground in the roll, (takeoff, len) when she does not land in it."""
+    f=np.asarray(flags);air=np.flatnonzero((f[start:]&K.F_GROUND)==0)
+    if not len(air):return None,len(f)
+    t=start+int(air[0])
+    return t,b13_landing(f,t)
+
+
+def b13b_side_meet(boxes,danger,start,stop):
+    """b13_first_meet in [start, stop) when that first entry is from the side: her box centre still below the body's top there
+    (a landing on the head from above is the strike rows' business, not this check's)."""
+    i=b13_first_meet(boxes,danger,start,stop)
+    if i is None:return None
+    b=np.asarray(boxes,float)[i];d=np.asarray(danger,float)
+    top=d[min(i,len(d)-1),3] if d.ndim==2 else d[3]
+    return i if (b[1]+b[3])/2.<top else None
+
+
+def b13b_sprint_jump(runner,p,sim,enemy,k,link):
+    """B13B: this tick's jump out of a held ground dash / sprint (propose's jump now with sprint_jump). Three key rows rolled
+    B13_ROLL_F frames from the actual start, in-flight prefix and hold (transfer.render of the Run's link, from this tick's mask on):
+      0. the plan: the sprint jump (DASH held into the jump);
+      1. the dash let go: the same keys without DASH (an ordinary jump at the sprint's regain, the side key held);
+      2. the dash and the side key let go (the jump alone; in the air the B13 guard steers off the body).
+    Each is read against the still target's body (b13_danger) for an entry from the side (b13b_side_meet) up to her landing after the
+    takeoff. Returns None (not checked: the target not still, an unknown start) or a record: kind "clear" (the plan does not enter),
+    "guard" (it enters more than B13B_GUARD_F frames after its takeoff: the air link's B13 guard has its strike / steer ticks; the
+    plan kept), "release" (it enters on the ground or within B13B_GUARD_F of the takeoff; row 1 or 2 takes off and does not:
+    sprint_jump off), "forced" (no row does: the plan kept, a chain defect in the record)."""
+    danger=b13_danger(enemy,len(sim.prefix)+1+B13_ROLL_F)
+    if danger is None:return None
+    S=np.asarray(sim.start,float)
+    if S.size!=K.K or not np.isfinite(S).all():return None
+    rows=np.zeros((3,B13_ROLL_F),np.int64)
+    plan=np.asarray(render(runner,p,k,B13_ROLL_F,link),np.int64)
+    rel=np.asarray(render(runner,replace(p,sprint_jump=False),k,B13_ROLL_F,link),np.int64)
+    rows[0,:len(plan)]=plan;rows[1,:len(rel)]=rel;rows[2,:len(rel)]=rel&~(B["L"]|B["R"])
+    ro=sim.roll(rows)
+    off=int(sim.off);meets=[];takeoffs=[]
+    for i in range(3):
+        t,land=b13b_flight(ro.flags[i],off)
+        takeoffs.append(t);meets.append(b13b_side_meet(ro.box[i],danger,1,land+1))
+    F=lambda v:None if v is None else int(sim.fo+v)
+    rec={"f":int(sim.f),"meet_F":F(meets[0]),"release_meets_F":[F(m) for m in meets[1:]],
+         "takeoffs_F":[F(t) for t in takeoffs],"state":control(enemy)[0]}
+    if meets[0] is None:return {**rec,"kind":"clear"}
+    if takeoffs[0] is not None and meets[0]-takeoffs[0]>B13B_GUARD_F:return {**rec,"kind":"guard"}
+    if any(meets[i] is None and takeoffs[i] is not None for i in (1,2)):return {**rec,"kind":"release"}
+    return {**rec,"kind":"forced"}
 
 
 # Task 182 seq 312 (design 3.1; the person: after the two crossed she came down on the other one, bouts 18 / 19 / 41 / 47): the route an
@@ -1956,7 +2029,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # An outside bounce/flight is an entry, not our missed jump. Keep the
         # same destination and owner across landing and select the normal jump.
         link="walk";air_entry=False;p=replace(p,jump_k=10000,jump_until=10000)
-    early=None
+    early=None;b13b=None
     if link in {"walk","dash"} and ground:
         held_dash=bool(current_mode in (K.M_DASH,K.M_SPRINT) and int(sim.prefix[0])&B["DASH"])
         if held_dash:link="dash"
@@ -1997,6 +2070,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
                     # #387 (the person 11-10: "如果太近就改成起跳"): too near to hook from any press of the jump: jump now, the whole hold
                     # (the rising side down slash in the air, the jump held; the hook after it if the body evades), no new dash
                     p=replace(p,jump_k=k+2,jump_until=k+2+int(cfg["STOMP"]["jump_hold"]),sprint_jump=held_dash,dash_k=k+10000)
+        if B13B and held_dash and p.sprint_jump and p.jump_k<=k+2:
+            # package 1 after B13 (design 7.1): no shuttlecock jump into her own still target's side (b13b_sprint_jump)
+            b13b=b13b_sprint_jump(runner,p,sim,enemy,k,link)
+            if b13b is not None and b13b["kind"]=="release":p=replace(p,sprint_jump=False)
     elif not ground and not tail_pending:
         if active is None or link in {"walk","dash"}:
             p=replace(p,jump_until=k,jump_k=min(p.jump_k,k));air_entry=True
@@ -2030,6 +2107,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     variables["hook_open"]=bool(hook_open)   # #387: this tick's only (read by the face hook)
     if active is None:variables["opening_run"]=bool(hook_open)   # #387: a Run begun as the small rune's opening (the native's _opening)
     if early is not None:variables["early_hook"]=early
+    variables["b13b"]=b13b   # B13B: this tick's sprint-jump check record (None: not checked)
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))

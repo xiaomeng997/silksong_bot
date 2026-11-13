@@ -342,3 +342,128 @@ def test_a_hook_ends_the_flight_of_a_steer(on):
     r = _caster_run(b13_steer=B["R"])
     made = T.propose(r, s, 1000 / 60., sim, 7, False, np.zeros((0, 6)), set(), hook_open=True)
     assert made[0].run.link == "claw" and "b13_steer" not in made[0].run.v
+
+
+# --- package 1 and 2 after B13 (design 7.1, the person 11-13 "你决定顺序"; SSBOT_FORUM_CHAIN_B13B) ---------------------------------
+
+@pytest.fixture
+def onb(monkeypatch):
+    monkeypatch.setattr(T, "B13", True)
+    monkeypatch.setattr(T, "B13B", True)
+
+
+def test_b13b_follows_v2_unless_set():
+    assert T.B13B == T._env_on("SSBOT_FORUM_CHAIN_B13B", T._ENV_V2)
+
+
+def test_first_meet_reads_the_protection_when_given():
+    boxes = np.array([[0., 0., 1., 1.], [1.5, 0., 2.5, 1.], [1.6, 0., 2.6, 1.], [1.7, 0., 2.7, 1.], [1.8, 0., 2.8, 1.]])
+    body = np.array([2., 0., 4., 1.])
+    assert T.b13_first_meet(boxes, body, 1, 5) == 1                                              # an unprotected entry
+    assert T.b13_first_meet(boxes, body, 1, 5, prot=[False] * 5) == 1
+    assert T.b13_first_meet(boxes, body, 1, 5, prot=[True, True, True, False, False]) == 3      # entered protected: its end
+    assert T.b13_first_meet(boxes[1:], body, 1, 4) is None                                       # inside from now on: no entry
+    assert T.b13_first_meet(boxes[1:], body, 1, 4, prot=[True, True, True, False]) == 3         # inside at the protection's end
+    assert T.b13_first_meet(boxes[1:], body, 1, 4, prot=[True] * 4) is None
+
+
+def test_flight_and_side_meet():
+    G = K.F_GROUND
+    assert T.b13b_flight([G, G, G, 0, 0, G, G], 1) == (3, 5)
+    assert T.b13b_flight([G, G, G, G], 1) == (None, 4)
+    assert T.b13b_flight([G, 0, 0, 0], 1) == (1, 4)
+    body = np.array([2., 3., 4., 7.])
+    side = np.array([[0., 3., .5, 5.], [1., 3., 1.5, 5.], [1.8, 3.2, 2.3, 5.2]])                  # centre y 4.2 < top 7
+    top = np.array([[2.5, 9., 3., 11.], [2.5, 8., 3., 10.], [2.5, 6.8, 3., 8.8]])                 # centre 7.8 > top: from above
+    assert T.b13b_side_meet(side, body, 1, 3) == 2
+    assert T.b13b_side_meet(top, body, 1, 3) is None
+
+
+class _Roll:
+    """A stub ChainSim: roll returns designed boxes / flags per row (index 0 = frame fo)."""
+    def __init__(self, boxes, flags):
+        self.boxes, self.flags = np.asarray(boxes, float), np.asarray(flags, np.int64)
+        self.prefix = np.array([0], np.int64); self.fo = 1000; self.f = 1000
+        self.start = np.zeros(K.K)
+
+    @property
+    def off(self):
+        return len(self.prefix) + 1
+
+    def roll(self, rows):
+        n = len(rows)
+        return NS(box=self.boxes[:n], flags=self.flags[:n])
+
+
+def _sprint_case(monkeypatch, *, plan_takeoff, plan_meet, rel_meets, rel_takeoff=5, n=T.B13_ROLL_F + 2):
+    """Three rows: she runs right on the ground into a body at x 10 (top 7) from x 0; a row's takeoff index and entry index."""
+    G = K.F_GROUND
+    body = np.array([10., 3., 12., 7.])
+    boxes = np.zeros((3, n, 4)); flags = np.zeros((3, n), np.int64)
+    for i, (t, m) in enumerate([(plan_takeoff, plan_meet)] + [(rel_takeoff, r) for r in rel_meets]):
+        for j in range(n):
+            x = (10.1 - (m - j) * .3) if m is not None and j >= m else (9. - (m - j) * .3 if m is not None else 0.)
+            if m is None:x = min(9., .2 * j)
+            boxes[i, j] = [x - .25, 3.1, x + .25, 5.1]
+            flags[i, j] = G if (t is None or j < t) else 0
+    monkeypatch.setattr(T, "b13_danger", lambda e, frames=None: np.tile(body, (frames or T.B13_ROLL_F, 1)))
+    monkeypatch.setattr(T, "render", lambda runner, p, k, length, link="walk": np.full(length, B["R"] | B["J"] | B["DASH"], np.int64))
+    monkeypatch.setattr(T, "control", lambda e: ("Spell Antic", .1))
+    plan = T.TransferPlan(8, 7, 990, 1000, 0., B["R"], 10, 2, 20, True, 1000, 0)
+    return T.b13b_sprint_jump(None, plan, _Roll(boxes, flags), {}, 0, "dash")
+
+
+def test_sprint_jump_kinds(monkeypatch):
+    assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=None, rel_meets=(None, None))["kind"] == "clear"
+    # entering 8 frames after its takeoff: the air guard's (B13B_GUARD_F 6)
+    assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=14, rel_meets=(None, None))["kind"] == "guard"
+    # within 6 of the takeoff, or on the ground (never off it): the dash let go when a release row takes off clear
+    assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=11, rel_meets=(15, None))["kind"] == "release"
+    assert _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(None, 12))["kind"] == "release"
+    rec = _sprint_case(monkeypatch, plan_takeoff=None, plan_meet=9, rel_meets=(9, 10))
+    assert rec["kind"] == "forced" and rec["meet_F"] == 1009 and rec["release_meets_F"] == [1009, 1010]
+    # a release row that never leaves the ground is no way (the jump link would end in its own failed jump)
+    assert _sprint_case(monkeypatch, plan_takeoff=6, plan_meet=11, rel_meets=(None, None), rel_takeoff=None)["kind"] == "forced"
+
+
+@pytest.mark.parametrize("kind,dash", [("release", False), ("guard", True), ("forced", True), ("clear", True)])
+def test_propose_lets_the_dash_go_only_on_release(onb, monkeypatch, kind, dash):
+    from tests.test_knife_chain_transfer import transfer_at_gap
+    seen = []
+    monkeypatch.setattr(T, "b13b_sprint_jump", lambda *a: seen.append(a) or {"kind": kind, "f": 1000})
+    r, s, sim = transfer_at_gap(2., K.M_SPRINT)
+    made = T.propose(r, s, 0., sim, 8, True, np.zeros((0, 6)), set())
+    assert made is not None and made[0] is not None and seen
+    draft, p, _, mask = made
+    assert p.sprint_jump is dash and bool(mask & B["DASH"]) is dash and mask & B["J"]
+    assert draft.run.v["b13b"]["kind"] == kind
+
+
+def test_propose_checks_no_sprint_jump_when_off(monkeypatch):
+    from tests.test_knife_chain_transfer import transfer_at_gap
+    monkeypatch.setattr(T, "B13", True); monkeypatch.setattr(T, "B13B", False)
+    monkeypatch.setattr(T, "b13b_sprint_jump", lambda *a: pytest.fail("checked while off"))
+    r, s, sim = transfer_at_gap(2., K.M_SPRINT)
+    made = T.propose(r, s, 0., sim, 8, True, np.zeros((0, 6)), set())
+    assert made[1].sprint_jump and made[3] & B["DASH"] and made[0].run.v["b13b"] is None
+
+
+def _inside(monkeypatch, on_b, steps=8.):
+    monkeypatch.setattr(T, "B13", True); monkeypatch.setattr(T, "B13B", on_b)
+    r, s, sim = flight(x=34.55, y=7., vx=0., vy=-.6, target_x=TX)    # her box 34.30-34.80 x 5.45-7.53 in the body 34.25-37.84 (top 6.92)
+    sim.start[K.POGO_OBS] = steps                                      # a real bounce protection: steps left
+    sim.start[K.ATK_CD] = 1.                                           # no down slash now (the Run's own strike row would come first)
+    return T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
+
+
+@pytest.mark.parametrize("steps", [8., 12.])   # its end 8 / 10 frames past the mask frame: inside steers at once, past B13_LEAD_F too
+def test_inside_the_body_at_the_protections_end_steers_out(monkeypatch, steps):
+    draft, _, _, mask = _inside(monkeypatch, True, steps)
+    rec = draft.run.v["b13"]
+    assert rec["kind"] == "steer" and rec["inside"] and rec["steer"] == B["L"]
+    assert mask & B["L"] and not mask & B["R"] and draft.run.v["b13_steer"] == B["L"]
+
+
+def test_inside_the_body_is_no_meeting_without_b13b(monkeypatch):
+    draft, _, _, mask = _inside(monkeypatch, False)
+    assert "b13" not in draft.run.v or draft.run.v["b13"] is None or draft.run.v["b13"].get("kind") != "steer"

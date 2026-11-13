@@ -1504,6 +1504,11 @@ class NativeManualAirChain(NativeChainB2):
             if key!=getattr(self,"_b13_noted",None):
                 self._b13_noted=key
                 self._note("transfer_b13_guard",frame=f,target=plan.iid,link=draft.run.link,mask=int(mask),**b13)
+        b13b=draft.run.v.get("b13b")
+        if isinstance(b13b,dict):
+            # package 1 after B13 (design 7.1): the ground route's sprint-jump check (knife_chain_transfer.b13b_sprint_jump), every
+            # checked tick noted (one per jump decision: the jump link takes over on the next)
+            self._note("transfer_b13b_sprint_jump",frame=f,target=plan.iid,link=draft.run.link,mask=int(mask),**b13b)
         if draft.run.link=="strike" and draft.run.v.get("seam_bound_fallback") and (run is None or run.link!="strike"):
             # Task 182 seq 312 #386: the seam bound's rows out of reach: the target's ordinary stomp row (knife_chain_transfer.stomp_plan)
             self._note("transfer_seam_bound_fallback",frame=f,target=plan.iid,row=draft.run.v.get("row",{}).get("contact_frame"))
