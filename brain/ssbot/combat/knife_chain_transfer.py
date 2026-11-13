@@ -16,8 +16,20 @@ from .knife_chain_eval import Run,X
 from .knife_chain_commitment import MoveInstance
 from .knife_chain_air import body_box,complete_hf,AirAnchor,model_path
 from .slam_play import clappers,control
+from .slam_play import _on as _env_on,_V2 as _ENV_V2
 
 PROGRAM="rune_transfer"
+# Task 182 B13 (docs/plans/forum_clapper_committed_chain.md 2.3 / 5.1 / 6.1; the person 11-12 "先做committed chain吧"): the Run's
+# OWN target body under the conditional rule: her box may meet a still target only in the two frames before its modeled blade
+# contact (contact-2 .. contact), never on the way there. The air link's body guard (transfer_body_guard) reads the Run's own keys
+# ahead to her landing and, when they would put her into that body first, picks the Run's own follow-up (a down slash whose blade
+# lands first, else steering off, else the latest meeting), never a hand-back. SSBOT_FORUM_CHAIN_B13 follows SSBOT_FORUM_V2 (=0:
+# the old rows, no guard).
+B13=_env_on("SSBOT_FORUM_CHAIN_B13",_ENV_V2)
+B13_LEAD_F=8      # steering is chosen only when the planned keys meet the body within this many frames of F
+B13_STRIKE_F=14   # the guard's own (relaxed) strike only within this many: farther, the Run's own rows still have time (a press needs
+                  # its two in-flight frames, the slash's 3 to its first active frame and her box out of the body to contact-2)
+B13_ROLL_F=48     # frames of the planned keys rolled ahead (past her landing from a held jump's apex)
 AIR_ATTACK_STATES=frozenset({"Slam Antic","Slam 0","Slam 1","Slam Effects?","Slam 2"})
 # Target-bound face hook: one aimed face hook inside the SAME rune_transfer Run. Every number is an existing one
 # (map2.strike / hero2 hooked Clawline, knife_chain_hook_target, knife_chain_empty_needle, vault far_lock, the
@@ -353,8 +365,11 @@ def in_slam_range(enemy,hero_box):
     return bool(hb[0]<x+rx and hb[2]>x-rx and hb[1]<y+ry1 and hb[3]>y+ry0)
 
 
-def contact_body_witness(enemy,frames,idle_no_evade=False,idle_time=None):
+def contact_body_witness(enemy,frames,idle_no_evade=False,idle_time=None,hull=False):
     """[frames,4] body boxes (x0,y0,x1,y1) a downslash must touch at f+d; nan rows have no witness.
+
+    hull (Task 182 B13, b13_danger only): the same supported poses, their UNION per frame instead of their intersection, each
+    frame together with the previous one (the box her own box must stay out of; never a hit witness).
 
     A hit witness needs the box EVERY supported pose shares, never the safety
     union. It reuses the fitted body runs and duration tables of the current
@@ -424,8 +439,10 @@ def contact_body_witness(enemy,frames,idle_no_evade=False,idle_time=None):
         if any(s not in STILL_ROOT_STATES or s not in know.body or (s=="Idle" and j>=idle_until)
                for s,j in active):break
         boxes=[standing(s,q) for s,j in active for q in range(j-3,j+2)]
-        c=(max(b[0] for b in boxes),max(b[1] for b in boxes),min(b[2] for b in boxes),min(b[3] for b in boxes))
-        if not (c[0]<c[2] and c[1]<c[3]):break
+        if hull:c=(min(b[0] for b in boxes),min(b[1] for b in boxes),max(b[2] for b in boxes),max(b[3] for b in boxes))
+        else:
+            c=(max(b[0] for b in boxes),max(b[1] for b in boxes),min(b[2] for b in boxes),min(b[3] for b in boxes))
+            if not (c[0]<c[2] and c[1]<c[3]):break
         core[d]=c;following=set()
         for s,j in active:
             if s=="Idle":following.add((s,j+1));continue
@@ -437,6 +454,9 @@ def contact_body_witness(enemy,frames,idle_no_evade=False,idle_time=None):
         if following is None:break
         active=following
     out=core.copy()
+    if hull:
+        out[1:,:2]=np.fmin(core[1:,:2],core[:-1,:2]);out[1:,2:]=np.fmax(core[1:,2:],core[:-1,2:])
+        return out
     out[1:,:2]=np.maximum(core[1:,:2],core[:-1,:2]);out[1:,2:]=np.minimum(core[1:,2:],core[:-1,2:])
     with np.errstate(invalid="ignore"):out[~((out[:,0]<out[:,2])&(out[:,1]<out[:,3]))]=np.nan
     return out
@@ -547,10 +567,13 @@ def walk_body_support(enemy,frames,hero):
     return support if np.isfinite(first[0]).all() else None
 
 
-def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False,contact_ok=None,rejects=None):
+def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False,contact_ok=None,rejects=None,danger=None):
     """Shared velocity-aware downslash exit, not a fixed position or hit receipt.
     clean (Task 182, the plans' over route, Sol seq 255 F2): a row whose hero box meets the body at all before its contact is no
     row (51 real DownSlash hits in the bots' recordings: none had her box in the body before the hit).
+    danger (Task 182 B13): one box, or one per roll index (stomp_rows: the still target's certain body, the row's own hit witness;
+    nan: no claim): a row whose hero box enters it (b13_first_meet) on a step before contact-2 (the conditional rule's two
+    frames) is no row.
     contact_ok (Task 183 seq 263/264, the seam strike): contact_ok(her x, contact index, the witness box there, the
     WalkSupport or None) -> (ok, bound) at the row's first contact, read at the same index as the hit witness; a row whose
     first contact fails it is no row in that direction (listed in rejects: direction, contact frame, her x, the bound).
@@ -600,6 +623,7 @@ def press_now_row(sim,body,F,hold,side,attacking_target=False,clean=False,contac
                 # a moving body is always margin-checked on its hull up to the target-contact exemption
                 if (attacking_target or support is not None) and grazes_body(ro.box[i],hull,j-2):break
                 if clean and enters_body(ro.box[i],hull,j):break
+                if danger is not None and b13_first_meet(ro.box[i],danger,1,j-2) is not None:break
                 cx=float(ro.pos[i,j,0]);bound=None
                 if contact_ok is not None:
                     ok,bound=contact_ok(cx,j,b,support)
@@ -674,6 +698,147 @@ def enters_body(boxes,body,until):
         h=boxes[i]
         if h[0]<=b[2] and h[2]>=b[0] and h[1]<=b[3] and h[3]>=b[1]:return True
     return False
+
+
+def b13_danger(enemy,frames=None):
+    """Task 182 B13: [frames,4] the box her own target body may occupy at each rollout index (0: the STATE frame): a still
+    (STILL_ROOT_STATES) Clapper that is not attacking. Idle: its observed box at every index (one fitted pose). A timed still state:
+    the union of its supported poses at each index (contact_body_witness hull: a caster's Spell Antic rises from top 6.19 to 7.78
+    within a few frames), index 0 together with the observed box, past the fit the last box held. None for any other state (a
+    walker, an evade, a jump, an attack: the existing rules), or an unknown box."""
+    frames=B13_ROLL_F if frames is None else int(frames)
+    st=control(enemy)[0]
+    if st not in STILL_ROOT_STATES or st in AIR_ATTACK_STATES or frames<1:return None
+    try:b=body_box(enemy)
+    except (TypeError,ValueError,OverflowError):return None
+    if b is None:return None
+    b=np.asarray(b,float)
+    if b.shape!=(4,) or not np.isfinite(b).all():return None
+    out=np.tile(b,(frames,1))
+    if st=="Idle":return out
+    w=contact_body_witness(enemy,frames,idle_no_evade=True,hull=True)
+    if w is None:return out
+    w=np.asarray(w,float);last=b
+    if w.ndim!=2 or w.shape[1]!=4:return out
+    for d in range(frames):
+        if d<len(w) and np.isfinite(w[d]).all():
+            last=np.r_[np.minimum(b[:2],w[d][:2]),np.maximum(b[2:],w[d][2:])] if d==0 else w[d]
+        out[d]=last
+    return out
+
+
+def b13_first_meet(boxes,body,start,stop):
+    """The first rollout index i in [start, stop) (start >= 1) where her box ENTERS the body: it meets it (exact overlap,
+    enters_body's test) and did not at i - 1 (index 0: her box now). body: one box, or one per rollout index (b13_danger; past
+    its end the last held). Already inside is no new meeting until she has left it: the pogo protection after a real bounce off
+    it (not in the STATE or the start state), or a hit already taken. None when none."""
+    a=max(start,1);n=min(stop,len(boxes))
+    if n<=a:return None
+    b=np.asarray(boxes,float)[a-1:n];body=np.asarray(body,float)
+    if body.ndim==2:
+        idx=np.minimum(np.arange(a-1,n),len(body)-1);body=body[idx]
+        m=(b[:,0]<=body[:,2])&(b[:,2]>=body[:,0])&(b[:,1]<=body[:,3])&(b[:,3]>=body[:,1])
+    else:m=(b[:,0]<=body[2])&(b[:,2]>=body[0])&(b[:,1]<=body[3])&(b[:,3]>=body[1])
+    hit=np.flatnonzero(m[1:]&~m[:-1])
+    return a+int(hit[0]) if len(hit) else None
+
+
+B13_HOLD_VY=-10.0   # a real bounce's hold: its STATE vy reads 17.4 (her real rise) and this frozen -10 in turn (s312 slam_notice)
+
+
+def b13_bounce_hold(hero):
+    """The STATE frames whose velocity is not her motion: vel exactly 0, 0 in the air (a hit's hit-stop, c86 ep13 41452; the first
+    airborne frame of a jump, ep40 121806) and a bounce hold's frozen vy -10 reading (in a DownSpikeBounce or a Recoil Twirl clip
+    alike: c86 ep13 41455-41456, ep33 101136 / 101139; between them the hold reads 17.4, her real rise, as a held jump does: ep14
+    44485-44492). The model's start from such a velocity is wrong; the guard reads the next frame. A falling vy never reads -10
+    exactly (it steps 1.2 from 17.4); a whole DownSpikeBounce clip can run through a fall with real values (p12 ep27 86686-86712)."""
+    vel=(hero or {}).get("vel")
+    if not isinstance(vel,(list,tuple)) or len(vel)<2:return False
+    try:vx,vy=float(vel[0]),float(vel[1])
+    except (TypeError,ValueError):return False
+    return (vx==0. and vy==0.) or abs(vy-B13_HOLD_VY)<1e-3
+
+
+def b13_held_back(x,e,sim,side,left):
+    """The native adapter's transfer_side_held_back (knife_chain_air_native._transfer_offer) for a side key of the air link: on the
+    plans' over route (plan_over_call), or with a casting target (HOOK_CAST_STATES, seq 312 active) once the small rune's opening
+    is not pending, the side key goes out while 14 frames of the key held would carry her box into the target's observed body.
+    True when the adapter would take this side key out (the guard then reads the keys without it)."""
+    from .tactics import clapper_separated as SEP
+    casting=bool(SEP.active(int(x.obs.f)) and control(e)[0] in HOOK_CAST_STATES and not opening_pending(x.v))
+    if not (plan_over_call(x.v) or casting):return False
+    body=body_box(e)
+    if body is None:return False
+    ro=sim.roll(np.full((1,14),int(side)|(B["J"] if left else 0),np.int64))
+    return enters_body(ro.box[0],np.asarray(body,float),len(ro.box[0]))
+
+
+def b13_landing(flags,start):
+    """The first rollout index from start on with her on the ground (len(flags) when none)."""
+    g=np.flatnonzero((np.asarray(flags)[start:]&K.F_GROUND)!=0)
+    return start+int(g[0]) if len(g) else len(flags)
+
+
+def b13_guard(x,strike_rows):
+    """Task 182 B13 (design 2.2 / 2.3: the chain's own follow-up, no hand-back): the air link's look ahead at the Run's OWN target
+    body. The Run's keys this tick (its side key, or a steer this guard chose earlier, with the jump hold it has left) are rolled
+    B13_ROLL_F frames from the actual start, in-flight prefix and hold filter, to her landing. When her box enters the still target
+    body (b13_danger; b13_first_meet: from outside it, already inside is no new meeting) on that roll (not read in a real bounce's
+    hold, b13_bounce_hold):
+      1. a down slash whose blade lands first: strike_rows(x) (the air link's stomp_rows, relaxed: the Run's own target even while
+         the small rune's opening is pending, Idle's Will Evade taken as not evading, every other rule of the Run's rows as ever:
+         no_strike, seam_only, the seam / bound predicates, a hit Idle, the B13 row rule on its certain body). Only within
+         B13_STRIKE_F frames of F (farther the Run's own rows still have time): the strike link next;
+      2. within B13_LEAD_F frames of F: steering, the first of releasing the side key and countersteering whose roll keeps her
+         out of the body to her landing (the jump hold unchanged); later ticks keep that steer to the landing;
+      3. within B13_LEAD_F with neither: the latest first meeting of the three (forced risk; a chain defect in the record).
+    Farther than B13_LEAD_F with no strike: the Run's keys as they are (a strike row may come as she nears). The record goes
+    to x.v["b13"] (the native adapter notes it); the guard never ends the Run. Returns a goto to the strike link or None."""
+    if not B13 or x.v.get("_approach_only") or not hasattr(x.obs,"sim") or x.obs.ground:return None
+    e=getattr(x.obs,"e",None)
+    if e is None or control(e)[0] not in STILL_ROOT_STATES or control(e)[0] in AIR_ATTACK_STATES:return None
+    if b13_bounce_hold(getattr(x.obs,"hero",None)):return None
+    sim=x.obs.sim
+    S=np.asarray(sim.start,float)
+    if S.size!=K.K or not np.isfinite(S).all():return None
+    st=control(e)[0]
+    danger=b13_danger(e,len(sim.prefix)+1+B13_ROLL_F)   # one box per rollout index (a caster's pose grows: Spell Antic -> Cast)
+    if danger is None:return None
+    side=int(x.v.get("side") or 0);left=max(0,int(x.v["jump_until"])-int(x.obs.k))
+    steer=x.v.get("b13_steer")
+    # the keys the native adapter really sends: its transfer_side_held_back takes a side key out (b13_held_back)
+    eff=lambda d:0 if d and b13_held_back(x,e,sim,d,left) else d
+    planned=eff(side if steer is None else int(steer))
+    counter=eff(B["L"] if side==B["R"] else B["R"] if side==B["L"] else 0)
+    dirs=[planned]+[d for d in dict.fromkeys((0,counter)) if d!=planned]
+    rows=np.zeros((len(dirs),B13_ROLL_F),np.int64)
+    for i,d in enumerate(dirs):rows[i]=d
+    rows[:,:min(left,B13_ROLL_F)]|=B["J"]
+    ro=sim.roll(rows)
+    off=int(sim.off)
+    meets=[]
+    for i in range(len(dirs)):
+        meets.append(b13_first_meet(ro.box[i],danger,1,b13_landing(ro.flags[i],off)+1))
+    if meets[0] is None:return None
+    info={"f":int(x.obs.f),"meet_F":int(sim.fo+meets[0]),"lead":int(meets[0]-off),"planned":int(planned),"state":st,
+          "opening":bool(opening_pending(x.v))}
+    out=strike_rows(x) if meets[0]-off<=B13_STRIKE_F else None
+    if out is not None:
+        row=x.v["row"]
+        x.v.update(b13_steer=None,b13={**info,"kind":"strike","contact_F":int(row["contact_frame"]),"press_F":int(row["press_F"])})
+        return out
+    if meets[0]-off>B13_LEAD_F:
+        x.v["b13"]={**info,"kind":"wait"}
+        return None
+    for i in range(1,len(dirs)):
+        if meets[i] is None:
+            x.v["b13_steer"]=int(dirs[i])
+            x.v["b13"]={**info,"kind":"steer","steer":int(dirs[i])}
+            return None
+    best=max(range(len(dirs)),key=lambda i:meets[i])
+    if best:x.v["b13_steer"]=int(dirs[best])
+    x.v["b13"]={**info,"kind":"forced","steer":int(dirs[best]),"meets_F":[int(sim.fo+m) for m in meets]}
+    return None
 
 
 # Task 182 seq 312 (design 3.1; the person: after the two crossed she came down on the other one, bouts 18 / 19 / 41 / 47): the route an
@@ -800,6 +965,10 @@ def air_approach_keys(x):
     All emitted keys still use the normal same-owner send and current-step gate.
     """
     side=int(x.v["side"]);left=max(0,int(x.v["jump_until"])-int(x.obs.k))
+    steer=x.v.get("b13_steer") if B13 else None
+    if steer is not None:
+        # Task 182 B13: the body guard's steer (release or countersteer) replaces the side key to her landing; no new dash
+        return int(steer)|(B["J"] if left else 0)
     mask=side|(B["J"] if left else 0)
     # A side approach has no strike/bounce to finish an irreversible air dash.
     # Keep the actual prefix/hold untouched; only decline a NEW dash impulse.
@@ -1371,16 +1540,17 @@ def register(prims):
             return m|int(masks[i])
         return m|int(x.v.get("source_tail_mask",0))
 
-    def seam_contact(x):
+    def seam_contact(x,store=True):
         """Task 183 seq 263/264: on a seam tick the row's first contact must be on the target's inner side. The bound is
         read at that row's own contact index, the index its hit witness is read at (seam_bound): a walking target's
         WalkSupport roots there (the support's own step counts; no other predictor), a still one's observed root, and
         the witness box's centre. An unknown side or a contact index without supported roots turns the row down. The
-        turned-down rows go to x.v["seam_rejects"] for the record. (predicate or None, rejects list or None)"""
+        turned-down rows go to x.v["seam_rejects"] for the record (not with store False: B13's second look). (predicate or
+        None, rejects list or None)"""
         seam=x.v.get("seam_inner")
         if not seam:return None,None
         root,sign=float(seam[0]),int(seam[1]);rejects=[]
-        x.v["seam_rejects"]=rejects
+        if store:x.v["seam_rejects"]=rejects
 
         def inner(cx,j,witness,support):
             if support is None:roots=[root]
@@ -1392,7 +1562,7 @@ def register(prims):
             return bound is not None and (cx-bound)*sign>=0.,bound
         return inner,rejects
 
-    def bound_contact(x,inner,rejects):
+    def bound_contact(x,inner,rejects,store=True):
         """Task 182 seq 312 #385 (the person's 1.2.2: down slash N outside the range, before it unlocks): a row counts only with her
         centre at its first contact on her side of bound_x ((x - bound_x) * sign >= 0) and that contact by frame by_f (x.v["strike_bound"]),
         together with the seam predicate when there is one; the turned-down rows go to the same record. (predicate, rejects)"""
@@ -1401,7 +1571,8 @@ def register(prims):
         bx,sg,by_f=float(sb[0]),int(sb[1]),int(sb[2])
         fo=int(x.obs.sim.fo)
         if rejects is None:
-            rejects=[];x.v["seam_rejects"]=rejects
+            rejects=[]
+            if store:x.v["seam_rejects"]=rejects
 
         def bounded(cx,j,witness,support):
             if (cx-bx)*sg<0. or fo+j>by_f:return False,bx
@@ -1410,11 +1581,20 @@ def register(prims):
 
     @prims.action("transfer_stomp_plan",doc="one press-now row against the currently observed body; not a hit receipt")
     def stomp_plan(x):
+        return stomp_rows(x)
+
+    def stomp_rows(x,relaxed=False):
+        """stomp_plan's row choice. relaxed (Task 182 B13: b13_guard only, when the Run's own keys would put her into its still target's
+        body first): the Run's own target even while the small rune's opening is pending (no opening slash: the hook did not fire this
+        tick and she is coming down on the caster), Idle's Will Evade taken as not evading (if it evades the blade misses and the body
+        has left: no worse than landing on it) with this Run's in-range record left untouched, every other rule as ever (no_strike,
+        seam_only, the seam and bound predicates, a hit Idle, the pose witness; their rejects not recorded twice). With B13 every row of
+        a still target is no row when her box enters its certain body (the hit witness) before contact-2."""
         if x.v.get("_approach_only") or x.v.get("no_strike") or not hasattr(x.obs,"sim") or x.obs.ground:return None
         # #387 (Sol seq 335): the small rune's high hook opening first (face_hook); its own row only: the rising side down slash on the
         # body too near to hook (the person 11-10, opening_slash), from the earliest press, the jump held (press_now_row's left)
-        slash=x.v.get("opening_slash") if opening_pending(x.v) else None
-        if opening_pending(x.v) and slash is None:return None
+        slash=x.v.get("opening_slash") if opening_pending(x.v) and not relaxed else None
+        if opening_pending(x.v) and slash is None and not relaxed:return None
         tgt=x.obs.e
         if slash is not None:
             tgt=next((e for e in getattr(x.obs,"ents",None) or () if e.get("iid")==slash),None)
@@ -1422,13 +1602,13 @@ def register(prims):
                 # (falling with no rising side slash found, or that body gone: the opening is lost, the Run's own down slash next tick)
                 x.v["opening_lost"]="no rising side down slash";x.v["opening_slash"]=None
                 return None
-        x.v["slash_iid"]=None
+        if not relaxed:x.v["slash_iid"]=None
         # Task 183 seq 268: the middle return's give-way (seam_only) is for a seam row only: no seam_inner this tick (not a
         # close pair now), no row on any side; a seam row is held to the target's inner side below (seam_contact)
         if x.v.get("seam_only") and not x.v.get("seam_inner"):return None
         from . import pogo_model as PM
-        inner0,rejects0=seam_contact(x)
-        inner,rejects=bound_contact(x,inner0,rejects0)
+        inner0,rejects0=seam_contact(x,store=not relaxed)
+        inner,rejects=bound_contact(x,inner0,rejects0,store=not relaxed)
         # Task 182 seq 312 #386: a seam-kind bound (the shared seam strike) is the preferred contact, never a ban on the stomp over the body:
         # with no row meeting it (the seam side out of reach before the contact) the target's ordinary rows whose contact has her centre over
         # its body (sy23_seam 131555-131570: every row turned down over N's outer half, the side key held back, she fell onto N unstruck);
@@ -1436,13 +1616,14 @@ def register(prims):
         # 1.2.2's "outside" bound stays a hard limit.
         sb=x.v.get("strike_bound")
         soft=bool(sb) and len(sb)>3 and sb[3]=="seam"
-        x.v["seam_bound_fallback"]=False
+        if not relaxed:x.v["seam_bound_fallback"]=False
 
         def over_body(cx,j,witness,support):
             if not float(witness[0])<=cx<=float(witness[2]):return False,None
             return (True,None) if inner0 is None else inner0(cx,j,witness,support)
         side=x.v.get("strike_dir") or x.v["side"]   # #385: 1.2.2's rows toward the target from the aim (the air key may be none there)
         if control(tgt)[0]=="Walk":
+            if relaxed:return None   # (B13 guards still bodies only)
             # Task 179: the explicit constant-velocity Walk domain (WalkSupport); outside it no row, the
             # existing approach continues and the next tick re-selects. Never the still-body witness below.
             prefix=getattr(x.obs.sim,"prefix",None)
@@ -1473,8 +1654,8 @@ def register(prims):
         # Will Evade shown False needs this Run's own CONTINUOUS in-range observations of this Idle instance from
         # the gate (EV_K[1]) through RANGE_LAG_F; leaving her range, a missing tick or an unknown box restarts the
         # collection, a new Idle (or a hit, which leaves Idle) starts over; once shown it holds to this Idle's end.
-        st0,t0=control(enemy);no_evade=False;f0=getattr(x.obs,"f",None)
-        if st0=="Idle" and type(t0) in (int,float) and math.isfinite(t0) and type(f0) is int:
+        st0,t0=control(enemy);no_evade=bool(relaxed);f0=getattr(x.obs,"f",None)
+        if not relaxed and st0=="Idle" and type(t0) in (int,float) and math.isfinite(t0) and type(f0) is int:
             k0=int(round(t0*60.));key=[enemy.get("iid"),f0-k0]
             w=x.v.get("idle_in_range")
             if not (isinstance(w,dict) and w.get("key")==key):w={"key":key,"start":None,"last_f":None,"done":False}
@@ -1493,12 +1674,15 @@ def register(prims):
                                   idle_time=idle_time_of(ev))
         if body is None:return None
         # The external step scans an ATTACKING target body with its margin (owner kind move); match it.
+        # Task 182 B13: a still target's CERTAIN body (this hit witness: the poses every timing shares) is out of bounds before
+        # contact-2 for every row (b13_first_meet); the guard's look ahead reads the possible one (b13_danger). None when off
+        danger=body if B13 else None
         row=press_now_row(x.obs.sim,body,x.obs.F,left,side,attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
-                          contact_ok=inner,rejects=rejects)
+                          contact_ok=inner,rejects=None if relaxed else rejects,danger=danger)
         if row is None and soft:
             row=press_now_row(x.obs.sim,body,x.obs.F,left,side,attacking_target=st0 in AIR_ATTACK_STATES,clean=plan_over_call(x.v),
-                              contact_ok=over_body,rejects=rejects0)
-            x.v["seam_bound_fallback"]=row is not None
+                              contact_ok=over_body,rejects=None if relaxed else rejects0,danger=danger)
+            if not relaxed or row is not None:x.v["seam_bound_fallback"]=row is not None
         if row is not None:
             x.v["row"]=row;x.v["slash_iid"]=slash
             return {"do":"goto","to":"strike"}
@@ -1517,6 +1701,10 @@ def register(prims):
 
     @prims.gen("transfer_air_keys",doc="same-owner optional one-shot air dash; never a new jump or umbrella")
     def air_keys(x,m):return m|air_approach_keys(x)
+
+    @prims.action("transfer_body_guard",doc="Task 182 B13: the Run's own target body ahead to her landing: a blade-first down "
+                                            "slash, else steering off, else the latest meeting; never a hand-back")
+    def body_guard(x):return b13_guard(x,lambda x:stomp_rows(x,relaxed=True))
 
     @prims.gen("transfer_follow_keys",doc="Task 183: the bounce follow-up's checked absolute row (middle: the key toward "
                                           "the middle, an optional opening air dash, then none; land: the key to the ground); no strike")

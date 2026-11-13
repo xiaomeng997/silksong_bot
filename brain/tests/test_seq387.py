@@ -146,7 +146,9 @@ def test_no_down_slash_row_before_the_openings_hook(monkeypatch):
 
 def test_an_opening_lost_to_a_face_too_near_hands_the_run_its_down_slash(monkeypatch):
     # the caster right beside her: no hook can be pressed (its face inside the press minimum); the opening is lost for this Run and its
-    # ordinary down slash takes over on the next tick (no useless jump past a caster she can strike)
+    # ordinary down slash takes over on the next tick (no useless jump past a caster she can strike). (Pinned to B13 off: the old Run;
+    # B13's body guard over a pending opening: tests/test_b13_guard.py)
+    monkeypatch.setattr(T, "B13", False)
     row = {"F0": 1002, "masks": [B["D"] | B["A"]] * 12, "press_F": 1003, "contact_frame": 1008, "support": "still"}
     monkeypatch.setattr(T, "contact_body_witness", lambda *a, **k: np.array([21.2, 3.01, 24.8, 6.92]))
     monkeypatch.setattr(T, "press_now_row", lambda *a, **k: dict(row))
@@ -275,6 +277,8 @@ def test_the_opening_has_its_own_once_per_cast_key():
 
 def test_the_caster_target_holds_the_side_key_back_while_it_would_carry_her_into_the_taller_body(monkeypatch):
     # g387_X14 54855: after a real bounce off the caster, the air link's side key carried her into its body corner (top 7.78 in the cast)
+    # (B13 off: with it the body guard releases the side key itself: tests/test_b13_guard.py)
+    monkeypatch.setattr(T, "B13", False)
     from ssbot.combat import knife_chain_air_native as N
     from ssbot.knowledge import kinematics as K
     from tests.test_dash_lock179 import FC, chain, geometry

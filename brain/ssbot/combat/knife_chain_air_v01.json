@@ -1015,6 +1015,7 @@
           {"do":"abort","when":{"p":"transfer_landed"},"why":{"lit":"transfer landed without a downslash"}},
           {"do":"act","act":{"a":"transfer_stomp_plan"}},
           {"do":"act","act":{"a":"transfer_face_hook"}},
+          {"do":"act","act":{"a":"transfer_body_guard"}},
           {"do":"abort","when":{"p":"transfer_antic_strike_late"},"why":{"lit":"attacking target: no down slash on its standing antic before the earliest lunge"}}
         ],
         "id": "rune_transfer.air",

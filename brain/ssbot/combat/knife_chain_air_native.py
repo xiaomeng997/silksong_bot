@@ -1493,6 +1493,14 @@ class NativeManualAirChain(NativeChainB2):
                        scope=getattr(getattr(prefs,"entry_attack",None),"scope",None),
                        basis="a Run made in the planner's own umbrella; its keys hold no J (the release is the sent key, not this note)")
         draft,plan,path,mask=made
+        b13=draft.run.v.get("b13")
+        if isinstance(b13,dict):
+            # Task 182 B13: the air link's body guard decision (knife_chain_transfer.b13_guard), noted once per decision
+            key=(plan.move,b13.get("kind"),b13.get("steer"),b13.get("contact_F"),
+                 None if b13.get("kind")=="wait" else b13.get("f"))
+            if key!=getattr(self,"_b13_noted",None):
+                self._b13_noted=key
+                self._note("transfer_b13_guard",frame=f,target=plan.iid,link=draft.run.link,mask=int(mask),**b13)
         if draft.run.link=="strike" and draft.run.v.get("seam_bound_fallback") and (run is None or run.link!="strike"):
             # Task 182 seq 312 #386: the seam bound's rows out of reach: the target's ordinary stomp row (knife_chain_transfer.stomp_plan)
             self._note("transfer_seam_bound_fallback",frame=f,target=plan.iid,row=draft.run.v.get("row",{}).get("contact_frame"))
@@ -1739,6 +1747,7 @@ class NativeManualAirChain(NativeChainB2):
              "tail_checked_through":draft.run.v.get("source_tail_checked_through"),
              "tail_mask":draft.run.v.get("source_tail_mask"),
              "approach_recipe":draft.run.v.get("approach_recipe"),"approach_only":approach_only,
+             **({"b13":(draft.run.v.get("b13") or {}).get("kind"),"b13_steer":draft.run.v.get("b13_steer")} if transfer.B13 else {}),
              "strike_direction":None if draft.run.v.get("row") is None else draft.run.v["row"].get("approach_direction"),
              "strike_support":None if draft.run.v.get("row") is None else draft.run.v["row"].get("support","still"),
              "strike_walk":None if draft.run.v.get("row") is None else draft.run.v["row"].get("walk"),
