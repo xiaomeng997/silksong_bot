@@ -1056,6 +1056,11 @@ class ForumPlannerPolicy(PlannerPolicy):
         own_bounce=getattr(chain,"own_bounce_now",None)
         handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce))
                  or (real_bounce and callable(own_bounce) and own_bounce(state)))
+        if (not handoff and slam_play.COMMIT and callable(getattr(script,"committed",None))
+                and script.committed(state)):
+            # Package 1 (SSBOT_FORUM_SLAM_COMMIT): a committed playbook run keeps the slam; no chain goal is bound before its
+            # bounce hand-off (the gate "slam_play" also holds the chain's offers this tick)
+            return prefs
         goal=getattr(chain,"_transfer_goal",None);target=getattr(prefs,"target",None)
         candidate=getattr(getattr(self,"tac",None),"wall_pressure_candidate",None)
         if (real_bounce and ws is not None and forecast is not None and callable(candidate)
@@ -1080,11 +1085,12 @@ class ForumPlannerPolicy(PlannerPolicy):
                          and getattr(chain,"candidate_generation",False)) else None
 
     @staticmethod
-    def _b2_policy_gate(*, low_crit, asw_crit, m2_on, supervisor):
+    def _b2_policy_gate(*, low_crit, asw_crit, m2_on, supervisor, slam_commit=False):
         if supervisor:return "supervisor"
         if m2_on:return "m2"
         if low_crit:return "low_crit"
         if asw_crit:return "asw_crit"
+        if slam_commit:return "slam_play"     # package 1: the committed slam playbook run (SSBOT_FORUM_SLAM_COMMIT)
         return None
 
     def _b2_script_critical(self, f, s):
@@ -1208,6 +1214,10 @@ class ForumPlannerPolicy(PlannerPolicy):
                     prefs = replace(prefs, rune_exit=rx)
         prefs = self._chain_goal_preferences(s,prefs,game_time=ws.stamp.t_game_s if slam_play.GAME_CLOCK else f/60.,
                                             ws=ws,forecast=fcast)
+        # Package 1 (SSBOT_FORUM_SLAM_COMMIT): the playbook run from its jump to the bounce hand-off / its apex (after the goal
+        # step above, which hands a real bounce to the chain and ends the run)
+        slam_commit = bool(self.slam_play is not None and slam_play.COMMIT
+                           and callable(getattr(self.slam_play, "committed", None)) and self.slam_play.committed(s))
         self._mode_last = prefs.mode
         if self.v2feed is not None:
             fplan = self.v2feed.support(fcast, fo, focus=getattr(prefs, "target", None),
@@ -1250,7 +1260,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         if b2_priority is not None:
             b2_critical=self._b2_script_critical(f,s)
             b2_priority.policy_gate_reason=self._b2_policy_gate(low_crit=b2_critical[0],asw_crit=b2_critical[2],
-                m2_on=m2_mask is not None,supervisor=self.pause_owned or self.sc.pq is not None)
+                m2_on=m2_mask is not None,supervisor=self.pause_owned or self.sc.pq is not None,slam_commit=slam_commit)
         self._rune_tick = {"rows": None, "sim": None, "ctx": (S0, prefix, hold, fo, f)}
         if self.chain_native is not None:
             self.chain_native.rune_rows = self._rune_rows      # Task 182 seq 310: the chain's own last check (knife_chain_b2._rune_gate), built when asked
@@ -1383,14 +1393,19 @@ class ForumPlannerPolicy(PlannerPolicy):
             # Restore SLAM_PLAY's original script priority for a selected B2
             # candidate. Critical scripts / map2 / supervisor still keep keys.
             b2_priority.policy_gate_reason=self._b2_policy_gate(low_crit=low_crit,asw_crit=asw_crit,
-                m2_on=m2_on,supervisor=r.mask is not None or self.pause_owned)
+                m2_on=m2_on,supervisor=r.mask is not None or self.pause_owned,slam_commit=slam_commit)
             if b2_priority.policy_gate_reason is None and self._b2_selected_for_policy(res,fresh=not air_tick):
                 mask=play=int(res.mask)
                 own="chain"
                 self.counts["b2_script_priority"]+=1
+            elif b2_priority.policy_gate_reason=="slam_play":
+                self.counts["slam_commit_gate"]+=1
+        slam_stepped = False
         if (self.slam_play is not None and not low_crit and not asw_crit and not m2_on
-                and not getattr(self.chain_native, "candidate_generation", False)):
+                and (slam_commit or not getattr(self.chain_native, "candidate_generation", False))):
             # SP1: the slam playbook's keys while its script runs (the supervisor's keys win and end the script)
+            # Package 1: a committed run is stepped even while the B2 chain has a context (the gate above holds its offers)
+            slam_stepped = True
             # SP10b (SSBOT_FORUM_TWO_AIRCHAIN): the hero model of this tick for the air chain's plan
             sim = (air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f)
                    if ((air_chain.AIRCHAIN and self.two is not None) or claw_strike.CLAWSTRIKE
@@ -1422,6 +1437,13 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play
                 own = "slam"
                 self.counts["slam_play"] += 1
+        if (not slam_stepped and self.slam_play is not None and slam_play.COMMIT
+                and callable(getattr(self.slam_play, "yield_ends_run", None)) and self.slam_play.yield_ends_run(s)):
+            # Package 1: a run from its jump on that another owner holds the keys from this tick (a critical script, map2, or
+            # the chain past its apex) ends here: no frozen run wakes at Slam 0 with a late press (B04, r2 bout 31)
+            self.slam_play.abort("yielded to " + ("low_crit" if low_crit else "asw_crit" if asw_crit else "m2" if m2_on
+                                                  else "chain"))
+            self.counts["slam_commit_yield"] += 1
         if self.claw is not None and play is None and not low_crit and not asw_crit:
             # SP10c: the late Clawline on a far jump while its script runs (the supervisor's keys win)
             cm = self.claw.step(f, s, ws.hero.contact.v == "GROUND",

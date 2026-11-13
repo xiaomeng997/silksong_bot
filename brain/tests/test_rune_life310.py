@@ -655,7 +655,8 @@ def arb(veto_for, two=None):
     p.two = two; p._wake_f = None; p.enc = NS(name="w13")
     s = {"f": 2599, "hero": {}}
     scope = dict(self=p, res=res, r=NS(mask=None), s=s, raw=s, f=2599, fo=2599, tap=None, ws=NS(stamp=NS(t_game_s=1.), hero=NS(contact=NS(v="GROUND"))), S0=None,
-                 prefix=[], hold=None, prefs=NS(target=7), esc_on=False, wt=None, fcast=None, m2_mask=None, b2_priority=None, b2_critical=None, air_tick=False)
+                 prefix=[], hold=None, prefs=NS(target=7), esc_on=False, wt=None, fcast=None, m2_mask=None, b2_priority=None, b2_critical=None, air_tick=False,
+                 slam_commit=False)            # Task 182 package 1: act's flag from SlamPlay.committed (no committed run here)
     exec(arbitration_code(), mod.__dict__, scope)
     return p, scope
 

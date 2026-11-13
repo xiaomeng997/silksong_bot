@@ -156,9 +156,14 @@ def arbitrate(s, planner_mask, *, ch=None, sup=None, slam=None, prefix=(0,), gro
     scope = dict(self=p, res=res, r=NS(mask=sup), s=s, raw=s, f=f, fo=f,
                  ws=NS(stamp=NS(t_game_s=1.), hero=NS(contact=NS(v="GROUND" if ground else "AIR"))), S0=None,
                  prefix=np.asarray(prefix, np.int64), hold=K.HoldState.idle(1), prefs=NS(target=IID), esc_on=False, wt=None, fcast=None,
-                 m2_mask=None, b2_priority=None, b2_critical=None, air_tick=False)
-    exec(arbitration_code(), mod.__dict__, scope)
-    return p, scope
+                 m2_mask=None, b2_priority=None, b2_critical=None, air_tick=False,
+                 slam_commit=False)            # Task 182 package 1: act's flag from SlamPlay.committed (no committed run here)
+    # One namespace (module globals + act's locals): act's generator expressions (seq 312's middle_jump reads prefs for every
+    # Clapper) see act's locals as they do in act; exec with a separate locals dict raised NameError since e1ac76e5
+    ns = dict(mod.__dict__)
+    ns.update(scope)
+    exec(arbitration_code(), ns)
+    return p, ns
 
 
 def test_production_the_move_away_goes_out_and_the_chase_ends():

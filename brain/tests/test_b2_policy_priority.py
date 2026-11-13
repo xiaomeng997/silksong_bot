@@ -79,11 +79,12 @@ def arbitration_code():
     return compile(ast.fix_missing_locations(ast.Module(body=copy.deepcopy(body[start:end]),type_ignores=[])),mod.__file__,"exec")
 
 
-def run_arbitration(p,res,*,mask_sup=None,low_crit=False,asw_crit=False,m2=None):
+def run_arbitration(p,res,*,mask_sup=None,low_crit=False,asw_crit=False,m2=None,slam_commit=False,slam=None):
+    # slam_commit: act's package-1 flag (SlamPlay.committed before the planner); slam: a slam playbook stand-in
     p.tac=None  # Actual arbitration also reads the optional Gauntlet wall-skip.
     p.sc=NS(pq=None);p.pause_owned=False;p.m2=m2;p.wpress=None;p.air_show=None
     p._play_tick=None;p.v2feed=None;p.counts=Counter();p._cogfly=lambda *a:None;p.cog={"frames":set()}
-    p.slam_play=Script(mask=16);p.claw=Script(mask=32);p.cast_stab=Script(mask=64)
+    p.slam_play=slam if slam is not None else Script(mask=16);p.claw=Script(mask=32);p.cast_stab=Script(mask=64)
     p.rune_lowhop=Script(mask=8,critical=low_crit);p.evade_chase=Script(mask=128)
     p.two=None;p._wake_f=None;p.enc=NS(name="w7")
     s={"f":2599,"hero":{}}
@@ -92,7 +93,7 @@ def run_arbitration(p,res,*,mask_sup=None,low_crit=False,asw_crit=False,m2=None)
         prefix=[],hold=None,prefs=NS(target=7),esc_on=False,wt=None,fcast=None,
         m2_mask=None if m2 is None else 256,b2_priority=p._b2_priority_chain(),
         b2_critical=(low_crit,None,asw_crit,False) if p._b2_priority_chain() is not None else None,
-        air_tick=False)
+        air_tick=False,slam_commit=slam_commit)
     exec(arbitration_code(),mod.__dict__,scope)
     return scope
 

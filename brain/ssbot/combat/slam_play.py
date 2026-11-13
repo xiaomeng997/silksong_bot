@@ -265,6 +265,16 @@ TIGHT_DASH_ROOM = 10.5      # the dash way out needs this room behind A's centre
 # slash's reach was checked against BODY_FRONT / BODY_BACK, not the state's real span: Slam 2 / Recover front 3.37-3.49,
 # Slam Antic 1.87)
 REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME", _V2)
+# SSBOT_FORUM_SLAM_COMMIT (Task 182 package 1; the person 11-12 "继续包1和包2吧", docs/plans/forum_clapper_committed_chain.md 7.1,
+# 5.2, 4.4; follows SSBOT_FORUM_V2, =0 the old arbitration): from its jump (or the Clawline's press) to the bounce hand-off or
+# its own bounce's apex the playbook is one committed link. The policy steps it on every tick of that span, the B2 chain gets
+# no keys (policy gate "slam_play"), and a run that loses the keys anyway from its jump on ends there instead of waking later.
+# Before: the chain's context (L2's escape waypoint) froze a jumped run, which woke at Slam 0 and pressed late (antic 48-51,
+# Slam 0 seen): 7 of 7 such runs (the new 50 and package 0's 100 bouts) caught nothing and 4 were hit (b2 B04 12082; P0 s1 ep 22
+# 69043, r2 ep 30 95655, ep 33 103706; s312/b_items/slam_preempt.txt). Before the jump nothing changes: the start keeps
+# today's yield rules and a walk the chain froze still re-checks the ground and the band at the jump.
+COMMIT = _on("SSBOT_FORUM_SLAM_COMMIT", _V2)
+COMMIT_PHASES = ("jump", "air", "after", "cs_lock", "cs_strike")
 NEAR_V = 0.165             # u per frame: the hero's air speed with a direction key (the probes' bounce, 9.9 u/s)
 SLASH_X = (0.19, 3.12)      # the Wanderer side slash's reach in front of her box centre (knowledge/.../attacks)
 BODY_FRONT, BODY_BACK = 2.25, 1.34      # the Clapper's body box from its centre (front / back), when no collider is seen
@@ -674,6 +684,26 @@ class SlamPlay:
     def active(self) -> bool:
         return self.run is not None and self.run.phase in ("land", "walk", "jump", "air", "after", "cs_pre", "cs_lock",
                                                             "cs_strike")
+
+    def committed(self, s: dict | None = None) -> bool:
+        """SSBOT_FORUM_SLAM_COMMIT (package 1): the run is a committed link - from its jump (Fable's commitment point,
+        k_jump 26) or the Clawline's press, through the press and the bounce, until her bounce stops rising (the apex,
+        about Slam 0 + 20: the hammer is off by Slam 0 + 12..14). A press with no bounce ends the run itself (no bounce
+        by the press + 14). s: this tick's STATE (her vertical speed for the apex); None reads the run alone."""
+        r = self.run
+        if r is None or r.phase not in COMMIT_PHASES:
+            return False
+        if r.phase != "after" or not r.bounced:
+            return True
+        vy = ((s or {}).get("hero") or {}).get("vel") if s is not None else None
+        return vy is not None and len(vy) > 1 and float(vy[1]) > 0.0
+
+    def yield_ends_run(self, s: dict | None = None) -> bool:
+        """SSBOT_FORUM_SLAM_COMMIT (package 1): a tick on which this run is not stepped (another owner has the keys) ends
+        it: from the jump / the Clawline's press on (committed or past its apex). A run before its jump keeps today's
+        rule (it is frozen and re-checks the ground and the band at the jump)."""
+        r = self.run
+        return r is not None and r.phase in COMMIT_PHASES
 
     def abort(self, why: str) -> None:
         """Hand the slam back to the planner (the supervisor took the keys)."""
