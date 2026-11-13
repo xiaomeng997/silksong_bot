@@ -2043,6 +2043,10 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if mask is None:
         why=draft.done[-1].v.get("why") if draft.done else None
         return (None,replace(p,ended_reason=why),None,None)
+    if B13 and (draft.run.link!="air" or ground):
+        # Task 182 B13 (Sol REVIEW399 1): a steer belongs to the flight it was chosen in, kept by the air link's keys to that flight's
+        # landing; on the ground or on any other link this tick (a landed Run that jumps again, a hook, a strike) its flight is over
+        draft.run.v.pop("b13_steer",None)
     row=draft.run.v.get("row")
     if row is not None:p=replace(p,press_k=k+row["press_F"]-state["f"],contact_frame=row["contact_frame"])
     path=model_path(sim,p,np.array([mask],np.int64),game)
@@ -2071,6 +2075,7 @@ def follow_draft(runner,made,state,game,sim,link,follow,idle_evidence=None):
     if body is None:return None
     draft=runner.fork_empty(AirAnchor())
     variables=dict(old.run.v);variables["follow"]=dict(follow)
+    variables.pop("b13_steer",None)   # (B13: a follow-up route is a motion of its own; Sol REVIEW399 1)
     draft.run=Run(PROGRAM,link,variables)
     h=state.get("hero") or {}
     obs=_observation(p,state,game,body,False,head_clearance(runner.chains[PROGRAM].cfg))

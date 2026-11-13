@@ -258,3 +258,87 @@ def test_on_a_downspikebounce_clip_with_a_real_vy_is_read(on):
     s["hero"]["anim"] = {"clip": "DownSpikeBounce 1"}
     made = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
     assert made[0].run.v["b13"]["kind"] == "forced"
+
+
+# ---- Sol REVIEW399 (0e3d6593): the steer's lifecycle and the route keys ----
+
+def _steer_then_land(release):
+    """Sol's b13_review_probe sequence: the guard steers at 1000 (release: 33.6 / 8.6, the release clear; countersteer: 34.15 / 9.2,
+    only the countersteer clear), the same outside-air-entry Run lands at 1012 and jumps again (R + J), airborne again at 1016."""
+    import copy
+    from ssbot.combat.air_chain import ChainSim
+    x, y, vy = (33.6, 8.6, -6.) if release else (34.15, 9.2, -4.)
+    r, s, sim = flight(x=x, y=y, vx=0., vy=vy, target_x=TX)
+    sim.start[K.ATK_CD] = 1.
+    made = T.propose(r, s, 0., sim, 8, False, np.zeros((0, 6)), set())
+    s2 = copy.deepcopy(s); s2["f"] = 1012
+    s2["hero"].update(pos=[32.5, 4.568], box=[32.25, 3.015, 32.75, 5.1], vel=[0., 0.])
+    s2["act"]["hf"].update(latched=0, desired=0)
+    S = K.initial_state(sim.params, 32.5, 4.568, vx=0., ground=True); S[K.ATK_CD] = .8
+    sim2 = ChainSim(S, np.array([0], np.int64), K.HoldState.from_act(s2["act"]), sim.params, sim.terrain, 1012, 1012)
+    land = T.propose(made[0], s2, 12 / 60., sim2, 8, True, np.zeros((0, 6)), set())
+    s3 = copy.deepcopy(s2); s3["f"] = 1016
+    s3["hero"].update(pos=[32.8, 5.2], box=[32.55, 3.647, 33.05, 5.732], vel=[8.25, 17.4])
+    s3["act"]["hf"].update(latched=B["R"] | B["J"], desired=B["R"] | B["J"])
+    S3 = K.initial_state(sim.params, 32.8, 5.2, vx=8.25, vy=17.4, ground=False); S3[K.ATK_CD] = .7; S3[K.JHELD] = 1.
+    S3[K.PREV] = B["R"] | B["J"]; S3[K.JUMPING] = 1.; S3[K.JSTEPS] = 2.
+    sim3 = ChainSim(S3, np.array([B["R"] | B["J"]], np.int64), K.HoldState.from_act(s3["act"]), sim.params, sim.terrain, 1016, 1016)
+    again = T.propose(land[0], s3, 16 / 60., sim3, 8, False, np.zeros((0, 6)), set())
+    return made, land, again
+
+
+@pytest.mark.parametrize("release", [True, False])
+def test_a_steer_ends_with_its_flight_and_a_new_jump_never_takes_it_back(on, release):
+    made, land, again = _steer_then_land(release)
+    steer = 0 if release else B["L"]
+    assert made[0].run.link == "air" and made[0].run.v["b13_steer"] == steer and made[0].run.v["b13"]["kind"] == "steer"
+    assert land[0].run.link == "jump" and "b13_steer" not in land[0].run.v            # landed, jumping again: that flight is over
+    assert land[3] == B["R"] | B["J"]
+    # airborne again: the guard reads the new flight afresh (its own decision of 1016), never the stale steer of 1000 (Sol: L + J)
+    rec = again[0].run.v.get("b13")
+    assert again[0].run.link == "air" and (rec is None or rec["f"] == 1016) and not again[3] & B["L"]
+
+
+def test_a_follow_up_route_does_not_inherit_a_steer(on):
+    r, s, sim = flight(x=33.6, y=8.6, vx=0., vy=-6., target_x=TX)
+    sim.start[K.ATK_CD] = 1.
+    made = T.propose(r, s, 0., sim, 8, False, np.zeros((0, 6)), set())
+    assert made[0].run.v["b13_steer"] == 0
+    follow = {"kind": "left_landing", "F0": 1002, "masks": [B["L"]] * 20}
+    fd = T.follow_draft(r, made, s, 0., sim, "land", follow)
+    assert fd is not None and fd[0].run.link == "land" and "b13_steer" not in fd[0].run.v
+
+
+@pytest.mark.parametrize("release", [True, False])
+def test_the_route_reads_the_keys_the_air_link_really_sends(on, release):
+    # Sol REVIEW399 2: _route_keys on the guard's own draft matches the air link's keys tick by tick (release 0, countersteer L)
+    from ssbot.combat.knife_chain_air_native import NativeManualAirChain
+    from ssbot.combat.knife_chain_eval import X
+    x, y, vy = (33.6, 8.6, -6.) if release else (34.15, 9.2, -4.)
+    r, s, sim = flight(x=x, y=y, vx=0., vy=vy, target_x=TX)
+    sim.start[K.ATK_CD] = 1.
+    d, plan, path, mask = T.propose(r, s, 0., sim, 8, False, np.zeros((0, 6)), set())
+    from dataclasses import replace
+    plan = replace(plan, jump_until=plan.entry_k + 6); d.run.v["jump_until"] = plan.jump_until   # a jump hold left: J in the first keys
+    n = NativeManualAirChain.__new__(NativeManualAirChain)
+    route = n._route_keys(plan, d, int(mask), "air", 1000)
+    actual = [int(mask)] + [T.air_approach_keys(X(d, d.run, NS(k=plan.entry_k + 2 + i))) for i in range(1, 7)]
+    assert d.run.v["b13_steer"] == (0 if release else B["L"]) and plan.side == B["R"]
+    assert [int(v) & ~B["DASH"] for v in route[:7]] == [v & ~B["DASH"] for v in actual]
+    monkeypatch_off = T.B13
+    try:
+        T.B13 = False
+        old = n._route_keys(plan, d, int(mask), "air", 1000)
+    finally:
+        T.B13 = monkeypatch_off
+    assert all(int(v) & (B["L"] | B["R"]) == B["R"] for v in old[1:7])             # B13 off: the plan's side, as before
+
+
+def test_a_hook_ends_the_flight_of_a_steer(on):
+    # Sol REVIEW399 1, the action boundary: the small rune opening's hook fires (claw link) on a Run that still holds a steer; the hook
+    # is a motion of its own, so the steer goes (its release later re-enters the air link without it)
+    from tests.test_seq387 import _caster_run, _opening_scene
+    s, sim = _opening_scene(17., 20.5)
+    r = _caster_run(b13_steer=B["R"])
+    made = T.propose(r, s, 1000 / 60., sim, 7, False, np.zeros((0, 6)), set(), hook_open=True)
+    assert made[0].run.link == "claw" and "b13_steer" not in made[0].run.v

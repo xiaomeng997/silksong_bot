@@ -1215,7 +1215,10 @@ class NativeManualAirChain(NativeChainB2):
             if frames:return np.array([masks[F-F0] for F in frames],np.int64)
         if link=="air":
             k=plan.entry_k+2+np.arange(H)
-            cmds=np.where(int(plan.jump_until)-k>0,int(plan.side)|B["J"],int(plan.side)).astype(np.int64)
+            # Task 182 B13 (Sol REVIEW399 2): the side key the air link really goes on sending is this tick's (the body guard's steer, the
+            # adapter's transfer_side_held_back already applied), not the plan's side; the jump hold as before. B13 off: the plan's side
+            side=int(mask)&(B["L"]|B["R"]) if transfer.B13 else int(plan.side)
+            cmds=np.where(int(plan.jump_until)-k>0,side|B["J"],side).astype(np.int64)
         else:
             cmds=np.asarray(transfer.render(self.runner,plan,plan.entry_k,H,link),np.int64)
         cmds=cmds.copy()
