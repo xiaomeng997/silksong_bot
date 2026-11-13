@@ -2099,15 +2099,17 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # Deferring J must not release a dash already in progress (which
         # cancels its sprint transition), or slide a pending far dash clock.
         link="dash" if current_mode in (K.M_DASH,K.M_SPRINT) else "walk"
-    held=None
+    held=held_f=None
     if B13B:
         # Sol REVIEW402: the approved row's side key (b13b_sprint_jump's release) holds through this flight: the jump link on the ground
-        # to its takeoff and the air link to her landing, whatever a later tick's side says (a 1.2.2 bound, a seam aim); on the ground
-        # past the jump link or on any other link (a strike row, a hook, a follow-up) its flight is over
-        if b13b is not None and b13b.get("kind")=="release":held=int(b13b["side"])
-        elif (active is not None and active.v.get("b13b_side") is not None and link in ("jump","air")
-              and not (ground and link=="air")):
-            held=int(active.v["b13b_side"]);p=replace(p,side=held)
+        # to its takeoff and the air link to her landing, whatever a later tick's side says (a 1.2.2 bound, a seam aim). Its flight is
+        # over (Sol seq 352) on the ground past the jump link, on any other link (a strike row, a hook, a follow-up route), on a follow
+        # release, and with a real bounce at or after its release (a BOUNCE goal from then: the bounce's own flight, its seam aim)
+        if b13b is not None and b13b.get("kind")=="release":held,held_f=int(b13b["side"]),int(state["f"])
+        elif (active is not None and active.v.get("b13b_side") is not None and active.v.get("b13b_side_f") is not None
+              and active.link in ("jump","air") and link in ("jump","air") and not (ground and link=="air") and not follow_release
+              and not (bounce_entry and goal is not None and int(goal.cast_fa)>=int(active.v["b13b_side_f"]))):
+            held,held_f=int(active.v["b13b_side"]),int(active.v["b13b_side_f"]);p=replace(p,side=held)
     draft=runner.fork_empty(AirAnchor())
     variables=dict(runner.chains[PROGRAM].vars)
     if active is not None:variables.update(active.v)
@@ -2132,6 +2134,7 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
     if early is not None:variables["early_hook"]=early
     variables["b13b"]=b13b   # B13B: this tick's sprint-jump check record (None: not checked)
     variables["b13b_side"]=held   # B13B: the approved row's side key held through this flight (None: none held)
+    variables["b13b_side_f"]=held_f   # B13B: the frame of that release (its flight's start)
     variables["_approach_only"]=approach_only
     variables["switch_stomp"]=switch_stomp
     variables["source_tail_done"]=bool(tail_done or (bounce_entry and not tail_pending))
@@ -2149,6 +2152,8 @@ def propose(runner,state,game,sim,target,ground,bombs,finished,goal=None,*,defer
         # Task 182 B13 (Sol REVIEW399 1): a steer belongs to the flight it was chosen in, kept by the air link's keys to that flight's
         # landing; on the ground or on any other link this tick (a landed Run that jumps again, a hook, a strike) its flight is over
         draft.run.v.pop("b13_steer",None)
+    if B13B and (draft.run.link not in ("jump","air") or (ground and draft.run.link=="air")):
+        draft.run.v["b13b_side"]=draft.run.v["b13b_side_f"]=None   # (Sol seq 352: this tick's link ends the approved row's flight)
     row=draft.run.v.get("row")
     if row is not None:p=replace(p,press_k=k+row["press_F"]-state["f"],contact_frame=row["contact_frame"])
     path=model_path(sim,p,np.array([mask],np.int64),game)
@@ -2178,6 +2183,7 @@ def follow_draft(runner,made,state,game,sim,link,follow,idle_evidence=None):
     draft=runner.fork_empty(AirAnchor())
     variables=dict(old.run.v);variables["follow"]=dict(follow)
     variables.pop("b13_steer",None)   # (B13: a follow-up route is a motion of its own; Sol REVIEW399 1)
+    variables.pop("b13b_side",None);variables.pop("b13b_side_f",None)   # (B13B: so is its approved sprint-jump side; Sol seq 352)
     draft.run=Run(PROGRAM,link,variables)
     h=state.get("hero") or {}
     obs=_observation(p,state,game,body,False,head_clearance(runner.chains[PROGRAM].cfg))

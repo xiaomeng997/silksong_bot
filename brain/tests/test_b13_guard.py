@@ -512,12 +512,12 @@ def test_row2_side_holds_in_the_air_and_ends_with_the_flight(monkeypatch):
     monkeypatch.setattr(T, "B13", True)
     monkeypatch.setattr(T, "B13B", True)
     r, s, sim = flight(x=30., y=8., vx=0., vy=5., target_x=TX)                # an air link Run of side R, a later tick of the flight
-    r.run.v["b13b_side"] = 0
+    r.run.v.update(b13b_side=0, b13b_side_f=990)
     draft, p, _, mask = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
-    assert p.side == 0 and not mask & (B["L"] | B["R"]) and draft.run.v["b13b_side"] == 0
+    assert p.side == 0 and not mask & (B["L"] | B["R"]) and draft.run.v["b13b_side"] == 0 and draft.run.v["b13b_side_f"] == 990
     monkeypatch.setattr(T, "B13B", False)                                      # off: the parent's side, no hold kept
     r, s, sim = flight(x=30., y=8., vx=0., vy=5., target_x=TX)
-    r.run.v["b13b_side"] = 0
+    r.run.v.update(b13b_side=0, b13b_side_f=990)
     draft, p, _, mask = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
     assert p.side == B["R"] and mask & B["R"] and draft.run.v["b13b_side"] is None
 
@@ -544,3 +544,60 @@ def test_inside_at_reads_the_frame_before_the_meeting():
     boxes = np.array([[2.5, 0., 3., 1.]] * 5)
     i = T.b13_first_meet(boxes, body, 1, 5, prot=[True, True, True, False, False])
     assert i == 3 and T.b13_inside_at(boxes, body, i)
+
+
+def _bounce_scene(release_f):
+    """Sol seq 352's helper scene (analysis/b13b_402_20261113/b13b_follow_boundary_probe.py): an air Run over the seam after a real
+    bounce off 7 at 990 (a BOUNCE goal; the seam aim right of her), carrying an approved sprint-jump side 0 released at release_f."""
+    from tests.test_knife_chain_transfer import fit_pose
+    r, s, sim = flight(x=30., y=11., vx=0., vy=-.6, target_x=TX)
+    s["ents"][0]["flipX"] = False
+    fit_pose(s["ents"][0], state="Idle", t=20 / 60., x=33.)
+    r.run.v.update(b13b_side=0, b13b_side_f=release_f, follow_close=True, source_tail_done=True, air_dash_decided=True)
+    sim.start[K.ATK_CD] = 1.
+    goal = T.TransferGoal(8, 7, 990, 0., "BOUNCE", T.MoveInstance(7, 940, "CC_SLAM"))
+    return r, s, sim, goal
+
+
+def test_the_approved_side_ends_at_a_later_real_bounce_and_the_follow_boundary(onb):
+    # Sol seq 352: an approved side from before the bounce must not override the bounce's own flight (its seam aim R), through
+    # follow_draft or the installed runner's follow release (native _seam_follow's propose)
+    import copy
+    from ssbot.combat.air_chain import ChainSim
+    r, s, sim, goal = _bounce_scene(980)
+    made = T.propose(r, s, 0., sim, 8, False, np.zeros((0, 6)), set(), goal)
+    assert made and made[0] and made[1].side == B["R"] and made[0].run.v["b13b_side"] is None
+    follow = {"kind": "middle", "F0": 1002, "masks": [B["R"]] * 20, "release_F": 1010, "land_f": 1030, "goal_x": 34.}
+    fd = T.follow_draft(r, made, s, 0., sim, "middle", follow)
+    assert fd and fd[0] and fd[0].run.v.get("b13b_side") is None and fd[0].run.v.get("b13b_side_f") is None
+    fd[0].run.v.update(b13b_side=0, b13b_side_f=980)                          # the old side left on the installed Run all the same
+    s2 = copy.deepcopy(s)
+    s2["f"] = 1001
+    sim2 = ChainSim(sim.start.copy(), np.array([B["R"]], np.int64), sim.hold, sim.params, sim.terrain, 1001, 1001)
+    rel = T.propose(fd[0], s2, 1 / 60., sim2, 8, False, np.zeros((0, 6)), set(), goal, follow_release=True)
+    assert rel[0].run.link == "air" and rel[1].side == B["R"] and rel[3] & B["R"] and rel[0].run.v["b13b_side"] is None
+    # an installed follow-up Run (link middle) released back to the air holds no side even from a release after the bounce: the follow
+    # route's own link and the follow release, not this tick's rewritten air link, decide (the leak Sol's probe found)
+    fd[0].run.v.update(b13b_side=0, b13b_side_f=995)
+    rel = T.propose(fd[0], s2, 1 / 60., sim2, 8, False, np.zeros((0, 6)), set(), goal, follow_release=True)
+    assert rel[0].run.link == "air" and rel[1].side == B["R"] and rel[3] & B["R"] and rel[0].run.v["b13b_side"] is None
+
+
+def test_the_approved_side_holds_through_its_own_flight_after_an_older_bounce(onb):
+    # released at 995 after the bounce at 990 (a landed Run's new jump under the same BOUNCE goal): the same flight, held
+    r, s, sim, goal = _bounce_scene(995)
+    made = T.propose(r, s, 0., sim, 8, False, np.zeros((0, 6)), set(), goal)
+    assert made and made[0] and made[1].side == 0 and not made[3] & (B["L"] | B["R"]) and made[0].run.v["b13b_side"] == 0
+    # a follow-up route from there is a motion of its own: follow_draft drops the held side (Sol seq 352)
+    follow = {"kind": "middle", "F0": 1002, "masks": [B["R"]] * 20, "release_F": 1010, "land_f": 1030, "goal_x": 34.}
+    fd = T.follow_draft(r, made, s, 0., sim, "middle", follow)
+    assert fd and fd[0] and fd[0].run.v.get("b13b_side") is None and fd[0].run.v.get("b13b_side_f") is None
+
+
+def test_the_approved_side_ends_when_this_tick_takes_a_strike_row(onb):
+    # held on the air link, this tick's evaluation takes the Run's own strike row: its flight ends with it (no stale side for a missed
+    # strike's return to the air)
+    r, s, sim = flight(x=34.55, y=7., vx=0., vy=-.6, target_x=TX)
+    r.run.v.update(b13b_side=0, b13b_side_f=990)
+    draft, _, _, _ = T.propose(r, s, (s["f"] - 1000) / 60., sim, 8, False, np.zeros((0, 6)), set())
+    assert draft.run.link == "strike" and draft.run.v["b13b_side"] is None and draft.run.v["b13b_side_f"] is None
