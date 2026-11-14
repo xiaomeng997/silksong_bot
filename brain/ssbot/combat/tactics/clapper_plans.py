@@ -83,6 +83,7 @@ HIT_TAIL_S = 1.0            # a plan's validity past the last hazard, for its re
 # public priorities); a way back to the middle not yet made is handed on, never counted as done.
 RUNE_WAITS = frozenset({"over_head", "over_wait", "over_stay", "over_out", "return", "attack_retreat"})
 RETURN_OWED = frozenset({"over_head", "over_wait", "over_stay", "over_out", "over_back"})
+BACK_PHASES = frozenset({"attack_back_jumper", "attack_back_other"})   # plan 2's way back (the person 11-13, quote 125)
 
 
 def _rune_reach() -> float:
@@ -1147,6 +1148,7 @@ class PlanRunner:
         self._stage_key = None             # (generation, phase) stage_frame last saw, and the frame it was first read
         self._stage_f = None
         self.pressed = None                # Task 182 seq 311: the jump instance she pressed (its later requests choose only the follow-ups)
+        self.arrived = None                # the person 11-13 (quote 125): this tick plan 2's way back reached this body (two_play.plan_entry)
         self.press_asked = None            # ... the plan generation whose follow-up has been asked for
 
     # ---- the channel ----
@@ -1256,6 +1258,18 @@ class PlanRunner:
         self._take_result(sc)
         self._step(sc)
         self._request(sc)
+        if ex.plan is not None and ex.plan.scene == "cluster" and ex.selected == "attack":
+            # the person 11-13 (quote 125, rx411 bout 2 2:03): plan 2 comes back to the near body and slashes on; it has no way into
+            # the middle, so its jumper's move makes no public middle return, and one still pending from before the plan (held while the
+            # plan ran, it took the scene the tick plan 2 was done: replay x4_ep1 9498, 582490's earlier jump) is dropped
+            _skip_middle(sc, ex.plan.instance[0], ex.plan.made_t)
+            _drop_middle(sc, ex.plan.made_t, "cluster attack plan: a return pending from a move begun before the plan")
+        # ... and its way back done this tick (in_reach) hands the body to IdleHit's side slash (two_play.plan_entry, set by the policy):
+        # "回来接着砍" whenever she gets there, not only inside the window of the body's own Idle entry
+        self.arrived = next((ph.target for n in ex.notes
+                             if n.get("what") == "ended" and n.get("reason") == "in_reach" and n.get("scene") == "cluster"
+                             and n.get("phase") in BACK_PHASES and ex.last_plan is not None
+                             for ph in (ex.last_plan.phase(n["phase"]),) if ph is not None), None)
         self.changed = ex.changed
         self.notes = self.notes + ex.notes
 
@@ -1457,7 +1471,7 @@ class PlanRunner:
             out.append("next_late")
         if "other_off" in names and o is not None and o.state in AIR:
             out.append("other_off")                # the second one is off the ground: its jump takes its turn by the public priorities
-        if "other_move" in names and _new_hostile(o, plan.get("other_family")):
+        if "other_move" in names and _new_hostile(o, plan.get("other_family")) and not self._other_jump_over(sc, o, dry):
             out.append("other_move")
         if "other_gone" in names and _other_gone(o):
             out.append("other_gone")
@@ -1586,6 +1600,21 @@ class PlanRunner:
         if plan.get("family") == "CC_JUMP_CAST":
             return sc.t >= seen + RUNE_OVER_S
         return s.family not in JUMPS or s.state == "Slam Recover"
+
+    def _other_jump_over(self, sc, o, dry=False) -> bool:
+        """The person 11-13 (quote 125, rx411 bout 2 2:03): the other one's own jump, begun while the plan ran, is already past its hazards by
+        the rule the plan keeps for its jumper (_hazard_over: landed and in Slam Recover; a jump cast RUNE_OVER_S after the landing). The
+        retreat kept her off it, so it is no new move for a phase that comes back to it (live 9486: the way back to it in its Slam Recover
+        was invalidated and the middle return took over), and no public middle return comes of it either."""
+        if o is None or o.family not in JUMPS:
+            return False
+        m = self.moves.get(o.iid)
+        if m is None or m.get("land_seen") is None:
+            return False
+        over = sc.t >= m["land_seen"] + RUNE_OVER_S if o.family == "CC_JUMP_CAST" else o.state == "Slam Recover"
+        if over and not dry:
+            _skip_middle(sc, o.iid, sc.t)
+        return over
 
     def _in_reach(self, sc, target) -> bool:
         if sc.geo is None:
@@ -2097,6 +2126,24 @@ class PlanRunner:
 def _new_hostile(o, family_at_plan) -> bool:
     """The other one is gone or began a new attack move (its ordinary reaction to a hit is neither)."""
     return o is None or (o.family != family_at_plan and o.family in ATTACK_FAMS)
+
+
+def _skip_middle(sc, iid, t) -> None:
+    """No public middle return for a move of iid begun at or before t (clapper_tactics.middle_return reads sc.mem["back_skip"]): the
+    cluster plan's attack variant comes back to the near body and slashes on (the person 11-13, quote 125: plan 2 has no way into the
+    middle)."""
+    skip = sc.mem.setdefault("back_skip", {})
+    skip[iid] = max(skip.get(iid, -math.inf), float(t))
+
+
+def _drop_middle(sc, t, why) -> None:
+    """A public middle return still pending (sc.mem["back"], clapper_tactics.middle_return) from a move begun at or before t is dropped,
+    with its record in sc.mem["back_skipped"]."""
+    due = sc.mem.get("back")
+    if due is not None and due.get("start_t", math.inf) <= t:
+        sc.mem["back"] = None
+        sc.mem["back_skipped"] = dict(iid=due.get("iid"), family=due.get("family"), start_t=due.get("start_t"), end_t=due.get("end_t"),
+                                      why=why)
 
 
 def _other_gone(o) -> bool:

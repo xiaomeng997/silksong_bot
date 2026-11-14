@@ -923,6 +923,7 @@ class TwoPlay:
     def reset(self) -> None:
         self.manual_focus = False                       # explicit manual-B L2 scene owns target/stance preferences
         self.idle_yield = False                         # Task 182 seq 312 (#384): set by the policy before step(): IdleHit prepares nothing
+        self.plan_entry = frozenset()                   # the person 11-13 (quote 125): set by the policy before step(): plan 2 is back at it
         self.prev: dict = {}             # iid -> (Control state, state time) on the last tick
         self.entry: dict = {}            # iid -> re-entry (bool) for the Clappers entering Idle this tick
         self.rec_entry: dict = {}        # Task 182 seq 289: iid -> False for the Clappers entering Slam Recover this tick (IdleHit only)
@@ -1009,6 +1010,7 @@ class TwoPlay:
         self.rec_entry = {}
         self.plan_no_hit = frozenset()
         self.idle_yield = False
+        self.plan_entry = frozenset()
         ground_now = bool(_sp.on_ground(s))
         self.landed_now = ground_now and self._airborne                # Task 182 seq 289: this tick is her first on the ground
         self._airborne = not ground_now
@@ -1169,10 +1171,14 @@ class TwoPlay:
         iid = F.get("iid")
         st, tin = _sp.control(F)
         entry = iid in self.entry or iid in self.rec_entry
-        if r is not None and (r.iid != iid or entry):
-            self._idle_close("focus" if r.iid != iid else "re-entry")      # (observe closes the other ends)
+        # the person 11-13 (quote 125, rx411 bout 2 2:03 "回来接着砍"): the cluster plan's attack variant is back at it this tick (its way
+        # back reached the side slash's reach, clapper_plans.PlanRunner.arrived): a run starts as at its Idle entry, whenever she gets there
+        # (its entry's window may be over), and a run already spent on it starts again (every guard below as for any run)
+        arrival = not entry and iid in getattr(self, "plan_entry", ()) and st in ("Idle", IDLEHIT_RECOVER)
+        if r is not None and (r.iid != iid or entry or arrival):
+            self._idle_close("focus" if r.iid != iid else "re-entry" if entry else "plan arrival")   # (observe closes the other ends)
             r = None
-        if r is None and entry:
+        if r is None and (entry or arrival):
             hx = _sp.hero_x(s)
             r = self.idle = IdleRun(iid=iid, f0=f, re=bool(self.entry.get(iid)),
                                     d0=round(abs(hx - float(F["pos"][0])), 3), hp0=hp)

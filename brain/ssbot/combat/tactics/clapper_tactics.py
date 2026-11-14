@@ -463,7 +463,12 @@ def middle_return(tac, subjects, geo, hx, t, mem, quiet_from, grounded=False, fr
             del moves[s.iid]
             # #386 (the person 11-10, Sol seq 330: "锤后一律回中间"): a slam's end with both Clappers here makes the return due wherever she was
             slam = SEP.active() and m["family"] == SEP.CC_SLAM and len(subjects) == 2
-            if (m["near"] or slam) and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
+            skip = (mem.get("back_skip") or {}).get(s.iid)
+            if skip is not None and m["start_t"] <= skip:
+                # the person 11-13 (quote 125): a move the cluster plan's attack variant came back from (its jumper's, or the other's jump
+                # already over on the way back): plan 2 slashes on at the near body, no middle return (clapper_plans._skip_middle)
+                mem["back_skipped"] = dict(iid=s.iid, family=m["family"], start_t=m["start_t"], end_t=t, why="cluster attack plan")
+            elif (m["near"] or slam) and not (min(roots) <= hx <= max(roots) and standing_gap(geo) is not False):
                 mem["back"] = dict(m, iid=s.iid, end_t=t, end_hx=hx, end_state=s.state, offered=False,
                                    **({} if frame is None else {"end_f": frame}))
     due = mem.get("back")

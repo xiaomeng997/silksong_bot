@@ -1577,6 +1577,11 @@ class ForumPlannerPolicy(PlannerPolicy):
                     rt_kw["bombs"] = _rbm.frames(trk_.rune.predict(trk_.T), trk_.T)
             if getattr(self.tac, "plan_runner", None) is not None:
                 self.two.plan_no_hit = frozenset(getattr(prefs, "no_hit", ()))
+                # the person 11-13 (quote 125): plan 2's way back reached this body this tick: IdleHit's side slash starts on it
+                arrived = getattr(self.tac.plan_runner, "arrived", None)
+                self.two.plan_entry = frozenset(() if arrived is None else (arrived,))
+                if arrived is not None:
+                    self.counts["two_plan_entry_125"] += 1
             if getattr(prefs, "clapper_choice", None) in ("sep_slam", "rune_down", "rune_after"):
                 from ssbot.combat.tactics import clapper_separated as _SEP
                 if _SEP.active(f):
