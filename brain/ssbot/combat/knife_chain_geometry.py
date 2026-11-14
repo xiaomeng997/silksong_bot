@@ -80,8 +80,25 @@ class B2Geometry:
             rs=self._fresh[length]
         return rs
 
+    def _walkers(self,rs,paths,spans,width,box=None):
+        """combat.walk_rule (the person 11-13, quote 130): {iid: body contacts [len(paths), width]} of every other
+        Clapper whose Idle / Walk body its walk rule covers on these routes (walk_rule.walker_x: not the target, no
+        move instance); spans[i] = (first frame - origin, last frame index). Empty with SSBOT_FORUM_TWO_WALK_RULE=0."""
+        from . import walk_rule as wr
+        trk=getattr(rs,"trk",None)
+        if not wr.ENABLED or trk is None:return {}
+        target=getattr(self.move,"target_iid",None)
+        out={};hist=None
+        for iid in sorted(getattr(trk,"now",None) or {}):
+            x0=wr.walker_x(trk,iid,target)
+            if x0 is None:continue
+            if hist is None:hist=wr.hero_history(trk)
+            out[iid]=wr.route_hits(x0,hist,paths,spans,width,box=box)[0]
+        return out
+
     def _query(self,path,limit,*,external_only=False):
         rs,length,x,y,tk,inv,owners,same=self._sweep(path,limit)
+        walk=self._walkers(rs,[path],[(path.origin-self.origin,length)],length+1)
         contacts=[];covered=np.zeros(length+1,bool)
         for iid in sorted(owners):
             haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
@@ -89,13 +106,22 @@ class B2Geometry:
             covered|=total|haz
             for k in np.flatnonzero(haz):contacts.append(PathContact(path.origin+int(k),iid,"delayed"))
             if external_only and iid==self.move.target_iid:continue
+            if iid in walk:
+                # combat.walk_rule: the other Clapper's Idle / Walk body by its walk rule, not by the raster's growth
+                # (the raster still covers its cells above: no "other" contact from them)
+                for k in np.flatnonzero(walk[iid][0]&~inv&~haz):contacts.append(PathContact(path.origin+int(k),iid,"body"))
+                continue
             kind="move" if getattr(getattr(rs.trk,"now",{}).get(iid,(None,None,None))[2],"fam",None) else "body"
             label=self.move if same and iid==self.move.target_iid else None
             for k in np.flatnonzero(total&~haz):contacts.append(PathContact(path.origin+int(k),iid,kind,label))
         unknown=np.asarray(rs.occupied(x,y,tk)).any(axis=0)&~inv&~covered
         for k in np.flatnonzero(unknown):contacts.append(PathContact(path.origin+int(k),None,"other"))
         return ContactScan(self.ref(path),path.origin,path.origin+length,tuple(contacts),
-                           "RangeSupport owner/hazard layers; current tracker instance; bounded sweep")
+                           "RangeSupport owner/hazard layers; current tracker instance; bounded sweep"+self._walk_src(walk))
+
+    @staticmethod
+    def _walk_src(walk):
+        return "; walk rule body: "+",".join(str(i) for i in sorted(walk)) if walk else ""
 
     def scan_delayed(self,path,limit=None):
         """The "delayed" contacts of scan(path, limit) alone, in its order (Task 182 seq 272: a waypoint Run's whole-route check):
@@ -209,11 +235,11 @@ class B2Geometry:
                 refused+=[(i,2,"h2 guard target no longer maps to the tracked slam instance")
                           for i in ids if paths[i].stage=="commitment"]
             tk=((np.arange(W)[None,:]+np.array([spans[i][0] for i in ids])[:,None])*self._frame_time(rs)).ravel()
-            built.append((rs,X,C,tk[C],(inv|~valid).ravel(),ids,W,same))
+            built.append((rs,X,C,tk[C],(inv|~valid).ravel(),ids,W,same,box))
         if refused:raise GeometryUnavailable(min(refused)[2])
         if failed is not None:raise failed[1]
         out=[None]*len(paths)
-        for rs,X,C,T,off,ids,W,same in built:
+        for rs,X,C,T,off,ids,W,same,box in built:
             x,y=X[:,0],X[:,1]
             def columns(hit):
                 col=np.zeros(len(ids)*W,bool);col[C[np.asarray(hit)]]=True;return col&~off
@@ -222,6 +248,7 @@ class B2Geometry:
             owners|={int(p[0]) for parts in rs.layers.values() for p in parts}
             if rs.bombs is not None:owners|={int(i) for i in rs.bombs[:,0]}
             contacts=[[] for _ in ids];covered=np.zeros(len(ids)*W,bool)
+            walk=self._walkers(rs,[paths[i] for i in ids],[spans[i] for i in ids],W,box=box)
             for iid in sorted(owners):
                 haz=columns(rs.occupied_hazards(x,y,T,{iid}))
                 total=columns(self._owner_occupancy(rs,x,y,T,iid))
@@ -230,6 +257,11 @@ class B2Geometry:
                 label=self.move if same and iid==self.move.target_iid else None
                 for g,k in zip(*np.divmod(np.flatnonzero(haz),W)):
                     contacts[g].append(PathContact(paths[ids[g]].origin+int(k),iid,"delayed"))
+                if iid in walk:
+                    # combat.walk_rule: as scan (the other Clapper's Idle / Walk body by its walk rule)
+                    for g,k in zip(*np.divmod(np.flatnonzero(walk[iid].ravel()&~off&~haz),W)):
+                        contacts[g].append(PathContact(paths[ids[g]].origin+int(k),iid,"body"))
+                    continue
                 for g,k in zip(*np.divmod(np.flatnonzero(total&~haz),W)):
                     contacts[g].append(PathContact(paths[ids[g]].origin+int(k),iid,kind,label))
             for g,k in zip(*np.divmod(np.flatnonzero(columns(rs.occupied(x,y,T))&~covered),W)):
@@ -237,7 +269,7 @@ class B2Geometry:
             for g,i in enumerate(ids):
                 o=paths[i].origin
                 out[i]=ContactScan(self.ref(paths[i]),o,o+spans[i][1],tuple(contacts[g]),
-                                   "RangeSupport owner/hazard layers; current tracker instance; bounded sweep")
+                                   "RangeSupport owner/hazard layers; current tracker instance; bounded sweep"+self._walk_src(walk))
         return out
 
     def preflight(self,path):

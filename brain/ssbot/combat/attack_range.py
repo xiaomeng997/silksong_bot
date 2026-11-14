@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -784,6 +785,8 @@ class RangeTracker:
         self.orphan_hazards: dict = {}  # owner iid -> (type, seen triggers), until their own windows end
         self.now: dict = {}         # iid -> (type key, entity dict, inst or None)
         self.hero: tuple | None = None
+        # her x over the last frames fed, oldest first (combat.walk_rule: the walk reads her x up to LAG_F late)
+        self.hero_hist: deque = deque(maxlen=16)
         self.objs: dict = {}        # stage B: owner iid -> its projectiles in flight now (type_extra)
         self.obj_owner: dict = {}   # projectile iid -> (owner iid: the nearest enemy of the owning type, first sight T)
         self.ents: tuple = ()       # the frame's entities (EnemySpec.custom: other entities, projectiles)
@@ -799,6 +802,8 @@ class RangeTracker:
         self.T += self.dt
         h = (s.get("hero") or {}).get("pos")
         self.hero = (float(h[0]), float(h[1])) if h else None
+        if self.hero is not None:
+            self.hero_hist.append(self.hero[0])
         self.ents = tuple(s.get("ents") or ())
         now = {}
         for e in self.ents:

@@ -461,6 +461,10 @@ class ForumPlannerPolicy(PlannerPolicy):
             from ssbot.combat.knife_chain_nominal import compiled_signatures
             self.b2_warmup_report["query_warmup"]=warm_query_kernels()
             self.b2_warmup_report["compiled_signatures"]=compiled_signatures()
+            # combat.walk_rule (the other Clapper's Idle / Walk body on whole-route checks): its kernel loaded here,
+            # not in the first chain tick (a cold load cost 14 ms on E16-23)
+            from ssbot.combat import walk_rule as _walk_rule
+            self.b2_warmup_report["walk_rule"]=_walk_rule.warm()
         self.fc.reset()
         return time.perf_counter() - t0
 
