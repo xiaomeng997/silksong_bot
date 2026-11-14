@@ -317,28 +317,42 @@ def _entry(path, v, f):
     alt = a.get("alt")
     if isinstance(alt, dict):
         branches.append((int(alt["iid"]), tuple(alt["body"]), tuple(0. for _ in a["reserve"]), int(alt["move_until"])))
+    fulls = {}          # Sol seq 359: per track, its rows from f (an intermediate's bound prefix + its own), alternatives
     for iid_b, body_b, reserve_b, move_until in branches:
         for d in range(HOOK_LATE_F + 1):
             if d >= len(a["rows"]):
                 raise GeometryUnavailable("transfer hook entry unchecked: press slot outside the anchor")
             pre = np.asarray([[r[0] - .5 * w, r[1], r[0] + .5 * w, r[1] + h] for r in a["rows"][:d]], float).reshape(-1, 4)
-            for i0, tr in _stop_tracks(tuple(a["rows"][d]), int(a["toward"]), body_b, reserve_b[d:d + TRACK_F], iid_b):
+            tracks = list(_stop_tracks(tuple(a["rows"][d]), int(a["toward"]), body_b, reserve_b[d:d + TRACK_F], iid_b))
+            bounds = [np.vstack([head, pre, boxes(tr)]) for i0, tr in tracks if i0 == 0]
+            for i0, tr in tracks:
                 # an intermediate stop's track is its bound's before i0 + 1: its rows from P + d + i0 only
                 origin, rows = (f, np.vstack([head, pre, boxes(tr)])) if i0 == 0 else (P + d + i0, boxes(tr))
                 ctrl = P + d + i0 + len(tr) - 1
-                out.setdefault((origin, rows.round(9).tobytes(), iid_b),
-                               (origin, rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
-                                (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6)), (iid_b, move_until)))
+                key = (origin, rows.round(9).tobytes(), iid_b)
+                out.setdefault(key, (origin, rows, (P + d + SK.HOOK_BODY_OFF[0], ctrl + SK.HOOK_BODY_OFF[1]),
+                                     (ctrl, round(float(tr[-1][0]), 6), round(float(tr[-1][1]), 6)), (iid_b, move_until)))
+                # the frames before an intermediate's rows: those of the bound(s) whose row at its first frame is its first row
+                k0 = origin - f
+                alts = [rows] if i0 == 0 else [np.vstack([B[:k0], rows]) for B in bounds
+                                               if len(B) > k0 and np.array_equal(B[k0], rows[0])]
+                have = fulls.setdefault(key, {})
+                for full in alts:
+                    have.setdefault(full.round(9).tobytes(), full)
     from types import SimpleNamespace
     basis = {**path.assumptions, "basis": "hooked-Clawline model through the locked hook", "protection": "none",
              "safety": "whole locked hook, all owners"}
     paths = []
-    for origin, rows, window, control, exempt in out.values():   # the fields B2Geometry reads; no protection flag
+    for key, (origin, rows, window, control, exempt) in out.items():   # the fields B2Geometry reads; no protection flag
         n = len(rows) - 1
         zero = np.zeros(n + 1, np.int64)
+        # Sol seq 359 (combat.walk_rule): her x from f through the control on every way here (walk_to_control: entry_outs'
+        # continuation at the control); an intermediate's frames before its rows walk_prelude (none found: unknown)
+        to_ctrl = [(f, .5 * (full[:, 0] + full[:, 2])) for full in fulls.get(key, {}).values()]
         paths.append((SimpleNamespace(origin=origin, stage="transfer_hook_entry", box=rows, commands=zero[:n],
                                       latched=zero[:n], flags=zero, check_flags=zero, through=origin + n,
-                                      assumptions=basis), window, control, exempt))
+                                      assumptions=basis, walk_prelude=(to_ctrl or None) if origin > f else None,
+                                      walk_to_control=to_ctrl), window, control, exempt))
     return paths
 
 
@@ -393,6 +407,13 @@ def entry_scan(geo, path, v, f):
     for _, _, control, ex in items:
         branch[control] = ex if control not in branch or ex[1] is None else branch[control]
     v["_hook_branch"] = branch
+    # Sol seq 359 (combat.walk_rule): each control point's ways here (her x from f), read by entry_outs as its continuations'
+    # walk_prelude; a point several tracks reach keeps them all (its continuations are checked against each)
+    ways = {}
+    for q, _, control, _ in items:
+        for first, xs in getattr(q, "walk_to_control", None) or ():
+            ways.setdefault(control, {}).setdefault(np.asarray(xs).round(9).tobytes(), (first, xs))
+    v["_hook_prelude"] = {c: list(w.values()) for c, w in ways.items()}
     return (ContactScan(scans[0][0].path_ref, min(s.first_frame for s, _ in scans),
                         max(s.last_frame for s, _ in scans), contacts,
                         f"transfer hook entry: {len(scans)} variant path(s) through the locked hook; all-owner scan; "
@@ -450,6 +471,7 @@ def entry_outs(geo, sim, v, f, controls, short_frames):
         raise GeometryUnavailable("transfer hook entry unchecked: no control point")
     holds = _control_holds(sim, v, f, sorted({F for F, _, _ in controls}))
     starts = _control_starts(sim, v, f, controls)
+    ways = v.get("_hook_prelude") or {}     # (Sol seq 359: entry_scan's ways to each control; missing: unknown)
     paths, meta = [], []
     for kind, bit, direction in (("left_landing", B["L"], -1), ("right_landing", B["R"], 1)):
         groups = {}                     # control frames whose keys latch alike share one rollout
@@ -475,9 +497,10 @@ def entry_outs(geo, sim, v, f, controls, short_frames):
                 executable = np.zeros(len(idx), bool)
             for r, j in enumerate(idx):
                 n, F = int(ns[r]), controls[j][0]
+                # Sol seq 359: the walk rule walks the hook's way to this control (entry_scan's) before the continuation
                 paths.append(SimpleNamespace(origin=F, stage="continuation", box=ro.box[r, :n + 1],
                                              flags=fl[r, :n + 1], check_flags=fl[r, :n + 1], commands=commands[:n],
-                                             through=F + n))
+                                             through=F + n, walk_prelude=ways.get(controls[j])))
                 meta.append((controls[j], kind, bool(executable[r])))
     from ssbot.map2 import strike as SK
     iid = int(v["hook_press"]["iid"])

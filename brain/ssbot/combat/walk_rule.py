@@ -10,6 +10,12 @@ earlier). Its body at a frame is its standing / walking body of either facing ov
 the root, the floor to BODY_TOP_U) grown by MARGIN_U; her HeroBox (swept from the previous frame) meeting it is a body
 contact. The interval only grows, so the previous frame's body (whose colliders the damage reads) is inside it.
 
+Sol seq 359 (Astra, #418 P2): a route that starts later than the forecast origin (a continuation after a bounce, a hook's
+stop or control) walks the frames before it too. Her x there comes from the same candidate's earlier part when the
+caller passes it (B2Geometry scan / preflight prelude=, scan_batch preludes=, or a path's walk_prelude); any frame of
+hers that is not known (no prelude, a tracker history shorter than LAG_F + 1 frames) is unknown and lets the walker
+close, so a later route alone is never checked against a smaller interval than the whole candidate.
+
 Recordings (rx411 10 + new-50 50 bouts, 120 Clapper tracks, 3.78 M start / look-ahead pairs up to 60 frames while it
 has no move; Opus walkcheck.py / walkexcess.py 11-13): the real root left this interval by more than 0.2 u toward her
 in 439 pairs, by at most 0.35 u (inside MARGIN_U); away from her in 1,449 pairs (at most 0.61 u), never with her
@@ -75,8 +81,9 @@ def walker_x(trk, iid, target_iid) -> float | None:
 
 
 def hero_history(trk) -> np.ndarray:
-    """Her x over the HIST_N frames up to the tracker's now, oldest first (RangeTracker.hero_hist; a shorter history is
-    padded with its oldest value; none: her x now; nothing known: empty)."""
+    """Her x over the HIST_N frames up to the tracker's now, oldest first (RangeTracker.hero_hist; none: her x now).
+    Frames the tracker has not seen are nan, unknown (Sol seq 359: a missing x is never filled from a known one; the
+    walk rule reads an unknown x as one that lets the walker close). Nothing known: empty."""
     h = getattr(trk, "hero_hist", None)
     vals = [float(v) for v in list(h)[-HIST_N:]] if h else []
     if not vals:
@@ -84,15 +91,50 @@ def hero_history(trk) -> np.ndarray:
         if not hero:
             return np.zeros(0)
         vals = [float(hero[0])]
-    return np.array([vals[0]] * (HIST_N - len(vals)) + vals, np.float64)
+    return np.array([np.nan] * (HIST_N - len(vals)) + vals, np.float64)
+
+
+def prelude_xs(spec):
+    """(first frame, her x per frame from it) of a prelude spec: (first_frame, xs), or a path-like (its pos x, else its
+    box centres, from its own origin): the part of the same candidate before a route that starts later (Sol seq 359)."""
+    if isinstance(spec, tuple) and len(spec) == 2 and not hasattr(spec, "box"):
+        return int(spec[0]), np.asarray(spec[1], np.float64).ravel()
+    pos = getattr(spec, "pos", None)
+    if pos is not None:
+        pa = np.asarray(pos, np.float64)
+        if pa.ndim == 2 and pa.shape[0] > 0:
+            return int(spec.origin), pa[:, 0].copy()
+    b = np.asarray(spec.box, np.float64)
+    return int(spec.origin), 0.5 * (b[:, 0] + b[:, 2])
+
+
+def gap_xs(now: int, offset: int, spec) -> list | None:
+    """Her x at frames now + 1 .. now + offset - 1 (between the forecast origin and a route starting offset frames later)
+    from a prelude spec (prelude_xs; or a list of specs: alternatives): one array per alternative, nan where the spec
+    does not cover a frame. None when the route has no such frames or nothing is known (the whole gap unknown)."""
+    if offset <= 1 or spec is None:
+        return None
+    specs = spec if isinstance(spec, list) else [spec]
+    frames = now + 1 + np.arange(offset - 1)
+    out = []
+    for s in specs:
+        first, xs = prelude_xs(s)
+        a = np.full(offset - 1, np.nan)
+        k = frames - first
+        ok = (k >= 0) & (k < len(xs))
+        a[ok] = xs[k[ok]]
+        out.append(a)
+    return out or None
 
 
 @numba.njit(cache=True)
-def _hits(x0, hist, has_hist, hx, cx, cy, n, off, lag, d_fwd, step, reach, hb_x, hb_lo, hb_hi, y_lo, y_hi):
+def _hits(x0, hist, has_hist, hx, cx, cy, n, off, pre, lag, d_fwd, step, reach, hb_x, hb_lo, hb_hi, y_lo, y_hi):
     """hx [P, W]: her x per route frame (the walk's reference); cx, cy [P, W]: her Bounds centre per route frame; n [P]:
     the frames each route checks (<= W); off [P]: its first frame - now; hist [lag + 1]: her x at frames now - lag ..
-    now (has_hist False: none, the route's first x instead). Before a route's first frame (now < frame < first) her x
-    is its first x. Returns hits [P, W] and the root interval lo, hi [P, W] (nan past a route's frames)."""
+    now (has_hist False: none known); pre [P, >= max(off) - 1]: her x at frames now + 1 .. now + off - 1, before the
+    route's first frame (the same candidate's earlier part). A nan x is unknown (Sol seq 359: a missing x is never filled
+    from the route's own points): a step whose window holds one moves both ends out, as if she were far. Returns hits
+    [P, W] and the root interval lo, hi [P, W] (nan past a route's frames)."""
     P, W = hx.shape
     hits = np.zeros((P, W), np.bool_)
     LO = np.full((P, W), np.nan)
@@ -108,26 +150,30 @@ def _hits(x0, hist, has_hist, hx, cx, cy, n, off, lag, d_fwd, step, reach, hb_x,
         if m <= 0:
             continue
         for c in range(lag + 1):
-            seq[c] = hist[c] if has_hist else hx[p, 0]
+            seq[c] = hist[c] if has_hist else np.nan
         for i in range(1, o + m):
             j = i - o
-            seq[lag + i] = hx[p, 0] if j < 0 else hx[p, j]
+            seq[lag + i] = pre[p, i - 1] if j < 0 else hx[p, j]
         lo = x0
         hi = x0
         for i in range(o + m):
             if i > 0:
                 # the step from frame now + i - 1 to now + i reads her x at frames now + i - 1 - lag .. now + i - 1
-                wmax = seq[i - 1]
-                wmin = wmax
-                for c in range(i, i + lag):
+                unknown = False
+                wmax = -np.inf
+                wmin = np.inf
+                for c in range(i - 1, i + lag):
                     v = seq[c]
-                    if v > wmax:
-                        wmax = v
-                    elif v < wmin:
-                        wmin = v
-                if not (wmin > hi and wmax <= hi + d_fwd - step):
+                    if v != v:
+                        unknown = True
+                    else:
+                        if v > wmax:
+                            wmax = v
+                        if v < wmin:
+                            wmin = v
+                if unknown or not (wmin > hi and wmax <= hi + d_fwd - step):
                     hi = hi + step
-                if not (wmax < lo and wmin >= lo - d_fwd + step):
+                if unknown or not (wmax < lo and wmin >= lo - d_fwd + step):
                     lo = lo - step
             j = i - o
             if j < 0:
@@ -144,14 +190,31 @@ def _hits(x0, hist, has_hist, hx, cx, cy, n, off, lag, d_fwd, step, reach, hb_x,
     return hits, LO, HI
 
 
-def route_hits(x0: float, history: np.ndarray, paths, spans, width: int, box=None):
+def route_hits(x0: float, history: np.ndarray, paths, spans, width: int, box=None, preludes=None):
     """Body contacts of a walker with root x0 now on each route: hits [len(paths), width] (column k = the route's
     frame k, False past its span) and the root interval lo, hi [len(paths), width]. spans[i] = (offset, length): the
     route's first frame minus the forecast origin (>= 0) and its last checked frame index; history: hero_history();
     box: the routes' boxes stacked [len(paths), >= width, 4] when the caller has them (B2Geometry.scan_batch).
-    Her x for the walk is the route's pos where it has one, else its box centre; her HeroBox comes from its box."""
+    Her x for the walk is the route's pos where it has one, else its box centre; her HeroBox comes from its box.
+    preludes[i] (Sol seq 359): her x at frames now + 1 .. now + offset - 1, before route i (gap_xs: a list of arrays,
+    alternatives, nan where unknown; None: all unknown). A route with alternatives is checked once per alternative:
+    its contacts are their union, its interval the hull of theirs."""
     P = len(paths)
     W = int(width)
+    alts = [None if preludes is None or preludes[g] is None else list(preludes[g]) for g in range(P)]
+    if any(a is not None and len(a) > 1 for a in alts):
+        src = np.array([g for g in range(P) for _ in (alts[g] or [None])], np.int64)
+        rows = [a for g in range(P) for a in (alts[g] or [None])]
+        h, lo, hi = route_hits(x0, history, [paths[g] for g in src], [spans[g] for g in src], W,
+                               box=None if box is None else np.asarray(box)[src], preludes=[None if a is None else [a] for a in rows])
+        hits = np.zeros((P, W), np.bool_)
+        LO = np.full((P, W), np.nan)
+        HI = np.full((P, W), np.nan)
+        for q, g in enumerate(src):
+            hits[g] |= h[q]
+            LO[g] = np.fmin(LO[g], lo[q])
+            HI[g] = np.fmax(HI[g], hi[q])
+        return hits, LO, HI
     n = np.zeros(P, np.int64)
     off = np.zeros(P, np.int64)
     if box is not None:
@@ -182,8 +245,14 @@ def route_hits(x0: float, history: np.ndarray, paths, spans, width: int, box=Non
     has_hist = hist.size == HIST_N
     if not has_hist:
         hist = np.zeros(HIST_N)
-    return _hits(float(x0), hist, has_hist, hx, cx, cy, n, off, LAG_F, D_FWD, V_WALK * FT, TURN_U + MARGIN_U, HB_HX,
-                 HB_DY - HB_HY, HB_DY + HB_HY, FLOOR_Y - MARGIN_U, FLOOR_Y + BODY_TOP_U + MARGIN_U)
+    pre = np.full((P, max(int(off.max(initial=0)) - 1, 1)), np.nan)
+    for g in range(P):
+        a = alts[g]
+        if a and off[g] > 1:
+            v = np.asarray(a[0], np.float64).ravel()[:off[g] - 1]
+            pre[g, :len(v)] = v
+    return _hits(float(x0), hist, has_hist, hx, cx, cy, n, off, pre, LAG_F, D_FWD, V_WALK * FT, TURN_U + MARGIN_U,
+                 HB_HX, HB_DY - HB_HY, HB_DY + HB_HY, FLOOR_Y - MARGIN_U, FLOOR_Y + BODY_TOP_U + MARGIN_U)
 
 
 def warm() -> dict:
@@ -202,4 +271,4 @@ def warm() -> dict:
 
 
 __all__ = ["ENABLED", "CLAPPER", "D_FWD", "V_WALK", "LAG_F", "V_IDLE_MAX", "TURN_U", "BODY_TOP_U", "MARGIN_U",
-           "walker_x", "hero_history", "route_hits", "warm"]
+           "walker_x", "hero_history", "prelude_xs", "gap_xs", "route_hits", "warm"]

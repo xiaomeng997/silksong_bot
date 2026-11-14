@@ -755,6 +755,7 @@ class NativeManualAirChain(NativeChainB2):
         ref=f"air:{move}:{path.through}";options=[];paths={}
         for kind in ("left_landing","right_landing"):
             p=ordinary_post(parent,sim.params,sim.terrain,kind=kind,profile=self.profile)
+            p.walk_prelude=path      # Sol seq 359: the walk rule walks the parent's frames before p (combat.walk_rule)
             paths[kind]=p
             executable=self.continuation_executable(kind,p)
             if wall_validator is not None:
@@ -764,6 +765,7 @@ class NativeManualAirChain(NativeChainB2):
                 executable,"pass",geo.scan(p)))
         def full(option):
             p=ordinary_post(parent,sim.params,sim.terrain,kind=option.kind,profile=self.profile,full=True)
+            p.walk_prelude=path
             scan=replace(geo.scan(p),path_ref=option.path_ref)
             if wall_validator is not None and not wall_validator(p):
                 scan=replace(scan,complete=False,source=scan.source+"; wall-free validator rejected continuation")

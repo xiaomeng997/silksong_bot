@@ -918,6 +918,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
             bounce_ref=f"{move}:{future.through}"
             opts=[]
             for kind,path in paths.items():
+                path.walk_prelude=future      # Sol seq 359: the walk rule walks future's frames before the bounce
                 short=bgeo.scan(path,min(self.profile.short_frames,len(path.commands)))
                 opts.append(Continuation(kind,kind,bounce_ref,bgeo.ref(path),
                     path.through if path.end=="handback" else None,
@@ -936,6 +937,7 @@ class NativeChainB2(Opt1ReceiptMixin,NativeChainCandidates):
                 from dataclasses import replace
                 from .knife_chain_commitment import FullContinuationScan
                 p=finish(option.option_id)
+                p.walk_prelude=future
                 # Same command program, now extended from its recorded checkpoint.
                 scan=replace(bgeo.scan(p),path_ref=option.path_ref)
                 return FullContinuationScan(scan,p.through)

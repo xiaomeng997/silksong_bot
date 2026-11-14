@@ -80,25 +80,32 @@ class B2Geometry:
             rs=self._fresh[length]
         return rs
 
-    def _walkers(self,rs,paths,spans,width,box=None):
+    def _walkers(self,rs,paths,spans,width,box=None,preludes=None):
         """combat.walk_rule (the person 11-13, quote 130): {iid: body contacts [len(paths), width]} of every other
         Clapper whose Idle / Walk body its walk rule covers on these routes (walk_rule.walker_x: not the target, no
-        move instance); spans[i] = (first frame - origin, last frame index). Empty with SSBOT_FORUM_TWO_WALK_RULE=0."""
+        move instance); spans[i] = (first frame - origin, last frame index). Empty with SSBOT_FORUM_TWO_WALK_RULE=0.
+        preludes[i] (Sol seq 359): what is known of her x before a path that starts after the origin (walk_rule.prelude_xs:
+        the same candidate's earlier part, or a list of alternatives); None there: the path's own walk_prelude, else
+        unknown (the walker may close over those frames: never a smaller interval than the whole candidate's)."""
         from . import walk_rule as wr
         trk=getattr(rs,"trk",None)
         if not wr.ENABLED or trk is None:return {}
         target=getattr(self.move,"target_iid",None)
-        out={};hist=None
+        out={};hist=None;pre=None
         for iid in sorted(getattr(trk,"now",None) or {}):
             x0=wr.walker_x(trk,iid,target)
             if x0 is None:continue
-            if hist is None:hist=wr.hero_history(trk)
-            out[iid]=wr.route_hits(x0,hist,paths,spans,width,box=box)[0]
+            if hist is None:
+                hist=wr.hero_history(trk)
+                pre=[wr.gap_xs(self.origin,int(o),(preludes[i] if preludes is not None and preludes[i] is not None
+                                                     else getattr(paths[i],"walk_prelude",None)))
+                     for i,(o,_) in enumerate(spans)]
+            out[iid]=wr.route_hits(x0,hist,paths,spans,width,box=box,preludes=pre)[0]
         return out
 
-    def _query(self,path,limit,*,external_only=False):
+    def _query(self,path,limit,*,external_only=False,prelude=None):
         rs,length,x,y,tk,inv,owners,same=self._sweep(path,limit)
-        walk=self._walkers(rs,[path],[(path.origin-self.origin,length)],length+1)
+        walk=self._walkers(rs,[path],[(path.origin-self.origin,length)],length+1,preludes=[prelude])
         contacts=[];covered=np.zeros(length+1,bool)
         for iid in sorted(owners):
             haz=np.asarray(rs.occupied_hazards(x,y,tk,{iid})).any(axis=0)&~inv
@@ -177,16 +184,17 @@ class B2Geometry:
         from .attack_range import FT
         return FT
 
-    def scan(self,path,limit=None):
-        return self._query(path,len(path.commands) if limit is None else limit)
+    def scan(self,path,limit=None,*,prelude=None):
+        """prelude (Sol seq 359): the same candidate's part before a path that starts after the origin (_walkers)."""
+        return self._query(path,len(path.commands) if limit is None else limit,prelude=prelude)
 
-    def scan_batch(self,paths):
+    def scan_batch(self,paths,*,preludes=None):
         """[scan(p) for p in paths] with one raster pass per owner (Task 179 #308: a whole locked hook's ~100 variant
         rows and the continuations of its forced bounce, in one tick). Each path keeps its own origin, clock, sweep
         points (scan's rows; a column that did not move contributes its centre once, its other rows being exact copies
         of it), protection flags and the support scan(p) reads; continuations first build one exact per-frame window
         over all of them, which scan(p) reuses the same way. Contacts per path in scan's order; the first path scan(p)
-        would refuse raises that refusal."""
+        would refuse raises that refusal. preludes[i]: scan(p, prelude=...) of path i (Sol seq 359)."""
         if not paths:return []
         from . import observed_slam
         spans=[(p.origin-self.origin,min(len(p.commands),len(p.box)-1)) for p in paths]
@@ -248,7 +256,8 @@ class B2Geometry:
             owners|={int(p[0]) for parts in rs.layers.values() for p in parts}
             if rs.bombs is not None:owners|={int(i) for i in rs.bombs[:,0]}
             contacts=[[] for _ in ids];covered=np.zeros(len(ids)*W,bool)
-            walk=self._walkers(rs,[paths[i] for i in ids],[spans[i] for i in ids],W,box=box)
+            walk=self._walkers(rs,[paths[i] for i in ids],[spans[i] for i in ids],W,box=box,
+                               preludes=None if preludes is None else [preludes[i] for i in ids])
             for iid in sorted(owners):
                 haz=columns(rs.occupied_hazards(x,y,T,{iid}))
                 total=columns(self._owner_occupancy(rs,x,y,T,iid))
@@ -272,13 +281,14 @@ class B2Geometry:
                                    "RangeSupport owner/hazard layers; current tracker instance; bounded sweep"+self._walk_src(walk))
         return out
 
-    def preflight(self,path):
+    def preflight(self,path,*,prelude=None):
         """Only rejects OTHER enemies / all delayed hazards on a modeled future.
 
         Used during approach, before the actual strike guard exists. No returned
         value can grant a target move admission or select the future strike.
+        prelude: as scan's (Sol seq 359).
         """
-        return self._query(path,len(path.commands),external_only=True)
+        return self._query(path,len(path.commands),external_only=True,prelude=prelude)
 
     @staticmethod
     def ref(path):

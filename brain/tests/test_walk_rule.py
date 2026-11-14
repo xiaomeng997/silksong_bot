@@ -30,21 +30,24 @@ def p_box(xs, ys):
     return route(xs, ys).box
 
 
-def hits_of(x0, hist, p, offset=0):
+def hits_of(x0, hist, p, offset=0, prelude=None):
     n = len(p.box) - 1
-    h, lo, hi = wr.route_hits(x0, np.asarray(hist, float), [p], [(offset, n)], n + 1)
+    h, lo, hi = wr.route_hits(x0, np.asarray(hist, float), [p], [(offset, n)], n + 1,
+                              preludes=None if prelude is None else [prelude])
     return h[0], lo[0], hi[0]
 
 
-def reference(x0, hist, hx, cx, cy, n, off):
-    """A plain restatement of the rule (not the kernel's code)."""
+def reference(x0, hist, hx, cx, cy, n, off, pre=None):
+    """A plain restatement of the rule (not the kernel's code). Sol seq 359: her x before the route (frames 1 .. off - 1)
+    is pre's (nan or absent: unknown), never the route's own first point; no history: unknown; a window holding an
+    unknown x moves both ends out."""
     lag = wr.LAG_F
     her = {}
     for f in range(-lag, off + n):
         if f <= 0:
-            her[f] = hist[lag + f] if hist is not None else hx[0]
+            her[f] = hist[lag + f] if hist is not None else float("nan")
         elif f < off:
-            her[f] = hx[0]
+            her[f] = pre[f - 1] if pre is not None and f - 1 < len(pre) else float("nan")
         else:
             her[f] = hx[f - off]
     lo = hi = x0
@@ -52,9 +55,10 @@ def reference(x0, hist, hx, cx, cy, n, off):
     for i in range(off + n):
         if i > 0:
             w = [her[f] for f in range(i - 1 - lag, i)]
-            if not (min(w) > hi and max(w) <= hi + wr.D_FWD - STEP):
+            unknown = any(v != v for v in w)
+            if unknown or not (min(w) > hi and max(w) <= hi + wr.D_FWD - STEP):
                 hi += STEP
-            if not (max(w) < lo and min(w) >= lo - wr.D_FWD + STEP):
+            if unknown or not (max(w) < lo and min(w) >= lo - wr.D_FWD + STEP):
                 lo -= STEP
         j = i - off
         if j < 0:
@@ -82,16 +86,23 @@ def test_constants_are_their_sources():
 
 def test_kernel_equals_the_plain_rule_on_random_routes():
     rng = np.random.default_rng(7)
-    for _ in range(60):
+    for _ in range(120):
         n = int(rng.integers(1, 70))
-        off = int(rng.integers(0, 4))
+        off = int(rng.integers(0, 9))
         x0 = float(rng.uniform(18, 44))
         hx = x0 + rng.uniform(-12, 12) + np.cumsum(rng.normal(0, .35, n + 1))
         cy = np.clip(4.6 + np.cumsum(rng.normal(0, .3, n + 1)), 4.6, 14.0)
         hist = None if rng.random() < .2 else x0 + rng.uniform(-12, 12) + np.cumsum(rng.normal(0, .3, wr.HIST_N))
+        if hist is not None and rng.random() < .2:
+            hist[:int(rng.integers(1, wr.HIST_N))] = np.nan          # a short tracker history (Sol seq 359: unknown)
+        pre = None
+        if off > 1 and rng.random() < .7:                             # the same candidate's earlier part, partly known
+            pre = hx[0] + np.cumsum(rng.normal(0, .35, off - 1))[::-1]
+            pre[rng.random(off - 1) < .2] = np.nan
         p = route(hx, cy)
-        h, lo, hi = wr.route_hits(x0, np.zeros(0) if hist is None else hist, [p], [(off, n)], n + 1)
-        rh, rlo, rhi = reference(x0, hist, hx, hx, 0.5 * (p.box[:, 1] + p.box[:, 3]), n + 1, off)
+        h, lo, hi = wr.route_hits(x0, np.zeros(0) if hist is None else hist, [p], [(off, n)], n + 1,
+                                  preludes=None if pre is None else [[pre]])
+        rh, rlo, rhi = reference(x0, hist, hx, hx, 0.5 * (p.box[:, 1] + p.box[:, 3]), n + 1, off, pre)
         np.testing.assert_allclose(lo[0], rlo, atol=1e-9)
         np.testing.assert_allclose(hi[0], rhi, atol=1e-9)
         np.testing.assert_array_equal(h[0], rh)
@@ -193,13 +204,15 @@ def test_the_tracker_keeps_her_recent_x():
     t = ar.RangeTracker(tables={})
     assert wr.hero_history(t).size == 0
     t.feed({"dt": ar.FT, "hero": {"pos": [30.0, 4.6]}, "ents": []})
-    np.testing.assert_array_equal(wr.hero_history(t), np.full(wr.HIST_N, 30.0))
+    h = wr.hero_history(t)          # Sol seq 359: the frames the tracker has not seen are unknown, not her oldest x
+    assert h.size == wr.HIST_N and np.isnan(h[:-1]).all() and h[-1] == 30.0
     for i in range(20):
         t.feed({"dt": ar.FT, "hero": {"pos": [30.0 + i, 4.6]}, "ents": []})
     np.testing.assert_array_equal(wr.hero_history(t), 30.0 + np.arange(20 - wr.HIST_N, 20))
     t.reset()
     assert len(t.hero_hist) == 0
-    assert wr.hero_history(NS(hero=(12.0, 4.0))).tolist() == [12.0] * wr.HIST_N
+    h = wr.hero_history(NS(hero=(12.0, 4.0)))
+    assert np.isnan(h[:-1]).all() and h[-1] == 12.0
 
 
 # ---- B2Geometry ----
@@ -286,3 +299,139 @@ def test_warm_loads_the_kernel_before_the_fight_and_is_wired(monkeypatch):
     assert wr.warm()["enabled"] is True and len(calls) == 2
     src = inspect.getsource(ForumPlannerPolicy.warmup)
     assert 'self.b2_warmup_report["walk_rule"]=_walk_rule.warm()' in src
+
+
+# ---- Sol seq 359 (Astra, #418 P2): a route that starts later walks the same candidate's earlier part ----
+
+def _astra():
+    """analysis/walk_rule418_20261113/ASTRA_REVIEW418.json: the walker at 24.5, her history at 34.5; 30 frames high in
+    the air from 34.5 to 29.5, then 10 frames falling at x 29.5. The whole route from frame 100, its suffix from 130."""
+    X = np.r_[np.linspace(34.5, 29.5, 31), np.full(10, 29.5)]
+    Y = np.r_[np.full(31, 10.0), np.linspace(9.46, 4.6, 10)]
+    return route(X, Y, origin=100), route(X[30:], Y[30:], origin=130)
+
+
+def test_a_later_route_walks_the_same_candidates_earlier_part():
+    whole, suffix = _astra()
+    hist = np.full(wr.HIST_N, 34.5)
+    hw, lw, uw = hits_of(24.5, hist, whole)
+    assert list(np.flatnonzero(hw)) == list(range(32, 41)) and uw[30] == pytest.approx(27.4333, abs=1e-3)
+    # the suffix handed the earlier part: the whole route's interval and contacts, frame by frame
+    hs, ls, us = hits_of(24.5, hist, suffix, offset=30, prelude=wr.gap_xs(100, 30, whole))
+    np.testing.assert_array_equal(hs, hw[30:])
+    np.testing.assert_allclose(us, uw[30:])
+    np.testing.assert_allclose(ls, lw[30:])
+    # without it those frames are unknown: never a smaller interval (8a9919e6 filled them with 29.5: 25.9667, no contact)
+    hu, lu, uu = hits_of(24.5, hist, suffix, offset=30)
+    assert (uu >= uw[30:] - 1e-9).all() and (lu <= lw[30:] + 1e-9).all() and (hu >= hw[30:]).all()
+    assert uu[0] > uw[30] + 1.0
+
+
+def test_prelude_alternatives_are_each_walked():
+    whole, suffix = _astra()
+    hist = np.full(wr.HIST_N, 34.5)
+    near = (100, np.full(40, 29.5))                                   # another way here: at 29.5 from frame 100
+    a = hits_of(24.5, hist, suffix, offset=30, prelude=wr.gap_xs(100, 30, near))
+    b = hits_of(24.5, hist, suffix, offset=30, prelude=wr.gap_xs(100, 30, whole))
+    both = hits_of(24.5, hist, suffix, offset=30, prelude=wr.gap_xs(100, 30, [near, whole]))
+    assert a[2][0] < b[2][0]                                          # the two ways give different intervals
+    np.testing.assert_array_equal(both[0], a[0] | b[0])
+    np.testing.assert_allclose(both[2], np.fmax(a[2], b[2]))
+    np.testing.assert_allclose(both[1], np.fmin(a[1], b[1]))
+
+
+def _near():
+    """She stands 4.5 u from the walker's root (24.5) for 30 frames, then 3.5 u: inside its 5.5 u it never closes, and
+    her 28.0 stays clear of its body (root + 2.8 u + her half width); the same frames unknown let it close onto her."""
+    X = np.r_[np.full(31, 29.0), np.full(10, 28.0)]
+    return route(X, 4.6, origin=100), route(X[30:], 4.6, origin=130)
+
+
+def test_b2geometry_checks_a_later_route_with_its_earlier_part(monkeypatch):
+    """Single (scan / preflight with prelude=) and batch (scan_batch with preludes=, or the path's walk_prelude): the
+    whole route's contacts of the walker on the suffix's frames; nothing handed on: a superset."""
+    monkeypatch.setattr(wr, "ENABLED", True)
+
+    def own7(scan):
+        return [(c.frame, c.kind) for c in scan.contacts if c.owner_iid == 7]
+    for case, hero_x, first in ((_astra, 34.5, 132), (_near, 29.0, None)):
+        whole, suffix = case()
+        rs = _support({7: 24.5, 9: 40.0}, hero_x)
+        ref = [c for c in own7(_geo(rs).scan(whole)) if c[0] >= 130]
+        assert (ref[0][0] if ref else None) == first and all(kind == "body" for _, kind in ref)
+        assert own7(_geo(rs).scan(suffix, prelude=whole)) == ref
+        assert own7(_geo(rs).preflight(suffix, prelude=whole)) == ref
+        assert own7(_geo(rs).scan_batch([suffix, whole], preludes=[whole, None])[0]) == ref
+        tagged = route(whole.pos[30:, 0], whole.pos[30:, 1], origin=130)
+        tagged.walk_prelude = whole
+        assert own7(_geo(rs).scan(tagged)) == ref and own7(_geo(rs).scan_batch([tagged])[0]) == ref
+        alone = own7(_geo(rs).scan(suffix))
+        assert set(ref) <= set(alone)
+        if case is _near:
+            assert alone                         # unknown frames let it close: the earlier part is what keeps her clear
+
+
+def test_the_continuation_callers_hand_on_their_earlier_part(monkeypatch):
+    from dataclasses import dataclass
+    from ssbot.combat import knife_chain_post_actions as Post
+    from ssbot.combat.knife_chain_air_native import NativeManualAirChain as Native
+    from ssbot.combat.knife_chain_commitment import ContactScan, MoveInstance
+
+    @dataclass
+    class P:
+        origin: int = 90
+        through: int = 100
+        stage: str = "approach"
+        end: str = "bounce"
+        kind: str = "parent"
+        full: bool = False
+    monkeypatch.setattr(Post, "ordinary_post", lambda parent, params, terrain, *, kind, profile, full=False:
+                        P(100, 150 if full else 112, "continuation", "handback" if full else "short", kind, full))
+    seen = []
+    geo = NS(ref=lambda p: p.kind, scan=lambda p: seen.append((p.full, getattr(p, "walk_prelude", None)))
+             or ContactScan(p.kind, p.origin, p.through, (), "clear"))
+    parent = P()
+    n = NS(profile=NS(short_frames=12), continuation_executable=lambda kind, p: True)
+    Native._continuations(n, parent, NS(params=None, terrain=None), geo, MoveInstance(7, 80, "CC_SLAM"),
+                          wall_validator=lambda p: p.kind == "left_landing" and not p.full)   # a full exit is checked too
+    assert [full for full, _ in seen] == [False, False, True] and all(w is parent for _, w in seen)
+    # knife_chain_b2's post-bounce exits (short and full): future's frames before the bounce
+    import inspect
+    from ssbot.combat import knife_chain_b2 as B
+    src = inspect.getsource(B)
+    assert "path.walk_prelude=future" in src and "p.walk_prelude=future" in src
+
+
+def test_the_hook_entry_hands_each_way_on_to_its_stops_and_controls():
+    from ssbot.combat import knife_chain_face_hook as FH
+    from ssbot.combat.knife_chain_commitment import ContactScan
+    from tests.test_hook_entry_bounce308 import V, hook_case, moving_rs
+    f = 1001
+    a, s, sim, g, path = hook_case(moving_rs())
+    items = FH._entry(path, V(a), f)
+    assert any(q.origin > f for q, _, _, _ in items)               # the intermediate stops start after f
+    bounds = [.5 * (q.box[:, 0] + q.box[:, 2]) for q, _, _, _ in items if q.origin == f]
+    for q, _, control, _ in items:
+        assert q.walk_to_control and all(first == f and len(xs) == control[0] - f + 1 for first, xs in q.walk_to_control)
+        own = .5 * (q.box[:, 0] + q.box[:, 2])
+        k0 = q.origin - f
+        for _, xs in q.walk_to_control:                             # its own rows from its origin on
+            np.testing.assert_allclose(xs[k0:], own)
+            # before them: a bound track's frames, the bound whose frame at the stop's origin is the stop's first row
+            assert k0 == 0 or any(len(b) > k0 and np.array_equal(b[:k0], xs[:k0]) and b[k0] == own[0] for b in bounds)
+        assert (q.walk_prelude is None) == (q.origin == f)
+
+    class Geo:
+        def __init__(self):
+            self.paths = []
+
+        def scan_batch(self, paths):
+            self.paths += paths
+            return [ContactScan("t", p.origin, p.through, (), "clear") for p in paths]
+    v = V(a)
+    _, controls = FH.entry_scan(Geo(), path, v, f)
+    assert set(v["_hook_prelude"]) == set(controls)
+    out = Geo()
+    FH.entry_outs(out, sim, v, f, controls, 12)
+    assert out.paths and all(any(p.walk_prelude is w for c, w in v["_hook_prelude"].items() if c[0] == p.origin)
+                             for p in out.paths)
