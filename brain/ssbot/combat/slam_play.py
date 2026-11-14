@@ -519,9 +519,8 @@ class SlamPlay:
         self._csx = None                     # SP13 SSBOT_FORUM_CLAWSTRIKE: claw_strike.ClawStrike (made on first use)
         self.cs_declines: dict = {}          # ... why a slam the playbook could not reach got no Clawline
         self._life = _rl.RuneCircles()       # the rune circles' lives (shared with the other scripts by the policy)
-        self._as_next: dict = {}             # 11-14 the re-pogo entry: Clapper iid -> the first frame air_catch_try searches again
-        self.as_tries = [0, 0]               # ... air_catch_try's searches, plans
-        self._as_fail: dict = {}             # ... (Clapper iid, antic entry frame) -> failed air-catch searches of that slam
+        self.as_tries = [0, 0]               # 11-14 the re-pogo entry: air_catch_try's searches, plans
+        self._as_slams: dict = {}            # ... Clapper iid -> its slam's air-catch search record (_as_slot)
 
     def reset(self) -> None:
         self.run = None
@@ -537,9 +536,8 @@ class SlamPlay:
         self.sg = []
         self.cs_declines = {}
         self._life = _rl.RuneCircles()
-        self._as_next = {}
         self.as_tries = [0, 0]
-        self._as_fail = {}
+        self._as_slams = {}
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -740,12 +738,14 @@ class SlamPlay:
         return r is not None and r.phase in COMMIT_PHASES
 
     def air_catch_try(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
-                      skip: frozenset | None = None, sim=None, guard: list | None = None) -> int | None:
+                      skip: frozenset | None = None, sim=None, guard: list | None = None, bombs=None) -> int | None:
         """11-14 the re-pogo entry (连踩入口, design 4.4a; SSBOT_FORUM_AIRSTRIKE): the mask for frame f + 2 when the air catch
         takes a slam while a chain's air context with no link running keeps the playbook unstepped (the policy's yield rule;
         the bounce hand-back), else None. Only the air catch (_as_try): no walk, no ground start, no Clawline. No run is
-        kept without a plan (the chain's goal hand-off reads the run): a failed search is tried again RESEARCH_F frames
-        later. A plan is a committed link (cs_strike): from the next tick the policy steps the run (package 1)."""
+        kept without a plan (the chain's goal hand-off reads the run); the slam instance's record (_as_slot) keeps the
+        failure budget and the retry interval across the dropped runs. A plan is a committed link (cs_strike): from the next
+        tick the policy steps the run (package 1). bombs: this tick's small-rune forecast (rune_bombs.frames) for the shared
+        known-hazard check (_as_hazard, Sol seq366)."""
         if not _cs.AIRSTRIKE or sim is None or ground or not accepting or self.run is not None or self._hold is not None:
             return None
         t = f / 60.0 if t_game is None else float(t_game)
@@ -759,9 +759,9 @@ class SlamPlay:
         if e.get("iid") == self._closed_iid and not self._new_slam(self._closed_iid, ta):
             return None                                   # the handled slam gets no second look (step's rule)
         k = int(round((t - ta) * 60.0)) + SEND_AHEAD + self.cfg.lag
-        if k > AS_K_MAX or f + 2 < self._as_next.get(e.get("iid"), -(1 << 30)):
+        if k > AS_K_MAX or not self._as_may_search(e.get("iid"), ta, t):
             return None
-        self._t, self._f, self._guard, self._bombs = t, f, guard, None
+        self._t, self._f, self._guard, self._bombs = t, f, guard, bombs
         self._life.update(f, s, t)
         r = self.run = Run(iid=e.get("iid"), fa=int(f - round(tin * 60.0)), face=1 if e.get("flipX") else -1, ta=ta)
         r.k = k
@@ -769,11 +769,62 @@ class SlamPlay:
         m = self._as_try(r, k, f, s, e, ground, accepting, sim, int((s.get("hero") or {}).get("health") or 0), t,
                          "air context")
         if m is None or self.run is not r:
-            self._as_next[e.get("iid")] = f + 2 + _ac.RESEARCH_F
             self.run = None
             return None
         self.as_tries[1] += 1
         return m
+
+    def _as_slot(self, iid, ta: float) -> dict:
+        """11-14 the re-pogo entry (Sol seq366 D426-SEARCH-BOUND): the record of one slam instance for the air catch's
+        searches - fails (AS_FAIL_MAX) and next_t (the game clock of the next allowed search, RESEARCH_F frames after a failed
+        one) - shared by air_catch_try, the run's wait (_cs_try) and the committed run's re-search (_cs_step). Keyed by the
+        Clapper and its antic entry on the game clock (ta), which stands still with the game clock through a hit-stop while
+        STATE frames pass (Sol's example: f 1000 -> 1003 at t 10, tin 0.2: one slam); an antic entry more than 30 game frames
+        from the record's (step's new_antic rule) is the next slam and restores the budget."""
+        rec = self._as_slams.get(iid)
+        if rec is None or abs(float(ta) - rec["ta"]) * 60.0 > 30:
+            rec = self._as_slams[iid] = {"ta": float(ta), "fails": 0, "next_t": float("-inf")}
+        return rec
+
+    def _as_may_search(self, iid, ta: float, t: float) -> bool:
+        rec = self._as_slot(iid, ta)
+        return rec["fails"] < AS_FAIL_MAX and t >= rec["next_t"] - 1e-9
+
+    def _as_failed(self, iid, ta: float, t: float) -> None:
+        rec = self._as_slot(iid, ta)
+        rec["fails"] += 1
+        rec["next_t"] = t + _ac.RESEARCH_F / 60.0
+
+    def _as_hazard(self, r: Run, s: dict, e: dict, plan, sim, t: float, k: int) -> str | None:
+        """11-14 the re-pogo entry (Sol seq366 D426-HAZARDS): why a known hazard outside the air catch's own model (air_chain
+        checks S's hammer and body and the other one's still body) meets the plan, or None; at its entry and on every tick of
+        the committed run. The other Clapper with a move under way - only Idle / Walk pass, the conservative domain of the
+        Clawline's other_free gate, so its jump's landing hammer, its slams, casts and evades are out; TWO_PLAY's other-one gate
+        (_two_danger) at the strike point; every placed rune lit over her on the plan's own modelled path (air_chain.plan_path
+        against rune_life.path_exposed, the gate _rune_path uses: rune_life's big circles and the small runes of this tick's
+        bomb forecast)."""
+        import numpy as np
+        for o in clappers(s):
+            if o.get("iid") == r.iid:
+                continue
+            st = control(o)[0]
+            if st not in ("Idle", "Walk"):
+                return f"other {st}"
+        path = _ac.plan_path(sim, plan)
+        if path is None:
+            return "no path"
+        xs, bottom = path
+        if TWO_PLAY and len(xs):
+            why = self._two_danger(s, e, float(xs[min(max(int(plan.c_strike) - int(sim.f), 0), len(xs) - 1)]), t, k)
+            if why is not None:
+                return why
+        rows = self._life.rows()
+        bk = self._bombs
+        if bk is not None and len(bk):
+            b_ = np.asarray(bk, np.float64).reshape(-1, 6)
+            rows = np.concatenate([rows, b_]) if len(rows) else b_
+        ex = _rl.path_exposed(xs, bottom, rows)
+        return None if ex is None else "rune " + ex
 
     def abort(self, why: str) -> None:
         """Hand the slam back to the planner (the supervisor took the keys)."""
@@ -1428,8 +1479,8 @@ class SlamPlay:
         air_chain's search with S as its B; the keys for frame f + 2 or None."""
         if ground or not accepting or r.as_air or k > AS_K_MAX:
             return None
-        if self._as_fail.get((r.iid, r.fa), 0) >= AS_FAIL_MAX:
-            return None                                   # 11-14: this slam's failed air-catch searches are used up
+        if not self._as_may_search(r.iid, r.ta, t):
+            return None                                   # 11-14: this slam's budget used up / its retry interval
         h = s.get("hero") or {}
         fc = h.get("facing")
         a_entry = int(round(f - (t - r.ta) * 60.0))
@@ -1437,14 +1488,19 @@ class SlamPlay:
                        kb0=sim.fo - a_entry, a_box=self._cs_box(self._cs_other(s, r)), hero_x=hero_x(s),
                        face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
         t0 = time.perf_counter()
-        plan = _ac.search(sim, actx, stages=AS_STAGES)
+        plan = _ac.search(sim, actx, stages=AS_STAGES, strict=True)
         ms = round(1e3 * (time.perf_counter() - t0), 1)
-        if plan is None:
-            self._as_fail[(r.iid, r.fa)] = self._as_fail.get((r.iid, r.fa), 0) + 1
+        hz = None if plan is None else self._as_hazard(r, s, e, plan, sim, t, k)
+        if plan is None or hz is not None:
+            self._as_failed(r.iid, r.ta, t)
             r.cs_next = f + 2 + _ac.RESEARCH_F
-            if not any(x_[1] == "as_none" for x_ in r.cs_log):
-                r.cs_log.append([f, "as_none", k, ms])
-            self._cs_decline(r, f, "as no plan")
+            if hz is not None:
+                r.cs_log.append([f, "as_hazard", k, hz, ms])
+                self._cs_decline(r, f, "as hazard")
+            else:
+                if not any(x_[1] == "as_none" for x_ in r.cs_log):
+                    r.cs_log.append([f, "as_none", k, ms])
+                self._cs_decline(r, f, "as no plan")
             return None
         hb = h.get("box") or [0, FLOOR_Y - 1.56, 0, 0]
         r.as_air, r.cs_strike = True, plan
@@ -1559,9 +1615,24 @@ class SlamPlay:
                        face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
         cfg = self._cs_cfg()
         sp_ = r.cs_strike
-        if r.as_air and sp_ is not None and not _ac.check(sim, actx, sp_):
-            # SP13a: the air approach searched again (air_chain's grid: drift, down slash, umbrella, the strike)
-            q = _ac.search(sim, actx)
+        if r.as_air and sp_ is not None:
+            # 11-14 the re-pogo entry (Sol seq366 D426-HAZARDS): the committed air catch re-reads the known hazards every tick
+            hz = self._as_hazard(r, s, e, sp_, sim, t, k)
+            if hz is not None:
+                r.cs_log.append([f, "as_hazard_abort", k, hz])
+                self._close("abort", "as hazard")
+                return None
+        if r.as_air and sp_ is not None and not _ac.check(sim, actx, sp_, strict=True):
+            # SP13a: the air approach searched again (air_chain's grid: drift, down slash, umbrella, the strike); 11-14 (Sol seq366
+            # D426-SEARCH-BOUND): with the air catch's stage, strict protection and hazards, inside the slam's shared budget and
+            # retry interval (_as_slot), a failed one counted
+            q = None
+            if self._as_may_search(r.iid, r.ta, t):
+                q = _ac.search(sim, actx, stages=AS_STAGES, strict=True)
+                if q is not None and self._as_hazard(r, s, e, q, sim, t, k) is not None:
+                    q = None
+                if q is None:
+                    self._as_failed(r.iid, r.ta, t)
             if q is not None:
                 if sp_.pressed_down is not None:
                     q.f_down, q.pressed_down = sp_.f_down, sp_.pressed_down

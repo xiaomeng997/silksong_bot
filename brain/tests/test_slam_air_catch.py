@@ -5,11 +5,13 @@ too close to it and with no landing in time (the run waits in the air), and from
 from collections import Counter
 from types import SimpleNamespace as NS
 
+import numpy as np
 import pytest
 
 from ssbot.combat import air_chain as ac
 from ssbot.combat import claw_strike as cs
 from ssbot.combat import slam_play as sp
+from ssbot.knowledge import kinematics as kin
 from ssbot.train import forum_planner_policy as mod
 from ssbot.train.forum_planner_policy import ForumPlannerPolicy as Policy
 from tests.test_b2_policy_priority import Script, run_arbitration, selected
@@ -176,7 +178,21 @@ def test_air_catch_try_gates(monkeypatch, spy, case):
     assert p.run is None or case == "run"
 
 
-def test_air_catch_try_keeps_no_run_without_a_plan_and_waits(monkeypatch, spy):
+@pytest.fixture
+def no_plan(monkeypatch):
+    """air_chain.search stand-in: records (stages, strict), no plan."""
+    calls = []
+
+    def fake(sim, ctx, stages=None, strict=False):
+        calls.append((stages, strict))
+        return None
+    monkeypatch.setattr(ac, "search", fake)
+    return calls
+
+
+def test_air_catch_try_keeps_no_run_without_a_plan_and_waits(monkeypatch, no_plan):
+    # a failed search: no run kept; the slam's record waits RESEARCH_F game frames, then searches again (the 47 stage,
+    # the strict protection)
     monkeypatch.setattr(cs, "AIRSTRIKE", True)
     hx = CX - 6.5
     p = sp.SlamPlay(sp.PlayCfg())
@@ -185,9 +201,20 @@ def test_air_catch_try_keeps_no_run_without_a_plan_and_waits(monkeypatch, spy):
         assert p.air_catch_try(f, air(f, k, hx), False, True, t_game=t_of(f),
                                sim=sim_for(hx, f=f, ground=False, bb=6.0)) is None
         assert p.run is None
-    # searched at 1000, again RESEARCH_F frames later (the mask frame f + 2 >= the wait's end)
-    assert spy == [(20, "air context"), (20 + ac.RESEARCH_F, "air context")]
-    assert p.as_tries == [2, 0] and p._as_next[7] == 1000 + ac.RESEARCH_F + 2 + ac.RESEARCH_F
+    assert no_plan == [(sp.AS_STAGES, True)] * 2
+    assert p.as_tries == [2, 0] and p._as_slams[7]["fails"] == 2
+
+
+def test_a_paused_game_clock_is_one_slam(monkeypatch, no_plan):
+    # Sol seq366 D426-SEARCH-BOUND: STATE frames 1000 -> 1009 while the game clock stands at t 10 (tin 0.2, a hit-stop): one
+    # slam (its antic entry on the game clock, 9.8), no second search before RESEARCH_F game frames
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    hx = CX - 6.5
+    p = sp.SlamPlay(sp.PlayCfg())
+    for f in (1000, 1003, 1006, 1009):
+        p.air_catch_try(f, air(f, 14, hx), False, True, t_game=10.0, sim=sim_for(hx, f=f, ground=False, bb=6.0))
+    assert len(no_plan) == 1 and list(p._as_slams) == [7] and p._as_slams[7]["fails"] == 1
+    assert abs(p._as_slams[7]["ta"] - 9.8) < 1e-9
 
 
 def test_air_catch_try_takes_a_real_plan_as_a_committed_link(monkeypatch):
@@ -222,26 +249,128 @@ def test_search_stages_default_and_the_47_stage():
     assert ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx, stages=()) is None
 
 
-def test_failed_searches_per_slam_are_capped(monkeypatch):
-    # AS_FAIL_MAX failed searches give up that slam (step and air_catch_try share the count); a new slam is searched again
+def test_failed_searches_per_slam_are_capped(monkeypatch, no_plan):
+    # AS_FAIL_MAX failed searches give up that slam (one record per slam instance); the next slam is searched again
     monkeypatch.setattr(cs, "AIRSTRIKE", True)
-    calls = []
-
-    def fake(sim, ctx, stages=None):
-        calls.append(stages)
-        return None
-    monkeypatch.setattr(ac, "search", fake)
     hx = CX - 6.5
     p = sp.SlamPlay(sp.PlayCfg())
     f = 1000
     for i in range(sp.AS_FAIL_MAX + 3):
-        f = 1000 + i * (ac.RESEARCH_F + 1)
-        p.air_catch_try(f, air(f, 12 + f - 1000, hx), False, True, t_game=10.0, sim=sim_for(hx, f=f, ground=False, bb=6.0))
-    assert len(calls) == sp.AS_FAIL_MAX and all(st == sp.AS_STAGES for st in calls)
-    # the same Clapper's next slam (its antic entry 60 frames later): searched again
+        f = 1000 + i * ac.RESEARCH_F
+        p.air_catch_try(f, air(f, 6 + i * ac.RESEARCH_F, hx), False, True, t_game=t_of(f),
+                        sim=sim_for(hx, f=f, ground=False, bb=6.0))
+    assert no_plan == [(sp.AS_STAGES, True)] * sp.AS_FAIL_MAX and p._as_slams[7]["fails"] == sp.AS_FAIL_MAX
+    # the same Clapper's next slam (its antic entry 78 game frames later): searched again, its own count
     f2 = f + 60
-    p.air_catch_try(f2, air(f2, 12, hx), False, True, t_game=10.0 + 60 / 60.0, sim=sim_for(hx, f=f2, ground=False, bb=6.0))
-    assert len(calls) == sp.AS_FAIL_MAX + 1
+    p.air_catch_try(f2, air(f2, 12, hx), False, True, t_game=t_of(f2), sim=sim_for(hx, f=f2, ground=False, bb=6.0))
+    assert len(no_plan) == sp.AS_FAIL_MAX + 1 and p._as_slams[7]["fails"] == 1
+
+
+def committed(monkeypatch):
+    """SP13a's case taken by air_catch_try with the real search: the committed run's SlamPlay."""
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    hx = CX - 6.5
+    p = sp.SlamPlay(sp.PlayCfg())
+    assert p.air_catch_try(1001, air(1001, 11, hx), False, True, t_game=t_of(1001),
+                           sim=sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0)) is not None
+    return p, hx
+
+
+def test_committed_re_search_shares_the_stage_and_the_budget(monkeypatch):
+    # Sol seq366 D426-SEARCH-BOUND: the committed plan no longer passing (its strict check) searches again with the 47 stage
+    # and the strict protection, the failure counted on the slam's record
+    p, hx = committed(monkeypatch)
+    calls = []
+    monkeypatch.setattr(ac, "check", lambda sim, ctx, plan, strict=False: calls.append(("check", strict)) is None and False)
+    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False: calls.append(("search", stages, strict)) and None)
+    p.step(1002, air(1002, 12, hx), False, t_game=t_of(1002), sim=sim_for(hx, f=1002, ground=False, bb=6.0, vy=2.0))
+    assert calls == [("check", True), ("search", sp.AS_STAGES, True)] and p._as_slams[7]["fails"] == 1
+
+
+def test_committed_re_search_inside_the_used_budget_does_not_search(monkeypatch):
+    p, hx = committed(monkeypatch)
+    p._as_slams[7]["fails"] = sp.AS_FAIL_MAX
+    calls = []
+    monkeypatch.setattr(ac, "check", lambda sim, ctx, plan, strict=False: False)
+    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False: calls.append(1))
+    p.step(1002, air(1002, 12, hx), False, t_game=t_of(1002), sim=sim_for(hx, f=1002, ground=False, bb=6.0, vy=2.0))
+    assert calls == [] and p._as_slams[7]["fails"] == sp.AS_FAIL_MAX
+    assert p.run is None and p.done[-1].why == "as no strike"           # its press far: no keep
+
+
+def other(iid, x, st):
+    return {"type_key": sp.CLAPPER, "iid": iid, "hp": 200, "pos": [x, 7.45], "flipX": False,
+            "fsms": [{"name": "Control", "state": st, "t": 0.3}]}
+
+
+@pytest.mark.parametrize("case", ["clean", "other idle", "other jump", "other slam", "big circle", "small rune", "two_play"])
+def test_air_catch_known_hazards_at_entry(monkeypatch, case):
+    # Sol seq366 D426-HAZARDS: SP13a's feasible catch, plus the other one in its jump (its landing hammer to come) or in a slam,
+    # a placed big circle or small rune lit on her modelled path, or TWO_PLAY's other-one gate: declined, the failure
+    # counted; clean (or the other one idle far away): the plan takes the keys
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    hx = CX - 6.5
+    p = sp.SlamPlay(sp.PlayCfg())
+    s = air(1001, 11, hx)
+    bombs = None
+    if case.startswith("other"):
+        s["ents"].append(other(8, 45.0, {"other idle": "Idle", "other jump": "Air", "other slam": "Slam Antic"}[case]))
+    elif case == "big circle":
+        monkeypatch.setattr(p._life, "rows", lambda t=None: np.array([[9.0, 27.0, 8.0, 7.2, 0.0, 90.0]]))
+    elif case == "small rune":
+        bombs = np.array([[9.0, hx, cs.FLOOR + 7.0, 1.2, 0.0, 90.0]])
+    elif case == "two_play":
+        monkeypatch.setattr(sp, "TWO_PLAY", True)
+        monkeypatch.setattr(p, "_two_danger", lambda s_, e_, tx, t, k=None: "other test")
+    m = p.air_catch_try(1001, s, False, True, t_game=t_of(1001), sim=sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0),
+                        bombs=bombs)
+    if case in ("clean", "other idle"):
+        assert m is not None and p.run is not None and p.run.as_air and p.run.cs_log[-1][1] == "as_plan"
+        return
+    assert m is None and p.run is None and p.cs_declines.get("as hazard") == 1 and p._as_slams[7]["fails"] == 1
+
+
+@pytest.mark.parametrize("st", ["Jump Antic", "Spell Antic"])
+def test_committed_air_catch_ends_on_a_new_hazard(monkeypatch, st):
+    # the committed run re-reads the known hazards every tick: the other one starting a move ends it (the planner decides)
+    p, hx = committed(monkeypatch)
+    s = air(1002, 12, hx)
+    s["ents"].append(other(8, 45.0, st))
+    m = p.step(1002, s, False, t_game=t_of(1002), sim=sim_for(hx, f=1002, ground=False, bb=6.0, vy=2.0))
+    assert m is None and p.run is None and p.done[-1].why == "as hazard"
+
+
+class RO:
+    def __init__(self, box, flags):
+        self.box, self.flags = box, flags
+
+
+@pytest.mark.parametrize("hazard,strict_bad,old_bad", [("a body", 9, -1), ("b body", -1, -1), ("b hammer", 9, -1)])
+def test_pre_contact_protection_only_for_the_contacted_body(monkeypatch, hazard, strict_bad, old_bad):
+    # Sol seq366 D426-PROTECTION: B's contact at index 10, none on A, no F_INVULN; her box meets one hazard at index 9 only.
+    # The historical rule clears all three; with owners only the contacted B's body (the chosen target rule), never A's
+    # body, never B's hammer; real F_INVULN still clears them
+    T1 = 14
+    box = np.tile(np.array([0.0, 0.0, 1.0, 1.0]), (1, T1, 1))
+    box[0, 9] = [10.0, 0.0, 11.0, 1.0]
+    far = np.tile(np.array([100.0, 0.0, 101.0, 1.0]), (T1, 1))
+    near = far.copy()
+    near[9] = [10.5, 0.0, 12.0, 2.0]
+    kind = {"b body": "root", "b hammer": "hammer"}.get(hazard)
+    monkeypatch.setattr(ac, "_b_boxes", lambda ctx, tl, idx, k: (near if k == kind else far)[np.asarray(idx)])
+    ctx = NS(a_box=[10.5, 0.0, 12.0, 2.0] if hazard == "a body" else None)
+    flags = np.zeros((1, T1), np.int64)
+    args = (ctx, None, np.array([[-1, 10]]), np.array([13]))
+    assert ac._first_unsafe(RO(box, flags), *args, owners=np.array([[0, 1]]))[0] == strict_bad
+    assert ac._first_unsafe(RO(box, flags), *args)[0] == old_bad
+    flags[0, 9] = kin.F_INVULN
+    assert ac._first_unsafe(RO(box, flags), *args, owners=np.array([[0, 1]]))[0] == -1
+
+
+def test_contact_owner_bits():
+    # the down slash's contact owner: B (1), A (2), both on the same frame (3), neither alone (0: both shapes split)
+    j, jb, ja = np.array([5, 5, 5, 5, -1]), np.array([5, 7, 5, -1, -1]), np.array([-1, 5, 5, 6, -1])
+    assert ac._owner_bits(j, jb, ja).tolist() == [1, 2, 3, 0, 0]
 
 
 class AirSlam(Script):
@@ -289,7 +418,7 @@ def test_policy_asks_the_air_catch_in_an_idle_chain_air_context(monkeypatch):
     p, slam, out = arb(monkeypatch)
     assert not slam.stepped and len(slam.air_calls) == 1 and slam.yield_calls == []
     f, ground, accepting, kws = slam.air_calls[0]
-    assert (f, ground, accepting) == (2599, True, True) and kws == ["guard", "sim", "skip", "t_game"]
+    assert (f, ground, accepting) == (2599, True, True) and kws == ["bombs", "guard", "sim", "skip", "t_game"]
     assert (out["own"], out["mask"], out["play"]) == ("slam", 48, 48)
     assert p.counts["slam_air_catch"] == 1 and p._play_tick["why"] == "air catch"
 
@@ -372,3 +501,37 @@ def test_chain_air_context_idle_reads_the_links():
     for k, v in (("runner", NS(run=object())), ("commitment", object()), ("recovery", object())):
         p.chain_native = NS(**{**dict(candidate_generation=True, runner=NS(run=None), commitment=None, recovery=None), k: v})
         assert not p._chain_air_context_idle(), k
+
+
+def test_strict_search_passes_the_contact_owners(monkeypatch):
+    # evaluate(strict) gives _first_unsafe the contacts' owners (the strike's column: B); the default keeps the historical
+    # rule (None) for the Clawline's strike and SP10b
+    seen = []
+    real = ac._first_unsafe
+
+    def spy_(ro, ctx, tl, contacts, i_end, i_from=None, owners=None):
+        seen.append(None if owners is None else np.asarray(owners).copy())
+        return real(ro, ctx, tl, contacts, i_end, i_from, owners)
+    monkeypatch.setattr(ac, "_first_unsafe", spy_)
+    hx = CX - 6.5
+    ctx = ac.Ctx(b_iid=7, b_x=CX, b_y=cs.FLOOR + 4.434, b_face=-1, kb0=9, a_box=None, hero_x=hx, face=1, tls=ac.timelines())
+    assert ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx, stages=sp.AS_STAGES, strict=True) is not None
+    assert seen and all(o is not None and (o[:, 1] == 1).all() for o in seen)
+    seen.clear()
+    assert ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx, stages=sp.AS_STAGES) is not None
+    assert seen and all(o is None for o in seen)
+
+
+@pytest.mark.parametrize("used", [False, True])
+def test_the_runs_wait_shares_the_slam_budget(monkeypatch, no_plan, used):
+    # the playbook's own run (step: late in the air -> _cs_try -> the air catch) reads the same slam record: with its budget
+    # used up (by air_catch_try or earlier looks) no search
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    monkeypatch.setattr(cs, "CLAWSTRIKE", False)
+    hx = CX - 6.5
+    p = sp.SlamPlay(sp.PlayCfg())
+    if used:
+        p._as_slams[7] = {"ta": 10.0 - 30 / 60.0, "fails": sp.AS_FAIL_MAX, "next_t": float("-inf")}
+    p.step(1000, air(1000, 32, hx), False, t_game=10.0, sim=sim_for(hx, ground=False, bb=6.0))
+    assert p.run is not None and p.run.why == "late"
+    assert no_plan == ([] if used else [(sp.AS_STAGES, True)])

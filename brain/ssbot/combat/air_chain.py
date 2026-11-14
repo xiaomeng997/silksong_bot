@@ -300,8 +300,10 @@ def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx,
     hx, hy = pos[..., 0].ravel(), pos[..., 1].ravel()
     hit = np.ones(hx.shape[0], bool)
     fr = np.repeat(np.asarray(faces), len(J))
-    ab = None if (targets != "ab" or ctx.a_box is None) else np.ascontiguousarray(
+    ab = None if (targets not in ("ab", "a") or ctx.a_box is None) else np.ascontiguousarray(
         np.broadcast_to(np.asarray(ctx.a_box, float), (hx.shape[0], 4)))
+    if targets == "a" and ab is None:                         # (11-14: 'a' = A's box alone, for the contact's owner)
+        return np.full(N, -1)
     for poly in (DOWN, DOWN_ALT):                             # both shapes (the alternation unknown)
         h = np.zeros(hx.shape[0], bool)
         for face in (1, -1):
@@ -312,7 +314,8 @@ def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx,
             py = np.ascontiguousarray(poly[:, 1])
             hs = np.zeros(int(sel.sum()), bool)
             hxs, hys = np.ascontiguousarray(hx[sel]), np.ascontiguousarray(hy[sel])
-            _sat(px, py, hxs, hys, np.ascontiguousarray(rb[sel]), hs)
+            if targets != "a":
+                _sat(px, py, hxs, hys, np.ascontiguousarray(rb[sel]), hs)
             if ab is not None:
                 _sat(px, py, hxs, hys, np.ascontiguousarray(ab[sel]), hs)
             h[sel] = hs
@@ -322,24 +325,46 @@ def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx,
 
 
 def _first_unsafe(ro: kin.Rollout, ctx: Ctx, tl, contacts: np.ndarray, i_end: np.ndarray,
-                  i_from: np.ndarray | None = None) -> np.ndarray:
+                  i_from: np.ndarray | None = None, owners: np.ndarray | None = None) -> np.ndarray:
     """[N] the first rollout index in 1 .. i_end[n] where her box meets B's hammer / body or A's box outside the
-    i-frames (F_INVULN) and the PRE_PROTECT_F frames before a contact (contacts [N, C], -1 none); -1 none."""
+    i-frames (F_INVULN) and the PRE_PROTECT_F frames before a contact (contacts [N, C], -1 none); -1 none.
+    owners [N, C] (11-14 the re-pogo entry, Sol seq366 D426-PROTECTION): each contact's owner bits (1 B, 2 A, 0 none
+    known). Given, the PRE_PROTECT_F frames before a contact clear only the overlap with that owner's body - never B's
+    hammer, never the other body - and F_INVULN as always. None: the historical rule (every hazard cleared before any
+    contact), kept for the Clawline's strike and SP10b's air chain."""
     N, T1 = ro.flags.shape
     idx = np.arange(T1)
     hb = ro.box                                                 # [N, T1, 4]
-    bad = _aabb_hit(hb, _b_boxes(ctx, tl, idx, "hammer")[None]) | _aabb_hit(hb, _b_boxes(ctx, tl, idx, "root")[None])
-    if ctx.a_box is not None:
-        bad |= _aabb_hit(hb, np.asarray(ctx.a_box, float)[None, None])
+    ham = _aabb_hit(hb, _b_boxes(ctx, tl, idx, "hammer")[None])
+    body_b = _aabb_hit(hb, _b_boxes(ctx, tl, idx, "root")[None])
+    body_a = (_aabb_hit(hb, np.asarray(ctx.a_box, float)[None, None]) if ctx.a_box is not None
+              else np.zeros_like(body_b))
+    for col in range(contacts.shape[1]):
+        cc = contacts[:, col][:, None]
+        win = (cc >= 0) & (idx[None, :] >= cc - PRE_PROTECT_F) & (idx[None, :] < cc)
+        if owners is None:
+            ham &= ~win
+            body_b &= ~win
+            body_a &= ~win
+        else:
+            own = np.asarray(owners)[:, col][:, None]
+            body_b &= ~(win & ((own & 1) != 0))
+            body_a &= ~(win & ((own & 2) != 0))
+    bad = ham | body_b | body_a
     bad &= (ro.flags & kin.F_INVULN) == 0
     bad[:, 0] = False
     if i_from is not None:
         bad &= idx[None, :] >= np.asarray(i_from)[:, None]
     bad &= idx[None, :] <= np.asarray(i_end)[:, None]
-    for col in range(contacts.shape[1]):
-        cc = contacts[:, col][:, None]
-        bad &= ~((cc >= 0) & (idx[None, :] >= cc - PRE_PROTECT_F) & (idx[None, :] < cc))
     return np.where(bad.any(axis=1), np.argmax(bad, axis=1), -1)
+
+
+def _owner_bits(j, jb, ja) -> np.ndarray:
+    """11-14 (Sol seq366 D426-PROTECTION): a contact's owner bits (1 B, 2 A) from the combined contact j ('ab') and the
+    per-owner ones jb ('b'), ja ('a'), -1 none: the owner(s) whose own contact is the combined one's frame; 0 when neither
+    alone meets it (both slash shapes split between the bodies)."""
+    j = np.asarray(j)
+    return np.where((np.asarray(jb) == j) & (j >= 0), 1, 0) | np.where((np.asarray(ja) == j) & (j >= 0), 2, 0)
 
 
 # ---- the search ----
@@ -421,8 +446,11 @@ def _pass2_rows(ro,sel):
     return kin.Rollout(ro.phys[sel],ro.pos[sel],ro.vel[sel],ro.mode[sel],ro.flags[sel],ro.final[:,sel],ro.box[sel])
 
 
-def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_event: bool = False) -> list[Plan]:
-    """The plans that pass in every timeline of ctx.tls (contact on B, the optional down slash's contact, safety)."""
+def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_event: bool = False,
+             strict: bool = False) -> list[Plan]:
+    """The plans that pass in every timeline of ctx.tls (contact on B, the optional down slash's contact, safety).
+    strict (11-14 the re-pogo entry, Sol seq366 D426-PROTECTION): the pre-contact protection only for the contacted
+    owner's body (_first_unsafe's owners: the strike's B; the down slash's B and / or A, whichever its contact met)."""
     if not plans:
         return []
     off = sim.off
@@ -431,6 +459,7 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
     good = np.ones(len(plans), bool)
     c_down = np.full(len(plans), -1)
     c_strike = np.full(len(plans), -1)
+    own_down = np.zeros(len(plans), np.int64)
     faces = np.array([_face(p, ctx) for p in plans])
     has_d = np.array([p.f_down is not None and p.pressed_down is None for p in plans])
     p_down = np.array([off + ((p.f_down if p.f_down is not None else F0) - F0) for p in plans])
@@ -450,6 +479,9 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
             good[d_i[j < off]] = False
             hit = d_i[j >= off]
             c_down[hit] = j[j >= off]
+            if strict:
+                own_down[d_i] = _owner_bits(j, _contacts(ro0, p_down[d_i], faces[d_i], ctx, tl, "b"),
+                                            _contacts(ro0, p_down[d_i], faces[d_i], ctx, tl, "a"))
             ev[hit, c_down[hit] - off] |= kin.EV_POGO           # the bounce on the contact frame (pogo_model EV_OFF 0)
         # pass 2: the strike's contact on B (with the down slash's bounce)
         sel = np.flatnonzero(good)
@@ -478,8 +510,9 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
         ii = np.arange(ro.flags.shape[1])[None, :]
         landed = (gnd & (ii >= off) & (ii <= c_strike[sel][:, None])).any(axis=1)
         i_from = np.array([0 if plans[i].inv_until is None else off + plans[i].inv_until - F0 + 1 for i in sel])
+        owners = np.stack([own_down[sel], np.ones(len(sel), np.int64)], axis=1) if strict else None
         bad = _first_unsafe(ro, ctx, tl, np.stack([c_down[sel], c_strike[sel]], axis=1), c_strike[sel] + SAFE_AFTER,
-                            i_from)
+                            i_from, owners)
         good[sel[landed | (bad >= 0)]] = False
     out = []
     for i in np.flatnonzero(good):
@@ -493,7 +526,7 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
 _EVALUATE_AUTHORITY=evaluate
 
 
-def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None) -> Plan | None:
+def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None, strict: bool = False) -> Plan | None:
     """The chain for this tick (mask frame F0 = f + 2), or None: plans with a down slash first (more hits), then the
     strike at K_PRESS 47 before 46 / 48, the shortest drift, no umbrella before an umbrella, the latest umbrella.
     stages: the press-frame stages tried in order (default: K_PRESS 47, then 46 / 48 when it has none); 11-14 the re-pogo
@@ -514,7 +547,7 @@ def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None) -> Plan | None:
             for c in downs.get(D, ()):
                 if F0 + c + ATK_CD_F <= p.f_press and (p.f_umb is None or p.f_umb > F0 + c + 4):
                     plans.append(Plan(p.f0, p.dirk, p.d_end, F0 + c, p.f_umb, p.f_press, p.k_press, p.b_iid))
-        ok = evaluate(sim, ctx, plans, F0)
+        ok = evaluate(sim, ctx, plans, F0, strict=strict)
         if ok:
             break
     if not ok:
@@ -527,8 +560,8 @@ def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None) -> Plan | None:
     return best
 
 
-def check(sim: ChainSim, ctx: Ctx, p: Plan) -> bool:
-    """The committed plan from this tick's start state still passes (every timeline)."""
+def check(sim: ChainSim, ctx: Ctx, p: Plan, strict: bool = False) -> bool:
+    """The committed plan from this tick's start state still passes (every timeline). strict: evaluate's."""
     F0 = sim.f + 2
     q = Plan(**{k: getattr(p, k) for k in p.__dataclass_fields__})
     q.f0 = F0
@@ -536,10 +569,29 @@ def check(sim: ChainSim, ctx: Ctx, p: Plan) -> bool:
         # sent: its bounce (if it landed) is in the start state, its i-frames are not (contact <= press + 9, then
         # 8 physics steps ~ 10 frames)
         q.inv_until = q.pressed_down + ACTIVE[1] + 10
-    return bool(evaluate(sim, ctx, [q], F0))
+    return bool(evaluate(sim, ctx, [q], F0, strict=strict))
 
 
-__all__ = ["AIRCHAIN", "ChainSim", "Ctx", "Plan", "timelines", "mask_at", "plan_cmds", "search", "check", "evaluate"]
+def plan_path(sim: ChainSim, p: Plan) -> tuple[np.ndarray, np.ndarray] | None:
+    """11-14 the re-pogo entry (Sol seq366 D426-HAZARDS): the plan's modelled path for the shared known-hazard check - her
+    box centre x and box bottom above the floor (rune_life's FLOOR_BOX 3.015), one value per frame from this STATE's
+    frame sim.f (the rune rows' frame 0) through the strike's contact + SAFE_AFTER, with the bounces on the plan's
+    contacts (evaluate's pass 3); None without a strike contact (before evaluate set it)."""
+    if p.c_strike is None:
+        return None
+    F0 = sim.f + 2
+    T = max(p.c_strike - F0, 0) + SAFE_AFTER + 2
+    cm = plan_cmds(p, F0, T)[None]
+    ev = np.zeros_like(cm)
+    for c in (p.c_down, p.c_strike):
+        if c is not None and 0 <= c - F0 < T:
+            ev[0, c - F0] |= kin.EV_POGO
+    box = sim.roll(cm, ev).box[0]
+    s0 = max(int(sim.f) - int(sim.fo), 0)                       # rollout index 0 is frame sim.fo
+    return 0.5 * (box[s0:, 0] + box[s0:, 2]), box[s0:, 1] - 3.015
+
+
+__all__ = ["AIRCHAIN", "ChainSim", "Ctx", "Plan", "timelines", "mask_at", "plan_cmds", "search", "check", "evaluate", "plan_path"]
 
 
 def warm(params) -> float:

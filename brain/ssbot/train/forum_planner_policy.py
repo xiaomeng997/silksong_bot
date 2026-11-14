@@ -1465,10 +1465,15 @@ class ForumPlannerPolicy(PlannerPolicy):
             # no link running (the bounce hand-back) keeps the playbook unstepped above; only its air catch is asked here.
             # A plan is a committed link: the next tick steps it (package 1's slam_commit) and the B2 gate holds the offers
             slam_stepped = True
+            ac_bks = None
+            if self.v2feed is not None and getattr(self.v2feed.trk, "rune", None) is not None:
+                # Sol seq366 D426-HAZARDS: the small-rune forecast for the air catch's known-hazard check (as the playbook's)
+                from ssbot.combat import rune_bombs as _rbm
+                ac_bks = _rbm.frames(self.v2feed.trk.rune.predict(self.v2feed.trk.T), self.v2feed.trk.T)
             ac_play = self.slam_play.air_catch_try(
                 f, s, ws.hero.contact.v == "GROUND", bool((s.get("hero") or {}).get("hero_accepting_input", True)),
                 t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=self._press_skip(asw_skip, prefs),
-                sim=air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), guard=gsp)
+                sim=air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), guard=gsp, bombs=ac_bks)
             if ac_play is not None and self._rune_veto("slam", ac_play):
                 self.slam_play.abort("rune exit")
                 ac_play = None
