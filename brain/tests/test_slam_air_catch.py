@@ -16,7 +16,7 @@ from ssbot.train import forum_planner_policy as mod
 from ssbot.train.forum_planner_policy import ForumPlannerPolicy as Policy
 from tests.test_b2_policy_priority import Script, run_arbitration, selected
 from tests.test_slam_play import state
-from tests.test_sp13 import sim_for
+from tests.test_sp13 import PARAMS, TERR, sim_for
 
 CX = 31.0                               # S's centre; state()'s Clapper faces left (flipX False): in front = left
 
@@ -277,22 +277,23 @@ def committed(monkeypatch):
 
 
 def test_committed_re_search_shares_the_stage_and_the_budget(monkeypatch):
-    # Sol seq366 D426-SEARCH-BOUND: the committed plan no longer passing (its strict check) searches again with the 47 stage
-    # and the strict protection, the failure counted on the slam's record
+    # Sol seq366 D426-SEARCH-BOUND: the committed plan no longer passing (its strict verify) searches again with the 47 stage
+    # and the strict protection, the failure counted on the slam's record (no down slash sent: nothing to bind)
     p, hx = committed(monkeypatch)
     calls = []
-    monkeypatch.setattr(ac, "check", lambda sim, ctx, plan, strict=False: calls.append(("check", strict)) is None and False)
-    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False: calls.append(("search", stages, strict)) and None)
+    monkeypatch.setattr(ac, "verify", lambda sim, ctx, plan, strict=False: calls.append(("verify", strict)) and None)
+    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False, sent=None:
+                        calls.append(("search", stages, strict, sent)) and None)
     p.step(1002, air(1002, 12, hx), False, t_game=t_of(1002), sim=sim_for(hx, f=1002, ground=False, bb=6.0, vy=2.0))
-    assert calls == [("check", True), ("search", sp.AS_STAGES, True)] and p._as_slams[7]["fails"] == 1
+    assert calls == [("verify", True), ("search", sp.AS_STAGES, True, None)] and p._as_slams[7]["fails"] == 1
 
 
 def test_committed_re_search_inside_the_used_budget_does_not_search(monkeypatch):
     p, hx = committed(monkeypatch)
     p._as_slams[7]["fails"] = sp.AS_FAIL_MAX
     calls = []
-    monkeypatch.setattr(ac, "check", lambda sim, ctx, plan, strict=False: False)
-    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False: calls.append(1))
+    monkeypatch.setattr(ac, "verify", lambda sim, ctx, plan, strict=False: None)
+    monkeypatch.setattr(ac, "search", lambda sim, ctx, stages=None, strict=False, sent=None: calls.append(1))
     p.step(1002, air(1002, 12, hx), False, t_game=t_of(1002), sim=sim_for(hx, f=1002, ground=False, bb=6.0, vy=2.0))
     assert calls == [] and p._as_slams[7]["fails"] == sp.AS_FAIL_MAX
     assert p.run is None and p.done[-1].why == "as no strike"           # its press far: no keep
@@ -535,3 +536,310 @@ def test_the_runs_wait_shares_the_slam_budget(monkeypatch, no_plan, used):
     p.step(1000, air(1000, 32, hx), False, t_game=10.0, sim=sim_for(hx, ground=False, bb=6.0))
     assert p.run is not None and p.run.why == "late"
     assert no_plan == ([] if used else [(sp.AS_STAGES, True)])
+
+
+# ---- Sol seq367: the committed continuation runs the plan it verified (no press-made protection, the sent state bound) ----
+
+PAD_A = (33.26, 3.02, 36.85, 6.92)
+EVERYWHERE = (-100.0, -100.0, 200.0, 200.0)
+
+
+def pad_scene():
+    """The pad (垫刀) scene: her 4.2 u up at x 35 falling (vy -10) over A's body, B (S, iid 8) at x 44 facing her in its antic
+    (frame 5 at the STATE frame 1000)."""
+    S = kin.initial_state(PARAMS, 35.0, cs.FLOOR + 4.2 + cs.POS_DY, vy=-10.0, facing=1, ground=False)
+    sim = ac.ChainSim(S, np.zeros(1, np.int64), kin.HoldState.idle(1), PARAMS, TERR, 1000, 1000)
+    ctx = ac.Ctx(b_iid=8, b_x=44.0, b_y=7.449, b_face=-1, kb0=5, a_box=PAD_A, hero_x=35.0, face=1, tls=ac.timelines())
+    return sim, ctx
+
+
+@pytest.fixture(scope="module")
+def pad():
+    """The air catch's plan in the pad scene (strict, the 47 stage): a down slash pressed at 1002 meets A at 1005, the strike
+    pressed at 1042 meets B at 1048."""
+    sim, ctx = pad_scene()
+    return sim, ctx, ac.search(sim, ctx, stages=sp.AS_STAGES, strict=True)
+
+
+def after_press(sim, ctx, p, fo2, bounce_at=None, pogo=None, a_box=None):
+    """A later tick of the pad plan with its down slash sent (pressed_down). fo2 == sim.fo: STATE frame fo2 + 1, the press in
+    the masks in flight (sim's own, then the plan's mask of the press). Else STATE frame fo2: the start rolled with the plan's
+    keys (its bounce at bounce_at when given), the prefix the plan's mask of fo2 + 1; pogo: the observed protection
+    (POGO_OBS) with the model's own INV_T cleared - the tracker's start state after a real bounce."""
+    q = ac.Plan(**{k: getattr(p, k) for k in p.__dataclass_fields__})
+    q.pressed_down = q.f_down
+    if fo2 == sim.fo:
+        f2, S2, hold = fo2 + 1, sim.start, sim.hold
+        pre = np.array(list(sim.prefix) + [ac.mask_at(p, F) for F in range(sim.f + 2, fo2 + 3)], np.int64)
+    else:
+        f2, F0 = fo2, sim.f + 2
+        cm = ac.plan_cmds(p, F0, p.f_press - F0 + 40)[None, :fo2 - F0 + 1]
+        ev = None
+        if bounce_at is not None:
+            ev = np.zeros_like(cm)
+            ev[0, bounce_at - F0] = kin.EV_POGO
+        S2, hold = sim.roll(cm, ev).final[:, 0].copy(), kin.HoldState.idle(1)
+        if pogo is not None:
+            S2[kin.INV_T], S2[kin.POGO_OBS] = 0.0, float(pogo)
+        pre = np.array([ac.mask_at(q, fo2 + 1)], np.int64)
+    sim2 = ac.ChainSim(S2, pre, hold, PARAMS, TERR, fo2, f2)
+    ctx2 = ac.Ctx(b_iid=ctx.b_iid, b_x=ctx.b_x, b_y=ctx.b_y, b_face=ctx.b_face, kb0=ctx.kb0 + (fo2 - sim.fo),
+                  a_box=ctx.a_box if a_box is None else a_box, hero_x=float(S2[kin.PX]), face=ctx.face, tls=ctx.tls)
+    return sim2, ctx2, q
+
+
+def hammer_at(monkeypatch, fo, frames):
+    """B's hammer box over everything on the given STATE frames (the sim's rollout index + fo)."""
+    real = ac._b_boxes
+
+    def fake(ctx, tl, idx, which):
+        out = real(ctx, tl, idx, which)
+        if which == "hammer":
+            out = np.array(out, float)
+            out[np.isin(np.asarray(idx) + fo, frames)] = EVERYWHERE
+        return out
+    monkeypatch.setattr(ac, "_b_boxes", fake)
+
+
+def test_pad_scene_plan(pad):
+    sim, ctx, p = pad
+    assert (p.f_down, p.c_down, p.f_press, p.c_strike, p.k_press, p.f_umb) == (1002, 1005, 1042, 1048, 47, 1010)
+
+
+@pytest.mark.parametrize("fo2", [1000, 1002, 1003, 1004])
+def test_a_sent_slash_not_yet_hit_is_modelled_from_the_real_prefix(pad, fo2):
+    # Sol seq367 (normal re-pogo goes on): the sent down slash not yet hit - its press in flight (1000), its swing in the start
+    # state (1002, 1003), its contact in flight (1004: ev_pre) - meets A on the same frame as planned and the strike follows;
+    # no protection is made from the press (inv_until stays None)
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, fo2)
+    v = ac.verify(sim2, ctx2, q, strict=True)
+    assert v is not None and (v.c_down, v.c_strike, v.inv_until, q.inv_until) == (1005, 1048, None, None)
+
+
+def test_a_contact_frame_without_observed_protection_is_still_pending(pad):
+    # the start state on the planned contact frame (1005) with no observed protection (the game's bounce not seen): the contact
+    # is predicted from the next frame on (1006), never on frames before the start state
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1005)
+    assert not ac._sent_down_bounced(sim2, q)
+    v = ac.verify(sim2, ctx2, q, strict=True)
+    assert v is not None and v.c_down == 1006
+
+
+def test_the_historical_check_is_unchanged(pad):
+    # not strict (the Clawline's strike, SP10b): the historical rule - no pending contact modelled, the press-made window - as
+    # before this package (here the plan fails it right after the press: no bounce in its model)
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1002)
+    assert not ac.check(sim2, ctx2, q) and ac.verify(sim2, ctx2, q) is None and ac.check(sim2, ctx2, q, strict=True)
+
+
+def test_the_hazard_path_carries_the_bounce_in_flight(pad):
+    # plan_path (the known-hazard check's path) places a pending contact in the masks in flight as evaluate does: from the tick
+    # 1004 (contact 1005 in flight) her box rises after the bounce
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1004)
+    v = ac.verify(sim2, ctx2, q, strict=True)
+    xs, bottom = ac.plan_path(sim2, v)
+    assert v.c_down == 1005 and bottom[3] > bottom[2] + 0.2                  # frames 1007 vs 1006
+
+
+@pytest.mark.parametrize("top,ok", [(6.92, True), (7.0, False)])
+def test_a_sent_slash_before_its_contact_a_body(pad, top, ok):
+    # Sol seq367 minimum (pressed, not hit, F_INVULN 0): A's body over her box from 1002 (top 7.0) is reported; the contact on A
+    # (1005) clears only its own 2 frames before it (1003, 1004: the target rule PRE 2 - top 6.92 passes). A press-made window
+    # (inv_until press + 19, the historical rule) no longer hides it under strict
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1000, a_box=(PAD_A[0], PAD_A[1], PAD_A[2], top))
+    assert (ac.verify(sim2, ctx2, q, strict=True) is not None) == ok
+    q.inv_until = q.pressed_down + ac.ACTIVE[1] + 10
+    assert bool(ac.evaluate(sim2, ctx2, [q], sim2.f + 2, strict=True)) == ok
+
+
+@pytest.mark.parametrize("fo2,frame,ok", [(1002, 1003, False), (1002, 1004, False), (1002, 1006, True), (1004, 1006, True),
+                                          (1000, 1002, False)])
+def test_a_sent_slash_before_its_contact_b_hammer(monkeypatch, pad, fo2, frame, ok):
+    # Sol seq367 minimum: B's hammer over her box before the pending contact (1002 - 1004; the target's 2 frames never clear B's
+    # hammer) is reported; after the modelled bounce (1006) its i-frames cover it, the contact in flight (1004) too
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, fo2)
+    hammer_at(monkeypatch, sim2.fo, [frame])
+    assert (ac.verify(sim2, ctx2, q, strict=True) is not None) == ok
+
+
+@pytest.mark.parametrize("frame,ok", [(None, True), (1008, True), (1016, False)])
+def test_a_real_bounce_uses_the_observed_protection(monkeypatch, pad, frame, ok):
+    # the down slash hit (1005): the start state 1006 carries the bounce and the observed protection (POGO_OBS 7, no model
+    # INV_T): no second contact is predicted, a hammer inside the observed protection passes, one after it is reported
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1006, bounce_at=1005, pogo=7)
+    assert ac._sent_down_bounced(sim2, q)
+    if frame is not None:
+        hammer_at(monkeypatch, sim2.fo, [frame])
+    v = ac.verify(sim2, ctx2, q, strict=True)
+    assert (v is not None) == ok
+    assert v is None or (v.c_down is None and v.c_strike is not None)
+
+
+def test_an_older_bounces_protection_is_not_this_press(pad):
+    # POGO_OBS before this press's earliest contact (press + ACTIVE[0]) is an older bounce's: the slash stays pending (its
+    # contact modelled); from that frame on it is this press's bounce
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1004)
+    sim2.start[kin.POGO_OBS] = 5.0
+    assert not ac._sent_down_bounced(sim2, q)
+    v = ac.verify(sim2, ctx2, q, strict=True)
+    assert v is not None and v.c_down == 1005
+    sim3, _, _ = after_press(sim, ctx, p, 1005, bounce_at=1005, pogo=8)
+    assert ac._sent_down_bounced(sim3, q)
+
+
+def test_the_bound_re_search_keeps_the_sent_slash(monkeypatch, pad):
+    # Sol seq367: the committed re-search binds the sent state first - every candidate evaluated carries the sent down slash
+    # (no new one searched), the strike ATK_CD_F after its press, the umbrella after its Down hold; its plan is the one checked
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1003)
+    seen = []
+    real = ac.evaluate
+
+    def spy_(sim_, ctx_, plans, F0, **kw):
+        seen.extend(plans)
+        return real(sim_, ctx_, plans, F0, **kw)
+    monkeypatch.setattr(ac, "evaluate", spy_)
+    monkeypatch.setattr(ac, "_down_candidates", lambda *a: pytest.fail("a new down slash searched"))
+    got = ac.search(sim2, ctx2, stages=sp.AS_STAGES, strict=True, sent=q)
+    assert seen and all((c.f_down, c.pressed_down) == (1002, 1002) for c in seen)
+    assert all(c.f_press >= 1002 + ac.ATK_CD_F and (c.f_umb is None or c.f_umb > 1006) for c in seen)
+    assert got is not None and (got.f_down, got.pressed_down, got.c_down) == (1002, 1002, 1005)
+    assert got in seen and ac.verify(sim2, ctx2, got, strict=True) is not None
+
+
+def test_the_bound_re_search_with_the_contact_in_flight(pad):
+    # the tick 1004 (the pending contact 1005 in the masks in flight): the bound plan with no umbrella reaches its strike only
+    # on that bounce (evaluate's strike pass and safety pass both carry it)
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1004)
+    got = ac.search(sim2, ctx2, stages=sp.AS_STAGES, strict=True, sent=q)
+    assert got is not None and (got.f_umb, got.c_down, got.c_strike, got.pressed_down) == (None, 1005, 1046, 1002)
+
+
+def test_a_bound_re_search_needs_the_strike_atk_cd_after_the_sent_press(monkeypatch, pad):
+    # a sent press too close to the strike (1030: the strike 1042 < 1030 + ATK_CD_F) leaves no candidate
+    sim, ctx, p = pad
+    sim2, ctx2, q = after_press(sim, ctx, p, 1003)
+    q.f_down = q.pressed_down = 1030
+    seen = []
+    real = ac.evaluate
+    monkeypatch.setattr(ac, "evaluate", lambda sim_, ctx_, plans, F0, **kw: seen.extend(plans) or real(sim_, ctx_, plans, F0, **kw))
+    assert ac.search(sim2, ctx2, stages=sp.AS_STAGES, strict=True, sent=q) is None and seen == []
+
+
+def test_the_committed_re_search_takes_a_bound_plan(monkeypatch, pad):
+    # the normal continuation through the re-search: the committed plan no longer passing (here its drift cut short), the bound
+    # re-search's plan keeps the sent slash and runs (the slash's Down still held), the budget untouched
+    sim, ctx, p0 = pad
+    sim2, ctx2, q = after_press(sim, ctx, p0, 1003)
+    q.d_end, q.f_umb = 1004, None
+    assert ac.verify(sim2, ctx2, q, strict=True) is None
+    p, r, t = pad_run(monkeypatch, q, 1003)
+    m = p.step(1003, pad_state(1003, float(sim2.start[kin.PX])), False, t_game=t, sim=sim2)
+    new = r.cs_strike
+    assert p.run is r and new is not q and (new.f_down, new.pressed_down, new.c_down) == (1002, 1002, 1005)
+    assert r.cs_log[-1][1] == "restrike" and m == ac.mask_at(new, 1005) and m & ac.M_D and p._as_slams[8]["fails"] == 0
+
+
+def pad_state(f, hx):
+    """STATE of frame f in the pad scene: S (iid 8) at x 44 in Slam Antic at its antic frame 5 + (f - 1000), A (iid 9) Idle
+    with its body collider PAD_A, her at x hx in the air facing right."""
+    s = state(f, "Slam Antic", (5 + f - 1000) / 60.0, cx=44.0, hx=hx, ground=False, iid=8)
+    s["ents"][0]["pos"] = [44.0, 7.449]
+    x0, y0, x1, y1 = PAD_A
+    s["ents"].append({"type_key": sp.CLAPPER, "iid": 9, "hp": 200, "pos": [35.0, 7.45], "flipX": False,
+                      "fsms": [{"name": "Control", "state": "Idle", "t": 0.3}],
+                      "colliders": [{"name": sp.CLAPPER, "enabled": True, "verts_world": [x0, y0, x1, y0, x1, y1, x0, y1]}]})
+    s["hero"]["facing"] = 1
+    return s
+
+
+def pad_run(monkeypatch, q, f):
+    """SlamPlay holding the committed air catch on S (cs_strike) with the pad plan q (its down slash sent)."""
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    p = sp.SlamPlay(sp.PlayCfg())
+    t = t_of(f)
+    r = sp.Run(iid=8, fa=995, face=-1, ta=t - (5 + f - 1000) / 60.0)
+    r.phase, r.as_air, r.cs_strike, r.hp0, r.k_start = "cs_strike", True, q, 9, 5
+    p.run = r
+    return p, r, t
+
+
+def test_the_committed_continuation_runs_the_plan_it_verified(monkeypatch, pad):
+    # Sol seq367 (the normal continuation kept; _as_hazard's order): the tick after the press, the committed plan with its sent
+    # slash is verified as it is, the known hazards read on that verified copy (this tick's contacts), its contacts kept on the
+    # committed plan, no search; the keys hold the slash's Down and the drift
+    sim, ctx, p0 = pad
+    sim2, ctx2, q = after_press(sim, ctx, p0, 1002)
+    p, r, t = pad_run(monkeypatch, q, 1002)
+    q.c_down = q.c_strike = None                              # stale contacts: replaced by this tick's
+    seen = []
+    real = sp.SlamPlay._as_hazard
+
+    def spy_(self, r_, s_, e_, plan, sim_, t_, k_):
+        seen.append((plan is q, plan.c_down, plan.c_strike))
+        return real(self, r_, s_, e_, plan, sim_, t_, k_)
+    monkeypatch.setattr(sp.SlamPlay, "_as_hazard", spy_)
+    monkeypatch.setattr(ac, "search", lambda *a, **k: pytest.fail("searched"))
+    m = p.step(1002, pad_state(1002, float(sim2.start[kin.PX])), False, t_game=t, sim=sim2)
+    assert p.run is r and r.cs_strike is q and seen == [(False, 1005, 1048)] and (q.c_down, q.c_strike) == (1005, 1048)
+    assert m == ac.mask_at(q, 1004) and m & ac.M_D and m & ac.M_R
+
+
+@pytest.mark.parametrize("hazard", [False, True])
+def test_the_committed_re_search_is_bound_and_runs_as_checked(monkeypatch, pad, hazard):
+    # Sol seq367 minimum: the old slash sent and not hit, the committed plan failing its verify: the re-search gets the sent
+    # state (sent = the committed plan) and its plan runs as returned - nothing moved into it after its check (the old
+    # transplant wrote the old f_down / pressed_down into a plan checked without them); a known hazard on that plan: not taken,
+    # the failure counted, the press far: the run ends
+    sim, ctx, p0 = pad
+    sim2, ctx2, q = after_press(sim, ctx, p0, 1002)
+    p, r, t = pad_run(monkeypatch, q, 1002)
+    cand = ac.Plan(1004, ac.M_R, 1010, None, None, 1042, 47, 8, c_down=None, c_strike=1048)
+    got, hz = [], []
+    monkeypatch.setattr(ac, "verify", lambda sim_, ctx_, plan, strict=False: None)
+    monkeypatch.setattr(ac, "search", lambda sim_, ctx_, stages=None, strict=False, sent=None: got.append(sent) or cand)
+    monkeypatch.setattr(sp.SlamPlay, "_as_hazard", lambda self, r_, s_, e_, plan, *a: hz.append(plan) or ("x" if hazard else None))
+    m = p.step(1002, pad_state(1002, float(sim2.start[kin.PX])), False, t_game=t, sim=sim2)
+    assert got == [q] and hz == [cand] and (cand.f_down, cand.pressed_down) == (None, None)
+    if hazard:
+        assert m is None and p.run is None and p.done[-1].why == "as no strike" and p._as_slams[8]["fails"] == 1
+    else:
+        assert p.run is r and r.cs_strike is cand and m == ac.mask_at(cand, 1004)
+
+
+@pytest.mark.parametrize("st,kept", [("Idle", True), ("Jump Antic", False)])
+def test_the_kept_plan_still_reads_the_known_hazards(monkeypatch, pad, st, kept):
+    # SP13a's keep (its strike close, no plan verified, unchanged): the committed plan goes on unless a known hazard is there
+    sim, ctx, p0 = pad
+    sim2, ctx2, q = after_press(sim, ctx, p0, 1002)
+    p, r, t = pad_run(monkeypatch, q, 1002)
+    q.f_press = 1010                                          # its strike within KEEP_F of this tick's mask frame (1004)
+    monkeypatch.setattr(ac, "verify", lambda sim_, ctx_, plan, strict=False: None)
+    monkeypatch.setattr(ac, "search", lambda sim_, ctx_, stages=None, strict=False, sent=None: None)
+    s = pad_state(1002, float(sim2.start[kin.PX]))
+    s["ents"][1]["fsms"][0]["state"] = st
+    m = p.step(1002, s, False, t_game=t, sim=sim2)
+    if kept:
+        assert p.run is r and r.cs_strike is q and r.cs_log[-1][1] == "keep" and m == ac.mask_at(q, 1004)
+    else:
+        assert m is None and p.run is None and p.done[-1].why == "as hazard"
+
+
+def test_the_committed_plan_failing_with_no_bound_plan_ends(monkeypatch, pad):
+    # B's hammer over her on the next commanded frame (1004, before the pending contact): the committed plan fails, no bound
+    # plan passes, the press far (no keep): the run ends, the planner decides - no unchecked keys sent
+    sim, ctx, p0 = pad
+    sim2, ctx2, q = after_press(sim, ctx, p0, 1002)
+    p, r, t = pad_run(monkeypatch, q, 1002)
+    hammer_at(monkeypatch, sim2.fo, [1004])
+    m = p.step(1002, pad_state(1002, float(sim2.start[kin.PX])), False, t_game=t, sim=sim2)
+    assert m is None and p.run is None and p.done[-1].why == "as no strike" and p._as_slams[8]["fails"] == 1

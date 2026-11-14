@@ -1616,35 +1616,49 @@ class SlamPlay:
         cfg = self._cs_cfg()
         sp_ = r.cs_strike
         if r.as_air and sp_ is not None:
-            # 11-14 the re-pogo entry (Sol seq366 D426-HAZARDS): the committed air catch re-reads the known hazards every tick
-            hz = self._as_hazard(r, s, e, sp_, sim, t, k)
-            if hz is not None:
-                r.cs_log.append([f, "as_hazard_abort", k, hz])
-                self._close("abort", "as hazard")
-                return None
-        if r.as_air and sp_ is not None and not _ac.check(sim, actx, sp_, strict=True):
-            # SP13a: the air approach searched again (air_chain's grid: drift, down slash, umbrella, the strike); 11-14 (Sol seq366
-            # D426-SEARCH-BOUND): with the air catch's stage, strict protection and hazards, inside the slam's shared budget and
-            # retry interval (_as_slot), a failed one counted
-            q = None
-            if self._as_may_search(r.iid, r.ta, t):
-                q = _ac.search(sim, actx, stages=AS_STAGES, strict=True)
-                if q is not None and self._as_hazard(r, s, e, q, sim, t, k) is not None:
-                    q = None
-                if q is None:
-                    self._as_failed(r.iid, r.ta, t)
+            # 11-14 the re-pogo entry (Sol seq367): the plan this tick runs is the committed one with its sent state (a down
+            # slash sent: pressed_down; pending or bounced: air_chain.evaluate reads it from the real prefix and the start
+            # state), verified as it is (air_chain.verify, strict: no protection made from a press); the known hazards (Sol
+            # seq366 D426-HAZARDS) are read on that same verified plan (its path with this tick's contacts), and its contacts
+            # are kept on the committed plan
+            q = _ac.verify(sim, actx, sp_, strict=True)
             if q is not None:
-                if sp_.pressed_down is not None:
-                    q.f_down, q.pressed_down = sp_.f_down, sp_.pressed_down
-                r.cs_log.append([f, "restrike", q.row(), q.n_ok])
-                r.cs_strike = sp_ = q
-            elif sp_.f_press - F <= _ac.KEEP_F:
-                if not r.cs_log or r.cs_log[-1][1] != "keep":
-                    r.cs_log.append([f, "keep", sp_.row()])
+                hz = self._as_hazard(r, s, e, q, sim, t, k)
+                if hz is not None:
+                    r.cs_log.append([f, "as_hazard_abort", k, hz])
+                    self._close("abort", "as hazard")
+                    return None
+                sp_.c_down, sp_.c_strike = q.c_down, q.c_strike
             else:
-                r.cs_log.append([f, "nostrike", k])
-                self._close("abort", "as no strike")
-                return None
+                # SP13a: the air approach searched again (air_chain's grid: drift, down slash, umbrella, the strike); 11-14 (Sol
+                # seq366 D426-SEARCH-BOUND): with the air catch's stage, strict protection and hazards, inside the slam's shared
+                # budget and retry interval (_as_slot), a failed one counted. Sol seq367: bound to the sent state first (search's
+                # sent: a sent down slash in every candidate, no new one), so the plan evaluated and hazard-checked is the plan
+                # that runs; nothing is moved into it afterwards
+                q = None
+                if self._as_may_search(r.iid, r.ta, t):
+                    q = _ac.search(sim, actx, stages=AS_STAGES, strict=True,
+                                   sent=sp_ if sp_.pressed_down is not None else None)
+                    if q is not None and self._as_hazard(r, s, e, q, sim, t, k) is not None:
+                        q = None
+                    if q is None:
+                        self._as_failed(r.iid, r.ta, t)
+                if q is not None:
+                    r.cs_log.append([f, "restrike", q.row(), q.n_ok])
+                    r.cs_strike = sp_ = q
+                elif sp_.f_press - F <= _ac.KEEP_F:
+                    # the committed plan kept close to its strike (SP13a's keep; unchanged): its known hazards still end it
+                    hz = self._as_hazard(r, s, e, sp_, sim, t, k)
+                    if hz is not None:
+                        r.cs_log.append([f, "as_hazard_abort", k, hz])
+                        self._close("abort", "as hazard")
+                        return None
+                    if not r.cs_log or r.cs_log[-1][1] != "keep":
+                        r.cs_log.append([f, "keep", sp_.row()])
+                else:
+                    r.cs_log.append([f, "nostrike", k])
+                    self._close("abort", "as no strike")
+                    return None
         elif sp_ is None or not _ac.check(sim, actx, sp_):
             f_min = max(F, a_entry + r.cs_k_ctrl + cfg.cd_f - 1, a_entry + cfg.press_k[0])
             plans = []

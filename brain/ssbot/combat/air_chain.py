@@ -75,7 +75,9 @@ class ChainSim:
         """The rollout index of cmds[:, 0] (rollout index 0 = frame fo)."""
         return len(self.prefix) + 1
 
-    def roll(self, cmds: np.ndarray, ev: np.ndarray | None = None) -> kin.Rollout:
+    def roll(self, cmds: np.ndarray, ev: np.ndarray | None = None, ev_pre: np.ndarray | None = None) -> kin.Rollout:
+        """ev: events [n, T] on the commanded frames; ev_pre (11-14 the re-pogo entry, Sol seq367): events [n, len(prefix)]
+        on the masks in flight (a sent down slash's contact before cmds index 0)."""
         cmds = np.asarray(cmds, np.int64)
         n, T = cmds.shape
         P = len(self.prefix)
@@ -83,9 +85,12 @@ class ChainSim:
         from ssbot.combat.holdfilter import hold_filter_jit
         lat, _ = hold_filter_jit(np.ascontiguousarray(full), self.hold)
         events = None
-        if ev is not None:
+        if ev is not None or ev_pre is not None:
             events = np.zeros((n, P + T), np.int64)
-            events[:, P:] = ev
+            if ev is not None:
+                events[:, P:] = ev
+            if ev_pre is not None:
+                events[:, :P] = ev_pre
         return kin.rollout(self.start, lat, self.params, self.terrain, events=events)
 
 
@@ -276,10 +281,13 @@ def _aabb_hit(hb: np.ndarray, boxes: np.ndarray) -> np.ndarray:
             boxes[..., 3] > hb[..., 1])
 
 
-def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx, tl, targets: str) -> np.ndarray:
+def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx, tl, targets: str,
+              i_min: int | None = None) -> np.ndarray:
     """[N] the first rollout index where the slash pressed at rollout index press_i[n] meets a target (both slash
     shapes), -1 none: the swing airborne (F_ATTACKING on the press frame or the next, not grounded the frame before),
-    not from the first grounded frame after the press. targets: 'b' (B's root box), 'ab' (A's box or B's)."""
+    not from the first grounded frame after the press. targets: 'b' (B's root box), 'ab' (A's box or B's). i_min (11-14,
+    Sol seq367: a sent down slash's press at or before the start state, index <= 0): contacts from this index on only (the
+    frames before the start state are not in the rollout)."""
     fl = ro.flags
     N, T1 = fl.shape
     rows = np.arange(N)
@@ -295,6 +303,8 @@ def _contacts(ro: kin.Rollout, press_i: np.ndarray, faces: np.ndarray, ctx: Ctx,
     gnd = np.cumsum((fl & kin.F_GROUND) != 0, axis=1)         # grounded frames up to each index
     landed = gnd[rows[:, None], idc] - gnd[rows, c(pi - 1)][:, None] > 0
     valid = ok[:, None] & (idx < T1) & ~landed
+    if i_min is not None:
+        valid &= idx >= i_min
     pos = ro.pos[rows[:, None], idc]                          # [N, 7, 2]
     rb = _b_boxes(ctx, tl, idc.ravel(), "root")
     hx, hy = pos[..., 0].ravel(), pos[..., 1].ravel()
@@ -365,6 +375,16 @@ def _owner_bits(j, jb, ja) -> np.ndarray:
     alone meets it (both slash shapes split between the bodies)."""
     j = np.asarray(j)
     return np.where((np.asarray(jb) == j) & (j >= 0), 1, 0) | np.where((np.asarray(ja) == j) & (j >= 0), 2, 0)
+
+
+def _sent_down_bounced(sim: ChainSim, p: Plan) -> bool:
+    """11-14 (Sol seq367): the sent down slash's bounce is in the start state - the observed pogo protection (POGO_OBS, the
+    STATE's cstate_int[1]: 8 on the contact frame, then counted down per physics step) once this press's earliest contact
+    frame has come (an older bounce's protection is gone by then: presses are ATK_CD_F apart). Its real i-frames then come
+    from the start state (F_INVULN while POGO_OBS lasts); none are made from the press."""
+    if p.pressed_down is None or int(sim.fo) < int(p.pressed_down) + ACTIVE[0]:
+        return False
+    return float(np.asarray(sim.start, float).reshape(kin.K, -1)[kin.POGO_OBS, 0]) > 0
 
 
 # ---- the search ----
@@ -450,7 +470,12 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
              strict: bool = False) -> list[Plan]:
     """The plans that pass in every timeline of ctx.tls (contact on B, the optional down slash's contact, safety).
     strict (11-14 the re-pogo entry, Sol seq366 D426-PROTECTION): the pre-contact protection only for the contacted
-    owner's body (_first_unsafe's owners: the strike's B; the down slash's B and / or A, whichever its contact met)."""
+    owner's body (_first_unsafe's owners: the strike's B; the down slash's B and / or A, whichever its contact met).
+    Sol seq367: strict never reads inv_until (no protection made from a press). A sent down slash whose bounce is not in
+    the start state (_sent_down_bounced) is pending: its contact predicted on the real prefix (its press in the masks in
+    flight or the start state's swing; index 1 on), its bounce placed there (ev_pre when in flight), the PRE window for its
+    owner's body, the model's own i-frames after the bounce; a miss is no bounce and no protection. Bounced: the start
+    state carries the bounce and its real i-frames (POGO_OBS)."""
     if not plans:
         return []
     off = sim.off
@@ -465,9 +490,13 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
     p_down = np.array([off + ((p.f_down if p.f_down is not None else F0) - F0) for p in plans])
     p_strike = np.array([off + (p.f_press - F0) for p in plans])
     ro0 = sim.roll(cm[has_d]) if has_d.any() else None     # pass 1 (no events): the same in every timeline
+    pend = np.array([bool(strict) and p.f_down is not None and p.pressed_down is not None
+                     and not _sent_down_bounced(sim, p) for p in plans])
+    p_pend = np.array([int(p.pressed_down) - int(sim.fo) if pend[i] else 0 for i, p in enumerate(plans)])
+    ro_pend = sim.roll(cm[pend]) if pend.any() else None   # the sent down slash's swing (no events), every timeline
     # Only the explicitly opted-in native, lane-independent no-event pass may
     # be reused. Every timeline still gets its own contact and hit/safety pass.
-    reuse=(reuse_no_event is True and not has_d.any() and type(sim) is ChainSim and _single_pass2_origin(sim) and
+    reuse=(reuse_no_event is True and not has_d.any() and not pend.any() and type(sim) is ChainSim and _single_pass2_origin(sim) and
            getattr(sim.roll,"__func__",None) is _CHAIN_ROLL_AUTHORITY and kin.rollout is _KIN_ROLLOUT_AUTHORITY and
            _contacts is _CONTACTS_AUTHORITY and _first_unsafe is _UNSAFE_AUTHORITY)
     pass2=None
@@ -483,11 +512,25 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
                 own_down[d_i] = _owner_bits(j, _contacts(ro0, p_down[d_i], faces[d_i], ctx, tl, "b"),
                                             _contacts(ro0, p_down[d_i], faces[d_i], ctx, tl, "a"))
             ev[hit, c_down[hit] - off] |= kin.EV_POGO           # the bounce on the contact frame (pogo_model EV_OFF 0)
+        ev_pre = None
+        if ro_pend is not None:
+            # Sol seq367: the pending sent down slash (index 1 on); a contact in flight goes to ev_pre, a later one to ev
+            q_i = np.flatnonzero(pend)
+            j = _contacts(ro_pend, p_pend[q_i], faces[q_i], ctx, tl, "ab", i_min=1)
+            c_down[q_i] = j
+            own_down[q_i] = _owner_bits(j, _contacts(ro_pend, p_pend[q_i], faces[q_i], ctx, tl, "b", i_min=1),
+                                        _contacts(ro_pend, p_pend[q_i], faces[q_i], ctx, tl, "a", i_min=1))
+            ev_pre = np.zeros((len(plans), off - 1), np.int64)
+            fl_ = (j >= 1) & (j < off)
+            ev_pre[q_i[fl_], j[fl_] - 1] |= kin.EV_POGO
+            cmd_ = j >= off
+            ev[q_i[cmd_], j[cmd_] - off] |= kin.EV_POGO
         # pass 2: the strike's contact on B (with the down slash's bounce)
         sel = np.flatnonzero(good)
         if not len(sel):
             return []
-        ro = _pass2_rows(pass2,sel) if pass2 is not None else sim.roll(cm[sel],ev[sel])
+        ro = (_pass2_rows(pass2,sel) if pass2 is not None else sim.roll(cm[sel],ev[sel]) if ev_pre is None else
+              sim.roll(cm[sel], ev[sel], ev_pre[sel]))
         if reuse and pass2 is None and len(sel)==len(plans) and type(ro) is kin.Rollout and not ro.variants and all(
                 getattr(ro,k) is None for k in ("var_box","var_mode","var_flags","bound","flags_all","flags_any")):
             pass2=ro
@@ -502,14 +545,14 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
         if not len(sel):
             return []
         # pass 3: safety with both bounces; no landing before the strike's contact
-        ro = sim.roll(cm[sel], ev[sel])
+        ro = sim.roll(cm[sel], ev[sel]) if ev_pre is None else sim.roll(cm[sel], ev[sel], ev_pre[sel])
         # grounded: the flag, or her box bottom at the floor (FP2, 3eb3914: a plan whose umbrella press came 1 frame
         # above the floor became a buffered ground jump - the model never set the flag on the landing frame - and
         # the run closed on the landing)
         gnd = ((ro.flags & kin.F_GROUND) != 0) | (ro.box[..., 1] <= FLOOR_Y + GROUND_EPS)
         ii = np.arange(ro.flags.shape[1])[None, :]
         landed = (gnd & (ii >= off) & (ii <= c_strike[sel][:, None])).any(axis=1)
-        i_from = np.array([0 if plans[i].inv_until is None else off + plans[i].inv_until - F0 + 1 for i in sel])
+        i_from = np.array([0 if strict or plans[i].inv_until is None else off + plans[i].inv_until - F0 + 1 for i in sel])
         owners = np.stack([own_down[sel], np.ones(len(sel), np.int64)], axis=1) if strict else None
         bad = _first_unsafe(ro, ctx, tl, np.stack([c_down[sel], c_strike[sel]], axis=1), c_strike[sel] + SAFE_AFTER,
                             i_from, owners)
@@ -526,18 +569,33 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
 _EVALUATE_AUTHORITY=evaluate
 
 
-def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None, strict: bool = False) -> Plan | None:
+def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None, strict: bool = False,
+           sent: Plan | None = None) -> Plan | None:
     """The chain for this tick (mask frame F0 = f + 2), or None: plans with a down slash first (more hits), then the
     strike at K_PRESS 47 before 46 / 48, the shortest drift, no umbrella before an umbrella, the latest umbrella.
     stages: the press-frame stages tried in order (default: K_PRESS 47, then 46 / 48 when it has none); 11-14 the re-pogo
     entry's searches (slam_play._as_try) pass (PRESS_K[:1],) - a failed full search costs ~35 ms (Idle, E cores), 47 alone
-    ~14 ms (s312/r4/as_cost.py, as_prof2.py)."""
+    ~14 ms (s312/r4/as_cost.py, as_prof2.py). sent (11-14 the re-pogo entry's committed re-search, Sol seq367): a plan whose
+    down slash was sent (pressed_down) - every candidate carries that slash (its f_down / pressed_down: no new one, no other
+    press frame) with the strike ATK_CD_F after it and the umbrella after its hold, so the plan evaluated is the plan that
+    runs (no state moved in after the check)."""
     F0 = sim.f + 2
     downs = None
     ok: list = []
+    bound = sent is not None and sent.pressed_down is not None
     for press_k in (stages if stages is not None else (PRESS_K[:1], PRESS_K[1:])):   # K_PRESS 47 first; 46 / 48 if none
         base = _plans(sim, ctx, F0, press_k)
         if not base:
+            continue
+        if bound:
+            plans = []
+            for p in base:
+                if p.f_press >= sent.pressed_down + ATK_CD_F and (p.f_umb is None or p.f_umb > sent.pressed_down + 4):
+                    p.f_down, p.pressed_down = sent.f_down, sent.pressed_down
+                    plans.append(p)
+            ok = evaluate(sim, ctx, plans, F0, strict=strict)
+            if ok:
+                break
             continue
         if downs is None:
             downs = _down_candidates(sim, ctx, F0, ctx.tls[0])
@@ -560,38 +618,54 @@ def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None, strict: bool = 
     return best
 
 
-def check(sim: ChainSim, ctx: Ctx, p: Plan, strict: bool = False) -> bool:
-    """The committed plan from this tick's start state still passes (every timeline). strict: evaluate's."""
+def verify(sim: ChainSim, ctx: Ctx, p: Plan, strict: bool = False) -> Plan | None:
+    """The committed plan from this tick's start state (every timeline): its evaluated copy (f0 this tick's F0, the
+    contacts of this evaluation) or None. strict (11-14 the re-pogo entry, Sol seq367): evaluate's strict rule and no
+    protection made from a press (inv_until cleared; a sent down slash pending or bounced: evaluate). Not strict: the
+    historical rule below (the Clawline's strike, SP10b)."""
     F0 = sim.f + 2
     q = Plan(**{k: getattr(p, k) for k in p.__dataclass_fields__})
     q.f0 = F0
-    if q.pressed_down is not None and q.inv_until is None:
+    if strict:
+        q.inv_until = None
+    elif q.pressed_down is not None and q.inv_until is None:
         # sent: its bounce (if it landed) is in the start state, its i-frames are not (contact <= press + 9, then
         # 8 physics steps ~ 10 frames)
         q.inv_until = q.pressed_down + ACTIVE[1] + 10
-    return bool(evaluate(sim, ctx, [q], F0, strict=strict))
+    ok = evaluate(sim, ctx, [q], F0, strict=strict)
+    return ok[0] if ok else None
+
+
+def check(sim: ChainSim, ctx: Ctx, p: Plan, strict: bool = False) -> bool:
+    """The committed plan from this tick's start state still passes (every timeline): verify's plan exists."""
+    return verify(sim, ctx, p, strict=strict) is not None
 
 
 def plan_path(sim: ChainSim, p: Plan) -> tuple[np.ndarray, np.ndarray] | None:
     """11-14 the re-pogo entry (Sol seq366 D426-HAZARDS): the plan's modelled path for the shared known-hazard check - her
     box centre x and box bottom above the floor (rune_life's FLOOR_BOX 3.015), one value per frame from this STATE's
     frame sim.f (the rune rows' frame 0) through the strike's contact + SAFE_AFTER, with the bounces on the plan's
-    contacts (evaluate's pass 3); None without a strike contact (before evaluate set it)."""
+    contacts (evaluate's pass 3; Sol seq367: a sent down slash's pending contact in the masks in flight too, as evaluate
+    places it); None without a strike contact (before evaluate set it)."""
     if p.c_strike is None:
         return None
     F0 = sim.f + 2
     T = max(p.c_strike - F0, 0) + SAFE_AFTER + 2
     cm = plan_cmds(p, F0, T)[None]
     ev = np.zeros_like(cm)
+    ev_pre = np.zeros((1, len(sim.prefix)), np.int64)
     for c in (p.c_down, p.c_strike):
-        if c is not None and 0 <= c - F0 < T:
+        if c is not None and 1 <= c - sim.fo <= len(sim.prefix):
+            ev_pre[0, c - sim.fo - 1] |= kin.EV_POGO
+        elif c is not None and 0 <= c - F0 < T:
             ev[0, c - F0] |= kin.EV_POGO
-    box = sim.roll(cm, ev).box[0]
+    box = (sim.roll(cm, ev, ev_pre) if ev_pre.any() else sim.roll(cm, ev)).box[0]
     s0 = max(int(sim.f) - int(sim.fo), 0)                       # rollout index 0 is frame sim.fo
     return 0.5 * (box[s0:, 0] + box[s0:, 2]), box[s0:, 1] - 3.015
 
 
-__all__ = ["AIRCHAIN", "ChainSim", "Ctx", "Plan", "timelines", "mask_at", "plan_cmds", "search", "check", "evaluate", "plan_path"]
+__all__ = ["AIRCHAIN", "ChainSim", "Ctx", "Plan", "timelines", "mask_at", "plan_cmds", "search", "check", "verify", "evaluate",
+           "plan_path"]
 
 
 def warm(params) -> float:
