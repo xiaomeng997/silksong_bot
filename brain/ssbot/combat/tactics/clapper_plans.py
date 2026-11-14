@@ -1471,8 +1471,9 @@ class PlanRunner:
             out.append("next_late")
         if "other_off" in names and o is not None and o.state in AIR:
             out.append("other_off")                # the second one is off the ground: its jump takes its turn by the public priorities
-        if "other_move" in names and _new_hostile(o, plan.get("other_family")) and not self._other_jump_over(sc, o, dry):
-            out.append("other_move")
+        if "other_move" in names and _new_hostile(o, plan.get("other_family")) and not (
+                plan.scene == "cluster" and phase.name in BACK_PHASES and self._other_jump_over(sc, o, dry)):
+            out.append("other_move")           # (Sol seq358: the exception is plan 2's way back only; the lure and the rest as before)
         if "other_gone" in names and _other_gone(o):
             out.append("other_gone")
         if "gap_closed" in names and o is not None and self._gap_closed(sc, plan, s, o):
@@ -1605,7 +1606,9 @@ class PlanRunner:
         """The person 11-13 (quote 125, rx411 bout 2 2:03): the other one's own jump, begun while the plan ran, is already past its hazards by
         the rule the plan keeps for its jumper (_hazard_over: landed and in Slam Recover; a jump cast RUNE_OVER_S after the landing). The
         retreat kept her off it, so it is no new move for a phase that comes back to it (live 9486: the way back to it in its Slam Recover
-        was invalidated and the middle return took over), and no public middle return comes of it either."""
+        was invalidated and the middle return took over), and no public middle return comes of it either. Asked only in plan 2's way back
+        (scene cluster, a BACK_PHASES phase; Sol seq358): the lure's phases, the middle scene's and the rest keep the plain other_move test
+        and the public middle return of that move."""
         if o is None or o.family not in JUMPS:
             return False
         m = self.moves.get(o.iid)

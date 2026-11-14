@@ -82,6 +82,24 @@ def test_the_other_ones_own_jump_on_the_way_back(monkeypatch, family, state, ove
         assert 8 not in (tac._clapper_priority.get("back_skip") or {})
 
 
+@pytest.mark.parametrize("branch,phase,kept", [("attack", "attack_back_other", True), ("lure", "lure_slash", False)])
+def test_the_landed_other_ones_exception_is_plan_2s_way_back_only(monkeypatch, branch, phase, kept):
+    # Sol seq358 (114eb8ff applied it to every other_move phase): the same landed other one in its Slam Recover keeps plan 2's way back and
+    # makes no middle return of its move; the lure's slash on it ends as before (other_move) and keeps that move's public middle return
+    tac, ws, fc, ex = _cluster(monkeypatch)
+    ex.select(branch, ws.stamp.t_game_s)
+    ex.name = phase                                                          # both watch other_move, both target the other one (8)
+    assert ex.phase.target == 8 and "other_move" in {e for e, _ in ex.phase.on}
+    change(fc, 8, family=G.CC_JUMP, state="Slam Recover", committed=True)
+    ws.entities[1].fsm = [("Control", "Slam Recover", .02)]
+    go_(tac, ws, fc)
+    skip = tac._clapper_priority.get("back_skip") or {}
+    if kept:
+        assert ex.plan is not None and ex.name == phase and 8 in skip
+    else:
+        assert ex.plan is None and ex.status == "invalid" and ex.reason == "other_move" and 8 not in skip
+
+
 def test_the_way_back_reaching_its_body_hands_it_to_idlehit_for_that_tick(monkeypatch):
     # the plan's in_reach end of a way-back phase names its body (PlanRunner.arrived, the policy's two_play.plan_entry) for one tick
     from ssbot.core.worldstate import E
