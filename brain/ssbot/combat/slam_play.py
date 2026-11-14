@@ -285,6 +285,12 @@ COMMIT_PHASES = ("jump", "air", "after", "cs_lock", "cs_strike")
 # step the playbook): the policy asks air_catch_try, and only the air catch may take the keys there. runtime354: 5 bounces off
 # a Clapper that then slammed with nobody to catch it (3 counters on an unlocked idle one, 2 mid-antic), 10 HP.
 AS_K_MAX = 40               # the air catch's last antic frame (its strike press at 46-48, at least air_chain.MIN_PRESS_C ahead)
+# The per-tick cost (s312/r4/as_cost.py, Idle on E cores): a search with a plan ~6.4 ms; a failed full search ~35 ms, with the
+# press at antic 47 alone ~14 ms (the same plans in the measured cases). So the air catch searches the 47 stage only and gives up
+# a slam after AS_FAIL_MAX failed searches (one every RESEARCH_F frames; runtime354 ep0's plan came on the fourth look - one from
+# the chain's air context, three in the run's wait - and a cap of 3 lost it: s312/r4 a3 / a3a / a3b).
+AS_STAGES = (_ac.PRESS_K[:1],)
+AS_FAIL_MAX = 6
 # SSBOT_FORUM_SLAM_START25 (Task 182 package 2; the person 11-12 "继续包1和包2吧" and quote 99 "为什么不能弄一个走位刀节规定在26帧之前
 # 到地方，然后安那套固定按键？"; design 7.1 / 7.11 C; follows SSBOT_FORUM_V2, =0 the old window): a start on the ground is no longer
 # bounded by K_START_MAX 14 (the demo's latest walk start) but only by the walk itself - in STAND and stopped by K_JUMP - 1 (the
@@ -515,6 +521,7 @@ class SlamPlay:
         self._life = _rl.RuneCircles()       # the rune circles' lives (shared with the other scripts by the policy)
         self._as_next: dict = {}             # 11-14 the re-pogo entry: Clapper iid -> the first frame air_catch_try searches again
         self.as_tries = [0, 0]               # ... air_catch_try's searches, plans
+        self._as_fail: dict = {}             # ... (Clapper iid, antic entry frame) -> failed air-catch searches of that slam
 
     def reset(self) -> None:
         self.run = None
@@ -532,6 +539,7 @@ class SlamPlay:
         self._life = _rl.RuneCircles()
         self._as_next = {}
         self.as_tries = [0, 0]
+        self._as_fail = {}
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -1420,6 +1428,8 @@ class SlamPlay:
         air_chain's search with S as its B; the keys for frame f + 2 or None."""
         if ground or not accepting or r.as_air or k > AS_K_MAX:
             return None
+        if self._as_fail.get((r.iid, r.fa), 0) >= AS_FAIL_MAX:
+            return None                                   # 11-14: this slam's failed air-catch searches are used up
         h = s.get("hero") or {}
         fc = h.get("facing")
         a_entry = int(round(f - (t - r.ta) * 60.0))
@@ -1427,9 +1437,10 @@ class SlamPlay:
                        kb0=sim.fo - a_entry, a_box=self._cs_box(self._cs_other(s, r)), hero_x=hero_x(s),
                        face=1 if fc is None or float(fc) >= 0 else -1, tls=_ac.timelines())
         t0 = time.perf_counter()
-        plan = _ac.search(sim, actx)
+        plan = _ac.search(sim, actx, stages=AS_STAGES)
         ms = round(1e3 * (time.perf_counter() - t0), 1)
         if plan is None:
+            self._as_fail[(r.iid, r.fa)] = self._as_fail.get((r.iid, r.fa), 0) + 1
             r.cs_next = f + 2 + _ac.RESEARCH_F
             if not any(x_[1] == "as_none" for x_ in r.cs_log):
                 r.cs_log.append([f, "as_none", k, ms])

@@ -493,13 +493,16 @@ def evaluate(sim: ChainSim, ctx: Ctx, plans: list[Plan], F0: int, *, reuse_no_ev
 _EVALUATE_AUTHORITY=evaluate
 
 
-def search(sim: ChainSim, ctx: Ctx) -> Plan | None:
+def search(sim: ChainSim, ctx: Ctx, stages: tuple | None = None) -> Plan | None:
     """The chain for this tick (mask frame F0 = f + 2), or None: plans with a down slash first (more hits), then the
-    strike at K_PRESS 47 before 46 / 48, the shortest drift, no umbrella before an umbrella, the latest umbrella."""
+    strike at K_PRESS 47 before 46 / 48, the shortest drift, no umbrella before an umbrella, the latest umbrella.
+    stages: the press-frame stages tried in order (default: K_PRESS 47, then 46 / 48 when it has none); 11-14 the re-pogo
+    entry's searches (slam_play._as_try) pass (PRESS_K[:1],) - a failed full search costs ~35 ms (Idle, E cores), 47 alone
+    ~14 ms (s312/r4/as_cost.py, as_prof2.py)."""
     F0 = sim.f + 2
     downs = None
     ok: list = []
-    for press_k in (PRESS_K[:1], PRESS_K[1:]):               # K_PRESS 47 first; 46 / 48 only when it has none
+    for press_k in (stages if stages is not None else (PRESS_K[:1], PRESS_K[1:])):   # K_PRESS 47 first; 46 / 48 if none
         base = _plans(sim, ctx, F0, press_k)
         if not base:
             continue

@@ -206,6 +206,42 @@ def test_air_catch_try_takes_a_real_plan_as_a_committed_link(monkeypatch):
     assert p.run is r and r.as_air and m2 is not None
     st = p.stats()
     assert st["as_runs"] == 1 and st["as_ctx_tries"] == 1 and st["as_ctx_plans"] == 1
+    assert r.cs_strike.k_press == 47                       # the air catch searches the K_PRESS 47 stage only (cost)
+
+
+def test_search_stages_default_and_the_47_stage():
+    # air_chain.search's default tries 47 then 46 / 48; the air catch passes the 47 stage alone (same plan in SP13a's case)
+    hx = CX - 6.5
+    ctx = ac.Ctx(b_iid=7, b_x=CX, b_y=cs.FLOOR + 4.434, b_face=-1, kb0=1001 - (1001 - 9), a_box=None, hero_x=hx, face=1,
+                 tls=ac.timelines())
+    full = ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx)
+    one = ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx, stages=sp.AS_STAGES)
+    assert sp.AS_STAGES == ((47,),) and full is not None and one is not None
+    assert (one.k_press, one.f_press, one.d_end, one.f_umb, one.f_down) == (full.k_press, full.f_press, full.d_end,
+                                                                            full.f_umb, full.f_down)
+    assert ac.search(sim_for(hx, f=1001, ground=False, bb=6.0, vy=2.0), ctx, stages=()) is None
+
+
+def test_failed_searches_per_slam_are_capped(monkeypatch):
+    # AS_FAIL_MAX failed searches give up that slam (step and air_catch_try share the count); a new slam is searched again
+    monkeypatch.setattr(cs, "AIRSTRIKE", True)
+    calls = []
+
+    def fake(sim, ctx, stages=None):
+        calls.append(stages)
+        return None
+    monkeypatch.setattr(ac, "search", fake)
+    hx = CX - 6.5
+    p = sp.SlamPlay(sp.PlayCfg())
+    f = 1000
+    for i in range(sp.AS_FAIL_MAX + 3):
+        f = 1000 + i * (ac.RESEARCH_F + 1)
+        p.air_catch_try(f, air(f, 12 + f - 1000, hx), False, True, t_game=10.0, sim=sim_for(hx, f=f, ground=False, bb=6.0))
+    assert len(calls) == sp.AS_FAIL_MAX and all(st == sp.AS_STAGES for st in calls)
+    # the same Clapper's next slam (its antic entry 60 frames later): searched again
+    f2 = f + 60
+    p.air_catch_try(f2, air(f2, 12, hx), False, True, t_game=10.0 + 60 / 60.0, sim=sim_for(hx, f=f2, ground=False, bb=6.0))
+    assert len(calls) == sp.AS_FAIL_MAX + 1
 
 
 class AirSlam(Script):
