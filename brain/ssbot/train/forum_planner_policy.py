@@ -1063,8 +1063,12 @@ class ForumPlannerPolicy(PlannerPolicy):
         # Task 181: the chain's own real bounce of this STATE hands off from any script phase: a script run left over from
         # before the chain took the keys is not stepped while they are the chain's (wtb3 2725-2760 phase wait)
         own_bounce=getattr(chain,"own_bounce_now",None)
+        # 11-14 the re-pogo entry (design 4.4a): an air catch the chain's own bounce hand-back left to the playbook
+        # (air_catch_try, made after the chain gave up the keys) is not such a left-over run: the bounce of the same STATE does
+        # not take it back (runtime354 ep17 57075-57076: the plan made on the hand-back tick was aborted on the next)
+        air_catch=run is not None and getattr(run,"as_air",False) and run.phase=="cs_strike"
         handoff=(run is None or (run.phase=="after" and (run.bounced or real_bounce))
-                 or (real_bounce and callable(own_bounce) and own_bounce(state)))
+                 or (real_bounce and callable(own_bounce) and own_bounce(state) and not air_catch))
         if (not handoff and slam_play.COMMIT and callable(getattr(script,"committed",None))
                 and script.committed(state)):
             # Package 1 (SSBOT_FORUM_SLAM_COMMIT): a committed playbook run keeps the slam; no chain goal is bound before its
@@ -1087,6 +1091,14 @@ class ForumPlannerPolicy(PlannerPolicy):
             if run is not None:script.abort("observed target transfer: goal handoff")
             self._play_tick=None
         return out
+
+    def _chain_air_context_idle(self):
+        """11-14 the re-pogo entry (design 4.4a): the chain generates candidates (it keeps the slam playbook unstepped) with
+        no link running - no Run, commitment or recovery (the bounce hand-back's air context)."""
+        chain=getattr(self,"chain_native",None)
+        if chain is None or not getattr(chain,"candidate_generation",False):return False
+        return (getattr(getattr(chain,"runner",None),"run",None) is None and getattr(chain,"commitment",None) is None
+                and getattr(chain,"recovery",None) is None)
 
     def _b2_priority_chain(self):
         chain=getattr(self,"chain_native",None)
@@ -1446,6 +1458,26 @@ class ForumPlannerPolicy(PlannerPolicy):
                 mask = play
                 own = "slam"
                 self.counts["slam_play"] += 1
+        if (not slam_stepped and claw_strike.AIRSTRIKE and self.slam_play is not None and own == "plan"
+                and not low_crit and not asw_crit and not m2_on and not self.pause_owned
+                and self._chain_air_context_idle()):
+            # 11-14 the re-pogo entry (连踩入口, design 4.4a; SSBOT_FORUM_AIRSTRIKE, default off): a chain's air context with
+            # no link running (the bounce hand-back) keeps the playbook unstepped above; only its air catch is asked here.
+            # A plan is a committed link: the next tick steps it (package 1's slam_commit) and the B2 gate holds the offers
+            slam_stepped = True
+            ac_play = self.slam_play.air_catch_try(
+                f, s, ws.hero.contact.v == "GROUND", bool((s.get("hero") or {}).get("hero_accepting_input", True)),
+                t_game=ws.stamp.t_game_s if slam_play.GAME_CLOCK else None, skip=self._press_skip(asw_skip, prefs),
+                sim=air_chain.ChainSim(S0, prefix, hold, self.params, self.terrain, fo, f), guard=gsp)
+            if ac_play is not None and self._rune_veto("slam", ac_play):
+                self.slam_play.abort("rune exit")
+                ac_play = None
+            if ac_play is not None:
+                rp = self.slam_play.run
+                self._play_tick = {"phase": rp.phase, "k": rp.k, "mask": ac_play, "why": "air catch"}
+                mask = play = ac_play
+                own = "slam"
+                self.counts["slam_air_catch"] += 1
         if (not slam_stepped and self.slam_play is not None and slam_play.COMMIT
                 and callable(getattr(self.slam_play, "yield_ends_run", None)) and self.slam_play.yield_ends_run(s)):
             # Package 1: a run from its jump on that another owner holds the keys from this tick (a critical script, map2, or

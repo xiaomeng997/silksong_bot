@@ -275,6 +275,16 @@ REACH_NAME = _on("SSBOT_FORUM_SLAM_REACH_NAME", _V2)
 # today's yield rules and a walk the chain froze still re-checks the ground and the band at the jump.
 COMMIT = _on("SSBOT_FORUM_SLAM_COMMIT", _V2)
 COMMIT_PHASES = ("jump", "air", "after", "cs_lock", "cs_strike")
+# 11-14 the re-pogo entry (连踩入口; docs/plans/forum_clapper_committed_chain.md 4.4a; the person 11-14 quotes 140, 141 "还是先把
+# 连踩入口给写了"; SSBOT_FORUM_AIRSTRIKE, default off): SP13a's air catch (air_chain.search with S as B: drift, an optional down
+# slash on a body below, the umbrella, the strike at antic 46-48 in Slam 0) on the HERO2 hero model, whose umbrella map v2 M0
+# calibrated on 10-22 (forum.md 91; SP13a's 1 / 5 of 10-18 failed on that model). Before: tried only when the Clawline
+# declined with no plan / silk / the other in the way / room. Now also in the air past the start frames (the Clawline's late,
+# _try_start's late), behind S or too close (over it), and with no landing in time (the run waits in the air instead of
+# ending), up to AS_K_MAX; and from a chain's air context with no link running (the bounce hand-back, where the policy does not
+# step the playbook): the policy asks air_catch_try, and only the air catch may take the keys there. runtime354: 5 bounces off
+# a Clapper that then slammed with nobody to catch it (3 counters on an unlocked idle one, 2 mid-antic), 10 HP.
+AS_K_MAX = 40               # the air catch's last antic frame (its strike press at 46-48, at least air_chain.MIN_PRESS_C ahead)
 # SSBOT_FORUM_SLAM_START25 (Task 182 package 2; the person 11-12 "继续包1和包2吧" and quote 99 "为什么不能弄一个走位刀节规定在26帧之前
 # 到地方，然后安那套固定按键？"; design 7.1 / 7.11 C; follows SSBOT_FORUM_V2, =0 the old window): a start on the ground is no longer
 # bounded by K_START_MAX 14 (the demo's latest walk start) but only by the walk itself - in STAND and stopped by K_JUMP - 1 (the
@@ -503,6 +513,8 @@ class SlamPlay:
         self._csx = None                     # SP13 SSBOT_FORUM_CLAWSTRIKE: claw_strike.ClawStrike (made on first use)
         self.cs_declines: dict = {}          # ... why a slam the playbook could not reach got no Clawline
         self._life = _rl.RuneCircles()       # the rune circles' lives (shared with the other scripts by the policy)
+        self._as_next: dict = {}             # 11-14 the re-pogo entry: Clapper iid -> the first frame air_catch_try searches again
+        self.as_tries = [0, 0]               # ... air_catch_try's searches, plans
 
     def reset(self) -> None:
         self.run = None
@@ -518,6 +530,8 @@ class SlamPlay:
         self.sg = []
         self.cs_declines = {}
         self._life = _rl.RuneCircles()
+        self._as_next = {}
+        self.as_tries = [0, 0]
 
     def _two_pick(self, s: dict, t: float) -> dict | None:
         """TWO_PLAY: the Clapper of this tick - the run's while it lives, else one entering a slam it has not handled
@@ -663,6 +677,8 @@ class SlamPlay:
                 out[f"cs_end_{r.phase}_{r.why[:24]}"] += 1
             for why, n in self.cs_declines.items():
                 out[f"cs_no_{why}"] += n
+            if _cs.AIRSTRIKE and self.as_tries[0]:
+                out["as_ctx_tries"], out["as_ctx_plans"] = self.as_tries      # 11-14: air_catch_try (a chain's air context)
         rg = [[r.iid, r.fa, r.rg_k, r.phase, r.why, r.k_press, r.bounced]
               for r in self.done + ([self.run] if self.run is not None else []) if r.rg_k is not None]
         res = dict(out)
@@ -714,6 +730,42 @@ class SlamPlay:
         rule (it is frozen and re-checks the ground and the band at the jump)."""
         r = self.run
         return r is not None and r.phase in COMMIT_PHASES
+
+    def air_catch_try(self, f: int, s: dict, ground: bool, accepting: bool = True, t_game: float | None = None,
+                      skip: frozenset | None = None, sim=None, guard: list | None = None) -> int | None:
+        """11-14 the re-pogo entry (连踩入口, design 4.4a; SSBOT_FORUM_AIRSTRIKE): the mask for frame f + 2 when the air catch
+        takes a slam while a chain's air context with no link running keeps the playbook unstepped (the policy's yield rule;
+        the bounce hand-back), else None. Only the air catch (_as_try): no walk, no ground start, no Clawline. No run is
+        kept without a plan (the chain's goal hand-off reads the run): a failed search is tried again RESEARCH_F frames
+        later. A plan is a committed link (cs_strike): from the next tick the policy steps the run (package 1)."""
+        if not _cs.AIRSTRIKE or sim is None or ground or not accepting or self.run is not None or self._hold is not None:
+            return None
+        t = f / 60.0 if t_game is None else float(t_game)
+        e = self._two_pick(s, t) if TWO_PLAY else clapper(s)
+        if e is None or (skip and e.get("iid") in skip):
+            return None
+        st, tin = control(e)
+        if st != "Slam Antic":
+            return None
+        ta = (f - round(tin * 60.0)) / 60.0 if t_game is None else t - tin
+        if e.get("iid") == self._closed_iid and not self._new_slam(self._closed_iid, ta):
+            return None                                   # the handled slam gets no second look (step's rule)
+        k = int(round((t - ta) * 60.0)) + SEND_AHEAD + self.cfg.lag
+        if k > AS_K_MAX or f + 2 < self._as_next.get(e.get("iid"), -(1 << 30)):
+            return None
+        self._t, self._f, self._guard, self._bombs = t, f, guard, None
+        self._life.update(f, s, t)
+        r = self.run = Run(iid=e.get("iid"), fa=int(f - round(tin * 60.0)), face=1 if e.get("flipX") else -1, ta=ta)
+        r.k = k
+        self.as_tries[0] += 1
+        m = self._as_try(r, k, f, s, e, ground, accepting, sim, int((s.get("hero") or {}).get("health") or 0), t,
+                         "air context")
+        if m is None or self.run is not r:
+            self._as_next[e.get("iid")] = f + 2 + _ac.RESEARCH_F
+            self.run = None
+            return None
+        self.as_tries[1] += 1
+        return m
 
     def abort(self, why: str) -> None:
         """Hand the slam back to the planner (the supervisor took the keys)."""
@@ -826,6 +878,13 @@ class SlamPlay:
                 cm = self._cs_try(r, k, f, s, e, ground, accepting, sim, hp, t, "no landing")
                 if cm is not None:
                     return cm
+            if (_cs.AIRSTRIKE and sim is not None and accepting and not ground and k <= AS_K_MAX
+                    and (k > (c.k_jump_late2 if LATE else c.k_jump_late - 1)
+                         or (LATE and k + _fall_frames(s) > c.k_jump_late2))):
+                # 11-14 the re-pogo entry: no landing in time: the run waits in the air for the air catch (the wait phase's
+                # _cs_try each tick, a failed search again after RESEARCH_F) instead of ending; the planner keeps the keys
+                r.phase, r.why = "wait", "no landing"
+                return None
             if k > (c.k_jump_late2 if LATE else c.k_jump_late - 1) or (not accepting and not LATE):
                 self._close("abort", "no landing" if accepting else "no input in the air")
                 return None
@@ -868,8 +927,11 @@ class SlamPlay:
             if m is not None and TWO_RUNEGATE and self._rg_tick == k and r.rg_k is None:
                 r.rg_k = k                            # SP11-0: started where the old gate would have declined it
             if m is None:
+                # 11-14 the re-pogo entry: in the air also late (past the start frames), behind S or too close (over it)
+                air_catch = (_cs.AIRSTRIKE and not ground and k <= AS_K_MAX
+                             and (r.why in ("late", "behind") or r.why.startswith("distance")))
                 if ((_cs.CLAWSTRIKE or _cs.AIRSTRIKE) and sim is not None and self.run is r and r.phase == "wait"
-                        and (r.why == "no time to walk" or r.why == "in the air"
+                        and (r.why == "no time to walk" or r.why == "in the air" or air_catch
                              or (r.why.startswith("distance") and (hero_x(s) - float(e["pos"][0])) * r.face
                                  > c.reach[1]))):
                     # SP13: the ground strike cannot reach it in time: the Clawline approach
@@ -1341,7 +1403,9 @@ class SlamPlay:
             reason = "other rune circle"
         if reason is not None:
             self._cs_decline(r, f, reason)
-            if _cs.AIRSTRIKE and reason in ("no plan", "silk", "other in the way", "room"):
+            if _cs.AIRSTRIKE and (reason in ("no plan", "silk", "other in the way", "room")
+                                  or (not ground and reason in ("late", "behind"))):
+                # (11-14 the re-pogo entry: in the air also past the Clawline's frame and behind S)
                 return self._as_try(r, k, f, s, e, ground, accepting, sim, hp, t, why)
             return None
         r.cs, r.cs_toward = plan, (1 if cx > hx else -1)
@@ -1354,7 +1418,7 @@ class SlamPlay:
                 t: float, why: str) -> int | None:
         """SP13a SSBOT_FORUM_AIRSTRIKE: in the air at S's antic with no ground strike in time (and no Clawline plan):
         air_chain's search with S as its B; the keys for frame f + 2 or None."""
-        if ground or not accepting or r.as_air or k > 40:
+        if ground or not accepting or r.as_air or k > AS_K_MAX:
             return None
         h = s.get("hero") or {}
         fc = h.get("facing")
@@ -1823,6 +1887,11 @@ class SlamPlay:
         elif START25:
             lim = c.k_jump - 1                            # package 2: the walk check below ("no time to walk") decides
         if k > lim:
+            if _cs.AIRSTRIKE and not ground and accepting and k <= AS_K_MAX:
+                # 11-14 the re-pogo entry: in the air past the ground start's frames the air catch may still take it (step
+                # routes "late" to _cs_try); the run stays open until AS_K_MAX
+                r.why = "late"
+                return None
             if not r.why:
                 r.why = "late"
             r.phase = "abort"
