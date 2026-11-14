@@ -104,20 +104,28 @@ def state(x, y, vx, vy, st="Air"):
                            "verts_world": [x - 2., y - 3., x + 2., y - 3., x + 2., y + 1., x - 2., y + 1.]}]}
 
 
-def jump(t0=9.5, branch="open", st="Air", fam="CC_JUMP"):
+def jump(t0=9.5, branch="open", st="Air", fam="CC_JUMP", dec_x=None):
+    """A committed jump instance in state st. dec_x: its decision point (inst.dec["x"]: the jump rule's decision at its first Jump / Air
+    frame, attack_range.Segmenter); None: fly() gives it the x it places the jumper at. inst.x0 (the move's start anchor) stays 0."""
     states = ["Jump Antic", "Jump", "Air"] + ([] if st in ("Jump", "Air") else ["Charged?", "Slam Effects?", "Slam 2", "Slam Recover"][
         :["Charged?", "Slam Effects?", "Slam 2", "Slam Recover"].index(st) + 1])
-    return Inst(fam=fam, t0=t0, x0=0., y0=4.5, s=-1, hero_du=0., branch=branch, states=states)
+    inst = Inst(fam=fam, t0=t0, x0=0., y0=4.5, s=-1, hero_du=0., branch=branch, states=states)
+    if dec_x is not None:
+        inst.dec = {"t": t0 + .5, "b": 0, "x": float(dec_x), "y": 8., "s": -1, "L": 0.}
+    return inst
 
 
-def fly(tac, ws, fc, iid, x, vx, inst, flip="auto", y=8.):
+def fly(tac, ws, fc, iid, x, vx, inst, flip="auto", y=8., vy=4.):
     """iid in the committed move instance inst at x (its fc subject, the tracker's STATE and instance, its entity's flipX: "auto" =
-    facing its x speed, None = absent)."""
+    facing its x speed, None = absent). An instance without a decision gets one at x (these fixtures' take-off area)."""
+    if inst.dec is None:
+        inst.dec = {"t": inst.t0 + .5, "b": 0, "x": float(x), "y": float(y), "s": 1 if vx > 0 else -1, "L": 0.}
     st = inst.states[-1]
-    change(fc, iid, family=inst.fam, state=st, committed=True, pos=(x, y if st in ("Jump", "Air") else 5.))
+    air = st in ("Jump", "Air")
+    change(fc, iid, family=inst.fam, state=st, committed=True, pos=(x, y if air else 5.))
     if getattr(tac, "v2trk", None) is None:
         tac.v2trk = NS(now={})
-    tac.v2trk.now[iid] = ("Song Heavy Sentry", state(x, y if st in ("Jump", "Air") else 7.45, vx, 4. if st in ("Jump", "Air") else 0., st), inst)
+    tac.v2trk.now[iid] = ("Song Heavy Sentry", state(x, y if air else 7.45, vx, vy if air else 0., st), inst)
     for e in ws.entities:
         if e.id == iid:
             e.flip_x = (vx > 0) if flip == "auto" else flip
@@ -242,6 +250,40 @@ def test_the_targets_predicted_landing_root_stays_in_the_hard_filter(monkeypatch
     assert rec["ends"][0]["why"] == ["predicted landing root"] and "current root" in rec["ends"][1]["why"]
 
 
+def test_a_landing_the_wall_rule_would_push_is_unknown(monkeypatch):
+    # Sol seq364 (Astra's counter-example): decided at 46 facing left (its back 2.99 u from the right wall), STATE vx -1 / vy 38, body
+    # (44, 3, 48, 7). The wall-free ballistic body lands at frame 54 on 45.10 - its branch open, inside the open zone - but the wall
+    # rule pushes that landing to 44.59 (48.99 - 4.4): unknown, both stances kept
+    from ssbot.combat import jump_behind as JB, knife_chain_transfer as T
+    from ssbot.combat.are_types.clapper import WALL_ZONE
+    res = {}
+    for on in (False, True):
+        monkeypatch.setattr(P, "LANDING_EXIT", on)
+        tac, ws, fc = scene(xs=(30., 46.), hx=40.)
+        fly(tac, ws, fc, 8, 46., -1., jump(dec_x=46.), y=6., vy=38.)
+        res[on] = tick(tac, ws, fc)
+    e = tac.v2trk.now[8][1]
+    bp = T.body_path(e, P.LEXIT_PATH_F)
+    k = int(np.nonzero(bp[1:, 1] <= T.ROUTE_FLOOR_Y + 1e-6)[0][0]) + 1
+    root = 46. + float(bp[k][0] - bp[0][0])
+    assert tuple(bp[0]) == (44., 3., 48., 7.) and k == 54 and root == pytest.approx(45.1)
+    assert WALL_ZONE[0] <= root <= WALL_ZONE[1] and JB.wall_rule(46., root, -1) == pytest.approx(44.59)
+    assert P._landing_facts(sc_of(tac, ws, fc, hx=40., mem={})) == ([], [(8, "Air", "wall rule moves the landing")])
+    assert tac.last["clapper_landing_exit"]["unknown"] == [[8, "Air", "wall rule moves the landing"]]
+    assert same(res[True], res[False])
+    # the same flight decided 7 u off that wall (its back 6.99 u from it): no push - an open jump that needs no wall correction, its band
+    fly(tac, ws, fc, 8, 42., -1., jump(t0=12.0, dec_x=42.), y=6., vy=38.)
+    (b,), unknown = P._landing_facts(sc_of(tac, ws, fc, hx=40., mem={}))
+    assert not unknown and b["root"] == pytest.approx(41.1) and JB.wall_rule(42., b["root"], -1) == b["root"]
+
+
+@pytest.mark.parametrize("dec", [None, {"t": 10., "x": float("nan")}, {"t": 10.}])
+def test_a_missing_or_non_finite_decision_point_is_unknown(monkeypatch, dec):
+    tac, ws, fc = layout(True, monkeypatch)
+    tac.v2trk.now[8][2].dec = dec                      # (inst.x0, the move's start anchor, is never read in its place)
+    assert P._landing_facts(sc_of(tac, ws, fc, mem={})) == ([], [(8, "Air", "no decision point")])
+
+
 def test_a_missing_state_velocity_in_the_air_is_unknown(monkeypatch):
     tac, ws, fc = layout(True, monkeypatch)
     del tac.v2trk.now[8][1]["vel"]                     # body_path would take (0, 0): a straight drop
@@ -352,13 +394,13 @@ def test_the_instance_end_clears_its_memory(monkeypatch):
     tick(tac, ws, fc)
     assert (8, 9.5) in tac._clapper_priority["lexit"]
     # landed and in its hammer: the band from the observed root, the memory kept
-    fly(tac, ws, fc, 8, 33.6, 0., jump(st="Slam 2"))
+    fly(tac, ws, fc, 8, 33.6, 0., jump(st="Slam 2", dec_x=36.))          # its decision point: the take-off at 36
     out = tick(tac, ws, fc)
     rec = tac.last["clapper_landing_exit"]["stance"]
     assert rec["bands"][0]["state"] == "Slam 2" and rec["bands"][0]["root"] == pytest.approx(33.6) and out.stance_x < 26.
     assert (8, 9.5) in tac._clapper_priority["lexit"]
     # Slam Recover: no hammer ahead, no band, memory still held (the instance lives)
-    fly(tac, ws, fc, 8, 33.6, 0., jump(st="Slam Recover"))
+    fly(tac, ws, fc, 8, 33.6, 0., jump(st="Slam Recover", dec_x=36.))
     tick(tac, ws, fc)
     assert "clapper_landing_exit" not in tac.last and (8, 9.5) in tac._clapper_priority["lexit"]
     # over: no instance, the memory goes

@@ -92,11 +92,13 @@ def _rune_exit(sc, x):
 # landing root (LEXIT_BAND: the model's boxes of runtime354 bout 22's two hurts, 70734 a CC_JUMP_CAST and 71442 a CC_JUMP, both on open
 # floor) and its standing body (LEXIT_BODY each side). A bounded preference with these two examples' extents, x only: not a hammer safety
 # envelope; every safety gate stays as it is. Its domain: CC_JUMP / CC_JUMP_CAST, the instance's decided branch "open" (are_types.clapper
-# .jump_branch) and its landing root inside the open zone (clapper.WALL_ZONE: no wall correction), the observed flipX (forum_local
+# .jump_branch), its landing root inside the open zone (clapper.WALL_ZONE) and left where it is by the wall rule (jump_behind.wall_rule from
+# the instance's decision point inst.dec["x"] and its bound facing: no wall push; Sol seq364), the observed flipX (forum_local
 # .clapper_facing's convention without its Entity.facing fallback) bound at the instance's first committed tick. The landing root: observed
 # once landed; in the air the ballistic body (knife_chain_transfer.body_path from the STATE pos / vel) carried to the floor, re-predicted
-# every tick; from Slam Recover on no band. A committed jump outside the domain (a wall or unknown branch, no observed flipX or a changed
-# one, a STATE input missing, a ballistic landing in the wall zone) or a scene without its geometry: both stances kept, the reasons logged.
+# every tick; from Slam Recover on no band. A committed jump outside the domain (a wall or unknown branch, no decision point, no observed
+# flipX or a changed one, a STATE input missing, a landing in the wall zone or one the wall rule moves) or a scene without its geometry:
+# both stances kept, the reasons logged.
 # L2's own target's jump never triggers it (its landing is the jump rule's); its band is merged as an obstacle. The exit (landing_exit_x):
 # an end of the span holding the stance, inside the walls, whose way from her crosses no Clapper's root and no committed jump's predicted
 # landing root interval; the side kept per jump instance and output while it stays allowed; neither end allowed: the stance kept. Ordinary
@@ -154,7 +156,7 @@ def _landing_facts(sc):
     reason)] for each one outside it, and (None, None, reason) for a missing tracker or scene geometry. Binds each instance's facing on its
     first committed tick in sc.mem["lexit"], keyed by its iid and t0 (a facing seen to change later keeps the instance unknown), and drops
     the instances that ended."""
-    from ssbot.combat import knife_chain_transfer as T
+    from ssbot.combat import jump_behind as _jb, knife_chain_transfer as T
     from ssbot.combat.are_types.clapper import WALL_ZONE
     from ssbot.combat.forum_v2 import committed
     trk = getattr(sc.tac, "v2trk", None)
@@ -176,6 +178,13 @@ def _landing_facts(sc):
             continue                                      # Slam Recover: no hammer ahead
         if inst.branch != "open":
             unknown.append((iid, st, f"branch {inst.branch}"))
+            continue
+        try:
+            dx = float(inst.dec["x"])                     # the instance's decision point (not inst.x0, the move's start anchor)
+        except (KeyError, TypeError, ValueError):
+            dx = float("nan")
+        if not np.isfinite(dx):
+            unknown.append((iid, st, "no decision point"))
             continue
         ent = sc.tac._ent(sc.ws, iid)
         fl = None if ent is None else getattr(ent, "flip_x", None)
@@ -214,6 +223,9 @@ def _landing_facts(sc):
             root = x0
         if not WALL_ZONE[0] <= root <= WALL_ZONE[1]:
             unknown.append((iid, st, "landing root in the wall zone"))
+            continue
+        if abs(_jb.wall_rule(dx, root, face) - root) > 1e-6:
+            unknown.append((iid, st, "wall rule moves the landing"))   # Sol seq364: an open branch inside the zone may still be pushed
             continue
         du = LEXIT_ROOT_U + abs(vx) * 2 / 60.
         a, b = root + face * LEXIT_BAND[0], root + face * LEXIT_BAND[1]
