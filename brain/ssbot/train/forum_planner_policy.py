@@ -39,6 +39,7 @@ import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat import rune_life
+from ssbot.combat import rune_hook_exit      # SSBOT_FORUM_RUNE_HOOK_EXIT (Task 182 seq 387): 0 off, 2 record only; 1 refused at import
 from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, observed_slam,
                           slam_notice, slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
@@ -242,6 +243,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.measurement = None
         self.measurement_choice = None
         self.chain_native = None           # opt-in audit bridge, not a key owner
+        # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (Task 182 seq 387): the empty-hook exit's per-tick record (never a key); None: off
+        self._rhx = rune_hook_exit.Recorder() if rune_hook_exit.RECORD else None
+        self._rhx_last = None
         self.terrain: Terrain2D | None = None
         self.log_path = (Path(log_dir) / f"decisions_i{instance}.jsonl") if log_dir else None
         self.keys_path = (Path(log_dir) / f"keys_i{instance}.jsonl") if log_dir else None
@@ -638,6 +642,9 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.flush_log()
         self.flush_keys()
         self.episode += 1
+        if self._rhx is not None:
+            self._rhx.reset()
+            self._rhx_last = None
         from ssbot.combat.knife_chain_budget import encounter_allowed
         if os.environ.get("SSBOT_FORUM_CHAIN_B2", "0").strip() == "1" and not encounter_allowed(enc.name):
             raise ValueError("B2 encounter requires w7 or the explicit manual-air w13 probe")
@@ -1664,6 +1671,13 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.cog["frames"].add(f + 2)
         if self.pause_owned:
             own = "sup"
+        if self._rhx is not None:
+            # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (Task 182 seq 387, design 4.10): the empty-hook exit's RECORD at this final owner - the
+            # gate, N1 / H1 / H2, the chain's own hand-back cause, the admission and the intersection, the first rejection and the
+            # cost. Read-only: the owner, the mask and the send stay as they are; no key is ever sent from here
+            self._rhx_last = self._rhx.record(self, s, f, fo, ws, S0, prefix, hold, res, fplan, prefs, own)
+            self.counts["rhx_entry"] += int(bool(self._rhx_last["entry"]))
+            self.counts["rhx_intersection"] += int(bool(self._rhx_last["intersection"]))
         key = (own, "low" if low_crit else "rt" if (two_play.RUNETIER and rt_crit) else "asw" if asw_crit else None,
                getattr(prefs, "target", None),
                self.tac.last.get("goal"), self.tac.last.get("goal_why"))
@@ -2045,6 +2059,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         rune_ = (self._rune_tick or {}).get("last")
         if rune_ is not None:
             rec["rune"] = rune_                  # Task 182 seq 310: the last check on a script's key this tick (rune_life.exit_veto)
+        if self._rhx is not None and self._rhx_last is not None:
+            rec["rhx"] = self._rhx_last          # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (seq 387): the empty-hook exit's record of this tick
         if self._play_tick is not None:
             rec["play"] = self._play_tick        # SSBOT_FORUM_SLAM_PLAY (SP1): the playbook's phase / frame / keys
             if self._play_tick["mask"] is not None:

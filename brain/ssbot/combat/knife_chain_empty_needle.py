@@ -4,7 +4,10 @@ This only composes HERO2's existing M0 track with the current input prefix.
 It neither sends a key nor admits a path. A caller must scan the entire path
 against every owner and delayed hazard, and observe real control before using
 the shared strike exit. Enemy/wall catches and the unmeasured ram successor
-are deliberately outside this primitive.
+are deliberately outside this primitive. Task 182 seq 387: terrain is judged by
+reach (reach_problem) - any row in the needle's ray band, and any slope a swept
+body box, ray band or ram box can meet, rejects; a slope out of every region is
+ignored (it used to reject the flight wherever it was).
 """
 from dataclasses import dataclass
 import math
@@ -70,36 +73,106 @@ def _overlap(a,b):
     return a[0]<b[2] and a[2]>b[0] and a[1]<b[3] and a[3]>b[1]
 
 
-def _pure_branch(physical,rendered,bodies,d,throw,params,terrain):
-    """Reject a different FSM successor; this is not external-hazard admission."""
-    p=params.vector();boxes=_boxes(physical,p)
+RAY_REACH=10.5             # first_ray_body's reach ahead of her box centre (the measured 9.25 u needle + her half width, padded)
+RAY_LO,RAY_HI=.50,1.98     # the ray band over her box bottom (first_ray_body)
+REACH_M=.02                # margin of a reach region against a terrain row's bounding box (touching counts)
+
+
+def _ray_band(hb,d):
+    x=.5*(hb[0]+hb[2])
+    return [min(x,x+d*RAY_REACH),hb[1]+RAY_LO,max(x,x+d*RAY_REACH),hb[1]+RAY_HI]
+
+
+def _row_boxes(terrain):
+    """The bounding boxes [n, 4] of the terrain's horizontal, vertical and slope rows."""
+    h=np.asarray(terrain.hseg,float).reshape(-1,3);v=np.asarray(terrain.vseg,float).reshape(-1,3)
+    s=np.asarray(terrain.slopes,float).reshape(-1,4)
+    return (np.column_stack((h[:,1],h[:,0],h[:,2],h[:,0])),np.column_stack((v[:,0],v[:,1],v[:,0],v[:,2])),
+            np.column_stack((np.minimum(s[:,0],s[:,2]),np.minimum(s[:,1],s[:,3]),
+                             np.maximum(s[:,0],s[:,2]),np.maximum(s[:,1],s[:,3]))))
+
+
+def _meets(regions,rows,m=REACH_M):
+    """[len(regions)]: some row bounding box meets the region grown by m."""
+    r=np.asarray(regions,float).reshape(-1,4)
+    if not len(r) or not len(rows):return np.zeros(len(r),bool)
+    return ((r[:,None,0]-m<=rows[None,:,2])&(r[:,None,2]+m>=rows[None,:,0])&
+            (r[:,None,1]-m<=rows[None,:,3])&(r[:,None,3]+m>=rows[None,:,1])).any(axis=1)
+
+
+def _sweeps(boxes):
+    b=np.asarray(boxes,float)
+    return np.column_stack((np.minimum(b[:-1,:2],b[1:,:2]),np.maximum(b[:-1,2:],b[1:,2:])))
+
+
+def reach_problem(boxes,rendered_boxes,rays,rams,terrain):
+    """The terrain a flight could act through that the measured pure branch excludes (None: none). Only rows that are
+    certainly out of reach are ignored: the needle's ray band (rays: every frame it can still be thrown, both poses)
+    meeting any row - a wall, ledge or slope it could hook; then any slope row meeting a swept body box of either pose
+    (boxes / rendered_boxes, frame to frame), a ray band or a ram box (rams). No hook, cling or motion on a slope is
+    modelled here: a reachable slope rejects."""
+    hr,vr,sr=_row_boxes(terrain)
+    if _meets(rays,np.vstack((hr,vr,sr))).any():
+        return 'empty needle ray meets terrain'
+    if len(sr):
+        regions=[_sweeps(boxes),_sweeps(rendered_boxes)]+[np.asarray(x,float).reshape(-1,4) for x in (rays,rams) if len(x)]
+        if _meets(np.vstack(regions),sr).any():
+            return 'empty needle sloped terrain in reach'
+    return None
+
+
+def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=0,p=None):
+    """Why a flight is not the measured pure branch, None when it is: physical / rendered pivots from P (index 0 = P,
+    as far as the caller's path goes), the Catch catch_shift frames off the measured one (a derived branch). A different
+    FSM successor only; this is not external-hazard admission. The frame checks are the original ones, in the same order
+    and with the same reasons; the terrain reach (reach_problem) replaces the former rejection of any slope anywhere.
+    p: params.vector() when the caller has it."""
+    p=params.vector() if p is None else p;boxes=_boxes(physical,p)
     rendered_boxes=_boxes(rendered,p)
     # The ray can be evaluated before Throw enters. Both physical and rendered
     # poses must be empty for the current observed bodies, through that prefix.
     for j in range(throw+1):
         for hb in (boxes[j],rendered_boxes[j]):
             if first_ray_body(hb.tolist(),d,bodies) is not None:
-                raise NominalUnsupported('empty needle would hook an observed body')
+                return 'empty needle would hook an observed body'
     dash=H2.CLAW_DASH_F+throw-H2.CLAW_THROW_F
-    catch=H2.CLAW_CATCH_F+throw-H2.CLAW_THROW_F
-    for j in range(1,len(physical)):
-        # Swept boxes also reject a wall/floor catch or physical body contact.
-        sweep=np.r_[np.minimum(boxes[j-1,:2],boxes[j,:2]),np.maximum(boxes[j-1,2:],boxes[j,2:])]
-        if any(_overlap(sweep,b) for _,b in bodies):
-            raise NominalUnsupported('empty needle body contact is outside pure branch')
-        if dash<j<=catch:
-            x0=min(physical[j-1,0],physical[j,0]);x1=max(physical[j-1,0],physical[j,0])
-            ram=[x0+min(0.,3*d),min(physical[j-1,1],physical[j,1])-1.05,
-                 x1+max(0.,3*d),max(physical[j-1,1],physical[j,1])+.45]
-            if any(_overlap(ram,b) for _,b in bodies):
-                raise NominalUnsupported('empty needle ram successor is unmeasured')
-        for y,x0,x1 in terrain.hseg:
-            if sweep[1]<=y<=sweep[3] and sweep[0]<x1 and sweep[2]>x0:
-                raise NominalUnsupported('empty needle touches terrain')
-        for x,y0,y1 in terrain.vseg:
-            if sweep[0]<=x<=sweep[2] and sweep[1]<y1 and sweep[3]>y0:
-                raise NominalUnsupported('empty needle touches terrain')
-    if len(terrain.slopes):raise NominalUnsupported('empty needle sloped terrain unsupported')
+    catch=H2.CLAW_CATCH_F+throw-H2.CLAW_THROW_F+catch_shift
+    # Frame j = 1 .. n-1 (row j-1), all frames at once; the first frame with a problem wins and, within it, the order of
+    # the former frame loop: body contact, the ram (dash < j <= catch), a horizontal row, a vertical row (same reasons).
+    # Swept boxes also reject a wall/floor catch or physical body contact.
+    phys=np.asarray(physical,float)
+    sw=_sweeps(boxes)
+    bb=np.array([b for _,b in bodies],float).reshape(-1,4)
+    js=np.arange(1,len(phys))
+    on=(js>dash)&(js<=catch)
+    ram=np.column_stack((np.minimum(phys[:-1,0],phys[1:,0])+min(0.,3*d),np.minimum(phys[:-1,1],phys[1:,1])-1.05,
+                         np.maximum(phys[:-1,0],phys[1:,0])+max(0.,3*d),np.maximum(phys[:-1,1],phys[1:,1])+.45))
+    contact=_strict_any(sw,bb)
+    rammed=on&_strict_any(ram,bb)
+    h=np.asarray(terrain.hseg,float).reshape(-1,3);v=np.asarray(terrain.vseg,float).reshape(-1,3)
+    touch=(((sw[:,None,1]<=h[None,:,0])&(h[None,:,0]<=sw[:,None,3])&(sw[:,None,0]<h[None,:,2])&(sw[:,None,2]>h[None,:,1])).any(1)
+           |((sw[:,None,0]<=v[None,:,0])&(v[None,:,0]<=sw[:,None,2])&(sw[:,None,1]<v[None,:,2])&(sw[:,None,3]>v[None,:,1])).any(1))
+    bad=contact|rammed|touch
+    if bad.any():
+        k=int(np.argmax(bad))
+        return ('empty needle body contact is outside pure branch' if contact[k] else
+                'empty needle ram successor is unmeasured' if rammed[k] else 'empty needle touches terrain')
+    rays=[_ray_band(hb,d) for j in range(throw+1) for hb in (boxes[j],rendered_boxes[j])]
+    return reach_problem(boxes,rendered_boxes,rays,ram[on],terrain)
+
+
+def _strict_any(a,b):
+    """[len(a)]: box a[i] overlaps some box of b (strict, as _overlap)."""
+    a=np.asarray(a,float).reshape(-1,4);b=np.asarray(b,float).reshape(-1,4)
+    if not len(a) or not len(b):return np.zeros(len(a),bool)
+    return ((a[:,None,0]<b[None,:,2])&(a[:,None,2]>b[None,:,0])&(a[:,None,1]<b[None,:,3])&(a[:,None,3]>b[None,:,1])).any(1)
+
+
+def _pure_branch(physical,rendered,bodies,d,throw,params,terrain):
+    """Reject a different FSM successor; this is not external-hazard admission."""
+    why=_branch_problem(physical,rendered,bodies,d,throw,params,terrain)
+    if why is not None:
+        raise NominalUnsupported(why)
 
 
 def _control(S,track,d,params):

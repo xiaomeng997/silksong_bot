@@ -90,6 +90,78 @@ def test_wall_inside_dash_rejects_without_adding_a_wall_bounce_model():
         N.compile_empty(sim,0.,[],1)
 
 
+def _with_slope(sim,*seg):
+    t=K.Terrain2D.from_boxes([(-100.,-10.,100.,3.015)])
+    t.slopes=np.array(seg,float).reshape(-1,4)
+    sim.terrain=t
+    return sim
+
+
+def _regions(made,sim,d=1,throw=9):
+    """The module's own reach regions of a compiled flight (physical / rendered boxes from P, ray bands, ram boxes)."""
+    p=sim.params.vector();P=made.activation_frame-sim.fo
+    phys=made.path.states[[K.PX,K.PY],P:].T;rend=made.path.pos[P:]
+    boxes=N._boxes(phys,p);rb=N._boxes(rend,p)
+    rays=np.array([N._ray_band(hb,d) for j in range(throw+1) for hb in (boxes[j],rb[j])])
+    dash,catch=H2.CLAW_DASH_F+throw-9,H2.CLAW_CATCH_F+throw-9
+    rams=np.array([[min(phys[j-1,0],phys[j,0])+min(0.,3*d),min(phys[j-1,1],phys[j,1])-1.05,
+                    max(phys[j-1,0],phys[j,0])+max(0.,3*d),max(phys[j-1,1],phys[j,1])+.45] for j in range(dash+1,catch+1)])
+    return boxes,rb,rays,rams
+
+
+def _inside(pt,boxes):
+    b=np.asarray(boxes,float).reshape(-1,4)
+    return bool(((b[:,0]-.03<=pt[0])&(pt[0]<=b[:,2]+.03)&(b[:,1]-.03<=pt[1])&(pt[1]<=b[:,3]+.03)).any())
+
+
+def test_a_slope_out_of_every_reach_region_no_longer_rejects_the_flight():
+    # seq 387: the former rule rejected any slope anywhere (the Forum has 65 slope rows on its upper walls)
+    made=N.compile_empty(_with_slope(scene(vy=0.),[80.,30.,85.,32.]),0.,[],1)
+    assert made.control_frame==1034
+
+
+def test_a_slope_only_in_the_needle_ray_band_rejects():
+    # falling in: the antic sinks her about 0.7 u, so the band's top (before the sink) is above every later body box
+    base=scene(vy=-15.);made=N.compile_empty(base,0.,[],1)
+    boxes,rb,rays,rams=_regions(made,base)
+    sw=np.vstack((N._sweeps(boxes),N._sweeps(rb)))
+    pt=None
+    for x in np.arange(boxes[0,0]+3.,boxes[0,0]+10.,.25):
+        for y in np.arange(rays[0,1],rays[0,3],.05):
+            if _inside((x,y),rays) and not _inside((x,y),sw) and not _inside((x,y),rams):
+                pt=(x,y);break
+        if pt:break
+    assert pt is not None, "this scene has no point that only the ray band reaches"
+    with pytest.raises(NominalUnsupported,match='ray meets terrain'):
+        N.compile_empty(_with_slope(scene(vy=-15.),[pt[0]-.01,pt[1]-.01,pt[0]+.01,pt[1]+.01]),0.,[],1)
+
+
+def test_a_slope_only_in_the_ram_box_rejects():
+    base=scene(vy=0.);made=N.compile_empty(base,0.,[],1)
+    boxes,rb,rays,rams=_regions(made,base)
+    sw=np.vstack((N._sweeps(boxes),N._sweeps(rb)))
+    pt=None
+    for r in rams[::-1]:
+        for x in np.arange(r[2]-.02,r[0],-.05):
+            for y in np.arange(r[1]+.02,r[3],.1):
+                if not _inside((x,y),sw) and not _inside((x,y),rays):
+                    pt=(x,y);break
+            if pt:break
+        if pt:break
+    assert pt is not None, "this scene has no point that only the ram box reaches"
+    with pytest.raises(NominalUnsupported,match='sloped terrain in reach'):
+        N.compile_empty(_with_slope(scene(vy=0.),[pt[0]-.005,pt[1]-.005,pt[0]+.005,pt[1]+.005]),0.,[],1)
+
+
+def test_a_slope_in_a_swept_body_box_below_the_ray_band_rejects():
+    base=scene(vy=0.);made=N.compile_empty(base,0.,[],1)
+    boxes,rb,rays,rams=_regions(made,base)
+    x=.5*(boxes[25,0]+boxes[25,2]);y=boxes[25,1]+.2
+    assert not _inside((x,y),rays) and not _inside((x,y),rams)
+    with pytest.raises(NominalUnsupported,match='sloped terrain in reach'):
+        N.compile_empty(_with_slope(scene(vy=0.),[x-.01,y-.01,x+.01,y+.01]),0.,[],1)
+
+
 def test_existing_shared_strike_exit_uses_residual_and_can_countersteer():
     from ssbot.combat.knife_chain_transfer import press_now_row
     sim=scene()
