@@ -242,6 +242,15 @@ TWO_REACH_U = 13.0          # the other one's follow-up hammer from its centre n
 # without it); =0 turns each off (arm rnsp10b0 = the SP10a default).
 TWO_HANDOFF = _on("SSBOT_FORUM_TWO_HANDOFF", _V2)
 HO_GAP_F = 4
+# SSBOT_FORUM_MIDDLE_HANDOFF (Task 182 item 3, the second package; Sol seq 372 on #433; design 7.1 step 3 "第二包"; default off):
+# since Task 183 the post-bounce of a struck slam is the chain's bounce follow-up, so A's strike run closes at the bounce hand-off,
+# long before her landing, and TWO_HANDOFF's anchor (_close on her landing) is never there when B's slam is already in its antic:
+# B's run opens on the landing tick as an ordinary start ("late", "no time to walk"; TV-on 50: the other's antic past frame 9 at
+# the middle landing 16 times, 10 lost HP). On: the follow-up's real normal completion between the two bodies (the chain's one-shot
+# event, the bounce's own slam source A, the same game clock as this tick) sets the same anchor (middle_handoff); everything after
+# is TWO_HANDOFF's own rule: a run opened within HO_GAP_F on another Clapper's slam is a late start when its antic frame is <=
+# K_JUMP_LATE2, every start gate and limit unchanged. Off: no anchor.
+MIDDLE_HANDOFF = _on("SSBOT_FORUM_MIDDLE_HANDOFF")
 CS_KEEP_F = 4               # SP13 SSBOT_FORUM_CLAWSTRIKE: a lost plan this close to its Clawline press is kept
 # ... and its landing (fixed-point t1, f3d6d62: B struck 7 / 11 hand-offs of k_land 8-29; the four failures landed 7.8-8.3 u
 # in front of B - A to B 11.5-11.9 u - and could not walk into BAND by K_JUMP_LATE2): while B is in Slam Antic before
@@ -832,6 +841,17 @@ class SlamPlay:
             self._close("abort", why)
         elif self.run is not None and self.run.phase == "wait":
             self.run.why = why
+
+    def middle_handoff(self, a_iid, t_game: float) -> bool:
+        """SSBOT_FORUM_MIDDLE_HANDOFF (Task 182 item 3, Sol seq 372): the chain's bounce follow-up off A's slam completed between
+        the two bodies on this tick: TWO_HANDOFF's anchor (A, this tick's clock), as A's own strike run sets it when it closes on her
+        landing (_close). The policy calls it before this tick's step, with the clock the step gets. The rest is step's rule: a run
+        opened within HO_GAP_F on another Clapper's slam is a late start when its antic frame allows it; a run already open, A's own
+        new slam, a closed slam and every start gate are as they were. False (no anchor) with TWO_HANDOFF or TWO_PLAY off or no A."""
+        if not (TWO_HANDOFF and TWO_PLAY) or a_iid is None:
+            return False
+        self._ho = (a_iid, float(t_game))
+        return True
 
     def _close(self, phase: str, why: str = "") -> None:
         r = self.run

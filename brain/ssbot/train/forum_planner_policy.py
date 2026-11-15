@@ -1421,6 +1421,15 @@ class ForumPlannerPolicy(PlannerPolicy):
                 self.counts["b2_script_priority"]+=1
             elif b2_priority.policy_gate_reason=="slam_play":
                 self.counts["slam_commit_gate"]+=1
+        if slam_play.MIDDLE_HANDOFF and self.slam_play is not None:
+            # Task 182 item 3 (Sol seq 372; SSBOT_FORUM_MIDDLE_HANDOFF, default off): the chain's bounce follow-up completed between
+            # the two bodies on this tick: the playbook's TWO_HANDOFF anchor (the bounce's own slam source, this tick's clock - the
+            # one the step below gets), so a run it opens now on the other one's slam is TWO_HANDOFF's late start; nothing else
+            take = getattr(self.chain_native, "take_middle_completion", None)
+            mev = take(f) if callable(take) else None
+            if mev is not None and self.slam_play.middle_handoff(
+                    mev["caster"], ws.stamp.t_game_s if slam_play.GAME_CLOCK else f / 60.0):
+                self.counts["middle_handoff"] += 1
         slam_stepped = False
         if (self.slam_play is not None and not low_crit and not asw_crit and not m2_on
                 and (slam_commit or not getattr(self.chain_native, "candidate_generation", False))):

@@ -17,6 +17,7 @@ from .knife_chain_air import (AirAnchor,load_runner,entry_context,plan_entry,mod
 from .knife_chain_geometry import B2Geometry,GeometryUnavailable
 from . import knife_chain_transfer as transfer
 from . import knife_chain_waypoint as waypoint
+from . import slam_play as _slam
 from .knife_chain_commitment import MoveInstance
 from .knife_chain_format import MASK_NAMES as B
 from .knife_chain_nominal import logical_copy,NominalUnsupported
@@ -117,6 +118,7 @@ class NativeManualAirChain(NativeChainB2):
         self._bounce=None;self._bounce_frames={}
         self._waypoint_wanted=False;self._waypoint_failed=set();self._waypoint_declined=None;self._waypoint_responsibility={}
         self._vault_tried={}   # Task 182 seq 312 #385: per waypoint key, the start states ("air" / "ground") a vault row was searched from
+        self.middle_completion=None   # Task 182 item 3 (Sol seq 372, slam_play.MIDDLE_HANDOFF): the follow-up's one-shot real middle completion
         super().reset(episode,start_frame=start_frame)
         from . import knife_chain_bounce_table as bounce_table
         # Task 179 (#309, Sol seq 229): the finite same-target bounce table (Tasks 143 / 145 / 148), opt-in.
@@ -1879,10 +1881,39 @@ class NativeManualAirChain(NativeChainB2):
                    planned_land_f=fo.get("land_f"),planned_box=fo.get("landing_box"))
         if not inside:
             self._recover("bounce follow-up landed outside the gap between the two bodies",f);return
+        if _slam.MIDDLE_HANDOFF and run.link=="middle":self._note_middle_completion(f)
         self.commitment=None;self._hook_start=None;self._jump_start=None;self._committed_future=None
         self._press=self._accepted=self._hit=None
         self._transfer_ready=False
         self._abandon("bounce follow-up done: "+("landed between the two bodies" if run.link=="middle" else "landed"))
+
+    def _note_middle_completion(self,f):
+        """Task 182 item 3 (Sol seq 372; slam_play.MIDDLE_HANDOFF): this tick's real normal completion of the middle (her box on the
+        ground between the two near body edges, _follow_landed) after a real bounce off a slam: the one-shot event the policy reads
+        on this same tick (take_middle_completion) for the slam playbook's TWO_HANDOFF anchor. Only a BOUNCE goal whose own source
+        is a CC_SLAM of the bounced Clapper itself (the goal's caster: the slam whose hammer the chain kept) names A; anything else
+        records nothing (the original output stays)."""
+        goal=self._transfer_goal
+        src=None if goal is None or isinstance(goal,transfer.ReturnGoal) else goal.responsibility
+        if (src is None or goal.source_kind!="BOUNCE" or src.family!="CC_SLAM" or goal.caster is None
+                or src.target_iid!=goal.caster):
+            self._note("middle_handoff_none",frame=f,reason="no observed real bounce off the bounced Clapper's own slam",
+                       kind=None if goal is None else goal.source_kind,source=None if src is None else asdict(src))
+            return
+        self.middle_completion=dict(episode=self.episode,frame=int(f),caster=int(goal.caster),bounce_f=int(goal.cast_fa),
+                                    source=asdict(src))
+        self._note("middle_handoff_ready",frame=f,caster=int(goal.caster),bounce_f=int(goal.cast_fa),source=asdict(src))
+
+    def take_middle_completion(self,f):
+        """Task 182 item 3 (Sol seq 372): the policy's one read of the middle's completion event, on the tick it happened only (the
+        playbook's anchor takes this tick's clock; an event from another tick or episode is dropped, never re-stamped). None when
+        there is none."""
+        ev=self.middle_completion;self.middle_completion=None
+        if ev is None:return None
+        if ev["frame"]!=int(f) or ev["episode"]!=self.episode:
+            self._note("middle_handoff_expired",frame=int(f),event_frame=ev["frame"],event_episode=ev["episode"])
+            return None
+        return ev
 
     def _owned_route(self,state,game,sim,geo,plan,gap,old,link):
         """Task 183: an owned follow-up route goes on (its absolute row; past it no key for the middle, the same key for a
