@@ -112,11 +112,86 @@ def test_a_free_float_kept_pays_and_a_release_does_not(params, arena, monkeypatc
     cmd0 = np.asarray(s1["cmd"])[:, 0]
     full = np.concatenate([np.full((len(cmd0), P), J, np.int64), np.asarray(s1["cmd"], np.int64)], axis=1)
     lat, _ = hold_filter_jit(full, _j_held(47))
-    keep = ((cmd0 & J) != 0) & ((lat[:, P] & J) != 0) & ((lat[:, P] & D) == 0) & np.asarray(s1["safe"])
+    held = ((cmd0 & J) != 0) & ((lat[:, P] & J) != 0) & ((lat[:, P] & D) == 0) & np.asarray(s1["safe"])
+    keep = held & (md[:, P + 1] == kin.M_GLIDE)            # the rollout's next state still floats: charged
+    leave = held & (md[:, P + 1] != kin.M_GLIDE)           # J kept but the first key leaves it (an attack's new edge)
     release = ((lat[:, P] & J) == 0) & np.asarray(s1["safe"])
     assert keep.any() and release.any()
-    assert (dv[keep] == fp.GLIDE_DANGER_C).all() and (dv[release] == 0).all()
+    assert (dv[keep] == fp.GLIDE_DANGER_C).all() and (dv[release] == 0).all() and (dv[leave] == 0).all()
     assert note["floats"] == int(keep.sum()) and note["opens"] == 0
+
+
+ROW = "JUMP(24)R+runR16_attack"           # the library row: J held, R; J+A at 20 - 22 (A's new edge at 20)
+A = kin.B_ATTACK
+
+
+def _only(name):
+    real = fp.veto
+
+    def veto(cs, ctx):
+        ok, why = real(cs, ctx)
+        return ok & np.array([cs.name(i) == name for i in range(len(cs.cmd))]), why
+    return veto
+
+
+def _continue_tick(params, arena, monkeypatch, on, held_a):
+    """Two real ticks: at frame 100 in a steady float the planner takes ROW; at 120 its CONTINUE's first new key is ROW's
+    command 20 (J+A). held_a: A already held (the state's previous mask and the filter latched it long ago, the in-flight
+    key holds it too), so 20 is no new A edge."""
+    s1 = _state(params, arena, _glide_masks(params, arena)[0])
+    monkeypatch.setattr(fp, "GLIDE_DANGER", on)
+    pl = ForumPlanner(params, arena, PlannerConfig(T=36, threads=2, variants="bounds_lo"),
+                      ForumConfig(deadline_ms=math.inf, esc_deadline_ms=math.inf, v2=True, forced_rank="seen_cf"),
+                      crest="Wanderer")
+    pl.debug = True
+    f = _forecast()
+
+    def tick(s, frame, prefix, hold):
+        x, y = float(s[kin.PX, 0]), float(s[kin.PY, 0])
+        ws = _world(x)
+        ws.hero.pos = E((x, y))
+        ws.stamp.frame = frame
+        return pl.tick(ws, s, hold, np.asarray(prefix, np.int64), f, _prefs(None, x), _ctx())
+
+    monkeypatch.setattr(fp, "veto", _only(ROW))
+    r1 = tick(s1, 100, [J], _j_held(47))
+    assert r1.name == ROW and int(r1.cmd[20]) == J | A and int(r1.cmd[19]) & A == 0
+    monkeypatch.undo()                                     # the real veto again (and the switch, set below)
+    monkeypatch.setattr(fp, "GLIDE_DANGER", on)
+    masks = np.concatenate([[J], np.asarray(r1.cmd[:19], np.int64)])[None]
+    lat, hold2 = hold_filter_jit(masks, _j_held(47))
+    s2 = kin.rollout(s1, lat, params, arena).final[:, :1].copy()
+    assert s2[kin.MODE, 0] == kin.M_GLIDE and s2[kin.PHASE, 0] == 2.0      # still the steady float at 120
+    prefix2 = [int(r1.cmd[19])]
+    if held_a:
+        s2[kin.PREV, 0] = float(int(s2[kin.PREV, 0]) | A)
+        hold2 = kin.HoldState(hold2.latched.copy(), hold2.desired.copy(), hold2.pending.copy(), hold2.age.copy())
+        hold2.latched[0, 1] = hold2.desired[0, 1] = True
+        hold2.pending[0, 1] = 0
+        hold2.age[0, 1] = 60
+        prefix2 = [int(r1.cmd[19]) | A]
+    tick(s2, 120, prefix2, hold2)
+    return pl
+
+
+@pytest.mark.parametrize("held_a", [False, True])
+def test_a_continue_whose_first_key_is_a_new_attack_leaves_the_float_and_pays_nothing(params, arena, monkeypatch,
+                                                                                    held_a):
+    """Sol seq384: the CONTINUE of JUMP(24)R+runR16_attack 20 frames on, its first new key J+A. A new A edge in the steady
+    float is kin_jit's Attack Cancel (out of GLIDE on the next state): no float kept, no cost. A held long before (no new
+    edge): the float goes on with J kept while a release was possible - charged as before."""
+    p0 = _continue_tick(params, arena, monkeypatch, False, held_a)
+    p1 = _continue_tick(params, arena, monkeypatch, True, held_a)
+    dv = _same_but_v2nh(p0, p1)
+    s1, P, md = _rows(p1)
+    c = len(np.asarray(s1["cmd"])) - 1                     # the CONTINUE row (the last)
+    assert int(np.asarray(s1["cmd"])[c, 0]) == J | A and np.asarray(s1["safe"])[c]
+    note = p1.last_info["glide_danger"]
+    assert note["mode"] == kin.M_GLIDE and note["phase"] == 2.0
+    if held_a:
+        assert md[c, P + 1] == kin.M_GLIDE and dv[c] == fp.GLIDE_DANGER_C
+    else:
+        assert md[c, P + 1] != kin.M_GLIDE and dv[c] == 0.0
 
 
 def test_true_jumps_from_the_floor_pay_nothing(params, arena, monkeypatch):

@@ -1434,7 +1434,9 @@ def _glide_danger_cost(planner, f, start, P: int, full, latched, r1, safe, param
         through by the hold filter (latched) - puts her in it on the next state (kin_jit's start_glide acts in the
         press's own step);
       - floats: the prefix leaves her in a free phase of the umbrella (Float Idle 2 / Bump 5, where a release goes to
-        the Deflate at once) and the row asks for J and keeps it on mask P with no dash press there.
+        the Deflate at once) and the row asks for J and keeps it on mask P with no dash press there, its own next state
+        still in the umbrella (seq 384: a first key that leaves it - an attack's new edge, the Attack Cancel - is
+        "exits", no cost; a held attack with no new edge floats on and pays).
     Both need a release to be possible on mask P (some row's latched mask P has no J): a J the filter keeps on every row
     (its minimum press) is no choice. No cost: an opening only later in the row ("later", recorded only), a J the
     filter keeps on a row that did not ask for it ("forced_j"), the Antic / Inflate / Deflate phases (a release changes
@@ -1477,20 +1479,26 @@ def _glide_danger_cost(planner, f, start, P: int, full, latched, r1, safe, param
     dash = (latched[:, P] & B_DASH) != 0
     free_choice = bool((~lat).any())
     z = np.zeros(N, bool)
-    opens, floats, later, unk = z, z, z, z
+    opens, floats, later, unk, exits = z, z, z, z, z
     if mP != M_GLIDE:
         opens = req & lat & (md[:, P + 1] == M_GLIDE) & free_choice
         if md.shape[1] > P + 2:
             later = (md[:, P + 1] != M_GLIDE) & (md[:, P + 2:] == M_GLIDE).any(axis=1)
     elif phP in (2.0, 5.0) and free_choice:
-        floats = req & lat & ~dash
+        # seq 384: J kept is a float kept only when the row's own next state still floats; a first key that leaves the
+        # umbrella (an attack's new edge: the Attack Cancel) is no float ("exits", no cost); a held attack (no new edge)
+        # floats on and pays
+        stay = md[:, P + 1] == M_GLIDE
+        floats = req & lat & ~dash & stay
+        exits = req & lat & ~dash & ~stay
         unk = req & lat & dash
     forced = lat & ~req
     charged = (opens | floats) & safe
     cost = np.where(charged, GLIDE_DANGER_C, 0.0)
     note.update(opens=int((opens & safe).sum()), floats=int((floats & safe).sum()), later=int((later & safe).sum()),
-                forced_j=int((forced & safe).sum()), unknown_rows=int((unk & safe).sum()), charged=int(charged.sum()))
-    planner._gd_rows = (opens, floats, later, forced, unk, cost)
+                forced_j=int((forced & safe).sum()), unknown_rows=int((unk & safe).sum()), exits=int((exits & safe).sum()),
+                charged=int(charged.sum()))
+    planner._gd_rows = (opens, floats, later, forced, unk, cost, exits)
     if a is not None:
         a.gd_rows += int(charged.sum())
         a.gd_ms += (time.perf_counter() - t0) * 1e3
@@ -1506,10 +1514,10 @@ def _glide_danger_final(planner, note: dict, first, chosen: int) -> dict:
     def cls(i):
         if rows is None or i is None or not 0 <= int(i) < len(rows[0]):
             return None
-        opens, floats, later, forced, unk, cost = rows
+        opens, floats, later, forced, unk, cost, exits = rows
         i = int(i)
-        c = ("opens" if opens[i] else "floats" if floats[i] else "unknown" if unk[i] else "later" if later[i]
-             else "forced_j" if forced[i] else "none")
+        c = ("opens" if opens[i] else "floats" if floats[i] else "unknown" if unk[i] else "exits" if exits[i]
+             else "later" if later[i] else "forced_j" if forced[i] else "none")
         return {"row": i, "class": c, "cost": float(cost[i])}
     out["first"] = cls(first)
     out["chosen"] = cls(chosen)
