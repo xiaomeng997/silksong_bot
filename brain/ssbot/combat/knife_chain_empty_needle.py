@@ -105,23 +105,48 @@ def _sweeps(boxes):
     return np.column_stack((np.minimum(b[:-1,:2],b[1:,:2]),np.maximum(b[:-1,2:],b[1:,2:])))
 
 
-def reach_problem(boxes,rendered_boxes,rays,rams,terrain):
+def _terrain_rows(terrain,shared=None):
+    """(_row_boxes(terrain), all rows stacked, h, v): once per terrain object within one caller's `shared` dict (an admission
+    call: one tick, one terrain), else computed."""
+    key=('terrain_rows',id(terrain))
+    if shared is not None and key in shared and shared[key][0] is terrain:
+        return shared[key][1]
+    hr,vr,sr=_row_boxes(terrain)
+    out=((hr,vr,sr),np.vstack((hr,vr,sr)),np.asarray(terrain.hseg,float).reshape(-1,3),np.asarray(terrain.vseg,float).reshape(-1,3))
+    if shared is not None:
+        shared[key]=(terrain,out)
+    return out
+
+
+def reach_problem(boxes,rendered_boxes,rays,rams,terrain,shared=None):
     """The terrain a flight could act through that the measured pure branch excludes (None: none). Only rows that are
     certainly out of reach are ignored: the needle's ray band (rays: every frame it can still be thrown, both poses)
     meeting any row - a wall, ledge or slope it could hook; then any slope row meeting a swept body box of either pose
     (boxes / rendered_boxes, frame to frame), a ray band or a ram box (rams). No hook, cling or motion on a slope is
-    modelled here: a reachable slope rejects."""
-    hr,vr,sr=_row_boxes(terrain)
-    if _meets(rays,np.vstack((hr,vr,sr))).any():
+    modelled here: a reachable slope rejects. shared (seq 392, optional): the caller's per-call dict - the rays' two
+    answers (any row, any slope) are kept per exact ray bytes, the terrain rows per terrain object; the sweeps and
+    rams are always checked here; same reasons, same order."""
+    (hr,vr,sr),allrows,_h,_v=_terrain_rows(terrain,shared)
+    ra=np.asarray(rays,float).reshape(-1,4)
+    key=None if shared is None else ('rays',ra.tobytes())
+    if key is not None and key in shared:
+        ray_rows,ray_slopes=shared[key]
+    else:
+        ray_rows=bool(_meets(ra,allrows).any())
+        ray_slopes=bool(len(sr)) and bool(len(ra)) and bool(_meets(ra,sr).any())
+        if key is not None:
+            shared[key]=(ray_rows,ray_slopes)
+    if ray_rows:
         return 'empty needle ray meets terrain'
     if len(sr):
-        regions=[_sweeps(boxes),_sweeps(rendered_boxes)]+[np.asarray(x,float).reshape(-1,4) for x in (rays,rams) if len(x)]
-        if _meets(np.vstack(regions),sr).any():
+        regions=[_sweeps(boxes),_sweeps(rendered_boxes)]+[np.asarray(rams,float).reshape(-1,4)] if len(rams) else \
+            [_sweeps(boxes),_sweeps(rendered_boxes)]
+        if ray_slopes or _meets(np.vstack(regions),sr).any():
             return 'empty needle sloped terrain in reach'
     return None
 
 
-def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=0,p=None):
+def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=0,p=None,shared=None):
     """Why a flight is not the measured pure branch, None when it is: physical / rendered pivots from P (index 0 = P,
     as far as the caller's path goes), the Catch catch_shift frames off the measured one (a derived branch). A different
     FSM successor only; this is not external-hazard admission. The frame checks are the original ones, in the same order
@@ -131,10 +156,23 @@ def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=
     rendered_boxes=_boxes(rendered,p)
     # The ray can be evaluated before Throw enters. Both physical and rendered
     # poses must be empty for the current observed bodies, through that prefix.
-    for j in range(throw+1):
-        for hb in (boxes[j],rendered_boxes[j]):
-            if first_ray_body(hb.tolist(),d,bodies) is not None:
-                return 'empty needle would hook an observed body'
+    # shared (seq 392): the answer is kept per exact input (both poses' boxes 0 .. throw, d, throw, the bodies) for the
+    # caller's other branches with the same pre-throw segment; the first branch computes it as before (an exception
+    # from first_ray_body still raises there, at the same frame).
+    key=None
+    if shared is not None:
+        key=('pre_throw_ray',int(d),int(throw),np.ascontiguousarray(boxes[:throw+1]).tobytes(),
+             np.ascontiguousarray(rendered_boxes[:throw+1]).tobytes(),
+             tuple((i,None if b is None else tuple(float(v) for v in b)) for i,b in bodies))
+    if key is not None and key in shared:
+        hooked=shared[key]
+    else:
+        hooked=any(first_ray_body(hb.tolist(),d,bodies) is not None for j in range(throw+1)
+                   for hb in (boxes[j],rendered_boxes[j]))
+        if key is not None:
+            shared[key]=hooked
+    if hooked:
+        return 'empty needle would hook an observed body'
     dash=H2.CLAW_DASH_F+throw-H2.CLAW_THROW_F
     catch=H2.CLAW_CATCH_F+throw-H2.CLAW_THROW_F+catch_shift
     # Frame j = 1 .. n-1 (row j-1), all frames at once; the first frame with a problem wins and, within it, the order of
@@ -149,7 +187,7 @@ def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=
                          np.maximum(phys[:-1,0],phys[1:,0])+max(0.,3*d),np.maximum(phys[:-1,1],phys[1:,1])+.45))
     contact=_strict_any(sw,bb)
     rammed=on&_strict_any(ram,bb)
-    h=np.asarray(terrain.hseg,float).reshape(-1,3);v=np.asarray(terrain.vseg,float).reshape(-1,3)
+    _rows,_all,h,v=_terrain_rows(terrain,shared)
     touch=(((sw[:,None,1]<=h[None,:,0])&(h[None,:,0]<=sw[:,None,3])&(sw[:,None,0]<h[None,:,2])&(sw[:,None,2]>h[None,:,1])).any(1)
            |((sw[:,None,0]<=v[None,:,0])&(v[None,:,0]<=sw[:,None,2])&(sw[:,None,1]<v[None,:,2])&(sw[:,None,3]>v[None,:,1])).any(1))
     bad=contact|rammed|touch
@@ -158,7 +196,7 @@ def _branch_problem(physical,rendered,bodies,d,throw,params,terrain,catch_shift=
         return ('empty needle body contact is outside pure branch' if contact[k] else
                 'empty needle ram successor is unmeasured' if rammed[k] else 'empty needle touches terrain')
     rays=[_ray_band(hb,d) for j in range(throw+1) for hb in (boxes[j],rendered_boxes[j])]
-    return reach_problem(boxes,rendered_boxes,rays,ram[on],terrain)
+    return reach_problem(boxes,rendered_boxes,rays,ram[on],terrain,shared=shared)
 
 
 def _strict_any(a,b):

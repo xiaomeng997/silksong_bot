@@ -345,7 +345,7 @@ def test_the_height_domain_is_checked_item_by_item_on_this_state():
     idle["fsms"][0]["state"] = "Idle"
     bad = {"state Idle outside the height domain": idle,
            "clock 22 at or past the raw maximum 22 of Evade Scuttle": evader(t=22 / 60),
-           "not standing (body bottom over the floor or a vertical speed)": evader(bottom=3.4),
+           "not standing (body bottom off the floor by more than GROUND_TOL, or a vertical speed)": evader(bottom=3.4),
            "Evade Scuttle not at 15 u/s away from its facing": evader(vx=-15.),
            "Slam Recover frame 0 within the clock tolerance (hammer tail)": clapper(8, "Slam Recover", 1 / 60, 21.325, flip=True)}
     for why, e in bad.items():
@@ -358,45 +358,93 @@ def test_the_height_domain_is_checked_item_by_item_on_this_state():
     assert routes is None and why == "body route unknown for 9 and its empirical height holds only to index 36"
 
 
+def _bits(*ns):
+    names = K.cstate_names()
+    v = [0, 0]
+    for n in ns:
+        i = names.index(n)
+        v[i >> 6] |= 1 << (i & 63)
+    return v
+
+
+ALLIES = [{"kind": "npc", "name": "Garmond Fighter", "state": "Dormant"}, {"kind": "npc", "name": "Shakra Fighter", "state": "Away"}]
+
+
+def _hero(**kw):
+    """The bout 35 F104247 hero fields the gate reads: facingRight + falling, Wanderer, no tool, the silk skill FSM Idle."""
+    return {"cstate": _bits("facingRight", "falling"), "crest": "Wanderer", "tools": [None] * 7, "tools_extra": 0,
+            "spell": ["Idle", 10.1], **kw}
+
+
+def _raws(f0=90, f1=100, **kw):
+    return {g: {"f": g, "ev": [], "allies": [dict(a) for a in ALLIES], **kw} for g in range(f0, f1 + 1)}
+
+
+KEYLOG = SimpleNamespace(actual={1: [[50, 52]], 0: [[40, 60]]}, act_on={21: 95})      # attacks and jumps only: no effect key
+
+
 def test_pending_attacks_and_missing_evidence_reject_the_research_path():
     sim = scene(vy=0.)
-    names = K.cstate_names()
-
-    def bits(*ns):
-        v = [0, 0]
-        for n in ns:
-            i = names.index(n)
-            v[i >> 6] |= 1 << (i & 63)
-        return v
-    clean = {"cstate": bits("facingRight", "falling")}               # the b35 F104247 bits
-    raws = {g: {"f": g, "ev": []} for g in range(90, 101)}
-    assert R.pending_attack(sim, clean, raws, 100, {9}) == (True, None)
-    assert R.pending_attack(sim, {"cstate": bits("falling", "attacking")}, raws, 100, {9})[1] == "her attack under way (attacking)"
-    assert R.pending_attack(sim, {}, raws, 100, {9})[1] == "her cstate unknown"
+    raws = _raws()
+    ok = R.pending_attack(sim, _hero(), raws, 100, {9}, keylog=KEYLOG)
+    assert ok == (True, None)
+    why = lambda **kw: R.pending_attack(kw.pop("sim", sim), kw.pop("hero", _hero()), kw.pop("raws", raws), 100, {9},
+                                        keylog=kw.pop("keylog", KEYLOG))[1]   # noqa: E731
+    assert why(hero=_hero(cstate=_bits("falling", "attacking"))) == "her effect under way (attacking)"
+    for bit in ("casting", "parrying", "isToolThrowing", "needolinPlayingMemory", "focusing"):
+        assert why(hero=_hero(cstate=_bits("falling", bit))) == f"her effect under way ({bit})"
+    assert why(hero={}) == "her cstate unknown"
+    assert why(hero=_hero(crest="Reaper")) == "crest 'Reaper': its attack effects are not verified here"
+    assert why(hero=_hero(tools=["Straight Pin"] + [None] * 6)).startswith("a tool equipped")
+    assert why(hero=_hero(tools=None)).startswith("a tool equipped")
+    assert why(hero=_hero(spell=["Cast", 0.1])) == "the silk skill FSM not in Idle (Cast)"
+    assert why(hero=_hero(spell=None)) == "the silk skill FSM not in Idle (unknown)"
+    assert why(keylog=None) == "the episode's latched input history unknown"
+    assert why(keylog=SimpleNamespace(actual={5: [[10, 30]]}, act_on={})) == "the needolin latched this episode (its effects are not observed)"
+    assert why(keylog=SimpleNamespace(actual={}, act_on={6: 99})) == "the quickcast latched this episode (its effects are not observed)"
     s2 = scene(vy=0.)
     s2.prefix[0] = K.B_ATTACK
-    assert R.pending_attack(s2, clean, raws, 100, {9})[1] == "an attack key in flight"
+    assert why(sim=s2) == "an attack or effect key in flight"
+    s2n = scene(vy=0.)
+    s2n.prefix[0] = R.B_NEEDOLIN
+    assert why(sim=s2n) == "an attack or effect key in flight"
     s3 = scene(vy=0.)
     s3.start[K.AQ] = 0.
-    assert R.pending_attack(s3, clean, raws, 100, {9})[1] == "the model start has an attack queued"
+    assert why(sim=s3) == "the model start has an attack queued"
     s4 = scene(vy=0.)
     s4.hold.latched[0, K.B_ATTACK.bit_length() - 1] = True
-    assert R.pending_attack(s4, clean, raws, 100, {9})[1] == "an attack key in the hold filter"
+    assert why(sim=s4) == "an attack or effect key in the hold filter"
     gap = dict(raws)
     del gap[95]
-    assert "frame 95 not seen" in R.pending_attack(sim, clean, gap, 100, {9})[1]
-    hit = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 9, "attack": "Nail"}}]}}
-    assert R.pending_attack(sim, clean, hit, 100, {9})[1].startswith("a hit on 9 at 97")
-    other = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 77}}]}}
-    assert R.pending_attack(sim, clean, other, 100, {9}) == (True, None)     # a hit on a body not observed here
-    frz = {**raws, 99: {"f": 99, "ev": [{"k": "freeze", "f": 99, "d": {}}]}}
-    assert R.pending_attack(sim, clean, frz, 100, {9})[1] == "a freeze at 99"
-    old = {**raws, 89: {"f": 89, "ev": [{"k": "hit", "f": 89, "d": {"ent": 9}}]}}
-    assert R.pending_attack(sim, clean, old, 100, {9}) == (True, None)       # older than RECENT_F frames
+    assert "frame 95 not seen" in why(raws=gap)
+    noal = {**raws, 96: {"f": 96, "ev": []}}
+    assert why(raws=noal) == "the allies of frame 96 unknown"
+    fight = {**raws, 97: {"f": 97, "ev": [], "allies": [{"name": "Garmond Fighter", "state": "Attack"}]}}
+    assert why(raws=fight) == "ally Garmond Fighter in Attack at 97 (an ally's attacks are not observed)"
+    hit = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 9, "attack": "Nail"}}], "allies": ALLIES}}
+    assert why(raws=hit).startswith("a hit on 9 at 97")
+    other = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 77}}], "allies": ALLIES}}
+    assert why(raws=other) is None                                   # a hit on a body not observed here
+    frz = {**raws, 99: {"f": 99, "ev": [{"k": "freeze", "f": 99, "d": {}}], "allies": ALLIES}}
+    assert why(raws=frz) == "a freeze at 99"
+    old = {**raws, 89: {"f": 89, "ev": [{"k": "hit", "f": 89, "d": {"ent": 9}}], "allies": ALLIES}}
+    assert why(raws=old) is None                                     # older than RECENT_F frames
     e = evader()
-    ok, why, _ = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e],
-                         research={"pending": (False, "an attack key in flight")})
-    assert not ok and why == "pending attack / effect: an attack key in flight"
+    ok, why_, _ = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e],
+                          research={"pending": (False, "an attack or effect key in flight")})
+    assert not ok and why_ == "pending attack / effect: an attack or effect key in flight"
+
+
+def test_the_height_domain_rejects_a_body_already_over_the_threshold_and_needs_both_sided_standing():
+    tall = evader()
+    tall["colliders"][0]["verts_world"] = [28.75, 3.015, 32.34, 3.015, 32.34, 8.5, 28.75, 8.5]       # Root's probe: top 8.50
+    assert R.height_support(tall) == (None, "the observed body top 8.500 over the empirical height 8.40")
+    assert R.height_support(evader(bottom=3.004))[0] == 42                                        # bout 35: 0.011 under the floor
+    sunk = R.height_support(evader(bottom=2.99))
+    assert sunk == (None, "not standing (body bottom off the floor by more than GROUND_TOL, or a vertical speed)")
+    flat = evader()
+    flat["colliders"][0]["verts_world"] = [30., 3.015, 30., 3.015, 30., 6.9, 30., 6.9]             # zero width
+    assert R.height_support(flat) == (None, "body box malformed")
 
 
 R_IID, R_TGT, R_SRC = -2258876, 3877540, 3877546
@@ -421,8 +469,8 @@ class C1Env:
         self.rec = R.Recorder()
 
     def tick(self, f, own="plan", name="MOVE(R)+runR8_stop", ground=False, outside=False, clappers=None, circles=((28.07, False),),
-             room="Hang_04", events=(), target=8):
-        x, y = float(self.sim.start[K.PX]), float(self.sim.start[K.PY])
+             room="Hang_04", events=(), target=8, hx=None):
+        x, y = float(self.sim.start[K.PX]) if hx is None else hx, float(self.sim.start[K.PY])
         hb = [x - .25, 10.6, x + .25, 12.7] if outside else [x - .25, y - 1.553, x + .25, y + .532]
         ents = list(clappers if clappers is not None else [_cl(R_TGT, 33.), _cl(R_SRC, 21.3)])
         for n, (cx, lit) in enumerate(circles):
@@ -517,3 +565,70 @@ def test_c1_record_clears_on_an_unseen_target_and_on_a_record_gap(monkeypatch):
     env2 = C1Env(monkeypatch)
     env2.failure()
     assert env2.tick(106)["c1"]["reason"] == "a record gap over MAX_GAP frames"
+
+
+
+def test_c1_entry_reads_its_own_bound_circle_never_a_later_one(monkeypatch):
+    # Root's probe (seq 392 C): the bound circle (iid R_IID, first 100, cx 28.07) stays; she flies to x 45 where a later circle
+    # (another object) has appeared: the common gate sees a circle around her, the C1 entry must not
+    env = C1Env(monkeypatch)
+    env.failure()
+    env.calls.clear()
+    b = env.tick(102, hx=45., circles=((28.07, False), (45.0, False)))
+    assert b["c1"]["status"] == "live" and b["gate"]["inside_not_lit"]
+    assert not b["c1_entry"] and b["c1_gate"] == {"inside_bound": False, "bound_not_lit": True, "why": None}
+    assert env.calls == [] and b["research"] is None
+    c = env.tick(103, circles=((28.07, False), (45.0, False)))                 # back inside its own circle: the entry again
+    assert c["c1_entry"] and c["c1_gate"]["inside_bound"] and env.calls == [True]
+
+
+def _variant_branches(sim, d=1, bodies=()):
+    out = []
+    for throw in (9, 8):
+        for late in (0, 1, 2):
+            N._pure_branch, orig = (lambda *a, **k: None), N._pure_branch
+            try:
+                made = N.compile_empty(sim, 0., list(bodies), d, throw_frames=throw, activation_delay=late)
+            finally:
+                N._pure_branch = orig
+            out += [(throw, cs, rr, phys, rend) for cs, rr, phys, rend in R.branch_paths(made, sim, d, throw)]
+    return out
+
+
+@pytest.mark.parametrize("case", ["clean", "body_in_ray", "slope_in_reach", "row_in_ray"])
+def test_the_pre_throw_dedup_gives_every_branch_the_same_answer(case):
+    sim = scene(vy=0., y=12.1 if case != "body_in_ray" else 9.0)
+    bodies = []
+    if case == "body_in_ray":
+        bodies = [(9, (33.0, 8.0, 36.0, 12.0))]
+    if case in ("slope_in_reach", "row_in_ray"):
+        x = float(sim.start[K.PX])
+        t_ = K.Terrain2D.from_boxes([(-100., -10., 100., 3.015)] + ([(x + 6., 11.5, x + 6.5, 12.)] if case == "row_in_ray" else []))
+        if case == "slope_in_reach":
+            t_.slopes = np.array([[x + 4., 11.0, x + 5., 11.5]])
+        sim.terrain = t_
+    p = sim.params.vector()
+    shared, plain, deduped = {}, [], []
+    for throw, cs, rr, phys, rend in _variant_branches(sim, 1, bodies):
+        plain.append(N._branch_problem(phys, rend, bodies, 1, throw, sim.params, sim.terrain, catch_shift=cs, p=p))
+        deduped.append(N._branch_problem(phys, rend, bodies, 1, throw, sim.params, sim.terrain, catch_shift=cs, p=p, shared=shared))
+    assert deduped == plain and len(plain) == 48
+    if case != "clean":
+        assert any(w is not None for w in plain), case                       # the case does reach its check
+
+
+def test_the_dedup_cuts_the_repeated_pre_throw_work_and_keeps_the_admission(monkeypatch):
+    calls = {"ray": 0, "meets": 0}
+    ray, meets = N.first_ray_body, N._meets
+    monkeypatch.setattr(N, "first_ray_body", lambda *a, **k: (calls.__setitem__("ray", calls["ray"] + 1) or ray(*a, **k)))
+    monkeypatch.setattr(N, "_meets", lambda *a, **k: (calls.__setitem__("meets", calls["meets"] + 1) or meets(*a, **k)))
+    e = evader()
+    got = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e], research=PEND_OK)
+    with_dedup = dict(calls)
+    calls.update(ray=0, meets=0)
+    bp = N._branch_problem
+    monkeypatch.setattr(N, "_branch_problem", lambda *a, **k: bp(*a, **{**k, "shared": None}))   # the old per-branch work
+    ref = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e], research=PEND_OK)
+    assert got[:2] == ref[:2] and got[2]["height_margin"] == ref[2]["height_margin"] and got[2]["branches"] == ref[2]["branches"] == 48
+    # pre-throw ray: 6 variants x (throw + 1) frames x 2 poses once each (plus compile_empty's own measured branch), not x 8
+    assert with_dedup["ray"] < calls["ray"] / 4 and with_dedup["meets"] < calls["meets"], (with_dedup, dict(calls))

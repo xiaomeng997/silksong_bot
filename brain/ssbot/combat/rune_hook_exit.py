@@ -76,14 +76,20 @@ HEIGHT_THRESHOLD = HEIGHT_REF + HEIGHT_MARGIN
 HEIGHT_STATES = ("Slam Recover", "Evade Scuttle")    # the domain: their state, standing, clock and walls are checked item by item
 FLOOR_Y = 3.015                 # map2.clapper FLOOR (the floor's top)
 WALL_L, WALL_R = 14.01, 48.99   # map2.clapper's wall faces
-GROUND_TOL = 0.02               # a body bottom this little over the floor still stands; a lifted body is outside the domain
+GROUND_TOL = 0.02               # standing: the body bottom within this of the floor, either way (bout 35 F104247: 3.004 vs 3.015)
 EVADE_U_S = 15.0                # Control FSM Evade Scuttle: SetVelocityByScale 15 (away from its facing)
 ESCAPE_RAY = 6.0                # Evade Scuttle's entry RayCast from Centre (offset 0) behind it: a wall this near -> Escape Jump
 RECENT_F = 10                   # STATE frames back from f whose hit / freeze events count as an effect still under way (Recoil
 #                                 0.15 s = 9 frames, + 1)
-ATTACK_KEYS = K.B_ATTACK | K.B_QUICKCAST
 ATTACK_BITS = ("nailCharging", "attacking", "altAttack", "upAttacking", "downAttacking", "downSpikeAntic", "downSpiking",
                "parryAttack", "isScrewDownAttacking")
+EFFECT_BITS = ATTACK_BITS + ("casting", "castRecoiling", "spellQuake", "focusing", "parrying", "isToolThrowing",
+                             "needolinPlayingMemory")
+B_NEEDOLIN = 1 << 5             # ssbot.ipc.framing.BUTTONS "needolin" (Control FSM Idle / Walk: CheckHeroPerformanceRegion -> SING)
+EFFECT_KEYS = K.B_ATTACK | B_NEEDOLIN | K.B_QUICKCAST
+LIFECYCLE_KEYS = ((5, "needolin"), (6, "quickcast"))     # button bits never latched this episode (KeyPlanLog actual / act_on)
+CREST = "Wanderer"              # the crest whose attacks the kinematics model holds (seq 392 A: the verified loadout)
+ALLY_PASSIVE = ("Dormant", "Away")   # the Forum allies' FSM states seen idle (any other: their attacks are unknown)
 RESEARCH_LABEL = "would / candidate: model-feasible under the empirical height condition; not an admission, never sent"
 
 
@@ -105,7 +111,8 @@ def _raw_durations() -> dict:
 def height_support(e, E=E_IDX):
     """(valid_to, info) or (None, why): the research path's empirical height condition for one observed Clapper without a complete
     fitted route. Its DOMAIN, each item checked on this STATE (else None, unknown): the Control state in HEIGHT_STATES with a finite
-    clock under the state's raw maximum; standing (body bottom within GROUND_TOL of the floor, no vertical speed); a Slam Recover
+    clock under the state's raw maximum; a well-formed observed body box whose top is already at or under HEIGHT_THRESHOLD (seq 392
+    B); standing (body bottom within GROUND_TOL of the floor either way, no vertical speed); a Slam Recover
     still (vx 0) and past its frame 0 even with one frame of clock tolerance (no hammer tail of its own), an Evade Scuttle at
     EVADE_U_S away from its facing; and every root x it can reach in E + 1 frames ESCAPE_RAY or more from BOTH walls (no Escape
     Jump at a later Evade entry, whichever way it then faces - a single-point exclusion re-checked on every STATE, never
@@ -143,8 +150,14 @@ def height_support(e, E=E_IDX):
         b = None
     if b is None or len(b) != 4 or not np.isfinite(np.asarray(b, float)).all():
         return None, "body box unknown"
-    if float(b[1]) > FLOOR_Y + GROUND_TOL or float(vel[1]) != 0.0:
-        return None, "not standing (body bottom over the floor or a vertical speed)"
+    if not (float(b[0]) < float(b[2]) and float(b[1]) < float(b[3])):
+        return None, "body box malformed"
+    # seq 392 B: the observed body itself must already be under the condition (never a later frame only), and standing is
+    # two-sided: the bottom within GROUND_TOL of the floor either way (a body sunk or lifted further is outside the domain)
+    if float(b[3]) > HEIGHT_THRESHOLD:
+        return None, f"the observed body top {float(b[3]):.3f} over the empirical height {HEIGHT_THRESHOLD:.2f}"
+    if abs(float(b[1]) - FLOOR_Y) > GROUND_TOL or float(vel[1]) != 0.0:
+        return None, "not standing (body bottom off the floor by more than GROUND_TOL, or a vertical speed)"
     face = 1 if flip else -1
     x, vx = float(pos[0]), float(vel[0])
     if st == "Slam Recover":
@@ -172,27 +185,52 @@ def height_support(e, E=E_IDX):
     return valid_to, info
 
 
-def pending_attack(sim, hero, raws, f, iids) -> tuple[bool, str | None]:
-    """(True, None) when what is observed shows none of her attacks still to land and no attack effect on a Clapper still under way
-    (seq 391's actual gate for the research path), else (False, why); missing evidence is unknown (False), never "none":
-      her cstate (STATE hero.cstate against kinematics.cstate_names) with none of ATTACK_BITS;
-      the model start with no attack running or queued (ATTACKING 0, AQ < 0, QQ < 0);
-      no ATTACK_KEYS in the in-flight prefix or in the hold filter (latched, desired, pending);
-      the STATE of every frame f - RECENT_F .. f seen (raws: the policy's frame history) with its event list, none with a hit on an
-      observed Clapper (iids), a hit whose target is unknown, or a freeze."""
+def pending_attack(sim, hero, raws, f, iids, keylog=None) -> tuple[bool, str | None]:
+    """(True, None) when what is observed shows none of her attacks or effects still to land and no attack effect on a Clapper still
+    under way (seq 391's actual gate for the research path, seq 392 A), else (False, why); missing evidence is unknown (False), never
+    "none". The oracle exports no object of hers or of an ally (the entities are health managers and sources that hurt HER), so an
+    effect already thrown cannot be seen; the gate instead requires a LOADOUT AND INPUT LIFECYCLE that cannot leave one, checked on
+    this tick's evidence:
+      her cstate (STATE hero.cstate against kinematics.cstate_names) with none of EFFECT_BITS (the nail's colliders act only while
+      cState.attacking; casting, the parry, a tool throw, binding and a Needolin performance have their own bits);
+      the crest CREST (the one whose attacks the kinematics model holds), no tool equipped (hero.tools all empty, tools_extra 0)
+      and the silk skill FSM (hero.spell) in Idle;
+      the episode's latched input history (keylog, the policy's KeyPlanLog fed with every STATE's act.mask) without any
+      LIFECYCLE_KEYS press (the Needolin - the Clapper's Idle / Walk answer a performance with SING - and the quick cast), so no
+      effect of theirs can still be out;
+      the model start with no attack running or queued (ATTACKING 0, AQ < 0, QQ < 0) and no EFFECT_KEYS in the in-flight prefix
+      or in the hold filter (latched, desired, pending);
+      the STATE of every frame f - RECENT_F .. f seen (raws: the policy's frame history) with its event list and its allies list:
+      every ally in ALLY_PASSIVE (an ally's attacks are not observed either), no hit on an observed Clapper (iids), no hit whose
+      target is unknown, no freeze."""
     from . import rune_life
     names = K.cstate_names()
-    cs = (hero or {}).get("cstate")
+    hero = hero if isinstance(hero, dict) else {}
+    cs = hero.get("cstate")
     if not isinstance(cs, (list, tuple)) or not cs or any(type(v) is not int for v in cs):
         return False, "her cstate unknown"
-    for n in ATTACK_BITS:
+    for n in EFFECT_BITS:
         if n not in names:
             return False, f"cstate bit {n} unknown"
         i = names.index(n)
         if (i >> 6) >= len(cs):
             return False, "her cstate too short"
         if (int(cs[i >> 6]) >> (i & 63)) & 1:
-            return False, f"her attack under way ({n})"
+            return False, f"her effect under way ({n})"
+    if hero.get("crest") != CREST:
+        return False, f"crest {hero.get('crest')!r}: its attack effects are not verified here"
+    tools = hero.get("tools")
+    if not isinstance(tools, (list, tuple)) or any(x is not None for x in tools) or hero.get("tools_extra") != 0:
+        return False, "a tool equipped, or the tool slots unknown (tool effects are not observed)"
+    spell = hero.get("spell")
+    if not isinstance(spell, (list, tuple)) or not spell or spell[0] != "Idle":
+        return False, f"the silk skill FSM not in Idle ({spell[0] if isinstance(spell, (list, tuple)) and spell else 'unknown'})"
+    actual, on = getattr(keylog, "actual", None), getattr(keylog, "act_on", None)
+    if not isinstance(actual, dict) or not isinstance(on, dict):
+        return False, "the episode's latched input history unknown"
+    for b, name in LIFECYCLE_KEYS:
+        if actual.get(b) or b in on:
+            return False, f"the {name} latched this episode (its effects are not observed)"
     S = np.asarray(sim.start, float).reshape(-1)
     if S[K.ATTACKING] > 0:
         return False, "the model start is attacking"
@@ -200,14 +238,21 @@ def pending_attack(sim, hero, raws, f, iids) -> tuple[bool, str | None]:
         return False, "the model start has an attack queued"
     if S[K.QQ] >= 0:
         return False, "the model start has a quick cast queued"
-    if any(int(m) & ATTACK_KEYS for m in np.asarray(sim.prefix).reshape(-1)):
-        return False, "an attack key in flight"
-    if rune_life._held_bits(sim.hold) & ATTACK_KEYS:
-        return False, "an attack key in the hold filter"
+    if any(int(m) & EFFECT_KEYS for m in np.asarray(sim.prefix).reshape(-1)):
+        return False, "an attack or effect key in flight"
+    if rune_life._held_bits(sim.hold) & EFFECT_KEYS:
+        return False, "an attack or effect key in the hold filter"
     for g in range(int(f) - RECENT_F, int(f) + 1):
         st = (raws or {}).get(g)
         if not isinstance(st, dict) or not isinstance(st.get("ev"), list):
             return False, f"the STATE of frame {g} not seen or without its event list (events unknown)"
+        allies = st.get("allies")
+        if not isinstance(allies, list):
+            return False, f"the allies of frame {g} unknown"
+        for a in allies:
+            if not isinstance(a, dict) or a.get("state") not in ALLY_PASSIVE:
+                nm, sa = (a.get("name"), a.get("state")) if isinstance(a, dict) else (None, None)
+                return False, f"ally {nm} in {sa} at {g} (an ally's attacks are not observed)"
         for ev in st.get("ev") or ():
             if not isinstance(ev, dict):
                 return False, f"an unreadable event at {g}"
@@ -470,6 +515,9 @@ def admit(sim, game, bodies, d, fplan, rows, E=E_IDX, enemies=(), research=None)
     rows = np.asarray(rows, np.float64).reshape(-1, 6) if rows is not None and len(rows) else np.zeros((0, 6))
     big = rows[rows[:, 3] > 5.0]
     p = sim.params.vector()
+    # seq 392: one dict for this call (one tick, one terrain): knife_chain_empty_needle keeps there the static answers of a variant's
+    # identical pre-throw segment (per exact input bytes) and the terrain's rows; every branch-specific check still runs per branch
+    shared = {}
     fulls, meta = [], []
     for throw in (9, 8):
         for late in (0, 1, 2):
@@ -488,7 +536,7 @@ def admit(sim, game, bodies, d, fplan, rows, E=E_IDX, enemies=(), research=None)
             lead_rend = np.asarray(made.path.pos[:P_idx + 1], float)
             for cs, rr, phys, rend in branch_paths(made, sim, d, throw, E):
                 btag = f"{tag} catch {cs:+d} control P+{rr}"
-                why = EN._branch_problem(phys, rend, bodies, d, throw, sim.params, sim.terrain, catch_shift=cs, p=p)
+                why = EN._branch_problem(phys, rend, bodies, d, throw, sim.params, sim.terrain, catch_shift=cs, p=p, shared=shared)
                 if why is not None:
                     return False, f"{btag}: {why}", info
                 lanes = {"physical": np.vstack((lead_phys, phys[1:])), "rendered": np.vstack((lead_rend, rend[1:]))}
@@ -677,6 +725,23 @@ class Recorder:
             return "the bound circle lit"
         return None
 
+    def _c1_circle_gate(self, pol, box):
+        """The live record's own circle on this tick (seq 392 C): {"inside_bound": her box meets ITS octagon, "bound_not_lit": its lit
+        window still ahead and not lit} from the rune ledger's record of the same object iid AND generation (first frame); anything
+        else (another generation, a missing record, an unknown box) is not inside - never another circle of the rows."""
+        from . import rune_life
+        circ = self.c1["circle"]
+        ledger = getattr(pol, "rune_life", None)
+        c = (getattr(ledger, "recs", None) or {}).get(circ["iid"])
+        if c is None or int(c.first_f) != circ["first_f"] or box is None or len(box) != 4:
+            return {"inside_bound": False, "bound_not_lit": False, "why": "the bound circle or her box unknown on this tick"}
+        t = float(getattr(ledger, "t", 0.0))
+        on_k = math.floor(max(0.0, (c.t0 + rune_life.ON_F / 60.0 - t) * 60.0) + 1e-6)     # RuneCircles.rows' on_k, as the gate reads it
+        not_lit = bool(not c.lit and c.t_on is None and not c.burst and on_k > 0)
+        inside = bool(rune_life._over_big(np.array([box[0]]), np.array([box[1]]), np.array([box[2]]), np.array([box[3]]),
+                                          c.cx, c.cy, rune_life.RUNE_R)[0])
+        return {"inside_bound": inside, "bound_not_lit": not_lit, "why": None}
+
     def _c1_step(self, pol, s, f, fo, own, gate, chain_now, h1, events, chain, clappers):
         out = None
         if self.c1 is not None:
@@ -746,7 +811,12 @@ class Recorder:
                "c1": c1}
         first = next((k for k, v in gate.items() if not v), None)
         entry = first is None and (n1 or h1 or h2)
-        c1_entry = first is None and c1["status"] == "live"
+        # seq 392 C: the C1 entry reads its OWN bound circle (object iid and generation) for "inside, not lit", never any circle of
+        # the rows; the other gate items are the common ones. N1 / H1 / H2 keep the common gate as it was.
+        c1_gate = self._c1_circle_gate(pol, box) if c1["status"] == "live" and self.c1 is not None else None
+        c1_entry = bool(c1_gate is not None and all(gate[k] for k in ("plan", "air", "harpoon", "silk", "input"))
+                        and c1_gate["inside_bound"] and c1_gate["bound_not_lit"])
+        rec["c1_gate"] = c1_gate
         rec["entry"] = entry
         rec["c1_entry"] = c1_entry
         rec["admission"] = None
@@ -771,7 +841,7 @@ class Recorder:
                 first = why
             try:
                 sim = air_chain.ChainSim(S0, prefix, copy.deepcopy(hold), pol.params, pol.terrain, fo, f)
-                pend = pending_attack(sim, h, getattr(pol, "raw", None), f, {i for i, _ in bodies})
+                pend = pending_attack(sim, h, getattr(pol, "raw", None), f, {i for i, _ in bodies}, keylog=getattr(pol, "keylog", None))
                 ok, why, info = admit(sim, ws.stamp.t_game_s, bodies, d, fplan, rows, enemies=clappers, research={"pending": pend})
             except Exception as e:          # an analysis failure is a rejection, never a crash of the tick
                 ok, why, info = False, "research error: " + type(e).__name__ + ": " + str(e)[:120], {}
