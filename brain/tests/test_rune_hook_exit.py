@@ -238,7 +238,8 @@ def _tick(rec, pol, sim, f, states, own, name, target, forced=False):
 @pytest.fixture
 def recorder_env(monkeypatch):
     calls = []
-    monkeypatch.setattr(R, "admit", lambda *a, **k: (calls.append(a) or (True, None, {"variants": 6, "branches": 48})))
+    # (seq 391: the research path calls admit too, with research=...; the strict admission is the call without it)
+    monkeypatch.setattr(R, "admit", lambda *a, **k: (calls.append((a, k)) or (True, None, {"variants": 6, "branches": 48})))
     sim = scene(vy=0.)
     rows = np.array([[-1., float(sim.start[K.PX]), 3.342, 7.187, 40., 50.]])   # she is inside a not-lit big circle
     return sim, _stub_policy(sim, rows), calls
@@ -252,7 +253,9 @@ def test_a_real_chain_hand_back_keeps_the_failure_events_identity_never_the_focu
     pol.chain_native.events.append({"event": "transfer_no_witness_handback", "episode": 34, "frame": 101, "target": 3877540,
                                     "reason": "no fitted still pose in Evade Scuttle", "owner": "B2 recovery hands back"})
     b = _tick(rec, pol, sim, 101, {8: "Idle"}, "plan", "MOVE(R)+runR8_stop", 8)
-    assert b["h1"] and b["h1_cause"] == "chain failure event" and b["entry"] and len(calls) == 1
+    assert b["h1"] and b["h1_cause"] == "chain failure event" and b["entry"]
+    assert [("research" in k) for _a, k in calls] == [False, True]       # the strict admission once, the research path once
+    assert b["research"]["label"].startswith("would / candidate") and b["sent"] is False
     ev = b["h1_events"][0]
     assert ev["event"] == "transfer_no_witness_handback" and ev["target"] == 3877540 and ev["episode"] == 34 and ev["frame"] == 101
     assert b["h1_failure_targets"] == [3877540]            # the event's own target, not the focus 8
@@ -296,3 +299,221 @@ def test_mode_one_is_refused_and_zero_is_off(monkeypatch):
     assert importlib.reload(R).RECORD
     monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "0")
     assert not importlib.reload(R).RECORD
+
+
+# ------------------------------------------------- seq 391: the record-only research path (empirical height) and the C1 record
+
+from ssbot.combat import rune_life as RL  # noqa: E402
+
+PEND_OK = {"pending": (True, None)}
+
+
+def evader(iid=9, x=31., t=0.1, vx=15., flip=False, bottom=3.015, vy=0.):
+    """An Evade Scuttle Clapper (SetVelocityByScale 15 away from its facing: flipX False faces -x, so vx +15), its Idle-sized box."""
+    face = 1 if flip else -1
+    xa, xb = x + face * 2.252, x - face * 1.341
+    lo, hi = min(xa, xb), max(xa, xb)
+    return {"iid": iid, "type_key": "Song Heavy Sentry", "hp": 100, "pos": [x, 7.449], "vel": [vx, vy], "flipX": flip,
+            "is_dead": False, "fsms": [{"name": "Control", "state": "Evade Scuttle", "t": t}],
+            "colliders": [{"name": "Song Heavy Sentry Body", "enabled": True,
+                           "verts_world": [lo, bottom, hi, bottom, hi, bottom + 3.901, lo, bottom + 3.901]}]}
+
+
+def test_research_is_explicit_and_the_default_admission_keeps_its_strict_domain():
+    e = evader()
+    ok, why, _ = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e])
+    assert not ok and why == "body route unknown for 9 (Evade Scuttle)"            # the default call: unchanged
+    ok, why, info = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e], research=PEND_OK)
+    assert ok, why
+    assert info["supports"] == {"9": "empirical height"} and info["heights"]["9"]["valid_to"] >= R.E_IDX
+    assert info["height_margin"] > 0 and info["pending_attack"] == "none observed" and info["branches"] == 48
+    assert R.HEIGHT_REF == 7.90 and R.HEIGHT_MARGIN == 0.50 and R.HEIGHT_THRESHOLD == pytest.approx(8.40)
+
+
+def test_the_empirical_height_rejects_a_flight_that_comes_down_to_it():
+    e = evader()
+    ok, why, info = R.admit(scene(vy=0., y=10.12), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e], research=PEND_OK)
+    assert not ok and "empirical height" in why and info["height_margin"] <= 0, why
+
+
+def test_the_height_domain_is_checked_item_by_item_on_this_state():
+    v, info = R.height_support(evader())
+    assert v == (20 - 6 - 1) + 29 and info["take_off_from"] == 43 and info["state"] == "Evade Scuttle"   # raw minima, k 6
+    v, info = R.height_support(clapper(8, "Slam Recover", 2 / 60, 21.325, flip=True))
+    assert v == (14 - 2 - 1) + 29 and info["wall_u"] == pytest.approx(7.315)
+    idle = evader()
+    idle["fsms"][0]["state"] = "Idle"
+    bad = {"state Idle outside the height domain": idle,
+           "clock 22 at or past the raw maximum 22 of Evade Scuttle": evader(t=22 / 60),
+           "not standing (body bottom over the floor or a vertical speed)": evader(bottom=3.4),
+           "Evade Scuttle not at 15 u/s away from its facing": evader(vx=-15.),
+           "Slam Recover frame 0 within the clock tolerance (hammer tail)": clapper(8, "Slam Recover", 1 / 60, 21.325, flip=True)}
+    for why, e in bad.items():
+        assert R.height_support(e) == (None, why), why
+    assert R.height_support(evader(vx=18.))[1] == "Evade Scuttle not at 15 u/s away from its facing"
+    assert R.height_support(evader(vy=-1.))[1].startswith("not standing")
+    assert R.height_support(evader(x=40.))[1].startswith("a wall")                          # it scuttles to x 49.5 by index 37
+    assert R.height_support(clapper(8, "Slam Recover", 2 / 60, 19.5, flip=True))[1].startswith("a wall")
+    routes, heights, why = R.research_supports([evader(t=12 / 60)])
+    assert routes is None and why == "body route unknown for 9 and its empirical height holds only to index 36"
+
+
+def test_pending_attacks_and_missing_evidence_reject_the_research_path():
+    sim = scene(vy=0.)
+    names = K.cstate_names()
+
+    def bits(*ns):
+        v = [0, 0]
+        for n in ns:
+            i = names.index(n)
+            v[i >> 6] |= 1 << (i & 63)
+        return v
+    clean = {"cstate": bits("facingRight", "falling")}               # the b35 F104247 bits
+    raws = {g: {"f": g, "ev": []} for g in range(90, 101)}
+    assert R.pending_attack(sim, clean, raws, 100, {9}) == (True, None)
+    assert R.pending_attack(sim, {"cstate": bits("falling", "attacking")}, raws, 100, {9})[1] == "her attack under way (attacking)"
+    assert R.pending_attack(sim, {}, raws, 100, {9})[1] == "her cstate unknown"
+    s2 = scene(vy=0.)
+    s2.prefix[0] = K.B_ATTACK
+    assert R.pending_attack(s2, clean, raws, 100, {9})[1] == "an attack key in flight"
+    s3 = scene(vy=0.)
+    s3.start[K.AQ] = 0.
+    assert R.pending_attack(s3, clean, raws, 100, {9})[1] == "the model start has an attack queued"
+    s4 = scene(vy=0.)
+    s4.hold.latched[0, K.B_ATTACK.bit_length() - 1] = True
+    assert R.pending_attack(s4, clean, raws, 100, {9})[1] == "an attack key in the hold filter"
+    gap = dict(raws)
+    del gap[95]
+    assert "frame 95 not seen" in R.pending_attack(sim, clean, gap, 100, {9})[1]
+    hit = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 9, "attack": "Nail"}}]}}
+    assert R.pending_attack(sim, clean, hit, 100, {9})[1].startswith("a hit on 9 at 97")
+    other = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 77}}]}}
+    assert R.pending_attack(sim, clean, other, 100, {9}) == (True, None)     # a hit on a body not observed here
+    frz = {**raws, 99: {"f": 99, "ev": [{"k": "freeze", "f": 99, "d": {}}]}}
+    assert R.pending_attack(sim, clean, frz, 100, {9})[1] == "a freeze at 99"
+    old = {**raws, 89: {"f": 89, "ev": [{"k": "hit", "f": 89, "d": {"ent": 9}}]}}
+    assert R.pending_attack(sim, clean, old, 100, {9}) == (True, None)       # older than RECENT_F frames
+    e = evader()
+    ok, why, _ = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e],
+                         research={"pending": (False, "an attack key in flight")})
+    assert not ok and why == "pending attack / effect: an attack key in flight"
+
+
+R_IID, R_TGT, R_SRC = -2258876, 3877540, 3877546
+
+
+def _cl(iid, x, state="Idle", dead=False):
+    return {"iid": iid, "type_key": "Song Heavy Sentry", "hp": 0 if dead else 100, "pos": [x, 7.449], "is_dead": dead,
+            "fsms": [{"name": "Control", "state": state, "t": 0.1}], "colliders": []}
+
+
+class C1Env:
+    """The Recorder over a stub policy with a REAL rune ledger (rune_life.RuneCircles) and a chain event deque, admit stubbed."""
+
+    def __init__(self, monkeypatch):
+        self.calls = []
+        monkeypatch.setattr(R, "admit", lambda *a, **k: (self.calls.append("research" in k)
+                                                         or (True, None, {"variants": 6, "branches": 48})))
+        self.sim = scene(vy=0.)
+        self.ledger = RL.RuneCircles()
+        self.pol = SimpleNamespace(params=self.sim.params, terrain=self.sim.terrain, _rune_rows=lambda: self.ledger.rows(),
+                                   chain_native=SimpleNamespace(events=deque(maxlen=200), episode=0), rune_life=self.ledger, raw={})
+        self.rec = R.Recorder()
+
+    def tick(self, f, own="plan", name="MOVE(R)+runR8_stop", ground=False, outside=False, clappers=None, circles=((28.07, False),),
+             room="Hang_04", events=(), target=8):
+        x, y = float(self.sim.start[K.PX]), float(self.sim.start[K.PY])
+        hb = [x - .25, 10.6, x + .25, 12.7] if outside else [x - .25, y - 1.553, x + .25, y + .532]
+        ents = list(clappers if clappers is not None else [_cl(R_TGT, 33.), _cl(R_SRC, 21.3)])
+        for n, (cx, lit) in enumerate(circles):
+            r = RL.RUNE_R
+            ents.append({"iid": R_IID - n, "type_key": "damager", "pos": [cx, 3.34],
+                         "colliders": [{"enabled": lit,
+                                        "verts_world": [cx - r, 3.34 - r, cx + r, 3.34 - r, cx + r, 3.34 + r, cx - r, 3.34 + r]}]})
+        s = {"f": f, "room": room, "ev": [], "ents": ents,
+             "hero": {"box": hb, "can": {"harpoon": True}, "silk": 3, "hero_accepting_input": True, "facing": 1, "cstate": [1025, 0]}}
+        self.pol.raw[f] = s
+        self.ledger.update(f, s, f / 60.)
+        for e in events:
+            self.pol.chain_native.events.append({"episode": 0, **e})
+        ws = SimpleNamespace(hero=SimpleNamespace(contact=SimpleNamespace(v="GROUND" if ground else "AIR")),
+                             stamp=SimpleNamespace(t_game_s=f / 60.))
+        return self.rec.record(self.pol, s, f, f, ws, self.sim.start, self.sim.prefix, self.sim.hold,
+                               SimpleNamespace(name=name, forced_risk=False), Forecast(), SimpleNamespace(target=target), own)
+
+    def failure(self, exposure=True, run_move=True, run_target=R_TGT, circles=((28.07, False),)):
+        """Ticks 100 (the chain's Run owns the keys) and 101 (its failure hand-back, outside the circle), as bout 35's 104240-104241."""
+        ev = [{"event": "b2_selected", "frame": 100, "move": {"target_iid": run_target, "antic_frame": 84, "family": "RUNE_TRANSFER"}}]
+        self.tick(100, name="CHAIN B2 active rune_transfer.air", events=ev if run_move else (), circles=circles)
+        ev = [{"event": "transfer_no_witness_handback", "frame": 101, "target": R_TGT, "reason": "no fitted still pose in Evade Scuttle",
+               "owner": "B2 recovery hands back; failure responsibility kept"},
+              {"event": "b2_recovery", "frame": 101, "reason": "transfer air run over its target with no strike witness"}]
+        if exposure:
+            ev.append({"event": "b2_failure_exposure", "frame": 101,
+                       "exposure": {"move": {"target_iid": R_SRC, "antic_frame": 43, "family": "CC_JUMP_CAST"}, "origin": 84,
+                                    "failed_frame": 101, "minimum_through": 131, "end_status": "unknown"}})
+        ev.append({"event": "chain_interrupted", "frame": 101, "link": "rune_transfer.air", "reason": "no strike witness"})
+        return self.tick(101, events=ev, outside=True, circles=circles)
+
+
+def test_c1_record_binds_the_real_failure_identity_and_lives_outside_the_circle(monkeypatch):
+    env = C1Env(monkeypatch)
+    a = env.failure()
+    assert a["h1"] and a["c1"]["status"] == "live" and not a["c1_entry"] and not a["gate"]["inside_not_lit"]
+    idn = a["c1"]["record"]
+    assert idn["failure"]["frame"] == 101 and idn["failure"]["target"] == R_TGT and idn["failure"]["episode"] == 0   # not the focus 8
+    assert idn["run_move"] == {"target_iid": R_TGT, "antic_frame": 84, "family": "RUNE_TRANSFER", "frame": 100}
+    assert idn["source_move"] == {"target_iid": R_SRC, "antic_frame": 43, "family": "CC_JUMP_CAST"} and idn["minimum_through"] == 131
+    assert idn["circle"]["iid"] == R_IID and idn["circle"]["first_f"] == 100
+    env.calls.clear()
+    b = env.tick(102)                                                      # back inside the circle: the C1 entry (no N1 / H1 / H2)
+    assert b["c1"]["status"] == "live" and b["c1_entry"] and not b["entry"] and b["admission"] is None
+    assert env.calls == [True] and b["research"]["label"].startswith("would / candidate") and b["sent"] is False
+    c = env.tick(103, clappers=[_cl(R_TGT, 33.), _cl(R_SRC, 21.3, dead=True)])
+    assert c["c1"]["status"] == "live"                                     # the circle's source owner dying does not clear it
+
+
+@pytest.mark.parametrize("kw,why", [
+    ({"exposure": False}, "no same-frame failure exposure with its source move"),
+    ({"run_move": False}, "the Run's own move not observed on the chain's last ticks"),
+    ({"run_target": 999}, "the failure target is not the Run move's target"),
+    ({"circles": ((28.07, False), (40.0, False))}, "big circle association not unique"),
+    ({"circles": ()}, "no big circle alive at the failure")])
+def test_c1_without_its_identity_or_a_unique_circle_is_unknown(monkeypatch, kw, why):
+    env = C1Env(monkeypatch)
+    a = env.failure(**kw)
+    assert a["h1"] and a["c1"] == {"status": "unknown", "reason": why, "record": None}
+    assert env.tick(102)["c1"]["status"] == "none"
+
+
+@pytest.mark.parametrize("tick,why", [
+    ({"ground": True}, "landing (the air phase ended)"),
+    ({"name": "CHAIN B2 active rune_transfer.air"}, "a chain link is the final key owner again"),
+    ({"own": "chain"}, "a chain link is the final key owner again"),
+    ({"own": "sup"}, "a supervisor or script owner (sup)"),
+    ({"own": "slam"}, "a supervisor or script owner (slam)"),
+    ({"clappers": [_cl(R_TGT, 33., dead=True), _cl(R_SRC, 21.3)]}, "the failure target dead"),
+    ({"circles": ((28.07, True),)}, "the bound circle lit"),
+    ({"circles": ()}, "the bound circle not listed"),
+    ({"circles": ((30.0, False),)}, "the bound circle's object re-created (a new generation)"),
+    ({"room": "Hang_05"}, "scene changed")])
+def test_c1_record_clears(monkeypatch, tick, why):
+    env = C1Env(monkeypatch)
+    assert env.failure()["c1"]["status"] == "live"
+    assert env.tick(102)["c1"]["status"] == "live"
+    c = env.tick(103, **tick)
+    assert c["c1"]["status"] == "cleared" and c["c1"]["reason"] == why and c["c1"]["record"]["failure"]["frame"] == 101
+    assert not c["c1_entry"]
+    d = env.tick(104)                                                      # a cleared record never comes back (a chain that
+    assert d["c1"]["status"] != "live" and d["c1"]["record"] is None      # held the keys hands back again: H1, unknown cause)
+
+
+def test_c1_record_clears_on_an_unseen_target_and_on_a_record_gap(monkeypatch):
+    env = C1Env(monkeypatch)
+    env.failure()
+    for f in (102, 103, 104):
+        assert env.tick(f, clappers=[_cl(R_SRC, 21.3)])["c1"]["status"] == "live"       # unseen 1 .. 3 frames: still live
+    assert env.tick(105, clappers=[_cl(R_SRC, 21.3)])["c1"]["reason"] == "the failure target unseen over MAX_GAP frames"
+    env2 = C1Env(monkeypatch)
+    env2.failure()
+    assert env2.tick(106)["c1"]["reason"] == "a record gap over MAX_GAP frames"
