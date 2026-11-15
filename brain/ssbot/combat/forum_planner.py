@@ -167,6 +167,13 @@ PC_ON = os.environ.get("SSBOT_FORUM_PC", "1") != "0"        # 0: FORCED_RISK wit
 # Task 182 seq 309's filter (FORCED_RISK under a visible hammer: no new umbrella while a row without one is allowed) is off since seq 312
 # #385 (the person 11-10, Sol seq 328: "那就给关上吧"); the slam's danger, its occupancy and risk scores stay. 1: back on (offline comparisons)
 SLAM_NO_NEW_GLIDE = os.environ.get("SSBOT_FORUM_SLAM_NO_NEW_GLIDE", "0").strip() == "1"
+# Task 182 seq 380 (#444, default off): the committed jump hold (jump_until, DESIGN 3.5.4: a pressed jump's hold keeps its
+# rise) is no umbrella's float. 1: a tick that begins in the umbrella (the start state's MODE is GLIDE) ends the old hold
+# before any row is built or reads it (_glide_hold_tick_start), so it neither binds nor comes back when she leaves the
+# umbrella; a chosen J whose press finds her still in the umbrella after the prefix, or opens one, commits no hold
+# (_glide_press); a jump - also one pressed after the prefix left the umbrella - commits its hold as before. No row, rank
+# key, ban or umbrella score is added or removed. 0: 8e34fb6c.
+GLIDE_JUMP_HOLD = os.environ.get("SSBOT_FORUM_GLIDE_JUMP_HOLD", "0").strip() == "1"
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 # Track A of the Forum push 2 (2026-10-08, the person's decisions and tactics; forum.md §26): each behind a token of
 # SSBOT_FORUM_TA ("+" or "," separated; "all": every one; empty, the default: none, everything as before):
@@ -601,6 +608,10 @@ class EnvelopeAudit:
     kp_sw_gone: int = 0           #   switches: the template's row is gone (contact / certified press lost, move over)
     kp_sw_unsafe: int = 0         #   switches: a check failed (S, hazards, the committed hold, the macro margin)
     kp_sw_escape: int = 0         #   switches: the escape check moved the choice off it
+    glide_ticks: int = 0          # SSBOT_FORUM_GLIDE_JUMP_HOLD (seq 380): ticks that began in the umbrella (GLIDE)
+    glide_hold_cleared: int = 0   #   of them, a committed jump hold still running was ended
+    glide_hold_skipped: int = 0   # chosen J presses in the umbrella or opening one: no hold committed
+    glide_hold_armed_after: int = 0   # a jump's hold committed on a tick that began in the umbrella (the prefix left it)
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -1348,6 +1359,58 @@ def _age_commitments(planner, d: int) -> None:
             planner.macro_until -= gap
     if last is None or d > last:
         planner._clock_d = d
+
+
+def _glide_hold_tick_start(planner, start) -> None:
+    """SSBOT_FORUM_GLIDE_JUMP_HOLD, at the start of a tick (after _age_commitments, before any row is built or the hold is
+    read: the special rows' hold_rem, the down-slash templates' jr, the ATTACK rows' J, keep / hf_keep, the value prune,
+    the arming): with the umbrella observed (the start state's MODE is GLIDE) the committed jump hold ends
+    (jump_until = -1), so it can neither bind this tick nor come back when she leaves the umbrella. The tick's note
+    (last_info "glide_hold": glide, cleared = the frames the ended hold had left) starts here."""
+    planner._glide_hold_note = None
+    if int(np.asarray(start).reshape(kin.K, -1)[kin.MODE, 0]) != M_GLIDE:
+        return
+    rem = int(getattr(planner, "jump_until", -1)) - int(getattr(planner, "ticks", 0))
+    planner.jump_until = -1
+    planner._glide_hold_note = {"glide": True, "cleared": max(rem, 0)}
+    a = getattr(planner, "audit", None)
+    if a is not None:
+        a.glide_ticks += 1
+        a.glide_hold_cleared += int(rem > 0)
+
+
+def _glide_press(modes, i: int, P: int, mode0: int) -> str | None:
+    """SSBOT_FORUM_GLIDE_JUMP_HOLD: the chosen row's J on its first new frame (mask P) is no jump's press when the prefix
+    leaves her in the umbrella ("in": modes[i, P], the state before that mask) or the press opens one ("opens":
+    modes[i, P + 1]; kin_jit's start_glide acts in the press's own step). None: a jump, or neither (the hold as before).
+    A chosen command without a rollout row (BIND): the observed start mode."""
+    if modes is None or not 0 <= i < len(modes):
+        return "in" if mode0 == M_GLIDE else None
+    if modes[i, P] == M_GLIDE:
+        return "in"
+    if P + 1 < modes.shape[1] and modes[i, P + 1] == M_GLIDE:
+        return "opens"
+    return None
+
+
+def _glide_hold_arm_note(planner, skip: str | None, n: int) -> None:
+    """SSBOT_FORUM_GLIDE_JUMP_HOLD: the arming's part of the tick's note - a chosen J press that committed no hold (skip
+    "in" / "opens", n the hold it would have had), or a jump's hold committed on a tick that began in the umbrella (the
+    prefix left it: armed = n). An ordinary jump outside the umbrella adds nothing."""
+    note = getattr(planner, "_glide_hold_note", None)
+    if skip is None and note is None:
+        return
+    note = dict(note or {"glide": False, "cleared": 0})
+    a = getattr(planner, "audit", None)
+    if skip is not None:
+        note.update(skip=skip, n=int(n))
+        if a is not None:
+            a.glide_hold_skipped += 1
+    else:
+        note["armed"] = int(n)
+        if a is not None:
+            a.glide_hold_armed_after += 1
+    planner._glide_hold_note = note
 
 
 def _note_plan_frame(planner, before, d: int) -> None:
@@ -4006,6 +4069,8 @@ class ForumPlanner(Planner):
                                     if _observed_slam.ENABLED and getattr(self, "measurement_enabled", False) else None)
         d_frame = _plan_frame(ws, prefix)         # Task 182 seq 278: frames skipped since the last tick age the
         _age_commitments(self, d_frame)           # committed jump hold / macro; prev_d follows prev_cmd below
+        if GLIDE_JUMP_HOLD:
+            _glide_hold_tick_start(self, start)   # seq 380: an observed umbrella ends the jump hold before any row
         prev0 = getattr(self, "prev_cmd", None)
         chain = getattr(self, "chain_native", None)
         if not getattr(chain, "b2", False) or getattr(chain, "arm", "A") != "B":
@@ -5636,7 +5701,12 @@ class ForumPlanner(Planner):
         if len(sel_cmd) and sel_cmd[0] & B_JUMP:
             if self.jump_until <= self.ticks:
                 held = sel_cmd & B_JUMP
-                self.jump_until = self.ticks + (int(np.argmin(held != 0)) if (held == 0).any() else len(held))
+                n_hold = int(np.argmin(held != 0)) if (held == 0).any() else len(held)
+                gp_ = _glide_press(r1.mode, int(res.idx), P, mode0) if GLIDE_JUMP_HOLD else None
+                if gp_ is None:
+                    self.jump_until = self.ticks + n_hold
+                if GLIDE_JUMP_HOLD:
+                    _glide_hold_arm_note(self, gp_, n_hold)
         else:
             self.jump_until = -1
         if _is_macro(res.name):
@@ -5762,6 +5832,8 @@ class ForumPlanner(Planner):
                           "esc": esc_info or None}
         if forced_slam is not None:
             self.last_info["forced_slam"] = forced_slam
+        if GLIDE_JUMP_HOLD and getattr(self, "_glide_hold_note", None) is not None:
+            self.last_info["glide_hold"] = dict(self._glide_hold_note)     # seq 380: this tick's umbrella / hold note
         if stay_info is not None:
             # Task 182 seq 280 - 282: over_stay's promotion this tick (orig: the choice it started from; skip: why it did not
             # run; rows / safe: the scan's candidates and those safe on both branches; cands / checked: the candidates ahead
