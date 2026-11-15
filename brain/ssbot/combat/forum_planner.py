@@ -174,6 +174,13 @@ SLAM_NO_NEW_GLIDE = os.environ.get("SSBOT_FORUM_SLAM_NO_NEW_GLIDE", "0").strip()
 # (_glide_press); a jump - also one pressed after the prefix left the umbrella - commits its hold as before. No row, rank
 # key, ban or umbrella score is added or removed. 0: 8e34fb6c.
 GLIDE_JUMP_HOLD = os.environ.get("SSBOT_FORUM_GLIDE_JUMP_HOLD", "0").strip() == "1"
+# Task 182 seq 383 (#448, default off; the person 11-15: an umbrella in danger is charged, never banned): with a hammer
+# in sight (visible_slam_units), a safe row whose first truly controllable key opens the umbrella, or keeps the free
+# float going when a release was possible, pays GLIDE_DANGER_C landed hits as its own term of v2_nh
+# (_glide_danger_cost). Raw nh, safe / sel / ok, every key above v2_nh, NOGLIDE, the jump hold, FORCED_RISK and the
+# old SLAM_NO_NEW_GLIDE (0) stay as they are; an opening later in a row is only recorded. 0: d6a36644.
+GLIDE_DANGER = os.environ.get("SSBOT_FORUM_GLIDE_DANGER", "0").strip() == "1"
+GLIDE_DANGER_C = 1.0              # the candidate price (landed-hit units): an engineering price, not a measured risk
 T_ENV = int(os.environ.get("SSBOT_FORUM_T", "36") or 36)     # the horizon arm (§4.5: T 36 / 48)
 # Track A of the Forum push 2 (2026-10-08, the person's decisions and tactics; forum.md §26): each behind a token of
 # SSBOT_FORUM_TA ("+" or "," separated; "all": every one; empty, the default: none, everything as before):
@@ -612,6 +619,11 @@ class EnvelopeAudit:
     glide_hold_cleared: int = 0   #   of them, a committed jump hold still running was ended
     glide_hold_skipped: int = 0   # chosen J presses in the umbrella or opening one: no hold committed
     glide_hold_armed_after: int = 0   # a jump's hold committed on a tick that began in the umbrella (the prefix left it)
+    gd_ticks: int = 0             # SSBOT_FORUM_GLIDE_DANGER (seq 383): ticks with a visible hammer and a safe row
+    gd_unknown: int = 0           #   of them, the prefix end could not be classified: no cost that tick
+    gd_rows: int = 0              #   safe rows charged (the first key opens the umbrella / keeps a free float)
+    gd_chosen: int = 0            #   ticks whose final choice was a charged row
+    gd_ms: float = 0.0            #   the term's own time (the prefix rollout and the classes)
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -1411,6 +1423,100 @@ def _glide_hold_arm_note(planner, skip: str | None, n: int) -> None:
         if a is not None:
             a.glide_hold_armed_after += 1
     planner._glide_hold_note = note
+
+
+def _glide_danger_cost(planner, f, start, P: int, full, latched, r1, safe, params, terrain):
+    """SSBOT_FORUM_GLIDE_DANGER (seq 383): this tick's dangerous-umbrella cost ([N] landed hits; None: nothing charged,
+    no window or an unknown prefix end) and its note (None: no window). Only with a hammer in sight
+    (visible_slam_units) and only on the first truly controllable key, mask P (the first after the in-flight prefix,
+    which is no new decision):
+      - opens: the prefix leaves her out of the umbrella and the row's own J on mask P - asked for (full) and let
+        through by the hold filter (latched) - puts her in it on the next state (kin_jit's start_glide acts in the
+        press's own step);
+      - floats: the prefix leaves her in a free phase of the umbrella (Float Idle 2 / Bump 5, where a release goes to
+        the Deflate at once) and the row asks for J and keeps it on mask P with no dash press there.
+    Both need a release to be possible on mask P (some row's latched mask P has no J): a J the filter keeps on every row
+    (its minimum press) is no choice. No cost: an opening only later in the row ("later", recorded only), a J the
+    filter keeps on a row that did not ask for it ("forced_j"), the Antic / Inflate / Deflate phases (a release changes
+    nothing there), true jumps. A row keeping J with a dash press on mask P in a free phase leans on the model's
+    umbrella dash cancel (kin_jit, the unfixed suspect): "unknown", no cost. The prefix end is the state after one
+    rollout of the shared prefix (P frames, one row); a prefix that leaves the umbrella on a dash press (the same
+    suspect), or rows whose mode at P disagrees with it, make the whole tick "unknown": no cost."""
+    units = visible_slam_units(f)
+    planner._gd_rows = None
+    if not units:
+        return None, None
+    t0 = time.perf_counter()
+    N = len(safe)
+    md = r1.mode
+    if P > 0:
+        st = kin.rollout(start, np.ascontiguousarray(latched[:1, :P]), params, terrain, threads=1).final
+    else:
+        st = np.asarray(start).reshape(kin.K, -1)
+    mP, phP = int(st[kin.MODE, 0]), float(st[kin.PHASE, 0])
+    note = {"window": [int(u) for u in units], "mode": mP, "phase": phP}
+    a = getattr(planner, "audit", None)
+    if a is not None:
+        a.gd_ticks += 1
+    unknown = None
+    if md.shape[1] <= P + 1 or not (md[:, P] == mP).all():
+        unknown = "rows disagree with the prefix end"
+    else:
+        for t in range(P):
+            if md[0, t] == M_GLIDE and md[0, t + 1] != M_GLIDE and int(latched[0, t]) & B_DASH:
+                unknown = "the prefix left the umbrella on a dash"
+                break
+    if unknown is not None:
+        note["unknown"] = unknown
+        if a is not None:
+            a.gd_unknown += 1
+            a.gd_ms += (time.perf_counter() - t0) * 1e3
+        return None, note
+    req = (full[:, P] & B_JUMP) != 0
+    lat = (latched[:, P] & B_JUMP) != 0
+    dash = (latched[:, P] & B_DASH) != 0
+    free_choice = bool((~lat).any())
+    z = np.zeros(N, bool)
+    opens, floats, later, unk = z, z, z, z
+    if mP != M_GLIDE:
+        opens = req & lat & (md[:, P + 1] == M_GLIDE) & free_choice
+        if md.shape[1] > P + 2:
+            later = (md[:, P + 1] != M_GLIDE) & (md[:, P + 2:] == M_GLIDE).any(axis=1)
+    elif phP in (2.0, 5.0) and free_choice:
+        floats = req & lat & ~dash
+        unk = req & lat & dash
+    forced = lat & ~req
+    charged = (opens | floats) & safe
+    cost = np.where(charged, GLIDE_DANGER_C, 0.0)
+    note.update(opens=int((opens & safe).sum()), floats=int((floats & safe).sum()), later=int((later & safe).sum()),
+                forced_j=int((forced & safe).sum()), unknown_rows=int((unk & safe).sum()), charged=int(charged.sum()))
+    planner._gd_rows = (opens, floats, later, forced, unk, cost)
+    if a is not None:
+        a.gd_rows += int(charged.sum())
+        a.gd_ms += (time.perf_counter() - t0) * 1e3
+    return (cost if charged.any() else None), note
+
+
+def _glide_danger_final(planner, note: dict, first, chosen: int) -> dict:
+    """SSBOT_FORUM_GLIDE_DANGER: the tick's note with the class and cost of the order's head (before the escape step,
+    the tail and the promotion) and of the final choice (res.idx) - the two as they are, not a counterfactual winner."""
+    out = dict(note)
+    rows = getattr(planner, "_gd_rows", None)
+
+    def cls(i):
+        if rows is None or i is None or not 0 <= int(i) < len(rows[0]):
+            return None
+        opens, floats, later, forced, unk, cost = rows
+        i = int(i)
+        c = ("opens" if opens[i] else "floats" if floats[i] else "unknown" if unk[i] else "later" if later[i]
+             else "forced_j" if forced[i] else "none")
+        return {"row": i, "class": c, "cost": float(cost[i])}
+    out["first"] = cls(first)
+    out["chosen"] = cls(chosen)
+    a = getattr(planner, "audit", None)
+    if a is not None and out["chosen"] is not None and out["chosen"]["cost"] > 0:
+        a.gd_chosen += 1
+    return out
 
 
 def _note_plan_frame(planner, before, d: int) -> None:
@@ -4986,6 +5092,7 @@ class ForumPlanner(Planner):
             bind_res = self._bind(ws, start, hold, prefix, f, ctx)
         forced = not safe.any() and not (bind_res is not None and bind_res[0])
         forced_slam = None                    # Task 182 seq 309: FORCED_RISK under a visible hammer (last_info, the decision log)
+        gd_note = gd_first = None             # seq 383 (SSBOT_FORUM_GLIDE_DANGER): the umbrella cost's note, the order's head
         Pc = np.zeros(N)
         t_c = np.full(N, T1, np.int64)
         sk_n = np.zeros(N, np.int64)          # the "seen" keys (0 on every row otherwise: the order is unchanged)
@@ -5216,6 +5323,13 @@ class ForumPlanner(Planner):
                     v2_nh = v2_nh + np.where(safe & corner, 1000.0, 0.0)
                     self.audit.v2_corner_rows += int((safe & corner).sum())
                     dg_corner = corner
+            if v2 and GLIDE_DANGER and safe.any():
+                # seq 383 (SSBOT_FORUM_GLIDE_DANGER): the dangerous-umbrella cost, its own term added once to the
+                # landed-hit layer (raw nh, the scene / readiness / corner terms, safe / sel / ok and every key above
+                # stay as they are); the primary order and over_stay's re-sort (v2_nh - cand_m) both read this v2_nh
+                gd_cost, gd_note = _glide_danger_cost(self, f, start, P, full, latched, r1, safe, params, self.terrain)
+                if gd_cost is not None:
+                    v2_nh = v2_nh + gd_cost
             v2_ff = np.where(safe & (sc["first_f"] >= 0), sc["first_f"], np.where(safe, T1, 0)) if v2                 else np.zeros(N, np.int64)
             nohit_ = getattr(prefs, "no_hit", None) or ()
             if v2 and nohit_ and len(sc.get("targets") or ()):
@@ -5337,6 +5451,7 @@ class ForumPlanner(Planner):
             order = np.lexsort(order_keys(J, v2_nh, nd_))
             order = order[sel[order]]
             i = int(order[0])
+            gd_first = i
             tail_ok = None
             carried = cont and i == N - 1 and self.prev_tail_ok
             # the selection's inputs, by reference (offline audits: tools/forum_tv_audit; not logged)
@@ -5834,6 +5949,9 @@ class ForumPlanner(Planner):
             self.last_info["forced_slam"] = forced_slam
         if GLIDE_JUMP_HOLD and getattr(self, "_glide_hold_note", None) is not None:
             self.last_info["glide_hold"] = dict(self._glide_hold_note)     # seq 380: this tick's umbrella / hold note
+        if GLIDE_DANGER and gd_note is not None:
+            # seq 383: the umbrella cost's note - window, classes, charged rows, the order head's and the final choice's
+            self.last_info["glide_danger"] = _glide_danger_final(self, gd_note, gd_first, int(res.idx))
         if stay_info is not None:
             # Task 182 seq 280 - 282: over_stay's promotion this tick (orig: the choice it started from; skip: why it did not
             # run; rows / safe: the scan's candidates and those safe on both branches; cands / checked: the candidates ahead

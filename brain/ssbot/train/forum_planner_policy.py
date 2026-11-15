@@ -2020,7 +2020,8 @@ class ForumPlannerPolicy(PlannerPolicy):
                "fi": {k: li.get(k) for k in ("posture", "N", "stage1_pass", "enveloped", "hitfx", "react", "capped",
                                              "cut", "overrun", "tv", "seen", "seen_cf", "esc", "forced_slam")}
                | ({"v2_return": li["v2_return"]} if li.get("v2_return") is not None else {})
-               | ({"glide_hold": li["glide_hold"]} if li.get("glide_hold") is not None else {}),
+               | ({"glide_hold": li["glide_hold"]} if li.get("glide_hold") is not None else {})
+               | ({"glide_danger": li["glide_danger"]} if li.get("glide_danger") is not None else {}),
                "pocket": self.tac.last.get("pocket_veto"), "goal": self.tac.last.get("goal"),
                "goal_why": self.tac.last.get("goal_why"), "goal_t_end": self.tac.last.get("goal_t_end"),
                "entry_attack": self.tac.last.get("entry_attack"),
