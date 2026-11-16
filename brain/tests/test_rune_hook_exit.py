@@ -376,38 +376,57 @@ def _hero(**kw):
             "spell": ["Idle", 10.1], **kw}
 
 
-def _raws(f0=90, f1=100, **kw):
-    return {g: {"f": g, "ev": [], "allies": [dict(a) for a in ALLIES], **kw} for g in range(f0, f1 + 1)}
+def _st(g, mask=0, cs=None, dt=1 / 60, allies=None, ev=None, **hero):
+    """One STATE as the lifecycle reads it: the latched mask, the scaled dt, her cstate and loadout, the allies, the events."""
+    h = {"cstate": _bits("facingRight", "falling") if cs is None else cs, "crest": "Wanderer", "tools": [None] * 7, "tools_extra": 0,
+         **hero}
+    return {"f": g, "ev": [] if ev is None else ev, "dt": dt, "act": {"mask": mask}, "hero": h,
+            "allies": [dict(a) for a in ALLIES] if allies is None else allies}
 
 
-KEYLOG = SimpleNamespace(actual={1: [[50, 52]], 0: [[40, 60]]}, act_on={21: 95})      # attacks and jumps only: no effect key
+def _episode(f0=40, f1=100, presses=((50, 3), (60, 3)), **over):
+    """Frames f0 .. f1 at 60 fps: attack presses (frame, held frames), every other key up; over: {frame: STATE} replacements."""
+    held = {g for p, n in presses for g in range(p, p + n)}
+    st = {g: _st(g, K.B_ATTACK if g in held else 0) for g in range(f0, f1 + 1)}
+    st.update({int(g): s for g, s in over.items()})
+    return st
+
+
+def _life(states, f=100):
+    life = R.Lifecycle()
+    life.feed(states, f)
+    return life
 
 
 def test_pending_attacks_and_missing_evidence_reject_the_research_path():
     sim = scene(vy=0.)
-    raws = _raws()
-    ok = R.pending_attack(sim, _hero(), raws, 100, {9}, keylog=KEYLOG)
-    assert ok == (True, None)
+    raws = _episode()
+    life = _life(raws)
+    assert life.summary() == {"first_f": 40, "last_f": 100, "unknown": None, "violation": None, "last_attack": 60}
+    assert R.pending_attack(sim, _hero(), raws, 100, {9}, life=life, first_tick=40) == (True, None)
     why = lambda **kw: R.pending_attack(kw.pop("sim", sim), kw.pop("hero", _hero()), kw.pop("raws", raws), 100, {9},
-                                        keylog=kw.pop("keylog", KEYLOG))[1]   # noqa: E731
+                                        life=kw.pop("life", life), first_tick=kw.pop("first_tick", 40))[1]   # noqa: E731
     assert why(hero=_hero(cstate=_bits("falling", "attacking"))) == "her effect under way (attacking)"
-    for bit in ("casting", "parrying", "isToolThrowing", "needolinPlayingMemory", "focusing"):
+    for bit in ("casting", "parrying", "isToolThrowing", "needolinPlayingMemory", "focusing", "isBinding"):
         assert why(hero=_hero(cstate=_bits("falling", bit))) == f"her effect under way ({bit})"
     assert why(hero={}) == "her cstate unknown"
     assert why(hero=_hero(crest="Reaper")) == "crest 'Reaper': its attack effects are not verified here"
     assert why(hero=_hero(tools=["Straight Pin"] + [None] * 6)).startswith("a tool equipped")
     assert why(hero=_hero(tools=None)).startswith("a tool equipped")
+    assert why(hero=_hero(tools=[])).startswith("a tool equipped")          # the exporter's unknown (CollectTools cleared it)
     assert why(hero=_hero(spell=["Cast", 0.1])) == "the silk skill FSM not in Idle (Cast)"
     assert why(hero=_hero(spell=None)) == "the silk skill FSM not in Idle (unknown)"
-    assert why(keylog=None) == "the episode's latched input history unknown"
-    assert why(keylog=SimpleNamespace(actual={5: [[10, 30]]}, act_on={})) == "the needolin latched this episode (its effects are not observed)"
-    assert why(keylog=SimpleNamespace(actual={}, act_on={6: 99})) == "the quickcast latched this episode (its effects are not observed)"
+    assert why(life=None) == "the episode's lifecycle history unknown"
+    assert why(first_tick=None) == "the lifecycle history (from 40) does not cover the policy's first tick (None)"
+    assert why(first_tick=39) == "the lifecycle history (from 40) does not cover the policy's first tick (39)"
+    assert why(life=_life(raws, 99)) == "the lifecycle history read to 99, not to this frame"
     s2 = scene(vy=0.)
     s2.prefix[0] = K.B_ATTACK
     assert why(sim=s2) == "an attack or effect key in flight"
-    s2n = scene(vy=0.)
-    s2n.prefix[0] = R.B_NEEDOLIN
-    assert why(sim=s2n) == "an attack or effect key in flight"
+    for b in (R.B_NEEDOLIN, R.B_TAUNT, K.B_QUICKCAST):
+        s2n = scene(vy=0.)
+        s2n.prefix[0] = b
+        assert why(sim=s2n) == "an attack or effect key in flight"
     s3 = scene(vy=0.)
     s3.start[K.AQ] = 0.
     assert why(sim=s3) == "the model start has an attack queued"
@@ -417,22 +436,79 @@ def test_pending_attacks_and_missing_evidence_reject_the_research_path():
     gap = dict(raws)
     del gap[95]
     assert "frame 95 not seen" in why(raws=gap)
-    noal = {**raws, 96: {"f": 96, "ev": []}}
-    assert why(raws=noal) == "the allies of frame 96 unknown"
-    fight = {**raws, 97: {"f": 97, "ev": [], "allies": [{"name": "Garmond Fighter", "state": "Attack"}]}}
-    assert why(raws=fight) == "ally Garmond Fighter in Attack at 97 (an ally's attacks are not observed)"
-    hit = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 9, "attack": "Nail"}}], "allies": ALLIES}}
+    hit = {**raws, 97: _st(97, ev=[{"k": "hit", "f": 97, "d": {"ent": 9, "attack": "Nail"}}])}
     assert why(raws=hit).startswith("a hit on 9 at 97")
-    other = {**raws, 97: {"f": 97, "ev": [{"k": "hit", "f": 97, "d": {"ent": 77}}], "allies": ALLIES}}
+    other = {**raws, 97: _st(97, ev=[{"k": "hit", "f": 97, "d": {"ent": 77}}])}
     assert why(raws=other) is None                                   # a hit on a body not observed here
-    frz = {**raws, 99: {"f": 99, "ev": [{"k": "freeze", "f": 99, "d": {}}], "allies": ALLIES}}
+    assert why(raws={**raws, 97: _st(97, ev=[{"k": "hit", "f": 97, "d": {}}])}) == "a hit with an unknown target at 97"
+    frz = {**raws, 99: _st(99, ev=[{"k": "freeze", "f": 99, "d": {}}])}
     assert why(raws=frz) == "a freeze at 99"
-    old = {**raws, 89: {"f": 89, "ev": [{"k": "hit", "f": 89, "d": {"ent": 9}}], "allies": ALLIES}}
+    old = {**raws, 89: _st(89, ev=[{"k": "hit", "f": 89, "d": {"ent": 9}}])}
     assert why(raws=old) is None                                     # older than RECENT_F frames
     e = evader()
     ok, why_, _ = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e],
                           research={"pending": (False, "an attack or effect key in flight")})
     assert not ok and why_ == "pending attack / effect: an attack or effect key in flight"
+
+
+def test_the_lifecycle_needs_every_frame_and_rejects_unmeasured_effects_for_the_whole_episode():
+    sim = scene(vy=0.)
+
+    def why(states, f=100, first_tick=40):
+        return R.pending_attack(sim, _hero(), states, f, {9}, life=_life(states, f), first_tick=first_tick)[1]
+
+    # every lifecycle key, however early: the Needolin, the quick cast (the silk skills), the taunt (the pre-review's probe)
+    for b, name in R.LIFECYCLE_KEYS:
+        assert why(_episode(**{"45": _st(45, 1 << b)})) == f"the {name} latched at 45 (its effects are not observed)"
+    # a nail charge may have begun: held CHARGE_BEGIN_S of scaled dt (14 frames at 60 fps; 13 are not); a hitch counts in game
+    # time, not frames (the pre-review's 130-frame hold released at f - 2 is far over)
+    assert why(_episode(presses=((50, 13),))) is None
+    assert why(_episode(presses=((50, 14),))).startswith("an attack held 0.233 s by 63 (a nail charge may have begun)")
+    hitch = _episode(presses=((50, 5),), **{"52": _st(52, K.B_ATTACK, dt=0.2)})
+    assert why(hitch).startswith("an attack held 0.233 s by 52")
+    assert why(_episode(presses=((40, 3),))) == ("the attack already held on the history's first frame 40 "
+                                                "(its effects are not observed)")
+    # an attack pressed in a dash / sprint: a crest FSM attack (the dash stab, its RecoilStab) - a bit on the frame before the
+    # press or within the input queue after it; outside that window it is a plain swing
+    dsh = _bits("facingRight", "dashing")
+    assert why(_episode(**{"49": _st(49, cs=dsh)})).startswith("an attack pressed at 50 with a dash / sprint bit at 49")
+    spr = _bits("facingRight", "isSprinting")
+    assert why(_episode(**{"58": _st(58, cs=spr)})).startswith("an attack pressed at 50 with a dash / sprint bit at 58")
+    assert why(_episode(**{"70": _st(70, cs=spr)})).startswith("an attack pressed at 60 with a dash / sprint bit at 70")
+    assert why(_episode(**{"71": _st(71, cs=spr)})) is None                          # 60 + 11: past the input queue
+    assert why(_episode(**{"48": _st(48, cs=dsh)})) is None                          # two frames before the press
+    # the loadout and the allies on every frame, not only the last ten (the pre-review's empty lists count as unknown)
+    assert why(_episode(**{"45": _st(45, crest="Hunter")})) == "crest 'Hunter' at 45 (its effects are not observed)"
+    assert why(_episode(**{"45": _st(45, tools=[])})).startswith("a tool equipped, or the tool slots unknown, at 45")
+    assert why(_episode(**{"45": _st(45, allies=[])})) == "the allies unknown at 45 (its effects are not observed)"
+    fight = _st(45, allies=[{"name": "Garmond Fighter", "state": "Attack"}, ALLIES[1]])
+    assert why(_episode(**{"45": fight})) == "ally Garmond Fighter in Attack at 45 (its effects are not observed)"
+    # the history: a missing frame (a late record, the catch-up limit) or a frame without its mask / dt / cstate is unknown for
+    # the rest of the episode; it must start at or before the policy's first tick
+    gap = _episode()
+    del gap[70]
+    assert why(gap) == "the episode's lifecycle history unknown: frame 70 missing from the history"
+    nomask = _episode(**{"70": {**_st(70), "act": {}}})
+    assert why(nomask) == "the episode's lifecycle history unknown: act.mask, dt or her cstate missing at 70"
+    assert why(_episode(f0=45), first_tick=42).startswith("the lifecycle history (from 45) does not cover")
+    # the measured swings: the last press must be older than SWING_EFFECT_F (queue + collider frames + a hit's recoil)
+    assert R.SWING_EFFECT_F == 30
+    assert why(_episode(presses=((70, 3),))) == "an attack pressed at 70: its swing or a hit's recoil may still be under way"
+    assert why(_episode(presses=((69, 3),))) is None
+
+
+def test_the_recorder_feeds_the_lifecycle_from_the_policy_history_one_frame_at_a_time():
+    life = R.Lifecycle()
+    raw = {g: _st(g) for g in range(88, 101)}                         # the policy's history after the reset: f - 12 .. f
+    life.feed(raw, 100)
+    assert (life.first_f, life.last_f, life.unknown) == (88, 100, None)
+    raw.update({g: _st(g) for g in range(101, 104)})
+    life.feed(raw, 103)
+    life.feed(raw, 103)                                                # a repeated tick reads nothing twice
+    assert (life.last_f, life.unknown) == (103, None)
+    later = {g: _st(g) for g in range(108, 121)}                      # a record 17 frames later: 104 .. 107 were dropped
+    life.feed(later, 120)
+    assert life.unknown == "frame 104 missing from the history" and life.last_f == 120
 
 
 def test_the_height_domain_rejects_a_body_already_over_the_threshold_and_needs_both_sided_standing():
@@ -445,6 +521,12 @@ def test_the_height_domain_rejects_a_body_already_over_the_threshold_and_needs_b
     flat = evader()
     flat["colliders"][0]["verts_world"] = [30., 3.015, 30., 3.015, 30., 6.9, 30., 6.9]             # zero width
     assert R.height_support(flat) == (None, "body box malformed")
+    two = evader()                                                  # the pre-review's probe: a second enabled body box, top 9.2
+    two["colliders"].append({"name": "Song Heavy Sentry Body (2)", "enabled": True,
+                             "verts_world": [29., 3.015, 31., 3.015, 31., 9.2, 29., 9.2]})
+    assert R.height_support(two) == (None, "2 enabled body colliders (the observed body is not one box)")
+    two["colliders"][1]["enabled"] = False
+    assert R.height_support(two)[0] == 42
 
 
 R_IID, R_TGT, R_SRC = -2258876, 3877540, 3877546
@@ -580,6 +662,9 @@ def test_c1_entry_reads_its_own_bound_circle_never_a_later_one(monkeypatch):
     assert env.calls == [] and b["research"] is None
     c = env.tick(103, circles=((28.07, False), (45.0, False)))                 # back inside its own circle: the entry again
     assert c["c1_entry"] and c["c1_gate"]["inside_bound"] and env.calls == [True]
+    env.ledger.t = None                                                         # the pre-review's probe: no clock - unknown,
+    g = env.rec._c1_circle_gate(env.pol, [27.0, 9.0, 27.5, 11.0])               # never an exception inside the tick
+    assert g == {"inside_bound": False, "bound_not_lit": False, "why": "the rune ledger's clock unknown on this tick"}
 
 
 def _variant_branches(sim, d=1, bodies=()):
@@ -632,3 +717,27 @@ def test_the_dedup_cuts_the_repeated_pre_throw_work_and_keeps_the_admission(monk
     assert got[:2] == ref[:2] and got[2]["height_margin"] == ref[2]["height_margin"] and got[2]["branches"] == ref[2]["branches"] == 48
     # pre-throw ray: 6 variants x (throw + 1) frames x 2 poses once each (plus compile_empty's own measured branch), not x 8
     assert with_dedup["ray"] < calls["ray"] / 4 and with_dedup["meets"] < calls["meets"], (with_dedup, dict(calls))
+
+
+
+def test_the_rays_cache_is_per_terrain_and_admit_makes_one_dict_per_call(monkeypatch):
+    sim = scene(vy=0., y=12.1)
+    x = float(sim.start[K.PX])
+    clean = K.Terrain2D.from_boxes([(-100., -10., 100., 3.015)])
+    wall = K.Terrain2D.from_boxes([(-100., -10., 100., 3.015), (x + 6., 11.5, x + 6.5, 12.)])
+    rays = np.array([[x, 11.6, x + 7., 12.3]])
+    boxes = np.array([[x - .25, 11., x + .25, 12.6]] * 2)
+    shared = {}                                                       # the pre-review's probe: one dict across two terrains
+    assert N.reach_problem(boxes, boxes, rays, (), clean, shared) is None
+    walled = N.reach_problem(boxes, boxes, rays, (), wall, shared)
+    assert walled == N.reach_problem(boxes, boxes, rays, (), wall) == "empty needle ray meets terrain"
+    seen = []
+    bp = N._branch_problem
+    monkeypatch.setattr(N, "_branch_problem", lambda *a, **k: (seen.append(k.get("shared")) or bp(*a, **k)))
+    e = evader()
+    for _ in range(2):
+        ok, why, _info = R.admit(scene(vy=0., y=12.1), 0., observed([e]), 1, Forecast(), np.zeros((0, 6)), enemies=[e],
+                                 research=PEND_OK)
+        assert ok, why
+    ds = [s for s in seen if s is not None]
+    assert len(ds) == 96 and all(s is ds[0] for s in ds[:48]) and all(s is ds[48] for s in ds[48:]) and ds[0] is not ds[48]

@@ -29,8 +29,8 @@ rejects: the package only admits flights among grounded still Clappers. The two 
 certificate: the lost 1 / 173 record and any other mechanism stay unverified.
 
 Research path (seq 391, record-only; admit's default call is unchanged): admit(..., research=...) - only the Recorder uses it, and
-only in mode 2 - first requires the pending-attack gate (pending_attack: none of her attacks may still land and no attack effect
-on a Clapper may still be under way, from what is observed; missing evidence is unknown), then lets a body WITHOUT a complete
+only in mode 2 - first requires the pending-attack gate (pending_attack: a verified loadout and the episode's input / ally
+lifecycle, Lifecycle, that cannot leave an effect of hers or an ally's; missing evidence is unknown), then lets a body WITHOUT a complete
 fitted route use the EMPIRICAL HEIGHT condition instead (height_support: a selected ground-sample reference HEIGHT_REF plus this
 study's chosen HEIGHT_MARGIN, never a body certificate), inside HEIGHT_STATES only, with a validity period from the Control FSM's
 path and the unfiltered duration samples (a model assumption), every other check unchanged. Its result is a would / candidate
@@ -83,11 +83,21 @@ RECENT_F = 10                   # STATE frames back from f whose hit / freeze ev
 #                                 0.15 s = 9 frames, + 1)
 ATTACK_BITS = ("nailCharging", "attacking", "altAttack", "upAttacking", "downAttacking", "downSpikeAntic", "downSpiking",
                "parryAttack", "isScrewDownAttacking")
-EFFECT_BITS = ATTACK_BITS + ("casting", "castRecoiling", "spellQuake", "focusing", "parrying", "isToolThrowing",
+EFFECT_BITS = ATTACK_BITS + ("casting", "castRecoiling", "spellQuake", "focusing", "isBinding", "parrying", "isToolThrowing",
                              "needolinPlayingMemory")
+DASH_BITS = ("dashing", "airDashing", "isSprinting", "isBackSprinting", "superDashing", "shadowDashing", "backDashing")
 B_NEEDOLIN = 1 << 5             # ssbot.ipc.framing.BUTTONS "needolin" (Control FSM Idle / Walk: CheckHeroPerformanceRegion -> SING)
-EFFECT_KEYS = K.B_ATTACK | B_NEEDOLIN | K.B_QUICKCAST
-LIFECYCLE_KEYS = ((5, "needolin"), (6, "quickcast"))     # button bits never latched this episode (KeyPlanLog actual / act_on)
+B_TAUNT = 1 << 7                # BUTTONS "taunt" (the Wanderer's Taunt Slash: a crest FSM attack, its timing unmeasured)
+EFFECT_KEYS = K.B_ATTACK | B_NEEDOLIN | K.B_QUICKCAST | B_TAUNT
+LIFECYCLE_KEYS = ((5, "needolin"), (6, "quickcast"), (7, "taunt"))   # button bits never latched this episode (Lifecycle)
+CHARGE_BEGIN_S = 0.225          # docs/facts hero_constants.json NAIL_CHARGE_BEGIN_TIME_QUICK (plain 0.3; the charge itself 0.8 /
+#                                 1.35 s): an attack held this long (the sum of its held frames' scaled dt) may have begun a nail
+#                                 charge; the charge slash's timing is unmeasured (knowledge attacks/wanderer.json)
+ATTACK_QUEUE_F = 10             # kinematics attack_queue_steps 8 physics steps (0.16 s): a press swings within 10 frames or never
+SWING_LAST_F = 10               # the HeroController swings' latest collider frame after the swing starts (attacks/wanderer.json
+#                                 t_off 0.16 s: down / alt down; live side / alt / up 1 - 7, down 3 - 9)
+SWING_EFFECT_F = ATTACK_QUEUE_F + SWING_LAST_F + RECENT_F   # an attack press this recent may still land a hit - a zero-damage
+#                                 one too, which the hit events do not report - or have a hit's recoil under way
 CREST = "Wanderer"              # the crest whose attacks the kinematics model holds (seq 392 A: the verified loadout)
 ALLY_PASSIVE = ("Dormant", "Away")   # the Forum allies' FSM states seen idle (any other: their attacks are unknown)
 RESEARCH_LABEL = "would / candidate: model-feasible under the empirical height condition; not an admission, never sent"
@@ -144,6 +154,12 @@ def height_support(e, E=E_IDX):
     if (not isinstance(pos, (list, tuple)) or len(pos) < 2 or not isinstance(vel, (list, tuple)) or len(vel) != 2
             or type(flip) is not bool or any(type(v) not in (int, float) or not math.isfinite(v) for v in (*pos[:2], *vel))):
         return None, "position / velocity / facing unknown"
+    # the observed body is ONE box: exactly one enabled "Song Heavy Sentry*" collider (every Clapper-frame of five recorded bouts,
+    # r7/body_colliders392.txt); body_box takes the first, so a second one would be ignored there - unknown here instead
+    on = [c for c in e.get("colliders") or () if isinstance(c, dict) and c.get("enabled")
+          and str(c.get("name") or "").startswith("Song Heavy Sentry")]
+    if len(on) != 1:
+        return None, f"{len(on)} enabled body colliders (the observed body is not one box)"
     try:
         b = body_box(e)
     except (TypeError, ValueError, OverflowError):
@@ -185,24 +201,149 @@ def height_support(e, E=E_IDX):
     return valid_to, info
 
 
-def pending_attack(sim, hero, raws, f, iids, keylog=None) -> tuple[bool, str | None]:
-    """(True, None) when what is observed shows none of her attacks or effects still to land and no attack effect on a Clapper still
-    under way (seq 391's actual gate for the research path, seq 392 A), else (False, why); missing evidence is unknown (False), never
-    "none". The oracle exports no object of hers or of an ally (the entities are health managers and sources that hurt HER), so an
-    effect already thrown cannot be seen; the gate instead requires a LOADOUT AND INPUT LIFECYCLE that cannot leave one, checked on
-    this tick's evidence:
-      her cstate (STATE hero.cstate against kinematics.cstate_names) with none of EFFECT_BITS (the nail's colliders act only while
-      cState.attacking; casting, the parry, a tool throw, binding and a Needolin performance have their own bits);
-      the crest CREST (the one whose attacks the kinematics model holds), no tool equipped (hero.tools all empty, tools_extra 0)
-      and the silk skill FSM (hero.spell) in Idle;
-      the episode's latched input history (keylog, the policy's KeyPlanLog fed with every STATE's act.mask) without any
-      LIFECYCLE_KEYS press (the Needolin - the Clapper's Idle / Walk answer a performance with SING - and the quick cast), so no
-      effect of theirs can still be out;
+class Lifecycle:
+    """seq 392 A (revised after the Opus pre-review): the episode's input / loadout / ally lifecycle the pending-effect gate needs,
+    read from EVERY STATE the policy received since its episode reset. The Recorder feeds it on each record from the policy's frame
+    history (pol.raw keeps frames f - 12 .. f; each frame is read once, in order). It becomes UNKNOWN for the rest of the episode -
+    never a pass - once a frame is missing (a record more than 12 frames after the last one, the catch-up's 64-STATE limit) or a
+    frame lacks act.mask, dt, her cstate or a dash / sprint bit name; pending_attack also needs it to start at or before the
+    policy's first tick of the episode (KeyPlanLog.f0) and to be read through the tick's frame. Violations, each kept with its
+    first frame - effects nobody observes and whose timing is unmeasured, so they must never have happened this episode:
+      a LIFECYCLE_KEYS press (the Needolin, the quick cast - the silk skills -, the taunt);
+      an attack held CHARGE_BEGIN_S or longer (the sum of its held frames' scaled dt; an attack already held on the history's
+      first frame counts): a nail charge may have begun (Needle Strike's charge slash);
+      an attack press with a DASH_BITS bit set on any frame from the one before it through ATTACK_QUEUE_F after it: a crest FSM
+      attack (the dash stab and its RecoilStab follow-up);
+      a crest other than CREST; a tool in a slot, an empty or missing slot list (the exporter's unknown) or tools_extra not 0;
+      an ally outside ALLY_PASSIVE, or an empty or missing allies list (the Forum's two fighters are listed through the fight).
+    last_attack: the latest attack press (a rising edge of the latched mask), for SWING_EFFECT_F."""
+
+    def __init__(self):
+        self.first_f = None            # the first frame read (the history's start)
+        self.last_f = None             # the last frame read
+        self.unknown = None            # why the history is unknown (the first cause), or None
+        self.violation = None          # the first violation, or None
+        self.mask = None               # the previous frame's latched mask (None: no frame read yet)
+        self.dash_prev = False         # a DASH_BITS bit on the previous frame
+        self.hold_s = 0.0              # the attack's held time so far (scaled dt)
+        self.presses = []              # attack press frames still inside the dash test's window
+        self.last_attack = None
+        self._dash_idx = None
+
+    def summary(self) -> dict:
+        return {"first_f": self.first_f, "last_f": self.last_f, "unknown": self.unknown, "violation": self.violation,
+                "last_attack": self.last_attack}
+
+    def _bad(self, why):
+        if self.violation is None:
+            self.violation = why
+
+    def _unk(self, why):
+        if self.unknown is None:
+            self.unknown = why
+
+    def feed(self, raw, f) -> None:
+        """Read the frames after the last one read, through f, from raw (frame -> STATE); the first call starts at raw's oldest
+        frame (the policy clears its history at the episode reset)."""
+        f = int(f)
+        if self.last_f is not None and f <= self.last_f:
+            return
+        raw = raw if isinstance(raw, dict) else {}
+        if self.last_f is None:
+            have = [g for g in raw if type(g) is int and g <= f]
+            g0 = min(have) if have else f
+            self.first_f = g0
+        else:
+            g0 = self.last_f + 1
+        for g in range(g0, f + 1):
+            st = raw.get(g)
+            if not isinstance(st, dict):
+                self._unk(f"frame {g} missing from the history")
+                continue
+            try:
+                self._frame(g, st)
+            except Exception as e:          # a malformed STATE is unknown, never a crash of the tick (the feed runs outside a try)
+                self._unk(f"frame {g} unreadable ({type(e).__name__})")
+        self.last_f = f
+
+    def _frame(self, g, st) -> None:
+        if self._dash_idx is None:
+            names = K.cstate_names()
+            if any(n not in names for n in DASH_BITS):
+                self._unk("a dash / sprint cstate bit name unknown")
+                return
+            self._dash_idx = [names.index(n) for n in DASH_BITS]
+        act = st.get("act")
+        mask = act.get("mask") if isinstance(act, dict) else None
+        dt = st.get("dt")
+        h = st.get("hero") if isinstance(st.get("hero"), dict) else {}
+        cs = h.get("cstate")
+        if (type(mask) is not int or type(dt) not in (int, float) or not math.isfinite(dt) or dt < 0
+                or not isinstance(cs, (list, tuple)) or not cs or any(type(v) is not int for v in cs)
+                or any((i >> 6) >= len(cs) for i in self._dash_idx)):
+            self._unk(f"act.mask, dt or her cstate missing at {g}")
+            return
+        dash = any((int(cs[i >> 6]) >> (i & 63)) & 1 for i in self._dash_idx)
+        for b, name in LIFECYCLE_KEYS:
+            if mask >> b & 1:
+                self._bad(f"the {name} latched at {g}")
+        held = bool(mask & K.B_ATTACK)
+        if held:
+            if self.mask is None:
+                self._bad(f"the attack already held on the history's first frame {g}")
+            elif not self.mask & K.B_ATTACK:
+                self.presses.append(g)
+                self.last_attack = g
+                self.hold_s = 0.0
+                if self.dash_prev:
+                    self._bad(f"an attack pressed at {g} with a dash / sprint bit at {g - 1} (a crest FSM attack)")
+            self.hold_s += float(dt)
+            if self.hold_s >= CHARGE_BEGIN_S:
+                self._bad(f"an attack held {self.hold_s:.3f} s by {g} (a nail charge may have begun)")
+        else:
+            self.hold_s = 0.0
+        if dash:
+            p = next((p for p in self.presses if g - ATTACK_QUEUE_F <= p <= g), None)
+            if p is not None:
+                self._bad(f"an attack pressed at {p} with a dash / sprint bit at {g} (a crest FSM attack)")
+        self.presses = [p for p in self.presses if p > g - ATTACK_QUEUE_F]
+        self.dash_prev = dash
+        if h.get("crest") != CREST:
+            self._bad(f"crest {h.get('crest')!r} at {g}")
+        tools = h.get("tools")
+        if not isinstance(tools, (list, tuple)) or not tools or any(x is not None for x in tools) or h.get("tools_extra") != 0:
+            self._bad(f"a tool equipped, or the tool slots unknown, at {g}")
+        allies = st.get("allies")
+        if not isinstance(allies, list) or not allies:
+            self._bad(f"the allies unknown at {g}")
+        else:
+            for a in allies:
+                if not isinstance(a, dict) or a.get("state") not in ALLY_PASSIVE:
+                    nm, sa = (a.get("name"), a.get("state")) if isinstance(a, dict) else (None, None)
+                    self._bad(f"ally {nm} in {sa} at {g}")
+                    break
+        self.mask = mask
+
+
+def pending_attack(sim, hero, raws, f, iids, life=None, first_tick=None) -> tuple[bool, str | None]:
+    """(True, None) when the evidence shows none of her attacks or effects still to land and no attack effect on a Clapper still
+    under way (seq 391's actual gate for the research path; seq 392 A, revised after the Opus pre-review), else (False, why);
+    missing evidence is unknown (False), never "none". The oracle exports no object of hers or of an ally (the entities are health
+    managers and sources that hurt HER), so an effect already out cannot be seen; the gate requires a LOADOUT AND INPUT LIFECYCLE
+    that cannot leave one:
+      this tick: her cstate (STATE hero.cstate against kinematics.cstate_names) with none of EFFECT_BITS; the crest CREST, every
+      tool slot empty (a non-empty slot list, tools_extra 0) and the silk skill FSM (hero.spell) in Idle;
+      the episode (life: a Lifecycle read from every STATE since the policy's episode reset, starting at or before the policy's
+      first tick first_tick and read through f): no LIFECYCLE_KEYS press, no attack held CHARGE_BEGIN_S, no attack pressed in a
+      dash / sprint, the loadout and every ally in ALLY_PASSIVE on every frame. The crest FSM attacks (Needle Strike's charge
+      slash, the dash stab and its RecoilStab, the Taunt Slash), the silk skills, the Needolin and the allies' attacks have
+      unmeasured timing, so they must never have happened; the measured HeroController swings count as over only from an
+      attack press older than SWING_EFFECT_F frames (the input queue, the latest collider frame and a hit's recoil: also covers a
+      zero-damage hit, which the hit events do not report);
       the model start with no attack running or queued (ATTACKING 0, AQ < 0, QQ < 0) and no EFFECT_KEYS in the in-flight prefix
       or in the hold filter (latched, desired, pending);
-      the STATE of every frame f - RECENT_F .. f seen (raws: the policy's frame history) with its event list and its allies list:
-      every ally in ALLY_PASSIVE (an ally's attacks are not observed either), no hit on an observed Clapper (iids), no hit whose
-      target is unknown, no freeze."""
+      the STATE of every frame f - RECENT_F .. f seen (raws: the policy's frame history) with its event list: no hit on an observed
+      Clapper (iids), no hit whose target is unknown, no freeze."""
     from . import rune_life
     names = K.cstate_names()
     hero = hero if isinstance(hero, dict) else {}
@@ -220,17 +361,23 @@ def pending_attack(sim, hero, raws, f, iids, keylog=None) -> tuple[bool, str | N
     if hero.get("crest") != CREST:
         return False, f"crest {hero.get('crest')!r}: its attack effects are not verified here"
     tools = hero.get("tools")
-    if not isinstance(tools, (list, tuple)) or any(x is not None for x in tools) or hero.get("tools_extra") != 0:
+    if not isinstance(tools, (list, tuple)) or not tools or any(x is not None for x in tools) or hero.get("tools_extra") != 0:
         return False, "a tool equipped, or the tool slots unknown (tool effects are not observed)"
     spell = hero.get("spell")
     if not isinstance(spell, (list, tuple)) or not spell or spell[0] != "Idle":
         return False, f"the silk skill FSM not in Idle ({spell[0] if isinstance(spell, (list, tuple)) and spell else 'unknown'})"
-    actual, on = getattr(keylog, "actual", None), getattr(keylog, "act_on", None)
-    if not isinstance(actual, dict) or not isinstance(on, dict):
-        return False, "the episode's latched input history unknown"
-    for b, name in LIFECYCLE_KEYS:
-        if actual.get(b) or b in on:
-            return False, f"the {name} latched this episode (its effects are not observed)"
+    if not isinstance(life, Lifecycle):
+        return False, "the episode's lifecycle history unknown"
+    if life.unknown is not None:
+        return False, f"the episode's lifecycle history unknown: {life.unknown}"
+    if type(first_tick) is not int or life.first_f is None or life.first_f > first_tick:
+        return False, f"the lifecycle history (from {life.first_f}) does not cover the policy's first tick ({first_tick})"
+    if life.last_f != int(f):
+        return False, f"the lifecycle history read to {life.last_f}, not to this frame"
+    if life.violation is not None:
+        return False, f"{life.violation} (its effects are not observed)"
+    if life.last_attack is not None and int(f) - life.last_attack <= SWING_EFFECT_F:
+        return False, f"an attack pressed at {life.last_attack}: its swing or a hit's recoil may still be under way"
     S = np.asarray(sim.start, float).reshape(-1)
     if S[K.ATTACKING] > 0:
         return False, "the model start is attacking"
@@ -246,13 +393,6 @@ def pending_attack(sim, hero, raws, f, iids, keylog=None) -> tuple[bool, str | N
         st = (raws or {}).get(g)
         if not isinstance(st, dict) or not isinstance(st.get("ev"), list):
             return False, f"the STATE of frame {g} not seen or without its event list (events unknown)"
-        allies = st.get("allies")
-        if not isinstance(allies, list):
-            return False, f"the allies of frame {g} unknown"
-        for a in allies:
-            if not isinstance(a, dict) or a.get("state") not in ALLY_PASSIVE:
-                nm, sa = (a.get("name"), a.get("state")) if isinstance(a, dict) else (None, None)
-                return False, f"ally {nm} in {sa} at {g} (an ally's attacks are not observed)"
         for ev in st.get("ev") or ():
             if not isinstance(ev, dict):
                 return False, f"an unreadable event at {g}"
@@ -611,7 +751,10 @@ class Recorder:
     is cleared by: a record gap over MAX_GAP frames, an episode or scene change, landing, any chain link owning the keys again, a
     supervisor or script owner, the failure target dead or unseen for over MAX_GAP frames, the bound circle gone, re-created (a new
     generation of its object iid) or lit. Its source move's owner dying does not clear it (the circle outlives its owner); being
-    outside the circle only fails that tick's entry (the gate). Nothing here is an admission, a certificate or a send."""
+    outside the circle only fails that tick's entry (the gate). Nothing here is an admission, a certificate or a send.
+
+    seq 392 A: the Recorder also keeps the episode's Lifecycle (fed on every record from the policy's frame history) for the
+    pending-effect gate of the research path; it is reset with the Recorder at the policy's episode reset."""
 
     def __init__(self):
         self.prev_chain = None             # the last recorded tick's final owner was the chain (None: no tick yet)
@@ -619,6 +762,7 @@ class Recorder:
         self.prev_f = None
         self.run_move = None               # the chain's own Run move on its last final-owner tick (with its frame)
         self.c1 = None                     # the live C1 record, or None
+        self.life = Lifecycle()            # seq 392 A: the episode's lifecycle from every STATE (reset with the episode)
 
     def reset(self):
         self.__init__()
@@ -735,7 +879,11 @@ class Recorder:
         c = (getattr(ledger, "recs", None) or {}).get(circ["iid"])
         if c is None or int(c.first_f) != circ["first_f"] or box is None or len(box) != 4:
             return {"inside_bound": False, "bound_not_lit": False, "why": "the bound circle or her box unknown on this tick"}
-        t = float(getattr(ledger, "t", 0.0))
+        t = getattr(ledger, "t", None)
+        if not isinstance(t, (int, float)) or isinstance(t, bool) or not math.isfinite(t):
+            # the Opus pre-review's probe: a None clock raised here, inside the tick (this call is outside record's try)
+            return {"inside_bound": False, "bound_not_lit": False, "why": "the rune ledger's clock unknown on this tick"}
+        t = float(t)
         on_k = math.floor(max(0.0, (c.t0 + rune_life.ON_F / 60.0 - t) * 60.0) + 1e-6)     # RuneCircles.rows' on_k, as the gate reads it
         not_lit = bool(not c.lit and c.t_on is None and not c.burst and on_k > 0)
         inside = bool(rune_life._over_big(np.array([box[0]]), np.array([box[1]]), np.array([box[2]]), np.array([box[3]]),
@@ -765,6 +913,7 @@ class Recorder:
         from . import air_chain, rune_life, slam_play
         from .knife_chain_air import body_box
         t0 = time.perf_counter()
+        self.life.feed(getattr(pol, "raw", None), f)
         h = s.get("hero") or {}
         can = h.get("can") or {}
         S = np.asarray(S0, float).reshape(-1)
@@ -817,6 +966,7 @@ class Recorder:
         c1_entry = bool(c1_gate is not None and all(gate[k] for k in ("plan", "air", "harpoon", "silk", "input"))
                         and c1_gate["inside_bound"] and c1_gate["bound_not_lit"])
         rec["c1_gate"] = c1_gate
+        rec["life"] = self.life.summary()
         rec["entry"] = entry
         rec["c1_entry"] = c1_entry
         rec["admission"] = None
@@ -841,7 +991,8 @@ class Recorder:
                 first = why
             try:
                 sim = air_chain.ChainSim(S0, prefix, copy.deepcopy(hold), pol.params, pol.terrain, fo, f)
-                pend = pending_attack(sim, h, getattr(pol, "raw", None), f, {i for i, _ in bodies}, keylog=getattr(pol, "keylog", None))
+                pend = pending_attack(sim, h, getattr(pol, "raw", None), f, {i for i, _ in bodies}, life=self.life,
+                                      first_tick=getattr(getattr(pol, "keylog", None), "f0", None))
                 ok, why, info = admit(sim, ws.stamp.t_game_s, bodies, d, fplan, rows, enemies=clappers, research={"pending": pend})
             except Exception as e:          # an analysis failure is a rejection, never a crash of the tick
                 ok, why, info = False, "research error: " + type(e).__name__ + ": " + str(e)[:120], {}
@@ -860,4 +1011,4 @@ class Recorder:
 
 
 __all__ = ["MODE", "RECORD", "E_IDX", "RESTORE", "CATCH_SHIFTS", "HEIGHT_REF", "HEIGHT_MARGIN", "HEIGHT_THRESHOLD", "branch_paths",
-           "admit", "height_support", "pending_attack", "research_supports", "Recorder"]
+           "admit", "height_support", "pending_attack", "Lifecycle", "research_supports", "Recorder"]

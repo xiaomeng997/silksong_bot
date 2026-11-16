@@ -124,18 +124,20 @@ def reach_problem(boxes,rendered_boxes,rays,rams,terrain,shared=None):
     meeting any row - a wall, ledge or slope it could hook; then any slope row meeting a swept body box of either pose
     (boxes / rendered_boxes, frame to frame), a ray band or a ram box (rams). No hook, cling or motion on a slope is
     modelled here: a reachable slope rejects. shared (seq 392, optional): the caller's per-call dict - the rays' two
-    answers (any row, any slope) are kept per exact ray bytes, the terrain rows per terrain object; the sweeps and
-    rams are always checked here; same reasons, same order."""
+    answers (any row, any slope) are kept per terrain object and exact ray bytes (the entry holds the terrain, so its
+    id cannot be reused while the dict lives), the terrain rows per terrain object; the sweeps and rams are always
+    checked here; same reasons, same order."""
     (hr,vr,sr),allrows,_h,_v=_terrain_rows(terrain,shared)
     ra=np.asarray(rays,float).reshape(-1,4)
-    key=None if shared is None else ('rays',ra.tobytes())
-    if key is not None and key in shared:
-        ray_rows,ray_slopes=shared[key]
+    key=None if shared is None else ('rays',id(terrain),ra.tobytes())
+    hit=shared.get(key) if key is not None else None
+    if hit is not None and hit[0] is terrain:
+        ray_rows,ray_slopes=hit[1]
     else:
         ray_rows=bool(_meets(ra,allrows).any())
         ray_slopes=bool(len(sr)) and bool(len(ra)) and bool(_meets(ra,sr).any())
         if key is not None:
-            shared[key]=(ray_rows,ray_slopes)
+            shared[key]=(terrain,(ray_rows,ray_slopes))
     if ray_rows:
         return 'empty needle ray meets terrain'
     if len(sr):
