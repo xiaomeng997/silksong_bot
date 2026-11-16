@@ -291,14 +291,19 @@ def test_evade_edges_need_a_known_previous_state_of_the_same_iid(recorder_env):
     assert not g["h2"] and g["h2_status"] == "unknown: no previous state"           # a gap: the change may lie in it
 
 
-def test_mode_one_is_refused_and_zero_is_off(monkeypatch):
-    monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "1")
-    with pytest.raises(ValueError, match="not implemented"):
+def test_mode_one_is_the_doomed_hook_two_records_and_zero_is_off(monkeypatch):
+    monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "3")
+    with pytest.raises(ValueError, match="only 0"):
         importlib.reload(R)
+    monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "1")
+    m = importlib.reload(R)
+    assert m.RECORD and m.ACT
     monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "2")
-    assert importlib.reload(R).RECORD
+    m = importlib.reload(R)
+    assert m.RECORD and not m.ACT
     monkeypatch.setenv("SSBOT_FORUM_RUNE_HOOK_EXIT", "0")
-    assert not importlib.reload(R).RECORD
+    m = importlib.reload(R)
+    assert not m.RECORD and not m.ACT
 
 
 # ------------------------------------------------- seq 391: the record-only research path (empirical height) and the C1 record
@@ -741,3 +746,73 @@ def test_the_rays_cache_is_per_terrain_and_admit_makes_one_dict_per_call(monkeyp
         assert ok, why
     ds = [s for s in seen if s is not None]
     assert len(ds) == 96 and all(s is ds[0] for s in ds[:48]) and all(s is ds[48] for s in ds[48:]) and ds[0] is not ds[48]
+
+
+
+# ------------------------------------------- mode 1: the person's doomed hook (11-15: "快死的时候钩一下，不用验证"), no admission
+
+GATE_OK = {"plan": True, "air": True, "harpoon": True, "silk": True, "input": True, "inside_not_lit": True}
+
+
+def _hs(x=30., facing=1, accepting=True, clip="Airborne"):
+    return {"hero": {"box": [x - .25, 10., x + .25, 12.], "facing": facing, "hero_accepting_input": accepting, "anim": {"clip": clip}}}
+
+
+def test_the_doomed_hook_turns_toward_the_nearer_side_presses_and_waits_for_control():
+    hk = R.DoomedHook()
+    # N1 in a circle centred at x 28: she is at 30 (the right of it) facing left - the turn right, then the Clawline + right twice
+    m, d = hk.step(100, _hs(30., -1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
+    assert m == K.B_RIGHT and d["phase"] == "turn" and d["trigger"] == "N1" and d["toward"] == 1
+    m, d = hk.step(101, _hs(30., 1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
+    assert m == R.M_CLAW | K.B_RIGHT and d["phase"] == "press" and d["press_f"] == 103
+    m, d = hk.step(102, _hs(30., 1), GATE_OK, False, False, None, None, "plan")
+    assert m == R.M_CLAW | K.B_RIGHT and d["phase"] == "press"
+    # the lock: no key while the Harpoon holds her, whoever owns the keys; control back from the press + 12 ends it
+    m, d = hk.step(110, _hs(36., 1, accepting=False, clip="Harpoon Dash"), GATE_OK, False, False, None, None, "chain")
+    assert m == 0 and d["phase"] == "lock" and d["owner_overridden"] == "chain"
+    assert hk.step(114, _hs(37.), GATE_OK, False, False, None, None, "plan")[0] == 0           # 114 < 103 + 12
+    m, d = hk.step(115, _hs(37.), GATE_OK, False, False, None, None, "plan")
+    assert m is None and d["phase"] == "done" and d["why"] == "control back"
+    # one hook per circle: the same circle again is skipped; another circle hooks (left of its centre, facing right: turn left)
+    m, d = hk.step(120, _hs(30., 1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
+    assert m is None and d["phase"] == "skip"
+    m, d = hk.step(121, _hs(20., 1), GATE_OK, True, False, None, (25.0, 3.3), "plan")
+    assert m == K.B_LEFT and d["toward"] == -1
+
+
+def test_the_doomed_hook_triggers_only_when_doomed_in_a_circle_and_aborts_on_landing():
+    hk = R.DoomedHook()
+    assert hk.step(100, _hs(), GATE_OK, False, False, None, (28., 3.3), "plan") == (None, None)       # not doomed
+    for k in GATE_OK:
+        assert hk.step(100, _hs(), {**GATE_OK, k: False}, True, False, None, (28., 3.3), "plan") == (None, None), k
+    assert hk.step(100, _hs(), GATE_OK, True, False, None, None, "plan") == (None, None)            # no circle around her
+    assert hk.step(100, _hs(), GATE_OK, True, False, None, (28., 3.3), "sup") == (None, None)       # a supervisor wins
+    # C1 (the chain's failed down slash, she inside its bound circle): facing the nearer side, the press at once
+    m, d = hk.step(100, _hs(30., 1), GATE_OK, False, True, (28.07, 3.34), None, "plan")
+    assert m == R.M_CLAW | K.B_RIGHT and d["trigger"] == "C1" and d["circle"] == [28.1, 3.3] and d["press_f"] == 102
+    hk.step(101, _hs(30., 1), GATE_OK, False, False, None, None, "plan")
+    lim = 102 + R.HOOK_LOCK_MAX                                                                     # control never back
+    assert hk.step(lim - 1, _hs(36., accepting=False, clip="Harpoon"), GATE_OK, False, False, None, None, "plan")[0] == 0
+    m, d = hk.step(lim, _hs(36., accepting=False, clip="Harpoon"), GATE_OK, False, False, None, None, "plan")
+    assert m is None and d["why"] == "lock limit"
+    hk2 = R.DoomedHook()
+    assert hk2.step(200, _hs(30., -1), GATE_OK, True, False, None, (28., 3.3), "plan")[0] == K.B_RIGHT
+    m, d = hk2.step(201, _hs(30., 1), {**GATE_OK, "air": False}, False, False, None, None, "plan")
+    assert m is None and d["phase"] == "abort" and d["why"] == "landed before the press"
+    hk3 = R.DoomedHook()                                      # a supervisor before the press: no late press after it
+    assert hk3.step(300, _hs(30., -1), GATE_OK, True, False, None, (28., 3.3), "plan")[0] == K.B_RIGHT
+    m, d = hk3.step(301, _hs(30., 1), GATE_OK, False, False, None, None, "sup")
+    assert m is None and d["phase"] == "abort" and hk3.run is None
+    assert hk3.step(302, _hs(30., 1), GATE_OK, False, False, None, None, "plan") == (None, None)
+
+
+def test_mode_one_records_without_any_admission_and_hooks_at_the_c1_entry(monkeypatch):
+    monkeypatch.setattr(R, "ACT", True)
+    env = C1Env(monkeypatch)                                  # admit stubbed: it must never be called in mode 1
+    a = env.failure()
+    assert a["c1"]["status"] == "live" and a["act"] is None and a["act_mask"] is None and not a["sent"]
+    b = env.tick(102)                                         # back inside the bound circle: the C1 entry
+    assert b["c1_entry"] and env.calls == [] and b["research"] is None and b["admission"] is None
+    x = float(env.sim.start[K.PX])
+    want = R.M_CLAW | K.B_RIGHT if x >= 28.07 else K.B_LEFT   # she faces right (facing 1)
+    assert b["act"]["trigger"] == "C1" and b["act_mask"] == want and b["sent"]

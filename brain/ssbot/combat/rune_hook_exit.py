@@ -3,6 +3,9 @@ empty-hook big-rune exit's ADMISSION and its RECORD-ONLY wiring. Nothing here se
 executor / state machine; see 4.10's pending items).
 
     0 (default)  nothing is computed; the policy is byte-identical.
+    1            THE DOOMED HOOK (the person 11-15: "快死的时候钩一下，不用验证"): the record below without the admission and the
+                 research path, and DoomedHook ACTS - in a big rune circle not lit yet, on N1 (the planner forced) or the C1
+                 entry (the chain's failed down slash), it throws the Clawline toward the circle's nearer side with no check.
     2            at the final owner, record only (Recorder.record): the common gate, N1 (the planner's own row, forced), the
                  candidate edges H1 (the chain held the keys on the previous recorded tick, the planner on this one) and H2 (the
                  L2 target's Control entered an evade state from a known previous state; a diagnostic candidate only), the
@@ -10,7 +13,6 @@ executor / state machine; see 4.10's pending items).
                  an ordinary hand-back or an evade edge is never written as a failed plan), the full entry (gate and an edge)
                  and - only then - the admission, their intersection, the first rejection and the cost. The final owner, keys
                  and send stay the policy's.
-    1            refused at import: acting is not implemented.
 
 Admission (admit): the facing side only; every variant of knife_chain_empty_needle.compile_empty (throw 9 / 8 x applied 0 .. 2
 frames late), and for each, every branch of the Catch {measured, one frame early (hypothesis)} x the control frame {P + 30 ..
@@ -51,10 +53,11 @@ import numpy as np
 from ssbot.knowledge import kinematics as K, hero2 as H2
 
 MODE = (os.environ.get("SSBOT_FORUM_RUNE_HOOK_EXIT", "0") or "0").strip()
-if MODE not in ("0", "2"):
-    raise ValueError(f"SSBOT_FORUM_RUNE_HOOK_EXIT={MODE!r}: only 0 (off) and 2 (record only) exist; acting (1) is not implemented - "
-                     "no executor / state machine yet (design section 4.10)")
-RECORD = MODE == "2"
+if MODE not in ("0", "1", "2"):
+    raise ValueError(f"SSBOT_FORUM_RUNE_HOOK_EXIT={MODE!r}: only 0 (off), 1 (the doomed hook: acts, no admission) and 2 (record "
+                     "only) exist")
+RECORD = MODE in ("1", "2")     # the Recorder runs (mode 1 also acts through DoomedHook)
+ACT = MODE == "1"               # the person 11-15: "快死的时候钩一下，不用验证"
 
 E_IDX = 37                      # the common end as a path index from f: press + 2 (latest late application) + 33 (latest control)
 RESTORE = (30, 31, 32, 33)      # control frames after P for the throw at P + 9 (measured spread; the throw's shift is added)
@@ -101,6 +104,11 @@ SWING_EFFECT_F = ATTACK_QUEUE_F + SWING_LAST_F + RECENT_F   # an attack press th
 CREST = "Wanderer"              # the crest whose attacks the kinematics model holds (seq 392 A: the verified loadout)
 ALLY_PASSIVE = ("Dormant", "Away")   # the Forum allies' FSM states seen idle (any other: their attacks are unknown)
 RESEARCH_LABEL = "would / candidate: model-feasible under the empirical height condition; not an admission, never sent"
+M_CLAW = 1 << 4                 # BUTTONS "clawline" (claw_strike / claw_chase's M_CLAW)
+HOOK_PRESS_F = 2                # the Clawline with the key toward the exit for two frames (claw_strike's press)
+HOOK_LOCK_MIN = 12              # no key for at least this many frames from the press's mask frame (the Harpoon Antic, the throw)
+HOOK_LOCK_MAX = 45              # ... and at most this many (control back at the press + 26 .. 34, p50 32: claw_strike's timeline)
+HARPOON_CLIPS = ("Harpoon",)    # claw_chase's: her clips while the Harpoon FSM holds her
 
 
 @lru_cache(maxsize=1)
@@ -730,6 +738,78 @@ def _move(mv):
     return None
 
 
+class DoomedHook:
+    """SSBOT_FORUM_RUNE_HOOK_EXIT=1, the person's decision (11-15, Opus session): "放不出来修呀", "要冲刺的时候预计接不上下劈就改成钩？",
+    "反正也要死了，就钩一下好了", "快死的时候钩一下，不用验证". When she is about to be blown up in a big rune circle, throw the hook -
+    with NO admission (no body route, height, lifecycle or flight check: a face hook, a wall or a short flight are accepted).
+    Trigger, at the policy's final owner, from the Recorder's facts of the tick: the planner owns the keys, she is in the air with
+    the harpoon available, silk >= 1 and accepting input, her box inside a big circle not lit yet, and either N1 (the planner forced:
+    no safe row) or the C1 entry (the chain's failure hand-back - its down slash could not be predicted to land - bound to this
+    circle, she inside it). Action (claw_strike's press): toward the circle's nearer side (her x against its centre); the turn key
+    alone on the frame before when she faces the other way; the Clawline with that key for HOOK_PRESS_F frames; then no key until
+    control is back (accepting input, no Harpoon clip, at least HOOK_LOCK_MIN frames after the press's mask frame) or HOOK_LOCK_MAX
+    frames after it; then the policy's owners again. One hook per circle (its rounded centre) per episode; landing before the press
+    aborts it; a supervisor / pause owner is never overridden."""
+
+    def __init__(self):
+        self.run = None                # the running hook
+        self.done = set()              # circles (rounded centres) hooked this episode
+
+    def step(self, f, s, gate, n1, c1_entry, xy_c1, xy_in, own) -> tuple[int | None, dict | None]:
+        """(the mask to send at this tick instead of the owner's, or None; this tick's record of the hook, or None)."""
+        h = s.get("hero") or {}
+        f = int(f)
+        if own == "sup":                                 # a supervisor / pause owns the keys: never overridden
+            if self.run is None:
+                return None, None
+            r = self.run
+            if r["phase"] in ("turn", "press"):          # not pressed yet (or half): no late press after the supervisor
+                self.run = None
+                return None, {**r, "phase": "abort", "why": "a supervisor took the keys before the press"}
+            return None, {**r, "phase": "supervisor"}   # the lock goes on from the next tick
+        if self.run is None:
+            base = all(gate.get(k) for k in ("plan", "air", "harpoon", "silk", "input"))
+            trig, xy = (("C1", xy_c1) if c1_entry and xy_c1 is not None else
+                        ("N1", xy_in) if n1 and base and gate.get("inside_not_lit") and xy_in is not None else (None, None))
+            if trig is None:
+                return None, None
+            key = (round(float(xy[0]), 1), round(float(xy[1]), 1))
+            if key in self.done:
+                return None, {"phase": "skip", "why": "this circle was hooked already", "trigger": trig, "circle": list(key)}
+            box = h.get("box")
+            try:
+                x = 0.5 * (float(box[0]) + float(box[2]))
+            except (TypeError, ValueError, IndexError):
+                x = float("nan")
+            if not math.isfinite(x):
+                return None, {"phase": "skip", "why": "her box unknown", "trigger": trig, "circle": list(key)}
+            toward = 1 if x >= float(xy[0]) else -1
+            self.done.add(key)
+            self.run = {"trigger": trig, "circle": list(key), "toward": toward, "start_f": f, "press_f": None,
+                        "phase": "press" if h.get("facing") == toward else "turn", "presses": 0}
+        r = self.run
+        tk = K.B_RIGHT if r["toward"] > 0 else K.B_LEFT
+        if r["phase"] in ("turn", "press") and not gate.get("air", True):
+            self.run = None
+            return None, {**r, "phase": "abort", "why": "landed before the press"}
+        if r["phase"] == "turn":
+            r["phase"] = "press"
+            return tk, {**r, "phase": "turn", "mask": tk}
+        if r["phase"] == "press":
+            if r["press_f"] is None:
+                r["press_f"] = f + 2                     # the press's mask frame (the send applies two frames on)
+            r["presses"] += 1
+            if r["presses"] >= HOOK_PRESS_F:
+                r["phase"] = "lock"
+            return M_CLAW | tk, {**r, "phase": "press", "mask": M_CLAW | tk}
+        clip = str(((h.get("anim") or {}).get("clip")) or "")
+        back = h.get("hero_accepting_input") is True and not clip.startswith(HARPOON_CLIPS)
+        if (back and f >= r["press_f"] + HOOK_LOCK_MIN) or f >= r["press_f"] + HOOK_LOCK_MAX:
+            self.run = None
+            return None, {**r, "phase": "done", "why": "control back" if back else "lock limit"}
+        return 0, {**r, "phase": "lock", "mask": 0, "owner_overridden": own}
+
+
 class Recorder:
     """SSBOT_FORUM_RUNE_HOOK_EXIT=2: one record per policy tick at its final owner; never a key, never a change to the tick.
 
@@ -763,6 +843,7 @@ class Recorder:
         self.run_move = None               # the chain's own Run move on its last final-owner tick (with its frame)
         self.c1 = None                     # the live C1 record, or None
         self.life = Lifecycle()            # seq 392 A: the episode's lifecycle from every STATE (reset with the episode)
+        self.hook = DoomedHook() if ACT else None   # mode 1: the person's doomed hook (reset with the episode)
 
     def reset(self):
         self.__init__()
@@ -920,12 +1001,13 @@ class Recorder:
         box = h.get("box")
         rows = pol._rune_rows()
         rows = np.asarray(rows, np.float64).reshape(-1, 6) if rows is not None and len(rows) else np.zeros((0, 6))
-        circle = None
+        circle = xy_in = None
         if box is not None and len(rows):
             for _o, cx, cy, r, on, off in rows[rows[:, 3] > 5.0]:
                 if on > 0 and rune_life._over_big(np.array([box[0]]), np.array([box[1]]), np.array([box[2]]), np.array([box[3]]),
                                                   cx, cy, r)[0]:
                     circle = [round(float(cx), 3), int(on)]
+                    xy_in = (float(cx), float(cy))
                     break
         silk = h.get("silk")
         gate = {"plan": own == "plan", "air": bool(S[K.GROUND] <= 0) and getattr(getattr(ws.hero, "contact", None), "v", None) != "GROUND",
@@ -973,7 +1055,15 @@ class Recorder:
         rec["research"] = None
         if first is None and not entry:
             first = "no candidate edge (N1 / H1 / H2)"
-        if entry or c1_entry:
+        act_mask = act = None
+        if self.hook is not None:
+            # mode 1, the person's doomed hook: no admission, no research path (nothing below runs); the hook acts on N1 / C1
+            cc = (self.c1 or {}).get("circle") if c1_entry else None
+            xy_c1 = (float(cc["cx"]), float(cc["cy"])) if cc else None
+            act_mask, act = self.hook.step(f, s, gate, n1, c1_entry, xy_c1, xy_in, own)
+        rec["act"] = act
+        rec["act_mask"] = act_mask
+        if (entry or c1_entry) and self.hook is None:
             face = h.get("facing")
             d = int(face) if face in (1, -1) else (1 if S[K.FACE] >= 0 else -1)
             bodies = []
@@ -1002,7 +1092,7 @@ class Recorder:
                                "ok": bool(ok), "first_reject": why, "d": d, **info}
         rec["intersection"] = bool(entry and rec["admission"] and rec["admission"]["ok"])
         rec["first_reject"] = first
-        rec["sent"] = False                  # mode 2 never sends: no executor exists (mode 1 is refused at import)
+        rec["sent"] = act_mask is not None   # mode 2 never sends; mode 1 sends only the doomed hook's keys (the policy applies act_mask)
         rec["ms"] = round((time.perf_counter() - t0) * 1e3, 3)
         self.prev_chain = chain_now
         self.seen = states
@@ -1011,4 +1101,4 @@ class Recorder:
 
 
 __all__ = ["MODE", "RECORD", "E_IDX", "RESTORE", "CATCH_SHIFTS", "HEIGHT_REF", "HEIGHT_MARGIN", "HEIGHT_THRESHOLD", "branch_paths",
-           "admit", "height_support", "pending_attack", "Lifecycle", "research_supports", "Recorder"]
+           "admit", "height_support", "pending_attack", "Lifecycle", "research_supports", "DoomedHook", "Recorder", "ACT"]

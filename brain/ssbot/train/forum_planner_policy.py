@@ -1671,6 +1671,7 @@ class ForumPlannerPolicy(PlannerPolicy):
             self.cog["frames"].add(f + 2)
         if self.pause_owned:
             own = "sup"
+        rhx_act = False
         if self._rhx is not None:
             # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (Task 182 seq 387, design 4.10): the empty-hook exit's RECORD at this final owner - the
             # gate, N1 / H1 / H2, the chain's own hand-back cause, the admission and the intersection, the first rejection and the
@@ -1678,6 +1679,12 @@ class ForumPlannerPolicy(PlannerPolicy):
             self._rhx_last = self._rhx.record(self, s, f, fo, ws, S0, prefix, hold, res, fplan, prefs, own)
             self.counts["rhx_entry"] += int(bool(self._rhx_last["entry"]))
             self.counts["rhx_intersection"] += int(bool(self._rhx_last["intersection"]))
+            # =1 (the person 11-15: "快死的时候钩一下，不用验证"): the doomed hook's keys replace the owner's - never a supervisor's
+            if rune_hook_exit.ACT and self._rhx_last.get("act_mask") is not None and r.mask is None and not self.pause_owned:
+                mask = int(self._rhx_last["act_mask"])
+                own = "rhx"
+                rhx_act = True
+                self.counts["rhx_hook_ticks"] += 1
         key = (own, "low" if low_crit else "rt" if (two_play.RUNETIER and rt_crit) else "asw" if asw_crit else None,
                getattr(prefs, "target", None),
                self.tac.last.get("goal"), self.tac.last.get("goal_why"))
@@ -1705,7 +1712,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         for old in [k for k in self.sent if k < f - 12]:
             del self.sent[old]
         self.cog["frames"] = {x for x in self.cog["frames"] if x >= f - 12}
-        self.keylog.tick(f, f + 2, res.cmd if r.mask is None and cog is None and play is None and len(res.cmd)
+        self.keylog.tick(f, f + 2, res.cmd if r.mask is None and cog is None and play is None and not rhx_act and len(res.cmd)
                          else (int(mask),), sup=r.mask is not None)
         self.tick_ms.append((time.perf_counter() - t0) * 1e3)
         self.plan_ms.append((t2 - t1) * 1e3)
