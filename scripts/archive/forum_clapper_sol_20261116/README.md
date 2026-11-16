@@ -1,6 +1,6 @@
 # Forum Clapper Sol helper archive — 2026-11-16
 
-Snapshot of 201 helper scripts (188 Python, 13 PowerShell) previously untracked under `C:/modeling/silksong_bot/tmp/`. Relative paths below this directory match their original paths below `tmp/`; the original files remain in place.
+Snapshot of 201 helper scripts (188 Python, 13 PowerShell) previously untracked under `C:/modeling/silksong_bot/tmp/`. Relative paths below this directory match their original paths below `tmp/`. On 2026-11-16, the original working copies and local outputs were moved together to `C:/modeling/silksong_bot/.local-work/forum_clapper/tmp/`, which is ignored by Git.
 
 These are historical review, audit, measurement, launch and receipt-writing helpers, not production entry points. Their absolute paths, source versions, batch contracts and permissions belong to the original task. Archiving a script does not start it or authorize rerunning a stopped batch. Some scripts write state, send a one-shot handoff, launch a game or restore resources; read their original task and current project workflow before reuse. No script was executed to make this snapshot; Python syntax was parsed only.
 
