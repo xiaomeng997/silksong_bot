@@ -1,6 +1,6 @@
 """SSBOT_FORUM_RUNE_HOOK_EXIT (Task 182, design docs/plans/forum_clapper_committed_chain.md section 4.10; Sol seq 385 - 387): the
-empty-hook big-rune exit's ADMISSION and its RECORD-ONLY wiring. Nothing here sends a key; the feature is NOT complete (no
-executor / state machine; see 4.10's pending items).
+empty-hook big-rune exit's ADMISSION, its RECORD-ONLY wiring and - mode 1 only, the person's decision of 11-15 - the DOOMED HOOK,
+which sends the Clawline with no admission (DoomedHook). Modes 0 and 2 send nothing.
 
     0 (default)  nothing is computed; the policy is byte-identical.
     1            THE DOOMED HOOK (the person 11-15: "快死的时候钩一下，不用验证"): the record below without the admission and the
@@ -107,7 +107,14 @@ RESEARCH_LABEL = "would / candidate: model-feasible under the empirical height c
 M_CLAW = 1 << 4                 # BUTTONS "clawline" (claw_strike / claw_chase's M_CLAW)
 HOOK_PRESS_F = 2                # the Clawline with the key toward the exit for two frames (claw_strike's press)
 HOOK_LOCK_MIN = 12              # no key for at least this many frames from the press's mask frame (the Harpoon Antic, the throw)
-HOOK_LOCK_MAX = 45              # ... and at most this many (control back at the press + 26 .. 34, p50 32: claw_strike's timeline)
+HOOK_LOCK_MAX = 60              # ... and at most this many (control back at the press + 26 .. 34, p50 32: claw_strike's timeline; a
+#                                 hooked body's hit-stop adds ~12 frames)
+HOOK_START_F = 6                # a Harpoon clip must show by the press's mask frame + this (its antic runs from P + 2), else the
+#                                 hook did not start: the keys go back at once
+HOOK_TRY_MAX = 6                # ticks to get the turn key latched and the two presses out, else the hook is dropped
+HOOK_ATTEMPTS = 2               # tries per circle (a hook that did not start may be tried once more)
+HOOK_REACH = 9.0                # the empty hook's sideways travel to control, lower bound (hero2.claw_unhooked: 9.4 u at vx -10,
+#                                 10.8 at rest, 12.2 at +10)
 HARPOON_CLIPS = ("Harpoon",)    # claw_chase's: her clips while the Harpoon FSM holds her
 
 
@@ -738,44 +745,88 @@ def _move(mv):
     return None
 
 
+def _latch(hold, prefix, m) -> tuple[int, int]:
+    """(the latched mask of the frame before this tick's send frame, the latched mask of the send frame) if this tick sends m: the
+    in-flight prefix, then m, through the oracle's hold filter from the tick's filter state (holdfilter.hold_filter_jit, as
+    air_chain.ChainSim rolls them; a key down holds 2 frames, opposite directions never latch together)."""
+    from ssbot.combat.holdfilter import hold_filter_jit
+    pre = [int(x) for x in np.asarray(prefix if prefix is not None else (), np.int64).reshape(-1)]
+    lat, _ = hold_filter_jit(np.array([pre + [int(m)]], np.int64), hold)
+    seq = [int(x) for x in np.asarray(lat).reshape(-1)]
+    if len(seq) >= 2:
+        return seq[-2], seq[-1]
+    on = getattr(hold, "latched", None)
+    before = int((np.asarray(on[0]).astype(np.int64) << np.arange(np.asarray(on[0]).size, dtype=np.int64)).sum()) if on is not None else 0
+    return before, seq[-1]
+
+
+def hook_side(x, cx) -> tuple[int, str]:
+    """(+-1, why) the side to hook toward: a side whose circle edge (her whole box past it) lies within HOOK_REACH and before that
+    side's wall; of those the nearer edge; when neither, the nearer edge (the person: no verification - a doomed hook is thrown)."""
+    r = rune_life_r()
+    sides = []
+    for d in (1, -1):
+        edge = (cx + d * r - x) * d + HW
+        wall = (WALL_R - x - HW) if d > 0 else (x - WALL_L - HW)
+        sides.append((edge, d, edge <= HOOK_REACH and edge < wall, wall))
+    ok = [s for s in sides if s[2]]
+    if ok:
+        e, d, _, _ = min(ok)
+        return d, f"edge {e:.2f} u within reach, before the wall"
+    e, d, _, w = min(sides)
+    return d, f"no side clears (edges {sides[0][0]:.2f} / {sides[1][0]:.2f} u, walls {sides[0][3]:.2f} / {sides[1][3]:.2f} u): the nearer edge"
+
+
+def rune_life_r() -> float:
+    from . import rune_life
+    return float(rune_life.RUNE_R)
+
+
 class DoomedHook:
     """SSBOT_FORUM_RUNE_HOOK_EXIT=1, the person's decision (11-15, Opus session): "放不出来修呀", "要冲刺的时候预计接不上下劈就改成钩？",
     "反正也要死了，就钩一下好了", "快死的时候钩一下，不用验证". When she is about to be blown up in a big rune circle, throw the hook -
-    with NO admission (no body route, height, lifecycle or flight check: a face hook, a wall or a short flight are accepted).
-    Trigger, at the policy's final owner, from the Recorder's facts of the tick: the planner owns the keys, she is in the air with
-    the harpoon available, silk >= 1 and accepting input, her box inside a big circle not lit yet, and either N1 (the planner forced:
-    no safe row) or the C1 entry (the chain's failure hand-back - its down slash could not be predicted to land - bound to this
-    circle, she inside it). Action (claw_strike's press): toward the circle's nearer side (her x against its centre); the turn key
-    alone on the frame before when she faces the other way; the Clawline with that key for HOOK_PRESS_F frames; then no key until
-    control is back (accepting input, no Harpoon clip, at least HOOK_LOCK_MIN frames after the press's mask frame) or HOOK_LOCK_MAX
-    frames after it; then the policy's owners again. One hook per circle (its rounded centre) per episode; landing before the press
-    aborts it; a supervisor / pause owner is never overridden."""
+    with NO admission (no body route, height, lifecycle or flight check: a face hook or a short flight is accepted).
+    Trigger, from the Recorder's facts of the tick at the policy's final owner: the planner owns the keys, she is in the air with the
+    harpoon available, silk >= 1 and accepting input, her box inside a big circle not lit yet, and either N1 (the planner forced: no
+    safe row; never when its pick is a chain row - a committed chain link is not cut) or the C1 entry (the chain's failure hand-back:
+    its down slash could not be predicted to land; bound to this circle, she inside it).
+    Action (revised after the independent review of 19cb9258): the side by hook_side (the nearer circle edge she can clear before a
+    wall); the turn key alone until the hold filter shows it latched on the send frame (the in-flight prefix rolled through
+    holdfilter.hold_filter_jit: a key already sent for f + 1 holds 2 frames, opposite directions never latch together); then the
+    Clawline with that key for HOOK_PRESS_F frames, each sent only when the frame before latches the side's key and the send frame
+    latches the Clawline with it and not the other side (else the turn key again); no turn, no presses within HOOK_TRY_MAX ticks:
+    dropped. After the presses no key until control is back (accepting input, no Harpoon clip, from the press's mask frame +
+    HOOK_LOCK_MIN) or + HOOK_LOCK_MAX; no Harpoon clip by + HOOK_START_F: the hook did not start, the keys go back at once and the
+    circle may be tried again (HOOK_ATTEMPTS per circle). Only the planner's keys are ever replaced: another owner (a chain, a
+    script, a supervisor / pause) taking the keys before a press drops the hook; after a press the lock only waits (that owner's keys
+    go out, nothing is replaced). One success per circle (its object iid and generation) per episode; landing before a press drops it."""
 
     def __init__(self):
         self.run = None                # the running hook
-        self.done = set()              # circles (rounded centres) hooked this episode
+        self.done = {}                 # circle key -> attempts made this episode
+        self.hooked = set()            # circle keys whose hook started
 
-    def step(self, f, s, gate, n1, c1_entry, xy_c1, xy_in, own) -> tuple[int | None, dict | None]:
-        """(the mask to send at this tick instead of the owner's, or None; this tick's record of the hook, or None)."""
+    def _drop(self, why, r, key_done=True):
+        self.run = None
+        return None, {**r, "phase": "abort", "why": why}
+
+    def step(self, f, s, gate, n1, c1_entry, circ_c1, circ_in, own, prefix=None, hold=None, chain_row=False
+             ) -> tuple[int | None, dict | None]:
+        """(the mask to send at this tick instead of the planner's, or None; this tick's record of the hook, or None). circ_*: (key,
+        cx) of the bound / the containing circle; prefix / hold: the tick's in-flight masks and filter state."""
         h = s.get("hero") or {}
         f = int(f)
-        if own == "sup":                                 # a supervisor / pause owns the keys: never overridden
-            if self.run is None:
-                return None, None
-            r = self.run
-            if r["phase"] in ("turn", "press"):          # not pressed yet (or half): no late press after the supervisor
-                self.run = None
-                return None, {**r, "phase": "abort", "why": "a supervisor took the keys before the press"}
-            return None, {**r, "phase": "supervisor"}   # the lock goes on from the next tick
         if self.run is None:
-            base = all(gate.get(k) for k in ("plan", "air", "harpoon", "silk", "input"))
-            trig, xy = (("C1", xy_c1) if c1_entry and xy_c1 is not None else
-                        ("N1", xy_in) if n1 and base and gate.get("inside_not_lit") and xy_in is not None else (None, None))
+            base = all(gate.get(k) for k in ("plan", "air", "harpoon", "silk", "input")) and own == "plan"
+            trig, circ = (("C1", circ_c1) if c1_entry and circ_c1 is not None and own == "plan" else
+                          ("N1", circ_in) if n1 and not chain_row and base and gate.get("inside_not_lit") and circ_in is not None
+                          else (None, None))
             if trig is None:
                 return None, None
-            key = (round(float(xy[0]), 1), round(float(xy[1]), 1))
-            if key in self.done:
-                return None, {"phase": "skip", "why": "this circle was hooked already", "trigger": trig, "circle": list(key)}
+            key, cx = circ
+            if key in self.hooked or self.done.get(key, 0) >= HOOK_ATTEMPTS:
+                return None, {"phase": "skip", "why": "this circle was hooked already (or tried enough)", "trigger": trig,
+                              "circle": list(key)}
             box = h.get("box")
             try:
                 x = 0.5 * (float(box[0]) + float(box[2]))
@@ -783,35 +834,69 @@ class DoomedHook:
                 x = float("nan")
             if not math.isfinite(x):
                 return None, {"phase": "skip", "why": "her box unknown", "trigger": trig, "circle": list(key)}
-            toward = 1 if x >= float(xy[0]) else -1
-            self.done.add(key)
-            self.run = {"trigger": trig, "circle": list(key), "toward": toward, "start_f": f, "press_f": None,
-                        "phase": "press" if h.get("facing") == toward else "turn", "presses": 0}
+            toward, side_why = hook_side(x, float(cx))
+            self.done[key] = self.done.get(key, 0) + 1
+            self.run = {"trigger": trig, "circle": list(key), "toward": toward, "side": side_why, "start_f": f, "press_f": None,
+                        "phase": "turn", "presses": 0, "tries": 0, "last_press_f": None, "seen_harpoon": False,
+                        "attempt": self.done[key]}
         r = self.run
         tk = K.B_RIGHT if r["toward"] > 0 else K.B_LEFT
-        if r["phase"] in ("turn", "press") and not gate.get("air", True):
-            self.run = None
-            return None, {**r, "phase": "abort", "why": "landed before the press"}
-        if r["phase"] == "turn":
-            r["phase"] = "press"
-            return tk, {**r, "phase": "turn", "mask": tk}
-        if r["phase"] == "press":
+        opp = K.B_LEFT if r["toward"] > 0 else K.B_RIGHT
+        if r["phase"] in ("turn", "press"):
+            if own != "plan":
+                if r["presses"] == 0:
+                    return self._drop(f"{own} took the keys before the press", r)
+                r["phase"] = "lock"                      # a Clawline frame is out: wait for it, replace nothing
+                return None, {**r, "phase": "lock", "why": f"{own} took the keys during the press", "yielded_to": own}
+            if not gate.get("air", True) and r["presses"] == 0:
+                return self._drop("landed before the press", r)
+            r["tries"] += 1
+            if r["tries"] > HOOK_TRY_MAX and r["presses"] == 0:
+                return self._drop("the turn / press never latched within HOOK_TRY_MAX ticks", r)
+            if r["phase"] == "press" and r["presses"] == 1 and r["last_press_f"] is not None and f > r["last_press_f"] + 1:
+                r["phase"] = "lock"                      # a tick was missed between the presses: no second press edge
+                return 0, {**r, "phase": "lock", "mask": 0, "why": "a tick missed between the presses"}
+            try:
+                if r["phase"] == "turn":
+                    before, at = _latch(hold, prefix, tk)
+                    if at & tk and not at & opp:
+                        r["phase"] = "press"
+                    return tk, {**r, "phase": "turn", "mask": tk, "latched": [before, at]}
+                before, at = _latch(hold, prefix, M_CLAW | tk)
+            except Exception as e:                       # no filter model: never a crash in the tick, the hook is dropped
+                return self._drop("hold filter unavailable: " + type(e).__name__, r)
+            if not (before & tk and not before & opp and at & M_CLAW and at & tk and not at & opp):
+                if r["presses"] == 0:
+                    return tk, {**r, "phase": "press", "mask": tk, "why": "the side's key not latched yet", "latched": [before, at]}
+                r["phase"] = "lock"
+                return 0, {**r, "phase": "lock", "mask": 0, "why": "second press would not latch", "latched": [before, at]}
             if r["press_f"] is None:
                 r["press_f"] = f + 2                     # the press's mask frame (the send applies two frames on)
             r["presses"] += 1
+            r["last_press_f"] = f
             if r["presses"] >= HOOK_PRESS_F:
                 r["phase"] = "lock"
-            return M_CLAW | tk, {**r, "phase": "press", "mask": M_CLAW | tk}
+            return M_CLAW | tk, {**r, "phase": "press", "mask": M_CLAW | tk, "latched": [before, at]}
         clip = str(((h.get("anim") or {}).get("clip")) or "")
-        back = h.get("hero_accepting_input") is True and not clip.startswith(HARPOON_CLIPS)
+        harp = clip.startswith(HARPOON_CLIPS)
+        if harp and not r["seen_harpoon"]:
+            r["seen_harpoon"] = True
+            self.hooked.add(tuple(r["circle"]))
+        back = h.get("hero_accepting_input") is True and not harp
+        if not r["seen_harpoon"] and f >= r["press_f"] + HOOK_START_F:
+            self.run = None
+            return None, {**r, "phase": "done", "why": "no Harpoon clip by the press + HOOK_START_F: the hook did not start"}
         if (back and f >= r["press_f"] + HOOK_LOCK_MIN) or f >= r["press_f"] + HOOK_LOCK_MAX:
             self.run = None
             return None, {**r, "phase": "done", "why": "control back" if back else "lock limit"}
-        return 0, {**r, "phase": "lock", "mask": 0, "owner_overridden": own}
+        if own != "plan":
+            return None, {**r, "phase": "lock", "yielded_to": own}
+        return 0, {**r, "phase": "lock", "mask": 0}
 
 
 class Recorder:
-    """SSBOT_FORUM_RUNE_HOOK_EXIT=2: one record per policy tick at its final owner; never a key, never a change to the tick.
+    """SSBOT_FORUM_RUNE_HOOK_EXIT=2 (and 1): one record per policy tick at its final owner; mode 2 never sends a key or changes the
+    tick; mode 1 adds DoomedHook's keys (act_mask), which the policy sends in place of the planner's.
 
     Edges are facts of two consecutive recorded ticks (seq 388 P2-C): H1 needs the previous tick's FINAL key owner to be the chain
     (the owner "chain", or the planner sending a chain row as its own pick) and this tick's to be the planner - a chain row that a
@@ -1001,13 +1086,14 @@ class Recorder:
         box = h.get("box")
         rows = pol._rune_rows()
         rows = np.asarray(rows, np.float64).reshape(-1, 6) if rows is not None and len(rows) else np.zeros((0, 6))
-        circle = xy_in = None
+        circle = xy_in = iid_in = None
         if box is not None and len(rows):
             for _o, cx, cy, r, on, off in rows[rows[:, 3] > 5.0]:
                 if on > 0 and rune_life._over_big(np.array([box[0]]), np.array([box[1]]), np.array([box[2]]), np.array([box[3]]),
                                                   cx, cy, r)[0]:
                     circle = [round(float(cx), 3), int(on)]
                     xy_in = (float(cx), float(cy))
+                    iid_in = int(_o) if float(_o) == int(_o) else None     # rune_life.rows: the circle object's iid (-1 unknown)
                     break
         silk = h.get("silk")
         gate = {"plan": own == "plan", "air": bool(S[K.GROUND] <= 0) and getattr(getattr(ws.hero, "contact", None), "v", None) != "GROUND",
@@ -1059,8 +1145,14 @@ class Recorder:
         if self.hook is not None:
             # mode 1, the person's doomed hook: no admission, no research path (nothing below runs); the hook acts on N1 / C1
             cc = (self.c1 or {}).get("circle") if c1_entry else None
-            xy_c1 = (float(cc["cx"]), float(cc["cy"])) if cc else None
-            act_mask, act = self.hook.step(f, s, gate, n1, c1_entry, xy_c1, xy_in, own)
+            circ_c1 = ((cc["iid"], int(cc["first_f"])), float(cc["cx"])) if cc else None
+            circ_in = None
+            if xy_in is not None:
+                rec_in = (getattr(getattr(pol, "rune_life", None), "recs", None) or {}).get(iid_in)
+                circ_in = (((iid_in, int(rec_in.first_f)) if rec_in is not None else ("xy", round(xy_in[0], 2), round(xy_in[1], 2))),
+                           xy_in[0])
+            act_mask, act = self.hook.step(f, s, gate, n1, c1_entry, circ_c1, circ_in, own, prefix=prefix, hold=hold,
+                                           chain_row=chain_now)
         rec["act"] = act
         rec["act_mask"] = act_mask
         if (entry or c1_entry) and self.hook is None:

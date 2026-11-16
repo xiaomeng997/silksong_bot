@@ -748,62 +748,123 @@ def test_the_rays_cache_is_per_terrain_and_admit_makes_one_dict_per_call(monkeyp
     assert len(ds) == 96 and all(s is ds[0] for s in ds[:48]) and all(s is ds[48] for s in ds[48:]) and ds[0] is not ds[48]
 
 
-
 # ------------------------------------------- mode 1: the person's doomed hook (11-15: "快死的时候钩一下，不用验证"), no admission
 
+import copy  # noqa: E402
+
+from ssbot.combat.holdfilter import hold_filter_jit  # noqa: E402
+
 GATE_OK = {"plan": True, "air": True, "harpoon": True, "silk": True, "input": True, "inside_not_lit": True}
+CIRC = ((-7, 100), 28.0)                                     # (the circle's key: object iid and generation, its centre x)
 
 
 def _hs(x=30., facing=1, accepting=True, clip="Airborne"):
     return {"hero": {"box": [x - .25, 10., x + .25, 12.], "facing": facing, "hero_accepting_input": accepting, "anim": {"clip": clip}}}
 
 
-def test_the_doomed_hook_turns_toward_the_nearer_side_presses_and_waits_for_control():
-    hk = R.DoomedHook()
-    # N1 in a circle centred at x 28: she is at 30 (the right of it) facing left - the turn right, then the Clawline + right twice
-    m, d = hk.step(100, _hs(30., -1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
-    assert m == K.B_RIGHT and d["phase"] == "turn" and d["trigger"] == "N1" and d["toward"] == 1
-    m, d = hk.step(101, _hs(30., 1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
-    assert m == R.M_CLAW | K.B_RIGHT and d["phase"] == "press" and d["press_f"] == 103
-    m, d = hk.step(102, _hs(30., 1), GATE_OK, False, False, None, None, "plan")
-    assert m == R.M_CLAW | K.B_RIGHT and d["phase"] == "press"
-    # the lock: no key while the Harpoon holds her, whoever owns the keys; control back from the press + 12 ends it
-    m, d = hk.step(110, _hs(36., 1, accepting=False, clip="Harpoon Dash"), GATE_OK, False, False, None, None, "chain")
-    assert m == 0 and d["phase"] == "lock" and d["owner_overridden"] == "chain"
-    assert hk.step(114, _hs(37.), GATE_OK, False, False, None, None, "plan")[0] == 0           # 114 < 103 + 12
-    m, d = hk.step(115, _hs(37.), GATE_OK, False, False, None, None, "plan")
-    assert m is None and d["phase"] == "done" and d["why"] == "control back"
-    # one hook per circle: the same circle again is skipped; another circle hooks (left of its centre, facing right: turn left)
-    m, d = hk.step(120, _hs(30., 1), GATE_OK, True, False, None, (28.0, 3.3), "plan")
-    assert m is None and d["phase"] == "skip"
-    m, d = hk.step(121, _hs(20., 1), GATE_OK, True, False, None, (25.0, 3.3), "plan")
-    assert m == K.B_LEFT and d["toward"] == -1
+class _Wire:
+    """The oracle's side for the hook's ticks: each tick's mask goes out two frames on, frame by frame through the hold filter
+    (holdfilter.hold_filter_jit); a tick reads its in-flight prefix (the mask for f + 1) and the filter state at f."""
+
+    def __init__(self, f0, in_flight=0):
+        self.sent = {f0 + 1: int(in_flight)}
+        self.hold = K.HoldState.idle(1)
+        self.lat = {}
+
+    def inputs(self, f):
+        return [self.sent.get(f + 1, 0)], copy.deepcopy(self.hold)
+
+    def send(self, f, mask):
+        self.sent[f + 2] = int(mask)
+        lat, self.hold = hold_filter_jit(np.array([[self.sent.get(f + 1, 0)]], np.int64), self.hold)
+        self.lat[f + 1] = int(lat[0, 0])
 
 
-def test_the_doomed_hook_triggers_only_when_doomed_in_a_circle_and_aborts_on_landing():
-    hk = R.DoomedHook()
-    assert hk.step(100, _hs(), GATE_OK, False, False, None, (28., 3.3), "plan") == (None, None)       # not doomed
+def _drive(hk, wire, frames, hs, gate=GATE_OK, n1=True, c1=False, circ_c1=None, circ_in=CIRC, own="plan", planner=0,
+           chain_row=False):
+    out = []
+    for f in frames:
+        prefix, hold = wire.inputs(f)
+        o = own(f) if callable(own) else own
+        m, d = hk.step(f, hs(f) if callable(hs) else hs, gate, n1(f) if callable(n1) else n1, c1, circ_c1, circ_in, o,
+                       prefix=prefix, hold=hold, chain_row=chain_row)
+        wire.send(f, planner if m is None else m)
+        out.append((f, m, d))
+    return out
+
+
+def test_the_doomed_hook_turns_until_the_side_latches_and_never_throws_the_wrong_way():
+    # the review's case: the planner's LEFT is already in flight for f + 1 (the hold filter keeps it 2 frames and never latches
+    # left and right together); she is right of the centre, so the hook goes right: the Clawline must latch only with RIGHT,
+    # RIGHT already latched on the frame before - never L + CLAW
+    for in_flight in (0, K.B_LEFT, K.B_RIGHT, K.B_LEFT | K.B_JUMP):
+        hk, w = R.DoomedHook(), _Wire(100, in_flight)
+        out = _drive(hk, w, range(100, 112), _hs(30.), n1=lambda f: f == 100)
+        claw = [g for g in sorted(w.lat) if w.lat[g] & R.M_CLAW]
+        assert claw, (in_flight, out)
+        assert all(w.lat[g] & K.B_RIGHT and not w.lat[g] & K.B_LEFT for g in claw), (in_flight, w.lat)
+        assert w.lat[claw[0] - 1] & K.B_RIGHT and not w.lat[claw[0] - 1] & K.B_LEFT, (in_flight, w.lat)
+        assert out[0][2]["phase"] == "turn" and out[0][1] == K.B_RIGHT and out[0][2]["trigger"] == "N1"
+
+
+def test_the_doomed_hook_gives_the_keys_back_when_it_did_not_start_and_tries_once_more():
+    hk, w = R.DoomedHook(), _Wire(200)
+    out = _drive(hk, w, range(200, 215), _hs(30.), n1=True)            # no Harpoon clip ever: the game never took the press
+    done = [d for _, _, d in out if d and d["phase"] == "done"]
+    assert done and done[0]["why"].startswith("no Harpoon clip") and done[0]["attempt"] == 1
+    p = done[0]["press_f"]
+    assert all(m is None for f, m, _ in out if f >= p + R.HOOK_START_F and f < p + R.HOOK_START_F + 1)
+    starts = [d for _, _, d in out if d and d.get("phase") == "turn" and d.get("start_f") is not None]
+    assert {d["attempt"] for d in starts} == {1, 2}                     # one more try for the same circle
+    out2 = _drive(hk, w, range(215, 240), _hs(30.), n1=True)
+    assert any(d and d["phase"] == "skip" for _, _, d in out2)           # tried enough: skipped from then on
+
+
+def test_the_doomed_hook_holds_the_keys_off_through_the_flight_and_hooks_a_circle_once():
+    hk, w = R.DoomedHook(), _Wire(300)
+    flying = range(305, 330)
+
+    def hs(f):
+        return _hs(36. if f in flying else 30., accepting=f not in flying, clip="Harpoon Dash" if f in flying else "Airborne")
+
+    out = _drive(hk, w, range(300, 345), hs, n1=True)
+    phases = [(f, m, d["phase"]) for f, m, d in out if d]
+    p = next(d["press_f"] for _, _, d in out if d and d.get("press_f"))
+    assert all(m == 0 for f, m, ph in phases if ph == "lock")
+    done = next((f, d) for f, _, d in out if d and d["phase"] == "done")
+    assert done[1]["why"] == "control back" and done[0] >= p + R.HOOK_LOCK_MIN and done[0] == 330
+    assert all(d["phase"] == "skip" for f, _, d in out if d and f > done[0])     # the hooked circle is never hooked again
+
+
+def test_the_doomed_hook_replaces_only_the_planner_and_never_cuts_a_chain_row():
+    hk, w = R.DoomedHook(), _Wire(400)
+    for o in ("chain", "slam", "sup", "two:jb"):
+        assert hk.step(400, _hs(), GATE_OK, True, False, None, CIRC, o, prefix=[0], hold=K.HoldState.idle(1)) == (None, None)
+    assert hk.step(400, _hs(), GATE_OK, True, False, None, CIRC, "plan", prefix=[0], hold=K.HoldState.idle(1),
+                   chain_row=True) == (None, None)                                     # N1 on a chain row: no hook
+    out = _drive(hk, w, range(400, 403), _hs(), own=lambda f: "plan" if f == 400 else "slam")
+    assert out[0][1] == K.B_RIGHT and out[1][1] is None and out[1][2]["phase"] == "abort"     # a script took the keys: dropped
+    hk2, w2 = R.DoomedHook(), _Wire(500)
+    out = _drive(hk2, w2, range(500, 504), _hs(), n1=lambda f: f == 500)
+    assert [m for _, m, _ in out][:3] == [K.B_RIGHT, R.M_CLAW | K.B_RIGHT, R.M_CLAW | K.B_RIGHT]
+    m, d = hk2.step(504, _hs(accepting=False, clip="Harpoon Antic"), GATE_OK, False, False, None, None, "chain", prefix=[0],
+                    hold=K.HoldState.idle(1))
+    assert m is None and d["phase"] == "lock" and d["yielded_to"] == "chain"           # after the press: wait, replace nothing
     for k in GATE_OK:
-        assert hk.step(100, _hs(), {**GATE_OK, k: False}, True, False, None, (28., 3.3), "plan") == (None, None), k
-    assert hk.step(100, _hs(), GATE_OK, True, False, None, None, "plan") == (None, None)            # no circle around her
-    assert hk.step(100, _hs(), GATE_OK, True, False, None, (28., 3.3), "sup") == (None, None)       # a supervisor wins
-    # C1 (the chain's failed down slash, she inside its bound circle): facing the nearer side, the press at once
-    m, d = hk.step(100, _hs(30., 1), GATE_OK, False, True, (28.07, 3.34), None, "plan")
-    assert m == R.M_CLAW | K.B_RIGHT and d["trigger"] == "C1" and d["circle"] == [28.1, 3.3] and d["press_f"] == 102
-    hk.step(101, _hs(30., 1), GATE_OK, False, False, None, None, "plan")
-    lim = 102 + R.HOOK_LOCK_MAX                                                                     # control never back
-    assert hk.step(lim - 1, _hs(36., accepting=False, clip="Harpoon"), GATE_OK, False, False, None, None, "plan")[0] == 0
-    m, d = hk.step(lim, _hs(36., accepting=False, clip="Harpoon"), GATE_OK, False, False, None, None, "plan")
-    assert m is None and d["why"] == "lock limit"
-    hk2 = R.DoomedHook()
-    assert hk2.step(200, _hs(30., -1), GATE_OK, True, False, None, (28., 3.3), "plan")[0] == K.B_RIGHT
-    m, d = hk2.step(201, _hs(30., 1), {**GATE_OK, "air": False}, False, False, None, None, "plan")
-    assert m is None and d["phase"] == "abort" and d["why"] == "landed before the press"
-    hk3 = R.DoomedHook()                                      # a supervisor before the press: no late press after it
-    assert hk3.step(300, _hs(30., -1), GATE_OK, True, False, None, (28., 3.3), "plan")[0] == K.B_RIGHT
-    m, d = hk3.step(301, _hs(30., 1), GATE_OK, False, False, None, None, "sup")
-    assert m is None and d["phase"] == "abort" and hk3.run is None
-    assert hk3.step(302, _hs(30., 1), GATE_OK, False, False, None, None, "plan") == (None, None)
+        assert R.DoomedHook().step(600, _hs(), {**GATE_OK, k: False}, True, False, None, CIRC, "plan", prefix=[0],
+                                   hold=K.HoldState.idle(1)) == (None, None), k
+
+
+def test_the_doomed_hook_side_clears_the_circle_before_a_wall_and_skips_a_second_press_after_a_missed_tick():
+    assert R.hook_side(30., 28.)[0] == 1 and R.hook_side(26., 28.)[0] == -1
+    d, why = R.hook_side(17.5, 18.)                     # left of the centre, but the left edge (10.2) is past the wall at 14.01
+    assert d == 1 and "within reach" in why
+    hk, w = R.DoomedHook(), _Wire(700)
+    out = _drive(hk, w, [700, 701], _hs(), n1=True)
+    assert [m for _, m, _ in out] == [K.B_RIGHT, R.M_CLAW | K.B_RIGHT]
+    prefix, hold = w.inputs(703)                        # 702 was never ticked (a late tick): no second press edge after the gap
+    m, d = hk.step(703, _hs(), GATE_OK, False, False, None, None, "plan", prefix=prefix, hold=hold)
+    assert m == 0 and d["phase"] == "lock" and d["why"] == "a tick missed between the presses"
 
 
 def test_mode_one_records_without_any_admission_and_hooks_at_the_c1_entry(monkeypatch):
@@ -813,6 +874,51 @@ def test_mode_one_records_without_any_admission_and_hooks_at_the_c1_entry(monkey
     assert a["c1"]["status"] == "live" and a["act"] is None and a["act_mask"] is None and not a["sent"]
     b = env.tick(102)                                         # back inside the bound circle: the C1 entry
     assert b["c1_entry"] and env.calls == [] and b["research"] is None and b["admission"] is None
-    x = float(env.sim.start[K.PX])
-    want = R.M_CLAW | K.B_RIGHT if x >= 28.07 else K.B_LEFT   # she faces right (facing 1)
-    assert b["act"]["trigger"] == "C1" and b["act_mask"] == want and b["sent"]
+    side = R.hook_side(float(env.sim.start[K.PX]), 28.07)[0]
+    want = K.B_RIGHT if side > 0 else K.B_LEFT                # the turn key first, whatever she faces
+    assert b["act"]["trigger"] == "C1" and b["act"]["phase"] == "turn" and b["act_mask"] == want and b["sent"]
+    assert b["act"]["circle"] == [R_IID, 100]                  # the bound circle's object iid and generation
+
+
+def _arbitrate(monkeypatch, act_mask, *, mask_sup=None, slam_mask=None):
+    """The production arbitration statements of ForumPlannerPolicy.act (test_b2_policy_priority's harness: the actual AST slice,
+    baseline arm A, every script without keys unless slam_mask) with a mode-1 Recorder stand-in whose record gives act_mask."""
+    from collections import Counter
+    from tests import test_b2_policy_priority as TP
+    from ssbot.train import forum_planner_policy as mod
+    monkeypatch.setattr(mod.rune_hook_exit, "ACT", True)
+    p, _ = TP.selected(stage="recovery", mask=0, arm="A")
+    res = SimpleNamespace(name="MOVE(R)", mask=4, forced_risk=True, cmd=())
+    seen = []
+    p._rhx = SimpleNamespace(record=lambda *a: (seen.append(a[-1]) or {"entry": False, "intersection": False, "act_mask": act_mask}))
+    p._rhx_last = None
+    p.tac = None
+    p.sc = SimpleNamespace(pq=None)
+    p.pause_owned = False
+    p.m2 = p.wpress = p.air_show = p._play_tick = p.v2feed = None
+    p.counts = Counter()
+    p._cogfly = lambda *a: None
+    p.cog = {"frames": set()}
+    p.slam_play = TP.Script(mask=slam_mask)
+    p.claw, p.cast_stab, p.rune_lowhop, p.evade_chase = (TP.Script(mask=None) for _ in range(4))
+    p.two = p._wake_f = None
+    p.enc = SimpleNamespace(name="w13")
+    s = {"f": 2599, "hero": {}}
+    scope = dict(self=p, res=res, r=SimpleNamespace(mask=mask_sup), s=s, raw=s, f=2599, fo=2599,
+                 ws=SimpleNamespace(stamp=SimpleNamespace(t_game_s=1.), hero=SimpleNamespace(contact=SimpleNamespace(v="AIR"))),
+                 S0=None, prefix=[], hold=None, prefs=SimpleNamespace(target=7), esc_on=False, wt=None, fcast=None, m2_mask=None,
+                 b2_priority=p._b2_priority_chain(), b2_critical=None, air_tick=False, slam_commit=False, fplan=None)
+    exec(TP.arbitration_code(), mod.__dict__, scope)
+    return scope, seen, p
+
+
+def test_the_policy_sends_the_doomed_hook_only_in_place_of_the_planner(monkeypatch):
+    out, seen, p = _arbitrate(monkeypatch, R.M_CLAW | K.B_RIGHT)
+    assert seen == ["plan"] and (out["own"], out["mask"], out["rhx_act"]) == ("rhx", R.M_CLAW | K.B_RIGHT, True)
+    assert p.counts["rhx_hook_ticks"] == 1
+    out, seen, _ = _arbitrate(monkeypatch, R.M_CLAW | K.B_RIGHT, mask_sup=512)            # a supervisor's keys: never replaced
+    assert out["own"] == "sup" and out["mask"] == 512 and not out["rhx_act"]
+    out, seen, _ = _arbitrate(monkeypatch, R.M_CLAW | K.B_RIGHT, slam_mask=16)            # a script's keys: never replaced
+    assert seen == ["slam"] and (out["own"], out["mask"], out["rhx_act"]) == ("slam", 16, False)
+    out, _, _ = _arbitrate(monkeypatch, None)                                            # no hook: the planner's own keys
+    assert (out["own"], out["mask"], out["rhx_act"]) == ("plan", 4, False)

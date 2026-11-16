@@ -39,7 +39,7 @@ import numpy as np
 
 from ssbot.backends.oracle_backend import OracleBackend
 from ssbot.combat import rune_life
-from ssbot.combat import rune_hook_exit      # SSBOT_FORUM_RUNE_HOOK_EXIT (Task 182 seq 387): 0 off, 2 record only; 1 refused at import
+from ssbot.combat import rune_hook_exit      # SSBOT_FORUM_RUNE_HOOK_EXIT (Task 182): 0 off, 2 record only, 1 the doomed hook (sends)
 from ssbot.combat import (air_chain, air_show, cast_stab, claw_chase, claw_strike, evade_chase, forum_v2, rune_lowhop, observed_slam,
                           slam_notice, slam_play, two_play)
 from ssbot.combat.enemy_tables import EnemyTables
@@ -642,7 +642,7 @@ class ForumPlannerPolicy(PlannerPolicy):
         self.flush_log()
         self.flush_keys()
         self.episode += 1
-        if self._rhx is not None:
+        if getattr(self, "_rhx", None) is not None:
             self._rhx.reset()
             self._rhx_last = None
         from ssbot.combat.knife_chain_budget import encounter_allowed
@@ -1672,15 +1672,17 @@ class ForumPlannerPolicy(PlannerPolicy):
         if self.pause_owned:
             own = "sup"
         rhx_act = False
-        if self._rhx is not None:
+        if getattr(self, "_rhx", None) is not None:
             # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (Task 182 seq 387, design 4.10): the empty-hook exit's RECORD at this final owner - the
             # gate, N1 / H1 / H2, the chain's own hand-back cause, the admission and the intersection, the first rejection and the
-            # cost. Read-only: the owner, the mask and the send stay as they are; no key is ever sent from here
+            # cost. Read-only in mode 2: the owner, the mask and the send stay as they are
             self._rhx_last = self._rhx.record(self, s, f, fo, ws, S0, prefix, hold, res, fplan, prefs, own)
             self.counts["rhx_entry"] += int(bool(self._rhx_last["entry"]))
             self.counts["rhx_intersection"] += int(bool(self._rhx_last["intersection"]))
-            # =1 (the person 11-15: "快死的时候钩一下，不用验证"): the doomed hook's keys replace the owner's - never a supervisor's
-            if rune_hook_exit.ACT and self._rhx_last.get("act_mask") is not None and r.mask is None and not self.pause_owned:
+            # =1 (the person 11-15: "快死的时候钩一下，不用验证"): the doomed hook's keys replace the PLANNER's only (DoomedHook gives a mask
+            # only while the planner owns the keys); never a supervisor's or a pause
+            if (rune_hook_exit.ACT and self._rhx_last.get("act_mask") is not None and r.mask is None and not self.pause_owned
+                    and own == "plan"):
                 mask = int(self._rhx_last["act_mask"])
                 own = "rhx"
                 rhx_act = True
@@ -2066,8 +2068,8 @@ class ForumPlannerPolicy(PlannerPolicy):
         rune_ = (self._rune_tick or {}).get("last")
         if rune_ is not None:
             rec["rune"] = rune_                  # Task 182 seq 310: the last check on a script's key this tick (rune_life.exit_veto)
-        if self._rhx is not None and self._rhx_last is not None:
-            rec["rhx"] = self._rhx_last          # SSBOT_FORUM_RUNE_HOOK_EXIT=2 (seq 387): the empty-hook exit's record of this tick
+        if getattr(self, "_rhx", None) is not None and getattr(self, "_rhx_last", None) is not None:
+            rec["rhx"] = self._rhx_last          # SSBOT_FORUM_RUNE_HOOK_EXIT=2 / 1 (seq 387): the empty-hook exit's record of this tick
         if self._play_tick is not None:
             rec["play"] = self._play_tick        # SSBOT_FORUM_SLAM_PLAY (SP1): the playbook's phase / frame / keys
             if self._play_tick["mask"] is not None:
